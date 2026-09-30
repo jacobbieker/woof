@@ -1,0 +1,84 @@
+# A checkout is byte-identical to the wheel, on every platform.
+#
+# git-for-Windows ships core.autocrlf=true, so without this line a
+# Windows clone materializes CRLF in every text file it has not been
+# told to leave alone -- including `woof/*.py`.  The product hashes
+# those: `_runtime_source_identity` in the prepared-forecast runners
+# binds the SHA-256 of its own implementation files, and the
+# preparation proof binds an export-source set.  A pip-installed
+# package (LF, as the wheel stores it) and a Windows clone (CRLF) then
+# disagree about the same file, and a mixed estate -- rw-wps from the
+# venv, the runner from a clone -- dies with `proof export source
+# hashes differ from preparation`.  That was observed, not theorized.
+#
+# `* -text` means "no conversion, in either direction, anywhere": the
+# bytes in the object database are the bytes on disk.  The per-path
+# rules below stay because they say the same thing more loudly for the
+# files where it matters most, and because `text eol=lf` additionally
+# normalizes on the way IN for files a contributor might author with
+# CRLF.  tests/test_line_ending_stability.py holds the promise.
+* -text
+# A trailing CR is a line TERMINATOR here, not trailing whitespace.
+# Under `* -text` git records the CR in the blob, and `git diff --check`
+# then reports every changed line of a CRLF file as "trailing
+# whitespace".  The public release export fails closed on that check and
+# stopped on 50 such lines in two files that were already CRLF in the
+# published tree.  Flattening them would rewrite whole files; this
+# states the convention instead.  Fresh carriage returns are still
+# refused, by tools/git_hooks/pre_commit_line_endings.py and
+# tests/test_line_ending_stability.py, which read the bytes.
+* whitespace=cr-at-eol
+
+woof/data/** -text
+tools/grib1_bridge/vendor/** -text
+patches/** -text
+*.sh text eol=lf
+*.ps1 text eol=lf
+*.cmd text eol=lf
+configs/rw-wps-gfs-pressure-grib2.mapping.json text eol=lf
+configs/rw-wps-gfs-terrain.composition.json text eol=lf
+configs/rw-wps-era5-1974-probe.mapping.json text eol=lf
+configs/rw-wps-era5-1974-terrain.composition.json text eol=lf
+configs/rw-wps-era5-netcdf.mapping.json text eol=lf
+configs/rw-wps-era5-netcdf-terrain.composition.json text eol=lf
+woof/authorities/*.json text eol=lf
+woof/physics_registry_v2.json text eol=lf
+tools/rustwx/vendor/** -text
+tools/rustwx/crates/** -text
+tools/rustwx/assets/** -text
+tests/fixtures/**/*.grib2 -text
+# A captured NOAA index is evidence: it round-trips byte for byte or the
+# digest its README publishes stops being true on a fresh checkout.
+tests/fixtures/**/*.idx -text
+
+# The FTZ receipt commits SHA-256 over its own artifacts; a line-ending
+# rewrite on checkout would break every one of them.  The cubins are ELF.
+tools/ftz_receipt/receipt/*.json text eol=lf
+tools/ftz_receipt/receipt/*.csv text eol=lf
+tools/ftz_receipt/receipt/ptx/** text eol=lf
+tools/ftz_receipt/receipt/cubin/** -text
+tools/ftz_receipt/receipt/sass/** text eol=lf
+tools/ftz_receipt/fixtures/*.ptx text eol=lf
+tools/ftz_receipt/fixtures/*.sass text eol=lf
+woof/verify/*.json text eol=lf
+
+# Vendored upstream patches are applied with `git apply -p1` against
+# someone else's worktree: a line-ending rewrite makes them fail to
+# apply, and the README beside them publishes their digests.
+evidence/upstream/** -text
+tools/noahmp_wrf461_oracle/*.sh text eol=lf
+
+# Preserve upstream checksum bytes, including shell scripts in the UI mirror.
+tools/arwen-ui-vendor/crates-io/** -text -whitespace
+
+# Cargo verifies the original registry bytes, including upstream script endings.
+# Preserve upstream formatting in the newly vendored Zarr dependency closure.
+tools/zarr_bridge/vendor/** -text -whitespace
+
+# Generated notices and retained upstream patches preserve quoted formatting.
+licenses/THIRD-PARTY-LICENSES-zarr-binary.txt -whitespace
+tools/rustwx/assets/basemap/THIRD-PARTY-LICENSES-zarr-binary.txt -whitespace
+tools/rustwx/patches/rdps-f000-components.patch -whitespace
+# 4 Hz nvidia-smi samples end in an empty procs field (a trailing tab) when no
+# process held the card; B4-SPEED-ANCHORS.json pins their sha256, so the bytes stay.
+docs/public/receipts/obsbattery/*.tsv -whitespace

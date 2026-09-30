@@ -1,0 +1,450 @@
+# The release battery's GPU pytest shard.
+#
+# WHAT THIS IS
+#   The set of test files the battery runs on a CUDA device at a cut.  It is
+#   the third leg, beside tools/battery/stage1_files.txt (CPU pytest) and
+#   tools/battery/cargo_gates.txt (Rust).
+#
+# WHY IT EXISTS
+#   Gap G2 of the 2026-08-13 test-estate audit: THERE WAS NO GPU PYTEST LEG
+#   AT ALL.  stage1_files.txt is CPU by construction, cargo_gates.txt is
+#   Rust, tiles_gates.txt names `python -m tilestream.*` modules.  No file
+#   anywhere named a GPU pytest shard, so the entire WRF-parity dycore ran
+#   on no list -- 6th-order diffusion including its boundary faces, both
+#   Smagorinsky closures, open and specified lateral boundaries, the
+#   acoustic solver, the mapped mass closure, the TKE budget.  The audit
+#   measured 389 of 1,258 in-scope core tests (31%) skipping on CPU, with
+#   these files at 100%.
+#
+#   Consequences are not hypothetical.  tests/test_wrfout_conformance.py is
+#   18 of 18 skipped on CPU, and its own docstring says every OTHER wrfout
+#   test is self-consistency while it is the only file that judges a woof
+#   wrfout with a real WRF reader.  It is the file that would catch the
+#   ISNOWXY-class miss, and a CPU-only gate never asks it.
+#
+# WHO CONSUMES IT
+#   The GPU leg of the per-assembly queue scripts, parsed exactly as the
+#   stage-1 list is:
+#
+#     $gpushard = @(Get-Content (Join-Path $CUT 'tools/battery/gpu_shard_files.txt') |
+#         ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+#
+#   It runs on an authorized CUDA device with a working compiler/header
+#   stack and enough memory for the selected tests. Authorization can name
+#   a local desktop or a designated node; it is not a GPU-model restriction.
+#   The trusted manual GPU dispatch in ci.yml runs BOTH declared shards.
+#
+#   Run it with GPUWM_NO_LOCAL_GPU UNSET.  That variable is what makes the
+#   CPU legs accurate; setting it here would skip the entire shard and report
+#   green, which is the exact class of defect this file was created to end.
+#
+# FORMAT
+#   One repository-relative path per line, forward slashes.  Blank lines and
+#   lines whose first non-space character is `#` are ignored.
+#
+# AMENDMENT DISCIPLINE
+#   As tools/battery/stage1_files.txt: an addition carries its REASON
+#   inline, on the lines above it, naming the task or the incident.  A
+#   removal is an argument made in the commit, not a tidy-up.
+#   tests/test_gpu_shard_manifest.py is the gate -- it checks every path
+#   exists, rejects duplicates, and pins the property that earns an entry a
+#   place here: that the file really is GPU-bound, so a CPU leg cannot be
+#   mistaken for coverage of it.
+#
+# SHARD 1 is below; SHARD 2 begins at the explicit marker near the bottom.
+# Both run on each authorized CI GPU dispatch. Shard 2 groups cumulus
+# comparisons against a pinned WRF v4.6.1 reference corpus:
+# corpus -- the Grell-Freitas family (tests/test_gf_*.py) and, since
+# d0c23dad0 (2.6.4), the New Tiedtke family (tests/test_ntiedtke_*.py).
+# tests/test_gpu_shard_manifest.py pins that rule by filename; a third
+# family widens it here first.
+# The corpus is pinned, not the implementation: Grell-Freitas deliberately
+# differs from WRF's gamma implementation. See docs/gf_gamma_known_delta.md
+# before interpreting its comparisons; no blanket bitwise WRF claim applies.
+
+# ---------------------------------------------------------------------------
+# SHARD 1a: the WRF-parity dycore, whole-module GPU.
+#
+# Every one of these is 100% skipped on a CPU box.  They are the dynamics,
+# not the schemes: diffusion and its boundary faces, both Smagorinsky
+# closures, the open lateral boundary, the mass closure under a map factor,
+# the TKE budget, the small-step lateral wrap, the terrain metric.
+# ---------------------------------------------------------------------------
+tests/test_openbc.py
+tests/test_diff6.py
+tests/test_diff6_boundary_face.py
+tests/test_smag2d.py
+tests/test_smag3d.py
+tests/test_terrain_dynamics.py
+tests/test_small_step_lateral_wrap.py
+tests/test_mapped_mass_closure.py
+tests/test_tke_budget.py
+tests/test_tke_km2.py
+tests/test_periodic_face_identity.py
+tests/test_kernel_local_bounds.py
+tests/test_dycore_full.py
+
+# The anisotropic-mixing criterion's stepped half.  Its CPU sibling
+# (tests/test_anisotropic_mixing_advisory.py) is already on stage 1; the
+# criterion that closed the 2026-08-06 LES tornado crash is only really
+# proved by stepping, and stepping needs the card.
+tests/test_anisotropic_mixing_w_stability.py
+
+# The advective forcing pair: RTHFTEN/RQVFTEN leave the dycore for the cumulus
+# driver.  Untested, the pair silently reverts to zeros and Grell-Freitas runs
+# on half its forcing.  Measured 2026-08-28 this file was on the CPU stage-1
+# list and on no GPU list, and every test in it is whole-module GPU-marked, so
+# it collected 0 of 9 on the leg that named it and ran on no leg at all --
+# nine tests for a defect a lane had already closed once, guarded by nothing.
+tests/test_dycore_advective_forcing_export.py
+
+# The dycore's symmetry relations: x-reflection, x<->y transpose, and
+# well-balancedness at rest.  Every other dycore gate on this list proves
+# either that the code has not CHANGED (byte identity, kernel source pins)
+# or that it CONSERVES; a compensating error is invariant under both.
+# Measured with injected faults: an al_pp -> alt substitution in the
+# terrain-following pressure gradient drives an at-rest atmosphere to
+# 108.5 m/s while the domain mass drift stays IDENTICAL to the clean run,
+# and a one-cell shift of the y advection stencil leaves the drift at
+# exactly 0.000e+00.  These are the only assertions in the tree that
+# constrain the operator's structure, and at 7 s of card time they belong
+# on the per-cut leg rather than the weekly one.
+tests/test_dycore_symmetry_relations.py
+
+# ---------------------------------------------------------------------------
+# SHARD 1b: the same dycore seen from the files whose GPU half is
+# function-marked rather than whole-module.  tests/conftest.py marks
+# individual test functions when the cupy import is inside them, so these
+# files DO run on a CPU leg -- they just run their CPU half.  Their device
+# halves are in exactly the same position as 1a above: on no list.
+#
+# tests/test_pd_advection.py is KNOWN RED at 2.1.1 on the CPU backend
+# (woof/core/moist.py's cp.ElementwiseKernel, red #1 of the audit, task
+# #161 class).  It is listed anyway and deliberately: the whole point of
+# this file is that a red belongs somewhere a leg can see it.
+# ---------------------------------------------------------------------------
+tests/test_acoustic.py
+tests/test_lateral_bc.py
+tests/test_advection.py
+tests/test_pd_advection.py
+
+# ---------------------------------------------------------------------------
+# SHARD 1c: the only file that judges a woof wrfout with a WRF reader.
+#
+# 18 of 18 skip on CPU.  Its own docstring: every other wrfout test is
+# self-consistency, and this is the one that reads the product the way a
+# user's tooling will.  If any single entry in this file justifies the leg,
+# it is this one.
+# ---------------------------------------------------------------------------
+tests/test_wrfout_conformance.py
+
+# ---------------------------------------------------------------------------
+# SHARD 1d: the streamed production clock, ARMED.
+#
+# `pytestmark = requires_gpu` on the whole module, so it is 100% skipped on
+# a CPU box and belongs here by the same rule as 1a.
+#
+# It earns the per-cut leg rather than the weekly one because of WHAT it
+# asserts.  The three bound roads -- streamed parent, streamed child,
+# per-domain [tiles] -- meet one carrier inventory here, and the property
+# is that the production clock is ARMED on each of them.  A streamed run
+# whose clock never arms does not crash: it produces a forecast, and the
+# lateral boundaries lag it by a timestep (task #219, where the gate suite
+# was structurally blind to exactly this).  Silent-wrong-answer coverage is
+# the last thing to run weekly.
+#
+# Registered at the 2.3.0 round-2 assembly.  lane/reach-223 shipped the
+# file and did not list it, so between the lane landing and this line the
+# test existed and no leg ran it -- the "a gate nobody can enumerate"
+# failure tools/battery/tiles_gates.txt names in its own header.
+# ---------------------------------------------------------------------------
+tests/test_streaming_clock_arming.py
+
+# ---------------------------------------------------------------------------
+# SHARD 1e: the tilestream pytest suites' device halves (2.5.0 release
+# blocker #5).
+#
+# These files ran on NO list -- pyproject's testpaths excluded tilestream/
+# and both battery pytest legs listed tests/ only -- and among what sat
+# unrun was the round-trip gate whose count had drifted (41 pinned against
+# 47 serialized fields: six restart carriers were streaming with no
+# transport proof) and a pinning gate that had never executed under pytest
+# at all.  tilestream/conftest.py extends the marker discipline over the
+# tree, so the stage-1 leg runs their CPU halves and this leg runs the
+# device halves.  Measured 2026-08-16 (5090, wall seconds per isolated
+# invocation): gather 4.0, graphcap 2.6, hoststore 9.5, exchange_pack 1.8,
+# autoplan 20.0.
+#
+# The all-47-names bitwise round trip (device + pinned-host), staggered
+# placement, wrapped-edge references, plan reuse -- the transport's own
+# correctness gate.  Whole module gpu by conftest's detector.
+tilestream/test_gather.py
+# CUDA-graph capture ledger semantics: deferred reads, drains, masked
+# clears, bit-exact replay.  Whole module gpu.
+tilestream/test_graphcap.py
+# The pinned host store: manifest probe, round trip, pinning report,
+# bandwidth floor, budget guards, the 2^31-straddling memcpy3D.  Whole
+# module gpu; its no-card host-memory half is tilestream/test_hostmem.py on
+# stage 1.
+tilestream/test_hoststore.py
+# The exchange pack/unpack seam.  Six single-card tests run anywhere; the
+# four needs-2-visible-GPUs rows skip on a one-card node and are the
+# multi-GPU lane's evidence when they run.
+tilestream/test_exchange_pack.py
+# Function-marked, exactly the shard-1b shape: its CPU half runs on stage 1
+# and here rides along, while its two device tests are the only rows that
+# FALSIFY the planner -- the VRAM model held against a real allocation, and
+# a plan spent on run_tiled reproducing a monolithic run bit-exactly.
+tilestream/test_autoplan.py
+
+# SHARD 1f: the device half of the 2.5.8 engine work.
+#
+# The rule applied is this file's own property -- asked of conftest's
+# detector rather than of the filename, since neither file below is named
+# *_gpu -- and then MEASURED under GPUWM_NO_LOCAL_GPU=1, one file at a
+# time:
+#
+#   test_mynn_mixscalars_runtime_residue    2/2   skipped on CPU
+#   test_ruc_runtime                       24/24  skipped on CPU
+#
+# 26 device rows, 100% skipped on CPU: a CPU leg reporting green on them
+# is reporting green on nothing, which is what this shard exists to end.
+#
+# test_mynn_mixscalars_runtime_residue is the substantive one.  It holds
+# the device qn-mixing solve bitwise against the CPU reference across a
+# restart boundary -- the residue that is zero only when every compute()
+# replaces the plain-attribute tendencies before any read.  test_ruc_runtime
+# is the RUC forecast column's device seam, which the soil-geometry lift
+# touched and which nothing on any list was running.
+tests/test_mynn_mixscalars_runtime_residue.py
+tests/test_ruc_runtime.py
+
+# SHARD 1g: the rest of the RUC forecast column's device leg, which was on
+# no list at all.  Found the same way SHARD 1f was -- by asking which new or
+# touched file is on no list -- while un-pinning the column's soil-level
+# count from nine to {6, 9}.  test_ruc_runtime.py is NOT repeated here: it is
+# already carried by SHARD 1f above.
+#
+# GPU-bound by conftest._cupy_scope rather than by filename, and MEASURED
+# under GPUWM_NO_LOCAL_GPU=1 one file at a time on this branch:
+#
+#   test_ruc_device_column   31/31  skipped on CPU
+#   test_ruc_gpu             42/42  skipped on CPU
+#   test_ruc_nzs_device      17/17  skipped on CPU
+#
+# 90 device rows, 100% skipped on CPU: the shard-1f ratio exactly, so they
+# go here and not on stage1_files.txt, where they would report green on
+# nothing.
+#
+# These are the files that judge whether the RUC soil column computes the
+# right NUMBERS on a card rather than merely being wired.
+# test_ruc_device_column.py is the 43-field host/device comparison at
+# max_ulp 0 through the nine-level loader; test_ruc_nzs_device.py is the
+# same comparison run at BOTH admitted geometries through the RUC_NZS tier,
+# which is the entire evidence that six levels computes what the host says
+# it does.  While they ran nowhere, the CPU estate could only ever check
+# that RUC was WIRED.
+tests/test_ruc_device_column.py
+tests/test_ruc_gpu.py
+tests/test_ruc_nzs_device.py
+
+# SHARD 1h: the device MYNN entry points whose admission surface this
+# branch CHANGED.  Same rule as 1f and 1g -- which touched file is on no
+# list -- and the one entry here is the case that proves the rule was
+# worth applying, because the defect it would have caught had already
+# landed.
+#
+# WHAT HAPPENED.  The mixscalars lift made bl_mynn_mixscalars=1 an
+# admitted value on mynn_dmp_mf_cuda.  Two tests asserted the old
+# refusal; the tendencies one moved 1 -> 2 with the lift, and its DMP-MF
+# twin here did not.  It went red and STAYED red across two integrations
+# with every list green, because this file is on none of them.  That is
+# the shard's own thesis in miniature: a CPU leg cannot ask a device
+# question, and a device file on no list is asked by nobody.
+#
+# GPU-bound by measurement, not by the _gpu in the name, under
+# GPUWM_NO_LOCAL_GPU=1 on this branch:
+#
+#   test_mynn_pbl_gpu   30/30  skipped on CPU   (30 passed with a card)
+#
+# 100% device rows -- the shard-1f and 1g ratio exactly -- so it belongs
+# here and not on stage1_files.txt.  Its CPU twin tests/test_mynn_pbl.py
+# runs 60 rows on a CPU and went to stage1_files.txt instead.
+tests/test_mynn_pbl_gpu.py
+
+# SHARD 1i: the P3 (mp_physics=50) device legs.  Same rule as 1f, 1g and
+# 1h -- a device file on no list is asked by nobody -- and P3 is the case
+# where that had already cost a forecast.
+#
+# WHAT HAPPENED.  The CUDA port landed with tests/test_p3_cuda_gpu.py on
+# no list at all.  Shipped mp=50 could not complete a single forecast:
+# woof/core/p3.py caches state._p3_workspace, woof/io/restart.py
+# refused to classify it, and every run died in canonical_state_digest
+# before its first history frame.  A CPU leg cannot ask that question --
+# the CPU shim state never calls p3.apply, so
+# test_every_domainstate_attribute_is_classified passed with
+# mp_physics=50 parametrized throughout.  Only a real device step asks
+# it, which is what test_p3_restart_manifest_gpu.py does.
+#
+# GPU-bound by measurement (tests/conftest.py::_cupy_scope), not by the
+# _gpu in the name: test_p3_cuda_gpu.py is whole-module GPU, and
+# test_p3_restart_manifest_gpu.py is GPU at both of its functions.
+tests/test_p3_cuda_gpu.py
+tests/test_p3_restart_manifest_gpu.py
+# And tests/test_p3_port.py, which the first pass of SHARD 1i MISSED --
+# recorded because the miss is the shard's own thesis a third time.  It
+# predates the CUDA port, it is whole-module GPU by _cupy_scope, and its
+# 31 rows are 31/31 DESELECTED under the stage-1 marker filter, so on a
+# CPU list it would report green on nothing and on no list it was asked
+# by nobody.  Measured 31 passed on a development machine's RTX 5070 Ti at this tip,
+# against package files hash-matched to the worktree, before listing.
+tests/test_p3_port.py
+
+# SHARD 1j: the MPAS column-batch seam's device half.  Same rule as 1f-1i
+# -- a device file on no list is asked by nobody -- and the fourth time the
+# rule found a defect already shipped.
+#
+# WHAT HAPPENED.  tests/test_mpas_column_batch_gpu.py gates the seam's
+# restart law (read-only phase-1, held radiation, buckets, and the restart
+# round-trip's bit-identical continuation) and was on NO list, so 2.6.0
+# shipped with test_restart_round_trip_continues_bit_identically red: the
+# export payload carried the held radiation buffers but not the
+# CarrierContract provenance, and every restored seam refused at its first
+# radiation-not-due step ("GLW has no producer").  Fixed by restart schema
+# v2 (scalars["carriers"], see the RESTART_SCHEMA comment in
+# woof/core/mpas_column_batch.py); this line is the other half of that
+# fix, so the round-trip question is asked at every cut from now on.
+# Whole-module GPU by conftest's detector (module-scope importorskip).
+tests/test_mpas_column_batch_gpu.py
+
+# SHARD 1k: the 2.6.1 fold wave's one function-marked device file, found by
+# the same scope-every-added-file pass that listed the CPU wave on stage 1.
+# tests/test_p3_front_door.py carries five device functions (the mp=50
+# campaign gate's on-card half); its CPU half runs on stage 1, exactly the
+# shard-1b shape.
+tests/test_p3_front_door.py
+
+# ---------------------------------------------------------------------------
+# The cumulus reference family occupies shard 2 at the explicit marker.
+# Membership stays separate for reporting; both shards execute on the same
+# authorized CI dispatch. GF's documented gamma delta remains deliberate.
+# ---------------------------------------------------------------------------
+
+# CumulusResult's momentum pair (d0c23dad0, 2.6.4): the inertness gate for
+# every scheme that supplies no momentum (Grell-Freitas, Kain-Fritsch must
+# not move by a bit) and the negative control that the supplied pair
+# reaches the momentum stacks through YSU's face coupling.  Device rows
+# (a DomainState on the card); a coupling contract, not an oracle parity
+# suite, so it stays in shard 1 rather than the reference-family shard where 7391fa8db
+# first listed it.
+tests/test_cumulus_momentum_extension.py
+
+# CFL geometry is active dycore behavior, so it belongs on the per-cut leg.
+# w_cfl_stat's 32-bin vert_cfl histogram against a CPU reference
+# (docs/ADAPTIVE-TIMESTEP.md section 11).  Nothing type-checks
+# kernels/openbc.cu's CFL_HIST_BINS/CFL_HIST_SCALE against the host's
+# _CFL_HIST_BINS/_CFL_HIST_SCALE, so the bin edges are asserted against
+# the kernel's own arithmetic.  It is on THIS list rather than stage 1
+# because the whole module is `pytest.importorskip("cupy")`: on the CPU
+# leg it would collect and skip every test while the line read as
+# coverage -- the same miss tests/test_anisotropic_mixing_w_stability.py
+# is kept off stage 1 for.
+tests/test_wrf_cfl_histogram.py
+
+# Recent shared runtime changes: these actual CUDA controls run on every cut.
+tests/test_both_streamed_nesting.py
+tests/test_cam_ozone.py
+tests/test_radiation_composition.py
+tests/test_trace_gas_overrides_gpu.py
+tests/test_acoustic_carrier_lifetime.py
+tests/test_attached_store_health_gpu.py
+tests/test_streamed_lifecycle_restart.py
+tests/test_rrtmg_legacy_selection.py
+
+# Actual driver attributes for every boundary-time entry point.
+tests/test_lbc_time_frame.py
+
+# Actual CUDA follower windows retain independent clocks across three restart storage directions.
+tests/test_follow_window_transport_gpu.py
+
+# Actual atmospheric support and scalar forcing consumers run on every cut.
+tests/test_analyzed_scalar_boundaries.py
+tests/test_atmospheric_window_gpu.py
+tests/test_mapped_atmospheric_writer_gpu.py
+tests/test_nest_bounded_operands.py
+tests/test_nest_window_gpu.py
+tests/test_streamed_relocation_rebuild_gpu.py
+tests/test_qnn_specified_inflow.py
+tests/test_wrfinput_physics_fields.py
+tests/test_metgrid_number_initialization_gpu.py
+
+# Actual cadence, streamed timestep, allocation and attribute-following paths.
+# Mixed CPU/GPU files are included so their marked device branches have a lane.
+tests/test_sase_cadence_gpu.py
+tests/test_adaptive_stream_gpu.py
+tests/test_rrtm_memory.py
+tests/test_relocation_held_physics_gpu.py
+tests/test_attribute_tracking_gpu.py
+tests/test_model_stability_gpu.py
+tests/test_nssl2_gpu.py
+
+# SHARD 1l: the LETKF accelerator staging seam.
+#
+# WHAT HAPPENED.  woof/da/radar_assimilation.py stages every observation
+# batch onto the device by rebuilding GriddedObs field by field, and the
+# rebuild dropped the batch's reach window.  A v2 windowed radar document,
+# which woof/da/obs_radar.py builds with window-sized arrays, reached the
+# filter declaring window=None, and woof/da/letkf.py -- which sizes every
+# batch array against the declaration -- raised on a shape it had produced
+# itself.  Windowed documents could not be assimilated on a card at all.
+# The CPU arm never rebuilds a batch and was never affected, which is
+# precisely why a CPU leg cannot ask this question.
+#
+# tests/test_local_da_integration.py pins the same contract with a stand-in
+# device namespace and runs on stage 1; it cannot show that the REAL
+# transfer preserves the declaration, and the transfer is the step that
+# dropped it.  Whole-module GPU by pytestmark, so on a CPU leg it would
+# collect and skip every row while the line read as coverage.
+tests/test_radar_staging_gpu.py
+
+# SHARD-2-BEGIN
+tests/test_gf_deep_cuda.py
+tests/test_gf_shallow_cuda.py
+tests/test_gf_gfdrv_cuda.py
+tests/test_gf_engine_smoke.py
+
+# NOT LISTED, and the reason is a finding.  The GF family also carries
+# tests/test_gf_{deep,shallow,driver,wrf461}_parity.py, and the obvious move
+# was to put all eight here.  test_gpu_shard_manifest.py refused them: by
+# conftest's own detector they open no CUDA device, and running them proves
+# it -- 396 passed in 12 s on the CPU, and 3 s / 1 s / 2 s / 1 s on the GPU
+# node, which is what CPU work looks like when it runs on a card.
+#
+# A CPU-only file on this list would be worse than useless: it would make
+# the shard look broader than it is and burn node time rented by the hour.
+# They are ALSO on no CPU list, so they are 396 tests running nowhere -- a
+# separate gap, recorded here rather than swept, and the right place to fix
+# it is tools/battery/stage1_files.txt, not this file.
+# New Tiedtke (cu_physics = 16, d0c23dad0): the stage and pipeline parity suites
+# against the WRF v4.6.1 oracle corpus, all device rows.
+tests/test_ntiedtke_adjust_parity.py
+tests/test_ntiedtke_cloud_depth_parity.py
+tests/test_ntiedtke_cuascn_parity.py
+tests/test_ntiedtke_cuddrafn_parity.py
+tests/test_ntiedtke_cudlfsn_parity.py
+tests/test_ntiedtke_cudtdqn_parity.py
+tests/test_ntiedtke_cududvn_parity.py
+tests/test_ntiedtke_cuflxn_parity.py
+tests/test_ntiedtke_kedis_parity.py
+tests/test_ntiedtke_launch_geometry.py
+tests/test_ntiedtke_mprofile_parity.py
+tests/test_ntiedtke_mrescale_parity.py
+tests/test_ntiedtke_pattern_controls.py
+tests/test_ntiedtke_phase2_gates.py
+tests/test_ntiedtke_phase_one_end_condition.py
+tests/test_ntiedtke_pipeline_boundaries.py
+tests/test_ntiedtke_post_conversion_parity.py
+tests/test_ntiedtke_post_run_parity.py
+tests/test_ntiedtke_prep_parity.py
+tests/test_ntiedtke_uscale_parity.py
+tests/test_ntiedtke_workspace.py

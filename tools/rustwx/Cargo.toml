@@ -1,0 +1,97 @@
+## gpuwm vendored Rusty Weather renderer workspace.
+##
+## The crates under crates/ and vendor/ are a verbatim subset of the project's
+## rusty-weather workspace (MIT, LICENSE in this directory), vendored at
+## the exact working-tree state that produced the campaign renderer
+## binary (rw_wrf_batch.exe sha256 aa220a5a...); provenance and the two
+## deliberate divergences are documented in VENDOR.md.  The one new
+## crate is crates/rw-wrfbatch, the headless wrfout -> product-PNG
+## batch renderer `gpuwm render --engine rust` drives.
+
+[workspace]
+members = [
+    "crates/netcdf-writer",
+    "crates/obs-regrid",
+    "crates/rustwx-calc",
+    "crates/rustwx-contour",
+    "crates/rustwx-core",
+    "crates/rustwx-cross-section",
+    "crates/rustwx-ensemble",
+    "crates/rustwx-io",
+    "crates/rustwx-models",
+    "crates/rustwx-products",
+    "crates/rustwx-render",
+    "crates/rusty-weather",
+    "crates/rw-atms",
+    "crates/rw-fetch",
+    "crates/rw-fieldcmp",
+    "crates/rw-host-memory",
+    "crates/rw-ingest",
+    "crates/rw-mpas",
+    "crates/rw-netcdf",
+    "crates/rw-nexrad",
+    "crates/rw-odim",
+    "crates/rw-obs",
+    "crates/rw-sat",
+    "crates/rw-goes",
+    "crates/rw-store",
+    "crates/rw-wrfbatch",
+    "crates/static-fields",
+]
+## `vendor/grib-core` is deliberately absent from both lists: the GRIB
+## decoder is ONE crate for the whole tree, and it lives at
+## `tools/grib1_bridge/vendor/grib-core`, which is where its VENDOR.md
+## delta discipline (per-file SHA-256, Rust 1.75 spellings) already
+## lives.  This workspace reaches it by path.  Two copies is what the
+## tree had before, and the copy that lived here was the one WITHOUT
+## `missing_value_management`, so every renderer and ingest read of a
+## complex-packed message decoded the encoder's missing-value markers as
+## physical data.  Do not re-vendor a second copy here.
+exclude = [
+    "vendor/ecape-rs",
+    "vendor/metrust",
+    "vendor/netcrust",
+    "vendor/netcrust/vendor/hdf5-reader",
+    "vendor/wx-core",
+    "vendor/wx-field",
+    "vendor/wx-math",
+    "vendor/wx-radar",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+publish = false
+rust-version = "1.85"
+
+[workspace.dependencies]
+rayon = "1"
+rustls = { version = "0.23", default-features = false, features = ["std"] }
+rustls-rustcrypto = "0.0.2-alpha"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
+
+# netcrust must resolve `hdf5-reader = "0.3"` to the vendored, production-
+# tested tree (vendor/netcrust/vendor/hdf5-reader), not the crates.io
+# package.  Patches only apply from the workspace root, so the pin lives
+# here, exactly as in the source workspace.
+[patch.crates-io]
+hdf5-reader = { path = "vendor/netcrust/vendor/hdf5-reader" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# The bundled binaries are package data in a platform wheel now, and the
+# wheel is measured against PyPI's 100 MB per-file cap with about four
+# megabytes of headroom (physics tables account for 67 MB of it before a
+# single binary is added).  Symbols are the cheapest megabytes to give
+# back: they are pure debug weight on Linux, where they live inside the
+# ELF rather than in a side .pdb as they do under MSVC.  Nothing that
+# proves an artifact reads them -- the source-revision stamp
+# (`GPUWM_BRIDGE_SOURCE_REV=`) and the contract markers are string
+# constants in .rodata, which stripping does not touch, and the library
+# ABI probe resolves an EXPORTED symbol, which is not a debug symbol.
+strip = "debuginfo"
