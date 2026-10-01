@@ -557,12 +557,20 @@ def _capture_advective_qv_forcing(state: DomainState, tend, mu0) -> None:
     state.rqvften[...] = rate
 
 
+def _ieva_scalar(state, tend, q_old, implicit, mu0, mu, dt_eff) -> None:
+    """``advect_s_implicit`` on one scalar's advective tendency, in place:
+    ``mut_old`` the time-t mass, ``mut = mut_new`` the post-acoustic one."""
+    from woof.core import ieva
+    ieva.solve_scalar(state, tend, q_old, implicit[1], mu0, mu, dt_eff)
+
+
 def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                           ru, rv, ww, dt_eff: float, final: bool,
                           apply_relax: bool = True,
                           physics_tendencies=None,
                           fixed_tendencies=None,
-                          export_advective_forcing: bool = False) -> None:
+                          export_advective_forcing: bool = False,
+                          implicit=None) -> None:
     """Advance qv/qc/qr one RK stage from their time-t copies (``*0``).
 
     Called by ``dycore.step`` after each stage's acoustic loop with that
@@ -603,7 +611,16 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
     are captured where their own fluxes are.  The final PD stage cannot
     serve: its tendency is the advection of a source-folded scalar
     (``_pd_fold_sources``), which is no longer pure advection.
+
+    ``implicit`` is ``rk_scalar_tend``'s IEVA split ``(wwE, wwI)`` of
+    ``ww`` (``zadvect_implicit = 1``, last substep): every explicit
+    operator, the PD limiter included, advects with ``wwE``, and each
+    species' advective tendency is then replaced by its column solve
+    against ``wwI`` from the time-t scalar the update starts from
+    (``advect_s_implicit``, module_em.F:1346-1364), before the msf
+    coupling, the lateral fold and the specified-ring exclusion.
     """
+    ww_explicit = ww if implicit is None else implicit[0]
     nz, ny, nx = state.p.shape
     mu0 = state.mub2d + state.mup0                     # time-t column mass
     mu = state.mub2d + state.mup                       # post-acoustic mass
@@ -720,7 +737,7 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
             # so retaining it would consume B once in q0_eff and again as
             # msft*B in the final update.
             tend[...] = 0
-            launch_pd_fluxes(q, q0_eff, ru, rv, ww, mu, state,
+            launch_pd_fluxes(q, q0_eff, ru, rv, ww_explicit, mu, state,
                              cfg.dx, cfg.dy, dt_eff, *bufs,
                              msft=state.msft, has_msf=state.has_msf,
                              open_x=boundary_x, open_y=boundary_y)
@@ -729,6 +746,8 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                                    dx=cfg.dx, dy=cfg.dy, dt=dt_eff,
                                    msft=state.msft, has_msf=state.has_msf,
                                    open_x=boundary_x, open_y=boundary_y)
+            if implicit is not None:
+                _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu, dt_eff)
             if boundary_forced:
                 _exclude_specified_ring_advection(tend, cfg.spec_zone)
             # ``msft`` carries WRF rk_update_scalar's
@@ -742,11 +761,13 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
             # writes nothing at specified-boundary cells, so this branch
             # must start from a clean buffer.
             tend[...] = 0
-            launch_flux_div_scalar(q, ru, rv, ww, tend, state,
+            launch_flux_div_scalar(q, ru, rv, ww_explicit, tend, state,
                                    cfg.dx, cfg.dy,
                                    open_x=boundary_x, open_y=boundary_y,
                                    msf=state.msft, has_msf=state.has_msf,
                                    spec=boundary_forced)
+            if implicit is not None:
+                _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
             if export_advective_forcing and name == "qv":
                 # WRF RQVFTEN.  The window is exactly here: ``tend`` holds
                 # the acoustic time-averaged flux divergence of qv and
@@ -819,7 +840,7 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                 # See the qv/qc/qr loop above: WRF clears sc_tend after the
                 # positive-definite source fold and before advection.
                 tend[...] = 0
-                launch_pd_fluxes(q, q0_eff, ru, rv, ww, mu, state,
+                launch_pd_fluxes(q, q0_eff, ru, rv, ww_explicit, mu, state,
                                  cfg.dx, cfg.dy, dt_eff, *bufs,
                                  msft=state.msft, has_msf=state.has_msf,
                                  open_x=boundary_x, open_y=boundary_y)
@@ -829,6 +850,9 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                                        msft=state.msft,
                                        has_msf=state.has_msf,
                                        open_x=boundary_x, open_y=boundary_y)
+                if implicit is not None:
+                    _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu,
+                                 dt_eff)
                 if boundary_forced:
                     _exclude_specified_ring_advection(tend, cfg.spec_zone)
                 _update_scalar_in_place(
@@ -838,12 +862,14 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
             else:
                 # flux_div_scalar accumulates; start from a clean buffer.
                 tend[...] = 0
-                launch_flux_div_scalar(q, ru, rv, ww, tend, state,
+                launch_flux_div_scalar(q, ru, rv, ww_explicit, tend, state,
                                        cfg.dx, cfg.dy,
                                        open_x=boundary_x, open_y=boundary_y,
                                        msf=state.msft,
                                        has_msf=state.has_msf,
                                        spec=boundary_forced)
+                if implicit is not None:
+                    _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
                 held = held_lbc.get(name)
                 lbc_after_msf = (
                     held is not None
@@ -997,7 +1023,7 @@ def init_moist_balanced(cfg: RunConfig, coord: VerticalCoord,
 
 def advance_tke_stage(state: DomainState, cfg: RunConfig,
                       ru, rv, ww, dt_eff: float, final: bool,
-                      fixed_tendency=None) -> None:
+                      fixed_tendency=None, implicit=None) -> None:
     """Advance the km_opt=2 prognostic TKE one RK stage from ``tke0``.
 
     WRF advects tke through ``rk_scalar_tend``/``rk_update_scalar[_pd]``
@@ -1024,7 +1050,12 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
       radiation lives in the advection operator and in ``set_physical_bc3d``,
       both already routed through ``launch_flux_div_scalar``'s ``open_x``/
       ``open_y`` and the diffusion tendencies' open-strip zeroing.
+
+    ``implicit`` is the substep's IEVA split, as in
+    :func:`advance_scalars_stage` (WRF's tke call of ``rk_scalar_tend``).
     """
+    if implicit is not None:
+        ww = implicit[0]
     nz, ny, nx = state.p.shape
     c1h = state.c1h[:, None, None]
     c2h = state.c2h[:, None, None]
@@ -1058,6 +1089,8 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
                                dx=cfg.dx, dy=cfg.dy, dt=dt_eff,
                                msft=state.msft, has_msf=state.has_msf,
                                open_x=boundary_x, open_y=boundary_y)
+        if implicit is not None:
+            _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu, dt_eff)
         if state.has_msf:
             tend *= state.msft[None]
         # WRF's PD fold moved the sources into q0_eff, so ``tend`` here is
@@ -1070,6 +1103,8 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
                                open_x=boundary_x, open_y=boundary_y,
                                msf=state.msft, has_msf=state.has_msf,
                                spec=(cfg.specified or cfg.nested))
+        if implicit is not None:
+            _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
         if state.has_msf:
             tend *= state.msft[None]
         _tke_budget_transport(state, cfg, tend, final=final)

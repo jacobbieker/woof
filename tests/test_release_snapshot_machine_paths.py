@@ -318,10 +318,13 @@ def test_the_staged_release_tree_carries_no_machine_paths():
     assert scanned > 500, "the scan found almost nothing to read"
     assert containers > 0, "the scan read no NetCDF file, so their attributes ship unread"
     assert offenders == [], (
-        f"{len(offenders)} developer-absolute path(s) would ship:\n  "
+        f"{len(offenders)} developer-absolute path(s) or private machine "
+        f"name(s) would ship:\n  "
         + "\n  ".join(offenders)
         + "\nParameterize/relativize the path if the file is useful to "
-          "the public, else add it to RELEASE-EXCLUDE.txt.")
+          "the public, else add it to RELEASE-EXCLUDE.txt; a data file a "
+          "wheel carries names the measurement, not the machine it ran on "
+          "(tools/release_exclusions.py holds that rule).")
 
 
 @requires_builder
@@ -424,3 +427,132 @@ def test_nothing_shipped_imports_the_excluded_campaign_harness():
             importers.append(rel)
     assert importers == [], (
         f"these ship but import the excluded harness: {importers}")
+
+
+# ---------------------------------------------------------------------
+# Private machine names in the data files a wheel carries (A154)
+# ---------------------------------------------------------------------
+# 2.8.1's fetch route table named the lab host that watched the posting
+# times in 20 measured rows: a private machine's name published in a
+# wheel.  Built from fragments, like the paths above.
+HOST = "no" + "de-4"
+WEATHER_HOST = "weather-" + "no" + "de-1"
+LAN = "192." + "168.68.50"
+
+
+@requires_builder
+def test_private_machine_names_are_refused_in_shipped_data_files(tmp_path):
+    snap = _snap()
+    files = {
+        # Shipped data: refused.
+        "woof/authorities/routes.json":
+            '{"measured": "2026-09-30 posting watch, ' + HOST + ' (x)"}\n',
+        "configs/demo.toml": "# Linux (" + WEATHER_HOST + ")\n",
+        "woof/data/oracle/PROVENANCE.md": "recorded on " + HOST + "\n",
+        "tools/release/identities.json": '{"box": "' + LAN + '"}\n',
+        # Code, a document outside every wheel, and words that are not a
+        # host: read for machine paths only.
+        "woof/core/timing.py": "# measured on " + WEATHER_HOST + "\n",
+        "docs/public/receipts/run.json": '{"host": "' + HOST + '"}\n',
+        "tools/battery/list.txt": HOST + "\n",
+        "woof/data/governor.json": '{"note": "the node-wide governor, node_4"}\n',
+    }
+    for rel, text in files.items():
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    hdf5_like = (b"\x89HDF\r\n\x1a\n" + b"\x00" * 64 + b"source\x00\x00"
+                 + ("met_em on " + WEATHER_HOST + " (" + LAN + ")").encode("ascii")
+                 + b"\x00" * 64)
+    (tmp_path / "configs" / "real").mkdir(parents=True)
+    (tmp_path / "configs" / "real" / "terrain.nc").write_bytes(hdf5_like)
+
+    hits = snap.machine_path_hits(str(tmp_path))
+    assert sorted((rel, kind) for rel, _where, kind, _ in hits) == [
+        ("configs/demo.toml", "private machine name"),
+        ("configs/real/terrain.nc", "private machine name"),
+        ("woof/authorities/routes.json", "private machine name"),
+        ("woof/data/oracle/PROVENANCE.md", "private machine name"),
+        ("tools/release/identities.json", "private network address")]
+
+
+@requires_builder
+def test_the_host_rule_covers_every_package_data_declaration():
+    """The rule's scope is the wheels' data, so it has to follow them.
+
+    Each package-data pattern of both pyprojects, instantiated as a tree
+    path, is either code or in the rule's scope: a new declaration that
+    ships data from somewhere else fails here instead of shipping unread.
+    """
+
+    import tomllib
+
+    from tools.release_exclusions import CODE_SUFFIXES, ships_as_wheel_data
+
+    declared = []
+    for project, root in ((REPO, ""), (REPO / "recast-woof-data", "recast-woof-data/")):
+        pyproject = project / "pyproject.toml"
+        if not pyproject.is_file():
+            continue
+        with pyproject.open("rb") as stream:
+            package_data = tomllib.load(stream)["tool"]["setuptools"][
+                "package-data"]
+        for package, patterns in package_data.items():
+            for pattern in patterns:
+                example = pattern.replace("**/", "sub/").replace("*", "x")
+                declared.append(root + package.replace(".", "/") + "/" + example)
+    assert len(declared) > 15, declared
+    outside = [rel for rel in declared
+               if Path(rel).suffix.lower() not in CODE_SUFFIXES
+               and not ships_as_wheel_data(rel)]
+    assert outside == [], (
+        "package-data ships these data files and the private-machine rule "
+        f"does not read them: {outside}")
+
+
+@requires_builder
+def test_the_host_rule_forgives_only_the_exact_bytes_a_reference_pins(
+        tmp_path, monkeypatch):
+    """The rule's one allowance is by digest, so an edit ends it."""
+
+    import hashlib
+
+    snap = _snap()
+    record = ("# the reference's own met_em, retained on " + WEATHER_HOST
+              + "\n").encode("utf-8")
+    monkeypatch.setattr(snap, "_PINNED_RECORD_DIGESTS",
+                        [frozenset({hashlib.sha256(record).hexdigest()})])
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "reference.toml").write_bytes(record)
+    (tmp_path / "configs" / "edited.toml").write_bytes(record + b"# edited\n")
+
+    hits = snap.machine_path_hits(str(tmp_path))
+    assert [(rel, kind) for rel, _where, kind, _ in hits] == [
+        ("configs/edited.toml", "private machine name")]
+
+
+@requires_builder
+def test_the_host_rule_allowance_is_live_and_names_one_shipped_config():
+    """An allowance that forgives nothing is an unused escape hatch.
+
+    The committed WRF reference manifests pin the config each reference was
+    built for; each pinned digest is the digest of exactly one shipped
+    config, which is the file the allowance exists for.
+    """
+
+    import hashlib
+
+    from tools.release_exclusions import pinned_record_digests
+
+    digests = pinned_record_digests(REPO)
+    if not (REPO / "docs" / "public" / "wrf-reference").is_dir():
+        pytest.skip("the WRF reference records are not in this tree")
+    assert digests, "no committed WRF reference manifest pins a config"
+    shipped = {}
+    for path in sorted((REPO / "configs").rglob("*.toml")):
+        shipped.setdefault(hashlib.sha256(path.read_bytes()).hexdigest(),
+                           []).append(path.relative_to(REPO).as_posix())
+    for digest in digests:
+        assert len(shipped.get(digest, [])) == 1, (
+            f"the WRF reference pinned at {digest} names no single shipped "
+            f"config: {shipped.get(digest)}")

@@ -110,9 +110,16 @@ REPORT_SCHEMA = "gpuwm-da.prepared-cycle-report.v1"
 #: maturity tier and registry digest in that tree's vocabulary; every
 #: selector, component and profile id can still match exactly.
 #: ``--tolerate-physics-vocabulary-drift`` allows a mismatch confined to
-#: these two fields, records it in the report, and refuses any other
+#: these fields, records it in the report, and refuses any other
 #: difference.  Without the flag the preflight is strict.
-PHYSICS_VOCABULARY_FIELDS = ("maturity", "registry_sha256")
+#:
+#: Since A153 the preflight itself resolves a maturity or document-digest
+#: difference from 2.8.0 on (it compares the registry's physics parts), so
+#: this flag only still matters for an authority written before 2.8.0,
+#: whose registry the history does not hold; ``registry_physics`` is here
+#: so the flag keeps doing exactly that and nothing more.
+PHYSICS_VOCABULARY_FIELDS = ("maturity", "registry_sha256",
+                             "registry_physics")
 
 
 def to_host(value) -> np.ndarray:

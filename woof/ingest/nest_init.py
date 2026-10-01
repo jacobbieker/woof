@@ -42,6 +42,7 @@ from woof.case_data import (PerDomainSourceOrography, SourceOrography,
                              SourceOrographyDeclaration,
                              resolve_source_orography)
 from woof.core import constants as c
+from woof.core import portable_math as pm
 from woof.core.diagnostics import update_diagnostics
 from woof.core.grid import (BaseState, VerticalCoord,
                             hybrid_column_ordering_refusal,
@@ -504,7 +505,8 @@ def _static_catalog(catalog):
     selected = getattr(catalog, "static_catalog", catalog)
     if selected is None:
         raise ValueError("input catalog does not bind a static WPS_GEOG catalog")
-    return selected
+    from woof.static.terrain_smoothing import catalog_with_smoothing
+    return catalog_with_smoothing(selected, getattr(catalog, "static_highres", None))
 
 
 def _read_source_orography(artifact: SourceOrography) -> np.ndarray:
@@ -727,9 +729,9 @@ def _base_from_blended(cfg, coord: VerticalCoord, p_top: float,
             or "blended hybrid base pressure is not monotonic")
     lapse = 50.0
     temperature = np.maximum(
-        200.0, cfg.base_temp + lapse * np.log(pb / c.P0))
-    thb = temperature * (c.P0 / pb) ** c.RCP
-    alb = c.RD * thb * (pb / c.P0) ** c.RCP / pb
+        200.0, cfg.base_temp + lapse * pm.log(pb / c.P0))
+    thb = temperature * pm.power(c.P0 / pb, c.RCP)
+    alb = c.RD * thb * pm.power(pb / c.P0, c.RCP) / pb
     return BaseState(mub=mub, p_top=float(p_top), pb=pb, alb=alb,
                      thb=thb, phb=phb, terrain_z=terrain)
 

@@ -26,7 +26,7 @@ from .constants import (
     PHYSICS_STATE_SCHEMA,
     SPECTRAL_FIELDS,
 )
-from .pins import DEFAULT_INTEGRATOR, KNOWN_PINS_HASHES, pins_hash
+from .pins import ACCEPTED_PINS_HASHES, DEFAULT_INTEGRATOR, pins_hash
 from .state import ArwenGlobalState, MoistHybridState, PhysicsState, SurfaceState
 from .water import SOIL_LAYER_THICKNESS_M
 
@@ -180,7 +180,7 @@ def read_migration_receipt(path: str | Path) -> dict[str, object]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if payload.get("schema") != LEVEL4_MIGRATION_SCHEMA:
         raise ValueError("migration receipt schema mismatch")
-    if payload.get("level5_pins_hash") not in KNOWN_PINS_HASHES:
+    if payload.get("level5_pins_hash") not in ACCEPTED_PINS_HASHES:
         raise ValueError("migration receipt Level-5 pins mismatch")
     self_hash = payload.pop("self_sha256", None)
     if self_hash != hashlib.sha256(_canonical(payload)).hexdigest():

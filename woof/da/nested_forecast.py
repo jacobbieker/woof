@@ -886,7 +886,9 @@ def _initialize_child_physics(initialized, child_run, inventory,
     grid = initialized.grid
 
     required = {"MMINLU", "ISWATER", "ISLAKE", "ISICE"}
-    if set(landuse_identity) != required:
+    admitted = (required | {"ISURBAN"}
+                if getattr(child_run, "sf_surface_mosaic", 0) == 1 else required)
+    if not required <= set(landuse_identity) <= admitted:
         raise NestedForecastRefusal(
             "nested child land-use identity must contain exactly "
             f"{sorted(required)}")
@@ -895,6 +897,7 @@ def _initialize_child_physics(initialized, child_run, inventory,
     lat, lon = grid.latlon_mass()
     landuse = initialize_landuse(
         static["LU_INDEX"], soil_type=static["SCT_DOM"],
+        urban_legend=int(getattr(child_run, "sf_urban_physics", 0)) > 0,
         landmask=static["LANDMASK"], snow=fields["SNOW"],
         xice=fields["SEAICE"], valid_time=valid_time,
         cen_lat=float(getattr(grid, "cen_lat", grid.ref_lat)
@@ -935,6 +938,13 @@ def _initialize_child_physics(initialized, child_run, inventory,
     driver.fields["shdmax"][...] = cp.asarray(
         100.0 * static["GREENFRAC"].max(axis=0), dtype=cp.float32)
     _nest_down_near_surface(driver, parent_driver, registration, cp)
+    if getattr(child_run, "sf_surface_mosaic", 0) == 1:
+        from woof.core.noah_mosaic_door import attach_noah_mosaic_to_driver
+        # The child's land use above is initialised fractional_seaice=True.
+        attach_noah_mosaic_to_driver(
+            driver, child_run, landusef=static.get("LANDUSEF"),
+            processed=False, landuse_attrs=landuse_identity,
+            landmask=static["LANDMASK"], fractional_seaice=True)
     return driver
 
 

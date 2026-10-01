@@ -23,6 +23,8 @@
 mod grib_import;
 #[path = "local_import.rs"]
 mod local_import;
+#[path = "nest_move.rs"]
+mod nest_move;
 #[path = "postproc_severe.rs"]
 mod postproc_severe;
 #[path = "wrf_process.rs"]

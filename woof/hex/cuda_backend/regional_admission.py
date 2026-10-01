@@ -510,7 +510,7 @@ class RegionalContract:
 #: tree's translation units are the evidence that the merged text computes
 #: the minted bits.
 MINTED_KERNEL_SET_SHA256 = (
-    "12c6c2a2b2a32ccf720da1ae4e98c08ac6c21e7beb369baae8f2687607531f35"
+    "0dd0dd948ed953888f03475849ce7eaed78495c0c77b8551c1407687b1bbaf1d"
 )
 
 _DRY_MINT_CAVEAT = (

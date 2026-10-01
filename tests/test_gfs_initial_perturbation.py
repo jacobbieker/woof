@@ -122,7 +122,7 @@ def _cpu_preparation(monkeypatch, exp):
         "LANDMASK", "LU_INDEX", "HGT_M", "SCT_DOM", "TMN", "MAPFAC_M",
         "MAPFAC_U", "MAPFAC_V", "F", "E", "SINALPHA", "COSALPHA")}
     monkeypatch.setattr(gfs_direct, "_static_from_geog",
-                        lambda *_a: (statics, {}, None))
+                        lambda *_a, **_k: (statics, {}, None))
     grid = SimpleNamespace(**{name: lambda: (np.zeros((3, 3)), np.zeros((3, 3)))
                             for name in ("latlon_mass", "latlon_u", "latlon_v")})
     monkeypatch.setattr(gfs_direct, "validate_native_lambert_contracts",
@@ -239,6 +239,11 @@ def test_fresh_tree_defers_bubbles_preserves_arrays_and_binds_exact_config(
         exp = load_experiment(path)
         before = asdict(exp)
         with monkeypatch.context() as patch:
+            # The hierarchy double below stands in for the one-shot
+            # hierarchy call, which is the tree route with chaining off;
+            # the chained GFS tree records the same deferral in its head
+            # (tests/test_gfs_chained_tree.py, A136 L7b).
+            patch.setenv("WOOF_CHAINED_PREP", "0")
             captures = _cpu_preparation(patch, exp)
             arguments = _inputs(tmp_path, path, name)
             proof = gfs_direct.prepare_gfs_wrf(**arguments)
@@ -299,7 +304,7 @@ def test_unsupported_single_or_spawn_scenario_refuses_before_static_or_decode(
     exp = load_experiment(scenario)
     _cpu_preparation(monkeypatch, exp)
     monkeypatch.setattr(gfs_direct, "_static_from_geog",
-                        lambda *_a: pytest.fail("unsupported scenario reached static preparation"))
+                        lambda *_a, **_k: pytest.fail("unsupported scenario reached static preparation"))
     arguments = _inputs(tmp_path, scenario, "refused")
     with pytest.raises(ValueError, match="spawn-triggered" if spawn else "does not apply.*perturbation"):
         gfs_direct.prepare_gfs_wrf(**arguments)

@@ -1620,6 +1620,15 @@ fn to_f64(values: Vec<f32>) -> Vec<f64> {
     values.into_iter().map(f64::from).collect()
 }
 
+/// `fold(a, b)`, or NaN (the store's missing value) when either is missing.
+fn missing_or(a: f64, b: f64, fold: impl Fn(f64, f64) -> f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        f64::NAN
+    } else {
+        fold(a, b)
+    }
+}
+
 /// Per-product streaming accumulator: per-frame planes fold in ascending
 /// slot order; `failed` records the first per-frame read failure (the
 /// product's blocker reason: once failed, later frames stop folding).
@@ -1707,20 +1716,25 @@ impl Accum {
                     *target += *value;
                 }
             }
+            // A missing value (NaN) is missing for the whole window: `f64::max`
+            // and `min` return the other operand, which would fold a cell
+            // from fewer frames than its window holds and draw it low (a
+            // moving nest's new ground holds no value from before the nest
+            // arrived, rw_wrfbatch's `nest_move`).  Gaps are never skipped.
             Some(AccumState::Max(acc)) => {
                 for (target, value) in acc.iter_mut().zip(values) {
-                    *target = target.max(*value);
+                    *target = missing_or(*target, *value, f64::max);
                 }
             }
             Some(AccumState::Min(acc)) => {
                 for (target, value) in acc.iter_mut().zip(values) {
-                    *target = target.min(*value);
+                    *target = missing_or(*target, *value, f64::min);
                 }
             }
             Some(AccumState::Range { max, min }) => {
                 for ((max, min), value) in max.iter_mut().zip(min.iter_mut()).zip(values) {
-                    *max = max.max(*value);
-                    *min = min.min(*value);
+                    *max = missing_or(*max, *value, f64::max);
+                    *min = missing_or(*min, *value, f64::min);
                 }
             }
             Some(AccumState::DifferencePending(start)) => {
@@ -1738,8 +1752,12 @@ impl Accum {
                     // stored run totals are f32, and differencing two
                     // large near-equal ones can land a hair below zero.
                     // Clamping publishes the physical floor instead of a
-                    // negative rainfall pixel.
-                    *target = (*value - *target).max(0.0);
+                    // negative rainfall pixel.  A missing endpoint stays
+                    // missing: `NaN.max(0.0)` is 0.0, which would draw a
+                    // cell the earlier frame never covered as a dry hour.
+                    *target = missing_or(*value, *target, |later, earlier| {
+                        (later - earlier).max(0.0)
+                    });
                 }
                 self.state = Some(AccumState::DifferenceReady(increment));
             }
@@ -3011,6 +3029,78 @@ mod tests {
             .collect();
         assert_values(qpf_total, &expected);
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// WHAT BREAKAGE THIS PREVENTS (gate law): a moving nest's earlier
+    /// frame, moved onto the nest's later place, holds NaN on the ground the
+    /// nest had not reached yet.  `NaN.max(0.0)` is 0.0 and `f64::max`
+    /// returns its other operand, so the difference drew that ground as a
+    /// dry hour and a maximum folded it from the frames after the nest
+    /// arrived, drawn as the whole window.  Missing stays missing.
+    #[test]
+    fn a_cell_missing_from_one_frame_is_missing_from_its_window() {
+        let dir = test_dir("missing-cell");
+        let run = "20260930_00z";
+        for hour in 0..=2u16 {
+            let mut total = apcp_run_accum_plane(hour);
+            if hour == 1 {
+                // New ground on the nest's leading edge: no F001 value.
+                total[0] = f32::NAN;
+            }
+            write_wrfout_apcp_hour(&dir, run, hour, total);
+        }
+        let outcome = compute(&dir, run, &[0, 1, 2], &["qpf_1h", "qpf_total"]);
+        let qpf_1h = grid_named(&outcome, "qpf_1h");
+        assert!(qpf_1h.values[0].is_nan(), "{:?}", qpf_1h.values);
+        for cell in 1..CELLS {
+            let want = (f64::from(apcp_run_accum_plane(2)[cell])
+                - f64::from(apcp_run_accum_plane(1)[cell]))
+                / MM_PER_INCH;
+            assert_eq!(qpf_1h.values[cell].to_bits(), want.to_bits(), "cell {cell}");
+        }
+        // The run total at F002 has its own value there and keeps it.
+        assert!(grid_named(&outcome, "qpf_total").values.iter().all(|v| v.is_finite()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let dir = test_dir("missing-cell-max");
+        for hour in 1..=3u16 {
+            let temp = field(
+                FieldSelector::height_agl(CanonicalField::Temperature, 2),
+                "K",
+                temp_k_plane(hour),
+            );
+            let mut values = uh_plane(hour);
+            if hour == 1 {
+                values[1] = f32::NAN;
+            }
+            let uh = field(
+                FieldSelector::height_layer_agl(CanonicalField::UpdraftHelicity, 2000, 5000),
+                "m2/s2",
+                values,
+            );
+            write_hour_from_fields_with_derived(
+                &dir,
+                "hrrr",
+                run,
+                hour,
+                &[("temperature_2m", &temp), ("updraft_helicity_2to5km", &uh)],
+                &[],
+                &[],
+                "windowed-store-test",
+                1_780_000_000 + hour as u64,
+            )
+            .unwrap();
+        }
+        let outcome = compute(&dir, run, &[1, 2, 3], &["uh_2to5km_3h_max"]);
+        let uh = grid_named(&outcome, "uh_2to5km_3h_max");
+        assert!(uh.values[1].is_nan(), "{:?}", uh.values);
+        for cell in [0usize, 2, 3] {
+            let want = (1..=3)
+                .map(|hour| f64::from(uh_plane(hour)[cell]))
+                .fold(f64::NEG_INFINITY, f64::max);
+            assert_eq!(uh.values[cell].to_bits(), want.to_bits(), "cell {cell}");
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

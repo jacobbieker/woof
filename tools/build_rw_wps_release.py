@@ -289,9 +289,21 @@ _CORE_MODULES = {
     # need only math, struct and numpy.
     "noahmp_libm.py",
     "host_libm.py",
+    # The portable transcendentals the host preparation takes (A130):
+    # real.py, nest_init.py, grid.py, nest_interp.py and the other
+    # preparation paths import it.  numpy, ctypes and the stdlib at
+    # module scope; the CPU preprocessing library it calls is staged.
+    "portable_math.py",
     "track_boundary.py",  # NumPy-only boundary diagnostic used by storm_tracking.
+    # Prepared/wrfinput initialization imports the lazy tile door, and the
+    # CPU fit estimator reads the import-free mosaic array inventory.
+    "noah_mosaic.py", "noah_mosaic_door.py",
     "grid.py",
     "landuse.py",
+    # landuse.py reads the LCZ categories through urban_tables under the
+    # urban land-use legend; urban_tables imports only noahmp_libm and noah,
+    # both staged here.
+    "urban_tables.py",
     "microphysics_transition.py",
     # The Milbrandt-Yau constant table, reached by microphysics_transition
     # above when a mixed nest edge enters mp=9 and the kernel needs the
@@ -413,9 +425,10 @@ _CORE_MODULES = {
     # `tiles: StreamingOptions = OFF` as a field default, so the class
     # cannot be defined without it, and a wheel that stages experiment.py
     # and not this one fails on `import woof.era5_direct`.  That is how
-    # the tilestream port broke this wheel: the scan below reads
-    # `from woof.core import streaming` as an import of `woof.core`,
-    # which IS staged, so nothing refused the staging.
+    # the tilestream port broke this wheel: the scan below read
+    # `from woof.core import streaming` as an import of `woof.core`
+    # alone, which IS staged, so nothing refused the staging.  It now
+    # checks woof.core.streaming too (A129).
     "streaming.py",
     "nssl2_contract.py",
     "noah.py",
@@ -436,6 +449,7 @@ _CORE_MODULES = {
     # number over the analyzed mass through the scheme's own entry block
     # (woof/ingest/real.py, staged above), and that block is the host
     # mirror woof/core/thompson_entry.py: numpy at module scope, its
+    # powers from noahmp_libm.py and host_libm.py (staged above), its
     # gamma moments from thompson_aerosol_contract.py, whose only other
     # internal reaches are thompson_contract.py (staged) and, function-
     # locally, woof.physics_compat (staged); the contract's exp/log are
@@ -544,8 +558,17 @@ _OBS_EXCLUDES = {"sources.py", "goes_window.py"}
 #: does not import the forecast output writer (and woof.supervisor and
 #: netCDF4 behind it).  tests/test_history_selection.py pins that
 #: boundary against the artifact.
-_IO_MODULES = {"__init__.py", "classic_tape.py", "history_selection.py",
-               "nc_writer_bridge.py", "wrf_output_schema.py"}
+#:
+#: ``classic_product`` is the whole-file classic NetCDF writer the staged
+#: woof.obs product writers open by default
+#: (``woof.obs.grid_product.open_obs_grid_product``), so
+#: ``woof.obs.write_radar_grid``, which the staged ``woof.obs`` exports,
+#: needs it.  Missing, that call raised ImportError in this package.
+#: Module scope is pathlib, typing and numpy, and its one internal lookup
+#: (``woof.io.nc_writer_bridge``) is function-local and staged.
+_IO_MODULES = {"__init__.py", "classic_product.py", "classic_tape.py",
+               "history_selection.py", "nc_writer_bridge.py",
+               "wrf_output_schema.py"}
 _ROOT_DATA = {
     "native_wrf_support_v1.json",
     "physics_registry_v2.json",
@@ -585,8 +608,26 @@ _OPTIONAL_STAGED_IMPORTS = {
         "forecast tree admission and execution estimates; standalone preparation "
         "only reads StreamingOptions and does not call these planners",
     ("woof/stage_cli.py", "woof.prepared_single_domain_forecast"):
-        "register_cli builds the full WOOF sim parser; standalone source_cli "
-        "uses only the staged bundle contracts and never registers sim",
+        "the forecast runner, imported inside _schema_index (behind "
+        "resolve_bundle and resolve_head_bundle), streaming_flags, sim_main "
+        "and register_cli.  This package's one route into stage_cli is "
+        "woof.prep_output's handoff after a finished preparation, which asks "
+        "missing_forecast_runners() first and, with both runners absent "
+        "here, prints the preparation-only line and resolves no bundle",
+    ("woof/stage_cli.py", "woof.prepared_domain_tree_forecast"):
+        "the tree forecast runner, imported inside _schema_index and "
+        "sim_main.  Same route and same reason as "
+        "woof.prepared_single_domain_forecast directly above: the "
+        "preparation handoff asks missing_forecast_runners() before it "
+        "resolves a bundle, so a finished preparation here imports neither",
+    ("woof/core/streaming.py", "woof.core.pace"):
+        "the step-cost sentence of an auto [tiles] refusal "
+        "(_refused_tiling_clause), reached only from decide() after "
+        "tilestream.autoplan refused a tiling.  decide imports tilestream "
+        "first, which this package does not carry, and its one staged "
+        "caller prices a downscaled forecast child "
+        "(downscale_pricing.price_child).  The clause also catches a failed "
+        "import and states the refusal without the cost",
     ("woof/core/streaming.py", "woof.core.adaptive_clock"):
         "adaptive forecast tile planning/step execution; StreamingOptions "
         "and config validation reach none of these function-local imports",
@@ -685,6 +726,18 @@ _OPTIONAL_STAGED_IMPORTS = {
         "certification kernel-manifest recording, reached only after the "
         "CuPy import inside the loader; RW-WPS stages no forecast executor "
         "and compiles no CUDA module",
+    ("woof/core/noah_mosaic.py", "woof.certify.kernel_manifest"):
+        "certification kernel-manifest recording inside the Noah mosaic "
+        "tile loop's own compile (_mosaic_module, _mosaic_ucm_module), "
+        "reached only after the CuPy import when a forecast launches the "
+        "loop; RW-WPS stages no forecast executor and compiles no CUDA "
+        "module.  The module is staged for the doors' tile initialization "
+        "and the fit estimator's import-free array inventory",
+    ("woof/core/noah_mosaic.py", "woof.core.urban_ucm"):
+        "the urban canopy's packed tables and state pointers, imported "
+        "function-locally in launch_noah_mosaic's urban arm, which only a "
+        "forecast's surface step calls; a preparation-only install never "
+        "launches the tile loop",
     ("woof/physics_compat.py", "woof.core.ruc_contract"):
         "RUC'S SOIL GEOMETRY COUNTS, and only those.  The import is "
         "function-local inside pending_wrf_physics_components' "
@@ -819,7 +872,22 @@ _OPTIONAL_STAGED_IMPORTS = {
         "preparation never builds one. The module ships with the rest of "
         "woof/ingest, and woof/ingest/nest_init.py imports it on that same "
         "forecast-only branch",
+    ("woof/fetch.py", "tools.download_gfs_native_subset"):
+        "the GFS subset transport (the NOMADS crop and whole-object "
+        "downloads, their level ladder and record counts), imported inside "
+        "the locked bodies of fetch_gfs and fetch_gfs_fullfile and five level "
+        "and record helpers.  Their callers are the `woof fetch` door "
+        "(fetch_main and the route fetch under it, registered only by "
+        "woof/cli.py, excluded above), woof/core/preflight.py (not staged) "
+        "and woof/download_budget.py (excluded above).  This package "
+        "has no fetch door: rw-wps --source gfs prepares a series already "
+        "fetched and authors its front-door manifest from the fetch receipt "
+        "on disk, which reads no transport",
 }
+
+
+def _names_verify(module: str) -> bool:
+    return module == "woof.verify" or module.startswith("woof.verify.")
 
 
 def _staged_verification_imports(destination: Path) -> list[dict[str, object]]:
@@ -839,6 +907,11 @@ def _staged_verification_imports(destination: Path) -> list[dict[str, object]]:
                 candidates.extend((alias.name, "import") for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module is not None:
                 candidates.append((node.module, "from"))
+                # `from woof import verify` imports woof.verify.
+                if not _names_verify(node.module):
+                    candidates.extend(
+                        (f"{node.module}.{alias.name}", "from")
+                        for alias in node.names if alias.name != "*")
             elif isinstance(node, ast.Call) and node.args:
                 argument = node.args[0]
                 if isinstance(argument, ast.Constant) and isinstance(
@@ -855,7 +928,7 @@ def _staged_verification_imports(destination: Path) -> list[dict[str, object]]:
                     if dynamic:
                         candidates.append((argument.value, "dynamic"))
             for module, kind in candidates:
-                if module == "woof.verify" or module.startswith("woof.verify."):
+                if _names_verify(module):
                     violations.append({
                         "path": source.relative_to(destination).as_posix(),
                         "line": int(getattr(node, "lineno", 0)),
@@ -865,10 +938,29 @@ def _staged_verification_imports(destination: Path) -> list[dict[str, object]]:
     return violations
 
 
+def _is_source_module(source_root: Path, module: str) -> bool:
+    """Is ``module`` a module or a regular package in the source tree?"""
+
+    path = source_root.joinpath(*module.split("."))
+    return (path.with_suffix(".py").is_file()
+            or (path / "__init__.py").is_file())
+
+
 def _staged_internal_imports(
-    destination: Path, *, optional: bool = False,
+    destination: Path, *, source_root: Path, optional: bool = False,
 ) -> list[dict[str, object]]:
-    """Return imports whose internal module is absent from wheel staging."""
+    """Return imports whose internal module is absent from wheel staging.
+
+    ``from package import name`` imports ``package.name`` as a module
+    whenever the source tree has one by that name, so each such alias is
+    checked as well as ``package``: ``from woof.core import host_libm``
+    needs ``woof/core/host_libm.py`` staged, not only
+    ``woof/core/__init__.py``.  Read as an import of ``woof.core`` alone
+    it passed this scan while host_libm was not staged, and the staged
+    map projections could not be imported.  Only the source
+    tree (``source_root``) can say whether a name is a submodule or an
+    attribute of its package, which is why the scan is given one.
+    """
     modules: set[str] = set()
     sources: list[tuple[Path, str, bool]] = []
     for source in sorted(destination.rglob("*.py")):
@@ -923,6 +1015,14 @@ def _staged_internal_imports(
                     resolved = node.module or ""
                 if resolved:
                     candidates.append((resolved, "from"))
+                    # A missing package is reported as itself; its
+                    # submodules cannot be staged without it.
+                    if resolved in modules:
+                        candidates.extend(
+                            (f"{resolved}.{alias.name}", "from")
+                            for alias in node.names
+                            if alias.name != "*" and _is_source_module(
+                                source_root, f"{resolved}.{alias.name}"))
             elif isinstance(node, ast.Call) and node.args:
                 argument = node.args[0]
                 if isinstance(argument, ast.Constant) and isinstance(
@@ -1175,14 +1275,15 @@ def _stage_rw_wps_python_project(destination: Path) -> dict[str, object]:
             "RW-WPS wheel staging imports omitted developer verification "
             f"modules: {verification_imports}"
         )
-    internal_imports = _staged_internal_imports(destination)
+    internal_imports = _staged_internal_imports(
+        destination, source_root=REPO)
     if internal_imports:
         raise RuntimeError(
             "RW-WPS wheel staging has unresolved internal imports: "
             f"{internal_imports}"
         )
     optional_internal_imports = _staged_internal_imports(
-        destination, optional=True)
+        destination, source_root=REPO, optional=True)
     return {
         "distribution": PYTHON_DISTRIBUTION,
         "file_count": len(files),

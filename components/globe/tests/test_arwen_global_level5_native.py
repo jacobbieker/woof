@@ -2519,7 +2519,8 @@ def test_cumulus_dynamics_lanes_measure_what_ran_between_calls():
 
 
 
-def test_convective_rain_is_booked_to_the_reservoir_rainc_and_the_land_bucket():
+@pytest.mark.parametrize("excess", [1.10, 0.90])
+def test_convective_rain_is_booked_to_the_reservoir_rainc_and_the_land_bucket(excess):
     from woof.globe.constants import (
         CONVECTIVE_RAIN_ACCUMULATOR, GRAVITY_M_S2,
     )
@@ -2529,10 +2530,13 @@ def test_convective_rain_is_booked_to_the_reservoir_rainc_and_the_land_bucket():
     dp_bottom = np.asarray(exchange.dp[-1], np.float32)
     drying = -2.0e-6
     # The scheme's own RAINCV, deliberately 10% off the column integral of
-    # its drying (the kernel prices in mixing ratio and rho*dz; the ledger
-    # in specific humidity and dp/g): the reservoir must take the MEASURED
-    # loss and the accumulators the reported rain.
-    reported = np.asarray(1.10 * (-drying) * dt * dp_bottom / GRAVITY_M_S2, np.float32)
+    # its drying, above it and below it: the reservoir must take the
+    # MEASURED loss, and RAINC and the land bucket one number, the smaller
+    # of the two (Grell-Freitas's deep arm reports more rain than its rates
+    # remove: Noah forced with the excess grew stores out of water the
+    # atmosphere never lost, paid by the reservoir, and the maps drew rain
+    # that never left the air).
+    reported = np.asarray(excess * (-drying) * dt * dp_bottom / GRAVITY_M_S2, np.float32)
 
     def convection(result, atmosphere):
         result.rqvcuten[0] = drying
@@ -2556,21 +2560,43 @@ def test_convective_rain_is_booked_to_the_reservoir_rainc_and_the_land_bucket():
     assert np.allclose(credited, removed, atol=2.0e-5)
     assert not np.allclose(credited, reported, atol=1.0e-3)
     assert result.diagnostics["maximum_local_water_repair_kg_m2"] < 1.0e-5
-    # RAINC: the scheme's reported rain; RAINNC untouched.
+    # RAINC: the reported rain capped at the water that left the column, the
+    # same number the land bucket takes; RAINNC untouched.
+    landed = np.minimum(np.asarray(reported, np.float64), removed)
     rainc = np.asarray(result.physics_state.arrays[CONVECTIVE_RAIN_ACCUMULATOR])
-    assert np.allclose(rainc, reported, rtol=1.0e-6)
+    assert np.allclose(rainc, landed, rtol=0.0, atol=2.0e-5)
+    if excess > 1.0:
+        assert np.all(rainc < reported)
+    else:
+        assert np.allclose(rainc, reported, rtol=1.0e-6)
     assert np.array_equal(
         np.asarray(result.surface.accumulated_rain_kg_m2, np.float64), rain0
     )
-    # The land bucket: Noah's next due call is forced with it (WRF RAINBL
-    # carries RAINCV), and the accumulator keeps growing.
+    # The call's rain books: what the scheme reported, what it reported
+    # beyond the removed water (withheld, never rain), and the removal.
+    d = result.diagnostics
+    assert np.isclose(d["cumulus_rain_reported_kg_m2"], float(np.mean(reported)), rtol=1.0e-6)
+    assert np.isclose(d["cumulus_rain_withheld_kg_m2"],
+                      float(np.mean(np.asarray(reported, np.float64) - rainc)), rtol=1.0e-5, atol=1.0e-9)
+    assert np.isclose(d["cumulus_water_removed_kg_m2"], float(np.mean(removed)), rtol=1.0e-4)
+    if excess > 1.0:
+        assert d["cumulus_rain_withheld_kg_m2"] > 0.05 * d["cumulus_rain_reported_kg_m2"]
+    else:
+        assert d["cumulus_rain_withheld_kg_m2"] == 0.0
+    # The land bucket: Noah's next due call is forced with that same number,
+    # and the accumulator keeps growing by it.
     second = suite.step(_advance(exchange, result, 10.0))
     assert len(calls) == 2
     assert np.allclose(calls[0]["rainbl"], 0.0)
-    assert np.allclose(calls[1]["rainbl"], reported, rtol=1.0e-6)
+    assert np.allclose(calls[1]["rainbl"], landed, rtol=0.0, atol=2.0e-5)
+    assert np.allclose(calls[1]["rainbl"], rainc, rtol=0.0, atol=1.0e-7)
+    if excess > 1.0:
+        assert np.all(calls[1]["rainbl"] < reported)
+    else:
+        assert np.allclose(calls[1]["rainbl"], reported, rtol=1.0e-6)
     assert np.allclose(
         np.asarray(second.physics_state.arrays[CONVECTIVE_RAIN_ACCUMULATOR]),
-        2.0 * reported, rtol=1.0e-6,
+        2.0 * rainc, rtol=0.0, atol=4.0e-5,
     )
     assert second.diagnostics["maximum_local_water_repair_kg_m2"] < 1.0e-5
 

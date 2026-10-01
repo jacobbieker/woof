@@ -96,6 +96,31 @@ the map.  The run's ``terrain_clock`` record states the longest step
 tried, per spacing and for each domain's reading, and the shortest entry
 under a stop it read and the crest that entry was measured under.
 
+THE ADAPTIVE CLOCK'S OWN ENTRIES.  Every entry above is a FIXED step on
+a fixed substep count, while the adaptive clock shortens its step on the
+CFL it measures and derives its substep count from the live step (eight
+at 22.6 s and up at 2.25 km).  Capping it from a fixed four-substep stop
+capped a 2.25 km domain under a 3.6 km crest of slope 0.30 at 24 m/s at
+15 s, where the adaptive clock held 30 s on that ridge for three hours.
+So the four-substep rows at 2 and 3 km of crests 1.5 to 4.5 km and ridge
+slopes 0.1 to 0.4, and under the 4.5 km crest ridge slopes 0.45 and 0.5,
+were also run on the production adaptive clock
+(``tools/terrain_clock_probe.py adaptive-extend``): max_time_step from
+15 s/km down to 5 s/km under 20 to 60 m/s, three hours each at the CFL
+target pairs 1.2 / 0.84 and 1.4 / 0.98 with 5 percent growth.  Every row
+held 15 s/km, the longest tried, at 20 m/s, and every one but the 3 km
+row of ridge slope 0.5 (grid 0.47), which held 5 s/km, at 30 m/s; from
+40 m/s some stopped, the gentlest slopes under the taller crests first,
+and some held none.  An adaptive domain whose reading takes only rows
+run that way, within the map's edges, and whose every cell held the
+longest step tried there, is capped at that step instead of the
+fixed-step stop (never below it), for a clock no faster than the one
+measured.  Wherever a cell run that way held a
+longest step under a longer one that stopped, that entry caps the clock
+whatever the fixed reading says.  A cell that held none gives no cap and
+says the domain may still stop.  Fixed steps read the fixed entries
+alone, as before.
+
 A FIXED STEP reads the same map.  At 3 km a fixed step of 15 s or less
 (the domain wizard writes 15 s) reads exactly as it did before the 3 km
 rows were extended, since no entry under 15 s moved.  A fixed 3 km step
@@ -104,6 +129,21 @@ substeps or divided: under a 3.9 km crest of slope 0.36, a fixed 18 s
 runs on six substeps instead of four at 30 m/s and is halved to 9 s on
 four from 40 m/s, and a fixed 20 s likewise runs on six at 30 m/s and
 is halved to 10 s from 40 m/s.
+
+UNDER zadvect_implicit.  Every entry was measured with explicit vertical
+advection, and a domain that runs WRF's implicit-explicit vertical
+advection (:mod:`woof.core.ieva`) reads the map unchanged: the step and
+substeps it is held to are the ones that held without the option, never
+longer.  That is what the probe measures with the option on, too: on the
+map's own ridges at 3 km (crests 3.9 and 4.5 km, slopes 0.36 and 0.4,
+20 to 40 m/s, 15 to 20 s on four and six substeps, one hour each, 96 and
+384 columns), each of 24 cells run once with it and once without held
+both times or stopped both times, with peak vertical velocities within
+1.5 m/s of each other wherever they held.  The ridge's limit is the
+acoustic and terrain-following one the substeps answer, not the vertical
+Courant number the option relaxes, so the map gives the option nothing
+to lengthen.  Its run line and its receipt say so (``zadvect_implicit``,
+``map_vertical_advection``).
 """
 
 from __future__ import annotations
@@ -155,9 +195,48 @@ class MapRow:
     #: every step tried there, and says nothing about a longer one.  The
     #: map's own ladder top where the row carries none.
     tried: tuple[float, ...] | None = None
+    #: On the ADAPTIVE clock, per mapped wind: the longest max_time_step,
+    #: s/km, that held three hours (:class:`AdaptiveMeasurement`), ``None``
+    #: where none tried held.  ``None`` for a row never run that way.
+    adaptive: tuple[float | None, ...] | None = None
+    #: The longest max_time_step tried at each wind, s/km, ``None`` at a
+    #: wind not run on the adaptive clock.
+    adaptive_tried: tuple[float | None, ...] | None = None
 
     def tried_at(self, index: int, top: float) -> float:
         return float(top) if self.tried is None else float(self.tried[index])
+
+    def adaptive_measured_at(self, index: int) -> bool:
+        return (self.adaptive_tried is not None
+                and self.adaptive_tried[index] is not None)
+
+
+@dataclass(frozen=True)
+class AdaptiveMeasurement:
+    """How the map's adaptive entries were measured: the same ridge on the
+    production adaptive clock (the controller fed the dycore's own CFL,
+    WRF's substep count from the live step, landing on every hour), from a
+    first step of the ladder's top, each entry held three hours at the CFL
+    target pairs ``targets`` alike, with growth bounded at
+    ``max_step_increase_pct``."""
+
+    #: The CFL target pairs every entry held at.
+    targets: tuple[tuple[float, float], ...]
+    max_step_increase_pct: int
+    #: The max_time_step values tried, s/km, longest first.
+    ladder: tuple[float, ...]
+    seconds: float
+
+    def covers(self, run) -> bool:
+        """A clock no faster than every one measured: targets no higher
+        than the highest pair and growth no faster.  A faster clock was
+        never run on this ground, so its entries are not read as held."""
+        cfl = max(pair[0] for pair in self.targets)
+        hcfl = max(pair[1] for pair in self.targets)
+        return (float(getattr(run, "target_cfl", 1.2)) <= cfl + 1e-12
+                and float(getattr(run, "target_hcfl", 0.84)) <= hcfl + 1e-12
+                and int(getattr(run, "max_step_increase_pct", 5))
+                <= int(self.max_step_increase_pct))
 
 
 @dataclass(frozen=True)
@@ -166,6 +245,7 @@ class StableStepMap:
     ladder: tuple[float, ...]
     rows: tuple[MapRow, ...]
     seconds: float
+    adaptive: AdaptiveMeasurement | None = None
 
     @property
     def top(self) -> float:
@@ -203,12 +283,53 @@ def measured_map() -> StableStepMap:
                 raise ValueError(
                     f"{MAP_PATH.name}: a row's top_s_per_km carries "
                     f"{len(tried)} winds, the map declares {len(winds)}")
+        adaptive = adaptive_tried = None
+        if "adaptive_s_per_km" in row:
+            adaptive = tuple(None if value is None else float(value)
+                             for value in row["adaptive_s_per_km"])
+            adaptive_tried = tuple(
+                None if value is None else float(value)
+                for value in row["adaptive_top_s_per_km"])
+            if len(adaptive) != len(winds) or len(adaptive_tried) != len(
+                    winds):
+                raise ValueError(
+                    f"{MAP_PATH.name}: a row's adaptive entries carry "
+                    f"{len(adaptive)} and {len(adaptive_tried)} winds, the "
+                    f"map declares {len(winds)}")
+            if int(row["sound_steps"]) != 4:
+                # The adaptive clock is read at four substeps, the count
+                # it takes at its shortest steps; an entry on another row
+                # would never be read.
+                raise ValueError(
+                    f"{MAP_PATH.name}: adaptive entries on a "
+                    f"{row['sound_steps']}-substep row")
+            for entry, top in zip(adaptive, adaptive_tried):
+                if entry is not None and (top is None
+                                          or entry > top * (1.0 + 1e-9)):
+                    # Read as held past the range tried, such an entry
+                    # would lift a cap over steps never run.
+                    raise ValueError(
+                        f"{MAP_PATH.name}: an adaptive entry of {entry} "
+                        f"s/km past the {top} s/km tried there")
         rows.append(MapRow(float(row["dx_m"]), float(row["crest_m"]),
                            float(row["slope"]), int(row["sound_steps"]),
-                           stable, tried))
+                           stable, tried, adaptive, adaptive_tried))
+    measurement = None
+    if "adaptive" in document:
+        block = document["adaptive"]
+        measurement = AdaptiveMeasurement(
+            targets=tuple((float(a), float(b)) for a, b in block["targets"]),
+            max_step_increase_pct=int(block["max_step_increase_pct"]),
+            ladder=tuple(float(v) for v in block["ladder_s_per_km"]),
+            seconds=float(block["seconds"]))
+    elif any(row.adaptive is not None for row in rows):
+        raise ValueError(
+            f"{MAP_PATH.name}: rows carry adaptive entries but the map "
+            "does not say how they were measured")
     return StableStepMap(winds, tuple(float(v) for v in
                                       document["ladder_s_per_km"]),
-                         tuple(rows), float(document["seconds"]))
+                         tuple(rows), float(document["seconds"]),
+                         measurement)
 
 
 @dataclass(frozen=True)
@@ -245,6 +366,31 @@ class MapReading:
     #: whether it is a lower ridge's than the one the reading was taken at.
     stopped_crest_m: float | None = None
     stopped_under_a_lower_crest: bool = False
+    #: THE ADAPTIVE CLOCK, read on the same cells (the rows read at this
+    #: crest, at every wind up to the domain's; the four-substep rows
+    #: only).  Whether every one of them was run on the adaptive clock.
+    adaptive_measured: bool = False
+    #: Where they all were: the longest max_time_step that held on every
+    #: one, s/km, ``None`` where one held none.
+    adaptive_per_km: float | None = None
+    #: The longest max_time_step tried on every one, s/km.
+    adaptive_top_per_km: float | None = None
+    #: Over the cells run on the adaptive clock, the shortest entry of one
+    #: that held a max_time_step and saw a longer one stop, s/km.  ``None``
+    #: where no such cell was read.
+    adaptive_stopped_per_km: float | None = None
+    #: A cell read held no max_time_step tried: the clock stopped there at
+    #: every one, down to the ladder's shortest.
+    adaptive_none_held: bool = False
+    #: That shortest max_time_step, s/km, where a cell held none.
+    adaptive_none_held_below_per_km: float | None = None
+
+    @property
+    def adaptive_held_everything_tried(self) -> bool:
+        """Every cell read was run on the adaptive clock and held every
+        max_time_step tried there."""
+        return (self.adaptive_measured and self.adaptive_per_km is not None
+                and self.adaptive_stopped_per_km is None)
 
     @property
     def held_everything_tried(self) -> bool:
@@ -406,6 +552,7 @@ def read_map(dx: float, crest_m: float, slope: float, wind: float,
             if most_stable is not None:
                 break
     stopped, under_lower, stopped_crest = stopped_through(wind_index)
+    adaptive = _adaptive_cells(selected, wind_index, table)
     return MapReading(
         per_km=per_km, dx_rows=tuple(dx_rows), crest_row=max(crest_rows),
         slope_row=max(slope_rows) if slope_rows else None,
@@ -413,7 +560,53 @@ def read_map(dx: float, crest_m: float, slope: float, wind: float,
         most_stable_per_km=most_stable,
         top_per_km=tried_through(wind_index),
         stopped_per_km=stopped, stopped_crest_m=stopped_crest,
-        stopped_under_a_lower_crest=under_lower)
+        stopped_under_a_lower_crest=under_lower, **adaptive)
+
+
+def _adaptive_cells(selected, wind_index: int, table: StableStepMap
+                    ) -> dict:
+    """The adaptive clock's reading of the cells a reading takes.
+
+    Cell by cell, as a stop is read on the fixed rows: a steeper domain
+    reads every row a gentler one does and a stronger wind every wind a
+    weaker one does, so adding a row or a wind can only lower the
+    shortest entry under a stop and can only leave the cells unmeasured.
+    Only the rows at the domain's own crest are read: every crest run on
+    the adaptive clock was run over the same ladder, so a lower crest's
+    cell was never tried past this crest's, and where this crest was not
+    run the cap is the fixed map's reading alone.
+    """
+    if table.adaptive is None:
+        return {}
+    cells = [(row, index) for row in selected
+             for index in range(wind_index + 1)]
+    measured = [(row, index) for row, index in cells
+                if row.adaptive_measured_at(index)]
+    stops = []
+    none_held = False
+    for row, index in measured:
+        entry, top = row.adaptive[index], row.adaptive_tried[index]
+        if entry is None:
+            # Every longest step tried stopped, down to the ladder's
+            # shortest, which is then no step seen to hold: capping the
+            # clock there would buy nothing measured.  The reading says so
+            # (the domain may still stop) and is never read as held.
+            none_held = True
+        elif entry < top * (1.0 - 1e-9):
+            stops.append(entry)
+    every = bool(cells) and len(measured) == len(cells)
+    entries = [row.adaptive[index] for row, index in measured]
+    return {
+        "adaptive_measured": every,
+        "adaptive_per_km": (min(entries) if every and all(
+            entry is not None for entry in entries) else None),
+        "adaptive_top_per_km": (min(row.adaptive_tried[index]
+                                    for row, index in measured)
+                                if every else None),
+        "adaptive_stopped_per_km": min(stops) if stops else None,
+        "adaptive_none_held": none_held,
+        "adaptive_none_held_below_per_km": (min(table.adaptive.ladder)
+                                            if none_held else None)}
 
 
 # ---------------------------------------------------------------------------
@@ -924,6 +1117,23 @@ class ClockAdaptation:
     #: ground read held its entry without being tried longer, the longer
     #: entry of the cell that saw the stop.  ``None`` where no cell did.
     limit_per_km: float | None = None
+    #: On the adaptive clock, the limit its longest step was capped from,
+    #: s/km, and where it comes from: ``"map"`` (``limit_per_km``),
+    #: ``"adaptive held"`` (the longest step every cell read held on the
+    #: adaptive clock) or ``"adaptive stop"`` (the entry under a longest
+    #: step seen to stop on it).  :func:`_adaptive_cap`.
+    cap_per_km: float | None = None
+    cap_source: str = "map"
+    adaptive_nest_lattice: bool = False
+    #: The domain runs WRF's implicit-explicit vertical advection
+    #: (``zadvect_implicit = 1``, :mod:`woof.core.ieva`).  Every entry of
+    #: the map was measured with explicit vertical advection, so the
+    #: reading is unchanged by it: the step and substeps read are the ones
+    #: that held WITHOUT the option.  The option relaxes the vertical
+    #: Courant limit, which is not what stops the map's ridges (24 probe
+    #: cells held or stopped alike with it and without; module docstring),
+    #: so the map never lengthens a step for it.
+    implicit_vertical: bool = False
 
     @property
     def dt(self) -> Fraction:
@@ -936,9 +1146,17 @@ class ClockAdaptation:
                 or self.ceiling is not None)
 
     @property
+    def adaptive_unheld(self) -> bool:
+        """On the adaptive clock, a cell read held no longest step tried
+        there: its cap is not a step seen to hold on that clock."""
+        return (self.adaptive and self.reading is not None
+                and self.reading.adaptive_none_held)
+
+    @property
     def beyond_measured(self) -> bool:
         return self.reading is not None and (
-            self.reading.per_km is None or bool(self.reading.beyond))
+            self.reading.per_km is None or bool(self.reading.beyond)
+            or self.adaptive_unheld)
 
     @property
     def unheld(self) -> bool:
@@ -949,7 +1167,11 @@ class ClockAdaptation:
     def status(self) -> str:
         if self.crest is None:
             return "NO_WIND_READING"
-        if self.unheld or (self.adapted and self.beyond_measured):
+        # Ground where the adaptive clock held no longest step tried is
+        # past what was measured to hold on it, whether or not the fixed
+        # reading changed the clock.
+        if (self.unheld or self.adaptive_unheld
+                or (self.adapted and self.beyond_measured)):
             return "BEYOND_MEASURED"
         return "ADAPTED" if self.adapted else "AS_CONFIGURED"
 
@@ -981,6 +1203,28 @@ class ClockAdaptation:
                 + _seconds_float(limit * self.dx / 1000.0)
                 + f" stopped {where})")
 
+    def _adaptive_part(self) -> str:
+        """What the adaptive clock's own entries say, where they set or
+        bound the cap."""
+        reading = self.reading
+        if not self.adaptive or reading is None:
+            return ""
+        if reading.adaptive_none_held:
+            return (", and on the adaptive clock every longest step tried "
+                    "stopped on some of the ground read, down to "
+                    + _seconds_float(reading.adaptive_none_held_below_per_km
+                                     * self.dx / 1000.0))
+        if self.ceiling is None or self.cap_per_km is None:
+            return ""
+        seconds = _seconds_float(self.cap_per_km * self.dx / 1000.0)
+        if self.cap_source == "adaptive held":
+            return (", and on the adaptive clock every cell read held a "
+                    f"longest step of {seconds}, the longest tried there")
+        if self.cap_source == "adaptive stop":
+            return (", and on the adaptive clock a longest step longer "
+                    f"than {seconds} stopped on the ground read")
+        return ""
+
     def _runs(self) -> str:
         parts = []
         if self.division != 1:
@@ -997,18 +1241,29 @@ class ClockAdaptation:
                          f"{_seconds(self.ceiling)}")
         return f"{self.label} runs " + " and ".join(parts)
 
+    def _implicit_part(self) -> str:
+        if not self.implicit_vertical:
+            return ""
+        return ("; the map was measured with explicit vertical advection, "
+                "so under zadvect_implicit it holds what held without it")
+
     def sentence(self) -> str:
         """The plain line a run prints when this domain's clock changed."""
 
         return (f"time step: {self._what()}; the measured map holds "
                 f"{self._held()} there with {self.time_step_sound} "
-                f"substeps{self._stop()}, so {self._runs()}")
+                f"substeps{self._stop()}{self._adaptive_part()}"
+                f"{self._implicit_part()}, so {self._runs()}")
 
     def beyond_sentence(self) -> str:
         """The line for a domain past the map's measured edge."""
 
         reading = self.reading
         if not self.adapted:
+            if reading.per_km is not None and self.adaptive_unheld:
+                # Held on the fixed rows, over ground where the adaptive
+                # clock held no longest step tried.
+                return self.adaptive_unheld_sentence()
             return (f"time step: {self._what()}; the measured map holds no "
                     f"step there at any substep count, so {self.label} runs "
                     "as configured and may still stop")
@@ -1020,12 +1275,35 @@ class ClockAdaptation:
                     f"measured holds {self._held()} with "
                     f"{self.time_step_sound} substeps at a weaker wind, so "
                     f"{self._runs()}, and may still stop")
+        if not reading.beyond:
+            # Within the map's edges, on ground where the adaptive clock
+            # held no longest step tried (:attr:`adaptive_unheld`).
+            return (f"time step: {self._what()}; the measured map holds "
+                    f"{self._held()} there with {self.time_step_sound} "
+                    f"substeps{self._stop()}{self._adaptive_part()}, so "
+                    f"{self._runs()}, and may still stop")
         return (f"time step: {self._what()}; the measured map holds "
                 f"{self._held()} there with {self.time_step_sound} "
-                f"substeps{self._stop()} but was not measured this far "
-                f"out in "
+                f"substeps{self._stop()}{self._adaptive_part()} but was "
+                f"not measured this far out in "
                 f"{', '.join(reading.beyond)}, so {self._runs()}, and may "
                 "still stop")
+
+    def adaptive_unheld_sentence(self) -> str:
+        """The line for an adaptive domain whose own reading leaves its
+        clock as configured, over ground where that clock held no longest
+        step tried (:attr:`adaptive_unheld`).  Said even unchanged: its
+        longest step is not one seen to hold on that clock there."""
+
+        reading = self.reading
+        out = ("" if not reading.beyond else
+               f" but was not measured this far out in "
+               f"{', '.join(reading.beyond)}")
+        return (f"time step: {self._what()}; the measured map holds "
+                f"{self._held()} there with {self.time_step_sound} "
+                f"substeps{self._stop()}{self._adaptive_part()}{out}, so "
+                f"{self.label}'s adaptive clock keeps its own longest step "
+                "and may still stop")
 
     def receipt(self) -> dict:
         row = {
@@ -1040,10 +1318,17 @@ class ClockAdaptation:
             "held_s_per_km": self.held_per_km,
             "adaptive": bool(self.adaptive),
         }
+        if self.adaptive_nest_lattice:
+            row["adaptive_step_mode"] = "nest-lattice-cell-steps-v1"
+        if self.implicit_vertical:
+            # Written only when on, so every other receipt is unchanged.
+            row["zadvect_implicit"] = 1
+            row["map_vertical_advection"] = "explicit"
         if self.limit_per_km is not None:
             row["limit_s_per_km"] = self.limit_per_km
         if self.ceiling is not None:
             row["max_time_step_s"] = _rational(self.ceiling)
+            row["max_time_step_from"] = self.cap_source
         if self.adaptive and self.time_step_sound != self.configured_sound:
             row["min_time_step_sound"] = int(self.time_step_sound)
         if self.crest is not None:
@@ -1063,6 +1348,22 @@ class ClockAdaptation:
                 "stop_crest_m": self.reading.stopped_crest_m,
                 "stop_under_a_lower_crest":
                     self.reading.stopped_under_a_lower_crest}
+            if self.adaptive:
+                km = self.dx / 1000.0
+                reading = self.reading
+
+                def seconds(value):
+                    return None if value is None else value * km
+
+                row["map_rows"]["adaptive_clock"] = {
+                    "every_cell_measured": bool(reading.adaptive_measured),
+                    "longest_step_held_s": seconds(reading.adaptive_per_km),
+                    "longest_step_tried_s": seconds(
+                        reading.adaptive_top_per_km),
+                    "shortest_entry_under_a_stop_s": seconds(
+                        reading.adaptive_stopped_per_km),
+                    "a_cell_held_none_down_to_s": seconds(
+                        reading.adaptive_none_held_below_per_km)}
         return row
 
 
@@ -1129,7 +1430,11 @@ def derive_clock(grid_id: int, run, dt: Fraction, slope: float,
     adaptive = bool(getattr(run, "use_adaptive_time_step", False))
     base = dict(grid_id=int(grid_id), label=label, slope=float(slope),
                 crest=crest, dx=dx, configured_dt=dt,
-                configured_sound=configured_sound, adaptive=adaptive)
+                configured_sound=configured_sound, adaptive=adaptive,
+                adaptive_nest_lattice=bool(getattr(
+                    run, "adaptive_nest_lattice", False)),
+                implicit_vertical=int(getattr(
+                    run, "zadvect_implicit", 0) or 0) > 0)
     if crest is None:
         return ClockAdaptation(division=1, time_step_sound=configured_sound,
                                held_per_km=None, reading=None, **base)
@@ -1152,8 +1457,13 @@ def derive_clock(grid_id: int, run, dt: Fraction, slope: float,
                 for count in counts}
     own = readings[configured_sound]
     if _holds(own, configured_per_km) and not own.beyond:
+        ceiling, cap, source = (_adaptive_ceiling(own, _held_step(own), run,
+                                                  table, dx, upper)
+                                if adaptive else (None, None, "map"))
         return ClockAdaptation(division=1, time_step_sound=configured_sound,
-                               held_per_km=own.per_km, reading=own, **base)
+                               held_per_km=own.per_km, reading=own,
+                               ceiling=ceiling, cap_per_km=cap,
+                               cap_source=source, **base)
     choices = []
     for count, reading in readings.items():
         if reading.per_km is None:
@@ -1176,24 +1486,75 @@ def derive_clock(grid_id: int, run, dt: Fraction, slope: float,
         held = limit = reading.most_stable_per_km
         division = (1 if held is None else
                     max(1, math.ceil(float(dt) / km / held - 1e-9)))
-    ceiling = None
-    if adaptive and limit is not None:
-        # A cell read saw a longer step stop (or, past the strongest wind
-        # the map holds a step at, every step): that limit caps the
-        # adaptive clock.  On its hundredth-of-a-second lattice, rounded
-        # down so the cap never sits above it.  A cap only ever shortens
-        # the step: one at or above the clock's own longest step (its
-        # max_time_step, or the 8 * dx fill-in) is not written, because a
-        # limit read from a stop seen above ground tried no further than
-        # it held would otherwise raise max_time_step past anything
-        # measured there.
-        ceiling = Fraction(math.floor(limit * dx / 1000.0 * 100.0 + 1e-9),
-                           100)
-        if upper <= ceiling:
-            ceiling = None
+    ceiling, cap, source = (_adaptive_ceiling(reading, limit, run, table,
+                                              dx, upper)
+                            if adaptive else (None, None, "map"))
     return ClockAdaptation(division=int(division), time_step_sound=int(count),
                            held_per_km=held, reading=reading,
-                           ceiling=ceiling, limit_per_km=limit, **base)
+                           ceiling=ceiling, limit_per_km=limit,
+                           cap_per_km=cap, cap_source=source, **base)
+
+
+def _adaptive_cap(reading: MapReading, limit: float | None, run,
+                  table: StableStepMap) -> tuple[float | None, str]:
+    """The limit, s/km, on the adaptive clock's longest step, and what
+    gives it: ``"map"`` (the fixed-step reading's ``limit``, ``None`` for
+    none), ``"adaptive held"`` or ``"adaptive stop"``.
+
+    The fixed-step limit is a step seen to stop as a FIXED step.  The
+    adaptive clock shortens its step on the CFL it measures and derives
+    its substep count from the live step, so where every cell read was
+    run on that clock and held every longest step tried there, it is
+    capped at that longest step instead (never below the fixed limit),
+    for a clock no faster than the one measured
+    (:meth:`AdaptiveMeasurement.covers`) on ground within the map's edges
+    (a reading past one keeps the fixed limit).  Where a cell run on it saw a
+    longest step stop, the entry under that stop caps it whatever the
+    fixed reading says; a clock faster than the one measured is no more
+    stable, so it reads that stop too.  Adding a row or a wind to a
+    reading can only lower either answer (:func:`_adaptive_cells`).
+    """
+    measured = table.adaptive
+    if measured is None:
+        return limit, "map"
+    cap, source = limit, "map"
+    # Only ground within the map's edges is lifted.  A domain steeper than
+    # the steepest row at its crest (or past any other edge) reads that
+    # row's cells, but no ridge that steep was run on the adaptive clock:
+    # lifting it would run a 3 km domain of slope 0.48 under a 4.5 km
+    # crest at 45 s, uncapped and reported as configured, from a 0.47 row.
+    if (limit is not None and not reading.beyond
+            and reading.adaptive_held_everything_tried
+            and measured.covers(run)
+            and reading.adaptive_per_km > limit * (1.0 + 1e-9)):
+        cap, source = reading.adaptive_per_km, "adaptive held"
+    stopped = reading.adaptive_stopped_per_km
+    if stopped is not None and (cap is None
+                                or stopped < cap * (1.0 - 1e-9)):
+        cap, source = stopped, "adaptive stop"
+    return cap, source
+
+
+def _adaptive_ceiling(reading: MapReading, limit: float | None, run,
+                      table: StableStepMap, dx: float, upper: Fraction
+                      ) -> tuple[Fraction | None, float | None, str]:
+    """The ``max_time_step`` written for an adaptive domain, the limit it
+    comes from (s/km) and that limit's source (:func:`_adaptive_cap`)."""
+    cap, source = _adaptive_cap(reading, limit, run, table)
+    if cap is None:
+        return None, None, source
+    # A cell read saw a longer step stop (or, past the strongest wind the
+    # map holds a step at, every step): that limit caps the adaptive
+    # clock.  On its hundredth-of-a-second lattice, rounded down so the
+    # cap never sits above it.  A cap only ever shortens the step: one at
+    # or above the clock's own longest step (its max_time_step, or the
+    # 8 * dx fill-in) is not written, because a limit read from a stop
+    # seen above ground tried no further than it held would otherwise
+    # raise max_time_step past anything measured there.
+    ceiling = Fraction(math.floor(cap * dx / 1000.0 * 100.0 + 1e-9), 100)
+    if upper <= ceiling:
+        ceiling = None
+    return ceiling, cap, source
 
 
 def _adaptive_upper(run):
@@ -1338,7 +1699,9 @@ def adapt_experiment_clock(
     ``slopes`` maps ``grid_id`` to the steepest slope the substep rule read
     and ``winds`` to the domain's crest-level wind.  A domain missing
     either runs as configured.  ``announce`` receives one line per changed
-    domain, ``caution`` the line for a changed domain past the map's edge.
+    domain, ``caution`` the line for a changed domain past the map's edge
+    and, changed or not, for one over ground the map holds no step for or
+    where the adaptive clock held no longest step tried.
     """
 
     adaptations = []
@@ -1368,8 +1731,9 @@ def adapt_experiment_clock(
             final.append(adaptation)
     # One line per changed domain.  A domain the map holds can still take a
     # finer step from its parent's division, and says so in its own words;
-    # one over ground and wind the map holds no step for says so even when
-    # its clock stays as configured.
+    # one over ground and wind the map holds no step for, or where the
+    # adaptive clock held no longest step tried, says so even when its
+    # clock stays as configured.
     changed_ids = {a.grid_id for a in changed}
     for adaptation in final:
         if adaptation.grid_id in changed_ids or adaptation.unheld:
@@ -1378,12 +1742,15 @@ def adapt_experiment_clock(
                     caution(adaptation.beyond_sentence())
             elif announce is not None:
                 announce(adaptation.sentence())
-        elif adaptation.division != 1 and announce is not None:
+            continue
+        if adaptation.division != 1 and announce is not None:
             announce(
                 f"time step: {adaptation.label} runs "
                 f"{_seconds(adaptation.dt)} steps instead of "
                 f"{_seconds(adaptation.configured_dt)} because its parent's "
                 "step was divided and a nest's step divides its parent's")
+        if adaptation.adaptive_unheld and caution is not None:
+            caution(adaptation.adaptive_unheld_sentence())
     return adapted, tuple(final)
 
 

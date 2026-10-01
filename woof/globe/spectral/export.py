@@ -12,7 +12,7 @@ import numpy as np
 from .checkpoint import read_checkpoint, state_from_checkpoint
 from .config import GlobalSpectralRunConfig
 from .constants import GRAVITY_M_S2
-from .pins import PINS_HASH
+from .pins import ACCEPTED_PINS_HASHES, PINS_HASH
 from .sampling import regular_latlon_coordinates, sample_scalar, sample_wind
 from .transform import SphericalHarmonicTransform
 
@@ -190,7 +190,7 @@ def read_latlon_export(path: str | Path) -> tuple[dict, dict[str, np.ndarray]]:
         }
     if metadata.get("schema") != EXPORT_SCHEMA:
         raise ValueError("lat/lon export schema mismatch")
-    if metadata.get("pins_hash") != PINS_HASH:
+    if metadata.get("pins_hash") not in ACCEPTED_PINS_HASHES:
         raise ValueError("lat/lon export arithmetic pins mismatch")
     self_hash = metadata.pop("self_sha256", None)
     if hashlib.sha256(_canonical(metadata)).hexdigest() != self_hash:

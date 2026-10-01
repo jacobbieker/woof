@@ -104,14 +104,14 @@ _AUTHORITY_DOCUMENT = {
         "execution_provenance",
     ],
     "execution_provenance": (
-        "immutable exact pinned Arwen aggregate execution identity, with optional "
+        "immutable exact pinned WOOF aggregate execution identity, with optional "
         "external YSU-GWDO execution/composition identity and four-byte validation"
     ),
     "post_rk_wsm6": [],
     "wsm6_sr_roundoff": {
         "source": (
-            "pinned Arwen gpuwm/core/physics.py:_wsm6_sr_roundoff_limit and "
-            "gpuwm/core/kernels/wsm6.cu"
+            "pinned WOOF woof/core/physics.py:_wsm6_sr_roundoff_limit and "
+            "woof/core/kernels/wsm6.cu"
         ),
         "meaning": (
             "accept the proven positive-sum binary32 SR roundoff envelope for "
@@ -164,8 +164,13 @@ CUDA_PHYSICS_V841_CONTRACT_SHA256 = sha256(
 
 #: The digest this contract carried before the row generalization, measured
 #: at 6652552.  The generator is faithful or this module refuses to import.
+#: RE-FROZEN for WOOF 1.0.1: the document's texts name WOOF where they
+#: named the engine's earlier name, and its WSM6 roundoff source names the
+#: engine files where WOOF ships them; no other byte of the document moved
+#: (the assembly's reword_identity.py verify proves it key for key).  As
+#: 1.0.0 froze it: 332899f6.
 _FROZEN_WSM6_PHYSICS_CONTRACT_SHA256 = (
-    "332899f64a24b45fc93a686ce056a674a4bd07a26d635447d0aff884ce13d001"
+    "3266241aea0d2481093bf7f1ed7617ca83301937dc89fa2229a6dcf30de11b69"
 )
 if CUDA_PHYSICS_V841_CONTRACT_SHA256 != _FROZEN_WSM6_PHYSICS_CONTRACT_SHA256:
     raise AssertionError(

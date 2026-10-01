@@ -51,8 +51,6 @@ def _release_2_7_0() -> tuple[str, ...]:
     from woof import upgrade_notes
 
     return (
-        "`woof tui` opens the terminal workspace for configuration, "
-        "research workspaces, case catalogs, forecasts and plots. "
         "Saved Linux node profiles are shared across working directories; "
         "remote jobs retain their reconnectable job IDs.",
         "`woof go CONFIG --outdir OUTPUT` prepares, forecasts and renders "

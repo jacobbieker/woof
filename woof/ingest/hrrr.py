@@ -327,6 +327,33 @@ def load_hrrr_native_series(
     )
 
 
+def verified_hrrr_native_bridge(
+        root, *, expected_manifest_sha256: str):
+    """Verify one bridge publication once; return a loader of one lead.
+
+    ``load(forecast_hour)`` maps that lead as :func:`load_hrrr_native_window`
+    does, without hashing the publication again.  A mapped lead holds one
+    open file descriptor per field until its arrays are let go (a numpy
+    memmap keeps its mmap, and CPython's mmap holds a duplicate of the
+    file's descriptor), at least 24 per lead.  A caller walking a long
+    window therefore maps each lead when it needs it:
+    :func:`load_hrrr_native_series` of every lead of a 48 h window holds
+    over 1,150 descriptors and fails with ``[Errno 24] Too many open
+    files`` under the ordinary 1024 soft ``RLIMIT_NOFILE``.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        raise FileNotFoundError(f"HRRR bridge directory is missing: {root}")
+    entries = _verify_manifest(root, expected_manifest_sha256)
+    gate = _read_gate(root)
+
+    def load(forecast_hour: int) -> HrrrNativeSnapshot:
+        return _load_verified_hrrr_native_window(
+            root, gate, forecast_hour, manifest_entries=entries)
+
+    return load
+
+
 def load_hrrr_pipeline_ready_window(
         root, forecast_hour: int) -> HrrrNativeSnapshot:
     """Map one hour after the live producer's atomic ready receipt.
@@ -1703,4 +1730,5 @@ __all__ = [
     "load_hrrr_native_series",
     "load_hrrr_pipeline_ready_window",
     "load_hrrr_native_window",
+    "verified_hrrr_native_bridge",
 ]

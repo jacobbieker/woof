@@ -402,6 +402,114 @@ def _onto_primary_grid(values: np.ndarray, source_lat, source_lon,
 #: receipt counts and locates it (``assumed_snow_free_points``).
 COASTAL_FILL_PASSES = 8
 
+#: The open-water skin's search reach, in analysis cells: a run water
+#: column whose bilinear stencil holds none of the analysis's own water
+#: points reads the analysis water values grown outward over its land this
+#: many passes at most (the reach doubles from one pass until the stencil
+#: is filled).  At 0.25 degrees, 512 passes cross any continent, so the
+#: cap is a guarantee that the search ends, not a reach anything needs:
+#: the GDAS 2026-09-30 12Z analysis on the T255 grid searched 220 columns
+#: (Antarctic ice-shelf water the analysis calls land) and reached all of
+#: them in 7 passes.
+OPEN_WATER_SKIN_SEARCH_PASSES = 512
+
+
+def open_water_skin_temperature(skin_src, land_src, regrid, open_water, *,
+                                latitude_deg=None, longitude_deg=None):
+    """The skin temperature of the run's open-water columns, from the
+    analysis's OWN water points only.
+
+    An open-water column starts from this skin and the ocean holds it for
+    the whole run (no ocean model: Noah skips it, the surface layer reads
+    it as the sea surface temperature; an inland lake's skin then follows
+    its own surface energy budget, native_runtime._lake_surface_step), so
+    that skin must be a water temperature.  The plain bilinear regrid of the analysis skin is not
+    one wherever the run's land fraction calls a column water and the
+    analysis calls a point of its stencil land: the stencil mixes in a
+    land skin, at the analysis hour.  On the GDAS 2026-09-30 12Z analysis
+    the north basin of Lake Turkana (4.45 N, 36.09 E, land fraction
+    0.485) started at 321.1 K, the 15:00 desert ground around the lake,
+    where the one analysis water point in its stencil read 300.8 K; held
+    for the run, a 48 C saturated lake under the Turkana jet evaporated
+    1.2e-3 kg/m2/s (about 3000 W/m2 latent) day and night, and the column
+    drained its 500 kg/m2 surface reservoir by hour 117 ("native physics
+    water closure exceeds the explicit surface reservoir").
+
+    The rule is metgrid's masked interpolation of SST over the analysis
+    land-sea mask (WPS METGRID.TBL, masked=land with search): the bilinear
+    weights renormalised over the stencil's analysis water points
+    (``land_src < 0.5``); a column whose stencil holds none reads the
+    analysis water values grown outward over the analysis land
+    (:func:`_grow_over_primary_land`, the 3 x 3 finite-neighbour mean)
+    until its stencil is filled.  Land and sea-ice columns keep the plain
+    regrid (Noah and the frozen-surface step integrate their skins from
+    the first call).  ``open_water`` is the run's open-water plane
+    (:func:`woof.globe.statics.water_columns`); ``latitude_deg`` and
+    ``longitude_deg`` (the target grid's axes) only locate the record's
+    largest changes.
+
+    Returns ``(skin, record)``: the open-water skin plane (equal to the
+    plain regrid everywhere else) and the provenance record that counts
+    and locates what the rule changed.
+    """
+    skin_src = np.asarray(skin_src, dtype=np.float64)
+    water_src = np.asarray(land_src, dtype=np.float64) < 0.5
+    plain = regrid(skin_src)
+    open_water = np.asarray(open_water, dtype=bool)
+    weight = regrid(water_src.astype(np.float64))
+    total = regrid(np.where(water_src, skin_src, 0.0))
+    has_water = weight > 0.0
+    skin = np.where(
+        open_water & has_water, total / np.where(has_water, weight, 1.0), plain
+    )
+    need = open_water & ~has_water
+    searched = int(np.count_nonzero(need))
+    passes = 0
+    if searched and water_src.any():
+        grown = np.where(water_src, skin_src, np.nan)
+        step = 1
+        while True:
+            grown, _filled, _left = _grow_over_primary_land(grown, ~water_src, step)
+            passes += step
+            values = regrid(grown)
+            reached = need & np.isfinite(values)
+            skin = np.where(reached, values, skin)
+            need = need & ~reached
+            if not need.any() or passes >= OPEN_WATER_SKIN_SEARCH_PASSES:
+                break
+            step = min(step * 2, OPEN_WATER_SKIN_SEARCH_PASSES - passes)
+    unreached = int(np.count_nonzero(need))
+    change = np.where(open_water, skin - plain, 0.0)
+    order = np.argsort(np.abs(change), axis=None)[::-1][:5]
+    rows, columns = np.unravel_index(order, change.shape)
+    record = {
+        "rule": (
+            "open-water columns take the analysis skin over the analysis's "
+            "own water points only: bilinear weights renormalised over the "
+            "stencil's water points (land_fraction < 0.5 in the analysis), "
+            "and a stencil with none reads the water values grown outward "
+            "over the analysis land by the 3 x 3 finite-neighbour mean; "
+            "land and sea-ice columns keep the plain bilinear regrid"
+        ),
+        "open_water_columns": int(np.count_nonzero(open_water)),
+        "stencil_with_analysis_land": int(np.count_nonzero(
+            open_water & has_water & (weight < 1.0 - 1.0e-12))),
+        "searched_columns": searched,
+        "search_passes": int(passes),
+        "unreached_columns_kept_plain_regrid": unreached,
+        "changed_by_more_than_1_k": int(np.count_nonzero(np.abs(change) > 1.0)),
+        "largest_cooling_k": float(-min(0.0, float(change.min()))),
+        "largest_warming_k": float(max(0.0, float(change.max()))),
+        "largest_changes": [
+            {"latitude_deg": None if latitude_deg is None else float(np.asarray(latitude_deg)[j]),
+             "longitude_deg": None if longitude_deg is None else float(np.asarray(longitude_deg)[i]),
+             "row": int(j), "column": int(i),
+             "plain_regrid_k": float(plain[j, i]), "open_water_k": float(skin[j, i])}
+            for j, i in zip(rows, columns) if change[j, i] != 0.0
+        ],
+    }
+    return skin, record
+
 
 def _grow_over_primary_land(values: np.ndarray, land: np.ndarray, passes: int):
     """A plane carrying a bitmap (NaN over the second product's water)
@@ -1015,8 +1123,26 @@ def analysis_initial_state(cfg, transform, frame=None, statics=None,
         statics_metadata[SURFACE_STATICS_METADATA_KEY]["ice_category"],
     )
 
+    # The open-water skin is a water temperature the ocean holds for the
+    # run (open_water_skin_temperature): the analysis's own water points,
+    # never a land skin its stencil mixed in.  The columns are the runtime's own
+    # open-water test on the planes in the state's precision.
+    from .statics import water_columns
+
+    surface_dtype = np.dtype(b.float_dtype)
+    open_water_skin, open_water_skin_record = open_water_skin_temperature(
+        frame.fields["skin_temperature"].values,
+        frame.fields["land_fraction"].values,
+        regrid,
+        water_columns(
+            np.asarray(land_fraction, dtype=surface_dtype),
+            sea_ice_fraction=np.asarray(seeded.sea_ice_fraction, dtype=surface_dtype),
+        ),
+        latitude_deg=grid.latitude_deg, longitude_deg=grid.longitude_deg,
+    )
+
     surface = SurfaceState(
-        temperature_k=b.asarray(skin_temperature, dtype=b.float_dtype),
+        temperature_k=b.asarray(open_water_skin, dtype=b.float_dtype),
         water_kg_m2=b.xp.full(
             grid.shape, float(cfg.surface_water_kg_m2), dtype=b.float_dtype
         ),
@@ -1101,6 +1227,7 @@ def analysis_initial_state(cfg, transform, frame=None, statics=None,
         "decode": _json_safe(decode_receipts) or None,
         "fill": _json_safe(getattr(frame, "fill", None)),
         "soil_water_floor": _json_safe(soil_water_floor),
+        "open_water_skin": _json_safe(open_water_skin_record),
     }
     return (
         ArwenGlobalState(
@@ -1114,6 +1241,8 @@ def analysis_initial_state(cfg, transform, frame=None, statics=None,
 
 __all__ = [
     "COASTAL_FILL_PASSES",
+    "OPEN_WATER_SKIN_SEARCH_PASSES",
+    "open_water_skin_temperature",
     "FILL_GROUPS",
     "CompositeFrame",
     "analysis_initial_state",

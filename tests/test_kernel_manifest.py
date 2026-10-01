@@ -54,6 +54,15 @@ SITE_FILES = (
     "woof/core/noahmp_thermal_gpu.py",
     "woof/core/noahmp_vegeflux_gpu.py",
     "woof/core/rrtmg_sw.py",
+    # The fused forecast units the 2026-09-30 speed lanes added: New
+    # Tiedtke's fused column (b11fc66ab), Noah's forcing prologue
+    # (3e23476ce) and SFCDIAGS (9aea8904f), the cumulus clock (da604fe01,
+    # two units) and the tendency coupling (4c1cab3c0).
+    "woof/core/ntiedtke_fused.py",
+    "woof/core/noah_forcing.py",
+    "woof/core/noah_sfcdiags.py",
+    "woof/core/cumulus_clock.py",
+    "woof/core/tendency_coupling.py",
 )
 
 #: Two cached loaders, nest interpolation, and the one Noah-MP compile
@@ -61,14 +70,20 @@ SITE_FILES = (
 #: factories that used to be sites each delegate to it.  ``rrtmg_sw.py`` is
 #: NOT among them -- it compiles through :data:`EXPECTED_NVRTC_SITE_COUNT`'s
 #: route instead, see the module docstring -- but it stays in
-#: :data:`SITE_FILES` because it still records.
-EXPECTED_SITE_COUNT = 4
+#: :data:`SITE_FILES` because it still records.  Plus the six fused units
+#: of the speed lanes' five files (the cumulus clock compiles two).
+EXPECTED_SITE_COUNT = 10
 
 #: ``cp.RawModule`` constructors under ``gpuwm/`` that are NOT manifest
 #: sites, each with the reason.  Closed and literal: a new constructor
 #: anywhere else fails the census below until it is either made a site or
 #: explained here.
 RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
+    "woof/core/urban_bem.py": (
+        "the BEP+BEM composed unit's own compile site (sf_urban_physics = 3, "
+        "-fmad=false --ftz=false); it records through record_module in the "
+        "same function and its frame is priced as urban_bem_composed in "
+        "woof/core/preflight.py"),
     "woof/core/p3_device.py": (
         "the P3 composed unit's own compile site; it records through "
         "record_module in the same function and its frame is re-audited on a "
@@ -86,6 +101,11 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "per argument count at call time in the shape of the MYNN check above; "
         "it reads the arrays and sets flags, computes no forecast field and is "
         "not a translation unit the manifest freezes"),
+    "woof/core/ruc_tier.py": (
+        "the fused RUC unit's own compile site (ruc.cu read as device "
+        "functions plus the fused sfctmp and driver sources), one module per "
+        "soil geometry; it records through record_module in the same function "
+        "under its own key, as the P3 composed unit above does"),
     "woof/da/fixed_order_gemm.py": (
         "the LETKF analysis's fixed-order batched products, one RawKernel per "
         "float dtype compiled on first use; they run in the data-assimilation "

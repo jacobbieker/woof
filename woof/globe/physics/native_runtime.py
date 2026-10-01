@@ -15,13 +15,14 @@ from ..constants import (
     DRY_AIR_GAS_CONSTANT,
     EARTH_RADIUS_M,
     GRAVITY_M_S2,
+    LATENT_HEAT_VAPORIZATION,
     NUMBER_MOMENTS,
     STEFAN_BOLTZMANN,
     WATER_SPECIES,
 )
 from ..statics import (
     SURFACE_STATICS_METADATA_KEY, CategoryConvention, frozen_water_columns,
-    xland_plane,
+    lake_columns, xland_plane,
 )
 from ..water import SOIL_LAYER_THICKNESS_M
 from . import frozen_surface
@@ -90,12 +91,18 @@ NATIVE_SURFACE_DIAGNOSTICS_SOURCE = "native-surface-layer-water+sfcdiags-land"
 NOAH_HELD_FLUX_FIELDS = ("hfx", "qfx", "qsfc")
 
 
+#: The floor of an inland lake's skin under its energy budget
+#: (NativePhysicsRuntime._lake_surface_step): freshwater freezing.
+LAKE_FREEZING_K = 273.15
+
+
 class _BandCache:
     """What the runtime builds once from the rows it is handed and keeps
     for the run: one of these per band (:attr:`NativePhysicsRuntime._bands`)."""
 
     __slots__ = ("radiation", "frozen", "frozen_count", "partial",
-                 "partial_count", "dx_column", "statics_checked")
+                 "partial_count", "lake", "lake_count", "dx_column",
+                 "statics_checked")
 
     def __init__(self) -> None:
         self.radiation = None
@@ -103,6 +110,8 @@ class _BandCache:
         self.frozen_count = None
         self.partial = None
         self.partial_count = None
+        self.lake = None
+        self.lake_count = None
         self.dx_column = None
         self.statics_checked = False
 
@@ -201,6 +210,22 @@ class NativePhysicsRuntime:
     @_partial_count.setter
     def _partial_count(self, value) -> None:
         self._band.partial_count = value
+
+    @property
+    def _lake(self):
+        return self._band.lake
+
+    @_lake.setter
+    def _lake(self, value) -> None:
+        self._band.lake = value
+
+    @property
+    def _lake_count(self):
+        return self._band.lake_count
+
+    @_lake_count.setter
+    def _lake_count(self, value) -> None:
+        self._band.lake_count = value
 
     @property
     def _dx_column(self):
@@ -419,6 +444,18 @@ class NativePhysicsRuntime:
             self._partial = self._frozen & frozen_water_columns(fraction, xp) & (fraction < xp.float32(1.0))
             self._partial_count = int(xp.count_nonzero(self._partial))
         return self._frozen
+
+    def _lake_columns(self, batch):
+        """The open-water columns that are inland lakes (statics.
+        lake_columns on the surface state's planes), fixed for the run."""
+        if self._lake is None:
+            xp = batch.xp
+            self._lake = xp.ascontiguousarray(lake_columns(
+                batch.surface.land_fraction, batch.surface.lake_fraction, xp,
+                sea_ice_fraction=batch.surface.sea_ice_fraction,
+            ))
+            self._lake_count = int(xp.count_nonzero(self._lake))
+        return self._lake
 
     def _ice_moisture_availability(self, persistent) -> float:
         """LANDUSE.TBL's SLMO for the ice class of the state's convention
@@ -954,6 +991,7 @@ class NativePhysicsRuntime:
         persistent.arrays["land_snowbl"].fill(0.0)
         persistent.arrays["land_graupelbl"].fill(0.0)
         self._frozen_surface_step(batch, persistent, elapsed)
+        self._lake_surface_step(batch, persistent, elapsed)
         persistent.metadata["last_land_bucket"] = bucket
         persistent.metadata["last_land_time_s"] = float(batch.time_s)
         return True
@@ -1243,6 +1281,70 @@ class NativePhysicsRuntime:
             f[name][...] = xp.where(frozen, qsat, f[name])
         persistent.metadata["frozen_surface_calls"] = int(
             persistent.metadata.get("frozen_surface_calls", 0)
+        ) + 1
+
+    def _lake_surface_step(self, batch, persistent, elapsed) -> None:
+        """The skin of an inland lake follows its own surface energy budget.
+
+        Open water has no ocean or lake model: Noah skips it and the surface
+        layer reads its skin as the water temperature.  On the ocean the
+        skin is held at the analysis SST for the run, the usual
+        medium-range choice for a sea surface the analysis observes.  An
+        inland lake (statics.lake_columns, WRF's LAKEMASK rule) is not that
+        surface: the analysis's lake temperature is weakly observed, and
+        held, a lake the analysis carries too warm evaporates at that rate
+        for the whole forecast.  GDAS carried Lake Tana (11.9 N, 37.5 E) at
+        304.8 to 305.1 K at all eight cycles of 2026-09-29 and 2026-09-30,
+        9.2 K above the 2 m air over it; held for a 240 h T255 forecast,
+        the column evaporated about 22 kg/m2 a day (published estimates of
+        the lake's open-water evaporation are about 4 to 5 mm a day) and
+        drew its surface reservoir toward the refusal "native physics
+        water closure exceeds the explicit surface reservoir", about 23
+        days out.
+
+        So a lake column integrates its skin on the land cadence from the
+        energy it exchanges, with the heat capacity the state already
+        carries for water (4e7 J/m2/K, a 10 m mixed layer, blended with the
+        column's land share as everywhere else): the shortwave the water
+        absorbs (``swdown`` and the surface albedo the radiation saw, as
+        Noah and the frozen-surface step take it), the downward longwave
+        it absorbs less its own emission, and this call's surface-layer
+        sensible and latent fluxes (``hfx``, and ``qfx`` times the latent
+        heat of vaporization: the evaporation the PBL books against the
+        surface reservoir).  The step is explicit: the skin's flux
+        sensitivity is of order 100 W/m2/K, which over a 2e7 J/m2/K
+        capacity and a 300 s land interval moves the skin by 0.0015 of its
+        own departure per step.  A lake is not cooled below freshwater
+        freezing (273.15 K) by this step: there is no lake ice here, and a
+        lake the analysis covers with ice is a frozen column, not this
+        one.  Nothing else changes: the surface layer reads the new skin
+        as the lake's water temperature on the next call, and the ocean,
+        land and frozen columns are untouched.
+        """
+        lake = self._lake_columns(batch)
+        if not self._lake_count:
+            return
+        xp = batch.xp
+        f = persistent.arrays
+        surface = batch.surface
+        skin = xp.asarray(surface.temperature_k, dtype=xp.float32)
+        emissivity = xp.asarray(surface.emissivity, dtype=xp.float32)
+        albedo = xp.asarray(surface.albedo, dtype=xp.float32)
+        net = (
+            f["swdown"] * (xp.float32(1.0) - albedo)
+            + emissivity * f["glw"]
+            - emissivity * xp.float32(STEFAN_BOLTZMANN) * skin ** 4
+            - f["hfx"]
+            - xp.float32(LATENT_HEAT_VAPORIZATION) * f["qfx"]
+        )
+        capacity = xp.asarray(surface.heat_capacity_j_m2_k, dtype=xp.float32)
+        stepped = skin + xp.float32(elapsed) * net / capacity
+        stepped = xp.maximum(
+            stepped, xp.minimum(skin, xp.float32(LAKE_FREEZING_K))
+        )
+        surface.temperature_k[...] = xp.where(lake, stepped, surface.temperature_k)
+        persistent.metadata["lake_surface_calls"] = int(
+            persistent.metadata.get("lake_surface_calls", 0)
         ) + 1
 
     def _pbl_step(self, batch, persistent):
@@ -1549,10 +1651,15 @@ class NativePhysicsRuntime:
         removed, MEASURED in the model's metric exactly as the Morrison
         and YSU bookings are (audit 2026-09-01 NB-3), so the suite's
         closure sees the atmosphere and the reservoir move together.  The
-        scheme's RAINCV (kg/m2 this call) feeds the accumulators: the
-        physics-state RAINC the render tape exports and the land bucket
-        Noah is forced with (WRF RAINBL = RAINCV + RAINNCV, module_
-        surface_driver.F:1566).  RAINNC stays the microphysics
+        rain that reaches the surface is ONE number: the scheme's RAINCV
+        (kg/m2 this call) up to the water the call removed.  It feeds both
+        the physics-state RAINC the render tape exports and the land
+        bucket Noah is forced with (WRF RAINBL = RAINCV + RAINNCV,
+        module_surface_driver.F:1566), so a scheme that reports more rain
+        than its rates take out of the column neither hands the land water
+        the atmosphere did not lose nor draws it on the maps; what it
+        reported beyond that is a diagnostic of the call
+        (``cumulus_rain_withheld_kg_m2``).  RAINNC stays the microphysics
         accumulators alone, WRF's own split.  Momentum rates, when the
         scheme carries them, integrate into u and v like the others.
         """
@@ -1608,9 +1715,11 @@ class NativePhysicsRuntime:
         batch.arrays["temperature"] = xp.ascontiguousarray(
             batch.arrays["theta"] * batch.arrays["exner"]
         )
-        self._credit_reservoir(
-            batch, column_before - batch.atmospheric_water_kg_m2()
-        )
+        # What the scheme's applied rates took out of the column, in the
+        # model's metric: the reservoir is credited with it, and it is also
+        # the most rain the land surface can receive from this call (below).
+        removed = column_before - batch.atmospheric_water_kg_m2()
+        self._credit_reservoir(batch, removed)
         momentum = {
             name: getattr(result, name, None) for name, _ in CUMULUS_MOMENTUM_FIELDS
         }
@@ -1640,12 +1749,45 @@ class NativePhysicsRuntime:
                     f"cumulus rainc shape {tuple(rainc.shape)} != {batch.surface_shape}"
                 )
             increment = xp.maximum(xp.asarray(rainc, dtype=xp.float32), 0.0)
-            f[CONVECTIVE_RAIN_ACCUMULATOR] += increment
-            f["land_rainbl"] += increment
+            # The rain that reached the surface is the scheme's rain only up
+            # to the water its rates removed, and it is ONE number for the
+            # land bucket and for RAINC.  Grell-Freitas's deep arm reports
+            # more rain than its own tendencies take out of the column
+            # (WRF v4.6.1's GFDRV does too: 1.27 times over the 84 raining
+            # columns of the oracle fixture), and on the T255 GDAS
+            # 2026-09-30 12Z forecast the reported rain was 1.77 times the
+            # removed water over the globe and 2.28 times over land in the
+            # first day.  Forced with the reported number, Noah's stores
+            # gained water that never left the atmosphere and the surface
+            # reservoir paid for it (a Texas column lost 143 kg/m2 of
+            # reservoir in one 72 h event).  Drawn with it, the maps showed
+            # convective rain that never left the air (660 kg/m2 against
+            # 288 removed on a Colombian column over 240 h), and the water
+            # budget's E = net + P read the same excess as evaporation.
+            # What the scheme reported beyond the removed water is kept as
+            # this call's diagnostic, never as rain.
+            landed = xp.minimum(
+                increment,
+                xp.maximum(xp.asarray(removed, dtype=xp.float32), xp.float32(0.0)),
+            )
+            f[CONVECTIVE_RAIN_ACCUMULATOR] += landed
+            f["land_rainbl"] += landed
+            rain_books = {
+                "rain_reported_kg_m2": float(xp.mean(increment, dtype=xp.float64)),
+                "rain_withheld_kg_m2": float(xp.mean(increment - landed, dtype=xp.float64)),
+                "water_removed_kg_m2": float(xp.mean(removed, dtype=xp.float64)),
+            }
+        else:
+            rain_books = {}
         persistent.metadata["cumulus_updates"] = int(
             persistent.metadata["cumulus_updates"]
         ) + 1
-        self._cumulus_diagnostics = dict(getattr(result, "diagnostics", None) or {})
+        # The scheme's own grid-mean readings, and the call's rain books
+        # (flat column means of this batch, kg/m2 this call; merged across
+        # bands by column count as every cumulus_ reading is).
+        self._cumulus_diagnostics = {
+            **dict(getattr(result, "diagnostics", None) or {}), **rain_books,
+        }
         self._cumulus_column_diagnostics = dict(
             getattr(self._cumulus, "last_column_diagnostics", None) or {}
         )
@@ -1775,6 +1917,9 @@ class NativePhysicsRuntime:
             # Sea-ice and land-ice columns whose skin the frozen-surface
             # step integrates in place of the unported WRF schemes.
             "frozen_surface_columns": int(self._frozen_count or 0),
+            # Inland lake columns whose skin follows their own surface
+            # energy budget (_lake_surface_step).
+            "lake_surface_columns": int(self._lake_count or 0),
             # The scheme's own grid-mean readings of this call (arwen-
             # massflux-v1: branch fractions, base mass flux, rain, CAPE);
             # the GF seam carries none.

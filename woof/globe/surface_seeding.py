@@ -344,8 +344,8 @@ def seed_surface_from_analysis(frame, regrid, *, target_land_fraction) -> Seeded
             "columns": int(cover.size),
         },
         "named_but_seeded_elsewhere": {
-            "skin_temperature": "analysis skin temperature on every column; on open water this is the analysis SST, held for the run (no ocean model)",
-            "sea_surface_temperature": "the analysis skin temperature on open-water columns",
+            "skin_temperature": "analysis skin temperature on land and sea-ice columns; on open water the analysis skin over the analysis's own water points only (analysis_initial.open_water_skin_temperature), held for the run on the ocean (no ocean model); an inland lake's skin then follows its own surface energy budget (native_runtime._lake_surface_step)",
+            "sea_surface_temperature": "the analysis skin temperature over the analysis's own water points, on open-water columns",
             "soil_temperature": "analysis soil temperature, four layers, water columns filled from the skin in source space",
             "volumetric_soil_moisture": "analysis volumetric soil moisture, four layers, water columns filled at 0.25 in source space",
             "land_fraction": "static water fraction (real statics) or the analysis land mask (synthetic)",

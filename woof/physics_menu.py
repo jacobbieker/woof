@@ -537,6 +537,7 @@ def profile_facts(profile: str) -> dict[str, Any]:
         "cumulus_scheme_id": int(switches.get("cu_physics", 0)),
         "pbl_scheme_id": int(switches.get("bl_pbl_physics", 0)),
         "land_surface_scheme_id": int(switches.get("sf_surface_physics", 0)),
+        "urban_scheme_id": int(switches.get("sf_urban_physics", 0)),
         "longwave_scheme_id": longwave,
         "shortwave_scheme_id": shortwave,
         "day_only": day_only(profile),

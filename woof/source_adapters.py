@@ -481,6 +481,13 @@ _ERA5_ARCO_ARCHIVE = ArchiveWindow(
     bounds_url=("https://storage.googleapis.com/gcp-public-data-arco-era5/ar/"
                 "full_37-1h-0p25deg-chunk-1.zarr-v3/.zattrs"),
     bounds_stop_keys=("valid_time_stop_era5t", "valid_time_stop"),
+    # MEASURED 2026-09-30: the store's valid_time_stop_era5t read
+    # 2026-09-23 at 01Z and 2026-09-24 at 04Z, so its last hour trailed
+    # real time by 125 to 146 h across one daily refresh, a day behind the
+    # CDS's five.  Seven days also covers one missed refresh.  Used only
+    # when the bounds document above cannot be read; when it can, its
+    # own last hour is the answer.
+    publication_lag_hours=168.0,
 )
 
 _ERA5_ARCHIVE = ArchiveWindow(
@@ -659,11 +666,10 @@ _ADAPTERS = (
             # table states a horizon in; held in step with
             # woof.hrrr_forecast's constants by a test.
             horizons=(((0, 6, 12, 18), 48), (None, 18)),
-            # Measured on the public mirror for every cycle of
-            # 2026-09-24..26: a synoptic run's f048 lands 1 h 47 min to
-            # 1 h 49 min after its start, an off-synoptic run's f018
-            # 1 h 25 min to 1 h 26 min after.  Three hours is the fetch
-            # route table's measured lag for hrrr-prs.
+            # The measured lead-by-lead times are the hrrr row of the
+            # route table's legacy_posting; this is past that row's
+            # latest posting seen of every cycle's last lead
+            # (tests/test_source_posting_rows.py holds it there).
             usual_delay_hours=3.0,
             basis="HRRR initializes every hour; publication is "
                   "decided by the per-object completeness probe, "
@@ -1248,8 +1254,9 @@ _ADAPTERS = (
             "ladder are admitted-and-ignored, and specific humidity is "
             "not published there), the surface/2 m/10 m fields and the "
             "two-layer ordinal soil column; the land mask and surface "
-            "geopotential ride the 0-hour file alone and are declared "
-            "cycle-invariant.  THREE limits a reader must know.  (1) The "
+            "geopotential ride the 0-hour file alone, so every lead takes "
+            "them from its cycle's 0-hour file, which a later start "
+            "fetches too.  THREE limits a reader must know.  (1) The "
             "soil column reaches 0.28 m: Noah's four layers are WRF's own "
             "shallow-column interpolation bracketed by the skin "
             "temperature at 0 m and the static deep-soil temperature at "

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .pins import PINS_HASH
+from .pins import ACCEPTED_PINS_HASHES, PINS_HASH
 from .transform import SphericalHarmonicTransform
 from .vector import VorticityDivergenceOperator
 
@@ -138,7 +138,7 @@ class CompressedWindField:
 def _validate_header(header: dict, schema: str, truncation: int) -> None:
     if header.get("schema") != schema:
         raise ValueError(f"compressed schema mismatch: {header.get('schema')!r}")
-    if header.get("pins_hash") != PINS_HASH:
+    if header.get("pins_hash") not in ACCEPTED_PINS_HASHES:
         raise ValueError("compressed arithmetic pins do not match this build")
     if int(header.get("truncation", -1)) != truncation:
         raise ValueError("compressed header and payload truncation disagree")

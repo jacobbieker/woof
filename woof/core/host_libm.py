@@ -10,9 +10,13 @@ code computes through the same C library, cannot take them.  These take
 :mod:`math` one element at a time, which is the C library on every host and
 the answer NumPy gives wherever its vector loops are not in use.
 
-``sin``, ``cos``, ``arctan2``, ``sqrt`` and ``x ** 2`` are not here: NumPy
-gives the C library's (or the correctly rounded) answer for them with and
-without its AVX-512 loops.
+``sin``, ``cos``, ``sqrt`` and ``x ** 2`` are not here: NumPy gives the C
+library's (or the correctly rounded) answer for them with and without its
+AVX-512 loops.  ``arctan2`` is: NumPy 2.5.3's AVX-512 float64 loop differs
+from the C library's ``atan2`` on 32,883 of 400,000 random argument pairs
+and on 6,096 of 400,000 Lambert-inverse-shaped ones (WSL Ubuntu 24.04,
+glibc 2.39), and on none with ``NPY_DISABLE_CPU_FEATURES="X86_V4
+AVX512_ICL"``.
 
 These cost a Python call per element.  They are for setup-scale arrays
 (projection transforms, coefficient ladders), not per-step fields.
@@ -24,8 +28,8 @@ import math
 
 import numpy as np
 
-__all__ = ["exp", "log", "log10", "tan", "arctan", "arcsin", "arccos",
-           "power"]
+__all__ = ["exp", "log", "log10", "tan", "arctan", "arctan2", "arcsin",
+           "arccos", "power"]
 
 
 def _unary(function, values):
@@ -92,6 +96,21 @@ def tan(values) -> np.ndarray:
 
 def arctan(values) -> np.ndarray:
     return _unary(math.atan, values)
+
+
+def arctan2(y, x) -> np.ndarray:
+    """``atan2(y, x)`` through the C library, over the broadcast operands.
+
+    :func:`math.atan2` raises for no argument, and its answers for zeros,
+    infinities and NaNs are the C library's, which are NumPy's.
+    """
+    a, b = np.broadcast_arrays(np.asarray(y, dtype=np.float64),
+                               np.asarray(x, dtype=np.float64))
+    flat = np.fromiter(
+        (math.atan2(float(u), float(v)) for u, v in zip(a.reshape(-1),
+                                                        b.reshape(-1))),
+        dtype=np.float64, count=a.size)
+    return flat.reshape(a.shape)
 
 
 def arcsin(values) -> np.ndarray:

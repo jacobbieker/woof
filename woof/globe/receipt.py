@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from .constants import RECEIPT_SCHEMA
-from .pins import KNOWN_PINS_HASHES, PINS_HASH_BY_SCHEME
+from .pins import ACCEPTED_PINS_HASHES, PINS_HASH_BY_SCHEME
 
 
 def canonical(value: object) -> bytes:
@@ -18,7 +18,7 @@ def canonical(value: object) -> bytes:
 
 #: Distributions whose version changes a run's numbers, in the order a reader
 #: cares about them.  A name that is not installed is simply absent.
-RECORDED_LIBRARIES = ("woof global", "woof", "recast-woof-data", "numpy", "scipy",
+RECORDED_LIBRARIES = ("recast-woof", "recast-woof-data", "numpy", "scipy",
                       "cupy-cuda13x", "cupy-cuda12x", "cupy", "netCDF4")
 
 
@@ -153,7 +153,8 @@ def check_receipt(path: str | Path) -> dict[str, object]:
     # own pin (the external proxy's is the pin of every receipt written
     # before the vertical-mode scheme existed), so any of those pins is
     # this build's.
-    if payload.get("pins_hash") not in KNOWN_PINS_HASHES:
+    # this build's pins and the pins WOOF 1.0.0 wrote for the same arithmetics
+    if payload.get("pins_hash") not in ACCEPTED_PINS_HASHES:
         raise ValueError(
             "WOOF global receipt arithmetic pins mismatch: receipt "
             f"{payload.get('pins_hash')!r} is not a pin of this build "

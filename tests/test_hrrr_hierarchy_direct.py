@@ -134,8 +134,15 @@ def test_join_highres_cache_survives_publication_and_reuses_tiles(
     monkeypatch.setattr(join, "_surface_state", lambda *a, **k: None)
     monkeypatch.setattr(join, "sealed_source_leads", lambda *a: (0, 1))
     monkeypatch.setattr(join, "load_hrrr_native_series", lambda *a, **k: (object(),))
-    monkeypatch.setattr(join, "verified_static_catalog", lambda *a:
-                        (SimpleNamespace(files=()), {"selections": {"d01": None}}))
+    handed = []
+
+    def static_catalog(*args, **kwargs):
+        # A170: the carrier builds land cover (fields "auto"), so each
+        # domain's GEOG selection reads it and the catalog is handed it.
+        handed.append(kwargs.get("static_highres"))
+        return SimpleNamespace(files=()), {"selections": {"d01": None}}
+
+    monkeypatch.setattr(join, "verified_static_catalog", static_catalog)
     monkeypatch.setattr(join, "grids_from_projection_config", lambda exp: (target.grid(),))
     monkeypatch.setattr(join, "ParentInitView", lambda **k: SimpleNamespace(**k))
     monkeypatch.setattr(join, "NestedInputCatalog", lambda **k: SimpleNamespace(**k))
@@ -212,6 +219,7 @@ def test_join_highres_cache_survives_publication_and_reuses_tiles(
         assert not transient and not missing, {"staging_references": transient,
                                               "missing_receipt_paths": missing}
         assert observed[-1] == resolved
+        assert handed[-1] is not None and handed[-1].cache_root == resolved
         assert not resolved.is_relative_to(output)
         for name in ("child-tile", "corridor-tile", "landcover"):
             assert (resolved / name).read_bytes() == b"stand-in source tile"

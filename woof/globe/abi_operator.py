@@ -602,7 +602,14 @@ def plant_perturbation(checkpoint_in: str | os.PathLike, checkpoint_out: str | o
         **kwargs,
     )
     written, _ = read_checkpoint(checkpoint_out)
-    if written["pins_hash"] != metadata["pins_hash"]:
+    from .pins import scheme_of_pins_hash
+
+    # the source may carry the v2 pin WOOF 1.0.0 wrote; the plant is written
+    # under v3, and either is the same arithmetic when their labels agree
+    if written["pins_hash"] != metadata["pins_hash"] and (
+            scheme_of_pins_hash(written["pins_hash"]) is None
+            or scheme_of_pins_hash(written["pins_hash"])
+            != scheme_of_pins_hash(metadata["pins_hash"])):
         Path(checkpoint_out).unlink(missing_ok=True)
         raise AbiOperatorError(
             f"the planted checkpoint would carry pins {written['pins_hash'][:12]} where the source "

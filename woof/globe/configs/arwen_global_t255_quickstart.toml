@@ -41,11 +41,11 @@
 #                       --area is optional request identity.  About 500 MB
 #                       for the one valid time.
 #
-#   gpuwm fetch --source gdas --cycle 2026-08-30T18 --hours 0 \
+#   woof fetch --source gdas --cycle 2026-08-30T18 --hours 0 \
 #       --mode full-file --out data/gdas-analysis
-#   gpuwm-global run "$(gpuwm-global configs --paths | grep t255_quickstart)" \
+#   woof global run "$(woof global configs --paths | grep t255_quickstart)" \
 #       --outdir out/arwen-global-24h
-#   gpuwm-global render out/arwen-global-24h \
+#   woof global render out/arwen-global-24h \
 #       --outdir out/arwen-global-png --start-date 2026-08-30_18:00:00
 #
 # TO MOVE TO A CURRENT CYCLE, exactly two spellings travel together: the

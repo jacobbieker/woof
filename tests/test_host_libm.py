@@ -54,6 +54,36 @@ def test_power_is_pow_element_for_element_and_broadcasts():
     assert got[3, 7] == math.pow(float(base[3, 7]), float(exponents[7]))
 
 
+def test_arctan2_is_atan2_element_for_element_and_broadcasts():
+    """The Lambert inverse's longitude takes ``arctan2``, whose NumPy 2.5
+    AVX-512 float64 loop differs from the C library's atan2 on about 8% of
+    random argument pairs, so it is held to :func:`math.atan2` here, on
+    ordinary pairs, on Lambert-inverse-shaped offsets and on the signed
+    zeros, infinities and NaNs."""
+    y = _RNG.uniform(-5.0, 5.0, 2000).reshape(40, 50)
+    x = _RNG.uniform(-3.0, 3.0, 2000).reshape(40, 50)
+    got = host_libm.arctan2(y, x)
+    assert got.shape == (40, 50) and got.dtype == np.float64
+    want = np.array([math.atan2(float(a), float(b))
+                     for a, b in zip(y.reshape(-1), x.reshape(-1))])
+    assert np.array_equal(got.reshape(-1).view(np.uint64),
+                          want.view(np.uint64))
+    offsets = _RNG.uniform(-600.0, 600.0, 2000)
+    got = host_libm.arctan2(offsets, 2400.0)
+    want = np.array([math.atan2(float(a), 2400.0) for a in offsets])
+    assert np.array_equal(got.view(np.uint64), want.view(np.uint64))
+    specials = np.array([0.0, -0.0, 1.0, -1.0, np.inf, -np.inf, np.nan])
+    a, b = np.meshgrid(specials, specials)
+    ours = host_libm.arctan2(a, b).reshape(-1)
+    theirs = np.array([math.atan2(float(u), float(v))
+                       for u, v in zip(a.reshape(-1), b.reshape(-1))])
+    number = ~np.isnan(theirs)
+    assert np.array_equal(np.isnan(ours), ~number)
+    assert np.array_equal(ours[number].view(np.uint64),
+                          theirs[number].view(np.uint64))
+    assert host_libm.arctan2(1.0, 2.0).shape == ()
+
+
 def test_a_scalar_argument_gives_a_zero_dimensional_answer():
     assert host_libm.tan(0.3).shape == ()
     assert float(host_libm.tan(0.3)) == math.tan(0.3)

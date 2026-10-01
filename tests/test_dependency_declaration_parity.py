@@ -434,6 +434,12 @@ def _top_level_imports(path: Path):
 _TEST_TREE_IMPORT_SITES: dict[str, tuple[str, ...]] = {
     "tools/recapture_card_pins.py": ("_card_pins",),
     "tools/recapture_phase2_pin.py": ("_phase2_pin",),
+    # The legacy RRTMG speed lane's node-side prep check (668fa4c56): it
+    # drives tests/test_rrtmg_legacy_prep_device.py through pytest, and its
+    # --timing arm imports that suite's synthetic-input and bit-compare
+    # helpers so the timing runs on the inputs the suite certifies.
+    # Checkout-only by the same construction as the two above.
+    "tools/rrtmg_prep_device_check.py": ("test_rrtmg_legacy_prep_device",),
 }
 
 

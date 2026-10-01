@@ -23,7 +23,7 @@ from ..constants import (
     REGIONAL_INSTALL_SCHEMA,
     WATER_SPECIES,
 )
-from ..pins import PINS_HASH
+from ..pins import PINS_HASH, accepted_pins_hashes
 from .artifact import (
     canonical,
     file_hash,
@@ -79,7 +79,7 @@ def _write_receipt(path: str | Path, payload: dict[str, object]) -> Path:
 
 def read_runtime_receipt(path: str | Path, schema: str) -> dict[str, object]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if payload.get("schema") != schema or payload.get("pins_hash") != PINS_HASH:
+    if payload.get("schema") != schema or payload.get("pins_hash") not in accepted_pins_hashes():
         raise ValueError("regional runtime receipt schema/pins mismatch")
     self_hash = payload.pop("self_sha256", None)
     if self_hash != hashlib.sha256(canonical(payload)).hexdigest():

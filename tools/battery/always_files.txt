@@ -241,3 +241,14 @@ tests/test_doc_anchors.py
 # Measured three times: 5e914cb3b, a 2.8.0 dry cut, and 3aacaed10.  The cut
 # battery runs it too (tools/release/cut/battery.py TREE_GATES).
 tests/test_research_catalog.py
+
+# A146's source scan: no float division by a compile-time constant outside
+# __fdiv_rn in any -ftz=true kernel source or inline Python kernel string.
+# NVRTC compiles such a division as a multiply by the rounded reciprocal on
+# every Blackwell card, one ULP off for up to 65 percent of inputs.  A .cu
+# edit has no import edge for fastfix to follow, and this file imports no
+# CuPy; its first version sat in a module that imported CuPy's NVRTC, so it
+# collected 0 of 5 under GPUWM_NO_LOCAL_GPU on every CPU leg (review of
+# 4810400f1).
+# The compiler census half is on the GPU shard (SHARD 1r).
+tests/test_literal_division_source_gate.py
