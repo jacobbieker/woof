@@ -22,6 +22,26 @@ model.
 Linux on x86_64, Python 3.11 or newer, an NVIDIA GPU and driver. WOOF has
 no Windows build of the native tools yet.
 
+With Pixi (Python and the Rust/build toolchain managed in one env):
+
+```bash
+pixi install
+pixi run setup
+pixi run doctor
+# or: pixi run doctor-explain
+```
+
+The default Pixi environment installs this checkout in editable mode with the
+`all-cu12` extra. For a CUDA 13 setup use:
+
+```bash
+pixi install -e cuda13
+```
+
+On a source checkout, `pixi run setup` builds the native Rust tools locally.
+`woof fetch-bridges` may report that no bundle pins are present; that is normal
+outside a published wheel install.
+
 ```bash
 python3 -m venv ~/woof-env
 ~/woof-env/bin/python -m pip install 'recast-woof[all-cu12]'
