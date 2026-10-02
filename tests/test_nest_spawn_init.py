@@ -15,6 +15,7 @@ mass at -g/alpha per metre, a valley must RAISE it).
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
@@ -185,7 +186,12 @@ def test_a_spawn_the_card_cannot_hold_refuses_before_any_allocation(
     monkeypatch.setattr(spawn_init, "parent_only_init", _reached)
     child_dc = micro["exp"].domains[1]
     expected = _expected_spawn_parts(child_dc, micro["exp"].root)
-    need = sum(expected.values())
+    # A163 moved this figure: the spawn check carries the forecast's
+    # measured pool margin over the itemized parts, as the startup
+    # envelope does, instead of the bare itemized sum.
+    from woof.core.preflight import forecast_pool_headroom
+    headroom = forecast_pool_headroom(dc.run for dc in micro["exp"].domains)
+    need = math.ceil(headroom * sum(expected.values()))
     small = need // 2
     with pytest.raises(SpawnInitRefusal) as caught:
         spawn_child_from_parent(child_dc, micro["parent"], array_module=np,

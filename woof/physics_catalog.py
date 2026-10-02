@@ -66,6 +66,7 @@ COUPLED_GROUPS = (
     ("microphysics", "radiation"),
     ("cumulus", "pbl"),
     ("land_surface", "radiation"),
+    ("urban", "land_surface", "pbl"),
 )
 
 NEIGHBOUR_LIMIT = 5
@@ -138,6 +139,11 @@ def _run_default(key: str) -> Any:
     from woof.config import RunConfig
 
     return next(item.default for item in fields(RunConfig) if item.name == key)
+
+
+#: The urban canopy keys (woof/config.py), which a mix leaves out of a file
+#: that never stated them while urban physics stays at its default, off.
+_URBAN_RUN_KEYS = ("sf_urban_physics", "use_wudapt_lcz", "num_urban_hi")
 
 
 #: The switches a nest running no cumulus keeps when a mix is written
@@ -831,6 +837,13 @@ def apply_to_experiment(text: str, request: Mapping[str, Any], *, load: bool = T
     # instead of the mix (radt 0, radiation on every model step).
     in_shared = {key for key in full if key in shared or not tables
                  or any(reads_shared(index, table, key) for index, table in enumerate(tables))}
+    # A urban key the file never states, at the engine's own urban-off
+    # default, stays out: every grid already runs that value, and writing
+    # sf_urban_physics = 0 into a file that never named urban physics made
+    # every mix touch a component it did not choose.
+    in_shared -= {key for key in _URBAN_RUN_KEYS
+                  if key not in shared and not any(key in table for table in tables)
+                  and full.get(key) == _run_default(key)}
     # A quiet nest that states no cu_physics would run the scheme [shared]
     # now carries, so it is written 0 in its own table.
     pins = {index: {"cu_physics": 0} for index in quiet_nests

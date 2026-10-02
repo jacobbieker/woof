@@ -102,12 +102,12 @@ def arithmetic_label(semi_implicit_scheme: str, integrator: str = DEFAULT_INTEGR
     return f"{semi_implicit_scheme}/{family}"
 
 _PIN_DOCUMENT_TEMPLATE = {
-    "schema": "gpuwm.arwen-global-pins/v2",
+    "schema": "woof.global-pins/v3",
     "level3_parent_pins_sha256": LEVEL3_PINS_HASH,
     "level4_parent_pins_sha256": LEVEL4_PINS_HASH,
     "relationship": (
         "additive global research model and one-way parent source; ordinary "
-        "regional Arwen numerics remain unchanged until an explicit install/"
+        "regional WOOF numerics remain unchanged until an explicit install/"
         "attach call consumes validated artifacts"
     ),
     "state": [
@@ -184,7 +184,7 @@ _PIN_DOCUMENT_TEMPLATE = {
         "adjustment-saturation-warm-rain-mixed-phase-fallout-v1"
     ),
     "native_physics": {
-        "adapter": "arwen-cuda-column-suite-v1",
+        "adapter": "woof-cuda-column-suite-v1",
         "order": ["rrtmgp", "sfclay", "noah", "ysu", "morrison"],
         "vertical_boundary": "global-top-to-surface-to-native-bottom-to-top-fp32-v1",
         "transaction": "copy-run-validate-return-no-caller-mutation-v1",
@@ -269,14 +269,14 @@ _PIN_DOCUMENT_TEMPLATE = {
         "geopotential": "target-terrain-hydrostatic-reintegration-v1",
         "vertical_velocity": "interpolated-parent-w-zero-boundary-flux-v1",
         "dry_mass": "sum-dp-over-one-plus-total-water-v1",
-        "coupled_units": "existing-Arwen-WRF-u-v-theta-phi-mu-qv-v1",
+        "coupled_units": "existing-WOOF-WRF-u-v-theta-phi-mu-qv-v1",
         "boundary_order": "west-south-storage-east-north-outermost-first-v1",
         "attachment": "existing-eager-or-streaming-LateralBoundaries-only-v1",
     },
     "device_qualification": (
         "uninterrupted-versus-midpoint-restart-bit-exact-plus-device-identity-v1"
     ),
-    "admission": "research-only-arwen-global-v1",
+    "admission": "research-only-woof-global-v1",
 }
 
 
@@ -377,6 +377,49 @@ RETIRED_SEMILAG_PINS_HASHES = frozenset({
 INSPECTABLE_RETIRED_PINS_HASHES = (
     SPECTRAL_TRACER_ERA_PINS_HASHES | RETIRED_SEMILAG_PINS_HASHES
 )
+#: The pins WOOF 1.0.0 wrote, one per arithmetic: the v2 document, whose
+#: identity texts still named the engine's earlier name.  1.0.1 rewords
+#: those texts (the v3 document above: its schema, the relationship
+#: sentence, the adapter, coupled-units and admission ids) and moves no
+#: arithmetic, so a checkpoint, receipt, export or migration record 1.0.0
+#: wrote carries one of these and IS the arithmetic of its label.  Every
+#: reader accepts both; every writer writes v3.  Written by the assembly
+#: from the v2 document as 1.0.0 shipped it, not typed.
+WOOF_1_0_0_PINS_HASH_BY_ARITHMETIC = {
+    "external": (
+        "f536e10061499732a08bd6e32cb45160820bb55519df5c0721be4c33fbf573a0"
+    ),
+    "external/imex_ssp3": (
+        "6066104ed4e0004ea7e17a5e99fd014968ec97241a93dc112400fd074f909546"
+    ),
+    "vertical_modes": (
+        "4c4340945258b8c3e5648d0350af6e84ceb1e3d69d17c8b7d4603d361cb92aa6"
+    ),
+    "vertical_modes/imex_ssp3": (
+        "c5d0545d71c6b3fefd2aa5899e720161b0f0d38ff4522a50f66cdc44a52a992b"
+    ),
+    "vertical_modes/sl_si": (
+        "d82dc8ae4b0b5ea75aadccbf8b2ef5f8b3330d5b36670f00234f28bfe6e9d5d8"
+    ),
+}
+#: The 1.0.0 pins, as a set.
+LEGACY_PINS_HASHES = frozenset(WOOF_1_0_0_PINS_HASH_BY_ARITHMETIC.values())
+#: Every pin a checkpoint, export, receipt or migration record may carry
+#: and still be one of this build's arithmetics.
+ACCEPTED_PINS_HASHES = KNOWN_PINS_HASHES | LEGACY_PINS_HASHES
+
+
+def accepted_pins_hashes(
+    semi_implicit_scheme: str = DEFAULT_SEMI_IMPLICIT_SCHEME,
+    integrator: str = DEFAULT_INTEGRATOR,
+) -> frozenset[str]:
+    """The pins an archive of this arithmetic may carry and resume under
+    it: its v3 pin and, when 1.0.0 shipped the arithmetic, the v2 pin
+    1.0.0 wrote for it."""
+    current = pins_hash(semi_implicit_scheme, integrator)
+    legacy = WOOF_1_0_0_PINS_HASH_BY_ARITHMETIC.get(
+        arithmetic_label(semi_implicit_scheme, integrator))
+    return frozenset({current} if legacy is None else {current, legacy})
 
 
 def scheme_of_pins_hash(value: object) -> str | None:
@@ -384,6 +427,10 @@ def scheme_of_pins_hash(value: object) -> str | None:
     pin ``value`` is, or None for a pin no shipped arithmetic carries (an
     earlier or later era of the document)."""
     for label, digest in PINS_HASH_BY_ARITHMETIC.items():
+        if value == digest:
+            return label
+    # the pin WOOF 1.0.0 wrote for the same arithmetic (v2 document)
+    for label, digest in WOOF_1_0_0_PINS_HASH_BY_ARITHMETIC.items():
         if value == digest:
             return label
     return None
@@ -400,7 +447,11 @@ def pins_receipt(
 
 
 __all__ = [
+    "ACCEPTED_PINS_HASHES",
     "DEFAULT_INTEGRATOR",
+    "LEGACY_PINS_HASHES",
+    "WOOF_1_0_0_PINS_HASH_BY_ARITHMETIC",
+    "accepted_pins_hashes",
     "SEMILAG_PIN_OVERRIDES",
     "SEMILAG_SEMI_IMPLICIT_PINS",
     "DEFAULT_SEMI_IMPLICIT_SCHEME",

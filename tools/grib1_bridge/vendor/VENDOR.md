@@ -80,9 +80,10 @@ auditable local deltas required by the native GFS bridge:
   `646d954d43f9bf26e8cefe962a7cc784006bb4026d6cd9f227f41e56ad7f64e9`.
 - `src/grib2/mod.rs` re-exports that identification value object and
   `DECODE_TEMPLATES`, and `MissingValueMode` / `missing_value_mode`
-  beside the unpackers.
+  beside the unpackers, and (A135, 2026-09-30) `StoredRect` and
+  `unpack_message_stored_rect`.
   Patched-file SHA-256:
-  `f4821ab9c8fca81b96a76751bf74af3a4bc131f352806a5b09c749ec5f4ec969`.
+  `02e9e69b08e1c18d4ae8692c6bcac02c99377d26ceeaee4f68a1395ed500590b`.
 - `src/grib2/search.rs` initializes the new identity in its pre-existing
   synthetic test messages. `src/grib2/unpack.rs` additionally enforces
   Section-5/7 simple- and complex-packing cardinality, checked bit reads, a
@@ -113,9 +114,19 @@ auditable local deltas required by the native GFS bridge:
   Sections 5/7 carry no coded value decodes as an all-missing field
   (NaN) rather than inventing its reference value; a missing or
   malformed bitmap, or a nonempty payload, is still a decode error.
+  A spatially differenced complex field (Template 5.3) is read straight
+  into its dense sequence of present cells plus a mask of missing cells,
+  instead of one tagged cell per grid point that was then filtered,
+  re-tagged and scaled; the arithmetic is the same cell for cell and the
+  refusals are raised in the same order.
+  A135 (2026-09-30) adds `unpack_message_stored_rect`: a stored-order
+  rectangle of a regular grid, decoded through OpenJPEG's decode area for
+  a bitmap-free JPEG2000 message whose main header declares the reversible
+  5/3 wavelet (the only case whose area integers are the whole decode's),
+  and unpacked whole and cropped for every other message.
   Patched-file SHA-256 values are respectively
   `22254047da83fafcc06816170b7687127cb9f64bc7e82e4de2d239861c149547`
-  and `4c6355f8aafdfef3a0858af65470afe398b223eb23c924ee8ee159a15253f689`.
+  and `22bbaae777eacaaa478cc084152d8df863f1dc1dfb02186ead53926a76e1b250`.
 - `src/grib2/grid.rs` fails closed on a grid-definition template it has no
   point placement for: `grid_latlon` returns `crate::Result` and refuses
   naming the template number (and that supporting it needs the template's

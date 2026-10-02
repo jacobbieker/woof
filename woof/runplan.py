@@ -101,6 +101,7 @@ import functools
 import hashlib
 import io
 import json
+import math
 import os
 import sys
 import tempfile
@@ -157,10 +158,63 @@ EVENT_TAGS = (
     # starts beside the rest of the preparation), and later the seal.
     "prepare_head_ready", "prepare_sealed",
     # ... and the forecast waiting at a seam for an interval not yet
-    # prepared, with how long it waited.
+    # prepared, with how long it waited (``cause: preparation``).
     "boundary_wait_started", "boundary_wait_finished",
+    # Runs as the source posts: the window's posting schedule, each lead
+    # as one host first holds it and as it is fetched and verified, the
+    # run blocked on a lead (every 60 s while it lasts, so a reader
+    # tailing the stream can tell a wait from a hang), and the terminal
+    # record of a lead later than its budget, just before `failed`.
+    "posting_schedule", "lead_posted", "lead_ready",
+    "source_wait_started", "source_wait_progress", "source_wait_finished",
+    "source_behind",
     "warning", "completed", "failed",
 )
+
+#: The fields each posting and wait event carries (design A136, 3.5); a
+#: route that emits one of these tags emits every field, ``None`` where
+#: the value is not known.
+POSTING_EVENT_FIELDS = {
+    "posting_schedule": (
+        "source", "member", "cycle", "as_posted", "shape", "streams", "why",
+        "late_after_minutes", "start_needs", "expected_ready_at",
+        "expected_final_at", "leads", "schedule_path", "table_sha256"),
+    "lead_posted": (
+        "source", "cycle", "lead", "valid_time", "expected_at",
+        "first_seen_at", "minutes_after_expected", "posted_when_first_asked",
+        "endpoint"),
+    "lead_ready": (
+        "source", "cycle", "lead", "valid_time", "bytes", "fetch_seconds",
+        "marker_sha256"),
+    "source_wait_started": (
+        "phase", "source", "cycle", "lead", "valid_time", "expected_at",
+        "late_at", "waited_seconds", "model_elapsed_seconds",
+        "model_valid_time", "interval", "reason"),
+    "source_wait_progress": (
+        "phase", "source", "cycle", "lead", "valid_time", "expected_at",
+        "late_at", "waited_seconds", "model_elapsed_seconds",
+        "model_valid_time", "interval", "reason"),
+    "source_wait_finished": (
+        "phase", "source", "cycle", "lead", "waited_seconds",
+        "first_seen_at", "model_elapsed_seconds", "model_valid_time"),
+    "boundary_wait_started": (
+        "interval", "reason", "cause", "model_elapsed_seconds",
+        "model_valid_time"),
+    "boundary_wait_finished": (
+        "interval", "seconds", "cause", "model_elapsed_seconds",
+        "model_valid_time"),
+    "source_behind": (
+        "source", "cycle", "lead", "valid_time", "expected_at", "late_at",
+        "late_after_minutes", "last_answer", "model_elapsed_seconds",
+        "model_valid_time", "frames_kept", "checkpoint"),
+}
+
+
+def source_behind_fields(details: Mapping[str, Any]) -> dict[str, Any]:
+    """A ``source_behind`` event's fields from the late lead's record."""
+
+    return {key: details.get(key)
+            for key in POSTING_EVENT_FIELDS["source_behind"]}
 
 #: Every ``code`` a ``warning`` event carries, and what each one means.
 #:
@@ -291,6 +345,11 @@ WARNING_CODES = {
         "the pipeline reported a preparation phase this door has no "
         "stage for; it is attributed to the open stage rather than "
         "dropped",
+    "forecast_restarted":
+        "the hosted forecast ended one attempt and starts again in this "
+        "process (a head-bound tree whose terrain clock moved runs again "
+        "on its sealed preparation); `reason` says why, and the attempt's "
+        "outputs are kept beside the new ones",
 }
 
 #: The one code family spelled by prefix rather than in full.
@@ -474,6 +533,13 @@ DEFAULT_OUTPUT_ROOT = Path("out") / "run"
 #: does not silently land in whichever stage happens to be open: it
 #: emits a ``warning`` naming itself, so a pipeline that grows a phase
 #: is reported rather than mis-filed.
+#:
+#: The three prepared-runner phases belong to ``forecast``: every prepared
+#: chain opens that stage itself before it hands the runner over, and the
+#: runner's first acts are to check the prepared bundle and load it.  They
+#: were missing here, so every prepared ``woof go`` printed two of these
+#: warnings (A155); tests/test_runplan.py holds this table to every phase
+#: the pipeline's source emits.
 _PHASE_STAGES = {
     "quarantine-wrfout": "prepare",
     "resolve-terrain-clock": "prepare",
@@ -485,8 +551,12 @@ _PHASE_STAGES = {
     "validate-checkpoint": "initialize",
     "restore-checkpoint": "initialize",
     "restore-tree-checkpoint": "initialize",
+    "restore-nest-lifecycle": "initialize",
     "initialize-domain-writers": "initialize",
     "initial-health-gate": "initialize",
+    "validate-prepared-inputs": "forecast",
+    "restore-prepared-domain": "forecast",
+    "restore-prepared-domain-tree": "forecast",
 }
 
 
@@ -821,6 +891,13 @@ def build_plan(raw: Mapping[str, Any], *, source: str,
                 raise PlanError("An existing prepared_root consumes no fetch stage, "
                                 "so run_options.transport would pin a host nothing "
                                 "asks; remove it to use that bundle")
+            # Breakage it prevents: the bundle's cycle is the one it was
+            # prepared from, so a cycle here would be read by nothing and
+            # the run would start at another time than its plan names.
+            if resolved_options.get("cycle") is not None:
+                raise PlanError("An existing prepared_root consumes no fetch stage, "
+                                "so run_options.cycle would name a cycle nothing "
+                                "fetches; remove it to use that bundle")
             _validate_prepared_output(plan, require_empty=True)
     return plan
 
@@ -1114,6 +1191,21 @@ _RUN_OPTION_DEFAULTS: dict[str, Any] = {
     # over the config's [fetch] transport.  Absent leaves the table's own
     # value, or the source's ladder when the table names none.
     "transport": None,
+    # `woof go --whole-cycle` (false) and `--late-after-minutes`: the
+    # fetch stage's posting rule and lateness budget, winning over the
+    # config's [fetch] as_posted and late_after_minutes (DESIGN A136
+    # 3.2).  Absent leaves the table's own, or the default: as posted,
+    # with the source row's budget.
+    "as_posted": None,
+    "late_after_minutes": None,
+    # `woof go --cycle`: the cycle the run starts from, winning over the
+    # config's [fetch] cycle (or an intent's cycle) the way --transport
+    # does; `latest` is resolved once, up front, under the run's posting
+    # rule.  A config named by path is re-timed into the run directory
+    # (:func:`plan_at_cycle`).  Absent runs the config's own cycle.  A
+    # site schedule names it rather than launching `latest` (DESIGN A136
+    # 3.7).
+    "cycle": None,
 }
 
 
@@ -1165,6 +1257,30 @@ def _run_option(key: str, value: object, base: Path) -> Any:
         return section
     if key == "physics_profile":
         return None if value is None else _nonempty_string(value, label)
+    if key == "as_posted":
+        if value is not None and not isinstance(value, bool):
+            raise PlanError(f"{label} must be true or false")
+        return value
+    if key == "cycle":
+        if value is None:
+            return None
+        text = _nonempty_string(value, label)
+        if text.lower() == "latest":
+            return "latest"
+        try:
+            datetime.strptime(text, "%Y-%m-%dT%H")
+        except ValueError:
+            raise PlanError(f"{label} = {value!r} must be YYYY-MM-DDTHH (UTC) "
+                            "or 'latest'") from None
+        return text
+    if key == "late_after_minutes":
+        if value is None:
+            return None
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(float(value)) or float(value) <= 0):
+            # A zero budget fails every lead a second late.
+            raise PlanError(f"{label} must be a positive number of minutes")
+        return float(value)
     if key == "transport":
         if value is None:
             return None
@@ -2097,6 +2213,9 @@ class RunObserver:
         #: lands (:mod:`woof.live_products`), on whenever the end of the
         #: run would draw pictures.
         self._live_products = None
+        #: The plan both were armed with, to arm them again when the
+        #: hosted forecast restarts (:meth:`restarting`).
+        self._render_plan = None
         #: Time to first plot, once there is one.  Kept so the run's
         #: ``completed`` event can carry the headline number too: a
         #: reader comparing runs should not have to scan the stream for
@@ -2209,6 +2328,68 @@ class RunObserver:
         hook = getattr(self._heartbeat, "written", None)
         if hook is not None:
             hook()
+
+    # A forecast at a seam waiting for a boundary interval
+    # (:class:`woof.ingest.boundary_stream.SeamWaits`): the heartbeat
+    # says ``waiting:source`` or ``waiting:preparation`` with its wait
+    # record, so a supervisor times the wait by its own bound.
+
+    def waiting(self, on: str, **record: Any) -> None:
+        hook = getattr(self._heartbeat, "waiting", None)
+        if hook is not None:
+            hook(on, **record)
+
+    def waited(self) -> None:
+        hook = getattr(self._heartbeat, "waited", None)
+        if hook is not None:
+            hook()
+
+    def restarting(self, reason: str) -> None:
+        """The hosted forecast starts again in this process.
+
+        The heartbeat publishes its restart record
+        (:func:`woof.supervisor.restart_attempt`).  The renders this
+        observer armed read the last attempt's frames, which the runner
+        moves aside next, so they are ended and waited for first
+        (:func:`woof.first_products.halt_renders_and_wait`, in
+        :meth:`stop_live_products`' order: the every-frame render closed
+        first and joined last) and armed again on the same plan for the
+        new attempt's frames.  The speed baseline and the frame count
+        start again with the new attempt.
+        """
+
+        hook = getattr(self._heartbeat, "restarting", None)
+        if hook is not None:
+            hook(reason)
+        live, first = self._live_products, self._first_products
+        if live is not None or first is not None:
+            from woof.first_products import halt_renders_and_wait
+
+            if live is not None:
+                live.halt(timeout=0)
+            if first is not None:
+                halt_renders_and_wait(first)
+            if live is not None:
+                halt_renders_and_wait(live)
+            self._first_products = None
+            self._live_products = None
+            if self._render_plan is not None:
+                self.arm_first_products(self._render_plan)
+        self._forecast_started_wall = None
+        self._forecast_started_model = None
+        self._last_model_seconds = None
+        self._committed = 0
+        self.warn("forecast_restarted",
+                  f"the forecast starts again: {reason}", reason=str(reason))
+
+    #: Set by :meth:`source_behind`: the run ends with ``source_behind``
+    #: then ``failed`` (``SourceBehind``, exit 75).
+    source_behind_record: dict[str, Any] | None = None
+
+    def source_behind(self, details: Mapping[str, Any]) -> None:
+        """The late lead that ended the forecast; said with ``failed``."""
+
+        self.source_behind_record = dict(details)
 
     def finalizing(self, phase: str, *, work_bytes: int | None = None) -> None:
         hook = getattr(self._heartbeat, "finalizing", None)
@@ -2382,6 +2563,7 @@ class RunObserver:
                                           live_render_requested,
                                           shared_render_slots)
 
+        self._render_plan = render_plan
         products = render_plan.get("render_products")
         slot, early_slot = shared_render_slots()
         if early_render_requested(products):
@@ -3348,12 +3530,12 @@ def disk_admission_refusal(plan: RunPlan, exp, *, raw: Mapping[str, Any], data,
     ``prep_root`` (where the preparation writes; the staged chain's
     ``chain/prep`` when not given) or wherever ``WOOF_COMPOSE_SCRATCH``
     points.  THE BREAKAGE: the stream is sized by the SOURCE grid (a GEM
-    GDPS 48 hour window stages about 82 GB), and the engine refused it
+    GDPS 48 hour window kept whole stages about 82 GB), and the engine refused it
     only after the whole download and the first valid time's decode.  A
     ``WOOF_COMPOSE_SCRATCH`` naming no folder is refused here as well:
     the preparation refuses it only once it starts composing.
 
-    ``warn`` is told ``(message, detail, folder)`` when a regional
+    ``warn`` is told ``(message, detail, folder)`` when a windowed
     source's stream may not fit where its certain part does
     (:func:`woof.disk_budget.disk_warning`); such a run is admitted.
     """
@@ -3578,12 +3760,66 @@ class _GoObserver:
         #: Whether `woof go`'s chained preparation published its head,
         #: so the end of its preparation stage is said as the seal.
         self._head_ready = False
+        #: The start wait said on the heartbeat before the forecast
+        #: begins: ``(lead, since_utc)`` of the lead the as-posted fetch
+        #: waits for, or ``None`` (:meth:`_start_wait`).
+        self._start_waiting: tuple[Any, str] | None = None
+        self._forecast_begun = False
 
     # -- woof go's chain hooks ---------------------------------------
 
     def stage_begin(self, *, label: str, command) -> None:
         self.current_stage = label
+        if label == "forecast":
+            # From here the forecast says its own waits (its seams).
+            self._forecast_begun = True
+            self._end_start_wait()
         self._observer.enter_stage(_GO_STAGES[label], phase=label)
+
+    def _start_wait(self, schedule: Mapping[str, Any]) -> None:
+        """Before the forecast begins, the run waits on a start need's lead.
+
+        The as-posted fetch runs beside the preparation (``woof go``'s
+        GFS chain) and its schedule is that stage's progress file.  The
+        run cannot start without its start needs (DESIGN A136 3.3, the
+        schedule's ``start_needs``), so a start-need lead of the window's
+        own source in state ``waiting`` (polled, not posted by any host)
+        is the run's wait: the heartbeat says ``waiting:source`` with the
+        lead and its scheduled and late times, as the forecast says a wait
+        at a seam.  The breakage this prevents: launched before the first
+        leads post (the site's launch rule), the run's heartbeat and GUI
+        export said ``preparing:worker-start`` for as long as the source
+        kept it waiting.
+
+        Any other lead the fetch waits for is not the run's wait (DESIGN
+        3.5: ``waiting:source`` is said when the run itself is blocked on a
+        lead): the fetch polls later leads as the preparation builds the
+        head from start needs that are in, and saying ``waiting:source``
+        then hid the preparation's own progress behind a false wait.
+        """
+
+        if self._forecast_begun:
+            return
+        from woof.chain_events import start_wait_row
+
+        # The same row the run's stream says as its `phase: start`
+        # source wait (GoChainEvents._relay_start_wait).
+        row = start_wait_row(schedule)
+        if row is None:
+            self._end_start_wait()
+            return
+        lead = row.get("lead")
+        if self._start_waiting is None or self._start_waiting[0] != lead:
+            self._start_waiting = (
+                lead, datetime.now(timezone.utc).isoformat())
+        self.waiting("source", since_utc=self._start_waiting[1],
+                     lead=lead, expected_at=row.get("expected_at"),
+                     late_at=row.get("late_at"))
+
+    def _end_start_wait(self) -> None:
+        if self._start_waiting is not None:
+            self._start_waiting = None
+            self.waited()
 
     def prepare_head_ready(self, *, head_sha256: str) -> None:
         # `woof go`'s chained preparation (the GFS chain) published its
@@ -3604,6 +3840,11 @@ class _GoObserver:
         # coarse signal for the stages that do not.
         if not isinstance(progress, dict):
             return
+        from woof.source_posting import SCHEDULE_SCHEMA
+
+        if label == "fetch" and progress.get("schema") == SCHEDULE_SCHEMA:
+            self._start_wait(progress)
+            return
         if progress.get("schema") == "gpuwm.prepare-progress/v1":
             preparation = {key: progress[key] for key in
                            ("schema", "status", "phase", "phase_index", "phases_total", "elapsed_seconds")
@@ -3619,6 +3860,21 @@ class _GoObserver:
             status=progress.get("status"))
 
     def stage_failed(self, *, label: str, exit_code: int, diagnostic: str) -> None:
+        # The first failure is the run's.  An as-posted fetch runs beside
+        # the preparation and the forecast (DESIGN A136 2.5), so a second
+        # stage can fail after the first (a preparation that ends because
+        # its fetch failed); the later one is a consequence, and a record
+        # naming it sent the reader to the wrong stage.
+        if self.failure is None or self.failure.get("stage") == label:
+            self.failure = {"stage": label, "exit_code": exit_code,
+                            "diagnostic": diagnostic}
+
+    def chain_failed(self, *, label: str, exit_code: int,
+                     diagnostic: str) -> None:
+        # `woof go` names the stage whose failure is the chain's when it
+        # decided that after the stages beside it ended: the as-posted
+        # fetch failed first and the preparation, told by its failure
+        # record, may have ended before the fetch did.
         self.failure = {"stage": label, "exit_code": exit_code,
                         "diagnostic": diagnostic}
 
@@ -3671,6 +3927,35 @@ class _GoObserver:
         if hook is not None:
             hook()
 
+    def waiting(self, on: str, **record) -> None:
+        hook = getattr(self._observer, "waiting", None)
+        if hook is not None:
+            hook(on, **record)
+
+    def waited(self) -> None:
+        hook = getattr(self._observer, "waited", None)
+        if hook is not None:
+            hook()
+
+    def restarting(self, reason: str) -> None:
+        hook = getattr(self._observer, "restarting", None)
+        if hook is not None:
+            hook(reason)
+
+    def source_behind(self, details) -> None:
+        hook = getattr(self._observer, "source_behind", None)
+        if hook is not None:
+            hook(details)
+
+    @property
+    def source_behind_record(self):
+        return getattr(self._observer, "source_behind_record", None)
+
+    @property
+    def events(self):
+        # The hosted forecast says its seam waits on the run's stream.
+        return getattr(self._observer, "events", None)
+
     def finalizing(self, phase: str, *, work_bytes: int | None = None) -> None:
         hook = getattr(self._observer, "finalizing", None)
         if hook is not None:
@@ -3719,7 +4004,19 @@ def _pinned_fetch_hints(plan: RunPlan, hints: Mapping[str, Any]) -> dict[str, An
         pinned, _basis = pinned_transport(merged, plan.run_options.get("transport"))
     except ValueError as error:
         raise PlanError(str(error)) from error
-    return pin_request(merged, pinned)
+    merged = pin_request(merged, pinned)
+    # The posting rule and budget the run options name win over the
+    # table the way --transport does (`woof go --whole-cycle`,
+    # `--late-after-minutes`), and so does the cycle (`--cycle`): a plan
+    # executed with one runs a config re-timed to it (:func:`plan_at_cycle`),
+    # and a query mode asks about the same window without writing one.
+    for key in ("as_posted", "late_after_minutes", "cycle"):
+        value = plan.run_options.get(key)
+        if value is not None:
+            merged[key] = value
+    if merged.get("as_posted") is False:
+        merged.pop("late_after_minutes", None)
+    return merged
 
 
 def _fetch_arguments_from_hints(hints: Mapping[str, Any],
@@ -3738,6 +4035,11 @@ def _fetch_arguments_from_hints(hints: Mapping[str, Any],
         if key == "out":
             continue          # run-plan owns where the data lands
         value = hints[key]
+        if key == "as_posted":
+            # The one boolean key whose false is a flag of its own: the
+            # fetch is as posted by default, so false must be said.
+            arguments.append("--as-posted" if value else "--whole-cycle")
+            continue
         if isinstance(value, bool):
             if value:
                 arguments.append("--" + key.replace("_", "-"))
@@ -3825,7 +4127,7 @@ def declared_forcing_fetch(payload: Mapping[str, Any], data) -> list[str] | None
 
 def _prepare_stage(root: Path, *, arguments: Sequence[Any],
                    stated: Mapping[str, Any],
-                   run) -> dict[str, Any]:
+                   run, built=None) -> dict[str, Any]:
     """Run a preparation, or reuse the one already at ``root``.
 
     THE recovery seam.  A plan that failed at the forecast stage leaves
@@ -3849,6 +4151,12 @@ def _prepare_stage(root: Path, *, arguments: Sequence[Any],
     The returned receipt is what the stage event carries, so which of
     the two happened, and why, is on the record rather than inferred
     from a timing.
+
+    ``built``, when given, is called with that receipt the moment
+    ``run`` returns, which is when the preparer has sealed its bundle:
+    before the reuse binding, which reads this engine's identity through
+    git and digests the stage's arguments, so a chain says when its seal
+    landed rather than when this stage's bookkeeping ended.
     """
 
     from woof import stage_reuse
@@ -3860,8 +4168,54 @@ def _prepare_stage(root: Path, *, arguments: Sequence[Any],
     if decision["decision"] == stage_reuse.REBUILD:
         decision["superseded"] = stage_reuse.supersede(root)
     run()
+    if built is not None:
+        built(dict(decision))
     stage_reuse.write_binding(root, arguments=arguments, stated=stated)
     return decision
+
+
+class _ChainSeal:
+    """``prepare_sealed``, said once, when a chained preparation's seal lands.
+
+    It needs both of two things, in whichever order they happen: the
+    forecast bound to the head (so the stream says ``prepare_head_ready``
+    first), and the preparer returned with its bundle sealed.  The seal
+    is reported by :func:`_prepare_stage` through ``built``, the moment
+    the preparer returns.  The breakage this prevents: reported when the
+    whole preparation call returned, the seal waited for the stage's
+    reuse binding (git and argument digests), and when that outlasted
+    the forecast, the event said the seal came at the forecast's end.
+    """
+
+    def __init__(self, observer: RunObserver, prep_root: Path):
+        self._observer = observer
+        self._prep_root = prep_root
+        self._lock = threading.Lock()
+        self._head = False
+        self._prepared: dict[str, Any] | None = None
+        self._emitted = False
+
+    def head_bound(self) -> None:
+        with self._lock:
+            self._head = True
+            self._emit()
+
+    def sealed(self, prepared: Mapping[str, Any]) -> None:
+        # The first report stands: a preparation's own return after
+        # ``built`` said it adds nothing but the later timing.
+        with self._lock:
+            if self._prepared is None:
+                self._prepared = dict(prepared)
+            self._emit()
+
+    def _emit(self) -> None:
+        if self._emitted or not self._head or self._prepared is None:
+            return
+        self._emitted = True
+        events = getattr(self._observer, "events", None)
+        if events is not None:
+            events.emit("prepare_sealed", prepared_root=str(self._prep_root),
+                        prepared=self._prepared)
 
 
 def _clear_forecast_output(forecast_dir: Path, *,
@@ -4101,7 +4455,7 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
     observer.enter_stage("fetch", phase="fetch")
     fetch_report = _run_fetch(
         _fetch_arguments_from_hints(hints, out=data_dir), run_dir,
-        events=getattr(observer, "events", None))
+        events=getattr(observer, "events", None), posting_relay=True)
     manifest = data_dir / "SHA256SUMS"
     if not manifest.is_file():
         raise PlanError(
@@ -4158,13 +4512,15 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
     lead = hints.get("forecast_start_hour")
     if lead:
         prepare += ["--forecast-start-hour", str(int(lead))]
-    prepared = _prepare_stage(
-        prep_root, arguments=prepare,
-        stated={"source_manifest_sha256": sha256_file(manifest),
-                "namelist_sha256": sha256_file(inputs["namelist_input"])},
-        run=lambda: run_stage("prepare", prepare, explain=False,
-                              progress=prep_root / "progress.json",
-                              observer=_GoObserver(observer)))
+    def preparation(built=None):
+        return _prepare_stage(
+            prep_root, arguments=prepare,
+            stated={"source_manifest_sha256": sha256_file(manifest),
+                    "namelist_sha256": sha256_file(inputs["namelist_input"])},
+            run=lambda: run_stage("prepare", prepare, explain=False,
+                                  progress=prep_root / "progress.json",
+                                  observer=_GoObserver(observer)),
+            built=built)
 
     if not prepare_only:
         forecast_dir = _clear_forecast_output(forecast_dir, observer=observer)
@@ -4176,15 +4532,12 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
         observer.arm_first_products(
             _chain_render_plan(plan, forecast_dir=forecast_dir, run_dir=run_dir))
 
-    if len(exp.domains) > 1:
+    def hierarchy(*, observe_stage=True):
         # A nested HRRR run takes a THIRD stage between the root
         # preparation and the forecast, and then a different runner.
-        # Everything above -- fetch, and the root preparation this
-        # branch shares -- is identical, which is why the split is here
-        # and not at the top of the function.
         from woof.static.corridor import config_declares_follow_source
 
-        tree_root = _hrrr_hierarchy_stage(
+        return _hrrr_hierarchy_stage(
             prep_root=prep_root, inputs=inputs, hints=hints,
             geog_root=geog_root, manifest=manifest, cycle=cycle,
             run_dir=run_dir, observer=observer,
@@ -4193,7 +4546,50 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
             # plan reported as corridor-bearing seals one and a plan
             # reported as still does not.
             statics_corridor=config_declares_follow_source(exp),
-            acknowledgements=tuple(exp.acknowledgements))
+            acknowledgements=tuple(exp.acknowledgements),
+            observe_stage=observe_stage)
+
+    if len(exp.domains) == 1 and not prepare_only:
+        # CHAINED PREPARATION (A136 L7c): the native preparation publishes
+        # the bundle's head once its start state exists and one boundary
+        # interval per hour after it, so the forecast starts on the head
+        # while the later hours are built.  ``None`` is a bundle published
+        # at its seal or reused whole, which runs below exactly as before.
+        prepared, chained = _hrrr_single_chain(
+            prep_root=prep_root, preparation=preparation,
+            forecast_dir=forecast_dir, exp=exp, observer=observer)
+        if chained is not None:
+            return _chain_render(plan, forecast_dir=forecast_dir,
+                                 run_dir=run_dir, observer=observer)
+    elif len(exp.domains) > 1 and not prepare_only:
+        # A native tree chains on its root preparation's head (A136 L7c):
+        # the hierarchy stage builds the children on the root's start state
+        # and publishes the tree's head, relays the root's boundary
+        # intervals as they are written, and seals once the root seals.
+        # ``None`` is a tree published at its seal or reused whole, which
+        # runs below as before.
+        tree_root = run_dir / "chain" / "hrrr-hierarchy"
+        prepared, chained = _hrrr_tree_chain(
+            prep_root=prep_root, tree_root=tree_root,
+            preparation=preparation,
+            hierarchy=lambda: hierarchy(observe_stage=False),
+            config_path=config_path, forecast_dir=forecast_dir,
+            observer=observer)
+        if chained is not None:
+            return _chain_render(plan, forecast_dir=forecast_dir,
+                                 run_dir=run_dir, observer=observer)
+        observer.finish_stage(hierarchy_root=str(tree_root),
+                              prepared=prepared)
+        _hrrr_tree_forecast(
+            tree_root=tree_root, config_path=config_path,
+            forecast_dir=forecast_dir, observer=observer)
+        return _chain_render(plan, forecast_dir=forecast_dir,
+                            run_dir=run_dir, observer=observer)
+    else:
+        prepared = preparation()
+
+    if len(exp.domains) > 1:
+        tree_root = hierarchy()
         if prepare_only:
             return _prepared_chain_result(tree_root, config_path, None)
         _hrrr_tree_forecast(
@@ -4311,12 +4707,178 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
                         observer=observer)
 
 
+def _hrrr_single_chain(*, prep_root: Path, preparation, forecast_dir: Path,
+                       exp, observer: RunObserver):
+    """Run the native HRRR preparation beside a forecast started on its head.
+
+    ``preparation(built=...)`` runs ``tools.prepare_hrrr_wrf`` to its seal
+    (or reuses a finished bundle) and calls ``built`` as the seal lands;
+    the forecast is the single-domain runner bound to
+    the head (``--prepared-head-sha256``), which waits at a seam for an
+    hour not built yet and holds the seal to the head at the end.  Returns
+    ``(prepared, forecast)``; ``forecast`` is ``None`` when no chained head
+    was published, and the caller then runs the sealed bundle as before.
+    """
+
+    from woof import stage_cli
+    from woof.ingest.boundary_stream import run_chained
+
+    seal = _ChainSeal(observer, prep_root)
+
+    def chained_preparation():
+        result = preparation(built=seal.sealed)
+        seal.sealed(result)
+        return result
+
+    def chained_forecast(head_sha256):
+        if head_sha256 is None:
+            return None
+        bundle = stage_cli.resolve_head_bundle(prep_root, head_sha256)
+        observer.finish_stage(prepared_root=str(prep_root),
+                              prepared={"chained": True,
+                                        "head_sha256": head_sha256})
+        events = getattr(observer, "events", None)
+        if events is not None:
+            events.emit("prepare_head_ready", head_sha256=head_sha256)
+        seal.head_bound()
+        from woof.hrrr_prepared_bundle import (
+            EXPERIMENT_CONFIG_NAME, WPS_NAMELIST_NAME)
+
+        # The published authorities the head's proof binds by name and
+        # digest, as the sealed arm relays them from the handoff.
+        argv = [
+            "--source", "hrrr",
+            "--prepared-root", str(prep_root),
+            "--prepared-head-sha256", head_sha256,
+            "--source-manifest-sha256", str(bundle["source_manifest_sha256"]),
+            "--experiment-config", str(prep_root / EXPERIMENT_CONFIG_NAME),
+            "--wps-namelist", str(prep_root / WPS_NAMELIST_NAME),
+            "--io-mode", "history", "--outdir", str(forecast_dir),
+        ]
+        if exp.tiles.enabled:
+            argv += stage_cli.streaming_flags("single", tiles=exp.tiles)
+        observer.enter_stage("forecast", phase="forecast")
+        from woof import prepared_single_domain_forecast as runner
+
+        code = runner.main(argv, observer=observer)
+        if code:
+            raise StageExitError("forecast", code)
+        return bundle
+
+    return run_chained(prepared_root=prep_root, prepare=chained_preparation,
+                       forecast=chained_forecast, observer=observer)
+
+
+def _hrrr_tree_chain(*, prep_root: Path, tree_root: Path, preparation,
+                     hierarchy, config_path: Path, forecast_dir: Path,
+                     observer: RunObserver):
+    """Run the native HRRR root preparation and hierarchy beside a forecast.
+
+    ``preparation`` runs the root preparation to its seal and
+    ``hierarchy`` the hierarchy stage; the hierarchy starts as soon as the
+    root preparation publishes a head of this run (or, when it publishes at
+    its seal or is reused whole, once it has finished), and chains on that
+    head itself (``woof.hrrr_hierarchy_direct``).  The forecast is the
+    tree runner bound to the tree's head (``--prepared-head-sha256``).
+    Returns ``(prepared, forecast)``; ``forecast`` is ``None`` when the
+    tree was published at its seal or reused whole, and the caller runs
+    the sealed tree as before.
+
+    A hierarchy stage stopped by its forecast (``stop.json``) stops the root
+    preparation too, which is the breakage this prevents: a stopped run
+    that waited for the root to build every later hour for nothing.  Any
+    other hierarchy failure leaves the root preparation running to its
+    seal, so a retry reuses it, as :func:`run_chained` leaves a producer
+    whose forecast failed.
+    """
+
+    import contextvars
+    import threading
+
+    from woof.ingest.boundary_stream import (
+        STOP_NAME, fresh_chained_head, request_stop, run_chained, stream_dir)
+
+    seal_lock = threading.Lock()
+    seal_state: dict[str, Any] = {"head": False, "emitted": False}
+
+    def emit_sealed_once():
+        if seal_state["emitted"] or not seal_state["head"] \
+                or "prepared" not in seal_state:
+            return
+        seal_state["emitted"] = True
+        events = getattr(observer, "events", None)
+        if events is not None:
+            events.emit("prepare_sealed", prepared_root=str(tree_root),
+                        prepared=seal_state["prepared"])
+
+    def tree_preparation():
+        box: dict[str, Any] = {}
+        started = time.time()
+
+        def root():
+            try:
+                box["result"] = preparation()
+            except BaseException as error:  # noqa: BLE001 - re-raised below
+                box["error"] = error
+
+        context = contextvars.copy_context()
+        worker = threading.Thread(target=context.run, args=(root,),
+                                  name="hrrr-root-preparation", daemon=True)
+        worker.start()
+        while worker.is_alive() \
+                and fresh_chained_head(prep_root, since=started) is None:
+            worker.join(0.5)
+        if not worker.is_alive():
+            worker.join()
+            if "error" in box:
+                raise box["error"]
+        try:
+            tree = hierarchy()
+        except BaseException as error:
+            if (stream_dir(tree_root) / STOP_NAME).exists() \
+                    or not isinstance(error, Exception):
+                request_stop(prep_root, "the tree's forecast ended: "
+                                        f"{type(error).__name__}: {error}")
+            worker.join()
+            raise
+        worker.join()
+        if "error" in box:
+            raise box["error"]
+        result = {"root": box.get("result"), "hierarchy_root": str(tree),
+                  "tree_root": str(tree_root)}
+        with seal_lock:
+            seal_state["prepared"] = result
+            emit_sealed_once()
+        return result
+
+    def tree_forecast(head_sha256):
+        if head_sha256 is None:
+            return None
+        observer.finish_stage(prepared_root=str(tree_root),
+                              prepared={"chained": True,
+                                        "head_sha256": head_sha256})
+        events = getattr(observer, "events", None)
+        if events is not None:
+            events.emit("prepare_head_ready", head_sha256=head_sha256)
+        with seal_lock:
+            seal_state["head"] = True
+            emit_sealed_once()
+        _hrrr_tree_forecast(tree_root=tree_root, config_path=config_path,
+                            forecast_dir=forecast_dir, observer=observer,
+                            head_sha256=head_sha256)
+        return head_sha256
+
+    return run_chained(prepared_root=tree_root, prepare=tree_preparation,
+                       forecast=tree_forecast)
+
+
 def _hrrr_hierarchy_stage(*, prep_root: Path, inputs: Mapping[str, Path],
                           hints: Mapping[str, Any], geog_root,
                           manifest: Path, cycle: str, run_dir: Path,
                           observer: RunObserver,
                           statics_corridor: bool = False,
-                          acknowledgements: Sequence[str] = ()) -> Path:
+                          acknowledgements: Sequence[str] = (),
+                          observe_stage: bool = True) -> Path:
     """Build d02..dNN from the sealed root preparation.
 
     The stage the GFS tree does not have.  rw-wps is not on this path at
@@ -4380,7 +4942,10 @@ def _hrrr_hierarchy_stage(*, prep_root: Path, inputs: Mapping[str, Path],
     if lead:
         command += ["--forecast-start-hour", str(int(lead))]
 
-    observer.enter_stage("prepare", phase="hierarchy")
+    if observe_stage:
+        # Not in a chained tree: its forecast opens its stage at the tree's
+        # head, while this stage is still relaying the root's intervals.
+        observer.enter_stage("prepare", phase="hierarchy")
     # Reuse is a whole-hierarchy decision: the canonical domain manifest,
     # every cache payload, static/corridor/export artifact, and the prepared
     # root input must still match the completed stage's binding.
@@ -4394,13 +4959,16 @@ def _hrrr_hierarchy_stage(*, prep_root: Path, inputs: Mapping[str, Path],
         raise PlanError(
             f"the HRRR hierarchy stage wrote no {tree_root}; its own "
             "output is above")
-    observer.finish_stage(hierarchy_root=str(tree_root), prepared=prepared)
+    if observe_stage:
+        observer.finish_stage(hierarchy_root=str(tree_root),
+                              prepared=prepared)
     return tree_root
 
 
 def _hrrr_tree_forecast(*, tree_root: Path, config_path: Path,
                         forecast_dir: Path,
-                        observer: RunObserver) -> None:
+                        observer: RunObserver,
+                        head_sha256: str | None = None) -> None:
     """The same tree runner the GFS tree route drives.
 
     The relay is the same shape too -- one preparation-receipt digest
@@ -4429,12 +4997,19 @@ def _hrrr_tree_forecast(*, tree_root: Path, config_path: Path,
     """
 
     from woof.fetch import sha256_file
-    from woof.go_cli import _hierarchy_document
 
-    receipt = _hierarchy_document(tree_root)
+    if head_sha256 is None:
+        from woof.go_cli import _hierarchy_document
+
+        binding = ["--preparation-receipt-sha256",
+                   sha256_file(_hierarchy_document(tree_root))]
+    else:
+        # A chained tree: the runner restores from the head and binds the
+        # seal at the end of the run.
+        binding = ["--prepared-head-sha256", str(head_sha256)]
     argv = [
         "--prepared-root", str(tree_root),
-        "--preparation-receipt-sha256", sha256_file(receipt),
+        *binding,
         "--experiment-config", str(config_path),
         "--experiment-config-sha256", sha256_file(config_path),
         "--io-mode", "history", "--outdir", str(forecast_dir),
@@ -4647,7 +5222,7 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
         data_dir = io_path(data_dir)
         fetch_report = _run_fetch(
             _fetch_arguments_from_hints(hints, out=data_dir), run_dir,
-            events=getattr(observer, "events", None))
+            events=getattr(observer, "events", None), posting_relay=True)
         handoff_path = data_dir / fetch_routes.PREP_ARGUMENTS_NAME
     handoff = _read_json_object(handoff_path)
     if handoff.get("schema") != fetch_routes.PREP_ARGUMENTS_SCHEMA:
@@ -4722,10 +5297,15 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
 
     verify_local()
 
-    def preparation():
+    member_notes: dict[str, Any] = {}
+
+    def preparation(built=None):
         return prepare_verified(member_receipt, prep_root, lambda: _prepare_stage(
             prep_root, arguments=arguments,
-            stated={}, run=run_preparation))
+            stated={}, run=run_preparation,
+            built=(None if built is None
+                   else lambda receipt: built({**receipt, **member_notes}))),
+            notes=member_notes)
 
     from woof import stage_cli
 
@@ -4733,26 +5313,11 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
     # preparation's own thread, not when the forecast returns: emitted
     # after the forecast it put the seal at the end of the run, so the
     # events of a chained run could not say when its preparation ended.
-    seal_lock = threading.Lock()
-    seal_state: dict[str, object] = {"head": False, "emitted": False}
-
-    def emit_sealed_once():
-        # Called with seal_lock held, once the head is bound and the
-        # preparation has returned, in whichever order those happen.
-        if seal_state["emitted"] or not seal_state["head"] \
-                or "prepared" not in seal_state:
-            return
-        seal_state["emitted"] = True
-        events = getattr(observer, "events", None)
-        if events is not None:
-            events.emit("prepare_sealed", prepared_root=str(prep_root),
-                        prepared=seal_state["prepared"])
+    seal = _ChainSeal(observer, prep_root)
 
     def chained_preparation():
-        result = preparation()
-        with seal_lock:
-            seal_state["prepared"] = result
-            emit_sealed_once()
+        result = preparation(built=seal.sealed)
+        seal.sealed(result)
         return result
 
     def chained_forecast(head_sha256):
@@ -4769,9 +5334,7 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
         events = getattr(observer, "events", None)
         if events is not None:
             events.emit("prepare_head_ready", head_sha256=head_sha256)
-        with seal_lock:
-            seal_state["head"] = True
-            emit_sealed_once()
+        seal.head_bound()
         head_bundle = stage_cli.resolve_head_bundle(prep_root, head_sha256)
         _staged_forecast_stage(head_bundle)
         return head_bundle
@@ -4801,17 +5364,19 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
     # `woof prep` runs in this process (_run_prep), so its step events reach
     # the run's stream through one listener around it.
     with _preparation_relay(observer):
-        if len(exp.domains) == 1 and not prepare_only:
+        if not prepare_only:
             from woof.ingest.boundary_stream import run_chained
 
+            # One domain or a tree: the forecast starts at the head a
+            # chained preparation publishes.  A mapped or GFS-series tree
+            # chains on either backend, CPU or card, and the tree runner
+            # starts its forecast on that head, a storm-following tree
+            # included (its statics corridor is built into the head); a
+            # tree published at its seal (native HRRR) runs below.
             prepared, chained = run_chained(
                 prepared_root=prep_root, prepare=chained_preparation,
-                forecast=chained_forecast)
+                forecast=chained_forecast, observer=observer)
         else:
-            if not prepare_only:
-                from woof.ingest.boundary_stream import say_prepared_sealed
-
-                say_prepared_sealed("domain_tree")
             prepared = preparation()
     verify_local()
     if chained is not None:
@@ -5132,6 +5697,16 @@ def _execute_prepared_route(plan: RunPlan, *, exp, data, config_path,
             tokens += [delivery.split(":", 1)[1], str(value)]
     if plan.run_options.get("transport") is not None:
         tokens += ["--transport", str(plan.run_options["transport"])]
+    # The posting rule and budget reach this chain's fetch stage the way
+    # they reach the other chains' (through _pinned_fetch_hints there):
+    # without them run_options.as_posted = false was accepted and read by
+    # nothing on this route.  The cycle needs no flag: config_path is
+    # already the configuration re-timed to it (:func:`plan_at_cycle`).
+    if plan.run_options.get("as_posted") is False:
+        tokens.append("--whole-cycle")
+    elif plan.run_options.get("late_after_minutes") is not None:
+        tokens += ["--late-after-minutes",
+                   f"{float(plan.run_options['late_after_minutes']):g}"]
     args = build_parser().parse_args(tokens)
     # Not a `woof go` CLI flag: it is stamped onto the namespace that
     # go_main reads, the same way go_main reads --outdir.  Adding a flag
@@ -5206,7 +5781,7 @@ ROUTES: dict[str, Route] = {
                 "this process (what `woof run CONFIG` executes)",
         run_options=frozenset(_RUN_OPTION_DEFAULTS)
         - {"data_dir", "physics_profile", "prepared_root", "wps_namelist", "supplement",
-           "transport"},
+           "transport", "as_posted", "late_after_minutes", "cycle"},
         execute=_execute_experiment_route),
 }
 
@@ -5624,6 +6199,10 @@ def execute_plan(plan: RunPlan, *, events: EventStream) -> int:
             # nothing while appearing to.
             os.environ["CUDA_VISIBLE_DEVICES"] = str(device)
 
+        # run_options.cycle (`woof go --cycle`): the configuration is
+        # re-timed into the run directory before anything reads it, and
+        # `latest` there is answered once, like the fetch's own below.
+        plan = plan_at_cycle(plan, run_dir)
         # A `latest` cycle is resolved BEFORE resolution reports, so
         # the resolved_plan event carries the concrete cycle rather than
         # the question the caller asked.
@@ -5726,7 +6305,8 @@ def execute_plan(plan: RunPlan, *, events: EventStream) -> int:
             stage = "fetch"
             observer.enter_stage("fetch")
             observer.finish_stage(
-                fetch=_run_fetch(fetch_arguments, run_dir, events=events))
+                fetch=_run_fetch(fetch_arguments, run_dir, events=events,
+                                 posting_relay=True))
 
         # The gate the resolution above deferred.  Everything the config
         # declares must be on disk before the model starts; whatever was
@@ -5807,17 +6387,38 @@ def execute_plan(plan: RunPlan, *, events: EventStream) -> int:
         # folder a frame stream did not fit in): a page that hides machine
         # paths still shows these, or its remedy names nowhere.
         folders = [str(folder) for folder in getattr(error, "folders", ()) or ()]
+        # A source lead later than its budget ends the run with the lead
+        # named and exit 75 (the same launch succeeds once it posts); every
+        # other failure keeps exit 1.  The record comes from the forecast
+        # (the observer heard it) or from the error itself.
+        from woof.ingest.boundary_stream import (
+            SOURCE_BEHIND_EXIT_CODE, SourceBehind, source_behind_sentence,
+        )
+        behind = (None if interrupted or observer is None
+                  else getattr(observer, "source_behind_record", None))
+        if (behind is None and not interrupted
+                and isinstance(error, SourceBehind)):
+            behind = dict(error.details)
+        error_class = type(error).__name__
+        message = str(error)
+        exit_code = (INTERRUPT_EXIT_CODE if interrupted
+                     else getattr(error, "exit_code", None))
+        if behind is not None:
+            events.emit("source_behind", **source_behind_fields(behind))
+            error_class, exit_code = "SourceBehind", SOURCE_BEHIND_EXIT_CODE
+            message = source_behind_sentence(behind)
         events.emit(
-            "failed", stage=stage, error_class=type(error).__name__,
-            message=str(error), run_dir=str(run_dir),
-            exit_code=(INTERRUPT_EXIT_CODE if interrupted
-                       else getattr(error, "exit_code", None)),
+            "failed", stage=stage, error_class=error_class,
+            message=message, run_dir=str(run_dir),
+            exit_code=exit_code,
             interrupted=interrupted,
             remedy=_remedy(error),
             receipts=_receipts(run_dir),
             **({"folders": folders} if folders else {}))
         if interrupted:
             return INTERRUPT_EXIT_CODE
+        if behind is not None:
+            return SOURCE_BEHIND_EXIT_CODE
         return 1
 
 
@@ -5953,6 +6554,139 @@ def _with_fetch_cycle(arguments: Sequence[str], cycle: str) -> list[str]:
     return rewritten
 
 
+#: Where a run re-timed by ``run_options.cycle`` keeps its configuration
+#: and the namelists beside it, inside the run directory.
+CYCLE_CONFIG_DIRNAME = "cycle-config"
+
+
+def plan_at_cycle(plan: RunPlan, destination: Path) -> RunPlan:
+    """``plan`` at ``run_options.cycle`` (``woof go --cycle``), or as it is.
+
+    ``latest`` is resolved once, here, by the fetch's own resolver under
+    the plan's posting rule, and the concrete cycle is recorded in
+    ``automatic_resolutions``.  An intent plan hands it to the wizard as
+    its ``--cycle``.  A configuration named by path is re-timed by
+    :func:`woof.companion_setups.retime_to_cycle` (start time, delayed
+    nests, the WPS and route namelists) into
+    ``destination/cycle-config/``, which is the run directory for a run
+    and a scratch folder for a query, and the plan continues on that file;
+    ``fetch.args`` a plan carries get the same cycle.
+
+    Refused, naming the breakage: an inline configuration (there is no
+    file or namelist beside it to re-time, so the fetch would move and
+    the forecast would not).
+    """
+
+    cycle = plan.run_options.get("cycle")
+    if cycle is None:
+        return plan
+    if plan.config_intent is not None:
+        intent = dict(plan.config_intent)
+        intent["cycle"] = cycle
+        return dataclasses.replace(plan, config_intent=intent)
+    if plan.config_path is None:
+        raise PlanError(
+            "run plan 'run_options.cycle' re-times the configuration file and "
+            "the namelists beside it, and an inline configuration has no "
+            "file or namelist to re-time, so its fetch would move and its "
+            "forecast would not. Next: name the configuration by "
+            "'config.path', or write the cycle into it.")
+    from woof.fetch import parse_cycle
+    from woof.go_cli import config_fetch_request
+
+    document = tomllib.loads(plan.config_bytes().decode("utf-8-sig"))
+    hints = document.get("fetch")
+    if not isinstance(hints, dict) or not {"source", "cycle"} <= hints.keys():
+        raise PlanError(
+            f"run plan 'run_options.cycle' names a cycle, and {plan.config_path} "
+            "has no [fetch] source and cycle to move it from")
+    source = str(hints["source"])
+    resolutions: list[dict[str, Any]] = []
+    concrete = str(cycle)
+    if concrete == "latest":
+        arguments = _fetch_arguments_from_hints(
+            _pinned_fetch_hints(plan, config_fetch_request(document)),
+            out=Path("latest"))
+        arguments, resolutions, _warnings = resolve_fetch_cycle(arguments)
+        concrete = _parse_fetch_arguments(arguments).cycle
+    try:
+        moment = parse_cycle(concrete, source)
+        own = parse_cycle(str(hints["cycle"]), source)
+    except ValueError as error:
+        raise PlanError(f"run plan 'run_options.cycle': {error}") from error
+    options = dict(plan.run_options)
+    options["cycle"] = concrete
+    fetch_arguments = plan.fetch_arguments
+    if fetch_arguments is not None:
+        fetch_arguments = tuple(_with_fetch_cycle(list(fetch_arguments), concrete))
+    config_path = plan.config_path
+    if moment == own:
+        note = "the configuration's own cycle; nothing was re-timed"
+    else:
+        from woof.companion_setups import retime_to_cycle
+
+        out = Path(destination) / CYCLE_CONFIG_DIRNAME / plan.config_path.name
+        try:
+            result = retime_to_cycle(plan.config_path, moment, out)
+        except ValueError as error:
+            raise PlanError(
+                f"run plan 'run_options.cycle' = {concrete}: {error}") from error
+        config_path = Path(result["config_path"])
+        note = (f"{plan.config_path} re-timed to start {result['start_time']} "
+                f"as {config_path}, with its namelists rendered again")
+    resolutions.append({"scope": "fetch", "key": "cycle", "value": concrete,
+                        "basis": "run_options.cycle", "note": note})
+    return dataclasses.replace(
+        plan, config_path=config_path, run_options=options,
+        fetch_arguments=fetch_arguments,
+        automatic_resolutions=tuple(plan.automatic_resolutions) + tuple(resolutions))
+
+
+def plan_readiness(plan: RunPlan, *, no_probe: bool = False
+                   ) -> tuple[dict[str, Any], int]:
+    """``woof run-plan --readiness``: the window this plan's fetch asks for.
+
+    The plan's own ``fetch.args`` when it carries them, otherwise the
+    configuration's ``[fetch]`` table with the run options over it, read
+    by the fetch command's own parser, so the answer is about the fetch
+    the run would start.
+    """
+
+    from woof.fetch import readiness_for_fetch
+
+    arguments = (list(plan.fetch_arguments)
+                 if plan.fetch_arguments is not None else None)
+    cycle = plan.run_options.get("cycle")
+    if arguments is not None and cycle is not None:
+        # run_options.cycle wins over the plan's own fetch.args, as it
+        # does when the plan runs (:func:`plan_at_cycle`).
+        arguments = _with_fetch_cycle(arguments, str(cycle))
+    if plan.config_intent is not None and cycle is not None:
+        plan = dataclasses.replace(
+            plan, config_intent={**plan.config_intent, "cycle": cycle})
+    if arguments is None:
+        if plan.config_intent is None:
+            document = tomllib.loads(plan.config_bytes().decode("utf-8-sig"))
+        else:
+            resolution, _exp, _data = resolve_plan(plan, require_inputs=False)
+            document = tomllib.loads(
+                str(resolution.get("generated_config") or ""))
+        hints = document.get("fetch")
+        if not isinstance(hints, dict) or not {"source", "cycle"} <= hints.keys():
+            # Breakage it prevents: a plan with no download would be
+            # answered for a window nobody fetches.
+            raise PlanError(
+                "--readiness answers for the window a plan fetches, and this "
+                "plan's configuration has no [fetch] source and cycle")
+        arguments = _fetch_arguments_from_hints(
+            _pinned_fetch_hints(plan, hints), out=Path("readiness"))
+    parsed = _parse_fetch_arguments(arguments)
+    try:
+        return readiness_for_fetch(parsed, no_probe=no_probe)
+    except ValueError as error:
+        raise PlanError(f"--readiness: {error}") from error
+
+
 def resolve_fetch_cycle(arguments: Sequence[str]
                         ) -> tuple[list[str], list[dict[str, Any]],
                                    list[dict[str, Any]]]:
@@ -6008,9 +6742,13 @@ def resolve_fetch_cycle(arguments: Sequence[str]
     resolutions = [{
         "scope": "fetch", "key": "cycle", "value": concrete,
         "basis": "resolved_latest",
-        "note": "the newest cycle whose objects for the final requested "
-                "hour are all published; a partially uploaded cycle "
-                "cannot win, so the window is complete by construction"}]
+        "note": ("the newest cycle whose start needs (the analysis and the "
+                 "first boundary lead, with what the route fetches beside "
+                 "them) are posted; the fetch takes each later lead as it "
+                 "posts" if options.get("as_posted") else
+                 "the newest cycle whose objects for the final requested "
+                 "hour are all published; a partially uploaded cycle "
+                 "cannot win, so the window is complete by construction")}]
 
     # A cycle that is not the newest one the clock allows means newer
     # cycles exist and are still publishing.  That is normal and not an
@@ -6026,7 +6764,7 @@ def resolve_fetch_cycle(arguments: Sequence[str]
     grid = cycle_grid_for(source)
     behind = int((now - cycle).total_seconds() // 3600)
     step = _cycle_spacing_hours(grid, cycle)
-    if step is not None and behind >= 2 * step + grid.delay_hours:
+    if step is not None and behind >= 2 * step + grid.delay(cycle, last_hour):
         warnings.append({
             "code": "latest_cycle_is_not_the_newest",
             "message": (
@@ -6086,7 +6824,8 @@ def _preparation_relay(observer):
 
 
 def _run_fetch(arguments: Sequence[str], run_dir: Path, *,
-               events: "EventStream | None" = None) -> dict[str, Any]:
+               events: "EventStream | None" = None,
+               posting_relay: bool = False) -> dict[str, Any]:
     """Execute the plan's fetch through ``woof fetch``'s own handler.
 
     Returns what the fetch actually did.  ``fetch_main`` answers only
@@ -6103,6 +6842,21 @@ def _run_fetch(arguments: Sequence[str], run_dir: Path, *,
     through every route signature in the fetch family.  The stage used
     to report only ``stage_started`` and, some minutes later,
     ``stage_finished``, so a front end had nothing to draw in between.
+
+    ``posting_relay`` is for a fetch that runs as a stage of its own,
+    before the preparation: its ``posting/`` folder (the schedule, each
+    lead's marker, the start need it waits on) is carried onto the
+    stream for as long as it runs, as ``posting_schedule``,
+    ``lead_posted``, ``lead_ready`` and the ``phase: start`` source
+    waits (:class:`woof.chain_events.HostedPostingRelay`, the relay a
+    fetch beside the preparation already has).  The breakage it
+    prevents, measured live on 2026-10-01 (woof go on an hrrr-prs tree
+    and on an ecmwf-open-data domain, both hosted by this module): the
+    fetch waited for its start needs and dated every lead as it posted,
+    and the run's stream said none of it, only transfer progress, so a
+    page following ``events.jsonl`` could not tell a wait on the source
+    from a slow download and had no lead to show.  A caller that relays
+    the posting folder itself leaves it off.
     """
 
     from woof.cli import parse_fetch_arguments
@@ -6117,11 +6871,23 @@ def _run_fetch(arguments: Sequence[str], run_dir: Path, *,
             pass
 
     args = parse_fetch_arguments(arguments)
-    if events is None:
-        code = args.func(args)
-    else:
-        with progress_mod.event_sink(relay):
+    posting = None
+    if (posting_relay and events is not None
+            and getattr(args, "out", None) is not None):
+        from woof.chain_events import HostedPostingRelay
+
+        posting = HostedPostingRelay(events, data_dir=args.out)
+        posting.start(since_unix_ms=int(time.time() * 1000))
+    try:
+        if events is None:
             code = args.func(args)
+        else:
+            with progress_mod.event_sink(relay):
+                code = args.func(args)
+    finally:
+        if posting is not None:
+            # Every lead the fetch dated lands before the stage closes.
+            posting.stop()
     if code:
         raise StageExitError("fetch", code)
 
@@ -6970,9 +7736,11 @@ def _source_fetch_facts(fetch_routes: Any, source_id: str) -> dict[str, Any]:
     """
 
     if source_id in set(fetch_routes.route_ids()):
-        return {"kind": "table_route", "route_id": source_id, "refusal": None}
+        return {"kind": "table_route", "route_id": source_id, "refusal": None,
+                "posting": _source_posting_facts(source_id)}
     if source_id in set(fetch_routes.LEGACY_ROUTE_SOURCES):
-        return {"kind": "legacy_transport", "route_id": None, "refusal": None}
+        return {"kind": "legacy_transport", "route_id": None, "refusal": None,
+                "posting": _source_posting_facts(source_id)}
     kind = ("refused" if source_id in set(fetch_routes.refusal_ids())
             else "none")
     refusal = None
@@ -6980,7 +7748,24 @@ def _source_fetch_facts(fetch_routes: Any, source_id: str) -> dict[str, Any]:
         fetch_routes.route_for(source_id)
     except Exception as error:  # noqa: BLE001 - a query mode reports
         refusal = str(error).split("[[explain]]")[0].strip()
-    return {"kind": kind, "route_id": None, "refusal": refusal}
+    return {"kind": kind, "route_id": None, "refusal": refusal, "posting": None}
+
+
+def _source_posting_facts(source_id: str) -> dict[str, Any] | None:
+    """How the source's cycles post: the route table's posting block and rules.
+
+    What a site plans a launch from without asking a host (DESIGN A136,
+    3.7): the shape, the lateness budget and poll ceiling, and the
+    ``publication_lag`` rules each lead's ``expected_at`` comes from.  A
+    query mode reports, so a lookup that fails says so in the block.
+    """
+
+    try:
+        from woof.source_posting import declaration
+
+        return declaration(source_id)
+    except Exception as error:  # noqa: BLE001 - a query mode reports
+        return {"error": f"{type(error).__name__}: {error}"}
 
 
 def source_inventory() -> dict[str, Any]:
@@ -7458,14 +8243,20 @@ def run_plan_main(args: argparse.Namespace) -> int:
             # resolved cycle, its gray-zone advisories, its fit notes.
             # All of that belongs to the reader on stderr; the document
             # is the answer.
-            with contextlib.redirect_stdout(sys.stderr):
+            with contextlib.redirect_stdout(sys.stderr),                     tempfile.TemporaryDirectory(prefix="gpuwm-cycle-") as scratch:
                 resolution, _exp, _data = resolve_plan(
-                    plan, require_inputs=False)
+                    plan_at_cycle(plan, Path(scratch)), require_inputs=False)
             return answer(resolution)
         if getattr(args, "estimate", False):
-            with contextlib.redirect_stdout(sys.stderr):
-                document = estimate_plan(plan)
+            with contextlib.redirect_stdout(sys.stderr),                     tempfile.TemporaryDirectory(prefix="gpuwm-cycle-") as scratch:
+                document = estimate_plan(plan_at_cycle(plan, Path(scratch)))
             return answer(document)
+        if getattr(args, "readiness", False):
+            with contextlib.redirect_stdout(sys.stderr):
+                document, code = plan_readiness(
+                    plan, no_probe=getattr(args, "no_probe", False))
+            answer(document)
+            return code
     except PlanError as error:
         # A draft too big for its card is refused with its figures: the
         # machine channel gets them as the memory refusal document every
@@ -7524,6 +8315,16 @@ def register_cli(subparsers: argparse._SubParsersAction) -> None:
         help="print this plan's VRAM estimate, output-frame counts, "
              "download and disk bytes as one JSON document, and run "
              "nothing")
+    mode.add_argument(
+        "--readiness", action="store_true",
+        help="print gpuwm.readiness.v1 for the window this plan fetches "
+             "and run nothing: exit 0 ready (or nothing to probe), 75 not "
+             "yet (with expected_ready_at and retry_after_seconds), 2 "
+             "refused (the window can never start)")
+    parser.add_argument(
+        "--no-probe", dest="no_probe", action="store_true",
+        help="with --readiness: compute the schedule from the source "
+             "table only and ask no host")
     mode.add_argument(
         "--catalog", action="store_true",
         help="print the renderer's product catalog as one JSON "
@@ -7584,13 +8385,14 @@ if __name__ == "__main__":
 __all__ = [
     "CATALOG_SCHEMA", "DEFAULT_OUTPUT_ROOT", "ESTIMATE_SCHEMA", "EVENTS_FILENAME",
     "EVENT_SCHEMA", "EVENT_TAGS", "MANIFEST_FILENAME", "MANIFEST_SCHEMA",
-    "PHYSICS_PROFILES_SCHEMA",
+    "PHYSICS_PROFILES_SCHEMA", "POSTING_EVENT_FIELDS",
     "PLAN_SCHEMA", "PROBE_SCHEMA", "RESOLVE_SCHEMA", "ROUTES",
     "SOURCES_SCHEMA", "STAGES",
     "WARNING_CODES", "WARNING_CODE_PREFIXES",
     "GENERATED_CONFIG_NAME",
     "DiskRefusal", "EventStream", "PlanError", "Route", "RunObserver", "RunPlan",
     "build_plan", "collect_warnings", "corridor_estimate",
+    "source_behind_fields",
     "declared_inputs", "disk_admission_refusal", "domain_size_floor",
     "missing_inputs_refusal",
     "estimate_plan", "execute_plan", "follow_statics_decision",

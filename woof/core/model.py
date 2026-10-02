@@ -354,7 +354,13 @@ RESTART_TOLERATED_EXPERIMENT_FIELDS = (
     # tape -- so a trimmed run resumes a full run's checkpoints and back
     # again.  Same law as "tiles" above.
     "output")
-RESTART_TOLERATED_DOMAIN_FIELDS = ("history_interval_s",)
+#: The history window (history_begin_s / history_end_s) is output-only
+#: like the cadence beside it: it decides which instants reach the history
+#: tape and changes no number the model integrates, so a resume may move
+#: it -- and every fingerprint written before the fields existed keeps its
+#: value because they leave the payload unconditionally.
+RESTART_TOLERATED_DOMAIN_FIELDS = (
+    "history_interval_s", "history_begin_s", "history_end_s")
 RESTART_TOLERATED_RUN_FIELDS = (
     "run_seconds", "output_interval_s", "restart_interval_s")
 
@@ -509,6 +515,15 @@ def restart_identity_payload(exp) -> dict:
     # other's checkpoints -- and every pre-feature fingerprint stays
     # byte-identical because the key is simply absent, as it always was.
     experiment.pop("auto_mix_isotropic", None)
+    # The off-centering provenance label leaves for the same reason: the
+    # epssm that runs (raised by the measured floor or not) binds on
+    # run.epssm, and an "auto" 0.1 resumes a written 0.1's checkpoints.
+    experiment.pop("auto_epssm", None)
+    # WRF's smooth_cg_topo, absent-stays-absent: off it is how every root
+    # terrain was built before the key existed; on, it binds, because the
+    # blended root terrain is what the whole run integrates.
+    if not experiment.get("smooth_cg_topo", False):
+        experiment.pop("smooth_cg_topo", None)
     for domain in experiment.get("domains", ()):
         for name in RESTART_TOLERATED_DOMAIN_FIELDS:
             domain.pop(name, None)
@@ -592,6 +607,17 @@ def restart_identity_payload(exp) -> dict:
             run.pop("relax_timescale_s", None)
         if not run.get("relax_w"):
             run.pop("relax_w", None)
+        # The urban canopy keys, on the same convention: with
+        # sf_urban_physics = 0 (WRF's default and every experiment written
+        # before the urban models existed) all three drop out, so no
+        # pre-urban fingerprint or checkpoint moves; a selected urban model
+        # binds all three, because each decides what the urban columns
+        # integrate.  woof/io/restart.py's configuration digest drops the
+        # same three on the same condition (_URBAN_DIGEST_FIELDS).
+        if not run.get("sf_urban_physics"):
+            for name in ("sf_urban_physics", "use_wudapt_lcz",
+                         "num_urban_hi"):
+                run.pop(name, None)
         # Scheme-scoped knobs leave the identity of every domain that does
         # not select their scheme (:data:`SCHEME_SCOPED_RUN_FIELDS`).
         selected = run.get("mp_physics")
@@ -654,6 +680,40 @@ def restart_identity_payload(exp) -> dict:
         else:
             for name in ADAPTIVE_POLICY_RUN_FIELDS:
                 run.pop(name, None)
+        # An absent key and the default describe the original clock.
+        if not run.get("adaptive_nest_lattice", False):
+            run.pop("adaptive_nest_lattice", None)
+        # WRF's slope_rad / topo_shading / shadlen, absent-stays-absent:
+        # off, none of the three is read, so every fingerprint written
+        # before they existed keeps its value; a domain that turns the
+        # slope flux on binds all three, because together they are the
+        # shortwave its land surface integrates.
+        if not run.get("slope_rad", 0):
+            for name in ("slope_rad", "topo_shading", "shadlen"):
+                run.pop(name, None)
+        elif not run.get("topo_shading", 0):
+            run.pop("topo_shading", None)
+            run.pop("shadlen", None)
+        # ... and the original explicit vertical advection (A158).
+        if not run.get("zadvect_implicit", 0):
+            run.pop("zadvect_implicit", None)
+        # ... and w_damp measured from Courant 1, WRF's default (A165).
+        if float(run.get("w_crit_cfl", 1.0)) == 1.0:
+            run.pop("w_crit_cfl", None)
+        # Noah mosaic, absent-stays-absent: off (WRF's default), no tile is
+        # integrated and none of the three keys is read, so every
+        # fingerprint written before mosaic existed keeps its value.  On,
+        # the switch and tile count bind; the urban canopy rule binds when
+        # it is not WRF's ("dominant"), because the town rule gives towns in
+        # rural cells an urban fraction WRF's rule leaves at zero.
+        # woof/io/restart.py's header and digest drop them on the same
+        # conditions.
+        if not run.get("sf_surface_mosaic", 0):
+            for name in ("sf_surface_mosaic", "mosaic_cat",
+                         "mosaic_urban_canopy"):
+                run.pop(name, None)
+        elif run.get("mosaic_urban_canopy") == "dominant":
+            run.pop("mosaic_urban_canopy", None)
     return experiment
 
 

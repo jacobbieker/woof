@@ -65,11 +65,13 @@ from woof.ingest.preparation_price import (
     price_forcing_preparation, price_preparation_floor)
 from woof.ingest.preprocess_backend import (
     admit_preparation,
+    preprocess_identity,
     release_backend_memory,
     resolve_preprocess_backend,
 )
 from woof.ingest.real import initialize_real
 from woof.ingest.ruc_soil import preprocess_land_surface_soil
+from woof.ingest.cg_topo import RootTerrainBlend
 from woof.ingest.soil import soil_source_orography
 from woof.ingest.soil_downscale import (
     declared_soil_texture_downscale, soil_mesh_plan_from_case)
@@ -97,6 +99,7 @@ from woof.source_hierarchy import (
 from woof.hrrr_native_static import verified_static_catalog
 from woof.static.build import (build_static_for_domain,
                                 geog_selection_from_catalog)
+from woof.static.terrain_smoothing import selection_carrier_kwargs
 from woof.wrf_direct import export_prepared_wrf
 from woof.vertical_contract import validate_explicit_eta_grid
 from woof.vertical_adaptation import (
@@ -243,14 +246,15 @@ def _announce_adaptation(sentence: str) -> None:
          "all carry the same coordinate.  p_top is untouched.")
 
 
-def _survey_static_catalog(exp, wps_namelist, geog_root):
+def _survey_static_catalog(exp, wps_namelist, geog_root, static_highres=None):
     """The WPS_GEOG catalog the terrain survey needs, or None."""
 
     if geog_root is None or len(exp.domains) < 2:
         return None
     catalog, _ = verified_static_catalog(
         Path(wps_namelist), Path(geog_root),
-        [domain.grid_id for domain in exp.domains])
+        [domain.grid_id for domain in exp.domains],
+        **selection_carrier_kwargs(static_highres))
     return catalog
 
 
@@ -267,14 +271,18 @@ def _load_static(path: Path, grid, ny: int, nx: int) -> dict[str, np.ndarray]:
 
 
 def _static_from_geog(
-        wps_namelist: Path, geog_root: Path, grid, cfg,
+        wps_namelist: Path, geog_root: Path, grid, cfg, *, static_highres=None,
 ) -> tuple[dict[str, np.ndarray], dict[str, object], dict[str, object]]:
     """The root statics from WPS GEOG, validated but for their land height.
 
     The land-height check is the caller's, as for :func:`_load_static`.
     """
+    # Only a carrier the selection reads (a non-default terrain smoothing,
+    # or a land cover its block builds) rides on the catalog, so any other
+    # root is built through the call it always made.
     catalog, receipt = verified_static_catalog(
-        Path(wps_namelist), Path(geog_root), (1,))
+        Path(wps_namelist), Path(geog_root), (1,),
+        **selection_carrier_kwargs(static_highres))
     fields = build_static_for_domain(grid, catalog, 1)
     # The land-use table's own ISLAKE/ISWATER, from the same GEOG index
     # the statics were built from, so the water-temperature assembly
@@ -556,7 +564,8 @@ def prepare_era5_wrf(
     landuse_attrs = None
     if static_input is None:
         static, root_static_receipt, landuse_attrs = _static_from_geog(
-            paths["wps_namelist"], Path(geog_root), grid, cfg)
+            paths["wps_namelist"], Path(geog_root), grid, cfg,
+            static_highres=static_highres)
         root_static_provider = "native-wps-geog"
     else:
         root_static_receipt = verify_native_static_receipt(
@@ -565,7 +574,8 @@ def prepare_era5_wrf(
         root_static_provider = "prebuilt-hash-bound-cache"
         if geog_root is not None:
             catalog, _ = verified_static_catalog(
-                paths["wps_namelist"], Path(geog_root), (1,))
+                paths["wps_namelist"], Path(geog_root), (1,),
+                **selection_carrier_kwargs(static_highres))
             landuse_attrs = geog_selection_from_catalog(
                 catalog, 1).landuse_global_attrs()
     static, root_static_receipt = apply_prepared_highres(
@@ -582,7 +592,7 @@ def prepare_era5_wrf(
     exp, vertical_adaptation = adapt_experiment_for_statics(
         exp, grids, root_terrain=static["HGT_M"],
         static_catalog=_survey_static_catalog(
-            exp, paths["wps_namelist"], geog_root),
+            exp, paths["wps_namelist"], geog_root, static_highres),
         static_highres=static_highres, announce=_announce_adaptation)
     cfg = exp.root.run
     source_terrain = (
@@ -769,6 +779,12 @@ def prepare_era5_wrf(
     forcing = StateBoundaryFrames(
         spec_bdy_width=cfg.spec_bdy_width,
         spec_zone=cfg.spec_zone, relax_zone=cfg.relax_zone)
+    # WRF's smooth_cg_topo (woof.ingest.cg_topo): the root terrain is
+    # blended toward ERA5's once, before the first initialization reads
+    # it: the declared source-orography artifact when there is one, else
+    # the invariant SOILGEO the snapshot carries.  Off, this does nothing.
+    terrain_blend = RootTerrainBlend(exp, static, route="era5")
+
     def build_forcing_time(index):
         # One forcing time's build, unchanged.  A single domain calls it
         # start first (woof.ingest.boundary_stream).
@@ -779,6 +795,9 @@ def prepare_era5_wrf(
             backend=preprocess,
             target_landmask=np.asarray(static["LANDMASK"]) >= 0.5,
             water_temperature_statics=water_statics)
+        terrain_blend.before_initialize(
+            source_terrain if source_terrain is not None
+            else met.fields.get("SOURCE_OROGRAPHY"))
         coord = make_vertical_coord(
             cfg.nz, hybrid_opt=cfg.hybrid_opt, etac=cfg.etac,
             eta_levels=exp.vertical.eta_levels)
@@ -896,7 +915,9 @@ def prepare_era5_wrf(
             "sha256": _sha256(paths["bridge"]),
             "implementation": "gpuwm-all-rust-grib1-bridge",
         },
-        "preprocessing": preprocess_receipt,
+        # What ran, without what was measured (A138): the proof below
+        # keeps the whole receipt.
+        "preprocessing": preprocess_identity(preprocess_receipt),
         **water_overlay_binding,
     }
 
@@ -1123,7 +1144,7 @@ def prepare_era5_wrf(
                 "last_valid_time": times[-1].isoformat(),
                 "forcing_hours": forcing_hours,
                 "boundary_interval_seconds": boundary_interval_seconds,
-                "preprocessing": preprocess_receipt,
+                "preprocessing": preprocess_identity(preprocess_receipt),
                 **soil_floor_binding,
             },
             lbc={

@@ -25,7 +25,7 @@ from .constants import (
     NATIVE_DEVICE_EVIDENCE_SCHEMA,
 )
 from .physics.builtin_adapters import ensure_builtin_global_physics_adapters
-from .pins import KNOWN_PINS_HASHES, pins_hash
+from .pins import ACCEPTED_PINS_HASHES, pins_hash
 from .runner import CHECKPOINT_PREFIX, RECEIPT_NAME, run
 
 
@@ -72,7 +72,7 @@ def _write_json(path: Path, payload: dict[str, object]) -> Path:
 
 def _read_json(path: str | Path, schema: str) -> dict[str, object]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if payload.get("schema") != schema or payload.get("pins_hash") not in KNOWN_PINS_HASHES:
+    if payload.get("schema") != schema or payload.get("pins_hash") not in ACCEPTED_PINS_HASHES:
         raise ValueError("native qualification receipt schema/pins mismatch")
     self_hash = payload.pop("self_sha256", None)
     if self_hash != hashlib.sha256(_canonical(payload)).hexdigest():

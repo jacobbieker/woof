@@ -47,6 +47,12 @@ _SOIL_LAYERS = 4
 EXPORT_RECEIPT_NAME = "arwen-global-export-receipt.json"
 #: wrfout global attribute stamped with the same label.
 SURFACE_DIAGNOSTICS_ATTR = "ARWEN_SURFACE_DIAGNOSTICS"
+#: The model the engine's renderer names in each map's metadata row.  A
+#: tape imports under the renderer's generic wrfout identity, so without
+#: this attribute every global map said "WRF" (the engine reads it from
+#: 2.8.1; an older engine ignores it and draws as before).
+MODEL_LABEL_ATTR = "GPUWM_MODEL_LABEL"
+MODEL_LABEL = "WOOF Global"
 EXPORT_FALLBACK_SOURCE = "export-similarity-fallback"
 SURFACE_DIAGNOSTICS_SOURCES = {
     NATIVE_SURFACE_DIAGNOSTICS_SOURCE: (
@@ -283,6 +289,7 @@ def export_wrfout(
         "GRID_ID": np.int32(1),
         "PARENT_ID": np.int32(0),
         "DT": np.float32(cfg.dt_s),
+        MODEL_LABEL_ATTR: MODEL_LABEL,
     }
 
     output = Path(outdir)

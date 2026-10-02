@@ -310,6 +310,13 @@ def _install_prepare_fakes(
         mapping_updates=None, nz: int = 49, eta: bool = True,
         water_policy="era5_class_coherent"):
     run_seconds = cadence if run_seconds is None else run_seconds
+    if domain_count > 1:
+        # These doubles stand in for the one-shot hierarchy call, which is
+        # the tree route with chaining off (and a CUDA tree's route); the
+        # chained tree is covered by tests/test_stream_tree_producer.py, by
+        # test_a_two_domain_mapped_tree_chains_through_prepare_mapped_wrf
+        # below and by the real-data byte-identity proof.
+        monkeypatch.setenv("WOOF_CHAINED_PREP", "0")
     exp = _experiment(domain_count, nz=nz, run_seconds=run_seconds, eta=eta)
     # Preparation validates actual configured physics before decoding.
     from dataclasses import asdict
@@ -1341,6 +1348,138 @@ def test_invalid_target_contract_stops_before_static_or_preprocessing(
     assert not args["output_root"].exists()
 
 
+def _icon_global_target_updates():
+    """The packaged icon-global target's spacing keys: the 1 h DWD posts,
+    taken at whole multiples (A173), while its route defaults to 3 h."""
+
+    from woof.source_authorities import (
+        BOUNDARY_MULTIPLES_KEY, packaged_mapping_target)
+
+    target = packaged_mapping_target("icon-global-grib2-v1")
+    assert target["boundary_interval_seconds"] == 3600
+    assert target[BOUNDARY_MULTIPLES_KEY] is True
+    return {"boundary_interval_seconds": 3600, BOUNDARY_MULTIPLES_KEY: True}
+
+
+def _counting_decode(monkeypatch):
+    decodes = []
+    decode = mapped_direct.decode_composed_source
+
+    def counted(*args, **kwargs):
+        decodes.append(1)
+        return decode(*args, **kwargs)
+
+    monkeypatch.setattr(mapped_direct, "decode_composed_source", counted)
+    return decodes
+
+
+def _write_share_interval(args, seconds):
+    args["wps_namelist"].write_text(
+        f"&share\n interval_seconds = {seconds},\n/\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("cadence_h", [3, 1])
+def test_plan_review_holds_a_run_to_its_own_spacing_not_the_publishers(
+        monkeypatch, tmp_path, cadence_h):
+    """A173 review: icon-global's mapping declares the 1 h DWD posts and
+    takes whole multiples, so its default 3 h run is held at plan review
+    to the 3 h it is prepared at, the namelist's interval_seconds.  At
+    dt = 54 s (3 h = 200 steps, 1 h = 66 2/3) the 3 h run prepares, and the
+    same config fetched at --cadence 1 is refused before any decode, naming
+    the 3600 s and the namelist it was read from."""
+
+    seconds = cadence_h * 3600
+    args, calls, expected = _install_prepare_fakes(
+        monkeypatch, tmp_path, domain_count=1, backend="cpu",
+        cadence=seconds, run_seconds=10800,
+        mapping_updates=_icon_global_target_updates())
+    expected.exp.dt_exact = lambda grid_id: Fraction(54, 3 ** (grid_id - 1))
+    expected.exp.root.run.dt = 54
+    _write_share_interval(args, seconds)
+    decodes = _counting_decode(monkeypatch)
+
+    if cadence_h == 3:
+        proof = mapped_direct.prepare_mapped_wrf(**args)
+        assert proof["schema"] == mapped_direct.PROOF_SCHEMA
+        assert decodes == [1]
+        assert len(calls["single_export"]) == 1
+        return
+    with pytest.raises(
+            ValueError,
+            match=r"boundary_interval_seconds = 3600 s for mapped target at "
+                  r"&share/interval_seconds of .*namelist\.wps is not a "
+                  r"whole number of root-domain steps: d01 dt = 54 s "
+                  r"exactly, cadence/dt = 200/3"):
+        mapped_direct.prepare_mapped_wrf(**args)
+    assert decodes == []
+    assert calls["build_static"] == 0
+    assert not args["output_root"].exists()
+
+
+def test_plan_review_refuses_a_nest_start_off_the_runs_own_seams(
+        monkeypatch, tmp_path):
+    """The seam half: a child starting at +1 h on a 3 h icon-global run
+    lands on no forcing time.  Plan review holds it to the run's 3 h and
+    refuses it before the decode, as it did before A173 moved the
+    mapping's spacing to the publisher's hour."""
+
+    args, calls, expected = _install_prepare_fakes(
+        monkeypatch, tmp_path, domain_count=2, backend="cpu",
+        cadence=10800, mapping_updates=_icon_global_target_updates())
+    offsets = {1: Fraction(0), 2: Fraction(3600)}
+    expected.exp.domain_start_offset_exact = lambda grid_id: offsets[grid_id]
+    _write_share_interval(args, 10800)
+    decodes = _counting_decode(monkeypatch)
+
+    with pytest.raises(
+            ValueError,
+            match=r"d02 .*not aligned to the boundary-forcing cadence: "
+                  r"boundary_interval_seconds = 10800 s"):
+        mapped_direct.prepare_mapped_wrf(**args)
+    assert decodes == []
+    assert not calls["hierarchy"]
+
+
+def test_plan_review_without_a_namelist_spacing_waits_for_the_series(
+        monkeypatch, tmp_path):
+    """A namelist that declares no interval_seconds leaves a whole-multiple
+    target's spacing unknown until the decode: plan review checks every
+    other limit, and the decoded 3 h series is held to the timing law at
+    its own spacing, so dt = 54 s is not refused for the 1 h it never
+    uses."""
+
+    args, calls, expected = _install_prepare_fakes(
+        monkeypatch, tmp_path, domain_count=1, backend="cpu",
+        cadence=10800, mapping_updates=_icon_global_target_updates())
+    expected.exp.dt_exact = lambda grid_id: Fraction(54, 3 ** (grid_id - 1))
+    expected.exp.root.run.dt = 54
+    assert mapped_direct._plan_review_spacing(
+        expected.mapping["target"], args["wps_namelist"]) == (None, None)
+
+    proof = mapped_direct.prepare_mapped_wrf(**args)
+    assert proof["schema"] == mapped_direct.PROOF_SCHEMA
+    assert len(calls["single_export"]) == 1
+
+
+def test_plan_review_of_a_single_spacing_target_reads_no_namelist(tmp_path):
+    """A target without whole multiples takes one spacing, so plan review
+    holds the run to it whatever the namelist says."""
+
+    namelist = tmp_path / "namelist.wps"
+    namelist.write_text("&share\n interval_seconds = 10800,\n/\n",
+                        encoding="utf-8")
+    assert mapped_direct._plan_review_spacing(
+        _target_mapping()["target"], namelist) == (3600, None)
+    multiples = _target_mapping(accept_boundary_interval_multiples=True)
+    assert mapped_direct._plan_review_spacing(
+        multiples["target"], namelist) == (
+            10800, f"&share/interval_seconds of {namelist}")
+    namelist.write_text("&share\n interval_seconds = 5400,\n/\n",
+                        encoding="utf-8")
+    assert mapped_direct._plan_review_spacing(
+        multiples["target"], namelist) == (None, None)
+
+
 def _mapped_cli_args(source_format: str, *decoder_args: str) -> list[str]:
     return [
         "--source-format", source_format,
@@ -2167,6 +2306,152 @@ def test_an_unchained_failure_publishes_nothing(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match="export physics differs"):
         mapped_direct.prepare_mapped_wrf(**args)
     assert not args["output_root"].exists()
+
+
+def test_a_two_domain_mapped_tree_chains_through_prepare_mapped_wrf(
+        monkeypatch, tmp_path):
+    """A CPU tree with chaining on: head, one segment per root interval, seal.
+
+    Driven through ``prepare_mapped_wrf`` itself, with the hierarchy's
+    head and seal and the artifact writers stood in (their own tests and
+    the real-data identity proof cover them) and the real stream writer
+    between them, so this holds the route's wiring: the head carries the
+    tree and binds the child's receipt, every root interval becomes a
+    segment, the seal is handed the whole boundary series, the one-shot
+    hierarchy call is not made, and the forecast doors bind the head as a
+    tree.  The start states between head and seal go through
+    ``TreeStartStates`` (A136 L7a): released at the head with each child's
+    head cache digest, re-read at the seal (the root's boundary set from
+    the sealed cache, which here is the recording cache stream: every
+    segment it was handed), and the sealed tree held to the head.
+    """
+    import woof.ingest.prepared_cache as prepared_cache_module
+    from woof import stage_cli
+    from woof.ingest.boundary_stream import (
+        LAYOUT_DOMAIN_TREE, read_head, segment_marker_path)
+
+    args, calls, expected = _install_prepare_fakes(
+        monkeypatch, tmp_path, domain_count=2, backend="cpu")
+    monkeypatch.setenv("WOOF_CHAINED_PREP", "1")
+    # The seal's receipt carries the sealed cache's content digest, which
+    # the start states are re-read against and the sealed tree held to.
+    monkeypatch.setattr(
+        prepared_cache_module.PreparedCacheStream, "seal",
+        lambda self: {"status": "PASS", "content_sha256": "f" * 64})
+    receipt = {"grid_id": 2, "artifacts": {
+        "prepared_cache": {"payload_bytes": 64,
+                           "content_sha256": "e" * 64}}}
+    receipt_bytes = json.dumps(receipt).encode("utf-8")
+    seen = {}
+    tree_head = SimpleNamespace(
+        child_results=("d02 start",),
+        forcing_identity={"forcing_hours": [0, 1]},
+        static_receipt={"status": "PASS"},
+        source_coverage_receipt={"status": "PASS"},
+        statics_corridor_receipt=None,
+        bound_source_identity=lambda identity: dict(identity))
+
+    def head(**kwargs):
+        seen["head"] = kwargs
+        return tree_head
+
+    def static_files(directory, *, domain, grid, static_fields):
+        (Path(directory) / "native-static.npz").write_bytes(b"static")
+        (Path(directory) / "geometry-receipt.json").write_text(
+            "{}", encoding="utf-8")
+        return {"sha256": "c" * 64}, {}
+
+    def children(domain_root, *, exp, child_results, **kwargs):
+        seen["children"] = child_results
+        folder = Path(domain_root) / "d02"
+        folder.mkdir(parents=True)
+        (folder / "receipt.json").write_bytes(receipt_bytes)
+        return [SimpleNamespace(receipt=receipt)]
+
+    def binding(**kwargs):
+        seen["binding"] = kwargs
+        return SimpleNamespace(identity={"source": "chained-tree-test"},
+                               metadata={"user": {}})
+
+    def seal(sealed_head, **kwargs):
+        seen["seal"] = (sealed_head, kwargs)
+        Path(kwargs["artifact_output"]).mkdir(parents=True)
+        return SimpleNamespace(
+            hierarchy=SimpleNamespace(
+                moisture_floor_receipts={},
+                artifacts=SimpleNamespace(receipt={"status": "PASS"}),
+                wrf_manifest={"status": "NOT_REQUESTED"},
+                timings_seconds={"initialize_children": 0.1}),
+            statics_corridor_receipt=None)
+
+    class StartStates:
+        @classmethod
+        def release(cls, *, root_result, root_met, child_results,
+                    child_content_sha256):
+            seen["release"] = {"root_result": root_result,
+                               "child_results": child_results,
+                               "children": dict(child_content_sha256)}
+            return cls()
+
+        def reread(self, root, *, exp, grids, root_identity,
+                   root_content_sha256):
+            seen["reread"] = root_content_sha256
+            return (seen["release"]["root_result"], "root met",
+                    SimpleNamespace(intervals=tuple(
+                        calls["cache_stream"]["segments"])),
+                    seen["release"]["child_results"])
+
+        def require_sealed_is_head(self, artifact_receipt, *,
+                                   root_content_sha256):
+            seen["sealed_is_head"] = root_content_sha256
+
+    monkeypatch.setattr(mapped_direct, "TreeStartStates", StartStates)
+    monkeypatch.setattr(
+        mapped_direct, "prepare_regular_source_hierarchy_head", head)
+    monkeypatch.setattr(mapped_direct, "write_domain_static_files",
+                        static_files)
+    monkeypatch.setattr(mapped_direct, "write_child_domain_artifacts",
+                        children)
+    monkeypatch.setattr(mapped_direct, "root_domain_artifact_binding",
+                        binding)
+    monkeypatch.setattr(mapped_direct, "seal_regular_source_hierarchy", seal)
+    monkeypatch.setattr(mapped_direct, "hierarchy_moisture_floor_receipts",
+                        lambda *operands: {})
+
+    proof = mapped_direct.prepare_mapped_wrf(**args)
+
+    root = args["output_root"]
+    published = read_head(root)
+    assert published["decision"]["chained"] is True
+    assert published["layout"] == LAYOUT_DOMAIN_TREE
+    assert published["domains"] == ["d01", "d02"]
+    assert published["basis"]["tree"]["children_receipts"] == {
+        "d02": hashlib.sha256(receipt_bytes).hexdigest()}
+    assert published["basis"]["cache"]["directory"] == (
+        "hierarchy-head/domains/d01/prepared-cache")
+    # The children came from the start time, into the head.
+    assert seen["children"] == ("d02 start",)
+    assert seen["head"]["root_initial_result"] is expected.results[0]
+    # Released at the head with the child's head cache digest, and the
+    # sealed tree held to the head.
+    assert seen["release"]["root_result"] is expected.results[0]
+    assert seen["release"]["children"] == {"d02": "e" * 64}
+    assert seen["reread"] == seen["sealed_is_head"] == "f" * 64
+    # One segment per root interval, and the seal holds the whole series.
+    intervals = len(expected.snapshots) - 1
+    assert all(segment_marker_path(root, k).is_file()
+               for k in range(intervals))
+    sealed_head, sealed = seen["seal"]
+    assert sealed_head is tree_head
+    assert len(sealed["root_boundaries"].intervals) == intervals
+    assert sealed["artifact_output"] == root / "hierarchy-artifacts"
+    # The one-shot hierarchy call is the unchained route's.
+    assert not calls["hierarchy"]
+    assert proof["boundary_stream"]["head_sha256"] == published["head_sha256"]
+    assert (root / "proof.json").is_file()
+    # The forecast doors bind this head as a tree.
+    bundle = stage_cli.resolve_head_bundle(root, published["head_sha256"])
+    assert bundle["layout"] == "tree" and bundle["domains"] == 2
 
 
 @pytest.mark.parametrize("mode", ["optional", "required", "off"])

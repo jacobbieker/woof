@@ -259,13 +259,18 @@ def test_the_local_da_door_binds_the_default_row_at_its_rungs_grid(source):
 
 
 @pytest.mark.parametrize("ladder", ["12-3-1-0.5", "auto"])
-def test_the_assistant_choosing_the_sources_own_default_on_a_sub_km_ladder_runs_it(tmp_path, ladder):
+def test_the_assistant_choosing_the_sources_own_default_on_a_sub_km_ladder_runs_it(tmp_path, monkeypatch, ladder):
     """The real planner picks Morrison with KF (gfs's own default) on a ladder reaching 500 m.
 
     It is not what that ladder runs unnamed, so the plan names it, and the run asserted it on every domain:
     the domain-tree forecast refused it after the download and the preparation, because the wizard turns
     cumulus off on the nests and damps them by the depth ladder.  The run now takes the file the wizard
     wrote from it, Morrison on the root, and asserts nothing the forecast refuses.
+
+    The system row names a 32 GB card.  The fit must reach the 500 m nest with MYNN at that card's
+    36,864 columns even off a card, or with a stale 16 GB runtime choice.  Pricing the off-card cap
+    instead made auto stop at 1 km, where the source's own default is the unnamed one and nothing
+    is named.
     """
 
     from datetime import datetime, timezone
@@ -273,7 +278,34 @@ def test_the_assistant_choosing_the_sources_own_default_on_a_sub_km_ladder_runs_
 
     from woof.experiment import load_experiment
     from woof.gui.assistant.plan import Planner
+    from woof.core import mynn_pbl_scratch as scratch, preflight as pf
 
+    card = "32gb"
+    monkeypatch.delenv(scratch.MYNN_PBL_COLUMN_CHUNK_ENV, raising=False)
+    # CUDA usable total measured on the physical 16 GB reference card.
+    stale = scratch.mynn_column_chunk_for_memory(
+        49, total_bytes=16611278848, free_bytes=15 * 1024 ** 3, environ={})
+    assert stale.chunk == 16384
+    monkeypatch.setattr(scratch, "_RESOLVED", {49: stale})
+    monkeypatch.setattr(scratch, "_PINNED", None)
+    monkeypatch.setattr(scratch, "_TILE_WALKED", {})
+    memo = dict(scratch._RESOLVED)
+    published = scratch.MYNN_PBL_COLUMN_CHUNK
+
+    def no_host_probe(device=None):
+        pytest.fail("the planner's declared-card fit consulted the host card")
+
+    monkeypatch.setattr(scratch, "probe_mynn_card", no_host_probe)
+    column_chunk = pf.mynn_pbl_column_chunk
+    priced_widths = []
+
+    def priced(cfg, **kwargs):
+        width = column_chunk(cfg, **kwargs)
+        if int(cfg.nx) * int(cfg.ny) >= 36864:
+            priced_widths.append((int(cfg.nz), width))
+        return width
+
+    monkeypatch.setattr(pf, "mynn_pbl_column_chunk", priced)
     source = "gfs"
     row = _menus()[source]
     own = row["default_profile"]
@@ -295,7 +327,7 @@ def test_the_assistant_choosing_the_sources_own_default_on_a_sub_km_ladder_runs_
                                 {"id": THOMPSON_MYNN_RUC_RTE_RRTMGP_PROFILE_ID, "summary": "Thompson, MYNN, RUC"}]}
     api = SimpleNamespace(sources=lambda: {"default_cycle": CYCLE, "sources": [sources_row],
                                            "ladders": ["12", "12-3", "12-3-1", "12-3-1-0.5", "auto"]},
-                          system=lambda: {"card": "32gb", "devices": [{"name": "card"}]}, fit=fit)
+                          system=lambda: {"card": card, "devices": [{"name": "card"}]}, fit=fit)
     picks = {"day": "now", "box_size": "300", "ladder": ladder, "source": source, "physics": own,
              "machine": "this-computer"}
 
@@ -311,6 +343,9 @@ def test_the_assistant_choosing_the_sources_own_default_on_a_sub_km_ladder_runs_
     if ladder == "auto":
         # Fitted before the physics question, with no physics named: the run the field left alone makes.
         assert "profile" not in fits[0]
+        # The fit priced the sub-km suite's MYNN at the width the named card walks, not at the off-card cap.
+        assert priced_widths and set(priced_widths) == {(49, 36864)}
+        assert scratch._RESOLVED == memo and scratch.MYNN_PBL_COLUMN_CHUNK == published
     assert fields["profile"] == own and fields["ladder"] == ladder
     plan, config = _written(tmp_path, dict(fields), "run")
     assert min(domain.run.dx for domain in load_experiment(config).domains) == pytest.approx(500.0)

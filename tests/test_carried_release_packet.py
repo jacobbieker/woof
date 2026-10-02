@@ -108,7 +108,7 @@ def test_corrective_release_requires_channel_and_verification_assets(publication
     missing = dict(manifest)
     missing.pop('carried_physics')
     with pytest.raises(publication.PublicationError, match='missing the carried-physics'):
-        publication.load_manifest(missing, 'v9.8.7', 'a'*40, 'FahrenheitResearch/arwen')
+        publication.load_manifest(missing, 'v9.8.7', 'a'*40, 'example-org/example-repo')
     manifest['github']['assets'] = [r for r in manifest['github']['assets'] if not r['filename'].endswith('.verification.json')]
     with pytest.raises(publication.PublicationError, match='exact hashed GitHub assets'):
-        publication.load_manifest(manifest, 'v9.8.7', 'a'*40, 'FahrenheitResearch/arwen')
+        publication.load_manifest(manifest, 'v9.8.7', 'a'*40, 'example-org/example-repo')

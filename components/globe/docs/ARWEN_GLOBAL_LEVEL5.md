@@ -154,8 +154,14 @@ forcing lanes, the pressure velocity the dycore's continuity closure
 diagnoses (`w = -omega / (rho g)`), the terrain height, YSU's PBL-top index,
 the surface fluxes and the land flag. Its heating, drying and detrainment
 integrate into the column; its convective rain is credited to the surface
-reservoir at the measured column loss, accumulated as `RAINC` on the render
-tape, and handed to Noah in the land bucket. The advective forcing lanes
+reservoir at the measured column loss, and one number, the scheme's reported
+rain capped at that loss, is accumulated as `RAINC` on the render tape and
+handed to Noah in the land bucket. Grell-Freitas's deep arm reports more rain
+than its own tendencies remove (1.27 times on WRF v4.6.1's oracle columns,
+1.77 times over the globe and 2.28 times over land in the first day of a T255
+GDAS forecast), so neither the land nor `RAINC` carries the excess; each call
+reports it as the diagnostic `cumulus_rain_withheld_kg_m2`, beside
+`cumulus_rain_reported_kg_m2` and `cumulus_water_removed_kg_m2`. The advective forcing lanes
 (WRF's `RTHFTEN`/`RQVFTEN`) are the dynamics' own theta and vapor
 tendencies over the previous dynamics interval, measured by the runtime
 between its two calls of a step and checkpointed with the physics
@@ -623,8 +629,33 @@ A real-analysis cold start seeds the surface from the analysis it decodes
 (`woof.globe.surface_seeding`): the sea-ice fraction and thickness
 (GRIB2 ICEC and ICETK) into the surface state, and the snow water
 equivalent, depth and cover flag (WEASD and SNOD) into Noah's store, beside
-the skin temperature (the SST on open water), the four soil layers and the
-land mask the initializer took before. The receipt's `initial.provenance.
+the skin temperature, the four soil layers and the land mask the initializer
+took before. On open water the skin is the analysis skin over the analysis's
+own water points only, so a lake or coastal column whose stencil reaches the
+analysis's land never starts, and holds for the run, a land skin
+(`analysis_initial.open_water_skin_temperature`; the rule and the columns it
+changed are in `initial.provenance.open_water_skin`). On the ocean that water
+temperature is held for the run, the usual medium-range choice for a sea
+surface the analysis observes. An inland lake is not that surface: the
+analysis's lake temperature is weakly observed, and held, a lake the analysis
+carries too warm evaporates at that rate for the whole forecast. GDAS carried
+Lake Tana (11.9 N, 37.5 E) at 304.8 to 305.1 K at all eight cycles of
+2026-09-29 and 2026-09-30, 9.2 K above the 2 m air temperature the same
+analyses carry over that water averaged over the eight cycles, and held for a
+240 h T255 forecast that column drew about 22 kg/m2 a day from its surface
+reservoir. So a lake column (`statics.lake_columns`, WRF's LAKEMASK rule:
+open water whose lake share in the statics' land-use fractions beats its
+ocean share; the statics carry the share as the surface member
+`lake_fraction`) integrates its skin on the land cadence from its own surface
+energy budget (`native_runtime._lake_surface_step`): the shortwave and
+downward longwave it absorbs, its own emission, and the surface layer's
+sensible and latent fluxes of the call, over the water heat capacity the
+state carries (4e7 J/m2/K, a 10 m mixed layer, blended with the column's land
+share), never cooled below 273.15 K (there is no lake ice; an analysed ice
+cover is a frozen column). On the GDAS 2026-09-25 12Z case the lake surface
+temperature error against OISST on the lakes it covers fell from 1.37 to
+1.11 K RMSE at 120 h, and Lake Tana's column cooled from 305.3 to 299.6 K.
+A checkpoint written before the plane reads with no lakes. The receipt's `initial.provenance.
 surface_seeding` names every source, its unit, value range, masked count
 and the columns seeded. The seeding refuses instead of guessing: an
 analysis without one of the four fields is refused by name, the snow unit

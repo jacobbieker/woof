@@ -463,12 +463,28 @@ def admit_spawned_child(child_dc, parent_node, *, free_bytes: int,
     bytes, but nothing held the card to that reservation afterwards:
     another program on the card, or growth since the start, spends it.
     """
+    from woof.core.preflight import (forecast_pool_estimate_bytes,
+                                      forecast_pool_headroom,
+                                      urban_held_bytes)
+
+    headroom = forecast_pool_headroom((child_dc.run, parent_node.cfg))
     parts = spawned_child_device_bytes(
         child_dc, parent_node.cfg, scratch_arena=scratch_arena,
         dycore_state_workspace=dycore_state_workspace)
-    need = int(sum(parts.values()))
+    itemized = int(sum(parts.values()))
+    held = urban_held_bytes(child_dc.run)
+    # The child's arrays go through the same pool as the tree's, so they
+    # carry the forecast's one measured pool margin (A163): the startup
+    # envelope priced this nest at that margin, and the check at the
+    # spawn reads the same number instead of the bare itemized sum.  The
+    # arrays held at their allocated size (urban) are priced there, as
+    # the startup envelope prices them.
+    need = forecast_pool_estimate_bytes(
+        itemized, held_exact_bytes=held, headroom=headroom)
     receipt: dict[str, object] = {
-        "need_bytes": need, "parts_bytes": dict(parts),
+        "need_bytes": need, "itemized_bytes": itemized,
+        "held_exact_bytes": held,
+        "pool_headroom": headroom, "parts_bytes": dict(parts),
         "card_free_bytes": int(free_bytes), "fits": need <= int(free_bytes),
     }
     if not receipt["fits"]:
@@ -476,7 +492,8 @@ def admit_spawned_child(child_dc, parent_node, *, free_bytes: int,
             f"spawning d{int(child_dc.grid_id):02d} needs {size_text(need)} "
             f"on the card (state {size_text(parts['state'])}, physics "
             f"{size_text(parts['physics'])}, nest interpolation tables "
-            f"{size_text(parts['interpolation'])}) and the card can hand "
+            f"{size_text(parts['interpolation'])}, x "
+            f"{headroom:.2f} measured pool margin) and the card can hand "
             f"out {size_text(free_bytes)} now; building it beside the "
             "live tree would end the run in a CUDA out-of-memory error "
             "part-way through the child.  The startup fit check reserved "

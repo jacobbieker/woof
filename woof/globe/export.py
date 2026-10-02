@@ -25,7 +25,7 @@ from .constants import (
     REFERENCE_PRESSURE_PA,
     WATER_SPECIES,
 )
-from .pins import KNOWN_PINS_HASHES, pins_hash
+from .pins import ACCEPTED_PINS_HASHES, pins_hash
 from .runner import build_model_and_cold_state, build_transform
 from .transport import sample_grid_field
 
@@ -285,7 +285,7 @@ def read_parent_export(path: str | Path) -> tuple[dict, dict[str, np.ndarray]]:
         }
     if metadata.get("schema") != EXPORT_SCHEMA:
         raise ValueError("parent export schema mismatch")
-    if metadata.get("pins_hash") not in KNOWN_PINS_HASHES:
+    if metadata.get("pins_hash") not in ACCEPTED_PINS_HASHES:
         raise ValueError("parent export arithmetic pins mismatch")
     self_hash = metadata.pop("self_sha256", None)
     if self_hash != hashlib.sha256(_canonical(metadata)).hexdigest():

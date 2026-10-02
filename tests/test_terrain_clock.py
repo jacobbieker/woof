@@ -1018,13 +1018,18 @@ def test_a_3km_conus_adaptive_run_is_capped_where_20_s_stopped():
     """The 3 km CONUS domain on HRRR's own grid: highest ground 3932 m,
     steepest slope 0.356, with a 12 s time_step.  Under the adaptive
     clock's default 24 s max_time_step, a 20 m/s crest-level wind leaves
-    it alone; at 30 and 40 m/s the step is capped at 15 s, because 20 s
-    stopped there on four substeps (before, the 15 s entry read as "holds
-    every step"); at 50 m/s the cap is the 13.5 s the map already held.
+    it alone; at 40 m/s the step is capped at 15 s, because 20 s stopped
+    there on four substeps (before, the 15 s entry read as "holds every
+    step"); at 50 m/s the cap is the 13.5 s the map already held.  At
+    30 m/s it was capped at 15 s from those fixed-step stops too; A139 ran
+    the rows it reads on the adaptive clock, which held a longest step of
+    45 s on every one of them at 20 and 30 m/s, so at 30 m/s it keeps its
+    24 s.  At 40 m/s the adaptive clock saw 45 s stop on the gentlest and
+    the steepest of them, so the fixed-step cap stands there.
     The 15 s time_step the domain wizard writes picks another pair at
     50 m/s, pinned in the test below."""
     run = _Run(use_adaptive_time_step=True)
-    expected = {20.0: None, 30.0: Fraction(15), 40.0: Fraction(15),
+    expected = {20.0: None, 30.0: None, 40.0: Fraction(15),
                 50.0: Fraction(27, 2)}
     for wind, ceiling in expected.items():
         adaptation = tc.derive_clock(1, run, Fraction(12), 0.356,
@@ -1046,13 +1051,15 @@ def test_a_3km_conus_adaptive_run_on_the_wizard_s_15_s_step():
     extended the six substep 15 s entry read as holding every longer
     step, and the clock kept its default 24 s on six.  So the 13.5 s a
     12 s time_step gets at 50 m/s is not this run's cap, before or now.
-    From 70 m/s the step is halved to 7.5 s and the cap is 12 s."""
+    From 70 m/s the step is halved to 7.5 s and the cap is 12 s.  At
+    30 m/s the cap was 15 s too, until A139's adaptive-clock entries: that
+    clock held 45 s on every row read there, so the run keeps -1."""
     exp = _wizard_experiment([(60, 60)], (), 3000.0, clock="auto")
     assert exp.domains[0].run.use_adaptive_time_step
     assert exp.dt_exact(1) == Fraction(15)
     assert exp.domains[0].run.max_time_step == -1
     # wind: (cap, substeps, division)
-    expected = {20.0: (None, 4, 1), 30.0: (Fraction(15), 4, 1),
+    expected = {20.0: (None, 4, 1), 30.0: (None, 4, 1),
                 40.0: (Fraction(15), 4, 1), 50.0: (Fraction(15), 6, 1),
                 60.0: (Fraction(15), 6, 1), 70.0: (Fraction(12), 4, 2)}
     for wind, (ceiling, sound, division) in expected.items():
@@ -1120,16 +1127,26 @@ def test_a_steeper_row_measured_less_far_keeps_the_stop_a_gentler_one_saw():
     assert not fixed.adapted
 
 
-@pytest.mark.parametrize("slope", [0.40, 0.42, 0.46])
-def test_steep_3km_ground_past_the_extended_rows_is_capped_like_conus(slope):
+@pytest.mark.parametrize("slope, ceiling, source", [
+    (0.40, None, "adaptive held"), (0.42, Fraction(15), "map"),
+    (0.46, Fraction(15), "map")])
+def test_steep_3km_ground_past_the_extended_rows_is_capped_like_conus(
+        slope, ceiling, source):
     """Past the extended rows' slope (0.36), under a 3.9 km crest at
     30 m/s: the tip left 0.40, 0.42 and 0.46 uncapped while 0.30 was
     capped at 20 s and 0.356 at 15 s.  The 15 s the 0.356 row held
-    below the 20 s it saw stop now caps them too."""
+    below the 20 s it saw stop now caps them too, on the fixed rows.
+    A139b ran the steeper 3 km rows under the 4.5 km crest on the
+    adaptive clock: the 0.4105 row held 15 s/km at 30 m/s, so 0.40 reads
+    as the CONUS 0.356 does there (A139: no cap under the 24 s default),
+    and the 0.4655 row that 0.42 and 0.46 read stopped above 5 s/km, so
+    they keep 15 s."""
     run = _Run(use_adaptive_time_step=True)
     adaptation = tc.derive_clock(1, run, Fraction(12), slope,
                                  _wind(30.0, crest=3932.0))
-    assert adaptation.ceiling == Fraction(15)
+    assert adaptation.limit_per_km == pytest.approx(5.0)
+    assert adaptation.ceiling == ceiling
+    assert adaptation.cap_source == source
     assert adaptation.time_step_sound == 4
 
 
@@ -1149,13 +1166,22 @@ def test_a_spacing_between_mapped_ones_keeps_the_3km_rows_stop():
     """A 2.5 km domain on the CONUS ground reads the 2 and 3 km rows.  At
     30 and 40 m/s the tip left it uncapped at the adaptive clock's 20 s,
     though its 3 km rows saw 20 s stop over 15 s held: it is capped at
-    what that is per km, 12.5 s."""
+    what that is per km, 12.5 s.  At 30 m/s A139's adaptive-clock entries
+    lift that: the adaptive clock held 15 s/km, 30 and 45 s, on every 2
+    and 3 km row read there, 37.5 s here, past the clock's own 20 s, so
+    no cap is written; at 40 m/s it saw that stop on some of them."""
     run = _Run(dx=2500.0, dy=2500.0, use_adaptive_time_step=True)
-    for wind in (30.0, 40.0):
+    for wind, ceiling in ((30.0, None), (40.0, Fraction(25, 2))):
         adaptation = tc.derive_clock(1, run, Fraction(10), 0.356,
                                      _wind(wind, crest=3932.0))
         assert adaptation.reading.dx_rows == (2000.0, 3000.0)
-        assert adaptation.ceiling == Fraction(25, 2), wind
+        assert adaptation.ceiling == ceiling, wind
+    assert adaptation.cap_source == "map"
+    lifted = tc.derive_clock(1, run, Fraction(10), 0.356,
+                             _wind(30.0, crest=3932.0))
+    assert lifted.limit_per_km == pytest.approx(5.0)
+    assert lifted.cap_source == "adaptive held"
+    assert lifted.cap_per_km == 15.0
 
 
 _SLOPES = (0.05, 0.1, 0.2, 0.25, 0.3, 0.33, 0.356, 0.37, 0.4, 0.42, 0.46,
@@ -1344,10 +1370,9 @@ def test_no_derived_cap_is_ever_at_or_above_the_run_s_longest_step(max_step):
 
 
 @pytest.mark.parametrize("slope, wind, crests", [
-    (0.356, 30.0, (3932.0, 4400.0, 4600.0, 5000.0, 5500.0, 6000.0,
-                   6456.0)),
+    (0.356, 30.0, (4600.0, 5000.0, 5500.0, 6000.0, 6456.0)),
     (0.30, 40.0, (3932.0, 4600.0, 5000.0, 5500.0, 6000.0)),
-    (0.40, 30.0, (4400.0, 4600.0, 5000.0, 5500.0))])
+    (0.40, 30.0, (4600.0, 5000.0, 5500.0))])
 def test_a_crest_above_the_extended_rows_keeps_the_stop_a_lower_one_saw(
         slope, wind, crests):
     """The 3 km rows of crests above 4.5 km were tried only to 15 s, so at
@@ -1355,13 +1380,24 @@ def test_a_crest_above_the_extended_rows_keeps_the_stop_a_lower_one_saw(
     and ran the default 24 s where the same slope and wind under a 4.4 km
     crest was capped at 15 s: taller ground took the longer step.  A
     longer step seen to stop under a lower crest now counts past the
-    longest step the taller crest was tried at."""
+    longest step the taller crest was tried at.  (Slope 0.356 at 30 m/s
+    under the 3.9 and 4.4 km crests is no longer capped: A139 ran their
+    4.5 km rows on the adaptive clock, which held 45 s on every one,
+    pinned in test_the_adaptive_clock_s_own_entries_lift_a_fixed_step_cap.
+    Slope 0.40 at 30 m/s under the 4.4 km crest likewise since A139b ran
+    the 4.5 km row of grid slope 0.4105 that way, pinned below.  The
+    taller crests were not run that way and keep 15 s.)"""
     run = _Run(use_adaptive_time_step=True)
     for crest in crests:
         adaptation = tc.derive_clock(1, run, Fraction(12), slope,
                                      _wind(wind, crest=crest))
         assert adaptation.ceiling == Fraction(15), crest
         assert adaptation.time_step_sound == 4
+    if slope == 0.40:
+        lifted = tc.derive_clock(1, run, Fraction(12), slope,
+                                 _wind(wind, crest=4400.0))
+        assert lifted.ceiling is None
+        assert lifted.cap_source == "adaptive held"
     tall = tc.read_map(3000.0, 5500.0, slope, wind, 4)
     assert tall.crest_row == 5500.0 and tall.top_per_km == 5.0
     assert tall.stopped_under_a_lower_crest
@@ -1483,8 +1519,517 @@ def test_a_limit_past_what_the_ground_held_is_said_as_a_stop_seen():
     rows = tall.receipt()["map_rows"]
     assert rows["stop_crest_m"] == 4500.0 and rows["stop_under_a_lower_crest"]
     # Where the limit is what the ground held, the line says only that.
+    # (At 40 m/s: at 30 the adaptive clock's own entries lift the cap.)
     conus = tc.derive_clock(1, _Run(use_adaptive_time_step=True),
-                            Fraction(12), 0.356, _wind(30.0, crest=3932.0))
+                            Fraction(12), 0.356, _wind(40.0, crest=3932.0))
+    assert conus.ceiling == Fraction(15)
     assert "no longer step was tried" not in conus.sentence()
     assert "holds steps up to 15 s there with 4 substeps, so" in (
         conus.sentence())
+
+
+# ---------------------------------------------------------------------------
+# The adaptive clock's own entries (A139).
+# ---------------------------------------------------------------------------
+
+
+def _adaptive_rows():
+    return [row for row in tc.measured_map().rows if row.adaptive is not None]
+
+
+def test_the_2_and_3km_rows_carry_the_adaptive_clock_s_own_entries():
+    """A139: the 2 and 3 km rows of crests 1.5 to 4.5 km and ridge slopes
+    0.1 to 0.4 were run on the production adaptive clock at max_time_step
+    15 s/km down to 5 s/km under 20 to 60 m/s, three hours each at both
+    CFL target pairs.  At 20 and 30 m/s every one held 15 s/km, the
+    longest tried: 30 s at 2 km and 45 s at 3 km.  A139b ran the rows of
+    ridge slopes 0.45 and 0.5 under the 4.5 km crest the same way (41 rows
+    became 45): every one held 15 s/km at 20 m/s, and all but the 3 km row
+    of ridge slope 0.5 (grid 0.4655), which held 5 s/km, at 30 m/s."""
+    table = tc.measured_map()
+    measured = table.adaptive
+    assert measured.targets == ((1.2, 0.84), (1.4, 0.98))
+    assert measured.max_step_increase_pct == 5
+    assert measured.seconds == 10800.0
+    assert measured.ladder[0] == 15.0 and measured.ladder[-1] == 5.0
+    rows = _adaptive_rows()
+    assert len(rows) == 45
+    assert {(row.dx_m, row.crest_m) for row in rows} == {
+        (dx, crest) for dx in (2000.0, 3000.0)
+        for crest in (1500.0, 3000.0, 4500.0)}
+    assert all(row.sound_steps == 4 for row in rows)
+    for row in rows:
+        expected = ((15.0, 5.0) if (row.dx_m, row.crest_m, row.slope)
+                    == (3000.0, 4500.0, 0.4655) else (15.0, 15.0))
+        assert row.adaptive[:2] == expected, row
+        assert row.adaptive_tried[:2] == (15.0, 15.0), row
+        # 70 m/s and up were not run.
+        assert set(row.adaptive_tried[5:]) == {None}, row
+
+
+def test_the_committed_probe_builds_the_rows_the_adaptive_clock_ran_on():
+    """Every row carrying adaptive entries is the probe's own ridge: its
+    grid slope and etac, row key for row key, at 2 km as at 3 km."""
+    import json
+
+    from tools.terrain_clock_probe import Ridge, geometry
+
+    document = json.loads(tc.MAP_PATH.read_text(encoding="utf-8"))
+    rows = [row for row in document["rows"] if "adaptive_s_per_km" in row]
+    assert len(rows) == 45
+    for row in rows:
+        shape = geometry(Ridge(row["dx_m"], row["crest_m"],
+                               row["ridge_slope"]))
+        assert shape["slope"] == row["slope"], row
+        assert shape["etac"] == row["etac"], row
+
+
+def test_the_adaptive_clock_s_own_entries_lift_a_fixed_step_cap():
+    """The defect: a 2.25 km domain under a 3.6 km crest of slope 0.30 at
+    24 m/s, on the adaptive clock with a 10 s first step and a 30 s
+    max_time_step, was capped at 15 s, the per-km reading of a FIXED 22 s
+    seen to stop on four substeps on its 3 km rows, though the adaptive
+    clock derives eight substeps at such a step and shortens it on CFL.
+    Run on the adaptive clock, every 2 and 3 km row it reads held the
+    longest step tried there (15 s/km, 33.75 s here), so it runs as
+    configured.  The fixed-step reading is unchanged."""
+    run = _Run(dx=2250.0, dy=2250.0, use_adaptive_time_step=True,
+               max_time_step=30)
+    adaptation = tc.derive_clock(1, run, Fraction(10), 0.30,
+                                 _wind(24.0, crest=3595.0))
+    reading = adaptation.reading
+    assert reading.dx_rows == (2000.0, 3000.0)
+    assert reading.crest_row == 4500.0
+    assert reading.stopped_per_km == pytest.approx(20.0 / 3.0)
+    assert reading.adaptive_measured
+    assert reading.adaptive_held_everything_tried
+    assert reading.adaptive_per_km == 15.0
+    assert adaptation.ceiling is None and not adaptation.adapted
+    assert adaptation.status == "AS_CONFIGURED"
+    assert adaptation.cap_source == "adaptive held"
+    rows = adaptation.receipt()["map_rows"]["adaptive_clock"]
+    assert rows["every_cell_measured"]
+    assert rows["longest_step_held_s"] == pytest.approx(33.75)
+    assert rows["shortest_entry_under_a_stop_s"] is None
+    # A longer max_time_step is capped at the longest step held there.
+    longer = tc.derive_clock(1, replace(run, max_time_step=60),
+                             Fraction(10), 0.30, _wind(24.0, crest=3595.0))
+    assert longer.ceiling == Fraction(3375, 100)
+    assert longer.receipt()["max_time_step_from"] == "adaptive held"
+    assert ("and on the adaptive clock every cell read held a longest step "
+            "of 33.75 s, the longest tried there, so d01 runs an adaptive "
+            "step capped at 33.75 s" in longer.sentence())
+    # The 3 km CONUS ground at 30 m/s, under crests read on the 4.5 km rows.
+    for crest in (3932.0, 4400.0):
+        conus = tc.derive_clock(1, _Run(use_adaptive_time_step=True),
+                                Fraction(12), 0.356,
+                                _wind(30.0, crest=crest))
+        assert conus.ceiling is None and conus.cap_source == "adaptive held"
+    # A fixed step reads the fixed-step map, as before.
+    fixed = tc.derive_clock(1, replace(run, use_adaptive_time_step=False),
+                            Fraction(18), 0.30, _wind(24.0, crest=3595.0))
+    assert fixed.cap_source == "map" and fixed.adapted
+    assert (fixed.division, fixed.time_step_sound) == (2, 4)
+
+
+def _faster(run, **settings):
+    return SimpleNamespace(**{**vars(run), **settings})
+
+
+def test_a_clock_faster_than_the_one_measured_keeps_the_fixed_step_cap():
+    """The entries held at CFL targets up to 1.4 / 0.98 with 5 percent
+    growth.  A clock with a higher target or faster growth was never run
+    on that ground, so its entries do not lift its cap."""
+    base = _Run(dx=2250.0, dy=2250.0, use_adaptive_time_step=True,
+                max_time_step=30)
+    for faster in (_faster(base, target_cfl=1.5),
+                   _faster(base, max_step_increase_pct=51)):
+        adaptation = tc.derive_clock(1, faster, Fraction(10), 0.30,
+                                     _wind(24.0, crest=3595.0))
+        assert adaptation.ceiling == Fraction(15)
+        assert adaptation.cap_source == "map"
+    measured = _faster(base, target_cfl=1.4, target_hcfl=0.98,
+                       max_step_increase_pct=5)
+    assert tc.derive_clock(1, measured, Fraction(10), 0.30,
+                           _wind(24.0, crest=3595.0)).ceiling is None
+
+
+def _steep_2250(**settings):
+    """A 2.25 km adaptive domain with a 10 s first step and a 30 s
+    max_time_step on the 1.4 / 0.98 targets with 5 percent growth."""
+    return _faster(_Run(dx=2250.0, dy=2250.0, use_adaptive_time_step=True,
+                        max_time_step=30),
+                   **{"target_cfl": 1.4, "target_hcfl": 0.98,
+                      "max_step_increase_pct": 5, **settings})
+
+
+@pytest.mark.parametrize("wind", [20.0, 24.0, 30.0])
+def test_a_2250_m_domain_of_slope_037_under_a_3841_m_crest_runs_as_set(wind):
+    """A139b, the defect: a 2.25 km adaptive domain of slope 0.37 under a
+    3841 m crest (first step 10 s, max_time_step 30 s) was capped at
+    20.25 s at 20 m/s and 11.25 s at 24 and 30 m/s, from fixed-step stops,
+    because one cell its reading takes, the 3 km row of grid slope 0.4105
+    under the 4.5 km crest, had not been run on the adaptive clock.  Run
+    so, it held 15 s/km at 20 and 30 m/s, so every cell read held the
+    longest step tried there (33.75 s here, above its 30 s) and the domain
+    runs as configured.  The 2.25 km ridge under a 3841 m crest at grid
+    slopes 0.366 and 0.379 held max_time_step 24 and 30 s for three hours
+    at 20 to 40 m/s on both target pairs (24 of 24)."""
+    adaptation = tc.derive_clock(1, _steep_2250(), Fraction(10), 0.37,
+                                 _wind(wind, crest=3841.0))
+    reading = adaptation.reading
+    assert reading.dx_rows == (2000.0, 3000.0)
+    assert reading.crest_row == 4500.0 and reading.slope_row == 0.4105
+    assert reading.beyond == ()
+    assert reading.adaptive_measured
+    assert reading.adaptive_held_everything_tried
+    assert reading.adaptive_per_km == 15.0
+    assert adaptation.cap_source == "adaptive held"
+    assert adaptation.ceiling is None and not adaptation.adapted
+    assert adaptation.status == "AS_CONFIGURED"
+    assert (adaptation.division, adaptation.time_step_sound) == (1, 4)
+    record = adaptation.receipt()["map_rows"]["adaptive_clock"]
+    assert record["longest_step_held_s"] == pytest.approx(33.75)
+    # A longer max_time_step is capped at the longest step held there.
+    longer = tc.derive_clock(1, _steep_2250(max_time_step=60), Fraction(10),
+                             0.37, _wind(wind, crest=3841.0))
+    assert longer.ceiling == Fraction(3375, 100)
+    assert longer.cap_source == "adaptive held"
+
+
+def test_at_40_ms_that_domain_keeps_its_cap_and_may_still_stop():
+    """At 40 m/s the 3 km row of grid slope 0.4105 held no max_time_step
+    on the adaptive clock, down to 5 s/km: the domain keeps the 10.12 s
+    cap its fixed rows give it and says it may still stop."""
+    adaptation = tc.derive_clock(1, _steep_2250(), Fraction(10), 0.37,
+                                 _wind(40.0, crest=3841.0))
+    assert adaptation.ceiling == Fraction(1012, 100)
+    assert adaptation.cap_source == "map"
+    assert adaptation.reading.adaptive_none_held
+    assert adaptation.status == "BEYOND_MEASURED"
+    line = adaptation.beyond_sentence()
+    assert ("on the adaptive clock every longest step tried stopped on some "
+            "of the ground read, down to 11.25 s" in line)
+    assert line.endswith("and may still stop")
+
+
+def test_the_steep_rows_under_the_4500_m_crest_carry_what_they_held():
+    """A139b's rows, from 20 m/s until a wind held none: the 2 km rows of
+    grid slope 0.4416 and 0.4816 and the 3 km rows of 0.4105 and 0.4655."""
+    expected = {
+        (2000.0, 0.4416): ((15.0,) * 5, (15.0,) * 5),
+        (2000.0, 0.4816): ((15.0, 15.0, 15.0, 5.5, 5.0), (15.0,) * 5),
+        (3000.0, 0.4105): ((15.0, 15.0, None, None, None),
+                           (15.0, 15.0, 15.0, None, None)),
+        (3000.0, 0.4655): ((15.0, 5.0, None, None, None),
+                           (15.0, 15.0, 15.0, None, None))}
+    rows = {(row.dx_m, row.slope): row for row in _adaptive_rows()
+            if row.crest_m == 4500.0}
+    for key, (entries, tried) in expected.items():
+        assert rows[key].adaptive[:5] == entries, key
+        assert rows[key].adaptive_tried[:5] == tried, key
+
+
+@pytest.mark.parametrize("dx", [2000.0, 2250.0, 2500.0, 3000.0])
+@pytest.mark.parametrize("slope", [0.37, 0.40, 0.42, 0.45])
+def test_steep_ground_under_a_4500_m_crest_reads_only_adaptive_cells(dx,
+                                                                     slope):
+    """Every cell a 2 to 3 km domain of slope up to 0.45 under a crest
+    read on the 4.5 km rows takes at 20 and 30 m/s was run on the
+    adaptive clock."""
+    for crest in (3100.0, 3841.0, 4500.0):
+        for wind in (20.0, 30.0):
+            reading = tc.read_map(dx, crest, slope, wind, 4)
+            assert reading.crest_row == 4500.0
+            assert reading.adaptive_measured, (crest, wind)
+
+
+def test_ground_steeper_than_every_row_keeps_the_fixed_step_cap():
+    """The 3 km rows under the 4.5 km crest carry adaptive entries up to
+    grid slope 0.4655, the steepest row there.  A domain steeper than
+    that reads every one of them, and all held 15 s/km at 20 m/s, but no
+    ridge that steep was run: lifted, a 3 km domain of slope 0.48 with a
+    45 s max_time_step ran uncapped and reported as configured.  It keeps
+    the fixed-step cap and says it may still stop; at 0.46, within the
+    rows, the entries lift it."""
+    run = _Run(use_adaptive_time_step=True, max_time_step=45)
+    steep = tc.derive_clock(1, run, Fraction(15), 0.48,
+                            _wind(20.0, crest=3841.0))
+    assert steep.reading.beyond == ("slope",)
+    assert steep.reading.adaptive_held_everything_tried
+    assert steep.cap_source == "map" and steep.ceiling == Fraction(27)
+    assert steep.status == "BEYOND_MEASURED"
+    within = tc.derive_clock(1, run, Fraction(15), 0.46,
+                             _wind(20.0, crest=3841.0))
+    assert within.reading.beyond == ()
+    assert within.cap_source == "adaptive held" and within.ceiling is None
+
+
+def _adaptive_table(entry, tried, *, fixed=(5.0, 5.0, 5.0),
+                    fixed_tried=None, steep=True):
+    """Two 3 km rows under a 4.5 km crest, slopes 0.2 and 0.4, the first
+    run on the adaptive clock with ``entry`` held of ``tried`` s/km at
+    every wind, the steeper one too where ``steep``."""
+    measured = tc.AdaptiveMeasurement(
+        targets=((1.2, 0.84), (1.4, 0.98)), max_step_increase_pct=5,
+        ladder=(15.0, 10.0, 5.0), seconds=10800.0)
+    rows = []
+    for slope in (0.2, 0.4):
+        adaptive = ((entry,) * 3, (tried,) * 3)
+        if slope == 0.4 and not steep:
+            adaptive = (None, None)
+        rows.append(tc.MapRow(3000.0, 4500.0, slope, 4, fixed, fixed_tried,
+                              *adaptive))
+        rows.append(tc.MapRow(3000.0, 4500.0, slope, 6, fixed, fixed_tried))
+    return tc.StableStepMap(winds=(20.0, 60.0, 100.0), ladder=(5.0, 4.0),
+                            seconds=1800.0, rows=tuple(rows),
+                            adaptive=measured)
+
+
+def test_a_stop_on_the_adaptive_clock_caps_it_whatever_the_fixed_map_says():
+    """Where the fixed map held every step tried (no cap), a longest step
+    seen to stop on the adaptive clock caps it at the entry held under
+    that stop, and the line and the record say where the cap is from."""
+    run = _Run(use_adaptive_time_step=True, max_time_step=41)
+    table = _adaptive_table(8.0, 15.0)
+    adaptation = tc.derive_clock(1, run, Fraction(15), 0.35,
+                                 _wind(60.0, crest=4500.0), table=table)
+    assert adaptation.reading.held_everything_tried
+    assert adaptation.reading.adaptive_stopped_per_km == 8.0
+    assert adaptation.ceiling == Fraction(24)
+    assert adaptation.cap_source == "adaptive stop"
+    assert adaptation.status == "ADAPTED"
+    assert ("and on the adaptive clock a longest step longer than 24 s "
+            "stopped on the ground read" in adaptation.sentence())
+    assert adaptation.receipt()["max_time_step_from"] == "adaptive stop"
+    # Below the fixed limit it lowers that too, and a faster clock reads it.
+    lower = _adaptive_table(4.0, 15.0, fixed_tried=(13.0, 13.0, 13.0))
+    fast = _faster(run, target_cfl=2.0)
+    for clock in (run, fast):
+        capped = tc.derive_clock(1, clock, Fraction(12), 0.35,
+                                 _wind(60.0, crest=4500.0), table=lower)
+        assert capped.ceiling == Fraction(12)
+        assert capped.cap_source == "adaptive stop"
+
+
+def test_a_row_not_run_on_the_adaptive_clock_keeps_the_fixed_cap():
+    """Every cell read must have been run on the adaptive clock before its
+    entries lift a cap: a gentler domain reading only rows run that way is
+    lifted, a steeper one reading a row that was not keeps the fixed-step
+    cap."""
+    run = _Run(use_adaptive_time_step=True, max_time_step=60)
+    table = _adaptive_table(15.0, 15.0, fixed_tried=(13.0, 13.0, 13.0),
+                            steep=False)
+    gentle = tc.derive_clock(1, run, Fraction(12), 0.15,
+                             _wind(20.0, crest=4500.0), table=table)
+    assert gentle.reading.adaptive_measured
+    assert gentle.ceiling == Fraction(45)
+    assert gentle.cap_source == "adaptive held"
+    steep = tc.derive_clock(1, run, Fraction(12), 0.35,
+                            _wind(20.0, crest=4500.0), table=table)
+    assert not steep.reading.adaptive_measured
+    assert steep.ceiling == Fraction(15) and steep.cap_source == "map"
+
+
+def test_ground_where_the_adaptive_clock_held_nothing_may_still_stop():
+    """A cell where every longest step tried stopped gives no cap (none of
+    them held), lifts nothing, and the line says the domain may still
+    stop."""
+    run = _Run(use_adaptive_time_step=True, max_time_step=41)
+    table = _adaptive_table(None, 15.0, fixed_tried=(13.0, 13.0, 13.0))
+    adaptation = tc.derive_clock(1, run, Fraction(12), 0.35,
+                                 _wind(60.0, crest=4500.0), table=table)
+    reading = adaptation.reading
+    assert reading.adaptive_none_held and reading.adaptive_per_km is None
+    assert reading.adaptive_stopped_per_km is None
+    assert adaptation.ceiling == Fraction(15)
+    assert adaptation.cap_source == "map"
+    assert adaptation.status == "BEYOND_MEASURED"
+    line = adaptation.beyond_sentence()
+    assert ("and on the adaptive clock every longest step tried stopped on "
+            "some of the ground read, down to 15 s" in line)
+    assert line.endswith("and may still stop")
+    record = adaptation.receipt()["map_rows"]["adaptive_clock"]
+    assert record["a_cell_held_none_down_to_s"] == 15.0
+
+
+def test_an_unchanged_domain_where_the_adaptive_clock_held_none_says_so():
+    """A 2 km adaptive domain under a 3 km crest of slope 0.09 at 40 m/s
+    with max_time_step -1 (16 s): the fixed rows it reads held every step
+    tried there (to 10 s), so its own clock stays as configured, but the
+    row it reads was run on the adaptive clock and held no max_time_step
+    down to 10 s.  That domain printed no line and reported
+    AS_CONFIGURED; it now reports BEYOND_MEASURED, and its line names the
+    adaptive stop and says it may still stop."""
+    exp = _wizard_experiment([(60, 60)], (), 2000.0)
+    root = exp.domains[0]
+    exp = replace(exp, domains=(replace(root, run=replace(
+        root.run, use_adaptive_time_step=True, max_time_step=-1,
+        max_time_step_den=0)),))
+    cautions, notes = [], []
+    adapted, adaptations = tc.adapt_experiment_clock(
+        exp, {1: 0.09}, {1: _wind(40.0, crest=3000.0)},
+        announce=notes.append, caution=cautions.append)
+    adaptation = adaptations[0]
+    assert adapted is exp
+    assert not adaptation.adapted and adaptation.ceiling is None
+    assert adaptation.adaptive_unheld
+    assert adaptation.reading.held_everything_tried
+    assert adaptation.status == "BEYOND_MEASURED"
+    assert notes == [] and len(cautions) == 1
+    line = cautions[0]
+    assert line == adaptation.beyond_sentence()
+    assert line.startswith("time step: d01's steepest terrain slope is 0.09")
+    assert ("the measured map holds steps up to 10 s there with 4 substeps"
+            in line)
+    assert ("and on the adaptive clock every longest step tried stopped on "
+            "some of the ground read, down to 10 s" in line)
+    assert line.endswith("so d01's adaptive clock keeps its own longest "
+                         "step and may still stop")
+    row = tc.clock_receipt(adaptations)["domains"][0]
+    assert row["status"] == "BEYOND_MEASURED"
+    assert "max_time_step_s" not in row
+    assert row["map_rows"]["adaptive_clock"][
+        "a_cell_held_none_down_to_s"] == 10.0
+    # The same ground on a fixed step reads the fixed rows alone: held.
+    fixed = replace(root, run=replace(root.run, use_adaptive_time_step=False))
+    _, alone = tc.adapt_experiment_clock(
+        replace(exp, domains=(fixed,)), {1: 0.09},
+        {1: _wind(40.0, crest=3000.0)}, announce=notes.append,
+        caution=cautions.append)
+    assert alone[0].status == "AS_CONFIGURED" and len(cautions) == 1
+
+
+_ADAPTIVE_SLOPES =(0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.33, 0.356, 0.37,
+                    0.4, 0.42, 0.44, 0.45, 0.48)
+_ADAPTIVE_WINDS = (20.0, 24.0, 30.0, 35.0, 40.0, 50.0, 60.0, 70.0)
+
+
+@pytest.mark.parametrize("dx", [2000.0, 2250.0, 2500.0, 3000.0])
+@pytest.mark.parametrize("crest", [1200.0, 1500.0, 2500.0, 3000.0, 3595.0,
+                                   3841.0, 4500.0])
+def test_the_adaptive_entries_keep_the_sweep_invariants(dx, crest):
+    """Over the ground the adaptive clock was run on: at the count a
+    domain runs, its cap never rises with slope or wind, never sits at or
+    above the clock's own longest step, and never lies past an entry held
+    under a longest step seen to stop on the adaptive clock."""
+    table = tc.measured_map()
+    for max_step in (-1, int(round(15.0 * dx / 1000.0))):
+        run = _Run(dx=dx, dy=dx, use_adaptive_time_step=True,
+                   max_time_step=max_step)
+        upper = _effective_upper(run)
+        dt = Fraction(int(round(4.0 * dx)), 1000)
+        grid = {}
+        for slope in _ADAPTIVE_SLOPES:
+            for wind in _ADAPTIVE_WINDS:
+                adaptation = tc.derive_clock(1, run, dt, slope,
+                                             _wind(wind, crest=crest),
+                                             table=table)
+                cap = _cap(adaptation)
+                if adaptation.ceiling is not None:
+                    assert adaptation.ceiling < upper
+                if adaptation.adaptive_unheld:
+                    # Ground where the adaptive clock held nothing tried is
+                    # never reported as held, changed or not.
+                    assert adaptation.status == "BEYOND_MEASURED", (
+                        max_step, slope, wind)
+                stopped = adaptation.reading.adaptive_stopped_per_km
+                if (stopped is not None and adaptation.time_step_sound == 4
+                        and stopped * dx / 1000.0 < upper):
+                    assert cap <= stopped * dx / 1000.0 + 1e-9, (
+                        max_step, slope, wind)
+                grid[slope, wind] = (cap, adaptation.time_step_sound)
+        for i, slope in enumerate(_ADAPTIVE_SLOPES):
+            for j, wind in enumerate(_ADAPTIVE_WINDS):
+                cap, count = grid[slope, wind]
+                others = []
+                if i:
+                    others.append((_ADAPTIVE_SLOPES[i - 1], wind))
+                if j:
+                    others.append((slope, _ADAPTIVE_WINDS[j - 1]))
+                for other in others:
+                    other_cap, other_count = grid[other]
+                    if count == other_count:
+                        assert cap <= other_cap, (max_step, slope, wind,
+                                                  other)
+
+
+def _map_loader(tmp_path, monkeypatch, edit):
+    import json
+
+    document = json.loads(tc.MAP_PATH.read_text(encoding="utf-8"))
+    edit(document)
+    path = tmp_path / tc.MAP_PATH.name
+    path.write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setattr(tc, "MAP_PATH", path)
+    return tc.measured_map.__wrapped__
+
+
+def _first_adaptive(document):
+    return next(row for row in document["rows"]
+                if "adaptive_s_per_km" in row)
+
+
+def _past_tried(document):
+    row = _first_adaptive(document)
+    row["adaptive_s_per_km"] = [16.0] + row["adaptive_s_per_km"][1:]
+
+
+def _on_six(document):
+    _first_adaptive(document)["sound_steps"] = 6
+
+
+def _unsaid(document):
+    document.pop("adaptive")
+
+
+def _short(document):
+    _first_adaptive(document)["adaptive_top_s_per_km"] = [15.0]
+
+
+@pytest.mark.parametrize("edit, message", [
+    (_past_tried, "past the 15.0 s/km tried there"),
+    (_on_six, "adaptive entries on a 6-substep row"),
+    (_unsaid, "does not say how they were measured"),
+    (_short, "the map declares 9")])
+def test_a_map_whose_adaptive_entries_would_misread_is_refused(
+        tmp_path, monkeypatch, edit, message):
+    """An entry past its tried range would lift a cap over steps never
+    run; an entry on a six-substep row would never be read; entries
+    without their measurement cannot say which clocks they hold for."""
+    load = _map_loader(tmp_path, monkeypatch, edit)
+    with pytest.raises(ValueError, match=message):
+        load()
+
+
+def test_the_probe_merges_adaptive_entries_onto_the_four_substep_row():
+    """``merge`` writes an ``adaptive-extend`` row's entries on the row's
+    four-substep line only, leaves its fixed entries alone, and writes the
+    block saying how they were measured."""
+    import copy
+    import json
+
+    from tools.terrain_clock_probe import adaptive_block, merge
+
+    document = json.loads(tc.MAP_PATH.read_text(encoding="utf-8"))
+    for row in document["rows"]:
+        row.pop("adaptive_s_per_km", None)
+        row.pop("adaptive_top_s_per_km", None)
+    document.pop("adaptive")
+    before = copy.deepcopy(document)
+    measured = {"targets": [[1.2, 0.84], [1.4, 0.98]], "increase_pct": 5,
+                "ladder_s_per_km": [15.0, 5.0], "check_seconds": 10800.0,
+                "rows": [{"dx_m": 2000.0, "crest_m": 4500.0,
+                          "ridge_slope": 0.3, "sound_steps": 4,
+                          "adaptive_s_per_km": [15.0] + [None] * 8,
+                          "adaptive_top_s_per_km": [15.0] + [None] * 8}]}
+    merge(document, measured["rows"], adaptive=adaptive_block(measured))
+    changed = [(a, b) for a, b in zip(before["rows"], document["rows"])
+               if a != b]
+    assert len(changed) == 1
+    old, new = changed[0]
+    assert new["sound_steps"] == 4 and new["ridge_slope"] == 0.3
+    assert new["stable_s_per_km"] == old["stable_s_per_km"]
+    assert new["adaptive_s_per_km"][0] == 15.0
+    assert document["adaptive"]["max_step_increase_pct"] == 5
+    assert document["adaptive"]["seconds"] == 10800.0

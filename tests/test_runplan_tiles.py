@@ -180,7 +180,7 @@ def _drive(tmp_path, monkeypatch, *, tiles="", nested=False):
                     "status": "PASS"}, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8")
 
-    def fake_fetch(arguments, run_dir, *, events=None):
+    def fake_fetch(arguments, run_dir, *, events=None, posting_relay=False):
         out = Path(arguments[arguments.index("--out") + 1])
         out.mkdir(parents=True, exist_ok=True)
         (out / "SHA256SUMS").write_text("x", encoding="utf-8")

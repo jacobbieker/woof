@@ -59,6 +59,8 @@ the documented boundary, and it is a real one.
 from __future__ import annotations
 
 import hashlib
+import importlib
+import importlib.machinery
 import json
 import sys
 from pathlib import Path
@@ -71,6 +73,36 @@ from woof import run_stamp
 #: checkout keeps -- the same reason ``woof go`` stopped naming one.
 SINGLE_DOMAIN_RUNNER = "woof.prepared_single_domain_forecast"
 TREE_RUNNER = "woof.prepared_domain_tree_forecast"
+
+
+def missing_forecast_runners() -> tuple[str, ...]:
+    """The runner modules this installation does not carry.
+
+    Both, in the standalone RW-WPS preparation package, which stages this
+    module and no forecast.  There :func:`_schema_index`, and so
+    :func:`resolve_bundle`, cannot import the tables it reads, so a
+    caller asks this first rather than resolving a bundle it cannot run.
+
+    A runner counts only when it is in the directories of the package
+    that is running (its ``__path__``), not wherever the import system
+    would find it.  An editable woof install adds a meta-path finder
+    that maps every ``woof.<name>`` to its checkout, so with the staged
+    package first on the path ``find_spec`` returned the checkout's tree
+    runner, the handoff went on to resolve the bundle, and importing that
+    runner against the staged ``woof.core`` failed ("No module named
+    'woof.core.adaptive_clock'").
+    """
+
+    missing = []
+    for name in (SINGLE_DOMAIN_RUNNER, TREE_RUNNER):
+        parent = name.rpartition(".")[0]
+        package = sys.modules.get(parent) or importlib.import_module(parent)
+        found = importlib.machinery.PathFinder.find_spec(
+            name, list(package.__path__)) is not None
+        if not found:
+            missing.append(name)
+    return tuple(missing)
+
 
 #: Filenames a preparation stage may leave as its top-level document,
 #: in the order they are looked for.  Both spellings are real: the
@@ -487,9 +519,10 @@ def resolve_head_bundle(prepared_root: Path, head_sha256: str) -> dict:
     The same answer as :func:`resolve_bundle`, read from
     ``boundary-stream/head.json`` before ``proof.json`` exists: the head
     carries the proof without its seal keys, so its schema names the
-    source and the layout exactly as the sealed proof will.  The returned
+    source and the layout exactly as the sealed proof will.  A domain
+    tree's head (``basis.tree``) answers ``layout: tree``.  The returned
     bundle carries ``head_sha256``, which :func:`sim_command` relays as
-    ``--prepared-head-sha256``.
+    ``--prepared-head-sha256`` to whichever runner the layout names.
     """
 
     from woof.ingest.boundary_stream import BoundaryStreamError, bind_head
@@ -507,17 +540,31 @@ def resolve_head_bundle(prepared_root: Path, head_sha256: str) -> dict:
             f"the prepared head in {root} declares schema {schema!r}, which "
             "no runner in this install reads")
     entry = index[schema]
-    if entry["layout"] != "single":
+    from woof.ingest.boundary_stream import LAYOUT_DOMAIN_TREE
+
+    tree = head["basis"].get("tree")
+    layout = ("tree" if isinstance(tree, dict)
+              and tree.get("layout") == LAYOUT_DOMAIN_TREE else "single")
+    if entry["layout"] != layout:
+        # The breakage this prevents: a head whose proof says one layout
+        # and whose basis says another, handed to the runner of either.
         raise StageRefusal(
-            f"the prepared head in {root} is a {entry['layout']} bundle; "
-            "only a single domain is published at its head")
+            f"the prepared head in {root} carries a {entry['layout']} proof "
+            f"but a {layout} head, so no runner can bind it")
+    domains = 1
+    if layout == "tree":
+        domains = payload.get("domain_count")
+        if not isinstance(domains, int) or isinstance(domains, bool)                 or domains != len(tree.get("domains") or ()):
+            raise StageRefusal(
+                f"the prepared head in {root} names {tree.get('domains')} "
+                f"but its proof counts {domains!r} domains")
     return {
         "document": root / "boundary-stream" / "head.json",
         "root": root,
         "schema": schema,
         "source": _resolve_packaged_source(root, entry),
-        "layout": "single",
-        "domains": 1,
+        "layout": layout,
+        "domains": domains,
         "payload": payload,
         "head_sha256": str(head["head_sha256"]),
         "source_manifest_sha256": head["basis"].get("input_manifest_sha256"),
@@ -561,12 +608,20 @@ def packaged_source_of(prepared_root: Path) -> str | None:
     runner enforces, asked one stage earlier so the answer at the door and
     the answer at depth cannot disagree.
 
+    A mapping that differs from the pin only in an admission-only
+    declaration (:func:`woof.source_authorities.bound_mapping_refusal`)
+    is still that profile's: a preparation made before a release added
+    one decodes the same frames, and naming it ``mapped`` relabelled a
+    packaged source's forecast as a caller's own mapping (A166).  The
+    runner then holds its boundary spacing to the packaged target.
+
     ``None`` means no shipped profile matches, which is exactly what a
     caller-authored mapping looks like.
     """
 
     from woof.source_adapters import packaged_profile_sources
-    from woof.source_authorities import packaged_authority_sha256
+    from woof.source_authorities import (bound_mapping_refusal,
+                                          packaged_authority_sha256)
 
     mapping = Path(prepared_root) / _MAPPED_EVIDENCE_MAPPING
     composition = Path(prepared_root) / _MAPPED_EVIDENCE_COMPOSITION
@@ -582,12 +637,14 @@ def packaged_source_of(prepared_root: Path) -> str | None:
 
     from woof.prepared_source_schemas import source_schemas
     schemas = source_schemas()
-    observed = (_sha256(mapping), _sha256(composition))
+    observed_composition = _sha256(composition)
+    mapping_bytes = mapping.read_bytes()
     for source, profile_id in packaged_profile_sources().items():
         pins = packaged_authority_sha256(profile_id)
-        if (observed == (pins["mapping"], pins["composition"])
+        if (observed_composition == pins["composition"]
                 and isinstance(manifest, dict)
-                and manifest.get("schema") == schemas.get(source)):
+                and manifest.get("schema") == schemas.get(source)
+                and bound_mapping_refusal(profile_id, mapping_bytes) is None):
             return source
     return None
 
@@ -856,10 +913,16 @@ def sim_command(bundle: dict, *, experiment_config: Path,
     config = Path(experiment_config)
     if layout == "tree":
         digests = tree_digests(bundle, config)
+        # A chained tree bound at its head: the runner restores from the
+        # head and binds the seal at the end, as the single domain does.
+        binding = (["--prepared-head-sha256", str(bundle["head_sha256"])]
+                   if bundle.get("head_sha256") is not None else
+                   ["--preparation-receipt-sha256",
+                    digests["preparation_receipt"]])
         return [sys.executable, "-m", TREE_RUNNER,
-                "--prepared-root", str(bundle["document"].parent),
-                "--preparation-receipt-sha256",
-                digests["preparation_receipt"],
+                "--prepared-root", str(bundle.get(
+                    "root", bundle["document"].parent)),
+                *binding,
                 "--experiment-config", str(config),
                 "--experiment-config-sha256", digests["experiment_config"],
                 *profile_flags, *restart_flags, *health_flags, *render_flags,
@@ -873,9 +936,12 @@ def sim_command(bundle: dict, *, experiment_config: Path,
     if bundle.get("head_sha256") is not None:
         # A chained preparation bound at its head: the proof and cache
         # digests do not exist yet, and the runner checks them at the seal.
+        # An as-posted head names no manifest: it binds its input plan, and
+        # its seal writes the manifest, held to that plan.
         binding = ["--prepared-head-sha256", str(bundle["head_sha256"]),
-                   "--source-manifest-sha256",
-                   str(bundle["source_manifest_sha256"])]
+                   *(() if bundle.get("source_manifest_sha256") is None
+                     else ("--source-manifest-sha256",
+                           str(bundle["source_manifest_sha256"])))]
     else:
         digests = single_domain_digests(bundle)
         binding = ["--proof-sha256", digests["proof"],

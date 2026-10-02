@@ -19,8 +19,8 @@ model.
 
 ## Install
 
-Linux on x86_64, Python 3.11 or newer, an NVIDIA GPU and driver. 1.0.0 has
-no Windows build of the native tools.
+Linux on x86_64, Python 3.11 or newer, an NVIDIA GPU and driver. WOOF has
+no Windows build of the native tools yet.
 
 With Pixi (Python and the Rust/build toolchain managed in one env):
 
@@ -101,7 +101,7 @@ of the MPAS-A v8.4.1 dynamical core with this engine's physics; it is not MPAS
 and is not endorsed by UCAR. Use official meteorological services for
 forecasts and warnings.
 
-WOOF 1.0.0 continues an engine released before under another name: it is
+WOOF continues an engine released before under another name: WOOF 1.0 is
 that engine's release 2.8.0 and the fixes made since, under the WOOF name,
 with the hex and global models inside it. Settings spelled `GPUWM_*` keep
 working beside the new `WOOF_*` spelling.

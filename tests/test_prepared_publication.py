@@ -22,7 +22,7 @@ import pytest
 TAG = "v9.8.7"
 VERSION = "9.8.7"
 COMMIT = "a" * 40
-REPOSITORY = "FahrenheitResearch/arwen"
+REPOSITORY = "example-org/example-repo"
 PIN = "b" * 64
 OTHER_PIN = "c" * 64
 

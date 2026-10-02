@@ -137,7 +137,7 @@ CUDA_V841_PHYSICS_GWDO_AUTHORITY_NONCLAIMS = (
     "native full-physics CUDA authority",
     "native moist-dynamics CUDA authority",
     "final forecast authority",
-    "Arwen GWDO execution",
+    "WOOF GWDO execution",
 )
 CUDA_V841_PHYSICS_GWDO_COMPONENTS = (
     "legacy_rrtmg_lw",

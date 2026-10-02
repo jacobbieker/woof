@@ -121,8 +121,8 @@ class LambertGrid(ProjectedGrid):
         yy = self.polej - self.hemi * y
         r2 = xx * xx + yy * yy
         r = np.sqrt(r2) / self.rebydx
-        lon = self.stand_lon + _DEG_PER_RAD * np.arctan2(self.hemi * xx,
-                                                         yy) / self.cone
+        lon = self.stand_lon + _DEG_PER_RAD * host_libm.arctan2(
+            self.hemi * xx, yy) / self.cone
         lon = np.mod(lon + 360.0, 360.0)
         if chi1 == chi2:  # tangent (exact-equality branch, as in Fortran)
             chi = 2.0 * host_libm.arctan(
