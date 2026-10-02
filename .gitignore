@@ -108,3 +108,6 @@ docs/branch-dispositions-private.md
 # Cargo checksum manifests require every upstream source and documentation file.
 !tools/arwen-ui-vendor/**
 tools/arwen-ui-vendor/**/__pycache__/
+# pixi environments
+.pixi/*
+!.pixi/config.toml
