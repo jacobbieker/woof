@@ -117,3 +117,38 @@ markers = ["gpu: requires a CUDA GPU + cupy",
            "doors: needs a staged Rust binary from a release bundle",
            "cpu_only: these tests must not open the local device"]
 testpaths = ["tests", "tilestream"]
+
+[tool.pixi.workspace]
+name = "woof"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.base.dependencies]
+python = "3.11.*"
+pip = "*"
+rust = "*"
+cmake = "*"
+ninja = "*"
+make = "*"
+pkg-config = "*"
+xarray = "*"
+zarr = "*"
+
+[tool.pixi.feature.base.pypi-dependencies]
+icechunk = "*"
+
+[tool.pixi.feature.cu12.pypi-dependencies]
+recast-woof = { path = ".", editable = true, extras = ["all-cu12"] }
+
+[tool.pixi.feature.cu13.pypi-dependencies]
+recast-woof = { path = ".", editable = true, extras = ["all-cu13"] }
+
+[tool.pixi.environments]
+default = { features = ["base", "cu12"], no-default-feature = true }
+cuda13 = { features = ["base", "cu13"], no-default-feature = true }
+
+[tool.pixi.feature.base.tasks]
+doctor = "woof doctor"
+doctor-explain = "woof doctor --explain"
+build-native = "cd tools/grib1_bridge && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rustwx && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../rw_wps && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline && cd ../region_global_dealias && CC=gcc CXX=g++ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc cargo build --release --locked --offline"
+setup = "pixi run build-native && (woof fetch-bridges || true)"

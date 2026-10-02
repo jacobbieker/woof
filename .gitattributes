@@ -82,3 +82,5 @@ tools/rustwx/patches/rdps-f000-components.patch -whitespace
 # 4 Hz nvidia-smi samples end in an empty procs field (a trailing tab) when no
 # process held the card; B4-SPEED-ANCHORS.json pins their sha256, so the bytes stay.
 docs/public/receipts/obsbattery/*.tsv -whitespace
+# SCM syntax highlighting & preventing 3-way merges
+pixi.lock merge=binary linguist-language=YAML linguist-generated=true -diff
