@@ -50,6 +50,7 @@ from woof.offline_child import (
     bind_parent_physics_from_wrf_namelist,
     build_offline_child_domain_state,
     build_offline_lateral_boundaries,
+    child_mosaic_refusal,
     child_surface_requirement,
     derive_child_surface_from_parent,
     child_inherits_parent_levels,
@@ -1454,6 +1455,7 @@ def _initialize_child_physics(child, cfg, initial, surface, start_time):
         xice = np.zeros_like(fields["LANDMASK"])
     landuse = initialize_landuse(
         fields["LU_INDEX"], soil_type=fields["ISLTYP"],
+        urban_legend=int(getattr(cfg, "sf_urban_physics", 0)) > 0,
         landmask=fields["LANDMASK"], snow=fields["SNOW"], xice=xice,
         valid_time=start_time, cen_lat=float(np.mean(lat)),
         mminlu=str(identity["MMINLU"]), iswater=int(identity["ISWATER"]),
@@ -3052,6 +3054,11 @@ def _run(args: argparse.Namespace,
     # checkpoint_due is the cadence.
     cadence = child_cadence(
         cfg, health_interval_seconds=float(args.health_interval_seconds))
+    # Noah mosaic, before the parent archive is interpolated: this route
+    # has no door that builds its tiles (offline_child.child_mosaic_refusal).
+    mosaic_refusal = child_mosaic_refusal(cfg)
+    if mosaic_refusal is not None:
+        raise OfflineChildContractError(mosaic_refusal)
     # THE DISK, before the parent archive is interpolated and before the
     # child takes a step: the same projection the plan review refused on,
     # asked again here for the runner door, which no review stands in

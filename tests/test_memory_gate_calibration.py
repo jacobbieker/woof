@@ -182,8 +182,12 @@ def test_windows_envelope_is_the_measured_affine_model(monkeypatch,
                 + est.non_pool_device_bytes
                 + pf.ENVELOPE_UNMODELLED_BYTES)
     assert est.peak_envelope_bytes == expected
-    # ...and the legacy-RRTMG lane still pays the measured slack, in the
-    # same affine form.
+    # ...and the legacy-RRTMG lane is priced in the same affine form.  It
+    # paid 20% of the estimate on top until A163 (2026-09-30) retired
+    # that term: the estimate's own margin already prices the pool
+    # headroom the slack priced a second time, and the measured margin
+    # bounds the legacy battery rows on its own
+    # (tests/test_memory_gate_a163.py).
     legacy_config = _emit(tmp_path, 110, 88,
                           profile="thompson-mp8-ysu-mm5-noah-rrtmg-legacy-v1")
     legacy_exp = dw.experiment_from_text(
@@ -193,9 +197,7 @@ def test_windows_envelope_is_the_measured_affine_model(monkeypatch,
     assert legacy.peak_envelope_bytes == (
         legacy.alloc_estimate_bytes
         + legacy.non_pool_device_bytes
-        + pf.ENVELOPE_UNMODELLED_BYTES
-        + math.ceil(pf.WDDM_POOL_SLACK_FRACTION
-                    * legacy.alloc_estimate_bytes))
+        + pf.ENVELOPE_UNMODELLED_BYTES)
     # The 5090 zero-step probe constant and the pool-retention constant
     # are display projections, never envelope intercept terms.
     assert est.envelope_intercept_bytes == est.non_pool_device_bytes
@@ -219,14 +221,12 @@ def test_windows_envelope_is_the_measured_affine_model(monkeypatch,
     assert est.peak_envelope_bytes < int(1.75 * measured), (
         "the envelope must bound the measured peak without the "
         "multiplicative slop class this gate was burned by")
-    # And nothing multiplicative survives on the terms line; the slack
-    # term is named on the lane that pays it and absent from the one
-    # that does not.
+    # And nothing multiplicative survives on the terms line, and no lane
+    # is charged a slack term since A163.
     for terms in (est.peak_envelope_terms(), legacy.peak_envelope_terms()):
         assert "1.75" not in terms
         assert "WDDM floor" not in terms
-    assert "pool slack" not in est.peak_envelope_terms()
-    assert "pool slack" in legacy.peak_envelope_terms()
+        assert "pool slack" not in terms
 
 
 def test_wizard_and_check_price_one_envelope_for_one_machine(monkeypatch,

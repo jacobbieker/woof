@@ -94,7 +94,7 @@ def test_the_named_forecast_pair_is_masked_digest_identical(receipts):
 SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     "src/hexcore/cuda_driver.py": {
         "recorded": "cb6477ef2fd02ad551e9b6c8af0724c94fc4d90bdc712fff1378d218662f5d04",
-        "current": "5a30009cc4a15a42df4b7a06f70641c46d04e60dcd324d8af8c57ac23a3e8ba4",
+        "current": "8d86e6e3f8b400672d26c5966f53306fd86f2cf9ab4b8570b3aac91c239f4544",
         "why": (
             "convection ruling, 2026-08-26: _v841_physics_cadences reports "
             "convection: None when no cumulus scheme is selected instead of "

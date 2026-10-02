@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.0.1
+
+The engine's speed work, forecasts that start before their inputs finish
+posting, and the fixes made since 1.0.0.
+
+New:
+
+- Faster physics, output byte-identical: legacy RRTMG radiation about 7x
+  faster per call (product-suite forecasts up to 13% faster), RTE-RRTMGP
+  1.6x faster per call, MYNN about 4.5x faster per call, and RUC land
+  surface as six fused kernels instead of up to 3,000 launches (7 to 22x
+  faster per call). The dycore step and nest forcing make fewer launches
+  and host waits (nest forcing takes 25% less time).
+- `WOOF_PHYSICS_MEGAKERNEL=1` runs the physics glue as a few fused kernels:
+  a 100 x 80 default-suite step is 1.12x faster and forecasts are
+  byte-identical. It is off by default, and a receipt names it when on.
+- `[shared] adaptive_nest_lattice = true` picks the adaptive outer time step
+  with the fewest nest cell-steps (6% faster on a three-domain 250 m tree).
+  Opt-in: answers change.
+- Sources are fetched as they post: `woof fetch` takes each forecast time as
+  soon as a host has it, `--cycle latest` needs only the first ones, a time
+  that passes its late limit exits 75, `--whole-cycle` keeps the old rule and
+  `--readiness` says whether a run can start. `woof sources` shows each
+  source's posting schedule and lateness budget.
+- Domain trees from HRRR pressure levels, mapped sources and GFS prepare
+  their start time and nests first, then one boundary interval at a time, and
+  the forecast starts on that head, waiting at any interval not yet prepared.
+  Output is identical to waiting for the whole preparation.
+- The source decode uses every core (`woof prep --preprocess-workers` sets
+  the count): a 48 h HRRR decode on 24 cores took 140 s instead of 480. Prepared arrays
+  are unchanged.
+- GEM GDPS, and every regular latitude/longitude source, decodes only the
+  window its domains read: a 6 h GDPS preparation took 32 s and 1.5 GB of
+  memory instead of 175 s and 12 GB.
+
+Fixed:
+
+- With `hypsometric_opt = 2`, which `woof domain` writes, a CPU-prepared
+  state takes glibc's `log1pf` on every machine, so it no longer differs in
+  the last bits on AVX-512 machines (the 1.0.0 known issue). The default
+  hybrid coordinate and the preparation's exp, log and pow are also the
+  same on every machine now.
+- Under the adaptive clock, the steep-terrain cap on `max_time_step` comes
+  from three-hour runs of the adaptive clock itself: a 2.25 km ridge under a
+  24 m/s crest wind keeps 30 s and a 3 km CONUS domain keeps 24 s up to
+  30 m/s, where 1.0.0 capped them shorter.
+- `--cycle latest` waits each publisher's measured delay for that cycle hour
+  and no longer skips posted cycles of seven sources. ECMWF's "slow down"
+  answer is retried for up to 10 minutes.
+- An AIFS forecast starting after f000, and a GEM GDPS window starting after
+  f000, now prepare: the land mask and terrain come from the cycle's f000.
+- A storm-following nest's 1 h rain draws at the hours it moved, and ground
+  it moves onto starts from the parent's rain total.
+- A nest that starts after the forecast draws live and through
+  `woof render`, where every frame was refused.
+- A forecast waiting for a boundary interval says so on its heartbeat,
+  progress file and events, and `woof go` no longer stops it after 120 s.
+- Two card preparations of the same inputs now publish identical prepared
+  caches; per-run measurements stay in the receipt.
+- In a cloud-cover picture, clear sky under the first level (10%) draws
+  nothing, so the map shows through instead of a white sheet.
+- Hex and global maps and cross-sections name their model, WOOF Hex and
+  WOOF Global, in the line under the title, where they said WRF.
+- The global model's quickstart configurations name the `woof` commands to
+  fetch its analysis and run it.
+- The identity texts name WOOF (the 1.0.0 known issue): the pin tables
+  `woof global pins` and `python -m woof.globe.spectral pins` print, and the
+  hex model's contract texts and messages. They carry new ids (global pins
+  v3, Level-3 pins v2, hex adapter contract v3) and no arithmetic moved.
+  1.0.1 reads the 1.0.0 ids as the same arithmetic, so a global checkpoint,
+  export or receipt written by 1.0.0 resumes and validates.
+- A global receipt's `libraries` block records the `recast-woof` version.
+  1.0.0 receipts recorded `recast-woof-data` and not the package itself.
+
 ## 1.0.0
 
 Recast WOOF 1.0.0 is the regional engine of release 2.8.0 and the fixes made

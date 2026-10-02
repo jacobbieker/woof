@@ -360,6 +360,49 @@ class TestComposeArguments:
             render_door._run = original
         assert "--compose-base-only" in command
 
+    def test_frames_name_their_model_when_the_converter_takes_it(
+            self, tmp_path, monkeypatch):
+        """A converted frame imports under the renderer's generic wrfout
+        identity, so its maps said "WRF".  A converter that takes
+        --model-label is given this distribution's name; an older one is
+        not given a flag it would refuse, and renders as before."""
+
+        from woof.hex import render_door
+
+        def fake_run(command, *, log_prefix):
+            (tmp_path / "scratch").mkdir(parents=True, exist_ok=True)
+            (tmp_path / "scratch" / "convert-report.json").write_text(
+                '{"frames": []}', encoding="utf-8")
+
+            class Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            return Result()
+
+        monkeypatch.setattr(render_door, "_run", fake_run)
+        for takes_it in (True, False):
+            monkeypatch.setattr(render_door, "converter_names_models",
+                                lambda exe, answer=takes_it: answer)
+            _, command = render_door.convert_frames(
+                Path("rw_mpas_convert"), histories=[Path("h.nc")],
+                mesh=Path("m.nc"), scratch=tmp_path / "scratch",
+                window="mesh", field_set="full", simulation_start=None,
+                nc_format="cdf2")
+            if takes_it:
+                at = command.index("--model-label")
+                assert command[at + 1] == render_door.MODEL_LABEL
+            else:
+                assert "--model-label" not in command
+
+    def test_a_converter_that_cannot_be_asked_takes_no_model_label(
+            self, tmp_path):
+        from woof.hex import render_door
+
+        assert not render_door.converter_names_models(
+            tmp_path / "no-such-rw_mpas_convert")
+
     def test_incoherent_commands_are_refused_before_a_binary_is_needed(
             self, tmp_path):
         """Named refusals, reachable without an engine installed.

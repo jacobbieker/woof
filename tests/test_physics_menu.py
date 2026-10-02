@@ -653,4 +653,3 @@ def test_every_route_answers_a_tree_as_it_answers_one_domain():
         for profile in shipped_profiles():
             assert profile_route_blocker(profile, source, domains=3) == \
                 profile_route_blocker(profile, source), (source, profile)
-

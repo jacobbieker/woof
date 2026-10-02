@@ -23,7 +23,7 @@ p_top_pa = 100.0
 
 # analysis_grib is relative to the working directory, in the shape the
 # quickstart's fetch writes:
-#   gpuwm fetch --source gdas --cycle <YYYY-MM-DD>T18 --hours 0 \
+#   woof fetch --source gdas --cycle <YYYY-MM-DD>T18 --hours 0 \
 #       --mode full-file --out data/gdas-analysis
 # analysis_mapping is the packaged authority's BARE ID, not a path: the
 # resolver globs rw-wps-<id>-*.mapping.json under gpuwm/authorities and

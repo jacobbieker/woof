@@ -54,6 +54,8 @@ from woof.fetch import (
 from woof.hrrr_forecast import hrrr_cycle_horizon
 from woof.ingest.hrrr_target import load_hrrr_target_domain
 from woof.io.restart import read_restart_header
+from woof.fortran_namelist import (
+    parse_namelist_text, scan_namelist_text, value_end_through_blanks)
 from woof.namelist_import import parse_namelist
 from woof.nomads_governor import paced_urlopen
 from woof.toml_document import iter_toml_statements
@@ -435,11 +437,6 @@ def load_stream_plan(path: str | Path) -> StreamPlan:
     )
 
 
-_ASSIGNMENT = re.compile(
-    r"^(?P<indent>\s*)(?P<key>[A-Za-z_][A-Za-z0-9_]*)"
-    r"(?P<equal>\s*=\s*)(?P<value>.*?)(?P<comment>\s*!.*)?$")
-
-
 def _render_namelist_values(values) -> str:
     def one(value):
         if isinstance(value, str):
@@ -451,39 +448,66 @@ def _render_namelist_values(values) -> str:
 
 
 def _rewrite_namelist(text: str, updates: Mapping[str, Mapping[str, list]]) -> str:
-    """Replace/insert simple WRF namelist assignments by section."""
-    lines = text.splitlines()
-    seen = {section: set() for section in updates}
-    current = None
-    out = []
-    for raw in lines:
-        stripped = raw.strip()
-        if stripped.startswith("&"):
-            current = stripped[1:].strip().lower()
-            out.append(raw)
-            continue
-        if stripped == "/":
-            if current in updates:
-                for key, values in updates[current].items():
-                    if key not in seen[current]:
-                        out.append(f" {key} = {_render_namelist_values(values)}")
-            current = None
-            out.append(raw)
-            continue
-        match = _ASSIGNMENT.match(raw)
-        if match and current in updates:
-            key = match.group("key").lower()
-            if key in updates[current]:
-                seen[current].add(key)
-                raw = (f"{match.group('indent')}{match.group('key')}"
-                       f"{match.group('equal')}"
-                       f"{_render_namelist_values(updates[current][key])}"
-                       f"{match.group('comment') or ''}")
-        out.append(raw)
-    missing_sections = sorted(section for section in updates if section not in seen)
+    """Replace/insert WRF namelist assignments by section.
+
+    Works on the assignment spans of :mod:`woof.fortran_namelist`, the
+    reader every namelist door shares, so a key packed beside others on
+    one line (``run_hours = 6, history_interval = 60,``) is replaced
+    without touching its neighbours, a value list continued over several
+    lines is replaced whole, and a later element or repeated assignment
+    of an updated key is removed rather than left to overwrite the new
+    value.  The line editor that stood here replaced everything after the
+    first key on its line (history_interval above was lost), left a
+    continued value's later lines behind as extra domains, and never
+    refused a template missing a section it had to set: its check
+    compared the updated sections with themselves.
+    """
+    parse_namelist_text(text)  # the same refusals the importer gives
+    groups = {group.name: group for group in scan_namelist_text(text)}
+    missing_sections = sorted(section for section in updates if section not in groups)
     if missing_sections:
         raise ValueError(f"namelist lacks section(s) {missing_sections}")
-    return "\n".join(out) + "\n"
+    edits: list[tuple[int, int, str]] = []
+    for section, keys in updates.items():
+        group = groups[section]
+        placed: set[str] = set()
+        for assignment in group.assignments:
+            if assignment.name not in keys:
+                continue
+            end = value_end_through_blanks(text, assignment)
+            rendered = _render_namelist_values(keys[assignment.name])
+            if assignment.name in placed:
+                line_start = text.rfind("\n", 0, assignment.start) + 1
+                line_end = text.find("\n", end)
+                line_end = len(text) if line_end < 0 else line_end + 1
+                if (not text[line_start:assignment.start].strip()
+                        and not text[end:line_end].strip()):
+                    edits.append((line_start, line_end, ""))
+                else:
+                    edits.append((assignment.start, end, ""))
+            elif assignment.subscript is None:
+                edits.append((assignment.value_start, end, rendered))
+            else:
+                edits.append((assignment.start, end,
+                              f"{assignment.name} = {rendered}"))
+            placed.add(assignment.name)
+        inserted = "".join(f" {key} = {_render_namelist_values(values)}\n"
+                           for key, values in keys.items() if key not in placed)
+        if not inserted:
+            continue
+        if group.terminator is None:
+            raise ValueError(
+                f"namelist &{section} has no '/' terminator to insert "
+                f"{sorted(set(keys) - placed)} before")
+        at = group.terminator[0]
+        line_start = text.rfind("\n", 0, at) + 1
+        if text[line_start:at].strip():
+            edits.append((at, at, "\n" + inserted))
+        else:
+            edits.append((line_start, line_start, inserted))
+    for start, stop, replacement in sorted(edits, key=lambda edit: edit[:2], reverse=True):
+        text = text[:start] + replacement + text[stop:]
+    return "\n".join(text.splitlines()) + "\n"
 
 
 def _materialize_input_namelist(
@@ -1634,7 +1658,13 @@ def _valid_hierarchy(path: Path, *, plan: StreamPlan, cycle: datetime,
             != sha256_file(stock)
             or provenance.get("root_static_receipt_sha256") != sha256_file(
                 root / "native-static-receipt.json")
-            or provenance.get("root_prepared_content_sha256")
+            # The receipt names the root's sealed cache in root_preparation
+            # (a chained tree's head is written before the root seals); a
+            # receipt written before the tree chained named it in its
+            # provenance.
+            or ((payload.get("root_preparation") or {}).get(
+                "prepared_content_sha256")
+                or provenance.get("root_prepared_content_sha256"))
             != root_header.get("content_sha256")):
         raise ValueError(
             f"hierarchy preparation receipt identity/status mismatch: "

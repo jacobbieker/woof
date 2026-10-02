@@ -82,6 +82,13 @@ assert engines.RENDERER.gpuwm_env == RENDERER_ENV_GPUWM
 #: The manifest schema written beside the delivered tree.
 MANIFEST_SCHEMA = "mpas-port.render-door-manifest/v1"
 
+#: The model this distribution's maps name in their metadata row.  A
+#: converted frame is wrfout-shaped and the renderer imports it under its
+#: generic wrfout identity, so every hex map said "WRF" until the frame
+#: named its model: ``rw_mpas_convert --model-label`` writes this into the
+#: frame (as ``GPUWM_MODEL_LABEL``) and the renderer prints it instead.
+MODEL_LABEL = "WOOF Hex"
+
 #: Layout tokens for a frame whose facts could not be read (same spellings
 #: as woof.render_layout, so a reader of either tree learns one vocabulary).
 NATIVE_GRID = "native_grid"
@@ -257,6 +264,23 @@ def _run(command: list[str], *, log_prefix: str) -> subprocess.CompletedProcess:
     )
 
 
+def converter_names_models(convert_exe: Path) -> bool:
+    """Whether this ``rw_mpas_convert`` takes ``--model-label``.
+
+    The flag arrived with the engine's 2.8.1 converter; the 2.8.0 one
+    refuses any flag it does not know, which would fail every render.  Its
+    own usage text is the answer, so an older engine still renders, with
+    the generic identity in the metadata row as before."""
+    try:
+        usage = subprocess.run(
+            [str(convert_exe), "--help"], capture_output=True, text=True,
+            errors="replace", timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "--model-label" in (usage.stdout or "") + (usage.stderr or "")
+
+
 def convert_frames(convert_exe: Path, *, histories: list[Path] | None,
                    mesh: Path | None, scratch: Path, window: str,
                    field_set: str, simulation_start: str | None,
@@ -303,6 +327,8 @@ def convert_frames(convert_exe: Path, *, histories: list[Path] | None,
     ))
     if simulation_start:
         command.extend(("--simulation-start", simulation_start))
+    if converter_names_models(convert_exe):
+        command.extend(("--model-label", MODEL_LABEL))
     result = _run(command, log_prefix="CONVERT")
     for line in (result.stdout or "").splitlines():
         if line.startswith(("WINDOW\t", "WEIGHTS\t", "CONVERTED\t",

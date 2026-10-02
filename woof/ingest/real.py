@@ -26,9 +26,11 @@ import numpy as np
 from woof.config import (RunConfig, validate_aerosol_source_options,
                           validate_run_preparation)
 from woof.core import constants as c
+from woof.core import portable_math as pm
 from woof.core.grid import (BaseState, VerticalCoord,
                              finalize_vertical_coord,
                              hybrid_column_ordering_refusal)
+from woof.core.noahmp_libm import log1pf_array
 from woof.core.state import DomainState
 from woof.ingest.horiz import (
     HorizontalSnapshot,
@@ -1012,7 +1014,7 @@ def _logarithm_tie_band(*pressures) -> float:
 
     lowest = min(float(np.min(value)) for value in pressures)
     highest = max(float(np.max(value)) for value in pressures)
-    extent = max(abs(np.log(lowest)), abs(np.log(highest)))
+    extent = max(abs(pm.log(lowest)), abs(pm.log(highest)))
     return 4.0 * float(np.spacing(np.float32(extent)))
 
 
@@ -2002,7 +2004,7 @@ def _saturation_mixing_ratio_serial(temperature, pressure,
     # Its unconditional floor is at
     # (module_initialize_real.F:7402, q = MAX(eps*es/(p/100.-es), 1.E-6)).
     with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
-        es_hpa = (rh * 0.01) * (10.0 * c.SVP1) * np.exp(
+        es_hpa = (rh * 0.01) * (10.0 * c.SVP1) * pm.exp(
             c.SVP2 * (temperature - c.SVPT0) / (temperature - c.SVP3))
         candidate = 0.622 * es_hpa / (pressure / 100.0 - es_hpa)
     valid = ((temperature != 0.0) & np.isfinite(es_hpa)
@@ -2026,7 +2028,8 @@ def _saturation_mixing_ratio(temperature, pressure, relative_humidity=100.0,
         np.clip(np.asarray(relative_humidity, dtype=np.float64), 0.0, 100.0),
     )
     if workers == 1 or temperature.ndim == 0 or temperature.shape[0] < 2:
-        return _saturation_mixing_ratio_serial(temperature, pressure, rh)
+        with pm.worker_limit(workers):
+            return _saturation_mixing_ratio_serial(temperature, pressure, rh)
 
     chunks = _axis0_chunks(temperature.shape[0], workers)
     output = np.empty(temperature.shape, dtype=np.float64)
@@ -2483,7 +2486,7 @@ def _mixing_ratio_to_relative_humidity_serial(
             "temperature, pressure, and mixing ratio must be finite; "
             f"pressure must be positive and mixing ratio {qv_requirement}")
     with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
-        es_hpa = (10.0 * c.SVP1) * np.exp(
+        es_hpa = (10.0 * c.SVP1) * pm.exp(
             c.SVP2 * (temperature - c.SVPT0) / (temperature - c.SVP3))
         vapor_hpa = qv * (pressure / 100.0) / (qv + 0.622)
         rh = 100.0 * vapor_hpa / es_hpa
@@ -2513,9 +2516,10 @@ def _mixing_ratio_to_relative_humidity(
     )
     if (workers == 1 or temperature.ndim == 0
             or temperature.shape[0] < 2):
-        return _mixing_ratio_to_relative_humidity_serial(
-            temperature, pressure, qv,
-            allow_wps_undershoot=allow_wps_undershoot)
+        with pm.worker_limit(workers):
+            return _mixing_ratio_to_relative_humidity_serial(
+                temperature, pressure, qv,
+                allow_wps_undershoot=allow_wps_undershoot)
 
     chunks = _axis0_chunks(temperature.shape[0], workers)
     output = np.empty(temperature.shape, dtype=np.float64)
@@ -2536,7 +2540,7 @@ def _mixing_ratio_to_relative_humidity(
 
 def _potential_temperature_from_temperature_serial(temperature, pressure):
     """Evaluate WRF's T-to-theta relation over one contiguous chunk."""
-    return temperature * (c.P0 / pressure) ** c.RCP
+    return temperature * pm.power(c.P0 / pressure, c.RCP)
 
 
 def _potential_temperature_from_temperature(
@@ -2549,8 +2553,9 @@ def _potential_temperature_from_temperature(
     )
     if (workers == 1 or temperature.ndim == 0
             or temperature.shape[0] < 2):
-        return _potential_temperature_from_temperature_serial(
-            temperature, pressure)
+        with pm.worker_limit(workers):
+            return _potential_temperature_from_temperature_serial(
+                temperature, pressure)
     chunks = _axis0_chunks(temperature.shape[0], workers)
     output = np.empty(temperature.shape, dtype=np.float64)
     with _column_pool(len(chunks)) as executor:
@@ -2568,7 +2573,7 @@ def _potential_temperature_from_temperature(
 
 def _temperature_from_potential_temperature_serial(theta, pressure):
     """Evaluate WRF's theta-to-T relation over one contiguous chunk."""
-    return theta * (pressure / c.P0) ** c.RCP
+    return theta * pm.power(pressure / c.P0, c.RCP)
 
 
 def _temperature_from_potential_temperature(
@@ -2580,7 +2585,9 @@ def _temperature_from_potential_temperature(
         np.asarray(pressure, dtype=np.float64),
     )
     if workers == 1 or theta.ndim == 0 or theta.shape[0] < 2:
-        return _temperature_from_potential_temperature_serial(theta, pressure)
+        with pm.worker_limit(workers):
+            return _temperature_from_potential_temperature_serial(
+                theta, pressure)
     chunks = _axis0_chunks(theta.shape[0], workers)
     output = np.empty(theta.shape, dtype=np.float64)
     with _column_pool(len(chunks)) as executor:
@@ -2599,7 +2606,7 @@ def _temperature_from_potential_temperature(
 def _moist_specific_volume_serial(theta, qv, pressure):
     """Evaluate one contiguous chunk of WRF moist specific volume."""
     theta_m = theta * (1.0 + c.RVOVRD * qv)
-    return c.RD * theta_m * (pressure / c.P0) ** c.RCP / pressure
+    return c.RD * theta_m * pm.power(pressure / c.P0, c.RCP) / pressure
 
 
 def _moist_specific_volume(theta, qv, pressure, *, column_workers=1):
@@ -2611,7 +2618,8 @@ def _moist_specific_volume(theta, qv, pressure, *, column_workers=1):
         np.asarray(pressure, dtype=np.float64),
     )
     if workers == 1 or theta.ndim == 0 or theta.shape[0] < 2:
-        return _moist_specific_volume_serial(theta, qv, pressure)
+        with pm.worker_limit(workers):
+            return _moist_specific_volume_serial(theta, qv, pressure)
     chunks = _axis0_chunks(theta.shape[0], workers)
     output = np.empty(theta.shape, dtype=np.float64)
     with _column_pool(len(chunks)) as executor:
@@ -2670,7 +2678,7 @@ def _surface_relative_humidity(dewpoint, temperature):
     dewpoint = _host(dewpoint)
     temperature = _host(temperature)
     xlv_over_rv = 2.5e6 / 461.5
-    return 100.0 * np.exp(
+    return 100.0 * pm.exp(
         xlv_over_rv * (1.0 / temperature - 1.0 / dewpoint))
 
 
@@ -2699,7 +2707,7 @@ def surface_pressure_from_surface(psfc_in, source_orography, terrain,
     if (not np.isfinite(virtual_temperature).all()
             or np.any(virtual_temperature <= 0.0)):
         raise ValueError("surface virtual temperature must be finite and positive")
-    result = psfc * np.exp(
+    result = psfc * pm.exp(
         c.G * (source_z - target_z) / (c.RD * virtual_temperature))
     if not np.isfinite(result).all() or np.any(result <= 0.0):
         raise ValueError("adjusted surface pressure is invalid")
@@ -2899,7 +2907,7 @@ def _make_real_base_serial(coord: VerticalCoord, terrain: np.ndarray,
         2.0 * c.G * terrain / (lapse * c.RD))
     if np.any(root <= 0.0):
         raise ValueError("terrain is outside the analytic base-state range")
-    ps_base = c.P0 * np.exp(-base_temp / lapse + np.sqrt(root))
+    ps_base = c.P0 * pm.exp(-base_temp / lapse + np.sqrt(root))
     mub = ps_base - p_top
     pb = (coord.c3h[:, None, None] * mub[None]
           + coord.c4h[:, None, None] + p_top)
@@ -2916,9 +2924,9 @@ def _make_real_base_serial(coord: VerticalCoord, terrain: np.ndarray,
             quantity="hybrid base pressure", row_offset=row_offset)
             or "hybrid base pressure is not monotonic")
     temperature = np.maximum(
-        iso_temperature, base_temp + lapse * np.log(pb / c.P0))
-    thb = temperature * (c.P0 / pb) ** c.RCP
-    alb = c.RD * thb * (pb / c.P0) ** c.RCP / pb
+        iso_temperature, base_temp + lapse * pm.log(pb / c.P0))
+    thb = temperature * pm.power(c.P0 / pb, c.RCP)
+    alb = c.RD * thb * pm.power(pb / c.P0, c.RCP) / pb
     phb = np.empty((coord.znw.size,) + terrain.shape, dtype=np.float64)
     phb[0] = c.G * terrain
     if hypsometric_opt == 1:
@@ -2932,7 +2940,7 @@ def _make_real_base_serial(coord: VerticalCoord, terrain: np.ndarray,
             pfu = coord.c3f[k + 1] * mub + coord.c4f[k + 1] + p_top
             pfd = coord.c3f[k] * mub + coord.c4f[k] + p_top
             phm = coord.c3h[k] * mub + coord.c4h[k] + p_top
-            phb[k + 1] = phb[k] + alb[k] * phm * np.log(pfd / pfu)
+            phb[k + 1] = phb[k] + alb[k] * phm * pm.log(pfd / pfu)
     else:
         raise ValueError(
             f"hypsometric_opt must be 1 or 2, got {hypsometric_opt}")
@@ -2962,8 +2970,9 @@ def _make_real_base(coord: VerticalCoord, terrain: np.ndarray, p_top: float,
     finalize_vertical_coord(coord, p_top)
     terrain = np.asarray(terrain, dtype=np.float64)
     if workers == 1 or terrain.shape[0] < 2:
-        return _make_real_base_serial(
-            coord, terrain, p_top, base_temp, hypsometric_opt)
+        with pm.worker_limit(workers):
+            return _make_real_base_serial(
+                coord, terrain, p_top, base_temp, hypsometric_opt)
 
     ny, nx = terrain.shape
     nz = coord.dnw.size
@@ -3120,7 +3129,7 @@ def _half_level_height_agl(base, coord, dry_mass, alpha, *,
         pfu = c3f[1:] * mu[None] + c4f[1:] + p_top
         pfd = c3f[:-1] * mu[None] + c4f[:-1] + p_top
         phm = c3h * mu[None] + c4h + p_top
-        dphi[...] = target * phm * np.log(pfd / pfu)
+        dphi[...] = target * phm * pm.log(pfd / pfu)
     else:
         dnw = np.asarray(coord.dnw, dtype=np.float64)[:, None, None]
         increment = (np.asarray(coord.c1h, dtype=np.float64)[:, None, None]
@@ -3206,7 +3215,9 @@ def _fp32_geopotential_split_serial(base, coord, dry_mass, alpha,
             phm = c3h[k] * mu32 + c4h[k] + pt32
             dpf = np.asarray(dc3f[k] * mu32 + dc4f[k],   # = pfd - pfu
                              dtype=np.float32)
-            log_ratio = np.log1p(np.asarray(dpf / pfu, dtype=np.float32))
+            # The CPU equation of state's own log1pf, so the split is
+            # searched against the operator that diagnoses it on every host.
+            log_ratio = log1pf_array(np.asarray(dpf / pfu, dtype=np.float32))
             desired_dphi = np.asarray(target[k] * phm * log_ratio,
                                       dtype=np.float32)
         else:
@@ -3759,8 +3770,10 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
     if source_orography is None:
         raise ValueError("source_orography is required for the analyzed surface and column moisture")
     if sfcp_to_sfcp:
-        surface_pressure = surface_pressure_from_surface(
-            fields["PSFC"], source_orography, terrain, fields["T2"], surface_qv)
+        with pm.worker_limit(column_workers):
+            surface_pressure = surface_pressure_from_surface(
+                fields["PSFC"], source_orography, terrain, fields["T2"],
+                surface_qv)
     else:
         from woof.ingest.cpu_backend import CpuPreprocessBackend
         surface_pressure = _host(CpuPreprocessBackend().surface_pressure_from_sea_level(
@@ -3803,10 +3816,11 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
             fields["T2"], fields["PSFC"], surface_qv,
             allow_wps_undershoot=True,
             column_workers=column_workers)
+    elif surface_rh_name == "D2":
+        with pm.worker_limit(column_workers):
+            surface_rh = _surface_relative_humidity(fields["D2"], fields["T2"])
     else:
-        surface_rh = (
-            _surface_relative_humidity(fields["D2"], fields["T2"])
-            if surface_rh_name == "D2" else fields["RH2"].copy())
+        surface_rh = fields["RH2"].copy()
     dry_mass = surface_pressure - intq - float(p_top)
     if np.any(dry_mass <= 0.0):
         raise ValueError("non-positive dry column mass")
@@ -4194,12 +4208,13 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         alpha_unperturbed = _moist_specific_volume(
             theta_h, qv_h, total_pressure_h,
             column_workers=column_workers)
-        z_half_agl = _half_level_height_agl(
-            base, coord, dry_mass, alpha_unperturbed,
-            hypsometric_opt=cfg.hypsometric_opt)
-        perturbation_receipt = initial_perturbation.apply(
-            theta=theta_h, qv=qv_h, pressure=total_pressure_h,
-            z_half_agl=z_half_agl)
+        with pm.worker_limit(column_workers):
+            z_half_agl = _half_level_height_agl(
+                base, coord, dry_mass, alpha_unperturbed,
+                hypsometric_opt=cfg.hypsometric_opt)
+            perturbation_receipt = initial_perturbation.apply(
+                theta=theta_h, qv=qv_h, pressure=total_pressure_h,
+                z_half_agl=z_half_agl)
         del alpha_unperturbed, z_half_agl
         mark_timing("initial_perturbation")
 
@@ -4839,7 +4854,7 @@ def hydrostatic_residual(result: RealInitResult) -> np.ndarray:
     qv = _host(state.qv)
     pressure = np.asarray(result.total_pressure, dtype=np.float64)
     alpha = (c.RD * theta * (1.0 + c.RVOVRD * qv)
-             * (pressure / c.P0) ** c.RCP / pressure)
+             * pm.power(pressure / c.P0, c.RCP) / pressure)
     if result.hypsometric_opt == 2:
         # Log-pressure hydrostatic operator on the total dry mass, the
         # opt-2 counterpart of the discrete d(phi)/d(eta) relation
@@ -4854,7 +4869,12 @@ def hydrostatic_residual(result: RealInitResult) -> np.ndarray:
         pfu = c3f[1:] * dry_mass[None] + c4f[1:] + p_top
         dpf = dc3f * dry_mass[None] + dc4f          # = pfd - pfu
         phm = c3h * dry_mass[None] + c4h + p_top
-        residual = dphi - alpha * phm * np.log1p(dpf / pfu)
+        ratio = dpf / pfu
+        # The state's float32 coefficients give a float32 ratio, and
+        # calc_p_alpha's CPU log1p for that is log1pf_array.
+        log_ratio = (log1pf_array(ratio) if ratio.dtype == np.float32
+                     else pm.log1p(ratio))
+        residual = dphi - alpha * phm * log_ratio
     else:
         c1h = _host(state.c1h)[:, None, None]
         c2h = _host(state.c2h)[:, None, None]

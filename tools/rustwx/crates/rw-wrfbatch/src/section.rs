@@ -51,7 +51,7 @@ use rustwx_cross_section as xs;
 use rustwx_render::{RenderTheme, Rgba};
 use wrf_core::{ComputeOpts, WrfFile, getvar};
 
-use crate::local_import::parse_utc_timestamp;
+use crate::local_import::{parse_utc_timestamp, wrf_run_origin};
 
 /// One term of a section product: a sum of named 3-D fields with modifiers.
 #[derive(Debug, Clone, PartialEq)]
@@ -911,14 +911,16 @@ fn enumerate_frames(inputs: &[PathBuf]) -> Result<(Vec<FrameRef>, i64), String> 
             });
         }
         if origin.is_none() {
-            for name in ["START_DATE", "SIMULATION_START_DATE"] {
-                if let Ok(value) = file.global_attr_str(name) {
-                    if let Some(parsed) = parse_utc_timestamp(&value) {
-                        origin = Some(parsed);
-                        break;
-                    }
-                }
-            }
+            // The run's origin, not the domain's own start: a delayed nest's
+            // START_DATE is later by design, and its sections are labelled on
+            // the same lead clock as every other domain's (A137).
+            let stamp = |name: &str| {
+                file.global_attr_str(name)
+                    .ok()
+                    .and_then(|value| parse_utc_timestamp(&value))
+            };
+            origin = wrf_run_origin(stamp("START_DATE"), stamp("SIMULATION_START_DATE"))
+                .map_err(|err| format!("{}: {err}", path.display()))?;
         }
     }
     if frames.is_empty() {
@@ -1508,11 +1510,48 @@ fn planned_section_header(request: &mut xs::CrossSectionRenderRequest) -> Option
 /// drawn as a field rather than as no signal.
 const SECTION_MIN_SIGNAL_SPAN: f32 = 1e-6;
 
+/// The global attribute in which a wrfout-shaped file names the model that
+/// produced it: a hex frame from `rw_mpas_convert` and a global model's
+/// tape write it, and the maps print it in place of `WRF`
+/// (`rustwx_products::shared_context::MODEL_LABEL_ATTRIBUTE` from engine
+/// 2.8.1, which this lane does not need in order to build; a test pins the
+/// same literal here).
+const MODEL_LABEL_ATTRIBUTE: &str = "GPUWM_MODEL_LABEL";
+
+/// The longest name the header takes, the maps' own limit.
+const MODEL_LABEL_MAX_CHARS: usize = 32;
+
+/// The model a section's header names: the file's `GPUWM_MODEL_LABEL` when
+/// it carries a usable one, else `WRF`, the generic wrfout identity.  The
+/// maps' rule exactly: runs of whitespace collapse to one space, and a
+/// blank name, one over 32 characters, or one holding a control character
+/// or `|` (the header's separator) is not printed.  A section of a hex
+/// frame or a global tape said `WRF` beside a map of the same file naming
+/// its model.
+fn section_model_token(raw: Option<&str>) -> String {
+    let label = raw
+        .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default();
+    if label.is_empty()
+        || label.chars().count() > MODEL_LABEL_MAX_CHARS
+        || label.chars().any(|ch| ch.is_control() || ch == '|')
+    {
+        return "WRF".to_string();
+    }
+    label
+}
+
 /// The section's time line in the map header's grammar:
 /// `Init 05/26 15Z | F002 | Valid 05/26 17Z | WRF`.  The domain rides in
 /// the title as the maps' `(d01 3 km)`, so the header composes it into the
-/// same place and spelling as every map of the domain.
-fn section_time_line(init_label: &str, lead_seconds: u64, valid_label: &str) -> String {
+/// same place and spelling as every map of the domain; the model is the
+/// one the file names ([`section_model_token`]).
+fn section_time_line(
+    init_label: &str,
+    lead_seconds: u64,
+    valid_label: &str,
+    model: &str,
+) -> String {
     let hours = lead_seconds / 3_600;
     let minutes = (lead_seconds % 3_600) / 60;
     let lead = if minutes == 0 {
@@ -1521,7 +1560,7 @@ fn section_time_line(init_label: &str, lead_seconds: u64, valid_label: &str) -> 
         format!("F{hours:03}:{minutes:02}")
     };
     let valid = valid_label.replace(":00Z", "Z");
-    format!("Init {init_label} | {lead} | Valid {valid} | WRF")
+    format!("Init {init_label} | {lead} | Valid {valid} | {model}")
 }
 
 /// A domain key as the map headers spell it: `d01-3km` is `d01 3 km`,
@@ -1783,6 +1822,8 @@ pub fn render_sections(
         let init_label = format!("{om:02}/{od:02} {oh:02}Z");
         let lead_label = format!("+{:03}:{:02}", lead / 3_600, (lead % 3_600) / 60);
         let valid_label = format!("{vm:02}/{vd:02} {vh:02}:{vmin:02}Z");
+        // The model this file names, for the header's model token.
+        let model = section_model_token(file.global_attr_str(MODEL_LABEL_ATTRIBUTE).ok().as_deref());
         let mut lines: Vec<(SectionLine, &'static str)> = vec![(config.line.clone(), "")];
         let mut across_pending = config.across_km;
         let mut line_index = 0usize;
@@ -2152,7 +2193,7 @@ pub fn render_sections(
                                 format!("{headline} (no signal) ({})", map_style_domain(&domain))
                             }),
                             Some(fill.units.as_str()),
-                            Some(&section_time_line(&init_label, lead, &valid_label)),
+                            Some(&section_time_line(&init_label, lead, &valid_label, &model)),
                             None,
                             config.theme.source_subtitle(Some(format!("source: {}", config.source_label))).as_deref(),
                         );
@@ -2212,7 +2253,30 @@ mod tests {
         assert_eq!(map_style_domain("d01-2.25km"), "d01 2.25 km");
         assert_eq!(map_style_domain("d02-750m"), "d02 750 m");
         assert_eq!(map_style_domain("d03"), "d03");
-        assert!(!section_time_line("05/26 15Z", 7_200, "05/26 17:00Z").contains("d01"));
+        assert!(!section_time_line("05/26 15Z", 7_200, "05/26 17:00Z", "WRF").contains("d01"));
+    }
+
+    /// A section of a hex frame or a global tape names the model its file
+    /// names, as the maps of the same file do; a stock wrfout keeps WRF.
+    #[test]
+    fn a_section_names_the_model_its_file_names() {
+        assert_eq!(MODEL_LABEL_ATTRIBUTE, "GPUWM_MODEL_LABEL");
+        assert_eq!(
+            section_time_line("09/29 00Z", 21_600, "09/29 06:00Z", &section_model_token(Some("WOOF Hex"))),
+            "Init 09/29 00Z | F006 | Valid 09/29 06Z | WOOF Hex"
+        );
+        assert_eq!(section_model_token(None), "WRF");
+        assert_eq!(section_model_token(Some("  ArWen   Global ")), "ArWen Global");
+        // The maps' refusals: blank, the header's separator, a control
+        // character, longer than 32 characters.
+        assert_eq!(section_model_token(Some("   ")), "WRF");
+        assert_eq!(section_model_token(Some("Hex | F001")), "WRF");
+        assert_eq!(section_model_token(Some("Hex\u{7}")), "WRF");
+        assert_eq!(section_model_token(Some(&"x".repeat(MODEL_LABEL_MAX_CHARS + 1))), "WRF");
+        assert_eq!(
+            section_model_token(Some(&"x".repeat(MODEL_LABEL_MAX_CHARS))),
+            "x".repeat(MODEL_LABEL_MAX_CHARS)
+        );
     }
 
     #[test]

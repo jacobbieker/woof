@@ -248,7 +248,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
         "5b9dd5980e33d7a0b1760281bc1553c93fa5f4c4395f7b107c8d61dabe1b9f23"
     ),
     "src/hexcore/cuda_physics_v841.py": (
-        "fed89ae26008b48a305f75af4db24c215cf5952d0ae28c67bbd05a5b925a569b"
+        "8522176f6cc036eb9cbf078e95f5617b2618b6ce6729bd7bf1cb0dc09c3616eb"
     ),
     # Re-frozen during the 12 GiB capacity work: the dynamics subcycle stopped
     # copying a scalar block nothing writes, stopped taking a private image of
@@ -328,7 +328,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # anchor basis prose) that nothing reads as a value.  Every affected proof
     # re-runs against this digest.
     "src/hexcore/cuda_driver.py": (
-        "5a30009cc4a15a42df4b7a06f70641c46d04e60dcd324d8af8c57ac23a3e8ba4"
+        "8d86e6e3f8b400672d26c5966f53306fd86f2cf9ab4b8570b3aac91c239f4544"
     ),
     # THE BREAKAGE THIS PREVENTS: the same lane that re-froze cuda_driver.py
     # also changed ``recover_state`` -- it gained ``include_pressure`` and
@@ -544,7 +544,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # pinned constants; the seam-class and phase-object checks, the surface
     # classification and the restore identity are unchanged.
     "src/hexcore/cuda_arwen_physics_v841.py": (
-        "00b4624d2f219b76803803fc1069f8cc35ad522988847ad6ad7e8057eaad6a0b"
+        "74b319e8e5fcc8800349c9fdf9ab261246ec81619df509fe6c5ec84764cc8566"
     ),
     # The v8.4.1 horizontal-mixing execution boundary (2-D Smagorinsky):
     # CPU authorities and the CUDA operator modules the RK1 saved-Euler
@@ -660,13 +660,13 @@ KNOWN_CONTRACT_PINS = MappingProxyType(
             "b334506b289c6f002a2660e6c7796361e39372f6652b8e60268c1400900ab9ec"
         ),
         "coupling_contract_sha256": (
-            "332899f64a24b45fc93a686ce056a674a4bd07a26d635447d0aff884ce13d001"
+            "3266241aea0d2481093bf7f1ed7617ca83301937dc89fa2229a6dcf30de11b69"
         ),
         "coupling_kernel_sha256": (
             "af9044f687dc9d50d66b035eba84373643218c55fb1872e0aeb7c523321c2365"
         ),
         "adapter_contract_sha256": (
-            "f82124c1dea5b46d9cfb497f3bbe004c5561081685176ce81f6458e3d6d67fff"
+            "5a2a51469afb1ff52801bdbc186af2dd4d09a4d02cadb41e4b338e7436922cee"
         ),
         "arwen_contract_surface_sha256": ARWEN_CONTRACT_SURFACE_SHA256,
         "arwen_glacier_composed_tu_sha256": ARWEN_GLACIER_COMPOSED_TU_SHA256,
@@ -1516,7 +1516,7 @@ def load_f000_initialized_surface_diagnostics(
         "receipt": {
             "source": "exact hash-pinned official x4.163842 init fields",
             "policy": (
-                "F000 snapshot-only replacement of frozen Arwen pre-first-call "
+                "F000 snapshot-only replacement of frozen WOOF pre-first-call "
                 "exact +0 optional diagnostic placeholders"
             ),
             "fields": {
@@ -4009,7 +4009,7 @@ def require_snapshot_receipt_surface_execution(
     nested = snapshot_receipt.get("arwen_v2_surface_execution")
     if not isinstance(nested, Mapping):
         raise ValueError(
-            f"baseline diagnostic {label} lacks nested Arwen surface execution"
+            f"baseline diagnostic {label} lacks nested WOOF surface execution"
         )
     return require_arwen_v2_surface_execution(
         nested, executed=(step > 0), label=f"baseline diagnostic {label}"
@@ -4127,7 +4127,7 @@ def _write_baseline_diagnostic_output(
             "this diagnostic is not a release proof",
         ],
         "proof": proof,
-        "weather_plot_policy": "native Rust/Arwen renderer only; q2 ships in the history stream and its weather-field plots go through the same renderer",
+        "weather_plot_policy": "native Rust/WOOF renderer only; q2 ships in the history stream and its weather-field plots go through the same renderer",
     }
     payload["payload_sha256"] = canonical_json_sha256(payload)
     receipt = diagnostic_root / BASELINE_DIAGNOSTIC_RECEIPT_NAME
@@ -4306,7 +4306,7 @@ def _execute_full_proof(
             restored_f030["atmosphere"],
         ),
         "backend": require_fingerprint_identity(
-            "F030 restored Arwen backend",
+            "F030 restored WOOF backend",
             checkpoint.backend_fingerprint,
             restored_f030["backend"],
         ),
@@ -4323,7 +4323,7 @@ def _execute_full_proof(
             worker["step16"]["atmosphere"],
         ),
         "backend": require_fingerprint_identity(
-            "first resumed step 16 Arwen backend",
+            "first resumed step 16 WOOF backend",
             baseline_step16_fingerprints["backend"],
             worker["step16"]["backend"],
         ),
@@ -4342,7 +4342,7 @@ def _execute_full_proof(
             restored_f001_atmosphere,
         ),
         "backend": require_fingerprint_identity(
-            "F030 restart continuation F001 Arwen backend",
+            "F030 restart continuation F001 WOOF backend",
             baseline_f001_backend,
             restored_f001_backend,
         ),
@@ -4487,7 +4487,7 @@ def _spawn_restart_worker(
     if not isinstance(results, Mapping) or results.get("schema") != RESTART_WORKER_SCHEMA:
         raise RuntimeError("restart worker returned an unrecognized payload schema")
     if results.get("arwen_commit") != ARWEN_COMMIT:
-        raise RuntimeError("restart worker executed against a different Arwen commit")
+        raise RuntimeError("restart worker executed against a different WOOF commit")
     if results.get("fresh_process") is not True:
         raise RuntimeError("restart worker did not attest fresh-process execution")
     required = {
@@ -4528,7 +4528,7 @@ def _execute_restart_worker(input_path: Path, output_path: Path) -> int:
     if not isinstance(job, Mapping) or job.get("schema") != RESTART_WORKER_SCHEMA:
         raise RuntimeError("restart worker input schema mismatch")
     if job.get("arwen_commit") != ARWEN_COMMIT:
-        raise RuntimeError("restart worker input Arwen commit mismatch")
+        raise RuntimeError("restart worker input WOOF commit mismatch")
     checkpoint = job["checkpoint"]
     if not isinstance(checkpoint, HostDriverCheckpoint):
         raise TypeError("restart worker requires a HostDriverCheckpoint payload")
@@ -4544,7 +4544,7 @@ def _execute_restart_worker(input_path: Path, output_path: Path) -> int:
             "baseline arm to mint a checkpoint that carries the pair."
         )
     paths = {role: Path(value) for role, value in dict(job["authority_paths"]).items()}
-    arwen_checkout = _plain_absolute(Path(job["arwen_checkout"]), "Arwen checkout")
+    arwen_checkout = _plain_absolute(Path(job["arwen_checkout"]), "WOOF checkout")
     # Source pins verify first: the checkout guard imports the manifest from a
     # pinned module, so that module's bytes are proven before its constants
     # are trusted.
@@ -4589,7 +4589,7 @@ def _execute_restart_worker(input_path: Path, output_path: Path) -> int:
         restored_f030["atmosphere"],
     )
     require_fingerprint_identity(
-        "F030 restored Arwen backend (fresh restart process)",
+        "F030 restored WOOF backend (fresh restart process)",
         checkpoint.backend_fingerprint,
         restored_f030["backend"],
     )
@@ -4764,7 +4764,7 @@ def verify_arwen_checkout_git(
             text=True,
         )
         if completed.stderr:
-            raise RuntimeError(f"Arwen git command wrote stderr: {completed.stderr!r}")
+            raise RuntimeError(f"WOOF git command wrote stderr: {completed.stderr!r}")
         return completed.stdout.strip() if strip else completed.stdout
 
     head: str | None = None
@@ -4781,7 +4781,7 @@ def verify_arwen_checkout_git(
             "status", "--porcelain=v1", "-z", "--untracked-files=all", strip=False
         )
         if top != root:
-            raise RuntimeError("Arwen checkout is not the exact requested Git root")
+            raise RuntimeError("WOOF checkout is not the exact requested Git root")
 
         expect_rename_origin = False
         for entry in status.split("\0"):
@@ -4815,7 +4815,7 @@ def verify_arwen_checkout_git(
         target = root / relative
         if not target.is_file():
             raise RuntimeError(
-                f"{relative} is missing from the Arwen checkout {root}, the "
+                f"{relative} is missing from the WOOF checkout {root}, the "
                 "seam's executed source moved; re-prove before running"
             )
         actual = sha256_file(target)
@@ -4830,7 +4830,7 @@ def verify_arwen_checkout_git(
     dirty_manifest = sorted(set(dirty_paths) & set(manifest))
     if dirty_manifest:
         raise RuntimeError(
-            f"{dirty_manifest[0]} is dirty in the Arwen checkout, its bytes "
+            f"{dirty_manifest[0]} is dirty in the WOOF checkout, its bytes "
             "cannot be provenanced to any commit; commit or restore it, then "
             "re-prove before running"
         )
@@ -4889,7 +4889,7 @@ def resolve_arwen_checkout(requested: Path | str | None) -> Path:
                 "--arwen-checkout <a woof clone at the pinned tag>"
             )
         requested = installed
-    checkout = _plain_absolute(requested, "Arwen checkout")
+    checkout = _plain_absolute(requested, "WOOF checkout")
     if not checkout.is_dir():
         raise FileNotFoundError(checkout)
     return checkout
@@ -4984,7 +4984,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             != _arwen_seam_identity(arwen_git_before)
         ):
             raise RuntimeError(
-                "source, authority, or Arwen seam bytes changed during preflight"
+                "source, authority, or WOOF seam bytes changed during preflight"
             )
         print(
             json.dumps(
@@ -5047,7 +5047,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         != _arwen_seam_identity(arwen_git_before)
     ):
         raise RuntimeError(
-            "source, authority, or Arwen seam bytes changed during execution"
+            "source, authority, or WOOF seam bytes changed during execution"
         )
     payload = {
         "schema": SCHEMA,
@@ -5065,7 +5065,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "proof": proof,
         "sources_unchanged": True,
         "authorities_unchanged": True,
-        "weather_plot_policy": "native Rust/Arwen renderer only; q2 ships in the history stream and its weather-field plots go through the same renderer",
+        "weather_plot_policy": "native Rust/WOOF renderer only; q2 ships in the history stream and its weather-field plots go through the same renderer",
     }
     payload["payload_sha256"] = canonical_json_sha256(payload)
     receipt = output_root / RECEIPT_NAME

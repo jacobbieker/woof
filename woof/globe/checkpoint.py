@@ -24,10 +24,12 @@ from .semilag.state import TRAJECTORY_FIELDS, TrajectoryState
 from .pins import (
     DEFAULT_INTEGRATOR,
     DEFAULT_SEMI_IMPLICIT_SCHEME,
+    ACCEPTED_PINS_HASHES,
     KNOWN_PINS_HASHES,
     INSPECTABLE_RETIRED_PINS_HASHES,
     RETIRED_SEMILAG_PINS_HASHES,
     SPECTRAL_TRACER_ERA_PINS_HASHES,
+    accepted_pins_hashes,
     arithmetic_label,
     pins_hash,
     scheme_of_pins_hash,
@@ -439,7 +441,8 @@ def read_checkpoint(
         )
     written_scheme = scheme_of_pins_hash(metadata["pins_hash"])
     if semi_implicit_scheme is not None:
-        if metadata["pins_hash"] != pins_hash(semi_implicit_scheme, integrator):
+        # the v3 pin, or the v2 pin WOOF 1.0.0 wrote for the same arithmetic
+        if metadata["pins_hash"] not in accepted_pins_hashes(semi_implicit_scheme, integrator):
             raise ValueError(
                 "checkpoint arithmetic pins mismatch: the checkpoint was "
                 + (
@@ -462,7 +465,7 @@ def read_checkpoint(
                 )
                 + f" and this run integrates {arithmetic_label(semi_implicit_scheme, integrator)!r}"
             )
-    elif metadata["pins_hash"] not in KNOWN_PINS_HASHES | INSPECTABLE_RETIRED_PINS_HASHES:
+    elif metadata["pins_hash"] not in ACCEPTED_PINS_HASHES | INSPECTABLE_RETIRED_PINS_HASHES:
         raise ValueError(
             "checkpoint arithmetic pins mismatch: the checkpoint's pin is not "
             "the pin of any semi-implicit scheme this build integrates, nor "

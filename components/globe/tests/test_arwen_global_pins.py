@@ -42,16 +42,40 @@ IMEX_EXTERNAL_PINS_HASH_AS_RECORDED = (
 #: The four digests above are the SPECTRAL-TRACER ERA.  The current
 #: documents' digests as first committed with the grid tracers; every
 #: checkpoint written since carries one of these four.
+#: RE-PINNED for WOOF 1.0.1: the v3 pin document names WOOF where v2
+#: named the engine's earlier name, and no arithmetic moved; the
+#: _WOOF_1_0_0 digest below is the v2 pin 1.0.0 wrote, its legacy alias.
 GRID_TRACER_SPLIT_VERTICAL_MODE_PINS_HASH = (
+    "d4d66f15ef5808fe09881586de180530a5a0b8c23c4d9852638e09fc7db2ac25"
+)
+GRID_TRACER_SPLIT_VERTICAL_MODE_PINS_HASH_WOOF_1_0_0 = (
     "4c4340945258b8c3e5648d0350af6e84ceb1e3d69d17c8b7d4603d361cb92aa6"
 )
+#: RE-PINNED for WOOF 1.0.1: the v3 pin document names WOOF where v2
+#: named the engine's earlier name, and no arithmetic moved; the
+#: _WOOF_1_0_0 digest below is the v2 pin 1.0.0 wrote, its legacy alias.
 GRID_TRACER_SPLIT_EXTERNAL_PINS_HASH = (
+    "592f66ce34c981db3073ae62179fd302e419e6085814416c959e47025a9a712f"
+)
+GRID_TRACER_SPLIT_EXTERNAL_PINS_HASH_WOOF_1_0_0 = (
     "f536e10061499732a08bd6e32cb45160820bb55519df5c0721be4c33fbf573a0"
 )
+#: RE-PINNED for WOOF 1.0.1: the v3 pin document names WOOF where v2
+#: named the engine's earlier name, and no arithmetic moved; the
+#: _WOOF_1_0_0 digest below is the v2 pin 1.0.0 wrote, its legacy alias.
 GRID_TRACER_IMEX_VERTICAL_MODE_PINS_HASH = (
+    "c503f36147d17b0411bf589ae8bededb1267ba935b2f7c970da938923a123405"
+)
+GRID_TRACER_IMEX_VERTICAL_MODE_PINS_HASH_WOOF_1_0_0 = (
     "c5d0545d71c6b3fefd2aa5899e720161b0f0d38ff4522a50f66cdc44a52a992b"
 )
+#: RE-PINNED for WOOF 1.0.1: the v3 pin document names WOOF where v2
+#: named the engine's earlier name, and no arithmetic moved; the
+#: _WOOF_1_0_0 digest below is the v2 pin 1.0.0 wrote, its legacy alias.
 GRID_TRACER_IMEX_EXTERNAL_PINS_HASH = (
+    "bcf017241eedb3dfa42b17c467e30d554f9d18e66a1b6d3c097144f9605e91ec"
+)
+GRID_TRACER_IMEX_EXTERNAL_PINS_HASH_WOOF_1_0_0 = (
     "6066104ed4e0004ea7e17a5e99fd014968ec97241a93dc112400fd074f909546"
 )
 #: The fifth arithmetic: the two-time-level semi-Lagrangian semi-implicit
@@ -65,7 +89,13 @@ GRID_TRACER_IMEX_EXTERNAL_PINS_HASH = (
 #: from the reference profile (the reference's grid tendency warmed the lid
 #: by 32 K a day where the trajectory is clamped, semilag.rhs) it went to
 #: v3, this hash moving with it each time.  The other four are untouched.
+#: RE-PINNED for WOOF 1.0.1: the v3 pin document names WOOF where v2
+#: named the engine's earlier name, and no arithmetic moved; the
+#: _WOOF_1_0_0 digest below is the v2 pin 1.0.0 wrote, its legacy alias.
 SEMILAG_VERTICAL_MODE_PINS_HASH = (
+    "aa1ad85393adc0f992a4c0a5f7cee89bb5e0fb336ddce94f6faf0384ade1f987"
+)
+SEMILAG_VERTICAL_MODE_PINS_HASH_WOOF_1_0_0 = (
     "d82dc8ae4b0b5ea75aadccbf8b2ef5f8b3330d5b36670f00234f28bfe6e9d5d8"
 )
 
@@ -196,8 +226,7 @@ def test_a_receipt_records_the_libraries_its_numbers_rode_on():
     libraries = library_versions()
     assert libraries["python"] == ".".join(str(n) for n in sys.version_info[:3])
     assert libraries["numpy"] == version("numpy")
-    assert libraries["woof"] == version("woof")
-    assert libraries["woof global"] == version("woof global")
+    assert libraries["recast-woof"] == version("recast-woof")
     # A distribution that is not installed is absent rather than null: a key
     # whose value is None reads as "asked and got nothing", which is a
     # different claim from "not installed".
@@ -217,3 +246,41 @@ def test_a_receipt_records_the_libraries_its_numbers_rode_on():
     # A caller that has already recorded them keeps its own.
     mine = {"python": "0.0.0"}
     assert finalize_receipt({"name": "x", "libraries": mine})["libraries"] == mine
+
+
+def test_the_woof_1_0_0_pins_are_legacy_aliases_of_the_same_arithmetic():
+    """WOOF 1.0.1 rewords the pin document's identity texts (v3) and moves no
+    arithmetic, so each pin WOOF 1.0.0 wrote reads as its own arithmetic, a
+    reader accepts it, and a restart under that arithmetic resumes it.  A
+    1.0.0 pin still never resumes under another arithmetic."""
+
+    import json
+
+    legacy = {
+        "vertical_modes": GRID_TRACER_SPLIT_VERTICAL_MODE_PINS_HASH_WOOF_1_0_0,
+        "external": GRID_TRACER_SPLIT_EXTERNAL_PINS_HASH_WOOF_1_0_0,
+        "vertical_modes/imex_ssp3": GRID_TRACER_IMEX_VERTICAL_MODE_PINS_HASH_WOOF_1_0_0,
+        "external/imex_ssp3": GRID_TRACER_IMEX_EXTERNAL_PINS_HASH_WOOF_1_0_0,
+        "vertical_modes/sl_si": SEMILAG_VERTICAL_MODE_PINS_HASH_WOOF_1_0_0,
+    }
+    assert pins.WOOF_1_0_0_PINS_HASH_BY_ARITHMETIC == legacy
+    assert pins.LEGACY_PINS_HASHES == frozenset(legacy.values())
+    assert not (pins.LEGACY_PINS_HASHES & pins.KNOWN_PINS_HASHES)
+    assert pins.ACCEPTED_PINS_HASHES == pins.KNOWN_PINS_HASHES | pins.LEGACY_PINS_HASHES
+    pairs = {
+        "vertical_modes": ("vertical_modes", "ssprk3"),
+        "external": ("external", "ssprk3"),
+        "vertical_modes/imex_ssp3": ("vertical_modes", "imex_ssp3"),
+        "external/imex_ssp3": ("external", "imex_ssp3"),
+        "vertical_modes/sl_si": ("vertical_modes", "sl_si"),
+    }
+    for label, digest in legacy.items():
+        scheme, integrator = pairs[label]
+        assert pins.scheme_of_pins_hash(digest) == label
+        assert pins.accepted_pins_hashes(scheme, integrator) == frozenset(
+            {pins.pins_hash(scheme, integrator), digest})
+        assert pins.pins_hash(scheme, integrator) != digest
+        document = json.dumps(pins.pin_document(scheme, integrator)).lower()
+        assert "arwen" not in document
+    assert legacy["external"] not in pins.accepted_pins_hashes("vertical_modes", "ssprk3")
+    assert pins.PIN_DOCUMENT["schema"] == "woof.global-pins/v3"

@@ -182,7 +182,7 @@ def controller_case(publication, monkeypatch, tmp_path):
             payload = ("proven synthetic " + name).encode()
             (dists / name).write_bytes(payload)
             pypi[project].append({"filename": name, "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()})
-    captured = {"commit": COMMIT, "manifest_sha256": MANIFEST_SHA, "repository": "FahrenheitResearch/arwen",
+    captured = {"commit": COMMIT, "manifest_sha256": MANIFEST_SHA, "repository": "example-org/example-repo",
                 "tag": "v" + VERSION, "release_id": 42, "prerelease": False}
     proven = {"captured": captured, "plan": {"version": VERSION, "pypi": pypi}}
     monkeypatch.setattr(publication, "proof", lambda path: deepcopy(proven))

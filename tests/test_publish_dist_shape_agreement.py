@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = "9.8.7"
 TAG = "v" + VERSION
 COMMIT = "a" * 40
-REPOSITORY = "FahrenheitResearch/arwen"
+REPOSITORY = "example-org/example-repo"
 
 
 @pytest.fixture(scope="module")

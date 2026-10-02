@@ -872,19 +872,25 @@ def _redundancy_limit_kwargs(options) -> dict:
 def tiling_shape(cfg, tile_nx, tile_ny, halo) -> tuple[int, float]:
     """``(tile count, redundancy)`` of one tiling of ``cfg``'s domain.
 
-    The planner's own arithmetic (:func:`tilestream.autoplan.redundancy`):
-    every tile carries the same ``tile + 2*halo`` compute window, so the
-    work done is the window count times the window area.  Used for pinned
-    tilings too, which never reach the planner, so every streamed decision
-    can state the two numbers a reader needs to judge its pace.
+    The tile geometry's arithmetic (:func:`tilestream.spec.redundancy`,
+    which the planner prices with too): every tile carries the same
+    ``tile + 2*halo`` compute window, so the work done is the window count
+    times the window area.  Used for pinned tilings too, which never reach
+    the planner, so every streamed decision can state the two numbers a
+    reader needs to judge its pace.
+
+    It reads the geometry module and never ``tilestream.autoplan``.  It
+    used to import the planner, so :func:`decide`'s pinned road, which
+    promises to consult no planner, imported it whenever no earlier code in
+    the process had, and a test of that promise passed or failed by import
+    order (A177).
     """
-    from tilestream import autoplan
+    from tilestream.spec import redundancy
 
     nx, ny = int(cfg.nx), int(cfg.ny)
     tile_nx, tile_ny = max(1, int(tile_nx)), max(1, int(tile_ny))
     ntiles = (-(-nx // tile_nx)) * (-(-ny // tile_ny))
-    return ntiles, float(autoplan.redundancy(nx, ny, tile_nx, tile_ny,
-                                             int(halo)))
+    return ntiles, float(redundancy(nx, ny, tile_nx, tile_ny, int(halo)))
 
 
 def _gib(value) -> str:
@@ -4154,6 +4160,32 @@ def attach(state, cfg, decision: StreamingDecision, *, tile_state_factory,
     step without one -- windows once with :func:`tile_boundary_tables` and
     passes the result both ways, rather than windowing twice.
     """
+    if int(getattr(cfg, "slope_rad", 0) or 0) == 1:
+        # Named breakage: the slope radiation (woof.core.topo_radiation)
+        # derives the slope from its neighbours and searches up to shadlen
+        # of terrain toward the sun, and a tile holds neither; its held
+        # radiation-time state is not among the carriers a tile streams.
+        raise StreamingRefused(
+            f"grid_id = {int(getattr(cfg, 'grid_id', 0))} sets slope_rad = "
+            "1, which reads the whole domain's terrain (the slope from its "
+            "neighbours, the shadow search up to shadlen toward the sun) and "
+            "holds radiation-time state no tile carries, so it cannot run "
+            "streamed.  Run this domain resident ([tiles] mode = 'off'), or "
+            "set slope_rad = 0.")
+    if int(getattr(cfg, "sf_surface_mosaic", 0) or 0) == 1:
+        # Named breakage: a tile buffer is built by initialize_physics on
+        # neutral geography (prepared_tile_state_factory) and no door runs
+        # on it, so it holds no land-use tiles (woof/core/
+        # noah_mosaic_door.py builds them only at the initialization
+        # doors); its first Noah step would stop with no tile state, or the
+        # carrier inventory would refuse the store's tile arrays first.
+        raise StreamingRefused(
+            f"grid_id = {int(getattr(cfg, 'grid_id', 0))} sets "
+            "sf_surface_mosaic = 1, and a tile buffer is built without the "
+            "domain's land-use tiles (only the initialization doors build "
+            "them from LANDUSEF), so Noah mosaic cannot run streamed.  Run "
+            "this domain resident ([tiles] mode = 'off'), or set "
+            "sf_surface_mosaic = 0.")
     from tilestream import driver as _driver
     from tilestream import gather as _gather
     from tilestream import physics_inventory as _physics
@@ -4857,6 +4889,12 @@ def prepared_tile_state_factory(state, cfg, *, tables0=None, seed: int = 4242,
         tile, _drv = _harness.make_physics_state(
             tile_cfg, seed, geography=geo, start_time=start_time,
             coord=coord, **extra)
+        # Before any step: a buffer walks MYNN at the tile width
+        # (mynn_pbl_scratch.resolve_mynn_tile_column_chunk), the width
+        # prepared_tile_memory prices it at, and a scratch slot keeps the
+        # shape it was first requested with.  woof/io/restart.py
+        # STATE_INFRA_ATTRS classifies the marker.
+        tile._tile_buffer = True
         if driver is not None and getattr(driver, "cam_ozone", None) is not None:
             from woof.core.cam_ozone import CamOzoneState, attach_cam_ozone
             owner = driver.cam_ozone

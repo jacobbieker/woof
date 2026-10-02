@@ -13,7 +13,7 @@ from ..constants import (
     REGIONAL_SERIES_SCHEMA,
     REGIONAL_TARGET_SCHEMA,
 )
-from ..pins import PINS_HASH
+from ..pins import PINS_HASH, accepted_pins_hashes
 
 
 def canonical(value: object) -> bytes:
@@ -82,7 +82,7 @@ def _read_npz(path: Path, schema: str) -> tuple[dict, dict[str, np.ndarray]]:
         }
     if metadata.get("schema") != schema:
         raise ValueError(f"artifact schema mismatch: expected {schema!r}")
-    if metadata.get("pins_hash") != PINS_HASH:
+    if metadata.get("pins_hash") not in accepted_pins_hashes():
         raise ValueError("artifact arithmetic/coupling pins mismatch")
     self_hash = metadata.pop("self_sha256", None)
     if self_hash != hashlib.sha256(canonical(metadata)).hexdigest():
@@ -324,7 +324,7 @@ def read_parent_series(path: str | Path):
     payload = json.loads(source.read_text(encoding="utf-8"))
     if payload.get("schema") != REGIONAL_SERIES_SCHEMA:
         raise ValueError("parent-series schema mismatch")
-    if payload.get("pins_hash") != PINS_HASH:
+    if payload.get("pins_hash") not in accepted_pins_hashes():
         raise ValueError("parent-series pins mismatch")
     self_hash = payload.pop("self_sha256", None)
     if self_hash != hashlib.sha256(canonical(payload)).hexdigest():

@@ -61,12 +61,16 @@ tile_ny = 200
 #: against 14.74 -- it FITS now, and refusing it was the defect.
 #: MEASURED here on this card: 550^2 admits resident at 15.03 GiB, 576^2
 #: refuses at 16.09 GiB against the 14.74 GiB budget, and 576^2 with the
-#: same [tiles] table is admitted at 6.71 GiB.
+#: same [tiles] table is admitted at 6.71 GiB.  Since A163 measured the
+#: forecast margin at 1.13 of the subtotal (the plan's 1.15 before it),
+#: 576^2 prices 15.14 GiB, which runs inside the card's free memory and
+#: the 0.5 GiB kept back for other programs, so the control is 600^2, at
+#: 16.14 GiB.
 #:
 #: A control has to be a run the gate genuinely cannot admit.  Leaving it
 #: pointed at 550^2 would have asserted the old double charge, which is
 #: pinning a bug rather than a contract.
-_OVER_BUDGET_NX = 576
+_OVER_BUDGET_NX = 600
 
 
 def _config(tmp_path, *, nx=550, ny=550, tiles=_TILES, name="exp",
@@ -152,7 +156,7 @@ def _total_from_terms(env, *, radiation_storage=True):
             + int(terms["fixed/k_tables_bytes"]))
     pool = max(pool, int(terms["fixed/loader_pool_peak_bytes"])
                + int(terms["fixed/k_tables_bytes"]))
-    return (math.ceil(preflight.ALLOCATOR_HEADROOM * pool)
+    return (math.ceil(preflight.FORECAST_POOL_HEADROOM * pool)
             + int(terms["fixed/cuda_context_bytes"])
             + int(terms["fixed/local_memory_bytes"])
             + int(terms["fixed/unmodelled_bytes"]))
@@ -526,14 +530,19 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # specified boundary carries all five Morrison masses (no seeded
     # numbers on mp=10): 5 x 2 x (2 x 49 x 550 x 5 + 2 x 49 x 5 x 550)
     # FP32 = 21,560,000 B of tables for the one retained interval, which
-    # the 1.15 allocator headroom makes 24,794,000 B of estimate and of
-    # envelope, and the 0.03 retention term 743,820 B of reserve.  The
+    # the 1.13 measured pool margin makes 24,362,800 B of estimate and of
+    # envelope, and the 0.03 retention term 730,884 B of reserve.  The
     # report, the reserve and the allocation gate price the same tables
     # the phase envelope does, so the two envelopes below stay one number.
-    assert payload["peak_envelope_bytes"] == 15376685241
-    assert payload["observed_peak_envelope_bytes"] == 15376685241
-    assert payload["alloc_estimate_bytes"] == 12210419897
-    assert payload["reserve_bytes"] == 3532577941
+    # A163 moved the estimate and envelope by -212,355,128 B: the forecast
+    # margin is the measured 1.13 instead of the plan's 1.15 (two
+    # hundredths of this config's 10,617,756,432 B subtotal).
+    assert payload["peak_envelope_bytes"] == 15164330113
+    assert payload["observed_peak_envelope_bytes"] == 15164330113
+    assert payload["alloc_estimate_bytes"] == 11998064769
+    # The reserve's 0.03 retention term follows the estimate: A163 moved
+    # it by 0.03 x -212,355,128 = -6,370,653 B.
+    assert payload["reserve_bytes"] == 3526207288
     assert payload["budget_bytes"] == _FITS_STREAMED_GIB * GIB
     assert payload["gates"]["alloc_estimate_le_wddm_budget"] is False
     assert rc == 1
@@ -585,10 +594,10 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # The command without the radiation modules gives every pin above,
     # with the same refusal: they are narrower than Morrison, so they
     # change nothing this configuration is charged.
-    assert old_payload["peak_envelope_bytes"] == 15376685241
-    assert old_payload["observed_peak_envelope_bytes"] == 15376685241
-    assert old_payload["alloc_estimate_bytes"] == 12210419897
-    assert old_payload["reserve_bytes"] == 3532577941
+    assert old_payload["peak_envelope_bytes"] == 15164330113
+    assert old_payload["observed_peak_envelope_bytes"] == 15164330113
+    assert old_payload["alloc_estimate_bytes"] == 11998064769
+    assert old_payload["reserve_bytes"] == 3526207288
     assert old_rc == rc == 1
     assert old_estimate == estimate
     for key in ("peak_envelope_bytes", "observed_peak_envelope_bytes",

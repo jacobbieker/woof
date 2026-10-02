@@ -289,7 +289,7 @@ def translate_parent_to_regional_frame(
             "geopotential": "target-terrain-hydrostatic-reintegration-v1",
             "vertical_velocity": "interpolated-parent-w-with-zero-boundary-flux-v1",
             "dry_mass": "sum-dp-over-one-plus-total-water-v1",
-            "coupling": "existing-Arwen-WRF-u-v-theta-phi-mu-qv-units-v1",
+            "coupling": "existing-WOOF-WRF-u-v-theta-phi-mu-qv-units-v1",
         },
         "extrapolated_fraction": extrapolated,
         "standard_lapse_rate_k_m": STANDARD_LAPSE_RATE_K_M,

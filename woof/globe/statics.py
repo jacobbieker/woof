@@ -66,7 +66,7 @@ SURFACE_STATIC_FIELDS = (
     "vegetation_fraction", "vegetation_fraction_min",
     "vegetation_fraction_max", "leaf_area_index", "background_albedo",
     "snow_albedo", "deep_soil_temperature_k",
-    "albedo", "emissivity", "roughness_m",
+    "albedo", "emissivity", "roughness_m", "lake_fraction",
 )
 #: physics_state.metadata key under which the category convention of the
 #: surface state's static fields travels with the state (cold start,
@@ -262,6 +262,26 @@ def water_columns(land_fraction, xp=np, *, sea_ice_fraction=None):
     the surface state.
     """
     return xland_plane(land_fraction, sea_ice_fraction, xp) >= xp.float32(1.5)
+
+
+def lake_columns(land_fraction, lake_fraction, xp=np, *, sea_ice_fraction=None):
+    """The open-water columns that are inland lakes: :func:`water_columns`
+    whose water is mostly lake, ``lake_fraction > (1 - land_fraction) -
+    lake_fraction`` in float32.
+
+    WRF's rule (module_initialize_real.F, LAKEMASK): a column is a lake
+    where the land-use set's lake class is its dominant water, which on a
+    water column is the lake share beating the ocean-water share.  The
+    lake fraction is the statics' LANDUSEF of the lake class, so the rule
+    names the lakes the land-use set names (MODIS with lakes), not a
+    connectivity or size threshold on the run grid.  A state without the
+    plane (the synthetic planet, a checkpoint from before it) has none.
+    """
+    land = xp.asarray(land_fraction, dtype=xp.float32)
+    lake = xp.asarray(lake_fraction, dtype=xp.float32)
+    return water_columns(land, xp, sea_ice_fraction=sea_ice_fraction) & (
+        lake > (xp.float32(1.0) - land) - lake
+    )
 
 
 def consistent_land_fraction(land_fraction, land) -> np.ndarray:
@@ -803,6 +823,10 @@ def resolve_surface_statics(fields: dict[str, np.ndarray], provenance: dict, *,
         "roughness_m": np.where(
             (ivgtyp == isice) & frozen, float(convention.sea_ice_roughness_m),
             np.asarray(by_hemisphere("z0"), dtype=np.float64)),
+        # The lake class's share of the column (lake_columns): carried so
+        # the runtime can tell an inland lake from the ocean after the
+        # rulebook folded the lake category into water.
+        "lake_fraction": np.clip(luf[islake - 1], 0.0, 1.0),
     }
     for name, value in resolved.items():
         if value.shape != shape or not np.isfinite(value).all():
@@ -890,6 +914,7 @@ def synthetic_surface_statics(land_fraction, soil_temperature_k,
         "albedo": albedo,
         "emissivity": full(SYNTHETIC_EMISSIVITY),
         "roughness_m": roughness,
+        "lake_fraction": full(0.0),
     }
 
 
@@ -974,7 +999,7 @@ __all__ = [
     "SYNTHETIC_LEAF_AREA_INDEX", "SYNTHETIC_SNOW_ALBEDO",
     "SYNTHETIC_SOIL_CATEGORY", "SYNTHETIC_VEGETATION_CATEGORY",
     "CategoryConvention", "StaticsOptions", "build_statics", "cache_paths",
-    "consistent_land_fraction", "load_statics", "parse_utc", "read_cache",
+    "consistent_land_fraction", "lake_columns", "load_statics", "parse_utc", "read_cache",
     "real_convention", "real_provenance", "resolve_geog_root",
     "resolve_surface_statics", "statics_sentence", "surface_statics_metadata",
     "frozen_water_columns", "synthetic_provenance", "synthetic_surface_statics",

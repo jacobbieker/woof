@@ -439,8 +439,9 @@ def test_dynamic_solve_device_real_lift_golden():
     (input quantization + FP32 forward arithmetic both included), and
     reproduces the pinned device goldens of THIS card exactly
     (deterministic reduction; drift canary for kernel/toolchain changes).
-    The pair is per card (sase_goldens.GOLDEN_DEVICE_BY_CARD: the 5090
-    pair fails on an RTX 4090 by rel 1.48e-08 in f); a card with no pair
+    The pair is per card (sase_goldens.GOLDEN_DEVICE_BY_CARD: before A146
+    the 5090 pair failed on an RTX 4090 by rel 1.48e-08 in f; since, the
+    5090, 5070 Ti and 4090 read one pair); a card with no pair
     skips, naming itself, rather than failing for the card and not the
     code, and the release card stage names that skip in its receipt.
     """

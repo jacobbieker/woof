@@ -26,7 +26,13 @@ CONFIG = str(_shipped_configs() / "arwen_global_moist_smoke.toml")
 #: scheme existed; its digest moved with the grid tracers (2026-09-02),
 #: whose transport of the condensate is not the arithmetic those
 #: archives were advanced with.
+#: RE-PINNED for WOOF 1.0.1: the v3 pin document names WOOF where v2
+#: named the engine's earlier name, and no arithmetic moved; the
+#: _WOOF_1_0_0 digest below is the v2 pin 1.0.0 wrote, its legacy alias.
 EXTERNAL_SCHEME_PINS_HASH = (
+    "592f66ce34c981db3073ae62179fd302e419e6085814416c959e47025a9a712f"
+)
+EXTERNAL_SCHEME_PINS_HASH_WOOF_1_0_0 = (
     "f536e10061499732a08bd6e32cb45160820bb55519df5c0721be4c33fbf573a0"
 )
 
@@ -373,3 +379,32 @@ def test_runtime_failure_writes_error_receipt_without_turning_green(tmp_path):
     assert receipt["status"] == "error"
     assert receipt["completed_step"] == 0
     assert receipt["error_type"] == "ValueError"
+
+
+def test_a_woof_1_0_0_checkpoint_resumes_under_its_v2_pin(tmp_path):
+    """A checkpoint WOOF 1.0.0 wrote carries the v2 pin of its arithmetic.
+    1.0.1 reworded the pin document and moved no arithmetic, so the restart
+    door resumes it to the same bytes an uninterrupted run reaches, writes
+    v3 from there, and still refuses it under the other scheme."""
+
+    from woof.globe import pins
+
+    cfg = load_config(CONFIG)
+    full = tmp_path / "full"
+    run(cfg, full)
+    midpoint = full / "arwen_global_step00000002.npz"
+    label = pins.arithmetic_label(cfg.semi_implicit_scheme, cfg.integrator)
+    _restamp_pins(midpoint, pins.WOOF_1_0_0_PINS_HASH_BY_ARITHMETIC[label])
+
+    resumed = tmp_path / "resumed"
+    assert run(cfg, resumed, restart=midpoint)["status"] == "pass"
+    meta_a, arrays_a = read_checkpoint(full / "arwen_global_step00000004.npz")
+    meta_b, arrays_b = read_checkpoint(resumed / "arwen_global_step00000004.npz")
+    assert meta_b["pins_hash"] == pins.pins_hash(cfg.semi_implicit_scheme, cfg.integrator)
+    assert meta_a["run_trackers"] == meta_b["run_trackers"]
+    assert arrays_a.keys() == arrays_b.keys()
+    for name in arrays_a:
+        assert np.array_equal(arrays_a[name], arrays_b[name]), name
+    other = replace(cfg, semi_implicit_scheme="external")
+    with pytest.raises(ValueError, match="arithmetic pins mismatch"):
+        run(other, tmp_path / "cross", restart=midpoint)

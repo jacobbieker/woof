@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from .constants import CHECKPOINT_SCHEMA
-from .pins import PINS_HASH
+from .pins import ACCEPTED_PINS_HASHES, PINS_HASH
 from .state import PrimitiveDryState, ShallowWaterState
 
 _TRACKER_KEYS = (
@@ -171,7 +171,7 @@ def read_checkpoint(
         raise ValueError(f"checkpoint schema mismatch: {metadata.get('schema')!r}")
     if metadata.get("model") not in {"shallow-water", "primitive-dry"}:
         raise ValueError(f"unknown checkpoint model {metadata.get('model')!r}")
-    if metadata.get("pins_hash") != PINS_HASH:
+    if metadata.get("pins_hash") not in ACCEPTED_PINS_HASHES:
         raise ValueError("checkpoint arithmetic pin does not match this implementation")
     if not _is_sha256(metadata.get("config_hash")):
         raise ValueError("checkpoint config hash is not a SHA-256 digest")

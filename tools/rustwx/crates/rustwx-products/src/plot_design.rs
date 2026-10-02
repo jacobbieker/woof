@@ -681,6 +681,12 @@ fn surface_relative_humidity_colors() -> Vec<Color> {
     ]
 }
 
+/// Cloud cover in percent.  Under the first level (10 %) the sky is clear
+/// and nothing is drawn, so the basemap shows through as it does under the
+/// reflectivity and QPF ladders.  Before, clear sky took the ladder's
+/// first colour: a clear 750 m afternoon drew as one white sheet, which on
+/// a dark theme is a glaring slab and on a light one hides land and water,
+/// and white is the colour a reader takes for cloud.
 fn cloud_cover_scale() -> DiscreteColorScale {
     DiscreteColorScale {
         levels: range_step(10.0, 100.0, 10.0),
@@ -695,8 +701,8 @@ fn cloud_cover_scale() -> DiscreteColorScale {
             Color::rgba(103, 177, 209, 255),
             Color::rgba(189, 232, 241, 255),
         ],
-        extend: ExtendMode::Both,
-        mask_below: None,
+        extend: ExtendMode::Max,
+        mask_below: Some(10.0),
     }
 }
 
@@ -960,6 +966,14 @@ mod tests {
                 mask_below: None,
             }),
         )
+    }
+
+    #[test]
+    fn clear_sky_under_the_first_cloud_level_draws_nothing() {
+        let scale = cloud_cover_scale();
+        assert_eq!(scale.mask_below, Some(10.0));
+        assert_eq!(scale.levels.first().copied(), Some(10.0));
+        assert!(matches!(scale.extend, ExtendMode::Max));
     }
 
     #[test]

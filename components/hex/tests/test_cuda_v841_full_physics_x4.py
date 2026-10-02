@@ -91,7 +91,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
             "5b9dd5980e33d7a0b1760281bc1553c93fa5f4c4395f7b107c8d61dabe1b9f23"
         ),
         "src/hexcore/cuda_physics_v841.py": (
-            "fed89ae26008b48a305f75af4db24c215cf5952d0ae28c67bbd05a5b925a569b"
+            "8522176f6cc036eb9cbf078e95f5617b2618b6ce6729bd7bf1cb0dc09c3616eb"
         ),
         # Re-frozen 2026-08-26 for the convection ruling: the physics cadence
         # table reports convection: None when no scheme is selected; and again
@@ -104,7 +104,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # of the two digest gates is an admission-time refusal, not a test.
         # Measured inert by AST; the rationale lives beside the runner's pin.
         "src/hexcore/cuda_driver.py": (
-            "5a30009cc4a15a42df4b7a06f70641c46d04e60dcd324d8af8c57ac23a3e8ba4"
+            "8d86e6e3f8b400672d26c5966f53306fd86f2cf9ab4b8570b3aac91c239f4544"
         ),
         "src/hexcore/cuda_backend/recovery.py": (
             "66d023c9921c97961892d918620b50d58162bb215e71a495522a3d2a9baf54bc"
@@ -172,7 +172,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # export became declinable (default armed).  The rationale lives
         # beside the runner's pin.
         "src/hexcore/cuda_arwen_physics_v841.py": (
-            "00b4624d2f219b76803803fc1069f8cc35ad522988847ad6ad7e8057eaad6a0b"
+            "74b319e8e5fcc8800349c9fdf9ab261246ec81619df509fe6c5ec84764cc8566"
         ),
         # Re-frozen for the regional CPU authority lane; the
         # rationale lives beside the runner's pin.
@@ -1001,9 +1001,9 @@ def test_restart_localization_gates_precede_first_resumed_step() -> None:
     f001 = source.index("identity = require_bitwise_restart_identity(")
     assert worker_spawn < restored_f030 < step16 < f001
     assert '"F030 restored MPAS atmosphere"' in source
-    assert '"F030 restored Arwen backend"' in source
+    assert '"F030 restored WOOF backend"' in source
     assert '"F030 restored GF advective forcing"' in source
-    assert '"first resumed step 16 Arwen backend"' in source
+    assert '"first resumed step 16 WOOF backend"' in source
     assert '"restart_arm_fresh_process": True' in source
 
     worker_source = inspect.getsource(runner._execute_restart_worker)

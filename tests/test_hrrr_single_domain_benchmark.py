@@ -1229,6 +1229,9 @@ def test_native_hrrr_real74_suite_profiles_bind_exact_namelist_and_runtime(
         "diff_6th_opt": 2,
         "diff_6th_factor": 0.12,
         "diff_6th_slopeopt": 1,
+        # Every template states the urban component since the urban canopy
+        # models joined the registry; the native run is urban-off.
+        "sf_urban_physics": 0,
         "radiation_scheme_ids": [4, 4],
     }
     assert receipt["radiation_substitution"]["contract"] \

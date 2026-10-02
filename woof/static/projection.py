@@ -37,7 +37,6 @@ from __future__ import annotations
 
 from fractions import Fraction
 import math
-import re
 import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -45,6 +44,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from woof.core import host_libm
+from woof.fortran_namelist import parse_namelist
 
 if TYPE_CHECKING:
     from woof.experiment import ExperimentConfig
@@ -892,32 +892,18 @@ def footprint_longitude_span(projection, nx: int, ny: int,
 
 
 def _parse_wps_namelist(path) -> dict:
-    """Minimal Fortran-namelist reader: ``key = v1, v2, ...`` lines only
-    (matches WPS namelist style; no multi-line continuations)."""
+    """A namelist.wps as one ``{key: [values]}`` table across its groups.
+
+    Read by :func:`woof.fortran_namelist.parse_namelist`, the reader every
+    namelist door shares; this view only flattens the groups (a later group
+    wins a key both declare, as before).  The line-at-a-time reader that
+    stood here split ``e_we = 100, e_sn = 80,`` into e_we = [100,
+    'e_sn = 80'], never expanded ``2*'...'``, and returned an unquoted
+    path's value while WPS itself stops the group at its first '/'.
+    """
     values: dict[str, list] = {}
-    for raw in Path(path).read_text().splitlines():
-        line = raw.split("!", 1)[0].strip()
-        if not line or line.startswith("&") or line == "/":
-            continue
-        if "=" not in line:
-            continue
-        key, rhs = line.split("=", 1)
-        tokens = [t.strip() for t in rhs.strip().rstrip(",").split(",")]
-        parsed = []
-        for tok in tokens:
-            if not tok:
-                continue
-            if re.fullmatch(r"'[^']*'|\"[^\"]*\"", tok):
-                parsed.append(tok[1:-1])
-            else:
-                try:
-                    parsed.append(int(tok))
-                except ValueError:
-                    try:
-                        parsed.append(float(tok))
-                    except ValueError:
-                        parsed.append(tok)
-        values[key.strip().lower()] = parsed
+    for table in parse_namelist(path).values():
+        values.update(table)
     return values
 
 

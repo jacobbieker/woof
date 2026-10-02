@@ -20,6 +20,106 @@
   the bytes, so an engine build older than the contract is still a gap.
 - `fetch-doors` downloads from the repository the installed distribution's
   own metadata names, not from an address written into the source.
+- An open-water column starts on a water temperature.  Open water holds its
+  starting skin temperature for the whole forecast (there is no ocean model;
+  an inland lake now follows its own heat budget, below), and the cold start
+  took that skin from a plain bilinear regrid of the analysis skin
+  temperature, which mixes in the analysis's land points wherever the run's
+  land fraction calls a column water and the analysis calls part of its
+  stencil land.  On the GDAS 2026-09-30 12Z analysis the north basin of Lake
+  Turkana (4.45 N, 36.09 E on the T255 grid) started at 321.1 K, the
+  afternoon desert around the lake, where the analysis's own lake point read
+  300.8 K.  Held for the forecast, that column evaporated about 1.2e-3
+  kg/m2/s, near 3,000 W/m2 of latent heat, day and night, and emptied its
+  500 kg/m2 surface reservoir at hour 117.3 of a 120 h T255 forecast, which
+  ended with "native physics water closure exceeds the explicit surface
+  reservoir".  The water books were exact; the flux they booked was wrong.
+  Open-water columns now take the analysis skin over the analysis's own
+  water points only: the bilinear weights renormalised over the stencil's
+  water points, and a stencil with none reads the analysis water values
+  grown outward over its land, the rule metgrid applies to SST.  Land and
+  sea-ice columns keep the plain regrid.  On that analysis the rule changed
+  1,784 of the 164,018 open-water columns by more than 1 K, and the run
+  receipt records it under `initial.provenance.open_water_skin`.
+- The land surface never receives convective rain the atmosphere did not
+  lose.  Grell-Freitas's deep arm reports more rain than its own tendencies
+  take out of the column: 1.27 times over the raining columns of WRF
+  v4.6.1's oracle fixture, and 1.77 times over the globe and 2.28 times over
+  land in the first day of the T255 GDAS 2026-09-30 12Z forecast.  Noah was
+  forced with the reported number, so its soil, canopy and runoff gained
+  water that never left the atmosphere, and the surface reservoir paid for
+  it: in a 240 h forecast from that analysis the reservoir of a convective
+  column in Colombia fell to 124 kg/m2 as the scheme reported 660 kg/m2 of
+  rain and removed 288, about 1.6 kg/m2/h, enough to stop a forecast of
+  about two weeks with the same refusal as the lake.  The land bucket now
+  takes the reported rain only up to the water the call removed, and `RAINC`
+  carries that same number, so the maps and the water budget's evaporation
+  read the convective rain that left the atmosphere rather than the scheme's
+  larger report (the scheme reported 660 kg/m2 on that Colombian column and
+  removed 288).  What a call reported beyond the removed water is kept as its
+  diagnostic `cumulus_rain_withheld_kg_m2`, beside
+  `cumulus_rain_reported_kg_m2` and `cumulus_water_removed_kg_m2`.  The
+  atmosphere is unchanged.  On the GDAS 2026-09-25 12Z case the lowest
+  reservoir at 120 h rises from 267 to 399 kg/m2; the global 2 m temperature
+  and 500 hPa height errors against the GDAS analyses at 24, 72 and 120 h (a
+  diagnostic, not the verification of record) change by less than 0.01 K
+  and 0.5 m.
+  Against observations on that case, the verification of record (one
+  T255 case, 1 degree boxes), the four-day precipitation total over 60 S
+  to 60 N falls from 1.43 to 1.06 times CMORPH's gauge-adjusted total, over
+  land from 1.45 to 1.05 times the CPC gauge analysis, and over the
+  contiguous United States from 1.59 to 1.17 times the MRMS multi-sensor
+  total, and the equitable threat score at 10 and 25 mm rises against all
+  three.  At about 2,700 to 2,950 surface stations (METAR, 12Z, 24 to
+  120 h) the 2 m temperature error rises by 0.002 to 0.022 K, the 2 m
+  dewpoint error moves by -0.034 to +0.195 K (the largest at 96 h, where
+  the dry bias grows from 1.83 to 1.98 K) and the sea-level pressure error
+  by +0.002 to +0.224 hPa; against about 470 to 540 radiosondes (12 to
+  72 h) the 500 hPa height error falls by 0.02 to 0.18 m and the 850 hPa
+  temperature error by 0.002 to 0.015 K.
+- An inland lake's water temperature follows its own heat budget.  Open
+  water held its starting skin temperature for the whole forecast.  On the
+  ocean that is the analysis SST; on an inland lake it is the analysis's
+  lake temperature, which is weakly observed.  GDAS carried Lake Tana (11.9
+  N, 37.5 E) at 304.8 to 305.1 K at all eight cycles of 2026-09-29 and
+  2026-09-30, 9.2 K above the 2 m air over it, and held for a 240 h T255
+  forecast that column evaporated about 22 kg/m2 a day, several times
+  published estimates of the lake's open-water evaporation (about 4 to 5 mm
+  a day); the warm lakes were the columns whose surface reservoirs would
+  next reach "native physics water closure exceeds the explicit surface
+  reservoir", about 23 days out.  A lake column (WRF's LAKEMASK rule: open
+  water whose lake share in the statics' land-use fractions beats its ocean
+  share; 920 columns at T255, from the Black Sea, the Caspian and the Great
+  Lakes to Tana and Turkana) now integrates its skin on the land cadence
+  from the shortwave and longwave it absorbs, its own emission and the
+  surface layer's sensible and latent fluxes, over the water heat capacity
+  the state carries (a 10 m mixed layer), and is not cooled below 273.15 K.
+  The ocean, land and sea ice are unchanged, and a run without lakes is bit
+  for bit the previous runtime.  The statics carry the lake share as the new
+  surface member `lake_fraction`: a checkpoint written before it reads with
+  no lakes and records the absence, so it resumes and runs as it did, and a
+  checkpoint written with it is refused by a reader from before it
+  ("checkpoint has an unknown array namespace").  Against observations on
+  the GDAS 2026-09-25 12Z case (T255, 120 h, one RTX PRO 4500, both arms
+  with the two fixes above): against OISST v2.1 on the lake columns it
+  covers, the lake surface temperature error at 120 h falls from 1.37 to
+  1.11 K RMSE (bias +0.37 to -0.35 K), because the observed lakes cooled 1.0
+  K over the five days and a held skin cannot follow;  Lake Superior 1.49 to
+  0.66 K, Lake Huron 1.09 to 0.68 K, Lake Michigan 1.15 to 0.68 K, the Black
+  Sea 1.22 to 0.99 K, the Caspian 1.64 to 1.39 K, while Lakes Erie and
+  Ontario (1.15 to 1.51 K) and Ladoga (0.75 to 0.80 K) move the other way.
+  Lake Tana's column cools from 305.3 to 299.6 K by 120 h and evaporates
+  13.7 kg/m2 a day over the five days instead of 20.7.  At about 2,700 to
+  2,960 surface stations (METAR, 12Z, 24 to 120 h) the 2 m temperature RMSE
+  moves by -0.013 to +0.019 K, the 2 m dewpoint by -0.041 to +0.086 K and
+  the sea-level pressure by -0.164 to +0.016 hPa; at the 210 to 220 of them
+  within 100 km of a lake column the 2 m temperature moves by -0.025 to
+  +0.171 K (the largest at 96 h) and the dewpoint by -0.031 to +0.067 K.
+  Against 425 to 540 radiosondes (IGRA2, 12 to 72 h, the two arms rerun on
+  one RTX 5090) the 500 hPa height RMSE moves by -0.085 to +0.059 m and the
+  850 hPa temperature by -0.011 to +0.020 K.  The precipitation total
+  against CMORPH (60 S to 60 N), the CPC gauges and MRMS moves by at most
+  0.017 of its ratio to the observed total.
 
 ## 0.1.2
 

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from .constants import RECEIPT_SCHEMA
-from .pins import PINS_HASH
+from .pins import ACCEPTED_PINS_HASHES, PINS_HASH
 
 
 def finalize_receipt(payload: dict) -> dict:
@@ -42,6 +42,6 @@ def check_receipt(path: str | Path) -> dict:
     payload["self_sha256"] = self_hash
     if payload.get("schema") != RECEIPT_SCHEMA:
         raise ValueError(f"receipt schema mismatch: {payload.get('schema')!r}")
-    if payload.get("pins_hash") != PINS_HASH:
+    if payload.get("pins_hash") not in ACCEPTED_PINS_HASHES:
         raise ValueError("receipt arithmetic pin mismatch")
     return payload

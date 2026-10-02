@@ -2603,7 +2603,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "MEASURED NEGATIVE, kept only so the measurement reproduces: hold "
-            "the frozen-Arwen physics seam's device residency in pinned host "
+            "the frozen-WOOF physics seam's device residency in pinned host "
             "memory across the dynamics half of every step.  It moves 786.8 "
             "MiB and releases 735.4 MiB of it, and on x1.40962 it still made "
             "the allocator's reservation WORSE -- 4068.7 MiB with the park "
@@ -2611,7 +2611,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "the instantaneous peak, is what a card has to provide.  Alone it "
             "changes neither number, since the peak is inside phase-1 physics "
             "where the tier is being read.  Those absolutes were measured "
-            "2026-08-20 at Arwen seam pin 629ddb6f0, BEFORE the Grell-Freitas "
+            "2026-08-20 at WOOF seam pin 629ddb6f0, BEFORE the Grell-Freitas "
             "local-memory frame cut; the A/B sign is what carries, and "
             "re-running the park at pin 0d04db712 is NOT MEASURED.  Do not "
             "reach for this as an optimisation.  Also not bit-identity: "
@@ -2970,7 +2970,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "dropped_guarantees": list(DROPPED_GUARANTEES),
         "claim": CLAIM,
         "nonclaims": list(NONCLAIMS),
-        "weather_plot_policy": "native Rust/Arwen renderer only; q2 ships in the history stream and its weather-field plots go through the same renderer",
+        "weather_plot_policy": "native Rust/WOOF renderer only; q2 ships in the history stream and its weather-field plots go through the same renderer",
     }
 
     if args.preflight_only:
@@ -2983,7 +2983,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             or arwen_git_after != arwen_git_before
         ):
             raise RuntimeError(
-                "source, authority, or Arwen bytes changed during preflight"
+                "source, authority, or WOOF bytes changed during preflight"
             )
         print(
             json.dumps(
@@ -3037,7 +3037,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         or authority_after != authority_before
         or arwen_git_after != arwen_git_before
     ):
-        raise RuntimeError("source, authority, or Arwen bytes changed during execution")
+        raise RuntimeError("source, authority, or WOOF bytes changed during execution")
     payload = {
         **provenance,
         "status": (

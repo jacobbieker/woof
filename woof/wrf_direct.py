@@ -2407,7 +2407,7 @@ def export_prepared_wrf_namelists(
 
     import tomllib
 
-    from woof.experiment import build_experiment
+    from woof.experiment import build_experiment_from_config_tables
     from woof.namelist_import import import_namelists
     from woof.native_wrf_contract import validate_native_lambert_contracts
 
@@ -2415,9 +2415,13 @@ def export_prepared_wrf_namelists(
     input_path = Path(namelist_input)
     artifacts_path = Path(domain_artifacts_manifest)
     resolved_text, report = import_namelists(wps_path, input_path)
-    exp = build_experiment(
+    # A WUDAPT geog_data_res imports with a [static] companion; the
+    # exported statics are the prepared artifacts', so it is validated and
+    # split off here, as every file door does.
+    exp = build_experiment_from_config_tables(
         tomllib.loads(resolved_text),
-        source=f"native export of {wps_path.name} + {input_path.name}")
+        source=f"native export of {wps_path.name} + {input_path.name}",
+        base_dir=wps_path.parent)
     validate_native_lambert_contracts(
         exp, wps_path, source_name="native hierarchy")
     provenance = {

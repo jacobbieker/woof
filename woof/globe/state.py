@@ -163,10 +163,19 @@ SURFACE_ARRAY_NAMES = {
     # seeding; the reader fills zeros and says so (checkpoint.py).
     "sea_ice_fraction": "sea_ice_fraction",
     "sea_ice_thickness_m": "sea_ice_thickness_m",
+    # The static lake share of each column (LANDUSEF of the land-use
+    # set's lake class, 0 on the synthetic planet), seeded by
+    # woof.globe.statics: an open-water column whose water is mostly
+    # lake is an inland lake (statics.lake_columns, WRF's LAKEMASK rule)
+    # and integrates its skin from its own surface energy budget
+    # (native_runtime._lake_surface_step).  Absent in checkpoints written
+    # before it; the reader fills zeros and says so (checkpoint.py).
+    "lake_fraction": "lake_fraction",
 }
-#: Surface members a checkpoint from before the cold-start seeding lacks;
-#: filled with zero on read (the ice-free planet that checkpoint ran).
-SEEDED_SURFACE_MEMBERS = ("sea_ice_fraction", "sea_ice_thickness_m")
+#: Surface members a checkpoint from before their seeding lacks; filled
+#: with zero on read (the ice-free planet with no lakes that checkpoint
+#: ran: its open water held the starting skin for the whole run).
+SEEDED_SURFACE_MEMBERS = ("sea_ice_fraction", "sea_ice_thickness_m", "lake_fraction")
 
 
 @dataclass
@@ -184,6 +193,8 @@ class SurfaceState:
     analysis's sea ice, seeded once and carried; a builder that has no
     ice (the analytic planet, a Level-4 migration) leaves them ``None``
     and they materialize as zero planes shaped like the land fraction.
+    ``lake_fraction`` (0 to 1) is the statics' lake share of the column,
+    the same way: ``None`` is a planet without lakes.
     """
 
     temperature_k: object
@@ -210,6 +221,7 @@ class SurfaceState:
     deep_soil_temperature_k: object
     sea_ice_fraction: object = None
     sea_ice_thickness_m: object = None
+    lake_fraction: object = None
 
     def __post_init__(self) -> None:
         for member in SEEDED_SURFACE_MEMBERS:

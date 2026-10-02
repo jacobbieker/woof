@@ -65,6 +65,7 @@ class ArwenCudaColumnSuite:
     #: they enter no checkpoint, and the merge is stated here.
     DIAGNOSTIC_MERGE = {
         "frozen_surface_columns": COUNT,
+        "lake_surface_columns": COUNT,
         "maximum_native_water_residual_kg_m2": MAX,
         "native_water_residual_exceeds_tolerance": MAX,
         "maximum_native_energy_change_j_m2": MAX,
@@ -72,13 +73,14 @@ class ArwenCudaColumnSuite:
         "maximum_local_water_repair_kg_m2": MAX,
     }
     #: Namespace metadata keys that are NOT the same on every band: the
-    #: two call counters a band without the columns they count does not
-    #: bump (a band with no frozen column, no partial pack), and the
+    #: three call counters a band without the columns they count does not
+    #: bump (a band with no frozen column, no partial pack, no lake), and the
     #: radiation size-bounding record, which ``finish`` assembles from the
     #: bands' counts and the whole-grid path-sum planes.
     METADATA_MERGE = {
         "frozen_surface_calls": MAX,
         "lead_tile_calls": MAX,
+        "lake_surface_calls": MAX,
         "radiation_size_bounding_last": SKIP,
         "radiation_size_bounding_sum": SKIP,
     }

@@ -400,7 +400,7 @@ def test_the_admission_prices_the_tables_the_source_publishes(source):
     chained = boundary_stream.chained_admission(
         experiment=exp, backend="cuda", device_bytes=0,
         card=(1 << 40, 0), source=source)
-    assert chained["forecast_bytes"] == carrying.alloc_estimate_bytes
+    assert chained["forecast_bytes"] == carrying.peak_envelope_bytes
 
 
 def test_the_resident_door_refuses_what_the_tables_push_over_the_card(
