@@ -1,5 +1,180 @@
 # Changelog
 
+## 1.0.2
+
+WRF-fidelity fixes correct moisture pressure terms, edge vertical velocity,
+diffusion and map factors, and the 2 m humidity cap. Forecast answers change.
+
+New:
+
+- `[devices]` in a single-domain or tree config, or `woof go --devices N`,
+  splits a forecast across cards, with per-card memory checks and an
+  execution receipt. `domains` selects split grids, defaulting to all;
+  split nests take forcing each parent step and return two-way feedback
+  to split parents. `woof sim --devices N` or `--devices-table` sets a
+  prepared forecast's split without changing its configuration.
+  `woof check CONFIG --devices N` prices every card, grid and pinned host
+  store, exiting 2 for an unknown VRAM budget. Frames reach the host while
+  the model steps on. Split parents over resident nests, moving nests and
+  late-starting split grids are refused. Split grids refuse Noah mosaic
+  and slope radiation (`slope_rad = 1`) before allocation, naming the
+  missing state; resident grids retain both. Splitting is off by default.
+- `woof run-plan` starts GFS and native HRRR single domains and trees from
+  the first posted hours, as `woof go` does. Both start single `hrrr-prs`,
+  `rap`, `rrfs`, `icon-eu` and `gem-gdps` domains the same way. A `[tiles]`
+  root, including `woof cyclone-setup` trees, waits at each boundary seam,
+  instead of for the whole cycle. Output is unchanged. An earlier forecast
+  failure keeps its own error beside any later input timeout.
+- `WOOF_FETCH_POLICY=aws` pins sources with an AWS host to that host without
+  NOMADS fall-through; sources with no AWS host retain their usual host.
+  `latest` selects the newest cycle whose first hours are on AWS;
+  `--whole-cycle` retains the whole-cycle rule. Forecasts still stream from
+  their first posted hours. Unset, fetching is unchanged. `woof fetch`
+  probes hosts refusing HEAD with a one-byte GET.
+- `woof import-namelist` accepts `domain_wizard`, `mod_levs`, `plotfmt` and
+  bare `30s` geography, and fills 17 of 33 formerly required keys from WRF
+  and WPS defaults. Unknown sections are refused by name.
+- `diff_opt = 1` runs WRF's coordinate-surface horizontal diffusion with
+  `km_opt` 2 or 4 and either `mix_full_fields` setting, including restarts
+  and streamed forecasts. It is off by default (`diff_opt = 2`).
+- `topo_wind` runs under YSU, excluding BEP and BEP+BEM;
+  `gwd_opt = 1` or `3` runs KIM or GSL gravity-wave drag under every PBL
+  scheme. GPU column checks match WRF 4.7.1 bit for bit. Static preparation
+  adds orographic statistics from WPS geography, and namelist imports keep
+  both keys. Orographic statistics are byte-identical on Linux and Windows.
+  A streamed `[tiles]` domain stops at its first drag call.
+  Both options are off by default.
+- `woof ml-export` converts regional histories, converted hex frames,
+  global tapes or their ZIPs into one Zarr store per domain. It offers
+  WeatherBench 2's 13 pressure levels, ERA5's 37 or model levels, ERA5
+  and WeatherBench 2 names and units, earth-relative winds, a
+  `below_ground` mask over ERA5's below-ground fill, an optional regular
+  latitude-longitude grid and a ZIP that opens in place. Levels above the
+  model top are omitted and listed. `xarray.open_zarr` works with
+  zarr-python 2.18 and 3. On Windows, ZIP history files with WRF's colon
+  filenames unpack with underscores; see `docs/ml-export.md`.
+- GPU preparation rotates winds, interpolates vertically and builds the
+  Thompson cold start with the CPU route's arithmetic, matching its
+  prepared arrays. Forecasts prepared on the card change. A full HRRR
+  forcing preparation took 154 s instead of 640 s.
+- Acoustic, advection, horizontal diffusion and per-step glue kernels move
+  less memory, with byte-identical output. The horizontal diffusion change
+  alone reduced an hour of an 800 x 600 x 50 forecast from 95.7 to 88.4 s
+  on an RTX 5090.
+
+Fixed:
+
+- Legacy RRTMG longwave radiation keeps the correct spacing above the
+  model top. A pressure guard had compressed valid layers, changing their
+  temperatures and heating. Forecast answers change.
+- `woof go --cycle` accepts an exact match to a prepared bundle,
+  checkpoint or declared forcing's actual initial time, recording a no-op.
+  Conflicting or unreadable input times remain refused. Forcing fetched by
+  the run is checked after acquisition and before preparation.
+- Every shipped profile and configuration leaving `moist_cq` unset applies
+  WRF's moisture correction to pressure terms, including passive vapour
+  with microphysics off. Dry states bypass it; an explicit setting wins.
+  Unmatched configurations had omitted it, and WSM6 and Kessler profiles
+  had disabled it. Forecast answers change.
+- The dynamical core corrects vertical-velocity damping and float32
+  rounding, geopotential tendencies at open and specified outer rows,
+  vertical advection at an open model top, mapped open-boundary map
+  factors, and diffusion's sixth-order filtering, boundary deformation,
+  outer-row TKE and prescribed surface heat flux. Routine output words
+  are checked against compiled WRF 4.7.1. Forecast answers change.
+- Surface vertical velocity at open and specified edges uses WRF's
+  clamped terrain slope. Copying the interior slope outward had doubled
+  its terrain-following term there. Periodic domains and interior cells
+  are unchanged; edge answers change.
+- Land points cap 2 m humidity at 1.05 times the lowest model level's
+  vapour after the surface schemes, as WRF's surface driver does.
+  Answers change for 2 m humidity.
+- WRF `wrfinput` starts initialize unfrozen Noah soil liquid water from
+  soil moisture and terrain-following vertical wind from surface flow,
+  instead of retaining zeros. First-hour latent heat flux RMSE against WRF
+  fell from 239 to 0.4 W/m2 on a 3 km comparison. With `usemonalb` off,
+  Noah keeps WRF's seasonal background albedo instead of the file's monthly
+  albedo. Answers change for these forecasts.
+- `woof downscale` children of saved runs, including `--point`, build
+  terrain, land use and soil at their own spacing, using Copernicus GLO-30
+  terrain at 1 km or finer. Parent states and every boundary frame are
+  blended and rebalanced as WRF's `ndown` does, within a few float32
+  epsilons of compiled WRF 4.7.1 on column checks. A WPS_GEOG tree is
+  required (`woof fetch-geog` or `--geog-root`); a missing tree is refused.
+  `--parent-terrain` retains the old route, and `[static]` records the
+  choice. Answers change for these children.
+- Downscaled children and DA nests take steep-terrain acoustic substeps
+  and the `epssm` floor from their own terrain, keeping automatic parent
+  choices. Lower explicit `epssm` values are refused. Answers change when
+  the child's terrain needs the rule and the parent's terrain did not.
+- Adaptive steps land on history, radiation, cumulus, surface and
+  boundary-layer times; history intervals need only be whole seconds.
+  Prepared forecasts honor adaptive history alarms and delayed domains
+  start on time. Answers change where those times fell between steps.
+- Disk estimates count each domain's physics fields, `history_vars` and
+  output window. Trimmed runs that fit start; insufficient space is
+  refused before starting.
+- BEP+BEM workspace estimates count urban columns, including forecasts
+  starting while their source posts, keeping a forecast that fits on the
+  card. Configuration checks explain their upper bound.
+- A resident nest under a streamed or split parent restores from the
+  shared scratch arena without a `KeyError`.
+- Streamed final-state digests use the resident forecast's model time.
+  Fractional adaptive steps no longer leave identical forecasts with
+  different digests through a 0.27 ms time difference after 3 h.
+- Resident, streamed and out-of-core checkpoint writers record the run
+  configuration alike. Checkpoints of the same state no longer differ in
+  their header.
+- CPU-only validation and SASE resource accounting work without CuPy.
+  Windows numerical receipts resolve their own paths.
+
+Available since 1.0.1:
+
+- `sf_urban_physics = 1` runs single-layer urban canopy under Noah or
+  Noah-MP; `2` runs BEP with YSU or MYJ; `3` adds BEP's building energy
+  model. Local Climate Zones and NLCD urban classes are retained. A
+  single-layer canopy above the first model level is refused. Urban
+  physics is off by default; BEP under YSU applies nonurban drag once.
+- `sf_surface_mosaic = 1` runs Noah land-use tiles per cell. With the
+  single-layer canopy, `mosaic_urban_canopy = "every_tile"` also treats
+  town tiles in mostly rural cells. Mosaic is off by default.
+- The UW moist-turbulence PBL (`bl_pbl_physics = 9`) runs on the GPU and
+  imports from WRF namelists. `[shared] zadvect_implicit = 1` runs
+  implicit-explicit vertical advection with `w_crit_cfl`, including the
+  two corrected boundary terms. Implicit advection is off by default;
+  answers change.
+- Terrain accepts WPS GEOGRID.TBL smoothers or no smoothing through
+  `woof domain --terrain-smoothing`, domain static settings or GEOGRID.TBL
+  import. `smooth_precision = "wps-float32"` or
+  `--terrain-smoothing-precision` matches default `geogrid.exe` smoothing;
+  float64 remains the default.
+- WRF namelists retain `history_begin`, `history_end`, `smooth_cg_topo`,
+  `topo_shading` and `slope_rad`, and imports name all unsupported keys
+  together. Restarts can change history windows where cadence can change.
+  WUDAPT Local Climate Zones import with their urban land cover.
+- Byte-identical physics speedups remain included: per call, legacy
+  RRTMG 7x, RUC 7 to 22x, Noah-MP 5.8x, MYNN 4.5x, NSSL 1.9 to 3.1x,
+  P3 1.5 to 2.2x, RTE-RRTMGP 1.6x, Thompson 1.3 to 1.6x, Morrison
+  1.2 to 1.5x, and Milbrandt-Yau, Kain-Fritsch, New Tiedtke, Shin-Hong
+  and Grell-Freitas 1.1 to 1.5x. Dycore bookkeeping and nest forcing
+  use fewer launches.
+- `[shared] adaptive_nest_lattice = true` selects the root step with the
+  fewest nest cell-steps; the three-domain 250 m comparison was 6% faster.
+  It is opt-in and changes answers.
+- `woof fetch` takes posted leads in order and records their first
+  availability or an already-up marker; late leads exit 75, AIGFS waits
+  for its GDAS donor, and events carry every source's leads.
+  GFS, native HRRR and mapped-source trees prepare their start and nests
+  first, then stream later boundaries; storm-following trees start at
+  that head too.
+  `woof sources` shows posting schedules and lateness budgets; fetch
+  `latest`, `--readiness` and `--whole-cycle` remain available, and
+  `woof go --cycle` selects the cycle. HRRR DA uses expected posting
+  times, and `latest` probes AIFS f360 from +5 h 26 min. Config preparation
+  can pin its CPU or GPU backend with `woof run --preprocess-backend` or
+  `[case_data] preprocess_backend`, and `--preprocess-workers` sets decode
+  concurrency. A 48 h HRRR decode on 24 cores took 140 s instead of 480 s.
+
 ## 1.0.1
 
 The engine's speed work, forecasts that start before their inputs finish
@@ -159,9 +334,13 @@ Fixed:
   free memory before it is rebuilt at its start, and no longer holds two
   copies of itself in memory there.
 - A domain finer than 1 km made by `woof domain` with no physics named now
-  runs Thompson microphysics with MYNN and RUC, the suite that kept coastal
-  fog and low stratus, instead of the source's YSU and Noah default. A
-  source whose soil RUC cannot start from keeps its own default.
+  runs Thompson microphysics with MYNN and RUC instead of the source's YSU
+  and Noah default. Scored against stations and ceilometers on marine fog
+  days at 750 m, that suite kept more coastal fog and low stratus (stratus
+  CSI 0.71, against 0.52 with Noah and 0.55 with YSU and Noah). This is
+  limited observation evidence: the selection record publishes neither a
+  case count nor a reproducible score receipt. A source whose soil RUC
+  cannot start from keeps its own default.
 - `woof domain` refuses a RUC land-surface suite on a source whose soil RUC
   cannot start from (GEM GDPS publishes one soil layer and RUC needs two),
   instead of leaving the refusal to the preparation after the download. A
@@ -256,9 +435,9 @@ Known issues, each fixed in 1.0.1 for the reason it names:
   still takes NumPy's float32 `log1p` when it is prepared on the CPU, so on
   a machine with AVX-512 its prepared `al`, `alt` and `p` can differ from
   another machine's in the last bits. The fix is made in the engine and
-  ships in 1.0.1: it changes prepared bytes, and 1.0.0's forecasts were
-  proved on the engine before it, so it goes in with the next engine
-  re-point and its proofs.
+  ships in 1.0.1: it changes prepared bytes, and 1.0.0's release checks ran
+  on the engine before it, so it goes in with the next engine re-point
+  and its checks.
 - Two kinds of identity text still print the engine's earlier name: the
   pin table `woof global pins` prints, and the contract texts `woof hex
   forecast --preflight` prints. Their bytes are hashed into every global

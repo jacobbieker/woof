@@ -217,7 +217,8 @@ def test_the_binary_form_notice_covers_the_first_party_ports() -> None:
     _requires_source_tree()
     text = _read(LICENSES / "THIRD-PARTY-LICENSES-bridge-binaries.txt")
     for token in ("UChicago Argonne", "Los Alamos National Security",
-                  "NumPy Developers", "SIL OPEN FONT LICENSE"):
+                  "NumPy Developers", "SIL OPEN FONT LICENSE",
+                  "rw-libm", "Arm Limited", "Alexei Sibidanov"):
         assert token in text, (
             f"the binary-form notice does not reproduce {token!r}; a compiled "
             "consumer never sees the source tree, so this is the only copy "
@@ -302,8 +303,8 @@ def test_the_arm_scope_list_is_derived_from_the_tree() -> None:
     """The NOTICE says this list is machine-derived.  This is the machine."""
     _requires_source_tree()
     derived = _arm_files()
-    assert len(derived) == 15, derived
-    assert len([name for name in derived if name != "glibc_trig_flt32.cuh"]) == 14, derived
+    assert len(derived) == 16, derived
+    assert len([name for name in derived if name != "glibc_trig_flt32.cuh"]) == 15, derived
     assert "glibc_trig_flt32.cuh" in derived
     listed = _read(KERNEL_NOTICE)
     missing = [name for name in derived if name not in listed]
@@ -331,6 +332,10 @@ FDLIBM_FILES: tuple[str, ...] = (
 #: as identified beside each entry.  Listed with the reason so that adding a
 #: real transcription here is a deliberate act.
 _NOT_FDLIBM = {
+    # Terrain drag (lane/282-terrain-drag): CUDA's double atan2 rounded once
+    # to float, standing for glibc 2.43's correctly rounded atan2f
+    # (CORE-MATH); no FDLIBM reduction is transcribed.
+    "terrain_drag.cu": ("td_atan2f",),
     "glibc_trig_flt32.cuh": ("glibc_atanf",),    # CORE-MATH s_atanf.c, a8066a5, MIT
     "p3.cu": ("p3_log10",),                      # (float)log10((double)x)
     "thompson_aerosol_warm.cu": ("thompson_aa_log10f_cr",),
@@ -392,6 +397,10 @@ MARKER_FILES: dict[str, str] = {
     "tools/region_global_dealias/src/solver.rs": "UChicago Argonne",
     "tools/rustwx/crates/static-fields/src/projection/npmath.rs":
         "NumPy Developers",
+    # Arm optimized-routines and CORE-MATH, the WPS orographic projection's
+    # libm (public CI run 37036982597 failed it on the platform libm).
+    "tools/rustwx/crates/rw-libm/src/lib.rs":
+        "Portable libm in Rust -- Arm optimized-routines and CORE-MATH",
 }
 
 

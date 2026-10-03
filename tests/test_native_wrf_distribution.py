@@ -477,6 +477,7 @@ def test_standalone_python_project_excludes_forecast_executor(tmp_path):
     assert "woof/core/nssl2_contract.py" in files
     assert "woof/core/kernels/vert_interp.cu" in files
     assert "woof/offline_child.py" not in files
+    assert "woof/offline_child_geography.py" not in files
     assert "woof/offline_child_run.py" not in files
     assert "woof/offline_child_smoke.py" not in files
     assert "woof/multi_run.py" not in files
@@ -544,8 +545,11 @@ def test_standalone_python_project_excludes_forecast_executor(tmp_path):
     # forecast admission it reaches only when it chains does not, and a
     # preparation-only install never chains, so that import is optional.
     assert "woof/ingest/boundary_stream.py" in files
+    assert "woof/core/urban_state.py" not in files
     assert {(item["path"], item["module"]) for item in receipt["optional_internal_imports"]} >= {
-        ("woof/ingest/boundary_stream.py", "woof.core.preflight")}
+        ("woof/ingest/boundary_stream.py", "woof.core.preflight"),
+        ("woof/ingest/boundary_stream.py", "woof.core.urban_state"),
+        ("woof/ingest/boundary_stream.py", "woof.prepared_domain_tree_forecast")}
     # doctor, on the other hand, belongs: a preprocessing install is
     # exactly the one that needs to be told which bridge is missing.  It
     # is here because its WPS_GEOG check reads the dataset list from
@@ -1084,6 +1088,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 staged = Path(os.environ["RW_WPS_STAGED_ROOT"]).resolve()
 import woof.source_cli as source_cli
@@ -1092,6 +1097,11 @@ source_cli._mapped_command = lambda args: [
     sys.executable, os.environ["RW_WPS_ADAPTER"], str(args.output_root)]
 code = source_cli.main(json.loads(os.environ["RW_WPS_ARGV"]))
 assert code == 0, code
+from woof.ingest.boundary_stream import prepared_head_urban_columns
+urban = SimpleNamespace(domains=(SimpleNamespace(
+    run=SimpleNamespace(sf_urban_physics=3)),))
+assert prepared_head_urban_columns(urban, {}) is None
+assert "woof.core.urban_state" not in sys.modules
 for name in ("woof.prepared_single_domain_forecast",
              "woof.prepared_domain_tree_forecast"):
     assert name not in sys.modules, name

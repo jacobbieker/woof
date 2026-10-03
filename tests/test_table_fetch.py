@@ -577,17 +577,8 @@ def test_wif_only_is_the_one_flag_that_skips_the_mandatory_leg(
     assert not user_root.exists(), "--wif-only touched the classic root"
 
 
-def test_the_wif_dataset_resolves_from_the_versioned_release_base(
-        monkeypatch):
-    """404: the dataset was fetched from the fixed v1.0.0 table release.
-
-    Verified against the live endpoint on 2026-09-01: the coefficient
-    tables answer 200 there and QNWFA_QNIFA_SIGMA_MONTHLY.dat answers
-    404, because it has never been published under that tag.  It is
-    carried as an asset of the release that pins it, beside the bridge
-    bundles, so its base has to move with the release.
-    """
-
+def test_the_wif_dataset_resolves_from_its_fixed_data_release(monkeypatch):
+    """The unchanged monthly dataset has its own fixed release URL."""
     from woof import bridge_assets
 
     monkeypatch.delenv(table_assets.ASSET_URL_BASE_ENV, raising=False)
@@ -598,32 +589,24 @@ def test_the_wif_dataset_resolves_from_the_versioned_release_base(
 
     monkeypatch.setattr(bridge_assets, "load_pins", lambda: _Pins())
     base = table_assets.wif_asset_url_base()
-    assert base.endswith("/releases/download/v9.9.9")
-    assert base == bridge_assets.asset_url_base(_Pins())
-    assert "v1.0.0" not in base
+    assert table_assets.WIF_DATA_RELEASE == "v1.0.1"
+    assert base == "https://github.com/recastsystems/woof/releases/download/v1.0.1"
+    assert base != bridge_assets.asset_url_base(_Pins())
 
 
-def test_an_unreachable_wif_dataset_names_the_file_url_and_remedy(
-        monkeypatch):
-    """A refusal that does not say what to do is a traceback with manners."""
-
+def test_the_wif_data_release_is_independent_of_bridge_release_pins(monkeypatch):
+    """Missing bridge pins cannot hide a fixed, pinned data release."""
     from woof import bridge_assets
-    from woof.ingest.wif_dataset import WIF_DATASET_FILE
 
     monkeypatch.delenv(table_assets.ASSET_URL_BASE_ENV, raising=False)
+    monkeypatch.delenv("WOOF_BRIDGE_ASSET_URL_BASE", raising=False)
 
     def _no_release():
-        raise bridge_assets.BridgeAssetError("the packaged pins declare "
-                                             "no release")
+        raise bridge_assets.BridgeAssetError("the packaged pins declare no release")
 
     monkeypatch.setattr(bridge_assets, "load_pins", _no_release)
-    with pytest.raises(table_assets.TableAssetError) as excinfo:
-        table_assets.wif_asset_url_base()
-    message = str(excinfo.value)
-    assert WIF_DATASET_FILE in message
-    assert "releases/download" in message
-    assert "--from DIR" in message
-    assert table_assets.ASSET_URL_BASE_ENV in message
+    assert table_assets.wif_asset_url_base() == (
+        "https://github.com/recastsystems/woof/releases/download/v1.0.1")
 
 
 def test_the_wif_leg_stages_from_a_local_file_url_base(tmp_path,

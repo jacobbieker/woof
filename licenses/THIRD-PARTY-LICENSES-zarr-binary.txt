@@ -6404,7 +6404,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[ZARR-089] sha256 46ec87feda5e2e81ca55ec73a026d35dadfbdb594041d61f4621d69a8c62fc7b
+[ZARR-089] sha256 8cc6dc6a6a65e43637cc9b56609f975252d48cd27d41cf56cd768142c2e83d9f
 As carried by:
   licenses/THIRD-PARTY-LICENSES-bridge-binaries.txt
 ------------------------------------------------------------------------------
@@ -6412,7 +6412,7 @@ THIRD-PARTY LICENCES FOR THE RECAST WOOF BRIDGE BUNDLE
 ==============================================================================
 
 This file is the binary-form notice for the compiled artefacts distributed
-in this bundle and staged into Recast WOOF platform wheels: 34 Rust executables and
+in this bundle and staged into Recast WOOF platform wheels: 35 Rust executables and
 libraries, plus the map assets beside it and two embedded fonts.
 
 Those binaries are built from two kinds of source, and both carry third-party

@@ -188,18 +188,18 @@ bytes are outside the numerical oracle.
   `-ftz=true` to whatever the caller passed, at
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
-  The inventory records 7 distinct caller-supplied option tuples across the 36
+  The inventory records 7 distinct caller-supplied option tuples across the 43
   compile sites in the shipped package, each listed here with a site that
   supplies it:
   - no caller options -- `woof/core/attribute_tracking.py:99`
-    (xp.ElementwiseKernel), and 17 other site(s)
-  - `-std=c++17` -- `woof/core/kernels/__init__.py:137` (cp.RawModule), and
-    5 other site(s)
-  - `-std=c++17` `--ftz=false` -- `woof/core/rrtmg_legacy.py:901`
+    (xp.ElementwiseKernel), and 23 other site(s)
+  - `-std=c++17` -- `woof/core/kernels/__init__.py:164` (cp.RawModule), and
+    6 other site(s)
+  - `-std=c++17` `--ftz=false` -- `woof/core/rrtmg_legacy.py:904`
     (_cc.compile_using_nvrtc), and 4 other site(s)
-  - `-fmad=false` -- `woof/core/dycore.py:286` (cp.ElementwiseKernel), and
+  - `-fmad=false` -- `woof/core/dycore.py:292` (cp.ElementwiseKernel), and
     2 other site(s)
-  - `-std=c++17` `--ftz=true` -- `woof/core/mynn_pbl_gpu.py:361`
+  - `-std=c++17` `--ftz=true` -- `woof/core/mynn_pbl_gpu.py:362`
     (cp.RawKernel), and 1 other site(s)
   - `--ftz=true` -- `woof/core/morrison.py:39` (cp.ElementwiseKernel)
   - `-std=c++17` `-fmad=false` -- `woof/core/nest_interp.py:261`
