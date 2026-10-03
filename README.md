@@ -17,6 +17,10 @@ its command says preview each time it runs; its config and checkpoint formats
 may change in a minor release. The major-version promise covers the regional
 model.
 
+Production means the regional commands and their config and checkpoint
+formats are covered by that promise. It is not a statement about forecast
+accuracy; see Science and limits below.
+
 ## Install
 
 Linux on x86_64, Python 3.11 or newer, an NVIDIA GPU and driver. WOOF has
@@ -64,8 +68,10 @@ name.
 
 ## Documentation
 
-- `docs/public/`: the CLI manual, physics, verification record, hardware
-  guidance and data sources.
+- `docs/public/`: the CLI manual, physics, hardware guidance and data sources.
+  The [code verification record](docs/public/VERIFICATION.md) documents
+  historical WRF v4.6.1 comparisons and their configuration and coverage
+  limits.
 - `components/hex/` and `components/globe/`: the hex and global models' manuals,
   tests and tools.
 - `woof --help-all` lists every command; `woof hex --help` and
@@ -74,12 +80,32 @@ name.
 ## Science and limits
 
 WOOF implements a WRF-ARW-class regional model and WRF-derived physics on the
-GPU. Its numerical comparisons apply to documented configurations and test
-cases; they do not establish general equivalence with WRF or forecast skill for
-every combination of physics, input data and hardware. The hex model is a port
-of the MPAS-A v8.4.1 dynamical core with this engine's physics; it is not MPAS
-and is not endorsed by UCAR. Use official meteorological services for
-forecasts and warnings.
+GPU. Comparisons against WRF Fortran, ULP and byte-identity checks, and the
+matched-run and ensemble consistency comparisons are **code verification**:
+evidence that the tested code computes its intended equations. Each result
+belongs to the build, reference version and configuration it tested. None
+establishes general equivalence with WRF or skill for every combination of
+physics, input data and hardware.
+
+**Solution verification** estimates numerical error in a particular run.
+Routine numerical-error budgets for weather forecasts remain a gap.
+**Validation** compares model results with observations. Meteorology calls
+that scoring forecast verification; in computational-science V&V terms it is
+validation. Matching WRF is code verification and never validates a model.
+WOOF can inherit WRF's published validation record only to the extent the
+two are statistically indistinguishable for the configuration in question.
+
+Published observation evidence is limited to specific runs and variables,
+including the ASOS snow/soil comparison, the station/ceilometer fog-suite
+comparison and an MRMS model-top comparison. The observation scoreboard is
+in development. These do not establish a broad validation record across
+regions, seasons or forecast lengths. The
+[evidence page](docs/public/VERIFICATION.md) documents historical WRF v4.6.1
+code comparisons and their configuration and coverage limits.
+
+The hex model is a port of the MPAS-A v8.4.1 dynamical core with this engine's
+physics; it is not MPAS and is not endorsed by UCAR. Use official
+meteorological services for forecasts and warnings.
 
 WOOF continues an engine released before under another name: WOOF 1.0 is
 that engine's release 2.8.0 and the fixes made since, under the WOOF name,

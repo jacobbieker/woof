@@ -359,7 +359,7 @@ observation battery and the demo gallery's basemaps.
 | `recast-woof[gpu-cu13]` | `cupy-cuda13x[ctk]` | running the model on a CUDA-13-only box |
 | `recast-woof[gpu]` | alias of `gpu-cu12` | kept so existing install lines keep working |
 | `recast-woof[render]` | `wrf-rust>=0.2.39` | `woof render`'s matplotlib engine, `woof enprod`, and derived quantities. The default rust engine needs none of it. The floor is 0.2.39 because that is the oldest release with wheels for every supported interpreter (cp310-cp314); no environment marker, nothing skipped |
-| `recast-woof[dev]` | `pytest`, `psutil`, `pyyaml` | running the test battery |
+| `recast-woof[dev]` | `pytest`, `psutil`, `pyyaml`, `setuptools` | running the test battery (setuptools because the wheel-gate tests run `setup.py` with the battery's interpreter) |
 | `recast-woof[publish]` | `huggingface_hub` | maintainers only: publishing the WPS_GEOG mirror snapshot. Needs write credentials nobody else has, so it is deliberately outside `[all]` |
 | `recast-woof[all-cu12]` | `gpu-cu12` + `render` | one line for a CUDA 12.x forecasting box |
 | `recast-woof[all-cu13]` | `gpu-cu13` + `render` | one line for a CUDA-13-only forecasting box |

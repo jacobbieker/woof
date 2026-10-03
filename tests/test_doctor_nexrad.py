@@ -174,19 +174,15 @@ def test_the_bundled_front_door_uses_the_resolution_ladders_own_env_var():
 
 
 def test_the_bundle_prose_counts_the_artifacts_it_actually_carries():
-    """The docstring is the contract a release engineer reads; keep it true.
+    """Keep the native roster count and its bundle description aligned.
 
-    The literal below is this gate's own copy of the count, and it is the
-    side that moves last: the global model's six observation doors
-    (``rw_atms`` through ``rw_wis2``) take the roster to thirty-four. The
-    count and ``woof.bridge_assets`` prose must move together. It is
-    raised to 34 and the previous spelling joins the stale list below, so
-    the pin stays exact in both directions rather than being widened to
-    accommodate the roster.
+    The regional engine's twenty-nine artifacts, including ``rw_mlexport``,
+    and the six global observation decoders form the thirty-five-artifact
+    bundle.
     """
 
-    assert len(bridge_assets.BUNDLED_ARTIFACTS) == 34
-    assert "thirty-four artifacts" in bridge_assets.__doc__
+    assert len(bridge_assets.BUNDLED_ARTIFACTS) == 35
+    assert "thirty-five artifacts" in bridge_assets.__doc__
     for stale in ("eight artifacts", "nine artifacts", "nine files",
                   "ten artifacts", "ten files", "eleven artifacts",
                   "eleven files", "fourteen artifacts", "fourteen files",
@@ -202,7 +198,8 @@ def test_the_bundle_prose_counts_the_artifacts_it_actually_carries():
                   "twenty-six artifacts", "twenty-six files",
                   "twenty-seven artifacts", "twenty-seven files",
                   "twenty-eight artifacts", "twenty-eight files",
-                  "twenty-nine artifacts", "twenty-nine files"):
+                  "twenty-nine artifacts", "twenty-nine files",
+                  "thirty artifacts", "thirty files"):
         # Match the complete count, so "eight" does not reject "twenty-eight".
         assert re.search(r"(?<![a-z-])" + re.escape(stale) + r"(?![a-z-])",
                          bridge_assets.__doc__) is None

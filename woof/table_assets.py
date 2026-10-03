@@ -97,6 +97,9 @@ EXTERNALIZED_TABLE_FILENAMES = frozenset({
 RELEASE_ASSET_BASE_URL = (
     "https://github.com/recastsystems/woof/releases/download/v1.0.0")
 
+#: Fixed data release for the unchanged monthly aerosol dataset.
+WIF_DATA_RELEASE = "v1.0.1"
+
 ASSET_URL_BASE_ENV = "WOOF_TABLE_ASSET_URL_BASE"
 
 _BLOCK_BYTES = 8 * 1024 * 1024
@@ -113,49 +116,19 @@ def asset_url_base() -> str:
 
 
 def wif_asset_url_base() -> str:
-    """Where ``--wif`` downloads from: the VERSIONED release-assets base.
+    """Use the fixed monthly dataset release, with table and bridge mirrors.
 
-    This used to return :func:`asset_url_base`, i.e. the fixed ``v1.0.0``
-    release the coefficient tables are published under -- where this file
-    has never existed.  ``woof fetch-tables --wif`` therefore refused
-    with ``HTTP Error 404`` on every install that had no local copy, which
-    is every install: there was no reachable route to the dataset at all.
-
-    The coefficient tables can sit at a fixed tag because their bytes are
-    frozen -- the same four files answer every release.  This dataset is
-    carried as an asset of the release that pins it, alongside the bridge
-    bundles, so its base has to MOVE with the release.  That is exactly
-    what :func:`woof.bridge_assets.asset_url_base` computes
-    (``<REPOSITORY_URL>/releases/download/<pins.release>``), including the
-    ``WOOF_BRIDGE_ASSET_URL_BASE`` override, so it is reused rather than
-    restated: one versioned base, not two that can drift apart.
-
-    ``WOOF_TABLE_ASSET_URL_BASE`` still wins when it is set, because an
-    operator who has named a mirror for this command's downloads has named
-    it for all of them.
+    ``WOOF_TABLE_ASSET_URL_BASE`` wins, followed by
+    ``WOOF_BRIDGE_ASSET_URL_BASE``. The default data release is fixed
+    because the monthly dataset's size and SHA-256 are unchanged.
     """
-
     override = os.environ.get(ASSET_URL_BASE_ENV)
     if override and override.strip():
         return override.strip().rstrip("/")
-
-    from woof import bridge_assets
-
-    try:
-        return bridge_assets.asset_url_base(bridge_assets.load_pins())
-    except Exception as error:
-        from woof.ingest.wif_dataset import WIF_DATASET_FILE
-
-        raise TableAssetError(
-            f"{WIF_DATASET_FILE}: no download URL could be resolved.  It "
-            "is published as an asset of the release that pins it, at "
-            f"<{bridges.REPOSITORY_URL}/releases/download/"
-            f"<release>/{WIF_DATASET_FILE}>, and the packaged release pin "
-            f"could not be read: {error}\n"
-            "  how to supply it: stage from a local copy with `woof "
-            "fetch-tables --wif --from DIR`, or set "
-            f"{ASSET_URL_BASE_ENV} (or WOOF_BRIDGE_ASSET_URL_BASE) to a "
-            "base URL that carries the file")
+    bridge_override = os.environ.get("WOOF_BRIDGE_ASSET_URL_BASE")
+    if bridge_override and bridge_override.strip():
+        return bridge_override.strip().rstrip("/")
+    return f"{bridges.REPOSITORY_URL}/releases/download/{WIF_DATA_RELEASE}"
 
 
 class TableAssetError(RuntimeError):

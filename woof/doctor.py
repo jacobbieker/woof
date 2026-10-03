@@ -1496,6 +1496,9 @@ _IMPORT_NAME = {
     # The YAML reader ([dev] extra): the release contract tests read
     # the publication workflow through it.
     "pyyaml": "yaml",
+    # The wheel-gate tests' build backend ([dev] extra): they run setup.py
+    # with the battery's interpreter.
+    "setuptools": "setuptools",
     # The CDS client ([era5] extra): distribution and module share the name.
     "cdsapi": "cdsapi",
     "huggingface-hub": "huggingface_hub",
@@ -2667,6 +2670,7 @@ _CHECKED_ARTIFACTS = {
     "rw_mpas_init": "the `MPAS binary` lines",
     "rw_mpas_convert": "the `MPAS binary` lines",
     "rw_mpas_lbc": "the `MPAS binary` lines",
+    "rw_mlexport": "the `ML dataset exporter` line",
 }
 
 
@@ -3319,6 +3323,52 @@ def _mpas_bridge_checks() -> list[Check]:
             group=_GROUP_ENGINES, blocking=False,
             severity=SEVERITY_UNREACHABLE))
     return checks
+
+
+def _ml_export_check() -> Check:
+    """``rw_mlexport``, the binary behind ``woof ml-export``.
+
+    Non-blocking: it is a capability (turning history files into a
+    training dataset), not a default path, so its absence closes
+    ``ml-export`` and touches nothing else.  Staleness is judged out of
+    the bytes, as ``woof fetch-bridges`` judges it.
+    """
+
+    from woof import ml_export
+
+    binary = ml_export.BINARY
+    label = f"ML dataset exporter ({binary.name})"
+    door = "woof ml-export"
+    try:
+        found = binary.find()
+    except FileNotFoundError as error:
+        return Check(
+            label, "missing", f"{error} -- {door} cannot run",
+            f"# {binary.env_var} names a missing executable: point it at a "
+            "real build, or unset it --\n" + binary.remedy(),
+            action=f"unset {binary.env_var}, or point it at a build",
+            brief=f"{binary.env_var} names a missing file",
+            group=_GROUP_ENGINES, blocking=False,
+            severity=SEVERITY_UNREACHABLE)
+    if found is None:
+        return Check(
+            label, "missing", f"not built and not staged -- {door} cannot run",
+            binary.remedy(), action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+            brief=f"not staged; {door} cannot run",
+            group=_GROUP_ENGINES, blocking=False,
+            severity=SEVERITY_UNREACHABLE)
+    ok, evidence = bridges.bridge_abi_matches(binary.name, found)
+    if not ok:
+        return Check(
+            label, "missing", f"{found} -- {evidence}; {door} would hand it a "
+            "request it does not speak",
+            "# this one is STALE, so re-point does not help; rebuild it:\n"
+            + binary.remedy(),
+            action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+            brief="stale build; rebuild it", group=_GROUP_ENGINES,
+            blocking=False, severity=SEVERITY_BROKEN)
+    return Check(label, "verified", f"{found} -- {evidence}",
+                 group=_GROUP_ENGINES)
 
 
 def _nexrad_front_door_check() -> Check:
@@ -5700,6 +5750,7 @@ def _collect_checks(sources: tuple[str, ...] | None = None,
     checks.extend(_obs_front_door_checks())
     # The five MPAS binaries no bundle carried and no check reported.
     checks.extend(_mpas_bridge_checks())
+    checks.append(_ml_export_check())
     checks.append(_netcdf_decoder_check())
     checks.append(_mapped_engine_check())
     checks.append(_ncwrite_check())
