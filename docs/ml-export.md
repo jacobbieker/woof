@@ -17,6 +17,7 @@ woof ml-export my-run/run/wrfout --out ml/my-run                 # WB13 levels, 
 woof ml-export my-run-wrfout.zip --out ml/my-run --zip           # straight from the run page's ZIP
 woof ml-export run/wrfout --out ml/x --grid latlon:0.25          # a regular 0.25 degree grid
 woof ml-export run/wrfout --out ml/x --levels model --variables +vertical_velocity
+woof ml-export run/wrfout --icechunk-repo ml/x-icechunk          # direct Icechunk output (temp staging)
 woof ml-export --list                                            # level sets, variables, naming schemes
 ```
 
@@ -41,9 +42,16 @@ read and deleted just after, so the disk holds one frame at a time.
 | `--zip` | also write `<out>-ml.zip` | off |
 | `--overwrite`, `--skip-unavailable`, `--threads` | replace an earlier export; write what the files can make and record the rest; worker threads | off, off, every core |
 | `--append`, `--finalize` | add frames to the export in `--out` one call at a time, then close it | |
+| `--icechunk-repo`, `--icechunk-branch`, `--icechunk-message` | write the export to an Icechunk repository (the Zarr export is staging only) | |
+| `--keep-zarr-staging` | with `--icechunk-repo`: keep the staged `dNN.zarr` output in `--out` | off |
 
 `--append` then `--finalize` writes exactly the bytes one call over the same
 frames writes; a service converting frames as they arrive uses it.
+
+With `--icechunk-repo`, `woof ml-export` stages the Zarr datasets, commits
+them into the named Icechunk repository on the chosen branch as grouped
+datasets (`d01.zarr`, `d02.zarr`, ...), then removes staged `dNN.zarr` by
+default. If `--out` is omitted, staging uses a temporary directory.
 
 ## What the dataset holds
 
