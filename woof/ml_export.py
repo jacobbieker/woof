@@ -518,6 +518,54 @@ def run_binary(exe: Path, request: dict, *, as_json: bool, stream=None) -> int:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def export_zarr_to_icechunk(
+    zarr_root: Path,
+    *,
+    repo_dir: Path,
+    branch: str,
+    message: str,
+) -> str:
+    """Mirror each ``dNN.zarr`` dataset under ``zarr_root`` into Icechunk."""
+
+    try:
+        import icechunk as ic
+        import xarray as xr
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "Icechunk export requires icechunk and xarray in the active environment."
+        ) from error
+
+    datasets = sorted(Path(zarr_root).glob("d*.zarr"))
+    if not datasets:
+        raise RuntimeError(
+            f"no dNN.zarr dataset found in {zarr_root}; ml-export produced nothing to mirror"
+        )
+
+    repo_dir = Path(repo_dir).resolve()
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    repo = ic.Repository.open_or_create(storage=ic.local_filesystem_storage(str(repo_dir)))
+    session = repo.writable_session(branch)
+    mode = "w"
+    for dataset_path in datasets:
+        group = dataset_path.name
+        # Copied chunk by chunk (the staged dask chunks: one time of one variable),
+        # so a long run's export never has to fit in host memory at once.
+        with xr.open_zarr(dataset_path) as dataset:
+            dataset.encoding = {}
+            for name in dataset.variables:
+                dataset[name].encoding = {}
+            dataset.to_zarr(
+                session.store,
+                mode=mode,
+                group=group,
+                consolidated=True,
+                zarr_format=3,
+            )
+        mode = "a"
+    snapshot = str(session.commit(message))
+    return snapshot
+
+
 # ---------------------------------------------------------------------------
 # Command line
 # ---------------------------------------------------------------------------
@@ -537,7 +585,7 @@ def register_cli(sub) -> None:
                    "variables: default, all, +NAME,... (defaults plus these) or NAME,...")
     parser = sub.add_parser(
         "ml-export",
-        help="turn a run's history files into a machine-learning dataset (Zarr)",
+        help="turn a run's history files into a machine-learning dataset (Zarr, optional Icechunk mirror)",
         description=(
             "Convert history files (wrfout_dNN_*, the run page's ZIP of them, or a folder) "
             "into one Zarr dataset per domain on standard pressure levels with ERA5 and "
@@ -580,6 +628,14 @@ def register_cli(sub) -> None:
                         help="add these frames to the export in --out (one frame at a time)")
     parser.add_argument("--finalize", action="store_true",
                         help="close the export in --out after --append calls")
+    parser.add_argument("--icechunk-repo", type=Path, default=None, metavar="DIR",
+                        help="also mirror the exported dNN.zarr datasets into an Icechunk repository")
+    parser.add_argument("--icechunk-branch", default="main", metavar="NAME",
+                        help="Icechunk branch name (default: main)")
+    parser.add_argument("--icechunk-message", default="Import woof ml-export datasets",
+                        metavar="TEXT", help="Icechunk commit message")
+    parser.add_argument("--keep-zarr-staging", action="store_true",
+                        help="with --icechunk-repo: keep the staged dNN.zarr output in --out")
     parser.add_argument("--list", action="store_true",
                         help="print the level sets, variables and naming schemes")
     parser.add_argument("--json", action="store_true",
@@ -613,8 +669,25 @@ def main(args) -> int:
         return EXIT_OK
     args.levels = args.levels or tables.levels["default"]
     args.names = args.names or tables.names["default"]
+    # Callers that build the namespace themselves predate the Icechunk options.
+    for name, default in (("icechunk_repo", None), ("icechunk_branch", "main"),
+                          ("icechunk_message", "Import woof ml-export datasets"),
+                          ("keep_zarr_staging", False)):
+        if not hasattr(args, name):
+            setattr(args, name, default)
+    stage_dir: Path | None = None
+    if args.out is None and args.icechunk_repo is not None:
+        stage_dir = Path(tempfile.mkdtemp(prefix="ml-export-icechunk-stage-"))
+        args.out = stage_dir
     if args.out is None:
         print("ml-export refused: --out is required (the export folder)", file=sys.stderr)
+        return EXIT_REFUSED
+    if args.icechunk_repo is not None and (args.append or args.finalize):
+        print(
+            "ml-export refused: --icechunk-repo currently supports only one-shot exports "
+            "(run mode, neither --append nor --finalize)",
+            file=sys.stderr,
+        )
         return EXIT_REFUSED
     try:
         request = build_request(args, tables)
@@ -635,4 +708,30 @@ def main(args) -> int:
         print(f"ml-export: {exe} is not the exporter this release drives: {why}",
               file=sys.stderr)
         return EXIT_NOT_STAGED
-    return run_binary(exe, request, as_json=args.json)
+    code = run_binary(exe, request, as_json=args.json)
+    if code != EXIT_OK:
+        return code
+    if args.icechunk_repo is not None:
+        try:
+            snapshot = export_zarr_to_icechunk(
+                Path(request["out"]),
+                repo_dir=Path(args.icechunk_repo),
+                branch=str(args.icechunk_branch),
+                message=str(args.icechunk_message),
+            )
+        except Exception as error:  # noqa: BLE001 - surfaced as export failure
+            print(f"ml-export failed: Icechunk mirror failed: {error}", file=sys.stderr)
+            return EXIT_FAILED
+        if not args.json:
+            print(
+                "icechunk commit: "
+                f"{snapshot} ({Path(args.icechunk_repo).resolve()}, branch {args.icechunk_branch})"
+            )
+        stage_root = Path(request["out"])
+        if stage_dir is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
+        elif not args.keep_zarr_staging:
+            for path in stage_root.glob("d*.zarr"):
+                shutil.rmtree(path, ignore_errors=True)
+            shutil.rmtree(stage_root / ".ml-export-state", ignore_errors=True)
+    return EXIT_OK

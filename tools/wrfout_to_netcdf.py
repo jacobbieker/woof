@@ -13,7 +13,8 @@ from netCDF4 import Dataset
 
 
 def _is_wrfout(path: Path) -> bool:
-    return path.is_file() and path.name.startswith("wrfout_d")
+    # woof.io.wrfout writes wrfout*.tmp* and renames it into place when complete.
+    return path.is_file() and path.name.startswith("wrfout_d") and ".tmp" not in path.name
 
 
 def _verify_netcdf(path: Path) -> dict[str, object]:
@@ -211,25 +212,28 @@ def stream_wrfout_to_icechunk(
         pending = [path for path in wrfouts if path.name not in processed and path.name not in skipped]
         if pending:
             idle_started = time.monotonic()
+        if not initialized and len(pending) == 1:
+            # The seed fixes the store's variable set, so wait for a second frame to
+            # learn which fields the writer only starts at the first step (REFL_10CM).
+            pending = []
         if not initialized and pending:
-            if len(pending) >= 2:
-                first, second = pending[0], pending[1]
-                with xr.open_dataset(first, engine="netcdf4") as ds_first, xr.open_dataset(
-                    second, engine="netcdf4"
-                ) as ds_second:
-                    first_vars = set(ds_first.variables.keys())
-                    second_vars = set(ds_second.variables.keys())
-                missing_from_first = sorted(second_vars - first_vars)
+            first, second = pending[0], pending[1]
+            with xr.open_dataset(second, engine="netcdf4") as ds_second:
+                second_vars = set(ds_second.variables.keys())
+                with xr.open_dataset(first, engine="netcdf4") as ds_first:
+                    missing_from_first = sorted(second_vars - set(ds_first.variables.keys()))
+                filler = None
                 if missing_from_first:
-                    skipped.add(first.name)
+                    filler = xr.full_like(ds_second[missing_from_first].load(), np.nan, dtype="float32")
                     print(
-                        f"Skipping initial frame {first.name}: missing {len(missing_from_first)} "
-                        "variable(s) present in the next timestep."
+                        f"Initial frame {first.name}: filling {len(missing_from_first)} "
+                        f"variable(s) first written after t=0 with NaN: {', '.join(missing_from_first)}"
                     )
-                    pending = [path for path in pending if path.name != first.name]
             if pending:
                 seed = pending[0]
                 with xr.open_dataset(seed, engine="netcdf4") as dataset:
+                    if filler is not None:
+                        dataset = xr.merge([dataset, filler], compat="override", join="override")
                     session = repo.writable_session(branch)
                     encoding = None
                     if compressor is not None:
