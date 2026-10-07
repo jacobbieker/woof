@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+New:
+
+- Station verification reads Dynamical.org's ASOS Parquet archive of
+  the Iowa Environmental Mesonet's reports: the United States and 14
+  other countries, about 4,060 stations in 2026. `woof verify-visuals
+  --station-source {auto,dynamical,iem}` or `WOOF_VERIFY_STATION_SOURCE`
+  selects the route; `auto`, the default, takes Dynamical.org where its
+  frozen station table has stations in the domain and the IEM's
+  `rw_asos` elsewhere or when the read fails. Only the needed row groups
+  and columns are fetched, by HTTP range requests, and cached under
+  `~/.woof/cache/dynamical-asos/` (`WOOF_DYNAMICAL_ASOS_CACHE`). Both
+  routes write the same station and surface files, so `rw_verify` scores
+  2 m temperature, dewpoint and 10 m wind unchanged; precipitation is not
+  read. `verification.json` and each hour's receipt name the source,
+  any fallback reason and the data attribution. The archive is labelled
+  experimental and states no licence. `pip install 'recast-woof[obs]'`
+  adds `pyarrow`, which the Pixi environment carries.
+- `woof obs dynamical-asos --bbox W,S,E,N --valid-time ISO --out DIR`
+  writes those files for any box and hour, and `woof doctor` reports the
+  route in a non-blocking row. The obs battery and the WOOF Global
+  scorecard read the archive through `DynamicalAsosSurfaceSource`.
+  Coverage and limits are in `docs/international-obs.md`.
+
 ## 1.0.3
 
 WOOF runs the operational HRRR configuration: its static file, its

@@ -258,8 +258,29 @@ reference is MRMS and the surface reference is ASOS-class stations.
 Specific case scores reported elsewhere are listed in
 [VERIFICATION.md](../public/VERIFICATION.md); they do not complete this
 programme or establish general forecast skill. The ingest doors are
-`woof obs asos | goes | mrms | odim | opera | stage4 | radar`; command
-details remain in [CLI-OPTIONS.md](../public/CLI-OPTIONS.md).
+`woof obs asos | dynamical-asos | goes | mrms | odim | opera | stage4 |
+radar`; command details remain in [CLI-OPTIONS.md](../public/CLI-OPTIONS.md).
+
+Station reports for post-run verification come from one of two routes,
+chosen by `woof verify-visuals --station-source {auto,dynamical,iem}` or
+`WOOF_VERIFY_STATION_SOURCE`: `rw_asos` against the Iowa Environmental
+Mesonet, or Dynamical.org's ASOS Parquet archive of the same reports,
+read by ranged HTTP requests. The archive covers the United States and 14
+other countries (about 4,060 stations in 2026); `auto` uses it where its
+frozen station table has stations in the domain and the IEM route
+elsewhere. Both routes write the same station and surface packs, so
+`rw_verify` scores 2 m temperature, 2 m dewpoint and 10 m wind the same
+way from either; the WOOF Global scorecard also scores sea-level pressure
+where a report carries it. Precipitation from the archive is never used,
+because it does not distinguish a missing hour from a dry one. The
+archive is a reprocessing of IEM-collected reports, not an independent
+reference; it carries no quality flags, so `rw_asos`'s gross-error and
+report-rate screens are applied to it, and its publisher labels it
+experimental. Wider coverage changes where a station score can be
+computed, not what a score establishes. Coverage, limits and licence are
+in [international-obs.md](../international-obs.md), section 6; selection,
+cached files and receipts in
+[verification-visuals.md](../verification-visuals.md).
 
 ## 7.5 DA and nowcasting: present, demo-grade, self-labelled
 
