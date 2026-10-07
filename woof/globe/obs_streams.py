@@ -110,7 +110,12 @@ MQTT, every original message archived on receipt, the coverage and
 latency measured; the BUFR payloads are archived and counted and are not
 yet decoded into the table (a named open item).  ``awc-metar`` the
 Aviation Weather Center METAR cache as the complementary surface source,
-``rw_asos awc``.
+``rw_asos awc``.  ``dynamical-asos`` the Dynamical.org ASOS Parquet
+re-packaging of the same IEM archive (the United States and 14 other
+countries), a verification stream with no analysis door: it is read by
+:class:`woof.obs.sources.DynamicalAsosSurfaceSource` to score forecasts
+against stations (``verification=True``), and ``fetch`` refuses it by name
+with the scoring commands as the remedy.
 
 Account-gated, reported and never fetched: MADIS aircraft (AMDAR) reports
 need a NOAA MADIS account.  Reachable but not decoded here: the NWS
@@ -188,6 +193,13 @@ class StreamSpec:
     #: the binary by hand, and a binary this package pins, stages and
     #: verifies but publishes no command for is not shipped.
     subscribes: bool = False
+    #: The stream's reports can referee a forecast: a station observation
+    #: source the obs battery (``tools/obs_battery_score.py
+    #: --surface-source``) and the WOOF Global scorecard (``surface
+    #: --obs-source``) read.  Independent of ``door``: a verification stream
+    #: need not feed the analysis, and one that does not must say so in its
+    #: notes rather than look like a missing decoder.
+    verification: bool = False
     notes: str = ""
 
     def __post_init__(self) -> None:
@@ -243,6 +255,39 @@ STREAMS: dict[str, StreamSpec] = {
                       "screen_dewpoint_2m", "anemometer_wind_10m"),
         notes="266 ASOS networks; ten networks per request, paced 2 s; a 31 h "
               "global window is 25 requests, 18.6 MB, 90 s",
+    ),
+    "dynamical-asos": StreamSpec(
+        name="dynamical-asos", door=None,
+        subject="ASOS/AWOS METAR through the Dynamical.org ASOS Parquet re-packaging of the "
+                "IEM archive (verification stream)",
+        sources=("https://dynamical.org/catalog/asos-parquet/",
+                 "https://data.source.coop/dynamical/asos-parquet/year=YYYY/data.parquet"),
+        variables=("surface_pressure_pa", "temperature_k", "dewpoint_k",
+                   "wind_u_m_s", "wind_v_m_s"),
+        errors={"surface_pressure_pa": 100.0, "temperature_k": 1.5,
+                "dewpoint_k": 1.5, "wind_u_m_s": 2.5, "wind_v_m_s": 2.5},
+        cadence_s=3600, public=True,
+        latency_class="fast",
+        latency_basis="probe instant minus the latest report in the year file's row-group "
+                      "statistics (an upper bound): 1,673 s at 08:17:53 UTC on 2026-10-07 (newest "
+                      "report 07:50:00, object Last-Modified 07:53:01); the publisher rewrites the "
+                      "year file hourly, so an hour's reports land about 30 to 60 minutes behind "
+                      "real time",
+        measurements=("station_pressure_from_altimeter", "sea_level_pressure",
+                      "screen_temperature_2m", "screen_dewpoint_2m", "anemometer_wind_10m"),
+        decoder_built=False, verification=True,
+        notes="a scoring source, not an analysis door: woof.obs.sources.DynamicalAsosSurfaceSource "
+              "reads it through the optional woof.obs.dynamical_asos reader (pyarrow), one "
+              "gpuwm-obs.asos-surface.v2 record per valid time, for `tools/obs_battery_score.py "
+              "--surface-source dynamical-asos` and `woof.globe.obs_scorecard surface --obs-source "
+              "dynamical-asos`; coverage is the United States and 14 other countries' IEM ASOS/AWOS "
+              "networks, 1940 to the present, one zstd Parquet file per year (2026: 480 MB, 45.5 "
+              "million rows in 44 row groups on 2026-10-07; columns include tmpc, dwpc, sknt, drct, "
+              "alti and mslp); it is never fed to the analysis (the iem-metar door carries the "
+              "same reports there, so assimilating both would double-count); attribution: data Iowa "
+              "Environmental Mesonet (Iowa State University), original reports NOAA/NWS/FAA (public "
+              "domain), processing dynamical.org, hosting Source Cooperative; the publisher marks "
+              "the dataset experimental",
     ),
     "igra2": StreamSpec(
         name="igra2", door="rw_igra2",
@@ -809,6 +854,7 @@ def streams_table() -> list[dict[str, object]]:
             "public": spec.public,
             "account_gated": spec.account_gated,
             "decoder_built": spec.decoder_built,
+            "verification": spec.verification,
             "latency_class": spec.latency_class,
             "latency_basis": spec.latency_basis,
             "cadence_s": spec.cadence_s,
@@ -1114,7 +1160,12 @@ def _cmd_fetch(args) -> int:
         )
     if spec.door is None or not spec.decoder_built:
         remedy = ""
-        if spec.subscribes:
+        if spec.verification:
+            remedy = (f"stream {spec.name} referees forecasts rather than feeding the "
+                      f"analysis: score with `tools/obs_battery_score.py --surface-source "
+                      f"{spec.name}` or `python -m woof.globe.obs_scorecard surface "
+                      f"--obs-source {spec.name}`")
+        elif spec.subscribes:
             remedy = (f"the door's subscriber is reachable with `woof global obs "
                       f"subscribe --stream {spec.name}`, which archives what arrives "
                       f"and reports coverage without claiming a table")
