@@ -52,6 +52,16 @@ box that fetched the bytes: the front doors record an absolute path in every
 observation's provenance, and the promotion rule's integrity clause re-hashes
 every one of them.  Given one or more roots, each source looks for its object
 by name under them instead.  Given none, nothing changes.
+
+``--surface-source`` picks where the station reports come from.  ``asos``
+(the default) reads the ``--asos-surface`` record the IEM front door wrote;
+``dynamical-asos`` fetches the Dynamical.org ASOS Parquet archive for every
+scored hour inside the arm's own grid (or ``--dynamical-bbox``), which scores
+a domain anywhere that archive has stations.  Its provenance names the
+archive, carries the dataset's attribution, and re-hashes through the
+manifest it writes.  A source that cannot be read here -- the optional reader
+or ``pyarrow`` missing, the host unreachable -- exits 4 and names itself; it
+is never replaced by anything.
 """
 
 from __future__ import annotations
@@ -68,8 +78,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from woof.obs.sources import (AsosSurfaceSource, MrmsCompositeSource,
-                               Stage4PrecipSource)
+from woof.obs.sources import (DYNAMICAL_SOURCE, SOURCE_UNAVAILABLE_EXIT,
+                               STATION_SOURCES, AsosSurfaceSource,
+                               MrmsCompositeSource, ObsSourceUnavailable,
+                               Stage4PrecipSource, bbox_of, parse_bbox,
+                               split_station_ids, station_obs_source)
 from woof.verify.obs import battery, model_source, registration, stations
 
 #: The earliest lead that can be reported at all.  Lead 0 is the initial
@@ -87,6 +100,17 @@ EARLIEST_REPORTABLE_LEAD_HOURS = 1
 MRMS_ARCHIVE_ID = "mrms"
 STAGE4_ARCHIVE_ID = "stage4"
 ASOS_ARCHIVE_ID = "asos"
+DYNAMICAL_ASOS_ARCHIVE_ID = DYNAMICAL_SOURCE
+
+#: Margin, in degrees, added around the arm's grid when the Dynamical.org
+#: ASOS archive is asked for its stations: generous enough that a station on
+#: the grid's edge is fetched, and the registered admission still drops
+#: every station outside the scored interior.
+DYNAMICAL_BBOX_MARGIN_DEG = 0.5
+
+#: Exit status when the selected station source cannot be read here (its
+#: optional reader or dependency is missing, or its host did not answer).
+EXIT_SOURCE_UNAVAILABLE = SOURCE_UNAVAILABLE_EXIT
 
 
 def _packs(directory: Path, pattern: str = "*.obspack"):
@@ -358,6 +382,28 @@ def main() -> int:
                              "window the registration scores, by default")
     parser.add_argument("--asos-stations", type=Path, default=None)
     parser.add_argument("--asos-surface", type=Path, default=None)
+    parser.add_argument("--surface-source", choices=STATION_SOURCES,
+                        default="asos",
+                        help="where the station reports come from: 'asos' "
+                             "reads the --asos-surface record (the default); "
+                             "'dynamical-asos' fetches the Dynamical.org ASOS "
+                             "Parquet archive for the scored hours into "
+                             "--dynamical-folder")
+    parser.add_argument("--dynamical-folder", type=Path, default=None,
+                        help="dynamical-asos: the working folder the hourly "
+                             "records and their manifest are written under")
+    parser.add_argument("--dynamical-bbox", default=None, metavar="W,S,E,N",
+                        help="dynamical-asos: the station box, the arm's own "
+                             "grid plus a margin by default (write "
+                             "--dynamical-bbox=W,S,E,N when W is negative)")
+    parser.add_argument("--dynamical-station-ids", default=None,
+                        help="dynamical-asos: comma-separated station ids to "
+                             "keep")
+    parser.add_argument("--dynamical-timeout", type=float, default=120.0,
+                        help="dynamical-asos: seconds per archive request")
+    parser.add_argument("--dynamical-refresh", action="store_true",
+                        help="dynamical-asos: fetch again even when a record "
+                             "for the hour is already in the folder")
     parser.add_argument("--boundary-width-cells", type=int, default=None)
     parser.add_argument("--reported-lead-hours", default=None,
                         help="comma-separated leads to report and never "
@@ -421,8 +467,44 @@ def main() -> int:
     # registration carries; the station SET is frozen further down, once the
     # document that says which hours it must report on exists.
     surface_source = None
+    surface_archive_id = ASOS_ARCHIVE_ID
     station_table_sha256 = ""
-    if arguments.asos_surface is not None:
+    if arguments.surface_source == "dynamical-asos":
+        if arguments.asos_surface is not None:
+            parser.error("--asos-surface is the 'asos' source's record; "
+                         "--surface-source dynamical-asos fetches its own")
+        if arguments.dynamical_folder is None:
+            parser.error("--surface-source dynamical-asos needs "
+                         "--dynamical-folder")
+        if arguments.asos_stations is not None:
+            # The IEM table's digest would bind the registration to a station
+            # table these scores never read.
+            parser.error("--asos-stations is the 'asos' source's frozen "
+                         "table; --surface-source dynamical-asos scores the "
+                         "archive's own stations, recorded in its manifest")
+        station_ids = split_station_ids(arguments.dynamical_station_ids)
+        try:
+            if arguments.dynamical_bbox is not None:
+                box = parse_bbox(arguments.dynamical_bbox)
+            elif station_ids:
+                box = None
+            else:
+                grid = arm.grid()
+                box = bbox_of(grid.latitude, grid.longitude,
+                              margin_deg=DYNAMICAL_BBOX_MARGIN_DEG)
+            surface_source = station_obs_source(
+                "dynamical-asos", folder=arguments.dynamical_folder,
+                bbox=box, station_ids=station_ids,
+                timeout=arguments.dynamical_timeout,
+                refresh=arguments.dynamical_refresh)
+        except ValueError as error:
+            parser.error(str(error))
+        surface_archive_id = DYNAMICAL_ASOS_ARCHIVE_ID
+        where = (f"stations {','.join(station_ids)}" if box is None else
+                 ", ".join(f"{v:g}" for v in surface_source.bbox))
+        print(f"station source: {DYNAMICAL_SOURCE} in {where} "
+              f"-> {arguments.dynamical_folder}")
+    elif arguments.asos_surface is not None:
         if arguments.asos_stations is None:
             parser.error("--asos-surface needs --asos-stations")
         table = json.loads(
@@ -491,7 +573,32 @@ def main() -> int:
     frozen = None
     if surface_source is not None:
         hours = battery.valid_times(arguments.init_time, scored_leads)
-        station_obs = surface_source.observations(hours)
+        try:
+            station_obs = surface_source.observations(hours)
+        except ObsSourceUnavailable as error:
+            print(f"{error}", file=sys.stderr)
+            print("install the Dynamical.org ASOS reader (pyarrow) or score "
+                  "with --surface-source asos and an --asos-surface record",
+                  file=sys.stderr)
+            return EXIT_SOURCE_UNAVAILABLE
+        except LookupError as error:
+            if isinstance(error, (KeyError, IndexError)):
+                raise
+            # The archive answered and holds no report for any scored hour
+            # (not yet ingested, or no station in the box): a refusal of
+            # this request, not a missing source.
+            print(f"no station observations to score: {error}",
+                  file=sys.stderr)
+            return 1
+        provenance = station_obs.provenance
+        print(f"station observations: {len(station_obs.stations)} stations, "
+              f"{len(station_obs.reports)} reports from {provenance.source}"
+              + (f" ({provenance.attribution})"
+                 if getattr(provenance, "attribution", "") else ""))
+        missing = getattr(surface_source, "empty_valid_times", ())
+        if missing:
+            print(f"no surviving station report at {list(missing)}; those "
+                  f"hours are scored as missing")
         grid = arm.grid()
         if grid.terrain_m is None:
             raise ValueError(
@@ -531,7 +638,7 @@ def main() -> int:
         MRMS_ARCHIVE_ID: reflectivity_obs,
         STAGE4_ARCHIVE_ID: (next(iter(precipitation_obs.values()))
                             if precipitation_obs else None),
-        ASOS_ARCHIVE_ID: surface_source,
+        surface_archive_id: surface_source,
     }
     rehash = ObservationRehash(observation_sources,
                                roots=arguments.obs_archive_root or ())

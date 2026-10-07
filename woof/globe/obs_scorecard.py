@@ -7,7 +7,10 @@ What it measures
 Two instruments, one sampling rule.
 
 *Surface.*  ASOS station reports (the ``gpuwm-obs.asos-surface.v2`` or ``.v1`` record
-``rw_asos`` decodes) at one valid time, four variables in the seam's units:
+``rw_asos`` decodes, or -- ``--obs-source dynamical-asos`` -- the same record fetched
+from the Dynamical.org ASOS Parquet archive for the models' own box, so stations
+anywhere that archive has them are scored; the provenance and its attribution
+travel in the result) at one valid time, four variables in the seam's units:
 2 m temperature (K), 2 m dewpoint (K), 10 m wind speed (m/s) and mean sea
 level pressure (Pa; the tables print hPa).  Every model is a
 :class:`SurfaceFields`: its 2 m temperature and specific humidity, 10 m wind
@@ -112,6 +115,17 @@ from .upper_air_scorecard import (
 )
 
 SCHEMA = "gpuwm.arwen-global-obs-scorecard/v1"
+
+#: The station sources ``surface`` can score against, by name; ``asos`` is
+#: the default.  Spelled here because this module imports the rest of
+#: ``woof`` lazily; a test pins it to :data:`woof.obs.sources.STATION_SOURCES`.
+SURFACE_OBS_SOURCES: tuple[str, ...] = ("asos", "dynamical-asos")
+
+#: Exit status of ``surface`` when the selected station source cannot be read
+#: here: the Dynamical.org reader or pyarrow missing, or the archive host
+#: unreachable.  Never replaced by a stand-in.  Pinned by a test to
+#: :data:`woof.obs.sources.SOURCE_UNAVAILABLE_EXIT`.
+EXIT_SOURCE_UNAVAILABLE = 4
 
 #: The scored surface variables, the seam names the station record uses.
 SURFACE_VARIABLES: tuple[str, ...] = ("temperature_2m", "dewpoint_2m", "wind_speed_10m", "mslp")
@@ -672,6 +686,40 @@ def score_surface_stations(
         "scores": scores,
         "stations": rows,
     }
+
+
+def surface_observations(
+    source: str, models: dict[str, SurfaceFields], valid_time: str, *, record: str | Path | None = None,
+    folder: str | Path | None = None, bbox=None, station_ids=None, timeout: float = 120.0, refresh: bool = False,
+):
+    """The station reports ``surface`` scores against, from the source named.
+
+    ``asos`` reads ``record`` (the ``gpuwm-obs.asos-surface`` record ``rw_asos``
+    decodes).  ``dynamical-asos`` fetches the Dynamical.org ASOS Parquet archive
+    at ``valid_time`` into ``folder``, inside ``bbox`` or, by default, the box
+    around every scored model's grid -- which for a global model is the whole
+    archive.  Returns the ``StationObsSet`` and the path of the record the
+    scores rest on (the per-hour record, or the manifest over them).  An
+    unreadable source raises :class:`woof.obs.sources.ObsSourceUnavailable`.
+    """
+    from woof.obs.sources import bbox_of, station_obs_source
+
+    if source not in SURFACE_OBS_SOURCES:
+        raise ValueError(f"unknown surface observation source {source!r}; the sources are {list(SURFACE_OBS_SOURCES)}")
+    if source == "asos":
+        reader = station_obs_source("asos", record=record)
+        return reader.observations([valid_time]), str(record)
+    if bbox is None and not station_ids:
+        if not models:
+            raise ValueError("a dynamical-asos box needs a --bbox or at least one model grid")
+        lat = np.concatenate([np.asarray(f.latitude_deg, dtype=np.float64).ravel() for f in models.values()])
+        lon = np.concatenate([np.asarray(f.longitude_deg, dtype=np.float64).ravel() for f in models.values()])
+        bbox = bbox_of(lat, lon)
+    reader = station_obs_source(
+        "dynamical-asos", folder=folder, bbox=bbox, station_ids=station_ids, timeout=timeout, refresh=refresh,
+    )
+    observations = reader.observations([valid_time])
+    return observations, str(reader.manifest_path)
 
 
 # --------------------------------------------------------------------------
@@ -1528,12 +1576,37 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--out", type=Path, required=True)
         if name == "surface":
             p.add_argument("--valid", required=True, help="seam instant, e.g. 2026-09-01T18:00:00")
-            p.add_argument("--obs", type=Path, required=True, help="gpuwm-obs.asos-surface.v2 (or v1) record")
+            p.add_argument("--obs-source", choices=SURFACE_OBS_SOURCES, default="asos",
+                           help="'asos' reads the --obs record (the default); 'dynamical-asos' fetches the "
+                                "Dynamical.org ASOS Parquet archive at --valid into --obs-folder")
+            p.add_argument("--obs", type=Path, help="gpuwm-obs.asos-surface.v2 (or v1) record (--obs-source asos)")
+            p.add_argument("--obs-folder", type=Path,
+                           help="dynamical-asos: working folder (default: <out's folder>/dynamical-asos)")
+            p.add_argument("--bbox", metavar="W,S,E,N",
+                           help="dynamical-asos: station box (default: the scored models' grids; write --bbox=W,S,E,N when W is negative)")
+            p.add_argument("--station-ids", help="dynamical-asos: comma-separated station ids to keep")
+            p.add_argument("--obs-timeout", type=float, default=120.0,
+                           help="dynamical-asos: seconds per archive request")
+            p.add_argument("--obs-refresh", action="store_true",
+                           help="dynamical-asos: fetch again even when the hour's record exists")
             p.add_argument("--csv", type=Path)
         else:
             p.add_argument("--valid", required=True, help="nominal instant, e.g. 2026-09-01T12:00:00Z")
             p.add_argument("--soundings", type=Path, required=True, help="igra2-extract output")
     args = parser.parse_args(argv)
+
+    obs_request = (None, None)
+    if args.command == "surface":
+        # Checked before any model is read: a forgotten record or a bad box
+        # should not cost a surface-geopotential derivation to hear about.
+        if args.obs_source == "asos" and args.obs is None:
+            parser.error("surface --obs-source asos needs --obs (a gpuwm-obs.asos-surface record)")
+        from woof.obs.sources import parse_bbox, split_station_ids
+
+        try:
+            obs_request = (parse_bbox(args.bbox) if args.bbox else None, split_station_ids(args.station_ids))
+        except ValueError as error:
+            parser.error(str(error))
 
     if args.command == "calibrate":
         payload = calibrate()
@@ -1574,8 +1647,7 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     if args.command == "surface":
-        from woof.obs.sources import AsosSurfaceSource
-
+        bbox, station_ids = obs_request
         models: dict[str, SurfaceFields] = {}
         for label, run_dir, checkpoint in args.model:
             phi, _prov = phi_by_run[run_dir]
@@ -1585,10 +1657,28 @@ def main(argv: list[str] | None = None) -> int:
             models[label] = product_surface_fields(frame, path=str(path))
             models[label].source["mapping"] = str(product_mappings[label])
             models[label].source["decode"] = decode
-        observations = AsosSurfaceSource(args.obs).observations([args.valid])
+        from woof.obs.sources import ObsSourceUnavailable
+
+        try:
+            observations, record = surface_observations(
+                args.obs_source, models, args.valid, record=args.obs,
+                folder=args.obs_folder or Path(args.out).parent / "dynamical-asos",
+                bbox=bbox, station_ids=station_ids, timeout=args.obs_timeout, refresh=args.obs_refresh,
+            )
+        except ObsSourceUnavailable as error:
+            print(str(error), file=sys.stderr)
+            print("install the Dynamical.org ASOS reader (pyarrow), or score with --obs-source asos --obs RECORD",
+                  file=sys.stderr)
+            return EXIT_SOURCE_UNAVAILABLE
+        except LookupError as error:
+            if isinstance(error, (KeyError, IndexError)):
+                raise
+            print(f"no station observations to score at {args.valid}: {error}", file=sys.stderr)
+            return 1
         result = score_surface_stations(models, observations, args.valid)
         result["surface_geopotential"] = {str(k): v[1] for k, v in phi_by_run.items()}
-        result["obs_record"] = str(args.obs)
+        result["obs_source"] = args.obs_source
+        result["obs_record"] = record
         _write_json(args.out, result)
         if args.csv:
             import csv

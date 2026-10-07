@@ -133,6 +133,12 @@ class ObsProvenance:
     The scoring pass re-hashes the same object and refuses a mismatch; that
     round trip is the whole reason this field is on the value rather than in
     a manifest somebody has to remember to consult.
+
+    ``attribution`` is the credit line a redistributed archive asks its users
+    to carry (the Dynamical.org ASOS Parquet re-packaging of the Iowa
+    Environmental Mesonet archive, for one).  It is optional, says nothing
+    about whether the values are real, and appears in :meth:`record` only
+    when set, so every receipt written before it existed is unchanged.
     """
 
     source: str
@@ -142,6 +148,7 @@ class ObsProvenance:
     fetched_at: str
     is_stub: bool = False
     stub_reason: str = ""
+    attribution: str = ""
 
     def __post_init__(self) -> None:
         for name in ("source", "product", "uri", "fetched_at"):
@@ -159,11 +166,14 @@ class ObsProvenance:
 
     def record(self) -> dict[str, object]:
         """The JSON form a receipt carries."""
-        return {
+        record: dict[str, object] = {
             "source": self.source, "product": self.product, "uri": self.uri,
             "sha256": self.sha256.lower(), "fetched_at": self.fetched_at,
             "is_stub": bool(self.is_stub), "stub_reason": self.stub_reason,
         }
+        if str(self.attribution).strip():
+            record["attribution"] = str(self.attribution)
+        return record
 
 
 @dataclass(frozen=True, eq=False)
