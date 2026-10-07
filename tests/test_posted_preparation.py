@@ -633,7 +633,7 @@ def _as_posted_tree(tmp_path, *, leads=(0, 1, 2), seal_manifest=None,
         frames.release(index - 1)
     manifest = seal_manifest if seal_manifest is not None else _manifest(leads)
     text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
-    (writer.root / "source-input-manifest.json").write_text(text)
+    (writer.root / "source-input-manifest.json").write_bytes(text.encode("utf-8"))
     digest = hashlib.sha256(text.encode()).hexdigest()
     writer.write_posted_leads(
         markers if markers is not None else
@@ -967,7 +967,7 @@ class _ReplayedFetch:
         (self.out / name).write_bytes(payload)
         digest = hashlib.sha256(payload).hexdigest()
         self.published.append((lead, name, digest))
-        with self.series.open("a", encoding="utf-8") as series:
+        with self.series.open("a", encoding="utf-8", newline="\n") as series:
             series.write(f"{lead}\t{name}\t{81 if lead == 0 else 96}\n")
         _write(self.out / fetch.FETCH_MANIFEST_NAME, {
             "schema": fetch.FETCH_MANIFEST_SCHEMA, "source": "gfs",

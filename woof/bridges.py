@@ -22,9 +22,14 @@ resolution mechanism shared by ingest (:func:`woof.ingest.grib
    are version-matched by construction while a fetched bundle is only
    as fresh as the last ``woof fetch-bridges``;
 5. the user-level default directory :func:`default_bridge_dir`
-   (``~/.woof/bridges``), which ``woof fetch-bridges``
-   (:mod:`woof.bridge_assets`) stages the release's prebuilt bundle
-   into, and where a wheel user otherwise copies their own build once.
+   (``~/.woof/bridges/<release>-<bundle digest>`` for a pinned
+   install, the flat ``~/.woof/bridges`` otherwise), which ``woof
+   fetch-bridges`` (:mod:`woof.bridge_assets`) stages the release's
+   prebuilt bundle into, and where a wheel user otherwise copies their
+   own build once;
+6. for a pinned install only, the flat legacy ``~/.woof/bridges``
+   (:func:`legacy_bridge_candidates`), read when its bytes are this
+   release's pin and never written.
 
 The ``py3-none-any`` fallback wheel -- the one pip resolves on a
 platform with no published bundle -- carries no rung 4, and every
@@ -102,6 +107,11 @@ CRATE_RELATIVE = "tools/grib1_bridge"
 #: line naming the argument vector), never a version number, which a
 #: rebuild bumps whether or not anything changed.
 BRIDGE_ABI_MARKERS = {
+    "rw_verify": b"gpuwm.verify-visuals.request.v1",
+    "rw_compare": b"gpuwm.reference-input.v1",
+    "rw_simradar": (b"rw_simradar --request REQUEST.json "
+                   b"schema=simulated-radar.request/v1 manifest=simulated-radar.manifest/v1 "
+                   b"volume_paths=v1 scene_shapes=v1"),
     "rw_netcdf": b"dtype\t<f8\t|S1\twater_layer_conversion\tsource_soil_recovery",
     "gdt101_remap": b"arwen.gdt101-regional-remap.v1",
     # The reader's newest behaviour, not its record schema: two fixes
@@ -155,9 +165,10 @@ BRIDGE_ABI_MARKERS = {
     # surface-nearest search.  A build predating them loads cleanly,
     # answers the ABI probe with 1 and maps every other field, and then
     # cannot map the land surface or assemble a water temperature at all.
-    # Spelled to match woof.ingest.cpu_backend.MASKED_NEAREST_ENTRY; a
-    # test binds the two.
-    "gpuwm_preprocess_cpu": b"gpuwm_masked_nearest_f32",
+    # The host Noah cold start also uses this library. A build without
+    # its soil-liquid-water entry cannot prepare a frozen soil column.
+    # Spelled to match woof.noah_init_bridge.NOAH_SH2O_ENTRY.
+    "gpuwm_preprocess_cpu": b"gpuwm_noah_initialize_sh2o_f64",
     # The NetCDF writer cdylib behind the DEFAULT wrfout engine AND the
     # DEFAULT wrfinput/wrfbdy export.  A library, so the literal is an
     # exported symbol name, and it names the newest capability a default
@@ -204,6 +215,18 @@ BRIDGE_ABI_MARKERS = {
     # -- whose tie-breaking is traversal order -- while reporting the
     # Rust engine as present.
     "obs_regrid": b"gpuwm_obsregrid_build_plan",
+    "obs_score": b"gpuwm_obsscore_masked_fss",
+    "rw_mpas_geometry": b"rw_mpas_geometry --protocol hex-geometry-v1",
+    "rw_mpas_hostprep": b"rw_mpas_hostprep --protocol hex-hostprep-v1",
+    # The isobaric-height reader cdylib (tools/rustwx/crates/rw-isobaric),
+    # behind every Python consumer of a height on a pressure surface (the
+    # vortex tracker on a host state, the GNSS-RO operator, the
+    # verification maps, the flagship products).  A library, so the
+    # literal is an exported symbol name: a build that answers the version
+    # probe but predates the height reader cannot read one surface.
+    # Spelled to match woof.isobaric_bridge.ABI_MARKER; a test binds the
+    # two.
+    "rw_isobaric": b"gpuwm_isobaric_heights",
     # The MPAS mesh generator behind `woof mesh`.  The marker is its
     # ARGUMENT VECTOR, spelled out, because that is the literal which
     # changes exactly when the request contract changes: a binary built
@@ -858,10 +881,119 @@ class quiet_loader_errors:  # noqa: N801 - a context manager, used as a verb
         return False
 
 
-def default_bridge_dir() -> Path:
-    """User-level directory for prebuilt bridges: ``~/.woof/bridges``."""
+def legacy_bridge_dir() -> Path:
+    """The shared, unversioned ``~/.woof/bridges``.
+
+    Every release before 2.8.6 staged its bundle flat into this one
+    directory, and a source checkout (whose pins declare no release) or
+    a platform with no published bundle still stages there.  It is
+    also the PARENT of every versioned staging directory.
+
+    It is shared by every woof install under this home, which is the
+    defect the versioned layout closes: on 2026-10-05 a PyPI 2.8.0 venv
+    on a development machine found the flat ``rw_netcdf`` stamped by a local build
+    (``fc5b34e26``), auto-fetched 2.8.0's bundle and overwrote all 31
+    files, breaking the other install that relied on them.  A pinned
+    install now only READS a file here, and only when its bytes are the
+    ones that install's own release pinned; it never writes here.
+    """
 
     return Path.home() / ".woof" / "bridges"
+
+
+#: Characters allowed in a versioned staging directory name.  A release
+#: name is a git tag, which may carry ``/``; anything outside this set
+#: becomes ``_`` so the name is always one path component.
+_TAG_SAFE = re.compile(r"[^A-Za-z0-9._+-]")
+
+
+def staged_version_tag() -> str | None:
+    """This install's versioned staging directory name, or None.
+
+    ``<release>-<first 12 hex of this platform's bundle SHA-256>``: the
+    release names it for a reader, the bundle digest makes it exact, so
+    two installs that both call themselves the same release but carry
+    different pins (a local re-cut, a private mirror) still never share
+    a directory.  None when this install carries no pins for this
+    platform -- a source checkout, or a platform with no bundle -- and
+    then there is nothing to fetch and nothing to version: such an
+    install keeps staging into :func:`legacy_bridge_dir` exactly as
+    before.
+    """
+
+    try:
+        from woof import bridge_assets
+
+        pins = bridge_assets.load_pins()
+        bundle = pins.bundle_for(bridge_assets.host_platform())
+    except Exception:                                # noqa: BLE001
+        return None
+    if bundle is None or not pins.release:
+        return None
+    release = _TAG_SAFE.sub("_", str(pins.release)).strip(".") or "release"
+    return f"{release}-{bundle.sha256[:12]}"
+
+
+def default_bridge_dir() -> Path:
+    """THIS install's staging directory for prebuilt bridges.
+
+    ``~/.woof/bridges/<release>-<bundle digest>`` for an install that
+    carries release pins for this platform: ``woof fetch-bridges`` and
+    the automatic refresh write there and nowhere else, so two engine
+    versions on one machine (two venvs, a user and a lane, an upgrade
+    side by side) each own their own directory and can never replace
+    each other's files.  An install with no pins keeps the flat
+    :func:`legacy_bridge_dir`.
+    """
+
+    tag = staged_version_tag()
+    root = legacy_bridge_dir()
+    return root if tag is None else root / tag
+
+
+def staging_location_note() -> str:
+    """Where this engine stages and reads bridges, in one sentence.
+
+    For ``woof doctor``: the resolved directory, not the
+    ``~/.woof/bridges`` spelling, because on a machine with two engine
+    versions the question a reader is asking is WHICH directory this one
+    uses.
+    """
+
+    own = default_bridge_dir()
+    if staged_version_tag() is None:
+        return (f"this engine stages bridges in {own} (the flat layout: "
+                "this install carries no release pins to version it by)")
+    return (f"this engine stages bridges in {own}, its own versioned "
+            f"directory; the shared flat {legacy_bridge_dir()} is read only "
+            "for a file whose bytes are this release's pin, and never "
+            "written")
+
+
+def legacy_bridge_candidates(filename: str) -> tuple[Path, ...]:
+    """The flat-layout rung that follows :func:`default_bridge_dir`.
+
+    Empty when this install's staging directory IS the flat one (no
+    pins).  Otherwise the flat copy of ``filename``, which every ladder
+    lists right after the versioned one so an estate staged by an older
+    release keeps working without a download -- but only while its bytes
+    are this release's pin: :func:`require_release_pin` judges it, and a
+    mismatch is fetched into the versioned directory instead, leaving
+    the flat file exactly as it was.
+    """
+
+    # Decided by the pins, not only by comparing directories: an install
+    # with no pins never versioned anything, so there is no older layout
+    # for it to fall back to and its staging directory IS the flat one.
+    if staged_version_tag() is None:
+        return ()
+    root = legacy_bridge_dir()
+    try:
+        if default_bridge_dir().resolve() == root.resolve():
+            return ()
+    except (OSError, ValueError):
+        return ()
+    return (root / filename,)
 
 
 #: Directory INSIDE the package that a platform wheel stages its
@@ -1027,7 +1159,7 @@ def _stale_refusal(status, *, refresh_note: str | None = None) -> str:
         lines.append(refresh_note)
     lines.append("remedy:")
     lines.append("  woof fetch-bridges")
-    lines.append(f"  # re-stages {status.release}'s bundle over "
+    lines.append(f"  # stages {status.release}'s bundle into its own "
                  f"{default_bridge_dir()}, verifying every artifact's")
     lines.append("  # size and SHA-256 against the pins packaged in this "
                  "install")
@@ -1059,7 +1191,8 @@ def _refresh_staged_estate(status) -> str | None:
 
     warn(f"the staged {status.pin.artifact} is not {status.release}'s "
          f"binary ({status.provenance()}); fetching {status.release}'s "
-         "bridge bundle before this run continues")
+         f"bridge bundle into {default_bridge_dir()} before this run "
+         f"continues (the file at {status.path} is left as it is)")
     try:
         bridge_assets.refresh_staged_bundle(
             progress=lambda message: print(message, file=sys.stderr))
@@ -1081,9 +1214,10 @@ def _refresh_staged_estate(status) -> str | None:
 def require_release_pin(path: Path) -> Path:
     """``path`` is bytes this release published, or it is not used.
 
-    Asked of ONE rung: :func:`default_bridge_dir`.  That is the
-    directory ``woof fetch-bridges`` writes and the only one a wheel
-    upgrade leaves behind -- ``pip install -U recast-woof`` replaces the
+    Asked of the staged rungs only: :func:`default_bridge_dir` and the
+    shared :func:`legacy_bridge_dir` beneath it.  Those are the
+    directories ``woof fetch-bridges`` writes (today, or under an older
+    release) and the only ones a wheel upgrade leaves behind -- ``pip install -U recast-woof`` replaces the
     Python half and never looks at it -- so it is where new Python ends
     up driving an older release's binaries.  Everything above it on the
     ladder is exempt by construction and stays exempt: an environment
@@ -1099,17 +1233,18 @@ def require_release_pin(path: Path) -> Path:
     what they do with it -- doctor reports, a door acts -- so they
     cannot disagree again.
 
-    Default is to fix it: re-fetch this release's bundle, verified by
-    size and SHA-256 exactly as the command does, and carry on with the
-    new bytes.  Offline, that becomes the refusal.
+    Default is to fix it: fetch this release's bundle into this
+    release's own versioned directory, verified by size and SHA-256
+    exactly as the command does, and carry on with the new bytes --
+    returning that path, which is not ``path`` when the stale file sat
+    in the shared flat layout.  The stale file itself is never
+    replaced: it may be exactly what another install on this machine
+    runs.  Offline, that becomes the refusal.
     """
 
     if _INSPECTION_ONLY:
         return path
-    try:
-        if not path.resolve().is_relative_to(default_bridge_dir().resolve()):
-            return path
-    except (OSError, ValueError):
+    if not _staged_rung(path):
         return path
     from woof import bridge_assets
 
@@ -1127,17 +1262,40 @@ def require_release_pin(path: Path) -> Path:
                  f"{status.describe()}")
         return path
     if policy == "refresh":
+        # The refresh writes THIS install's directory and nothing else.
+        # A stale file found anywhere else under the shared root -- the
+        # flat legacy layout, or (never listed by a ladder, but judged
+        # the same if handed here) another release's directory -- is
+        # left byte-for-byte as it was, and the door gets this release's
+        # copy of the same filename instead.
+        own = default_bridge_dir() / path.name
         failure = _refresh_staged_estate(status)
         if failure is None:
-            after = bridge_assets.staged_pin_status(path)
-            if after is None or after.matches:
-                return path
+            after = bridge_assets.staged_pin_status(own)
+            if after is not None and after.matches:
+                return own
             raise StaleBridgeError(_stale_refusal(
-                after, refresh_note=(
+                after or status, refresh_note=(
                     "the automatic refresh ran and this artifact still "
                     "does not match its pin.")))
         raise StaleBridgeError(_stale_refusal(status, refresh_note=failure))
     raise StaleBridgeError(_stale_refusal(status))
+
+
+def _staged_rung(path: Path) -> bool:
+    """Is ``path`` in a directory a fetch stages into (own or shared)?
+
+    This install's own :func:`default_bridge_dir`, or anywhere under the
+    shared :func:`legacy_bridge_dir` root.  Never raises.
+    """
+
+    try:
+        resolved = path.resolve()
+        return any(resolved.is_relative_to(directory.resolve())
+                   for directory in (default_bridge_dir(),
+                                     legacy_bridge_dir()))
+    except (OSError, ValueError):
+        return False
 
 
 def accept_resolved(path: Path, *, executable: bool = True) -> Path:
@@ -1638,6 +1796,7 @@ def artifact_candidates(env_var: str, filename: str) -> tuple[Path, ...]:
         root / "libexec" / "bridges" / filename,
         packaged_bridge_dir() / filename,
         default_bridge_dir() / filename,
+        *legacy_bridge_candidates(filename),
     ))
     return tuple(candidates)
 
@@ -1688,6 +1847,31 @@ SOURCE_DECODERS = {
     "hrrr": "hrrr_grib2_bridge",
     "gfs": "gfs_grib2_bridge",
     "era5": "grib1_bridge",
+}
+
+#: Decoder executable -> the optional MODES it implements beyond its base
+#: contract.  A mode is a command a newer build has and an older one does
+#: not, so a decoder that speaks this release's base contract
+#: (:data:`BRIDGE_ABI_MARKERS`) can still be too old for the mode a caller
+#: needs.  Each row is the capability, declared: ``marker`` is the literal
+#: the mode compiles into the binary (checked statically, exactly like the
+#: base marker), ``command`` is what the decoder calls the mode,
+#: ``required_by`` is the option that needs it and ``label`` is how a
+#: refusal names it.  Keyed by executable, never by source, so a decoder
+#: that gains a mode is one row here and no branch in
+#: :func:`resolve_source_decoder`.
+DECODER_MODE_CONTRACTS = {
+    "hrrr_grib2_bridge": {
+        # Append-only lead admission: the decoder takes each lead as it
+        # posts instead of a complete window.
+        "as_posted": {
+            "marker": (b"--series-workers-posted WORKERS SERIES_TSV "
+                       b"OUTPUT_DIR SIGNAL_DIR ADMIT_DIR"),
+            "command": "--series-workers-posted",
+            "required_by": "--as-posted",
+            "label": "posted-mode",
+        },
+    },
 }
 
 
@@ -1862,7 +2046,7 @@ def cargo_missing_refusal(artifact: str, crate_relative: str) -> str:
         f"  {cargo_activation_command()}")
 
 
-def resolve_source_decoder(source: str) -> Path:
+def resolve_source_decoder(source: str, *, mode: str | None = None) -> Path:
     """THE decoder ``source``'s preparation will launch, or a refusal.
 
     One function, called by the preparation wrapper AND by ``woof
@@ -1895,6 +2079,12 @@ def resolve_source_decoder(source: str) -> Path:
     sources.  The gate lives INSIDE the resolver now -- one question,
     one answer, no second call for a caller to forget.
 
+    ``mode`` additionally requires a capability the decoder declares in
+    :data:`DECODER_MODE_CONTRACTS` (``"as_posted"`` is append-only lead
+    admission). An older decoder remains valid for its complete window
+    mode but cannot be returned for a command it does not implement, and
+    a decoder that declares no such mode is refused by name.
+
     Nothing here runs cargo, so it is safe to call from a report.
     """
 
@@ -1903,9 +2093,25 @@ def resolve_source_decoder(source: str) -> Path:
             f"no decoder is declared for source {source!r}; known: "
             f"{sorted(SOURCE_DECODERS)}")
     name = SOURCE_DECODERS[source]
+    declared = (None if mode is None
+                else DECODER_MODE_CONTRACTS.get(name, {}).get(mode))
+    if mode is not None and declared is None:
+        raise ValueError(f"no decoder mode contract is declared for {source!r} {mode!r}")
     found = find_bridge(name)
     if found is not None:
         ok, evidence = bridge_abi_matches(name, found)
+        if ok and declared is not None:
+            try:
+                ok = declared["marker"] in Path(found).read_bytes()
+            except OSError as error:
+                ok, evidence = False, (
+                    f"cannot read its {declared['label']} contract: {error}")
+            else:
+                if not ok:
+                    evidence = (
+                        f"does not implement {declared['command']}, which "
+                        f"{declared['required_by']} requires; "
+                        "rebuild it from a matching checkout")
         if ok:
             return found
         raise DecoderContractError(
@@ -2168,7 +2374,8 @@ def decode_failure_message(subject: str, stderr: str) -> str:
 
 __all__ = [
     "decode_failure_message",
-    "SOURCE_DECODERS", "resolve_source_decoder", "DecoderContractError",
+    "SOURCE_DECODERS", "DECODER_MODE_CONTRACTS", "resolve_source_decoder",
+    "DecoderContractError",
     "launchable", "native_executable_format", "quiet_loader_errors",
     "BRIDGE_ABI_MARKERS", "bridge_abi_matches",
     "CheckoutBuildStatus", "StaleCheckoutBuildError", "checkout_build_status",
@@ -2182,7 +2389,8 @@ __all__ = [
     "cargo_missing_refusal", "classify_cargo_failure",
     "build_from_clone_hint", "cargo_activation_command",
     "cargo_executable", "cargo_is_installed", "crate_dir",
-    "default_bridge_dir",
+    "default_bridge_dir", "legacy_bridge_dir", "legacy_bridge_candidates",
+    "staged_version_tag", "staging_location_note",
     "executable_name", "find_artifact", "find_bridge",
     "StaleBridgeError", "accept_resolved", "inspection_only",
     "require_release_pin",

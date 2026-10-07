@@ -87,7 +87,9 @@ ROUTE_TABLE_SHA256 = (
     # Moved by A173: every row's cadences list is retired (it refused
     # spacings the publisher posts and the decode takes, naming no
     # breakage), and cadence_note states the grammar that replaces it.
-    "2db19d826e1c650e55d151a019c22d66329db8d66d10c3755ff4874592aa98b1"
+    # Native-level atmosphere and analysis-soil routes are table entries,
+    # merged with the ecmwf-ens and rrfs-ens input-ensemble rows.
+    "6e7155e6461fa9c9093d9c564cef498dc003849cc3a79f99c8aa40d58bd0b9b2"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own
@@ -176,6 +178,10 @@ class FileRow:
     #: proxy served with HTTP 200, and it is declared rather than guessed
     #: from a suffix because ``gec00.t00z.pgrb2a.0p50.f000`` has none.
     magic: str
+    #: A JSON-lines index selecting a member from a multi-member object.
+    #: The byte ranges are copied unchanged, then verified by Rust inventory.
+    member_index: Mapping[str, object] | None = None
+    index_suffix_replaces: str | None = None
 
 
 @dataclass(frozen=True)
@@ -332,6 +338,10 @@ def _file_row(raw: Mapping[str, object]) -> FileRow:
         idx_sidecar=(str(raw["idx_sidecar"]) if raw.get("idx_sidecar")
                      else None),
         magic=str(raw.get("magic", "GRIB")),
+        member_index=(MappingProxyType(dict(raw["member_index"]))
+                      if raw.get("member_index") else None),
+        index_suffix_replaces=(str(raw["index_suffix_replaces"])
+                               if raw.get("index_suffix_replaces") else None),
     )
 
 
@@ -755,8 +765,10 @@ def _build_routes() -> Mapping[str, Route]:
                 raise ValueError(
                     f"{ROUTE_TABLE_NAME}: route {route.source_id} file "
                     f"{row.role} spells unknown token(s) {list(bad)}")
-        supplement = route.prep.get("supplement")
-        if supplement:
+        supplement_specs = tuple(route.prep.get("extra_supplements") or ())
+        if route.prep.get("supplement"):
+            supplement_specs = (route.prep["supplement"], *supplement_specs)
+        for supplement in supplement_specs:
             origin = str(supplement.get("from", ""))
             roles = {row.role for row in files}
             if not (origin in SUPPLEMENT_ORIGINS
@@ -977,6 +989,10 @@ def source_root_layout(source: str) -> Mapping[str, object] | None:
     rows state for the folder a download writes.
     """
 
+    from woof.cf_archive_fetch import sources, row
+    canonical = _canonical(source)
+    if canonical in sources() and row(canonical).get("source_root") is not None:
+        return _source_root_row(canonical,row(canonical)["source_root"])
     return (acquisition_refusal(source) or {}).get("source_root")
 
 
@@ -1061,8 +1077,8 @@ def sniff_format(path: Path) -> str | None:
 
 def all_fetchable_sources() -> tuple[str, ...]:
     """Every ``--source`` the fetch front door accepts, sorted."""
-
-    return tuple(sorted(set(LEGACY_ROUTE_SOURCES) | set(_ROUTES)))
+    from woof.cf_archive_fetch import sources
+    return tuple(sorted(set(LEGACY_ROUTE_SOURCES) | set(_ROUTES) | set(sources())))
 
 
 def _canonical(source: str) -> str:
@@ -1554,7 +1570,7 @@ def resolve_member(route: Route, member: str | None) -> tuple[str, str]:
         listed = tuple(known)
         raise ValueError(
             f"--member {name}: --source {route.source_id} publishes "
-            f"{listed[0]} (the control) and {listed[1]}..{listed[-1]} -- "
+            f"{listed[0]}..{listed[-1]} -- "
             f"{len(listed)} members in all.")
     return name, known[name]
 
@@ -1583,6 +1599,9 @@ class PlannedObject:
     lead: int | None
     idx_url: str | None
     key: str = ""
+    member_index: Mapping[str, object] | None = None
+    member_ordinal: int | None = None
+    index_key: str | None = None
 
     def urls(self, ladder: Sequence[Endpoint]) -> tuple[str, ...]:
         if not self.key:
@@ -1644,6 +1663,18 @@ class FetchPlan:
     @property
     def source_id(self) -> str:
         return self.route.source_id
+
+    @property
+    def extra_supplement_files(self):
+        bindings = []
+        for spec in self.route.prep.get("extra_supplements") or ():
+            origin = str(spec["from"])
+            if not origin.startswith("role:"):
+                raise ValueError("additional supplements must name a declared file role")
+            file_role = origin.split(":", 1)[1]
+            bindings.extend((str(spec["role"]), Path(obj.relpath))
+                            for obj in self.objects if obj.role == file_role)
+        return tuple(bindings)
 
 
 def _cycle_context(cycle: datetime) -> dict[str, str]:
@@ -1781,6 +1812,15 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
     ladder = endpoint_ladder(route, cycle, host=host, now=now)
     chosen = ladder[0]
     member_name, member_token = resolve_member(route, member)
+    member_ordinal = None
+    if any(row.member_index is not None for row in files):
+        from woof.member_grammar import load_member_grammar
+        from woof.source_authorities import packaged_member_grammar
+        grammar_id = source_adapters.get_source_adapter(route.source_id).member_set
+        if grammar_id is None:
+            raise ValueError("Indexed member fetch needs a byte-verification member grammar")
+        member_ordinal = load_member_grammar(
+            packaged_member_grammar(grammar_id)).member(member_name).ordinal
 
     context = _cycle_context(cycle)
     context["MEMBER"] = member_token
@@ -1807,11 +1847,20 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
                 continue
             seen.add(key)
             relpath = _relpath(route, key)
+            if row.member_index is not None:
+                relpath = f"members/{member_name}/{relpath}"
+            index_base = key
+            if row.index_suffix_replaces:
+                if not key.endswith(row.index_suffix_replaces):
+                    raise ValueError(f"Index suffix does not match object key {key}")
+                index_base = key[:-len(row.index_suffix_replaces)]
+            index_key = f"{index_base}{row.idx_sidecar}" if row.idx_sidecar else None
             objects.append(PlannedObject(
                 name=relpath, url=chosen.url(key), relpath=relpath,
                 role=row.role, lead=lead, key=key,
-                idx_url=(chosen.url(f"{key}{row.idx_sidecar}")
-                         if row.idx_sidecar else None)))
+                idx_url=chosen.url(index_key) if index_key else None,
+                member_index=row.member_index, member_ordinal=member_ordinal,
+                index_key=index_key))
             by_role.setdefault(row.role, []).append(
                 (lead if lead is not None else -1, relpath))
 
@@ -2113,6 +2162,12 @@ def _download_along_ladder(plan: FetchPlan, obj: PlannedObject, dest: Path, *,
 
     def transfer(endpoint: Endpoint) -> dict:
         url = endpoint.url(obj.key) if obj.key else obj.url
+        if obj.member_index is not None:
+            from woof.member_index import download_indexed_member
+            return download_indexed_member(
+                url, endpoint.url(obj.index_key), dest,
+                declaration=obj.member_index, member_ordinal=obj.member_ordinal,
+                source=plan.source_id, member=plan.member, opener=opener)
         return fetch(url, dest, magic=magic, opener=opener)
 
     endpoint, entry = fetch_endpoints.ask_along_ladder(
@@ -2796,6 +2851,8 @@ def write_handoff(plan: FetchPlan, out: Path, *,
         binding = (f"{plan.supplement_role}={(out / path).resolve()}"
                    if plan.supplement_role else str((out / path).resolve()))
         tokens += ["--supplement", binding]
+    for role, path in plan.extra_supplement_files:
+        tokens += ["--supplement", f"{role}={(out / path).resolve()}"]
     unfetched: list[DonorRequest] = []
     for donor in plan.donors:
         supplied = (donor_files or {}).get(donor.role)
@@ -2961,6 +3018,9 @@ def prepares_through_packaged_composition(source: str) -> bool:
 def publishes_prep_handoff(source: str) -> bool:
     """Whether the implemented acquisition path publishes bound prep arguments."""
     source = canonical_source(source)
+    from woof.cf_archive_fetch import sources
+    if source in sources():
+        return True
     if source in route_ids():
         return True
     # The container writer emits a mapped handoff when its composition

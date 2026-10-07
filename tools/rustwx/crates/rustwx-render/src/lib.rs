@@ -18,6 +18,7 @@ mod panel;
 mod presentation;
 mod projected_map;
 mod projection;
+pub mod radar_tables;
 mod rasterize;
 mod render;
 mod request;
@@ -92,6 +93,10 @@ pub use weather::{
 };
 
 pub use crate::color::Rgba;
+pub use crate::radar_tables::{
+    RADAR_COLORS_ENV, RadarColorSet, RadarTable, active_radar_color_set,
+    install_radar_color_set, radar_color_set_from_env,
+};
 pub use crate::colorbar::{legend_color_at_rel, legend_tick_rel};
 use crate::colormap::Extend;
 pub use crate::colormap::{
@@ -109,6 +114,10 @@ use crate::render::{
     trim_vertical_canvas_whitespace,
 };
 pub use crate::text::{format_tick, format_tick_labels};
+// The text primitives a SHEET of finished panels writes its shared header
+// with (`rw_compare`): the same font owner and the same pixel sizes the
+// panels' own titles use, so a header band does not bring a second face.
+pub use crate::text::{draw_text, draw_text_bold, text_width, text_width_bold};
 pub use crate::theme::{
     FooterTheme, MeshTheme, PresentationTheme, RenderTheme, RenderThemeFile, THEME_ENV,
     active_theme, install_theme,

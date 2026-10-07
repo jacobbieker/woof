@@ -30,7 +30,11 @@
 * whitespace=cr-at-eol
 
 woof/data/** -text
-tools/grib1_bridge/vendor/** -text
+# Vendored crate sources keep their upstream bytes, trailing blanks included:
+# Cargo verifies them against .cargo-checksum.json, and the public export's
+# `git diff --check` would refuse the 2.8.5 export on the trailing blanks in
+# cpufeatures, digest, rayon-core and typenum (as tools/rustwx/vendor below).
+tools/grib1_bridge/vendor/** -text -whitespace
 patches/** -text
 *.sh text eol=lf
 *.ps1 text eol=lf
@@ -43,7 +47,10 @@ configs/rw-wps-era5-netcdf.mapping.json text eol=lf
 configs/rw-wps-era5-netcdf-terrain.composition.json text eol=lf
 woof/authorities/*.json text eol=lf
 woof/physics_registry_v2.json text eol=lf
-tools/rustwx/vendor/** -text
+# Vendored upstream sources keep their own bytes, trailing spaces included: the
+# BowEcho data-source test fixtures reproduce NHC/JTWC bulletins verbatim, and the
+# 2.8.4 cut's export whitespace check refused them (2026-10-03).
+tools/rustwx/vendor/** -text -whitespace
 tools/rustwx/crates/** -text
 tools/rustwx/assets/** -text
 tests/fixtures/**/*.grib2 -text
@@ -84,7 +91,7 @@ tools/rustwx/patches/rdps-f000-components.patch -whitespace
 docs/public/receipts/obsbattery/*.tsv -whitespace
 # Bytes kept as their upstream or a recorded digest has them. The public export's
 # `git diff --check` refused their trailing blanks at the 2.8.1 cut battery:
-# WRF v4.7.1's urban tables (woof/data/urban/oracle/bep/oracle-sha256sums.txt pins both),
+# WRF v4.7.1's urban tables (tests/data/oracles/urban/bep/oracle-sha256sums.txt pins both),
 # the generated glibc trig header (tools/glibc_trig_flt32_proof/final-hashes.txt pins it),
 # the WRF driver excerpts the urban oracle compiles, and the UW PBL oracle's retained
 # glibc sources (libm64/upstream-sha256.json pins them) and captured disassembly.
@@ -99,8 +106,26 @@ tools/uwpbl_wrf471_oracle/libm64/upstream/*.c -whitespace
 # SCM syntax highlighting & preventing 3-way merges
 pixi.lock merge=binary linguist-language=YAML linguist-generated=true -diff
 
+# Byte-unmodified WRF lake oracle sources retain upstream trailing blanks.
+# Their SHA-256 values are bound in woof/data/lake/oracle/manifest.json.
+tools/lake_wrf461_oracle/upstream/** -whitespace
+
 # YSU's topo_wind arm (lane/282-terrain-drag), byte-pinned by
 # tests/test_kernel_source_freeze_per_module.py PINNED_HEADERS and graded with
 # ysu.cu by tests/test_terrain_drag_wrf471_parity.py: the 2.8.2 cut battery's
 # `git diff --check` refused its trailing blank line, which the pins record.
 woof/core/kernels/ysu_topo.cuh -whitespace
+
+# The operational HRRR namelists kept verbatim as importer fixtures: their
+# trailing blanks are the published files' own bytes and several are pinned
+# by hash, so the 2.8.6 cut's export whitespace check must not ask for them
+# to be stripped (2026-10-05).
+tests/data/albsol_config/hrrr_wrf.nl -whitespace
+tests/data/hrrr_v4121_namelists/hrrr_namelist.wps -whitespace
+tests/data/hrrr_v4121_namelists/hrrr_wrf.nl -whitespace
+tests/data/hrrr_wrf_v4_1_21.nl -whitespace
+tests/fixtures/namelist/hrrr_wrf-v4.1.21.nl -whitespace
+tests/fixtures/source_requests/hrrr_namelist.wps.c18 -whitespace
+tests/fixtures/source_requests/hrrr_wrf.nl.c18c -whitespace
+# A captured pytest log; excluded from the release (RELEASE-EXCLUDE.txt).
+tools/albsol_score/receipts/tests.log -whitespace

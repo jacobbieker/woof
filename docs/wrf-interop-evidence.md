@@ -3,8 +3,8 @@
 Audited 2026-07-29 against the rw-wps authorities tree
 (`codex/rwwps-gfs-ra0-20cr-authorities` @ `01ac4e78`, fully merged into
 this line) and the retained campaign evidence store.  This page states
-exactly what is proven, what is packaged-but-unexecuted, and where the
-receipts live.
+what the retained receipts report, what is packaged but unexecuted,
+and which evidence an outside reader cannot yet inspect.
 
 ## The claim, framed correctly
 
@@ -17,7 +17,11 @@ chain and emits `wrfinput_d0N` + `wrfbdy_d01` directly
 **unchanged stock WRF v4.6.1 `wrf.exe` opened rw-wps-produced
 `wrfinput`/`wrfbdy` bytes and integrated the model.**
 
-## What is PROVEN (execution receipts, hash-bound)
+## What the retained execution receipts report
+
+The receipts are bound to hashes, but their archives are not published
+with this repository. An outside reader cannot independently check
+the execution claims below from the published files alone.
 
 Roughly eighteen independent receipts (schemas
 `gpuwm-hrrr-stock-wrf-acceptance-v1`,
@@ -43,16 +47,12 @@ files, `wrf: SUCCESS COMPLETE WRF`, finite `wrfout` readback) spanning:
   `prelaunch.sha256` (`wrfinput_d01 = d7baa0e3...`) matches the
   producer's `proof.json` export hash exactly.
 
-Receipt locations: the receipts are **not inside this repository**.
-They are retained on the campaign evidence store beside the authorities
-worktree (`...\2026-07-18\files-mentioned-by-the-user-you\outputs\`:
-`node1-wrf-direct-f00f12-v2\`, `node1-live-evidence\`,
-`co-orchestrator-handoff-20260720\node1-preprocessing\receipts\`,
-`stock-wrf-real-gfs-*-gate-20260721\`,
-`native-wrf-distribution-6725d3c-v1\`).  `PROVENANCE.md` and
+Receipt locations: the archives are retained in a local evidence
+store and are **not published with this repository**.
+`PROVENANCE.md` and
 [native-wrf-direct-export.md](native-wrf-direct-export.md) quote the
-same hashes.  If this feature ships beyond this machine, the receipt
-archives must ship with it.
+hashes, but hashes alone do not let an outside reader inspect the
+runs. Publishing the receipt archives remains an evidence gap.
 
 ## The accurate boundaries (must accompany any claim)
 
@@ -60,9 +60,13 @@ archives must ship with it.
    seconds**, not forecast-skill runs and not WPS/METGRID numerical
    parity (masked surface/soil interpolation deliberately differs;
    `PROVENANCE.md`).  The longest proven integration is 60 s.
-2. Acceptance requires three receipt-bound namelist deltas
-   (`ra_lw_physics 0->1`, `use_theta_m 0->1`, stock-only `ghg_input=0`;
-   [native-wrf-direct-support-matrix.md](native-wrf-direct-support-matrix.md)).
+2. Acceptance requires two receipt-bound namelist deltas
+   (`ra_lw_physics 0->1`, stock-only `ghg_input=0`;
+   [native-wrf-direct-support-matrix.md](native-wrf-direct-support-matrix.md))
+   and `use_theta_m = 0` on both sides.  The receipts above recorded a
+   third, `use_theta_m 0->1`, on exports that declared `USE_THETA_M = 1`
+   over dry-coupled `T_B*` rows; since 2.8.5 the export is dry theta
+   throughout and declares it.
 3. Certification is confined to the WSM6+YSU+MM5-91+Noah 49-level
    slice, plus one narrow Thompson/Morrison 10-second gate on the
    hash-bound current-GFS d01-d04 export.

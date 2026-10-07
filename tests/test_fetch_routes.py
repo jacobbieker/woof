@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 import json
+import os
 import re
 import shlex
 
@@ -38,6 +39,8 @@ def test_every_runnable_source_either_routes_or_refuses_by_name():
     handled = set(fetch_routes.route_ids()) | set(fetch_routes.refusal_ids())
     # gfs/hrrr/era5 keep their own hand-written routes in woof.fetch.
     handled |= set(fetch_routes.LEGACY_ROUTE_SOURCES)
+    from woof.cf_archive_fetch import sources
+    handled |= set(sources())
     runnable = {row.source_id for row in source_adapters.source_adapters()
                 if row.runnable}
     assert runnable - handled == set()
@@ -437,7 +440,7 @@ def test_only_producers_with_step0_statics_declare_them():
         if any(row.leads == "step0"
                for row in fetch_routes.route_for(source).files))
     assert step0_supplement == ["aifs"]
-    assert step0_rows == ["gem-gdps"]
+    assert step0_rows == ["gem-gdps", "hrrr-native", "hrrr-prs"]
 
 
 def test_icon_eu_expands_125_field_objects_a_lead_plus_two_invariants():
@@ -632,7 +635,6 @@ def test_an_area_crop_refuses_naming_where_the_crop_actually_happens():
 
 @pytest.mark.parametrize("source_id,fragment,door", [
     ("20crv3", "every-member", "--source-root DIR --author-only"),
-    ("20crv3-cf", "no cycle", "--source-root DIR --experiment-config"),
     # The generic adapter has no folder layout to bind: its door is the
     # mapping and composition the caller brings with the files.
     ("mapped", "generic declarative adapter", "--mapping MAPPING.json"),
@@ -954,7 +956,10 @@ def test_every_route_prints_the_whole_prep_line_it_published(source,
     commands = [line.strip() for line in lines
                 if line.strip().startswith("woof prep ")]
     assert len(commands) == 1, lines
-    assert shlex.split(commands[0]) == ["woof", "prep", *document["argv"]]
+    # The printed line is the platform's own quoting: on Windows the paths
+    # are bare backslash paths, which POSIX splitting would eat.
+    assert shlex.split(commands[0], posix=os.name != "nt") == [
+        "woof", "prep", *document["argv"]]
     comments = " ".join(line for line in lines
                         if line.strip().startswith("#"))
     for flag in document["caller_supplies"]:

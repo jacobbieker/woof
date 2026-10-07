@@ -520,7 +520,33 @@ pub(crate) fn mslp_pressure_fill_scale() -> DiscreteColorScale {
     }
 }
 
+/// The reflectivity products' ladder: composite reflectivity, composite
+/// reflectivity with UH, 1 km reflectivity, and through
+/// `rw_wrfbatch::scales::reflectivity_scale` the radar PPIs and the
+/// observed reflectivity grids. It is the radar reflectivity table
+/// (`rustwx_render::RadarTable::Reflectivity`, the AWIPS-style table
+/// transcribed from BowEcho) in 1 dBZ bins from the 10 dBZ display floor
+/// to 85 dBZ, its top row held above. The ladder it replaced,
+/// [`classic_reflectivity_dbz_scale`], is what the `classic` radar colour
+/// set selects (`rw_wrfbatch --radar-colors classic`, `RUSTWX_RADAR_COLORS`,
+/// `[simulated_radar] color_tables`).
 fn reflectivity_dbz_scale() -> DiscreteColorScale {
+    reflectivity_dbz_scale_for(rustwx_render::active_radar_color_set())
+}
+
+/// The reflectivity ladder of one radar colour set.
+pub fn reflectivity_dbz_scale_for(set: rustwx_render::RadarColorSet) -> DiscreteColorScale {
+    match set {
+        rustwx_render::RadarColorSet::Standard => rustwx_render::RadarTable::Reflectivity
+            .scale(10.0, 85.0, 1.0, ExtendMode::Max, Some(10.0)),
+        rustwx_render::RadarColorSet::Classic => classic_reflectivity_dbz_scale(),
+    }
+}
+
+/// The twelve-step reflectivity ladder the reflectivity products wore
+/// before the radar reflectivity table: the `classic` radar colour set's
+/// reflectivity, and `reflectivity_classic` by table name.
+pub fn classic_reflectivity_dbz_scale() -> DiscreteColorScale {
     DiscreteColorScale {
         levels: vec![
             10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0,
@@ -977,6 +1003,49 @@ mod tests {
     }
 
     #[test]
+    fn clear_sky_pixels_are_the_uncovered_basemap_and_ten_percent_draws_cloud() {
+        let mut request = sample_request();
+        request.width = 320;
+        request.height = 240;
+        request.colorbar = false;
+        request.background = Color::rgba(21, 37, 58, 255);
+        request.scale = ColorScale::Discrete(cloud_cover_scale());
+        request.field.values.fill(f32::NAN);
+        let uncovered = rustwx_render::render_image(&request).unwrap();
+        let evidence = std::env::var_os("RUSTWX_CLOUD_MASK_EVIDENCE").map(std::path::PathBuf::from);
+        if let Some(folder) = &evidence {
+            std::fs::create_dir_all(folder).unwrap();
+            uncovered.save(folder.join("cloud-uncovered.png")).unwrap();
+        }
+        let mut clear_images = Vec::new();
+        for value in [0.0, 5.0, 9.999, 10.0, 95.0] {
+            request.field.values.fill(value);
+            let image = rustwx_render::render_image(&request).unwrap();
+            if let Some(folder) = &evidence {
+                image.save(folder.join(format!("cloud-{value}-percent.png"))).unwrap();
+            }
+            if value < 10.0 {
+                clear_images.push((value, image));
+            }
+        }
+        for (value, clear) in clear_images {
+            assert_eq!(clear, uncovered, "{value}% cloud painted a basemap pixel");
+        }
+        request.field.values.fill(10.0);
+        let cloudy = rustwx_render::render_image(&request).unwrap();
+        let mut old_scale = cloud_cover_scale();
+        old_scale.mask_below = None;
+        old_scale.extend = ExtendMode::Both;
+        request.scale = ColorScale::Discrete(old_scale);
+        let first_level_control = rustwx_render::render_image(&request).unwrap();
+        assert_eq!(cloudy, first_level_control,
+                   "the clear-sky mask changed a pixel at the first drawn cloud level");
+        let painted = cloudy.pixels().zip(uncovered.pixels())
+            .filter(|(cloud, base)| cloud != base).count();
+        assert!(painted > 100, "the first drawn cloud level painted {painted} pixels");
+    }
+
+    #[test]
     fn regional_static_design_uses_projected_grid_frame_and_smooth_legend() {
         let mut request = sample_request();
 
@@ -1121,7 +1190,9 @@ mod tests {
             panic!("expected reflectivity discrete scale");
         };
         assert_eq!(reflectivity_scale.levels.first().copied(), Some(10.0));
-        assert_eq!(reflectivity_scale.levels.last().copied(), Some(70.0));
+        // Re-recorded 2026-10-03: the reflectivity products moved to the
+        // radar reflectivity table, which runs to 85 dBZ (was 70).
+        assert_eq!(reflectivity_scale.levels.last().copied(), Some(85.0));
         assert_eq!(reflectivity_scale.extend, ExtendMode::Max);
         assert_eq!(reflectivity_scale.mask_below, Some(10.0));
 

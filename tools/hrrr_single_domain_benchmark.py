@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from woof.physics_registry import canonical_template_id
+
 import argparse
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
@@ -30,6 +32,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from woof import runtime_manifest  # noqa: E402
+from woof.ingest.preprocess_backend import preprocess_math_call
 from woof.aerosol_source_receipt import (  # noqa: E402
     AEROSOL_SOURCE_KEY,
     aerosol_source_report_entry,
@@ -361,6 +364,32 @@ def runner_capabilities() -> dict[str, object]:
                 "readiness": "IMPLEMENTED_UNVERIFIED",
                 "explicit_expert_consent_required": False,
                 "radiation_solver": "RTE+RRTMGP",
+            },
+            THOMPSON_MYNN_RUC_MONTHLY_LEGACY_RRTMG_PROFILE_ID: {
+                "selector": 8,
+                **staged_thompson,
+                "readiness": "IMPLEMENTED_UNVERIFIED",
+                "explicit_expert_consent_required": False,
+                "radiation_solver": "legacy RRTMG",
+            },
+            THOMPSON_MYNN_RUC_MONTHLY_SOLAR_LEGACY_RRTMG_PROFILE_ID: {
+                "selector": 8,
+                **staged_thompson,
+                "readiness": "IMPLEMENTED_UNVERIFIED",
+                "explicit_expert_consent_required": False,
+                "radiation_solver": "legacy RRTMG",
+                "surface_albedo": "solar-geometry-selected",
+            },
+            THOMPSON_MYNN_GSD41_PROFILE_ID: {
+                "selector": 28,
+                "readiness": "IMPLEMENTED_UNVERIFIED",
+                "explicit_expert_consent_required": False,
+                "radiation_solver": "legacy RRTMG",
+                "table_staging": "route-staged-at-profile-binding",
+                "runtime_guards": [
+                    "classic and aerosol tables size- and SHA256-checked before GPU setup",
+                    "staged WIF climatology for the declared aerosol source",
+                ],
             },
             RUC_PROFILE_ID: {
                 "selector": 6,
@@ -957,6 +986,15 @@ ROUTE_ID = "tools.hrrr_single_domain_benchmark"
 #: HRRR physics profile``.  The route declares what it can replay; this
 #: reads that declaration.
 NATIVE_BENCHMARK_PHYSICS_PROFILES = route_physics_profiles(ROUTE_ID)
+THOMPSON_MYNN_RUC_MONTHLY_LEGACY_RRTMG_PROFILE_ID = (
+    "thompson-mp8-mynn-mynn-ruc-monthly-rrtmg-legacy-v1"
+)
+THOMPSON_MYNN_RUC_MONTHLY_SOLAR_LEGACY_RRTMG_PROFILE_ID = (
+    "thompson-mp8-mynn-mynn-ruc-monthly-solar-rrtmg-legacy-v1"
+)
+THOMPSON_MYNN_GSD41_PROFILE_ID = (
+    "thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1"
+)
 
 _NATIVE_HRRR_NAMELIST_CONTRACTS = MappingProxyType({
     WSM6_PROFILE_ID: MappingProxyType({
@@ -1112,6 +1150,80 @@ _NATIVE_HRRR_NAMELIST_CONTRACTS = MappingProxyType({
             "sf_sfclay_physics": 5.0,
             "sf_surface_physics": 3.0,
             "bl_pbl_physics": 5.0,
+            "cu_physics": 0.0,
+            "num_soil_layers": 9.0,
+        }),
+        "dynamics": MappingProxyType({
+            "km_opt": 4.0,
+            "diff_6th_opt": 2.0,
+            "diff_6th_factor": 0.08,
+            "diff_6th_slopeopt": 1.0,
+        }),
+    }),
+    # Monthly surface fields change WRF namelist values, so this profile
+    # has its own contract rather than borrowing the unselected surface
+    # switches of the radiation sibling. The row binds the supplied
+    # configuration; it does not certify a native forecast comparison.
+    THOMPSON_MYNN_RUC_MONTHLY_LEGACY_RRTMG_PROFILE_ID: MappingProxyType({
+        "physics": MappingProxyType({
+            "mp_physics": 8.0,
+            "ra_lw_physics": 4.0,
+            "ra_sw_physics": 4.0,
+            "radt": 12.0,
+            "sf_sfclay_physics": 5.0,
+            "sf_surface_physics": 3.0,
+            "bl_pbl_physics": 5.0,
+            "cu_physics": 0.0,
+            "num_soil_layers": 9.0,
+            "usemonalb": True,
+            "rdlai2d": True,
+            "fractional_seaice": 1.0,
+        }),
+        "dynamics": MappingProxyType({
+            "km_opt": 4.0,
+            "diff_6th_opt": 2.0,
+            "diff_6th_factor": 0.08,
+            "diff_6th_slopeopt": 1.0,
+        }),
+    }),
+    # Solar albedo is a separate requested native fork switch. This row
+    # binds the input composition and makes no native trajectory claim.
+    THOMPSON_MYNN_RUC_MONTHLY_SOLAR_LEGACY_RRTMG_PROFILE_ID: MappingProxyType({
+        "physics": MappingProxyType({
+            "mp_physics": 8.0,
+            "ra_lw_physics": 4.0,
+            "ra_sw_physics": 4.0,
+            "radt": 12.0,
+            "sf_sfclay_physics": 5.0,
+            "sf_surface_physics": 3.0,
+            "bl_pbl_physics": 5.0,
+            "cu_physics": 0.0,
+            "num_soil_layers": 9.0,
+            "usemonalb": True,
+            "rdlai2d": True,
+            "fractional_seaice": 1.0,
+            "alb_sol": 1.0,
+        }),
+        "dynamics": MappingProxyType({
+            "km_opt": 4.0,
+            "diff_6th_opt": 2.0,
+            "diff_6th_factor": 0.08,
+            "diff_6th_slopeopt": 1.0,
+        }),
+    }),
+    # This pins the declared source-version composition. It does not
+    # certify an operational native trajectory or the remaining fork rows.
+    THOMPSON_MYNN_GSD41_PROFILE_ID: MappingProxyType({
+        "physics": MappingProxyType({
+            "mp_physics": 28.0,
+            "ra_lw_physics": 4.0,
+            "ra_sw_physics": 4.0,
+            "radt": 15.0,
+            "sf_sfclay_physics": 5.0,
+            "sf_surface_physics": 3.0,
+            "bl_pbl_physics": 5.0,
+            "bl_mynn_mixlength": 2.0,
+            "scalar_pblmix": 1.0,
             "cu_physics": 0.0,
             "num_soil_layers": 9.0,
         }),
@@ -1402,12 +1514,14 @@ _INITIALIZATION_CONTRACT_ALIASES = MappingProxyType({
     # both read the Thompson validation row's tables.
     THOMPSON_MYNN_RUC_DUDHIA_PROFILE_ID: THOMPSON_PROFILE_ID,
     THOMPSON_MYNN_RUC_RTE_RRTMGP_PROFILE_ID: THOMPSON_PROFILE_ID,
+    THOMPSON_MYNN_RUC_MONTHLY_LEGACY_RRTMG_PROFILE_ID: THOMPSON_PROFILE_ID,
+    THOMPSON_MYNN_RUC_MONTHLY_SOLAR_LEGACY_RRTMG_PROFILE_ID: THOMPSON_PROFILE_ID,
 })
 
 
 def _initialization_contract_profile(profile: str) -> str:
     """The profile whose species/cold-start tables serve ``profile``."""
-
+    profile = canonical_template_id(profile)
     return _INITIALIZATION_CONTRACT_ALIASES.get(profile, profile)
 
 
@@ -1459,6 +1573,7 @@ _NAMELIST_CONTRACT_ALIASES = MappingProxyType({
 
 
 def _native_hrrr_profile_contract(profile: str) -> dict[str, object]:
+    profile = canonical_template_id(profile)
     contract_profile = _NAMELIST_CONTRACT_ALIASES.get(profile, profile)
     if contract_profile not in _NATIVE_HRRR_NAMELIST_CONTRACTS:
         raise _unsupported_profile(profile)
@@ -1470,6 +1585,7 @@ def _native_hrrr_profile_contract(profile: str) -> dict[str, object]:
 
 
 def _native_hrrr_runtime_switches(profile: str) -> dict[str, object]:
+    profile = canonical_template_id(profile)
     try:
         return dict(_NATIVE_HRRR_RUNTIME_SWITCHES[profile])
     except KeyError:
@@ -1552,6 +1668,40 @@ def _thompson_runtime_authority() -> dict[str, object]:
     }
 
 
+def _with_thompson_process_generation_authority(authority: dict, switches: dict) -> dict:
+    if int(switches["mp_physics"]) != 28:
+        return authority
+    version = switches.get("thompson_version", "wrf_461")
+    if version == "wrf_461":
+        return authority
+    if version != "wrf_39_noaa":
+        raise ValueError(f"MP28 has no process table authority for thompson_version={version!r}")
+    from woof.core.thompson_contract import (
+        FORK_REFERENCE_SOURCE, TABLE_SETS_BY_VERSION, validate_table_assets,
+    )
+    from woof.physics_compat import thompson_fork_table_root
+
+    _, expected_assets, table_set = TABLE_SETS_BY_VERSION[version]
+    # Configuration preview declares the pinned process set without downloading
+    # or compiling it. Actual fork execution acquires and byte-validates through
+    # woof.thompson_fork_assets.ensure_thompson_fork_tables before first use.
+    root = Path(thompson_fork_table_root()).resolve()
+    assets = expected_assets
+    return {
+        "schema": authority["schema"], "mp_physics": 28,
+        "thompson_version": version,
+        "table_root": str(root), "table_set": table_set,
+        "asset_validation": "deferred_to_runtime_before_first_use",
+        "wrf_reference_version": "3.9-noaa-fork", "wrf_reference_source": FORK_REFERENCE_SOURCE,
+        "assets": [{"filename": item.filename, "bytes": item.bytes, "sha256": item.sha256}
+                   for item in assets],
+        "classic_aerosol_authority": {
+            **authority,
+            "runtime_role": "The fork reads CCN activation from this validated classic root and process tables from the fork root.",
+        },
+    }
+
+
 def _microphysics_table_authority(profile: str) -> dict[str, object] | None:
     """Stage and byte-validate the lookup tables THIS profile's mp reads.
 
@@ -1559,7 +1709,7 @@ def _microphysics_table_authority(profile: str) -> dict[str, object] | None:
     Until 1.8 the only microphysics tables this route ever resolved were
     the ones :func:`_thompson_runtime_authority` resolves, and that
     function fires for exactly one profile id --
-    ``thompson-mp8-ysu-mm5-noah-validation-v1``, the guarded evidence
+    ``thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1``, the guarded evidence
     runtime -- behind two environment variables.  Every other mp8 suite,
     including BOTH legacy-RRTMG twins (the only full-radiation
     compositions this route's physics gate admits), reached GPU setup
@@ -1590,7 +1740,7 @@ def _microphysics_table_authority(profile: str) -> dict[str, object] | None:
     switches = (_native_hrrr_runtime_switches(profile)
                 if isinstance(profile, str) else asdict(profile))
     mp_physics = int(switches["mp_physics"])
-    if mp_physics == THOMPSON_MP_PHYSICS:
+    if mp_physics in (THOMPSON_MP_PHYSICS, 28):
         from woof.core.thompson_contract import (
             CLASSIC_TABLE_ASSETS,
             TABLE_SET_ID,
@@ -1605,14 +1755,22 @@ def _microphysics_table_authority(profile: str) -> dict[str, object] | None:
         # classic set and fails closed on an absent, resized or substituted
         # asset, so it IS the contract -- re-comparing its return value to
         # the same constant would only ever catch a test double.
-        root = Path(require_thompson_tables(
-            assets=CLASSIC_TABLE_ASSETS)).resolve()
-        assets = validate_table_assets(root)
-        return {
+        required_assets = CLASSIC_TABLE_ASSETS
+        table_set = TABLE_SET_ID
+        if mp_physics == 28:
+            from woof.core.thompson_aerosol_contract import (
+                AEROSOL_TABLE_ASSETS, AEROSOL_TABLE_SET_ID,
+            )
+            required_assets = (*CLASSIC_TABLE_ASSETS, *AEROSOL_TABLE_ASSETS)
+            table_set = AEROSOL_TABLE_SET_ID
+        root = Path(require_thompson_tables(assets=required_assets)).resolve()
+        assets = (validate_table_assets(root, required_assets)
+                  if mp_physics == 28 else validate_table_assets(root))
+        authority = {
             "schema": "gpuwm-prepared-microphysics-table-authority-v1",
-            "mp_physics": THOMPSON_MP_PHYSICS,
+            "mp_physics": mp_physics,
             "table_root": str(root),
-            "table_set": TABLE_SET_ID,
+            "table_set": table_set,
             "wrf_reference_version": WRF_REFERENCE_VERSION,
             "wrf_reference_commit": WRF_REFERENCE_COMMIT,
             "assets": [
@@ -1621,6 +1779,7 @@ def _microphysics_table_authority(profile: str) -> dict[str, object] | None:
                 for item in assets
             ],
         }
+        return _with_thompson_process_generation_authority(authority, switches)
     if mp_physics == 50:
         # P3's single lookup table ships INSIDE the woof wheel and its
         # loader (woof.core.p3_tables) is the byte authority; p3_init
@@ -1702,6 +1861,7 @@ def _validate_native_hrrr_physics_profile(
     the fix.
     """
 
+    profile = canonical_template_id(profile)
     from woof.namelist_import import (
         MULTI_DOMAIN_ROOT_VIEW_HINT,
         parse_namelist,
@@ -1759,6 +1919,23 @@ def _validate_native_hrrr_physics_profile(
                         + ", ".join(nonuniform_columns))
                 raise ValueError(message)
             selected[section_name][key] = actual
+    if profile == THOMPSON_MYNN_GSD41_PROFILE_ID:
+        # The source spelling and aerosol source are part of this version,
+        # not optional namelist fields to silently replace with its preset.
+        for key, expected in {"bl_mynn_tkebudget": 0,
+                              "use_aero_icbc": True}.items():
+            raw = root_view["physics"].get(key)
+            if type(raw) is not type(expected) or raw != expected:
+                raise ValueError(
+                    f"native HRRR profile {profile!r} requires "
+                    f"&physics/{key}={expected!r}, got {raw!r}")
+            selected["physics"][key] = raw
+        wif_input = root_view.get("domains", {}).get("wif_input_opt")
+        if type(wif_input) is not int or wif_input != 1:
+            raise ValueError(
+                f"native HRRR profile {profile!r} requires "
+                f"&domains/wif_input_opt=1, got {wif_input!r}")
+        selected["domains"] = {"wif_input_opt": wif_input}
     if profile in (NSSL2_PROFILE_ID, NSSL2_LEGACY_RRTMG_PROFILE_ID):
         physics_section = root_view["physics"]
         nssl_values: dict[str, int | float] = {}
@@ -1845,9 +2022,15 @@ def _validate_native_hrrr_physics_profile(
         receipt["microphysics_table_authority"] = table_authority
     if profile == THOMPSON_PROFILE_ID:
         receipt["readiness"] = "WRF_MATCHED_RUN_EXPERIMENTAL"
+        receipt["readiness_scope"] = (
+            "Legacy readiness identifier. The July matched run is historical "
+            "and does not cover this current daytime-only suite.")
         receipt["thompson_contract"] = _thompson_runtime_authority()
     elif profile == MORRISON_PROFILE_ID:
         receipt["readiness"] = "WRF_MATCHED_RUN_RUNTIME_PROFILE"
+        receipt["readiness_scope"] = (
+            "Legacy readiness identifier for a composition exemption; no "
+            "current matched-run manifest or decay tables cover this exact suite.")
         receipt["morrison_contract"] = {
             "selector": 10,
             "morr_rimed_ice": 1,
@@ -1885,7 +2068,10 @@ def _validate_native_hrrr_physics_profile(
             # The Thompson members of the MYNN + RUC pair, at the ceiling
             # MYNN and RUC set.
             THOMPSON_MYNN_RUC_DUDHIA_PROFILE_ID,
-            THOMPSON_MYNN_RUC_RTE_RRTMGP_PROFILE_ID):
+            THOMPSON_MYNN_RUC_RTE_RRTMGP_PROFILE_ID,
+            THOMPSON_MYNN_RUC_MONTHLY_LEGACY_RRTMG_PROFILE_ID,
+            THOMPSON_MYNN_RUC_MONTHLY_SOLAR_LEGACY_RRTMG_PROFILE_ID,
+            THOMPSON_MYNN_GSD41_PROFILE_ID):
         receipt["readiness"] = "IMPLEMENTED_UNVERIFIED"
     if profile in (MORRISON_PROFILE_ID, NSSL2_PROFILE_ID,
                    THOMPSON_RTE_RRTMGP_PROFILE_ID):
@@ -1895,7 +2081,8 @@ def _validate_native_hrrr_physics_profile(
             "resolved_gpuwm_scheme_ids": [4, 4],
             "resolved_gpuwm_solver": "RTE+RRTMGP",
         }
-    elif profile == NSSL2_LEGACY_RRTMG_PROFILE_ID:
+    elif profile in (NSSL2_LEGACY_RRTMG_PROFILE_ID,
+                     THOMPSON_MYNN_GSD41_PROFILE_ID):
         receipt["radiation_identity"] = {
             "contract": WRF_RRTMG_LEGACY,
             "requested_wrf_scheme_ids": [4, 4],
@@ -1920,6 +2107,11 @@ def _validate_native_hrrr_physics_profile(
 #: switch this map does not name is now a named refusal here rather than
 #: a silent default three layers down.
 _PROFILE_SWITCH_HOMES = MappingProxyType({
+    "aer_init_opt": "shared",
+    "alb_sol": "shared",
+    "bl_mynn_gsd41_unsquared_qtke": "shared",
+    "bl_mynn_mixlength": "shared",
+    "bl_mynn_version": "shared",
     "bl_pbl_physics": "shared",
     "cu_physics": "shared",
     "cudt_minutes": "shared",
@@ -1927,24 +2119,34 @@ _PROFILE_SWITCH_HOMES = MappingProxyType({
     "diff_6th_opt": "shared",
     "diff_6th_slopeopt": "shared",
     "epssm": "shared",
+    "fractional_seaice": "shared",
     "km_opt": "shared",
+    "mosaic_lu": "shared",
+    "mosaic_soil": "shared",
     "moist": "shared",
     "moist_cq": "shared",
     "morr_rimed_ice": "shared",
     "mp_physics": "shared",
+    "mynn_sfclay_variant": "shared",
     "num_soil_layers": "shared",
     "ra_lw_physics": "shared",
     "ra_physics": "shared",
     "ra_rrtmg_variant": "shared",
     "ra_sw_physics": "shared",
     "radt": "domain",
+    "rdlai2d": "shared",
     "sf_sfclay_physics": "shared",
     "sf_surface_physics": "shared",
     # Every template declares the urban component (none = 0) since the
     # urban canopy models joined the registry.
     "sf_urban_physics": "shared",
+    "scalar_pblmix": "shared",
     "terrain_opt": "shared",
+    "thompson_fork_snow_fall": "shared",
+    "thompson_version": "shared",
     "top_lid": "shared",
+    "usemonalb": "shared",
+    "wif_input_opt": "shared",
     "wrf_rrtmg_compatibility": "shared",
     "wsm6_hail_opt": "shared",
 })
@@ -1980,7 +2182,8 @@ def _experiment_tables(
         start_time: datetime = datetime(2026, 7, 18),
         target: HrrrTargetDomain | None = None,
         physics_profile: str = ROUTE_DEFAULT_PHYSICS_PROFILE,
-        history_interval_seconds: float = 300.0):
+        history_interval_seconds: float = 300.0,
+        usemonalb: bool | None = None, rdlai2d: bool | None = None):
     """The raw tables this route hands ``build_experiment``, plus the target.
 
     Split out of :func:`_experiment` so the preparation can PUBLISH the
@@ -2072,6 +2275,35 @@ def _experiment_tables(
         }],
     }
     _forward_profile_switches(raw, switches)
+    # A frozen replay can state its historical surface controls explicitly.
+    # None retains the selected source/profile's prescribed defaults.
+    for name, value in (("usemonalb", usemonalb), ("rdlai2d", rdlai2d)):
+        if value is not None:
+            if type(value) is not bool:
+                raise ValueError(f"{name} override must be boolean")
+            raw["shared"][name] = value
+    from woof.physics_source_defaults import (
+        recipe_physics_defaults, recipe_root_defaults, with_recipe_root_defaults)
+    defaults = recipe_physics_defaults("hrrr")
+    for name, value in defaults.items():
+        if name in ("usemonalb", "rdlai2d"):
+            # 3e5245839, lane/ruc-evap-gap: prescribed monthly fields have
+            # consumers in Noah (2) and RUC (3). Preserve each profile's
+            # declared controls, including explicit false.
+            if int(switches["sf_surface_physics"]) in (2, 3):
+                raw["shared"].setdefault(name, value)
+        else:
+            raw["shared"][name] = value
+    with_recipe_root_defaults(
+        raw["shared"], raw["domain"], recipe_root_defaults("hrrr"))
+    if (target.dx_m == 3000.0 and target.dy_m == 3000.0
+            and target.time_step_exact == Fraction(20)):
+        # A 20 s native-grid recipe retains the full-source operational
+        # acoustic bound: HRRR's 20/20/20 clock derives six substeps over
+        # its entire 3 km source grid. This is a retained source bound,
+        # not a fresh derivation from the smaller crop's map factors.
+        raw["shared"]["time_step_sound"] = 6
+        raw["shared"]["use_adaptive_time_step"] = False
     _declare_asymmetric_radiation(
         raw, switches, target=target, start_time=start_time,
         run_seconds=run_seconds)
@@ -2087,7 +2319,7 @@ def _declare_asymmetric_radiation(
     Eight of the thirteen profiles this route stages run
     ``ra_sw_physics 1`` (Dudhia) with ``ra_lw_physics 0`` -- the whole
     wsm6 no-radiation family, ``kessler-mp1-ysu-mm5-noah-dudhia-v1``
-    and ``thompson-mp8-ysu-mm5-noah-validation-v1``.  1.7.1's
+    and ``thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1``.  1.7.1's
     nocturnal-radiation guard refuses that pairing at config load for
     any window that includes local night
     (:func:`woof.physics_compat.nocturnal_radiation_refusal`), which is
@@ -2188,13 +2420,15 @@ def _experiment(
         start_time: datetime = datetime(2026, 7, 18),
         target: HrrrTargetDomain | None = None,
         physics_profile: str = ROUTE_DEFAULT_PHYSICS_PROFILE,
-        history_interval_seconds: float = 300.0):
+        history_interval_seconds: float = 300.0,
+        usemonalb: bool | None = None, rdlai2d: bool | None = None):
     from woof.experiment import build_experiment
 
     raw, resolved = _experiment_tables(
         vertical, run_seconds=run_seconds, start_time=start_time,
         target=target, physics_profile=physics_profile,
-        history_interval_seconds=history_interval_seconds)
+        history_interval_seconds=history_interval_seconds,
+        usemonalb=usemonalb, rdlai2d=rdlai2d)
     return build_experiment(
         raw, f"programmatic:native-HRRR:{resolved.identity_sha256()}")
 
@@ -2239,7 +2473,7 @@ def _initial_hrrr_microphysics_receipt(
     source-nonzero/state-zero refusal so old in-process callers neither gain
     nor lose admission through a schema reinterpretation.
     """
-
+    profile = canonical_template_id(profile)
     from woof.ingest.real import (
         HRRR_HYDROMETEOR_CORRESPONDENCE_SCHEMA_V1,
         HRRR_HYDROMETEOR_CORRESPONDENCE_SCHEMA_V2,
@@ -2621,7 +2855,8 @@ def _initial_hrrr_microphysics_receipt(
 def _load_static(
         cache: Path, receipt_path: Path,
         target: HrrrTargetDomain | None = None):
-    from woof.hrrr_native_static import verify_geog_source_evidence
+    from woof.hrrr_native_static import (require_static_coverage,
+                                          verify_geog_source_evidence)
 
     target = target or HrrrTargetDomain.legacy_500x500()
     started = time.perf_counter()
@@ -2636,9 +2871,11 @@ def _load_static(
     if receipt.get("schema") == "gpuwm-native-hrrr-static-v2":
         if receipt.get("target_domain_sha256") != target.identity_sha256():
             raise ValueError("native static target-domain identity mismatch")
-        if not required_hrrr_source_window(target).matches_record(
-                receipt.get("hrrr_source_coverage")):
-            raise ValueError("native static HRRR source-coverage receipt mismatch")
+        # A pinned static source (the HRRR route's default since
+        # 6a69b356f) records its own grid window, not the HRRR crop; the
+        # shared check reads which one this receipt must carry.
+        require_static_coverage(receipt, target,
+                                prefix="native static HRRR receipt")
     expected = receipt.get("cache", {}).get("sha256")
     actual = sha256_file(cache)
     if actual != expected:
@@ -2864,6 +3101,7 @@ def _compact_boundary_static(static, run_cfg, *, width):
     }
 
 
+@preprocess_math_call
 def _initialize_boundary_sides(
         compact_mets, run_cfg, static_sides, eta, *, p_top, width,
         preprocess_backend="cuda", preprocess_workers=None,
@@ -3095,25 +3333,39 @@ def _native_boundary_species():
     return source_boundary_species("hrrr")
 
 
+@preprocess_math_call
 def _initialize_state(
         snapshot, dc, grid, static, eta, mapping_report, *,
         p_top, column_workers=1, surface_fallback_radius: int = 8,
         preprocess_backend="cuda", state_backend="cuda",
-        sfcp_to_sfcp=True, water_temperature_statics=None):
+        sfcp_to_sfcp=True, water_temperature_statics=None,
+        physical_input=None, physical_output=None):
     """Full-domain f00/reference initialization with split timing."""
     from woof.core.grid import make_vertical_coord
     from woof.ingest.real import initialize_real
 
-    met, horizontal_seconds = _map_snapshot(
-        snapshot, grid, static, mapping_report,
-        surface_fallback_radius=surface_fallback_radius,
-        preprocess_backend=preprocess_backend)
-    if water_temperature_statics is not None:
+    if physical_input is None:
+        met, horizontal_seconds = _map_snapshot(
+            snapshot, grid, static, mapping_report,
+            surface_fallback_radius=surface_fallback_radius,
+            preprocess_backend=preprocess_backend)
+    else:
+        started = time.perf_counter()
+        met = physical_input.read(0)
+        if met.valid_time != snapshot.valid_time:
+            raise ValueError("physical start snapshot valid time differs from the native source")
+        from woof.ensemble.hrrr_physical_contract import validate_hrrr_physical_snapshot
+        validate_hrrr_physical_snapshot(met)
+        horizontal_seconds = time.perf_counter() - started
+        mapping_report.update(_physical_mapping_receipt(physical_input, preprocess_backend))
+    if water_temperature_statics is not None and physical_input is None:
         from woof.ingest.cpu_backend import host_step_workers
         from woof.ingest.water_temperature import assemble_horizontal_water_temperature
         met = assemble_horizontal_water_temperature(
             met, water_temperature_statics,
             workers=host_step_workers(preprocess_backend))
+    if physical_output is not None:
+        physical_output.write(met)
     started = time.perf_counter()
     coord = make_vertical_coord(
         dc.run.nz, hybrid_opt=dc.run.hybrid_opt, etac=dc.run.etac,
@@ -3133,6 +3385,48 @@ def _initialize_state(
         cosa=static["COSALPHA"])
     return (result, met, horizontal_seconds, time.perf_counter() - started,
             state_timing)
+
+
+def _physical_mapping_receipt(store, preprocess):
+    """The mapping authority belongs to a verified native physical store."""
+    from woof.ensemble.physical_store import digest_file
+    return {"policy": "sealed native physical snapshot input",
+            "physical_store_sha256": digest_file(store.manifest_path),
+            "preprocess_backend": preprocess.receipt()}
+
+
+def _overlay_acquirer(acquire, hours, overlay, binding, *, workers,
+                      physical_input=None):
+    """Apply source-grid overlays only before the first native mapping.
+
+    A physical input has already passed physical_input_binding, including
+    equality of the requested overlay bytes and source policy. Its mapped
+    fields therefore carry that application and must not be overlaid again.
+    """
+    if overlay is None or physical_input is not None:
+        return acquire, None
+    from woof.ingest.water_overlay import overlay_snapshot_sequence
+
+    class ForcingSequence:
+        def __len__(self):
+            return len(hours)
+
+        def __getitem__(self, index):
+            return acquire(hours[index])
+
+    sequence = overlay_snapshot_sequence(
+        ForcingSequence(), overlay, binding=binding, workers=workers)
+    return lambda hour: sequence[hours.index(hour)], sequence
+
+
+def _verify_preparation_overlay(sequence, *, physical_input, binding):
+    from woof.ingest.water_overlay import (
+        WaterOverlayError, overlay_file_identity, verify_overlay_sequence)
+    result = verify_overlay_sequence(sequence)
+    if physical_input is not None and binding is not None:
+        if overlay_file_identity(binding["path"]) != binding:
+            raise WaterOverlayError("water-temperature overlay bytes changed during physical replay")
+    return result
 
 
 class _LbcPayloadDigest:
@@ -3555,13 +3849,95 @@ def _seal_posted_bridge(args, *, admitter, pipeline_producer, source_window,
     return pipeline_report, source_hash_receipt
 
 
+def _posted_bundle_plan(args, *, chain, requested_cycle, source_forecast_hours,
+                        model_forcing_hours, preprocess_receipt, source_identity,
+                        posted_leads, metadata):
+    """Publish the ordinary fixed authorities once, before a physical capture."""
+    from woof.hrrr_prepared_bundle import publish_hrrr_bundle_head
+    from woof.ingest.boundary_stream import input_plan
+    root = Path(chain["output_root"]).resolve()
+    def optional_path(key):
+        value = chain.get(key)
+        return None if value is None else Path(value)
+    bundle = publish_hrrr_bundle_head(
+        output_root=root, prepared_cache=root / CHAINED_CACHE_NAME,
+        static_cache=Path(chain["static_cache"]),
+        static_receipt=Path(chain["static_receipt"]),
+        geometry_receipt=Path(chain["geometry_receipt"]),
+        bridge_manifest=args.bridge / "SHA256SUMS",
+        namelist_input=args.namelist_input,
+        wps_namelist=optional_path("wps_namelist"),
+        source_manifest=Path(chain["source_manifest"]),
+        experiment_config=Path(chain["experiment_config"]),
+        source_cycle=requested_cycle,
+        source_forecast_hours=source_forecast_hours,
+        model_forcing_hours=model_forcing_hours,
+        preprocessing=_strict_json(preprocess_receipt),
+        source_identity=source_identity,
+        physics_profile=chain.get("physics_profile"),
+        cache_user_metadata=metadata,
+        expert_acknowledgements=tuple(chain.get("acknowledgements") or ()),
+        domain_spec=optional_path("domain_spec"), as_posted=True)
+    plan = input_plan(
+        bundle["manifest"], lead_role_prefix=POSTED_NATIVE_LEAD_ROLE_PREFIX,
+        route_table_sha256=posted_leads.route_table_sha256(),
+        derived_roles=POSTED_NATIVE_DERIVED_ROLES)
+    return bundle, plan
+
+
+class _PostedHrrrCapture:
+    """Capture a native knot only after its ordinary lead evidence is ready."""
+    def __init__(self, stream, *, cycle, source_forecast_hours, admitter, decoded_records):
+        self.stream = stream
+        self.cycle = cycle
+        self.source_forecast_hours = tuple(source_forecast_hours)
+        self.admitter = admitter
+        self.decoded_records = decoded_records
+
+    def write(self, snapshot):
+        from woof.ingest.boundary_stream import (
+            posted_lead_marker_sha256, decoded_lead_record_sha256)
+        seconds = (snapshot.valid_time - self.cycle).total_seconds()
+        lead = int(seconds // 3600)
+        if seconds != lead * 3600 or lead not in self.source_forecast_hours:
+            raise ValueError("captured physical time is outside the native posted source plan")
+        if lead not in self.admitter.markers or lead not in self.decoded_records:
+            raise ValueError("physical capture requires actual posted and decoded native lead evidence")
+        return self.stream.publish(snapshot,
+            posted_leads={str(lead): posted_lead_marker_sha256(self.admitter.markers[lead])},
+            decoded_leads={str(lead): decoded_lead_record_sha256(self.decoded_records[lead])})
+
+    def seal(self):
+        return self.stream.seal()
+
+
+def _complete_posted_head_receipts(bundle, *, metadata, preprocess_receipt):
+    """Fill observed preparation receipts before the ordinary head is hashed.
+
+    Physical capture needs the fixed input plan before real initialization.
+    The vertical route and soil outcomes become known during that call. They
+    belong in the subsequently published proof, not in the fixed input plan.
+    """
+    from woof.hrrr_prepared_bundle import _canonical
+    from woof.ingest.prepared_cache import SOIL_PREPARATION_RECEIPTS
+    proof = bundle["proof_head"]
+    observed = _strict_json(preprocess_receipt)
+    proof["preprocessing"] = observed
+    proof["preprocessing_receipt_sha256"] = hashlib.sha256(
+        _canonical(observed).encode("utf-8")).hexdigest()
+    for key in SOIL_PREPARATION_RECEIPTS:
+        if key in metadata:
+            proof[key] = metadata[key]
+
+
 def _write_posted_head(
         args, *, chain, exp, dc, grid, static, soil_mesh, admitter,
         producer, posted_leads, decoded_records, timing, make_identity,
         requested_cycle, source_forecast_hours, model_forcing_hours,
         requested_hours, initial_snapshot, root_result, root_met,
         mapping_reports, boundary_sides, preprocess_receipt,
-        source_identity):
+        source_identity, posted_bundle=None, ensemble_physical=None,
+        physical_receipts=None, shared_source=None, reused_surface=None):
     """Publish an as-posted native preparation's head (A136 L7c (b)).
 
     Written once the start state exists and the first boundary lead is
@@ -3577,9 +3953,9 @@ def _write_posted_head(
     """
 
     from woof.hrrr_prepared_bundle import (
-        AS_POSTED_SEAL_KEYS, HrrrBundleError, publish_hrrr_bundle_head)
+        AS_POSTED_SEAL_KEYS, HrrrBundleError)
     from woof.ingest.boundary_stream import (
-        PreparedTreeWriter, as_posted_placeholder, input_plan,
+        PreparedTreeWriter, as_posted_placeholder,
         input_plan_sha256)
     from woof.ingest.hrrr_physics import resolve_prepared_noah_surface
     from woof.ingest.preprocess_backend import preprocess_reports_identity
@@ -3587,12 +3963,14 @@ def _write_posted_head(
 
     started = time.perf_counter()
     start_leads = tuple(source_forecast_hours[:2])
-    start_markers = {lead: _await_admitted(admitter, producer, lead)
-                     for lead in start_leads}
+    start_records = ({"start_markers": {
+        lead: _await_admitted(admitter, producer, lead) for lead in start_leads}}
+        if shared_source is None else {"start_marker_sha256":
+            dict(shared_source.posted["start_marker_sha256"])})
     timing["posted_head_start_leads_wait"] = time.perf_counter() - started
 
     root_surface = resolve_prepared_noah_surface(
-        root_met, dc.run, static, soil_mesh=soil_mesh)
+        root_met, dc.run, static, soil_mesh=soil_mesh, surface=reused_surface)
     soil_temperature_repair = soil_temperature_repair_proof(root_surface, grid)
     start_key = f"f{source_forecast_hours[0]:02d}"
     metadata = {
@@ -3613,40 +3991,26 @@ def _write_posted_head(
     }
     root = Path(chain["output_root"]).resolve()
 
-    def optional_path(key):
-        value = chain.get(key)
-        return None if value is None else Path(value)
-
     try:
-        head_bundle = publish_hrrr_bundle_head(
-            output_root=root, prepared_cache=root / CHAINED_CACHE_NAME,
-            static_cache=Path(chain["static_cache"]),
-            static_receipt=Path(chain["static_receipt"]),
-            geometry_receipt=Path(chain["geometry_receipt"]),
-            bridge_manifest=args.bridge / "SHA256SUMS",
-            namelist_input=args.namelist_input,
-            wps_namelist=optional_path("wps_namelist"),
-            source_manifest=Path(chain["source_manifest"]),
-            experiment_config=Path(chain["experiment_config"]),
-            source_cycle=requested_cycle,
-            source_forecast_hours=source_forecast_hours,
-            model_forcing_hours=model_forcing_hours,
-            preprocessing=_strict_json(preprocess_receipt),
-            source_identity=source_identity,
-            physics_profile=chain.get("physics_profile"),
-            cache_user_metadata=metadata,
-            expert_acknowledgements=tuple(chain.get("acknowledgements") or ()),
-            domain_spec=optional_path("domain_spec"), as_posted=True)
+        if posted_bundle is None:
+            head_bundle, plan = _posted_bundle_plan(
+                args, chain=chain, requested_cycle=requested_cycle,
+                source_forecast_hours=source_forecast_hours,
+                model_forcing_hours=model_forcing_hours,
+                preprocess_receipt=preprocess_receipt, source_identity=source_identity,
+                posted_leads=posted_leads, metadata=metadata)
+        else:
+            head_bundle, plan = posted_bundle
+            _complete_posted_head_receipts(head_bundle, metadata=metadata,
+                                          preprocess_receipt=preprocess_receipt)
     except HrrrBundleError as error:
+        if posted_bundle is not None or ensemble_physical is not None:
+            raise
         print("prepare: chained preparation not used: the portable bundle's "
               f"head could not be published ({error}); the forecast starts "
               "after preparation", file=sys.stderr, flush=True)
         return None, None, None, root_surface, soil_temperature_repair
 
-    plan = input_plan(
-        head_bundle["manifest"], lead_role_prefix=POSTED_NATIVE_LEAD_ROLE_PREFIX,
-        route_table_sha256=posted_leads.route_table_sha256(),
-        derived_roles=POSTED_NATIVE_DERIVED_ROLES)
     placeholder = as_posted_placeholder(input_plan_sha256(plan))
     identity = make_identity(placeholder, placeholder)
     writer = PreparedTreeWriter(
@@ -3659,8 +4023,11 @@ def _write_posted_head(
         if backend == "cuda" else None)
     writer.admit(experiment=exp, backend=backend, device_bytes=device_bytes,
                  source="hrrr")
-    writer.bind_posted_leads(admitter.markers)
-    writer.bind_decoded_leads(decoded_records)
+    if shared_source is None:
+        writer.bind_posted_leads(admitter.markers)
+        writer.bind_decoded_leads(decoded_records)
+    if physical_receipts is not None:
+        writer.bind_physical_receipts(physical_receipts)
     bridge_relative = (Path(args.bridge).resolve() / "SHA256SUMS").relative_to(
         root).as_posix()
     source_relative = Path(chain["source_manifest"]).resolve().relative_to(
@@ -3676,9 +4043,11 @@ def _write_posted_head(
         proof_head=head_bundle["proof_head"], input_manifest_sha256=None,
         forcing=_interval_host_pricing(boundary_sides),
         seal_completes=CHAINED_SEAL_COMPLETES,
+        **({"ensemble_physical": ensemble_physical}
+           if ensemble_physical is not None else {}),
         as_posted={
             "input_plan": plan,
-            "start_markers": start_markers,
+            **start_records,
             "forcing_leads": list(source_forecast_hours),
             "seal_authored_proof_keys": AS_POSTED_SEAL_KEYS,
             "manifest_path": "source-input-manifest.json",
@@ -3749,7 +4118,8 @@ def _publish_chained_proof(writer, args, *, chain, report, configured_run,
         report, selected_backend=requested["preprocess_backend"],
         requested_preprocess_workers=requested["preprocess_workers"],
         requested_pipeline_workers=requested["pipeline_workers"],
-        final_hour=int(report["model_forcing_hours"][-1]))
+        final_hour=int(report["model_forcing_hours"][-1]),
+        reused_posted_source=getattr(args, "physical_input_provider", None) is not None)
     _validated_physics_receipt(
         report, requested_profile=chain.get("physics_profile"),
         expected_selection=configured_run)
@@ -3899,6 +4269,9 @@ def _require_preprocess_receipt(
     _carry_vertical_routes(expected, actual, context)
     if expected["backend"] == "cpu":
         expected.pop("workers")
+        # Worker-share and host-headroom telemetry, measured per job.
+        expected.pop("parallelism", None)
+        actual.pop("parallelism", None)
         observed_workers = actual.pop("workers", None)
         if observed_workers != expected_native_workers:
             raise RuntimeError(
@@ -3985,6 +4358,7 @@ def native_preparation_price(run_cfg, *, forcing_times, prepare_workers):
         boundary_workers=workers)
 
 
+@preprocess_math_call(options_parameter="args")
 def run(args):
     from woof.ingest.cpu_backend import host_step_workers
 
@@ -4060,8 +4434,7 @@ def run(args):
             require_native_pressure_field(case_policy, bridge_root=args.bridge)
     trace_gas_overrides = ({"co2": declared_case.co2_vmr}
         if declared_case is not None and declared_case.co2_vmr is not None else None)
-    from woof.ingest.water_overlay import (
-        load_bound_water_overlay, overlay_snapshot_sequence, verify_overlay_sequence)
+    from woof.ingest.water_overlay import load_bound_water_overlay
     water_overlay, water_overlay_binding = load_bound_water_overlay(
         None if declared_case is None else declared_case.water_temperature_overlay)
     from woof.static.highres_production import (resolve_static_highres, static_highres_identity)
@@ -4145,6 +4518,82 @@ def run(args):
 
     if static_highres is not None:
         source_identity["static_highres"] = static_highres_identity(static_highres)
+    physical_input = None
+    physical_output = None
+    physical_provider = None
+    shared_posted = None
+    physical_receipts = {}
+    posted_bundle = None
+    physical_output_receipt = None
+    physical_input_path = getattr(args, "physical_input_store", None)
+    physical_output_path = getattr(args, "physical_output_store", None)
+    physical_provider_path = getattr(args, "physical_input_provider", None)
+    physical_member_index = getattr(args, "physical_member_index", None)
+    physical_requested = any(path is not None for path in (
+        physical_input_path, physical_output_path, physical_provider_path))
+    ordinary_physical_source_identity = dict(source_identity) if physical_requested else None
+    if (physical_provider_path is None) != (physical_member_index is None):
+        raise ValueError("physical-input-provider and physical-member-index must be supplied together")
+    if physical_provider_path is not None:
+        if args.as_posted is None or physical_input_path is not None or physical_output_path is not None:
+            raise ValueError("a posted provider requires --as-posted and cannot also capture or replay a sealed physical store")
+        from woof.ensemble.posted_physical import PostedPhysicalProvider
+        physical_provider = PostedPhysicalProvider.open(
+            physical_provider_path, cpu_bridge=args.cpu_preprocess_bridge,
+            workers=host_step_workers(preprocess))
+        from tools.hrrr_posted_reuse import SharedPostedHrrr
+        shared_posted = SharedPostedHrrr(
+            physical_provider.source_context(physical_member_index),
+            cycle=requested_cycle, source_forecast_hours=source_forecast_hours)
+        from woof.ensemble.posted_native import checked_source_inputs
+        shared_posted.checked = checked_source_inputs(
+            shared_posted.context, source="hrrr",
+            experiment_config=shared_posted.context.prepared_root / "experiment.toml",
+            wps_namelist=shared_posted.context.prepared_root / "namelist.wps",
+            physics_profile=args.physics_profile, expert_acknowledgements=tuple(args.ack),
+            history_interval_seconds=history_interval_seconds)
+    if physical_input_path is not None and args.as_posted is not None:
+        raise ValueError("sealed physical input cannot replace an as-posted provider")
+    if physical_requested:
+        if (not args.prepare_only
+                or (args.prepared_cache is not None and args.prepared_cache.exists())):
+            raise ValueError("physical input/output requires a fresh native preparation")
+        from woof.ensemble.physical_store import (
+            NativePhysicalStore, physical_input_binding, physical_static_identity)
+        physical_static = physical_static_identity(static, attrs=attrs)
+        if physical_input_path is not None:
+            physical_input = NativePhysicalStore(physical_input_path)
+            from woof.ensemble.hrrr_physical_contract import validate_hrrr_physical_field_contract
+            validate_hrrr_physical_field_contract(physical_input.require_field_contract(), physical_input.document["grid"])
+            expected_times = tuple(model_start_time + timedelta(hours=hour)
+                                   for hour in model_forcing_hours)
+            if physical_input.times != expected_times:
+                raise ValueError("physical input must provide every native forcing valid time exactly")
+            source_identity["ensemble_physical_input"] = physical_input_binding(
+                physical_input, grid, dc.run, source_identity,
+                input_manifest_sha256=args.source_manifest_sha256,
+                static_identity=physical_static)
+        if physical_output_path is not None and args.as_posted is None:
+            from woof.native_wrf_contract import native_geometry_contract
+            from woof.ensemble.hrrr_physical_contract import hrrr_physical_field_contract
+            from woof.ingest import water_temperature
+            geometry = native_geometry_contract(grid, dc.run)
+            evidence = {
+                "native_mapper": source_identity["source_sha256"]["woof/ingest/hrrr.py"],
+                "raw_source_manifest": args.source_manifest_sha256,
+                "water_temperature_assembly": _sha256(Path(water_temperature.__file__)),
+                "target_static_cache": _sha256(args.static_cache),
+            }
+            if args.pipeline_decoder is not None:
+                evidence["native_decoder_executable"] = _sha256(args.pipeline_decoder)
+            else:
+                evidence["sealed_native_bridge_manifest"] = _sha256(args.bridge / "SHA256SUMS")
+            physical_output = NativePhysicalStore(
+                physical_output_path, grid_identity=geometry,
+                source_identity={**source_identity,
+                                 "input_manifest_sha256": args.source_manifest_sha256,
+                                 "static_identity": physical_static},
+                field_contract=hrrr_physical_field_contract(geometry, evidence=evidence))
     namelist_sha256 = _sha256(args.namelist_input)
     prepared_cache_receipt = None
     prepared_cache_identity = None
@@ -4316,6 +4765,10 @@ def run(args):
             "prepared_cache_content_sha256": restored.receipt[
                 "content_sha256"],
         })
+    elif shared_posted is not None:
+        posted_leads = shared_posted
+        available_hours = requested_hours
+        acquire_snapshot = shared_posted.acquire
     elif args.pipeline_series is not None and args.as_posted is not None:
         # AS POSTED (A136 L7c (b)): no lead is hashed up front.  Each is
         # admitted to the decoder once its posted marker is there and its
@@ -4369,7 +4822,7 @@ def run(args):
             admitted(source_hour)
             root = pipeline_producer.wait_hour(source_hour)
             decoded_records[source_hour] = _decoded_lead_record(
-                root, source_hour)
+                root, source_hour, workers=host_step_workers(preprocess))
             return load_hrrr_pipeline_ready_window(root, source_hour)
     elif args.pipeline_series is not None:
         from tools.hrrr_pipeline import (
@@ -4419,27 +4872,81 @@ def run(args):
             # Every hour is consumed exactly once, and mapped only then: a
             # long window's leads mapped at once exceed the ordinary open
             # file limit (_SealedBridgeLeads).
+            if physical_input is not None:
+                return SimpleNamespace(valid_time=physical_input.times[hour])
             return sealed_leads.take(hour)
+        if physical_input is not None or physical_output is not None:
+            pipeline_report = {
+                "operation": "reused_sealed_native_bridge",
+                "bridge_manifest_sha256": args.manifest_sha256,
+                "workers": {"requested": str(args.pipeline_workers).strip().lower(),
+                            "selected": 0, "operation": "reused_sealed_native_bridge"}}
+
+    if args.as_posted is not None and physical_requested:
+        if chain is None or posted_leads is None:
+            raise ValueError("posted physical preparation requires the ordinary portable posted head")
+        if water_overlay is not None:
+            raise ValueError("a declared whole-window water overlay cannot publish a posted native head")
+        posted_bundle = _posted_bundle_plan(
+            args, chain=chain, requested_cycle=requested_cycle,
+            source_forecast_hours=source_forecast_hours,
+            model_forcing_hours=model_forcing_hours,
+            preprocess_receipt=preprocess_receipt, source_identity=source_identity,
+            posted_leads=posted_leads, metadata={})
+        from woof.ingest.boundary_stream import input_plan_sha256, as_posted_placeholder
+        from woof.ensemble.posted_physical import PostedPhysicalStream, posted_source_identity
+        posted_plan = posted_bundle[1]
+        posted_digest = input_plan_sha256(posted_plan)
+        if physical_output_path is not None:
+            from datetime import timezone
+            from woof.ensemble.recipes import SourceTrajectory
+            from woof.native_wrf_contract import native_geometry_contract
+            from woof.ensemble.hrrr_physical_contract import hrrr_physical_field_contract
+            from woof.ingest import water_temperature
+            geometry = native_geometry_contract(grid, dc.run)
+            captured_identity = posted_source_identity(
+                {**source_identity, "input_manifest_sha256": as_posted_placeholder(posted_digest),
+                 "static_identity": physical_static}, input_plan=posted_plan)
+            contract = hrrr_physical_field_contract(geometry, evidence={
+                "native_mapper": source_identity["source_sha256"]["woof/ingest/hrrr.py"],
+                "ordinary_source_input_plan": posted_digest,
+                "native_decoder_executable": _sha256(args.pipeline_decoder),
+                "water_temperature_assembly": _sha256(Path(water_temperature.__file__)),
+                "target_static_cache": _sha256(args.static_cache)})
+            stream = PostedPhysicalStream.create(
+                physical_output_path,
+                trajectory=SourceTrajectory("hrrr", requested_cycle.replace(tzinfo=timezone.utc), None),
+                valid_times=tuple((model_start_time + timedelta(hours=hour)).replace(tzinfo=timezone.utc)
+                                  for hour in requested_hours),
+                grid_identity=geometry, source_identity=captured_identity,
+                field_contract=contract, input_plan_sha256=posted_digest)
+            physical_output = _PostedHrrrCapture(
+                stream, cycle=requested_cycle, source_forecast_hours=source_forecast_hours,
+                admitter=admitter, decoded_records=decoded_records)
+
+    def resolve_physical_hour(hour, valid_time):
+        if physical_provider is None:
+            return physical_input
+        from woof.ensemble.posted_physical import bind_posted_physical_input
+        from woof.ensemble.hrrr_physical_contract import validate_hrrr_physical_field_contract
+        store, receipt = physical_provider.resolve(physical_member_index, valid_time)
+        validate_hrrr_physical_field_contract(store.require_field_contract(), store.document["grid"])
+        binding = bind_posted_physical_input(
+            store, receipt, provider_plan=physical_provider.plan,
+            member_index=physical_member_index, valid_time=valid_time, grid=grid, cfg=dc.run,
+            source_identity={**ordinary_physical_source_identity,
+                             "input_manifest_sha256": as_posted_placeholder(posted_digest)},
+            input_plan=posted_plan, static_identity=physical_static)
+        physical_receipts[hour] = binding
+        if hour == 0:
+            source_identity["ensemble_posted_physical_input"] = binding
+        return store
 
     overlay_series = None
     if not restore_cached and water_overlay is not None:
-        # Keep the existing one-hour loader lifetime in both pipeline and
-        # sealed-file modes. The wrapper retains receipts, never weather arrays.
-        raw_acquire = acquire_snapshot
-
-        class ForcingSequence:
-            def __len__(self):
-                return len(requested_hours)
-
-            def __getitem__(self, index):
-                return raw_acquire(requested_hours[index])
-
-        overlay_series = overlay_snapshot_sequence(
-            ForcingSequence(), water_overlay, binding=water_overlay_binding,
-            workers=host_step_workers(preprocess))
-
-        def acquire_snapshot(hour):
-            return overlay_series[requested_hours.index(hour)]
+        acquire_snapshot, overlay_series = _overlay_acquirer(
+            acquire_snapshot, requested_hours, water_overlay, water_overlay_binding,
+            workers=host_step_workers(preprocess), physical_input=physical_input)
 
     if not restore_cached:
         from woof.ingest.boundary_stream import say_prepared_sealed
@@ -4477,6 +4984,13 @@ def run(args):
             f00_preprocess = preprocess_backend_for_workers(
                 f00_native_workers)
             f00_job_started = time.perf_counter()
+            initial_physical = resolve_physical_hour(0, snapshot.valid_time)
+            if shared_posted is not None:
+                from woof.ensemble.posted_native import shared_surface
+                base_store, _ = shared_posted.context.physical_stream.require(
+                    shared_posted.context.physical_stream.times[0])
+                root_surface = shared_surface(shared_posted.checked,
+                    base_met=base_store.read(0), member_met=initial_physical.read(0))
             with _prep_step(args, "root_initialize",
                             label="Initialize the start state"):
                 result, met, horizontal, vertical, state_timing = _initialize_state(
@@ -4488,7 +5002,8 @@ def run(args):
                         target.surface_fallback_radius_cells),
                     preprocess_backend=f00_preprocess,
                     state_backend=(
-                        "preprocess" if args.prepare_only else "cuda"))
+                        "preprocess" if args.prepare_only else "cuda"),
+                    physical_input=initial_physical, physical_output=physical_output)
             f00_job_finished = time.perf_counter()
             if not preprocess_is_cuda:
                 preprocess_worker_budget.record(
@@ -4545,7 +5060,7 @@ def run(args):
             })
 
             completed_hours = {0}
-            if chain is not None and admitter is not None:
+            if chain is not None and (admitter is not None or shared_posted is not None):
                 (writer, lbc_digest, posted_identity, root_surface,
                  soil_temperature_repair) = _write_posted_head(
                     args, chain=chain, exp=exp, dc=dc, grid=grid,
@@ -4562,7 +5077,16 @@ def run(args):
                     mapping_reports=mapping_reports,
                     boundary_sides=boundary_sides_by_hour[0],
                     preprocess_receipt=preprocess_receipt,
-                    source_identity=source_identity)
+                    source_identity=source_identity, posted_bundle=posted_bundle,
+                    ensemble_physical=(None if physical_provider is None else {
+                        "provider_plan": physical_provider.plan,
+                        "member_index": physical_member_index,
+                        "initial_receipt": physical_receipts[0]}),
+                    physical_receipts=(physical_receipts if physical_provider is not None else None),
+                    shared_source=shared_posted, reused_surface=root_surface)
+                if shared_posted is not None:
+                    from woof.ensemble.posted_native import writer_source_wait
+                    physical_provider.set_wait_observer(writer_source_wait(writer))
             elif chain is not None:
                 (writer, lbc_digest, prepared_cache_identity, root_surface,
                  soil_temperature_repair, pipeline_report) = _write_chained_head(
@@ -4598,7 +5122,11 @@ def run(args):
                         start_seconds=float(k * 3600),
                         end_seconds=float((k + 1) * 3600))
                     lbc_digest.add(k, interval)
-                    writer.write_segment(k, interval)
+                    if shared_posted is None:
+                        writer.write_segment(k, interval)
+                    else:
+                        from woof.ensemble.posted_native import relay_source_segment
+                        relay_source_segment(shared_posted.context, k, writer, interval)
                     del interval, boundary_sides_by_hour[k]
                     next_segment[0] = k + 1
 
@@ -4610,11 +5138,41 @@ def run(args):
                 ready_wait = time.perf_counter() - ready_started
                 mapping = {}
                 mapping_started = time.perf_counter()
-                compact, horizontal = _map_boundary_snapshot(
-                    hour_snapshot, boundary_targets, mapping,
-                    surface_fallback_radius=(
-                        target.surface_fallback_radius_cells),
-                    preprocess_backend=hour_preprocess)
+                hour_physical = resolve_physical_hour(hour, hour_snapshot.valid_time)
+                if hour_physical is not None:
+                    met = hour_physical.read(0 if physical_provider is not None else hour)
+                    if met.valid_time != hour_snapshot.valid_time:
+                        raise ValueError("physical boundary valid time differs from the native source")
+                    from woof.ensemble.hrrr_physical_contract import validate_hrrr_physical_snapshot
+                    validate_hrrr_physical_snapshot(met)
+                    compact = _compact_boundary_inputs(met, dc, width=width)
+                    mapping.update(_physical_mapping_receipt(hour_physical, hour_preprocess))
+                    if physical_output is not None:
+                        physical_output.write(met)
+                    del met
+                    horizontal = time.perf_counter() - mapping_started
+                else:
+                    compact, horizontal = _map_boundary_snapshot(
+                        hour_snapshot, boundary_targets, mapping,
+                        surface_fallback_radius=(
+                            target.surface_fallback_radius_cells),
+                        preprocess_backend=hour_preprocess)
+                    if physical_output is not None:
+                        # Capture is observational: the ordinary boundary strips
+                        # above remain the exact arrays the initializer consumes.
+                        # The full map is made only when explicitly requested.
+                        capture_mapping = {}
+                        met, capture_seconds = _map_snapshot(
+                            hour_snapshot, grid, static, capture_mapping,
+                            surface_fallback_radius=target.surface_fallback_radius_cells,
+                            preprocess_backend=hour_preprocess)
+                        from woof.ingest.water_temperature import assemble_horizontal_water_temperature
+                        met = assemble_horizontal_water_temperature(
+                            met, water_statics, workers=host_step_workers(hour_preprocess))
+                        physical_output.write(met)
+                        mapping["physical_capture"] = capture_mapping
+                        mapping["physical_capture_seconds"] = capture_seconds
+                        del met
                 mapping_finished = time.perf_counter()
                 if not preprocess_is_cuda:
                     preprocess_worker_budget.record(
@@ -4869,7 +5427,10 @@ def run(args):
                         start_seconds=float((hour - 1) * 3600),
                         end_seconds=float(hour * 3600)))
             last_valid_time = valid_time_by_hour[requested_hours[-1]]
-            if admitter is not None:
+            if shared_posted is not None:
+                pipeline_report, source_hash_receipt = shared_posted.seal(args)
+                prepared_cache_identity = make_prepared_cache_identity(args.manifest_sha256)
+            elif admitter is not None:
                 # Every lead is decoded: the source manifest is authored
                 # from the leads' markers and the bridge sealed, and the
                 # one-shot identity of those bytes is what the seal writes.
@@ -4902,9 +5463,10 @@ def run(args):
         timing["all_root_lbc_bound_seconds_from_startup"] = (
             time.perf_counter() - total_started)
 
-        verify_overlay_sequence(overlay_series)
+        _verify_preparation_overlay(overlay_series, physical_input=physical_input,
+                                    binding=water_overlay_binding)
         posted_proof = None
-        if writer is not None and admitter is not None:
+        if writer is not None and (admitter is not None or shared_posted is not None):
             try:
                 from woof.hrrr_prepared_bundle import seal_hrrr_posted_inputs
 
@@ -4914,11 +5476,13 @@ def run(args):
                     bridge_manifest=args.bridge / "SHA256SUMS",
                     source_manifest=Path(args.source_manifest))
                 window = set(source_forecast_hours)
+                source_markers = (admitter.markers if shared_posted is None else shared_posted.markers)
+                source_decoded = (decoded_records if shared_posted is None else shared_posted.decoded)
                 writer.write_posted_leads(
-                    {lead: marker for lead, marker in admitter.markers.items()
+                    {lead: marker for lead, marker in source_markers.items()
                      if lead in window},
                     route_table_sha256=posted_leads.route_table_sha256(),
-                    decoded=decoded_records)
+                    decoded=source_decoded)
                 prepared_cache_receipt = _seal_chained_cache(
                     writer, timing=timing, mapping_reports=mapping_reports,
                     last_valid_time=last_valid_time,
@@ -4926,7 +5490,9 @@ def run(args):
                     manifest_sha256=posted_inputs["input_manifest_sha256"],
                     document_sha256={
                         "bridge_manifest_sha256": args.manifest_sha256,
-                        "source_manifest_sha256": args.source_manifest_sha256})
+                        "source_manifest_sha256": args.source_manifest_sha256},
+                    **({"physical_provider_seal": physical_provider.seal()}
+                       if physical_provider is not None else {}))
                 posted_proof = {
                     **posted_inputs,
                     "posting": {"as_posted": True,
@@ -4975,6 +5541,11 @@ def run(args):
                 seal_process = None
 
             from woof.ingest.prepared_cache import write_prepared_cache
+            from woof.static.external_source import static_source_for
+            if static_source_for(static_highres) is not None:
+                from woof.runtime_surface_fetch import require_runtime_surface_fields
+                from woof.source_adapters import get_source_adapter
+                require_runtime_surface_fields(root_met, get_source_adapter("hrrr"))
             from woof.ingest.hrrr_physics import resolve_prepared_noah_surface
             from woof.ingest.preprocess_backend import (
                 preprocess_reports_identity)
@@ -5018,6 +5589,8 @@ def run(args):
             timing["write_prepared_state_and_all_lbc_cache"] = (
                 time.perf_counter() - started)
 
+    if physical_output is not None:
+        physical_output_receipt = physical_output.seal()
     if root_result is None or root_met is None or initial_snapshot is None:
         raise AssertionError("benchmark preparation produced no initial state")
     if (last_valid_time - initial_snapshot.valid_time).total_seconds() \
@@ -5031,7 +5604,8 @@ def run(args):
             root_result.state, exp.root.run,
             getattr(root_result, "hydrometeor_initialization", None)))
 
-    verify_overlay_sequence(overlay_series)
+    _verify_preparation_overlay(overlay_series, physical_input=physical_input,
+                                binding=water_overlay_binding)
     if args.prepare_only:
         if prepared_cache_receipt is None:
             raise RuntimeError("prepare-only completed without a cache receipt")
@@ -5085,6 +5659,8 @@ def run(args):
                 "lbc_payload_sha256": lbc_payload_sha256,
             },
             "prepared_cache": prepared_cache_receipt,
+            **({"physical_output_store": physical_output_receipt}
+               if physical_output_receipt is not None else {}),
             "physics": physics_profile,
             "memory": {
                 "gpu_peak_used_bytes_observed": setup_gpu_peak_used,
@@ -5149,6 +5725,11 @@ def run(args):
             args, pipeline_report, source_hash_receipt, source_window)
 
     started = time.perf_counter()
+    from woof.static.external_source import static_source_for
+    if static_source_for(static_highres) is not None:
+        from woof.runtime_surface_fetch import require_runtime_surface_fields
+        from woof.source_adapters import get_source_adapter
+        require_runtime_surface_fields(root_met, get_source_adapter("hrrr"))
     driver = initialize_hrrr_physics(
         root_result, dc.run, root_met, static, attrs, grid,
         initial_snapshot.valid_time,
@@ -5629,7 +6210,7 @@ def _parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bridge", type=Path, required=True)
     parser.add_argument(
-        "--physics-profile",
+        "--physics-profile", type=canonical_template_id,
         default=None,
         help="optional equality assertion against a named physics template; "
              "this route offers "
@@ -5670,6 +6251,14 @@ def _parse_args(argv=None):
     parser.add_argument("--source-manifest-sha256")
     parser.add_argument("--static-cache", type=Path, required=True)
     parser.add_argument("--static-receipt", type=Path, required=True)
+    parser.add_argument("--physical-input-provider", type=Path,
+                        help="posted native physical provider with a frozen member plan")
+    parser.add_argument("--physical-member-index", type=int,
+                        help="original recipe member index in the posted provider")
+    parser.add_argument("--physical-input-store", type=Path,
+                        help="sealed native physical snapshots for this complete forcing window")
+    parser.add_argument("--physical-output-store", type=Path,
+                        help="capture mapped native physical snapshots before real initialization")
     parser.add_argument(
         "--domain-spec", type=Path,
         help=("strict gpuwm-hrrr-target-domain-v1 JSON; omission retains "
@@ -5764,6 +6353,9 @@ def _parse_args(argv=None):
         }
         if args.as_posted is not None:
             required.pop("source_manifest_sha256")
+        if args.physical_input_provider is not None:
+            required.pop("pipeline_decoder")
+            required.pop("pipeline_signals")
         missing = [key for key, value in required.items() if value is None]
         if missing:
             parser.error(f"pipeline mode is missing: {missing}")

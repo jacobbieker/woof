@@ -27,6 +27,8 @@ struct Request {
     title: String,
     #[serde(default)]
     subtitle: Option<String>,
+    #[serde(default)]
+    theme: Option<String>,
     sheets: Vec<SheetRequest>,
 }
 
@@ -235,6 +237,12 @@ fn run(request_path: &Path) -> Result<(), String> {
     if request.sheets.is_empty() {
         return Err("a pair-sheet request names no sheet".into());
     }
+    if let Some(spec) = request.theme.as_deref() {
+        if spec.trim().is_empty() {
+            return Err("pair-sheet theme must not be blank".into());
+        }
+        rustwx_render::install_theme(rustwx_render::RenderTheme::resolve(spec)?)?;
+    }
     let mut failed = 0usize;
     for sheet in &request.sheets {
         let result = compose(&request, sheet).and_then(|canvas| {
@@ -273,6 +281,38 @@ pub fn try_cli(args: &[String]) -> Option<Result<(), String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_native_pair_sheet_preserves_every_source_pixel_at_its_own_size() {
+        let root = std::env::temp_dir().join(format!(
+            "rustwx-pair-pixels-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .unwrap().as_nanos()));
+        fs::create_dir(&root).unwrap();
+        let left = RgbaImage::from_fn(31, 24, |x, y| {
+            image::Rgba([(x * 7) as u8, (y * 9) as u8, 103, 255])
+        });
+        let right = RgbaImage::from_fn(39, 28, |x, y| {
+            image::Rgba([61, (x * 5) as u8, (y * 7) as u8, 255])
+        });
+        let left_path = root.join("a.png");
+        let right_path = root.join("b.png");
+        left.save(&left_path).unwrap();
+        right.save(&right_path).unwrap();
+        let legs = [("A".into(), left_path.clone()), ("B".into(), right_path.clone())];
+        let canvas = compose_with("Paired fields", None, &legs, pair_layout).unwrap();
+        let plan = pair_layout(2, 39, 28, false);
+        assert_eq!((canvas.width(), canvas.height()), (plan.canvas_w, plan.canvas_h));
+        for (panel, (_, (x, y))) in [left, right].iter().zip(&plan.cells) {
+            for (px, py, pixel) in panel.enumerate_pixels() {
+                assert_eq!(canvas.get_pixel(x + px, y + py), pixel,
+                           "source pixel ({px}, {py}) changed in the pair sheet");
+            }
+        }
+        fs::remove_file(left_path).unwrap();
+        fs::remove_file(right_path).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
 
     #[test]
     fn square_panels_pair_in_a_row_and_wide_panels_stack() {

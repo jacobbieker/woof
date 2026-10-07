@@ -14,11 +14,12 @@ CPU-importable.
 """
 from __future__ import annotations
 from collections.abc import Mapping
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
 import fnmatch
+import json
 import os
 from pathlib import Path
 import queue
@@ -682,6 +683,24 @@ def _driver_refreshes_psfc(state) -> bool:
         getattr(physics, "surface_enabled", False))
 
 
+def _state_device_context(state):
+    """Select the state card without requiring CUDA for host-only templates."""
+    device = getattr(getattr(state, "mup", None), "device", None)
+    return device if getattr(device, "id", None) is not None else nullcontext()
+
+
+def _domain_output_device(state):
+    """A host shell keeps its run's card even after its arrays are freed."""
+    streamed = getattr(state, "_streamed_domain", None)
+    run = getattr(streamed, "_run", None)
+    devices = getattr(run, "devices", ())
+    if devices:
+        return int(devices[0])
+    if getattr(run, "_device_id", None) is not None:
+        return int(run._device_id)
+    return getattr(getattr(getattr(state, "mup", None), "device", None), "id", None)
+
+
 def state_frame(
         state, *, include_diagnostic_pressure: bool = False
 ) -> dict[str, np.ndarray]:
@@ -702,58 +721,59 @@ def state_frame(
     """
     import cupy as cp  # deferred: the writer itself stays CPU-importable
 
-    ny, nx = state.mup.shape
-    phb = cp.asnumpy(state.phb)
-    if phb.ndim == 1:                     # flat base state: broadcast column
-        phb = np.ascontiguousarray(
-            np.broadcast_to(phb[:, None, None], (phb.size, ny, nx)))
-    fields = {
-        "T": (cp.asnumpy(state.thp) if _WRF_EXACT
-              else cp.asnumpy(state.total_theta()) - np.float32(300.0)),
-        **{name: cp.asnumpy(getattr(state, attribute))
-           for name, attribute in CORE_DIRECT_STATE_FIELDS.items()},
-        "PHB": phb,
-        "MUB": cp.asnumpy(state.mub2d),
-        "HGT": cp.asnumpy(state.ht),
-    }
-    if include_diagnostic_pressure:
-        pb = state.pb
-        pb3 = pb if pb.ndim == 3 else pb[:, None, None]
-        fields["P"] = cp.asnumpy(state.p_perturbation if DIAGNOSTICS_ENABLED
-                                 else state.p - pb3)
-        # Broadcast on the host: a state prepared on the CPU carries numpy
-        # arrays, and cp.broadcast_to refuses those where cp.asnumpy does
-        # not.  Same bytes for a device state.
-        fields["PB"] = np.ascontiguousarray(
-            np.broadcast_to(cp.asnumpy(pb3), tuple(state.p.shape)))
-        if _driver_refreshes_psfc(state):
-            fields["PSFC"] = cp.asnumpy(state.physics.fields["psfc"])
-        elif getattr(state, "p_top", None) is not None:
-            # Without a physics driver, diagnose PSFC the way WRF's
-            # phy_prep extrapolates the full (moist) pressure to the
-            # surface in z (module_big_step_utilities_em.F:5566-5578).
-            # The previous dry form (total_mu + p_top) understates a
-            # moist column's PSFC by the column water weight.
-            from woof.core import constants as c
-            phb3 = (state.phb[:, None, None]
-                    if state.phb.ndim == 1 else state.phb)
-            z_if = (phb3 + state.php) / np.float32(c.G)
-            z_mid = 0.5 * (z_if[:-1] + z_if[1:])
-            w1 = (z_if[0] - z_mid[1]) / (z_mid[0] - z_mid[1])
-            fields["PSFC"] = cp.asnumpy(
-                w1 * state.p[0] + (1.0 - w1) * state.p[1])
-    if state.qv is not None:
-        fields.update({name: cp.asnumpy(getattr(state, attribute))
-                       for name, attribute in MOISTURE_STATE_FIELDS.items()})
-    for name, array in _live_state_history_fields(state).items():
-        if isinstance(array, np.ndarray):
-            fields[name] = np.array(array, copy=True, order="C")
-        else:
-            fields[name] = cp.asnumpy(array)
-    if getattr(state, "physics", None) is not None:
-        fields.update({name: cp.asnumpy(array)
-                       for name, array in state.physics.output_fields().items()})
-    return fields
+    with _state_device_context(state):
+        ny, nx = state.mup.shape
+        phb = cp.asnumpy(state.phb)
+        if phb.ndim == 1:                     # flat base state: broadcast column
+            phb = np.ascontiguousarray(
+                np.broadcast_to(phb[:, None, None], (phb.size, ny, nx)))
+        fields = {
+            "T": (cp.asnumpy(state.thp) if _WRF_EXACT
+                  else cp.asnumpy(state.total_theta()) - np.float32(300.0)),
+            **{name: cp.asnumpy(getattr(state, attribute))
+               for name, attribute in CORE_DIRECT_STATE_FIELDS.items()},
+            "PHB": phb,
+            "MUB": cp.asnumpy(state.mub2d),
+            "HGT": cp.asnumpy(state.ht),
+        }
+        if include_diagnostic_pressure:
+            pb = state.pb
+            pb3 = pb if pb.ndim == 3 else pb[:, None, None]
+            fields["P"] = cp.asnumpy(state.p_perturbation if DIAGNOSTICS_ENABLED
+                                     else state.p - pb3)
+            # Broadcast on the host: a state prepared on the CPU carries numpy
+            # arrays, and cp.broadcast_to refuses those where cp.asnumpy does
+            # not.  Same bytes for a device state.
+            fields["PB"] = np.ascontiguousarray(
+                np.broadcast_to(cp.asnumpy(pb3), tuple(state.p.shape)))
+            if _driver_refreshes_psfc(state):
+                fields["PSFC"] = cp.asnumpy(state.physics.fields["psfc"])
+            elif getattr(state, "p_top", None) is not None:
+                # Without a physics driver, diagnose PSFC the way WRF's
+                # phy_prep extrapolates the full (moist) pressure to the
+                # surface in z (module_big_step_utilities_em.F:5566-5578).
+                # The previous dry form (total_mu + p_top) understates a
+                # moist column's PSFC by the column water weight.
+                from woof.core import constants as c
+                phb3 = (state.phb[:, None, None]
+                        if state.phb.ndim == 1 else state.phb)
+                z_if = (phb3 + state.php) / np.float32(c.G)
+                z_mid = 0.5 * (z_if[:-1] + z_if[1:])
+                w1 = (z_if[0] - z_mid[1]) / (z_mid[0] - z_mid[1])
+                fields["PSFC"] = cp.asnumpy(
+                    w1 * state.p[0] + (1.0 - w1) * state.p[1])
+        if state.qv is not None:
+            fields.update({name: cp.asnumpy(getattr(state, attribute))
+                           for name, attribute in MOISTURE_STATE_FIELDS.items()})
+        for name, array in _live_state_history_fields(state).items():
+            if isinstance(array, np.ndarray):
+                fields[name] = np.array(array, copy=True, order="C")
+            else:
+                fields[name] = cp.asnumpy(array)
+        if getattr(state, "physics", None) is not None:
+            fields.update({name: cp.asnumpy(array)
+                           for name, array in state.physics.output_fields().items()})
+        return fields
 
 
 def _validation_reader(path):
@@ -1100,6 +1120,13 @@ class WrfoutWriter:
         })
         if global_attrs:
             ds.setncatts(dict(global_attrs))
+        # The physics parameter set this process runs, when it runs one
+        # (woof.physics_params).  A default run writes nothing here, so
+        # its file is the file it always was.
+        from woof.physics_params import wrfout_global_attrs
+        parameter_set = wrfout_global_attrs()
+        if parameter_set:
+            ds.setncatts(parameter_set)
         ds.createVariable("Times", "S1", ("Time", "DateStrLen"))
         self._n = 0
         self._times = []
@@ -1398,30 +1425,17 @@ class WrfoutWriter:
                 self._temp_path, inventory=inventory, shapes=shapes,
                 times=times)
             self._publication_file.check_validated()
-            # Sharing violations receive the same capped 0.50 s retry as the
-            # heartbeat, but a durable wrfout publication remains fail-loud.
-            replace_file_with_retry(self._temp_path, self._final_path)
-            # The DATA was made durable above; the NAME is durable only
-            # once the containing directory is synced.  Without this a
-            # machine that loses power seconds after a frame is published
-            # can come back with the file's bytes intact and its directory
-            # entry still naming the hidden temporary -- which the next
-            # run's ``quarantine_orphan_wrfouts`` sweeps into
-            # ``.quarantine`` on the ``.wrfout*.tmp*`` glob.  The frame's
-            # own ready marker is published through
-            # ``supervisor.atomic_write_json``, which DOES fsync its
-            # directory, so the documented invariant "a marker that exists
-            # names a frame that is complete and readable" can invert.
-            # This is the last step of ``supervisor.atomic_publish_file``,
-            # the helper whose docstring says the wrfout handoff uses it.
-            _fsync_directory(self._final_path.parent)
-            self.publication_revision = self._publication_file.published(self._final_path)
-            if not getattr(self, "_retain_identity_handle", False):
-                self.release_identity_handle()
+            if getattr(self, "_retain_identity_handle", False):
+                # Finish identity outside the NetCDF lock, after releasing
+                # host staging and before exposing the final history name.
+                self.publication_revision = self._publication_file.written
+                return
+            self._publish_output()
+            self.release_identity_handle()
         except BaseException:
             self.release_identity_handle(preserve=True)
             if not self._closed:
-                # A half-closed netCDF handle can fail repeatedly.  Preserve
+                # A half-closed netCDF handle can fail repeatedly. Preserve
                 # the original publication error and still reach quarantine.
                 with suppress(BaseException):
                     self._abandon_ds()
@@ -1432,6 +1446,16 @@ class WrfoutWriter:
                         self._temp_path,
                         reason="failed-wrfout-publication")
             raise
+
+    def _publish_output(self, *, allow_missing=False):
+        # Sharing violations receive the same capped 0.50 s retry as the
+        # heartbeat, but a durable wrfout publication remains fail-loud.
+        replace_file_with_retry(self._temp_path, self._final_path)
+        # Sync the name before emitting a ready marker. A durable payload
+        # alone could otherwise recover under its hidden temporary name.
+        _fsync_directory(self._final_path.parent)
+        self.publication_revision = self._publication_file.published(
+            self._final_path, allow_missing=allow_missing)
 
     def release_identity_handle(self, *, preserve=False):
         retained, self._publication_file = self._publication_file, None
@@ -1462,13 +1486,23 @@ class WrfoutWriter:
             retained.close()
 
     def complete_output_identity(self, *, cancel_event=None):
-        from woof.output_identity import completed_file_record
+        from woof.output_identity import CompletedFileRecord, completed_file_record
         try:
-            return completed_file_record(
-                self._final_path, published=self.publication_revision,
+            proof = completed_file_record(
+                self._temp_path, published=self.publication_revision,
                 cancel_event=cancel_event, handle=self._publication_file.handle)
+            self._publication_file.check_validated()
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Output publication was cancelled before completion.")
+            self._publish_output(allow_missing=True)
+            return CompletedFileRecord(
+                str(self._final_path.resolve()), proof.size, proof.sha256,
+                self.publication_revision, str(self._final_path))
         except BaseException:
             self.release_identity_handle(preserve=True)
+            if self._temp_path.exists():
+                with suppress(BaseException):
+                    quarantine_file(self._temp_path, reason="failed-wrfout-identity")
             raise
         finally:
             self.release_identity_handle()
@@ -1499,40 +1533,41 @@ def _device_state_frame(state, *, include_diagnostic_pressure: bool = True):
     """Build the standard frame as live device arrays for side-stream D2H."""
     import cupy as cp
 
-    ny, nx = state.mup.shape
-    phb = state.phb
-    if phb.ndim == 1:
-        phb = cp.broadcast_to(phb[:, None, None], (phb.size, ny, nx))
-    fields = {
-        "T": (state.thp if _WRF_EXACT
-              else state.total_theta() - cp.float32(300.0)),
-        **{name: getattr(state, attribute)
-           for name, attribute in CORE_DIRECT_STATE_FIELDS.items()},
-        "PHB": phb, "MUB": state.mub2d, "HGT": state.ht,
-    }
-    if include_diagnostic_pressure:
-        pb = state.pb
-        pb3 = pb if pb.ndim == 3 else pb[:, None, None]
-        fields["P"] = (state.p_perturbation if DIAGNOSTICS_ENABLED
-                       else state.p - pb3)
-        fields["PB"] = cp.broadcast_to(pb3, state.p.shape)
-        if _driver_refreshes_psfc(state):
-            fields["PSFC"] = state.physics.fields["psfc"]
-        elif getattr(state, "p_top", None) is not None:
-            from woof.core import constants as c
-            phb3 = (state.phb[:, None, None]
-                    if state.phb.ndim == 1 else state.phb)
-            z_if = (phb3 + state.php) / cp.float32(c.G)
-            z_mid = 0.5 * (z_if[:-1] + z_if[1:])
-            w1 = (z_if[0] - z_mid[1]) / (z_mid[0] - z_mid[1])
-            fields["PSFC"] = w1 * state.p[0] + (1.0 - w1) * state.p[1]
-    if state.qv is not None:
-        fields.update({name: getattr(state, attribute)
-                       for name, attribute in MOISTURE_STATE_FIELDS.items()})
-    fields.update(_live_state_history_fields(state))
-    if getattr(state, "physics", None) is not None:
-        fields.update(state.physics.output_fields())
-    return fields
+    with _state_device_context(state):
+        ny, nx = state.mup.shape
+        phb = state.phb
+        if phb.ndim == 1:
+            phb = cp.broadcast_to(phb[:, None, None], (phb.size, ny, nx))
+        fields = {
+            "T": (state.thp if _WRF_EXACT
+                  else state.total_theta() - cp.float32(300.0)),
+            **{name: getattr(state, attribute)
+               for name, attribute in CORE_DIRECT_STATE_FIELDS.items()},
+            "PHB": phb, "MUB": state.mub2d, "HGT": state.ht,
+        }
+        if include_diagnostic_pressure:
+            pb = state.pb
+            pb3 = pb if pb.ndim == 3 else pb[:, None, None]
+            fields["P"] = (state.p_perturbation if DIAGNOSTICS_ENABLED
+                           else state.p - pb3)
+            fields["PB"] = cp.broadcast_to(pb3, state.p.shape)
+            if _driver_refreshes_psfc(state):
+                fields["PSFC"] = state.physics.fields["psfc"]
+            elif getattr(state, "p_top", None) is not None:
+                from woof.core import constants as c
+                phb3 = (state.phb[:, None, None]
+                        if state.phb.ndim == 1 else state.phb)
+                z_if = (phb3 + state.php) / cp.float32(c.G)
+                z_mid = 0.5 * (z_if[:-1] + z_if[1:])
+                w1 = (z_if[0] - z_mid[1]) / (z_mid[0] - z_mid[1])
+                fields["PSFC"] = w1 * state.p[0] + (1.0 - w1) * state.p[1]
+        if state.qv is not None:
+            fields.update({name: getattr(state, attribute)
+                           for name, attribute in MOISTURE_STATE_FIELDS.items()})
+        fields.update(_live_state_history_fields(state))
+        if getattr(state, "physics", None) is not None:
+            fields.update(state.physics.output_fields())
+        return fields
 
 
 @dataclass
@@ -1565,6 +1600,9 @@ class _AsyncFrame:
     #: assembles it, after its download lands.  ``None`` for every other
     #: frame, whose ``fields`` are complete at admission.
     deferred: object = None
+    #: Required producer identity handoff. Unlike telemetry, failure prevents
+    #: publication being treated as a safely consumable ensemble history.
+    completed_observer: object = None
 
 
 def _compose_host_frame(frame_items, refl, extra) -> dict:
@@ -1649,6 +1687,7 @@ class AsyncDomainWrfoutWriter:
     #: defaults for the same ``object.__new__`` shells as above.
     _pending_bytes = 0
     _identity_bytes = 0
+    _device = None
 
     @staticmethod
     def _new_ticket_queue() -> queue.Queue:
@@ -1660,7 +1699,7 @@ class AsyncDomainWrfoutWriter:
 
     def __init__(self, *, nx, ny, nz, dx, dy, title, global_attrs,
                  abort_event=None, soil_layers=None, grid_id=None,
-                 landing_observer=None, history_selection=None):
+                 landing_observer=None, history_selection=None, device=None):
         import cupy as cp
 
         #: Which domain this writer is, and who to tell when one of its
@@ -1681,7 +1720,9 @@ class AsyncDomainWrfoutWriter:
         self.dx, self.dy = float(dx), float(dy)
         self.title = title
         self.global_attrs = dict(global_attrs)
-        self.stream = cp.cuda.Stream(non_blocking=True)
+        self._device = cp.cuda.Device(device)
+        with self._device:
+            self.stream = cp.cuda.Stream(non_blocking=True)
         self._queue = self._new_ticket_queue()
         self._condition = threading.Condition()
         self._pending = 0
@@ -1696,6 +1737,10 @@ class AsyncDomainWrfoutWriter:
             target=self._worker, name=f"gpuwm-wrfout-{id(self):x}",
             daemon=True)
         self._thread.start()
+
+    def _device_context(self):
+        # CPU-only writer shells have no CUDA owner. Real writers always do.
+        return self._device if self._device is not None else nullcontext()
 
     @property
     def pending(self) -> int:
@@ -1823,7 +1868,7 @@ class AsyncDomainWrfoutWriter:
         return {**base, **history_attrs}
 
     def submit(self, path, valid_time, state, *, extra_fields=None,
-               refl_field=None, frame=None, global_attrs=None) -> None:
+               refl_field=None, frame=None, global_attrs=None, completed_observer=None) -> None:
         """Queue a nonblocking, stream-ordered snapshot of one domain.
 
         ``frame`` is a COMPLETE host frame, already assembled, and it is the
@@ -1865,82 +1910,94 @@ class AsyncDomainWrfoutWriter:
         """
         import cupy as cp
 
-        if self._closed:
-            raise RuntimeError("cannot submit to a closed wrfout writer")
-        self._raise_failure()
-        producer = cp.cuda.get_current_stream()
-        if frame is not None:
-            if state is not None:
-                raise ValueError(
-                    "submit() was given both a prepared host frame and a "
-                    "device state; they are two different domains' worth of "
-                    "numbers and there is no rule for which wins.  A "
-                    "streamed domain passes state=None.")
-            self._admit_host_frame(path, valid_time, frame,
-                                   extra_fields=extra_fields,
-                                   refl_field=refl_field, producer=producer,
-                                   global_attrs=global_attrs)
-            return
-        device_fields = _device_state_frame(
-            state, include_diagnostic_pressure=True)
-        if refl_field is not None:
-            device_fields["REFL_10CM"] = refl_field
-        # The [output] selection, resolved BEFORE the staging loop below
-        # so a dropped field costs no D2H at all -- see _history_plan.
-        produced = list(device_fields)
-        produced.extend(name for name in (extra_fields or ())
-                        if name not in device_fields)
-        keep, history_attrs = self._history_plan(produced)
-        ready = cp.cuda.Event()
-        ready.record(producer)
-        self.stream.wait_event(ready)
+        # A caller can finish another rank with a different card current.
+        # Stream entry does not select its card in CuPy.
+        with self._device_context():
+            if self._closed:
+                raise RuntimeError("cannot submit to a closed wrfout writer")
+            self._raise_failure()
+            producer = cp.cuda.get_current_stream()
+            try:
+                if frame is not None:
+                    if state is not None:
+                        raise ValueError(
+                            "submit() was given both a prepared host frame and a "
+                            "device state; they are two different domains' worth of "
+                            "numbers and there is no rule for which wins.  A "
+                            "streamed domain passes state=None.")
+                    self._admit_host_frame(path, valid_time, frame,
+                                           extra_fields=extra_fields,
+                                           refl_field=refl_field, producer=producer,
+                                           global_attrs=global_attrs,
+                                           completed_observer=completed_observer)
+                    return
+                device_fields = _device_state_frame(
+                    state, include_diagnostic_pressure=True)
+                if refl_field is not None:
+                    device_fields["REFL_10CM"] = refl_field
+                # The [output] selection, resolved BEFORE the staging loop below
+                # so a dropped field costs no D2H at all -- see _history_plan.
+                produced = list(device_fields)
+                produced.extend(name for name in (extra_fields or ())
+                                if name not in device_fields)
+                keep, history_attrs = self._history_plan(produced)
+                ready = cp.cuda.Event()
+                ready.record(producer)
+                self.stream.wait_event(ready)
 
-        host_fields: dict[str, np.ndarray] = {}
-        device_refs: list[object] = []
-        pinned_refs: list[object] = []
-        with self.stream:
-            for name, value in device_fields.items():
-                if name not in keep:
-                    continue
-                if isinstance(value, np.ndarray):
-                    # Already on host: staging it through the device would
-                    # be a pure bounce (measured ~1.8 GiB of cached device
-                    # staging across the initial frames).  np.array preserves
-                    # a scalar P_TOP's 0-D shape; np.ascontiguousarray would
-                    # silently promote it to (1,) and give it a vertical dim.
-                    host_fields[name] = np.array(
-                        value, copy=True, order="C", subok=False)
-                    continue
-                array = cp.ascontiguousarray(value)
-                memory = cp.cuda.alloc_pinned_memory(int(array.nbytes))
-                host = np.frombuffer(memory, dtype=array.dtype,
-                                     count=array.size).reshape(array.shape)
-                array.get(out=host, stream=self.stream, blocking=False)
-                host_fields[name] = host
-                device_refs.append(array)
-                pinned_refs.append(memory)
-            for name, value in (extra_fields or {}).items():
-                # Prognostic/state-derived fields win (notably child HGT,
-                # which is blended while static HGT_M remains unblended).
-                if name not in host_fields and name in keep:
-                    host_fields[name] = np.ascontiguousarray(value)
-            done = cp.cuda.Event()
-            done.record(self.stream)
-        # The next mutation on the producing stream waits for the snapshot,
-        # while the host remains free to write another domain/file.
-        producer.wait_event(done)
-        ticket = _AsyncFrame(
-            path=Path(path),
-            time_str=valid_time.strftime("%Y-%m-%d_%H:%M:%S"),
-            fields=host_fields, event=done,
-            device_refs=tuple(device_refs),
-            pinned_refs=tuple(pinned_refs),
-            valid_time=valid_time,
-            global_attrs=self._frame_attrs(global_attrs, history_attrs))
-        self._admit(ticket)
+                host_fields: dict[str, np.ndarray] = {}
+                device_refs: list[object] = []
+                pinned_refs: list[object] = []
+                with self.stream:
+                    for name, value in device_fields.items():
+                        if name not in keep:
+                            continue
+                        if isinstance(value, np.ndarray):
+                            # Already on host: staging it through the device would
+                            # be a pure bounce (measured ~1.8 GiB of cached device
+                            # staging across the initial frames).  np.array preserves
+                            # a scalar P_TOP's 0-D shape; np.ascontiguousarray would
+                            # silently promote it to (1,) and give it a vertical dim.
+                            host_fields[name] = np.array(
+                                value, copy=True, order="C", subok=False)
+                            continue
+                        array = cp.ascontiguousarray(value)
+                        memory = cp.cuda.alloc_pinned_memory(int(array.nbytes))
+                        host = np.frombuffer(memory, dtype=array.dtype,
+                                             count=array.size).reshape(array.shape)
+                        array.get(out=host, stream=self.stream, blocking=False)
+                        host_fields[name] = host
+                        device_refs.append(array)
+                        pinned_refs.append(memory)
+                    for name, value in (extra_fields or {}).items():
+                        # Prognostic/state-derived fields win (notably child HGT,
+                        # which is blended while static HGT_M remains unblended).
+                        if name not in host_fields and name in keep:
+                            host_fields[name] = np.ascontiguousarray(value)
+                    done = cp.cuda.Event()
+                    done.record(self.stream)
+                # The next mutation on the producing stream waits for the snapshot,
+                # while the host remains free to write another domain/file.
+                producer.wait_event(done)
+                ticket = _AsyncFrame(
+                    path=Path(path),
+                    time_str=valid_time.strftime("%Y-%m-%d_%H:%M:%S"),
+                    fields=host_fields, event=done,
+                    completed_observer=completed_observer,
+                    device_refs=tuple(device_refs),
+                    pinned_refs=tuple(pinned_refs),
+                    valid_time=valid_time,
+                    global_attrs=self._frame_attrs(global_attrs, history_attrs))
+                self._admit(ticket)
+            finally:
+                # CuPy stream contexts restore their context stack, which can
+                # differ from a producer selected with Stream.use(). Keep the
+                # caller on the stream that waits for this frame's snapshot.
+                producer.use()
+
 
     def _admit_host_frame(self, path, valid_time, frame, *, extra_fields,
-                          refl_field, producer, global_attrs=None) -> None:
+                          refl_field, producer, global_attrs=None, completed_observer=None) -> None:
         """Publish a frame that is already on the host.
 
         The whole of ``submit``'s device machinery collapses here and it is
@@ -2004,6 +2061,7 @@ class AsyncDomainWrfoutWriter:
             path=Path(path),
             time_str=valid_time.strftime("%Y-%m-%d_%H:%M:%S"),
             fields=host_fields, event=done,
+            completed_observer=completed_observer,
             device_refs=tuple(device_refs),
             pinned_refs=tuple(pinned_refs),
             valid_time=valid_time,
@@ -2033,6 +2091,12 @@ class AsyncDomainWrfoutWriter:
         return host
 
     def _worker(self) -> None:
+        # CUDA current devices are thread-local. A new writer thread starts
+        # on card 0 even when its stream and buffers belong to another card.
+        with self._device_context():
+            self._worker_on_device()
+
+    def _worker_on_device(self) -> None:
         if not hasattr(self, "_completed_records"):
             self._completed_records = []
         while True:
@@ -2083,8 +2147,9 @@ class AsyncDomainWrfoutWriter:
                         self._abort_event.set()
                         raise
                 # The native writer has consumed every host view and made
-                # the file durable. Release staging before its separate
-                # payload hash, so a streamed next step can reuse its store.
+                # the temporary file durable. Release staging before its
+                # payload hash and final-name publication, so a streamed
+                # next step can reuse its store.
                 # Identity work stays on this worker and outside the NetCDF
                 # lock; the existing queue still holds at most one ticket.
                 ticket.fields = {}
@@ -2099,6 +2164,8 @@ class AsyncDomainWrfoutWriter:
                 published = getattr(writer, "publication_revision", None)
                 if published is not None:
                     proof = writer.complete_output_identity(cancel_event=self._abort_event)
+                    if ticket.completed_observer is not None:
+                        ticket.completed_observer(proof, ticket.valid_time)
                     with self._condition:
                         self._completed_records.append(proof)
                 self.paths.append(ticket.path)
@@ -2285,6 +2352,9 @@ def _carrier_attrs(policy: str, rows) -> dict:
 class PerDomainWrfoutWriters:
     """One asynchronous writer/side stream per domain in an experiment."""
 
+    _simulated_radar = None
+    _output_observer = None
+
     #: The tree-wide ``[output]`` history selection this writer set was
     #: built with (``ExperimentConfig.output``), or ``None`` for the FULL
     #: default.  A class attribute so the verification cases and the
@@ -2300,7 +2370,8 @@ class PerDomainWrfoutWriters:
     def __init__(self, model, output_dir, *, start_time, title,
                  initial_condition=None, source=None,
                  progress_callback=None, history_selection=None,
-                 episodes_by_grid_id=None):
+                 episodes_by_grid_id=None, simulated_radar=None,
+                 radar_output_dir=None):
         """``initial_condition`` is the preparation receipt's provenance
         block, stamped onto every domain's frames so the durable artifact
         states what its initial state was and not only when it began.
@@ -2349,7 +2420,10 @@ class PerDomainWrfoutWriters:
         #: Every final pathname THIS writer set has published, which is
         #: what the duplicate-valid-time guard in submit() is scoped to.
         self._published_paths = set()
+        self._captured_paths = []
         self._abort_event = threading.Event()
+        self._output_observer = None
+        self._simulated_radar = None
         resumed_episodes = {int(gid): int(episode) for gid, episode
                             in dict(episodes_by_grid_id or {}).items()}
         for node in model.walk_parent_first():
@@ -2376,8 +2450,15 @@ class PerDomainWrfoutWriters:
                     simulation_start_time=start_time),
                 abort_event=self._abort_event,
                 grid_id=node.cfg.grid_id,
-                history_selection=self._selection_for(node.cfg))
+                history_selection=self._selection_for(node.cfg),
+                device=_domain_output_device(node.state))
         self.last_durable_wrfout = None
+        if simulated_radar is not None and simulated_radar.enabled:
+            from woof.simulated_radar import LiveSimulatedRadar
+            self._simulated_radar = LiveSimulatedRadar(
+                simulated_radar, radar_output_dir or self.output_dir)
+            for writer in self._writers.values():
+                writer.landing_observer = self._notify_output
         if progress_callback is not None:
             self.attach_progress_callback(progress_callback)
             self.attach_write_progress(progress_callback)
@@ -2419,9 +2500,19 @@ class PerDomainWrfoutWriters:
                 "would silently miss them.  Attach before the first "
                 "history period, or pass progress_callback to the "
                 "constructor.")
-        observer = getattr(progress_callback, "output_committed", None)
+        self._output_observer = getattr(progress_callback, "output_committed", None)
+        observer = (self._notify_output if getattr(self, "_simulated_radar", None) is not None
+                    else self._output_observer)
         for writer in self._writers.values():
             writer.landing_observer = observer
+
+    def _notify_output(self, **event):
+        # Requested radar output is checked by drain/close on the model
+        # thread, since the writer treats landing callbacks as telemetry.
+        if self._simulated_radar is not None:
+            self._simulated_radar.output_committed(**event)
+        if self._output_observer is not None:
+            self._output_observer(**event)
 
     def attach_write_progress(self, progress_callback) -> None:
         """Tell ``progress_callback`` about each write between two steps.
@@ -2460,6 +2551,11 @@ class PerDomainWrfoutWriters:
         for gid in sorted(self._writers):
             ret.extend(self._writers[gid].paths)
         return tuple(ret)
+
+    @property
+    def captured_paths(self) -> tuple[Path, ...]:
+        """Logical history cadence captured without claiming member files."""
+        return tuple(getattr(self, "_captured_paths", ()))
 
     @property
     def completed_records(self):
@@ -2508,7 +2604,14 @@ class PerDomainWrfoutWriters:
                 source=self._source,
                 simulation_start_time=self.start_time),
             abort_event=self._abort_event,
-            history_selection=self._selection_for(node.cfg))
+            grid_id=grid_id,
+            # Only [simulated_radar] listens for a late domain's frames.
+            # Without it a spawned nest reports nothing, exactly as 2.8.3
+            # wrote it: no output_committed events for those frames.
+            landing_observer=(self._notify_output if self._simulated_radar is not None
+                              else None),
+            history_selection=self._selection_for(node.cfg),
+            device=_domain_output_device(node.state))
 
     def remove_domain(self, grid_id: int) -> None:
         """Drain and close one retired episode without losing its paths."""
@@ -2574,6 +2677,8 @@ class PerDomainWrfoutWriters:
         marker ``streaming.StreamedDomain`` leaves on the state it took
         over.
         """
+        if getattr(self, "_simulated_radar", None) is not None:
+            self._simulated_radar.check()
         seconds = ticks / node.clock.tick_den
         valid_time = self.start_time + timedelta(seconds=seconds)
         episode = int(self._episode_by_grid_id.get(node.cfg.grid_id, 0))
@@ -2606,7 +2711,26 @@ class PerDomainWrfoutWriters:
                 "frame. (A frame left by a PREVIOUS run at this path is "
                 "replaced as it always has been.)")
         self._published_paths.add(path)
+        from woof.ensemble.runtime_context import current_capture
+        capture = current_capture()
+        if capture is not None:
+            metadata = self._metadata_by_grid_id[node.cfg.grid_id]
+            with self._write_beat(f"ensemble-history-d{int(node.cfg.grid_id):02d}",
+                                  capture.work_bytes(metadata)):
+                capture.submit(
+                    state=node.state,
+                    streamed=getattr(node.state, "_streamed_domain", None),
+                    metadata=metadata,
+                    refl_field=refl_field, valid_time=valid_time,
+                    grid_id=node.cfg.grid_id, episode=episode, clock=node.clock)
+            if not hasattr(self, "_captured_paths"):
+                self._captured_paths = []
+            self._captured_paths.append(path)
+            if not capture.keep_member_files:
+                return
         writer = self._writers[node.cfg.grid_id]
+        committed = (None if capture is None else capture.history_committer(
+            grid_id=node.cfg.grid_id, episode=episode))
         # CARRIER PROVENANCE, snapshotted per frame.  Each valid time is
         # its own file, and the snapshot rides the ticket rather than the
         # writer's standing attribute set, so the provenance the driver
@@ -2653,7 +2777,8 @@ class PerDomainWrfoutWriters:
                         extra_fields=self._metadata_by_grid_id[
                             node.cfg.grid_id],
                         refl_field=refl_field,
-                        global_attrs=frame_attrs)
+                        global_attrs=frame_attrs,
+                        completed_observer=committed)
                     # The next sweep may reuse these pinned views once the
                     # native write releases them. Identity hashing can
                     # continue on the worker; final drain/close still wait
@@ -2676,7 +2801,8 @@ class PerDomainWrfoutWriters:
                 path, valid_time, node.state,
                 extra_fields=self._metadata_by_grid_id[node.cfg.grid_id],
                 refl_field=refl_field,
-                global_attrs=frame_attrs)
+                global_attrs=frame_attrs,
+                completed_observer=committed)
 
     def drain(self, *, before_domain=None) -> None:
         """Wait for every domain's durable files and output identities.
@@ -2701,6 +2827,86 @@ class PerDomainWrfoutWriters:
                     self._writers[gid].drain()
             if self._writers[gid].paths:
                 self.last_durable_wrfout = self._writers[gid].paths[-1]
+        if getattr(self, "_simulated_radar", None) is not None:
+            self._simulated_radar.drain()
+
+    def rewind_to_checkpoint(self, valid_time, *, marker_directory=None,
+                             before_delete=None):
+        """Discard only this writer's unchanged frames after a retry seam.
+
+        Drains every asynchronous publication before inspecting output paths.
+        Every victim must still match its writer-completion proof. The whole
+        deletion plan is checked before removing a frame or its ready marker.
+        Earlier frames and unrelated files are preserved. Return path/size
+        receipts so failed-leg simulation data need not be retained.
+        """
+        from woof.output_identity import file_record
+        from woof.restart_render import _frame_valid
+
+        if getattr(self, "_simulated_radar", None) is not None:
+            raise ValueError("automatic history rewind cannot roll back "
+                             "simulated-radar volumes")
+        self.drain()
+        root = self.output_dir.resolve()
+        proofs = {Path(proof.address): proof for proof in self.completed_records}
+        victims = set()
+        removals = []
+        for path in sorted(self._published_paths):
+            instant = _frame_valid(path)
+            if instant is None:
+                raise ValueError(f"history rewind cannot date owned frame {path}")
+            if instant <= valid_time:
+                continue
+            resolved = path.resolve(strict=True)
+            if path.is_symlink() or not resolved.is_relative_to(root):
+                raise ValueError(f"history rewind refuses a linked or outside "
+                                 f"frame {path}")
+            proof = proofs.get(path.absolute())
+            if proof is None:
+                raise ValueError(f"history rewind lacks writer-completion "
+                                 f"proof for {path}")
+            record = file_record(path, completed=proof)
+            removals.append((path, record))
+            victims.add(path)
+            if marker_directory is not None:
+                marker_root = Path(marker_directory)
+                marker = marker_root / f"{path.name}.json"
+                if marker.exists() or marker.is_symlink():
+                    if (marker.is_symlink() or not marker.resolve().is_relative_to(
+                            marker_root.resolve())):
+                        raise ValueError(f"history rewind refuses linked marker {marker}")
+                    data = json.loads(marker.read_text(encoding="utf-8"))
+                    if (data.get("schema") != "gpuwm.frame-ready/v1"
+                            or data.get("path") != str(resolved)):
+                        raise ValueError(f"history rewind marker names another "
+                                         f"publication: {marker}")
+                    removals.append((marker, {"path": str(marker.resolve()),
+                                              "bytes": marker.stat().st_size}))
+        if before_delete is not None:
+            before_delete([record for _path, record in removals])
+        receipts = []
+        for path, record in removals:
+            path.unlink()
+            receipts.append(record)
+        absolute_victims = {str(path.absolute()) for path in victims}
+        for writer in self._writers.values():
+            with writer._condition:
+                writer.paths[:] = [path for path in writer.paths
+                                   if path not in victims]
+                writer._completed_records[:] = [proof for proof in
+                    writer._completed_records
+                    if proof.address not in absolute_victims]
+        self._archived_paths[:] = [path for path in self._archived_paths
+                                   if path not in victims]
+        self._archived_records[:] = [proof for proof in self._archived_records
+                                    if proof.address not in absolute_victims]
+        self._captured_paths[:] = [path for path in self._captured_paths
+                                   if path not in victims]
+        self._published_paths.difference_update(victims)
+        retained = self.paths
+        self.last_durable_wrfout = (None if not retained else
+                                   max(retained, key=_frame_valid))
+        return receipts
 
     def close(self) -> None:
         saved: BaseException | None = None
@@ -2713,6 +2919,12 @@ class PerDomainWrfoutWriters:
                     saved = exc
             if writer.paths:
                 self.last_durable_wrfout = writer.paths[-1]
+        if getattr(self, "_simulated_radar", None) is not None:
+            try:
+                self._simulated_radar.close()
+            except BaseException as exc:
+                if saved is None:
+                    saved = exc
         if saved is not None:
             raise saved
 
@@ -2723,6 +2935,12 @@ class PerDomainWrfoutWriters:
         if exc_type is None:
             self.close()
         else:
+            # A stopping forecast does not wait for queued radar scans: they
+            # are dropped, the running rw_simradar is terminated, and close()
+            # names every history left without a volume.
+            if getattr(self, "_simulated_radar", None) is not None:
+                with suppress(BaseException):
+                    self._simulated_radar.cancel()
             # D2H already in flight must complete before process teardown;
             # publication failures remain quarantined by WrfoutWriter.
             self._abort_event.set()

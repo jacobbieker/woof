@@ -62,6 +62,7 @@ import hashlib
 import importlib
 import importlib.machinery
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Mapping, NamedTuple
@@ -916,6 +917,7 @@ def sim_command(bundle: dict, *, experiment_config: Path,
                 render_products: str | None = None,
                 render_dir: Path | None = None,
                 tiles=None, stream_init: str | None = None, devices: int | None = None, devices_options=None,
+                simulated_radar=None,
                 memory_gate: bool = True) -> list[str]:
     """The exact runner command this prepared tree needs.
 
@@ -945,6 +947,11 @@ def sim_command(bundle: dict, *, experiment_config: Path,
         raise StageRefusal(f"unknown runner arm {layout!r}")
     stream_flags = streaming_flags(layout, tiles=tiles, stream_init=stream_init)
     stream_flags += devices_flags(layout, options=devices_options)
+    from woof.simulated_radar_config import execution_flags as radar_flags
+    try:
+        stream_flags += radar_flags(simulated_radar)
+    except (ValueError, TypeError) as error:
+        raise StageRefusal(str(error)) from error
     if devices is not None:
         stream_flags += ["--devices", str(devices)]
     profile_flags = ([] if physics_profile is None else
@@ -1103,6 +1110,19 @@ def sim_main(args) -> int:
     from woof.explain import explain_enabled, render
 
     try:
+        from woof.ensemble.calibration_admission import (
+            refuse_public_arguments, refuse_unopened_table)
+        try:
+            refuse_public_arguments(args)
+            # This stage runs the one forecast its prepared bundle holds
+            # and opens no ensemble session.  2.8.4 refused an [ensemble]
+            # table here; reading it and running one forecast would drop
+            # the table without a word.
+            refuse_unopened_table(getattr(args, "experiment_config", None),
+                                  door="woof sim")
+        except ValueError as refusal:
+            # Before the bundle is opened or a run folder is claimed.
+            raise StageRefusal(str(refusal)) from refusal
         try:
             bundle = resolve_bundle(args.prepared_root)
         except StageRefusal:
@@ -1145,6 +1165,7 @@ def sim_main(args) -> int:
             devices=getattr(args, "devices", None),
             devices_options=_devices_table_argument(
                 getattr(args, "devices_table", None)),
+            simulated_radar=getattr(args, "simulated_radar_table", None),
             stream_init=getattr(args, "stream_init", None),
             memory_gate=not getattr(args, "no_memory_gate", False))
         if not getattr(args, "print_command", False):
@@ -1175,10 +1196,12 @@ def sim_main(args) -> int:
         render_note = (f"no fetch; drawing {requested} from each output "
                        "frame as it lands")
     elif requested is None:
-        render_note = ("no fetch and no render: pass --render-products to "
-                       "draw each output frame as it lands")
+        render_note = ("no fetch; pass --render-products to draw each "
+                       "output frame as it lands")
     else:
-        render_note = f"no fetch and no render (--render-products {requested})"
+        render_note = f"no fetch; frame maps disabled (--render-products {requested})"
+    if os.environ.get("WOOF_VERIFY_VISUALS", "1").lower() not in {"0", "false", "off"}:
+        render_note += "; observation verification at finish as reports are available"
     print(f"sim: {bundle.get('root', bundle['document'].parent)} -- "
           f"{bundle['schema']} "
           f"(source {bundle['source']}, "
@@ -1246,7 +1269,9 @@ def register_cli(subparsers) -> None:
                      help="the experiment TOML this preparation was "
                           "bound to (the tree runner binds its digest; "
                           "the single-domain runner binds it through "
-                          "the proof)")
+                             "the proof)")
+    from woof.simulated_radar_config import add_execution_argument
+    add_execution_argument(sim)
     sim.add_argument("--wps-namelist", type=Path, default=None,
                      metavar="WPS", dest="wps_namelist",
                      help="the namelist.wps this preparation consumed; "

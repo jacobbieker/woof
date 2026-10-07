@@ -239,10 +239,20 @@ RESOLVED: dict[str, tuple[str, str]] = {
     # header is now at :1247 (launch_wrf_tke_km, def at :1245) and the
     # km_opt=3 header at :1341 (launch_wrf_smag3d_km, def at :1339).
     # Anchors unchanged.
-    "woof/core/dycore.py:1247": (
+    #
+    # RE-PINNED a sixth time: the vertical advection orders
+    # (lane/286-vadv5: the vertical_orders reads on both slow-tendency
+    # paths and the rhs_ph order note) moved both 13 lines.  The km_opt=2
+    # header is now at :1260 and the km_opt=3 header at :1354.  Anchors
+    # unchanged.
+    # (lane/kernel-levers: the 32-bit Smagorinsky index dispatch moved both
+    # one more line, to :1261 and :1355.  Anchors unchanged.)
+    # (lane/cut286-fu-diff6-price: the workspace-priced sixth-order edge form
+    # moved both six lines, to :1267 and :1361.  Anchors unchanged.)
+    "woof/core/dycore.py:1267": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=2:"),
-    "woof/core/dycore.py:1341": (
+    "woof/core/dycore.py:1361": (
         "woof/core/dycore.py",
         "WRF v4.6.1 km_opt=3:"),
 }
