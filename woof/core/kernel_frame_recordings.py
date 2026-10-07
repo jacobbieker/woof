@@ -66,6 +66,13 @@ rather than left as holes or back-filled from another platform.  They
 agree with sm_120: 88 B, 0 B and 512 B.  This recording is COMPLETE
 again.
 
+The lake module was added on 2026-10-03. Recordings without a lake reading
+are partial again. Its production loader on RTX 5090 with NVRTC 13.4.92
+read 4,720 B for initialization and 14,224 B for stepping; that platform's
+existing recording includes the new module. RTX PRO 6000 Blackwell Server
+with NVRTC 12.8.93 read 4,720 B and 14,400 B in the two-card oracle run;
+the partial recording below raises the module ceiling to that reading.
+
 COMPLETE is a claim about the ``.cu`` files that compile ALONE, and those
 are the whole key domain of a ``frames`` mapping: both readers --
 ``tools/vram_reserve_probe.py`` (``mode_frames``) and
@@ -102,8 +109,9 @@ what a module could cost, and a module whose widest kernel a given
 configuration never launches costs less than its row.  ``thompson`` is
 the standing example: its 11,264 B is the ``KMAX=256`` template, and a
 run with nz <= 64 launches only the ``_64`` variants (2,816 B measured).
-Pricing the row is the safe direction and is what preflight does; it is
-not what the driver charges.
+The recordings retain that full-module ceiling. Preflight prices the
+measured 64-level ceiling when every domain selecting the module stays
+within that tier, and the full ceiling when any selected domain is deeper.
 
 Rows move with the ARCHITECTURE at a fixed compiler, with the COMPILER
 BUILD at a fixed architecture, or with both (``noahmp_leaves``,
@@ -699,9 +707,39 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
     compute_capability='120',
     nvrtc_build='13.4.92',
     platform_family='linux',
-    measured='2026-10-02',
+    measured='2026-10-05',
     complete=True,
     frames=MappingProxyType({
+        # Three standalone units the 2.8.6 staging line added without a row
+        # (so this recording stopped being complete): the fork's order-five
+        # vertical scalar flux pd_vertical_sl (f82847049), the fork's
+        # saved-wind limiter upper_wind_limiter (4b2bd1665) and the
+        # prescribed-smoke time blend rrtmg_smoke_manifest (ef8325e32).
+        # Read 2026-10-05 with `tools/vram_reserve_probe.py frames` on an
+        # RTX 5090 (box B, 170 SMs), CuPy 14.2.0, nvidia-cuda-nvrtc 13.4.92,
+        # through the production loader: 0 B each.  The same reading
+        # reproduced every other row of this recording to the byte.
+        'pd_vertical_sl': 0,
+        'rrtmg_smoke_manifest': 0,
+        'upper_wind_limiter': 0,
+        # Initialization-only parameter-table scaler, driver attributes
+        # read through the production loader on 2026-10-04, CuPy 14.2.0,
+        # NVRTC 13.4.92 (CL-38855100), -std=c++17: 0 B local, 16 registers,
+        # 0 B static shared and constant memory. The assembled source SHA
+        # is PHYSICS_PARAMS_MEASURED_SOURCE_SHA256 below. Earlier module
+        # readings remain unchanged; this extends their complete coverage.
+        'physics_params': 0,
+        # The 2.8.5 ensemble line's three units, read 2026-10-03 with
+        # `tools/vram_reserve_probe.py frames` on this card, CuPy 14.2.0,
+        # NVRTC 13.4.92 (CL-38855100), fresh CuPy and compute caches: 0 B
+        # each.  The same reading reproduced every other row of this
+        # recording to the byte.
+        'ensemble_bookkeeping': 0,
+        'ensemble_stochastic': 0,
+        'ruc_spp': 0,
+        # WRF lake through the production --fmad=false loader, 2026-10-03:
+        # init 4,720 B and step 14,224 B on this card and compiler.
+        'lake': 14224,
         # horizontal.cu: fused RH adds 0 B; unit maximum stays 16 B, NVRTC 13.4.92.
         'horizontal': 16,
         # thompson_cold_start.cu (the card closure) and the test-only
@@ -877,8 +915,22 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         'urban_bep': 0,
         'urban_bep_couple': 0,
         'urban_ucm': 0,
+        # Lane 286-aer-swint: WRF swint_opt = 1 (swint.cu) and aer_opt = 3
+        # (rrtmg_aer3.cu), read 2026-10-03 on this card at this build through
+        # the production loader (tools/hrrr_radiation_driver_oracle/
+        # read_frames.py, the get_function().attributes route of
+        # tools/vram_reserve_probe.py): 0 B for every entry point of both.
+        'rrtmg_aer3': 0,
+        'swint': 0,
+        # Production loader, RTX 5090, same compiler, 2026-10-04.
+        # Oracle replay covers all 2,048 columns at three radiation calls.
+        'solar_albedo': 0,
     }),
 )
+
+# The exact production source of the measured parameter-table shader.
+PHYSICS_PARAMS_MEASURED_SOURCE_SHA256 = (
+    "84d8f6741e1ea69c6bd48f7ef7589526d09382edf0c213a8a4ffbbc8072eeaca")
 
 #: A167: sm_120 at NVRTC 12.9.86, the compiler of the default recast-woof[gpu]
 #: extra (cupy-cuda12x[ctk], RESOLVED_TOOLCHAIN_PINS) and of the shipped
@@ -910,7 +962,7 @@ SM120_NVRTC_12_9_86 = KernelFrameRecording(
     nvrtc_build='12.9.86',
     platform_family='linux',
     measured='2026-10-02',
-    complete=True,
+    complete=False,  # The new lake module has not been read on this compiler.
     frames=MappingProxyType({
         'acoustic': 544,
         'advection': 0,
@@ -1059,7 +1111,7 @@ SM89_NVRTC_13_4_92 = KernelFrameRecording(
     nvrtc_build='13.4.92',
     platform_family='linux',
     measured='2026-09-30',
-    complete=True,
+    complete=False,  # The new lake module has not been read on this architecture.
     frames=MappingProxyType({
         # Read whole 2026-10-01 on this card at this build, fresh CuPy cache,
         # at the GPU forcing-preparation lane's merge with integrate/2.8
@@ -1239,6 +1291,14 @@ SM89_NVRTC_13_4_59_COLD_START = KernelFrameRecording(
 )
 
 KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
+    # Production loader, final WRF lake source, 2026-10-03. Both cards
+    # matched every native 300-step oracle word at this compiler profile.
+    KernelFrameRecording(
+        box='box-e', device='NVIDIA RTX PRO 6000 Blackwell Server Edition',
+        compute_capability='120', nvrtc_build='12.8.93',
+        platform_family='linux', measured='2026-10-03', complete=False,
+        frames=MappingProxyType({'lake': 14400}),
+    ),
     # gp-libm64 records only its new grading unit on the measured compiler.
     KernelFrameRecording(
         box='host-2', device='NVIDIA GeForce RTX 5090',
@@ -1503,7 +1563,10 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
     "rrtmg_sw_legacy":
         "rrtmg_sw.cu through its own unit (woof/core/rrtmg_sw.py); the "
         "fragment fails NVRTC standalone.  Priced 0 B from the same "
-        "sm_120 / cupy 14.0.1 reading, 2026-07-27.",
+        "sm_120 / cupy 14.0.1 reading, 2026-07-27; re-read 0 B for all 17 "
+        "kernels on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92 on 2026-10-02, "
+        "after rsw_sfluxzen_body's store on every path; bounded on a "
+        "device by tests/test_rrtmg_sw_cuda.py (LOCAL_FRAME_BOUNDS).",
     # BEP+BEM (sf_urban_physics = 3).
     "urban_bem_composed":
         "glibc_flt32.cuh + glibc_trig_flt32.cuh + urban_bem.cuh + "

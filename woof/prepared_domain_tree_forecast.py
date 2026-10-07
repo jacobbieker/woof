@@ -272,6 +272,7 @@ def _without_forecast_stop(exp):
     result.pop("auto_mix_isotropic", None)
     # Likewise the off-centering provenance label (run.epssm binds).
     result.pop("auto_epssm", None)
+    result.pop("simulated_radar", None)
     domains = result.get("domains")
     if not isinstance(domains, list) or not domains:
         raise ValueError(
@@ -476,6 +477,11 @@ def claim_output_directory(output: Path, *, protected_roots: tuple[Path, ...]) -
             # the one direction that loses data.
             occupied = True
         if occupied:
+            from woof.ensemble.runtime_context import current_session
+            session = current_session()
+            if (session is not None and session.restart_roster is not None
+                    and result.resolve() == session.output_directory.resolve()):
+                return result
             raise FileExistsError(
                 f"refusing output directory that already holds a run: "
                 f"{result}") from None
@@ -1728,6 +1734,7 @@ def preflight_prepared_tree(
     prepared_head_sha256: str | None = None,
     devices: int | None = None,
     devices_options=None,
+    simulated_radar=None,
 ) -> PreparedTreeInputs:
     """Verify the complete hierarchy and resolve a runnable CPU-only plan.
 
@@ -1744,7 +1751,8 @@ def preflight_prepared_tree(
         prepared_root=prepared_root, experiment_config=experiment_config,
         experiment_config_sha256=experiment_config_sha256,
         physics_profile=physics_profile, devices=devices,
-        devices_options=devices_options))
+        devices_options=devices_options,
+        **({} if simulated_radar is None else {"simulated_radar": simulated_radar})))
     if (preparation_receipt_sha256 is None) == (prepared_head_sha256 is None):
         raise ValueError(
             "a prepared tree binds its sealed preparation receipt or its "
@@ -1803,6 +1811,14 @@ def preflight_prepared_tree(
     if devices is not None:
         from woof.core.devices import override_device_count
         exp = replace(exp, devices=override_device_count(exp.devices, devices))
+    from woof.simulated_radar_config import apply_execution_options
+    exp = apply_execution_options(exp, simulated_radar)
+    if exp.simulated_radar.enabled:
+        # Before the model is built or a card allocated, not at the first
+        # history: a missing or stale rw_simradar, or a scan the host
+        # memory cannot hold, refuses here.
+        from woof.simulated_radar_config import require_admitted
+        require_admitted(exp)
     from woof.core.devices import validate_device_road, validate_tree_devices
     validate_device_road(exp.devices, getattr(exp, "tiles", None), exp.domains)
     validate_tree_devices(exp)
@@ -2661,6 +2677,8 @@ def _write_failed_run_receipt(outdir, error) -> None:
     """The receipt a run that STARTED and died owes its caller."""
     evidence = outdir / "evidence"
     evidence.mkdir(exist_ok=True)
+    from woof.stability_recovery import RECOVERY_RECEIPT
+    recovery_path = evidence / RECOVERY_RECEIPT
     _atomic_json(
         evidence / "failed-run-receipt.json",
         {
@@ -2669,6 +2687,8 @@ def _write_failed_run_receipt(outdir, error) -> None:
             "error_type": type(error).__name__,
             "error": str(error),
             "traceback": traceback.format_exc(),
+            "stability_recovery_receipt": (
+                str(recovery_path.resolve()) if recovery_path.is_file() else None),
         },
     )
 
@@ -2853,7 +2873,7 @@ def _priced_external_boundary_source(boundaries, source):
 
 
 def _admit_devices_tree(exp, split_ids, *, forcing_intervals,
-                        forcing_interval_seconds, source):
+                        forcing_interval_seconds, source, stream_head=None):
     """Per-card memory admission for a split tree, before anything restores.
 
     Each split grid is priced the way the single-domain door prices one
@@ -2872,18 +2892,24 @@ def _admit_devices_tree(exp, split_ids, *, forcing_intervals,
     validate_device_count(exp.devices, cp.cuda.runtime.getDeviceCount())
     ids = list(dict.fromkeys(exp.devices.device_ids()))
     budgets = {}
+    identities = {}
+    from woof.core.device_probe import cuda_device_identity
     for dev in ids:
         with cp.cuda.Device(dev):
             budgets[dev] = int(cp.cuda.runtime.memGetInfo()[0])
+            identities[dev] = cuda_device_identity(dev)
+    budgets = prepared_single._devices_stream_budgets(
+        budgets, stream_head, identities=identities)
     # The same pricing `woof check --devices` and the `woof go` gate
     # print before the download (devices_memory.estimate_devices_tree).
     estimate = estimate_devices_tree(
         exp, split_ids=split_ids, forcing_intervals=forcing_intervals,
-        forcing_interval_seconds=forcing_interval_seconds, source=source)
+        forcing_interval_seconds=forcing_interval_seconds, source=source,
+        streaming_boundaries=stream_head is not None)
     cards = {row["card"]: int(row["total_bytes"]) for row in estimate["cards"]}
     host = int(estimate["host_bytes"])
     rows = estimate["grids"]
-    host_budget = host_available_bytes()
+    host_budget = prepared_single._stream_host_budget(host_available_bytes(), stream_head)
     lines = []
     refused = False
     for dev in ids:
@@ -2951,6 +2977,9 @@ def run_prepared_tree(
     progress_options=None,
     initialization: TreeInitialization | None = None,
     first_products=None,
+    ensemble_bootstrap=None,
+    health_retry_products=None,
+    schedule_dispatch=None,
 ) -> dict[str, object]:
     """Restore the prepared domains and execute the existing tree engine.
 
@@ -2970,8 +2999,22 @@ def run_prepared_tree(
     durable history file.
     """
 
+    from woof.ensemble.runtime_context import current_session
+    ensemble_session = current_session()
+    if ensemble_session is not None:
+        return ensemble_session.run_prepared(
+            run_prepared_tree, inputs, output_directory=output_directory, io_mode=io_mode,
+            restart=restart, health_debug=health_debug,
+            sealed_forcing_extension=sealed_forcing_extension, observer=observer,
+            progress_options=progress_options, initialization=initialization,
+            first_products=first_products, ensemble_bootstrap=ensemble_bootstrap,
+            health_retry_products=health_retry_products,
+            **({} if schedule_dispatch is None else {"schedule_dispatch": schedule_dispatch}))
+
     if io_mode not in {"history", "none"}:
         raise ValueError("io_mode must be 'history' or 'none'")
+    if io_mode == "none" and inputs.experiment.simulated_radar.enabled:
+        raise ValueError("simulated radar requires io_mode='history': virtual beams read durable atmospheric columns")
     from woof.output_disk import require_output_space, renderer_products
 
     require_output_space(
@@ -3089,7 +3132,20 @@ def run_prepared_tree(
         heartbeat=True,
     )
 
+    stream_head = getattr(inputs, "stream_head", None)
+    from woof.core.device_probe import cuda_device_identity
+    admission_identity = (cuda_device_identity(0) if not split_ids
+                          and prepared_single._stream_producer_reserve(stream_head) else None)
     planning_machine = streaming.cold_planning_machine(exp)
+    if (planning_machine is None and not split_ids
+            and (prepared_single._stream_producer_reserve(stream_head, identity=admission_identity)
+                 or prepared_single._stream_host_producer_reserve(stream_head))):
+        planning_machine = streaming.cold_admission_machine(
+            options=getattr(exp, "tiles", None))
+    planning_machine = prepared_single._stream_reserved_machine(
+        planning_machine, stream_head, identity=admission_identity)
+    planning_exp = prepared_single._stream_reserved_experiment(
+        exp, planning_machine, stream_head, identity=admission_identity)
     external_boundaries = getattr(initialization, "lateral_boundaries", None)
     # The root's boundary tables as this run will hold them.  Handed in
     # whole (the wrfinput and met_em doors), they are that set's own
@@ -3125,7 +3181,7 @@ def run_prepared_tree(
     # consumes this decision rather than asking again from the ledger
     # estimate, which is a different question against a different budget.
     cold_tree = cold_tree_streaming_decision(
-        exp, cold_nodes, machine=planning_machine, decisions=cold_decisions,
+        planning_exp, cold_nodes, machine=planning_machine, decisions=cold_decisions,
         source=priced_boundary, urban_columns=urban_columns)
     devices_admission = None
     if split_ids:
@@ -3135,7 +3191,7 @@ def run_prepared_tree(
         devices_admission = _admit_devices_tree(
             exp, split_ids, forcing_intervals=retained_intervals,
             forcing_interval_seconds=inputs.boundary_interval_seconds,
-            source=priced_boundary)
+            source=priced_boundary, stream_head=stream_head)
         for dc in exp.domains:
             if int(dc.grid_id) in split_ids:
                 cold_decisions[dc.grid_id] = streaming.ranked_decision(
@@ -3152,6 +3208,9 @@ def run_prepared_tree(
         # the card's own profile, state and physics of every domain together.
         admission_machine = streaming.cold_admission_machine(
             planning_machine, options=getattr(exp, "tiles", None))
+        if planning_machine is None:
+            admission_machine = prepared_single._stream_reserved_machine(
+                admission_machine, stream_head, identity=admission_identity)
         from woof.boundary_fields import source_boundary_species
         streaming.admit_resident_road(
             exp, None, machine=admission_machine,
@@ -3765,6 +3824,8 @@ def run_prepared_tree(
     runtime.publish_lifecycle_runners(
         model, relocation_runner=relocation_runner)
 
+    from woof.ensemble.runtime_context import bind_current_member_model
+    bind_current_member_model(model)
     restart_info = None
     if restart is not None:
         checkpoint = validate_manifest_checkpoint(Path(restart))
@@ -3908,6 +3969,14 @@ def run_prepared_tree(
         if not result["ok"]:
             raise FloatingPointError(f"initial d{grid_id:02d} health failed: {result}")
 
+    from woof.ensemble.runtime_context import initialized_bootstrap_handoff, observe_current_counters
+    ensemble_report = initialized_bootstrap_handoff(
+        ensemble_bootstrap, inputs=inputs, model=model, node=model.root,
+        output_directory=outdir, observer=observer, step_log=step_log)
+    if ensemble_report is not None:
+        return ensemble_report
+    observe_current_counters(model, start_time=exp.start_time)
+
     history = []
     # Boundary-only sampling under-reported the peak: the executor trims
     # the CuPy pool per STEP and at period commit BEFORE the progress
@@ -3942,6 +4011,7 @@ def run_prepared_tree(
             # The tree-wide [output] history selection; each domain's own
             # `output = {...}` overrides it inside the writer set.
             history_selection=exp.output,
+            simulated_radar=exp.simulated_radar, radar_output_dir=outdir,
         )
         if io_mode == "history"
         else None
@@ -3993,6 +4063,7 @@ def run_prepared_tree(
             wall_seconds=time.perf_counter() - restart_started)
 
     def progress_callback(**event):
+        observe_current_counters(model, start_time=exp.start_time)
         if observer is not None:
             observer(**event)
         memory_watch.sample()
@@ -4035,7 +4106,8 @@ def run_prepared_tree(
     landing = progress_log.LandingFanout(
         getattr(observer, "output_committed", None),
         step_log.output_committed if step_log.enabled else None,
-        None if first_products is None else first_products.frame_committed)
+        None if first_products is None else
+        lambda **event: first_products.frame_committed(**event))
     if landing and writers is not None:
         writers.attach_progress_callback(landing)
     if writers is not None:
@@ -4114,6 +4186,34 @@ def run_prepared_tree(
     # whole point: `progress_callback` fires once per ROOT step, so a
     # d04 taking 36 substeps inside one of them reported nothing.
     step_observer = step_log.step_observer if step_log.enabled else None
+    from woof.stability_recovery import NestedHealthRecovery, RecoveryRefused
+
+    def rearm_products(checkpoint):
+        nonlocal first_products
+        if first_products is not None:
+            if health_retry_products is None:
+                raise RecoveryRefused(
+                    "the caller supplied standalone render consumers without "
+                    "a retry rearm hook; history cannot be removed while read")
+            first_products = health_retry_products(checkpoint)
+
+    recovery = NestedHealthRecovery(
+        model=model, experiment=exp, output_directory=outdir,
+        writers=writers, history=history, observer=observer,
+        before_rewind=rearm_products,
+        sealed_forcing_extension=sealed_forcing_extension)
+
+    def execute_leg(active_experiment):
+        return execute_experiment(
+            model, history_handler=None if writers is None else history_handler,
+            restart_handler=restart_handler, progress_callback=progress_callback,
+            validate_state=True, health_debug=health_debug,
+            skip_feedback_path=(int(exp.feedback) == 0),
+            relocation_runner=relocation_runner, steppers=steppers,
+            step_observer=step_observer, experiment=active_experiment,
+            delayed_child_initializer=initialize_delayed_child,
+            **({} if schedule_dispatch is None else {"schedule_dispatch": schedule_dispatch}))
+
     try:
         memory_watch.start()
         if already_complete:
@@ -4126,41 +4226,17 @@ def run_prepared_tree(
         if writers is None:
             execution = (
                 _completed_execution_report(model) if already_complete
-                else execute_experiment(
-                    model,
-                    history_handler=None,
-                    restart_handler=restart_handler,
-                    progress_callback=progress_callback,
-                    validate_state=True,
-                    health_debug=health_debug,
-                    skip_feedback_path=(int(exp.feedback) == 0),
-                    relocation_runner=relocation_runner,
-                    steppers=steppers,
-                    step_observer=step_observer,
-                    experiment=exp,
-                    delayed_child_initializer=initialize_delayed_child,
-                ))
+                else recovery.run(execute_leg))
             wrfout_paths = ()
         else:
             with writers:
                 execution = (
                     _completed_execution_report(model) if already_complete
-                    else execute_experiment(
-                        model,
-                        history_handler=history_handler,
-                        restart_handler=restart_handler,
-                        progress_callback=progress_callback,
-                        validate_state=True,
-                        health_debug=health_debug,
-                        skip_feedback_path=(int(exp.feedback) == 0),
-                        relocation_runner=relocation_runner,
-                        steppers=steppers,
-                        step_observer=step_observer,
-                        experiment=exp,
-                        delayed_child_initializer=initialize_delayed_child,
-                    ))
+                    else recovery.run(execute_leg))
                 writers.drain(before_domain=runtime._drain_progress(observer))
                 wrfout_paths = writers.paths
+        exp = recovery.experiment
+        inputs = replace(inputs, experiment=exp)
         runtime._finalizing_progress(observer, "close-relocation-receipt")
         if relocation_runner is not None:
             relocation_runner.close_receipt(model)
@@ -4206,7 +4282,7 @@ def run_prepared_tree(
     runtime._finalizing_progress(observer, "microphysics-transition-receipt")
     transition_path, transition_sha, transitions = (
         runtime._write_microphysics_transition_receipt(
-            evidence, model, exp, resumed=restart is not None
+            evidence, model, exp, resumed=bool(model._resumed)
         )
     )
     final_health = {}
@@ -4345,6 +4421,7 @@ def run_prepared_tree(
             "relocation_crossed": getattr(
                 model, "_restart_crossed_relocation", None),
         },
+        "stability_recovery": recovery.receipt,
         # The [relocation] echo (None when the config never opted in).
         # A follow source reaches execution only over a verified statics
         # corridor (the preflight refuses corridor-less bundles), so a
@@ -4431,7 +4508,8 @@ def run_prepared_tree(
         "output": {
             "io_mode": io_mode,
             "frame_count": len(outputs),
-            "total_bytes": sum(item["bytes"] for item in outputs),
+            "total_bytes": (sum(item["bytes"] for item in outputs)
+                if all(item["bytes"] is not None for item in outputs) else None),
             "files": outputs,
             "last_checkpoint": (
                 None
@@ -4808,6 +4886,8 @@ def build_parser() -> argparse.ArgumentParser:
     # The same four flags the single-domain door carries, registered
     # from the same function so the two cannot drift.
     add_progress_arguments(parser)
+    from woof.simulated_radar_config import add_execution_argument
+    add_execution_argument(parser)
     return parser
 
 
@@ -4825,6 +4905,12 @@ def main(argv=None, *, observer=None) -> int:
     if argv == ["--show-capabilities"]:
         print(json.dumps(runner_capabilities(), sort_keys=True))
         return 0
+    from woof.ensemble.calibration_admission import refuse_explicit_config_argv
+    try:
+        refuse_explicit_config_argv(argv)
+    except ValueError as error:
+        print(f"prepared_domain_tree_forecast: {error}", file=sys.stderr)
+        return 2
     # Which tree is about to integrate this tree of domains.  Same
     # contract as the single-domain runner, including leaving
     # ``--show-capabilities`` above untouched.
@@ -4898,6 +4984,9 @@ def main(argv=None, *, observer=None) -> int:
             from woof.core.devices import DeviceOptions
             binding["devices_options"] = DeviceOptions.from_mapping(
                 json.loads(args.devices_table), source="--devices-table")
+        if getattr(args, "simulated_radar_table", None) is not None:
+            from woof.simulated_radar_config import execution_argument
+            binding["simulated_radar"] = execution_argument(args.simulated_radar_table)
         if (args.preparation_receipt_sha256 is None) \
                 == (args.prepared_head_sha256 is None):
             raise ValueError(
@@ -4965,6 +5054,17 @@ def main(argv=None, *, observer=None) -> int:
     from woof.core.resident_admission import memory_gate_override
 
     def run(bound, products, restart):
+        def rearm(checkpoint):
+            nonlocal first_products
+            from woof.first_products import halt_renders_and_wait
+            if not halt_renders_and_wait(first_products):
+                raise RuntimeError("a failed-leg render is still reading "
+                                   "history; refusing health recovery rewind")
+            retry_args = argparse.Namespace(**{**vars(args), "restart": checkpoint})
+            first_products = prepared_single._route_owned_first_products(
+                retry_args, outdir=outdir, observer=observer, started=started)
+            return first_products
+
         with memory_gate_override(args.no_memory_gate):
             return run_prepared_tree(
                 bound,
@@ -4975,6 +5075,7 @@ def main(argv=None, *, observer=None) -> int:
                 observer=observer,
                 sealed_forcing_extension=args.sealed_forcing_extension,
                 progress_options=ProgressOptions.from_args(args),
+                health_retry_products=rearm,
                 **({} if products is None else {"first_products": products}),
             )
 
@@ -5106,6 +5207,11 @@ def main(argv=None, *, observer=None) -> int:
                 print("prepared_domain_tree_forecast: first-frame plot join "
                       f"failed: {type(render_error).__name__}: {render_error}",
                       file=sys.stderr)
+    if report.get("schema") == "gpuwm-ensemble-run.v1":
+        print(json.dumps({"schema": report["schema"], "status": report["status"],
+            "members": report["request"]["members"], "completed_seconds": report["completed_seconds"],
+            "ensemble_manifest": str(outdir / "ensemble-run.json")}, sort_keys=True))
+        return 0
     print(
         json.dumps(
             {

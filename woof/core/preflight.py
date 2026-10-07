@@ -583,6 +583,49 @@ def anisotropic_w_mixing_advisories(exp) -> list[str]:
     return lines
 
 
+#: The child step growth a generated adaptive nest carries
+#: (woof.domain_wizard), and the value the advisory below measures from.
+GENERATED_NEST_STEP_GROWTH_PCT = 5
+
+
+def nest_step_growth_advisories(exp) -> list[str]:
+    """One line per adaptive nest whose step may grow faster than 5 percent.
+
+    The breakage this names: a 500 m child at ``max_step_increase_pct =
+    51`` -- WRF's own nest value, so an imported namelist carries it --
+    took a freshly measured CFL after an output alarm, grew to about
+    three times its spacing rule within a few steps and went non-finite
+    in vertical velocity many hours into a nested forecast.  The same
+    forecast at 5 percent ran to completion at the same pace.
+
+    Advisory, not a refusal: 51 is a legal WRF setting that many trees
+    run without incident, and refusing it would turn away every imported
+    nested namelist.  It changes no exit code and blocks nothing.
+    """
+
+    lines: list[str] = []
+    for dc in exp.domains:
+        run = dc.run
+        if int(getattr(dc, "parent_id", 0) or 0) == 0:
+            continue
+        if not getattr(run, "use_adaptive_time_step", False):
+            continue
+        growth = int(getattr(run, "max_step_increase_pct",
+                             GENERATED_NEST_STEP_GROWTH_PCT))
+        if growth <= GENERATED_NEST_STEP_GROWTH_PCT:
+            continue
+        lines.append(
+            f"d{dc.grid_id:02d} is an adaptive nest with "
+            f"max_step_increase_pct = {growth}: after an output alarm a "
+            "child at this growth has been reproduced taking steps about "
+            "three times its spacing rule and then failing with a "
+            "non-finite vertical velocity hours into a nested forecast. "
+            f"max_step_increase_pct = {GENERATED_NEST_STEP_GROWTH_PCT} on "
+            "the nest ran the same forecast to completion at the same "
+            "pace; generated nests already use it.")
+    return lines
+
+
 #: "The caller did not price this" -- distinct from a caller that priced
 #: it and got ``None``, which is the answer "this config does not stream".
 _UNPRICED = object()
@@ -861,6 +904,7 @@ def check_advisories(exp, config_path=None, *, machine=None,
     advisories = [feedback_advisory(exp)]
     advisories.extend(spawn_reservation_advisories(exp))
     advisories.extend(anisotropic_w_mixing_advisories(exp))
+    advisories.extend(nest_step_growth_advisories(exp))
     advisories.append(streaming_advisory(exp, machine=machine,
                                          envelope=streamed,
                                          tree_road=tree_road,
@@ -1664,7 +1708,7 @@ def card_local_memory_profile(
     return MEASURED_LOCAL_MEMORY_PROFILE
 
 
-def local_memory_profile_from_device(cp) -> DeviceLocalMemoryProfile:
+def local_memory_profile_from_device(cp, *, device_id: int = 0) -> DeviceLocalMemoryProfile:
     """Read the profile off the attached device: its name, shader census,
     default stack limit and compile platform.
 
@@ -1679,7 +1723,9 @@ def local_memory_profile_from_device(cp) -> DeviceLocalMemoryProfile:
     # ``woof multi-run`` masks one physical UUID into each check process;
     # CUDA ordinal 0 is therefore the selected logical device, not a claim
     # that every run belongs on the machine's physical index zero.
-    props = cp.cuda.runtime.getDeviceProperties(0)
+    # Ensemble packing samples each physical card in its active Device
+    # context. The existing masked single-card callers keep ordinal zero.
+    props = cp.cuda.runtime.getDeviceProperties(device_id)
     name = props["name"]
     stack_limit = int(cp.cuda.runtime.deviceGetLimit(0))
     return DeviceLocalMemoryProfile(
@@ -1764,6 +1810,27 @@ def read_compile_platform() -> tuple[str, str] | None:
 #: under-pricing is what put a run 1,630 MiB over; the bound is stated, not
 #: silently tightened.
 KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
+    # Three units the 2.8.6 staging line shipped without a row, read
+    # 2026-10-05 with tools/vram_reserve_probe.py frames on RTX 5090 /
+    # NVRTC 13.4.92 through the production loader: 0 B each.  The fork's
+    # order-five vertical scalar flux (f82847049), the fork's saved-wind
+    # limiter (4b2bd1665) and the prescribed-smoke time blend (ef8325e32).
+    "pd_vertical_sl": 0,
+    "rrtmg_smoke_manifest": 0,
+    "upper_wind_limiter": 0,
+    # Initialization-only parameter-table scaler, measured 2026-10-04
+    # through the production loader on RTX 5090 / NVRTC 13.4.92: 0 B.
+    "physics_params": 0,
+    # The ensemble member bookkeeping, the stochastic pattern generator and
+    # the RUC hydraulic SPP operator, read 2026-10-03 on RTX 5090 /
+    # NVRTC 13.4.92: 0 B each (no kernel of the three holds a local array).
+    "ensemble_bookkeeping": 0,
+    "ensemble_stochastic": 0,
+    "ruc_spp": 0,
+    # Production lake loader, measured 2026-10-03: step 14,224 B on
+    # RTX 5090 / NVRTC 13.4.92 and 14,400 B on RTX PRO 6000 / 12.8.93.
+    # Init is 4,720 B on both; charge the larger measured step frame.
+    "lake": 14400,
     # Test-only math grading unit, read on sm_89 and sm_120, NVRTC 13.4.59.
     "portable_libm64_grade": 48,
     # Added with this box's recording at 0 B. 'ntiedtke' is what
@@ -2051,6 +2118,12 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "thompson_aerosol_warm": 112,
     "tke_budget": 0,
     "topo_radiation": 40,
+    # WRF swint_opt = 1 and aer_opt = 3 (lane 286-aer-swint): 0 B on sm_120
+    # at NVRTC 13.4.92 (kernel_frame_recordings).
+    "swint": 0,
+    # Production loader on RTX 5090, NVRTC 13.4.92, 2026-10-04.
+    "solar_albedo": 0,
+    "rrtmg_aer3": 0,
     "uh_diag": 0,
     # The UW moist-turbulence PBL (bl_pbl_physics = 9): uwpbl_columns keeps
     # CAM's automatic arrays in a global per-column workspace
@@ -2294,6 +2367,37 @@ LEVEL_SPECIALIZED_KERNEL_FRAMES: dict[str, LevelSpecializedFrame] = {
         "wdm6_refl", "REFL_KMAX", 256, 63, alignment_bytes=16),
 }
 
+# The launchers select only 64-level fallout variants at nz <= 64.
+# The full module ceilings remain in KERNEL_MAX_LOCAL_SIZE_BYTES for
+# deeper runs and the compilation census. Charging a loaded but unlaunched
+# 256-level variant reserved memory the driver never allocates. Measured
+# through the production loader on RTX 4090: the maximum over every plain
+# and 64-level export is 2,816 / 2,304 bytes. The classic value also matches
+# the earlier RTX 5090 recording in kernel_frame_recordings.py.
+THOMPSON_SHALLOW_KERNEL_FRAMES = {
+    "thompson": 2816,
+    "thompson_aerosol_sed": 2304,
+}
+THOMPSON_SHALLOW_LEVELS = 64
+
+# thompson_version = "wrf_39_noaa" compiles the aerosol units with
+# THOMPSON_AA_WRF39 (woof.core.thompson_aerosol_launch.WRF39_DEFINES), and
+# the fork's fallout is a different frame: read 2026-10-05 through the
+# production loader on RTX 5090 / NVRTC 13.4.92, the sedimentation unit's
+# widest export is 11,264 B (9,216 at wrf_461) and its widest 64-level or
+# plain export is 2,816 B (2,304 at wrf_461).  The other five aerosol units
+# read the same frame at both generations.  This row does not move today's
+# reservation: that is the widest frame over every launched module, and
+# mp_physics = 28 always launches the classic ``thompson`` unit, whose rows
+# (11,264 / 2,816) equal the fork's.  Breakage prevented: nothing else reads
+# the fork's frames, so a change that narrows the classic unit would leave the
+# shipped HRRR configuration recipes (which select the fork generation)
+# under-priced by up to 2,048 B per resident thread with no gate failing.
+#   module -> (widest export, widest plain/64-level export)
+THOMPSON_WRF39_KERNEL_FRAMES = {
+    "thompson_aerosol_sed": (11264, 2816),
+}
+
 for _spec in LEVEL_SPECIALIZED_KERNEL_FRAMES.values():
     if (_spec.frame_bytes(_spec.unspecialized_levels)
             != KERNEL_MAX_LOCAL_SIZE_BYTES[_spec.module]):
@@ -2513,7 +2617,9 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         max_local_size_bytes=0,
         # Re-read 2026-09-30 after the fused spcvmc layer pass and the
         # coalesced slabs: all 17 kernels 0 B on sm_120 and sm_89 at
-        # NVRTC 13.4.92.
+        # NVRTC 13.4.92.  Re-read 2026-10-02 after rsw_sfluxzen_body's
+        # store on every path (fix/rrtmg-sw-sfluxzen): all 17 kernels 0 B
+        # on sm_120 (RTX 5070 Ti) at NVRTC 13.4.92, before and after.
         covers=frozenset({"rrtmg_sw"})),
     # P3 one-category (mp=50).  ``noahmp_leaves.cu`` + ``p3.cu`` compiled as
     # ONE unit by woof/core/p3_device.p3_source(), the same shape the
@@ -3013,6 +3119,16 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("terrain_drag_composed")
     if int(getattr(dc.run, "zadvect_implicit", 0) or 0) > 0:
         modules.add("ieva")                    # A158, woof/core/ieva.py
+    # WRF swint_opt = 1 (woof/core/swint.py) and aer_opt = 3 on the
+    # legacy RRTMG shortwave (woof/core/rrtmg_aerosol_optics.py).
+    if int(getattr(dc.run, "swint_opt", 0) or 0) == 1:
+        modules.add("swint")
+    if int(getattr(dc.run, "alb_sol", 0) or 0) == 1:
+        modules.add("solar_albedo")
+    if int(getattr(dc.run, "aer_opt", 0) or 0) == 3:
+        modules.add("rrtmg_aer3")
+    if int(getattr(dc.run, "sf_lake_physics", 0)) == 1:
+        modules.add("lake")
     mp_physics = int(dc.run.mp_physics)
     if (mp_physics and mp_physics not in _REFLECTIVITY_MICROPHYSICS
             and mp_physics not in _SELF_REFLECTIVITY_MICROPHYSICS):
@@ -3175,6 +3291,25 @@ def kernel_local_frame_bytes(
         frame = IEVA_TIER_FRAME.frame_bytes(ieva_level_tier(int(dc.run.nz)))
         if frame > frames.get(IEVA_TIER_FRAME.module, -1):
             frames[IEVA_TIER_FRAME.module] = frame
+    for module, shallow_frame in THOMPSON_SHALLOW_KERNEL_FRAMES.items():
+        selected_levels = [int(dc.run.nz) for dc in exp.domains
+                           if module in domain_kernel_modules(
+                               dc, prices_refl=prices_refl)]
+        if selected_levels and max(selected_levels) <= THOMPSON_SHALLOW_LEVELS:
+            frames[module] = shallow_frame
+    # The fork generation is priced at its own frames whenever any domain
+    # launching the unit selects it; the 64-level rule is the one above
+    # (every launching domain at or under THOMPSON_SHALLOW_LEVELS).
+    for module, (deep_frame, shallow_frame) in THOMPSON_WRF39_KERNEL_FRAMES.items():
+        launching = [dc for dc in exp.domains
+                     if module in domain_kernel_modules(dc, prices_refl=prices_refl)]
+        if not any(getattr(dc.run, "thompson_version", "wrf_461") == "wrf_39_noaa"
+                   for dc in launching):
+            continue
+        shallow = max(int(dc.run.nz) for dc in launching) <= THOMPSON_SHALLOW_LEVELS
+        frame = shallow_frame if shallow else deep_frame
+        if frame > frames.get(module, -1):
+            frames[module] = frame
     return frames
 
 
@@ -3983,11 +4118,14 @@ def physics_field_names_2d(cfg: RunConfig | None = None) -> tuple[str, ...]:
         from woof.core.surface_forcing import SURFACE_PRECIPITATION_FIELDS
         union.update(dict.fromkeys(SURFACE_PRECIPITATION_FIELDS))
         union["coszen"] = None
+    if cfg is not None and int(getattr(cfg, "alb_sol", 0)) == 1:
+        union.update(dict.fromkeys(("albsol", "albbcksol")))
     return tuple(union)
 
 
 def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
-                         urban_columns: int | None = None
+                         urban_columns: int | None = None,
+                         lake_columns: int | None = None
                          ) -> dict[str, tuple[int, ...]]:
     """``PhysicsDriver`` persistents per selected scheme (physics.py).
 
@@ -4024,6 +4162,37 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
     n_soil = soil_layer_count(cfg)
     for name in ("smois", "tslb", "sh2o", "smcrel"):
         shapes[f"fields/{name}"] = (n_soil, ny, nx)
+    if int(cfg.sf_surface_physics) == 3:
+        # Configuration-only estimates allow the largest supported RUC
+        # tables (USGS-RUC 28 and STAS-RUC 19). Actual category arrays keep
+        # their source dimensions, so this is a conservative bound.
+        if cfg.mosaic_lu:
+            shapes["fields/landusef"] = (28, ny, nx)
+        if cfg.mosaic_soil:
+            shapes["fields/soilctop"] = (19, ny, nx)
+    if int(getattr(cfg, "sf_lake_physics", 0)) == 1:
+        from woof.core.lake_schema import (
+            LAKE_STATE_WORDS, LAKE_STATIC_WORDS,
+            LAKE_FORCING_WORDS, LAKE_OUTPUT_WORDS)
+        count = ny * nx if lake_columns is None else int(lake_columns)
+        if not 0 <= count <= ny * nx:
+            raise ValueError("lake_columns must lie within the domain")
+        # Restart/rank carriers retain horizontal axes; only computation
+        # uses the sparse lake-column work arrays.
+        shapes["fields/lake_columns"] = (LAKE_STATE_WORDS, ny, nx)
+        shapes["fields/lake_static"] = (LAKE_STATIC_WORDS, ny, nx)
+        shapes["fields/lake_latitude"] = s2
+        shapes["lake/indices"] = (count,)
+        shapes["lake/columns"] = (LAKE_STATE_WORDS, count)
+        shapes["lake/static"] = (LAKE_STATIC_WORDS, count)
+        shapes["lake/latitude"] = (count,)
+        shapes["lake/forcing"] = (LAKE_FORCING_WORDS, count)
+        shapes["lake/outputs"] = (LAKE_OUTPUT_WORDS, count)
+        shapes["lake/errors"] = (count,)
+        # Bound library workspace for indexed horizontal gathers even when
+        # an out buffer is supplied; this also covers the smaller init seed.
+        shapes["lake/gather_work"] = (LAKE_STATE_WORDS, count)
+        shapes["lake/precipitation"] = s2
     if int(getattr(cfg, "sf_surface_mosaic", 0)) == 1:
         from woof.core.noah_mosaic import mosaic_array_shapes
         for name, (shape, dtype) in mosaic_array_shapes(
@@ -4311,7 +4480,8 @@ def mynn_pbl_scratch_slots(cfg: RunConfig, *, tile_buffer: bool = False
     chunk = mynn_pbl_column_chunk(cfg, tile_buffer=tile_buffer)
     nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
     slots: dict[str, tuple[int, ...]] = {}
-    slots.update(mynn_pbl_scratch_shapes(chunk, nz))
+    slots.update(mynn_pbl_scratch_shapes(chunk, nz,
+                                       bl_mynn_version=cfg.bl_mynn_version))
     slots.update(mynn_pbl_index_shapes(chunk, nz))
     slots.update(mynn_pbl_flag_shapes())
     slots.update(mynn_pbl_tendency_field_shapes(nz, ny, nx))
@@ -4586,44 +4756,32 @@ def scratch_slot_registry(cfg: RunConfig, *,
         #       rc/nc/the ncten limiter/the terminal clamp are all formed
         #       on.  Distinct from mp_thompson_frozen_reference_density,
         #       which the saturation adjustment OVERWRITES mid-call.
-        #   nwfa_entry_m3/nifa_entry_m3 -- the per-m3 entry aerosol of
-        #       :1805-1812, consumed by scavenging, iceDeMott and iceKoop.
         #   tau1_density           -- the REFRESHED density of :3193.
         #   nwfa_work_m3           -- the :3211 working CCN snapshot, which
-        #       is a genuinely different quantity from nwfa_entry_m3 (no
-        #       9999E6 ceiling, tau+1 density) and feeds activ_ncloud only.
+        #       has no 9999E6 ceiling, uses tau+1 density and feeds
+        #       activ_ncloud only.
         #   qc_entry               -- frozen qc1d, required by the ncten
         #       balance limiter (:2996-3019), which needs BOTH the entry and
         #       the post-source cloud mass.
         #   ni_entry               -- frozen ni1d, credited to ncten by the
         #       cloud-ice melt branch of the final phase cleanup (:3943-3966).
-        #   rc_entry/nc_entry_m3/nu_c_entry/l_qc_entry -- the outputs of the
-        #       entry droplet-distribution diagnosis (:1826-1848), whose
-        #       in-place side effect (zeroing qc1d/nc1d on the qc <= R1
-        #       branch, :1844-1845) is what makes state.nc a legitimate
-        #       "entry number" for every later kernel.
         #   condensation_rate      -- prw_vcd, held so rain evaporation can
         #       reproduce the :3502 gate that suppresses evaporation in a
         #       cell that just condensed.
         #
-        # nu_c_entry / l_qc_entry are int32; every other row is float32.
-        # Both are 4 bytes per element, so the byte estimate is unchanged by
-        # the dtype and the registry keeps storing shapes only.
+        # The entry aerosol and droplet-distribution launchers also expose
+        # six optional probe outputs. The forecast does not consume those
+        # arrays, so it requests no storage for them. Their state-updating
+        # operations still run before every later consumer.
         slots.update(
             mp_thompson_aero_ncten=m,
             mp_thompson_aero_nwfaten=m,
             mp_thompson_aero_nifaten=m,
             mp_thompson_aero_entry_density=m,
-            mp_thompson_aero_nwfa_entry_m3=m,
-            mp_thompson_aero_nifa_entry_m3=m,
             mp_thompson_aero_tau1_density=m,
             mp_thompson_aero_nwfa_work_m3=m,
             mp_thompson_aero_qc_entry=m,
             mp_thompson_aero_ni_entry=m,
-            mp_thompson_aero_rc_entry=m,
-            mp_thompson_aero_nc_entry_m3=m,
-            mp_thompson_aero_nu_c_entry=m,
-            mp_thompson_aero_l_qc_entry=m,
             mp_thompson_aero_condensation_rate=m,
         )
     if cfg.mp_physics == 9:
@@ -4797,6 +4955,13 @@ def scratch_slot_registry(cfg: RunConfig, *,
         slots.update(diff6_x=xs, diff6_y=ys)
     if cfg.diff_6th_opt:
         slots.update(diff6_z=fl, diff6_m=m)
+        # The NOAA WRFV3.9 fork's edge-to-edge form (diff_6th_form =
+        # "noaa_wrf39", the HRRR recipe request default) on a specified or
+        # nested domain: the padded field, padded tendency, padded planes
+        # and, under the slope taper, padded base geopotential that
+        # dycore.launch_diff6_to_edge filters (diff6_edge_workspace.py).
+        from woof.core.diff6_edge_workspace import diff6_edge_slot_shapes
+        slots.update(diff6_edge_slot_shapes(cfg))
     if cfg.khdif > 0.0 or cfg.kvdif > 0.0:
         slots.update(diff_u=xs, diff_v=ys, diff_w=fl, diff_th=m)
 
@@ -5208,6 +5373,18 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "stress faces and scalar fluxes, so every configuration retains "
         "two distinct face backings"),
     ScratchSlotLifetime(
+        ("diff6_edge_field", "diff6_edge_tend", "diff6_edge_planes",
+         "diff6_edge_phb"),
+        "write_before_read",
+        "woof/core/dycore.py:launch_diff6_to_edge,_diff6_edge_work; "
+        "woof/core/diff6_edge_workspace.py",
+        "every padded copy (field, column mass, map factors, base "
+        "geopotential) is written whole by _edge_pad_into and the padded "
+        "tendency is zeroed before the kernel adds into it, all inside one "
+        "launch_diff6_to_edge call whose result is added into the caller's "
+        "diff6_* temporary before it returns; nothing is read across "
+        "calls, so no arena neighbour can be observed through them"),
+    ScratchSlotLifetime(
         ("moist_pd_q0", "moist_rq_t", "moist_absent_mass",
          "pd_fxl", "pd_fxc", "pd_fyl",
          "pd_fyc", "pd_fzl", "pd_fzc"), "write_before_read",
@@ -5335,16 +5512,10 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
          "mp_thompson_aero_nwfaten",
          "mp_thompson_aero_nifaten",
          "mp_thompson_aero_entry_density",
-         "mp_thompson_aero_nwfa_entry_m3",
-         "mp_thompson_aero_nifa_entry_m3",
          "mp_thompson_aero_tau1_density",
          "mp_thompson_aero_nwfa_work_m3",
          "mp_thompson_aero_qc_entry",
          "mp_thompson_aero_ni_entry",
-         "mp_thompson_aero_rc_entry",
-         "mp_thompson_aero_nc_entry_m3",
-         "mp_thompson_aero_nu_c_entry",
-         "mp_thompson_aero_l_qc_entry",
          "mp_thompson_aero_condensation_rate"),
         "write_before_read",
         "woof/core/thompson_aerosol_state.py:"
@@ -5592,6 +5763,7 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
          "mynn_pbl_initialize_work", "mynn_pbl_plume_layer",
          "mynn_pbl_plume_face", "mynn_pbl_plume_column",
          "mynn_pbl_plume_work", "mynn_pbl_plume_scratch",
+         "mynn_pbl_gsd41_condensation_work", "mynn_pbl_gsd41_thvl",
          "mynn_pbl_tendency", "mynn_pbl_tendency_work",
          "mynn_pbl_tendency_face", "mynn_pbl_stage_layer",
          "mynn_pbl_stage_dx", "mynn_pbl_out_du", "mynn_pbl_out_dv",
@@ -6160,13 +6332,68 @@ def atmosphere_transient_shapes(cfg: RunConfig, *, cam_ozone: bool = False
     return {"atmosphere/theta": m, "atmosphere/temperature": m,
             "atmosphere/pressure": m, "atmosphere/exner": m,
             "atmosphere/u": m, "atmosphere/v": m, "atmosphere/dz": m,
+            "atmosphere/rho": m,
             "atmosphere/p_interface": fl, "atmosphere/z_interface": fl}
 
 
-#: PBL schemes that allocate the raw YSU-shaped output bundle.  MYNN
-#: fills the same dict of names through its own launcher; SASE does not
-#: -- it hands its rates straight to the coupling helper.
-_YSU_OUTPUT_BUNDLE_SCHEMES = (1, 5)
+#: Only YSU allocates this raw output bundle. MYNN returns six views of
+#: the already priced ``mynn_pbl_out_*`` scratch and writes its diagnostics
+#: into the already priced driver fields. Charging the YSU bundle to MYNN
+#: counted those arrays twice and added YSU-only diagnostics it never owns.
+_YSU_OUTPUT_BUNDLE_SCHEMES = (1,)
+
+
+def mynn_mixscalars_memory_items(cfg: RunConfig, *, tile_buffer: bool = False
+                                ) -> tuple[MemoryItem, ...]:
+    """Conditional qn storage outside the always-on MYNN scratch arena.
+
+    The previous four coupled scalars remain held by ``self.tendencies``
+    until composition (physics.py:_compose_tendencies). During replacement,
+    four raw rates, four new coupled fields and the mass field coexist:
+    thirteen volume fields including the previous four. This also bounds
+    the earlier mass-expression temporaries, before new coupled fields exist.
+
+    The chunk term bounds the wider DMP phase, including five previous
+    chunk tendencies kept by the wrapper's old ``out`` dict. The subsequent
+    five scalar solves need fewer bytes, including both returned qn2 arrays
+    during assignment and their (7*nz+1)-wide solve scratch. Summing this
+    chunk ceiling beside the full coupling peak is conservative; the two
+    phases are sequential. Probe-only export_sink copies are not forecast
+    allocations. Owners: mynn_pbl_runtime.py, mynn_pbl_gpu.py and
+    mynn_scalar_mix_gpu.py.
+    """
+    if int(cfg.bl_pbl_physics) != 5 or int(cfg.bl_mynn_mixscalars) != 1:
+        return ()
+    from woof.core.mynn_pbl import DMP_NUP
+    from woof.core.mynn_scalar_mix import QN_SOLVE_ORDER
+
+    nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
+    chunk = min(nx * ny, mynn_pbl_column_chunk(cfg, tile_buffer=tile_buffer))
+    mass = (nz, ny, nx)
+    prefix = "mynn_mixscalars/"
+    items = [MemoryItem(prefix + "held_" + name, "physics", mass, 4)
+             for name in ("nc", "ni", "nwfa", "nifa")]
+    for family in ("raw_", "coupled_"):
+        items.extend(MemoryItem(prefix + family + name, "transient", mass, 4)
+                     for name in ("nc", "ni", "nwfa", "nifa"))
+    items.append(MemoryItem(prefix + "coupling_mass", "transient", mass, 4))
+    shapes = {}
+    for species in QN_SOLVE_ORDER:
+        shapes["input_" + species] = (chunk, nz)
+        shapes["previous_tendency_" + species] = (chunk, nz)
+        shapes["flux_" + species] = (chunk, nz + 1)
+    shapes.update(
+        plume_area=(chunk, nz + 1, DMP_NUP),
+        plume_velocity_copy=(chunk, nz + 1, DMP_NUP),
+        plume_area_copy=(chunk, nz + 1, DMP_NUP),
+        plume_entrainment_copy=(chunk, nz, DMP_NUP),
+        flux_workspace=(chunk, (nz + 1) * DMP_NUP),
+        plume_weight=(chunk,), plume_limiter=(chunk,))
+    items.extend(MemoryItem(prefix + name, "transient", shape, 4)
+                 for name, shape in shapes.items())
+    items.append(MemoryItem(prefix + "plume_active", "transient",
+                            (chunk,), 4, "int32"))
+    return tuple(items)
 
 
 def ysu_output_transient_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
@@ -6189,6 +6416,27 @@ def ysu_output_transient_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
     shapes = {f"ysu_output/{name}": m for name in _YSU_3D}
     shapes.update({f"ysu_output/{name}": s2 for name in _YSU_2D})
     return shapes
+
+
+def mynn_scalar_transient_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
+    """Peak live FP32 storage added by MYNN ``scalar_pblmix=1``.
+
+    The local solve keeps four raw grid rates and the previous four coupled
+    rates alive. Its chunk adds 5*nz+1 work values, two current outputs,
+    one packed input and one time step per column, plus the scalar time-step
+    input. Outputs are dropped after scatter before the next species.
+    Coupling can keep old and new four-field
+    coupled banks beside the four raw rates and its mass coefficient.
+    Charge the larger phase, rather than summing nonconcurrent phases.
+    The scalar-off estimate is unchanged.
+    """
+    if int(cfg.bl_pbl_physics) != 5 or int(cfg.scalar_pblmix) != 1:
+        return {}
+    nz, columns = int(cfg.nz), int(cfg.ny) * int(cfg.nx)
+    chunk = mynn_pbl_column_chunk(cfg)
+    solve = 8 * nz * columns + (8 * nz + 2) * chunk + 1
+    coupling = 13 * nz * columns
+    return {"mynn_scalar/local_diffusion_peak": (max(solve, coupling),)}
 
 
 #: PBL schemes that allocate the Shin-Hong per-call output bundle
@@ -6524,6 +6772,8 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
         items += _nest_items(shapes, nest_slot_dtypes(dc, width, parent))
     items += _items("transient", atmosphere_transient_shapes(run, cam_ozone=cam_ozone))
     items += _items("transient", ysu_output_transient_shapes(run))
+    items += _items("transient", mynn_scalar_transient_shapes(run))
+    items += mynn_mixscalars_memory_items(run, tile_buffer=tile_buffer)
     from woof.core.physics_inventory import terrain_drag_transient_shapes
     items += _items("transient", terrain_drag_transient_shapes(run))
     items += _items("transient", shinhong_output_transient_shapes(run))
@@ -6532,6 +6782,16 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
     items += _items("transient", noahmp_lsm_transient_shapes(run),
                     itemsize=1)
     items += _items("physics", noahmp_lsm_cache_shapes(run), itemsize=1)
+    if int(run.sf_surface_physics) == 3:
+        # The RUC fused driver and generated soil/snow/sea-ice solver keep
+        # their own slabs outside DomainState.scratch. Omitting them hides
+        # more than a GiB on a wide rank. Price their GPU-censused shape
+        # inventory, including per-allocation pool rounding.
+        from woof.core.ruc_memory import ruc_runtime_memory_bytes
+        for name, size in ruc_runtime_memory_bytes(
+                int(run.nx) * int(run.ny), soil_layer_count(run)).items():
+            category = "transient" if name == "sfctmp_outputs" else "physics"
+            items.append(MemoryItem("ruc/" + name, category, (size,), 1))
     items += tuple(MemoryItem(name, "transient", shape, size)
                    for name, (shape, size)
                    in rrtmgp_column_shapes(
@@ -6605,6 +6865,10 @@ class ExperimentMemoryEstimate:
     # Included in non_pool_device_bytes, but bounded by grid column counts.
     # Keep it separate for fixed-floor diagnostics, not a second admission.
     column_workspace_bytes: int = 0
+    # Immutable microphysics coefficients uploaded once per device, not
+    # once per domain. Separate from radiation's shared k-tables so a
+    # legacy radiation workspace is never mistaken for a fixed floor.
+    physics_tables_bytes: int = 0
 
     @property
     def fixed_envelope_bytes(self) -> int:
@@ -6616,7 +6880,8 @@ class ExperimentMemoryEstimate:
         Pure-legacy call workspaces can scale with columns and are excluded.
         No forecast or admission number changes when this diagnostic is read.
         """
-        fixed_pool = self.k_tables_bytes + (self.workspace_bytes if self.k_tables_bytes else 0)
+        fixed_pool = (self.k_tables_bytes + self.physics_tables_bytes
+                      + (self.workspace_bytes if self.k_tables_bytes else 0))
         return machine_peak_envelope_bytes(
             alloc_estimate_bytes=math.ceil(self.headroom * fixed_pool),
             non_pool_bytes=self.non_pool_device_bytes - self.column_workspace_bytes,
@@ -6632,7 +6897,7 @@ class ExperimentMemoryEstimate:
         if self.uses_shared_dycore_state_workspace:
             per_domain -= self.dycore_state_request_bytes
             per_domain += self.dycore_state_workspace_bytes
-        return per_domain + self.k_tables_bytes
+        return per_domain + self.k_tables_bytes + self.physics_tables_bytes
 
     @property
     def dycore_state_request_bytes(self) -> int:
@@ -7026,16 +7291,13 @@ CPU_PREPARATION_ANALYSIS_MULTIPLE_PER_INTERVAL = 0.3
 #: and NetCDF writer); ``tests/test_cpu_preparation_host_ram.py`` carries
 #: every case.  The multiples put the estimate at or above the highest
 #: peak seen for each case, which moved by up to 6% between repeated runs
-#: of one configuration.  Every case ran eight preparation threads, the
-#: most a CPU preparation starts on its own
-#: (``woof.ingest.cpu_backend.AUTOMATIC_PREPARATION_WORKERS``): the peak
-#: grows with the thread count, and at 32 and 64 threads on a 64-vCPU
-#: host the 744x594x49 case peaked above its estimate
-#: (``MEASURED_CPU_PREPARATION_WORKER_COUNTS`` in that test file).
+#: of one configuration. Every case ran eight preparation threads. Wider
+#: pools add 32 MiB per extra worker for allocator and column scratch,
+#: covering the saved 16/32/64-worker process-tree peaks in that test file.
 CPU_PREPARATION_PEAK_BASIS = (
     "measured on real GFS preparations at 3 km, 474x380 to 902x720, 49 to "
-    "96 levels, 3 to 25 forcing times, with the eight worker threads a CPU "
-    "preparation starts at most unless --preprocess-workers names more: "
+    "96 levels, 3 to 25 forcing times, with eight worker threads, plus "
+    "32 MiB allocator and column scratch per worker above eight: "
     "the floor came to 0.74 to 0.89 of "
     "the peak and the estimate to 1.01 to 1.11; for nested trees of 2 and "
     "3 domains the floor came to 0.68 to 0.94 of the measured peak and "
@@ -7284,20 +7546,25 @@ class IngestMemoryEstimate:
             return 0
         intervals = max(0, int(self.n_forcing_times) - 1)
         root_analysis = self.category_bytes("analysis")
+        from woof.ingest.preparation_workers import effective_workers, WORKER_SCRATCH_BYTES
+        # The original peak calibration used eight workers. Wider pools
+        # reserve allocator/column scratch per extra worker instead of
+        # imposing a machine-wide eight-thread ceiling.
+        worker_bytes = max(0, effective_workers() - 8) * WORKER_SCRATCH_BYTES
         interval_bytes = (CPU_PREPARATION_ANALYSIS_MULTIPLE_PER_INTERVAL
                           * intervals * root_analysis)
         if not self.nest_analysis_bytes:
             return math.ceil(
                 self.host_preprocess_floor_bytes
                 + CPU_PREPARATION_ANALYSIS_MULTIPLE * root_analysis
-                + interval_bytes)
+                + interval_bytes + worker_bytes)
         active_analysis = max(root_analysis, self.widest_nest_analysis_bytes)
         tree_peak = (
             self.host_preprocess_floor_bytes
             + CPU_PREPARATION_TREE_ACTIVE_ANALYSIS_MULTIPLE * active_analysis
             + CPU_PREPARATION_RETAINED_NEST_ANALYSIS_MULTIPLE
             * (self.nest_analysis_bytes - self.widest_nest_analysis_bytes))
-        return math.ceil(tree_peak + interval_bytes)
+        return math.ceil(tree_peak + interval_bytes + worker_bytes)
 
     @property
     def host_peak_estimate_bytes(self) -> int | None:
@@ -8177,6 +8444,29 @@ def estimate_devices(exp, **kwargs):
     return estimate(exp, **kwargs)
 
 
+@lru_cache(maxsize=2)
+def thompson_coefficient_bytes(aerosol: bool = False) -> int:
+    """Exact immutable device-table allocations, without loading an asset.
+
+    Both Thompson variants upload the complete classic float64 contract.
+    The aerosol variant adds CCN activation and the small derived arrays;
+    its droplet-evaporation table aliases the classic owner and adds zero.
+    Round each allocation to the device pool's 512-byte quantum.
+    """
+    from woof.core.thompson_contract import (
+        AUXILIARY_TABLE_RECORDS, GENERATED_TABLE_FILES)
+
+    records = tuple(record for group in GENERATED_TABLE_FILES.values()
+                    for record in group) + AUXILIARY_TABLE_RECORDS
+    sizes = [record.payload_bytes for record in records]
+    if aerosol:
+        from woof.core.thompson_aerosol_contract import (
+            CCN_ACTIVATION_VALUES, derived_constant_arrays)
+        sizes.append(CCN_ACTIVATION_VALUES * 8)
+        sizes.extend(array.size * 8 for array in derived_constant_arrays().values())
+    return sum(((int(size) + 511) // 512) * 512 for size in sizes)
+
+
 def estimate_experiment(
         exp: ExperimentConfig, *,
         column_chunk: int | None = None,
@@ -8187,6 +8477,7 @@ def estimate_experiment(
         profile: DeviceLocalMemoryProfile | None = None,
         boundary_species=(),
         urban_columns=None,
+        tile_buffer: bool = False,
 ) -> ExperimentMemoryEstimate:
     """Sum the per-domain itemizations; count the lru_cache-shared
     k-distribution tables ONCE (rrtmgp.py:324/:436 -- baseline behavior,
@@ -8197,10 +8488,16 @@ def estimate_experiment(
     MEASURED budget (free VRAM at startup minus the configured reserve --
     never nominal 32 GiB).
 
+    ``tile_buffer`` prices the MYNN workspace a prepared tile or device
+    rank actually allocates. The loader's retained template is a resident
+    domain and keeps the default False.
+
     ``urban_columns`` maps grid id to the domain's urban column count, the
     prepared doors' reading of their land cover
     (:func:`woof.core.urban_state.prepared_urban_columns`); a domain it
-    does not name is priced at every column urban (A176)."""
+    does not name is priced at every column urban (A176). ``tile_buffer``
+    prices the workspace policy used by ``prepared_tile_state_factory``;
+    permanently resident device ranks use that factory too."""
     column_chunk = (exp.column_chunk if column_chunk is None
                     else column_chunk)
     if (isinstance(column_chunk, bool)
@@ -8228,6 +8525,7 @@ def estimate_experiment(
             boundary_species=(boundary_species if dc.parent_id == 0 else ()),
             p_top=exp.vertical.p_top,
             column_chunk=column_chunk,
+            tile_buffer=tile_buffer,
             urban_columns=(urban_columns or {}).get(int(dc.grid_id)))
         for dc in exp.domains)
     from woof.physics_compat import RRTMG_VARIANT_LEGACY, rrtmg_variant
@@ -8295,7 +8593,8 @@ def estimate_experiment(
                 p_top=exp.vertical.p_top, column_chunk=None,
                 longwave=radiation_scheme_ids(dc.run)[0] == 4,
                 shortwave=radiation_scheme_ids(dc.run)[1] == 4,
-                resident_threads=device_profile.resident_thread_capacity)
+                resident_threads=device_profile.resident_thread_capacity,
+                aer_opt=int(getattr(dc.run, "aer_opt", 0)))
             if (4 in radiation_scheme_ids(dc.run)
                 and rrtmg_variant(dc.run) == RRTMG_VARIANT_LEGACY) else 0
             for dc in exp.domains)
@@ -8333,6 +8632,10 @@ def estimate_experiment(
         column_workspace_bytes=column_workspace_bytes(
             exp, profile=(card_local_memory_profile(vram_gib)
                           if profile is None else profile)),
+        physics_tables_bytes=(thompson_coefficient_bytes(
+            any(int(dc.run.mp_physics) == 28 for dc in exp.domains))
+            if any(int(dc.run.mp_physics) in (8, 28) for dc in exp.domains)
+            else 0),
     )
 
 
@@ -8571,6 +8874,52 @@ def cap_free_to_device_wide(free_bytes: int, *, device_id: str | None = None
     return capped, capped < free
 
 
+def release_unreachable_device_memory(array_module=None) -> None:
+    """Hand back the device memory nothing in this process can reach.
+
+    Call it immediately before a card reading that decides something (an
+    admission, a pack, a tile plan).  Two kinds of bytes are this process's
+    own and free in every sense that matters, yet ``cudaMemGetInfo`` counts
+    them as used:
+
+    * arrays reachable only through a reference cycle.  The driver/state
+      attachment of a finished forecast is such a cycle, and its arrays stay
+      allocated until the cyclic collector happens to run; when it runs
+      depends on everything the process allocated before, not on the run
+      being admitted.
+    * blocks the default CuPy pool holds unused after earlier work.
+
+    So a reading taken without this depended on what ran earlier in the
+    process.  MEASURED (RTX 5090 held to 15 GiB free, the release gate's
+    one-process order): after the two member-sources ensemble identity
+    tests, the native decline gate read 2.87 GiB free and its first member
+    was refused (it needs 4.77 GiB); with one collection between the tests
+    and nothing else changed it read 13.3 GB and passed.  The C6 skeptic
+    saw the same reading admit the gate's four-member native pack as two
+    packs.  The same garbage is reachable in production wherever a process
+    runs a second forecast or ensemble after a first.
+
+    Live arrays are untouched (``free_all_blocks`` releases unreferenced
+    blocks only), so this has no numerical effect.  It is a whole-process
+    collection, which is why it belongs at the few decision readings and
+    never on a per-step path.  A process with no reachable card has nothing
+    to hand back and returns quietly.
+    """
+    import gc
+
+    gc.collect()
+    if array_module is None:
+        try:
+            import cupy as array_module
+        except Exception:                         # noqa: BLE001 - no CuPy
+            return
+    try:
+        array_module.cuda.get_current_stream().synchronize()
+        array_module.get_default_memory_pool().free_all_blocks()
+    except Exception:                             # noqa: BLE001 - no card
+        return
+
+
 def device_free_and_total_bytes(device: int | None = None) -> tuple[int, int]:
     """``(free, total)`` for one CUDA device, free as the tiling planner reads it.
 
@@ -8584,6 +8933,9 @@ def device_free_and_total_bytes(device: int | None = None) -> tuple[int, int]:
     4.32 GiB, with about 6 GiB held by other programs.  On Linux the two
     agree and the cap is a no-op.
 
+    The reading is taken after :func:`release_unreachable_device_memory`,
+    so it does not depend on what this process ran before.
+
     ``device`` None reads the current device, as ``cupy.cuda.Device()``
     does.
     """
@@ -8592,6 +8944,7 @@ def device_free_and_total_bytes(device: int | None = None) -> tuple[int, int]:
 
     selected = cp.cuda.Device() if device is None else cp.cuda.Device(device)
     with selected:
+        release_unreachable_device_memory(cp)
         free, total = cp.cuda.runtime.memGetInfo()
     free, _ = cap_free_to_device_wide(free, device_id=selected.pci_bus_id)
     return int(free), int(total)
@@ -9080,7 +9433,8 @@ def run_alloc_preflight(
                     ncol=dc.run.ny * dc.run.nx, nz=dc.run.nz,
                     p_top=exp.vertical.p_top, column_chunk=None,
                     longwave=radiation_scheme_ids(dc.run)[0] == 4,
-                    shortwave=radiation_scheme_ids(dc.run)[1] == 4)
+                    shortwave=radiation_scheme_ids(dc.run)[1] == 4,
+                    aer_opt=int(getattr(dc.run, "aer_opt", 0)))
                 for dc in legacy_44)
             holdings.append(cp.zeros(envelope, dtype=cp.uint8))
         if any(4 in radiation_scheme_ids(dc.run)
@@ -10041,6 +10395,7 @@ def _required_memory_without_kernels(exp, args, *,
         "transient_peak_bytes": estimate.transient_peak_bytes,
         "workspace_bytes": estimate.workspace_bytes,
         "k_tables_bytes": estimate.k_tables_bytes,
+        "physics_tables_bytes": estimate.physics_tables_bytes,
         "alloc_estimate_bytes": estimate.alloc_estimate_bytes,
         "resident_forecast_peak_envelope_bytes": estimate.peak_envelope_bytes,
         "bem_column_workspace_basis": _check_bem_basis(
@@ -10380,6 +10735,11 @@ def check_main(args) -> int:
         profiles = (None if measured is None else
                     {int(dev): profile_from_device_probe(row)
                      for dev, row in measured["cards"].items()})
+        declared_budget = args.budget_gib if args.budget_gib is not None else declared_free_gib
+        budgets = ({dev: int(declared_budget * GIB) for dev in exp.devices.device_ids()}
+                   if declared_budget is not None else None if measured is None else
+                   {int(dev): int(row["free_bytes"])
+                    for dev, row in measured["cards"].items()})
         if len(exp.domains) > 1:
             # A split tree: each grid on the cards it runs on, the pricing
             # the `woof go` gate and the tree runner use.
@@ -10392,12 +10752,8 @@ def check_main(args) -> int:
             estimate = estimate_devices(
                 exp, forcing_intervals=forcing_intervals,
                 forcing_interval_seconds=forcing_interval, vram_gib=card_total_gib,
-                profile=profile, source=priced_boundary_source, profiles=profiles)
-        declared_budget = args.budget_gib if args.budget_gib is not None else declared_free_gib
-        budgets = ({dev: int(declared_budget * GIB) for dev in exp.devices.device_ids()}
-                   if declared_budget is not None else None if measured is None else
-                   {int(dev): int(row["free_bytes"])
-                    for dev, row in measured["cards"].items()})
+                profile=profile, source=priced_boundary_source, profiles=profiles,
+                budgets=budgets)
         gate = devices_gate(estimate, budgets=budgets, host_budget=host_available_bytes())
         if prepared is None:
             include_preparation(
@@ -10836,6 +11192,7 @@ def check_main(args) -> int:
                                      "nest", "diagnostic", "sase", "transient")},
                 } for d in estimate.domains},
             "k_tables_bytes": estimate.k_tables_bytes,
+            "physics_tables_bytes": estimate.physics_tables_bytes,
             "workspace_bytes": estimate.workspace_bytes,
             "scratch_arena_bytes": estimate.scratch_arena_bytes,
             "scratch_arena_request_bytes":

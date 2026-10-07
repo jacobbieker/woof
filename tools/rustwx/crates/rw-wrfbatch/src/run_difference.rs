@@ -23,7 +23,7 @@
 //! One valid time per invocation.  Pairing a whole series by valid time is
 //! the caller's (`gpuwm.rustwx.pair_frames_by_valid_time`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
@@ -183,6 +183,8 @@ struct RunContext {
     domain_slug: Option<String>,
     spacing: Option<String>,
     title_provenance: TitleProvenance,
+    initial_condition_disclosure: Option<String>,
+    model_label: Option<String>,
 }
 
 fn import_side(
@@ -218,26 +220,19 @@ fn import_side(
         domain_slug,
         spacing,
         title_provenance,
+        initial_condition_disclosure:
+            rustwx_products::shared_context::initial_condition_disclosure(),
+        model_label: rustwx_products::shared_context::model_label(),
     })
 }
 
-/// Put back the initial-condition line of the run about to be drawn.  The
-/// import records it globally as it reads the files, so after both imports
-/// it holds run A's, and run B's pass would print run A's start on run B.
-fn install_disclosure(inputs: &[PathBuf]) {
-    let Some(path) = inputs.last() else {
-        return;
-    };
-    let raw = crate::wrf_process::isolate_panics("read WRF provenance", || {
-        wrf_core::WrfFile::open(path).map_err(|err| err.to_string())
-    });
-    let disclosure = match raw {
-        Ok(file) => crate::local_import::initial_condition_disclosure(&file),
-        Err(_) => netcrust::open(path)
-            .ok()
-            .and_then(|nc| crate::local_import::netcdf_initial_condition_disclosure(&nc)),
-    };
-    rustwx_products::shared_context::set_initial_condition_disclosure(disclosure);
+/// Restore the provenance the import resolved for this entire run. Both
+/// imports complete before either pass renders, so the process-wide model
+/// label and initial-condition line otherwise belong to the last import.
+fn install_provenance(side: &RunContext) {
+    rustwx_products::shared_context::set_initial_condition_disclosure(
+        side.initial_condition_disclosure.clone());
+    rustwx_products::shared_context::set_model_label(side.model_label.clone());
 }
 
 struct PassCounts {
@@ -349,16 +344,18 @@ pub(super) fn run(mut args: Args) -> Result<(), String> {
 
     // Pass B: capture.  Nothing is written to --out-dir; with a sheet, run
     // B's own pictures go to the work folder.
-    install_disclosure(&difference.against);
+    install_provenance(&b);
     difference::begin_capture(difference.labels.clone(), panel_dir.clone());
     let b_out = work_root.join("b-out");
+    let mut unavailable_b = HashSet::new();
     let b_summary = run_batch_render(request_for(&b, b_out.clone()), &cancel, |event| match event {
         BatchRenderEvent::ItemSkipped {
             hour, slug, reason, ..
-        } => println!(
-            "SKIPPED {slug} run B: {}",
-            frame_attributed(&b_frames, hour, &reason)
-        ),
+        } => {
+            unavailable_b.insert(slug.clone());
+            println!("SKIPPED {slug} run B: {}",
+                     frame_attributed(&b_frames, hour, &reason));
+        }
         BatchRenderEvent::ItemFailed {
             hour, slug, error, ..
         } => eprintln!(
@@ -389,10 +386,19 @@ pub(super) fn run(mut args: Args) -> Result<(), String> {
     // Pass A: subtract.  Each product's difference is written beside the
     // name run A's own picture would have had, with `_difference`.
     let a_frames: HashMap<u16, PathBuf> = a.imported.frame_sources.clone();
-    install_disclosure(&args.inputs);
+    install_provenance(&a);
     let mut panel_georefs: Vec<RenderedPanelGeoref> = Vec::new();
-    let a_summary = run_batch_render(
-        request_for(&a, args.out_dir.clone()),
+    let mut a_request = request_for(&a, args.out_dir.clone());
+    // A registered absence in run B has no quantity to subtract. Keep
+    // its named skip rather than trying to read an uncaptured field and
+    // turning a missing accumulation window into a hard render failure.
+    a_request.product_spec = product_spec.split(',')
+        .filter(|slug| !unavailable_b.contains(*slug))
+        .collect::<Vec<_>>().join(",");
+    let a_summary = if a_request.product_spec.is_empty() {
+        Ok(rusty_weather::batch_render::BatchRenderSummary::default())
+    } else { run_batch_render(
+        a_request,
         &cancel,
         |event| match event {
             BatchRenderEvent::ItemRendered {
@@ -432,7 +438,7 @@ pub(super) fn run(mut args: Args) -> Result<(), String> {
             ),
             _ => {}
         },
-    );
+    ) };
     let (drawn, unmatched) = difference::finish();
     let a_summary = a_summary.map_err(|err| format!("run A: {err}"))?;
     let subtract = PassCounts {
@@ -486,19 +492,20 @@ pub(super) fn run(mut args: Args) -> Result<(), String> {
          subtract_ms={} sheet_ms={sheet_ms}",
         capture.elapsed_ms, subtract.elapsed_ms
     );
-    let failed = subtract.failed + sheet_failures;
+    let failed = capture.failed + subtract.failed + sheet_failures;
+    let skipped = subtract.skipped + unavailable_b.len() + unmatched.len();
     println!(
         "FINISHED rendered={} skipped={} failed={failed} elapsed_ms={}",
         subtract.rendered + sheets,
-        subtract.skipped + unmatched.len(),
+        skipped,
         started.elapsed().as_millis()
     );
     let _ = capture.rendered;
-    if drawn.is_empty() || failed > 0 {
+    if failed > 0 || (drawn.is_empty() && skipped == 0) {
         return Err(format!(
             "difference incomplete: drawn={} skipped={} failed={failed}",
             drawn.len(),
-            subtract.skipped + unmatched.len()
+            skipped
         ));
     }
     Ok(())

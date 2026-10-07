@@ -55,7 +55,7 @@ def _call(function, fields, atmosphere, params, k):
     return function(fields, atmosphere, params=params,
                     precipitation=SurfacePrecipitationForcing.from_fields(fields),
                     dt=12.0, itimestep=k, mosaic_lu=0, mosaic_soil=0,
-                    flag_sm_adj=0, spp_lsm=0)
+                    flag_sm_adj=0, spp_lsm=0, lakemodel=1)
 
 
 @pytest.mark.gpu
@@ -93,6 +93,112 @@ def test_negative_control_detects_one_word():
     _call(_ruc_lsm_step_reference, reference, atmosphere, driver.ruc_params, 1)
     with pytest.raises(AssertionError):
         _equal(driver.fields, reference)
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize('nzs', [6, 9])
+@pytest.mark.parametrize('mosaic_lu', [0, 1])
+def test_generic_ruc_defaults_match_named_legacy_after_every_gpu_call(nzs, mosaic_lu):
+    """Omitted selectors reproduce legacy arithmetic throughout mixed columns.
+
+    The independent pre-switch source anchors are in
+    test_ruc_default_selection.py. This covers runtime dispatch, successive
+    state writes and 2 m diagnostics, including snow and an irrigation witness.
+    """
+    import cupy as cp
+    from woof.core.ruc_runtime import ruc_lsm_step, _ruc_lsm_step_reference
+    from woof.core.surface_forcing import SurfacePrecipitationForcing
+
+    bench, driver, atmosphere, cold = _case(5917, nzs, 'mixed')
+    base = driver.fields
+    shape = base['tsk'].shape
+    crop = ((base['xland'] < 1.5) & (base['xice'] == 0)
+            & (base['snow'] == 0))
+    base['ivgtyp'][crop] = 12
+    base['isltyp'][crop] = 6
+    base['vegfra'][crop] = 80
+    base['smois'][:, crop] = cp.float32(.06)
+    base['sh2o'][:, crop] = cp.float32(.06)
+    if mosaic_lu:
+        fractions = cp.zeros((21,) + shape, cp.float32)
+        for category in range(21):
+            fractions[category] = (base['ivgtyp'] == category + 1).astype(cp.float32)
+        fractions[:, crop] = 0
+        fractions[11, crop] = cp.float32(.05)
+        fractions[9, crop] = cp.float32(.95)
+        base['landusef'] = fractions
+    arms = {name: _copy(base) for name in ('generic', 'named', 'reference', 'fork')}
+    changed = False
+    for k in range(1, 7):
+        for target in arms.values():
+            bench.forcing(SimpleNamespace(fields=target), k, 29, shape, cold)
+        kwargs = dict(params=driver.ruc_params, dt=12. if k % 2 else 20.,
+                      itimestep=k, mosaic_lu=mosaic_lu, mosaic_soil=0,
+                      flag_sm_adj=0, spp_lsm=0, lakemodel=0)
+        for name, target in arms.items():
+            selected = {} if name == 'generic' else dict(
+                ruc_soilprop='wrf_45', ruc_irrigation='wrf_461', ruc_snow='wrf_461',
+                ruc_qvg_cold_start='wrf', ruc_2m_diagnostic='flux')
+            if name == 'fork':
+                selected.update(ruc_irrigation='wrf_45', ruc_snow='wrf_45')
+            function = _ruc_lsm_step_reference if name == 'reference' else ruc_lsm_step
+            function(target, atmosphere,
+                     precipitation=SurfacePrecipitationForcing.from_fields(target),
+                     **kwargs, **selected)
+        _equal(arms['generic'], arms['named'])
+        _equal(arms['generic'], arms['reference'])
+        for name in ('snowc', 'tsk', 'smois'):
+            changed |= bool(cp.any(arms['generic'][name].view(cp.uint32)
+                                   != arms['fork'][name].view(cp.uint32)))
+    assert changed, 'the heterogeneous snow and cropland columns never reached a fork difference'
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize("nzs", [6, 9])
+@pytest.mark.parametrize("ncol", [17, 500000])
+def test_full_width_workspace_allocation_census(nzs, ncol, monkeypatch):
+    """Admission counts real arrays, including the generated snow workspace."""
+    from woof.core import ruc_fused, ruc_gpu, ruc_memory
+
+    monkeypatch.setattr(ruc_gpu, "_SFCTMP_SCRATCH", {})
+    workspace = ruc_fused._Workspace((1, ncol), nzs)
+    driver = {name: getattr(workspace, name) for name in
+              ("storage", "integer", "run", "flag_slab", "sptr", "iptr", "optr", "cptr")}
+    scratch = ruc_gpu._sfctmp_scratch(ncol, nzs)
+    surface = {"scratch": scratch[0], "pointers": scratch[2],
+               "private_flags": scratch[7], "alive": scratch[8]}
+    for actual, expected in (
+            (driver, ruc_memory.driver_workspace_allocations(ncol, nzs)),
+            (surface, ruc_memory.sfctmp_workspace_allocations(ncol, nzs))):
+        assert {name: (array.shape, str(array.dtype)) for name, array in actual.items()} == expected
+        assert len({array.data.ptr for array in actual.values()}) == len(actual)
+        assert sum(array.nbytes for array in actual.values()) == ruc_memory.allocation_bytes(
+            expected, rounded=False)
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize("nzs", [6, 9])
+def test_full_width_output_allocation_census(nzs, monkeypatch):
+    """Full-width outputs coexist with both workspaces until the commit."""
+    from woof.core import ruc_fused, ruc_memory
+    from woof.core.ruc_runtime import ruc_lsm_step
+
+    _, driver, atmosphere, _ = _case(17, nzs, "mixed")
+    original = ruc_fused._RUC_SFCTMP_FULL_WIDTH
+    observed = []
+
+    def measure(*args, **kwargs):
+        result = original(*args, **kwargs)
+        observed.append({name: (array.shape, str(array.dtype))
+                         for name, array in result.items()})
+        return result
+
+    monkeypatch.setattr(ruc_fused, "_RUC_SFCTMP_FULL_WIDTH", measure)
+    _call(ruc_lsm_step, driver.fields, atmosphere, driver.ruc_params, 1)
+    assert observed == [ruc_memory.sfctmp_output_allocations(17, nzs)]
 
 
 @pytest.mark.gpu
@@ -254,8 +360,8 @@ def test_the_forecast_call_is_six_kernels_and_no_orchestration_reads(nzs, monkey
     launched = []
     original = ruc_tier.ruc_fused_kernel
 
-    def counting(func, levels):
-        kernel = original(func, levels)
+    def counting(func, levels, *lineage):
+        kernel = original(func, levels, *lineage)
 
         def launch(*args):
             launched.append(func)
@@ -304,3 +410,114 @@ def test_t2_and_th2_do_not_reach_the_hosts_numpy_power(nzs, monkeypatch):
                 np.float32(1.5), np.float32(0.3))
             _call(ruc_lsm_step, moved, atmosphere, driver.ruc_params, k)
         _equal(driver.fields, moved)
+
+
+def _operational_params(params, nzs, *, rdlai2d, fractional_seaice):
+    from woof.core.ruc_runtime import RucRuntimeParameters
+    resolved = RucRuntimeParameters(
+        params.bundle, dataset_identifier=params.dataset_identifier,
+        seaice_albedo_default=params.seaice_albedo_default,
+        num_soil_layers=nzs, rdlai2d=rdlai2d,
+        fractional_seaice=fractional_seaice)
+    resolved.iswater, resolved.isice = params.iswater, params.isice
+    return resolved
+
+
+def _fractional_ice_and_monthly_lai(fields, width):
+    """Sea-ice fractions across WRF's 0.02 threshold and a prescribed LAI.
+
+    Every fractional ice cell of the mixed fixture moves into [0.02, 0.5),
+    the cells the 0.5 pin left open water and HRRR's fractional_seaice = 1
+    blends; two sit exactly on 0.02 and one just below it.  The LAI is a
+    field no table produces, as real.exe's LAI12M interpolation is.
+    """
+    import cupy as cp
+    rng = np.random.default_rng(29)
+    xice = cp.asnumpy(fields["xice"]).copy()
+    partial = (xice > 0.0) & (xice < 1.0)
+    xice[partial] = rng.uniform(0.02, 0.5, xice.shape)[partial].astype(np.float32)
+    edge = np.flatnonzero(partial.reshape(-1))[:3]
+    flat = xice.reshape(-1)
+    flat[edge] = np.asarray([0.02, 0.02, np.nextafter(np.float32(0.02),
+                                                      np.float32(0.0))],
+                            dtype=np.float32)[:edge.size]
+    fields["xice"][...] = cp.asarray(xice, dtype=fields["xice"].dtype)
+    # landuse_init's fractional blend (module_physics_init.F:1638-1639) for
+    # the moved cells, so the driver's de-blend recovers an ice albedo.
+    one = np.float32(1.0)
+    moved = cp.asarray(partial)
+    fraction = fields["xice"]
+    fields["albedo"][...] = cp.where(
+        moved, fraction * np.float32(0.55) + (one - fraction) * np.float32(0.08),
+        fields["albedo"])
+    fields["emiss"][...] = cp.where(
+        moved, fraction * np.float32(0.98) + (one - fraction) * np.float32(0.98),
+        fields["emiss"])
+    fields["lai"][...] = cp.asarray(
+        rng.uniform(0.05, 4.5, (1, width)), dtype=fields["lai"].dtype)
+    return int(np.count_nonzero((xice >= np.float32(0.02))
+                                & (xice < np.float32(0.5))))
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize("nzs", [9, 6])
+@pytest.mark.parametrize("width", [17, 5917])
+def test_rdlai2d_and_the_fractional_threshold_fused_matches_reference(width, nzs):
+    # Operational HRRR's RUC switches (hrrr_wrf.nl:149 rdlai2d, :154
+    # fractional_seaice = 1 -> xice_threshold 0.02 at
+    # module_surface_driver.F:1365-1368): the fused driver must write every
+    # word the per-kernel reference path writes, on cells the new threshold
+    # admits, and SOILVEGIN must leave the prescribed LAI alone
+    # (module_sf_ruclsm.F:7028, :7042, :7061, :7075).
+    import cupy as cp
+    from woof.core.ruc_runtime import ruc_lsm_step, _ruc_lsm_step_reference
+    bench, driver, atmosphere, cold = _case(width, nzs, "mixed")
+    params = _operational_params(driver.ruc_params, nzs, rdlai2d=True,
+                                 fractional_seaice=1)
+    assert params.xice_threshold == 0.02
+    admitted = _fractional_ice_and_monthly_lai(driver.fields, width)
+    assert admitted > 0
+    reference = _copy(driver.fields)
+    prescribed = cp.asnumpy(driver.fields["lai"]).copy()
+    for k in range(1, 8):
+        bench.forcing(driver, k, 11, (1, width), cold)
+        bench.forcing(SimpleNamespace(fields=reference), k, 11, (1, width), cold)
+        actual = _call(ruc_lsm_step, driver.fields, atmosphere, params, k)
+        expected = _call(_ruc_lsm_step_reference, reference, atmosphere, params, k)
+        assert actual == expected
+        _equal(driver.fields, reference)
+        np.testing.assert_array_equal(
+            cp.asnumpy(driver.fields["lai"]).view(np.uint32),
+            prescribed.view(np.uint32))
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_the_new_switches_are_live_on_the_fused_path():
+    # Negative control for the test above: the same fields under the
+    # previous pins (rdlai2d false, threshold 0.5) must write other words,
+    # in the LAI everywhere on land and in the fluxes of the admitted cells.
+    import cupy as cp
+    from woof.core.ruc_runtime import ruc_lsm_step
+    width, nzs = 5917, 9
+    bench, driver, atmosphere, cold = _case(width, nzs, "mixed")
+    _fractional_ice_and_monthly_lai(driver.fields, width)
+    pinned = _copy(driver.fields)
+    xice = cp.asnumpy(driver.fields["xice"]).reshape(-1)
+    admitted = (xice >= np.float32(0.02)) & (xice < np.float32(0.5))
+    new = _operational_params(driver.ruc_params, nzs, rdlai2d=True,
+                              fractional_seaice=1)
+    old = _operational_params(driver.ruc_params, nzs, rdlai2d=False,
+                              fractional_seaice=0)
+    bench.forcing(driver, 1, 11, (1, width), cold)
+    bench.forcing(SimpleNamespace(fields=pinned), 1, 11, (1, width), cold)
+    _call(ruc_lsm_step, driver.fields, atmosphere, new, 1)
+    _call(ruc_lsm_step, pinned, atmosphere, old, 1)
+    lai_new = cp.asnumpy(driver.fields["lai"]).reshape(-1)
+    lai_old = cp.asnumpy(pinned["lai"]).reshape(-1)
+    assert np.count_nonzero(lai_new != lai_old) > width // 2
+    for name in ("hfx", "tsk", "albedo"):
+        moved = (cp.asnumpy(driver.fields[name]).reshape(-1)
+                 != cp.asnumpy(pinned[name]).reshape(-1))
+        assert np.count_nonzero(moved & admitted) > 0, name

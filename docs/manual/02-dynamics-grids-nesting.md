@@ -6,22 +6,32 @@ The core is a WRF-ARW-class compressible nonhydrostatic solver: three-stage
 Runge-Kutta outer integration wrapping split-explicit acoustic steps
 (forward-backward horizontal, implicit vertical, recoupled to the large step), on a
 hybrid terrain-following dry-mass vertical coordinate, FP32 on CUDA
-[docs/gpuwm-project-history.md:65; README.md:33-34]. The RK stage table is a
-config-visible knob (`rk_ord`, default 3) [docs/public/CONFIGURATION.md:734].
+[docs/gpuwm-project-history.md:65; README.md, current release scope]. The RK stage table is a
+config-visible knob (`rk_ord`, default 3) [docs/public/CONFIGURATION.md:785].
 
-Advection is WRF's stencils, hardcoded where WRF hardcodes behavior: horizontal
-momentum is the WRF flux5 (5th-order) stencil, vertical momentum and scalars the
-flux3 (3rd-order) stencil (`woof/core/kernels/advection.cu`)
-[docs/public/CONFIGURATION.md:730-731]. Transported-scalar stencils are fixed
-5th/3rd order, so the importer accepts only the Registry default
+Advection is WRF's stencils: horizontal momentum and scalars are the WRF flux5
+(5th-order) stencil, and the vertical faces take WRF's `vert_order` ladder,
+3 (flux3 between 2nd-order faces) or 5 (flux3 two faces in, flux5 between),
+selected by `v_sca_adv_order` for scalars, theta, TKE and w and by
+`v_mom_adv_order` for u and v (`woof/core/kernels/advection.cu`; both default 3,
+operational HRRR runs 5). Transported-scalar horizontal stencils are fixed at
+5th order, so the importer accepts only the Registry default
 `h_sca_adv_order = 5`; the configurable `h_sca_adv_order` (legacy default 2) feeds
-the geopotential equation only [docs/public/CONFIGURATION.md:412]. Moist transport
+the geopotential equation only [docs/public/CONFIGURATION.md:430]. Moist transport
 runs WRF option 1 (positive-definite limiter) with `scalar_adv_opt` required to
-match [docs/public/CONFIGURATION.md:413, 740].
+match [docs/public/CONFIGURATION.md:434, 790]. At vertical order 5 its
+low-order eta flux takes the operational fork's semi-Lagrangian sum of the
+upstream cells above face Courant 1 (`woof/core/kernels/pd_vertical_sl.cu`)
+and the upwind flux elsewhere, so the limiter stays positive definite.
+The fork itself takes the downstream cell at face Courant numbers at most 1,
+which drains an empty cell; the final-stage clamp then adds that mass back
+as new scalar. Only the strict WRF verification build keeps the fork's
+choice, to measure the rest of the transcription against it. Order 3 has
+the upwind low-order flux at every face.
 
 Lateral boundaries use specified/relaxation zones with Davies-style weighting;
 `spec_bdy_width` defaults to 5 and must be at least `spec_zone + relax_zone`
-[docs/public/CONFIGURATION.md:105]. The damping stack is described in section 1.2.
+[docs/public/CONFIGURATION.md:115]. The damping stack is described in section 1.2.
 
 No symbolic statement of the governing equation set exists in the documentation
 tree; the prose description above and the WRF-ARW technical-note lineage are the
@@ -31,7 +41,7 @@ reference. This is recorded as a documentation gap, not a claim.
 
 `hybrid_opt` supports 0/1 (sigma, `B(eta)=eta`) and 2 (WRF cubic-B hybrid); anything
 else is refused by name. The importer and the domain wizard default to 2 with
-`etac = 0.2` [docs/public/CONFIGURATION.md:140-141; woof/namelist_import.py:3011-3012;
+`etac = 0.2` [docs/public/CONFIGURATION.md:155-156; woof/namelist_import.py:3011-3012;
 woof/domain_wizard.py:867]. That `etac` is the value asked for, not always the
 value run: at `hybrid_opt = 2` the cubic orders a column only while its surface
 pressure stays above a floor set by `etac` and `p_top` (46408 Pa, about 6082 m of
@@ -56,7 +66,7 @@ Eta levels are explicit, not generated: `eta_levels` is required for real runs,
 automatic level generation (`auto_levels_opt`, `max_dz`, `dzbot`,
 `dzstretch_s/u`) is not implemented, and with explicit `eta_levels` those keys
 are inert in WRF too, so they import as dropped. `p_top` defaults on import to
-the Registry's 5000 Pa [docs/public/CONFIGURATION.md:142].
+the Registry's 5000 Pa [docs/public/CONFIGURATION.md:154].
 
 Two hard properties a WRF user must plan around:
 
@@ -86,7 +96,7 @@ Two hard properties a WRF user must plan around:
 
 ## 2.3 Projections
 
-Implemented: Lambert conformal northern hemisphere (model-validated), Lambert
+Implemented: Lambert conformal northern hemisphere (projection-oracle checks and one historical matched WRF case; code verification only), Lambert
 conformal SH, Mercator, and polar stereographic at either pole (the latter three
 implemented-unverified: binary64 oracle plus GPU smoke). Latitude-longitude and
 rotated grids are not implemented, refused at load, never substituted. Domains
@@ -102,15 +112,15 @@ exact parent-step and forcing-cadence seam. Two-way feedback (`feedback = 1`) sh
 as an experimental path: it runs, it is stamped as experimental in the run's own
 provenance, and one-way consumers refuse a feedback-modified parent. It feeds back
 dynamic state only, where WRF also feeds back hundreds of masked land-surface
-fields, so it is not a WRF-equivalent claim [README.md:472-479;
-docs/public/CONFIGURATION.md:87-88]. `smooth_option` admits 0 only (the parent
+fields, so it is not a WRF-equivalent claim [README.md, current release scope;
+docs/public/CONFIGURATION.md:112-113]. `smooth_option` admits 0 only (the parent
 smoother acts only under two-way feedback). No receipt, gate, or measurement exists
 yet for the two-way path beyond its stamping; treat it accordingly.
 
 Execution walks parent before child on a flat integer-tick schedule so no
 floating-point clock drift can reorder coupling; child timestep derives exactly as
 `dt_child = dt_parent / parent_time_step_ratio`
-[docs/gpuwm-project-history.md:75; docs/public/CONFIGURATION.md:135].
+[docs/gpuwm-project-history.md:75; docs/public/CONFIGURATION.md:207].
 Parent-to-child initialization uses WRF's SINT interpolation family with
 stagger-aware geometry; lateral forcing is stored as value/tendency tables in WRF
 `bdy_interp1` form [docs/gpuwm-project-history.md:77]. All 128 WRF boundary tables
@@ -201,7 +211,7 @@ the artifact to driver-held state. The fixed arm's small RAINC dips (-431 and -8
 mm-sum) are strip-exit losses (heavy-rain columns leaving the domain), not resets
 [gallery:2026-08-17-moving-nest-kf/INDEX.md;
 tests/test_relocation_physics_continuation.py, 8 tests]. The fix ships default-on on
-both moving-nest routes [CHANGELOG.md, Unreleased].
+both moving-nest routes [CHANGELOG.md, engine 2.5.0].
 
 ### 2.5.3 What a move does not promise
 
@@ -267,7 +277,7 @@ one line naming the ratio and the limit, and reported by the preflight checker
 `woof check` (section 8.5) as what the run will do. A config that writes
 `mix_isotropic = 0` keeps it, in the danger zone
 too, and gets the advisory carrying the override state
-[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:394]. Because
+[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:409]. Because
 `mix_isotropic` is inside the restart fingerprint, a checkpoint written under the
 old anisotropic default does not bit-continue under the auto-selected isotropic
 form. A guard test fails if any shipped config arrives on the exposed path, and the

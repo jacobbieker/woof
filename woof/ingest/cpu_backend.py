@@ -30,8 +30,12 @@ that predates the entry is refused by name with the remedy
 from __future__ import annotations
 
 import ctypes
+from contextlib import contextmanager
+from contextvars import ContextVar
 import os
 from pathlib import Path
+from threading import RLock
+import weakref
 from typing import Final
 
 import numpy as np
@@ -39,6 +43,25 @@ import numpy as np
 
 CPU_BACKEND_ABI: Final[int] = 1
 CPU_BRIDGE_ENV: Final[str] = "WOOF_CPU_PREPROCESS_BRIDGE"
+_selected_cpu_bridge = ContextVar("selected_preparation_cpu_bridge", default=None)
+_selected_cpu_worker_cap = ContextVar("selected_preparation_cpu_worker_cap", default=None)
+_vertical_geometry_lock = RLock()
+_vertical_geometry_bytes = 0
+
+
+@contextmanager
+def cpu_bridge_scope(path, *, worker_cap=None):
+    """Keep one preparation's selected bridge for its default native helpers."""
+    if path is None:
+        yield
+        return
+    token = _selected_cpu_bridge.set(resolve_cpu_bridge(path))
+    worker_token = _selected_cpu_worker_cap.set(worker_cap)
+    try:
+        yield
+    finally:
+        _selected_cpu_bridge.reset(token)
+        _selected_cpu_worker_cap.reset(worker_token)
 
 _ERRORS = {
     1: "null buffer",
@@ -46,7 +69,10 @@ _ERRORS = {
     3: "non-finite value or invalid pressure",
     4: "source pressure is not strictly descending",
     5: "no source level is above the surface",
-    6: "target pressure lies above the source top",
+    6: ("target pressure lies above the source top by more than the "
+        "2^-16 co-location tolerance: its values would have to be "
+        "extrapolated past the top of the source analysis, where there is "
+        "no data.  Raise p_top or supply a source that reaches higher"),
     7: "no interpolation window fits the assembled column",
     8: "input file could not be opened or read",
     9: "input file is not the declared intermediate format",
@@ -102,6 +128,7 @@ WATER_BODY_STAT_SLOTS: Final[int] = 7
 _WPS_OPERATOR_CODES = {
     "sixteen_pt": 0, "four_pt": 1, "average_4pt": 2,
     "wt_average_4pt": 3, "wt_average_16pt": 4, "search": 5,
+    "nearest_neighbor": 6,
 }
 _WPS_UNKNOWN_OPERATOR = 255
 _WPS_CHAIN_MODES = {"plain": 0, "land": 1, "skin": 2}
@@ -148,6 +175,8 @@ def resolve_cpu_bridge(path: Path | str | None = None) -> Path:
 
     from woof.bridges import cpu_bridge_remedy, find_artifact
 
+    if path is None:
+        path = _selected_cpu_bridge.get()
     filename = _library_names()[0]
     if path is not None:
         explicit = Path(path)
@@ -178,31 +207,22 @@ def resolve_cpu_bridge(path: Path | str | None = None) -> Path:
         + rendered + "\n" + cpu_bridge_remedy(filename))
 
 
-#: The most threads the CPU preparation starts on its own, in the native
-#: transforms here and in the setup column helpers
-#: (:func:`woof.ingest.real.initialize_real`).  Its peak host RAM grows
-#: with its thread count, and every calibration row behind
-#: ``IngestMemoryEstimate.host_preprocess_bytes`` in
-#: :mod:`woof.core.preflight` was measured at eight.  Sized from the
-#: machine instead, a 64-vCPU host prepared a 744x594x49 domain from 6 h
-#: of real GFS at a peak 10% over the eight-thread one and 1.04 times
-#: the estimate ``woof check`` and ``woof domain`` size RAM against,
-#: and no faster on that shared host.  An explicit ``workers`` (``--preprocess-workers``)
-#: still goes above it; that is a choice the estimate does not price.
+#: The reference width of the saved host-RAM calibration. Runtime uses
+#: the CPU and memory budget, with extra worker scratch priced in preflight.
 AUTOMATIC_PREPARATION_WORKERS: Final[int] = 8
 
 
 def available_cpu_count() -> int:
-    """The CPUs this process may run on (its affinity where the OS has one)."""
-    try:
-        return max(1, len(os.sched_getaffinity(0)))
-    except (AttributeError, OSError):
-        return max(1, int(os.cpu_count() or 1))
+    """The CPU capacity allowed by affinity and every cgroup quota."""
+    from woof.ingest.preparation_workers import cpu_budget
+    return cpu_budget()["available_cpus"]
 
 
 def automatic_workers() -> int:
     """Threads a CPU preparation uses when no count was given."""
-    return min(available_cpu_count(), AUTOMATIC_PREPARATION_WORKERS)
+    from woof.ingest.preparation_workers import PREPARATION_THREADS_ENV, effective_workers
+    configured = os.environ.get(PREPARATION_THREADS_ENV, "")
+    return effective_workers(int(configured)) if configured.isdecimal() and int(configured) > 0 else effective_workers()
 
 
 def host_step_workers(backend=None) -> int:
@@ -229,7 +249,10 @@ def _workers(value: int | None, independent_count: int) -> int:
     value = int(value)
     if value < 1:
         raise ValueError("workers must be positive")
-    return min(value, independent_count)
+    from woof.ingest.preparation_workers import effective_workers
+    value = min(effective_workers(value), independent_count)
+    cap = _selected_cpu_worker_cap.get()
+    return value if cap is None else min(value, cap)
 
 
 def _host_f32(value) -> np.ndarray:
@@ -406,6 +429,66 @@ class _CpuIndexedDonorPlan:
         ))
         self.backend._raise(code, "indexed-donor horizontal interpolation")
         return output.reshape((*leading_shape, *self.target_shape))
+
+
+def _release_vertical_geometry(release, handle, nbytes):
+    global _vertical_geometry_bytes
+    with _vertical_geometry_lock:
+        release(ctypes.c_void_p(handle))
+        _vertical_geometry_bytes -= nbytes
+
+
+class _NativeVerticalGeometry:
+    """Own immutable Rust geometry while each field keeps its original checks."""
+
+    def __init__(self, backend, handle, source_shape, target_shape, nbytes):
+        self.backend = backend
+        self.handle = handle
+        self.source_shape = source_shape
+        self.target_shape = target_shape
+        self.nbytes = nbytes
+        self._lock = RLock()
+        release = backend._library.gpuwm_wrf_vertical_plan_free
+        release.argtypes = [ctypes.c_void_p]
+        release.restype = None
+        self._release = weakref.finalize(
+            self, _release_vertical_geometry, release, handle, nbytes)
+
+    def close(self):
+        with self._lock:
+            self._release()
+
+    def apply(self, field, surface_value, source_pressure, surface_pressure,
+              target_pressure, *, extrap, vboundb, workers):
+        with self._lock:
+            return self._apply(field, surface_value, source_pressure,
+                surface_pressure, target_pressure, extrap=extrap,
+                vboundb=vboundb, workers=workers)
+
+    def _apply(self, field, surface_value, source_pressure, surface_pressure,
+               target_pressure, *, extrap, vboundb, workers):
+        if extrap not in ("constant", "temperature"):
+            raise ValueError("extrap must be 'constant' or 'temperature'")
+        values, source, sv, sp, target = (
+            _host_f32(value) for value in
+            (field, source_pressure, surface_value, surface_pressure, target_pressure))
+        if (values.shape != self.source_shape or source.shape != self.source_shape
+                or sv.shape != self.source_shape[1:] or sp.shape != sv.shape
+                or target.shape != self.target_shape or not self._release.alive):
+            return None
+        output = np.empty(target.shape, dtype=np.float32)
+        entry = self.backend._library.gpuwm_wrf_vertical_plan_apply
+        pointer, size = ctypes.c_void_p, ctypes.c_size_t
+        entry.argtypes = [pointer] * 7 + [ctypes.c_int32, size, size]
+        entry.restype = ctypes.c_int32
+        code = int(entry(ctypes.c_void_p(self.handle),
+            *[ctypes.c_void_p(value.ctypes.data) for value in
+              (values, sv, source, sp, target, output)],
+            int(extrap == "temperature"), int(vboundb), _workers(workers, sp.size)))
+        if code == 126:
+            return None
+        self.backend._raise(code, "vertical interpolation")
+        return output
 
 
 class CpuPreprocessBackend:
@@ -718,6 +801,24 @@ class CpuPreprocessBackend:
             raise ValueError(
                 f"parallel CPU {operation} failed: {detail}: {message}")
         raise ValueError(f"parallel CPU {operation} failed: {detail}")
+
+    def aerosol_surface_mass(self, number, phb, inverse_density, dx, dy):
+        """Operational WRF's REAL surface emission from monthly number."""
+        try:
+            entry = self._library.gpuwm_aerosol_surface_mass_f32
+        except AttributeError:
+            raise RuntimeError("CPU bridge lacks aerosol surface emission; rebuild the preprocessing bridge") from None
+        arrays = [_host_f32(value) for value in
+                  (number, phb[0], phb[1], inverse_density)]
+        if not arrays[0].ndim == 2 or any(a.shape != arrays[0].shape for a in arrays):
+            raise ValueError("surface aerosol operands must share the mass grid")
+        output = np.empty_like(arrays[0])
+        entry.argtypes = [ctypes.c_void_p] * 5 + [ctypes.c_size_t] + [ctypes.c_float] * 3
+        entry.restype = ctypes.c_int32
+        code = entry(*(a.ctypes.data for a in arrays), output.ctypes.data,
+                     output.size, 9.81, float(dx), float(dy))
+        self._raise_native(code, "aerosol surface emission")
+        return output
 
     def read_wps_intermediate(self, path):
         """Decode every field record of a WPS intermediate (IFV=5) file.
@@ -1597,6 +1698,49 @@ class CpuPreprocessBackend:
 
         return _CpuIndexedDonorPlan(
             self, source_shape, donor_y, donor_x, fraction_y, fraction_x)
+
+    def prepare_vertical_geometry(self, source_pressure, surface_pressure,
+            target_pressure, *, interp_in_logp=True, force_sfc_in_vinterp=1,
+            zap_close_levels=500.0, workers=None):
+        """Optional bounded geometry cache; every decline keeps the old ABI."""
+        global _vertical_geometry_bytes
+        entry = getattr(self._library, "gpuwm_wrf_vertical_plan_new", None)
+        if entry is None or not isinstance(interp_in_logp, (bool, np.bool_)):
+            return None
+        source, surface, target = (_host_f32(value) for value in
+                                  (source_pressure, surface_pressure, target_pressure))
+        if (source.ndim != 3 or target.ndim != 3 or surface.shape != source.shape[1:]
+                or target.shape[1:] != surface.shape or source.shape[0] < 2
+                or target.shape[0] == 0 or surface.size == 0
+                or not 0 <= int(force_sfc_in_vinterp) <= target.shape[0]):
+            return None
+        from woof.ingest.preparation_workers import host_available_bytes
+        handle, nbytes = ctypes.c_void_p(), ctypes.c_size_t()
+        pointer, size = ctypes.c_void_p, ctypes.c_size_t
+        entry.argtypes = [pointer, pointer, pointer, size, size, size,
+            ctypes.c_int32, size, ctypes.c_float, size, size,
+            ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_size_t)]
+        entry.restype = ctypes.c_int32
+        with _vertical_geometry_lock:
+            available = host_available_bytes()
+            # All live plans together receive one eighth of capacity that
+            # is currently free or already held by this geometry cache.
+            # Other preparation allocations reduce the next allowance.
+            if available is None:
+                return None
+            budget = max(0, (int(available) + _vertical_geometry_bytes) // 8
+                         - _vertical_geometry_bytes)
+            code = int(entry(*[ctypes.c_void_p(value.ctypes.data) for value in
+                               (source, surface, target)],
+                source.shape[0], target.shape[0], surface.size, int(interp_in_logp),
+                int(force_sfc_in_vinterp), float(zap_close_levels),
+                _workers(workers, surface.size), budget,
+                ctypes.byref(handle), ctypes.byref(nbytes)))
+            if code or not handle.value:
+                return None
+            _vertical_geometry_bytes += int(nbytes.value)
+            return _NativeVerticalGeometry(self, handle.value, source.shape,
+                                            target.shape, int(nbytes.value))
 
     def wrf_vertical_interpolate(
             self, field, surface_value, source_pressure, surface_pressure,

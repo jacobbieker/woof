@@ -121,7 +121,8 @@ def library_names() -> tuple[str, ...]:
 
 def library_candidates() -> tuple[Path, ...]:
     """Deterministic candidate paths, best first (the nc-writer ladder)."""
-    from woof.bridges import default_bridge_dir, packaged_bridge_dir
+    from woof.bridges import (default_bridge_dir, legacy_bridge_candidates,
+                               packaged_bridge_dir)
     from woof.rustwx import crate_dir
 
     filename = library_names()[0]
@@ -136,6 +137,7 @@ def library_candidates() -> tuple[Path, ...]:
         root / "libexec" / "bridges" / filename,
         packaged_bridge_dir() / filename,
         default_bridge_dir() / filename,
+        *legacy_bridge_candidates(filename),
     ))
     return tuple(candidates)
 
@@ -469,6 +471,7 @@ def build_fields(grid_handle: int, geog_paths: dict,
 #: ``_bind_entry_points``, so a library staged before it keeps serving
 #: every build that does not ask for them.
 OROGRAPHIC_MARKER: Final[str] = "gpuwm_static_orographic_v2"
+CONTINUOUS_MARKER: Final[str] = "gpuwm_static_continuous_v1"
 
 
 def build_orographic(grid_handle: int, request: dict,
@@ -479,6 +482,14 @@ def build_orographic(grid_handle: int, request: dict,
     "fields": [{"name", "path", "gcell", "masked_water"}, ...]}``.
     """
     library = load()
+    extended = {"gcell_ratio", "search_depth", "masked_land", "fill_missing"}
+    if (any(extended.intersection(field) for field in request.get("fields", ()))
+            and not hasattr(library, CONTINUOUS_MARKER)):
+        raise StaticBridgeError(
+            "the staged static-fields library lacks declared grid-cell "
+            "ratios, bounded WPS search and land masking; LAKE_DEPTH would "
+            "use different bathymetry. Restage the rebuilt bridge: "
+            + _checkout_build_command())
     if not hasattr(library, OROGRAPHIC_MARKER):
         raise StaticBridgeError(
             "the staged static-fields library predates the corrected WPS "

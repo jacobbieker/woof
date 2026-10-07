@@ -103,7 +103,7 @@ def _module(device: int):
     kernels to WRF.  ``-arch`` is left to CuPy (NVRTC 13 refuses it twice).
     """
     import cupy as cp
-    from cupy.cuda import compiler
+    from woof import nvrtc_ptx_cache as compiler
 
     from woof.certify.kernel_manifest import record_module
     from woof.kernel_compile_notice import observe_module_compile
@@ -350,6 +350,23 @@ class TerrainDrag:
     ctopo2: object = None
     gwd: dict | None = None
     kpblmax: int | None = None
+
+    def geography(self) -> dict:
+        """Static device arrays that a tiled rank gathers column for column.
+
+        Carry the finished topo_wind coefficients, not the raw terrain:
+        recomputing its Laplacian at a tile edge would clamp an interior
+        neighbour and change the drag.  ``kpblmax`` depends only on the
+        domain's shared eta coordinate and has no horizontal extent.
+        """
+        arrays = {}
+        if self.topo_wind:
+            arrays.update({"terrain_drag/ctopo": self.ctopo,
+                           "terrain_drag/ctopo2": self.ctopo2})
+        if self.gwd_opt:
+            arrays.update({f"terrain_drag/gwd/{name}": self.gwd[name]
+                           for name in GWD_FIELDS[self.gwd_opt]})
+        return arrays
 
     def apply_gwd(self, atmosphere, du, dv, *, sina, cosa, xland, br, pblh,
                   kpbl, dx: float, dt: float) -> None:

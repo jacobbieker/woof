@@ -522,14 +522,15 @@ def ruc_surface_parameters_cuda(
     mminlu: str = "MODIFIED_IGBP_MODIS_NOAH",
     mosaic_lu: int = 0,
     mosaic_soil: int = 0,
+    landusef=None,
+    soilctop=None,
     parameters: RucParameterBundle | None = None,
 ) -> RucSurfaceParametersCuda:
     """Evaluate WRF ``soilvegin`` directly on independent GPU columns."""
 
-    if type(mosaic_lu) is not int or mosaic_lu != 0:
-        raise ValueError("RUC CUDA surface setup currently requires mosaic_lu=0")
-    if type(mosaic_soil) is not int or mosaic_soil != 0:
-        raise ValueError("RUC CUDA surface setup currently requires mosaic_soil=0")
+    from woof.core.ruc_mosaic import mosaic_option, mosaic_fractions
+    mosaic_option(mosaic_lu, "mosaic_lu")
+    mosaic_option(mosaic_soil, "mosaic_soil")
     if type(rdlai2d) is not bool:
         raise TypeError("rdlai2d must be bool")
 
@@ -584,6 +585,11 @@ def ruc_surface_parameters_cuda(
     else:
         raise ValueError(f"RUC iswater {iswater!r} is outside 1..{nvegetation}")
 
+    land_fractions = (mosaic_fractions(landusef, shape, "landusef", nvegetation, arrays=cp)
+                      if mosaic_lu else cp.empty((0,), dtype=cp.float32))
+    soil_fractions = (mosaic_fractions(soilctop, shape, "soilctop", nsoil, arrays=cp)
+                      if mosaic_soil else cp.empty((0,), dtype=cp.float32))
+
     float_names = (
         "emiss", "pc", "znt", "lai", "qwrtz", "rhocs", "bclh",
         "dqm", "ksat", "psis", "qmin", "ref", "wilt",
@@ -622,6 +628,9 @@ def ruc_surface_parameters_cuda(
             np.int32(water_category),
             np.int32(rdlai2d),
             np.int32(n),
+            land_fractions, soil_fractions,
+            np.int32(land_fractions.shape[0]), np.int32(soil_fractions.shape[0]),
+            np.int32(mosaic_lu), np.int32(mosaic_soil),
         ),
     )
     return RucSurfaceParametersCuda(
@@ -634,9 +643,19 @@ def ruc_soil_properties_cuda(
     values: dict[str, object],
     *,
     riw: float = 0.9,
+    spp_lsm: int = 0,
+    rstochcol=None,
+    fieldcol_sf=None,
+    soilprop: str = "wrf_461",
 ) -> RucSoilPropertiesCuda:
-    """Evaluate deterministic WRF ``soilprop`` on nine-level GPU columns."""
+    """Evaluate deterministic WRF ``soilprop`` on nine-level GPU columns.
 
+    ``soilprop`` names the WRF lineage (``woof.core.ruc_tier``
+    ``RUC_SOILPROP_FORMS``); it selects the translation unit's define.
+    """
+
+    from woof.core.ruc_spp import validate_spp_mode, hydraulic_spp_device
+    enabled_spp = validate_spp_mode(spp_lsm)
     ice_water_ratio = np.float32(riw)
     if not np.isfinite(ice_water_ratio) or ice_water_ratio <= np.float32(0.0):
         raise ValueError("RUC CUDA soilprop riw must be finite and positive")
@@ -672,7 +691,7 @@ def ruc_soil_properties_cuda(
     ncolumn = int(np.prod(horizontal_shape))
     threads = 128
     blocks = (ncolumn + threads - 1) // threads
-    kernel = _ruc_kernel("ruc_soil_properties", nzs)
+    kernel = _ruc_kernel("ruc_soil_properties", nzs, soilprop)
     kernel(
         (blocks,),
         (threads,),
@@ -684,6 +703,8 @@ def ruc_soil_properties_cuda(
             np.int32(ncolumn),
         ),
     )
+    if enabled_spp:
+        hydraulic_spp_device(outputs["hydro"], rstochcol, fieldcol_sf)
     return RucSoilPropertiesCuda(**outputs)
 
 
@@ -948,6 +969,10 @@ def ruc_soil_step_cuda(
     myj: bool = False,
     mminlu: str = "MODIFIED_IGBP_MODIS_NOAH",
     parameters: RucParameterBundle | None = None,
+    spp_lsm: int = 0,
+    rstochcol=None,
+    fieldcol_sf=None,
+    soilprop: str = "wrf_461",
 ) -> RucSoilStepCuda:
     """Run the complete snow-free WRF RUC land column on the GPU."""
 
@@ -1020,6 +1045,8 @@ def ruc_soil_step_cuda(
             )},
         },
         riw=float(source_riw),
+        spp_lsm=spp_lsm, rstochcol=rstochcol, fieldcol_sf=fieldcol_sf,
+        soilprop=soilprop,
     )
 
     ncolumn = int(np.prod(horizontal_shape))
@@ -1484,6 +1511,38 @@ def _snow_preparation_tables(
     )
 
 
+_SNOW_PREPARATION_BUNDLE_TABLES = {}
+
+
+def _snow_preparation_tables_for(parameters, mminlu):
+    """Select the supplied bundle's snow-preparation columns.
+
+    Bundles with default ``z0``/``lemi``/``URBAN`` values share the existing
+    default upload. Other bundles are cached by their consumed values and
+    device, with upload readiness preserved across streams.
+    """
+    device_id = int(cp.cuda.runtime.getDevice())
+    if parameters is None:
+        return _snow_preparation_tables(device_id, mminlu)
+    supplied = parameters.vegetation_for(mminlu)
+    default = _default_parameter_bundle().vegetation_for(mminlu)
+    z0 = tuple(row.z0 for row in supplied.rows)
+    lemi = tuple(row.lemi for row in supplied.rows)
+    urban = int(supplied.scalars["URBAN"])
+    if (z0 == tuple(row.z0 for row in default.rows)
+            and lemi == tuple(row.lemi for row in default.rows)
+            and urban == int(default.scalars["URBAN"])):
+        return _snow_preparation_tables(device_id, mminlu)
+    key = (device_id, mminlu, z0, lemi, urban)
+
+    def upload():
+        with cp.cuda.Device(device_id):
+            return (cp.asarray(z0, dtype=DTYPE),
+                    cp.asarray(lemi, dtype=DTYPE), urban, len(supplied.rows))
+
+    return cached_ready(cp, _SNOW_PREPARATION_BUNDLE_TABLES, key, upload)
+
+
 def ruc_snow_preparation_cuda(
     values: dict[str, object],
     *,
@@ -1495,8 +1554,13 @@ def ruc_snow_preparation_cuda(
     c2sn: float = 21.0,
     isncovr_opt: int = RUC_SNOW_COVER_OPTION,
     mminlu: str = "MODIFIED_IGBP_MODIS_NOAH",
+    snow: str = "wrf_461",
+    parameters=None,
 ) -> RucSnowPreparationCuda:
     """Run WRF ``sfctmp``'s snow-preparation block on the GPU.
+
+    ``snow`` names the lineage (``woof.core.ruc_tier.RUC_SNOW_FORMS``), as
+    for :func:`woof.core.ruc.ruc_snow_preparation`.
 
     ``phys/module_sf_ruclsm.F:1400-1766``, one thread per column, stopping
     immediately before the ``:1767`` dispatch to ``soil``, ``snowsoil``,
@@ -1557,9 +1621,8 @@ def ruc_snow_preparation_cuda(
     )
     land_category = _integer_field(cp.asarray(iland), horizontal_shape, "iland")
 
-    device_id = int(cp.cuda.runtime.getDevice())
-    roughness, emissivity, urban, ncategory = _snow_preparation_tables(
-        device_id, mminlu
+    roughness, emissivity, urban, ncategory = _snow_preparation_tables_for(
+        parameters, mminlu
     )
     for name, category in (
         ("ivgtyp", vegetation_category), ("iland", land_category)
@@ -1589,7 +1652,7 @@ def ruc_snow_preparation_cuda(
     ncolumn = int(np.prod(horizontal_shape))
     threads = 128
     blocks = (ncolumn + threads - 1) // threads
-    kernel = _ruc_kernel("ruc_snow_preparation", nzs)
+    kernel = _ruc_kernel("ruc_snow_preparation", nzs, snow=snow)
     kernel(
         (blocks,),
         (threads,),
@@ -1864,8 +1927,12 @@ def ruc_snow_temperature_step_cuda(
     ilnb: object = 1,
     xlvm: float = 2.835e6,
     cvw: float = 4.183e6,
+    snow: str = "wrf_461",
 ) -> RucSnowTemperatureCuda:
     """Run the complete WRF RUC ``snowtemp`` snow column on the GPU.
+
+    ``snow`` names the lineage, as for
+    :func:`woof.core.ruc.ruc_snow_temperature_step`.
 
     ``phys/module_sf_ruclsm.F:4836-5728``.  One thread per column: the soil
     heat sweep, the one-layer, two-layer or blended snow coefficient row, the
@@ -1954,7 +2021,7 @@ def ruc_snow_temperature_step_cuda(
     # ruc_snow_soil_step_cuda.  Both are tiered or neither may be: an
     # untiered load at nzs=6 returns the nine-level module, whose kernel
     # reads past every scratch array in the frame.
-    kernel = _ruc_kernel("ruc_snow_temperature_step", nzs)
+    kernel = _ruc_kernel("ruc_snow_temperature_step", nzs, snow=snow)
     kernel(
         (blocks,),
         (threads,),
@@ -2072,9 +2139,16 @@ def ruc_snow_soil_step_cuda(
     cw: float = 4.183e6,
     mminlu: str = "MODIFIED_IGBP_MODIS_NOAH",
     parameters: RucParameterBundle | None = None,
+    spp_lsm: int = 0,
+    rstochcol=None,
+    fieldcol_sf=None,
+    soilprop: str = "wrf_461",
+    snow: str = "wrf_461",
 ) -> RucSnowSoilStepCuda:
     """Run the complete snow-covered WRF RUC land column on the GPU."""
 
+    # ``snow`` is the lineage name; the body reuses the word for its outputs.
+    snow_form = snow
     if myj is not False:
         raise ValueError("RUC CUDA snow soil lane supports myj=False only")
     timestep = np.float32(delt)
@@ -2173,6 +2247,8 @@ def ruc_snow_soil_step_cuda(
             )},
         },
         riw=float(source_riw),
+        spp_lsm=spp_lsm, rstochcol=rstochcol, fieldcol_sf=fieldcol_sf,
+        soilprop=soilprop,
     )
 
     ncolumn = int(np.prod(horizontal_shape))
@@ -2258,7 +2334,7 @@ def ruc_snow_soil_step_cuda(
     updated_layers = cp.empty(horizontal_shape, dtype=cp.int32)
     # ONE OF TWO launch sites for this symbol; the other is in
     # ruc_snow_temperature_step_cuda.  See the note there.
-    _ruc_kernel("ruc_snow_temperature_step", nzs)(
+    _ruc_kernel("ruc_snow_temperature_step", nzs, snow=snow_form)(
         (blocks,),
         (threads,),
         (
@@ -2496,38 +2572,19 @@ RUC_SFCTMP_DEVICE_LEAVES_SNOW_FREE: Mapping[str, object] = MappingProxyType({
 def _host_facing_snow_prep():
     """``ruc_snow_preparation_cuda`` behind the host stage's signature.
 
-    Two things the leaf wrapper does not have to do.  The host stage takes a
-    ``bundle``; the kernel indexes device tables built from
-    :func:`woof.core.ruc.load_ruc_parameters`, so a caller that supplied a
-    DIFFERENT bundle would silently get the default tables.  That is refused
-    rather than ignored -- fail-closed, checked against the three quantities
-    the kernel actually reads (``z0tbl``, ``lemitbl`` and ``URBAN``).
+    The supplied bundle's ``z0tbl``, ``lemitbl`` and ``URBAN`` reach the
+    kernel. Default-valued columns share the cached default upload.
     """
 
     fields = tuple(RucSnowPreparation.__dataclass_fields__)
 
     def call(values, *, delt, ivgtyp, iland, isice=15, c1sn=0.026,
              c2sn=21.0, isncovr_opt=RUC_SNOW_COVER_OPTION,
-             mminlu="MODIFIED_IGBP_MODIS_NOAH", bundle=None):
-        if bundle is not None:
-            supplied = bundle.vegetation_for(mminlu)
-            default = _default_parameter_bundle().vegetation_for(mminlu)
-            same = (
-                [row.z0 for row in supplied.rows]
-                == [row.z0 for row in default.rows]
-                and [row.lemi for row in supplied.rows]
-                == [row.lemi for row in default.rows]
-                and supplied.scalars["URBAN"] == default.scalars["URBAN"]
-            )
-            if not same:
-                raise ValueError(
-                    "the RUC CUDA snow-preparation stage indexes device "
-                    "tables built from the default parameter bundle; the "
-                    "supplied bundle differs in z0tbl, lemitbl or URBAN"
-                )
+             mminlu="MODIFIED_IGBP_MODIS_NOAH", bundle=None, snow="wrf_461"):
         result = ruc_snow_preparation_cuda(
             values, delt=delt, ivgtyp=ivgtyp, iland=iland, isice=isice,
-            c1sn=c1sn, c2sn=c2sn, isncovr_opt=isncovr_opt, mminlu=mminlu)
+            c1sn=c1sn, c2sn=c2sn, isncovr_opt=isncovr_opt, mminlu=mminlu,
+            parameters=bundle, snow=snow)
         return RucSnowPreparation(
             **{name: cp.asnumpy(getattr(result, name)) for name in fields})
 
@@ -2699,9 +2756,12 @@ RUC_DEVICE_ARRAYS = SimpleNamespace(
     abs=cp.abs,
     all=cp.all,
     any=cp.any,
+    sum=cp.sum,
     arange=_dtype_normalising(cp.arange),
     array=_dtype_normalising(cp.array),
     asarray=_dtype_normalising(cp.asarray),
+    ascontiguousarray=_dtype_normalising(cp.ascontiguousarray),
+    shares_memory=cp.shares_memory,
     atleast_1d=cp.atleast_1d,
     broadcast_to=cp.broadcast_to,
     count_nonzero=cp.count_nonzero,
@@ -2739,36 +2799,18 @@ RUC_SFCTMP_DEVICE_LEAVES_RESIDENT: Mapping[str, object] = MappingProxyType({
 
 
 def _resident_snow_prep():
-    """``ruc_snow_preparation_cuda`` with the same fail-closed bundle check.
+    """``ruc_snow_preparation_cuda`` returning device arrays.
 
-    The guard is :func:`_host_facing_snow_prep`'s, unchanged and for the same
-    reason: the kernel indexes ``z0tbl``/``lemitbl``/``URBAN`` uploaded from
-    the default bundle, so a caller who supplies a different one must be
-    refused rather than silently handed the default tables.
+    The supplied bundle's ``z0tbl``/``lemitbl``/``URBAN`` reach the kernel.
     """
 
     def call(values, *, delt, ivgtyp, iland, isice=15, c1sn=0.026,
              c2sn=21.0, isncovr_opt=RUC_SNOW_COVER_OPTION,
-             mminlu="MODIFIED_IGBP_MODIS_NOAH", bundle=None):
-        if bundle is not None:
-            supplied = bundle.vegetation_for(mminlu)
-            default = _default_parameter_bundle().vegetation_for(mminlu)
-            same = (
-                [row.z0 for row in supplied.rows]
-                == [row.z0 for row in default.rows]
-                and [row.lemi for row in supplied.rows]
-                == [row.lemi for row in default.rows]
-                and supplied.scalars["URBAN"] == default.scalars["URBAN"]
-            )
-            if not same:
-                raise ValueError(
-                    "the RUC CUDA snow-preparation stage indexes device "
-                    "tables built from the default parameter bundle; the "
-                    "supplied bundle differs in z0tbl, lemitbl or URBAN"
-                )
+             mminlu="MODIFIED_IGBP_MODIS_NOAH", bundle=None, snow="wrf_461"):
         return ruc_snow_preparation_cuda(
             values, delt=delt, ivgtyp=ivgtyp, iland=iland, isice=isice,
-            c1sn=c1sn, c2sn=c2sn, isncovr_opt=isncovr_opt, mminlu=mminlu)
+            c1sn=c1sn, c2sn=c2sn, isncovr_opt=isncovr_opt, mminlu=mminlu,
+            parameters=bundle, snow=snow)
 
     call.__name__ = "ruc_snow_preparation_cuda_resident"
     call.__qualname__ = call.__name__
@@ -2816,6 +2858,8 @@ def ruc_sfctmp_full_width_reference(
     isncovr_opt: int,
     mminlu: str,
     parameters: RucParameterBundle | None,
+    soilprop: str = "wrf_461",
+    snow: str = "wrf_461",
 ) -> dict[str, cp.ndarray]:
     """``sfctmp`` on the columns ``run`` selects, returned at FULL width.
 
@@ -2847,7 +2891,8 @@ def ruc_sfctmp_full_width_reference(
         ilnb=ilnb[index], isice=int(isice), c1sn=c1sn, c2sn=c2sn,
         myj=False, isncovr_opt=int(isncovr_opt), mminlu=mminlu,
         parameters=parameters, leaves=RUC_SFCTMP_DEVICE_LEAVES_RESIDENT,
-        stages=RUC_SFCTMP_DEVICE_STAGES_RESIDENT, arrays=RUC_DEVICE_ARRAYS)
+        stages=RUC_SFCTMP_DEVICE_STAGES_RESIDENT, arrays=RUC_DEVICE_ARRAYS,
+        soilprop=soilprop, snow=snow)
     out: dict[str, cp.ndarray] = {}
     for name in RucSurfaceTemperatureStep.__dataclass_fields__:
         part = cp.asarray(getattr(step, name))
@@ -2869,8 +2914,42 @@ _SFCTMP_FLAG_WORDS = (len(_SFCTMP_CHECKS) + 63) // 64
 RUC_SFCTMP_FLAGS_SIZE = _SFCTMP_FLAG_WORDS + len(_SFCTMP_CHECKS)
 _SFCTMP_SCRATCH = {}
 _SFCTMP_FLAG_CONTEXT = {}
+_SFCTMP_CONTEXT_STREAMS = {}
 _SFCTMP_TABLE_CACHE = {}
 _SFCTMP_UPLOADS = {}
+
+
+def release_ruc_stream_scratch(*, device_id, stream):
+    """Retire only a completed stream's fused RUC mutable scratch.
+
+    Independent ensemble members use separate streams. Their fused scratch
+    and pending pinned uploads cannot remain resident after their models
+    finish, or successive concurrent waves accumulate their full RUC working
+    sets. Shared immutable device tables retain their existing cache owners.
+    The caller must own the supplied stream and have selected its device.
+    """
+    device_id = int(device_id)
+    if int(cp.cuda.runtime.getDevice()) != device_id:
+        raise ValueError("RUC scratch release requires the owning CUDA device")
+    stream.synchronize()
+    owner = (device_id, int(stream.ptr))
+    retired = {}
+    for label, cache in (("scratch", _SFCTMP_SCRATCH),
+                         ("tables", _SFCTMP_TABLE_CACHE),
+                         ("uploads", _SFCTMP_UPLOADS)):
+        # Other member streams can add keys while this one retires. Snapshot
+        # the keys first, then remove only this inactive stream's entries.
+        keys = [key for key in tuple(cache) if key[:2] == owner]
+        for key in keys:
+            del cache[key]
+        retired[label] = len(keys)
+    keys = [key for key, stream_id in tuple(_SFCTMP_CONTEXT_STREAMS.items())
+            if key[0] == device_id and stream_id == owner[1]]
+    for key in keys:
+        _SFCTMP_FLAG_CONTEXT.pop(key, None)
+        del _SFCTMP_CONTEXT_STREAMS[key]
+    retired["flag_contexts"] = len(keys)
+    return retired
 
 
 def _sfctmp_tables(parameters, mminlu, nzs):
@@ -2891,14 +2970,6 @@ def _sfctmp_tables(parameters, mminlu, nzs):
     cached = _SFCTMP_TABLE_CACHE.get(key)
     if cached is not None:
         return cached
-    original = default.vegetation_for(mminlu)
-    if ([row.z0 for row in supplied.rows] != [row.z0 for row in original.rows]
-            or [row.lemi for row in supplied.rows] != [row.lemi for row in original.rows]
-            or supplied.scalars['URBAN'] != original.scalars['URBAN']):
-        raise ValueError(
-            'the RUC CUDA snow-preparation stage indexes device '
-            'tables built from the default parameter bundle; the '
-            'supplied bundle differs in z0tbl, lemitbl or URBAN')
     table, ncategory, _, _ = (_default_device_tables(device, mminlu)
                              if parameters is None
                              else _bundle_device_tables(bundle, mminlu))
@@ -2984,7 +3055,7 @@ def ruc_sfctmp_full_width_fused(
     values: Mapping[str, object], *, run, delt: float, conflx, ivgtyp,
     iland, nroot, ilnb, isice: int, c1sn: float, c2sn: float,
     isncovr_opt: int, mminlu: str, parameters: RucParameterBundle | None,
-    flags=None,
+    flags=None, soilprop: str = "wrf_461", snow: str = "wrf_461",
 ) -> dict[str, cp.ndarray]:
     """Execute full-width sfctmp in three stages with deferred device flags.
 
@@ -3109,14 +3180,16 @@ def ruc_sfctmp_full_width_fused(
         pending.append((reset_done, error_memory, error_reset))
     else:
         active_flags.set(reset, stream=stream)
-    _SFCTMP_FLAG_CONTEXT[(int(cp.cuda.runtime.getDevice()), active_flags.data.ptr)] = (
+    context_key = (int(cp.cuda.runtime.getDevice()), active_flags.data.ptr)
+    _SFCTMP_FLAG_CONTEXT[context_key] = (
         nzs, ncategory, mminlu, {index: (type(error), str(error)) for index, error in errors.items()})
+    _SFCTMP_CONTEXT_STREAMS[context_key] = int(stream.ptr)
     if n:
         scalars = (timestep, np.float32(c1sn), np.float32(c2sn),
                    rsmax, np.int32(ice), np.int32(urban), np.int32(ncategory),
                    np.int32(min(errors, default=len(_SFCTMP_CHECKS))), np.int32(n))
         for stage in range(3):
-            ruc_fused_kernel(f'ruc_sfctmp_stage{stage}', nzs)(
+            ruc_fused_kernel(f'ruc_sfctmp_stage{stage}', nzs, soilprop, snow)(
                 ((n + 127) // 128,), (128,), (pointers, run, active_flags, alive, *scalars))
     if flags is None:
         ruc_sfctmp_raise_from_flags(active_flags)
@@ -3124,4 +3197,4 @@ def ruc_sfctmp_full_width_fused(
 
 
 __all__ += ['ruc_sfctmp_full_width_fused', 'ruc_sfctmp_raise_from_flags',
-            'RUC_SFCTMP_FLAGS_SIZE']
+            'RUC_SFCTMP_FLAGS_SIZE', 'release_ruc_stream_scratch']

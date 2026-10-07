@@ -42,6 +42,16 @@ def drop_default_diffusion_selectors(values: dict) -> None:
         values.pop("diff_opt", None)
         values.pop("mix_full_fields", None)
 
+
+def drop_default_spp_selectors(values: dict) -> None:
+    """Keep newly added SPP selectors absent when disabled.
+
+    spp_lsm predates the SPP consumer port and must keep its existing echo.
+    """
+    for name in ("spp_conv", "spp_pbl"):
+        if values.get(name, 0) == 0:
+            values.pop(name, None)
+
 #: THE table of output-only RunConfig switches: each one decides what a
 #: forecast WRITES, never what it integrates, so it may differ between
 #: the run that wrote a checkpoint and the run that resumes it, and
@@ -220,7 +230,35 @@ NOAH_MOSAIC_ALGORITHM_IDENTITY = "noah-mosaic-wrf-v4.7.1-v1"
 LAND_SURFACE_ALGORITHM_IDENTITIES = {
     0: "disabled",
     2: "noah-lsm-v2-post-sflx-chs2-source-water-lake-skin",
-    3: "ruc-lsm-wrf-v4.6.1-v1",
+    # v2 (2.8.5): a LAKEMASK column is bypassed only when the lake model is
+    # selected (module_sf_ruclsm.F:824, lakemodel==1 .and. lakemask==1).
+    # v1 bypassed every LAKEMASK column, so with sf_lake_physics = 0 a lake
+    # column was never advanced; it now runs RUC's water branch.  That
+    # changes the surface state and fluxes of every RUC run with lake
+    # cells, so a v1 checkpoint may not continue under v2.
+    # v3 (2.8.5): SOILPROP's soil-water diffusivity and conductivity take
+    # the WRF v4.0-4.5 normalisation by default (ruc_soilprop = "wrf_45",
+    # woof/core/ruc_tier.py); v2 ran the v4.6.1 form over total porosity,
+    # which moves 2.5 to 8 times more water up into a dry top soil level.
+    # That changes the soil water and surface fluxes of every RUC run, so
+    # a v2 checkpoint may not continue under v3.
+    # v4: the post-SFCTMP irrigation takes the WRF v4.0-4.5 crop-fraction-
+    # scaled floor by default (ruc_irrigation = "wrf_45",
+    # woof/core/ruc_mosaic.py), whatever mosaic_lu says; v3 ran the v4.6.1
+    # relaxation under mosaic_lu = 1 and nothing without it.  That changes
+    # the root-zone soil water of every RUC run with cropland, so a v3
+    # checkpoint may not continue under v4.
+    # v5: the snow scheme takes the WRF v4.0-4.5 form the operational
+    # RAP/HRRR branch carries by default (ruc_snow = "wrf_45",
+    # woof/core/ruc_tier.py); v4 ran the v4.6.1 snow conductivity, cover,
+    # melt and albedo.  That changes the snow pack and the surface over it
+    # in every RUC run with snow, so a v4 checkpoint may not continue under
+    # v5.
+    # v6 restores generic irrigation and snow to wrf_461. Unpublished v4/v5
+    # headers omitted wrf_45, so interpreting those missing selectors as the
+    # restored defaults would change their continuing trajectory. The new
+    # identity refuses those checkpoints before restoring live forecast arrays.
+    3: "ruc-lsm-wrf-v4.6.1-v6-default-selection",
     4: "noahmp-lsm-wrf-v4.6.1-v1",
 }
 PBL_ALGORITHM_IDENTITIES = {

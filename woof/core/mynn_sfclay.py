@@ -16,8 +16,12 @@ from dataclasses import dataclass
 import cupy as cp
 import numpy as np
 
-from woof.core.kernels import get_kernel
-from woof.core.mynn_surface import ISFTCFLX_DEFINED
+from woof.core.kernels import get_kernel, get_kernel_int_defines
+from woof.core.mynn_surface import (
+    ISFTCFLX_DEFINED,
+    MYNN_SFCLAY_DEFAULT,
+    mynn_sfclay_variant_form,
+)
 from woof.core.state import DTYPE
 
 
@@ -95,6 +99,23 @@ class MynnSurfaceResult:
 
 
 _TPB = 128
+
+#: The compile-time switch that selects the GSL WRF 3.9 fork's form in
+#: kernels/mynn_surface.cu.  Absent for "wrf_461", so the default unit is
+#: the one :func:`get_kernel` has always compiled.
+MYNN_SFCLAY_DEFINES = {
+    "wrf_461": (),
+    "gsl_wrf39": (("MYNN_SFCLAY_GSL_WRF39", 1),),
+}
+
+
+def mynn_surface_kernel(variant: str = MYNN_SFCLAY_DEFAULT):
+    """The deterministic MYNN surface kernel for one variant."""
+    defines = MYNN_SFCLAY_DEFINES[mynn_sfclay_variant_form(variant)]
+    if not defines:
+        return get_kernel("mynn_surface", "mynn_surface_column")
+    return get_kernel_int_defines(
+        "mynn_surface", "mynn_surface_column", defines)
 
 
 def seed_mynn_surface_first_step(
@@ -186,10 +207,16 @@ def launch_mynn_surface_layer(
     itimestep: int = 1,
     isfflx: int = 1,
     isftcflx: int = 0,
+    spp_pbl: int = 0,
+    pattern_spp_pbl=None,
+    variant: str = MYNN_SFCLAY_DEFAULT,
 ) -> None:
     """Launch the MYNN surface kernel into preallocated outputs."""
 
     _validate_options(dx, itimestep, isfflx, isftcflx)
+    variant = mynn_sfclay_variant_form(variant)
+    from woof.core.spp_kernel_sources import spp_flag
+    stochastic = spp_flag(spp_pbl, "spp_pbl")
     missing = [name for name in MYNN_SURFACE_INPUTS if name not in inputs]
     if missing:
         raise TypeError(f"missing MYNN surface inputs: {', '.join(missing)}")
@@ -205,14 +232,28 @@ def launch_mynn_surface_layer(
             )
     n = int(np.prod(shape))
     blocks = (n + _TPB - 1) // _TPB
-    kernel = get_kernel("mynn_surface", "mynn_surface_column")
+    if stochastic:
+        if (not isinstance(pattern_spp_pbl, cp.ndarray)
+                or pattern_spp_pbl.shape != shape
+                or pattern_spp_pbl.dtype != DTYPE
+                or not pattern_spp_pbl.flags.c_contiguous
+                or pattern_spp_pbl.device.id != inputs["u1"].device.id):
+            raise ValueError("MYNN surface SPP requires contiguous float32 pattern_spp_pbl[ny,nx] on the input device")
+        if not bool(cp.all(cp.isfinite(pattern_spp_pbl)).item()):
+            raise ValueError("MYNN surface SPP pattern must be finite")
+        from woof.core.spp_kernel_sources import load_spp_module
+        kernel = load_spp_module(
+            "mynn_surface", defines=MYNN_SFCLAY_DEFINES[variant],
+        ).get_function("mynn_surface_column")
+    else:
+        kernel = mynn_surface_kernel(variant)
     kernel(
         (blocks,),
         (_TPB,),
         arrays + (
             DTYPE(dx), np.int32(itimestep), np.int32(isfflx),
             np.int32(isftcflx), np.int32(n),
-        ),
+        ) + ((pattern_spp_pbl,) if stochastic else ()),
     )
 
 
@@ -225,6 +266,9 @@ def mynn_surface_layer(
     isftcflx: int = 0,
     mol: object | None = None,
     ustm: object | None = None,
+    spp_pbl: int = 0,
+    pattern_spp_pbl=None,
+    variant: str = MYNN_SFCLAY_DEFAULT,
 ) -> MynnSurfaceResult:
     """Evaluate WRF MYNN surface physics on 2-D device fields."""
 
@@ -249,6 +293,7 @@ def mynn_surface_layer(
     launch_mynn_surface_layer(
         inputs, mol_array, ustm_array, result,
         dx=dx, itimestep=itimestep, isfflx=isfflx, isftcflx=isftcflx,
+        spp_pbl=spp_pbl, pattern_spp_pbl=pattern_spp_pbl, variant=variant,
     )
     return result
 
@@ -258,10 +303,12 @@ __all__ = [
     "MYNN_NOAHMP_EXCHANGE_HANDOFF",
     "MYNN_POST_LSM_2M_WRITEBACK",
     "MYNN_RUC_EXCHANGE_HANDOFF",
+    "MYNN_SFCLAY_DEFINES",
     "MYNN_SURFACE_INPUTS",
     "MYNN_SURFACE_OUTPUTS",
     "MynnSurfaceResult",
     "launch_mynn_surface_layer",
+    "mynn_surface_kernel",
     "mynn_surface_layer",
     "seed_mynn_surface_first_step",
 ]

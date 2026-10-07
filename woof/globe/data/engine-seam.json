@@ -2,7 +2,7 @@
   "schema": "gpuwm.arwen-global-engine-seam/v1",
   "engine": {
     "distribution": "woof",
-    "version": "1.0.2"
+    "version": "1.0.3"
   },
   "files": [
     {
@@ -19,14 +19,14 @@
     },
     {
       "path": "woof/config.py",
-      "size": 268703,
-      "sha256": "57f1adcdf61e2df46aed1824039bc95250c3e53205bde50e90a37c0ad0f67d7d",
+      "size": 313941,
+      "sha256": "5f203f980db53573dc360526d0129e3d407621b13b08cc3dc2b9291cd983c827",
       "reached": "DEFAULT_COLUMN_CHUNK, radiation_enabled, radiation_scheme_ids, RunConfig and SASE_PBL_SCHEME.  RunConfig IS constructed in carried npref, twice, inside its reference-state builders; no door of this package and no test calls those.  Against the cut revision the file differs by 1,130 lines at woof 2.7.3 (308 at 2.7.0), 105 of them inside RunConfig, and RunConfig's own 2.7.0-to-2.7.3 movement is comment text with no field, default or validation changed"
     },
     {
       "path": "woof/core/state.py",
-      "size": 65963,
-      "sha256": "0480e2c02851528615f5ec701a9222028bcf17c6b65b4f48601cfe95fa72993f",
+      "size": 67263,
+      "sha256": "fe9095c50b0594dc8ad0c8d4e6fff9183d0c1d5678c56cd19564f46f6613efaa",
       "reached": "DTYPE, DomainState and the constants wdm6/sase read.  The DomainState constructor and init_at_rest are reached only from the same two reference-state builders in carried npref.  Against the cut revision the file differs by 141 lines at woof 2.7.3 (100 at 2.7.0), 109 of them inside DomainState; the 2.7.0-to-2.7.3 movement is one comment in DomainState plus a scratch-arena dtype rule that widens what is accepted and an optional argument nothing here passes"
     },
     {
@@ -37,14 +37,14 @@
     },
     {
       "path": "woof/core/preflight.py",
-      "size": 638222,
-      "sha256": "8b3eb669a0916fea0d61947280cda88ef13879bc0c419009a4373b1e25452e10",
+      "size": 657210,
+      "sha256": "0a9ade5bebf4a67630afa793ebdc2a7ab802c3c30fad14078daaddd08308fe7f",
       "reached": "EXTERNAL_MARGIN_BYTES, device_memory_probe_reason, device_memory_probe_subprocess and MEASURED_LOCAL_MEMORY_PROFILE, which carried ntiedtke reads for its SM count"
     },
     {
       "path": "woof/physics_compat.py",
-      "size": 185071,
-      "sha256": "35862d7c908c66b216bcdd7b90a7e487121458e07cc1bc9ff540d4e74ccd2ccb",
+      "size": 190381,
+      "sha256": "d4cc59864956e05f43d8ab34db7e61edf63afe1b2d53bd8c85f8d37e8d232498",
       "reached": "WRF_RRTMG_TO_RTE_RRTMGP and WRF_RRTMG_TO_RTE_RRTMGP_V1, two string tokens carried rrtmgp binds"
     },
     {
@@ -91,8 +91,8 @@
     },
     {
       "path": "woof/core/microphysics.py",
-      "size": 51271,
-      "sha256": "2fa3b3d0281709380cc493bff00e0dacd5f93e93a2faa16bc0641717358950b0",
+      "size": 59125,
+      "sha256": "d902cb78a239635c22adbc0faff3917fff02e6b410658c1c9c6d334cd2a40765",
       "reached": "MicrophysicsDiagnostics and its siblings, reached only through morrison.apply, which this package never calls"
     },
     {
@@ -157,8 +157,8 @@
     },
     {
       "path": "woof/core/mynn_sfclay.py",
-      "size": 8664,
-      "sha256": "c305d91f97c20c687114f50ac7a4d35fd4d7c9fac122c31033159e3e101e69d9",
+      "size": 10683,
+      "sha256": "74ec131845fcce1f3b01f487f67050424bc13e898e1d1e6121193385df78681f",
       "reached": "MYNN_SURFACE_OUTPUTS, MynnSurfaceResult, launch_mynn_surface_layer and seed_mynn_surface_first_step.  This model runs sfclay, so they are bound at import and never called"
     },
     {
@@ -169,14 +169,14 @@
     },
     {
       "path": "woof/core/ruc_runtime.py",
-      "size": 55731,
-      "sha256": "a4713c5de2cac6d461d8dbf555c53d70933208b196ca4bdc9233b4a9bedb7767",
+      "size": 62326,
+      "sha256": "d1913f6be337050d0a91bbca1ba168b8e5c3a4e6ec940c85edbb0301aaeee8df",
       "reached": "the RUC LSM inventories, cold start and step.  This model runs Noah, so they are bound at import and never called"
     },
     {
       "path": "woof/core/mynn_pbl_runtime.py",
-      "size": 17332,
-      "sha256": "9555aeffd0139f276130e78badc869d848c6abd653dfed45649e9f2e5badda38",
+      "size": 20295,
+      "sha256": "83452c52afcee197b997ae6a87ac0ce3823172b8eb3a2de1d4ff0f8019d9fbaf",
       "reached": "the MYNN PBL inventories, mynn_pbl_step and validate_mynn_tendencies.  This model runs YSU, so they are bound at import and never called"
     },
     {
@@ -217,8 +217,8 @@
     },
     {
       "path": "woof/ingest/soil.py",
-      "size": 87616,
-      "sha256": "16153dadc300d1a802b774bc95467d9b895c0d932810f368712ddab616a9c470",
+      "size": 87892,
+      "sha256": "924e98cca541c781119c427e0bfc6db33c40ac95a3e7d851e70c0a69afd1e4e1",
       "reached": "NOAH_LAYER_THICKNESS_M, the four Noah layer depths every land-surface step is handed.  The file differs from the graded tree by 165 lines and the array is identical in both"
     },
     {
@@ -247,8 +247,8 @@
     },
     {
       "path": "woof/core/rrtmg_legacy.py",
-      "size": 93921,
-      "sha256": "3b2ae7434cc6b8326a2e90708fd7a9937918113309153fa02e2077e360f58b92",
+      "size": 104076,
+      "sha256": "2569f20c7f2e5c700556c18a07f78349a9213b9d10dab6977902a04e38c2ecf9",
       "reached": "RRTMGLegacyRadiation, imported inside the radiation selector at ra_lw=ra_sw=4 with the legacy variant.  The native adapter admits radiation='rrtmgp' only, which is why its 177 differing lines at woof 2.7.3 (157 at 2.7.0) are not this model's physics"
     },
     {

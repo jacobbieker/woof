@@ -353,7 +353,7 @@ RESTART_TOLERATED_EXPERIMENT_FIELDS = (
     # exists for -- a run that filled its disk resuming with a trimmed
     # tape -- so a trimmed run resumes a full run's checkpoints and back
     # again.  Same law as "tiles" above.
-    "output")
+    "output", "simulated_radar")
 #: The history window (history_begin_s / history_end_s) is output-only
 #: like the cadence beside it: it decides which instants reach the history
 #: tape and changes no number the model integrates, so a resume may move
@@ -463,7 +463,8 @@ def restart_identity_payload(exp) -> dict:
     """
 
     from woof.experiment import experiment_config_document
-    from woof.checkpoint_identity import drop_default_diffusion_selectors
+    from woof.checkpoint_identity import (
+        drop_default_diffusion_selectors, drop_default_spp_selectors)
     experiment = _jsonable(experiment_config_document(exp))
     # The new attribute follower is an explicitly selected trajectory policy.
     # Bind its source, reduction, direction and movement controls while keeping
@@ -500,6 +501,12 @@ def restart_identity_payload(exp) -> dict:
     # experiment and must refuse.
     if experiment.get("spectral_numerics") is None:
         experiment.pop("spectral_numerics", None)
+    # Same convention for [physics_params]: ABSENT stays absent, so every
+    # pre-feature fingerprint and checkpoint is preserved.  A PRESENT set
+    # binds value for value: resuming a checkpoint under other constants is
+    # another trajectory and must refuse.
+    if experiment.get("physics_params") is None:
+        experiment.pop("physics_params", None)
     # Same convention for the declared constant downward longwave: ABSENT
     # stays absent, so every experiment written before the field existed
     # keeps its exact fingerprint and its checkpoints keep resuming.  A
@@ -586,6 +593,16 @@ def restart_identity_payload(exp) -> dict:
         domain.pop("output", None)
         run = domain.get("run", {})
         drop_default_diffusion_selectors(run)
+        drop_default_spp_selectors(run)
+        # fractional_seaice, absent-stays-absent: 0 is the 0.5 sea-ice
+        # threshold every RUC fingerprint written before the field ran.
+        if not run.get("fractional_seaice", 0):
+            run.pop("fractional_seaice", None)
+        # These radiation-driver fields were absent from older fingerprints.
+        # Zero retains the prior trajectory; every enabled selector binds.
+        for name in ("swint_opt", "aer_opt", "alb_sol"):
+            if not run.get(name, 0):
+                run.pop(name, None)
         for name in RESTART_TOLERATED_RUN_FIELDS:
             run.pop(name, None)
         # ``eta_levels`` on the absent-stays-absent convention of the
@@ -685,6 +702,10 @@ def restart_identity_payload(exp) -> dict:
         # An absent key and the default describe the original clock.
         if not run.get("adaptive_nest_lattice", False):
             run.pop("adaptive_nest_lattice", None)
+        if not run.get("use_rap_aero_icbc", False):
+            # The absent selector read no analyzed donor and no operational
+            # surface source. Keep older default restart identities intact.
+            run.pop("use_rap_aero_icbc", None)
         # WRF's slope_rad / topo_shading / shadlen, absent-stays-absent:
         # off, none of the three is read, so every fingerprint written
         # before they existed keeps its value; a domain that turns the
@@ -699,9 +720,76 @@ def restart_identity_payload(exp) -> dict:
         # ... and the original explicit vertical advection (A158).
         if not run.get("zadvect_implicit", 0):
             run.pop("zadvect_implicit", None)
+        if run.get("zadvect_implicit_variant", "wrf_471") == "wrf_471":
+            run.pop("zadvect_implicit_variant", None)
+        # ... and the RUC SOILPROP lineage, omitted at its wrf_45 default so
+        # a non-RUC run's fingerprint does not move; the wrf_461 name is
+        # bound because its soil water differs.
+        if run.get("ruc_soilprop", "wrf_45") == "wrf_45":
+            run.pop("ruc_soilprop", None)
+        # ... and the Thompson generation, omitted at its wrf_461 default;
+        # the fork's name is bound because its microphysics differs.
+        if run.get("thompson_version", "wrf_461") == "wrf_461":
+            run.pop("thompson_version", None)
+        if run.get("thompson_fork_snow_fall", "blend") == "blend":
+            run.pop("thompson_fork_snow_fall", None)
+        # ... and the MYNN generation, omitted at wrf_461 (every earlier
+        # fingerprint), bound by name off it; its gsd_41 TKE option is
+        # omitted at its default for the same reason.
+        if run.get("bl_mynn_version", "wrf_461") == "wrf_461":
+            run.pop("bl_mynn_version", None)
+        if run.get("bl_mynn_gsd41_unsquared_qtke", False) is False:
+            run.pop("bl_mynn_gsd41_unsquared_qtke", None)
+        if run.get("bl_mynn_cloud_tendency_form", "wrf_461") == "wrf_461":
+            run.pop("bl_mynn_cloud_tendency_form", None)
+        # ... and the MYNN surface-layer generation, omitted at its wrf_461
+        # default (what every earlier build ran) so no fingerprint moves.
+        if run.get("mynn_sfclay_variant", "wrf_461") == "wrf_461":
+            run.pop("mynn_sfclay_variant", None)
+        # ... and the WRF v4.6.1 sixth-order filter form with no second
+        # factor, and no mp_zero_out pass: omitted at those defaults so
+        # every earlier fingerprint keeps its value; the fork form, its
+        # factor and an active zero-out bind, because their moisture
+        # differs.
+        if run.get("diff_6th_form", "wrf_461") == "wrf_461":
+            run.pop("diff_6th_form", None)
+        if run.get("diff_6th_factor2", None) is None:
+            run.pop("diff_6th_factor2", None)
+        if run.get("upper_wind_limiter_form", "wrf_461") == "wrf_461":
+            run.pop("upper_wind_limiter_form", None)
+        if not run.get("mp_zero_out", 0):
+            run.pop("mp_zero_out", None)
+            run.pop("mp_zero_out_thresh", None)
+            run.pop("mp_zero_out_all", None)
+        # ... and the public RUC irrigation form (wrf_461),
+        # omitted at its default so a non-RUC run's fingerprint does not
+        # move; the wrf_45 name is bound because its soil water differs.
+        if run.get("ruc_irrigation", "wrf_461") == "wrf_461":
+            run.pop("ruc_irrigation", None)
+        # ... and the RUC QVG cold start, omitted at its default.
+        if run.get("ruc_qvg_cold_start", "wrf") == "wrf":
+            run.pop("ruc_qvg_cold_start", None)
+        # ... and the RUC 2 m diagnostic, omitted at its flux default.
+        if run.get("ruc_2m_diagnostic", "flux") == "flux":
+            run.pop("ruc_2m_diagnostic", None)
+        # ... and the RUC snow lineage, omitted at its wrf_461 default so a
+        # non-RUC run's fingerprint does not move.
+        if run.get("ruc_snow", "wrf_461") == "wrf_461":
+            run.pop("ruc_snow", None)
+        # ... and WRF's vert_order 3 ladder with the flux5 momentum
+        # stencil, which every echo before the order fields described.
+        for name, default in (("v_sca_adv_order", 3), ("v_mom_adv_order", 3),
+                              ("h_mom_adv_order", 5)):
+            if int(run.get(name, default)) == default:
+                run.pop(name, None)
         # ... and w_damp measured from Courant 1, WRF's default (A165).
         if float(run.get("w_crit_cfl", 1.0)) == 1.0:
             run.pop("w_crit_cfl", None)
+        if not run.get("sf_lake_physics", 0):
+            run.pop("sf_lake_physics", None)
+            run.pop("use_lakedepth", None)
+            run.pop("lakedepth_default", None)
+            run.pop("lake_min_elev", None)
         # Noah mosaic, absent-stays-absent: off (WRF's default), no tile is
         # integrated and none of the three keys is read, so every
         # fingerprint written before mosaic existed keeps its value.  On,
@@ -722,6 +810,30 @@ def restart_identity_payload(exp) -> dict:
         for name in ("topo_wind", "gwd_opt"):
             if not run.get(name, 0):
                 run.pop(name, None)
+        # Off, post-PBL scalar diffusion preserves pre-option fingerprints.
+        if not run.get("scalar_pblmix", 0):
+            run.pop("scalar_pblmix", None)
+        # The terrain-clock mode: "measured" is the derivation every
+        # fingerprint written before the field ran under, so it drops
+        # out; "pinned" binds, because the same configured clock then
+        # integrates where the measured rule might have divided it.
+        if run.get("terrain_clock", "measured") == "measured":
+            run.pop("terrain_clock", None)
+        # Earlier runs held shortwave between calls, used zero aerosol,
+        # and ran the WRF v4.6.1 cloud wrapper. Only moved forms bind.
+        for key in ("swint_opt", "aer_opt"):
+            if not run.get(key, 0):
+                run.pop(key, None)
+        if run.get("rrtmg_cloud_optics_form", "wrf_461") == "wrf_461":
+            run.pop("rrtmg_cloud_optics_form", None)
+        # Source members, not a path alone, identify prescribed radiation.
+        from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
+        if run.get("rrtmg_smoke_manifest", ""):
+            bind_smoke_source_identity(run,
+                start_time=domain.get("start_time") or exp.start_time,
+                nz=run["nz"])
+        else:
+            bind_smoke_source_identity(run)
     return experiment
 
 
@@ -882,6 +994,8 @@ def build_experiment(exp, case_data) -> ExperimentState:
     physics driver and Task-13 coupler.  Every state is constructed against
     the one shared transient arena before any scratch slot is materialized.
     """
+    from woof.experiment import _bind_physics_params
+    exp = _bind_physics_params(exp, "woof.core.model.build_experiment")
     from woof import runtime
     from woof.core.clock import build_schedule, resolve_clock
     from woof.core.preflight import estimate_experiment
@@ -902,7 +1016,7 @@ def build_experiment(exp, case_data) -> ExperimentState:
     # command that holds the run, whose stderr is a person's terminal.
     with prep_stage("source_decode", label="Read the starting data",
                     stderr=False):
-        catalog = build_input_catalog(case_data)
+        catalog = runtime._runtime_input_catalog(case_data)
         # THE COORDINATE, BEFORE ANY OTHER READ OF THE EXPERIMENT.  This route
         # holds the experiment for the whole run -- the root below, every
         # child, and every spawn and relocation that reads exp.vertical later
@@ -1364,6 +1478,71 @@ def _release_startup_build(model, node, validators, *,
     gc.collect()
 
 
+def _bind_execution_physics_params(model, experiment):
+    """Require a built tree to retain the constants it was built under.
+
+    Construction may bind a set; execution cannot first select one because
+    the existing state or parameter tables may already contain defaults.
+    The published declaration also prevents re-labelling that state with
+    another set even when no affected kernel has compiled yet.
+    """
+    from woof.experiment import _bind_physics_params
+    from woof.physics_params import active, document, environment_set
+
+    try:
+        declared = model._declared_experiment
+    except AttributeError:
+        declared = None
+    if declared is None:
+        try:
+            context = model._activation_context
+        except AttributeError:
+            context = None
+        if context is not None:
+            declared = context.get("experiment")
+    authority = experiment if experiment is not None else declared
+    from_env = environment_set()
+    before = active()
+    if authority is None:
+        if before is not None or from_env is not None:
+            raise ValueError(
+                "execute_experiment received a built tree without its "
+                "physics parameter declaration while a set is selected; "
+                "its existing state cannot be labelled with those constants. "
+                "Pass the original experiment used to construct the tree.")
+        return None
+    try:
+        requested = authority.physics_params
+    except AttributeError:
+        requested = None
+    if requested is None:
+        requested = from_env
+    if requested is not None and (
+            before is None or requested.sha256() != before.sha256()):
+        raise ValueError(
+            "execute_experiment cannot first apply or switch a physics "
+            "parameter set on an already-built tree: its state, kernels "
+            "or tables may contain other constants. Select the set before "
+            "constructing the tree in its own process.")
+    if declared is not None:
+        try:
+            original = declared.physics_params
+        except AttributeError:
+            original = None
+        if document(original) != document(requested):
+            raise ValueError(
+                "execute_experiment's physics parameter set differs from "
+                "the built tree's declaration; re-labelling its existing "
+                "state would bind checkpoints to constants it did not run.")
+    bound = _bind_physics_params(authority, "woof.core.model.execute_experiment")
+    if requested is not None:
+        publish_declared_experiment(model, bound)
+        return bound
+    # Preserve the existing explicit-argument/context fallback for every
+    # other execution feature when parameter binding is absent.
+    return experiment
+
+
 def execute_experiment(
         model: ExperimentState, *, history_handler=None,
         restart_handler=None, progress_callback=None,
@@ -1372,7 +1551,7 @@ def execute_experiment(
         skip_feedback_path: bool = False,
         pool_trim_per_period: bool | None = None,
         relocation_runner=None, steppers=None, step_observer=None,
-        experiment=None, delayed_child_initializer=None):
+        experiment=None, delayed_child_initializer=None, schedule_dispatch=None):
     """Wire one :class:`ExperimentState` into ``execute_schedule``.
 
     STEP calls the domain's existing dycore, FORCE calls its node-facing
@@ -1435,7 +1614,16 @@ def execute_experiment(
     36 substeps inside one of those is invisible to it.  ``None`` -- the
     default -- adds one ``is not None`` test per STEP op and changes
     nothing else.
+
+    ``schedule_dispatch`` is an internal capture/dispatch seam for a
+    qualified member scheduler. It receives this executor's actual
+    callbacks and adaptive controller after setup. Omission calls the
+    original integer executor directly.
     """
+    experiment = _bind_execution_physics_params(model, experiment)
+    from woof.core.restart_request import RestartRequest
+    restart_request = RestartRequest()
+    requested_restart = [False]
     from woof.core.clock import execute_schedule
     from woof.core.dycore import step
     from woof.core.state import refresh_model_time
@@ -1740,6 +1928,8 @@ def execute_experiment(
             # are seeded before the route attaches their steppers.
             from woof.core.streaming import reattach_rebuilt_domain
             reattach_rebuilt_domain(rebound, node)
+        from woof.ensemble.runtime_context import bind_reconstructed_member_node
+        bind_reconstructed_member_node(node, prepared_case=prepared)
         if validate_state:
             from woof.core.health import health_validator_for_domain
             validators[grid_id] = health_validator_for_domain(model, node)
@@ -1989,15 +2179,21 @@ def execute_experiment(
             status.pending_d2h = int(io_manager.pending)
         if restart_handler is not None:
             restart_handler(model, ticks)
+            if requested_restart[0]:
+                restart_request.acknowledge()
+                requested_restart[0] = False
 
     def on_period_end(period, clocks) -> None:
         status.schedule_cursor = PERIOD_BEGIN
         status.prior_feedback_committed = status.pending_feedback == 0
         root_clock = clocks[model.root.cfg.grid_id]
+        requested_restart[0] = (restart_handler is not None
+                                and restart_request.pending())
         mandatory = (
             root_clock.at_stop_time
             or any(clock.history_due() for clock in clocks.values())
-            or (restart_enabled and root_clock.restart_due()))
+            or (restart_enabled and root_clock.restart_due())
+            or requested_restart[0])
         if validators and (health_debug or mandatory
                            or root_clock.step_count % 4 == 0):
             for gid, validator in validators.items():
@@ -2016,6 +2212,11 @@ def execute_experiment(
 
     def on_period_commit(period, clocks) -> None:
         root_clock = clocks[model.root.cfg.grid_id]
+        # Scheduled restart operations have already run. A still-pending
+        # request therefore needs one write at this fully synchronized
+        # boundary, after history resets and feedback have committed.
+        if requested_restart[0]:
+            on_restart(root_clock.ticks)
         if pool_trim_per_period:
             _trim_default_pool()
         now = time.perf_counter()
@@ -2113,24 +2314,47 @@ def execute_experiment(
                 else _streamed(gid).maximum_map_factor()))
 
     try:
-        execution = execute_schedule(
-            model.schedule, on_step=on_step, on_force=on_force,
-            on_period_steps=adaptive_driver,
-            on_feedback_prepare=on_feedback_prepare,
-            on_feedback_commit=on_feedback_commit,
-            on_feedback_finalize=on_feedback_finalize,
-            on_history=on_history, on_restart=on_restart,
-            on_domain_start=on_domain_start,
-            on_period_begin=on_period_begin, on_period_end=on_period_end,
-            on_period_commit=on_period_commit,
-            skip_feedback_path=skip_feedback_path, clocks=clocks,
-            start_period=start_period,
-            started_grid_ids=(
-                node.cfg.grid_id for node in model.walk_parent_first()
-                if bool(node._started)),
-            committed_initial_history_grid_ids=(
-                model._resume_committed_history_grid_ids
-                if bool(model._resumed) else ()))
+        if schedule_dispatch is not None:
+            execution = schedule_dispatch(
+                model=model, schedule=model.schedule,
+                step_bindings=steppers,
+                callbacks={"step": on_step, "force": on_force,
+                    "feedback_prepare": on_feedback_prepare,
+                    "feedback_commit": on_feedback_commit,
+                    "feedback_finalize": on_feedback_finalize,
+                    "history": on_history, "restart": on_restart,
+                    "domain_start": on_domain_start,
+                    "period_begin": on_period_begin,
+                    "period_end": on_period_end,
+                    "period_commit": on_period_commit},
+                adaptive_driver=adaptive_driver, clocks=clocks,
+                skip_feedback_path=skip_feedback_path,
+                start_period=start_period,
+                started_grid_ids=tuple(
+                    node.cfg.grid_id for node in model.walk_parent_first()
+                    if bool(node._started)),
+                committed_initial_history_grid_ids=(
+                    model._resume_committed_history_grid_ids
+                    if bool(model._resumed) else ()))
+        else:
+            execution = execute_schedule(
+                model.schedule, on_step=on_step, on_force=on_force,
+                on_period_steps=adaptive_driver,
+                on_feedback_prepare=on_feedback_prepare,
+                on_feedback_commit=on_feedback_commit,
+                on_feedback_finalize=on_feedback_finalize,
+                on_history=on_history, on_restart=on_restart,
+                on_domain_start=on_domain_start,
+                on_period_begin=on_period_begin, on_period_end=on_period_end,
+                on_period_commit=on_period_commit,
+                skip_feedback_path=skip_feedback_path, clocks=clocks,
+                start_period=start_period,
+                started_grid_ids=(
+                    node.cfg.grid_id for node in model.walk_parent_first()
+                    if bool(node._started)),
+                committed_initial_history_grid_ids=(
+                    model._resume_committed_history_grid_ids
+                    if bool(model._resumed) else ()))
     finally:
         if adaptive_driver is not None:
             # THE FOLD IS A MODULE GLOBAL, so it outlives this run.  A

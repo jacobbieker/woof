@@ -66,6 +66,11 @@ tests/test_tiles_gate_manifest.py
 # battery list with no manifest gate at all.
 tests/test_battery_list_census.py
 
+# A notice audit reads the tree rather than importing donor modules. Keep it
+# unconditional so a vendored Rust change cannot ship compiled code without
+# its required license and NOTICE texts in the Python distribution.
+tests/test_licence_notices_ship.py
+
 # Byte-level repository hygiene.  `.gitattributes` sets `* -text`, so an
 # LF-to-CRLF rewrite is a real byte change in files the product hashes for
 # identity.  Task #168 rewrote thirteen files that way and the stage-1
@@ -172,6 +177,15 @@ tests/test_wheel_pin_gate.py
 # implementation under one name.  4 passed, 0.37 s.
 tests/test_mynn_dmp_sibling.py
 
+# The exclusion gate's display-label pin, moved out of the module above
+# by lane/cut286-fu-doctor-probe (45d840b1a).  It reads no checkout, but
+# the module above skips every test it holds without one, so the pin that
+# keeps the "<name> WOOF" display-label allowance to one exact phrase in
+# its pinned files went unchecked on every release snapshot.  Listed here
+# because the move took its one test off this leg: the census row of the
+# module above fell 8 -> 7, and this row carries that 1.
+tests/test_excluded_subsystem_label_pin.py
+
 # ADDED 2026-08-29, and the reason is the defect they exist for.
 # fastfix's selector answers a non-Python change (a .cu, a .rs, a receipt)
 # with the ALWAYS list AND NOTHING ELSE -- its own docstring says so, because
@@ -256,3 +270,24 @@ tests/test_literal_division_source_gate.py
 # Prevents compressed valid above-top layers and platform-libm profile
 # word expectations from escaping the CPU checks after a prep edit.
 tests/test_rrtmg_lw_buffer_grid.py
+
+# Current RUC and MYNN selectors: measured CPU contracts and numerical checks.
+tests/test_ruc_2m_diagnostic.py
+tests/test_ruc_default_selection.py
+tests/test_ruc_fork_configuration_doors.py
+tests/test_ruc_fork_oracle.py
+tests/test_ruc_irrigation.py
+tests/test_ruc_public_identity.py
+tests/test_ruc_qvg_cold_start.py
+tests/test_ruc_selector_comment.py
+tests/test_ruc_snow.py
+tests/test_thompson_mynn_ruc_profiles.py
+tests/test_mynn_gsd41_selection.py
+tests/test_mynn_massflux_gsd41.py
+tests/test_mynn_rank_chunk_policy.py
+tests/test_mynn_water_gsd41.py
+
+# c9f4efeee, lane/286-staging-repair: execute the CPU source/hash receipt
+# guard for the two measured b0556bd76, lane/286-fork-thompson, powf sites.
+# The device bodies remain GPU work; dynamic loading needs ALWAYS coverage.
+tests/test_thompson_fork_plain_powf_receipt.py
