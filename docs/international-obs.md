@@ -15,6 +15,7 @@ an absence.
 | European radar composite | works | composite reflectivity, dBZ | `rw_opera` |
 | European per-site polar volumes | works | reflectivity + radial velocity | `rw_odim`, via `woof obs radar` |
 | Worldwide surface reports | works | temperature, dewpoint, wind, MSLP | `rw_asos` |
+| Station reports, Dynamical.org archive | works, US and 14 countries | temperature, dewpoint, wind, MSLP | `woof obs dynamical-asos` |
 | Japanese radar | not built, provenance question open | - | none |
 
 ## 1. European radar: the composite route works end to end
@@ -322,6 +323,117 @@ conversion is arithmetic.
 Smaller: a station frozen into the table that returns no rows disappears from
 the decoded record without entering either drop list. The count went 9 to 8
 with no explanation in the receipt.
+
+## 6. Station reports from the Dynamical.org ASOS archive
+
+Dynamical.org publishes the Iowa Environmental Mesonet's ASOS and METAR
+archive as Parquet, one file per year from 1940
+(<https://dynamical.org/catalog/asos-parquet/>, files at
+`https://data.source.coop/dynamical/asos-parquet/year=YYYY/data.parquet`).
+`woof/obs/dynamical_asos.py` reads it with HTTP range requests, fetching
+only the row groups and columns a valid hour needs, and writes the same
+`stations.json` and `surface.json` packs `rw_asos` writes. `rw_verify`,
+`DynamicalAsosSurfaceSource` in `woof/obs/sources.py`, the obs battery
+(`tools/obs_battery_score.py`) and the WOOF Global scorecard
+(`woof/globe/obs_scorecard.py`) read those packs unchanged; the scorecard's
+stream table lists it as `dynamical-asos`.
+
+It is the same reports §3 reaches, reprocessed and hosted elsewhere, not an
+independent network. What it changes is the fetch: ranged reads of one
+year file instead of per-network requests to the IEM, and no network list
+to resolve. `woof verify-visuals --station-source auto` uses it where it
+has stations and `rw_asos` everywhere else; see
+[verification-visuals.md](verification-visuals.md).
+
+### Coverage is fourteen countries and the United States
+
+Stations reporting in the 2026 file, about 4,060 in all:
+
+| Country | Stations |
+| --- | --- |
+| United States | 2 641 |
+| Canada | 480 |
+| India | 131 |
+| Brazil | 112 |
+| France | 110 |
+| Japan | 104 |
+| United Kingdom | 92 |
+| Russia | 78 |
+| Germany | 72 |
+| Mexico | 64 |
+| Australia | 58 |
+| South Korea | 45 |
+| China | 42 |
+| South Africa | 30 |
+| New Zealand | 0 |
+
+New Zealand is in the archive's country list and has no 2026 reports.
+Greenland, most of Africa, the Middle East, South-East Asia, South America
+outside Brazil and the oceans are absent. A domain there gets its station
+reports from `rw_asos` and the worldwide network table of §3; the frozen
+table `woof/obs/data/dynamical_asos_stations.json`
+(`tools/freeze_dynamical_asos_stations.py`) is what decides.
+
+### What is read, and what is not
+
+One report per station, the one nearest the valid time within 600 s.
+Temperature and dewpoint become kelvin, wind speed m/s and sea-level
+pressure Pa, and a null stays omitted rather than becoming a zero. There
+are no quality flags in the archive, so the reader applies `rw_asos`'s
+screens: 233 to 328 K, wind 0 to 75 m/s, a dewpoint above the temperature
+dropped, and the same per-station report-rate screen.
+
+**Precipitation is never used.** The `p01i` and `p01m` columns carry no
+nulls, so a missing hour and a dry hour are the same number.
+
+**The European pressure gap of §5 is unchanged.** The reader takes
+sea-level pressure from `mslp` only and does not reduce QNH, so a European
+station that reports QNH alone reaches the global scorecard's MSLP rows
+empty, exactly as it does through `rw_asos`.
+
+### Freshness and stability
+
+- The current year's file is rewritten at :20 and :50 UTC, so the newest
+  reports are 30 to 60 minutes old. The latest 72 hours can be revised;
+  `woof verify-visuals RUN_DIRECTORY --refresh` rereads them.
+- The cache, `~/.woof/cache/dynamical-asos/` or
+  `WOOF_DYNAMICAL_ASOS_CACHE`, is keyed by each file's ETag, so a rewrite
+  is never mixed with ranges read before it. `WOOF_DYNAMICAL_ASOS_URL`
+  replaces the base URL, for a mirror.
+- Station metadata is the latest known position and elevation, not the
+  position at the time of the report.
+- `station` is the IEM id: `JFK`, not `KJFK`, in the United States, and
+  the ICAO id elsewhere.
+- Python's default urllib user agent receives HTTP 403; WOOF sends its
+  own.
+- The dataset is labelled experimental and "may change or be removed
+  without notice". A successor, `obs-parquet/v1`, is announced and not yet
+  published. If the archive moves or goes, `auto` falls back to `rw_asos`.
+  `woof doctor` reports the route in a non-blocking row,
+  `station observations: Dynamical.org ASOS Parquet`.
+
+### Using it directly
+
+`pyarrow` is the one added dependency: `pip install 'recast-woof[obs]'`,
+or the Pixi base environment, which carries it.
+
+```sh
+woof obs dynamical-asos --bbox -8.7,49.8,1.9,60.9 \
+  --valid-time 2026-10-06T12:00:00Z --out OBS_DIRECTORY
+```
+
+`--stations`, `--list-stations`, `--refresh`, `--timeout` and `--json` are
+described in [verification-visuals.md](verification-visuals.md).
+
+### Licence and attribution
+
+The catalog page states no licence for this dataset. The dynamical.org
+licence page says most of its datasets are CC BY 4.0; check this dataset's
+terms before redistributing the reports. The original reports are NOAA,
+NWS and FAA data in the public domain. Attribution: data from the Iowa
+Environmental Mesonet, Iowa State University; processing by dynamical.org;
+hosting by Source Cooperative. WOOF records this attribution in every
+receipt scored from the archive.
 
 ## Open questions
 
