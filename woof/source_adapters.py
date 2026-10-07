@@ -101,6 +101,15 @@ class SourceAdapter:
     packaged_profile: str | None = None
     # A recommendation only; runtime capability never depends on this name.
     default_physics_profile: str | None = None
+    #: Published static source selected by this source's configuration.
+    #: An absent declaration leaves existing configuration bytes unchanged.
+    static_source: str | None = None
+    #: Runtime surface records appended to a native source's soil stream.
+    #: Tuples are (engine name, product, index selector, units, numeric selector).
+    runtime_surface_fields: tuple[tuple, ...] = ()
+    #: Optional exact-lattice pairing for this source's own target grid.
+    #: Undeclared sources retain projected indices and coverage checks.
+    same_grid_pairing: str | None = None
     composition_requirement: str | None = None
     #: The packaged ``rw-wps.members.v1`` document (shipped in the wheel
     #: and pinned by SHA-256 in :mod:`woof.source_authorities`) this
@@ -110,6 +119,19 @@ class SourceAdapter:
     #: per-source code -- the declared member set, filename patterns,
     #: verification triple and statistic guard are all table data.
     member_set: str | None = None
+    #: Operational ensemble associated with this source. Selection is table
+    #: data so deterministic and ensemble doors share one provider path.
+    ensemble_source: str | None = None
+    #: A separately published control trajectory, when the member grammar
+    #: contains perturbed members only. It is not assigned invented GRIB
+    #: ensemble octets; its own deterministic source verifies its inputs.
+    ensemble_control_source: str | None = None
+    #: A multi-member run started from this source needs a policy fitted
+    #: against observations before automatic selection may run it: the
+    #: reference model-error fallback is not offered for it.  The built-in
+    #: unfitted policy (:mod:`woof.ensemble.automatic_sources`) reads this
+    #: column, so a source that needs the same treatment is one row here.
+    requires_ensemble_calibration: bool = False
     #: The native cadence of this source's model state, in seconds -- the
     #: spacing between the valid times a preparation gets lateral boundary
     #: conditions from, and therefore ``&share/interval_seconds`` in an
@@ -252,6 +274,10 @@ class SourceAdapter:
         return (self.display_name or "").strip() or self.source_id
 
     def __post_init__(self) -> None:
+        if self.same_grid_pairing not in (None, "identity"):
+            raise ValueError(
+                "same_grid_pairing must be 'identity' or None; an unknown "
+                "pairing cannot preserve the declared source indices")
         if type(self.forecast_time_cycle_argument) is not bool:
             raise TypeError("forecast_time_cycle_argument must be a boolean")
         for name in ("selection_owner", "forecast_time_owner"):
@@ -280,6 +306,12 @@ class SourceAdapter:
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
         value.pop("root_target_interior_axis")
+        if value["static_source"] is None:
+            value.pop("static_source")
+        if not value["runtime_surface_fields"]:
+            value.pop("runtime_surface_fields")
+        if value["same_grid_pairing"] is None:
+            value.pop("same_grid_pairing")
         value["source_kind"] = self.source_kind.value
         value["status"] = self.status.value
         # The name a consumer shows, resolved: a row that declares none
@@ -324,8 +356,14 @@ def _adapter(
     runner: str | None = None,
     packaged_profile: str | None = None,
     default_physics_profile: str | None = None,
+    static_source: str | None = None,
+    runtime_surface_fields: tuple[tuple, ...] = (),
+    same_grid_pairing: str | None = None,
     composition: str | None = None,
     member_set: str | None = None,
+    ensemble_source: str | None = None,
+    ensemble_control_source: str | None = None,
+    requires_ensemble_calibration: bool = False,
     forcing_interval_seconds: float | None = None,
     fetch_entire_window: bool = False,
     fetch_requires_retrieve: bool = False,
@@ -372,8 +410,14 @@ def _adapter(
         runner=runner,
         packaged_profile=packaged_profile,
         default_physics_profile=default_physics_profile,
+        static_source=static_source,
+        runtime_surface_fields=runtime_surface_fields,
+        same_grid_pairing=same_grid_pairing,
         composition_requirement=composition,
         member_set=member_set,
+        ensemble_source=ensemble_source,
+        ensemble_control_source=ensemble_control_source,
+        requires_ensemble_calibration=requires_ensemble_calibration,
         forcing_interval_seconds=forcing_interval_seconds,
         fetch_entire_window=fetch_entire_window,
         fetch_requires_retrieve=fetch_requires_retrieve,
@@ -417,6 +461,11 @@ _NORTH_AMERICA_32KM_LAMBERT = LambertGridWindow(
     nx=349, ny=277,
     lat1=1.0, lon1=-145.5,
     dx_m=32463.0, truelat1=50.0, truelat2=50.0, stand_lon=-107.0)
+
+#: AWIPS grid 130. Section 3 of the 2026-10-02 18Z native-level object.
+_CONUS_13KM_LAMBERT = LambertGridWindow(
+    nx=451, ny=337, lat1=16.281, lon1=-126.138,
+    dx_m=13545.0, truelat1=25.0, truelat2=25.0, stand_lon=-95.0)
 
 #: DWD's ICON-EU regular lat-lon window, exactly as DWD publishes it and as
 #: the preparation stage's own out-of-grid refusal reports it: 1377 x 657
@@ -616,6 +665,12 @@ _MSC_DATAMART_DOOR = ArchiveWindow(
 _ADAPTERS = (
     _adapter(
         "hrrr",
+        static_source="hrrr-conus-v4",
+        same_grid_pairing="identity",
+        runtime_surface_fields=(("VEGFRA", "sfc", "VEG:surface", "percent", (
+            ("discipline", 2), ("category", 0), ("parameter", 4),
+            ("level_type", 1), ("level_value", 0), ("pdt", 0))),),
+        requires_ensemble_calibration=True,
         forecast_time_owner="hrrr_forecast_hours",
         forecast_time_cycle_argument=True,
         fetch_entire_window=True,
@@ -652,7 +707,7 @@ _ADAPTERS = (
         # rather than imported because this table is read while the
         # route module is not: the menu asks the adapter what it
         # recommends (woof.physics_menu._recommended_profile).
-        default_physics_profile="thompson-mp8-ysu-mm5-noah-rte-rrtmgp-v1",
+        default_physics_profile="thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1",
         forcing_interval_seconds=3600.0,
         # Hourly, and the walk-back is short on purpose: the
         # operational directories turn over quickly, and a cycle half
@@ -689,6 +744,11 @@ _ADAPTERS = (
     ),
     _adapter(
         "hrrr-prs",
+        static_source="hrrr-conus-v4",
+        same_grid_pairing="identity",
+        default_physics_profile=(
+            "thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1"
+        ),
         archives=(ArchiveWindow("aws", _HRRR_NATIVE_ARCHIVE.start,
                                 _HRRR_NATIVE_ARCHIVE.note,
                                 _HRRR_NATIVE_ARCHIVE.documentation),),
@@ -895,6 +955,7 @@ _ADAPTERS = (
     ),
     _adapter(
         "gfs",
+        ensemble_source="gefs",
         forecast_time_owner="gfs_forecast_hours",
         seed_fields=('air_pressure', 'air_temperature', 'eastward_wind',
                      'northward_wind', 'mean_sea_level_pressure'),
@@ -1006,6 +1067,7 @@ _ADAPTERS = (
     ),
     _adapter(
         "gefs",
+        ensemble_source="gefs",
         archives=(_GEFS_ARCHIVE,),
         name="GEFS (global ensemble member)", aliases=("gefs-ensemble",),
         kind=SourceKind.ENSEMBLE_MEMBERS,
@@ -1058,6 +1120,7 @@ _ADAPTERS = (
     ),
     _adapter(
         "aigfs",
+        ensemble_source="aigefs",
         name="AIGFS (NOAA AI global forecast)", aliases=("ai-gfs",),
         decoder=(
             "packaged AIGFS operational profile + "
@@ -1118,6 +1181,7 @@ _ADAPTERS = (
     ),
     _adapter(
         "aigefs",
+        ensemble_source="aigefs",
         archives=(_AIGEFS_ARCHIVE,),
         name="AIGEFS (NOAA AI global ensemble member)", aliases=("ai-gefs",),
         kind=SourceKind.ENSEMBLE_MEMBERS,
@@ -1181,6 +1245,7 @@ _ADAPTERS = (
     ),
     _adapter(
         "ecmwf-open-data",
+        ensemble_source="ecmwf-ens",
         archives=(_ECMWF_OPEN_DOOR,),
         name="ECMWF IFS (open data, 0.25 degree)", aliases=("ecmwf", "ifs"),
         file_family="GRIB2",
@@ -1221,6 +1286,44 @@ _ADAPTERS = (
             "policy-controlled (local-table/bitmap semantics not yet "
             "bound), and the route is not yet accepted by unchanged stock "
             "WRF."
+        ),
+    ),
+    _adapter(
+        "ecmwf-ens",
+        ensemble_source="ecmwf-ens",
+        ensemble_control_source="ecmwf-open-data",
+        archives=(_ECMWF_OPEN_DOOR,),
+        name="ECMWF ENS (open data, member)",
+        aliases=("ifs-ens", "ecmwf-ensemble"),
+        kind=SourceKind.ENSEMBLE_MEMBERS,
+        default_product="enfo/member", required_products=("enfo/member",),
+        max_hour=360,
+        upstream_ingest="declarative_mapping_v1_over_packaged_profile",
+        status=AdapterStatus.RUNNABLE_NOT_CERTIFIED,
+        field_mapping="packaged-rw-wps-ecmwf-ens-open-grib2-v1",
+        level_mapping="14-pressure-level-to-explicit-wrf-eta-v2",
+        cadence_mapping="uniform-three-hour-forecast-series-v1",
+        stock_wrf_gate="live-unchanged-stock-wrf-gate-pending",
+        runnable=True, runner="mapped_composition_v1",
+        packaged_profile="ecmwf-ens-open-grib2-v1",
+        forcing_interval_seconds=10800.0,
+        member_set="ecmwf-ens-open-grib2-members-v1",
+        composition=(
+            "One indexed and byte-verified perturbed member supplies its "
+            "atmosphere and four soil layers. The separate oper control "
+            "is selected through ensemble_control_source."
+        ),
+        notes=(
+            "The current open-data enfo-ef object contains 50 perturbed "
+            "members. JSON index ranges select one member; the Rust GRIB "
+            "inventory then verifies every selected message. The "
+            "mapped member profile reads the same field definitions, "
+            "including surface-pressure terrain derivation when surface "
+            "geopotential is absent. The separately published oper-fc "
+            "control makes 51 trajectories. Fetch-as-posted remains active "
+            "for each member's forcing series. Historical publication "
+            "layouts before IFS cycle 50r1 are not declared by this route. "
+            "Data: ECMWF open data, CC BY 4.0. Not stock-WRF certified."
         ),
     ),
     _adapter(
@@ -1271,6 +1374,60 @@ _ADAPTERS = (
         ),
     ),
     _adapter(
+        "rap-native",
+        name="RAP hybrid levels (13 km CONUS)",
+        aliases=("rap-awp130bgrb",), upstream_model_id="rap",
+        default_product="awp130bgrb", max_hour=51,
+        upstream_ingest="declarative_mapping_v1_over_packaged_profile",
+        status=AdapterStatus.RUNNABLE_NOT_CERTIFIED,
+        field_mapping="packaged-rw-wps-rap-native-grib2-v1",
+        level_mapping="50-model-level-explicit-pressure-to-wrf-eta-v1",
+        cadence_mapping="uniform-hourly-forecast-series-v1",
+        stock_wrf_gate="live-unchanged-stock-wrf-gate-pending",
+        runnable=True, runner="mapped_composition_v1",
+        packaged_profile="rap-native-grib2-v1",
+        forcing_interval_seconds=3600.0, coverage=_CONUS_13KM_LAMBERT,
+        boundary_species=("qc", "qr", "qi", "qs", "qg"),
+        notes=(
+            "The generic mapped route reads the fifty native hybrid levels "
+            "published on the 13 km CONUS Lambert grid, including explicit "
+            "pressure, hydrometeors, aerosol numbers and nine RUC soil nodes. "
+            "QNWFA/QNIFA use the operational HRRR Vtable's kg-1 semantics "
+            "for NCEP local parameters 0/13/193 and 0/13/192. The product "
+            "is horizontally interpolated by its producer; it is not RAP's "
+            "full rotated native grid. Stock-WRF certification is pending."
+        ),
+    ),
+    _adapter(
+        "hrrr-native",
+        static_source="hrrr-conus-v4",
+        same_grid_pairing="identity",
+        default_physics_profile=(
+            "thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1"
+        ),
+        name="HRRR native hybrid analysis (mapped)",
+        aliases=("hrrr-mapped-native",), upstream_model_id="hrrr",
+        default_product="wrfnat", max_hour=48,
+        upstream_ingest="declarative_mapping_v1_over_packaged_profile",
+        status=AdapterStatus.RUNNABLE_NOT_CERTIFIED,
+        field_mapping="packaged-rw-wps-hrrr-native-grib2-v1",
+        level_mapping="50-model-level-explicit-pressure-to-wrf-eta-v1",
+        cadence_mapping="uniform-hourly-forecast-series-v1",
+        stock_wrf_gate="live-unchanged-stock-wrf-gate-pending",
+        runnable=True, runner="mapped_composition_v1",
+        packaged_profile="hrrr-native-grib2-v1",
+        forcing_interval_seconds=3600.0, coverage=_CONUS_3KM_LAMBERT,
+        boundary_species=("qc", "qr", "qi", "qs", "qg"),
+        notes=(
+            "The generic mapped route reads the fifty native hybrid levels "
+            "from wrfnat, with explicit pressure and aerosol numbers. Its "
+            "same-cycle wrfprs analysis supplies the nine-node soil column "
+            "and terrain through a hash-bound composition. This profile "
+            "supports a native analysis donor independently of the selected "
+            "lateral forcing source. Stock-WRF certification is pending."
+        ),
+    ),
+    _adapter(
         "rap",
         archives=(_RAP_ARCHIVE,),
         name="RAP (32 km North America)",
@@ -1303,11 +1460,8 @@ _ADAPTERS = (
             "soil column.  Pressure-level humidity is RH and rides the "
             "declared RH-to-specific-humidity derivation the GFS profile "
             "proved.  There is no RAP decode code on this route.  The "
-            "13 km CONUS Lambert products are NOT reachable as tables "
-            "today and this row does not claim them: awp130pgrb carries "
-            "no soil/land state, and pairing it with awp130bgrb refuses "
-            "because both products publish byte-identical surface records "
-            "that no selector octet separates; the native rotated "
+            "13 km hybrid product is a separate rap-native table row. "
+            "The native rotated "
             "lat-lon wrfprs product (GDT 32769) is outside the declared "
             "grid families.  Not yet accepted by unchanged stock WRF."
         ),
@@ -1367,6 +1521,8 @@ _ADAPTERS = (
     ),
     _adapter(
         "rrfs",
+        ensemble_source="rrfs-ens",
+        requires_ensemble_calibration=True,
         archives=(_RRFS_OPS_ARCHIVE,),
         name="RRFS (operational 3 km CONUS)",
         aliases=("rrfs-ops",),
@@ -1391,8 +1547,8 @@ _ADAPTERS = (
         coverage=_CONUS_3KM_LAMBERT,
         notes=(
             "RRFS -- HRRR's operational successor, flowing today on "
-            "noaa-rrfs-ops-pds and NOMADS rrfs/v1.0 (implementation date "
-            "2026-10-06) -- through the GENERIC mapped route as a packaged "
+            "noaa-rrfs-ops-pds and NOMADS rrfs/v1.0 through the GENERIC "
+            "mapped route as a packaged "
             "profile.  The 3 km CONUS grid is bit-for-bit HRRR's Lambert "
             "(every geolocating octet identical, measured from real "
             "bytes), so the HRRR wrfprs machinery carries it; RRFS's own "
@@ -1405,14 +1561,45 @@ _ADAPTERS = (
             "octet-identical to HRRR's.  There is no RRFS decode code on "
             "this route.  NOT reachable today and not claimed by this "
             "row: the natlev native-level product, the 3 km "
-            "North-America rotated grid, the thinned subset files and "
-            "every per-member ensemble file exist only in the frozen "
+            "North-America rotated grid and the thinned subset files "
+            "exist only in the frozen "
             "prototype bucket noaa-rrfs-pds (halted 2026-08-12 by "
             "design) with no live front door; the relocatable firewx "
-            "nest changes grid daily.  The ops bucket currently lists 6 "
-            "days and whether that is rolling retention or feed age is "
-            "not yet distinguishable.  Not yet accepted by unchanged "
+            "nest changes grid daily. The public rrfsens member subset "
+            "has its own rrfs-ens row; its 250 hPa top and missing land "
+            "state do not replace this full-column route. "
+            "Not yet accepted by unchanged "
             "stock WRF."
+        ),
+    ),
+    _adapter(
+        "rrfs-ens",
+        ensemble_source="rrfs-ens",
+        name="RRFS ensemble (public member subset)", aliases=("rrfsens",),
+        kind=SourceKind.ENSEMBLE_MEMBERS,
+        default_product="prslevnomads+2dfldnomads/member",
+        required_products=("prslevnomads", "2dfldnomads"), max_hour=60,
+        status=AdapterStatus.COMPOSITION_REQUIRED,
+        member_set="rrfs-ops-subset-grib2-members-v1",
+        forcing_interval_seconds=3600.0,
+        certified_source_top_pa=25000.0,
+        coverage=_CONUS_3KM_LAMBERT,
+        composition=(
+            "The public member column stops at 250 hPa and publishes no "
+            "soil temperature, soil moisture, skin temperature or land "
+            "mask. A complete upper atmosphere and explicit land-state "
+            "composition are required before these members can initialize "
+            "a normal full-column run. No automatic top lowering."
+        ),
+        notes=(
+            "Five real member trajectories, m001 through m005, are posted "
+            "in rrfsens.YYYYMMDD/CC on the operational-layout AWS bucket "
+            "and NOMADS v1.0. Member 1 pressure and surface samples carry "
+            "PDT 1, perturbation number 1, ensemble type 3 and size 5. "
+            "The subset supplies 14 pressure levels from 250 to 1000 hPa. "
+            "Acquisition and byte identity are implemented; complete "
+            "initialization is not. Ensemble statistics remain the separate "
+            "REFS source and cannot substitute for a member."
         ),
     ),
     _adapter(
@@ -1643,7 +1830,7 @@ _ADAPTERS = (
         default_product="si-subdaily-pressure+surface+subsurface",
         required_products=(
             "prsSI", "sfcSI", "2mSI", "10mSI", "subsfcSI",
-            "recovered invariant supplement",
+            "published invariant supplement",
         ),
         max_hour=0,
         upstream_ingest="declarative_mapping_v1_over_packaged_profile",
@@ -1661,7 +1848,7 @@ _ADAPTERS = (
         certified_source_top_pa=10000.0,
         notes=(
             "The publicly downloadable form of 20CRv3: NOAA PSL's sub-daily "
-            "NetCDF SI series, decoded through the Rust rw_netcdf bridge with "
+            "NetCDF SI/MO series, fetched through woof fetch --source 20crv3-cf and decoded through the Rust rw_netcdf bridge with "
             "no per-source decode code -- the mapping, composition and "
             "provenance documents are packaged and pinned by SHA-256. "
             "Three-hourly analyses on 21 common pressure levels (1000-100 "
@@ -1677,16 +1864,18 @@ _ADAPTERS = (
             "not a dynamically balanced trajectory, while this is an analysis "
             "at its own valid time and is the only 20CRv3 form NOAA "
             "distributes as NetCDF -- but the difference is a judgement worth "
-            "reading before a study depends on it. (2) PSL publishes no "
-            "orography and no land mask for 20CRv3, so both are recovered "
-            "from 20CRv3's own published fields by "
-            "tools/build_pressure_level_invariant_supplement.py and carried "
-            "as a supplement whose provenance document states the method and "
-            "the divergence. Not yet accepted by unchanged stock WRF."
+            "reading before a study depends on it. (2) Native fetch binds "
+            "PSL's published time-invariant surface height and land fraction "
+            "to every primary time through Rust exact coordinate subsetting. "
+            "Soil temperature and moisture use the four published Noah layers; "
+            "ocean initialization uses published skin temperature as an "
+            "explicit SST proxy. No separate sub-daily SST is published. "
+            "Not yet accepted by unchanged stock WRF."
         ),
     ),
     _adapter(
         "mapped",
+        time_axis="supplied_times",
         name="Generic mapped source (rw-wps mapping v1)",
         aliases=("generic-mapped", "mapping-v1"),
         upstream_model_id=None,

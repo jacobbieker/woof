@@ -324,7 +324,7 @@ def test_native_wrf_contract_is_versioned_and_explicit():
     assert "grib2_inventory" in BRIDGE_NAMES
     assert "grib2_dump" in BRIDGE_NAMES
     assert contract["preprocess_backends"]["cpu"] \
-        == "rust-scoped-threads-fp32-v1"
+        == "rust-parallel-fp32-v1"
     assert "parallel CPU" in contract["public_controls"]["gfs"]["preprocessing"]
     assert "parallel CPU" in contract["public_controls"]["era5"]["preprocessing"]
     assert "max_dom=4" in contract["public_controls"]["20crv3"]["domain"]
@@ -417,6 +417,72 @@ def test_windows_installer_and_launcher_are_fail_closed():
     assert launcher.index('$env:PYTHONNOUSERSITE = "1"') < first_python
     assert launcher.index('$env:PYTHONDONTWRITEBYTECODE = "1"') < first_python
     assert launcher.count("& $python -B -P -m") == 2
+
+
+def test_standalone_parser_resolves_a_named_parameter_set_without_forecast_runtime(tmp_path):
+    """The staged parser carries its registry and fixed-clock dependencies."""
+    import tomllib
+    from test_physics_params import _EXPERIMENT
+
+    staged = tmp_path / "rw-wps-python"
+    receipt = _stage_or_skip(staged)
+    assert "woof/physics_params.py" in receipt["files"]
+    assert "woof/physics_params_registry_v1.json" in receipt["files"]
+    assert "woof/core/adaptive_clock.py" in receipt["files"]
+    assert "woof/core/adaptive_timestep.py" in receipt["files"]
+    assert "woof/render_compare.py" not in receipt["files"]
+    metadata = tomllib.loads((staged / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "physics_params_registry_v1.json" in metadata["tool"]["setuptools"]["package-data"]["woof"]
+    version = metadata["project"]["version"]
+    info = staged / f"rw_wps-{version}.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: rw-wps\nVersion: {version}\n",
+                                   encoding="utf-8")
+    (info / "RECORD").write_text("woof/__init__.py,,\n", encoding="utf-8")
+    set_path = tmp_path / "member.toml"
+    set_path.write_text('[physics_params]\nname = "member"\nvalues = {"mynn.prandtl" = 0.8}\n',
+                        encoding="utf-8")
+    script = r"""
+import os
+from pathlib import Path
+import sys
+import tomllib
+from woof.experiment import build_experiment, experiment_config_document
+from woof import physics_params
+from woof.core import adaptive_clock, adaptive_timestep
+
+root = Path(os.environ["RW_WPS_STAGED_ROOT"]).resolve()
+assert Path(physics_params.__file__).resolve().is_relative_to(root)
+assert Path(adaptive_clock.__file__).resolve().is_relative_to(root)
+assert Path(adaptive_timestep.__file__).resolve().is_relative_to(root)
+assert adaptive_clock.wrf_num_sound_steps(20.0, 3000.0, 3000.0, 1.0443) == 6
+exp = build_experiment(tomllib.loads(os.environ["RW_WPS_EXPERIMENT"]), "staged-parameter-test")
+assert exp.physics_params.name == "member"
+assert exp.physics_params.changed() == ("mynn.prandtl",)
+assert experiment_config_document(exp)["physics_params"] == physics_params.document(exp.physics_params)
+for module in ("woof.core.physics", "woof.core.ruc", "woof.core.ruc_gpu", "woof.core.model"):
+    assert module not in sys.modules, module
+"""
+    environment = os.environ.copy()
+    environment["GPUWM_NO_LOCAL_GPU"] = "1"
+    environment["CUDA_VISIBLE_DEVICES"] = "-1"
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONPATH"] = str(staged)
+    environment["RW_WPS_STAGED_ROOT"] = str(staged)
+    # A prescribed surface with radiation off needs no forecast-only
+    # LSM or radiation modules. The selected coefficient belongs to MYNN.
+    environment["RW_WPS_EXPERIMENT"] = _EXPERIMENT.replace(
+        "sf_surface_physics = 3", "sf_surface_physics = 0").replace(
+        "num_soil_layers = 6", "num_soil_layers = 4").replace(
+        "ra_lw_physics = 4", "ra_lw_physics = 0").replace(
+        "ra_sw_physics = 4", "ra_sw_physics = 0").replace(
+        'ra_rrtmg_variant = "rrtmg_legacy"', 'ra_rrtmg_variant = "rte-rrtmgp"').replace(
+        'wrf_rrtmg_compatibility = "wrf-rrtmg-4-4-legacy-v1"',
+        'wrf_rrtmg_compatibility = "none"')
+    environment["WOOF_PHYSICS_PARAMS"] = str(set_path)
+    completed = subprocess.run([sys.executable, "-P", "-c", script], cwd=tmp_path,
+                               env=environment, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_standalone_python_project_excludes_forecast_executor(tmp_path):
@@ -534,13 +600,16 @@ def test_standalone_python_project_excludes_forecast_executor(tmp_path):
     assert {(item["path"], item["module"]) for item in receipt["optional_internal_imports"]} >= {
         ("woof/static/corridor.py", "woof.core.nest_relocation"),
         ("woof/static/corridor.py", "woof.ingest.relocation_init")}
-    # The steep-terrain clock sets the time step a forecast starts with;
-    # its importers are the excluded runners and it reaches
-    # woof.core.adaptive_clock, which does not ship.  Staged, it made
-    # this staging refuse outright.
+    # Terrain adaptation belongs to the excluded forecast runners. The
+    # namelist importer needs the shared acoustic count, which ships with
+    # its adaptive-timestep dependency. Its live physics cadence stays out.
     assert "woof/acoustic_adaptation.py" not in files
     assert "woof/terrain_clock.py" not in files
-    assert "woof/core/adaptive_clock.py" not in files
+    assert "woof/core/adaptive_clock.py" in files
+    assert "woof/core/adaptive_timestep.py" in files
+    assert "woof/core/physics.py" not in files
+    assert {(item["path"], item["module"]) for item in receipt["optional_internal_imports"]} >= {
+        ("woof/core/adaptive_clock.py", "woof.core.physics")}
     # The chained writer ships with the era5, gfs and mapped routes; the
     # forecast admission it reaches only when it chains does not, and a
     # preparation-only install never chains, so that import is optional.
@@ -669,6 +738,82 @@ assert 'woof.core.cam_ozone' not in sys.modules
 assert 'woof.branch' not in sys.modules
 assert 'woof.prepared_single_domain_forecast' not in sys.modules
 
+# The ensemble package's preparation side is staged and its orchestration is
+# not.  Every streamed preparation asks these hooks whether a member input is
+# bound, and the namelist importer reads the stochastic contract; with the
+# package absent, or with a door that imported woof.ensemble.cycle beside any
+# submodule, each was a ModuleNotFoundError in a preparation binding no member.
+from woof.ensemble.posted_preparation import (
+    current_posted_domain, current_posted_preparation)
+from woof.ensemble.runtime_preparation import current_runtime_preparation
+assert current_posted_domain() is None
+assert current_posted_preparation() is None
+assert current_runtime_preparation() is None
+import woof.namelist_stochastic
+from woof.ensemble import physical_boundary, physical_store
+for name in ("cycle", "engine", "member", "request", "batch_products"):
+    assert f"woof.ensemble.{name}" not in sys.modules, name
+    assert not (root / "woof" / "ensemble" / f"{name}.py").exists(), name
+# An experiment config carrying [ensemble] still builds past the table:
+# preparation consumes nothing from it, and its validator lives with the
+# forecast this wheel omits.  The builder leaves it for the ensemble door, so
+# the refusal below is about the rest of the document, not about the table.
+from woof.experiment import build_experiment
+try:
+    build_experiment({"ensemble": {"members": 2, "unknown": 1}}, "standalone")
+except ValueError as error:
+    assert "must carry an [experiment] table" in str(error), error
+else:
+    raise AssertionError("an empty experiment document was built")
+# A [grid]/[dynamics]/[run] config carrying the table is refused by name here
+# as in the full distribution: no door runs an ensemble from one (2.8.4
+# refused the table as unknown), and the refusal needs nothing this wheel
+# omits.  Read and dropped, the table prepared one input for a run that the
+# forecast install then refuses.
+from woof.config import load_config
+ensemble_config = Path.cwd() / "ensemble.toml"
+ensemble_config.write_text(
+    "[grid]\nnx = 28\nny = 28\nnz = 12\ndx = 3000.0\ndy = 3000.0\n"
+    "ztop = 16000.0\n[run]\ndt = 3.0\nrun_seconds = 30.0\n"
+    "[ensemble]\nmembers = 2\n", encoding="utf-8")
+try:
+    load_config(ensemble_config)
+except ValueError as error:
+    assert "carries an [ensemble] table" in str(error), error
+    assert "remove the [ensemble] table to run this one forecast" in str(error), error
+else:
+    raise AssertionError("the [ensemble] table of a RunConfig was read and dropped")
+assert "woof.ensemble.request" not in sys.modules
+# The planning door reads a multi-model member list with what this wheel
+# carries.  Its reader lived in the forecast door (woof.ensemble.recipe_door),
+# which is not staged, so the staging refused the import as unresolved.
+import contextlib
+import io
+import json
+from woof.ensemble import recipes
+listed = Path.cwd() / "members.json"
+listed.write_text(json.dumps([{"source": "hrrr", "cycle": "2026-10-01T18"},
+                              {"source": "rap", "cycle": "2026-10-01T18"}]),
+                  encoding="utf-8")
+printed = io.StringIO()
+with contextlib.redirect_stdout(printed):
+    assert recipes.main(["--source", "hrrr", "--cycle", "2026-10-01T18:00:00+00:00",
+                         "--hours", "1", "--members", "2", "--recipe", "multi-model",
+                         "--trajectories", str(listed)]) == 0
+assert [member["trajectory"]["source"]
+        for member in json.loads(printed.getvalue())["members"]] == ["hrrr", "rap"]
+assert "woof.ensemble.recipe_door" not in sys.modules
+assert not (root / "woof" / "ensemble" / "recipe_door.py").exists()
+# A posted provider member needs the forecast runner's preflight and says so.
+from woof.ensemble.posted_native import checked_source_inputs
+try:
+    checked_source_inputs(None, source="gfs", experiment_config="x",
+                          wps_namelist="y")
+except RuntimeError as error:
+    assert "preparation-only installation" in str(error), error
+else:
+    raise AssertionError("a provider member was not refused by name")
+
 # A staged config reader must retain attribute-following validation, including
 # its refusal, while the runtime UI and executor imports remain blocked.
 follow = build_follow_config({
@@ -756,6 +901,69 @@ for name in (
     assert completed.returncode == 0, completed.stderr
 
 
+def test_the_full_distribution_validates_the_ensemble_table_at_load(tmp_path):
+    """Leaving the table unvalidated is a property of the staged wheel alone.
+
+    The breakage this prevents: build_experiment skips the ``[ensemble]``
+    validator where ``woof.ensemble.request`` is not installed.  If that
+    presence check ever answered False in the full distribution, every
+    ensemble table would load unchecked and an unknown key would reach the
+    batched forecast.
+
+    load_config asks no such question: a ``[grid]``/``[dynamics]``/``[run]``
+    config opens no ensemble session at any door, so its table is refused
+    by name in every installation, as 2.8.4 refused it as unknown.
+    """
+
+    from woof import ensemble
+    from woof.config import load_config
+    from woof.experiment import build_experiment
+
+    assert ensemble.request_installed()
+    with pytest.raises(ValueError, match="unknown ensemble"):
+        build_experiment({"ensemble": {"members": 2, "unknown": 1}}, "full")
+    config = tmp_path / "ensemble.toml"
+    config.write_text(
+        "[grid]\nnx = 28\nny = 28\nnz = 12\ndx = 3000.0\ndy = 3000.0\n"
+        "ztop = 16000.0\n[run]\ndt = 3.0\nrun_seconds = 30.0\n"
+        "[ensemble]\nmembers = 2\nunknown = 1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"carries an \[ensemble\] table") as refused:
+        load_config(config)
+    assert "opens no ensemble session" in str(refused.value)
+
+
+def test_the_planning_door_reads_its_member_list_without_the_forecast_door(tmp_path):
+    """``python -m woof.ensemble.recipes --trajectories FILE`` imports no forecast door.
+
+    The breakage this prevents: the planning module is staged into the
+    preparation-only wheel, and its ``--trajectories`` reader was imported
+    from ``woof.ensemble.recipe_door``, which is not.  The staging of the
+    wheel refused that as an unresolved internal import, so the wheel could
+    not be built.  This runs in any tree, staged or not.
+    """
+
+    listed = tmp_path / "members.json"
+    listed.write_text(json.dumps([{"source": "hrrr", "cycle": "2026-10-01T18"},
+                                  {"source": "rap", "cycle": "2026-10-01T18"}]),
+                      encoding="utf-8")
+    script = (
+        "import sys\n"
+        "from woof.ensemble import recipes\n"
+        "code = recipes.main(['--source', 'hrrr', '--cycle', '2026-10-01T18:00:00+00:00',\n"
+        "                     '--hours', '1', '--members', '2', '--recipe', 'multi-model',\n"
+        "                     '--trajectories', sys.argv[1]])\n"
+        "assert code == 0, code\n"
+        "assert 'woof.ensemble.recipe_door' not in sys.modules\n")
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(listed)], cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(
+            [str(ROOT), os.environ.get("PYTHONPATH", "")])},
+        capture_output=True, text=True, timeout=120)
+    assert completed.returncode == 0, completed.stderr
+    plan = json.loads(completed.stdout)
+    assert [member["trajectory"]["source"] for member in plan["members"]] == ["hrrr", "rap"]
+
+
 def test_standalone_auto_backend_reads_the_card_load(tmp_path):
     """The staged package prices its preparation against the card's load.
 
@@ -815,12 +1023,18 @@ assert Path(backend.__file__).resolve().is_relative_to(root)
 
 runtime = SimpleNamespace(getDeviceCount=lambda: 1, getDevice=lambda: 0,
                           runtimeGetVersion=lambda: 13020)
-card = SimpleNamespace(name="cuda", array_module=SimpleNamespace(
-    __version__="14.2.0", cuda=SimpleNamespace(runtime=runtime)))
+class ShadowCuda(backend.CudaPreprocessBackend):
+    @property
+    def array_module(self):
+        return SimpleNamespace(__version__="14.2.0",
+                               cuda=SimpleNamespace(runtime=runtime))
+
 cpu = SimpleNamespace(name="cpu")
-backend.CudaPreprocessBackend = lambda: card
+backend.CudaPreprocessBackend = ShadowCuda
 backend.ParallelCpuPreprocessBackend = lambda **_: cpu
 backend._gpu_runtime_installed = lambda: True
+from woof.ingest import preparation_workers
+preparation_workers.host_available_bytes = lambda: 1024 * GIB
 
 from woof.config import RunConfig
 from woof.ingest.preparation_price import price_forcing_preparation
@@ -835,33 +1049,37 @@ snapshot = SimpleNamespace(fields={
     "TT": level, "UU": level, "VV": level, "RH": level, "GHT": level,
     "PSFC": SimpleNamespace(shape=(1059, 1799))})
 price = price_forcing_preparation("mapped", exp, [snapshot] * 7)
-# The stand-in card is 32 GiB: 2 GiB free cannot hold this preparation
-# and 30 GiB free can.
+# The stand-in card is 32 GiB. No free memory cannot hold even a batch;
+# 30 GiB free admits the host-retained, bounded CUDA preparation.
 assert 2 * GIB < price.need_bytes < 30 * GIB, price.need_bytes
 
-os.environ["SHADOW_FREE_GIB"] = "2"
+os.environ["SHADOW_FREE_GIB"] = "0"
 chosen = backend.resolve_preprocess_backend("auto", price=price)
 assert chosen is cpu, chosen.selection
 reason = chosen.selection["reason"]
 assert reason.startswith("the CUDA preparation needs "), reason
-assert "the card has 2.0 GiB free of 32.0 GiB" in reason, reason
+assert "the card has 0.0 GiB free of 32.0 GiB" in reason, reason
 fit = chosen.selection["device_fit"]
 assert fit["fits"] is False, fit
 assert fit["need_bytes"] == price.need_bytes, fit
-assert fit["free_bytes"] == 2 * GIB, fit
+assert fit["free_bytes"] == 0, fit
 assert fit["route"] == "mapped", fit
 load = chosen.selection["device_load"]
-assert load["free_bytes"] == 2 * GIB, load
+assert load["free_bytes"] == 0, load
 assert load["total_bytes"] == 32 * GIB, load
 
 os.environ["SHADOW_FREE_GIB"] = "30"
 chosen = backend.resolve_preprocess_backend("auto", price=price)
-assert chosen is card, chosen.selection
+from woof.ingest.bounded_cuda import BoundedCudaPreprocessBackend
+assert isinstance(chosen, BoundedCudaPreprocessBackend), chosen.selection
 assert "certified" in chosen.selection["reason"], chosen.selection
 assert chosen.selection["device_load"]["free_bytes"] == 30 * GIB, chosen.selection
 fit = chosen.selection["device_fit"]
 assert fit["fits"] is True, fit
-assert fit["need_bytes"] == price.need_bytes, fit
+assert fit["need_bytes"] < price.need_bytes, fit
+assert fit["unchunked_need_bytes"] == price.need_bytes, fit
+assert fit["need_bytes"] == sum(fit["terms"].values()), fit
+assert chosen.selection["chunking"]["retained_arrays"] == "host"
 assert fit["free_bytes"] == 30 * GIB, fit
 
 import woof.core.device_probe as probe
@@ -1181,7 +1399,7 @@ def test_standalone_preparation_ignores_a_runner_another_tree_provides(
     package first on the path, ``importlib.util.find_spec`` found the
     checkout's tree runner through the editable finder, so the handoff
     resolved the bundle and importing that runner against the staged
-    woof.core failed ("No module named 'woof.core.adaptive_clock'").
+    woof.core failed on its forecast-only dependencies.
     The finder here is setuptools' shape; the handoff must end on the
     preparation-only line and import neither runner.
     """

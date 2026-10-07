@@ -65,6 +65,8 @@ Sizing conventions (all documented, none silent):
 
 from __future__ import annotations
 
+from woof.physics_registry import canonical_template_id
+
 import json
 import hashlib
 import math
@@ -1131,7 +1133,8 @@ def prepared_route_physics_notice(profile: str | None,
         "note: the HRRR route's cold-start evidence contract is keyed "
         "by shipped profile, so it prepares "
         f"{HRRR_DEFAULT_PROFILE} when none is named -- Thompson "
-        "microphysics with RTE+RRTMGP longwave AND shortwave and no "
+        "microphysics, MYNN PBL and surface layer, RUC, "
+        "RTE+RRTMGP longwave AND shortwave and no "
         "cumulus at 3 km; pass --physics-profile <id> to choose "
         "another, the same composition on the legacy RRTMG engines "
         "included.",
@@ -1595,7 +1598,7 @@ def resolved_physics_profile(source: str, requested: str | None, *,
     source registered tomorrow get a working default as table work.
     """
     if requested is not None:
-        return requested
+        return canonical_template_id(requested)
     from woof.physics_menu import default_profile_for
 
     return default_profile_for(source, finest_dx_m, domains)
@@ -3812,6 +3815,11 @@ def render_config(*, name: str, start_time: datetime, hours: int,
             raise ValueError("--nz must be at least 4 (the vertical stencil width)")
         shared["nz"] = nz
         shared["eta_levels"] = tuple(float(level) for level in levels)
+    from woof.physics_source_defaults import (land_scoped_defaults,
+                                               recipe_physics_defaults)
+    shared.update(land_scoped_defaults(
+        recipe_physics_defaults((fetch_hints or {}).get("source")),
+        shared.get("sf_surface_physics")))
     if tiles is not None and tiles not in {"off", "auto", "on"}:
         raise ValueError("--tiles must be off, auto, or on")
     # The vertical default is bounded by the source's certified column:
@@ -3920,7 +3928,7 @@ def render_config(*, name: str, start_time: datetime, hours: int,
             f"# {first_night:%Y-%m-%dT%H:%M}Z).  Every front door refuses "
             "it at config load.\n"
             "# Re-emit with a full lw+sw profile, or -- if you mean the "
-            "daytime validation\n"
+            "daytime-only\n"
             "# suite and accept the night -- re-emit with `woof domain "
             "--ack\n"
             f"# {ASYMMETRIC_RADIATION_NOCTURNAL_ACK}`.\n")
@@ -4073,6 +4081,11 @@ def render_config(*, name: str, start_time: datetime, hours: int,
         # at launch and write their own ceiling and substep floor onto
         # the domains that need them.
         shared["use_adaptive_time_step"] = True
+        if ratios:
+            # Declare the existing 5% child-growth default in generated nests.
+            # Shared inheritance survives catalog geometry reconstruction;
+            # targets and per-resolution bounds retain their existing values.
+            shared["max_step_increase_pct"] = 5
         header += (
             "# CLOCK: adaptive.  Each grid starts at the time_step below "
             "and then follows\n"
@@ -4089,11 +4102,16 @@ def render_config(*, name: str, start_time: datetime, hours: int,
     ]
     if tiles is not None:
         parts.append(_render_table("tiles", {"mode": tiles}))
-    for table in _domain_tables(
+    from woof.physics_source_defaults import (
+        recipe_root_defaults, with_recipe_root_defaults)
+    domain_tables = _domain_tables(
             dims, ratios, time_step=time_step, root_dx_m=root_dx_m,
             profile=profile, cumulus_requested=cumulus_requested,
             history_interval_s=history_interval_s,
-            nest_history_interval_s=nest_history_interval_s):
+            nest_history_interval_s=nest_history_interval_s)
+    with_recipe_root_defaults(
+        shared, domain_tables, recipe_root_defaults((fetch_hints or {}).get("source")))
+    for table in domain_tables:
         parts.append(_render_table("domain", table, array_of_tables=True))
     if fetch_hints:
         parts.append(_render_table(
@@ -4270,27 +4288,26 @@ def with_noah_mosaic_options(text: str, option=None, count=None,
 
 
 def experiment_from_text(text: str, *, source: str) -> ExperimentConfig:
-    """Round-trip emitted TEXT through the real loaders (advisory [fetch],
-    [case_data] and [static] are split off exactly as the CLI loaders do).
+    """Round-trip emitted text through the canonical owner-validating builder.
+
+    Companion [fetch], [case_data], [static] and [ingest] tables share
+    the same validation boundary as the CLI file loader.
 
     [static] is validated here and consumed where the statics are built:
     each preparation route reads it back from the config file
     (:func:`woof.static.highres_production.load_static_highres`).  Left
-    in, it stopped ``woof go`` on any config that turned the
+    in the bare experiment-table builder, it stopped ``woof go`` on any
+    config that turned the
     high-resolution overlay on, before a byte was fetched.
     """
     raw = tomllib.loads(text)
-    fetch_table = raw.pop("fetch", None)
-    if fetch_table is not None:
-        from woof.fetch import validate_fetch_hints
-        validate_fetch_hints(fetch_table, source=source)
-    raw.pop("case_data", None)
-    static_table = raw.pop("static", None)
-    if static_table is not None:
-        from woof.static.highres_production import parse_static_table
-        parse_static_table(static_table, source=source,
-                           base_dir=Path(source).parent)
-    return build_experiment(raw, source=source)
+    from woof.experiment import build_experiment_from_config_tables
+
+    # The wizard authors a one-file case with source-selected static metadata.
+    # Use the same validating owner boundary as the file loader, including
+    # case_data/static/ingest. Bare build_experiment remains strict.
+    return build_experiment_from_config_tables(
+        raw, source=source, base_dir=Path(source).parent)
 
 
 def sizing_budget_bytes(exp: ExperimentConfig, *, free_bytes: int,
@@ -5546,6 +5563,18 @@ def verify_polygon_containment(exp: ExperimentConfig,
                 "buffer; refusing to emit a partial target domain")
 
 
+def _fit_source_projection(projection: dict, source: str,
+                           root_dx_m: float) -> dict:
+    """Fit about the projection and cell center exact-source emission uses."""
+    from woof.static.source_defaults import align_source_projection
+
+    # 6a69b356f, lane/hrrr-statics, aligns exact-spacing emission to the
+    # source projection and lattice. Root dimensions have an even quantum,
+    # so a 2x2 planning window establishes their half-cell center before
+    # sizing every level. Final actual-dimension crop admission still runs.
+    return align_source_projection(projection, (2, 2), root_dx_m, source)
+
+
 def fit_polygon_ladder(*, footprint: PolygonFootprint,
                        buffers_km: tuple[float, ...],
                        free_bytes: int, hours: int,
@@ -6691,7 +6720,7 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
             f"at load.  Choose a nocturnally valid profile with both "
             f"radiation streams on that --source {args.source} can "
             f"actually prepare -- {remedy['instruction']} -- or, if you "
-            f"mean the daytime validation suite and accept the night, "
+            f"mean the daytime-only suite and accept the night, "
             f"declare it yourself with --ack "
             f"{ASYMMETRIC_RADIATION_NOCTURNAL_ACK}.  `woof run-plan "
             f"--physics-profiles` lists every suite this source admits",
@@ -6750,6 +6779,8 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
             return None
         return lambda ratios_here: profile_at(ratios_here, root_dx_here)
 
+    projection = _fit_source_projection(
+        projection, args.source, custom[0] if custom is not None else ROOT_DX_M)
     if custom is not None:
         root_dx_m, ratios = custom
         profile = profile_at(ratios, root_dx_m)
@@ -6891,6 +6922,9 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
     _refuse_profile_its_source_cannot_prepare(
         getattr(args, "physics_profile", None), args.source,
         domains=len(ratios) + 1)
+    from woof.static.source_defaults import align_source_projection
+    projection = align_source_projection(
+        projection, dims[0], root_dx_m, args.source)
     # Which bound stopped the POINT fit, if one did -- read off the
     # search itself rather than reconstructed from the emitted root.  It
     # decides two things below: the plain fact the plan summary states,
@@ -7067,6 +7101,8 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
         acknowledgements=acknowledgements, nz=nz, tiles=tiles,
         physics_mix=physics_mix, clock=clock)
     text = with_surface_flux_option(text, getattr(args, "isftcflx", None))
+    from woof.static.source_defaults import with_source_static_defaults_text
+    text = with_source_static_defaults_text(text, args.source)
     smoothing_spec = getattr(args, "terrain_smoothing", None)
     smoothing_precision = getattr(args, "terrain_smoothing_precision", None)
     if smoothing_spec or smoothing_precision:
@@ -7663,16 +7699,16 @@ def register_cli(subparsers) -> None:
                              "that fits the card), or --root-dx / --chain "
                              "for anything else; their closing block "
                              "names the tree runner they route to")
-    parser.add_argument("--physics-profile", default=None,
+    parser.add_argument("--physics-profile", default=None, type=canonical_template_id,
                         choices=WIZARD_PHYSICS_PROFILES,
                         help="shipped physics suite to emit; taken verbatim "
                              "from the registry the prepared-forecast "
                              "runner validates against, so the emitted "
                              "config passes its guard as written.  Read "
-                             "the names: the *-no-radiation-* and "
-                             "*-validation-* profiles run reduced physics "
-                             "with longwave OFF and are NOT nocturnally "
-                             "valid -- selecting one for a window that "
+                             "the resolved radiation selectors: a suite with "
+                             "shortwave ON and longwave OFF is a daytime-only "
+                             "experiment; "
+                             "selecting it for a window that "
                              "includes local night is REFUSED unless you "
                              "declare it yourself with --ack.  "
                              + _profile_help_route_note()
@@ -7710,8 +7746,8 @@ def register_cli(subparsers) -> None:
              "does, and refuses instead.  The id it accepts is "
              + ASYMMETRIC_RADIATION_NOCTURNAL_ACK
              + ": a longwave-OFF suite over a window that includes local "
-             "night, which you are running deliberately as a daytime "
-             "validation experiment")
+             "night, which you are running deliberately as a "
+             "daytime-only experiment")
     parser.add_argument("--root-dx", type=float, default=None,
                         metavar="KM",
                         help="custom root grid spacing in km "

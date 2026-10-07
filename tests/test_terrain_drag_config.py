@@ -19,7 +19,7 @@ import pytest
 from woof.config import (GWD_OPT_VALUES, TOPO_WIND_VALUES, RunConfig,
                           terrain_drag_refusal, validate_run_config)
 from woof.experiment import build_experiment
-from tests.test_namelist_gaps import _import, _with
+from test_namelist_gaps import _import, _with
 
 
 def _cfg(**over) -> RunConfig:
@@ -40,7 +40,13 @@ def _ysu(text):
 
 def test_the_fields_are_appended_last_at_wrfs_defaults():
     names = [f.name for f in dataclasses.fields(RunConfig)]
-    assert names[-2:] == ["topo_wind", "gwd_opt"]
+    # The drag pair was the tail until lane/sol-hrrr-zadvect (37a99fcd4,
+    # merged at dd5ded73f) appended zadvect_implicit_variant after it,
+    # default "wrf_471"; the pair keeps its positional place and WRF's 0.
+    # 2.8.5 appends further fields after zadvect_implicit_variant
+    # (tests/test_config_freeze.py pins that tail).
+    at = names.index("topo_wind")
+    assert names[at:at + 3] == ["topo_wind", "gwd_opt", "zadvect_implicit_variant"]
     assert RunConfig.__dataclass_fields__["topo_wind"].default == 0
     assert RunConfig.__dataclass_fields__["gwd_opt"].default == 0
     assert TOPO_WIND_VALUES == (0, 1, 2) and GWD_OPT_VALUES == (0, 1, 3)
@@ -234,7 +240,7 @@ def test_a_child_domain_with_terrain_drag_is_refused_by_name(tmp_path):
 
 
 def test_an_omitted_key_imports_byte_identically(tmp_path):
-    from tests.test_namelist_import import INPUT_TEXT
+    from test_namelist_import import INPUT_TEXT
 
     text, _ = _import(tmp_path, INPUT_TEXT)
     zero, _ = _import(tmp_path, _with(dynamics=" gwd_opt = 0, 0,\n"))
@@ -248,7 +254,7 @@ def test_an_omitted_key_imports_byte_identically(tmp_path):
 
 def test_the_defaults_leave_the_restart_identity_alone(tmp_path):
     from woof.core.model import restart_identity_payload
-    from tests.test_namelist_import import INPUT_TEXT
+    from test_namelist_import import INPUT_TEXT
 
     text, _ = _import(tmp_path, INPUT_TEXT)
     payload = restart_identity_payload(

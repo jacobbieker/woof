@@ -14,8 +14,13 @@ pub mod seam;
 pub mod net;
 pub mod bufr;
 pub mod bufr_obs;
+pub mod ncep_bufr;
+pub mod errtable;
+pub mod prepbufr;
 pub mod table;
 pub mod tar;
+pub mod precipitation;
+pub mod precipitation_hdf;
 
 use std::error::Error;
 

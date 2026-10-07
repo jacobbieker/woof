@@ -12,7 +12,7 @@ from woof.verify.urban_ucm_ref import (
 
 from woof.verify.urban_ucm_oracle import UCM_VARIANTS
 
-ROOT = Path(__file__).resolve().parents[1] / 'woof/data/urban/oracle/ucm'
+ROOT = Path(__file__).resolve().parents[1] / 'tests/data/oracles/urban/ucm'
 # The twelve column-oracle variants; the Noah and Noah-MP coupling fixtures
 # beside them have their own replay at the end of this file.
 FIXTURES = [ROOT / f'{name}.csv.gz' for name in UCM_VARIANTS]

@@ -68,7 +68,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from woof.core.kernels import get_kernel
+from woof.core.thompson_aerosol_launch import aerosol_kernel
 from woof.core.state import DTYPE
 from woof.core.thompson_aerosol_launch import (
     STATE_MODULE,
@@ -100,7 +100,7 @@ NA_IN1 = 0.5e6           # :95
 
 
 def _kernel(name: str):
-    return get_kernel(STATE_MODULE, name)
+    return aerosol_kernel(STATE_MODULE, name)
 
 
 def _launch(name: str, size: int, args: tuple) -> None:
@@ -141,18 +141,25 @@ def launch_aerosol_entry_snapshot(temperature, pressure, qv, nwfa, nifa,
     ``rho_out`` receives WRF's entry density (:1802), formed from the
     vapour already floored at 1e-10 by :1801.
 
-    This snapshot -- both bounds applied -- is what scavenging, ``iceDeMott``
+    Optional ``None`` aerosol outputs skip storage when the fused source
+    kernels rediagnose those values inline.  Density is always written.
+    The snapshot -- both bounds applied -- is what scavenging, ``iceDeMott``
     and ``iceKoop`` consume.  It is a different quantity from
     :func:`launch_aerosol_working_number`'s output; see that docstring.
     """
-    _, size = validate_fields({
+    arrays = {
         "temperature": temperature, "pressure": pressure, "qv": qv,
         "nwfa": nwfa, "nifa": nifa, "rho_out": rho_out,
-        "nwfa_entry_m3": nwfa_entry_m3, "nifa_entry_m3": nifa_entry_m3,
-    })
+    }
+    arrays.update((name, value) for name, value in (
+        ("nwfa_entry_m3", nwfa_entry_m3), ("nifa_entry_m3", nifa_entry_m3))
+        if value is not None)
+    _, size = validate_fields(arrays)
     _launch("thompson_aa_entry_snapshot", size,
             (temperature, pressure, qv, nwfa, nifa, rho_out,
-             nwfa_entry_m3, nifa_entry_m3, np.int32(size)))
+             np.uint64(0) if nwfa_entry_m3 is None else nwfa_entry_m3,
+             np.uint64(0) if nifa_entry_m3 is None else nifa_entry_m3,
+             np.int32(size)))
 
 
 def launch_aerosol_micro_columns(qc, qi, qr, qs, qg, temperature, pressure,
@@ -194,17 +201,26 @@ def launch_aerosol_entry_cloud_number(qc, nc, rho, rc_out, nc_entry_m3,
     in kg m^-3 (floored at R1), ``nc_entry_m3`` the rediagnosed droplet number
     in m^-3, ``nu_c_out``/``l_qc_out`` int32.
 
+    Diagnostic outputs may be ``None``.  The forecast sources rediagnose
+    them inline; requesting no diagnostic preserves the qc/nc entry rewrite
+    without retaining four unused volume arrays.
+
     The arithmetic is ``thompson_aa_cloud_dist`` from the shared device
     header, so a package that prefers to recompute it inline gets the
     identical value.
     """
-    shape, size = validate_fields({
-        "qc": qc, "nc": nc, "rho": rho, "rc_out": rc_out,
-        "nc_entry_m3": nc_entry_m3,
-    })
-    validate_int_fields({"nu_c_out": nu_c_out, "l_qc_out": l_qc_out}, shape)
+    arrays = {"qc": qc, "nc": nc, "rho": rho}
+    arrays.update((name, value) for name, value in (
+        ("rc_out", rc_out), ("nc_entry_m3", nc_entry_m3))
+        if value is not None)
+    shape, size = validate_fields(arrays)
+    integer_outputs = {name: value for name, value in (
+        ("nu_c_out", nu_c_out), ("l_qc_out", l_qc_out)) if value is not None}
+    if integer_outputs:
+        validate_int_fields(integer_outputs, shape)
     _launch("thompson_aa_entry_cloud_number", size,
-            (qc, nc, rho, rc_out, nc_entry_m3, nu_c_out, l_qc_out,
+            (qc, nc, rho, *(np.uint64(0) if value is None else value
+                           for value in (rc_out, nc_entry_m3, nu_c_out, l_qc_out)),
              np.int32(size)))
 
 
@@ -570,3 +586,64 @@ __all__ = [
     "launch_tau1_density",
     "zero_aerosol_accumulators",
 ]
+
+
+# ---------------------------------------------------------------------------
+# The operational WRF 3.9 fork's graupel intercept (thompson_version =
+# "wrf_39_noaa").
+# ---------------------------------------------------------------------------
+
+#: thompson_aa_wrf39_graupel_intercept's passes (thompson_aerosol_state.cu).
+WRF39_INTERCEPT_POST_SOURCE = 0
+WRF39_INTERCEPT_ENTRY = 1
+WRF39_INTERCEPT_REFLECTIVITY = 2
+
+
+def _require_wrf39(what: str) -> None:
+    from woof.core.thompson_aerosol_launch import active_thompson_version
+    version = active_thompson_version()
+    if version != "wrf_39_noaa":
+        raise RuntimeError(
+            f"{what} is the WRF 3.9 fork's kernel; the active Thompson "
+            f"generation is {version!r} (run it inside "
+            "thompson_version_scope('wrf_39_noaa'))")
+
+
+def launch_wrf39_graupel_intercept(qg, qr, nr, temperature, pressure, qv,
+                                   out, *, mode: int) -> None:
+    """The fork's column graupel intercept (fork :2031-2054, :3110-3133,
+    :5486-5510) into ``out``: N0_exp per level for the entry and
+    post-source passes, the graupel number per kilogram for the
+    reflectivity pass."""
+    _require_wrf39("launch_wrf39_graupel_intercept")
+    if mode not in (WRF39_INTERCEPT_POST_SOURCE, WRF39_INTERCEPT_ENTRY,
+                    WRF39_INTERCEPT_REFLECTIVITY):
+        raise ValueError(f"unknown intercept pass {mode!r}")
+    shape, _ = validate_fields({
+        "qg": qg, "qr": qr, "nr": nr, "temperature": temperature,
+        "pressure": pressure, "qv": qv, "out": out})
+    if len(shape) != 3:
+        raise ValueError(f"intercept fields must be 3-D, got {shape}")
+    nz, ny, nx = shape
+    grid, block = launch_grid(ny * nx)
+    _kernel("thompson_aa_wrf39_graupel_intercept")(grid, block, (
+        qg, qr, nr, temperature, pressure, qv, out, np.int32(mode),
+        np.int32(nz), np.int32(ny), np.int32(nx)))
+
+
+def launch_wrf39_graupel_finalize(qg) -> None:
+    """fork :3755: graupel at or below R1 leaves as zero."""
+    _require_wrf39("launch_wrf39_graupel_finalize")
+    _, size = validate_fields({"qg": qg})
+    _launch("thompson_aa_wrf39_graupel_finalize", size, (qg, np.int32(size)))
+
+
+def launch_wrf39_start_emission(nwfa, nwfa2d, *, dx, dy) -> None:
+    """fork :587-603: surface emission from the lowest-level CCN at start."""
+    _require_wrf39("launch_wrf39_start_emission")
+    shape, _ = validate_fields({"nwfa": nwfa})
+    if len(shape) != 3 or nwfa2d.shape != shape[1:]:
+        raise ValueError("start emission needs 3-D CCN and its 2-D mass grid")
+    _, size = validate_fields({"lowest_ccn": nwfa[0], "emission": nwfa2d})
+    _launch("thompson_aa_wrf39_start_emission", size,
+            (nwfa, nwfa2d, np.float32(dx), np.float32(dy), np.int32(size)))

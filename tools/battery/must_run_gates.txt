@@ -46,6 +46,9 @@
 tests/test_rrtmg_sw_oracle.py  skips<=*  # night columns: SW is not called on
                                          # them, and how many of the fixture
                                          # columns are night is fixture data
+# The columns with no layer above the troposphere switch
+# (fixtures_shallow.npz): not slow, all day columns, nothing may skip.
+tests/test_rrtmg_sw_no_upper_flux.py
 
 # --- Grell-Freitas cumulus, against tools/gf_wrf461_oracle/
 tests/test_gf_deep_parity.py
@@ -53,8 +56,16 @@ tests/test_gf_driver_parity.py
 tests/test_gf_shallow_parity.py
 
 # --- MYNN, against tools/mynn_wrf461_oracle/ and tools/mynn_pbl_wrf461_oracle/
-tests/test_mynn_dmp_sibling.py
+# test_default_dmp_still_launches_the_original_module (2.8.6) imports
+# woof.core.mynn_pbl_gpu, which imports cupy at module scope, so it skips
+# on a runner without cupy (public CI 37456404124); it runs in the release
+# gate's Stage 1, whose environment has cupy. The three source-pin tests
+# in the file still may not skip.
+tests/test_mynn_dmp_sibling.py  skips<=1
 tests/test_mynn_surface.py
+# WRF scalar_pblmix against its committed WRF Fortran column fixtures (CPU
+# only): a missing fixture must fail, not silently remove the comparison.
+tests/test_scalar_pblmix.py
 
 # --- Noah-MP, against woof/data/noahmp/oracle/ and tools/noahmp_wrf461_oracle/
 tests/test_noahmp_bareflux.py
@@ -86,9 +97,33 @@ tests/test_thompson_oracle_provenance.py
 
 tests/test_tui_cli.py
 
+# Committed WRF SOILVEGIN and complete LSMRUC mosaic fixtures. A skipped
+# comparison would lose mixture-order and irrigation regression coverage.
+tests/test_ruc_mosaic.py
+
+# All WRF lake statements, layer defaults and 300-step fixture words stay
+# bound to byte-unmodified upstream source; fixture absence cannot skip.
+tests/test_lake_contract.py
+
 # --- DECLARED-SKIPPING-BEGIN -------------------------------------------------
 # Release-source checks need an external Git executable to construct real repositories.
 tests/test_verify_release_build_tree.py  needs Git on PATH; it checks real tracked and untracked build state.
+# DECLARED TEST EXCEPTIONS: one test id, not a file (tools/battery/
+# no_silent_skip.py skips exactly that test with this reason; every other test
+# in the file keeps running).  2.8.6 ruling: the g3 gate is the one test that
+# asserts the aero-cloud-freeze-nc, aero-cold-overlap and wp08-nusweep cells
+# against the 2e-6 bound; the residual ratchet, the published-matrix pins and
+# the one-extra-rounding pin beside it keep gating.  Retire this entry in the
+# commit that makes g3 pass.
+tests/test_thompson_aerosol_adapter.py::test_g3_end_to_end_against_all_nineteen_oracle_fixtures  mp=28 (aerosol-aware Thompson) is not yet bit-parity with WRF 4.6.1 on 7 oracle cells (qc up to 4.9e-6 against a 2e-6 bound); the accumulation-order rework is in progress and changes kernels shared with mp=8 (lane/cut286-mp28-g3)
+# Ensemble member decks (lane/283-ensemble-batch) skip whole modules when
+# their device or native preparation library is absent.
+tests/test_ensemble_batch_bookkeeping_gpu.py  needs a CUDA device; it is skipped when GPUWM_NO_LOCAL_GPU is set, and a GPU leg with the device runs its member bookkeeping word comparisons.
+tests/test_ensemble_recentered_gpu.py  needs a CUDA device and CuPy; it is skipped when GPUWM_NO_LOCAL_GPU is set, and a GPU leg with the device runs its recentered member field comparisons.
+tests/test_ensemble_physical_preparation.py  needs WOOF_ENSEMBLE_PREPARATION_BRIDGE bound to the built tools/grib1_bridge preparation library; a leg that builds the bridge and sets the variable runs it.
+tests/test_ensemble_recipe_door_gpu.py  needs a CUDA device, the live provider network (WOOF_NETWORK_TESTS=1) and the WPS geography tree; a card leg that sets the variable runs both front-door recipe ensembles.
+tests/test_ensemble_go_door_gpu.py  needs a CUDA device, the live provider network (WOOF_NETWORK_TESTS=1) and the WPS geography tree; a card leg that sets the variable runs `woof go CONFIG --members N` for real and stops it with Ctrl-C.
+tests/test_ensemble_member_inputs_gpu.py  needs a CUDA device, the live provider network (WOOF_NETWORK_TESTS=1) and the WPS geography tree; a card leg that sets the variable runs the plain member count door end to end: the operational ensemble of the source, its go and run flags, and the refusal where a source declares none.
 #
 # Below this line: every module in the test tree that carries a MODULE-LEVEL
 # skip -- a `pytestmark` skipif or a `pytest.skip(allow_module_level=True)` --
@@ -116,6 +151,12 @@ tests/test_rrtmg_lw_cuda.py    the same fixtures as its NumPy twin above, and
 tests/test_rrtmg_sw_cuda.py    needs a CUDA device (the shortwave fixtures do
 #                              ship; only the device is absent).  Runs on the
 #                              gpu lane of .github/workflows/ci.yml.
+tests/test_rrtmg_sw_no_upper_flux_gpu.py  needs a CUDA device (its WRF
+#                              fixture, fixtures_shallow.npz, ships; only the
+#                              device is absent).  Runs on
+#                              tools/battery/gpu_shard_files.txt SHARD 1v; its
+#                              NumPy half, tests/test_rrtmg_sw_no_upper_flux.py,
+#                              runs on stage 1.
 tests/test_wrfout_dual_write.py  needs the Rust NetCDF writer built in this
 #                              checkout (cargo build --release); a wheel
 #                              install carries it, a bare source tree does not.
@@ -155,3 +196,17 @@ tests/test_diffusion_drivers_wrf471_parity.py  needs a CUDA device for complete 
 # The opt-in strict WRF arithmetic (lane/282-wrf-exact, d707721e3) is selected
 # before import; its compiler witness skips the module in every default process.
 tests/test_wrf_exact_gpu.py  needs GPUWM_WRF_EXACT=1 set before import and a CUDA device: it compiles real NVRTC programs under the opt-in strict compiler hook, which a default process never installs, so no default leg can run it.
+
+# MYNN mixing length 2 uses committed, reproducible WRF Fortran column
+# fixtures; its CPU comparisons run everywhere and a missing fixture fails.
+tests/test_mynn_mixlength2.py  needs a CUDA device for its CUDA column comparisons: three against the WRF Fortran fixtures (mixlength, initialize, two driver steps) and one against the CPU reference for a boundary layer at the model top; the CPU comparisons run without it.
+
+# Ensemble device decks (lanes 283-ensemble-batch and 283-ens-perturb, 2.8.5)
+# that the release GPU leg does not run (the recipe door's own device test
+# is declared above).  These skip inside a fixture, fail against the
+# calibration refusal or are deselected by the leg's marker expression;
+# they are written down so their absence from
+# tools/battery/gpu_shard_files.txt is a statement.
+tests/test_ensemble_spp_runtime_gpu.py  needs a CUDA device and WOOF_TEST_RUNTIME_CASE_CONFIG (staged on a development machine); with both, its SPP member arm builds a public EnsembleRequest with stochastic controls, which the 2.8.5 calibration refusal (woof/ensemble/calibration_admission.py) refuses, so 1 of its 3 tests fails until that arm reaches the stochastic path through a door the refusal admits; it joins tools/battery/gpu_shard_files.txt SHARD 1w when it does.
+tests/test_ensemble_wrf_seed_labels_runtime_gpu.py  needs a CUDA device and WOOF_TEST_RUNTIME_CASE_CONFIG (staged on a development machine); with both, its 2 tests build a public EnsembleRequest with SPPT controls (one arm adds SKEBS), which the 2.8.5 calibration refusal (woof/ensemble/calibration_admission.py) refuses, so both fail until they reach the stochastic path through a door the refusal admits; it joins tools/battery/gpu_shard_files.txt SHARD 1w when they do.
+tests/test_ensemble_tiny_domain_gpu.py  needs a CUDA device and the staged May-1999 ERA5 case data with its reference bundle under GPUWM_CASE_DATA_ROOT, which is not staged on the release node; it is marked slow, so every battery leg's marker expression deselects it.

@@ -3,12 +3,50 @@ Copyright 2026 Recast WOOF contributors
 
 WOOF derives from ArWen, Apache-2.0 code Copyright 2026 ArWen contributors.
 
+woof/ensemble/stochastic.py and
+woof/core/kernels/ensemble_stochastic.cu implement Philox4x32-10 using
+Random123's algorithm. Its BSD-3-Clause notice is reproduced in
+licenses/LICENSE-Random123.txt. The spectral stochastic equations in those
+files come from WRF v4.6.1 dyn_em/module_stoch.F, covered by the WRF notice
+below and licenses/LICENSE-WRF-public-domain.txt. GPU counter generation
+and cuFFT replace the compiler-dependent RNG and FFTPACK; the implementation
+does not claim bitwise identity with WRF.
+
+woof/core/spp_kernel_sources.py restores stochastic parameter consumers
+from WRF v4.6.1 module_cu_gf_deep.F, module_bl_mynn.F and module_sf_mynn.F.
+The WRF public-domain notice below and licenses/LICENSE-WRF-public-domain.txt
+apply to these expressions and the native captures in woof/data/spp/.
+
+woof/core/ruc_spp.py and woof/core/kernels/ruc_spp.cu restore the hydraulic
+conductivity perturbation operator from WRF V3.9.1 phys/module_sf_ruclsm.F.
+It runs inside the current RUC soil and snow-soil ports. WRF 4.6.1 and 4.7.1
+retain the parameter arguments but omit this historical operator. The WRF
+public-domain notice below and licenses/LICENSE-WRF-public-domain.txt apply.
+
+tools/grib1_bridge/src/aerosol_emission.rs and
+tests/oracles/aerosol_surface_mass.f90 transcribe the surface aerosol source
+in NOAA-EMC/HRRR WRFV3.9 dyn_em/module_initialize_real.F:4428-4430.
+The WRF public-domain notice is retained in
+licenses/LICENSE-WRF-public-domain.txt. The source's scalar field identities
+are also documented in the RAP native mapping provenance.
+The nearest-neighbor entry in tools/grib1_bridge/src/wps_masked.rs follows
+WPS v4.6.0 geogrid/src/interp_module.F:402-438 and falls through to the
+existing WPS four-point and average operators when its donor is missing.
+
 woof/core/kernels/portable_libm64.cuh transcribes Rust libm 0.2.16
 exp.rs, log.rs, log1p.rs, pow.rs and generic/scalbn.rs, and glibc 2.39
 s_log1pf.c through woof/core/noahmp_libm.py. The Rust crate's MIT grant
 and MIT OR Apache-2.0 contributor grant are preserved in
 licenses/LICENSE-rust-libm.txt. The Sun notices for the algorithms are
 preserved in the header and licenses/LICENSE-FDLIBM-SunPro.txt.
+
+The CPU preparation bridge's tools/grib1_bridge/src/glibc239_math.rs
+transcribes the pinned FP32 powf implementation and tables in
+woof/core/noahmp_libm.py. These are Arm optimized-routines under MIT,
+Copyright (c) 2017-2018, Arm Limited. The complete grant is reproduced
+beside the Rust code and in licenses/LICENSE-Arm-optimized-routines-MIT.txt.
+The binary-form bridge notice covers this compiled copy too. The separate
+host FP64 entries call the platform C library; they do not transcribe it.
 
 The native regular-grid Zarr reader's locked dependencies, including codec
 and TLS libraries, are inventoried with their licence texts in
@@ -57,6 +95,12 @@ See "Source Sans 3" below.
 
 WRF / NCAR / UCAR
 
+The MYNN mixing-length option 2 and post-PBL scalar diffusion in
+woof/core/mynn_pbl.py, mynn_scalar_mix.py and their CUDA companions
+transcribe WRF v4.6.1 phys/module_bl_mynn.F and phys/module_pbl_driver.F.
+Their Fortran oracle tools retain the same public-domain source notice.
+The full WRF notice below and licenses/LICENSE-WRF-public-domain.txt apply.
+
 WOOF is an independent implementation. It is not affiliated with or
 endorsed by the National Center for Atmospheric Research (NCAR) or the
 University Corporation for Atmospheric Research (UCAR). The Weather
@@ -103,6 +147,18 @@ clause, so they fall under the same declaration, and v4.7.1's LICENSE.txt
 is byte-identical to the text above (sha256
 b30611d35ad1922bc741e86d21e1a897234c1a9c9e2af28076e021f565dfbec6, the
 digest of licenses/LICENSE-WRF-public-domain.txt).
+
+The implicit vertical-advection kernels in woof/core/kernels/ieva.cu
+transcribe WRF v4.7.1 dyn_em/module_ieva_em.F at that same tag commit.
+Their wrf_legacy variant transcribes the earlier dyn_em/module_advect_em.F
+and WW_SPLIT in dyn_em/module_big_step_utilities_em.F distributed in
+NOAA-EMC/HRRR, sorc/hrrr_wrfarw.fd/WRFV3.9, at commit
+40ee6058c2fc6624cbfbbe8cf1c20c59e6a45827. The source hashes, extracted
+routine hashes, hybrid-coordinate macro expansion and the declared lower
+w-boundary correction are recorded by tools/ieva_wrf_oracle/legacy_build.py
+and the retained native Fortran fixture. These WRF-derived portions carry
+the same reproduced WRF notice above and in
+licenses/LICENSE-WRF-public-domain.txt.
 
 The renderer's WRF-file reader (tools/rustwx/crates/rw-wrfbatch) cites
 share/output_wrf.F, the WRF source that writes a history file's
@@ -274,6 +330,10 @@ once more, in Python, in woof/core/noahmp_libm.py. Sixteen files, and the
 count is machine-derived: those are exactly the files that reproduce Arm's
 coefficient tables.
 
+vert_interp.cu's wrf_vi_pressure_log uses the Arm logf tables from
+glibc_flt32.cuh and reproduces its range reduction and polynomial with
+fused binary64 operations.
+
 The sinf / cosf cores and their tables in
 woof/core/kernels/glibc_trig_flt32.cuh are also Arm's work. Their sources
 are math/sinf.c, math/cosf.c, math/sincosf.h and math/sincosf_data.c.
@@ -296,7 +356,7 @@ renamings, qualifiers, macro spellings and splitting polynomial helpers
 into sincosf_poly.h. Integration aliases and IFUNC wrappers are not copied.
 The MIT branch is elected for these parts too; the full Arm permission
 notice below and licenses/LICENSE-Arm-optimized-routines-MIT.txt apply.
-This adds one trig header to the fourteen log/exp/pow kernel files above;
+This adds one trig header to the fifteen log/exp/pow kernel files above;
 the Python log/exp/pow copy remains separate.
 
 The grant WOOF elects is Arm's MIT, and the sequence matters enough to
@@ -722,7 +782,7 @@ below; a renderer shipped without it would satisfy clause 2 nowhere.
 
 Compiled artifacts (release bridge bundles and platform wheels)
 
-Thirty-five Rust executables and libraries (woof.bridge_assets
+Forty-two Rust executables and libraries (woof.bridge_assets
 .BUNDLED_ARTIFACTS) are distributed in compiled form: as GitHub release
 bridge bundles, and staged into platform wheels at woof/libexec/bridges/.
 They are built from the three bridge dependency trees below, and from
@@ -937,6 +997,71 @@ cover carries terms of its own:
     Sci. Data 14, 3835). WOOF fetches the published GeoTIFF whole from
     Zenodo, unmodified, and maps its classes into WRF's MODIS categories
     at preparation time.
+
+
+--------------------------------------------------------------------------
+
+WOOF simulated radar
+
+The native simulated radar path uses BowEcho's simulation library and
+recast-radar-tools 0.1.3 volume writers. The source trees are retained at
+tools/rustwx/vendor/bowecho and tools/rustwx/vendor/recast-radar-tools.
+Their SOURCE.json records identify the exact source revisions and files.
+Both projects are licensed under MIT OR Apache-2.0. Their unmodified grants
+are reproduced at:
+
+  licenses/LICENSE-BowEcho-MIT.txt
+  licenses/LICENSE-BowEcho-Apache-2.0.txt
+  licenses/LICENSE-recast-radar-tools-MIT.txt
+  licenses/LICENSE-recast-radar-tools-Apache-2.0.txt
+
+BowEcho's PYART-LICENSE.txt is byte-identical to the grant already retained
+at licenses/LICENSE-PyART-Argonne-BSD-3-Clause.txt. The compiled radar
+bridge's notices accompany both bridge bundles and platform wheels in
+licenses/THIRD-PARTY-LICENSES-bridge-binaries.txt. No optional scattering
+lookup-table pack is included in these source trees or binary notices.
+
+The radar dependency extension adds 83 source packages, including build
+and platform-specific dependencies. Their inventory and grant hashes are
+recorded in tools/rustwx/crates/rw-simradar/data/dependency-licenses.json.
+The binary-form notice reproduces their 69 distinct grant and attribution
+texts, including nested native-library notices. The separate wrf-core
+revision 9874474d9566a7536a90f457a48be30caa5f973a retains its original
+metadata; that source's pyproject.toml declares MIT and the source has no
+standalone grant file, as with the wrf-core declaration described above.
+
+The scoped vendor notices are retained in the source trees and reproduced at:
+
+  licenses/NOTICE-BowEcho.txt
+  licenses/NOTICE-recast-radar-tools.txt
+
+The recast-radar-bzip2 randomisation table derives from libbzip2 1.0.8
+randtable.c. Its upstream grant is retained at:
+
+  licenses/LICENSE-recast-radar-tools-bzip2.txt
+
+Both binary-form notice copies reproduce these notices and the table grant.
+The upstream notice collections remain beside each SOURCE.json. Exact build
+resolution is documented in tools/rustwx/vendor/SIMULATED-RADAR.md.
+
+--------------------------------------------------------------------------
+
+RUC mosaic and CLM lake transcriptions
+
+woof/core/ruc_mosaic.py, the mosaic sections of woof/core/ruc.py,
+woof/core/kernels/ruc.cu and ruc_fused_driver.cuh, and the corresponding
+driver generator transcribe SOILVEGIN and LSMRUC from WRF v4.6.1
+phys/module_sf_ruclsm.F. The generated lake.cu and lake_wrf.cuh transcribe
+the complete WRF v4.6.1 phys/module_sf_lake.F. Reproducible source and
+oracle notices are retained under tools/ruc_mosaic_wrf461_oracle and
+tools/lake_wrf461_oracle. The WRF public-domain notice above and in
+licenses/LICENSE-WRF-public-domain.txt applies to these transcriptions.
+
+The lake-depth row in woof/static/lake.py and the bounded default-REAL
+search in tools/rustwx/crates/static-fields/src/interp.rs follow WPS
+v4.6.0 GEOGRID.TBL.ARW and geogrid/src/interp_module.F. WPS's source
+download page points to the WRF public-domain notice reproduced above:
+https://www2.mmm.ucar.edu/wrf/site/wps_source.html.
 
 
 ========================================================================

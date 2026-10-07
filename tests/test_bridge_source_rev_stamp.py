@@ -297,6 +297,8 @@ _STAMP_SOURCES = {
     "gpuwm_preprocess_cpu": "src/lib.rs",
     "rw_fetch": "crates/rw-fetch/src/main.rs",
     "rw_wrfbatch": "crates/rw-wrfbatch/src/main.rs",
+    "rw_compare": "crates/rw-wrfbatch/src/bin/compare.rs",
+    "rw_verify": "crates/rw-wrfbatch/src/bin/verify.rs",
     "rw_mpas_mesh": "crates/rw-mpas/src/bin/rw_mpas_mesh.rs",
     "rw_mpas_static": "crates/rw-mpas/src/bin/rw_mpas_static.rs",
     "rw_mpas_init": "crates/rw-mpas/src/bin/rw_mpas_init.rs",
@@ -311,6 +313,11 @@ _STAMP_SOURCES = {
     "rw_mpas_lbc": "crates/rw-mpas/src/bin/rw_mpas_lbc.rs",
     # The ML dataset exporter: its own crate, its own build.rs.
     "rw_mlexport": "crates/rw-mlexport/src/bin/rw_mlexport.rs",
+    # The simulated radar: its own crate, whose build.rs injects the
+    # revision beside the implementation hash it already emitted.  It
+    # joined BUNDLED_ARTIFACTS without a stamp, so the cut would have
+    # refused the bundle that carried it.
+    "rw_simradar": "crates/rw-simradar/src/main.rs",
     # The GDT-101 remapper, added to BUNDLED_ARTIFACTS by the icon-global
     # lane.  It lives in the bridge crate, so `tools/grib1_bridge/build.rs`
     # stamps it with its five siblings, and its `main` black_boxes the
@@ -337,6 +344,10 @@ _STAMP_SOURCES = {
     "static_fields": "crates/static-fields/src/capi/mod.rs",
     "gpuwm_mapped_engine": "crates/mapped-engine/src/main.rs",
     "obs_regrid": "crates/obs-regrid/src/capi.rs",
+    "obs_score": "crates/obs-score/src/lib.rs",
+    "rw_mpas_geometry": "crates/rw-mpas/src/bin/rw_mpas_geometry.rs",
+    "rw_mpas_hostprep": "crates/rw-mpas/src/bin/rw_mpas_hostprep.rs",
+    "rw_isobaric": "crates/rw-isobaric/src/capi.rs",
 }
 
 #: The build script that injects the revision for each artifact.
@@ -348,6 +359,7 @@ _STAMP_BUILDS = {
                                     "crates/rw-wrfbatch/build.rs",
                                     "crates/rw-mpas/build.rs",
                                     "crates/rw-mlexport/build.rs",
+                                    "crates/rw-simradar/build.rs",
                                     "crates/rw-nexrad/build.rs",
                                     "crates/rw-odim/build.rs",
                                     # rw-obs builds four bins from one
@@ -359,7 +371,9 @@ _STAMP_BUILDS = {
                                     "crates/rw-netcdf/build.rs",
                                     "crates/netcdf-writer/build.rs",
                                     "crates/static-fields/build.rs",
-                                    "crates/obs-regrid/build.rs"),
+                                    "crates/obs-regrid/build.rs",
+                                    "crates/obs-score/build.rs",
+                                    "crates/rw-isobaric/build.rs"),
     # The engine workspace carries one gpuwm-authored crate beside the
     # donor snapshot (tools/rw_wps/VENDOR.md); the snapshot's own crate
     # ships nothing, so it is stamped by nothing.

@@ -221,7 +221,8 @@ SHAPEFILE_READER = Requirement(
 #: which were the extras that carried scipy; the packaging lane moved
 #: scipy into the runtime dependencies and left both extras declared and
 #: EMPTY, so that they keep resolving for every install line already
-#: written down.  Offering an empty extra is the failure mode this whole
+#: written down.  (``[obs]`` has since gained pyarrow, for the
+#: Dynamical.org ASOS reader, and still carries no scipy.)  Offering an empty extra is the failure mode this whole
 #: registry exists to prevent: `pip install 'recast-woof[dealias]'` would
 #: report success, install nothing, and the next attempt would fail
 #: identically.  Reaching this message now means a declared dependency
@@ -599,6 +600,11 @@ def require(door: str, *requirements: Requirement,
 #: a traceback, pointed the other way.
 COMMAND_REQUIREMENTS: dict[str, tuple[Requirement, ...]] = {
     "go": (GPU_RUNTIME,),
+    # `woof ensemble` is `go` by another name, and argparse stores the
+    # name the reader typed, so a table keyed on "go" alone misses it.
+    # Without the row an install with no CuPy fetched and prepared every
+    # member of a recipe ensemble before the forecast stage refused.
+    "ensemble": (GPU_RUNTIME,),
     "run": (GPU_RUNTIME,),
     "resume": (GPU_RUNTIME,),
     # The unbundled forecast stage integrates the same model `go`'s
@@ -616,6 +622,9 @@ _BEFORE = {
     "go": ("Refusing here, before the fetch stage downloads the forcing "
            "data and the prepare stage writes the static fields, rather "
            "than at the forecast stage after both."),
+    "ensemble": ("Refusing here, before any member's forcing data is "
+                 "downloaded or prepared, rather than at the forecast "
+                 "stage after every member's fetch and preparation."),
     "run": ("Refusing here, before a GPU is selected, a worker spawned "
             "and the case prepared."),
     "resume": ("Refusing here, before a GPU is selected and a worker "

@@ -11,6 +11,25 @@ from woof.core.kernels import get_kernel, get_kernel_int_defines
 _THREADS = 256
 _WRF_THREADS = 192
 
+# 2^-16, shared with the Rust/CUDA operators (TOP_COLOCATION_RTOL in
+# tools/grib1_bridge/src/lib.rs, which carries the derivation).  A native
+# top mass level is a FULL pressure holding its top half-layer's vapour
+# weight, ~ (p_level - p_lid) * qv; integ_moist leaves that level undried
+# while the target is the same eta level as a DRY pressure.  HRRR at a
+# 1500 Pa lid measures 4.9e-7 relative on 2025-03-14 06Z, past the old
+# four-epsilon (2^-21) rounding-only bound.  2^-16 covers qv_top up to
+# 1e-5 kg/kg plus FP32 and GRIB rounding, about 0.1 m in height.
+WRF_TOP_ENDPOINT_RTOL = 2.0 ** -16
+
+#: Refusal text for a target meaningfully above the source top.  It names
+#: the breakage: the target's values would have to be invented above the
+#: analysis.  "target pressure lies above source top" stays its prefix.
+WRF_TARGET_ABOVE_TOP_MESSAGE = (
+    "target pressure lies above source top by more than the 2^-16 "
+    "co-location tolerance: its values would have to be extrapolated past "
+    "the top of the source analysis, where there is no data.  Raise p_top "
+    "or supply a source that reaches higher")
+
 #: Column capacities ``wrf_real_vertical_interpolate`` is compiled at.  A
 #: column is the source levels plus the surface pseudo-level, and each tier
 #: is the ``WRF_VI_MAX_LEVELS`` size of the kernel's three per-thread column
@@ -186,8 +205,9 @@ def _prepare_wrf_vert_interp_geometry(source_pressure, surface_pressure,
         source = source[::-1]
     if not bool(((source < sfc_pressure[None]).any(axis=0)).all()):
         raise ValueError("every column needs a source level above the surface")
-    if bool((target < source[-1][None, :, :]).any()):
-        raise ValueError("target pressure lies above source top")
+    if bool(((source[-1][None, :, :] - target)
+             > WRF_TOP_ENDPOINT_RTOL * source[-1][None, :, :]).any()):
+        raise ValueError(WRF_TARGET_ABOVE_TOP_MESSAGE)
     return _WrfVertGeometryPlan(
         source=cp.ascontiguousarray(source),
         surface_pressure=cp.ascontiguousarray(sfc_pressure),
@@ -335,7 +355,11 @@ def wrf_vert_interp_gpu(field, surface_value, source_pressure,
     ``interp_in_logp=False`` is WRF's forced ``interp_type=1`` for the
     full-pressure field; ``extrap='temperature'`` selects the
     ``t_extrap_type=2`` CRC below-ground branch.  A target above the source
-    top is WRF-fatal and rejected here before launch.  The kernel runs at
+    top by more than :data:`WRF_TOP_ENDPOINT_RTOL` (2^-16 relative) is
+    rejected before launch, as WRF real refuses it.  A target within that
+    bound, the dry pressure of a native top mass level whose source value
+    is a full (moist) pressure, is co-located with the source endpoint,
+    with no value extrapolation.  The kernel runs at
     the smallest :data:`WRF_VERT_INTERP_LEVEL_TIERS` tier holding the
     column; a column deeper than the top tier runs on the CPU bridge and
     comes back on the device all the same.
@@ -382,8 +406,9 @@ def wrf_vert_interp_gpu(field, surface_value, source_pressure,
         source = source[::-1]
     if not bool(((source < sfc_pressure[None]).any(axis=0)).all()):
         raise ValueError("every column needs a source level above the surface")
-    if bool((target < source[-1][None, :, :]).any()):
-        raise ValueError("target pressure lies above source top")
+    if bool(((source[-1][None, :, :] - target)
+             > WRF_TOP_ENDPOINT_RTOL * source[-1][None, :, :]).any()):
+        raise ValueError(WRF_TARGET_ABOVE_TOP_MESSAGE)
     values = cp.ascontiguousarray(values)
     source = cp.ascontiguousarray(source)
     sfc_value = cp.ascontiguousarray(sfc_value)

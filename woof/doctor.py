@@ -656,6 +656,37 @@ def _overlapping_cupy_check(wheels: list[tuple[str, int | None]]) -> Check:
         severity=SEVERITY_BROKEN)
 
 
+def _host_threads_check() -> Check:
+    """Whether ``[devices]`` slab threads can run at once on this interpreter.
+
+    THE BREAKAGE THIS NAMES: every slab of a multi-card forecast steps from
+    its own Python thread, and on a GIL build those threads take turns on
+    one interpreter lock -- measured on a two-socket 4-card box, radiation
+    steps of 13-25 s under the lock against 5-8 s on a free-threaded
+    interpreter, and four cards slower than two.  Never blocking: one-card
+    forecasts do not care, and a GIL build still runs every forecast.
+    """
+    from woof.free_threading import free_threaded_build
+
+    name = "multi-card host threads"
+    version = ".".join(str(v) for v in sys.version_info[:3])
+    if free_threaded_build():
+        return Check(name, "verified",
+                     f"free-threaded Python {version}: [devices] slab threads "
+                     "run at once (PYTHON_GIL=0 is kept for command lines)",
+                     brief="free-threaded")
+    return Check(
+        name, "info",
+        f"Python {version} has the interpreter lock: the slab threads of a "
+        "multi-card [devices] forecast take turns on it, so extra cards add "
+        "little; one-card forecasts are unaffected",
+        "# for multi-card forecasts, reinstall under a free-threaded Python 3.14\n"
+        "export WOOF_PYTHON=python3.14t\n"
+        "bash install.sh",
+        action="reinstall under python3.14t for multi-card forecasts",
+        brief="GIL build: multi-card slabs take turns", blocking=False)
+
+
 def _cupy_check() -> Check:
     wheels = _installed_cupy_wheels()
     if len(wheels) > 1:
@@ -1490,6 +1521,7 @@ _IMPORT_NAME = {
     "netcdf4": "netCDF4",
     "matplotlib": "matplotlib",
     "jsonschema": "jsonschema",
+    "threadpoolctl": "threadpoolctl",
     "pytest": "pytest",
     "pytest-xdist": "xdist",
     "psutil": "psutil",
@@ -1756,11 +1788,13 @@ _EXTRA_FACTS: dict[str, _ExtraFacts] = {
                     "from this extra",
         blocking=True, severity=SEVERITY_UNREACHABLE),
     "obs": _ExtraFacts(
-        doors=("python -m tools.obs_battery_score",
-               "python -m tools.obs_precampaign_controls",
-               "python -m tools.obs_battery_registration"),
-        still_works="every forecast and preprocessing route; only scoring "
-                    "a run against observations needs it",
+        doors=("station scoring from the Dynamical.org ASOS Parquet "
+               "archive (woof.obs.dynamical_asos, pyarrow)",
+               "python -m tools.freeze_dynamical_asos_stations"),
+        still_works="every forecast and preprocessing route, and scoring "
+                    "against the IEM ASOS front door, MRMS and the obs "
+                    "battery (python -m tools.obs_battery_score); only the "
+                    "Dynamical.org station archive needs it",
         blocking=False, severity=SEVERITY_DEGRADED),
     # NOT the default engine.  region-global became the shipped
     # --dealias-engine on 2026-08-12 and is the Rust library this report
@@ -2641,6 +2675,7 @@ _CHECKED_ARTIFACTS = {
     "gpuwm_preprocess_cpu": "the `cpu preprocess library` line",
     "rw_fetch": "the `fetch backbone` line",
     "rw_wrfbatch": "the `renderer` line",
+    "rw_simradar": "the `simulated radar` line",
     "rw_mpas_mesh": "the `mesh generator` line",
     "rw_mpas_static": "the `mesh static builder` line",
     "rw_nexrad": "the `radar front door` line",
@@ -2666,11 +2701,17 @@ _CHECKED_ARTIFACTS = {
     "gpuwm_mapped_engine": "the `mapped decode engine` line",
     "static_fields": "the `static builder` line",
     "obs_regrid": "the `observation remap` line",
+    "obs_score": "the `observation scoring` line",
+    "rw_isobaric": "the `isobaric height reader` line",
     "rw_mpas_mesh": "the `MPAS binary` lines",
     "rw_mpas_init": "the `MPAS binary` lines",
+    "rw_mpas_geometry": "the `MPAS binary` lines",
+    "rw_mpas_hostprep": "the `MPAS binary` lines",
     "rw_mpas_convert": "the `MPAS binary` lines",
     "rw_mpas_lbc": "the `MPAS binary` lines",
     "rw_mlexport": "the `ML dataset exporter` line",
+    "rw_verify": "the `observation verification engine` line",
+    "rw_compare": "the `comparison engine` line",
 }
 
 
@@ -2842,7 +2883,8 @@ def _staged_estate_check() -> Check:
             _STAGED_ESTATE_NAME, "info",
             f"not compared -- {reason}, so there is nothing to check the "
             "staged artifacts against.  A released wheel carries pins and "
-            "this line compares every artifact's bytes against them",
+            "this line compares every artifact's bytes against them.  "
+            + bridges.staging_location_note(),
             brief="no pins to compare against", group=_GROUP_BRIDGES,
             blocking=False)
 
@@ -2882,9 +2924,12 @@ def _staged_estate_check() -> Check:
             absent.append(pin.filename)
         elif bridge_assets.matches_pin(resolved, pin):
             current.append(pin.filename)
-        elif _under(resolved, staged_dir):
+        elif (_under(resolved, staged_dir)
+              or _under(resolved, bridges.legacy_bridge_dir())):
+            where = ("" if _under(resolved, staged_dir)
+                     else f" at {resolved}, left in place")
             stale.append(f"{pin.filename} ({resolved.stat().st_size:,} B, "
-                         f"pinned {pin.bytes:,} B)")
+                         f"pinned {pin.bytes:,} B{where})")
         else:
             foreign.append(f"{pin.filename} at {resolved}")
 
@@ -2910,7 +2955,8 @@ def _staged_estate_check() -> Check:
             "so the renderer draws plots without coastlines or borders")
 
     census = (f"{len(current)} of {len(bundle.binaries)} artifact(s) match "
-              f"the bytes {pins.release} published")
+              f"the bytes {pins.release} published; "
+              + bridges.staging_location_note())
     if stale:
         return Check(
             _STAGED_ESTATE_NAME, "missing",
@@ -3210,6 +3256,8 @@ _MPAS_DOORS = {
     "rw_mpas_mesh": "woof mesh (MPAS mesh generation)",
     "rw_mpas_static": "woof mesh (the matching MPAS static)",
     "rw_mpas_init": "MPAS initial conditions from a grid and a static file",
+    "rw_mpas_geometry": "MPAS reconstruction geometry",
+    "rw_mpas_hostprep": "MPAS forecast host preparation",
     "rw_mpas_convert": "MPAS history onto the renderer's tape",
     "rw_mpas_lbc": "MPAS lateral boundaries for a limited-area mesh",
 }
@@ -3369,6 +3417,145 @@ def _ml_export_check() -> Check:
             blocking=False, severity=SEVERITY_BROKEN)
     return Check(label, "verified", f"{found} -- {evidence}",
                  group=_GROUP_ENGINES)
+
+
+def _rustwx_door_check(*, label: str, env_var: str, find, remedy: str,
+                       doors: tuple[tuple[str, object], ...],
+                       missing_severity: str = SEVERITY_UNREACHABLE) -> Check:
+    """One ``tools/rustwx`` executable behind its doors.
+
+    ``find`` is the resolver the doors call and each entry of ``doors``
+    is ``(door, probe)`` with the probe THAT door refuses by, imported
+    from the door's own module and never restated here.  Breakage this
+    prevents: the first version of these lines judged every binary by the
+    static :data:`woof.bridges.BRIDGE_ABI_MARKERS` byte search while
+    ``woof render --compare`` judged ``rw_compare`` by its ``--abi``
+    line, so a build carrying the reference-input literal and an older
+    ``--abi`` line was reported verified here and refused at the door.
+    Verified means every door would accept the build; otherwise the line
+    names each door that would refuse it and that door's own evidence.
+    Non-blocking: each closes only its own doors.
+    """
+
+    build = _build_action(bridges.RUSTWX_CRATE_RELATIVE)
+    every_door = " and ".join(door for door, _ in doors)
+    try:
+        found = find()
+    except (FileNotFoundError, RuntimeError) as error:
+        return Check(
+            label, "missing", f"{error} -- {every_door} cannot run",
+            f"# {env_var} names a missing executable: point it at a real "
+            "build, or unset it --\n" + remedy,
+            action=f"unset {env_var}, or point it at a build",
+            brief=f"{env_var} names a missing file",
+            group=_GROUP_ENGINES, blocking=False,
+            severity=missing_severity)
+    if found is None:
+        return Check(
+            label, "missing",
+            f"not built and not staged -- {every_door} cannot run",
+            remedy, action=build, brief="not staged; its doors cannot run",
+            group=_GROUP_ENGINES, blocking=False, severity=missing_severity)
+    accepted: list[str] = []
+    refused: list[str] = []
+    for door, probe in doors:
+        ok, evidence = probe(found)
+        (accepted if ok else refused).append(f"{door}: {evidence}")
+    if refused:
+        return Check(
+            label, "missing",
+            f"{found} -- STALE for {len(refused)} of {len(doors)} door(s); "
+            + "; ".join(f"{line} (refused)" for line in refused)
+            + "".join(f"; {line}" for line in accepted),
+            "# this one is STALE, so re-point does not help; rebuild it:\n"
+            + remedy,
+            action=build, brief="stale build; rebuild it",
+            group=_GROUP_ENGINES, blocking=False, severity=SEVERITY_BROKEN)
+    return Check(label, "verified", f"{found} -- " + "; ".join(accepted),
+                 group=_GROUP_ENGINES)
+
+
+def _verification_engine_check() -> Check:
+    """``rw_verify``, the native observation verification engine.
+
+    Degraded rather than unreachable when absent: a completed run still
+    finishes, but the observation verification it draws at finish by
+    default (``WOOF_VERIFY_VISUALS``) and ``woof verify-visuals`` have
+    nothing to score with.  Judged by
+    :func:`woof.rustwx.probe_verification_binary`, the probe
+    :func:`woof.rustwx.verification_binary` refuses by.
+    """
+
+    from woof import rustwx
+
+    filename = bridges.executable_name("rw_verify")
+    return _rustwx_door_check(
+        label="observation verification engine (rw_verify)",
+        env_var=rustwx.VERIFICATION_ENV,
+        find=rustwx.find_verification_binary,
+        remedy=bridges.artifact_remedy(
+            env_var=rustwx.VERIFICATION_ENV, filename=filename,
+            subject="the observation verification engine",
+            crate_relative=bridges.RUSTWX_CRATE_RELATIVE,
+            one_liner=bridges.rustwx_build_hint(), artifact="rw_verify"),
+        doors=((("woof verify-visuals and the observation verification a "
+                 "completed run draws"), rustwx.probe_verification_binary),),
+        missing_severity=SEVERITY_DEGRADED)
+
+
+def _comparison_engine_check() -> Check:
+    """``rw_compare``, the reference-model comparison engine.
+
+    Two doors, two contracts: ``woof render --compare`` refuses by
+    :func:`woof.rustwx_lanes.probe_compare_bin` (the ``--abi`` line) and
+    the reference panels beside a run's observation verification refuse
+    by :func:`woof.rustwx_lanes.probe_compare_reference_bin` (the
+    reference-input receipt).  The two landed on parallel branches, so a
+    build can pass either alone, and this line runs both.
+    """
+
+    from woof import rustwx_lanes
+
+    return _rustwx_door_check(
+        label=f"comparison engine ({rustwx_lanes.COMPARE_NAME})",
+        env_var=rustwx_lanes.COMPARE_ENV,
+        find=rustwx_lanes.find_compare_bin,
+        remedy=rustwx_lanes.compare_remedy(),
+        doors=(("woof render --compare", rustwx_lanes.probe_compare_bin),
+               ("the reference verification panels",
+                rustwx_lanes.probe_compare_reference_bin)))
+
+
+def _simulated_radar_check() -> Check:
+    """Check the optional native radar capability without touching a GPU.
+
+    Every gap carries its next command, as the sibling bridge checks do:
+    the one-line doctor layer otherwise showed a radar gap that led nowhere.
+    """
+    from woof.rustwx import SIMULATED_RADAR_ENV, simulated_radar_binary
+    label = "simulated radar (rw_simradar)"
+    remedy = bridges.artifact_remedy(
+        env_var=SIMULATED_RADAR_ENV, filename=bridges.executable_name("rw_simradar"),
+        subject="the simulated radar engine", crate_relative=bridges.RUSTWX_CRATE_RELATIVE,
+        one_liner=bridges.rustwx_build_hint(), artifact="rw_simradar")
+    build = _build_action(bridges.RUSTWX_CRATE_RELATIVE)
+    try:
+        found = simulated_radar_binary()
+    except (FileNotFoundError, RuntimeError) as error:
+        return Check(label, "missing", str(error), remedy,
+                     action=f"unset {SIMULATED_RADAR_ENV}, or point it at a build",
+                     brief=f"{SIMULATED_RADAR_ENV} names a missing file",
+                     group=_GROUP_ENGINES, blocking=False, severity=SEVERITY_UNREACHABLE)
+    if found is None:
+        return Check(label, "missing", "not staged; simulated radar cannot run", remedy,
+                     action=build, brief="not staged; simulated radar cannot run",
+                     group=_GROUP_ENGINES, blocking=False, severity=SEVERITY_UNREACHABLE)
+    ok, evidence = bridges.bridge_abi_matches("rw_simradar", found)
+    return Check(label, "verified" if ok else "missing", f"{found}: {evidence}",
+                 None if ok else remedy, action=None if ok else build,
+                 brief=None if ok else "stale build; rebuild it",
+                 group=_GROUP_ENGINES, blocking=False,
+                 severity=None if ok else SEVERITY_BROKEN)
 
 
 def _nexrad_front_door_check() -> Check:
@@ -3814,6 +4001,100 @@ def _obs_regrid_check() -> Check:
             group=_GROUP_ENGINES)
     return Check(name, "verified",
                  f"{path} -- ABI {regrid_bridge.OBSREGRID_ABI}",
+                 brief="staged", group=_GROUP_ENGINES)
+
+
+def _noah_init_check() -> Check:
+    """A native host preparation must be able to partition frozen soil water."""
+    from woof import noah_init_bridge
+
+    reason = noah_init_bridge.unavailable_reason()
+    if reason is not None:
+        return Check(
+            "Noah soil initialization", "missing", reason,
+            bridges.install_aware_build_hint(bridges.CARGO_BUILD_HINT),
+            action=_build_action(), brief="frozen soil cannot be prepared",
+            group=_GROUP_ENGINES)
+    return Check("Noah soil initialization", "verified",
+                 "native float64 frozen-soil solve is available",
+                 brief="staged", group=_GROUP_ENGINES)
+
+
+def _obs_score_check() -> Check:
+    """The numerical scoring library required by observation verification."""
+    name = "observation scoring"
+    try:
+        from woof import obs_score_bridge as score_bridge
+    except ImportError as error:
+        return Check(name, "missing", f"scoring seam is not importable: {error}",
+                     "pip install --force-reinstall woof", brief="seam missing",
+                     group=_GROUP_ENGINES)
+    remedy = bridges.artifact_remedy(
+        env_var=score_bridge.OBSSCORE_BRIDGE_ENV,
+        filename=score_bridge.library_names()[0],
+        subject="the observation scoring engine",
+        crate_relative=bridges.RUSTWX_CRATE_RELATIVE)
+    try:
+        path = score_bridge.resolve_obsscore_bridge()
+    except FileNotFoundError as error:
+        return Check(name, "missing", str(error), remedy,
+                     action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+                     brief="scores cannot be computed", group=_GROUP_ENGINES)
+    reason = score_bridge.unavailable_reason()
+    if reason is not None:
+        return Check(name, "missing", f"{path}: {reason}", remedy,
+                     action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+                     brief="scores cannot be computed", group=_GROUP_ENGINES)
+    return Check(name, "verified", f"{path}: ABI {score_bridge.OBSSCORE_ABI}",
+                 brief="staged", group=_GROUP_ENGINES)
+
+
+def _isobaric_reader_check() -> Check:
+    """The isobaric-height reader the Python height consumers call.
+
+    ``missing``, because there is no Python implementation behind it: the
+    vortex tracker on a host state, the GNSS-RO refractivity operator, the
+    verification maps and the flagship products refuse their isobaric
+    heights by name without it (a layer-mean height at the mass-level
+    pressure, the only other reading, is 4 to 6 m high at 500 hPa).
+    """
+
+    name = "isobaric height reader (rw-isobaric)"
+    degrades = ("the vortex tracker on a host state, the GNSS-RO operator, "
+                "the verification maps and the flagship products refuse "
+                "their isobaric heights")
+    try:
+        from woof import isobaric_bridge
+    except ImportError as error:                 # pragma: no cover - partial
+        return Check(name, "missing",
+                     f"woof.isobaric_bridge is not importable ({error}) "
+                     f"-- {degrades}",
+                     "# reinstall so the reader seam imports:\n"
+                     "  pip install --force-reinstall woof",
+                     brief="isobaric_bridge not importable",
+                     group=_GROUP_ENGINES)
+    remedy = bridges.artifact_remedy(
+        env_var=isobaric_bridge.ISOBARIC_BRIDGE_ENV,
+        filename=isobaric_bridge.library_names()[0],
+        subject="the isobaric height reader",
+        crate_relative=bridges.RUSTWX_CRATE_RELATIVE)
+    try:
+        path = isobaric_bridge.resolve_isobaric_bridge()
+    except FileNotFoundError as error:
+        return Check(
+            name, "missing", f"{error} -- {degrades}", remedy,
+            action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+            brief="not staged; isobaric height reads refuse",
+            group=_GROUP_ENGINES)
+    reason = isobaric_bridge.unavailable_reason()
+    if reason is not None:
+        return Check(
+            name, "missing", f"{path} -- {reason} -- {degrades}", remedy,
+            action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+            brief="not loadable; isobaric height reads refuse",
+            group=_GROUP_ENGINES)
+    return Check(name, "verified",
+                 f"{path} -- ABI {isobaric_bridge.ISOBARIC_ABI}",
                  brief="staged", group=_GROUP_ENGINES)
 
 
@@ -5718,6 +5999,7 @@ def _collect_checks(sources: tuple[str, ...] | None = None,
             "  # here depends on how this Python was installed",
             action="install Python 3.11 or newer",
             brief=f"{version} is below the 3.11 floor"))
+    checks.append(_host_threads_check())
     checks.append(_cupy_check())
     # Between the wheel and the solver, because that is the order the
     # three fail in: a wheel that will not load, then a wheel that
@@ -5751,11 +6033,17 @@ def _collect_checks(sources: tuple[str, ...] | None = None,
     # The five MPAS binaries no bundle carried and no check reported.
     checks.extend(_mpas_bridge_checks())
     checks.append(_ml_export_check())
+    checks.append(_verification_engine_check())
+    checks.append(_comparison_engine_check())
+    checks.append(_simulated_radar_check())
     checks.append(_netcdf_decoder_check())
     checks.append(_mapped_engine_check())
     checks.append(_ncwrite_check())
     checks.append(_static_builder_check())
     checks.append(_obs_regrid_check())
+    checks.append(_obs_score_check())
+    checks.append(_noah_init_check())
+    checks.append(_isobaric_reader_check())
     checks.append(_region_dealias_check())
     checks.extend(_bridge_checks())
     # ABOUT the report, not about an artifact: does every artifact the

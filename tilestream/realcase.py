@@ -498,7 +498,10 @@ def prepare_low_water(config_path: str, *, verbose=print):
 
     from woof.case_data import load_experiment_case
     from woof.core.diagnostics import update_diagnostics
-    from woof.core.landuse import initialize_landuse, reconciled_soil_category
+    from woof.core.landuse import (initialize_landuse,
+                                    reconciled_soil_category,
+                                    ruc_fractional_seaice,
+                                    usemonalb_landuse_inputs)
     from woof.core.noah import noah_initial_snow_albedo
     from woof.core.physics import initialize_physics
     from woof.ingest.horiz import interpolate_era5_to_lambert
@@ -526,6 +529,8 @@ def prepare_low_water(config_path: str, *, verbose=print):
     cfg = dc.run
     grid = experiment_grid(exp, data)
     geog_selection = GeogSelection.from_case_data(data, domain_id=dc.grid_id)
+    from woof.static.lake import with_lake_statics
+    geog_selection = with_lake_statics(geog_selection, cfg)
     catalog = build_input_catalog(data)
     snapshots = forcing_snapshots(data, catalog)
     times = forcing_schedule(exp, data, snapshots)
@@ -615,8 +620,11 @@ def prepare_low_water(config_path: str, *, verbose=print):
         source_snapshot=snapshots[start_time], target_lat=lat,
         target_lon=lon, route=WATER_ROUTE_LOW_WATER,
         workers=host_step_workers(backend))
+    from woof.core.landuse import (
+        ruc_fractional_seaice as _ruc_fractional_seaice)
     soil = preprocess_land_surface_soil(
         soil_fields, sf_surface_physics=int(cfg.sf_surface_physics),
+        fractional_seaice=_ruc_fractional_seaice(cfg),
         soil_type=reconciled_soil_type,
         deep_soil_temperature=static["TMN"],
         landmask=static["LANDMASK"], terrain=None, source_orography=None,
@@ -629,7 +637,8 @@ def prepare_low_water(config_path: str, *, verbose=print):
             snapshots[start_time], (lat, lon), data),
         route=WATER_ROUTE_LOW_WATER)
     vegfra = 100.0 * monthly_interp_to_date(static["GREENFRAC"], start_time)
-    lai = monthly_interp_to_date(static["LAI12M"], start_time)
+    from woof.core.landuse import surface_leaf_area
+    lai = surface_leaf_area(cfg, static["LAI12M"], start_time)
     update_diagnostics(state, cfg.hypsometric_opt)
     radiation = None
     if radiation_scheme_ids(cfg) == (4, 4):
@@ -645,7 +654,13 @@ def prepare_low_water(config_path: str, *, verbose=print):
         iswater=int(landuse_attrs["ISWATER"]),
         islake=int(landuse_attrs["ISLAKE"]),
         isice=int(landuse_attrs["ISICE"]),
-        soil_temperature=soil.soil_temperature)
+        soil_temperature=soil.soil_temperature,
+        # As woof/runtime.py: the sea-ice branch and usemonalb's monthly
+        # ALBBCK follow the configuration; off, the call is unchanged.
+        fractional_seaice=ruc_fractional_seaice(cfg),
+        **usemonalb_landuse_inputs(cfg, static, start_time))
+    from woof.ingest.ruc_mosaic import ruc_mosaic_physics_inputs
+    from woof.ingest.lake_physics import lake_physics_inputs
     driver = initialize_physics(
         state, cfg, landuse=landuse, tsk=soil.tsk,
         soil_temperature=soil.soil_temperature,
@@ -656,10 +671,14 @@ def prepare_low_water(config_path: str, *, verbose=print):
         xice=soil.xice, snow=soil.snow_water, snow_depth=soil.snow_depth,
         sst=soil_fields.get("SST", soil.tsk),
         radiation=radiation, radiation_start_time=start_time,
-        radiation_latitude=lat, radiation_longitude=lon)
+        radiation_latitude=lat, radiation_longitude=lon,
+        **ruc_mosaic_physics_inputs(
+            cfg, static, landuse_attrs=landuse_attrs, xice=soil.xice,
+            fractional_seaice=ruc_fractional_seaice(cfg)),
+        **lake_physics_inputs(cfg, static))
+    from woof.core.landuse import surface_snow_albedo
     driver.fields["snoalb"][...] = cp.asarray(
-        noah_initial_snow_albedo(static["SNOALB"], static["LU_INDEX"],
-                                 driver.noah_params, rdmaxalb=cfg.rdmaxalb),
+        surface_snow_albedo(cfg, static, driver.noah_params),
         dtype=cp.float32)
     driver.fields["lai"][...] = cp.asarray(lai, dtype=cp.float32)
     driver.fields["shdmin"][...] = cp.asarray(
@@ -858,7 +877,10 @@ def prepare_slabbed(config_path: str, *, rows_per_slab: int = 64,
 
     from woof.case_data import load_experiment_case
     from woof.core.diagnostics import update_diagnostics
-    from woof.core.landuse import initialize_landuse, reconciled_soil_category
+    from woof.core.landuse import (initialize_landuse,
+                                    reconciled_soil_category,
+                                    ruc_fractional_seaice,
+                                    usemonalb_landuse_inputs)
     from woof.core.noah import noah_initial_snow_albedo
     from woof.core.physics import initialize_physics
     from woof.ingest.horiz import interpolate_era5_to_lambert
@@ -889,6 +911,8 @@ def prepare_slabbed(config_path: str, *, rows_per_slab: int = 64,
     cfg = dc.run
     grid = experiment_grid(exp, data)
     geog_selection = GeogSelection.from_case_data(data, domain_id=dc.grid_id)
+    from woof.static.lake import with_lake_statics
+    geog_selection = with_lake_statics(geog_selection, cfg)
     catalog = build_input_catalog(data)
     snapshots = forcing_snapshots(data, catalog)
     times = forcing_schedule(exp, data, snapshots)
@@ -1007,8 +1031,11 @@ def prepare_slabbed(config_path: str, *, rows_per_slab: int = 64,
         source_snapshot=snapshots[start_time], target_lat=lat,
         target_lon=lon, route=WATER_ROUTE_SLABBED,
         workers=host_step_workers(backend))
+    from woof.core.landuse import (
+        ruc_fractional_seaice as _ruc_fractional_seaice)
     soil = preprocess_land_surface_soil(
         soil_fields, sf_surface_physics=int(cfg.sf_surface_physics),
+        fractional_seaice=_ruc_fractional_seaice(cfg),
         soil_type=reconciled_soil_type,
         deep_soil_temperature=static["TMN"],
         landmask=static["LANDMASK"], terrain=None, source_orography=None,
@@ -1021,7 +1048,8 @@ def prepare_slabbed(config_path: str, *, rows_per_slab: int = 64,
             snapshots[start_time], (lat, lon), data),
         route=WATER_ROUTE_SLABBED)
     vegfra = 100.0 * monthly_interp_to_date(static["GREENFRAC"], start_time)
-    lai = monthly_interp_to_date(static["LAI12M"], start_time)
+    from woof.core.landuse import surface_leaf_area
+    lai = surface_leaf_area(cfg, static["LAI12M"], start_time)
     update_diagnostics(state, cfg.hypsometric_opt)
     radiation = None
     if radiation_scheme_ids(cfg) == (4, 4):
@@ -1037,7 +1065,13 @@ def prepare_slabbed(config_path: str, *, rows_per_slab: int = 64,
         iswater=int(landuse_attrs["ISWATER"]),
         islake=int(landuse_attrs["ISLAKE"]),
         isice=int(landuse_attrs["ISICE"]),
-        soil_temperature=soil.soil_temperature)
+        soil_temperature=soil.soil_temperature,
+        # As woof/runtime.py: the sea-ice branch and usemonalb's monthly
+        # ALBBCK follow the configuration; off, the call is unchanged.
+        fractional_seaice=ruc_fractional_seaice(cfg),
+        **usemonalb_landuse_inputs(cfg, static, start_time))
+    from woof.ingest.ruc_mosaic import ruc_mosaic_physics_inputs
+    from woof.ingest.lake_physics import lake_physics_inputs
     driver = initialize_physics(
         state, cfg, landuse=landuse, tsk=soil.tsk,
         soil_temperature=soil.soil_temperature,
@@ -1048,10 +1082,14 @@ def prepare_slabbed(config_path: str, *, rows_per_slab: int = 64,
         xice=soil.xice, snow=soil.snow_water, snow_depth=soil.snow_depth,
         sst=soil_fields.get("SST", soil.tsk),
         radiation=radiation, radiation_start_time=start_time,
-        radiation_latitude=lat, radiation_longitude=lon)
+        radiation_latitude=lat, radiation_longitude=lon,
+        **ruc_mosaic_physics_inputs(
+            cfg, static, landuse_attrs=landuse_attrs, xice=soil.xice,
+            fractional_seaice=ruc_fractional_seaice(cfg)),
+        **lake_physics_inputs(cfg, static))
+    from woof.core.landuse import surface_snow_albedo
     driver.fields["snoalb"][...] = cp.asarray(
-        noah_initial_snow_albedo(static["SNOALB"], static["LU_INDEX"],
-                                 driver.noah_params, rdmaxalb=cfg.rdmaxalb),
+        surface_snow_albedo(cfg, static, driver.noah_params),
         dtype=cp.float32)
     driver.fields["lai"][...] = cp.asarray(lai, dtype=cp.float32)
     driver.fields["shdmin"][...] = cp.asarray(

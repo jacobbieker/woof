@@ -52,6 +52,10 @@ _ALLOWED_AEROSOL_MODULES = frozenset({
 #: at max_ulp 0, which is a stronger gate than source identity and the only
 #: reason the trade was takeable.
 _EXPECTED_HEADERS = {
+    "upper_wind_limiter": ("glibc_flt32.cuh",),
+    # New order-five scalar eta entry, qualified against the native fork.
+    # No existing translation unit gains a header through this grant.
+    "pd_vertical_sl": ("pd_advection.cu",),
     "noah_init": ("noah.cu",),
     "horizontal": ("portable_libm64.cuh",),
     # Test-only bit grading, with the same shared header future callers use.
@@ -73,6 +77,10 @@ _EXPECTED_HEADERS = {
     # entry points compile to byte-identical PTX with the header present
     # (tests/test_mp8_frozen.py, the ysu re-pin).
     "ysu": ("glibc_flt32.cuh", "ysu_topo.cuh"),
+    # Lane 286-aer-swint: WRF swint_opt = 1 and aer_opt = 3, graded
+    # bitwise against the operational HRRR fork's gfortran/glibc Fortran.
+    "swint": ("glibc_flt32.cuh", "glibc_trig_flt32.cuh"),
+    "rrtmg_aer3": ("glibc_flt32.cuh",),
     # The UW moist-turbulence PBL: a new module, so no existing unit moves.
     "uwpbl": ("glibc_flt64.cuh", "uwpbl_common.cuh", "uwpbl_wvsat.cuh",
               "uwpbl_vdiff.cuh", "uwpbl_zisocl.cuh", "uwpbl_caleddy.cuh",
@@ -83,6 +91,10 @@ _EXPECTED_HEADERS = {
     # A new module; the WRF v4.7.1 Noah mosaic column oracle grades it
     # bitwise.
     "noah_mosaic": ("glibc_flt32.cuh",),
+    # RUC LOG/EXP mixture words and the new lake driver's REAL32 power
+    # use the shared WRF-oracle float32 functions.
+    "ruc": ("glibc_flt32.cuh",),
+    "lake": ("glibc_flt32.cuh", "lake_support.cuh", "lake_wrf.cuh"),
 }
 
 
@@ -91,6 +103,15 @@ def _module_names() -> list[str]:
     assert names, "no CUDA translation units found"
     assert "thompson" in names
     return names
+
+
+def test_lake_compile_options_do_not_change_existing_modules():
+    # Disabling contraction belongs to the lake Fortran translation. A
+    # global option change would also move previously qualified kernels.
+    assert kernel_loader.module_options("lake") == ("-std=c++17", "--fmad=false")
+    for name in _module_names():
+        if name != "lake":
+            assert kernel_loader.module_options(name) == ("-std=c++17",)
 
 
 def _pre_hook_source(name: str) -> str:
@@ -159,8 +180,9 @@ def test_allow_listed_headers_exist_and_translation_units_are_explicit():
         for header in headers:
             path = _KDIR / header
             assert path.is_file(), f"missing device header {header}"
-            assert path.suffix == ".cuh" or (module == "noah_init" and header == "noah.cu"), (
-                "only the explicitly reused Noah unit may supply a .cu header")
+            assert path.suffix == ".cuh" or (module, header) in (
+                ("noah_init", "noah.cu"), ("pd_vertical_sl", "pd_advection.cu")), (
+                "only the explicitly reused initialization and scalar units may supply a .cu header")
 
 
 def test_allow_list_has_no_implicit_filesystem_behaviour():

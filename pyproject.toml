@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recast-woof"
-version = "1.0.2"
+version = "1.0.3"
 description = "Recast WOOF: GPU-native regional weather forecasting with WRF-class physics, data assimilation and native preprocessing, plus preview hex and global models"
 readme = "README.md"
 license = "Apache-2.0"
@@ -20,7 +20,7 @@ requires-python = ">=3.11"
 # recast-woof-data: reference tables and map assets, pinned to this version.
 dependencies = ["numpy>=2.0", "netCDF4>=1.6", "matplotlib>=3.8",
                 "jsonschema>=4.0",
-                "scipy>=1.11", "pyshp>=2.3", "cdsapi>=0.7.7", "recast-woof-data==1.0.2"]
+                "scipy>=1.11", "pyshp>=2.3", "cdsapi>=0.7.7", "recast-woof-data==1.0.3"]
 keywords = ["WRF", "WPS", "GRIB", "NetCDF", "weather", "CUDA", "MPAS", "data-assimilation"]
 classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
@@ -46,12 +46,14 @@ render = ["wrf-rust>=0.2.39,<0.3"]
 # The legacy Python warp path of the high-resolution static builder; the
 # default path is the Rust static-fields library in the bundle.
 geog = ["rasterio>=1.3", "pyproj>=3.6"]
-obs = []
+# pyarrow: the Dynamical.org ASOS Parquet reader (woof.obs.dynamical_asos),
+# which scores forecasts against surface reports outside the IEM front door.
+obs = ["pyarrow>=15"]
 dealias = []
 dev = ["pytest>=8.0", "pytest-xdist>=3.5", "psutil>=5.9", "pyyaml>=6.0"]
 publish = ["huggingface_hub>=0.23", "h5py>=3.10"]
-all-cu12 = ["recast-woof[gpu-cu12]", "recast-woof[render]"]
-all-cu13 = ["recast-woof[gpu-cu13]", "recast-woof[render]"]
+all-cu12 = ["recast-woof[gpu-cu12]", "recast-woof[render]", "recast-woof[obs]"]
+all-cu13 = ["recast-woof[gpu-cu13]", "recast-woof[render]", "recast-woof[obs]"]
 all = ["recast-woof[all-cu12]"]
 
 [project.scripts]
@@ -136,6 +138,7 @@ zarr = "*"
 
 [tool.pixi.feature.base.pypi-dependencies]
 icechunk = "*"
+pyarrow = ">=15"
 
 [tool.pixi.feature.cu12.pypi-dependencies]
 recast-woof = { path = ".", editable = true, extras = ["all-cu12"] }

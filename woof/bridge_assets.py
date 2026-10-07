@@ -12,11 +12,12 @@ carries no binaries at all.  Before either existed, the only way to get
 the GRIB decoders, the CPU preprocessing library, the fetch backbone,
 the batch renderer, the two radar front doors, the MRMS, Stage-IV,
 surface, GOES and European-composite front doors, the NetCDF decoder,
-the mapped decode engine, the Zarr reader, the observation remap, the ML
-dataset exporter and the terminal workspace onto a wheel install was to
-clone the repository and run ``cargo build`` -- a
+the mapped decode engine, the Zarr reader, the observation remap, the
+isobaric-height reader, the ML dataset exporter, the
+simulated radar and the terminal workspace onto a
+wheel install was to clone the repository and run ``cargo build`` -- a
 Rust toolchain, a 2.5 GB checkout and a few minutes of compiling, for
-thirty-five files.
+forty-two files.
 ``woof fetch-bridges`` is the same trade :mod:`woof.table_assets`
 already makes for the externalized physics tables: the artifacts are
 published as versioned GitHub release assets, their exact size and
@@ -25,11 +26,17 @@ byte is verified against those pins *before* anything is installed.
 
 What is staged, and where
 -------------------------
-One bundle per platform, holding the thirty-five artifacts of
+One bundle per platform, holding the forty-two artifacts of
 :data:`BUNDLED_ARTIFACTS`, staged into :func:`woof.bridges
-.default_bridge_dir` (``~/.woof/bridges``) -- the last rung of the
-resolution ladder every consumer already searches, so nothing else in
-woof needs to know this command exists.  ``--dest DIR`` stages
+.default_bridge_dir` (``~/.woof/bridges/<release>-<bundle digest>``)
+-- the staged rung of the resolution ladder every consumer already
+searches, so nothing else in woof needs to know this command exists.
+The directory is this release's alone: until 2.8.6 every release
+staged flat into the shared ``~/.woof/bridges``, so two installs of
+different versions on one machine re-fetched over each other and each
+broke the other's runs.  The flat directory is still read, by the
+rung after the versioned one, but only for a file whose bytes are this
+release's pin, and it is never written by a pinned install.  ``--dest DIR`` stages
 somewhere else; the per-artifact environment variables keep overriding
 everything, and a set override is reported rather than silently
 shadowed.
@@ -320,6 +327,21 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
         "rw_wrfbatch", "executable", bridges.RUSTWX_CRATE_RELATIVE,
         "WOOF_RW_WRFBATCH", "woof render --engine rust"),
     BundledArtifact(
+        "rw_compare", "executable", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_RW_COMPARE", "native reference panels and observation overlays"),
+    BundledArtifact(
+        "rw_verify", "executable", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_RW_VERIFY", "woof verify-visuals and completed-run verification"),
+    # The simulated radar.  Beam tracing, field sampling, the Level II,
+    # CfRadial and ODIM writers and the PPI images all run in it, so a
+    # bundle without it is an install whose `[simulated_radar]` table and
+    # `woof simulated-radar` door can only refuse.  Its own build.rs
+    # stamps the source revision like every gpuwm-authored row here.
+    # Environment variable spelled to match woof.rustwx's resolver.
+    BundledArtifact(
+        "rw_simradar", "executable", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_RW_SIMRADAR", "WOOF simulated radar volumes and PPI images"),
+    BundledArtifact(
         "rw_nexrad", "executable", bridges.RUSTWX_CRATE_RELATIVE,
         "WOOF_RW_NEXRAD", "radar observation ingest (the DA nowcast)"),
     BundledArtifact(
@@ -485,6 +507,23 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
         "obs_regrid", "library", bridges.RUSTWX_CRATE_RELATIVE,
         "WOOF_OBSREGRID_BRIDGE",
         "observation remap plans (the default battery remap engine)"),
+    BundledArtifact(
+        "obs_score", "library", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_OBSSCORE_BRIDGE",
+        "observation fractions, contingency and station scoring"),
+    # The ISOBARIC-HEIGHT READER.  It joined this list the moment the
+    # Python consumers of a height on a pressure surface moved onto the
+    # Rust crate every chart already reads with: the vortex tracker on a
+    # host state, the GNSS-RO refractivity operator, the verification maps
+    # and the flagship products.  There is no Python implementation behind
+    # it, so a wheel without it refuses those reads by name.  Environment
+    # variable spelled to match woof.isobaric_bridge.ISOBARIC_BRIDGE_ENV;
+    # a test binds the two (tests/test_bridge_fetch.py).
+    BundledArtifact(
+        "rw_isobaric", "library", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_ISOBARIC_BRIDGE",
+        "isobaric heights read between layer interfaces (vortex tracker, "
+        "GNSS-RO operator, verification maps)"),
     # The four MPAS binaries of the first wave (the fifth, the
     # lateral-boundary producer, is the last entry in this tuple and
     # carries its own note), and `rw_mpas_convert` is the artifact this
@@ -525,6 +564,14 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
         "rw_mpas_init", "executable", bridges.RUSTWX_CRATE_RELATIVE,
         "WOOF_RW_MPAS_INIT",
         "MPAS initial conditions from a grid and a static file"),
+    BundledArtifact(
+        "rw_mpas_geometry", "executable", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_RW_MPAS_GEOMETRY",
+        "MPAS reconstruction geometry"),
+    BundledArtifact(
+        "rw_mpas_hostprep", "executable", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_RW_MPAS_HOSTPREP",
+        "MPAS forecast host preparation"),
     BundledArtifact(
         "rw_mpas_convert", "executable", bridges.RUSTWX_CRATE_RELATIVE,
         "WOOF_RW_MPAS_CONVERT",
@@ -590,6 +637,9 @@ LIBRARY_ABI: dict[str, tuple[str, int]] = {
     # Matches woof.obs_regrid_bridge.OBSREGRID_ABI; a test
     # binds them.
     "obs_regrid": ("gpuwm_obsregrid_abi_version", 1),
+    "obs_score": ("gpuwm_obsscore_abi_version", 1),
+    # Matches woof.isobaric_bridge.ISOBARIC_ABI; a test binds them.
+    "rw_isobaric": ("gpuwm_isobaric_abi_version", 1),
 }
 
 
@@ -1016,20 +1066,28 @@ def verify_source_revision(payload: bytes, *, expected: str,
 #: What it is for.  A release cut reuses a binary built at an earlier
 #: commit when every path listed for its crate is byte-identical (the
 #: same git object) at the commit being released, so a release that
-#: changed one Python file does not recompile thirty-five unchanged
+#: changed one Python file does not recompile forty-two unchanged
 #: binaries.  A path missing from this table is a binary that could be
 #: reused while carrying a stale copy of that file, so
 #: ``tests/test_native_build_inputs.py`` re-derives the outside inputs
 #: from the Cargo manifests and the Rust sources and refuses any it does
 #: not find covered here.
 NATIVE_BUILD_INPUTS: dict[str, tuple[str, ...]] = {
-    "tools/grib1_bridge": ("tools/grib1_bridge",),
-    "tools/rustwx": ("tools/rustwx", "tools/grib1_bridge/vendor/grib-core"),
-    "tools/rw_wps": ("tools/rw_wps", "tools/grib1_bridge/vendor/grib-core"),
+    "tools/grib1_bridge": ("tools/grib1_bridge", "tools/preparation_resources.rs"),
+    "tools/rustwx": ("tools/rustwx", "tools/grib1_bridge/vendor/grib-core",
+                     "tools/preparation_resources.rs"),
+    # The shared NetCDF reader (netcrust and its HDF5 reader) lives under
+    # tools/rustwx/vendor since the array-ceiling work; rw_wps and the Zarr
+    # bridge build against it by path.
+    "tools/rw_wps": ("tools/rw_wps", "tools/grib1_bridge/vendor/grib-core",
+                     "tools/preparation_resources.rs",
+                     "tools/rustwx/vendor/netcrust"),
     "tools/region_global_dealias": ("tools/region_global_dealias",),
     "tools/zarr_bridge": (
         "tools/zarr_bridge", "tools/rustwx/crates/netcdf-writer",
-        "tools/rw_wps", "tools/grib1_bridge/vendor/grib-core"),
+        "tools/rw_wps", "tools/grib1_bridge/vendor/grib-core",
+        "tools/preparation_resources.rs",
+        "tools/rustwx/vendor/netcrust"),
 }
 
 
@@ -1259,7 +1317,9 @@ def staged_pin_status(path: Path | str, *,
     pins have nothing to say, and each of those is a deliberate
     exemption rather than an oversight:
 
-    * the file is not under :func:`woof.bridges.default_bridge_dir`.
+    * the file is not under :func:`woof.bridges.default_bridge_dir`
+      (this install's own staging directory) or the shared
+      :func:`woof.bridges.legacy_bridge_dir` root it sits in.
       An environment override is an explicit declaration, a checkout's
       ``target/release`` is a build the developer just made, and
       ``libexec`` beside the package or inside it arrived with this
@@ -1284,7 +1344,8 @@ def staged_pin_status(path: Path | str, *,
         resolved = Path(path).resolve()
     except (OSError, ValueError):
         return None
-    if not _under(resolved, bridges.default_bridge_dir()):
+    if not (_under(resolved, bridges.default_bridge_dir())
+            or _under(resolved, bridges.legacy_bridge_dir())):
         return None
     if pins is None:
         try:
@@ -1346,7 +1407,11 @@ def stale_policy() -> str:
 def refresh_staged_bundle(*, pins: BridgePins | None = None,
                           dest: Path | None = None, progress=None,
                           urlopen_fn=None) -> list[Path]:
-    """Re-stage this release's bundle over the staged directory.
+    """Stage this release's bundle into this release's own directory.
+
+    ``dest`` defaults to :func:`woof.bridges.default_bridge_dir`, which
+    for a pinned install is versioned by release and bundle digest, so
+    the refresh can only ever write files no other install resolves.
 
     The same verified path ``woof fetch-bridges`` walks -- download,
     size and SHA-256 against the packaged pins, contract marker, atomic
@@ -1546,46 +1611,100 @@ def stage_from_bundle(archive: Path, bundle: BundlePin, dest: Path,
     # the estate itself, so two runs on one box can be extracting into
     # this directory at the same moment.  A shared scratch name means
     # the ``finally`` below deletes the other run's half-written files.
-    # The install itself is already safe -- verify, then ``os.replace``.
     work = dest / f"{ARCHIVE_SUBDIR}-stage-{os.getpid()}"
     work.mkdir(parents=True, exist_ok=True)
     installed: list[Path] = []
     try:
+        # Phase 1: extract and verify EVERYTHING before installing
+        # anything.  Installing file by file used to leave a directory
+        # holding the first artifacts of this release and the old (or
+        # no) copies of the rest whenever one member failed its pin, so
+        # the routes resolving there ran a mix of two releases.  A
+        # bundle that does not verify whole installs nothing.
+        verified: list[tuple[Path, Path, str]] = []
         with zipfile.ZipFile(archive) as zf:
             for pin in bundle.binaries:
                 temp = work / pin.filename
-                with zf.open(pin.filename) as source, \
-                        temp.open("wb") as sink:
+                with zf.open(pin.filename) as source,                         temp.open("wb") as sink:
                     shutil.copyfileobj(source, sink, _BLOCK_BYTES)
-                final = dest / pin.filename
-                replaced = final.is_file()
-                _install(temp, final, pin)
-                installed.append(final)
-                progress(
-                    f"woof fetch-bridges: {'replaced' if replaced else 'staged'}"
-                    f" {final} ({pin.bytes:,} B, SHA-256 {pin.sha256[:12]}...)")
-            staged_assets = 0
-            asset_bytes = 0
-            for pin in bundle.assets:
+                _verify_partial_refusal(
+                    archive, bundle, pin.filename,
+                    lambda temp=temp, pin=pin: _verify_binary(temp, pin))
+                verified.append((temp, dest / pin.filename,
+                                 f"({pin.bytes:,} B, SHA-256 "
+                                 f"{pin.sha256[:12]}...)"))
+            for index, pin in enumerate(bundle.assets):
                 # The pinned path is validated relative and contained by
                 # parse_pins, so the join cannot leave dest.
-                temp = work / "asset.part"
+                temp = work / f"asset-{index}.part"
                 with zf.open(pin.path) as source, temp.open("wb") as sink:
                     shutil.copyfileobj(source, sink, _BLOCK_BYTES)
-                final = dest / pin.path
-                _install_asset(temp, final, pin)
-                installed.append(final)
-                staged_assets += 1
-                asset_bytes += pin.bytes
-            if staged_assets:
+                _verify_partial_refusal(
+                    archive, bundle, pin.path,
+                    lambda temp=temp, pin=pin: _verify_asset(temp, pin))
+                verified.append((temp, dest / pin.path, ""))
+        # Phase 2: every byte verified; place each with an atomic
+        # replace.  Two processes staging the same release land the same
+        # verified bytes, so the order they finish in does not matter.
+        binary_count = len(bundle.binaries)
+        asset_bytes = 0
+        for index, (temp, final, note) in enumerate(verified):
+            replaced = final.is_file()
+            final.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(temp, final)
+            installed.append(final)
+            if index < binary_count:
                 progress(
-                    f"woof fetch-bridges: staged {staged_assets} map asset "
-                    f"file(s) ({asset_bytes / (1024 * 1024):.1f} MiB) under "
-                    f"{dest / ASSET_ROOT}; the renderer finds them there "
-                    "without any environment variable")
+                    f"woof fetch-bridges: {'replaced' if replaced else 'staged'}"
+                    f" {final} {note}")
+            else:
+                asset_bytes += bundle.assets[index - binary_count].bytes
+        staged_assets = len(verified) - binary_count
+        if staged_assets:
+            progress(
+                f"woof fetch-bridges: staged {staged_assets} map asset "
+                f"file(s) ({asset_bytes / (1024 * 1024):.1f} MiB) under "
+                f"{dest / ASSET_ROOT}; the renderer finds them there "
+                "without any environment variable")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return installed
+
+
+def _verify_binary(temp: Path, pin: BinaryPin) -> None:
+    """Size, SHA-256 and contract marker; the execute bit on success."""
+
+    verify_pinned_file(temp, expected_bytes=pin.bytes,
+                       expected_sha256=pin.sha256, label=pin.filename)
+    verify_contract_marker(pin.artifact, temp)
+    if os.name != "nt":
+        os.chmod(temp, 0o755)
+
+
+def _verify_asset(temp: Path, pin: AssetPin) -> None:
+    """Size and SHA-256; read-only data mode on success."""
+
+    verify_pinned_file(temp, expected_bytes=pin.bytes,
+                       expected_sha256=pin.sha256, label=pin.path)
+    if os.name != "nt":
+        os.chmod(temp, 0o644)
+
+
+def _verify_partial_refusal(archive: Path, bundle: BundlePin, member: str,
+                            check) -> None:
+    """Run ``check``; a failure refuses the WHOLE bundle, by name."""
+
+    try:
+        check()
+    except BridgeAssetError as error:
+        raise BridgeAssetError(
+            f"{archive.name}: {error}.  Refused the whole bundle and "
+            "installed none of it: staging the members that did verify "
+            "would leave a bridge directory holding part of "
+            f"{bundle.platform}'s set beside missing or older copies of "
+            "the rest, so some routes would run this release's binaries "
+            f"and others another release's, or none ({member} failed)"
+        ) from None
 
 
 def stage_from_loose_files(source_dir: Path, bundle: BundlePin, dest: Path,
@@ -2151,7 +2270,8 @@ def register_cli(subparsers) -> None:
     parser = subparsers.add_parser(
         "fetch-bridges",
         help="download this platform's prebuilt Rust artifacts into "
-             "~/.woof/bridges -- the GRIB decoders and CPU preprocessing "
+             "this release's own ~/.woof/bridges/<release>-<digest> -- "
+             "the GRIB decoders and CPU preprocessing "
              "library, the mapped decode engine, the fetch backbone, the "
              "batch renderer, the dealiasing engine and the radar, MRMS, "
              "Stage-IV, surface and GOES observation front doors -- each "
@@ -2168,8 +2288,11 @@ def register_cli(subparsers) -> None:
         # after rw_nexrad and the dealiasing engine had joined.
         description=(
             "Download this platform's prebuilt Rust artifacts into "
-            "~/.woof/bridges, each verified against the packaged "
-            "SHA-256 pins before it is installed.\n\n"
+            "this release's own directory, ~/.woof/bridges/<release>-"
+            "<bundle digest>, each verified against the packaged "
+            "SHA-256 pins before it is installed.  Another woof "
+            "version's directory, and the flat ~/.woof/bridges that "
+            "releases before 2.8.6 staged into, are never written.\n\n"
             f"This release's bundle carries: {summary}.\n\n"
             "Idempotent: everything already staged and pin-valid is "
             "left alone."),
@@ -2181,7 +2304,8 @@ def register_cli(subparsers) -> None:
              "artifacts loose in it; verification is identical")
     parser.add_argument(
         "--dest", metavar="DIR", default=None,
-        help="stage into DIR instead of ~/.woof/bridges (woof finds "
+        help="stage into DIR instead of this release's own "
+             "~/.woof/bridges/<release>-<digest> (woof finds "
              "the default on its own; anywhere else needs the "
              "per-artifact environment variables)")
     parser.add_argument(

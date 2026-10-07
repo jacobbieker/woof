@@ -371,6 +371,13 @@ def managed_download_dir(case_root: Path, fetch_table: dict) -> Path:
                     manifest = candidate / fetch.FETCH_MANIFEST_NAME
                     if manifest.is_file():
                         payload = json.loads(manifest.read_text(encoding="utf-8"))
+                        if fetch.native_cf_fetch_contract(source) is not None:
+                            from woof import cf_archive_fetch
+                            if payload.get("schema") != cf_archive_fetch.MANIFEST_SCHEMA:
+                                raise ValueError("The native CF cache has no recognized fetch receipt")
+                            cf_archive_fetch.check_prior_request(candidate,source=source,cycle=cycle,
+                                hours=request.get("hours",0),cadence=request.get("cadence"),area=area)
+                            return candidate
                         table_route = source in fetch_routes.route_ids()
                         schema = (fetch_routes.ROUTE_MANIFEST_SCHEMA if table_route
                                   else fetch.FETCH_MANIFEST_SCHEMA)
@@ -1454,7 +1461,13 @@ def _run_forecast(plan: dict, digests: dict, *, explain: bool,
     # chain gives up the process isolation that keeps a CUDA failure
     # inside one stage.  Defaults to True, so every existing caller
     # (which is run-plan, and which does host) is unchanged.
-    hosted = observer is not None and getattr(observer, "hosts_forecast", True)
+    #
+    # An ensemble session hosts the forecast here whoever is observing:
+    # its members run in this process.  That is a second reason to be
+    # in process, and it does not make the stage observer a host.
+    from woof.ensemble.runtime_context import current_session
+    observer_hosts = observer is not None and getattr(observer, "hosts_forecast", True)
+    hosted = current_session() is not None or observer_hosts
     early = None if hosted else _early_render_products(plan)
     command = (tree_forecast_command(
                    plan, early_render=early,
@@ -1503,7 +1516,24 @@ def _run_forecast(plan: dict, digests: dict, *, explain: bool,
     import importlib
 
     runner = importlib.import_module(module_name)
-    code = runner.main(argv, observer=observer)
+    # The runner calls its observer on every committed step, so it is
+    # handed one only when that observer hosts.  A stage observer that
+    # does not (woof go's own GoChainEvents, under an ensemble session)
+    # still hears stage_begin and stage_end above and below; the session
+    # then says each member's progress on the terminal itself.  Breakage
+    # this prevents: woof go and woof ensemble with members ended at
+    # the first forecast step with "TypeError: 'GoChainEvents' object is
+    # not callable", after the fetch and the preparation had run.
+    try:
+        code = runner.main(argv, observer=observer if observer_hosts else None)
+    except KeyboardInterrupt:
+        if observer_hosts:
+            # The host owns its stop (woof run-plan reads this class).
+            raise
+        # The typed chain, as for a stage subprocess: go's own Ctrl-C
+        # result, one sentence naming the stage, exit 130, and its stage
+        # stream closed as interrupted.  There is no child pid to name.
+        raise GoInterrupted("forecast", None, hosted=True) from None
     ok = not code
     _notify(observer, "stage_end", label="forecast", exit_code=code, ok=ok,
             elapsed_seconds=time.monotonic() - started,
@@ -2010,6 +2040,14 @@ def _render_stage(plan: dict, *, explain: bool,
     render that wrote it, because on `woof go` it never does.
     """
 
+    from woof.ensemble.runtime_context import current_session
+    ensemble_session = current_session()
+    if ensemble_session is not None:
+        ensemble_session.completed_products()
+        _notify(observer, "stage_begin", label="render", command=[])
+        _notify(observer, "stage_end", label="render", exit_code=0, ok=True,
+                elapsed_seconds=0.0)
+        return True
     if str(plan.get("render_products") or "").strip().lower() == "none":
         print("  -- render skipped: this run asked for no products "
               "(render_products = none).")
@@ -3497,10 +3535,51 @@ class GoInterrupted(Exception):
     #: without importing this module to ask.
     exit_code = INTERRUPT_EXIT_CODE
 
-    def __init__(self, label: str, pid: int | None):
+    def __init__(self, label: str, pid: int | None, *, hosted: bool = False):
         super().__init__(f"interrupted during {label}")
         self.label = label
         self.pid = pid
+        #: The stage ran inside this process (an ensemble's members), so
+        #: there was no stage subprocess for the interrupt to reach.
+        self.hosted = hosted
+
+
+def _interrupt_report(stop: GoInterrupted, plan: dict) -> str:
+    """go's Ctrl-C result: what stopped and what is on disk, then why.
+
+    The explanation half is the mechanism, and the mechanism differs.  A
+    stage subprocess received the terminal's SIGINT itself.  A stage
+    hosted in this process (an ensemble's members) has no subprocess:
+    the session stopped its members at a step boundary.
+    """
+
+    child = ("" if stop.pid is None else
+             f"  # the {stop.label} process was pid {stop.pid}; woof "
+             "signalled nothing and killed nothing\n")
+    why = (
+        "The ensemble's members ran inside this process, so there was no "
+        "stage subprocess: members that were running ended at their next "
+        "model step, members not yet started were cancelled, and woof "
+        "signalled no pid. ensemble-run.json in the run folder records "
+        "the run as interrupted and lists the members not completed; no "
+        "aggregate product was closed as complete."
+        if stop.hosted else
+        "Ctrl-C sends SIGINT to the whole foreground process group, "
+        "so the stage subprocess received it directly and woof did "
+        "not (and will not) signal any pid itself -- a tool that "
+        "kills pids it merely observed is a tool that eventually "
+        "kills the wrong one. If the stage was launched into the "
+        "background by a shell, SIGINT is SIG_IGN for the whole job "
+        "and neither process can see a Ctrl-C at all; send SIGTERM "
+        "there instead.")
+    return layered(
+        f"go: interrupted during {stop.label}; no later stage ran and "
+        f"{plan['root']} is a partial tree with no certification "
+        "capsule.\n"
+        f"{child}"
+        f"  remedy: woof go {_quote(plan['config'])} --outdir "
+        "<a new directory>   # every stage is create-only",
+        why)
 
 
 def _physics_words(plan: dict) -> str:
@@ -3681,6 +3760,10 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
         profiles = (None if measured is None else
                     {int(dev): profile_from_device_probe(row)
                      for dev, row in measured["cards"].items()})
+        budgets = ({dev: int(vram_gib * 2**30) for dev in exp.devices.device_ids()}
+                   if vram_gib is not None else None if measured is None else
+                   {int(dev): int(row["free_bytes"])
+                    for dev, row in measured["cards"].items()})
         if len(exp.domains) > 1:
             # A split tree: every grid on the cards it runs on, the
             # pricing the tree runner repeats before its first restore.
@@ -3692,12 +3775,8 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
         else:
             estimate = estimate_devices(
                 exp, vram_gib=vram_gib, forcing_intervals=intervals, source=source,
-                profiles=profiles,
+                profiles=profiles, budgets=budgets,
                 forcing_interval_seconds=interval or DEFAULT_FORCING_INTERVAL_SECONDS)
-        budgets = ({dev: int(vram_gib * 2**30) for dev in exp.devices.device_ids()}
-                   if vram_gib is not None else None if measured is None else
-                   {int(dev): int(row["free_bytes"])
-                    for dev, row in measured["cards"].items()})
         gate = devices_gate(estimate, budgets=budgets,
                             host_budget=host_available_bytes())
         include_preparation(
@@ -3786,17 +3865,24 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
     # comparison here sees; one larger than the machine's RAM is killed
     # after the download.  Host RAM does not depend on the card, so it is
     # read even when no card could be.
+    #
+    # Weighed against the RAM this host can still give -- MemAvailable and
+    # every cgroup limit, never more than its MemTotal -- and never against
+    # the card: a 64 GiB host beside a 96 GB card was told its preparation
+    # fit "the 93.93 GiB budget" and was SIGKILLed in its decode
+    # (woof.ingest.host_decode_window).
     preparation_refusal = preparation_warning = None
+    host = _preparation_host(phases)
     weigh_preparation = getattr(phases, "host_preparation_refusal", None)
     if weigh_preparation is not None:
-        preparation_host = getattr(phases, "host_ram_bytes", None)
-        if preparation_host is None:
-            from woof.core.streaming import _host_total_bytes
-            preparation_host = _host_total_bytes()
+        preparation_host = host["budget_bytes"]
         preparation_refusal = weigh_preparation(preparation_host)
         preparation_warning = getattr(
             phases, "host_preparation_warning", lambda _host: None)(
                 preparation_host)
+    decode = _decode_window_clause(
+        exp, source, host, forcing_intervals=forcing_intervals,
+        forcing_interval_seconds=forcing_interval)
 
     if probe is None:
         # No numbers: price the phases and print the verdict, but never
@@ -3811,9 +3897,11 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
         verdict = f"{phases.verdict(None)} ({probe_reason})" if probe_reason else phases.verdict(None)
         if planner_note and planner_note not in verdict:
             verdict += "; " + planner_note
+        verdict += "; " + decode["sentence"]
         if preparation_refusal is not None:
             verdict += "; " + preparation_refusal
-        return {"verdict": verdict,
+        return {"verdict": verdict, "host": host, "decode_window": decode["window"],
+                "decode_warning": decode["warning"],
                 "refuse": planner_refuse or preparation_refusal is not None,
                 "warn": False, "free_bytes": None,
                 "probe_reason": probe_reason, "phases": phases, "device_probe": probe,
@@ -3836,7 +3924,9 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
         forcing_interval_seconds=forcing_interval,
         profile=profile)
     peak = phases.peak_envelope_bytes
-    verdict = phases.verdict(budget)
+    # The card's budget is the forecast's and the card's alone; the host
+    # side is said beside it with its own number (decode clause below).
+    verdict = _card_budget_words(phases.verdict(budget))
     # A resident reference number cannot admit a configuration for which the
     # native tree planner explicitly refused the configured execution road.
     # A planning REPORT that died is not such a refusal (planner_gate).
@@ -3846,6 +3936,7 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
         verdict += "; " + preparation_on_cpu_note
     if planner_note and planner_note not in verdict:
         verdict += "; " + planner_note
+    verdict += "; " + decode["sentence"]
     if preparation_refusal is not None:
         refuse = True
         verdict += "; and " + preparation_refusal
@@ -3889,7 +3980,94 @@ def memory_gate(plan: dict, *, vram_gib: float | None = None,
         "preparation_warning": preparation_warning,
         "card_refuse": card_refuse,
         "preparation_on_cpu": preparation_on_cpu_note,
+        # The host RAM the preparation was weighed against, and the decode
+        # window it will open at that RAM.
+        "host": host,
+        "decode_window": decode["window"],
+        "decode_warning": decode["warning"],
     }
+
+
+def _card_budget_words(verdict: str) -> str:
+    """Name the forecast verdict's budget as the CARD's.
+
+    The phases verdict says "the N GiB budget"; on a host with less RAM
+    than its card that number read as the preparation's budget.
+    """
+
+    return verdict.replace(" GiB budget", " GiB card budget")
+
+
+def _preparation_host(phases) -> dict:
+    """This host's RAM for a preparation: available, total and the budget.
+
+    The budget is the smaller of what the host can still give
+    (``MemAvailable`` under every memory cgroup) and its total (``MemTotal``
+    under the cgroup limit, or the planner machine's RAM).  ``None`` only
+    when neither can be read: unknown RAM never refuses.
+    """
+
+    from woof.ingest.host_decode_window import available_host_bytes
+
+    total = getattr(phases, "host_ram_bytes", None)
+    if total is None:
+        from woof.core.streaming import _host_total_bytes
+        total = _host_total_bytes()
+    available = available_host_bytes()
+    known = [int(value) for value in (available, total) if value is not None]
+    return {"available_bytes": available, "total_bytes": total,
+            "budget_bytes": min(known) if known else None}
+
+
+def _decode_window_clause(exp, source, host, *, forcing_intervals,
+                          forcing_interval_seconds=None) -> dict:
+    """The preparation's decode window at this host's RAM, in one clause.
+
+    Priced on the source's largest lead objects
+    (:func:`woof.ingest.host_decode_window.plan_window`), which the
+    transport may not deliver (a NOMADS crop is far smaller), so a host
+    that cannot hold even one such lead is WARNED, never refused here; the
+    decode sizes its real window from the objects it reads.
+    """
+
+    from woof.ingest.host_decode_window import (
+        GIB, plan_window, threads_available)
+
+    budget = host["budget_bytes"]
+    where = ("this host's RAM is unreadable, so the preparation's decode "
+             "is not bounded by it" if budget is None else
+             f"the preparation is budgeted against this host's RAM, not the "
+             f"card: {budget / GIB:.2f} GiB available"
+             + ("" if host["total_bytes"] is None else
+                f" of {int(host['total_bytes']) / GIB:.2f} GiB")
+             + " (MemAvailable under any cgroup limit)")
+    from woof.core.preflight import (DEFAULT_FORCING_INTERVAL_SECONDS,
+                                      lbc_intervals)
+    try:
+        leads = lbc_intervals(
+            float(exp.run_seconds),
+            float(forcing_interval_seconds or DEFAULT_FORCING_INTERVAL_SECONDS),
+            retained_intervals=forcing_intervals) + 1
+    except Exception:  # a gate never dies on its estimate
+        leads = None
+    window = None
+    if leads is not None and source is not None:
+        window = plan_window(
+            source=str(source), leads=leads, threads=threads_available(),
+            p_top_pa=getattr(getattr(exp, "vertical", None), "p_top", None),
+            available=budget)
+    if window is None:
+        return {"sentence": where, "window": None, "warning": None}
+    sentence = (f"{where}; at whole-globe {source} leads its "
+                f"{window.sentence(leads)}")
+    warning = None
+    if budget is not None and window.batch_bytes > budget:
+        warning = (f"decoding one whole-globe {source} lead holds about "
+                   f"{window.batch_bytes / GIB:.2f} GiB of host RAM, more "
+                   f"than the {budget / GIB:.2f} GiB this host has "
+                   "available, so a full-file fetch may be killed in its "
+                   "decode after the download; a host with more RAM moves it")
+    return {"sentence": sentence, "window": window, "warning": warning}
 
 
 def _planner_machine(probe, profile=None):
@@ -4064,8 +4242,8 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
     # refused against a managed downloads path the reader never named.
     # Only an explicit `--data-dir` overrides the config here; the
     # default leaves the config's own root to speak.
-    local_input = acquires and bool(
-        runplan.drivability_for(fetch.get("source")).get("requires_source_root"))
+    from woof.source_drivability import local_input_requested
+    local_input = acquires and local_input_requested(fetch)
     if args.data_dir is not None:
         data_dir = Path(args.data_dir)
     elif local_input:
@@ -4090,6 +4268,10 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
                              else str(Path(args.geog_root).resolve())),
                "render_products": (args.render_products if args.render_products is not None
                                    else DEFAULT_RENDER_PRODUCTS)}
+    from woof.ensemble.runtime_context import current_session
+    ensemble_session = current_session()
+    if ensemble_session is not None:
+        options["ensemble"] = ensemble_session.request.receipt()
     if section is not None:
         options["render_section"] = section
     keep = getattr(args, "keep_checkpoints", None)
@@ -4203,6 +4385,8 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
                   file=sys.stderr)
         if gate.get("preparation_warning"):
             print(f"warning: {gate['preparation_warning']}.", file=sys.stderr)
+        if gate.get("decode_warning"):
+            print(f"warning: {gate['decode_warning']}.", file=sys.stderr)
     from woof.geog_assets import default_geog_root
     geog_root = (data.geog_root if data is not None
                  else Path(args.geog_root) if args.geog_root is not None
@@ -4546,12 +4730,11 @@ def _at_flag_cycle(args, config: Path, payload: dict, cycle: str
     return out, tomllib.loads(out.read_text(encoding="utf-8"))
 
 
-def _go_readiness(payload: dict, options: dict, pinned: str | None, *,
-                  no_probe: bool) -> int:
-    """``woof go CONFIG --readiness``: the config's window, answered, run nothing."""
+def _readiness_answer(payload: dict, options: dict, pinned: str | None, *,
+                      no_probe: bool) -> tuple[dict, int]:
+    """``gpuwm.readiness.v1`` and its exit code for one config's fetch window."""
 
     from woof import runplan as plans
-    from woof import source_readiness as readiness
     from woof.fetch import readiness_for_fetch
 
     hints = pin_request(config_fetch_request(payload), pinned)
@@ -4565,9 +4748,18 @@ def _go_readiness(payload: dict, options: dict, pinned: str | None, *,
 
     parsed = plans._parse_fetch_arguments(_join_negative_coordinates(arguments))
     try:
-        document, code = readiness_for_fetch(parsed, no_probe=no_probe)
+        return readiness_for_fetch(parsed, no_probe=no_probe)
     except ValueError as error:
         raise GoRefusal(f"--readiness: {error}") from error
+
+
+def _go_readiness(payload: dict, options: dict, pinned: str | None, *,
+                  no_probe: bool) -> int:
+    """``woof go CONFIG --readiness``: the config's window, answered, run nothing."""
+
+    from woof import source_readiness as readiness
+
+    document, code = _readiness_answer(payload, options, pinned, no_probe=no_probe)
     readiness.print_document(document)
     print(f"go: readiness {document['state']}"
           + (f" ({document['refusal']})" if document.get("refusal") else "")
@@ -4585,10 +4777,286 @@ def go_main(args, *, observer=None) -> int:
     then refused that envelope again after the fetch and the preparation.
     """
     from woof.core.resident_admission import memory_gate_override
+    from woof.verification_visuals import verification_scope
+    enabled = getattr(args, "verify_visuals", None)
+    if enabled is None:
+        enabled = os.environ.get("WOOF_VERIFY_VISUALS", "1").lower() not in ("0", "false", "off")
+    from woof.ensemble.door import request_for_config, production_run_scope
+    from woof.ensemble.runtime_context import current_session
+    inherited = current_session()
+    from woof.ensemble import recipe_door
+    try:
+        request = (request_for_config(args.config,
+                                     override=None if inherited is None else inherited.request.receipt(),
+                                     members=getattr(args, "members", None),
+                                     keep_member_files=getattr(args, "keep_member_files", None),
+                                     **recipe_door.flag_overrides(args))
+                   if Path(args.config).is_file() else None)
+    except recipe_door.RecipeRefusal as refusal:
+        raise GoRefusal(str(refusal)) from None
+    if getattr(args, "command", None) == "ensemble" and request is None and Path(args.config).is_file():
+        raise GoRefusal("ensemble requires --members N or [ensemble].members in CONFIG")
+    if getattr(args, "restart_roster", None) is not None:
+        if request is None:
+            raise GoRefusal("--restart-roster requires the original ensemble configuration")
+        from woof.ensemble.restart_roster import resume_prepared_roster
+        return resume_prepared_roster(args, request, observer=observer)
+    if getattr(args, "prepare_only", False):
+        # Source preparation owns one trajectory even when its configuration
+        # also describes a forecast ensemble. It creates no member session.
+        with memory_gate_override(getattr(args, "no_memory_gate", False)), verification_scope(enabled):
+            return _go_launch(args, observer=observer)
+    from woof.ensemble import member_inputs
+    # A plain member count (N > 1, no recipe named) is given real members
+    # too: this chain prepares ONE trajectory, so launching it would run N
+    # copies of one forecast and publish zero spread.  It takes the recipe
+    # route, which plans the source's operational ensemble or refuses by
+    # name before anything is downloaded, and which answers every go flag
+    # for the members that will run: --readiness for each member's window,
+    # --cycle by re-timing the config the members are planned from, and
+    # the flags that name one trajectory's input by name.
+    plain = member_inputs.needs_member_sources(request)
+    if request is not None and (request.recipe is not None or plain):
+        # Time-lagged, multi-model and operational-ensemble members: each
+        # member's own source trajectory is prepared by its ordinary chain,
+        # then the roster runs through the same ensemble session every
+        # other ensemble uses.
+        from woof.core.resident_admission import memory_gate_override as _gate
+        try:
+            with _gate(getattr(args, "no_memory_gate", False)), verification_scope(enabled), _each_advisory_once():
+                return _go_recipe(args, request, observer=observer)
+        except recipe_door.RecipeRefusal as refusal:
+            raise GoRefusal(str(refusal)) from None
 
-    with memory_gate_override(getattr(args, "no_memory_gate", False)), \
-            _each_advisory_once():
+    with memory_gate_override(getattr(args, "no_memory_gate", False)), verification_scope(enabled), \
+            _each_advisory_once(), production_run_scope(request,
+                output_directory=getattr(args, "outdir", None) or Path(args.config).with_suffix(""),
+                **({"restart_roster": args.restart_roster}
+                   if getattr(args, "restart_roster", None) is not None else {})):
         return _go_launch(args, observer=observer)
+
+
+#: ``woof go`` flags a recipe request does not consume, each with the
+#: breakage a silent acceptance would cause.  ``(flag, namespace attribute,
+#: sentence)``; refused by name before anything is planned.
+_RECIPE_UNCONSUMED_FLAGS = (
+    ("--prepared-root", "prepared_root",
+     "it names one prepared bundle, which is one trajectory: every member "
+     "would run that bundle and the ensemble would report spread it does "
+     "not have"),
+    ("--restart", "restart",
+     "it continues one forecast from its checkpoint, and a recipe ensemble "
+     "prepares and starts every member from its own source, so the run "
+     "would be a fresh fetch and forecast in place of the continuation"),
+    ("--data-dir", "data_dir",
+     "it names one existing download, and a recipe downloads one window "
+     "per member into its own request cache: the fetch refuses a folder "
+     "that holds another cycle's files, after the members before it were "
+     "prepared"),
+    ("--supplement", "supplement",
+     "it binds one donor file of one trajectory, and every member is "
+     "prepared from its own trajectory: handed to all of them it is "
+     "another valid time's bytes for every member but one"),
+    ("--section", "render_section",
+     "the ensemble draws its aggregate maps and no stage of it cuts a "
+     "vertical section, so the line would be read by nothing"),
+)
+
+
+def _refuse_recipe_unconsumed(args) -> None:
+    """Refuse, by name, the ``woof go`` flags the recipe route does not consume.
+
+    Breakage it prevents: each was parsed and dropped, so the run did not
+    do what its command line said (a restart became a fresh fetch and
+    forecast, a prepared bundle was ignored) and exited 0.
+    """
+
+    given = [(flag, why) for flag, attribute, why in _RECIPE_UNCONSUMED_FLAGS
+             if getattr(args, attribute, None) not in (None, [], ())]
+    if given:
+        raise GoRefusal(
+            "An ensemble recipe does not use " + ", ".join(flag for flag, _ in given)
+            + ": " + "; ".join(f"{flag}: {why}" for flag, why in given)
+            + ". Next: omit " + ("it" if len(given) == 1 else "them") + ".")
+    if (getattr(args, "cycle", None) is not None
+            and getattr(args, "wps_namelist", None) is not None):
+        raise GoRefusal(
+            "--wps-namelist names a namelist written for the config's own "
+            "cycle, and --cycle re-times the config and renders its namelist "
+            "again: every member would be prepared with the old dates. "
+            "Next: omit --wps-namelist.")
+
+
+def _recipe_flag_cycle(args, payload: dict) -> str | None:
+    """``--cycle`` on the recipe route: ``latest``, a concrete cycle, or None."""
+
+    value = getattr(args, "cycle", None)
+    fetch_table = payload.get("fetch")
+    if value is None or not isinstance(fetch_table, dict) or not (
+            {"source", "cycle"} <= fetch_table.keys()):
+        # A config with no [fetch] source and cycle is refused by the
+        # recipe plan itself, in its own words.
+        return None
+    value = str(value).strip()
+    if value.lower() == "latest":
+        return "latest"
+    from woof.fetch import parse_cycle
+
+    try:
+        return parse_cycle(value, str(fetch_table["source"])).strftime("%Y-%m-%dT%H")
+    except ValueError as error:
+        raise GoRefusal(str(error)) from error
+
+
+def recipe_readiness(request, payload: dict, experiment, *, cycle: str | None,
+                     posting: dict, transport: str | None = None,
+                     no_probe: bool = False) -> tuple[dict, int]:
+    """``--readiness`` for a recipe: every member's window, answered, run nothing.
+
+    A readiness document answers for one fetch window, and a recipe
+    fetches one per member.  Each member's window is asked the way the
+    config's own is (:func:`_readiness_answer`), and the answer is the
+    worst of them: refused (2) when any member's window is, not yet (75)
+    when any is waiting, ready (0) only when every one is.  The document
+    is the deciding member's own ``gpuwm.readiness.v1``, with ``state``,
+    ``ready``, ``expected_ready_at``, ``retry_after_seconds`` and
+    ``refusal`` answering for the whole roster and ``recipe`` carrying
+    every member's document.  ``cycle`` is the base cycle asked about
+    (``latest``, a concrete cycle, or None for the config's own);
+    ``posting`` and ``transport`` are the run's posting rule and host pin.
+
+    Breakage it prevents: the flag was dropped on this route, so a
+    scheduler's readiness poll claimed a run folder and started the
+    members' downloads, on a box the capability check had waved through
+    because ``--readiness`` spends nothing.
+    """
+
+    from woof import source_readiness as readiness
+    from woof.ensemble import recipe_door
+
+    flag = transport
+    base = None
+    fetch_table = payload.get("fetch")
+    if cycle == "latest" and isinstance(fetch_table, dict):
+        # The config's own window names the concrete cycle, under the same
+        # rule the run resolves ``latest`` with.
+        latest = {**payload, "fetch": {**fetch_table, "cycle": "latest"}}
+        pinned, _from = pinned_transport(fetch_table, flag)
+        base, code = _readiness_answer(latest, posting, pinned, no_probe=no_probe)
+        if code == readiness.REFUSED_EXIT or not base.get("cycle"):
+            return base, code
+        cycle = str(base["cycle"])
+    recipe = recipe_door.plan_recipe(request, payload, experiment, cycle=cycle)
+    answers = []
+    for member in recipe.members:
+        table = recipe_door.member_fetch(payload, experiment, recipe, member)
+        pinned, _from = pinned_transport(table, flag)
+        document, code = _readiness_answer({**payload, "fetch": table}, posting,
+                                           pinned, no_probe=no_probe)
+        answers.append((member, document, code))
+    worst = (readiness.REFUSED_EXIT
+             if any(code == readiness.REFUSED_EXIT for _m, _d, code in answers)
+             else readiness.NOT_YET_EXIT
+             if any(code == readiness.NOT_YET_EXIT for _m, _d, code in answers)
+             else readiness.READY_EXIT)
+    deciding = [row for row in answers if row[2] == worst]
+    if worst == readiness.NOT_YET_EXIT:
+        # The member that is ready last decides when to ask again.
+        deciding.sort(key=lambda row: float(row[1].get("retry_after_seconds") or 0.0),
+                      reverse=True)
+    member, chosen, _code = deciding[0]
+    states = {document.get("state") for _m, document, _c in answers}
+    stamps = [document["expected_ready_at"] for _m, document, _c in answers
+              if document.get("expected_ready_at")]
+    retries = [float(document["retry_after_seconds"]) for _m, document, _c in answers
+               if document.get("retry_after_seconds") is not None]
+    refusals = [f"{recipe_door.member_label(row[0])}: {row[1]['refusal']}"
+                for row in answers if row[1].get("refusal")]
+    document = dict(chosen)
+    document.update(
+        state=("refused" if worst == readiness.REFUSED_EXIT else
+               "waiting" if worst == readiness.NOT_YET_EXIT else
+               states.pop() if len(states) == 1 else "ready"),
+        ready=worst == readiness.READY_EXIT,
+        expected_ready_at=max(stamps) if stamps else None,
+        retry_after_seconds=(max(retries) if retries and worst == readiness.NOT_YET_EXIT
+                             else None),
+        refusal="; ".join(refusals) or None)
+    document["recipe"] = {
+        "kind": recipe.kind, "members": len(answers),
+        "answered_by_member": member.index,
+        "base_cycle": recipe.base.cycle.strftime("%Y-%m-%dT%H"),
+        "base_cycle_basis": None if base is None else base.get("cycle_basis"),
+        "member_windows": [
+            {"member_id": row[0].index, "source": row[0].trajectory.source,
+             "cycle": row[0].trajectory.cycle.strftime("%Y-%m-%dT%H"),
+             "source_member": row[0].trajectory.member,
+             "exit_code": row[2], "readiness": row[1]} for row in answers]}
+    return document, worst
+
+
+def _recipe_readiness(args, request, config: Path, payload: dict,
+                      cycle: str | None, posting: dict) -> int:
+    """``woof go CONFIG --readiness`` on the recipe route: answered, run nothing."""
+
+    from woof import source_readiness as readiness
+    from woof.experiment import load_experiment
+
+    document, code = recipe_readiness(
+        request, payload, load_experiment(config), cycle=cycle,
+        posting={key: value for key, value in posting.items() if key != "transport"},
+        transport=posting.get("transport"),
+        no_probe=bool(getattr(args, "no_probe", False)))
+    readiness.print_document(document)
+    members = (document.get("recipe") or {}).get("members")
+    print(f"go: readiness {document['state']}"
+          + ("" if members is None else f" for {members} recipe members")
+          + (f" ({document['refusal']})" if document.get("refusal") else "")
+          + (f"; expected ready at {document['expected_ready_at']}"
+             if document.get("expected_ready_at") else ""), file=sys.stderr)
+    return code
+
+
+def _go_recipe(args, request, *, observer=None) -> int:
+    """The recipe route of :func:`go_main`: go's own flags, then the door.
+
+    Every ``woof go`` flag is answered here before the door plans
+    anything: ``--readiness`` and ``--no-probe`` answer and stop,
+    ``--cycle`` re-times the config the members are planned from,
+    ``--transport``, ``--whole-cycle`` and ``--late-after-minutes`` reach
+    every member's fetch stage, and the flags the route does not consume
+    are refused by name (:func:`_refuse_recipe_unconsumed`).  The route
+    used to return to the door before any of them was read.
+    """
+
+    import tomllib
+
+    from woof.ensemble import recipe_door
+
+    config = Path(args.config)
+    payload = tomllib.loads(config.read_text(encoding="utf-8-sig"))
+    _refuse_recipe_unconsumed(args)
+    _posting_options(args)          # refuses --no-probe without --readiness
+    posting = {key: value for key, value in (
+        ("transport", getattr(args, "transport", None)),
+        ("as_posted", False if getattr(args, "whole_cycle", False) else None),
+        ("late_after_minutes", getattr(args, "late_after_minutes", None)),
+    ) if value is not None}
+    if posting.get("as_posted") is False:
+        # The budget is an as-posted fetch's; the whole-cycle rule waits
+        # for nothing, as the ordinary plan drops it.
+        posting.pop("late_after_minutes", None)
+    cycle = _recipe_flag_cycle(args, payload)
+    if getattr(args, "readiness", False):
+        return _recipe_readiness(args, request, config, payload, cycle, posting)
+    if cycle is not None:
+        config, payload = _at_flag_cycle(args, config, payload, cycle)
+    _extend_outdir(args, config, payload)
+    if getattr(args, "prepare_only", False):
+        return _prepare_only_launch(args, config=config, payload=payload, observer=observer)
+    with _checkpoint_retention(getattr(args, "keep_checkpoints", None)):
+        return recipe_door.run_recipe_ensemble(args, request, observer=observer,
+                                               options=posting)
 
 
 def _go_launch(args, *, observer=None) -> int:
@@ -4650,6 +5118,54 @@ def _go_launch(args, *, observer=None) -> int:
     return _go_prepared_main(args, observer=observer)
 
 
+def _prepare_only_launch(args, *, config, payload, observer=None):
+    """Run the source's ordinary live producer without starting a forecast."""
+    import hashlib
+    from woof import runplan
+    from woof.experiment import load_experiment
+    from woof.ensemble.runtime_context import current_session
+    if any(getattr(args, key, None) is not None for key in
+           ("restart", "prepared_root", "restart_roster")) or current_session() is not None:
+        raise GoRefusal("--prepare-only requires one source trajectory without a restart")
+    fetch = payload.get("fetch") or {}
+    chain = runplan.prepared_chain_for_source(str(fetch.get("source")),
+                                            source_root=fetch.get("source_root"))
+    if chain == "prepared:go":
+        return _go_prepared_main(args, observer=observer)
+    if chain not in ("prepared:hrrr", "prepared:staged"):
+        raise GoRefusal("--prepare-only requires a native prepared source route")
+    output = Path(args.outdir or config.parent / (config.stem + "-prepare"))
+    options = {key: str(Path(getattr(args, key)).resolve()) for key in
+               ("data_dir", "geog_root") if getattr(args, key, None) is not None}
+    if getattr(args, "transport", None) is not None:
+        options["transport"] = args.transport
+    if getattr(args, "whole_cycle", False):
+        options["as_posted"] = False
+    if getattr(args, "late_after_minutes", None) is not None:
+        options["late_after_minutes"] = args.late_after_minutes
+    if getattr(args, "supplement", None):
+        from woof.launch_supplements import bindings
+        options["supplement"] = bindings(args.supplement, base=Path.cwd())
+    raw = {"schema": runplan.PLAN_SCHEMA, "name": config.stem, "route": "prepared",
+           "config": {"path": str(config.resolve())}, "output_root": str(output.resolve()),
+           "run_options": options}
+    plan = runplan.build_plan(raw, source="woof go --prepare-only", base_dir=config.parent,
+                             sha256=hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest())
+    events = None
+    if observer is None:
+        events = runplan.EventStream(output / "preparation-events.jsonl")
+        observer = runplan.RunObserver(events)
+    operation = runplan._hrrr_chain if chain == "prepared:hrrr" else runplan._staged_chain
+    try:
+        result = operation(plan, config_path=config, exp=load_experiment(config),
+                           observer=observer, run_dir=output, prepare_only=True)
+    finally:
+        if events is not None:
+            events.close()
+    print(json.dumps({"status": "PREPARED", "prepared_root": result["prepared_root"]}, sort_keys=True))
+    return 0
+
+
 def _disk_admission(plan: dict, args) -> None:
     """Refuse, before the run folder is claimed or a byte is fetched, a run its disks cannot hold.
 
@@ -4675,6 +5191,7 @@ def _disk_admission(plan: dict, args) -> None:
     config = Path(plan["config"]).resolve()
     keep = getattr(args, "keep_checkpoints", None)
     options = {"keep_checkpoints": DEFAULT_KEEP_CHECKPOINTS if keep is None else keep,
+               "verify_visuals": os.environ.get("WOOF_VERIFY_VISUALS", "1").lower() not in ("0", "false", "off"),
                "render_products": plan.get("render_products") or None,
                # The line its sections are cut along: a plan naming an
                # xsec: product and no line is refused when it is built.
@@ -4944,6 +5461,8 @@ def _go_prepared_main(args, *, observer=None) -> int:
                       "OOM this run.")
             if gate.get("preparation_warning"):
                 print(f"go: WARNING -- {gate['preparation_warning']}.")
+            if gate.get("decode_warning"):
+                print(f"go: WARNING -- {gate['decode_warning']}.")
 
         _require_forecast_device()
         # Same rule as the memory gate, same side of the download.
@@ -5088,6 +5607,8 @@ def _go_prepared_main(args, *, observer=None) -> int:
             keep = DEFAULT_KEEP_CHECKPOINTS
 
         def forecast(head_sha256):
+            if getattr(args, "prepare_only", False):
+                return
             # A hierarchy proof carries no single prepared-cache identity,
             # and proof_digests says so by refusing.  The tree arm reads its
             # own one digest instead, so it is not asked for here.  A
@@ -5199,6 +5720,11 @@ def _go_prepared_main(args, *, observer=None) -> int:
         if hosted_relay is not None:
             hosted_relay.stop()
             hosted_relay = None
+        if getattr(args, "prepare_only", False):
+            if chain is not None:
+                chain.finish(status="PREPARED", exit_code=0)
+            print(json.dumps({"status": "PREPARED", "prepared_root": str(plan["prepared"])}, sort_keys=True))
+            return 0
         rendered = _render_stage(plan, explain=explain,
                                  observer=observer)
     except GoRefusal:
@@ -5225,25 +5751,8 @@ def _go_prepared_main(args, *, observer=None) -> int:
         # One sentence, 130, and the truth about what is on disk.  The
         # partial tree has no certification capsule, which is what makes
         # its incompleteness visible to every receipt reader.
-        child = ("" if stop.pid is None else
-                 f"  # the {stop.label} process was pid {stop.pid}; woof "
-                 "signalled nothing and killed nothing\n")
-        print(render(layered(
-            f"go: interrupted during {stop.label}; no later stage ran and "
-            f"{plan['root']} is a partial tree with no certification "
-            "capsule.\n"
-            f"{child}"
-            f"  remedy: woof go {_quote(plan['config'])} --outdir "
-            "<a new directory>   # every stage is create-only",
-            "Ctrl-C sends SIGINT to the whole foreground process group, "
-            "so the stage subprocess received it directly and woof did "
-            "not (and will not) signal any pid itself -- a tool that "
-            "kills pids it merely observed is a tool that eventually "
-            "kills the wrong one. If the stage was launched into the "
-            "background by a shell, SIGINT is SIG_IGN for the whole job "
-            "and neither process can see a Ctrl-C at all; send SIGTERM "
-            "there instead."),
-            explain=explain, command="woof go"), file=sys.stderr)
+        print(render(_interrupt_report(stop, plan),
+                     explain=explain, command="woof go"), file=sys.stderr)
         if chain is not None:
             chain.finish(status="INTERRUPTED",
                          exit_code=INTERRUPT_EXIT_CODE)
@@ -5268,7 +5777,9 @@ def _go_prepared_main(args, *, observer=None) -> int:
         print(f"go: forecast validity {verdict}")
     print(f"go: wrote {plan['run']}")
     if rendered:
-        print(f"go: rendered {plan['render']}")
+        pictures = _rendered_root(plan)
+        if pictures is not None:
+            print(f"go: rendered {pictures}")
     if chain is not None:
         summary = chain.finish(status="SUCCESS")
         # THE HEADLINE NUMBER, said out loud at the end of the run that
@@ -5288,6 +5799,30 @@ def _go_prepared_main(args, *, observer=None) -> int:
         print("go: launch to done "
               f"{_elapsed_words(summary['wall_seconds'])}{where}")
     return 0
+
+
+def _rendered_root(plan: dict) -> Path | None:
+    """The folder this run's pictures are in, or None when there is none.
+
+    An ensemble session draws its own aggregate maps while the members
+    run, under the forecast folder (``run/maps/<domain>/<product>/
+    <valid-day>/``), and the render stage only verifies them, so
+    ``plan["render"]`` is never created for an ensemble.  Breakage this
+    prevents: go's closing line named ``<run folder>/png`` for an ensemble
+    whose 132 pictures were under ``run/maps``, a path that did not exist.
+    """
+
+    from woof.ensemble.runtime_context import current_session
+
+    session = current_session()
+    if session is None:
+        return Path(plan["render"])
+    # The run folder as this chain names it everywhere else, then the
+    # session's own record of where it wrote.
+    for root in (plan.get("run"), getattr(session, "last_output_directory", None)):
+        if root is not None and (Path(root) / "maps").is_dir():
+            return Path(root) / "maps"
+    return None
 
 
 def _boundary_interval_refusal(plan: dict, report: dict) -> str | None:
@@ -5353,11 +5888,14 @@ def _checkpoint_sets(text: str) -> int:
 
 def register_cli(subparsers) -> None:
     parser = subparsers.add_parser(
-        "go",
+        "go", aliases=["ensemble"],
         help="prepare, run and render a forecast, fetching inputs when needed")
     parser.add_argument("config", type=Path, metavar="CONFIG",
                         help="an experiment TOML from woof domain; its source and "
                              "domain tree choose the preparation route")
+    from woof.ensemble.door import add_arguments, add_recipe_arguments
+    add_arguments(parser)
+    add_recipe_arguments(parser)
     parser.add_argument("--outdir", type=Path, default=None, metavar="DIR",
                         help="output root for one timestamped run folder per launch, "
                              "with forecast files, pictures and diagnostics "
@@ -5369,6 +5907,8 @@ def register_cli(subparsers) -> None:
     parser.add_argument("--restart", type=Path, default=None, metavar="CHECKPOINT",
                         help="continue an existing checkpoint; prepared-cache runs "
                              "also need --prepared-root, and use fresh output")
+    parser.add_argument("--prepare-only", action="store_true",
+                        help="fetch and stream prepared inputs without starting a forecast")
     parser.add_argument("--prepared-root", type=Path, default=None, metavar="DIR",
                         help="run this existing prepared bundle without fetch or "
                              "preparation; add --restart to continue its checkpoint")
@@ -5433,6 +5973,8 @@ def register_cli(subparsers) -> None:
                              "catalog), or 'none' to stop after the "
                              "forecast.  The same spelling `woof render "
                              "--products` takes")
+    parser.add_argument("--no-verify-visuals", action="store_false", dest="verify_visuals", default=None,
+                        help="skip postforecast observation verification; the physical run is unchanged")
     # `woof render --section`, carried to every render this chain runs:
     # the frames drawn as they land, the early first frame and the
     # end-of-run batch.  Without it an `xsec:` term in --products passed

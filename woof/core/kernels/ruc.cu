@@ -1,6 +1,6 @@
-// WRF v4.6.1 RUC LSM dominant-category surface/soil parameter setup.
-// One thread transcribes one call to module_sf_ruclsm.F:soilvegin with
-// mosaic_lu=0 and mosaic_soil=0.  Explicit round-to-nearest intrinsics keep
+// WRF v4.6.1 RUC LSM surface/soil parameter setup.
+// Public-domain WRF transcription: licenses/LICENSE-WRF-public-domain.txt.
+// One thread transcribes one call to module_sf_ruclsm.F:soilvegin.  Explicit round-to-nearest intrinsics keep
 // the operation boundaries used by WRF default REAL arithmetic.
 
 // PROVISIONAL float32 transcendentals, pending a verified glibc transcription.
@@ -135,6 +135,82 @@ real ruc_expf_rn(real value)
     return __double2float_rn(exp((double)value));
 }
 
+// >>> RUC MOSAIC SURFACE >>>
+// WRF SOILVEGIN mosaic loops. Keep ascending category accumulation and
+// the capped area; effective roughness deliberately has no area division.
+__device__ __forceinline__ void ruc_mosaic_parameters(
+    int i,int n,int nlcat,int nscat,int mosaic_lu,int mosaic_soil,
+    const float* landusef,const float* soilctop,
+    int soil,int iswater,bool rdlai2d,float factor,float incoming_znt,
+    const int* ifortbl,const float* z0tbl,const float* lemitbl,
+    const float* pctbl,const float* laitbl,const float* bb,
+    const float* drysmc,const float* hc,const float* maxsmc,
+    const float* refsmc,const float* satpsi,const float* satdk,
+    const float* wltsmc,const float* qtz,
+    float& emiss,float& pc,float& znt,float& lai,
+    float& qwrtz,float& rhocs,float& bclh,float& dqm,
+    float& ksat,float& psis,float& qmin,float& ref,float& wilt) {
+    if(mosaic_lu) {
+        float area=0.0f, rough=0.0f, leaf=0.0f;
+        emiss=pc=0.0f;
+        for(int k=0;k<nlcat;++k) {
+            float fraction=landusef[k*n+i];
+            int forest=ifortbl[k];
+            float delta=0.0f,scaled=__fmul_rn(0.8f,laitbl[k]);
+            if(forest==1) delta=fminf(0.2f,scaled);
+            if(forest==2 || forest==7) delta=fminf(0.5f,scaled);
+            if(forest==3) delta=fminf(0.45f,scaled);
+            if(forest==4) delta=fminf(0.75f,scaled);
+            if(forest==5) delta=fminf(0.86f,scaled);
+            float today_lai=k+1==iswater ? laitbl[k]:__fsub_rn(laitbl[k],__fmul_rn(delta,factor));
+            float today_znt=k+1==iswater ? incoming_znt:(forest==7 ? __fsub_rn(z0tbl[k],__fmul_rn(0.125f,factor)):z0tbl[k]);
+            float logarithm=gfk_log(__fdiv_rn(5.0f,today_znt));
+            area=__fadd_rn(area,fraction);
+            emiss=__fadd_rn(emiss,__fmul_rn(lemitbl[k],fraction));
+            rough=__fadd_rn(rough,__fdiv_rn(fraction,__fmul_rn(logarithm,logarithm)));
+            if(!rdlai2d) leaf=__fadd_rn(leaf,__fmul_rn(today_lai,fraction));
+            pc=__fadd_rn(pc,__fmul_rn(pctbl[k],fraction));
+        }
+        area=fminf(1.0f,area);
+        emiss=__fdiv_rn(emiss,area);
+        pc=__fdiv_rn(pc,area);
+        znt=__fdiv_rn(5.0f,gfk_exp(__fsqrt_rn(__fdiv_rn(1.0f,rough))));
+        if(!rdlai2d) lai=__fdiv_rn(leaf,area);
+    }
+    if(mosaic_soil) {
+        float area=0.0f;
+        qwrtz=rhocs=bclh=dqm=ksat=psis=qmin=ref=wilt=0.0f;
+        for(int k=0;k<nscat;++k) {
+            if(k==13) continue;
+            float fraction=soilctop[k*n+i];
+            area=__fadd_rn(area,fraction);
+            rhocs=__fadd_rn(rhocs,__fmul_rn(__fmul_rn(hc[k],1.0e6f),fraction));
+            bclh=__fadd_rn(bclh,__fmul_rn(bb[k],fraction));
+            dqm=__fadd_rn(dqm,__fmul_rn(__fsub_rn(maxsmc[k],drysmc[k]),fraction));
+            ksat=__fadd_rn(ksat,__fmul_rn(satdk[k],fraction));
+            psis=__fsub_rn(psis,__fmul_rn(satpsi[k],fraction));
+            qmin=__fadd_rn(qmin,__fmul_rn(drysmc[k],fraction));
+            ref=__fadd_rn(ref,__fmul_rn(refsmc[k],fraction));
+            wilt=__fadd_rn(wilt,__fmul_rn(wltsmc[k],fraction));
+            qwrtz=__fadd_rn(qwrtz,__fmul_rn(qtz[k],fraction));
+        }
+        area=fminf(1.0f,area);
+        if(area<=0.0f) {
+            int k=soil-1;
+            rhocs=__fmul_rn(hc[k],1.0e6f); bclh=bb[k];
+            dqm=__fsub_rn(maxsmc[k],drysmc[k]); ksat=satdk[k];
+            psis=-satpsi[k]; qmin=drysmc[k]; ref=refsmc[k];
+            wilt=wltsmc[k]; qwrtz=qtz[k];
+        } else {
+            rhocs=__fdiv_rn(rhocs,area); bclh=__fdiv_rn(bclh,area);
+            dqm=__fdiv_rn(dqm,area); ksat=__fdiv_rn(ksat,area);
+            psis=__fdiv_rn(psis,area); qmin=__fdiv_rn(qmin,area);
+            ref=__fdiv_rn(ref,area); wilt=__fdiv_rn(wilt,area);
+            qwrtz=__fdiv_rn(qwrtz,area);
+        }
+    }
+}
+
 extern "C" __global__
 void ruc_surface_parameters(
     const int* __restrict__ isltyp,
@@ -172,7 +248,9 @@ void ruc_surface_parameters(
     real* __restrict__ qmin_out,
     real* __restrict__ ref_out,
     real* __restrict__ wilt_out,
-    int iswater, int rdlai2d, int n)
+    int iswater, int rdlai2d, int n,
+    const float* landusef,const float* soilctop,
+    int nlcat,int nscat,int mosaic_lu,int mosaic_soil)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
@@ -237,7 +315,7 @@ void ruc_surface_parameters(
     qmin_out[idx] = 0.0f;
     ref_out[idx] = 0.0f;
     wilt_out[idx] = 0.0f;
-    if (isltyp[idx] == 14) return;
+    if (isltyp[idx] != 14) {
 
     qwrtz_out[idx] = qtz[soil_index];
     rhocs_out[idx] = __fmul_rn(hc[soil_index], 1.0e6f);
@@ -248,7 +326,17 @@ void ruc_surface_parameters(
     qmin_out[idx] = drysmc[soil_index];
     ref_out[idx] = refsmc[soil_index];
     wilt_out[idx] = wltsmc[soil_index];
+    }
+    ruc_mosaic_parameters(idx,n,nlcat,nscat,mosaic_lu,mosaic_soil,
+        landusef,soilctop,isltyp[idx],iswater,rdlai2d,factor,znt_in[idx],
+        ifortbl,z0tbl,lemitbl,pctbl,laitbl,bb,drysmc,hc,maxsmc,
+        refsmc,satpsi,satdk,wltsmc,qtz,
+        emiss_out[idx],pc_out[idx],znt_out[idx],lai_out[idx],
+        qwrtz_out[idx],rhocs_out[idx],bclh_out[idx],dqm_out[idx],
+        ksat_out[idx],psis_out[idx],qmin_out[idx],ref_out[idx],wilt_out[idx]);
+
 }
+// <<< RUC MOSAIC SURFACE <<<
 
 
 // Freezing-curve partition used on both sides of WRF's snow-free soiltemp
@@ -515,7 +603,20 @@ void ruc_soil_properties(
     real kdry = __fdiv_rn(
         __fadd_rn(__fmul_rn(0.135f, gamd), 64.7f),
         __fsub_rn(2700.0f, __fmul_rn(0.947f, gamd)));
+    // SOILPROP by WRF lineage (ruc_soilprop, gpuwm/core/ruc_tier.py).  The
+    // default is WRF v4.0-4.5 (v4.5.2 module_sf_ruclsm.F:6154, 6213-6216,
+    // 6245; the operational RAP/HRRR branch carries the same lines at 6343,
+    // 6402-6407, 6434): Johansen's kzero at every quartz fraction, and water
+    // diffusivity and conductivity normalised by the moisture above the
+    // residual, (theta - qmin)/(theta_sat - qmin).  GPUWM_SOILPROP_WRF461
+    // compiles WRF v4.6.1 (:6198-6202, 6261-6267, 6289): a 3.0 mineral
+    // conductivity below 20 percent quartz, and total moisture over porosity,
+    // which diffuses 2.5 to 8 times more water up into a dry top level.
+#ifdef GPUWM_SOILPROP_WRF461
     real mineral = qwrtz > 0.2f ? 2.0f : 3.0f;
+#else
+    real mineral = 2.0f;
+#endif
     real kas = __fmul_rn(
         ruc_powf_rn(conductivity_quartz, qwrtz),
         ruc_powf_rn(mineral, __fsub_rn(1.0f, qwrtz)));
@@ -585,21 +686,31 @@ void ruc_soil_properties(
         real ice = __fmul_rn(riw, middle_ice);
         real diffusivity = 0.0f;
         if (__fsub_rn(ws, ice) >= 0.12f) {
+#ifdef GPUWM_SOILPROP_WRF461
             real h = fmaxf(
                 0.0f,
                 __fdiv_rn(
                     __fsub_rn(__fadd_rn(middle_moisture, qmin), ice),
                     fmaxf(minimum, __fsub_rn(ws, ice))));
+            real porosity = ws;
+#else
+            real h = fmaxf(
+                0.0f,
+                __fdiv_rn(
+                    __fsub_rn(middle_moisture, ice),
+                    fmaxf(minimum, __fsub_rn(dqm, ice))));
+            real porosity = dqm;
+#endif
             real facd = 1.0f;
             if (ice != 0.0f) {
                 facd = __fsub_rn(
                     1.0f, __fdiv_rn(ice, fmaxf(minimum, middle_moisture)));
             }
-            real ame = fmaxf(minimum, __fsub_rn(ws, ice));
+            real ame = fmaxf(minimum, __fsub_rn(porosity, ice));
             diffusivity = __fmul_rn(__fmul_rn(-bclh, ksat), psis);
             diffusivity = __fdiv_rn(diffusivity, ame);
             diffusivity = __fmul_rn(
-                diffusivity, ruc_powf_rn(__fdiv_rn(ws, ame), 3.0f));
+                diffusivity, ruc_powf_rn(__fdiv_rn(porosity, ame), 3.0f));
             diffusivity = __fmul_rn(
                 diffusivity, ruc_powf_rn(h, __fadd_rn(bclh, 2.0f)));
             diffusivity = __fmul_rn(diffusivity, facd);
@@ -619,7 +730,11 @@ void ruc_soil_properties(
                 1.0f,
                 __fdiv_rn(ice, fmaxf(minimum, soilmois[index])));
         }
+#ifdef GPUWM_SOILPROP_WRF461
         real am = fmaxf(minimum, __fsub_rn(ws, ice));
+#else
+        real am = fmaxf(minimum, __fsub_rn(dqm, ice));
+#endif
         real conductivity = __fdiv_rn(ksat, am);
         real exponent = __fadd_rn(__fmul_rn(2.0f, bclh), 2.0f);
         conductivity = __fmul_rn(
@@ -1913,6 +2028,17 @@ void ruc_sea_ice_step(
 
 
 // module_sf_ruclsm.F:63-69 sncovfac, read only when isncovr_opt==3.
+// The snow scheme by WRF lineage (ruc_snow, gpuwm/core/ruc_tier.py).  The
+// default compile is WRF v4.0-4.5, which the operational RAP/HRRR branch
+// carries; GPUWM_SNOW_WRF461 compiles WRF v4.6.1.  GPUWM_RUC_SNOW_V461 is the same
+// choice as a value, for the arms written as conditions; the generated
+// fused sfctmp kernel reads it too.
+#ifdef GPUWM_SNOW_WRF461
+#define GPUWM_RUC_SNOW_V461 true
+#else
+#define GPUWM_RUC_SNOW_V461 false
+#endif
+
 __device__ static const real ruc_sncovfac[30] = {
     0.030f, 0.030f, 0.030f, 0.030f, 0.030f,
     0.016f, 0.016f, 0.020f, 0.020f, 0.020f,
@@ -2240,7 +2366,7 @@ void ruc_snow_preparation(
     }
 
     // :1504 - the mosaic flag from the previous step's snow fraction.
-    if (snowfrac < 0.75f) snow_mosaic = one;
+    if (GPUWM_RUC_SNOW_V461 && snowfrac < 0.75f) snow_mosaic = one;
 
     // :1506-1540 fresh snowfall and its density.
     newsn = __fmul_rn(newsnms, delt);
@@ -2312,6 +2438,15 @@ void ruc_snow_preparation(
         infwater = prcpms;
     }
 
+#ifndef GPUWM_SNOW_WRF461
+    // Branch :1675-1679: the critical depths from the density this step
+    // built, and the mosaic flag from the depth before new snow.
+    snhei_crit = __fdiv_rn(critical_depth_coefficient, rhosn);
+    snhei_crit_newsn = __fdiv_rn(new_snow_depth_coefficient, rhosn);
+    snowfrac = fminf(one, __fdiv_rn(snhei, __fmul_rn(2.0f, snhei_crit)));
+    if (snowfrac < 0.75f) snow_mosaic = one;
+#endif
+
     // :1580-1598 fresh snow onto the ground.
     if (newsn > zero) {
         snwe = fmaxf(zero, __fsub_rn(__fadd_rn(snwe, newsn), intersn));
@@ -2338,6 +2473,20 @@ void ruc_snow_preparation(
     if (snhei > zero) {
         // :1603 - snow-covered points use the snow/ice land-use class.
         iland = isice;
+#ifndef GPUWM_SNOW_WRF461
+        // Branch :1708-1719.  isncovr_opt is not read.
+        snowfrac = fminf(one, __fdiv_rn(snhei, __fmul_rn(2.0f, snhei_crit)));
+        if (ivgtyp == urban) snowfrac = fminf(0.75f, snowfrac);
+        if (snowfrac < 0.75f) snow_mosaic = one;
+        if (newsn > zero) {
+            snowfracnewsn = fminf(one, __fdiv_rn(snhei, snhei_crit_newsn));
+        }
+        keep_snow_albedo = zero;
+        if (newsn > zero && snowfracnewsn > 0.99f) {
+            keep_snow_albedo = one;
+            snow_mosaic = zero;
+        }
+#else
         if (isncovr_opt == 1) {
             snowfrac = fminf(
                 one, __fdiv_rn(snhei, __fmul_rn(2.0f, snhei_crit)));
@@ -2378,6 +2527,7 @@ void ruc_snow_preparation(
             keep_snow_albedo = one;
             snow_mosaic = zero;
         }
+#endif
         // :1672-1680 roughness blend toward the snow/ice class.
         if (newsn == zero && znt <= 0.2f && ivgtyp != isice) {
             real snow_roughness = z0tbl[iland - 1];
@@ -2400,7 +2550,10 @@ void ruc_snow_preparation(
                 // :1690-1696 is unreachable: :1662 clears snow_mosaic
                 // whenever keep_snow_albedo is set, so this test can never
                 // pass.  Transcribed to stay faithful.
-                if (keep_snow_albedo > 0.9f && albsn < 0.4f) albsn = 0.7f;
+                // The branch has no 0.7 floor, here or below.
+                if (GPUWM_RUC_SNOW_V461 && keep_snow_albedo > 0.9f && albsn < 0.4f) {
+                    albsn = 0.7f;
+                }
                 emiss = emissn;
             } else {
                 albsn = fmaxf(
@@ -2411,7 +2564,8 @@ void ruc_snow_preparation(
                             __fmul_rn(
                                 __fsub_rn(alb_snow, alb_snow_free), snowfrac)),
                         alb_snow));
-                if (newsn > zero && keep_snow_albedo > 0.9f && albsn < 0.4f) {
+                if (GPUWM_RUC_SNOW_V461 && newsn > zero && keep_snow_albedo > 0.9f
+                    && albsn < 0.4f) {
                     albsn = 0.7f;
                 }
                 emiss = fmaxf(
@@ -3354,9 +3508,12 @@ void ruc_snow_sea_ice_step(
 }
 
 
-// module_sf_ruclsm.F:5046-5072, repeated verbatim at :5587-5610.  :49 fixes
-// isncond_opt = 2, so the constant 0.265/rhocsn branch is dead and the Sturm
-// et al. (1997) effective conductivity always applies.
+// module_sf_ruclsm.F:5046-5072, repeated verbatim at :5587-5610.  The snow
+// scheme by WRF lineage (ruc_snow, gpuwm/core/ruc_tier.py): the default is
+// WRF v4.0-4.5, which the operational RAP/HRRR branch carries (branch
+// :5235, :5738): a constant conductivity, thdifsn = 0.265/rhocsn.
+// GPUWM_SNOW_WRF461 compiles WRF v4.6.1, whose :49 fixes isncond_opt = 2:
+// the Sturm et al. (1997) effective conductivity.
 __device__ __forceinline__
 real ruc_snow_thermal_diffusivity(
     real rhosn,
@@ -3365,6 +3522,9 @@ real ruc_snow_thermal_diffusivity(
     real newsnow,
     real snhei)
 {
+#ifndef GPUWM_SNOW_WRF461
+    return __fdiv_rn(0.265f, rhocsn);
+#endif
     const real fact = 1.0f;
     real keff;
     if (rhosn < 156.0f || (newsnow > 0.0f && rhonewsn < 156.0f)) {
@@ -3847,7 +4007,9 @@ void ruc_snow_temperature_step(
 
         // :5332-5340 skin temperature.
         soilt = ts1;
-        if (nmelt == 1 && snowfrac == one && snwe > zero && soilt > freeze) {
+        // wrf_45 (the branch) has neither freezing clamp on the second pass.
+        if (GPUWM_RUC_SNOW_V461 && nmelt == 1 && snowfrac == one && snwe > zero
+            && soilt > freeze) {
             soilt = fminf(freeze, soilt);
         }
 
@@ -3874,7 +4036,7 @@ void ruc_snow_temperature_step(
             soilt1 = soilt;
             tsob = tso[0];
         }
-        if (nmelt == 1 && snowfrac == one) {
+        if (GPUWM_RUC_SNOW_V461 && nmelt == 1 && snowfrac == one) {
             soilt1 = fminf(freeze, soilt1);
             tso[0] = fminf(freeze, tso[0]);
             tsob = fminf(freeze, tsob);
@@ -3891,7 +4053,18 @@ void ruc_snow_temperature_step(
 
         if (nmelt == 1) break;
 
-        if (soilt > freeze && beta == one && snhei > zero) {
+#ifdef GPUWM_SNOW_WRF461
+        bool melts = soilt > freeze && beta == one && snhei > zero;
+#else
+        // Branch :5586: melt while the pack outlasts the step's evaporation.
+        bool melts = soilt > freeze
+            && __fsub_rn(
+                   snwepr,
+                   __fmul_rn(__fmul_rn(__fmul_rn(beta, epot), ras), delt))
+               > zero
+            && snhei > zero;
+#endif
+        if (melts) {
             // :5414-5553 top melt.
             nmelt = 1;
             soiltfrac = __fadd_rn(
@@ -3899,9 +4072,13 @@ void ruc_snow_temperature_step(
                 __fmul_rn(__fsub_rn(one, snowfrac), soilt));
             qsg = fminf(
                 qsg, __fdiv_rn(ruc_qsn_lookup(soiltfrac, tbq), pp));
+#ifdef GPUWM_SNOW_WRF461
             qvg = __fadd_rn(
                 __fmul_rn(snowfrac, qsg),
                 __fmul_rn(__fsub_rn(one, snowfrac), qvg));
+#else
+            qvg = qsg;  // branch :5590, saturated at melt
+#endif
             // :5419-5421 t3/upflux/xinet are dead: xinet is never read.
             epot = -__fmul_rn(qkms, __fsub_rn(qvatm, qsg));
             q1 = __fmul_rn(epot, ras);
@@ -3967,6 +4144,46 @@ void ruc_snow_temperature_step(
                     __fsub_rn(rain_temperature, soiltfrac)));
             snoh = fmaxf(zero, snoh);
             smelt = __fmul_rn(__fdiv_rn(snoh, xlmelt), milli);
+            // :5530 the Koren et al. (1999) retained fraction, both lineages.
+            real rsmfrac = fminf(
+                0.18f,
+                fmaxf(
+                    0.08f,
+                    __fmul_rn(__fdiv_rn(snwepr, 0.10f), 0.13f)));
+#ifndef GPUWM_SNOW_WRF461
+            {
+                // Branch :5652-5698, straight-line: the cap does not scale
+                // with the step or depend on density, and liquid is
+                // retained whenever the pack is deeper than 1 cm.
+                real available = __fsub_rn(
+                    __fdiv_rn(snwepr, delt),
+                    __fmul_rn(__fmul_rn(beta, epot), ras));
+                smelt = fminf(smelt, available);
+                smelt = fmaxf(zero, smelt);
+                real limit = __fmul_rn(5.6e-8f, meltfactor);
+                limit = __fmul_rn(
+                    limit, fmaxf(one, __fsub_rn(soilt, freeze)));
+                smelt = fminf(smelt, limit);
+                real rr = fmaxf(zero, available);
+                smelt = fminf(smelt, rr);
+                snoh = __fmul_rn(__fmul_rn(smelt, xlmelt), thousand);
+                if (snhei > 0.01f) {
+                    rsm = __fmul_rn(__fmul_rn(rsmfrac, smelt), delt);
+                } else {
+                    rsm = zero;
+                }
+                smelt = fmaxf(zero, __fsub_rn(smelt, __fdiv_rn(rsm, delt)));
+                snwe = fmaxf(
+                    zero,
+                    __fsub_rn(
+                        snwepr,
+                        __fmul_rn(
+                            __fadd_rn(
+                                smelt,
+                                __fmul_rn(__fmul_rn(beta, epot), ras)),
+                            delt)));
+            }
+#else
             real potential = __fmul_rn(__fmul_rn(epot, ras), delt);
             if (epot > zero && snwepr <= potential) {
                 // :5483-5491 all the snow can evaporate; jump to :5518.
@@ -4004,11 +4221,6 @@ void ruc_snow_temperature_step(
             snoh = __fmul_rn(__fmul_rn(smelt, xlmelt), thousand);
             if (smelt > zero) {
                 // :5529-5543 Koren et al. (1999) liquid retention.
-                real rsmfrac = fminf(
-                    0.18f,
-                    fmaxf(
-                        0.08f,
-                        __fmul_rn(__fdiv_rn(snwepr, 0.10f), 0.13f)));
                 if (snhei > 0.01f && rhosn < 350.0f) {
                     rsm = __fmul_rn(__fmul_rn(rsmfrac, smelt), delt);
                 } else {
@@ -4030,9 +4242,11 @@ void ruc_snow_temperature_step(
                                 __fmul_rn(__fmul_rn(beta, epot), ras)),
                             delt)));
             }
+#endif
         } else {
-            // :5557-5567 no melt: sublimation or condensation only.
-            if (snhei != zero && beta == one) {
+            // :5557-5567 no melt: sublimation or condensation only.  The
+            // branch updates any pack and never zeroes one here.
+            if (snhei != zero && (beta == one || !GPUWM_RUC_SNOW_V461)) {
                 epot = -__fmul_rn(qkms, __fsub_rn(qvatm, qsg));
                 snwe = fmaxf(
                     zero,
@@ -4040,7 +4254,7 @@ void ruc_snow_temperature_step(
                         snwepr,
                         __fmul_rn(
                             __fmul_rn(__fmul_rn(beta, epot), ras), delt)));
-            } else {
+            } else if (GPUWM_RUC_SNOW_V461) {
                 snwe = zero;
             }
         }
@@ -4132,16 +4346,19 @@ void ruc_snow_temperature_step(
             __fmul_rn(__fsub_rn(tso[0], soiltfrac), snohg), delt);
         snohg = fmaxf(zero, snohg);
         real smeltg = __fmul_rn(__fdiv_rn(snohg, xlmelt), milli);
-        // :5658-5660 the Egglston bottom-melt limit.
-        if ((rhosn < 350.0f || (newsnow > zero && rhonewsn < 450.0f))
-            && soilt < 283.0f) {
+        // :5658-5660 the Egglston bottom-melt limit; unconditional in the
+        // branch.
+        if (!GPUWM_RUC_SNOW_V461
+            || ((rhosn < 350.0f || (newsnow > zero && rhonewsn < 450.0f))
+                && soilt < 283.0f)) {
             smeltg = fminf(smeltg, 5.8e-9f);
         }
         real rr = __fdiv_rn(snwe, delt);
         smeltg = fminf(smeltg, rr);
         snwe = fmaxf(zero, __fsub_rn(snwe, __fmul_rn(smeltg, delt)));
         snhei = __fdiv_rn(__fmul_rn(snwe, thousand), rhosn);
-        smelt = __fadd_rn(smelt, smeltg);
+        // The branch keeps the bottom melt water out of smelt.
+        if (GPUWM_RUC_SNOW_V461) smelt = __fadd_rn(smelt, smeltg);
         if (snhei > zero) tso[0] = soiltfrac;
     }
 
