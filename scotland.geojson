@@ -1,0 +1,18 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "scotland-bounds"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-7.75, 54.63],
+        [-0.7, 54.63],
+        [-0.7, 60.86],
+        [-7.75, 60.86],
+        [-7.75, 54.63]
+      ]
+    ]
+  }
+}
