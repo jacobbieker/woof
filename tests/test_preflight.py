@@ -902,6 +902,13 @@ def test_every_scratch_call_site_is_classified(d01_cfg):
                 RunConfig(**_TINY, km_opt=2, bl_pbl_physics=0,
                           tke_budget=1),
                 RunConfig(**_TINY, km_opt=4, diff_opt=1),
+                # The NOAA WRFV3.9 fork's edge-to-edge sixth-order filter
+                # (the HRRR recipe default) on a specified domain with the
+                # slope taper owns the four diff6_edge_* slots; without
+                # this arm their call sites in dycore._diff6_edge_work are
+                # invisible to this completeness gate.
+                RunConfig(**_TINY, diff_6th_opt=2, specified=True,
+                          diff_6th_form="noaa_wrf39", diff_6th_slopeopt=1),
                 # The UW moist-turbulence PBL owns its zero plane
                 # (uwpbl_zero); without this arm its call site in
                 # _run_uwpbl is invisible to this completeness gate.
@@ -1273,16 +1280,10 @@ def test_mp28_scratch_registry_is_complete():
         "mp_thompson_aero_nwfaten",
         "mp_thompson_aero_nifaten",
         "mp_thompson_aero_entry_density",
-        "mp_thompson_aero_nwfa_entry_m3",
-        "mp_thompson_aero_nifa_entry_m3",
         "mp_thompson_aero_tau1_density",
         "mp_thompson_aero_nwfa_work_m3",
         "mp_thompson_aero_qc_entry",
         "mp_thompson_aero_ni_entry",
-        "mp_thompson_aero_rc_entry",
-        "mp_thompson_aero_nc_entry_m3",
-        "mp_thompson_aero_nu_c_entry",
-        "mp_thompson_aero_l_qc_entry",
         "mp_thompson_aero_condensation_rate",
     )}
     assert aerosol.items() <= slots.items()
@@ -2940,13 +2941,14 @@ def test_estimate_domain_itemization_pins(exp1):
         "scratch": 596974580,
         "lbc": 67091504,
         "nest": 0,
-        "transient": 441262500,
+        # _prepare_atmosphere also allocates rho: 4*49*200*250 bytes.
+        "transient": 451062500,
     }
     assert d01.resident_bytes == sum(
         v for c, v in by_cat.items() if c != "transient")
     assert d01.resident_bytes == 1513530992
     assert est.resident_bytes == d01.resident_bytes + est.k_tables_bytes
-    assert d01.transient_bytes == 441262500
+    assert d01.transient_bytes == 451062500
 
 
 @requires_4dom_inputs

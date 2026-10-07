@@ -64,6 +64,15 @@ _TOP_LEVEL_EXCLUDES = {
     # exists to call is not in this wheel, so shipping it would offer a
     # command that cannot run.
     "go_cli.py",
+    # Input-cycle checks belong to go_cli/runplan, both excluded here.
+    # Their checkpoint verification imports the forecast-only io.restart;
+    # no standalone preparation door imports this module.
+    "input_cycle.py",
+    # Nested health recovery (lane/prod-stability) restores a forecast
+    # from a checkpoint and re-arms the supervisor.  Its only importer,
+    # prepared_domain_tree_forecast.py, is the forecast runner this wheel
+    # does not carry; a preprocessing wheel runs no forecast to recover.
+    "stability_recovery.py",
     # Its only importer, go_cli.py, is excluded, as is its dependency
     # woof.supervisor. A preprocessing wheel does not run forecasts.
     "forecast_supervisor.py",
@@ -81,6 +90,10 @@ _TOP_LEVEL_EXCLUDES = {
     # stages, so the unresolved-import scan refused the whole staging.  A
     # preprocessing wheel runs no forecast whose frames it could draw.
     "live_products.py",
+    # Forecast-history comparison calls the excluded render front door.
+    # Staging it leaves an unresolved woof.render import in a package
+    # whose preparation commands do not create forecast history.
+    "render_compare.py",
     # The physics catalog behind `woof physics-catalog` and New forecast's
     # Physics step.  Its importers are woof/cli.py and woof/runplan.py,
     # both excluded, and it reaches for woof.domain_wizard,
@@ -217,6 +230,9 @@ _TOP_LEVEL_EXCLUDES = {
     # wheel resumes no forecast and draws no pictures.
     "restart_render.py",
     "runtime.py",
+    # Forecast-history consumers stay in WOOF; preparation still parses
+    # their metadata through simulated_radar_config.py.
+    "simulated_radar.py",
     "state_digest.py",
     "supervisor.py",
     # Forecast input runners and terminal job/catalog entry points have no
@@ -279,15 +295,20 @@ _TOP_LEVEL_EXCLUDES = {
     # domain's ground and crest-level wind allow.  Both set the time step a
     # forecast integrates with, when the forecast starts, and besides each
     # other their only importers are woof/runtime.py and the two prepared
-    # forecast runners, all excluded above.  Both reach woof.core.adaptive_clock, which this
-    # wheel does not stage (it reaches the physics cadence in
-    # woof.core.physics), so staging them made this builder's own
-    # unresolved-import scan refuse the whole staging and the RW-WPS
-    # package could not be built.  A preprocessing wheel takes no step.
+    # forecast runners, all excluded above. A preprocessing wheel takes
+    # no step and selects no terrain-dependent forecast clock. The shared
+    # adaptive-clock arithmetic is staged below because the namelist
+    # importer uses its acoustic count for a fixed step through WRF's
+    # adaptive clock; that does not call either terrain adaptation module.
     "acoustic_adaptation.py", "terrain_clock.py",
 }
 _CORE_MODULES = {
     "__init__.py",
+    # The namelist importer collapses equal adaptive-clock bounds using
+    # wrf_num_sound_steps. Its module imports adaptive_timestep at module
+    # scope; both use stdlib and numpy without initializing a forecast.
+    # The physics cadence refresh is function-local and recorded below.
+    "adaptive_clock.py", "adaptive_timestep.py",
     "constants.py",
     "diagnostics.py",
     # The C-library transcriptions the CPU paths hash through (A126):
@@ -512,7 +533,49 @@ _INGEST_EXCLUDES = {"preflight.py", "nest_spawn_init.py",
 #: the radar front door `woof doctor` checks for is unaffected.
 # GOES window acquisition publishes cycle/ensemble manifests. The lower-level
 # observation decoders remain available to standalone preprocessing.
-_OBS_EXCLUDES = {"sources.py", "goes_window.py"}
+#: `precipitation.py` subclasses `woof.obs.sources._GriddedSource` at module
+#: scope, so it crosses the same verification boundary `sources.py` does and
+#: stays behind with it.  It is the scorer's precipitation timeline, and its
+#: only importer is the observation battery's scoring tool, which this wheel
+#: does not stage.
+_OBS_EXCLUDES = {"sources.py", "goes_window.py", "precipitation.py"}
+#: The PREPARATION SIDE of ``woof/ensemble``, an allowlist like
+#: ``_IO_MODULES`` and for the same reason: the package is mostly member
+#: orchestration and the batched forecast, which this wheel exists not to
+#: carry.
+#:
+#: What forces a name here is that ordinary preparation reaches it.  Every
+#: streamed preparation asks ``posted_preparation`` whether a posted member
+#: input is bound (``woof/ingest/boundary_stream.py``, ``woof/gfs_direct.py``,
+#: ``woof/mapped_direct.py``, ``woof/ingest/nest_init.py``), every child
+#: preparation asks ``runtime_preparation`` the same about a runtime member
+#: (``nest_init.py``), and every namelist import reads ``stochastic`` and
+#: ``stochastic_seeds`` through ``woof/namelist_stochastic.py``.  With the
+#: package absent each of those is a ModuleNotFoundError in a preparation
+#: that binds no member at all, which is how the ensemble line broke this
+#: wheel's staging.
+#:
+#: The rest is the physical member input those doors accept
+#: (``--physical-input-store``, ``--physical-output-store``, a posted
+#: provider): the store, its field contract, the boundary record a prepared
+#: head binds, the source recipes and the three per-source contracts and
+#: reuse writers.  Module scope across the set is the standard library plus
+#: numpy; every reach into the forecast executor is function-local and has
+#: its reason in ``_OPTIONAL_STAGED_IMPORTS``.
+#:
+#: ``__init__.py`` is staged as the package door.  Its exports are lazy, so
+#: importing one of these modules imports none of the orchestration the
+#: door also names (``cycle`` and ``engine`` reach the forecast executor).
+_ENSEMBLE_MODULES = {
+    "__init__.py",
+    "gfs_physical_contract.py", "gfs_posted_reuse.py",
+    "hrrr_physical_contract.py",
+    "mapped_physical_contract.py", "mapped_posted_reuse.py",
+    "physical_boundary.py", "physical_fields.py", "physical_store.py",
+    "posted_native.py", "posted_physical.py", "posted_preparation.py",
+    "member_variants.py", "recipes.py", "runtime_preparation.py", "seeds.py",
+    "stochastic.py", "stochastic_seeds.py", "surface_controls.py",
+}
 #: The only two files of ``woof/io`` this wheel stages -- named
 #: individually rather than by excluding the rest of the package,
 #: because the package is the forecast executor's output side and the
@@ -586,6 +649,7 @@ _IO_MODULES = {"__init__.py", "classic_product.py", "classic_tape.py",
                "wrf_output_schema.py"}
 _ROOT_DATA = {
     "native_wrf_support_v1.json",
+    "physics_params_registry_v1.json",
     "physics_registry_v2.json",
     "wrf_direct_v461_contract.json",
 }
@@ -619,6 +683,66 @@ _FORBIDDEN_STAGED_FILES = {
 }
 
 _OPTIONAL_STAGED_IMPORTS = {
+    ("woof/core/adaptive_clock.py", "woof.core.physics"):
+        "the physics cadence helpers inside _refresh_physics_cadence, "
+        "called by the executing adaptive driver. The function returns "
+        "before this import without a live physics driver; namelist "
+        "translation calls only wrf_num_sound_steps and standalone "
+        "preparation advances no forecast clock",
+    ("woof/config.py", "woof.ensemble.request"):
+        "the [ensemble] table's validator, imported only when a RunConfig "
+        "TOML carries the table.  The request reads the batched forecast's "
+        "product table (woof.ensemble.batch_products), which this wheel "
+        "does not stage.  load_config asks "
+        "woof.ensemble.request_installed() first: preparation consumes "
+        "nothing from the table, so a preparation-only install leaves it "
+        "for the ensemble door to validate where the forecast is installed",
+    ("woof/experiment.py", "woof.ensemble.request"):
+        "the same [ensemble] validator at the experiment door, behind the "
+        "same request_installed() check as woof/config.py above",
+    ("woof/core/streaming.py", "woof.ensemble.stochastic_streaming"):
+        "the stochastic hook of an executing forecast tile step; "
+        "StreamingOptions and config validation reach no step",
+    ("woof/stage_cli.py", "woof.ensemble.calibration_admission"):
+        "the calibrated-perturbation admission inside sim_main, a forecast "
+        "door.  This package's one route into stage_cli is the preparation "
+        "handoff, which resolves no forecast (see "
+        "woof.prepared_single_domain_forecast below)",
+    ("woof/ensemble/posted_physical.py", "woof.ensemble.physical_recenter"):
+        "the recentered recipe's member operator, imported inside "
+        "PostedPhysicalProvider.prepare only for recipe kind 'recentered'.  "
+        "It runs real initialization over a donor population on the card "
+        "(woof.ensemble.recentered, woof.ensemble.native_preparation); "
+        "direct posted recipes never take the branch",
+    ("woof/ensemble/posted_native.py", "woof.prepared_single_domain_forecast"):
+        "the ordinary source head preflight a posted provider's member runs "
+        "with its original pin (checked_source_inputs).  It is the forecast "
+        "runner's preflight and this wheel carries no forecast runner; the "
+        "function asks woof.stage_cli.missing_forecast_runners() first and "
+        "refuses a provider member here by name.  Sealed physical stores do "
+        "not reach it",
+    ("woof/ensemble/runtime_preparation.py", "woof.ingest.preflight"):
+        "the runtime member's input catalog (runtime_input_catalog and "
+        "RuntimePreparation.catalog), called by the forecast runtime's own "
+        "preparation, excluded with woof/ingest/preflight.py above.  A "
+        "standalone preparation asks only current_runtime_preparation(), "
+        "which answers None with no runtime member bound",
+    ("woof/ensemble/runtime_preparation.py", "woof.ingest.case_store"):
+        "capture_root_inputs seals a runtime member's cold source words, "
+        "reached only inside a root build scope the forecast runtime opens",
+    ("woof/ensemble/runtime_preparation.py", "woof.runtime"):
+        "prepare_root and _restore_root build or restore a runtime member's "
+        "root through the forecast runtime, excluded above",
+    ("tools/hrrr_single_domain_benchmark.py", "tools.hrrr_posted_reuse"):
+        "the shared posted HRRR producer of a provider member, imported only "
+        "with --physical-input-provider and beside "
+        "woof.ensemble.posted_native.checked_source_inputs, which refuses a "
+        "provider member on a preparation-only install by name before the "
+        "producer is used",
+    ("woof/ingest/prepared_store.py", "woof.core.terrain_drag"):
+        "the topo_wind=1 halo refresh of a forecast slab's physics "
+        "initialization (CuPy, imported inside the function); standalone "
+        "preparation initializes no forecast physics",
     ("woof/config.py", "woof.offline_child_geography"):
         "the [static] parser runs only when load_config admits child_static, "
         "which only the excluded offline child route requests; ordinary "
@@ -647,9 +771,6 @@ _OPTIONAL_STAGED_IMPORTS = {
         "caller prices a downscaled forecast child "
         "(downscale_pricing.price_child).  The clause also catches a failed "
         "import and states the refusal without the cost",
-    ("woof/core/streaming.py", "woof.core.adaptive_clock"):
-        "adaptive forecast tile planning/step execution; StreamingOptions "
-        "and config validation reach none of these function-local imports",
     ("woof/core/streaming.py", "woof.io.restart"):
         "live forecast tile builder inventories restart tracker slots; "
         "standalone preparation constructs no tile stepper",
@@ -659,6 +780,14 @@ _OPTIONAL_STAGED_IMPORTS = {
         "--restart checkpoint is the run's input.  This package resumes no "
         "checkpoint and does not stage the restart reader, so a --cycle "
         "check here reads a prepared bundle's or declared forcing's start",
+    ("woof/ingest/stream_resume.py", "woof.io.restart"):
+        "the checkpoint clock of `seal-prefix --checkpoint` "
+        "(read_restart_header), imported inside main only when a forecast "
+        "checkpoint names the prefix to seal (lane/spot-resume).  This "
+        "package writes and resumes no checkpoint; a standalone "
+        "preparation seals by --checkpoint-seconds, and its staged "
+        "callers (fetch_as_posted, hrrr_hierarchy_direct) import only the "
+        "posted-marker helpers",
     ("woof/core/streaming.py", "woof.core.streamed_relocation"):
         "forecast-only replacement/adoption of a child store after a move",
     ("woof/core/streaming.py", "woof.core.physics_step_control"):
@@ -690,11 +819,23 @@ _OPTIONAL_STAGED_IMPORTS = {
         "as it is here without woof.core.preflight and woof.core.model, "
         "so an era5, gfs or mapped preparation publishes at its seal and "
         "neither import runs",
+    ("woof/ingest/host_decode_window.py", "woof.core.preflight"):
+        "the nominal GFS field count (source_analysis_fields_per_time) "
+        "inside plan_window, the planner's pre-fetch view that only "
+        "woof/go_cli.py's memory line calls; go_cli is excluded above.  "
+        "The staged preparation path, woof/gfs_direct.py, imports only "
+        "decode_window, available_host_bytes, threads_available and "
+        "gfs_decoded_lead_bytes, which price the window from the fetched "
+        "files themselves and reach no preflight import",
     ("woof/ingest/boundary_stream.py", "woof.core.urban_state"):
         "the BEM workspace count reader in prepared_head_urban_columns; "
         "forecast_installed() is checked before this import, so a "
         "preparation-only installation reads no forecast workspace count "
         "and publishes at the seal",
+    ("woof/ingest/boundary_stream.py", "woof.core.devices_memory"):
+        "ranked forecast memory admission, reached through PreparedTreeWriter.admit "
+        "only after forecast_installed() confirms a forecast executor; a "
+        "preparation-only installation returns before pricing any forecast",
     ("woof/ingest/boundary_stream.py", "woof.prepared_domain_tree_forecast"):
         "the prepared tree's land-cover count reader, reused for chained "
         "head admission after forecast_installed() confirms this package "
@@ -1118,7 +1259,7 @@ description = "Native parallel preprocessing and stock-WRF initialization"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26", "netCDF4>=1.6"]
+dependencies = ["numpy>=1.26", "netCDF4>=1.6", "threadpoolctl>=3.1"]
 keywords = ["WRF", "WPS", "GRIB", "NetCDF", "weather"]
 classifiers = ["License :: OSI Approved :: Apache Software License"]
 
@@ -1146,6 +1287,7 @@ include = ["woof*", "tools"]
 [tool.setuptools.package-data]
 woof = [
   "native_wrf_support_v1.json",
+  "physics_params_registry_v1.json",
   "physics_registry_v2.json",
   "wrf_direct_v461_contract.json",
   "authorities/*.json",
@@ -1153,6 +1295,7 @@ woof = [
   "core/kernels/*.cuh",
   "data/noah_tables/*.TBL",
   "data/noah_tables/*.md",
+  "data/thompson/fork-build/*.F90",
 ]
 tools = ["*.sh"]
 """
@@ -1262,6 +1405,11 @@ def _stage_rw_wps_python_project(destination: Path) -> dict[str, object]:
             REPO / "woof" / "io" / name,
             package / "io" / name,
         )
+    for name in sorted(_ENSEMBLE_MODULES):
+        _copy_source(
+            REPO / "woof" / "ensemble" / name,
+            package / "ensemble" / name,
+        )
     for name in sorted(_CORE_MODULES):
         _copy_source(
             REPO / "woof" / "core" / name,
@@ -1284,6 +1432,10 @@ def _stage_rw_wps_python_project(destination: Path) -> dict[str, object]:
                 source,
                 package / "data" / "noah_tables" / source.name,
             )
+    # Fork tables are generated from pinned public inputs at actual first use.
+    # Ship only the small original CPU harness, never the 345 MB coefficient set.
+    for source in sorted((REPO / "woof" / "data" / "thompson" / "fork-build").glob("*.F90")):
+        _copy_source(source, package / "data" / "thompson" / "fork-build" / source.name)
     for name in sorted(_TOOL_FILES):
         _copy_source(REPO / "tools" / name, destination / "tools" / name)
     _copy_source(REPO / "README.md", destination / "README.md")

@@ -12,10 +12,12 @@ the experiment through woof's existing atomic writer and carry
 
 from __future__ import annotations
 
+from woof.physics_registry import canonical_template_id
+
 import argparse
 import copy
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from fractions import Fraction
 import hashlib
@@ -136,6 +138,7 @@ from woof.physics_compat import (  # noqa: E402
     validate_single_domain_physics_profile,
 )
 from woof.certify.capsule import emit_run_capsule  # noqa: E402
+from woof.physics_profile_siblings import with_profile_siblings
 from woof.spectral_seam import (  # noqa: E402
     seam_capsule_receipts as _seam_capsule_receipts,
 )
@@ -326,7 +329,13 @@ _VERIFIED_SOURCE_PHYSICS_PROFILES = {
         # it moves the microphysics of, as the registry route declares it.
         THOMPSON_MYNN_RUC_DUDHIA_PHYSICS_PROFILE,
         MYNN_RUC_RTE_RRTMGP_PHYSICS_PROFILE,
-        THOMPSON_MYNN_RUC_RTE_RRTMGP_PHYSICS_PROFILE),
+        THOMPSON_MYNN_RUC_RTE_RRTMGP_PHYSICS_PROFILE,
+        "thompson-mp8-mynn-mynn-ruc-monthly-rrtmg-legacy-v1",
+        # The monthly-albedo twin with alb_sol 1 (lane/286-albsol) and the
+        # GSD MYNN 4.1 Thompson-aerosol suite (lane/286-fork-mynn), as the
+        # registry route declares them for this source.
+        "thompson-mp8-mynn-mynn-ruc-monthly-solar-rrtmg-legacy-v1",
+        "thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1"),
     "20crv3": (
         TWENTYCRV3_WSM6_PHYSICS_PROFILE, PHYSICS_PROFILE,
         THOMPSON_PHYSICS_PROFILE, MORRISON_PHYSICS_PROFILE,
@@ -456,7 +465,7 @@ _EXPERT_PROFILE_IDS = (
 #: template list is empty).
 _SOURCE_PHYSICS_PROFILES = MappingProxyType({
     source_id: (
-        tuple(p for p in profiles if p not in _EXPERT_PROFILE_IDS)
+        with_profile_siblings(p for p in profiles if p not in _EXPERT_PROFILE_IDS)
         + COMPOSITION_SUITE_PROFILE_IDS
         + _EXPERT_PROFILE_IDS
         if profiles else profiles)
@@ -513,6 +522,9 @@ _MATERIALIZED_PHYSICS_KEYS = frozenset({
     # The urban canopy selector every profile states since the urban models
     # joined the registry (none = 0); a physics switch, not a descriptor.
     "sf_urban_physics", "use_wudapt_lcz", "num_urban_hi",
+    # RUC mosaic selectors and MYNN scalar diffusion, stated by the
+    # profiles that select those schemes since 2.8.5.
+    "mosaic_lu", "mosaic_soil", "scalar_pblmix",
 })
 #: The nest-transition rule every materialized authority states.  No
 #: profile switch table carries it, so it is pinned here, once, and read
@@ -614,6 +626,7 @@ MAPPED_DIRECT_PROOF_KEYS = frozenset({
     # arrays built for another one.
     "vertical_coordinate",
     "prepared_cache", "export", "timing_seconds", "proof_content_sha256",
+    "preparation_parallelism", "forcing_stage_timings",
     # The prepared head the seal names (chained preparation).  A bundle
     # prepared before chaining carries none and is still accepted.
     "boundary_stream",
@@ -645,6 +658,10 @@ MAPPED_MOISTURE_FLOOR_KEYS = frozenset({
 #: document that has none.  A bundle that HAS it keeps the exactness,
 #: because the key is in the required sets above.
 MAPPED_VERTICAL_COORDINATE_KEYS = frozenset({"vertical_coordinate"})
+#: Completed at the direct preparation's seal. Older preparations have no
+#: worker/stage measurements; their scientific identity remains readable.
+MAPPED_PREPARATION_TELEMETRY_KEYS = frozenset({
+    "preparation_parallelism", "forcing_stage_timings"})
 #: Top-level proof keys the writer publishes ONLY when that preparation
 #: opted in, so the runner has to take the document with them and
 #: without them.  ``woof/mapped_direct.py`` spreads these in
@@ -665,9 +682,13 @@ MAPPED_VERTICAL_COORDINATE_KEYS = frozenset({"vertical_coordinate"})
 #: deferred_initial_perturbation).
 #: ``posting`` likewise: written only by a preparation made as its leads
 #: posted (DESIGN A136 2.4 item 6), the leads it waited for.
+#: ``source_pairing`` likewise: written only when the root is its source's
+#: own declared grid and pairs cell for cell (lane/286-fixed-step-grid,
+#: horiz.declared_grid_pairing); without it here the runner refused every
+#: such bundle as an unknown top-level inventory.
 MAPPED_OPTIONAL_PROOF_KEYS = frozenset({
     "statics_corridor", "source_vertical_ladder", "soil_temperature_repair",
-    "initial_perturbation", "posting"})
+    "initial_perturbation", "posting", "initial_source", "source_pairing"})
 _SOURCE_ADAPTER = {
     # The generic mapped adapter, truthfully: a packaged profile is
     # prepared by `woof.mapped_direct` with nothing model-specific in
@@ -1355,6 +1376,7 @@ def runner_capabilities() -> dict[str, object]:
                 "20crv3": "manifest-bound-uniform-positive-whole-hour",
                 "20crv3-cf": "uniform-positive-whole-hour",
                 "hrrr-prs": "uniform-positive-whole-hour",
+                "hrrr-native": "uniform-positive-whole-hour",
                 "gdas": "uniform-positive-whole-hour",
                 "gefs": "uniform-positive-whole-hour",
                 "gem-gdps": "uniform-positive-whole-hour",
@@ -1365,6 +1387,7 @@ def runner_capabilities() -> dict[str, object]:
                 "icon-eu": "uniform-positive-whole-hour",
                 "icon-d2": "uniform-positive-whole-hour",
                 "rap": "uniform-positive-whole-hour",
+                "rap-native": "uniform-positive-whole-hour",
                 "rrfs": "uniform-positive-whole-hour",
             },
             "forcing_must_cover_run": True,
@@ -1473,6 +1496,20 @@ class PreparedForecastInputs:
     #: clock, kept for a head-bound run only
     #: (:class:`woof.ingest.boundary_stream.ClockBasis`).
     clock_basis: object | None = None
+    #: Ephemeral immutable mappings verified by this sealed direct preflight.
+    #: These change no run authority or serialized receipt identity.
+    cache_payload: object | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def execution_plan(self):
+        """This run's execution plan, as the prepared-tree inputs carry it.
+
+        The preflight records it on the physics receipt; the ensemble
+        session reads it off the inputs to admit the native member pack
+        and to stamp its receipts, on both roads alike.
+        """
+        receipt = self.physics_receipt
+        return receipt.get("execution_plan") if isinstance(receipt, Mapping) else None
 
 
 @dataclass(frozen=True)
@@ -1573,6 +1610,42 @@ def _root_history_window(exp) -> tuple[float, float | None]:
             None if end_ticks is None else float(Fraction(end_ticks, den)))
 
 
+def _completed_history_inventory(records, schedule, *, captured_paths=None):
+    """Report retained native files separately from synchronous capture."""
+    if captured_paths is not None:
+        if records:
+            raise RuntimeError(
+                "suppressed member histories unexpectedly retained native file records")
+        if tuple(path.name for path in captured_paths) != tuple(row[2] for row in schedule):
+            raise RuntimeError(
+                "ensemble capture omitted or changed a hash-bound history handoff")
+        frames = [{"name": name, "model_elapsed_seconds": offset,
+                   "valid_time": valid_time.isoformat()}
+                  for offset, valid_time, name in schedule]
+        return [], {
+            "output_mode": "ensemble_capture",
+            "expected_frame_count": 0,
+            "scheduled_frame_count": len(schedule),
+            "initial_frame_verified": False,
+            "last_scheduled_frame_verified": False,
+            "initial_and_final_frames_verified": False,
+            "all_frames_readback_verified": False,
+            "capture": {
+                "expected_frame_count": len(schedule),
+                "frame_count": len(frames),
+                "exact_schedule_verified": True,
+                "history_files_retained": False,
+                "frames": frames,
+            },
+        }
+    inventory = [{**record, "model_elapsed_seconds": offset,
+                  "valid_time": valid_time.isoformat(),
+                  "atomic_writer_readback_verified": (
+                      record["sha256"] is not None and record["bytes"] is not None)}
+                 for record, (offset, valid_time, _name) in zip(records, schedule, strict=True)]
+    return inventory, {}
+
+
 def _validate_hash_bound_history_cadence(
         exp, history_interval_seconds: float,
 ) -> dict[str, object]:
@@ -1654,6 +1727,7 @@ def _profile_runtime_switches(source: str, profile: str) -> dict[str, object]:
 
 
 def _profile_readiness(source: str, profile: str) -> tuple[str, str | None]:
+    profile = canonical_template_id(profile)
     if source in _MAPPED_SOURCES:
         suffix = {
             THOMPSON_PHYSICS_PROFILE: (
@@ -1675,9 +1749,13 @@ def _profile_readiness(source: str, profile: str) -> tuple[str, str | None]:
             "this profile has no public forecast acceptance gate")
     if profile == THOMPSON_PHYSICS_PROFILE:
         return "WRF_MATCHED_RUN_EXPERIMENTAL_RUNTIME", (
-            "Thompson MP8 remains an experimental table-bound runtime")
+            "This legacy readiness code names an experimental runtime; "
+            "the July matched run is historical and does not cover this "
+            "current daytime-only suite.")
     if profile == MORRISON_PHYSICS_PROFILE:
-        return "WRF_MATCHED_RUN_RUNTIME_PROFILE", None
+        return "WRF_MATCHED_RUN_RUNTIME_PROFILE", (
+            "This legacy readiness code is a composition exemption; no "
+            "current matched-run manifest or decay tables cover this exact suite.")
     if profile in (
             NSSL2_PHYSICS_PROFILE,
             NSSL2_LEGACY_RRTMG_PHYSICS_PROFILE,
@@ -2937,6 +3015,11 @@ def claim_output_directory(
                 f"here to refuse or to reuse -- pass an {flag} that names "
                 f"a real path.") from probe_error
         if held:
+            from woof.ensemble.runtime_context import current_session
+            session = current_session()
+            if (session is not None and session.restart_roster is not None
+                    and path.resolve() == session.output_directory.resolve()):
+                return keep_spelling(given, _resolve_or_refuse(path, flag))
             raise FileExistsError(
                 f"{resolved} already holds a run's output "
                 f"({', '.join(held)[:120]}), and this runner never merges "
@@ -4433,6 +4516,57 @@ def _execution_plan_receipt(
     }
 
 
+def _apply_runtime_run_overrides(exp, overrides):
+    """Apply only run fields the prepared-state contract declares inert."""
+    if overrides is None:
+        return exp, []
+    if not isinstance(overrides, Mapping):
+        raise TypeError("runtime_run_overrides must be a mapping of RunConfig fields")
+    from woof.config import RunConfig, validate_run_config
+    from woof.ingest.prepared_cache import (
+        PREPARATION_INERT_RUN_FIELDS, effective_prepared_domain_config,
+        prepared_domain_config_identity)
+
+    allowed = {path.removeprefix("run.")
+               for path in PREPARATION_INERT_RUN_FIELDS if path.startswith("run.")}
+    for name in overrides:
+        if not isinstance(name, str) or name not in allowed:
+            raise ValueError(
+                f"runtime run override {name!r} changes a preparation input or "
+                "is unknown; only PREPARATION_INERT_RUN_FIELDS may reuse "
+                "the verified prepared state")
+        value = overrides[name]
+        declared = RunConfig.__dataclass_fields__[name].type
+        valid_type = {
+            "bool": type(value) is bool,
+            "int": type(value) is int,
+            "str": type(value) is str,
+            "float": type(value) in (int, float) and math.isfinite(value),
+            "float | None": value is None or (
+                type(value) in (int, float) and math.isfinite(value)),
+        }.get(declared, False)
+        if not valid_type:
+            raise ValueError(
+                f"runtime run override {name} must have declared type "
+                f"{declared}, got {value!r}")
+    original = exp.root.run
+    executed = validate_run_config(replace(original, **copy.deepcopy(dict(overrides))))
+    domain = replace(exp.root, run=executed)
+    if effective_prepared_domain_config(prepared_domain_config_identity(exp.root)) != \
+            effective_prepared_domain_config(prepared_domain_config_identity(domain)):
+        raise ValueError("runtime run overrides changed the prepared-domain identity")
+    changed = [{
+        "field": f"domain_config.run.{name}",
+        "prepared": getattr(original, name),
+        "executed": getattr(executed, name),
+        "prepared_state_changed": False,
+        "model_state_or_physics_changed": True,
+        "reason": "preparation does not read this field; the forecast uses the executed value",
+    } for name in sorted(overrides)
+        if getattr(original, name) != getattr(executed, name)]
+    return replace(exp, domains=(domain,)), changed
+
+
 def _validate_execution_file_receipt(
         receipt, actual: Path | None, label: str,
 ) -> None:
@@ -4681,6 +4815,7 @@ def _validate_packaged_mapped_evidence(
     # of it is still refused.
     expected_proof_keys -= MAPPED_MOISTURE_FLOOR_KEYS - set(proof)
     expected_proof_keys -= MAPPED_VERTICAL_COORDINATE_KEYS - set(proof)
+    expected_proof_keys -= MAPPED_PREPARATION_TELEMETRY_KEYS - set(proof)
     expected_proof_keys -= {"boundary_stream"} - set(proof)
     if not sealed:
         # A prepared head's proof: the seal adds these, and the seal
@@ -4711,6 +4846,11 @@ def _validate_packaged_mapped_evidence(
         _validate_proof_content_sha256(proof)
     evidence_root = _require_directory(
         prepared_root / "source-evidence", "mapped source evidence")
+    if "initial_source" in proof:
+        from woof.initial_source import validate_initial_evidence
+        validate_initial_evidence(
+            prepared_root, proof["initial_source"],
+            valid_time=proof["forcing_times"][0])
     mapping_path = _require_file(
         evidence_root / "mapping.json", "mapped source mapping evidence")
     composition_path = _require_file(
@@ -5057,7 +5197,7 @@ def _validate_packaged_mapped_evidence(
         # was invariant across the supplied times -- plus the fact that
         # its bytes are inside the proof, whose content hash the caller
         # pinned.
-        if declared_bindings:
+        if terrain_binding is not None:
             # Cross-source: the top-level alignment is the terrain
             # provider's binding receipt, under the binding's own declared
             # clock; every borrowed field must carry a subset digest, and
@@ -5445,6 +5585,22 @@ def _require_preprocessing_binding(bound, receipt) -> None:
             "prepared cache preprocessing identity differs from the proof")
 
 
+def _physical_base_manifest_digest(manifest_sha256, manifest_files):
+    """Resolve the raw authority when a portable bundle wraps its manifest.
+
+    A native bundle can carry both its portable input-list digest and a
+    separately verified original source manifest. Physical capture binds
+    the latter, just as the native prepared-cache identity does.
+    """
+    original = manifest_files.get("source_manifest")
+    if original is not None and original.get("sha256") is None:
+        from woof.ingest.boundary_stream import is_as_posted_placeholder
+        if is_as_posted_placeholder(manifest_sha256):
+            return manifest_sha256
+    return (manifest_sha256 if original is None else
+            _require_digest(original.get("sha256"), "physical base source manifest"))
+
+
 def _validate_source_identity(
         source: str, identity: object, manifest_sha256: str,
         manifest_files: Mapping[str, Mapping[str, object]], proof,
@@ -5452,9 +5608,64 @@ def _validate_source_identity(
         grid_id: int = 1,
         experiment_config: Path | None = None,
         experiment_config_sha256: str | None = None,
+        physical_head: Mapping[str, object] | None = None,
+        ordinary_input_plan: Mapping[str, object] | None = None,
 ) -> Mapping[str, object]:
     if not isinstance(identity, dict):
         raise ValueError("prepared cache source identity must be an object")
+    from woof.ensemble.posted_preparation import BINDING_KEY, validate_posted_member_head
+    bound_source = identity.get("root_preparation", identity)
+    if BINDING_KEY in bound_source:
+        validate_posted_member_head(bound_source[BINDING_KEY], identity={"source_identity": identity})
+        baseline = dict(identity)
+        if "root_preparation" in baseline:
+            baseline["root_preparation"] = {key: value for key, value in bound_source.items() if key != BINDING_KEY}
+        else:
+            baseline.pop(BINDING_KEY)
+        baseline_proof = dict(proof)
+        if baseline_proof.get("source_identity") == identity:
+            baseline_proof["source_identity"] = baseline
+        _validate_source_identity(source, baseline, manifest_sha256, manifest_files, baseline_proof,
+            layout=layout, mapped_authority=mapped_authority, grid_id=grid_id,
+            experiment_config=experiment_config, experiment_config_sha256=experiment_config_sha256,
+            physical_head=physical_head, ordinary_input_plan=ordinary_input_plan)
+        return identity
+    if "ensemble_posted_physical_input" in identity:
+        from woof.ensemble.posted_physical import (
+            validate_posted_physical_input, validate_posted_native_source)
+        if physical_head is None or "ensemble_physical_input" in identity:
+            raise ValueError("posted physical inputs need one prepared provider head authority")
+        binding = identity["ensemble_posted_physical_input"]
+        baseline = {key:value for key,value in identity.items() if key != "ensemble_posted_physical_input"}
+        _validate_source_identity(source, baseline, manifest_sha256, manifest_files, proof,
+            layout=layout, mapped_authority=mapped_authority, grid_id=grid_id,
+            experiment_config=experiment_config, experiment_config_sha256=experiment_config_sha256)
+        if binding != physical_head["initial_receipt"]["binding"]:
+            raise ValueError("prepared source initial physical input differs from its provider head")
+        validate_posted_physical_input(binding, provider_plan=physical_head["provider_plan"],
+            member_index=physical_head["member_index"],
+            valid_time=datetime.fromisoformat(physical_head["forcing_valid_times"][0]))
+        physical_manifest = _physical_base_manifest_digest(manifest_sha256, manifest_files)
+        # Some native routes bind this authority at the cache identity level.
+        # Capture supplies the same verified value in its physical source view.
+        validate_posted_native_source(binding,
+            source_identity={"input_manifest_sha256": physical_manifest, **baseline},
+            input_manifest_authority=physical_manifest,
+            input_plan=ordinary_input_plan)
+        return identity
+    if "ensemble_physical_input" in identity:
+        from woof.ensemble.physical_store import validate_physical_input_binding
+        binding = identity["ensemble_physical_input"]
+        baseline = {key: value for key, value in identity.items() if key != "ensemble_physical_input"}
+        validate_physical_input_binding(binding, input_manifest_sha256=
+                                        _physical_base_manifest_digest(manifest_sha256, manifest_files),
+                                        source_identity=baseline)
+        _validate_source_identity(
+            source, baseline, manifest_sha256, manifest_files, proof,
+            layout=layout, mapped_authority=mapped_authority, grid_id=grid_id,
+            experiment_config=experiment_config,
+            experiment_config_sha256=experiment_config_sha256)
+        return identity
     if source in _MAPPED_SOURCES:
         if mapped_authority is None:
             raise ValueError("mapped source authority is missing")
@@ -5479,6 +5690,11 @@ def _validate_source_identity(
         _require_preprocessing_binding(
             identity.get("preprocessing"), mapped_authority["preprocessing"])
         allowed = set(expected) | {"preprocessing"}
+        if "initial_source" in proof or "initial_source" in identity:
+            if ("initial_source" not in proof
+                    or identity.get("initial_source") != proof["initial_source"]):
+                raise ValueError("prepared initial analysis differs from the proof's source evidence")
+            allowed.add("initial_source")
         if "static_highres" in identity:
             # Shared preflight below compares this owner-normalized block
             # with the exact experiment authority for every source family.
@@ -5570,6 +5786,7 @@ def _validate_cache_metadata(
         reader: PreparedCacheReader, *, source: str, exp, forcing_hours,
         boundary_interval_seconds: int, proof, layout: str,
         posted_placeholder: str | None = None,
+        physical_catalog: Mapping[str, object] | None = None,
 ) -> None:
     """The cache's metadata against the source, the proof and the experiment.
 
@@ -5658,6 +5875,9 @@ def _validate_cache_metadata(
     for key in receipt_keys:
         if key in proof or (isinstance(user, dict) and key in user):
             expected_user[key] = proof.get(key)
+    if physical_catalog is not None:
+        from woof.ensemble.physical_boundary import KEY
+        expected_user[KEY] = dict(physical_catalog)
     if user != expected_user:
         raise ValueError(
             "prepared cache user metadata differs from source/proof/experiment")
@@ -6303,6 +6523,23 @@ def _require_sealed_identity(inputs, sealed_inputs, head) -> None:
             f"forecast started from: {error}") from None
 
 
+def _retained_preflight_payload(reader, *, layout, head):
+    """Use the additive native hasher for sealed direct immutable mappings."""
+    if head is not None or layout not in _DIRECT_LAYOUTS:
+        return None
+    from woof.ingest.prepared_writer import native_hasher
+    try:
+        entry = native_hasher()
+    except (OSError, RuntimeError):
+        # Older installs without this additive bridge retain their original
+        # full checked reads. Source and byte identity rules are unchanged.
+        return None
+    if entry is None:
+        return None
+    from woof.ingest.prepared_store import _CachePayload
+    return _CachePayload(reader, log=lambda _: None)
+
+
 def preflight_prepared_forecast(
         *, source: str, prepared_root: Path, proof_sha256: str | None = None,
         source_manifest_sha256: str,
@@ -6314,8 +6551,17 @@ def preflight_prepared_forecast(
         run_seconds: float, history_interval_seconds: float,
         domain_bundle: Path | None = None,
         tiles=None, devices: int | None = None, devices_options=None,
+        simulated_radar=None,
+        runtime_run_overrides: Mapping[str, object] | None = None,
 ) -> PreparedForecastInputs:
     """Validate every portable preparation authority without importing CuPy.
+
+    ``runtime_run_overrides`` is a Python API mapping of RunConfig fields
+    declared in PREPARATION_INERT_RUN_FIELDS. The original experiment and
+    WPS bytes remain bound to the preparation, and each changed runtime
+    value is validated and recorded in the execution plan. Preparation
+    inputs, including grid, soil geometry and microphysics selectors,
+    cannot be replaced through this mapping.
 
     ``tiles`` is an optional :class:`~woof.core.streaming.StreamingOptions`
     that REPLACES whatever the hash-bound experiment declares, and it is
@@ -6343,6 +6589,10 @@ def preflight_prepared_forecast(
 
     if source not in SUPPORTED_SOURCES:
         raise ValueError(f"unsupported prepared forecast source {source!r}")
+    if runtime_run_overrides is not None:
+        if not isinstance(runtime_run_overrides, Mapping):
+            raise TypeError("runtime_run_overrides must be a mapping of RunConfig fields")
+        runtime_run_overrides = MappingProxyType(copy.deepcopy(dict(runtime_run_overrides)))
     preflight_arguments = MappingProxyType(dict(
         source=source, prepared_root=prepared_root,
         source_manifest_sha256=source_manifest_sha256,
@@ -6352,7 +6602,10 @@ def preflight_prepared_forecast(
         run_seconds=run_seconds,
         history_interval_seconds=history_interval_seconds,
         domain_bundle=domain_bundle, tiles=tiles, devices=devices,
-        devices_options=devices_options))
+        devices_options=devices_options,
+        **({} if runtime_run_overrides is None else
+           {"runtime_run_overrides": runtime_run_overrides}),
+        **({} if simulated_radar is None else {"simulated_radar": simulated_radar})))
     head = None
     #: An as-posted head's block (``basis.as_posted``): the head binds the
     #: input plan, and the manifest does not exist until its seal.
@@ -6480,14 +6733,18 @@ def preflight_prepared_forecast(
 
     exp = source_exp if len(source_exp.domains) == 1 else replace(
         source_exp, domains=(source_exp.root,))
+    prepared_run = exp.root.run
+    exp, runtime_overrides = _apply_runtime_run_overrides(exp, runtime_run_overrides)
     physics_receipt = _validate_physics(
         exp, physics_profile, run_seconds, history_interval_seconds,
         source=source, expert_acknowledgements=expert_acknowledgements)
     front_door_physics = _validate_front_door_physics_proof(
-        proof, source=source, profile=physics_profile, cfg=exp.root.run)
+        proof, source=source, profile=physics_profile, cfg=prepared_run)
     physics_receipt["execution_plan"] = _execution_plan_receipt(
         source_exp=source_exp, executed_exp=exp, profile=physics_profile,
         history_interval_seconds=history_interval_seconds)
+    if runtime_overrides:
+        physics_receipt["execution_plan"]["physics_overrides"] = runtime_overrides
     manifest_files, source_manifest_receipt = _manifest_file_specs(
         source, manifest, source_exp, proof,
         pending=_as_posted_pending_roles(as_posted, manifest),
@@ -6670,12 +6927,47 @@ def preflight_prepared_forecast(
     header_identity = header.get("identity")
     if not isinstance(header_identity, dict):
         raise ValueError("prepared cache identity must be an object")
+    physical_head = physical_catalog = None
+    if "ensemble_posted_physical_input" in (header_identity.get("source_identity") or {}):
+        from woof.ingest.boundary_stream import read_head, verify_seal
+        from woof.ensemble import physical_boundary
+        if head is None:
+            physical_stream_head = read_head(prepared_root, expected_sha256=_require_digest(
+                proof.get("boundary_stream",{}).get("head_sha256"), "physical prepared head"))
+            verify_seal(prepared_root,head=physical_stream_head)
+        else:
+            physical_stream_head = head
+        physical_head = physical_stream_head["basis"].get(physical_boundary.KEY)
+        physical_boundary.validate_head(physical_head,
+            physical_stream_head["basis"]["cache"]["lbc"]["schedule"])
+        # Completed catalogs were checked against every consumed segment and
+        # ordinary source seal above; early heads admit only the initial knot.
+        physical_catalog = (physical_boundary.head_catalog(physical_head) if head is not None
+                            else header["metadata"]["user"][physical_boundary.KEY])
     source_identity = _validate_source_identity(
         source, header_identity.get("source_identity"),
         source_manifest_sha256, manifest_files, proof, layout=layout.kind,
         mapped_authority=mapped_authority,
         experiment_config=experiment_config,
-        experiment_config_sha256=_sha256(experiment_config))
+        experiment_config_sha256=_sha256(experiment_config),
+        physical_head=physical_head,
+        ordinary_input_plan=None if as_posted is None else as_posted["input_plan"])
+    if physical_head is not None:
+        from woof.ensemble.posted_physical import validate_posted_native_source
+        from woof.ensemble.physical_store import physical_static_identity
+        physical_manifest = _physical_base_manifest_digest(source_manifest_sha256, manifest_files)
+        validate_posted_native_source(source_identity["ensemble_posted_physical_input"],
+            source_identity={"input_manifest_sha256": physical_manifest, **source_identity},
+            input_manifest_authority=physical_manifest,
+            input_plan=None if as_posted is None else as_posted["input_plan"],
+            static_identity=physical_static_identity(static,NATIVE_LANDUSE_IDENTITY))
+    if "ensemble_physical_input" in source_identity:
+        from woof.ensemble.physical_store import physical_static_identity, validate_physical_input_binding
+        validate_physical_input_binding(
+            source_identity["ensemble_physical_input"], input_manifest_sha256=
+            _physical_base_manifest_digest(source_manifest_sha256, manifest_files),
+            source_identity=source_identity,
+            static_identity=physical_static_identity(static, NATIVE_LANDUSE_IDENTITY))
     if layout.kind in _HIERARCHY_LAYOUTS \
             and source_identity.get("grid_id") != 1:
         raise ValueError("hierarchy prepared-cache source identity is not d01")
@@ -6768,7 +7060,11 @@ def preflight_prepared_forecast(
     if head is None:
         reader = PreparedCacheReader(
             prepared_cache_path, expected_identity=cache_identity)
-        verified_cache = reader.verify_all()
+        cache_payload = _retained_preflight_payload(
+            reader, layout=layout.kind, head=head)
+        readonly_reader = (reader if cache_payload is None
+                           else cache_payload.read_only_reader())
+        verified_cache = readonly_reader.verify_all()
         if verified_cache["content_sha256"] != prepared_content_sha256:
             raise ValueError(
                 "verified prepared cache differs from the caller pin")
@@ -6776,10 +7072,12 @@ def preflight_prepared_forecast(
         reader = PreparedHeadReader(
             prepared_root, head, expected_identity=cache_identity)
         reader.verify_all()
+        cache_payload = None
+        readonly_reader = reader
     _validate_cache_metadata(
         reader, source=source, exp=exp, forcing_hours=forcing_hours,
         boundary_interval_seconds=boundary_interval_seconds, proof=proof,
-        layout=layout.kind,
+        layout=layout.kind, physical_catalog=physical_catalog,
         posted_placeholder=(source_manifest_sha256
                             if as_posted is not None
                             and source in _MAPPED_SOURCES else None))
@@ -6790,7 +7088,7 @@ def preflight_prepared_forecast(
         label=f"d{int(exp.root.grid_id):02d}", vertical=exp.vertical,
         coord_scalars=(reader.header.get("metadata") or {}).get(
             "coord_scalars") or {},
-        base_arrays={"mub": reader.read_array("base/mub")}
+        base_arrays={"mub": readonly_reader.read_array("base/mub")}
         if "base/mub" in reader.arrays else {})
     if _coordinate_refusal is not None:
         raise ValueError(_coordinate_refusal)
@@ -6998,7 +7296,7 @@ def preflight_prepared_forecast(
     # arrives (run_prepared_forecast's clock guard).
     clock_basis: dict = {}
     exp = _terrain_derivations(
-        exp, static, grid, reader, physics_receipt,
+        exp, static, grid, readonly_reader, physics_receipt,
         basis_out=clock_basis if head is not None else None)
     if tiles is not None:
         # LAST, after every identity comparison above.  [tiles] is not a
@@ -7024,6 +7322,14 @@ def preflight_prepared_forecast(
     if devices is not None:
         from woof.core.devices import override_device_count
         exp = replace(exp, devices=override_device_count(exp.devices, devices))
+    from woof.simulated_radar_config import apply_execution_options
+    exp = apply_execution_options(exp, simulated_radar)
+    if exp.simulated_radar.enabled:
+        # Before the model is built or a card allocated, not at the first
+        # history: a missing or stale rw_simradar, or a scan the host
+        # memory cannot hold, refuses here.
+        from woof.simulated_radar_config import require_admitted
+        require_admitted(exp)
     return PreparedForecastInputs(
         source=source, layout=layout.kind, prepared_root=prepared_root,
         domain_bundle_path=layout.domain_bundle,
@@ -7053,6 +7359,7 @@ def preflight_prepared_forecast(
         stream_head=(None if head is None else MappingProxyType(head)),
         preflight_arguments=preflight_arguments,
         clock_basis=clock_basis.get("basis"),
+        cache_payload=cache_payload,
     )
 
 
@@ -7547,21 +7854,122 @@ def _devices_init_road(exp):
                      "the whole domain must never be resident on a card"}
 
 
+def _stream_producer_reserve(stream_head, device=0, *, identity=None):
+    """The next preparation batch this physical card must still hold.
+
+    An old head's ordinal is not a physical identity: CUDA visibility may
+    differ between the producer and consumer. Without both physical
+    readings every consumer card retains the bound conservatively.
+    """
+    decision = (stream_head or {}).get("decision") or {}
+    reserve = decision.get("producer_reserve_bytes")
+    if reserve is None:
+        return 0
+    producer = decision.get("producer_device_identity")
+    if isinstance(producer, Mapping) and isinstance(identity, Mapping):
+        for key in ("uuid", "pci_bus_id"):
+            if producer.get(key) and identity.get(key):
+                return 0 if producer[key] != identity[key] else max(0, int(reserve))
+    return max(0, int(reserve))
+
+
+def _devices_stream_budgets(budgets, stream_head, *, identities=None):
+    """Leave a chunked producer's next batch free on its own card."""
+    identities = identities or {}
+    reserves = {dev: _stream_producer_reserve(
+        stream_head, dev, identity=identities.get(dev)) for dev in budgets}
+    if not any(reserves.values()):
+        return budgets
+    return {dev: max(0, int(free) - reserves[dev])
+            for dev, free in budgets.items()}
+
+
+def _stream_host_producer_reserve(stream_head):
+    """Additional host bytes the producer may need beyond its head RSS."""
+    decision = (stream_head or {}).get("decision") or {}
+    return max(0, int((decision.get("host") or {}).get("producer_host_bytes") or 0))
+
+
+def _stream_host_budget(available, stream_head):
+    return (None if available is None else
+            max(0, int(available) - _stream_host_producer_reserve(stream_head)))
+
+
+def _stream_reserved_machine(machine, stream_head, *, device=0, identity=None):
+    """Forecast budgets with room for the producer's next device/host peak."""
+    if machine is None:
+        return None
+    free = int(machine.vram_bytes)
+    reserved = _devices_stream_budgets(
+        {device: free}, stream_head, identities={device: identity})[device]
+    host = int(machine.host_bytes)
+    if _stream_host_producer_reserve(stream_head):
+        from woof.core.preflight import host_available_bytes
+
+        available = host_available_bytes()
+        if available is not None:
+            host = min(host, int(available))
+        host = _stream_host_budget(host, stream_head)
+    return (machine if free == reserved and host == int(machine.host_bytes) else
+            replace(machine, vram_bytes=reserved, host_bytes=host))
+
+
+def _stream_reserved_options(options, machine, stream_head, *, device=0, identity=None):
+    """Explicit tile budgets cannot spend the producer's reservations."""
+    if options is None or machine is None:
+        return options
+    changes = {}
+    if (options.vram_budget_bytes is not None
+            and _stream_producer_reserve(stream_head, device, identity=identity)):
+        changes["vram_budget_bytes"] = min(
+            int(options.vram_budget_bytes), int(machine.vram_bytes))
+    if options.host_budget_bytes is not None and _stream_host_producer_reserve(stream_head):
+        changes["host_budget_bytes"] = min(
+            int(options.host_budget_bytes), int(machine.host_bytes))
+    return replace(options, **changes) if changes else options
+
+
+def _stream_reserved_experiment(exp, machine, stream_head, *, device=0, identity=None):
+    """Cap only the tree planner's local copy of configured tile budgets."""
+    if machine is None or not (
+            _stream_producer_reserve(stream_head, device, identity=identity)
+            or _stream_host_producer_reserve(stream_head)):
+        return exp
+    return replace(exp, tiles=_stream_reserved_options(
+        exp.tiles, machine, stream_head, device=device, identity=identity), domains=tuple(
+            replace(domain, tiles=_stream_reserved_options(
+                domain.tiles, machine, stream_head, device=device, identity=identity))
+            for domain in exp.domains))
+
+
 def _admit_devices_forecast(exp, cfg, *, geography, forcing_intervals,
-                            inventory=None, source=None):
+                            inventory=None, source=None, template=None,
+                            boundaries=None, stream_head=None):
     from woof.core.adaptive_clock import maximum_map_factor
     from woof.core.devices import validate_device_count, DevicesRefused
     from woof.core.preflight import estimate_devices, host_available_bytes
-    from woof.core.devices_memory import devices_gate
+    from woof.core.devices_memory import (devices_gate, priced_template_live_bytes,
+                                           priced_host_live_bytes)
+    from woof.core.resident_admission import device_free_bytes
     import cupy as cp
     validate_device_count(exp.devices, cp.cuda.runtime.getDeviceCount())
     budgets = {}
+    budget_terms = {}
     profiles = {}
+    identities = {}
+    from woof.core.device_probe import cuda_device_identity
     from woof.core.device_inventory import DeviceLocalMemoryProfile
-    from woof.core.preflight import read_compile_platform
+    from woof.core.preflight import read_compile_platform, device_free_and_total_bytes
     for dev in set(exp.devices.device_ids()):
         with cp.cuda.Device(dev):
-            budgets[dev] = int(cp.cuda.runtime.memGetInfo()[0])
+            free, _total = device_free_and_total_bytes(dev)
+            reusable = int(cp.get_default_memory_pool().free_bytes())
+            available = device_free_bytes()
+            budgets[dev] = min(free + reusable, available) if available is not None else free
+            budget_terms[dev] = {"device_free_bytes": free,
+                                 "reusable_pool_bytes": reusable,
+                                 "template_live_credit_bytes": 0}
+            identities[dev] = cuda_device_identity(dev)
             props = cp.cuda.runtime.getDeviceProperties(dev)
             name = props["name"]
             profiles[dev] = DeviceLocalMemoryProfile(
@@ -7570,12 +7978,49 @@ def _admit_devices_forecast(exp, cfg, *, geography, forcing_intervals,
                 max_threads_per_multiprocessor=int(props["maxThreadsPerMultiProcessor"]),
                 default_stack_limit_bytes=int(cp.cuda.runtime.deviceGetLimit(0)),
                 compile_platform=read_compile_platform())
-    estimate = estimate_devices(
-        replace(exp, domains=(replace(exp.root, run=cfg),)),
-        max_map_factor=maximum_map_factor(geography=geography),
-        forcing_intervals=forcing_intervals, inventory=inventory,
-        geography=geography, source=source, profiles=profiles)
-    gate = devices_gate(estimate, budgets=budgets, host_budget=host_available_bytes())
+    # Leave a chunked producer's next batch free on its own card before the
+    # rank widths are fitted, so the fitted widths respect that reserve.
+    budgets = _devices_stream_budgets(budgets, stream_head, identities=identities)
+    def price():
+        return estimate_devices(
+            replace(exp, domains=(replace(exp.root, run=cfg),)),
+            max_map_factor=maximum_map_factor(geography=geography),
+            forcing_intervals=forcing_intervals, inventory=inventory,
+            geography=geography, source=source, profiles=profiles, budgets=budgets,
+            streaming_boundaries=stream_head is not None)
+    estimate = price()
+    if template is not None:
+        # The second admission runs after the store loader. Its retained
+        # template is already excluded from free memory and already included
+        # in the price. Credit only its exact priced array spans, not every
+        # allocation the process happens to hold.
+        first = exp.devices.device_ids()[0]
+        template_price = next(row["template_bytes"] for row in estimate["cards"]
+                              if row["card"] == first)
+        credit = min(template_price, priced_template_live_bytes(template, cfg, device=first))
+        budgets[first] += credit
+        budget_terms[first]["template_live_credit_bytes"] = credit
+        if credit:
+            estimate = price()
+    for dev, terms in budget_terms.items():
+        terms["budget_bytes"] = budgets[dev]
+    estimate["budget_terms"] = budget_terms
+    host_free = host_available_bytes()
+    host_credit = {"host_store_bytes": 0, "host_boundary_bytes": 0}
+    if inventory is not None:
+        # The pinned store and loaded host forcing already reduced available
+        # RAM. Credit only those supplied arrays, capped by the two terms
+        # that this same admission charges. Rank seam staging is not built.
+        live = priced_host_live_bytes(inventory, geography, boundaries)
+        host_credit = {key: min(estimate[key], value) for key, value in live.items()}
+    host_budget = None if host_free is None else host_free + sum(host_credit.values())
+    host_budget = _stream_host_budget(host_budget, stream_head)
+    estimate["host_budget_terms"] = {
+        "available_bytes": host_free,
+        "store_live_credit_bytes": host_credit["host_store_bytes"],
+        "boundary_live_credit_bytes": host_credit["host_boundary_bytes"],
+        "budget_bytes": host_budget}
+    gate = devices_gate(estimate, budgets=budgets, host_budget=host_budget)
     print(gate["verdict"], flush=True)
     if gate["refuse"]:
         from woof.core.resident_admission import memory_gate_overridden
@@ -7595,7 +8040,7 @@ def _admit_devices_forecast(exp, cfg, *, geography, forcing_intervals,
     return estimate
 
 
-def _devices_stepper(bundle, node, exp, decisions):
+def _devices_stepper(bundle, node, exp, decisions, *, admission=None):
     from woof.core.adaptive_clock import maximum_map_factor
     from woof.core.streaming import ranked_decision, ranked_domain_builder
     cfg = node.cfg.run
@@ -7609,7 +8054,12 @@ def _devices_stepper(bundle, node, exp, decisions):
     # slabs were built and before the first step.
     stepper = streaming.make_stepper(
         node.state, cfg, decision=decision,
-        build=ranked_domain_builder(bundle, clock=node.clock, options=exp.devices))
+        build=ranked_domain_builder(
+            bundle, clock=node.clock, options=exp.devices,
+            snapshot_limits=(None if admission is None else tuple(
+                rank["frame_snapshot_bytes"] for rank in admission["rank_shapes"])),
+            mynn_column_chunks=(None if admission is None else tuple(
+                rank.get("mynn_column_chunk") for rank in admission["rank_shapes"]))))
     decisions[int(node.cfg.grid_id)] = decision
     node.state._streamed_domain = stepper
     gy, gx = exp.devices.resolved_grid(cfg.nx, cfg.ny)
@@ -8226,6 +8676,12 @@ def _single_prepared_root(domain_cfg, grid, state, clock, *, store_direct):
 
 def _single_checkpoint_identity(inputs, runtime_source_identity):
     """Bind every sealed authority, including the unchanged stop time in TOML."""
+    from woof.physics_params import document as parameter_document
+
+    parameters = parameter_document(getattr(
+        getattr(inputs, "experiment", None), "physics_params", None))
+    parameter_binding = ({} if parameters is None
+                         else {"physics_params": parameters})
     stream_head = getattr(inputs, "stream_head", None)
     head_sha256 = (stream_head["head_sha256"] if stream_head is not None
                    else (dict(getattr(inputs, "proof", {}) or {}).get(
@@ -8237,6 +8693,7 @@ def _single_checkpoint_identity(inputs, runtime_source_identity):
             "prepared_content_sha256": inputs.cache_reader.content_sha256,
             "authority_sha256": dict(inputs.file_sha256),
             "runtime_source_identity": runtime_source_identity,
+            **parameter_binding,
         }
     # A chained preparation is bound by its head whichever way this run
     # binds it (the head at launch, or the sealed proof that names it), so
@@ -8258,6 +8715,7 @@ def _single_checkpoint_identity(inputs, runtime_source_identity):
             name: digest for name, digest in inputs.file_sha256.items()
             if name not in sealed_only},
         "runtime_source_identity": runtime_source_identity,
+        **parameter_binding,
     }
 
 
@@ -8395,6 +8853,7 @@ def run_prepared_forecast(
         progress_options=None, preflight_seconds: float | None = None,
         kernel_cache_census=None, restart: Path | None = None,
         health_debug: bool = False,
+        ensemble_bootstrap=None,
 ) -> dict[str, object]:
     """Restore, integrate, and publish hash-bound source-neutral history.
 
@@ -8439,6 +8898,16 @@ def run_prepared_forecast(
     which step it is on cannot be driven from a script, and "the user
     did not pass a flag" is not a reason to withhold that.
     """
+
+    from woof.ensemble.runtime_context import current_session
+    ensemble_session = current_session()
+    if ensemble_session is not None:
+        return ensemble_session.run_prepared(
+            run_prepared_forecast, inputs, output_directory=output_directory,
+            observer=observer, first_products=first_products, stream_init=stream_init,
+            progress_options=progress_options, preflight_seconds=preflight_seconds,
+            kernel_cache_census=kernel_cache_census, restart=restart,
+            health_debug=health_debug, ensemble_bootstrap=ensemble_bootstrap)
 
     from woof.output_disk import require_output_space, renderer_products
 
@@ -8539,6 +9008,16 @@ def run_prepared_forecast(
     admission_machine = (None if getattr(getattr(exp, "devices", None), "enabled", False) else
                          streaming.cold_admission_machine(
                              planning_machine, options=tiles_options))
+    stream_head = getattr(inputs, "stream_head", None)
+    from woof.core.device_probe import cuda_device_identity
+    admission_identity = (None if admission_machine is None or not
+                          _stream_producer_reserve(stream_head) else cuda_device_identity(0))
+    planning_machine = _stream_reserved_machine(
+        planning_machine, stream_head, identity=admission_identity)
+    admission_machine = _stream_reserved_machine(
+        admission_machine, stream_head, identity=admission_identity)
+    tiles_options = _stream_reserved_options(
+        tiles_options, admission_machine, stream_head, identity=admission_identity)
     # THE SHARED ADMISSION, not a second one.  This door used to price
     # from the restored cache's own retained lateral-boundary interval
     # count, which is the run's LEDGER question rather than the
@@ -8561,7 +9040,7 @@ def run_prepared_forecast(
         devices_admission = _admit_devices_forecast(
             exp, cfg, geography=inputs.static,
             forcing_intervals=_retained_interval_count(inputs.cache_reader),
-            source=priced_boundary)
+            source=priced_boundary, stream_head=getattr(inputs, "stream_head", None))
         resident_estimate = stream_decision = None
         init_road, init_receipt = _devices_init_road(exp)
     else:
@@ -8579,7 +9058,10 @@ def run_prepared_forecast(
                                     machine=admission_machine)
         init_road, init_receipt = _choose_stream_init_road(
             stream_init, decision=stream_decision, reader=inputs.cache_reader,
-            cfg=cfg)
+            cfg=cfg, device_memory=(
+                None if admission_machine is None or
+                not _stream_producer_reserve(stream_head, identity=admission_identity) else
+                (int(admission_machine.vram_bytes), _free_device_bytes()[1])))
     if init_receipt is not None:
         print(f"prepared forecast: {init_receipt['why']}", flush=True)
     if init_road != "store":
@@ -8606,15 +9088,7 @@ def run_prepared_forecast(
     #: before the first), which dates a seam wait.
     stepped = {"model_elapsed_seconds": None}
     seam_waits = None
-    if stream_head is not None and init_road == "store":
-        # The store road reads the whole sealed cache one slab at a time,
-        # so a forecast bound to a head waits for the seal here and runs
-        # as a sealed binding (named, so the reader knows why it waited).
-        print("prepared forecast: the store-direct road reads the sealed "
-              "cache, so this run starts after the preparation seals",
-              file=sys.stderr, flush=True)
-        inputs = _seal_streamed_inputs(inputs)
-    elif stream_head is not None:
+    if stream_head is not None:
         from woof.ingest.boundary_stream import (
             PRODUCER_NAME, SeamWaits, WAIT_LOG_NAME, stream_dir,
             streamed_boundaries,
@@ -8710,10 +9184,22 @@ def run_prepared_forecast(
         started = time.perf_counter()
         if getattr(getattr(exp, "devices", None), "enabled", False):
             cp.cuda.Device(exp.devices.device_ids()[0]).use()
+        loader_memory = streaming.radiation_footprint(
+            cfg, tiles_options, resident_estimate=resident_estimate,
+            machine=planning_machine).prepared_memory
+        loader_terms = None if loader_memory is None else loader_memory.fixed_terms()
         bundle = store_from_prepared_cache(
             inputs.prepared_cache_path,
             expected_identity=inputs.cache_identity,
             cfg=cfg, static=inputs.static,
+            reader=(inputs.cache_reader if (boundary_source is not None
+                    or inputs.cache_payload is not None)
+                    else None),
+            cache_payload=inputs.cache_payload,
+            rows_per_slab=(None if loader_terms is None else loader_terms["loader_rows"]),
+            retain_template_rows=(None if loader_terms is None else loader_terms["template_rows"]),
+            column_chunk=exp.column_chunk,
+            boundary_source=boundary_source,
             landuse_attrs=inputs.landuse_identity, grid=inputs.grid,
             valid_time=exp.start_time,
             # The user's own pinned-host budget when [tiles] carries one, so
@@ -8840,6 +9326,9 @@ def run_prepared_forecast(
                                      state=None))),
     })
 
+    from woof.ensemble.runtime_context import bind_current_member_model
+    bind_current_member_model(model)
+
     if bundle is None:
         initial_health = _strict_json(vars(
             StateHealthValidator(node.state).validate(
@@ -8873,6 +9362,14 @@ def run_prepared_forecast(
                  "; gated fields the store does not carry: "
                  + ", ".join(coverage["not_in_store"])), flush=True)
 
+    from woof.ensemble.runtime_context import initialized_bootstrap_handoff, observe_current_counters
+    ensemble_report = initialized_bootstrap_handoff(
+        ensemble_bootstrap, inputs=inputs, model=model, node=node,
+        output_directory=outdir, observer=observer, step_log=step_log)
+    if ensemble_report is not None:
+        return ensemble_report
+    observe_current_counters(model, start_time=exp.start_time)
+
     history = []
     # Boundary-only sampling under-reported the peak: the executor trims
     # the CuPy pool per STEP and at period commit BEFORE the progress
@@ -8901,7 +9398,8 @@ def run_prepared_forecast(
         # The tree-wide [output] history selection; a single-domain run's
         # own `output = {...}` on its [[domain]] table overrides it inside
         # the writer set, exactly as it does on a tree.
-        history_selection=exp.output)
+        history_selection=exp.output,
+        simulated_radar=exp.simulated_radar, radar_output_dir=outdir)
     model._io_manager = writers
     forecast_started = time.perf_counter()
 
@@ -8984,6 +9482,7 @@ def run_prepared_forecast(
         # runner's own publication is throttled to every 60th step, and
         # a caller driving the run in-process wants the cadence, not the
         # sample of it.
+        observe_current_counters(model, start_time=exp.start_time)
         if observer is not None:
             observer(**event)
         outer_step = int(event["outer_step"])
@@ -9082,8 +9581,11 @@ def run_prepared_forecast(
         devices_admission = _admit_devices_forecast(
             exp, cfg, geography=bundle.geography,
             forcing_intervals=_retained_interval_count(inputs.cache_reader),
-            inventory=bundle.store, source=priced_boundary)
-        steppers = _devices_stepper(bundle, node, exp, streaming_decisions)
+            inventory=bundle.store, source=priced_boundary, template=bundle.template,
+            boundaries=bundle.boundaries,
+            stream_head=getattr(inputs, "stream_head", None))
+        steppers = _devices_stepper(bundle, node, exp, streaming_decisions,
+                                   admission=devices_admission)
     else:
         steppers = streaming.steppers_for_tree(
             model, exp.tiles, machine=planning_machine, resident_estimate=resident_estimate,
@@ -9275,12 +9777,17 @@ def run_prepared_forecast(
         cadence_seconds=cadence_seconds, after_seconds=restored_seconds,
         begin_seconds=begin_s, end_seconds=end_s)
     expected_frames = len(output_schedule)
-    if len(wrfout_paths) != expected_frames:
+    from woof.ensemble.runtime_context import current_capture
+    capture = current_capture()
+    cadence_paths = (writers.captured_paths
+                     if capture is not None and not capture.keep_member_files
+                     else wrfout_paths)
+    if len(cadence_paths) != expected_frames:
         raise RuntimeError(
-            f"history writer published {len(wrfout_paths)} frames, "
+            f"history handoff published {len(cadence_paths)} frames, "
             f"expected {expected_frames}")
     expected_names = tuple(record[2] for record in output_schedule)
-    if tuple(path.name for path in wrfout_paths) != expected_names:
+    if tuple(path.name for path in cadence_paths) != expected_names:
         raise RuntimeError(
             "WRF history output filenames/cadence differ from the "
             "hash-bound request")
@@ -9379,13 +9886,15 @@ def run_prepared_forecast(
         # header against the head and every segment, the full preflight
         # against the sealed tree, and the setup fingerprint the header
         # records against the one the integrated state reproduces.
-        from woof.state_serialization_contract import setup_fingerprint
+        from woof.prepared_domain_tree_forecast import _root_setup_fingerprint
 
         seal_started = time.perf_counter()
         inputs = _seal_streamed_inputs(
             inputs, stream=boundary_source.intervals)
         recorded = inputs.cache_reader.metadata.get("setup_fingerprint")
-        if setup_fingerprint(domain_state) != recorded:
+        if _root_setup_fingerprint(
+                node, steppers.get(int(node.cfg.grid_id))
+                if bundle is not None else None) != recorded:
             raise RuntimeError(
                 "the sealed prepared cache records a different setup "
                 "fingerprint than the streamed boundaries reproduce")
@@ -9417,19 +9926,13 @@ def run_prepared_forecast(
     if moved is not None:
         raise RuntimeError(
             f"forecast runtime implementation changed during run: {moved}")
-    output_inventory = []
     records = runtime._frame_records(
         wrfout_paths, completed_records=getattr(writers, "completed_records", ()),
         progress_callback=observer)
     runtime._finalizing_progress(observer, "write-receipts")
-    for record, (offset_seconds, valid_time, _name) in zip(
-            records, output_schedule, strict=True):
-        output_inventory.append({
-            **record,
-            "model_elapsed_seconds": offset_seconds,
-            "valid_time": valid_time.isoformat(),
-            "atomic_writer_readback_verified": True,
-        })
+    output_inventory, capture_output = _completed_history_inventory(
+        records, output_schedule,
+        captured_paths=(cadence_paths if capture is not None and not capture.keep_member_files else None))
     timing["total"] = time.perf_counter() - total_started
     report = {
         "schema": REPORT_SCHEMA,
@@ -9579,16 +10082,21 @@ def run_prepared_forecast(
             "frames_per_file": 1,
             "expected_frame_count": expected_frames,
             "exact_frame_count_verified": True,
-            "initial_frame_verified": restart_info is None,
-            "last_scheduled_frame_verified": bool(output_schedule),
+            "initial_frame_verified": (restart_info is None and bool(output_inventory)
+                and output_inventory[0]["atomic_writer_readback_verified"]),
+            "last_scheduled_frame_verified": (bool(output_inventory)
+                and output_inventory[-1]["atomic_writer_readback_verified"]),
             "last_scheduled_offset_seconds": cadence_receipt[
                 "last_scheduled_offset_seconds"],
             "last_scheduled_valid_time": cadence_receipt[
                 "last_scheduled_valid_time"],
             "last_scheduled_equals_run_end": cadence_receipt[
                 "last_scheduled_equals_run_end"],
-            "initial_and_final_frames_verified": (restart_info is None and cadence_receipt[
-                "last_scheduled_equals_run_end"]),
+            "initial_and_final_frames_verified": (restart_info is None
+                and cadence_receipt["last_scheduled_equals_run_end"]
+                and bool(output_inventory)
+                and output_inventory[0]["atomic_writer_readback_verified"]
+                and output_inventory[-1]["atomic_writer_readback_verified"]),
             "all_frames_readback_verified": all(
                 item["atomic_writer_readback_verified"]
                 for item in output_inventory),
@@ -9597,8 +10105,10 @@ def run_prepared_forecast(
                 "value": 1,
             },
             "frame_count": len(output_inventory),
-            "total_bytes": sum(item["bytes"] for item in output_inventory),
+            "total_bytes": (sum(item["bytes"] for item in output_inventory)
+                if all(item["bytes"] is not None for item in output_inventory) else None),
             "files": output_inventory,
+            **capture_output,
         },
         "input": {
             "prepared_root": str(inputs.prepared_root),
@@ -9730,7 +10240,9 @@ def run_prepared_forecast(
                 "io_mode": "history"},
             "output_and_diagnostic_mode": {
                 "io_mode": "history",
-                "history_interval_seconds": cadence_seconds},
+                "history_interval_seconds": cadence_seconds,
+                **({"output_mode": "ensemble_capture",
+                    "capture": capture_output["capture"]} if capture_output else {})},
             # DETERMINISM.md lists the configuration bytes as a
             # essential pin, and this route hash-binds the experiment
             # TOML before it runs a step -- the published wheel's capsule
@@ -9907,7 +10419,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--experiment-config", type=Path, required=True)
     parser.add_argument("--wps-namelist", type=Path, required=True)
     parser.add_argument(
-        "--physics-profile", default=None,
+        "--physics-profile", default=None, type=canonical_template_id,
         help=("optional assertion that the hash-bound experiment IS this "
               "shipped suite, refused on any switch drift; omitted, the "
               "experiment's own physics runs as written and its "
@@ -10003,6 +10515,8 @@ def build_parser() -> argparse.ArgumentParser:
     # The per-step progress surface, registered from one place so this
     # door and the tree runner's cannot drift in spelling or in help.
     add_progress_arguments(parser)
+    from woof.simulated_radar_config import add_execution_argument
+    add_execution_argument(parser)
     return parser
 
 
@@ -10035,7 +10549,7 @@ def build_materialize_parser() -> argparse.ArgumentParser:
         "--base-experiment-config", type=Path, required=True)
     parser.add_argument("--base-wps-namelist", type=Path, required=True)
     parser.add_argument(
-        "--physics-profile", default=None,
+        "--physics-profile", default=None, type=canonical_template_id,
         help=("shipped suite to materialize into the experiment; omitted, "
               "the base config's own physics is published unchanged and "
               "its WRF-verification status is reported"))
@@ -10201,6 +10715,9 @@ def _route_owned_first_products(args, *, outdir: Path, observer,
     finalize stage or a reader cannot tell the two arming routes apart.
     """
 
+    from woof.ensemble.runtime_context import current_session
+    if current_session() is not None:
+        return None
     from woof.first_products import FirstProducts, early_render_requested
     from woof.live_products import LandingRenders
 
@@ -10263,10 +10780,21 @@ def main(argv=None, *, observer=None) -> int:
     changes nothing.
     """
 
+    if argv is None:
+        # Before any heavy import: a free-threaded build keeps the rank
+        # threads off the interpreter lock (woof.free_threading).
+        from woof.free_threading import keep_gil_disabled
+        keep_gil_disabled()
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv == ["--show-capabilities"]:
         print(json.dumps(runner_capabilities(), sort_keys=True))
         return 0
+    from woof.ensemble.calibration_admission import refuse_explicit_config_argv
+    try:
+        refuse_explicit_config_argv(argv)
+    except ValueError as error:
+        print(f"prepared_single_domain_forecast: {error}", file=sys.stderr)
+        return 2
     # Which tree is about to integrate this forecast.  Announced before
     # any argument is interpreted, and a refusal when the version this
     # process would stamp into its report disagrees with the code
@@ -10387,6 +10915,8 @@ def main(argv=None, *, observer=None) -> int:
         devices_options = (None if args.devices_table is None else
                            DeviceOptions.from_mapping(json.loads(args.devices_table),
                                                       source="--devices-table"))
+        from woof.simulated_radar_config import execution_argument
+        simulated_radar = execution_argument(getattr(args, "simulated_radar_table", None))
     except (ValueError, TypeError) as error:
         print(f"prepared_single_domain_forecast: --tiles refused: {error}",
               file=sys.stderr)
@@ -10442,7 +10972,8 @@ def main(argv=None, *, observer=None) -> int:
             run_seconds=args.run_seconds,
             history_interval_seconds=args.history_interval_seconds,
             domain_bundle=args.domain_bundle,
-            tiles=tiles, devices=args.devices, devices_options=devices_options)
+            tiles=tiles, devices=args.devices, devices_options=devices_options,
+            **({} if simulated_radar is None else {"simulated_radar": simulated_radar}))
         preflight_seconds = time.perf_counter() - preflight_started
         verification = dict(inputs.physics_receipt).get("verification")
         if (isinstance(verification, dict)
@@ -10604,6 +11135,11 @@ def main(argv=None, *, observer=None) -> int:
                   file=sys.stderr)
             return SOURCE_BEHIND_EXIT_CODE
         raise
+    if report.get("schema") == "gpuwm-ensemble-run.v1":
+        print(json.dumps({"schema": report["schema"], "status": report["status"],
+            "members": report["request"]["members"], "completed_seconds": report["completed_seconds"],
+            "ensemble_manifest": str(outdir / "ensemble-run.json")}, sort_keys=True))
+        return 0
     print(json.dumps({
         "schema": report["schema"],
         "status": report["status"],

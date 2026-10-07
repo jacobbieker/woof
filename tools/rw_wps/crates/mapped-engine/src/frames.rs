@@ -423,7 +423,9 @@ pub fn materialize_frame(
         let finite_required = required_names.contains(&field.name)
             && field.name != "soil_temperature"
             && field.name != "volumetric_soil_moisture";
-        if finite_required && field.values.iter().any(|value| !value.is_finite()) {
+        if finite_required && field.values.iter().any(|value| !value.is_finite())
+            && mapping.field(&field.name)?.missing_kind()? != "preserve_mask"
+        {
             return Err(frame_invalid(format!(
                 "required mapped field {} is not finite at {valid_time}",
                 field.name
@@ -706,7 +708,7 @@ fn frame_header(
             .parameters
             .as_ref()
             .expect("lambert declarations carry parameters");
-        json!({
+        let mut grid = json!({
             "projection": GRID_FAMILY_LAMBERT,
             "nx": collection.longitude.len(),
             "ny": collection.latitude.len(),
@@ -731,7 +733,11 @@ fn frame_header(
                 "shape_of_earth": parameters.shape_of_earth,
                 "source_wind_basis": declaration.wind_basis,
             },
-        })
+        });
+        if let Some(pairing) = declaration.same_grid_pairing.as_ref() {
+            grid["parameters"]["same_grid_pairing"] = json!(pairing);
+        }
+        grid
     } else {
         regular_latlon_grid(&collection.latitude, &collection.longitude)
     };
@@ -1467,7 +1473,9 @@ fn field_work(
     let field = &fields.available[&id];
     let finite_required = plan.required_names.contains(&field.name)
         && field.name != "soil_temperature" && field.name != "volumetric_soil_moisture";
-    if finite_required && field.values.iter().any(|value| !value.is_finite()) {
+    if finite_required && field.values.iter().any(|value| !value.is_finite())
+        && fields.mapping.field(&field.name)?.missing_kind()? != "preserve_mask"
+    {
         return Err(frame_invalid(format!(
             "required mapped field {} is not finite at {valid_time}", field.name)));
     }
@@ -2052,6 +2060,46 @@ impl Committer<'_> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn exact_grid_pairing_reaches_the_frame_only_when_declared() {
+        let (_, collection, plan) = chain_fixture(false);
+        for selected in [false, true] {
+            let mut document = json!({
+                "name": "projected-pairing-test",
+                "coordinates": {"vertical": {"kind": "pressure", "units": "Pa"}},
+                "fields": {}, "target": {},
+                "grid": {
+                    "family": "lambert_conformal",
+                    "wind_basis": "grid_relative_with_rotation",
+                    "parameters": {
+                        "latin1": 50.0, "latin2": 50.0, "lov": 253.0,
+                        "lat1": 1.0, "lon1": 214.5,
+                        "dx_m": 32463.0, "dy_m": 32463.0,
+                        "nx": 2, "ny": 2,
+                        "earth_radius_m": 6371229.0, "shape_of_earth": 6
+                    }
+                }
+            });
+            if selected {
+                document["grid"]["same_grid_pairing"] = json!("identity");
+            }
+            let payload = serde_json::to_vec(&document).unwrap();
+            let mapping = Mapping {
+                doc: crate::node::Node::parse(&payload).unwrap(),
+                sha256: crate::digest::bytes_sha256(&payload),
+                path: "<projected-pairing-test>".to_owned(),
+            };
+            let header = frame_header(&mapping, plan.keys[0].0, plan.keys[0].0, &collection, &[]).unwrap();
+            let parameters = &header["grid"]["parameters"];
+            if selected {
+                assert_eq!(parameters["same_grid_pairing"], json!("identity"));
+            } else {
+                assert!(parameters.get("same_grid_pairing").is_none());
+                assert!(!serde_json::to_string(&header).unwrap().contains("same_grid_pairing"));
+            }
+        }
+    }
+
     fn chain_fixture(self_seed: bool) -> (Mapping, DecodedCollection, FramePlan) {
         let source = json!({"units": {"source": "1", "target": "1"}, "location": "mass",
             "source_axes": ["y", "x"], "target_axes": ["y", "x"]});
@@ -2316,6 +2364,49 @@ mod tests {
             .map(|name| golden_root.join(name.as_str().unwrap()).display().to_string()).collect();
         let collection = crate::engine::decode_collection(&mapping, &inputs, &mut |_| {}).unwrap();
         (mapping, collection, inputs)
+    }
+
+    #[test]
+    fn required_analyzed_numbers_keep_masks_until_horizontal_repair() {
+        // A required field must be present, but preserve_mask explicitly
+        // delegates its finite-neighbor repair to the next stage. Rejecting
+        // its NaNs here prevents that stage from reading legitimate input.
+        for policy in ["preserve_mask", "reject"] {
+            let (mapping, mut collection, _) = netcdf_golden();
+            let mut document = mapping.doc.to_value();
+            let name = "water_friendly_aerosol_number";
+            let mut field = document["fields"]["air_temperature"].clone();
+            field["units"] = json!({"source": "kg-1", "target": "kg-1"});
+            field["missing"] = json!({"kind": policy});
+            document["fields"][name] = field;
+            document["target"]["required_fields"].as_array_mut().unwrap().push(
+                json!({"name": name, "axes": ["vertical", "y", "x"],
+                       "location": "mass", "target_units": "kg-1"}));
+            let payload = serde_json::to_vec(&document).unwrap();
+            let mapping = Mapping { doc: crate::node::Node::parse(&payload).unwrap(),
+                sha256: crate::digest::bytes_sha256(&payload), path: "<masked-required>".to_owned() };
+            let originals: Vec<_> = collection.direct.iter()
+                .filter(|((_, _, field), _)| field == "air_temperature")
+                .map(|(key, value)| (key.clone(), value.clone())).collect();
+            for ((time, member, _), mut value) in originals {
+                value.name = name.to_owned();
+                *value.values.iter_mut().next().unwrap() = f64::NAN;
+                value.missing_count = 1;
+                collection.direct.insert((time, member, name.to_owned()), value);
+            }
+            let materialized = materialize_frames(&mapping, &collection);
+            assert_eq!(materialized.is_ok(), policy == "preserve_mask");
+            let plan = plan_frames(&mapping, &collection.source_cycles).unwrap();
+            let mut fields = FieldMaterializer::new(&mapping, collection, &plan, &plan.keys[0]).unwrap();
+            for id in fields.output.clone() {
+                fields.materialize(id).unwrap();
+                if fields.available[&id].name == name {
+                    let result = field_work(&fields, id, &plan, None, None, None,
+                                            &json!({}), plan.keys[0].0);
+                    assert_eq!(result.is_ok(), policy == "preserve_mask");
+                }
+            }
+        }
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {

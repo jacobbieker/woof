@@ -161,10 +161,28 @@ _PER_COLUMN_STRIDE_NAMES = frozenset((
 #: the no-``DomainState`` path used by the standalone harnesses, and the
 #: 256-byte validity words, built once per process.
 _PHYSICS_ALLOCATION_INVENTORY = {
+    # Active parameter-table scaling is reached from initialize_physics,
+    # never the timestep driver. The validated registry selects at most
+    # 61 unique cells, independent of domain dimensions. Two explicit
+    # allocations hold outputs/status (5 bytes per cell); three asarray
+    # uploads hold binary64 values/factors and crop flags (17 bytes per
+    # cell). Bound: 1,342 raw bytes per initialization, returned to the
+    # reusable device pool on return.
+    # test_parameter_scaler_has_a_registry_bound_and_an_initialization_owner
+    # pins that bound and the initialization-only importer.
+    "woof/core/physics_param_gpu.py": {
+        "scale_physics_param_values": 2,
+    },
+    # CLM lake columns (sf_lake_physics = 1): per-lake-column state and
+    # refresh scratch, bounded by the lake-column count.
+    "woof/core/lake.py": {
+        "initialize_lake": 6,
+        "refresh_columns": 6,
+    },
     # Preparation seeds: candidate numbers span the grid, while rounded alt
     # and gathered scratch use at most 112 bytes per cell in one bounded chunk.
     "woof/ingest/closure_device.py": {
-        "temperature": 1,
+        "temperature": 2,
         "gathered_numbers": 2,
         "_rounded_alt": 1,
         "_closure_chunk": 4,
@@ -256,6 +274,27 @@ _PHYSICS_ALLOCATION_INVENTORY = {
         # Bound: (ny, nx + 1), (ny + 1, nx) and (ny, nx) float32 per such
         # call, freed on return.
         'launch_diff6': 3,
+        # The NOAA WRFV3.9 fork's edge-to-edge sixth-order filter
+        # (75c95b9dd, diff_6th_form = "noaa_wrf39", specified or nested
+        # domains).  NOT opt-in: request-defaults.v1.toml makes it the
+        # request default of every HRRR recipe source (hrrr, hrrr-native,
+        # hrrr-prs) and of hrrr_wrf.nl namelists, so it runs on the
+        # production HRRR route.  launch_diff6_to_edge itself allocates
+        # nothing since 2.8.6 (lane cut286-fu-diff6-price): its padded
+        # field, padded tendency, four padded planes and slope-taper
+        # padded base geopotential are the diff6_edge_* slots of
+        # preflight.scratch_slot_registry (shapes in
+        # woof/core/diff6_edge_workspace.py), drawn through
+        # DomainState.scratch by _diff6_edge_work and priced by the run
+        # preflight and every ensemble plan that reads the registry.  The
+        # one site left is the fallback for a bare-array launch with no
+        # DomainState: one flat float32 buffer of two padded fields, the
+        # padded planes and (slope taper only) the padded geopotential,
+        # freed on return.  Only the verification callers
+        # (tests/test_diff6_fork_form.py, tools/wrf_diffusion_oracle/
+        # diff6_fork_oracle.py) reach it; both forecast callers
+        # (prepare_fixed_tendencies, apply_diff6) pass the workspace.
+        '_diff6_edge_transient_work': 1,
         'reset': 1,
     },
     # Grell-Freitas.  Scanned since 5ef5d7dba (lane speed-default-pieces),
@@ -353,14 +392,19 @@ _PHYSICS_ALLOCATION_INVENTORY = {
         'mynn_dmp_mf_cuda': 4,
     },
     'woof/core/mynn_pbl_runtime.py': {
-        # One six-word int32 block per (device, stream), not per step.
+        # One growable int32 status block per (device, stream), not per step.
         '_validity_flags': 1,
         # One became three with the mixscalars landing (4a0bb3f69): the
         # qn-family output planes (five (nz, ny, nx) fields on the
         # bl_mynn_mixscalars=1 lane) and the qnbca zero column mp=28's
         # Registry package declares absent.  Entered in the same sweep as
         # the mynn_pbl_gpu row; ncol/plane-scaled, none nest-persistent.
-        'mynn_pbl_step': 3,
+        # scalar_pblmix adds one reused chunk work array (5*nz+1 floats
+        # per column), never a full-domain tridiagonal workspace. The four
+        # qn output planes reuse the existing allocation site above.
+        # preflight.mynn_scalar_transient_shapes prices the full live peak;
+        # omitting it would admit a run without space for its scalar rates.
+        'mynn_pbl_step': 4,
     },
     # Born with the mixscalars landing (4a0bb3f69) and entered in the same
     # sweep as the mynn_pbl_gpu row above: the qn-family tridiagonal
@@ -369,6 +413,10 @@ _PHYSICS_ALLOCATION_INVENTORY = {
     'woof/core/mynn_scalar_mix_gpu.py': {
         'mynn_dmp_qn_flux_columns_cuda': 2,
         'mynn_mix_scalar_columns_cuda': 3,
+        # Two chunk output buffers plus an optional standalone work buffer.
+        # Runtime passes its preallocated chunk work. No whole-domain solve
+        # buffer is permitted to hide behind this bounded-column entry.
+        'scalar_pblmix_columns_cuda': 3,
     },
     # The RUC soil-tier module allocates nothing; its columns come from
     # the caller's batch.
@@ -558,7 +606,7 @@ _PHYSICS_ALLOCATION_INVENTORY = {
         'ruc_soil_properties_cuda': 1,
         'ruc_soil_step_cuda': 6,
         'ruc_soil_temperature_step_cuda': 2,
-        'ruc_surface_parameters_cuda': 2,
+        'ruc_surface_parameters_cuda': 4,
         # Added at dd0df4e with the whole-column device path, and the one row
         # here that DOES scale with the nest: the argument is the snow-covered
         # subset of the RUC batch, so ``module_sf_ruclsm.F:2087``'s rebuild
@@ -790,20 +838,65 @@ def _physics_gpu_modules() -> tuple[str, ...]:
     gate without anyone remembering to add it here.
     """
     tracked = _tracked_core_modules()
-    found = []
+    trees = {}
     for path in sorted((ROOT / "woof" / "core").glob("*.py")):
         rel = path.relative_to(ROOT).as_posix()
         if tracked is not None and rel not in tracked:
             continue
-        source = path.read_text(encoding="utf-8")
-        for node in ast.walk(ast.parse(source)):
+        trees[rel] = ast.parse(path.read_text(encoding="utf-8"))
+    fetchers = _kernel_fetchers(trees)
+    found = []
+    for rel, tree in trees.items():
+        # A fetcher counts only where it is imported from the module that
+        # defines it; a same-named local helper is not a kernel launch.
+        names = {"get_kernel"}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.ImportFrom)
+                    and node.module in fetchers):
+                names.update(alias.asname or alias.name
+                             for alias in node.names
+                             if alias.name in fetchers[node.module])
+        for node in ast.walk(tree):
             if (isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Name)
-                    and node.func.id == "get_kernel"):
-                found.append(path.relative_to(ROOT).as_posix())
+                    and node.func.id in names):
+                found.append(rel)
                 break
     found.append("woof/ingest/closure_device.py")
     return tuple(found)
+
+
+def _kernel_fetchers(trees) -> dict[str, frozenset[str]]:
+    """Top-level functions that only hand back a ``get_kernel`` result.
+
+    The breakage this closes: b0556bd76 routed the five aerosol Thompson
+    units (cold, sat, sed, state, warm) through
+    ``thompson_aerosol_launch.aerosol_kernel``, a one-line
+    ``get_kernel`` selector for the generation's define, and a scanner that
+    knew only the name ``get_kernel`` stopped seeing five modules that still
+    launch kernels every step.  Their rows, including the two empty
+    forecast-path rows this ratchet exists to assert, went unchecked.  A
+    function whose every ``return`` is a ``get_kernel`` or
+    ``get_kernel_int_defines`` call is the same launch under another name.
+    """
+    direct = {"get_kernel", "get_kernel_int_defines"}
+    fetchers: dict[str, frozenset[str]] = {}
+    for rel, tree in trees.items():
+        names = set()
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            returns = [inner for inner in ast.walk(node)
+                       if isinstance(inner, ast.Return)]
+            if returns and all(
+                    isinstance(inner.value, ast.Call)
+                    and isinstance(inner.value.func, ast.Name)
+                    and inner.value.func.id in direct
+                    for inner in returns):
+                names.add(node.name)
+        if names:
+            fetchers[rel[:-3].replace("/", ".")] = frozenset(names)
+    return fetchers
 
 
 def _allocator_names(node) -> tuple[str, ...]:
@@ -1086,6 +1179,45 @@ def test_the_allocation_allowlist_has_not_rotted():
         stale = set(_PHYSICS_ALLOCATION_INVENTORY[rel]) - set(live)
         assert not stale, (
             f"{rel}: enumerated but no longer allocating: {stale}")
+
+
+def test_parameter_scaler_has_a_registry_bound_and_an_initialization_owner():
+    """A table edit must not grow into an undeclared grid-sized allocation."""
+    from woof.physics_params import registry
+
+    cells = {(section, category, row.column)
+             for row in registry().values() if row.table == "ruc-vegparm"
+             for section, categories in row.categories.items()
+             for category in categories}
+    assert len(cells) == 61, "update the parameter-scaling allocation bound with registry growth"
+    helper = ast.parse((ROOT / "woof/core/physics_param_gpu.py").read_text(encoding="utf-8"))
+    function = next(node for node in helper.body if isinstance(node, ast.FunctionDef)
+                    and node.name == "scale_physics_param_values")
+    count = next(node for node in function.body if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name) and target.id == "count"
+                         for target in node.targets))
+    assert ast.unparse(count.value) == "len(values)"
+    allocations = [node for node in ast.walk(function) if isinstance(node, ast.Call)
+                   and isinstance(node.func, ast.Attribute)
+                   and isinstance(node.func.value, ast.Name)
+                   and node.func.value.id == "cp"
+                   and node.func.attr in _ALLOCATORS]
+    assert len(allocations) == 2
+    assert all(ast.unparse(node.args[0]) == "count" for node in allocations)
+
+    owners = []
+    for path in sorted((ROOT / "woof").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.ImportFrom)
+                    and node.module == "woof.core.physics_param_gpu"):
+                continue
+            containers = [parent.name for parent in ast.walk(tree)
+                          if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+                          and node in ast.walk(parent)]
+            owners.append((path.relative_to(ROOT).as_posix(), tuple(containers)))
+    assert owners == [("woof/core/physics.py", ("initialize_physics",))], (
+        "parameter-scaling allocations gained a caller outside physics initialization", owners)
 
 
 def _shape_names(node: ast.Call) -> set[str]:

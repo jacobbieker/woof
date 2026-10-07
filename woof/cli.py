@@ -111,6 +111,8 @@ ml_export_register_cli = _lazy_register("woof.ml_export")
 multi_run_register_cli = _lazy_register("woof.multi_run")
 obs_register_cli = _lazy_register("woof.obs.cli")
 render_register_cli = _lazy_register("woof.render")
+simulated_radar_register_cli = _lazy_register("woof.simulated_radar")
+verification_visuals_register_cli = _lazy_register("woof.verification_visuals")
 remote_register_cli = _lazy_register("woof.remote_cli")
 report_register_cli = _lazy_register("woof.report_bundle")
 run_plan_register_cli = _lazy_register("woof.runplan")
@@ -269,6 +271,9 @@ _LONG_RUNNING_COMMANDS = frozenset({
     # they were split out of: preprocessing is minutes of static build,
     # the forecast is the forecast.
     "prep", "sim", "warm-kernels",
+    # `woof ensemble` is `go` by another name; argparse stores the name
+    # the reader typed, so the alias needs its own row to get the notice.
+    "ensemble",
 })
 
 
@@ -433,6 +438,8 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # beside render, the other door that turns history files into a
     # product.
     ml_export_register_cli(sub)
+    simulated_radar_register_cli(sub)
+    verification_visuals_register_cli(sub)
     enprod_register_cli(sub)
     downscale_register_cli(sub)
     doctor_register_cli(sub)
@@ -490,9 +497,9 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     lst.add_argument("--json", action="store_true",
                      help="emit the registry as JSON for a front end")
     ver = sub.add_parser(
-        "verify", help="run a benchmark or real case and check its gates")
+        "verify", help="run a benchmark or code-verification case and check its gates")
     ver.add_argument("case", choices=sorted(_CASES),
-                     help="verification case to run")
+                     help="benchmark or code-verification case to run (no observation scoring)")
     ver.add_argument("--outdir", type=Path, default=None, metavar="OUT",
                      help="directory for the PNG and wrfout NetCDF output "
                           "(omit to compute metrics only)")
@@ -613,14 +620,24 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
                      help="[experiment].name for the resolved TOML "
                           "(default derived from start time and domain "
                           "count)")
-    imp.add_argument("--rrtmg-variant", default="rte-rrtmgp",
+    imp.add_argument("--rrtmg-variant", default=None,
                      choices=("rte-rrtmgp", "rrtmg_legacy"),
                      dest="rrtmg_variant",
                      help="implementation for a WRF RRTMG 4/4 request: "
-                          "the established RTE+RRTMGP substitution "
-                          "(default, unchanged output) or the exact "
-                          "legacy-RRTMG port (fails closed at physics "
-                          "setup until its compute kernels land)")
+                          "RTE+RRTMGP by default, or legacy RRTMG when "
+                          "the namelist selects GSD MYNN or aer_opt=3; "
+                          "an explicit choice retains its implementation")
+    # No argparse default: the report records WHAT chose the line, and
+    # "nobody did, the importer's default applied" is one of the answers.
+    imp.add_argument("--wrf-version", default=None, choices=("3", "4"),
+                     dest="wrf_version",
+                     help="the WRF line the namelist was written for; "
+                          "selects only the Registry default an omitted "
+                          "&dynamics/use_theta_m takes (3: 0, dry theta, "
+                          "the line operational HRRR v4 runs; 4, the "
+                          "default: 1, moist theta, booked as a "
+                          "substitution). The report names the line and "
+                          "what chose it")
     imp.add_argument("--ack", action="append", default=[], metavar="ID",
                      help="declared-experiment acknowledgement id to "
                           "write into [experiment].acknowledgements of "
@@ -666,6 +683,12 @@ def main(argv: list[str] | None = None) -> int:
     this call's, on every exit path including a raised exception.
     """
 
+    if argv is None:
+        # A command line on a free-threaded build keeps the interpreter
+        # lock off for good (the ranks would otherwise take turns again
+        # after netCDF4's import); see woof.free_threading.
+        from woof.free_threading import keep_gil_disabled
+        keep_gil_disabled()
     from woof.explain import explain_scope
     from woof.progress import line_buffer_stdout
 
@@ -778,6 +801,8 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         # and a gate that blocks its own diagnostic leaves no way out.
         from woof.provenance_gate import announce
 
+        from woof.ensemble.calibration_admission import refuse_public_arguments
+        refuse_public_arguments(args)
         announce(f"woof {args.command}")
         # THE front-door capability preflight, for every subcommand, in
         # one place.  After argparse (so `--help` is never refused) and
@@ -800,8 +825,11 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         # and runs nothing, and a site asks it from a scheduler that may
         # have no card (DESIGN A136 3.4, 3.7).
         _spends_nothing = (
-            (args.command == "go" and (getattr(args, "dry_run", False)
-                                       or getattr(args, "readiness", False)))
+            # `ensemble` is `go` by another name, so its dry run (which
+            # prints a recipe's member plan) spends nothing either.
+            (args.command in ("go", "ensemble")
+             and (getattr(args, "dry_run", False)
+                  or getattr(args, "readiness", False)))
             or (args.command == "sim"
                 and getattr(args, "print_command", False)))
         if not _spends_nothing:
@@ -946,6 +974,15 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
             print(f"woof {args.command}: "
                   + _layer(error, args), file=sys.stderr)
             return 2
+        # The simulated radar door's refusals (a missing or stale
+        # rw_simradar, a native refusal of an option or input) name the
+        # breakage and the next step; a traceback buried that sentence.
+        from woof.rustwx import SimulatedRadarRefusal
+
+        if isinstance(error, SimulatedRadarRefusal):
+            print(f"woof {args.command}: "
+                  + _layer(error, args), file=sys.stderr)
+            return 2
         if args.command in ("fetch", "stream", "fetch-geog", "fetch-tables",
                             "fetch-bridges", "obs", "report"):
             # fetch-family RuntimeErrors are operational outcomes
@@ -1033,6 +1070,52 @@ def case_door(record: dict) -> str:
     return f"python -m woof.verify.cases.{name}"
 
 
+def _plain_member_request(args):
+    """The N > 1 request with no recipe this command line and its config make, or None.
+
+    Read from an experiment config only: a ``[grid]``/``[dynamics]``/``[run]``
+    config is refused by name further down, by the loader that owns it.
+    ``[ensemble] sources`` is refused here in its own words: `run`, `resume`
+    and `branch` bind no member source, and the worker would only find
+    that out after it had been given a card.
+    """
+    from woof.ensemble import member_inputs
+
+    config = getattr(args, "config", None)
+    if config is not None and Path(config).is_file():
+        from woof.config_authority import read_config_authority
+        if not is_experiment_toml_bytes(read_config_authority(config).payload):
+            return None
+    request = member_inputs.config_request(
+        config, members=getattr(args, "members", None),
+        keep_member_files=getattr(args, "keep_member_files", None))
+    if request is not None and request.recipe is None and request.sources:
+        from woof.ensemble_admission import unbound_sources_refusal
+        raise ValueError(unbound_sources_refusal())
+    return request if member_inputs.needs_member_sources(request) else None
+
+
+def _refuse_members_of_one_checkpoint(args) -> None:
+    """``resume`` and ``branch`` continue ONE forecast from ONE checkpoint.
+
+    Breakage it prevents: N > 1 members would each restore that checkpoint
+    and run the same forecast N times, published with zero spread.  Refused
+    here, before ``branch`` writes its run folder and before a worker or a
+    card is taken.
+
+    A config that selects a recipe is refused before this is asked, by
+    :func:`woof.ensemble.recipe_door.refuse_continuation`, and neither
+    command registers ``--recipe`` or ``--trajectories``.
+    """
+    request = _plain_member_request(args)
+    if request is not None:
+        from woof.ensemble import member_inputs
+        raise ValueError(member_inputs.one_input_refusal(
+            request.members,
+            f"woof {args.command} continues one forecast from one checkpoint, "
+            "so every member would restore it."))
+
+
 def _dispatch(args) -> int:
     if args.command in ("check", "fetch", "stream", "fetch-geog", "domain", "render",
                         "enprod", "downscale", "doctor", "fetch-tables",
@@ -1103,9 +1186,14 @@ def _dispatch(args) -> int:
                 args.wps, args.input, name=args.name,
                 static_cache_root=(None if args.static_cache_root is None
                                    else args.static_cache_root.resolve()),
-                rrtmg_variant=args.rrtmg_variant,
+                **({} if args.rrtmg_variant is None else
+                   {"rrtmg_variant": args.rrtmg_variant}),
                 acknowledgements=tuple(args.ack), geogrid_tbl=args.geogrid_tbl,
-                terrain_smoothing_precision=args.terrain_smoothing_precision)
+                terrain_smoothing_precision=args.terrain_smoothing_precision,
+                **({} if args.wrf_version is None else {
+                    "wrf_version": args.wrf_version,
+                    "wrf_version_source":
+                        f"--wrf-version {args.wrf_version}"}))
         except NotImplementedError as error:
             # validate_run_config raises its "not executable yet" refusals
             # (e.g. ra_lw_physics=1, WRF RRTM longwave) as
@@ -1146,6 +1234,10 @@ def _dispatch(args) -> int:
         if child is not None:
             raise ValueError(offline_child_resume_refusal(child))
         experiment = resolve_resume_experiment(args.config, args.outdir)
+        # A recipe is refused here, before a checkpoint is looked for, a
+        # card locked or a worker started (the breakage is named there).
+        from woof.ensemble import recipe_door
+        recipe_door.refuse_continuation("resume", experiment.path)
         if experiment.note is not None:
             # A resolution, not a guess: the file was found by the ladder
             # the refusal would otherwise have printed, so the line says
@@ -1161,6 +1253,7 @@ def _dispatch(args) -> int:
                 explain=explain_enabled(args),
                 command=f"woof {args.command}"))
             args.config = experiment.path
+        _refuse_members_of_one_checkpoint(args)
         # Locate only; every safety property of the resume (manifest
         # validation, config/setup/physics identity, complete tree set)
         # is the run machinery's own and runs on the path set here.
@@ -1187,12 +1280,57 @@ def _dispatch(args) -> int:
         # compares the payloads before writing anything), so the restart
         # guard adjudicates this restore exactly as it does a resume's.
         from woof.branch import prepare_branch_from_cli
+        from woof.ensemble import recipe_door
+        # Before the new run directory is written: a branch continues one
+        # checkpointed trajectory, as a resume does.
+        recipe_door.refuse_continuation("branch", args.config)
+        _refuse_members_of_one_checkpoint(args)
         plan = prepare_branch_from_cli(args)
         if args.prepare_only:
             return 0
         args.config = plan.config_path
         args.restart = plan.checkpoint
         # Fall through to the run dispatch below.
+
+    if args.command == "run":
+        from woof.ensemble import recipe_door
+        if recipe_door.requested(args) or (
+                args.config is not None and recipe_door.configured(args.config)):
+            # Time-lagged and multi-model members.  Breakage it prevents on
+            # the input-directory doors: --wrfinput and --met-em hold ONE
+            # trajectory's prepared files, so every member would be that
+            # trajectory and the ensemble would report spread it lacks.
+            if args.config is None:
+                raise ValueError(
+                    "--recipe fetches and prepares each member's own source "
+                    "trajectory; --wrfinput and --met-em name one trajectory's "
+                    "files. Next: woof ensemble CONFIG --recipe time-lagged")
+            # The recipe runs in THIS process, ahead of the supervisor: the
+            # supervision flags it cannot consume are refused by name.
+            recipe_door.refuse_unsupervised(args)
+            from woof.ensemble.door import request_for_config
+            request = request_for_config(
+                args.config, members=getattr(args, "members", None),
+                keep_member_files=getattr(args, "keep_member_files", None),
+                **recipe_door.flag_overrides(args))
+            return recipe_door.run_recipe_ensemble(args, request)
+        # A plain member count (N > 1, no recipe named).  This door prepares
+        # ONE trajectory, so running it would be N copies of one forecast
+        # with zero spread.  The recipe door plans the source's operational
+        # ensemble instead, or refuses by name before anything is fetched.
+        # A config that is not a readable file is refused further down, in
+        # the sentence that says so.
+        request = (_plain_member_request(args)
+                   if args.config is not None and Path(args.config).is_file() else None)
+        if request is not None:
+            # The members run in THIS process like any recipe's, ahead of
+            # the supervisor.  Breakage it prevents: --gpu-uuid, --restart
+            # and the other supervision flags were accepted and read by
+            # nothing on this route, so a pinned run put its members on
+            # the cards the pin excludes, and a card that does not exist
+            # was not even refused.
+            recipe_door.refuse_unsupervised(args)
+            return recipe_door.run_recipe_ensemble(args, request)
 
     if args.command == "run" and (args.wrfinput is not None or args.met_em is not None):
         from woof.wrfinput_forecast import run_wrf_forecast
@@ -1206,12 +1344,17 @@ def _dispatch(args) -> int:
         if unsupported:
             raise ValueError("WRF input execution does not consume " + ", ".join(unsupported)
                              + "; remove these CONFIG supervision options")
+        from woof.ensemble.door import request_for_inputs
+        ensemble_request = request_for_inputs(members=getattr(args, "members", None),
+            keep_member_files=getattr(args, "keep_member_files", None))
         return launch(directory, args.outdir,
                                run_seconds=args.run_seconds, restart=args.restart,
                                health_debug=args.health_debug, gpu_uuid=args.gpu_uuid,
                                exclusive_gpu=not args.no_supervise,
                                rrtmg_variant=args.rrtmg_variant,
                                allow_shared_gpu=args.allow_shared_gpu,
+                               **({} if ensemble_request is None else
+                                  {"ensemble_request": ensemble_request.receipt()}),
                                **({"vertical_grid":args.vertical_grid,
                                    "vertical_levels":args.vertical_levels}
                                   if args.met_em is not None else
@@ -1273,9 +1416,16 @@ def _dispatch(args) -> int:
             if getattr(args, "preprocess_backend", None) is not None:
                 from dataclasses import replace
                 data = replace(data, preprocess_backend=args.preprocess_backend)
-            summary = runtime.run_experiment(exp, data, args.outdir,
-                                             restart=args.restart,
-                                             health_debug=args.health_debug)
+            from woof.ensemble.door import request_for_payload, production_run_scope
+            request = request_for_payload(config_authority.payload,
+                members=getattr(args, "members", None),
+                keep_member_files=getattr(args, "keep_member_files", None))
+            with production_run_scope(request, output_directory=args.outdir,
+                                      **({"restart_roster": args.restart_roster}
+                                         if getattr(args, "restart_roster", None) is not None else {})):
+                summary = runtime.run_experiment(exp, data, args.outdir,
+                                                 restart=args.restart,
+                                                 health_debug=args.health_debug)
             print({"experiment": exp.name, "outdir": str(args.outdir),
                    "wrfout_count": len(summary.wrfout_paths),
                    "completed_seconds": summary.completed_seconds,
@@ -1298,6 +1448,16 @@ def _dispatch(args) -> int:
             f"and {args.config} is a legacy [run] config whose frozen case "
             "path does not read it; refusing to drop it and run the case's "
             "own preparation under your pin")
+    if getattr(args, "members", None) is not None or getattr(args, "keep_member_files", None):
+        # Breakage it prevents: the frozen case path below integrates one
+        # forecast and opens no ensemble session, so the member count
+        # would be read and dropped, and one forecast would run under it.
+        raise ValueError(
+            f"--members and --keep-member-files make an ensemble, and {args.config} is a "
+            "[grid]/[dynamics]/[run] config whose case path runs one forecast and opens "
+            "no ensemble session; refusing to drop them and run one forecast under an "
+            "ensemble's name. Next: woof ensemble CONFIG --members N on the config "
+            "woof domain wrote.")
     if args.command == "run":
         from types import SimpleNamespace
         from woof.config import load_device_options

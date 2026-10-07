@@ -3054,7 +3054,7 @@ def _pair_main(args: argparse.Namespace) -> int:
             sheets = compose_pairs(
                 left, right, args.out, title=args.pair_title,
                 subtitle=args.pair_subtitle, left_label=labels[0],
-                right_label=labels[1])
+                right_label=labels[1], theme=args.theme)
         except ValueError as exc:
             print(f"render: {exc}", file=sys.stderr)
             return 2
@@ -3074,8 +3074,8 @@ _DIFF_SHEET_REFUSAL = "is a sheet composed of several panels"
 def _diff_main(args: argparse.Namespace) -> int:
     """``woof render --diff A_RUN B_RUN``: products as run A minus run B.
 
-    Orchestration only: the frames are paired by the valid time their
-    NAMES carry (:mod:`woof.render_difference`), and each pair is drawn
+    Orchestration only: the frames are paired by their recorded valid time
+    (:mod:`woof.render_difference`), and each pair is drawn
     by the Rust renderer, which reads both runs, checks that they share
     the valid time and the grid, and refuses by name when they do not.
     """
@@ -3085,11 +3085,23 @@ def _diff_main(args: argparse.Namespace) -> int:
     try:
         renderer = require_renderer()
         size = parse_size(args.size)
+        timeidx = parse_timeidx(args.timeidx)
         products = parse_products_rust(args.products)
+        if args.list_products:
+            raise ValueError("--list-products describes one run; ask it of "
+                             "each run without --diff")
+        if getattr(args, "context_wrfout", ()):
+            raise ValueError("--context-wrfout names one run's history, so it "
+                             "cannot identify which --diff side it continues; "
+                             "include earlier frames in the matching run folder")
         a_run, b_run = args.diff
         pairing = render_difference.pair_frames_by_valid_time(
             render_difference.run_frames(a_run),
-            render_difference.run_frames(b_run))
+            render_difference.run_frames(b_run),
+            reader=_history_series_record, domain_reader=_domain_tag,
+            series_groups=history_series_groups,
+            timeidx=timeidx,
+            series=getattr(args, "series", False) or Path(a_run).is_dir())
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         print("render: " + explain.render(
             str(exc), explain=explain.explain_enabled(args),
@@ -3099,15 +3111,18 @@ def _diff_main(args: argparse.Namespace) -> int:
     if notice is not None:
         print(f"render: note: {notice}", file=sys.stderr)
     if not pairing.pairs:
-        print("render: --diff found no valid time both runs hold, so there "
+        print("render: --diff found no selected valid time both runs hold, so there "
               "is nothing to difference", file=sys.stderr)
         return 2
     labels = tuple(args.diff_labels) if args.diff_labels else (
         Path(a_run).name or "A", Path(b_run).name or "B")
     source_label = args.source_label or default_source_label()
+    if getattr(args, "radar_colors", None):
+        os.environ[rustwx.RADAR_COLORS_ENV] = args.radar_colors
     _claim_run_dir(args, [pair[2] for pair in pairing.pairs])
     written: list[Path] = []
     failures: list[str] = []
+    skipped_rows: list[tuple[str, str]] = []
     # 'all' reaches the multi-panel sheets too, which the renderer refuses
     # to difference (it draws per map product); under 'all' they are
     # skipped once each and said so, and only a sheet named on the command
@@ -3117,29 +3132,34 @@ def _diff_main(args: argparse.Namespace) -> int:
     try:
         args.out.mkdir(parents=True, exist_ok=True)
         for domain, valid, a_file, b_file in pairing.pairs:
+            a_paths, b_paths, a_index = pairing.contexts[(domain, valid)]
             token = domain_token(_domain_tag(a_file), _grid_spacing_m(a_file))
             prior_georef = render_georef.read(
                 args.out / render_georef.GEOREF_FILENAME)
             with scratch_store(args.out) as store:
                 drawn, failed, skipped, differences = (
                     rustwx.run_renderer_difference(
-                        renderer, a_file, b_file, store_root=store,
+                        renderer, a_paths, b_paths, timeidx=a_index, store_root=store,
                         out_dir=args.out, products=products, labels=labels,
                         sheet=args.diff_sheet, source_label=source_label,
                         theme=args.theme,
+                        overlays=args.overlays, annotate=args.annotate,
+                        streamlines=args.streamlines,
                         width=size[0] if size else None,
                         height=size[1] if size else None))
             drawn = render_georef.file_pictures(
                 args.out, drawn,
                 lambda png, token=token: _place_engine_output(
-                    png, args.out, token, args.layout),
+                    png, args.out, token, args.layout,
+                    episode=history_episode(a_file)),
                 prior=prior_georef)
             for png in drawn:
                 print(f"render: {png}")
             for row in differences:
                 print(f"render: difference {row['key']} {valid:%Y-%m-%d %H:%MZ}"
                       f" bar +/-{row.get('half_range')} {row.get('units', '')}"
-                      f" ({row.get('rule')})")
+                      f" ({row.get('rule')}) cells={row.get('defined_cells')}"
+                      f" max_abs={row.get('max_abs')}")
             for slug, reason in skipped:
                 print(f"render: skipped {slug}: {reason}", file=sys.stderr)
             if every_product:
@@ -3155,6 +3175,18 @@ def _diff_main(args: argparse.Namespace) -> int:
                 print(f"render: failed {failure}", file=sys.stderr)
             written.extend(drawn)
             failures.extend(failed)
+            skipped_rows.extend(skipped)
+        from woof.render_receipts import _drawn_family, publish_invocation
+
+        publish_invocation(root=args.out, engine="rust",
+            requested_spec=args.products, written=written,
+            failures=failures,
+            skipped=[(_drawn_family(slug) + "_difference", reason)
+                     for slug, reason in skipped_rows], layout=args.layout,
+            inputs=list(dict.fromkeys(path for pair in pairing.pairs for path in pair[2:])),
+            context_inputs=list(dict.fromkeys(
+                path for sides in pairing.contexts.values()
+                for paths in sides[:2] for path in paths)))
         print(f"render: {len(written)} difference picture(s) from "
               f"{len(pairing.pairs)} valid time(s) -> {args.out}")
         return 1 if failures or not written else 0
@@ -3368,6 +3400,26 @@ def render_main(args: argparse.Namespace) -> int:
     if refusal is not None:
         print(f"render: {refusal}", file=sys.stderr)
         return 2
+    comparisons = [name for name in ("pair", "compare", "diff")
+                   if getattr(args, name, None)]
+    if len(comparisons) > 1:
+        print("render: " + ", ".join("--" + name for name in comparisons)
+              + " name separate comparison inputs; choose one comparison",
+              file=sys.stderr)
+        return 2
+    if getattr(args, "compare", None):
+        # A run beside a reference model's own fields: its own engine
+        # (rw_compare), its own product names and its own inputs (frames
+        # or a run folder), so it leaves this handler before any of the
+        # single-run engine resolution below.
+        if args.pair:
+            print("render: --compare draws from history frames and --pair "
+                  "composes already-rendered PNG directories; they do not "
+                  "combine", file=sys.stderr)
+            return 2
+        from woof.render_compare import compare_main
+
+        return compare_main(args)
     if args.pair:
         if args.wrfout:
             print("render: --pair composes already-rendered PNG "
@@ -3530,6 +3582,13 @@ def render_main(args: argparse.Namespace) -> int:
             # engine's 153 products had to be explained after the fact.
             from woof import rustwx
             from woof.provenance_gate import bridge_tree_match
+
+            # The radar colour set reaches the engine by its environment
+            # name, which every renderer subprocess inherits
+            # (rustwx.renderer_env): one switch for every radar-table
+            # product, no per-product argument.
+            if getattr(args, "radar_colors", None):
+                os.environ[rustwx.RADAR_COLORS_ENV] = args.radar_colors
 
             verdict = bridge_tree_match(rustwx.find_renderer(),
                                         env_var=rustwx.RENDERER_ENV)
@@ -3788,6 +3847,15 @@ def register_cli(subparsers) -> None:
              "environment spelling).  Omitted, the engine draws its own "
              "look and the PNGs are byte-identical")
     parser.add_argument(
+        "--radar-colors", choices=("standard", "classic"), default=None,
+        help="rust engine: the colour tables the reflectivity and radial "
+             "velocity products draw with -- standard (the radar tables, "
+             "the default) or classic (the reflectivity ladder and "
+             "blue-red velocity scale before 2.8.5).  One name selects "
+             "every radar-table product; RUSTWX_RADAR_COLORS is the "
+             "environment spelling, which `woof go` and `woof run` "
+             "renders also read")
+    parser.add_argument(
         "--section", metavar="lat,lon,lat,lon|FILE.json", default=None,
         help="rust engine: the line the vertical-section products "
              "(xsec:<fill>[/<overlay>...] in --products, any 3-D wrfout "
@@ -3834,6 +3902,9 @@ def register_cli(subparsers) -> None:
     parser.add_argument(
         "--pair-labels", nargs=2, metavar=("LEFT", "RIGHT"),
         help="panel labels (default: the two directory names)")
+    from woof.render_compare import register_arguments
+
+    register_arguments(parser)
     parser.add_argument(
         "--diff", nargs=2, metavar=("A_RUN", "B_RUN"), type=Path,
         help="draw each product as run A minus run B: two folders of wrfout "

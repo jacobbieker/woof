@@ -354,6 +354,14 @@ WARNING_CODES = {
         "process (a head-bound tree whose terrain clock moved runs again "
         "on its sealed preparation); `reason` says why, and the attempt's "
         "outputs are kept beside the new ones",
+    "stability_retry":
+        "a static nested forecast failed its full-state health check and "
+        "bounded checkpoint recovery acted on it: it rewinds to the last "
+        "proven checkpoint and runs again with half-sized adaptive step "
+        "caps, at most twice; `recovery` carries the retry number, its "
+        "phase (validating_restore, resumed, refused or interrupted), the "
+        "checkpoint, the cause, the per-domain clock_policy_changes and "
+        "the path of the stability-recovery.json receipt",
 }
 
 #: The one code family spelled by prefix rather than in full.
@@ -991,6 +999,12 @@ def _build_intent(intent: object, *, route: str,
         except ValueError as error:
             raise PlanError(str(error)) from error
     intent = dict(intent)
+    if isinstance(intent.get("physics_profile"), str):
+        from woof.physics_registry import canonical_template_id
+
+        # The wizard reads an old profile ID as its current ID; the chain's
+        # own assertion and the manifest read this value directly.
+        intent["physics_profile"] = canonical_template_id(intent["physics_profile"])
     if base is not None:
         # A relative file in a plan means a file beside the plan, as the
         # rest of the plan's paths do; left relative it would be read
@@ -1166,12 +1180,14 @@ def intent_arguments(intent: Mapping[str, Any], *, out: Path
 #: an option the route does not support is refused, never accepted and
 #: dropped.
 _RUN_OPTION_DEFAULTS: dict[str, Any] = {
+    "ensemble": None,
     "device": None,
     "dry_run": False,
     "restart": None,
     "prepared_root": None,
     "wps_namelist": None,
     "health_debug": False,
+    "verify_visuals": True,
     "data_dir": None,
     "geog_root": None,
     "physics_profile": None,
@@ -1220,6 +1236,14 @@ _RUN_OPTION_DEFAULTS: dict[str, Any] = {
 
 def _run_option(key: str, value: object, base: Path) -> Any:
     label = f"run plan 'run_options.{key}'"
+    if key == "ensemble":
+        if value is None:
+            return None
+        from woof.ensemble.request import EnsembleRequest
+        try:
+            return EnsembleRequest.from_mapping(value).receipt()
+        except (ValueError, TypeError) as error:
+            raise PlanError(f"{label}: {error}") from error
     if key == "devices":
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise PlanError(f"{label} must be a positive integer slab count")
@@ -1230,7 +1254,7 @@ def _run_option(key: str, value: object, base: Path) -> Any:
             return bindings(value, base=base)
         except ValueError as error:
             raise PlanError(str(error)) from error
-    if key in ("dry_run", "health_debug"):
+    if key in ("dry_run", "health_debug", "verify_visuals"):
         if not isinstance(value, bool):
             raise PlanError(f"{label} must be true or false")
         return value
@@ -1269,7 +1293,14 @@ def _run_option(key: str, value: object, base: Path) -> Any:
             raise PlanError(f"{label}: {problem}")
         return section
     if key == "physics_profile":
-        return None if value is None else _nonempty_string(value, label)
+        if value is None:
+            return None
+        from woof.physics_registry import canonical_template_id
+
+        # An old profile ID is read as its current ID here, once, so the
+        # preparation's receipt check, the prepared-run conflict check and
+        # the manifest's component record all see the ID the registry keys.
+        return canonical_template_id(_nonempty_string(value, label))
     if key == "as_posted":
         if value is not None and not isinstance(value, bool):
             raise PlanError(f"{label} must be true or false")
@@ -2385,19 +2416,28 @@ class RunObserver:
         start again with the new attempt.
         """
 
-        hook = getattr(self._heartbeat, "restarting", None)
-        if hook is not None:
-            hook(reason)
         live, first = self._live_products, self._first_products
         if live is not None or first is not None:
             from woof.first_products import halt_renders_and_wait
 
             if live is not None:
                 live.halt(timeout=0)
-            if first is not None:
-                halt_renders_and_wait(first)
-            if live is not None:
-                halt_renders_and_wait(live)
+            # A bounded halt may return with a reader still alive.  Keep the
+            # old render handles and progress intact in that case: the runner
+            # is about to rewind history, so a new attempt cannot start until
+            # every reader of the old frames has ended.  Try both readers even
+            # when the first one fails to stop.
+            first_stopped = (first is None or halt_renders_and_wait(first))
+            live_stopped = (live is None or halt_renders_and_wait(live))
+            if not first_stopped or not live_stopped:
+                raise RuntimeError(
+                    "forecast restart refused: a render is still reading "
+                    "the previous attempt's history; refusing output rewind")
+
+        hook = getattr(self._heartbeat, "restarting", None)
+        if hook is not None:
+            hook(reason)
+        if live is not None or first is not None:
             self._first_products = None
             self._live_products = None
             if self._render_plan is not None:
@@ -2585,6 +2625,9 @@ class RunObserver:
         place, :func:`woof.first_products.early_render_requested`.
         """
 
+        from woof.ensemble.runtime_context import current_session
+        if current_session() is not None:
+            return
         from woof.first_products import (FirstProducts,
                                           early_render_requested)
         from woof.live_products import (LiveProducts, early_render_runner,
@@ -2751,8 +2794,12 @@ def _schema_default_resolutions(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
     spelled |= {name for name in raw if name != "experiment"}
     resolutions = []
     for field in dataclasses.fields(ExperimentConfig):
-        if field.name == "devices":
+        if field.name in {"devices", "simulated_radar"}:
             # OFF contributes no new schema row to an existing plan.
+            continue
+        if field.name == "physics_params" and field.default is None:
+            # Absent constants contribute no schema-default row. An active
+            # set is carried by the resolved configuration snapshot instead.
             continue
         if field.default is dataclasses.MISSING:
             continue
@@ -3094,6 +3141,9 @@ def resolve_plan(plan: RunPlan, *, generate_into: Path | None = None,
                 "and the caller owns restart policy"})
 
     existing_bundle = _existing_prepared_bundle(plan)
+    recipe_refusal = _recipe_plan_refusal(plan, raw, existing_bundle)
+    if recipe_refusal is not None:
+        raise PlanError(recipe_refusal)
     if plan.route == "prepared" and existing_bundle is None:
         hints = raw.get("fetch") or {}
         if {"source", "cycle"} <= hints.keys():
@@ -3145,7 +3195,8 @@ def resolve_plan(plan: RunPlan, *, generate_into: Path | None = None,
                     "value": {"id": member, "token": token},
                     "basis": "route_default" if requested is None else "declared"})
     local_verdict = drivability_for((raw.get("fetch") or {}).get("source"))
-    if chain == "prepared:staged" and local_verdict.get("requires_source_root"):
+    from woof.source_drivability import local_input_requested
+    if chain == "prepared:staged" and local_input_requested(raw.get("fetch") or {}):
         from woof.local_preparation import review_local_inputs
         hints = raw.get("fetch") or {}
         try:
@@ -3233,10 +3284,20 @@ def resolve_plan(plan: RunPlan, *, generate_into: Path | None = None,
     from woof.config import validate_experiment_preparation
 
     if existing_bundle is None:
+        from woof.preparation_assets import wif_fetch_domains, wif_fetch_resolution
+
+        # Only a chain that actually fetches may defer this dependency.
+        # Preparation and initialization still require the acquired dataset.
+        fetch_hints = raw.get("fetch") or {}
+        pending_wif = (wif_fetch_domains(exp, fetch_hints)
+                       if chain in ("prepared:hrrr", "prepared:staged")
+                       and not local_input_requested(fetch_hints) else ())
         try:
-            validate_experiment_preparation(exp)
+            validate_experiment_preparation(exp, pending_wif_domains=pending_wif)
         except ValueError as refusal:
             raise PlanError(str(refusal)) from None
+        if pending_wif:
+            resolutions.append(wif_fetch_resolution(pending_wif))
         # A root the [fetch] source's grid does not reach, on the same
         # terms: the source row declares its coverage, the config holds
         # the root, and the preparation otherwise refuses it only after
@@ -3374,6 +3435,83 @@ def resolve_plan(plan: RunPlan, *, generate_into: Path | None = None,
     }, exp, data
 
 
+def _plan_recipe(plan: RunPlan, raw: Mapping[str, Any]) -> str | None:
+    """The member-source recipe this plan's ensemble request names, or None.
+
+    ``run_options.ensemble`` wins over the configuration's ``[ensemble]``
+    table, as it does when the request is built for the run.  A trajectory
+    list alone is the multi-model recipe.
+    """
+
+    table = plan.run_options.get("ensemble")
+    if table is None and isinstance(raw, Mapping):
+        table = raw.get("ensemble")
+    if not isinstance(table, Mapping):
+        return None
+    if table.get("recipe") is not None:
+        return str(table["recipe"])
+    if table.get("member_variants"):
+        return "member-roster"
+    return "multi-model" if table.get("trajectories") else None
+
+
+#: Run options a recipe request does not consume, each with the breakage a
+#: silent acceptance would cause.  The recipe door fetches and prepares
+#: every member by its own source's chain (:mod:`woof.ensemble.recipe_door`).
+_RECIPE_UNCONSUMED_OPTIONS = {
+    "supplement": "it binds one donor file of one trajectory, and every member "
+                  "is prepared from its own trajectory",
+    "data_dir": "it names one existing download, and a recipe downloads one "
+                "window per member into its own request cache",
+    "physics_profile": "it asserts a suite to one chain's preparer, and each "
+                       "member is prepared by its source's own chain, which is "
+                       "handed no assertion",
+    "render_section": "the ensemble draws its aggregate maps and no stage of "
+                      "it cuts a vertical section",
+}
+
+
+def _recipe_plan_refusal(plan: RunPlan, raw: Mapping[str, Any],
+                         existing_bundle) -> str | None:
+    """Why this plan's recipe request cannot run as planned, or None.
+
+    Asked at plan resolution, so ``--resolve`` and a run both answer
+    before anything is fetched.  Breakage it prevents: a recipe on the
+    experiment route, or over an existing prepared bundle, ran its whole
+    download or restore for ONE trajectory and was refused only at the
+    forecast stage, where the session finds no member sources; and a run
+    option the recipe door does not consume was accepted and read by
+    nothing.
+    """
+
+    recipe = _plan_recipe(plan, raw)
+    if recipe is None:
+        return None
+    door = f"woof ensemble CONFIG --recipe {recipe}"
+    if plan.route != "prepared":
+        return (f"the {recipe} ensemble recipe fetches and prepares each member's "
+                f"own source trajectory, and the {plan.route!r} route runs the one "
+                "trajectory its [case_data] files hold: every member would be a "
+                f"copy of it. Next: {door} on a config with a [fetch] table "
+                "(woof domain writes one)")
+    if existing_bundle is not None or plan.run_options.get("restart") is not None:
+        return (f"the {recipe} ensemble recipe prepares each member's own source "
+                "trajectory, and run_options.prepared_root / restart name one "
+                "prepared trajectory: every member would be a copy of it. Next: "
+                "remove prepared_root and restart from the plan")
+    intent = plan.config_intent or {}
+    given = [key for key in _RECIPE_UNCONSUMED_OPTIONS
+             if plan.run_options.get(key) not in (None, [], ())
+             or (key == "data_dir" and intent.get("data_dir"))]
+    if given:
+        return (f"the {recipe} ensemble recipe does not use "
+                + ", ".join(f"run_options.{key}" for key in given) + ": "
+                + "; ".join(f"{key}: {_RECIPE_UNCONSUMED_OPTIONS[key]}" for key in given)
+                + ", so it would be read by nothing. Next: remove "
+                + ("it" if len(given) == 1 else "them") + " from the plan")
+    return None
+
+
 def _planned_download(plan: RunPlan, raw: Mapping[str, Any], data, *,
                       fetch_arguments: Sequence[str] | None,
                       run_dir: Path | None = None
@@ -3446,6 +3584,57 @@ def _preparation_chain(plan: RunPlan, raw: Mapping[str, Any]) -> str | None:
     if plan.route != "prepared":
         return plan.route
     return _chain_key(plan.route, ((raw or {}).get("fetch") or {}).get("source"))
+
+
+def _refuse_one_input_ensemble(plan: RunPlan, raw: Mapping[str, Any]) -> None:
+    """Refuse, before the fetch, N > 1 members that would all run this plan's one input.
+
+    Breakage it prevents: the experiment route, the native and staged
+    chains and an existing prepared bundle hold ONE trajectory's inputs.
+    N > 1 members on them are N copies of one forecast, and the ensemble
+    session only finds that out at its first member, after the download
+    and the preparation.  The ``go`` chain is not refused here: ``woof
+    go`` hands a member count to the door that plans each member's own
+    source, and refuses it itself where no plan exists.
+    """
+
+    request = _member_request(plan, raw)
+    if request is None or _preparation_chain(plan, raw) == "prepared:go":
+        return
+    from woof.ensemble import member_inputs
+
+    try:
+        member_inputs.refuse_one_input(
+            request, "This plan's route prepares one trajectory, so every member would run it.")
+    except ValueError as error:
+        raise PlanError(str(error)) from error
+
+
+def _member_request(plan: RunPlan, raw: Mapping[str, Any]):
+    """The ensemble request this plan makes, or None: ``run_options.ensemble`` over the config's table."""
+
+    value = plan.run_options.get("ensemble")
+    if value is None:
+        value = raw.get("ensemble") if isinstance(raw, Mapping) else None
+    if value is None:
+        return None
+    from woof.ensemble.request import EnsembleRequest
+
+    return EnsembleRequest.from_mapping(value)
+
+
+def _go_plans_members(plan: RunPlan, raw: Mapping[str, Any]) -> bool:
+    """Does this plan hand a plain member count to the door that plans each member's source?
+
+    True for N > 1 members with no recipe named on the ``go`` chain:
+    ``woof go`` runs them as the source's operational ensemble, so the
+    windows the run fetches are the members', not the config's own.
+    """
+
+    from woof.ensemble import member_inputs
+
+    return (member_inputs.needs_member_sources(_member_request(plan, raw))
+            and _preparation_chain(plan, raw) == "prepared:go")
 
 
 def _present_download_bytes(request: Mapping[str, Any] | None, directory: Path | None,
@@ -4514,6 +4703,10 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
     # decodes each lead as its marker appears, publishes its head on the
     # first two leads and writes the source manifest at its seal.  The
     # fetch beside is ``None`` otherwise, and the window is fetched first.
+    from woof.preparation_assets import wif_fetch_domains
+
+    if wif_fetch_domains(exp, hints):
+        hints = {**hints, "wif": True}
     beside = _native_fetch_beside(plan, hints, exp, data_dir=data_dir,
                                   run_dir=run_dir, observer=observer,
                                   prepare_only=prepare_only)
@@ -4653,7 +4846,7 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
         if chained is not None:
             return _chain_render(plan, forecast_dir=forecast_dir,
                                  run_dir=run_dir, observer=observer)
-    elif len(exp.domains) > 1 and not prepare_only:
+    elif len(exp.domains) > 1 and (not prepare_only or os.environ.get("WOOF_CONTINUATION_PREFIX")):
         # A native tree chains on its root preparation's head (A136 L7c):
         # the hierarchy stage builds the children on the root's start state
         # and publishes the tree's head, relays the root's boundary
@@ -4667,10 +4860,13 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
                 preparation=preparation,
                 hierarchy=lambda: hierarchy(observe_stage=False),
                 config_path=config_path, forecast_dir=forecast_dir,
-                observer=observer, devices=plan.run_options.get("devices"))
+                observer=observer, devices=plan.run_options.get("devices"),
+                prepare_only=prepare_only)
             if beside is not None:
                 beside.result()
         if chained is not None:
+            if prepare_only:
+                return _prepared_chain_result(tree_root, config_path, None)
             return _chain_render(plan, forecast_dir=forecast_dir,
                                  run_dir=run_dir, observer=observer)
         observer.finish_stage(hierarchy_root=str(tree_root),
@@ -4790,6 +4986,9 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
     if getattr(getattr(exp, "devices", None), "enabled", False):
         from woof.stage_cli import devices_flags
         argv += devices_flags("single", options=exp.devices)
+    if getattr(getattr(exp, "simulated_radar", None), "enabled", False):
+        from woof.simulated_radar_config import execution_flags
+        argv += execution_flags(exp.simulated_radar)
     observer.enter_stage("forecast", phase="forecast")
     from woof import prepared_single_domain_forecast as runner
 
@@ -4925,7 +5124,7 @@ def _native_fetch_beside(plan: RunPlan, hints, exp, *, data_dir: Path,
     :func:`native_whole_window_reason`; a preparation-only door stays sealed.
     """
 
-    if hints.get("as_posted") is False or prepare_only:
+    if hints.get("as_posted") is False or (prepare_only and not os.environ.get("WOOF_CONTINUATION_PREFIX")):
         return None
     reason = native_whole_window_reason(
         domains=len(exp.domains),
@@ -5061,6 +5260,9 @@ def _hrrr_single_chain(*, prep_root: Path, preparation, forecast_dir: Path,
         ]
         if exp.tiles.enabled:
             argv += stage_cli.streaming_flags("single", tiles=exp.tiles)
+        if getattr(getattr(exp, "simulated_radar", None), "enabled", False):
+            from woof.simulated_radar_config import execution_flags
+            argv += execution_flags(exp.simulated_radar)
         observer.enter_stage("forecast", phase="forecast")
         from woof import prepared_single_domain_forecast as runner
 
@@ -5075,7 +5277,8 @@ def _hrrr_single_chain(*, prep_root: Path, preparation, forecast_dir: Path,
 
 def _hrrr_tree_chain(*, prep_root: Path, tree_root: Path, preparation,
                      hierarchy, config_path: Path, forecast_dir: Path,
-                     observer: RunObserver, devices: int | None = None):
+                     observer: RunObserver, devices: int | None = None,
+                     prepare_only: bool = False):
     """Run the native HRRR root preparation and hierarchy beside a forecast.
 
     ``preparation`` runs the root preparation to its seal and
@@ -5169,6 +5372,8 @@ def _hrrr_tree_chain(*, prep_root: Path, tree_root: Path, preparation,
         with seal_lock:
             seal_state["head"] = True
             emit_sealed_once()
+        if prepare_only:
+            return head_sha256
         _hrrr_tree_forecast(tree_root=tree_root, config_path=config_path,
                             forecast_dir=forecast_dir, observer=observer,
                             head_sha256=head_sha256, devices=devices)
@@ -5866,7 +6071,8 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
     observer.enter_stage("fetch", phase="fetch")
     verdict = drivability_for(hints.get("source"))
     local_snapshot = None
-    if verdict.get("requires_source_root"):
+    from woof.source_drivability import local_input_requested
+    if local_input_requested(hints):
         from woof.local_preparation import (
             inspect_local_inputs, publish_local_handoff, resolve_source_root)
         from woof.fetch import parse_cycle
@@ -5905,6 +6111,10 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
                         "network_used": False, "input_sha256": snapshot["sha256"],
                         "file_count": len(snapshot["files"])}
     else:
+        from woof.preparation_assets import wif_fetch_domains
+
+        if wif_fetch_domains(exp, hints):
+            hints = {**hints, "wif": True}
         # Acquisition publishes complete extended paths on Windows. Keep the
         # same directory spelling when reading its handoff and writing the
         # verified member list, including cache roots beyond MAX_PATH.
@@ -6491,10 +6701,21 @@ def _execute_prepared_route(plan: RunPlan, *, exp, data, config_path,
     # dispatch.  One function, so a config cannot be judged as one chain
     # and then run as the other.
     chain = _chain_key(plan.route, (raw.get("fetch") or {}).get("source"))
-    if chain == "prepared:hrrr":
+    # A member-source recipe is not one chain's run: each member is fetched
+    # and prepared by ITS source's chain.  `woof go` owns that door for
+    # every source (woof.go_cli._go_recipe), so a recipe request takes the
+    # go arm below whatever chain the config's own source is on.  Breakage
+    # it prevents: the two chains dispatched here fetched and prepared the
+    # config's one trajectory and were refused at the forecast stage, where
+    # the ensemble session found no member sources.
+    from woof.ensemble.runtime_context import current_session
+
+    session = current_session()
+    recipe = None if session is None else session.request.recipe
+    if chain == "prepared:hrrr" and recipe is None:
         return _hrrr_chain(plan, config_path=Path(config_path), exp=exp,
                            observer=observer, run_dir=run_dir)
-    if chain == "prepared:staged":
+    if chain == "prepared:staged" and recipe is None:
         return _staged_chain(plan, config_path=Path(config_path), exp=exp,
                              observer=observer, run_dir=run_dir)
 
@@ -7075,6 +7296,12 @@ def execute_plan(plan: RunPlan, *, events: EventStream) -> int:
             inputs_present=resolution["inputs_present"],
             run_options=dict(plan.run_options))
 
+        # BEFORE the fetch, and before a dry run reports the plan as
+        # runnable: members that would all run this plan's one prepared
+        # input are refused while nothing has been spent.
+        _refuse_one_input_ensemble(
+            plan, _config_for_declared_fetch(plan, resolution, run_dir))
+
         if plan.run_options.get("dry_run"):
             events.emit(
                 "completed", dry_run=True, run_dir=str(run_dir),
@@ -7178,7 +7405,13 @@ def execute_plan(plan: RunPlan, *, events: EventStream) -> int:
         # the phases it already reports; the observer maps them.  Only
         # finalize is this front door's own, because the pipeline has no
         # word for it.
-        with _kernel_compile_relay(observer):
+        from woof.ensemble.door import request_for_config, production_run_scope
+        from woof.verification_visuals import verification_scope
+        ensemble_request = request_for_config(config_path,
+            override=plan.run_options.get("ensemble"))
+        with _kernel_compile_relay(observer), verification_scope(
+                plan.run_options.get("verify_visuals", True)), production_run_scope(
+                ensemble_request, output_directory=run_dir):
             summary = ROUTES[plan.route].execute(
                 plan, exp=exp, data=data, config_path=config_path,
                 observer=observer)
@@ -7508,11 +7741,11 @@ def plan_readiness(plan: RunPlan, *, no_probe: bool = False
             plan, config_intent={**plan.config_intent, "cycle": cycle})
     if arguments is None:
         if plan.config_intent is None:
-            document = tomllib.loads(plan.config_bytes().decode("utf-8-sig"))
+            text = plan.config_bytes().decode("utf-8-sig")
         else:
             resolution, _exp, _data = resolve_plan(plan, require_inputs=False)
-            document = tomllib.loads(
-                str(resolution.get("generated_config") or ""))
+            text = str(resolution.get("generated_config") or "")
+        document = tomllib.loads(text)
         hints = document.get("fetch")
         if not isinstance(hints, dict) or not {"source", "cycle"} <= hints.keys():
             # Breakage it prevents: a plan with no download would be
@@ -7520,6 +7753,31 @@ def plan_readiness(plan: RunPlan, *, no_probe: bool = False
             raise PlanError(
                 "--readiness answers for the window a plan fetches, and this "
                 "plan's configuration has no [fetch] source and cycle")
+        if plan.route == "prepared" and (_plan_recipe(plan, document) is not None
+                                         or _go_plans_members(plan, document)):
+            # A recipe fetches one window per member: the answer is for
+            # all of them, from the reader `woof go --readiness` uses.
+            # A plain member count on the go chain is the same run (the
+            # source's operational ensemble).  Breakage it prevents: it
+            # was answered for the config's own source, ready at one time
+            # for a run whose members post at another.
+            from woof.domain_wizard import experiment_from_text
+            from woof.ensemble.door import request_for_payload
+            from woof.go_cli import recipe_readiness
+
+            try:
+                request = request_for_payload(
+                    text.encode("utf-8"), override=plan.run_options.get("ensemble"))
+                return recipe_readiness(
+                    request, document,
+                    experiment_from_text(text, source=str(plan.config_path or plan.source)),
+                    cycle=None if cycle is None else str(cycle),
+                    posting={key: plan.run_options[key]
+                             for key in ("as_posted", "late_after_minutes")
+                             if plan.run_options.get(key) is not None},
+                    transport=plan.run_options.get("transport"), no_probe=no_probe)
+            except ValueError as error:
+                raise PlanError(f"--readiness: {error}") from error
         arguments = _fetch_arguments_from_hints(
             _pinned_fetch_hints(plan, hints), out=Path("readiness"))
     parsed = _parse_fetch_arguments(arguments)

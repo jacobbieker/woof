@@ -316,11 +316,10 @@ def noah_initial_snow_albedo(
 
 def noah_frh2o(tkelv: float, smc: float, sh2o: float, smcmax: float,
                 bexp: float, psis: float) -> float:
-    """WRF Noah ``FRH2O`` supercooled-liquid-water solve in float64.
+    """Scalar FRH2O qualification authority with its original input types.
 
-    This is the setup-time CPU twin of ``noah_frh2o`` in ``noah.cu`` and
-    follows ``module_sf_noahlsm.F:1447-1585``: the CK=8 log-form Newton
-    iteration is bounded to ten iterations, with the CK=0 explicit fallback.
+    Runtime soil arrays use sh2o_init and its Rust field entry. This scalar
+    authority retains the host reference for qualification and standalone prep.
     """
     ck, blim, error = 8.0, 5.5, 0.005
     hlice, gs, t0 = 3.335e5, 9.81, 273.15
@@ -372,41 +371,10 @@ def sh2o_init(smois, tslb, isltyp, params: NoahParams) -> np.ndarray:
         soil_type = np.broadcast_to(soil_type, column_shape)
     except ValueError as exc:
         raise ValueError("isltyp must match the soil-profile columns") from exc
-    if (not np.isfinite(soil_type).all()
-            or np.any(soil_type != np.floor(soil_type))):
-        raise ValueError("isltyp must contain finite integer categories")
-
-    out = smois.copy()
-    blim, hlice, grav, t0 = 5.5, 3.335e5, 9.81, 273.15
-    # LSMINIT compares a stored FP32 soil temperature against this FP32
-    # literal. Evaluating the literal as FP64 would send its own FP32
-    # boundary word through the cold solve instead of the warm copy
-    # (module_sf_noahdrv.F:1931,1955).
-    cold_threshold = float(np.float32(273.149))
-    for column in np.ndindex(column_shape):
-        category = int(soil_type[column])
-        if category < 1 or category > params.slcats:
-            raise ValueError(f"isltyp category {category} is outside table")
-        row = params.soil[category - 1]
-        bx = row[SOIL_COLS.index("bexp")]
-        smcmax = row[SOIL_COLS.index("smcmax")]
-        psisat = row[SOIL_COLS.index("psisat")]
-        if not (bx > 0.0 and smcmax > 0.0 and psisat > 0.0):
-            continue
-        bx = min(bx, blim)
-        for k in range(smois.shape[0]):
-            index = (k, *column)
-            if tslb[index] >= cold_threshold:
-                continue
-            fk = (((hlice / (grav * (-psisat)))
-                   * ((tslb[index] - t0) / tslb[index]))
-                  ** (-1.0 / bx)) * smcmax
-            if fk < 0.02:
-                fk = 0.02
-            guess = min(fk, smois[index])
-            out[index] = noah_frh2o(
-                tslb[index], smois[index], guess, smcmax, bx, psisat)
-    return out
+    from woof.noah_init_bridge import initialize
+    indices = [SOIL_COLS.index(name) for name in ("bexp", "smcmax", "psisat")]
+    table = params.soil[:params.slcats, indices]
+    return initialize(smois, tslb, soil_type, table)
 
 
 # ---------------------------------------------------------------------------
@@ -443,29 +411,37 @@ def _device_tables(params: NoahParams, dzs):
     ``+Noah LSM`` upward from being capturable -- see the census in
     :mod:`tilestream.graphcap`.
 
-    The cache lives in this module and NOT on the ``params`` object, keyed
-    by that object's identity with a reference held so the identity cannot
-    be recycled.  Attaching it to ``params`` was the first attempt and
+    The cache lives in this module and NOT on the ``params`` object.
+    Attaching it to ``params`` was the first attempt and
     ``woof/io/restart.py`` was right to refuse the equivalent on the
     radiation callable: an array attribute on a driver object is state a
     restart must account for, and a cached constant is not state.
+
+    It is keyed by the values it uploads, not by the identity of
+    ``params``.  An identity key held a reference to every parameter object
+    it had seen, and each forecast run in one process loads its own: every
+    member of an ensemble left one more copy of the same tables on the card
+    for the rest of the run (tests/test_ensemble_member_release_gpu.py).  By
+    value, every forecast with the same tables shares one upload, a forecast
+    with other tables gets its own, and nothing keeps a finished forecast's
+    parameter object alive.
     """
     import cupy as cp
 
     from woof.core.device_cache import cached_ready
 
-    key = (int(cp.cuda.Device().id), id(params), tuple(float(v)
-                             for v in np.asarray(dzs, np.float32).ravel()))
+    host = (params.veg.astype(np.float32).ravel(),
+            params.soil.astype(np.float32).ravel(),
+            params.gen.astype(np.float32),
+            np.asarray(dzs, np.float32))
+    key = (int(cp.cuda.Device().id),
+           *((table.shape, table.tobytes()) for table in host))
     def upload():
-        return (params,
-                (cp.asarray(params.veg.astype(np.float32).ravel()),
-                 cp.asarray(params.soil.astype(np.float32).ravel()),
-                 cp.asarray(params.gen.astype(np.float32)),
-                 cp.asarray(np.asarray(dzs, np.float32))))
-    return cached_ready(cp, _DEVICE_TABLES, key, upload)[1]
+        return tuple(cp.asarray(table) for table in host)
+    return cached_ready(cp, _DEVICE_TABLES, key, upload)
 
 
-#: ``(device, id(params), dzs) -> (params, device tables)``.  See :func:`_device_tables`.
+#: ``(device, the uploaded tables by value) -> device tables``.  See :func:`_device_tables`.
 _DEVICE_TABLES: dict = {}
 
 def initialize_noah_liquid_water(dev: dict, params: NoahParams, dzs) -> None:

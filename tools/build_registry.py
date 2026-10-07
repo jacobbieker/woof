@@ -42,7 +42,7 @@ from woof.config import (  # noqa: E402
     MP28_AEROSOL_SOURCES as MP28_AEROSOL_SOURCES,
 )
 from woof.physics_registry import (  # noqa: E402
-    canonical_json, component_override_declaration,
+    TEMPLATE_ID_ALIASES, canonical_json, component_override_declaration,
 )
 from woof import physics_compat  # noqa: E402
 
@@ -80,6 +80,55 @@ from woof.wrf461_compatibility import (  # noqa: E402
 # type / enum / minimum / default taken from woof's own accepted sets
 # (woof/config.py validate_run_config), not from WRF's wider sets.
 IMPLEMENTED: dict[str, dict] = {
+    "bl_mynn_mixlength": {
+        "type": "integer", "enum": [1, 2], "default": 1,
+        "component_id": "pbl", "read_when": {"bl_pbl_physics": 5}},
+    "scalar_pblmix": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "component_id": "pbl", "read_when": {"bl_pbl_physics": 5}},
+    "bl_mynn_version": {
+        "type": "string", "enum": ["wrf_461", "gsd_41"], "default": "wrf_461",
+        "component_id": "pbl", "read_when": {"bl_pbl_physics": 5},
+        "warnings": ["Selects the MYNN generation. wrf_461 is WRF v4.6.1 "
+                     "module_bl_mynn.F. gsd_41 is the GSD MYNN v4.1 of the "
+                     "NOAA-EMC WRF 3.9 branch, ported row by row: a downward "
+                     "surface vapour flux (dew, frost) reaches the vapour "
+                     "equation instead of being deleted, and mixing length "
+                     "option 2 takes that generation's constants, caps and "
+                     "blend. A namelist that spells the budget switch "
+                     "bl_mynn_tkebudget (WRF 3.x) imports as gsd_41."]},
+    "bl_mynn_cloud_tendency_form": {
+        "type": "string", "enum": ["wrf_461", "gsd_41"], "default": "wrf_461",
+        "component_id": "pbl",
+        "read_when": {"bl_pbl_physics": 5, "bl_mynn_version": "gsd_41"},
+        "warnings": ["wrf_461 conserves water and reconstructs heat with mixed condensate. "
+                     "gsd_41 reproduces the source's pre-mixing condensate heat and "
+                     "tendency-only negative-condensate clipping together. This defect "
+                     "form is never an importer or recipe default."]},
+    "bl_mynn_gsd41_unsquared_qtke": {
+        "type": "boolean", "default": False,
+        "component_id": "pbl",
+        "read_when": {"bl_pbl_physics": 5, "bl_mynn_version": "gsd_41",
+                      "bl_mynn_mixlength": 2},
+        "warnings": ["true takes the gsd_41 option-2 mixing length's TKE "
+                     "conversion 0.5*q as written (no square); false, the "
+                     "default, takes 0.5*q**2 as its option 1 and every "
+                     "later generation do."]},
+    "mynn_sfclay_variant": {
+        "type": "string", "enum": ["wrf_461", "gsl_wrf39"],
+        "default": "wrf_461",
+        "component_id": "surface_layer", "read_when": {"sf_sfclay_physics": 5},
+        "warnings": ["Selects the generation of the MYNN surface layer. "
+                     "wrf_461 is WRF v4.6.1 module_sf_mynn.F. gsl_wrf39 is "
+                     "the same module in the GSL WRF 3.9 fork (NOAA-EMC/HRRR "
+                     "v4.1.21): z/L from a 5-pass secant search that gives up "
+                     "to 5 Ri (unstable) or 8 Ri (stable), z/L capped at 50 "
+                     "instead of 20, the bulk Richardson number clamped at 50 "
+                     "instead of 4 after the first step, zt instead of z0 in "
+                     "the heat log numerators, and z0/L instead of zt/L as "
+                     "psih's lower limit at the first level. Over rough land "
+                     "(forest, urban) on stable nights the two give "
+                     "different u* and exchange coefficients."]},
     # acoustic / small step
     "time_step_sound": {"type": "integer", "minimum": 2, "default": 4},
     "smdiv": {"type": "number", "minimum": 0.0, "default": 0.1},
@@ -91,6 +140,11 @@ IMPLEMENTED: dict[str, dict] = {
     "diff_opt": {"type": "integer", "enum": [1, 2], "default": 2,
                  "description": "1: coordinate-surface diffusion for km_opt=2/4; 2: metric stress/scalar diffusion."},
     "mix_full_fields": {"type": "boolean", "default": True,
+                        # Left as it was by lane 286-mix-full-fields on purpose: it is part of
+                        # the parameter's registry physics identity, and a selection
+                        # receipt bound before lane 286-mix-full-fields must keep
+                        # resolving.  Both values are admitted under either operator
+                        # (woof/config.py, validate_km_opt; docs/public/CONFIGURATION.md).
                         "description": "WRF logical retained under coordinate diffusion; that operator always mixes theta relative to its initial field."},
     "diff_6th_thresh": {"type": "number", "minimum": 0.0, "default": 0.10},
     # upper-level damping
@@ -105,6 +159,13 @@ IMPLEMENTED: dict[str, dict] = {
     "hypsometric_opt": {"type": "integer", "enum": [1, 2], "default": 1},
     # transport
     "h_sca_adv_order": {"type": "integer", "enum": [2, 5], "default": 2},
+    # WRF &dynamics vertical advection orders (module_advect_em.F
+    # vert_order 3 and 5 ladders; scalars and w follow v_sca_adv_order,
+    # u and v follow v_mom_adv_order).  h_mom_adv_order is declared so a
+    # namelist maps one to one; the momentum kernels carry flux5 only.
+    "v_sca_adv_order": {"type": "integer", "enum": [3, 5], "default": 3},
+    "v_mom_adv_order": {"type": "integer", "enum": [3, 5], "default": 3},
+    "h_mom_adv_order": {"type": "integer", "enum": [5], "default": 5},
     "moist_adv_opt": {"type": "integer", "enum": [0, 1], "default": 1},
     # WRF 4.3+ implicit-explicit vertical advection (woof.core.ieva), off
     # by default.  Its warning is the declared divergence of its w solve
@@ -112,7 +173,8 @@ IMPLEMENTED: dict[str, dict] = {
     "zadvect_implicit": {
         "type": "integer", "enum": [0, 1], "default": 0,
         "warnings": [
-            "DIVERGENCE from WRF v4.7.1, declared: the implicit w solve's "
+            "For zadvect_implicit_variant='wrf_471', DIVERGENCE from WRF "
+            "v4.7.1, declared: the implicit w solve's "
             "two boundary terms take the units of the w terms beside them. "
             "WRF's lower boundary (dyn_em/module_ieva_em.F:1231-1244) builds "
             "the surface w increment from the mass-coupled u/v tendencies, "
@@ -123,6 +185,15 @@ IMPLEMENTED: dict[str, dict] = {
             "by g; woof divides it. Every other IEVA routine matches WRF "
             "v4.7.1 word for word, and the w solve matches WRF's routine "
             "with those two corrections (tools/ieva_wrf_oracle)."]},
+    "zadvect_implicit_variant": {
+        "type": "string", "enum": ["wrf_471", "wrf_legacy"],
+        "default": "wrf_471",
+        "warnings": [
+            "Selects the WRF numerical generation when zadvect_implicit=1. "
+            "wrf_471 preserves module_ieva_em. wrf_legacy uses "
+            "module_advect_em's current-mass coefficients and one-sided "
+            "horizontal Courant allowance. Both uncouple the lower w "
+            "boundary's momentum tendencies, a declared unit correction."]},
     # microphysics heating controls
     "no_mp_heating": {"type": "integer", "enum": [0, 1], "default": 0},
     "mp_tend_lim": {"type": "number", "minimum": 0.0, "default": 10.0},
@@ -143,6 +214,36 @@ IMPLEMENTED: dict[str, dict] = {
     # (woof.core.topo_radiation, lane 281-namelist-gaps), off by default.
     "slope_rad": {"type": "integer", "enum": [0, 1], "default": 0},
     "topo_shading": {"type": "integer", "enum": [0, 1], "default": 0},
+    # WRF radiation-driver options as the operational HRRR fork runs them
+    # (lane 286-aer-swint), both off by default.  swint_opt 1 refits the
+    # surface shortwave at every radiation call and evaluates it at the
+    # current sun on every step (woof.core.swint); aer_opt 3 hands the
+    # legacy RRTMG shortwave per-band aerosol optics from the Thompson
+    # aerosol numbers (woof.core.rrtmg_aerosol_optics).  aer_opt 1 and 2
+    # are untranscribed WRF branches and refuse by name
+    # (woof.config.validate_radiation_driver_options).
+    "swint_opt": {"type": "integer", "enum": [0, 1], "default": 0},
+    "aer_opt": {"type": "integer", "enum": [0, 3], "default": 0},
+    "alb_sol": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "warnings": [
+            "alb_sol=1 updates sun-angle-dependent ALBSOL/ALBBCKSOL on "
+            "radiation steps, supplies ALBSOL to shortwave radiation and "
+            "the RUC land surface, and uses the corrected background "
+            "albedo in RUC's snow albedo. It needs active shortwave and "
+            "MODIS21 land-use categories. Other configurations retain "
+            "the unchanged albedo carrier at 0."]},
+    "rrtmg_smoke_manifest": {
+        "type": "string", "default": "", "component_id": "radiation",
+        "read_when": {"ra_sw_physics": 4, "ra_rrtmg_variant": "rrtmg_legacy"},
+        "consuming_read": "woof/core/rrtmg_smoke_identity.py",
+        "description": "Explicit timestamped three-dimensional prescribed smoke forcing. Empty selects no prescribed smoke; enabled requires legacy shortwave, aer_opt=3 and aerosol-aware Thompson. Manifest and member content identities bind forecasts and restarts."},
+    "rrtmg_cloud_optics_form": {
+        "type": "string", "enum": ["wrf_461", "noaa_wrf39"],
+        "default": "wrf_461", "component_id": "radiation",
+        "read_when": {"ra_rrtmg_variant": "rrtmg_legacy"},
+        "consuming_read": "woof/core/rrtmg_legacy.py",
+        "description": "Source form of the legacy RRTMG cloud wrapper: WRF v4.6.1 or the NOAA WRFV3.9 fork's shortwave radius defaults, snow ice fraction and Thompson cold-start radii."},
     # WRF v4.7.1 sub-grid terrain drag (woof.core.terrain_drag, lane
     # 282-terrain-drag), off by default: topo_wind under YSU, gwd_opt under
     # every PBL scheme.
@@ -177,12 +278,175 @@ IMPLEMENTED: dict[str, dict] = {
     "isfflx": {"type": "integer", "enum": [0, 1], "default": 1},
     "isftcflx": {"type": "integer", "enum": [0, 1, 2], "default": 0},
     "iz0tlnd": {"type": "integer", "enum": [0, 1, 2], "default": 0},
-    # Noah LSM -- newly ported: kernel branches already existed at
-    # noah.cu:1036/:1111/:1112/:1116/:1117 (usemonalb, rdlai2d) and :181
-    # (opt_thcnd); only the configuration path was missing.
-    "usemonalb": {"type": "boolean", "default": False},
-    "rdlai2d": {"type": "boolean", "default": False},
+    # Land-surface vegetation and albedo switches.  Noah's kernel branches
+    # are at noah.cu:1036/:1111/:1112/:1116/:1117 (usemonalb, rdlai2d) and
+    # :181 (opt_thcnd).  RUC reads rdlai2d in SOILVEGIN (ruc.cu:171, :178,
+    # :292 and the fused driver prologue) and usemonalb through
+    # landuse_init's background albedo (woof/core/landuse.py
+    # initialize_landuse, WRF module_physics_init.F:1611); opt_thcnd is
+    # Noah only.
+    "usemonalb": {
+        "type": "boolean", "default": False,
+        "warnings": [
+            "usemonalb=true is implemented by Noah (sf_surface_physics=2) "
+            "and RUC (sf_surface_physics=3): landuse_init keeps real.exe's "
+            "ALBEDO12M background albedo interpolated to the start date "
+            "instead of LANDUSE.TBL's seasonal row, and a snow-covered "
+            "cell takes SNOALB. A surface source without the monthly "
+            "albedo field is refused by name."]},
+    "rdlai2d": {
+        "type": "boolean", "default": False,
+        "warnings": [
+            "rdlai2d=true is implemented by Noah (sf_surface_physics=2) "
+            "and RUC (sf_surface_physics=3): the LSM keeps the LAI12M field "
+            "interpolated to the start date instead of the VEGPARM table "
+            "value. Under RUC a road that seeds no LAI field is refused at "
+            "the first land-surface step rather than running the "
+            "allocation default."]},
     "opt_thcnd": {"type": "integer", "enum": [1, 2], "default": 1},
+    # WRF &physics fractional_seaice: which of WRF's two sea-ice
+    # thresholds the surface runs (module_surface_driver.F:1365-1368 of the
+    # HRRR v4.1.21 fork).  Read by the RUC seam, the RUC land-use and
+    # mosaic initialisation and the CLM lake beside it.
+    "fractional_seaice": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "component_id": "land_surface",
+        "read_when": {"sf_surface_physics": 3},
+        "warnings": [
+            "fractional_seaice=1 is implemented by the RUC LSM "
+            "(sf_surface_physics=3) only and refused under any other land "
+            "surface. It lowers the sea-ice threshold from 0.5 to 0.02 "
+            "(WRF module_surface_driver.F:1365-1368), so every water cell "
+            "with 0.02 <= XICE <= 1 takes the ice column, the open-water "
+            "second surface-layer call and the post-LSM flux blend, and "
+            "land-use initialisation and the CLM lake read the same "
+            "threshold. 0 keeps the 0.5 threshold every earlier RUC run "
+            "used; the blend machinery runs under both values."]},
+    "sf_lake_physics": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "per_domain": True, "component_id": "land_surface",
+        "warnings": ["Option 1 runs WRF's CLM lake column on LAKEMASK "
+                     "cells, with ten water and ten sediment layers and "
+                     "up to five snow layers. Default 0 retains prescribed "
+                     "water temperatures."]},
+    "use_lakedepth": {
+        "type": "integer", "enum": [0, 1], "default": 1,
+        "per_domain": True, "component_id": "land_surface",
+        "read_when": {"sf_lake_physics": 1},
+        "warnings": ["WRF default 1 requires input LAKE_DEPTH. Explicit 0 "
+                     "uses lakedepth_default for every lake column."]},
+    "lakedepth_default": {
+        "type": "number", "default": 50.0,
+        "per_domain": True, "component_id": "land_surface",
+        "read_when": {"sf_lake_physics": 1},
+        "warnings": ["Depth in metres used by WRF lakeini when a supplied "
+                     "depth is nonpositive or use_lakedepth=0. A nonpositive "
+                     "default uses WRF's reference layer geometry depth."]},
+    "lake_min_elev": {
+        "type": "number", "default": 5.0,
+        "per_domain": True, "component_id": "land_surface",
+        "read_when": {"sf_lake_physics": 1},
+        "warnings": ["Minimum water-cell elevation in metres used by WRF "
+                     "when the input does not provide a lake mask."]},
+    "mosaic_lu": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "component_id": "land_surface", "read_when": {"sf_surface_physics": 3},
+        "warnings": ["RUC weighted vegetation parameters and irrigation use "
+                     "LANDUSEF. WRF's default is 0; 1 requires category fractions."]},
+    "mosaic_soil": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "component_id": "land_surface", "read_when": {"sf_surface_physics": 3},
+        "warnings": ["RUC weighted soil parameters use SOILCTOP. WRF's default "
+                     "is 0; 1 requires category fractions."]},
+    "ruc_soilprop": {
+        "type": "string", "enum": ["wrf_45", "wrf_461"], "default": "wrf_45",
+        "component_id": "land_surface", "read_when": {"sf_surface_physics": 3},
+        "warnings": ["Selects which WRF lineage's LSMRUC SOILPROP sets soil-water "
+                     "diffusivity and hydraulic conductivity. wrf_45 (WRF v4.0-4.5, also "
+                     "the operational RAP/HRRR branch) normalises both by the moisture "
+                     "above the residual, (theta - qmin)/(theta_sat - qmin), and uses "
+                     "mineral conductivity 2.0 at every quartz fraction. wrf_461 (WRF "
+                     "v4.6.1) uses total moisture over porosity and 3.0 below 20 percent "
+                     "quartz; in dry soil its water diffusivity is 2.5 to 8 times "
+                     "larger, measured to raise a 3 km afternoon top soil level from "
+                     "0.161 to 0.187 m3/m3 in one hour from the levels below, where the "
+                     "operational model's own top level fell to 0.157. The default "
+                     "changed from the v4.6.1 form to wrf_45: every RUC configuration "
+                     "changes answers."]},
+    "thompson_version": {
+        "type": "string", "enum": ["wrf_461", "wrf_39_noaa"],
+        "default": "wrf_461", "component_id": "microphysics",
+        "read_when": {"mp_physics": 28}, "per_domain": False,
+        "consuming_read": "woof/core/microphysics_aerosol.py",
+        "warnings": ["wrf_39_noaa uses the NOAA WRF 3.9 fork's size distributions "
+                     "and its own pinned tables. Fork column comparisons are in "
+                     "tests/test_thompson_wrf39.py; the v4.6.1 qualification "
+                     "receipts do not qualify this generation."]},
+    "thompson_fork_snow_fall": {
+        "type": "string", "enum": ["blend", "wrf_39_noaa"], "default": "blend",
+        "component_id": "microphysics", "per_domain": False,
+        "read_when": {"mp_physics": 28, "thompson_version": "wrf_39_noaa"},
+        "consuming_read": "woof/core/microphysics_aerosol.py",
+        "warnings": ["wrf_39_noaa selects the fork's singular melting-snow "
+                     "fall speed. It is a defined fork defect and defaults off. "
+                     "blend retains the later rain-share blend."]},
+    "ruc_snow": {
+        "type": "string", "enum": ["wrf_45", "wrf_461"], "default": "wrf_461",
+        "component_id": "land_surface", "read_when": {"sf_surface_physics": 3},
+        "warnings": ["Which WRF lineage's RUC snow scheme runs. wrf_45 (WRF v4.0-4.5, "
+                     "which the operational RAP/HRRR branch carries) takes a constant "
+                     "snow conductivity, snow cover from depth over a critical depth "
+                     "taken after compaction, fresh-snow albedo from the depth on the "
+                     "ground, a melt cap independent of the step, melt bookkeeping "
+                     "scaled by cover under the snow mosaic, and SNOWFALLAC grown by "
+                     "new snow less its melt. wrf_461 (WRF v4.6.1) takes the Sturm "
+                     "conductivity, the blended depth and roughness cover rebuilt "
+                     "after the snow column, and density-gated melt limits. The "
+                     "generic default remains wrf_461. The operational namelist importer "
+                     "and HRRR configuration recipe explicitly select wrf_45, "
+                     "which changes answers where there is snow."]},
+    "ruc_2m_diagnostic": {
+        "type": "string", "enum": ["flux", "log_profile"], "default": "flux",
+        "component_id": "land_surface", "read_when": {"sf_surface_physics": 3},
+        "warnings": ["How SFCDIAGS_RUCLSM writes T2, TH2 and Q2. flux (public WRF) is "
+                     "the flux form. log_profile adds the block the operational RAP/HRRR "
+                     "branch carries and no public WRF has: where the air is warmer or "
+                     "moister than the surface, T2 and Q2 follow a logarithmic profile "
+                     "between the surface and half the lowest layer. Measured on a 3 km "
+                     "cut of an operational-HRRR start at night: T2 0.33 to 0.36 K "
+                     "lower, 2 m dewpoint 0.01 K lower, against the operational model's "
+                     "own files, which match the flux form's T2 within 0.04 K. Default "
+                     "flux."]},
+    "ruc_qvg_cold_start": {
+        "type": "string", "enum": ["air", "wrf"], "default": "wrf",
+        "component_id": "land_surface", "read_when": {"sf_surface_physics": 3},
+        "warnings": ["LSMRUC's cold start of the ground vapour and condensate when the "
+                     "run starts without them. wrf (public WRF, the default) starts QCG "
+                     "from the lowest-level condensate and QVG from saturation at the "
+                     "skin times moisture availability. air (the operational RAP/HRRR "
+                     "branch's fallback; that branch cycles QVG) starts an invalid QVG "
+                     "from the lowest-level vapour with no ground condensate. Because "
+                     "SOILTEMP carries the old QVG as vapour storage, air pulls the skin "
+                     "toward the air's dewpoint on the first steps: measured 2.7 K "
+                     "colder after 20 steps on a moist test column, and -0.013 to +0.018 "
+                     "K of 2 m dewpoint on a 3 km cut of an operational-HRRR start. Read "
+                     "only on a cold start."]},
+    "ruc_irrigation": {
+        "type": "string", "enum": ["wrf_45", "wrf_461"], "default": "wrf_461",
+        "component_id": "land_surface", "read_when": {"sf_surface_physics": 3},
+        "warnings": ["Selects which WRF lineage's LSMRUC irrigation holds root-layer "
+                     "soil moisture up after SFCTMP. wrf_45 (WRF v4.0-4.5, also the "
+                     "operational RAP/HRRR branch) is a hard floor scaled by the cell's "
+                     "cropland fraction and gated on leaf area index above 1.1 "
+                     "(cropland) or 0.7 (dominant crop/natural mosaic), applied whatever "
+                     "mosaic_lu says: with mosaic_lu=1 it reads the LANDUSEF fractions, "
+                     "with mosaic_lu=0 the dominant category counts as the whole cell. "
+                     "wrf_461 (WRF v4.6.1, mosaic_lu=1 only) relaxes every root layer "
+                     "toward the full 1.1 x wilting point each step for any cell with "
+                     "any crop or crop/natural fraction and a greenness factor above "
+                     "0.75. The generic default remains wrf_461. The operational "
+                     "namelist importer and HRRR configuration recipe explicitly "
+                     "select wrf_45, which changes the added irrigation water."]},
     "sf_surface_mosaic": {
         "type": "integer", "enum": [0, 1], "default": 0,
         "warnings": ["Noah only: WRF v4.7.1 lsm_mosaic tile state. "
@@ -383,11 +647,63 @@ TIGHTEN: dict[str, dict] = {
     # a pair the registry made unspellable, since one row refused it and
     # the other did not exist.
     "wif_input_opt": {"type": "integer", "enum": [0, 1], "default": 0},
-    "aer_init_opt": {"type": "integer", "enum": [0, 1], "default": 0},
+    "aer_init_opt": {"type": "integer", "enum": [0, 1, 2], "default": 0,
+                     "compatible_previous_enums": [[0, 1]]},
+    "use_rap_aero_icbc": {
+        "type": "boolean", "default": False,
+        "component_id": "microphysics",
+        "consuming_read": "woof/ingest/real.py",
+        "description": "Analyzed QNWFA/QNIFA initial and lateral values with operational monthly surface emissions; mp_physics=28 only.",
+    },
     "epssm": {"type": "number", "minimum": 0.0, "maximum": 1.0,
               "default": 0.1},
     "diff_6th_factor": {"type": "number", "minimum": 0.0, "maximum": 1.0,
                         "default": 0.12},
+    # The sixth-order filter's source form (woof.core.dycore.DIFF6_FORMS)
+    # and the NOAA WRFV3.9 fork's second factor (fork
+    # Registry.EM_COMMON:2629, &dynamics, max_domains, default 0.04).
+    "diff_6th_form": {
+        "type": "string", "enum": ["wrf_461", "noaa_wrf39"],
+        "default": "wrf_461",
+        "consuming_read": "woof/core/dycore.py",
+        "warnings": [
+            "Selects which source's sixth-order filter runs when "
+            "diff_6th_opt > 0. wrf_461 (WRF v4.6.1) filters moisture and "
+            "scalars with diff_6th_factor on the RK3 first-stage step dt/3 "
+            "and stops three points short of a specified or nested edge. "
+            "noaa_wrf39 (the NOAA-EMC WRFV3.9 fork, operational HRRR "
+            "v4.1.21) filters the moist and scalar arrays with "
+            "diff_6th_factor2 on the full step and runs the filter to the "
+            "domain edge on zero-gradient halo copies; at HRRR's 0.12/0.04 "
+            "that is nine times weaker on moisture. An imported namelist "
+            "that names diff_6th_factor2 selects noaa_wrf39."]},
+    "upper_wind_limiter_form": {
+        "type": "string", "enum": ["wrf_461", "noaa_wrf39"],
+        "default": "wrf_461", "consuming_read": "woof/core/acoustic.py",
+        "description": "WRF v4.6.1 has no upper-wind limiter. The NOAA WRFV3.9 form damps saved stage winds above 110 m/s inside zdamp on each acoustic substep when damp_opt=3. A namelist naming diff_6th_factor2 selects the fork form."},
+    "diff_6th_factor2": {
+        "type": "number", "minimum": 0.0, "maximum": 1.0,
+        "default": None,
+        "warnings": [
+            "Read only under diff_6th_form = noaa_wrf39 (null takes the "
+            "fork's 0.04); refused under wrf_461, which has no second "
+            "factor."]},
+    # WRF mp_zero_out (Registry.EM_COMMON:2553, both sources) and v4.6.1's
+    # mp_zero_out_all (:2554), consumed by woof.core.microphysics.
+    "mp_zero_out": {
+        "type": "integer", "enum": [0, 1, 2], "default": 0,
+        "warnings": [
+            "After microphysics: 1 sets non-vapour species below "
+            "mp_zero_out_thresh to zero, 2 also floors vapour at zero; the "
+            "outermost ring is floored at zero in both (WRF "
+            "module_microphysics_zero_out)."]},
+    "mp_zero_out_thresh": {"type": "number", "default": 1.0e-8},
+    "mp_zero_out_all": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "warnings": [
+            "1 also applies mp_zero_out to the scalar number arrays, which "
+            "the NOAA WRFV3.9 fork always does; WRF v4.6.1's default 0 "
+            "applies it to the moist array only."]},
     "moist": {"type": "boolean", "default": False},
     "moist_cq": {"type": "boolean", "default": True},
     # WRF's own &dynamics switch (Registry.EM_COMMON:2889, max_domains,
@@ -423,7 +739,8 @@ TIGHTEN: dict[str, dict] = {
     # degrading; 'synthetic' selects thompson_init's profile on purpose.
     "mp28_aerosol_source": {
         "type": "string",
-        "enum": ["auto", "climatology", "synthetic"],
+        "enum": list(MP28_AEROSOL_SOURCES),
+        "compatible_previous_enums": [["auto", "climatology", "synthetic"]],
         "default": "auto",
         "consuming_read": "woof/ingest/real.py",
     },
@@ -594,11 +911,6 @@ WRF_TYPE = {"integer": "integer", "real": "number",
 # is kept beside the blocker so the generated registry and the handoff cannot
 # drift into calling a bounded option branch a new subsystem.
 UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
-    "aer_opt": (
-        "c",
-        "Radiation aerosol optics are absent: no aerosol optical-depth/"
-        "single-scattering/asymmetry state, ingest, restart carriers, or "
-        "legacy/RTE radiation-kernel binding exists."),
     "aercu_fct": (
         "c",
         "This belongs to the unported multiscale Kain-Fritsch aerosol-aware "
@@ -643,13 +955,6 @@ UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
         "domain, at debug verbosity "
         "(share/module_check_a_mundo.F:2459-2474); woof's posture is to "
         "refuse where WRF overwrites, so a nonzero value is an error."),
-    "fractional_seaice": (
-        "b",
-        "The component branches exist only partially: land-use initialization "
-        "and RUC/MYNN wrappers disagree on thresholds and several ingest paths "
-        "hardwire opposite modes. A bounded transcription must make one "
-        "option govern ingest, surface-layer deblend/reblend, and LSM routing "
-        "with WRF oracle coverage."),
     "icloud_cu": (
         "c",
         "Not a WRF v4.6.1 namelist option. ICLOUD_CU is derived cloud-state "
@@ -755,13 +1060,6 @@ UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
         "auxiliary input subsystem, an update cadence, restart position and "
         "field ownership; woof writes one fixed wrfout frame per domain and "
         "reads no auxiliary input streams at all."),
-    "scalar_pblmix": (
-        "c",
-        "This mixes WRF's 4-D scalar array -- qnc/qnwfa/qnifa -- with the PBL "
-        "scheme (phys/module_pbl_driver.F:2251). woof supplies no scalar "
-        "array to any PBL component and withholds those species from MYNN, so "
-        "the selector has nothing to act on. See the thompson-aerosol-mp28 "
-        "warnings for the resulting divergence."),
     "scm_force_flux": (
         "c",
         "This belongs to WRF's single-column-model forcing subsystem; woof "
@@ -834,18 +1132,13 @@ UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
         "met-field selection and provenance semantics. woof's ingest routes "
         "own those choices explicitly and implement no interchangeable "
         "runtime source selector."),
-    "swint_opt": (
-        "c",
-        "Shortwave interpolation needs carried previous/next radiation fields "
-        "and per-step interpolation ownership; WRF's additional FARMS choice "
-        "also needs an unported solver. woof recomputes on radiation cadence "
-        "and carries neither subsystem."),
     "tice2tsk_if2cold": (
         "b",
         "This is a bounded branch in the existing fractional-sea-ice surface "
-        "wrapper, but woof currently transcribes only the false arithmetic. "
-        "The true get_local_ice_tsk correction must be ported together with "
-        "the coherent fractional_seaice option and WRF oracle fixtures."),
+        "wrapper, but woof currently transcribes only the false arithmetic "
+        "(the operational HRRR v4.1.21 value). The true get_local_ice_tsk "
+        "branch, TSK_ICE = MIN(TSK, 273.15), is not ported and has no WRF "
+        "oracle fixture."),
     "tmn_update": (
         "c",
         "Updating deep-soil temperature needs a running/calendar mean "
@@ -858,17 +1151,11 @@ UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
         "Noah LSM driver only."),
     "use_aero_icbc": (
         "c",
-        "GOCART climatological 3-D aerosol IC/BC for "
-        "components.microphysics.options.thompson-aerosol-mp28. The scheme is "
-        "ported; this ingest is not -- woof has no GOCART reader and no "
-        "aerosol lateral-boundary carrier, so mp_physics=28 runs on "
-        "thompson_init's synthetic profile only."),
-    "use_rap_aero_icbc": (
-        "c",
-        "The RAP-sourced variant of the GOCART climatological aerosol IC/BC "
-        "above, and blocked on the same absent reader and lateral-boundary "
-        "carrier; components.microphysics.options.thompson-aerosol-mp28 runs "
-        "thompson_init's synthetic profile only."),
+        "For components.microphysics.options.thompson-aerosol-mp28, this "
+        "namelist-only key imports through the aer_init_opt=1 / "
+        "wif_input_opt=1 pair rather than a RunConfig field of its own. "
+        "Monthly WIF and analyzed QNWFA/QNIFA initial and lateral carriers "
+        "are implemented. An unrestricted GOCART species reader is not."),
     "wif_fire_emit": (
         "c",
         "Biomass-burning aerosol emissions for Thompson-MP-Aero need a fire "
@@ -1058,7 +1345,7 @@ def find_consuming_read(name: str, current: str | None = None) -> str | None:
 # Each template gets its own list, because the two chains are not the same
 # chain.  Both descend 12 km -> 3 km -> 1 km on parent grid ratios 1/4/3, and
 # then they diverge: the reference chain closes on parent_grid_ratio 3
-# (1000/3 m, published as the nominal 333 m) and the validation-candidate
+# (1000/3 m, published as the nominal 333 m) and the wrf-matched-run-candidate
 # chain closes on parent_grid_ratio 2 (500 m).  Those ratios were read from
 # the two four-domain experiment configurations, not inferred.
 #
@@ -1080,7 +1367,7 @@ NEST_COLUMNS: dict[str, list[dict]] = {
         {"nominal_dx_m": 333.0, "diff_6th_factor": 0.06, "radt": 1.0,
          "epssm": 0.1},
     ],
-    "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-validation-candidate-v1": [
+    "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-wrf-comparison-candidate-v1": [
         {"nominal_dx_m": 12000.0, "diff_6th_factor": 0.12, "radt": 12.0,
          "epssm": 0.5},
         {"nominal_dx_m": 3000.0, "diff_6th_factor": 0.10, "radt": 3.0,
@@ -1159,12 +1446,18 @@ def _surface_coupling_warnings(registry: dict) -> None:
         "oracle replay remains explicit-only; independent source "
         "transcription probes cover the ARW seam.")
     ruc[9] = (
-        "Mosaic land-use and soil remain fail-closed at 0, spp_lsm at 0 and "
-        "flag_sm_adj at 0. Also pinned rather than configurable: "
-        "XICE_THRESHOLD=0.5, isncovr_opt=2, c1sn=0.026, c2sn=21.0, "
-        "myj=False and rdlai2d=False. seaice_albedo_default is configurable "
-        "over [0,1] and defaults to the former literal 0.65. "
-        "FRACTIONAL_SEAICE follows WRF's enabled pre/post coupling.")
+        "Mosaic land-use and soil accept 0/1, default 0, and read LANDUSEF "
+        "and SOILCTOP. spp_lsm accepts 0/1 and needs a member-owned SPP "
+        "pattern; flag_sm_adj remains at 0. "
+        "The sea-ice threshold follows fractional_seaice: 0.5 at 0 (the "
+        "default), 0.02 at 1, read by the seam, the fused driver, land-use "
+        "initialisation and the CLM lake. rdlai2d and usemonalb are read "
+        "by RUC: rdlai2d keeps the monthly LAI12M field and usemonalb the "
+        "monthly ALBEDO12M background albedo. Pinned rather than "
+        "configurable: isncovr_opt=2, c1sn=0.026, c2sn=21.0 and myj=False. "
+        "seaice_albedo_default is configurable over [0,1] and defaults to "
+        "the former literal 0.65. The fractional sea-ice deblend and "
+        "reblend run under both thresholds.")
     ruc[8] = (
         "Admitted at num_soil_layers=9 with revised MM5, classic MM5 or "
         "MYNN surface. Under the MYNN 5/5 pairing, WRF v4.6.1 runs the surface "
@@ -1176,6 +1469,45 @@ def _surface_coupling_warnings(registry: dict) -> None:
         "writer-order tests are in tools/mynn_surface_pairing_wrf461_oracle "
         "and tests/test_mynn_surface_pairing_ownership.py.")
     ruc_option = land["ruc-lsm"]
+    for key in ("mosaic_lu", "mosaic_soil"):
+        ruc_option["constraints"]["required_settings"].pop(key, None)
+        ruc_option["constraints"].setdefault("admitted_setting_values", {})[key] = [0, 1]
+        ruc_option["constraints"].setdefault("admitted_setting_values_reasons", {})[key] = (
+            "WRF RUC SOILVEGIN selects dominant parameters at 0 and weighted "
+            "category parameters at 1; other values select neither branch")
+    ruc_option["constraints"]["required_settings"].pop("ruc_soilprop", None)
+    ruc_option["constraints"]["admitted_setting_values"]["ruc_soilprop"] = ["wrf_45", "wrf_461"]
+    ruc_option["constraints"]["admitted_setting_values_reasons"]["ruc_soilprop"] = (
+        "wrf_45 is the WRF v4.0-4.5 soil-water diffusivity over the moisture "
+        "above the residual and wrf_461 the WRF v4.6.1 form over total "
+        "porosity; the two move different water between soil levels, so no "
+        "other name can select either")
+    ruc_option["constraints"]["required_settings"].pop("ruc_irrigation", None)
+    ruc_option["constraints"]["admitted_setting_values"]["ruc_irrigation"] = ["wrf_45", "wrf_461"]
+    ruc_option["constraints"]["admitted_setting_values_reasons"]["ruc_irrigation"] = (
+        "wrf_45 is the WRF v4.0-4.5 crop-fraction-scaled soil moisture floor "
+        "and wrf_461 the WRF v4.6.1 per-step relaxation to 1.1 x wilting "
+        "point; the two add different soil water, so no other name can "
+        "select either")
+    ruc_option["constraints"]["required_settings"].pop("ruc_qvg_cold_start", None)
+    ruc_option["constraints"]["admitted_setting_values"]["ruc_qvg_cold_start"] = ["air", "wrf"]
+    ruc_option["constraints"]["admitted_setting_values_reasons"]["ruc_qvg_cold_start"] = (
+        "air starts the ground vapour from the lowest-level air and wrf from "
+        "saturation at the skin times moisture availability; the two start "
+        "different surface humidity, so no other name can select either")
+    ruc_option["constraints"]["required_settings"].pop("ruc_snow", None)
+    ruc_option["constraints"]["admitted_setting_values"]["ruc_snow"] = ["wrf_45", "wrf_461"]
+    ruc_option["constraints"]["admitted_setting_values_reasons"]["ruc_snow"] = (
+        "wrf_45 is the WRF v4.0-4.5 snow scheme the operational RAP/HRRR "
+        "branch carries and wrf_461 the WRF v4.6.1 rewrite; the two differ "
+        "in snow conductivity, cover, melt and albedo, so no other name can "
+        "select either")
+    ruc_option["constraints"]["required_settings"].pop("ruc_2m_diagnostic", None)
+    ruc_option["constraints"]["admitted_setting_values"]["ruc_2m_diagnostic"] = ["flux", "log_profile"]
+    ruc_option["constraints"]["admitted_setting_values_reasons"]["ruc_2m_diagnostic"] = (
+        "flux is public WRF's 2 m flux form and log_profile adds the "
+        "operational RAP/HRRR branch's logarithmic profile; the two write "
+        "different 2 m values, so no other name can select either")
     ruc_option["constraints"]["requires_components"]["surface_layer"] = [
         "revised-mm5", "classic-mm5", "mynn"]
     ruc_option["extensions"]["mynn_surface_ownership"] = {
@@ -1191,11 +1523,22 @@ def _surface_coupling_warnings(registry: dict) -> None:
     }
 
     registry["parameters"]["spp_lsm"]["warnings"][0] = (
-        "Only spp_lsm=0 is honoured. The ARW/EM_CORE==1 surface path is "
-        "ported, but its stochastic pattern_spp_lsm and field_sf inputs are "
-        "not; enabling spp_lsm would require that separate stochastic state "
-        "and restart contract. Validation and the RUC runtime both refuse a "
-        "nonzero value.")
+        "spp_lsm=1 consumes a member-owned stochastic pattern in RUC's "
+        "historical WRF 3.9.1 hydraulic-conductivity operator. Current WRF "
+        "4.6.1 and 4.7.1 retain the arguments but omit this operator. The "
+        "ensemble provider owns its spectral restart state; ordinary "
+        "physics refuses an enabled consumer without a bound pattern.")
+    ruc_option["constraints"].setdefault("required_settings", {}).pop("spp_lsm", None)
+    ruc_option["constraints"].setdefault("admitted_setting_values", {})["spp_lsm"] = [0, 1]
+    for name, consumer, reader in (
+            ("spp_conv", "GF closure", "woof/core/gf.py"),
+            ("spp_pbl", "MYNN PBL and surface", "woof/core/physics.py")):
+        registry["parameters"][name] = {
+            "type": "integer", "enum": [0, 1], "per_domain": False,
+            "consuming_read": reader,
+            "warnings": [f"{name}=1 requires {consumer} and a member-owned stochastic "
+                         "pattern bound by the ensemble timestep provider. The "
+                         "provider owns the spectral restart state."]}
 
     route_text = (
         "The Noah-MP glacier refusal and sea-ice skip still apply. Its "
@@ -1269,7 +1612,7 @@ def _surface_coupling_warnings(registry: dict) -> None:
             "EXPERT ONLY. WRF owns the write-back sequence explicitly: MYNN "
             "surface first, Noah-MP flux/state write-back second, and the "
             "Noah-MP category/fraction 2-m diagnostic post-pass last. The "
-            "existing Noah-MP glacier, sea-ice and validation-status warnings "
+            "existing Noah-MP glacier, sea-ice and verification-status warnings "
             "still apply."),
         *mynn_noahmp["warnings"],
     ]
@@ -1411,7 +1754,7 @@ def _surface_coupling_warnings(registry: dict) -> None:
 #:     constant, with no change to any .cu or .cuh file.  The registry was
 #:     10,500x pessimistic about its own worst number, and about a residual
 #:     that its own reference harness had manufactured.  See
-#:     docs/public/validation/mp28-column-evidence.md section 3.4.
+#:     docs/public/wrf-comparison/mp28-column-evidence.md section 3.4.
 #:   * ``aero-cloud-freeze-nc`` lost its ``effc_m`` row (5.018e-06 ->
 #:     1.619e-06, inside the gate) and its ``qc`` fell 1.478e-05 -> 4.926e-06.
 #:   * ``aero-ice-demott-idxin`` lost its ``qc`` row (6.031e-06 -> 7.556e-08)
@@ -1475,7 +1818,7 @@ MP28_G3_CLEAN = (
 #: ``rr(k) > R1``, a MASS CONCENTRATION, so at wp08-freeze level 1 -- qr =
 #: 8.5265e-13 kg/kg but rr = 1.1748e-12 kg/m3 -- WRF gives the level a real
 #: fall speed and ArWen treats it as rain-free.  That kernel is the frozen,
-#: model-validated mp=8 one, so the residual is recorded and filed as an
+#: wrf-matched-run mp=8 one, so the residual is recorded and filed as an
 #: integration request rather than fixed here.
 #:
 #: THE TWO wp08 CELLS SWAPPED PLACES AT THE 1.4.1 MERGE.
@@ -1591,9 +1934,9 @@ def _thompson_aerosol_mp28(registry: dict) -> None:
     ``maturity: implemented-unverified`` -- and no higher.  PHYSICS.md's
     published definition of that label is exactly this option's state: column
     -oracle-measured against unmodified WRF Fortran, with no forecast
-    -trajectory comparison.  It may not claim ``validation-candidate`` (no
+    -trajectory comparison.  It may not claim ``wrf-matched-run-candidate`` (no
     ratified reference comparison exists) and certainly not
-    ``model-validated`` (no matched multi-hour run, no decay tables).  What it
+    ``wrf-matched-run`` (no matched multi-hour run, no decay tables).  What it
     also may not do is claim the column evidence is CLEAN, so the measured G3
     residuals are published on the option itself rather than left in a test
     file: four of twenty-two fixtures miss the 2e-6 gate and a fifth clears
@@ -1819,34 +2162,26 @@ def _thompson_aerosol_mp28(registry: dict) -> None:
                     "to name was retired at the 1.4.1 merge and is in "
                     "retired_allowances. clean_fixtures below is the "
                     "UNEXCEPTIONED list."),
-                # No longer None.  docs/public/validation/
+                # No longer None.  docs/public/wrf-comparison/
                 # mp28-matched-trajectory.md is a matched IDEALIZED forecast
                 # against unmodified WRF v4.6.1, and it publishes its own
                 # FAILED gate rather than a summary of the parts that passed.
                 "forecast_trajectory_comparison": {
-                    "document": ("docs/public/validation/"
+                    "document": ("docs/public/wrf-comparison/"
                                  "mp28-matched-trajectory.md"),
                     "kind": "idealized single-domain doubly-periodic forecast",
                     "not_nested_not_real_data": (
-                        "A matched nested real-data forecast is not possible "
-                        "and was not attempted. WRF's real.exe is a fatal "
-                        "error on wif_input_opt=0 with mp_physics=28 "
-                        "(dyn_em/module_initialize_real.F:2734-2736), and "
-                        "the comparison would have to be run under woof's "
-                        "aerosol boundary policy. woof DOES couple "
-                        "nwfa/nifa from boundary snapshots when the WIF "
-                        "climatology supplies them "
-                        "(woof/ingest/wif_climatology.py, "
-                        "woof/boundary_fields.py) and refuses an mp=28 "
-                        "domain with external lateral boundaries "
-                        "(specified) without that dataset, before any "
-                        "fetch; WITHOUT it the species take "
-                        "zero-inflow flow-dependent boundaries and the "
-                        "measured depletion front advances at 0.993 of the "
-                        "wind speed, so a 100 km nest sits at WRF's aerosol "
-                        "floor within 83 minutes. Both blockers are "
-                        "BOUNDARY blockers and neither exists on a periodic "
-                        "domain."),
+                        "This retained comparison is idealized, single-domain "
+                        "and periodic. A matched nested or real-data WRF "
+                        "comparison was not attempted. WRF's real.exe refuses "
+                        "wif_input_opt=0 with mp_physics=28 "
+                        "(dyn_em/module_initialize_real.F:2734-2736), but that "
+                        "does not make a comparison on the current WIF route "
+                        "impossible. The current route couples nwfa/nifa from "
+                        "the WIF climatology and refuses specified domains "
+                        "without the required dataset. Matching initial and "
+                        "boundary inputs and retaining the comparison results "
+                        "remain evidence gaps, not absent runtime capability."),
                     "case": (
                         "WRF's own em_quarter_ss initializer with the "
                         "hodograph removed: a 3 K cos^2 thermal, 10 km "
@@ -2156,10 +2491,10 @@ def _thompson_aerosol_mp28(registry: dict) -> None:
         "reachability": {"state": "component-override"},
         "selectors": {"mp_physics": 28},
         "warnings": [
-            "UNVERIFIED against a WRF forecast in the sense that matters "
-            "operationally: there is no matched REAL-DATA or NESTED "
-            "trajectory and no decay table, and both blockers stand until "
-            "an aerosol lateral boundary condition exists. There IS now a "
+            "No matched REAL-DATA or NESTED WRF trajectory and no decay table "
+            "is recorded here. The WIF lateral-boundary carrier now exists, "
+            "so missing matched inputs and a retained comparison are the "
+            "evidence gap. There IS a "
             "matched IDEALIZED trajectory -- a doubly periodic "
             "single-domain warm-bubble forecast against unmodified WRF "
             "v4.6.1, recorded in extensions.column_oracle_evidence."
@@ -2271,7 +2606,7 @@ def _thompson_aerosol_mp28(registry: dict) -> None:
             "WORSE, which is why it can be trusted. See "
             "extensions.column_oracle_evidence for the full "
             "table, the allowance list and the two counts, and "
-            "docs/public/validation/mp28-column-evidence.md section 3.4 for "
+            "docs/public/wrf-comparison/mp28-column-evidence.md section 3.4 for "
             "the re-derivation from the committed fixtures.",
             "AEROSOL INPUT LIMITS: native met_em preparation accepts a complete "
             "analyzed QNWFA/QNIFA pair and the monthly WIF climatology reader "
@@ -2290,80 +2625,46 @@ def _thompson_aerosol_mp28(registry: dict) -> None:
             "seam WRF calls mp_init from phy_init. A freshly initialised "
             "mp=28 domain selecting this fallback starts on WRF's decaying continental "
             "profile, strictly above the terminal apply's clamps "
-            "(phys/module_mp_thompson.F:3972-4021), not pinned at them. HOW "
-            "MUCH THAT IS WORTH, measured over 150 steps x 12 s on a "
+            "(phys/module_mp_thompson.F:3972-4021), not pinned at them. A "
+            "HISTORICAL SYNTHETIC-PROFILE SENSITIVITY run measured over "
+            "150 steps x 12 s on a "
             "28 x 16 x 24 2 km specified-BC convective domain against an "
             "otherwise identical run with the profile removed: initial mean "
             "nwfa 6.6532e+07 vs 0.0 kg^-1, peak nc 1.5980e+08 vs 2.9451e+07 "
             "kg^-1 (5.4x fewer droplets without it), domain-total RAINNC "
             "1.957357 vs 3.207102 mm -- the aerosol-free run rains 63.8% "
-            "MORE. Read that as the sensitivity of an mp=28 forecast to its "
-            "aerosol initial condition; it is also the magnitude the "
-            "lateral-boundary deviation below converges to after the domain "
-            "has ventilated once. See extensions.aerosol_initialisation.",
-            "DIVERGENCE, admission: WRF's own initializer REFUSES the "
-            "configuration woof runs. dyn_em/module_initialize_real.F:"
+            "MORE. This describes the retained synthetic-profile experiment, "
+            "not a current WIF-initialized run or a score against "
+            "observations. See extensions.aerosol_initialisation.",
+            "SYNTHETIC-PROFILE ADMISSION DIFFERENCE: WRF's initializer "
+            "refuses this fallback configuration. dyn_em/module_initialize_real.F:"
             "2734-2736 calls wrf_error_fatal('wif_input_opt=0 but "
             "mp_physics=28'), so real.exe will not build a wrfinput for the "
             "synthetic-profile case at all. The PHYSICS is WRF's; the "
             "admission decision is not.",
-            "DIVERGENCE, lateral boundaries: an external-BC (specified) "
-            "domain carries NO aerosol inflow, and this is the deviation "
-            "that grows with run length. woof couples only qv from external "
-            "boundary snapshots and gives every other scalar flow-dependent "
-            "boundaries with zero inflow, so aerosol-free air advects in at "
-            "the upstream face and monotonically depletes nwfa/nifa for as "
-            "long as the run continues -- with no NaN, no negative and no "
-            "health trip: where the scheme runs WRF's terminal clamps "
-            "(nwfa >= 11.1e6, nifa >= 5.0e3 per m3) hold the floor, and a "
-            "clear column, which WRF leaves at its no-microphysics exit "
-            "(phys/module_mp_thompson.F:2020), keeps the zero the inflow "
-            "brought. WRF's Registry gives "
-            "qnwfa/qnifa real bdy arrays and forces them from the boundary "
-            "file. MEASURED on a deliberately cloud-free 150-step run, so "
-            "every kilogram lost is the boundary policy and not "
-            "microphysics: with a 20.0 m/s inflow the depletion front "
-            "advances at 20.0909 m/s (1.00454 of the wind), and over 1800 s "
-            "the domain-interior mean nwfa falls to 0.3314 of its initial "
-            "value and nifa to 0.3272. At 10 m/s the front runs at "
-            "9.958 m/s, so this is a law and not one number: the upstream "
-            "U*t of your domain has lost its initial aerosol after time t, "
-            "and the whole domain after L/U -- 13.9 hours for a 1000 km domain "
-            "in a 20 m/s flow, 83 minutes for a 100 km nest. The only "
-            "interior source is the fixed surface emission nwfa2d at k=0, "
-            "measured at 5540.14 kg^-1 s^-1, which replaces about 5% of the "
-            "lowest level's initial loading over 1800 s and acts on that "
-            "level only. SEPARATELY, the spec_zone ring itself ends at "
-            "EXACTLY zero aerosol on three of its four faces (west/south/"
-            "north 1.000, east 0.125), because WRF's clipped microphysics "
-            "tile means the terminal clamp never runs there, and that is "
-            "what a nest boundary or a wrfout reader sees; WRF forces "
-            "qnwfa/qnifa at the boundary, so in WRF this zero does not "
-            "arise. This matches woof's existing hydrometeor policy "
-            "and is documented, not fixed.",
-            "DIVERGENCE, PBL: woof passes flag_qnc/flag_qnwfa/flag_qnifa to "
-            "MYNN as literal False (woof/core/mynn_pbl.py), so nc/nwfa/nifa "
-            "are never vertically mixed by the PBL. WRF mixes them when "
-            "bl_mynn_mixscalars=1 (phys/module_bl_mynn.F:4735,:4777,:4957) or "
-            "through scalar_pblmix (phys/module_pbl_driver.F:2251). At "
-            "woof's pinned MYNN identity bl_mynn_mixscalars=0, and WRF's "
-            "check_a_mundo raises scalar_pblmix to 1 ONLY when use_aero_icbc "
-            "or use_rap_aero_icbc is set (share/module_check_a_mundo.F:"
-            "2477-2495) -- both of which woof refuses -- so WRF's own value "
-            "here is 0 too and today the two "
-            "models agree -- but woof's withholding is STRUCTURAL rather "
-            "than a namelist value, and mp_physics=28 is the first "
-            "configuration where those species exist and the withholding is "
-            "physically visible.",
-            "MIXED NESTING IS REFUSED BY NAME. An mp_physics=28 domain may "
-            "only sit under an mp_physics=28 parent. No cross-scheme "
-            "transition rule is registered for it, so the registry refuses "
-            "any mixed edge with unsupported-component-transition and "
-            "woof/core/microphysics_transition.py refuses the same edge at "
-            "runtime with a named message. WRF's own non-aerosol-aware "
-            "fallbacks (nc=100e6/rho, nwfa=11.1e6/rho, nifa=5.0e3/rho) would "
-            "give a nested child fabricated aerosol rather than its parent's, "
-            "and no gate in this tree would flag it.",
+            "AEROSOL LATERAL BOUNDARIES: the current WIF-climatology route "
+            "couples nwfa/nifa through the specified boundary carrier. A "
+            "specified domain without its required aerosol dataset is "
+            "refused before step 0. The formerly measured zero-inflow "
+            "depletion describes the historical uncoupled route, not the "
+            "current WIF route. Runtime coupling is not evidence of a "
+            "matched real-data or nested WRF forecast.",
+            "MYNN aerosol-number mixing is optional. bl_mynn_mixscalars=0 "
+            "is the default. Setting it to 1 mixes nc/nwfa/nifa using the "
+            "WRF qn solves, and is admitted only with bl_pbl_physics=5, "
+            "mp_physics=28 and bldt=0. This is component code verification, "
+            "not validation against observations.",
+            "PBL number mixing is selectable for mp_physics=28 with MYNN: "
+            "scalar_pblmix=1 applies WRF post-PBL diffusion through exch_h "
+            "to nc/ni/nwfa/nifa; bl_mynn_mixscalars=1 instead selects "
+            "MYNN scalar plume transport. Both default to 0 and require "
+            "bldt=0. WRF disables the former when the latter is active, "
+            "so selecting both is refused.",
+            "MIXED NESTING uses the registered transition policy. Entry "
+            "into mp_physics=28 from a non-aerosol parent requires a declared "
+            "aerosol source; same-scheme nesting carries the parent state. "
+            "See the transition registry for admitted edges and provenance. "
+            "Runtime admission is not a matched WRF trajectory comparison.",
             "DELIBERATE THERMODYNAMIC DIVERGENCE FROM mp_physics=8, and it is "
             "not a defect on either side. mp=28's RSLF/RSIF saturation Horner "
             "chains are contraction-pinned while mp=8's stay FMA-contracted, "
@@ -2371,12 +2672,14 @@ def _thompson_aerosol_mp28(registry: dict) -> None:
             "ulp. That matters because module_mp_thompson.F:3401 opens the "
             "whole condensation/CCN-activation block on ssatw > 1.E-15 (:185) "
             "-- one ulp flips a branch. mp=28 matches WRF's own gfortran "
-            "-O2 arithmetic; mp=8 stays byte-frozen at its model-validated "
-            "trajectory. The two are deliberately not bit-identical.",
-            "Reachable only as a per-domain microphysics override on the "
-            "experiment-per-domain tree route. No registered template selects "
-            "it, it is no template's default, and the shipped default suite "
-            "is unchanged.",
+            "-O2 arithmetic; mp=8 retains its FMA-contracted saturation "
+            "chains. Its kernels changed after the 2026-07-28 matched "
+            "run, so that run describes an earlier build. The two "
+            "schemes are deliberately not bit-identical.",
+            "Reachable through the registered aerosol-aware template and "
+            "per-domain microphysics overrides where the route admits "
+            "them. Read each route's declared templates and constraints; "
+            "reachability is not forecast verification evidence.",
             "Launch must byte-validate CCN_ACTIVATE.BIN (35,288 bytes, "
             "sha256 f2b8d391...) plus the four classic Thompson tables. The "
             "activation table IS distributed with woof as of 2026-08-01 -- "
@@ -2522,8 +2825,8 @@ def _wrf_compatibility_authority() -> dict:
 #: matched WRF run is agreement with another model, and "validated" is read
 #: by everyone as skill against the atmosphere.  The new spellings say what
 #: the evidence is.  Applied to maturity VALUES at every surface; template
-#: ids keep their historical spelling because an id is a name, not a claim,
-#: and renaming one silently breaks every config and route that cites it.
+#: ids migrate through an explicit alias table, with old inputs accepted
+#: and preparation-receipt physics identities kept unchanged.
 MATURITY_RENAMES = {
     "model-validated": "wrf-matched-run",
     "validation-candidate": "wrf-matched-run-candidate",
@@ -2568,9 +2871,11 @@ _MATURITY_RUNGS = (
      "deliberately not the default: the next candidate for a full matched "
      "run. Selecting it warns and does not block."),
     ("wrf-matched-run", "nonwarning",
-     "A matched multi-hour WOOF-versus-WRF forecast of a reference case "
-     "has been run with this option and its decay tables are published. "
-     "This is agreement with WRF, not skill against observations."),
+     "A historical matched-run label. Read verification_scope and its "
+     "note: the current code or exact suite may not be covered, and "
+     "some template labels are composition exemptions. "
+     "This is code verification against WRF. It is not validation "
+     "against observations."),
 )
 
 #: The independent-science axis (D-26: options only).  ``none`` is the
@@ -2636,6 +2941,7 @@ def _evidence_architecture(registry: dict) -> None:
         "axis": "conformance",
         "order": order,
         "rungs": rungs,
+        "aliases": dict(MATURITY_RENAMES),
         "meaning": (
             "How far agreement with the WRF reference implementation has "
             "been demonstrated for this component, template or nest edge. "
@@ -2806,14 +3112,14 @@ def _composition_exemptions() -> dict:
                 "the exact legacy engine, so its manifest does not cover "
                 "this template's tuple. " + unverified_land_pbl),
         },
-        "thompson-mp8-ysu-mm5-noah-validation-v1": {
+        "thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1": {
             "owner_decision_id": "D-16",
             "clause": "C2",
             "basis": (
                 "A table-bound experimental runtime carried above its "
                 "component floor. " + unverified_land_pbl),
         },
-        "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-validation-candidate-v1": {
+        "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-wrf-comparison-candidate-v1": {
             "owner_decision_id": "D-16",
             "clause": "C1+C2",
             "basis": (
@@ -2821,7 +3127,7 @@ def _composition_exemptions() -> dict:
                 "comparison, and no matched-run manifest. "
                 + unverified_land_pbl),
         },
-        "nssl2-mp18-ysu-mm5-noah-kf-rrtmg-legacy-validation-candidate-v1": {
+        "nssl2-mp18-ysu-mm5-noah-kf-rrtmg-legacy-wrf-comparison-candidate-v1": {
             "owner_decision_id": "D-16",
             "clause": "C1+C2",
             "basis": (
@@ -2916,7 +3222,7 @@ def _milbrandt2mom_mp9(registry: dict) -> None:
     measured, residuals published) or Morrison (ULP table against the real
     Fortran), this option's evidence today is a column smoke through the
     shipped seams plus float64 self-consistency.  It may not claim
-    ``validation-candidate`` and it may not imply the column evidence is
+    ``wrf-matched-run-candidate`` and it may not imply the column evidence is
     conformance evidence, because there is no comparison to conform to.
 
     ``reachability: component-override`` -- computed, not chosen.  No
@@ -3922,6 +4228,13 @@ def _consumer_rows(registry: dict) -> None:
                 "forbidden_setting_values", {})["mp28_aerosol_source"] = [
                     value for value in MP28_AEROSOL_SOURCES
                     if value != MP28_AEROSOL_SOURCE_DEFAULT_VALUE]
+            option["constraints"]["forbidden_setting_values"]["use_rap_aero_icbc"] = [True]
+            previous_forbidden = copy.deepcopy(option["constraints"]["forbidden_setting_values"])
+            previous_forbidden["mp28_aerosol_source"] = [
+                value for value in registry["parameters"]["mp28_aerosol_source"]["compatible_previous_enums"][0]
+                if value != MP28_AEROSOL_SOURCE_DEFAULT_VALUE]
+            previous_forbidden.pop("use_rap_aero_icbc", None)
+            option["compatible_previous_forbidden_settings"] = [previous_forbidden]
         if mp == 28:
             # THE ONE SPELLING of the dataset precondition, read by both
             # authorities: the run door refuses an externally forced mp=28
@@ -4509,8 +4822,56 @@ _UWPBL_WARNINGS = (
 )
 
 
+def _rename_template_ids(registry: dict) -> None:
+    """Move menu IDs while retaining an explicit map for old inputs."""
+
+    def replace(node):
+        if isinstance(node, dict):
+            return {TEMPLATE_ID_ALIASES.get(key, key): replace(value)
+                    for key, value in node.items()}
+        if isinstance(node, list):
+            return [replace(value) for value in node]
+        if isinstance(node, str):
+            return TEMPLATE_ID_ALIASES.get(node, node)
+        return node
+
+    normalized = replace({key: value for key, value in registry.items()
+                          if key != "template_aliases"})
+    registry.clear()
+    registry.update(normalized)
+
+
+def _current_verification_scope(registry: dict) -> None:
+    """Keep historical/exempt labels from claiming current exact-suite evidence."""
+
+    mp8 = registry["components"]["microphysics"]["options"]["thompson-mp8"]
+    mp8["verification_scope"] = "historical-matched-run"
+    mp8["verification_scope_note"] = (
+        "The 2026-07-28 WRF v4.6.1 comparison used legacy RRTMG and failed "
+        "the t=0 digest on all four domains. Kernels changed in 2.7.4 and "
+        "on 2026-09-23; that matched run has not been repeated. Current "
+        "component evidence is the documented WRF Fortran column comparisons.")
+    for template_id, template in registry["templates"].items():
+        if template.get("maturity") == "wrf-matched-run":
+            exemption = registry["maturity_ladder"]["composition_rule"][
+                "composition_exemptions"].get(template_id)
+            if exemption:
+                template["verification_scope"] = "composition-exemption"
+                template["verification_scope_note"] = (
+                    "This label is a composition exemption, not a current "
+                    "matched run of this exact suite. " + exemption["basis"])
+
+
 def build(registry: dict) -> dict:
     """Apply this pass's tables to ``registry`` in place and return it."""
+    _rename_template_ids(registry)
+    # Registered source tables determine which prepared inputs each runner
+    # accepts. Carrying yesterday's registry source list omits a newly
+    # mapped source even after its decoder and forecast route are usable.
+    from woof.prepared_single_domain_forecast import SUPPORTED_SOURCES as single_sources
+    from woof.prepared_domain_tree_forecast import SUPPORTED_SOURCES as tree_sources
+    registry["runner_routes"]["tools.prepared_single_domain_forecast"]["source_ids"] = sorted(single_sources)
+    registry["runner_routes"]["tools.prepared_domain_tree_forecast"]["source_ids"] = sorted(tree_sources)
     _urban_component(registry)
     _surface_coupling_warnings(registry)
     _thompson_aerosol_mp28(registry)
@@ -4608,7 +4969,22 @@ def build(registry: dict) -> dict:
             "publish; the Eta layer publishes MYJ's own exchange set "
             "instead and the off option writes none of them (WRF v4.6.1 "
             "admits the same three at phys/module_physics_init.F:3837-3839)")}
-    # MYNN's closure knobs are pinned to the ported configuration; the
+    # These implemented choices no longer have a single-value constraint.
+    for name in ("bl_mynn_mixlength", "bl_mynn_mixscalars"):
+        pbl_options["mynn"]["constraints"]["required_settings"].pop(name, None)
+    # Both MYNN surface-layer generations are implemented.
+    mynn_surface = surface_options["mynn"]["constraints"]
+    mynn_surface.setdefault("required_settings", {}).pop(
+        "mynn_sfclay_variant", None)
+    mynn_surface.setdefault("admitted_setting_values", {})[
+        "mynn_sfclay_variant"] = ["wrf_461", "gsl_wrf39"]
+    mynn_surface.setdefault("admitted_setting_values_reasons", {})[
+        "mynn_sfclay_variant"] = (
+        "wrf_461 is WRF v4.6.1's MYNN surface layer and gsl_wrf39 the GSL "
+        "WRF 3.9 fork's; the two solve different equations for z/L, so no "
+        "other name can select either")
+    pbl_options["mynn"]["parameters"]["scalar_pblmix"] = 0
+    # MYNN's remaining closure knobs are pinned to the ported configuration; the
     # required_settings rows say so machine-readably and this says why.
     pbl_options["mynn"]["constraints"]["required_settings_reasons"] = {
         name: (
@@ -5542,17 +5918,10 @@ def build(registry: dict) -> dict:
                     "runs."),
                 "remedy_settings": {"diff_opt": 2},
             })
-        rules.append({
-            "settings": {"diff_opt": [2], "mix_full_fields": [False]},
-            "reason": (
-                "mix_full_fields=false selects WRF's perturbation mixing (the "
-                "base-state profile subtracted before mixing), which the "
-                "diff_opt=2 metric operator does not implement: the run "
-                "would mix full fields while its configuration says "
-                "otherwise"),
-            "remedy_label": "Set mix_full_fields=true.",
-            "remedy_settings": {"mix_full_fields": True},
-        })
+        # mix_full_fields=false under diff_opt=2 carries no rule: the run
+        # door admits it (woof/config.py, validate_km_opt), because WRF's
+        # perturbation branch subtracts base-state profiles real.exe
+        # leaves at zero, the same operator for a real-data run.
         # Every plan selects a turbulence option.  Its existing constraint
         # object carries this PBL coupling without creating a new empty
         # physics-identity wrapper for PBL off.  No sources clause: the
@@ -5678,7 +6047,7 @@ def build(registry: dict) -> dict:
         if not isinstance(spec, dict):
             continue
         before = prior_citations.get(name)
-        citation = find_consuming_read(name, before)
+        citation = find_consuming_read(name, before or spec.get("consuming_read"))
         if citation is None:
             uncited.append(name)
             spec.pop("consuming_read", None)
@@ -5766,15 +6135,13 @@ def build(registry: dict) -> dict:
             "phys/module_bl_mynn.F:1104-1106 passes real sqs to "
             "mym_condensation when FLAG_QS is true; mynn_tendencies still "
             "receives kzero at :1240-1242, matching WRF"),
-        "withheld_aerosol_number_note": (
-            "qnc/qnwfa/qnifa stay withheld under mp_physics=28, the first "
-            "configuration where they carry real prognostic values. woof "
-            "passes flag_qnc/flag_qnwfa/flag_qnifa to MYNN as literal False "
-            "(woof/core/mynn_pbl.py), so MYNN never mixes them; WRF mixes "
-            "them at bl_mynn_mixscalars=1 (phys/module_bl_mynn.F:4735,:4777,"
-            ":4957), which woof's MYNN option identity pins to 0. The "
-            "withholding is structural rather than a namelist value; see the "
-            "microphysics thompson-aerosol-mp28 warnings."),
+        "aerosol_number_mixing_note": (
+            "MYNN scalar plume transport is selected by bl_mynn_mixscalars=1. "
+            "WRF post-PBL local diffusion is selected by scalar_pblmix=1 "
+            "(phys/module_pbl_driver.F:2251,2641-2844). Both mix the "
+            "mp_physics=28 nc/ni/nwfa/nifa family, default to 0 and require "
+            "bldt=0. WRF's check_a_mundo disables scalar_pblmix when "
+            "bl_mynn_mixscalars=1, so that joint request is refused."),
     }
     mynn["extensions"]["radiation_cloud_merge"] = {
         "activation": "bl_pbl_physics=5 and icloud_bl>0",
@@ -5805,10 +6172,10 @@ def build(registry: dict) -> dict:
         "source-preparation decision for the user.")
     nssl2_id = (
         "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-"
-        "validation-candidate-v1")
+        "wrf-comparison-candidate-v1")
     nssl2_legacy_id = (
         "nssl2-mp18-ysu-mm5-noah-kf-rrtmg-legacy-"
-        "validation-candidate-v1")
+        "wrf-comparison-candidate-v1")
     nssl2_legacy = copy.deepcopy(registry["templates"][nssl2_id])
     nssl2_legacy["label"] = (
         "NSSL-2 + YSU + classic MM5 + Noah + KF + legacy RRTMG")
@@ -5840,7 +6207,7 @@ def build(registry: dict) -> dict:
     # registered -- notably radt 12.0 at dx 3000 m, where the KF template
     # family's ladder carries radt 3.0 at 3 km.  That divergence is
     # deliberate: this row names what the battery runs, not the ladder.
-    thompson_validation_id = "thompson-mp8-ysu-mm5-noah-validation-v1"
+    thompson_validation_id = "thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1"
     thompson_legacy_id = "thompson-mp8-ysu-mm5-noah-rrtmg-legacy-v1"
     thompson_legacy = copy.deepcopy(
         registry["templates"][thompson_validation_id])
@@ -6018,6 +6385,10 @@ def build(registry: dict) -> dict:
     # And the microphysics-arm siblings, at the same point for the same
     # reason: their bases exist and are declared on their final routes.
     _microphysics_arm_siblings(registry)
+    _mynn_source_version_templates(registry)
+    _thompson_fork_source_template(registry)
+    _monthly_surface_template(registry)
+    _solar_monthly_surface_template(registry)
 
     # Owner-ratified declaration: the GFS runner has always advertised this
     # profile and retains the existing Noah-MP route acknowledgement.
@@ -6224,6 +6595,7 @@ def build(registry: dict) -> dict:
     # including the legacy NSSL-2 template and the regenerated nest edges.
     _rename_maturities(registry)
     _evidence_architecture(registry)
+    _current_verification_scope(registry)
     # LAST: every option is registered, every constraint written and
     # every maturity renamed, so the consumer rows see the final
     # option set.
@@ -6235,6 +6607,7 @@ def build(registry: dict) -> dict:
     # LAST of all: every template and every route declaration above is
     # final, so the easiest path to each option is the one this computes.
     _phase2c_recompute_reachability(registry)
+    registry["template_aliases"] = dict(TEMPLATE_ID_ALIASES)
     return registry
 
 
@@ -6261,7 +6634,7 @@ NO_RADIATION_NAME_WARNING = (
     "longwave-free run, phys/module_physics_init.F:1168-1170 and "
     "phys/module_radiation_driver.F:1719-1722) for the entire forecast, "
     "and every land-surface model reads it every step. That makes this a "
-    "DAYTIME VALIDATION suite: a real window containing local night "
+    "DAYTIME-ONLY suite: a real window containing local night "
     "refuses to load unless [experiment] declares acknowledgements = "
     "[\"asymmetric-radiation-nocturnal-window-v1\"]. Read the label, not "
     "the id -- the label has always named Dudhia SW. The id is not being "
@@ -7180,7 +7553,7 @@ _MICROPHYSICS_ARM_SIBLINGS = (
             "the pair isolates it; every other component and parameter is "
             "transcribed from that template, and it is offered on exactly "
             "the routes and sources that template is.",
-            "DAYTIME VALIDATION SUITE. The radiation component is "
+            "DAYTIME-ONLY SUITE. The radiation component is "
             "'dudhia-shortwave': ra_lw_physics 0 with ra_sw_physics 1, so "
             "Dudhia shortwave runs and no longwave scheme does, and GLW "
             "stays at zero for the whole forecast. A real window containing "
@@ -7201,6 +7574,119 @@ _BASE_DESCRIBING_WARNING_PREFIXES = (
     "This template differs from ",
     "RADIATION IS THE ONLY DIFFERENCE from ",
 )
+
+
+THOMPSON_FORK_SOURCE_PROFILE_ID = "thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1"
+
+
+def _thompson_fork_source_template(registry: dict) -> None:
+    template = registry["templates"][THOMPSON_FORK_SOURCE_PROFILE_ID]
+    microphysics = registry["components"]["microphysics"]["options"][template["components"]["microphysics"]]
+    if microphysics["selectors"]["mp_physics"] != 28:
+        raise ValueError("Thompson fork source forms require the staged MP28 composition")
+    if template["parameters"]["bl_mynn_version"] != "gsd_41":
+        raise ValueError("Thompson source composition must retain its staged MYNN generation")
+    if registry["parameters"]["bl_mynn_cloud_tendency_form"]["default"] != "wrf_461":
+        raise ValueError("Thompson source composition must retain the conservative MYNN cloud default")
+    template["parameters"].update(
+        thompson_version="wrf_39_noaa", thompson_fork_snow_fall="wrf_39_noaa")
+
+
+def _mynn_source_version_templates(registry: dict) -> None:
+    """A source version is an explicit composition, never a global default."""
+    template_id = "thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1"
+    base_id = "thompson-mp8-mynn-mynn-ruc-rte-rrtmgp-implemented-unverified-v1"
+    template = copy.deepcopy(registry["templates"][base_id])
+    template["components"]["microphysics"] = "thompson-aerosol-mp28"
+    template["parameters"].update({
+        "bl_mynn_version": "gsd_41",
+        "bl_mynn_gsd41_unsquared_qtke": False,
+        "mynn_sfclay_variant": "gsl_wrf39",
+        "bl_mynn_mixlength": 2,
+        "scalar_pblmix": 1,
+        "aer_init_opt": 1,
+        "wif_input_opt": 1,
+        "ra_rrtmg_variant": "rrtmg_legacy",
+        "wrf_rrtmg_compatibility": "wrf-rrtmg-4-4-legacy-v1",
+        "radt": 15.0,
+    })
+    template["label"] = "Aerosol Thompson + GSD v4.1 MYNN + MYNN surface + RUC + legacy RRTMG"
+    template["maturity"] = _composition_ceiling(registry, template["components"])
+    template["warnings"] = [
+        "The GSD v4.1 MYNN source version is selected explicitly. Remaining fork differences are listed in docs/dev/mynn-gsd41.md.",
+        "This composition requires the staged WIF aerosol climatology and legacy RRTMG assets. It has no matched operational full-grid trajectory receipt.",
+    ]
+    registry["templates"][template_id] = template
+    for route_id, route in registry["runner_routes"].items():
+        for source_id, declared in route.get("source_template_ids", {}).items():
+            if template_id in declared:
+                declared.remove(template_id)
+            if route_id == "tools.prepared_single_domain_forecast":
+                from woof.prepared_single_domain_forecast import _SOURCE_PHYSICS_PROFILES
+                offered = _SOURCE_PHYSICS_PROFILES.get(source_id, ())
+                if template_id in offered:
+                    declared.append(template_id)
+                    order = {name: index for index, name in enumerate(offered)}
+                    declared.sort(key=lambda name: order.get(name, len(order)))
+                continue
+            if base_id in declared:
+                declared.insert(declared.index(base_id) + 1, template_id)
+
+
+def _monthly_surface_template(registry: dict) -> None:
+    """A named surface configuration with its prescribed fields selected."""
+    template_id = "thompson-mp8-mynn-mynn-ruc-monthly-rrtmg-legacy-v1"
+    base_id = "thompson-mp8-mynn-mynn-ruc-rte-rrtmgp-implemented-unverified-v1"
+    template = copy.deepcopy(registry["templates"][base_id])
+    template["label"] = (
+        "Thompson + MYNN + RUC monthly LAI/albedo and fractional sea ice + legacy RRTMG")
+    template["parameters"].update(
+        usemonalb=True, rdlai2d=True, fractional_seaice=1,
+        ra_rrtmg_variant="rrtmg_legacy",
+        wrf_rrtmg_compatibility="wrf-rrtmg-4-4-legacy-v1")
+    template["maturity"] = _composition_ceiling(registry, template["components"])
+    template["warnings"] = [
+        "The monthly surface fields and the 0.02 fractional ice threshold "
+        "are selected by this template with no additional flags. A static "
+        "catalogue must supply LAI12M, ALBEDO12M and SNOALB. The template "
+        "does not qualify a forecast against operational output; solar "
+        "angle albedo, native cycled inputs and the complete physics "
+        "configuration require separate verification.",
+        *[warning for warning in template.get("warnings", [])
+          if not warning.startswith(_BASE_DESCRIBING_WARNING_PREFIXES)],
+    ]
+    registry["templates"][template_id] = template
+    for route in registry["runner_routes"].values():
+        for declared in route.get("source_template_ids", {}).values():
+            if template_id in declared:
+                declared.remove(template_id)
+            if base_id in declared:
+                declared.insert(declared.index(base_id) + 1, template_id)
+
+
+def _solar_monthly_surface_template(registry: dict) -> None:
+    """An explicit solar-albedo sibling; prior templates keep their values."""
+    base_id = "thompson-mp8-mynn-mynn-ruc-monthly-rrtmg-legacy-v1"
+    template_id = "thompson-mp8-mynn-mynn-ruc-monthly-solar-rrtmg-legacy-v1"
+    template = copy.deepcopy(registry["templates"][base_id])
+    template["parameters"]["alb_sol"] = 1
+    template["label"] = (
+        "Thompson + MYNN + RUC monthly LAI/albedo, solar albedo and "
+        "fractional sea ice + legacy RRTMG")
+    template["warnings"][0] = (
+        "Monthly LAI and albedo, the 0.02 fractional ice threshold and "
+        "sun-angle albedo are selected by this template with no additional "
+        "flags. A MODIS21 static catalogue must supply LAI12M, ALBEDO12M "
+        "and SNOALB. This template does not qualify a forecast against "
+        "operational output; native cycled inputs and the complete physics "
+        "configuration require separate verification.")
+    registry["templates"][template_id] = template
+    for route in registry["runner_routes"].values():
+        for declared in route.get("source_template_ids", {}).values():
+            if template_id in declared:
+                declared.remove(template_id)
+            if base_id in declared:
+                declared.insert(declared.index(base_id) + 1, template_id)
 
 
 def _microphysics_arm_siblings(registry: dict) -> None:

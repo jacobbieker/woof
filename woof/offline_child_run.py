@@ -1392,6 +1392,8 @@ def _initialize_child_physics(child, cfg, initial, surface, start_time, *,
     """
     from woof.core.physics import initialize_physics
     from woof.static.orographic import required_static_fields
+    from woof.ingest.ruc_mosaic import ruc_mosaic_physics_inputs
+    from woof.ingest.lake_physics import lake_physics_inputs
 
     drag_fields = required_static_fields(getattr(cfg, "topo_wind", 0),
                                         getattr(cfg, "gwd_opt", 0))
@@ -1469,12 +1471,35 @@ def _initialize_child_physics(child, cfg, initial, surface, start_time, *,
             radiation_start_time=start_time,
             radiation_latitude=lat, radiation_longitude=lon, **drag_kwargs)
 
-    from woof.core.landuse import initialize_landuse
+    from woof.core.landuse import (initialize_landuse, ruc_fractional_seaice,
+                                    usemonalb_landuse_inputs)
     fields = surface.fields
     identity = surface.identity
     xice = fields.get("SEAICE", fields.get("XICE"))
     if xice is None:
         xice = np.zeros_like(fields["LANDMASK"])
+    # usemonalb's monthly ALBBCK and SNOALB come from the child's own static
+    # build (ALBEDO12M interpolated to the start date, real.exe
+    # module_initialize_real.F:1192, :1235-1239), exactly as the case-data
+    # roads take them.  A child-grid file or a parent-derived surface carries
+    # no monthly albedo, and running the table albedo under the switch
+    # would be the configuration it replaces, so that is refused by name.
+    albedo_inputs = {}
+    if bool(getattr(cfg, "usemonalb", False)):
+        if terrain_drag_static is None or any(
+                terrain_drag_static.get(name) is None
+                for name in ("ALBEDO12M", "SNOALB", "LANDMASK")):
+            raise OfflineChildContractError(
+                "usemonalb=true on a downscaled child needs the monthly "
+                "background albedo ALBEDO12M and the snow albedo SNOALB of "
+                "the child's own static build; this child's surface "
+                "source (a child-grid file or the parent-derived surface) "
+                "carries neither, so landuse_init would run LANDUSE.TBL's "
+                "seasonal albedo under a switch that names the monthly "
+                "field. Build the child's own geography, or set "
+                "usemonalb=false")
+        albedo_inputs = usemonalb_landuse_inputs(
+            cfg, terrain_drag_static, start_time)
     landuse = initialize_landuse(
         fields["LU_INDEX"], soil_type=fields["ISLTYP"],
         urban_legend=int(getattr(cfg, "sf_urban_physics", 0)) > 0,
@@ -1485,7 +1510,12 @@ def _initialize_child_physics(child, cfg, initial, surface, start_time, *,
         isoilwater=int(identity["ISOILWATER"]),
         # real.exe's landmask/soil-category reconciliation decides a
         # disagreeing column from its soil temperature, then its SST.
-        soil_temperature=fields["TSLB"], sst=fields.get("SST"))
+        soil_temperature=fields["TSLB"], sst=fields.get("SST"),
+        # landuse_init reads the threshold the surface runs
+        # (module_physics_init.F:1463-1465): 0.02 under fractional_seaice
+        # = 1, the value the RUC seam and the lake take on this road too.
+        fractional_seaice=ruc_fractional_seaice(cfg),
+        **albedo_inputs)
     driver = initialize_physics(
         child, cfg, landuse=landuse, tsk=fields["TSK"],
         landuse_dataset=str(identity["MMINLU"]),
@@ -1497,7 +1527,15 @@ def _initialize_child_physics(child, cfg, initial, surface, start_time, *,
         snow_depth=fields.get("SNOWH", np.zeros_like(fields["SNOW"])),
         pblh=fields.get("PBLH", 0.0),
         radiation=radiation, radiation_start_time=start_time,
-        radiation_latitude=lat, radiation_longitude=lon, **drag_kwargs)
+        radiation_latitude=lat, radiation_longitude=lon,
+        **ruc_mosaic_physics_inputs(
+            cfg, fields if terrain_drag_static is None else terrain_drag_static,
+            landuse_attrs=identity, xice=xice,
+            processed=terrain_drag_static is None,
+            fractional_seaice=ruc_fractional_seaice(cfg)),
+        **lake_physics_inputs(
+            cfg, fields if terrain_drag_static is None else terrain_drag_static),
+        **drag_kwargs)
     # Seed time-zero surface diagnostics from the child-grid source; the
     # first model step replaces them through SFCLAY/LSM/PBL in WRF
     # ordering (same convention as the experiment path's warm seed).
@@ -1514,6 +1552,19 @@ def _initialize_child_physics(child, cfg, initial, surface, start_time, *,
         if value is not None and field_name in driver.fields:
             driver.fields[field_name][...] = cp.asarray(
                 value, dtype=cp.float32)
+    if (int(cfg.sf_surface_physics) == 3 and cfg.rdlai2d
+            and terrain_drag_static is not None
+            and terrain_drag_static.get("LAI12M") is not None
+            and "lai" in driver.fields):
+        from woof.core.landuse import surface_leaf_area
+        driver.fields["lai"][...] = cp.asarray(
+            surface_leaf_area(cfg, terrain_drag_static["LAI12M"], start_time),
+            dtype=cp.float32)
+    if (int(cfg.sf_surface_physics) == 3 and cfg.usemonalb
+            and "snoalb" in driver.fields):
+        from woof.core.landuse import surface_snow_albedo
+        driver.fields["snoalb"][...] = cp.asarray(
+            surface_snow_albedo(cfg, terrain_drag_static, None), dtype=cp.float32)
     noah_params = getattr(driver, "noah_params", None)
     if (fields.get("SNOALB") is not None and noah_params is not None
             and "snoalb" in driver.fields):
@@ -3376,7 +3427,11 @@ def _run(args: argparse.Namespace,
                                        initial.valid_time,
                                        **({"terrain_drag_static": geography.fields}
                                           if geography is not None and
-                                          (cfg.topo_wind or cfg.gwd_opt) else {}))
+                                          (cfg.topo_wind or cfg.gwd_opt
+                                           or cfg.mosaic_lu or cfg.mosaic_soil
+                                           or cfg.sf_lake_physics
+                                           or cfg.usemonalb
+                                           or cfg.rdlai2d) else {}))
     ozone_routing = _child_ozone_routing(driver)
     cp.cuda.runtime.deviceSynchronize()
     # ``[tiles]``, wired exactly the way the prepared front doors wire it

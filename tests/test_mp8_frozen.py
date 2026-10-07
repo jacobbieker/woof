@@ -130,7 +130,7 @@ tests/test_thompson_real_column_host_parity.py (no rate and no
 final-state quantity beyond 1e-2 unexplained, echo within 0.05 dB, exit
 temperature within 1e-5).  The 92 classic oracle CSVs (F1) are unchanged;
 tools/thompson_real_column_parity/README.md and
-docs/public/validation/mp28-column-evidence.md say what closed and what
+docs/public/wrf-comparison/mp28-column-evidence.md say what closed and what
 remains.
 
 This module does not import cupy in its own source and opens no device: the
@@ -477,8 +477,21 @@ FROZEN_MODULE_DIGESTS = {
         # compiled-WRF advect oracle reproduces every recorded word on the
         # RTX 4090 and on sm_120 (tools/advect_wrf471_oracle/README.md).
         # Previously 6facc4f8/66e08b7a.
-        '30320494525569841b17749fb39996b2484865592824519d083fcc4cec364c7d',
-        'c077f4ae20589cea757a33cac5026729cf433fe74dabfd6f5edd87a0e47689f4'),
+        # Re-pinned for lane/286-vadv5 (WRF v_sca_adv_order / v_mom_adv_order):
+        # the four flux-divergence entries take a trailing int vorder, a
+        # vertical flux5v (WRF flux5 with -vel) joins flux3, zface_half and
+        # advect_w's five vertical-face blocks run WRF's vert_order == 5
+        # ladder under vorder 5 and the unchanged vert_order 3 ladder under
+        # vorder 3, which every launcher defaults to.  Reading: the compiled
+        # WRF 4.7.1 advect oracle reproduces every recorded production word
+        # on sm_120 at vorder 3 (tests/data/wrf471_advect receipts recaptured
+        # with only the kernel digests moved), and at vorder 5 the HRRR-fork
+        # oracle fixture (tests/data/wrf_legacy_advect, NOAA-EMC/HRRR
+        # 40ee6058c WRFV3.9) holds the four explicit routines bitwise under
+        # the exact-C build (tests/test_advect_wrf_legacy_parity.py).
+        # Previously 85062bec/e3fa6135.
+        '1f9cd387e5e20469ce7905065a11b367110ec635adb0efe331dce3ae450a98bf',
+        'ba500e338d41859b88351ca8014921381c2a33a78b9d56ec66d351a3ccdc073c'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
@@ -823,8 +836,41 @@ FROZEN_MODULE_DIGESTS = {
         # sm_89 unchanged (the compute_89 PTX with __fdiv_rn spelled '/' is
         # identical to the base's); Blackwell cards now round these quotients
         # IEEE-correctly.  Previously 5c5a7278/0258a93f.
-        'fccea5e6cce85002f494d1bfe780db12b688675e1ec21de1e64148eb0e596fef',
-        '33f7a2faee1130d26ecafaf4b00c571ee243e2c5fcdf4ec30a5d0dd9c8f8a995'),
+        # Option 2 now reaches WRF's local mixing-length law in cold and
+        # carried calls. The option-1 kernel body is unchanged; Fortran
+        # column and assembled-driver checks live in test_mynn_mixlength2.
+        # Previously b03be073/8771aada.
+        # Re-pinned by lane/286-fork-mynn: the GSD MYNN v4.1 rows
+        # (bl_mynn_version = "gsd_41") sit behind #if defined(MYNN_GSD41)
+        # and compile only through the integer-define loader.  Reading: the
+        # default build's binary is byte-identical to the previous source's
+        # (NVRTC on the RTX 4090, sha256 c0e92423...), so every wrf_461 run
+        # is the same machine code; tests/test_mynn_gsd41.py holds the rows.
+        # Moved again by the gsd_41 cloud block (stratus condensation,
+        # shallow-cumulus cloud, decay memory, in-cloud QC_BL write-back),
+        # all behind MYNN_GSD41; the default binary is still c0e92423.
+        # Previously f4706c64/6923ecda.
+        # Moved again by the gsd_41 surface TKE source and 1/L and its
+        # dissipative heating, behind MYNN_GSD41; default binary c0e92423.
+        # Previously ab421d81/3f08b100.
+        # Moved again by the gsd_41 PBL height input (theta-v of the
+        # liquid-water theta) and KPBL blend; default binary c0e92423.
+        # Previously 52121cc9/1fc6c827.
+        # Moved again by the gsd_41 stability-function limits; default
+        # binary c0e92423.  Previously b61e6fa2/d07dbe63.
+        # Plume saturation and its iteration stop now take the fork form
+        # under MYNN_GSD41; the leaf matches 24 unmodified Fortran states
+        # bit for bit. The new PBL-height divisions use __fdiv_rn. Default
+        # PTX remains c0e92423. Previously dec5ec9e/04bb84ea.
+        # GSD mass-flux population, trigger, ascent, scale awareness and
+        # density-free transport are conditional. Default PTX remains
+        # identical on the RTX 5090 (3dbf9aead85e, 1234799 bytes).
+        # P20 uses the fork's Neumann top row, 1e-4 floor, no TKE cap and
+        # 1e-12 initialization production floor under MYNN_GSD41 only.
+        # All 96 predictor TKE words match unmodified source. Default PTX
+        # is identical to staging cdf5a7dea at compute89 and compute120.
+        '3243ddcbb65e4cae69975840e177822ca3000507f07aef2e50fe10360001a554',
+        'ecf106fc09e1f3982a9fa8c2b277b3959dbc7af102cc1500b4e64dbad6fd6d25'),
     'mynn_surface': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
@@ -832,8 +878,11 @@ FROZEN_MODULE_DIGESTS = {
         # sm_89 unchanged (the compute_89 PTX with __fdiv_rn spelled '/' is
         # identical to the base's); Blackwell cards now round these quotients
         # IEEE-correctly.  Previously a94de3ff/891ec5d5.
-        'e2593f1fbc56581258594c3dfa2c6ac8471afd351a2f15cdacc1225a64750d92',
-        '698e7f36bac844c7727b2fee5f15b5673276c87bfb4b36edbf367b0369aa87a4'),
+        # The selectable GSL surface variant and explicit table rounding
+        # coexist. The ordinary table retains the native Blackwell operation
+        # order; the selected variant keeps its own stability solver.
+        'e7d9a055cb1226168d54b4416ef7435746219316b92bfdffc09127feda4203ea',
+        'dc759001e1fbb3886d0c8d066596d31a78b9c57cea51b2fbd62ecdad35ccd650'),
     'nest': (
         # Re-pinned for a combined four-side boundary launch. The original
         # single-side entry point and SINT expression tree remain unchanged.
@@ -1210,8 +1259,18 @@ FROZEN_MODULE_DIGESTS = {
         # oracle reproduces every recorded word on the RTX 4090 and on
         # sm_120 (tools/advect_wrf471_oracle/README.md).
         # Previously 8284e197/7de1823f.
-        '20a2dd7977d06b42f66ca3ca7c3170a5d638a5ad6f7603323f468c95b14460a5',
-        'b4832282be55c3658586478788e979e3595a66a9fae56e00378843c25f62b28f'),
+        # Re-pinned for lane/286-vadv5 (WRF v_sca_adv_order): pd_fluxes takes
+        # a trailing int vorder; pd_zface_half runs WRF's vert_order == 5
+        # ladder (pd_flux5v, advect_scalar_pd's flux5 with -vel) under 5 and
+        # the unchanged vert_order 3 ladder under 3, the launcher default.
+        # Reading: the compiled WRF 4.7.1 advect oracle reproduces every
+        # recorded production word on sm_120 at vorder 3, and at vorder 5
+        # the limiter's total tendency holds bitwise against WRF 4.7.1 under
+        # the exact-C build on the HRRR-fork fixture's cases
+        # (tests/test_advect_wrf_legacy_parity.py).
+        # Previously 20a2dd79/b4832282.
+        'de5a7aabcaafa9975bdf305834d771a68172388f73317788ff389db7ac64344c',
+        '9011930b5b510770f81e11c56a7fd6764233e1592127edc05c1d9c20f7e5142b'),
     'refl': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
@@ -1287,9 +1346,27 @@ FROZEN_MODULE_DIGESTS = {
         # e203fa9ea re-mapped rsw_taumol_b and the accumulation tile; a
         # clean RTX PRO 4500 profile measured both slower, so the next
         # commit restored this file byte for byte to its bfc177208 content,
-        # whose pin this is.
-        '44a83f0e310996cd708fb186d81e49722a199d4ed965d9eca37177c480c1a044',
-        'c9e02eeaa6c611943244ccbd786dd5ede27b52ac0621f9a86f6c5dfb13e0e701'),
+        # whose pin this was.
+        # Re-pinned for the solar source of columns with no layer above the
+        # troposphere switch (fix/rrtmg-sw-sfluxzen): rsw_sfluxzen_body now
+        # stores on every path, zero for bands 16, 17, 27, 28 and 29 when
+        # laytrop == nlayers, as WRF's taumol_sw leaves them.  Bands 16 and
+        # 27 used to return unstored, so the batched path read recycled
+        # scratch there, and 17, 28 and 29 computed a flux WRF never sets.
+        # Only rsw_sfluxzen and rsw_sfluxzen_b move: the other 15 entries
+        # compile to identical PTX for compute_89, compute_90 and
+        # compute_120 with NVRTC 13.4 and 12.9 (tools/kernel_ptx_identity/
+        # receipts/, rrtmg-sw-sfluxzen-2.8.4-nvrtc13.4.json and
+        # -nvrtc12.9.json).  Reading, on a development machine's RTX 5070 Ti:
+        # tests/test_rrtmg_sw_no_upper_flux_gpu.py (the unmodified WRF
+        # Fortran's fixtures_shallow.npz at max_ulp 0, per column and
+        # batched through NaN, 1e30 and stale-flux scratch) fails 7 of 9 on
+        # the previous kernel and passes 9 of 9, tests/test_rrtmg_sw_cuda.py
+        # passes 162 of 162, and a 360 s legacy-RRTMG forecast with a 50 hPa
+        # top (133x125x50, 18 UTC) writes byte-identical wrfout files with
+        # either kernel.  Previously 44a83f0e/c9e02eea.
+        '43134d6d6d2be4b3e668c7ab92d5850f1f992a09812dd09c9536fce5d9ab791e',
+        '663d12d7556f379bdd0724bb4f018113450ce45666e13f3ec3220615409acd08'),
     'rrtmgp_cloud': (
         # Re-pinned for fused profile preparation, broadcasts, temperature casts and flux copies.
         # Exact-array gates and all five seeded digests match the base.
@@ -1326,7 +1403,15 @@ FROZEN_MODULE_DIGESTS = {
     'rrtmgp_validation': (
         'c3a2554827e7c39db269d0fa1d5ad594d1623d6974be859a1ae3a044d438951f',
         '36f7a4dccc8c66be225e16fdd6088f0fafa7a357ac1aba9b4a99f98af297c370'),
+    # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
+    # labels), proven equal with comments stripped; the preprocessor drops
+    # comments, so the compiled binary does not move.
     'ruc': (
+        # 2.8.4: WRF mosaic SOILVEGIN parameters and post-SFCTMP irrigation.
+        # Twelve surface and 48 full-column WRF oracles match every bit;
+        # the mixed-grid fused checks cover all selector pairs over three
+        # steps. This pin prevents changed category order or missing root
+        # irrigation from silently changing the surface water and fluxes.
         # Re-pinned for the RUC_NZS tier ladder (lane/ruc-column-nzs, step 3
         # of 3, final): the ladder, the 161-token macro substitution that
         # uses it, and the `#elif RUC_NZS == 6` arm of the depth table.  The
@@ -1371,8 +1456,44 @@ FROZEN_MODULE_DIGESTS = {
         # d446b7462e4952416d3e21482b051823766a6f675163236686c7d9fab7fbbdb7,
         # through one extra named inversion step for this block, which is
         # what keeps "the lift changed nothing else" checkable.
-        '2b176b92364530762032a815de270373143725c553437d19207152c84213ac1f',
-        '55894935fdfde9f3ac683e2bbf151e0c20f677744b37a9a438aa61bb91635935'),
+        #
+        # 2.8.5, SOILPROP by WRF lineage (ruc_soilprop).  ruc_soil_properties
+        # compiles WRF v4.0-4.5's soil-water diffusivity and conductivity,
+        # normalised by the moisture above the residual, and mineral
+        # conductivity 2.0 at every quartz fraction (v4.5.2
+        # module_sf_ruclsm.F:6154, 6213-6216, 6245; the same lines in the
+        # operational RAP/HRRR branch); GPUWM_SOILPROP_WRF461 compiles the
+        # v4.6.1 lines this unit carried before (:6198-6202, 6261-6267,
+        # 6289), and under that define every WRF v4.6.1 column oracle still
+        # matches as before (tests/test_ruc.py, test_ruc_gpu.py,
+        # test_ruc_mosaic_gpu.py).  WHAT THE PIN PREVENTS: the v4.6.1 form
+        # returning as the default.  Measured on a 3 km October afternoon
+        # cut of an operational-HRRR start (106,671 land cells): it refills a
+        # dry top soil level from below, 0.161 to 0.187 m3/m3 in the first
+        # hour against 0.173 under this default and 0.157 in the operational
+        # model, with latent heat 207 against 186 W/m2 (operational 142).
+        # tests/test_ruc_nzs_tier.py inverts the five edits by name before
+        # its historical digest, so the lift proof above still closes.
+        # Previously 57e8c503/39d88927.
+        #
+        # 2.8.6, the snow scheme by WRF lineage (ruc_snow).  The default
+        # compile is WRF v4.0-4.5's SFCTMP snow preparation and SNOWTEMP,
+        # which the operational RAP/HRRR branch carries (constant snow
+        # conductivity, cover from depth over the critical depth taken after
+        # compaction, fresh-snow albedo from the depth on the ground, no 0.7
+        # albedo floor, no freezing clamps on the second pass, melt entered
+        # while the pack outlasts the step's evaporation with a cap
+        # independent of the step, bottom melt capped unconditionally and
+        # kept out of smelt); GPUWM_SNOW_WRF461 compiles the v4.6.1 lines
+        # this unit carried before, and under that define every WRF v4.6.1
+        # column oracle still matches as before (tests/test_ruc.py,
+        # test_ruc_gpu.py); the default matches the branch build bit for
+        # bit (tests/test_ruc_fork_oracle.py).  WHAT THE PIN PREVENTS: the
+        # v4.6.1 snow scheme returning as the default, or either lineage
+        # changing unseen.  tests/test_ruc_nzs_tier.py inverts the edits by
+        # name before its historical digest.  Previously 844546e3/0af961d3.
+        'f2de42c4b47c26927d1c6097a6f5801a96ae12a96f84f0aede2ec4c45e4cad4a',
+        '32b762c0325b389415553e5a08f980128a1c2eb0096a7daf97fd692c52e95a73'),
     'saxpy': (
         # 2.8.2: four values per thread with aligned vector loads/stores.
         # Scalar a*x+y and the default FMA policy are unchanged. The word
@@ -1469,8 +1590,21 @@ FROZEN_MODULE_DIGESTS = {
         # Ordinary scalar interpolation and sm_120 W stress reuse preserve
         # output words in the focused scalar and W identity tests. Strict
         # WRF source and cubins remain unchanged. Previously 0aab5788/c9165bb9.
-        'aaf455f56420fe67f78d8bd45e150e06dcfcc6e4dace79a89f4a3581fe164430',
-        'b60a029091011e77e3261c62b6b494cbd2d92ad3d2a09a0eae902d548cc422fd'),
+        # Explicit stress, interpolation and scalar rounding preserves the
+        # native sm_120 words in 248 randomized kernel fixtures and the
+        # full short forecast. The direct W evaluator uses the same rounded
+        # face arithmetic without reading the production face buffers.
+        # Re-pinned for 1f625334f (perf: bounded 32-bit addressing for the
+        # scalar Smagorinsky kernels, merged 8a9c9e63d): a GPUWM_SMAG_INDEX32
+        # tier the host selects only after proving the largest staggered
+        # allocation fits uint32; floating expressions and their explicit
+        # rounding are unchanged.  Reading: byte-identical forecasts on Ada
+        # and Blackwell (merge 8a9c9e63d), tests/test_smag2d_index32_*.py,
+        # and all 178,128 diff_opt=1 coordinate words reproduced on an RTX
+        # 5090 at this source (tests/data/wrf471_diff_opt1/
+        # measured-source-transition.json).  Previously 1c8c29c1/565ad5fa.
+        '932359b9f7685918fdd69e204ead1d2ac8369b792d64ff393e00b6b910dc84ad',
+        '400d89d032c13c4ed64be6cfd96e72483dc176fc83a933098b8cde85ac2a34a9'),
     'spec_bdy': (
         'bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161',
         'bc03ed595bacc546d8e041fbb1d11b5bb3b3b90760ef06ea1dd1f0f18b4de931'),
@@ -1543,8 +1677,27 @@ FROZEN_MODULE_DIGESTS = {
         # __fdiv_rn spelling of the other entry point (vertical_interpolate_logp).
         # Previously 339e7266/b532daea on the lane and 3efb1a82/1c882556 on
         # integrate/2.8.
-        'f945e143abb6f9d8d3808be28c397b5d989ef87fc33b81fa9873c357886f4b8b',
-        '08ae8c9220d7dd0662f4d056b8f71b742d2e4595ffafc0040b8f9a262734f7b5'),
+        # Native endpoint roundoff (69a0baec1): targets within four FP32
+        # epsilons of the top pressure use that endpoint, matching the Rust
+        # operator. tests/test_wrf_vert_interp.py grades both routes. The
+        # file pin moved in b6f34356b; its assembled-source pin did not.
+        # Re-pinned for 508691422 (fix(vert): co-locate a native moist top
+        # within 2^-16 of its dry target, merged 2cc4baa2f): the top
+        # co-location bound widens from four FP32 epsilons to 2^-16
+        # relative in the kernel, the Rust operator, the Rust plan and the
+        # launcher check alike, so an HRRR-native start whose top moist level
+        # sits 4.9e-7 above the dry target no longer refuses.  Runs that
+        # passed before are unchanged; tests/test_native_pressure_top.py and
+        # tests/test_wrf_vert_interp.py grade both routes.  Previously
+        # 1787bbbf/7ea882cb.
+        'dadb7dff57ab3f7440bcec9700d28a7c1621dbddf35922ce27476c34986a6bf9',
+        # Re-pinned for c0ffc53b5 and 2bd3bc505 shared-header additions.
+        # The kernel file is unchanged. The added unused helpers disappear
+        # from compiled code: sm_100 and sm_120 each retain identical ordered
+        # PTX and SASS operations, operands and predicates against the header
+        # before c0ffc53b5. Reading: vert-interp-preservation.json.
+        # Moved again with the file by 508691422 (above).
+        '5918c3f6b6572a5b3fbad923317bc2a55bd7ec7be712ae2d410d725eccd3bec7'),
     'wsm6': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a

@@ -61,7 +61,10 @@ EXPECTED_SOURCE_IDS = (
     "aigefs",
     "hgefs",
     "ecmwf-open-data",
+    "ecmwf-ens",
     "aifs",
+    "rap-native",
+    "hrrr-native",
     "rap",
     "nam",
     "hiresw",
@@ -71,6 +74,7 @@ EXPECTED_SOURCE_IDS = (
     "urma",
     "nbm",
     "rrfs",
+    "rrfs-ens",
     "rrfs-a",
     "rrfs-public",
     "refs",
@@ -133,7 +137,10 @@ def test_registry_covers_bound_inventory_and_external_source_routes():
         "aigfs",
         "aigefs",
         "ecmwf-open-data",
+        "ecmwf-ens",
         "aifs",
+        "rap-native",
+        "hrrr-native",
         "rap",
         "rrfs",
         "era5",
@@ -583,7 +590,7 @@ def test_cli_reports_the_runnable_20crv3_netcdf_route(capsys):
     # The two limits that must never be readable only in prose somewhere
     # else: it is the ensemble MEAN, and its invariants are recovered.
     assert "ENSEMBLE MEAN" in payload["notes"]
-    assert "no orography and no land mask" in payload["notes"]
+    assert "published time-invariant surface height and land fraction" in payload["notes"]
 
 
 def _twentycr_args():
@@ -1578,14 +1585,14 @@ def test_cli_hrrr_routes_absolute_source_windows_and_thompson_profile(
         "--run-seconds", str(6 * 3600),
         "--forecast-start-hour", start,
         "--forecast-end-hour", end,
-        "--physics-profile", "thompson-mp8-ysu-mm5-noah-validation-v1",
+        "--physics-profile", "thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1",
         "--dry-run",
     ])
     assert result == 0
     command = capsys.readouterr().out
     assert f"--forecast-start-hour {start}" in command
     assert f"--forecast-end-hour {end}" in command
-    assert "--physics-profile thompson-mp8-ysu-mm5-noah-validation-v1" \
+    assert "--physics-profile thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1" \
         in command
 
 

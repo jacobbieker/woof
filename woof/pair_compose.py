@@ -107,7 +107,7 @@ def product_name(path: Path) -> str:
 
 def _compose_pairs_rust(renderer: Path, pairs: dict, out_dir: Path, *,
                         title: str, subtitle: str, left_label: str,
-                        right_label: str) -> list[Path]:
+                        right_label: str, theme: str | None = None) -> list[Path]:
     """The sheets drawn by the renderer (``rw_wrfbatch --pair-sheet``).
 
     This module keeps the pairing -- which file of each run is the same
@@ -134,7 +134,8 @@ def _compose_pairs_rust(renderer: Path, pairs: dict, out_dir: Path, *,
     request = out_dir / "pair-sheet-request.json"
     request.write_text(json.dumps({
         "schema": "arwen.pair-sheet-request.v1", "title": title,
-        "subtitle": subtitle or None, "sheets": sheets}, indent=1),
+        "subtitle": subtitle or None, "sheets": sheets,
+        **({"theme": theme} if theme is not None else {})}, indent=1),
         encoding="utf-8")
     try:
         done = subprocess.run(
@@ -185,7 +186,8 @@ def compose_pairs(left_dir: Path, right_dir: Path, out_dir: Path, *,
                   title: str, subtitle: str = "",
                   left_label: str | None = None,
                   right_label: str | None = None,
-                  panel_width: int = 900) -> list[Path]:
+                  panel_width: int = 900,
+                  theme: str | None = None) -> list[Path]:
     """Write one pair sheet per common product; return the sheet paths.
 
     Raises ``ValueError`` when the directories share no product PNGs --
@@ -250,7 +252,10 @@ def compose_pairs(left_dir: Path, right_dir: Path, out_dir: Path, *,
     if renderer is not None and rustwx.probe_renderer(renderer)[0]:
         return _compose_pairs_rust(renderer, pairs, out_dir, title=title,
                                    subtitle=subtitle, left_label=left_label,
-                                   right_label=right_label)
+                                   right_label=right_label, theme=theme)
+
+    if theme is not None:
+        raise ValueError("pair sheets with --theme require the native renderer; build or install this release's renderer and retry")
 
     title_font = _load_font(34, bold=True)
     subtitle_font = _load_font(22)
