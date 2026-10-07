@@ -56,6 +56,22 @@ NOTES: dict[str, str] = {
     "woof render": (
         "`--pair-labels`, `--pair-subtitle` and `--pair-title` title and "
         "label the paired CPU-vs-GPU figure `--pair` composes."),
+    "woof verify-visuals": (
+        "`--station-source {auto,dynamical,iem}` picks the station-report "
+        "archive: `dynamical` reads the Dynamical.org ASOS parquet archive "
+        "(https://dynamical.org/catalog/asos-parquet/; the US and 14 other "
+        "countries), `iem` the Iowa Environmental Mesonet ASOS service, and "
+        "`auto` (the default) uses Dynamical where its station table lists a "
+        "station inside the forecast domain and IEM otherwise, or when "
+        "Dynamical fails.  `WOOF_VERIFY_STATION_SOURCE` sets the same choice "
+        "for this command and for the finished-run background verifier; the "
+        "flag wins over it.  Each archive keeps its own cache folder "
+        "(`stations-dynamical/` and `stations/`), and `verification.json` "
+        "and every `verification_HHMMSS.json` receipt name the archive used "
+        "as `station_source`, with `station_source_reason` when auto fell "
+        "back to IEM and `station_attribution` when Dynamical supplied the "
+        "reports.  The background verifier never downloads: it reuses an "
+        "existing decoded `surface.json` from the chosen archive."),
     "woof-prepared-forecast": (
         "`--tiles JSON` is the only way to stream this route: its "
         "hash-bound experiment cannot carry a `[tiles]` table, so the "
