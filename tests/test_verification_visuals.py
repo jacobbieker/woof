@@ -7,11 +7,19 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from urllib.request import urlopen
 
 import pytest
 
 from woof import rustwx, verification_visuals as visuals
+
+
+@pytest.fixture(autouse=True)
+def no_dynamical_reader(monkeypatch):
+    """Keep auto station selection off the network: the reader is absent unless a test injects one."""
+    monkeypatch.setitem(sys.modules, visuals.DYNAMICAL_MODULE, None)
+    monkeypatch.delenv(visuals.STATION_SOURCE_ENV, raising=False)
 
 
 @pytest.fixture
@@ -820,3 +828,233 @@ def test_empty_active_job_revisits_newly_declared_coverage(tmp_path, native, mon
     assert not job["declared_empty"] and job["compact_inputs_ready"]
     assert len(state["hours"]) == 1 and (root / "retained.npz").is_file()
     assert not (root / ".keep").exists()
+
+
+# Station archive selection: Dynamical.org ASOS parquet, IEM, or auto.
+
+class FakeDynamicalUnavailable(RuntimeError):
+    pass
+
+
+def install_dynamical(monkeypatch, *, count=5, error=None):
+    """Inject a stand-in for ``woof.obs.dynamical_asos`` that never touches a network."""
+    module = types.ModuleType(visuals.DYNAMICAL_MODULE)
+    module.SOURCE = visuals.DYNAMICAL_SOURCE
+    module.DynamicalUnavailable = FakeDynamicalUnavailable
+    module.calls = []
+    module.station_count_in_bbox = lambda west, south, east, north: count
+
+    def fetch_surface(bbox, valid_time, folder, *, timeout=120.0, refresh=False, station_ids=None):
+        module.calls.append({"bbox": bbox, "valid_time": valid_time, "folder": Path(folder),
+                             "refresh": refresh, "station_ids": station_ids})
+        if error is not None:
+            raise error
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "stations.json").write_text("dynamical-stations")
+        path = folder / "surface.json"
+        path.write_text("dynamical-surface")
+        return path
+
+    module.fetch_surface = fetch_surface
+    monkeypatch.setitem(sys.modules, visuals.DYNAMICAL_MODULE, module)
+    return module
+
+
+def score_hour(root, hour_request, **kwargs):
+    state = visuals.score_available(root, requests=[hour_request], reference=None,
+                                    now="2026-01-01T04:00:00Z", **kwargs)
+    return next(iter(state["hours"].values()))
+
+
+def test_auto_without_dynamical_reader_uses_iem_and_records_why(tmp_path, hour_request, native):
+    hour = score_hour(tmp_path / "run", hour_request)
+    stations = hour["sources"]["stations"]
+    assert stations["status"] == "ready" and stations["station_source"] == visuals.IEM_SOURCE
+    assert Path(stations["input"]).parent.name == "stations"
+    assert "not installed" in stations["station_source_reason"]
+    assert hour["station_source"] == visuals.IEM_SOURCE
+    assert "not installed" in hour["station_source_reason"]
+    receipt = json.loads(Path(hour["receipt_path"]).read_text())
+    assert receipt["station_source"] == visuals.IEM_SOURCE
+    assert "not installed" in receipt["station_source_reason"]
+    assert "station_attribution" not in receipt
+
+
+def test_auto_uses_dynamical_where_it_lists_stations(tmp_path, hour_request, native, monkeypatch):
+    module = install_dynamical(monkeypatch)
+    monkeypatch.setattr(visuals, "fetch_stations", lambda *a, **k: pytest.fail("IEM used"))
+    hour = score_hour(tmp_path / "run", hour_request)
+    stations = hour["sources"]["stations"]
+    assert stations["status"] == "ready" and stations["station_source"] == visuals.DYNAMICAL_SOURCE
+    assert Path(stations["input"]).parent.name == "stations-dynamical"
+    assert "station_source_reason" not in stations and "station_source_reason" not in hour
+    assert native[-1]["stations_path"] == stations["input"]
+    call = module.calls[0]
+    assert call["bbox"] == (-100.0, 35.0, -90.0, 45.0) and call["station_ids"] is None
+    assert call["valid_time"] == visuals._time("2026-01-01T01:00:00Z")
+    assert call["valid_time"].tzinfo is not None
+    receipt = json.loads(Path(hour["receipt_path"]).read_text())
+    assert receipt["station_source"] == hour["station_source"] == visuals.DYNAMICAL_SOURCE
+    for credit in ("Iowa State University", "NOAA/NWS/FAA", "dynamical.org", "Source Cooperative"):
+        assert credit in receipt["station_attribution"] and credit in hour["station_attribution"]
+
+
+def test_dynamical_receives_frozen_station_ids(tmp_path, hour_request, native, monkeypatch):
+    module = install_dynamical(monkeypatch)
+    table = tmp_path / "stations.json"
+    table.write_text(json.dumps({"schema": "gpuwm-obs.asos-stations.v1",
+                                 "stations": [{"station_id": "EGFF"}, {"station_id": "EGGD"}]}))
+    hour_request["station_table_path"] = str(table)
+    hour = score_hour(tmp_path / "run", hour_request, station_source="dynamical")
+    assert hour["station_source"] == visuals.DYNAMICAL_SOURCE
+    assert module.calls[0]["station_ids"] == ["EGFF", "EGGD"]
+
+
+def test_auto_uses_iem_when_dynamical_lists_no_station(tmp_path, hour_request, native, monkeypatch):
+    module = install_dynamical(monkeypatch, count=0)
+    hour = score_hour(tmp_path / "run", hour_request)
+    assert module.calls == []
+    assert hour["station_source"] == visuals.IEM_SOURCE
+    assert "no station" in hour["station_source_reason"]
+
+
+@pytest.mark.parametrize("error", [FakeDynamicalUnavailable("parquet host unreachable"),
+                                   LookupError("no report survives quality control")])
+def test_dynamical_failure_falls_back_only_in_auto(tmp_path, hour_request, native, monkeypatch, error):
+    install_dynamical(monkeypatch, error=error)
+    hour = score_hour(tmp_path / "auto", hour_request)
+    stations = hour["sources"]["stations"]
+    assert stations["status"] == "ready" and stations["station_source"] == visuals.IEM_SOURCE
+    assert str(error) in stations["station_source_reason"]
+    assert str(error) in json.loads(Path(hour["receipt_path"]).read_text())["station_source_reason"]
+
+    iem = []
+    monkeypatch.setattr(visuals, "fetch_stations", lambda *a, **k: iem.append(a))
+    hour = score_hour(tmp_path / "explicit", hour_request, station_source="dynamical")
+    stations = hour["sources"]["stations"]
+    assert iem == [] and stations["status"] == "pending"
+    assert str(error) in stations["reason"]
+    assert stations["station_source"] == visuals.DYNAMICAL_SOURCE
+    assert "station_attribution" not in stations
+    assert hour["status"] == "partial" and "stations_path" not in hour["prepared_request"]
+    # The hour credits no archive: none supplied the scored station reports.
+    assert "station_source" not in hour and "station_attribution" not in hour
+
+
+def test_reader_errors_beyond_the_contract_still_fall_back_in_auto(
+        tmp_path, hour_request, native, monkeypatch):
+    install_dynamical(monkeypatch, error=ModuleNotFoundError("No module named 'pyarrow'"))
+    hour = score_hour(tmp_path / "auto", hour_request)
+    assert hour["station_source"] == visuals.IEM_SOURCE and "pyarrow" in hour["station_source_reason"]
+    hour = score_hour(tmp_path / "explicit", hour_request, station_source="dynamical")
+    assert hour["sources"]["stations"]["status"] == "pending"
+    assert "pyarrow" in hour["sources"]["stations"]["reason"]
+
+
+def test_inputs_saved_before_the_choice_are_credited_to_iem(tmp_path, hour_request, native):
+    root = tmp_path / "run"
+    score_hour(root, hour_request)
+    manifest = root / visuals.MANIFEST_NAME
+    state = json.loads(manifest.read_text())
+    hour = next(iter(state["hours"].values()))
+    for key in ("station_source", "station_source_reason", "station_attribution"):
+        hour.pop(key, None)
+        hour["sources"]["stations"].pop(key, None)
+    manifest.write_text(json.dumps(state))
+    again = score_hour(root, hour_request, station_source="iem")
+    assert again["station_source"] == visuals.IEM_SOURCE and len(native) == 1
+
+
+def test_explicit_dynamical_without_reader_is_pending(tmp_path, hour_request, native, monkeypatch):
+    monkeypatch.setattr(visuals, "fetch_stations", lambda *a, **k: pytest.fail("silent IEM fallback"))
+    hour = score_hour(tmp_path / "run", hour_request, station_source="dynamical")
+    stations = hour["sources"]["stations"]
+    assert stations["status"] == "pending" and "not installed" in stations["reason"]
+    assert stations["station_source"] == visuals.DYNAMICAL_SOURCE
+
+
+def test_station_sources_keep_separate_caches(tmp_path, hour_request, native, monkeypatch):
+    module = install_dynamical(monkeypatch)
+    root = tmp_path / "run"
+    first = score_hour(root, hour_request, station_source="iem")
+    second = score_hour(root, hour_request, station_source="dynamical")
+    third = score_hour(root, hour_request, station_source="iem")
+    paths = [Path(hour["sources"]["stations"]["input"]) for hour in (first, second, third)]
+    assert [path.parent.name for path in paths] == ["stations", "stations-dynamical", "stations"]
+    assert paths[0].read_text() == "native-surface" and paths[1].read_text() == "dynamical-surface"
+    assert [hour["station_source"] for hour in (first, second, third)] == [
+        visuals.IEM_SOURCE, visuals.DYNAMICAL_SOURCE, visuals.IEM_SOURCE]
+    assert len(module.calls) == 1 and len(native) == 3
+    # An unchanged choice reuses the ready input and the existing score.
+    score_hour(root, hour_request, station_source="iem")
+    assert len(native) == 3
+
+
+@pytest.mark.parametrize("choice, cached, expected", [
+    ("auto", ("stations", "stations-dynamical"), "stations-dynamical"),
+    ("auto", ("stations",), "stations"),
+    ("iem", ("stations", "stations-dynamical"), "stations"),
+    ("dynamical", ("stations",), None),
+])
+def test_local_only_reuses_the_chosen_cache_and_never_fetches(
+        tmp_path, hour_request, native, monkeypatch, choice, cached, expected):
+    module = install_dynamical(monkeypatch)
+    monkeypatch.setattr(visuals, "fetch_stations", lambda *a, **k: pytest.fail("fetched IEM"))
+    monkeypatch.setattr(visuals, "fetch_radar", lambda *a, **k: pytest.fail("fetched radar"))
+    monkeypatch.setenv(visuals.STATION_SOURCE_ENV, choice)
+    root = tmp_path / "run"
+    for name in cached:
+        folder = root / "d01/verification/2026-01-01/observations/010000" / name
+        folder.mkdir(parents=True)
+        (folder / "surface.json").write_text(name)
+    # The finisher passes no choice; the environment selects the archive.
+    hour = score_hour(root, hour_request, local_only=True)
+    stations = hour["sources"]["stations"]
+    assert module.calls == []
+    if expected is None:
+        assert stations["status"] == "pending" and "local-only" in stations["reason"]
+    else:
+        assert stations["status"] == "provisional"
+        assert Path(stations["input"]).parent.name == expected
+        assert stations["station_source"] == (visuals.DYNAMICAL_SOURCE if expected == "stations-dynamical"
+                                              else visuals.IEM_SOURCE)
+
+
+def test_local_scope_blocks_the_dynamical_reader(monkeypatch, tmp_path):
+    module = install_dynamical(monkeypatch)
+    request = {"valid_time": "2026-01-01T01:00:00Z"}
+    with visuals._local_scope(True):
+        with pytest.raises(RuntimeError, match="local-only"):
+            visuals.fetch_dynamical_stations(request, (-5, 51, -3, 53), tmp_path, timeout=1)
+    assert module.calls == []
+
+
+def test_station_source_cli_overrides_environment(tmp_path, monkeypatch):
+    import argparse
+
+    assert visuals.station_source_choice() == "auto"
+    monkeypatch.setenv(visuals.STATION_SOURCE_ENV, "IEM")
+    assert visuals.station_source_choice() == "iem"
+    assert visuals.station_source_choice("dynamical") == "dynamical"
+    monkeypatch.setenv(visuals.STATION_SOURCE_ENV, "noaa")
+    with pytest.raises(ValueError, match=visuals.STATION_SOURCE_ENV):
+        visuals.station_source_choice()
+
+    parser = argparse.ArgumentParser()
+    visuals.register_cli(parser.add_subparsers())
+    seen = []
+    monkeypatch.setattr(visuals, "score_available", lambda *a, **k: seen.append(k["station_source"]) or {})
+    for argv in (["verify-visuals", str(tmp_path)], ["verify-visuals", str(tmp_path), "--station-source", "iem"]):
+        args = parser.parse_args(argv)
+        assert args.func(args) == 0
+    assert seen == [None, "iem"]
+    with pytest.raises(SystemExit):
+        parser.parse_args(["verify-visuals", str(tmp_path), "--station-source", "noaa"])
+
+
+def test_environment_selects_station_source_unless_cli_overrides(tmp_path, hour_request, native, monkeypatch):
+    install_dynamical(monkeypatch)
+    monkeypatch.setenv(visuals.STATION_SOURCE_ENV, "iem")
+    assert score_hour(tmp_path / "env", hour_request)["station_source"] == visuals.IEM_SOURCE
+    explicit = score_hour(tmp_path / "cli", hour_request, station_source="dynamical")
+    assert explicit["station_source"] == visuals.DYNAMICAL_SOURCE

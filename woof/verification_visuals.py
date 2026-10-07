@@ -45,6 +45,19 @@ OBSERVATION_ROWS = (
      "final_minutes": 80},
 )
 
+# Station reports come from one of two archives. Each keeps its own cache
+# folder so a decoded surface file never mixes reports from both.
+STATION_SOURCES = ("auto", "dynamical", "iem")
+STATION_SOURCE_ENV = "WOOF_VERIFY_STATION_SOURCE"
+IEM_SOURCE = "iem-asos"
+DYNAMICAL_SOURCE = "dynamical-asos-parquet"
+DYNAMICAL_MODULE = "woof.obs.dynamical_asos"
+STATION_FOLDERS = {DYNAMICAL_SOURCE: "stations-dynamical", IEM_SOURCE: "stations"}
+DYNAMICAL_ATTRIBUTION = (
+    "Station observations from the Iowa Environmental Mesonet (IEM), Iowa State University; "
+    "original reports by NOAA/NWS/FAA; processing by dynamical.org; hosting by Source Cooperative "
+    "(https://dynamical.org/catalog/asos-parquet/)")
+
 FIELD_NAMES = {
     "temperature_2m": "t2_k", "dewpoint_2m": "td2_k",
     "wind_speed_10m": "wind_ms", "composite_reflectivity": "refc_dbz",
@@ -362,6 +375,161 @@ def fetch_stations(request, bbox, folder, *, timeout, refresh=False) -> Path:
     return surface
 
 
+def station_source_choice(value=None) -> str:
+    """Resolve the station archive: an explicit value, else the environment, else auto."""
+    text = value if value is not None else os.environ.get(STATION_SOURCE_ENV, "")
+    choice = (text or "auto").strip().lower()
+    if choice not in STATION_SOURCES:
+        origin = "--station-source" if value is not None else STATION_SOURCE_ENV
+        raise ValueError(f"{origin} must be one of {', '.join(STATION_SOURCES)}, not {text!r}")
+    return choice
+
+
+def _dynamical_module():
+    # Imported lazily: the reader and its parquet dependency are optional, and
+    # sys.modules may hold None to mark the reader as absent.
+    import importlib
+
+    return importlib.import_module(DYNAMICAL_MODULE)
+
+
+def _station_record(source, *, reason=None, module=None) -> dict:
+    record = {"station_source": source}
+    if source == DYNAMICAL_SOURCE:
+        record["station_attribution"] = getattr(module, "ATTRIBUTION", None) or DYNAMICAL_ATTRIBUTION
+    if reason:
+        record["station_source_reason"] = reason
+    return record
+
+
+def _station_provenance(record) -> dict:
+    """The archive that supplied a usable station input; empty when none did."""
+    if (record.get("status") not in ("ready", "provisional")
+            or record.get("origin") == "supplied observation input"):
+        return {}
+    # Inputs saved before the source choice existed came from IEM.
+    provenance = {"station_source": record.get("station_source") or IEM_SOURCE}
+    provenance.update({key: record[key] for key in ("station_source_reason", "station_attribution")
+                       if record.get(key)})
+    return provenance
+
+
+def _record_entry_station(entry, sources) -> dict:
+    """Copy the station archive actually used onto the hour's manifest entry."""
+    station = _station_provenance(sources.get("stations", {}))
+    for key in ("station_source", "station_source_reason", "station_attribution"):
+        entry.pop(key, None)
+    entry.update(station)
+    return station
+
+
+def _station_source_allowed(record, choice) -> bool:
+    """Whether a saved station input may serve the requested archive."""
+    if choice == "auto" or record.get("origin") == "supplied observation input":
+        return True
+    # Receipts written before the source choice existed used IEM.
+    used = record.get("station_source") or IEM_SOURCE
+    return used == (DYNAMICAL_SOURCE if choice == "dynamical" else IEM_SOURCE)
+
+
+def _station_ids(request):
+    table = request.get("station_table_path")
+    if not table:
+        return None
+    document = json.loads(Path(table).read_text(encoding="utf-8"))
+    ids = [str(row.get("station_id") or row.get("id") or "") for row in document.get("stations", [])]
+    ids = [value for value in ids if value]
+    if not ids:
+        raise ValueError(f"station table {table} lists no station ids")
+    return ids
+
+
+def fetch_dynamical_stations(request, bbox, folder, *, timeout, refresh=False, module=None) -> Path:
+    """Decode Dynamical.org ASOS parquet reports into an asos-surface file."""
+    if _LOCAL_ONLY.get():
+        raise RuntimeError("local-only verification cannot invoke a public observation source")
+    if bbox is None:
+        raise ValueError("Dynamical station verification needs a native grid bbox")
+    module = module or _dynamical_module()
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        surface = module.fetch_surface(tuple(float(value) for value in bbox), _time(request["valid_time"]),
+                                       folder, timeout=_timeout(timeout), refresh=refresh,
+                                       station_ids=_station_ids(request))
+    except ImportError as error:  # an optional parquet dependency imported inside the reader
+        raise RuntimeError(f"Dynamical ASOS reader dependency is missing: {error}") from error
+    return Path(surface)
+
+
+# Any of these from the Dynamical reader sends auto mode to IEM, with the
+# reason recorded; explicit ``dynamical`` reports them as a pending source.
+_DYNAMICAL_FAILURES = (ImportError, LookupError, OSError, RuntimeError, ValueError)
+
+
+def _dynamical_choice(bbox):
+    """Return (module, None) when auto may use Dynamical, else (module|None, reason)."""
+    if bbox is None:
+        return None, "Dynamical ASOS parquet needs a native grid bbox; used IEM"
+    try:
+        module = _dynamical_module()
+    except ImportError as error:
+        return None, f"Dynamical ASOS reader is not installed ({error}); used IEM"
+    unavailable = getattr(module, "DynamicalUnavailable", RuntimeError)
+    try:
+        count = module.station_count_in_bbox(*(float(value) for value in bbox))
+    except (unavailable, *_DYNAMICAL_FAILURES) as error:
+        return module, f"Dynamical ASOS parquet is unavailable ({error}); used IEM"
+    if count < 1:
+        return module, "Dynamical ASOS parquet lists no station inside the forecast domain; used IEM"
+    return module, None
+
+
+def fetch_station_source(request, bbox, cache, *, choice, timeout, refresh=False, attempt=None):
+    """Fetch station reports from the chosen archive; return (surface path, source record).
+
+    ``attempt`` is filled with the record of the archive being tried, so a
+    caller that catches a failure can still report which source failed.
+    """
+    attempt = {} if attempt is None else attempt
+    if choice == "dynamical":
+        attempt["station_source"] = DYNAMICAL_SOURCE
+        try:
+            module = _dynamical_module()
+        except ImportError as error:
+            raise RuntimeError(f"Dynamical ASOS reader is not installed: {error}") from error
+        attempt.update(_station_record(DYNAMICAL_SOURCE, module=module))
+        path = fetch_dynamical_stations(request, bbox, cache / STATION_FOLDERS[DYNAMICAL_SOURCE],
+                                        timeout=timeout, refresh=refresh, module=module)
+        return path, dict(attempt)
+    reason = None
+    if choice == "auto":
+        module, reason = _dynamical_choice(bbox)
+        if reason is None:
+            attempt.update(_station_record(DYNAMICAL_SOURCE, module=module))
+            unavailable = getattr(module, "DynamicalUnavailable", RuntimeError)
+            try:
+                path = fetch_dynamical_stations(request, bbox, cache / STATION_FOLDERS[DYNAMICAL_SOURCE],
+                                                timeout=timeout, refresh=refresh, module=module)
+                return path, dict(attempt)
+            except (unavailable, *_DYNAMICAL_FAILURES) as error:
+                reason = f"Dynamical ASOS parquet failed ({error}); used IEM"
+            attempt.clear()
+    attempt.update(_station_record(IEM_SOURCE, reason=reason))
+    path = fetch_stations(request, bbox, cache / STATION_FOLDERS[IEM_SOURCE], timeout=timeout, refresh=refresh)
+    return path, dict(attempt)
+
+
+def _cached_station(cache, choice):
+    """Select an already decoded surface file from the requested archive's folder."""
+    order = {"dynamical": (DYNAMICAL_SOURCE,), "iem": (IEM_SOURCE,),
+             "auto": (DYNAMICAL_SOURCE, IEM_SOURCE)}[choice]
+    for source in order:
+        path = cache / STATION_FOLDERS[source] / "surface.json"
+        if path.is_file():
+            return str(path), _station_record(source)
+    return None, {}
+
+
 def fetch_radar(request, row, bbox, folder, *, timeout, refresh=False) -> dict:
     from woof.obs.frontdoor import MRMS
 
@@ -383,15 +551,18 @@ def fetch_radar(request, row, bbox, folder, *, timeout, refresh=False) -> dict:
     return {"quantity": row["key"], "path": str(pack), "grid_path": str(grid)}
 
 
-def _cached_observation(row, folder):
-    """Select already decoded local files; native code validates their data."""
+def _cached_observation(row, cache, *, station_source="auto"):
+    """Select already decoded local files; native code validates their data.
+
+    Returns ``(value, record)``; the record names the station archive used.
+    """
     if row["key"] == "stations":
-        path = folder / "surface.json"
-        return str(path) if path.is_file() else None
+        return _cached_station(cache, station_source)
+    folder = cache / row["key"]
     pack, grid = folder / "field.obspack", folder / "grid.geopack"
     if pack.is_file() and grid.is_file():
-        return {"quantity": row["key"], "path": str(pack), "grid_path": str(grid)}
-    return None
+        return {"quantity": row["key"], "path": str(pack), "grid_path": str(grid)}, {}
+    return None, {}
 
 
 def _outputs_present(entry):
@@ -456,11 +627,16 @@ def _preserve_inputs(root, requests, state, *, station_mode, timeout, reference,
 def score_available(root: Path, *, requests=None, cycle=None, refresh=False,
                     station_mode="observed", timeout=120, budget_seconds=None,
                     now=None, append_to=None, reference="hrrr", reference_dir=None,
-                    local_only=False) -> dict:
-    """Score each available source independently; retain retryable pending rows."""
+                    local_only=False, station_source=None) -> dict:
+    """Score each available source independently; retain retryable pending rows.
+
+    ``station_source`` is ``auto``, ``dynamical`` or ``iem``; ``None`` reads
+    ``WOOF_VERIFY_STATION_SOURCE`` and defaults to ``auto``.
+    """
     from woof.rustwx import (verification_inventory, verify_observations,
                              verification_reference, prepare_verification)
 
+    station_choice = station_source_choice(station_source)
     root = Path(root).resolve()
     now = _time(now or datetime.now(UTC))
     if requests is None:
@@ -513,7 +689,9 @@ def score_available(root: Path, *, requests=None, cycle=None, refresh=False,
                         and entry.get("base_signature") == base_signature
                         and entry.get("input_validated_signature") == _first_input_signature(request)
                         and _sources_complete(sources)
+                        and _station_source_allowed(sources.get("stations", {}), station_choice)
                         and entry.get("signature") == _signature(prepared)):
+                    _record_entry_station(entry, sources)
                     entry["status"] = "ready"
                     entry.pop("reason", None)
                     continue
@@ -568,7 +746,8 @@ def score_available(root: Path, *, requests=None, cycle=None, refresh=False,
                         sources[source_key] = {"status": "ready", "input": supplied,
                                                "origin": "supplied observation input"}
                         continue
-                    if (local_only or not refresh) and previous.get("status") in (
+                    allowed = source_key != "stations" or _station_source_allowed(previous, station_choice)
+                    if allowed and (local_only or not refresh) and previous.get("status") in (
                             ("ready", "provisional") if local_only else ("ready",)):
                         value = previous.get("input")
                         if value and all(Path(path).is_file() for path in
@@ -580,11 +759,13 @@ def score_available(root: Path, *, requests=None, cycle=None, refresh=False,
                                 request.setdefault("radar", []).append(value)
                             continue
                     if local_only:
-                        value = _cached_observation(row, cache / source_key)
+                        # Never fetch here, from either station archive.
+                        value, record = _cached_observation(row, cache, station_source=station_choice)
                         if value:
                             sources[source_key] = {"status": "provisional", "input": value,
                                 "origin": "local cache; archive finality unverified",
-                                "final_after": _stamp(when + timedelta(minutes=row["final_minutes"]))}
+                                "final_after": _stamp(when + timedelta(minutes=row["final_minutes"])),
+                                **record}
                             if source_key == "stations":
                                 request["stations_path"] = value
                             else:
@@ -596,21 +777,30 @@ def score_available(root: Path, *, requests=None, cycle=None, refresh=False,
                     if deadline is not None and time.monotonic() >= deadline:
                         sources[source_key] = {"status": "pending", "reason": "finish-time budget ended"}
                         continue
+                    attempt = {}
                     try:
-                        source_folder = cache / source_key
-                        value = (fetch_stations(request, bbox, source_folder, timeout=timeout, refresh=refresh)
-                                 if source_key == "stations" else
-                                 fetch_radar(request, row, bbox, source_folder, timeout=timeout, refresh=refresh))
+                        if source_key == "stations":
+                            # A provisional snapshot is refetched, not reread from a reader cache.
+                            value, record = fetch_station_source(
+                                request, bbox, cache, choice=station_choice, timeout=timeout,
+                                refresh=refresh or previous.get("status") == "provisional", attempt=attempt)
+                        else:
+                            value, record = fetch_radar(request, row, bbox, cache / source_key,
+                                                        timeout=timeout, refresh=refresh), {}
                         value = str(value) if isinstance(value, Path) else value
                         sources[source_key] = {"status": "ready" if final else "provisional", "input": value,
                                                "fetched_at": _stamp(now),
-                                               "final_after": _stamp(when + timedelta(minutes=row["final_minutes"]))}
+                                               "final_after": _stamp(when + timedelta(minutes=row["final_minutes"])),
+                                               **record}
                         if source_key == "stations":
                             request["stations_path"] = value
                         else:
                             request.setdefault("radar", []).append(value)
                     except (OSError, ValueError, RuntimeError, LookupError, subprocess.SubprocessError) as error:
-                        sources[source_key] = {"status": "pending", "reason": str(error)}
+                        # Name the archive that failed; it supplied nothing to credit.
+                        attempt.pop("station_attribution", None)
+                        sources[source_key] = {"status": "pending", "reason": str(error), **attempt}
+                station = _record_entry_station(entry, sources)
                 if not request.get("stations_path") and not request.get("radar"):
                     entry.update(status="pending", reason="no observation source is available")
                     continue
@@ -622,6 +812,8 @@ def score_available(root: Path, *, requests=None, cycle=None, refresh=False,
                 card = output / f"scorecard_{when.strftime('%H%M%S')}.png"
                 receipt = verify_observations(request, receipt_path=receipt_path, image_path=card,
                                               timeout=_timeout(max(timeout, 900)))
+                if station and request.get("stations_path"):
+                    _record_station_source(receipt_path, receipt, station)
                 score_gaps = [{"quantity": row["quantity"], "status": row.get("status")}
                               for row in [*receipt.get("stations", []), *receipt.get("radar", [])]
                               if row.get("status", "ready") not in ("ready", "no-observed-events")]
@@ -651,6 +843,15 @@ def score_available(root: Path, *, requests=None, cycle=None, refresh=False,
         if append_to:
             append_results(state, Path(append_to))
         return state
+
+
+def _record_station_source(receipt_path, receipt, station):
+    """Name the station archive (and its attribution) in the native score receipt."""
+    receipt.update(station)
+    document = _read(receipt_path)
+    if isinstance(document, dict):
+        document.update(station)
+        _atomic_json(receipt_path, document)
 
 
 def append_results(state, folder: Path):
@@ -978,6 +1179,8 @@ def _finish_worker(root, token, *, coverage_attempt=0):
                 if saved and _lineage_matches(saved, expected):
                     requests[index] = saved
         # Let saved compact requests survive a repeated finish with no raw frames.
+        # The station archive comes from WOOF_VERIFY_STATION_SOURCE; local-only
+        # scoring reuses that archive's cache and never fetches.
         state = score_available(root, requests=requests or None, cycle=cycle, timeout=30,
                                 budget_seconds=120, local_only=True)
         completed = _background_job_update(root, token, expected_inputs_match=job.get("expected_inputs", []),
@@ -1015,7 +1218,8 @@ def command_main(args):
         else:
             state = score_available(args.run_dir, requests=requests, cycle=args.cycle,
                 station_mode=args.station_mode, refresh=args.refresh, timeout=args.timeout,
-                append_to=args.append_to, reference=args.reference, reference_dir=args.reference_dir)
+                append_to=args.append_to, reference=args.reference, reference_dir=args.reference_dir,
+                station_source=getattr(args, "station_source", None))
         print(json.dumps(state, indent=2, sort_keys=True))
         return 0
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
@@ -1039,6 +1243,11 @@ def register_cli(subparsers):
     parser.add_argument("--first-hour", type=int, default=1)
     parser.add_argument("--last-hour", type=int, default=48)
     parser.add_argument("--station-mode", choices=("observed", "error"), default="observed")
+    parser.add_argument("--station-source", choices=STATION_SOURCES, default=None,
+                        help="station report archive: dynamical (Dynamical.org ASOS parquet), iem "
+                             f"(Iowa Environmental Mesonet), or auto (default; {STATION_SOURCE_ENV} "
+                             "overrides the default): Dynamical where it lists stations in the "
+                             "domain, otherwise IEM")
     parser.add_argument("--timeout", type=int, default=120, help="seconds allowed for each public-source command")
     parser.add_argument("--refresh", action="store_true", help="refetch observations and regenerate receipts")
     parser.add_argument("--list-pending", action="store_true", help="print the durable verification state without fetching")
