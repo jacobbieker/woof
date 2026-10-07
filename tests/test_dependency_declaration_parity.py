@@ -92,6 +92,7 @@ _FIRST_PARTY = frozenset({"woof", "tools", "tilestream",
 _PROVIDERS: dict[str, tuple[str, ...]] = {
     "h5py": ("h5py",),
     "PIL": ("pillow",),
+    "pyarrow": ("pyarrow",),
     "affine": ("affine",),
     "cupy": ("cupy-cuda12x", "cupy-cuda13x"),
     "cupy_backends": ("cupy-cuda12x", "cupy-cuda13x"),
@@ -233,6 +234,15 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
 #: capability is genuinely optional"; it is deliberately more work than
 #: promoting the dependency.
 _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
+    "pyarrow": (
+        ("obs",),
+        "Reads the Dynamical.org ASOS Parquet archive "
+        "(woof.obs.dynamical_asos and tools/freeze_dynamical_asos_stations.py), "
+        "one observation source among several for scoring a finished "
+        "forecast. The import is lazy and its absence raises "
+        "DynamicalUnavailable naming `pip install 'recast-woof[obs]'`; no "
+        "forecast or preprocessing route reaches it, and [all-*] carries it.",
+    ),
     "cupy": (
         ("gpu-cu12", "gpu-cu13"),
         "CuPy ships one wheel per CUDA major and a pip extra cannot detect "
@@ -325,11 +335,6 @@ _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
 #: install line somebody already wrote keeps resolving.  Each says what it
 #: used to mean and where that moved.
 _NEUTRALISED_EXTRAS: dict[str, str] = {
-    "obs": (
-        "was scipy>=1.11, for the observation-battery referee's cKDTree. "
-        "scipy is a base dependency now: `pip install recast-woof` scores against "
-        "observations. Kept so `pip install 'recast-woof[obs]'` still resolves."
-    ),
     "dealias": (
         "was scipy>=1.11, for velocity dealiasing's connected-components "
         "region labelling -- the DEFAULT engine. scipy is a base dependency "
