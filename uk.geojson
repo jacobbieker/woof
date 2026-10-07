@@ -1,0 +1,18 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "uk-bounds"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-8.25, 49.85],
+        [1.8, 49.85],
+        [1.8, 60.9],
+        [-8.25, 60.9],
+        [-8.25, 49.85]
+      ]
+    ]
+  }
+}

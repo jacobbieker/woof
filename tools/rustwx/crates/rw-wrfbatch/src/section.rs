@@ -893,11 +893,19 @@ struct FrameRef {
     valid_unix: i64,
 }
 
-fn enumerate_frames(inputs: &[PathBuf]) -> Result<(Vec<FrameRef>, i64), String> {
+/// The frames of the inputs, the run's origin, and the model token of the
+/// sections' time line: `WOOF` for the engine's own history files, a
+/// model label the files agree on, otherwise the store identity `WRF`
+/// (the maps' rule, `rustwx_products::shared_context::model_token`).
+fn enumerate_frames(inputs: &[PathBuf]) -> Result<(Vec<FrameRef>, i64, String), String> {
     let mut frames = Vec::new();
     let mut origin: Option<i64> = None;
+    let mut model_labels = Vec::with_capacity(inputs.len());
     for path in inputs {
         let file = WrfFile::open(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        // A label the metadata row cannot take keeps the store identity,
+        // as it does on the maps; it never stops the sections.
+        model_labels.push(crate::local_import::model_label(&file).unwrap_or(None));
         let times = file
             .times()
             .map_err(|err| format!("{}: Times: {err}", path.display()))?;
@@ -928,7 +936,11 @@ fn enumerate_frames(inputs: &[PathBuf]) -> Result<(Vec<FrameRef>, i64), String> 
     }
     frames.sort_by_key(|frame| frame.valid_unix);
     let origin = origin.unwrap_or(frames[0].valid_unix);
-    Ok((frames, origin))
+    let model = rustwx_products::shared_context::model_token_with(
+        rustwx_core::ModelId::WrfGdex,
+        rustwx_products::shared_context::agreed_model_label(&model_labels).as_deref(),
+    );
+    Ok((frames, origin, model))
 }
 
 /// Bilinear column weights in grid space for a lat/lon point.
@@ -1479,7 +1491,7 @@ fn build_request(theme: &RenderTheme, width: u32, height: u32) -> xs::CrossSecti
     // The producer's mark on the title row, from `text.source_label`.  A
     // theme that names none leaves it unset and the header is drawn the
     // way it always was.
-    if let Some(mark) = theme.source_label.clone() {
+    if let Some(mark) = theme.source_subtitle(theme.source_label.clone()) {
         request.source_label = Some(mark);
     }
     request
@@ -1510,47 +1522,18 @@ fn planned_section_header(request: &mut xs::CrossSectionRenderRequest) -> Option
 /// drawn as a field rather than as no signal.
 const SECTION_MIN_SIGNAL_SPAN: f32 = 1e-6;
 
-/// The global attribute in which a wrfout-shaped file names the model that
-/// produced it: a hex frame from `rw_mpas_convert` and a global model's
-/// tape write it, and the maps print it in place of `WRF`
-/// (`rustwx_products::shared_context::MODEL_LABEL_ATTRIBUTE` from engine
-/// 2.8.1, which this lane does not need in order to build; a test pins the
-/// same literal here).
-const MODEL_LABEL_ATTRIBUTE: &str = "GPUWM_MODEL_LABEL";
-
-/// The longest name the header takes, the maps' own limit.
-const MODEL_LABEL_MAX_CHARS: usize = 32;
-
-/// The model a section's header names: the file's `GPUWM_MODEL_LABEL` when
-/// it carries a usable one, else `WRF`, the generic wrfout identity.  The
-/// maps' rule exactly: runs of whitespace collapse to one space, and a
-/// blank name, one over 32 characters, or one holding a control character
-/// or `|` (the header's separator) is not printed.  A section of a hex
-/// frame or a global tape said `WRF` beside a map of the same file naming
-/// its model.
-fn section_model_token(raw: Option<&str>) -> String {
-    let label = raw
-        .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
-        .unwrap_or_default();
-    if label.is_empty()
-        || label.chars().count() > MODEL_LABEL_MAX_CHARS
-        || label.chars().any(|ch| ch.is_control() || ch == '|')
-    {
-        return "WRF".to_string();
-    }
-    label
-}
-
 /// The section's time line in the map header's grammar:
-/// `Init 05/26 15Z | F002 | Valid 05/26 17Z | WRF`.  The domain rides in
+/// `Init 05/26 15Z | F002 | Valid 05/26 17Z | WOOF`.  The domain rides in
 /// the title as the maps' `(d01 3 km)`, so the header composes it into the
-/// same place and spelling as every map of the domain; the model is the
-/// one the file names ([`section_model_token`]).
+/// same place and spelling as every map of the domain.  `model` is the
+/// inputs' model token (`WOOF`, a named model, or `WRF` for stock WRF),
+/// which a theme's `text.model_label` still replaces.
 fn section_time_line(
+    theme: &RenderTheme,
+    model: &str,
     init_label: &str,
     lead_seconds: u64,
     valid_label: &str,
-    model: &str,
 ) -> String {
     let hours = lead_seconds / 3_600;
     let minutes = (lead_seconds % 3_600) / 60;
@@ -1560,7 +1543,7 @@ fn section_time_line(
         format!("F{hours:03}:{minutes:02}")
     };
     let valid = valid_label.replace(":00Z", "Z");
-    format!("Init {init_label} | {lead} | Valid {valid} | {model}")
+    format!("Init {init_label} | {lead} | Valid {valid} | {}", theme.model_name(model))
 }
 
 /// A domain key as the map headers spell it: `d01-3km` is `d01 3 km`,
@@ -1583,8 +1566,7 @@ fn map_style_domain(domain: &str) -> String {
 /// rule the map products take at the renderer's seam.
 fn section_source_label(theme: &RenderTheme, derived: &str) -> String {
     theme
-        .source_label
-        .clone()
+        .source_subtitle(Some(derived.to_string()))
         .unwrap_or_else(|| derived.to_string())
 }
 
@@ -1782,7 +1764,7 @@ pub fn render_sections(
     config: &SectionRenderConfig<'_>,
     mut emit: impl FnMut(SectionOutcome),
 ) -> Result<(usize, usize), String> {
-    let (frames, origin_unix) = enumerate_frames(config.inputs)?;
+    let (frames, origin_unix, model) = enumerate_frames(config.inputs)?;
     let frames: Vec<&FrameRef> = match config.frame {
         None => frames.iter().collect(),
         Some(index) => vec![frames.get(index).ok_or_else(|| {
@@ -1822,8 +1804,6 @@ pub fn render_sections(
         let init_label = format!("{om:02}/{od:02} {oh:02}Z");
         let lead_label = format!("+{:03}:{:02}", lead / 3_600, (lead % 3_600) / 60);
         let valid_label = format!("{vm:02}/{vd:02} {vh:02}:{vmin:02}Z");
-        // The model this file names, for the header's model token.
-        let model = section_model_token(file.global_attr_str(MODEL_LABEL_ATTRIBUTE).ok().as_deref());
         let mut lines: Vec<(SectionLine, &'static str)> = vec![(config.line.clone(), "")];
         let mut across_pending = config.across_km;
         let mut line_index = 0usize;
@@ -2193,7 +2173,7 @@ pub fn render_sections(
                                 format!("{headline} (no signal) ({})", map_style_domain(&domain))
                             }),
                             Some(fill.units.as_str()),
-                            Some(&section_time_line(&init_label, lead, &valid_label, &model)),
+                            Some(&section_time_line(config.theme, &model, &init_label, lead, &valid_label)),
                             None,
                             config.theme.source_subtitle(Some(format!("source: {}", config.source_label))).as_deref(),
                         );
@@ -2253,30 +2233,7 @@ mod tests {
         assert_eq!(map_style_domain("d01-2.25km"), "d01 2.25 km");
         assert_eq!(map_style_domain("d02-750m"), "d02 750 m");
         assert_eq!(map_style_domain("d03"), "d03");
-        assert!(!section_time_line("05/26 15Z", 7_200, "05/26 17:00Z", "WRF").contains("d01"));
-    }
-
-    /// A section of a hex frame or a global tape names the model its file
-    /// names, as the maps of the same file do; a stock wrfout keeps WRF.
-    #[test]
-    fn a_section_names_the_model_its_file_names() {
-        assert_eq!(MODEL_LABEL_ATTRIBUTE, "GPUWM_MODEL_LABEL");
-        assert_eq!(
-            section_time_line("09/29 00Z", 21_600, "09/29 06:00Z", &section_model_token(Some("WOOF Hex"))),
-            "Init 09/29 00Z | F006 | Valid 09/29 06Z | WOOF Hex"
-        );
-        assert_eq!(section_model_token(None), "WRF");
-        assert_eq!(section_model_token(Some("  ArWen   Global ")), "ArWen Global");
-        // The maps' refusals: blank, the header's separator, a control
-        // character, longer than 32 characters.
-        assert_eq!(section_model_token(Some("   ")), "WRF");
-        assert_eq!(section_model_token(Some("Hex | F001")), "WRF");
-        assert_eq!(section_model_token(Some("Hex\u{7}")), "WRF");
-        assert_eq!(section_model_token(Some(&"x".repeat(MODEL_LABEL_MAX_CHARS + 1))), "WRF");
-        assert_eq!(
-            section_model_token(Some(&"x".repeat(MODEL_LABEL_MAX_CHARS))),
-            "x".repeat(MODEL_LABEL_MAX_CHARS)
-        );
+        assert!(!section_time_line(&RenderTheme::default_theme(), "WOOF", "05/26 15Z", 7_200, "05/26 17:00Z").contains("d01"));
     }
 
     #[test]
@@ -2667,9 +2624,9 @@ mod tests {
         let plain = build_request(&RenderTheme::dark_theme(), 1200, 900);
         assert!(plain.source_label.is_none());
         let mut theme = RenderTheme::dark_theme();
-        theme.source_label = Some("hex-mod 0.2.3".to_string());
+        theme.source_label = Some("OTHER 0.2.3".to_string());
         let marked = build_request(&theme, 1200, 900);
-        assert_eq!(marked.source_label.as_deref(), Some("hex-mod 0.2.3"));
+        assert_eq!(marked.source_label.as_deref(), Some("OTHER 0.2.3"));
     }
 
     #[test]
@@ -2679,6 +2636,31 @@ mod tests {
         let mut theme = RenderTheme::dark_theme();
         theme.source_label = Some("my model 1.2.3".to_string());
         assert_eq!(section_source_label(&theme, "ArWen"), "my model 1.2.3");
+    }
+
+    #[test]
+    fn woof_section_headers_use_public_labels_and_generic_headers_keep_their_bytes() {
+        let generic = RenderTheme::default_theme();
+        let expected = "Init 05/26 15Z | F002 | Valid 05/26 17Z | WRF";
+        assert_eq!(section_time_line(&generic, "WRF", "05/26 15Z", 7_200, "05/26 17:00Z"), expected);
+        // The engine's own history files carry WOOF into the line with no theme.
+        assert_eq!(
+            section_time_line(&generic, "WOOF", "05/26 15Z", 7_200, "05/26 17:00Z"),
+            "Init 05/26 15Z | F002 | Valid 05/26 17Z | WOOF"
+        );
+        assert!(build_request(&generic, 640, 480).source_label.is_none());
+        for name in ["woof-light", "woof-dark"] {
+            let theme = RenderTheme::builtin(name).unwrap();
+            let line = section_time_line(&theme, "WRF", "05/26 15Z", 7_200, "05/26 17:00Z");
+            assert_eq!(line, "Init 05/26 15Z | F002 | Valid 05/26 17Z | WOOF");
+            assert_eq!(build_request(&theme, 640, 480).source_label.as_deref(), Some("Recast WOOF"));
+            assert_eq!(section_source_label(&theme, "ArWen"), "Recast WOOF");
+        }
+        let mut templated = generic;
+        templated.source_label = Some("Recast WOOF {version}".into());
+        let mark = build_request(&templated, 640, 480).source_label.unwrap();
+        assert!(mark.starts_with("Recast WOOF") && !mark.contains('{'), "{mark}");
+        assert_eq!(section_source_label(&templated, "ArWen"), mark);
     }
 
     #[test]

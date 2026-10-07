@@ -37,6 +37,7 @@ mod wrf_column_planes;
 mod mesh;
 #[path = "section.rs"]
 mod section;
+mod input_list;
 mod run_difference;
 mod sheet;
 mod store_render;
@@ -136,9 +137,10 @@ gpuwm-rw-wrfbatch-requirements-v1\tNEEDS\tslug\tselector\tPLANNED\tstore_field\t
 gpuwm-rw-wrfbatch-wrfout-lane-v1\tWRFOUT\tslug\tkind\tverdict\tminimum_hour\tdetail\t\
 gpuwm-rw-wrfbatch-events-v2\tRENDERED\tSKIPPED\tFAILED\tframe-attributed\t\
 gpuwm-rw-wrfbatch-sections-v1\tSECTIONFILL\tslug\tlo\thi\tabsence\trule\t\
+gpuwm-rw-wrfbatch-inputs-json-v1\t\
 gpuwm-rw-wrfbatch-vocabulary-v2\tgeneric\tvar:\tvariables\txsec:\tmesh:\tmeshdiff:\tselectable_slugs\t\
 gpuwm-rw-wrfbatch-layout-v1\t--layout\tauto\tfixed\t--size-class\t--scale\t--pair-sheet\t\
-gpuwm-rw-wrfbatch-difference-v1\t--diff-against\t--diff-labels\t--diff-sheet\tDIFFERENCE";
+gpuwm-rw-wrfbatch-difference-v1\t--diff-against\t--diff-inputs-json\t--diff-label-a\t--diff-label-b\t--diff-labels\t--diff-sheet\tDIFFERENCE";
 
 #[derive(Debug)]
 struct Args {
@@ -170,6 +172,10 @@ struct Args {
     /// import so a typo is refused before a file is opened.  `None` is
     /// the renderer's own look, byte-identical to every earlier build.
     theme: Option<rustwx_render::RenderTheme>,
+    /// `--radar-colors standard|classic`: the tables the reflectivity and
+    /// radial velocity products draw with.  The flag outranks
+    /// RUSTWX_RADAR_COLORS; absent both it is `standard`.
+    radar_colors: rustwx_render::RadarColorSet,
     /// `--section lat,lon,lat,lon | FILE.json`: the line every `xsec:`
     /// product is cut along; required when one is requested.
     section: Option<section::SectionLine>,
@@ -215,13 +221,14 @@ fn usage() -> &'static str {
     "usage: rw_wrfbatch --store-root DIR --out-dir DIR [--products all|SLUGS] \
 [--frames all|N] [--layout auto|fixed] [--size-class standard|phone|large] [--scale S] \
 [--width N] [--height N] [--heavy] [--streamlines|--barbs] \
-[--source-label TEXT] [--theme NAME|FILE.json] [--section lat,lon,lat,lon|FILE.json] \
+[--source-label TEXT] [--theme NAME|FILE.json] [--radar-colors standard|classic] [--section lat,lon,lat,lon|FILE.json] \
 [--section-across KM] [--isotherms L,L,...[@H]] [--section-top-km N] \
 [--section-size WxH] [--section-reference-km N] \
 [--mesh-grid FILE.nc] [--mesh-reference DIR|FILE] [--mesh-labels A,B] [--mesh-bounds W,E,S,N] \
 [--footer-title TEXT] [--footer-valid TEXT] [--footer-mesh TEXT] [--footer-leg TEXT] \
-[--footer-note TEXT] [--diff-against WRFOUT]... [--diff-labels A,B] [--diff-sheet] \
-[--list-products] wrfout...\n       \
+[--footer-note TEXT] [--diff-against WRFOUT]... [--diff-inputs-json FILE] \
+[--diff-labels A,B] [--diff-label-a TEXT] [--diff-label-b TEXT] [--diff-sheet] \
+[--list-products] [--inputs-json FILE] wrfout...\n       \
 rw_wrfbatch --help | --abi"
 }
 
@@ -672,6 +679,7 @@ fn parse_args() -> Result<Invocation, CliError> {
     let mut overlays_path: Option<PathBuf> = None;
     let mut annotate_path: Option<PathBuf> = None;
     let mut theme_spec: Option<String> = None;
+    let mut radar_colors_spec: Option<String> = None;
     let mut section_spec: Option<String> = None;
     let mut section_across_km: Option<f64> = None;
     let mut isotherms_spec: Option<String> = None;
@@ -691,6 +699,18 @@ fn parse_args() -> Result<Invocation, CliError> {
 
     while let Some(arg) = raw.next() {
         match arg.as_str() {
+            "--inputs-json" => {
+                let path = PathBuf::from(raw.next().ok_or_else(|| {
+                    CliError::Usage("--inputs-json requires a JSON file".to_string())
+                })?);
+                inputs.extend(input_list::read(&path).map_err(CliError::Usage)?);
+            }
+            "--diff-inputs-json" => {
+                let path = PathBuf::from(raw.next().ok_or_else(|| {
+                    CliError::Usage("--diff-inputs-json requires a JSON file".to_string())
+                })?);
+                diff_against.extend(input_list::read(&path).map_err(CliError::Usage)?);
+            }
             "--store-root" => {
                 store_root = Some(PathBuf::from(
                     raw.next().ok_or("--store-root requires a directory")?,
@@ -780,6 +800,15 @@ fn parse_args() -> Result<Invocation, CliError> {
                     return Err(CliError::Usage("--theme must not be blank".to_string()));
                 }
                 theme_spec = Some(value);
+            }
+            // The radar colour set: `standard` (the radar tables) or
+            // `classic` (the reflectivity ladder and blue-red velocity scale
+            // they replaced).  One name selects every radar-table product.
+            "--radar-colors" => {
+                radar_colors_spec = Some(
+                    raw.next()
+                        .ok_or("--radar-colors requires standard or classic")?,
+                );
             }
             // The section line and its dressing, for the `xsec:` family.
             "--section" => {
@@ -922,6 +951,21 @@ fn parse_args() -> Result<Invocation, CliError> {
                 }
                 diff_labels = Some(rustwx_render::difference::DifferenceLabels { a, b });
             }
+            "--diff-label-a" | "--diff-label-b" => {
+                let value = raw.next().ok_or_else(|| {
+                    CliError::Usage(format!("{arg} requires a run name"))
+                })?;
+                let value = value.trim();
+                if value.is_empty() {
+                    return Err(CliError::Usage(format!("{arg} requires a nonempty run name")));
+                }
+                let labels = diff_labels.get_or_insert_with(Default::default);
+                if arg == "--diff-label-a" {
+                    labels.a = value.to_string();
+                } else {
+                    labels.b = value.to_string();
+                }
+            }
             "--diff-sheet" => diff_sheet = true,
             "--heavy" => heavy = true,
             // The wind layer, at the front door.  Drawing streamlines was
@@ -970,6 +1014,11 @@ fn parse_args() -> Result<Invocation, CliError> {
         .map(|spec| rustwx_render::RenderTheme::resolve(&spec))
         .transpose()
         .map_err(CliError::Usage)?;
+    let radar_colors = match radar_colors_spec {
+        Some(name) => rustwx_render::RadarColorSet::parse(&name)
+            .map_err(|error| CliError::Usage(format!("--radar-colors: {error}")))?,
+        None => rustwx_render::radar_color_set_from_env().map_err(CliError::Usage)?,
+    };
     let section = section_spec
         .as_deref()
         .map(section::SectionLine::parse)
@@ -1018,6 +1067,7 @@ fn parse_args() -> Result<Invocation, CliError> {
             .transpose()
             .map_err(CliError::Usage)?,
         theme,
+        radar_colors,
         section,
         section_across_km,
         isotherms,
@@ -1299,8 +1349,6 @@ fn run(mut args: Args) -> Result<(), String> {
         }
     };
     rustwx_render::set_layout_mode(args.layout);
-    // A theme's `{version}` is the executing engine's: the version the
-    // caller's source label carries (`ArWen 2.8.0`), or nothing.
     rustwx_render::theme::set_template_version(
         args.source_label
             .split_whitespace()
@@ -1309,6 +1357,9 @@ fn run(mut args: Args) -> Result<(), String> {
             .map(str::to_string),
     );
     println!("THEME {theme_name}");
+    // Selected before the first product resolves its scale, so one run
+    // draws one radar look.
+    rustwx_render::install_radar_color_set(args.radar_colors)?;
     // The section crate draws its own text; a theme with fonts hands it the
     // same bytes so one theme names the type on every surface.
     {
@@ -2704,6 +2755,7 @@ mod tests {
             overlays: None,
             annotations: None,
             theme: None,
+            radar_colors: rustwx_render::RadarColorSet::Standard,
             section: None,
             section_across_km: None,
             isotherms: section::Isotherms::default(),
@@ -3171,6 +3223,9 @@ fn dispatch() -> Result<(), CliError> {
 
 fn main() -> ExitCode {
     let _ = std::hint::black_box(GPUWM_BRIDGE_SOURCE_REV_STAMP);
+    if let Some(result) = rw_wrfbatch::ensemble_products::try_cli(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        return match result { Ok(()) => ExitCode::SUCCESS, Err(message) => { eprintln!("FAILED\t{message}"); ExitCode::FAILURE } };
+    }
     if let Some(result) = sheet::try_cli(&std::env::args().skip(1).collect::<Vec<_>>()) {
         return match result { Ok(()) => ExitCode::SUCCESS, Err(message) => { eprintln!("{message}"); ExitCode::FAILURE } };
     }

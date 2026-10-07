@@ -23,6 +23,9 @@ struct Request {
     /// shape (auto layout).  Both given: a fixed canvas of that size.
     #[serde(default)] width: Option<u32>,
     #[serde(default)] height: Option<u32>,
+    /// A built-in or theme JSON path on this node. Absent keeps the
+    /// existing generic appearance; a file may inherit a WOOF theme.
+    #[serde(default)] theme: Option<String>,
 }
 
 /// The fixed canvas a request asks for, or `None` for auto layout.  One
@@ -68,11 +71,20 @@ fn validate(request:&Request,result:&ProcessResult)->Result<(),String>{
     verify_result(result)
 }
 
+fn requested_theme(request: &Request) -> Result<rustwx_render::RenderTheme, String> {
+    match request.theme.as_deref() {
+        Some(spec) if spec.trim().is_empty() => Err("Native plot theme must not be blank".into()),
+        Some(spec) => rustwx_render::RenderTheme::resolve(spec),
+        None => Ok(rustwx_render::RenderTheme::default_theme()),
+    }
+}
+
 fn render(request:Request,output:&Path)->Result<(),String>{
     let metadata=fs::metadata(&request.process_result).map_err(|e|e.to_string())?;
     if metadata.len()>512*1024{return Err("Native store receipt exceeds its metadata bound".into());}
     let result:ProcessResult=serde_json::from_slice(&fs::read(&request.process_result).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     validate(&request,&result)?;
+    let theme = requested_theme(&request)?;
     if request.out_dir.exists() || output.exists() {return Err("Native plots need new output paths; existing files are preserved".into());}
     // create_dir is exclusive even when another process races this invocation.
     let parent=request.out_dir.parent().ok_or("Native plots need a parent directory")?;
@@ -88,7 +100,14 @@ fn render(request:Request,output:&Path)->Result<(),String>{
     limits.max_products_per_hour=96;limits.max_work_items=96;
     limits.max_output_width=width;limits.max_output_height=height;
     limits.max_output_pixels=u64::from(width)*u64::from(height);
-    rustwx_render::install_theme(rustwx_render::RenderTheme::default_theme())?;
+    rustwx_render::install_theme(theme)?;
+    // validate() admits only a frame whose committed identity names the
+    // engine as its source (`arwen`, the remote job pipeline's own history
+    // output), so the model token is the engine's public name rather than
+    // the store identity `WRF`.  A theme's `text.model_label` still wins.
+    rustwx_products::shared_context::set_model_label(Some(
+        rustwx_products::shared_context::ENGINE_MODEL_LABEL.to_string(),
+    ));
     rustwx_render::set_layout_mode(match fixed{
         Some(_)=>rustwx_render::LayoutMode::Fixed,
         None=>rustwx_render::LayoutMode::Auto{class:rustwx_render::SizeClass::Standard,scale:1.0},
@@ -155,6 +174,20 @@ mod tests{
         assert!(try_cli(&["--help".into()]).is_none());
         assert!(try_cli(&["--render-store-request".into(),"missing.json".into(),"--input".into(),"source.nc".into()]).unwrap().is_err());
         assert!(serde_json::from_value::<Request>(serde_json::json!({"schema":REQUEST_SCHEMA,"process_result":"receipt.json","expected_frame_id":"id","expected_source_sha256":"hash","out_dir":"plots","products":["2m_temperature"],"wrf_input":"forbidden.nc"})).is_err());
+    }
+    #[test]
+    fn a_store_theme_request_keeps_generic_defaults_and_can_name_woof() {
+        let base = serde_json::json!({"schema": REQUEST_SCHEMA, "process_result": "receipt.json", "expected_frame_id": "id", "expected_source_sha256": "hash", "out_dir": "plots", "products": ["2m_temperature"]});
+        let generic: Request = serde_json::from_value(base.clone()).unwrap();
+        assert!(requested_theme(&generic).unwrap().is_default());
+        let mut public = base.clone(); public["theme"] = "woof-light".into();
+        let public: Request = serde_json::from_value(public).unwrap();
+        let theme = requested_theme(&public).unwrap();
+        assert_eq!(theme.model_name("WRF"), "WOOF");
+        assert_eq!(theme.source_subtitle(Some("source: ArWen".into())).as_deref(), Some("Recast WOOF"));
+        let mut blank = base; blank["theme"] = " ".into();
+        let blank: Request = serde_json::from_value(blank).unwrap();
+        assert!(requested_theme(&blank).unwrap_err().contains("must not be blank"));
     }
     #[test]
     fn a_request_without_a_size_is_auto_layout_and_half_a_size_is_refused(){

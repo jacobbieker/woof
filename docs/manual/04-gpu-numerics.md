@@ -1,7 +1,7 @@
 # 4. GPU numerics a researcher must know
 
 The model state is FP32, like WRF's default REAL; no end-to-end bit-identity with
-WRF is claimed anywhere [README.md:480-483]. Four numerics facts govern how to read
+WRF is claimed anywhere [README.md, current release scope]. Four numerics facts govern how to read
 WOOF results: subnormal handling follows the compile route, FMA contraction and
 library reduction orders scope the determinism claim, dual-run byte comparison is a
 transient-fault screen (not ECC), and restart identity is a published contract.
@@ -67,8 +67,10 @@ and the FP64 arm disagree must be zero), and the max-ULP-0 oracle and batched ga
 end to end. Two conversion helpers stay live because the compiler's own conversions
 flush on this route; division and sqrt stay on hardware `__fdiv_rn`/`__fsqrt_rn`
 under a named invariant that every operand reaching them is non-subnormal, with the
-two audited exposure sites listed and the aerosol route closed by refusing
-`aer_opt != 0` [woof/core/kernels/rrtmg_sw.cu:93-133].
+two audited exposure sites listed [woof/core/kernels/rrtmg_sw.cu:93-133]. The
+aerosol route is closed for `aer_opt` 1 and 2 by refusal; `aer_opt = 3` reaches
+the division with optics whose range is proven normal for any layer of nonzero
+mass [woof/core/rrtmg_aerosol_optics.py, tests/test_rrtmg_aerosol_optics.py].
 
 Other schemes carry subnormal-class records in the registry rather than silent
 behavior: YSU records two FTZ-class subnormal branch disagreements; Shin-Hong
@@ -180,7 +182,7 @@ Determinism results actually measured:
   before each kill were byte-compared when regenerated after relaunch:
   SHA256-identical. WOOF reproduces its own trajectory bit-for-bit under
   restart-free relaunch on the same hardware and build
-  [docs/public/VERIFICATION.md:205-209].
+  [docs/public/VERIFICATION.md, historical comparison and limits].
 - LES: two independent 14,400-step `km_opt=2` integrations produced byte-identical
   state and receipts identical in every field but wall time; since extended across
   hardware, the same seed is bit-identical on three different cards (two of them

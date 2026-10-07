@@ -69,6 +69,46 @@ def test_fetch_from_dir_refuses_and_deletes_wrong_bytes(tmp_path):
     assert list(root.glob(".*fetch-partial")) == []
 
 
+def test_damaged_repair_preserves_original_until_replacement_is_verified(tmp_path):
+    payload = b"verified replacement"
+    asset = _asset_for(payload)
+    source, root = tmp_path / "source", tmp_path / "root"
+    source.mkdir(), root.mkdir()
+    final = root / asset.filename
+    final.write_bytes(b"damaged")
+    (source / asset.filename).write_bytes(b"wrong replacement")
+
+    with pytest.raises(table_assets.TableAssetError, match="refused"):
+        table_assets.fetch_asset_from_dir(root, asset, source, replace_damaged=True)
+    assert final.read_bytes() == b"damaged"
+    assert not list(root.glob(".*fetch-partial-*"))
+
+    (source / asset.filename).write_bytes(payload)
+    with pytest.raises(table_assets.TableAssetError):
+        table_assets.fetch_asset_from_dir(root, asset, source)
+    assert final.read_bytes() == b"damaged"
+    assert table_assets.fetch_asset_from_dir(root, asset, source, replace_damaged=True) == final
+    assert final.read_bytes() == payload
+    assert not list(root.glob(".*fetch-partial-*"))
+
+
+@pytest.mark.parametrize("copy", [b"bad", b"mismatch"])
+def test_packaged_repair_preserves_the_damaged_target_if_source_pin_fails(
+        tmp_path, copy):
+    asset = _asset_for(b"verified")
+    source = tmp_path / "package"
+    root = tmp_path / "staged"
+    source.mkdir(), root.mkdir()
+    (source / asset.filename).write_bytes(copy)
+    damaged = root / asset.filename
+    damaged.write_bytes(b"")
+
+    with pytest.raises(table_assets.TableAssetError, match="refused"):
+        table_assets.fetch_asset_from_dir(root, asset, source, replace_damaged=True)
+    assert damaged.read_bytes() == b""
+    assert list(root.iterdir()) == [damaged]
+
+
 def test_fetch_from_url_verifies_sha256_not_just_size(tmp_path):
     payload = os.urandom(8192)
     asset = _asset_for(payload)
@@ -577,8 +617,10 @@ def test_wif_only_is_the_one_flag_that_skips_the_mandatory_leg(
     assert not user_root.exists(), "--wif-only touched the classic root"
 
 
-def test_the_wif_dataset_resolves_from_its_fixed_data_release(monkeypatch):
-    """The unchanged monthly dataset has its own fixed release URL."""
+def test_the_wif_dataset_resolves_from_its_fixed_public_source(
+        monkeypatch):
+    """A fixed dataset must not depend on the current binary release."""
+
     from woof import bridge_assets
 
     monkeypatch.delenv(table_assets.ASSET_URL_BASE_ENV, raising=False)
@@ -588,25 +630,30 @@ def test_the_wif_dataset_resolves_from_its_fixed_data_release(monkeypatch):
         release = "v9.9.9"
 
     monkeypatch.setattr(bridge_assets, "load_pins", lambda: _Pins())
-    base = table_assets.wif_asset_url_base()
-    assert table_assets.WIF_DATA_RELEASE == "v1.0.1"
-    assert base == "https://github.com/recastsystems/woof/releases/download/v1.0.1"
-    assert base != bridge_assets.asset_url_base(_Pins())
+    from woof.ingest.wif_dataset import WIF_DATASET_DOWNLOAD_BASE, WIF_DATASET_FILE
+    assert table_assets.wif_asset_url_base() == WIF_DATASET_DOWNLOAD_BASE
+    assert table_assets.wif_asset_source() == (
+        WIF_DATASET_DOWNLOAD_BASE + "/" + WIF_DATASET_FILE + ".bz2", "bz2")
 
 
-def test_the_wif_data_release_is_independent_of_bridge_release_pins(monkeypatch):
-    """Missing bridge pins cannot hide a fixed, pinned data release."""
+def test_a_source_install_without_release_pins_can_fetch_wif(
+        monkeypatch):
+    """Missing bridge-release metadata cannot strand fixed input data."""
+
     from woof import bridge_assets
+    from woof.ingest.wif_dataset import WIF_DATASET_FILE
 
     monkeypatch.delenv(table_assets.ASSET_URL_BASE_ENV, raising=False)
     monkeypatch.delenv("WOOF_BRIDGE_ASSET_URL_BASE", raising=False)
 
     def _no_release():
-        raise bridge_assets.BridgeAssetError("the packaged pins declare no release")
+        raise bridge_assets.BridgeAssetError("the packaged pins declare "
+                                             "no release")
 
     monkeypatch.setattr(bridge_assets, "load_pins", _no_release)
-    assert table_assets.wif_asset_url_base() == (
-        "https://github.com/recastsystems/woof/releases/download/v1.0.1")
+    url, compression = table_assets.wif_asset_source()
+    assert url.endswith(WIF_DATASET_FILE + ".bz2")
+    assert compression == "bz2"
 
 
 def test_the_wif_leg_stages_from_a_local_file_url_base(tmp_path,

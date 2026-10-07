@@ -27,9 +27,24 @@ from woof.config import RunConfig
 from woof.core import device_probe
 from woof.ingest import preparation_price as pp
 from woof.ingest import preprocess_backend as backend
+from woof.ingest.bounded_cuda import BoundedCudaPreprocessBackend
 
 ROOT = Path(__file__).resolve().parents[1]
 GIB = 2 ** 30
+
+
+@pytest.fixture(autouse=True)
+def _stand_in_cards_are_not_the_local_device(monkeypatch):
+    """Every card in this file is a stand-in with a stated free memory.
+
+    The CPU battery legs set GPUWM_NO_LOCAL_GPU, and since 083ac7cd0
+    (lane/sw-excess) the backend selection refuses CUDA under it before any
+    probe.  That refusal is right for the local device and has its own
+    tests (tests/test_preprocess_no_local_gpu.py); here it would hide the
+    pricing decisions this file exists to hold, none of which opens a
+    device.  The process-wide CUDA visibility ban stays in force.
+    """
+    monkeypatch.setattr("woof.local_gpu.no_local_gpu", lambda: False)
 
 
 def _cfg(nx, ny, nz, **overrides):
@@ -381,10 +396,15 @@ def card(monkeypatch):
     def cuda_backend():
         return SimpleNamespace(name="cuda", array_module=module)
 
-    def cpu_backend(**kwargs):
-        return SimpleNamespace(name="cpu", workers=kwargs.get("workers"))
+    # A class, not a factory function: preprocessing_math_scope asks
+    # isinstance(backend, ParallelCpuPreprocessBackend) at every wrapped
+    # preparation door, and a function there is a TypeError.
+    class cpu_backend(SimpleNamespace):
+        def __init__(self, **kwargs):
+            super().__init__(name="cpu", workers=kwargs.get("workers"))
 
     reading = {}
+    monkeypatch.setattr("woof.ingest.preparation_workers.host_available_bytes", lambda: 1024 * GIB)
     monkeypatch.setattr(backend, "CudaPreprocessBackend", cuda_backend)
     monkeypatch.setattr(backend, "ParallelCpuPreprocessBackend", cpu_backend)
     monkeypatch.setattr(backend, "_gpu_runtime_installed", lambda: True)
@@ -401,6 +421,13 @@ def test_auto_prepares_on_the_cpu_when_the_card_cannot_hold_it(
     card.reading.update(SMALL_CARD)
     price = _route_prices()[route]
     chosen = backend.resolve_preprocess_backend("auto", price=price)
+    if route == "mapped":
+        assert isinstance(chosen, BoundedCudaPreprocessBackend)
+        assert chosen.name == "cuda"
+        assert chosen.selection["device_fit"]["fits"] is True
+        assert chosen.selection["chunking"]["retained_arrays"] == "host"
+        assert card.allocations == []
+        return
     assert chosen.name == "cpu"
     selection = chosen.selection
     assert selection["requested"] == "auto"
@@ -420,6 +447,10 @@ def test_explicit_cuda_is_refused_by_name_before_anything_is_allocated(
         route, card):
     card.reading.update(SMALL_CARD)
     price = _route_prices()[route]
+    if route == "mapped":
+        # A mapped preparation only refuses when even one bounded batch
+        # cannot fit; it no longer refuses a whole-grid allocation it avoids.
+        card.reading["free_bytes"] = 128 * 1024**2
     with pytest.raises(backend.PreparationDeviceRefused) as refused:
         backend.resolve_preprocess_backend("cuda", price=price)
     message = str(refused.value)
@@ -438,6 +469,8 @@ def test_a_card_with_room_still_prepares_on_the_card(route, requested, card):
     price = _route_prices()[route]
     chosen = backend.resolve_preprocess_backend(requested, price=price)
     assert chosen.name == "cuda"
+    if route == "mapped":
+        assert isinstance(chosen, BoundedCudaPreprocessBackend)
     assert chosen.selection["device_fit"]["fits"] is True
     assert card.allocations == []
 

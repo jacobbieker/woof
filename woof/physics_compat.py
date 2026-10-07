@@ -333,6 +333,29 @@ def thompson_table_root() -> str:
     return str(packaged)
 
 
+#: Environment override for the operational WRF 3.9 fork's Thompson tables
+#: (RunConfig.thompson_version = "wrf_39_noaa").
+THOMPSON_FORK_TABLE_ROOT_ENV = "WOOF_THOMPSON_FORK_TABLE_ROOT"
+
+
+def thompson_fork_table_root() -> str:
+    """Where the WRF 3.9 fork's Thompson tables live.
+
+    The override first, then ``~/.woof/tables/thompson-wrf39-noaa``.  The
+    set is generated from the fork's own ``thompson_init`` by
+    ``tools/thompson_fork_oracle/build.sh`` (gfortran on any Linux CPU, about
+    two minutes) and is pinned by size and SHA-256 in
+    :data:`woof.core.thompson_contract.FORK_TABLE_ASSETS`, so a root with
+    other bytes fails closed exactly as the v4.6.1 root does.  The fork's
+    CCN activation table is byte-identical to the v4.6.1 one and is read
+    from :func:`thompson_table_root`.
+    """
+    override = os.environ.get(THOMPSON_FORK_TABLE_ROOT_ENV)
+    if override:
+        return override
+    return str(user_thompson_table_root().parent / "thompson-wrf39-noaa")
+
+
 def thompson_guard_exports() -> tuple[str, str]:
     """The two exports the guarded mp8 runners demand, ready to paste.
 
@@ -415,7 +438,7 @@ WSM6_PROFILE_ID = "wsm6-ysu-mm5-noah-no-radiation-v1"
 #: The profile is admitted only with the end-to-end HRRR probe and its
 #: source-frozen-species discard receipt.
 KESSLER_PROFILE_ID = "kessler-mp1-ysu-mm5-noah-dudhia-v1"
-THOMPSON_PROFILE_ID = "thompson-mp8-ysu-mm5-noah-validation-v1"
+THOMPSON_PROFILE_ID = "thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1"
 #: The observation battery's registered composition (lead ruling,
 #: obs-battery integration wave 2026-08-04): the Thompson validation
 #: suite with the exact WRF v4.6.1 legacy RRTMG in place of no-radiation,
@@ -459,10 +482,10 @@ MORRISON_PROFILE_ID = (
     "morrison-mp10-ysu-mm5-noah-kf-rte-rrtmgp-v1"
 )
 NSSL2_PROFILE_ID = (
-    "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-validation-candidate-v1"
+    "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-wrf-comparison-candidate-v1"
 )
 NSSL2_LEGACY_RRTMG_PROFILE_ID = (
-    "nssl2-mp18-ysu-mm5-noah-kf-rrtmg-legacy-validation-candidate-v1"
+    "nssl2-mp18-ysu-mm5-noah-kf-rrtmg-legacy-wrf-comparison-candidate-v1"
 )
 #: The P3 one-category composition: the Thompson legacy-RRTMG suite with
 #: exactly ONE selector moved (``mp_physics`` 8 -> 50), transcribed switch
@@ -592,7 +615,7 @@ THOMPSON_MYNN_RUC_RTE_RRTMGP_PROFILE_ID = (
     "thompson-mp8-mynn-mynn-ruc-rte-rrtmgp-implemented-unverified-v1"
 )
 #: The same composition with Dudhia shortwave and longwave off, the
-#: sibling of :data:`MYNN_RUC_PROFILE_ID`.  A daytime validation suite, as
+#: sibling of :data:`MYNN_RUC_PROFILE_ID`.  A daytime-only suite, as
 #: that sibling is.
 THOMPSON_MYNN_RUC_DUDHIA_PROFILE_ID = (
     "thompson-mp8-mynn-mynn-ruc-dudhia-implemented-unverified-v1"
@@ -680,7 +703,7 @@ _SWITCHES_OUTSIDE_THE_SINGLE_DOMAIN_PRODUCT = frozenset({
     "bl_mynn_edmf", "bl_mynn_edmf_mom", "bl_mynn_edmf_tke",
     "bl_mynn_mixlength", "bl_mynn_mixqt", "bl_mynn_mixscalars",
     "bl_mynn_output", "bl_mynn_tkeadvect",
-    "flag_sm_adj", "mosaic_lu", "mosaic_soil", "spp_lsm",
+    "flag_sm_adj", "spp_lsm",
     "dveg", "noahmp_acc_dt", "noahmp_output", "soiltstep",
     "opt_alb", "opt_btr", "opt_crop", "opt_crs", "opt_frz", "opt_gla",
     "opt_inf", "opt_infdv", "opt_irr", "opt_irrm", "opt_pedo", "opt_rad",
@@ -815,7 +838,9 @@ def _derive_single_domain_profiles():
         switches.update({
             name: value
             for name, value in (template.get("parameters") or {}).items()
-            if name not in _SWITCHES_OUTSIDE_THE_SINGLE_DOMAIN_PRODUCT
+            # Explicit template choices survive option-identity exclusions.
+            # A single-domain product still has no nest-edge policy.
+            if name != "nest_microphysics_transition"
         })
         floor = list(_SINGLE_DOMAIN_SWITCH_FLOOR)
         if (switches.get("ra_lw_physics"), switches.get("ra_sw_physics")) == (
@@ -856,6 +881,8 @@ SINGLE_DOMAIN_PHYSICS_PROFILES, _SINGLE_DOMAIN_RUNTIME_SWITCHES = (
 def single_domain_runtime_switches(profile: str) -> dict[str, object]:
     """Return one complete canonical single-domain runtime product."""
 
+    from woof.physics_registry import canonical_template_id
+    profile = canonical_template_id(profile)
     try:
         return dict(_SINGLE_DOMAIN_RUNTIME_SWITCHES[profile])
     except KeyError:
@@ -1059,12 +1086,12 @@ def _ack_instruction(acknowledgement: str) -> str:
 #: flags are merged.
 #:
 #: Provenance (2026-08-06): a wizard-emitted 48 h real case bound
-#: ``thompson-mp8-ysu-mm5-noah-validation-v1`` (ra_lw_physics 0,
+#: ``thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1`` (ra_lw_physics 0,
 #: ra_sw_physics 1).  Shortwave heated the surface by day; at night the
 #: surface radiated with no downward longwave, skin temperature
 #: cratered, the surface saturation humidity collapsed with it, and 2 m
 #: dewpoints read in the 50s F inside a 70s airmass.  The pairing is a
-#: legitimate DAYTIME validation configuration and stays selectable --
+#: legitimate DAYTIME-only configuration and stays selectable --
 #: loudly, never silently.
 ASYMMETRIC_RADIATION_NOCTURNAL_ACK = (
     "asymmetric-radiation-nocturnal-window-v1"
@@ -1503,7 +1530,7 @@ def nocturnal_radiation_refusal(
         "downward longwave to balance it: skin temperature craters, the "
         "surface saturation humidity collapses with it, and 2 m "
         "dewpoints read far below the airmass.  This pairing is a "
-        "daytime validation configuration; a shipped 48 h case emitted "
+        "daytime-only configuration; a shipped 48 h case emitted "
         "with it verified exactly this failure.  The acknowledgement is "
         "config-side (not --ack) because the refusal happens at config "
         "load, before any runner flag is read.")
@@ -2330,9 +2357,11 @@ def validate_single_domain_physics_profile(
     """
 
     from woof.physics_registry import (
-        physics_registry, registry_physics_receipt, registry_sha256)
+        canonical_template_id, physics_registry, registry_physics_receipt,
+        registry_sha256)
 
     registry = physics_registry()
+    profile = canonical_template_id(profile, registry)
     template = registry["templates"].get(profile)
     if not isinstance(template, Mapping):
         raise ValueError(
@@ -2459,8 +2488,7 @@ _EXPERIMENTAL_MATURITY = "experimental-runtime"
 _NO_WRF_COUNTERPART = "wrf_counterpart"
 VERIFICATION_STATUS_SCHEMA = "gpuwm-physics-verification-status-v1"
 
-#: The registry maturity that constitutes WRF-verification evidence.
-#: Everything else the engine implements is accurately "supported".
+#: A historical label; current exact-suite evidence also needs a scope.
 _WRF_VERIFIED_MATURITY = "wrf-matched-run"
 
 
@@ -2564,15 +2592,17 @@ def single_domain_verification_status(run_config) -> dict[str, object]:
     product surfaces print -- detail stays in this receipt.
     """
 
-    from woof.physics_registry import physics_registry
+    from woof.physics_registry import canonical_maturity, physics_registry
 
     registry = physics_registry()
     matched = identify_single_domain_profile(run_config)
     maturity = None
+    verification_scope = None
     if matched is not None:
         template = registry["templates"].get(matched)
         if isinstance(template, Mapping):
-            maturity = template.get("maturity")
+            maturity = canonical_maturity(template.get("maturity"), registry)
+            verification_scope = template.get("verification_scope")
     component_match: dict[str, object] | None = None
     if matched is None:
         try:
@@ -2586,11 +2616,12 @@ def single_domain_verification_status(run_config) -> dict[str, object]:
                         == resolved):
                     component_match = {
                         "template": template_id,
-                        "maturity": template.get("maturity"),
+                        "maturity": canonical_maturity(template.get("maturity"), registry),
                         "scope": "components-only-not-switch-level",
                     }
                     break
-    verified = matched is not None and maturity == _WRF_VERIFIED_MATURITY
+    verified = (matched is not None and maturity == _WRF_VERIFIED_MATURITY
+                and verification_scope == "current-matched-run")
     experimental = experimental_component_labels(run_config, registry)
     if experimental:
         # One definition, in experimental_selection_sentence, so this
@@ -2616,6 +2647,7 @@ def single_domain_verification_status(run_config) -> dict[str, object]:
             else VERIFICATION_SUPPORTED),
         "matched_profile": matched,
         "matched_profile_maturity": maturity,
+        "matched_profile_verification_scope": verification_scope,
         "component_matched_template": component_match,
         "experimental_components": list(experimental),
         "sentence": sentence,
@@ -2942,8 +2974,10 @@ def physics_selection_differences(
 
     from woof.physics_registry import (
         NO_OFF_VALUE, REGISTRY_PHYSICS_IDENTITY_SCHEMA, component_off_option,
+        canonical_template_id, canonical_sha256,
         physics_registry, recorded_registry_physics_parts,
-        registry_knob_is_read, same_setting_value, setting_off_value)
+        registry_knob_is_read, same_setting_value, setting_off_value,
+        strip_registry_documentation)
 
     if not isinstance(recorded, Mapping):
         return ["the recorded physics receipt is missing"]
@@ -2964,6 +2998,9 @@ def physics_selection_differences(
 
     def walk(prepared: object, current: object, path: str,
              key: object = None, container: object = None) -> None:
+        if key == "profile":
+            prepared = canonical_template_id(prepared, registry)
+            current = canonical_template_id(current, registry)
         if isinstance(prepared, Mapping) and isinstance(current, Mapping):
             for child in sorted(set(prepared) | set(current), key=str):
                 if not path and child in SELECTION_RECEIPT_RECORD_ONLY_FIELDS:
@@ -3031,6 +3068,68 @@ def physics_selection_differences(
             return knob_at_off_value(rest)
         return False
 
+    def parameter_enum_was_extended(name: str) -> bool:
+        # A newly admitted value does not change an older prepared value.
+        # Match the complete prior declaration, changing only its enum;
+        # altered defaults, types, bounds or physics therefore still refuse.
+        kind, _, knob = name.partition(".")
+        if kind != "parameters" or settings is None:
+            return False
+        spec = (registry.get("parameters") or {}).get(knob)
+        if not isinstance(spec, Mapping) or not isinstance(spec.get("enum"), list):
+            return False
+        if expected_parts.get(name) != canonical_sha256(strip_registry_documentation(spec)):
+            return False
+        value = _selection_value_or_absent(settings, knob)
+        if value is _ABSENT:
+            value = setting_off_value(knob, registry)
+        for previous in spec.get("compatible_previous_enums", ()):
+            if not isinstance(previous, list) or not previous:
+                continue
+            if not all(any(same_setting_value(old, current) for current in spec["enum"])
+                       for old in previous):
+                continue
+            if not any(same_setting_value(value, old) for old in previous):
+                continue
+            prior_spec = {**spec, "enum": previous}
+            if recorded_parts.get(name) == canonical_sha256(
+                    strip_registry_documentation(prior_spec)):
+                return True
+        return False
+
+    def forbidden_values_were_extended(name: str) -> bool:
+        # New forbidden values for new controls do not change an admitted
+        # older selection. The complete old option must still hash exactly.
+        kind, _, rest = name.partition(".")
+        component, separator, option_id = rest.partition(".options.")
+        if kind != "components" or not separator or settings is None:
+            return False
+        option = ((registry.get("components") or {}).get(component, {}).get("options") or {}).get(option_id)
+        if not isinstance(option, Mapping):
+            return False
+        if expected_parts.get(name) != canonical_sha256(strip_registry_documentation(option)):
+            return False
+        constraints = option.get("constraints") or {}
+        current = constraints.get("forbidden_setting_values") or {}
+        for knob, values in current.items():
+            value = _selection_value_or_absent(settings, knob)
+            if value is _ABSENT:
+                value = setting_off_value(knob, registry)
+            if value is NO_OFF_VALUE or any(same_setting_value(value, v) for v in values):
+                return False
+        for previous in option.get("compatible_previous_forbidden_settings", ()):
+            if not isinstance(previous, Mapping):
+                continue
+            if not all(knob in current and isinstance(values, list)
+                       and all(any(same_setting_value(old, new) for new in current[knob])
+                               for old in values) for knob, values in previous.items()):
+                continue
+            prior_option = {**option, "constraints": {
+                **constraints, "forbidden_setting_values": previous}}
+            if recorded_parts.get(name) == canonical_sha256(strip_registry_documentation(prior_option)):
+                return True
+        return False
+
     # A receipt written before registry_physics existed (or in another
     # identity schema) resolves to every part its document had; the
     # selection's own scope is then this build's.  A receipt's own parts
@@ -3042,6 +3141,17 @@ def physics_selection_differences(
         names |= set(recorded_parts)
     for name in sorted(names):
         if recorded_parts.get(name) == expected_parts.get(name):
+            continue
+        if (settings is not None and name.startswith("parameters.")
+                and not registry_knob_is_read(
+                    name.removeprefix("parameters."), settings, registry)):
+            # A newly scoped knob can leave an older receipt's parts.
+            # Its metadata cannot change physics this configuration never
+            # reads, just as an added unread knob cannot change it.
+            continue
+        if parameter_enum_was_extended(name):
+            continue
+        if forbidden_values_were_extended(name):
             continue
         if (name not in recorded_parts and name in expected_parts
                 and part_added_at_off_value(name)):
@@ -3083,11 +3193,8 @@ def _tree_tuple_registry_governance(
         raise PhysicsCapabilityError(
             "physics registry lacks tuple reachability declarations")
 
-    def key(value: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
-        return tuple(sorted(value.items()))
-
-    normal: set[tuple[tuple[str, str], ...]] = set()
-    expert: dict[tuple[tuple[str, str], ...], set[str]] = {}
+    normal = False
+    expert: set[str] = set()
 
     for route in routes.values():
         if (
@@ -3138,38 +3245,30 @@ def _tree_tuple_registry_governance(
                 admitted.update(option_sets.get(component_id, ()))
                 option_sets[component_id] = tuple(sorted(admitted))
 
-        def variants(template_id: str):
+        def admits(template_id: str) -> bool:
             template = templates.get(template_id)
             base = (
                 template.get("components", {})
                 if isinstance(template, Mapping) else {}
             )
             if not isinstance(base, Mapping):
-                return
-            candidates = [dict(base)]
+                return False
+            # Preparation used to materialize millions of Cartesian tuples
+            # to ask whether this one tuple belonged. Each override dimension
+            # is independent, so exact membership needs only its own choices.
+            if set(selected) != set(base) | set(option_sets):
+                return False
+            if any(selected[name] != value for name, value in base.items()
+                   if name not in option_sets):
+                return False
             for component_id, option_ids in option_sets.items():
-                expanded = []
-                for candidate in candidates:
-                    # SEED WITH THE TEMPLATE'S OWN VALUE (audit R-022).
-                    # The expansion REPLACES this component, so a template
-                    # whose own option is absent from the route's allowed
-                    # list was deleted from the union -- the template
-                    # itself stopped being reachable through the route
-                    # that declares it.  Measured when land_surface gained
-                    # an option list: the expert Noah-MP templates
-                    # silently demoted to outside-declared-reachability
-                    # and lost the acknowledgement they publish.  No
-                    # template tripped it before, which is exactly why it
-                    # had to be fixed in the same pass as the list.
-                    own = candidate.get(component_id)
-                    seeded = list(option_ids)
-                    if isinstance(own, str) and own not in seeded:
-                        seeded.append(own)
-                    for option_id in seeded:
-                        expanded.append({
-                            **candidate, component_id: option_id})
-                candidates = expanded
-            yield from candidates
+                own = base.get(component_id)
+                value = selected[component_id]
+                # Keep the template's own choice even when it is absent
+                # from the route override list (the R-022 expert demotion).
+                if value not in option_ids and not (isinstance(own, str) and value == own):
+                    return False
+            return True
 
         source_template_ids = route.get("source_template_ids", {})
         if isinstance(source_template_ids, Mapping):
@@ -3181,8 +3280,7 @@ def _tree_tuple_registry_governance(
                 if isinstance(template_id, str)
             }
             for template_id in normal_ids:
-                normal.update(key(candidate)
-                              for candidate in variants(template_id))
+                normal = normal or admits(template_id)
 
         expert_template_ids = route.get("expert_template_ids", {})
         acknowledgement = route.get("expert_acknowledgement_id")
@@ -3198,15 +3296,13 @@ def _tree_tuple_registry_governance(
                 if isinstance(template_id, str)
             }
             for template_id in expert_ids:
-                for candidate in variants(template_id):
-                    expert.setdefault(key(candidate), set()).add(
-                        acknowledgement)
+                if admits(template_id):
+                    expert.add(acknowledgement)
 
-    selected_key = key(selected)
-    if selected_key in normal:
+    if normal:
         return "registry-reachable", None
-    if selected_key in expert:
-        acknowledgements = sorted(expert[selected_key])
+    if expert:
+        acknowledgements = sorted(expert)
         if len(acknowledgements) != 1:
             raise PhysicsCapabilityError(
                 "registry expert tuple publishes ambiguous acknowledgements "
@@ -3443,8 +3539,8 @@ def pending_wrf_physics_components(
     # never by a silent numeric gate here:
     #   * the two aerosol-source selectors fail closed in
     #     woof.config.validate_aerosol_source_options -- aer_init_opt and
-    #     wif_input_opt are honoured at 0 only, because ArWen has no WIF
-    #     metgrid ingest and no nbca species;
+    #     wif_input_opt select climatology or analyzed fields; the analyzed
+    #     route requires both QNWFA/QNIFA. Black carbon has no nbca species;
     #   * WRF's real.exe FATALs mp_physics=28 at wif_input_opt=0
     #     (dyn_em/module_initialize_real.F:2735-2736) while ArWen runs
     #     thompson_init's synthetic CCN/IN profile.  Same physics, an
@@ -3462,7 +3558,13 @@ def pending_wrf_physics_components(
     #     not the default template's microphysics and no route makes it a
     #     default, so it is still never the scheme a user gets by
     #     accident: it is reached by naming that suite or as a per-domain
-    #     component override.  (Verified against the shipped registry by
+    #     component override.  A second named suite, the operational HRRR
+    #     fork composition thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1
+    #     (4193eb0da), is the recommended profile of the HRRR doors (hrrr,
+    #     hrrr-prs, hrrr-native) and nowhere else, and the native benchmark
+    #     declares it on the HRRR source because the operational namelist
+    #     it replays is that composition.  Neither is the global default.
+    #     (Verified against the shipped registry by
     #     tests/test_mp28_runnable.py.)
     # Adding a blocker here instead would be the wrong shape twice over: it
     # would refuse the whole scheme for a limitation that is really about
@@ -3733,6 +3835,7 @@ __all__ = [
     "profile_declared_acknowledgements",
     "settings_declared_acknowledgements",
     "thompson_guard_exports",
+    "thompson_fork_table_root",
     "thompson_table_root",
     "require_ready_wrf_physics",
     "require_rrtmg_legacy_executable",

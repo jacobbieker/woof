@@ -215,7 +215,7 @@ class RucInitialization:
 
 @dataclass(frozen=True)
 class RucSurfaceParameters:
-    """Dominant-category outputs from WRF ``soilvegin``."""
+    """Surface and soil outputs from WRF ``soilvegin``."""
 
     iforest: np.ndarray
     emiss: np.ndarray
@@ -836,21 +836,28 @@ def ruc_surface_parameters(
     mminlu: str = "MODIFIED_IGBP_MODIS_NOAH",
     mosaic_lu: int = 0,
     mosaic_soil: int = 0,
+    landusef=None,
+    soilctop=None,
     parameters: RucParameterBundle | None = None,
     arrays=None,
 ) -> RucSurfaceParameters:
-    """Transcribe WRF ``soilvegin`` for the first dominant-category lane.
+    """Transcribe WRF ``soilvegin``, preserving ordered mosaic mixtures.
 
-    All arithmetic follows WRF's default-real (float32) evaluation order.
-    The two mosaic modes remain fail-closed because they are outside the
-    pinned first RUC option lane.
+    Fractions have category-first shape. WRF's dominant-category defaults
+    remain unchanged; enabled mosaics require the original source fractions.
     """
+    from woof.core.ruc_mosaic import mosaic_option, surface_mixture
 
     np = arrays if arrays is not None else _NUMPY
-    if type(mosaic_lu) is not int or mosaic_lu != 0:
-        raise ValueError("RUC surface setup currently requires mosaic_lu=0")
-    if type(mosaic_soil) is not int or mosaic_soil != 0:
-        raise ValueError("RUC surface setup currently requires mosaic_soil=0")
+    mosaic_option(mosaic_lu, "mosaic_lu")
+    mosaic_option(mosaic_soil, "mosaic_soil")
+    if arrays is not None and (mosaic_lu or mosaic_soil):
+        from woof.core.ruc_gpu import ruc_surface_parameters_cuda
+        return ruc_surface_parameters_cuda(
+            isltyp, ivgtyp, shdmin, shdmax, vegfrac, znt, lai,
+            rdlai2d=rdlai2d, iswater=iswater, mminlu=mminlu,
+            mosaic_lu=mosaic_lu, mosaic_soil=mosaic_soil,
+            landusef=landusef, soilctop=soilctop, parameters=parameters)
     if type(rdlai2d) is not bool:
         raise TypeError("rdlai2d must be bool")
 
@@ -1017,7 +1024,7 @@ def ruc_surface_parameters(
         output_flat[name][:] = np.where(
             solid, value, output_flat[name]).astype(np.float32)
 
-    return RucSurfaceParameters(
+    result = RucSurfaceParameters(
         iforest=forest,
         emiss=output["emiss"],
         pc=output["pc"],
@@ -1033,14 +1040,39 @@ def ruc_surface_parameters(
         ref=output["ref"],
         wilt=output["wilt"],
     )
+    if mosaic_lu or mosaic_soil:
+        surface_mixture(
+            result, isltyp=soil_type, shdmin=minimum_green,
+            shdmax=maximum_green, vegfrac=green_fraction,
+            znt=incoming_roughness, lai=incoming_lai,
+            vegetation=vegetation, soil=bundle.soil,
+            mosaic_lu=mosaic_lu, mosaic_soil=mosaic_soil,
+            landusef=landusef, soilctop=soilctop,
+            iswater=water_category, rdlai2d=rdlai2d)
+    return result
+
 
 
 def ruc_soil_properties(
     values: Mapping[str, object],
     *,
     riw: float = 0.9,
+    spp_lsm: int = 0,
+    rstochcol=None,
+    fieldcol_sf=None,
+    soilprop: str = "wrf_461",
 ) -> RucSoilProperties:
     """Transcribe deterministic WRF ``soilprop`` in float32.
+
+    ``soilprop`` names the WRF lineage (:data:`woof.core.ruc_tier.
+    RUC_SOILPROP_FORMS`): ``wrf_45`` (v4.5.2 ``:6154``, ``:6213-6216``,
+    ``:6245``) normalises water diffusivity and conductivity by the moisture
+    above the residual and uses mineral conductivity 2.0 at every quartz
+    fraction; ``wrf_461`` (``:6198-6202``, ``:6261-6267``, ``:6289``) uses
+    total moisture over porosity and 3.0 below 20 percent quartz.  The
+    transcription keeps v4.6.1, the lineage its oracle was recorded with, as
+    its default; the forecast runtime passes ``RunConfig.ruc_soilprop``
+    (default ``wrf_45``) through :func:`woof.core.ruc_runtime.ruc_lsm_step`.
 
     Profile arrays use woof soil-first order
     ``(9, ...horizontal...)``.  WRF initializes all four output profiles to
@@ -1049,6 +1081,10 @@ def ruc_soil_properties(
     value while computing hydraulic conductivity at all nine levels.
     """
 
+    from woof.core.ruc_spp import validate_spp_mode, hydraulic_spp
+    from woof.core.ruc_tier import ruc_soilprop_form
+    enabled_spp = validate_spp_mode(spp_lsm)
+    v461 = ruc_soilprop_form(soilprop) == "wrf_461"
     ice_water_ratio = np.float32(riw)
     if not np.isfinite(ice_water_ratio) or ice_water_ratio <= 0.0:
         raise ValueError("RUC soilprop riw must be finite and positive")
@@ -1132,7 +1168,8 @@ def ruc_soil_properties(
                 np.float32(2700.0) - np.float32(np.float32(0.947) * gamd)
             )
         )
-        mineral = np.float32(2.0 if qwrtz > np.float32(0.2) else 3.0)
+        mineral = np.float32(
+            3.0 if v461 and not qwrtz > np.float32(0.2) else 2.0)
         # Every transcendental in soilprop rounds a float64 evaluation once.
         # See _RUC_PROVISIONAL_TRANSCENDENTALS: this is NOT glibc, it is the
         # closest of the available float32 kernels and the only one that is
@@ -1246,22 +1283,31 @@ def ruc_soil_properties(
             if np.float32(ws - ice) < np.float32(0.12):
                 diffu = zero
             else:
-                h = np.float32(max(
-                    zero,
-                    np.float32(soilmoism + qmin - ice)
-                    / np.float32(max(minimum, np.float32(ws - ice))),
-                ))
+                if v461:
+                    porosity = ws
+                    h = np.float32(max(
+                        zero,
+                        np.float32(soilmoism + qmin - ice)
+                        / np.float32(max(minimum, np.float32(ws - ice))),
+                    ))
+                else:
+                    porosity = dqm
+                    h = np.float32(max(
+                        zero,
+                        np.float32(soilmoism - ice)
+                        / np.float32(max(minimum, np.float32(dqm - ice))),
+                    ))
                 facd = one
                 if ice != zero:
                     facd = np.float32(
                         one - ice / np.float32(max(minimum, soilmoism))
                     )
-                ame = np.float32(max(minimum, np.float32(ws - ice)))
+                ame = np.float32(max(minimum, np.float32(porosity - ice)))
                 diffu = np.float32(np.float32(-bclh * ksat) * psis)
                 diffu = np.float32(diffu / ame)
                 diffu = np.float32(
                     diffu * np.float32(np.power(
-                        np.float64(np.float32(ws / ame)), np.float64(3.0)
+                        np.float64(np.float32(porosity / ame)), np.float64(3.0)
                     ))
                 )
                 diffu = np.float32(
@@ -1289,7 +1335,8 @@ def ruc_soil_properties(
                             minimum, profile_flat["soilmois"][level, column]
                         ))
                     )
-                am = np.float32(max(minimum, np.float32(ws - ice)))
+                am = np.float32(max(
+                    minimum, np.float32((ws if v461 else dqm) - ice)))
                 hydro = np.float32(ksat / am)
                 hydro = np.float32(
                     hydro * np.float32(np.power(
@@ -1306,6 +1353,9 @@ def ruc_soil_properties(
                 if hydro < np.float32(1.0e-10):
                     hydro = zero
             output_flat["hydro"][level, column] = hydro
+
+    if enabled_spp:
+        hydraulic_spp(outputs["hydro"], rstochcol, fieldcol_sf)
 
     for name, array in outputs.items():
         if not np.all(np.isfinite(array)):
@@ -2940,6 +2990,10 @@ def ruc_soil_step(
     myj: bool = False,
     mminlu: str = "MODIFIED_IGBP_MODIS_NOAH",
     parameters: RucParameterBundle | None = None,
+    spp_lsm: int = 0,
+    rstochcol=None,
+    fieldcol_sf=None,
+    soilprop: str = "wrf_461",
 ) -> RucSoilStep:
     """Run the complete deterministic snow-free WRF RUC land column."""
 
@@ -3009,7 +3063,9 @@ def ruc_soil_step(
         **{name: columns[name] for name in (
             "qwrtz", "rhocs", "dqm", "qmin", "psis", "bclh", "ksat"
         )},
-    }, riw=float(np.float32(np.float32(900.0) * np.float32(1.0e-3))))
+    }, riw=float(np.float32(np.float32(900.0) * np.float32(1.0e-3))),
+       spp_lsm=spp_lsm, rstochcol=rstochcol, fieldcol_sf=fieldcol_sf,
+       soilprop=soilprop)
 
     ncolumn = int(np.prod(horizontal_shape))
     column_flat = {name: array.reshape(ncolumn) for name, array in columns.items()}
@@ -3793,8 +3849,20 @@ def ruc_snow_preparation(
     isncovr_opt: int = RUC_SNOW_COVER_OPTION,
     mminlu: str = "MODIFIED_IGBP_MODIS_NOAH",
     bundle: RucParameterBundle | None = None,
+    snow: str = "wrf_461",
 ) -> RucSnowPreparation:
     """Transcribe WRF ``sfctmp``'s snow-preparation block.
+
+    ``snow`` names the lineage (:data:`woof.core.ruc_tier.RUC_SNOW_FORMS`);
+    the line numbers below are WRF v4.6.1's, the ``wrf_461`` form.  Under
+    ``wrf_45`` (WRF v4.0-4.5, the operational RAP/HRRR branch's
+    ``module_sf_ruclsm.F:1640-1770`` there) the critical depths are taken
+    after compaction, new-snow density and interception; the mosaic flag
+    comes from ``min(1, snhei/(2*snhei_crit))`` at that point, before new
+    snow is added; the cover inside the snow branch is that same formula
+    (``isncovr_opt`` is not read); fresh-snow albedo is kept when snow is
+    falling and the depth on the ground reaches the new-snow critical depth;
+    and there is no 0.7 floor on a low snow albedo.
 
     ``phys/module_sf_ruclsm.F:1400-1766``: the straight-line prologue of
     ``sfctmp``.  It zeroes the per-step accumulators, builds the Zubov
@@ -3837,6 +3905,8 @@ def ruc_snow_preparation(
         raise ValueError("RUC snow preparation c1sn/c2sn must be finite")
     if isncovr_opt not in (1, 2, 3):
         raise ValueError("RUC isncovr_opt must be 1, 2, or 3")
+    from woof.core.ruc_tier import ruc_snow_form
+    v461 = ruc_snow_form(snow) == "wrf_461"
     if type(isice) is not int:
         raise TypeError("RUC snow preparation isice must be an int")
     missing = [
@@ -4059,7 +4129,7 @@ def ruc_snow_preparation(
                 rhosn = min(max(np.float32(58.8), xsn), np.float32(500.0))
 
         # :1504 - the mosaic flag from the previous step's snow fraction.
-        if snowfrac < np.float32(0.75):
+        if v461 and snowfrac < np.float32(0.75):
             snow_mosaic = one
 
         # :1506-1540 fresh snowfall and its density.
@@ -4162,6 +4232,18 @@ def ruc_snow_preparation(
             intersn = zero
             infwater = prcpms
 
+        if not v461:
+            # Branch :1675-1679: the critical depths from the density this
+            # step built, and the mosaic flag from the depth before new snow.
+            snhei_crit = np.float32(critical_depth_coefficient / rhosn)
+            snhei_crit_newsn = np.float32(new_snow_depth_coefficient / rhosn)
+            snowfrac = min(
+                one,
+                np.float32(snhei / np.float32(np.float32(2.0) * snhei_crit)),
+            )
+            if snowfrac < np.float32(0.75):
+                snow_mosaic = one
+
         # :1580-1598 fresh snow onto the ground.
         if newsn > zero:
             snwe = max(zero, np.float32(np.float32(snwe + newsn) - intersn))
@@ -4185,7 +4267,26 @@ def ruc_snow_preparation(
         if snhei > zero:
             # :1603 - snow-covered points use the snow/ice land-use class.
             iland_column = isice
-            if isncovr_opt == 1:
+            if not v461:
+                # Branch :1708-1719.
+                snowfrac = min(
+                    one,
+                    np.float32(
+                        snhei / np.float32(np.float32(2.0) * snhei_crit)
+                    ),
+                )
+                if ivgtyp_column == urban:
+                    snowfrac = min(np.float32(0.75), snowfrac)
+                if snowfrac < np.float32(0.75):
+                    snow_mosaic = one
+                if newsn > zero:
+                    snowfracnewsn = min(
+                        one, np.float32(snhei / snhei_crit_newsn))
+                keep_snow_albedo = zero
+                if newsn > zero and snowfracnewsn > np.float32(0.99):
+                    keep_snow_albedo = one
+                    snow_mosaic = zero
+            elif isncovr_opt == 1:
                 snowfrac = min(
                     one,
                     np.float32(
@@ -4227,25 +4328,27 @@ def ruc_snow_preparation(
                         * np.float32(rhosn / rhonewsn)
                     )
                 ))
-            if newsn > zero:
-                snowfracnewsn = min(
-                    one,
-                    np.float32(
-                        np.float32(snowfallac * np.float32(1.0e-3))
-                        / snhei_crit_newsn
-                    ),
-                )
-            # :1645
-            if ivgtyp_column == urban:
-                snowfrac = min(np.float32(0.75), snowfrac)
-            # :1656
-            if snowfrac < np.float32(0.75):
-                snow_mosaic = one
-            # :1658-1663
-            keep_snow_albedo = zero
-            if snowfracnewsn > np.float32(0.99) and rhosnfall < np.float32(450.0):
-                keep_snow_albedo = one
-                snow_mosaic = zero
+            if v461:
+                if newsn > zero:
+                    snowfracnewsn = min(
+                        one,
+                        np.float32(
+                            np.float32(snowfallac * np.float32(1.0e-3))
+                            / snhei_crit_newsn
+                        ),
+                    )
+                # :1645
+                if ivgtyp_column == urban:
+                    snowfrac = min(np.float32(0.75), snowfrac)
+                # :1656
+                if snowfrac < np.float32(0.75):
+                    snow_mosaic = one
+                # :1658-1663
+                keep_snow_albedo = zero
+                if (snowfracnewsn > np.float32(0.99)
+                        and rhosnfall < np.float32(450.0)):
+                    keep_snow_albedo = one
+                    snow_mosaic = zero
             # :1672-1680 roughness blend toward the snow/ice class.
             if (
                 newsn == zero
@@ -4277,7 +4380,8 @@ def ruc_snow_preparation(
                     # whenever keep_snow_albedo is set, so this test can
                     # never pass.  Transcribed to stay faithful.
                     if (
-                        keep_snow_albedo > np.float32(0.9)
+                        v461
+                        and keep_snow_albedo > np.float32(0.9)
                         and albsn < np.float32(0.4)
                     ):
                         albsn = np.float32(0.7)
@@ -4297,7 +4401,8 @@ def ruc_snow_preparation(
                         ),
                     )
                     if (
-                        newsn > zero
+                        v461
+                        and newsn > zero
                         and keep_snow_albedo > np.float32(0.9)
                         and albsn < np.float32(0.4)
                     ):
@@ -5697,8 +5802,14 @@ def _ruc_snow_thermal_diffusivity(
     rhonewsn: np.float32,
     newsnow: np.float32,
     snhei: np.float32,
+    v461: bool = True,
 ) -> np.float32:
-    """WRF ``snowtemp`` snow thermal diffusivity for ``isncond_opt = 2``.
+    """WRF ``snowtemp`` snow thermal diffusivity, by lineage.
+
+    ``v461`` false is the WRF v4.0-4.5 form, carried unchanged by the
+    operational RAP/HRRR branch (``thdifsn = 0.265/rhocsn``, branch
+    ``module_sf_ruclsm.F:5235`` and ``:5738``; 4.6.1's ``isncond_opt = 1``).
+    The rest of this docstring is the v4.6.1 form, ``isncond_opt = 2``.
 
     ``phys/module_sf_ruclsm.F:49`` fixes ``isncond_opt = 2``, so the constant
     ``0.265/rhocsn`` branch is dead and the Sturm et al. (1997) effective
@@ -5707,6 +5818,8 @@ def _ruc_snow_thermal_diffusivity(
     density update; both call sites share this transcription.
     """
 
+    if not v461:
+        return np.float32(np.float32(0.265) / rhocsn)
     zero = np.float32(0.0)
     fact = np.float32(1.0)
     if rhosn < np.float32(156.0) or (
@@ -5743,8 +5856,21 @@ def ruc_snow_temperature_step(
     ilnb: object = 1,
     xlvm: float = 2.835e6,
     cvw: float = 4.183e6,
+    snow: str = "wrf_461",
 ) -> RucSnowTemperature:
     """Transcribe WRF ``snowtemp``: the snow energy budget and heat solve.
+
+    ``snow`` names the lineage (:data:`woof.core.ruc_tier.RUC_SNOW_FORMS`).
+    ``wrf_461`` is the form documented below, the one the WRF v4.6.1 oracle
+    pins.  ``wrf_45`` is WRF v4.0-4.5, which the operational RAP/HRRR branch
+    carries line for line (branch ``module_sf_ruclsm.F:5026-5853``): constant
+    snow conductivity; no skin, interface or 7.5 cm clamp at freezing on the
+    second pass; melt entered while the pack outlasts the step's
+    evaporation, with ``qvg = qsg``; a melt cap ``5.6e-8*meltfactor*max(1,
+    soilt-273.15)`` independent of the step and of density; liquid retained
+    whenever the pack is deeper than 1 cm; no separate branch for a pack
+    that evaporates completely; and bottom melt capped at ``5.8e-9`` and
+    kept out of ``smelt``.
 
     ``phys/module_sf_ruclsm.F:4836-5728``.  One nine-level column at a time:
     the upward tridiagonal sweep through the soil (``:5103-5115``), the extra
@@ -5787,6 +5913,8 @@ def ruc_snow_temperature_step(
     which is what leaves the path without a reference result.
     """
 
+    from woof.core.ruc_tier import ruc_snow_form
+    v461 = ruc_snow_form(snow) == "wrf_461"
     timestep = np.float32(delt)
     constant_flux_depth = _ruc_constant_flux_depth(conflx, "snowtemp")
     water_heat_capacity = np.float32(cvw)
@@ -5939,7 +6067,7 @@ def ruc_snow_temperature_step(
         rhocsn = np.float32(np.float32(2090.0) * rhosn)
         rhonewcsn = np.float32(np.float32(2090.0) * rhonewsn)
         thdifsn = _ruc_snow_thermal_diffusivity(
-            rhosn, rhocsn, rhonewsn, newsnow, snhei
+            rhosn, rhocsn, rhonewsn, newsnow, snhei, v461
         )
         # :5074-5091 prologue.
         ras = np.float32(rho * milli)
@@ -6238,7 +6366,8 @@ def ruc_snow_temperature_step(
             # :5332-5340 skin temperature.
             soilt = ts1
             if (
-                nmelt == 1
+                v461
+                and nmelt == 1
                 and snowfrac == one
                 and snwe > zero
                 and soilt > freeze
@@ -6275,7 +6404,7 @@ def ruc_snow_temperature_step(
                 tso[0] = soilt
                 soilt1 = soilt
                 tsob = tso[0]
-            if nmelt == 1 and snowfrac == one:
+            if v461 and nmelt == 1 and snowfrac == one:
                 soilt1 = min(freeze, soilt1)
                 tso[0] = min(freeze, tso[0])
                 tsob = min(freeze, tsob)
@@ -6292,7 +6421,22 @@ def ruc_snow_temperature_step(
             if nmelt == 1:
                 break
 
-            if soilt > freeze and beta == one and snhei > zero:
+            if v461:
+                melts = soilt > freeze and beta == one and snhei > zero
+            else:
+                # Branch :5584: melt while the pack outlasts the step's
+                # evaporation, SNWEPR-BETA*EPOT*RAS*DELT > 0.
+                melts = (
+                    soilt > freeze
+                    and np.float32(
+                        snwepr
+                        - np.float32(
+                            np.float32(np.float32(beta * epot) * ras) * timestep
+                        )
+                    ) > zero
+                    and snhei > zero
+                )
+            if melts:
                 # :5414-5553 top melt.
                 nmelt = 1
                 soiltfrac = np.float32(
@@ -6303,10 +6447,14 @@ def ruc_snow_temperature_step(
                     qsg,
                     np.float32(np.float32(ruc_qsn(soiltfrac, table)) / pp),
                 )
-                qvg = np.float32(
-                    np.float32(snowfrac * qsg)
-                    + np.float32(np.float32(one - snowfrac) * qvg)
-                )
+                if v461:
+                    qvg = np.float32(
+                        np.float32(snowfrac * qsg)
+                        + np.float32(np.float32(one - snowfrac) * qvg)
+                    )
+                else:
+                    # Branch :5588: saturated at melt.
+                    qvg = qsg
                 # :5419-5421 t3/upflux/xinet are dead: xinet is never read.
                 epot = np.float32(-np.float32(qkms * np.float32(qvatm - qsg)))
                 q1 = np.float32(epot * ras)
@@ -6384,6 +6532,55 @@ def ruc_snow_temperature_step(
                 )
                 snoh = max(zero, snoh)
                 smelt = np.float32(np.float32(snoh / xlmelt) * milli)
+                if not v461:
+                    # Branch :5652-5698, straight-line.
+                    available = np.float32(
+                        np.float32(snwepr / timestep)
+                        - np.float32(np.float32(beta * epot) * ras)
+                    )
+                    smelt = min(smelt, available)
+                    smelt = max(zero, smelt)
+                    limit = np.float32(np.float32(5.6e-8) * meltfactor)
+                    limit = np.float32(
+                        limit * max(one, np.float32(soilt - freeze))
+                    )
+                    smelt = min(smelt, limit)
+                    rr = max(zero, available)
+                    smelt = min(smelt, rr)
+                    snoh = np.float32(np.float32(smelt * xlmelt) * thousand)
+                    rsmfrac = min(
+                        np.float32(0.18),
+                        max(
+                            np.float32(0.08),
+                            np.float32(
+                                np.float32(snwepr / np.float32(0.10))
+                                * np.float32(0.13)
+                            ),
+                        ),
+                    )
+                    if snhei > np.float32(0.01):
+                        rsm = np.float32(np.float32(rsmfrac * smelt) * timestep)
+                    else:
+                        rsm = zero
+                    smelt = max(
+                        zero, np.float32(smelt - np.float32(rsm / timestep))
+                    )
+                    snwe = max(
+                        zero,
+                        np.float32(
+                            snwepr
+                            - np.float32(
+                                np.float32(
+                                    smelt
+                                    + np.float32(np.float32(beta * epot) * ras)
+                                )
+                                * timestep
+                            )
+                        ),
+                    )
+                    if nmelt == 1:
+                        continue
+                    break
                 potential = np.float32(np.float32(epot * ras) * timestep)
                 if epot > zero and snwepr <= potential:
                     # :5483-5491 all the snow can evaporate; jump to :5518.
@@ -6458,7 +6655,7 @@ def ruc_snow_temperature_step(
                     )
             else:
                 # :5557-5567 no melt: sublimation or condensation only.
-                if snhei != zero and beta == one:
+                if snhei != zero and (beta == one or not v461):
                     epot = np.float32(-np.float32(qkms * np.float32(qvatm - qsg)))
                     snwe = max(
                         zero,
@@ -6469,7 +6666,7 @@ def ruc_snow_temperature_step(
                             )
                         ),
                     )
-                else:
+                elif v461:
                     snwe = zero
 
             if nmelt == 1:
@@ -6489,7 +6686,7 @@ def ruc_snow_temperature_step(
             rhosn = min(max(np.float32(58.8), xsn), np.float32(500.0))
             rhocsn = np.float32(np.float32(2090.0) * rhosn)
             thdifsn = _ruc_snow_thermal_diffusivity(
-                rhosn, rhocsn, rhonewsn, newsnow, snhei
+                rhosn, rhocsn, rhonewsn, newsnow, snhei, v461
             )
 
         # :5616-5629 flux in the top snow layer, then in the top soil layer.
@@ -6538,16 +6735,18 @@ def ruc_snow_temperature_step(
             snohg = max(zero, snohg)
             smeltg = np.float32(np.float32(snohg / xlmelt) * milli)
             # :5658-5660 the Egglston bottom-melt limit.
-            if (
+            if not v461 or ((
                 rhosn < np.float32(350.0)
                 or (newsnow > zero and rhonewsn < np.float32(450.0))
-            ) and soilt < np.float32(283.0):
+            ) and soilt < np.float32(283.0)):
                 smeltg = min(smeltg, np.float32(5.8e-9))
             rr = np.float32(snwe / timestep)
             smeltg = min(smeltg, rr)
             snwe = max(zero, np.float32(snwe - np.float32(smeltg * timestep)))
             snhei = np.float32(np.float32(snwe * thousand) / rhosn)
-            smelt = np.float32(smelt + smeltg)
+            if v461:
+                # Branch: the bottom melt water does not join smelt.
+                smelt = np.float32(smelt + smeltg)
             if snhei > zero:
                 tso[0] = soiltfrac
 
@@ -6760,6 +6959,11 @@ def ruc_snow_soil_step(
     cw: float = 4.183e6,
     mminlu: str = "MODIFIED_IGBP_MODIS_NOAH",
     parameters: RucParameterBundle | None = None,
+    spp_lsm: int = 0,
+    rstochcol=None,
+    fieldcol_sf=None,
+    soilprop: str = "wrf_461",
+    snow: str = "wrf_461",
 ) -> RucSnowSoilStep:
     """Run the complete deterministic snow-covered WRF RUC land column.
 
@@ -6875,7 +7079,8 @@ def ruc_snow_soil_step(
         **{name: columns[name] for name in (
             "qwrtz", "rhocs", "dqm", "qmin", "psis", "bclh", "ksat"
         )},
-    }, riw=float(riw))
+    }, riw=float(riw), spp_lsm=spp_lsm, rstochcol=rstochcol,
+       fieldcol_sf=fieldcol_sf, soilprop=soilprop)
 
     ncolumn = int(np.prod(horizontal_shape))
     column_flat = {name: array.reshape(ncolumn) for name, array in columns.items()}
@@ -6998,6 +7203,7 @@ def ruc_snow_soil_step(
         ilnb=layers_flat.reshape(horizontal_shape),
         xlvm=float(xlvm),
         cvw=float(cvw),
+        snow=snow,
     )
     # snowtemp returns tso rather than updating it in place.
     tso = snow_result.tso
@@ -7443,6 +7649,20 @@ class RucSurfaceTemperatureStep:
     ilnb: np.ndarray
 
 
+def _ruc_snow_lineage_mask(snow: str, ncolumn: int, np):
+    """Per-column ``True`` where the ``wrf_461`` snow lineage runs.
+
+    One value for every column; a mask rather than a Python flag so the
+    sfctmp dispatch below stays one straight-line transcription for both
+    lineages.  ``tools/ruc_fused/gen_sfctmp.py`` replaces it with the
+    translation unit's ``GPUWM_RUC_SNOW_V461`` define when it writes the
+    fused kernel, so the fused path selects by the same mask.
+    """
+    from woof.core.ruc_tier import ruc_snow_form
+
+    return np.full((ncolumn,), ruc_snow_form(snow) == "wrf_461", dtype=bool)
+
+
 def _ruc_tanh_array(values, *, arrays=None) -> np.ndarray:
     """``_f32_tanh`` mapped elementwise.
 
@@ -7537,8 +7757,25 @@ def ruc_surface_temperature_step(
     leaves: "Mapping[str, object] | None" = None,
     stages: "Mapping[str, object] | None" = None,
     arrays=None,
+    spp_lsm: int = 0,
+    pattern_spp_lsm=None,
+    field_sf=None,
+    soilprop: str = "wrf_461",
+    snow: str = "wrf_461",
 ) -> RucSurfaceTemperatureStep:
     """Transcribe WRF ``sfctmp`` end to end.
+
+    ``snow`` names the snow lineage (:data:`woof.core.ruc_tier.RUC_SNOW_FORMS`)
+    for the preparation block, ``snowsoil`` and the three places the dispatch
+    itself differs.  Under ``wrf_45`` (the operational RAP/HRRR branch,
+    ``module_sf_ruclsm.F:2045-2168``): a melted-out column's albedo and land
+    class are reset before the recombination rather than after it; both
+    mosaic recombinations scale
+    ``smelt``, ``snoh``, ``snflx`` and ``snom`` by ``snowfrac``; the cover is
+    not rebuilt or urban-capped after the snow column; and ``snowfallac``
+    grows by ``max(0, newsn - rhowater/rhonewsn*smelt*delt*newsnowratio)``.
+    The branch accumulates that in metres; it is kept here in millimetres,
+    the unit ``wrf_461`` and the output schema use, by a factor of 1000.
 
     ``phys/module_sf_ruclsm.F:1180-2198``.  The snow-preparation prologue is
     delegated to :func:`ruc_snow_preparation` (``:1400-1766``); everything
@@ -7578,9 +7815,9 @@ def ruc_surface_temperature_step(
     ``snowseaice`` runs, on every one of the four paths.
     ``edir1``, ``ec1``, ``ett1``  the same, except on the two sea-ice paths
     where ``:1863-1865``/``:1961-1963``/``:2176-2178`` force them.
-    ``isltyp``, ``ktau``, ``i``, ``j``, ``spp_lsm``, ``rstochcol``,
-    ``fieldcol_sf``  carried through to leaves that woof has already shown
-    do not read them.
+    ``isltyp``, ``ktau``, ``i``, ``j`` are unobserved by the deterministic
+    leaves. SPP patterns are explicit optional arguments; when enabled the
+    historical WRF hydraulic operator runs before soil moisture transport.
 
     ``s``, ``sublim`` and ``evapl`` are NOT in that list and are required
     inputs: ``snowseaice`` reads ``s``; ``sublim`` survives the snow-free
@@ -7692,6 +7929,28 @@ def ruc_surface_temperature_step(
     assert shape is not None
     horizontal_shape = shape[1:]
     ncolumn = int(np.prod(horizontal_shape))
+    from woof.core.ruc_tier import ruc_snow_form
+    snow_form = ruc_snow_form(snow)
+    snow_v461 = _ruc_snow_lineage_mask(snow_form, ncolumn, np)
+    from woof.core.ruc_spp import pattern_inputs
+    spp_pattern, spp_field = pattern_inputs(
+        spp_lsm, pattern_spp_lsm, field_sf, shape, arrays=np)
+    if spp_pattern is not None:
+        spp_pattern = spp_pattern.reshape(nzs, ncolumn)
+    spp_diagnostic = (None if spp_field is None else
+                      np.array(spp_field.reshape(nzs, ncolumn), copy=True))
+
+    def _spp_arguments(take):
+        if spp_pattern is None:
+            return {}
+        return {"spp_lsm": 1, "rstochcol": spp_pattern[:, take],
+                "fieldcol_sf": None if spp_diagnostic is None else
+                spp_diagnostic[:, take].copy()}
+
+    def _spp_scatter(take, arguments):
+        if spp_diagnostic is not None:
+            spp_diagnostic[:, take] = arguments["fieldcol_sf"]
+
     columns = {
         name: _horizontal_float_field(
             values[name], horizontal_shape, name, arrays=arrays,
@@ -7720,6 +7979,7 @@ def ruc_surface_temperature_step(
         isncovr_opt=isncovr_opt,
         mminlu=mminlu,
         bundle=bundle,
+        snow=snow_form,
     )
 
     one = np.float32(1.0)
@@ -7759,7 +8019,7 @@ def ruc_surface_temperature_step(
         for name in (
             "snow_mosaic", "keep_snow_albedo", "newsn", "rainf", "drip",
             "dripsn", "dripliq", "infwater", "vegfrac", "gswin", "albice",
-            "emissn", "emiss_snowfree", "snhei_crit",
+            "emissn", "emiss_snowfree", "snhei_crit", "newsnowratio",
         )
     }
     ice_profile = {
@@ -7847,6 +8107,7 @@ def ruc_surface_temperature_step(
             gswnew,
             arrays=arrays,
         )
+        spp_arguments = _spp_arguments(mask)
         free = leaf["soil"](
             {
                 "soilmois": state["soilm1d"][:, mask],
@@ -7898,7 +8159,10 @@ def ruc_surface_temperature_step(
             myj=myj,
             mminlu=mminlu,
             parameters=bundle,
+            soilprop=soilprop,
+            **spp_arguments,
         )
+        _spp_scatter(mask, spp_arguments)
         for name, source in (
             ("soilm1d", "soilmois"), ("ts1d", "tso"),
             ("smfrkeep", "smfrkeep"), ("keepfr", "keepfr"),
@@ -8007,6 +8271,7 @@ def ruc_surface_temperature_step(
         snfr = np.where(mosaic[mask], one, state["snowfrac"][mask]).astype(
             np.float32
         )
+        spp_arguments = _spp_arguments(mask)
         packed = leaf["snow_soil"](
             {
                 "soilmois": state["soilm1d"][:, mask],
@@ -8064,7 +8329,11 @@ def ruc_surface_temperature_step(
             cw=cw,
             mminlu=mminlu,
             parameters=bundle,
+            soilprop=soilprop,
+            snow=snow_form,
+            **spp_arguments,
         )
+        _spp_scatter(mask, spp_arguments)
         for name, source in (
             ("soilm1d", "soilmois"), ("ts1d", "tso"),
             ("smfrkeep", "smfrkeep"), ("keepfr", "keepfr"),
@@ -8153,6 +8422,17 @@ def ruc_surface_temperature_step(
         ):
             state[name][:, mask] = value
 
+    # wrf_45 (branch :2045-2048) resets a melted-out column's albedo and
+    # land class BEFORE the recombination, so on sea ice the recombined
+    # albedo starts from the snow-free one and ends at the ice albedo;
+    # wrf_461 resets after it (:2077-2080).  On land the two orders agree.
+    # Elementwise over the full width, so it costs no mask conversion.
+    melted_early = snow_column & (state["snhei"] == zero) & ~snow_v461
+    state["alb"] = np.where(
+        melted_early, flat["alb_snow_free"], state["alb"]).astype(np.float32)
+    land_category = np.where(
+        melted_early, vegetation_category, land_category).astype(np.int32)
+
     # :1979-2039 -- mosaic recombination on land.
     mask = _selected(mosaic_land, np, runs_mosaic_land)
     if mask.size:
@@ -8216,6 +8496,13 @@ def ruc_surface_temperature_step(
         )
         for name in ("runoff1", "runoff2"):
             state[name][mask] = blend(shadow[name][mask], state[name][mask])
+        # wrf_45 (branch :2110-2113): the melt bookkeeping is the cover's share.
+        for name in ("smelt", "snoh", "snflx", "snom"):
+            state[name][mask] = np.where(
+                snow_v461[mask],
+                state[name][mask],
+                np.float32(state[name][mask] * snowfrac),
+            ).astype(np.float32)
         # :2032 -- ``1.*snowfrac`` is snowfrac.
         state["mavail"][mask] = np.float32(
             np.float32(shadow["mavail"][mask] * rest) + snowfrac
@@ -8282,16 +8569,24 @@ def ruc_surface_temperature_step(
         )
         for name in ("runoff1", "runoff2"):
             state[name][mask] = blend(shadow[name][mask], state[name][mask])
+        # wrf_45 (branch :2151-2154): the melt bookkeeping is the cover's share.
+        for name in ("smelt", "snoh", "snflx", "snom"):
+            state[name][mask] = np.where(
+                snow_v461[mask],
+                state[name][mask],
+                np.float32(state[name][mask] * snowfrac),
+            ).astype(np.float32)
 
     # :2077-2115 -- melt-out reset, cover rebuild, urban cap, accumulation.
     mask = _selected(snow_column, np, runs_snow_column)
     if mask.size:
         melted_here = snow_column & (state["snhei"] == zero)
-        melted = _selected(melted_here, np)
+        melted = _selected(melted_here & snow_v461, np)
         state["alb"][melted] = flat["alb_snow_free"][melted]
         land_category[melted] = vegetation_category[melted]
 
-        remaining = _selected(snow_column & ~melted_here, np)
+        # wrf_45 keeps the preparation block's cover: no rebuild, no cap.
+        remaining = _selected(snow_column & ~melted_here & snow_v461, np)
         if remaining.size:
             snhei = state["snhei"][remaining]
             depth_fraction = np.minimum(
@@ -8340,14 +8635,30 @@ def ruc_surface_temperature_step(
                     )
                 ), arrays=arrays)
         # :2111
-        town = _selected(snow_column & (vegetation_category == urban), np)
+        town = _selected(
+            snow_column & (vegetation_category == urban) & snow_v461, np)
         state["snowfrac"][town] = np.minimum(
             np.float32(0.75), state["snowfrac"][town]
         )
-        # :2115
+        # :2115; wrf_45 branch :2168, kept in millimetres.
+        melt_share = np.float32(
+            np.float32(
+                np.float32(
+                    np.float32(np.float32(1.0e3) / state["rhonewsn"][mask])
+                    * state["smelt"][mask]
+                )
+                * timestep
+            )
+            * local["newsnowratio"][mask]
+        )
+        fallen = np.where(
+            snow_v461[mask],
+            local["newsn"][mask],
+            np.maximum(zero, np.float32(local["newsn"][mask] - melt_share)),
+        ).astype(np.float32)
         state["snowfallac"][mask] = np.float32(
             state["snowfallac"][mask]
-            + np.float32(local["newsn"][mask] * np.float32(1.0e3))
+            + np.float32(fallen * np.float32(1.0e3))
         )
 
     # :2118-2195 -- the snow-free branch.
@@ -8372,6 +8683,7 @@ def ruc_surface_temperature_step(
 
     mask = _selected(bare_land, np, runs_bare_land)
     if mask.size:
+        spp_arguments = _spp_arguments(mask)
         bare = leaf["soil"](
             {
                 "soilmois": state["soilm1d"][:, mask],
@@ -8422,7 +8734,10 @@ def ruc_surface_temperature_step(
             myj=myj,
             mminlu=mminlu,
             parameters=bundle,
+            soilprop=soilprop,
+            **spp_arguments,
         )
+        _spp_scatter(mask, spp_arguments)
         for name, source in (
             ("soilm1d", "soilmois"), ("ts1d", "tso"),
             ("smfrkeep", "smfrkeep"), ("keepfr", "keepfr"),
@@ -8523,6 +8838,8 @@ def ruc_surface_temperature_step(
     for name, ok in zip(checked, finite.tolist()):
         if not ok:
             raise ValueError(f"RUC sfctmp produced non-finite {name}")
+    if spp_field is not None:
+        spp_field[...] = spp_diagnostic.reshape(shape)
     return result
 
 
@@ -8820,6 +9137,8 @@ def ruc_land_surface_step(
     rdlai2d: bool = False,
     mosaic_lu: int = 0,
     mosaic_soil: int = 0,
+    landusef=None,
+    soilctop=None,
     iswater: int | None = None,
     isice: int | None = None,
     xice_threshold: float = 0.5,
@@ -8833,8 +9152,29 @@ def ruc_land_surface_step(
     leaves: "Mapping[str, object] | None" = None,
     stages: "Mapping[str, object] | None" = None,
     arrays=None,
+    spp_lsm: int = 0,
+    pattern_spp_lsm=None,
+    field_sf=None,
+    irrigation: str = "wrf_461",
+    soilprop: str = "wrf_461",
+    qvg_cold_start: str = "wrf",
+    snow: str = "wrf_461",
 ) -> RucLandSurfaceStep:
     """Transcribe WRF ``LSMRUC``, ``phys/module_sf_ruclsm.F:84-1175``.
+
+    ``snow`` names the snow lineage (:data:`woof.core.ruc_tier.RUC_SNOW_FORMS`)
+    handed to ``SFCTMP``.  Here it is the first step only: under ``wrf_45``
+    (the operational RAP/HRRR branch, ``LSMRUC:459-472``) a column with snow
+    water and no snow cover starts with ``snowc = min(1, snow/32)``, and the
+    inside-snow temperature repair blends skin and soil where there is more
+    than 32 mm of snow water; ``wrf_461`` blends wherever ``snowc > 0``.
+
+    ``irrigation`` names the post-SFCTMP irrigation rule
+    (:data:`woof.core.ruc_mosaic.IRRIGATION_FORMS`): ``wrf_45`` is the
+    v4.0-4.5 crop-fraction-scaled floor selected by the operational
+    namelist importer and recipe; the generic default ``wrf_461`` is
+    the v4.6.1 per-step relaxation this driver's mosaic oracle was
+    recorded with.
 
     This is the RUC driver: the first-step initialisation block, the
     per-column unit conversions, the precipitation partition, the water /
@@ -8849,12 +9189,9 @@ def ruc_land_surface_step(
     for the historical ``woof/data/ruc/oracle`` fixture; the forecast
     runtime always selects ARW.
 
-    ``mosaic_lu`` and ``mosaic_soil`` must be 0.  That is not an extra
-    restriction: :func:`ruc_surface_parameters` is fail-closed on
-    ``SOILVEGIN``'s mosaic arms, and ``LSMRUC``'s irrigation block
-    (``:984-1009``) is gated on the same ``mosaic_lu == 1``, so the irrigation
-    block is unreachable wherever ``SOILVEGIN`` is.  It is therefore not
-    transcribed either.
+    Enabled ``mosaic_lu`` and ``mosaic_soil`` require category-first
+    ``landusef`` and ``soilctop``. WRF mixes parameters before the single
+    prognostic column and irrigates root layers after SFCTMP.
 
     **Two WRF defects reproduced on purpose.**
 
@@ -8966,10 +9303,16 @@ def ruc_land_surface_step(
             "dependence on WRF's uninitialised ilnb and is refused on a "
             "non-host array namespace; the forecast runtime uses "
             "ilnb_chain=False, which is woof's defined behaviour")
-    if type(mosaic_lu) is not int or mosaic_lu != 0:
-        raise ValueError("RUC driver currently requires mosaic_lu=0")
-    if type(mosaic_soil) is not int or mosaic_soil != 0:
-        raise ValueError("RUC driver currently requires mosaic_soil=0")
+    from woof.core.ruc_mosaic import (irrigation_form, mosaic_option,
+                                       mosaic_fractions, irrigate)
+    mosaic_option(mosaic_lu, "mosaic_lu")
+    mosaic_option(mosaic_soil, "mosaic_soil")
+    irrigation_form(irrigation)
+    from woof.core.ruc_tier import ruc_qvg_cold_start_form, ruc_soilprop_form
+    ruc_soilprop_form(soilprop)
+    qvg_air = ruc_qvg_cold_start_form(qvg_cold_start)
+    from woof.core.ruc_tier import ruc_snow_form
+    snow = ruc_snow_form(snow)
     if myj is not False:
         # Same gate as ``ruc_surface_temperature_step``: ``ruc_soil_step``
         # and ``ruc_snow_soil_step`` are fail-closed on ``myj=True``, so the
@@ -9071,6 +9414,13 @@ def ruc_land_surface_step(
     assert shape is not None
     horizontal_shape = shape[1:]
     ncolumn = int(np.prod(horizontal_shape))
+    if mosaic_lu:
+        landusef = mosaic_fractions(landusef, horizontal_shape, "landusef",
+                                   ncategory, arrays=np).reshape(-1, ncolumn)
+    if mosaic_soil:
+        soilctop = mosaic_fractions(soilctop, horizontal_shape, "soilctop",
+                                   len(bundle.soil.rows), arrays=np).reshape(-1, ncolumn)
+
 
     # The reshape and the copy are what the driver keeps; the finiteness of
     # the field it copied FROM is what the batch decides, and the two are the
@@ -9149,12 +9499,25 @@ def ruc_land_surface_step(
         state["keepfr3dflag"][:, :] = zero
         soilt = columns["soilt"]
         tso_top = state["tso"][0]
+        if snow == "wrf_45":
+            # Branch LSMRUC:459-462; snow/32 as the exact snow*2**-5.
+            snow_water = columns["snow"]
+            columns["snowc"] = np.where(
+                (snow_water > zero) & (columns["snowc"] <= zero),
+                np.minimum(
+                    one, (snow_water * np.float32(0.03125)).astype(np.float32)),
+                columns["snowc"],
+            ).astype(np.float32)
+            # Branch :464-465.
+            inside_snow = snow_water > np.float32(32.0)
+        else:
+            inside_snow = columns["snowc"] > zero
         repair = (columns["soilt1"] < np.float32(170.0)) | (
             columns["soilt1"] > np.float32(400.0))
         blended = (np.float32(0.5) * (soilt + tso_top)).astype(np.float32)
         columns["soilt1"] = np.where(
             repair,
-            np.where(columns["snowc"] > zero, blended, tso_top),
+            np.where(inside_snow, blended, tso_top),
             columns["soilt1"],
         ).astype(np.float32)
         columns["tsnav"] = (blended - freezing).astype(np.float32)
@@ -9162,13 +9525,23 @@ def ruc_land_surface_step(
         columns["qsg"] = (
             ruc_qsn(soilt, tbq, arrays=arrays).astype(np.float32) / patmb
         ).astype(np.float32)
-        columns["qcg"] = np.where(
-            (columns["qcg"] < zero) | (columns["qcg"] > np.float32(0.1)),
-            columns["qc3d"], columns["qcg"]).astype(np.float32)
-        columns["qvg"] = np.where(
-            (columns["qvg"] <= zero) | (columns["qvg"] > np.float32(0.1)),
-            (columns["qsg"] * columns["mavail"]).astype(np.float32),
-            columns["qvg"]).astype(np.float32)
+        invalid_qvg = ((columns["qvg"] <= zero)
+                       | (columns["qvg"] > np.float32(0.1)))
+        if qvg_air:
+            # The operational RAP/HRRR branch, LSMRUC:479-483: no QCG check.
+            columns["qcg"] = np.where(
+                invalid_qvg, zero, columns["qcg"]).astype(np.float32)
+            columns["qvg"] = np.where(
+                invalid_qvg, columns["qv3d"], columns["qvg"]).astype(np.float32)
+        else:
+            # Public WRF v4.6.1 :505-514.
+            columns["qcg"] = np.where(
+                (columns["qcg"] < zero) | (columns["qcg"] > np.float32(0.1)),
+                columns["qc3d"], columns["qcg"]).astype(np.float32)
+            columns["qvg"] = np.where(
+                invalid_qvg,
+                (columns["qsg"] * columns["mavail"]).astype(np.float32),
+                columns["qvg"]).astype(np.float32)
         columns["qsfc"] = (
             columns["qvg"] / (one + columns["qvg"]).astype(np.float32)
         ).astype(np.float32)
@@ -9288,6 +9661,9 @@ def ruc_land_surface_step(
         soil_category, vegetation_category, columns["shdmin"],
         columns["shdmax"], columns["vegfra"], columns["znt"], columns["lai"],
         rdlai2d=rdlai2d, iswater=water_category, mminlu=mminlu,
+        mosaic_lu=mosaic_lu, mosaic_soil=mosaic_soil,
+        landusef=(None if landusef is None else np.asarray(landusef).reshape(-1, ncolumn)),
+        soilctop=(None if soilctop is None else np.asarray(soilctop).reshape(-1, ncolumn)),
         parameters=bundle, arrays=arrays,
     )
     iforest = np.asarray(surface.iforest, dtype=np.int32)
@@ -9491,15 +9867,30 @@ def ruc_land_surface_step(
             values_out[name] = local[name][take]
         return values_out
 
+    from woof.core.ruc_spp import pattern_inputs
+    spp_pattern, spp_field = pattern_inputs(
+        spp_lsm, pattern_spp_lsm, field_sf, (nzs,) + horizontal_shape, arrays=np)
+    if spp_pattern is not None:
+        spp_pattern = spp_pattern.reshape(nzs, ncolumn)
+    spp_diagnostic = (None if spp_field is None else
+                      np.array(spp_field.reshape(nzs, ncolumn), copy=True))
+
     def _dispatch(take, seeds):
-        return ruc_surface_temperature_step(
+        spp_arguments = {} if spp_pattern is None else {
+            "spp_lsm": 1, "pattern_spp_lsm": spp_pattern[:, take],
+            "field_sf": None if spp_diagnostic is None else spp_diagnostic[:, take].copy()}
+        step_result = ruc_surface_temperature_step(
             _sfctmp_values(take), delt=float(timestep), conflx=conflx[take],
             ivgtyp=vegetation_category[take], iland=iland[take],
             nroot=nroot[take], ilnb=seeds, isice=ice_category,
             c1sn=c1sn, c2sn=c2sn, myj=myj, isncovr_opt=isncovr_opt,
             mminlu=mminlu, parameters=bundle, leaves=leaves, stages=stages,
-            arrays=arrays,
+            soilprop=soilprop, snow=snow,
+            arrays=arrays, **spp_arguments,
         )
+        if spp_diagnostic is not None:
+            spp_diagnostic[:, take] = spp_arguments["field_sf"]
+        return step_result
 
     if run.size:
         if ilnb_chain:
@@ -9568,6 +9959,23 @@ def ruc_land_surface_step(
         columns["lh"][run] = np.asarray(surface_step.qfx, dtype=np.float32)
         columns["hfx"][run] = np.asarray(surface_step.hfx, dtype=np.float32)
         sflx[run] = np.asarray(surface_step.s, dtype=np.float32)
+
+    # ``wrf_461`` irrigates under ``mosaic_lu == 1`` only (v4.6.1 :985);
+    # ``wrf_45`` has no mosaic gate (v4.5.2 :970) and reads the LANDUSEF
+    # fractions when the run carries them.  Without them the dominant
+    # category stands for the whole cell (WRF's arithmetic on a one-hot
+    # LANDUSEF), the same reduction SOILVEGIN makes with mosaic off.
+    if mosaic_lu or irrigation == "wrf_45":
+        fractions = (None if landusef is None else mosaic_fractions(
+            np.asarray(landusef).reshape(-1, ncolumn), (ncolumn,),
+            "landusef", len(vegetation.rows), arrays=np))
+        irrigate(soilm1d, landusef=fractions, vegfrac=columns["vegfra"],
+                 shdmin=columns["shdmin"], shdmax=columns["shdmax"],
+                 wilt=wilt, qmin=qmin, nroot=nroot,
+                 crop=int(vegetation.scalars["CROP"]),
+                 natural=int(vegetation.scalars["NATURAL"]),
+                 active=land_here, form=irrigation, lai=columns["lai"],
+                 ivgtyp=vegetation_category, arrays=np)
 
     # ``:1024-1035`` soil moisture diagnostics.
     smavail = np.zeros(ncolumn, dtype=np.float32)
@@ -9691,6 +10099,8 @@ def ruc_land_surface_step(
     for name, ok in zip(checked, finite.tolist()):
         if not ok:
             raise ValueError(f"RUC driver produced non-finite {name}")
+    if spp_field is not None:
+        spp_field[...] = spp_diagnostic.reshape((nzs,) + horizontal_shape)
     return result
 
 

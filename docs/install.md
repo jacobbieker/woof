@@ -361,11 +361,11 @@ observation battery and the demo gallery's basemaps.
 | `recast-woof[render]` | `wrf-rust>=0.2.39` | `woof render`'s matplotlib engine, `woof enprod`, and derived quantities. The default rust engine needs none of it. The floor is 0.2.39 because that is the oldest release with wheels for every supported interpreter (cp310-cp314); no environment marker, nothing skipped |
 | `recast-woof[dev]` | `pytest`, `psutil`, `pyyaml`, `setuptools` | running the test battery (setuptools because the wheel-gate tests run `setup.py` with the battery's interpreter) |
 | `recast-woof[publish]` | `huggingface_hub` | maintainers only: publishing the WPS_GEOG mirror snapshot. Needs write credentials nobody else has, so it is deliberately outside `[all]` |
-| `recast-woof[all-cu12]` | `gpu-cu12` + `render` | one line for a CUDA 12.x forecasting box |
-| `recast-woof[all-cu13]` | `gpu-cu13` + `render` | one line for a CUDA-13-only forecasting box |
+| `recast-woof[all-cu12]` | `gpu-cu12` + `render` + `obs` | one line for a CUDA 12.x forecasting box |
+| `recast-woof[all-cu13]` | `gpu-cu13` + `render` + `obs` | one line for a CUDA-13-only forecasting box |
 | `recast-woof[all]` | alias of `all-cu12` | kept so existing install lines keep working |
 | `recast-woof[geog]` | `rasterio`, `pyproj` | the pure-Python **parity fallback** for the high-resolution warp (`WOOF_STATIC_PYTHON=1`). The default engine is the Rust `static-fields` library a bare install stages, so this changes no default and unlocks no product; deliberately outside `[all]` because 118.8 MiB of GDAL stack does not belong in the recommended one-liner for a debugging aid |
-| `recast-woof[obs]` | nothing | **empty as of 2.4.1.** scipy moved into the base install, so scoring a forecast against observations (`woof.verify.obs`) works from `pip install recast-woof`; the name is kept so the old line does not fail |
+| `recast-woof[obs]` | `pyarrow` | reading station reports from the Dynamical.org ASOS Parquet archive (`woof.obs.dynamical_asos`), which scores a forecast against surface observations in the US and a dozen other countries without the IEM front door. Everything else in `woof.verify.obs` works from `pip install recast-woof` (scipy has been a base dependency since 2.4.1) |
 | `recast-woof[dealias]` | nothing | **empty as of 2.4.1.** scipy moved into the base install, so the `vad-region` dealiasing engine is selectable from `pip install recast-woof`; the name is kept so the old line does not fail |
 
 `pyshp` moved into the base install alongside `scipy` for the same
@@ -407,7 +407,7 @@ python tools/smoke_rw_wps_cpu_install.py \
   --receipt /tmp/rw-wps-clean-cpu-install.json
 ```
 
-The smoke command installs only NumPy and netCDF4, extracts with traversal and
+The smoke command installs only NumPy, netCDF4 and threadpoolctl, extracts with traversal and
 non-regular-entry checks, invokes `install.sh --skip-gpu`, runs the public CLI
 from outside the checkout, and retains a receipt. Supply `--wheelhouse DIR`
 for an offline dependency install.
@@ -416,7 +416,7 @@ After extracting an archive into a new directory:
 
 ```bash
 python -m venv /opt/rw-wps-venv
-/opt/rw-wps-venv/bin/python -m pip install 'numpy>=1.26' 'netCDF4>=1.6'
+/opt/rw-wps-venv/bin/python -m pip install 'numpy>=1.26' 'netCDF4>=1.6' 'threadpoolctl>=3.1'
 
 WOOF_PYTHON=/opt/rw-wps-venv/bin/python ./install.sh --skip-gpu
 ./bin/rw-wps --version
@@ -487,8 +487,8 @@ python tools/smoke_rw_wps_cpu_install.py `
 ```
 
 The smoke extracts only regular ZIP entries beneath one root, rejects path
-traversal and case-insensitive duplicate paths, installs only NumPy and
-netCDF4, and proves CuPy and Matplotlib are absent. Manual installation is:
+traversal and case-insensitive duplicate paths, installs only NumPy,
+netCDF4 and threadpoolctl, and proves CuPy and Matplotlib are absent. Manual installation is:
 
 ```powershell
 $env:WOOF_PYTHON = "C:\absolute\venv\Scripts\python.exe"

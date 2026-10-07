@@ -136,7 +136,7 @@ def test_an_extra_fires_when_absent_and_is_silent_when_present(monkeypatch):
     absent = _by_name(doctor._extras_checks())["pip extra [obs]"]
     assert absent.status == "missing"
     assert absent.action == "pip install 'recast-woof[obs]'"
-    assert "tools.obs_battery_score" in absent.detail
+    assert "woof.obs.dynamical_asos" in absent.detail
 
     # Direction 2: present.  Not a gap, and no install line to run.
     monkeypatch.setattr(importlib.metadata, "version", lambda name: "1.14.0")

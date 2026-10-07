@@ -124,7 +124,8 @@ def _build(*, nx: int = 8, ny: int = 6, nz: int = 40, vegtyp: int = _GRASSLAND,
            frozen: bool = False, dt: float = 12.0, radiation=None,
            ra_physics: int = 0, radt_minutes: float = 12.0,
            mp_physics: int = 6, sf_sfclay_physics: int = 1,
-           bl_pbl_physics: int = 1, nzs: int = _NSOIL):
+           bl_pbl_physics: int = 1, nzs: int = _NSOIL,
+           ruc_soilprop: str = "wrf_45", ruc_snow: str = "wrf_45"):
     """One RUC forecast configuration.
 
     ``nzs`` defaults to :data:`_NSOIL`, which is what keeps every caller in
@@ -150,7 +151,8 @@ def _build(*, nx: int = 8, ny: int = 6, nz: int = 40, vegtyp: int = _GRASSLAND,
                     sf_sfclay_physics=sf_sfclay_physics,
                     sf_surface_physics=3, num_soil_layers=nzs,
                     bl_pbl_physics=bl_pbl_physics, bldt=0.0,
-                    ra_physics=ra_physics, radt_minutes=radt_minutes)
+                    ra_physics=ra_physics, radt_minutes=radt_minutes,
+                    ruc_soilprop=ruc_soilprop, ruc_snow=ruc_snow)
 
     def theta(z):
         z = np.asarray(z, np.float64)
@@ -769,8 +771,9 @@ def test_water_columns_take_the_water_arm_and_sea_ice_takes_its_own():
 
 
 @requires_gpu
-def test_lakemask_bypasses_ruc_while_a_neighboring_land_column_runs():
-    """WRF's EM_CORE lake GOTO leaves the RUC column state untouched."""
+@pytest.mark.parametrize("lakemodel", [0, 1])
+def test_lakemask_bypass_requires_enabled_lake_model(lakemodel):
+    """The WRF lake GOTO needs both the model selector and lake mask."""
     from woof.core import physics
     from woof.core.ruc_runtime import ruc_lsm_step
     from woof.core.surface_forcing import SurfacePrecipitationForcing
@@ -788,15 +791,20 @@ def test_lakemask_bypasses_ruc_while_a_neighboring_land_column_runs():
         precipitation=SurfacePrecipitationForcing.from_fields(driver.fields),
         dt=cfg.dt, itimestep=1, mosaic_lu=cfg.mosaic_lu,
         mosaic_soil=cfg.mosaic_soil, flag_sm_adj=cfg.flag_sm_adj,
-        spp_lsm=cfg.spp_lsm)
+        spp_lsm=cfg.spp_lsm, lakemodel=lakemodel)
 
-    for name in names:
-        cp.testing.assert_array_equal(
-            driver.fields[name][..., 0, 0], before[name][..., 0, 0])
+    if lakemodel:
+        for name in names:
+            cp.testing.assert_array_equal(
+                driver.fields[name][..., 0, 0], before[name][..., 0, 0])
+    else:
+        assert any(not bool(cp.array_equal(
+            driver.fields[name][..., 0, 0], before[name][..., 0, 0]))
+                   for name in names)
     assert any(not bool(cp.array_equal(
         driver.fields[name][..., 0, 1], before[name][..., 0, 1]))
                for name in names)
-    assert census == {"land": 7, "water": 0, "lake": 1, "sea_ice": 0}
+    assert census == {"land": 8 - lakemodel, "water": 0, "lake": lakemodel, "sea_ice": 0}
 
 
 @requires_gpu
@@ -928,30 +936,46 @@ def test_the_snow_mass_budget_closes_and_a_cold_pack_persists():
     the melt runs, plus the control that says the melt is driven by the warm
     ground rather than by the scheme leaking mass: an identical pack over
     subfreezing air and soil must keep its SWE and accumulate exactly no melt.
+
+    The fast melt above is the WRF v4.6.1 snow scheme's (``ruc_snow =
+    "wrf_461"``), whose bottom-melt cap applies only to light packs over
+    ground below 283 K, so a 303 K soil melts the pack from below at once;
+    that leg runs it by name.  Under explicit ``wrf_45`` (the operational
+    RAP/HRRR branch) bottom melt is capped at 5.8e-9 m/s whatever the
+    ground temperature, so the same pack persists through these 144 s; the
+    budget must close there too.
     """
     from woof.core.dycore import step
 
-    state, cfg, driver = _build(nx=6, ny=4, nz=20, snow_mm=15.0,
-                                snow_depth_m=0.08, soil_moisture=0.30)
-    swe0 = float(_land(cp.asnumpy(driver.fields["snow"]), cfg).mean())
-    assert abs(swe0 - 15.0) < 1e-3
-    for _ in range(12):
-        step(state, cfg)
-    swe = _land(cp.asnumpy(driver.fields["snow"]), cfg)
-    melt = _land(cp.asnumpy(driver.fields["acsnom"]), cfg)
-    # SFCEVP is accumulated TWICE by module_sf_ruclsm.F (:1095 and :1116), so
-    # a water budget must halve it -- which is exactly the published
-    # sfcevp_is_double_counted_on_purpose restriction, used here rather than
-    # merely asserted elsewhere.
-    evap = _land(cp.asnumpy(driver.fields["sfcevp"]), cfg) / 2.0
-    closure = float((swe + melt + evap).mean()) - swe0
-    assert abs(closure) < 0.05 * swe0, (
-        f"snow mass budget does not close: SWE {swe.mean():.4f} + melt "
-        f"{melt.mean():.4f} + evap/2 {evap.mean():.4f} against {swe0} mm "
-        f"initial, residual {closure:.4f} mm")
-    assert float(melt.mean()) > 0.9 * swe0, (
-        "the pack vanished without ACSNOM accounting for it, which is a "
-        "dropped pack rather than a melted one")
+    for lineage in ("wrf_461", "wrf_45"):
+        state, cfg, driver = _build(nx=6, ny=4, nz=20, snow_mm=15.0,
+                                    snow_depth_m=0.08, soil_moisture=0.30,
+                                    ruc_snow=lineage)
+        swe0 = float(_land(cp.asnumpy(driver.fields["snow"]), cfg).mean())
+        assert abs(swe0 - 15.0) < 1e-3
+        for _ in range(12):
+            step(state, cfg)
+        swe = _land(cp.asnumpy(driver.fields["snow"]), cfg)
+        melt = _land(cp.asnumpy(driver.fields["acsnom"]), cfg)
+        # SFCEVP is accumulated TWICE by module_sf_ruclsm.F (:1095 and
+        # :1116), so a water budget must halve it -- which is exactly the
+        # published sfcevp_is_double_counted_on_purpose restriction, used
+        # here rather than merely asserted elsewhere.
+        evap = _land(cp.asnumpy(driver.fields["sfcevp"]), cfg) / 2.0
+        closure = float((swe + melt + evap).mean()) - swe0
+        assert abs(closure) < 0.05 * swe0, (
+            f"{lineage}: snow mass budget does not close: SWE "
+            f"{swe.mean():.4f} + melt {melt.mean():.4f} + evap/2 "
+            f"{evap.mean():.4f} against {swe0} mm initial, residual "
+            f"{closure:.4f} mm")
+        if lineage == "wrf_461":
+            assert float(melt.mean()) > 0.9 * swe0, (
+                "the pack vanished without ACSNOM accounting for it, which "
+                "is a dropped pack rather than a melted one")
+        else:
+            assert float(swe.mean()) > 0.9 * swe0, (
+                "under the capped bottom melt the pack should persist; "
+                f"SWE fell to {swe.mean():.4f} mm")
 
     # The control: the same pack in a subfreezing column keeps its mass and
     # melts nothing at all, so the melt above is the warm ground and not the
@@ -1035,7 +1059,12 @@ def test_udrunoff_is_zero_because_no_level_oversaturates_and_can_be_nonzero():
     # rather than by a remembered constant.
     saturated = _maxsmc(_LOAM)
     assert 0.44 < saturated < 0.46, saturated
-    state, cfg, driver = _build(nx=6, ny=4, nz=20, soil_moisture=saturated)
+    # The witness column runs v4.6.1's SOILPROP, on which it was measured.
+    # MEASURED under the default wrf_45 lineage: this saturated column
+    # leaves runoff2 at exactly zero in every land cell, so the accumulator
+    # under test would never be written.  The wiring is the same for both.
+    state, cfg, driver = _build(nx=6, ny=4, nz=20, soil_moisture=saturated,
+                                ruc_soilprop="wrf_461")
     step(state, cfg)
 
     runoff2 = _land(cp.asnumpy(driver.fields["ruc_runoff2"]), cfg)
@@ -1344,7 +1373,13 @@ def test_a_frozen_soil_carrier_perturbation_also_breaks_the_next_step(
     from woof.core.dycore import step
 
     def frozen():
-        return _build(nx=6, ny=4, nz=20, frozen=True, soil_moisture=0.30)
+        # KEEPFR3DFLAG reaches 1 only where soil temperature and moisture
+        # both rise in a step (:2742-2744).  The 16 witness cells were
+        # measured on v4.6.1's SOILPROP.  MEASURED under the default wrf_45
+        # lineage: no cell of this grid reaches 1 in six steps, so the
+        # carrier would never be read.  The round trip is the same for both.
+        return _build(nx=6, ny=4, nz=20, frozen=True, soil_moisture=0.30,
+                      ruc_soilprop="wrf_461")
 
     state, cfg, driver = frozen()
     for _ in range(6):

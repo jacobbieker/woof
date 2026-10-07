@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from woof import render_difference, rustwx
+from woof import cli, render, render_difference, rustwx
 
 
 def _touch(folder: Path, name: str) -> Path:
@@ -94,3 +94,101 @@ def test_the_renderer_difference_line_parses_and_the_contract_names_it():
         'DIFFERENCE valid=2025-03-16 00:00Z a_frame=0 b_frame=0') is None
     assert "\t--diff-against\t" in rustwx.RENDERER_ABI_MARKER
     assert "\tDIFFERENCE" in rustwx.RENDERER_ABI_MARKER
+
+
+def test_default_canvas_and_difference_flags_agree_at_both_cli_doors():
+    words = ["render", "--diff", "run-a", "run-b", "--diff-sheet",
+             "--diff-labels", "forecast-a", "forecast-b"]
+    fast = vars(cli.build_parser(render_only=True).parse_args(words))
+    full = vars(cli.build_parser().parse_args(words))
+    full.pop("ingest_preflight_handler", None)
+    assert fast == full
+    assert fast["size"] == "auto"
+    assert render.parse_size("auto") is None
+    assert render.parse_size("640x480") == (640, 480)
+    assert fast["diff"] == [Path("run-a"), Path("run-b")]
+
+
+@pytest.mark.parametrize("other", ["pair", "compare"])
+def test_a_run_difference_refuses_other_comparison_inputs(other, capsys):
+    words = ["render", "--diff", "run-a", "run-b"]
+    words += ["--pair", "png-a", "png-b"] if other == "pair" else ["--compare", "hrrr"]
+    args = cli.build_parser(render_only=True).parse_args(words)
+    assert render.render_main(args) == 2
+    reason = capsys.readouterr().err
+    assert "--diff" in reason and "--" + other in reason
+    assert "choose one comparison" in reason
+
+
+def _recorded_pairing(a, b, stamps, identities=None, **options):
+    def metadata(path):
+        return ((identities or {}).get(path, (path.parent, path.name.split("_")[1])),
+                tuple(dt.datetime(2025, 3, 16, hour) for hour in stamps[path]))
+    return render_difference.pair_frames_by_valid_time(
+        a, b, reader=metadata, **options)
+
+
+def test_inner_records_pair_by_actual_time_and_keep_both_full_timelines():
+    a = Path("a/wrfout_d01_2025-03-16_00_00_00")
+    b = Path("b/wrfout_d01_2025-03-16_01_00_00")
+    pairing = _recorded_pairing([a], [b], {a: [0, 1, 2], b: [1, 2, 3]}, timeidx=2)
+    assert [(domain, valid.hour) for domain, valid, *_ in pairing.pairs] == [("d01", 2)]
+    assert pairing.contexts[("d01", dt.datetime(2025, 3, 16, 2))] == ([a], [b], 2)
+    assert "only run B has d01 03/16 03:00Z" in render_difference.unpaired_notice(pairing)
+
+
+def test_timeidx_is_per_file_unless_the_run_is_a_series():
+    a = [Path(f"a/wrfout_d01_2025-03-16_{hour:02d}_00_00") for hour in (0, 2)]
+    b = [Path(f"b/{path.name}") for path in a]
+    stamps = {a[0]: [0, 1], a[1]: [2, 3], b[0]: [0, 1], b[1]: [2, 3]}
+    individual = _recorded_pairing(a, b, stamps, timeidx=1)
+    series = _recorded_pairing(a, b, stamps, timeidx=1, series=True)
+    assert [valid.hour for _, valid, *_ in individual.pairs] == [1, 3]
+    assert [valid.hour for _, valid, *_ in series.pairs] == [1]
+    assert all(paths_a == a and paths_b == b
+               for paths_a, paths_b, _ordinal in individual.contexts.values())
+
+
+def test_timeidx_selects_each_domain_and_keeps_its_window_context():
+    a = [Path(f"a/wrfout_{domain}_2025-03-16_{hour:02d}_00_00")
+         for hour in (0, 1) for domain in ("d01", "d02")]
+    b = [Path(f"b/{path.name}") for path in a]
+    stamps = {path: [int(path.name[-8:-6])] for path in [*a, *b]}
+    pairing = _recorded_pairing(a, b, stamps, timeidx=1, series=True)
+    assert [(domain, valid.hour) for domain, valid, *_ in pairing.pairs] == [
+        ("d01", 1), ("d02", 1)]
+    for (domain, _valid), (paths_a, paths_b, ordinal) in pairing.contexts.items():
+        assert len(paths_a) == len(paths_b) == 2 and ordinal == 1
+        assert all(f"wrfout_{domain}_" in path.name for path in [*paths_a, *paths_b])
+
+
+def test_missing_selected_a_time_is_named_and_never_shifted_to_a_shared_time():
+    a = Path("a/wrfout_d01_2025-03-16_00_00_00")
+    b = Path("b/wrfout_d01_2025-03-16_02_00_00")
+    pairing = _recorded_pairing([a], [b], {a: [0, 1, 2], b: [2]}, timeidx=1, series=True)
+    assert pairing.pairs == []
+    assert "only run A has d01 03/16 01:00Z" in render_difference.unpaired_notice(pairing)
+
+
+def test_out_of_range_difference_timeidx_is_refused_before_rendering():
+    a = Path("a/wrfout_d01_2025-03-16_00_00_00")
+    b = Path("b/wrfout_d01_2025-03-16_00_00_00")
+    with pytest.raises(ValueError, match="--timeidx 2 out of range; file has 2 frame"):
+        _recorded_pairing([a], [b], {a: [0, 1], b: [0, 1]}, timeidx=2)
+
+
+def test_existing_moving_nest_context_reaches_the_difference_store():
+    a = [Path(f"a/wrfout_d02_2025-03-16_{hour:02d}_00_00") for hour in (0, 1)]
+    b = [Path(f"b/{path.name}") for path in a]
+    stamps = {a[0]: [0], a[1]: [1], b[0]: [0], b[1]: [1]}
+    identities = {path: (path.parent, index) for side in (a, b)
+                  for index, path in enumerate(side)}
+
+    def groups(paths):
+        return [(paths[:1], []), (paths, paths[:1])]
+
+    pairing = _recorded_pairing(a, b, stamps, identities=identities,
+                               series_groups=groups, series=True)
+    assert [(domain, valid.hour) for domain, valid, *_ in pairing.pairs] == [
+        ("d02", 0), ("d02", 1)]
+    assert pairing.contexts[("d02", dt.datetime(2025, 3, 16, 1))] == (a, b, 1)

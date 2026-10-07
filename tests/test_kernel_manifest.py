@@ -44,6 +44,7 @@ KERNEL_DIR = REPO / "woof" / "core" / "kernels"
 #: is the census behind this list; nothing under ``gpuwm/`` may construct a
 #: RawModule without appearing either here or in its explained allow-list.
 SITE_FILES = (
+    "woof/core/spp_kernel_sources.py",
     "woof/core/kernels/__init__.py",
     "woof/core/nest_interp.py",
     "woof/core/noahmp_driver_gpu.py",
@@ -54,6 +55,7 @@ SITE_FILES = (
     "woof/core/noahmp_thermal_gpu.py",
     "woof/core/noahmp_vegeflux_gpu.py",
     "woof/core/rrtmg_sw.py",
+    "woof/core/ruc_spp.py",
     # The fused forecast units the 2026-09-30 speed lanes added: New
     # Tiedtke's fused column (b11fc66ab), Noah's forcing prologue
     # (3e23476ce) and SFCDIAGS (9aea8904f), the cumulus clock (da604fe01,
@@ -63,6 +65,17 @@ SITE_FILES = (
     "woof/core/noah_sfcdiags.py",
     "woof/core/cumulus_clock.py",
     "woof/core/tendency_coupling.py",
+    "woof/ensemble/batch_fluxes.py",
+    "woof/ensemble/batch_kernel.py",
+    "woof/ensemble/batch_perturbation.py",
+    "woof/ensemble/batch_physics.py",
+    "woof/ensemble/batch_physics_init.py",
+    "woof/ensemble/batch_product_output.py",
+    "woof/ensemble/batch_products.py",
+    # 3fa941d96, lane/ensemble-nested-pack delivered at ff238b1d9, adds
+    # the native member RUC unit. Audit its actual source/options recording.
+    "woof/ensemble/batch_ruc.py",
+    "woof/ensemble/surface_recipe.py",
 )
 
 #: Two cached loaders, nest interpolation, and the one Noah-MP compile
@@ -71,8 +84,14 @@ SITE_FILES = (
 #: NOT among them -- it compiles through :data:`EXPECTED_NVRTC_SITE_COUNT`'s
 #: route instead, see the module docstring -- but it stays in
 #: :data:`SITE_FILES` because it still records.  Plus the six fused units
-#: of the speed lanes' five files (the cumulus clock compiles two).
-EXPECTED_SITE_COUNT = 10
+#: of the speed lanes' five files (the cumulus clock compiles two), and the
+#: CLM lake's own ``--fmad=false`` site beside the two cached loaders
+#: (``_load_module_without_fmad``, 2.8.5), which records in its own function.
+# The surface-state recipe records its seeded preparation unit at the
+# compiler call too, so the same source/options audit covers that site.
+# 3fa941d96, lane/ensemble-nested-pack: the one recorded member RUC
+# constructor joins the 28 retained sites; no compiler source is changed.
+EXPECTED_SITE_COUNT = 29
 
 #: ``cp.RawModule`` constructors under ``gpuwm/`` that are NOT manifest
 #: sites, each with the reason.  Closed and literal: a new constructor
@@ -106,11 +125,30 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "functions plus the fused sfctmp and driver sources), one module per "
         "soil geometry; it records through record_module in the same function "
         "under its own key, as the P3 composed unit above does"),
+    "woof/core/storm_tracking.py": (
+        "the vortex tracker's one-kernel isobaric height, a transcription of "
+        "the rw-isobaric crate's column read graded word for word against it "
+        "by tests/test_storm_tracking_isobaric_gpu.py; it runs between steps "
+        "to steer a nest, computes no forecast field and is not a "
+        "translation unit the manifest freezes"),
     "woof/da/fixed_order_gemm.py": (
         "the LETKF analysis's fixed-order batched products, one RawKernel per "
         "float dtype compiled on first use; they run in the data-assimilation "
         "analysis, not a forecast step, record nothing and are not a "
         "translation unit the manifest freezes"),
+    "woof/da/radar_tten.py": (
+        "the research data-assimilation line's radar latent heating, one "
+        "RawKernel per entry point compiled on first use: the builder runs "
+        "between legs, and its one model-side kernel runs only while a "
+        "forcing is attached by the cycle driver's opt-in flag; it records "
+        "nothing and is graded against NOAA's compiled Fortran instead"),
+    "woof/da/hydrometeor_analysis.py": (
+        "the radar precipitation analysis of the research DA line (NOAA's "
+        "Thompson retrieval and GSD precipitation block, glibc_flt64.cuh "
+        "prepended), one RawModule compiled on first use; it runs in the "
+        "data-assimilation analysis, not a forecast step, records nothing and "
+        "is graded bit for bit against NOAA's own Fortran by "
+        "tools/gsd_precip_oracle"),
     "woof/core/noah_mosaic.py": (
         "the Noah mosaic tile loop's two compile sites (with and without the "
         "urban canopy, --fmad=false); each records through record_module in "
@@ -136,10 +174,19 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "tests/test_smallstep_vertical_wrf471_parity.py, never in a forecast"),
 }
 
-#: ``compile_using_nvrtc`` sites among :data:`SITE_FILES`: rrtmg_sw only.
+#: ``compile_using_nvrtc`` sites among SITE_FILES: shortwave and RUC SPP.
 #: (``rrtmg_lw.py`` and ``rrtmg_mcica.py`` take the same route but record
 #: nothing, so they are not manifest sites and are not listed above.)
-EXPECTED_NVRTC_SITE_COUNT = 1
+EXPECTED_NVRTC_SITE_COUNT = 3
+
+# These direct-NVRTC transforms precede forecast construction. They bind
+# compiler options and source bytes in their own preparation receipts.
+PREPARATION_NVRTC_SITES = {
+    "woof/ensemble/recentered.py": (
+        "one-time physical source preparation before initialize_real at "
+        "initial and boundary knots, never a forecast execution kernel; "
+        "its operator receipt binds the source SHA, compiler options and full population mapping"),
+}
 
 
 def _is_rawmodule(node: ast.AST) -> bool:
@@ -304,6 +351,31 @@ def test_every_direct_nvrtc_site_is_accounted_for():
     assert total == EXPECTED_NVRTC_SITE_COUNT, (
         f"expected {EXPECTED_NVRTC_SITE_COUNT} compile_using_nvrtc site(s) "
         f"among the manifest files, found {total}")
+
+
+def test_preparation_nvrtc_route_preserves_subnormals_and_records_its_options():
+    from tools.ftz_receipt import route_inventory
+    from woof.ensemble import recentered
+    for path,reason in PREPARATION_NVRTC_SITES.items():
+        source = _site_text(path)
+        sites = route_inventory.scan_source(path,source)
+        assert len(sites) == 1
+        assert sites[0]["constructor_kind"] == "cupy.cuda.compiler.compile_using_nvrtc"
+        assert sites[0]["options_expression"] == "_CUDA_OPTIONS"
+        assert len(reason.split()) >= 12
+        assert "receipt[\"compiler_options\"] = list(_CUDA_OPTIONS)" in source
+    assert recentered._CUDA_OPTIONS == ("-std=c++17", "--fmad=false", "--ftz=false")
+
+
+def test_ruc_hydraulic_nvrtc_route_preserves_small_conductivities():
+    from tools.ftz_receipt import route_inventory
+    from woof.core import ruc_spp
+    path = "woof/core/ruc_spp.py"
+    sites = route_inventory.scan_source(path, _site_text(path))
+    assert len(sites) == 1
+    assert sites[0]["constructor_kind"] == "cupy.cuda.compiler.compile_using_nvrtc"
+    assert sites[0]["options_expression"] == "MODULE_OPTIONS"
+    assert ruc_spp.MODULE_OPTIONS == ("-std=c++17", "--fmad=false", "--ftz=false")
 
 
 @pytest.mark.parametrize("path", SITE_FILES)

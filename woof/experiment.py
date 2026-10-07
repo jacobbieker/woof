@@ -49,6 +49,7 @@ from woof import physics_mode as physics_mode_module
 from woof.core.devices import DeviceOptions, DEVICES_OFF, validate_device_road
 from woof.core import streaming as streaming_module
 from woof.io import history_selection as history_selection_module
+from woof import simulated_radar_config as simulated_radar_module
 from woof.config_keys import KeyRow, key_rows
 from woof.config import (DEFAULT_COLUMN_CHUNK,
                           EXPLICIT_HORIZONTAL_DIFFUSION_LIMIT,
@@ -292,10 +293,19 @@ _DOMAIN_RUN_OVERRIDES = (
     "wrf_rrtmg_compatibility", "o3input", "use_mp_re", "swrad_scat",
     "diff_6th_factor", "epssm", "spec_exp", "mp_physics", "moist",
     "moist_cq", "nest_microphysics_transition",
+    # WRF SPP consumer switches are max_domains. Each original driver
+    # owns its enabled parameter patterns and checkpoint state.
+    # spp_lsm stays tree-wide: its consumer is the land surface, which
+    # this loader keeps shared, and a per-domain row would change the
+    # registry physics every earlier preparation was bound to.
+    "spp_conv", "spp_pbl",
     "km_opt", "bl_pbl_physics", "sf_sfclay_physics", "c_s", "c_k",
     # WRF Registry.EM_COMMON:2889 declares moist_mix6_off max_domains, so it
     # is per domain here for the same reason diff_6th_factor is.
     "moist_mix6_off",
+    # The NOAA WRFV3.9 fork declares diff_6th_factor2 max_domains
+    # (Registry.EM_COMMON:2629), beside diff_6th_factor.
+    "diff_6th_factor2",
     "diff_6th_opt", "mix_isotropic", "mix_upper_bound", "isfflx",
     "tke_heat_flux", "tke_drag_coefficient", "tke_upper_bound",
     # The rest of the numerics WRF declares `max_domains`, added because
@@ -321,6 +331,9 @@ _DOMAIN_RUN_OVERRIDES = (
     "emdiv", "smdiv",
     "khdif", "kvdif", "diff_opt", "mix_full_fields",
     "h_sca_adv_order", "moist_adv_opt",
+    # WRF declares the remaining advection orders max_domains too
+    # (operational HRRR runs vert_order 5 on d01 and 3 on its nests).
+    "v_sca_adv_order", "v_mom_adv_order", "h_mom_adv_order",
     "tke_budget",
     # Output-only, and per domain because its cost scales with the grid:
     # four extra (nz+1, ny, nx) planes per frame, so the finest domains
@@ -373,6 +386,8 @@ _DOMAIN_RUN_OVERRIDES = (
     # sf_urban_physics stay [shared]; every domain's RunConfig still passes
     # validate_noah_mosaic_config with them.
     "mosaic_urban_canopy",
+    # WRF Registry scopes CLM lake selection per domain.
+    "sf_lake_physics", "use_lakedepth", "lakedepth_default", "lake_min_elev",
     # WRF declares topo_wind and gwd_opt max_domains too
     # (woof.core.terrain_drag); the GSL suite tapers itself with each
     # domain's grid length, so a column is the natural shape.
@@ -793,6 +808,28 @@ def refuse_unrouted_spectral_numerics(exp, route: str) -> None:
         "config identity.  Run this configuration through the "
         "execute_experiment routes (woof run / the prepared tree "
         "runners), or set mode = \"off\".")
+
+
+def refuse_unrouted_simulated_radar(exp, route: str) -> None:
+    """Fail loud where an enabled [simulated_radar] would be dropped.
+
+    The radar listens on the forecast's history landings through
+    :class:`woof.simulated_radar.LiveSimulatedRadar`, which the
+    ``woof run``, ``woof go`` and prepared-runner routes attach.  A route
+    that integrates without it (the ensemble member and local cycling
+    member legs) would accept the table, finish, and write no radar volume:
+    a requested product silently absent from a run that reports success.
+    ``enabled = false`` passes; it asks for nothing.
+    """
+    options = getattr(exp, "simulated_radar", None)
+    if options is None or not getattr(options, "enabled", False):
+        return
+    raise ValueError(
+        f"the {route} route does not attach [simulated_radar] to its history "
+        "landings; refused rather than ignored, because the run would finish "
+        "with no radar volume while its configuration asked for one.  Run "
+        "this configuration through woof go, woof run or woof sim, or set "
+        "[simulated_radar] enabled = false for the members.")
 
 
 def refuse_unrouted_perturbation(exp, route: str) -> None:
@@ -1369,6 +1406,8 @@ class ExperimentConfig:
     #: Excluded from the restart identity for the same reason ``tiles``
     #: is: it changes no number the model computes.
     output: "object" = history_selection_module.FULL
+    #: Radar products observe saved history and do not change restart state.
+    simulated_radar: simulated_radar_module.SimulatedRadarOptions = simulated_radar_module.OFF
     #: grid_ids whose ``mix_isotropic`` was CHOSEN BY THE MODEL because
     #: the config left it unset or wrote the ``"auto"`` sentinel (ArWen's
     #: 2026-08-16 auto-switch ruling; ``resolve_auto_mix_isotropic``).
@@ -1414,6 +1453,15 @@ class ExperimentConfig:
     #: every root terrain exactly as before and drops out of the restart
     #: identity; True binds it, because the terrain is part of the run.
     smooth_cg_topo: bool = False
+    #: The validated [physics_params] set
+    #: (:class:`woof.physics_params.PhysicsParamSet`), or ``None`` when the
+    #: config does not carry one.  ``None`` is the default contract: every
+    #: kernel literal and parameter table is WRF's/today's and the restart
+    #: identity omits the key.  A PRESENT set binds the restart identity
+    #: value for value, because a resume under other constants is another
+    #: trajectory.  Last field on purpose: a mid-dataclass field would move
+    #: every positional construction after it.
+    physics_params: object | None = None
 
     def __post_init__(self):
         if self.feedback not in FEEDBACK_OPTIONS:
@@ -1709,6 +1757,9 @@ def load_experiment(path: str | Path) -> ExperimentConfig:
     authority = read_config_authority(path)
     raw = tomllib.load(io.BytesIO(authority.payload))
     source = str(authority.source)
+    from woof.config import _anchor_config_file_paths
+    _anchor_config_file_paths(raw.get("shared", {}), authority.source,
+                              keys=("rrtmg_smoke_manifest",))
     base_dir = Path(authority.source).parent
     experiment = build_experiment_from_config_tables(
         raw, source=source, base_dir=base_dir)
@@ -2397,6 +2448,43 @@ def _refuse_moving_slope_radiation(domains, relocation, source) -> None:
                 "call.  Set slope_rad = 0 on the moving nest.")
 
 
+def _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation,
+                                                 source) -> None:
+    """swint_opt = 1 on a nest rebuilt mid-run: refused until the rebuild
+    carries the fit.
+
+    A move or a spawn rebuilds the nest's physics driver cold
+    (woof.runtime.rebuild_child_driver_from_land_state) and carries only
+    the land-surface radiation carriers (woof.core.physics_continuation);
+    the shortwave interpolation's fit coefficients and reference call
+    (woof.core.swint STATE_FIELDS, Registry misc state in WRF) are not
+    among them.  The rebuilt nest keeps its model time, so its next
+    radiation call is a whole cadence away, and on every step until then
+    interp_sw_radiation evaluates a zero reference: SWDOWN, GSW and the
+    direct and diffuse parts are zero over the whole nest in daylight.
+    """
+    rebuilt = {}
+    if relocation is not None and getattr(relocation, "enabled", False)             and (getattr(relocation, "moves", ())
+                 or getattr(relocation, "follow", None) is not None):
+        rebuilt[int(relocation.grid_id)] = "moves"
+    for dc in domains:
+        if getattr(dc, "follow", None) is not None:
+            rebuilt[int(dc.grid_id)] = "moves"
+        elif getattr(dc, "spawn", None) is not None:
+            rebuilt.setdefault(int(dc.grid_id), "is spawned mid-run")
+    for dc in domains:
+        how = rebuilt.get(int(dc.grid_id))
+        if how is not None and int(getattr(dc.run, "swint_opt", 0) or 0) == 1:
+            raise ValueError(
+                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} {how} "
+                "and sets swint_opt = 1: a move or a spawn rebuilds the "
+                "nest's physics cold and does not carry the shortwave "
+                "interpolation's fit (woof.core.swint), so until the "
+                "nest's next radiation call its surface shortwave would be "
+                "zero in daylight.  Keep this nest still and present from "
+                "the start, or set swint_opt = 0.")
+
+
 def _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source) -> None:
     """Noah mosaic on a nest whose physics is rebuilt mid-run: refused.
 
@@ -2432,6 +2520,26 @@ def _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source) -> None:
                 "its first Noah step after the event with no tile state.  "
                 "Keep this nest still and present from the start, or set "
                 "sf_surface_mosaic = 0.")
+
+
+def _refuse_rebuilt_nest_lake(domains, relocation, source) -> None:
+    """A rebuilt lake nest must not silently cold-start its heat storage."""
+    rebuilt = set()
+    if relocation is not None and getattr(relocation, "enabled", False) \
+            and (getattr(relocation, "moves", ())
+                 or getattr(relocation, "follow", None) is not None):
+        rebuilt.add(int(relocation.grid_id))
+    rebuilt.update(int(dc.grid_id) for dc in domains
+                   if getattr(dc, "follow", None) is not None
+                   or getattr(dc, "spawn", None) is not None)
+    for dc in domains:
+        if int(dc.grid_id) in rebuilt and int(getattr(dc.run, "sf_lake_physics", 0)) == 1:
+            raise ValueError(
+                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} moves "
+                "or is spawned mid-run with sf_lake_physics = 1: the nest "
+                "rebuild does not carry lake water, ice, snow and sediment "
+                "heat storage. Keep this lake domain fixed and present "
+                "from the start; otherwise its lake state would be reset.")
 
 
 def _refuse_child_terrain_drag(domains, source) -> None:
@@ -3095,8 +3203,8 @@ def _parent_before_child(domain_tables: list, source: str) -> list:
 def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     """Validate a parsed experiment TOML dict and build the config."""
     known_tables = ("experiment", "shared", "projection", "domain",
-                    "relocation", "perturbation", "tiles", "devices", "output",
-                    "spectral_numerics")
+                    "relocation", "perturbation", "tiles", "devices", "output", "simulated_radar",
+                    "spectral_numerics", "physics_params")
     # [ingest] is INGEST POLICY, and it is validated-and-dropped HERE
     # rather than added to the companion list above.  The companion
     # tables declare INPUTS: dropping one loses a setting, so the caller
@@ -3114,6 +3222,24 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         from woof.ingest.soil_downscale import parse_ingest_table
         raw = dict(raw)
         parse_ingest_table(raw.pop("ingest"), source=source)
+    # Random-physics switches (SPPT, SKEBS, SPP and the perturbation
+    # selectors) are refused HERE, in the builder every config door loads
+    # through, so no route can read past them and only fail at the first
+    # physics call, after its download and its preparation on the card.
+    # The reason is the calibration one: their amplitudes have not been
+    # measured against observations.
+    from woof.ensemble_admission import refuse_configured_random
+    refuse_configured_random(raw)
+    if isinstance(raw, dict) and "ensemble" in raw:
+        from woof import ensemble
+        raw = dict(raw)
+        table = raw.pop("ensemble")
+        # The same boundary as woof.config.load_config: a preparation-only
+        # install stages no ensemble request, and the table is the ensemble
+        # door's to validate.
+        if ensemble.request_installed():
+            from woof.ensemble.request import EnsembleRequest
+            EnsembleRequest.from_mapping(table)
     # Companion tables of the ONE-FILE case schema: real, documented
     # tables that belong to other owners (woof.case_data, woof.fetch,
     # woof.static.highres_production) and are split off by every file
@@ -3329,6 +3455,23 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
 
     devices = DeviceOptions.from_mapping(raw.get("devices"), source=source)
 
+    # ---- [physics_params] ----------------------------------------------
+    # ABSENT authors nothing: physics_params = None, every kernel source and
+    # parameter table is today's, and the restart identity omits the key so
+    # pre-feature fingerprints are preserved.  PRESENT, the set is validated
+    # against woof/physics_params_registry_v1.json (unknown constants and
+    # out-of-range values refuse) and bound to this process below, once the
+    # domains are known.
+    physics_params = None
+    if "physics_params" in raw:
+        from woof.physics_params import PhysicsParamsError, parse_table
+        base_dir = Path(source).parent if Path(source).is_file() else None
+        try:
+            physics_params = parse_table(
+                raw["physics_params"], source=source, base_dir=base_dir)
+        except PhysicsParamsError as err:
+            raise ValueError(str(err)) from None
+
     # ---- [tiles] ---------------------------------------------------
     # ABSENT is the OFF contract, and it is the shared StreamingOptions.OFF
     # object rather than a fresh one: the mode is an EXECUTION choice, it
@@ -3350,6 +3493,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     # field's docstring on ExperimentConfig.
     output = history_selection_module.HistorySelection.from_mapping(
         raw.get("output"), source=source)
+    simulated_radar = simulated_radar_module.SimulatedRadarOptions.from_mapping(
+        raw.get("simulated_radar"), source=source)
 
     # ---- [shared] ------------------------------------------------------
     shared = dict(raw.get("shared", {}))
@@ -4295,6 +4440,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     _refuse_windowed_stash_watch(domains, source)
     _refuse_moving_slope_radiation(domains, relocation, source)
     _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source)
+    _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation, source)
+    _refuse_rebuilt_nest_lake(domains, relocation, source)
     _refuse_child_terrain_drag(domains, source)
     from woof.core.attribute_tracking import validate_attribute_domains
     validate_attribute_domains(domains, relocation)
@@ -4311,9 +4458,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         relocation=relocation,
         physics_mode=physics_mode,
         perturbation=perturbation,
-        tiles=tiles, devices=devices, output=output,
+        tiles=tiles, devices=devices, output=output, simulated_radar=simulated_radar,
         spectral_numerics=spectral_numerics,
-        auto_epssm=tuple(sorted(auto_epssm_ids)))
+        auto_epssm=tuple(sorted(auto_epssm_ids)),
+        physics_params=physics_params)
     from woof.static.terrain_smoothing import refuse_moving_reach
     refuse_moving_reach(domain_tables, experiment, source=source)
     # The mixing-length auto-switch runs HERE, at the one load every
@@ -4333,6 +4481,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     for dc in experiment.domains:
         selection = history_selection_module.resolve(
             experiment.output, dc.output)
+        simulated_radar_module.validate_history_selection(
+            simulated_radar, selection, where=f"d{dc.grid_id:02d} of {source}")
         selection.warn_lost_products(
             history_selection_module.HISTORY_VOCABULARY,
             where=f"d{dc.grid_id:02d} of {source}")
@@ -4452,6 +4602,45 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     _refuse_inflow_seeding_under_a_pbl_off_parent(experiment, source)
     _advise_anisotropic_w_mixing(experiment, source)
     _assert_derived_copies(experiment, source)
+    return _bind_physics_params(experiment, source)
+
+
+def _bind_physics_params(experiment, source: str):
+    """Refuse a [physics_params] set that acts on no domain, then bind the
+    experiment's set (or its absence) to this process.
+
+    Binding at the load every front door shares is what makes the set reach
+    every route: the kernels read the process's set when they compile and
+    the forecast's RUC tables read it when they are built.  One process runs
+    one set, so a second experiment that declares another is refused here
+    rather than running under the first one's constants.
+
+    A set named by ``WOOF_PHYSICS_PARAMS`` (members sharing one prepared
+    root) is attached to an experiment that carries no table, so the run's
+    identity and receipts name it exactly as if the file had; a table that
+    names a different set refuses.
+    """
+    from dataclasses import replace as _replace
+    from woof.physics_params import (
+        PhysicsParamsError, check_schemes, declare, environment_set)
+    pset = getattr(experiment, "physics_params", None)
+    try:
+        from_env = environment_set()
+        if from_env is not None:
+            if pset is None:
+                experiment = _replace(experiment, physics_params=from_env)
+                pset = from_env
+            elif pset.sha256() != from_env.sha256():
+                raise PhysicsParamsError(
+                    f"{source} carries physics parameter set {pset.name!r} "
+                    f"but WOOF_PHYSICS_PARAMS names {from_env.name!r}; two "
+                    "sources for one run's constants cannot both be honoured")
+        if pset is not None:
+            check_schemes(pset, [dc.run for dc in experiment.domains],
+                          source=source)
+        declare(pset, source=source)
+    except PhysicsParamsError as err:
+        raise ValueError(str(err)) from None
     return experiment
 
 
@@ -5138,10 +5327,28 @@ def _public_config_value(value):
     if isinstance(value, StreamingOptions):
         return value.to_mapping()
     if is_dataclass(value):
-        return {item.name: _public_config_value(getattr(value, item.name))
-                for item in fields(value)
-                if not (isinstance(value, FollowConfig)
-                        and value.field != "attribute" and item.name in ATTRIBUTE_KEYS)}
+        document = {item.name: _public_config_value(getattr(value, item.name))
+                    for item in fields(value)
+                    if not (isinstance(value, FollowConfig)
+                            and value.field != "attribute" and item.name in ATTRIBUTE_KEYS)}
+        run_document = (document if isinstance(value, RunConfig) else
+                        document.get("run") if isinstance(value, DomainConfig) else None)
+        if isinstance(run_document, dict):
+            # The generic forms existed before these selectors. Keep
+            # their public bytes; an explicitly moved form remains bound.
+            for name, default in (("ruc_irrigation", "wrf_461"),
+                                  ("ruc_qvg_cold_start", "wrf"),
+                                  ("ruc_2m_diagnostic", "flux"),
+                                  ("ruc_snow", "wrf_461"),
+                                  ("swint_opt", 0), ("aer_opt", 0),
+                                  ("alb_sol", 0),
+                                  ("thompson_version", "wrf_461"),
+                                  ("thompson_fork_snow_fall", "blend"),
+                                  ("rrtmg_cloud_optics_form", "wrf_461"),
+                                  ("rrtmg_smoke_manifest", "")):
+                if run_document.get(name, default) == default:
+                    run_document.pop(name, None)
+        return document
     if isinstance(value, tuple) and hasattr(value, "_fields"):
         return type(value)(*(_public_config_value(item) for item in value))
     if isinstance(value, (list, tuple)):
@@ -5162,6 +5369,13 @@ def experiment_config_document(exp: ExperimentConfig) -> dict[str, object]:
     document = _public_config_value(exp)
     # A newly introduced execution control stays absent when off, so default
     # public snapshots and plans retain their pre-feature bytes.
+    if exp.physics_params is None:
+        document.pop("physics_params", None)
+    else:
+        from woof.physics_params import document as parameter_document
+        document["physics_params"] = parameter_document(exp.physics_params)
     if not exp.devices.enabled:
         document.pop("devices", None)
+    if not exp.simulated_radar.enabled:
+        document.pop("simulated_radar", None)
     return document

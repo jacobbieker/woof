@@ -65,6 +65,7 @@ from woof.ingest.memory_refusal import InitializationMemoryRefused
 from woof.ingest.preparation_price import (
     price_forcing_preparation, price_preparation_floor)
 from woof.ingest.preprocess_backend import (
+    preprocess_math_call,
     admit_preparation,
     preprocess_identity,
     release_backend_memory,
@@ -284,7 +285,9 @@ def _static_from_geog(
     catalog, receipt = verified_static_catalog(
         Path(wps_namelist), Path(geog_root), (1,),
         **selection_carrier_kwargs(static_highres))
-    fields = build_static_for_domain(grid, catalog, 1)
+    fields = build_static_for_domain(
+        grid, catalog, 1,
+        **({"cfg": cfg} if getattr(cfg, "sf_lake_physics", 0) else {}))
     # The land-use table's own ISLAKE/ISWATER, from the same GEOG index
     # the statics were built from, so the water-temperature assembly
     # and the statics cannot disagree about what a lake is.
@@ -384,6 +387,7 @@ def _soil_source_orography(declared, fields):
     return resolved
 
 
+@preprocess_math_call
 def prepare_era5_wrf(
     *,
     grib: Path,
@@ -845,8 +849,15 @@ def prepare_era5_wrf(
     # router forwards this exact argument list to preprocess_noah_soil for
     # Noah-geometry schemes, so their soil state is unchanged by the LSM
     # dispatch seam.
+    from woof.core.landuse import (
+        ruc_fractional_seaice as _ruc_fractional_seaice)
     soil = preprocess_land_surface_soil(
         initial_met.fields,
+        # real.exe's adjust_for_seaice_pre/post keep the fraction under
+        # fractional_seaice = 1 (threshold 0.02) and snap to 0/1 at 0.5
+        # otherwise (module_soil_pre.F:216-219, :337-343, :392-393 of the HRRR
+        # v4.1.21 fork).
+        fractional_seaice=_ruc_fractional_seaice(cfg),
         sf_surface_physics=int(cfg.sf_surface_physics),
         # Resolved, not defaulted: see woof/ingest/hrrr_physics.py for the
         # failure this closes.  Inert at every geometry but RUC's six.

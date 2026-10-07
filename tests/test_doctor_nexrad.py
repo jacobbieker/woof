@@ -174,15 +174,16 @@ def test_the_bundled_front_door_uses_the_resolution_ladders_own_env_var():
 
 
 def test_the_bundle_prose_counts_the_artifacts_it_actually_carries():
-    """Keep the native roster count and its bundle description aligned.
+    """The docstring is the contract a release engineer reads; keep it true.
 
-    The regional engine's twenty-nine artifacts, including ``rw_mlexport``,
-    and the six global observation decoders form the thirty-five-artifact
-    bundle.
+    The count and ``woof.bridge_assets`` prose move together when a
+    consumer joins or leaves the bundle. The engine's thirty-six artifacts
+    without the terminal workspace and the six global observation decoders
+    form the forty-two-artifact bundle.
     """
 
-    assert len(bridge_assets.BUNDLED_ARTIFACTS) == 35
-    assert "thirty-five artifacts" in bridge_assets.__doc__
+    assert len(bridge_assets.BUNDLED_ARTIFACTS) == 42
+    assert "forty-two artifacts" in bridge_assets.__doc__
     for stale in ("eight artifacts", "nine artifacts", "nine files",
                   "ten artifacts", "ten files", "eleven artifacts",
                   "eleven files", "fourteen artifacts", "fourteen files",
@@ -199,7 +200,12 @@ def test_the_bundle_prose_counts_the_artifacts_it_actually_carries():
                   "twenty-seven artifacts", "twenty-seven files",
                   "twenty-eight artifacts", "twenty-eight files",
                   "twenty-nine artifacts", "twenty-nine files",
-                  "thirty artifacts", "thirty files"):
+                  "thirty artifacts", "thirty files",
+                  "thirty-one artifacts", "thirty-one files",
+                  "thirty-two artifacts", "thirty-two files",
+                  "thirty-five artifacts", "thirty-five files",
+                  "thirty-seven artifacts", "thirty-seven files",
+                  "thirty-eight artifacts", "thirty-eight files"):
         # Match the complete count, so "eight" does not reject "twenty-eight".
         assert re.search(r"(?<![a-z-])" + re.escape(stale) + r"(?![a-z-])",
                          bridge_assets.__doc__) is None

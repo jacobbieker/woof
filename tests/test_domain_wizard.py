@@ -1817,7 +1817,7 @@ def test_emitted_radiation_uses_the_representation_the_guard_compares(
 
 @pytest.mark.parametrize("profile", [
     "morrison-mp10-ysu-mm5-noah-kf-rte-rrtmgp-v1",
-    "thompson-mp8-ysu-mm5-noah-validation-v1",
+    "thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1",
     "wsm6-ysu-mm5-noah-no-radiation-v1",
 ])
 def test_physics_profile_configs_pass_the_runner_guard_as_emitted(
@@ -1888,7 +1888,7 @@ def test_the_default_suite_states_its_physics_and_runs(
     full = physics_summary("morrison-mp10-ysu-mm5-noah-kf-rte-rrtmgp-v1")
     assert "longwave RTE+RRTMGP, shortwave RTE+RRTMGP" in full
     assert "Kain-Fritsch cumulus" in full
-    reduced = physics_summary("thompson-mp8-ysu-mm5-noah-validation-v1")
+    reduced = physics_summary("thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1")
     assert "longwave OFF, shortwave Dudhia" in reduced
     assert "NO cumulus parameterization" in reduced
 
@@ -2413,6 +2413,52 @@ def hrrr_route_inputs_render_target_domain_at_3km(tmp_path) -> str:
     return render_target_domain(load_experiment(out))
 
 
+def test_native_hrrr_polygon_fits_about_the_emitted_cell_center(tmp_path):
+    """A deep polygon stays whole when its requested center is off lattice."""
+    from dataclasses import asdict
+
+    from woof.domain_wizard import (load_polygon_footprint,
+                                     verify_polygon_containment)
+    from woof.static.external_source import (crop_window, source_grid,
+                                               static_source_row)
+    from woof.static.source_defaults import (align_source_projection,
+                                               source_static_defaults)
+
+    row = static_source_row(source_static_defaults("hrrr")["source"])
+    source = source_grid(row)
+    lat, lon = source.ij_to_latlon(900.01, 500.01)
+    lat, lon = float(lat), float(lon)
+    polygon = tmp_path / "off-lattice.geojson"
+    polygon.write_text(json.dumps({"type": "Polygon", "coordinates": [[
+        [lon - .005, lat - .005], [lon + .005, lat - .005],
+        [lon + .005, lat + .005], [lon - .005, lat + .005],
+        [lon - .005, lat - .005]]]}), encoding="utf-8")
+    footprint = load_polygon_footprint(polygon)
+    x, y = source.latlon_to_ij(footprint.center_lat, footprint.center_lon)
+    # 6a69b356f, lane/hrrr-statics, snaps exact-spacing roots to source
+    # mass points. This center is nearly half a root cell from that lattice,
+    # amplified by 27 on d04; sizing before the snap used to clip the polygon.
+    assert abs(float(x) - (round(float(x) - .5) + .5)) > .45
+    assert abs(float(y) - (round(float(y) - .5) + .5)) > .45
+    out = tmp_path / "off-lattice.toml"
+    rc = cli_main([
+        "domain", "--polygon", str(polygon), "--root-dx", "3",
+        "--chain", "3,3,3", "--source", "hrrr", "--vram-gib", "48",
+        "--cycle", "2026-07-29T18", "--hours", "1", "--out", str(out)])
+    assert rc == 0
+    exp = load_experiment(out)
+    assert len(exp.domains) == 4
+    verify_polygon_containment(exp, footprint, (0., 0., 0., 0.))
+    grids = grids_from_projection_config(exp)
+    for key in ("map_proj", "truelat1", "truelat2", "stand_lon"):
+        assert getattr(grids[0], key) == row.grid_map[key]
+    assert crop_window(row, grids[0]) is not None
+    projection = asdict(exp.projection)
+    aligned = align_source_projection(
+        projection, (grids[0].e_we - 1, grids[0].e_sn - 1), 3000., "hrrr")
+    assert aligned == projection  # Final alignment cannot move the fitted center.
+
+
 def test_a_spec_refusal_is_not_dressed_as_a_coverage_refusal(
         tmp_path, monkeypatch, capsys):
     """Each refusal path states its own cause and its own remedy.
@@ -2597,9 +2643,14 @@ def test_no_fit_advice_names_only_profiles_the_same_source_accepts(
         south, west, north, east = window.envelope()
         point = f"{0.5 * (south + north):.2f},{0.5 * (west + east):.2f}"
 
+    # 315803306, lane/20cr-site, admits the historical 1836..2015 archive.
+    # Advice ranking needs a valid request to reach memory sizing, not a
+    # 2026 window refused by the source's unchanged temporal guard.
+    cycle = "1957-12-18T12" if source == "20crv3-cf" else "2026-08-12T00"
+
     def _argv(vram: str) -> list[str]:
         return ["domain", f"--point={point}", "--ladder", "12",
-                "--source", source, "--cycle", "2026-08-12T00",
+                "--source", source, "--cycle", cycle,
                 "--hours", "6", "--vram-gib", vram]
 
     # Force the fit loop's own refusal -- the one that ranks lighter
@@ -2955,8 +3006,8 @@ def test_the_wizard_labels_its_verdict_as_an_estimate_for_a_declared_card(
 
 
 NSSL2_PROFILES = (
-    "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-validation-candidate-v1",
-    "nssl2-mp18-ysu-mm5-noah-kf-rrtmg-legacy-validation-candidate-v1",
+    "nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-wrf-comparison-candidate-v1",
+    "nssl2-mp18-ysu-mm5-noah-kf-rrtmg-legacy-wrf-comparison-candidate-v1",
 )
 
 

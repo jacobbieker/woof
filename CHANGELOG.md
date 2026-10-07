@@ -1,5 +1,221 @@
 # Changelog
 
+## 1.0.3
+
+WOOF runs the operational HRRR configuration: its static file, its
+Thompson, MYNN, RUC, surface-layer and radiation forms, its fixed 20 s
+clock and fifth-order vertical advection, from `woof import-namelist` on
+an HRRR namelist or from the shipped HRRR recipes. Ensembles, simulated
+radar volumes and verification against observations join the forecast
+doors. Isobaric heights, RUC soil water and legacy RRTMG longwave are
+corrected. Forecast answers change.
+
+New:
+
+- HRRR configuration recipes ship in the installed package's `configs/recipes/`
+  folder: `hrrr_configuration_cut.toml` (a 401 x 301 3 km cut, started from
+  native RAP columns), `hrrr_configuration_clock.toml`,
+  `conus_hrrr_configuration.toml` and `hrrr_v4_gsd41.toml`. Run one by its
+  installed path:
+  `RECIPES=$(python -c "import configs, pathlib; print(pathlib.Path(list(configs.__path__)[0], 'recipes'))")`
+  then `woof fetch-geog` and `woof fetch-geog --static-source hrrr-conus-v4`
+  (once; the operational static file is 1.1 GB) and
+  `woof go "$RECIPES/hrrr_configuration_cut.toml"`. Each recipe ships the
+  WPS namelist its staged route reads beside it. They select the
+  operational branch forms below explicitly; generic configurations keep
+  the WRF v4.6.1 defaults.
+- `woof import-namelist` on a supported `hrrr_wrf.nl` selects the HRRR
+  physics forms: GSD v4.1 MYNN, the operational Thompson, MYNN surface
+  layer, RUC irrigation, snow, ground-vapour cold start and logarithmic
+  2 m diagnostic, prescribed monthly leaf area and albedo, legacy RRTMG
+  with the operational cloud form, aerosol optics 3, shortwave
+  interpolation 1, sun-angle land albedo (`alb_sol = 1`), the sixth-order
+  filter, microphysics zero-out and upper wind limiter of that branch, and
+  fifth-order vertical advection. An adaptive clock whose start, minimum
+  and maximum are equal (HRRR v4: 20/20/20) imports as a fixed step with
+  `terrain_clock = "pinned"` and the acoustic substep count WRF derives
+  for it (6 for HRRR's grid at 20 s, where its namelist spells 4). The
+  import report lists each substitution. The namelist importer also
+  accepts 43 inert `&time_control` output-stream settings it refused.
+- `[static] source` selects a published static file. HRRR configurations
+  take the pinned operational CONUS static file by default, on its native
+  grid and contained cuts; soil, land use, terrain, monthly vegetation,
+  lakes and drag fields keep the source values, and analyzed vegetation
+  fraction comes from the initialization GRIB.
+- `terrain_clock = "pinned"` runs `time_step` and `time_step_sound`
+  exactly as written when `use_adaptive_time_step = false`. The terrain
+  clock and steep-ground substep rule still report what they would have
+  done, as advice in their receipts, and apply nothing. `"measured"`
+  stays the default.
+- New physics selectors, each off or at the WRF v4.6.1 form by default:
+  `bl_mynn_version = "gsd_41"` (the operational RAP/HRRR MYNN boundary
+  layer, with dew and frost water, mixing length 2, subgrid stratus and
+  shallow cumulus, and an optional mass-flux plume population),
+  `thompson_version = "wrf_39_noaa"` with its own lookup tables, fetched
+  once from pinned public source with hash checks,
+  `mynn_sfclay_variant = "gsl_wrf39"`, `fractional_seaice = 1`,
+  `ruc_qvg_cold_start = "air"`, `ruc_2m_diagnostic = "log_profile"`,
+  `ruc_irrigation = "wrf_45"`, `ruc_snow = "wrf_45"`, `alb_sol = 1`,
+  `diff_6th_form`, `diff_6th_factor2`, `mp_zero_out`,
+  `upper_wind_limiter_form`, and advection orders `v_sca_adv_order`,
+  `v_mom_adv_order` and `h_mom_adv_order` (defaults 3, 3 and 5).
+  `bl_mynn_version = "gsd_41"` lowered daytime 2 m dewpoint bias against
+  the operational model on a 3 km cut from +0.93/+0.95 K to +0.69/+0.85 K
+  at f01/f02. The GSD v4.1 MYNN port is partial.
+- `rap-native` fetches and prepares RAP's 13 km hybrid-level columns.
+  `hrrr-native` supplies a native hybrid analysis, with the same cycle's
+  pressure product supplying the soil column. `woof prep --initial-inputs
+  JSON` starts a domain from a separate analysis while every lateral frame
+  comes from the boundary source. `use_rap_aero_icbc = true` takes
+  aerosol number initial and boundary values from the analysis. HRRR
+  plans stage the monthly aerosol climatology in the shared cache before
+  forcing transfer, with exact size and SHA-256 checks; dry runs report
+  it as pending.
+- A domain that is its source's own Lambert grid (for `hrrr-prs` and
+  `hrrr-native`, the full 1799 x 1059 HRRR grid) prepares untrimmed, each
+  point copying its own source cell. It was refused before.
+- MYNN supports WRF mixing length 2 and `scalar_pblmix = 1`. RUC mosaic
+  land use and soil (`mosaic_lu`, `mosaic_soil`) and WRF's CLM lake model
+  (`sf_lake_physics = 1`) run, off by default.
+  `zadvect_implicit_variant = "wrf_legacy"` selects the older WRF
+  implicit vertical-advection split.
+- Ensembles: `woof ensemble CONFIG --members N` (also `woof go` and
+  `woof run` with `--members N`, or `[ensemble] members = N`) runs N
+  members, each from its own source trajectory: the source's operational
+  ensemble (`gefs` for `gfs`, `aigefs` for `aigfs`, `ecmwf-ens` for
+  `ecmwf-open-data`), `--recipe time-lagged`, or multi-model members from
+  `--trajectories FILE`. A source with no ensemble and no recipe is
+  refused before any download, because copies of one forecast have no
+  spread. The run draws mean, spread, minimum, maximum, threshold
+  probabilities, paintball and postage-stamp maps as members finish.
+  Members of matching physics and forcing advance as one batch per card,
+  with every product byte-identical to members run one at a time. Packed
+  members can carry a parent and its nest. An interrupted streamed nested
+  forecast or ensemble continues from its last checkpoint. Random
+  perturbations (SPPT, SKEBS, SPP and related switches) are refused at
+  every door, because their spread has not been calibrated against
+  observations. `woof fetch --source ecmwf-ens` fetches ECMWF open-data
+  ENS members p01 to p50 and `--source rrfs-ens` the five public RRFS
+  members, which preparation refuses because their files carry no soil.
+- `[simulated_radar]` writes native radar volumes (Level II and CfRadial 1
+  by default; CfRadial 2 and ODIM optional) and PPI loops while a forecast
+  runs, off by default. `woof simulated-radar` replays saved histories;
+  `--describe` and `--estimate` report support, memory and output size.
+  PPIs draw ZDR, CC and KDP when the volume carries them. Radar colours
+  follow the AWIPS reflectivity table and a green-red velocity table;
+  `[simulated_radar] color_tables = "classic"`, `woof render
+  --radar-colors classic` or `RUSTWX_RADAR_COLORS=classic` restores the
+  earlier colours byte for byte.
+- A finished forecast is verified against observations by default:
+  station dots and scorecards, and MRMS reflectivity and hourly rain
+  panels, scored and drawn in Rust. The run waits at most 2 seconds for
+  it; downloads and scoring continue in the background, and `woof
+  verify-visuals RUN_DIRECTORY` runs it on demand. A verification failure
+  never changes a forecast's result; `WOOF_VERIFY_VISUALS=0` turns it off.
+  A regional rain scorer adds Rust hourly rain, echo and fractions skill
+  score kernels with a native MRMS decoder.
+- Comparison sheets draw MRMS and RRFS as reference panels, in a stated
+  order. Maps and sections name the model WOOF for files WOOF wrote.
+- Multi-card `[devices]` forecasts step their slabs at once under a
+  free-threaded Python 3.14 (`python3.14t`); `woof` re-executes once with
+  `PYTHON_GIL=0` on such a build. Full HRRR physics on the 1797 x 1057 x
+  50 grid: 4 x RTX PRO 6000 130.0 s per forecast hour against 333.8
+  before, 8 x RTX 5090 83.8 s. Histories are byte-identical across 2, 4
+  and 8 cards and both interpreters.
+- `woof fetch --source 20crv3-cf` reads the 20th Century Reanalysis v3
+  ensemble mean (1836 to 2015), so a forecast can start from a historical
+  date.
+- `[physics_params]` (or `WOOF_PHYSICS_PARAMS`) applies a named set of
+  physics parameter values, recorded in the run's identity. Default runs
+  are unchanged.
+- Generated adaptive nests declare a maximum step growth of 5 percent,
+  and `woof check` names a nest whose growth is above 5 (WRF's own nest
+  value, 51, ended a nested forecast with a non-finite vertical velocity).
+
+Fixed:
+
+- Isobaric heights no longer read high: each pressure-level height had
+  paired a layer's mean height with its mid-level pressure (500 hPa read
+  5.3 m high on a 3 km frame). The fix reaches height charts, pressure
+  planes, soundings, post-processed files, ML export, the moving-nest
+  tracker and GNSS-RO data assimilation. Answers change for every
+  isobaric and sounding height product.
+- RUC soil water no longer refills a dry top level at the WRF v4.6.1
+  rate. `ruc_soilprop` defaults to `"wrf_45"`, the operational RAP and
+  HRRR form; in one cycle 2 m dewpoint bias against stations went from
+  +1.16/+1.59 K to +0.92/+1.22 K at f01/f02. `"wrf_461"` reproduces the
+  earlier output. RUC also runs its water branch on lake cells when the
+  lake model is off. Answers change for every RUC run.
+- Legacy RRTMG longwave applies each stratospheric optical-depth
+  correction once; parallel bands had raced on shared outputs. Legacy
+  RRTMG shortwave follows WRF on columns with no layer above the
+  troposphere switch, where it had read stale memory. Answers change.
+- Fifth-order vertical scalar transport no longer creates mass: a 12 h
+  3 km forecast had gained 181,000 t of cloud ice through its zero clamp,
+  now 25 t. Order 3, the generic default, is unchanged.
+- HRRR-configuration runs: surface shortwave excess against HRRR fell
+  from about +31 to +4 W/m2 on a full-grid cycle, and the afternoon 2 m
+  dewpoint bias came down from about +0.5 to +0.8 K to HRRR's own on two
+  cycles, with 2 m temperature error unchanged. RUC keeps prescribed
+  leaf area on those paths, and the Q2 cap applies over land and water
+  under the logarithmic 2 m diagnostic.
+- MYNN initializes turbulent moments from water vapour, as WRF does, and
+  a physics template's own parameters win over its component options.
+- An HRRR-native start no longer refuses when the source's top moist
+  level sits a fraction of a millipascal above the model top. Native
+  hybrid analysis can initialize at its own model-top interface.
+- Nested forecasts: a nest keeps its fresh CFL after an output alarm on a
+  full step, a nested health failure is retried at most twice from a
+  verified checkpoint with a lowered step ceiling, and each retry is
+  written to the receipt.
+- Multi-card forecasts: the GPU memory watcher no longer stalls the
+  forecast (a busy 8-card nested run went from 130.5 to 8.0 s per
+  forecast hour), cross-NUMA halo copies are staged, slab threads run on
+  their card's local CPUs, halo seams move in one launch each, history
+  writes select the owning card, split domains pass orographic and
+  topographic wind inputs to each tile, and admission prices MYNN, RUC,
+  microphysics and boundary workspaces.
+- Process start to first output on a 1797 x 1057 x 50 case fell from
+  113.8 to 26.6 minutes with identical output, and such cases run within
+  the usual 1,024 open-file limit. High-resolution static preparation
+  holds about 160 MiB per reader instead of climbing to 322 GiB, with
+  identical fields. GFS preparation budgets its decode against host
+  memory.
+- Preparation honours explicit worker counts, runs host interpolation and
+  prepared-file writes in Rust workers, prepares grids larger than a
+  card's workspace on that card, and starts split forecasts from the
+  first boundary interval.
+- More host work runs in Rust with unchanged bits: hex geometry and
+  initialization checks (a 157,859-cell geometry job from 28.46 to
+  0.223 s), observation scoring, Noah soil liquid water, health scans,
+  ozone interpolation and prepared-store hashing. Legacy RRTMG frees
+  326 MiB to 5,145 MiB of unused ozone grids.
+- The shared NetCDF reader accepts arrays above 134,217,728 values and
+  signed and unsigned 64-bit coordinates; compressed NetCDF-4 files with
+  dense attributes read without a checksum mismatch. GRIB2 readers keep
+  complex-packed all-missing fields as missing.
+- Two WOOF versions on one machine no longer overwrite each other's Rust
+  bridges: a release stages its bundle in its own folder under
+  `~/.woof/bridges/`, and `woof doctor` names the folder in use.
+- A completed forecast keeps its exit status and final digest when
+  another process deletes history frames during the run. Simulated-radar
+  requests survive preparation. Forecasts run one after another in one
+  process release their microphysics and land tables.
+- Windowed products (6 h precipitation and similar) on latitude-longitude
+  grids, such as a WOOF Global map, no longer streak across the date line
+  or shrink on a regional crop.
+- High-resolution geography fetches serialize shared cache entries and
+  verify hashes before reuse; damaged packaged tables in the user cache
+  are repaired by verified replacement.
+- A WPS namelist whose `ref_x`/`ref_y` name the grid centre imports to
+  the same bytes on Linux and Windows.
+- A packed data-assimilation step resumed with `--resume-ensemble`
+  reproduces the uninterrupted run, and the radar observation operator no
+  longer zeroes graupel in the model state.
+- Scientific documentation separates code verification, solution
+  verification and validation against observations; old physics profile
+  IDs are accepted as aliases.
+
 ## 1.0.2
 
 WRF-fidelity fixes correct moisture pressure terms, edge vertical velocity,

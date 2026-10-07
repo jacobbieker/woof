@@ -11,7 +11,7 @@ from woof.verify.noah_mosaic_oracle import (
     load, soil_reduction, wrf_defective_soil_reduction, weighted_twin_increments,
 )
 
-ROOT = Path(__file__).resolve().parents[1] / "woof/data/noah_mosaic/oracle"
+ROOT = Path(__file__).resolve().parents[1] / "tests/data/oracles/noah_mosaic"
 
 
 def test_d1_control():

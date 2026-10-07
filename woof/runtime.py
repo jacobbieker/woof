@@ -48,6 +48,8 @@ from dataclasses import dataclass, replace as dataclass_replace
 from pathlib import Path
 from typing import Mapping
 
+from woof.core.restart_request import RESTART_REQUEST_ENV, RestartRequest
+
 import numpy as np
 
 from woof.case_data import CaseDataConfig
@@ -72,7 +74,7 @@ from woof.ingest.preprocess_backend import (
     CudaPreprocessBackend,
     release_backend_memory,
 )
-from woof.ingest.real import initialize_real
+from woof.ingest.real import initialize_real, surface_fields_to_device
 from woof.ingest.ruc_soil import preprocess_land_surface_soil
 from woof.moisture_floor_receipt import (
     MOISTURE_FLOOR_BY_DOMAIN_KEY, moisture_floor_block,
@@ -83,6 +85,10 @@ from woof.static.build import (GeogSelection, build_static,
                                 monthly_interp_to_date)
 from woof.static.lambert import grids_from_projection_config
 from woof.static.orographic import with_terrain_drag_statics
+from woof.ensemble.runtime_preparation import (
+    current_runtime_preparation as _runtime_preparation_source,
+    runtime_input_catalog as _runtime_input_catalog,
+)
 
 
 #: ``mp_physics`` values whose microphysics call stages a scheme-native
@@ -239,6 +245,8 @@ class ExperimentRunSummary:
     #: AFTER this one, so what the run route recorded and did not hand
     #: back was replaced rather than kept.
     moisture_floor_receipts: Mapping[str, object] | None = None
+    ensemble_manifest: Path | None = None
+    ensemble_manifest_sha256: str | None = None
 
 
 #: Environment switch that turns the trajectory-digest instrumentation off.
@@ -284,7 +292,7 @@ class _SingleDomainDigestClock:
 
 def _frame_records(paths, *, progress_callback=None, completed_records=()
                    ) -> list[dict[str, object]]:
-    """Verify completed writer identities, hashing legacy files as needed.
+    """Retain completed writer identities, hashing legacy files as needed.
 
     The shared owner checks each fresh record's file revision before reuse.
     Files without a current writer proof still receive a complete stable
@@ -292,6 +300,8 @@ def _frame_records(paths, *, progress_callback=None, completed_records=()
     Each beat declares the file's size, the most this record can read, so
     the supervisor bounds a multi-GiB frame by its bytes and not by the
     model step.
+    Missing history is named and recorded without failing a completed
+    forecast. The final-state digest comes from live state independently.
     """
     from woof.output_identity import file_records
 
@@ -305,7 +315,8 @@ def _frame_records(paths, *, progress_callback=None, completed_records=()
         _finalizing_progress(
             progress_callback, f"hash-output-frames-{index}-of-{total}",
             work_bytes=size)
-    return file_records(paths, completed=completed_records, before_record=beginning)
+    return file_records(paths, completed=completed_records,
+                        before_record=beginning, allow_missing=True)
 
 
 #: What the run route says for a domain whose prepared case holds no
@@ -673,6 +684,15 @@ def experiment_grid(exp: ExperimentConfig, data: CaseDataConfig):
 # ---------------------------------------------------------------------------
 
 def forcing_snapshots(data: CaseDataConfig, input_catalog=None) -> dict:
+    source = _runtime_preparation_source()
+    if source is None:
+        return _forcing_snapshots(data, input_catalog)
+    catalog = _runtime_input_catalog(data) if input_catalog is None else input_catalog
+    return source.forcing_snapshots(data, catalog,
+        build=lambda: _forcing_snapshots(data, catalog))
+
+
+def _forcing_snapshots(data: CaseDataConfig, input_catalog=None) -> dict:
     """Decode forcing under one input catalog's valid-time authority.
 
     The catalog is built here when a caller has not already built it.  Runtime
@@ -683,7 +703,7 @@ def forcing_snapshots(data: CaseDataConfig, input_catalog=None) -> dict:
     if input_catalog is None:
         from woof.ingest.preflight import build_input_catalog
 
-        input_catalog = build_input_catalog(data)
+        input_catalog = _runtime_input_catalog(data)
 
     forcing_hashes = {
         Path(record.path).resolve(): record.sha256
@@ -934,15 +954,22 @@ def _initialize_real_case_physics(
     radiation composition, or configured column chunk.
     """
     from woof.core.diagnostics import update_diagnostics
-    from woof.core.landuse import initialize_landuse
+    from woof.core.landuse import (initialize_landuse,
+                                    ruc_fractional_seaice,
+                                    usemonalb_landuse_inputs)
     from woof.core.physics import initialize_physics
+    from woof.ingest.ruc_mosaic import ruc_mosaic_physics_inputs
+    from woof.ingest.lake_physics import lake_physics_inputs
 
     # WRF interpolates GREENFRAC/LAI to the run date
     # (module_initialize_real.F:1322-1335, mid-month anchors); shdmin/
-    # shdmax stay the monthly extrema (:1348-1351).  With the supported
-    # usemonalb=false path, landuse_init overwrites ALBEDO12M from the table.
-    vegfra = 100.0 * monthly_interp_to_date(static["GREENFRAC"], start_time)
-    lai = monthly_interp_to_date(static["LAI12M"], start_time)
+    # shdmax stay the monthly extrema (:1348-1351).  With usemonalb=false,
+    # landuse_init overwrites ALBEDO12M from the table; with it true the
+    # monthly field stays (usemonalb_landuse_inputs).
+    from woof.ingest.vegetation import initial_vegetation_fraction
+    vegfra = initial_vegetation_fraction(initial_met, static, start_time)
+    from woof.core.landuse import surface_leaf_area
+    lai = surface_leaf_area(cfg, static["LAI12M"], start_time)
     state = initial_result.state
     # initialize_real loads prognostics but does not launch the EOS kernel.
     # Diagnose the time-zero atmosphere before the first RRTMGP call.
@@ -966,7 +993,9 @@ def _initialize_real_case_physics(
         isice=int(landuse_attrs["ISICE"]),
         # real.exe's landmask/soil-category reconciliation decides a
         # disagreeing column from its soil temperature, then its SST.
-        soil_temperature=soil.soil_temperature)
+        soil_temperature=soil.soil_temperature,
+        fractional_seaice=ruc_fractional_seaice(cfg),
+        **usemonalb_landuse_inputs(cfg, static, start_time))
     driver = initialize_physics(
         state, cfg, landuse=landuse, tsk=soil.tsk,
         soil_temperature=soil.soil_temperature,
@@ -981,12 +1010,15 @@ def _initialize_real_case_physics(
         radiation_start_time=start_time, radiation_latitude=lat,
         radiation_longitude=lon,
         terrain_drag_static=static,
+        **lake_physics_inputs(cfg, static),
+        **ruc_mosaic_physics_inputs(
+            cfg, static, landuse_attrs=landuse_attrs, xice=soil.xice,
+            fractional_seaice=ruc_fractional_seaice(cfg)),
         **({"cam_ozone": cam_ozone} if cam_ozone is not None else {}))
     import cupy as cp
+    from woof.core.landuse import surface_snow_albedo
     driver.fields["snoalb"][...] = cp.asarray(
-        noah_initial_snow_albedo(
-            static["SNOALB"], static["LU_INDEX"], driver.noah_params,
-            rdmaxalb=cfg.rdmaxalb),
+        surface_snow_albedo(cfg, static, driver.noah_params),
         dtype=cp.float32)
     driver.fields["lai"][...] = cp.asarray(lai, dtype=cp.float32)
     driver.fields["shdmin"][...] = cp.asarray(
@@ -1024,6 +1056,19 @@ def _initialize_real_case_physics(
 
 
 def case_static_fields(grid, geog_root, *, selection: GeogSelection,
+                       static_highres=None, domain_id: int = 1,
+                       case_date=None) -> dict:
+    source = _runtime_preparation_source()
+    if source is None:
+        return _case_static_fields(grid, geog_root, selection=selection,
+            static_highres=static_highres, domain_id=domain_id, case_date=case_date)
+    return source.static_fields(grid, geog_root, selection=selection,
+        static_highres=static_highres, domain_id=domain_id, case_date=case_date,
+        build=lambda: _case_static_fields(grid, geog_root, selection=selection,
+            static_highres=static_highres, domain_id=domain_id, case_date=case_date))
+
+
+def _case_static_fields(grid, geog_root, *, selection: GeogSelection,
                        static_highres=None, domain_id: int = 1,
                        case_date=None) -> dict:
     """One domain's static fields as this route will integrate them.
@@ -1299,9 +1344,16 @@ def prepare_real_case(cfg: RunConfig, *, grid, geog_root,
     soil_orography = soil_source_orography(source_orography, soil_fields)
     reconciled_soil_type = door_reconciled_soil_category(
         static, soil_fields, landuse_attrs)
+    from woof.core.landuse import (
+        ruc_fractional_seaice as _ruc_fractional_seaice)
     soil = preprocess_land_surface_soil(
         soil_fields, sf_surface_physics=int(cfg.sf_surface_physics),
         num_soil_layers=soil_layer_count(cfg),
+        # real.exe's adjust_for_seaice_pre/post keep the fraction under
+        # fractional_seaice = 1 (threshold 0.02) and snap to 0/1 at 0.5
+        # otherwise (module_soil_pre.F:216-219, :337-343, :392-393 of the HRRR
+        # v4.1.21 fork).
+        fractional_seaice=_ruc_fractional_seaice(cfg),
         soil_type=reconciled_soil_type,
         deep_soil_temperature=static["TMN"],
         landmask=static["LANDMASK"],
@@ -1372,6 +1424,16 @@ def prepare_real_case(cfg: RunConfig, *, grid, geog_root,
                 soil.snow_water, dtype=np.float64, copy=True),
             forcing_times=times, geog_selection=geog_selection,
             store_input=inputs)
+    source = _runtime_preparation_source()
+    if source is not None:
+        source.capture_root_inputs(cfg=cfg, vertical=vertical, times=times,
+            initial_result=initial_result, met=initial_met, soil=soil,
+            soil_fields=soil_fields, reconciled_soil_type=reconciled_soil_type,
+            boundaries=boundaries, landuse_attrs=landuse_attrs,
+            trace_gas_overrides=trace_gas_overrides,
+            radiation_column_chunk=radiation_column_chunk,
+            constant_glw_wm2=constant_glw_wm2, cam_ozone=cam_ozone,
+            preprocess_backend=release_backend.name)
     _initialize_real_case_physics(
         initial_result, cfg, initial_met, soil, soil_fields, static,
         landuse_attrs, grid, start_time, vertical=vertical,
@@ -1397,6 +1459,30 @@ def prepare_root_experiment_case(exp: ExperimentConfig,
                                  dycore_state_workspace=None,
                                  store_request=None
                                  ) -> PreparedRealCase:
+    source = _runtime_preparation_source()
+    if source is None:
+        return _prepare_root_experiment_case(exp, data, input_catalog=input_catalog,
+            forcing_by_time=forcing_by_time, scratch_arena=scratch_arena,
+            dycore_state_workspace=dycore_state_workspace, store_request=store_request)
+    catalog = _runtime_input_catalog(data) if input_catalog is None else input_catalog
+    grid = (experiment_grid(exp, data) if len(exp.domains) == 1 else grids_from_projection_config(exp)[0])
+    selection = GeogSelection.from_case_data(data, domain_id=exp.root.grid_id)
+    return source.prepare_root(exp, data, grid=grid, selection=selection, catalog=catalog,
+        scratch_arena=scratch_arena, dycore_state_workspace=dycore_state_workspace,
+        store_request=store_request,
+        build=lambda: _prepare_root_experiment_case(exp, data, input_catalog=catalog,
+            forcing_by_time=forcing_by_time, scratch_arena=scratch_arena,
+            dycore_state_workspace=dycore_state_workspace, store_request=store_request))
+
+
+def _prepare_root_experiment_case(exp: ExperimentConfig,
+                                 data: CaseDataConfig, *,
+                                 input_catalog=None,
+                                 forcing_by_time=None,
+                                 scratch_arena=None,
+                                 dycore_state_workspace=None,
+                                 store_request=None
+                                 ) -> PreparedRealCase:
     """Prepare the root domain of a single- or multi-domain experiment."""
     dc = exp.root
     cfg = dc.run
@@ -1409,7 +1495,7 @@ def prepare_root_experiment_case(exp: ExperimentConfig,
         data, domain_id=dc.grid_id)
     from woof.ingest.preflight import build_input_catalog
 
-    catalog = (build_input_catalog(data) if input_catalog is None
+    catalog = (_runtime_input_catalog(data) if input_catalog is None
                else input_catalog)
     snapshots = (forcing_snapshots(data, catalog)
                  if forcing_by_time is None else forcing_by_time)
@@ -1571,14 +1657,18 @@ def prepare_child_case(initialized, child_dc, *, exp: ExperimentConfig,
     state = initialized.state
     static = initialized.static_fields
     soil = initialized.soil
-    met0 = initialized.horizontal.fields
+    # A shared child input retains host words. Keep the fresh initializer's
+    # original field precision while restoring those words on this card.
+    met0 = surface_fields_to_device(initialized.horizontal, cp, preserve_dtype=True)
     real = initialized.real
 
     update_diagnostics(state, cfg.hypsometric_opt)
     domain_start_time = exp.domain_start_time(dc.grid_id)
-    vegfra = 100.0 * monthly_interp_to_date(static["GREENFRAC"],
-                                             domain_start_time)
-    lai = monthly_interp_to_date(static["LAI12M"], domain_start_time)
+    from woof.ingest.vegetation import initial_vegetation_fraction
+    vegfra = initial_vegetation_fraction(
+        initialized.horizontal, static, domain_start_time)
+    from woof.core.landuse import surface_leaf_area
+    lai = surface_leaf_area(cfg, static["LAI12M"], domain_start_time)
     lat, lon = initialized.grid.latlon_mass()
     radiation = _child_radiation_adapter(
         exp, data, dc, state, lat, lon,
@@ -1587,6 +1677,8 @@ def prepare_child_case(initialized, child_dc, *, exp: ExperimentConfig,
     geog_selection = GeogSelection.from_case_data(
         data, domain_id=dc.grid_id)
     landuse_attrs = geog_selection.landuse_global_attrs()
+    from woof.core.landuse import (ruc_fractional_seaice,
+                                    usemonalb_landuse_inputs)
     landuse = initialize_landuse(
         static["LU_INDEX"], urban_legend=int(getattr(cfg, "sf_urban_physics", 0)) > 0,
         soil_type=static["SCT_DOM"],
@@ -1599,9 +1691,13 @@ def prepare_child_case(initialized, child_dc, *, exp: ExperimentConfig,
         isice=int(landuse_attrs["ISICE"]),
         # real.exe's landmask/soil-category reconciliation decides a
         # disagreeing column from its soil temperature, then its SST.
-        soil_temperature=soil.soil_temperature)
+        soil_temperature=soil.soil_temperature,
+        fractional_seaice=ruc_fractional_seaice(cfg),
+        **usemonalb_landuse_inputs(cfg, static, domain_start_time))
     from woof.core.cam_ozone import cam_ozone_setup
+    from woof.ingest.ruc_mosaic import ruc_mosaic_physics_inputs
     cam = cam_ozone_setup(exp=exp, dc=dc, grid=initialized.grid)
+    from woof.ingest.lake_physics import lake_physics_inputs
     driver = initialize_physics(
         state, cfg, cam_ozone=cam, landuse=landuse, tsk=soil.tsk,
         soil_temperature=soil.soil_temperature,
@@ -1612,11 +1708,14 @@ def prepare_child_case(initialized, child_dc, *, exp: ExperimentConfig,
         xice=soil.xice, snow=soil.snow_water, snow_depth=soil.snow_depth,
         glw=declared_constant_glw(exp),
         radiation=radiation, radiation_start_time=exp.start_time,
-        radiation_latitude=lat, radiation_longitude=lon)
+        radiation_latitude=lat, radiation_longitude=lon,
+        **lake_physics_inputs(cfg, static),
+        **ruc_mosaic_physics_inputs(
+            cfg, static, landuse_attrs=landuse_attrs, xice=soil.xice,
+            fractional_seaice=ruc_fractional_seaice(cfg)))
+    from woof.core.landuse import surface_snow_albedo
     driver.fields["snoalb"][...] = cp.asarray(
-        noah_initial_snow_albedo(
-            static["SNOALB"], static["LU_INDEX"], driver.noah_params,
-            rdmaxalb=cfg.rdmaxalb),
+        surface_snow_albedo(cfg, static, driver.noah_params),
         dtype=cp.float32)
     driver.fields["lai"][...] = cp.asarray(lai, dtype=cp.float32)
     driver.fields["shdmin"][...] = cp.asarray(
@@ -1718,7 +1817,8 @@ def rebuild_child_driver_from_land_state(*, exp: ExperimentConfig,
     # Climatology fields interpolate to the EVENT time: a child rebuilt
     # (or born) in May must not wear its January vegetation.
     vegfra = 100.0 * monthly_interp_to_date(static["GREENFRAC"], now)
-    lai = monthly_interp_to_date(static["LAI12M"], now)
+    from woof.core.landuse import surface_leaf_area
+    lai = surface_leaf_area(cfg, static["LAI12M"], now)
     lat, lon = grid.latlon_mass()
     if radiation_factory is None:
         parent_physics = getattr(parent_node.state, "physics", None)
@@ -1736,6 +1836,8 @@ def rebuild_child_driver_from_land_state(*, exp: ExperimentConfig,
         attrs = geog_selection.landuse_global_attrs()
     else:
         attrs = dict(landuse_attrs)
+    from woof.core.landuse import (ruc_fractional_seaice,
+                                    usemonalb_landuse_inputs)
     landuse = initialize_landuse(
         static["LU_INDEX"], urban_legend=int(getattr(cfg, "sf_urban_physics", 0)) > 0,
         soil_type=static["SCT_DOM"],
@@ -1748,9 +1850,13 @@ def rebuild_child_driver_from_land_state(*, exp: ExperimentConfig,
         iswater=int(attrs["ISWATER"]),
         islake=int(attrs["ISLAKE"]),
         isice=int(attrs["ISICE"]),
-        soil_temperature=land.get("tslb"))
+        soil_temperature=land.get("tslb"),
+        fractional_seaice=ruc_fractional_seaice(cfg),
+        **usemonalb_landuse_inputs(cfg, static, now))
     from woof.core.cam_ozone import cam_ozone_setup
+    from woof.ingest.ruc_mosaic import ruc_mosaic_physics_inputs
     cam = cam_ozone_setup(exp=exp, dc=child_dc, grid=grid)
+    from woof.ingest.lake_physics import lake_physics_inputs
     driver = initialize_physics(
         state, cfg, landuse=landuse,
         tsk=land.get("tsk", 300.0),
@@ -1764,13 +1870,16 @@ def rebuild_child_driver_from_land_state(*, exp: ExperimentConfig,
         sst=land.get("tsk"),
         glw=declared_constant_glw(exp),
         cam_ozone=cam, radiation=radiation, radiation_start_time=exp.start_time,
-        radiation_latitude=lat, radiation_longitude=lon)
+        radiation_latitude=lat, radiation_longitude=lon,
+        **lake_physics_inputs(cfg, static),
+        **ruc_mosaic_physics_inputs(
+            cfg, static, landuse_attrs=attrs, xice=land.get("xice", 0.0),
+            fractional_seaice=ruc_fractional_seaice(cfg)))
     from woof.core.cam_ozone import configure_cam_ozone
     configure_cam_ozone(state, cfg, exp=exp, dc=child_dc, grid=grid)
+    from woof.core.landuse import surface_snow_albedo
     driver.fields["snoalb"][...] = cp.asarray(
-        noah_initial_snow_albedo(
-            static["SNOALB"], static["LU_INDEX"], driver.noah_params,
-            rdmaxalb=cfg.rdmaxalb),
+        surface_snow_albedo(cfg, static, driver.noah_params),
         dtype=cp.float32)
     driver.fields["lai"][...] = cp.asarray(lai, dtype=cp.float32)
     driver.fields["shdmin"][...] = cp.asarray(
@@ -2692,6 +2801,9 @@ def build_prepared_tree_descendant_regrounder(exp, *, model, corridors,
         # ground moved; `plan` does.  See the plan-override comment in
         # RealRelocationChildPreparer.__call__.
         preparer._plan_override = plan
+        from woof.ensemble.runtime_context import (current_member_reconstruction_owner,
+                                                    bind_reconstructed_member_node)
+        member_pattern_owner = current_member_reconstruction_owner(node.state)
         factory = getattr(reground, "streamed_reconstruction_factory", None)
         reconstruction = (factory(node, initializer=initializer, preparer=preparer)
                           if callable(factory) and getattr(node.state, "_streamed_domain", None) is not None
@@ -2787,6 +2899,7 @@ def build_prepared_tree_descendant_regrounder(exp, *, model, corridors,
         after_move = getattr(preparer, "after_move", None)
         if callable(after_move):
             after_move(node)
+        bind_reconstructed_member_node(node, previous_owner=member_pattern_owner)
         return {
             "statics": statics_builder.source_label,
             "static_fields": CORRIDOR_REBUILT_STATICS,
@@ -3033,6 +3146,8 @@ def _retarget_tree_schedule(model, active_exp: ExperimentConfig,
         node.clock = new
         if old is None:
             refresh_model_time(node.state, new)
+        from woof.ensemble.runtime_context import bind_reconstructed_member_node
+        bind_reconstructed_member_node(node)
     model.schedule = schedule
 
 
@@ -3083,6 +3198,8 @@ def _attach_spawned_children(model, active_exp, record, writers,
         model.nodes_by_grid_id = MappingProxyType(nodes)
         prepared = preparer.prepared_by_grid_id[gid]
         model._prepared_by_grid_id[gid] = prepared
+        from woof.ensemble.runtime_context import bind_reconstructed_member_node
+        bind_reconstructed_member_node(node, prepared_case=prepared)
         if writers is not None:
             episodes = record.get("episode_by_grid_id", {})
             episode = int(episodes.get(str(gid), episodes.get(gid, 0)))
@@ -3991,12 +4108,28 @@ def _global_wrf_attrs(
 def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,
                       start_time: datetime, title: str, domain_id: int = 1,
                       expect_refl_10cm: bool = True,
-                      feedback=None, history_selection=None) -> Path:
+                      feedback=None, history_selection=None,
+                      completed_records=None) -> Path | None:
     from woof.io.wrfout import (WrfoutWriter, state_frame,
                                  wrfout_filename)
 
     state = prepared.initial_result.state
     streamed = getattr(state, "_streamed_domain", None)
+    from woof.ensemble.runtime_context import current_capture
+    capture = current_capture()
+    captured_refl = None
+    if capture is not None:
+        if (expect_refl_10cm
+                and prepared.cfg.mp_physics in REFL_10CM_MICROPHYSICS
+                and state.qv is not None):
+            from woof.core.refl import consume_refl_10cm
+            captured_refl = consume_refl_10cm(state)
+        capture.submit(
+            state=state, streamed=streamed,
+            metadata=_metadata_frame(prepared.grid, prepared.static_fields),
+            refl_field=captured_refl, valid_time=valid_time, grid_id=domain_id)
+        if not capture.keep_member_files:
+            return None
     if streamed is None:
         # Output observes the completed state without re-diagnosing it.
         frame = state_frame(state, include_diagnostic_pressure=True)
@@ -4004,6 +4137,13 @@ def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,
         # The same StoreFrame used by the tree writer. Its arrays remain
         # valid until the next sweep; this writer closes synchronously.
         frame = streamed.history_fields()
+        if (capture is None and expect_refl_10cm
+                and prepared.cfg.mp_physics in REFL_10CM_MICROPHYSICS
+                and state.qv is not None):
+            # The field is already in StoreFrame. Retire the domain handoff
+            # once, just as the tree route does, before the next due sweep.
+            from woof.core.refl import consume_refl_10cm
+            consume_refl_10cm(state)
     frame.update(_metadata_frame(prepared.grid, prepared.static_fields))
     if streamed is None:
         import cupy as cp
@@ -4015,7 +4155,8 @@ def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,
         # the output-due microphysics call from its prepared p/post-call T.
         # Missing or double-consumed handoffs are cadence bugs and fail loud.
         from woof.core.refl import consume_refl_10cm
-        frame["REFL_10CM"] = cp.asnumpy(consume_refl_10cm(state))
+        frame["REFL_10CM"] = cp.asnumpy(
+            consume_refl_10cm(state) if capture is None else captured_refl)
     from woof.io.history_selection import resolve
 
     frame, history_attrs = resolve(history_selection, None).apply(frame)
@@ -4037,8 +4178,14 @@ def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,
             # took WrfoutWriter's old literal-4 default, so a nine-layer
             # scheme would have declared soil_layers_stag=4 here.
             soil_layers=soil_layer_count(prepared.cfg),
+            _retain_identity_handle=True,
             ) as writer:
         writer.write_frame(valid_time.strftime("%Y-%m-%d_%H:%M:%S"), frame)
+    proof = writer.complete_output_identity()
+    if capture is not None:
+        capture.history_committed(proof, grid_id=domain_id, valid_time=valid_time)
+    if completed_records is not None:
+        completed_records.append(proof)
     return path
 
 
@@ -4401,6 +4548,7 @@ def integrate_prepared_case(
         grid_id=domain_id)
     restart_write_steps = restart_outer_steps(
         cfg, restart_interval_s=restart_interval_s)
+    restart_request = RestartRequest()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     integration_cfg = cfg if integration_cfg is None else integration_cfg
@@ -4441,6 +4589,9 @@ def integrate_prepared_case(
     # configured WRF STEPRA calendar on those internal steps.  A positive
     # configured bldt keeps the driver's WRF STEPBL calendar (see helper).
     apply_single_domain_pbl_cadence(state.physics, integration_cfg)
+    from woof.ensemble.runtime_context import bind_current_member_state
+    bind_current_member_state(prepared_case=prepared, state=state,
+                              cfg=integration_cfg, grid=prepared.grid)
     if restart_write_steps is not None:
         # THE CHECKPOINT'S QUESTION, ASKED BEFORE STEP 0.  A run that will
         # write checkpoints must be able to NAME its physics setup, and
@@ -4465,6 +4616,7 @@ def integrate_prepared_case(
 
         ask_checkpoint_physics_identity(state, integration_cfg)
     outputs = []
+    completed_records = []
     nan_free = True
     w_max = 0.0
     w_max_boundary_row = None
@@ -4475,23 +4627,36 @@ def integrate_prepared_case(
     swdown_peak_time = start_time
     start_outer_step = 0
     last_checkpoint = None
+    from woof.ensemble.runtime_counters import fixed_counter_observer_for_current
+    counters = fixed_counter_observer_for_current(prepared, stepper,
+        start_time=start_time, domain_id=domain_id, run_seconds=run_seconds,
+        outer_steps=outer_steps, output_outer_steps=output_outer_steps,
+        history_begin_step=history_begin_step, history_end_step=history_end_step,
+        write_final_output=write_final_output)
+    if counters is not None and restart_path is None:
+        counters.observe()
     if restart_path is None and history_begin_step == 0:
         # No microphysics call precedes the cold-start frame, so there is no
         # WRF-arranged post-call reflectivity field to consume.
         _preparation_progress(progress_callback, "cold-start-wrfout")
-        outputs.append(write_case_output(
+        output_path = write_case_output(
             prepared, output_dir, start_time, start_time=start_time,
             title=output_title, domain_id=domain_id,
             expect_refl_10cm=False, feedback=feedback,
-            history_selection=history_selection))
-        _output_committed(progress_callback, domain_id=domain_id,
-                          valid_time=start_time, path=outputs[-1])
+            history_selection=history_selection,
+            completed_records=completed_records)
+        if output_path is not None:
+            outputs.append(output_path)
+            _output_committed(progress_callback, domain_id=domain_id,
+                              valid_time=start_time, path=output_path)
         # WRF resets the nwp_diagnostics running maxima each history
         # interval (module_diag_nwp.F:246-269); woof's ratified placement
         # is immediately after the frame is durable.
         from woof.core.uh_diag import reset_up_heli_max
         reset_up_heli_max(state)
         _reset_streamed_up_heli_max(stepper if streamed else None)
+        if counters is not None:
+            counters.history_consumed(start_time)
     elif restart_path is not None:
         _preparation_progress(progress_callback, "validate-checkpoint")
         last_checkpoint = validate_manifest_checkpoint(restart_path)
@@ -4534,6 +4699,8 @@ def integrate_prepared_case(
             swdown_peak_time = datetime.fromisoformat(
                 trackers["swdown_peak_time"])
         surface_forcing_updates = domain_call_counts(stepper, state)["radiation"]
+        if counters is not None:
+            counters.observe()
     _preparation_progress(progress_callback, "initial-health-gate")
     if health_armed or restart_path is None:
         health.require_healthy(phase="initialized-or-restored")
@@ -4570,6 +4737,8 @@ def integrate_prepared_case(
             if health_debug and phase_hook_supported:
                 step_kwargs["phase_observer"] = health.phase_observer
             stepper(state, integration_cfg, **step_kwargs)
+            if counters is not None:
+                counters.observe()
             # Validator cadence (controller amendment, 2026-07-16): the
             # measured full-validation cost is 5.00% of step wall vs the
             # plan's <=2% gate, so the pre-registered remedy applies --
@@ -4681,19 +4850,25 @@ def integrate_prepared_case(
                               history_begin_outer_step=history_begin_step,
                               history_end_outer_step=history_end_step):
             valid = start_time + timedelta(seconds=(outer_step + 1) * cfg.dt)
-            outputs.append(write_case_output(
+            output_path = write_case_output(
                 prepared, output_dir, valid, start_time=start_time,
                 title=output_title, domain_id=domain_id,
-                feedback=feedback, history_selection=history_selection))
-            _output_committed(progress_callback, domain_id=domain_id,
-                              valid_time=valid, path=outputs[-1])
+                feedback=feedback, history_selection=history_selection,
+                completed_records=completed_records)
+            if output_path is not None:
+                outputs.append(output_path)
+                _output_committed(progress_callback, domain_id=domain_id,
+                                  valid_time=valid, path=output_path)
             # History-interval reset of the UP_HELI_MAX window (the frame
             # above snapshotted the accumulator synchronously).
             from woof.core.uh_diag import reset_up_heli_max
             reset_up_heli_max(state)
             _reset_streamed_up_heli_max(stepper if streamed else None)
-        if (restart_write_steps is not None
-                and (outer_step + 1) % restart_write_steps == 0):
+            if counters is not None:
+                counters.history_consumed(valid)
+        requested_restart = restart_request.pending()
+        if (requested_restart or (restart_write_steps is not None
+                and (outer_step + 1) % restart_write_steps == 0)):
             valid = start_time + timedelta(seconds=(outer_step + 1) * cfg.dt)
             checkpoint_path = (
                 output_dir / restart_filename(valid, f"d{domain_id:02d}"))
@@ -4722,6 +4897,8 @@ def integrate_prepared_case(
                     **({'preserved_forcing_prefix': True} if preserved_forcing_prefix else {}))
             from woof.resume import retire_superseded_checkpoints
             retire_superseded_checkpoints(output_dir)
+            if requested_restart:
+                restart_request.acknowledge()
         # The state gate completed after the final internal step.  Publish
         # progress only after any due wrfout/checkpoint is durable, so a
         # heartbeat can never advertise unguarded or unpublished work.
@@ -4777,6 +4954,9 @@ def integrate_prepared_case(
             RuntimeWarning, stacklevel=2)
     return RealCaseRunSummary(
         trajectory_digest=trajectory_digest,
+        frame_records=tuple(_frame_records(
+            outputs, completed_records=completed_records,
+            progress_callback=progress_callback)),
         wrfout_paths=tuple(outputs), nan_free=nan_free,
         w_max_ms=w_max, boundary_w_max_ms=boundary_w_max,
         interior_w_max_ms=interior_w_max,
@@ -5098,7 +5278,7 @@ def _terrain_clock_for_case(exp, data, acoustic, terrain, grids, reach):
 
     if not acoustic or not getattr(data, "forcing", None):
         return exp, ()
-    catalog = build_input_catalog(data)
+    catalog = _runtime_input_catalog(data)
     window = forcing_window(forcing_snapshots(data, catalog),
                             exp.start_time, exp.run_seconds)
     starts = {}
@@ -5163,6 +5343,14 @@ def run_experiment(exp: ExperimentConfig, data: CaseDataConfig, outdir, *,
     runs the extracted prepare/integrate pipeline with every input and
     policy drawn from the config pair.
     """
+    from woof.experiment import _bind_physics_params
+    exp = _bind_physics_params(exp, "woof.runtime.run_experiment")
+    from woof.ensemble.runtime_context import current_session
+    ensemble = current_session()
+    if ensemble is not None:
+        return ensemble.run_experiment(run_experiment, exp, data,
+            output_directory=outdir, restart=restart,
+            progress_callback=progress_callback, health_debug=health_debug)
     from woof.io.wrfout import quarantine_orphan_wrfouts
     from woof.core.devices import refuse_unrouted_devices
     refuse_unrouted_devices(exp, "woof run")
@@ -5241,6 +5429,12 @@ def run_experiment(exp: ExperimentConfig, data: CaseDataConfig, outdir, *,
     experimental_feedback = feedback_provenance(exp)
     if experimental_feedback is not None:
         print(FEEDBACK_EXPERIMENTAL_WARNING)
+    if exp.simulated_radar.enabled:
+        # Radar admission before the fetch, the preparation and any device
+        # work, for every caller of this route; the CLI door asks the same
+        # inventory first (woof.config.experiment_preparation_refusals).
+        from woof.simulated_radar_config import require_admitted
+        require_admitted(exp)
     _preparation_progress(progress_callback, "quarantine-wrfout")
     quarantine_orphan_wrfouts(outdir)
     # THE OUTPUT DISK ADMISSION (A190), after the structural refusals above
@@ -5325,7 +5519,7 @@ def run_experiment(exp: ExperimentConfig, data: CaseDataConfig, outdir, *,
             _streaming.admit_resident_road(
                 exp, single_decision, machine=admission_machine,
                 what="this run, held resident on the card")
-        catalog = build_input_catalog(data)
+        catalog = _runtime_input_catalog(data)
         snapshots = forcing_snapshots(data, catalog)
         times = forcing_schedule(exp, data, snapshots)
         store_direct = single_decision.stream and single_decision.store == "host"
@@ -5415,8 +5609,10 @@ def run_experiment(exp: ExperimentConfig, data: CaseDataConfig, outdir, *,
                 prepared_decisions={int(dc.grid_id): single_decision})
         from woof.io.history_selection import resolve
 
-        summary = integrate_prepared_case(
-            outdir, prepared, start_time=exp.start_time,
+        from woof.simulated_radar import run_with_radar
+        summary = run_with_radar(
+            integrate_prepared_case, outdir, prepared, start_time=exp.start_time,
+            radar_options=exp.simulated_radar, radar_outdir=outdir,
             output_title=data.output_title, domain_id=data.output_domain,
             run_seconds=exp.run_seconds,
             history_interval_s=dc.history_interval_s,
@@ -5430,11 +5626,10 @@ def run_experiment(exp: ExperimentConfig, data: CaseDataConfig, outdir, *,
         _finalizing_progress(progress_callback, "provenance-receipts")
         _write_feedback_provenance_receipt(
             outdir, exp, resumed=restart is not None)
-        # Hashed once, here, and carried on the summary: same reason as
-        # the tree route below -- the supervisor's success capsule used
-        # to re-read every emitted frame a second time.
-        frame_records = _frame_records(
-            summary.wrfout_paths, progress_callback=progress_callback)
+        # The fixed loop carries hashes captured before frame publication.
+        frame_records = (list(summary.frame_records) if summary.frame_records else
+                         _frame_records(summary.wrfout_paths,
+                                        progress_callback=progress_callback))
         _finalizing_progress(progress_callback, "run-capsule")
         _, floor_receipts = _emit_front_door_capsule(
             outdir, emission_site="runtime.run_experiment:single-domain",
@@ -5596,6 +5791,8 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
               f"policy state from {Path(restart).name}")
     _write_initial_perturbation_receipt(
         outdir, exp, getattr(model, "_initial_perturbation_receipts", ()))
+    from woof.ensemble.runtime_context import bind_current_member_model
+    bind_current_member_model(model)
     restart_info = None
     lifecycle_episodes: dict[int, int] = {}
     if restart is not None:
@@ -5654,6 +5851,7 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
             # The tree-wide [output] history selection; each domain's own
             # `output = {...}` overrides it inside the writer set.
             history_selection=exp.output,
+            simulated_radar=exp.simulated_radar, radar_output_dir=outdir,
             # A domain resumed mid-episode-2 writes d0N/episode-002/ from
             # its FIRST frame; empty on every run that is not a lifecycle
             # resume, which is the byte-inert default.
@@ -5748,6 +5946,14 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
             # "prepared forecast: "), so the receipt's own tag is the one
             # thing not to repeat.
             print(f"  {streaming_report['summary']}")
+        from woof.ensemble.runtime_context import current_capture, observe_current_counters
+        committed_progress = progress_callback
+        if current_capture() is not None:
+            observe_current_counters(model, start_time=exp.start_time)
+            def committed_progress(**event):
+                observe_current_counters(model, start_time=exp.start_time)
+                if progress_callback is not None:
+                    progress_callback(**event)
         if already_complete:
             # Not a skipped run: the restore above put the finished state
             # back in memory, and everything below -- drain, digest,
@@ -5762,7 +5968,7 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
             execute_experiment(
                 model, history_handler=history_handler,
                 restart_handler=restart_handler,
-                progress_callback=progress_callback,
+                progress_callback=committed_progress,
                 health_debug=health_debug,
                 relocation_runner=relocation_runner,
                 steppers=steppers, experiment=exp)
@@ -5780,7 +5986,7 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
                         exp, data, model, outdir)),
                 history_handler=history_handler,
                 restart_handler=restart_handler,
-                progress_callback=progress_callback,
+                progress_callback=committed_progress,
                 health_debug=health_debug,
                 steppers=steppers)
         _finalizing_progress(progress_callback, "drain-history-writers")

@@ -105,6 +105,49 @@ RE_PINNED_DRIFT: dict[str, tuple[str, str]] = {
 #: nothing observes.  The comment above each entry is the commit that last
 #: moved that file.
 BASELINE_PINNED: dict[str, str] = {
+    # Already-staged vertical order kernel (f82847049); lane/ec-pd-upwind-286
+    # confined its downstream cell at Courant <= 1 to the strict WRF
+    # verification build (it manufactured scalar mass).
+    "pd_vertical_sl": "c2b845e06f4aa693f021aadc19d8a32fe001da645f4c48b4684d7c99a09e231d",
+    # Already-staged upper-wind source, unchanged by this RUC merge.
+    # Its fork device oracle and generic OFF controls are retained in
+    # test_upper_wind_limiter.py; freeze its admitted raw source here.
+    "upper_wind_limiter": "7c097a45c226cceda7ecae2424ce8a0fa3cd98a63648a12395be9f29d00ed724",
+    # e677dccb6: active table edits multiply binary64 values on the GPU,
+    # round once to REAL, and reject non-positive crop roughness.
+    "physics_params":
+        "7054ef168fe48437d0eeec18f27055959888bd7594af9f38c4b75720c8083e69",
+    # Sun-angle albedo: normalization, MODIS classes, first-call copies,
+    # retained masked values and the ALBSOL-only cap are compared with
+    # extracted fork Fortran at supplied COSZEN. This pin does not qualify
+    # the upstream solar-geometry libm seam or forecast skill.
+    "solar_albedo":
+        "056fb00313f426f294e6da9577e0ed1d05be071f150ec6d1c402b497fbb87d24",
+    # The 2.8.5 ensemble line's three translation units, pinned at the bytes
+    # that line merged (they joined the product with no digest at all).
+    # 234f5ee94: member word-table copies for the resident ensemble batch;
+    # tests/test_ensemble_batch_bookkeeping_gpu.py grades it on a card.
+    "ensemble_bookkeeping":
+        "e323f39729e2248a133f362a5cb5ad0a0c7339c90b3065705919b009602f2d1a",
+    # 86dfe06f0: WRF v4.6.1 module_stoch spectral AR(1) patterns over
+    # Philox4x32-10; tests/test_ensemble_stochastic_streaming_gpu.py and
+    # tests/test_spp_consumers_gpu.py run it on a card.
+    "ensemble_stochastic":
+        "fed01693da7edf891b8596024cf0244fb560547d292cfa156a1f091c444f35b0",
+    # 1ef07b807: WRF V3.9.1 RUC hydraulic-conductivity SPP operator, kept out
+    # of ruc.cu so the disabled path keeps its translation unit;
+    # tests/test_ruc_spp_gpu.py compares it with the native overlay oracle.
+    "ruc_spp":
+        "c116898c0bcb37e4b8bf371ca495b445e816d4a1b441fc24c5ba4bb6269fcbb3",
+    # Complete WRF v4.6.1 lake driver. The source-pinned native oracle and
+    # test_lake_gpu compare all persistent and output words over 300 steps.
+    # RE-PINNED at 2.8.5 from 120fa6f73e711147 by the RUC vegetation, albedo
+    # and sea-ice lane: lake_init_columns and lake_step_columns take the
+    # run's xice_threshold as an argument (module_surface_driver.F
+    # :1365-1368 hands lakeini and lake the same 0.5 or 0.02 the land
+    # surface runs) in place of the two local ``xice_threshold=0.5``
+    # assignments.  At 0.5 every word is the previous build's.
+    "lake": "e47718427bb04a9b1f1bc1501b16889d02f9f67363b7a41cac34e7241cda7919",
     # gp-libm64: new test-only host-library bit grading entry points.
     "portable_libm64_grade":
         "080beeaea2eb617ae3e53beb529f8f99e793eea48c572710d0939c9ec19bb3a9",
@@ -282,11 +325,14 @@ BASELINE_PINNED: dict[str, str] = {
     # RE-PINNED by the 2026-09-30 MYNN speed lane (2f5dd16f9): the flux kernel reads
     # level-major plume and column storage.  Addressing only; the
     # mixscalars replay is bitwise identical.
+    # Added WRF diff4d/diff/invert for scalar_pblmix, which uses a separate
+    # entry point. test_scalar_pblmix_gpu compares its output words with
+    # compiled WRF and exercises consumption by the actual RK3 path.
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
     "mynn_scalar_mix":
-        "f1eb035142452f1b4c0575d4928faae79f6e77cd18ab06ed08e9a8b59ecc4ed1",
+        "abc61827d645ce7af664a7294ecfd289834de5cc57b485bff20e20d27ed17c1f",
     # 342f8780d feat(glacier): NOAHMP_GLACIER ported, the sea-ice threshold configurable, na
     "noahmp_glacier":
         "6a200773433a257f562f38d3e32cff13555acea1a4ce8267054b60914a6b5219",
@@ -370,8 +416,18 @@ BASELINE_PINNED: dict[str, str] = {
     # Previously ff9efd45815288a6.
     # Re-pinned for A146 (a98f2482e): constant-divisor float divisions
     # spelled __fdiv_rn.  Previously 42fcf4c2.
+    # RE-PINNED 2026-10-03 by the operational WRF 3.9 fork's Thompson
+    # (RunConfig.thompson_version = "wrf_39_noaa", lane/286-fork-thompson):
+    # every fork statement sits in a THOMPSON_AA_WRF39 arm, compiled only
+    # under that integer define; with it absent the v4.6.1 code compiles as
+    # before.  Measured: the host parity report against WRF v4.6.1 on the
+    # 42 committed real-data columns is byte-identical before and after,
+    # tests/test_thompson_wrf39.py strips the fork arms back to the pre-fork
+    # source, and the wrf_461 KS/CO cut forecast is compared word for word
+    # with the branch base on a card (lane report).
+    # Previously d8b8faa7ac626c96.
     "thompson_aerosol_cold":
-        "d8b8faa7ac626c96d0eb851afc1a6b7779bfa2bbae8ff138c35155ad445472d4",
+        "001c8655d12a2f4ae7cb12da02d777e75e10b79889faafc3036f4d03473ceba4",
     # 0ebda6608 snapshot(mp28): the recovered aerosol-aware Thompson port, re-parented to it
     "thompson_aerosol_probe":
         "a83d3c9f8157b5702b504350ee93572c34378390917f8c037bf2762b27b0a91e",
@@ -416,8 +472,20 @@ BASELINE_PINNED: dict[str, str] = {
     # the level-parallel cloud fallout; no answer moved (bit tests and a
     # byte-identical 1 h mp=28 forecast on an RTX 4090).
     # Previously 8380f654e902a4ec.
+    # RE-PINNED 2026-10-03 by the operational WRF 3.9 fork's Thompson
+    # (RunConfig.thompson_version = "wrf_39_noaa", lane/286-fork-thompson):
+    # every fork statement sits in a THOMPSON_AA_WRF39 arm, compiled only
+    # under that integer define; with it absent the v4.6.1 code compiles as
+    # before.  Measured: the host parity report against WRF v4.6.1 on the
+    # 42 committed real-data columns is byte-identical before and after,
+    # tests/test_thompson_wrf39.py strips the fork arms back to the pre-fork
+    # source, and the wrf_461 KS/CO cut forecast is compared word for word
+    # with the branch base on a card (lane report).
+    # Previously cff91a9693c01ab2.
+    # Comment-only re-pin: the source note omits a personal attribution.
+    # Stripping the fork arms still restores the pre-fork default source.
     "thompson_aerosol_sed":
-        "cff91a9693c01ab21b298c621f2786edd57901b585c3e27980f3a6701a136925",
+        "248d83895eacbbe60f31136f3d186820dd577c148380c23197364212e4ec0fb0",
     # c1563f187 fix(release-scan): the gate reads by content, and sees an escaped path
     # RE-PINNED 2026-09-24 by the WRF v4.6.1 real-column repairs.  What
     # moved is WRF's own rule in each case, cited to module_mp_thompson.F
@@ -435,8 +503,27 @@ BASELINE_PINNED: dict[str, str] = {
     # flooring vapour at 1e-10 in every other column (:3974); the final
     # vapour, nwfa and nifa have no unexplained cell on any frame.
     # Previously 856c00e10f3fb4cf.
+    # Re-pinned 2026-10-03 for optional stores of unused entry diagnostics.
+    # RTX 4090: 77 entry/memory GPU tests passed, including three calls on
+    # all 22 fixture states against the full-output path, bit for bit.
+    # NVRTC 13.4 compiler census: no constant-divisor or rewrite sites.
+    # RE-PINNED 2026-10-03 by the operational WRF 3.9 fork's Thompson
+    # (RunConfig.thompson_version = "wrf_39_noaa", lane/286-fork-thompson):
+    # every fork statement sits in a THOMPSON_AA_WRF39 arm, compiled only
+    # under that integer define; with it absent the v4.6.1 code compiles as
+    # before.  Measured: the host parity report against WRF v4.6.1 on the
+    # 42 committed real-data columns is byte-identical before and after,
+    # tests/test_thompson_wrf39.py strips the fork arms back to the pre-fork
+    # source, and the wrf_461 KS/CO cut forecast is compared word for word
+    # with the branch base on a card (lane report).
+    # Previously 005bdb57bfc83b37.
+    # Re-pinned for fork-only start emission, measured against the fork's
+    # thompson_init on five cell spacings by test_thompson_wrf39_init_gpu.
+    # The default state's 39 GPU gates pass, and the 42-column adapter's
+    # 26 outputs remain byte-identical to 7ab2e3dcf. Fork compiler census:
+    # zero constant-divisor and rewrite sites in all five translation units.
     "thompson_aerosol_state":
-        "a64cc5d86f2cfa0908cbff1ec0c0109b8e1fa2eba4947792aab362b9a260a7a8",
+        "009f1debca0c3ecbb86d44456d273ac699d18f18dd15031e2efc70f93e0f3eb2",
     # c1563f187 fix(release-scan): the gate reads by content, and sees an escaped path
     # RE-PINNED 2026-09-24 by the WRF v4.6.1 real-column repairs.  What
     # moved is WRF's own rule in each case, cited to module_mp_thompson.F
@@ -458,8 +545,18 @@ BASELINE_PINNED: dict[str, str] = {
     # A146 review repair: the two lamc clamps divide by a header constant
     # (THOMPSON_AA_D0C, THOMPSON_AA_D0R * 2.0f), which compute_120 turns
     # into a reciprocal multiply; they now go through thompson_aa_div.
+    # RE-PINNED 2026-10-03 by the operational WRF 3.9 fork's Thompson
+    # (RunConfig.thompson_version = "wrf_39_noaa", lane/286-fork-thompson):
+    # every fork statement sits in a THOMPSON_AA_WRF39 arm, compiled only
+    # under that integer define; with it absent the v4.6.1 code compiles as
+    # before.  Measured: the host parity report against WRF v4.6.1 on the
+    # 42 committed real-data columns is byte-identical before and after,
+    # tests/test_thompson_wrf39.py strips the fork arms back to the pre-fork
+    # source, and the wrf_461 KS/CO cut forecast is compared word for word
+    # with the branch base on a card (lane report).
+    # Previously 633791f61719e99f.
     "thompson_aerosol_warm":
-        "633791f61719e99f8c9d1ed3a1e5989fd6839243ab84be74ed6c985e95493281",
+        "56abc1c1082ee1f1b6e6d83ee663876be66eb4ae226fbaaa2309a2d52cbc9d36",
     # 02cfd5301 feat(les): km_opt=2 restart carrier, lateral-boundary arm, TKE budget
     "tke_budget":
         "c7f6dc37f15b25fccbea50deef0c6d595c08b2ee4762f14eef169b654d54fccb",
@@ -600,13 +697,21 @@ BASELINE_PINNED: dict[str, str] = {
     # moved by a44612163 and last by 77ae92552 (a summing thread per
     # (column, level) row).  Exercised by
     # tests/test_rrtmg_legacy_device_glue.py, test_rrtmg_legacy_prep_device.py
-    # and test_rrtmg_lw_batched_layout.py.
+    # and test_rrtmg_lw_batched_layout.py.  Moved by lane/286-fork-mynn:
+    # rla_mynn_gsd41 added (the GSD MYNN v4.1 subgrid-cloud merge, selected
+    # only under bl_mynn_version = "gsd_41"); every existing entry point is
+    # unchanged text.  Previously b19b4e13.
     "rrtmg_legacy_adapter":
-        "b19b4e13cb424b50789d75c7c8fa6066cf9a84808f9f9f5e14250e85d63b4524",
+        "48c49d79d56e94507ec006488f2bc702fdd76b7223c58c2b8b647c048d9daa40",
     # Coastal LW native-entry regression: the positivity guard counts only
     # retained interfaces; WRF overwrites the final interface with zero.
+    # Re-pinned for the source-selected NOAA WRF 3.9 SW cloud optics:
+    # land/water fallback radii 5.4/9.6 microns and snow fraction cap 1.0.
+    # The WRF 4.6.1 default stays behind RP_CLOUD_FORM=0. Both forms were
+    # exercised by test_rrtmg_source_cloud_form_gpu.py in the node4 gate;
+    # the measured node4 source-transition receipt records these raw bytes.
     "rrtmg_legacy_prep":
-        "92a11a6cb2498368171f2cbc9c52b21de3d3f1eccf311af35c0f57e417c01738",
+        "fba22c05ab15139df82653cc1e699b8f1a53d10d11359bc7b6c14da36012c15a",
     "rrtmg_lw_chain_coalesced":
         "2682d172388d4a31ae11be0168bdd13b33be9c1b8e77e7ca92e86a8f9a822401",
     "rrtmg_lw_zbatched":
@@ -620,8 +725,20 @@ BASELINE_PINNED: dict[str, str] = {
     # terms take consistent units (the lower one uncouples the u/v
     # tendencies, the upper one divides by g), a declared divergence from
     # WRF 4.7.1 graded against WRF's routine with the same corrections.
+    # Moved a third time by lane/sol-hrrr-zadvect (37a99fcd4, lane tip
+    # fd1772ba0, merged at dd5ded73f): zadvect_implicit_variant =
+    # "wrf_legacy" selects the earlier WRF split (upwind-level winds with
+    # the mass-point map factor, cx+cy), current-mass face coefficients in
+    # the u/v solves and the earlier upper-w grouping (divide the whole
+    # increment by g); the "wrf_471" default runs the operator above
+    # unchanged.  Graded word for word against native Fortran extracted from
+    # the pinned NOAA-EMC/HRRR WRF source (40ee6058c) by
+    # tests/test_zadvect_legacy.py: 33,320 words at max ULP 0 for the legacy
+    # arm and 4,381 at max ULP 0 for wrf_471, on an RTX 5090 at NVRTC 13.4,
+    # whose reading also gives local frames of 1040/2064/4112 B at
+    # IEVA_KMAX 65/129/257, unchanged, so no frame recording or price moves.
     "ieva":
-        "45740ad8cbbe738a5b69b32a03a63cd878e6cd3f0378e2a9d6216deea7448df3",
+        "a3bcfbb1064f7513a4ffb0dfc5d0550da8576923c9ff0d71779397d4dd4b4aa2",
     # Lane 281-namelist-gaps: WRF v4.7.1 slope_rad / topo_shading
     # (module_radiation_driver.F toposhad/topo_rad_adj), held bit for bit
     # to WRF's Fortran by tests/test_topo_radiation.py on a card.
@@ -633,6 +750,30 @@ BASELINE_PINNED: dict[str, str] = {
     # (tests/test_noah_mosaic_wrf471_parity.py).
     "noah_mosaic":
         "8dab69ae3a7cb90ad41436b97ade1f4728e4030d3fc0b86fced12089ff21f791",
+    # Lane 286-aer-swint: WRF swint_opt = 1 (radconst/calc_coszen at the
+    # current xtime, update_swinterp_parameters, interp_sw_radiation of the
+    # NOAA-EMC/HRRR v4.1.21 fork's module_radiation_driver.F), glibc libm
+    # words through glibc_flt32.cuh and glibc_trig_flt32.cuh, held word for
+    # word to the fork's gfortran/glibc Fortran by
+    # tests/test_swint_interpolation.py on a card.
+    # Lane 286-aer-swint: WRF aer_opt = 3 shortwave optics (gt_aod and
+    # calc_aerosol_rrtmg_sw of the NOAA-EMC/HRRR v4.1.21 fork, RSLF,
+    # Bolton RH, the rural Lagrange tables), glibc expf through
+    # glibc_flt32.cuh, held word for word to the fork's gfortran/glibc
+    # Fortran by tests/test_rrtmg_aerosol_optics.py on a card.
+    # Re-pinned for prescribed smoke: source-order 4.0 mass extinction,
+    # layer cap 3.0 and no RH enhancement. The pinned smoke_aer3_oracle
+    # fixture and node4 smoke optical/provider gates grade these bytes;
+    # zero smoke remains an exact control. No forecast skill is inferred.
+    "rrtmg_aer3":
+        "8f428e8d7d2f02ef174880b24c4e7c09cba5fb89ca6138b24ebab519d80ecccf",
+    # Explicit prescribed profiles only: device finite/unit guards,
+    # bounded UTC interpolation and congruent-grid slab gathering.
+    # The node4 8-test adapter/provider gate binds this exact raw source.
+    "rrtmg_smoke_manifest":
+        "ac810c4ffc873f084882adb695eccdbf84d8c7d28af1654c3d01755770460ece",
+    "swint":
+        "ced1a30cd19b61b749add691522d134cf2cee7b2cb818ebe175b1bd5112620f7",
 }
 
 _FROZEN = _frozen_module()
@@ -647,6 +788,20 @@ PINNED.update(BASELINE_PINNED)
 # docs/gf_gamma_known_delta.md and tests/test_gf_gamma_correctly_rounded.py;
 # header assembly is independently checked by test_kernel_loader_inert.py.
 PINNED_HEADERS = {
+    # The staged vertical loader borrows this already frozen raw unit.
+    "pd_advection.cu": PINNED["pd_advection"],
+    # Lake lower bounds, REAL kinds and division rounding are part of the
+    # column contract; test_lake_contract regenerates the WRF statements.
+    # ABS sign clearing includes negative zero, subnormals and signed NaNs;
+    # native Fortran word controls and the CUDA probe hold that boundary.
+    # RE-PINNED at 2.8.5 from 2c67731aae313025 and f31a4a7144c95ad3 by the
+    # notice correction: one comment line in each header (line 2, line 3)
+    # named tools/lake_wrf461_oracle/NOTICE.txt, which neither distribution
+    # carries, and promised CLM notices that file never held.  Both now name
+    # licenses/LICENSE-WRF-public-domain.txt.  Comments only, measured: every
+    # other line is byte-identical and the headers keep 92 and 4128 lines.
+    "lake_support.cuh": "5a8fb446ae3b0584a360e9961bb94d056cb9ebb7d8c5b7c4ca52ff1010ad76ae",
+    "lake_wrf.cuh": "196340026552b827c804eeea5f3ce9a6bd1883e86fdb694ca397882c26d58d94",
     # gp-libm64: new Rust libm 0.2.16 and glibc 2.39 log1pf twins.
     "portable_libm64.cuh": "bca62ac1366a4602b0c5bd0b11a11c9ee226a1e1a1f690060c924ef94a64655e",
     # NumPy NaN payloads and explicit rounding for the real_init units.
@@ -665,7 +820,10 @@ PINNED_HEADERS = {
     "glibc_flt32.cuh": "95246afdfdab3419e9b273b7ffd468faf94f1f025e776eb66cc11f9ada438762",
     "rrtmgp_planck_common.cuh": "4e1a8214ea8e2a3dbd88cc2cda260a21ff678d98acf4f22c971ba0b51b4eba36",
     # A146 (a98f2482e): __fdiv_rn spellings; previously 07f5c144.
-    "thompson_aerosol_common.cuh": "94876bfbc38db9c75540d24944a1744d3c40d29f9be9e88dff5dafe32b772760",
+    # RE-PINNED 2026-10-03 (lane/286-fork-thompson): the WRF 3.9 fork's
+    # helpers and constants appended (thompson_aa_wrf39_*), referenced only
+    # by THOMPSON_AA_WRF39 arms; previously 94876bfbc38db9c7.
+    "thompson_aerosol_common.cuh": "dce2673c68a7a0f80aae3a359051b8630b92c658472f8dc6375634820d9ebaf2",
     # 399b1c017: glibc 2.43 float32 trig (Arm sinf/cosf, CORE-MATH tanf/
     # asinf/acosf/atanf) for the urban BEP column, generated and proven by
     # tools/glibc_trig_flt32_proof/.
@@ -692,8 +850,26 @@ PINNED_HEADERS = {
     # whose every output word equals the array orchestration's.  sfctmp's is
     # generated by tools/ruc_fused/gen_sfctmp.py, the driver's aliases by
     # tools/ruc_fused/build_driver.py; regenerate, prove identity, re-pin.
-    "ruc_fused_sfctmp.cuh": "97f28c5dbf215d13bb08ee75c79a25e6bbf62255536ec1f62b7977ea05f3ef5f",
-    "ruc_fused_driver.cuh": "a38eb8389187b746accc140b3b90acf10721191b7a714c01276df1359ecf7455",
+    # 2.8.6: regenerated for the snow lineage (ruc_snow): the dispatch's
+    # three wrf_45 arms (melt-out reset before the recombination, melt
+    # bookkeeping scaled by cover, SNOWFALLAC net of melt) and the v4.6.1
+    # cover rebuild select on GPUWM_RUC_SNOW_V461; tests/test_ruc_sfctmp_fused.py
+    # grades it against the array orchestration under both names.
+    # Prevents either lineage changing unseen.  Previously 97f28c5d.
+    "ruc_fused_sfctmp.cuh": "767102b293783e84887b0c5ffec1e7409a35cf014f61f157a6a9b5c057126d2f",
+    # 2.8.4: mosaic mixtures and irrigation match WRF column words; mixed
+    # 5,917-column calls match the resident reference for all selector pairs.
+    # Prevent omitting irrigation or bypassing a lake when its model is off.
+    # Forward merge of RUC selectors with the staged vegetation seam:
+    # the prologue carries qvg_air, prescribed-LAI rdlai2d and the sea-ice
+    # threshold together; the epilogue carries land category count,
+    # irrigation and screen diagnostic selectors plus that threshold.
+    # The generated header follows build_driver.py and its launcher ABI.
+    # Generic forms remain irrigation/snow wrf_461, QVG wrf and diagnostic
+    # flux. Named source forms are explicit. The full RUC GPU deck and
+    # test_generic_ruc_defaults_match_named_legacy_after_every_gpu_call
+    # must verify the merged dispatch before this tip is handed over.
+    "ruc_fused_driver.cuh": "49bc4c655d6fb8ad4a88445347d3490213ba78185063215ec8e5709341a53dc3",
 }
 
 #: Headers a module composes ITSELF rather than through the loader's
