@@ -1788,11 +1788,13 @@ _EXTRA_FACTS: dict[str, _ExtraFacts] = {
                     "from this extra",
         blocking=True, severity=SEVERITY_UNREACHABLE),
     "obs": _ExtraFacts(
-        doors=("python -m tools.obs_battery_score",
-               "python -m tools.obs_precampaign_controls",
-               "python -m tools.obs_battery_registration"),
-        still_works="every forecast and preprocessing route; only scoring "
-                    "a run against observations needs it",
+        doors=("station scoring from the Dynamical.org ASOS Parquet "
+               "archive (woof.obs.dynamical_asos, pyarrow)",
+               "python -m tools.freeze_dynamical_asos_stations"),
+        still_works="every forecast and preprocessing route, and scoring "
+                    "against the IEM ASOS front door, MRMS and the obs "
+                    "battery (python -m tools.obs_battery_score); only the "
+                    "Dynamical.org station archive needs it",
         blocking=False, severity=SEVERITY_DEGRADED),
     # NOT the default engine.  region-global became the shipped
     # --dealias-engine on 2026-08-12 and is the Rust library this report

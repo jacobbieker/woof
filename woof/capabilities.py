@@ -221,7 +221,8 @@ SHAPEFILE_READER = Requirement(
 #: which were the extras that carried scipy; the packaging lane moved
 #: scipy into the runtime dependencies and left both extras declared and
 #: EMPTY, so that they keep resolving for every install line already
-#: written down.  Offering an empty extra is the failure mode this whole
+#: written down.  (``[obs]`` has since gained pyarrow, for the
+#: Dynamical.org ASOS reader, and still carries no scipy.)  Offering an empty extra is the failure mode this whole
 #: registry exists to prevent: `pip install 'recast-woof[dealias]'` would
 #: report success, install nothing, and the next attempt would fail
 #: identically.  Reaching this message now means a declared dependency
