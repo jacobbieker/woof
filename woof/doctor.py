@@ -4049,6 +4049,233 @@ def _obs_score_check() -> Check:
                  brief="staged", group=_GROUP_ENGINES)
 
 
+# ---------------------------------------------------------------------------
+# Station observations from the Dynamical.org ASOS Parquet archive
+# ---------------------------------------------------------------------------
+
+DYNAMICAL_ASOS_NAME = "station observations: Dynamical.org ASOS Parquet"
+#: Spelled here as well as in :mod:`woof.obs.dynamical_asos` because this
+#: row has to report on an install where that module is absent; the
+#: module's own constants win whenever it imports.
+_DYNAMICAL_ASOS_MODULE = "woof.obs.dynamical_asos"
+_DYNAMICAL_ASOS_URL_ENV = "WOOF_DYNAMICAL_ASOS_URL"
+_DYNAMICAL_ASOS_DEFAULT_URL = "https://data.source.coop/dynamical/asos-parquet"
+_DYNAMICAL_ASOS_CACHE_ENV = "WOOF_DYNAMICAL_ASOS_CACHE"
+_DYNAMICAL_ASOS_TABLE = "dynamical_asos_stations.json"
+_DYNAMICAL_ASOS_COVERAGE = (
+    "coverage: the United States plus 14 countries (CA, AU, BR, CN, DE, FR, "
+    "GB, IN, JP, KR, MX, NZ, RU, ZA), about 30-60 min behind real time and "
+    "marked Experimental by dynamical.org; stations elsewhere fall back to "
+    "the Iowa Environmental Mesonet route (`woof obs asos`)")
+_DYNAMICAL_ASOS_ATTRIBUTION = (
+    "attribution: data Iowa Environmental Mesonet (Iowa State University); "
+    "original reports NOAA/NWS/FAA (public domain); processing "
+    "dynamical.org; hosting Source Cooperative")
+#: Said under every "install pyarrow" remedy.  The ``obs`` extra carries
+#: pyarrow from the release that ships the reader; the direct install is
+#: the answer on a build whose extra predates it.
+_PYARROW_REMEDY_NOTE = (
+    "\n  # installs pyarrow, which reads the archive's Parquet files;"
+    "\n  # if pyarrow is still absent afterwards, install it directly:"
+    "\n  #   pip install pyarrow")
+#: How many files the cache census walks before it stops and says so.
+#: The cache holds one Parquet file per year, so this is never reached by
+#: an honest cache; it bounds the walk on a mis-pointed override.
+_DYNAMICAL_CACHE_WALK_LIMIT = 10_000
+
+
+def _dynamical_asos_cache_dir() -> Path:
+    """The cache root the reader writes to, override honoured."""
+
+    override = os.environ.get(_DYNAMICAL_ASOS_CACHE_ENV)
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".woof" / "cache" / "dynamical-asos"
+
+
+def _dynamical_cache_census(root: Path) -> str:
+    """``"<root> (N file(s), X MB)"`` or why it could not be read.
+
+    A bounded local walk; never raises.
+    """
+
+    if not root.is_dir():
+        return f"{root} (not created yet; the first fetch creates it)"
+    files = 0
+    size = 0
+    truncated = False
+    walk_errors: list[OSError] = []
+    try:
+        for dirpath, _dirnames, filenames in os.walk(
+                root, onerror=walk_errors.append):
+            for filename in filenames:
+                try:
+                    size += (Path(dirpath) / filename).stat().st_size
+                except OSError:
+                    continue
+                files += 1
+                if files >= _DYNAMICAL_CACHE_WALK_LIMIT:
+                    truncated = True
+                    break
+            if truncated:
+                break
+    except OSError as error:
+        return f"{root} (unreadable: {error})"
+    if walk_errors and not files:
+        return f"{root} (unreadable: {walk_errors[0]})"
+    if walk_errors:
+        truncated = True
+    return (f"{root} ({'at least ' if truncated else ''}{files} file(s), "
+            f"{size / 1e6:.1f} MB)")
+
+
+def _dynamical_asos_check() -> Check:
+    """Can this install score against the Dynamical.org ASOS archive?
+
+    Local evidence only, by contract: the reader module imports, PyArrow
+    imports (in a subprocess, through :func:`_import_probe`, so this
+    process never loads it), the frozen station table answers, and where
+    the cache lives.  The archive host is NOT contacted -- doctor runs on
+    air-gapped boxes and in CI, and a report that waits on a remote host
+    is a report that hangs -- so the detail says so rather than letting
+    ``verified`` imply a fetch was tried.
+
+    Non-blocking in every branch: this is an optional observation source
+    beside the IEM route, named in no FIRST-LIGHT step.
+    """
+
+    name = DYNAMICAL_ASOS_NAME
+    tail = f"{_DYNAMICAL_ASOS_COVERAGE}; {_DYNAMICAL_ASOS_ATTRIBUTION}"
+    cache = _dynamical_cache_census(_dynamical_asos_cache_dir())
+    try:
+        from importlib import import_module
+
+        reader = import_module(_DYNAMICAL_ASOS_MODULE)
+    except ModuleNotFoundError as error:
+        if (error.name or "").split(".")[0] == "pyarrow":
+            # A reader that imports PyArrow eagerly: the same opt-in gap
+            # as the probe below finds, and the same one command.
+            install = _extra_install_line("obs")
+            return Check(
+                name, "missing",
+                f"{_DYNAMICAL_ASOS_MODULE} needs pyarrow, which is not "
+                f"installed ({error}), so `woof obs dynamical-asos` "
+                f"refuses; {tail}",
+                install + _PYARROW_REMEDY_NOTE,
+                action=install, brief="pyarrow not installed",
+                blocking=False, severity=SEVERITY_OPT_IN)
+        if error.name != _DYNAMICAL_ASOS_MODULE:
+            # The reader is here and one of ITS imports is not: that is
+            # a broken install, not an older one.
+            return Check(
+                name, "missing",
+                f"{_DYNAMICAL_ASOS_MODULE} is present but does not import "
+                f"({error}); `woof obs dynamical-asos` refuses; {tail}",
+                "# the reader module is installed but incomplete:\n"
+                + REINSTALL_HINT,
+                action="reinstall woof", brief="reader does not import",
+                blocking=False, severity=SEVERITY_DEGRADED)
+        url = (os.environ.get(_DYNAMICAL_ASOS_URL_ENV)
+               or _DYNAMICAL_ASOS_DEFAULT_URL)
+        return Check(
+            name, "info",
+            "this WOOF build does not include the Dynamical.org ASOS reader "
+            f"({_DYNAMICAL_ASOS_MODULE}), so `woof obs dynamical-asos` "
+            "refuses and station verification uses the IEM route only; "
+            f"base URL it would read: {url}; cache: {cache}; {tail}",
+            "# update to a WOOF build that includes the Dynamical reader:\n"
+            "pip install --upgrade 'recast-woof[obs]'",
+            action="update to a WOOF build that includes the Dynamical reader",
+            brief="reader not in this build", blocking=False)
+    except Exception as error:                   # noqa: BLE001 - reported
+        return Check(
+            name, "missing",
+            f"{_DYNAMICAL_ASOS_MODULE} failed to import "
+            f"({type(error).__name__}: {error}); `woof obs dynamical-asos` "
+            f"refuses; {tail}",
+            "# the reader module is installed but broken:\n" + REINSTALL_HINT,
+            action="reinstall woof", brief="reader does not import",
+            blocking=False, severity=SEVERITY_DEGRADED)
+
+    url_env = getattr(reader, "BASE_URL_ENV", _DYNAMICAL_ASOS_URL_ENV)
+    default_url = getattr(reader, "DEFAULT_BASE_URL",
+                          _DYNAMICAL_ASOS_DEFAULT_URL)
+    override = os.environ.get(url_env)
+    url = (f"{override} (from {url_env})" if override
+           else f"{default_url} (default; {url_env} overrides)")
+    # The reader's own answer to "where is the cache" wins when it has one.
+    try:
+        cache = _dynamical_cache_census(Path(reader.cache_root()))
+    except Exception:                            # noqa: BLE001 - fallback
+        pass
+
+    arrow_ok, arrow_evidence = _import_probe("pyarrow")
+    arrow = f"pyarrow {arrow_evidence}"
+
+    try:
+        table_path: Path | None = (Path(reader.__file__).resolve().parent
+                                   / "data" / _DYNAMICAL_ASOS_TABLE)
+    except (TypeError, AttributeError, OSError):
+        table_path = None
+    table_ok = False
+    try:
+        stations = list(reader.stations_in_bbox(-180.0, -90.0, 180.0, 90.0))
+    except Exception as error:                   # noqa: BLE001 - reported
+        table = f"station table unreadable ({type(error).__name__}: {error})"
+    else:
+        countries = sorted({str(row.get("country") or "?")
+                            for row in stations if isinstance(row, dict)})
+        table_ok = bool(stations)
+        table = (f"station table: {len(stations)} station(s) in "
+                 f"{len(countries)} country code(s) "
+                 f"({', '.join(countries[:20])}"
+                 f"{', ...' if len(countries) > 20 else ''})"
+                 if stations else "station table is empty")
+        if table_path is not None and table_path.is_file():
+            table += f" from {table_path}"
+
+    evidence = f"{arrow}; {table}; base URL {url}; cache: {cache}"
+    if not arrow_ok and arrow_evidence.startswith("installed but"):
+        # Present and wrong: an install command answers "already
+        # satisfied", so the remedy is the reinstall that replaces it.
+        return Check(
+            name, "missing",
+            f"the reader is installed but {arrow}, and it reads the "
+            f"Parquet archive through it, so `woof obs dynamical-asos` "
+            f"refuses; {evidence}; {tail}",
+            "pip install --force-reinstall pyarrow\n"
+            "  # replaces a pyarrow install that does not import",
+            action="pip install --force-reinstall pyarrow",
+            brief="pyarrow does not import", blocking=False,
+            severity=SEVERITY_DEGRADED)
+    if not arrow_ok:
+        install = _extra_install_line("obs")
+        return Check(
+            name, "missing",
+            f"the reader is installed but {arrow}, and it reads the "
+            f"Parquet archive through it, so `woof obs dynamical-asos` "
+            f"refuses; {evidence}; {tail}",
+            install + _PYARROW_REMEDY_NOTE,
+            action=install, brief="pyarrow not installed", blocking=False,
+            severity=SEVERITY_OPT_IN)
+    if not table_ok:
+        return Check(
+            name, "missing",
+            f"{table}, so stations cannot be selected by box; {evidence}; "
+            f"{tail}",
+            "# the frozen station table ships with the package:\n"
+            + REINSTALL_HINT,
+            action="reinstall woof", brief="station table missing",
+            blocking=False, severity=SEVERITY_DEGRADED)
+    return Check(
+        name, "verified",
+        f"reader {_DYNAMICAL_ASOS_MODULE} imports; {evidence}; the archive "
+        f"host itself is not contacted (doctor stays offline); {tail}",
+        brief=f"reader, pyarrow {arrow_evidence} and "
+              f"{len(stations)}-station table present",
+        blocking=False)
+
+
 def _isobaric_reader_check() -> Check:
     """The isobaric-height reader the Python height consumers call.
 
@@ -6042,6 +6269,9 @@ def _collect_checks(sources: tuple[str, ...] | None = None,
     checks.append(_static_builder_check())
     checks.append(_obs_regrid_check())
     checks.append(_obs_score_check())
+    # Optional and offline: the reader, pyarrow and the frozen station
+    # table, never the archive host.
+    checks.append(_dynamical_asos_check())
     checks.append(_noah_init_check())
     checks.append(_isobaric_reader_check())
     checks.append(_region_dealias_check())

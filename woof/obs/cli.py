@@ -36,6 +36,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 
 from woof.cli_help import ForecastParser
 from woof.cli_numbers import float_between, positive_float
@@ -65,7 +66,10 @@ def _quantities(value: str | None) -> list[str] | None:
     return names or None
 
 
-def _bbox(value: str) -> tuple[float, float, float, float]:
+def _bbox(value: str, *, wrap: bool = False
+          ) -> tuple[float, float, float, float]:
+    """``W,S,E,N`` in degrees.  ``wrap`` lets ``W > E`` cross 180 deg."""
+
     parts = [part.strip() for part in value.split(",")]
     if len(parts) != 4:
         raise argparse.ArgumentTypeError(
@@ -85,7 +89,12 @@ def _bbox(value: str) -> tuple[float, float, float, float]:
     if south >= north:
         raise argparse.ArgumentTypeError(
             f"--bbox south {south} is not below north {north}")
-    if west >= east:
+    if wrap and west == east:
+        # West > east is a box across the antimeridian; west == east is a
+        # zero-width box, which selects nothing and would report success.
+        raise argparse.ArgumentTypeError(
+            f"--bbox west and east are both {west}, a box of zero width")
+    if not wrap and west >= east:
         raise argparse.ArgumentTypeError(
             f"--bbox west {west} is not west of east {east}")
     return west, south, east, north
@@ -428,6 +437,259 @@ def _register_radar(sub) -> None:
     grid.set_defaults(func=_radar_grid)
 
 
+# ------------------------------------- Dynamical.org ASOS Parquet archive
+#
+# A pure-Python door, not a front door: the reader is
+# :mod:`woof.obs.dynamical_asos` and there is no binary to resolve, so it is
+# deliberately absent from ``frontdoor.FRONT_DOORS`` and ``_INSTRUMENTS``.
+# The reader is imported when the command runs, never at registration, so
+# ``woof obs --help`` works on a build without it and this command refuses
+# by name instead.
+
+_DYNAMICAL_PREFIX = "woof obs dynamical-asos"
+_DYNAMICAL_MODULE = "woof.obs.dynamical_asos"
+
+
+def _bbox_wrapping(value: str) -> tuple[float, float, float, float]:
+    """``W,S,E,N`` in degrees, where ``W > E`` crosses the antimeridian."""
+
+    return _bbox(value, wrap=True)
+
+
+def _utc_time(value: str):
+    """An ISO 8601 instant that states its offset, as an aware UTC time."""
+
+    from datetime import datetime, timezone
+
+    text = value.strip()
+    try:
+        parsed = datetime.fromisoformat(
+            text[:-1] + "+00:00" if text[-1:] in ("Z", "z") else text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"--valid-time {value!r} is not an ISO 8601 time "
+            f"(e.g. 2026-10-05T12:00Z): {error}") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise argparse.ArgumentTypeError(
+            f"--valid-time {value!r} names no time zone; add Z (UTC) or an "
+            "offset such as +00:00, because a naive time would be read in "
+            "whatever zone this box is set to")
+    return parsed.astimezone(timezone.utc)
+
+
+def _station_ids(value: str) -> list[str]:
+    ids = [part.strip() for part in value.split(",") if part.strip()]
+    if not ids:
+        raise argparse.ArgumentTypeError(
+            f"--stations {value!r} names no station id")
+    return ids
+
+
+def _format_bbox(bbox) -> str:
+    return ",".join(f"{value:g}" for value in bbox)
+
+
+def _refuse(sentence: str) -> int:
+    import sys
+
+    print(f"{_DYNAMICAL_PREFIX}: {sentence}", file=sys.stderr)
+    return 2
+
+
+def _count(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (list, tuple, dict)):
+        return len(value)
+    return None
+
+
+def _surface_counts(surface: Path) -> tuple[int | None, int | None]:
+    """``(stations, reports)`` from the record the reader wrote."""
+
+    try:
+        record = json.loads(Path(surface).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, None
+    if not isinstance(record, dict):
+        return None, None
+    return _count(record.get("stations")), _count(record.get("reports"))
+
+
+def _dynamical_asos(args) -> int:
+    from importlib import import_module
+
+    try:
+        reader = import_module(_DYNAMICAL_MODULE)
+    except ModuleNotFoundError as error:
+        if error.name != _DYNAMICAL_MODULE:
+            return _refuse(
+                f"the Dynamical.org ASOS reader is installed but cannot "
+                f"import {error.name!r} ({error}); install it with "
+                "pip install 'recast-woof[obs]'.")
+        return _refuse(
+            "this WOOF build does not include the Dynamical.org ASOS reader "
+            f"({_DYNAMICAL_MODULE}); update to a WOOF build that includes "
+            "it, or use `woof obs asos` for the IEM route.")
+    except ImportError as error:
+        return _refuse(
+            f"the Dynamical.org ASOS reader failed to import ({error}); "
+            "reinstall woof.")
+    unavailable = getattr(reader, "DynamicalUnavailable", RuntimeError)
+    bbox = args.bbox
+    where = f"bbox {_format_bbox(bbox)}"
+
+    if args.list_stations:
+        try:
+            stations = list(reader.stations_in_bbox(*bbox))
+        except (unavailable, OSError, ValueError) as error:
+            return _refuse(
+                f"the frozen Dynamical.org station table could not be read "
+                f"for {where}: {error}")
+        if args.stations is not None:
+            wanted = set(args.stations)
+            stations = [row for row in stations
+                        if row.get("station_id") in wanted]
+            where += f" matching --stations {','.join(args.stations)}"
+        if args.json:
+            return _print({
+                "schema": "gpuwm-obs.dynamical-asos-stations.v1",
+                "source": getattr(reader, "SOURCE", "dynamical-asos-parquet"),
+                "bbox": list(bbox),
+                "count": len(stations),
+                "stations": stations,
+            })
+        print(f"{_DYNAMICAL_PREFIX}: {len(stations)} station(s) in {where} "
+              "(frozen table; no network)")
+        for row in stations:
+            latitude = row.get("latitude")
+            longitude = row.get("longitude")
+            position = (f"{latitude:.4f},{longitude:.4f}"
+                        if isinstance(latitude, (int, float))
+                        and isinstance(longitude, (int, float)) else "?")
+            print(f"  {row.get('station_id', '?'):<8} "
+                  f"{row.get('country') or '?':<3} {position:<20} "
+                  f"{row.get('name') or ''}")
+        return 0
+
+    missing = [flag for flag, value in (("--valid-time", args.valid_time),
+                                        ("--out", args.out))
+               if value is None]
+    if missing:
+        return _refuse(
+            f"a fetch needs {' and '.join(missing)} (or pass "
+            "--list-stations to list the box's stations without fetching).")
+
+    valid = args.valid_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        surface = reader.fetch_surface(
+            bbox, args.valid_time, args.out, timeout=args.timeout,
+            refresh=args.refresh, station_ids=args.stations)
+    except (KeyError, IndexError):
+        # LookupError's other children are reader bugs, not "no data";
+        # a traceback is the honest report of those.
+        raise
+    except LookupError as error:
+        return _refuse(
+            f"no Dynamical.org ASOS report survived for {where} at {valid} "
+            f"({error}).")
+    except ImportError as error:
+        return _refuse(
+            f"the Dynamical.org reader needs pyarrow, which does not import "
+            f"({error}); install it with pip install 'recast-woof[obs]'.")
+    except unavailable as error:
+        return _refuse(
+            f"the Dynamical.org ASOS archive is unavailable for {where} at "
+            f"{valid}: {error}")
+    except OSError as error:
+        return _refuse(
+            f"the Dynamical.org ASOS fetch for {where} at {valid} into "
+            f"{args.out} failed: {error}")
+    except ValueError as error:
+        # PyArrow's ArrowInvalid is a ValueError: a truncated or corrupt
+        # cached file is the usual cause, and --refresh replaces it.
+        return _refuse(
+            f"the Dynamical.org ASOS archive data for {where} at {valid} "
+            f"could not be decoded ({error}); retry with --refresh to "
+            "replace any cached copy.")
+
+    surface = Path(surface)
+    stations, reports = _surface_counts(surface)
+    record = {
+        "schema": "gpuwm-obs.dynamical-asos-fetch.v1",
+        "source": getattr(reader, "SOURCE", "dynamical-asos-parquet"),
+        "bbox": list(bbox),
+        "valid_time": valid,
+        "surface": str(surface),
+        "stations_file": str(surface.parent / "stations.json"),
+        "stations": stations,
+        "reports": reports,
+    }
+    if args.json:
+        return _print(record)
+    print(f"{_DYNAMICAL_PREFIX}: "
+          f"{'?' if stations is None else stations} station(s), "
+          f"{'?' if reports is None else reports} report(s) for {where} at "
+          f"{valid} -> {surface}")
+    return 0
+
+
+def _register_dynamical(sub) -> None:
+    parser = sub.add_parser(
+        "dynamical-asos",
+        help="fetch surface station reports from the Dynamical.org ASOS "
+             "Parquet archive (the US plus 14 countries) into the "
+             "gpuwm-obs.asos-surface.v2 record verification scores against",
+        description="Fetch ASOS/METAR station reports for a box and a valid "
+                    "time from the Dynamical.org ASOS Parquet archive and "
+                    "write stations.json and surface.json "
+                    "(gpuwm-obs.asos-surface.v2) under --out. Data: Iowa "
+                    "Environmental Mesonet (Iowa State University); original "
+                    "reports NOAA/NWS/FAA; processing dynamical.org; hosting "
+                    "Source Cooperative. Needs pyarrow "
+                    "(pip install 'recast-woof[obs]').")
+    # A western-hemisphere box starts with a minus sign, and argparse
+    # reads ``-8.25,49.85,1.8,60.9`` as an unknown option because only a
+    # bare ``-8.25`` matches its negative-number pattern, so
+    # ``--bbox -8.25,...`` failed with "expected one argument".  This
+    # parser has no option spelled like a number, so any token opening
+    # with ``-<digit>`` or ``-.<digit>`` is a value (the rule Python 3.13
+    # adopted for every parser).  Not woof.cli's _COORDINATE_FLAGS join:
+    # that rewrite is global, and ``woof globe ... --bbox -10 40 5 50``
+    # (nargs=4) would be turned into ``--bbox=-10 40 5 50`` and break.
+    parser._negative_number_matcher = re.compile(r"^-\.?\d")
+    parser.add_argument("--bbox", type=_bbox_wrapping, required=True,
+                        metavar="W,S,E,N",
+                        help="lon/lat box in degrees; west greater than east "
+                             "crosses the antimeridian")
+    parser.add_argument("--valid-time", type=_utc_time, default=None,
+                        metavar="ISO8601",
+                        help="the valid time to match, with its zone "
+                             "(2026-10-05T12:00Z). Required unless "
+                             "--list-stations")
+    parser.add_argument("--out", type=Path, default=None, metavar="DIR",
+                        help="directory to write stations.json and "
+                             "surface.json into. Required unless "
+                             "--list-stations")
+    parser.add_argument("--refresh", action="store_true",
+                        help="re-download archive files already in the cache")
+    parser.add_argument("--timeout", type=positive_float, default=120.0,
+                        metavar="S",
+                        help="network timeout in seconds (default 120)")
+    parser.add_argument("--stations", type=_station_ids, default=None,
+                        metavar="ID,ID",
+                        help="fetch these station ids instead of every "
+                             "station the frozen table places inside --bbox")
+    parser.add_argument("--list-stations", action="store_true",
+                        help="list the frozen table's stations inside --bbox "
+                             "and exit; reads no archive and uses no network")
+    parser.add_argument("--json", action="store_true",
+                        help="print a JSON record instead of one line")
+    parser.set_defaults(func=_dynamical_asos)
+
+
 # ------------------------------------------------- the instrument doors
 
 def _print_estate(explain: bool) -> int:
@@ -605,6 +867,7 @@ def register_cli(subparsers) -> None:
     obs.set_defaults(func=_obs_estate)
     _register_radar(obs_sub)
     _register_instruments(obs_sub)
+    _register_dynamical(obs_sub)
 
 
 __all__ = ["register_cli"]
