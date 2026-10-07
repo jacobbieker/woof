@@ -1,0 +1,23 @@
+&share
+ wrf_core = 'ARW',
+ max_dom = 1,
+ interval_seconds = 10800,
+ io_form_geogrid = 2,
+/
+&geogrid
+ parent_id         = 1,
+ parent_grid_ratio = 1,
+ i_parent_start    = 1,
+ j_parent_start    = 1,
+ e_we              = 463,
+ e_sn              = 817,
+ geog_data_res     = 'default',
+ dx = 3440,
+ dy = 3440,
+ map_proj = 'polar',
+ ref_lat   = 71.7,
+ ref_lon   = -42.09999999999991,
+ truelat1  = 71.7,
+ truelat2  = 71.7,
+ stand_lon = -42.09999999999991,
+/
