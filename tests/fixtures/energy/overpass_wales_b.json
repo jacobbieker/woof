@@ -1,0 +1,21 @@
+{
+ "_fixture": "Hand-written Overpass API JSON for tests/test_energy_osm.py: a neighbouring tile repeating way 2001 (dedupe) plus one new line. Synthetic; not OpenStreetMap data.",
+ "version": 0.6,
+ "generator": "Overpass API 0.7.62.11 87bfad18",
+ "osm3s": {
+  "timestamp_osm_base": "2026-10-01T12:05:00Z",
+  "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+ },
+ "elements": [
+  {"type": "way", "id": 2001,
+   "nodes": [11, 12, 13],
+   "geometry": [{"lat": 51.60, "lon": -3.40}, {"lat": 51.65, "lon": -3.30}, {"lat": 51.70, "lon": -3.20}],
+   "tags": {"power": "line", "voltage": "400000;132000", "circuits": "2",
+            "cables": "6", "frequency": "50", "name": "Synthetic 400 kV",
+            "operator": "Synthetic Grid", "line": "busbar"}},
+  {"type": "way", "id": 2101,
+   "nodes": [111, 112],
+   "geometry": [{"lat": 51.60, "lon": -2.90}, {"lat": 51.62, "lon": -2.80}],
+   "tags": {"power": "line", "voltage": "275 kV"}}
+ ]
+}
