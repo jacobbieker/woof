@@ -111,3 +111,4 @@ tools/arwen-ui-vendor/**/__pycache__/
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+tools/rustwx/target

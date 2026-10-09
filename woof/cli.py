@@ -101,6 +101,7 @@ doctor_register_cli = _lazy_register("woof.doctor")
 domain_register_cli = _lazy_register("woof.domain_wizard")
 cyclone_setup_register_cli = _lazy_register("woof.cyclone_setup")
 downscale_register_cli = _lazy_register("woof.downscale")
+energy_register_cli = _lazy_register("woof.energy.cli")
 fetch_register_cli = _lazy_register("woof.fetch")
 geog_register_cli = _lazy_register("woof.geog_assets")
 go_register_cli = _lazy_register("woof.go_cli")
@@ -266,7 +267,7 @@ _INTERRUPT_EXIT_CODE = 130
 _LONG_RUNNING_COMMANDS = frozenset({
     "go", "run", "run-plan", "resume", "branch", "fetch", "fetch-geog",
     "fetch-tables", "fetch-bridges", "setup", "verify", "downscale",
-    "enprod", "render", "dual-run", "certify", "spectral",
+    "enprod", "render", "dual-run", "certify", "spectral", "energy",
     # The unbundled stages run for exactly as long as the welded ones
     # they were split out of: preprocessing is minutes of static build,
     # the forecast is the forecast.
@@ -442,6 +443,7 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     verification_visuals_register_cli(sub)
     enprod_register_cli(sub)
     downscale_register_cli(sub)
+    energy_register_cli(sub)
     doctor_register_cli(sub)
     obs_register_cli(sub)
     table_assets_register_cli(sub)

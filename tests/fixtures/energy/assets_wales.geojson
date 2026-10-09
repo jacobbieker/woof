@@ -1,0 +1,600 @@
+{
+ "type": "FeatureCollection",
+ "woof": {
+  "schema": "woof-energy.assets.v1",
+  "sources": [
+   {
+    "source": "synthetic",
+    "license": "CC0-1.0",
+    "attribution": "hand-built test fixture; invented geometry and attributes"
+   }
+  ]
+ },
+ "features": [
+  {
+   "type": "Feature",
+   "id": "synthetic:line/1",
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -4.99,
+      51.684
+     ],
+     [
+      -4.8,
+      51.7
+     ],
+     [
+      -4.55,
+      51.72
+     ],
+     [
+      -4.3,
+      51.7
+     ],
+     [
+      -4.1,
+      51.68
+     ],
+     [
+      -3.95,
+      51.668
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:line/1",
+    "kind": "line",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic West 400 kV",
+    "operator": null,
+    "voltage_kv": [
+     400.0
+    ],
+    "circuits": 2,
+    "cables": 6,
+    "frequency_hz": 50.0,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:line/2",
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -3.95,
+      51.668
+     ],
+     [
+      -3.8,
+      51.64
+     ],
+     [
+      -3.62,
+      51.6
+     ],
+     [
+      -3.45,
+      51.56
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:line/2",
+    "kind": "line",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic East 400/275 kV",
+    "operator": null,
+    "voltage_kv": [
+     400.0,
+     275.0
+    ],
+    "circuits": 2,
+    "cables": 6,
+    "frequency_hz": 50.0,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:line/3",
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -3.95,
+      51.668
+     ],
+     [
+      -3.9,
+      51.75
+     ],
+     [
+      -3.82,
+      51.83
+     ],
+     [
+      -3.7,
+      51.9
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:line/3",
+    "kind": "line",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Valley 132 kV",
+    "operator": null,
+    "voltage_kv": [
+     132.0
+    ],
+    "circuits": 1,
+    "cables": 3,
+    "frequency_hz": 50.0,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:cable/4",
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -3.95,
+      51.668
+     ],
+     [
+      -3.96,
+      51.64
+     ],
+     [
+      -3.965,
+      51.62
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:cable/4",
+    "kind": "cable",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Bay 132 kV cable",
+    "operator": null,
+    "voltage_kv": [
+     132.0
+    ],
+    "circuits": 1,
+    "cables": 3,
+    "frequency_hz": 50.0,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:substation/1",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -4.99,
+     51.684
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:substation/1",
+    "kind": "substation",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic West",
+    "operator": null,
+    "voltage_kv": [
+     400.0,
+     132.0
+    ],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:substation/2",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.953,
+       51.666
+      ],
+      [
+       -3.947,
+       51.666
+      ],
+      [
+       -3.947,
+       51.67
+      ],
+      [
+       -3.953,
+       51.67
+      ],
+      [
+       -3.953,
+       51.666
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:substation/2",
+    "kind": "substation",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Junction",
+    "operator": null,
+    "voltage_kv": [
+     400.0,
+     275.0,
+     132.0
+    ],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:plant/1",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.66,
+       51.69
+      ],
+      [
+       -3.58,
+       51.69
+      ],
+      [
+       -3.58,
+       51.73
+      ],
+      [
+       -3.66,
+       51.73
+      ],
+      [
+       -3.66,
+       51.69
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:plant/1",
+    "kind": "plant",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Moor wind farm",
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 12.0,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/1",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.64,
+     51.7
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/1",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 90.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/1"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/2",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.62,
+     51.71
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/2",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 90.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/1"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/3",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.6,
+     51.715
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/3",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 90.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/1"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/4",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.61,
+     51.725
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/4",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 90.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/1"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/5",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -4.72,
+       51.715
+      ],
+      [
+       -4.7,
+       51.715
+      ],
+      [
+       -4.7,
+       51.725
+      ],
+      [
+       -4.72,
+       51.725
+      ],
+      [
+       -4.72,
+       51.715
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/5",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Ridge solar",
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "solar",
+    "capacity_mw": 8.0,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:tower/1",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.9,
+     51.75
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:tower/1",
+    "kind": "tower",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {
+     "line": "synthetic:line/3"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:tower/2",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.86,
+     51.79
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:tower/2",
+    "kind": "tower",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {
+     "line": "synthetic:line/3"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:tower/3",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.82,
+     51.83
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:tower/3",
+    "kind": "tower",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": null,
+    "capacity_mw": null,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {
+     "line": "synthetic:line/3"
+    }
+   }
+  }
+ ]
+}

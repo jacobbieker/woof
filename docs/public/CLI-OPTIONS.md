@@ -612,6 +612,119 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--out-report REPORT` | write the comparison document here |
 
+## `woof energy`
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof energy extract`
+
+| argument | what it does |
+|---|---|
+| `PLAN.json` | woof-energy.plan.v1 document whose runs finished |
+
+| option | what it does |
+|---|---|
+| `--format {netcdf,zarr,icechunk,csv}` | output format (default netcdf) |
+| `--heights-m` | override the sites document's heights |
+| `--output PATH` | output file or store |
+| `--sites SITES.json` | sites document (default: the one the plan names) |
+| `--vars NAME[,NAME]` | forecast.v1 variables to write (default all the runs can supply) |
+
+## `woof energy fetch`
+
+| option | what it does |
+|---|---|
+| `--bbox W,S,E,N` | area to fetch, degrees west,south,east,north (write --bbox=-3.4,51.6,-3.0,51.8 when west is negative) |
+| `--endpoint URL` | Overpass interpreter URL to ask first (default: the built-in mirror ladder) |
+| `--kinds` | asset kinds to fetch (comma list; default line,cable,substation,plant,generator) |
+| `--min-voltage-kv` | drop lines, cables and substations below this voltage (assets with no voltage tag are kept) |
+| `--offline` | use only cached responses; refuse if any tile is missing |
+| `--output ASSETS.geojson` | where to write the woof-energy.assets.v1 document |
+| `--polygon FILE.geojson` | area to fetch as a GeoJSON Polygon/MultiPolygon |
+| `--refresh` | revalidate cached Overpass responses |
+| `--timeout-s` | server-side Overpass timeout per tile (default 180) |
+
+## `woof energy import`
+
+| argument | what it does |
+|---|---|
+| `SRC [SRC ...]` | input files (PyPSA-Eur CSV directory or files, REPD CSV, GeoJSON, CSV) |
+
+| option | what it does |
+|---|---|
+| `--format {pypsa-eur,repd,geojson,csv}` | input format |
+| `--id-col` | CSV identifier column (--format csv) |
+| `--kind {line,minor_line,cable,substation,plant,generator,tower}` | asset kind for every row (--format csv/geojson when the input does not say) |
+| `--lat-col` | CSV latitude column (--format csv) |
+| `--lon-col` | CSV longitude column (--format csv) |
+| `--merge ASSETS.geojson` | existing assets document to merge into (duplicates by source reference and proximity are dropped) |
+| `--output ASSETS.geojson` | where to write the woof-energy.assets.v1 document |
+
+## `woof energy plan`
+
+| argument | what it does |
+|---|---|
+| `SITES.json` | woof-energy.sites.v1 document |
+
+| option | what it does |
+|---|---|
+| `--card` | size each domain for this GPU tier |
+| `--corridor-km` | half-width of the high-resolution corridor around each site (default 2) |
+| `--dx-m` | target grid spacing over the sites (default 100) |
+| `--hours` | forecast length in hours (default 24) |
+| `--max-domains` | refuse plans with more high-resolution domains |
+| `--nz` | vertical levels (default: the planner's ladder) |
+| `--outdir DIR` | directory for plan.json and emitted configs |
+| `--parent-dx-m` | outer parent grid spacing (default: chosen by the planner) |
+| `--source` | initial/boundary condition source (default: the one woof domain emits) |
+| `--start YYYY-MM-DDTHH` | forecast start, UTC (default: the most recent 00/06/12/18 cycle) |
+| `--topology {wrf-nests,wrf-tiles,hex-swath}` | wrf-nests: sibling nests in one run; wrf-tiles: one parent run plus offline child tiles (no count limit); hex-swath: MPAS corridor mesh |
+| `--vram-gib` | size each domain for this many GiB |
+
+## `woof energy rating`
+
+| argument | what it does |
+|---|---|
+| `FORECAST.nc` | woof-energy.forecast.v1 netCDF file |
+
+| option | what it does |
+|---|---|
+| `--conductor` | conductor name from the table, or auto (by line voltage; default) |
+| `--conductor-table FILE.json` | conductor table replacing the built-in one |
+| `--output PRODUCTS.nc` | where to write the products netCDF |
+| `--products` | products to compute (comma list; default dlr,icing,wind-power,pv-power) |
+
+## `woof energy run`
+
+| argument | what it does |
+|---|---|
+| `PLAN.json` | woof-energy.plan.v1 document |
+
+| option | what it does |
+|---|---|
+| `--dry-run` | print the commands without running them |
+| `--only ID[,ID]` | run only these domain_ids (their parents must already have run) |
+| `--resume` | skip domains whose run manifest says complete |
+
+## `woof energy sites`
+
+| argument | what it does |
+|---|---|
+| `ASSETS.geojson` | woof-energy.assets.v1 document |
+
+| option | what it does |
+|---|---|
+| `--heights-m` | heights above ground to sample every site at (comma list; default 10,30,100); turbine hub heights are added |
+| `--include-towers` | add a site at every power=tower node |
+| `--kinds` | asset kinds to keep (comma list; default all) |
+| `--min-voltage-kv` | drop lines and substations below this voltage |
+| `--output SITES.json` | where to write the woof-energy.sites.v1 document |
+| `--pv-grid-m` | sample solar farm polygons on a grid of this spacing (default: one site at the centroid) |
+| `--region FILE.geojson` | keep only sites inside this Polygon/MultiPolygon |
+| `--spacing-m` | sample spacing along lines and cables (default 100) |
+
 ## `woof enprod`
 
 | argument | what it does |
@@ -925,7 +1038,11 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--finalize` | close the export in --out after --append calls |
 | `--grid GRID` | native (default), latlon, or latlon:DEG |
+| `--icechunk-branch NAME` | Icechunk branch name (default: main) |
+| `--icechunk-message TEXT` | Icechunk commit message |
+| `--icechunk-repo DIR` | also mirror the exported dNN.zarr datasets into an Icechunk repository |
 | `--json` | with --list: the options document; otherwise: progress as JSON lines |
+| `--keep-zarr-staging` | with --icechunk-repo: keep the staged dNN.zarr output in --out |
 | `--layout {analysis,forecast}` | analysis: time is valid time; forecast: WeatherBench 2's time + prediction_timedelta |
 | `--levels SET` | wb13 (default), era5-37, model, model:LIST, or hPa list |
 | `--list` | print the level sets, variables and naming schemes |
@@ -966,6 +1083,19 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `ARGS ...` | arguments passed to the instrument's binary unchanged, --help included; woof's own flags must come before the instrument name |
 
 Takes no options of its own.
+
+## `woof obs dynamical-asos`
+
+| option | what it does |
+|---|---|
+| `--bbox W,S,E,N` | lon/lat box in degrees; west greater than east crosses the antimeridian |
+| `--json` | print a JSON record instead of one line |
+| `--list-stations` | list the frozen table's stations inside --bbox and exit; reads no archive and uses no network |
+| `--out DIR` | directory to write stations.json and surface.json into. Required unless --list-stations |
+| `--refresh` | re-download archive files already in the cache |
+| `--stations ID,ID` | fetch these station ids instead of every station the frozen table places inside --bbox |
+| `--timeout S` | network timeout in seconds (default 120) |
+| `--valid-time ISO8601` | the valid time to match, with its zone (2026-10-05T12:00Z). Required unless --list-stations |
 
 ## `woof obs goes`
 
