@@ -4276,6 +4276,349 @@ def _dynamical_asos_check() -> Check:
         blocking=False)
 
 
+# ---------------------------------------------------------------------------
+# woof energy: forecasts along power lines, substations and renewables
+# ---------------------------------------------------------------------------
+
+ENERGY_NAME = "energy forecasts: woof energy"
+#: Spelled as constants rather than imported, for the reason the
+#: Dynamical row gives: this row has to report on an install where
+#: :mod:`woof.energy` is absent.  The module is imported through the
+#: NAME, not a literal, so the RW-WPS wheel builder's import scan does
+#: not count it as a module that wheel must stage.
+_ENERGY_MODULE = "woof.energy"
+#: ``woof.energy.sample_bridge`` is the Python face of the Rust sampler;
+#: when it imports, its own search ladder wins over the one below.
+_ENERGY_SAMPLE_BRIDGE_MODULE = "woof.energy.sample_bridge"
+_ENERGY_OSM_CACHE_ENV = "WOOF_ENERGY_OSM_CACHE"
+_ENERGY_SITESAMPLE_ENV = "WOOF_SITESAMPLE_BRIDGE"
+#: Optional packages ``woof energy extract --format zarr|icechunk``
+#: imports lazily.  No extra declares them, so the remedy names them.
+_ENERGY_OPTIONAL_PACKAGES = ("xarray", "zarr", "icechunk")
+#: ``woof energy`` stage -> the module whose ``main`` runs it.  A stage
+#: this build has not implemented yet has a ``main`` that only raises
+#: ``EnergyNotImplemented``, and the row says which.
+_ENERGY_STAGES = (
+    ("fetch", "osm"), ("import", "importers"), ("sites", "sites"),
+    ("plan wrf-nests", "plan_wrf_nests"), ("plan wrf-tiles", "plan_wrf_tiles"),
+    ("plan hex-swath", "plan_hex"), ("run", "run"), ("extract", "extract"),
+    ("rating", "products"),
+)
+_ENERGY_ATTRIBUTION = (
+    "OpenStreetMap power data fetched by `woof energy fetch` is "
+    "(c) OpenStreetMap contributors, ODbL 1.0, and its attribution travels "
+    "in each assets document's sources records")
+
+
+def _energy_osm_cache_dir() -> Path:
+    """Where ``woof energy fetch`` caches Overpass responses.
+
+    The fetcher's own answer wins when it has one (a ``cache_root`` or
+    ``cache_dir`` function), as the Dynamical row asks its reader; the
+    documented default and override are the fallback.
+    """
+
+    try:
+        from importlib import import_module
+
+        osm = import_module(f"{_ENERGY_MODULE}.osm")
+        for attribute in ("cache_root", "cache_dir"):
+            answer = getattr(osm, attribute, None)
+            if callable(answer):
+                return Path(answer()).expanduser()
+    except Exception:                            # noqa: BLE001 - fallback
+        pass
+    override = os.environ.get(_ENERGY_OSM_CACHE_ENV)
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".woof" / "cache" / "energy-osm"
+
+
+def _energy_sitesample_filename() -> str:
+    """The site sampler's shared-library name on this platform."""
+
+    if sys.platform == "win32":
+        return "rw_sitesample.dll"
+    if sys.platform == "darwin":
+        return "librw_sitesample.dylib"
+    return "librw_sitesample.so"
+
+
+def _energy_sitesample_candidates() -> tuple[Path, ...]:
+    """The sampler search ladder: the override, then the bridge rungs.
+
+    The same rungs :func:`woof.obs_score_bridge.library_candidates`
+    walks -- the checkout's cargo targets, the ``libexec/bridges`` rung,
+    the packaged directory, this install's staging directory and the
+    flat legacy one -- so a sampler staged the way every other cdylib is
+    staged is found here too.
+    """
+
+    try:
+        from importlib import import_module
+
+        bridge = import_module(_ENERGY_SAMPLE_BRIDGE_MODULE)
+        found = tuple(Path(p) for p in bridge.library_candidates())
+        if found:
+            return found
+    except Exception:                            # noqa: BLE001 - fallback
+        pass
+    filename = _energy_sitesample_filename()
+    override = os.environ.get(_ENERGY_SITESAMPLE_ENV)
+    candidates = [Path(override).expanduser()] if override else []
+    crate = rustwx.crate_dir()
+    candidates.extend((
+        crate / "target" / "release" / filename,
+        crate / "target" / "debug" / filename,
+        # The rung obs_score_bridge computes from its own file, which sits
+        # at the same depth in the package as this one.
+        Path(__file__).resolve().parent.parent.parent.parent
+        / "libexec" / "bridges" / filename,
+    ))
+    for rung in (bridges.packaged_bridge_dir, bridges.default_bridge_dir):
+        try:
+            candidates.append(rung() / filename)
+        except Exception:                        # noqa: BLE001 - skipped
+            continue
+    try:
+        candidates.extend(bridges.legacy_bridge_candidates(filename))
+    except Exception:                            # noqa: BLE001 - skipped
+        pass
+    return tuple(candidates)
+
+
+def _energy_sitesample_crate_present() -> bool:
+    """Does this checkout carry the sampler's Rust crate?"""
+
+    try:
+        crates = rustwx.crate_dir() / "crates"
+        return any(path.is_dir() and "sitesample" in path.name
+                   for path in crates.iterdir())
+    except OSError:
+        return False
+
+
+def _energy_unimplemented_stages() -> list[str]:
+    """``woof energy`` stages whose ``main`` this build has not written.
+
+    Read from the code object, never by calling it: a stage ``main``
+    whose only global name is ``EnergyNotImplemented`` is a stub that
+    refuses every invocation.  A stage module that does not import
+    counts as well.
+    """
+
+    from importlib import import_module
+
+    missing: list[str] = []
+    for stage, module in _ENERGY_STAGES:
+        try:
+            main = import_module(f"{_ENERGY_MODULE}.{module}").main
+            names = set(main.__code__.co_names)
+        except Exception:                        # noqa: BLE001 - reported
+            missing.append(stage)
+            continue
+        if names == {"EnergyNotImplemented"}:
+            missing.append(stage)
+    return missing
+
+
+def _energy_sitesample_remedy(buildable: bool) -> str:
+    """How to build the sampler, true for THIS install.
+
+    A checkout with the crate gets the shared build block, which returns
+    to the directory it started in.  Every other install gets comments
+    only: no published bundle carries the sampler, so offering
+    ``woof fetch-bridges`` would be a remedy that cannot supply it, and
+    a clone block here would compete with the one the bridge rows print.
+    """
+
+    filename = _energy_sitesample_filename()
+    if buildable:
+        return bridges.artifact_remedy(
+            env_var=_ENERGY_SITESAMPLE_ENV, filename=filename,
+            subject="the energy site sampler",
+            crate_relative=bridges.RUSTWX_CRATE_RELATIVE)
+    if bridges.sources_present(bridges.RUSTWX_CRATE_RELATIVE):
+        return (
+            "# this checkout's tools/rustwx carries no rw-sitesample crate,\n"
+            f"# so {filename} cannot be built here; update the checkout to a\n"
+            "# WOOF revision that includes it, then build tools/rustwx with\n"
+            "#   cargo build --release --locked --offline")
+    # No literal build command here, even commented: on a wheel with a
+    # published bundle every block naming the cargo build must lead with
+    # `woof fetch-bridges`, and that download cannot supply the sampler.
+    return (
+        f"# the energy site sampler ({filename}) is built from the Rust\n"
+        "# workspace in a source checkout; a wheel carries no Rust sources\n"
+        "# and no published bundle carries the sampler.  In a clone of the\n"
+        "# repository, the release build of the tools/rustwx workspace\n"
+        f"# produces it; then set {_ENERGY_SITESAMPLE_ENV} to the built "
+        "library.")
+
+
+def _energy_check() -> Check:
+    """Can this install plan and sample forecasts along grid assets?
+
+    Local evidence only, like the Dynamical row: the package imports,
+    the Overpass response cache is counted, the Rust site sampler is
+    looked for (never loaded) on the ladder ``woof energy extract``
+    walks, and the optional array-store packages are import-probed in a
+    subprocess.  No Overpass server, PyPSA mirror or other host is
+    contacted.
+
+    Non-blocking in every branch: ``woof energy`` is an optional
+    product named in no FIRST-LIGHT step.  The sampler being absent is
+    ``info`` with the build command, because fetch, import, sites, plan
+    and run all work without it; only extract needs it.
+    """
+
+    name = ENERGY_NAME
+    cache = _dynamical_cache_census(_energy_osm_cache_dir())
+    try:
+        from importlib import import_module
+
+        import_module(_ENERGY_MODULE)
+    except ModuleNotFoundError as error:
+        if error.name != _ENERGY_MODULE:
+            return Check(
+                name, "missing",
+                f"{_ENERGY_MODULE} is present but does not import ({error}); "
+                f"`woof energy` refuses; Overpass cache: {cache}",
+                "# the energy package is installed but incomplete:\n"
+                + REINSTALL_HINT,
+                action="reinstall woof", brief="package does not import",
+                blocking=False, severity=SEVERITY_DEGRADED)
+        return Check(
+            name, "info",
+            "this WOOF build does not include the energy package "
+            f"({_ENERGY_MODULE}), so `woof energy` is unavailable; "
+            f"Overpass cache: {cache}",
+            "# update to a WOOF build that includes woof energy:\n"
+            "pip install --upgrade recast-woof",
+            action="update to a WOOF build that includes woof energy",
+            brief="not in this build", blocking=False)
+    except Exception as error:                   # noqa: BLE001 - reported
+        return Check(
+            name, "missing",
+            f"{_ENERGY_MODULE} failed to import "
+            f"({type(error).__name__}: {error}); `woof energy` refuses; "
+            f"Overpass cache: {cache}",
+            "# the energy package is installed but broken:\n"
+            + REINSTALL_HINT,
+            action="reinstall woof", brief="package does not import",
+            blocking=False, severity=SEVERITY_DEGRADED)
+
+    filename = _energy_sitesample_filename()
+    override = os.environ.get(_ENERGY_SITESAMPLE_ENV)
+    candidates = _energy_sitesample_candidates()
+    sampler = next((path for path in candidates if path.is_file()), None)
+    # Judged only when the ladder in use honours the override: a sampler
+    # bridge with a ladder of its own decides what extract loads.
+    if (override and Path(override).expanduser() in candidates
+            and not Path(override).expanduser().is_file()):
+        return Check(
+            name, "missing",
+            f"{_ENERGY_SITESAMPLE_ENV} names {override}, which is not a "
+            f"file, so `woof energy extract` cannot sample WRF history; "
+            f"package {_ENERGY_MODULE} imports; Overpass cache: {cache}; "
+            f"the sampler was not loaded and no host was contacted",
+            f"# {_ENERGY_SITESAMPLE_ENV} names no file.  Point it at a built\n"
+            f"# {filename}, or unset it so the bridge directories are "
+            "searched.",
+            action=f"fix or unset {_ENERGY_SITESAMPLE_ENV}",
+            brief=f"{_ENERGY_SITESAMPLE_ENV} names no file",
+            blocking=False, severity=SEVERITY_DEGRADED)
+
+    stubs = _energy_unimplemented_stages()
+    optional: list[str] = []
+    absent: list[str] = []
+    broken: list[str] = []
+    for package in _ENERGY_OPTIONAL_PACKAGES:
+        ok, evidence = _import_probe(package)
+        optional.append(f"{package} {evidence}")
+        if not ok:
+            (broken if evidence.startswith("installed but") else
+             absent).append(package)
+
+    if sampler is not None:
+        sampler_text = (f"site sampler found at {sampler} (present; doctor "
+                        "does not load it)")
+    else:
+        sampler_text = (f"site sampler {filename} not found, so "
+                        "`woof energy extract` refuses until it is built "
+                        "(fetch, import, sites, plan, run and rating do not "
+                        "need it); searched: "
+                        + "; ".join(str(path) for path in candidates))
+    if absent or broken:
+        stores = (f"optional {', '.join(_ENERGY_OPTIONAL_PACKAGES)}: "
+                  f"{'; '.join(optional)} -- `woof energy extract --format "
+                  "zarr` needs xarray and zarr, `--format icechunk` needs "
+                  "icechunk as well; netcdf and csv need none of them")
+    else:
+        stores = f"optional packages: {'; '.join(optional)}"
+    if stubs:
+        stages = (f"{len(stubs)} of {len(_ENERGY_STAGES)} stage(s) are not "
+                  "implemented in this build and refuse when run: "
+                  f"{', '.join(stubs)}")
+    else:
+        stages = f"all {len(_ENERGY_STAGES)} stages implemented"
+    evidence = (f"package {_ENERGY_MODULE} imports; {stages}; "
+                f"{sampler_text}; "
+                f"{stores}; Overpass cache: {cache}; no Overpass server or "
+                f"other host is contacted (doctor stays offline); "
+                f"{_ENERGY_ATTRIBUTION}")
+
+    buildable = (sampler is None
+                 and bridges.sources_present(bridges.RUSTWX_CRATE_RELATIVE)
+                 and _energy_sitesample_crate_present())
+    remedy_parts: list[str] = []
+    if stubs:
+        remedy_parts.append(
+            "# some woof energy stages are not implemented in this build;\n"
+            "# they arrive with a WOOF release or checkout that implements "
+            "them.")
+    if sampler is None:
+        remedy_parts.append(_energy_sitesample_remedy(buildable))
+    if absent:
+        remedy_parts.append(
+            "# optional, for woof energy extract --format zarr or icechunk:\n"
+            f"pip install {' '.join(absent)}")
+    if broken:
+        remedy_parts.append(
+            "# replaces an install that does not import:\n"
+            f"pip install --force-reinstall {' '.join(broken)}")
+    remedy = "\n".join(remedy_parts) or None
+
+    if stubs:
+        return Check(
+            name, "info", evidence, remedy,
+            action="use a WOOF build that implements every woof energy stage",
+            brief=f"{len(stubs)} of {len(_ENERGY_STAGES)} stages not "
+                  "implemented in this build",
+            blocking=False)
+    if sampler is None:
+        return Check(
+            name, "info", evidence, remedy,
+            action=(bridges.cargo_build_one_liner(
+                bridges.RUSTWX_CRATE_RELATIVE) if buildable
+                else "build the site sampler (woof doctor --explain)"),
+            brief="site sampler not built; extract refuses",
+            blocking=False)
+    if absent or broken:
+        unavailable = ", ".join(absent + broken)
+        return Check(
+            name, "info", evidence, remedy,
+            action=(f"pip install {' '.join(absent)}" if not broken
+                    else "woof doctor --explain"),
+            brief=f"sampler present; {unavailable} unavailable "
+                  "(zarr/icechunk output)",
+            blocking=False)
+    return Check(
+        name, "present", evidence,
+        brief="package, site sampler and zarr/icechunk packages present",
+        blocking=False)
+
+
 def _isobaric_reader_check() -> Check:
     """The isobaric-height reader the Python height consumers call.
 
@@ -6272,6 +6615,9 @@ def _collect_checks(sources: tuple[str, ...] | None = None,
     # Optional and offline: the reader, pyarrow and the frozen station
     # table, never the archive host.
     checks.append(_dynamical_asos_check())
+    # Optional and offline as well: the energy package, the Overpass
+    # cache, the site sampler's file and the array-store packages.
+    checks.append(_energy_check())
     checks.append(_noah_init_check())
     checks.append(_isobaric_reader_check())
     checks.append(_region_dealias_check())

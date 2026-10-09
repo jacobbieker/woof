@@ -92,6 +92,10 @@ name.
   The [code verification record](docs/public/VERIFICATION.md) documents
   historical WRF v4.6.1 comparisons and their configuration and coverage
   limits.
+- [Energy forecasts](docs/energy-forecasts.md): `woof energy` builds 50-100 m
+  forecasts along power lines, substations and renewable sites from
+  OpenStreetMap or your own grid data, with line rating, icing and power
+  products.
 - `components/hex/` and `components/globe/`: the hex and global models' manuals,
   tests and tools.
 - `woof --help-all` lists every command; `woof hex --help` and
