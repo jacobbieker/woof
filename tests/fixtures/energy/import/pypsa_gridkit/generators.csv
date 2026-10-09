@@ -1,0 +1,4 @@
+generator_id,bus_id,technology,capacity,tags,geometry
+8001,4,Wind farm,120,'"oid"=>"9301", "name"=>"Synthetic Moor"',POINT(-2.95 51.75)
+8002,3,Fossil gas,-1,'"name"=>"Synthetic Gas"',POINT(-2.91 51.71)
+8003,1,Hydro run of river & pondage,15,,

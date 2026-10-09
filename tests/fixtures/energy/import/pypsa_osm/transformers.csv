@@ -1,0 +1,3 @@
+transformer_id,bus0,bus1,voltage_bus0,voltage_bus1,s_nom,geometry
+way/1003-400-132,way/1003-400,way/1003-132,400,132,1000,'LINESTRING (-4.2 51.8, -4.2009 51.8009)'
+way/1005-400-132,way/1005-400,way/1005-132,400,132,1000,'LINESTRING (-3.95 51.668, -3.95 51.668)'
