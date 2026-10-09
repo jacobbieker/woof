@@ -1,0 +1,135 @@
+{
+  "schema": "woof-energy.conductors.v1",
+  "description": "Overhead-line conductor table for woof energy rating (IEEE 738-2012 steady-state thermal rating and Makkonen icing). Resistances are per subconductor, in ohm per metre, at 25 and 75 degC. height_m is the above-ground height the weather is read at; forecast heights are interpolated to it. subconductors is the number of subconductors per phase bundle; rating_amps is reported per phase bundle.",
+  "notes": [
+    "ACSR Drake is the IEEE 738-2012 Annex B worked-example conductor; its values are the AC resistances printed there.",
+    "The GB conductors carry DC resistance at 20 degC from manufacturer tables citing BS 215-2 (ACSR) and BS EN 50182 (AAAC, AL5 alloy). They are carried to 25 and 75 degC with R(T) = R20 (1 + a20 (T - 20)), a20 = 0.00403 /K for hard-drawn aluminium (ACSR) and 0.0036 /K for aluminium alloy (AAAC). No AC/DC skin-effect factor is applied; for these sizes it is about 1 to 3 percent, so ratings are optimistic by about half that.",
+    "max_temp_c for the GB conductors is an assumed 75 degC design temperature, typical of legacy GB overhead-line design. Many circuits are designed to 50 degC or uprated to 90 degC; set the value for the circuit you rate.",
+    "emissivity 0.8 and absorptivity 0.8 follow the CIGRE TB 601 recommendation when the surface condition is unknown, and match the IEEE 738 Annex B example.",
+    "height_m defaults to 10 m. Real conductor clearance at mid-span on 132-400 kV lines is typically 7-25 m; raise it per entry if you know the circuit."
+  ],
+  "sources": {
+    "ieee738": "IEEE Std 738-2012, IEEE Standard for Calculating the Current-Temperature Relationship of Bare Overhead Conductors, Annex B (795 kcmil 26/7 ACSR Drake example).",
+    "bs215": "BS 215-2 ACSR conductor table as reproduced in manufacturer catalogues (Gulf Cables and Lumino Industries BS 215 tables): Lynx 30/7 x 2.79 mm, 19.53 mm, 0.1576 ohm/km at 20 degC; Zebra 54/7 x 3.18 mm, 28.62 mm, 0.0674 ohm/km at 20 degC.",
+    "en50182": "BS EN 50182 AL5 AAAC table as reproduced in manufacturer catalogues (Lumino Industries 'TYPE AL5 EN 50182'; Moseroth AAAC AL5): Upas 37/3.53 mm, 24.7 mm, 0.0879 ohm/km; Rubus 61/3.50 mm, 31.5 mm, 0.0544 ohm/km; Araucaria 61/4.14 mm, 37.3 mm, 0.0389 ohm/km, all at 20 degC.",
+    "cigre601": "CIGRE Technical Brochure 601 (2014), Guide for thermal rating calculations of overhead lines."
+  },
+  "auto": {
+    "description": "--conductor auto picks an entry by the site's voltage_kv: the first rule whose min_kv the voltage reaches. Sites below the last rule, or with unknown voltage, get no rating (NaN) because distribution conductors vary too widely to guess.",
+    "rules": [
+      {"min_kv": 350.0, "conductor": "aaac_araucaria_twin", "why": "GB 400 kV: twin 700 mm2 AAAC Araucaria is the common modern bundle"},
+      {"min_kv": 220.0, "conductor": "aaac_rubus_twin", "why": "GB 275 kV: twin 500 mm2 AAAC Rubus"},
+      {"min_kv": 100.0, "conductor": "acsr_lynx", "why": "GB 132 kV: single ACSR Lynx is the most widespread conductor; AAAC Upas is used on newer rebuilds, choose aaac_upas explicitly if known"}
+    ]
+  },
+  "conductors": {
+    "acsr_drake": {
+      "name": "ACSR Drake 795 kcmil 26/7",
+      "diameter_m": 0.02814,
+      "r25_ohm_per_m": 7.283e-05,
+      "r75_ohm_per_m": 8.688e-05,
+      "max_temp_c": 100.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 1,
+      "height_m": 10.0,
+      "source": "ieee738"
+    },
+    "acsr_lynx": {
+      "name": "ACSR Lynx 175 mm2 30/7",
+      "diameter_m": 0.01953,
+      "r25_ohm_per_m": 1.6078e-04,
+      "r75_ohm_per_m": 1.9253e-04,
+      "max_temp_c": 75.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 1,
+      "height_m": 10.0,
+      "source": "bs215"
+    },
+    "acsr_zebra": {
+      "name": "ACSR Zebra 400 mm2 54/7",
+      "diameter_m": 0.02862,
+      "r25_ohm_per_m": 6.8758e-05,
+      "r75_ohm_per_m": 8.2339e-05,
+      "max_temp_c": 75.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 1,
+      "height_m": 10.0,
+      "source": "bs215"
+    },
+    "acsr_zebra_twin": {
+      "name": "ACSR Zebra 400 mm2 54/7, twin bundle",
+      "diameter_m": 0.02862,
+      "r25_ohm_per_m": 6.8758e-05,
+      "r75_ohm_per_m": 8.2339e-05,
+      "max_temp_c": 75.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 2,
+      "height_m": 10.0,
+      "source": "bs215"
+    },
+    "aaac_upas": {
+      "name": "AAAC Upas 300 mm2 37/3.53 (AL5)",
+      "diameter_m": 0.0247,
+      "r25_ohm_per_m": 8.9482e-05,
+      "r75_ohm_per_m": 1.0530e-04,
+      "max_temp_c": 75.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 1,
+      "height_m": 10.0,
+      "source": "en50182"
+    },
+    "aaac_rubus": {
+      "name": "AAAC Rubus 500 mm2 61/3.50 (AL5)",
+      "diameter_m": 0.0315,
+      "r25_ohm_per_m": 5.5379e-05,
+      "r75_ohm_per_m": 6.5171e-05,
+      "max_temp_c": 75.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 1,
+      "height_m": 10.0,
+      "source": "en50182"
+    },
+    "aaac_rubus_twin": {
+      "name": "AAAC Rubus 500 mm2 61/3.50 (AL5), twin bundle",
+      "diameter_m": 0.0315,
+      "r25_ohm_per_m": 5.5379e-05,
+      "r75_ohm_per_m": 6.5171e-05,
+      "max_temp_c": 75.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 2,
+      "height_m": 10.0,
+      "source": "en50182"
+    },
+    "aaac_araucaria": {
+      "name": "AAAC Araucaria 700 mm2 61/4.14 (AL5)",
+      "diameter_m": 0.0373,
+      "r25_ohm_per_m": 3.9600e-05,
+      "r75_ohm_per_m": 4.6602e-05,
+      "max_temp_c": 75.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 1,
+      "height_m": 10.0,
+      "source": "en50182"
+    },
+    "aaac_araucaria_twin": {
+      "name": "AAAC Araucaria 700 mm2 61/4.14 (AL5), twin bundle",
+      "diameter_m": 0.0373,
+      "r25_ohm_per_m": 3.9600e-05,
+      "r75_ohm_per_m": 4.6602e-05,
+      "max_temp_c": 75.0,
+      "emissivity": 0.8,
+      "absorptivity": 0.8,
+      "subconductors": 2,
+      "height_m": 10.0,
+      "source": "en50182"
+    }
+  }
+}
