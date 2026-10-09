@@ -696,8 +696,13 @@ Keep return codes, exact command arguments, configuration copies, and reported o
 | `version` / `update` | Identify the environment / print its upgrade command. | `version` asks the package index only with `--check-pypi`; `update` does not install. |
 | `report` | Write a diagnostic archive for a run. | `--dry-run`. |
 | `run-plan` | Structured orchestration. | `--resolve`, `--estimate`, `--sources`, `--physics-profiles`. |
+| `energy` | Forecasts along power lines, substations and renewable sites. | `energy` alone prints the pipeline; `energy run --dry-run` prints the commands. |
 
 Specialist surfaces such as ensembles, observations, verification campaigns, cycle streaming, and mesh generation have separate contracts. Use `woof --help-all` and their command help before applying them to production data.
+
+### Energy forecasts
+
+`woof energy` produces high-resolution forecasts (typically 100 m or 50 m) along power lines, substations, wind farms and solar farms. It reads grid topology from OpenStreetMap (`woof energy fetch`) or from PyPSA-Eur, REPD, GeoJSON or CSV files (`woof energy import`), turns the assets into forecast sites (`woof energy sites`), and plans domains that cover them (`woof energy plan --topology wrf-nests`, `wrf-tiles` or `hex-swath`). It then runs the plan (`woof energy run`), samples the output at the sites (`woof energy extract`), and computes line ratings, icing, and wind and PV power (`woof energy rating`). Each stage writes a versioned file the next one reads. The [energy forecasts guide](../energy-forecasts.md) covers the data sources and their licences, the file contracts, how to choose a topology and a resolution, and a worked example.
 
 ## 17. Troubleshooting
 

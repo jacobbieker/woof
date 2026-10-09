@@ -24,6 +24,39 @@ New:
   route in a non-blocking row. The obs battery and the WOOF Global
   scorecard read the archive through `DynamicalAsosSurfaceSource`.
   Coverage and limits are in `docs/international-obs.md`.
+- `woof energy` produces high-resolution forecasts (typically 100 m or
+  50 m) along power lines, substations, wind farms and solar farms.
+  `woof energy fetch` reads OpenStreetMap power infrastructure through
+  the Overpass API (ODbL 1.0; the attribution travels in each assets
+  file), cached under `~/.woof/cache/energy-osm/`
+  (`WOOF_ENERGY_OSM_CACHE`). `woof energy import` reads PyPSA-Eur
+  network CSVs, the UK REPD, GeoJSON and CSV. `woof energy sites`
+  samples lines every `--spacing-m` with the conductor bearing and adds
+  substations, turbines at hub height and PV farms. `woof energy run`
+  runs a plan, `woof energy extract` samples it at the sites, and
+  `woof energy rating` computes IEEE 738 line ratings, Makkonen
+  conductor icing, wind power and PV power. Four versioned files
+  (`woof-energy.assets.v1`, `sites.v1`, `plan.v1` and `forecast.v1`)
+  connect the stages.
+- `woof energy plan` has three topologies. `wrf-nests` is one run with
+  up to 20 sibling nests. `wrf-tiles` is one regional parent run plus
+  any number of offline `woof downscale` tiles along the corridors: an
+  irregular WRF topology for long lines and national grids. `hex-swath`
+  is an MPAS mesh refined along the corridors, subject to the mesh
+  generation gates.
+- The `energy` history preset (`[output] preset = "energy"`) keeps the
+  fields the extractor reads, including direct normal and diffuse
+  shortwave irradiance (`SWDDNI`, `SWDDIF`) for the forecast's `dni` and
+  `dhi`.
+- The Rust site sampler (`librw_sitesample.so`, override with
+  `WOOF_SITESAMPLE_BRIDGE`) interpolates wrfout history to sites and
+  heights above ground. It interpolates bilinearly on mass points and
+  linearly in height, and it never extrapolates.
+- `woof doctor` reports `woof energy` in a non-blocking row: whether the
+  package imports, the Overpass cache size, whether the site sampler is
+  on disk, and whether the optional `xarray`, `zarr` and `icechunk`
+  packages import. It contacts no host. The guide is
+  `docs/energy-forecasts.md`.
 
 ## 1.0.3
 
