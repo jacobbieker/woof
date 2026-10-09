@@ -1,0 +1,4 @@
+line_id,bus0,bus1,voltage,circuits,length,underground,under_construction,tags,geometry
+5001,1,2,400,2,15000.5,False,False,'"oid"=>"9101", "symbol"=>"380-400 kV Transmission Line"','LINESTRING(-3.2 51.5,-3.1 51.52,-3.0 51.55)'
+5002,2,3,400,1,20000,False,True,,'LINESTRING(-3.0 51.55,-2.9 51.7)'
+5003,3,4,220,1,6000,True,False,,

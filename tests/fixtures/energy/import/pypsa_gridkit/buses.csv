@@ -1,0 +1,5 @@
+bus_id,station_id,voltage,dc,symbol,under_construction,tags,x,y
+1,10,400,f,Substation,f,'"TSO"=>"Synthetic TSO", "oid"=>"9001", "country"=>"GB"',-3.2,51.5
+2,11,400,f,joint,f,'"oid"=>"9002"',-3.0,51.55
+3,12,220,f,Substation,f,'"oid"=>"9003"',-2.9,51.7
+4,13,220,f,Wind farm,f,'"oid"=>"9004"',-2.95,51.75
