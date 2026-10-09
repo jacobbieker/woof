@@ -998,6 +998,22 @@ cover carries terms of its own:
     Zenodo, unmodified, and maps its classes into WRF's MODIS categories
     at preparation time.
 
+`woof energy fetch` queries public Overpass API instances for
+OpenStreetMap power infrastructure (lines, cables, substations, plants,
+generators, towers) and caches the raw answers in the user's own
+WOOF_ENERGY_OSM_CACHE (default ~/.woof/cache/energy-osm/). OpenStreetMap
+data is (c) OpenStreetMap contributors and is available under the Open
+Data Commons Open Database License 1.0 (ODbL,
+https://opendatacommons.org/licenses/odbl/1-0/); see
+https://www.openstreetmap.org/copyright. No OpenStreetMap data is
+redistributed by this repository: the Overpass fixtures under
+tests/fixtures/energy/ are hand-written and synthetic. Every assets
+document the command writes carries this attribution and the ODbL-1.0
+licence identifier in its sources records. An assets document shared
+publicly is a database under the ODbL's attribution and share-alike
+terms; a work produced from one, such as a forecast, carries the
+attribution.
+
 
 --------------------------------------------------------------------------
 
