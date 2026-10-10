@@ -190,6 +190,72 @@ def _render(arguments: argparse.Namespace) -> int:
     return run_render(arguments)
 
 
+def _static_highres(arguments: argparse.Namespace) -> int:
+    from .static_highres import run_cli
+
+    return run_cli(arguments)
+
+
+#: ``woof hex static-highres`` choices; held equal to
+#: ``static_highres.TERRAIN_CHOICES``/``LANDUSE_CHOICES`` by a test.
+STATIC_HIGHRES_TERRAIN = ("glo30", "none")
+STATIC_HIGHRES_LANDUSE = ("cglc", "none")
+STATIC_HIGHRES_MAX_SPACING_KM = 2.0
+
+
+def _add_static_highres_parser(commands) -> None:
+    parser = commands.add_parser(
+        "static-highres",
+        help="replace a hex static's 30-arc-second terrain (and optionally "
+             "land use) with Copernicus GLO-30 / CGLC-MODIS-LCZ cell "
+             "averages; run BEFORE the vertical build and mesh registration",
+        description=(
+            "Post-process an rw_mpas_static file for 50-100 m cells: "
+            "area-average Copernicus DEM GLO-30 (~30 m) over each Voronoi "
+            "cell into ter and, with --landuse cglc, take the per-cell area "
+            "mode of CGLC-MODIS-LCZ (100 m) for ivgtyp/lu_index with "
+            "landmask re-derived.  ORDER: run before `woof hex vertical` and "
+            "`woof hex register`: the vertical build smooths ter into its "
+            "height coordinate and the mesh-row registry pins the static's "
+            "SHA-256, so both must see the post-processed file.  Orographic "
+            "GWD statistics (var2d, con, oa*, ol*) are kept: they are "
+            "30-arc-second box statistics by definition."))
+    parser.add_argument("--static", type=Path, required=True, metavar="S",
+                        help="the rw_mpas_static output to post-process")
+    parser.add_argument("-o", "--output", type=Path, required=True,
+                        metavar="S2", help="the new static file to write")
+    parser.add_argument("--terrain", choices=STATIC_HIGHRES_TERRAIN,
+                        default="glo30",
+                        help="terrain source (default glo30: Copernicus DEM "
+                             "GLO-30); none keeps ter")
+    parser.add_argument("--landuse", choices=STATIC_HIGHRES_LANDUSE,
+                        default="none",
+                        help="land-use source (cglc: CGLC-MODIS-LCZ 100 m, a "
+                             "2.28 GB one-time download); default none keeps "
+                             "ivgtyp/landmask")
+    parser.add_argument("--max-spacing-km", type=float,
+                        default=STATIC_HIGHRES_MAX_SPACING_KM, metavar="KM",
+                        help="post-process only cells this fine or finer "
+                             f"(default {STATIC_HIGHRES_MAX_SPACING_KM:g}); "
+                             "coarser cells keep their 30-arc-second fields")
+    parser.add_argument("--sample-m", type=float, default=None, metavar="M",
+                        help="sample-lattice spacing in metres (default: "
+                             "automatic, no coarser than the source pixel and "
+                             "fine enough that every cell holds samples)")
+    parser.add_argument("--cache-root", type=Path, default=None, metavar="DIR",
+                        help="high-resolution tile cache (default: the "
+                             "per-user woof highres-cache shared with the WRF "
+                             "path)")
+    parser.add_argument("--offline", action="store_true",
+                        help="never touch the network; refuse when a needed "
+                             "tile or raster is not already cached")
+    parser.add_argument("--receipt", type=Path, default=None, metavar="FILE",
+                        help="receipt path (default: <S2>.static-highres.json)")
+    parser.add_argument("--clobber", action="store_true",
+                        help="replace an existing -o file")
+    parser.set_defaults(handler=_static_highres)
+
+
 def _add_mesh_paths(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--grid", type=Path, default=DEFAULT_GRID)
     parser.add_argument("--static", type=Path, default=DEFAULT_STATIC)
@@ -248,6 +314,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_mesh_paths(oracle_gate)
     oracle_gate.add_argument("--fixtures", type=Path, default=DEFAULT_ORACLE)
     oracle_gate.set_defaults(handler=_oracle_gate)
+
+    # Before cull, vertical and init, because that is where it must run: it
+    # rewrites the static's terrain, which the vertical build smooths and
+    # the mesh-row registry pins by SHA-256.  The parser lives here and the
+    # module is imported only by the handler: it pulls numpy, scipy and
+    # netCDF4, and parsing must not.
+    _add_static_highres_parser(commands)
 
     add_cull_parser(commands)
 
