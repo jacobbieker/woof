@@ -203,6 +203,12 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/cuda_les_v841.py": (
             "95a3560a9f3f4535a752f252bbf3f86d2acb2f5aa7fcadedc89b82bc82f5059b"
         ),
+        # New pin (compensated large-step recovery, attached by the device
+        # stack below the smallest anchored timestep); the rationale lives
+        # beside the runner's pin.
+        "src/hexcore/cuda_compensated_recovery.py": (
+            "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+        ),
         "src/hexcore/cuda_horizontal.py": (
             "ade36498f2115a18ff56d71c141b2115daba4b96598c4162163c8aeaa84db1e1"
         ),

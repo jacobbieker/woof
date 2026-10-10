@@ -392,10 +392,9 @@ def compensated_recovery_required(dt_seconds: float) -> bool:
     restated, so the gate moves with it.
     """
 
-    from .dt_admission import ADMITTED_TIMESTEPS
+    from .dt_admission import below_smallest_anchor
 
-    floor = min(float(anchor.dt_seconds) for anchor in ADMITTED_TIMESTEPS.values())
-    return float(dt_seconds) < floor
+    return below_smallest_anchor(dt_seconds)
 
 
 def recover_large_step_variables_compensated(
@@ -430,16 +429,17 @@ def recover_large_step_variables_compensated(
     The returned state carries the caller's own perturbation fields.
 
     WHERE IT RUNS.  This is the CPU-authority half of the remedy and the
-    reference a CUDA port is decked against; no forecast driver calls it
-    yet.  The CUDA recovery kernels (``recover_cells_f32`` /
-    ``recover_edges_f32`` / ``recover_interfaces_f32`` in ``cuda_driver.py``)
-    live in the regional kernel set that every minted regional class is keyed
-    on (``cuda_backend.regional_admission.REGIONAL_KERNEL_SOURCES``), so
-    porting this there lapses every class until it is re-minted, and is
-    therefore left to a ruling.  The port is: one binary32 residual array per
-    field in the table above, folded into the perturbation at every stage's
-    recovery, rewritten from TwoSum on the final stage only, launched only
-    when :func:`compensated_recovery_required` holds.
+    reference the CUDA port is decked against.  The CUDA recovery kernels
+    (``recover_cells_f32`` / ``recover_edges_f32`` /
+    ``recover_interfaces_f32`` in ``cuda_driver.py``) live in the regional
+    kernel set that every minted regional class is keyed on
+    (``cuda_backend.regional_admission.REGIONAL_KERNEL_SOURCES``), so the
+    port does not edit them: :mod:`woof.hex.cuda_compensated_recovery` wraps
+    the driver's ``_recover_candidate`` at runtime when
+    :func:`compensated_recovery_required` holds -- one binary32 residual array
+    per field in the table above, folded into the perturbation at every
+    stage's recovery, rewritten from TwoSum on RK stage 3 only -- and the
+    kernel-set digest does not move.
     """
 
     effective = state.copy()

@@ -77,3 +77,8 @@ tests/test_physics_carrier_kernels.py
 # weights: bit-identical kdiff on a coarse mesh under the auto gate, and on
 # the binary64 authority at 50/100 m where native weights were not.
 tests/test_deformation_geometry_precision_gpu.py
+# The compensated large-step recovery on the GPU: the production
+# _recover_candidate wrapped by woof.hex.cuda_compensated_recovery matches the
+# CPU authority on a synthetic patch, and the dt 0.5/0.25 s stepping loop
+# reproduces the CPU probe's loss numbers with and without compensation.
+tests/test_cuda_compensated_recovery_gpu.py

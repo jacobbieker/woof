@@ -625,6 +625,14 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/cuda_les_v841.py": (
         "95a3560a9f3f4535a752f252bbf3f86d2acb2f5aa7fcadedc89b82bc82f5059b"
     ),
+    # New pin (compensated large-step recovery): the device stack attaches
+    # cuda_compensated_recovery whenever config_dt is below the smallest
+    # anchored timestep, wrapping _recover_candidate, so the execution of the
+    # sub-anchor lane depends on these bytes.  Outside the regional kernel
+    # set by design: kernel_set_sha256 does not move.
+    "src/hexcore/cuda_compensated_recovery.py": (
+        "f076673925dc4761c7bd77380722f8badc1ffdbdec228cbb4c3c573edb2f6129"
+    ),
     "src/hexcore/cuda_horizontal.py": (
         "ade36498f2115a18ff56d71c141b2115daba4b96598c4162163c8aeaa84db1e1"
     ),
@@ -3940,6 +3948,13 @@ def _construct_device_stack(
             else float(les_request["initial_tke"])
         ),
     )
+    # Compensated large-step recovery: attached here for the same reason, so
+    # no stack can run a timestep below the smallest anchor without it.  At
+    # or above that anchor (every proof, every minted class) it returns None
+    # and nothing is rebound (woof.hex.cuda_compensated_recovery).
+    from woof.hex.cuda_compensated_recovery import attach_compensated_recovery
+
+    recovery_attachment = attach_compensated_recovery(driver)
     prep_geometry = CudaMpasToPhysGeometryV841.from_host(physics_mesh)
     physics_geometry = CudaPhysicsGeometryV841.from_host(physics_mesh)
     gwdo_static = CudaYsuGwdoStaticV841.from_host(host["gwdo_host"])
@@ -3979,6 +3994,11 @@ def _construct_device_stack(
     stack: dict[str, Any] = {
         "driver": driver,
         **({} if les_attachment is None else {"les": les_attachment}),
+        **(
+            {}
+            if recovery_attachment is None
+            else {"large_step_recovery": recovery_attachment}
+        ),
         "backend": backend,
         "prep_geometry": prep_geometry,
         "physics_geometry": physics_geometry,

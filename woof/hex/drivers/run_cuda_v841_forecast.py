@@ -2201,6 +2201,11 @@ def execute_forecast(
     from woof.hex.cuda_les_v841 import stamp_les_history
 
     les_attachment = stack.get("les")
+    # The compensated large-step recovery is attached inside the device stack
+    # too, and only for a timestep below the smallest anchor; None otherwise.
+    from woof.hex.cuda_compensated_recovery import stamp_large_step_recovery_history
+
+    recovery_attachment = stack.get("large_step_recovery")
 
     physics_park = None
     if park_physics_tier:
@@ -2300,15 +2305,18 @@ def execute_forecast(
             snapshot_files[str(step)] = stamp_timestep_evidence(
                 Path(snapshot_files[str(step)]["path"]), host["timestep_evidence"]
             )
+        history_path = output_root / f"cuda-history.{labels[step]}.nc"
         if les_attachment is not None:
-            history_path = output_root / f"cuda-history.{labels[step]}.nc"
             stamp_les_history(
                 history_path,
                 les_attachment,
                 les_model=les_attachment.closure.config.les_model,
             )
-            # The stamp appends attributes and fields, so the recorded bytes
-            # and digest are re-measured from the file as it now stands.
+        if recovery_attachment is not None:
+            stamp_large_step_recovery_history(history_path, recovery_attachment)
+        if les_attachment is not None or recovery_attachment is not None:
+            # The stamps append attributes and fields, so the recorded bytes
+            # and digest are re-measured, once, from the file as it now stands.
             snapshot_files[str(step)] = {
                 **snapshot_files[str(step)],
                 "bytes": history_path.stat().st_size,
@@ -2528,8 +2536,16 @@ def execute_forecast(
     from woof.hex.cuda_backend.arch_admission import architecture_status
 
     les_block = None if les_attachment is None else les_attachment.summary()
+    recovery_block = (
+        None if recovery_attachment is None else recovery_attachment.summary()
+    )
     return {
         **({} if les_block is None else {"les": les_block}),
+        **(
+            {}
+            if recovery_block is None
+            else {"large_step_recovery": recovery_block}
+        ),
         "capability": capability.as_dict(),
         "architecture": architecture_status(capability.compute).as_dict(),
         "arwen_pre_kernel_cache_pin": arwen_pin,
@@ -3585,6 +3601,12 @@ def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
         "sources_unchanged": True,
         "authorities_unchanged": True,
     }
+    if forecast.get("large_step_recovery") is not None:
+        # Labelled from the attachment the run actually executed
+        # (woof.hex.cuda_compensated_recovery), never from the requested dt.
+        payload["large_step_recovery"] = forecast["large_step_recovery"][
+            "large_step_recovery"
+        ]
     payload["payload_sha256"] = proof.canonical_json_sha256(
         json.loads(json.dumps(payload, sort_keys=True, default=str))
     )
