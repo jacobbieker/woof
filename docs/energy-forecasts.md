@@ -191,9 +191,11 @@ Coordinates (`FORECAST_COORDINATES`):
 | `domain_id` | site | - | owning plan domain |
 | `dx_m` | site | m | grid spacing of the owning domain |
 | `inside` | site | 1 | 1 where the owning domain sampled the site |
+| `voltage_kv` | site | kV | asset voltage (NaN where unknown) |
+| `hub_height_m` | site | m | turbine hub height above ground (NaN where unknown) |
+| `capacity_mw` | site | MW | asset generating capacity (NaN where unknown) |
 
-Each file also carries the per-site coordinates `voltage_kv`, `hub_height_m`
-and `capacity_mw`, and the global attributes `schema`, `plan_sha256` and
+Each file also carries the global attributes `schema`, `plan_sha256` and
 `sites_sha256`. Those attributes bind the forecast to the exact plan and
 sites it came from. A site its owning domain could not sample has
 `inside = 0` and NaN data. Nothing is extrapolated.
