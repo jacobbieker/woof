@@ -973,7 +973,7 @@ def _graded_raster(path: Path, *, fine_km: float, background_km: float,
 
 
 def _fake_plan(captured):
-    def plan(*, spec, cells, workdir):
+    def plan(*, spec, cells, workdir, **_):
         captured.append(json.loads(json.dumps(spec)))
         return {"steepest_requested_gradient_percent_per_cell": 1.0,
                 "gradient_probe_coverage": "complete",

@@ -1147,7 +1147,11 @@ def _footprint_model(profile, levels: int | None):
                       "row (shaped footprint model)")
     at_levels = device_admission.model_for_card(
         profile, configuration="limited-area", levels=int(levels))
-    if float(at_levels.bytes_per_cell) != float(base.bytes_per_cell):
+    scales_itself = (
+        float(at_levels.bytes_per_cell) != float(base.bytes_per_cell)
+        or float(getattr(at_levels, "level_scale", lambda: 1.0)()) != 1.0
+    )
+    if scales_itself:
         return at_levels, (f"woof.hex.device_admission limited-area row at "
                            f"{int(levels)} levels (the module scales it)")
     return (_LevelScaledModel(base, at_levels, int(levels), base_levels),

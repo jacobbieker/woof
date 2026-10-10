@@ -368,8 +368,8 @@ def test_floor_refusal_names_the_experimental_lane(tmp_path):
         message.index("--hex-experimental-dt")
 
 
-@pytest.mark.parametrize("dx_m,dt", [(100.0, 600.0 / 1024.0),
-                                     (50.0, 600.0 / 2048.0)])
+@pytest.mark.parametrize("dx_m,dt", [(100.0, 0.5),
+                                     (50.0, 0.25)])
 def test_experimental_plan_lifts_the_floor(tmp_path, dx_m, dt):
     plan = _xplan(tmp_path, dx_m=dx_m)
     outdir = tmp_path / "xplan"
@@ -393,8 +393,8 @@ def test_experimental_plan_lifts_the_floor(tmp_path, dx_m, dt):
                  "regional_window.json", "vertical_spec.json", "sites.json"):
         assert (outdir / name).is_file(), name
     assert len(load_sites(outdir / "sites.json")) == 4
-    assert extra["capacity"]["fits"] and extra["capacity"]["levels"] == 100
-    assert "INTERIM" in extra["capacity"]["bytes_per_cell_basis"]
+    assert extra["capacity"]["fits"] and extra["capacity"]["levels"] == 80
+    assert "the module scales it" in extra["capacity"]["bytes_per_cell_basis"]
     assert extra["estimate"]["window_cells"] > extra["estimate"]["cull_cells"]
     assert plan.notes[0].startswith("EXPERIMENTAL (experimental-unanchored)")
     assert plan.source == "gfs"
@@ -552,9 +552,9 @@ def test_main_reports_the_missing_features(tmp_path, monkeypatch, capsys):
     assert plan_hex.main(args) == 0
     record = json.loads(capsys.readouterr().out)
     assert record["timestep_evidence"] == "experimental-unanchored"
-    assert record["dt_seconds"] == 600.0 / 1024.0
+    assert record["dt_seconds"] == 0.5
     assert record["runnable"] == "full"
-    assert record["capacity"]["levels"] == 100
+    assert record["capacity"]["levels"] == 80
     missing = {row["argv_head"] for row in
                record["commands_missing_in_this_build"]}
     plan = load_plan(tmp_path / "plan" / "plan.json")
@@ -570,7 +570,7 @@ def test_experimental_capacity_refusal(tmp_path):
                             vram_gib=48.0, experimental_dt=True)
     message = str(caught.value)
     assert "cells" in message and "wrf-tiles" in message
-    assert "100 levels" in message and "shorter corridor" in message
+    assert "80 levels" in message and "shorter corridor" in message
     assert not (tmp_path / "plan" / "plan.json").exists()
 
 
@@ -578,11 +578,13 @@ def test_capacity_scales_with_levels():
     base = plan_hex.capacity_verdict(100_000.0, None, 48.0)
     same = plan_hex.capacity_verdict(100_000.0, None, 48.0, levels=55)
     assert {k: v for k, v in same.items() if k != "levels"} == base
-    deep = plan_hex.capacity_verdict(100_000.0, None, 48.0, levels=100)
-    assert deep["levels"] == 100
-    assert deep["required_mib"] > base["required_mib"] * 1.5
+    deep = plan_hex.capacity_verdict(100_000.0, None, 48.0, levels=80)
+    assert deep["levels"] == 80
+    # The device model prices the column itself (levels/55 per cell above
+    # 55, plus the wider WSM6 frame above 64), so no interim scaling.
+    assert deep["required_mib"] > base["required_mib"] * 1.3
     assert deep["cells_that_fit"] < base["cells_that_fit"]
-    assert "INTERIM" in deep["bytes_per_cell_basis"]
+    assert "INTERIM" not in deep["bytes_per_cell_basis"]
 
 
 def test_windowed_gradient_matches_the_uniform_estimate(monkeypatch):
@@ -601,14 +603,14 @@ def test_les_vertical_spec():
     doc = plan_hex.les_vertical_spec()
     VerticalSpec.from_mapping(doc).validate()
     z = np.asarray(doc["specified_interfaces_m"])
-    assert doc["scheme"] == "specified" and doc["n_vert_levels"] == 100
-    assert len(z) == 101 and z[0] == 0.0 and z[-1] == doc["ztop_m"]
+    assert doc["scheme"] == "specified" and doc["n_vert_levels"] == 80
+    assert len(z) == 81 and z[0] == 0.0 and z[-1] == doc["ztop_m"]
     dz = np.diff(z)
     assert np.all(dz > 0.0)
     assert dz[0] == pytest.approx(plan_hex.LES_SURFACE_DZ_M, rel=0.02)
     assert np.all(dz[1:] >= dz[:-1] - 1e-2)
     assert plan_hex.les_vertical_spec(60)["n_vert_levels"] == 60
-    for n in (40, 55, 60, 200):
+    for n in (40, 55, 60, 80):
         few = plan_hex.les_vertical_spec(n)
         VerticalSpec.from_mapping(few).validate()
         z = np.asarray(few["specified_interfaces_m"])
@@ -633,7 +635,7 @@ def test_experimental_controls_are_refused(tmp_path):
     with pytest.raises(plan_hex.HexPlanRefusal, match="whole number"):
         _xplan(tmp_path, hours=0.0002)
     with pytest.raises(plan_hex.HexPlanRefusal, match="no timestep"):
-        _xplan(tmp_path, dx_m=30.0)
+        _xplan(tmp_path, dx_m=5.0)
     with pytest.raises(plan_hex.HexPlanRefusal, match="drop the flag"):
         _xplan(tmp_path, dx_m=937.5)
     with pytest.raises(plan_hex.HexPlanRefusal, match="f009"):
