@@ -198,6 +198,10 @@ tests/test_hrrr_intermediate.py
 tests/test_mesh_point.py
 tests/test_mesh_rows.py
 tests/test_regional_class_band.py
+# Generic registration and the vertical doors: `woof hex register`,
+# `woof hex vertical` and `woof hex cull --parent-vertical` (skips by name
+# when rw_mpas_mesh is not on the engine ladder).
+tests/test_register_vertical.py
 
 # Time stepping and physics cadence: the local timestep and the PBL call
 # interval.  A cadence that drifts changes every forecast this port produces

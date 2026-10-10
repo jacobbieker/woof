@@ -8,7 +8,9 @@
 | `woof hex doctor [--explain] [--json]` | report every estate this install can reach; exit 1 while a required one is missing | nothing |
 | `woof hex mesh-check --grid G --static S` | validate a mesh pair; print dimensions and SHA-256 digests; a regional cull gains a `regional` receipt block; `--grid-only --grid G` validates a grid before its static exists | the pair (or the grid alone) |
 | `woof hex oracle-gate --grid G --static S --fixtures DIR` | replay the source-extracted Fortran M1 fixtures against a mesh | a source checkout's oracle fixtures |
-| `woof hex cull --parent-grid G --parent-static S --parent-init I --region R` | cut a limited-area grid, static and init out of a global case; `init` refuses a regional grid by name, so this is how a limited-area case gets an init at all | `rw_mpas_mesh`, the global triple, one region row |
+| `woof hex vertical --grid G --static S --vertical-spec V -o F` | mint the native-free vertical artifact on a GLOBAL grid (level count and terrain smoothing from the spec); a regional grid is refused, because the closed-sphere vertical authority does not invent exterior state | the global pair, a `gpuwm-hex.vertical-spec/v1` file |
+| `woof hex cull --parent-grid G --parent-static S --parent-init I --region R` | cut a limited-area grid, static and init out of a global case; `init` refuses a regional grid by name, so this is how a limited-area case gets an init at all. `--parent-vertical F` cuts the vertical artifact beside them, so the cut can be initialised from it with `init --capsule/--reference` | `rw_mpas_mesh`, the global triple, one region row |
+| `woof hex register --grid G --static S --name N [--parent-row P --cull-receipt R] [--dt-seconds DT] [--rows FILE]` | admit any generated global mesh (or a cull of one) -- dual edges, cell coordination, Courant and the timestep anchor -- and append it to a runtime row file (`--rows` or `$WOOF_HEX_MESH_ROWS`) so `forecast --mesh N` resolves it; a cull row needs its parent in the same file and a cull receipt whose digests match the files | the pair; for a cull, the `woof hex cull` receipt |
 | `woof hex init ...` | build initial conditions (chapter 5) | `rw_mpas_init`, met file, mesh pair, capsule |
 | `woof hex forecast ...` | run the model on a registered mesh (chapter 6); `--preflight` answers "will it fit?" without integrating | a CUDA device with room for the mesh, the pinned `woof` installed, mesh pair, init |
 | `woof hex swath {plan,metrics,explain}` | place fine grids from a coarse forecast's own fields, print the armed threat rows, explain why each candidate was taken or declined; `plan` prices every admitted swath through a real `rw_mpas_mesh --dry-run` unless `--no-size` | CPU only; a coarse forecast or its run receipt, `rw_mpas_mesh` to price |
@@ -102,7 +104,9 @@ limit and diverge there.
 
 | receipt | written by | carries |
 | --- | --- | --- |
-| `<name>.cull.json` | cull door | the region row, the engine, one entry per cut file with its parent, its cell counts, its lineage and the engine's own `*.cull-receipt.json` |
+| `<name>.cull.json` | cull door | the region row (path, digest and document), the engine, one entry per cut file with its parent, the SHA-256 of parent and cut, its cell counts, its lineage and the engine's own `*.cull-receipt.json` |
+| `<output>.receipt.json` | vertical door | the grid, static and vertical-spec digests, the vertical invariants, the derived-geometry source and the output digest |
+| `mesh-rows.json` | register door, `mesh-plan --point --generate` | one runtime row per registered pair: bytes and digests, nominal dx, dt and its `timestep_evidence`, the admission pass, the spec digest and region, and for a cull its parent row, boundary-mask digest and cull receipt |
 | `<init>.provenance.json` | init door | SHA-256 of every input, engine binary, argv, engine receipt, output |
 | `render-manifest.json` | render door | engine digests, weights/output digests, per-frame product results, exact invocations |
 | `forecast-receipt.json` | forecast door | the resolved request, the admission decision with every number it was made from, the mesh-binding receipt, the driver's receipt whole, the history files, the render command for them |
