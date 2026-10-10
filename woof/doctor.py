@@ -2703,6 +2703,7 @@ _CHECKED_ARTIFACTS = {
     "obs_regrid": "the `observation remap` line",
     "obs_score": "the `observation scoring` line",
     "rw_isobaric": "the `isobaric height reader` line",
+    "rw_sitesample": "the `energy site sampler` line",
     "rw_mpas_mesh": "the `MPAS binary` lines",
     "rw_mpas_init": "the `MPAS binary` lines",
     "rw_mpas_geometry": "the `MPAS binary` lines",
@@ -4322,6 +4323,56 @@ def _isobaric_reader_check() -> Check:
             group=_GROUP_ENGINES)
     return Check(name, "verified",
                  f"{path} -- ABI {isobaric_bridge.ISOBARIC_ABI}",
+                 brief="staged", group=_GROUP_ENGINES)
+
+
+def _sitesample_check() -> Check:
+    """The wrfout site sampler behind ``woof energy extract``.
+
+    ``missing`` when absent: there is no Python implementation behind it,
+    so energy extraction from WRF history refuses by name without it.
+    """
+
+    name = "energy site sampler (rw-sitesample)"
+    degrades = "woof energy extract cannot sample WRF history at sites"
+    try:
+        from woof.energy import sample_bridge
+    except ImportError as error:                 # pragma: no cover - partial
+        return Check(name, "missing",
+                     f"woof.energy.sample_bridge is not importable ({error}) "
+                     f"-- {degrades}",
+                     "# reinstall so the sampler seam imports:\n"
+                     "  pip install --force-reinstall woof",
+                     brief="sample_bridge not importable",
+                     group=_GROUP_ENGINES)
+    remedy = bridges.artifact_remedy(
+        env_var=sample_bridge.SITESAMPLE_BRIDGE_ENV,
+        filename=sample_bridge.library_names()[0],
+        subject="the energy site sampler",
+        crate_relative=bridges.RUSTWX_CRATE_RELATIVE)
+    try:
+        path = sample_bridge.resolve_sitesample_bridge()
+    except FileNotFoundError as error:
+        return Check(
+            name, "missing", f"{error} -- {degrades}", remedy,
+            action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+            brief="not staged; energy extraction refuses",
+            group=_GROUP_ENGINES)
+    except RuntimeError as error:
+        return Check(
+            name, "missing", f"{error} -- {degrades}", remedy,
+            action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+            brief="not usable; energy extraction refuses",
+            group=_GROUP_ENGINES)
+    reason = sample_bridge.unavailable_reason()
+    if reason is not None:
+        return Check(
+            name, "missing", f"{path} -- {reason} -- {degrades}", remedy,
+            action=_build_action(bridges.RUSTWX_CRATE_RELATIVE),
+            brief="not loadable; energy extraction refuses",
+            group=_GROUP_ENGINES)
+    return Check(name, "verified",
+                 f"{path} -- ABI {sample_bridge.SITESAMPLE_ABI}",
                  brief="staged", group=_GROUP_ENGINES)
 
 
@@ -6274,6 +6325,7 @@ def _collect_checks(sources: tuple[str, ...] | None = None,
     checks.append(_dynamical_asos_check())
     checks.append(_noah_init_check())
     checks.append(_isobaric_reader_check())
+    checks.append(_sitesample_check())
     checks.append(_region_dealias_check())
     checks.extend(_bridge_checks())
     # ABOUT the report, not about an artifact: does every artifact the

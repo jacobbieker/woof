@@ -201,7 +201,7 @@ def test_manylinux_probes_every_declared_artifact_before_output(tmp_path, monkey
             "region_global_dealias", "netcdf_writer", "static_fields",
             "gpuwm_mapped_engine", "obs_regrid", "obs_score", "rw_mpas_mesh", "rw_mpas_static",
             "rw_mpas_init", "rw_mpas_geometry", "rw_mpas_hostprep", "rw_mpas_convert", "rw_mpas_lbc", "rw_mlexport",
-            "arwen-tui", "rw_zarr", "rw_isobaric",
+            "arwen-tui", "rw_zarr", "rw_isobaric", "rw_sitesample",
         }
         assert required <= {r["artifact"] for r in result}
         assert set(called) == {a.name for a in bridge_assets.BUNDLED_ARTIFACTS if a.kind == "executable"}
@@ -739,18 +739,22 @@ def test_the_release_ships_six_libraries_with_different_abi_symbols() -> None:
     the fifth is the observation remap, which joined when
     `woof.verify.obs.regrid` flipped off scipy by default. The sixth is
     the shared isobaric reader used by pressure-level products and exports.
+    The wrfout site sampler behind `woof energy extract` joined with the
+    energy pipeline.
     """
 
     artifacts = _library_artifacts()
     assert {a.name for a in artifacts} == {
         "gpuwm_preprocess_cpu", "region_global_dealias", "netcdf_writer",
-        "static_fields", "obs_regrid", "obs_score", "rw_isobaric"}
+        "static_fields", "obs_regrid", "obs_score", "rw_isobaric",
+        "rw_sitesample"}
     symbols = {bridge_assets.library_abi_for(a.name)[0] for a in artifacts}
     assert symbols == {"gpuwm_preprocess_cpu_abi_version", "bw_abi_version",
                        "gpuwm_ncwrite_abi_version",
                        "gpuwm_static_abi_version",
                        "gpuwm_obsregrid_abi_version", "gpuwm_obsscore_abi_version",
-                       "gpuwm_isobaric_abi_version"}
+                       "gpuwm_isobaric_abi_version",
+                       "gpuwm_sitesample_abi_version"}
 
 
 @pytest.mark.parametrize("platform", bridge_assets.SUPPORTED_PLATFORMS)

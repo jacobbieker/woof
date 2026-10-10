@@ -13,11 +13,11 @@ the GRIB decoders, the CPU preprocessing library, the fetch backbone,
 the batch renderer, the two radar front doors, the MRMS, Stage-IV,
 surface, GOES and European-composite front doors, the NetCDF decoder,
 the mapped decode engine, the Zarr reader, the observation remap, the
-isobaric-height reader, the ML dataset exporter, the
+isobaric-height reader, the energy site sampler, the ML dataset exporter, the
 simulated radar and the terminal workspace onto a
 wheel install was to clone the repository and run ``cargo build`` -- a
 Rust toolchain, a 2.5 GB checkout and a few minutes of compiling, for
-forty-two files.
+forty-three files.
 ``woof fetch-bridges`` is the same trade :mod:`woof.table_assets`
 already makes for the externalized physics tables: the artifacts are
 published as versioned GitHub release assets, their exact size and
@@ -26,7 +26,7 @@ byte is verified against those pins *before* anything is installed.
 
 What is staged, and where
 -------------------------
-One bundle per platform, holding the forty-two artifacts of
+One bundle per platform, holding the forty-three artifacts of
 :data:`BUNDLED_ARTIFACTS`, staged into :func:`woof.bridges
 .default_bridge_dir` (``~/.woof/bridges/<release>-<bundle digest>``)
 -- the staged rung of the resolution ladder every consumer already
@@ -524,6 +524,17 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
         "WOOF_ISOBARIC_BRIDGE",
         "isobaric heights read between layer interfaces (vortex tracker, "
         "GNSS-RO operator, verification maps)"),
+    # The WRFOUT SITE SAMPLER behind `woof energy extract`: destaggering,
+    # bilinear and height interpolation and wind rotation at forecast
+    # sites.  No Python implementation stands behind it, so a wheel
+    # without it refuses energy extraction by name.  Environment variable
+    # spelled to match woof.energy.sample_bridge.SITESAMPLE_BRIDGE_ENV; a
+    # test binds the two (tests/test_energy_sample.py).
+    BundledArtifact(
+        "rw_sitesample", "library", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_SITESAMPLE_BRIDGE",
+        "wrfout history sampled at energy forecast sites "
+        "(woof energy extract)"),
     # The four MPAS binaries of the first wave (the fifth, the
     # lateral-boundary producer, is the last entry in this tuple and
     # carries its own note), and `rw_mpas_convert` is the artifact this
@@ -640,6 +651,8 @@ LIBRARY_ABI: dict[str, tuple[str, int]] = {
     "obs_score": ("gpuwm_obsscore_abi_version", 1),
     # Matches woof.isobaric_bridge.ISOBARIC_ABI; a test binds them.
     "rw_isobaric": ("gpuwm_isobaric_abi_version", 1),
+    # Matches woof.energy.sample_bridge.SITESAMPLE_ABI; a test binds them.
+    "rw_sitesample": ("gpuwm_sitesample_abi_version", 1),
 }
 
 
@@ -1066,7 +1079,7 @@ def verify_source_revision(payload: bytes, *, expected: str,
 #: What it is for.  A release cut reuses a binary built at an earlier
 #: commit when every path listed for its crate is byte-identical (the
 #: same git object) at the commit being released, so a release that
-#: changed one Python file does not recompile forty-two unchanged
+#: changed one Python file does not recompile forty-three unchanged
 #: binaries.  A path missing from this table is a binary that could be
 #: reused while carrying a stale copy of that file, so
 #: ``tests/test_native_build_inputs.py`` re-derives the outside inputs
