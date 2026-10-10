@@ -153,7 +153,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # the table is unchanged and the new branch runs only on opt-in; the
         # rationale lives beside the runner's pin.
         "src/hexcore/dt_admission.py": (
-            "4aebb6cee974525743e8ff53c358857b7df9324a720891013d72b9a90f3f5fd3"
+            "8fa46aaed6a7e219f214985ec94455b5e3f8cba86407b6f5f23dc903dce106cf"
         ),
         # New pin (surface/PBL cadence, 2026-08-26): this module decides
         # config_bldt_seconds, a knob the frozen registry keys on; the

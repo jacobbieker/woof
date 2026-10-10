@@ -495,7 +495,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # twice the Courant floor's own count, which changes only meshes finer
     # than ~35 m that used to get None; the registered rows reproduce.
     "src/hexcore/dt_admission.py": (
-        "4aebb6cee974525743e8ff53c358857b7df9324a720891013d72b9a90f3f5fd3"
+        "8fa46aaed6a7e219f214985ec94455b5e3f8cba86407b6f5f23dc903dce106cf"
     ),
     # New pin (surface/PBL cadence, 2026-08-26): this module decides
     # config_bldt_seconds, a knob the frozen timestep registry keys on, so
