@@ -165,6 +165,48 @@ pilot below both derive it from
 `woof.static.highres.baseline_ocean_mask`, so the two cannot report
 different coastlines for one domain.
 
+## Hex statics (MPAS meshes)
+
+A hex static comes from `rw_mpas_static`, which reads WPS_GEOG at 30
+arc-seconds (about 900 m).  For 50-100 m cells, post-process it from the
+same cached sources with `woof hex static-highres`.  Give it the input as
+`--static S` and the new file as `-o S2`.  `--terrain glo30` is the
+default; add `--landuse cglc` for land use and `--offline` to stay off the
+network.
+
+- **Order.**  Run it before the vertical grid is built (the vertical build
+  smooths `ter`) and before the mesh row is registered (the registry pins
+  the static's SHA-256).  A static that already carries a vertical grid,
+  or that was already post-processed, is refused.
+- **Terrain.**  Copernicus GLO-30 is area-averaged over each cell's
+  Voronoi polygon into `ter`.  The tiles are fetched, cached and hashed by
+  the same code as the WRF path, under the same per-user cache.  Area an
+  unpublished (all-water) tile leaves uncovered takes the cell's own
+  30-arc-second height.
+- **Land use** (`--landuse cglc`).  `ivgtyp`/`lu_index` become the
+  per-cell area mode of CGLC-MODIS-LCZ, through the WRF path's crosswalk.
+  A cell with under half its area classified keeps its old category.
+  `landmask` is re-derived as `ivgtyp != iswater_lu`, as `rw_mpas_static`
+  derives it.  A cell that becomes land takes its land-only climatologies
+  and soil categories from the nearest old land cell.  A cell that becomes
+  water gets the static's water zeros.
+- **Kept on purpose.**  `var2d`, `con`, `oa1..4` and `ol1..4` stay as
+  they are.  They are orographic drag statistics, defined over a
+  30-arc-second box sized from `dcEdge`.
+- **Which cells.**  Only cells finer than `--max-spacing-km` (default 2)
+  are processed, so a global variable-resolution parent is sampled over
+  its refined region only.
+- **Method.**  The rasters are decoded and warped by the Rust
+  `static-fields` library onto a Mercator sample lattice.  Each sample goes
+  to the cell with the nearest centre, which is the Voronoi assignment, and
+  at the edge of the processed set each sample is also tested against the
+  cell's polygon.  The per-cell sums are area-weighted.
+- **Offline.**  `--offline` refuses, naming the files, when a tile or the
+  land-cover raster is not already cached.
+- **Provenance.**  The receipt (`<S2>.static-highres.json`) and the
+  output's `highres_*` global attributes record the tile hashes, the window
+  hash, the lattice and the method.
+
 ## Reproducing the bounded pilot
 
 The raster work runs in the Rust `static-fields` library, which a plain
