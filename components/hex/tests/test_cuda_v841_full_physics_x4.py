@@ -179,10 +179,11 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/mixing.py": (
             "7b5f9f8ac8f93f66e180d85f90ba3181eac2547c0ef7146b752eb5dd2c1a6433"
         ),
-        # Re-frozen for the regional CPU authority lane; the
-        # rationale lives beside the runner's pin.
+        # Re-frozen for the regional CPU authority lane, and again
+        # 2026-10-10 for fine-mesh (sub-500 m) binary64 deformation
+        # geometry; the rationale lives beside the runner's pin.
         "src/hexcore/mixing_v841.py": (
-            "534d8f31d5591091180bb7218046feed4c32613bab890034601aaf00100f519c"
+            "9e37ebe07089d286b551f0370116766c74d0cf71d36845a4f883e9226f60cbca"
         ),
         "src/hexcore/cuda_horizontal.py": (
             "ade36498f2115a18ff56d71c141b2115daba4b96598c4162163c8aeaa84db1e1"

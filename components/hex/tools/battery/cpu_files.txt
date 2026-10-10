@@ -260,3 +260,11 @@ tests/test_physics_rollback_policy.py
 # and a row cannot declare a physics suite the pinned engine seam does not
 # take as an argument.
 tests/test_forecast_preset.py
+# Deformation weights below 500 m are evaluated in binary64 about each cell
+# centre (the binary32 Earth-centred evaluation is off by up to 18 % at 50 m),
+# and every coarser mesh keeps its native bytes. Synthetic patches, no card.
+tests/test_deformation_geometry_precision.py
+# The carried large-step state loses small-timestep increments to binary32
+# rounding; the compensated CPU-authority recovery and its sub-anchor gate.
+# Synthetic patch, no card.
+tests/test_large_step_compensation.py
