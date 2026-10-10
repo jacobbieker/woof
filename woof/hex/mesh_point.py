@@ -427,7 +427,9 @@ def max_radius_for_cells(
     return round(low, 1)
 
 
-def choose_timestep(minimum_dc_edge_m: float, *, fine_dx_m: float) -> dict[str, Any]:
+def choose_timestep(
+    minimum_dc_edge_m: float, *, fine_dx_m: float, experimental: bool = False
+) -> dict[str, Any]:
     """The largest ANCHORED timestep the mesh's own Courant limit admits.
 
     Sub-3-km meshes run convection off by the 2026-08-26 ruling
@@ -435,6 +437,16 @@ def choose_timestep(minimum_dc_edge_m: float, *, fine_dx_m: float) -> dict[str, 
     convection-off rows; a coarser mesh consults the Grell-Freitas rows.
     The registry row declares what this returns and the bind re-admits it
     against the static's own ``dcEdge``.
+
+    ``experimental=True`` changes nothing while an anchored timestep fits.
+    When none does -- every mesh whose Courant limit is below the smallest
+    anchor, i.e. the 50-100 m cores -- it returns the largest timestep
+    :func:`woof.hex.dt_admission.largest_admissible_dt` finds for this
+    ``min(dcEdge)`` (Courant, exact radiation divisibility, binary64 clock
+    closure; 600/1024 s near 100 m, 600/2048 s near 50 m), re-admitted
+    through :func:`woof.hex.dt_admission.experimental_dt_anchor` and stamped
+    ``experimental-unanchored``.  The forecast door admits exactly that
+    value under ``--experimental-dt`` and refuses it without.
     """
 
     from . import convection_admission, dt_admission
@@ -463,6 +475,10 @@ def choose_timestep(minimum_dc_edge_m: float, *, fine_dx_m: float) -> dict[str, 
                 "cumulus_scheme": scheme,
                 "anchors_consulted": candidates,
             }
+    if experimental:
+        return _experimental_timestep(
+            minimum_dc_edge_m, limit=limit, scheme=scheme, candidates=candidates
+        )
     raise PointPlanRefusal(
         f"no anchored timestep fits this mesh: its Courant limit is "
         f"{limit:.3f} s (min dcEdge {minimum_dc_edge_m:.1f} m at "
@@ -473,6 +489,47 @@ def choose_timestep(minimum_dc_edge_m: float, *, fine_dx_m: float) -> dict[str, 
         f"refused at bind for holding no anchor; earn one with "
         f"tools/mint_dt_anchor.py or coarsen --fine-dx-m"
     )
+
+
+def _experimental_timestep(
+    minimum_dc_edge_m: float,
+    *,
+    limit: float,
+    scheme: str | None,
+    candidates: Sequence[float],
+) -> dict[str, Any]:
+    """The experimental-lane answer when no anchored timestep fits."""
+
+    from . import dt_admission
+
+    search = dt_admission.largest_admissible_dt(float(minimum_dc_edge_m))
+    dt = search["largest_admissible_dt_seconds"]
+    if dt is None:
+        raise PointPlanRefusal(
+            f"no timestep fits this mesh even in the experimental lane: its "
+            f"Courant limit is {limit:.6g} s (min dcEdge "
+            f"{minimum_dc_edge_m:.3f} m) and no exact binary64 divisor of the "
+            f"{search['radiation_cadence_seconds']:g} s radiation cadence "
+            f"inside woof.hex.dt_admission.largest_admissible_dt's search "
+            f"sits at or below it; coarsen --fine-dx-m"
+        )
+    try:
+        anchor = dt_admission.experimental_dt_anchor(
+            float(dt), cumulus_scheme=scheme,
+            minimum_dc_edge_m=float(minimum_dc_edge_m),
+        )
+    except dt_admission.DtAdmissionError as error:
+        raise PointPlanRefusal(str(error)) from error
+    return {
+        "dt_seconds": float(dt),
+        "courant_limit_seconds": limit,
+        "margin": limit / float(dt),
+        "cumulus_scheme": scheme,
+        "anchors_consulted": list(candidates),
+        "timestep_evidence": anchor.timestep_evidence,
+        "timestep_evidence_reason": dt_admission.EXPERIMENTAL_DT_REASON,
+        "radiation_steps": search["radiation_steps_at_that_dt"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +548,9 @@ class PointRequest:
     vram_gib: float | None
     mesh_exe: Path | None
     name: str | None
+    #: ``--experimental-dt``: let the admission pick a timestep below the
+    #: smallest anchor when none fits (:func:`choose_timestep`).
+    experimental_dt: bool = False
 
     @property
     def fine_km(self) -> float:
@@ -514,6 +574,7 @@ def request_from_arguments(arguments: argparse.Namespace) -> PointRequest:
         vram_gib=arguments.vram_gib,
         mesh_exe=arguments.mesh_exe,
         name=getattr(arguments, "name", None),
+        experimental_dt=bool(getattr(arguments, "experimental_dt", False)),
     )
 
 
@@ -707,7 +768,9 @@ def resolve_geog(explicit: Path | None) -> Path:
     )
 
 
-def admit_pair(grid: Path, static: Path, *, fine_dx_m: float, log=print) -> dict[str, Any]:
+def admit_pair(
+    grid: Path, static: Path, *, fine_dx_m: float, experimental: bool = False, log=print
+) -> dict[str, Any]:
     """The door's own admission pass over a pair it just built."""
 
     import numpy as np
@@ -747,7 +810,9 @@ def admit_pair(grid: Path, static: Path, *, fine_dx_m: float, log=print) -> dict
         dataset.set_auto_maskandscale(False)
         dc_edge = np.asarray(dataset.variables["dcEdge"][:], dtype=np.float64)
     authority = edge_length_authority(dc_edge)
-    chosen = choose_timestep(authority.minimum_m, fine_dx_m=fine_dx_m)
+    chosen = choose_timestep(
+        authority.minimum_m, fine_dx_m=fine_dx_m, experimental=experimental
+    )
     try:
         timestep = admit_timestep(chosen["dt_seconds"], authority, policy=CourantPolicy())
     except TimestepAdmissionError as error:
@@ -758,6 +823,11 @@ def admit_pair(grid: Path, static: Path, *, fine_dx_m: float, log=print) -> dict
         f"min dcEdge {authority.minimum_m:.3f} m, dt {chosen['dt_seconds']:g} s "
         f"(Courant limit {chosen['courant_limit_seconds']:.3f} s, "
         f"{chosen['margin']:.3f}x)"
+        + (
+            f" [{chosen['timestep_evidence']}]"
+            if chosen.get("timestep_evidence")
+            else ""
+        )
     )
     return {
         "dual_edge_admission": dual.as_dict(),
@@ -841,7 +911,10 @@ def generate_point(
     legs.append({"leg": "static", "seconds": round(done.elapsed, 2)})
     log(f"STATIC {static.name} written in {done.elapsed:.1f} s")
 
-    admission = admit_pair(grid, static, fine_dx_m=request.fine_dx_m, log=log)
+    admission = admit_pair(
+        grid, static, fine_dx_m=request.fine_dx_m,
+        experimental=request.experimental_dt, log=log,
+    )
     if admission["regional"]:
         raise PointPlanRefusal(
             f"{grid} carries a boundary zone; the generator was asked for a "
@@ -876,7 +949,10 @@ def generate_point(
     cut["static"] = cull_one(mesh_exe, static, region_path, cull_static, clobber=clobber)
     cut["static"]["lineage"] = carry_lineage(static, cull_static, drives_boundaries=False)
     legs.append({"leg": "cull", "seconds": round(time.perf_counter() - started, 2)})
-    cull_admission = admit_pair(cull_grid, cull_static, fine_dx_m=request.fine_dx_m, log=log)
+    cull_admission = admit_pair(
+        cull_grid, cull_static, fine_dx_m=request.fine_dx_m,
+        experimental=request.experimental_dt, log=log,
+    )
     if not cull_admission["regional"]:
         raise PointPlanRefusal(
             f"{cull_grid} carries no boundary zone after the cull; the "
@@ -972,7 +1048,12 @@ def generate_point(
             "--extrap-airtemp constant --use-spechumd yes",
             f"WOOF_HEX_MESH_ROWS={rows_path} woof hex forecast --mesh {cull_row.name} "
             f"--grid {cull_grid} --static {cull_static} --init {out_dir / (stem + '-cull.init.nc')} "
-            f"--lbc-dir {lbc_dir} --hours 3 --start-time ... --out <RUN>",
+            f"--lbc-dir {lbc_dir} --hours 3 --start-time ... --out <RUN>"
+            + (
+                " --experimental-dt"
+                if admission["timestep_choice"].get("timestep_evidence")
+                else ""
+            ),
         ],
     }
     receipt_path = out_dir / f"{stem}.point-generate.json"
@@ -1029,6 +1110,15 @@ def add_point_arguments(parser: argparse.ArgumentParser) -> None:
         help="with --generate: mint the parent's native-free vertical artifact "
              "from this gpuwm-hex.vertical-spec/v1 declaration and cull it, so "
              "the cull can be initialised from a regional source")
+    group.add_argument(
+        "--experimental-dt", action="store_true",
+        help="EXPERIMENTAL, unanchored: when no anchored timestep fits the "
+             "generated mesh's Courant limit (fine cores below about 1 km), "
+             "declare the largest Courant-admissible exact divisor of the "
+             "600 s radiation cadence instead of refusing; the row's recorded "
+             "admission (timestep_choice) and the generate receipt say "
+             "experimental-unanchored, and the forecast needs "
+             "`woof hex forecast --experimental-dt` to run it")
     group.add_argument("--static-exe", type=Path, default=None, metavar="FILE")
     group.add_argument("--clobber", action="store_true")
 

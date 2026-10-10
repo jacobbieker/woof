@@ -473,8 +473,19 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # change are message and metadata text (a card label, a ruling quotation,
     # anchor basis prose) that nothing reads as a value.  Every affected proof
     # re-runs against this digest.
+    # Re-frozen 2026-10-10 for the opt-in EXPERIMENTAL sub-anchor lane
+    # (--experimental-dt).  ADMITTED_TIMESTEPS is byte-for-byte unchanged and
+    # every existing branch returns what it returned: require_dt_anchor gains
+    # one branch that runs only when the table has no row, the timestep is
+    # below the smallest anchor AND the caller opted in (argument, or the
+    # run's own experimental_lane scope).  The record it returns is never a
+    # table row and is stamped experimental-unanchored; DtAnchor.as_dict adds
+    # that label only to such records, so every anchored receipt is unchanged.
+    # largest_admissible_dt's divisor search also runs past 2400 counts to
+    # twice the Courant floor's own count, which changes only meshes finer
+    # than ~35 m that used to get None; the registered rows reproduce.
     "src/hexcore/dt_admission.py": (
-        "f34c7ea4ef1e89816599dd70070d38f3dd05e3466c77040a526a6c2d1dd3e97f"
+        "c98fe39399afb0da5d6c39e7162711512ac2b8d97c4ba78a0b70f6d74f833d5c"
     ),
     # New pin (surface/PBL cadence, 2026-08-26): this module decides
     # config_bldt_seconds, a knob the frozen timestep registry keys on, so

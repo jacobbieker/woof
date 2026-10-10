@@ -587,6 +587,7 @@ def admit_timestep(
     nominal_dx_m: float | None = None,
     convection: str = "auto",
     pbl_cadence: str = "auto",
+    experimental: bool = False,
 ) -> dict[str, Any]:
     """Answer the timestep half of "will this run?" from the row alone.
 
@@ -601,6 +602,14 @@ def admit_timestep(
     timestep, and whether that timestep is anchored is a table lookup.  It
     is the same shape as :func:`admit_architecture`, and for the same
     reason -- preflight's answer and the run's answer must not disagree.
+
+    ``experimental`` is ``--experimental-dt`` (or ``WOOF_HEX_EXPERIMENTAL_DT=1``,
+    read once by :func:`experimental_dt_requested`).  A row timestep below
+    the smallest anchor is then admitted through
+    :func:`woof.hex.dt_admission.experimental_dt_anchor` on its cadences, RK
+    shape and clock; the row carries no ``min(dcEdge)``, so the Courant half
+    of the lane is the bind's (``bind_mesh`` re-admits it against the
+    static's own dcEdge before anything is allocated) and the record says so.
     """
 
     from . import convection_admission, dt_admission
@@ -646,6 +655,31 @@ def admit_timestep(
     anchor = dt_admission.admitted_timestep(
         dt_seconds, cumulus_scheme, surface_pbl_seconds
     )
+    if (
+        anchor is None
+        and experimental
+        and dt_admission.below_smallest_anchor(dt_seconds)
+    ):
+        try:
+            anchor = dt_admission.experimental_dt_anchor(
+                dt_seconds,
+                cumulus_scheme=cumulus_scheme,
+                surface_pbl_seconds=surface_pbl_seconds,
+                cumulus_seconds=(
+                    None if cumulus_scheme is None else float(dt_seconds)
+                ),
+                minimum_dc_edge_m=None,
+                courant_deferred_to=(
+                    "bind_mesh: woof.hex.timestep_admission.admit_timestep and "
+                    "the experimental lane re-check against the static's own "
+                    "dcEdge, before CUDA"
+                ),
+            )
+        except dt_admission.DtAdmissionError as error:
+            raise _refuse(
+                f"--mesh {mesh} declares dt={float(dt_seconds):g} s and "
+                f"--experimental-dt was given, but {error}"
+            ) from error
     if anchor is None:
         raise _refuse(
             f"--mesh {mesh} declares dt={float(dt_seconds):g} s and selects "
@@ -655,7 +689,15 @@ def admit_timestep(
             + dt_admission.unanchored_refusal(
                 dt_seconds, cumulus_scheme, surface_pbl_seconds
             )
+            + (
+                ".  " + dt_admission.experimental_lane_not_applicable(dt_seconds)
+                if experimental
+                else ""
+            )
         )
+    experimental_fields: dict[str, Any] = (
+        dt_admission.experimental_evidence_fields() if anchor.experimental else {}
+    )
     return {
         "dt_seconds": float(dt_seconds),
         "admitted": True,
@@ -672,7 +714,55 @@ def admit_timestep(
         "surface_pbl_anchor_derived_from": anchor.derived_from,
         "convection": decision,
         "pbl_cadence": pbl_decision,
+        **experimental_fields,
     }
+
+
+def experimental_dt_requested(
+    flag: bool, environ: Mapping[str, str] | None = None
+) -> bool:
+    """The run's ONE experimental-dt decision: the flag, or the env switch.
+
+    Read here, at the command line, and nowhere deeper: from this point the
+    decision travels as the request's typed ``experimental_dt`` field into
+    the bind and the driver's own ``--experimental-dt``.  The switch must be
+    ``1`` to open the lane; empty or ``0`` leaves it shut, and any other
+    value is refused rather than guessed at.
+    """
+
+    from .dt_admission import EXPERIMENTAL_DT_ENV
+
+    if flag:
+        return True
+    raw = (os.environ if environ is None else environ).get(EXPERIMENTAL_DT_ENV, "")
+    value = str(raw).strip()
+    if value in ("", "0"):
+        return False
+    if value == "1":
+        return True
+    raise _refuse(
+        f"{EXPERIMENTAL_DT_ENV}={raw!r} is neither 1 (open the experimental "
+        f"sub-anchor timestep lane) nor 0/empty (leave it shut).  The lane "
+        f"admits timesteps nobody has anchored, so an ambiguous switch is "
+        f"refused rather than read either way"
+    )
+
+
+def experimental_dt_warning(request: "ForecastRequest") -> str:
+    """The loud line the door prints before an experimental run."""
+
+    from .dt_admission import EXPERIMENTAL_TIMESTEP_EVIDENCE, smallest_anchored_dt
+
+    return (
+        f"WARNING EXPERIMENTAL TIMESTEP: mesh {request.mesh} runs at "
+        f"dt={request.dt_seconds:g} s, below the smallest anchored timestep "
+        f"({smallest_anchored_dt():g} s), under --experimental-dt.  "
+        f"timestep_evidence={EXPERIMENTAL_TIMESTEP_EVIDENCE}: Courant, cadences, "
+        f"RK shape and clock closure are checked; NO integration anchor, NO "
+        f"physics band and NO native reference exist at this timestep, and "
+        f"the 5 s anchors above it record DIVERGES SEVERELY.  Every receipt "
+        f"and history file of this run carries the label"
+    )
 
 
 def admit_device(
@@ -763,6 +853,21 @@ class ForecastRequest:
     #: ``"preset"`` when the row decided the surface/PBL cadence,
     #: ``"explicit"`` when --pbl-cadence was given.
     pbl_cadence_source: str = "preset"
+    #: ``--experimental-dt`` / ``WOOF_HEX_EXPERIMENTAL_DT=1``, resolved once
+    #: by :func:`experimental_dt_requested`.  ``True`` only matters for a
+    #: row timestep below the smallest anchor; there it is the run's
+    #: timestep evidence, ``experimental-unanchored``.
+    experimental_dt: bool = False
+
+    @property
+    def timestep_experimental(self) -> bool:
+        """Whether this run's timestep is admitted by the experimental lane."""
+
+        from .dt_admission import below_smallest_anchor
+
+        # Below the smallest anchor no row exists at all, so the flag plus
+        # the timestep decide it; above it the flag changes nothing.
+        return bool(self.experimental_dt) and below_smallest_anchor(self.dt_seconds)
 
     @property
     def inputs_present(self) -> bool:
@@ -1008,20 +1113,24 @@ def _schedule(hours: float, history_every_minutes: int, dt_seconds: float,
     if abs(raw_steps - round(raw_steps)) > 1e-9:
         raise _refuse(
             f"--hours {hours} is not a whole number of steps on mesh {mesh}, "
-            f"whose registered timestep is {dt_seconds:.0f} s: it is "
+            f"whose registered timestep is {dt_seconds:g} s: it is "
             f"{raw_steps:.4f} steps.  A partial step cannot be integrated, so "
-            f"choose a length that divides by {dt_seconds:.0f} s (for example "
+            f"choose a length that divides by {dt_seconds:g} s (for example "
             f"{max(1, int(raw_steps)) * dt_seconds / 3600.0:g} hours)."
         )
     steps = int(round(raw_steps))
     history_seconds = int(history_every_minutes) * 60
-    if history_seconds <= 0 or history_seconds % int(dt_seconds) != 0:
+    # One rule with the driver's build_schedule, sub-second timesteps
+    # included (woof.hex.timestep_admission.history_stride_steps).
+    from .timestep_admission import history_stride_steps
+
+    stride = history_stride_steps(history_seconds, dt_seconds)
+    if stride is None:
         raise _refuse(
             f"--history-every-minutes {history_every_minutes} is not a whole "
-            f"number of {dt_seconds:.0f} s steps on mesh {mesh}; a history "
+            f"number of {dt_seconds:g} s steps on mesh {mesh}; a history "
             "frame can only be written at a step boundary."
         )
-    stride = history_seconds // int(dt_seconds)
     if steps % stride != 0:
         raise _refuse(
             f"--history-every-minutes {history_every_minutes} does not divide "
@@ -1182,18 +1291,32 @@ def resolve_request(
     else:
         pbl_cadence = str(explicit_pbl_cadence)
         pbl_cadence_source = "explicit"
+    try:
+        experimental_dt = experimental_dt_requested(
+            bool(getattr(arguments, "experimental_dt", False))
+        )
+    except ForecastDoorRefusal as error:
+        # Preflight reports an ambiguous switch beside every other problem;
+        # the lane stays shut while it does.
+        if collected is None:
+            raise
+        collected.append(str(error))
+        experimental_dt = False
+    experimental_kwargs: dict[str, Any] = (
+        {"experimental": True} if experimental_dt else {}
+    )
     if collected is None:
         admit_timestep(
             mesh, row.dt_seconds,
             nominal_dx_m=row.nominal_dx_m, convection=convection,
-            pbl_cadence=pbl_cadence,
+            pbl_cadence=pbl_cadence, **experimental_kwargs,
         )
     else:
         try:
             admit_timestep(
                 mesh, row.dt_seconds,
                 nominal_dx_m=row.nominal_dx_m, convection=convection,
-                pbl_cadence=pbl_cadence,
+                pbl_cadence=pbl_cadence, **experimental_kwargs,
             )
         except ForecastDoorRefusal as error:
             collected.append(str(error))
@@ -1450,6 +1573,7 @@ def resolve_request(
         input_problems=tuple(collected or ()),
         preset=preset.name,
         pbl_cadence_source=pbl_cadence_source,
+        experimental_dt=experimental_dt,
     )
 
 
@@ -1504,6 +1628,8 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
             argv += ["--local-timestep-classing", str(request.local_timestep_classing)]
     if request.stop_on_refusal:
         argv.append("--stop-on-refusal")
+    if request.experimental_dt:
+        argv.append("--experimental-dt")
     if request.preflight:
         argv.append("--preflight-only")
     else:
@@ -1642,7 +1768,28 @@ def build_receipt(
         "history": [str(path) for path in history],
         "render_command": render_command(request, history),
         "door_seconds": round(float(seconds), 3),
+        **_timestep_evidence_receipt(request),
     }
+
+
+def _timestep_evidence_receipt(request: ForecastRequest) -> dict[str, Any]:
+    """The receipt's experimental label; empty on every ordinary run."""
+
+    if not request.timestep_experimental:
+        return {}
+    from .dt_admission import experimental_evidence_fields
+
+    return {**experimental_evidence_fields(), "experimental_dt": True}
+
+
+def _announce_experimental_dt(request: ForecastRequest) -> None:
+    """Print the loud warning, to stdout and stderr, before an experimental run."""
+
+    if not request.timestep_experimental:
+        return
+    warning = experimental_dt_warning(request)
+    print(warning, flush=True)
+    print(warning, file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1692,6 +1839,9 @@ def _bind(binding, driver, request: ForecastRequest) -> dict[str, Any]:
             forecast=driver,
             convection=request.convection,
             pbl_cadence=request.pbl_cadence,
+            # Passed only when set, so an ordinary run calls the bind exactly
+            # as it always has.
+            **({"experimental_dt": True} if request.experimental_dt else {}),
         )
     except binding.MeshBindingError as error:
         raise _refuse(f"the mesh bind refused: {error}{_BIND_REMEDY}") from None
@@ -1742,6 +1892,7 @@ def _run_preflight(request: ForecastRequest, registry: Mapping[str, MeshRow],
     problems: list[str] = list(request.input_problems)
     for problem in request.input_problems:
         print(f"INPUT MISSING {problem}", flush=True)
+    _announce_experimental_dt(request)
 
     bind_receipt: dict[str, Any] | None = None
     if request.grid.is_file() and request.static.is_file():
@@ -1856,6 +2007,8 @@ def run_forecast(arguments: argparse.Namespace) -> int:
     started = time.monotonic()
     request = resolve_request(arguments)
     registry = load_registry(request.repo)
+    if not request.preflight:
+        _announce_experimental_dt(request)
     if request.preflight:
         return _run_preflight(request, registry, started)
 
@@ -2159,6 +2312,18 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
         help="when the model refuses to publish a step, stop and write the "
              "receipt for the frames already committed instead of aborting "
              "with none. No validation is relaxed")
+    parser.add_argument(
+        "--experimental-dt", action="store_true",
+        help="EXPERIMENTAL, unanchored: admit a row timestep BELOW the "
+             "smallest anchored timestep (5 s) on the host-derivable checks "
+             "alone -- Courant against the static's own dcEdge, exact "
+             "radiation/surface-PBL/cumulus cadence divisibility, RK schedule "
+             "shape, binary64 clock closure.  No integration anchor or "
+             "physics band exists at such a timestep, and the 5 s anchors "
+             "record DIVERGES SEVERELY; every receipt and history file says "
+             "timestep_evidence=experimental-unanchored.  Unanchored "
+             "timesteps above 5 s stay refused.  Also opened by "
+             "WOOF_HEX_EXPERIMENTAL_DT=1")
     parser.add_argument(
         "--preflight", action="store_true",
         help="resolve, bind and admit without touching the integration")

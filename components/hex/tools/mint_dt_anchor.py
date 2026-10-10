@@ -169,6 +169,17 @@ def verify_anchor(anchor: DtAnchor, *, root: Path = ROOT) -> dict[str, Any]:
     """
 
     findings: list[str] = []
+    if anchor.timestep_evidence is not None:
+        return {
+            "dt_seconds": anchor.dt_seconds,
+            "certified": False,
+            "findings": [
+                f"dt={anchor.dt_seconds:g} s is an {anchor.timestep_evidence} "
+                f"record from the opt-in experimental lane, not a table row: "
+                f"it names no schedule receipt on disk, no integration pair "
+                f"and no physics band, and is never an anchor"
+            ],
+        }
     if anchor.admitted_on.startswith("CANDIDATE"):
         return {
             "dt_seconds": anchor.dt_seconds,

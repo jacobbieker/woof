@@ -1711,6 +1711,28 @@ def _inspect_static(
     }
 
 
+def _timestep_evidence_fields(decision: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The bind receipt's top-level label: empty on every ordinary bind."""
+
+    if decision is None:
+        return {}
+    return dt_admission.experimental_evidence_fields()
+
+
+def _publish_timestep_evidence(forecast: Any, decision: Mapping[str, Any] | None) -> None:
+    """Hand the driver ONE timestep-evidence decision, on bind success only.
+
+    The forecast driver refuses a run whose own ``--experimental-dt``
+    disagrees with it, and opens the experimental lane from it with the
+    static's measured ``min(dcEdge)``.
+    """
+
+    if forecast is not None:
+        forecast.TIMESTEP_EVIDENCE_DECISION = (
+            None if decision is None else dict(decision)
+        )
+
+
 def _zero_digest(shape: tuple[int, ...]) -> str:
     return hashlib.sha256(np.zeros(shape, dtype="<f4").tobytes(order="C")).hexdigest()
 
@@ -1725,9 +1747,20 @@ def bind_mesh(
     verify_frozen_sources: bool = True,
     convection: str = "auto",
     pbl_cadence: str = "auto",
+    experimental_dt: bool = False,
     log=print,
 ) -> dict[str, Any]:
-    """Cross-examine, Courant-admit, and bind one registered mesh before CUDA."""
+    """Cross-examine, Courant-admit, and bind one registered mesh before CUDA.
+
+    ``experimental_dt`` is the run's typed ``--experimental-dt`` decision.
+    It changes nothing for a row whose timestep is anchored, or unanchored
+    at or above the smallest anchor.  For a row declaring a timestep BELOW
+    the smallest anchor it admits the row through
+    :func:`woof.hex.dt_admission.experimental_dt_anchor` -- Courant against
+    this static's own ``min(dcEdge)``, cadence divisibility, RK shape and
+    clock closure all still enforced -- and the binding record says
+    ``timestep_evidence: experimental-unanchored``.
+    """
 
     if mesh_name not in MESH_BINDINGS:
         raise MeshBindingMismatch(
@@ -1735,6 +1768,12 @@ def bind_mesh(
             "Register dimensions, file pins, nominal dx, timestep, and Courant policy before running"
         )
     binding = MESH_BINDINGS[mesh_name]
+    if forecast is not None:
+        # The driver's timestep-evidence decision is reset on EVERY bind and
+        # published only when the bind succeeds (_publish_timestep_evidence),
+        # so neither an earlier experimental bind nor a failed one can leak
+        # a decision into the run that follows in the same process.
+        forecast.TIMESTEP_EVIDENCE_DECISION = None
 
     frozen: dict[str, Any] | None = None
     if verify_frozen_sources:
@@ -1866,6 +1905,46 @@ def bind_mesh(
     dt_anchor = dt_admission.admitted_timestep(
         binding.dt_seconds, cumulus_scheme, surface_pbl_seconds
     )
+    experimental_decision: dict[str, Any] | None = None
+    if (
+        dt_anchor is None
+        and experimental_dt
+        and dt_admission.below_smallest_anchor(binding.dt_seconds)
+    ):
+        # The opt-in experimental lane.  Courant was admitted above against
+        # this static's own dcEdge and is re-checked inside the lane with
+        # the same number, so the record carries it.
+        try:
+            dt_anchor = dt_admission.experimental_dt_anchor(
+                binding.dt_seconds,
+                cumulus_scheme=cumulus_scheme,
+                surface_pbl_seconds=surface_pbl_seconds,
+                radiation_seconds=PHYSICS_RADIATION_CADENCE_SECONDS,
+                cumulus_seconds=(
+                    None if cumulus_scheme is None else float(binding.dt_seconds)
+                ),
+                minimum_dc_edge_m=float(authority.minimum_m),
+            )
+        except dt_admission.DtAdmissionError as error:
+            raise MeshBindingMismatch(f"mesh {mesh_name!r}: {error}") from error
+        experimental_decision = {
+            **dt_admission.experimental_evidence_fields(),
+            "dt_seconds": float(binding.dt_seconds),
+            "cumulus_scheme": cumulus_scheme,
+            "surface_pbl_seconds": float(surface_pbl_seconds),
+            "minimum_dc_edge_m": float(authority.minimum_m),
+            "courant_limit_seconds": float(timestep.maximum_admitted_dt_seconds),
+            "smallest_anchored_dt_seconds": dt_admission.smallest_anchored_dt(),
+        }
+        observed["timestep_evidence"] = experimental_decision
+        log(
+            f"[mesh-binding] WARNING mesh {mesh_name}: dt={binding.dt_seconds:g} s "
+            f"is below the smallest anchored timestep "
+            f"({dt_admission.smallest_anchored_dt():g} s) and is admitted "
+            f"EXPERIMENTAL-UNANCHORED (--experimental-dt): Courant limit "
+            f"{timestep.maximum_admitted_dt_seconds:.6g} s, cadences and clock "
+            f"checked on the host, NO integration anchor and NO physics band"
+        )
     if dt_anchor is None:
         raise MeshBindingMismatch(
             f"mesh {mesh_name!r}: "
@@ -1877,13 +1956,26 @@ def bind_mesh(
             f"{dt_admission.admitted_summary()}; the largest of those at or "
             f"below this mesh's own limit is what the row should declare, and "
             f"if none is, the remedy above is to mint one"
+            + (
+                ".  " + dt_admission.experimental_lane_not_applicable(binding.dt_seconds)
+                if experimental_dt
+                else ""
+            )
         )
     observed["dt_admission"] = dt_anchor.as_dict()
     log(
         f"[mesh-binding] mesh {mesh_name}: nCells={observed['nCells']} "
         f"nEdges={observed['nEdges']} nominal={observed['nominalMinDc_f32']} m; "
-        f"min(dcEdge)={authority.minimum_m:.3f} m; dt={binding.dt_seconds:.3f} s; "
-        f"limit={timestep.maximum_admitted_dt_seconds:.3f} s"
+        f"min(dcEdge)={authority.minimum_m:.3f} m; "
+        + (
+            f"dt={binding.dt_seconds:.9g} s; "
+            f"limit={timestep.maximum_admitted_dt_seconds:.6g} s"
+            if experimental_decision is not None
+            else (
+                f"dt={binding.dt_seconds:.3f} s; "
+                f"limit={timestep.maximum_admitted_dt_seconds:.3f} s"
+            )
+        )
     )
     log(
         f"[mesh-binding] mesh {mesh_name}: min(dvEdge/dcEdge)="
@@ -1941,6 +2033,7 @@ def bind_mesh(
             f"[mesh-binding] {mesh_name} frozen no-op: fingerprint unchanged "
             f"at {fingerprint_after['sha256'][:16]}"
         )
+        _publish_timestep_evidence(forecast, experimental_decision)
         return {
             "mesh": mesh_name,
             "rebound": False,
@@ -1953,6 +2046,7 @@ def bind_mesh(
             "timestep_admission": timestep.as_dict(),
             "rebindings": {},
             "notes": binding.notes,
+            **_timestep_evidence_fields(experimental_decision),
         }
 
     rebindings: dict[str, Any] = {}
@@ -2161,6 +2255,7 @@ def bind_mesh(
         f"dx={float(dx)} m, dt={binding.dt_seconds} s; fingerprint "
         f"{fingerprint_before['sha256'][:16]} -> {fingerprint_after['sha256'][:16]}"
     )
+    _publish_timestep_evidence(forecast, experimental_decision)
     return {
         "mesh": mesh_name,
         "rebound": True,
@@ -2174,4 +2269,5 @@ def bind_mesh(
         "rebindings": rebindings,
         "deformation_dropped": dropped,
         "notes": binding.notes,
+        **_timestep_evidence_fields(experimental_decision),
     }

@@ -145,6 +145,7 @@ tests/test_convection_admission.py
 tests/test_device_admission.py
 tests/test_domain_size_agreement.py
 tests/test_dt_admission.py
+tests/test_dt_experimental.py
 tests/test_dual_edge_admission.py
 tests/test_native_free_init_admission_305.py
 tests/test_partition_device_admission.py
