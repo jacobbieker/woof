@@ -294,6 +294,7 @@ _STAMP_SOURCES = {
     "hrrr_grib2_bridge": "src/bin/hrrr_grib2_bridge.rs",
     "grib2_inventory": "src/bin/grib2_inventory.rs",
     "grib2_dump": "src/bin/grib2_dump.rs",
+    "met_intermediate": "src/bin/met_intermediate.rs",
     "gpuwm_preprocess_cpu": "src/lib.rs",
     "rw_fetch": "crates/rw-fetch/src/main.rs",
     "rw_wrfbatch": "crates/rw-wrfbatch/src/main.rs",

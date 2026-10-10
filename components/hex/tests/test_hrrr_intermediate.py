@@ -161,7 +161,12 @@ def test_the_doors_are_subcommands_of_the_console_script() -> None:
         "intermediate", "--grib-dir", "d", "--cycle", "2026-09-13T15", "--out-dir", "o",
         "--point", "39.1,-94.58", "--radius-km", "155",
     ])
-    assert arguments.hours == "0-3" and arguments.spacing_deg == hi.DEFAULT_SPACING_DEG
+    # The hours and workers defaults are per row (HRRR's 0-3 and 4; a global
+    # source takes its own cadence), so the parser leaves them unset and the
+    # HRRR request fills them in.
+    assert arguments.hours is None and arguments.spacing_deg == hi.DEFAULT_SPACING_DEG
+    request = hi.request_from_arguments(arguments)
+    assert request.hours == (0, 1, 2, 3) and request.workers == 4
     with pytest.raises(IntermediateRefusal) as refusal:
         hi.request_from_arguments(parser.parse_args([
             "intermediate", "--grib-dir", "d", "--cycle", "2026-09-13T15", "--out-dir", "o",

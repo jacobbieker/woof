@@ -24,16 +24,43 @@
 //! label is a refusal.  See `MapSource`.
 //!
 //! usage: met_intermediate --vtable VTABLE --date YYYY-MM-DD_HH:MM:SS
-//!            --map-source LABEL --out OUTFILE GRIB [GRIB ...]
+//!            --map-source LABEL --out OUTFILE [--pmin PA]
+//!            [--select-valid-time] [--invariant GRIB --invariant-field NAME ...]
+//!            GRIB [GRIB ...]
+//!
+//! Time identity.  Every matched message's valid time is computed from
+//! its own reference time and lead and reported in the receipt
+//! (`matched_valid_times`).  `--select-valid-time` additionally drops
+//! every message that is not valid at `--date`, which is what a file
+//! carrying a whole time series (an ERA5 combined retrieval) needs:
+//! without it the last time in the file would silently win every key.
+//! Messages produced by statistical processing over a time range (GRIB2
+//! product templates other than 4.0/4.1, GRIB1 time-range indicators
+//! other than 0/1/10) never match a row: a maximum or minimum 2 m
+//! temperature shares the instantaneous field's identity, and whichever
+//! the file stored last used to win.
+//!
+//! Invariants.  `--invariant GRIB` names a file whose messages may supply
+//! ONLY the fields named by `--invariant-field`, and only when the main
+//! inputs do not carry them -- the AIFS land mask and surface
+//! geopotential ride the 0-hour file alone.  An invariant field the
+//! invariant files do not carry is a refusal, not a gap.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use chrono::{NaiveDate, NaiveDateTime, TimeDelta};
 use grib_core::grib1::Grib1File;
-use grib_core::grib2::{grid_latlon, unpack_message, Grib2File};
+use grib_core::grib2::{grid_latlon, unpack_message, Grib2File, Grib2Message};
+
+/// The receipt schema this tool prints on stdout.  v3 added the time
+/// identity (`matched_valid_times`, `--select-valid-time`, the
+/// time-processed skip) and the invariant-file provenance; the literal
+/// doubles as the contract marker `woof.bridges` looks for.
+const RECEIPT_SCHEMA: &str = "gpuwm.rw-wps.met-intermediate/v3";
 
 /// WPS intermediate format version this tool writes.
 const WPS_FORMAT_VERSION: i32 = 5;
@@ -658,6 +685,16 @@ fn describe_latlon(
 
 struct Collector {
     pmin_pa: f64,
+    /// When set, a matched message valid at any other time is dropped
+    /// (and counted) instead of competing for the key.
+    select_valid_time: Option<NaiveDateTime>,
+    /// Matched messages dropped by `select_valid_time`.
+    messages_other_valid_time: usize,
+    /// Matched messages dropped for being statistically processed over a
+    /// time range (max/min/accumulation/average), not instantaneous.
+    messages_time_processed: usize,
+    /// Distinct valid times of every message that reached the store.
+    matched_valid_times: BTreeSet<NaiveDateTime>,
     /// Isobaric levels dropped for sitting above `pmin_pa`, counted so
     /// the omission is reported rather than silent.
     levels_below_pmin: usize,
@@ -672,6 +709,10 @@ impl Collector {
     fn new(pmin_pa: f64) -> Self {
         Collector {
             pmin_pa,
+            select_valid_time: None,
+            messages_other_valid_time: 0,
+            messages_time_processed: 0,
+            matched_valid_times: BTreeSet::new(),
             levels_below_pmin: 0,
             masked_points: 0,
             slabs: BTreeMap::new(),
@@ -686,6 +727,23 @@ impl Collector {
         // appears in more than one input: the last GRIBFILE read
         // supplies the value.
         self.slabs.insert(key, slab);
+    }
+
+    /// Decide whether a matched message valid at `valid` may enter the
+    /// store, recording the decision.
+    fn admit_valid_time(&mut self, valid: NaiveDateTime) -> bool {
+        if let Some(want) = self.select_valid_time {
+            if valid != want {
+                self.messages_other_valid_time += 1;
+                return false;
+            }
+        }
+        self.matched_valid_times.insert(valid);
+        true
+    }
+
+    fn has_field(&self, name: &str) -> bool {
+        self.slabs.keys().any(|(n, _)| n == name)
     }
 
     fn get(&self, name: &str, xlvl: f32) -> Option<&Slab> {
@@ -736,8 +794,17 @@ fn collect_grib2(path: &Path, vtable: &[VtableRow], out: &mut Collector) -> Resu
         let Some(xlvl) = xlvl_for_grib2_level(product.level_type as u16, product.level_value) else {
             continue;
         };
+        if !grib2_is_instantaneous(message) {
+            out.messages_time_processed += 1;
+            continue;
+        }
         if product.level_type == 100 && (xlvl as f64) < out.pmin_pa {
             out.levels_below_pmin += 1;
+            continue;
+        }
+        let valid = grib2_valid_time(message)
+            .map_err(|e| format!("{}: field {}: {e}", path.display(), row.name))?;
+        if !out.admit_valid_time(valid) {
             continue;
         }
         // Raw, not scan-normalized: `grid_latlon` reports coordinates in
@@ -784,6 +851,107 @@ fn mark_masked(values: &mut [f32]) -> usize {
         }
     }
     n
+}
+
+// ---------------------------------------------------------------------
+// Time identity
+// ---------------------------------------------------------------------
+
+/// The `--date` text WPS writes into every header, as a time.
+fn parse_hdate(text: &str) -> Result<NaiveDateTime, String> {
+    let bad = || format!("--date {text:?} is not YYYY-MM-DD_HH:MM:SS");
+    let t = text.trim();
+    let b = t.as_bytes();
+    if b.len() != 19 || b[4] != b'-' || b[7] != b'-' || b[10] != b'_' || b[13] != b':' || b[16] != b':' {
+        return Err(bad());
+    }
+    let num = |range: std::ops::Range<usize>| -> Result<u32, String> {
+        t.get(range).and_then(|s| s.parse::<u32>().ok()).ok_or_else(bad)
+    };
+    let (year, month, day) = (num(0..4)? as i32, num(5..7)?, num(8..10)?);
+    let (hour, minute, second) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    NaiveDate::from_ymd_opt(year, month, day)
+        .and_then(|d| d.and_hms_opt(hour, minute, second))
+        .ok_or_else(bad)
+}
+
+fn format_hdate(time: &NaiveDateTime) -> String {
+    use chrono::{Datelike, Timelike};
+    format!(
+        "{:04}-{:02}-{:02}_{:02}:{:02}:{:02}",
+        time.year(),
+        time.month(),
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second()
+    )
+}
+
+/// Seconds in one unit of GRIB2 Code Table 4.4 / GRIB1 Table 4 (the
+/// codes the two editions share; GRIB1 spells seconds 254, GRIB2 13).
+fn time_unit_seconds(unit: u8, edition: u8) -> Result<i64, String> {
+    Ok(match (unit, edition) {
+        (0, _) => 60,
+        (1, _) => 3_600,
+        (2, _) => 86_400,
+        (10, _) => 3 * 3_600,
+        (11, _) => 6 * 3_600,
+        (12, _) => 12 * 3_600,
+        (13, 2) | (254, 1) => 1,
+        (other, _) => {
+            return Err(format!(
+                "GRIB{edition} time unit code {other} is not one this tool converts; \
+                 refusing rather than guessing the message's valid time"
+            ))
+        }
+    })
+}
+
+/// GRIB2 product templates whose field is a value AT the valid time:
+/// 4.0 (deterministic) and 4.1 (one ensemble member).  Every other
+/// template either processes a time range (4.8, 4.11, 4.12 ...) or is a
+/// derived statistic (mean, spread, percentile, probability), none of
+/// which a Vtable row means.
+fn grib2_is_instantaneous(message: &Grib2Message) -> bool {
+    matches!(message.product.template, 0 | 1) && message.product.statistical_process_type.is_none()
+}
+
+fn grib2_valid_time(message: &Grib2Message) -> Result<NaiveDateTime, String> {
+    let product = &message.product;
+    let unit = time_unit_seconds(product.time_range_unit, 2)?;
+    let lead = TimeDelta::try_seconds(unit * product.forecast_time as i64)
+        .ok_or_else(|| format!("forecast time {} overflows", product.forecast_time))?;
+    Ok(message.reference_time + lead)
+}
+
+fn grib1_valid_time(pds: &grib_core::grib1::ProductDefinitionSection) -> Result<NaiveDateTime, String> {
+    let reference = NaiveDate::from_ymd_opt(pds.year(), pds.month as u32, pds.day as u32)
+        .and_then(|d| d.and_hms_opt(pds.hour as u32, pds.minute as u32, 0))
+        .ok_or_else(|| {
+            format!(
+                "GRIB1 reference time {}-{}-{} {}:{} is not a date",
+                pds.year(),
+                pds.month,
+                pds.day,
+                pds.hour,
+                pds.minute
+            )
+        })?;
+    let steps: i64 = match pds.time_range_indicator {
+        0 => pds.p1 as i64,
+        1 => 0,
+        10 => (pds.p1 as i64) * 256 + pds.p2 as i64,
+        other => {
+            return Err(format!(
+                "GRIB1 time-range indicator {other} is not an instantaneous value"
+            ))
+        }
+    };
+    let unit = time_unit_seconds(pds.time_unit, 1)?;
+    let lead = TimeDelta::try_seconds(unit * steps)
+        .ok_or_else(|| format!("GRIB1 lead {steps} overflows"))?;
+    Ok(reference + lead)
 }
 
 /// Soil-layer rows key on the layer bounds as well as the surface type.
@@ -848,8 +1016,17 @@ fn collect_grib1(
         let Some(xlvl) = xlvl_for_grib1_level(pds.level_type as u16, pds.level_value as f64) else {
             continue;
         };
+        if !matches!(pds.time_range_indicator, 0 | 1 | 10) {
+            out.messages_time_processed += 1;
+            continue;
+        }
         if pds.level_type == 100 && (xlvl as f64) < out.pmin_pa {
             out.levels_below_pmin += 1;
+            continue;
+        }
+        let valid = grib1_valid_time(pds)
+            .map_err(|e| format!("{}: field {}: {e}", path.display(), row.name))?;
+        if !out.admit_valid_time(valid) {
             continue;
         }
         let Some(gds) = message.gds.as_ref() else {
@@ -1539,7 +1716,8 @@ fn write_slab<W: Write>(
 fn usage() -> String {
     format!(
         "usage: met_intermediate --vtable VTABLE --date YYYY-MM-DD_HH:MM:SS \
-         --map-source LABEL --out OUTFILE [--pmin PA] GRIB [GRIB ...]\n\
+         --map-source LABEL --out OUTFILE [--pmin PA] [--select-valid-time] \
+         [--invariant GRIB ... --invariant-field NAME ...] GRIB [GRIB ...]\n\
          --map-source is required; known labels: {}",
         known_map_source_list()
     )
@@ -1551,10 +1729,17 @@ fn usage() -> String {
 struct Config {
     vtable_path: PathBuf,
     date: String,
+    /// `date` as a time, parsed before any decode.
+    valid_time: NaiveDateTime,
     out_path: PathBuf,
     source: &'static MapSource,
     pmin_pa: f64,
+    /// Drop matched messages not valid at `date`.
+    select_valid_time: bool,
     inputs: Vec<PathBuf>,
+    /// Files that may supply only `invariant_fields`.
+    invariants: Vec<PathBuf>,
+    invariant_fields: Vec<String>,
 }
 
 /// Returned when `--help` asked for the usage text rather than a run.
@@ -1570,7 +1755,10 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Str
     let mut out_path: Option<PathBuf> = None;
     let mut map_source: Option<String> = None;
     let mut pmin_pa = DEFAULT_PMIN_PA;
+    let mut select_valid_time = false;
     let mut inputs: Vec<PathBuf> = Vec::new();
+    let mut invariants: Vec<PathBuf> = Vec::new();
+    let mut invariant_fields: Vec<String> = Vec::new();
 
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -1584,6 +1772,15 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Str
                 pmin_pa = text
                     .parse::<f64>()
                     .map_err(|_| format!("--pmin wants pascals, not {text:?}"))?;
+            }
+            "--select-valid-time" => select_valid_time = true,
+            "--invariant" => invariants.push(PathBuf::from(args.next().ok_or_else(usage)?)),
+            "--invariant-field" => {
+                let name = args.next().ok_or_else(usage)?;
+                if name.trim().is_empty() {
+                    return Err("--invariant-field wants a field name".to_string());
+                }
+                invariant_fields.push(name.trim().to_string());
             }
             "--help" | "-h" => return Ok(Invocation::Help),
             other if other.starts_with("--") => {
@@ -1611,17 +1808,32 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Str
     if inputs.is_empty() {
         return Err(format!("no GRIB inputs given\n{}", usage()));
     }
+    let valid_time = parse_hdate(&date)?;
+    if invariants.is_empty() != invariant_fields.is_empty() {
+        return Err(
+            "--invariant and --invariant-field come together: an invariant file supplies \
+             only the fields named for it, and a named field needs a file to come from"
+                .to_string(),
+        );
+    }
     Ok(Invocation::Run(Box::new(Config {
         vtable_path,
         date,
+        valid_time,
         out_path,
         source,
         pmin_pa,
+        select_valid_time,
         inputs,
+        invariants,
+        invariant_fields,
     })))
 }
 
 fn main() {
+    // Keep the release-provenance stamp in the binary: the bundle cut
+    // proves a staged bridge by these bytes (see lib.rs).
+    let _ = std::hint::black_box(gpuwm_preprocess_cpu::SOURCE_REV_STAMP);
     if let Err(message) = run() {
         eprintln!("met_intermediate: {message}");
         std::process::exit(1);
@@ -1630,6 +1842,14 @@ fn main() {
 
 fn json_escape(text: &str) -> String {
     text.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn json_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| format!("\"{}\"", json_escape(&p.display().to_string())))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn run() -> Result<(), String> {
@@ -1644,19 +1864,24 @@ fn run() -> Result<(), String> {
     let vtable = parse_vtable(&config.vtable_path)?;
     let metas = field_metas(&vtable);
     let mut collector = Collector::new(config.pmin_pa);
+    if config.select_valid_time {
+        collector.select_valid_time = Some(config.valid_time);
+    }
 
     for input in &config.inputs {
-        match grib_edition(input)? {
-            1 => collect_grib1(input, &vtable, config.source, &mut collector)?,
-            2 => collect_grib2(input, &vtable, &mut collector)?,
-            other => {
-                return Err(format!(
-                    "{}: GRIB edition {other} is not supported",
-                    input.display()
-                ))
-            }
-        }
+        collect_file(input, &vtable, config.source, &mut collector)?;
     }
+    if collector.select_valid_time.is_some()
+        && collector.slabs.is_empty()
+        && collector.messages_other_valid_time > 0
+    {
+        return Err(format!(
+            "--select-valid-time {}: {} matched messages are valid at other times and none \
+             at this one; the inputs do not hold this time",
+            config.date, collector.messages_other_valid_time
+        ));
+    }
+    let invariant_sources = merge_invariants(&config, &vtable, &mut collector)?;
 
     let mut ledger = RuleLedger::default();
     apply_ungrib_rules(&mut collector, config.source, &mut ledger);
@@ -1698,7 +1923,7 @@ fn run() -> Result<(), String> {
 
     // The report is on stdout so a caller can capture it as a receipt.
     println!("{{");
-    println!("  \"schema\": \"gpuwm.rw-wps.met-intermediate/v2\",");
+    println!("  \"schema\": \"{RECEIPT_SCHEMA}\",");
     println!("  \"out\": \"{}\",", json_escape(&config.out_path.display().to_string()));
     println!("  \"format_version\": {WPS_FORMAT_VERSION},");
     println!("  \"hdate\": \"{}\",", json_escape(&config.date));
@@ -1725,6 +1950,40 @@ fn run() -> Result<(), String> {
         collector.levels_below_pmin
     );
     println!("  \"bitmap_masked_points\": {},", collector.masked_points);
+    println!(
+        "  \"valid_time_selection\": \"{}\",",
+        if config.select_valid_time { "select" } else { "all" }
+    );
+    println!(
+        "  \"messages_other_valid_time\": {},",
+        collector.messages_other_valid_time
+    );
+    println!(
+        "  \"messages_time_processed_skipped\": {},",
+        collector.messages_time_processed
+    );
+    println!(
+        "  \"matched_valid_times\": [{}],",
+        collector
+            .matched_valid_times
+            .iter()
+            .map(|t| format!("\"{}\"", format_hdate(t)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    println!("  \"inputs\": [{}],", json_paths(&config.inputs));
+    println!(
+        "  \"invariants\": {{\"files\": [{}], \"fields\": [{}]}},",
+        json_paths(&config.invariants),
+        invariant_sources
+            .iter()
+            .map(|(name, from)| format!(
+                "{{\"field\": \"{}\", \"from\": \"{from}\"}}",
+                json_escape(name)
+            ))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     println!("  \"masked_point_value\": {MASKED_SENTINEL:e},");
     println!("  \"rules\": [");
     for (i, decision) in ledger.entries.iter().enumerate() {
@@ -1768,6 +2027,100 @@ fn run() -> Result<(), String> {
     println!("}}");
 
     Ok(())
+}
+
+/// Decode one GRIB file of either edition into `out`.
+fn collect_file(
+    input: &Path,
+    vtable: &[VtableRow],
+    source: &MapSource,
+    out: &mut Collector,
+) -> Result<(), String> {
+    match grib_edition(input)? {
+        1 => collect_grib1(input, vtable, source, out),
+        2 => collect_grib2(input, vtable, out),
+        other => Err(format!(
+            "{}: GRIB edition {other} is not supported",
+            input.display()
+        )),
+    }
+}
+
+/// Fill the named invariant fields the main inputs lack from the
+/// `--invariant` files, and say where each one came from.
+///
+/// An invariant file is decoded into its own store with no valid-time
+/// selection (a land mask published once at hour zero is the point),
+/// and only the named fields cross over.  A named field the main inputs
+/// already carry keeps the main inputs' value; one that neither carries
+/// is a refusal; one on a different grid from the rest of the file is a
+/// refusal, because a record header cannot say "this one is elsewhere".
+fn merge_invariants(
+    config: &Config,
+    vtable: &[VtableRow],
+    collector: &mut Collector,
+) -> Result<Vec<(String, &'static str)>, String> {
+    let mut decided: Vec<(String, &'static str)> = Vec::new();
+    if config.invariants.is_empty() {
+        return Ok(decided);
+    }
+    // Decode only what is still needed, and only its rows: the invariant
+    // file is a whole hour-zero product, and unpacking every matched
+    // message in it to keep two fields would double each lead's decode.
+    let needed: Vec<&String> = config
+        .invariant_fields
+        .iter()
+        .filter(|name| !collector.has_field(name))
+        .collect();
+    let rows: Vec<VtableRow> = vtable
+        .iter()
+        .filter(|row| needed.iter().any(|name| **name == row.name))
+        .cloned()
+        .collect();
+    let mut store = Collector::new(config.pmin_pa);
+    if !rows.is_empty() {
+        for input in &config.invariants {
+            collect_file(input, &rows, config.source, &mut store)?;
+        }
+    }
+    let reference_grid = collector.slabs.values().next().map(|s| s.grid.clone());
+    for name in &config.invariant_fields {
+        if collector.has_field(name) {
+            decided.push((name.clone(), "inputs"));
+            continue;
+        }
+        let keys: Vec<SlabKey> = store
+            .slabs
+            .keys()
+            .filter(|(n, _)| n == name)
+            .cloned()
+            .collect();
+        if keys.is_empty() {
+            return Err(format!(
+                "--invariant-field {name}: neither the inputs nor the invariant files ({}) \
+                 carry it under any Vtable row",
+                json_paths(&config.invariants)
+            ));
+        }
+        for key in keys {
+            let slab = store.slabs.remove(&key).expect("key listed above");
+            if let Some(grid) = &reference_grid {
+                if &slab.grid != grid {
+                    return Err(format!(
+                        "--invariant-field {name}: the invariant file's grid ({}x{}, start \
+                         {},{} step {},{}) is not the inputs' grid ({}x{}, start {},{} step \
+                         {},{}); one intermediate file has one grid",
+                        slab.grid.nx, slab.grid.ny, slab.grid.startlat, slab.grid.startlon,
+                        slab.grid.deltalat, slab.grid.deltalon, grid.nx, grid.ny,
+                        grid.startlat, grid.startlon, grid.deltalat, grid.deltalon
+                    ));
+                }
+            }
+            collector.insert(slab);
+        }
+        decided.push((name.clone(), "invariant"));
+    }
+    Ok(decided)
 }
 
 /// Read the edition byte from a GRIB envelope.
@@ -1858,6 +2211,85 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(err.contains("ncep-gfs"), "{err}");
+    }
+
+    // -----------------------------------------------------------------
+    // Time identity and invariant files
+    // -----------------------------------------------------------------
+
+    fn base_args() -> Vec<&'static str> {
+        vec![
+            "--vtable", "V", "--date", "2026-09-24_15:00:00", "--out", "O",
+            "--map-source", "ecmwf",
+        ]
+    }
+
+    #[test]
+    fn the_date_is_parsed_before_any_decode() {
+        let mut list = base_args();
+        list[3] = "2026-09-24T15";
+        list.push("a.grib");
+        let err = parse_args(args(&list)).unwrap_err();
+        assert!(err.contains("is not YYYY-MM-DD_HH:MM:SS"), "{err}");
+        let mut list = base_args();
+        list[3] = "2026-02-30_00:00:00";
+        list.push("a.grib");
+        assert!(parse_args(args(&list)).is_err());
+    }
+
+    #[test]
+    fn select_valid_time_and_invariants_parse() {
+        let mut list = base_args();
+        list.extend([
+            "--select-valid-time", "--invariant", "f0.grib2", "--invariant-field", "LANDSEA",
+            "--invariant-field", "SOILGEO", "a.grib2",
+        ]);
+        let Invocation::Run(config) = parse_args(args(&list)).unwrap() else {
+            panic!("help")
+        };
+        assert!(config.select_valid_time);
+        assert_eq!(config.invariants, vec![PathBuf::from("f0.grib2")]);
+        assert_eq!(config.invariant_fields, vec!["LANDSEA", "SOILGEO"]);
+        assert_eq!(config.inputs, vec![PathBuf::from("a.grib2")]);
+        assert_eq!(format_hdate(&config.valid_time), "2026-09-24_15:00:00");
+    }
+
+    #[test]
+    fn an_invariant_file_without_named_fields_refuses() {
+        let mut list = base_args();
+        list.extend(["--invariant", "f0.grib2", "a.grib2"]);
+        let err = parse_args(args(&list)).unwrap_err();
+        assert!(err.contains("come together"), "{err}");
+        let mut list = base_args();
+        list.extend(["--invariant-field", "LANDSEA", "a.grib2"]);
+        assert!(parse_args(args(&list)).unwrap_err().contains("come together"));
+    }
+
+    #[test]
+    fn time_units_convert_or_refuse() {
+        assert_eq!(time_unit_seconds(1, 2).unwrap(), 3600);
+        assert_eq!(time_unit_seconds(11, 1).unwrap(), 21600);
+        assert_eq!(time_unit_seconds(13, 2).unwrap(), 1);
+        assert_eq!(time_unit_seconds(254, 1).unwrap(), 1);
+        assert!(time_unit_seconds(13, 1).is_err());
+        assert!(time_unit_seconds(7, 2).unwrap_err().contains("refusing"));
+    }
+
+    #[test]
+    fn selection_drops_other_times_and_records_the_admitted_one() {
+        let mut collector = Collector::new(DEFAULT_PMIN_PA);
+        let want = parse_hdate("2025-03-14_12:00:00").unwrap();
+        collector.select_valid_time = Some(want);
+        assert!(!collector.admit_valid_time(parse_hdate("2025-03-14_06:00:00").unwrap()));
+        assert!(collector.admit_valid_time(want));
+        assert_eq!(collector.messages_other_valid_time, 1);
+        assert_eq!(collector.matched_valid_times.len(), 1);
+        // Without selection every time is admitted and every one is
+        // reported, so a caller can see a mixed file.
+        let mut open = Collector::new(DEFAULT_PMIN_PA);
+        assert!(open.admit_valid_time(parse_hdate("2025-03-14_06:00:00").unwrap()));
+        assert!(open.admit_valid_time(want));
+        assert_eq!(open.matched_valid_times.len(), 2);
     }
 
     #[test]

@@ -315,6 +315,16 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
         "grib2_dump", "executable", bridges.CRATE_RELATIVE,
         bridges.BRIDGE_ENV["grib2_dump"],
         "20CRv3/mapped GRIB2 routes"),
+    # The WPS-intermediate writer.  Its source has been in the decoder
+    # workspace since the hex source matrix minted six global sources
+    # through it by hand; `woof hex intermediate --source gfs|gdas|
+    # ecmwf-open-data|era5|aifs` is the door that drives it, and a door
+    # whose binary no bundle carries is a capability nobody can reach.
+    BundledArtifact(
+        "met_intermediate", "executable", bridges.CRATE_RELATIVE,
+        bridges.BRIDGE_ENV["met_intermediate"],
+        "global-source WPS intermediates for hex init/LBC "
+        "(woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs)"),
     BundledArtifact(
         "gpuwm_preprocess_cpu", "library", bridges.CRATE_RELATIVE,
         "WOOF_CPU_PREPROCESS_BRIDGE",

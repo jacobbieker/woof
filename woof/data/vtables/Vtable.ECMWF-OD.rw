@@ -1,0 +1,55 @@
+GRIB1| Level| From |  To  | metgrid  | metgrid  | metgrid                                  |GRIB2|GRIB2|GRIB2|GRIB2|
+Param| Type |Level1|Level2| Name     | Units    | Description                              |Discp|Catgy|Param|Level|
+-----+------+------+------+----------+----------+------------------------------------------+-----------------------+
+     | 100  |   *  |      | GEOPT    | m2 s-2   |                                          |  0  |  3  |  4  | 100 |
+     | 100  |   *  |      | HGT      | m        | Height                                   |  0  |  3  |  5  | 100 |
+     | 100  |   *  |      | TT       | K        | Temperature                              |  0  |  0  |  0  | 100 |
+     | 100  |   *  |      | UU       | m s-1    | U                                        |  0  |  2  |  2  | 100 |
+     | 100  |   *  |      | VV       | m s-1    | V                                        |  0  |  2  |  3  | 100 |
+     | 100  |   *  |      | RH       | %        | Relative Humidity                        |  0  |  1  |  1  | 100 |
+     | 100  |   *  |      | SPECHUMD | kg kg-1  | Specific Humidity                        |  0  |  1  |  0  | 100 |
+     | 105  |  10  |      | UU       | m s-1    | U                    At 10 m             |  0  |  2  |  2  | 103 |
+     | 105  |  10  |      | VV       | m s-1    | V                    At 10 m             |  0  |  2  |  3  | 103 |
+     | 105  |   2  |      | TT       | K        | Temperature          At  2 m             |  0  |  0  |  0  | 103 |
+     | 105  |   2  |      | DEWPT    | K        |                                          |  0  |  0  |  6  | 103 |
+     |   1  |   0  |      | RH       | %        | Relative Humidity    At  2 m             |     |     |     | 103 |
+     |   1  |   0  |      | PSFC     | Pa       | Surface Pressure                         |  0  |  3  |  0  |  1  |
+     |   1  |   0  |      | PMSL     | Pa       | Sea-level Pressure                       |  0  |  3  |  0  | 101 |
+     |   1  |   0  |      | LANDSEA  | proprtn  | Land/Sea flag                            |  2  |  0  |  0  |  1  |
+     |   1  |   0  |      | SOILGEO  | m2 s-2   |                                          |  0  |  3  |  4  |  1  |
+     |   1  |   0  |      | SOILHGT  | m        | Terrain field of source analysis         |     |     |     |  1  |
+     |   1  |   0  |      | SKINTEMP | K        | Skin temperature                         |  0  |  0  | 17  |  1  |
+     |   1  |   0  |      | SNOW_EC  | m        |                                          |  0  |  1  | 254 |  1  |
+     |   1  |   0  |      | SNOW_DEN | kg m-3   |                                          |  0  |  1  | 61  |  1  |
+     |   1  |   0  |      | SNOW     | kg m-2   |Water Equivalent of Accumulated Snow Depth|     |     |     |  1  |
+     |   1  |   0  |      | SNOWH    | m        | Physical Snow Depth                      |     |     |     |  1  |
+     | 151  |   0  |   1  | ST000007 | K        | T of 0-7 cm ground layer                 |  2  |  3  | 18  | 151 |
+     | 151  |   1  |   2  | ST007028 | K        | T of 7-28 cm ground layer                |  2  |  3  | 18  | 151 |
+     | 151  |   2  |   3  | ST028100 | K        | T of 28-100 cm ground layer              |  2  |  3  | 18  | 151 |
+     | 151  |   3  |   4  | ST100289 | K        | T of 100-289 cm ground layer             |  2  |  3  | 18  | 151 |
+     | 151  |   0  |   1  | SM000007 | m3 m-3   | Soil moisture of 0-7 cm ground layer     |  2  |  0  | 25  | 151 |
+     | 151  |   1  |   2  | SM007028 | m3 m-3   | Soil moisture of 7-28 cm ground layer    |  2  |  0  | 25  | 151 |
+     | 151  |   2  |   3  | SM028100 | m3 m-3   | Soil moisture of 28-100 cm ground layer  |  2  |  0  | 25  | 151 |
+     | 151  |   3  |   4  | SM100289 | m3 m-3   | Soil moisture of 100-289 cm ground layer |  2  |  0  | 25  | 151 |
+-----+------+------+------+----------+----------+------------------------------------------+-----+-----+-----+-----+
+#
+#  ECMWF open data (IFS oper 0.25 degree, and AIFS single 0.25 degree) GRIB2 for
+#  the Rust met_intermediate writer.  GRIB2 only: the GRIB1 parameter column is
+#  blank on every row, so no GRIB1 message can match this table.
+#
+#  * Pressure levels carry both RH and SPECHUMD where the product publishes them;
+#    AIFS publishes no pressure-level RH, so its init uses --use-spechumd yes.
+#    HGT is derived from GEOPT / 9.81 on any level that carries no HGT (AIFS
+#    publishes geopotential only).
+#  * Soil is addressed by ordinal on the generalized vertical coordinate
+#    (fixed-surface type 151): Level1/Level2 are the ordinal pair, not depths.
+#    IFS publishes four layers, AIFS two (--nfgsoillevels 2).
+#  * 2 m RH is derived from 2 m dewpoint (rrpr.F compute_rh_dewpt); SOILHGT from
+#    surface geopotential; SNOW from snow depth in metres of water equivalent
+#    (x 1000); SNOWH from SNOW and the published snow density.
+#  * LANDSEA is the land fraction; the "ecmwf" map source converts it to a flag.
+#  * Sea ice is not mapped: the product publishes ice thickness (10-2-1), not
+#    the ice-cover fraction an init reads.
+#  * Only instantaneous messages (product templates 4.0/4.1) match: the
+#    statistically processed 2 m maximum and minimum temperatures share the
+#    2 m temperature's identity and are dropped by met_intermediate.
