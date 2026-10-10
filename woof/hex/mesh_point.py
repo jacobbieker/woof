@@ -427,6 +427,23 @@ def max_radius_for_cells(
     return round(low, 1)
 
 
+def _courant_limit_and_scheme(minimum_dc_edge_m: float, fine_dx_m: float):
+    """``(policy, Courant limit in s, anchor-table cumulus key)`` for a mesh.
+
+    One derivation for the chosen and the explicit timestep, so the two can
+    never disagree about the limit or about which anchors a mesh consults.
+    """
+
+    from . import convection_admission
+    from .timestep_admission import CourantPolicy
+
+    policy = CourantPolicy()
+    limit = policy.safety_factor * float(minimum_dc_edge_m) / policy.max_characteristic_speed_m_s
+    sub_3km = float(fine_dx_m) < convection_admission.CONVECTION_OFF_BELOW_M
+    # The anchor table spells Grell-Freitas "gf" (woof.hex.dt_admission.dt_key).
+    return policy, limit, (None if sub_3km else "gf")
+
+
 def choose_timestep(minimum_dc_edge_m: float, *, fine_dx_m: float) -> dict[str, Any]:
     """The largest ANCHORED timestep the mesh's own Courant limit admits.
 
@@ -437,14 +454,9 @@ def choose_timestep(minimum_dc_edge_m: float, *, fine_dx_m: float) -> dict[str, 
     against the static's own ``dcEdge``.
     """
 
-    from . import convection_admission, dt_admission
-    from .timestep_admission import CourantPolicy
+    from . import dt_admission
 
-    policy = CourantPolicy()
-    limit = policy.safety_factor * float(minimum_dc_edge_m) / policy.max_characteristic_speed_m_s
-    sub_3km = float(fine_dx_m) < convection_admission.CONVECTION_OFF_BELOW_M
-    # The anchor table spells Grell-Freitas "gf" (woof.hex.dt_admission.dt_key).
-    scheme = None if sub_3km else "gf"
+    policy, limit, scheme = _courant_limit_and_scheme(minimum_dc_edge_m, fine_dx_m)
     candidates = sorted(
         {
             anchor.dt_seconds
@@ -725,17 +737,13 @@ def explicit_timestep(
     the Courant check is never skipped.
     """
 
-    from . import convection_admission, dt_admission
+    from . import dt_admission
     from .mesh_rows import ANCHORED_TIMESTEP_EVIDENCE, EXPERIMENTAL_TIMESTEP_EVIDENCE
-    from .timestep_admission import CourantPolicy
 
     dt = float(dt_seconds)
     if not math.isfinite(dt) or dt <= 0.0:
         raise PointPlanRefusal(f"--dt-seconds {dt_seconds!r} is not a positive number")
-    policy = CourantPolicy()
-    limit = policy.safety_factor * float(minimum_dc_edge_m) / policy.max_characteristic_speed_m_s
-    sub_3km = float(fine_dx_m) < convection_admission.CONVECTION_OFF_BELOW_M
-    scheme = None if sub_3km else "gf"
+    policy, limit, scheme = _courant_limit_and_scheme(minimum_dc_edge_m, fine_dx_m)
     if dt > limit:
         raise PointPlanRefusal(
             f"dt {dt:g} s exceeds this mesh's Courant limit {limit:.3f} s "

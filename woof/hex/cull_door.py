@@ -70,6 +70,10 @@ CULL_ROLES: tuple[tuple[str, str], ...] = (
     ("init", "init"),
 )
 
+#: The roles whose parent and cut bytes the receipt digests: the two a
+#: runtime row pins (``woof hex register --cull-receipt`` checks them).
+DIGESTED_ROLES: tuple[str, ...] = ("grid", "static")
+
 #: The global attribute ``woof.hex.vertical_spec`` stamps on every vertical
 #: artifact; a ``--parent-vertical`` without it is not one.
 VERTICAL_ARTIFACT_ATTRIBUTE = "gpuwm_hex_vertical_artifact_schema"
@@ -284,7 +288,7 @@ def check_parent_vertical(grid: Path, vertical: Path) -> dict[str, Any]:
     complaint and hand the child another mesh's terrain-following levels.
     Measured here: the artifact must carry the vertical-artifact stamp, the
     parent's nCells and nEdges, and -- where both carry cell centres -- the
-    parent's cell centres bit for bit.
+    parent's cell centres to within 1e-6 rad.
     """
 
     from netCDF4 import Dataset
@@ -314,22 +318,30 @@ def check_parent_vertical(grid: Path, vertical: Path) -> dict[str, Any]:
                 f"parent grid {grid.name} has {[v[1] for v in sizes.values()]}; "
                 f"the artifact was minted on another mesh"
             )
-        checked = False
-        if "latCell" in artifact.variables and "latCell" in parent.variables:
-            for name in ("latCell", "lonCell"):
-                if name not in artifact.variables or name not in parent.variables:
-                    continue
-                have = np.asarray(artifact.variables[name][:], dtype=np.float64)
-                want = np.asarray(parent.variables[name][:], dtype=np.float64)
-                if have.shape != want.shape or not np.allclose(
-                    have, want, rtol=0.0, atol=1.0e-6
-                ):
-                    raise _refuse(
-                        f"--parent-vertical {vertical.name} and the parent "
-                        f"grid {grid.name} disagree on {name}; the artifact "
-                        f"was minted on another mesh of the same size"
-                    )
-            checked = True
+        for name in ("latCell", "lonCell"):
+            missing = [
+                label for label, dataset in (("artifact", artifact), ("parent grid", parent))
+                if name not in dataset.variables
+            ]
+            if missing:
+                raise _refuse(
+                    f"the {' and '.join(missing)} carries no {name}, so "
+                    f"--parent-vertical {vertical.name} cannot be shown to sit "
+                    f"on {grid.name}'s cells; a size match alone is refused"
+                )
+            have = np.asarray(artifact.variables[name][:], dtype=np.float64)
+            want = np.asarray(parent.variables[name][:], dtype=np.float64)
+            # 1e-6 rad (about 6 m) admits a float32 copy of the same centre
+            # and nothing a different mesh would put there.
+            if have.shape != want.shape or not np.allclose(
+                have, want, rtol=0.0, atol=1.0e-6
+            ):
+                raise _refuse(
+                    f"--parent-vertical {vertical.name} and the parent "
+                    f"grid {grid.name} disagree on {name}; the artifact "
+                    f"was minted on another mesh of the same size"
+                )
+        checked = True
         n_levels = (
             len(artifact.dimensions["nVertLevels"])
             if "nVertLevels" in artifact.dimensions else None
@@ -430,9 +442,12 @@ def run_cull(arguments: argparse.Namespace) -> int:
         )
         # Digests AFTER the lineage carry, because that is the file a row
         # pins: `woof hex register --cull-receipt` checks the grid and static
-        # it is handed against these, and the parent's against its row.
-        rows[role]["parent_sha256"] = sha256_file(parents[role])
-        rows[role]["out_sha256"] = sha256_file(out)
+        # it is handed against these, and the parent's against its row.  The
+        # init and vertical are not digested: no row pins them, and on a
+        # global parent they are the multi-GB files a cull should not reread.
+        if role in DIGESTED_ROLES:
+            rows[role]["parent_sha256"] = sha256_file(parents[role])
+            rows[role]["out_sha256"] = sha256_file(out)
         if role == "vertical" and vertical_check is not None:
             rows[role]["parent_vertical"] = vertical_check
 

@@ -90,6 +90,63 @@ def resolve_rows_path(explicit: Path | str | None) -> Path:
     return named[0].expanduser().absolute()
 
 
+def shipped_mesh_names() -> set[str]:
+    """The names the shipped registry holds before any runtime row is applied.
+
+    Read out of ``drivers/mpas_mesh_binding.py`` the way the forecast door
+    reads it (by path), with the runtime-row and cascade-row environment
+    cleared for the load, so the answer is the checkout's own rows and
+    never a row file's.  A runtime row that reuses one of these names makes
+    ``apply_rows`` refuse the WHOLE file at import, so it is refused here,
+    before it is written.
+    """
+
+    import importlib.util
+
+    from .cascade_row import CASCADE_ROWS_ENVIRONMENT
+    from .mesh_rows import MESH_ROWS_ENVIRONMENT
+
+    path = Path(__file__).resolve().parent / "drivers" / "mpas_mesh_binding.py"
+    saved = {
+        key: os.environ.pop(key)
+        for key in (MESH_ROWS_ENVIRONMENT, CASCADE_ROWS_ENVIRONMENT)
+        if key in os.environ
+    }
+    name = "_woof_hex_register_shipped_registry"
+    try:
+        specification = importlib.util.spec_from_file_location(name, path)
+        if specification is None or specification.loader is None:  # pragma: no cover
+            raise _refuse(f"{path} could not be loaded to read the shipped registry")
+        module = importlib.util.module_from_spec(specification)
+        sys.modules[name] = module
+        specification.loader.exec_module(module)
+        return set(module.MESH_BINDINGS)
+    finally:
+        sys.modules.pop(name, None)
+        os.environ.update(saved)
+
+
+def _refuse_name_collisions(name: str, rows_path: Path) -> None:
+    from .mesh_rows import read_rows, row_files
+
+    if name in shipped_mesh_names():
+        raise _refuse(
+            f"--name {name!r} is a shipped registry row.  A runtime row may "
+            f"never shadow one, and the bind refuses the whole row file when "
+            f"one tries, so every row beside it would stop binding too"
+        )
+    for other in row_files(None):
+        other = other.expanduser().absolute()
+        if other == rows_path or not other.is_file():
+            continue
+        if any(row.name == name for row in read_rows(other)):
+            raise _refuse(
+                f"--name {name!r} is already registered in {other}, which "
+                f"$WOOF_HEX_MESH_ROWS also names; two files registering one "
+                f"name refuse at bind"
+            )
+
+
 def static_nominal_dx_m(static: Path) -> float:
     """The static's ``nominalMinDc``, as the FP32 value the bind compares."""
 
@@ -167,8 +224,39 @@ def grid_spec(grid: Path) -> tuple[dict[str, Any] | None, str | None]:
     return spec, hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _canonical(document: Any) -> str:
-    return json.dumps(document, sort_keys=True, separators=(",", ":"))
+def _numbers_as_float(document: Any) -> Any:
+    if isinstance(document, bool) or document is None or isinstance(document, str):
+        return document
+    if isinstance(document, (int, float)):
+        return float(document)
+    if isinstance(document, Mapping):
+        return {str(k): _numbers_as_float(v) for k, v in document.items()}
+    if isinstance(document, (list, tuple)):
+        return [_numbers_as_float(v) for v in document]
+    return document
+
+
+def _canonical_spec(document: Mapping[str, Any]) -> str:
+    """A spec as the generator READ it: numbers as floats, defaults filled.
+
+    ``rw_mpas_mesh`` stamps the spec it parsed (serde), so ``1000`` reads
+    back as ``1000.0`` and an omitted ``regions`` or ``name`` comes back as
+    ``[]`` or ``null``; nulls are dropped on both sides so an optional field
+    the generator writes as null compares equal to one the file omits.
+    """
+
+    def strip_nulls(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {k: strip_nulls(v) for k, v in value.items() if v is not None}
+        if isinstance(value, list):
+            return [strip_nulls(v) for v in value]
+        return value
+
+    filled = {"regions": [], **{k: v for k, v in document.items()
+                                if not str(k).startswith("_")}}
+    return json.dumps(
+        strip_nulls(_numbers_as_float(filled)), sort_keys=True, separators=(",", ":")
+    )
 
 
 def _region_summary(spec: Mapping[str, Any], source: str) -> dict[str, Any]:
@@ -320,6 +408,7 @@ def register_mesh(
             f"{rows_path} already holds a row named {name!r}; a pair is "
             f"registered once"
         )
+    _refuse_name_collisions(str(name), rows_path)
     vertical_spec_path = (
         None if vertical_spec is None else _require_file(vertical_spec, "--vertical-spec")
     )
@@ -328,10 +417,6 @@ def register_mesh(
     nominal = static_nominal_dx_m(static)
 
     if parent_row is None:
-        if dt_seconds is None and experimental:
-            raise _refuse(
-                "the experimental timestep lane needs an explicit --dt-seconds"
-            )
         admission = _admit(grid, static, fine_dx_m=nominal, dt_seconds=dt_seconds,
                            experimental=experimental, log=log)
         if admission["regional"]:
@@ -352,11 +437,9 @@ def register_mesh(
             if not isinstance(declared, Mapping):
                 raise _refuse(f"--spec {spec_path} is not a JSON object")
             if stamped is not None:
-                stamped_clean = {k: v for k, v in stamped.items() if not k.startswith("_")}
-                # rw_mpas_mesh stamps the spec it parsed (null name included),
-                # so compare what the spec SAYS, not how it was spelled.
-                declared_clean = {"name": None, **dict(declared)}
-                if _canonical(stamped_clean) != _canonical(declared_clean):
+                # rw_mpas_mesh stamps the spec it parsed, so compare what the
+                # spec SAYS, not how it was spelled.
+                if _canonical_spec(stamped) != _canonical_spec(declared):
                     raise _refuse(
                         f"--spec {spec_path} is not the spec {grid.name} was "
                         f"generated from (its rw_mesh_spec_json digests to "
@@ -432,10 +515,16 @@ def register_mesh(
                 f"{parent.dt_seconds:g} s; its cull inherits that timestep only "
                 f"on the same explicit opt-in"
             )
+        # Inheriting an ANCHORED parent's dt is anchored whatever the caller
+        # asked: labelling it experimental would claim no anchor stands
+        # behind a timestep one does.
+        effective_experimental = experimental and (
+            dt_seconds is not None or parent.experimental
+        )
         admission = _admit(
             grid, static, fine_dx_m=parent.nominal_dx_m,
             dt_seconds=parent.dt_seconds if dt_seconds is None else dt_seconds,
-            experimental=experimental, log=log,
+            experimental=effective_experimental, log=log,
         )
         if not admission["regional"]:
             raise _refuse(
@@ -444,10 +533,16 @@ def register_mesh(
             )
         region_doc = _cull_region(receipt, receipt_path)
         pad = cull_pad_scale
+        centre = region_doc.get("center_deg")
         if (
             pad is None and region_doc.get("kind") == "cap"
             and parent.core_radius_km and region_doc.get("radius_km")
+            and parent.point_deg is not None
+            and isinstance(centre, (list, tuple)) and len(centre) == 2
+            and abs(float(centre[0]) - parent.point_deg[0]) < 1.0e-6
+            and abs(((float(centre[1]) - parent.point_deg[1] + 180.0) % 360.0) - 180.0) < 1.0e-6
         ):
+            # Only a cap on the parent's own core is a dilation of it.
             pad = float(region_doc["radius_km"]) / float(parent.core_radius_km)
         lbc = lbc_source or (
             f"{grid.parent / (name + '.lbc')} (rw_mpas_lbc on the "
@@ -466,6 +561,14 @@ def register_mesh(
         except mesh_rows.MeshRowRefusal as error:
             raise _refuse(str(error)) from error
     mesh_rows.append_row(rows_path, row)
+    if row.experimental:
+        log(
+            f"ADVISORY {row.name}: dt {row.dt_seconds:g} s is "
+            f"{mesh_rows.EXPERIMENTAL_TIMESTEP_EVIDENCE}.  The forecast bind "
+            f"still requires an anchor unless the run opts into the "
+            f"experimental timestep lane; this row records the opt-in, it "
+            f"does not grant it"
+        )
     log(
         f"ROW {row.name} ({row.kind}, {row.n_cells:,} cells, dt "
         f"{row.dt_seconds:g} s {row.timestep_evidence}, {row.n_levels} levels) "

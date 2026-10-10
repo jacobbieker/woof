@@ -47,7 +47,7 @@ class VerticalDoorRefusal(MpasPortError):
 
 
 def _refuse(message: str) -> VerticalDoorRefusal:
-    print(f"woof hex: {message}", file=sys.stderr)
+    # Not printed here: ``woof hex``'s main prints every MpasPortError once.
     return VerticalDoorRefusal(message)
 
 
@@ -108,7 +108,8 @@ def mint_vertical(
     static = _require_file(static, "--static")
     vertical_spec = _require_file(vertical_spec, "--vertical-spec")
     output = Path(output).expanduser().absolute()
-    if output in (grid, static):
+    # resolve(): a `..` or a symlink must not slip an input past this check.
+    if output.resolve() in (grid.resolve(), static.resolve()):
         raise _refuse(
             f"-o {output} would overwrite an input; the artifact is a new file"
         )

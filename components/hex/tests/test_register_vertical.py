@@ -193,10 +193,12 @@ def test_the_culled_vertical_is_the_parent_restricted_to_the_cut_cells(chain) ->
 
 def test_the_cull_receipt_records_digests_for_every_role(chain) -> None:
     receipt = json.loads(chain.cull_receipt.read_text(encoding="utf-8"))
-    for role in ("grid", "static", "vertical"):
+    for role in ("grid", "static"):
         entry = receipt["files"][role]
         assert entry["out_sha256"] == mesh_rows.sha256_file(Path(entry["out"]))
         assert entry["parent_sha256"] == mesh_rows.sha256_file(Path(entry["parent"]))
+    # No row pins the vertical (or an init), so the cull does not reread it.
+    assert "out_sha256" not in receipt["files"]["vertical"]
     assert receipt["files"]["vertical"]["parent_vertical"]["n_vert_levels"] == LEVELS
     assert receipt["region_document"]["kind"] == "cap"
 
@@ -371,7 +373,7 @@ def test_the_experimental_lane_skips_only_the_anchor_and_labels_the_row(chain, t
     with pytest.raises(RegisterRefusal) as refusal:
         register_mesh(grid=chain.grid, static=chain.static, name="gx",
                       rows=rows, experimental=True, log=_quiet)
-    assert "explicit --dt-seconds" in str(refusal.value)
+    assert "needs an explicit dt" in str(refusal.value)
     parent, _ = register_mesh(grid=chain.grid, static=chain.static, name="gx", rows=rows,
                               dt_seconds=7.0, experimental=True, vertical_spec=chain.spec,
                               log=_quiet)
@@ -397,8 +399,10 @@ def test_register_refuses_a_spec_that_is_not_the_grids_own(chain, tmp_path) -> N
         register_mesh(grid=chain.grid, static=chain.static, name="g", rows=tmp_path / "r.json",
                       spec=spec, log=_quiet)
     assert "false lineage" in str(refusal.value)
+    # The generator stamps the spec it PARSED: 1000 reads back as 1000.0 and
+    # an omitted regions list as []; the file it was made from still matches.
     same = tmp_path / "same.json"
-    same.write_text(json.dumps({"background_km": 1000.0, "regions": []}))
+    same.write_text(json.dumps({"background_km": 1000}))
     row, _ = register_mesh(grid=chain.grid, static=chain.static, name="g",
                            rows=tmp_path / "r.json", spec=same, log=_quiet)
     assert row.spec_sha256 == mesh_rows.sha256_file(same)
@@ -416,3 +420,71 @@ def test_register_refuses_without_a_rows_file(chain, monkeypatch) -> None:
     with pytest.raises(RegisterRefusal) as refusal:
         register_mesh(grid=chain.grid, static=chain.static, name="g", log=_quiet)
     assert "no row file" in str(refusal.value)
+
+
+def test_register_refuses_a_name_the_shipped_registry_holds(chain, tmp_path) -> None:
+    from woof.hex.register_door import shipped_mesh_names
+
+    shipped = shipped_mesh_names()
+    assert "x4.163842" in shipped
+    with pytest.raises(RegisterRefusal) as refusal:
+        register_mesh(grid=chain.grid, static=chain.static, name="x4.163842",
+                      rows=tmp_path / "r.json", log=_quiet)
+    assert "shipped registry row" in str(refusal.value)
+    assert not (tmp_path / "r.json").exists()
+
+
+def test_register_refuses_a_name_another_environment_row_file_holds(chain, tmp_path, monkeypatch) -> None:
+    import os
+
+    other = tmp_path / "other.json"
+    register_mesh(grid=chain.grid, static=chain.static, name="gdup", rows=other, log=_quiet)
+    target = tmp_path / "target.json"
+    monkeypatch.setenv(mesh_rows.MESH_ROWS_ENVIRONMENT, os.pathsep.join([str(other), str(target)]))
+    with pytest.raises(RegisterRefusal) as refusal:
+        register_mesh(grid=chain.grid, static=chain.static, name="gdup", rows=target, log=_quiet)
+    assert "already registered in" in str(refusal.value)
+
+
+def test_an_experimental_cull_of_an_anchored_parent_keeps_the_anchored_label(chain, tmp_path) -> None:
+    rows = tmp_path / "r.json"
+    register_mesh(grid=chain.grid, static=chain.static, name="g1000", rows=rows,
+                  vertical_spec=chain.spec, log=_quiet)
+    cull, _ = register_mesh(grid=chain.cull_grid, static=chain.cull_static, name="c1",
+                            rows=rows, parent_row="g1000", cull_receipt=chain.cull_receipt,
+                            experimental=True, log=_quiet)
+    assert cull.timestep_evidence == mesh_rows.ANCHORED_TIMESTEP_EVIDENCE
+
+
+def test_the_pad_scale_is_derived_only_for_a_cap_on_the_parents_own_core(chain, tmp_path) -> None:
+    rows = tmp_path / "r.json"
+    parent, _ = register_mesh(grid=chain.grid, static=chain.static, name="g1000", rows=rows,
+                              vertical_spec=chain.spec, log=_quiet)
+    # Give the parent a point cap that is NOT the cut's centre.
+    raw = parent.as_dict()
+    raw.update(point_deg=[10.0, 20.0], core_radius_km=1000.0)
+    mesh_rows.write_rows(rows, [mesh_rows.MeshRow.from_dict(raw)])
+    cull, _ = register_mesh(grid=chain.cull_grid, static=chain.cull_static, name="c1",
+                            rows=rows, parent_row="g1000", cull_receipt=chain.cull_receipt,
+                            log=_quiet)
+    assert cull.cull_pad_scale is None
+    raw.update(point_deg=[40.0, -100.0])
+    mesh_rows.write_rows(rows, [mesh_rows.MeshRow.from_dict(raw)])
+    cull, _ = register_mesh(grid=chain.cull_grid, static=chain.cull_static, name="c2",
+                            rows=rows, parent_row="g1000", cull_receipt=chain.cull_receipt,
+                            log=_quiet)
+    assert cull.cull_pad_scale == pytest.approx(4.0)
+
+
+def test_a_parent_vertical_without_cell_centres_is_refused(chain, tmp_path) -> None:
+    stripped = tmp_path / "no-lat.grid.nc"
+    with netCDF4.Dataset(str(chain.grid)) as src, \
+            netCDF4.Dataset(str(stripped), "w", format="NETCDF3_64BIT_OFFSET") as dst:
+        for dim, value in src.dimensions.items():
+            dst.createDimension(dim, len(value))
+        for name in ("lonCell", "xCell"):
+            var = src.variables[name]
+            dst.createVariable(name, var.dtype, var.dimensions)[:] = var[:]
+    with pytest.raises(CullRefusal) as refusal:
+        check_parent_vertical(stripped, chain.vertical)
+    assert "a size match alone is refused" in str(refusal.value)
