@@ -86,6 +86,11 @@ ARWEN_GLACIER_CUDA_PROVENANCE = (
 
 N_CELLS = 163_842
 N_EDGES = 491_520
+# The native x4 column.  NOT a limit: a registered mesh's own column count
+# (measured from its init at registration, checked against the init file at
+# bind) is rebound here by ``mpas_mesh_binding.bind_mesh``, exactly as
+# N_CELLS is, and every allocation, kernel launch and history dimension
+# below reads these two names at call time.
 N_LEVELS = 55
 N_INTERFACES = 56
 N_SOIL_LEVELS = 4
@@ -98,6 +103,11 @@ CHECKPOINT_STEP = 15
 SNAPSHOT_STEPS = (0, CHECKPOINT_STEP, FULL_STEPS)
 SNAPSHOT_LABELS = {0: "F000", CHECKPOINT_STEP: "F030", FULL_STEPS: "F001"}
 START_TIME_TEXT = "2026-08-10_12:00:00"
+#: Extra global attributes every history file of THIS run carries, set by
+#: the forecast driver for a configuration a reader must not mistake for
+#: the proven one (``pbl_scheme = "off"``).  Empty on every proven run, so
+#: a proven run's history files are byte-for-byte what they were.
+HISTORY_ATTRIBUTES: dict[str, str] = {}
 NOMINAL_DX_M = np.float32(25_000.0)
 EXPECTED_ARWEN_P_TOP_PA_F32 = np.float32(1_159.38818359375)
 EXPECTED_TOP_PRESSURE_RANGE_PA = (592.24884, 1_233.00952, 1_342.08362)
@@ -245,7 +255,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
         "ee30ffca73d05b738c353d2f54115320c0bd0db4694d5ec43172ae4c5be2625a"
     ),
     "src/hexcore/cuda_gwdo_v841.py": (
-        "5b9dd5980e33d7a0b1760281bc1553c93fa5f4c4395f7b107c8d61dabe1b9f23"
+        "4c039df184f1d7f8d29f4f9e6e95af09d6de8c6e69ff665744d5727a035ccf17"
     ),
     "src/hexcore/cuda_physics_v841.py": (
         "8522176f6cc036eb9cbf078e95f5617b2618b6ce6729bd7bf1cb0dc09c3616eb"
@@ -385,7 +395,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # anchor basis prose) that nothing reads as a value.  Every affected proof
     # re-runs against this digest.
     "src/hexcore/config_v841.py": (
-        "705147c38f8e6f8e0b363e205200cc31b725c6962fa5d8c606d1ebc0a581297a"
+        "924460a848779a178de526541fe97f020e5e3987ca8d85cf6806cd0186d6abdd"
     ),
     # New pin (convection ruling, 2026-08-26): the frozen config ADMITS
     # config_convection_scheme from this module and the frozen timestep
@@ -504,6 +514,12 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/pbl_cadence.py": (
         "5036e512847c0ebada66ebbbe2533c2d2a86209436a425f7841a7a42d8fd86ef"
     ),
+    # Frozen for the PBL slot: config_v841 admits config_pbl_scheme from
+    # this module (``--pbl off``, WRF bl_pbl_physics=0), so it is an
+    # execution boundary exactly as pbl_cadence.py is.
+    "src/hexcore/pbl_admission.py": (
+        "ef6aa30f18e27ef244451fd01424424c1e7792c2abf273d0a3e902ff5f42ce5d"
+    ),
     # Re-frozen for the seam convergence: the Arwen seam pin moved
     # off the pin-only lineage onto the release line's seam-converge merge,
     # so the pinned bytes are the bytes the next public engine snapshot
@@ -544,7 +560,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # pinned constants; the seam-class and phase-object checks, the surface
     # classification and the restore identity are unchanged.
     "src/hexcore/cuda_arwen_physics_v841.py": (
-        "74b319e8e5fcc8800349c9fdf9ab261246ec81619df509fe6c5ec84764cc8566"
+        "7a129fc21be6bf9e70ecdf611a21edab9a6dd6a91473c6ae8805b127563c141b"
     ),
     # The v8.4.1 horizontal-mixing execution boundary (2-D Smagorinsky):
     # CPU authorities and the CUDA operator modules the RK1 saved-Euler
@@ -3496,6 +3512,8 @@ def write_snapshot_netcdf(path: Path, snapshot: Mapping[str, Any], static: Mappi
             "transcribing WRF mp_wsm6.F90:2275-2444 with module_mp_radar "
             "melting); the model's field, not a renderer diagnostic",
         )
+        for key, value in sorted(HISTORY_ATTRIBUTES.items()):
+            dataset.setncattr(str(key), str(value))
         for name, dtype in (("indexToCellID", "i4"), ("latCell", "f4"), ("lonCell", "f4"), ("ter", "f4")):
             variable = dataset.createVariable(name, dtype, ("nCells",))
             variable[:] = static[name]

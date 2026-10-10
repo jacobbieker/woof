@@ -88,7 +88,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
             "ee30ffca73d05b738c353d2f54115320c0bd0db4694d5ec43172ae4c5be2625a"
         ),
         "src/hexcore/cuda_gwdo_v841.py": (
-            "5b9dd5980e33d7a0b1760281bc1553c93fa5f4c4395f7b107c8d61dabe1b9f23"
+            "4c039df184f1d7f8d29f4f9e6e95af09d6de8c6e69ff665744d5727a035ccf17"
         ),
         "src/hexcore/cuda_physics_v841.py": (
             "8522176f6cc036eb9cbf078e95f5617b2618b6ce6729bd7bf1cb0dc09c3616eb"
@@ -118,7 +118,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # of the two digest gates is an admission-time refusal, not a test.
         # Measured inert by AST; the rationale lives beside the runner's pin.
         "src/hexcore/config_v841.py": (
-            "705147c38f8e6f8e0b363e205200cc31b725c6962fa5d8c606d1ebc0a581297a"
+            "924460a848779a178de526541fe97f020e5e3987ca8d85cf6806cd0186d6abdd"
         ),
         # New pin (convection ruling, 2026-08-26): the frozen config admits
         # config_convection_scheme from this module and the timestep registry
@@ -163,6 +163,9 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/pbl_cadence.py": (
             "5036e512847c0ebada66ebbbe2533c2d2a86209436a425f7841a7a42d8fd86ef"
         ),
+        "src/hexcore/pbl_admission.py": (
+            "ef6aa30f18e27ef244451fd01424424c1e7792c2abf273d0a3e902ff5f42ce5d"
+        ),
         # Re-frozen 2026-08-28 for the 2.5.8 engine repin: 77f831b rewrote
         # this module's own ARWEN_SOURCE_MANIFEST/ARWEN_BUILD_COMMIT and did
         # not carry its new digest into either copy of the table, which left
@@ -172,7 +175,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # export became declinable (default armed).  The rationale lives
         # beside the runner's pin.
         "src/hexcore/cuda_arwen_physics_v841.py": (
-            "74b319e8e5fcc8800349c9fdf9ab261246ec81619df509fe6c5ec84764cc8566"
+            "7a129fc21be6bf9e70ecdf611a21edab9a6dd6a91473c6ae8805b127563c141b"
         ),
         # Re-frozen for the regional CPU authority lane; the
         # rationale lives beside the runner's pin.

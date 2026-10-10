@@ -110,6 +110,17 @@ seam = run_mpas_column_batch(
   follow `MOD(ITIMESTEP, STEP*) == 0` with the mandatory step-1 call.
 - `cumulus_scheme="gf"` requires `cumulus_seconds == dt`. That is WRF's
   own pinned `cudt = 0` law for Grell-Freitas.
+- `pbl_scheme=` selects the PBL slot: `"ysu"` (the default,
+  `bl_pbl_physics = 1`) or `"off"` (`bl_pbl_physics = 0`, WRF's PBL-off
+  branch for a caller that resolves turbulence itself). With the slot
+  off the revised-MO surface layer and Noah-MP still run on the
+  surface/PBL cadence and publish their fluxes, YSU is never called and
+  the held `du`/`dv` and PBL rates stay zero; `surface_pbl_ran` then
+  reports the surface layer's call. `"off"` with `cumulus_scheme="gf"`
+  is refused: Grell-Freitas indexes the column at KPBL, which only a PBL
+  scheme writes. A non-default slot joins the seam identity as
+  `"pbl_scheme"`, so a restart across the slot refuses; a `"ysu"`
+  identity is unchanged.
 - `gf_ishallow=` toggles GF's shallow scheme (CUP_gf_sh). The default is
   ON for `cumulus_scheme="gf"` because native MPAS v8.4.1 hardwires
   `ishallow = 1` (mpas_atmphys_vars.F:340) -- shallow OFF was the

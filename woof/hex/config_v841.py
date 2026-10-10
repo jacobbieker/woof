@@ -406,6 +406,42 @@ class V841MpasColumnPhysicsConfig(V841DryDycoreConfig):
                 "config_convection_scheme='cu_grell_freitas'",
             )
 
+        # The PBL slot is admitted from its own module for the convection
+        # knob's reason: ``off`` (WRF bl_pbl_physics=0, for a run that
+        # resolves turbulence) is a real configuration of this lane, and the
+        # proven YSU configuration is unchanged and still the default.  The
+        # dt anchors below were all measured with YSU; a PBL-off run records
+        # itself as an unanchored configuration in its pbl decision.
+        from . import pbl_admission
+
+        if self.config_pbl_scheme not in pbl_admission.ADMITTED_PBL_SCHEMES:
+            _refuse(
+                "config_pbl_scheme",
+                self.config_pbl_scheme,
+                (
+                    "the frozen v8.4.1 column-physics lane admits the proven "
+                    "YSU scheme and, for a turbulence-resolving run, no PBL "
+                    "scheme at all.  A third scheme is a different, unproven "
+                    "physics lane"
+                ),
+                "config_pbl_scheme in "
+                f"{list(pbl_admission.ADMITTED_PBL_SCHEMES)}",
+            )
+        if (
+            self.config_pbl_scheme == pbl_admission.CONFIG_SCHEMES["off"]
+            and cumulus_scheme is not None
+        ):
+            _refuse(
+                "config_pbl_scheme",
+                self.config_pbl_scheme,
+                (
+                    "Grell-Freitas indexes the column at KPBL, which only a "
+                    "PBL scheme writes, so the PBL slot cannot be off while a "
+                    "cumulus scheme is selected"
+                ),
+                "config_pbl_scheme='off' with config_convection_scheme='off'",
+            )
+
         from . import dt_admission
 
         try:
@@ -472,7 +508,9 @@ class V841MpasColumnPhysicsConfig(V841DryDycoreConfig):
             # 2026-08-26 ruling made "off" a second real configuration of
             # this lane.  Every other selector below is still exact.
             "config_lsm_scheme": "sf_noahmp",
-            "config_pbl_scheme": "bl_ysu",
+            # config_pbl_scheme is NOT a literal here either: it is admitted
+            # above from woof.hex.pbl_admission, because ``--pbl off`` (WRF
+            # bl_pbl_physics=0) is a second real configuration of this lane.
             "config_sfclayer_scheme": "sf_monin_obukhov_rev",
             "config_radt_cld_scheme": "cld_fraction",
             "config_radt_lw_scheme": "rrtmg_lw",

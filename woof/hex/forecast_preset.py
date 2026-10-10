@@ -16,9 +16,12 @@ free saving behind a preset would make the default slower for no reason.
 
 THE PHYSICS SUITE IS DECLARED, AND CHECKED AGAINST THE ENGINE.  The pinned
 engine's column seam (``woof.core.mpas_column_batch``) builds its physics
-configuration with the radiation, land-surface, surface-layer and PBL
+configuration with the radiation, land-surface and surface-layer
 selections written as literals, and publishes no constructor argument for
-any of them.  Every row therefore declares :data:`ENGINE_COLUMN_SUITE`, and
+any of them; the PBL slot is the one argument it takes (``pbl_scheme``),
+selected per run by ``--pbl`` rather than by a row (see
+:data:`ENGINE_ARGUMENT_SLOTS`).  Every row therefore declares
+:data:`ENGINE_COLUMN_SUITE`, and
 :func:`resolve_preset` refuses a row that declares anything else.  THE
 BREAKAGE THIS PREVENTS: a row naming RTE-RRTMGP or Noah would run legacy
 RRTMG and Noah-MP while its receipt said otherwise.  When the engine's seam
@@ -60,12 +63,16 @@ import math
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from . import pbl_admission as _pbl_admission
 from .errors import ConfigurationRefusal
 
 
 __all__ = [
+    "BL_PBL_PHYSICS",
     "DEFAULT_PRESET",
+    "ENGINE_ARGUMENT_SLOTS",
     "ENGINE_COLUMN_SUITE",
+    "effective_suite",
     "FAST_PRESET",
     "PRESETS",
     "REFERENCE_PRESET",
@@ -76,12 +83,13 @@ __all__ = [
 ]
 
 
-#: The column physics the pinned engine seam constructs, whatever a caller
-#: asks for: ``MpasColumnBatchPhysics.__init__`` builds its ``RunConfig`` with
+#: The column physics the pinned engine seam constructs by default:
+#: ``MpasColumnBatchPhysics.__init__`` builds its ``RunConfig`` with
 #: ``ra_physics=4, ra_rrtmg_variant=RRTMG_VARIANT_LEGACY``,
-#: ``sf_surface_physics=4``, ``sf_sfclay_physics=1`` and ``bl_pbl_physics=1``
-#: (woof 2.8.0, ``woof/core/mpas_column_batch.py``), one of the sixteen
-#: engine files :mod:`woof.hex.cuda_arwen_physics_v841` pins by SHA-256.
+#: ``sf_surface_physics=4``, ``sf_sfclay_physics=1`` and, unless its
+#: ``pbl_scheme`` argument says otherwise, ``bl_pbl_physics=1``
+#: (``woof/core/mpas_column_batch.py``), one of the sixteen engine files
+#: :mod:`woof.hex.cuda_arwen_physics_v841` records by SHA-256.
 ENGINE_COLUMN_SUITE: Mapping[str, str] = MappingProxyType(
     {
         "radiation": "rrtmg_legacy",
@@ -90,6 +98,43 @@ ENGINE_COLUMN_SUITE: Mapping[str, str] = MappingProxyType(
         "boundary_layer": "ysu",
     }
 )
+
+#: Suite slots the engine seam takes as a constructor ARGUMENT, with the
+#: values it accepts.  The PBL slot is the one so far (``pbl_scheme``,
+#: ``"off"`` is WRF ``bl_pbl_physics=0``).  It is selected per run by
+#: ``woof hex forecast --pbl`` (:mod:`woof.hex.pbl_admission`), not by a
+#: preset row, because whether a mesh may run without a PBL scheme is a
+#: property of the mesh and the closure, not of a speed/accuracy choice.
+ENGINE_ARGUMENT_SLOTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {"boundary_layer": _pbl_admission.REQUESTS}
+)
+
+#: The WRF ``bl_pbl_physics`` each boundary-layer slot value builds.
+BL_PBL_PHYSICS: Mapping[str, int] = MappingProxyType(dict(_pbl_admission.BL_PBL_PHYSICS))
+
+
+def effective_suite(row: "ForecastPreset", pbl: str = "ysu") -> dict[str, Any]:
+    """The suite a run under ``row`` with ``--pbl pbl`` actually executes.
+
+    ``pbl="ysu"`` returns the row's own suite unchanged.  ``"off"`` replaces
+    the boundary-layer slot and names the WRF selector it builds
+    (``bl_pbl_physics=0``), so a receipt never says YSU ran when it did not.
+    """
+
+    allowed = ENGINE_ARGUMENT_SLOTS["boundary_layer"]
+    if pbl not in allowed:
+        raise ConfigurationRefusal(
+            "pbl",
+            pbl,
+            f"the engine seam's PBL slot takes {list(allowed)}",
+            f"--pbl in {list(allowed)}",
+        )
+    suite = dict(row.suite)
+    if pbl == "ysu":
+        return suite
+    suite["boundary_layer"] = pbl
+    suite["bl_pbl_physics"] = BL_PBL_PHYSICS[pbl]
+    return suite
 
 
 @dataclass(frozen=True, slots=True)

@@ -74,7 +74,11 @@ DEFAULT_RING_FACTOR = 3.0
 #: (``evidence/nest-ratio-20260827/``: every field improves monotonically
 #: with cut width and the knee is at 1.35x the fine core).
 DEFAULT_CULL_PAD_SCALE = 1.35
-#: Column count every measured row and every anchor in this tree runs at.
+#: Column count every measured row and every anchor in this tree runs at,
+#: and the count a row declares when no vertical declaration says otherwise.
+#: Not a limit: a row's levels are measured from its vertical declaration
+#: (and, at registration, from the init) and the bind checks them against
+#: the init file.
 DEFAULT_LEVELS = 55
 #: The generator's own hexagon area factor (rw-mpas density.rs).
 HEXAGON_AREA_FACTOR = math.sqrt(3.0) / 2.0
@@ -368,14 +372,17 @@ def resolve_card(key: str | None) -> dict[str, Any] | None:
 
 
 def device_verdict(
-    cells: float, card: Mapping[str, Any], *, budget_mib: float | None = None
+    cells: float, card: Mapping[str, Any], *, budget_mib: float | None = None,
+    levels: int = DEFAULT_LEVELS,
 ) -> dict[str, Any]:
-    """The limited-area admission row applied to the predicted cull."""
+    """The limited-area admission row applied to the predicted cull, at ``levels``."""
 
     from . import device_admission
 
     profile = device_admission.KNOWN_CARDS[str(card["admission_card"])]
-    model = device_admission.model_for_card(profile, configuration="limited-area")
+    model = device_admission.model_for_card(
+        profile, configuration="limited-area", levels=int(levels)
+    )
     required = model.required_bytes(int(math.ceil(cells)))
     predicted = model.predict_bytes(int(math.ceil(cells)))
     margin = model.margin_bytes()
@@ -400,6 +407,7 @@ def device_verdict(
         "fits": required <= budget_bytes,
         "cells_that_fit": fits,
         "short_by_mib": round(max(0.0, (required - budget_bytes) / device_admission.MIB), 1),
+        "levels": int(levels),
     }
 
 
@@ -491,6 +499,9 @@ class PointRequest:
     vram_gib: float | None
     mesh_exe: Path | None
     name: str | None
+    #: The column the rows will declare, from ``--vertical-spec`` when one
+    #: is given; the device verdict is priced at it.
+    levels: int = DEFAULT_LEVELS
 
     @property
     def fine_km(self) -> float:
@@ -499,6 +510,17 @@ class PointRequest:
     @property
     def transition_km(self) -> float:
         return self.transition_factor * self.fine_km
+
+
+def _declared_levels(vertical_spec: Any) -> int:
+    if vertical_spec is None:
+        return DEFAULT_LEVELS
+    from .vertical_spec import VerticalSpecError, load_vertical_spec
+
+    try:
+        return int(load_vertical_spec(vertical_spec).n_vert_levels)
+    except VerticalSpecError as error:
+        raise PointPlanRefusal(str(error)) from error
 
 
 def request_from_arguments(arguments: argparse.Namespace) -> PointRequest:
@@ -514,6 +536,7 @@ def request_from_arguments(arguments: argparse.Namespace) -> PointRequest:
         vram_gib=arguments.vram_gib,
         mesh_exe=arguments.mesh_exe,
         name=getattr(arguments, "name", None),
+        levels=_declared_levels(getattr(arguments, "vertical_spec", None)),
     )
 
 
@@ -563,6 +586,7 @@ def plan_point(request: PointRequest) -> dict[str, Any]:
             cull["predicted_cells"], request.card, budget_mib=(
                 None if request.vram_gib is None else float(request.vram_gib) * 1024.0
             ),
+            levels=request.levels,
         )
         verdict["max_core_radius_km_on_this_card"] = max_radius_for_cells(
             int(verdict["cells_that_fit"]), request, attained_fine_km=attained_km,
@@ -779,10 +803,29 @@ def generate_point(
     vertical_spec: Path | None,
     clobber: bool,
     static_exe: Path | None = None,
-    n_levels: int = DEFAULT_LEVELS,
+    n_levels: int | None = None,
     log=print,
 ) -> dict[str, Any]:
-    """Build, admit, register and cull the pair the plan priced."""
+    """Build, admit, register and cull the pair the plan priced.
+
+    ``n_levels`` is the column the rows declare.  It is MEASURED from the
+    vertical declaration when one is given -- the row and the artifact the
+    init is built from must agree, and the bind checks the init against the
+    row -- and is :data:`DEFAULT_LEVELS` only when no declaration exists.
+    A caller's explicit count that disagrees with the declaration refuses.
+    """
+
+    if vertical_spec is not None:
+        declared_levels = _declared_levels(vertical_spec)
+        if n_levels is not None and int(n_levels) != declared_levels:
+            raise PointPlanRefusal(
+                f"n_levels={n_levels} disagrees with the vertical declaration "
+                f"{vertical_spec} ({declared_levels} levels); the rows would "
+                f"declare a column the init does not carry"
+            )
+        n_levels = declared_levels
+    elif n_levels is None:
+        n_levels = DEFAULT_LEVELS
 
     from . import mesh_rows
     from .cull_door import carry_lineage, cull_one
@@ -1027,8 +1070,10 @@ def add_point_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         "--vertical-spec", type=Path, default=None, metavar="JSON",
         help="with --generate: mint the parent's native-free vertical artifact "
-             "from this gpuwm-hex.vertical-spec/v1 declaration and cull it, so "
-             "the cull can be initialised from a regional source")
+             "from this gpuwm-hex.vertical-spec/v1 declaration (or a named "
+             "preset such as preset:les) and cull it, so the cull can be "
+             "initialised from a regional source; the rows declare its level "
+             "count")
     group.add_argument("--static-exe", type=Path, default=None, metavar="FILE")
     group.add_argument("--clobber", action="store_true")
 

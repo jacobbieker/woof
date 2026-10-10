@@ -56,6 +56,7 @@ from typing import Any, Callable
 import numpy as np
 
 from . import engine_identity
+from . import pbl_admission as _pbl_admission
 from .cuda_backend.containers import require_resident_array
 from .cuda_backend.runtime import KernelCache
 from .cuda_gwdo_v841 import (
@@ -184,6 +185,12 @@ _CONSTRUCTOR_KEYS = frozenset(
         *_CONSTRUCTOR_ARRAY_FIELDS,
     )
 )
+#: Keys the mapping MAY carry.  ``pbl_scheme`` is the engine seam's PBL
+#: slot; it is optional so the proven configuration's mapping, identity and
+#: receipts stay byte-identical: ``"ysu"`` (or absence) seals nothing, and
+#: only ``"off"`` joins the sealed values and the identity digest.
+_OPTIONAL_CONSTRUCTOR_KEYS = frozenset(("pbl_scheme",))
+_PBL_SCHEMES = tuple(_pbl_admission.ENGINE_SCHEMES.values())
 _SURFACE_FLOAT_FIELDS = (
     "latitude_deg",
     "longitude_deg",
@@ -336,7 +343,9 @@ class SealedArwenConstructorV841:
         if not isinstance(values, Mapping):
             raise TypeError("WOOF constructor values must be a mapping")
         missing = sorted(_CONSTRUCTOR_KEYS - set(values))
-        extra = sorted(set(values) - _CONSTRUCTOR_KEYS)
+        extra = sorted(
+            set(values) - _CONSTRUCTOR_KEYS - _OPTIONAL_CONSTRUCTOR_KEYS
+        )
         if missing or extra:
             raise ValueError(
                 "exact-real WOOF constructor mapping is not exhaustive: "
@@ -421,6 +430,16 @@ class SealedArwenConstructorV841:
             raise ValueError("gf_ishallow must be the integer 0 or 1")
         if int(ishallow) == 1 and scheme != "gf":
             raise ValueError("gf_ishallow=1 requires cumulus_scheme='gf'")
+        pbl_scheme = values.get("pbl_scheme", "ysu")
+        if pbl_scheme not in _PBL_SCHEMES:
+            raise ValueError(
+                f"pbl_scheme must be one of {list(_PBL_SCHEMES)}, got {pbl_scheme!r}"
+            )
+        if pbl_scheme == "off" and scheme == "gf":
+            raise ValueError(
+                "pbl_scheme='off' requires no cumulus scheme: Grell-Freitas "
+                "indexes the column at KPBL, which only a PBL scheme writes"
+            )
         scalars = {
             "n_levels": nlev,
             "n_columns": ncol,
@@ -439,6 +458,8 @@ class SealedArwenConstructorV841:
                 "xice_threshold", values["xice_threshold"]
             ),
         }
+        if pbl_scheme != "ysu":
+            scalars["pbl_scheme"] = pbl_scheme
         arrays: dict[str, np.ndarray] = {}
         for name in _SURFACE_FLOAT_FIELDS:
             arrays[name] = _host_exact_array(
@@ -508,6 +529,10 @@ class SealedArwenConstructorV841:
     def microphysics_scheme(self) -> str:
         return str(self._values["microphysics_scheme"])
 
+    @property
+    def pbl_scheme(self) -> str:
+        return str(self._values.get("pbl_scheme", "ysu"))
+
     def expected_surface_classification(self) -> Mapping[str, Any]:
         """Authority-only host classification for the sealed constructor."""
 
@@ -548,6 +573,11 @@ class SealedArwenConstructorV841:
                 "n_columns": self.n_columns,
                 "dt": self.dt,
                 "microphysics_scheme": self.microphysics_scheme,
+                **(
+                    {}
+                    if self.pbl_scheme == "ysu"
+                    else {"pbl_scheme": self.pbl_scheme}
+                ),
                 "host_array_bytes": self.host_array_bytes,
                 "defaults_used": False,
                 "surface_soil_statics": "official-exhaustive-sealed-host-mapping",

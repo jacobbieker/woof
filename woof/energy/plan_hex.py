@@ -120,6 +120,7 @@ from woof.energy.contracts import (
     load_sites,
 )
 from woof.hex.errors import MpasPortError
+from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
 from woof.hex.mesh_point import (
     DEFAULT_BACKGROUND_KM,
     DEFAULT_CULL_PAD_SCALE,
@@ -169,8 +170,18 @@ FLAT_TRANSITIONS = 1.5
 CULL_PAD_SCALE = DEFAULT_CULL_PAD_SCALE
 #: MPAS's boundary-relaxation zone, cells (``bdyMaskCell`` 1..7).
 BOUNDARY_RINGS = SWATH_BOUNDARY_RINGS
-#: Vertical levels every hex anchor, admission row and vertical spec runs at.
+#: The column a hex plan declares when ``--nz`` is not given: the one every
+#: measured row and anchor runs at.  Not a limit: ``--nz`` declares another
+#: column, the plan prices its device footprint at it, and the vertical
+#: artifact, the row and the init must then carry it (the forecast bind
+#: checks the init against the row).
 HEX_LEVELS = DEFAULT_LEVELS
+#: The column range ``--nz`` admits.  The floor is the vertical operators'
+#: three layers; the ceiling is the deepest column the forecast runs
+#: (``woof.hex.vertical_spec.HEX_MAX_COLUMN_LEVELS``: the engine's WSM6
+#: compiles at most 80 levels).
+HEX_MIN_LEVELS = 3
+HEX_MAX_LEVELS = HEX_MAX_COLUMN_LEVELS
 #: A line chain is split where consecutive sites are farther apart than this
 #: (separate parts of a multi-part asset), so no ring bridges open ground.
 CHAIN_GAP_KM = 25.0
@@ -933,9 +944,9 @@ def estimate_parent_cells(shapes: Sequence[RungShapes], chains: Sequence[Chain],
 # capacity
 
 
-def capacity_verdict(cells: float, card: str | None, vram_gib: float | None
-                     ) -> dict[str, Any]:
-    """The limited-area admission row applied to the predicted cut."""
+def capacity_verdict(cells: float, card: str | None, vram_gib: float | None,
+                     levels: int = HEX_LEVELS) -> dict[str, Any]:
+    """The limited-area admission row applied to the predicted cut, at ``levels``."""
 
     from woof.hex import device_admission
     from woof.hex.mesh_point import CARD_ALIASES, resolve_card
@@ -969,8 +980,8 @@ def capacity_verdict(cells: float, card: str | None, vram_gib: float | None
     worst: dict[str, Any] | None = None
     for key in profiles:
         profile = device_admission.KNOWN_CARDS[key]
-        model = device_admission.model_for_card(profile,
-                                                configuration="limited-area")
+        model = device_admission.model_for_card(
+            profile, configuration="limited-area", levels=int(levels))
         required = model.required_bytes(priced)
         budget_bytes = int(budget_mib * MIB)
         row = {
@@ -987,6 +998,11 @@ def capacity_verdict(cells: float, card: str | None, vram_gib: float | None
             "bytes_per_cell_basis": ("woof.hex.device_admission limited-area "
                                      "row (shaped footprint model)"),
         }
+        if int(levels) != HEX_LEVELS:
+            row["levels"] = int(levels)
+        if model.level_scale() != 1.0:
+            row["bytes_per_cell_basis"] += (
+                f", per-cell slope scaled to {int(levels)} levels")
         if worst is None or row["required_mib"] > worst["required_mib"]:
             worst = row
     assert worst is not None
@@ -1126,11 +1142,13 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     if not (corridor_km > 0.0 and math.isfinite(corridor_km)):
         raise HexPlanRefusal(
             f"--corridor-km {corridor_km!r} must be a positive number")
-    if nz is not None and nz != HEX_LEVELS:
+    if nz is not None and not HEX_MIN_LEVELS <= int(nz) <= HEX_MAX_LEVELS:
         raise HexPlanRefusal(
-            f"--nz {nz} cannot be honoured by hex-swath: every hex timestep "
-            f"anchor, device-admission row and vertical spec runs "
-            f"{HEX_LEVELS} levels.  Omit --nz, or use a wrf topology")
+            f"--nz {nz} is outside the hex column range "
+            f"{HEX_MIN_LEVELS}..{HEX_MAX_LEVELS}: below it the vertical "
+            f"operators have no interior layer, above it the engine's WSM6 "
+            f"refuses the column at its first call")
+    levels = HEX_LEVELS if nz is None else int(nz)
     if max_domains is not None and max_domains < 1:
         raise HexPlanRefusal("--max-domains must allow the one hex mesh")
     start = _check_start(start) if start is not None else default_start()
@@ -1157,7 +1175,7 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     cull = estimate_cull(chains, shapes, rungs, background_km, projection,
                          corridor_km)
     parent_estimate = estimate_parent_cells(shapes, chains, background_km)
-    verdict = capacity_verdict(cull.cells, card, vram_gib)
+    verdict = capacity_verdict(cull.cells, card, vram_gib, levels)
 
     # Every site must sit inside the cut, never in its boundary rings.
     sx, sy = projection.forward(arrays["lat"], arrays["lon"])
@@ -1243,6 +1261,13 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         "ladder_km": sorted(rungs_km),
         "regions": len(spec["regions"]),
     }
+    if levels != HEX_LEVELS:
+        mesh["levels"] = levels
+        mesh["vertical_spec"] = (
+            f"a {levels}-level vertical declaration for `woof hex init "
+            f"--vertical-spec` (e.g. preset:les:levels={levels}); the row and "
+            f"the init must carry the same column, and the forecast bind "
+            f"refuses an init that does not")
     extra = {
         "commands": hex_commands(parent_cells=parent_cells),
         "runnable": "mesh-and-cull",
