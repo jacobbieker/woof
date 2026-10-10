@@ -344,6 +344,53 @@ generation gates as any other mesh (`woof/hex/mesh_spec_gates.py`):
 The finest graded mesh this tree has a measurement for is 0.75 km. Meshes at
 100 m and 50 m are unmeasured.
 
+#### Adapting the mesh between cycles
+
+`woof hex adapt` reads one cycle's hex history and plans the next cycle's
+mesh. It turns the forecast into a target cell spacing using the criteria you
+select, writes that spacing as a `woof-hex.density.v1` raster, and decides
+whether the mesh needs regenerating.
+
+For example, for the Welsh corridor at 100 m, give it the history files
+(`--history "runs/hex/forecast/cuda-history.*.nc"`), the criteria
+(`--criteria wind,icing,assets` with `--sites wales/sites.json`), the two
+spacings (`--fine-km 0.1 --background-km 3`), the timestep
+(`--dt-seconds 0.6 --experimental-dt`), the previous cycle's state
+(`--state runs/hex/cycle-01/next-spec/adapt-state.json`) and an output
+folder (`-o runs/hex/cycle-02/next-spec`).
+
+- **Criteria.** `wind` (10 m wind speed), `shear`, `icing` (cloud and rain
+  water below 0 °C in the lowest model levels), `precip` (rate),
+  `theta-gradient`, `wind-gradient` and `assets` (distance to the sites or
+  assets). `--threshold NAME=LO:HI` sets where a criterion's demand starts
+  and where it is full. `--weight NAME=W` scales it.
+- **Smoothness.** The spacing is gradient-limited to the published-mesh
+  smoothness (1.53 % per cell) unless you pass `--max-gradient-percent`.
+- **Hysteresis.** The new target is compared with the raster the current
+  mesh was generated from. The mesh is regenerated when too many of the
+  target's cells are under-resolved, when too many of the current mesh's
+  cells are wasted, or when the forecast domain has moved outside the mesh.
+  A mesh is kept for `--minimum-dwell-cycles` cycles unless the
+  under-resolution is large.
+- **State.** The plan writes `adapt-state.proposed.json`. It becomes the
+  `adapt-state.json` that `--state` reads only after the plan's mesh stages
+  have succeeded: `woof hex cycle run` does this for you, and by hand you
+  run `woof hex adapt` with `--commit` and the next-spec folder. A state
+  that names a mesh nobody generated is refused.
+- **The plan.** `adapt-plan.json` lists every command the next cycle runs
+  (mesh, statics, register, vertical, cull, remap, boundaries, forecast), an
+  estimate of the cell count, and the hysteresis decision. Each command is
+  checked against this build's parsers, and a command that this build does
+  not have yet is marked rather than run.
+- **Timestep.** A `--dt-seconds` below the smallest anchored timestep needs
+  `--experimental-dt`. The plan and the forecast are then labelled
+  `experimental-unanchored`. The Courant check still applies.
+
+`woof hex cycle run` with `--adaptive` runs this loop for you: in each
+cycle it runs `woof hex adapt`, then the plan's commands, then the
+forecast. Without `--adaptive`, `woof hex cycle run` culls a fixed parent as
+before.
+
 ## Resolution: 100 m or 50 m
 
 ### Turbulence: the gray zone and LES
