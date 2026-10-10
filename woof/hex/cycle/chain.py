@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -50,6 +51,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .. import adapt as adapt_module
 from .. import cascade_row
 from ..cull_door import carry_lineage, cull_one
 from ..swath.history import HistoryReader
@@ -276,6 +278,18 @@ class CascadeConfig:
     state: Path | None = None
     metrics: Path | None = None
     policy: Path | None = None
+    # ADAPTIVE MODE (``woof hex cycle run --adaptive``): regenerate the mesh
+    # from the forecast between cycles instead of culling one fixed parent.
+    # Off by default, and when off nothing below this line is read.
+    adaptive: bool = False
+    adapt_criteria: tuple[str, ...] = ()
+    adapt_fine_km: float | None = None
+    adapt_background_km: float | None = None
+    #: Further ``woof hex adapt`` arguments, passed through verbatim.
+    adapt_options: tuple[str, ...] = ()
+    #: An ``adapt-state.json`` to continue from, so cycle 1 here can keep
+    #: the mesh an earlier run generated.
+    adapt_state: Path | None = None
 
 
 @dataclass
@@ -839,6 +853,8 @@ def run_slot(
 def run_cascade(config: CascadeConfig) -> dict[str, Any]:
     """Every cycle, in order, carrying its state forward."""
 
+    if config.adaptive:
+        return run_adaptive_cascade(config)
     out = Path(config.out)
     out.mkdir(parents=True, exist_ok=True)
     ledger = out / "contract-ledger"
@@ -951,11 +967,308 @@ def run_cascade(config: CascadeConfig) -> dict[str, Any]:
     return receipt_document
 
 
+# ---------------------------------------------------------------------------
+# the adaptive loop: regenerate instead of cull
+# ---------------------------------------------------------------------------
+ADAPTIVE_SCHEMA = "gpuwm-hex.adaptive-cascade-cycle/v1"
+
+#: Plan stages the adaptive loop may find blocked and still run: it drives
+#: the boundaries itself, from the coarse parent stream, exactly as the
+#: fixed-parent loop does.
+ADAPTIVE_SUBSTITUTED_STAGES = ("lbc",)
+
+#: Every adaptive cycle needs these stages in its plan.  The mesh stages are
+#: absent only when the hysteresis kept the mesh.
+ADAPTIVE_REQUIRED_STAGES = ("remap", "forecast")
+
+_FRAME_LABEL = re.compile(r"(\d{4}-\d{2}-\d{2}_\d{2}\.\d{2}\.\d{2})")
+
+
+def _woof(config: CascadeConfig, *arguments: Any) -> list[str]:
+    """``python -m woof ...``: the adaptive plan names top-level doors
+    (``woof mesh``) as well as ``woof hex`` ones."""
+
+    return [config.python, "-m", "woof", *[str(item) for item in arguments]]
+
+
+def with_engine_overrides(config: CascadeConfig, argv: Sequence[str]) -> list[str]:
+    """The cascade's own engine pins, carried onto the planner's argv.
+
+    ``--mesh-exe`` reaches the cull and ``--gpuwm-checkout`` the forecast,
+    as they do in the fixed-parent loop; a plan never names either.
+    """
+
+    argv = [str(item) for item in argv]
+    if argv[:2] == ["hex", "cull"] and config.mesh_exe is not None and "--engine" not in argv:
+        argv += ["--engine", str(config.mesh_exe)]
+    if (argv[:2] == ["hex", "forecast"] and config.gpuwm_checkout is not None
+            and "--gpuwm-checkout" not in argv):
+        argv += ["--gpuwm-checkout", str(config.gpuwm_checkout)]
+    return argv
+
+
+def frames_in(directory: Path) -> list[tuple[datetime, Path]]:
+    """A forecast folder's frames, by the valid time in their names."""
+
+    rows: list[tuple[datetime, Path]] = []
+    for path in sorted(Path(directory).glob("cuda-history.*.nc")):
+        match = _FRAME_LABEL.search(path.name)
+        if match is not None:
+            rows.append((_parse_label(match.group(1)), path))
+    rows.sort(key=lambda row: row[0])
+    return rows
+
+
+def admit_adaptive_plan(plan: Mapping[str, Any], plan_path: Path) -> None:
+    """Refuse a plan whose stages cannot run, before anything is spent.
+
+    A stage whose door has not merged into this build, a stage the planner
+    blocked, or a refusal the planner recorded would each fail AFTER the
+    mesh was generated -- the 20-minute leg -- so all three are refused here.
+    """
+
+    problems: list[str] = list(plan.get("refusals") or ())
+    for row in plan.get("blocked_stages") or ():
+        if row.get("stage") not in ADAPTIVE_SUBSTITUTED_STAGES:
+            problems.append(f"stage {row.get('stage')} is blocked: {row.get('blocked_by')}")
+    stages = [command.get("stage") for command in plan.get("commands") or ()]
+    for stage in ADAPTIVE_REQUIRED_STAGES:
+        if stage not in stages:
+            problems.append(f"the plan has no {stage} stage")
+    for command in plan.get("commands") or ():
+        contract = command.get("contract") or {}
+        if contract.get("status") != "parsed":
+            problems.append(
+                f"stage {command.get('stage')} ({command.get('owner')}): "
+                f"{contract.get('status')} -- {contract.get('detail')}"
+            )
+    if problems:
+        raise CycleRefusal(
+            f"the adaptive plan {plan_path} cannot run: " + "; ".join(problems)
+            + ".  Nothing was generated: every one of these would have failed "
+            "after the mesh leg had already been paid for"
+        )
+
+
+def run_adaptive_cascade(config: CascadeConfig) -> dict[str, Any]:
+    """Every cycle regenerates (or, by hysteresis, keeps) its own mesh.
+
+    A cycle is:
+
+        coarse window (+ the previous fine forecast) -> ``woof hex adapt``
+            -> [mesh -> statics -> register -> vertical -> cull -> register]
+               when the hysteresis says the target moved
+            -> remap the previous state onto the cycle's mesh
+            -> boundaries from the coarse parent
+            -> a contract deck on THIS mesh's rings
+            -> full-physics fine forecast -> frame
+
+    THE OUTSIDE-PARENT-REFINEMENT SKIP HAS NO PLACE HERE.  The fixed-parent
+    loop skips a swath its parent has no resolution for because the remedy
+    -- regenerating the parent -- is not available to it.  This loop IS that
+    remedy: the planner regenerates whenever the next domain leaves the
+    current mesh's domain or asks for resolution it does not have.
+    """
+
+    if not config.adapt_criteria:
+        raise CycleRefusal(
+            "--adaptive was given with no --adapt-criteria: the mesh would "
+            "follow nothing, and regenerating a background mesh every cycle "
+            "is cost with no forecast behind it"
+        )
+    if config.adapt_fine_km is None or config.adapt_background_km is None:
+        raise CycleRefusal(
+            "--adaptive needs --adapt-fine-km and --adapt-background-km: the "
+            "two spacings the density raster interpolates between"
+        )
+    out = Path(config.out)
+    out.mkdir(parents=True, exist_ok=True)
+    ledger = out / "contract-ledger"
+    ledger.mkdir(parents=True, exist_ok=True)
+    coarse = read_parent_stream(Path(config.coarse_history))
+    state_path = None if config.adapt_state is None else Path(config.adapt_state)
+    previous: dict[str, Any] | None = None
+
+    started_all = time.perf_counter()
+    cycles: list[dict[str, Any]] = []
+    for index in range(int(config.cycles)):
+        cycle_start = coarse.start + timedelta(hours=index * float(config.cycle_hours))
+        cycle_dir = out / f"cycle-{index + 1:02d}"
+        logs = cycle_dir / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        window_end = cycle_start + timedelta(hours=float(config.plan_window_hours))
+        histories = [str(path) for _, path, _ in coarse.window(cycle_start, window_end)]
+
+        # The remap source: the previous fine forecast at this hour when there
+        # is one, with the coarse parent as the fallback the planner takes
+        # when the fine domain does not cover the next one.
+        source_grid: Path = Path(config.coarse_parent_grid)
+        source_state: Path = coarse.at(cycle_start)[1]
+        fallback: tuple[Path, Path] | None = None
+        if previous is not None:
+            later = [(moment, path) for moment, path in previous["frames"]
+                     if moment >= cycle_start]
+            histories += [str(path) for _, path in later]
+            here = [path for moment, path in later if moment == cycle_start]
+            if here:
+                fallback = (source_grid, source_state)
+                source_grid, source_state = previous["grid"], here[0]
+
+        next_spec = cycle_dir / "next-spec"
+        argv: list[Any] = [
+            "hex", "adapt", "--history", *histories,
+            "--criteria", ",".join(config.adapt_criteria),
+            "-o", next_spec,
+            "--fine-km", repr(float(config.adapt_fine_km)),
+            "--background-km", repr(float(config.adapt_background_km)),
+            "--dt-seconds", repr(float(config.dt_seconds)),
+            "--cycle-index", str(index + 1),
+            "--start-time", _stamp(cycle_start),
+            "--hours", repr(float(config.fine_hours)),
+            "--history-every-minutes", str(int(config.history_every_minutes)),
+            "--from-grid", source_grid, "--from-state", source_state,
+        ]
+        if fallback is not None:
+            argv += ["--fallback-from-grid", fallback[0],
+                     "--fallback-from-state", fallback[1]]
+        if state_path is not None:
+            argv += ["--state", state_path]
+        argv += list(config.adapt_options)
+        legs: list[dict[str, Any]] = []
+        started = time.perf_counter()
+        code = _run(_woof(config, *argv), log=logs / "adapt.log", env=_tool_env(config))
+        plan_path = next_spec / "adapt-plan.json"
+        if code != 0 or not plan_path.is_file():
+            raise CycleRefusal(
+                f"woof hex adapt refused cycle {index + 1} (exit {code}); its "
+                f"message is in {logs / 'adapt.log'}"
+            )
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        legs.append(LegTiming("adapt", time.perf_counter() - started, {
+            "decision": plan["decision"]["action"],
+            "forecast_domain_cells": plan["estimate"]["forecast_domain_cells"],
+        }).as_dict())
+        admit_adaptive_plan(plan, plan_path)
+
+        # Every planned stage up to the forecast, in the planner's order.
+        commands = list(plan["commands"])
+        for command in commands:
+            if command["stage"] == "forecast":
+                continue
+            started = time.perf_counter()
+            code = _run(
+                _woof(config, *with_engine_overrides(config, command["argv"])),
+                log=logs / f"{command['stage']}.log",
+                env=_tool_env(config, command.get("env") or {}),
+            )
+            if code != 0:
+                raise CycleRefusal(
+                    f"cycle {index + 1}: stage {command['stage']} failed (exit "
+                    f"{code}); its output is in {logs / (command['stage'] + '.log')}"
+                )
+            legs.append(LegTiming(command["stage"], time.perf_counter() - started).as_dict())
+        # The mesh the plan's state names now exists: commit it, so the next
+        # cycle's hysteresis compares against a mesh somebody generated.
+        state_path = adapt_module.commit_state(next_spec)
+
+        mesh = plan["mesh"]
+        grid = Path(mesh["grid"])
+        init = Path(plan["paths"]["init"])
+        lbc_dir = Path(plan["paths"]["lbc_dir"])
+        start = datetime.strptime(plan["start_time"], XTIME_FORMAT)
+        stop = start + timedelta(hours=float(config.fine_hours))
+        if not any(command["stage"] == "lbc" for command in commands):
+            boundaries = build_boundaries(
+                config, coarse, init, lbc_dir, start, stop, logs / "lbc.log"
+            )
+            legs.append(LegTiming("boundaries", boundaries["seconds"], {
+                "files": boundaries["files"]}).as_dict())
+
+        contract = run_contract_deck(
+            config, grid, init, lbc_dir, cycle_dir / "contract.json",
+            str(mesh["name"]), logs / "contract.log", start=start,
+        )
+        legs.append(LegTiming("contract-deck", contract["seconds"], {
+            "all_decks_bitwise": contract["all_decks_bitwise"],
+            "n_cells": contract["n_cells"],
+        }).as_dict())
+        shutil.copyfile(cycle_dir / "contract.json",
+                        ledger / f"c{index + 1:02d}-{mesh['name']}.contract.json")
+
+        forecast_command = next(c for c in commands if c["stage"] == "forecast")
+        started = time.perf_counter()
+        forecast_code = _run(
+            _woof(config, *with_engine_overrides(config, forecast_command["argv"])),
+            log=logs / "forecast.log",
+            env=_tool_env(config, {
+                **(forecast_command.get("env") or {}),
+                "WOOF_HEX_REGIONAL_CONTRACT_DIR": str(ledger),
+            }),
+        )
+        legs.append(LegTiming("fine-forecast", time.perf_counter() - started, {
+            "returncode": forecast_code}).as_dict())
+        forecast_dir = Path(plan["paths"]["forecast_dir"])
+        frames = frames_in(forecast_dir) if forecast_code == 0 else []
+
+        rendered: dict[str, Any] | None = None
+        if config.render and frames:
+            rendered = render_cycle(
+                config, history=[path for _, path in frames], mesh=grid,
+                out=cycle_dir / "render", scratch=cycle_dir / "render-scratch",
+                start=start, log=logs / "render.log",
+            )
+            legs.append(LegTiming("render", rendered["seconds"], {
+                "pngs": rendered["pngs"]}).as_dict())
+
+        # A failed forecast leaves no fine state: the next cycle remaps from
+        # the coarse parent rather than from a stale frame.
+        previous = {"grid": grid, "frames": frames} if frames else None
+        cycles.append({
+            "cycle_index": index + 1,
+            "valid_time": _stamp(cycle_start),
+            "plan": str(plan_path),
+            "decision": plan["decision"],
+            "mesh_row": mesh["name"],
+            "estimate": plan["estimate"],
+            "timestep_evidence": plan.get("timestep_evidence"),
+            "remap_source": plan.get("remap_source"),
+            "contract": contract,
+            "forecast": {"returncode": forecast_code, "out": str(forecast_dir),
+                         "frames": len(frames), "log": str(logs / "forecast.log")},
+            "render": rendered,
+            "legs": legs,
+            "wall_seconds": round(sum(item["seconds"] for item in legs), 2),
+        })
+
+    receipt_document = {
+        "schema": ADAPTIVE_SCHEMA,
+        "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "wall_seconds": round(time.perf_counter() - started_all, 2),
+        "adaptive": True,
+        "criteria": list(config.adapt_criteria),
+        "coarse_history": str(config.coarse_history),
+        "cycles": cycles,
+        "outside_parent_refinement": (
+            "not applicable: each cycle's mesh is regenerated for its own "
+            "domain, which is the remedy the fixed-parent loop cannot take"
+        ),
+    }
+    (out / "cascade-receipt.json").write_text(
+        json.dumps(receipt_document, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8", newline="\n",
+    )
+    return receipt_document
+
+
 __all__ = [
+    "ADAPTIVE_SCHEMA",
     "CASCADE_SCHEMA",
     "CascadeConfig",
     "ParentStream",
+    "admit_adaptive_plan",
+    "frames_in",
     "read_parent_stream",
+    "run_adaptive_cascade",
     "run_cascade",
     "run_slot",
     "window_receipt",

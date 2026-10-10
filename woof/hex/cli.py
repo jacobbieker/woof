@@ -298,6 +298,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_cycle_parser(commands)
 
+    # Beside cycle, because it is the step between two cycles when the mesh
+    # follows the forecast: criteria -> density raster -> hysteresis -> the
+    # next cycle's commands.  Stdlib-only at import; numpy, scipy and
+    # netCDF4 are pulled inside the handler.
+    from .adapt import add_adapt_parser
+
+    add_adapt_parser(commands)
+
     render = commands.add_parser(
         "render",
         help="MPAS history -> product PNGs through the Rust path "

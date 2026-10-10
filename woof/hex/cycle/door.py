@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,8 @@ def _config(arguments: argparse.Namespace) -> CascadeConfig:
         arguments.repo if arguments.repo is not None
         else Path(__file__).resolve().parents[3]
     )
+    if getattr(arguments, "adaptive", False):
+        return _adaptive_config(arguments, repo)
     return CascadeConfig(
         out=Path(_require(arguments.out, "--out", "a cascade writes a folder per cycle and there is no default place for it")),
         parent_row=str(_require(arguments.parent_row, "--parent-row", "every cull registers itself as a cull OF something, and lineage stops at a row a person registered")),
@@ -98,9 +101,69 @@ def _config(arguments: argparse.Namespace) -> CascadeConfig:
     )
 
 
+def _adaptive_config(arguments: argparse.Namespace, repo: Path) -> CascadeConfig:
+    """``--adaptive``: no fixed parent is cut, so none is required.
+
+    The parent flags, when given, are recorded and unused; the coarse
+    stream is what every adaptive cycle adapts to, remaps from and drives
+    its boundaries with.
+    """
+
+    def optional(value: Any) -> Path:
+        return Path("") if value is None else Path(value)
+
+    criteria = tuple(
+        token.strip()
+        for value in (arguments.adapt_criteria or ())
+        for token in str(value).split(",")
+        if token.strip()
+    )
+    options: list[str] = []
+    for value in arguments.adapt_option or ():
+        options += shlex.split(str(value))
+    return CascadeConfig(
+        out=Path(_require(arguments.out, "--out", "a cascade writes a folder per cycle and there is no default place for it")),
+        parent_row=str(arguments.parent_row or ""),
+        parent_grid=optional(arguments.parent_grid),
+        parent_static=optional(arguments.parent_static),
+        parent_init=optional(arguments.parent_init),
+        parent_history=None,
+        coarse_history=Path(_require(arguments.coarse_history, "--coarse-history", "an adaptive cycle adapts its mesh to the coarse forecast, remaps from it and drives its boundaries with it")),
+        coarse_parent_grid=Path(_require(arguments.coarse_parent_grid, "--coarse-parent-grid", "the remap and rw_mpas_lbc read the coarse parent's own grid")),
+        gpuwm_checkout=(
+            None if arguments.gpuwm_checkout is None else Path(arguments.gpuwm_checkout)
+        ),
+        repo=repo,
+        mesh_exe=None if arguments.mesh_exe is None else Path(arguments.mesh_exe),
+        lbc_exe=None if arguments.lbc_exe is None else Path(arguments.lbc_exe),
+        cycles=int(arguments.cycles),
+        cycle_hours=float(arguments.cycle_hours),
+        plan_window_hours=float(arguments.plan_window_hours),
+        fine_hours=float(arguments.fine_hours),
+        history_every_minutes=int(arguments.history_every_minutes),
+        dt_seconds=float(arguments.dt),
+        nominal_dx_m=float(arguments.nominal_dx_m),
+        class_id=str(arguments.class_id),
+        lbc_interval_seconds=int(arguments.lbc_interval_seconds),
+        render=bool(arguments.render),
+        adaptive=True,
+        adapt_criteria=criteria,
+        adapt_fine_km=arguments.adapt_fine_km,
+        adapt_background_km=arguments.adapt_background_km,
+        adapt_options=tuple(options),
+        adapt_state=None if arguments.adapt_state is None else Path(arguments.adapt_state),
+    )
+
+
 def run_cycle_plan(arguments: argparse.Namespace) -> int:
     """Every cycle's decision, priced, with no device opened and nothing cut."""
 
+    if getattr(arguments, "adaptive", False):
+        raise CycleRefusal(
+            "woof hex cycle plan prices swath placement on a fixed parent; the "
+            "adaptive cycle's per-cycle plan is `woof hex adapt`, which writes "
+            "adapt-plan.json without generating anything"
+        )
     config = _config(arguments)
     coarse = read_parent_stream(config.coarse_history)
     parent = (
@@ -203,6 +266,8 @@ def run_cycle_plan(arguments: argparse.Namespace) -> int:
 def run_cycle_run(arguments: argparse.Namespace) -> int:
     config = _config(arguments)
     receipt = run_cascade(config)
+    if receipt.get("adaptive"):
+        return _report_adaptive(config, receipt)
     print(json.dumps({
         "out": str(config.out),
         "cycles": [
@@ -222,6 +287,36 @@ def run_cycle_run(arguments: argparse.Namespace) -> int:
         for cycle in receipt["cycles"]
         for slot in cycle["slots"]
         if slot.get("ran") and slot["forecast"]["returncode"] != 0
+    ]
+    if failed:
+        print(
+            "woof hex: these fine forecasts did not finish and their logs say "
+            f"why: {', '.join(failed)}",
+        )
+        return 1
+    return 0
+
+
+def _report_adaptive(config: CascadeConfig, receipt: dict[str, Any]) -> int:
+    print(json.dumps({
+        "out": str(config.out),
+        "cycles": [
+            {
+                "cycle_index": cycle["cycle_index"],
+                "valid_time": cycle["valid_time"],
+                "decision": cycle["decision"]["action"],
+                "mesh_row": cycle["mesh_row"],
+                "forecast_domain_cells": cycle["estimate"]["forecast_domain_cells"],
+                "timestep_evidence": cycle["timestep_evidence"],
+            }
+            for cycle in receipt["cycles"]
+        ],
+        "wall_seconds": receipt["wall_seconds"],
+    }, indent=2, sort_keys=True))
+    failed = [
+        f"cycle-{cycle['cycle_index']:02d}"
+        for cycle in receipt["cycles"]
+        if cycle["forecast"]["returncode"] != 0
     ]
     if failed:
         print(
@@ -313,6 +408,26 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
              "the A/B arm for what a delayed start saves, not a mode anybody "
              "should run: without it a swath placed for hour 12 either "
              "integrates from hour 0 or does not run")
+    parser.add_argument(
+        "--adaptive", action="store_true",
+        help="regenerate each cycle's mesh from the forecast (woof hex adapt: "
+             "criteria -> density raster -> hysteresis) instead of culling one "
+             "fixed parent; the parent flags are then not required")
+    parser.add_argument("--adapt-criteria", action="append", default=None,
+                        metavar="LIST",
+                        help="with --adaptive: the woof hex adapt --criteria list")
+    parser.add_argument("--adapt-fine-km", type=float, default=None, metavar="KM",
+                        help="with --adaptive: woof hex adapt --fine-km")
+    parser.add_argument("--adapt-background-km", type=float, default=None,
+                        metavar="KM",
+                        help="with --adaptive: woof hex adapt --background-km")
+    parser.add_argument(
+        "--adapt-option", action="append", default=None, metavar="ARGS",
+        help="with --adaptive: further woof hex adapt arguments, shell-split "
+             "and passed through; repeatable.  A lone flag needs the = form: "
+             "--adapt-option=--experimental-dt")
+    parser.add_argument("--adapt-state", type=Path, default=None, metavar="FILE",
+                        help="with --adaptive: an adapt-state.json to continue from")
 
 
 def _dispatch(arguments: argparse.Namespace) -> int:
