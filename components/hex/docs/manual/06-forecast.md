@@ -482,6 +482,43 @@ more kernels, so the door prices it as `row=... limited-area` rather than
 scaling the global row. That row's core is an ENVELOPE over five measured
 culls rather than a fit, so it over-predicts the smaller ones on purpose.
 
+### Unminted fine classes: the experimental lane
+
+A limited-area run is admitted on two halves
+(`woof.hex.cuda_backend.regional_admission`): the cull's own **contract
+deck** (one receipt per `bdyMask` digest, shipped or presented through
+`$WOOF_HEX_REGIONAL_CONTRACT_DIR`) and a **forecast mint** of its
+configuration class, keyed on zone width, column count, finest edge,
+timestep and kernel set. The finest minted classes are
+`graded-869m-dt5-z7` and `graded-711m-dt5-z7`, so a 100 m corridor at
+dt 0.5 s (`graded-117m-dt0.5-z7` in the same grammar) holds no mint and is
+refused.
+
+With the experimental lane open (`WOOF_HEX_EXPERIMENTAL_DT=1`, which the
+forecast door's experimental-timestep flag also sets), such a class is
+admitted on a class synthesised from the key measured off the run, and
+every anchor, contract receipt and preflight receipt says
+`"class_evidence": "experimental-unminted"`. What the lane does not relax:
+
+- the cull still needs its own contract deck;
+- the outer-step Courant ceiling (125 m/s at safety 0.9) stays enforced;
+- the lane only takes FINE classes: a finest edge below the finest minted
+  edge, or a timestep below the shortest minted timestep. A coarser unminted
+  class still goes to the ordinary mint;
+- no row is ever added to `ADMITTED_CLASSES`. A real row needs a
+  two-process mint pair.
+
+The deck receipt for a freshly cut cull is produced locally by
+`python -m woof.hex.regional_contract_receipt`. Given `--init` and
+`--lbc-dir`, it runs the deck instrument on a card. Given `--deck-receipt`,
+it reuses a receipt that instrument already wrote. Either way it
+cross-checks the deck against the measured geometry and stamps it with the
+measured class. The deck's verdicts are never edited, so a failing deck
+stays refused. An unminted class is stamped only with `--experimental-dt`.
+`woof hex forecast --preflight` runs the same regional gate on the files
+before the dycore starts, prints a `REGIONAL class=... evidence=...` line,
+and records the verdict under `regional_admission` in the receipt.
+
 ## 6.9 Cycling: following weather from one cycle to the next
 
 One forecast is a snapshot. `woof hex cycle run` is the loop: detect in a

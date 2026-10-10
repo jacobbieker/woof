@@ -198,6 +198,7 @@ tests/test_hrrr_intermediate.py
 tests/test_mesh_point.py
 tests/test_mesh_rows.py
 tests/test_regional_class_band.py
+tests/test_regional_experimental_classes.py
 
 # Time stepping and physics cadence: the local timestep and the PBL call
 # interval.  A cadence that drifts changes every forecast this port produces
