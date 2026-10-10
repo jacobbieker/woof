@@ -885,6 +885,11 @@ class ForecastRequest:
     #: ``--les-model`` (owned by the LES closure); read here only for the PBL
     #: guard, ``off`` when the flag does not exist in this build.
     les_model: str = "off"
+    les_surface: str = "none"
+    les_heat_flux: float = 0.0
+    les_moisture_flux: float = 0.0
+    les_drag_coefficient: float = 0.0
+    les_initial_tke: float | None = None
 
     @property
     def inputs_present(self) -> bool:
@@ -1413,6 +1418,7 @@ def resolve_request(
         )
 
     horiz_mixing = getattr(arguments, "horiz_mixing", "2d_smagorinsky")
+    les = _resolve_les(arguments, horiz_mixing)
     local_timestep = bool(getattr(arguments, "local_timestep", False))
     rates = _parse_rates(
         getattr(arguments, "local_timestep_rates", "1,3"), "--local-timestep-rates"
@@ -1629,6 +1635,7 @@ def resolve_request(
         pbl_decision=pbl_decision,
         allow_pbl_off_gray_zone=allow_gray,
         les_model=les_model,
+        **{key: value for key, value in les.items() if key != "les_model"},
     )
 
 
@@ -1696,9 +1703,138 @@ def _decide_pbl(
     return decision
 
 
+#: ``--les-model`` spelling -> native ``config_les_model``.  Restated here
+#: (stdlib only: this module is imported by ``woof hex --help`` on a render
+#: node with no numpy); a test holds it equal to ``les_v841.LES_MODEL_CLI``.
+LES_MODEL_NATIVE = {
+    "off": "none",
+    "3d_smagorinsky": "3d_smagorinsky",
+    "prognostic_tke": "prognostic_1.5_order",
+}
+LES_MODEL_CHOICES = tuple(LES_MODEL_NATIVE)
+LES_SURFACE_CHOICES = ("none", "specified")
+
+
+def les_flag_problem(
+    *,
+    model: str,
+    surface: str,
+    heat: float,
+    moisture: float,
+    drag: float,
+    initial: float | None,
+    horiz_mixing: str,
+    pbl: str | None,
+) -> str | None:
+    """The first reason a set of LES flags cannot run, or ``None``.
+
+    Shared by the door and the engineering driver so the two cannot drift.
+    THE BREAKAGE THE PBL RULE PREVENTS: the v8.4.1 LES closure applies its
+    vertical fluxes on top of whatever the PBL scheme does, so an LES run
+    with YSU still running mixes the boundary layer twice and reports
+    itself as an LES run.  ``pbl`` is the ``--pbl`` selection; ``None``
+    means this build has no PBL selection at all.
+    """
+
+    if model not in LES_MODEL_NATIVE:
+        return f"--les-model {model} is not one of {list(LES_MODEL_CHOICES)}"
+    if surface not in LES_SURFACE_CHOICES:
+        return f"--les-surface {surface} is not one of {list(LES_SURFACE_CHOICES)}"
+    if model == "off":
+        if surface != "none" or heat or moisture or drag or initial is not None:
+            return (
+                "--les-surface, --les-heat-flux, --les-moisture-flux, "
+                "--les-drag-coefficient and --les-initial-tke are read only "
+                "by an LES model; with --les-model off they would be accepted "
+                "and never applied.  Pass --les-model, or drop them."
+            )
+        return None
+    if pbl is None:
+        return (
+            f"--les-model {model} needs the boundary-layer scheme off and this "
+            "build has no PBL selection (--pbl off): YSU always runs here.  "
+            "The MPAS v8.4.1 LES closure replaces the PBL scheme; with YSU "
+            "still running the boundary layer is mixed twice."
+        )
+    if str(pbl) != "off":
+        return (
+            f"--les-model {model} needs the boundary-layer scheme off: pass "
+            f"--pbl off (got --pbl {pbl}).  The MPAS v8.4.1 LES closure "
+            "replaces the PBL scheme; with it still running the boundary "
+            "layer is mixed twice."
+        )
+    if horiz_mixing != "2d_smagorinsky":
+        return (
+            f"--les-model {model} enters at the explicit-mixing seam of the "
+            "2-D Smagorinsky lane (it reuses its c_s, length scale and del4 "
+            "background filter); --horiz-mixing off has no such seam.  Use "
+            "--horiz-mixing 2d_smagorinsky."
+        )
+    if surface != "specified" and (heat or moisture or drag):
+        return (
+            "--les-heat-flux, --les-moisture-flux and --les-drag-coefficient "
+            "are read only by --les-surface specified."
+        )
+    if initial is not None:
+        if model != "prognostic_tke":
+            return (
+                "--les-initial-tke seeds the prognostic TKE and "
+                f"--les-model {model} carries none."
+            )
+        if not (float(initial) > 0.0):
+            return (
+                "--les-initial-tke must be positive: with tke=0 the 1.5-order "
+                "closure has no viscosity and no production, so it runs as no "
+                "closure at all."
+            )
+    return None
+
+
+def _resolve_les(arguments: argparse.Namespace, horiz_mixing: str) -> dict[str, Any]:
+    """Check the LES flags at the door, before anything is bound."""
+
+    model = str(getattr(arguments, "les_model", "off") or "off")
+    surface = str(getattr(arguments, "les_surface", "none") or "none")
+    heat = float(getattr(arguments, "les_heat_flux", 0.0) or 0.0)
+    moisture = float(getattr(arguments, "les_moisture_flux", 0.0) or 0.0)
+    drag = float(getattr(arguments, "les_drag_coefficient", 0.0) or 0.0)
+    initial = getattr(arguments, "les_initial_tke", None)
+    pbl = getattr(arguments, "pbl", None)
+    problem = les_flag_problem(
+        model=model, surface=surface, heat=heat, moisture=moisture, drag=drag,
+        initial=initial, horiz_mixing=horiz_mixing,
+        pbl=None if pbl is None else str(pbl),
+    )
+    if problem is not None:
+        raise _refuse(problem)
+    if model == "off":
+        return {}
+    return {
+        "les_model": model,
+        "les_surface": surface,
+        "les_heat_flux": heat,
+        "les_moisture_flux": moisture,
+        "les_drag_coefficient": drag,
+        "les_initial_tke": None if initial is None else float(initial),
+    }
+
+
 # ---------------------------------------------------------------------------
 # the driver invocation and the hand-off
 # ---------------------------------------------------------------------------
+def _les_receipt(request: ForecastRequest) -> dict[str, Any]:
+    """``les_model=...`` in the receipt of an LES run; nothing otherwise."""
+
+    if request.les_model == "off":
+        return {}
+    native = LES_MODEL_NATIVE[request.les_model]
+    return {
+        "les_model": native,
+        "les_label": f"les_model={native}",
+        "les_surface": request.les_surface,
+    }
+
+
 def build_driver_argv(request: ForecastRequest) -> list[str]:
     """The argument vector handed to the engineering forecast driver.
 
@@ -1751,6 +1887,19 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         ]
         if request.local_timestep_classing is not None:
             argv += ["--local-timestep-classing", str(request.local_timestep_classing)]
+    if request.les_model != "off":
+        # Only an LES run adds flags, so the default run's vector is the one
+        # it always was.
+        argv += ["--les-model", request.les_model]
+        if request.les_surface != "none":
+            argv += [
+                "--les-surface", request.les_surface,
+                "--les-heat-flux", repr(request.les_heat_flux),
+                "--les-moisture-flux", repr(request.les_moisture_flux),
+                "--les-drag-coefficient", repr(request.les_drag_coefficient),
+            ]
+        if request.les_initial_tke is not None:
+            argv += ["--les-initial-tke", repr(request.les_initial_tke)]
     if request.stop_on_refusal:
         argv.append("--stop-on-refusal")
     if request.experimental_dt:
@@ -1861,6 +2010,7 @@ def build_receipt(
         },
         "configuration": {
             "horiz_mixing": request.horiz_mixing,
+            **_les_receipt(request),
             "convection": request.convection,
             "preset": forecast_preset.resolve_preset(request.preset).receipt(),
             "pbl_cadence": request.pbl_cadence,
@@ -2451,6 +2601,36 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
              "deformation-based 2-D Smagorinsky. 'off' is the pre-mixing "
              "control lane, reported as the configuration native itself "
              "cannot integrate on convective cases (default: 2d_smagorinsky)")
+    parser.add_argument(
+        "--les-model", choices=LES_MODEL_CHOICES, default="off",
+        help="MPAS-A v8.4.1 LES closure applied as explicit u/w/theta "
+             "tendencies at the 2-D Smagorinsky mixing seam: "
+             "'3d_smagorinsky' (diagnostic K from the 3-D strain and N^2) or "
+             "'prognostic_tke' (native 'prognostic_1.5_order', K = c_k l "
+             "sqrt(e)). Needs --pbl off. The run and its history are "
+             "labelled les_model=... (default: off)")
+    parser.add_argument(
+        "--les-surface", choices=LES_SURFACE_CHOICES, default="none",
+        help="config_les_surface. 'specified' applies --les-heat-flux, "
+             "--les-moisture-flux and --les-drag-coefficient at the ground; "
+             "'none' is zero-gradient at both ends (default: none)")
+    parser.add_argument(
+        "--les-heat-flux", type=float, default=0.0, metavar="K_M_S",
+        help="config_surface_heat_flux w'theta' for --les-surface specified "
+             "(default: 0.0)")
+    parser.add_argument(
+        "--les-moisture-flux", type=float, default=0.0, metavar="KG_M_S",
+        help="config_surface_moisture_flux w'q' for --les-surface specified "
+             "(default: 0.0)")
+    parser.add_argument(
+        "--les-drag-coefficient", type=float, default=0.0, metavar="CD",
+        help="config_surface_drag_coefficient for --les-surface specified "
+             "(default: 0.0)")
+    parser.add_argument(
+        "--les-initial-tke", type=float, default=None, metavar="M2S2",
+        help="cold-start TKE for --les-model prognostic_tke. Port-local: "
+             "native reads tke from its init and hex inits carry none "
+             "(default: 0.1)")
     parser.add_argument(
         "--convection", choices=("auto", "off", "gf"), default="auto",
         help="cumulus selection. The default 'auto' switches the cumulus "

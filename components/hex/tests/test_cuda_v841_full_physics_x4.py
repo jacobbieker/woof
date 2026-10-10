@@ -191,6 +191,16 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/mixing_v841.py": (
             "9e37ebe07089d286b551f0370116766c74d0cf71d36845a4f883e9226f60cbca"
         ),
+        # New pins (the v8.4.1 LES closure): config_v841 admits
+        # config_les_model through les_v841.validate_les_selection, and the
+        # forecast stack attaches cuda_les_v841 whenever a configuration selects
+        # it, so the frozen lane's admission and execution depend on these bytes.
+        "src/hexcore/les_v841.py": (
+            "cc828e44ba9a14739fa475c138ae09272fa3c33b89b9bafdbe2eaff7a84b78fb"
+        ),
+        "src/hexcore/cuda_les_v841.py": (
+            "95a3560a9f3f4535a752f252bbf3f86d2acb2f5aa7fcadedc89b82bc82f5059b"
+        ),
         "src/hexcore/cuda_horizontal.py": (
             "ade36498f2115a18ff56d71c141b2115daba4b96598c4162163c8aeaa84db1e1"
         ),

@@ -608,6 +608,16 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/mixing_v841.py": (
         "9e37ebe07089d286b551f0370116766c74d0cf71d36845a4f883e9226f60cbca"
     ),
+    # New pins (the v8.4.1 LES closure): config_v841 admits
+    # config_les_model through les_v841.validate_les_selection, and the
+    # forecast stack attaches cuda_les_v841 whenever a configuration selects
+    # it, so the frozen lane's admission and execution depend on these bytes.
+    "src/hexcore/les_v841.py": (
+        "cc828e44ba9a14739fa475c138ae09272fa3c33b89b9bafdbe2eaff7a84b78fb"
+    ),
+    "src/hexcore/cuda_les_v841.py": (
+        "95a3560a9f3f4535a752f252bbf3f86d2acb2f5aa7fcadedc89b82bc82f5059b"
+    ),
     "src/hexcore/cuda_horizontal.py": (
         "ade36498f2115a18ff56d71c141b2115daba4b96598c4162163c8aeaa84db1e1"
     ),
@@ -3802,6 +3812,24 @@ def _construct_device_stack(
             scalar_names=regional["driven_scalars"],
         )
         physics_mesh = driver.regional_v841.padded
+    # The MPAS-A v8.4.1 LES closure: attached here, where the driver is
+    # built, so no stack can carry an LES configuration without it.  A run
+    # with config_les_model='none' (every proof and the default forecast)
+    # gets None and nothing is rebound (woof.hex.cuda_les_v841).
+    from woof.hex.cuda_les_v841 import attach_les_v841
+    from woof.hex.les_v841 import DEFAULT_COLD_START_TKE
+
+    les_request = host.get("les") or {}
+    les_attachment = attach_les_v841(
+        driver,
+        host_mesh=prepared.mesh,
+        scalar_names=tuple(host.get("scalar_names", ())),
+        initial_tke=(
+            float(DEFAULT_COLD_START_TKE)
+            if les_request.get("initial_tke") is None
+            else float(les_request["initial_tke"])
+        ),
+    )
     prep_geometry = CudaMpasToPhysGeometryV841.from_host(physics_mesh)
     physics_geometry = CudaPhysicsGeometryV841.from_host(physics_mesh)
     gwdo_static = CudaYsuGwdoStaticV841.from_host(host["gwdo_host"])
@@ -3840,6 +3868,7 @@ def _construct_device_stack(
         raise RuntimeError("driver and public backend diagnostic clocks differ")
     stack: dict[str, Any] = {
         "driver": driver,
+        **({} if les_attachment is None else {"les": les_attachment}),
         "backend": backend,
         "prep_geometry": prep_geometry,
         "physics_geometry": physics_geometry,

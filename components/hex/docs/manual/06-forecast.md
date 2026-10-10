@@ -67,6 +67,23 @@ Notable flags:
 - `--horiz-mixing`: default `2d_smagorinsky`, the native Registry
   default, ported and A/B-proven; `off` is a control lane, reported as the
   configuration native itself cannot integrate on convective cases.
+- `--les-model`: default `off`. `3d_smagorinsky` and `prognostic_tke`
+  (native `prognostic_1.5_order`) run the MPAS-A v8.4.1 LES closure
+  (`woof.hex.les_v841`, CUDA in `woof.hex.cuda_les_v841`) at the 2-D
+  Smagorinsky mixing seam: the eddy viscosities come from the 3-D strain
+  and N² (or from the prognostic TKE, K = c_k l sqrt(e)), and u, w and
+  theta get the LES horizontal and vertical fluxes. It needs the PBL
+  scheme off (the `--pbl off` selection; a build without a PBL selection
+  refuses every LES request, because YSU would still run) and
+  `--horiz-mixing 2d_smagorinsky`, and it refuses otherwise by name. `--les-surface specified` applies
+  `--les-heat-flux`, `--les-moisture-flux` and `--les-drag-coefficient`;
+  `--les-initial-tke` sets the cold-start TKE (default 0.1 m² s⁻²). The
+  receipt and every history file carry `les_model=...`; the history gains
+  `tke`, `les_eddy_visc_horz` and `les_eddy_visc_vert`. Two declared
+  divergences from native: the TKE is advanced by a first-order upwind
+  transport owned by the closure (native advects it through the scalar
+  transport), and it starts from a uniform cold start (native reads it
+  from the init). Scalar LES mixing (`config_mix_scalars`) is not ported.
 - `--stop-on-refusal`, when the model refuses to publish a step, stop and
   write the receipt for the frames already committed instead of aborting
   with no receipt. No validation is relaxed.
