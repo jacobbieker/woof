@@ -2432,6 +2432,51 @@ def _bridge_checks() -> list[Check]:
     return checks
 
 
+def _met_intermediate_check() -> Check:
+    """The WPS-intermediate writer behind ``woof hex intermediate``'s global sources.
+
+    Non-blocking: it opens one door (hex init/LBC from GFS, GDAS, ECMWF
+    open data, ERA5 or AIFS) and no default path degrades without it, and
+    bundles published before it joined do not carry it.  Presence,
+    launchability and the contract marker are all reported.
+    """
+
+    name = "hex intermediate writer (met_intermediate)"
+    degrades = ("woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs "
+                "refuses")
+    try:
+        found = bridges.find_bridge("met_intermediate")
+    except FileNotFoundError as error:
+        return Check(name, "missing", f"{error} -- {degrades}",
+                     bridges.bridge_remedy("met_intermediate"),
+                     brief="override names a missing file", blocking=False,
+                     group=_GROUP_BRIDGES)
+    if found is None:
+        return Check(name, "missing", f"not built or staged -- {degrades}",
+                     bridges.bridge_remedy("met_intermediate"),
+                     action=_build_action(), brief="not staged", blocking=False,
+                     group=_GROUP_BRIDGES)
+    ok, evidence = _exec_probe(found)
+    if ok:
+        ok, evidence = bridges.bridge_abi_matches("met_intermediate", found)
+    if not ok:
+        return Check(name, "missing", f"{found} -- {evidence} -- {degrades}",
+                     "# this one has to be replaced:\n"
+                     + bridges.install_aware_build_hint(bridges.CARGO_BUILD_HINT),
+                     action=_build_action(), brief=_short(evidence), blocking=False,
+                     group=_GROUP_BRIDGES)
+    build = bridges.checkout_build_status(found)
+    if build is not None and not build.current:
+        return Check(name, "missing", build.describe(),
+                     "# this checkout built it, and its sources have moved since --\n"
+                     f"  {build.remedy()}",
+                     action="rebuild this checkout's bridges",
+                     brief="checkout build is older than its own sources", blocking=False,
+                     group=_GROUP_BRIDGES)
+    return Check(name, "verified", f"{found} -- {evidence}",
+                 brief=_short(evidence), group=_GROUP_BRIDGES)
+
+
 #: Why an ``unreachable`` finding can still exit 0.  Printed on the two
 #: that do, so the summary's severity census and its blocking count are
 #: never in unexplained disagreement.
@@ -2672,6 +2717,7 @@ _CHECKED_ARTIFACTS = {
     "grib2_inventory": "the `bridge ...` and mapped/20CRv3 route lines",
     "grib2_dump": "the `bridge ...` and mapped/20CRv3 route lines",
     "gdt101_remap": "the `bridge ...` lines",
+    "met_intermediate": "the `hex intermediate writer` line",
     "gpuwm_preprocess_cpu": "the `cpu preprocess library` line",
     "rw_fetch": "the `fetch backbone` line",
     "rw_wrfbatch": "the `renderer` line",
@@ -6535,6 +6581,7 @@ def _collect_checks(sources: tuple[str, ...] | None = None,
     checks.append(_sitesample_check())
     checks.append(_region_dealias_check())
     checks.extend(_bridge_checks())
+    checks.append(_met_intermediate_check())
     # ABOUT the report, not about an artifact: does every artifact the
     # bundle carries have a line above?  Twice it did not, and both
     # times doctor called the estate green.

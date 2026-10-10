@@ -831,27 +831,53 @@ def build_intermediates(request: IntermediateRequest, *, log: Callable[[str], No
     return receipt
 
 
+def _intermediate_sources() -> tuple[str, ...]:
+    """Every ``--source`` the intermediate door admits: this module's rows,
+    then the uniform lat-lon rows :mod:`woof.hex.met_intermediate_door`
+    writes through ``met_intermediate`` (stdlib-only at import)."""
+
+    from .met_intermediate_door import GLOBAL_SOURCES
+
+    return (*SOURCE_ROWS, *GLOBAL_SOURCES)
+
+
+INTERMEDIATE_SOURCES = _intermediate_sources()
+
+
 def add_intermediate_parser(commands: Any) -> None:
     parser = commands.add_parser(
         "intermediate",
-        help="write regular lat-lon WPS intermediates from a projected regional "
-             "source (HRRR) through the engine's own decoder and operator",
+        help="write WPS intermediates for hex init/LBC: HRRR regridded to lat-lon, "
+             "or a global lat-lon source (GFS, GDAS, ECMWF open data, ERA5, AIFS) "
+             "through met_intermediate",
         description=(
-            "Resample a projected regional source onto a regular lat-lon WPS "
-            "intermediate the init and boundary engines read.  The decode, the "
-            "interpolation operator and the soil layering are woof's own; the "
-            "record layout is the inverse of this tree's reader and every file "
-            "is read back before the receipt is written."
+            "Write the WPS intermediates the init and boundary engines read.  "
+            "--source hrrr resamples the projected HRRR onto a regular lat-lon "
+            "box through the engine's own decoder and operator.  The global "
+            "sources (gfs, gdas, ecmwf-open-data, era5, aifs) are already "
+            "uniform lat-lon and are written on their own grid by the Rust "
+            "met_intermediate writer with a packaged Vtable.  Every file is "
+            "read back and checked before the receipt is written."
         ),
     )
-    parser.add_argument("--source", default="hrrr", metavar="ROW",
-                        help=f"a row of SOURCE_ROWS ({', '.join(sorted(SOURCE_ROWS))})")
-    parser.add_argument("--grib-dir", type=Path, required=True, metavar="DIR",
-                        help="where `woof fetch --source hrrr` wrote the cycle")
-    parser.add_argument("--cycle", required=True, metavar="YYYY-MM-DDTHH",
-                        help="the cycle the files came from (UTC)")
-    parser.add_argument("--hours", default="0-3", metavar="SPEC",
+    parser.add_argument("--source", default="hrrr", metavar="{" + ",".join(INTERMEDIATE_SOURCES) + "}",
+                        help="the source the files came from (default hrrr); any other "
+                             "name is refused with the reason")
+    parser.add_argument("--grib-dir", type=Path, default=None, metavar="DIR",
+                        help="where `woof fetch --source hrrr` wrote the cycle (GRIB rows; required there)")
+    parser.add_argument("--cycle", default=None, metavar="YYYY-MM-DDTHH",
+                        help="the cycle the files came from, UTC (GRIB rows; required there)")
+    parser.add_argument("--hours", default=None, metavar="SPEC",
                         help="forecast hours to write, contiguous (default 0-3)")
+    parser.add_argument("--interval-hours", type=int, default=None, metavar="H",
+                        help="global sources (gfs, gdas, ecmwf-open-data, era5, aifs): "
+                             "--hours is START-END stepped by this many hours (default: "
+                             "the source's published cadence -- gfs 3, gdas 1, "
+                             "ecmwf-open-data 3, aifs 6, era5 6; --hours defaults to 0, "
+                             "the init time only; for era5 --cycle is the first "
+                             "analysis time)")
+    parser.add_argument("--vtable", type=Path, default=None, metavar="FILE",
+                        help="global sources: a Vtable overriding the packaged one")
     parser.add_argument("--from-plan", type=Path, default=None, metavar="JSON",
                         help="derive the target box from a mesh-plan --point receipt's cull region")
     parser.add_argument("--point", default=None, metavar="LAT,LON",
@@ -866,14 +892,30 @@ def add_intermediate_parser(commands: Any) -> None:
     parser.add_argument("--prefix", default="MET", metavar="TEXT",
                         help="file prefix, ungrib style PREFIX:YYYY-MM-DD_HH (default MET)")
     parser.add_argument("--decoder", type=Path, default=None, metavar="FILE",
-                        help="the engine's decoder binary (default: woof's bridge ladder)")
-    parser.add_argument("--workers", type=int, default=4, metavar="N",
+                        help="the engine's decoder binary: hrrr_grib2_bridge for hrrr, "
+                             "met_intermediate for a global source (default: woof's "
+                             "bridge ladder)")
+    parser.add_argument("--workers", type=int, default=None, metavar="N",
                         help="decoder workers, 1..13 (default 4)")
     parser.set_defaults(handler=run_intermediate)
 
 
 def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest:
     row = source_row(arguments.source)
+    for flag, value in (("--interval-hours", getattr(arguments, "interval_hours", None)),
+                        ("--vtable", getattr(arguments, "vtable", None))):
+        if value is not None:
+            raise IntermediateRefusal(
+                f"{flag} applies to the global sources; --source {row.name} writes "
+                f"every contiguous hour through the engine's own decoder"
+            )
+    for flag, value in (("--grib-dir", arguments.grib_dir), ("--cycle", arguments.cycle)):
+        if value is None:
+            raise IntermediateRefusal(f"--source {row.name} needs {flag}; it has no default")
+    if arguments.hours is None:
+        arguments.hours = "0-3"
+    if arguments.workers is None:
+        arguments.workers = 4
     if arguments.from_plan is not None and arguments.point is not None:
         raise IntermediateRefusal("--from-plan and --point were both given; the box comes from one")
     if arguments.from_plan is not None:
@@ -905,6 +947,17 @@ def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest
 
 
 def run_intermediate(arguments: argparse.Namespace) -> int:
+    from .met_intermediate_door import (
+        GLOBAL_SOURCES,
+        refuse_unknown_source,
+        run_global_intermediate,
+    )
+
+    key = str(arguments.source).strip().lower()
+    if key in GLOBAL_SOURCES:
+        return run_global_intermediate(arguments)
+    if key not in SOURCE_ROWS:
+        refuse_unknown_source(key)
     request = request_from_arguments(arguments)
     receipt = build_intermediates(request)
     print(json.dumps({
@@ -1063,6 +1116,7 @@ __all__ = [
     "DEFAULT_MARGIN_KM",
     "DEFAULT_SPACING_DEG",
     "INTERMEDIATE_SCHEMA",
+    "INTERMEDIATE_SOURCES",
     "SOURCE_ROWS",
     "SURFACE_LEVEL",
     "IntermediateRefusal",

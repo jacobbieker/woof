@@ -66,6 +66,7 @@ BRIDGE_ENV = {
     "grib2_inventory": "WOOF_GRIB2_INVENTORY",
     "grib2_dump": "WOOF_GRIB2_DUMP",
     "gdt101_remap": "WOOF_GDT101_REMAP",
+    "met_intermediate": "WOOF_MET_INTERMEDIATE",
 }
 # `gpuwm_mapped_engine` is deliberately NOT in this map, for the same
 # reason `rw_netcdf` is not: this map's consumers resolve through
@@ -123,6 +124,14 @@ BRIDGE_ABI_MARKERS = {
     # passed; this literal arrived with the later of the two fixes.
     "rw_zarr": b"http transfer failed after ",
     "grib1_bridge": b"usage: grib1_bridge INPUT.grb OUTPUT_DIR",
+    # The WPS-intermediate writer behind `woof hex intermediate` for the
+    # global lat-lon sources.  The receipt schema literal arrived with the
+    # time-identity contract (a statistically processed 2 m maximum no
+    # longer competes with the 2 m temperature for its key, a multi-time
+    # file can be cut to one valid time, every matched valid time is
+    # reported); an older build writes a structurally perfect file without
+    # any of that, so the door refuses it statically.
+    "met_intermediate": b"gpuwm.rw-wps.met-intermediate/v3",
     "gfs_grib2_bridge": (
         b" must be HOUR<TAB>GRIB2[<TAB>FORECAST_PROCESS_ID]"),
     "hrrr_grib2_bridge": (

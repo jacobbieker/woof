@@ -37,10 +37,23 @@ and a forecast receipt, with one met_intermediate receipt or verbatim refusal
 per source. Every verdict quoted in the tables below is reproduced verbatim
 here, so the table is readable on its own.
 
-The one authored table this matrix required, `Vtable.ECMWF-OD.rw`, is in
-the repository at `vtables/Vtable.ECMWF-OD.rw`. It is a repository asset
-rather than a packaged one: it is consumed by `woof`'s RW-WPS
-`met_intermediate` writer, upstream of anything this distribution installs.
+The one authored table this matrix required, `Vtable.ECMWF-OD.rw`, was a
+repository asset that this checkout no longer carried.  It is now packaged
+at `woof/data/vtables/Vtable.ECMWF-OD.rw`, beside `Vtable.GFS.rw` and
+`Vtable.ERA5.rw`, and `woof hex intermediate --source
+gfs|gdas|ecmwf-open-data|era5|aifs` (`woof/hex/met_intermediate_door.py`)
+now drives `met_intermediate` with them; this matrix's rows were minted by
+hand.  The recreated table is read off a 2026-09-24 IFS oper file and is
+not byte-identical to the one these rows used.  The writer changed too:
+time-processed messages (2 m maximum and minimum temperature) no longer
+compete with instantaneous ones for a key, and each matched valid time is
+reported.  Its exe digest therefore differs from the instrument recorded
+below.
+
+```
+woof hex intermediate --source ecmwf-open-data --grib-dir DIR \
+  --cycle 2026-09-24T12 --hours 0-12 --out-dir MET
+```
 
 ## Sources with a runnable registry route
 
