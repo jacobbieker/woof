@@ -67,3 +67,7 @@ tests/test_species_row.py
 tests/test_moist_coefficients_species_row.py
 tests/test_prep_species_row.py
 tests/test_physics_carrier_kernels.py
+# The shipped smagorinsky_v841_f32 kernel fed native vs local64 deformation
+# weights: bit-identical kdiff on a coarse mesh under the auto gate, and on
+# the binary64 authority at 50/100 m where native weights were not.
+tests/test_deformation_geometry_precision_gpu.py

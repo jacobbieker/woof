@@ -569,8 +569,17 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # memory model on a regional mesh (garbage-element columns, stripped
     # after) -- a branch a global mesh never enters, since it has no
     # sentinel cellsOnEdge slot to detect.
+    # Re-frozen 2026-10-10 for fine-mesh deformation geometry: the weights
+    # gained a binary64 local-tangent-plane evaluation (geometry="local64")
+    # that the default geometry="auto" selects only for a binary32 build on
+    # a mesh whose min(dcEdge) is under 500 m, where the native binary32
+    # Earth-centred evaluation is off by 3-18 %.  The native mirror's
+    # arithmetic is unchanged (its sphere check moved into a shared helper
+    # that computes the same radius), and the x4 proof mesh is far coarser
+    # than 500 m, so every admitted configuration selects native and its
+    # weights are byte-unchanged.
     "src/hexcore/mixing_v841.py": (
-        "534d8f31d5591091180bb7218046feed4c32613bab890034601aaf00100f519c"
+        "9e37ebe07089d286b551f0370116766c74d0cf71d36845a4f883e9226f60cbca"
     ),
     "src/hexcore/cuda_horizontal.py": (
         "ade36498f2115a18ff56d71c141b2115daba4b96598c4162163c8aeaa84db1e1"

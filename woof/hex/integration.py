@@ -325,3 +325,177 @@ def recover_large_step_variables(
                 + fzp[level] * out.rho_zz[level - 1, cell]
             )
     return out
+
+
+# ---------------------------------------------------------------------------
+# compensated large-step recovery (small-timestep precision lane)
+# ---------------------------------------------------------------------------
+
+#: The carried ``saved + perturbation`` sums the compensated recovery tracks,
+#: as ``(saved field, perturbation field, recovered field)`` on
+#: :class:`RecoveryState`.  ``rw`` is the interior-level sum
+#: ``rw_save + rw_p``; its bottom and top interfaces are zero by construction.
+COMPENSATED_RECOVERY_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("rho_p_save", "rho_pp", "rho_p"),
+    ("rtheta_p_save", "rtheta_pp", "rtheta_p"),
+    ("ru_save", "ru_p", "ru"),
+    ("rw_save", "rw_p", "rw"),
+)
+
+
+@dataclass(slots=True)
+class RecoveryResidual:
+    """Binary32 rounding residuals carried across timesteps.
+
+    Each array holds the exact rounding error of the last FINAL-stage
+    ``saved + perturbation`` addition for its field (TwoSum), so the carried
+    state is ``recovered + residual`` to about twice working precision while
+    the model reads only ``recovered``.  Zero arrays are the uncompensated
+    start.
+    """
+
+    rho_p: FloatArray
+    rtheta_p: FloatArray
+    ru: FloatArray
+    rw: FloatArray
+
+    @classmethod
+    def zeros_like(cls, state: "RecoveryState") -> "RecoveryResidual":
+        return cls(
+            rho_p=np.zeros_like(state.rho_p),
+            rtheta_p=np.zeros_like(state.rtheta_p),
+            ru=np.zeros_like(state.ru),
+            rw=np.zeros_like(state.rw),
+        )
+
+
+def _two_sum_residual(a: FloatArray, b: FloatArray, s: FloatArray) -> FloatArray:
+    """Knuth TwoSum: the exact ``(a + b) - s`` for ``s = fl(a + b)``.
+
+    Branch-free and valid for any magnitudes (unlike Fast2Sum, which needs
+    ``|a| >= |b|``; a perturbation-form ``saved`` field crosses zero).  Every
+    operation is a separate ufunc in the arrays' own dtype, so no step is
+    contracted or widened.
+    """
+
+    bb = np.subtract(s, a)
+    return np.add(np.subtract(a, np.subtract(s, bb)), np.subtract(b, bb))
+
+
+def compensated_recovery_required(dt_seconds: float) -> bool:
+    """Whether a timestep is in the lane the compensated recovery is for.
+
+    True exactly below the smallest timestep the anchor table
+    (:data:`woof.hex.dt_admission.ADMITTED_TIMESTEPS`) has ever admitted, so
+    every anchored configuration keeps its uncompensated bytes and only the
+    experimental sub-anchor lane changes.  Read from the table rather than
+    restated, so the gate moves with it.
+    """
+
+    from .dt_admission import ADMITTED_TIMESTEPS
+
+    floor = min(float(anchor.dt_seconds) for anchor in ADMITTED_TIMESTEPS.values())
+    return float(dt_seconds) < floor
+
+
+def recover_large_step_variables_compensated(
+    mesh: object,
+    state: RecoveryState,
+    background: RecoveryBackground,
+    residual: RecoveryResidual,
+    *,
+    final_stage: bool,
+    **kwargs: Any,
+) -> tuple[RecoveryState, RecoveryResidual]:
+    """:func:`recover_large_step_variables` with TwoSum-compensated sums.
+
+    MEASURED NEED (``woof.hex.precision_probe.large_step_increment_loss``):
+    in binary32, a 2e-5 K/s theta tendency and a 2e-5 m/s2 momentum
+    tendency held for 60 s lose about 2 % of their mean increment and carry
+    8-15 % RMS error at dt 0.5/0.25 s, because each timestep's increment is
+    only a few units in the last place of the carried ``rtheta_p``/``ru``;
+    at dt 5 s the mean loss is 0.01-0.03 %.
+
+    WHAT IT DOES.  Each RK stage recovers from ``saved`` with the
+    perturbation ``pert + residual`` (the residual being the part of the
+    carried state that binary32 could not hold), through the UNCHANGED
+    authority.  On the final stage only -- the one whose result is carried
+    into the next timestep, exactly as ``atm_rk_integration_setup`` copies
+    it -- the new residual is the exact TwoSum rounding error of that
+    stage's ``saved + perturbation``.  Intermediate stages restart from the
+    same ``saved`` and do not touch the residual.
+
+    In binary64 the residual stays identically zero (nothing is carried), so
+    this is a no-op wrapper there.  ``kwargs`` are passed through verbatim.
+    The returned state carries the caller's own perturbation fields.
+
+    WHERE IT RUNS.  This is the CPU-authority half of the remedy and the
+    reference a CUDA port is decked against; no forecast driver calls it
+    yet.  The CUDA recovery kernels (``recover_cells_f32`` /
+    ``recover_edges_f32`` / ``recover_interfaces_f32`` in ``cuda_driver.py``)
+    live in the regional kernel set that every minted regional class is keyed
+    on (``cuda_backend.regional_admission.REGIONAL_KERNEL_SOURCES``), so
+    porting this there lapses every class until it is re-minted, and is
+    therefore left to a ruling.  The port is: one binary32 residual array per
+    field in the table above, folded into the perturbation at every stage's
+    recovery, rewritten from TwoSum on the final stage only, launched only
+    when :func:`compensated_recovery_required` holds.
+    """
+
+    effective = state.copy()
+    dtype = np.asarray(state.rtheta_p).dtype
+    compensate = dtype == np.dtype(np.float32)
+    # The rounding error of folding the residual into each perturbation is
+    # itself carried, so the compensation stays exact when |pert| is as
+    # large as |saved| (a field near a zero crossing).
+    fold_error: dict[str, FloatArray] = {}
+    if compensate:
+        for _, pert_name, recovered_name in COMPENSATED_RECOVERY_FIELDS:
+            carried = np.asarray(getattr(residual, recovered_name))
+            pert = np.asarray(getattr(effective, pert_name))
+            if carried.shape != pert.shape or carried.dtype != pert.dtype:
+                raise ValueError(
+                    f"recovery residual {recovered_name} must match {pert_name} "
+                    f"({pert.shape} {pert.dtype}); got {carried.shape} {carried.dtype}"
+                )
+            folded = np.add(pert, carried)
+            fold_error[recovered_name] = _two_sum_residual(pert, carried, folded)
+            setattr(effective, pert_name, folded)
+    out = recover_large_step_variables(mesh, effective, background, **kwargs)
+    # Hand back the caller's own perturbations, never the folded ones, so a
+    # caller that reuses ``out``'s perturbation fields cannot count the
+    # residual twice.
+    for _, pert_name, _recovered in COMPENSATED_RECOVERY_FIELDS:
+        setattr(out, pert_name, np.asarray(getattr(state, pert_name)).copy())
+    if not (compensate and final_stage):
+        return out, residual
+    nlev = out.rho_p.shape[0]
+    interior = slice(1, nlev)
+    updated: dict[str, FloatArray] = {}
+    for saved_name, pert_name, recovered_name in COMPENSATED_RECOVERY_FIELDS:
+        a = np.asarray(getattr(effective, saved_name))
+        b = np.asarray(getattr(effective, pert_name))
+        s = np.asarray(getattr(out, recovered_name))
+        res = np.zeros_like(s)
+        if recovered_name == "rw":
+            res[interior] = _two_sum_residual(a[interior], b[interior], s[interior])
+        elif recovered_name == "rtheta_p" and int(kwargs.get("rk_step", 1)) == 3:
+            # Stage 3 forms (saved + pert) - dt*rho_zz*diabatic in two
+            # binary32 roundings (see recover_large_step_variables); carry
+            # both errors.  The subtrahend is rebuilt with the authority's
+            # own operation order.
+            diabatic = np.asarray(kwargs["rt_diabatic_tendency"])
+            c = (dtype.type(kwargs["dt"]) * out.rho_zz) * diabatic
+            t = np.add(a, b)
+            res[...] = np.add(
+                _two_sum_residual(a, b, t),
+                _two_sum_residual(t, np.negative(c), s),
+            )
+        else:
+            res[...] = _two_sum_residual(a, b, s)
+        if recovered_name == "rw":
+            res[interior] = np.add(res[interior], fold_error[recovered_name][interior])
+        else:
+            res[...] = np.add(res, fold_error[recovered_name])
+        updated[recovered_name] = res
+    return out, RecoveryResidual(**updated)
