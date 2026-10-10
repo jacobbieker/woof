@@ -344,6 +344,89 @@ generation gates as any other mesh (`woof/hex/mesh_spec_gates.py`):
 The finest graded mesh this tree has a measurement for is 0.75 km. Meshes at
 100 m and 50 m are unmeasured.
 
+#### The timestep floor and the experimental lane
+
+By default the planner refuses `--dx-m` below about 819 m. The hex forecast
+only runs a timestep that has an anchor in its timestep table, and the
+smallest anchor is 5 s. At the Courant limit (125 m/s with a 0.9 safety
+factor) a 5 s step needs edges of at least 694 m. Generated cells come out
+as fine as 0.848 times their requested spacing, which puts the floor at
+about 819 m. The refusal names `--topology wrf-tiles` and
+`--hex-experimental-dt`.
+
+`--hex-experimental-dt` is an explicit opt-in that lifts the floor. The
+planner then picks the largest timestep that does all of the following:
+
+- satisfies the Courant limit on the finest delivered edge,
+- divides the 600 s radiation cadence exactly, and
+- keeps the model clock exact in binary64.
+
+That works out to 600/1024 s (about 0.59 s) at 100 m and 600/2048 s (about
+0.29 s) at 50 m. No anchor backs these timesteps. The two 5 s anchors that
+do exist are recorded as diverging severely, for a reason nobody has
+measured yet. The plan, the forecast receipt and the history files therefore
+carry `timestep_evidence = "experimental-unanchored"`. Treat the output as
+an experiment, not a forecast of record. Real anchors for these timesteps
+need a candidate mint that passes and then a ruling from the project owner.
+Until then the anchor table stays as it is.
+
+With the flag, the plan holds the whole chain in `extra["commands"]`, and
+`extra["runnable"]` is `"full"`. The steps run in this order:
+
+1. A density raster built from the sites, with `--hex-density raster` (the
+   default). With `--hex-density polygons` the planner's corridor polygon
+   rows in `mesh_spec.json` are used instead.
+2. The parent mesh, generated only inside a regional window: the cut plus
+   three boundary-zone widths, written to `regional_window.json`.
+3. Static fields upgraded to GLO-30 terrain and CGLC land cover.
+4. A runtime mesh row for the parent.
+5. The LES vertical from `vertical_spec.json`: 100 levels by default
+   (`--nz` changes it), a 20 m lowest layer and a 30 km top.
+6. The cut, made with `cull_region.json` and carrying its own vertical.
+7. A runtime mesh row for the cut.
+8. Met intermediates from `--source`, which defaults to `gfs`. Pass
+   `--hex-forcing-wrfout GLOB` to force the corridor from an existing WRF
+   parent run instead.
+9. The initial conditions.
+10. The lateral boundary files.
+11. The forecast: MPAS v8.4.1's 3-D Smagorinsky LES closure with the PBL
+    scheme off, writing the energy history preset.
+
+`woof energy run` exports `WOOF_HEX_MESH_ROWS` to every step, so the
+forecast finds the rows that the earlier steps registered.
+
+Several of these steps depend on hex commands and flags that are newer than
+the planner. `extra["requires"]` lists, for each command, the feature it
+needs and whether this build can run it. That means this build's parser
+accepts the command and, for the met step, the build knows the source. The
+`woof energy plan` summary names any that are missing, so a build without
+one tells you before anything runs.
+
+Sources that publish hourly (`gfs`, `gdas`, `era5`, `hrrr`) are fetched
+every hour. `ecmwf-open-data` publishes every 3 hours and `aifs` every 6,
+and the met step has to accept that coarser spacing. `gdas` stops at 9
+hours, so a longer `--hours` is refused.
+
+#### Capacity at 50 m and 100 m
+
+Only the cut runs on the GPU. The planner prices its cells on the
+limited-area device row at the LES vertical's level count. Every device row
+was measured at 55 levels. Until the device model scales its per-cell cost
+with the level count, the planner multiplies the whole 55-level footprint by
+the ratio of the two level counts. The plan notes say when this interim
+scaling was used.
+
+A 48 GiB card holds about 460,000 limited-area cells at 55 levels. At 100 m
+that is a cut of roughly 63 km by 63 km at the fine spacing. At 100 levels it
+is about half that many cells. The cut also includes the spacing ramp
+outside the corridor, so a 100 km line at 100 m does not fit. When the cut
+does not fit, the plan is refused and the refusal suggests a shorter
+corridor, planned in pieces, or `--topology wrf-tiles`.
+
+```bash
+woof energy plan wales/sites.json --topology hex-swath --dx-m 100 --corridor-km 1 --start 2026-10-10T00 --hours 6 --vram-gib 48 --hex-experimental-dt -o wales/plan-hex-100m
+```
+
 ## Resolution: 100 m or 50 m
 
 ### Turbulence: the gray zone and LES
@@ -438,10 +521,12 @@ One regional parent plus offline tiles along the lines:
 woof energy plan wales/sites.json --topology wrf-tiles --dx-m 100 --corridor-km 2 --parent-dx-m 900 --start 2026-10-10T00 --hours 24 --vram-gib 24 -o wales/plan-tiles
 ```
 
-An MPAS corridor mesh:
+An MPAS corridor mesh. At 100 m this needs the experimental timestep lane,
+and only a compact cluster of sites fits on one card (see
+[`hex-swath`](#hex-swath)):
 
 ```bash
-woof energy plan wales/sites.json --topology hex-swath --dx-m 100 --corridor-km 3 --start 2026-10-10T00 --hours 24 --vram-gib 24 -o wales/plan-hex
+woof energy plan wales/sites.json --topology hex-swath --dx-m 100 --corridor-km 1 --start 2026-10-10T00 --hours 24 --vram-gib 48 --hex-experimental-dt -o wales/plan-hex
 ```
 
 Read `plan.json` and the emitted configurations before running. The notes
@@ -514,8 +599,9 @@ rating methodology.
 - **Offline tiles** (`wrf-tiles`) are one-way and see the parent only at its
   history interval. A short parent history interval costs disk but improves
   the tiles' boundaries.
-- **`hex-swath` at 50 m to 100 m** is unmeasured. See
-  [Choosing a topology](#choosing-a-topology).
+- **`hex-swath` at 50 m to 100 m** is unmeasured. It runs only on the
+  experimental, unanchored timestep lane (`--hex-experimental-dt`), and its
+  output is labelled that way. See [`hex-swath`](#hex-swath).
 - **50 m in general** is unmeasured in WOOF, for LES and for static fields.
 
 ## Checking an install
