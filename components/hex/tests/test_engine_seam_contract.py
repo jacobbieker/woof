@@ -44,8 +44,14 @@ from woof.hex import engine_identity
 
 #: The seam contract surface as the WOOF rename writes it (see the module
 #: docstring for its derivation).  Only a folded tree compares against it.
+#: MOVED DELIBERATELY for the PBL slot: the column batch gained the
+#: ``pbl_scheme`` constructor argument ("ysu" default, "off" =
+#: bl_pbl_physics 0) and docs/mpas-seam.md documents it.  The default path
+#: is unchanged -- same RunConfig, same identity, same surface_pbl_ran
+#: counter -- so every anchor taken on the previous surface
+#: (``d478e699...``) describes a YSU run of this one.
 RENAMED_CONTRACT_SURFACE_SHA256 = (
-    "d478e699aca4c7ae69c5a9dad3b3aae390f79d106492fc02e2868ad8705a51d7"
+    "4685edd4cfdf4d3fd5bb02e0583d520ca530bde16c2159336038c3f25a1e52cd"
 )
 FOLDED = not engine_identity.__name__.startswith("hexcore.")
 

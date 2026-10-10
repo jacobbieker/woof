@@ -135,6 +135,193 @@ class VerticalSpecError(MpasPortError):
     """A vertical declaration or produced artifact violates a named contract."""
 
 
+#: Where the dycore's own upper damping layer starts.  NOT a knob of this
+#: module: ``config_zd = 22 km`` with ``config_xnutr = 0.2`` is pinned by
+#: :class:`woof.hex.config_v841.V841MpasColumnPhysicsConfig`, and the run
+#: builds ``dss`` from it at setup (the init file's ``dss`` is a zero
+#: placeholder).  Restated here because a column whose top sits at or below
+#: it has no damping layer at all, and the forecast refuses it at setup with
+#: "nonzero config_xnutr has no model layer above the damping start" --
+#: after the init was built.  The LES preset refuses such a top up front.
+DYCORE_DAMPING_START_M = 22_000.0
+
+#: ``--vertical-spec preset:NAME[:key=value,...]`` selects a named preset
+#: instead of a JSON file.  The preset is written out as canonical JSON next
+#: to the artifact, so every receipt still names a file and its digest.
+PRESET_PREFIX = "preset:"
+
+#: The deepest column the hex forecast can run.  Set by the engine's WSM6,
+#: whose kernel compiles a per-thread column at one of two tiers, 64 and 80
+#: (``woof.core.wsm6_constants.WSM6_DEEP_KMAX``), and refuses deeper
+#: columns at its first call -- MEASURED: a 100-level column reached the
+#: first post-RK microphysics call and stopped with "WSM6 requires 2 <= nz
+#: <= 80, got 100".  Restated here (a test holds the two equal) so the
+#: preset, the bind and the planner refuse such a column before an init is
+#: built rather than at step one.
+HEX_MAX_COLUMN_LEVELS = 80
+
+#: The LES preset's defaults: the deepest column the forecast runs
+#: (:data:`HEX_MAX_COLUMN_LEVELS`), 20 m near the ground, a 30 km top so the
+#: pinned 22 km damping layer keeps several layers above it.
+LES_DEFAULT_TOP_M = 30_000.0
+LES_DEFAULT_DZ_SURFACE_M = 20.0
+LES_DEFAULT_LEVELS = HEX_MAX_COLUMN_LEVELS
+#: Layers held at exactly the surface thickness before stretching starts.
+LES_DEFAULT_SURFACE_LAYERS = 4
+#: The largest layer-to-layer thickness ratio the preset admits.  "Gentle"
+#: is a number: above about 8 % per layer the truncation error of the
+#: centred vertical operators on a stretched grid grows with the stretch,
+#: and an LES closure's length scale (``(dx dy dz)**(1/3)``) jumps between
+#: neighbouring layers.  A request that can only reach its top by stretching
+#: harder is refused, naming the level count that would reach it.
+LES_MAX_STRETCH = 1.08
+#: Layer midpoints the preset requires above :data:`DYCORE_DAMPING_START_M`,
+#: so the sin^2 damping ramp has more than one layer to act on.
+LES_MIN_LAYERS_ABOVE_DAMPING = 3
+
+
+def les_interfaces(
+    *,
+    top_m: float = LES_DEFAULT_TOP_M,
+    dz_surface_m: float = LES_DEFAULT_DZ_SURFACE_M,
+    levels: int = LES_DEFAULT_LEVELS,
+    surface_layers: int = LES_DEFAULT_SURFACE_LAYERS,
+) -> tuple[float, ...]:
+    """Interface heights (``levels + 1`` values, 0 to ``top_m``) for the LES preset.
+
+    ``surface_layers`` layers of exactly ``dz_surface_m``, then a geometric
+    stretch by the one ratio that lands the last interface on ``top_m``.
+    The ratio is solved, not chosen, so the column has no kink; it must not
+    exceed :data:`LES_MAX_STRETCH`.  Construction is float64 and the last
+    interface is set to ``top_m`` exactly (the validator compares it).
+    """
+
+    top = float(top_m)
+    dz = float(dz_surface_m)
+    if isinstance(levels, bool) or not isinstance(levels, int):
+        raise VerticalSpecError("LES preset levels must be an integer")
+    if isinstance(surface_layers, bool) or not isinstance(surface_layers, int):
+        raise VerticalSpecError("LES preset surface_layers must be an integer")
+    if not (np.isfinite(top) and top > 0.0):
+        raise VerticalSpecError(f"LES preset top_m must be positive, got {top_m!r}")
+    if not (np.isfinite(dz) and dz > 0.0):
+        raise VerticalSpecError(
+            f"LES preset dz_surface_m must be positive, got {dz_surface_m!r}"
+        )
+    if levels > HEX_MAX_COLUMN_LEVELS:
+        raise VerticalSpecError(
+            f"LES preset levels={levels} exceeds the {HEX_MAX_COLUMN_LEVELS}-level "
+            "column the hex forecast can run: the engine's WSM6 compiles at "
+            f"most {HEX_MAX_COLUMN_LEVELS} levels and refuses a deeper column "
+            "at its first call"
+        )
+    if not 1 <= surface_layers < levels:
+        raise VerticalSpecError(
+            f"LES preset needs 1 <= surface_layers < levels, got "
+            f"surface_layers={surface_layers}, levels={levels}"
+        )
+    if top <= DYCORE_DAMPING_START_M:
+        raise VerticalSpecError(
+            f"LES preset top_m={top:g} m is at or below the dycore's pinned "
+            f"upper damping start config_zd={DYCORE_DAMPING_START_M:g} m "
+            "(config_xnutr=0.2, V841MpasColumnPhysicsConfig).  The run builds "
+            "its w damping from that height at setup, so a column topped "
+            "below it has no damping layer and the forecast refuses it after "
+            "the init was built.  Use a top above "
+            f"{DYCORE_DAMPING_START_M:g} m (default {LES_DEFAULT_TOP_M:g} m)"
+        )
+    stretched = levels - surface_layers
+
+    def column_top(ratio: float) -> float:
+        if ratio == 1.0:
+            return dz * levels
+        powers = ratio ** np.arange(1, stretched + 1, dtype=np.float64)
+        return dz * surface_layers + dz * float(np.sum(powers))
+
+    if column_top(1.0) >= top:
+        raise VerticalSpecError(
+            f"LES preset: {levels} layers of {dz:g} m already reach "
+            f"{dz * levels:g} m >= top_m={top:g} m; use fewer levels, a "
+            "thinner surface layer or a higher top"
+        )
+    if column_top(LES_MAX_STRETCH) < top:
+        needed = levels
+        while (
+            needed <= HEX_MAX_COLUMN_LEVELS
+            and column_top_for(needed, dz, surface_layers, LES_MAX_STRETCH) < top
+        ):
+            needed += 1
+        remedy = (
+            f"{needed} levels reach it at that ratio"
+            if needed <= HEX_MAX_COLUMN_LEVELS
+            else (
+                f"even the {HEX_MAX_COLUMN_LEVELS}-level column the forecast "
+                "runs cannot; use a thicker dz_surface_m or a lower top_m"
+            )
+        )
+        raise VerticalSpecError(
+            f"LES preset: {levels} levels starting at {dz:g} m cannot reach "
+            f"top_m={top:g} m without stretching faster than "
+            f"{LES_MAX_STRETCH:g} per layer; {remedy}"
+        )
+    low, high = 1.0, LES_MAX_STRETCH
+    for _ in range(200):
+        mid = 0.5 * (low + high)
+        if column_top(mid) < top:
+            low = mid
+        else:
+            high = mid
+    ratio = 0.5 * (low + high)
+    thickness = np.empty(levels, dtype=np.float64)
+    thickness[:surface_layers] = dz
+    thickness[surface_layers:] = dz * ratio ** np.arange(
+        1, stretched + 1, dtype=np.float64
+    )
+    interfaces = np.concatenate(([0.0], np.cumsum(thickness)))
+    interfaces[-1] = top
+    if not np.all(np.diff(interfaces) > 0.0):
+        raise VerticalSpecError("LES preset produced a non-increasing column")
+    return tuple(float(value) for value in interfaces)
+
+
+def column_top_for(levels: int, dz: float, surface_layers: int, ratio: float) -> float:
+    """The top a ``levels`` column reaches at ``ratio`` -- the refusal's remedy."""
+
+    stretched = max(int(levels) - int(surface_layers), 0)
+    powers = float(ratio) ** np.arange(1, stretched + 1, dtype=np.float64)
+    return float(dz) * min(int(levels), int(surface_layers)) + float(dz) * float(
+        np.sum(powers)
+    )
+
+
+def les_layer_report(spec: "VerticalSpec") -> dict[str, Any]:
+    """What an LES column looks like, in the numbers a reader checks.
+
+    Recorded beside the preset so a receipt says the near-surface thickness,
+    the largest stretch and how many layers sit inside the damping layer
+    without anyone re-deriving them from the interface list.
+    """
+
+    if spec.specified_interfaces_m is None:
+        raise VerticalSpecError("les_layer_report needs scheme='specified'")
+    zw = np.asarray(spec.specified_interfaces_m, dtype=np.float64)
+    dz = np.diff(zw)
+    mid = 0.5 * (zw[:-1] + zw[1:])
+    return {
+        "levels": int(spec.n_vert_levels),
+        "top_m": float(zw[-1]),
+        "lowest_layer_m": float(dz[0]),
+        "layers_below_100m": int(np.count_nonzero(zw[1:] <= 100.0)),
+        "layers_below_1km": int(np.count_nonzero(zw[1:] <= 1000.0)),
+        "thickest_layer_m": float(dz.max()),
+        "max_stretch": float(np.max(dz[1:] / dz[:-1])),
+        "layers_above_damping_start": int(
+            np.count_nonzero(mid > DYCORE_DAMPING_START_M)
+        ),
+        "damping_start_m": DYCORE_DAMPING_START_M,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class VerticalSpec:
     schema: str = SCHEMA
@@ -179,7 +366,51 @@ class VerticalSpec:
         return result
 
     @classmethod
+    def les(
+        cls,
+        *,
+        top_m: float = LES_DEFAULT_TOP_M,
+        dz_surface_m: float = LES_DEFAULT_DZ_SURFACE_M,
+        levels: int = LES_DEFAULT_LEVELS,
+        surface_layers: int = LES_DEFAULT_SURFACE_LAYERS,
+    ) -> "VerticalSpec":
+        """The LES column: thin near-surface layers, gentle stretch, damped top.
+
+        ``scheme='specified'`` with interface heights from
+        :func:`les_interfaces`; every other field is this class's default,
+        so terrain smoothing, the hybrid coordinate and the init-time
+        damping placeholder are the same as any other declaration.  The
+        upper damping the run applies is the dycore's pinned 22 km layer,
+        which the top is required to sit above.
+        """
+
+        interfaces = les_interfaces(
+            top_m=top_m,
+            dz_surface_m=dz_surface_m,
+            levels=levels,
+            surface_layers=surface_layers,
+        )
+        spec = cls(
+            n_vert_levels=int(levels),
+            ztop_m=float(top_m),
+            scheme="specified",
+            specified_interfaces_m=interfaces,
+        )
+        spec.validate()
+        report = les_layer_report(spec)
+        if report["layers_above_damping_start"] < LES_MIN_LAYERS_ABOVE_DAMPING:
+            raise VerticalSpecError(
+                f"LES preset: only {report['layers_above_damping_start']} layer "
+                f"midpoint(s) sit above the {DYCORE_DAMPING_START_M:g} m damping "
+                f"start; at least {LES_MIN_LAYERS_ABOVE_DAMPING} are needed for "
+                "the damping ramp to act.  Raise top_m or add levels"
+            )
+        return spec
+
+    @classmethod
     def from_file(cls, path: str | Path) -> "VerticalSpec":
+        if is_preset_reference(path):
+            return resolve_preset(str(path))
         source = Path(path).expanduser().resolve(strict=True)
         try:
             raw = json.loads(source.read_text(encoding="utf-8"))
@@ -272,6 +503,92 @@ class VerticalSpec:
 
     def sha256(self) -> str:
         return hashlib.sha256(self.canonical_bytes()).hexdigest()
+
+
+#: Named presets ``--vertical-spec preset:NAME`` selects.  ``default`` is the
+#: 55-level ``tc`` column every measured row and anchor runs at; ``les`` is
+#: :meth:`VerticalSpec.les`.  Keys after the name override the preset's
+#: keyword arguments: ``preset:les:levels=70,dz_surface_m=25``.
+_PRESET_PARAMETERS: dict[str, dict[str, type]] = {
+    "default": {},
+    "les": {
+        "top_m": float,
+        "dz_surface_m": float,
+        "levels": int,
+        "surface_layers": int,
+    },
+}
+
+
+def preset_names() -> tuple[str, ...]:
+    return tuple(_PRESET_PARAMETERS)
+
+
+def is_preset_reference(value: object) -> bool:
+    return value is not None and str(value).startswith(PRESET_PREFIX)
+
+
+def resolve_preset(reference: str) -> VerticalSpec:
+    """``preset:NAME[:key=value,...]`` -> a validated :class:`VerticalSpec`."""
+
+    text = str(reference)
+    if not text.startswith(PRESET_PREFIX):
+        raise VerticalSpecError(
+            f"{text!r} is not a preset reference; spell it {PRESET_PREFIX}NAME"
+        )
+    body = text[len(PRESET_PREFIX):]
+    name, _, raw_options = body.partition(":")
+    name = name.strip().lower()
+    if name not in _PRESET_PARAMETERS:
+        raise VerticalSpecError(
+            f"no vertical preset named {name!r}; presets: {list(preset_names())}"
+        )
+    allowed = _PRESET_PARAMETERS[name]
+    options: dict[str, Any] = {}
+    for piece in filter(None, (part.strip() for part in raw_options.split(","))):
+        key, sep, value = piece.partition("=")
+        key = key.strip()
+        if not sep or key not in allowed:
+            raise VerticalSpecError(
+                f"vertical preset {name!r} takes {sorted(allowed) or 'no options'}; "
+                f"got {piece!r}"
+            )
+        try:
+            options[key] = allowed[key](value.strip())
+        except ValueError as error:
+            raise VerticalSpecError(
+                f"vertical preset {name!r}: {key}={value!r} is not a "
+                f"{allowed[key].__name__}"
+            ) from error
+    if name == "default":
+        spec = VerticalSpec()
+        spec.validate()
+        return spec
+    return VerticalSpec.les(**options)
+
+
+def load_vertical_spec(value: str | Path) -> VerticalSpec:
+    """A ``--vertical-spec`` argument: a JSON file or a ``preset:`` reference."""
+
+    if is_preset_reference(value):
+        return resolve_preset(str(value))
+    return VerticalSpec.from_file(value)
+
+
+def _materialize_spec_file(value: str | Path, output: Path) -> Path:
+    """The file a receipt names for ``value``.
+
+    A JSON path is returned resolved.  A preset is written as the canonical
+    bytes of its declaration beside ``output``, so the receipt carries a
+    real path and a real digest for what was built, exactly as for a file.
+    """
+
+    if not is_preset_reference(value):
+        return Path(value).expanduser().resolve(strict=True)
+    spec = resolve_preset(str(value))
+    target = output.with_name(output.name + ".vertical-spec.json")
+    target.write_bytes(spec.canonical_bytes())
+    return target
 
 
 def _sha256_file(path: Path) -> str:
@@ -601,8 +918,12 @@ def materialize_vertical_artifact(
 
     grid_path = Path(grid).expanduser().resolve(strict=True)
     static_path = Path(static).expanduser().resolve(strict=True)
-    spec_file = Path(spec_path).expanduser().resolve(strict=True)
     out = Path(output).expanduser().resolve()
+    if is_preset_reference(spec_path) and not out.parent.is_dir():
+        raise VerticalSpecError(
+            f"vertical artifact output directory {out.parent} does not exist; create it"
+        )
+    spec_file = _materialize_spec_file(spec_path, out)
     receipt = (
         Path(receipt_path).expanduser().resolve()
         if receipt_path is not None
@@ -725,7 +1046,7 @@ def materialize_vertical_artifact(
         "inputs": {
             "grid": {"path": str(grid_path), "bytes": grid_path.stat().st_size, "sha256": grid_sha},
             "static": {"path": str(static_path), "bytes": static_path.stat().st_size, "sha256": static_sha},
-            "vertical_spec": {"path": str(spec_file), "bytes": spec_file.stat().st_size, "file_sha256": _sha256_file(spec_file), "canonical_sha256": spec.sha256(), "declaration": spec.to_mapping()},
+            "vertical_spec": {"path": str(spec_file), "bytes": spec_file.stat().st_size, "file_sha256": _sha256_file(spec_file), "canonical_sha256": spec.sha256(), "declaration": spec.to_mapping(), "preset": str(spec_path) if is_preset_reference(spec_path) else None, "column": les_layer_report(spec) if spec.scheme == "specified" else None},
             "producer_sources": {
                 "vertical.py": _sha256_file(Path(__file__).with_name("vertical.py")),
                 "vertical_spec.py": _sha256_file(Path(__file__)),

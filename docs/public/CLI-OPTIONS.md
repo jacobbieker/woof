@@ -675,7 +675,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--dx-m` | target grid spacing over the sites (default 100) |
 | `--hours` | forecast length in hours (default 24) |
 | `--max-domains` | refuse plans with more high-resolution domains |
-| `--nz` | vertical levels (default: the planner's ladder) |
+| `--nz` | vertical levels (default: the planner's ladder; hex-swath: 55, or 3..80 priced at that column) |
 | `--outdir DIR` | directory for plan.json and emitted configs |
 | `--parent-dx-m` | outer parent grid spacing (default: chosen by the planner) |
 | `--source` | initial/boundary condition source (default: the one woof domain emits) |

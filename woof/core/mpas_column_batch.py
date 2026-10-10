@@ -271,6 +271,11 @@ _SPECIES = _SPECIES_BY_SCHEME["wsm6"]
 #: drift apart.
 _MP_PHYSICS_BY_SCHEME = {"wsm6": 6, "p3": 50, "thompson_aero": 28}
 
+#: ``pbl_scheme`` -> WRF ``bl_pbl_physics``.  "ysu" is the published
+#: configuration; "off" is WRF's bl_pbl_physics=0 (surface layer and LSM
+#: still run, no PBL tendencies), for a caller resolving turbulence itself.
+_BL_PBL_PHYSICS_BY_SCHEME = {"ysu": 1, "off": 0}
+
 #: Scheme rows whose driver arm binds a GRAUPEL accumulator, and so
 #: report ``graupelncv`` in the per-call receipt and ``GRAUPELNC`` in
 #: the buckets.  P3's single ice category has neither
@@ -645,7 +650,7 @@ class MpasColumnBatchPhysics:
                  vegfra=50.0, tsk=300.0, tmn=285.0, xice=0.0, snow=0.0,
                  snow_depth=0.0, soil_temperature=285.0,
                  soil_moisture=0.30, xice_threshold=0.5,
-                 wsm6_hail_opt=0):
+                 wsm6_hail_opt=0, pbl_scheme="ysu"):
         # ---- pure validation FIRST: every refusal below fires before a
         # single device allocation, so the CPU-hermetic contract tests
         # can exercise the whole refusal surface without touching a GPU.
@@ -681,6 +686,23 @@ class MpasColumnBatchPhysics:
                 "would be silently ignored, which reads as "
                 "configuration the run does not have.  Leave it 0 (the "
                 "default)")
+        # The PBL slot.  "ysu" (bl_pbl_physics=1) is the default and the
+        # seam's published configuration; "off" (bl_pbl_physics=0) mirrors
+        # WRF's PBL-off branch for a resolved-turbulence (LES) caller: the
+        # revised-MO surface layer and Noah-MP still run on the surface/PBL
+        # cadence and publish their fluxes, YSU is never called, and the
+        # held du/dv/PBL rates stay zero.  Grell-Freitas reads KPBL, which
+        # only a PBL scheme writes, so GF with the slot off is refused here
+        # exactly as validate_run_config refuses cu_physics=3 without one.
+        if pbl_scheme not in _BL_PBL_PHYSICS_BY_SCHEME:
+            raise ValueError(
+                f"pbl_scheme must be one of "
+                f"{sorted(_BL_PBL_PHYSICS_BY_SCHEME)}, got {pbl_scheme!r}")
+        if pbl_scheme == "off" and cumulus_scheme == "gf":
+            raise ValueError(
+                "pbl_scheme='off' with cumulus_scheme='gf': Grell-Freitas "
+                "indexes the column at KPBL, which only a PBL scheme "
+                "writes; select no cumulus scheme with the PBL slot off")
         threshold = float(xice_threshold)
         if not np.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
             raise ValueError(
@@ -757,7 +779,7 @@ class MpasColumnBatchPhysics:
             **aerosol_source,
             ra_physics=4, ra_rrtmg_variant=RRTMG_VARIANT_LEGACY,
             sf_sfclay_physics=1, sf_surface_physics=4,
-            bl_pbl_physics=1,
+            bl_pbl_physics=_BL_PBL_PHYSICS_BY_SCHEME[pbl_scheme],
             cu_physics=cadences["cu_physics"],
             ishallow=int(gf_ishallow),
             radt=cadences["radt_minutes"],
@@ -768,6 +790,12 @@ class MpasColumnBatchPhysics:
         self._cadences = cadences
         self._dt = float(cadences["dt"])
         self._nz, self._ncol = nz, ncol
+        self._pbl_scheme = pbl_scheme
+        #: The counter that says the surface/PBL stack ran this step: the
+        #: PBL slot's ("ysu") when a PBL scheme is selected, the surface
+        #: layer's when the slot is off -- the stack still runs on its
+        #: cadence, it just has no PBL member.
+        self._surface_pbl_counter = "ysu" if pbl_scheme != "off" else "sfclay"
         self._start_time = start_time
         self._microphysics_scheme = microphysics_scheme
         self._has_graupel = microphysics_scheme in _GRAUPEL_SCHEMES
@@ -802,6 +830,10 @@ class MpasColumnBatchPhysics:
             # restore refuses on the identity comparison (the key is
             # present on one side only).
             self._identity["microphysics"] = microphysics_scheme
+        if pbl_scheme != "ysu":
+            # Same asymmetry, same reason: a YSU identity stays
+            # byte-identical, and a restore across the PBL slot refuses.
+            self._identity["pbl_scheme"] = pbl_scheme
 
         # ---- device construction from here on --------------------------
         import cupy as cp
@@ -1135,7 +1167,8 @@ class MpasColumnBatchPhysics:
             step_index=self._step_index,
             elapsed_seconds=state.elapsed_seconds,
             radiation_ran=after["radiation"] > before["radiation"],
-            surface_pbl_ran=after["ysu"] > before["ysu"],
+            surface_pbl_ran=(after[self._surface_pbl_counter]
+                             > before[self._surface_pbl_counter]),
             cumulus_ran=after["cumulus"] > before["cumulus"])
         self._pending_phase = _PHASE2
         return result

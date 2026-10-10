@@ -534,7 +534,9 @@ def prepare_vertical_source(arguments: argparse.Namespace) -> VerticalSource:
         capsule=artifact,
         reference=artifact,
         summary=summary,
-        vertical_spec=arguments.vertical_spec,
+        # A ``preset:`` reference is materialized as a JSON file beside the
+        # artifact; the receipt names that file, so its digest is real.
+        vertical_spec=Path(payload["inputs"]["vertical_spec"]["path"]),
         vertical_artifact_receipt=receipt,
     )
 
@@ -555,7 +557,7 @@ def add_init_parser(commands: Any) -> None:
     parser.add_argument("--met", type=Path, help="WPS intermediate file, or a directory holding exactly one")
     parser.add_argument("--static", type=Path, help="generated/published static file")
     parser.add_argument("--grid", type=Path, default=None, help="grid file; required in native-free mode")
-    parser.add_argument("--vertical-spec", type=Path, default=None, help="versioned JSON declaration for native-free construction")
+    parser.add_argument("--vertical-spec", type=Path, default=None, help="versioned JSON declaration for native-free construction, or a named preset: preset:default (55-level tc) or preset:les[:levels=N,dz_surface_m=M,top_m=T,surface_layers=K] (80 levels from 20 m, the deepest column the forecast runs)")
     parser.add_argument("--vertical-artifact", type=Path, default=None, help="durable constructed artifact path (default: <out>.vertical.nc)")
     parser.add_argument("--capsule", type=Path, default=None, help="explicit compatibility-only native init-class capsule")
     parser.add_argument("--reference", type=Path, default=None, help="explicit compatibility-only native reference")

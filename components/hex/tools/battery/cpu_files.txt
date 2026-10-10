@@ -270,3 +270,4 @@ tests/test_deformation_geometry_precision.py
 # rounding; the compensated CPU-authority recovery and its sub-anchor gate.
 # Synthetic patch, no card.
 tests/test_large_step_compensation.py
+tests/test_les_column.py

@@ -174,13 +174,26 @@ def test_parent_dx_off_the_ladder_is_refused(tmp_path):
 
 def test_other_controls_are_refused(tmp_path):
     with pytest.raises(plan_hex.HexPlanRefusal, match="--nz"):
-        _plan(tmp_path, nz=80)
+        _plan(tmp_path, nz=2)
+    with pytest.raises(plan_hex.HexPlanRefusal, match="--nz"):
+        _plan(tmp_path, nz=plan_hex.HEX_MAX_LEVELS + 1)
     with pytest.raises(plan_hex.HexPlanRefusal, match="YYYY-MM-DDTHH"):
         _plan(tmp_path, start="2026-10-10 00:00")
     with pytest.raises(plan_hex.HexPlanRefusal, match="no sites"):
         plan_hex.build_plan(SiteSet(sites=[], heights_m=(10.0,)),
                             outdir=tmp_path / "plan", dx_m=937.5)
-    assert _plan(tmp_path, nz=55).domains
+    native = _plan(tmp_path, nz=55).domains[0]
+    assert "levels" not in native.mesh
+
+
+def test_a_declared_column_is_priced_at_its_level_count(tmp_path):
+    native = _plan(tmp_path / "a").domains[0]
+    deep = _plan(tmp_path / "b", nz=80).domains[0]
+    assert deep.mesh["levels"] == 80
+    assert "preset:les:levels=80" in deep.mesh["vertical_spec"]
+    assert deep.extra["capacity"]["levels"] == 80
+    assert (deep.extra["capacity"]["required_mib"]
+            > native.extra["capacity"]["required_mib"])
 
 
 def test_generator_refusal_refuses_the_plan(tmp_path, monkeypatch):

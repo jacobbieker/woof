@@ -138,7 +138,10 @@ STATED LIMITS, ON PAGE ONE OF THE MODULE.
   merged tip, and carry :data:`PIN_RESTATEMENT_BYTES` for it.
 * Every measurement in this module is 55 vertical levels, float32, WSM6 + GF
   + YSU + YSU-GWDO + revised-MO + NoahMP + cloud fraction + legacy RRTMG.
-  The tiled-workspace terms are functions of ``nz``; nothing else here is.
+  The tiled-workspace terms are functions of ``nz``.  The per-cell slope is
+  priced per level for a DEEPER column (``levels / 55``, derived, labelled
+  so in the row) and kept at its measured 55-level value for a shallower
+  one; the cores are column-independent.
 * The four-swath spread that opened this lane is EXPLAINED IN MECHANISM but
   NOT SEPARATED IN MEASUREMENT: the four runs share card, pin, timestep,
   schedule and radiation cadence, so arena placement is the only candidate
@@ -179,6 +182,8 @@ __all__ = [
     "TiledWorkspace",
     "YSU_WORKSPACE",
     "card_profile_from_attributes",
+    "model_at_levels",
+    "wsm6_local_frame_bytes",
     "model_for_card",
     "native_device_floor_bytes",
     "radiation_chunk_columns",
@@ -194,8 +199,9 @@ __all__ = [
 MIB = 1024**2
 
 #: The vertical level count every measurement in this module was taken at.
-#: The tiled-workspace terms are functions of it; the per-cell slope and the
-#: cores are NOT re-derivable at another ``nz`` from anything measured here.
+#: The tiled-workspace terms are functions of it, and the per-cell slope is
+#: scaled by ``levels / 55`` for a deeper column
+#: (:meth:`ShapedFootprintModel.level_scale`); the cores are not.
 MODEL_VERTICAL_LEVELS = 55
 
 #: The native x4.163842 cell count the frozen proof runs at.  Restated here
@@ -471,6 +477,31 @@ PIN_RESTATEMENT_BYTES = int(round(484.0 * MIB))
 #: derived row conservative.
 WIDEST_LAUNCHED_LOCAL_FRAME_BYTES = 7_216
 
+#: ``wsm6_column``'s frame follows its compile-time tier, not the 55-level
+#: column every row was measured at: ``woof/core/wsm6.py`` compiles the 64
+#: tier up to 64 levels and the 80 tier above that, and the frame grows by
+#: exactly 112 B per level between them (7,216 B at 64, 9,008 B at 80,
+#: re-measured on the reference card; ``woof.core.preflight.WSM6_TIER_FRAME``).
+#: Restated so this module stays stdlib-only; a test holds them equal.
+WSM6_SHALLOW_TIER_LEVELS = 64
+WSM6_DEEP_TIER_LEVELS = 80
+WSM6_FRAME_BYTES_PER_LEVEL = 112
+
+
+def wsm6_local_frame_bytes(levels: int) -> int:
+    """The widest launched local frame at this column: WSM6 at its tier."""
+
+    levels = int(levels)
+    if levels > WSM6_DEEP_TIER_LEVELS:
+        raise ValueError(
+            f"{levels} levels is deeper than the {WSM6_DEEP_TIER_LEVELS}-level "
+            "WSM6 tier the engine compiles; no footprint exists for it"
+        )
+    tier = WSM6_SHALLOW_TIER_LEVELS if levels <= WSM6_SHALLOW_TIER_LEVELS else WSM6_DEEP_TIER_LEVELS
+    return WIDEST_LAUNCHED_LOCAL_FRAME_BYTES + WSM6_FRAME_BYTES_PER_LEVEL * (
+        tier - WSM6_SHALLOW_TIER_LEVELS
+    )
+
 
 # ---------------------------------------------------------------------------
 # the model
@@ -494,6 +525,45 @@ class ShapedFootprintModel:
     derived_from: str | None = None
 
     # -- the terms, each nameable on its own ------------------------------
+    def level_scale(self) -> float:
+        """How much deeper this column is than the one the slope was measured on.
+
+        The per-cell slope is measured at :data:`MODEL_VERTICAL_LEVELS` and
+        is, to within the 2-D surface/soil carriers, all 3-D arrays: every
+        prognostic, diagnostic, tendency and physics carrier the run holds
+        is ``[nVertLevels(+1), nCells|nEdges]``.  A deeper column therefore
+        scales the slope by ``levels / 55``.  A SHALLOWER column is NOT
+        scaled down: the 2-D share of the slope does not shrink with the
+        column and no arm measured how much of it there is, so the measured
+        55-level slope stays a ceiling.  The cores are not scaled (they are
+        mesh- and column-independent by construction: kernel images, the
+        CUDA context, the local-memory backing store).
+        """
+
+        levels = int(self.levels)
+        if levels <= MODEL_VERTICAL_LEVELS:
+            return 1.0
+        return levels / float(MODEL_VERTICAL_LEVELS)
+
+    def level_bytes_per_cell(self) -> float:
+        """The slope a run at ``self.levels`` is priced with."""
+
+        return float(self.bytes_per_cell) * self.level_scale()
+
+    def local_store_extra_bytes(self) -> int:
+        """Backing store a deeper WSM6 tier adds to the measured core.
+
+        The core holds CUDA's per-context local-memory backing store at the
+        64-tier frame (:data:`WIDEST_LAUNCHED_LOCAL_FRAME_BYTES`) times the
+        card's resident threads.  Above 64 levels WSM6 compiles its 80 tier,
+        whose frame is 1,792 B wider, and CUDA reserves that much more per
+        resident thread at first launch -- memory the pool never reports.
+        Zero for every column of 64 levels or fewer.
+        """
+
+        extra = wsm6_local_frame_bytes(int(self.levels)) - WIDEST_LAUNCHED_LOCAL_FRAME_BYTES
+        return max(0, extra) * int(self.card.resident_threads)
+
     def tiled_bytes(self, cells: int) -> int:
         return sum(
             ws.bytes_for(int(cells), self.card, self.levels)
@@ -511,7 +581,8 @@ class ShapedFootprintModel:
             raise ValueError("cells must be positive")
         return (
             float(self.core_bytes)
-            + float(self.bytes_per_cell) * int(cells)
+            + float(self.local_store_extra_bytes())
+            + self.level_bytes_per_cell() * int(cells)
             + float(self.tiled_bytes(int(cells)))
         )
 
@@ -578,7 +649,7 @@ class ShapedFootprintModel:
 
         margin = self.margin_bytes() if margin_bytes is None else int(margin_bytes)
         budget = int(budget_bytes) - margin
-        if budget <= 0 or self.bytes_per_cell <= 0.0:
+        if budget <= 0 or self.level_bytes_per_cell() <= 0.0:
             return 0
         if self.predict_bytes(1) > budget:
             return 0
@@ -604,6 +675,22 @@ class ShapedFootprintModel:
             "bytes_per_cell": float(self.bytes_per_cell),
             "configuration": self.configuration,
             "levels": int(self.levels),
+            **(
+                {}
+                if self.level_scale() == 1.0
+                else {
+                    "level_scaled_bytes_per_cell": self.level_bytes_per_cell(),
+                    "local_store_extra_bytes": self.local_store_extra_bytes(),
+                    "level_scale": self.level_scale(),
+                    "level_scaling": (
+                        f"DERIVED, NOT MEASURED: the {MODEL_VERTICAL_LEVELS}-level "
+                        f"slope times {int(self.levels)}/{MODEL_VERTICAL_LEVELS}; "
+                        "every per-cell carrier is a column, so a deeper "
+                        "column scales the slope.  One ledger arm at this "
+                        "level count replaces it"
+                    ),
+                }
+            ),
             "card": self.card.as_dict(),
             "measured": bool(self.measured),
             "derived_from": self.derived_from,
@@ -784,7 +871,9 @@ def model_for_card(
             configuration=model.configuration,
             provenance=model.provenance,
             levels=int(levels),
-            measured=True,
+            # A deeper column prices its slope by derivation, so the row is
+            # no longer a measurement of what this run allocates.
+            measured=int(levels) <= MODEL_VERTICAL_LEVELS,
         )
 
     reference_key = row_key(configuration, REFERENCE_CARD)
@@ -856,6 +945,21 @@ def required_free_bytes(
 
     model = FOOTPRINT_MODEL if model is None else model
     return model.required_bytes(int(cells), margin_bytes)
+
+
+def model_at_levels(levels: int) -> ShapedFootprintModel:
+    """The row of record priced at ``levels``: the bind's per-mesh floor.
+
+    The 55-level column returns :data:`FOOTPRINT_MODEL` itself, so every
+    existing row's floor is the same object and the same number as before.
+    """
+
+    levels = int(levels)
+    if levels < 1:
+        raise ValueError(f"levels must be positive, got {levels!r}")
+    if levels == MODEL_VERTICAL_LEVELS:
+        return FOOTPRINT_MODEL
+    return model_for_card(REFERENCE_CARD, "global", levels)
 
 
 def native_device_floor_bytes() -> int:

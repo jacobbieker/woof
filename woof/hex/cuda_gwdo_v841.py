@@ -67,7 +67,20 @@ RV_F32 = np.float32(461.6)
 CP_F32 = np.float32(np.float32(7.0) * RD_F32 / np.float32(2.0))
 EP1_F32 = np.float32(RV_F32 / RD_F32 - np.float32(1.0))
 PI_F32 = np.float32(3.141592653589793)
+#: The column the GWDO contract was written and anchored at, and the column
+#: its guards check.  ``mpas_mesh_binding.bind_mesh`` rebinds it to a
+#: registered mesh's own column (as it rebinds ``X4_DT_SECONDS_F32``), and
+#: the kernel is compiled at that length: the source is byte-identical at 55
+#: and a deeper column is the same source with only ``GWDO_NLEV`` changed
+#: (:func:`gwdo_kernel_source`).
 X4_N_VERT_LEVELS = 55
+#: The column the authority document and the pinned kernel digest name.
+GWDO_ANCHORED_LEVELS = 55
+#: Longest column the per-thread arrays may hold.  The kernel keeps twelve
+#: float columns per thread in local memory; at 160 levels that is 7.7 KiB,
+#: still inside the widest launched frame the device-admission model prices
+#: (``WIDEST_LAUNCHED_LOCAL_FRAME_BYTES``).
+GWDO_MAX_LEVELS = 160
 X4_DT_SECONDS_F32 = np.float32(120.0)
 X4_NOMINAL_MIN_DC_M_F32 = np.float32(25_000.0)
 
@@ -549,13 +562,27 @@ class CudaYsuGwdoResultV841:
         return {
             "schema": CUDA_GWDO_V841_SCHEMA,
             "contract_sha256": self.contract_sha256,
-            "kernel_sha256": CUDA_GWDO_V841_KERNEL_SHA256,
+            # The digest of the source that EXECUTED: the anchored one at
+            # 55 levels, the level variant's otherwise (which also carries
+            # the anchored digest it was derived from).
+            "kernel_sha256": gwdo_kernel_variant(
+                int(self.rublten.shape[0])
+            )["kernel_sha256"],
             "selector": "bl_ysu_gwdo",
             "time_seconds": self.time_seconds,
             "shape": list(self.rublten.shape),
             "validation_d2h": self.validation_d2h.as_dict(),
             "transactional": True,
             "persistent_state": "none",
+            **(
+                {}
+                if int(self.rublten.shape[0]) == GWDO_ANCHORED_LEVELS
+                else {
+                    "kernel_level_variant": gwdo_kernel_variant(
+                        int(self.rublten.shape[0])
+                    )
+                }
+            ),
         }
 
 
@@ -689,7 +716,9 @@ def bl_ysu_gwdo_cpu_oracle_v841(
 
     nlev, ncells = np.asarray(u_p).shape
     if nlev != X4_N_VERT_LEVELS or ncells <= 0:
-        raise ValueError("CPU GWD oracle requires exact x4 55-level columns")
+        raise ValueError(
+            f"CPU GWD oracle requires the bound {X4_N_VERT_LEVELS}-level columns"
+        )
     shape = (nlev, ncells)
     dynamic = {
         "u_p": u_p,
@@ -1475,7 +1504,48 @@ extern "C" __global__ void bl_ysu_gwdo_v841_f32(
 
 CUDA_GWDO_V841_KERNEL_SHA256 = sha256(_CUDA_SOURCE.encode("utf-8")).hexdigest()
 _KERNEL_NAME = "bl_ysu_gwdo_v841_f32"
-_KERNELS: dict[int, Any] = {}
+_KERNELS: dict[tuple[int, int], Any] = {}
+_NLEV_DEFINE = "#define GWDO_NLEV 55\n"
+
+
+def gwdo_kernel_source(nlev: int) -> str:
+    """The kernel source for an ``nlev`` column.
+
+    At the anchored 55 levels this is ``_CUDA_SOURCE`` itself, byte for byte,
+    so the pinned kernel digest is the executed one.  Any other column is the
+    same source with only the ``GWDO_NLEV`` line changed: the kernel takes
+    ``nlev`` at run time and the define sizes its per-thread arrays and its
+    own guard, nothing else.
+    """
+
+    nlev = int(nlev)
+    if nlev == GWDO_ANCHORED_LEVELS:
+        return _CUDA_SOURCE
+    if not 3 <= nlev <= GWDO_MAX_LEVELS:
+        raise ValueError(
+            f"YSU-GWDO column of {nlev} levels is outside 3..{GWDO_MAX_LEVELS}; "
+            "its per-thread arrays would exceed the priced local frame"
+        )
+    if _CUDA_SOURCE.count(_NLEV_DEFINE) != 1:  # pragma: no cover - source guard
+        raise RuntimeError("GWDO source no longer carries one GWDO_NLEV define")
+    return _CUDA_SOURCE.replace(_NLEV_DEFINE, f"#define GWDO_NLEV {nlev}\n")
+
+
+def gwdo_kernel_variant(nlev: int) -> dict[str, Any]:
+    """What a receipt records about the column the kernel was compiled at."""
+
+    source = gwdo_kernel_source(nlev)
+    return {
+        "levels": int(nlev),
+        "anchored_levels": GWDO_ANCHORED_LEVELS,
+        "anchored_kernel_sha256": CUDA_GWDO_V841_KERNEL_SHA256,
+        "kernel_sha256": sha256(source.encode("utf-8")).hexdigest(),
+        "derivation": (
+            "the anchored source"
+            if int(nlev) == GWDO_ANCHORED_LEVELS
+            else "the anchored source with only the GWDO_NLEV define changed"
+        ),
+    }
 _REQUIRED_KERNEL_CACHE_OPTIONS = ("--std=c++17", "--fmad=false")
 
 
@@ -1506,16 +1576,35 @@ def _require_kernel_cache_contract(cache: KernelCache) -> None:
         )
 
 
-def _kernel(cache: KernelCache) -> Any:
+def _kernel(cache: KernelCache, nlev: int = GWDO_ANCHORED_LEVELS) -> Any:
     _require_kernel_cache_contract(cache)
-    result = _KERNELS.get(id(cache))
+    key = (id(cache), int(nlev))
+    result = _KERNELS.get(key)
     if result is None:
+        # ONE module key whatever the column: the limited-area launch
+        # observer recognises this module's launches by it
+        # (cuda_regional_forecast_v841.SELF_MANAGED_GARBAGE_MODULES), and a
+        # per-column key would let the scrub rewrite the GWDO's padded
+        # column.  The compile manifest refuses one key for two sources, so
+        # a cache holds ONE column's kernel -- a run binds one column -- and
+        # a second column on the same cache is refused here by name rather
+        # than inside the manifest.
+        other = [
+            levels for (cache_id, levels) in _KERNELS
+            if cache_id == id(cache) and levels != int(nlev)
+        ]
+        if other:
+            raise ValueError(
+                f"this KernelCache already holds the {other[0]}-level YSU-GWDO "
+                f"kernel; a {int(nlev)}-level column needs its own cache (one "
+                "run binds one column)"
+            )
         result = cache.raw_kernel(
             _KERNEL_NAME,
-            _CUDA_SOURCE,
+            gwdo_kernel_source(nlev),
             module_key="hexcore.cuda_gwdo_v841",
         )
-        _KERNELS[id(cache)] = result
+        _KERNELS[key] = result
     return result
 
 
@@ -1568,7 +1657,7 @@ def run_bl_ysu_gwdo_cuda_v841(
     }
     invalid = cp.zeros((1,), dtype=cp.int32)
     threads = 64
-    _kernel(kernel_cache)(
+    _kernel(kernel_cache, nlev)(
         ((ncells + threads - 1) // threads,),
         (threads,),
         (
@@ -1652,7 +1741,11 @@ __all__ = [
     "X4_DT_SECONDS_F32",
     "X4_NOMINAL_MIN_DC_M_F32",
     "X4_N_VERT_LEVELS",
+    "GWDO_ANCHORED_LEVELS",
+    "GWDO_MAX_LEVELS",
     "bl_ysu_gwdo_cpu_oracle_v841",
+    "gwdo_kernel_source",
+    "gwdo_kernel_variant",
     "gwdo_contract_evidence_v841",
     "run_bl_ysu_gwdo_cuda_v841",
 ]
