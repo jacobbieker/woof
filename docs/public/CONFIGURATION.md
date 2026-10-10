@@ -45,7 +45,9 @@ statistical equivalence or forecast accuracy.
 
 WRF's `iofields_filename`, as a selection over the inventory the run
 already produces. `preset = "full"` (the default) writes everything;
-`"minimal"` and `"severe"` are named sets; `history_vars` /
+`"minimal"`, `"severe"` and `"energy"` (what a power-grid site
+forecast samples, including `SWDDNI`/`SWDDIF`/`COSZEN`) are named sets;
+`history_vars` /
 `history_drop` are explicit include and exclude lists, mutually
 exclusive. The same table sits inline on a `[[domain]]` as
 `output = { ... }` and overrides the tree-wide one for that domain, as

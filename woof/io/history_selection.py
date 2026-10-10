@@ -169,6 +169,43 @@ _SEVERE_EXTRA_FIELDS: frozenset[str] = frozenset({
     "REFL_10CM",
 })
 
+#: The ``energy`` preset's science: what a forecast along power lines,
+#: substations and renewable sites is sampled from (``woof energy
+#: extract``).  Stated as its own add-list, not built from ``minimal``,
+#: because its reader is a site sampler and not a render panel.
+#:
+#: * Winds and temperature through the column (``U``, ``V``, ``W``, ``T``
+#:   and the height/pressure coordinate ``PH``/``PHB``/``P``/``PB``) for
+#:   hub-height and conductor-height interpolation.
+#: * Hydrometeors for icing and precipitation loading.
+#: * The near-surface state and the surface shortwave TRIO a PV
+#:   plane-of-array model needs: global ``SWDOWN``, direct-normal
+#:   ``SWDDNI``, diffuse ``SWDDIF`` and the zenith cosine ``COSZEN``.
+#: * ``SINALPHA``/``COSALPHA`` to rotate grid winds to earth-relative
+#:   bearings against a line's azimuth, and the georeference.
+#:
+#: A member the run does not produce is simply absent from its tape, the
+#: rule every preset already follows (a preset is a filter over what the
+#: run produced, so ``severe`` on a warm-rain scheme has no ``QICE`` and
+#: says nothing): ``SWDDNI``/``SWDDIF`` need a shortwave scheme that
+#: computes a direct/diffuse split (``ra_sw_physics = 4``), ``COSZEN``
+#: needs radiation on, ``QICE``/``QSNOW``/``QGRAUP`` need an ice scheme.  The
+#: consumer reads that absence as "not produced"; nothing is zero-filled.
+_ENERGY_FIELDS: frozenset[str] = frozenset({
+    # Column dynamics and the vertical coordinate.
+    "U", "V", "W", "T", "PH", "PHB", "HGT", "P", "PB",
+    # Moisture and hydrometeors (icing, loading).
+    "QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP",
+    # Near-surface state.
+    "T2", "Q2", "U10", "V10", "PSFC",
+    # Surface shortwave: global, direct-normal, diffuse, zenith cosine.
+    "SWDOWN", "SWDDNI", "SWDDIF", "COSZEN",
+    # Precipitation accumulators.
+    "RAINNC", "RAINC",
+    # Grid rotation and georeference.
+    "SINALPHA", "COSALPHA", "XLAT", "XLONG",
+})
+
 #: Named presets: name -> the set of droppable fields it keeps, or
 #: ``None`` for "everything this run produces".  :data:`STRUCTURAL_FIELDS`
 #: is added to every non-``None`` set at selection time.
@@ -176,6 +213,7 @@ HISTORY_PRESETS: dict[str, frozenset[str] | None] = {
     "full": None,
     "minimal": _MINIMAL_FIELDS,
     "severe": _MINIMAL_FIELDS | _SEVERE_EXTRA_FIELDS,
+    "energy": _ENERGY_FIELDS,
 }
 
 #: What each named preset costs in RENDER PRODUCTS, not in variables.
@@ -195,6 +233,29 @@ PRESET_PRODUCT_COUNTS: dict[str, int] = {
     "full": 162,
     "severe": 162,
     "minimal": 30,
+}
+
+#: Presets measured on a frame of their OWN rather than on the ladder above:
+#: name -> (products kept, products the same frame's full inventory renders,
+#: the basis clause).  Their figures share no basis with
+#: :data:`PRESET_PRODUCT_COUNTS` -- a newer renderer build whose catalog is
+#: larger, a different run -- so they are reported as their own pair and
+#: never mixed into the ladder's 162, and the ladder's per-field
+#: attribution (:data:`PRODUCT_LOSS_ATTRIBUTION`) is not applied to them:
+#: ``energy`` KEEPS ``U,V,W``, ``QVAPOR``, ``P,PB`` and ``PH``.
+#:
+#: ``energy``: rw_wrfbatch --list-products on the 14Z frame of a 2-hour
+#: 3 km HRRR-forced run (100x80x49, Thompson, RTE+RRTMGP), the full tape
+#: (82 variables) against the same frame trimmed by this preset (37):
+#: ``CATALOG ... renderable=207`` and ``renderable=174``.  What it sheds
+#: that products read is ``REFL_10CM`` (radar products fall back to the
+#: generic hydrometeor dBZ), ``MU``, ``UP_HELI_MAX``, ``OLR``
+#: and the land-surface rows.
+SEPARATELY_MEASURED_PRESET_PRODUCT_COUNTS: dict[str, tuple[int, int, str]] = {
+    "energy": (174, 207,
+               "measured with rw_wrfbatch --list-products on one 3 km "
+               "frame (49 levels, Thompson, RTE+RRTMGP), full tape against "
+               "the same frame trimmed to the preset"),
 }
 
 #: Which fields the loss is attributable to, largest first, read off the
@@ -346,7 +407,9 @@ class HistorySelection:
                 "writes every variable the run produces; 'minimal' keeps "
                 "the 2-D surface state and the accumulators; 'severe' adds "
                 "the storm-scale volumes (winds, theta, hydrometeors, "
-                "REFL_10CM).")
+                "REFL_10CM); 'energy' keeps what a power-grid site forecast "
+                "samples (column winds and theta, hydrometeors, the "
+                "near-surface state, SWDOWN/SWDDNI/SWDDIF/COSZEN).")
         if self.history_vars and self.history_drop:
             raise ValueError(
                 f"[output] of {self.source} sets both history_vars and "
@@ -530,9 +593,13 @@ class HistorySelection:
         printing a measured-looking number nobody measured.
         """
 
+        exact = not (self.history_vars or self.history_drop)
+        separate = SEPARATELY_MEASURED_PRESET_PRODUCT_COUNTS.get(self.preset)
+        if separate is not None and not self.history_vars:
+            return separate[0], separate[1], exact
         total = PRESET_PRODUCT_COUNTS["full"]
         kept = PRESET_PRODUCT_COUNTS.get(self.preset, total)
-        return kept, total, not (self.history_vars or self.history_drop)
+        return kept, total, exact
 
     def warn_lost_products(self, produced, *, where: str) -> None:
         """Name the render products this selection kills, at plan time.
@@ -558,7 +625,18 @@ class HistorySelection:
         if not lost:
             return
         kept, total, exact = self.product_cost()
-        if kept < total:
+        separate = (None if self.history_vars else
+                    SEPARATELY_MEASURED_PRESET_PRODUCT_COUNTS.get(self.preset))
+        if separate is not None:
+            # Its own frame, its own basis: no ladder attribution, which
+            # names fields this preset keeps.
+            cost = (f"keeps {kept} of {total} render products, "
+                    f"{total - kept} lost ({separate[2]})"
+                    if exact else
+                    f"keeps at most {kept} of {total} render products (an "
+                    f"upper bound: this selection narrows "
+                    f"preset={self.preset} further; {separate[2]})")
+        elif kept < total:
             # The named rungs do not exhaust the loss: the ladder's own
             # 162 -> 160 step belongs to the rest of the inventory, and
             # a sentence whose figures do not add up reads as an error
@@ -642,6 +720,7 @@ __all__ = [
     "PRESET_PRODUCT_COUNTS",
     "PRODUCT_COUNT_BASIS",
     "PRODUCT_LOSS_ATTRIBUTION",
+    "SEPARATELY_MEASURED_PRESET_PRODUCT_COUNTS",
     "HISTORY_VOCABULARY",
     "HistorySelection",
     "OUTPUT_KEYS",

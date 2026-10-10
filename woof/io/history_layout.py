@@ -283,6 +283,43 @@ def live_state_history_fields(state) -> dict[str, object]:
     return fields
 
 
+def surface_solar_history_fields(physics) -> dict[str, object]:
+    """WRF's SWDDNI, SWDDIF and COSZEN, exactly where a scheme produced them.
+
+    Called only while radiation runs.  Each field rides its producer's
+    declaration, the rule OLR follows, so the variable's PRESENCE is the
+    statement that the active shortwave scheme computed it:
+
+    * ``SWDDNI``/``SWDDIF`` -- the surface direct-normal and diffuse
+      shortwave of the scheme's own two-stream solve, written when the
+      shortwave leaf declares ``supplies_surface_direct`` (RTE+RRTMGP and
+      legacy RRTMG, ``ra_sw_physics = 4``).  Dudhia and the analytic proxy
+      have no direct/diffuse split; WRF fills one for Dudhia with the
+      driver's empirical Ruiz-Arias model, which this does NOT publish as
+      model output, so their runs carry neither field.  Under
+      ``swint_opt = 1`` the per-step interpolated pair in ``fields`` is
+      published instead, as WRF's driver rewrites both every step there.
+    * ``COSZEN`` -- the radiation-time zenith cosine the shortwave ran at
+      (``xtime + radt/2``), held between calls as WRF holds it.
+
+    Absent from the dict, never zero-filled, when nothing produced them.
+    """
+    output: dict[str, object] = {}
+    dni = getattr(physics, "surface_dni", None)
+    dif = getattr(physics, "surface_dif", None)
+    fields = physics.fields
+    if (dni is not None and getattr(physics, "swint", None) is not None
+            and "swddni" in fields and "swddif" in fields):
+        dni, dif = fields["swddni"], fields["swddif"]
+    if dni is not None and dif is not None:
+        output["SWDDNI"] = dni
+        output["SWDDIF"] = dif
+    coszen = getattr(physics, "radiation_coszen", None)
+    if coszen is not None:
+        output["COSZEN"] = coszen
+    return output
+
+
 def physics_history_fields(physics) -> dict[str, object]:
     """WRF diagnostic name -> live FP32 device surface field.
 
@@ -372,6 +409,7 @@ def physics_history_fields(physics) -> dict[str, object]:
         # zero when nothing produced them, and this follows that.
         if physics.olr is not None:
             output["OLR"] = physics.olr
+        output.update(surface_solar_history_fields(physics))
     output["RAINC"] = (physics._zero_accumulator() if physics.rainc is None
                        else physics.rainc)
     output["RAINSH"] = physics._zero_accumulator()
@@ -471,6 +509,12 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
             radiation_active=radiation_enabled(cfg),
             topo_shortwave=object() if topography else None,
             olr=carrier(surface) if "olr" in allocated else None,
+            surface_dni=(carrier(surface) if "surface_dni" in allocated
+                         else None),
+            surface_dif=(carrier(surface) if "surface_dif" in allocated
+                         else None),
+            radiation_coszen=(carrier(surface)
+                              if "radiation_coszen" in allocated else None),
             rainc=carrier(surface) if cfg.cu_physics else None,
             rthratenlw=carrier(mass), rthratensw=carrier(mass),
             _zero_accumulator=lambda: carrier(surface),
