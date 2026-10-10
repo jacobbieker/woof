@@ -195,6 +195,10 @@ tests/test_regional_runtime.py
 # They arrived with the door and were named by no tier list, which is the
 # forty-first file tests/test_tier_membership.py exists to catch.
 tests/test_hrrr_intermediate.py
+# The wrfout forcing source: each test writes a tiny synthetic Lambert wrfout
+# with netCDF4 and runs the engine's NumPy reference operator; no card, no
+# assets, no network.
+tests/test_wrfout_intermediate.py
 tests/test_mesh_point.py
 tests/test_mesh_rows.py
 tests/test_regional_class_band.py
