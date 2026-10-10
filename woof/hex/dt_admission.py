@@ -79,6 +79,8 @@ the mechanism that ruling would use, not the ruling.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import functools
+import json
 import math
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -137,8 +139,27 @@ class DtAnchor:
     #: Carried so a receipt reading a derived row can never mistake it for
     #: a registered one.
     derived_from: str | None = None
+    #: ``None`` for every registered or derived row.  The literal
+    #: :data:`EXPERIMENTAL_TIMESTEP_EVIDENCE` on a record built by the
+    #: opt-in experimental lane (:func:`experimental_dt_anchor`), which is
+    #: never a table row; :meth:`as_dict` then carries it and its reason so
+    #: every receipt quoting the record says what it is.
+    timestep_evidence: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
+        record = self._anchor_dict()
+        if self.timestep_evidence is not None:
+            record["timestep_evidence"] = self.timestep_evidence
+            record["timestep_evidence_reason"] = EXPERIMENTAL_DT_REASON
+        return record
+
+    @property
+    def experimental(self) -> bool:
+        """Whether this record came from the experimental lane, not the table."""
+
+        return self.timestep_evidence == EXPERIMENTAL_TIMESTEP_EVIDENCE
+
+    def _anchor_dict(self) -> dict[str, Any]:
         return {
             "dt_seconds": self.dt_seconds,
             "radiation_seconds": self.radiation_seconds,
@@ -1141,7 +1162,11 @@ def largest_admissible_dt(
     steps = math.ceil(cadence / courant_limit)
     admissible: float | None = None
     rejected_for_clock: list[float] = []
-    for count in range(max(1, steps), int(cadence) * 4 + 1):
+    # The search runs to 4x the cadence in counts (0.25 s at 600 s), and
+    # past it to twice the Courant floor's own count, so a mesh finer than
+    # ~35 m still meets the exact power-of-two divisors (600/4096 s, ...)
+    # rather than a None that blames the mesh.
+    for count in range(max(1, steps), max(int(cadence) * 4, 2 * steps) + 1):
         candidate = cadence / count
         if candidate > courant_limit:
             continue
@@ -1270,6 +1295,8 @@ def require_dt_anchor(
     surface_pbl_seconds: float,
     cumulus_seconds: float | None,
     cumulus_scheme: str | None = "gf",
+    experimental: bool = False,
+    minimum_dc_edge_m: float | None = None,
 ) -> DtAnchor:
     """Admit one configuration at one timestep, or refuse by name.
 
@@ -1278,9 +1305,39 @@ def require_dt_anchor(
     a mismatch could only ever be an error; now that it is holdable, a held
     cadence is a different configuration that earns its own row rather than
     a welded row it fails against.  See :mod:`woof.hex.pbl_cadence`.
+
+    ``experimental=True`` (or a live :func:`experimental_lane` scoped to
+    this exact timestep, which is how the frozen config's ``validate`` --
+    a method with no arguments -- reaches the same decision) opens the
+    EXPERIMENTAL lane for a timestep below the smallest anchor: the record
+    returned is :func:`experimental_dt_anchor`'s, stamped
+    ``experimental-unanchored``, never a table row.  An anchored timestep
+    is answered from the table either way, and an unanchored timestep at or
+    above the smallest anchor is refused exactly as without the flag.
     """
 
     anchor = admitted_timestep(dt_seconds, cumulus_scheme, surface_pbl_seconds)
+    lane = _EXPERIMENTAL_LANE
+    lane_requested = experimental or (
+        lane is not None and lane.dt_seconds == float(dt_seconds)
+    )
+    if anchor is None and lane_requested and below_smallest_anchor(dt_seconds):
+        # The opt-in experimental lane: below the smallest anchor only, and
+        # only on the host-derivable checks (Courant, cadence divisibility,
+        # RK schedule shape, binary64 clock closure).  Anywhere else the
+        # ordinary refusals below stand unchanged.
+        return experimental_dt_anchor(
+            dt_seconds,
+            cumulus_scheme=cumulus_scheme,
+            surface_pbl_seconds=surface_pbl_seconds,
+            radiation_seconds=radiation_seconds,
+            cumulus_seconds=cumulus_seconds,
+            minimum_dc_edge_m=(
+                minimum_dc_edge_m
+                if minimum_dc_edge_m is not None
+                else (None if lane is None else lane.minimum_dc_edge_m)
+            ),
+        )
     if anchor is None:
         # The exact configuration holds no row.  Before saying so, look for
         # the row this caller MEANT: same timestep, same cumulus selection,
@@ -1303,6 +1360,11 @@ def require_dt_anchor(
             )
         raise DtAdmissionError(
             unanchored_refusal(dt_seconds, cumulus_scheme, surface_pbl_seconds)
+            + (
+                ".  " + experimental_lane_not_applicable(dt_seconds)
+                if lane_requested
+                else ""
+            )
         )
     if (
         float(radiation_seconds) != float(anchor.radiation_seconds)
@@ -1567,11 +1629,369 @@ def require_step_clock_coherence(
     }
 
 
+# ---------------------------------------------------------------------------
+# the experimental lane: explicit opt-in, below the smallest anchor only
+# ---------------------------------------------------------------------------
+#: The label every receipt, binding record and history file of a run admitted
+#: through the experimental lane carries under ``timestep_evidence``.
+EXPERIMENTAL_TIMESTEP_EVIDENCE = "experimental-unanchored"
+
+#: The environment switch the forecast door reads ONCE, at the command line,
+#: beside ``--experimental-dt``.  Nothing below the door reads it: the
+#: decision travels as a typed argument from there.
+EXPERIMENTAL_DT_ENV = "WOOF_HEX_EXPERIMENTAL_DT"
+
+#: The ``admitted_on`` stamp of an experimental record.  Not a date, so the
+#: anchor verifier (``tools/mint_dt_anchor.py``) cannot find the schedule
+#: receipt it names and refuses to certify it.
+EXPERIMENTAL_ADMITTED_ON = "EXPERIMENTAL-UNANCHORED"
+
+EXPERIMENTAL_DT_REASON = (
+    "timestep below the smallest anchored timestep, admitted by explicit "
+    "opt-in (woof hex forecast --experimental-dt, or "
+    f"{EXPERIMENTAL_DT_ENV}=1) on the host-derivable checks only: the outer-"
+    "step Courant rule (0.9 x min(dcEdge) / 125 m/s against the mesh's own "
+    "dcEdge), exact radiation/surface-PBL/cumulus cadence divisibility, the "
+    "RK schedule shape and binary64 clock closure over a 24 h run.  NO "
+    "integration anchor, NO physics band and NO native reference exist at "
+    "this timestep, and both registered 5 s rows this lane sits beneath "
+    "record DIVERGES SEVERELY with the cause unmeasured.  This record is not "
+    "an anchor, is not in woof.hex.dt_admission.ADMITTED_TIMESTEPS and "
+    "cannot be certified as one"
+)
+
+
+def smallest_anchored_dt() -> float:
+    """The smallest timestep any registered row anchors (5 s today)."""
+
+    if not ADMITTED_TIMESTEPS:
+        raise DtAdmissionError(
+            "the timestep registry is empty, so there is no smallest anchor "
+            "for the experimental lane to open beneath"
+        )
+    return min(float(anchor.dt_seconds) for anchor in ADMITTED_TIMESTEPS.values())
+
+
+def below_smallest_anchor(dt_seconds: float) -> bool:
+    """Whether ``dt_seconds`` lies strictly below every anchored timestep."""
+
+    try:
+        dt = float(dt_seconds)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(dt) and 0.0 < dt < smallest_anchored_dt()
+
+
+def experimental_lane_not_applicable(dt_seconds: float) -> str:
+    """The sentence appended when the lane was asked for and does not apply."""
+
+    return (
+        f"The experimental lane was requested and does not apply: it opens "
+        f"ONLY for timesteps below the smallest anchored timestep "
+        f"({smallest_anchored_dt():g} s), and config_dt={float(dt_seconds):g} s "
+        f"is not one, so the ordinary anchor rules above govern it unchanged"
+    )
+
+
+def experimental_dt_anchor(
+    dt_seconds: float,
+    *,
+    cumulus_scheme: str | None,
+    surface_pbl_seconds: float | None = None,
+    radiation_seconds: float = RADIATION_CADENCE_SECONDS,
+    cumulus_seconds: float | None = None,
+    minimum_dc_edge_m: float | None,
+    courant_deferred_to: str | None = None,
+) -> DtAnchor:
+    """The synthetic record admitting one sub-anchor timestep, or a refusal.
+
+    NOT A TABLE ROW.  ``ADMITTED_TIMESTEPS`` is never read for this dt and
+    never written: the record exists for the duration of the caller's
+    admission and is stamped ``experimental-unanchored`` everywhere it goes.
+
+    Admitted only when ALL of these hold, each refusing by name:
+
+    * the timestep lies strictly below the smallest anchor;
+    * the outer-step Courant rule against ``minimum_dc_edge_m``, the mesh's
+      own measured ``min(dcEdge)`` (:class:`woof.hex.timestep_admission.
+      CourantPolicy`, the same tolerance as ``admit_timestep``).  A caller
+      with no mesh in hand (the forecast door's row-only pass) must say
+      where the rule IS enforced through ``courant_deferred_to``; with
+      neither, the lane refuses rather than skip the rule;
+    * the radiation cadence divides exactly (:func:`cadence_steps`);
+    * :func:`schedule_receipt` mints clean -- surface/PBL and cumulus
+      cadence integrality, the Grell-Freitas weld, the RK schedule shape and
+      binary64 clock closure over a 24 h run, which is exactly the clock
+      check :func:`largest_admissible_dt` applies, so every value that
+      function returns for a mesh is admitted here for the same mesh.
+
+    The answer is memoised per argument set and per table object: the frozen
+    config re-validates on every commit, and re-proving a 24 h clock each
+    time would cost host seconds per step at a sub-second timestep.  A
+    refusal is never cached (it raises), and swapping the table -- a
+    candidate mint, a test -- keys a fresh answer.
+    """
+
+    def _number(value: float | None) -> float | None:
+        return None if value is None else float(value)
+
+    return _experimental_dt_anchor_cached(
+        float(dt_seconds),
+        None if cumulus_scheme is None else str(cumulus_scheme),
+        _number(surface_pbl_seconds),
+        float(radiation_seconds),
+        _number(cumulus_seconds),
+        _number(minimum_dc_edge_m),
+        None if courant_deferred_to is None else str(courant_deferred_to),
+        id(ADMITTED_TIMESTEPS),
+    )
+
+
+@functools.lru_cache(maxsize=64)
+def _experimental_dt_anchor_cached(
+    dt: float,
+    cumulus_scheme: str | None,
+    surface_pbl_seconds: float | None,
+    radiation_seconds: float,
+    cumulus_seconds: float | None,
+    minimum_dc_edge_m: float | None,
+    courant_deferred_to: str | None,
+    _table_identity: int,
+) -> DtAnchor:
+    dt_seconds = dt
+    if not math.isfinite(dt) or dt <= 0.0:
+        raise DtAdmissionError(
+            f"experimental lane: dt={dt_seconds!r} must be finite and positive"
+        )
+    smallest = smallest_anchored_dt()
+    if not dt < smallest:
+        raise DtAdmissionError(
+            f"experimental lane: dt={dt:g} s is not below the smallest anchored "
+            f"timestep ({smallest:g} s).  The lane opens only beneath the "
+            f"table; an unanchored timestep above it follows the ordinary "
+            f"anchor rules (woof.hex.dt_admission.require_dt_anchor)"
+        )
+    if registered_anchor(dt, cumulus_scheme, surface_pbl_seconds) is not None:
+        raise DtAdmissionError(
+            f"experimental lane: dt={dt:g} s holds a registered anchor, so the "
+            f"table answers it and the experimental lane does not"
+        )
+
+    from .timestep_admission import CourantPolicy
+
+    policy = CourantPolicy()
+    policy.validate()
+    courant: dict[str, Any] = {
+        "policy_speed_m_s": policy.max_characteristic_speed_m_s,
+        "policy_safety_factor": policy.safety_factor,
+    }
+    if minimum_dc_edge_m is None:
+        if not courant_deferred_to:
+            raise DtAdmissionError(
+                f"experimental lane: dt={dt:g} s cannot be admitted without "
+                f"the mesh's own min(dcEdge): the Courant rule stays enforced "
+                f"in this lane and nothing here may skip it"
+            )
+        courant.update({"checked": False, "deferred_to": str(courant_deferred_to)})
+    else:
+        minimum = float(minimum_dc_edge_m)
+        if not math.isfinite(minimum) or minimum <= 0.0:
+            raise DtAdmissionError(
+                f"experimental lane: min(dcEdge)={minimum_dc_edge_m!r} m must "
+                f"be finite and positive"
+            )
+        # The bind's own admission function, so the lane's Courant verdict
+        # and the bind's can never split on a formula or a tolerance.
+        import numpy as np
+
+        from .timestep_admission import (
+            TimestepAdmissionError,
+            admit_timestep,
+            edge_length_authority,
+        )
+
+        try:
+            admitted = admit_timestep(
+                dt,
+                edge_length_authority(
+                    np.array([minimum], dtype=np.float64),
+                    source="experimental-lane min(dcEdge)",
+                ),
+                policy=policy,
+            )
+        except TimestepAdmissionError as error:
+            raise DtAdmissionError(
+                f"experimental lane: dt={dt:.9g} s fails the outer-step Courant "
+                f"rule ({error}).  The experimental lane relaxes the anchor "
+                f"requirement only; Courant stays enforced"
+            ) from error
+        courant.update(
+            {
+                "checked": True,
+                "minimum_dc_edge_m": minimum,
+                "courant_limit_seconds": admitted.maximum_admitted_dt_seconds,
+                "estimated_outer_courant": admitted.estimated_outer_courant,
+            }
+        )
+
+    try:
+        cadence_steps("radiation_seconds", radiation_seconds, dt)
+        schedule = schedule_receipt(
+            dt,
+            radiation_seconds=radiation_seconds,
+            surface_pbl_seconds=surface_pbl_seconds,
+            cumulus_seconds=cumulus_seconds,
+            cumulus_scheme=cumulus_scheme,
+            run_steps=max(1, int(round(86_400.0 / dt))),
+        )
+    except DtAdmissionError as error:
+        raise DtAdmissionError(
+            f"experimental lane: dt={dt:g} s refused on the host-derivable "
+            f"checks the lane keeps enforced: {error}"
+        ) from error
+    cadences = schedule["cadences"]
+    return DtAnchor(
+        dt_seconds=dt,
+        radiation_seconds=float(cadences["radiation_seconds"]),
+        surface_pbl_seconds=float(cadences["surface_pbl_seconds"]),
+        cumulus_seconds=(
+            None
+            if cadences["cumulus_seconds"] is None
+            else float(cadences["cumulus_seconds"])
+        ),
+        cumulus_scheme=cumulus_scheme,
+        meshes=(),
+        card="none -- no card has integrated this timestep for an anchor",
+        admitted_on=EXPERIMENTAL_ADMITTED_ON,
+        schedule_receipt=(
+            f"re-minted on the host at admission and not written to the tree "
+            f"(woof.hex.dt_admission.schedule_receipt: stepra "
+            f"{cadences['stepra']}, stepbl {cadences['stepbl']}, stepcu "
+            f"{cadences['stepcu']}, clock closed over "
+            f"{schedule['clock_closure']['run_steps']} steps); Courant "
+            f"{json.dumps(courant, sort_keys=True)}"
+        ),
+        integration_anchor=(
+            f"NOT MEASURED -- {EXPERIMENTAL_TIMESTEP_EVIDENCE}: no two "
+            f"byte-identical forecasts exist at this timestep"
+        ),
+        native_reference=None,
+        basis=EXPERIMENTAL_DT_REASON,
+        physics_health=(
+            f"NOT MEASURED -- {EXPERIMENTAL_TIMESTEP_EVIDENCE}.  No band was "
+            f"measured at {dt:g} s against a control; the nearest anchored "
+            f"rows ({smallest:g} s) record DIVERGES SEVERELY, cause unmeasured"
+        ),
+        timestep_evidence=EXPERIMENTAL_TIMESTEP_EVIDENCE,
+    )
+
+
+class _ExperimentalLane:
+    """Scope the experimental lane to ONE timestep on ONE mesh for a run.
+
+    ``V841MpasColumnPhysicsConfig.validate`` takes no arguments and is
+    re-run by the CUDA driver at construction and at every commit, so the
+    run's typed ``experimental_dt`` decision reaches it through this scope
+    rather than through an environment read deep in the config: the
+    forecast driver enters it from its own ``--experimental-dt`` argument
+    with the bound mesh's measured ``min(dcEdge)``, and
+    :func:`require_dt_anchor` consults it ONLY when the table has no row for
+    the exact timestep it scopes.  It writes no table row.  Entering
+    re-checks the whole lane, so a scope can never hold a timestep the lane
+    would refuse.
+    """
+
+    def __init__(
+        self,
+        dt_seconds: float,
+        *,
+        minimum_dc_edge_m: float,
+        cumulus_scheme: str | None = None,
+        surface_pbl_seconds: float | None = None,
+    ) -> None:
+        self.dt_seconds = float(dt_seconds)
+        self.minimum_dc_edge_m = float(minimum_dc_edge_m)
+        # Refuse at construction what the lane would refuse at admission,
+        # for the run's OWN cumulus selection and surface/PBL cadence.
+        experimental_dt_anchor(
+            self.dt_seconds,
+            cumulus_scheme=cumulus_scheme,
+            surface_pbl_seconds=surface_pbl_seconds,
+            cumulus_seconds=None if cumulus_scheme is None else self.dt_seconds,
+            minimum_dc_edge_m=self.minimum_dc_edge_m,
+        )
+        self._entered = False
+
+    def __enter__(self) -> "_ExperimentalLane":
+        global _EXPERIMENTAL_LANE
+        if _EXPERIMENTAL_LANE is not None:
+            raise DtAdmissionError(
+                f"an experimental lane is already open at "
+                f"dt={_EXPERIMENTAL_LANE.dt_seconds:g} s; one run, one "
+                f"timestep, one scope"
+            )
+        _EXPERIMENTAL_LANE = self
+        self._entered = True
+        return self
+
+    def __exit__(self, *exception: object) -> None:
+        global _EXPERIMENTAL_LANE
+        if self._entered:
+            _EXPERIMENTAL_LANE = None
+            self._entered = False
+
+
+_EXPERIMENTAL_LANE: _ExperimentalLane | None = None
+
+
+def experimental_lane(
+    dt_seconds: float,
+    *,
+    minimum_dc_edge_m: float,
+    cumulus_scheme: str | None = None,
+    surface_pbl_seconds: float | None = None,
+) -> _ExperimentalLane:
+    """Open the experimental lane for one sub-anchor timestep (a context)."""
+
+    return _ExperimentalLane(
+        dt_seconds,
+        minimum_dc_edge_m=minimum_dc_edge_m,
+        cumulus_scheme=cumulus_scheme,
+        surface_pbl_seconds=surface_pbl_seconds,
+    )
+
+
+def experimental_evidence_fields() -> dict[str, str]:
+    """The two receipt keys every experimental record carries."""
+
+    return {
+        "timestep_evidence": EXPERIMENTAL_TIMESTEP_EVIDENCE,
+        "timestep_evidence_reason": EXPERIMENTAL_DT_REASON,
+    }
+
+
+def active_experimental_lane() -> _ExperimentalLane | None:
+    """The open experimental scope, or ``None`` on every ordinary run."""
+
+    return _EXPERIMENTAL_LANE
+
+
 __all__ = [
     "ADMITTED_TIMESTEPS",
     "CANDIDATE_MINT_AUTHORIZATION",
+    "EXPERIMENTAL_ADMITTED_ON",
+    "EXPERIMENTAL_DT_ENV",
+    "EXPERIMENTAL_DT_REASON",
+    "EXPERIMENTAL_TIMESTEP_EVIDENCE",
     "DtAdmissionError",
     "DtAnchor",
+    "active_experimental_lane",
+    "below_smallest_anchor",
+    "experimental_dt_anchor",
+    "experimental_evidence_fields",
+    "experimental_lane",
+    "experimental_lane_not_applicable",
+    "smallest_anchored_dt",
     "PROVEN_DT_SECONDS",
     "RADIATION_CADENCE_SECONDS",
     "WSM6_MINOR_DT_SECONDS",

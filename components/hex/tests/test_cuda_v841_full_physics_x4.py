@@ -149,8 +149,11 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # the public copy, because the copy carries these pins with it and one
         # of the two digest gates is an admission-time refusal, not a test.
         # Measured inert by AST; the rationale lives beside the runner's pin.
+        # Re-frozen 2026-10-10 for the opt-in experimental sub-anchor lane:
+        # the table is unchanged and the new branch runs only on opt-in; the
+        # rationale lives beside the runner's pin.
         "src/hexcore/dt_admission.py": (
-            "f34c7ea4ef1e89816599dd70070d38f3dd05e3466c77040a526a6c2d1dd3e97f"
+            "c98fe39399afb0da5d6c39e7162711512ac2b8d97c4ba78a0b70f6d74f833d5c"
         ),
         # New pin (surface/PBL cadence, 2026-08-26): this module decides
         # config_bldt_seconds, a knob the frozen registry keys on; the

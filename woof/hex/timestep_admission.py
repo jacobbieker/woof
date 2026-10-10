@@ -148,6 +148,64 @@ def edge_length_authority(
     )
 
 
+def recommended_dt_seconds(maximum_dt_seconds: float) -> float:
+    """The informational recommendation: ``maximum`` rounded DOWN.
+
+    At or above one second the step is 0.1 s, as it always was.  Below one
+    second a 0.1 s step cannot represent the answer -- a 50 m mesh's
+    0.305 s limit would print 0.3 and a 20 m mesh's 0.12 s limit 0.1, and
+    anything finer than 10 m would print 0.0 -- so the step there is the
+    second significant figure (0.30, 0.12, 0.072).
+    """
+
+    maximum = float(maximum_dt_seconds)
+    if not math.isfinite(maximum) or maximum <= 0.0:
+        return 0.0
+    if maximum >= 1.0:
+        return math.floor(maximum * 10.0) / 10.0
+    exponent = math.floor(math.log10(maximum)) - 1
+    step = 10.0 ** exponent
+    # maximum/step can land a hair under a whole count (0.36 / 0.01 is
+    # 35.99999...); the next count is taken only when its ROUNDED value
+    # still sits at or below the maximum, so the result never exceeds it.
+    count = math.floor(maximum / step)
+    if round((count + 1) * step, -exponent) <= maximum:
+        count += 1
+    value = round(count * step, -exponent)
+    while value > maximum and count > 0:
+        count -= 1
+        value = round(count * step, -exponent)
+    return value
+
+
+def history_stride_steps(history_seconds: int, dt_seconds: float) -> int | None:
+    """Steps between history frames, or ``None`` if not a whole number.
+
+    One rule for the forecast door and the forecast driver, which must not
+    disagree.  The exact ratio is used for every timestep: for an integral
+    timestep it is exact and agrees with the integer modulus, and a
+    sub-second timestep (the experimental lane) has no integer part to take
+    a modulus by.
+    """
+
+    seconds = int(history_seconds)
+    dt = float(dt_seconds)
+    if seconds <= 0 or not math.isfinite(dt) or dt <= 0.0:
+        return None
+    ratio = seconds / dt
+    if ratio != round(ratio) or round(ratio) < 1:
+        return None
+    return int(round(ratio))
+
+
+def format_recommended_dt(maximum_dt_seconds: float, recommended: float) -> str:
+    """Print the recommendation without losing a sub-second value."""
+
+    if float(maximum_dt_seconds) >= 1.0:
+        return f"{recommended:.1f}"
+    return f"{recommended:g}"
+
+
 def admit_timestep(
     requested_dt_seconds: float,
     authority: EdgeLengthAuthority,
@@ -172,7 +230,7 @@ def admit_timestep(
     admitted_courant = selected.safety_factor
     # The recommendation is informational and deliberately rounded down.  It
     # is never substituted for the user's/registry's declared value.
-    recommended = math.floor(maximum * 10.0) / 10.0
+    recommended = recommended_dt_seconds(maximum)
     tolerance = max(1.0e-12, 8.0 * math.ulp(maximum))
     if dt > maximum + tolerance:
         raise TimestepAdmissionError(
@@ -181,7 +239,8 @@ def admit_timestep(
             f"requested dt={dt:.9g} s, policy speed={selected.max_characteristic_speed_m_s:.9g} m/s, "
             f"safety factor={selected.safety_factor:.9g}, computed maximum dt={maximum:.9g} s "
             f"(estimated Courant={courant:.9g}, admitted <= {admitted_courant:.9g}). "
-            f"Declare dt_seconds <= {recommended:.1f} s or use a mesh with a larger real minimum dcEdge. "
+            f"Declare dt_seconds <= {format_recommended_dt(maximum, recommended)} s "
+            "or use a mesh with a larger real minimum dcEdge. "
             "The runtime will not auto-shrink the timestep."
         )
     return TimestepAdmission(

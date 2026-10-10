@@ -204,6 +204,14 @@ CONVECTION_DECISION: dict[str, Any] = {}
 #: did.  See :mod:`woof.hex.pbl_cadence`.
 PBL_CADENCE_DECISION: dict[str, Any] = {}
 
+#: The run's timestep evidence when the bound row's timestep is admitted by
+#: the EXPERIMENTAL lane (below the smallest anchor, ``--experimental-dt``):
+#: ``bind_mesh`` sets it, with the static's measured ``min(dcEdge)``, and
+#: resets it to ``None`` on every other bind.  ``None`` is every ordinary
+#: run.  :func:`timestep_evidence_decision` refuses a run whose own
+#: ``--experimental-dt`` disagrees with it -- one decision, one source.
+TIMESTEP_EVIDENCE_DECISION: dict[str, Any] | None = None
+
 # Mesh authority roles kept under exact-byte pins.  ``init`` is deliberately
 # absent: see removal 1.
 MESH_AUTHORITY_ROLES = ("grid", "static")
@@ -1810,16 +1818,19 @@ def build_schedule(
     steps = total_seconds / DT_SECONDS
     if steps <= 0 or abs(steps - round(steps)) > 1e-9:
         raise ValueError(
-            f"--hours {hours} is not a whole number of {DT_SECONDS:.0f} s steps"
+            f"--hours {hours} is not a whole number of {DT_SECONDS:g} s steps"
         )
     steps = int(round(steps))
     history_seconds = int(history_every_minutes) * 60
-    if history_seconds <= 0 or history_seconds % int(DT_SECONDS) != 0:
+    # One rule with the door's _schedule, sub-second timesteps included.
+    from woof.hex.timestep_admission import history_stride_steps
+
+    stride = history_stride_steps(history_seconds, DT_SECONDS)
+    if stride is None:
         raise ValueError(
             f"--history-every-minutes {history_every_minutes} is not a whole "
-            f"number of {DT_SECONDS:.0f} s steps"
+            f"number of {DT_SECONDS:g} s steps"
         )
-    stride = history_seconds // int(DT_SECONDS)
     if steps % stride != 0:
         raise ValueError("the history cadence does not divide the forecast length")
     capture_steps = list(range(0, steps + 1, stride))
@@ -2112,6 +2123,10 @@ def execute_forecast(
         snapshot_files[str(step)] = proof.write_snapshot_netcdf(
             output_root / f"cuda-history.{labels[step]}.nc", snapshot, static
         )
+        if host.get("timestep_evidence") is not None:
+            snapshot_files[str(step)] = stamp_timestep_evidence(
+                Path(snapshot_files[str(step)]["path"]), host["timestep_evidence"]
+            )
         write_seconds += time.perf_counter() - mark
         del snapshot
         gc.collect()
@@ -2661,6 +2676,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument(
+        "--experimental-dt",
+        action="store_true",
+        help=(
+            "EXPERIMENTAL, unanchored: run a bound timestep below the "
+            "smallest anchor through woof.hex.dt_admission's experimental "
+            "lane (Courant, cadences, RK shape and clock closure enforced; "
+            "no integration anchor).  Must agree with the bind's decision; "
+            "every receipt and history file carries "
+            "timestep_evidence=experimental-unanchored"
+        ),
+    )
+    parser.add_argument(
         "--stop-on-refusal",
         action="store_true",
         help=(
@@ -2857,8 +2884,101 @@ def resolve_physics_backend_row(args: argparse.Namespace):
     return row
 
 
+def timestep_evidence_decision(experimental_dt: bool) -> dict[str, Any] | None:
+    """The run's experimental timestep decision, or ``None`` (every ordinary run).
+
+    The bind takes the decision (``TIMESTEP_EVIDENCE_DECISION``) with the
+    static's measured ``min(dcEdge)``; the driver's own ``--experimental-dt``
+    must agree with it, in both directions, or the run is refused on the
+    host -- the shape of the 2026-08-26 clock defect, refused the same way.
+    """
+
+    decision = (
+        dict(TIMESTEP_EVIDENCE_DECISION) if TIMESTEP_EVIDENCE_DECISION else None
+    )
+    below = dt_admission.below_smallest_anchor(DT_SECONDS)
+    if decision is not None:
+        if not experimental_dt:
+            raise ConfigurationRefusal(
+                "config_dt",
+                float(DT_SECONDS),
+                "the bound mesh admitted this timestep through the "
+                "experimental lane (--experimental-dt) and this run was "
+                "invoked without it; one decision, one source",
+                "the same --experimental-dt the bind was given",
+            )
+        if float(decision.get("dt_seconds", float("nan"))) != float(DT_SECONDS):
+            raise ConfigurationRefusal(
+                "config_dt",
+                float(DT_SECONDS),
+                f"the bind's experimental decision names "
+                f"dt={decision.get('dt_seconds')!r} s and the bound timestep "
+                f"is {float(DT_SECONDS)!r} s",
+                "one bind per run",
+            )
+        return decision
+    if experimental_dt and below:
+        raise ConfigurationRefusal(
+            "config_dt",
+            float(DT_SECONDS),
+            "--experimental-dt at a timestep below the smallest anchor needs "
+            "the bind's measured min(dcEdge) to keep the Courant rule "
+            "enforced, and no bind recorded one; run through `woof hex "
+            "forecast --experimental-dt`, which binds the mesh first",
+            "woof hex forecast --mesh ... --experimental-dt",
+        )
+    return None
+
+
+def stamp_timestep_evidence(path: Path, decision: Mapping[str, Any]) -> dict[str, Any]:
+    """Label one written history file and re-measure its bytes.
+
+    The frozen writer (``run_cuda_v841_full_physics_x4.write_snapshot_netcdf``)
+    is pinned and stays untouched; the label is appended here, and the
+    record's byte count and SHA-256 are taken AFTER it, so the run receipt
+    names the bytes that are on disk.
+    """
+
+    from netCDF4 import Dataset
+
+    with Dataset(str(path), "a") as dataset:
+        dataset.setncattr("timestep_evidence", str(decision["timestep_evidence"]))
+        dataset.setncattr(
+            "timestep_evidence_reason", str(decision["timestep_evidence_reason"])
+        )
+        dataset.setncattr("timestep_dt_seconds", repr(float(decision["dt_seconds"])))
+    return {
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": proof.sha256_file(path),
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    decision = timestep_evidence_decision(bool(args.experimental_dt))
+    if decision is None:
+        return _main(args, None)
+    print(
+        f"[timestep] WARNING {decision['timestep_evidence']}: dt="
+        f"{float(DT_SECONDS):g} s is below the smallest anchored timestep "
+        f"({decision.get('smallest_anchored_dt_seconds', '?')} s); "
+        f"{decision['timestep_evidence_reason']}",
+        flush=True,
+    )
+    # The frozen config's validate() takes no arguments and is re-run at
+    # construction and at every commit, so the typed decision reaches it
+    # through a scope held for the whole run -- never through a table row.
+    with dt_admission.experimental_lane(
+        DT_SECONDS,
+        minimum_dc_edge_m=float(decision["minimum_dc_edge_m"]),
+        cumulus_scheme=decision.get("cumulus_scheme"),
+        surface_pbl_seconds=decision.get("surface_pbl_seconds"),
+    ):
+        return _main(args, decision)
+
+
+def _main(args: argparse.Namespace, decision: Mapping[str, Any] | None) -> int:
     paths = {
         "grid": Path(args.grid).expanduser().absolute(),
         "static": Path(args.static).expanduser().absolute(),
@@ -2906,6 +3026,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         local_timestep_rates=args.local_timestep_rates,
         local_timestep_buffer_rings=args.local_timestep_buffer_rings,
     )
+    if decision is not None:
+        host["timestep_evidence"] = dict(decision)
     schedule = build_schedule(
         hours=args.hours,
         history_every_minutes=args.history_every_minutes,
@@ -2972,6 +3094,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "nonclaims": list(NONCLAIMS),
         "weather_plot_policy": "native Rust/WOOF renderer only; q2 ships in the history stream and its weather-field plots go through the same renderer",
     }
+    if decision is not None:
+        provenance["timestep_evidence"] = decision["timestep_evidence"]
+        provenance["timestep_evidence_reason"] = decision["timestep_evidence_reason"]
+        provenance["experimental_timestep"] = dict(decision)
 
     if args.preflight_only:
         source_after = proof.require_frozen_execution_sources()
