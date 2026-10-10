@@ -1918,6 +1918,19 @@ class DryDycoreDriver:
                 "only source-pinned v8.2.3 and v8.4.1 implementations exist",
                 "source_release='v8.2.3' or V841DryDycoreConfig",
             )
+        if getattr(self.config, "config_les_model", "none") != "none":
+            # The v8.4.1 configuration admits the LES closure because the
+            # CUDA lane applies it (woof.hex.cuda_les_v841.attach_les_v841).
+            # This CPU integrator has no LES branch, so it would run plain
+            # 2-D Smagorinsky under a configuration that says LES.
+            _refuse(
+                "config_les_model",
+                self.config.config_les_model,
+                "the CPU dycore integrator applies no LES branch; the closure "
+                "runs on the CUDA forecast lane (woof.hex.les_v841 is its CPU "
+                "authority for the tendencies, not an integrator)",
+                "config_les_model='none' on the CPU dycore",
+            )
         self.source_release = selected_release
         self.rgas = float(rgas)
         self.cp = float(cp)

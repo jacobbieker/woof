@@ -231,20 +231,16 @@ class V841DryDycoreConfig(DryDycoreConfig):
                 "the closed serial CPU lane has no MPI halo transport",
                 "config_gpu_aware_mpi=false",
             )
-        if self.config_les_model != "none":
-            _refuse(
-                "config_les_model",
-                self.config_les_model,
-                "the v8.4.1 LES dissipation branches are not ported",
-                "config_les_model='none'",
-            )
-        if self.config_les_surface != "none":
-            _refuse(
-                "config_les_surface",
-                self.config_les_surface,
-                "surface LES fluxes require a ported LES model",
-                "config_les_surface='none'",
-            )
+        # The v8.4.1 LES closure IS ported (woof.hex.les_v841 CPU authority
+        # + woof.hex.cuda_les_v841 kernels): '3d_smagorinsky' and
+        # 'prognostic_1.5_order' with config_les_surface 'none', 'specified'
+        # or 'varying'.  Every other value, a surface option without a model,
+        # an LES model with a PBL scheme running, config_mix_scalars, and an
+        # LES-surface knob that would be silently ignored are refused by name
+        # inside the authority.
+        from .les_v841 import validate_les_selection
+
+        validate_les_selection(self)
         if not isinstance(self.config_mix_scalars, (bool, np.bool_)):
             _refuse(
                 "config_mix_scalars",
@@ -259,19 +255,6 @@ class V841DryDycoreConfig(DryDycoreConfig):
                 "the new dynamics-substep scalar dissipation branch is not ported",
                 "config_mix_scalars=false",
             )
-        for knob in (
-            "config_surface_heat_flux",
-            "config_surface_moisture_flux",
-            "config_surface_drag_coefficient",
-        ):
-            value = float(getattr(self, knob))
-            if not np.isfinite(value) or value != 0.0:
-                _refuse(
-                    knob,
-                    getattr(self, knob),
-                    "this LES-surface-only knob must not be silently ignored",
-                    f"{knob}=0.0 with config_les_surface='none'",
-                )
 
         # A zero-coefficient 2d_fixed selection is a no-mixing branch.  The
         # active v8.4.1 Smagorinsky association/order remains a separate lane.
@@ -592,6 +575,14 @@ class V841MpasColumnPhysicsSmagorinskyGwdoConfig(V841MpasColumnPhysicsGwdoConfig
         parent_values["config_smagorinsky_coef"] = 0.0
         parent_values["config_del4u_div_factor"] = 10.0
         parent_values["config_h_ScaleWithMesh"] = True
+        # The LES selection rides on this lane's mixing seam, so the
+        # neutralized parent view carries none of it; it is validated on the
+        # actual values below, PBL rule included.
+        parent_values["config_les_model"] = "none"
+        parent_values["config_les_surface"] = "none"
+        parent_values["config_surface_heat_flux"] = 0.0
+        parent_values["config_surface_moisture_flux"] = 0.0
+        parent_values["config_surface_drag_coefficient"] = 0.0
         V841MpasColumnPhysicsGwdoConfig(**parent_values).validate()
 
         exact = {
@@ -640,6 +631,9 @@ class V841MpasColumnPhysicsSmagorinskyGwdoConfig(V841MpasColumnPhysicsGwdoConfig
             config_h_ScaleWithMesh=self.config_h_ScaleWithMesh,
             config_mpas_cam_coef=self.config_mpas_cam_coef,
         ).validate()
+        from .les_v841 import validate_les_selection
+
+        validate_les_selection(self)
 
 
 __all__ = [
