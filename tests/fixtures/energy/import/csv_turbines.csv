@@ -1,0 +1,5 @@
+turbine_ref,name,latitude,longitude,hub_height_m,rotor_diameter_m,capacity_mw,operator
+T1,Synthetic T1,51.7001,-3.6402,80,90,2.5,Synthetic Wind Ltd
+T2,Synthetic T2,51.8,-3.5,100,117,3.6,Synthetic Wind Ltd
+T3,Synthetic T3,51.805,-3.49,100,117,3.6,
+T4,Synthetic T4,n/a,-3.48,100,117,3.6,

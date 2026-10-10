@@ -1,0 +1,9 @@
+bus_id,voltage,dc,symbol,under_construction,tags,x,y,country,geometry
+way/1001-400,400,f,Substation,f,way/1001,-4.99,51.684,GB,POINT (-4.99 51.684)
+way/1001-132,132,f,Substation,f,way/1001,-4.99,51.684,GB,POINT (-4.99 51.684)
+way/1002-400,400,f,Substation,f,way/1002,-3.45,51.56,GB,POINT (-3.45 51.56)
+way/1003-400,400,f,Substation,f,way/1003,-4.2,51.8,GB,POINT (-4.2 51.8)
+way/1003-132,132,f,Substation,f,way/1003,-4.2009,51.8009,GB,POINT (-4.2009 51.8009)
+relation/1004,320,t,Substation,f,relation/1004,-3.3,51.45,GB,POINT (-3.3 51.45)
+way/1005-400,400,f,Substation,f,way/1005,-3.95,51.668,GB,POINT (-3.95 51.668)
+way/1005-132,132,f,Substation,f,way/1005,-3.95,51.668,GB,POINT (-3.95 51.668)

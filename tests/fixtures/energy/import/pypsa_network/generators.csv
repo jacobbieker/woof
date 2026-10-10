@@ -1,0 +1,3 @@
+Generator,bus,carrier,p_nom
+GB0 0 onwind,GB0 0,onwind,250.0
+GB0 1 solar,GB0 1,solar,0.0

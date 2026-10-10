@@ -1,0 +1,154 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": "way/1",
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      -3.3,
+      51.9
+     ],
+     [
+      -3.25,
+      51.95
+     ],
+     [
+      -3.2,
+      52.0
+     ]
+    ]
+   },
+   "properties": {
+    "power": "line",
+    "voltage": "132000;33000",
+    "circuits": "1",
+    "cables": "3",
+    "frequency": "50",
+    "name": "Synthetic Ridge 132 kV",
+    "operator": "Synthetic DNO",
+    "source": "survey"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "way/2",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.202,
+       51.998
+      ],
+      [
+       -3.198,
+       51.998
+      ],
+      [
+       -3.198,
+       52.002
+      ],
+      [
+       -3.202,
+       52.002
+      ],
+      [
+       -3.202,
+       51.998
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "power": "substation",
+    "voltage": "132000",
+    "substation": "transmission"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.1,
+     51.95
+    ]
+   },
+   "properties": {
+    "power": "plant",
+    "plant:source": "wind",
+    "plant:output:electricity": "20 MW",
+    "name": "Synthetic Hill Wind"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "node/4",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.25,
+     51.95
+    ]
+   },
+   "properties": {
+    "power": "pole"
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "node/5",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.05,
+     51.9
+    ]
+   },
+   "properties": {
+    "name": "Synthetic unlabelled point",
+    "capacity_mw": 5.5
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "way/6",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.0,
+       51.9
+      ],
+      [
+       -2.99,
+       51.9
+      ],
+      [
+       -2.99,
+       51.91
+      ],
+      [
+       -3.0,
+       51.91
+      ],
+      [
+       -3.0,
+       51.9
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "kind": "generator",
+    "generator:source": "solar",
+    "generator:output:electricity": "4.5 MW",
+    "voltage": "11"
+   }
+  }
+ ]
+}

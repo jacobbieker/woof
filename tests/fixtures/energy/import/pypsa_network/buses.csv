@@ -1,0 +1,4 @@
+Bus,v_nom,x,y,carrier,country
+GB0 0,400.0,-3.5,52.0,AC,GB
+GB0 1,400.0,-3.3,52.1,AC,GB
+GB0 0 H2,1.0,-3.5,52.0,H2,GB
