@@ -1810,16 +1810,19 @@ def build_schedule(
     steps = total_seconds / DT_SECONDS
     if steps <= 0 or abs(steps - round(steps)) > 1e-9:
         raise ValueError(
-            f"--hours {hours} is not a whole number of {DT_SECONDS:.0f} s steps"
+            f"--hours {hours} is not a whole number of {DT_SECONDS:g} s steps"
         )
     steps = int(round(steps))
     history_seconds = int(history_every_minutes) * 60
-    if history_seconds <= 0 or history_seconds % int(DT_SECONDS) != 0:
+    # A ratio of floats, not ``history % int(DT_SECONDS)``: a sub-second
+    # timestep truncates to 0 and the modulo would divide by zero.
+    raw_stride = history_seconds / float(DT_SECONDS) if history_seconds > 0 else 0.0
+    if raw_stride < 1.0 or abs(raw_stride - round(raw_stride)) > 1e-9 * raw_stride:
         raise ValueError(
             f"--history-every-minutes {history_every_minutes} is not a whole "
-            f"number of {DT_SECONDS:.0f} s steps"
+            f"number of {DT_SECONDS:g} s steps"
         )
-    stride = history_seconds // int(DT_SECONDS)
+    stride = int(round(raw_stride))
     if steps % stride != 0:
         raise ValueError("the history cadence does not divide the forecast length")
     capture_steps = list(range(0, steps + 1, stride))

@@ -206,7 +206,7 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     },
     "tools/run_cuda_regional_forecast.py": {
         "recorded": "0829a0d11501388c974f267d85f42adea39e762884948b36304d6d4f8ed64167",
-        "current": "84ee169405b6fc54ed7b0e5ab847cf61ad583c44ce0f4a57161b0780e00a158c",
+        "current": "7c6c7aa8aefad106b7942f34211f3268fb521acec1291faa39cf5a1dc862b871",
         "why": (
             "swath-as-lam lane, 2026-08-27: the instrument grew named "
             "--grid/--init/--lbc-dir/--start-time/--dt/--len-disp paths and a "
@@ -223,6 +223,16 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
             "mpas_port is substituted with hexcore, so nothing an archived "
             "receipt measured can differ.  Re-derived by "
             "tools/repin_source_tables.py"
+            "  Moved again by the sub-second regional mint tooling: the "
+            "source digests now resolve through woof.hex.shipped_sources "
+            "(the old ROOT / 'src/hexcore/...' join found no src/ under "
+            "components/hex and raised before step 1), and history_cadence "
+            "refuses, on the host, a frame cadence that would write two "
+            "frames into one whole-second file name -- which only a "
+            "sub-second dt can do.  Neither touches what the dycore "
+            "computes: the `--arm x1` route, the 120 s every-step cadence the "
+            "four archived receipts used and dry_reference_config() are "
+            "unchanged, the last checked below"
         ),
     },
     "src/hexcore/cuda_acoustic_v841.py": {

@@ -37,6 +37,22 @@ The result is written as one JSON per timestep plus an rc-gated marker, so a
 long leg can run detached and be adjudicated by its marker rather than by
 watching it.
 
+The candidate arms run only under the candidate-mint sentence, supplied
+verbatim by the person who rules on the anchor (``--authorization``, or
+``$WOOF_HEX_CANDIDATE_MINT_AUTHORIZATION`` to keep it off the command line).
+This tool used to fill that argument in from the constant itself, which meant
+anyone who could run it had opened the gate without ever saying the sentence.
+It now takes it from the caller, checks it before the first arm starts, hands
+it to each arm through that environment variable rather than argv, and
+redacts it from the logs, the anchor JSON and the markers it writes.
+``--dry-run`` runs every host check and prints every leg without it.
+
+Sub-second regional culls (a 100 m corridor's Courant limit is under a
+second, and the smallest anchored timestep is 5 s) cannot run the control at
+an anchored timestep at all.  ``--control-dt`` runs it at a finer unanchored
+step through the same candidate path instead, and the anchor JSON labels the
+control ``step-halving-unanchored``.
+
 Nothing here registers anything.  Registering an anchor moves the frozen lane
 off its proven timestep, which is a ruling.
 """
@@ -60,6 +76,13 @@ for _entry in (str(SRC), str(ROOT / "tools")):
 
 from woof.hex import dt_admission  # noqa: E402
 from woof.hex import pbl_cadence  # noqa: E402
+# ONE redaction rule and one placeholder, owned by the mint harness this
+# campaign drives, so the two tools cannot drift on what they keep out of logs.
+from mint_dt_anchor import (  # noqa: E402
+    AUTHORIZATION_ENVIRONMENT,
+    AUTHORIZATION_PLACEHOLDER,
+    redact_authorization,
+)
 
 SCHEMA = "gpuwm-hex.dt-anchor-campaign/v1"
 
@@ -252,16 +275,36 @@ def prepare_arm_directory(arm: Path) -> None:
             )
 
 
-def _run(argv: list[str], log_path: Path, cwd: Path) -> int:
-    """Run one leg, tee its output to a log, return its rc."""
+def _run(
+    argv: list[str],
+    log_path: Path,
+    cwd: Path,
+    environment: dict[str, str] | None = None,
+) -> int:
+    """Run one leg, tee its output to a log, return its rc.
+
+    ``environment`` is ADDED to this process's environment for the leg.  It
+    is how a candidate arm receives the authorization: through the variable
+    the mint harness reads (``--authorization-env``), never through argv,
+    which the log below records and the process list shows.  The argv line
+    is redacted as well, in case a caller passed the sentence there anyway.
+    """
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.time()
+    env = None if not environment else {**os.environ, **environment}
     with log_path.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(f"argv: {json.dumps(argv)}\ncwd: {cwd}\n\n")
+        handle.write(
+            f"argv: {redact_authorization(json.dumps(argv))}\ncwd: {cwd}\n\n"
+        )
         handle.flush()
         completed = subprocess.run(
-            argv, cwd=str(cwd), stdout=handle, stderr=subprocess.STDOUT, check=False
+            argv,
+            cwd=str(cwd),
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            check=False,
+            env=env,
         )
         handle.write(f"\nrc: {completed.returncode}\n")
         handle.write(f"seconds: {time.time() - started:.1f}\n")
@@ -289,8 +332,14 @@ def door_argv(
     case_label: str,
     device_fixed_mib: float | None,
     device_bytes_per_cell: float | None,
+    lbc_dir: Path | None = None,
 ) -> list[str]:
-    """The forecast door's argument vector for one arm."""
+    """The forecast door's argument vector for one arm.
+
+    ``lbc_dir`` is the limited-area boundary series.  A regional corridor
+    cull is integrated with ``config_apply_lbcs`` on, and the door refuses
+    a cull with no boundary series by name, so a regional mint names it.
+    """
 
     argv = [
         python, "-m", "woof.hex.cli", "forecast",
@@ -311,6 +360,8 @@ def door_argv(
     ]
     if start_time:
         argv += ["--start-time", start_time]
+    if lbc_dir is not None:
+        argv += ["--lbc-dir", str(lbc_dir)]
     if device_fixed_mib is not None and device_bytes_per_cell is not None:
         argv += [
             "--device-fixed-mib", f"{device_fixed_mib:g}",
@@ -456,6 +507,249 @@ def compare_bands(control: dict[str, Any], candidate: dict[str, Any]) -> dict[st
     return rows
 
 
+def resolve_cumulus_scheme(mesh: str, convection: str) -> str | None:
+    """The cumulus selection the ARMS will run, decided as the harness decides it.
+
+    An explicit ``off`` or ``gf`` is the selection whatever the mesh.  ``auto``
+    applies the 3 km ruling to the registered row's spacing -- the same
+    ``convection_decision`` call ``mint_dt_anchor.run_candidate_forecast``
+    makes -- so the host half and the pre-check are about the configuration
+    the arms actually run, not about Grell-Freitas by default.
+    """
+
+    if convection == "off":
+        return None
+    if convection == "gf":
+        return "gf"
+    from woof.hex import convection_admission, forecast_door  # noqa: PLC0415
+
+    row = forecast_door.load_registry().get(mesh)
+    if row is None:
+        raise CampaignError(
+            f"--convection auto needs the registered row to decide on, and "
+            f"{mesh!r} is not registered here (name the row file with "
+            f"$WOOF_HEX_MESH_ROWS), or pass --convection off|gf explicitly"
+        )
+    return convection_admission.convection_decision(
+        nominal_dx_m=float(row.nominal_dx_m), requested="auto"
+    )["constructor_scheme"]
+
+
+def preflight_configuration(
+    dt_seconds: float,
+    *,
+    cumulus_scheme: str | None,
+    pbl_request: str,
+    hours: float,
+) -> dict[str, Any]:
+    """The host checks one candidate configuration must pass, sentence aside.
+
+    The SAME checks the candidate admission makes before a card is touched --
+    its schedule receipt mints at the arm's cumulus selection and surface/PBL
+    cadence over the arm's length, and the configuration holds no REGISTERED
+    anchor -- so a dry run that prints ``runnable: true`` is a campaign whose
+    real run would get as far as the authorization.
+    """
+
+    pbl = pbl_cadence.pbl_cadence_decision(dt_seconds=dt_seconds, requested=pbl_request)
+    surface_pbl_seconds = float(pbl["surface_pbl_seconds"])
+    receipt = dt_admission.schedule_receipt(
+        dt_seconds,
+        cumulus_scheme=cumulus_scheme,
+        surface_pbl_seconds=surface_pbl_seconds,
+        run_steps=max(1, int(round(hours * 3600.0 / dt_seconds))),
+    )
+    if (
+        dt_admission.registered_anchor(dt_seconds, cumulus_scheme, surface_pbl_seconds)
+        is not None
+    ):
+        raise CampaignError(
+            f"dt={float(dt_seconds):g} s with "
+            f"{'convection off' if cumulus_scheme is None else cumulus_scheme} "
+            f"already holds a registered anchor; a candidate arm there would be "
+            f"refused, and there is nothing for it to earn"
+        )
+    return {"pbl_cadence": pbl, "surface_pbl_seconds": surface_pbl_seconds,
+            "schedule_receipt": receipt}
+
+
+def check_authorization(
+    dt_seconds: float,
+    *,
+    card: str,
+    authorization: str,
+    cumulus_scheme: str | None,
+    surface_pbl_seconds: float,
+) -> None:
+    """Refuse a wrong authorization BEFORE the control arm spends card time.
+
+    Constructs the candidate admission the arm will open and does not enter
+    it, so nothing is admitted here: the constructor checks the sentence, the
+    card, that the configuration holds no real anchor, and that its schedule
+    receipt mints clean -- which is everything the arm would check first,
+    hours later, after the control arm had already run.
+    """
+
+    try:
+        dt_admission.candidate_mint(
+            dt_seconds,
+            authorization=authorization,
+            card=card,
+            cumulus_scheme=cumulus_scheme,
+            cumulus_seconds=None if cumulus_scheme is None else float(dt_seconds),
+            surface_pbl_seconds=surface_pbl_seconds,
+        )
+    except dt_admission.DtAdmissionError as error:
+        raise CampaignError(
+            f"the candidate admission for dt={float(dt_seconds):g} s would be "
+            f"refused, so no arm is started: {redact_authorization(error)}"
+        ) from None
+
+
+def candidate_argv(
+    *,
+    python: str,
+    repo: Path,
+    dt_seconds: float,
+    card: str,
+    forwarded: list[str],
+) -> list[str]:
+    """One candidate arm: the mint harness wrapping the door's arguments.
+
+    The authorization travels in the environment (see :func:`_run`), named by
+    ``--authorization-env``; it is never an argument.
+    """
+
+    return [
+        python,
+        str(repo / "tools" / "mint_dt_anchor.py"),
+        "--candidate-forecast",
+        "--dt", f"{float(dt_seconds):g}",
+        "--card", card,
+        "--authorization-env", AUTHORIZATION_ENVIRONMENT,
+        "--",
+        *forwarded,
+    ]
+
+
+def _forwarded(argv: list[str]) -> list[str]:
+    """Everything after the door subcommand, which the mint harness forwards."""
+
+    return argv[argv.index("forecast") + 1:]
+
+
+def control_kind(arguments: argparse.Namespace) -> str:
+    """Which control the physics-health verdict is read against."""
+
+    if arguments.control_band is not None:
+        return "reused-band"
+    if arguments.skip_control:
+        return "none"
+    if arguments.control_dt is not None:
+        return "step-halving-unanchored"
+    return "anchored-row-timestep"
+
+
+def leg_argvs(arguments: argparse.Namespace, *, label: str) -> dict[str, list[str]]:
+    """Every card leg this campaign would run, as argument vectors.
+
+    One function for the dry run and the real run, so the plan a dry run
+    prints is the plan the real run executes.
+    """
+
+    work = arguments.work
+    common = dict(
+        python=arguments.python,
+        repo=arguments.repo,
+        convection=arguments.convection,
+        pbl_cadence=arguments.pbl_cadence,
+        mesh=arguments.mesh,
+        grid=arguments.grid,
+        static=arguments.static,
+        init=arguments.init,
+        init_source=arguments.init_source,
+        start_time=arguments.start_time,
+        hours=arguments.hours,
+        history_every_minutes=arguments.history_every_minutes,
+        gpuwm_checkout=arguments.gpuwm_checkout,
+        device_fixed_mib=arguments.device_fixed_mib,
+        device_bytes_per_cell=arguments.device_bytes_per_cell,
+        lbc_dir=arguments.lbc_dir,
+    )
+    legs: dict[str, list[str]] = {}
+    kind = control_kind(arguments)
+    if kind in ("anchored-row-timestep", "step-halving-unanchored"):
+        control = door_argv(
+            out=work / "control" / "out",
+            scratch=work / "control" / "scratch",
+            case_label=f"dt-anchor-control-{label}",
+            **common,
+        )
+        if kind == "step-halving-unanchored":
+            control = candidate_argv(
+                python=arguments.python,
+                repo=arguments.repo,
+                dt_seconds=float(arguments.control_dt),
+                card=arguments.card,
+                forwarded=_forwarded(control),
+            )
+        legs["control"] = control
+    for name in ("arm-a", "arm-b"):
+        legs[name] = candidate_argv(
+            python=arguments.python,
+            repo=arguments.repo,
+            dt_seconds=float(arguments.dt),
+            card=arguments.card,
+            forwarded=_forwarded(
+                door_argv(
+                    out=work / name / "out",
+                    scratch=work / name / "scratch",
+                    case_label=f"dt-anchor-{label}-{name}",
+                    **common,
+                )
+            ),
+        )
+    return legs
+
+
+def check_control_dt(dt_seconds: float, control_dt: float) -> None:
+    """A step-halving control must be a smaller, positive timestep."""
+
+    if not 0.0 < control_dt < dt_seconds:
+        raise CampaignError(
+            f"--control-dt {control_dt:g} s is not smaller than --dt "
+            f"{dt_seconds:g} s (and positive).  The step-halving control reads "
+            "the candidate's band against a FINER step on the same mesh, card "
+            "and init; a coarser control would be the candidate's own question "
+            "again"
+        )
+
+
+def host_preflight(
+    arguments: argparse.Namespace,
+) -> tuple[str | None, dict[str, Any], dict[str, Any] | None]:
+    """Every host check of the campaign, for the dry run and the real run alike.
+
+    Returns the cumulus selection, the candidate's preflight and the control's
+    (``None`` unless a step-halving control will run).
+    """
+
+    dt = float(arguments.dt)
+    scheme = resolve_cumulus_scheme(arguments.mesh, arguments.convection)
+    candidate = preflight_configuration(
+        dt, cumulus_scheme=scheme, pbl_request=arguments.pbl_cadence,
+        hours=arguments.hours,
+    )
+    control = None
+    if control_kind(arguments) == "step-halving-unanchored":
+        check_control_dt(dt, float(arguments.control_dt))
+        control = preflight_configuration(
+            float(arguments.control_dt), cumulus_scheme=scheme,
+            pbl_request=arguments.pbl_cadence, hours=arguments.hours,
+        )
+    return scheme, candidate, control
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="earn one timestep anchor's integration half on one card"
@@ -468,6 +762,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--init", type=Path, required=True)
     parser.add_argument("--init-source", required=True)
     parser.add_argument("--start-time", default=None)
+    parser.add_argument(
+        "--lbc-dir",
+        type=Path,
+        default=None,
+        help="lateral-boundary files (lbc.*.nc) for a regional cull; forwarded "
+             "to every arm's door",
+    )
     parser.add_argument("--hours", type=float, default=2.0)
     parser.add_argument("--history-every-minutes", type=int, default=30)
     parser.add_argument("--gpuwm-checkout", type=Path, required=True)
@@ -498,13 +799,49 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--device-fixed-mib", type=float, default=None)
     parser.add_argument("--device-bytes-per-cell", type=float, default=None)
-    parser.add_argument(
+    controls = parser.add_mutually_exclusive_group()
+    controls.add_argument(
         "--skip-control",
         action="store_true",
         help="reuse a control band already measured on this card; the anchor "
              "then names the run it came from instead of one of its own",
     )
-    parser.add_argument("--control-band", type=Path, default=None)
+    controls.add_argument("--control-band", type=Path, default=None)
+    controls.add_argument(
+        "--control-dt",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "run the control arm at this SMALLER unanchored timestep, through "
+            "the same candidate path, instead of at the row's anchored "
+            "timestep.  For a mesh no anchored timestep fits: a 100 m cull's "
+            "Courant limit is under a second and the smallest anchor is 5 s, "
+            "so its health band can only be read against a finer step on the "
+            "same mesh.  Recorded as control kind 'step-halving-unanchored'"
+        ),
+    )
+    parser.add_argument(
+        "--authorization",
+        default=None,
+        help=(
+            "the candidate-mint authorization sentence, verbatim, supplied by "
+            "the person who rules on the anchor.  When omitted it is read from "
+            f"${AUTHORIZATION_ENVIRONMENT}, which keeps it off the command "
+            "line.  Required to run any candidate arm; checked before the "
+            "first arm starts and handed to each arm through that variable, "
+            "never through argv"
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "run every host check, print every card leg this campaign would "
+            "run and exit; writes nothing, touches no card and needs no "
+            "authorization"
+        ),
+    )
     parser.add_argument(
         "--reextract",
         action="store_true",
@@ -514,6 +851,75 @@ def main(argv: list[str] | None = None) -> int:
              "than leaving one anchor's evidence shaped differently",
     )
     arguments = parser.parse_args(argv)
+
+    dt = float(arguments.dt)
+    label = f"dt{dt:g}".replace(".", "p")
+
+    if arguments.dry_run:
+        try:
+            scheme, candidate, control = host_preflight(arguments)
+        except (dt_admission.DtAdmissionError, CampaignError,
+                pbl_cadence.PblCadenceError) as error:
+            print(
+                json.dumps(
+                    {"schema": SCHEMA, "dry_run": True, "runnable": False,
+                     "refusal": redact_authorization(error)},
+                    indent=2, sort_keys=True,
+                )
+            )
+            return 1
+        print(
+            json.dumps(
+                {
+                    "schema": SCHEMA,
+                    "dry_run": True,
+                    "runnable": True,
+                    "dt_seconds": dt,
+                    "timestep_evidence": "experimental-unanchored",
+                    "cumulus_scheme": scheme,
+                    "control_kind": control_kind(arguments),
+                    "control_dt_seconds": arguments.control_dt,
+                    "expected_steps": int(round(arguments.hours * 3600.0 / dt)),
+                    "schedule_receipt": candidate["schedule_receipt"],
+                    "control_schedule_receipt": (
+                        None if control is None else control["schedule_receipt"]
+                    ),
+                    "legs": legs_in_order(leg_argvs(arguments, label=label)),
+                    "outputs": {
+                        "schedule_receipt": str(
+                            arguments.work / f"schedule-receipt-{label}.json"
+                        ),
+                        "anchor": str(arguments.work / f"anchor-{label}.json"),
+                        "logs": str(arguments.work / "logs"),
+                        "markers": [
+                            str(arguments.work / "DONE"),
+                            str(arguments.work / "FAILED"),
+                        ],
+                    },
+                    "authorization": (
+                        f"{AUTHORIZATION_PLACEHOLDER}: a real run takes the "
+                        "sentence verbatim from the person ruling on the "
+                        f"anchor (--authorization or ${AUTHORIZATION_ENVIRONMENT}), "
+                        "refuses anything else before the first arm starts, "
+                        "and hands it to each candidate arm in "
+                        f"${AUTHORIZATION_ENVIRONMENT}, never in argv"
+                    ),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    authorization = arguments.authorization or os.environ.get(
+        AUTHORIZATION_ENVIRONMENT
+    )
+    if not arguments.reextract and not authorization:
+        parser.error(
+            f"--authorization (or ${AUTHORIZATION_ENVIRONMENT}) is required to "
+            "run candidate arms; use --dry-run to print the plan, or "
+            "--reextract to rebuild from an existing --work"
+        )
 
     work = arguments.work
     work.mkdir(parents=True, exist_ok=True)
@@ -525,69 +931,61 @@ def main(argv: list[str] | None = None) -> int:
         if marker.exists():
             marker.unlink()
 
-    dt = float(arguments.dt)
-    label = f"dt{dt:g}".replace(".", "p")
     result: dict[str, Any] = {
         "schema": SCHEMA,
         "dt_seconds": dt,
+        "timestep_evidence": "experimental-unanchored",
         "card": arguments.card,
         "mesh": arguments.mesh,
         "hours": arguments.hours,
-        "host": __import__("hexcore.host_identity", fromlist=["host_record"]).host_record(),
+        "host": __import__("woof.hex.host_identity", fromlist=["host_record"]).host_record(),
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "init": str(arguments.init),
         "init_source": arguments.init_source,
+        "lbc_dir": None if arguments.lbc_dir is None else str(arguments.lbc_dir),
         "gpuwm_checkout": str(arguments.gpuwm_checkout),
+        "control_kind": control_kind(arguments),
+        "control_dt_seconds": arguments.control_dt,
     }
+    arm_environment = (
+        None if not authorization else {AUTHORIZATION_ENVIRONMENT: authorization}
+    )
 
     try:
         # ---- the host half, refused before a card is touched --------------
         expected_steps = int(round(arguments.hours * 3600.0 / dt))
-        # The receipt is minted for the CONFIGURATION this campaign runs: an
-        # 'off' arm reports no cumulus cadence and no call rate, because
-        # there is no closure to call.
-        cumulus_scheme = None if arguments.convection == "off" else "gf"
+        cumulus_scheme, candidate, control_preflight = host_preflight(arguments)
         result["convection"] = arguments.convection
         result["cumulus_scheme"] = cumulus_scheme
-        # The surface/PBL cadence is part of the configuration the receipt
-        # is minted for, so an arm holding it reports its own call rate
-        # rather than the welded one dt would imply.
-        pbl_decision = pbl_cadence.pbl_cadence_decision(
-            dt_seconds=dt, requested=arguments.pbl_cadence
-        )
-        surface_pbl_seconds = float(pbl_decision["surface_pbl_seconds"])
-        result["pbl_cadence"] = pbl_decision
-        result["schedule_receipt"] = dt_admission.schedule_receipt(
-            dt,
-            cumulus_scheme=cumulus_scheme,
-            surface_pbl_seconds=surface_pbl_seconds,
-            run_steps=expected_steps,
-        )
+        result["pbl_cadence"] = candidate["pbl_cadence"]
+        surface_pbl_seconds = candidate["surface_pbl_seconds"]
+        result["schedule_receipt"] = candidate["schedule_receipt"]
         (work / f"schedule-receipt-{label}.json").write_text(
             json.dumps(result["schedule_receipt"], indent=2, sort_keys=True) + "\n",
             encoding="utf-8", newline="\n",
         )
         _log(f"schedule receipt minted for dt={dt:g} s ({expected_steps} steps)")
 
-        common = dict(
-            python=arguments.python,
-            repo=arguments.repo,
-            convection=arguments.convection,
-            pbl_cadence=arguments.pbl_cadence,
-            mesh=arguments.mesh,
-            grid=arguments.grid,
-            static=arguments.static,
-            init=arguments.init,
-            init_source=arguments.init_source,
-            start_time=arguments.start_time,
-            hours=arguments.hours,
-            history_every_minutes=arguments.history_every_minutes,
-            gpuwm_checkout=arguments.gpuwm_checkout,
-            device_fixed_mib=arguments.device_fixed_mib,
-            device_bytes_per_cell=arguments.device_bytes_per_cell,
-        )
+        # ---- the gate, checked before ANY arm spends card time -------------
+        if not arguments.reextract:
+            check_authorization(
+                dt,
+                card=arguments.card,
+                authorization=authorization,
+                cumulus_scheme=cumulus_scheme,
+                surface_pbl_seconds=surface_pbl_seconds,
+            )
+            if control_preflight is not None:
+                check_authorization(
+                    float(arguments.control_dt),
+                    card=arguments.card,
+                    authorization=authorization,
+                    cumulus_scheme=cumulus_scheme,
+                    surface_pbl_seconds=control_preflight["surface_pbl_seconds"],
+                )
+        legs = leg_argvs(arguments, label=label)
 
-        # ---- the control arm, at the anchored timestep ---------------------
+        # ---- the control arm ------------------------------------------------
         control_band: dict[str, Any] | None = None
         if arguments.control_band is not None:
             control_band = json.loads(
@@ -598,29 +996,26 @@ def main(argv: list[str] | None = None) -> int:
                 "band": control_band,
             }
             _log(f"control band reused from {arguments.control_band}")
-        elif not arguments.skip_control:
+        elif "control" in legs:
             control_out = work / "control" / "out"
             if arguments.reextract:
                 rc = 0
             else:
                 prepare_arm_directory(work / "control")
                 rc = _run(
-                    door_argv(
-                        out=control_out,
-                        scratch=work / "control" / "scratch",
-                        case_label=f"dt-anchor-control-{label}",
-                        **common,
-                    ),
-                    logs / "control.log",
-                    arguments.repo,
+                    legs["control"], logs / "control.log", arguments.repo,
+                    arm_environment if control_preflight is not None else None,
                 )
             if rc != 0:
+                where = (
+                    f"the step-halving control at {float(arguments.control_dt):g} s"
+                    if control_preflight is not None
+                    else "the control arm at the row's anchored timestep"
+                )
                 raise CampaignError(
-                    f"the control arm at the anchored "
-                    f"{dt_admission.PROVEN_DT_SECONDS:g} s timestep failed "
-                    f"(rc={rc}) on this card.  The candidate's band has "
-                    f"nothing to be read against, so this campaign stops here "
-                    f"rather than reporting a band with no reference"
+                    f"{where} failed (rc={rc}) on this card.  The candidate's "
+                    f"band has nothing to be read against, so this campaign "
+                    f"stops here rather than reporting a band with no reference"
                 )
             control = arm_summary(control_out)
             control_band = control["band"]
@@ -638,29 +1033,7 @@ def main(argv: list[str] | None = None) -> int:
                 arms.append(arm_summary(out))
                 continue
             prepare_arm_directory(work / name)
-            forecast_arguments = door_argv(
-                out=out,
-                scratch=work / name / "scratch",
-                case_label=f"dt-anchor-{label}-{name}",
-                **common,
-            )
-            # Everything after the door subcommand is what the mint harness
-            # forwards; the harness supplies the candidate admission around it.
-            forwarded = forecast_arguments[forecast_arguments.index("forecast") + 1:]
-            rc = _run(
-                [
-                    arguments.python,
-                    str(arguments.repo / "tools" / "mint_dt_anchor.py"),
-                    "--candidate-forecast",
-                    "--dt", f"{dt:g}",
-                    "--card", arguments.card,
-                    "--authorization", dt_admission.CANDIDATE_MINT_AUTHORIZATION,
-                    "--",
-                    *forwarded,
-                ],
-                logs / f"{name}.log",
-                arguments.repo,
-            )
+            rc = _run(legs[name], logs / f"{name}.log", arguments.repo, arm_environment)
             if rc != 0:
                 raise CampaignError(
                     f"candidate {name} at dt={dt:g} s failed with rc={rc}; "
@@ -698,6 +1071,13 @@ def main(argv: list[str] | None = None) -> int:
             f"{dt_admission.PROVEN_DT_SECONDS:g} s, so no other timestep can "
             "have that half without a fresh native run",
         ]
+        if control_preflight is not None:
+            result["what_this_does_not_prove"].append(
+                "that the band is right in absolute terms: the control is a "
+                f"finer UNANCHORED step ({float(arguments.control_dt):g} s) on "
+                "the same mesh, so agreement says the solution is converged "
+                "in dt, not that either step matches an anchored run"
+            )
         calls = result["schedule_receipt"]["cadences"]["cumulus_calls_per_hour"]
         if calls is None:
             result["what_this_does_not_prove"].append(
@@ -719,10 +1099,12 @@ def main(argv: list[str] | None = None) -> int:
         result["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     except Exception as error:  # noqa: BLE001 - the marker must record anything
-        result["error"] = f"{type(error).__name__}: {error}"
+        result["error"] = f"{type(error).__name__}: {redact_authorization(error)}"
         result["integration_anchor_earned"] = False
         (work / f"anchor-{label}.json").write_text(
-            json.dumps(result, indent=2, sort_keys=True, default=str) + "\n",
+            redact_authorization(
+                json.dumps(result, indent=2, sort_keys=True, default=str)
+            ) + "\n",
             encoding="utf-8", newline="\n",
         )
         marker_failed.write_text(result["error"] + "\n", encoding="utf-8", newline="\n")
@@ -730,7 +1112,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     (work / f"anchor-{label}.json").write_text(
-        json.dumps(result, indent=2, sort_keys=True, default=str) + "\n",
+        # Redacted as a whole: an arm summary lifts the door receipt's
+        # candidate row, whose basis names the authorization sentence.
+        redact_authorization(
+            json.dumps(result, indent=2, sort_keys=True, default=str)
+        ) + "\n",
         encoding="utf-8", newline="\n",
     )
     if not result["integration_anchor_earned"]:
@@ -748,6 +1134,7 @@ def main(argv: list[str] | None = None) -> int:
                 "mesh": arguments.mesh,
                 "steps_per_arm": expected_steps,
                 "frames_identical": result["determinism"]["frames_identical"],
+                "timestep_evidence": "experimental-unanchored",
             },
             sort_keys=True,
         )
@@ -756,6 +1143,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     _log(f"DONE: dt={dt:g} s integration anchor earned on {arguments.card}")
     return 0
+
+
+def legs_in_order(legs: dict[str, list[str]]) -> list[dict[str, Any]]:
+    """The legs as an ordered list, in the order the real run executes them."""
+
+    return [{"leg": name, "argv": argv} for name, argv in legs.items()]
 
 
 if __name__ == "__main__":  # pragma: no cover

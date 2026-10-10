@@ -1008,20 +1008,24 @@ def _schedule(hours: float, history_every_minutes: int, dt_seconds: float,
     if abs(raw_steps - round(raw_steps)) > 1e-9:
         raise _refuse(
             f"--hours {hours} is not a whole number of steps on mesh {mesh}, "
-            f"whose registered timestep is {dt_seconds:.0f} s: it is "
+            f"whose registered timestep is {dt_seconds:g} s: it is "
             f"{raw_steps:.4f} steps.  A partial step cannot be integrated, so "
-            f"choose a length that divides by {dt_seconds:.0f} s (for example "
+            f"choose a length that divides by {dt_seconds:g} s (for example "
             f"{max(1, int(raw_steps)) * dt_seconds / 3600.0:g} hours)."
         )
     steps = int(round(raw_steps))
     history_seconds = int(history_every_minutes) * 60
-    if history_seconds <= 0 or history_seconds % int(dt_seconds) != 0:
+    # The stride is a RATIO of two floats, not ``history % int(dt)``: a
+    # sub-second timestep truncates to ``int(dt) == 0`` and the modulo would
+    # divide by zero before any refusal could name the mesh.
+    raw_stride = history_seconds / float(dt_seconds) if history_seconds > 0 else 0.0
+    if raw_stride < 1.0 or abs(raw_stride - round(raw_stride)) > 1e-9 * raw_stride:
         raise _refuse(
             f"--history-every-minutes {history_every_minutes} is not a whole "
-            f"number of {dt_seconds:.0f} s steps on mesh {mesh}; a history "
+            f"number of {dt_seconds:g} s steps on mesh {mesh}; a history "
             "frame can only be written at a step boundary."
         )
-    stride = history_seconds // int(dt_seconds)
+    stride = int(round(raw_stride))
     if steps % stride != 0:
         raise _refuse(
             f"--history-every-minutes {history_every_minutes} does not divide "
