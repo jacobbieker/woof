@@ -1728,6 +1728,63 @@ def _print_admission(request: ForecastRequest, admission: AdmissionVerdict) -> N
     )
 
 
+def _regional_admission_block(request: ForecastRequest) -> dict[str, Any] | None:
+    """The regional anchor gate's verdict on this request's files.
+
+    ``None`` for a global grid (no bdyMask triple) or when the grid/static
+    pair is not both present.  Measures the class key the way the regional
+    forecast opener does at run time and runs the same gate, so preflight
+    reports the regional verdict -- and, with the experimental lane open
+    (``--experimental-dt`` or ``WOOF_HEX_EXPERIMENTAL_DT=1``), its
+    ``"class_evidence": "experimental-unminted"`` label -- before the dycore
+    starts.  Never raises: a measurement failure is reported as a refusal.
+    """
+
+    if not (request.grid.is_file() and request.static.is_file()):
+        return None
+    from . import regional_contract_receipt
+
+    try:
+        if not regional_contract_receipt.grid_is_regional(request.grid):
+            return None
+        return regional_contract_receipt.regional_preflight(
+            request.grid,
+            dt_seconds=float(request.dt_seconds),
+            static=request.static,
+            init=request.init if request.init.is_file() else None,
+            # The run passes the mesh's registry_row, which nothing writes,
+            # so the gate is asked exactly as the run will ask it.
+            mesh_row=None,
+            experimental=(
+                True if getattr(request, "experimental_dt", False) else None
+            ),
+        )
+    except Exception as error:  # reported, never raised: preflight collects
+        return {
+            "admitted": False,
+            "refusal": (
+                f"the regional admission could not be measured: "
+                f"{type(error).__name__}: {error}"
+            ),
+        }
+
+
+def _print_regional(block: Mapping[str, Any]) -> None:
+    if block.get("admitted"):
+        print(
+            f"REGIONAL class={block.get('class_id')} "
+            f"evidence={block.get('class_evidence')} "
+            f"contract={block.get('contract_route')} -> admitted",
+            flush=True,
+        )
+    else:
+        print(
+            f"REGIONAL class={block.get('measured_class_id', '(unmeasured)')} "
+            f"-> REFUSED",
+            flush=True,
+        )
+
+
 def _run_preflight(request: ForecastRequest, registry: Mapping[str, MeshRow],
                    started: float) -> int:
     """Answer the whole question, not the first half of it.
@@ -1763,6 +1820,12 @@ def _run_preflight(request: ForecastRequest, registry: Mapping[str, MeshRow],
             "bind is a cross-examination of those exact bytes",
             flush=True,
         )
+
+    regional = _regional_admission_block(request)
+    if regional is not None:
+        _print_regional(regional)
+        if not regional.get("admitted"):
+            problems.append(str(regional.get("refusal")))
 
     admission: AdmissionVerdict | None = None
     try:
@@ -1836,6 +1899,8 @@ def _run_preflight(request: ForecastRequest, registry: Mapping[str, MeshRow],
         architecture=architecture,
     )
     receipt["preflight_problems"] = problems
+    if regional is not None:
+        receipt["regional_admission"] = regional
     written = _write_receipt(request, receipt)
     if written is not None:
         print(f"RECEIPT {written}", flush=True)
@@ -1893,6 +1958,13 @@ def run_forecast(arguments: argparse.Namespace) -> int:
 
     binding, driver = _load_drivers(request.repo)
     bind_receipt = _bind(binding, driver, request)
+    # Recorded, not enforced: the regional forecast opener runs the same gate
+    # before a byte reaches the device and refuses there by name.  The block
+    # is what puts the class (and an experimental lane's
+    # "experimental-unminted" label) into this run's receipt.
+    regional = _regional_admission_block(request)
+    if regional is not None:
+        _print_regional(regional)
     driver_argv = build_driver_argv(request)
     # The driver's validate_destination requires BOTH roots absent and creates
     # them itself; a door that pre-creates them kills every admitted run with
@@ -1962,6 +2034,8 @@ def run_forecast(arguments: argparse.Namespace) -> int:
         status=status,
         architecture=architecture,
     )
+    if regional is not None:
+        receipt["regional_admission"] = regional
     written = _write_receipt(request, receipt)
     if written is not None:
         print(f"RECEIPT {written}", flush=True)
