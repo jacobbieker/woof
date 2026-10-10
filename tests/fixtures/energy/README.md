@@ -18,3 +18,8 @@ site at each line vertex and segment midpoint, using the segment bearing,
 plus the substations, turbines and the PV farm. It is not `woof energy
 sites` output; it exists so units that consume sites can test without the
 sites builder.
+
+`overpass_wales_a.json`, `overpass_wales_b.json` and `overpass_timeout.json`
+are hand-written Overpass API answers for `tests/test_energy_osm.py`. Their
+ids, names, coordinates and tags are invented. They are not OpenStreetMap
+data.
