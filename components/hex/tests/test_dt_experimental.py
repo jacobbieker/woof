@@ -93,8 +93,7 @@ def test_the_table_still_bottoms_out_at_five_seconds_and_says_diverges():
 
 @pytest.mark.parametrize(
     "dt,minimum",
-    [(0.5, MIN_DC_100M), (0.25, MIN_DC_50M), (600.0 / 1024, MIN_DC_100M),
-     (600.0 / 2048, MIN_DC_50M)],
+    [(0.5, MIN_DC_100M), (0.25, MIN_DC_50M)],
 )
 def test_sub_anchor_timesteps_are_admitted_on_synthetic_fine_meshes(dt, minimum):
     anchor = dt_admission.experimental_dt_anchor(
@@ -284,9 +283,9 @@ def test_the_search_reaches_meshes_finer_than_the_old_divisor_cutoff():
     """Below ~35 m the Courant floor's count passes 2400; the search follows it."""
 
     result = dt_admission.largest_admissible_dt(TAIL * 25.0)
-    assert result["largest_admissible_dt_seconds"] == 600.0 / 4096
+    assert result["largest_admissible_dt_seconds"] == 0.125
     dt_admission.experimental_dt_anchor(
-        600.0 / 4096, cumulus_scheme=None, minimum_dc_edge_m=TAIL * 25.0
+        0.125, cumulus_scheme=None, minimum_dc_edge_m=TAIL * 25.0
     )
     # and the registered graded rows are reproduced unchanged
     assert dt_admission.largest_admissible_dt(13_311.8)["largest_admissible_dt_seconds"] == 75.0
@@ -315,7 +314,7 @@ def test_choose_timestep_without_the_flag_refuses_a_fine_mesh_unchanged():
 
 
 @pytest.mark.parametrize(
-    "fine_dx_m,expected", [(100.0, 600.0 / 1024), (50.0, 600.0 / 2048)]
+    "fine_dx_m,expected", [(100.0, 0.5), (50.0, 0.25)]
 )
 def test_choose_timestep_with_the_flag_picks_largest_admissible_dt(fine_dx_m, expected):
     minimum = TAIL * fine_dx_m
@@ -678,3 +677,19 @@ def test_the_driver_parser_carries_the_flag(driver):
          "--preflight-only", "--experimental-dt"]
     )
     assert args.experimental_dt is True
+
+
+@pytest.mark.parametrize("dt,minimum", [(600.0 / 1024, MIN_DC_100M), (600.0 / 2048, MIN_DC_50M)])
+def test_a_timestep_off_the_millisecond_quantum_is_refused(dt, minimum):
+    """600/1024 s passes Courant, radiation divisibility and clock closure, but
+    the regional class key and the mint tooling quantise to whole
+    milliseconds: it could never be minted, so the lane refuses it and the
+    search skips it."""
+
+    with pytest.raises(DtAdmissionError) as caught:
+        dt_admission.experimental_dt_anchor(
+            dt, cumulus_scheme=None, minimum_dc_edge_m=minimum
+        )
+    assert "whole number of milliseconds" in str(caught.value)
+    search = dt_admission.largest_admissible_dt(minimum)
+    assert dt in search["rejected_for_millisecond_quantum"]

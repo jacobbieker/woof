@@ -390,9 +390,9 @@ def test_planned_argv_parse_with_the_real_parsers(tmp_path):
 
 
 def test_check_argv_does_not_accept_a_prefix_as_a_flag():
-    """argparse would take --pbl as --pbl-cadence; the contract check must not."""
+    """argparse would take --pbl-cad as --pbl-cadence; the contract check must not."""
 
-    status = adapt.check_argv(["hex", "forecast", "--pbl", "ysu"])
+    status = adapt.check_argv(["hex", "forecast", "--pbl-cad", "60"])
     assert status["status"] == "flags-not-in-this-build", status
 
 

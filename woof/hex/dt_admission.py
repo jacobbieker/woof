@@ -1190,9 +1190,6 @@ def largest_admissible_dt(
         candidate = cadence / count
         if candidate > courant_limit:
             continue
-        if not whole_milliseconds(candidate):
-            rejected_for_quantum.append(candidate)
-            continue
         try:
             cadence_steps("radiation_seconds", cadence, candidate)
             schedule_receipt(
@@ -1202,6 +1199,9 @@ def largest_admissible_dt(
             )
         except DtAdmissionError:
             rejected_for_clock.append(candidate)
+            continue
+        if not whole_milliseconds(candidate):
+            rejected_for_quantum.append(candidate)
             continue
         admissible = candidate
         break

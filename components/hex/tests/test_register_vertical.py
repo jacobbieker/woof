@@ -370,10 +370,12 @@ def test_register_refuses_a_timestep_above_the_courant_limit_even_experimentally
 
 def test_the_experimental_lane_skips_only_the_anchor_and_labels_the_row(chain, tmp_path) -> None:
     rows = tmp_path / "r.json"
-    with pytest.raises(RegisterRefusal) as refusal:
-        register_mesh(grid=chain.grid, static=chain.static, name="gx",
-                      rows=rows, experimental=True, log=_quiet)
-    assert "needs an explicit dt" in str(refusal.value)
+    # With no explicit dt the lane follows choose_timestep: an anchored
+    # timestep that fits is chosen and labelled anchored; only a mesh no
+    # anchor fits gets an experimental pick (woof.hex.mesh_point).
+    auto, _ = register_mesh(grid=chain.grid, static=chain.static, name="gauto",
+                            rows=tmp_path / "auto.json", experimental=True, log=_quiet)
+    assert auto.timestep_evidence == mesh_rows.ANCHORED_TIMESTEP_EVIDENCE
     parent, _ = register_mesh(grid=chain.grid, static=chain.static, name="gx", rows=rows,
                               dt_seconds=7.0, experimental=True, vertical_spec=chain.spec,
                               log=_quiet)

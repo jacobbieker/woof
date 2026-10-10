@@ -289,3 +289,14 @@ tests/test_deformation_geometry_precision.py
 # Synthetic patch, no card.
 tests/test_large_step_compensation.py
 tests/test_les_column.py
+# Sub-second regional mint planning (dry-run/plan mode only; no card).
+tests/test_dt_mint_regional_plan.py
+# `woof hex adapt` and the adaptive cycle mode (synthetic history, fake runner).
+tests/test_hex_adapt.py
+# Global-source WPS intermediates through met_intermediate (skips the real
+# conversion when the binary is not built).
+tests/test_met_intermediate_door.py
+# Mesh-to-mesh state remap door (one real rw_mpas_remap run when staged).
+tests/test_remap_door.py
+# GLO-30 / CGLC statics for hex cells (synthetic mesh and DEM; no network).
+tests/test_static_highres.py
