@@ -1109,3 +1109,64 @@ def test_a_default_run_carries_no_backend_token(tmp_path):
     argv = door.build_driver_argv(request)
     assert "--physics-backend" not in argv
     assert "--source-table" not in argv
+
+
+# ---------------------------------------------------------------------------
+# history variable selection
+# ---------------------------------------------------------------------------
+def test_the_default_history_is_the_full_set_and_adds_no_driver_flag(
+    tmp_path: Path,
+) -> None:
+    request = door.resolve_request(_namespace(tmp_path), registry=_registry())
+    assert request.history_selection["variables"] is None
+    argv = door.build_driver_argv(request)
+    assert "--history-vars" not in argv
+    assert "--history-preset" not in argv
+
+
+def test_the_energy_history_preset_reaches_the_driver(tmp_path: Path) -> None:
+    request = door.resolve_request(
+        _namespace(tmp_path, history_preset="energy"), registry=_registry()
+    )
+    argv = door.build_driver_argv(request)
+    assert argv[argv.index("--history-preset") + 1] == "energy"
+    receipt = door.build_receipt(
+        request=request, admission=None, bind_receipt=None,
+        driver_receipt=None, history=[], driver_argv=argv, seconds=0.1,
+        status="refused_by_admission",
+    )
+    chosen = receipt["schedule"]["history_variables"]
+    assert chosen["preset"] == "energy"
+    assert "swddni" in chosen["variables"] and "zgrid" in chosen["variables"]
+    json.dumps(receipt, sort_keys=True, allow_nan=False)
+
+
+def test_an_explicit_history_list_reaches_the_driver(tmp_path: Path) -> None:
+    request = door.resolve_request(
+        _namespace(tmp_path, history_vars="t2,swdown,zgrid"),
+        registry=_registry(),
+    )
+    argv = door.build_driver_argv(request)
+    assert argv[argv.index("--history-vars") + 1] == "t2,swdown,zgrid"
+
+
+def test_a_history_list_and_preset_together_are_refused(tmp_path: Path) -> None:
+    message = _refusal(
+        _namespace(tmp_path, history_vars="t2", history_preset="energy")
+    )
+    assert "exclusive" in message
+    second = tmp_path / "second"
+    second.mkdir()
+    message = _refusal(_namespace(second, history_vars="t2,,u10"))
+    assert "empty name" in message
+
+
+def test_the_console_parser_takes_the_history_flags() -> None:
+    parser = argparse.ArgumentParser()
+    door.add_forecast_arguments(parser)
+    arguments = parser.parse_args(["--history-preset", "energy"])
+    assert arguments.history_preset == "energy"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--history-preset", "everything"])
+    text = parser.format_help()
+    assert "--history-vars" in text and "--history-preset" in text

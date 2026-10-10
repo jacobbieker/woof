@@ -274,6 +274,40 @@ paste rather than a lookup. Its form:
 NEXT woof hex render --history <out>/cuda-history.<valid-time>.nc --mesh <grid> --out <out>/png --simulation-start <start>
 ```
 
+### What a history frame carries
+
+Every frame carries the mesh coordinates (`indexToCellID`, `latCell`,
+`lonCell`, `ter` and the edge coordinates), `xtime` (the valid time as
+MPAS writes it, `char xtime(Time, StrLen)`), and `zgrid(nCells,
+nVertLevelsP1)`, the run's layer-interface heights from the init. `zgrid`
+is written in every file, without a Time dimension, so any subset of the
+frames can be placed in height without the init. Its digest is in the
+`zgrid_sha256` global attribute.
+
+By default a frame also carries every model field the run produces. With
+the RRTMG shortwave the radiation fields are `swdown`, `swddni`
+(direct-normal), `swddif` (diffuse) and `coszr`. Each holds the last
+radiation call's value, and the start frame carries zeros because no
+radiation call precedes it. A scheme that computes no direct beam writes no
+`swddni` or `swddif`. They are left out, not zero-filled.
+
+To write fewer variables:
+
+- `--history-preset energy` writes the fields the energy sampler reads:
+  winds, `w`, `theta`, `pressure`, `rho`, the six water species, `t2`, `q2`,
+  `u10`, `v10`, `surface_pressure`, `swdown`, `swddni`, `swddif`, `coszr`,
+  `rainnc`, `rainc`, `zgrid` and `xtime`. If the run does not produce one
+  of these, it is skipped, and the driver receipt lists it under
+  `history_variables.absent_from_frames`.
+- `--history-vars u_zonal,v_meridional,t2` writes exactly the variables you
+  list. This is strict. A name that no frame of this run can carry (a typo,
+  or a WRF or native-MPAS spelling such as `t2m`) is refused before the run
+  is built. An optional field that the run turns out not to produce, such
+  as `swddni` without a direct-beam shortwave, is refused at the first
+  frame, before any step is integrated.
+
+The two options cannot be combined.
+
 ## 6.4 What a run claims: read the receipt
 
 Every run writes `cuda-v841-forecast-receipt.json`. Its `claim` names

@@ -543,8 +543,15 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # digests, version and commit and records them where it recorded the
     # pinned constants; the seam-class and phase-object checks, the surface
     # classification and the restore identity are unchanged.
+    # Re-frozen for the history outputs: the committed-boundary diagnostic
+    # snapshot also selects SWDDNI, SWDDIF and COSZR, the radiation call's
+    # held history buffers, from the seam export's diag/ keys when the
+    # attached shortwave publishes them.  It is a read of arrays the export
+    # already carried; no state, step or publication path moved, and the
+    # adapter authority document (CUDA_ARWEN_PHYSICS_V841_CONTRACT_SHA256)
+    # is unchanged.
     "src/hexcore/cuda_arwen_physics_v841.py": (
-        "74b319e8e5fcc8800349c9fdf9ab261246ec81619df509fe6c5ec84764cc8566"
+        "237eb7e6ef29483c65becb1e121f0499d4524bbabba75028ab48895485f8eaa4"
     ),
     # The v8.4.1 horizontal-mixing execution boundary (2-D Smagorinsky):
     # CPU authorities and the CUDA operator modules the RK1 saved-Euler
@@ -3456,14 +3463,81 @@ def _write_exclusive_json(path: Path, value: Any) -> None:
         stream.write(data)
 
 
-def write_snapshot_netcdf(path: Path, snapshot: Mapping[str, Any], static: Mapping[str, Any]) -> dict[str, Any]:
-    """Write one truthful native-grid CUDA history capsule for Rust rendering."""
+#: MPAS ``StrLen``: the width of the ``xtime`` character variable.
+HISTORY_STRLEN = 64
+
+
+def write_snapshot_netcdf(
+    path: Path,
+    snapshot: Mapping[str, Any],
+    static: Mapping[str, Any],
+    *,
+    variables: Sequence[str] | None = None,
+    xtime: str | None = None,
+    zgrid: Any | None = None,
+    zgrid_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Write one truthful native-grid CUDA history capsule for Rust rendering.
+
+    Without the keyword arguments this writes exactly what the proof lane
+    always wrote: every snapshot array the dimensions admit.  The forecast
+    driver passes the rest:
+
+    * ``variables`` -- the snapshot array names to publish (``None`` is all
+      of them).  A name the frame does not carry is skipped here; whether
+      that is a refusal is the caller's decision
+      (woof.hex.history_selection), because the caller knows whether the
+      name was asked for explicitly or by a preset.  The mesh coordinates
+      (``indexToCellID``, ``latCell``, ...) are written regardless, since a
+      frame without them cannot be placed on any mesh.
+    * ``xtime`` -- the valid time, ``YYYY-MM-DD_hh:mm:ss``, written as
+      MPAS's ``char xtime(Time, StrLen)``.
+    * ``zgrid`` -- the run's layer-interface heights ``(nCells,
+      nVertLevelsP1)``, written as MPAS's ``zgrid(nCells, nVertLevelsP1)``
+      with no Time dimension, once in every file, beside a ``zgrid_sha256``
+      global attribute.  Every file rather than the first only, so any
+      subset of the frames a sampler is handed can place its profiles in
+      height without the init file; it is one interface field among the
+      frame's level fields, so a few percent of a frame's bytes.
+      ``zgrid_sha256`` is its digest when the caller already holds it (a
+      run hashes its static zgrid once, not once per frame).
+
+    With ``variables`` given, a selected array whose shape is none of the
+    frame's layouts is refused rather than skipped: the caller was told the
+    frame carries it.
+    """
 
     from netCDF4 import Dataset
 
     if path.exists():
         raise FileExistsError(path)
     arrays = snapshot["arrays"]
+    if variables is not None:
+        wanted = set(variables)
+        arrays = {name: value for name, value in arrays.items() if name in wanted}
+        layouts = {
+            (N_LEVELS, N_CELLS), (N_LEVELS, N_EDGES), (N_INTERFACES, N_CELLS),
+            (N_SOIL_LEVELS, N_CELLS), (N_CELLS,),
+        }
+        unwritable = sorted(
+            name for name, value in arrays.items()
+            if tuple(np.shape(value)) not in layouts
+        )
+        if unwritable:
+            raise ValueError(
+                f"selected history arrays {unwritable} have no frame layout "
+                "(level, interface, soil or surface on cells; level on edges)"
+            )
+    zgrid_array = None
+    if zgrid is not None:
+        zgrid_array = np.ascontiguousarray(zgrid, dtype=np.float32)
+        if zgrid_array.shape != (N_CELLS, N_INTERFACES):
+            raise ValueError(
+                f"zgrid has shape {zgrid_array.shape}; a history frame of "
+                f"{N_CELLS} cells needs {(N_CELLS, N_INTERFACES)}"
+            )
+    if xtime is not None:
+        datetime.strptime(xtime, "%Y-%m-%d_%H:%M:%S")  # refuse a malformed time
     with Dataset(path, "w", format="NETCDF4_CLASSIC") as dataset:
         dataset.createDimension("Time", 1)
         dataset.createDimension("nCells", N_CELLS)
@@ -3533,7 +3607,41 @@ def write_snapshot_netcdf(path: Path, snapshot: Mapping[str, Any], static: Mappi
             "dtauy3d": "m s^{-2}",
             "rubldiff": "m s^{-2}",
             "rvbldiff": "m s^{-2}",
+            "swdown": "W m^{-2}",
+            "swddni": "W m^{-2}",
+            "swddif": "W m^{-2}",
+            "coszr": "1",
         }
+        long_names = {
+            "swdown": "downward shortwave flux at the surface, last radiation call",
+            "swddni": "surface direct-normal shortwave (SWDDIR / COSZEN), last radiation call",
+            "swddif": "surface diffuse shortwave, last radiation call",
+            "coszr": "cosine of the solar zenith angle, last radiation call",
+        }
+        if xtime is not None:
+            dataset.createDimension("StrLen", HISTORY_STRLEN)
+            variable = dataset.createVariable("xtime", "S1", ("Time", "StrLen"))
+            variable.setncattr("long_name", "model valid time, YYYY-MM-DD_hh:mm:ss")
+            variable.set_auto_chartostring(False)
+            variable[0, :] = np.frombuffer(
+                xtime.ljust(HISTORY_STRLEN).encode("ascii"), dtype="S1"
+            )
+        if zgrid_array is not None:
+            variable = dataset.createVariable(
+                "zgrid", "f4", ("nCells", "nVertLevelsP1"), zlib=True, complevel=1
+            )
+            variable.setncattr("units", "m")
+            variable.setncattr("long_name", "geometric height of layer interfaces")
+            variable[:] = zgrid_array
+            dataset.setncattr(
+                "zgrid_sha256",
+                zgrid_sha256 if zgrid_sha256 is not None else array_sha256(zgrid_array),
+            )
+            dataset.setncattr(
+                "zgrid_policy",
+                "the run's init zgrid, written once in every file without a "
+                "Time dimension",
+            )
         for name, value in sorted(arrays.items()):
             array = np.asarray(value, dtype=np.float32)
             if array.shape == (N_LEVELS, N_CELLS):
@@ -3555,6 +3663,8 @@ def write_snapshot_netcdf(path: Path, snapshot: Mapping[str, Any], static: Mappi
                 continue
             variable = dataset.createVariable(name, "f4", dims, zlib=True, complevel=1)
             variable.setncattr("units", units.get(name, ""))
+            if name in long_names:
+                variable.setncattr("long_name", long_names[name])
             variable[:] = payload
     return {"path": str(path), "bytes": path.stat().st_size, "sha256": sha256_file(path)}
 
