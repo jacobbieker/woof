@@ -319,6 +319,34 @@ back to the parent. Each tile also has its own lateral boundary zone, which
 is one reason to keep `--corridor-km` wide enough that the sites sit well
 inside their tile.
 
+Each tile gets its own child configuration, `tiles/<id>.toml`, and runs as
+`woof downscale --child-config tiles/<id>.toml` with the placement given
+explicitly (`--ratio`, `--i-parent-start`, `--j-parent-start`). The planner
+builds that file with the code `woof downscale --point` uses to derive a
+child, from the parent configuration it emitted, and then sets two things
+`--point` has no flag for:
+
+- **LES closure.** Leaf tiles at 250 m or finer carry the closure of the
+  shipped 250 m LES child (`configs/les_nest_250m_km3.toml`, see
+  [LES.md](public/LES.md)): `km_opt = 3`, `bl_pbl_physics = 0`,
+  `mix_isotropic = 1`, `diff_opt = 2`, `c_s = 0.25`,
+  `mix_upper_bound = 0.1`, `isfflx = 1` and `cu_physics = 0`. They also get
+  their own 60-level ladder, or `--nz` levels. Coarser leaf tiles keep the
+  parent's physics.
+- **History preset.** Leaf tiles write `[output] preset = "energy"`.
+  Intermediate tiles keep the full history, because the tiles below them
+  are downscaled from it and the preset drops the land and soil fields a
+  child is built from.
+
+Before writing the plan, the planner reads each file back through the
+loader `woof downscale` uses, and refuses to plan if any setting does not
+come back as written. The tile's `downscale_args` pin the file with
+`--child-config-sha256`, so `woof downscale` refuses a file edited after
+planning. Each `tiles/<id>.json` records the settings, `applied: true`
+and the hash. One part is approximate: the planner derives the file from
+the parent's configuration, not from the parent's restart file as
+`--point` does, because the parent has not run yet when the plan is made.
+
 ### `hex-swath`
 
 An MPAS mesh whose cell spacing falls to `--dx-m` along the corridors and

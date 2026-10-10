@@ -38,27 +38,50 @@ How the plan is built
    rectangles snapped to parent cells and no larger than the biggest child
    the per-tile budget affords.  That budget is priced the way
    ``woof downscale --point`` prices it: the child RunConfig derived from
-   the parent's (:func:`woof.downscale._derive_child_run_config`) through
+   the parent's (:func:`woof.downscale._derive_child_run_config`), with
+   the LES overrides of step 5 applied to an LES leaf, through
    :func:`woof.core.preflight.estimate_experiment`, against the same
    ceiling (:func:`woof.downscale._budget_bytes`).
 
-4. **Placement.**  Each rectangle becomes a ``woof downscale --point
-   LAT,LON --ratio R --child-size NX,NY`` invocation whose point is the
-   exact parent mass point that ``_centered_placement`` centres the
-   rectangle on, so the child that runs covers exactly the cells planned.
-   The placement is proven here with downscale's own placement (including
-   the SINT stencil-coverage gate), and every tile must stay clear of its
-   parent's specified/relaxation zone, terrain blend and stencil.
+4. **Placement.**  Each rectangle becomes one ``woof downscale
+   --child-config tiles/<id>.toml --ratio R --i-parent-start I
+   --j-parent-start J`` invocation.  The start indices are the ones
+   ``woof downscale --point`` would reach: the planner centres the
+   rectangle on a parent mass point and proves the start with downscale's
+   own centred placement (``_centered_placement``, including the SINT
+   stencil-coverage gate), so the child that runs covers exactly the cells
+   planned.  Every tile must stay clear of its parent's
+   specified/relaxation zone, terrain blend and stencil.
 
-5. **What downscale cannot be told.**  A ``--point`` child inherits its
-   parent's physics verbatim and writes the full history inventory.  So
-   the LES gray-zone closure (docs/public/LES.md, the 250 m child of
-   ``configs/les_nest_250m_km3.toml``: ``km_opt = 3``, ``bl_pbl_physics =
-   0``, ``mix_isotropic = 1``) and the ``energy`` history preset are
-   recorded in each tile spec as *not applied*, with the reason, and the
-   plan notes say so.  The part of the LES recipe downscale does take, the
-   child's own vertical ladder (``--child-levels N,STRETCH``), is applied
-   to every leaf at or below 250 m.
+5. **The child configuration.**  Each tile's TOML is built by the code
+   path ``woof downscale --point`` writes its derived child config with
+   (:func:`woof.downscale._derive_child_run_config`,
+   ``_with_parent_epssm_label``, ``_render_child_toml`` and the
+   ``[static]`` table), from the parent's emitted RunConfig rather than
+   from its restart evidence, which does not exist at plan time.  Two
+   things are then set that ``--point`` has no flag for:
+
+   * leaf tiles at or finer than :data:`LES_CHILD_DX_M` (250 m) carry the
+     LES gray-zone closure of ``configs/les_nest_250m_km3.toml`` d03
+     (:data:`LES_PHYSICS_RECIPE`: ``km_opt = 3``, ``bl_pbl_physics = 0``,
+     ``mix_isotropic = 1`` ...), and their own vertical ladder
+     (``eta_levels``, ``--nz`` or :data:`DEFAULT_LES_CHILD_NZ`);
+   * every leaf tile writes the ``energy`` history preset (``[output]
+     preset = "energy"``).  Intermediate tiles keep the full inventory,
+     because the tiles below them are downscaled from it and the preset
+     sheds the land identity and soil state a child is built from.
+
+   The TOML is priced with the overrides in place, read back through the
+   door's own loader (:func:`woof.offline_child.resolve_child_run_config`)
+   and refused unless every override survives the round trip, then
+   written to ``tiles/<id>.toml`` and bound by its sha256
+   (``--child-config-sha256``), so an edited file is refused by
+   ``woof downscale`` rather than run.  :func:`woof.experiment.
+   load_experiment` reads only the experiment schema and refuses the
+   legacy ``[grid]``/``[run]`` schema a ``--child-config`` file must use;
+   the patched RunConfig is checked through
+   :func:`woof.experiment.experiment_from_run_config` and the estimator
+   instead.
 
 Python boundary (docs/dev/static-rust-port.md): everything here is
 orchestration over per-site and per-tile vectors (projection of the site
@@ -122,10 +145,10 @@ DEFAULT_CARD = "24gb"
 #: LES case is stated at the door").
 LES_CHILD_DX_M = 250.0
 
-#: The leaf's own vertical ladder (``--child-levels N,STRETCH``) when
-#: ``--nz`` is not given.  60 levels stays under every radiation bound a
-#: parent suite can carry at ``p_top = 5000 Pa`` (legacy RRTMG shortwave is
-#: the tightest at 63; docs/public/LES.md section 4), and the stretch is the
+#: The leaf's own vertical ladder (``eta_levels`` in its child TOML, built
+#: as ``--child-levels N,STRETCH`` builds it) when ``--nz`` is not given.
+#: 60 levels stays under every radiation bound a parent suite can carry at
+#: ``p_top = 5000 Pa`` (legacy RRTMG shortwave is the tightest at 63; docs/public/LES.md section 4), and the stretch is the
 #: one docs/public/DOWNSCALE.md uses for its LES child.
 DEFAULT_LES_CHILD_NZ = 60
 CHILD_LEVEL_STRETCH = 2.5
@@ -138,8 +161,11 @@ SINT_STENCIL_ROWS = 2
 
 #: The LES gray-zone closure of the shipped 250 m child
 #: (``configs/les_nest_250m_km3.toml`` d03; docs/public/LES.md and
-#: GRAYZONE-NEST.md).  Recorded per tile; ``woof downscale --point`` cannot
-#: apply it.
+#: GRAYZONE-NEST.md), with that domain's ``cu_physics = 0``.  Written into
+#: the ``[run]`` table of every leaf tile's ``--child-config`` TOML at or
+#: finer than :data:`LES_CHILD_DX_M`; every key is a per-domain RunConfig
+#: field, and each is read back through ``woof downscale``'s own loader
+#: before the plan is written.
 LES_PHYSICS_RECIPE = {
     "bl_pbl_physics": 0,
     "km_opt": 3,
@@ -148,19 +174,30 @@ LES_PHYSICS_RECIPE = {
     "mix_isotropic": 1,
     "mix_upper_bound": 0.1,
     "isfflx": 1,
+    "cu_physics": 0,
 }
+
+#: Where the LES recipe comes from, recorded in each tile spec.
+LES_RECIPE_SOURCE = "configs/les_nest_250m_km3.toml d03 (docs/public/LES.md)"
 
 #: The history preset name shared across the energy units.
 ENERGY_HISTORY_PRESET = "energy"
 
-_NOT_APPLIED_PHYSICS = (
-    "woof downscale --point inherits the parent's physics verbatim from its "
-    "restart evidence and has no flag for km_opt/bl_pbl_physics; only a "
-    "--child-config TOML with explicit placement can carry a closure")
-_NOT_APPLIED_PRESET = (
-    "a --point child writes the full history inventory: the [output] "
-    "selection is read only from a --child-config TOML, which "
-    "woof downscale --point does not write")
+#: Why an intermediate tile keeps the full history inventory.
+_INTERMEDIATE_HISTORY = (
+    "an intermediate tile is the parent of the tiles below it, which "
+    "woof downscale builds from its full history (land identity, soil "
+    "state); the energy preset sheds those fields, so the tile keeps the "
+    "full inventory")
+
+#: How each tile's child TOML is derived, recorded in its spec.
+_DERIVATION = (
+    "woof.downscale._derive_child_run_config, _with_parent_epssm_label, "
+    "_render_child_toml and the [static] table: the code path woof "
+    "downscale --point writes its derived child config with, run at plan "
+    "time on the parent's emitted RunConfig (the parent's restart "
+    "evidence, which --point derives from, does not exist until the "
+    "parent has run)")
 
 
 class TilePlanRefusal(ValueError):
@@ -321,6 +358,10 @@ class _Parent:
     clearance_cells: int
     peak_envelope_gib: float | None
     transcript: str
+    #: The root's ``epssm`` was the model's choice (``ExperimentConfig
+    #: .auto_epssm``), which its checkpoint labels and ``--point`` hands
+    #: down as ``epssm = { auto = VALUE }``.
+    auto_epssm: bool = False
 
 
 def _sites_region(lon: np.ndarray, lat: np.ndarray) -> dict:
@@ -463,7 +504,9 @@ def _emit_parent(*, outdir: Path, region: dict, parent_dx_m: float,
         run_config=run, history_interval_s=float(root.history_interval_s),
         run_seconds=float(exp.run_seconds),
         clearance_cells=spec_bdy + TERRAIN_BLEND_ROWS + SINT_STENCIL_ROWS,
-        peak_envelope_gib=peak, transcript=transcript)
+        peak_envelope_gib=peak, transcript=transcript,
+        auto_epssm=int(root.grid_id) in {
+            int(gid) for gid in (getattr(exp, "auto_epssm", None) or ())})
 
 
 # --------------------------------------------------------------------------
@@ -482,19 +525,36 @@ class _Pricer:
 
     def derive(self, parent_cfg: dict, *, parent_dx: float, ratio: int,
                nx: int, ny: int, run_seconds: float, output_interval_s: float,
-               levels: tuple | None, centre_lat: float) -> dict:
+               levels: tuple | None, centre_lat: float,
+               overrides: dict | None = None) -> dict:
+        """The child RunConfig ``woof downscale --point`` would derive,
+        with ``overrides`` (the LES recipe) applied on top and the result
+        re-validated by the config authority."""
+
+        from woof.config import RunConfig, validate_run_config
         from woof.downscale import _derive_child_run_config
 
-        return _derive_child_run_config(
+        merged = _derive_child_run_config(
             parent_cfg, parent={"dx": parent_dx, "dy": parent_dx},
             ratio=int(ratio), child_nx=int(nx), child_ny=int(ny),
             run_seconds=run_seconds, output_interval_s=output_interval_s,
             child_eta_levels=levels, centre_lat=centre_lat,
             clock_seconds=(DOWNSCALE_HEALTH_INTERVAL_S,))
+        if overrides:
+            unknown = sorted(set(overrides) - set(merged))
+            if unknown:
+                raise ValueError(
+                    f"override key(s) {unknown} are not RunConfig fields; "
+                    "a --child-config [run] table cannot carry them")
+            merged = {**merged, **overrides}
+            validate_run_config(RunConfig(**merged))
+        return merged
 
     def price(self, key: tuple, parent_cfg: dict, **kwargs) -> tuple[float, dict]:
         cache_key = key + (kwargs["nx"], kwargs["ny"],
-                           round(float(kwargs["centre_lat"]), 4))
+                           round(float(kwargs["centre_lat"]), 4),
+                           tuple(sorted((kwargs.get("overrides") or {})
+                                        .items())))
         if cache_key not in self._cache:
             from woof.config import RunConfig
             from woof.core.preflight import estimate_experiment
@@ -589,6 +649,10 @@ class _Tile:
     levels: tuple | None
     min_edge_distance_m: float | None = None
     children: list = field(default_factory=list)
+    #: The LES recipe written into this tile's TOML (empty when none).
+    overrides: dict = field(default_factory=dict)
+    #: The parent's epssm was the model's choice (see :class:`_Parent`).
+    parent_auto_epssm: bool = False
 
 
 def _placement_point(start: int, span: int) -> int:
@@ -746,8 +810,9 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     pricer = _Pricer(capacity)
     tiles_dir = outdir / "tiles"
     tiles_dir.mkdir(parents=True, exist_ok=True)
-    for stale in tiles_dir.glob("*.json"):
-        stale.unlink()
+    for pattern in ("*.json", "*.toml"):
+        for stale in tiles_dir.glob(pattern):
+            stale.unlink()
     # A refused re-plan must not leave an older plan.json pointing at the
     # tile specs just removed and the parent just re-emitted.
     (outdir / "plan.json").unlink(missing_ok=True)
@@ -758,11 +823,16 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     def plan_level(*, grid, nx: int, ny: int, pdx: float, cfg: dict,
                    clearance: int, members: np.ndarray, ratios: tuple,
                    parent_id: str, parent_wrf_grid_id: int, level: int,
-                   margins: list[float]) -> None:
+                   margins: list[float], parent_auto_epssm: bool) -> None:
         ratio = int(ratios[0])
         margin_m = margins[0]
         leaf = len(ratios) == 1
         cdx = pdx / ratio
+        # The LES closure goes on leaf tiles in the LES regime only; an
+        # intermediate tile forces the level below with its parent's
+        # physics.
+        overrides = (dict(LES_PHYSICS_RECIPE)
+                     if leaf and cdx <= LES_CHILD_DX_M + 1e-9 else {})
         m_lat, m_lon = lat[members], lon[members]
         fi, fj = (np.asarray(v, dtype=np.float64)
                   for v in grid.latlon_to_ij(m_lat, m_lon))
@@ -785,8 +855,10 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         centre_lat = float(np.mean(m_lat))
         price_kwargs = dict(parent_dx=pdx, run_seconds=parent.run_seconds,
                             output_interval_s=parent.history_interval_s,
-                            levels=levels, centre_lat=centre_lat)
-        key = (parent_id, ratio, leaf_levels_n if leaf else None)
+                            levels=levels, centre_lat=centre_lat,
+                            overrides=overrides)
+        key = (parent_id, ratio, leaf_levels_n if leaf else None,
+               bool(overrides))
         size = _tile_capacity(pricer, key, cfg, ratio=ratio, **price_kwargs)
         # Room for one parent cell of snapping slack on each side.
         max_cells = max(2 * ratio, size - 2 * ratio)
@@ -858,7 +930,8 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                     "that does not contain them once snapped to parent cells")
             edge_cells = np.minimum.reduce([ci - 0.5, child_nx + 0.5 - ci,
                                             cj - 0.5, child_ny + 0.5 - cj])
-            # Priced as downscale derives it: centred on the --point.
+            # Priced as downscale derives it, centred on the mass point
+            # the placement is centred on, with the overrides applied.
             peak, merged = pricer.price(
                 key, cfg, ratio=ratio, nx=child_nx, ny=child_ny,
                 **{**price_kwargs, "centre_lat": c_lat})
@@ -881,7 +954,9 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                 wrf_grid_id=parent_wrf_grid_id + 1, sites=tile_sites,
                 run_config=merged, peak_envelope_gib=peak / GIB,
                 levels=levels,
-                min_edge_distance_m=float(np.min(edge_cells)) * cdx / mapfac)
+                min_edge_distance_m=float(np.min(edge_cells)) * cdx / mapfac,
+                overrides=dict(overrides),
+                parent_auto_epssm=bool(parent_auto_epssm))
             all_tiles.append(tile)
             if not leaf:
                 inner_clearance = (int(merged["spec_bdy_width"])
@@ -891,7 +966,10 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                            members=tile_sites, ratios=ratios[1:],
                            parent_id=domain_id,
                            parent_wrf_grid_id=tile.wrf_grid_id,
-                           level=level + 1, margins=margins[1:])
+                           level=level + 1, margins=margins[1:],
+                           # _with_parent_epssm_label labels this tile's
+                           # own epssm when its parent's was labelled.
+                           parent_auto_epssm=tile.parent_auto_epssm)
             if max_domains is not None and len(all_tiles) > max_domains:
                 raise TooManyTiles(
                     f"the cover needs more than {max_domains} tiles "
@@ -907,13 +985,15 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                cfg=parent.run_config, clearance=parent.clearance_cells,
                members=np.arange(len(sites)), ratios=chain,
                parent_id="parent", parent_wrf_grid_id=1, level=1,
-               margins=_level_margins(chain, parent.dx, corridor_m))
+               margins=_level_margins(chain, parent.dx, corridor_m),
+               parent_auto_epssm=parent.auto_epssm)
 
     domains = [_parent_domain(parent, outdir)]
     for tile in all_tiles:
         domains.append(_tile_domain(
             tile, outdir=outdir, site_ids=site_ids, capacity=capacity,
-            capacity_flags=capacity_flags, parent=parent))
+            capacity_flags=capacity_flags, parent=parent,
+            start=start_text))
 
     notes += _plan_notes(parent=parent, chain=chain, dx_m=dx_m,
                          corridor_m=corridor_m, leaf_levels_n=leaf_levels_n,
@@ -950,31 +1030,142 @@ def _parent_domain(parent: _Parent, outdir: Path) -> PlanDomain:
         })
 
 
-def _downscale_args(tile: _Tile, *, run_dir: str,
+class _ChildConfig:
+    """One tile's written ``--child-config`` TOML and what was proven."""
+
+    def __init__(self, *, path: Path, relpath: str, sha256: str,
+                 history_preset: str, verified_keys: tuple[str, ...]):
+        self.path = path
+        self.relpath = relpath
+        self.sha256 = sha256
+        self.history_preset = history_preset
+        self.verified_keys = verified_keys
+
+
+def _child_config_text(tile: _Tile) -> str:
+    """The tile's ``--child-config`` TOML, rendered as ``--point`` renders
+    its derived config, with the LES recipe already in ``[run]`` (it is in
+    ``tile.run_config``) and the leaf's ``[output]`` preset appended."""
+
+    from types import SimpleNamespace
+
+    from woof.downscale import (_derived_static_table, _render_child_toml,
+                                _with_parent_epssm_label)
+    from woof.io.restart import AUTO_EPSSM_HEADER_KEY
+
+    config = _with_parent_epssm_label(
+        dict(tile.run_config),
+        {AUTO_EPSSM_HEADER_KEY: True} if tile.parent_auto_epssm else {})
+    head = [
+        f"# woof energy plan --topology wrf-tiles: {tile.domain_id} "
+        f"({tile.role}, {tile.dx:g} m, ratio {tile.ratio} from "
+        f"{tile.parent_id}).",
+        "# Run as `woof downscale <parent frames> --child-config <this file> "
+        "--child-config-sha256 ...`;",
+        "# an edited file no longer matches the sha256 the plan recorded and "
+        "is refused.",
+    ]
+    if tile.overrides:
+        head.append(
+            "# LES gray-zone closure in [run], from " + LES_RECIPE_SOURCE
+            + ": " + ", ".join(f"{key} = {value}" for key, value
+                               in tile.overrides.items()) + ".")
+    head.append("# The body below is rendered by woof downscale's own --point "
+                "renderer; its header follows.")
+    # The [static] table --point writes with no terrain or GEOG flag.
+    static = _derived_static_table(
+        SimpleNamespace(parent_terrain=False, geog_root=None))
+    text = "\n".join(head) + "\n" + _render_child_toml(config) + static
+    if tile.role == "child":
+        text += f'\n[output]\npreset = "{ENERGY_HISTORY_PRESET}"\n'
+    return text
+
+
+def _write_child_config(tile: _Tile, *, outdir: Path,
+                        start: str) -> _ChildConfig:
+    """Write ``tiles/<id>.toml`` and prove ``woof downscale`` reads back
+    exactly what was planned: the grid, every LES override and the history
+    preset.  Any disagreement refuses the plan; no key is dropped."""
+
+    from woof.config import load_history_selection
+    from woof.experiment import experiment_from_run_config
+    from woof.offline_child import (require_offline_child_root_forcing,
+                                    resolve_child_run_config)
+
+    path = outdir / "tiles" / f"{tile.domain_id}.toml"
+    path.write_text(_child_config_text(tile), encoding="utf-8", newline="\n")
+    try:
+        # The --child-config door's own loader (load_config +
+        # validate_run_config), and its specified-boundary gate.
+        cfg = resolve_child_run_config(path)
+        require_offline_child_root_forcing(cfg)
+        selection = load_history_selection(path)
+        experiment_from_run_config(
+            cfg, datetime.strptime(start, "%Y-%m-%dT%H")
+            .replace(tzinfo=timezone.utc))
+    except (ValueError, TypeError, KeyError) as error:
+        raise TilePlanRefusal(
+            f"woof downscale would refuse the child config planned for "
+            f"{tile.domain_id} ({path}): {error}") from error
+    expected = {"nx": tile.nx, "ny": tile.ny,
+                "nz": int(tile.run_config["nz"]),
+                "dx": float(tile.run_config["dx"]),
+                "dt": float(tile.run_config["dt"]),
+                "grid_id": tile.wrf_grid_id, **tile.overrides}
+    mismatched = []
+    for key, want in expected.items():
+        got = getattr(cfg, key, None)
+        same = (math.isclose(float(got), float(want), rel_tol=0.0,
+                             abs_tol=1e-9)
+                if isinstance(want, float) and got is not None
+                else got == want)
+        if not same:
+            mismatched.append(f"{key} = {want!r} planned, {got!r} read back")
+    if tile.levels is not None and (
+            cfg.eta_levels is None
+            or tuple(float(v) for v in cfg.eta_levels)
+            != tuple(float(v) for v in tile.levels)):
+        mismatched.append("eta_levels: the planned ladder did not round-trip")
+    want_preset = ENERGY_HISTORY_PRESET if tile.role == "child" else "full"
+    if selection.preset != want_preset:
+        mismatched.append(f"[output] preset = {want_preset!r} planned, "
+                          f"{selection.preset!r} read back")
+    if mismatched:
+        raise TilePlanRefusal(
+            f"the child config planned for {tile.domain_id} ({path}) does not "
+            "read back as planned through woof downscale's loader: "
+            + "; ".join(mismatched))
+    return _ChildConfig(
+        path=path, relpath=_relpath(path, outdir),
+        sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        history_preset=selection.preset,
+        verified_keys=tuple(sorted(tile.overrides)))
+
+
+def _downscale_args(tile: _Tile, *, run_dir: str, child: _ChildConfig,
                     capacity_flags: list[str], parent: _Parent) -> list[str]:
-    """``woof downscale <parent run_dir>`` arguments for one tile."""
+    """``woof downscale <parent frames>`` arguments for one tile: the
+    ``--child-config`` route with the explicit placement it requires."""
 
     from woof.downscale import PARENT_RESTART_LATEST
 
-    args = ["--parent-domain", str(tile.parent_wrf_grid_id),
+    return ["--parent-domain", str(tile.parent_wrf_grid_id),
             "--parent-restart", PARENT_RESTART_LATEST,
-            "--point", f"{tile.centre_lat:.6f},{tile.centre_lon:.6f}",
+            "--child-config", child.relpath,
+            "--child-config-sha256", child.sha256,
             "--ratio", str(tile.ratio),
-            "--child-size", f"{tile.nx},{tile.ny}"]
-    if tile.levels is not None:
-        args += ["--child-levels",
-                 f"{len(tile.levels) - 1},{CHILD_LEVEL_STRETCH:g}"]
-    args += ["--max-boundary-interval-seconds",
-             f"{parent.history_interval_s:g}",
-             *capacity_flags,
-             "--render-products", "none",
-             "--out", run_dir]
-    return args
+            "--i-parent-start", str(tile.i_parent_start),
+            "--j-parent-start", str(tile.j_parent_start),
+            "--max-boundary-interval-seconds",
+            f"{parent.history_interval_s:g}",
+            *capacity_flags,
+            "--render-products", "none",
+            "--out", run_dir]
 
 
 def _tile_domain(tile: _Tile, *, outdir: Path, site_ids: np.ndarray,
                  capacity: float, capacity_flags: list[str],
-                 parent: _Parent) -> PlanDomain:
+                 parent: _Parent, start: str) -> PlanDomain:
     parent_run_dir = ("runs/parent" if tile.parent_id == "parent"
                       else f"runs/{tile.parent_id}")
     # The positional downscale argument is the parent's FRAMES directory:
@@ -982,12 +1173,46 @@ def _tile_domain(tile: _Tile, *, outdir: Path, site_ids: np.ndarray,
     parent_frames = (f"{parent_run_dir}/{Path(PARENT_OUTPUT_GLOB).parent}"
                      if tile.parent_id == "parent" else parent_run_dir)
     run_dir = f"runs/{tile.domain_id}"
+    child = _write_child_config(tile, outdir=outdir, start=start)
     downscale_args = _downscale_args(
-        tile, run_dir=run_dir, capacity_flags=capacity_flags, parent=parent)
+        tile, run_dir=run_dir, child=child, capacity_flags=capacity_flags,
+        parent=parent)
     footprint = _ring(tile.grid, tile.nx, tile.ny)
     owned = (tuple(str(s) for s in site_ids[tile.sites])
              if tile.role == "child" else ())
-    les = tile.role == "child" and tile.dx <= LES_CHILD_DX_M
+    leaf = tile.role == "child"
+    via = f"--child-config {child.relpath}"
+    if tile.overrides:
+        physics = {
+            "recipe": dict(tile.overrides),
+            "source": LES_RECIPE_SOURCE,
+            "applied": True,
+            "via": f"[run] of {child.relpath} ({via})",
+            "verified_keys": list(child.verified_keys),
+            "verified_with": "woof.offline_child.resolve_child_run_config "
+                             "(the --child-config door's loader)",
+        }
+    else:
+        physics = {
+            "recipe": {},
+            "source": None,
+            "applied": None,
+            "reason": (
+                "intermediate tile: it forces the tiles below it with its "
+                "parent's physics, inherited as woof downscale --point "
+                "inherits them" if not leaf else
+                f"not in the LES regime (coarser than {LES_CHILD_DX_M:g} "
+                "m); parent physics inherited as woof downscale --point "
+                "inherits them"),
+        }
+    if leaf:
+        history = {"preset": child.history_preset, "applied": True,
+                   "via": f"[output] of {child.relpath} ({via})",
+                   "interval_s": parent.history_interval_s}
+    else:
+        history = {"preset": child.history_preset, "applied": True,
+                   "reason": _INTERMEDIATE_HISTORY,
+                   "interval_s": parent.history_interval_s}
     spec = {
         "schema": TILE_SCHEMA,
         "domain_id": tile.domain_id,
@@ -1013,31 +1238,28 @@ def _tile_domain(tile: _Tile, *, outdir: Path, site_ids: np.ndarray,
                                      else round(tile.min_edge_distance_m, 1)),
         "dt_s": float(tile.run_config["dt"]),
         "nz": int(tile.run_config["nz"]),
+        "child_config": {
+            "path": child.relpath,
+            "sha256": child.sha256,
+            "derived_with": _DERIVATION,
+            "epssm_auto_label": bool(tile.parent_auto_epssm),
+        },
         "child_levels": (None if tile.levels is None else
                          {"nz": len(tile.levels) - 1,
                           "stretch": CHILD_LEVEL_STRETCH, "applied": True,
-                          "via": "--child-levels"}),
+                          "via": f"eta_levels in {child.relpath}"}),
         "lateral_zone": {
             key: tile.run_config[key]
             for key in ("spec_zone", "relax_zone", "spec_bdy_width",
                         "relax_timescale_s")},
-        "physics_overrides": {
-            "recipe": (dict(LES_PHYSICS_RECIPE) if les else {}),
-            "source": ("configs/les_nest_250m_km3.toml d03 "
-                       "(docs/public/LES.md)" if les else None),
-            "applied": False if les else None,
-            "reason": _NOT_APPLIED_PHYSICS if les else
-            ("not in the LES regime (coarser than "
-             f"{LES_CHILD_DX_M:g} m); parent physics inherited"),
-        },
-        "history": {"preset": ENERGY_HISTORY_PRESET, "applied": False,
-                    "reason": _NOT_APPLIED_PRESET,
-                    "interval_s": parent.history_interval_s},
+        "physics_overrides": physics,
+        "history": history,
         "vram": {"peak_envelope_gib": round(tile.peak_envelope_gib, 3),
                  "capacity_gib": capacity,
                  "basis": "woof.core.preflight.estimate_experiment on the "
-                          "child RunConfig derived as woof downscale --point "
-                          "derives it"},
+                          "child RunConfig in child_config (derived as "
+                          "woof downscale --point derives it, with the "
+                          "physics overrides applied)"},
         "downscale_args": downscale_args,
         # The orchestrator expands parent_frames_glob to the one frames
         # directory of the finished parent run and substitutes it here.
@@ -1055,6 +1277,8 @@ def _tile_domain(tile: _Tile, *, outdir: Path, site_ids: np.ndarray,
         wps_namelist=None, grid_id=1, parent=tile.parent_id, site_ids=owned,
         extra={
             "downscale_args": downscale_args,
+            "child_config": child.relpath,
+            "child_config_sha256": child.sha256,
             "ratio": tile.ratio, "nx": tile.nx, "ny": tile.ny,
             "parent_domain": tile.parent_wrf_grid_id,
             "wrf_grid_id": tile.wrf_grid_id,
@@ -1084,32 +1308,56 @@ def _plan_notes(*, parent: _Parent, chain: tuple[int, ...], dx_m: float,
         "native spacing; see parent/woof-domain.log for the wizard's "
         "physics and gray-zone advisories")
     notes.append(
-        f"tiles are one-way offline children (woof downscale --point): "
+        "tiles are one-way offline children (woof downscale --child-config "
+        "tiles/<id>.toml with explicit --ratio/--i-parent-start/"
+        "--j-parent-start placement, each TOML bound by the sha256 in "
+        "its downscale_args): "
         f"boundaries every {parent.history_interval_s:g} s from the parent "
         "history, which is also each tile's history cadence")
     notes.append(
         "launch every plan command from the plan directory: the parent "
-        "TOML's [fetch].out and the tiles' downscale_args (--out) are "
-        "relative to it.  The parent runs as `woof go <config> --outdir "
+        "TOML's [fetch].out and the tiles' downscale_args (--child-config, "
+        "--out) are relative to it.  The parent runs as `woof go <config> --outdir "
         f"runs/parent` and its frames match {PARENT_OUTPUT_GLOB!r}; the "
         "orchestrator runs `woof downscale <parent frames directory> "
         "<downscale_args>`, and --parent-restart latest finds the parent's "
         "checkpoints in the run directory above that wrfout/ folder.  A "
         "tile writes its frames directly in its --out (= run_dir), which "
         "is create-only")
+    notes.append(
+        "each tile's child TOML is derived by " + _DERIVATION + ".  This "
+        "is an approximation of --point in one respect: a value the "
+        "parent's run settles only at run time and records in its "
+        "checkpoint is not seen.  The adaptive step does not matter (the "
+        "child takes a fixed step of its own either way) and a "
+        "model-chosen epssm is handed down labelled, as --point does; "
+        "woof downscale still binds the parent's microphysics from "
+        "--parent-restart latest and checks the child's scheme against it")
     if leaf_levels_n is not None:
         notes.append(
             f"leaf tiles carry their own {leaf_levels_n}-level ladder "
-            f"(--child-levels {leaf_levels_n},{CHILD_LEVEL_STRETCH:g}), the "
+            f"(eta_levels in tiles/<id>.toml, built as --child-levels "
+            f"{leaf_levels_n},{CHILD_LEVEL_STRETCH:g} builds it), the "
             "vertical half of the LES recipe")
     if dx_m <= LES_CHILD_DX_M:
         notes.append(
-            "LES gray-zone closure NOT applied: " + _NOT_APPLIED_PHYSICS
-            + "; the leaf tiles run the parent's PBL scheme at "
-            f"{dx_m:g} m, which woof downscale states at its door; the "
-            "recipe each tile would need is recorded in its tiles/<id>.json")
-    notes.append(f"history preset {ENERGY_HISTORY_PRESET!r} NOT applied to "
-                 "tiles: " + _NOT_APPLIED_PRESET)
+            "LES gray-zone closure applied to every leaf tile at "
+            f"{dx_m:g} m: "
+            + ", ".join(f"{key} = {value}"
+                        for key, value in LES_PHYSICS_RECIPE.items())
+            + f" in the [run] table of tiles/<id>.toml ({LES_RECIPE_SOURCE}),"
+            " each key read back through woof downscale's --child-config "
+            "loader before the plan was written")
+    else:
+        notes.append(
+            f"leaf tiles at {dx_m:g} m are coarser than the "
+            f"{LES_CHILD_DX_M:g} m LES regime: they inherit the parent's "
+            "physics, as woof downscale --point would")
+    notes.append(
+        f"history preset {ENERGY_HISTORY_PRESET!r} applied to every leaf "
+        "tile ([output] in tiles/<id>.toml)"
+        + ("; intermediate tiles write the full inventory: "
+           + _INTERMEDIATE_HISTORY if len(chain) > 1 else ""))
     zone_m = (1 + _relax_cells(chain[-1]) + TERRAIN_BLEND_ROWS) * dx_m
     if corridor_m <= zone_m:
         notes.append(
