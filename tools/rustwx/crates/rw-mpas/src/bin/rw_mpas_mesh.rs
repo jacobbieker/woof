@@ -34,6 +34,7 @@ use rw_mpas::mesh::{GenerateRequest, Limits, LloydOptions, generate};
 /// the marker exists to catch.
 pub const ABI_MARKER: &str = "rw_mpas_mesh --out GRID.nc [--spec SPEC.json | --background-km KM | --from-centres GRID.nc] \
 [--cells N | --card KEY [--vram-gib X]] [--fit-spacing yes|no] [--sweeps N] [--tolerance X] [--omega X] \
+[--regional-window POLY.json [--regional-halo-rings N]] \
 [--receipt JSON] [--triangulation rebuild|incremental] [--clobber] [--dry-run] [--list-cards]";
 
 /// Progress tokens this binary prints, one per stage, tab separated.
@@ -88,7 +89,12 @@ fn usage() -> String {
          --sweeps         relaxation budget (default 300)\n\
          --omega          over-relaxation factor (default 1.4; 1.0 is plain Lloyd)\n\
          --triangulation  how the Delaunay is kept between relaxation sweeps.\n\
-        \x20                 rebuild (DEFAULT, class A) rebuilds it from scratch every sweep.\n\
+        \x20                 THE RULE: rebuild is the default for every whole-sphere request\n\
+        \x20                 (--spec, --background-km), so goldens and registered meshes\n\
+        \x20                 reproduce without being told; incremental is the default with\n\
+        \x20                 --regional-window, a mesh no registry holds. --from-centres never\n\
+        \x20                 relaxes and refuses the flag. Naming an arm always wins.\n\
+        \x20                 rebuild (class A) rebuilds it from scratch every sweep.\n\
         \x20                 That is what every registered mesh was generated with and the\n\
         \x20                 only setting that reproduces one byte for byte.\n\
         \x20                 incremental (class B) keeps the facets and repairs them by Lawson\n\
@@ -96,6 +102,18 @@ fn usage() -> String {
         \x20                 it had where a rebuild re-rolls it for about 27% of cells, so the\n\
         \x20                 FILE differs. Use it for a mesh that has never existed; never to\n\
         \x20                 regenerate one with a registered SHA-256.\n\n\
+         THE REGIONAL WINDOW (EXPERIMENTAL)\n\
+         --regional-window  refine and relax only inside this window plus a halo. A GeoJSON\n\
+        \x20                 Polygon ([lon, lat]; bare, Feature or one-feature collection) or a\n\
+        \x20                 Shape row ({{\"kind\": \"polygon\", \"vertices_deg\": [[lat, lon], ...]}}).\n\
+        \x20                 Level 0 is still the whole-sphere background; every later level\n\
+        \x20                 inserts, relaxes and repairs inside the zone only, and generators\n\
+        \x20                 outside it stay frozen bit for bit while still triangulated, so the\n\
+        \x20                 output is a whole-sphere grid that culls and validates as usual.\n\
+        \x20                 Needs a graded --spec. Receipt: regional_window (halo_quality).\n\
+         --regional-halo-rings  halo in background rings from the window. Default: the measured\n\
+        \x20                 spill (where the spec still asks >2% finer than the background)\n\
+        \x20                 plus max(6, ceil(band_cells)) rings. Too short is refused.\n\n\
          THE REGIONAL CULL\n\
          --cull-parent    cut a limited-area mesh out of an existing global grid or static\n\
         \x20                 file instead of generating one. Byte-matches the native\n\
@@ -249,7 +267,18 @@ fn run() -> Result<String, String> {
                     .to_string(),
             );
         }
-        for named in ["cells", "card", "vram-gib", "fit-spacing", "sweeps", "tolerance", "omega"] {
+        for named in [
+            "cells",
+            "card",
+            "vram-gib",
+            "fit-spacing",
+            "sweeps",
+            "tolerance",
+            "omega",
+            "triangulation",
+            "regional-window",
+            "regional-halo-rings",
+        ] {
             if args.get(named).is_some() {
                 return Err(format!(
                     "--{named} sizes or relaxes a mesh this route never generates: --from-centres takes the cell centres as given and rebuilds the derived fields around them. Accepting the flag and ignoring it would report a cell count or a convergence the run never had"
@@ -347,11 +376,42 @@ fn run() -> Result<String, String> {
         }
         lloyd.omega = v;
     }
-    // THE CLASS SWITCH. Default `rebuild`; see `hull::TriangulationMode` for
-    // why a faster default would silently lapse every registered mesh digest.
-    if let Some(v) = args.get("triangulation") {
-        lloyd.triangulation = rw_mpas::mesh::hull::TriangulationMode::parse(v)?;
-    }
+    // --- the regional window (experimental) ----------------------------------
+    let regional = match args.get("regional-window") {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("cannot read the regional window {path}: {e}"))?;
+            let (shape, format) =
+                rw_mpas::mesh::regional::parse_window(&text).map_err(|e| e.to_string())?;
+            Some(rw_mpas::mesh::regional::RegionalWindow {
+                shape,
+                source_format: format.to_string(),
+                halo_rings: args.number::<f64>("regional-halo-rings")?,
+            })
+        }
+        None => {
+            if args.get("regional-halo-rings").is_some() {
+                return Err(
+                    "--regional-halo-rings sizes the halo of a --regional-window, and none was given; a halo with no window has nothing to surround"
+                        .to_string(),
+                );
+            }
+            None
+        }
+    };
+
+    // THE CLASS SWITCH, by a stated rule. A whole-sphere request defaults to
+    // `rebuild` -- see `hull::TriangulationMode` for why a faster default
+    // there would silently lapse every registered mesh digest. A regional
+    // window defaults to `incremental`: no registry holds a mesh made with
+    // one, so there is no digest to reproduce, and the rebuild arm's full
+    // re-triangulation per sweep is most of a graded run's wall. Naming the
+    // arm always wins.
+    lloyd.triangulation = match (args.get("triangulation"), &regional) {
+        (Some(v), _) => rw_mpas::mesh::hull::TriangulationMode::parse(v)?,
+        (None, Some(_)) => rw_mpas::mesh::hull::TriangulationMode::Maintained,
+        (None, None) => rw_mpas::mesh::hull::TriangulationMode::Rebuild,
+    };
 
     let request = GenerateRequest {
         spec: spec.clone(),
@@ -364,6 +424,7 @@ fn run() -> Result<String, String> {
         // gate and the file cannot disagree about how precisely this mesh is
         // stored.
         limits: Limits::for_storage(CoordinateRepresentation::for_generated_mesh()),
+        regional: regional.clone(),
         ..Default::default()
     };
 
@@ -382,7 +443,33 @@ fn run() -> Result<String, String> {
         // a `JSONDecodeError` at line 1 column 1 rather than a message anybody
         // reads.
         let (spec, dry_snap) = rw_mpas::mesh::ladder_snap::snap_to_ladder(&spec);
-        let predicted = spec.predicted_cells(request.sizing_samples);
+        let mut predicted = spec.predicted_cells(request.sizing_samples);
+        // With a window, the count is the regional plan's adaptive one: the
+        // lattice above cannot see a sub-km zone, and a footprint priced on
+        // it would describe a mesh the run will not build. Measured on the
+        // spec before any fit; --fit-spacing with a window is refused below.
+        let regional_count = match &regional {
+            Some(w) => {
+                if spec.regions.is_empty() {
+                    return Err("--regional-window needs a graded spec: a uniform request refines nowhere".to_string());
+                }
+                if fit_spacing {
+                    return Err("--fit-spacing rescales the spec against a whole-sphere lattice count, which cannot see a regional window's zone; size a windowed request with --cells or the spec's own spacings".to_string());
+                }
+                let reading = spec.steepest_gradient_reading(50_000);
+                let band = rw_mpas::mesh::hierarchy::band_cells_of(reading.per_cell);
+                let plan = rw_mpas::mesh::regional::RegionalPlan::new(
+                    w,
+                    &spec.prepared(),
+                    spec.background_km * 1000.0,
+                    band,
+                )
+                .map_err(|e| e.to_string())?;
+                predicted = plan.predicted_active_cells + plan.predicted_frozen_cells;
+                Some(plan.preview())
+            }
+            None => None,
+        };
         let target = match (request.target_cells, budget_mib) {
             (Some(n), _) => n,
             // `card` is Some here: a budget with no card was already refused
@@ -404,7 +491,10 @@ fn run() -> Result<String, String> {
         // built. Read once and reported whole: the number, what it cost, and
         // whether it is a measurement at all.
         let gradient = fitted.steepest_gradient_reading(50_000);
+        let regional_plan = regional_count;
         let plan = serde_json::json!({
+            "regional_window": regional_plan,
+            "triangulation": request.lloyd.triangulation.as_str(),
             "engine": concat!("rw-mpas ", env!("CARGO_PKG_VERSION"), " (rust)"),
             "dry_run": true,
             "spec": fitted,
@@ -414,7 +504,8 @@ fn run() -> Result<String, String> {
             // with what they typed has this beside it to say why.
             "ladder_snap": dry_snap,
             "target_cells": target,
-            "predicted_cells": fitted.predicted_cells(request.sizing_samples),
+            "predicted_cells": if regional_plan.is_some() { predicted } else { fitted.predicted_cells(request.sizing_samples) },
+            "predicted_cells_basis": if regional_plan.is_some() { "regional adaptive quadrature" } else { "whole-sphere lattice" },
             // The card is printed BESIDE the footprint, always. A footprint
             // with no card next to it is a number nobody can check, which is
             // how one part's fixed term came to be quoted as "the measured
@@ -544,6 +635,9 @@ fn cull_region(args: &Args, parent: &str) -> Result<String, String> {
         "sweeps",
         "tolerance",
         "omega",
+        "triangulation",
+        "regional-window",
+        "regional-halo-rings",
     ] {
         if args.get(named).is_some() {
             return Err(format!(

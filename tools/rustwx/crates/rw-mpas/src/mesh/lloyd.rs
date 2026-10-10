@@ -278,6 +278,45 @@ pub fn relax<F: DensityField + Sync>(
     spec: &F,
     opts: &LloydOptions,
 ) -> MpasResult<LloydOutcome> {
+    relax_masked(points, spec, opts, None)
+}
+
+/// [`relax`] with some generators FROZEN: `frozen[i]` holds generator `i`
+/// exactly where it is (bit for bit) while it still takes part in every
+/// triangulation. The convergence contract is unchanged -- mean and worst
+/// `delta/h` over EVERY generator, a frozen one measured where it stands --
+/// so a regional build is held to the same tolerance a global one is, and a
+/// frozen cell the active ones pull off-centre counts against convergence
+/// rather than being hidden from it. The settled background dilutes this
+/// mean exactly as the same, already-converged background cells dilute it in
+/// a global build (they are relaxed there too, and sit at the same residual);
+/// MEASURED: averaging over the moving cells alone doubled the level sweeps
+/// on an 89k-cell ladder for no gate the global path is held to. The
+/// window's own residual is reported separately in the receipt
+/// (`halo_quality.window_mean_delta_over_h`).
+///
+/// `None` is [`relax`] itself, arithmetic for arithmetic: the regional
+/// window ([`crate::mesh::regional`]) is the only caller that passes a mask.
+pub fn relax_masked<F: DensityField + Sync>(
+    points: &mut Vec<V3>,
+    spec: &F,
+    opts: &LloydOptions,
+    frozen: Option<&[bool]>,
+) -> MpasResult<LloydOutcome> {
+    if let Some(mask) = frozen {
+        if mask.len() != points.len() {
+            return Err(MpasError::Refusal(format!(
+                "a frozen mask of {} flags cannot pin {} generators",
+                mask.len(),
+                points.len()
+            )));
+        }
+        if mask.iter().all(|&f| f) {
+            return Err(MpasError::Refusal(
+                "every generator is frozen, so there is nothing to relax".to_string(),
+            ));
+        }
+    }
     if !(opts.tolerance > 0.0 && opts.tolerance.is_finite()) {
         return Err(MpasError::Refusal(format!(
             "a relaxation tolerance of {} cannot be reached; the tolerance is the quality contract the mesh is held to and it has to be a positive number",
@@ -322,12 +361,18 @@ pub fn relax<F: DensityField + Sync>(
                     .collect()
             },
         );
+        // The SAME contract with or without a mask: mean and worst delta/h
+        // over every generator. A frozen one is measured where it stands
+        // (it is part of the mesh being judged) and is simply never moved.
         let worst = step.iter().map(|(_, r)| *r).fold(0.0f64, f64::max);
         let mean = step.iter().map(|(_, r)| *r).sum::<f64>() / step.len() as f64;
         history.push(mean);
         worst_history.push(worst);
 
         for (i, (c, _)) in step.iter().enumerate() {
+            if frozen.is_some_and(|mask| mask[i]) {
+                continue;
+            }
             let moved = if opts.omega == 1.0 {
                 *c
             } else {
@@ -488,6 +533,14 @@ pub fn relax<F: DensityField + Sync>(
         opts.tolerance,
         mean * 100.0
     )))
+}
+
+/// How far generator `i` sits from its own density-weighted Voronoi centroid
+/// under `field`, over its local spacing: the relaxation's own `delta/h`,
+/// read on a finished mesh. The regional window's halo report is measured
+/// with it.
+pub fn centroid_residual<F: DensityField>(points: &[V3], rings: &Rings, field: &F, i: usize) -> f64 {
+    cell_step(points, rings, field, i).1
 }
 
 /// One cell's density-weighted centroid and its normalised displacement.

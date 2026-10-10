@@ -257,6 +257,7 @@ BRIDGE_ABI_MARKERS = {
         b"rw_mpas_mesh --out GRID.nc [--spec SPEC.json | --background-km KM "
         b"| --from-centres GRID.nc] [--cells N | --card KEY [--vram-gib X]] "
         b"[--fit-spacing yes|no] [--sweeps N] [--tolerance X] [--omega X] "
+        b"[--regional-window POLY.json [--regional-halo-rings N]] "
         b"[--receipt JSON] [--triangulation rebuild|incremental] [--clobber] "
         b"[--dry-run] [--list-cards]"),
     # The MPAS static builder, the other half of what `woof mesh`

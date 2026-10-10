@@ -504,6 +504,7 @@ fn local_polish<F: DensityField + Sync>(
     radius: usize,
     sweeps: usize,
     mode: TriangulationMode,
+    pinned: Option<&Pinned<'_>>,
 ) -> MpasResult<Rings> {
     let _polish_timer = crate::mesh::profile::Span::new(
         &crate::mesh::profile::SURGERY_POLISH,
@@ -543,7 +544,7 @@ fn local_polish<F: DensityField + Sync>(
             }
         }
         let moves: Vec<(usize, V3)> = (0..points.len())
-            .filter(|&i| active[i])
+            .filter(|&i| active[i] && !pinned.is_some_and(|pin| pin(points[i])))
             .map(|i| (i, polish_step(points, &rings, field, i)))
             .collect();
         for (i, c) in moves {
@@ -655,6 +656,30 @@ pub fn drain<F: DensityField + Sync>(
     opts: &SurgeryOptions,
     drift_budget_points: usize,
 ) -> MpasResult<(Rings, SurgeryLedger)> {
+    drain_pinned(points, field, opts, drift_budget_points, None)
+}
+
+/// A position predicate: `true` where a generator must not be moved,
+/// deleted, or have a new generator placed at it.
+pub type Pinned<'a> = dyn Fn(V3) -> bool + Sync + 'a;
+
+/// [`drain`] with a PIN: no operator moves, deletes or inserts a generator
+/// where `pinned` reads `true`. The regional window
+/// ([`crate::mesh::regional`]) pins everything outside its zone, which is
+/// what keeps the frozen background bit-for-bit fixed through surgery.
+///
+/// A flagged quad whose site is pinned is not operated on at all; if one
+/// exists the loop cannot reach its exit test and ends in the round-budget
+/// refusal, which is the fail-closed outcome for a defect in frozen crystal.
+/// `None` is [`drain`] itself, operation for operation.
+pub fn drain_pinned<F: DensityField + Sync>(
+    points: &mut Vec<V3>,
+    field: &F,
+    opts: &SurgeryOptions,
+    drift_budget_points: usize,
+    pinned: Option<&Pinned<'_>>,
+) -> MpasResult<(Rings, SurgeryLedger)> {
+    let is_pinned = |p: V3| pinned.is_some_and(|pin| pin(p));
     let mut ledger = SurgeryLedger::default();
     let mut tracker = SiteTracker::new();
     // Consecutive rounds that have carried a cell below MIN_COORDINATION.
@@ -746,6 +771,9 @@ pub fn drain<F: DensityField + Sync>(
             if cells.iter().any(|&c| used[c]) {
                 continue;
             }
+            if pinned.is_some() && cells.iter().all(|&c| is_pinned(points[c])) {
+                continue;
+            }
             for &c in &cells {
                 used[c] = true;
             }
@@ -755,7 +783,11 @@ pub fn drain<F: DensityField + Sync>(
             }
         }
         if batch.is_empty() && !flagged.is_empty() {
-            batch.push(flagged[0]);
+            let first = flagged[0];
+            let cells = [first.i as usize, first.j as usize, first.a as usize, first.b as usize];
+            if !(pinned.is_some() && cells.iter().all(|&c| is_pinned(points[c]))) {
+                batch.push(first);
+            }
         }
 
         // ---- operate -----------------------------------------------------
@@ -795,6 +827,18 @@ pub fn drain<F: DensityField + Sync>(
                     }
                     removal.sort_unstable();
                     removal.dedup();
+                    // Under a pin a cavity that would remove a pinned cell is
+                    // not resampled at all: re-placing a lattice around the
+                    // frozen survivors could land a new generator on top of
+                    // one. Recorded stubborn, which the loop refuses.
+                    if pinned.is_some() && removal.iter().any(|&c| is_pinned(points[c])) {
+                        ledger.stubborn.push(StubbornSite {
+                            site: site_pos,
+                            q: r.q,
+                            ops_spent,
+                        });
+                        continue;
+                    }
                     cavity_jobs.push((site_pos, removal));
                     tracker.sites[sk].3 = true;
                     tracker.sites[sk].1 += 1;
@@ -840,6 +884,16 @@ pub fn drain<F: DensityField + Sync>(
             } else {
                 OpKind::InsertDiagonal
             };
+            // Under a pin, an operator whose target is pinned swaps for the
+            // other; a quad where neither can act is left for the round-budget
+            // refusal rather than repaired through the frozen background.
+            // Deletion under a pin may only take an UNPINNED cell that is
+            // itself overfilled (ratio < 1): deleting an underfilled one
+            // would open a hole instead of merging rows.
+            let deletable = !pinned.is_some()
+                || crowd.iter().any(|&(ratio, c)| ratio < 1.0 && !is_pinned(points[c]));
+            let insertable = !pinned.is_some()
+                || !is_pinned(spacing_true_point(field, points[r.a as usize], points[r.b as usize]));
             // Third op on a site: the op type is FORCED to swap. A site that
             // two same-kind ops did not cure is not asking for a third.
             let kind = if ops_spent == opts.site_op_cap - 1 && last_kind == Some(phi_kind) {
@@ -850,12 +904,33 @@ pub fn drain<F: DensityField + Sync>(
             } else {
                 phi_kind
             };
+            let kind = match kind {
+                OpKind::DeleteCrowded if !deletable => OpKind::InsertDiagonal,
+                OpKind::InsertDiagonal if !insertable => OpKind::DeleteCrowded,
+                other => other,
+            };
+            if (kind == OpKind::DeleteCrowded && !deletable)
+                || (kind == OpKind::InsertDiagonal && !insertable)
+            {
+                // Neither operator may act without touching the pinned
+                // region: stubborn now, so the loop refuses this round
+                // instead of reselecting the site until its budget runs out.
+                ledger.stubborn.push(StubbornSite {
+                    site: site_pos,
+                    q: r.q,
+                    ops_spent,
+                });
+                continue;
+            }
 
             match kind {
                 OpKind::DeleteCrowded => {
                     // A dislocation is a surplus half-row terminus; deleting
                     // the most crowded generator merges the rows.
                     crowd.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+                    if pinned.is_some() {
+                        crowd.retain(|&(ratio, c)| ratio < 1.0 && !is_pinned(points[c]));
+                    }
                     delete.push(crowd[0].1);
                 }
                 OpKind::InsertDiagonal => {
@@ -929,6 +1004,9 @@ pub fn drain<F: DensityField + Sync>(
             coord_stall += 1;
             if coord_stall > COORD_REANNEAL_ROUNDS {
                 for (&i, &p) in sub5.iter().zip(sub5_pos.iter()) {
+                    if is_pinned(p) {
+                        continue;
+                    }
                     delete.push(i);
                     ledger.coordination_deletions += 1;
                     ledger.ops.push(OpRecord {
@@ -960,7 +1038,14 @@ pub fn drain<F: DensityField + Sync>(
                 .collect();
             let n_new = fresh.len();
             removed_set.extend(fresh);
-            cavity_new.extend(cavity_points(field, *centre, n_new));
+            let placed = cavity_points(field, *centre, n_new);
+            if let Some(p) = placed.iter().find(|&&p| is_pinned(p)) {
+                return Err(MpasError::Refusal(format!(
+                    "a cavity resample would place a generator at unit vector [{:.6}, {:.6}, {:.6}], inside the pinned region (outside a regional window's zone), which must stay exactly as it was. Widen the halo so repairs stay clear of the frozen background",
+                    p[0], p[1], p[2]
+                )));
+            }
+            cavity_new.extend(placed);
         }
         removed_set.sort_unstable();
         removed_set.dedup();
@@ -1017,6 +1102,7 @@ pub fn drain<F: DensityField + Sync>(
             opts.local_radius,
             opts.polish_sweeps,
             opts.triangulation,
+            pinned,
         )?;
     }
 

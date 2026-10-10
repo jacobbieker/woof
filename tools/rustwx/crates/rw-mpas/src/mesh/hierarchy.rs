@@ -33,7 +33,8 @@ use crate::mesh::density::{Coverage, DensityField, LevelClamp, MeshSpec};
 use crate::mesh::derive::Rings;
 use crate::mesh::geom::{EARTH_RADIUS_M, V3, add, arc, unit};
 use crate::mesh::hull::delaunay_rings;
-use crate::mesh::lloyd::{LloydOptions, LloydOutcome, relax};
+use crate::mesh::lloyd::{LloydOptions, LloydOutcome, relax, relax_masked};
+use crate::mesh::regional::{RegionalPlan, RegionalWindow, Zone};
 use crate::mesh::surgery::{self, SurgeryOptions, SurgerySummary};
 
 /// The splitting threshold: a Delaunay edge splits when its arc exceeds
@@ -109,7 +110,7 @@ pub fn ladder(spec: &MeshSpec) -> Vec<f64> {
 /// Delivered spacing per cell in metres, from the Voronoi cell areas of the
 /// current triangulation: `h = sqrt(2A / sqrt(3))`, the regular-hexagon
 /// across-flats inversion, the same convention `MpasMesh::spacing_m` uses.
-fn delivered_spacing_m(points: &[V3], rings: &Rings) -> Vec<f64> {
+pub(crate) fn delivered_spacing_m(points: &[V3], rings: &Rings) -> Vec<f64> {
     use crate::mesh::geom::{circumcenter, tri_area};
     (0..points.len())
         .map(|i| {
@@ -165,6 +166,7 @@ fn insert_level(
     field: &LevelClamp<'_>,
     beta: f64,
     sizing_samples: usize,
+    regional: Option<(&Zone, f64)>,
 ) -> MpasResult<InsertOutcome> {
     // COUNT-TARGETED splitting. The threshold alone cannot count: in a wide
     // gentle annulus every parent edge sits in the split band and thresholded
@@ -177,7 +179,19 @@ fn insert_level(
     // Delivered count is then exact by construction wherever enough edges
     // qualify, and the shortfall lands in the outer band where the field is
     // coarsening anyway.
-    let n_target = crate::mesh::density::predicted_cells_of(field, sizing_samples).round() as i64;
+    // REGIONAL: the frozen generators are counted as they stand (they never
+    // change) and only the zone is integrated -- adaptively, because the
+    // lattice below sits ~50 km apart and cannot see a sub-km window at all.
+    let frozen_now = |points: &[V3]| -> usize {
+        match regional {
+            Some((zone, _)) => points.par_iter().filter(|&&p| !zone.active(p)).count(),
+            None => 0,
+        }
+    };
+    let n_target = match regional {
+        Some((_, zone_cells)) => (frozen_now(points) as f64 + zone_cells).round() as i64,
+        None => crate::mesh::density::predicted_cells_of(field, sizing_samples).round() as i64,
+    };
     let mut inserted_total = 0usize;
     let mut batches_used = 0usize;
     // The outermost field value this level inserted at; 0.0 until it does.
@@ -210,6 +224,9 @@ fn insert_level(
                     let Some(mid) = unit(add(points[i], points[j])) else {
                         continue;
                     };
+                    if regional.is_some_and(|(zone, _)| !zone.active(mid)) {
+                        continue;
+                    }
                     let h_bar = field.spacing_m(mid) / EARTH_RADIUS_M;
                     let a = arc(points[i], points[j]);
                     let ratio = a / h_bar;
@@ -269,7 +286,10 @@ fn insert_level(
     }
     let predicted = n_target as f64;
     let deficit = predicted.round() as i64 - points.len() as i64;
-    if deficit.unsigned_abs() as usize > points.len() / 20 {
+    // Over 5% of what the level actually builds: the whole mesh globally, the
+    // zone's generators regionally (a frozen sphere would dilute the gate).
+    let scale = points.len() - frozen_now(points);
+    if deficit.unsigned_abs() as usize > scale / 20 {
         return Err(MpasError::Refusal(format!(
             "the level at h_l = {:.1} km delivered {} points against a predicted {predicted:.0} -- a {deficit} gap, over 5% of the mesh. A top-up that large is not serving a sub-threshold tail, it is papering over a field/criterion disagreement, and the anneal would have to transport the correction across the whole sphere",
             field.level_spacing_m / 1000.0,
@@ -296,6 +316,9 @@ fn insert_level(
                     let Some(mid) = unit(add(points[i], points[j])) else {
                         continue;
                     };
+                    if regional.is_some_and(|(zone, _)| !zone.active(mid)) {
+                        continue;
+                    }
                     // Only edges where the level field genuinely VARIES: the
                     // deficit lives in the annulus and the tanh tail, and a
                     // top-up point dropped into the uniform crystal (where
@@ -486,6 +509,50 @@ pub fn generate_graded(
     lloyd: &LloydOptions,
     surgery_opts: &SurgeryOptions,
     beta: f64,
+    progress: impl FnMut(&str),
+) -> MpasResult<(
+    Vec<V3>,
+    Rings,
+    LloydOutcome,
+    crate::mesh::icosa::GoldbergChoice,
+    Vec<LevelReport>,
+)> {
+    let (points, rings, outcome, choice, reports, _) =
+        generate_graded_regional(spec, sizing_samples, lloyd, surgery_opts, beta, None, progress)?;
+    Ok((points, rings, outcome, choice, reports))
+}
+
+/// What a regional ladder run measured about its window.
+#[derive(Debug, Clone)]
+pub struct RegionalOutcome {
+    pub plan: RegionalPlan,
+    /// Level-0 generators outside the zone, held fixed through every level.
+    pub frozen_cells: usize,
+    /// Every one of them was found, bit for bit, in the returned points.
+    pub frozen_bitwise_unchanged: bool,
+}
+
+/// Cells across one 2x band at a per-cell gradient `g`: `ln 2 / ln(1 + g)`.
+pub fn band_cells_of(gradient: f64) -> f64 {
+    if gradient > 0.0 {
+        (2f64).ln() / (1.0 + gradient).ln()
+    } else {
+        f64::INFINITY
+    }
+}
+
+/// [`generate_graded`] with an optional REGIONAL WINDOW. With `None` it is
+/// [`generate_graded`] operation for operation. With a window, level 0 is
+/// still the whole-sphere Goldberg arm, and every later level inserts,
+/// relaxes and repairs inside the window's zone only; see
+/// [`crate::mesh::regional`].
+pub fn generate_graded_regional(
+    spec: &MeshSpec,
+    sizing_samples: usize,
+    lloyd: &LloydOptions,
+    surgery_opts: &SurgeryOptions,
+    beta: f64,
+    window: Option<&RegionalWindow>,
     mut progress: impl FnMut(&str),
 ) -> MpasResult<(
     Vec<V3>,
@@ -493,6 +560,7 @@ pub fn generate_graded(
     LloydOutcome,
     crate::mesh::icosa::GoldbergChoice,
     Vec<LevelReport>,
+    Option<RegionalOutcome>,
 )> {
     spec.check()?;
     if spec.regions.is_empty() {
@@ -554,17 +622,30 @@ pub fn generate_graded(
     // The INFINITY branch is sound now and was not before: it is reachable
     // only under complete coverage, where a zero reading means a genuinely
     // uniform field.
-    let band_cells = if gradient > 0.0 {
-        (2f64).ln() / (1.0 + gradient).ln()
-    } else {
-        f64::INFINITY
-    };
+    let band_cells = band_cells_of(gradient);
     if band_cells < 2.0 * SURGERY_LOCALITY_CELLS {
         return Err(MpasError::Refusal(format!(
             "the requested gradient ({:.2}% per cell) makes each level's transition band about {band_cells:.1} cells wide -- narrower than twice the {SURGERY_LOCALITY_CELLS:.0}-cell surgery locality radius, so a repair at the band's centre would reach across the whole band and repairs could not be contained where the localization claim confines them. Widen the transition (the receipt's region_attainment carries widest_transition_km as the printed remedy); the reachable spec space shrinks at extreme gradients and that is the correct outcome",
             gradient * 100.0
         )));
     }
+
+    // ---- the regional plan: measured on the field before anything is built.
+    let plan = match window {
+        Some(w) => {
+            let plan = RegionalPlan::new(w, &spec.prepared(), spec.background_km * 1000.0, band_cells)?;
+            progress(&format!(
+                "REGIONAL\t{:.3}\t{:.3}\t{:.0}\t{:.0}\t{}",
+                plan.zone.halo_rad * EARTH_RADIUS_M / 1000.0,
+                plan.spill_rad * EARTH_RADIUS_M / 1000.0,
+                plan.predicted_active_cells,
+                plan.predicted_frozen_cells,
+                crate::mesh::regional::STATUS
+            ));
+            Some(plan)
+        }
+        None => None,
+    };
 
     progress(&format!(
         "LADDER\t{}\t{}",
@@ -604,6 +685,27 @@ pub fn generate_graded(
         outcome.sweeps, outcome.mean_delta_over_h, outcome.min_dv_over_dc
     ));
 
+    // The frozen background: level-0 generators outside the zone, recorded
+    // bit for bit so the finished mesh can be held to them.
+    let frozen_bits = match &plan {
+        Some(plan) => {
+            let frozen: Vec<V3> = points
+                .iter()
+                .copied()
+                .filter(|&p| !plan.zone.active(p))
+                .collect();
+            if frozen.is_empty() {
+                return Err(MpasError::Refusal(format!(
+                    "every level-0 generator lies inside the regional zone (window plus a {:.1} km halo), so the window freezes nothing; drop --regional-window or shrink the window",
+                    plan.zone.halo_rad * EARTH_RADIUS_M / 1000.0
+                )));
+            }
+            progress(&format!("FROZEN\t{}\t{}", frozen.len(), points.len() - frozen.len()));
+            Some((frozen.len(), crate::mesh::regional::bit_set(&frozen)))
+        }
+        None => None,
+    };
+
     let mut reports: Vec<LevelReport> = Vec::new();
 
     // ---- levels 1..L ------------------------------------------------------
@@ -642,7 +744,15 @@ pub fn generate_graded(
         } = crate::mesh::profile::timed(
             &crate::mesh::profile::INSERT,
             points.len() as u64,
-            || insert_level(&mut points, &clamp, beta, sizing_samples),
+            || {
+                insert_level(
+                    &mut points,
+                    &clamp,
+                    beta,
+                    sizing_samples,
+                    plan.as_ref().map(|p| (&p.zone, p.zone_cells_at(h_l))),
+                )
+            },
         )?;
         progress(&format!("INSERTED\t{l}\t{inserted}\t{batches}"));
         if inserted == 0 {
@@ -652,7 +762,8 @@ pub fn generate_graded(
         front_m = front_m.max(front_spacing_m);
         progress(&format!("FRONT\t{l}\t{:.4}", front_m / 1000.0));
 
-        outcome = relax(&mut points, &clamp, &level_lloyd)?;
+        let frozen_mask = plan.as_ref().map(|p| p.zone.frozen_mask(&points));
+        outcome = relax_masked(&mut points, &clamp, &level_lloyd, frozen_mask.as_deref())?;
         progress(&format!(
             "ANNEALED\t{l}\t{}\t{:.4e}\t{:.4e}",
             outcome.sweeps, outcome.mean_delta_over_h, outcome.min_dv_over_dc
@@ -768,7 +879,13 @@ pub fn generate_graded(
         let (rings_after, ledger) = crate::mesh::profile::timed(
             &crate::mesh::profile::SURGERY,
             points.len() as u64,
-            || surgery::drain(&mut points, &clamp, surgery_opts, drift_budget),
+            || match &plan {
+                None => surgery::drain(&mut points, &clamp, surgery_opts, drift_budget),
+                Some(p) => {
+                    let pin = |q: V3| !p.zone.active(q);
+                    surgery::drain_pinned(&mut points, &clamp, surgery_opts, drift_budget, Some(&pin))
+                }
+            },
         )?;
         progress(&format!(
             "SURGERY\t{l}\t{}\t{}\t{:.4e}",
@@ -787,8 +904,11 @@ pub fn generate_graded(
         // all-cells percentiles remain the campaign's G7 reading, where the
         // canonical defect fraction (~10^-3) cannot move a percentile.
         let delivered = delivered_spacing_m(&points, &rings_after);
+        // Regionally, over the ZONE's hexagons: the frozen background reads
+        // its own level-0 delivery and would only dilute the median.
         let mut ratios: Vec<f64> = (0..points.len())
             .filter(|&i| rings_after.degree(i) == 6)
+            .filter(|&i| plan.as_ref().is_none_or(|p| p.zone.active(points[i])))
             .map(|i| delivered[i] / DensityField::spacing_m(&clamp, points[i]))
             .collect();
         ratios.sort_by(|a, b| a.total_cmp(b));
@@ -875,7 +995,24 @@ pub fn generate_graded(
     outcome.min_dv_over_dc = q_final;
     outcome.min_dv_over_dc_edge = edge_final;
     outcome.min_dv_over_dc_trajectory.push(q_final);
-    Ok((points, rings, outcome, choice, reports))
+    let regional = match (plan, frozen_bits) {
+        (Some(plan), Some((frozen_cells, bits))) => {
+            let present = crate::mesh::regional::bit_set(&points);
+            let unchanged = bits.iter().all(|b| present.contains(b));
+            if !unchanged {
+                return Err(MpasError::Refusal(
+                    "a frozen background generator moved during a regional build; the window's one invariant is that nothing outside the zone is touched, so the mesh is refused rather than shipped with a seam nobody measured".to_string(),
+                ));
+            }
+            Some(RegionalOutcome {
+                plan,
+                frozen_cells,
+                frozen_bitwise_unchanged: unchanged,
+            })
+        }
+        _ => None,
+    };
+    Ok((points, rings, outcome, choice, reports, regional))
 }
 
 #[cfg(test)]
@@ -967,7 +1104,7 @@ mod tests {
         let clamp = prepared_half.clamped(mean_arc * EARTH_RADIUS_M / 2.0);
         let InsertOutcome {
             inserted, batches, ..
-        } = insert_level(&mut pts, &clamp, DEFAULT_BETA, 50_000).unwrap();
+        } = insert_level(&mut pts, &clamp, DEFAULT_BETA, 50_000, None).unwrap();
         assert_eq!(
             pts.len(),
             crate::mesh::icosa::goldberg_cells(2 * m, 2 * n),
@@ -1013,7 +1150,7 @@ mod tests {
 
         // Determinism: the same insertion twice is bit-identical.
         let mut again = crate::mesh::icosa::seed(m, n).unwrap();
-        insert_level(&mut again, &clamp, DEFAULT_BETA, 50_000).unwrap();
+        insert_level(&mut again, &clamp, DEFAULT_BETA, 50_000, None).unwrap();
         assert_eq!(pts.len(), again.len());
         for k in 0..pts.len() {
             assert_eq!(pts[k], again[k], "insertion is not deterministic at point {k}");
