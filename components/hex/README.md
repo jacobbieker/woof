@@ -514,6 +514,11 @@ lat-lon WPS intermediate the init and boundary engines read, through the
 engine's own decoder and interpolation operator; `woof hex lbc` builds the
 boundary series from the hourly intermediates. The whole chain, with what it
 measured, is [`docs/hex-point-hrrr.md`](docs/hex-point-hrrr.md).
+`woof hex intermediate --source wrfout --wrfout-glob GLOB` does the same for a
+WOOF WRF run's own history (one-way forcing from a `wrf-nests` or `wrf-tiles`
+parent). It writes one intermediate per wrfout time and keeps every WRF mass
+level and the parent's Noah soil layers. A cull outside the parent's interior
+is refused, as are missing variables and duplicate times.
 
 ### Placement and cycling
 

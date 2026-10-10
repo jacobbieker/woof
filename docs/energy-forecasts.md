@@ -344,6 +344,31 @@ generation gates as any other mesh (`woof/hex/mesh_spec_gates.py`):
 The finest graded mesh this tree has a measurement for is 0.75 km. Meshes at
 100 m and 50 m are unmeasured.
 
+A hex corridor can be forced one way from a WOOF WRF run, such as a 1 km to
+3 km `wrf-nests` or `wrf-tiles` parent, instead of from a GRIB source. Run
+`woof hex intermediate` with these flags:
+
+- `--source wrfout`.
+- `--wrfout-glob`, quoted, naming the history of the finest parent domain
+  that covers the cull. For a `wrf-nests` parent that is the nest's
+  `wrfout_d02_*` (or deeper), not the coarse `wrfout_d01_*`.
+- `--cull-region`, naming the plan's `cull_region.json`.
+- `--halo-km`, set to the boundary-ring width the plan reports. The region
+  file holds only the cut, and the rings lie outside it.
+- `--out-dir`, a fresh directory. A directory that already holds
+  intermediates is refused.
+
+This writes one WPS intermediate per wrfout time on a regular lat-lon grid at
+the parent's dx. Every WRF mass level is kept, with its 3-D pressure, plus the
+four Noah soil layers. Winds are rotated to earth-relative on the WRF grid
+before they are moved. The cull, plus `--margin-km` of margin, must sit inside
+the parent's interior: `--wrf-edge-cells` (default 5) relaxed boundary rows
+are excluded on every side, and a cull that reaches them is refused. A parent
+that is not on Lambert, polar stereographic or Mercator is refused, as is a
+parent whose soil column is not Noah or Noah-MP, or a set of files that
+repeats a valid time. The receipt records the sha256 of every wrfout it read.
+`woof hex lbc` then builds the boundary series from those files.
+
 ## Resolution: 100 m or 50 m
 
 ### Turbulence: the gray zone and LES

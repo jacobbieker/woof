@@ -125,6 +125,14 @@ class SourceRow:
     parabolic_halo_cells: int = 2
     #: What a refusal calls the product.
     description: str = ""
+    #: Which door converts the row: ``engine-decoder`` (the engine's GRIB
+    #: decoder and loader, this module) or ``wrfout`` (a WOOF WRF run's own
+    #: history, :mod:`woof.hex.wrfout_intermediate`).
+    door: str = "engine-decoder"
+    #: 3-D and surface fields written only when the source carries them,
+    #: window key -> (WPS name, units, description[, method]).
+    optional_3d: Mapping[str, tuple[str, str, str]] = field(default_factory=dict)
+    optional_surface: Mapping[str, tuple[str, str, str, str]] = field(default_factory=dict)
 
     def hour_files(self, root: Path, cycle: datetime, hour: int) -> tuple[Path, Path]:
         atmosphere, soil = self.grib_names
@@ -173,6 +181,59 @@ SOURCE_ROWS: Mapping[str, SourceRow] = {
         levels=50,
         map_source="NCEP HRRR via woof hex latlon",
         description="the 3 km Lambert CONUS HRRR (native hybrid wrfnat + wrfprs soil)",
+    ),
+    # One-way forcing from a WOOF WRF run (a wrf-nests / wrf-tiles parent):
+    # the window keys are the fields woof.hex.wrfout_intermediate derives on
+    # the WRF mass grid; the level count is the parent's own and is set per
+    # run from the file.
+    "wrfout": SourceRow(
+        name="wrfout",
+        decoder_key="",
+        loader_module="woof.hex.wrfout_intermediate",
+        grib_names=("", ""),
+        atmosphere_3d={
+            "P_FULL": ("PRESSURE", "Pa", "Pressure"),
+            "Z_MASS": ("GHT", "m", "Height"),
+            "TEMP": ("TT", "K", "Temperature"),
+            "QSPEC": ("SPECHUMD", "kg kg-1", "Specific humidity"),
+        },
+        wind_3d=("U_MASS", "V_MASS"),
+        surface={
+            "T2": ("TT", "K", "Temperature", "parabolic"),
+            "Q2SPEC": ("SPECHUMD", "kg kg-1", "Specific humidity", "parabolic"),
+            "PSFC": ("PSFC", "Pa", "Surface pressure", "parabolic"),
+            "TSK": ("SKINTEMP", "K", "Skin temperature", "parabolic"),
+            "TERRAIN": ("SOILHGT", "m", "Terrain field of source analysis", "parabolic"),
+            "SNOW": ("SNOW", "kg m-2", "Water equivalent snow depth", "bilinear"),
+            "LANDMASK": ("LANDSEA", "proprtn", "Land/Sea flag (1=land, 0 or 2=sea)", "nearest"),
+            "SEAICE": ("SEAICE", "proprtn", "Ice flag", "nearest"),
+        },
+        wind_10m=("U10_MASS", "V10_MASS"),
+        nearest=("LANDMASK", "SEAICE"),
+        soil_temperature="SOILT",
+        soil_moisture="SOILW",
+        soil_layer_names=(
+            ("ST000010", "SM000010"),
+            ("ST010040", "SM010040"),
+            ("ST040100", "SM040100"),
+            ("ST100200", "SM100200"),
+        ),
+        levels=0,
+        map_source="WOOF WRF wrfout via hex latlon",
+        description="a WOOF WRF run's own wrfout history (Lambert, Mercator or polar "
+                    "stereographic), one-way forcing",
+        door="wrfout",
+        optional_3d={
+            "QC": ("QC", "kg kg-1", "Cloud water mixing ratio"),
+            "QR": ("QR", "kg kg-1", "Rain water mixing ratio"),
+            "QI": ("QI", "kg kg-1", "Ice mixing ratio"),
+            "QS": ("QS", "kg kg-1", "Snow mixing ratio"),
+            "QG": ("QG", "kg kg-1", "Graupel mixing ratio"),
+        },
+        optional_surface={
+            "SST": ("SST", "K", "Sea surface temperature", "nearest"),
+            "SNOWH": ("SNOWH", "m", "Physical snow depth", "bilinear"),
+        },
     ),
 }
 
@@ -594,7 +655,7 @@ def regrid_hour(
         tag = float(k + 1)
         for window_name, (wps_name, units, description) in row.atmosphere_3d.items():
             values = three_d[window_name][k]
-            if wps_name == "SPECHUMD":
+            if wps_name == "SPECHUMD" or units == "kg kg-1":
                 values = np.maximum(values, np.float32(0.0))
             record(wps_name, units, description, tag, values)
         record("UU", "m s-1", "U", tag, u3[k])
@@ -603,7 +664,7 @@ def regrid_hour(
     # Surface.
     for window_name, (wps_name, units, description, method) in row.surface.items():
         values = np.asarray(plan.apply(source[window_name], method=method), dtype=np.float32)
-        if wps_name in ("SPECHUMD", "SNOW"):
+        if wps_name in ("SPECHUMD", "SNOW", "SNOWH"):
             values = np.maximum(values, np.float32(0.0))
         if wps_name == "LANDSEA":
             values = np.where(values >= 0.5, np.float32(1.0), np.float32(0.0)).astype(np.float32)
@@ -835,7 +896,8 @@ def add_intermediate_parser(commands: Any) -> None:
     parser = commands.add_parser(
         "intermediate",
         help="write regular lat-lon WPS intermediates from a projected regional "
-             "source (HRRR) through the engine's own decoder and operator",
+             "source (HRRR, or a WOOF WRF run's wrfout) through the engine's own "
+             "operator",
         description=(
             "Resample a projected regional source onto a regular lat-lon WPS "
             "intermediate the init and boundary engines read.  The decode, the "
@@ -846,11 +908,23 @@ def add_intermediate_parser(commands: Any) -> None:
     )
     parser.add_argument("--source", default="hrrr", metavar="ROW",
                         help=f"a row of SOURCE_ROWS ({', '.join(sorted(SOURCE_ROWS))})")
-    parser.add_argument("--grib-dir", type=Path, required=True, metavar="DIR",
-                        help="where `woof fetch --source hrrr` wrote the cycle")
-    parser.add_argument("--cycle", required=True, metavar="YYYY-MM-DDTHH",
-                        help="the cycle the files came from (UTC)")
-    parser.add_argument("--hours", default="0-3", metavar="SPEC",
+    parser.add_argument("--grib-dir", type=Path, default=None, metavar="DIR",
+                        help="where `woof fetch --source hrrr` wrote the cycle (GRIB rows; required there)")
+    parser.add_argument("--cycle", default=None, metavar="YYYY-MM-DDTHH",
+                        help="the cycle the files came from, UTC (GRIB rows; required there)")
+    parser.add_argument("--wrfout-glob", default=None, metavar="GLOB",
+                        help="--source wrfout: the WOOF WRF history files to convert, one "
+                             "intermediate per wrfout time (quote the glob)")
+    parser.add_argument("--cull-region", type=Path, default=None, metavar="JSON",
+                        help="--source wrfout: derive the target box from a cap or polygon "
+                             "cull region (the cull_region.json `woof energy plan` writes)")
+    parser.add_argument("--halo-km", type=float, default=None, metavar="KM",
+                        help="--source wrfout: width of the boundary rings outside the cut, "
+                             "added to the box (required with --cull-region; the plan's halo_km)")
+    parser.add_argument("--wrf-edge-cells", type=int, default=None, metavar="N",
+                        help="--source wrfout: relaxed WRF boundary rows the target may not "
+                             "touch (default 5, WRF's spec_bdy_width)")
+    parser.add_argument("--hours", default=None, metavar="SPEC",
                         help="forecast hours to write, contiguous (default 0-3)")
     parser.add_argument("--from-plan", type=Path, default=None, metavar="JSON",
                         help="derive the target box from a mesh-plan --point receipt's cull region")
@@ -860,20 +934,44 @@ def add_intermediate_parser(commands: Any) -> None:
                         help="half-reach of the target box around --point")
     parser.add_argument("--margin-km", type=float, default=DEFAULT_MARGIN_KM, metavar="KM",
                         help=f"ground kept past the reach (default {DEFAULT_MARGIN_KM:g})")
-    parser.add_argument("--spacing-deg", type=float, default=DEFAULT_SPACING_DEG, metavar="DEG",
-                        help=f"target lat-lon spacing (default {DEFAULT_SPACING_DEG:g})")
+    parser.add_argument("--spacing-deg", type=float, default=None, metavar="DEG",
+                        help=f"target lat-lon spacing (default {DEFAULT_SPACING_DEG:g} for "
+                             f"HRRR; for wrfout the WRF dx, same ground distance zonally)")
     parser.add_argument("--out-dir", type=Path, required=True, metavar="DIR")
     parser.add_argument("--prefix", default="MET", metavar="TEXT",
                         help="file prefix, ungrib style PREFIX:YYYY-MM-DD_HH (default MET)")
     parser.add_argument("--decoder", type=Path, default=None, metavar="FILE",
                         help="the engine's decoder binary (default: woof's bridge ladder)")
-    parser.add_argument("--workers", type=int, default=4, metavar="N",
+    parser.add_argument("--workers", type=int, default=None, metavar="N",
                         help="decoder workers, 1..13 (default 4)")
     parser.set_defaults(handler=run_intermediate)
 
 
 def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest:
     row = source_row(arguments.source)
+    if row.door != "engine-decoder":
+        raise IntermediateRefusal(
+            f"--source {row.name} is converted by the {row.door} door, not the GRIB "
+            f"decoder road; `woof hex intermediate --source {row.name}` dispatches it"
+        )
+    for flag, value in (("--wrfout-glob", getattr(arguments, "wrfout_glob", None)),
+                        ("--cull-region", getattr(arguments, "cull_region", None)),
+                        ("--halo-km", getattr(arguments, "halo_km", None)),
+                        ("--wrf-edge-cells", getattr(arguments, "wrf_edge_cells", None))):
+        if value is not None:
+            raise IntermediateRefusal(
+                f"{flag} belongs to --source wrfout; --source {row.name} is a GRIB row "
+                f"read from --grib-dir"
+            )
+    for flag, value in (("--grib-dir", arguments.grib_dir), ("--cycle", arguments.cycle)):
+        if value is None:
+            raise IntermediateRefusal(f"--source {row.name} needs {flag}; it has no default")
+    if arguments.spacing_deg is None:
+        arguments.spacing_deg = DEFAULT_SPACING_DEG
+    if arguments.hours is None:
+        arguments.hours = "0-3"
+    if arguments.workers is None:
+        arguments.workers = 4
     if arguments.from_plan is not None and arguments.point is not None:
         raise IntermediateRefusal("--from-plan and --point were both given; the box comes from one")
     if arguments.from_plan is not None:
@@ -905,6 +1003,10 @@ def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest
 
 
 def run_intermediate(arguments: argparse.Namespace) -> int:
+    if source_row(arguments.source).door == "wrfout":
+        from .wrfout_intermediate import run_wrfout_intermediate
+
+        return run_wrfout_intermediate(arguments)
     request = request_from_arguments(arguments)
     receipt = build_intermediates(request)
     print(json.dumps({
