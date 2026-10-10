@@ -562,6 +562,7 @@ def test_intermediate_tiles_keep_parent_physics_and_full_history(tmp_path,
         assert spec["physics_overrides"]["applied"] is None
         assert spec["physics_overrides"]["recipe"] == {}
         assert spec["history"]["preset"] == "full"
+        assert spec["history"]["applied"] is None
     for domain in leaves:
         spec = json.loads((outdir / domain.config).read_text())
         raw = tomllib.loads((outdir / spec["child_config"]["path"])
@@ -670,3 +671,68 @@ def test_auto_epssm_parent_hands_the_label_down(wales):
         peak_envelope_gib=0.0, levels=None, parent_auto_epssm=True)
     labelled = tomllib.loads(tiles._child_config_text(tile))
     assert labelled["run"]["epssm"] == {"auto": raw["run"]["epssm"]}
+
+
+def test_epssm_label_lost_on_read_back_refuses_the_plan(tmp_path, cover,
+                                                        monkeypatch):
+    import woof.offline_child as offline_child
+
+    monkeypatch.setattr(offline_child, "child_epssm_is_auto",
+                        lambda path: True)
+    with pytest.raises(tiles.TilePlanRefusal,
+                       match="epssm auto label = False planned, True"):
+        tiles.build_plan(load_sites(SITES_WALES), outdir=tmp_path / "plan",
+                         dx_m=100.0, start=START, hours=6)
+
+
+def test_tile_toml_header_does_not_claim_restart_evidence(wales):
+    _, _, outdir = wales
+    for _, spec in _leaf_specs(outdir):
+        text = (outdir / spec["child_config"]["path"]).read_text()
+        assert "restart evidence" not in text
+        assert "km_opt = 3" in text.split("[grid]")[0]
+
+
+@pytest.mark.parametrize("parent_cu, dx, leaf, expected", [
+    # LES leaf under a cumulus-free parent: the recipe, nothing else.
+    (0, 100.0, True, dict(tiles.LES_PHYSICS_RECIPE)),
+    # Coarse leaf and intermediate under a cumulus-free parent: nothing.
+    (0, 300.0, True, {}),
+    (0, 500.0, False, {}),
+    # Kain-Fritsch parent: retired below the 4 km bound on every tile.
+    (1, 2500.0, False, {"cu_physics": 0, "cudt_minutes": 0.0}),
+    (1, 300.0, True, {"cu_physics": 0, "cudt_minutes": 0.0}),
+    (1, 100.0, True, {**tiles.LES_PHYSICS_RECIPE, "cudt_minutes": 0.0}),
+    # ... and kept above it.
+    (1, 5000.0, False, {}),
+    # Grell-Freitas parent: its family keys go back to their defaults.
+    (3, 500.0, False, {"cu_physics": 0, "cudt_minutes": 0.0,
+                       "clos_choice": 0, "ishallow": 0}),
+])
+def test_tile_overrides(parent_cu, dx, leaf, expected):
+    assert tiles.tile_overrides({"cu_physics": parent_cu}, child_dx_m=dx,
+                                leaf=leaf) == expected
+
+
+def test_grell_parent_les_leaf_validates(wales):
+    """A Grell-Freitas parent with non-default family keys: the LES leaf's
+    cu_physics = 0 would be refused by validate_run_config unless the
+    family keys are reset with it."""
+
+    import dataclasses
+
+    from woof.experiment import load_experiment
+
+    _, _, outdir = wales
+    plan = load_plan(outdir / "plan.json")
+    exp = load_experiment(outdir / plan.domain("parent").config)
+    parent = {**dataclasses.asdict(exp.root.run), "cu_physics": 3,
+              "cudt_minutes": 0.0, "clos_choice": 1, "ishallow": 1}
+    overrides = tiles.tile_overrides(parent, child_dx_m=100.0, leaf=True)
+    merged = tiles._Pricer(24.0).derive(
+        parent, parent_dx=500.0, ratio=5, nx=100, ny=100,
+        run_seconds=21600.0, output_interval_s=900.0, levels=None,
+        centre_lat=51.7, overrides=overrides)
+    assert (merged["cu_physics"], merged["clos_choice"],
+            merged["ishallow"]) == (0, 0, 0)
+    assert merged["km_opt"] == 3

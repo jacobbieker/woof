@@ -331,8 +331,11 @@ child, from the parent configuration it emitted, and then sets two things
   [LES.md](public/LES.md)): `km_opt = 3`, `bl_pbl_physics = 0`,
   `mix_isotropic = 1`, `diff_opt = 2`, `c_s = 0.25`,
   `mix_upper_bound = 0.1`, `isfflx = 1` and `cu_physics = 0`. They also get
-  their own 60-level ladder, or `--nz` levels. Coarser leaf tiles keep the
-  parent's physics.
+  their own 60-level ladder, or `--nz` levels. Coarser leaf tiles and
+  intermediate tiles keep the parent's boundary-layer physics.
+- **Cumulus.** Any tile finer than 4 km runs with `cu_physics = 0`, as
+  `woof domain` runs its own grids there, even when a coarse parent runs a
+  cumulus scheme.
 - **History preset.** Leaf tiles write `[output] preset = "energy"`.
   Intermediate tiles keep the full history, because the tiles below them
   are downscaled from it and the preset drops the land and soil fields a
@@ -342,10 +345,13 @@ Before writing the plan, the planner reads each file back through the
 loader `woof downscale` uses, and refuses to plan if any setting does not
 come back as written. The tile's `downscale_args` pin the file with
 `--child-config-sha256`, so `woof downscale` refuses a file edited after
-planning. Each `tiles/<id>.json` records the settings, `applied: true`
-and the hash. One part is approximate: the planner derives the file from
-the parent's configuration, not from the parent's restart file as
-`--point` does, because the parent has not run yet when the plan is made.
+planning. Each `tiles/<id>.json` records the hash, the settings the file
+sets, and `applied: true` for each setting it carries. One part is
+approximate: the planner derives the file from the parent's
+configuration, not from the parent's restart file as `--point` does,
+because the parent has not run yet when the plan is made. A value the
+parent only settles while it runs, such as a model-chosen `epssm`, is
+taken at its value before the run.
 
 ### `hex-swath`
 
