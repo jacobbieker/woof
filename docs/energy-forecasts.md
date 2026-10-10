@@ -246,7 +246,7 @@ every configuration it emits. The common flags:
 | `--source` | Initial and boundary condition source (default: the one `woof domain` emits) |
 | `--card` or `--vram-gib` | Size each domain for a GPU tier or a memory budget |
 | `--max-domains` | Refuse a plan with more high-resolution domains than this |
-| `--nz` | Vertical levels (default: the planner's ladder) |
+| `--nz` | Vertical levels (default: the planner's ladder; `hex-swath`: 55, or 3 to 80 with the device footprint priced at that column) |
 
 Emitted WRF configurations write history with the `energy` output preset
 (`[output] preset = "energy"`), which keeps the fields the extractor reads,

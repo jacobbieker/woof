@@ -589,3 +589,52 @@ worse on three. Use it when time matters more than the near-surface
 forecast. The measurement is in
 [`docs/hex-point-hrrr.md`](../hex-point-hrrr.md), the forecast presets
 section.
+
+
+## 6.12 The PBL scheme: `--pbl ysu` (default) or `--pbl off`
+
+`--pbl ysu` is the proven configuration, and a run that does not pass
+`--pbl` is the run it always was: the same configuration, the same
+constructor mapping, the same driver argument vector and the same history
+files.
+
+`--pbl off` mirrors WRF `bl_pbl_physics = 0` for a mesh fine enough to
+resolve the boundary layer's eddies (an LES-class mesh). YSU is never
+called and its tendencies stay zero; the revised-MO surface layer and
+Noah-MP still run on the surface/PBL cadence and publish their fluxes;
+the external YSU gravity-wave drag still runs on a zero PBL momentum
+tendency.
+
+```sh
+woof hex forecast --mesh <row> --grid ... --static ... --init ... --init-source "..." --hours 1 --history-every-minutes 10 --out <dir> --pbl off
+```
+
+The switch is guarded, because with the PBL off the surface fluxes reach
+the atmosphere only through a turbulence closure:
+
+- admitted when `--les-model` selects a closure (any spacing);
+- admitted when the mesh's finest spacing is below 1 km, with a warning
+  when no `--les-model` closure carries the fluxes;
+- refused otherwise. `--allow-pbl-off-gray-zone` overrides the refusal for
+  an experiment arm, and the run prints and records a gray-zone warning;
+- refused with Grell-Freitas convection (`--convection gf`): GF reads the
+  PBL top, which only a PBL scheme writes.
+
+Every timestep anchor was measured with YSU, so a PBL-off run records
+`"anchor_evidence": "unanchored-configuration"` in its receipt
+(`configuration.pbl_admission`) and `pbl_scheme = "off"` in every history
+file's global attributes.
+
+## 6.13 Deeper columns: the level count comes from the files
+
+A mesh row declares its column (`nVertLevels`), measured from the init it
+was registered with. The bind holds the run's init to it and refuses a
+disagreeing one by name; the bound modules, the GWDO kernel and every
+allocation then use that count. 55 levels stays the default for every
+existing row. The deepest column a forecast runs is 80 levels: the
+engine's WSM6 compiles at most that many, and a deeper row is refused at
+the door and at the bind. The device footprint is priced per level: the
+per-cell slope scales by `levels / 55` above 55 (derived, labelled so in
+the receipt), and above 64 levels the wider WSM6 local frame is charged
+too. Build an LES-ready column with `woof hex init --vertical-spec
+preset:les` (chapter 5).

@@ -260,3 +260,4 @@ tests/test_physics_rollback_policy.py
 # and a row cannot declare a physics suite the pinned engine seam does not
 # take as an argument.
 tests/test_forecast_preset.py
+tests/test_les_column.py

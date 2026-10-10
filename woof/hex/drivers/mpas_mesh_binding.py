@@ -1711,6 +1711,91 @@ def _inspect_static(
     }
 
 
+def _inspect_init_column(init_path: Path | None, binding: MeshBinding) -> dict[str, Any]:
+    """The column the run's init carries, checked against the row.
+
+    THE VERTICAL STRUCTURE IS A PROPERTY OF THE FILES, NOT OF THIS MODULE.
+    The row's ``n_levels`` is measured from the init when the row is
+    registered (``woof.hex.mesh_rows`` / ``woof.hex.cascade_row``); here the
+    init the run will actually read is held to it.  A row and an init that
+    disagree are two different columns, and the first kernel to index one
+    with the other's count reads past an allocation, so the bind refuses by
+    name.  With no init supplied (instruments that bind without running)
+    the row's declaration is the column, and the record says so.
+    """
+
+    want_levels = int(binding.n_levels)
+    want_interfaces = int(binding.n_interfaces)
+    if want_levels < 3:
+        raise MeshBindingMismatch(
+            f"mesh {binding.name!r}: the row declares nVertLevels={want_levels}; "
+            "the vertical operators need at least three layers"
+        )
+    from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
+
+    if want_levels > HEX_MAX_COLUMN_LEVELS:
+        raise MeshBindingMismatch(
+            f"mesh {binding.name!r}: the row declares nVertLevels={want_levels}, "
+            f"deeper than the {HEX_MAX_COLUMN_LEVELS}-level column the forecast "
+            "can run: the engine's WSM6 compiles at most that many levels and "
+            "refuses a deeper column at its first call, after the card is "
+            "reserved"
+        )
+    if want_interfaces != want_levels + 1:
+        raise MeshBindingMismatch(
+            f"mesh {binding.name!r}: the row declares nVertLevels={want_levels} "
+            f"and nVertLevelsP1={want_interfaces}; interfaces are always "
+            "levels + 1, so the row describes no column"
+        )
+    if init_path is None:
+        return {
+            "nVertLevels": want_levels,
+            "nVertLevelsP1": want_interfaces,
+            "source": "registry row (no init supplied to the bind)",
+        }
+    import netCDF4
+
+    path = Path(init_path)
+    if not path.is_file():
+        raise MeshBindingMismatch(
+            f"mesh {binding.name!r}: init {path} does not exist, so its column "
+            "cannot be checked against the row"
+        )
+    with netCDF4.Dataset(str(path)) as dataset:
+        dims = {key: len(value) for key, value in dataset.dimensions.items()}
+    levels = dims.get("nVertLevels")
+    interfaces = dims.get("nVertLevelsP1")
+    soil = dims.get("nSoilLevels")
+    if levels is None:
+        raise MeshBindingMismatch(
+            f"mesh {binding.name!r}: init {path} declares no nVertLevels; it "
+            "is not an init-class file"
+        )
+    if int(levels) != want_levels:
+        raise MeshBindingMismatch(
+            f"mesh {binding.name!r}: init {path} carries nVertLevels={levels}, "
+            f"the registry row declares {want_levels}.  The row is measured "
+            "from the init it was registered with; this is a different "
+            "column.  Re-register the row from this init, or pass the init "
+            "the row was registered from"
+        )
+    if interfaces is not None and int(interfaces) != want_interfaces:
+        raise MeshBindingMismatch(
+            f"mesh {binding.name!r}: init {path} carries nVertLevelsP1="
+            f"{interfaces}, the registry row declares {want_interfaces}"
+        )
+    if soil is not None and int(soil) != int(binding.n_soil_levels):
+        raise MeshBindingMismatch(
+            f"mesh {binding.name!r}: init {path} carries nSoilLevels={soil}, "
+            f"the registry row declares {binding.n_soil_levels}"
+        )
+    return {
+        "nVertLevels": int(levels),
+        "nVertLevelsP1": want_interfaces if interfaces is None else int(interfaces),
+        "source": f"init {path}",
+    }
+
+
 def _zero_digest(shape: tuple[int, ...]) -> str:
     return hashlib.sha256(np.zeros(shape, dtype="<f4").tobytes(order="C")).hexdigest()
 
@@ -1725,9 +1810,19 @@ def bind_mesh(
     verify_frozen_sources: bool = True,
     convection: str = "auto",
     pbl_cadence: str = "auto",
+    init: Path | None = None,
+    pbl: str = "ysu",
+    les_model: str | None = "off",
+    allow_pbl_off_gray_zone: bool = False,
     log=print,
 ) -> dict[str, Any]:
-    """Cross-examine, Courant-admit, and bind one registered mesh before CUDA."""
+    """Cross-examine, Courant-admit, and bind one registered mesh before CUDA.
+
+    ``init`` is the init the run will read; when given, its column
+    (``nVertLevels``) is held to the row's and the bound modules take that
+    count.  ``pbl``/``les_model``/``allow_pbl_off_gray_zone`` decide the PBL
+    slot (:mod:`woof.hex.pbl_admission`) from this mesh's finest spacing.
+    """
 
     if mesh_name not in MESH_BINDINGS:
         raise MeshBindingMismatch(
@@ -1754,6 +1849,9 @@ def bind_mesh(
     # an empty boundary-source slot, is refused by name right here.
     observed["regional_admission"] = admit_regional_row(binding, observed)
     observed.update(_inspect_static(Path(files["static"]["path"]), binding, observed))
+    observed["init_column"] = _inspect_init_column(
+        None if init is None else Path(init), binding
+    )
     # Reconstruct the immutable authority through its public constructor -- the
     # same read a fingerprint baseline performs -- rather than trusting the
     # mapping the inspection pass already built.
@@ -1863,6 +1961,30 @@ def bind_mesh(
         f"{pbl_decision['calls_per_hour_at_proven_dt']:g}) "
         f"({pbl_decision['source']})"
     )
+    # The PBL slot, decided once here from the same finest spacing the
+    # convection ruling used, and after it, because Grell-Freitas without a
+    # PBL scheme is refused by name.  The default ``ysu`` is the proven
+    # configuration and records nothing new.
+    from woof.hex import pbl_admission
+
+    try:
+        pbl_slot = pbl_admission.pbl_decision(
+            requested=pbl,
+            finest_spacing_m=float(convection_decision["finest_spacing_m"]),
+            les_model=les_model,
+            convection_scheme=convection_decision["scheme"],
+            allow_gray_zone=bool(allow_pbl_off_gray_zone),
+        )
+    except pbl_admission.PblAdmissionError as error:
+        raise MeshBindingError(f"mesh {mesh_name!r}: {error}") from None
+    if pbl_slot["requested"] != pbl_admission.DEFAULT_REQUEST:
+        observed["pbl_admission"] = pbl_slot
+        log(
+            f"[mesh-binding] PBL: {pbl_slot['scheme']} ({pbl_slot['source']}); "
+            f"{pbl_slot['anchor_evidence']}"
+        )
+        for warning in pbl_slot["warnings"]:
+            log(f"[mesh-binding] WARNING {warning}")
     dt_anchor = dt_admission.admitted_timestep(
         binding.dt_seconds, cumulus_scheme, surface_pbl_seconds
     )
@@ -1896,17 +2018,16 @@ def bind_mesh(
     edge_sha = authority.raw_sha256
     fingerprint_before = _fingerprint_with_authority(proof, authority)
 
-    for attr, want in (
-        ("N_LEVELS", binding.n_levels),
-        ("N_INTERFACES", binding.n_interfaces),
-        ("N_SOIL_LEVELS", binding.n_soil_levels),
-    ):
-        have = getattr(proof, attr)
-        if have != want:
-            raise MeshBindingMismatch(
-                f"mesh {mesh_name!r}: module {attr}={have}, registry={want}; vertical structure "
-                "is not rebound by mesh binding and must already agree"
-            )
+    # The soil column is the engine's, fixed at four Noah levels whatever
+    # the source published (vertical_spec.MET_STATE_SOIL_LEVELS); it is not
+    # rebound.  The ATMOSPHERIC column is the files': it is rebound below on
+    # every non-native row, checked against the init above.
+    if int(getattr(proof, "N_SOIL_LEVELS")) != int(binding.n_soil_levels):
+        raise MeshBindingMismatch(
+            f"mesh {mesh_name!r}: module N_SOIL_LEVELS={proof.N_SOIL_LEVELS}, "
+            f"registry={binding.n_soil_levels}; the engine's soil column is "
+            "fixed and is not rebound by mesh binding"
+        )
 
     native = MESH_BINDINGS[NATIVE_MESH_NAME]
     if binding.frozen_native:
@@ -1914,6 +2035,8 @@ def bind_mesh(
         for attr, want in (
             ("N_CELLS", binding.n_cells),
             ("N_EDGES", binding.n_edges),
+            ("N_LEVELS", binding.n_levels),
+            ("N_INTERFACES", binding.n_interfaces),
             ("MIN_FREE_DEVICE_BYTES", NATIVE_DEVICE_FLOOR),
         ):
             have = getattr(proof, attr)
@@ -1972,6 +2095,15 @@ def bind_mesh(
     rebindings["N_CELLS"] = [native.n_cells, nc]
     rebindings["N_EDGES"] = [native.n_edges, ne]
 
+    # The column, from the files (checked against the init above).  55 on
+    # every row registered before the column was unpinned, so those binds
+    # rebind nothing here and stay byte-identical.
+    nz, nzp1 = int(binding.n_levels), int(binding.n_interfaces)
+    if (int(proof.N_LEVELS), int(proof.N_INTERFACES)) != (nz, nzp1):
+        rebindings["N_LEVELS"] = [int(proof.N_LEVELS), nz]
+        rebindings["N_INTERFACES"] = [int(proof.N_INTERFACES), nzp1]
+        proof.N_LEVELS, proof.N_INTERFACES = nz, nzp1
+
     before_dt = float(proof.DT_SECONDS)
     proof.DT_SECONDS = float(binding.dt_seconds)
     rebindings["DT_SECONDS"] = [before_dt, float(binding.dt_seconds)]
@@ -2027,7 +2159,11 @@ def bind_mesh(
         # scaling this replaced admitted x1.40962 at 6,144 MiB free against a
         # measured 8,874 MiB peak: an admission that dies inside a CuPy
         # allocation mid-run, which is the breakage this floor prevents.
-        floor = device_admission.required_free_bytes(nc)
+        # Priced at THIS row's column: the per-cell slope scales with the
+        # level count above the measured 55 (device_admission.level_scale).
+        floor = device_admission.required_free_bytes(
+            nc, device_admission.model_at_levels(nz)
+        )
         inner = proof.gpu_memory_admission
 
         def _admit(cp, *, minimum=None, _inner=inner, _floor=floor):
@@ -2066,6 +2202,7 @@ def bind_mesh(
 
     if forecast is not None:
         forecast.N_CELLS, forecast.N_EDGES = nc, ne
+        forecast.N_LEVELS, forecast.N_INTERFACES = nz, nzp1
         forecast.NOMINAL_DX_M = dx
         forecast.DT_SECONDS = float(binding.dt_seconds)
         # ONE convection decision, taken here from this mesh's own measured
@@ -2078,13 +2215,18 @@ def bind_mesh(
         # second decision taken from a default in the runner is exactly how
         # config_dt and the seam's dt came to disagree.
         forecast.PBL_CADENCE_DECISION = dict(pbl_decision)
+        # The PBL slot rides the same road: one decision, taken above.
+        forecast.PBL_DECISION = dict(pbl_slot)
         rebindings["forecast_reexports"] = [
             "N_CELLS",
             "N_EDGES",
+            "N_LEVELS",
+            "N_INTERFACES",
             "NOMINAL_DX_M",
             "DT_SECONDS",
             "CONVECTION_DECISION",
             "PBL_CADENCE_DECISION",
+            "PBL_DECISION",
         ]
         # THE BREAKAGE THIS PREVENTS: a receipt for a run on this mesh that
         # says "x4.163842" in its own claim sentence and profile slug.  Both
@@ -2118,9 +2260,18 @@ def bind_mesh(
             _prepare=prepare,
             _dx=dx,
             _dt=np.float32(binding.dt_seconds),
+            _nz=nz,
             **kwargs,
         ):
             import woof.hex.cuda_gwdo_v841 as gwdo
+
+            # The GWDO column guard and its kernel's compile-time column
+            # length follow the bound column, as its dt guard does below.
+            # 55 on every pre-existing row, so nothing moves there.
+            before_nz = int(gwdo.X4_N_VERT_LEVELS)
+            gwdo.X4_N_VERT_LEVELS = int(_nz)
+            if before_nz != int(_nz):
+                log(f"[mesh-binding] GWDO column {before_nz} -> {int(_nz)} levels")
 
             before = np.float32(gwdo.X4_NOMINAL_MIN_DC_M_F32)
             gwdo.X4_NOMINAL_MIN_DC_M_F32 = _dx
@@ -2149,6 +2300,8 @@ def bind_mesh(
             float(native.dt_seconds),
             float(binding.dt_seconds),
         ]
+        if nz != native.n_levels:
+            rebindings["cuda_gwdo_v841.X4_N_VERT_LEVELS"] = [native.n_levels, nz]
 
     fingerprint_after = _fingerprint_with_authority(proof, authority)
     if fingerprint_after["sha256"] == fingerprint_before["sha256"]:

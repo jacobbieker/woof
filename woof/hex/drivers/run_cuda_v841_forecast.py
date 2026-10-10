@@ -204,6 +204,13 @@ CONVECTION_DECISION: dict[str, Any] = {}
 #: did.  See :mod:`woof.hex.pbl_cadence`.
 PBL_CADENCE_DECISION: dict[str, Any] = {}
 
+#: The run's PBL slot (``--pbl``), and why it was admitted.  Same road
+#: again: ``bind_mesh`` decides it once from the bound mesh's finest
+#: spacing and rebinds it here, and the driver refuses if its own request
+#: disagrees.  Empty before a bind means YSU, the proven configuration.
+#: See :mod:`woof.hex.pbl_admission`.
+PBL_DECISION: dict[str, Any] = {}
+
 # Mesh authority roles kept under exact-byte pins.  ``init`` is deliberately
 # absent: see removal 1.
 MESH_AUTHORITY_ROLES = ("grid", "static")
@@ -740,6 +747,7 @@ def build_forecast_config(
     local_timestep_rates: tuple[int, ...] = (1, 3),
     local_timestep_buffer_rings: int = 1,
     apply_lbcs: bool = False,
+    pbl_scheme: str = "bl_ysu",
 ) -> Any:
     """Build the run's configuration AT THE BOUND MESH'S TIMESTEP.
 
@@ -814,6 +822,10 @@ def build_forecast_config(
         # mpas_atm_bdy_checks refuses either mismatch by name -- boundary
         # cells with the switch off, or the switch on with none.
         "config_apply_lbcs": bool(apply_lbcs),
+        # The PBL slot (``--pbl``), admitted by the config from
+        # woof.hex.pbl_admission.  ``bl_ysu`` is the dataclass default, so
+        # the proven configuration is field-for-field what it always was.
+        "config_pbl_scheme": str(pbl_scheme),
     }
     lts_block: dict[str, Any] = {
         "config_local_timestep": bool(local_timestep),
@@ -1187,6 +1199,15 @@ def build_forecast_constructor_values(
         **soil,
         "wsm6_hail_opt": 0,
     }
+    # The engine seam's PBL slot comes from the CONFIG, like every other
+    # selector here.  Only "off" is written: the sealed mapping treats an
+    # absent key as YSU, so the proven configuration's mapping and its
+    # identity digest are byte-identical.
+    from woof.hex import pbl_admission
+
+    pbl_request = pbl_admission.request_for_config(config.config_pbl_scheme)
+    if pbl_request != pbl_admission.DEFAULT_REQUEST:
+        values["pbl_scheme"] = pbl_admission.ENGINE_SCHEMES[pbl_request]
     arrays = {
         name: value for name, value in values.items() if isinstance(value, np.ndarray)
     }
@@ -1220,6 +1241,11 @@ def build_forecast_constructor_values(
         "gf_ishallow": gf_ishallow,
         "cumulus_scheme": cumulus_scheme,
         "config_convection_scheme": config.config_convection_scheme,
+        **(
+            {}
+            if pbl_request == pbl_admission.DEFAULT_REQUEST
+            else {"config_pbl_scheme": config.config_pbl_scheme}
+        ),
         "defaults_used": False,
         "arrays": {
             name: {
@@ -1261,6 +1287,9 @@ def prepare_forecast_host(
     lbc_paths: Sequence[str] | None = None,
     physics_backend: str = "wsm6_column",
     source_table: str | None = None,
+    pbl: str = "ysu",
+    les_model: str | None = "off",
+    allow_pbl_off_gray_zone: bool = False,
 ) -> dict[str, Any]:
     from woof.hex.cuda_arwen_physics_v841 import SealedArwenConstructorV841
     from woof.hex.cuda_dualrun import PreparedCudaInputs
@@ -1329,6 +1358,41 @@ def prepare_forecast_host(
         flush=True,
     )
 
+    # The PBL slot travels the same road with the same refusal.  Decided at
+    # the bind from the mesh's finest spacing (nominal and measured); a
+    # direct invocation with no bind decides it here from the nominal one.
+    from woof.hex import pbl_admission as _pbl_admission
+
+    pbl_slot = dict(PBL_DECISION) if PBL_DECISION else None
+    if pbl_slot is not None and pbl_slot.get("requested") != pbl:
+        raise ValueError(
+            f"the bound mesh decided its PBL slot under --pbl "
+            f"{pbl_slot.get('requested')!r} and this run was invoked with "
+            f"--pbl {pbl!r}.  One decision, one source"
+        )
+    if pbl_slot is None:
+        try:
+            pbl_slot = _pbl_admission.pbl_decision(
+                requested=pbl,
+                finest_spacing_m=float(NOMINAL_DX_M),
+                les_model=les_model,
+                convection_scheme=convection_scheme,
+                allow_gray_zone=allow_pbl_off_gray_zone,
+            )
+        except _pbl_admission.PblAdmissionError as error:
+            raise ConfigurationRefusal(
+                "config_pbl_scheme", pbl, str(error),
+                "--pbl ysu, or --pbl off on a sub-1 km mesh or with --les-model",
+            ) from None
+    if pbl_slot["requested"] != _pbl_admission.DEFAULT_REQUEST:
+        print(
+            f"[pbl] {pbl_slot['scheme']} ({pbl_slot['source']}): "
+            f"{pbl_slot['note']}; {pbl_slot['anchor_evidence']}",
+            flush=True,
+        )
+        for warning in pbl_slot.get("warnings", ()):
+            print(f"[pbl] WARNING {warning}", flush=True)
+
     config = build_forecast_config(
         dt_seconds=float(DT_SECONDS),
         convection_scheme=convection_scheme,
@@ -1339,6 +1403,7 @@ def prepare_forecast_host(
         local_timestep_rates=local_timestep_rates,
         local_timestep_buffer_rings=local_timestep_buffer_rings,
         apply_lbcs=bool(lbc_paths),
+        pbl_scheme=pbl_slot["config_pbl_scheme"],
     )
     backend_row, scheme_alias, seam_options = resolve_run_row(
         physics_backend, source_table
@@ -1533,6 +1598,8 @@ def prepare_forecast_host(
     }
     constructor_receipt["convection_admission"] = decision
     constructor_receipt["pbl_cadence"] = pbl_decision
+    if pbl_slot["requested"] != _pbl_admission.DEFAULT_REQUEST:
+        constructor_receipt["pbl_admission"] = pbl_slot
     regional: dict[str, Any] | None = None
     if is_regional:
         # The species the boundary files actually carry, intersected with
@@ -1576,6 +1643,7 @@ def prepare_forecast_host(
         "regional": regional,
         "convection": decision,
         "pbl_cadence": pbl_decision,
+        "pbl": pbl_slot,
         "prepared": prepared,
         "constructor_values": constructor_values,
         "constructor_receipt": constructor_receipt,
@@ -1855,8 +1923,13 @@ def _physics_cadence_proof(
     decision: Mapping[str, Any] | None,
     step_receipts: Sequence[Mapping[str, Any]],
     executed_steps: int,
+    pbl_scheme: str = "ysu",
 ) -> dict[str, Any] | None:
     """Positive evidence the declared surface/PBL cadence is the one that ran.
+
+    With ``--pbl off`` no PBL scheme is called, so the engine's PBL-slot
+    counter (``ysu``) stays at zero by design and the stack's own count is
+    the surface layer's (``sfclay``), which runs on the same cadence.
 
     A/B rule: a held-cadence arm that reproduces the welded arm exactly is
     first evidence the hold never happened, and a receipt that only repeats
@@ -1887,7 +1960,10 @@ def _physics_cadence_proof(
     expected = pbl_cadence.calls_in_steps(
         steps_between_calls=stepbl, executed_steps=int(executed_steps)
     )
-    engine_calls = None if "ysu" not in counts else int(counts["ysu"])
+    from woof.hex import pbl_admission
+
+    counter = pbl_admission.SURFACE_PBL_COUNTER.get(pbl_scheme, "ysu")
+    engine_calls = None if counter not in counts else int(counts[counter])
     consistent = due == expected and (engine_calls in (None, expected))
     return {
         "schema": "gpuwm-hex.physics-cadence-proof/v1",
@@ -1910,7 +1986,7 @@ def _physics_cadence_proof(
             f"({decision['label']}) predicts {expected} calls"
             + (
                 "" if engine_calls is None
-                else f"; the engine's own ysu counter reads {engine_calls}"
+                else f"; the engine's own {counter} counter reads {engine_calls}"
             )
             + (".  They agree" if consistent else ".  THEY DISAGREE")
         ),
@@ -2413,7 +2489,8 @@ def execute_forecast(
         "step_health": health,
         "step_receipt_count": len(step_receipts),
         "physics_cadence": _physics_cadence_proof(
-            host.get("pbl_cadence"), step_receipts, executed_steps
+            host.get("pbl_cadence"), step_receipts, executed_steps,
+            pbl_scheme=(host.get("pbl") or {}).get("scheme", "ysu"),
         ),
         "physics_rollback": {
             "armed": bool(stop_on_refusal),
@@ -2543,6 +2620,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "It changes the forecast and records itself as an explicit "
             "selection, with its calls per hour, in the receipt.  See "
             "hexcore.pbl_cadence"
+        ),
+    )
+    parser.add_argument(
+        "--pbl",
+        choices=("ysu", "off"),
+        default="ysu",
+        help=(
+            "PBL slot.  The default 'ysu' is the proven configuration and "
+            "changes nothing.  'off' mirrors WRF bl_pbl_physics=0: YSU is not "
+            "called, the surface layer and Noah-MP still run and publish "
+            "their fluxes.  Admitted on a mesh finer than 1 km or with an LES "
+            "closure; refused otherwise.  See woof.hex.pbl_admission"
+        ),
+    )
+    parser.add_argument(
+        "--allow-pbl-off-gray-zone",
+        action="store_true",
+        help=(
+            "EXPERIMENT ARM: admit --pbl off at or above 1 km with no LES "
+            "closure.  The run prints and records a gray-zone warning"
         ),
     )
     parser.add_argument(
@@ -2901,6 +2998,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         horiz_mixing=args.horiz_mixing,
         convection=args.convection,
         pbl_cadence=args.pbl_cadence,
+        pbl=args.pbl,
+        les_model=getattr(args, "les_model", "off"),
+        allow_pbl_off_gray_zone=bool(args.allow_pbl_off_gray_zone),
         local_timestep=args.local_timestep,
         local_timestep_declared_off=args.local_timestep_declared_off,
         local_timestep_rates=args.local_timestep_rates,
@@ -2912,6 +3012,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         start_text=host["start_time_text"],
     )
     install_capture_labels(schedule["labels"])
+    # Per run, never inherited: a cascade drives several forecasts from one
+    # process, and a YSU run after a PBL-off one must not carry its label.
+    proof.HISTORY_ATTRIBUTES.pop("pbl_scheme", None)
+    proof.HISTORY_ATTRIBUTES.pop("pbl_anchor_evidence", None)
+    if host["pbl"]["requested"] != "ysu":
+        # A reader of a history file alone must be able to tell this run
+        # from the proven configuration.
+        proof.HISTORY_ATTRIBUTES["pbl_scheme"] = str(host["pbl"]["scheme"])
+        proof.HISTORY_ATTRIBUTES["pbl_anchor_evidence"] = str(
+            host["pbl"]["anchor_evidence"]
+        )
 
     provenance = {
         "schema": SCHEMA,
@@ -2945,6 +3056,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "source_release": proof.SOURCE_RELEASE,
         "horiz_mixing": args.horiz_mixing,
         "convection": host["convection"],
+        **({} if host["pbl"]["requested"] == "ysu" else {"pbl": host["pbl"]}),
         "local_timestep": {
             "enabled": bool(args.local_timestep),
             "declared_off_arm": bool(args.local_timestep_declared_off),

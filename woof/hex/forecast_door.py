@@ -53,6 +53,7 @@ import time
 from typing import Any, Mapping, Sequence
 
 from .device_admission import (
+    WSM6_DEEP_TIER_LEVELS,
     DEFAULT_HEADROOM_BYTES,
     FOOTPRINT_MODEL,
     REFERENCE_CARD,
@@ -231,6 +232,10 @@ class MeshRow:
     #: offers no spacing is recorded as ``source: "unknown-spacing"`` rather
     #: than having one guessed for it.
     nominal_dx_m: float | None = None
+    #: The row's column (``nVertLevels``), measured from its init at
+    #: registration; the device footprint is priced at it.  55 on every row
+    #: registered before the column was unpinned.
+    levels: int = 55
 
 
 def load_registry(drivers: Path | None = None) -> dict[str, MeshRow]:
@@ -251,6 +256,7 @@ def load_registry(drivers: Path | None = None) -> dict[str, MeshRow]:
             cells=int(row.n_cells),
             dt_seconds=float(row.dt_seconds),
             nominal_dx_m=float(row.nominal_dx_m),
+            levels=int(row.n_levels),
         )
         for name, row in module.MESH_BINDINGS.items()
     }
@@ -763,6 +769,17 @@ class ForecastRequest:
     #: ``"preset"`` when the row decided the surface/PBL cadence,
     #: ``"explicit"`` when --pbl-cadence was given.
     pbl_cadence_source: str = "preset"
+    #: The row's column (``nVertLevels``); the bind checks the init against it.
+    levels: int = 55
+    #: ``--pbl``: ``ysu`` (the proven configuration) or ``off``.
+    pbl: str = "ysu"
+    #: The PBL decision the door took from the row (woof.hex.pbl_admission).
+    pbl_decision: Mapping[str, Any] | None = None
+    #: ``--allow-pbl-off-gray-zone``.
+    allow_pbl_off_gray_zone: bool = False
+    #: ``--les-model`` (owned by the LES closure); read here only for the PBL
+    #: guard, ``off`` when the flag does not exist in this build.
+    les_model: str = "off"
 
     @property
     def inputs_present(self) -> bool:
@@ -879,13 +896,16 @@ class _SuppliedRow:
     core_bytes: float
     bytes_per_cell: float
 
-    def with_card(self, card: CardProfile, configuration: str) -> ShapedFootprintModel:
+    def with_card(
+        self, card: CardProfile, configuration: str, levels: int = 55
+    ) -> ShapedFootprintModel:
         return ShapedFootprintModel(
             core_bytes=self.core_bytes,
             bytes_per_cell=self.bytes_per_cell,
             card=card,
             configuration=configuration,
-            measured=True,
+            levels=int(levels),
+            measured=int(levels) <= 55,
             provenance=(
                 "supplied on the command line as this card's measured row; "
                 "the tiled physics workspaces are charged on top of it from "
@@ -984,11 +1004,14 @@ def resolve_admission_model(request: "ForecastRequest") -> ShapedFootprintModel:
     configuration = request_configuration(request)
     card = read_card_profile()
     supplied = request.model
+    levels = int(getattr(request, "levels", 55))
     if isinstance(supplied, _SuppliedRow):
-        return supplied.with_card(card, configuration)
+        return supplied.with_card(card, configuration, levels)
     if isinstance(supplied, ShapedFootprintModel):
         return supplied
-    return model_for_card(card, configuration)
+    # A deeper column prices its per-cell slope per level
+    # (device_admission.ShapedFootprintModel.level_scale).
+    return model_for_card(card, configuration, levels)
 
 
 def _schedule(hours: float, history_every_minutes: int, dt_seconds: float,
@@ -1198,6 +1221,33 @@ def resolve_request(
         except ForecastDoorRefusal as error:
             collected.append(str(error))
     steps, captures = _schedule(hours, history_every_minutes, row.dt_seconds, mesh)
+
+    levels = int(getattr(row, "levels", 55))
+    if levels > WSM6_DEEP_TIER_LEVELS:
+        raise _refuse(
+            f"--mesh {mesh} declares a {levels}-level column, deeper than the "
+            f"{WSM6_DEEP_TIER_LEVELS} levels the engine's WSM6 compiles; the "
+            "run would stop at its first microphysics call, after the card is "
+            "reserved.  Rebuild the vertical with at most "
+            f"{WSM6_DEEP_TIER_LEVELS} levels (e.g. --vertical-spec preset:les)"
+        )
+
+    # The PBL slot, answered from the row alone (its nominal spacing and the
+    # convection default at it); the bind re-takes it with the mesh's
+    # measured finest edge.  The default ``ysu`` decides nothing new.
+    pbl = str(getattr(arguments, "pbl", None) or "ysu")
+    les_model = str(getattr(arguments, "les_model", None) or "off")
+    allow_gray = bool(getattr(arguments, "allow_pbl_off_gray_zone", False))
+    pbl_decision = None
+    try:
+        pbl_decision = _decide_pbl(
+            pbl=pbl, nominal_dx_m=getattr(row, "nominal_dx_m", None),
+            convection=convection, les_model=les_model, allow_gray_zone=allow_gray,
+        )
+    except ForecastDoorRefusal as error:
+        if collected is None:
+            raise
+        collected.append(str(error))
 
     out = Path(_require(
         getattr(arguments, "out", None), "--out",
@@ -1450,7 +1500,76 @@ def resolve_request(
         input_problems=tuple(collected or ()),
         preset=preset.name,
         pbl_cadence_source=pbl_cadence_source,
+        levels=levels,
+        pbl=pbl,
+        pbl_decision=pbl_decision,
+        allow_pbl_off_gray_zone=allow_gray,
+        les_model=les_model,
     )
+
+
+def _decide_pbl(
+    *,
+    pbl: str,
+    nominal_dx_m: float | None,
+    convection: str,
+    les_model: str,
+    allow_gray_zone: bool,
+) -> dict[str, Any]:
+    """The door's PBL decision, or a refusal naming what would admit it."""
+
+    from . import convection_admission, pbl_admission
+
+    convection_scheme = None
+    if nominal_dx_m is not None:
+        try:
+            convection_scheme = convection_admission.convection_decision(
+                nominal_dx_m=float(nominal_dx_m), requested=convection
+            )["scheme"]
+        except convection_admission.ConvectionAdmissionError:
+            convection_scheme = None
+    if pbl not in pbl_admission.REQUESTS:
+        raise _refuse(f"--pbl {pbl!r} is not one of {list(pbl_admission.REQUESTS)}")
+    if pbl != pbl_admission.DEFAULT_REQUEST and convection_scheme == (
+        convection_admission.SCHEME_GRELL_FREITAS
+    ):
+        # Not a spacing question: refused here, the same way the bind would.
+        try:
+            pbl_admission.pbl_decision(
+                requested=pbl, finest_spacing_m=None,
+                convection_scheme=convection_scheme,
+            )
+        except pbl_admission.PblAdmissionError as error:
+            raise _refuse(str(error)) from None
+    try:
+        decision = pbl_admission.pbl_decision(
+            requested=pbl,
+            finest_spacing_m=None if nominal_dx_m is None else float(nominal_dx_m),
+            les_model=les_model,
+            convection_scheme=convection_scheme,
+            allow_gray_zone=allow_gray_zone,
+        )
+    except pbl_admission.PblAdmissionError as error:
+        # The door sees only the row's NOMINAL spacing; the bind measures the
+        # mesh's finest edge, which can be finer.  One decision, one source:
+        # the spacing refusal is the bind's, taken before any device work.
+        decision = {
+            "schema": "woof-hex.pbl-decision/v1",
+            "requested": pbl,
+            "scheme": pbl,
+            "source": "deferred-to-bind",
+            "finest_spacing_m": None if nominal_dx_m is None else float(nominal_dx_m),
+            "warnings": [],
+            "note": (
+                f"{error}  The row's nominal spacing does not admit it; the "
+                "bind decides from the mesh's measured finest edge and refuses "
+                "before any device work if that does not either"
+            ),
+        }
+        print(f"PBL DEFERRED {decision['note']}", file=sys.stderr, flush=True)
+    for warning in decision["warnings"]:
+        print(f"PBL WARNING {warning}", file=sys.stderr, flush=True)
+    return decision
 
 
 # ---------------------------------------------------------------------------
@@ -1484,6 +1603,12 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
     ]
     if request.lbc_dir is not None:
         argv += ["--lbc-dir", str(request.lbc_dir)]
+    if request.pbl != "ysu":
+        # Only a non-default slot reaches the argv, so a YSU run's argv is
+        # byte-identical to one built before --pbl existed.
+        argv += ["--pbl", request.pbl]
+        if request.allow_pbl_off_gray_zone:
+            argv.append("--allow-pbl-off-gray-zone")
     if request.physics_backend != DEFAULT_BACKEND:
         argv += ["--physics-backend", request.physics_backend]
     if request.source_table is not None:
@@ -1579,6 +1704,7 @@ def build_receipt(
             "dt_seconds": request.dt_seconds,
             "grid": str(request.grid),
             "static": str(request.static),
+            **({} if request.levels == 55 else {"levels": request.levels}),
         },
         "init": {"path": str(request.init), "source": request.init_source},
         "physics": {
@@ -1622,6 +1748,21 @@ def build_receipt(
                 else str(request.local_timestep_classing)
             ),
             "stop_on_refusal": request.stop_on_refusal,
+            **(
+                {}
+                if request.pbl == "ysu"
+                else {
+                    "pbl": request.pbl,
+                    "pbl_admission": (
+                        None if request.pbl_decision is None
+                        else dict(request.pbl_decision)
+                    ),
+                    "suite": forecast_preset.effective_suite(
+                        forecast_preset.resolve_preset(request.preset),
+                        request.pbl,
+                    ),
+                }
+            ),
         },
         "admission": admission.as_dict() if admission is not None else None,
         "architecture": None if architecture is None else dict(architecture),
@@ -1692,6 +1833,12 @@ def _bind(binding, driver, request: ForecastRequest) -> dict[str, Any]:
             forecast=driver,
             convection=request.convection,
             pbl_cadence=request.pbl_cadence,
+            # The init's column is held to the row's at bind.  A preflight
+            # with no init yet binds on the row's declaration alone.
+            init=request.init if Path(request.init).is_file() else None,
+            pbl=request.pbl,
+            les_model=request.les_model,
+            allow_pbl_off_gray_zone=request.allow_pbl_off_gray_zone,
         )
     except binding.MeshBindingError as error:
         raise _refuse(f"the mesh bind refused: {error}{_BIND_REMEDY}") from None
@@ -2115,6 +2262,20 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
              "its calls per hour in the receipt. Radiation keeps its own "
              "600 s cadence either way. Measured on the point mesh in "
              "docs/hex-point-hrrr.md (default: the preset's)")
+    parser.add_argument(
+        "--pbl", choices=("ysu", "off"), default="ysu",
+        help="PBL scheme. The default 'ysu' is the proven configuration and "
+             "changes nothing. 'off' mirrors WRF bl_pbl_physics=0: YSU is not "
+             "called, the revised-MO surface layer and Noah-MP still run and "
+             "publish their fluxes, and the run records itself as a "
+             "configuration no timestep anchor measured. Admitted when the "
+             "mesh's finest spacing is below 1 km or --les-model selects a "
+             "closure; refused otherwise (default: ysu)")
+    parser.add_argument(
+        "--allow-pbl-off-gray-zone", action="store_true",
+        help="EXPERIMENT ARM: admit --pbl off at or above 1 km with no LES "
+             "closure. The boundary layer is then neither parameterised nor "
+             "resolved; the run prints and records a gray-zone warning")
     parser.add_argument(
         "--local-timestep", action="store_true",
         help="OPT-IN, default off: advance coarse columns on fewer, longer "

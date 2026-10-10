@@ -41,6 +41,19 @@ the only mode that needs a native `init_atmosphere_model` artifact.
 The admission design behind native-free mode is documented in
 [`docs/native-free-init-admission.md`](../native-free-init-admission.md).
 
+**Named presets.** `--vertical-spec` also takes a preset name instead of a
+file: `preset:default` is the 55-level `tc` column every measured row runs
+at, and `preset:les` is an LES-ready column: 80 levels (the deepest the
+forecast runs), four 20 m layers at the ground then a gentle stretch (at
+most 8 per cent per layer, solved so the column lands exactly on its top),
+and a 30 km top so the dycore's pinned 22 km damping layer keeps several
+layers above it. Options follow the name:
+`preset:les:levels=70,dz_surface_m=25,top_m=30000,surface_layers=4`. A
+column the preset cannot build gently, a top at or below the damping start
+and more than 80 levels are refused by name. The preset is written as
+canonical JSON beside the vertical artifact, so the receipt names a file
+and its digest exactly as for a hand-written declaration.
+
 ## 5.2 The invocation
 
 ```sh

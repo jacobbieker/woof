@@ -219,7 +219,8 @@ def _register_plan(sub) -> None:
     p.add_argument("--max-domains", type=positive_int, default=None,
                    help="refuse plans with more high-resolution domains")
     p.add_argument("--nz", type=positive_int, default=None,
-                   help="vertical levels (default: the planner's ladder)")
+                   help="vertical levels (default: the planner's ladder; "
+                        "hex-swath: 55, or 3..80 priced at that column)")
     p.add_argument("-o", "--outdir", required=True, metavar="DIR",
                    help="directory for plan.json and emitted configs")
     p.set_defaults(func=_plan)
