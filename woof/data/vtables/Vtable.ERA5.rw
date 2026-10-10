@@ -1,0 +1,57 @@
+GRIB1| Level| From |  To  | metgrid  | metgrid  | metgrid                                  |
+Param| Type |Level1|Level2| Name     | Units    | Description                              |
+-----+------+------+------+----------+----------+------------------------------------------+
+ 129 | 100  |   *  |      | GEOPT    | m2 s-2   |                                          |
+ 130 | 100  |   *  |      | TT       | K        | Temperature                              |
+ 131 | 100  |   *  |      | UU       | m s-1    | U                                        |
+ 132 | 100  |   *  |      | VV       | m s-1    | V                                        |
+ 157 | 100  |   *  |      | RH       | %        | Relative Humidity                        |
+ 133 | 100  |   *  |      | SPECHUMD | kg kg-1  | Specific Humidity                        |
+     | 100  |   *  |      | HGT      | m        | Height                                   |
+ 165 |   1  |   0  |      | UU       | m s-1    | U                    At 10 m             |
+ 166 |   1  |   0  |      | VV       | m s-1    | V                    At 10 m             |
+ 167 |   1  |   0  |      | TT       | K        | Temperature          At  2 m             |
+ 168 |   1  |   0  |      | DEWPT    | K        |                                          |
+     |   1  |   0  |      | RH       | %        | Relative Humidity    At  2 m             |
+ 172 |   1  |   0  |      | LANDSEA  | proprtn  | Land/Sea flag                            |
+ 129 |   1  |   0  |      | SOILGEO  | m2 s-2   |                                          |
+     |   1  |   0  |      | SOILHGT  | m        | Terrain field of source analysis         |
+ 134 |   1  |   0  |      | PSFC     | Pa       | Surface Pressure                         |
+ 151 |   1  |   0  |      | PMSL     | Pa       | Sea-level Pressure                       |
+ 235 |   1  |   0  |      | SKINTEMP | K        | Skin temperature                         |
+  31 |   1  |   0  |      | SEAICE   | proprtn  | Sea-Ice-Fraction                         |
+ 141 |   1  |   0  |      | SNOW_EC  | m        |                                          |
+     |   1  |   0  |      | SNOW     | kg m-2   |Water Equivalent of Accumulated Snow Depth|
+     |   1  |   0  |      | SNOWH    | m        | Physical Snow Depth                      |
+ 139 | 112  |   0  |   7  | ST000007 | K        | T of 0-7 cm ground layer                 |
+ 170 | 112  |   7  |  28  | ST007028 | K        | T of 7-28 cm ground layer                |
+ 183 | 112  |  28  | 100  | ST028100 | K        | T of 28-100 cm ground layer              |
+ 236 | 112  | 100  | 255  | ST100289 | K        | T of 100-289 cm ground layer             |
+  39 | 112  |   0  |   7  | SM000007 | m3 m-3   | Soil moisture of 0-7 cm ground layer     |
+  40 | 112  |   7  |  28  | SM007028 | m3 m-3   | Soil moisture of 7-28 cm ground layer    |
+  41 | 112  |  28  | 100  | SM028100 | m3 m-3   | Soil moisture of 28-100 cm ground layer  |
+  42 | 112  | 100  | 255  | SM100289 | m3 m-3   | Soil moisture of 100-289 cm ground layer |
+ 139 |   1  |   0  |      | ST000007 | K        | T of 0-7 cm ground layer                 |
+ 170 |   1  |   0  |      | ST007028 | K        | T of 7-28 cm ground layer                |
+ 183 |   1  |   0  |      | ST028100 | K        | T of 28-100 cm ground layer              |
+ 236 |   1  |   0  |      | ST100289 | K        | T of 100-289 cm ground layer             |
+  39 |   1  |   0  |      | SM000007 | m3 m-3   | Soil moisture of 0-7 cm ground layer     |
+  40 |   1  |   0  |      | SM007028 | m3 m-3   | Soil moisture of 7-28 cm ground layer    |
+  41 |   1  |   0  |      | SM028100 | m3 m-3   | Soil moisture of 28-100 cm ground layer  |
+  42 |   1  |   0  |      | SM100289 | m3 m-3   | Soil moisture of 100-289 cm ground layer |
+-----+------+------+------+----------+----------+------------------------------------------+
+#
+#  ERA5 (CDS reanalysis, ECMWF table-128 GRIB1) for the Rust met_intermediate
+#  writer, with the "ecmwf" map source.  GRIB1 only.  Names, units and soil
+#  layers follow WPS's Vtable.ECMWF; the parameter set is what
+#  `woof fetch --source era5` retrieves (woof/fetch.py ERA5_REQUIRED_*).
+#
+#  * Soil layers are keyed twice: native CDS level type 112 with the layer bounds
+#    in centimetres (100-255 is how GRIB1 spells the 100-289 cm layer), and the
+#    CDO-flattened level type 1 the packaged Vtable.ERA5_CDO uses.  The first
+#    row carrying a name supplies its units and description.
+#  * HGT is derived from GEOPT / 9.81, 2 m RH from 2 m dewpoint, SOILHGT from
+#    the surface geopotential, SNOW from snow depth in metres of water
+#    equivalent and SNOWH from SNOW (rrpr.F); their rows only name the output.
+#  * A combined retrieval carries every analysis time in one file, so the door
+#    runs met_intermediate with --select-valid-time: one valid time per file.

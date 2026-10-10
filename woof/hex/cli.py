@@ -254,8 +254,11 @@ def build_parser() -> argparse.ArgumentParser:
     # Between cull and init, because that is where a regional case meets it:
     # a cull needs a regional meteorological source the init and boundary
     # engines can read, and a projected product (HRRR) is not one until it
-    # is resampled onto a regular lat-lon intermediate.  Deferred import:
-    # the door pulls numpy and the engine's ingest.
+    # is resampled onto a regular lat-lon intermediate.  The global lat-lon
+    # sources (gfs, gdas, ecmwf-open-data, era5, aifs) share the command and
+    # dispatch to woof.hex.met_intermediate_door, which drives the Rust
+    # met_intermediate writer without regridding.  Deferred import: the door
+    # pulls numpy and the engine's ingest.
     from .hrrr_intermediate import add_intermediate_parser, add_lbc_parser
 
     add_intermediate_parser(commands)
