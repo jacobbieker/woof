@@ -929,6 +929,96 @@ def build_spec(*, background_km: float, refine: list[str] | None = None,
     return spec
 
 
+#: The schema a ``--density-raster`` file declares (``rw-mpas``
+#: ``mesh/raster.rs::RASTER_SCHEMA``).
+DENSITY_RASTER_SCHEMA = "woof-hex.density.v1"
+
+#: ``rw-mpas`` ``mesh/raster.rs::BAND_CEILING_PER_CELL``: the generator's
+#: transition-band ceiling, ``2 ** (1 / 6) - 1``, spelled as the crate's own
+#: literal.  A raster row may not ask for a slope ceiling above it; the
+#: generator refuses one (with a 1e-12 relative allowance for this spelling).
+RASTER_BAND_CEILING_PER_CELL = 0.122462048309373
+
+#: How far inside the door's smoothness bound the raster's slope limiter is
+#: aimed, so the meter's last-bit rounding cannot read a limited raster as
+#: over the bound it was limited to.
+RASTER_LIMIT_MARGIN = 0.99
+
+
+def raster_region(path: Path, *, limit: bool = True,
+                  max_gradient_per_cell: float | None = None) -> dict:
+    """One ``{"shape": "raster", ...}`` row for a density raster.
+
+    The path is made absolute, because the spec is written into a scratch
+    directory before the binary reads it and a relative path would then be
+    read against the wrong place.  The file has to exist: a raster that is
+    not there is refused here, before any sizing is spent, rather than by
+    the binary after it.  The raster's CONTENTS are checked by the binary
+    (schema, NaNs, non-positive spacing, ascending axes, the declared
+    minimum), which is the one reader that will use them.
+    """
+
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.is_file():
+        raise MeshRequestError(
+            f"--density-raster {path}: no such file.  A density raster is "
+            f"CF netCDF with schema={DENSITY_RASTER_SCHEMA!r}, `spacing_km` "
+            "on ascending 1-D lat/lon; `woof hex density` writes one.")
+    row: dict = {"shape": "raster", "path": str(resolved)}
+    if not limit:
+        row["limit"] = False
+    if max_gradient_per_cell is not None:
+        if not (0.0 < max_gradient_per_cell <= RASTER_BAND_CEILING_PER_CELL):
+            raise MeshRequestError(
+                f"a raster slope ceiling of {max_gradient_per_cell:g} per cell "
+                "is outside (0, 2^(1/6) - 1]; the generator's transition-band "
+                "gate refuses anything steeper")
+        row["max_gradient_per_cell"] = float(max_gradient_per_cell)
+    return row
+
+
+def adopt_spec_raster_rows(spec: dict, *, spec_dir: Path,
+                           ceiling: float | None) -> None:
+    """Make a ``--spec`` document's raster rows mean here what they meant
+    beside the spec file.
+
+    The door writes the spec into a scratch directory before the binary
+    reads it, and the binary resolves a raster row's relative ``path``
+    against the directory of the spec it was handed -- which would then be
+    the scratch directory.  So a relative path is resolved against the
+    spec file's own directory first.  A row that names no
+    ``max_gradient_per_cell`` gets this door's ceiling, the same one a
+    ``--density-raster`` row gets, so a raster is judged the same way
+    whichever way it came in; a row that names one keeps it.
+    """
+
+    for row in spec.get("regions") or ():
+        if not (isinstance(row, dict) and row.get("shape") == "raster"):
+            continue
+        path = row.get("path")
+        if isinstance(path, str) and not Path(path).is_absolute():
+            row["path"] = str((Path(spec_dir) / path).resolve())
+        if ceiling is not None and "max_gradient_per_cell" not in row:
+            row["max_gradient_per_cell"] = float(ceiling)
+
+
+def raster_gradient_ceiling(sizing: "Sizing", *, allow_rough: bool) -> float | None:
+    """The slope a ``--density-raster`` is limited to at this door.
+
+    The door's own smoothness bound (``refuse_above_percent_per_cell`` in
+    :data:`SIZING_DATA_PATH`), a hair inside it, so a limited raster passes
+    the gate it is about to be judged by.  Under ``--allow-rough-mesh`` the
+    row names no ceiling and the generator's default applies -- five percent
+    inside its transition-band ceiling -- which is the only bound that
+    workaround does not lift.
+    """
+
+    if allow_rough:
+        return None
+    bound = sizing.smoothness.refuse_above_percent_per_cell / 100.0
+    return min(bound * RASTER_LIMIT_MARGIN, RASTER_BAND_CEILING_PER_CELL)
+
+
 # ---------------------------------------------------------------------------
 # Driving the binary
 # ---------------------------------------------------------------------------
@@ -1351,6 +1441,20 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
              "LAT0,LAT1,LON0,LON1,SPACING_KM and optionally a sixth "
              "TRANSITION_KM.  Repeatable")
     parser.add_argument(
+        "--density-raster", action="append", default=[], type=Path,
+        metavar="DENSITY.nc",
+        help="refine where a woof-hex.density.v1 raster says to: spacing_km "
+             "on ascending lat/lon, bilinear inside its extent, the finer "
+             "of it and every other region wins.  Its finest value is "
+             "snapped to the power-of-two ladder like a region spacing, "
+             "and its slope is limited to this door's smoothness bound "
+             "(finer, never coarser; the receipt records what moved).  "
+             "Repeatable; works with --spec too")
+    parser.add_argument(
+        "--density-raster-no-limit", action="store_true",
+        help="refuse a --density-raster steeper than the smoothness bound "
+             "instead of slope-limiting it")
+    parser.add_argument(
         "--background-km", type=float, default=None, metavar="KM",
         help="cell spacing far from every refinement region; with no "
              "--refine this is a uniform mesh at that spacing")
@@ -1551,6 +1655,29 @@ def gradient_gate_reading(proposed) -> float:
     return float(gradient)
 
 
+def raster_report_lines(proposed: dict) -> list[str]:
+    """One line per density raster in a plan: what it delivers and what the
+    limiter and the ladder snap did to it.  Empty for a plan with none."""
+
+    lines = []
+    for report in proposed.get("raster_regions") or ():
+        limiter = report.get("limiter") or {}
+        moved = limiter.get("nodes_lowered", 0)
+        lines.append(
+            f"density raster regions[{report.get('region')}] "
+            f"({str(report.get('sha256', ''))[:12]}...): finest "
+            f"{report.get('raster_finest_km', 0.0):g} km asked, "
+            f"{report.get('delivered_finest_km', 0.0):g} km delivered; "
+            f"slope certified at "
+            f"{100.0 * report.get('certified_peak_per_cell', 0.0):.3f} %/cell "
+            f"(ceiling {100.0 * limiter.get('max_gradient_per_cell', 0.0):.3f}); "
+            + (f"limiter lowered {moved:,} of {limiter.get('nodes', 0):,} "
+               f"nodes, at most "
+               f"{100.0 * limiter.get('max_relative_lowering', 0.0):.1f} %"
+               if limiter.get("applied") else "limiter off"))
+    return lines
+
+
 def mesh_main(args) -> int:
     """``woof mesh``: plan, gate, generate."""
 
@@ -1581,6 +1708,22 @@ def mesh_main(args) -> int:
             spec = build_spec(background_km=args.background_km,
                               refine=args.refine,
                               refine_box=args.refine_box, name=args.name)
+        rasters = list(getattr(args, "density_raster", None) or [])
+        if getattr(args, "density_raster_no_limit", False) and not rasters:
+            raise MeshRequestError(
+                "--density-raster-no-limit names how to treat a density "
+                "raster, and no --density-raster was given")
+        ceiling = raster_gradient_ceiling(
+            sizing, allow_rough=args.allow_rough_mesh)
+        if args.spec is not None:
+            adopt_spec_raster_rows(spec, spec_dir=args.spec.parent,
+                                   ceiling=ceiling)
+        if rasters:
+            spec.setdefault("regions", [])
+            for path in rasters:
+                spec["regions"].append(raster_region(
+                    path, limit=not args.density_raster_no_limit,
+                    max_gradient_per_cell=ceiling))
         cells, sizing_note = _resolve_cells(args, sizing)
         if not args.dry_run and args.out is None:
             raise MeshRequestError(
@@ -1620,6 +1763,8 @@ def mesh_main(args) -> int:
                   f"{reference:.2f} %/cell)")
             if note:
                 print(f"woof mesh: {note}")
+            for line in raster_report_lines(proposed):
+                print(f"woof mesh: {line}")
             if args.dry_run:
                 proposed["gpuwm_sizing"] = sizing_note
                 proposed["gpuwm_smoothness_note"] = note
@@ -1699,6 +1844,8 @@ def mesh_main(args) -> int:
 
 __all__ = [
     "BRIDGES", "CONVERT", "CONVERT_ABI_MARKER", "CardCapacity", "GEOMETRY", "INIT",
+    "DENSITY_RASTER_SCHEMA", "RASTER_BAND_CEILING_PER_CELL", "raster_region",
+    "raster_gradient_ceiling", "raster_report_lines", "adopt_spec_raster_rows",
     "INIT_ABI_MARKER", "LBC", "LBC_ABI_MARKER",
     "MESH", "MESH_ABI_MARKER", "MeshRequestError", "TRIANGULATION_ARMS",
     "MeshRoughnessError", "MpasBridge", "SIZING_DATA_PATH", "SIZING_SCHEMA",

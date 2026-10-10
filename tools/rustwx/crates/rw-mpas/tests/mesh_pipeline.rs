@@ -297,6 +297,7 @@ fn a_variable_resolution_request_delivers_the_refinement_it_asked_for() {
     // user experience -- 4x refinement over a named box -- at a ramp the
     // annuli can carry, and it passes the DEFAULT gate.
     let spec = MeshSpec {
+        rasters: Vec::new(),
         background_km: 600.0,
         regions: vec![Region {
             shape: Shape::LatLonBox {
@@ -407,6 +408,7 @@ fn a_graded_request_regenerates_byte_identically() {
     // RNG and every ordering is canonical; this measures that end to end
     // through the real writer.
     let spec = MeshSpec {
+        rasters: Vec::new(),
         background_km: 600.0,
         regions: vec![Region {
             shape: Shape::Cap {
@@ -467,6 +469,7 @@ fn a_request_that_does_not_fit_the_card_is_refused_with_both_numbers() {
     // path is still worth a test: it just needs a request that genuinely
     // overruns the card it names.
     let spec = MeshSpec {
+        rasters: Vec::new(),
         background_km: 120.0,
         regions: vec![Region {
             shape: Shape::LatLonBox {

@@ -1004,6 +1004,8 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--card NAME` | size the mesh to this card's measured device footprint; --list-cards prints the ones that have been measured |
 | `--cells N` | exact cell count, skipping the device model entirely |
 | `--clobber` | replace an existing --out |
+| `--density-raster DENSITY.nc` | refine where a woof-hex.density.v1 raster says to: spacing_km on ascending lat/lon, bilinear inside its extent, the finer of it and every other region wins. Its finest value is snapped to the power-of-two ladder like a region spacing, and its slope is limited to this door's smoothness bound (finer, never coarser; the receipt records what moved). Repeatable; works with --spec too |
+| `--density-raster-no-limit` | refuse a --density-raster steeper than the smoothness bound instead of slope-limiting it |
 | `--dry-run` | size and cost the request, apply both gates, write nothing |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--geog DIR` | WPS_GEOG archive the static's terrain, land use, soil, green-ness and albedo come from. Defaults to $GPUWM_WPS_GEOG, then ~/.local/share/woof/WPS_GEOG |

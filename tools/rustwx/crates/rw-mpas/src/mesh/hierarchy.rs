@@ -495,7 +495,10 @@ pub fn generate_graded(
     Vec<LevelReport>,
 )> {
     spec.check()?;
-    if spec.regions.is_empty() {
+    // The raster gates (slope, edge step) on the spec as it will be built;
+    // the limiter is cached per raster, so only the edge steps are re-read.
+    spec.check_rasters()?;
+    if spec.is_uniform() {
         return Err(MpasError::Refusal(
             "the hierarchical ladder is the graded arm; a uniform request has no bands to refine and takes the icosahedral arm directly".to_string(),
         ));
@@ -518,7 +521,7 @@ pub fn generate_graded(
         crate::mesh::ladder_snap::first_off_ladder(spec)
     {
         return Err(MpasError::Refusal(format!(
-            "region {i} asks for {requested:.4} km against a {:.4} km background, a ratio of              {:.4} that is not a power of two. This ladder refines by MIDPOINT INSERTION, which              halves a spacing exactly, so {levels} levels reach {delivered:.4} km and there is no              rung at {requested:.4}: the core would be built at {delivered:.4} km and the file              would name {requested:.4}. The level delivery gate cannot catch it -- it is a median              over every cell and the miss is confined to the core, measured at 1.0070 against a              1.0212 bound while the core ran 16.2% coarse. Snap the request with              mesh::ladder_snap::snap_to_ladder (which delivers {delivered:.4} km, finer than              asked), or set the background to {:.4} km, which puts {requested:.4} km on a rung              exactly",
+            "region {i} (an analytic row, or a density raster named by its position in the regions array) asks for {requested:.4} km against a {:.4} km background, a ratio of              {:.4} that is not a power of two. This ladder refines by MIDPOINT INSERTION, which              halves a spacing exactly, so {levels} levels reach {delivered:.4} km and there is no              rung at {requested:.4}: the core would be built at {delivered:.4} km and the file              would name {requested:.4}. The level delivery gate cannot catch it -- it is a median              over every cell and the miss is confined to the core, measured at 1.0070 against a              1.0212 bound while the core ran 16.2% coarse. Snap the request with              mesh::ladder_snap::snap_to_ladder (which delivers {delivered:.4} km, finer than              asked), or set the background to {:.4} km, which puts {requested:.4} km on a rung              exactly",
             spec.background_km,
             spec.background_km / requested,
             requested * 2f64.powi(levels as i32)
@@ -887,6 +890,7 @@ mod tests {
         // 240 -> 480 km: one doubling, a single cap band, small enough for a
         // test-speed sphere (~2,500 cells at level 1).
         MeshSpec {
+            rasters: Vec::new(),
             background_km: 480.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -903,6 +907,7 @@ mod tests {
     #[test]
     fn the_ladder_is_pure_data_from_the_spec() {
         let spec15to60 = MeshSpec {
+            rasters: Vec::new(),
             background_km: 60.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -916,6 +921,7 @@ mod tests {
         };
         assert_eq!(ladder(&spec15to60), vec![60_000.0, 30_000.0, 15_000.0]);
         let spec15to120 = MeshSpec {
+            rasters: Vec::new(),
             background_km: 120.0,
             regions: spec15to60.regions.clone(),
             name: None,
@@ -926,6 +932,7 @@ mod tests {
         );
         // An 18 -> 120 request is not a power of two: the last level clamps.
         let spec18 = MeshSpec {
+            rasters: Vec::new(),
             background_km: 120.0,
             regions: vec![Region {
                 shape: spec15to60.regions[0].shape.clone(),
@@ -1066,6 +1073,7 @@ mod tests {
         // cell, so a 2x band spans ~2 cells against the 6 the surgery
         // locality needs.
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 480.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -1106,6 +1114,7 @@ mod tests {
     #[test]
     fn a_band_narrower_than_the_lattice_that_measures_it_is_refused_too() {
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 51.2,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -1145,6 +1154,7 @@ mod tests {
     /// and refused at 2,004 km.
     fn cpas_rung(radius_km: f64, spacing_km: f64, transition_km: f64) -> MeshSpec {
         MeshSpec {
+            rasters: Vec::new(),
             background_km: 51.2,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -1260,6 +1270,7 @@ mod tests {
         // inside the boundary, so 3,000 km of cap under a 100 km ramp leaves
         // a flat core out to 1,093 km.
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 51.2,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -1300,6 +1311,7 @@ mod tests {
     /// density.rs's own definition of the word.
     fn crystal_and_spec() -> (Vec<V3>, MeshSpec) {
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 120.0,
             regions: vec![Region {
                 shape: Shape::Cap {

@@ -108,6 +108,37 @@ pub struct LadderSnap {
     /// when one exists. `None` when the regions disagree, in which case each
     /// region's own `exact_background_km` is the answer for that region alone.
     pub exact_background_km: Option<f64>,
+    /// What each density raster's finest value had to move. OMITTED when the
+    /// spec has no raster: this record is stamped into the grid file, and a
+    /// field that always appeared would move every registered mesh's bytes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rasters: Vec<RasterSnap>,
+}
+
+/// What one density raster's finest value had to move.
+///
+/// THE RULE, the raster form of "finer, never coarser": the raster's finest
+/// node (after clamping at the background) is moved to
+/// `rung = background / 2^ceil(log2(background / finest))`, and every other
+/// node by the AFFINE map that sends `finest -> rung` and
+/// `background -> background`. A node is never coarsened, the background
+/// edge still meets the field outside the raster, and the slope is
+/// multiplied by `(background - rung) / (background - finest)` -- which the
+/// slope limiter, run after the snap, holds under the raster's ceiling.
+#[derive(Debug, Clone, Serialize)]
+pub struct RasterSnap {
+    /// Position of the raster row in the spec's `regions` array.
+    pub region: usize,
+    pub requested_finest_km: f64,
+    pub delivered_finest_km: f64,
+    pub ladder_levels: usize,
+    /// `delivered / requested - 1`: zero on the ladder, else in `[-0.5, 0)`.
+    pub snap_relative: f64,
+    /// `(requested / delivered)^2`: the cell cost at the plateau.
+    pub cell_cost_factor: f64,
+    /// The background that would have put this raster's finest on a rung.
+    pub exact_background_km: f64,
+    pub rule: &'static str,
 }
 
 impl LadderSnap {
@@ -128,6 +159,23 @@ impl LadderSnap {
                     r.exact_background_km
                 )
             })
+            .chain(
+                self.rasters
+                    .iter()
+                    .filter(|r| r.snap_relative != 0.0)
+                    .map(|r| {
+                        format!(
+                            "LADDERSNAP\traster@{}\t{:.4}\t{:.4}\t{}\t{:+.2}%\t{:.2}x\t{:.4}",
+                            r.region,
+                            r.requested_finest_km,
+                            r.delivered_finest_km,
+                            r.ladder_levels,
+                            r.snap_relative * 100.0,
+                            r.cell_cost_factor,
+                            r.exact_background_km
+                        )
+                    }),
+            )
             .collect()
     }
 }
@@ -166,6 +214,19 @@ pub fn first_off_ladder(spec: &MeshSpec) -> Option<(usize, f64, usize, f64)> {
         let delivered = spec.background_km * 0.5f64.powi(l as i32);
         if (delivered / r.spacing_km - 1.0).abs() > 1.0e-9 {
             return Some((i, r.spacing_km, l, delivered));
+        }
+    }
+    // A raster's plateau is its finest delivered value; it must sit on a rung
+    // for the same reason a region's spacing must. Named by its position in
+    // the written `regions` array.
+    for r in &spec.rasters {
+        let finest = r.effective_finest_km(spec.background_km);
+        let Some(l) = levels_for(spec.background_km / finest) else {
+            continue;
+        };
+        let delivered = spec.background_km * 0.5f64.powi(l as i32);
+        if (delivered / finest - 1.0).abs() > 1.0e-9 {
+            return Some((r.position, finest, l, delivered));
         }
     }
     None
@@ -231,19 +292,68 @@ pub fn snap_to_ladder(spec: &MeshSpec) -> (MeshSpec, LadderSnap) {
             transition_held_km: transition_held,
         });
     }
-    let exact = records.first().map(|r| r.exact_background_km).filter(|&b| {
-        records
-            .iter()
-            .all(|r| (r.exact_background_km - b).abs() <= 1e-9 * b.max(1.0))
-    });
+    let mut raster_records = Vec::with_capacity(spec.rasters.len());
+    for (k, r) in spec.rasters.iter().enumerate() {
+        // From the RAW finest each time, so snapping an already snapped spec
+        // lands on the same rung rather than walking down the ladder.
+        let requested = r.requested_finest_km(spec.background_km);
+        let Some(l) = levels_for(spec.background_km / requested) else {
+            // No finer than the background: `MeshSpec::check` refuses such a
+            // raster by name; recorded unmoved here so the record is whole.
+            out.rasters[k].ladder_rung_km = None;
+            raster_records.push(RasterSnap {
+                region: r.position,
+                requested_finest_km: requested,
+                delivered_finest_km: requested,
+                ladder_levels: 0,
+                snap_relative: 0.0,
+                cell_cost_factor: 1.0,
+                exact_background_km: spec.background_km,
+                rule: RASTER_SNAP_RULE,
+            });
+            continue;
+        };
+        let delivered = spec.background_km * 0.5f64.powi(l as i32);
+        let on_ladder = (delivered / requested - 1.0).abs() <= 1.0e-9;
+        out.rasters[k].ladder_rung_km = if on_ladder { None } else { Some(delivered) };
+        if !on_ladder {
+            moved = true;
+        }
+        raster_records.push(RasterSnap {
+            region: r.position,
+            requested_finest_km: requested,
+            delivered_finest_km: if on_ladder { requested } else { delivered },
+            ladder_levels: l,
+            snap_relative: if on_ladder { 0.0 } else { delivered / requested - 1.0 },
+            cell_cost_factor: if on_ladder { 1.0 } else { (requested / delivered).powi(2) },
+            exact_background_km: requested * 2f64.powi(l as i32),
+            rule: RASTER_SNAP_RULE,
+        });
+    }
+    let exact = records
+        .iter()
+        .map(|r| r.exact_background_km)
+        .chain(raster_records.iter().map(|r| r.exact_background_km))
+        .next()
+        .filter(|&b| {
+            records
+                .iter()
+                .map(|r| r.exact_background_km)
+                .chain(raster_records.iter().map(|r| r.exact_background_km))
+                .all(|e| (e - b).abs() <= 1e-9 * b.max(1.0))
+        });
     let snap = LadderSnap {
         background_km: spec.background_km,
         regions: records,
         moved,
         exact_background_km: exact,
+        rasters: raster_records,
     };
     (out, snap)
 }
+
+/// The raster snap rule, as the receipt names it.
+pub const RASTER_SNAP_RULE: &str = "affine: finest -> background/2^ceil(log2(background/finest)), background -> background, finer never coarser; slope limiter runs after";
 
 #[cfg(test)]
 mod tests {
@@ -252,6 +362,7 @@ mod tests {
 
     fn spec(bg: f64, spacings: &[f64], transition: TransitionField) -> MeshSpec {
         MeshSpec {
+            rasters: Vec::new(),
             background_km: bg,
             name: None,
             regions: spacings

@@ -21,8 +21,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use std::sync::{Arc, OnceLock};
+
 use crate::error::{MpasError, MpasResult};
 use crate::mesh::geom::{EARTH_RADIUS_M, V3, arc, cross, dot, from_lat_lon, lat_lon, sub, unit};
+use crate::mesh::raster::{PreparedRaster, RasterRegion, RasterReport};
 
 // THE DEVICE FOOTPRINT MODEL DOES NOT LIVE HERE ANY MORE.
 //
@@ -996,15 +999,150 @@ impl TransitionField {
 }
 
 /// The whole resolution request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `regions` holds the ANALYTIC rows (a shape, a spacing and a ramp) and
+/// `rasters` the FIELD-DRIVEN ones (`{"shape": "raster", "path": ...}`, see
+/// [`crate::mesh::raster`]). On the wire both are rows of the one `regions`
+/// array, in whatever order the spec wrote them; each raster remembers its
+/// position so a spec serialises back in that order. A spec with no raster
+/// row serialises byte for byte as it did before rasters existed, which is
+/// what keeps every registered grid digest reproducible.
+///
+/// INDEXING, stated so a message is not misread: "region i" in a refusal
+/// about an analytic region counts ANALYTIC rows (`regions[i]` here); a
+/// raster is always named by its position in the written array.
+#[derive(Debug, Clone)]
 pub struct MeshSpec {
     /// Spacing far from every region, hexagon across-flats, in km.
     pub background_km: f64,
-    #[serde(default)]
     pub regions: Vec<Region>,
     /// Optional human label carried into the file's provenance attributes.
-    #[serde(default)]
     pub name: Option<String>,
+    /// Field-driven refinement regions, read from density rasters.
+    pub rasters: Vec<RasterRegion>,
+}
+
+/// The wire form `MeshSpec` is read through: the region rows stay raw JSON
+/// until each one is told apart as analytic or raster.
+#[derive(Deserialize)]
+struct MeshSpecWire {
+    background_km: f64,
+    #[serde(default)]
+    regions: Vec<serde_json::Value>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+impl MeshSpecWire {
+    fn into_spec(self, base: Option<&std::path::Path>) -> MpasResult<MeshSpec> {
+        let mut regions = Vec::new();
+        let mut rasters = Vec::new();
+        for (position, row) in self.regions.into_iter().enumerate() {
+            if crate::mesh::raster::is_raster_row(&row) {
+                rasters.push(RasterRegion::from_row(row, position, base)?);
+            } else {
+                regions.push(serde_json::from_value::<Region>(row).map_err(|e| {
+                    MpasError::Refusal(format!(
+                        "the resolution spec is not valid JSON: regions[{position}]: {e}"
+                    ))
+                })?);
+            }
+        }
+        Ok(MeshSpec {
+            background_km: self.background_km,
+            regions,
+            name: self.name,
+            rasters,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for MeshSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        MeshSpecWire::deserialize(d)?
+            .into_spec(None)
+            .map_err(<D::Error as serde::de::Error>::custom)
+    }
+}
+
+impl Serialize for MeshSpec {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        // EXACTLY the derived form when there is no raster: same fields, same
+        // order, same values, so every stamped spec and receipt is unchanged.
+        #[derive(Serialize)]
+        #[serde(rename = "MeshSpec")]
+        struct Plain<'a> {
+            background_km: f64,
+            regions: &'a Vec<Region>,
+            name: &'a Option<String>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename = "MeshSpec")]
+        struct Rows<'a> {
+            background_km: f64,
+            regions: Vec<serde_json::Value>,
+            name: &'a Option<String>,
+        }
+        if self.rasters.is_empty() {
+            return Plain {
+                background_km: self.background_km,
+                regions: &self.regions,
+                name: &self.name,
+            }
+            .serialize(s);
+        }
+        let mut rows = Vec::with_capacity(self.regions.len() + self.rasters.len());
+        for r in &self.regions {
+            rows.push(serde_json::to_value(r).map_err(<S::Error as serde::ser::Error>::custom)?);
+        }
+        let mut ordered: Vec<&RasterRegion> = self.rasters.iter().collect();
+        ordered.sort_by_key(|r| r.position);
+        for r in ordered {
+            let at = r.position.min(rows.len());
+            rows.insert(at, r.to_json(self.background_km));
+        }
+        Rows {
+            background_km: self.background_km,
+            regions: rows,
+            name: &self.name,
+        }
+        .serialize(s)
+    }
+}
+
+/// The spec as stamped INTO a grid file: identical to its JSON except that a
+/// raster row's `path` is dropped. The registry pins a grid by SHA-256, so a
+/// path inside the bytes would make one mesh two files depending on where
+/// its raster sat (the `--from-centres` route measured exactly that); the
+/// raster's own `sha256` stays, and is what identifies it. A spec with no
+/// raster takes the plain serialisation, byte for byte.
+pub fn provenance_spec_json(spec: &MeshSpec) -> Result<String, serde_json::Error> {
+    if spec.rasters.is_empty() {
+        return serde_json::to_string(spec);
+    }
+    let mut value = serde_json::to_value(spec)?;
+    strip_raster_paths(&mut value);
+    serde_json::to_string(&value)
+}
+
+/// Remove `path` from every raster row, at any depth.
+pub fn strip_raster_paths(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.get("shape").and_then(|s| s.as_str()) == Some("raster") {
+                map.remove("path");
+            }
+            for child in map.values_mut() {
+                strip_raster_paths(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items.iter_mut() {
+                strip_raster_paths(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The production transition width, for reference in a receipt: the published
@@ -1117,6 +1255,10 @@ pub fn declared_finest_m_of(field: &impl DensityField, p: V3) -> f64 {
 /// second way to under-read with no signature at all.
 pub const PROBE_BUDGET: usize = 4_000_000;
 
+/// Points read inside each segment of a raster's boundary, between its edge
+/// nodes, when its edge step is measured.
+pub const EDGE_STEP_POINTS_BETWEEN_NODES: usize = 3;
+
 /// How much of a ramp's own peak gradient the shell is allowed to omit. One
 /// ramp's peak per-cell gradient sits at signed distance `W ln(rho) / 2`; the
 /// tail at `K` widths is `(sqrt(rho)+1)^2 sech^2(K) / 4` of it, which is what
@@ -1187,6 +1329,25 @@ pub trait DensityField {
     /// this method is. A field that cannot answer this question has no
     /// business being gated on, so it is a compile error not to answer it.
     fn variation_probes(&self, budget: usize, out: &mut Vec<V3>) -> Coverage;
+
+    /// The per-cell spacing change contributed by the density rasters
+    /// ([`crate::mesh::raster`]): a PROVEN UPPER BOUND over every raster
+    /// cell's slope, combined with the step where each raster meets the
+    /// field outside it (sampled along the boundary, see
+    /// [`PreparedSpec::raster_edge_steps`]). `0.0` when there are none.
+    ///
+    /// No default body, for the same reason `variation_probes` has none: a
+    /// field that silently answered 0.0 here would be the friendliest
+    /// possible answer from a field that never looked. The gradient reading
+    /// folds this in by `max`, so it can only raise the number a gate sees.
+    fn certified_peak_per_cell(&self) -> f64;
+
+    /// The rasters whose extents the sizing integral covers EXACTLY, cell by
+    /// cell, instead of from the global lattice -- which at its usual 200,000
+    /// points sits 50 km apart and cannot see a 4 km-wide plateau at 0.1 km.
+    /// Empty when there are none, which leaves the integral the lattice
+    /// alone, bit for bit.
+    fn exact_quadrature_rasters(&self) -> Vec<Arc<PreparedRaster>>;
 }
 
 impl DensityField for MeshSpec {
@@ -1198,6 +1359,12 @@ impl DensityField for MeshSpec {
     }
     fn variation_probes(&self, budget: usize, out: &mut Vec<V3>) -> Coverage {
         self.prepared().variation_probes(budget, out)
+    }
+    fn certified_peak_per_cell(&self) -> f64 {
+        self.prepared().certified_peak_per_cell()
+    }
+    fn exact_quadrature_rasters(&self) -> Vec<Arc<PreparedRaster>> {
+        self.prepared().rasters.clone()
     }
 }
 
@@ -1213,6 +1380,16 @@ pub struct PreparedSpec {
     background_inv_m: f64,
     finest_m: f64,
     regions: Vec<PreparedRegion>,
+    /// The density rasters, clamped, snapped and limited. Evaluated AFTER the
+    /// analytic regions with the same finer-wins rule; empty for a spec with
+    /// no raster, which then evaluates exactly as before.
+    rasters: Vec<Arc<PreparedRaster>>,
+    /// Each raster's position in the written `regions` array, for messages.
+    raster_positions: Vec<usize>,
+    /// Each raster's edge step against the field outside it, solved on
+    /// first use: it costs one evaluation of the rest of the field per edge
+    /// node, which a caller that only evaluates the field never pays.
+    edge_steps: Arc<OnceLock<Vec<(f64, [f64; 2])>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1229,7 +1406,16 @@ struct PreparedRegion {
 impl PreparedSpec {
     /// The requested spacing at a point, in metres. Same field, same numbers,
     /// as [`MeshSpec::spacing_m`].
+    #[inline]
     pub fn spacing_m(&self, p: V3) -> f64 {
+        self.spacing_m_without(p, None)
+    }
+
+    /// The field with raster `skip` left out: what the field would be at `p`
+    /// if that raster were not there. The raster's edge step is measured
+    /// against this.
+    #[inline]
+    fn spacing_m_without(&self, p: V3, skip: Option<usize>) -> f64 {
         let mut inv = self.background_inv_m;
         for r in &self.regions {
             // THE SATURATION SKIP, and why it cannot move a bit.
@@ -1257,7 +1443,74 @@ impl PreparedSpec {
                 inv = here;
             }
         }
+        // The rasters, by the same finer-wins rule. Outside its extent a
+        // raster returns nothing and the rest of the field stands.
+        for (k, raster) in self.rasters.iter().enumerate() {
+            if skip == Some(k) {
+                continue;
+            }
+            if let Some(h) = raster.sample_m(p) {
+                let here = 1.0 / h;
+                if here > inv {
+                    inv = here;
+                }
+            }
+        }
         1.0 / inv
+    }
+
+    /// Each raster's edge step, `(h_outside / h_edge - 1, where)`, zero when
+    /// the raster's boundary is no finer than the field outside it.
+    ///
+    /// Inside its extent the raster is bilinear between its nodes, so along
+    /// its boundary it is linear between its edge nodes; just outside, the
+    /// rest of the field holds. Where the edge is finer, the combined field
+    /// STEPS there, and a step of `s` reads as `s` per cell to anything that
+    /// crosses it.
+    ///
+    /// SAMPLED, and stated as such: read at every edge node and at
+    /// [`EDGE_STEP_POINTS_BETWEEN_NODES`] points inside each edge segment,
+    /// because the field outside (a tanh ramp, another raster) need not be
+    /// linear between two nodes. It is a measurement of the boundary, not a
+    /// closed-form bound like the raster's interior slope; a field outside
+    /// that varies faster than the raster's own edge pitch can still step
+    /// harder between samples, which is the case to build the raster wider
+    /// than its grading for.
+    pub fn raster_edge_steps(&self) -> &[(f64, [f64; 2])] {
+        self.edge_steps.get_or_init(|| {
+            self.rasters
+                .iter()
+                .enumerate()
+                .map(|(k, raster)| {
+                    let mut worst = (0.0f64, raster.node_deg(0, 0));
+                    for at in raster.boundary_points_deg(EDGE_STEP_POINTS_BETWEEN_NODES) {
+                        let p = from_lat_lon(at[0].to_radians(), at[1].to_radians());
+                        let Some(edge) = raster.sample_m(p) else {
+                            continue;
+                        };
+                        let outside = self.spacing_m_without(p, Some(k));
+                        let step = outside / edge - 1.0;
+                        if step > worst.0 {
+                            worst = (step, at);
+                        }
+                    }
+                    worst
+                })
+                .collect()
+        })
+    }
+
+    /// The largest certified per-cell change over every raster: its limited
+    /// cells and its edge step. `0.0` for a spec with no raster.
+    pub fn certified_peak_per_cell(&self) -> f64 {
+        if self.rasters.is_empty() {
+            return 0.0;
+        }
+        let mut peak = 0.0f64;
+        for (raster, &(edge, _)) in self.rasters.iter().zip(self.raster_edge_steps()) {
+            peak = peak.max(raster.certified_peak_per_cell).max(edge);
+        }
+        peak
     }
 
     /// `meshDensity` at a point. Same field as [`MeshSpec::density`].
@@ -1336,6 +1589,24 @@ impl PreparedSpec {
                 missed.push(format!("region {i}"));
             }
         }
+        // THE RASTERS. Their slope is CERTIFIED in closed form
+        // ([`PreparedSpec::certified_peak_per_cell`]), so the reading is
+        // complete over their cells whatever these probes find. The probes
+        // are what lets the meter VISIT the refinement -- the finest node
+        // always, the edge where the raster meets the field outside it, and
+        // a decimated sample of every non-constant cell -- so a raster-only
+        // spec cannot read "every probe saw the background". The decimation
+        // is what keeps a long thin raster inside the budget instead of
+        // reporting it unmeasured.
+        for (raster, &position) in self.rasters.iter().zip(&self.raster_positions) {
+            if left == 0 {
+                missed.push(format!("raster region (regions[{position}])"));
+                continue;
+            }
+            let before = out.len();
+            raster.probes(left, out);
+            left = left.saturating_sub(out.len() - before);
+        }
         if missed.is_empty() {
             Coverage::Complete
         } else {
@@ -1353,6 +1624,12 @@ impl DensityField for PreparedSpec {
     }
     fn variation_probes(&self, budget: usize, out: &mut Vec<V3>) -> Coverage {
         PreparedSpec::variation_probes(self, budget, out)
+    }
+    fn certified_peak_per_cell(&self) -> f64 {
+        PreparedSpec::certified_peak_per_cell(self)
+    }
+    fn exact_quadrature_rasters(&self) -> Vec<Arc<PreparedRaster>> {
+        self.rasters.clone()
     }
 }
 
@@ -1385,6 +1662,17 @@ impl DensityField for LevelClamp<'_> {
     fn variation_probes(&self, budget: usize, out: &mut Vec<V3>) -> Coverage {
         self.spec.variation_probes(budget, out)
     }
+    /// The spec's bound, for the reason the probes are the spec's: the clamp
+    /// is a monotone map of `h`, flat where it binds and the spec's own slope
+    /// where it does not, so it cannot be steeper than the spec anywhere.
+    fn certified_peak_per_cell(&self) -> f64 {
+        self.spec.certified_peak_per_cell()
+    }
+    /// The spec's rasters: the quadrature evaluates THIS field (clamp and
+    /// all) at its sub-points, so only the extents come from the spec.
+    fn exact_quadrature_rasters(&self) -> Vec<Arc<PreparedRaster>> {
+        self.spec.rasters.clone()
+    }
     fn density(&self, p: V3) -> f64 {
         // Normalised so the level's own spacing reads 1.0 -- the same
         // `(h_min / h)^4` law as the spec, with the level floor as h_min.
@@ -1400,15 +1688,110 @@ impl MeshSpec {
             background_km,
             regions: Vec::new(),
             name: None,
+            rasters: Vec::new(),
         }
     }
 
+    /// True when nothing refines: no analytic region and no raster.
+    pub fn is_uniform(&self) -> bool {
+        self.regions.is_empty() && self.rasters.is_empty()
+    }
+
     /// Parse a spec from JSON, refusing anything that cannot describe a mesh.
+    /// A raster row's relative `path` is read against the working directory;
+    /// [`MeshSpec::from_json_at`] reads it against the spec's own directory.
     pub fn from_json(text: &str) -> MpasResult<MeshSpec> {
-        let spec: MeshSpec = serde_json::from_str(text)
+        MeshSpec::from_json_at(text, None)
+    }
+
+    /// [`MeshSpec::from_json`], resolving a raster row's relative `path`
+    /// against `base` (the directory the spec file sits in).
+    pub fn from_json_at(text: &str, base: Option<&std::path::Path>) -> MpasResult<MeshSpec> {
+        let wire: MeshSpecWire = serde_json::from_str(text)
             .map_err(|e| MpasError::Refusal(format!("the resolution spec is not valid JSON: {e}")))?;
+        let spec = wire.into_spec(base)?;
         spec.check()?;
         Ok(spec)
+    }
+
+    /// The raster gates, which need the PREPARED raster (clamped at the
+    /// background, snapped to its ladder rung and limited) and so are not
+    /// part of the cheap structural [`MeshSpec::check`]: run them on the
+    /// spec that will be BUILT, after [`crate::mesh::ladder_snap`].
+    ///
+    /// * `"limit": false` and a raster steeper than its ceiling: refused,
+    ///   naming the steepest cell. (With the limiter on that cannot happen;
+    ///   it is still checked, because a guarantee is cheap to verify.)
+    /// * an edge step steeper than the ceiling: the raster's outermost nodes
+    ///   are finer than the field just outside it, so the field jumps there.
+    ///   Refused, with the remedy: extend the raster until its grading
+    ///   reaches the field outside it.
+    pub fn check_rasters(&self) -> MpasResult<Vec<RasterReport>> {
+        if self.rasters.is_empty() {
+            return Ok(Vec::new());
+        }
+        let prepared = self.prepared();
+        let edges = prepared.raster_edge_steps();
+        let mut reports = Vec::with_capacity(self.rasters.len());
+        for ((row, raster), &(edge, edge_at)) in
+            self.rasters.iter().zip(&prepared.rasters).zip(edges)
+        {
+            let g = row.max_gradient_per_cell;
+            let tolerance = 1e-9;
+            if raster.certified_peak_per_cell > g * (1.0 + tolerance) {
+                let at = raster.certified_peak_at_deg;
+                return Err(MpasError::Refusal(if row.limit {
+                    format!(
+                        "raster region (regions[{}]) still reads {:.4} %/cell at lat {:.4} lon {:.4} after gradient limiting to {:.4} %/cell; the limiter's guarantee did not hold, which is a defect in this build, not in the raster",
+                        row.position,
+                        raster.certified_peak_per_cell * 100.0,
+                        at[0],
+                        at[1],
+                        g * 100.0
+                    )
+                } else {
+                    format!(
+                        "raster region (regions[{}]) asks for {:.4} %/cell at lat {:.4} lon {:.4}, steeper than its {:.4} %/cell ceiling, and its row says \"limit\": false, so it is refused rather than smoothed. Grade the raster more gently there, or drop \"limit\": false to let the slope limiter lower the coarse side (finer, never coarser; the receipt records every node it moved)",
+                        row.position,
+                        raster.certified_peak_per_cell * 100.0,
+                        at[0],
+                        at[1],
+                        g * 100.0
+                    )
+                }));
+            }
+            if edge > g * (1.0 + tolerance) {
+                return Err(MpasError::Refusal(format!(
+                    "raster region (regions[{}]) ends finer than the field outside it: at lat {:.4} lon {:.4} the field just beyond its edge is {:.4} % coarser than its edge node, a step of {:.4} %/cell where the raster meets the rest of the spec, against a {:.4} %/cell ceiling. The limiter only ever lowers a raster, so it cannot close a step at the raster's own boundary. Extend the raster until its grading reaches the background (or the region around it) before its edge -- graded at g per cell, an edge spacing h needs about (h_outside - h) / g of extra margin -- or nest it inside an analytic region whose spacing meets the raster's edge",
+                    row.position,
+                    edge_at[0],
+                    edge_at[1],
+                    edge * 100.0,
+                    edge * 100.0,
+                    g * 100.0
+                )));
+            }
+            let src = row.source();
+            reports.push(RasterReport {
+                region: row.position,
+                schema: crate::mesh::raster::RASTER_SCHEMA,
+                sha256: src.sha256.clone(),
+                lat_nodes: src.lat_deg.len(),
+                lon_nodes: src.lon_deg.len(),
+                lat_extent_deg: [src.lat_deg[0], src.lat_deg[src.lat_deg.len() - 1]],
+                lon_extent_deg: [src.lon_deg[0], src.lon_deg[src.lon_deg.len() - 1]],
+                raster_finest_km: src.finest_km,
+                raster_finest_at_deg: src.finest_at_deg,
+                delivered_finest_km: raster.finest_m / 1000.0,
+                ladder_rung_km: row.ladder_rung_km,
+                limiter: raster.limiter.clone(),
+                certified_peak_per_cell: raster.certified_peak_per_cell,
+                certified_peak_at_deg: raster.certified_peak_at_deg,
+                edge_step_per_cell: edge,
+                edge_step_at_deg: edge_at,
+            });
+        }
+        Ok(reports)
     }
 
     pub fn check(&self) -> MpasResult<()> {
@@ -1447,15 +1830,33 @@ impl MeshSpec {
                 }
             }
         }
+        for r in &self.rasters {
+            if r.source().finest_km >= self.background_km {
+                return Err(MpasError::Refusal(format!(
+                    "raster region (regions[{}]) is nowhere finer than the {} km background (its finest node is {} km), so it refines nothing; a raster that changes no cell is a mistake in the request, not a no-op to build around",
+                    r.position,
+                    self.background_km,
+                    r.source().finest_km
+                )));
+            }
+        }
         Ok(())
     }
 
-    /// The finest spacing anywhere in the spec, in km.
+    /// The finest spacing anywhere in the spec, in km. A raster contributes
+    /// its DELIVERED finest -- the ladder rung once snapped -- which is exact
+    /// without running its limiter, because the limiter never lowers the
+    /// minimum.
     pub fn finest_km(&self) -> f64 {
-        self.regions
+        let analytic = self
+            .regions
             .iter()
             .map(|r| r.spacing_km)
-            .fold(self.background_km, f64::min)
+            .fold(self.background_km, f64::min);
+        self.rasters
+            .iter()
+            .map(|r| r.effective_finest_km(self.background_km))
+            .fold(analytic, f64::min)
     }
 
     /// The requested spacing at a point, in metres.
@@ -1494,6 +1895,13 @@ impl MeshSpec {
                     }
                 })
                 .collect(),
+            rasters: self
+                .rasters
+                .iter()
+                .map(|r| r.prepared(self.background_km))
+                .collect(),
+            raster_positions: self.rasters.iter().map(|r| r.position).collect(),
+            edge_steps: Arc::new(OnceLock::new()),
         }
     }
 
@@ -1605,6 +2013,11 @@ impl MeshSpec {
     /// Scale every spacing by `k` so the mesh comes out at a chosen cell count.
     /// Ratios between regions are preserved: the SHAPE of the request is the
     /// user's, the size is the card's.
+    ///
+    /// A raster row is NOT rescaled: its values are kilometres somebody
+    /// computed, and scaling them by one factor would scale its slope with
+    /// them. [`MeshSpec::fitted_to`] therefore refuses a spec with rasters
+    /// rather than calling this on one.
     pub fn scaled(&self, k: f64) -> MeshSpec {
         let mut out = self.clone();
         out.background_km *= k;
@@ -1621,6 +2034,11 @@ impl MeshSpec {
     /// factor applied. Solved by bisection on the scale factor: `N` falls as
     /// `k^-2`, so the bracket is easy and the solve is exact to a cell.
     pub fn fitted_to(&self, target: usize, samples: usize) -> MpasResult<(MeshSpec, f64)> {
+        if !self.rasters.is_empty() {
+            return Err(MpasError::Refusal(
+                "--fit-spacing rescales every spacing by one factor, and a spec with a density raster cannot be rescaled that way: the raster's values are kilometres computed for a purpose, and scaling them would scale its graded slope with them (a factor above one could carry it past the ceiling it was limited to). Size the mesh with --cells (or --card, which takes the count the spacings need), or rebuild the raster at the spacing that fits".to_string(),
+            ));
+        }
         if target < 12 {
             return Err(MpasError::Refusal(format!(
                 "a target of {target} cells cannot carry the twelve pentagons every triangulated sphere must have"
@@ -1661,15 +2079,43 @@ impl MeshSpec {
 /// [`MeshSpec::predicted_cells`] over any [`DensityField`]: the sizing
 /// integral evaluated on the field a relaxation actually runs under, so a
 /// ladder level can hold its own delivered count to its own field.
-pub fn predicted_cells_of(field: &impl DensityField, samples: usize) -> f64 {
+///
+/// WITH A RASTER the integral is split. Outside every raster extent it is the
+/// same lattice average (the lattice points inside an extent are dropped,
+/// each lattice point standing for `4 pi R^2 / samples` of area). Inside, it
+/// is integrated EXACTLY over the raster's own cells by
+/// [`PreparedRaster::inverse_area_integral`], on the whole field (clamp,
+/// analytic regions and all), so a plateau far narrower than the lattice
+/// pitch is counted. With no raster the function is the lattice alone, bit
+/// for bit.
+pub fn predicted_cells_of(field: &(impl DensityField + Sync), samples: usize) -> f64 {
+    let rasters = field.exact_quadrature_rasters();
+    let sphere_area = 4.0 * std::f64::consts::PI * EARTH_RADIUS_M * EARTH_RADIUS_M;
+    if rasters.is_empty() {
+        let mut acc = 0.0f64;
+        for p in fibonacci_lattice(samples) {
+            let h = field.spacing_m(p);
+            acc += 1.0 / (h * h);
+        }
+        let mean_inv_h2 = acc / samples as f64;
+        return sphere_area * mean_inv_h2 / (3f64.sqrt() / 2.0);
+    }
     let mut acc = 0.0f64;
     for p in fibonacci_lattice(samples) {
+        if rasters.iter().any(|r| r.contains(p)) {
+            continue;
+        }
         let h = field.spacing_m(p);
         acc += 1.0 / (h * h);
     }
-    let mean_inv_h2 = acc / samples as f64;
-    let sphere_area = 4.0 * std::f64::consts::PI * EARTH_RADIUS_M * EARTH_RADIUS_M;
-    sphere_area * mean_inv_h2 / (3f64.sqrt() / 2.0)
+    let mut inside = 0.0f64;
+    for (k, raster) in rasters.iter().enumerate() {
+        let earlier = &rasters[..k];
+        inside += raster.inverse_area_integral(&|p| field.spacing_m(p), &|p| {
+            earlier.iter().any(|r| r.contains(p))
+        });
+    }
+    (sphere_area * acc / samples as f64 + inside) / (3f64.sqrt() / 2.0)
 }
 
 /// [`MeshSpec::steepest_gradient_reading`] over any [`DensityField`], so the
@@ -1735,6 +2181,10 @@ pub fn steepest_gradient_reading_of(
             }
         }
     }
+    // The closed-form bound on every raster cell and raster edge. Folded by
+    // `max`, so it can only raise the reading; `0.0` without a raster, which
+    // leaves the reading bit for bit what the probes found.
+    let worst = worst.max(field.certified_peak_per_cell());
     GradientReading {
         per_cell: worst,
         coverage,
@@ -1842,6 +2292,7 @@ mod tests {
         let specs = [
             MeshSpec::uniform(120.0),
             MeshSpec {
+                rasters: Vec::new(),
                 background_km: 75.0,
                 regions: vec![Region {
                     shape: corridor_polygon(),
@@ -1851,6 +2302,7 @@ mod tests {
                 name: None,
             },
             MeshSpec {
+                rasters: Vec::new(),
                 background_km: 200.0,
                 regions: vec![
                     Region {
@@ -1971,6 +2423,7 @@ mod tests {
     #[test]
     fn fitting_to_a_card_hits_the_target() {
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 120.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2007,6 +2460,7 @@ mod tests {
     #[test]
     fn attainment_reports_the_spacing_a_region_actually_reaches() {
         let region = |radius_km: f64, transition_km: f64| MeshSpec {
+            rasters: Vec::new(),
             background_km: 200.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2059,6 +2513,7 @@ mod tests {
     #[test]
     fn a_cap_refines_inside_and_relaxes_outside() {
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 120.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2200,6 +2655,7 @@ mod tests {
         let centre = [0.2f64, 0.2];
         for half_width in [22.0f64, 60.0, 150.0, 300.0] {
             let spec = MeshSpec {
+                rasters: Vec::new(),
                 background_km: 75.0,
                 regions: vec![Region {
                     shape: square_about(centre, half_width),
@@ -2239,6 +2695,7 @@ mod tests {
     fn a_polygon_ramp_is_a_ramp_and_not_a_step() {
         let centre = [0.2f64, 0.2];
         let polygon = MeshSpec {
+            rasters: Vec::new(),
             background_km: 75.0,
             regions: vec![Region {
                 shape: square_about(centre, 300.0),
@@ -2248,6 +2705,7 @@ mod tests {
             name: None,
         };
         let cap = MeshSpec {
+            rasters: Vec::new(),
             background_km: 75.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2281,6 +2739,7 @@ mod tests {
     fn a_polygon_does_not_size_for_a_second_refined_region() {
         let centre = [0.2f64, 0.2];
         let polygon = MeshSpec {
+            rasters: Vec::new(),
             background_km: 75.0,
             regions: vec![Region {
                 shape: square_about(centre, 600.0),
@@ -2290,6 +2749,7 @@ mod tests {
             name: None,
         };
         let cap = MeshSpec {
+            rasters: Vec::new(),
             background_km: 75.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2366,6 +2826,7 @@ mod tests {
     #[test]
     fn the_level_clamp_floors_the_spacing_and_leaves_the_spec_untouched() {
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 60.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2429,6 +2890,7 @@ mod tests {
         assert_eq!(flat.probe_points, 0);
         assert!(flat.saw_the_refinement());
         let gentle = MeshSpec {
+            rasters: Vec::new(),
             background_km: 120.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2441,6 +2903,7 @@ mod tests {
             name: None,
         };
         let steep = MeshSpec {
+            rasters: Vec::new(),
             background_km: 120.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2500,6 +2963,7 @@ mod tests {
     /// One cap region, spelled once for the tests that vary it.
     fn one_cap(background_km: f64, at: [f64; 2], radius_km: f64, spacing_km: f64, w_km: f64) -> MeshSpec {
         MeshSpec {
+            rasters: Vec::new(),
             background_km,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -2833,6 +3297,7 @@ mod tests {
             named(
                 "cells-ramp-cap",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 75.0,
                     regions: vec![Region {
                         shape: Shape::Cap {
@@ -2848,6 +3313,7 @@ mod tests {
             named(
                 "box",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 120.0,
                     regions: vec![Region {
                         shape: Shape::LatLonBox {
@@ -2863,6 +3329,7 @@ mod tests {
             named(
                 "polygon",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 75.0,
                     regions: vec![Region {
                         shape: Shape::Polygon {
@@ -2901,6 +3368,7 @@ mod tests {
         out.push(named(
             "nested-ladder",
             MeshSpec {
+                rasters: Vec::new(),
                 background_km: 51.2,
                 regions: rungs,
                 name: None,
@@ -2923,6 +3391,7 @@ mod tests {
             named(
                 "mid-latitude-box",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 120.0,
                     regions: vec![Region {
                         shape: Shape::LatLonBox {
@@ -2938,6 +3407,7 @@ mod tests {
             named(
                 "polar-box",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 240.0,
                     regions: vec![Region {
                         shape: Shape::LatLonBox {
@@ -2953,6 +3423,7 @@ mod tests {
             named(
                 "triangle",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 120.0,
                     regions: vec![Region {
                         shape: Shape::Polygon {
@@ -2967,6 +3438,7 @@ mod tests {
             named(
                 "crescent",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 120.0,
                     regions: vec![Region {
                         shape: Shape::Polygon {
@@ -2990,6 +3462,7 @@ mod tests {
             named(
                 "cancelling-ring",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 240.0,
                     regions: vec![Region {
                         shape: Shape::Polygon {
