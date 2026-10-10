@@ -301,3 +301,406 @@ def test_main_refuses_hex_engine_errors(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(plan_hex, "_generator_sizing", broken)
     assert plan_hex.main(_args(tmp_path)) == 2
     assert "engine says no" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# the experimental lane: --hex-experimental-dt
+
+
+def _compact_sites() -> SiteSet:
+    """Two turbines and a short line: a cut that fits the reference card
+    at the LES vertical's level count at 50 m and 100 m."""
+
+    return SiteSet(sites=[
+        Site(site_id="t1", asset_id="generator/1", kind="turbine",
+             lat=51.70, lon=-3.64, hub_height_m=80.0),
+        Site(site_id="t2", asset_id="generator/2", kind="turbine",
+             lat=51.71, lon=-3.62, hub_height_m=80.0),
+        Site(site_id="l0", asset_id="line/1", kind="line_sample",
+             lat=51.705, lon=-3.66, chainage_m=0.0),
+        Site(site_id="l1", asset_id="line/1", kind="line_sample",
+             lat=51.712, lon=-3.645, chainage_m=1300.0),
+    ], heights_m=(10.0, 80.0))
+
+
+def _xplan(tmp_path, **overrides):
+    kwargs = dict(outdir=tmp_path / "xplan", dx_m=100.0, corridor_km=1.0,
+                  start="2026-10-10T00", hours=6.0, experimental_dt=True)
+    kwargs.update(overrides)
+    return plan_hex.build_plan(_compact_sites(), **kwargs)
+
+
+RASTER_STAGES = [
+    "density", "mesh", "mesh-check", "static-highres", "register-parent",
+    "vertical", "cull", "mesh-check-cull", "register-cull", "fetch",
+    "intermediate", "init", "lbc", "forecast"]
+
+
+def _by_stage(domain):
+    return dict(zip(domain.extra["stages"], domain.extra["commands"]))
+
+
+def _flag(argv, flag):
+    return argv[argv.index(flag) + 1]
+
+
+def test_floor_refusal_names_the_experimental_lane(tmp_path):
+    with pytest.raises(plan_hex.HexPlanRefusal) as caught:
+        _plan(tmp_path, dx_m=100.0)
+    message = str(caught.value)
+    assert "--hex-experimental-dt" in message
+    assert "experimental-unanchored" in message
+    # today's refusal is kept word for word ahead of the new sentence
+    assert message.index("or ask hex-swath for a coarser --dx-m.") < \
+        message.index("--hex-experimental-dt")
+
+
+@pytest.mark.parametrize("dx_m,dt", [(100.0, 600.0 / 1024.0),
+                                     (50.0, 600.0 / 2048.0)])
+def test_experimental_plan_lifts_the_floor(tmp_path, dx_m, dt):
+    plan = _xplan(tmp_path, dx_m=dx_m)
+    outdir = tmp_path / "xplan"
+    domain = load_plan(outdir / "plan.json").domains[0]
+    extra = domain.extra
+    assert extra["timestep"]["dt_seconds"] == dt
+    assert extra["timestep_evidence"] == "experimental-unanchored"
+    assert extra["timestep"]["timestep_evidence"] == "experimental-unanchored"
+    # Courant still binds: dt sits under 0.9 x 0.8484 dx / 125
+    assert dt <= extra["timestep"]["courant_limit_seconds"]
+    assert extra["timestep"]["courant_limit_seconds"] == pytest.approx(
+        0.9 * 0.8484 * dx_m / 125.0)
+    assert 600.0 / dt == round(600.0 / dt)
+    assert extra["runnable"] == "full" and "blocked_stages" not in extra
+    assert extra["stages"] == RASTER_STAGES
+    assert domain.mesh["mesh_path"] == "runs/hex/corridor.init.nc"
+    assert domain.output_glob == "forecast/cuda-history.*.nc"
+    assert extra["env_paths"] == {
+        "WOOF_HEX_MESH_ROWS": "runs/hex/mesh-rows.json"}
+    for name in ("plan.json", "mesh_spec.json", "cull_region.json",
+                 "regional_window.json", "vertical_spec.json", "sites.json"):
+        assert (outdir / name).is_file(), name
+    assert len(load_sites(outdir / "sites.json")) == 4
+    assert extra["capacity"]["fits"] and extra["capacity"]["levels"] == 100
+    assert "INTERIM" in extra["capacity"]["bytes_per_cell_basis"]
+    assert extra["estimate"]["window_cells"] > extra["estimate"]["cull_cells"]
+    assert plan.notes[0].startswith("EXPERIMENTAL (experimental-unanchored)")
+    assert plan.source == "gfs"
+    register = _by_stage(domain)["register-parent"]
+    assert float(_flag(register, "--dt-seconds")) == dt
+
+
+def test_experimental_chain_uses_the_frozen_contracts(tmp_path):
+    domain = _xplan(tmp_path).domains[0]
+    stage = _by_stage(domain)
+    run = "runs/hex"
+    assert stage["density"] == [
+        "hex", "density", "--sites", "sites.json", "--fine-km", "0.1",
+        "--background-km", f"{domain.mesh['background_km']:g}",
+        "-o", f"{run}/density.nc"]
+    mesh = stage["mesh"]
+    assert mesh[:3] == ["mesh", "--density-raster", f"{run}/density.nc"]
+    assert _flag(mesh, "--regional-window") == "regional_window.json"
+    assert int(_flag(mesh, "--cells")) >= domain.extra["estimate"][
+        "window_cells"]
+    assert stage["static-highres"] == [
+        "hex", "static-highres", "--static", f"{run}/parent.static.nc",
+        "-o", f"{run}/parent.static-highres.nc", "--terrain", "glo30",
+        "--landuse", "cglc"]
+    parent_row = domain.mesh["parent_row"]
+    cull_row = domain.mesh["cull_row"]
+    assert stage["register-parent"][:2] == ["hex", "register"]
+    assert _flag(stage["register-parent"], "--name") == parent_row
+    assert _flag(stage["register-parent"], "--static") == \
+        f"{run}/parent.static-highres.nc"
+    assert stage["vertical"] == [
+        "hex", "vertical", "--grid", f"{run}/parent.grid.nc", "--static",
+        f"{run}/parent.static-highres.nc", "--vertical-spec",
+        "vertical_spec.json", "-o", f"{run}/parent.vertical.nc"]
+    cull = stage["cull"]
+    assert _flag(cull, "--parent-vertical") == f"{run}/parent.vertical.nc"
+    assert _flag(cull, "--parent-static") == f"{run}/parent.static-highres.nc"
+    assert _flag(cull, "--region") == "cull_region.json"
+    reg = stage["register-cull"]
+    assert _flag(reg, "--parent-row") == parent_row
+    assert _flag(reg, "--cull-receipt") == f"{run}/corridor.cull.json"
+    assert _flag(reg, "--name") == cull_row
+    assert _flag(reg, "--rows") == f"{run}/mesh-rows.json"
+    assert stage["fetch"][:3] == ["fetch", "--source", "gfs"]
+    assert _flag(stage["fetch"], "--cadence") == "1"
+    assert _flag(stage["fetch"], "--hours") == "6"
+    assert _flag(stage["intermediate"], "--source") == "gfs"
+    assert _flag(stage["intermediate"], "--hours") == "0-6"
+    assert int(_flag(stage["fetch"], "--radius-km")) > \
+        int(_flag(stage["intermediate"], "--radius-km")) + \
+        float(_flag(stage["intermediate"], "--margin-km"))
+    init = stage["init"]
+    assert _flag(init, "--capsule") == _flag(init, "--reference") == \
+        f"{run}/corridor.vertical.nc"
+    assert _flag(init, "--out") == domain.mesh["mesh_path"]
+    assert _flag(init, "--met") == f"{run}/met/MET:2026-10-10_00"
+    assert _flag(stage["lbc"], "--stop-time") == "2026-10-10_06:00:00"
+    forecast = stage["forecast"]
+    assert _flag(forecast, "--mesh") == cull_row
+    assert "--experimental-dt" in forecast
+    assert _flag(forecast, "--les-model") == "3d_smagorinsky"
+    assert _flag(forecast, "--pbl") == "off"
+    assert _flag(forecast, "--history-preset") == "energy"
+    assert _flag(forecast, "--out") == f"{run}/forecast"
+    assert float(_flag(forecast, "--hours")) == 6.0
+    for argv in domain.extra["commands"]:
+        for token in argv:
+            assert not Path(token).is_absolute(), token
+    window = json.loads((tmp_path / "xplan" / "regional_window.json")
+                        .read_text())
+    assert window["kind"] == "polygon" and len(window["vertices_deg"]) >= 3
+
+
+def test_experimental_chain_variants(tmp_path, monkeypatch):
+    domain = _xplan(tmp_path, density="polygons",
+                    source="ecmwf-open-data").domains[0]
+    stage = _by_stage(domain)
+    assert domain.extra["stages"][0] == "mesh-plan"
+    assert stage["mesh"][:3] == ["mesh", "--spec", "mesh_spec.json"]
+    assert "--density-raster" not in stage["mesh"]
+    assert not (tmp_path / "xplan" / "sites.json").exists()
+    assert _flag(stage["intermediate"], "--source") == "ecmwf-open-data"
+    mesh_needs = next(r for r in domain.extra["requires"]
+                      if r["stage"] == "mesh")["needs"]
+    assert [n["unit"] for n in mesh_needs] == [9]
+    # a 3-hourly source: fetched on its own ladder, the met window rounded
+    # up to whole leads, and the coarse ladder named as a need
+    assert _flag(stage["fetch"], "--cadence") == "3"
+    assert _flag(stage["intermediate"], "--hours") == "0-6"
+    met_needs = next(r for r in domain.extra["requires"]
+                     if r["stage"] == "intermediate")["needs"]
+    assert [n["unit"] for n in met_needs] == [11, 11]
+    domain = _xplan(tmp_path, source="aifs", hours=7.0).domains[0]
+    assert _flag(_by_stage(domain)["intermediate"], "--hours") == "0-12"
+
+    # a relative WRF glob is rewritten against the plan directory, the cwd
+    # its commands run in
+    here = tmp_path / "here"
+    here.mkdir()
+    monkeypatch.chdir(here)
+    domain = _xplan(tmp_path, wrfout_glob="wrf/wrfout_d01_*").domains[0]
+    stage = _by_stage(domain)
+    assert "fetch" not in stage
+    assert stage["intermediate"][:6] == [
+        "hex", "intermediate", "--source", "wrfout", "--wrfout-glob",
+        "../here/wrf/wrfout_d01_*"]
+    assert (tmp_path / "xplan" / "../here/wrf").resolve() == \
+        (here / "wrf").resolve()
+    assert "--grib-dir" not in stage["intermediate"]
+    assert domain.extra["forcing"]["source"] == "wrfout"
+    needs = next(r for r in domain.extra["requires"]
+                 if r["stage"] == "intermediate")["needs"]
+    assert [n["unit"] for n in needs] == [12]
+
+
+def test_requirements_name_each_feature_and_parse_with_real_parsers(
+        tmp_path):
+    from woof.cli import build_parser
+    from woof.hex.cli import build_parser as hex_parser
+
+    domain = _xplan(tmp_path).domains[0]
+    requires = domain.extra["requires"]
+    assert [r["command"] for r in requires] == \
+        list(range(len(domain.extra["commands"])))
+    units = {r["stage"]: sorted(n["unit"] for n in r["needs"])
+             for r in requires}
+    assert units["density"] == [8]
+    assert units["mesh"] == [7, 9]
+    assert units["static-highres"] == [13]
+    assert units["register-parent"] == units["register-cull"] == [10]
+    assert units["vertical"] == units["cull"] == [10]
+    assert units["intermediate"] == [11]
+    assert units["forecast"] == [1, 5, 6, 16]
+    for stage in ("mesh-check", "mesh-check-cull", "fetch", "init", "lbc"):
+        assert units[stage] == [], stage
+    for row, argv in zip(requires, domain.extra["commands"]):
+        if not row["needs"]:
+            # nothing new: this build's own parser must take it as written
+            assert row["available_in_this_build"], row
+            if argv[0] == "hex":
+                parsed = hex_parser().parse_args(argv[1:])
+                assert callable(parsed.handler)
+            else:
+                build_parser().parse_args(argv)
+        elif not row["available_in_this_build"]:
+            assert row["why_not"], row
+            assert "choose from" not in row["why_not"]
+
+
+def test_main_reports_the_missing_features(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(plan_hex, "load_sites", lambda path: _compact_sites())
+    args = _args(tmp_path, dx_m=100.0, corridor_km=1.0, hours=6.0,
+                 hex_experimental_dt=True, hex_density=None,
+                 hex_forcing_wrfout=None)
+    assert plan_hex.main(args) == 0
+    record = json.loads(capsys.readouterr().out)
+    assert record["timestep_evidence"] == "experimental-unanchored"
+    assert record["dt_seconds"] == 600.0 / 1024.0
+    assert record["runnable"] == "full"
+    assert record["capacity"]["levels"] == 100
+    missing = {row["argv_head"] for row in
+               record["commands_missing_in_this_build"]}
+    plan = load_plan(tmp_path / "plan" / "plan.json")
+    expected = {r["argv_head"] for r in plan.domains[0].extra["requires"]
+                if not r["available_in_this_build"]}
+    assert missing == expected
+
+
+def test_experimental_capacity_refusal(tmp_path):
+    with pytest.raises(plan_hex.HexPlanRefusal) as caught:
+        plan_hex.build_plan(load_sites(SITES), outdir=tmp_path / "plan",
+                            dx_m=100.0, start="2026-10-10T00",
+                            vram_gib=48.0, experimental_dt=True)
+    message = str(caught.value)
+    assert "cells" in message and "wrf-tiles" in message
+    assert "100 levels" in message and "shorter corridor" in message
+    assert not (tmp_path / "plan" / "plan.json").exists()
+
+
+def test_capacity_scales_with_levels():
+    base = plan_hex.capacity_verdict(100_000.0, None, 48.0)
+    same = plan_hex.capacity_verdict(100_000.0, None, 48.0, levels=55)
+    assert {k: v for k, v in same.items() if k != "levels"} == base
+    deep = plan_hex.capacity_verdict(100_000.0, None, 48.0, levels=100)
+    assert deep["levels"] == 100
+    assert deep["required_mib"] > base["required_mib"] * 1.5
+    assert deep["cells_that_fit"] < base["cells_that_fit"]
+    assert "INTERIM" in deep["bytes_per_cell_basis"]
+
+
+def test_windowed_gradient_matches_the_uniform_estimate(monkeypatch):
+    background, rungs_km = plan_hex.background_km_for(100.0, None)
+    rungs = plan_hex.ladder(rungs_km, 1.0, 0.1, 80.0)
+    monkeypatch.setattr(plan_hex, "MAX_GRADIENT_SAMPLES", 10 ** 12)
+    uniform = plan_hex.steepest_gradient_percent(rungs, background)
+    monkeypatch.setattr(plan_hex, "MAX_GRADIENT_SAMPLES", 1)
+    windowed = plan_hex.steepest_gradient_percent(rungs, background)
+    assert windowed == pytest.approx(uniform, rel=1e-9)
+
+
+def test_les_vertical_spec():
+    from woof.hex.vertical_spec import VerticalSpec
+
+    doc = plan_hex.les_vertical_spec()
+    VerticalSpec.from_mapping(doc).validate()
+    z = np.asarray(doc["specified_interfaces_m"])
+    assert doc["scheme"] == "specified" and doc["n_vert_levels"] == 100
+    assert len(z) == 101 and z[0] == 0.0 and z[-1] == doc["ztop_m"]
+    dz = np.diff(z)
+    assert np.all(dz > 0.0)
+    assert dz[0] == pytest.approx(plan_hex.LES_SURFACE_DZ_M, rel=0.02)
+    assert np.all(dz[1:] >= dz[:-1] - 1e-2)
+    assert plan_hex.les_vertical_spec(60)["n_vert_levels"] == 60
+    for n in (40, 55, 60, 200):
+        few = plan_hex.les_vertical_spec(n)
+        VerticalSpec.from_mapping(few).validate()
+        z = np.asarray(few["specified_interfaces_m"])
+        assert len(z) == n + 1 and z[-1] == few["ztop_m"]
+        # the LES surface layer holds however few levels are asked for
+        assert z[1] == pytest.approx(plan_hex.LES_SURFACE_DZ_M, rel=0.02), n
+    with pytest.raises(plan_hex.HexPlanRefusal, match="--nz 20"):
+        plan_hex.les_vertical_spec(20)
+
+
+def test_experimental_controls_are_refused(tmp_path):
+    with pytest.raises(plan_hex.HexPlanRefusal, match="--hex-density"):
+        _plan(tmp_path, density="raster")
+    with pytest.raises(plan_hex.HexPlanRefusal, match="--hex-forcing-wrfout"):
+        _plan(tmp_path, wrfout_glob="wrfout_d01_*")
+    with pytest.raises(plan_hex.HexPlanRefusal, match="give one"):
+        _xplan(tmp_path, source="gfs", wrfout_glob="wrfout_d01_*")
+    with pytest.raises(plan_hex.HexPlanRefusal, match="no hex regional"):
+        _xplan(tmp_path, source="cmc")
+    with pytest.raises(plan_hex.HexPlanRefusal, match="not one of"):
+        _xplan(tmp_path, density="voronoi")
+    with pytest.raises(plan_hex.HexPlanRefusal, match="whole number"):
+        _xplan(tmp_path, hours=0.0002)
+    with pytest.raises(plan_hex.HexPlanRefusal, match="no timestep"):
+        _xplan(tmp_path, dx_m=30.0)
+    with pytest.raises(plan_hex.HexPlanRefusal, match="drop the flag"):
+        _xplan(tmp_path, dx_m=937.5)
+    with pytest.raises(plan_hex.HexPlanRefusal, match="f009"):
+        _xplan(tmp_path, source="gdas", hours=12.0)
+    with pytest.raises(plan_hex.HexPlanRefusal, match="--nz 500"):
+        _xplan(tmp_path, nz=500)
+    assert not (tmp_path / "xplan" / "plan.json").exists()
+    domain = _xplan(tmp_path, nz=80).domains[0]
+    assert domain.extra["vertical"]["n_vert_levels"] == 80
+    assert domain.extra["capacity"]["levels"] == 80
+
+
+def test_cli_hex_lane_flags(tmp_path, capsys):
+    from woof.cli import build_parser
+
+    args = build_parser().parse_args([
+        "energy", "plan", str(SITES), "--topology", "hex-swath",
+        "--dx-m", "100", "--hex-experimental-dt", "--hex-density",
+        "polygons", "--hex-forcing-wrfout", "wrfout_d01_*",
+        "-o", str(tmp_path / "plan")])
+    assert args.hex_experimental_dt and args.hex_density == "polygons"
+    assert args.hex_forcing_wrfout == "wrfout_d01_*"
+    default = build_parser().parse_args([
+        "energy", "plan", str(SITES), "--topology", "hex-swath",
+        "-o", str(tmp_path / "plan")])
+    assert default.hex_experimental_dt is False
+    assert default.hex_density is None and default.hex_forcing_wrfout is None
+    other = build_parser().parse_args([
+        "energy", "plan", str(SITES), "--topology", "wrf-nests",
+        "--hex-experimental-dt", "-o", str(tmp_path / "nests")])
+    assert other.func(other) == 2
+    assert "only to --topology hex-swath" in capsys.readouterr().err
+    assert not (tmp_path / "nests").exists()
+
+
+def test_run_exports_the_rows_path(tmp_path, monkeypatch):
+    from woof.energy import run
+    from woof.energy.contracts import PlanDomain
+
+    ring = ((-3.6, 51.7), (-3.5, 51.7), (-3.5, 51.8), (-3.6, 51.7))
+
+    def domain(env_paths):
+        return PlanDomain(
+            domain_id="hex", topology="hex-swath", role="mesh", dx_m=100.0,
+            run_dir="runs/hex", output_glob="forecast/cuda-history.*.nc",
+            footprint=ring, site_ids=("s",), mesh={"grid": "g.nc"},
+            extra={"commands": [["hex", "version"]],
+                   "env_paths": env_paths})
+
+    from woof.energy.contracts import Plan, dump_plan
+
+    rows = {"WOOF_HEX_MESH_ROWS": "runs/hex/mesh-rows.json"}
+    step = run._hex_step(domain(rows))
+    assert step.env_paths == rows
+    assert any("WOOF_HEX_MESH_ROWS" in note for note in step.notes)
+    monkeypatch.delenv("WOOF_HEX_MESH_ROWS", raising=False)
+    exported = run._step_env(step, tmp_path)
+    expected = str((tmp_path / "runs/hex/mesh-rows.json").resolve())
+    assert run._child_env(exported)["WOOF_HEX_MESH_ROWS"] == expected
+    assert "WOOF_HEX_MESH_ROWS" not in run._child_env()
+
+    # through woof energy run: every command of the step gets the path
+    plan_path = dump_plan(Plan(topology="hex-swath", dx_m=100.0,
+                               start="2026-10-10T00", hours=6.0,
+                               domains=[domain(rows)]),
+                          tmp_path / "plan.json")
+    seen = []
+
+    def fake(argv, cwd, log, env=None):
+        seen.append(env)
+        out = Path(cwd) / "runs/hex/forecast"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "cuda-history.2026-10-10_00.nc").write_bytes(b"x")
+        return 0
+
+    monkeypatch.setattr(run, "_execute", fake)
+    assert run.main(argparse.Namespace(plan=str(plan_path), dry_run=False,
+                                       only=None, resume=False)) == 0
+    assert seen == [{"WOOF_HEX_MESH_ROWS": expected}]
+    for bad in ({"WOOF_HEX_MESH_ROWS": "/abs/rows.json"},
+                {"WOOF_HEX_MESH_ROWS": 3}, ["WOOF_HEX_MESH_ROWS"]):
+        with pytest.raises(run.RunRefusal, match="env_paths"):
+            run._hex_step(domain(bad))

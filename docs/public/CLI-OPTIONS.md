@@ -673,6 +673,9 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--card` | size each domain for this GPU tier |
 | `--corridor-km` | half-width of the high-resolution corridor around each site (default 2) |
 | `--dx-m` | target grid spacing over the sites (default 100) |
+| `--hex-density {raster,polygons}` | with --hex-experimental-dt: hand the mesh generator a density raster built from the sites (raster, the default) or the planner's corridor polygon rows (polygons) |
+| `--hex-experimental-dt` | EXPERIMENTAL: lift the hex-swath spacing floor (about 819 m) by planning on an unanchored sub-5 s timestep (Courant, clock and radiation checks still apply) and emit the full chain: mesh, statics, vertical, cull, met, init, boundaries and an LES forecast. Every output is labelled experimental-unanchored |
+| `--hex-forcing-wrfout GLOB` | with --hex-experimental-dt: force the hex corridor from this WRF parent run's wrfout files instead of --source |
 | `--hours` | forecast length in hours (default 24) |
 | `--max-domains` | refuse plans with more high-resolution domains |
 | `--nz` | vertical levels (default: the planner's ladder) |

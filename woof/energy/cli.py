@@ -91,7 +91,23 @@ def _dispatch(module: str):
     return run
 
 
+#: ``woof energy plan`` flags only the hex-swath planner reads.
+_HEX_ONLY_FLAGS = (("hex_experimental_dt", "--hex-experimental-dt"),
+                   ("hex_density", "--hex-density"),
+                   ("hex_forcing_wrfout", "--hex-forcing-wrfout"))
+
+
 def _plan(args) -> int:
+    if args.topology != "hex-swath":
+        given = [flag for attribute, flag in _HEX_ONLY_FLAGS
+                 if getattr(args, attribute, None) not in (None, False)]
+        if given:
+            import sys
+
+            print(f"woof energy plan: REFUSED: {', '.join(given)} applies "
+                  f"only to --topology hex-swath; --topology {args.topology} "
+                  "would ignore it", file=sys.stderr)
+            return 2
     return import_module(_TOPOLOGY_MODULES[args.topology]).main(args)
 
 
@@ -220,6 +236,26 @@ def _register_plan(sub) -> None:
                    help="refuse plans with more high-resolution domains")
     p.add_argument("--nz", type=positive_int, default=None,
                    help="vertical levels (default: the planner's ladder)")
+    hex_lane = p.add_argument_group(
+        "hex-swath experimental lane",
+        "read only with --topology hex-swath; refused with any other")
+    hex_lane.add_argument(
+        "--hex-experimental-dt", action="store_true",
+        help="EXPERIMENTAL: lift the hex-swath spacing floor (about 819 m) "
+             "by planning on an unanchored sub-5 s timestep (Courant, clock "
+             "and radiation checks still apply) and emit the full chain: "
+             "mesh, statics, vertical, cull, met, init, boundaries and an "
+             "LES forecast.  Every output is labelled "
+             "experimental-unanchored")
+    hex_lane.add_argument(
+        "--hex-density", choices=("raster", "polygons"), default=None,
+        help="with --hex-experimental-dt: hand the mesh generator a density "
+             "raster built from the sites (raster, the default) or the "
+             "planner's corridor polygon rows (polygons)")
+    hex_lane.add_argument(
+        "--hex-forcing-wrfout", default=None, metavar="GLOB",
+        help="with --hex-experimental-dt: force the hex corridor from this "
+             "WRF parent run's wrfout files instead of --source")
     p.add_argument("-o", "--outdir", required=True, metavar="DIR",
                    help="directory for plan.json and emitted configs")
     p.set_defaults(func=_plan)

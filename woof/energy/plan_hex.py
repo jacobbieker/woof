@@ -44,8 +44,9 @@ The gates, and which one binds
   = 694 m``; delivered cells run as fine as 0.848 x their request
   (:data:`woof.hex.mesh_spec_gates.DELIVERED_SPACING_P05`), so a request
   below about 819 m is refused HERE, naming the floor and pointing at
-  ``--topology wrf-tiles``.  This is the gate that binds for 50 m and 100 m.
-  The numbers are read from those modules at run time, never restated.
+  ``--topology wrf-tiles`` and ``--hex-experimental-dt``.  This is the gate
+  that binds for 50 m and 100 m.  The numbers are read from those modules
+  at run time, never restated.
 * **Transition band / smoothness** (:mod:`woof.hex.mesh_spec_gates`,
   ``woof/data/mpas/mesh-sizing.json``).  The steepest requested spacing
   gradient of the emitted spec is estimated from its own density formula
@@ -94,6 +95,31 @@ is ``"mesh-and-cull"``: a run of this plan produces the corridor mesh and
 its cut, and extraction refuses on the missing history rather than reading
 anything else.
 
+The experimental lane (``--hex-experimental-dt``)
+-------------------------------------------------
+An explicit opt-in that lifts the spacing floor.  The timestep is the
+largest one :func:`woof.hex.dt_admission.largest_admissible_dt` admits on the
+finest delivered edge -- Courant, exact division of the 600 s radiation
+cadence and binary64 clock closure all still apply -- with no anchor row
+behind it: 600/1024 s at 100 m, 600/2048 s at 50 m.  The anchor table is
+neither read for that number nor written.  The plan, and every command
+that reports, carries ``timestep_evidence = "experimental-unanchored"``.
+
+``extra["runnable"]`` is then ``"full"`` and ``extra["commands"]`` is the
+whole chain in the hex campaign's frozen command contracts: a density raster
+from the sites (or, with ``--hex-density polygons``, the polygon spec
+above), the parent mesh generated inside a regional window (the cut plus
+:data:`WINDOW_HALOS` boundary halos), GLO-30/CGLC statics, the parent's
+runtime row, the LES vertical (``vertical_spec.json``, ``scheme
+"specified"``, :data:`LES_LEVELS` levels), the cut with its vertical, the
+cut's row, met intermediates from ``--source`` (or a WRF parent with
+``--hex-forcing-wrfout``), the init, the boundaries, and an LES forecast
+(3-D Smagorinsky, PBL off, the energy history preset).  ``extra["requires"]``
+names, per command, the campaign feature it depends on and whether this
+build's parser accepts it, so a build lacking one says which before
+anything runs.  Capacity is priced at the LES vertical's level count (see
+:class:`_LevelScaledModel`).
+
 Python boundary (``docs/dev/static-rust-port.md``): this module plans.  Its
 numpy work is per-site vectors and one bounded estimation grid (at most
 :data:`MAX_ESTIMATE_POINTS` points), never model data.
@@ -105,6 +131,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -116,6 +143,7 @@ from woof.energy.contracts import (
     PlanDomain,
     SiteSet,
     dump_plan,
+    dump_sites,
     file_ref,
     load_sites,
 )
@@ -176,6 +204,10 @@ HEX_LEVELS = DEFAULT_LEVELS
 CHAIN_GAP_KM = 25.0
 #: Cap on the estimation grid; past it the grid coarsens and the plan says so.
 MAX_ESTIMATE_POINTS = 4_000_000
+#: Past this many uniform samples the gradient estimate samples each rung's
+#: blend window at its own resolution instead (see
+#: :func:`steepest_gradient_percent`).
+MAX_GRADIENT_SAMPLES = 2_000_000
 #: Polyline simplification tolerance as a fraction of ``corridor_km``; every
 #: corridor ring is widened by the tolerance so the simplification can only
 #: add cells, never uncover a site.
@@ -265,8 +297,71 @@ def _check_floor(dx_m: float) -> dict[str, Any]:
             f"request, hence {floor['floor_dx_m']:.0f} m "
             f"({floor['gate']}).  For {dx_m:g} m along the corridors use "
             "--topology wrf-tiles (one parent run plus offline child tiles "
-            "at any spacing), or ask hex-swath for a coarser --dx-m.")
+            "at any spacing), or ask hex-swath for a coarser --dx-m."
+            + EXPERIMENTAL_FLOOR_HINT)
     return floor
+
+
+#: Appended to the floor refusal: the opt-in lane that lifts the floor.
+EXPERIMENTAL_FLOOR_HINT = (
+    "  Or pass --hex-experimental-dt to plan on the EXPERIMENTAL "
+    "sub-5 s timestep lane: Courant, clock closure and radiation "
+    "divisibility still apply, no anchor backs the timestep, and every "
+    "output is labelled experimental-unanchored.")
+
+#: The label the experimental lane writes into the plan, the forecast
+#: receipt and the history attributes (``timestep_evidence``).
+EXPERIMENTAL_EVIDENCE = "experimental-unanchored"
+
+
+def experimental_timestep(dx_m: float) -> dict[str, Any]:
+    """The timestep the EXPERIMENTAL lane plans at ``dx_m``.
+
+    The largest dt that divides the 600 s radiation cadence, closes the
+    model clock exactly in binary64 and satisfies the Courant policy on the
+    finest delivered edge (``DELIVERED_SPACING_P05 x dx``), by
+    :func:`woof.hex.dt_admission.largest_admissible_dt` -- the function the
+    forecast door's experimental lane re-checks with, so the plan and the
+    run agree on the number.  No anchor row is consulted or written.
+    """
+
+    from woof.hex import dt_admission
+    from woof.hex.mesh_spec_gates import DELIVERED_SPACING_P05
+    from woof.hex.timestep_admission import CourantPolicy
+
+    policy = CourantPolicy()
+    min_dc_edge_m = DELIVERED_SPACING_P05 * dx_m
+    found = dt_admission.largest_admissible_dt(
+        min_dc_edge_m,
+        max_characteristic_speed_m_s=policy.max_characteristic_speed_m_s,
+        safety_factor=policy.safety_factor)
+    dt = found["largest_admissible_dt_seconds"]
+    if dt is None:
+        raise HexPlanRefusal(
+            f"--dx-m {dx_m:g} admits no timestep even on the experimental "
+            f"lane: its finest delivered edge, about {min_dc_edge_m:.1f} m, "
+            f"has a Courant limit of {found['courant_limit_seconds']:.4g} s "
+            f"({policy.max_characteristic_speed_m_s:g} m/s, safety "
+            f"{policy.safety_factor:g}), and no divisor of the "
+            f"{found['radiation_cadence_seconds']:g} s radiation cadence at "
+            "or below it closes the model clock exactly in binary64 "
+            "(woof.hex.dt_admission.largest_admissible_dt).  Coarsen --dx-m "
+            "or use --topology wrf-tiles")
+    return {
+        "dt_seconds": float(dt),
+        "timestep_evidence": EXPERIMENTAL_EVIDENCE,
+        "min_dc_edge_m": min_dc_edge_m,
+        "courant_limit_seconds": found["courant_limit_seconds"],
+        "radiation_cadence_seconds": found["radiation_cadence_seconds"],
+        "radiation_steps": found["radiation_steps_at_that_dt"],
+        "rejected_for_clock_closure": len(found["rejected_for_clock_closure"]),
+        "max_characteristic_speed_m_s": policy.max_characteristic_speed_m_s,
+        "courant_safety_factor": policy.safety_factor,
+        "delivered_spacing_p05": DELIVERED_SPACING_P05,
+        "gate": ("woof.hex.dt_admission.largest_admissible_dt (Courant + "
+                 "radiation divisibility + binary64 clock closure); no "
+                 "ADMITTED_TIMESTEPS anchor"),
+    }
 
 
 def _smoothness_bounds() -> dict[str, Any]:
@@ -395,9 +490,23 @@ def steepest_gradient_percent(rungs: Sequence[Rung], background_km: float
 
     step = rungs[0].spacing_km / 8.0
     far = rungs[-1].reach_km + 6.0 * rungs[-1].transition_km
-    d = np.arange(0.0, far + step, step)
-    h = spacing_at_distance(d, rungs, background_km)
-    return float(np.max(np.abs(np.diff(h)) / step) * 100.0)
+    if far / step <= MAX_GRADIENT_SAMPLES:
+        d = np.arange(0.0, far + step, step)
+        h = spacing_at_distance(d, rungs, background_km)
+        return float(np.max(np.abs(np.diff(h)) / step) * 100.0)
+    # A fine ladder (50 m to 100 m) reaches hundreds of km at an 8th of its
+    # finest spacing: tens of millions of samples.  Outside every rung's
+    # blend window the field is flat, so the steepest gradient lies in one
+    # of them; each window is sampled at an 8th of its own rung's spacing.
+    steepest = 0.0
+    for rung in rungs:
+        local = rung.spacing_km / 8.0
+        lo = max(0.0, rung.reach_km - 6.0 * rung.transition_km)
+        hi = rung.reach_km + 6.0 * rung.transition_km
+        d = np.arange(lo, hi + local, local)
+        h = spacing_at_distance(d, rungs, background_km)
+        steepest = max(steepest, float(np.max(np.abs(np.diff(h)) / local)))
+    return steepest * 100.0
 
 
 # --------------------------------------------------------------------------
@@ -838,11 +947,23 @@ class CullEstimate:
     grid_step_km: float
     grid_points: int
     notes: list[str]
+    window_xy: np.ndarray | None = None
+    window_latlon: list[tuple[float, float]] | None = None
+    window_km: float | None = None
+    window_cells: float | None = None
 
 
 def estimate_cull(chains: Sequence[Chain], shapes: Sequence[RungShapes],
                   rungs: Sequence[Rung], background_km: float,
-                  projection: _Aeqd, corridor_km: float) -> CullEstimate:
+                  projection: _Aeqd, corridor_km: float,
+                  window_halos: float | None = None) -> CullEstimate:
+    """The cut, its cells, and (with ``window_halos``) the regional window.
+
+    ``window_halos`` adds a generation window: the cut's convex hull
+    buffered by that many boundary-ring halos past the cut (so the window
+    holds the cut, its seven boundary rings and the rest as margin), with
+    its own area-integral cell count.
+    """
     all_x = np.concatenate([c.x for c in chains])
     all_y = np.concatenate([c.y for c in chains])
     cut_reach = CULL_PAD_SCALE * rungs[0].reach_km
@@ -864,13 +985,42 @@ def estimate_cull(chains: Sequence[Chain], shapes: Sequence[RungShapes],
                                         background_km, step)))
     halo = BOUNDARY_RINGS * h_cut
     outer = _buffered_hull(all_x, all_y, cut_reach + halo)
-    xmin, ymin = outer.min(axis=0)
-    xmax, ymax = outer.max(axis=0)
+    cells, fine, step, points = _integrate_cells(
+        outer, shapes, chains, rungs, background_km, step, notes, "cut")
+    lat, lon = projection.inverse(cut[:, 0], cut[:, 1])
+    ring = [(float(a), float(b)) for a, b in zip(lat, lon)]
+    window = window_ring = window_km = window_cells = None
+    if window_halos is not None:
+        # Integrated on its own grid, so the larger box never coarsens the
+        # cut's estimate (which the capacity verdict reads).
+        window_km = cut_reach + window_halos * halo
+        window = _buffered_hull(all_x, all_y, window_km)
+        window_cells = _integrate_cells(
+            window, shapes, chains, rungs, background_km, step, notes,
+            "window")[0]
+        wlat, wlon = projection.inverse(window[:, 0], window[:, 1])
+        window_ring = [(float(a), float(b)) for a, b in zip(wlat, wlon)]
+    return CullEstimate(cut, ring, cut_reach, halo, h_cut, cells, fine, step,
+                        points, notes, window, window_ring, window_km,
+                        window_cells)
+
+
+def _integrate_cells(polygon: np.ndarray, shapes: Sequence[RungShapes],
+                     chains: Sequence[Chain], rungs: Sequence[Rung],
+                     background_km: float, step: float, notes: list[str],
+                     what: str) -> tuple[float, float, float, int]:
+    """Area-integral cells inside a convex polygon: ``(cells, fine, step,
+    points)``, coarsening the grid (and saying so) past the point cap."""
+
+    xmin, ymin = polygon.min(axis=0)
+    xmax, ymax = polygon.max(axis=0)
     area_box = (xmax - xmin) * (ymax - ymin)
     if area_box / (step * step) > MAX_ESTIMATE_POINTS:
         coarse = math.sqrt(area_box / MAX_ESTIMATE_POINTS)
         notes.append(
-            f"cell estimate grid coarsened from {step:.3f} km to "
+            ("cell estimate grid" if what == "cut" else
+             f"{what} cell estimate grid")
+            + f" coarsened from {step:.3f} km to "
             f"{coarse:.3f} km to stay within {MAX_ESTIMATE_POINTS:,} points; "
             "the area integral is less exact at that step")
         step = coarse
@@ -878,16 +1028,13 @@ def estimate_cull(chains: Sequence[Chain], shapes: Sequence[RungShapes],
     ys = np.arange(ymin + 0.5 * step, ymax, step)
     gx, gy = np.meshgrid(xs, ys)
     gx, gy = gx.ravel(), gy.ravel()
-    keep = _inside_convex(outer, gx, gy)
+    keep = _inside_convex(polygon, gx, gy)
     gx, gy = gx[keep], gy[keep]
     h = _field_spacing(gx, gy, shapes, chains, background_km, step)
     per_point = step * step / (HEXAGON_AREA_FACTOR * h * h)
     cells = float(np.sum(per_point))
     fine = float(np.sum(per_point[h <= rungs[0].spacing_km * 1.05]))
-    lat, lon = projection.inverse(cut[:, 0], cut[:, 1])
-    ring = [(float(a), float(b)) for a, b in zip(lat, lon)]
-    return CullEstimate(cut, ring, cut_reach, halo, h_cut, cells, fine, step,
-                        int(len(gx)), notes)
+    return cells, fine, step, int(len(gx))
 
 
 def estimate_parent_cells(shapes: Sequence[RungShapes], chains: Sequence[Chain],
@@ -933,9 +1080,79 @@ def estimate_parent_cells(shapes: Sequence[RungShapes], chains: Sequence[Chain],
 # capacity
 
 
-def capacity_verdict(cells: float, card: str | None, vram_gib: float | None
-                     ) -> dict[str, Any]:
-    """The limited-area admission row applied to the predicted cut."""
+class _LevelScaledModel:
+    """INTERIM: a 55-level footprint row priced at ``levels`` levels.
+
+    Every row in :mod:`woof.hex.device_admission` was measured at 55
+    levels and, on this branch, only its tiled workspaces scale with the
+    level count; the per-cell slope and the core do not.  Until the module
+    scales them itself, the whole 55-level prediction is multiplied by
+    ``levels / 55`` (the core too, so the estimate can only err high) and
+    the margin is the row's own at ``levels``.  :func:`capacity_verdict`
+    drops this wrapper as soon as ``model_for_card(levels=...)`` returns a
+    slope that differs from the 55-level one.
+    """
+
+    def __init__(self, base, margin_model, levels: int, base_levels: int):
+        self.base = base
+        self.margin_model = margin_model
+        self.scale = float(levels) / float(base_levels)
+        self.measured = base.measured
+
+    def predict_bytes(self, cells: int) -> float:
+        return self.base.predict_bytes(int(cells)) * self.scale
+
+    def margin_bytes(self) -> int:
+        return int(self.margin_model.margin_bytes())
+
+    def required_bytes(self, cells: int) -> int:
+        return int(round(self.predict_bytes(cells))) + self.margin_bytes()
+
+    def max_cells(self, budget_bytes: int) -> int:
+        budget = int(budget_bytes) - self.margin_bytes()
+        if budget <= 0 or self.predict_bytes(1) > budget:
+            return 0
+        low, high = 1, 2
+        while self.predict_bytes(high) <= budget and high < 1 << 40:
+            low, high = high, high * 2
+        while low + 1 < high:
+            mid = (low + high) // 2
+            if self.predict_bytes(mid) <= budget:
+                low = mid
+            else:
+                high = mid
+        return low
+
+
+def _footprint_model(profile, levels: int | None):
+    """The limited-area row for ``profile`` at ``levels`` and its basis."""
+
+    from woof.hex import device_admission
+
+    base_levels = int(device_admission.MODEL_VERTICAL_LEVELS)
+    base = device_admission.model_for_card(profile, configuration="limited-area")
+    if levels is None or int(levels) == base_levels:
+        return base, ("woof.hex.device_admission limited-area "
+                      "row (shaped footprint model)")
+    at_levels = device_admission.model_for_card(
+        profile, configuration="limited-area", levels=int(levels))
+    if float(at_levels.bytes_per_cell) != float(base.bytes_per_cell):
+        return at_levels, (f"woof.hex.device_admission limited-area row at "
+                           f"{int(levels)} levels (the module scales it)")
+    return (_LevelScaledModel(base, at_levels, int(levels), base_levels),
+            f"woof.hex.device_admission limited-area row measured at "
+            f"{base_levels} levels, scaled x{int(levels)}/{base_levels} "
+            "(INTERIM: the module does not yet scale its per-cell slope "
+            "with the level count)")
+
+
+def capacity_verdict(cells: float, card: str | None, vram_gib: float | None,
+                     levels: int | None = None) -> dict[str, Any]:
+    """The limited-area admission row applied to the predicted cut.
+
+    ``levels`` other than the rows' measured 55 prices the cut at that
+    vertical level count (see :class:`_LevelScaledModel`).
+    """
 
     from woof.hex import device_admission
     from woof.hex.mesh_point import CARD_ALIASES, resolve_card
@@ -969,8 +1186,7 @@ def capacity_verdict(cells: float, card: str | None, vram_gib: float | None
     worst: dict[str, Any] | None = None
     for key in profiles:
         profile = device_admission.KNOWN_CARDS[key]
-        model = device_admission.model_for_card(profile,
-                                                configuration="limited-area")
+        model, model_basis = _footprint_model(profile, levels)
         required = model.required_bytes(priced)
         budget_bytes = int(budget_mib * MIB)
         row = {
@@ -984,9 +1200,10 @@ def capacity_verdict(cells: float, card: str | None, vram_gib: float | None
             "budget_basis": basis,
             "fits": required <= budget_bytes,
             "cells_that_fit": int(model.max_cells(budget_bytes)),
-            "bytes_per_cell_basis": ("woof.hex.device_admission limited-area "
-                                     "row (shaped footprint model)"),
+            "bytes_per_cell_basis": model_basis,
         }
+        if levels is not None:
+            row["levels"] = int(levels)
         if worst is None or row["required_mib"] > worst["required_mib"]:
             worst = row
     assert worst is not None
@@ -1054,6 +1271,412 @@ BLOCKED_STAGES: tuple[dict[str, str], ...] = (
 
 
 # --------------------------------------------------------------------------
+# the experimental full chain
+
+
+#: ``--hex-density``: how the full chain hands the generator its density.
+DENSITY_MODES = ("raster", "polygons")
+#: Met sources the full chain fetches and turns into WPS intermediates
+#: (``woof hex intermediate --source``); the first is the default.
+CHAIN_SOURCES = ("gfs", "ecmwf-open-data", "gdas", "era5", "aifs", "hrrr")
+#: Hours between the forecast leads each source publishes and the chain
+#: fetches (``woof fetch --cadence``).  An hourly source is fetched hourly
+#: so the intermediate's contiguous ``--hours 0-N`` finds every lead.
+SOURCE_CADENCE_HOURS = {"gfs": 1, "gdas": 1, "era5": 1, "hrrr": 1,
+                        "ecmwf-open-data": 3, "aifs": 6}
+#: The GDAS ladder ends at f009 (``woof fetch --source gdas``).
+GDAS_MAX_HOURS = 9
+#: The source name the chain records when a WRF parent run forces it.
+WRFOUT_SOURCE = "wrfout"
+#: Vertical levels of the LES vertical the full chain writes by default.
+LES_LEVELS = 100
+#: Bounds on ``--nz`` for the LES vertical.
+LES_LEVELS_RANGE = (40, 200)
+#: The LES vertical: lowest layer depth, geometric growth per layer, model
+#: top.  Layers grow from the surface until they reach a uniform cap,
+#: solved so the column closes at the top exactly.
+LES_SURFACE_DZ_M = 20.0
+LES_GROWTH = 1.06
+LES_ZTOP_M = 30_000.0
+#: The regional generation window is the cut buffered by this many
+#: boundary-ring halos past the cut: one for the seven boundary rings the
+#: culler adds, two more as margin so the cut never meets the window edge.
+WINDOW_HALOS = 3.0
+#: File names inside :data:`RUN_DIR`.
+ROWS_FILE = "mesh-rows.json"
+#: Ground the met intermediate keeps past the regional window, km (the
+#: ``woof hex intermediate --margin-km`` default, passed explicitly).
+MET_MARGIN_KM = 30.0
+PARENT_STEM = "parent"
+#: First-guess level ceilings ``woof hex init`` / ``woof hex lbc`` are told
+#: per source (``--nfglevels``).  The init door refuses only a met file
+#: holding MORE profile levels than declared, so these are upper bounds;
+#: HRRR's is the shipped point recipe's (``woof.hex.mesh_point``).
+FIRST_GUESS_LEVELS = {"hrrr": 51, "gfs": 64, "gdas": 64,
+                      "ecmwf-open-data": 64, "era5": 64, "aifs": 64,
+                      WRFOUT_SOURCE: 140}
+#: The rest of the init's explicit switches: the shipped point recipe's
+#: (``woof.hex.mesh_point`` ``next``), agreeing with the LES vertical's
+#: ``theta_adv_order`` / ``coef_3rd_order``.
+INIT_SWITCHES = (
+    "--nfgsoillevels", "4", "--extrap-airtemp", "constant",
+    "--use-spechumd", "yes", "--theta-adv-order", "3",
+    "--coef-3rd-order", "0.25", "--virtual-factor", "reproduce-fortran",
+    "--deep-soil-moisture", "reproduce-fortran",
+    "--landuse-table", "MODIFIED_IGBP_MODIS_NOAH", "--frac-seaice", "yes",
+    "--tsk-seaice-threshold", "100.0", "--oned-underflow", "preserve")
+LBC_SWITCHES = ("--extrap-airtemp", "constant", "--use-spechumd", "yes",
+                "--theta-adv-order", "3", "--coef-3rd-order", "0.25")
+#: The forecast physics the chain asks for: the MPAS v8.4.1 LES closure
+#: with the PBL scheme off, and the energy history preset.
+FORECAST_LES_MODEL = "3d_smagorinsky"
+FORECAST_PBL = "off"
+FORECAST_HISTORY_PRESET = "energy"
+
+
+def les_vertical_spec(n_levels: int = LES_LEVELS) -> dict[str, Any]:
+    """A ``gpuwm-hex.vertical-spec/v1`` document for the LES chain.
+
+    ``scheme="specified"``: :data:`LES_SURFACE_DZ_M` at the ground, growing
+    :data:`LES_GROWTH` per layer up to a uniform cap solved (bisection) so
+    ``n_levels`` layers close at :data:`LES_ZTOP_M`.  Every other key is the
+    shipped ``tc55-v1`` declaration's.  Validated by
+    :class:`woof.hex.vertical_spec.VerticalSpec` before it is returned.
+    """
+
+    from woof.hex.vertical_spec import VerticalSpec, VerticalSpecError
+
+    lo_bound, hi_bound = LES_LEVELS_RANGE
+    if not (lo_bound <= int(n_levels) <= hi_bound):
+        raise HexPlanRefusal(
+            f"--nz {n_levels} is outside the LES vertical's "
+            f"{lo_bound}..{hi_bound} levels")
+    n = int(n_levels)
+    ratio = LES_GROWTH
+
+    def total(r: float) -> float:
+        return float(np.sum(LES_SURFACE_DZ_M * r ** np.arange(n)))
+
+    if total(ratio) < LES_ZTOP_M:
+        # Too few levels for the shipped growth to reach the top: keep the
+        # 20 m surface layer and grow faster (the cap never binds).
+        low, high = LES_GROWTH, 2.0
+        for _ in range(200):
+            ratio = 0.5 * (low + high)
+            if total(ratio) < LES_ZTOP_M:
+                low = ratio
+            else:
+                high = ratio
+        ratio = high
+    growth = LES_SURFACE_DZ_M * ratio ** np.arange(n)
+    low, high = LES_SURFACE_DZ_M, float(np.max(growth))
+    for _ in range(200):
+        cap = 0.5 * (low + high)
+        if float(np.sum(np.minimum(growth, cap))) < LES_ZTOP_M:
+            low = cap
+        else:
+            high = cap
+    dz = np.minimum(growth, high)
+    dz = dz * (LES_ZTOP_M / float(np.sum(dz)))
+    interfaces = np.concatenate([[0.0], np.cumsum(dz)])
+    interfaces = [round(float(z), 3) for z in interfaces]
+    interfaces[0] = 0.0
+    interfaces[-1] = LES_ZTOP_M
+    document = {
+        "schema": "gpuwm-hex.vertical-spec/v1",
+        "n_vert_levels": n,
+        "ztop_m": LES_ZTOP_M,
+        "scheme": "specified",
+        "specified_interfaces_m": interfaces,
+        "interface_projection": "linear_interpolation",
+        "terrain_smoothing_passes": 1,
+        "smooth_surfaces": True,
+        "surface_smoothing_passes": 30,
+        "minimum_layer_fraction": 0.3,
+        "hybrid_coordinate": True,
+        "hybrid_transition_height_m": 30_000.0,
+        "rayleigh_xnutr": 0.0,
+        "rayleigh_damping_start_m": 22_000.0,
+        "theta_adv_order": 3,
+        "coef_3rd_order": 0.25,
+    }
+    try:
+        VerticalSpec.from_mapping(document).validate()
+    except VerticalSpecError as error:   # pragma: no cover - fixed recipe
+        raise HexPlanRefusal(f"internal: the LES vertical spec is invalid "
+                             f"({error})") from error
+    return document
+
+
+def _start_stamp(start: str, hours: float = 0.0) -> str:
+    when = datetime.strptime(start, "%Y-%m-%dT%H") + timedelta(hours=hours)
+    return when.strftime("%Y-%m-%d_%H:%M:%S")
+
+
+def full_chain_commands(*, dt_seconds: float, density: str, dx_m: float,
+                        background_km: float, window_cells: int,
+                        start: str, hours: float, source: str,
+                        wrfout_glob: str | None, centre: tuple[float, float],
+                        met_radius_km: float, parent_row: str,
+                        cull_row: str) -> list[tuple[str, list[str]]]:
+    """``(stage, argv)`` of the full experimental chain, in run order.
+
+    argv follows ``woof``; cwd is the plan directory.  The flags are the
+    frozen hex campaign contracts; :data:`STAGE_REQUIREMENTS` names which
+    feature each one depends on.
+    """
+
+    run = RUN_DIR
+    parent_grid = f"{run}/{PARENT_STEM}.grid.nc"
+    parent_static = f"{run}/{PARENT_STEM}.static.nc"
+    parent_highres = f"{run}/{PARENT_STEM}.static-highres.nc"
+    parent_vertical = f"{run}/{PARENT_STEM}.vertical.nc"
+    cull_grid = f"{run}/{CULL_NAME}.grid.nc"
+    cull_static = f"{run}/{CULL_NAME}.static.nc"
+    cull_vertical = f"{run}/{CULL_NAME}.vertical.nc"
+    cull_init = f"{run}/{CULL_NAME}.init.nc"
+    rows = f"{run}/{ROWS_FILE}"
+    met_dir = f"{run}/met"
+    lbc_dir = f"{run}/lbc"
+    dt_text = repr(float(dt_seconds))
+    cadence = 1 if wrfout_glob is not None else SOURCE_CADENCE_HOURS[source]
+    # The met window covers the forecast, in whole leads of the source.
+    whole_hours = cadence * int(math.ceil(hours / cadence - 1e-9))
+    point = f"{centre[0]:.4f},{centre[1]:.4f}"
+    radius = f"{math.ceil(met_radius_km):d}"
+    # The fetch subsets the source around the same point; it covers the
+    # intermediate's box (radius + margin) with one more margin to spare.
+    fetch_radius = f"{math.ceil(met_radius_km + 2.0 * MET_MARGIN_KM):d}"
+    chain: list[tuple[str, list[str]]] = []
+    if density == "raster":
+        chain.append(("density", [
+            "hex", "density", "--sites", "sites.json",
+            "--fine-km", f"{dx_m / 1000.0:g}",
+            "--background-km", f"{background_km:g}",
+            "-o", f"{run}/density.nc"]))
+        mesh = ["mesh", "--density-raster", f"{run}/density.nc"]
+    else:
+        chain.append(("mesh-plan", [
+            "hex", "mesh-plan", "--spec", "mesh_spec.json", "--json",
+            "--out", f"{run}/mesh-plan.json"]))
+        mesh = ["mesh", "--spec", "mesh_spec.json"]
+    chain.append(("mesh", mesh + [
+        "--regional-window", "regional_window.json",
+        "--cells", str(int(window_cells)),
+        "--out", parent_grid, "--static-out", parent_static]))
+    chain.append(("mesh-check", ["hex", "mesh-check", "--grid", parent_grid,
+                                 "--static", parent_static]))
+    chain.append(("static-highres", [
+        "hex", "static-highres", "--static", parent_static,
+        "-o", parent_highres, "--terrain", "glo30", "--landuse", "cglc"]))
+    chain.append(("register-parent", [
+        "hex", "register", "--grid", parent_grid, "--static", parent_highres,
+        "--name", parent_row, "--dt-seconds", dt_text, "--rows", rows]))
+    chain.append(("vertical", [
+        "hex", "vertical", "--grid", parent_grid, "--static", parent_highres,
+        "--vertical-spec", "vertical_spec.json", "-o", parent_vertical]))
+    chain.append(("cull", [
+        "hex", "cull", "--parent-grid", parent_grid,
+        "--parent-static", parent_highres,
+        "--parent-vertical", parent_vertical,
+        "--region", "cull_region.json", "--out-dir", run,
+        "--name", CULL_NAME]))
+    chain.append(("mesh-check-cull", [
+        "hex", "mesh-check", "--grid", cull_grid, "--static", cull_static]))
+    chain.append(("register-cull", [
+        "hex", "register", "--grid", cull_grid, "--static", cull_static,
+        "--parent-row", parent_row,
+        "--cull-receipt", f"{run}/{CULL_NAME}.cull.json",
+        "--name", cull_row, "--dt-seconds", dt_text, "--rows", rows]))
+    window = ["--cycle", start, "--hours", f"0-{whole_hours}",
+              "--point", point, "--radius-km", radius,
+              "--margin-km", f"{MET_MARGIN_KM:g}",
+              "--out-dir", met_dir, "--prefix", "MET"]
+    if wrfout_glob is not None:
+        chain.append(("intermediate", [
+            "hex", "intermediate", "--source", WRFOUT_SOURCE,
+            "--wrfout-glob", wrfout_glob, *window]))
+    else:
+        fetch = ["fetch", "--source", source, "--cycle", start,
+                 "--hours", str(whole_hours), "--cadence", str(cadence),
+                 "--point", point, "--radius-km", fetch_radius,
+                 "--out", f"{run}/grib"]
+        if source == "era5":
+            fetch.append("--retrieve")
+        chain.append(("fetch", fetch))
+        chain.append(("intermediate", [
+            "hex", "intermediate", "--source", source,
+            "--grib-dir", f"{run}/grib", *window]))
+    levels = str(FIRST_GUESS_LEVELS[WRFOUT_SOURCE if wrfout_glob is not None
+                                    else source])
+    first_met = f"{met_dir}/MET:{_start_stamp(start)[:13]}"
+    chain.append(("init", [
+        "hex", "init", "--met", first_met, "--static", cull_static,
+        "--capsule", cull_vertical, "--reference", cull_vertical,
+        "--out", cull_init, "--start-time", _start_stamp(start),
+        "--nfglevels", levels, *INIT_SWITCHES]))
+    chain.append(("lbc", [
+        "hex", "lbc", "--grid", cull_init, "--met-dir", met_dir,
+        "--out-dir", lbc_dir, "--start-time", _start_stamp(start),
+        "--stop-time", _start_stamp(start, hours),
+        "--nfglevels", levels, *LBC_SWITCHES]))
+    forcing = (f"WRF parent {wrfout_glob}" if wrfout_glob is not None
+               else f"{source} cycle {start}")
+    chain.append(("forecast", [
+        "hex", "forecast", "--mesh", cull_row, "--grid", cull_grid,
+        "--static", cull_static, "--init", cull_init,
+        "--init-source", forcing, "--lbc-dir", lbc_dir,
+        "--start-time", _start_stamp(start), "--hours", repr(float(hours)),
+        "--out", f"{run}/forecast", "--experimental-dt",
+        "--les-model", FORECAST_LES_MODEL, "--pbl", FORECAST_PBL,
+        "--history-preset", FORECAST_HISTORY_PRESET]))
+    return chain
+
+
+#: stage -> the features (flags or commands) it needs that the hex campaign
+#: adds, each with the unit that owns it.  A stage absent here, or a need
+#: with ``unit: None``, uses only what predates the campaign.
+STAGE_REQUIREMENTS: dict[str, tuple[dict[str, Any], ...]] = {
+    "density": ({"feature": "woof hex density --sites", "unit": 8,
+                 "what": "density raster (woof-hex.density.v1)"},),
+    "mesh": ({"feature": "woof mesh --density-raster", "unit": 7,
+              "what": "density-raster mesh spec", "density": "raster"},
+             {"feature": "woof mesh --regional-window", "unit": 9,
+              "what": "regional generation window"}),
+    "static-highres": ({"feature": "woof hex static-highres", "unit": 13,
+                        "what": "GLO-30 terrain / CGLC land cover statics"},),
+    "register-parent": ({"feature": "woof hex register", "unit": 10,
+                         "what": "runtime mesh row for an authored mesh"},),
+    "vertical": ({"feature": "woof hex vertical", "unit": 10,
+                  "what": "native-free vertical artifact on the parent"},),
+    "cull": ({"feature": "woof hex cull --parent-vertical", "unit": 10,
+              "what": "culled vertical artifact"},),
+    "register-cull": ({"feature": "woof hex register --parent-row "
+                                  "--cull-receipt", "unit": 10,
+                       "what": "runtime mesh row for the cut"},),
+    "intermediate": ({"feature": "woof hex intermediate --source "
+                                 "gfs|ecmwf-open-data|gdas|era5|aifs",
+                      "unit": 11, "what": "global-source WPS intermediates",
+                      "forcing": "global"},
+                     {"feature": "woof hex intermediate --source wrfout "
+                                 "--wrfout-glob", "unit": 12,
+                      "what": "WRF-parent WPS intermediates",
+                      "forcing": "wrfout"},
+                     {"feature": "woof hex intermediate --hours 0-N on a "
+                                 "3 h or 6 h lead ladder", "unit": 11,
+                      "what": "boundary times from a source that is not "
+                              "hourly", "cadence": "coarse"}),
+    "forecast": ({"feature": "woof hex forecast --experimental-dt", "unit": 1,
+                  "what": "experimental sub-5 s timestep lane"},
+                 {"feature": "woof hex forecast --les-model", "unit": 6,
+                  "what": "MPAS v8.4.1 LES closure"},
+                 {"feature": "woof hex forecast --pbl off", "unit": 5,
+                  "what": "PBL scheme off (and level-aware device admission)"},
+                 {"feature": "woof hex forecast --history-preset", "unit": 16,
+                  "what": "hex history preset"}),
+}
+
+
+def _parse_error(argv: Sequence[str],
+                 parsers: dict[str, Any] | None = None) -> str | None:
+    """None when this build's real parser accepts ``woof argv``, else why.
+
+    ``parsers`` caches the two parsers across one plan's commands (building
+    ``woof``'s top-level parser is the slow part).
+    """
+
+    import contextlib
+    import io
+
+    parsers = {} if parsers is None else parsers
+    stream = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(stream), \
+                contextlib.redirect_stdout(io.StringIO()):
+            if argv[0] == "hex":
+                if "hex" not in parsers:
+                    from woof.hex.cli import build_parser as hex_parser
+
+                    parsers["hex"] = hex_parser()
+                parsers["hex"].parse_args(list(argv[1:]))
+            else:
+                if "woof" not in parsers:
+                    from woof.cli import build_parser
+
+                    parsers["woof"] = build_parser()
+                parsers["woof"].parse_args(list(argv))
+    except SystemExit:
+        lines = [line for line in stream.getvalue().splitlines()
+                 if line.strip()]
+        if not lines:
+            return "the parser refused it"
+        # "invalid choice: 'x' (choose from <every command>)" -> the verdict
+        return lines[-1].split(" (choose from")[0]
+    except Exception as error:      # noqa: BLE001 - a broken door is a miss
+        return f"{type(error).__name__}: {error}"
+    return None
+
+
+def _intermediate_refusal(argv: Sequence[str]) -> str | None:
+    """Why this build's intermediate door would refuse the argv's source.
+
+    The door's parser takes any ``--source`` string and refuses an unknown
+    row only at run time, after the mesh, statics and cut are built; asking
+    its row table here moves that refusal to plan time.  A build whose door
+    has no such table is not second-guessed.
+    """
+
+    try:
+        from woof.hex.hrrr_intermediate import source_row
+    except ImportError:
+        return None
+    try:
+        source_row(_flag_value(argv, "--source"))
+    except MpasPortError as error:
+        return f"woof hex intermediate refuses it at run time: {error}"
+    except Exception:                       # noqa: BLE001 - not our call
+        return None
+    return None
+
+
+def _flag_value(argv: Sequence[str], flag: str) -> str:
+    return str(argv[list(argv).index(flag) + 1])
+
+
+def chain_requirements(chain: Sequence[tuple[str, list[str]]], *,
+                       density: str, forcing: str,
+                       cadence: str = "hourly") -> list[dict[str, Any]]:
+    """One row per command: what it needs, and whether this build has it.
+
+    ``available_in_this_build`` is the real parser's verdict on the argv
+    (``why_not`` says what it refused), plus, for the intermediate, the
+    door's own source table (:func:`_intermediate_refusal`).  That is
+    necessary, not sufficient -- a door can accept a flag it then refuses at
+    run time -- so the needs list is the contract and the verdict the
+    evidence for this install.
+    """
+
+    rows = []
+    parsers: dict[str, Any] = {}
+    for index, (stage, argv) in enumerate(chain):
+        needs = [
+            {key: value for key, value in need.items()
+             if key not in ("density", "forcing", "cadence")}
+            for need in STAGE_REQUIREMENTS.get(stage, ())
+            if need.get("density", density) == density
+            and need.get("forcing", forcing) == forcing
+            and need.get("cadence", cadence) == cadence]
+        error = _parse_error(argv, parsers)
+        if error is None and stage == "intermediate":
+            error = _intermediate_refusal(argv)
+        rows.append({"command": index, "stage": stage,
+                     "argv_head": " ".join(argv[:2]), "needs": needs,
+                     "available_in_this_build": error is None,
+                     "why_not": error})
+    return rows
+
+
+# --------------------------------------------------------------------------
 # the generator, when staged
 
 
@@ -1114,9 +1737,17 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                start: str | None = None, hours: float = 24.0,
                source: str | None = None, card: str | None = None,
                vram_gib: float | None = None, max_domains: int | None = None,
-               nz: int | None = None) -> Plan:
+               nz: int | None = None, experimental_dt: bool = False,
+               density: str | None = None,
+               wrfout_glob: str | None = None) -> Plan:
     """Emit the domains for ``sites`` under ``outdir`` and return the plan
-    (already written to ``outdir/plan.json``)."""
+    (already written to ``outdir/plan.json``).
+
+    ``experimental_dt`` (``--hex-experimental-dt``) plans the full chain on
+    the EXPERIMENTAL sub-5 s timestep lane; ``density``
+    (``--hex-density``) and ``wrfout_glob`` (``--hex-forcing-wrfout``)
+    shape that chain and are refused without it.
+    """
 
     outdir = Path(outdir)
     if len(sites) == 0:
@@ -1126,7 +1757,15 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     if not (corridor_km > 0.0 and math.isfinite(corridor_km)):
         raise HexPlanRefusal(
             f"--corridor-km {corridor_km!r} must be a positive number")
-    if nz is not None and nz != HEX_LEVELS:
+    if not experimental_dt:
+        for flag, value in (("--hex-density", density),
+                            ("--hex-forcing-wrfout", wrfout_glob)):
+            if value is not None:
+                raise HexPlanRefusal(
+                    f"{flag} shapes the full experimental chain and is only "
+                    "read with --hex-experimental-dt; without that flag it "
+                    "would be accepted and never used")
+    if not experimental_dt and nz is not None and nz != HEX_LEVELS:
         raise HexPlanRefusal(
             f"--nz {nz} cannot be honoured by hex-swath: every hex timestep "
             f"anchor, device-admission row and vertical spec runs "
@@ -1135,7 +1774,58 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         raise HexPlanRefusal("--max-domains must allow the one hex mesh")
     start = _check_start(start) if start is not None else default_start()
 
-    floor = _check_floor(dx_m)
+    timestep: dict[str, Any] | None = None
+    vertical_doc: dict[str, Any] | None = None
+    levels: int | None = None
+    chain_source: str | None = None
+    if experimental_dt:
+        density = "raster" if density is None else density
+        if density not in DENSITY_MODES:
+            raise HexPlanRefusal(
+                f"--hex-density {density!r} is not one of "
+                f"{', '.join(DENSITY_MODES)}")
+        if wrfout_glob is not None:
+            if not str(wrfout_glob).strip():
+                raise HexPlanRefusal("--hex-forcing-wrfout needs a glob")
+            if source is not None:
+                raise HexPlanRefusal(
+                    "--source and --hex-forcing-wrfout both name the "
+                    "forcing; a WRF parent run IS the source, so give one")
+            chain_source = WRFOUT_SOURCE
+        else:
+            chain_source = CHAIN_SOURCES[0] if source is None else source
+            if chain_source not in CHAIN_SOURCES:
+                raise HexPlanRefusal(
+                    f"--source {source!r} has no hex regional met route; the "
+                    f"full chain takes {', '.join(CHAIN_SOURCES)}, or a WRF "
+                    "parent run with --hex-forcing-wrfout")
+            if chain_source == "gdas" and hours > GDAS_MAX_HOURS:
+                raise HexPlanRefusal(
+                    f"--source gdas publishes leads to f{GDAS_MAX_HOURS:03d} "
+                    f"only; --hours {hours:g} needs boundaries past that.  "
+                    "Use --source gfs")
+        floor = spacing_floor_m(dx_m)
+        if dx_m >= floor["floor_dx_m"]:
+            raise HexPlanRefusal(
+                f"--hex-experimental-dt is for spacings below the anchored "
+                f"floor (about {floor['floor_dx_m']:.0f} m); --dx-m {dx_m:g} "
+                "is served by an anchored timestep, so drop the flag rather "
+                "than run it on an unanchored one")
+        levels = LES_LEVELS if nz is None else int(nz)
+        vertical_doc = les_vertical_spec(levels)
+        timestep = experimental_timestep(dx_m)
+        steps = hours * 3600.0 / timestep["dt_seconds"]
+        if abs(steps - round(steps)) > 1e-6:
+            raise HexPlanRefusal(
+                f"--hours {hours:g} is not a whole number of "
+                f"{timestep['dt_seconds']!r} s timesteps; woof hex forecast "
+                "refuses it")
+        if wrfout_glob is not None and not Path(wrfout_glob).is_absolute():
+            # Commands run with the plan directory as cwd.
+            wrfout_glob = os.path.relpath(os.path.abspath(wrfout_glob),
+                                          outdir.resolve())
+    else:
+        floor = _check_floor(dx_m)
     bounds = _smoothness_bounds()
     background_km, rungs_km = background_km_for(dx_m, parent_dx_m)
     tolerance_km = SIMPLIFY_FRACTION * corridor_km
@@ -1155,9 +1845,10 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
             f"{corridor_km:g}km on {background_km:g}km")
     spec = mesh_spec_document(shapes, background_km, name)
     cull = estimate_cull(chains, shapes, rungs, background_km, projection,
-                         corridor_km)
+                         corridor_km,
+                         window_halos=WINDOW_HALOS if experimental_dt else None)
     parent_estimate = estimate_parent_cells(shapes, chains, background_km)
-    verdict = capacity_verdict(cull.cells, card, vram_gib)
+    verdict = capacity_verdict(cull.cells, card, vram_gib, levels=levels)
 
     # Every site must sit inside the cut, never in its boundary rings.
     sx, sy = projection.forward(arrays["lat"], arrays["lon"])
@@ -1174,12 +1865,28 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
             f"{verdict['cells_that_fit']:,} cells.  Narrow --corridor-km, "
             "coarsen --dx-m, split the sites into smaller regions and plan "
             "each, name a bigger card, or use --topology wrf-tiles (no count "
-            "limit)")
+            "limit)"
+            + ("" if levels is None else
+               f".  The cut was priced at the LES vertical's {levels} levels "
+               f"({verdict['bytes_per_cell_basis']}); a shorter corridor, "
+               "planned in pieces, is the usual fix at 50 m to 100 m"))
 
-    sizing = _generator_sizing(spec)
+    raster = experimental_dt and density == "raster"
+    # In raster mode the generator never sees this spec, so its global
+    # dry-run would gate and price a mesh nobody builds.
+    sizing = None if raster else _generator_sizing(spec)
     notes: list[str] = []
     measured_parent = None
-    if sizing is None:
+    if raster:
+        notes.append(
+            "density raster: the mesh is generated from `hex density`'s "
+            "raster, not from mesh_spec.json, so the generator's dry-run "
+            "gate was not run on it; the gradient estimate, the cut's cell "
+            "count and the --cells figure price the planner's own corridor "
+            "ladder, the raster's ramp may differ, and the forecast door "
+            "re-admits the real cut at launch.  --hex-density polygons "
+            "builds from the priced spec instead")
+    elif sizing is None:
         notes.append(
             "rw_mpas_mesh is not staged here, so the spec was not priced "
             "through the generator's --dry-run at plan time; the first "
@@ -1266,6 +1973,114 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                       "corridor_km": corridor_km,
                       "simplify_tolerance_km": tolerance_km},
     }
+    chain_notes: list[str] = []
+    if experimental_dt:
+        assert timestep is not None and vertical_doc is not None
+        assert cull.window_latlon is not None and cull.window_xy is not None
+        _write_json(vertical_doc, outdir / "vertical_spec.json")
+        _write_json({"kind": "polygon",
+                     "vertices_deg": [[round(lat, 6), round(lon, 6)]
+                                      for lat, lon in cull.window_latlon]},
+                    outdir / "regional_window.json")
+        if density == "raster":
+            dump_sites(sites, outdir / "sites.json")
+        from woof.hex.mesh_point import row_token
+
+        token = row_token((projection.lat0, projection.lon0))
+        parent_row = f"energy-{token}-{dx_m:g}m-{PARENT_STEM}"
+        cull_row = f"energy-{token}-{dx_m:g}m-{CULL_NAME}"
+        window_cells = int(math.ceil(cull.window_cells or 0.0))
+        met_radius = float(np.max(np.hypot(cull.window_xy[:, 0],
+                                           cull.window_xy[:, 1])))
+        chain = full_chain_commands(
+            dt_seconds=timestep["dt_seconds"], density=density, dx_m=dx_m,
+            background_km=background_km, window_cells=window_cells,
+            start=start, hours=hours, source=chain_source,
+            wrfout_glob=wrfout_glob,
+            centre=(projection.lat0, projection.lon0),
+            met_radius_km=met_radius, parent_row=parent_row,
+            cull_row=cull_row)
+        requires = chain_requirements(
+            chain, density=density,
+            forcing="wrfout" if wrfout_glob is not None else "global",
+            cadence=("hourly" if wrfout_glob is not None
+                     or SOURCE_CADENCE_HOURS[chain_source] == 1
+                     else "coarse"))
+        missing = [row for row in requires
+                   if not row["available_in_this_build"]]
+        estimate["window_cells"] = round(cull.window_cells or 0.0, 1)
+        estimate["window_reach_km"] = round(cull.window_km or 0.0, 3)
+        mesh.update({
+            "regional_window": "regional_window.json",
+            "vertical_spec": "vertical_spec.json",
+            "static_highres": f"{RUN_DIR}/{PARENT_STEM}.static-highres.nc",
+            "vertical": f"{RUN_DIR}/{CULL_NAME}.vertical.nc",
+            "rows": f"{RUN_DIR}/{ROWS_FILE}",
+            "parent_row": parent_row,
+            "cull_row": cull_row,
+            "density": density,
+        })
+        if density == "raster":
+            mesh["density_raster"] = f"{RUN_DIR}/density.nc"
+            mesh["sites"] = "sites.json"
+        extra.pop("blocked_stages")
+        extra.update({
+            "commands": [argv for _, argv in chain],
+            "stages": [stage for stage, _ in chain],
+            "runnable": "full",
+            "requires": requires,
+            "timestep_evidence": EXPERIMENTAL_EVIDENCE,
+            "timestep": timestep,
+            # woof hex forecast binds --mesh against $WOOF_HEX_MESH_ROWS;
+            # woof energy run exports each name as plan_dir / path.
+            "env_paths": {"WOOF_HEX_MESH_ROWS": f"{RUN_DIR}/{ROWS_FILE}"},
+            "vertical": {"spec": "vertical_spec.json",
+                         "n_vert_levels": levels,
+                         "scheme": vertical_doc["scheme"],
+                         "lowest_layer_m": round(
+                             vertical_doc["specified_interfaces_m"][1], 3),
+                         "ztop_m": vertical_doc["ztop_m"]},
+            "physics": {"les_model": FORECAST_LES_MODEL,
+                        "pbl": FORECAST_PBL,
+                        "history_preset": FORECAST_HISTORY_PRESET},
+            "forcing": ({"source": WRFOUT_SOURCE, "wrfout_glob": wrfout_glob}
+                        if wrfout_glob is not None
+                        else {"source": chain_source}),
+        })
+        chain_notes = [
+            f"EXPERIMENTAL ({EXPERIMENTAL_EVIDENCE}): dt "
+            f"{timestep['dt_seconds']!r} s ({timestep['radiation_steps']} "
+            f"steps per {timestep['radiation_cadence_seconds']:g} s radiation "
+            f"call) from the Courant limit {timestep['courant_limit_seconds']:.4g}"
+            f" s on min dcEdge {timestep['min_dc_edge_m']:.1f} m; no "
+            "ADMITTED_TIMESTEPS anchor backs it, and the forecast receipt and "
+            "history carry timestep_evidence="
+            f"{EXPERIMENTAL_EVIDENCE}.  Real anchors await a passing mint and "
+            "a user ruling",
+            f"full chain: {len(chain)} commands ({' > '.join(s for s, _ in chain)}); "
+            f"density {density}; LES {FORECAST_LES_MODEL} with --pbl "
+            f"{FORECAST_PBL} on a {levels}-level specified vertical "
+            f"(lowest layer {vertical_doc['specified_interfaces_m'][1]:.0f} m); "
+            "forcing " + (f"WRF parent {wrfout_glob}" if wrfout_glob is not None
+                          else chain_source),
+            f"regional window: the cut buffered {cull.window_km:.1f} km "
+            f"({WINDOW_HALOS:g} boundary halos past it), about "
+            f"{cull.window_cells:,.0f} cells; passed to woof mesh as --cells",
+            "init/lbc --nfglevels is the source's declared ceiling "
+            f"({FIRST_GUESS_LEVELS[WRFOUT_SOURCE if wrfout_glob else chain_source]}); "
+            "the intermediate receipt prints the exact count",
+        ]
+        if missing:
+            chain_notes.append(
+                f"this build parses {len(requires) - len(missing)} of "
+                f"{len(requires)} chain commands; a run stops at command "
+                f"{missing[0]['command']} ({missing[0]['argv_head']}).  "
+                "Missing: " + "; ".join(
+                    f"{row['argv_head']} needs "
+                    + (", ".join(f"{n['feature']} (unit {n['unit']}, "
+                                 f"{n['what']})" for n in row["needs"])
+                       or "nothing new")
+                    + f" [{row['why_not']}]" for row in missing))
     domain = PlanDomain(
         domain_id="hex",
         topology=TOPOLOGY,
@@ -1306,14 +2121,26 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         *verdict["notes"],
         *cull.notes,
         *notes,
-        "runnable today: mesh-and-cull.  " + "; ".join(
-            f"{row['stage']}: {row['blocked_by']}" for row in BLOCKED_STAGES),
     ]
-    if source is not None:
-        notes.append(f"--source {source} is recorded; the hex regional met "
-                     "stage that would consume it is blocked (see above)")
+    if experimental_dt:
+        notes[1] = (
+            f"spacing floor lifted by --hex-experimental-dt: the anchored "
+            f"route admits >= {floor['floor_dx_m']:.0f} m (smallest anchored "
+            f"dt {floor['smallest_anchored_dt_s']:g} s); this plan runs "
+            f"{dx_m:g} m on an unanchored dt")
+        notes[0:0] = chain_notes[:1]
+        notes.extend(chain_notes[1:])
+    else:
+        notes.append("runnable today: mesh-and-cull.  " + "; ".join(
+            f"{row['stage']}: {row['blocked_by']}" for row in BLOCKED_STAGES))
+        if source is not None:
+            notes.append(f"--source {source} is recorded; the hex regional "
+                         "met stage that would consume it is blocked (see "
+                         "above)")
     plan = Plan(topology=TOPOLOGY, dx_m=dx_m, start=start, hours=hours,
-                domains=[domain], source=source, notes=notes)
+                domains=[domain],
+                source=chain_source if experimental_dt else source,
+                notes=notes)
     dump_plan(plan, outdir / "plan.json")
     return plan
 
@@ -1329,13 +2156,17 @@ def main(args) -> int:
             corridor_km=args.corridor_km, parent_dx_m=args.parent_dx_m,
             start=args.start, hours=args.hours, source=args.source,
             card=args.card, vram_gib=args.vram_gib,
-            max_domains=args.max_domains, nz=args.nz)
+            max_domains=args.max_domains, nz=args.nz,
+            experimental_dt=bool(getattr(args, "hex_experimental_dt", False)),
+            density=getattr(args, "hex_density", None),
+            wrfout_glob=getattr(args, "hex_forcing_wrfout", None))
         plan.sites_ref = file_ref(args.sites, relative_to=outdir)
         dump_plan(plan, outdir / "plan.json")
     except (HexPlanRefusal, MpasPortError, ContractError, OSError) as error:
         print(f"woof energy plan: REFUSED: {error}", file=sys.stderr)
         return 2
     domain = plan.domains[0]
+    extra = domain.extra
     record = {
         "schema": "woof-energy.plan.v1",
         "plan": str(outdir / "plan.json"),
@@ -1350,12 +2181,25 @@ def main(args) -> int:
         "commands": len(domain.extra["commands"]),
         "notes": plan.notes,
     }
+    if "timestep" in extra:
+        record["timestep_evidence"] = extra["timestep_evidence"]
+        record["dt_seconds"] = extra["timestep"]["dt_seconds"]
+        record["window_cells"] = extra["estimate"]["window_cells"]
+        record["capacity"]["levels"] = extra["capacity"].get("levels")
+        record["commands_missing_in_this_build"] = [
+            {"command": row["command"], "argv_head": row["argv_head"],
+             "needs": [f"{n['feature']} (unit {n['unit']})"
+                       for n in row["needs"]]}
+            for row in extra["requires"]
+            if not row["available_in_this_build"]]
     print(json.dumps(record, indent=2, default=str))
     return 0
 
 
 __all__ = [
     "TOPOLOGY", "RUN_DIR", "OUTPUT_GLOB", "HexPlanRefusal", "background_km_for",
-    "build_plan", "capacity_verdict", "hex_commands", "ladder", "main",
+    "build_plan", "capacity_verdict", "chain_requirements",
+    "experimental_timestep", "full_chain_commands", "hex_commands", "ladder",
+    "les_vertical_spec", "main",
     "spacing_at_distance", "spacing_floor_m", "steepest_gradient_percent",
 ]
