@@ -575,6 +575,7 @@ mod tests {
         // generators inside the refined cap against the count a uniform seed
         // would put there -- a count, not a fit.
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 120.0,
             regions: vec![Region {
                 shape: Shape::Cap {
@@ -759,6 +760,7 @@ mod tests {
             (
                 "cap 4x 1200",
                 MeshSpec {
+                    rasters: Vec::new(),
                     background_km: 600.0,
                     regions: vec![Region {
                         shape: Shape::Cap {

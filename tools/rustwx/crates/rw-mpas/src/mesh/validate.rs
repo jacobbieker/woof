@@ -1185,6 +1185,7 @@ pub fn displacement(a: V3, b: V3) -> V3 {
         // merits: the graded ladder's own two-level fixture reads heptagons
         // and passes.
         let graded = crate::mesh::density::MeshSpec {
+            rasters: Vec::new(),
             background_km: 480.0,
             regions: vec![crate::mesh::density::Region {
                 shape: crate::mesh::density::Shape::Cap {
@@ -1376,6 +1377,7 @@ mod area_decomposition_tests {
     /// one mesh carries both ends of the argument.
     fn graded_fixture() -> MpasMesh {
         let spec = MeshSpec {
+            rasters: Vec::new(),
             background_km: 480.0,
             regions: vec![Region {
                 shape: Shape::Cap {

@@ -23,6 +23,7 @@ pub mod icosa;
 pub mod ladder_snap;
 pub mod lloyd;
 pub mod profile;
+pub mod raster;
 pub mod surgery;
 pub mod validate;
 
@@ -30,6 +31,7 @@ use serde::Serialize;
 
 use crate::error::{MpasError, MpasResult};
 pub use density::{MeshSpec, Region, Shape, TransitionField};
+pub use raster::{RasterRegion, RasterReport};
 pub use footprint::{CARDS, Card};
 pub use derive::{MpasMesh, Rings};
 pub use geom::V3;
@@ -232,6 +234,14 @@ pub struct Receipt {
     /// reconciled, exactly as `Seeding`'s cell-count snap is; see
     /// [`ladder_snap`] for what an unsnapped request silently delivered.
     pub ladder_snap: LadderSnap,
+    /// What each density raster delivered: its digest, the ladder rung its
+    /// finest value was snapped to, what the slope limiter moved, and the
+    /// certified slope and edge step it was gated on. OMITTED when the spec
+    /// has no raster, for the reason `triangulation` is: this receipt is
+    /// stamped into the grid file, and a field that always appeared would
+    /// move the bytes of every registered mesh.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub raster_regions: Vec<raster::RasterReport>,
     pub mesh: MeshReport,
     pub deliverable_boundary: String,
 }
@@ -362,6 +372,15 @@ pub fn generate(
         spec: spec_on_ladder,
         ..request.clone()
     };
+    // The raster gates, on the SNAPPED spec -- the one that will be built.
+    // Before sizing, because a refused raster should cost milliseconds and
+    // not a relaxation.
+    let raster_regions = request.spec.check_rasters()?;
+    if request.fit_spacing && !request.spec.rasters.is_empty() {
+        // `fitted_to` refuses this too; refused here first so the refusal
+        // names the request and not an intermediate.
+        request.spec.fitted_to(12, 1)?;
+    }
 
     // --- how many cells, and at what spacings -------------------------------
     let predicted_from_spec = request.spec.predicted_cells(request.sizing_samples);
@@ -390,8 +409,13 @@ pub fn generate(
     let predicted = spec.predicted_cells(request.sizing_samples);
     if !request.fit_spacing && matches!(sizing, Sizing::DeviceBudget) && predicted > target as f64 * 1.02 {
         return Err(MpasError::Refusal(format!(
-            "the requested spacings need about {predicted:.0} cells but the device budget holds {target}. Generating {target} cells at these spacings would deliver a mesh {:.2}x coarser than asked for everywhere without saying so. Pass --fit-spacing to rescale every spacing by one factor and keep the ratios between them, or raise the budget",
-            (predicted / target as f64).sqrt()
+            "the requested spacings need about {predicted:.0} cells but the device budget holds {target}. Generating {target} cells at these spacings would deliver a mesh {:.2}x coarser than asked for everywhere without saying so. {}",
+            (predicted / target as f64).sqrt(),
+            if spec.rasters.is_empty() {
+                "Pass --fit-spacing to rescale every spacing by one factor and keep the ratios between them, or raise the budget"
+            } else {
+                "--fit-spacing cannot rescale a density raster, so raise the budget, coarsen the background, or rebuild the raster at a spacing that fits"
+            }
         )));
     }
     progress(&format!(
@@ -433,7 +457,7 @@ pub fn generate(
         ));
     }
 
-    let uniform = spec.regions.is_empty();
+    let uniform = spec.is_uniform();
     let (points, outcome, seeding, graded_levels) = if uniform {
         let ceiling = matches!(sizing, Sizing::DeviceBudget);
         let choice = icosa::snap_cells(target, ceiling)?;
@@ -582,6 +606,7 @@ pub fn generate(
         },
         graded_levels,
         ladder_snap,
+        raster_regions,
         mesh: report,
         deliverable_boundary:
             "grid file only; running this mesh also needs a matching static file (terrain, land use, soil, nVertLevels=55, nSoilLevels=4, FP32-bit-exact nominalMinDc)"
@@ -611,6 +636,9 @@ pub fn generate(
 pub fn provenance_json<T: Serialize>(receipt: &T) -> Result<String, serde_json::Error> {
     let mut value = serde_json::to_value(receipt)?;
     strip_durations(&mut value);
+    // A density raster's PATH is where it sat, not what it is; its sha256
+    // stays. A receipt with no raster row has nothing here to strip.
+    density::strip_raster_paths(&mut value);
     serde_json::to_string(&value)
 }
 

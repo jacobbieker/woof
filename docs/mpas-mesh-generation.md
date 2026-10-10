@@ -170,6 +170,39 @@ directly and also reaches polygon regions and cell-counted ramps.
 A southern-hemisphere centre starts with a minus sign, which argparse
 reads as another option. Spell those attached: `--refine=-33,151,600,10`.
 
+## Refining where a field says to: `--density-raster`
+
+    woof mesh --out corridor.grid.nc --background-km 25.6 \
+      --density-raster corridor.density.nc --cells 1200000 --dry-run
+
+A density raster is a spacing FIELD rather than a shape: CF netCDF with
+schema `woof-hex.density.v1`, `spacing_km` (float64) on ascending 1-D
+`lat`/`lon` (they need not be evenly spaced), and a `min_spacing_km`
+attribute that matches the data. In a spec it is the row
+`{"shape": "raster", "path": "corridor.density.nc"}`; a relative path is
+read against the spec's own directory.
+
+Inside its extent the raster is bilinear between its nodes; outside it
+the rest of the spec stands; where they overlap the finer one wins. The
+generator then does three things to it, in order, and the dry-run record
+(`raster_regions`) reports each one:
+
+* clamps it at the background, which it cannot beat anyway;
+* snaps its finest value onto the power-of-two ladder, finer never
+  coarser, by the affine map that sends the finest node to the rung and
+  leaves the background where it was;
+* limits its slope to this door's smoothness bound, lowering nodes on the
+  coarse side of anything steeper (finer, never coarser). The limited
+  slope is then certified per cell and folded into the steepest-gradient
+  reading. `--density-raster-no-limit` refuses a steeper raster instead.
+
+A raster whose edge is finer than the field just outside it is refused:
+the limiter only lowers, so it cannot close a step at the raster's own
+boundary. Build the raster wide enough for its grading to reach the
+background first. The generator's own `rw_mpas_mesh --fit-spacing`
+rescale is refused with a raster, because rescaling its kilometres would
+rescale its slope with them.
+
 ## Two refusals, and why each one exists
 
 **It does not fit the named card.** The cell count the request implies
