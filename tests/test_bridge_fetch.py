@@ -694,6 +694,7 @@ def test_artifact_filenames_agree_with_the_resolvers_on_this_host():
         library_names as obsregrid_names)
     from woof.obs_score_bridge import library_names as obsscore_names
     from woof.isobaric_bridge import library_names as isobaric_names
+    from woof.energy.sample_bridge import library_names as sitesample_names
 
     # One expected filename per library, from the resolver that actually
     # searches for it: libraries with one shared expectation would
@@ -704,7 +705,8 @@ def test_artifact_filenames_agree_with_the_resolvers_on_this_host():
                  "static_fields": static_names()[0],
                  "obs_regrid": obsregrid_names()[0],
                  "obs_score": obsscore_names()[0],
-                 "rw_isobaric": isobaric_names()[0]}
+                 "rw_isobaric": isobaric_names()[0],
+                 "rw_sitesample": sitesample_names()[0]}
     for artifact in bridge_assets.BUNDLED_ARTIFACTS:
         produced = bridge_assets.artifact_filename(artifact, host)
         if artifact.kind == "library":

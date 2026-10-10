@@ -38,6 +38,7 @@ members = [
     "crates/rw-obs",
     "crates/rw-sat",
     "crates/rw-simradar",
+    "crates/rw-sitesample",
     "crates/rw-goes",
     "crates/rw-store",
     "crates/rw-wrfbatch",

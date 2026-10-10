@@ -227,6 +227,12 @@ BRIDGE_ABI_MARKERS = {
     # Spelled to match woof.isobaric_bridge.ABI_MARKER; a test binds the
     # two.
     "rw_isobaric": b"gpuwm_isobaric_heights",
+    # The wrfout site sampler cdylib (tools/rustwx/crates/rw-sitesample)
+    # behind `woof energy extract`.  A library, so the literal is an
+    # exported symbol name: the earth-relative wind profile is the call
+    # every energy forecast makes.  Spelled to match
+    # woof.energy.sample_bridge.ABI_MARKER; a test binds the two.
+    "rw_sitesample": b"gpuwm_sitesample_wind_profile",
     # The MPAS mesh generator behind `woof mesh`.  The marker is its
     # ARGUMENT VECTOR, spelled out, because that is the literal which
     # changes exactly when the request contract changes: a binary built
