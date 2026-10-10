@@ -120,6 +120,22 @@ def test_an_output_that_names_an_input_is_refused(tmp_path: Path) -> None:
         remap_door.build_argv(arguments, Path("/bin/true"))
 
 
+def test_an_output_reached_through_dot_dot_is_still_the_input(tmp_path: Path) -> None:
+    arguments = _args(tmp_path, "--clobber")
+    (tmp_path / "run").mkdir()
+    arguments.out = tmp_path / "run" / ".." / "A.init.nc"
+    with pytest.raises(RemapDoorRefusal, match="never overwrites"):
+        remap_door.build_argv(arguments, Path("/bin/true"))
+
+
+@pytest.mark.parametrize("which", ["out", "from_state"])
+def test_a_receipt_that_names_a_state_file_is_refused(tmp_path: Path, which: str) -> None:
+    arguments = _args(tmp_path)
+    arguments.receipt = getattr(arguments, which)
+    with pytest.raises(RemapDoorRefusal, match="--receipt"):
+        remap_door.build_argv(arguments, Path("/bin/true"))
+
+
 def test_an_existing_output_needs_clobber(tmp_path: Path) -> None:
     arguments = _args(tmp_path)
     Path(arguments.out).write_bytes(b"old")

@@ -310,6 +310,9 @@ pub struct RemapReceipt {
     pub budgets: Budgets,
     pub variables: Vec<VariableReport>,
     pub absent_in_source_written_as_zero: Vec<String>,
+    /// Derived slots the remap could not compute (no target metric, no
+    /// target land mask) and so carried from the template unchanged.
+    pub derived_slots_carried_from_template: Vec<String>,
     pub source_variables_not_remapped: Vec<String>,
     pub soil_mask: String,
     pub soil_cells_mask_fallback: usize,
@@ -411,7 +414,6 @@ pub fn remap_columns(
         h_vap: f64,
         c_mass: f64,
         below: f64,
-        above: f64,
         iters: u32,
         cap: bool,
         rebalance: f64,
@@ -419,6 +421,38 @@ pub fn remap_columns(
     }
 
     let zs = |c: usize, k: usize| src.zgrid[c * (ns + 1) + k] as f64;
+
+    // Above-top refusal first, from the tops alone: it needs no column pass.
+    let above: Vec<f64> = (0..n_tgt)
+        .into_par_iter()
+        .map(|j| {
+            let top: f64 = ops
+                .weights(j)
+                .map(|w| w.iter().map(|&(i, wi)| wi * zs(i, ns)).sum())
+                .unwrap_or(f64::INFINITY);
+            (tgt_zgrid[j * (nt + 1) + nt] as f64 - top).max(0.0)
+        })
+        .collect();
+    let (worst_above, worst_cell) = above
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(j, a)| (a, j))
+        .fold((0.0f64, 0usize), |a, b| if b.0 > a.0 { b } else { a });
+    if worst_above > TOP_TOLERANCE_M {
+        let n_above = above.iter().filter(|&&a| a > TOP_TOLERANCE_M).count();
+        return Err(MpasError::Refusal(format!(
+            "{n_above} target column(s) reach above the source's model top; the worst is target \
+             cell {} by {worst_above:.1} m.  Above the source's top there is no source \
+             atmosphere, so those layers would be invented by extension.  Give the target a \
+             model top at or below the source's",
+            worst_cell + 1
+        )));
+    }
+
+    // The scalar slices, resolved once.
+    let scalar_fields: Vec<&[f32]> = scalars.iter().map(|(n, _)| src.cell3[n].as_slice()).collect();
+
     let results: Vec<MpasResult<Out>> = (0..n_tgt)
         .into_par_iter()
         .map(|j| {
@@ -448,8 +482,8 @@ pub fn remap_columns(
                     let dz = zs(i, k + 1) - zs(i, k);
                     let mi = rho[i * ns + k] as f64 * dz;
                     m[k] += wi * mi;
-                    for (s, (name, _)) in scalars.iter().enumerate() {
-                        acc[s][k] += wi * mi * src.cell3[name][i * ns + k] as f64;
+                    for s in 0..scalars.len() {
+                        acc[s][k] += wi * mi * scalar_fields[s][i * ns + k] as f64;
                     }
                     if let (Some(mom), Some(v)) = (mom.as_mut(), src_vec.as_ref()) {
                         let vv = v[i * ns + k];
@@ -586,6 +620,17 @@ pub fn remap_columns(
                     pw = (0..nt).map(|k| rho_t[k] * svals_t[qi][k] * dzt[k]).sum::<f64>() as f32;
                 }
             }
+            if balance == Balance::Carry {
+                if let (Some(ti), Some(qi)) = (theta_index, qv_index) {
+                    // The lowest layer's pressure by the equation of state,
+                    // carried hydrostatically down half a layer to the surface
+                    // of the TARGET's terrain.
+                    let p1 = column::pressure_from_state(rho_t[0], svals_t[ti][0], svals_t[qi][0], factor);
+                    let half = 0.5 * dzt[0];
+                    let g = crate::init::dynamics::constants::GRAVITY as f64;
+                    sp = (p1 + g * rho_t[0] * (1.0 + svals_t[qi][0]) * half) as f32;
+                }
+            }
 
             Ok(Out {
                 rho: out_rho,
@@ -601,7 +646,6 @@ pub fn remap_columns(
                 h_vap,
                 c_mass,
                 below: ext.below_m,
-                above: ext.above_m,
                 iters,
                 cap,
                 rebalance: reb,
@@ -613,23 +657,6 @@ pub fn remap_columns(
     let mut outs = Vec::with_capacity(n_tgt);
     for r in results {
         outs.push(r?);
-    }
-
-    // Above-top refusal, with the worst column named.
-    let (worst_above, worst_cell) = outs
-        .iter()
-        .enumerate()
-        .map(|(j, o)| (o.above, j))
-        .fold((0.0f64, 0usize), |a, b| if b.0 > a.0 { b } else { a });
-    if worst_above > TOP_TOLERANCE_M {
-        let n_above = outs.iter().filter(|o| o.above > TOP_TOLERANCE_M).count();
-        return Err(MpasError::Refusal(format!(
-            "{n_above} target column(s) reach above the source's model top; the worst is target \
-             cell {} by {worst_above:.1} m.  Above the source's top there is no source \
-             atmosphere, so those layers would be invented by extension.  Give the target a \
-             model top at or below the source's",
-            worst_cell + 1
-        )));
     }
 
     let mut state = State {
@@ -673,9 +700,9 @@ pub fn remap_columns(
         derived3.insert("rho_base".to_string(), outs.iter().flat_map(|o| o.rho_base.iter().copied()).collect());
         derived3.insert("theta_base".to_string(), outs.iter().flat_map(|o| o.theta_base.iter().copied()).collect());
         derived2.insert("precipw".to_string(), outs.iter().map(|o| o.pw).collect());
-        if balance == Balance::Hydrostatic {
-            derived2.insert("surface_pressure".to_string(), outs.iter().map(|o| o.sp).collect());
-        }
+    }
+    if theta_index.is_some() && qv_index.is_some() && (metrics.is_some() || balance == Balance::Carry) {
+        derived2.insert("surface_pressure".to_string(), outs.iter().map(|o| o.sp).collect());
     }
 
     let mut spread: BTreeMap<String, (f64, f64)> = BTreeMap::new();
@@ -705,7 +732,7 @@ pub fn remap_columns(
         target_levels: nt,
         columns_extended_below: outs.iter().filter(|o| o.below > 0.0).count(),
         max_metres_below_source_column: outs.iter().map(|o| o.below).fold(0.0, f64::max),
-        columns_extended_above: outs.iter().filter(|o| o.above > 0.0).count(),
+        columns_extended_above: above.iter().filter(|&&a| a > 0.0).count(),
         max_metres_above_source_top: worst_above,
         balance: match balance {
             Balance::Hydrostatic => "hydrostatic".to_string(),
@@ -876,16 +903,22 @@ pub fn coverage_report(source: &RemapMesh, target: &RemapMesh, ops: &Operators, 
     let with_poly: Vec<usize> = (0..target.n_cells).filter(|&j| target.polygons[j].is_some()).collect();
     let mut worst: Vec<(f64, usize)> = with_poly.iter().map(|&j| (ov.coverage[j], j)).collect();
     worst.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let min_coverage = worst.first().map(|w| w.0).unwrap_or(f64::NAN);
     let mean_coverage = if with_poly.is_empty() {
         f64::NAN
     } else {
-        worst.iter().map(|w| w.0).sum::<f64>() / with_poly.len() as f64
+        with_poly.iter().map(|&j| ov.coverage[j]).sum::<f64>() / with_poly.len() as f64
     };
-    let fallback_unplaced = (0..target.n_cells)
-        .filter(|&j| target.polygons[j].is_none() && ops.cell_bary[j].is_none())
-        .count();
-    let below = worst.iter().filter(|w| !(w.0 >= min_required)).count() + fallback_unplaced;
+    // A polygon-less target cell is placed by the barycentric operator; one
+    // the operator can only place in its skirt (a copy of the nearest source
+    // cell, past the source's triangles) is extrapolation, and counts as
+    // uncovered with coverage 0.
+    for j in 0..target.n_cells {
+        if target.polygons[j].is_none() && ops.cell_bary[j].map(|op| op.skirt).unwrap_or(true) {
+            worst.push((0.0, j));
+        }
+    }
+    worst.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let below = worst.iter().filter(|w| !(w.0 >= min_required)).count();
     let covered_area: f64 = ov.source_covered.iter().sum();
     let src_area: f64 = source.polygon_area.iter().sum();
     CoverageReport {
@@ -893,7 +926,7 @@ pub fn coverage_report(source: &RemapMesh, target: &RemapMesh, ops: &Operators, 
         target_cells: target.n_cells,
         target_cells_with_polygon: with_poly.len(),
         target_cells_barycentric_fallback: target.n_cells - with_poly.len(),
-        min_coverage,
+        min_coverage: worst.first().map(|w| w.0).unwrap_or(f64::NAN),
         mean_coverage,
         cells_below_required: below,
         worst: worst
@@ -904,7 +937,7 @@ pub fn coverage_report(source: &RemapMesh, target: &RemapMesh, ops: &Operators, 
                 cell: j + 1,
                 lat_deg: target.cell_lat[j].to_degrees(),
                 lon_deg: target.cell_lon[j].to_degrees(),
-                coverage: c,
+                coverage: c + 0.0,
             })
             .collect(),
         source_cells: source.n_cells,
@@ -1113,7 +1146,30 @@ pub fn run(cfg: &RemapConfig) -> MpasResult<RemapReceipt> {
             cfg.min_coverage
         )));
     }
-    if cfg.out == cfg.from_state || cfg.out == template || Some(&cfg.out) == cfg.to_static.as_ref() {
+    let canonical = |p: &Path| -> PathBuf {
+        if let Ok(c) = std::fs::canonicalize(p) {
+            return c;
+        }
+        match (p.parent(), p.file_name()) {
+            (Some(dir), Some(name)) => {
+                let dir = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
+                std::fs::canonicalize(dir).map(|d| d.join(name)).unwrap_or_else(|_| p.to_path_buf())
+            }
+            _ => p.to_path_buf(),
+        }
+    };
+    let out_c = canonical(&cfg.out);
+    let inputs: Vec<&PathBuf> = [
+        Some(&cfg.from_grid),
+        Some(&cfg.from_state),
+        Some(&cfg.to_grid),
+        cfg.to_static.as_ref(),
+        cfg.to_vertical.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if inputs.iter().any(|p| canonical(p) == out_c) {
         return Err(MpasError::Refusal(
             "the output path names one of the inputs; the remap never overwrites its own source \
              or template"
@@ -1382,6 +1438,7 @@ pub fn run(cfg: &RemapConfig) -> MpasResult<RemapReceipt> {
     let mut computed: BTreeMap<String, emit::Computed> = BTreeMap::new();
     let mut absent: Vec<String> = Vec::new();
     let mut fallbacks = 0usize;
+    let mut derived_carried: Vec<String> = Vec::new();
     for v in tfile.file.variables()? {
         let name = v.name().to_string();
         let Some(method) = method_for(&name) else { continue };
@@ -1438,6 +1495,25 @@ pub fn run(cfg: &RemapConfig) -> MpasResult<RemapReceipt> {
                     let t = remap_surface(&ops, target.n_cells, &vals, 1, Method::Barycentric, None, None, &mut fallbacks)?;
                     report_surface(&mut variables, &name, Method::Barycentric, &vals, &t);
                     computed.insert(name, floats(t));
+                } else if name == "precipw" {
+                    // No metric to rebalance with: integrate the remapped
+                    // column directly.
+                    let st = &cols.state;
+                    let (rho, qv) = (&st.cell3["rho"], &st.cell3["qv"]);
+                    let pw: Vec<f32> = (0..target.n_cells)
+                        .map(|c| {
+                            (0..nt)
+                                .map(|k| {
+                                    let dz = (st.zgrid[c * (nt + 1) + k + 1] - st.zgrid[c * (nt + 1) + k]) as f64;
+                                    rho[c * nt + k] as f64 * qv[c * nt + k] as f64 * dz
+                                })
+                                .sum::<f64>() as f32
+                        })
+                        .collect();
+                    computed.insert(name, floats(pw));
+                }
+                if !computed.contains_key(v.name()) {
+                    derived_carried.push(v.name().to_string());
                 }
             }
             Method::AreaConservative | Method::MaskedConservative | Method::Barycentric | Method::Dominant => {
@@ -1476,6 +1552,7 @@ pub fn run(cfg: &RemapConfig) -> MpasResult<RemapReceipt> {
         }
     }
     receipt.soil_cells_mask_fallback = fallbacks;
+    receipt.derived_slots_carried_from_template = derived_carried;
     receipt.absent_in_source_written_as_zero = absent;
     receipt.variables = variables;
 
@@ -1490,7 +1567,8 @@ pub fn run(cfg: &RemapConfig) -> MpasResult<RemapReceipt> {
             let Some(text) = read_text(&cfg.from_state, &name).or_else(|| read_text(&cfg.from_state, "xtime"))
             else {
                 return Err(MpasError::Refusal(format!(
-                    "the target template declares the label {name} and the source state carries                      no valid time to fill it with; an identity label is never invented"
+                    "the target template declares the label {name} and the source state carries \
+                     no valid time to fill it with; an identity label is never invented"
                 )));
             };
             text

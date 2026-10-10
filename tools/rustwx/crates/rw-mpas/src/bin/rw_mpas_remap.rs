@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use rw_mpas::init::dynamics::VirtualFactor;
-use rw_mpas::remap::{run, Balance, RemapConfig, DEFAULT_MIN_COVERAGE};
+use rw_mpas::remap::{run, Balance, RemapConfig, RemapReceipt, DEFAULT_MIN_COVERAGE};
 
 /// `GPUWM_BRIDGE_SOURCE_REV=<40-hex commit>`: see `rw_mpas_init` for why the
 /// stamp exists and how the release cut reads it.
@@ -122,7 +122,28 @@ fn run_cli() -> Result<String, (String, Option<String>)> {
                 .unwrap_or_else(|_| "an unnamed tree".to_string())
         ),
     };
-    let receipt = run(&cfg).map_err(|e| (e.to_string(), None))?;
+    let receipt = match run(&cfg) {
+        Ok(r) => r,
+        Err(e) => {
+            // A refusal raised before the receipt was complete still leaves
+            // a receipt naming it, so the door's record is never empty.
+            let refused = RemapReceipt {
+                schema: "rw-mpas.remap-receipt/v1".to_string(),
+                status: "refused".to_string(),
+                refusal: Some(e.to_string()),
+                from_grid: cfg.from_grid.display().to_string(),
+                from_state: cfg.from_state.display().to_string(),
+                to_grid: cfg.to_grid.display().to_string(),
+                out: cfg.out.display().to_string(),
+                ..Default::default()
+            };
+            let json = serde_json::to_string_pretty(&refused).map_err(|e| (e.to_string(), None))?;
+            if let Some(path) = map.get("receipt") {
+                std::fs::write(path, &json).map_err(|e| (format!("cannot write {path}: {e}"), None))?;
+            }
+            return Err((e.to_string(), Some(json)));
+        }
+    };
     let json = serde_json::to_string_pretty(&receipt).map_err(|e| (e.to_string(), None))?;
     if let Some(path) = map.get("receipt") {
         std::fs::write(path, &json).map_err(|e| (format!("cannot write {path}: {e}"), None))?;

@@ -141,12 +141,13 @@ pub fn build(source: &RemapMesh, target: &RemapMesh) -> MpasResult<Overlap> {
                 Some(&(i, _)) => i as usize,
                 None => return Ok(Vec::new()),
             };
-            let mut visited: Vec<u32> = Vec::with_capacity(32);
+            let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::with_capacity(64);
             let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
             let mut row: Vec<(u32, f64)> = Vec::new();
-            let push = |c: usize, visited: &mut Vec<u32>, queue: &mut std::collections::VecDeque<usize>| {
-                if !visited.contains(&(c as u32)) {
-                    visited.push(c as u32);
+            let push = |c: usize,
+                        visited: &mut std::collections::HashSet<u32>,
+                        queue: &mut std::collections::VecDeque<usize>| {
+                if visited.insert(c as u32) {
                     queue.push_back(c);
                 }
             };

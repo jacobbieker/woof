@@ -76,7 +76,9 @@ def _existing(flag: str, value: Path | None, *, required: bool) -> Path | None:
         if required:
             raise RemapDoorRefusal(f"{flag} is required")
         return None
-    path = Path(value).expanduser().absolute()
+    # resolve(), not absolute(): a `..` or a symlinked directory must not
+    # let two spellings of one file pass the same-file guards below.
+    path = Path(value).expanduser().resolve()
     if not path.is_file():
         raise RemapDoorRefusal(f"{flag} {path} is not a file")
     return path
@@ -110,7 +112,7 @@ def build_argv(arguments: argparse.Namespace, engine: Path) -> tuple[list[str], 
     to_vertical = _existing("--to-vertical", arguments.to_vertical, required=False)
     if arguments.out is None:
         raise RemapDoorRefusal("-o/--out is required")
-    out = Path(arguments.out).expanduser().absolute()
+    out = Path(arguments.out).expanduser().resolve()
     if not out.parent.is_dir():
         raise RemapDoorRefusal(f"the output directory {out.parent} does not exist; create it")
     inputs = {"from_grid": from_grid, "from_state": from_state, "to_grid": to_grid,
@@ -137,11 +139,17 @@ def build_argv(arguments: argparse.Namespace, engine: Path) -> tuple[list[str], 
     min_coverage = float(arguments.min_coverage)
     if not 0.0 < min_coverage <= 1.0:
         raise RemapDoorRefusal(f"--min-coverage {min_coverage} is outside (0, 1]")
-    receipt = (Path(arguments.receipt).expanduser().absolute() if arguments.receipt
+    receipt = (Path(arguments.receipt).expanduser().resolve() if arguments.receipt
                else out.with_name(out.name + ".receipt.json"))
     engine_receipt = receipt.with_name(receipt.stem + ".engine.json")
     if engine_receipt == receipt:  # pragma: no cover - a receipt named *.engine
         engine_receipt = receipt.with_name(receipt.name + ".engine.json")
+    taken = {out, *(path for path in inputs.values() if path is not None)}
+    for flag, path in (("--receipt", receipt), ("--receipt (engine copy)", engine_receipt)):
+        if path in taken:
+            raise RemapDoorRefusal(
+                f"{flag} {path} is the output or one of the inputs; the receipt would be "
+                "written over a state file")
     argv = [
         str(engine),
         "--from-grid", str(from_grid),
