@@ -55,6 +55,12 @@ fn usage() -> String {
         \x20                                \"radius_km\": 1200}},\n\
         \x20                    \"spacing_km\": 20.0, \"transition_km\": 900.0}}]}}\n\
         \x20                 shapes: cap | lat_lon_box | polygon; ramp: transition_km | transition_cells\n\
+        \x20                 FIELD-DRIVEN rows: {{\"shape\": \"raster\", \"path\": \"density.nc\"}} reads a\n\
+        \x20                 woof-hex.density.v1 raster (spacing_km on ascending lat/lon); bilinear inside\n\
+        \x20                 its extent, finer wins. Clamped at the background, its finest value snapped\n\
+        \x20                 to the ladder, then slope-limited to \"max_gradient_per_cell\" (default\n\
+        \x20                 {:.4}); \"limit\": false refuses a steeper raster instead. A relative path\n\
+        \x20                 is read against the spec's directory.\n\
          --background-km  a uniform mesh at one spacing, when no spec file is wanted\n\
          --from-centres   take the cell centres of an existing MPAS grid file and rebuild every\n\
         \x20                 derived field from them. No sizing, no relaxation: the centres are\n\
@@ -115,6 +121,7 @@ fn usage() -> String {
          This produces a GRID file. Running the mesh also needs a matching STATIC file\n\
          (terrain, land use, soil, nVertLevels=55, nSoilLevels=4, FP32-bit-exact nominalMinDc),\n\
          which rw_mpas_static builds. `gpuwm mesh` runs both and writes the pair.",
+        rw_mpas::mesh::raster::DEFAULT_MAX_GRADIENT_PER_CELL,
         footprint::card("rtx-5090")
             .ok()
             .and_then(|c| c.fixed_mib())
@@ -281,7 +288,10 @@ fn run() -> Result<String, String> {
         (Some(path), None) => {
             let text = std::fs::read_to_string(path)
                 .map_err(|e| format!("cannot read the resolution spec {path}: {e}"))?;
-            let spec = MeshSpec::from_json(&text).map_err(|e| e.to_string())?;
+            // A raster row's relative path is read against the SPEC's own
+            // directory, so a spec and its raster can travel together.
+            let base = Path::new(path).parent().filter(|p| !p.as_os_str().is_empty());
+            let spec = MeshSpec::from_json_at(&text, base).map_err(|e| e.to_string())?;
             (spec, text)
         }
         (None, Some(km)) => {
@@ -382,6 +392,9 @@ fn run() -> Result<String, String> {
         // a `JSONDecodeError` at line 1 column 1 rather than a message anybody
         // reads.
         let (spec, dry_snap) = rw_mpas::mesh::ladder_snap::snap_to_ladder(&spec);
+        // The raster gates the real run applies, on the same snapped spec, so
+        // a dry run refuses what the build would refuse.
+        let raster_regions = spec.check_rasters().map_err(|e| e.to_string())?;
         let predicted = spec.predicted_cells(request.sizing_samples);
         let target = match (request.target_cells, budget_mib) {
             (Some(n), _) => n,
@@ -404,7 +417,7 @@ fn run() -> Result<String, String> {
         // built. Read once and reported whole: the number, what it cost, and
         // whether it is a measurement at all.
         let gradient = fitted.steepest_gradient_reading(50_000);
-        let plan = serde_json::json!({
+        let mut plan = serde_json::json!({
             "engine": concat!("rw-mpas ", env!("CARGO_PKG_VERSION"), " (rust)"),
             "dry_run": true,
             "spec": fitted,
@@ -467,6 +480,15 @@ fn run() -> Result<String, String> {
             "region_attainment": fitted.region_attainment(200_000),
             "deliverable_boundary": "grid file only; running this mesh also needs a matching static file",
         });
+        // Present only when the spec has a raster, so a plan for any other
+        // spec is the document it always was.
+        if !raster_regions.is_empty() {
+            plan["raster_regions"] =
+                serde_json::to_value(&raster_regions).map_err(|e| e.to_string())?;
+            plan["predicted_cells_method"] = serde_json::Value::from(
+                "global lattice outside every raster extent; exact per-cell quadrature of the whole field inside each extent",
+            );
+        }
         return serde_json::to_string_pretty(&plan).map_err(|e| e.to_string());
     }
 
@@ -479,7 +501,10 @@ fn run() -> Result<String, String> {
     let generated = generate(&request, |line| println!("{line}")).map_err(|e| e.to_string())?;
 
     let provenance = Provenance {
-        spec_json: serde_json::to_string(&generated.spec).unwrap_or_else(|_| spec_json.clone()),
+        // A raster row's path is dropped from the stamped bytes (its sha256
+        // stays); a spec with no raster stamps exactly what it always did.
+        spec_json: rw_mpas::mesh::density::provenance_spec_json(&generated.spec)
+            .unwrap_or_else(|_| spec_json.clone()),
         request: format!(
             "{} cells, {:.3} km finest, {:.3} km background",
             generated.receipt.delivered_cells,

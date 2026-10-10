@@ -243,12 +243,42 @@ def transition_band_cells(gradient_per_cell: float) -> float:
     return math.log(2.0) / math.log(1.0 + gradient_per_cell)
 
 
+def is_raster_region(region: Mapping[str, Any]) -> bool:
+    """A ``{"shape": "raster", ...}`` row (``rw-mpas`` ``mesh/raster.rs``)."""
+
+    return region.get("shape") == "raster"
+
+
+def region_spacing_km(region: Mapping[str, Any]) -> float:
+    """The finest spacing one region row asks for.
+
+    An analytic row says it (``spacing_km``).  A density-raster row does
+    not: its spacing is a FIELD in a file, and its finest value -- after the
+    background clamp and the ladder snap -- is only known once the generator
+    has read it.  The generator writes it back as ``finest_km`` on the row
+    of every spec it echoes (the dry-run receipt's ``spec``), so that is the
+    row a gate has to be handed; a raster row without it is refused rather
+    than guessed at, because the finest spacing sets the ladder and the
+    short-dual-edge exposure.
+    """
+
+    if is_raster_region(region):
+        if "finest_km" not in region:
+            raise MeshSpecRefusal(
+                "a density-raster region's finest spacing lives in its file, "
+                "and this spec row does not carry the finest_km the "
+                "generator writes back.  Judge the spec the dry-run receipt "
+                "echoes (receipt['spec']), which does")
+        return float(region["finest_km"])
+    return float(region["spacing_km"])
+
+
 def finest_spacing_km(spec: Mapping[str, Any]) -> float:
     """``MeshSpec::finest_km``: the background, lowered by every region."""
 
     finest = float(spec["background_km"])
     for region in spec.get("regions") or ():
-        finest = min(finest, float(region["spacing_km"]))
+        finest = min(finest, region_spacing_km(region))
     return finest
 
 
@@ -380,6 +410,14 @@ def transition_band_refusal(
             f"({transition_band_cells(widened):.2f} cells), which clears:"
         )
         for index, region in enumerate(spec.get("regions") or ()):
+            if is_raster_region(region):
+                # A raster has no ramp to widen; the generator limits its
+                # slope itself (rw-mpas mesh/raster.rs).
+                lines.append(
+                    f"               region {index} (density raster): "
+                    "slope-limited by the generator, no ramp to widen"
+                )
+                continue
             lines.append(
                 f"               region {index} "
                 f"({float(region['spacing_km']):g} km): "
@@ -632,6 +670,18 @@ def gates_from_receipt(
             "where the regions are"
         )
     gradient = float(gradient_percent) / 100.0
+    # A density-raster row carries no spacing of its own; the receipt's echoed
+    # spec carries the finest_km the generator read off the raster, so that is
+    # the spec judged when the caller's has a raster in it.
+    if any(is_raster_region(r) and "finest_km" not in r
+           for r in spec.get("regions") or ()):
+        echoed = receipt.get("spec")
+        if not isinstance(echoed, Mapping):
+            raise MeshSpecRefusal(
+                "the spec has a density-raster region and the receipt echoes "
+                "no spec carrying its finest_km, so the finest spacing these "
+                "gates are decided by is unknown")
+        spec = echoed
     check_transition_band(spec, gradient, measure=measure)
     return {
         "transition_band": {
@@ -672,7 +722,9 @@ __all__ = [
     "check_transition_band",
     "finest_spacing_km",
     "gates_from_receipt",
+    "is_raster_region",
     "ladder_km",
+    "region_spacing_km",
     "scaled_transitions",
     "short_dual_edge_exposure",
     "transition_band_cells",

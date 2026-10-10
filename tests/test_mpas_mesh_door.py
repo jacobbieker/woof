@@ -929,3 +929,231 @@ def test_the_dry_run_still_prints_the_record_alone_on_either_arm():
         assert result.returncode == 0, f"{extra}: {result.stderr}"
         plan = json.loads(result.stdout)
         assert plan["dry_run"] is True, extra
+
+
+# ---------------------------------------------------------------------------
+# 12. field-driven density: `woof mesh --density-raster`
+# ---------------------------------------------------------------------------
+
+def _write_density_raster(path: Path, *, lat, lon, spacing_km,
+                          schema: str = "woof-hex.density.v1") -> Path:
+    """A woof-hex.density.v1 file, written the way a Python builder would
+    (xarray, netCDF-4), so the binary is exercised on that encoding."""
+
+    np = pytest.importorskip("numpy")
+    xr = pytest.importorskip("xarray")
+    values = np.asarray(spacing_km, dtype="float64")
+    ds = xr.Dataset(
+        {"spacing_km": (("lat", "lon"), values, {"units": "km"})},
+        coords={"lat": ("lat", np.asarray(lat, dtype="float64")),
+                "lon": ("lon", np.asarray(lon, dtype="float64"))},
+        attrs={"schema": schema,
+               "min_spacing_km": float(np.nanmin(values))})
+    ds.to_netcdf(path)
+    return path
+
+
+def _graded_raster(path: Path, *, fine_km: float, background_km: float,
+                   grade: float = 0.05, **extra) -> Path:
+    """FINE within 30 km of (51.7, -4.0), graded at GRADE to BACKGROUND,
+    reaching it well inside the raster's own edge."""
+
+    np = pytest.importorskip("numpy")
+    lat = np.linspace(40.0, 64.0, 97)
+    lon = np.linspace(-24.0, 16.0, 161)
+    la, lo = np.meshgrid(lat, lon, indexing="ij")
+    d_km = np.hypot((la - 51.7) * 111.2,
+                    (lo + 4.0) * 111.2 * np.cos(np.radians(la)))
+    h = np.minimum(fine_km + grade * np.maximum(d_km - 30.0, 0.0),
+                   background_km)
+    return _write_density_raster(path, lat=lat, lon=lon, spacing_km=h,
+                                 **extra)
+
+
+def _fake_plan(captured):
+    def plan(*, spec, cells, workdir):
+        captured.append(json.loads(json.dumps(spec)))
+        return {"steepest_requested_gradient_percent_per_cell": 1.0,
+                "gradient_probe_coverage": "complete",
+                "predicted_cells": cells, "raster_regions": []}
+    return plan
+
+
+def test_the_door_offers_the_density_raster_flags():
+    parser = mpas_mesh.build_parser()
+    flags = {option for action in parser._actions
+             for option in action.option_strings}
+    assert "--density-raster" in flags
+    assert "--density-raster-no-limit" in flags
+
+
+def test_a_density_raster_becomes_a_raster_row_limited_to_the_door_bound(
+        tmp_path, monkeypatch):
+    """The row the binary reads: shape "raster", an ABSOLUTE path (the spec
+    is written into a scratch directory), and the slope ceiling set a hair
+    inside this door's own smoothness bound, so a limited raster passes the
+    gate it is judged by next."""
+
+    raster = tmp_path / "corridor.density.nc"
+    raster.write_bytes(b"placeholder; the fake plan never opens it")
+    captured: list = []
+    monkeypatch.setattr(mpas_mesh, "plan", _fake_plan(captured))
+    monkeypatch.chdir(tmp_path)
+    args = mpas_mesh.build_parser().parse_args(
+        ["--density-raster", "corridor.density.nc", "--background-km", "25.6",
+         "--cells", "5000", "--dry-run"])
+    assert mpas_mesh.mesh_main(args) == 0
+    row, = captured[0]["regions"]
+    assert row["shape"] == "raster"
+    assert row["path"] == str(raster.resolve())
+    assert "limit" not in row
+    bound = mpas_mesh.load_sizing().smoothness.refuse_above_percent_per_cell
+    assert row["max_gradient_per_cell"] == pytest.approx(
+        bound / 100.0 * mpas_mesh.RASTER_LIMIT_MARGIN)
+    assert row["max_gradient_per_cell"] < bound / 100.0
+
+
+def test_no_limit_and_rough_mesh_reach_the_raster_row(tmp_path, monkeypatch):
+    raster = tmp_path / "r.nc"
+    raster.write_bytes(b"x")
+    captured: list = []
+    monkeypatch.setattr(mpas_mesh, "plan", _fake_plan(captured))
+    args = mpas_mesh.build_parser().parse_args(
+        ["--density-raster", str(raster), "--density-raster-no-limit",
+         "--background-km", "25.6", "--cells", "5000", "--dry-run",
+         "--allow-rough-mesh", "--refine", "51.7,-4.0,50,12.8"])
+    assert mpas_mesh.mesh_main(args) == 0
+    cap, row = captured[0]["regions"]
+    assert cap["shape"]["kind"] == "cap"
+    assert row["limit"] is False
+    # Under the workaround the row names no ceiling, so the generator's
+    # own default -- inside its transition-band ceiling -- applies.
+    assert "max_gradient_per_cell" not in row
+
+
+def test_a_spec_raster_row_is_read_beside_the_spec_and_gets_the_door_bound(
+        tmp_path, monkeypatch):
+    """The door copies a --spec into scratch before the binary reads it, so
+    a raster row's relative path is resolved against the SPEC's directory
+    first; and a row naming no slope ceiling is limited to this door's bound,
+    exactly as a --density-raster row would be."""
+
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "proj" / "density.nc").write_bytes(b"x")
+    spec_path = tmp_path / "proj" / "spec.json"
+    spec_path.write_text(json.dumps({"background_km": 25.6, "regions": [
+        {"shape": "raster", "path": "density.nc"},
+        {"shape": "raster", "path": "density.nc",
+         "max_gradient_per_cell": 0.01}]}))
+    captured: list = []
+    monkeypatch.setattr(mpas_mesh, "plan", _fake_plan(captured))
+    args = mpas_mesh.build_parser().parse_args(
+        ["--spec", str(spec_path), "--cells", "5000", "--dry-run"])
+    assert mpas_mesh.mesh_main(args) == 0
+    first, second = captured[0]["regions"]
+    assert first["path"] == str((tmp_path / "proj" / "density.nc").resolve())
+    bound = mpas_mesh.load_sizing().smoothness.refuse_above_percent_per_cell
+    assert first["max_gradient_per_cell"] == pytest.approx(
+        bound / 100.0 * mpas_mesh.RASTER_LIMIT_MARGIN)
+    assert second["max_gradient_per_cell"] == 0.01
+
+
+def test_a_missing_density_raster_is_refused_before_any_sizing(
+        tmp_path, monkeypatch, capsys):
+    def never(**_):
+        raise AssertionError("the plan ran for a raster that is not there")
+    monkeypatch.setattr(mpas_mesh, "plan", never)
+    args = mpas_mesh.build_parser().parse_args(
+        ["--density-raster", str(tmp_path / "absent.nc"),
+         "--background-km", "25.6", "--cells", "5000", "--dry-run"])
+    assert mpas_mesh.mesh_main(args) == 2
+    assert "no such file" in capsys.readouterr().err
+
+
+def test_no_limit_without_a_raster_is_refused(monkeypatch, capsys):
+    monkeypatch.setattr(mpas_mesh, "plan", _fake_plan([]))
+    args = mpas_mesh.build_parser().parse_args(
+        ["--density-raster-no-limit", "--background-km", "25.6",
+         "--cells", "5000", "--dry-run"])
+    assert mpas_mesh.mesh_main(args) == 2
+    assert "no --density-raster was given" in capsys.readouterr().err
+
+
+def test_a_raster_slope_ceiling_steeper_than_the_build_gate_is_refused(
+        tmp_path):
+    raster = tmp_path / "r.nc"
+    raster.write_bytes(b"x")
+    with pytest.raises(mpas_mesh.MeshRequestError):
+        mpas_mesh.raster_region(raster, max_gradient_per_cell=0.2)
+
+
+def test_the_gates_read_a_raster_rows_finest_from_the_echoed_spec():
+    """A raster row carries no spacing_km: its finest value is in its file.
+    The gates refuse to guess it and read the finest_km the generator
+    echoes back on the dry-run receipt's spec instead."""
+
+    from woof.hex import mesh_spec_gates as gates
+
+    typed = {"background_km": 25.6,
+             "regions": [{"shape": "raster", "path": "/x/r.nc"}]}
+    with pytest.raises(gates.MeshSpecRefusal) as raised:
+        gates.finest_spacing_km(typed)
+    assert "finest_km" in str(raised.value)
+    echoed = {"background_km": 25.6,
+              "regions": [{"shape": "raster", "sha256": "ab",
+                           "finest_km": 0.1}]}
+    assert gates.finest_spacing_km(echoed) == 0.1
+    assert gates.ladder_km(echoed)[-1] == 0.1
+    document = gates.gates_from_receipt(typed, {
+        "steepest_requested_gradient_percent_per_cell": 2.7,
+        "gradient_probe_coverage": "complete",
+        "spec": echoed})
+    assert document["short_dual_edge_floor"]["finest_requested_spacing_km"] \
+        == 0.1
+    with pytest.raises(gates.MeshSpecRefusal):
+        gates.gates_from_receipt(typed, {
+            "steepest_requested_gradient_percent_per_cell": 2.7,
+            "gradient_probe_coverage": "complete"})
+
+
+@pytest.mark.skipif(_mesh_binary() is None,
+                    reason="rw_mpas_mesh is not built or staged here")
+def test_the_real_binary_plans_a_density_raster(tmp_path):
+    """Through the real binary, on a netCDF-4 raster written by xarray: the
+    plan carries the raster's report, a complete gradient reading under the
+    door's bound, and a spec echoing the raster's finest value."""
+
+    raster = _graded_raster(tmp_path / "graded.nc", fine_km=51.2,
+                            background_km=102.4, grade=0.05)
+    spec = mpas_mesh.build_spec(background_km=102.4)
+    spec["regions"].append(mpas_mesh.raster_region(
+        raster, max_gradient_per_cell=0.075))
+    plan = mpas_mesh.plan(spec=spec, cells=60000, workdir=tmp_path)
+    if "raster_regions" not in plan:
+        pytest.skip("the staged rw_mpas_mesh predates density rasters")
+    assert plan["gradient_probe_coverage"] == "complete"
+    assert plan["steepest_requested_gradient_percent_per_cell"] <= 7.5
+    report, = plan["raster_regions"]
+    assert report["schema"] == "woof-hex.density.v1"
+    assert report["delivered_finest_km"] == 51.2
+    assert report["certified_peak_per_cell"] <= 0.075
+    assert report["edge_step_per_cell"] == 0.0
+    row, = plan["spec"]["regions"]
+    assert row["shape"] == "raster" and row["finest_km"] == 51.2
+    # The predictor counts the raster: more cells than the background alone.
+    uniform = mpas_mesh.plan(spec=mpas_mesh.build_spec(background_km=102.4),
+                             cells=60000, workdir=tmp_path)
+    assert plan["predicted_cells"] > uniform["predicted_cells"] + 100
+
+
+@pytest.mark.skipif(_mesh_binary() is None,
+                    reason="rw_mpas_mesh is not built or staged here")
+def test_the_real_binary_refuses_a_raster_that_breaks_the_schema(tmp_path):
+    raster = _graded_raster(tmp_path / "bad.nc", fine_km=12.8,
+                            background_km=102.4, schema="not-a-density")
+    spec = mpas_mesh.build_spec(background_km=102.4)
+    spec["regions"].append(mpas_mesh.raster_region(raster))
+    with pytest.raises(mpas_mesh.MeshRequestError) as raised:
+        mpas_mesh.plan(spec=spec, cells=60000, workdir=tmp_path)
+    assert "schema" in str(raised.value) or "not valid JSON" in \
+        str(raised.value)
