@@ -173,6 +173,10 @@ tests/test_fullstep_projection_probe.py
 # device halves import cupy inside the test and are marked gpu by conftest.
 tests/test_solve_region_checks.py
 tests/test_libm_identity.py
+# The v8.4.1 LES closure: the CPU authority on analytic flows over a pure-
+# Python spherical Voronoi mesh, its configuration refusals and the driver
+# argument checks.  The CUDA parity members import cupy and are marked gpu.
+tests/test_les_v841.py
 tests/test_nvrtc_reciprocal_rewrite.py
 tests/test_vertical_artifact_met_state.py
 tests/test_vertical_vectorized_equivalence.py

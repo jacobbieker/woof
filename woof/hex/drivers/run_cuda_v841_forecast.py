@@ -740,6 +740,7 @@ def build_forecast_config(
     local_timestep_rates: tuple[int, ...] = (1, 3),
     local_timestep_buffer_rings: int = 1,
     apply_lbcs: bool = False,
+    les: Mapping[str, Any] | None = None,
 ) -> Any:
     """Build the run's configuration AT THE BOUND MESH'S TIMESTEP.
 
@@ -815,6 +816,26 @@ def build_forecast_config(
         # cells with the switch off, or the switch on with none.
         "config_apply_lbcs": bool(apply_lbcs),
     }
+    # The LES closure (woof.hex.les_v841): only a selected model touches the
+    # configuration, so a run without --les-model builds the same object as
+    # before.  The configuration validates the selection (PBL off, the 2-D
+    # Smagorinsky seam, the surface knobs) and refuses by name.
+    if les is not None and les.get("les_model", "none") != "none":
+        clocks.update(
+            {
+                "config_les_model": str(les["les_model"]),
+                "config_les_surface": str(les.get("les_surface", "none")),
+                "config_surface_heat_flux": float(les.get("surface_heat_flux", 0.0)),
+                "config_surface_moisture_flux": float(
+                    les.get("surface_moisture_flux", 0.0)
+                ),
+                "config_surface_drag_coefficient": float(
+                    les.get("surface_drag_coefficient", 0.0)
+                ),
+            }
+        )
+        if les.get("pbl_scheme") is not None:
+            clocks["config_pbl_scheme"] = str(les["pbl_scheme"])
     lts_block: dict[str, Any] = {
         "config_local_timestep": bool(local_timestep),
         "config_local_timestep_rates": tuple(local_timestep_rates),
@@ -1261,6 +1282,7 @@ def prepare_forecast_host(
     lbc_paths: Sequence[str] | None = None,
     physics_backend: str = "wsm6_column",
     source_table: str | None = None,
+    les: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     from woof.hex.cuda_arwen_physics_v841 import SealedArwenConstructorV841
     from woof.hex.cuda_dualrun import PreparedCudaInputs
@@ -1339,6 +1361,7 @@ def prepare_forecast_host(
         local_timestep_rates=local_timestep_rates,
         local_timestep_buffer_rings=local_timestep_buffer_rings,
         apply_lbcs=bool(lbc_paths),
+        les=les,
     )
     backend_row, scheme_alias, seam_options = resolve_run_row(
         physics_backend, source_table
@@ -1573,6 +1596,7 @@ def prepare_forecast_host(
         }
     return {
         "config": config,
+        "les": None if les is None else dict(les),
         "regional": regional,
         "convection": decision,
         "pbl_cadence": pbl_decision,
@@ -2041,6 +2065,12 @@ def execute_forecast(
         classing=explicit_classing,
     )
     stack["local_timestep"] = lts_attachment
+    # The opt-in LES closure is attached inside the device stack
+    # (proof._construct_device_stack), so every stack that carries an LES
+    # configuration carries the closure; None when config_les_model='none'.
+    from woof.hex.cuda_les_v841 import stamp_les_history
+
+    les_attachment = stack.get("les")
 
     physics_park = None
     if park_physics_tier:
@@ -2112,6 +2142,20 @@ def execute_forecast(
         snapshot_files[str(step)] = proof.write_snapshot_netcdf(
             output_root / f"cuda-history.{labels[step]}.nc", snapshot, static
         )
+        if les_attachment is not None:
+            history_path = output_root / f"cuda-history.{labels[step]}.nc"
+            stamp_les_history(
+                history_path,
+                les_attachment,
+                les_model=les_attachment.closure.config.les_model,
+            )
+            # The stamp appends attributes and fields, so the recorded bytes
+            # and digest are re-measured from the file as it now stands.
+            snapshot_files[str(step)] = {
+                **snapshot_files[str(step)],
+                "bytes": history_path.stat().st_size,
+                "sha256": proof.sha256_file(history_path),
+            }
         write_seconds += time.perf_counter() - mark
         del snapshot
         gc.collect()
@@ -2317,7 +2361,9 @@ def execute_forecast(
         }
     from woof.hex.cuda_backend.arch_admission import architecture_status
 
+    les_block = None if les_attachment is None else les_attachment.summary()
     return {
+        **({} if les_block is None else {"les": les_block}),
         "capability": capability.as_dict(),
         "architecture": architecture_status(capability.compute).as_dict(),
         "arwen_pre_kernel_cache_pin": arwen_pin,
@@ -2511,6 +2557,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "convective cases"
         ),
     )
+    _add_les_arguments(parser)
     parser.add_argument(
         "--convection",
         choices=("auto", "off", "gf"),
@@ -2701,6 +2748,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     if args.local_timestep_buffer_rings < 1:
         parser.error("--local-timestep-buffer-rings must be >= 1")
+    les_problem = _les_flag_problem(args)
+    if les_problem is not None:
+        parser.error(les_problem)
     if args.local_timestep_classing is not None:
         if not args.local_timestep:
             parser.error(
@@ -2714,6 +2764,55 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                 "is not a file"
             )
     return args
+
+
+def _add_les_arguments(parser: argparse.ArgumentParser) -> None:
+    """The LES flags: the door's spelling, choices and defaults."""
+
+    from woof.hex.forecast_door import LES_MODEL_CHOICES, LES_SURFACE_CHOICES
+
+    parser.add_argument(
+        "--les-model", choices=LES_MODEL_CHOICES, default="off",
+        help="MPAS-A v8.4.1 LES closure (woof.hex.les_v841); see "
+             "`woof hex forecast --help` (default: off)",
+    )
+    parser.add_argument(
+        "--les-surface", choices=LES_SURFACE_CHOICES, default="none",
+        help="config_les_surface (default: none)",
+    )
+    parser.add_argument(
+        "--les-heat-flux", type=float, default=0.0, metavar="K_M_S",
+        help="config_surface_heat_flux for --les-surface specified (default: 0.0)",
+    )
+    parser.add_argument(
+        "--les-moisture-flux", type=float, default=0.0, metavar="KG_M_S",
+        help="config_surface_moisture_flux for --les-surface specified (default: 0.0)",
+    )
+    parser.add_argument(
+        "--les-drag-coefficient", type=float, default=0.0, metavar="CD",
+        help="config_surface_drag_coefficient for --les-surface specified "
+             "(default: 0.0)",
+    )
+    parser.add_argument(
+        "--les-initial-tke", type=float, default=None, metavar="M2S2",
+        help="cold-start TKE for prognostic_tke (port-local) (default: 0.1)",
+    )
+
+
+def _les_flag_problem(args: argparse.Namespace) -> str | None:
+    from woof.hex.forecast_door import les_flag_problem
+
+    pbl = getattr(args, "pbl", None)
+    return les_flag_problem(
+        model=str(args.les_model),
+        surface=str(args.les_surface),
+        heat=float(args.les_heat_flux),
+        moisture=float(args.les_moisture_flux),
+        drag=float(args.les_drag_coefficient),
+        initial=args.les_initial_tke,
+        horiz_mixing=str(args.horiz_mixing),
+        pbl=None if pbl is None else str(pbl),
+    )
 
 
 def resolve_run_row(physics_backend: str, source_table: str | None):
@@ -2857,6 +2956,53 @@ def resolve_physics_backend_row(args: argparse.Namespace):
     return row
 
 
+def _les_request(args: argparse.Namespace) -> dict[str, Any] | None:
+    """The LES selection from the argument vector, or ``None`` when off.
+
+    ``None`` keeps the default run's configuration object, host mapping and
+    receipt exactly as they were before the closure existed.
+    """
+
+    from woof.hex.les_v841 import les_model_from_cli
+
+    model = les_model_from_cli(getattr(args, "les_model", "off"))
+    if model == "none":
+        return None
+    return {
+        "les_model": model,
+        "les_surface": str(getattr(args, "les_surface", "none")),
+        "surface_heat_flux": float(getattr(args, "les_heat_flux", 0.0)),
+        "surface_moisture_flux": float(getattr(args, "les_moisture_flux", 0.0)),
+        "surface_drag_coefficient": float(getattr(args, "les_drag_coefficient", 0.0)),
+        "initial_tke": (
+            None
+            if getattr(args, "les_initial_tke", None) is None
+            else float(args.les_initial_tke)
+        ),
+        # Read when the PBL selection exists in this tree; absent, the
+        # configuration's own PBL field decides (and refuses YSU by name).
+        "pbl_scheme": (
+            None
+            if getattr(args, "pbl", None) is None
+            else ("off" if str(args.pbl) == "off" else None)
+        ),
+    }
+
+
+def _les_provenance(les: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Receipt fields for an LES run; empty for the default run."""
+
+    if not les:
+        return {}
+    from woof.hex.les_v841 import les_label
+
+    return {
+        "les_model": les["les_model"],
+        "les_label": les_label(les["les_model"]),
+        "les_surface": les.get("les_surface", "none"),
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     paths = {
@@ -2905,6 +3051,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         local_timestep_declared_off=args.local_timestep_declared_off,
         local_timestep_rates=args.local_timestep_rates,
         local_timestep_buffer_rings=args.local_timestep_buffer_rings,
+        les=_les_request(args),
     )
     schedule = build_schedule(
         hours=args.hours,
@@ -2944,6 +3091,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "profile": proof.PROFILE,
         "source_release": proof.SOURCE_RELEASE,
         "horiz_mixing": args.horiz_mixing,
+        **_les_provenance(host.get("les")),
         "convection": host["convection"],
         "local_timestep": {
             "enabled": bool(args.local_timestep),

@@ -1109,3 +1109,52 @@ def test_a_default_run_carries_no_backend_token(tmp_path):
     argv = door.build_driver_argv(request)
     assert "--physics-backend" not in argv
     assert "--source-table" not in argv
+
+
+# ---------------------------------------------------------------------------
+# the LES closure (woof.hex.les_v841)
+# ---------------------------------------------------------------------------
+def test_the_default_run_carries_no_les_flag_or_receipt_field(tmp_path: Path) -> None:
+    request = door.resolve_request(_namespace(tmp_path), registry=_registry())
+    assert request.les_model == "off"
+    argv = door.build_driver_argv(request)
+    assert not any(token.startswith("--les") for token in argv)
+    assert door._les_receipt(request) == {}
+
+
+def test_les_without_pbl_off_is_refused_naming_the_flag(tmp_path: Path) -> None:
+    arguments = _namespace(tmp_path, les_model="3d_smagorinsky")
+    with pytest.raises(door.ForecastDoorRefusal) as caught:
+        door.resolve_request(arguments, registry=_registry())
+    assert "--pbl off" in str(caught.value)
+
+
+def test_les_with_pbl_off_reaches_the_driver_and_the_receipt(tmp_path: Path) -> None:
+    arguments = _namespace(
+        tmp_path, les_model="prognostic_tke", pbl="off", les_initial_tke=0.2,
+        les_surface="specified", les_heat_flux=0.05,
+    )
+    request = door.resolve_request(arguments, registry=_registry())
+    argv = door.build_driver_argv(request)
+    assert argv[argv.index("--les-model") + 1] == "prognostic_tke"
+    assert argv[argv.index("--les-surface") + 1] == "specified"
+    assert float(argv[argv.index("--les-heat-flux") + 1]) == 0.05
+    assert float(argv[argv.index("--les-initial-tke") + 1]) == 0.2
+    receipt = door._les_receipt(request)
+    assert receipt["les_label"] == "les_model=prognostic_1.5_order"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"les_heat_flux": 0.1},
+        {"les_initial_tke": 0.1},
+        {"les_model": "3d_smagorinsky", "pbl": "off", "horiz_mixing": "off"},
+        {"les_model": "3d_smagorinsky", "pbl": "off", "les_drag_coefficient": 0.01},
+        {"les_model": "3d_smagorinsky", "pbl": "off", "les_initial_tke": 0.1},
+        {"les_model": "prognostic_tke", "pbl": "off", "les_initial_tke": 0.0},
+    ],
+)
+def test_les_flags_that_would_be_ignored_are_refused(tmp_path: Path, overrides) -> None:
+    with pytest.raises(door.ForecastDoorRefusal):
+        door.resolve_request(_namespace(tmp_path, **overrides), registry=_registry())

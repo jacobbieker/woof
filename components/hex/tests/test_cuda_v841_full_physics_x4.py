@@ -118,7 +118,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # of the two digest gates is an admission-time refusal, not a test.
         # Measured inert by AST; the rationale lives beside the runner's pin.
         "src/hexcore/config_v841.py": (
-            "705147c38f8e6f8e0b363e205200cc31b725c6962fa5d8c606d1ebc0a581297a"
+            "16e720188ecc0a30a6adf587eb557b21a0da3b3fe82f2ffcf774e48735703eb6"
         ),
         # New pin (convection ruling, 2026-08-26): the frozen config admits
         # config_convection_scheme from this module and the timestep registry
@@ -183,6 +183,16 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # rationale lives beside the runner's pin.
         "src/hexcore/mixing_v841.py": (
             "534d8f31d5591091180bb7218046feed4c32613bab890034601aaf00100f519c"
+        ),
+        # New pins (the v8.4.1 LES closure): config_v841 admits
+        # config_les_model through les_v841.validate_les_selection, and the
+        # forecast stack attaches cuda_les_v841 whenever a configuration selects
+        # it, so the frozen lane's admission and execution depend on these bytes.
+        "src/hexcore/les_v841.py": (
+            "cc828e44ba9a14739fa475c138ae09272fa3c33b89b9bafdbe2eaff7a84b78fb"
+        ),
+        "src/hexcore/cuda_les_v841.py": (
+            "95a3560a9f3f4535a752f252bbf3f86d2acb2f5aa7fcadedc89b82bc82f5059b"
         ),
         "src/hexcore/cuda_horizontal.py": (
             "ade36498f2115a18ff56d71c141b2115daba4b96598c4162163c8aeaa84db1e1"
