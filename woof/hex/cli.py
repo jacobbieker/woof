@@ -190,6 +190,99 @@ def _render(arguments: argparse.Namespace) -> int:
     return run_render(arguments)
 
 
+def _density(arguments: argparse.Namespace) -> int:
+    from .density import run_density
+
+    return run_density(arguments)
+
+
+def _add_density_parser(commands) -> None:
+    density = commands.add_parser(
+        "density",
+        help="write a woof-hex.density.v1 spacing raster from energy "
+             "corridors and/or terrain gradient",
+        description=(
+            "Build a requested-spacing raster (woof-hex.density.v1, CF "
+            "netCDF) for a raster-region mesh spec.  Sources combine by "
+            "minimum spacing; the result is graded and limited so spacing "
+            "changes by at most the generator's per-cell bound (3.06 %/cell "
+            "by default).  Prints a JSON summary."),
+    )
+    density.add_argument("--sites", type=Path, default=None,
+                         metavar="SITES.json",
+                         help="woof-energy.sites.v1 document; fine spacing "
+                              "within --corridor-km of its per-asset chains")
+    density.add_argument("--assets", type=Path, default=None,
+                         metavar="ASSETS.geojson",
+                         help="woof-energy.assets.v1 GeoJSON; fine spacing "
+                              "within --corridor-km of every asset")
+    density.add_argument("--terrain-gradient", action="store_true",
+                         help="refine where GLO-30 terrain is steep or "
+                              "strongly curved (needs --bbox or --polygon)")
+    density.add_argument("--bbox", default=None, metavar="W,S,E,N",
+                         help="terrain region, degrees west,south,east,north "
+                              "(write --bbox=-3.6,51.7,-3.3,51.9 when west is "
+                              "negative)")
+    density.add_argument("--polygon", type=Path, default=None,
+                         metavar="FILE.geojson",
+                         help="terrain region as a GeoJSON Polygon/"
+                              "MultiPolygon")
+    density.add_argument("--fine-km", type=float, required=True,
+                         help="finest requested spacing, km")
+    density.add_argument("--background-km", type=float, required=True,
+                         help="spacing everywhere nothing asks for less, km")
+    density.add_argument("--corridor-km", type=float, default=2.0,
+                         help="corridor half-width around lines and sites, "
+                              "km (default 2)")
+    density.add_argument("--grade-percent-per-cell", type=float, default=None,
+                         help="grade outward at this %%/cell instead of the "
+                              "bound in force (refused above it)")
+    density.add_argument("--allow-rough", action="store_true",
+                         help="WORKAROUND: limit at the generator's 12.25 "
+                              "%%/cell transition-band ceiling instead of the "
+                              "3.06 %%/cell woof mesh smoothness bound")
+    density.add_argument("--cells-per-finest", type=float, default=4.0,
+                         help="target raster cells per finest spacing "
+                              "(default 4)")
+    density.add_argument("--max-raster-cells", type=int, default=30_000_000,
+                         help="refuse rasters larger than this (default "
+                              "30000000)")
+    density.add_argument("--interp-tolerance", type=float, default=0.10,
+                         help="when the size limit coarsens the raster, the "
+                              "largest spacing error it may introduce, as a "
+                              "fraction of the finest spacing (default 0.10)")
+    terrain = density.add_argument_group("terrain gradient")
+    terrain.add_argument("--terrain-fine-km", type=float, default=None,
+                         help="finest spacing terrain asks for (default "
+                              "--fine-km)")
+    terrain.add_argument("--terrain-scale-km", type=float, default=None,
+                         help="length the terrain is judged at; the DEM is "
+                              "area-averaged to half of it (default the "
+                              "terrain fine spacing)")
+    terrain.add_argument("--slope-coarse-deg", type=float, default=5.0,
+                         help="slope at and below which terrain asks for "
+                              "nothing (default 5)")
+    terrain.add_argument("--slope-fine-deg", type=float, default=25.0,
+                         help="slope at and above which terrain asks for the "
+                              "terrain fine spacing (default 25)")
+    terrain.add_argument("--curvature-coarse", type=float, default=2.0e-4,
+                         help="|laplacian of elevation|, 1/m, at and below "
+                              "which terrain asks for nothing (default 2e-4)")
+    terrain.add_argument("--curvature-fine", type=float, default=2.0e-3,
+                         help="|laplacian of elevation|, 1/m, at and above "
+                              "which terrain asks for the fine spacing "
+                              "(default 2e-3)")
+    terrain.add_argument("--cache-root", type=Path, default=None,
+                         help="GLO-30 tile cache (default the per-user "
+                              "highres cache)")
+    terrain.add_argument("--offline", action="store_true",
+                         help="read cached GLO-30 tiles only; refuse on a "
+                              "missing tile")
+    density.add_argument("-o", "--output", type=Path, required=True,
+                         help="raster to write (netCDF)")
+    density.set_defaults(handler=_density)
+
+
 def _add_mesh_paths(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--grid", type=Path, default=DEFAULT_GRID)
     parser.add_argument("--static", type=Path, default=DEFAULT_STATIC)
@@ -228,6 +321,11 @@ def build_parser() -> argparse.ArgumentParser:
     from .mesh_plan_door import add_mesh_plan_parser
 
     add_mesh_plan_parser(commands)
+
+    # Beside mesh-plan, because a density raster is what a raster-region
+    # mesh spec is planned from.  The handler imports numpy/scipy; the
+    # parser stays stdlib-only so the render door keeps working without them.
+    _add_density_parser(commands)
 
     mesh_check = commands.add_parser("mesh-check", help="validate an MPAS mesh")
     _add_mesh_paths(mesh_check)
