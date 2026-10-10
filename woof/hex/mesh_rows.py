@@ -78,8 +78,17 @@ MESH_ROWS_FILENAME = "mesh-rows.json"
 #: what the row is, in the row's own words.
 GENERATED_ROW_MARKER = "GENERATED-AT-POINT"
 CULL_ROW_MARKER = "GENERATED-CULL"
+#: A generated global row with no point cap (`woof hex register`).
+GENERATED_GLOBAL_ROW_MARKER = "GENERATED-GLOBAL"
 
 ROW_KINDS = ("generated-global", "generated-cull")
+
+#: ``timestep_evidence`` values.  The second is the experimental sub-anchor
+#: lane's label: a row carrying it passed the Courant check and skipped
+#: ONLY the anchor-table lookup, on an explicit opt-in.
+ANCHORED_TIMESTEP_EVIDENCE = "anchored"
+EXPERIMENTAL_TIMESTEP_EVIDENCE = "experimental-unanchored"
+TIMESTEP_EVIDENCE = (ANCHORED_TIMESTEP_EVIDENCE, EXPERIMENTAL_TIMESTEP_EVIDENCE)
 
 
 class MeshRowRefusal(MpasPortError):
@@ -106,18 +115,32 @@ class MeshRow:
     static_bytes: int
     static_sha256: str
     #: The resolution spec the generator was handed, by digest, and the
-    #: receipts it and the static builder wrote.  Lineage stops here.
-    spec_sha256: str
-    generator_receipt: str
-    static_receipt: str
-    #: The point, fine spacing and core radius the spec was built from.
-    point_deg: tuple[float, float]
-    fine_dx_m: float
-    core_radius_km: float
-    background_km: float
+    #: receipts it and the static builder wrote.  Lineage stops here.  A
+    #: pair registered with ``woof hex register`` and no receipt on disk
+    #: carries ``None`` for the receipt it does not have, never a guess.
+    spec_sha256: str | None
+    generator_receipt: str | None
+    static_receipt: str | None
     #: The door's own admission pass over the pair, recorded so the row
     #: says what was measured before it was written.
     admission: Mapping[str, Any]
+    #: The point, fine spacing and core radius the spec was built from --
+    #: a ``mesh-plan --point`` cap only.  A mesh generated from any other
+    #: spec (raster density, polygon, a uniform background) carries
+    #: ``None`` here and names its spec in ``region`` instead.
+    point_deg: tuple[float, float] | None = None
+    fine_dx_m: float | None = None
+    core_radius_km: float | None = None
+    background_km: float | None = None
+    #: The resolution spec itself (or the part of it a reader needs), for
+    #: rows registered by ``woof hex register``; ``spec_sha256`` digests it.
+    region: Mapping[str, Any] | None = None
+    #: What stands behind ``dt_seconds``: ``"anchored"`` (an
+    #: ``ADMITTED_TIMESTEPS`` row admits this configuration) or
+    #: ``"experimental-unanchored"`` (the Courant check passed and the
+    #: anchor lookup was skipped on an explicit opt-in).  ``None`` on rows
+    #: written before the field existed, which were all anchored.
+    timestep_evidence: str | None = None
     # -- cull rows only ---------------------------------------------------
     parent_row: str | None = None
     boundary_zone_width: int | None = None
@@ -147,7 +170,8 @@ class MeshRow:
             raise MeshRowRefusal(
                 f"a mesh row is missing {missing}; a row that does not say "
                 f"what it pins cannot be bound.  Rows are written by "
-                f"`woof hex mesh-plan --point --generate`, never by hand"
+                f"`woof hex mesh-plan --point --generate` or `woof hex "
+                f"register`, never by hand"
             )
         unknown = sorted(name for name in raw if name not in names)
         if unknown:
@@ -157,49 +181,113 @@ class MeshRow:
                 f"read with its unknown fields ignored"
             )
         values = dict(raw)
-        values["point_deg"] = tuple(float(v) for v in values["point_deg"])
+        if values.get("point_deg") is not None:
+            values["point_deg"] = tuple(float(v) for v in values["point_deg"])
         values["admission"] = MappingProxyType(dict(values.get("admission") or {}))
-        if values.get("cull_region") is not None:
-            values["cull_region"] = MappingProxyType(dict(values["cull_region"]))
+        for key in ("cull_region", "region"):
+            if values.get(key) is not None:
+                values[key] = MappingProxyType(dict(values[key]))
+        evidence = values.get("timestep_evidence")
+        if evidence is not None and evidence not in TIMESTEP_EVIDENCE:
+            raise MeshRowRefusal(
+                f"a mesh row declares timestep_evidence {evidence!r}; this "
+                f"build knows {list(TIMESTEP_EVIDENCE)}"
+            )
         return cls(**{name: values.get(name) for name in names})
 
+    @property
+    def experimental(self) -> bool:
+        """True when the row's timestep holds no anchor (explicit opt-in)."""
+
+        return self.timestep_evidence == EXPERIMENTAL_TIMESTEP_EVIDENCE
+
+    def _origin(self) -> str:
+        """What the mesh was generated from, in words, cap or not."""
+
+        if self.point_deg is not None:
+            lat, lon = self.point_deg
+            core = (
+                f"a {self.fine_dx_m:g} m core"
+                if self.fine_dx_m is not None else "a core"
+            )
+            radius = (
+                f" of {self.core_radius_km:g} km radius"
+                if self.core_radius_km is not None else ""
+            )
+            background = (
+                f" on a {self.background_km:g} km background"
+                if self.background_km is not None else ""
+            )
+            return f"{core}{radius} at {lat:.4f} N {lon:.4f} E{background}"
+        region = dict(self.region or {})
+        pieces = [f"a generated mesh of nominal dx {self.nominal_dx_m:g} m"]
+        label = region.get("name")
+        if label:
+            pieces.append(f"named {label!s}")
+        kinds = region.get("region_kinds")
+        if kinds:
+            pieces.append(f"refined over {', '.join(str(k) for k in kinds)} regions")
+        if self.background_km is not None:
+            pieces.append(f"on a {self.background_km:g} km background")
+        return " ".join(pieces)
+
+    def _spec_words(self) -> str:
+        if self.spec_sha256:
+            return f"the spec digest {self.spec_sha256[:16]}..."
+        return "no recorded spec digest"
+
+    def _timestep_words(self) -> str:
+        if not self.experimental:
+            return ""
+        return (
+            f"  TIMESTEP {self.dt_seconds:g} s IS "
+            f"{EXPERIMENTAL_TIMESTEP_EVIDENCE.upper()}: the Courant check "
+            f"passed and no ADMITTED_TIMESTEPS row stands behind it."
+        )
+
     def notes(self) -> str:
-        lat, lon = self.point_deg
         if self.kind == "generated-cull":
+            pad = (
+                f"cut at pad {float(self.cull_pad_scale):g}"
+                if self.cull_pad_scale is not None else "cut"
+            )
             return (
                 f"{CULL_ROW_MARKER}: a limited-area cull of the runtime row "
-                f"{self.parent_row!r} (a {self.fine_dx_m:g} m core of "
-                f"{self.core_radius_km:g} km radius at {lat:.4f} N {lon:.4f} E "
-                f"on a {self.background_km:g} km background), cut at pad "
-                f"{float(self.cull_pad_scale or 0.0):g} with rw_mpas_mesh "
-                f"--cull-parent.  Nobody hand-wrote this row: it is written "
-                f"from the cull receipt at {self.cull_receipt}, the parent's "
-                f"generator receipt at {self.generator_receipt}, and the spec "
-                f"digest {self.spec_sha256[:16]}...; every admission behind "
-                f"it is a measurement of these files at bind, and the "
-                f"regional opener requires a contract deck on these rings "
-                f"and re-measures the class key.  Boundary series: "
-                f"{self.lbc_source}."
+                f"{self.parent_row!r} ({self._origin()}), {pad} with "
+                f"rw_mpas_mesh --cull-parent.  Nobody hand-wrote this row: it "
+                f"is written from the cull receipt at {self.cull_receipt}, the "
+                f"parent's generator receipt at {self.generator_receipt}, and "
+                f"{self._spec_words()}; every admission behind it is a "
+                f"measurement of these files at bind, and the regional opener "
+                f"requires a contract deck on these rings and re-measures the "
+                f"class key.  Boundary series: {self.lbc_source}."
+                + self._timestep_words()
             )
+        static = (
+            f"static by rw_mpas_static (receipt {self.static_receipt})"
+            if self.static_receipt else "static registered without a receipt"
+        )
         return (
-            f"{GENERATED_ROW_MARKER}: a {self.fine_dx_m:g} m core of "
-            f"{self.core_radius_km:g} km radius at {lat:.4f} N {lon:.4f} E on a "
-            f"{self.background_km:g} km global background, generated by "
-            f"rw_mpas_mesh from the spec digest {self.spec_sha256[:16]}... "
-            f"(receipt {self.generator_receipt}); static by rw_mpas_static "
-            f"(receipt {self.static_receipt}).  Nobody hand-wrote this row: "
-            f"the door that generated the pair measured dual edges, cell "
-            f"coordination and Courant at dt {self.dt_seconds:g} s before "
-            f"writing it, and the bind measures them again."
+            f"{GENERATED_ROW_MARKER if self.point_deg is not None else GENERATED_GLOBAL_ROW_MARKER}: "
+            f"{self._origin()}, generated by "
+            f"rw_mpas_mesh from {self._spec_words()} (receipt "
+            f"{self.generator_receipt}); {static}.  Nobody hand-wrote this "
+            f"row: the door that registered the pair measured dual edges, "
+            f"cell coordination and Courant at dt {self.dt_seconds:g} s "
+            f"before writing it, and the bind measures them again."
+            + self._timestep_words()
         )
 
 
+#: Keys a row must SPELL (a value may still be ``null`` where the field
+#: allows it).  The cap fields left this set when ``woof hex register``
+#: began registering meshes that have no cap; a row written before then
+#: still reads, because every field it carries is still known.
 _REQUIRED_KEYS = {
     "kind", "name", "n_cells", "n_edges", "n_levels", "n_interfaces",
     "n_soil_levels", "nominal_dx_m", "dt_seconds", "grid", "grid_bytes",
     "grid_sha256", "static", "static_bytes", "static_sha256", "spec_sha256",
-    "generator_receipt", "static_receipt", "point_deg", "fine_dx_m",
-    "core_radius_km", "background_km", "admission",
+    "generator_receipt", "static_receipt", "admission",
 }
 
 
@@ -308,22 +396,54 @@ def describe_generated(
     name: str,
     grid: Path,
     static: Path,
-    spec_path: Path,
-    generator_receipt: Path,
-    static_receipt: Path,
-    point_deg: tuple[float, float],
-    fine_dx_m: float,
-    core_radius_km: float,
-    background_km: float,
     dt_seconds: float,
     n_levels: int,
     admission: Mapping[str, Any],
+    spec_path: Path | None = None,
+    spec_sha256: str | None = None,
+    generator_receipt: Path | None = None,
+    static_receipt: Path | None = None,
+    point_deg: tuple[float, float] | None = None,
+    fine_dx_m: float | None = None,
+    core_radius_km: float | None = None,
+    background_km: float | None = None,
+    nominal_dx_m: float | None = None,
+    region: Mapping[str, Any] | None = None,
+    timestep_evidence: str | None = None,
     n_soil_levels: int = 4,
 ) -> MeshRow:
-    """Measure a freshly-generated pair and write the row that describes it."""
+    """Measure a generated pair and write the row that describes it.
+
+    A ``mesh-plan --point`` pair passes its cap (``point_deg``,
+    ``fine_dx_m``, ``core_radius_km``, ``background_km``) and its spec file;
+    any other generated mesh passes ``nominal_dx_m`` (the static's own
+    ``nominalMinDc``, which the bind compares FP32-exactly) and a ``region``
+    naming the spec instead, with ``spec_sha256`` when the spec is known only
+    by digest.  At least one of ``fine_dx_m`` and ``nominal_dx_m`` is
+    required: a row with no nominal spacing cannot be bound.
+    """
 
     grid = Path(grid)
     static = Path(static)
+    if nominal_dx_m is None and fine_dx_m is None:
+        raise MeshRowRefusal(
+            f"the row {name!r} declares neither a fine spacing nor a nominal "
+            f"dx; the bind compares the registry's nominal dx FP32-exactly "
+            f"against the static's nominalMinDc and has nothing to compare"
+        )
+    if spec_path is not None and spec_sha256 is not None:
+        measured_spec = sha256_file(Path(spec_path))
+        if measured_spec != spec_sha256:
+            raise MeshRowRefusal(
+                f"the spec {spec_path} digests to {measured_spec[:16]}... and "
+                f"the row was told {spec_sha256[:16]}...; one of the two names "
+                f"the wrong spec"
+            )
+    if timestep_evidence is not None and timestep_evidence not in TIMESTEP_EVIDENCE:
+        raise MeshRowRefusal(
+            f"timestep_evidence {timestep_evidence!r} is not one of "
+            f"{list(TIMESTEP_EVIDENCE)}"
+        )
     dims = _dimensions(grid)
     for key in ("nCells", "nEdges"):
         if key not in dims:
@@ -347,7 +467,7 @@ def describe_generated(
         n_levels=int(n_levels),
         n_interfaces=int(n_levels) + 1,
         n_soil_levels=int(n_soil_levels),
-        nominal_dx_m=float(fine_dx_m),
+        nominal_dx_m=float(nominal_dx_m if nominal_dx_m is not None else fine_dx_m),
         dt_seconds=float(dt_seconds),
         grid=str(grid),
         grid_bytes=grid.stat().st_size,
@@ -355,14 +475,24 @@ def describe_generated(
         static=str(static),
         static_bytes=static.stat().st_size,
         static_sha256=sha256_file(static),
-        spec_sha256=sha256_file(Path(spec_path)),
-        generator_receipt=str(generator_receipt),
-        static_receipt=str(static_receipt),
-        point_deg=(float(point_deg[0]), float(point_deg[1])),
-        fine_dx_m=float(fine_dx_m),
-        core_radius_km=float(core_radius_km),
-        background_km=float(background_km),
+        spec_sha256=(
+            sha256_file(Path(spec_path)) if spec_path is not None else spec_sha256
+        ),
+        generator_receipt=None if generator_receipt is None else str(generator_receipt),
+        static_receipt=None if static_receipt is None else str(static_receipt),
+        point_deg=(
+            None if point_deg is None
+            else (float(point_deg[0]), float(point_deg[1]))
+        ),
+        fine_dx_m=None if fine_dx_m is None else float(fine_dx_m),
+        core_radius_km=None if core_radius_km is None else float(core_radius_km),
+        background_km=None if background_km is None else float(background_km),
         admission=MappingProxyType(dict(admission)),
+        region=(
+            None if region is None
+            else MappingProxyType(json.loads(json.dumps(dict(region))))
+        ),
+        timestep_evidence=timestep_evidence,
     )
 
 
@@ -374,12 +504,18 @@ def describe_cull(
     static: Path,
     cull_receipt: Path,
     cull_region: Mapping[str, Any],
-    cull_pad_scale: float,
+    cull_pad_scale: float | None,
     lbc_source: str,
     admission: Mapping[str, Any],
     dt_seconds: float | None = None,
+    timestep_evidence: str | None = None,
 ) -> MeshRow:
-    """Measure a freshly-cut pair and write the cull row that describes it."""
+    """Measure a freshly-cut pair and write the cull row that describes it.
+
+    ``cull_pad_scale`` is ``None`` when the cut was not made as a multiple
+    of a cap's core radius (a polygon, a box, a cap that is not a point
+    door's).  ``timestep_evidence`` defaults to the parent's.
+    """
 
     from netCDF4 import Dataset
     import numpy as np
@@ -439,13 +575,17 @@ def describe_cull(
         core_radius_km=parent.core_radius_km,
         background_km=parent.background_km,
         admission=MappingProxyType(dict(admission)),
+        region=parent.region,
+        timestep_evidence=(
+            parent.timestep_evidence if timestep_evidence is None else timestep_evidence
+        ),
         parent_row=parent.name,
         boundary_zone_width=zone_width,
         bdy_mask_sha256=digest,
         lbc_source=str(lbc_source),
         cull_receipt=str(cull_receipt),
         cull_region=MappingProxyType(json.loads(json.dumps(dict(cull_region)))),
-        cull_pad_scale=float(cull_pad_scale),
+        cull_pad_scale=None if cull_pad_scale is None else float(cull_pad_scale),
     )
 
 
@@ -553,12 +693,16 @@ def apply_rows(
 
 
 __all__ = [
+    "ANCHORED_TIMESTEP_EVIDENCE",
     "CULL_ROW_MARKER",
+    "EXPERIMENTAL_TIMESTEP_EVIDENCE",
+    "GENERATED_GLOBAL_ROW_MARKER",
     "GENERATED_ROW_MARKER",
     "MESH_ROWS_ENVIRONMENT",
     "MESH_ROWS_FILENAME",
     "ROWS_SCHEMA",
     "ROW_KINDS",
+    "TIMESTEP_EVIDENCE",
     "MeshRow",
     "MeshRowRefusal",
     "append_row",

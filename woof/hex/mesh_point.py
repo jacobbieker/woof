@@ -707,8 +707,87 @@ def resolve_geog(explicit: Path | None) -> Path:
     )
 
 
-def admit_pair(grid: Path, static: Path, *, fine_dx_m: float, log=print) -> dict[str, Any]:
-    """The door's own admission pass over a pair it just built."""
+def explicit_timestep(
+    minimum_dc_edge_m: float,
+    dt_seconds: float,
+    *,
+    fine_dx_m: float,
+    experimental: bool = False,
+) -> dict[str, Any]:
+    """An EXPLICIT timestep held to the same two questions ``choose_timestep`` asks.
+
+    Courant first, always: a timestep above the mesh's own limit is refused
+    whatever else is true.  Then the anchor: the configuration (dt, the
+    cumulus selection the mesh's spacing implies, the welded surface/PBL
+    cadence) must hold an ``ADMITTED_TIMESTEPS`` row, refused with that
+    table's own message when it does not.  ``experimental=True`` skips the
+    anchor lookup ONLY and labels the answer ``experimental-unanchored``;
+    the Courant check is never skipped.
+    """
+
+    from . import convection_admission, dt_admission
+    from .mesh_rows import ANCHORED_TIMESTEP_EVIDENCE, EXPERIMENTAL_TIMESTEP_EVIDENCE
+    from .timestep_admission import CourantPolicy
+
+    dt = float(dt_seconds)
+    if not math.isfinite(dt) or dt <= 0.0:
+        raise PointPlanRefusal(f"--dt-seconds {dt_seconds!r} is not a positive number")
+    policy = CourantPolicy()
+    limit = policy.safety_factor * float(minimum_dc_edge_m) / policy.max_characteristic_speed_m_s
+    sub_3km = float(fine_dx_m) < convection_admission.CONVECTION_OFF_BELOW_M
+    scheme = None if sub_3km else "gf"
+    if dt > limit:
+        raise PointPlanRefusal(
+            f"dt {dt:g} s exceeds this mesh's Courant limit {limit:.3f} s "
+            f"(min dcEdge {minimum_dc_edge_m:.1f} m at "
+            f"{policy.max_characteristic_speed_m_s:g} m/s x "
+            f"{policy.safety_factor:g}); the row is NOT registered"
+            + ("" if not experimental else
+               ".  The experimental lane skips the anchor lookup and never the "
+               "Courant check")
+        )
+    anchor = None
+    if not experimental:
+        anchor = dt_admission.admitted_timestep(dt, scheme, None)
+        if anchor is None:
+            raise PointPlanRefusal(dt_admission.unanchored_refusal(dt, scheme, None))
+    return {
+        "dt_seconds": dt,
+        "courant_limit_seconds": limit,
+        "margin": limit / dt,
+        "cumulus_scheme": scheme,
+        "explicit": True,
+        "timestep_evidence": (
+            EXPERIMENTAL_TIMESTEP_EVIDENCE if experimental else ANCHORED_TIMESTEP_EVIDENCE
+        ),
+        "anchor": None if anchor is None else dt_admission.anchor_label(anchor),
+    }
+
+
+def admit_pair(
+    grid: Path,
+    static: Path,
+    *,
+    fine_dx_m: float,
+    log=print,
+    dt_seconds: float | None = None,
+    experimental: bool = False,
+) -> dict[str, Any]:
+    """The door's own admission pass over a pair it just built.
+
+    ``dt_seconds=None`` picks the largest anchored timestep the mesh's
+    Courant limit admits (:func:`choose_timestep`); an explicit
+    ``dt_seconds`` is held to the same Courant and anchor questions by
+    :func:`explicit_timestep`, which ``experimental=True`` relaxes to Courant
+    alone.  An experimental admission needs an explicit timestep: the lane
+    exists to run a NAMED unanchored dt, never to pick one.
+    """
+
+    if experimental and dt_seconds is None:
+        raise PointPlanRefusal(
+            "the experimental timestep lane needs an explicit dt: it skips the "
+            "anchor lookup for a timestep somebody named, and never chooses one"
+        )
 
     import numpy as np
 
@@ -747,7 +826,14 @@ def admit_pair(grid: Path, static: Path, *, fine_dx_m: float, log=print) -> dict
         dataset.set_auto_maskandscale(False)
         dc_edge = np.asarray(dataset.variables["dcEdge"][:], dtype=np.float64)
     authority = edge_length_authority(dc_edge)
-    chosen = choose_timestep(authority.minimum_m, fine_dx_m=fine_dx_m)
+    if dt_seconds is None:
+        chosen = choose_timestep(authority.minimum_m, fine_dx_m=fine_dx_m)
+        chosen["timestep_evidence"] = "anchored"
+    else:
+        chosen = explicit_timestep(
+            authority.minimum_m, dt_seconds, fine_dx_m=fine_dx_m,
+            experimental=experimental,
+        )
     try:
         timestep = admit_timestep(chosen["dt_seconds"], authority, policy=CourantPolicy())
     except TimestepAdmissionError as error:
@@ -856,6 +942,7 @@ def generate_point(
         core_radius_km=request.radius_km, background_km=request.background_km,
         dt_seconds=admission["timestep_choice"]["dt_seconds"],
         n_levels=n_levels, admission=admission,
+        timestep_evidence=admission["timestep_choice"]["timestep_evidence"],
     )
     mesh_rows.write_rows(rows_path, [parent])
     log(f"ROW {parent.name} -> {rows_path}")
@@ -1088,6 +1175,7 @@ __all__ = [
     "cull_region",
     "cull_row_name",
     "device_verdict",
+    "explicit_timestep",
     "generate_point",
     "ladder_rungs",
     "ladder_spec",

@@ -249,7 +249,20 @@ def build_parser() -> argparse.ArgumentParser:
     oracle_gate.add_argument("--fixtures", type=Path, default=DEFAULT_ORACLE)
     oracle_gate.set_defaults(handler=_oracle_gate)
 
+    # Before cull, because the vertical artifact is minted on the GLOBAL
+    # parent and then cut with the grid and static (`cull --parent-vertical`).
+    # Deferred import: the door pulls netCDF4 and numpy at run time only.
+    from .vertical_door import add_vertical_parser
+
+    add_vertical_parser(commands)
+
     add_cull_parser(commands)
+
+    # After cull, because a cull row is registered from the cull's receipt;
+    # a global row is registered as soon as its pair exists.
+    from .register_door import add_register_parser
+
+    add_register_parser(commands)
 
     # Between cull and init, because that is where a regional case meets it:
     # a cull needs a regional meteorological source the init and boundary
