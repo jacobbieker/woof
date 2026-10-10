@@ -201,7 +201,7 @@ def test_captured_lineage_receipt_retains_its_original_digest():
 _AUTHORED_RUSTWX_CRATES = (
     "rw-fetch", "rw-wrfbatch", "rw-nexrad", "rw-odim", "rw-obs",
     "rw-goes", "rw-netcdf", "rw-mpas", "rw-host-memory",
-    "rw-isobaric", "rw-mlexport", "rw-libm",
+    "rw-isobaric", "rw-mlexport", "rw-libm", "rw-sitesample",
 )
 
 #: The 62 files that already carried CR when this gate was widened,

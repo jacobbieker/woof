@@ -348,6 +348,7 @@ _STAMP_SOURCES = {
     "rw_mpas_geometry": "crates/rw-mpas/src/bin/rw_mpas_geometry.rs",
     "rw_mpas_hostprep": "crates/rw-mpas/src/bin/rw_mpas_hostprep.rs",
     "rw_isobaric": "crates/rw-isobaric/src/capi.rs",
+    "rw_sitesample": "crates/rw-sitesample/src/capi.rs",
 }
 
 #: The build script that injects the revision for each artifact.
@@ -373,7 +374,8 @@ _STAMP_BUILDS = {
                                     "crates/static-fields/build.rs",
                                     "crates/obs-regrid/build.rs",
                                     "crates/obs-score/build.rs",
-                                    "crates/rw-isobaric/build.rs"),
+                                    "crates/rw-isobaric/build.rs",
+                                    "crates/rw-sitesample/build.rs"),
     # The engine workspace carries one gpuwm-authored crate beside the
     # donor snapshot (tools/rw_wps/VENDOR.md); the snapshot's own crate
     # ships nothing, so it is stamped by nothing.

@@ -1,0 +1,26 @@
+# Point sampling of WRF history at forecast sites (`woof energy`).
+#
+# The data-path arithmetic of `woof.energy.sample.sample_wrfout`:
+# destaggering U/V/W/PH+PHB onto mass points, bilinear horizontal
+# interpolation at fractional mass-point indices, height above model
+# terrain from (PH + PHB) / g - HGT, linear interpolation in height to the
+# requested heights, and rotation of grid-relative wind to earth-relative
+# with SINALPHA/COSALPHA.  Python computes the fractional indices (per-site
+# projection arithmetic) and reads the windows; every per-cell operation
+# happens here.
+#
+# No dependencies: the arithmetic is plain f64, so the locked offline build
+# needs nothing beyond the standard library.
+[package]
+name = "rw-sitesample"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "rw_sitesample"
+# cdylib: the ctypes seam woof/energy/sample_bridge.py loads (src/capi.rs).
+# rlib:   the crate's own tests.
+crate-type = ["cdylib", "rlib"]
