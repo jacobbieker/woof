@@ -288,6 +288,11 @@ tests/test_deformation_geometry_precision.py
 # rounding; the compensated CPU-authority recovery and its sub-anchor gate.
 # Synthetic patch, no card.
 tests/test_large_step_compensation.py
+# The GPU compensated recovery's attachment: anchored timesteps rebind
+# nothing, the regional kernel-set digest is the minted one, the module is a
+# pinned execution source, and the forecast stack attaches and labels it.
+# No card (the device half is in gpu_gates.txt).
+tests/test_cuda_compensated_recovery.py
 tests/test_les_column.py
 # Sub-second regional mint planning (dry-run/plan mode only; no card).
 tests/test_dt_mint_regional_plan.py

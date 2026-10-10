@@ -14,6 +14,11 @@ Two measurements, both CPU, both float32 against float64:
 
 Neither probe changes model arithmetic.  The synthetic patch builder
 (:func:`synthetic_hex_patch`) is shared with the tests.
+
+:func:`device_large_step_increment_loss` is the binary32 half of probe 2 run
+on the GPU through the production ``CudaDryDycoreDriver._recover_candidate``
+(:func:`stock_recovery_driver`), with and without the compensated recovery
+attachment (:mod:`woof.hex.cuda_compensated_recovery`).  It needs cupy.
 """
 
 from __future__ import annotations
@@ -467,6 +472,252 @@ def large_step_increment_loss(
     return report
 
 
+def stock_recovery_driver(
+    *,
+    rho_base: NDArray[Any],
+    rtheta_base: NDArray[Any],
+    exner_base: NDArray[Any],
+    zz: NDArray[Any],
+    fzm: NDArray[Any],
+    fzp: NDArray[Any],
+    cells_on_edge: NDArray[Any],
+    kernel_cache: Any | None = None,
+) -> Any:
+    """A :class:`woof.hex.cuda_driver.CudaDryDycoreDriver` that can only recover.
+
+    The instance is made without ``__init__`` and carries exactly the
+    attributes ``CudaDryDycoreDriver._recover_candidate`` reads -- the
+    reference state, ``zz``/``fzm``/``fzp`` and ``cellsOnEdge`` -- so the
+    PRODUCTION recovery method and its shipped kernels (``recover_cells_f32``,
+    ``recover_edges_f32``, ``recover_interfaces_f32``, the v8.4.1 ``rw``
+    endpoint enforcement and ``recover_state``'s velocity kernels) run on a
+    synthetic patch with flat terrain and no regional runtime.  A probe and
+    test instrument; nothing in a forecast builds one.
+    """
+
+    from types import SimpleNamespace
+
+    import cupy as cp
+
+    from .cuda_backend import KernelCache
+    from .cuda_driver import CudaDryDycoreDriver
+
+    f32 = np.dtype(np.float32)
+    nlev, n_cells = np.asarray(rho_base).shape
+    coe = np.ascontiguousarray(np.asarray(cells_on_edge, dtype=np.int32))
+    driver = object.__new__(CudaDryDycoreDriver)
+    driver.cp = cp
+    driver.cache = KernelCache() if kernel_cache is None else kernel_cache
+    driver._kernels = {}
+    driver.nlev = int(nlev)
+    driver.ncells = int(n_cells)
+    driver.nedges = int(coe.shape[0])
+    driver.v841_context = SimpleNamespace(role="recovery probe")
+    driver.regional_v841 = None
+    driver.atmosphere = SimpleNamespace(
+        mesh=SimpleNamespace(
+            cells_on_edge=cp.asarray(coe),
+            n_cells=int(n_cells),
+            n_edges=int(coe.shape[0]),
+            index_dtype=np.dtype(np.int32),
+            dtype=f32,
+        ),
+        state=SimpleNamespace(time_seconds=0.0),
+        vertical=SimpleNamespace(
+            zz=cp.asarray(np.asarray(zz, dtype=f32)),
+            fzm=cp.asarray(np.asarray(fzm, dtype=f32)),
+            fzp=cp.asarray(np.asarray(fzp, dtype=f32)),
+            n_vert_levels=int(nlev),
+            dtype=f32,
+        ),
+        reference=SimpleNamespace(
+            rho_base=cp.asarray(np.asarray(rho_base, dtype=f32)),
+            rho_theta_base=cp.asarray(np.asarray(rtheta_base, dtype=f32)),
+            exner_base=cp.asarray(np.asarray(exner_base, dtype=f32)),
+            dtype=f32,
+        ),
+        terrain=None,
+        h2d=None,
+    )
+    return driver
+
+
+def device_large_step_increment_loss(
+    dt: float,
+    *,
+    simulated_seconds: float = 60.0,
+    acoustic_steps: int = 2,
+    nlev: int = 12,
+    spacing_m: float = 100.0,
+    theta_tendency: float = 2.0e-5,
+    u_tendency: float = 2.0e-5,
+    compensated: bool = False,
+    all_rk_stages: bool = False,
+    kernel_cache: Any | None = None,
+) -> dict[str, Any]:
+    """:func:`large_step_increment_loss`'s binary32 run, recovered on the GPU.
+
+    The same patch, state, tendencies and acoustic accumulation as the CPU
+    probe; the recovery is the production ``_recover_candidate`` on a
+    :func:`stock_recovery_driver`, and the recovered state (prognostic and
+    saved diagnostics) is copied into the next timestep's saved state exactly
+    as ``_advance_dynamics_subcycle_v841`` copies a subcycle's result.
+    ``compensated=True`` attaches
+    :func:`woof.hex.cuda_compensated_recovery.attach_compensated_recovery`
+    (opened through its ``dt_seconds`` argument, so the probe measures the
+    same kernels at any ``dt``).  ``all_rk_stages=True`` also runs RK stages 1
+    and 2 from the same saved state each timestep (their results are dropped,
+    as the subcycle drops them once stage 3 has recovered), which must leave
+    the carried state bit-identical to the stage-3-only run.
+
+    Metrics are those of :func:`large_step_increment_loss`, under the
+    ``"float32_device"`` key; ``"final"`` holds the last read-out arrays.
+    """
+
+    import cupy as cp
+
+    from .cuda_acoustic import CudaAcousticState
+    from .cuda_backend.containers import (
+        DevicePrognosticState,
+        DeviceSavedDiagnostics,
+        TransferStats,
+    )
+    from .cuda_compensated_recovery import (
+        attach_compensated_recovery,
+        compensated_recovery_floor_seconds,
+    )
+
+    if dt <= 0.0 or simulated_seconds <= 0.0:
+        raise ValueError("dt and simulated_seconds must be positive")
+    n_steps = int(round(simulated_seconds / dt))
+    patch = synthetic_hex_patch(spacing_m, rings=2)
+    arrays = patch.arrays
+    n_cells = arrays["nEdgesOnCell"].size
+    n_edges = arrays["cellsOnEdge"].shape[0]
+    coe = arrays["cellsOnEdge"].copy()
+    coe[:, 1] = np.where(coe[:, 1] < 0, coe[:, 0], coe[:, 1])
+    # The CPU probe's state, drawn in the same order from the same seed.
+    col = _standard_column(nlev)
+    rng = np.random.default_rng(20261010)
+    theta_off = rng.uniform(2.0, 40.0, size=(nlev, n_cells))
+    rho_off = rng.uniform(0.01, 0.03, size=(nlev, n_cells))
+    u0 = rng.uniform(3.0, 25.0, size=(nlev, n_edges)) * rng.choice(
+        [-1.0, 1.0], size=(nlev, n_edges)
+    )
+    rho_base = np.repeat(col["rho_base"][:, None], n_cells, axis=1)
+    theta_base = np.repeat(col["theta_base"][:, None], n_cells, axis=1)
+    exner_base = np.repeat(col["exner_base"][:, None], n_cells, axis=1)
+    rho_zz0 = rho_base * (1.0 + rho_off)
+    theta0 = theta_base + theta_off
+    rtheta_base = rho_base * theta_base
+    f = np.float32
+    fz = np.full(nlev + 1, 0.5, dtype=f)
+    driver = stock_recovery_driver(
+        rho_base=rho_base, rtheta_base=rtheta_base, exner_base=exner_base,
+        zz=np.ones((nlev, n_cells)), fzm=fz, fzp=fz, cells_on_edge=coe,
+        kernel_cache=kernel_cache,
+    )
+    attachment = None
+    if compensated:
+        attachment = attach_compensated_recovery(
+            driver,
+            dt_seconds=min(float(dt), 0.5 * compensated_recovery_floor_seconds()),
+        )
+        if attachment is None:  # pragma: no cover - the gate moved
+            raise RuntimeError("the compensated recovery refused to attach")
+        # The summary names the dt this probe runs, not the one that opened
+        # the gate; ``gate_opened_by_probe`` records when those differ.
+        attachment.dt_seconds = float(dt)
+    rho_zz = rho_zz0.astype(f)
+    rho_edge64 = 0.5 * (rho_zz0[:, coe[:, 0]] + rho_zz0[:, coe[:, 1]])
+    zero = TransferStats(0, 0.0)
+    state = DevicePrognosticState(
+        cp.asarray(rho_zz),
+        cp.asarray((rho_zz0 * theta0).astype(f)),
+        cp.asarray((rho_edge64 * u0).astype(f)),
+        cp.zeros((nlev + 1, n_cells), dtype=f),
+        cp.zeros((0, nlev, n_cells), dtype=f),
+        0.0,
+        np.dtype(f),
+        zero,
+    )
+    saved = DeviceSavedDiagnostics(
+        cp.asarray(theta0.astype(f)),
+        cp.ones((nlev, n_cells), dtype=f),
+        cp.asarray((rho_zz0 - rho_base).astype(f)),
+        cp.asarray((rho_zz0 * theta0 - rtheta_base).astype(f)),
+        cp.zeros((nlev, n_cells), dtype=f),
+        cp.zeros((nlev, n_edges), dtype=f),
+        cp.zeros((nlev + 1, n_cells), dtype=f),
+        np.dtype(f),
+        zero,
+    )
+    # The model's read-out before the first step, formed as the CPU probe does.
+    rtheta_p0 = cp.asnumpy(saved.rho_theta_perturbation)
+    ru0 = cp.asnumpy(state.rho_u)
+    theta_start = ((rtheta_p0 + rtheta_base.astype(f)) / rho_zz).astype(np.float64)
+    u_start = (
+        (f(2.0) * ru0) / (rho_zz[:, coe[:, 0]] + rho_zz[:, coe[:, 1]])
+    ).astype(np.float64)
+    tend_rt = cp.asarray(rho_zz * f(theta_tendency))
+    tend_ru = cp.asarray(rho_edge64.astype(f) * f(u_tendency))
+    stages: tuple[tuple[int, int, float], ...] = ()
+    if all_rk_stages:
+        stages = (
+            (1, 1, dt / 3.0),
+            (2, max(1, acoustic_steps // 2), dt / acoustic_steps),
+        )
+    stages = stages + ((3, acoustic_steps, dt / acoustic_steps),)
+    recovered_state = state
+    recovered_diag = saved
+    for _ in range(n_steps):
+        for stage, substeps, dts in stages:
+            acoustic = CudaAcousticState.zeros(nlev, n_cells, n_edges)
+            step = f(dts)
+            for _sub in range(substeps):
+                acoustic.rtheta_pp = cp.add(acoustic.rtheta_pp, step * tend_rt)
+                acoustic.ru_p = cp.add(acoustic.ru_p, step * tend_ru)
+            recovered_state, recovered_diag, _flux_u, _flux_w = driver._recover_candidate(
+                state, saved, acoustic, stage, substeps, state.scalars
+            )
+        state = driver._copy_state(recovered_state, share_scalars=True)
+        saved = driver._copy_saved(recovered_diag)
+    d_theta = cp.asnumpy(recovered_diag.theta_m).astype(np.float64) - theta_start
+    d_u = cp.asnumpy(recovered_diag.normal_velocity).astype(np.float64) - u_start
+    intended_theta = theta_tendency * n_steps * dt
+    intended_u = u_tendency * n_steps * dt
+    report: dict[str, Any] = {
+        "dt": float(dt),
+        "steps": n_steps,
+        "simulated_seconds": float(n_steps * dt),
+        "acoustic_steps": int(acoustic_steps),
+        "theta_tendency_K_per_s": float(theta_tendency),
+        "u_tendency_m_per_s2": float(u_tendency),
+        "compensated": bool(compensated),
+        "all_rk_stages": bool(all_rk_stages),
+        "float32_device": {
+            "theta_lost_fraction": float(1.0 - np.mean(d_theta) / intended_theta),
+            "theta_rms_relative_error": float(
+                np.sqrt(np.mean((d_theta - intended_theta) ** 2)) / intended_theta
+            ),
+            "u_lost_fraction": float(1.0 - np.mean(d_u) / intended_u),
+            "u_rms_relative_error": float(
+                np.sqrt(np.mean((d_u - intended_u) ** 2)) / intended_u
+            ),
+        },
+        "final": {
+            "rtheta_p": cp.asnumpy(recovered_diag.rho_theta_perturbation),
+            "ru": cp.asnumpy(recovered_state.rho_u),
+            "theta_m": cp.asnumpy(recovered_diag.theta_m),
+            "u": cp.asnumpy(recovered_diag.normal_velocity),
+        },
+    }
+    if attachment is not None:
+        report["attachment"] = attachment.summary()
+        report["gate_opened_by_probe"] = float(dt) >= compensated_recovery_floor_seconds()
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     """``python -m woof.hex.precision_probe``: print both probes as JSON."""
 
@@ -500,7 +751,9 @@ __all__ = [
     "SyntheticPatchMesh",
     "analytic_deformation_weights",
     "deformation_geometry_error",
+    "device_large_step_increment_loss",
     "large_step_increment_loss",
+    "stock_recovery_driver",
     "synthetic_hex_patch",
 ]
 
