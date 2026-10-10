@@ -395,7 +395,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # anchor basis prose) that nothing reads as a value.  Every affected proof
     # re-runs against this digest.
     "src/hexcore/config_v841.py": (
-        "924460a848779a178de526541fe97f020e5e3987ca8d85cf6806cd0186d6abdd"
+        "9ac0d8c63a99055b2e38a7b94b5fd972f1f53868f564604fa1852fd388dd10fe"
     ),
     # New pin (convection ruling, 2026-08-26): the frozen config ADMITS
     # config_convection_scheme from this module and the frozen timestep
@@ -495,7 +495,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # twice the Courant floor's own count, which changes only meshes finer
     # than ~35 m that used to get None; the registered rows reproduce.
     "src/hexcore/dt_admission.py": (
-        "c98fe39399afb0da5d6c39e7162711512ac2b8d97c4ba78a0b70f6d74f833d5c"
+        "4aebb6cee974525743e8ff53c358857b7df9324a720891013d72b9a90f3f5fd3"
     ),
     # New pin (surface/PBL cadence, 2026-08-26): this module decides
     # config_bldt_seconds, a knob the frozen timestep registry keys on, so
@@ -578,7 +578,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # adapter authority document (CUDA_ARWEN_PHYSICS_V841_CONTRACT_SHA256)
     # is unchanged.
     "src/hexcore/cuda_arwen_physics_v841.py": (
-        "7a129fc21be6bf9e70ecdf611a21edab9a6dd6a91473c6ae8805b127563c141b"
+        "51c0a05485a97b916cec06338d851aeb1edebbebeec9f315f921d852cd576c1b"
     ),
     # The v8.4.1 horizontal-mixing execution boundary (2-D Smagorinsky):
     # CPU authorities and the CUDA operator modules the RK1 saved-Euler
