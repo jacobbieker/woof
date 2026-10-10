@@ -8,13 +8,18 @@ Two history dialects are read, by variable name:
 
 * native MPAS-A history (``uReconstructZonal``, ``t2m``, ``xtime``, ...);
 * ``woof hex forecast`` output (``cuda-history.<YYYY-MM-DD_HH.MM.SS>.nc``:
-  ``u_zonal``, ``v_meridional``, ``t2``, ``pressure``, no ``xtime`` -- the
-  valid time is the label in the file name).
+  ``u_zonal``, ``v_meridional``, ``t2``, ``pressure``, ``swdown``; the
+  valid time is ``xtime`` when the frame carries it, else the label in the
+  file name, which frames written before ``xtime`` was added rely on).
 
-Mesh fields (``latCell``/``lonCell`` in radians, ``zgrid``, ``bdyMaskCell``,
-``cellsOnVertex``) are read from ``mesh_path`` first and from the first
-history file second; the CUDA history carries no ``zgrid``, so a profile
-needs the culled init (the plan's ``mesh["mesh_path"]``).
+Mesh fields (``latCell``/``lonCell`` in radians, ``bdyMaskCell``,
+``cellsOnVertex``, ``ter``) are read from ``mesh_path`` first and from the
+first history file second.  ``zgrid`` is read from the first history file
+that carries one -- ``woof hex forecast`` writes the run's own ``zgrid`` in
+every frame -- and from ``mesh_path`` (the culled init, the plan's
+``mesh["mesh_path"]``) only when no history file does.  History files whose
+``zgrid_sha256`` attributes disagree come from different vertical grids and
+are refused.
 
 Horizontal: barycentric interpolation over the Delaunay triangle (the three
 cells around one Voronoi vertex, ``cellsOnVertex``) that contains the site,
@@ -80,7 +85,7 @@ SURFACE_SOURCES: dict[str, tuple[str, ...]] = {
     "T2": ("t2m", "t2"),
     "Q2": ("q2",),
     "PSFC": ("surface_pressure",),
-    "SWDOWN": ("swdnb",),
+    "SWDOWN": ("swdnb", "swdown"),
     "SWDDNI": ("swddni",),
     "SWDDIF": ("swddif",),
     "RAINNC": ("rainnc",),
@@ -89,7 +94,7 @@ SURFACE_SOURCES: dict[str, tuple[str, ...]] = {
 }
 PRESSURE_PARTS = ("pressure_p", "pressure_base")
 
-_MESH_NAMES = ("latCell", "lonCell", "zgrid", "bdyMaskCell", "cellsOnVertex",
+_MESH_NAMES = ("latCell", "lonCell", "bdyMaskCell", "cellsOnVertex",
                "ter")
 _LABEL = re.compile(r"(\d{4}-\d{2}-\d{2})_(\d{2})[.:](\d{2})[.:](\d{2})")
 
@@ -188,8 +193,26 @@ class _Mesh:
 
 def _read_mesh(paths: Sequence[Path], mesh_path: Path | None) -> _Mesh:
     found: dict[str, np.ndarray] = {}
+    history_path = Path(paths[0])
     sources = ([Path(mesh_path)] if mesh_path is not None else []) + \
-        [Path(paths[0])]
+        [history_path]
+    # zgrid: the first history file that carries one (the run's own
+    # vertical grid; every other frame carrying one must agree with it by
+    # zgrid_sha256, checked in sample_mpas), the mesh file only when no
+    # history file does.
+    zgrid_from = None
+    zgrid_sources = [(Path(p), "history") for p in paths]
+    if mesh_path is not None:
+        zgrid_sources.append((Path(mesh_path), "mesh"))
+    for source, kind in zgrid_sources:
+        with _dataset(source) as ds:
+            if "zgrid" in ds.variables:
+                variable = ds.variables["zgrid"]
+                index = tuple(0 if d == "Time" else slice(None)
+                              for d in variable.dimensions)
+                found["zgrid"] = _array(variable, index)
+                zgrid_from = kind
+                break
     for source in sources:
         with _dataset(source) as ds:
             for name in _MESH_NAMES:
@@ -213,6 +236,8 @@ def _read_mesh(paths: Sequence[Path], mesh_path: Path | None) -> _Mesh:
         lat, lon = np.radians(lat), np.radians(lon)
         notes.append("latCell/lonCell read as degrees (values exceed pi/2)")
     zgrid = found.get("zgrid")
+    if zgrid_from is not None:
+        notes.append(f"zgrid read from the {zgrid_from} file")
     if zgrid is not None:
         zgrid = zgrid.astype(np.float64)
         if zgrid.shape[0] != lat.shape[0] and zgrid.shape[-1] == lat.shape[0]:
@@ -479,8 +504,19 @@ def sample_mpas(paths: Sequence[Path], lat: np.ndarray, lon: np.ndarray,
     profile: dict[str, list[np.ndarray]] = {k: [] for k in profile_keys}
     surface: dict[str, list[np.ndarray]] = {k: [] for k in surface_keys}
     count = len(lat)
+    zgrid_digests: dict[str, Path] = {}
     for path in paths:
         with _dataset(path) as ds:
+            if "zgrid_sha256" in ds.ncattrs():
+                zgrid_digests.setdefault(str(ds.getncattr("zgrid_sha256")),
+                                         path)
+                if len(zgrid_digests) > 1:
+                    first, second = list(zgrid_digests.values())[:2]
+                    raise SampleUnavailable(
+                        f"{first} and {second} carry different zgrid "
+                        "(zgrid_sha256 differs): the history files come "
+                        "from different vertical grids and cannot be "
+                        "sampled as one series")
             file_times = _times(ds, path)
             names = set(ds.variables)
             for t, stamp in enumerate(file_times):

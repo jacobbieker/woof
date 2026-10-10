@@ -127,7 +127,27 @@ _REQUIRED_ARWEN_EXPORT_FIELDS = ("tsk", "smois", "tslb", "hfx", "qfx", "lh")
 _OPTIONAL_ARWEN_EXPORT_FIELDS = (
     "t2", "q2", "pblh", "u10", "v10", "psfc",
     "swdown", "glw", "olr",
+    "swddni", "swddif", "coszr",
 )
+#: Export keys for the optional fields the engine does not publish under
+#: ``fields/<name>``.  SWDDNI, SWDDIF and COSZR are the radiation call's
+#: held history buffers (``PhysicsDriver.surface_dni``/``surface_dif``/
+#: ``radiation_coszen``, carried in the seam export as ``diag/...`` by
+#: woof.io.restart's checkpoint-only class).  They exist only when the
+#: attached shortwave declares ``supplies_surface_direct`` (SWDDNI/SWDDIF)
+#: or ``publishes_coszen`` (COSZR), so a run whose scheme computes none
+#: exports none and its history carries none: absent, never zero-filled.
+#: Like ``swdown`` they hold the last radiation call's values between
+#: calls, and the start frame carries the allocated zeros (no radiation
+#: call precedes it), as native MPAS-A writes them.  The WRF side's
+#: ``swint_opt = 1`` per-step interpolated pair has no MPAS-A v8.4.1
+#: counterpart and the column-batch seam constructs no swint, so the held
+#: buffers are the only SWDDNI/SWDDIF this physics produces.
+_ARWEN_EXPORT_KEYS = {
+    "swddni": "diag/surface_dni",
+    "swddif": "diag/surface_dif",
+    "coszr": "diag/radiation_coszen",
+}
 _SOIL_DIAGNOSTIC_FIELDS = frozenset(("smois", "tslb"))
 _GWDO_SURFACE_FIELDS = ("dusfcg", "dvsfcg")
 _GWDO_LEVEL_FIELDS = (
@@ -1628,7 +1648,7 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
         selected_h2d_bytes = 0
         names = (*_REQUIRED_ARWEN_EXPORT_FIELDS, *_OPTIONAL_ARWEN_EXPORT_FIELDS)
         for name in names:
-            key = f"fields/{name}"
+            key = _ARWEN_EXPORT_KEYS.get(name, f"fields/{name}")
             if key not in export_arrays:
                 if name in _REQUIRED_ARWEN_EXPORT_FIELDS:
                     raise ValueError(f"frozen WOOF v2 public export lacks required {key!r}")
@@ -1738,7 +1758,9 @@ class PersistentTwoPhaseCudaPhysicsBackendV841:
                 sorted(export_arrays)
             ),
             "selected_export_inventory": [
-                f"fields/{name}" for name in names if name in selected
+                _ARWEN_EXPORT_KEYS.get(name, f"fields/{name}")
+                for name in names
+                if name in selected
             ],
             "selected_export_hashes": selected_hashes,
             "selected_export_h2d_bytes": selected_h2d_bytes,

@@ -1235,9 +1235,10 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         "grid": f"{RUN_DIR}/{CULL_NAME}.grid.nc",
         "static": f"{RUN_DIR}/{CULL_NAME}.static.nc",
         # What woof energy extract hands sample_mpas(mesh_path=...): the
-        # culled init carries latCell/lonCell, bdyMaskCell, cellsOnVertex
-        # and zgrid (the CUDA history files carry no zgrid).  Written by the
-        # blocked init stage.
+        # culled init carries bdyMaskCell and cellsOnVertex, which the CUDA
+        # history files do not (they carry latCell/lonCell and their own
+        # zgrid, which the sampler prefers).  Written by the blocked init
+        # stage.
         "mesh_path": f"{RUN_DIR}/{CULL_NAME}.init.nc",
         "background_km": background_km,
         "ladder_km": sorted(rungs_km),

@@ -42,7 +42,7 @@ argument refusal work on a box with no CUDA lane at all.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import datetime as _dt
 import importlib.util
 import json
@@ -70,6 +70,7 @@ from .physics_backend_admission import (
 )
 from . import engine_identity
 from . import forecast_preset
+from . import history_selection as _history_selection
 from .host_identity import host_record
 from .errors import ConfigurationRefusal, MpasPortError
 
@@ -763,6 +764,12 @@ class ForecastRequest:
     #: ``"preset"`` when the row decided the surface/PBL cadence,
     #: ``"explicit"`` when --pbl-cadence was given.
     pbl_cadence_source: str = "preset"
+    #: Which variables the history frames publish
+    #: (``woof.hex.history_selection.resolve_history_selection``); the
+    #: default is the full set.
+    history_selection: Mapping[str, Any] = field(
+        default_factory=lambda: _history_selection.resolve_history_selection(None, None)
+    )
 
     @property
     def inputs_present(self) -> bool:
@@ -1155,6 +1162,13 @@ def resolve_request(
         "--history-every-minutes",
         "the history cadence has no default; it decides how much of the run "
         "survives it, and a wrong guess is discovered only after the run"))
+    try:
+        selection = _history_selection.resolve_history_selection(
+            getattr(arguments, "history_vars", None),
+            getattr(arguments, "history_preset", None),
+        )
+    except _history_selection.HistorySelectionRefusal as error:
+        raise _refuse(str(error)) from None
     # Before the schedule is built from the row's timestep, ask whether that
     # timestep is one the frozen lane may execute at all.  Card-free,
     # file-free, and ahead of every expensive check.
@@ -1450,6 +1464,7 @@ def resolve_request(
         input_problems=tuple(collected or ()),
         preset=preset.name,
         pbl_cadence_source=pbl_cadence_source,
+        history_selection=selection,
     )
 
 
@@ -1474,6 +1489,7 @@ def build_driver_argv(request: ForecastRequest) -> list[str]:
         "--init-source", request.init_source,
         "--hours", repr(request.hours),
         "--history-every-minutes", str(request.history_every_minutes),
+        *_history_selection.selection_argv(request.history_selection),
         "--arwen-checkout", str(request.gpuwm_checkout),
         "--horiz-mixing", request.horiz_mixing,
         "--convection", request.convection,
@@ -1606,6 +1622,24 @@ def build_receipt(
             "history_every_minutes": request.history_every_minutes,
             "expected_frames": request.capture_count,
             "start_time": request.start_time,
+            "history_variables": {
+                "source": request.history_selection["source"],
+                "preset": request.history_selection["preset"],
+                "variables": (
+                    None
+                    if request.history_selection["variables"] is None
+                    else list(request.history_selection["variables"])
+                ),
+                # What the frames actually carry, from the driver; None
+                # until it has run.
+                "written": (
+                    None
+                    if driver_receipt is None
+                    else dict(driver_receipt).get("forecast", {}).get(
+                        "history_variables"
+                    )
+                ),
+            },
         },
         "configuration": {
             "horiz_mixing": request.horiz_mixing,
@@ -2048,6 +2082,22 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--history-every-minutes", type=int, default=None, metavar="M",
         help="history cadence; must divide the run into whole steps")
+    parser.add_argument(
+        "--history-vars", default=None, metavar="A,B,C",
+        help="publish only these history variables, comma-separated "
+             "(e.g. u_zonal,v_meridional,t2,zgrid). Strict: a name the "
+             "run's frame does not carry refuses at the first frame. Mesh "
+             "coordinates and xtime are always written. Exclusive with "
+             "--history-preset; default is every variable")
+    parser.add_argument(
+        "--history-preset", default=None,
+        choices=sorted(_history_selection.HISTORY_PRESETS),
+        help="publish a named history selection. 'energy': the energy "
+             "sampler's fields (winds, w, theta, pressure, rho, the six "
+             "water species, t2, q2, u10, v10, surface_pressure, swdown, "
+             "swddni, swddif, coszr, rainnc, rainc, zgrid, xtime); a member "
+             "the run does not produce is skipped and named in the receipt. "
+             "'full': every variable (the default)")
     parser.add_argument(
         "--out", type=Path, default=None, metavar="DIR",
         help="fresh directory for history frames and the run receipt")

@@ -162,6 +162,14 @@ from woof.hex import dt_admission  # noqa: E402
 from woof.hex import engine_identity  # noqa: E402
 from woof.hex import shipped_sources  # noqa: E402
 from woof.hex.errors import ConfigurationRefusal  # noqa: E402
+from woof.hex.history_selection import (  # noqa: E402
+    FRAME_NAMES,
+    HistorySelectionRefusal,
+    plan_frame,
+    precheck_names,
+    resolve_history_selection,
+    wants_zgrid,
+)
 from woof.hex.species_row import species_row_for_scheme as _row_for_scheme  # noqa: E402
 from woof.hex.mesh import (  # noqa: E402
     REGIONAL_BOUNDARY_MASK_NAMES,
@@ -1795,6 +1803,35 @@ class BoundaryFingerprintWriter:
         self._stream.close()
 
 
+def load_history_zgrid(init_path: Path) -> np.ndarray:
+    """The init's ``zgrid(nCells, nVertLevelsP1)`` for the history frames.
+
+    Read once per run from the same init the host was prepared from, as
+    FP32 -- the precision the run's own vertical grid is built in -- so a
+    sampler can place each frame's profiles in height without the init.
+    """
+
+    from netCDF4 import Dataset
+
+    with Dataset(init_path, "r") as dataset:
+        if "zgrid" not in dataset.variables:
+            raise ValueError(f"{init_path} carries no zgrid")
+        variable = dataset.variables["zgrid"]
+        if tuple(variable.dimensions) != ("nCells", "nVertLevelsP1"):
+            raise ValueError(
+                f"init zgrid has dimensions {variable.dimensions}; expected "
+                "('nCells', 'nVertLevelsP1')"
+            )
+        variable.set_auto_mask(False)
+        zgrid = np.ascontiguousarray(variable[:], dtype=np.float32)
+    if zgrid.shape != (N_CELLS, N_INTERFACES):
+        raise ValueError(
+            f"init zgrid shape {zgrid.shape} is not the bound mesh's "
+            f"{(N_CELLS, N_INTERFACES)}"
+        )
+    return zgrid
+
+
 def _snapshot_q2_hash(snapshot: Mapping[str, Any]) -> str | None:
     value = snapshot["arrays"].get("q2")
     return None if value is None else proof.array_sha256(value)
@@ -1978,8 +2015,15 @@ def execute_forecast(
     park_physics_tier: bool = False,
     required_free_bytes: int | None = None,
     local_timestep_classing_path: Path | None = None,
+    history_selection: Mapping[str, Any] | None = None,
+    history_zgrid: Any | None = None,
 ) -> dict[str, Any]:
     from woof.hex.cuda_arwen_physics_v841 import pin_arwen_physics_v841
+
+    # Refuse a malformed selection before CUDA is touched; the default is
+    # the full set, every array a frame carries, as before selection existed.
+    if history_selection is None:
+        history_selection = resolve_history_selection(None, None)
 
     arwen_pin = dict(_pin_for_run(host, arwen_checkout, pin_arwen_physics_v841))
     # This must precede KernelCache's woof platform-binding construction.
@@ -2074,6 +2118,15 @@ def execute_forecast(
     integration_seconds = 0.0
     first_step_seconds = None
 
+    history_missing: dict[str, list[int]] = {}
+    history_written: set[str] = set()
+    history_zgrid_frames: list[int] = []
+    # The static zgrid is copied and hashed once, not once per frame.
+    history_zgrid_sha256 = None
+    if history_zgrid is not None:
+        history_zgrid = np.ascontiguousarray(history_zgrid, dtype=np.float32)
+        history_zgrid_sha256 = proof.array_sha256(history_zgrid)
+
     def capture(step: int) -> None:
         nonlocal capture_seconds, write_seconds
         mark = time.perf_counter()
@@ -2108,11 +2161,34 @@ def execute_forecast(
         snapshot_projection[str(step)] = proof._snapshot_hash_projection(snapshot)
         snapshot_q2[str(step)] = _snapshot_q2_hash(snapshot)
         snapshot_receipts[str(step)] = snapshot["receipt"]
+        # The selection is applied at the writer only: the physical gate and
+        # the hash projection above saw the whole frame.  A strict
+        # (--history-vars) name the frame does not carry refuses here, at
+        # the start frame, before any step is integrated.
+        frame = plan_frame(
+            history_selection,
+            snapshot["arrays"],
+            zgrid_available=history_zgrid is not None,
+        )
         mark = time.perf_counter()
         snapshot_files[str(step)] = proof.write_snapshot_netcdf(
-            output_root / f"cuda-history.{labels[step]}.nc", snapshot, static
+            output_root / f"cuda-history.{labels[step]}.nc",
+            snapshot,
+            static,
+            variables=frame["arrays"],
+            xtime=schedule["valid_times"][step],
+            zgrid=history_zgrid if frame["zgrid"] else None,
+            zgrid_sha256=history_zgrid_sha256 if frame["zgrid"] else None,
         )
         write_seconds += time.perf_counter() - mark
+        # Recorded only once the frame is on disk.
+        history_written.update(
+            snapshot["arrays"] if frame["arrays"] is None else frame["arrays"]
+        )
+        if frame["zgrid"]:
+            history_zgrid_frames.append(step)
+        for name in frame["missing"]:
+            history_missing.setdefault(name, []).append(step)
         del snapshot
         gc.collect()
 
@@ -2380,6 +2456,28 @@ def execute_forecast(
             key: value for key, value in schedule.items() if key != "labels"
         },
         "history_labels": schedule["labels"],
+        "history_variables": {
+            "source": history_selection["source"],
+            "preset": history_selection["preset"],
+            "requested": (
+                None
+                if history_selection["variables"] is None
+                else list(history_selection["variables"])
+            ),
+            "written_arrays": sorted(history_written),
+            "zgrid_written_at_steps": history_zgrid_frames,
+            "zgrid_sha256": history_zgrid_sha256,
+            "xtime_written": True,
+            "absent_from_frames": {
+                name: steps_ for name, steps_ in sorted(history_missing.items())
+            },
+            "note": (
+                "mesh coordinates and xtime are written in every frame; "
+                "a preset member the run does not produce (e.g. swddni/swddif "
+                "without a direct-beam shortwave) is absent, listed here, "
+                "never zero-filled"
+            ),
+        },
         "walls": {
             "integration_seconds": integration_seconds,
             "integration_note": (
@@ -2482,6 +2580,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--hours", type=float, required=True)
     parser.add_argument("--history-every-minutes", type=int, required=True)
+    parser.add_argument(
+        "--history-vars",
+        default=None,
+        metavar="A,B,C",
+        help="publish only these history variables (strict: a name the "
+             "frame does not carry refuses at the first frame)",
+    )
+    parser.add_argument(
+        "--history-preset",
+        default=None,
+        help="publish a named history selection "
+             "(woof.hex.history_selection.HISTORY_PRESETS)",
+    )
     parser.add_argument(
         "--arwen-checkout",
         type=Path,
@@ -2673,6 +2784,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if not args.preflight_only and (args.cache_root is None or args.output is None):
         parser.error("execution requires --cache-root and --output")
+    try:
+        args.history_selection = resolve_history_selection(
+            args.history_vars, args.history_preset
+        )
+    except HistorySelectionRefusal as error:
+        parser.error(str(error))
     if args.fingerprint_every < 0:
         parser.error("--fingerprint-every must be >= 0")
     if args.required_free_bytes is not None and args.required_free_bytes <= 0:
@@ -2912,6 +3029,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         start_text=host["start_time_text"],
     )
     install_capture_labels(schedule["labels"])
+    # History selection, checked against this run's own names and zgrid
+    # read, BEFORE the destinations exist: a typo in --history-vars or an
+    # unreadable zgrid refuses here, where a retry needs no cleanup.
+    precheck_names(
+        args.history_selection,
+        (
+            *FRAME_NAMES,
+            *host["scalar_names"],
+            *host["surface_accumulators"],
+        ),
+    )
+    history_zgrid = (
+        load_history_zgrid(paths["init"])
+        if wants_zgrid(args.history_selection)
+        else None
+    )
 
     provenance = {
         "schema": SCHEMA,
@@ -2944,6 +3077,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "profile": proof.PROFILE,
         "source_release": proof.SOURCE_RELEASE,
         "horiz_mixing": args.horiz_mixing,
+        "history_selection": {
+            "source": args.history_selection["source"],
+            "preset": args.history_selection["preset"],
+            "variables": (
+                None
+                if args.history_selection["variables"] is None
+                else list(args.history_selection["variables"])
+            ),
+        },
         "convection": host["convection"],
         "local_timestep": {
             "enabled": bool(args.local_timestep),
@@ -3028,6 +3170,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         park_physics_tier=bool(args.park_physics_tier),
         required_free_bytes=args.required_free_bytes,
         local_timestep_classing_path=args.local_timestep_classing,
+        history_selection=args.history_selection,
+        history_zgrid=history_zgrid,
     )
     source_after = proof.require_frozen_execution_sources()
     authority_after = verify_forecast_authorities(paths)
