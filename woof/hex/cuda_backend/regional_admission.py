@@ -135,6 +135,35 @@ class RegionalAdmissionRefusal(RuntimeError):
     """A regional configuration is refused, and the message says why."""
 
 
+#: What every admitted class row in :data:`ADMITTED_CLASSES` is: a class with
+#: a verified two-process forecast mint behind it.
+CLASS_EVIDENCE_MINTED = "minted"
+
+#: What a class admitted through the EXPERIMENTAL lane is: a configuration
+#: class synthesised from the key measured off the run in hand, with NO mint
+#: pair behind it.  Every anchor, contract receipt and preflight receipt the
+#: lane produces carries this label under ``class_evidence``.
+CLASS_EVIDENCE_EXPERIMENTAL = "experimental-unminted"
+
+#: The opt-in shared with the experimental sub-5 s timestep lane
+#: (``woof hex forecast --experimental-dt`` sets it for the driver).  Only the
+#: exact value ``1`` opens the lane; anything else leaves it closed.
+EXPERIMENTAL_DT_ENVIRONMENT = "WOOF_HEX_EXPERIMENTAL_DT"
+
+
+def experimental_lane_requested(experimental: bool | None = None) -> bool:
+    """Is the experimental regional-class lane open for this call?
+
+    An explicit ``experimental`` argument wins (the CLI flag's value, passed
+    through); ``None`` reads :data:`EXPERIMENTAL_DT_ENVIRONMENT`, which is how
+    the frozen driver's own call site -- which passes nothing -- learns it.
+    """
+
+    if experimental is not None:
+        return bool(experimental)
+    return os.environ.get(EXPERIMENTAL_DT_ENVIRONMENT, "").strip() == "1"
+
+
 def kernel_set_sha256(root: Path | None = None) -> str:
     """One digest over every source the regional step launches through.
 
@@ -345,10 +374,15 @@ class RegionalClass:
     #: A class declares a band only when its basis says why; see
     #: :meth:`RegionalClassKey.finest_edge_within`.
     finest_edge_band_relative: float = 0.0
+    #: ``"minted"`` for every row of :data:`ADMITTED_CLASSES`;
+    #: ``"experimental-unminted"`` only for a class the experimental lane
+    #: synthesised from a measured key (:func:`experimental_class_for_key`).
+    class_evidence: str = CLASS_EVIDENCE_MINTED
 
     def as_dict(self) -> dict[str, object]:
         return {
             "class_id": self.class_id,
+            "class_evidence": self.class_evidence,
             "key": self.key.as_dict(),
             "finest_edge_band_relative": self.finest_edge_band_relative,
             "parent": self.parent,
@@ -1127,14 +1161,44 @@ def presented_contract(
     n_cells: int | None,
     kernel_set: str,
     directories: Sequence[Path | str] = (),
+    prefer_class_ids: Sequence[str] = (),
 ) -> tuple[RegionalContract | None, list[str]]:
     """A contract deck receipt presented for this exact geometry.
 
     Returns the admitted contract and the reasons every candidate receipt was
     rejected, so a refusal can say what it looked at rather than only that it
     found nothing.
+
+    ``prefer_class_ids`` picks, among receipts that ALL pass for this
+    geometry, the first one whose class claim is in that list (in the list's
+    order).  It matters once a ledger holds several stamped receipts for one
+    digest (an experimental stamp beside a minted one): the receipt this run
+    can actually be admitted on is chosen rather than whichever sorts first.
+    With no preference, or no match, the first passing receipt is returned
+    exactly as before.
     """
 
+    preferred = [item for item in prefer_class_ids if item]
+    found, rejected = _presented_contracts(
+        bdy_mask_sha256, n_cells=n_cells, kernel_set=kernel_set,
+        directories=directories, first_only=not preferred,
+    )
+    for class_id in preferred:
+        for candidate in found:
+            if candidate.class_id == class_id:
+                return candidate, rejected
+    return (found[0] if found else None), rejected
+
+
+def _presented_contracts(
+    bdy_mask_sha256: str,
+    *,
+    n_cells: int | None,
+    kernel_set: str,
+    directories: Sequence[Path | str],
+    first_only: bool,
+) -> tuple[list[RegionalContract], list[str]]:
+    found: list[RegionalContract] = []
     rejected: list[str] = []
     for directory in _ledger_directories(directories):
         if not directory.is_dir():
@@ -1155,7 +1219,7 @@ def presented_contract(
                 rejected.append(f"{path.name}: {defects[0]}")
                 continue
             class_id = str(document.get("class_id") or "")
-            return (
+            found.append(
                 RegionalContract(
                     bdy_mask_sha256=bdy_mask_sha256,
                     n_cells=int(document.get("n_cells") or (n_cells or 0)),
@@ -1174,11 +1238,18 @@ def presented_contract(
                         "kernels covered, every mutation control with teeth, "
                         "dual-run identical, at this tree's own regional "
                         "kernel-set digest."
+                        + (
+                            "  Its class stamp reads "
+                            f"{document.get('class_evidence')!r}."
+                            if document.get("class_evidence")
+                            else ""
+                        )
                     ),
-                ),
-                rejected,
+                )
             )
-    return None, rejected
+            if first_only:
+                return found, rejected
+    return found, rejected
 
 
 # ---------------------------------------------------------------------------
@@ -1240,6 +1311,178 @@ def contract_for_row(mesh_row: str | None) -> RegionalContract | None:
 
 
 # ---------------------------------------------------------------------------
+# the EXPERIMENTAL lane: fine classes nobody has minted
+# ---------------------------------------------------------------------------
+#: The class-id grammar every shipped row follows: ``graded-<edge>m-dt<dt>-
+#: z<width>``, the finest edge rounded to the metre and the timestep printed
+#: with ``%g``.  A column count other than the program's 55 levels appends
+#: ``-l<levels>`` so two experimental classes that differ only in levels
+#: never share a name.
+STANDARD_CLASS_LEVELS = 55
+
+
+def class_id_for_key(key: RegionalClassKey) -> str:
+    """The class id the shipped grammar gives a measured key.
+
+    ``graded-117m-dt0.5-z7`` for a 117 m cull at dt 0.5 s with seven rings.
+    A key with an unmeasured edge has no grammar name and is refused.
+    """
+
+    if not key.finest_edge_measured:
+        raise RegionalAdmissionRefusal(
+            "a class id needs a measured finest edge; this key's edge was "
+            "never measured"
+        )
+    edge_m = int(round(key.finest_edge_mm / 1000.0))
+    dt_seconds = key.dt_ms / 1000.0
+    name = f"graded-{edge_m}m-dt{dt_seconds:g}-z{key.boundary_zone_width}"
+    if key.n_vert_levels != STANDARD_CLASS_LEVELS:
+        name += f"-l{key.n_vert_levels}"
+    return name
+
+
+def finest_minted_edge_mm() -> int:
+    """The finest MEASURED edge any minted class holds, in millimetres."""
+
+    edges = [
+        row.key.finest_edge_mm
+        for row in ADMITTED_CLASSES.values()
+        if row.key.finest_edge_measured
+    ]
+    return min(edges) if edges else 0
+
+
+def shortest_minted_dt_ms() -> int:
+    """The shortest timestep any minted class holds, in milliseconds."""
+
+    steps = [row.key.dt_ms for row in ADMITTED_CLASSES.values()]
+    return min(steps) if steps else 0
+
+
+def regional_courant_limit_seconds(finest_edge_m: float) -> float:
+    """The outer-step Courant ceiling the global admission applies.
+
+    The same rule, not a copy of its numbers: :class:`woof.hex.
+    timestep_admission.CourantPolicy` (125 m/s at a 0.9 safety factor).  The
+    experimental lane relaxes the MINT, never this.
+    """
+
+    from ..timestep_admission import CourantPolicy
+
+    policy = CourantPolicy()
+    policy.validate()
+    return (
+        float(finest_edge_m)
+        * float(policy.safety_factor)
+        / float(policy.max_characteristic_speed_m_s)
+    )
+
+
+def experimental_class_defects(key: RegionalClassKey) -> list[str]:
+    """Why ``key`` cannot be admitted through the experimental lane.
+
+    Empty when it can.  The lane exists for FINE classes -- finer than the
+    finest minted edge or shorter than the shortest minted timestep -- so a
+    coarse class the ordinary mint covers the shape of is still sent to the
+    mint.  The Courant ceiling stays enforced, and a key whose finest edge was
+    never measured is refused because nothing would distinguish its
+    resolution from any other.
+    """
+
+    defects: list[str] = []
+    if not key.finest_edge_measured or key.finest_edge_mm <= 0:
+        defects.append(
+            "its finest edge was not measured off the mesh, so nothing would "
+            "tell this class's resolution from any other"
+        )
+        return defects
+    if key.dt_ms <= 0:
+        defects.append(f"its timestep {key.dt_ms / 1000.0:g} s is not positive")
+        return defects
+    if key.boundary_zone_width <= 0:
+        defects.append(
+            "it carries no boundary rings, so it is not a regional cull"
+        )
+    finest = finest_minted_edge_mm()
+    shortest = shortest_minted_dt_ms()
+    if not (key.finest_edge_mm < finest or key.dt_ms < shortest):
+        defects.append(
+            f"it is not a FINE class: its finest edge "
+            f"{key.finest_edge_mm / 1000.0:.3f} m is not below the finest "
+            f"minted edge ({finest / 1000.0:.3f} m) and its timestep "
+            f"{key.dt_ms / 1000.0:g} s is not below the shortest minted "
+            f"timestep ({shortest / 1000.0:g} s), so the ordinary forecast "
+            f"mint (tools/run_cuda_regional_forecast.py --mint-anchor, run "
+            f"twice) is the route for it"
+        )
+    limit = regional_courant_limit_seconds(key.finest_edge_mm / 1000.0)
+    if key.dt_ms / 1000.0 > limit:
+        from ..timestep_admission import CourantPolicy
+
+        policy = CourantPolicy()
+        defects.append(
+            f"its timestep {key.dt_ms / 1000.0:g} s exceeds the outer-step "
+            f"Courant ceiling {limit:.4f} s for a "
+            f"{key.finest_edge_mm / 1000.0:.3f} m finest edge "
+            f"({policy.max_characteristic_speed_m_s:g} m/s at safety "
+            f"{policy.safety_factor:g}); the experimental lane never relaxes "
+            f"the Courant rule"
+        )
+    return defects
+
+
+_EXPERIMENTAL_CLASS_BASIS = (
+    "EXPERIMENTAL-UNMINTED CLASS, admitted only because the experimental lane "
+    "was opened explicitly (--experimental-dt / WOOF_HEX_EXPERIMENTAL_DT=1).  "
+    "No pair of independent runs has ever shown that this kernel set "
+    "reproduces itself at this timestep on a domain of this shape: the "
+    "forecast mint half of the anchor is ABSENT, and output of this run is "
+    "unanchored evidence.  What still holds: the key was measured off the "
+    "run in hand, the outer-step Courant ceiling was enforced, the kernel set "
+    "is this tree's, and the cull's own contract deck (the GEOMETRY half) was "
+    "required exactly as for a minted class.  This class is never a row of "
+    "ADMITTED_CLASSES; a real row needs a two-process mint pair."
+)
+
+
+def experimental_class_for_key(key: RegionalClassKey) -> RegionalClass:
+    """Synthesise the experimental class a fine measured key belongs to.
+
+    Refuses by name when :func:`experimental_class_defects` finds anything.
+    Never consults or extends :data:`ADMITTED_CLASSES`.
+    """
+
+    defects = experimental_class_defects(key)
+    if defects:
+        raise RegionalAdmissionRefusal(
+            experimental_class_refusal(key, None, defects)
+        )
+    return RegionalClass(
+        class_id=class_id_for_key(key),
+        key=key,
+        parent="(experimental: no minted parent)",
+        card="(unminted)",
+        admitted_on="(unminted)",
+        mint_receipts=(),
+        minted_on_geometries=(),
+        basis=_EXPERIMENTAL_CLASS_BASIS,
+        class_evidence=CLASS_EVIDENCE_EXPERIMENTAL,
+    )
+
+
+def experimental_class_refusal(
+    key: RegionalClassKey, mesh_row: str | None, defects: Sequence[str]
+) -> str:
+    """The refusal when even the experimental lane cannot admit a class."""
+
+    return (
+        unanchored_class_refusal(key, mesh_row)
+        + ".  THE EXPERIMENTAL LANE WAS OPEN and still refuses it, because "
+        + "; ".join(defects)
+    )
+
+
+# ---------------------------------------------------------------------------
 # refusals
 # ---------------------------------------------------------------------------
 def unanchored_class_refusal(
@@ -1271,8 +1514,15 @@ def uncontracted_geometry_refusal(
     n_cells: int | None,
     class_id: str,
     rejected: Sequence[str] = (),
+    *,
+    class_status: str = "IS minted",
 ) -> str:
-    """The named refusal for a cull whose own zone geometry is unchecked."""
+    """The named refusal for a cull whose own zone geometry is unchecked.
+
+    ``class_status`` is how the class half stands; the experimental lane
+    passes "is admitted experimental-unminted" so the sentence never claims
+    a mint that does not exist.
+    """
 
     digest = (
         "no bdyMask digest was supplied"
@@ -1287,7 +1537,7 @@ def uncontracted_geometry_refusal(
         )
     return (
         f"regional CUDA execution is refused for this cull ({digest}{cells}): "
-        f"its configuration class {class_id!r} IS minted, but no contract "
+        f"its configuration class {class_id!r} {class_status}, but no contract "
         f"deck has been run on THIS cull's own zone geometry.  The concrete "
         f"breakage that prevents: the 22 regional kernels are indexed by "
         f"ring, and a deck run on another cull's rings measured another "
@@ -1356,6 +1606,20 @@ class RegionalAnchor:
     class_id: str = ""
     class_key: RegionalClassKey | None = None
     contract_route: str = "shipped"
+    #: ``"minted"``, or ``"experimental-unminted"`` when the experimental
+    #: lane synthesised the class (no forecast mint pair behind it).
+    class_evidence: str = CLASS_EVIDENCE_MINTED
+    #: The class the geometry's contract deck CLAIMED, recorded beside the
+    #: class actually admitted (they differ only on the experimental lane,
+    #: where a minted claim's deck is reused for a finer timestep).
+    contract_class_claim: str = ""
+    #: The outer-step Courant ceiling the experimental lane enforced, in
+    #: seconds; ``None`` on the minted lane, whose class row carries it.
+    courant_limit_seconds: float | None = None
+
+    @property
+    def experimental(self) -> bool:
+        return self.class_evidence == CLASS_EVIDENCE_EXPERIMENTAL
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -1371,6 +1635,9 @@ class RegionalAnchor:
             "class_id": self.class_id,
             "class_key": None if self.class_key is None else self.class_key.as_dict(),
             "contract_route": self.contract_route,
+            "class_evidence": self.class_evidence,
+            "contract_class_claim": self.contract_class_claim,
+            "courant_limit_seconds": self.courant_limit_seconds,
         }
 
 
@@ -1399,6 +1666,13 @@ def _compose(
         class_id=klass.class_id,
         class_key=klass.key,
         contract_route=route,
+        class_evidence=klass.class_evidence,
+        contract_class_claim=contract.class_id,
+        courant_limit_seconds=(
+            None
+            if klass.class_evidence == CLASS_EVIDENCE_MINTED
+            else regional_courant_limit_seconds(klass.key.finest_edge_mm / 1000.0)
+        ),
     )
 
 
@@ -1413,6 +1687,7 @@ def require_regional_anchor(
     dt_seconds: float | None = None,
     contract_directories: Sequence[Path | str] = (),
     kernel_set: str | None = None,
+    experimental: bool | None = None,
 ) -> RegionalAnchor:
     """Admit one regional configuration for CUDA execution, or refuse by name.
 
@@ -1434,6 +1709,18 @@ def require_regional_anchor(
     message that names the concrete breakage, per the gate law.  Callers
     convert it to their own refusal type when a typed refusal is the local
     convention.
+
+    ``experimental`` opens the EXPERIMENTAL lane (``None`` reads
+    ``WOOF_HEX_EXPERIMENTAL_DT``; see :func:`experimental_lane_requested`).
+    It changes exactly one decision: a run whose MEASURED key matches no
+    minted class, and which is a fine class under the Courant ceiling
+    (:func:`experimental_class_defects`), is admitted on a class synthesised
+    from that key and labelled ``"experimental-unminted"``.  The geometry
+    half is unchanged -- the cull still needs its own contract deck, shipped
+    or presented -- and a deck's class claim must be the measured
+    experimental class or a minted one.  It never adds a row to
+    :data:`ADMITTED_CLASSES`, and with the lane closed this function behaves
+    exactly as before.
     """
 
     digest = None if not bdy_mask_sha256 else str(bdy_mask_sha256)
@@ -1465,18 +1752,6 @@ def require_regional_anchor(
             f"geometries: {contract_summary()}"
         )
 
-    contract = shipped_contract(digest) or named
-    route = "shipped"
-    rejected: list[str] = []
-    if contract is None and digest:
-        contract, rejected = presented_contract(
-            digest,
-            n_cells=n_cells,
-            kernel_set=resolved_kernel_set,
-            directories=contract_directories,
-        )
-        route = "presented"
-
     # The class key.  Measured from this run when the caller knows it, taken
     # from the geometry's contract row when it does not.
     measured_key: RegionalClassKey | None = None
@@ -1487,6 +1762,56 @@ def require_regional_anchor(
             finest_edge_m=float(finest_edge_m),  # type: ignore[arg-type]
             dt_seconds=float(dt_seconds),  # type: ignore[arg-type]
             kernel_set=resolved_kernel_set,
+        )
+
+    # The experimental lane applies only to a MEASURED key no minted class
+    # matches; with the lane closed ``experimental_key`` is always None and
+    # every decision below is the one this gate made before the lane existed.
+    lane = experimental_lane_requested(experimental)
+    experimental_key = (
+        measured_key
+        if lane
+        and measured_key is not None
+        and admitted_class_for_key(measured_key) is None
+        else None
+    )
+
+    contract = shipped_contract(digest) or named
+    route = "shipped"
+    rejected: list[str] = []
+    if contract is None and digest:
+        # Which class claims this run could be admitted on, best first, so a
+        # ledger holding several receipts for one digest yields the usable one.
+        preferred: list[str] = []
+        if experimental_key is not None:
+            preferred.append(class_id_for_key(experimental_key))
+            preferred.extend(
+                class_id
+                for class_id in sorted(ADMITTED_CLASSES)
+                if _experimental_claim_defect(class_id, experimental_key) is None
+            )
+        elif measured_key is not None:
+            minted = admitted_class_for_key(measured_key)
+            if minted is not None:
+                preferred.append(minted.class_id)
+        contract, rejected = presented_contract(
+            digest,
+            n_cells=n_cells,
+            kernel_set=resolved_kernel_set,
+            directories=contract_directories,
+            prefer_class_ids=preferred,
+        )
+        route = "presented"
+
+    if experimental_key is not None:
+        return _require_experimental_anchor(
+            experimental_key,
+            mesh_row=mesh_row,
+            contract=contract,
+            route=route,
+            digest=digest,
+            n_cells=n_cells,
+            rejected=rejected,
         )
 
     if contract is None:
@@ -1567,6 +1892,109 @@ def require_regional_anchor(
     return _compose(contract, klass, n_cells=n_cells, route=route)
 
 
+def _experimental_claim_defect(claim: str, key: RegionalClassKey) -> str | None:
+    """Why a deck's class claim cannot carry an experimental run of ``key``.
+
+    ``None`` when it can: the claim is the measured experimental class
+    itself, or a MINTED class with a measured finest edge that differs from
+    the run in the timestep and nothing else -- same zone width, same
+    column, the same finest edge within the class's own band, and the same
+    kernel set.  The kernel-set comparison is what ties a SHIPPED deck to
+    bytes on this lane: a shipped row records no kernel set of its own, its
+    class does, and a moved kernel set lapses the claim exactly as it lapses
+    the class.
+    """
+
+    if claim and key.finest_edge_measured and claim == class_id_for_key(key):
+        return None
+    claimed = admitted_class(claim)
+    if claimed is None:
+        return "the claim is neither the measured class nor a minted one"
+    if not claimed.key.finest_edge_measured:
+        return (
+            f"the claimed class {claim!r} never measured its own finest edge, "
+            f"so it cannot say this cull's resolution is its own"
+        )
+    differing = [
+        name
+        for name in claimed.key.differing_fields(
+            key, band=claimed.finest_edge_band_relative
+        )
+        if name != "dt_ms"
+    ]
+    if differing:
+        return (
+            f"the claimed minted class {claim!r} differs from this run in "
+            f"{differing} besides the timestep"
+        )
+    return None
+
+
+def _require_experimental_anchor(
+    key: RegionalClassKey,
+    *,
+    mesh_row: str | None,
+    contract: RegionalContract | None,
+    route: str,
+    digest: str | None,
+    n_cells: int | None,
+    rejected: Sequence[str],
+) -> RegionalAnchor:
+    """The experimental lane's half of :func:`require_regional_anchor`.
+
+    Reached only with the lane open and a measured key no minted class
+    matches.  The geometry checks are the ordinary ones; only the missing
+    mint is tolerated, and only for a fine class under the Courant ceiling.
+    """
+
+    defects = experimental_class_defects(key)
+    if defects:
+        raise RegionalAdmissionRefusal(
+            experimental_class_refusal(key, mesh_row, defects)
+        )
+    klass = experimental_class_for_key(key)
+    if contract is None:
+        raise RegionalAdmissionRefusal(
+            uncontracted_geometry_refusal(
+                digest, n_cells, klass.class_id, rejected,
+                class_status=(
+                    "holds NO forecast mint and is admissible only as "
+                    f"{CLASS_EVIDENCE_EXPERIMENTAL!r}"
+                ),
+            )
+            + "  THE EXPERIMENTAL LANE IS OPEN and admits the unminted class "
+            f"{klass.class_id!r}, but never without the cull's own contract "
+            f"deck.  `python -m woof.hex.regional_contract_receipt --grid ... "
+            f"--static ... --init ... --lbc-dir ... --dt-seconds "
+            f"{key.dt_ms / 1000.0:g} --experimental-dt --out "
+            f"<{CONTRACT_LEDGER_ENVIRONMENT}>/<name>.json` runs the deck on "
+            f"this cull and stamps its receipt {CLASS_EVIDENCE_EXPERIMENTAL!r}"
+        )
+    claim = str(contract.class_id or "")
+    defect = _experimental_claim_defect(claim, key)
+    if defect is not None:
+        raise RegionalAdmissionRefusal(
+            f"regional CUDA execution is refused for this cull (bdyMask "
+            f"digest {contract.bdy_mask_sha256[:16]}...): its contract deck "
+            f"claims class {claim or '(none)'!r} and this run measures the "
+            f"experimental class {klass.class_id!r} ({key.describe()}); "
+            f"{defect}.  That is two classifiers disagreeing about which "
+            f"configuration this is.  Re-stamp the deck receipt with `python "
+            f"-m woof.hex.regional_contract_receipt --deck-receipt ... "
+            f"--dt-seconds {key.dt_ms / 1000.0:g} --experimental-dt`"
+        )
+    if n_cells is not None and contract.n_cells and int(n_cells) != int(contract.n_cells):
+        raise RegionalAdmissionRefusal(
+            f"regional CUDA execution is refused for "
+            f"{mesh_row or contract.mesh_row!r}: the contract deck was run on "
+            f"{contract.n_cells} cells and this mesh carries {int(n_cells)}; "
+            f"the 22 regional kernels are indexed by ring and a deck run on "
+            f"other rings measured another domain's zones.  The experimental "
+            f"lane relaxes the forecast mint, never the geometry"
+        )
+    return _compose(contract, klass, n_cells=n_cells, route=route)
+
+
 # ---------------------------------------------------------------------------
 # retired surface, kept resolvable
 # ---------------------------------------------------------------------------
@@ -1622,7 +2050,11 @@ def unanchored_refusal(mesh_row: str | None, bdy_mask_sha256: str | None) -> str
 __all__ = [
     "ADMITTED_CLASSES",
     "ADMITTED_REGIONS",
+    "CLASS_EVIDENCE_EXPERIMENTAL",
+    "CLASS_EVIDENCE_MINTED",
     "CONTRACT_LEDGER_ENVIRONMENT",
+    "EXPERIMENTAL_DT_ENVIRONMENT",
+    "STANDARD_CLASS_LEVELS",
     "MINTED_KERNEL_SET_SHA256",
     "REGIONAL_KERNEL_SOURCES",
     "RegionalAdmissionRefusal",
@@ -1637,15 +2069,23 @@ __all__ = [
     "admitted_region",
     "admitted_region_by_digest",
     "admitted_summary",
+    "class_id_for_key",
     "class_mismatch_refusal",
     "contract_for_row",
     "contract_receipt_defects",
     "contract_summary",
     "digest_mismatch_refusal",
+    "experimental_class_defects",
+    "experimental_class_for_key",
+    "experimental_class_refusal",
+    "experimental_lane_requested",
+    "finest_minted_edge_mm",
     "kernel_set_sha256",
     "presented_contract",
+    "regional_courant_limit_seconds",
     "require_regional_anchor",
     "shipped_contract",
+    "shortest_minted_dt_ms",
     "unanchored_class_refusal",
     "unanchored_refusal",
     "uncontracted_geometry_refusal",
