@@ -235,6 +235,13 @@ impl Default for Limits {
 /// x4.163842.static.nc's own worst reading is 1.247e-4.
 pub const DV_EDGE_FLOOR_QUANTA: f64 = 400.0;
 
+/// Cell-centre distance `dcEdge` (metres) at and above which the
+/// orthogonality gate is the published-anchored `Limits::orthogonality`
+/// exactly. Below it the limit scales as `REF / dcEdge`, following the
+/// rounding floor of the circumcentre-difference direction; see the gate in
+/// `validate`.
+pub const ORTHOGONALITY_NOISE_REF_M: f64 = 1000.0;
+
 impl Limits {
     /// The limits for a mesh that will be STORED in `storage`.
     ///
@@ -530,19 +537,51 @@ pub fn validate(mesh: &MpasMesh, limits: Limits) -> MpasResult<MeshReport> {
 
     // 2. Orthogonality. The mimetic operators are second-order only while the
     //    primal and dual arcs cross at a right angle.
+    //
+    //    THE LIMIT FOLLOWS THE CELL SPACING BELOW A KILOMETRE, for the reason
+    //    the area-decomposition floor above follows the epsilon: the reading
+    //    is a ROUNDING reading there, not a mesh reading. The dual edge's
+    //    direction is taken from two circumcentres whose f64 positions carry
+    //    a tangential error set by the cell size, so the angle it subtends
+    //    grows as one over the spacing. MEASURED: the published 25-60 km meshes read
+    //    5e-13; a 100 m corridor mesh read 1.29e-10 on a converged SCVT --
+    //    the same 1/h law (250x finer, ~250x the reading) -- and was refused
+    //    by a 1e-10 that was anchored three decades above the km-scale noise.
+    //    Every edge whose dcEdge is at least ORTHOGONALITY_NOISE_REF_M keeps
+    //    exactly the published-anchored limit; a shorter one gets it scaled
+    //    by REF / dcEdge, which keeps the same margin over the same rounding
+    //    mechanism. dcEdge and NOT dvEdge: a near-cocircular defect collapses
+    //    the dual edge while the cells stay a full spacing apart, and scaling
+    //    by the collapsed edge would excuse exactly the defect class (the
+    //    dv/dc floor refuses it separately as well).
+    let r_m = crate::mesh::geom::EARTH_RADIUS_M;
     let mut max_nonorth = 0.0f64;
-    let mut worst_nonorth_edge = 0usize;
+    let mut worst_excess = 0.0f64;
+    let mut worst_excess_edge = 0usize;
+    let mut worst_excess_limit = limits.orthogonality;
     for e in 0..ne {
         let c = edge_nonorthogonality(mesh, e).abs();
-        if c > max_nonorth {
-            max_nonorth = c;
-            worst_nonorth_edge = e;
+        max_nonorth = max_nonorth.max(c);
+        let dc_m = mesh.dc_edge[e] * r_m;
+        let limit_e = if dc_m > 0.0 {
+            limits.orthogonality * (ORTHOGONALITY_NOISE_REF_M / dc_m).max(1.0)
+        } else {
+            limits.orthogonality
+        };
+        let excess = c / limit_e;
+        if excess > worst_excess {
+            worst_excess = excess;
+            worst_excess_edge = e;
+            worst_excess_limit = limit_e;
         }
     }
-    if max_nonorth > limits.orthogonality {
+    if worst_excess > 1.0 {
+        let c = edge_nonorthogonality(mesh, worst_excess_edge).abs();
         return Err(MpasError::Refusal(format!(
-            "edge {worst_nonorth_edge}: the primal and dual great circles cross at {:.6} degrees off perpendicular (|cos| = {max_nonorth:.3e}, limit {:.3e}). The published meshes read 5.1e-13 and 5.3e-13. A non-orthogonal mesh is not a centroidal Voronoi tessellation; the divergence and gradient operators lose their second-order cancellation between neighbours and the leftover first-order term appears as grid-scale noise wherever the mesh is worst",
-            (max_nonorth.asin()).to_degrees(),
+            "edge {worst_excess_edge}: the primal and dual great circles cross at {:.6} degrees off perpendicular (|cos| = {c:.3e}, limit {:.3e} for its {:.1} m dcEdge; {:.3e} at and above {ORTHOGONALITY_NOISE_REF_M} m). The published meshes read 5.1e-13 and 5.3e-13. A non-orthogonal mesh is not a centroidal Voronoi tessellation; the divergence and gradient operators lose their second-order cancellation between neighbours and the leftover first-order term appears as grid-scale noise wherever the mesh is worst",
+            (c.asin()).to_degrees(),
+            worst_excess_limit,
+            mesh.dc_edge[worst_excess_edge] * r_m,
             limits.orthogonality
         )));
     }

@@ -23,6 +23,7 @@ pub mod icosa;
 pub mod ladder_snap;
 pub mod lloyd;
 pub mod profile;
+pub mod regional;
 pub mod surgery;
 pub mod validate;
 
@@ -126,6 +127,11 @@ pub struct GenerateRequest {
     /// Quadrature points for the sizing integral. 200,000 was the count the
     /// sizing instrument was validated at.
     pub sizing_samples: usize,
+    /// EXPERIMENTAL: refine and relax only inside this window plus a halo;
+    /// everything outside stays the frozen level-0 background. `None` is the
+    /// whole-sphere build every registered mesh was made with. See
+    /// [`regional`].
+    pub regional: Option<regional::RegionalWindow>,
 }
 
 impl Default for GenerateRequest {
@@ -148,6 +154,7 @@ impl Default for GenerateRequest {
                 crate::staticfile::coordframe::CoordinateRepresentation::for_generated_mesh(),
             ),
             sizing_samples: 200_000,
+            regional: None,
         }
     }
 }
@@ -227,6 +234,13 @@ pub struct Receipt {
     pub triangulation: Option<&'static str>,
     /// Per-level ladder reports on the graded arm; empty on the uniform arm.
     pub graded_levels: Vec<hierarchy::LevelReport>,
+    /// The regional window's account -- zone, halo, frozen count and the
+    /// measured halo quality -- present only when a window was given.
+    /// OMITTED, not `null`, otherwise, for the same reason as
+    /// `triangulation`: this receipt is stamped into the grid file, and a
+    /// field that always appeared would move every registered mesh's bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regional_window: Option<regional::RegionalReceipt>,
     /// What each region's requested spacing had to move to reach a rung the
     /// midpoint-insertion ladder can build. A SNAP, recorded rather than
     /// reconciled, exactly as `Seeding`'s cell-count snap is; see
@@ -382,6 +396,11 @@ pub fn generate(
         )));
     }
 
+    if request.fit_spacing && request.regional.is_some() {
+        return Err(MpasError::Refusal(
+            "--fit-spacing rescales the spec against a whole-sphere lattice count, which cannot see a regional window's zone; size a windowed request with --cells or the spec's own spacings".to_string(),
+        ));
+    }
     let (spec, scale) = if request.fit_spacing {
         request.spec.fitted_to(target, request.sizing_samples)?
     } else {
@@ -434,6 +453,12 @@ pub fn generate(
     }
 
     let uniform = spec.regions.is_empty();
+    if uniform && request.regional.is_some() {
+        return Err(MpasError::Refusal(
+            "--regional-window needs a graded spec: a uniform request refines nowhere, so a window would freeze part of the sphere at the very spacing the rest is relaxed to and save nothing. Give --spec with refinement regions inside the window".to_string(),
+        ));
+    }
+    let mut regional_outcome: Option<hierarchy::RegionalOutcome> = None;
     let (points, outcome, seeding, graded_levels) = if uniform {
         let ceiling = matches!(sizing, Sizing::DeviceBudget);
         let choice = icosa::snap_cells(target, ceiling)?;
@@ -465,7 +490,7 @@ pub fn generate(
         ));
         (pts, outcome, seeding, Vec::new())
     } else {
-        let (pts, _rings, outcome, choice, reports) = hierarchy::generate_graded(
+        let (pts, _rings, outcome, choice, reports, regional) = hierarchy::generate_graded_regional(
             &spec,
             request.sizing_samples,
             &request.lloyd,
@@ -474,8 +499,10 @@ pub fn generate(
                 ..surgery::SurgeryOptions::default()
             },
             hierarchy::DEFAULT_BETA,
+            request.regional.as_ref(),
             &mut progress,
         )?;
+        regional_outcome = regional;
         progress(&format!(
             "RELAXED\t{}\t{:.4e}\t{:.4e}\t{:.2}",
             outcome.sweeps,
@@ -545,6 +572,36 @@ pub fn generate(
     ));
 
     let gradient = spec.steepest_gradient_reading(50_000);
+    // The regional account, measured on the finished mesh against the SPEC's
+    // field: what the frozen background and the halo cost.
+    let regional_window = regional_outcome.map(|r| {
+        let quality = regional::measure_halo(&mesh.cell_xyz, &outcome.rings, &r.plan.zone, &prepared);
+        progress(&format!(
+            "HALO\t{}\t{:.4e}\t{:.4e}\t{:.4}",
+            quality.interface_frozen_cells,
+            quality.interface_frozen_max_delta_over_h,
+            quality.halo_max_delta_over_h,
+            quality.halo_max_adjacent_spacing_ratio
+        ));
+        regional::RegionalReceipt {
+            status: regional::STATUS,
+            window: r.plan.window.shape.clone(),
+            window_format: r.plan.window.source_format.clone(),
+            halo_rule: r.plan.halo_rule.clone(),
+            halo_rings: r.plan.halo_rings,
+            halo_km: r.plan.zone.halo_rad * geom::EARTH_RADIUS_M / 1000.0,
+            spill_km: r.plan.spill_rad * geom::EARTH_RADIUS_M / 1000.0,
+            spill_tolerance: regional::SPILL_TOLERANCE,
+            quadrature_leaves: r.plan.leaves,
+            predicted_active_cells: r.plan.predicted_active_cells,
+            predicted_frozen_cells: r.plan.predicted_frozen_cells,
+            frozen_cells: r.frozen_cells,
+            frozen_bitwise_unchanged: r.frozen_bitwise_unchanged,
+            active_cells: mesh.n_cells - r.frozen_cells,
+            halo_quality: quality,
+            deliverable_note: regional::DELIVERABLE_NOTE,
+        }
+    });
     let receipt = Receipt {
         engine: concat!("rw-mpas ", env!("CARGO_PKG_VERSION"), " (rust)").to_string(),
         spec: spec.clone(),
@@ -581,6 +638,7 @@ pub fn generate(
             None
         },
         graded_levels,
+        regional_window,
         ladder_snap,
         mesh: report,
         deliverable_boundary:

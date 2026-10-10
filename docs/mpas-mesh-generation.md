@@ -193,6 +193,109 @@ Both decisions come from a dry run that costs milliseconds, so neither
 arrives after the relaxation has been paid for. `--dry-run` runs exactly
 that pass and writes nothing.
 
+## Faster generation, and the regional window (experimental)
+
+**The triangulation rule.** The relaxation either rebuilds the spherical
+Delaunay from scratch after every sweep (`rebuild`, class A) or keeps it
+and repairs it by Lawson flips (`incremental`, class B: the same
+triangulation, but each cell keeps its ring rotation, so the file bytes
+differ). On an 89,000-cell graded ladder the rebuilds were 77 % of the
+wall, and the incremental arm ran the same request in a quarter of the
+time. Which arm runs is a stated rule, never inferred:
+
+| Route | Default arm | Why |
+|---|---|---|
+| `rw_mpas_mesh --spec` / `--background-km` (whole sphere) | `rebuild` | goldens, registered meshes and every script that regenerates one reproduce without being told |
+| `rw_mpas_mesh --regional-window` | `incremental` | no registry holds a windowed mesh, so there is no digest to reproduce |
+| `rw_mpas_mesh --from-centres` | `rebuild` only | it never relaxes; `--triangulation` is refused there |
+| `woof mesh --triangulation auto` (default) | `rebuild` for a uniform request, `incremental` for a graded spec, a raster density spec or a regional window | new meshes take the fast arm |
+
+A named arm always wins. To regenerate a REGISTERED graded mesh
+(`v20.80.151649`, the `v4.75.*` rows, a point-plan row from `woof hex mesh-plan`)
+byte for byte, pass `--triangulation rebuild`. Lloyd sweeps were
+already parallel (rayon) and already stop at the convergence tolerance;
+neither changed.
+
+**The regional window.** `--regional-window POLY.json` (on both
+`woof mesh` and `rw_mpas_mesh`) takes a GeoJSON Polygon (`[lon, lat]`;
+bare, a Feature or a one-feature FeatureCollection) or a Shape row
+(`{"kind": "polygon", "vertices_deg": [[lat, lon], ...]}`, the cull
+grammar). Holes and multi-part windows are refused. Level 0 is still the
+whole-sphere Goldberg background; every later ladder level inserts,
+relaxes and repairs only inside the ZONE -- the window plus a halo -- and
+every generator outside it stays the level-0 background, frozen bit for
+bit (checked at the end of the run; a moved one is a refusal). Frozen
+generators still take part in every triangulation, so the output is a
+whole-sphere grid that `woof hex cull` cuts and `woof hex mesh-check`
+admits like any other.
+
+The halo has to contain everywhere the spec still asks for a finer
+spacing than the background, because a frozen cell can only deliver the
+background. The default halo is the measured SPILL (how far beyond the
+window the spec asks for more than 2 % finer than the background) plus
+`max(6, ceil(band_cells))` background rings, where `band_cells = ln 2 /
+ln(1 + g)` is the width of one 2x band at the steepest requested
+gradient. `--regional-halo-rings N` sets N background rings from the
+window instead, and is refused if it does not cover the spill. A zone
+that covers the whole sphere is refused too: it would freeze nothing.
+
+The window also fixes a count the global ladder gets wrong at sub-km
+scale. Each level's cell target is a sizing integral, and the global
+path takes it on a 200,000-point lattice about 50 km apart. The
+regional path integrates the zone adaptively (leaves no wider than the
+local spacing). On the South Wales 100 m corridor below the lattice
+predicts 52,552 cells and the adaptive count 96,380; the global ladder
+under-inserts the corridor and refuses with a relaxation limit cycle at
+level 9, while the windowed build delivers 96,446.
+
+**The trade-off, measured.** Every regional receipt carries a
+`regional_window.halo_quality` block: `delta/h` against the spec's own
+field for the frozen cells on the zone boundary, the active cells next
+to them, the halo and the window, and the largest adjacent spacing ratio
+in the halo and the window. On the Wales corridor:
+
+| Set | cells | mean delta/h | max delta/h |
+|---|---|---|---|
+| frozen interface | 210 | 1.09e-2 | 2.96e-2 |
+| active interface | 211 | 2.1e-5 | 4.2e-5 |
+| halo | 47,567 | 4.7e-4 | 1.74e-2 |
+| window | 43,439 | 1.76e-3 | 2.91e-2 |
+
+The frozen interface cells sit about ten times further from their
+centroids than the relaxation tolerance (mean 1e-3): they were relaxed
+under the uniform background and their active neighbours then moved.
+The spec asks for the background there to within 2 %, so this is a
+centroidal error, not a resolution miss. The largest adjacent spacing
+ratio is 1.234 in the halo and 1.210 in the window.
+
+**Measured times** (32-thread workstation shared with other jobs, load
+average 30-50, so treat these as indicative; ranges are repeat runs):
+
+| Request | Cells | Route | Wall |
+|---|---|---|---|
+| 1.5 km point ladder (`woof hex mesh-plan` recipe, 96 km background) | 89,216 | global, rebuild | 182-408 s |
+| same | 89,216 | global, incremental | 43-112 s |
+| same, 400 km cap window | 89,238 | regional, incremental | 45 s |
+| South Wales 100 m corridor, 30 km of line 2 | 96,446 | regional, incremental | 231-373 s (294 s on the final build) |
+| same | -- | global, incremental | refused at level 9 (lattice undercount) |
+
+The corridor spec is the `woof energy plan --topology hex-swath` ladder
+built from `tests/fixtures/energy/sites_wales.json` (line 2 only) with
+a 24x ramp, two ramps per rung and a 204.8 km background; it reads
+10.06 %/cell, inside the build's 12.25 %/cell band ceiling and above
+`woof mesh`'s provisional 3.06 %/cell bound (so `woof mesh` needs
+`--allow-rough-mesh` for it). Delivered: min spacing 97.8 m, min
+dvEdge/dcEdge 0.0402, coordination 5-8 with none below five, validated;
+the cull (convex hull of the line buffered to 1.35x the finest rung's
+reach) is 46,517 cells and passes `woof hex mesh-check`.
+
+**One gate moved to reach 100 m.** The orthogonality check reads
+`|cos|` between the primal and dual arcs; its f64 rounding floor grows as
+one over the dual-edge length (published 25-60 km meshes read 5e-13; the
+100 m corridor read 1.29e-10 on a converged mesh, against a 1e-10
+limit). The limit is unchanged for every dual edge of 1 km or longer and
+scales as `1 km / dvEdge` below that.
+
 ## Checking the estate
 
     woof doctor

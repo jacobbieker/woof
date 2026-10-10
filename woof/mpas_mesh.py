@@ -122,6 +122,7 @@ MESH_ABI_MARKER = (
     "rw_mpas_mesh --out GRID.nc [--spec SPEC.json | --background-km KM | "
     "--from-centres GRID.nc] [--cells N | --card KEY [--vram-gib X]] "
     "[--fit-spacing yes|no] [--sweeps N] [--tolerance X] [--omega X] "
+    "[--regional-window POLY.json [--regional-halo-rings N]] "
     "[--receipt JSON] [--triangulation rebuild|incremental] [--clobber] "
     "[--dry-run] [--list-cards]")
 
@@ -987,7 +988,34 @@ def _spec_file(spec: dict, workdir: Path) -> Path:
     return path
 
 
-def plan(*, spec: dict, cells: int, workdir: Path) -> dict:
+def _regional_arguments(regional_window: Path | None,
+                        regional_halo_rings: float | None) -> list[str]:
+    """The binary's regional flags, refused here when they cannot apply."""
+
+    if regional_window is None:
+        if regional_halo_rings is not None:
+            raise MeshRequestError(
+                "--regional-halo-rings sizes the halo of a "
+                "--regional-window, and none was given")
+        return []
+    window = Path(regional_window)
+    try:
+        json.loads(window.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise MeshRequestError(
+            f"cannot read the regional window {window}: {error}.  It is a "
+            "GeoJSON Polygon ([lon, lat]) or a Shape row "
+            "({\"kind\": \"polygon\", \"vertices_deg\": [[lat, lon], ...]})"
+        ) from None
+    arguments = ["--regional-window", str(window)]
+    if regional_halo_rings is not None:
+        arguments += ["--regional-halo-rings", repr(float(regional_halo_rings))]
+    return arguments
+
+
+def plan(*, spec: dict, cells: int, workdir: Path,
+         regional_window: Path | None = None,
+         regional_halo_rings: float | None = None) -> dict:
     """Size and cost the request without writing a mesh.
 
     The plan is what the quality and capacity gates are applied to, and
@@ -999,7 +1027,9 @@ def plan(*, spec: dict, cells: int, workdir: Path) -> dict:
     """
 
     return _run_mesh(["--spec", str(_spec_file(spec, workdir)),
-                      "--cells", str(int(cells)), "--dry-run"])
+                      "--cells", str(int(cells)), "--dry-run",
+                      *_regional_arguments(regional_window,
+                                           regional_halo_rings)])
 
 
 #: The two arms of the generator, and what choosing one costs.
@@ -1015,16 +1045,75 @@ def plan(*, spec: dict, cells: int, workdir: Path) -> dict:
 #: that ran is stamped into the receipt whenever it is not the default.
 TRIANGULATION_ARMS = ("rebuild", "incremental")
 
+#: What ``woof mesh --triangulation`` accepts: an arm, or ``auto`` for the
+#: rule in :func:`resolve_triangulation`.
+TRIANGULATION_CHOICES = ("auto", *TRIANGULATION_ARMS)
+
+
+def _has_raster_region(spec: dict) -> bool:
+    for region in spec.get("regions") or ():
+        shape = region.get("shape") if isinstance(region, dict) else None
+        if shape == "raster" or (isinstance(shape, dict)
+                                 and shape.get("kind") == "raster"):
+            return True
+    return False
+
+
+def resolve_triangulation(spec: dict, *, regional_window: Path | None,
+                          requested: str | None) -> tuple[str, str]:
+    """The arm ``woof mesh`` runs, and the sentence that says why.
+
+    THE RULE.  A named arm always wins.  Otherwise (``auto``):
+
+    * a UNIFORM request (no regions) builds ``rebuild``: it is the
+      published icosahedral family, and the x1 goldens and every
+      registered uniform mesh reproduce only on that arm;
+    * a REGIONAL WINDOW, a RASTER density spec, or any other graded spec
+      builds ``incremental``: these are new meshes with no registered
+      digest to reproduce, and the rebuild arm spends most of a graded
+      run re-triangulating from scratch every sweep (measured 77 % of the
+      wall on an 89k-cell ladder, 3.6x slower end to end).
+
+    To regenerate a REGISTERED graded mesh (``v20.80.151649``,
+    ``v4.75.*``, a ``woof hex mesh-plan --point`` row) pass
+    ``--triangulation rebuild``: their bytes were minted on that arm.
+    ``rw_mpas_mesh`` itself keeps ``rebuild`` as its whole-sphere default,
+    so scripts and the point-plan door that drive it directly are unchanged.
+    """
+
+    if requested not in (None, "auto"):
+        if requested not in TRIANGULATION_ARMS:
+            raise MeshRequestError(
+                f"--triangulation {requested} is not an arm; it is auto, "
+                "rebuild or incremental")
+        return requested, f"{requested}, named with --triangulation"
+    if regional_window is not None:
+        return "incremental", ("incremental (auto): a regional window "
+                               "builds a mesh no registry holds")
+    if _has_raster_region(spec):
+        return "incremental", ("incremental (auto): a raster density spec "
+                               "is a new mesh")
+    if spec.get("regions"):
+        return "incremental", (
+            "incremental (auto): a graded spec is a new mesh; pass "
+            "--triangulation rebuild to regenerate a registered one byte "
+            "for byte")
+    return "rebuild", ("rebuild (auto): a uniform request is the published "
+                       "icosahedral family, reproduced on the rebuild arm")
+
 
 def generate(*, spec: dict, cells: int, out: Path, workdir: Path,
              clobber: bool = False, receipt: Path | None = None,
              sweeps: int | None = None, tolerance: float | None = None,
              triangulation: str | None = None,
+             regional_window: Path | None = None,
+             regional_halo_rings: float | None = None,
              progress=None) -> dict:
     """Generate the mesh and return the binary's receipt."""
 
     arguments = ["--spec", str(_spec_file(spec, workdir)),
-                 "--cells", str(int(cells)), "--out", str(out)]
+                 "--cells", str(int(cells)), "--out", str(out),
+                 *_regional_arguments(regional_window, regional_halo_rings)]
     if clobber:
         arguments.append("--clobber")
     if receipt is not None:
@@ -1037,11 +1126,12 @@ def generate(*, spec: dict, cells: int, out: Path, workdir: Path,
         if triangulation not in TRIANGULATION_ARMS:
             raise MeshRequestError(
                 f"--triangulation {triangulation} is not an arm; it is "
-                "`rebuild` (the default, and the arm every registered mesh "
-                "digest was minted on -- the only one that reproduces one "
-                "byte for byte) or `incremental` (the same triangulation "
-                "kept and repaired by Lawson flips, which is faster and "
-                "writes a different file)")
+                "`rebuild` (the arm every registered mesh digest was "
+                "minted on -- the only one that reproduces one byte for "
+                "byte, and rw_mpas_mesh's whole-sphere default) or "
+                "`incremental` (the same triangulation kept and repaired "
+                "by Lawson flips, which is faster and writes a different "
+                "file)")
         arguments += ["--triangulation", triangulation]
     return _run_mesh(arguments, progress=progress)
 
@@ -1383,15 +1473,35 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
         "--tolerance", type=positive_float, default=None, metavar="X",
         help="relaxation convergence tolerance passed to the generator")
     parser.add_argument(
-        "--triangulation", choices=TRIANGULATION_ARMS, default=None,
+        "--triangulation", choices=TRIANGULATION_CHOICES, default="auto",
         help="how the Delaunay is kept between relaxation sweeps.  "
-             "rebuild (the default) rebuilds it every sweep and is the arm "
-             "every registered mesh was generated with -- the only one that "
+             "rebuild rebuilds it every sweep and is the arm every "
+             "registered mesh was generated with -- the only one that "
              "reproduces a pinned SHA-256.  incremental keeps the facets "
              "and repairs them by Lawson flips: the same triangulation, "
-             "much faster, and a DIFFERENT FILE, because each cell keeps "
-             "the ring rotation a rebuild re-rolls.  For a mesh that has "
-             "never existed")
+             "several times faster, and a DIFFERENT FILE, because each "
+             "cell keeps the ring rotation a rebuild re-rolls.  auto (the "
+             "default): rebuild for a uniform request, incremental for a "
+             "graded or raster spec or a --regional-window (new meshes).  "
+             "Pass rebuild to regenerate a registered graded mesh")
+    parser.add_argument(
+        "--regional-window", type=Path, default=None, metavar="POLY.json",
+        help="EXPERIMENTAL: refine and relax only inside this window plus "
+             "a halo; generators outside stay the frozen level-0 "
+             "background (still triangulated, so the result is a "
+             "whole-sphere grid that culls and validates as usual).  A "
+             "GeoJSON Polygon ([lon, lat]) or a Shape row {\"kind\": "
+             "\"polygon\", \"vertices_deg\": [[lat, lon], ...]}.  Needs a "
+             "graded spec; the receipt's regional_window block measures "
+             "the halo's centroidal error and gradient")
+    parser.add_argument(
+        "--regional-halo-rings", type=positive_float, default=None,
+        metavar="N",
+        help="halo of a --regional-window in background rings from the "
+             "window.  Default: the measured spill (where the spec still "
+             "asks for more than 2 percent finer than the background) plus "
+             "max(6, ceil(band_cells)) rings.  A halo that does not cover "
+             "the spill is refused")
     parser.add_argument(
         "--clobber", action="store_true",
         help="replace an existing --out")
@@ -1600,9 +1710,14 @@ def mesh_main(args) -> int:
             static_out = (args.static_out if args.static_out is not None
                           else default_static_path(args.out))
 
+        arm, arm_note = resolve_triangulation(
+            spec, regional_window=args.regional_window,
+            requested=args.triangulation)
         with tempfile.TemporaryDirectory(prefix="gpuwm-mesh-") as scratch:
             work = Path(scratch)
-            proposed = plan(spec=spec, cells=cells, workdir=work)
+            proposed = plan(spec=spec, cells=cells, workdir=work,
+                            regional_window=args.regional_window,
+                            regional_halo_rings=args.regional_halo_rings)
             steep = gradient_gate_reading(proposed)
             note = sizing.smoothness.check(
                 steep, allow_rough=args.allow_rough_mesh)
@@ -1615,6 +1730,16 @@ def mesh_main(args) -> int:
             reference = \
                 sizing.smoothness.published_reference_percent_per_cell
             print(f"woof mesh: {sizing_note}")
+            print(f"woof mesh: triangulation {arm_note}")
+            regional = proposed.get("regional_window")
+            if regional:
+                print(f"woof mesh: EXPERIMENTAL regional window: halo "
+                      f"{regional.get('halo_km', 0.0):,.1f} km "
+                      f"({regional.get('halo_rule', '')}); about "
+                      f"{regional.get('predicted_active_cells', 0.0):,.0f} "
+                      "active and "
+                      f"{regional.get('predicted_frozen_cells', 0.0):,.0f} "
+                      "frozen cells")
             print(f"woof mesh: steepest requested gradient "
                   f"{steep:.2f} %/cell (published reference "
                   f"{reference:.2f} %/cell)")
@@ -1625,13 +1750,17 @@ def mesh_main(args) -> int:
                 proposed["gpuwm_smoothness_note"] = note
                 proposed["gpuwm_smoothness_status"] = \
                     sizing.smoothness.status
+                proposed["gpuwm_triangulation"] = arm
+                proposed["gpuwm_triangulation_rule"] = arm_note
                 print(json.dumps(proposed, indent=2))
                 return 0
             receipt = generate(
                 spec=spec, cells=cells, out=args.out, workdir=work,
                 clobber=args.clobber, receipt=args.receipt,
                 sweeps=args.sweeps, tolerance=args.tolerance,
-                triangulation=args.triangulation,
+                triangulation=arm,
+                regional_window=args.regional_window,
+                regional_halo_rings=args.regional_halo_rings,
                 progress=lambda line: print(f"woof mesh: {line}"))
         # REPORTED, not judged.  See DeliveredSmoothness: this metric is
         # a max over every edge and reads 14.07 % on a mesh with no
@@ -1701,6 +1830,7 @@ __all__ = [
     "BRIDGES", "CONVERT", "CONVERT_ABI_MARKER", "CardCapacity", "GEOMETRY", "INIT",
     "INIT_ABI_MARKER", "LBC", "LBC_ABI_MARKER",
     "MESH", "MESH_ABI_MARKER", "MeshRequestError", "TRIANGULATION_ARMS",
+    "TRIANGULATION_CHOICES", "resolve_triangulation",
     "MeshRoughnessError", "MpasBridge", "SIZING_DATA_PATH", "SIZING_SCHEMA",
     "PORT_BLOCKING_STATIC_FIELDS", "STATIC", "STATIC_ABI_MARKER", "Sizing",
     "Smoothness", "build_parser", "build_spec", "build_static", "crate_dir",
