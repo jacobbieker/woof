@@ -284,6 +284,14 @@ BRIDGE_ABI_MARKERS = {
     # exactly breaks on a reflow that changed nothing.  The head names
     # the four arguments whose meaning a stale build would get wrong.
     # Spelled to match woof.mpas_mesh.LBC_ABI_MARKER; a test binds them.
+    # The mesh-to-mesh state remap, the seventh binary out of the same
+    # crate.  Truncated at the head for the reason the boundary
+    # producer's is; the head names the three arguments whose meaning a
+    # stale build would get wrong.  Spelled to match
+    # woof.mpas_mesh.REMAP_ABI_MARKER; a test binds them.
+    "rw_mpas_remap": (
+        b"rw_mpas_remap --from-grid A.grid.nc --from-state A.state.nc "
+        b"--to-grid B.grid.nc"),
     "rw_mpas_lbc": (
         b"rw_mpas_lbc --grid INIT.nc --out-dir DIR "
         b"--start-time YYYY-MM-DD_HH:MM:SS --stop-time YYYY-MM-DD_HH:MM:SS"),

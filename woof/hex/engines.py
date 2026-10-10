@@ -203,10 +203,29 @@ LBC = EngineSpec(
     cargo_package="rw-mpas",
 )
 
+#: The mesh-to-mesh state remap: an init or restart state on one mesh
+#: onto another.  ``woof hex remap`` drives it; the adaptive cycle needs it
+#: because a regenerated mesh shares no cell set with the one the last
+#: cycle ended on.
+REMAP = EngineSpec(
+    name="rw_mpas_remap",
+    flag="--remap-exe",
+    env_names=("WOOF_HEX_RW_MPAS_REMAP", "RW_MPAS_REMAP"),
+    gpuwm_env="WOOF_RW_MPAS_REMAP",
+    subject="the mesh-to-mesh state remap",
+    what_breaks=(
+        "a state cannot cross from one mesh to another: a cycle that "
+        "regenerates its mesh has to start cold from an analysis instead of "
+        "from the state the last cycle ended on"
+    ),
+    cargo_package="rw-mpas",
+)
+
 #: Every engine a front door of this distribution drives, best-known name
 #: first.  ``woof.hex.doctor`` reads this, so adding an engine is a row
 #: here and is reported without a second edit.
-ENGINES: tuple[EngineSpec, ...] = (INIT, CONVERT, MESH, STATIC, LBC, RENDERER)
+ENGINES: tuple[EngineSpec, ...] = (INIT, CONVERT, MESH, STATIC, LBC, REMAP,
+                                   RENDERER)
 
 
 # ---------------------------------------------------------------------------

@@ -2710,6 +2710,7 @@ _CHECKED_ARTIFACTS = {
     "rw_mpas_hostprep": "the `MPAS binary` lines",
     "rw_mpas_convert": "the `MPAS binary` lines",
     "rw_mpas_lbc": "the `MPAS binary` lines",
+    "rw_mpas_remap": "the `MPAS binary` lines",
     "rw_mlexport": "the `ML dataset exporter` line",
     "rw_verify": "the `observation verification engine` line",
     "rw_compare": "the `comparison engine` line",
@@ -3261,6 +3262,7 @@ _MPAS_DOORS = {
     "rw_mpas_hostprep": "MPAS forecast host preparation",
     "rw_mpas_convert": "MPAS history onto the renderer's tape",
     "rw_mpas_lbc": "MPAS lateral boundaries for a limited-area mesh",
+    "rw_mpas_remap": "woof hex remap (MPAS state from one mesh onto another)",
 }
 
 #: One action for all five: they share a clone, a cargo build and a

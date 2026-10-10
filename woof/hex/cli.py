@@ -267,6 +267,12 @@ def build_parser() -> argparse.ArgumentParser:
     # route.
     add_lbc_parser(commands)
 
+    # After lbc, because it is the cycle-to-cycle step: a state the last
+    # cycle ended on, carried onto the mesh the next cycle regenerated.
+    from .remap_door import add_remap_parser
+
+    add_remap_parser(commands)
+
     # Between init and render, because that is the order a user meets them:
     # an init is what a forecast starts from and history is what a render
     # consumes.  The door needs a source checkout and says so by name; it is

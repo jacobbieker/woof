@@ -347,6 +347,7 @@ _STAMP_SOURCES = {
     "obs_score": "crates/obs-score/src/lib.rs",
     "rw_mpas_geometry": "crates/rw-mpas/src/bin/rw_mpas_geometry.rs",
     "rw_mpas_hostprep": "crates/rw-mpas/src/bin/rw_mpas_hostprep.rs",
+    "rw_mpas_remap": "crates/rw-mpas/src/bin/rw_mpas_remap.rs",
     "rw_isobaric": "crates/rw-isobaric/src/capi.rs",
     "rw_sitesample": "crates/rw-sitesample/src/capi.rs",
 }

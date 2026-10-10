@@ -609,6 +609,13 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
         "rw_mpas_lbc", "executable", bridges.RUSTWX_CRATE_RELATIVE,
         "WOOF_RW_MPAS_LBC",
         "MPAS lateral boundaries for a limited-area mesh"),
+    # The mesh-to-mesh state remap behind `woof hex remap`: an adaptive
+    # cycle regenerates its mesh, and the state the last cycle ended on
+    # reaches the new mesh only through this binary.
+    BundledArtifact(
+        "rw_mpas_remap", "executable", bridges.RUSTWX_CRATE_RELATIVE,
+        "WOOF_RW_MPAS_REMAP",
+        "MPAS state remap between two meshes (woof hex remap)"),
     # The ML dataset exporter.  Every array operation `woof ml-export`
     # performs happens in it (the history read, the vertical interpolation,
     # the regrid, the Zarr and ZIP writing), so a bundle without it is an
