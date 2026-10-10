@@ -50,6 +50,7 @@ pub mod hostprep;
 pub mod init;
 pub mod lbc;
 pub mod mesh;
+pub mod remap;
 pub mod staticfile;
 pub mod static_builder;
 pub mod static_geog;

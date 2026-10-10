@@ -158,6 +158,13 @@ LBC_ABI_MARKER = (
     "rw_mpas_lbc --grid INIT.nc --out-dir DIR "
     "--start-time YYYY-MM-DD_HH:MM:SS --stop-time YYYY-MM-DD_HH:MM:SS")
 
+#: ``rw_mpas_remap``'s contract, at the head of its argument vector, for
+#: the reason :data:`LBC_ABI_MARKER` is a prefix.  Spelled to match
+#: :data:`woof.bridges.BRIDGE_ABI_MARKERS`; a test binds the two.
+REMAP_ABI_MARKER = (
+    "rw_mpas_remap --from-grid A.grid.nc --from-state A.state.nc "
+    "--to-grid B.grid.nc")
+
 #: ``CARGO_BUILD_HINT``: the one-liner that builds the mesh tools, from a
 #: checkout root, spelled for the shell rule when it is read.
 __getattr__ = lazy_build_hints(
@@ -358,11 +365,20 @@ LBC = MpasBridge(
     abi_marker=LBC_ABI_MARKER,
 )
 
+#: The mesh-to-mesh state remap behind ``woof hex remap``.
+REMAP = MpasBridge(
+    name="rw_mpas_remap",
+    env_var="WOOF_RW_MPAS_REMAP",
+    subject="the MPAS mesh-to-mesh state remap",
+    abi_marker=REMAP_ABI_MARKER,
+)
+
 #: Every MPAS binary the crate builds, by artifact name.  Read by
 #: ``woof doctor`` and by the bundle-coverage test, so a sixth binary
 #: is a row here and is reported without a second edit.
 BRIDGES: dict[str, MpasBridge] = {
-    bridge.name: bridge for bridge in (MESH, STATIC, INIT, GEOMETRY, HOSTPREP, CONVERT, LBC)}
+    bridge.name: bridge for bridge in (MESH, STATIC, INIT, GEOMETRY, HOSTPREP, CONVERT, LBC,
+                                    REMAP)}
 
 
 # ---------------------------------------------------------------------------
