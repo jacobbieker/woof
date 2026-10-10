@@ -207,6 +207,93 @@ def assemble_global_control_driver(
     )
 
 
+def history_cadence(dt_seconds: float, steps: int, history_every: int) -> dict[str, Any]:
+    """Refuse, before a card is touched, a frame cadence that cannot be named.
+
+    Every frame is named ``history.<YYYY-MM-DD_HH.MM.SS>.nc`` and stamped with
+    a whole-second ``xtime``.  With frames a second or more apart no two
+    names can meet, so nothing here ever fired.  At 0.5 s or 0.25 s,
+    ``--history-every 1`` writes two or four frames per second under ONE
+    file name: each overwrites the last, the receipt lists frames that are
+    not on disk, and a mint pair compared frame by frame would compare the
+    survivors only.  The final frame is always written, so it can meet the
+    last periodic one the same way (0.5 s, every 4 steps, 1,081 steps: 540 s
+    and 540.5 s).  So the names are computed exactly as :func:`main` writes
+    them, and any two frames that would share one are refused.  A cadence
+    that ran before -- 7.5 s every step, frames at 7, 15, 22 s -- still runs.
+    """
+
+    dt = float(dt_seconds)
+    if not np.isfinite(dt) or dt <= 0.0:
+        raise SystemExit(f"--dt {dt_seconds!r} must be finite and positive")
+    if int(steps) < 1:
+        raise SystemExit("--steps must be at least one step")
+    every = max(1, int(history_every))
+    frame_steps = [0] + [
+        step for step in range(1, int(steps) + 1)
+        if step % every == 0 or step == int(steps)
+    ]
+    origin = datetime(2000, 1, 1)
+    named: dict[str, int] = {}
+    for step in frame_steps:
+        name = (origin + timedelta(seconds=step * dt)).strftime("%H.%M.%S|%j")
+        if name in named:
+            raise SystemExit(
+                f"--history-every {every} at --dt {dt:g} s over --steps "
+                f"{int(steps)} writes steps {named[name]} and {step} into ONE "
+                "frame file: frames are named and stamped to the second, so "
+                "the later overwrites the earlier.  Choose --history-every and "
+                "--steps so every frame lands in its own second (for a "
+                "sub-second dt, history-every x dt a whole number of seconds "
+                "and steps a multiple of history-every)"
+            )
+        named[name] = step
+    return {
+        "dt_seconds": dt,
+        "history_every_steps": every,
+        "history_stride_seconds": every * dt,
+        "frames": len(frame_steps),
+        "run_seconds": int(steps) * dt,
+    }
+
+
+def source_digests() -> dict[str, str]:
+    """The bytes this run launches through, resolved where they EXECUTE.
+
+    The declared names keep the repository's ``src/hexcore/`` spelling (the
+    archived receipts name them that way); each resolves through
+    :mod:`woof.hex.shipped_sources` to the module this interpreter imported.
+    Joining them onto this file's own directory -- the earlier form -- found
+    no ``src/`` beneath ``components/hex`` and raised before the first step.
+    """
+
+    from woof.hex import shipped_sources
+
+    digests: dict[str, str] = {}
+    for name in (
+        "src/hexcore/cuda_driver.py",
+        "src/hexcore/cuda_horizontal.py",
+        "src/hexcore/cuda_horizontal_v841.py",
+        "src/hexcore/cuda_acoustic_v841.py",
+        "src/hexcore/cuda_transport.py",
+        "src/hexcore/cuda_transport_v841.py",
+        "src/hexcore/cuda_dynamics_v841.py",
+        "src/hexcore/cuda_v841.py",
+        "src/hexcore/cuda_regional_v841.py",
+        "src/hexcore/cuda_regional_forecast_v841.py",
+        "src/hexcore/cuda_backend/containers.py",
+        "src/hexcore/cuda_backend/runtime.py",
+        "src/hexcore/regional_v841.py",
+    ):
+        digests[name] = hashlib.sha256(
+            shipped_sources.resolve(name).read_bytes()
+        ).hexdigest()
+    digests["tools/run_cuda_regional_forecast.py"] = hashlib.sha256(
+        Path(__file__).resolve().read_bytes()
+    ).hexdigest()
+    return digests
+
+
 def frame_time(path: Path) -> datetime:
     with Dataset(path) as dataset:
         dataset.set_auto_maskandscale(False)
@@ -425,6 +512,12 @@ def main() -> int:
         if not frames:
             raise SystemExit(f"no history frames under {frames_dir}")
         start_time = frame_time(frames[0])
+
+    # Checked on the host, before the mesh loads or a card is touched: a
+    # sub-second timestep is where this first bites (see history_cadence).
+    cadence = history_cadence(
+        120.0 if args.dt is None else args.dt, args.steps, args.history_every
+    )
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -648,29 +741,12 @@ def main() -> int:
     # receipts that row names, which is circular and says nothing about the
     # numbers.  The registry is held to its evidence by
     # tests/test_regional_forecast_anchor.py instead.
-    source_digests = {
-        name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
-        for name in (
-            "src/hexcore/cuda_driver.py",
-            "src/hexcore/cuda_horizontal.py",
-            "src/hexcore/cuda_horizontal_v841.py",
-            "src/hexcore/cuda_acoustic_v841.py",
-            "src/hexcore/cuda_transport.py",
-            "src/hexcore/cuda_transport_v841.py",
-            "src/hexcore/cuda_dynamics_v841.py",
-            "src/hexcore/cuda_v841.py",
-            "src/hexcore/cuda_regional_v841.py",
-            "src/hexcore/cuda_regional_forecast_v841.py",
-            "src/hexcore/cuda_backend/containers.py",
-            "src/hexcore/cuda_backend/runtime.py",
-            "src/hexcore/regional_v841.py",
-            "tools/run_cuda_regional_forecast.py",
-        )
-    }
+    source_sha256 = source_digests()
 
     report: dict[str, Any] = {
         "instrument": "run_cuda_regional_forecast",
-        "source_sha256": source_digests,
+        "source_sha256": source_sha256,
+        "history_cadence": cadence,
         "shared_dycore_probe": shared_dycore_probe,
         "schema": "mpas-port.regional-cuda-forecast/v1",
         "label": args.label,

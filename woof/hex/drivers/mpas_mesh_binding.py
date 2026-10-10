@@ -1260,18 +1260,6 @@ MESH_BINDINGS: Mapping[str, MeshBinding] = MappingProxyType(
     }
 )
 
-# An anchor-mint run may override ONE row's declared timestep while it is in
-# flight (woof.hex.mesh_row_candidate), because an anchor is a property of the
-# TIMESTEP and the cheap place to earn one is the smallest registered mesh --
-# whose Courant limit is an upper bound every candidate sits far beneath.  This
-# returns the mapping above UNCHANGED on every ordinary run: an override exists
-# only inside a live dt_admission.candidate_mint, under the same authorization
-# sentence, and the overridden row stamps itself CANDIDATE-UNANCHORED-DT in the
-# bind log and the run receipt.  Applied here, where the mapping is built, so
-# the forecast door's by-path re-execution of this file picks it up as the
-# first copy did.
-MESH_BINDINGS = mesh_row_candidate.apply_overrides(MESH_BINDINGS)
-
 # A mesh GENERATED AT A POINT -- ``woof hex mesh-plan --point --generate``
 # -- cannot be a row in this file either: the point is arbitrary and the
 # mesh did not exist when this file was written.  ``woof.hex.mesh_rows``
@@ -1293,6 +1281,25 @@ MESH_BINDINGS = mesh_rows.apply_rows(MESH_BINDINGS, MeshBinding)
 # row does not have is a person who read it; what stands in for that is the
 # per-geometry contract deck the cascade runs before the forecast.
 MESH_BINDINGS = cascade_row.apply_rows(MESH_BINDINGS, MeshBinding)
+
+# An anchor-mint run may override ONE row's declared timestep while it is in
+# flight (woof.hex.mesh_row_candidate), because an anchor is a property of the
+# TIMESTEP and the cheap place to earn one is the smallest registered mesh --
+# whose Courant limit is an upper bound every candidate sits far beneath.  This
+# returns the mapping above UNCHANGED on every ordinary run: an override exists
+# only inside a live dt_admission.candidate_mint, under the same authorization
+# sentence, and the overridden row stamps itself CANDIDATE-UNANCHORED-DT in the
+# bind log and the run receipt.  Applied here, where the mapping is built, so
+# the forecast door's by-path re-execution of this file picks it up as the
+# first copy did.
+#
+# Applied LAST -- after the runtime rows and the cascade rows -- so a mint can
+# override a row registered at runtime ($WOOF_HEX_MESH_ROWS).  A regional
+# corridor cull is never a row in this file.  Applied before those rows were
+# added, the override found no such row and skipped it, and a sub-second mint
+# arm on a corridor cull would have run at the row's REGISTERED timestep
+# instead of the candidate's.
+MESH_BINDINGS = mesh_row_candidate.apply_overrides(MESH_BINDINGS)
 
 NATIVE_MESH_NAME = "x4.163842"
 
