@@ -153,7 +153,7 @@ def test_select_preserves_the_produced_order():
 # -------------------------------------------------------------------- presets
 
 def test_named_presets_are_reachable_and_full_is_the_default():
-    assert set(hs.HISTORY_PRESETS) == {"full", "minimal", "severe"}
+    assert set(hs.HISTORY_PRESETS) == {"full", "minimal", "severe", "energy"}
     assert hs.HistorySelection.from_mapping({}).preset == "full"
 
 

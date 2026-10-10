@@ -2015,6 +2015,42 @@ class PhysicsDriver:
             if self.radiation_active and getattr(
                 self.radiation_callable, "publishes_olr", False)
             else None)
+        # WRF's surface solar trio for history: SWDDNI (direct normal),
+        # SWDDIF (diffuse) and COSZEN (the radiation-time zenith cosine),
+        # Registry.EM_COMMON:1719/:1723/:997.  On OLR's terms exactly: a
+        # buffer exists only when the attached scheme DECLARES it computes
+        # the quantity, so the variable's presence in a wrfout says "the
+        # shortwave scheme produced this" and its absence says no scheme
+        # did -- never a fabricated split.  Held between radiation calls,
+        # as WRF holds them, zero before the first call (WRF's t=0 frame
+        # precedes it too), carried by a checkpoint
+        # (restart.DRIVER_CHECKPOINT_ONLY_ATTRS) and scattered under tiling
+        # (tilestream.physics_inventory.OUTPUT_ONLY_DRIVER_ATTRS).
+        #
+        # SWDDNI/SWDDIF come from the shortwave solve's own surface direct
+        # beam: RTE+RRTMGP's flux_dir and legacy RRTMG's swdkdir, both
+        # ra_sw_physics = 4.  Dudhia (1) and the analytic proxy have no
+        # direct/diffuse split -- WRF fills them for Dudhia with the
+        # driver's empirical Ruiz-Arias model -- so those runs publish
+        # neither.  The request reaches every leaf that can answer it.
+        from woof.core.radiation_composition import radiation_adapters
+        surface = state.p.shape[1:]
+        direct_leaves = (
+            tuple(leaf for leaf in radiation_adapters(self.radiation_callable)
+                  if getattr(leaf, "supplies_surface_direct", False))
+            if self.radiation_active else ())
+        for target in ((self.radiation_callable,) + direct_leaves
+                       if direct_leaves else ()):
+            target.surface_direct_requested = True
+        self.surface_dni = (cp.zeros(surface, dtype=DTYPE)
+                            if direct_leaves else None)
+        self.surface_dif = (cp.zeros(surface, dtype=DTYPE)
+                            if direct_leaves else None)
+        self.radiation_coszen = (
+            cp.zeros(surface, dtype=DTYPE)
+            if self.radiation_active and getattr(
+                self.radiation_callable, "publishes_coszen", False)
+            else None)
         self.tendencies = (
             self.pbl_tendencies
             if (not (radiation_enabled(cfg) or cfg.cu_physics)
@@ -2488,7 +2524,15 @@ class PhysicsDriver:
             # hands it over; for any other the urban coupler applies the
             # radiation driver's Ruiz-Arias split right after this call,
             # on the same radiation-time sun (UrbanCoupler.update_solar).
-            if result.swddir is not None and result.swddif is not None:
+            # A spectrum COMPOSITION carried no SWDDIR here before the
+            # history request made it carry one, and its BEP+BEM runs took
+            # the Ruiz-Arias split; they still do (swint_opt = 1 aside, which
+            # always carried it).
+            bep_direct = result.swddir
+            if (getattr(self.radiation_callable, "spectrum_adapters", None)
+                    is not None and int(getattr(cfg, "swint_opt", 0)) != 1):
+                bep_direct = None
+            if bep_direct is not None and result.swddif is not None:
                 self.fields["swddir"][...] = _checked_array(
                     result.swddir, (ny, nx), "radiation SWDDIR")
                 self.fields["swddif"][...] = _checked_array(
@@ -2579,11 +2623,60 @@ class PhysicsDriver:
                     "but returned no OLR (TOA outgoing longwave)")
             self.olr[...] = _checked_array(
                 result.olr, (ny, nx), "radiation OLR")
+        self._capture_surface_solar(result, ny, nx)
         # WRF's slope_rad / topo_shading: what the radiation driver leaves
         # for the surface driver (diffuse fraction, solar geometry, shadow
         # mask).  None on every domain that does not turn slope_rad on.
         if self.topo_shortwave is not None:
             self.topo_shortwave.after_radiation(result, state, cfg)
+
+    def _capture_surface_solar(self, result: RadiationResult,
+                               ny: int, nx: int) -> None:
+        """Hold one radiation call's SWDDNI, SWDDIF and COSZEN for history.
+
+        Fail closed, as OLR does: a buffer exists only because the attached
+        scheme declared it computes the quantity, so a call that returns
+        none is a broken scheme, not a configuration in which the field is
+        undefined, and republishing the previous call's value would hide it.
+
+        SWDDNI is WRF's ``swddir / coszen`` (module_ra_rrtmg_sw.F, the
+        jararias 2013 arm, transcribed in woof.core.rrtmg_sw), evaluated
+        only where the radiation-time sun is up; night columns are zero,
+        as the radiation driver zeroes them.  Small 2-D elementwise work
+        on the device, once per radiation call.
+
+        Read through ``getattr`` so a driver assembled outside ``__init__``
+        (the CPU ordering fixtures) simply has no buffers to fill.
+        """
+        coszen_out = getattr(self, "radiation_coszen", None)
+        if coszen_out is not None:
+            if result.coszen is None:
+                raise ValueError(
+                    "the attached radiation callable declares "
+                    "publishes_coszen but returned no COSZEN")
+            coszen_out[...] = _checked_array(
+                result.coszen, (ny, nx), "radiation COSZEN")
+        if (getattr(self, "surface_dni", None) is None
+                or getattr(self, "surface_dif", None) is None):
+            return
+        missing = [name for name, value in (("SWDDIR", result.swddir),
+                                            ("SWDDIF", result.swddif),
+                                            ("COSZEN", result.coszen))
+                   if value is None]
+        if missing:
+            raise ValueError(
+                "the attached radiation callable declares "
+                "supplies_surface_direct and was asked for the surface "
+                f"direct beam, but returned no {', '.join(missing)}; "
+                "SWDDNI (direct horizontal / cos(zenith)) and SWDDIF "
+                "cannot be published from this call")
+        direct = _checked_array(result.swddir, (ny, nx), "radiation SWDDIR")
+        cosine = _checked_array(result.coszen, (ny, nx), "radiation COSZEN")
+        day = cosine > DTYPE(0.0)
+        self.surface_dni[...] = cp.where(
+            day, direct / cp.where(day, cosine, DTYPE(1.0)), DTYPE(0.0))
+        self.surface_dif[...] = _checked_array(
+            result.swddif, (ny, nx), "radiation SWDDIF")
 
     def _run_cumulus(self, atmosphere: Mapping[str, cp.ndarray],
                       state: DomainState, cfg: RunConfig) -> None:

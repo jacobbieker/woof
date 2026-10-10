@@ -24,6 +24,9 @@ lands in the file, in the same order, with the same header.
 exactly what every WOOF release before this one wrote: same inventory,
 same variable order, same global attributes, byte for byte. Trimming is
 something you ask for; it is never something a default does to you.
+(The one addition to the full inventory is the [surface solar
+fields](#surface-solar-fields), present when a radiation scheme
+produces them.)
 
 ## Three ways to say it
 
@@ -39,6 +42,13 @@ preset = "minimal"
 | `"full"` | **the default.** Every variable the run produces. |
 | `"minimal"` | the 2-D surface state and the accumulators: `T2`, `Q2`, `TH2`, `PSFC`, `U10`/`V10`, `TSK`, the surface energy budget (`HFX`, `LH`, `QFX`, `GRDFLX`, `SWDOWN`, `GLW`, `OLR`), `PBLH`, the precipitation and snow accumulators, `UP_HELI_MAX`, the grid metadata and the land identity, plus the two structural volumes below. |
 | `"severe"` | `minimal` plus the storm-scale volumes: `U`, `V`, `W`, `PH`, `P`, `PB`, the hydrometeor mixing ratios and number concentrations, and `REFL_10CM`. It sheds the restart-only scheme carriers no render product reads. |
+| `"energy"` | what a forecast along power lines, substations and renewable sites is sampled from (`woof energy extract`): the column winds and theta (`U`, `V`, `W`, `T`), the height and pressure coordinate (`PH`, `PHB`, `HGT`, `P`, `PB`), `QVAPOR`, `QCLOUD`, `QRAIN`, `QICE`, `QSNOW`, `QGRAUP`, the near-surface state (`T2`, `Q2`, `U10`, `V10`, `PSFC`), the surface shortwave trio (`SWDOWN`, `SWDDNI`, `SWDDIF`, `COSZEN`), `RAINNC`, `RAINC`, `SINALPHA`/`COSALPHA` and the georeference. |
+
+A preset is a filter over what the run produced, so a member the run
+does not produce is simply absent from the tape, never zero-filled:
+`severe` on a warm-rain scheme has no `QICE`, and `energy` has no
+`SWDDNI`/`SWDDIF` unless the shortwave scheme computes a direct/diffuse
+split (see [Surface solar fields](#surface-solar-fields)).
 
 ### What each preset buys, measured
 
@@ -54,6 +64,15 @@ asking the real renderer how many of its catalog it can draw:
 | + `QVAPOR` | 62 | opens | 66 |
 | + `U`, `V`, `W` (≈ `severe`) | 65 | opens | 160 |
 | the full inventory | 74 | opens | 162 |
+
+`energy` was measured separately, on one 3 km frame of a 2-hour
+HRRR-forced run (49 levels, Thompson, RTE+RRTMGP) with a newer renderer
+whose catalog is larger, so its figure is its own pair and not a rung of
+the ladder above: the full tape (82 variables) renders 207 products and
+the same frame trimmed to `energy` (37 variables) renders 174. It keeps
+every volume the ladder's large rungs need and sheds `REFL_10CM` (radar
+products fall back to a generic hydrometeor dBZ), `MU`,
+`UP_HELI_MAX`, `OLR` and the land-surface rows.
 
 The first row is why `T` is structural: a tape with no `T` is not a
 smaller wrfout, it is a file the estate's own reader will not open.
@@ -259,3 +278,31 @@ the whole valid set printed, because there is no other place to read it:
 history variable.  Did you mean QCLOUD?  The valid set is: ACRUNOFF,
 ALBOLD, ... ZTOP_PLUME.
 ```
+
+## Surface solar fields
+
+Beside `SWDOWN` (global horizontal irradiance), a run with radiation on
+publishes WRF's surface solar fields under their WRF names, exactly when
+the active scheme computes them:
+
+| variable | units | written when |
+|---|---|---|
+| `SWDDNI` | W m-2 | the shortwave scheme computes a direct/diffuse split from its own solve: `ra_sw_physics = 4` (RTE+RRTMGP, the default, or `ra_rrtmg_variant = "rrtmg_legacy"`). Direct-normal irradiance, WRF's `SWDDIR / COSZEN` on daylit columns, zero at night. |
+| `SWDDIF` | W m-2 | same condition. Diffuse horizontal irradiance at the surface. |
+| `COSZEN` | dimensionless | any radiation scheme is on. The cosine of the solar zenith angle at the radiation call (WRF's interval-midpoint sun), held between calls as WRF holds it. |
+
+On a daylit column `SWDDNI * COSZEN + SWDDIF` is the scheme's surface
+downward shortwave, which is `SWDOWN`. All three are held between
+radiation calls, like `SWDOWN`; under `swint_opt = 1` the
+per-step interpolated `SWDDNI`/`SWDDIF` are written instead.
+
+Dudhia shortwave (`ra_sw_physics = 1`) and the analytic proxy compute no
+direct/diffuse split. WRF fills one for Dudhia with the radiation
+driver's empirical Ruiz-Arias model; WOOF does not publish an empirical
+split as model output, so those runs carry `COSZEN` but neither
+`SWDDNI` nor `SWDDIF`. WRF flags `SWDDNI`/`SWDDIF` restart-only, so a
+stock WRF wrfout carries them only through an `iofields_filename` add;
+WOOF writes them with WRF's own schema (name, units, description,
+stagger). They make the default full inventory larger than releases
+before this one: `COSZEN` on every run with radiation on, and
+`SWDDNI`/`SWDDIF` as well on a run with `ra_sw_physics = 4`.

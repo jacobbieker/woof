@@ -750,6 +750,46 @@ SURFACE_IDENTITY_OUTPUT_FIELDS: dict[str, WrfOutputField] = {
 }
 
 
+#: The surface solar fields a shortwave scheme publishes beside SWDOWN,
+#: keyed by the name that reaches the NetCDF file.  Transcribed verbatim
+#: from the pinned WRF v4.6.1 ``Registry/Registry.EM_COMMON``; all three are
+#: ``ij`` ``misc`` reals, no stagger.
+#:
+#: * ``SWDDNI``/``SWDDIF`` are the surface direct-normal and diffuse
+#:   irradiance rrtmg_swrad computes (``swddni = swddir / coszen``,
+#:   ``swddif = swdkdif(1)``, module_ra_rrtmg_sw.F's jararias 2013 arm).
+#:   WRF flags both ``rd`` -- restart, not history -- so a stock wrfout
+#:   carries them only through an ``iofields_filename`` add, which is what
+#:   every solar-energy WRF setup writes.  Publishing them is an EXTENSION
+#:   of WRF's history inventory with WRF's own schema, recorded as
+#:   ``wrf_history=False`` on the same terms as ``EXCH_H``.
+#: * ``COSZEN`` is the radiation-time cosine of the solar zenith angle,
+#:   ``rh`` in WRF: history-carried upstream.
+#:
+#: Written by ``woof.io.history_layout.surface_solar_history_fields`` only
+#: when the attached radiation scheme declares it computes them: SWDDNI and
+#: SWDDIF from a 4-shortwave (RTE+RRTMGP or legacy RRTMG) solve, never from
+#: an empirical split, so a Dudhia run carries neither.  They are model-state
+#: diagnostics, not scheme-selector fields, so they join
+#: :data:`HISTORY_FIELDS_BY_NETCDF_NAME` on the same terms as
+#: :data:`SURFACE_IDENTITY_OUTPUT_FIELDS`, and the selector-driven
+#: cardinality pin over :data:`OUTPUT_FIELDS_BY_NETCDF_NAME` is unchanged.
+SURFACE_SOLAR_OUTPUT_FIELDS: dict[str, WrfOutputField] = {
+    "SWDDNI": WrfOutputField(
+        "SWDDNI", "f4", "",
+        "Shortwave surface downward direct normal irradiance",
+        "W m-2", "Registry.EM_COMMON:1719", wrf_history=False),
+    "SWDDIF": WrfOutputField(
+        "SWDDIF", "f4", "",
+        "Shortwave surface downward diffuse irradiance",
+        "W m-2", "Registry.EM_COMMON:1723", wrf_history=False),
+    "COSZEN": WrfOutputField(
+        "COSZEN", "f4", "",
+        "COS of SOLAR ZENITH ANGLE",
+        "dimensionless", "Registry.EM_COMMON:997", wrf_history=True),
+}
+
+
 @dataclass(frozen=True)
 class WrfSelectorGlobal:
     """One WRF physics selector that stock WRF stamps into every history file.
@@ -882,7 +922,7 @@ for _group in (SCHEME_OUTPUT_FIELDS, PRECIPITATION_OUTPUT_FIELDS):
 #: so only the second question includes them.
 HISTORY_FIELDS_BY_NETCDF_NAME: dict[str, WrfOutputField] = {}
 for _group in (OUTPUT_FIELDS_BY_NETCDF_NAME, THOMPSON_AEROSOL_OUTPUT_FIELDS,
-               SURFACE_IDENTITY_OUTPUT_FIELDS):
+               SURFACE_IDENTITY_OUTPUT_FIELDS, SURFACE_SOLAR_OUTPUT_FIELDS):
     for _key, _field in _group.items():
         _clash = HISTORY_FIELDS_BY_NETCDF_NAME.get(_field.netcdf_name)
         if _clash is not None and _clash != _field:
@@ -1080,6 +1120,7 @@ __all__ = [
     "RUC_OUTPUT_FIELDS",
     "SCHEME_OUTPUT_FIELDS",
     "SURFACE_IDENTITY_OUTPUT_FIELDS",
+    "SURFACE_SOLAR_OUTPUT_FIELDS",
     "THOMPSON_AEROSOL_OUTPUT_FIELDS",
     "WRF_FIELD_TYPE_INTEGER",
     "WRF_FIELD_TYPE_REAL",

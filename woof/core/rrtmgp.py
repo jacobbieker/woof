@@ -3138,6 +3138,16 @@ class RRTMGPRadiation:
     #: decide whether the run's wrfout carries the field.  Unannotated on
     #: purpose: this is a class constant, not a dataclass field.
     publishes_olr = True
+    #: The radiation-time zenith cosine this adapter returns is the one its
+    #: shortwave ran at (``mu_raw``, the interval-midpoint sun), so the
+    #: driver may publish it as WRF's COSZEN (Registry.EM_COMMON:997).
+    publishes_coszen = True
+    #: Whether this adapter can hand the driver the surface direct beam and
+    #: diffuse flux of its own two-stream solve, WRF's SWDDIR/SWDDIF (and
+    #: from them SWDDNI).  Rebound per instance in ``__post_init__``: only a
+    #: shortwave-active adapter has a solve to read them from.  The driver
+    #: answers by setting ``surface_direct_requested``.
+    supplies_surface_direct = True
 
     start_time: datetime
     latitude_deg: object
@@ -3164,6 +3174,7 @@ class RRTMGPRadiation:
         if not (self.longwave or self.shortwave):
             raise ValueError("radiation adapter needs at least one spectrum")
         self.publishes_olr = bool(self.longwave)
+        self.supplies_surface_direct = bool(self.shortwave)
         if not isinstance(self.start_time, datetime):
             raise TypeError("radiation_start_time must be a datetime")
         self.latitude_deg = cp.ascontiguousarray(
@@ -3854,8 +3865,13 @@ class RRTMGPRadiation:
         # (woof.core.topo_radiation), total minus direct beam at the
         # surface (RTE's flux_dn already carries the direct beam).  One
         # plane, night columns keep the radiation driver's zero, and
-        # nothing it feeds changes any other output.
-        want_swddir = bool(self.shortwave and "swddir" in fields)
+        # nothing it feeds changes any other output.  The driver also asks
+        # for it (``surface_direct_requested``) to publish WRF's SWDDNI and
+        # SWDDIF in history; the beam is already in ``flux_dir``, so the
+        # request adds one surface plane and moves no other number.
+        want_swddir = bool(self.shortwave and (
+            "swddir" in fields
+            or getattr(self, "surface_direct_requested", False)))
         sw_dir_sfc = (cp.zeros(lw_up.shape[0], dtype=DTYPE)
                       if want_swddir or (self.shortwave and getattr(
                           self, "surface_diffuse_requested", False))

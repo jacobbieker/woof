@@ -1228,6 +1228,14 @@ class RRTMGLegacyRadiation:
     #: the run's wrfout carries the field.  The declaration is what the
     #: driver reads to decide whether OLR exists at all.
     publishes_olr = True
+    #: The returned COSZEN is the radiation-time cosine the shortwave ran at
+    #: (calc_coszen at xtime + radt/2), WRF's COSZEN (Registry.EM_COMMON:997).
+    publishes_coszen = True
+    #: rrtmg_swrad's swdkdir/swdkdif can be handed to the driver as WRF's
+    #: SWDDIR/SWDDIF (SWDDNI = SWDDIR / coszen, module_ra_rrtmg_sw.F's
+    #: jararias arm).  Rebound per instance: a longwave-only adapter has no
+    #: shortwave solve.  The driver answers with ``surface_direct_requested``.
+    supplies_surface_direct = True
 
     # No latitude-derived ozone is retained. The common tile gather and
     # moving-grid routes change latitude in place, so every radiation call
@@ -1263,6 +1271,7 @@ class RRTMGLegacyRadiation:
             raise ValueError("prescribed smoke requires legacy shortwave with aer_opt=3")
         self._smoke_provider = smoke_provider
         self.publishes_olr = self.longwave
+        self.supplies_surface_direct = self.shortwave
         from woof.core.trace_gases import (
             LEGACY_LW_GASES, LEGACY_SW_GASES, validate_trace_gas_overrides)
         supported = ((LEGACY_LW_GASES if self.longwave else frozenset())
@@ -1921,9 +1930,13 @@ class RRTMGLegacyRadiation:
         # as the radiation driver zeroes them (:1724-1726).  SWDDIR is built
         # only when BEP+BEM (sf_urban_physics = 3) allocated it in the
         # surface fields; SWDDIF also when slope_rad asks for it
-        # (woof.core.topo_radiation).  Off, nothing is allocated.
+        # (woof.core.topo_radiation), and both when the driver asked for
+        # them to publish SWDDNI/SWDDIF in history (surface_direct_requested;
+        # the engine computes swdkdir regardless, so the request moves no
+        # other number).  Off, nothing is allocated.
         swddir = swddif = None
-        if self.shortwave and "swddir" in fields:
+        if self.shortwave and ("swddir" in fields or getattr(
+                self, "surface_direct_requested", False)):
             swddir = cp.zeros(ncol, dtype=cp.float32)
         if self.shortwave and (swddir is not None or getattr(
                 self, "surface_diffuse_requested", False)):
