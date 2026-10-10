@@ -96,6 +96,12 @@ tests/test_obs_referee.py
 # the default stream makes divergence 3's declared referee unrunnable, which
 # is exactly what the first real run reported.
 tests/test_history_refl_q2.py
+# the forecast lane's history outputs: swddni/swddif/coszr, zgrid and xtime
+# in the frame, the proof frame unchanged without them, --history-vars and
+# --history-preset energy selection and their refusals, and the energy
+# sampler reading a written frame without the init.  Synthetic frames and a
+# tiny netCDF; no card, no assets.
+tests/test_history_outputs.py
 # the start frame's q2 and psfc: taken from the start file or the model's own
 # start state rather than published as the seam's pre-first-call placeholders
 # (+0 and 100000 Pa), from which every hour-0 2 m dewpoint map was drawn

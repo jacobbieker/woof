@@ -80,7 +80,7 @@ def _write_mesh(path: Path, *, bdy=None, with_cov=True, with_zgrid=True,
 
 def _write_history(path: Path, *, stamp="2026-10-10_06:00:00",
                    dialect="native", offset=0.0, with_xtime=True,
-                   n_extra_cells=0):
+                   n_extra_cells=0, terrain_m=None, zgrid_sha256=None):
     lat, lon, _ = _grid()
     if n_extra_cells:
         lat = np.concatenate([lat, np.full(n_extra_cells, LAT0 - 1.0)])
@@ -126,6 +126,17 @@ def _write_history(path: Path, *, stamp="2026-10-10_06:00:00",
                 ("nCells", "nVertLevels"))
             put("t2", _linear(lat, lon, 0.01), ("nCells",))
             put("surface_pressure", 95000.0 + 0.0 * lat, ("nCells",))
+            # woof hex forecast's radiation names (swdown, not swdnb)
+            put("swdown", 600.0 + 0.0 * lat, ("nCells",))
+            put("swddni", 800.0 + 0.0 * lat, ("nCells",))
+            put("swddif", 90.0 + 0.0 * lat, ("nCells",))
+            put("coszr", 0.6 + 0.0 * lat, ("nCells",))
+        if terrain_m is not None:
+            # woof hex forecast writes the run's zgrid once per file, no Time
+            ds.createVariable("zgrid", "f4", ("nCells", "nVertLevelsP1"))[:] = \
+                terrain_m + INTERFACES_AGL[None, :] + 0.0 * lat[:, None]
+        if zgrid_sha256 is not None:
+            ds.setncattr("zgrid_sha256", zgrid_sha256)
         put("u10", _linear(lat, lon, 0.001), ("nCells",))
         put("rainnc", 1.5 + 0.0 * lat, ("nCells",))
 
@@ -319,3 +330,95 @@ def test_keys_must_match_their_kind(tmp_path):
     with pytest.raises(SampleUnavailable, match="unknown sample keys"):
         sample_mpas([tmp_path / "history.nc"], SITES_LAT, SITES_LON, HEIGHTS,
                     profile_vars=("U10",), mesh_path=tmp_path / "mesh.nc")
+
+
+def test_cuda_dialect_radiation_names(tmp_path):
+    """``woof hex forecast`` writes swdown/swddni/swddif/coszr."""
+
+    _write_mesh(tmp_path / "mesh.nc")
+    path = tmp_path / "cuda-history.2026-10-10_06.00.00.nc"
+    _write_history(path, dialect="cuda")
+    result = sample_mpas([path], SITES_LAT, SITES_LON, HEIGHTS,
+                         mesh_path=tmp_path / "mesh.nc")
+    np.testing.assert_allclose(result.surface["SWDOWN"][0, :2], 600.0)
+    np.testing.assert_allclose(result.surface["SWDDNI"][0, :2], 800.0)
+    np.testing.assert_allclose(result.surface["SWDDIF"][0, :2], 90.0)
+    np.testing.assert_allclose(result.surface["COSZEN"][0, :2], 0.6,
+                               rtol=1e-6)
+    assert np.isnan(result.surface["SWDOWN"][0, 2])     # outside the mesh
+    available = available_variables([path], mesh_path=tmp_path / "mesh.nc")
+    assert {"SWDOWN", "SWDDNI", "SWDDIF", "COSZEN"} <= available
+
+
+def test_native_swdnb_still_wins_over_swdown(tmp_path):
+    _write_mesh(tmp_path / "mesh.nc")
+    _write_history(tmp_path / "history.nc")
+    with netCDF4.Dataset(tmp_path / "history.nc", "a") as ds:
+        ds.createVariable("swdown", "f4", ("Time", "nCells"))[0] = 1.0
+    result = sample_mpas([tmp_path / "history.nc"], SITES_LAT, SITES_LON,
+                         HEIGHTS, mesh_path=tmp_path / "mesh.nc")
+    np.testing.assert_allclose(result.surface["SWDOWN"][0, :2], 400.0)
+
+
+def test_xtime_dates_a_cuda_frame_over_its_file_name(tmp_path):
+    _write_mesh(tmp_path / "mesh.nc")
+    path = tmp_path / "cuda-history.2026-10-10_06.00.00.nc"
+    _write_history(path, dialect="cuda", stamp="2026-10-10_09:30:00")
+    result = sample_mpas([path], SITES_LAT, SITES_LON, HEIGHTS,
+                         mesh_path=tmp_path / "mesh.nc")
+    assert result.times.tolist() == [np.datetime64("2026-10-10T09:30:00")]
+
+
+def test_history_zgrid_is_used_first(tmp_path):
+    # The mesh file has no zgrid; the history's own places the profiles.
+    _write_mesh(tmp_path / "mesh.nc", with_zgrid=False)
+    _write_history(tmp_path / "h.nc", dialect="cuda", terrain_m=100.0)
+    result = sample_mpas([tmp_path / "h.nc"], SITES_LAT, SITES_LON, HEIGHTS,
+                         mesh_path=tmp_path / "mesh.nc")
+    truth = _linear(SITES_LAT[:2], SITES_LON[:2])
+    np.testing.assert_allclose(result.profile["U"][0, :2, 0], truth,
+                               atol=2e-2)
+    np.testing.assert_allclose(result.terrain_m[:2], 100.0)
+    assert any("zgrid read from the history" in n for n in result.notes)
+    # Both carry one: the history's wins (terrain 250 m against the mesh
+    # file's 100 m).
+    _write_mesh(tmp_path / "mesh2.nc")
+    _write_history(tmp_path / "h2.nc", dialect="cuda", terrain_m=250.0)
+    result = sample_mpas([tmp_path / "h2.nc"], SITES_LAT, SITES_LON, HEIGHTS,
+                         mesh_path=tmp_path / "mesh2.nc")
+    np.testing.assert_allclose(result.terrain_m[:2], 250.0)
+
+
+def test_mesh_zgrid_is_the_fallback(tmp_path):
+    _write_mesh(tmp_path / "mesh.nc")
+    _write_history(tmp_path / "h.nc", dialect="cuda")
+    result = sample_mpas([tmp_path / "h.nc"], SITES_LAT, SITES_LON, HEIGHTS,
+                         mesh_path=tmp_path / "mesh.nc")
+    assert any("zgrid read from the mesh" in n for n in result.notes)
+    assert "U" in result.profile
+
+
+def test_frames_from_different_vertical_grids_are_refused(tmp_path):
+    _write_mesh(tmp_path / "mesh.nc")
+    _write_history(tmp_path / "a.nc", dialect="cuda", terrain_m=100.0,
+                   zgrid_sha256="aa", stamp="2026-10-10_06:00:00")
+    _write_history(tmp_path / "b.nc", dialect="cuda", terrain_m=100.0,
+                   zgrid_sha256="bb", stamp="2026-10-10_07:00:00")
+    with pytest.raises(SampleUnavailable, match="different vertical grids"):
+        sample_mpas([tmp_path / "a.nc", tmp_path / "b.nc"], SITES_LAT,
+                    SITES_LON, HEIGHTS, mesh_path=tmp_path / "mesh.nc")
+
+
+def test_zgrid_comes_from_any_frame_before_the_mesh(tmp_path):
+    """An older frame without zgrid first: a later frame's zgrid is used,
+    not the mesh file's."""
+
+    _write_mesh(tmp_path / "mesh.nc")                  # terrain 100 m
+    _write_history(tmp_path / "a.nc", dialect="cuda",
+                   stamp="2026-10-10_06:00:00")
+    _write_history(tmp_path / "b.nc", dialect="cuda", terrain_m=250.0,
+                   zgrid_sha256="bb", stamp="2026-10-10_07:00:00")
+    result = sample_mpas([tmp_path / "a.nc", tmp_path / "b.nc"], SITES_LAT,
+                         SITES_LON, HEIGHTS, mesh_path=tmp_path / "mesh.nc")
+    np.testing.assert_allclose(result.terrain_m[:2], 250.0)
+    assert any("zgrid read from the history" in n for n in result.notes)

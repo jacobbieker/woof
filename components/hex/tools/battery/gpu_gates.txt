@@ -33,6 +33,12 @@ tests/test_device_capacity.py
 # suite skips by name rather than grading whatever woof sys.path holds.
 tests/test_p3_seam_ab.py
 
+# The history radiation export: the real column-batch seam (legacy RRTMG)
+# on four daytime columns exports diag/surface_dni, diag/surface_dif and
+# diag/radiation_coszen once radiation runs, the keys the adapter publishes
+# as swddni/swddif/coszr.  Any CUDA device; skips under 2 GiB free.
+tests/test_history_radiation_export_gpu.py
+
 # --- harness gates (not pytest; run as commands) ----------------------------
 #
 # These are the proof and forecast harnesses.  They are listed here rather

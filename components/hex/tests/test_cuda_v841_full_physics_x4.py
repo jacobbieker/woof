@@ -176,7 +176,9 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # when the checkout guard learned to resolve an admitted engine's
         # identity.  Re-frozen again 2026-09-27 when the per-step boundary
         # export became declinable (default armed).  The rationale lives
-        # beside the runner's pin.
+        # beside the runner's pin.  Re-frozen for the history outputs
+        # (SWDDNI/SWDDIF/COSZR selected from the export's diag/ keys); the
+        # rationale lives beside the runner's pin.
         "src/hexcore/cuda_arwen_physics_v841.py": (
             "7a129fc21be6bf9e70ecdf611a21edab9a6dd6a91473c6ae8805b127563c141b"
         ),
