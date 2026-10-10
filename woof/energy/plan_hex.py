@@ -101,7 +101,7 @@ An explicit opt-in that lifts the spacing floor.  The timestep is the
 largest one :func:`woof.hex.dt_admission.largest_admissible_dt` admits on the
 finest delivered edge -- Courant, exact division of the 600 s radiation
 cadence and binary64 clock closure all still apply -- with no anchor row
-behind it: 600/1024 s at 100 m, 600/2048 s at 50 m.  The anchor table is
+behind it: 0.5 s at 100 m, 0.25 s at 50 m.  The anchor table is
 neither read for that number nor written.  The plan, and every command
 that reports, carries ``timestep_evidence = "experimental-unanchored"``.
 

@@ -1403,6 +1403,26 @@ def timestep_preflight(dt_seconds: float, min_spacing_km: float, *,
                 f"{EXPERIMENTAL_DT_EVIDENCE!r}"
             )
         evidence = EXPERIMENTAL_DT_EVIDENCE
+        # The same admission the forecast door and the bind apply to a
+        # sub-anchor timestep: radiation divisibility, cadence integrality,
+        # the RK shape and binary64 clock closure.  Courant is re-checked
+        # by the door on the delivered mesh's measured min(dcEdge).
+        from . import dt_admission
+
+        try:
+            dt_admission.experimental_dt_anchor(
+                dt_seconds, cumulus_scheme=None,
+                minimum_dc_edge_m=None,
+                courant_deferred_to="woof hex forecast (delivered min(dcEdge))",
+            )
+        except dt_admission.DtAdmissionError as error:
+            raise AdaptRefusal(
+                f"--dt-seconds {dt_seconds:g} is refused by the experimental "
+                f"lane the forecast applies: {error}.  "
+                f"woof.hex.dt_admission.largest_admissible_dt names the "
+                f"timesteps it admits (0.5 s near 100 m, 0.25 s near "
+                f"50 m)"
+            ) from None
     return {
         "dt_seconds": dt_seconds,
         "courant_max_dt_seconds_at_requested_min_spacing": round(maximum, 6),

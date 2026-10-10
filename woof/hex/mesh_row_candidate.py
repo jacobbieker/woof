@@ -122,8 +122,9 @@ class _CandidateMeshDt:
             raise DtAdmissionError(
                 "overriding a registered row's timestep requires the "
                 "candidate-mint authorization verbatim "
-                f"({dt_admission.CANDIDATE_MINT_AUTHORIZATION!r}); got "
-                f"{authorization!r}.  This path exists ONLY to let a mint run "
+                "(<CANDIDATE_MINT_AUTHORIZATION>); the string given does not "
+                f"match it ({dt_admission._authorization_shape(authorization)}).  "
+                "This path exists ONLY to let a mint run "
                 "reach a card at a timestep no mesh row declares, and every "
                 "receipt it produces says so"
             )

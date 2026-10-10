@@ -392,11 +392,12 @@ about 819 m. The refusal names `--topology wrf-tiles` and
 planner then picks the largest timestep that does all of the following:
 
 - satisfies the Courant limit on the finest delivered edge,
-- divides the 600 s radiation cadence exactly, and
-- keeps the model clock exact in binary64.
+- divides the 600 s radiation cadence exactly,
+- keeps the model clock exact in binary64, and
+- is a whole number of milliseconds, the quantum of the regional class key
+  and the mint tooling.
 
-That works out to 600/1024 s (about 0.59 s) at 100 m and 600/2048 s (about
-0.29 s) at 50 m. No anchor backs these timesteps. The two 5 s anchors that
+That works out to 0.5 s at 100 m and 0.25 s at 50 m. No anchor backs these timesteps. The two 5 s anchors that
 do exist are recorded as diverging severely, for a reason nobody has
 measured yet. The plan, the forecast receipt and the history files therefore
 carry `timestep_evidence = "experimental-unanchored"`. Treat the output as
@@ -494,7 +495,7 @@ For example, for the Welsh corridor at 100 m, give it the history files
 (`--history "runs/hex/forecast/cuda-history.*.nc"`), the criteria
 (`--criteria wind,icing,assets` with `--sites wales/sites.json`), the two
 spacings (`--fine-km 0.1 --background-km 3`), the timestep
-(`--dt-seconds 0.5859375 --experimental-dt`, which is 600/1024 s), the previous cycle's state
+(`--dt-seconds 0.5 --experimental-dt`), the previous cycle's state
 (`--state runs/hex/cycle-01/next-spec/adapt-state.json`) and an output
 folder (`-o runs/hex/cycle-02/next-spec`).
 

@@ -468,7 +468,7 @@ def choose_timestep(
     anchor, i.e. the 50-100 m cores -- it returns the largest timestep
     :func:`woof.hex.dt_admission.largest_admissible_dt` finds for this
     ``min(dcEdge)`` (Courant, exact radiation divisibility, binary64 clock
-    closure; 600/1024 s near 100 m, 600/2048 s near 50 m), re-admitted
+    closure, whole milliseconds; 0.5 s near 100 m, 0.25 s near 50 m), re-admitted
     through :func:`woof.hex.dt_admission.experimental_dt_anchor` and stamped
     ``experimental-unanchored``.  The forecast door admits exactly that
     value under ``--experimental-dt`` and refuses it without.

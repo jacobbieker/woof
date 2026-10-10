@@ -1127,6 +1127,22 @@ def schedule_receipt(
     }
 
 
+#: Timesteps are quantised to whole milliseconds by the regional class key
+#: (``cuda_backend.regional_admission.RegionalClassKey.dt_ms``) and by the
+#: mint tooling (``components/hex/tools/mint_dt_anchor.py``).  A timestep
+#: that is not a whole number of milliseconds would share a class key with a
+#: neighbouring timestep and could never be minted, so the search and the
+#: experimental lane admit only whole-millisecond timesteps.
+DT_QUANTUM_SECONDS = 0.001
+
+
+def whole_milliseconds(dt_seconds: float) -> bool:
+    """Whether ``dt_seconds`` is an exact whole number of milliseconds."""
+
+    milliseconds = float(dt_seconds) * 1000.0
+    return milliseconds == round(milliseconds)
+
+
 def largest_admissible_dt(
     minimum_dc_edge_m: float,
     *,
@@ -1144,7 +1160,10 @@ def largest_admissible_dt(
     * exact divisibility of the physics radiation cadence, which the sealed
       constructor enforces AFTER the card is reserved; and
     * clock closure -- the candidate's multiples must be exact in binary64,
-      which rules out ``600/7`` and every other inexact divisor.
+      which rules out ``600/7`` and every other inexact divisor; and
+    * the millisecond quantum of the regional class key and the mint
+      tooling (:data:`DT_QUANTUM_SECONDS`), which rules out ``600/1024``:
+      0.5 s near 100 m and 0.25 s near 50 m.
 
     Returns all three, plus the largest value satisfying them.  Reproduces
     the registered graded rows: 13,311.8 m -> 95.84 s Courant -> 75 s
@@ -1162,6 +1181,7 @@ def largest_admissible_dt(
     steps = math.ceil(cadence / courant_limit)
     admissible: float | None = None
     rejected_for_clock: list[float] = []
+    rejected_for_quantum: list[float] = []
     # The search runs to 4x the cadence in counts (0.25 s at 600 s), and
     # past it to twice the Courant floor's own count, so a mesh finer than
     # ~35 m still meets the exact power-of-two divisors (600/4096 s, ...)
@@ -1169,6 +1189,9 @@ def largest_admissible_dt(
     for count in range(max(1, steps), max(int(cadence) * 4, 2 * steps) + 1):
         candidate = cadence / count
         if candidate > courant_limit:
+            continue
+        if not whole_milliseconds(candidate):
+            rejected_for_quantum.append(candidate)
             continue
         try:
             cadence_steps("radiation_seconds", cadence, candidate)
@@ -1191,6 +1214,7 @@ def largest_admissible_dt(
             None if admissible is None else int(round(cadence / admissible))
         ),
         "rejected_for_clock_closure": rejected_for_clock,
+        "rejected_for_millisecond_quantum": rejected_for_quantum,
     }
 
 
@@ -1393,6 +1417,20 @@ def require_dt_anchor(
 #: Deliberately a sentence rather than a flag: the only legitimate reason to
 #: do this is to mint the evidence a ruling would then act on, and a caller
 #: who cannot say that sentence has not read why the gate is there.
+def _authorization_shape(value: object) -> str:
+    """Describe a refused authorization string WITHOUT echoing it.
+
+    The candidate-mint sentence is a ruling the project owner supplies; a
+    refusal that quoted either the expected sentence or a near-miss of it
+    would publish it in logs and receipts.  Only the type and length are
+    reported.
+    """
+
+    if not isinstance(value, str):
+        return f"not a string: {type(value).__name__}"
+    return f"{len(value)} characters"
+
+
 CANDIDATE_MINT_AUTHORIZATION = (
     "minting the integration anchor for a ruling that has not been made"
 )
@@ -1434,8 +1472,9 @@ class _CandidateTimestep:
         if authorization != CANDIDATE_MINT_AUTHORIZATION:
             raise DtAdmissionError(
                 "running at an unanchored timestep requires the candidate-mint "
-                f"authorization verbatim ({CANDIDATE_MINT_AUTHORIZATION!r}); "
-                f"got {authorization!r}.  This path exists ONLY to mint the "
+                "authorization verbatim (<CANDIDATE_MINT_AUTHORIZATION>); the "
+                f"string given does not match it ({_authorization_shape(authorization)}).  "
+                "This path exists ONLY to mint the "
                 "integration evidence a ruling would act on, and every receipt "
                 "it produces says so"
             )
@@ -1487,8 +1526,8 @@ class _CandidateTimestep:
             integration_anchor="NOT MEASURED -- this run is minting it",
             native_reference=None,
             basis=(
-                "candidate mint under "
-                f"{CANDIDATE_MINT_AUTHORIZATION!r}; this row admits nothing "
+                "candidate mint under the <CANDIDATE_MINT_AUTHORIZATION> "
+                "ruling text (redacted); this row admits nothing "
                 "and is removed when the mint finishes"
             ),
             physics_health=(
@@ -1735,6 +1774,15 @@ def experimental_dt_anchor(
     def _number(value: float | None) -> float | None:
         return None if value is None else float(value)
 
+    if not whole_milliseconds(dt_seconds):
+        raise DtAdmissionError(
+            f"experimental lane: dt={float(dt_seconds)!r} s is not a whole "
+            f"number of milliseconds; the regional class key and the mint "
+            f"tooling quantise timesteps to 1 ms, so this timestep would share "
+            f"a class with its neighbours and could never be minted.  "
+            f"largest_admissible_dt names the whole-millisecond timesteps a "
+            f"mesh admits (0.5 s near 100 m, 0.25 s near 50 m)"
+        )
     return _experimental_dt_anchor_cached(
         float(dt_seconds),
         None if cumulus_scheme is None else str(cumulus_scheme),
