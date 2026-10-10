@@ -59,12 +59,24 @@ from .errors import MpasPortError
 #: What a cull produces, and the order it produces it in.  The grid comes
 #: first because everything else is checked against it; the init comes last
 #: because it is the biggest and a failure earlier should not have paid for
-#: it.
+#: it.  The vertical artifact (``woof hex vertical``, minted on the global
+#: parent) is cut beside the static so a cull with no global init still gets
+#: the parent's vertical cell for cell -- the road ``woof hex init
+#: --capsule/--reference`` takes with a regional meteorological source.
 CULL_ROLES: tuple[tuple[str, str], ...] = (
     ("grid", "grid"),
     ("static", "static"),
+    ("vertical", "vertical"),
     ("init", "init"),
 )
+
+#: The roles whose parent and cut bytes the receipt digests: the two a
+#: runtime row pins (``woof hex register --cull-receipt`` checks them).
+DIGESTED_ROLES: tuple[str, ...] = ("grid", "static")
+
+#: The global attribute ``woof.hex.vertical_spec`` stamps on every vertical
+#: artifact; a ``--parent-vertical`` without it is not one.
+VERTICAL_ARTIFACT_ATTRIBUTE = "gpuwm_hex_vertical_artifact_schema"
 
 #: The global attributes ``rw_mpas_lbc`` reads off its ``--grid`` and refuses
 #: rather than invent, transcribed from ``rw-mpas/src/lbc/emit.rs:67-136``.
@@ -268,6 +280,85 @@ def carry_lineage(
     }
 
 
+def check_parent_vertical(grid: Path, vertical: Path) -> dict[str, Any]:
+    """Refuse a ``--parent-vertical`` that is not the parent grid's artifact.
+
+    The culler subsets any file that carries the mesh dimensions, so a
+    vertical minted on a DIFFERENT mesh of the same size would be cut without
+    complaint and hand the child another mesh's terrain-following levels.
+    Measured here: the artifact must carry the vertical-artifact stamp, the
+    parent's nCells and nEdges, and -- where both carry cell centres -- the
+    parent's cell centres to within 1e-6 rad.
+    """
+
+    from netCDF4 import Dataset
+    import numpy as np
+
+    with Dataset(str(vertical)) as artifact, Dataset(str(grid)) as parent:
+        artifact.set_auto_maskandscale(False)
+        parent.set_auto_maskandscale(False)
+        if VERTICAL_ARTIFACT_ATTRIBUTE not in artifact.ncattrs():
+            raise _refuse(
+                f"--parent-vertical {vertical.name} carries no "
+                f"{VERTICAL_ARTIFACT_ATTRIBUTE}; it is not a vertical artifact. "
+                f"Mint one on the global parent with `woof hex vertical`"
+            )
+        sizes: dict[str, tuple[int | None, int | None]] = {}
+        for name in ("nCells", "nEdges"):
+            have = artifact.dimensions.get(name)
+            want = parent.dimensions.get(name)
+            sizes[name] = (
+                None if have is None else len(have),
+                None if want is None else len(want),
+            )
+        if any(have != want for have, want in sizes.values()):
+            raise _refuse(
+                f"--parent-vertical {vertical.name} has "
+                f"nCells/nEdges {[v[0] for v in sizes.values()]} and the "
+                f"parent grid {grid.name} has {[v[1] for v in sizes.values()]}; "
+                f"the artifact was minted on another mesh"
+            )
+        for name in ("latCell", "lonCell"):
+            missing = [
+                label for label, dataset in (("artifact", artifact), ("parent grid", parent))
+                if name not in dataset.variables
+            ]
+            if missing:
+                raise _refuse(
+                    f"the {' and '.join(missing)} carries no {name}, so "
+                    f"--parent-vertical {vertical.name} cannot be shown to sit "
+                    f"on {grid.name}'s cells; a size match alone is refused"
+                )
+            have = np.asarray(artifact.variables[name][:], dtype=np.float64)
+            want = np.asarray(parent.variables[name][:], dtype=np.float64)
+            # 1e-6 rad (about 6 m) admits a float32 copy of the same centre
+            # and nothing a different mesh would put there.
+            if have.shape != want.shape or not np.allclose(
+                have, want, rtol=0.0, atol=1.0e-6
+            ):
+                raise _refuse(
+                    f"--parent-vertical {vertical.name} and the parent "
+                    f"grid {grid.name} disagree on {name}; the artifact "
+                    f"was minted on another mesh of the same size"
+                )
+        checked = True
+        n_levels = (
+            len(artifact.dimensions["nVertLevels"])
+            if "nVertLevels" in artifact.dimensions else None
+        )
+        schema = str(artifact.getncattr(VERTICAL_ARTIFACT_ATTRIBUTE))
+        spec_sha = (
+            str(artifact.getncattr("gpuwm_hex_vertical_spec_sha256"))
+            if "gpuwm_hex_vertical_spec_sha256" in artifact.ncattrs() else None
+        )
+    return {
+        "artifact_schema": schema,
+        "vertical_spec_sha256": spec_sha,
+        "n_vert_levels": n_levels,
+        "cell_centres_checked": checked,
+    }
+
+
 def run_cull(arguments: argparse.Namespace) -> int:
     started = time.monotonic()
     engine = resolve_mesh_engine(getattr(arguments, "engine", None))
@@ -303,15 +394,27 @@ def run_cull(arguments: argparse.Namespace) -> int:
             "other file is subset against, and a static or init cut without "
             "it would have no mesh to be a mesh of"
         )
+    vertical_check: dict[str, Any] | None = None
+    if "vertical" in parents:
+        vertical_check = check_parent_vertical(parents["grid"], parents["vertical"])
     if "init" not in parents:
         print(
             "woof hex: advisory: no --parent-init was given, so this cull "
             "produces a mesh and no initial condition.  `woof hex init` "
             "REFUSES a limited-area grid by name -- its closed-sphere "
             "vertical authority does not invent exterior state -- so the "
-            "supported way to get one is to cull the parent's init here.",
+            "supported way to get one is to cull the parent's init here"
+            + (
+                ", or to initialise the cut from the culled vertical artifact "
+                "with `woof hex init --capsule/--reference`."
+                if "vertical" in parents
+                else ", or to pass --parent-vertical (minted on this parent "
+                "with `woof hex vertical`) and initialise from it."
+            ),
             file=sys.stderr,
         )
+
+    from .mesh_rows import sha256_file
 
     rows: dict[str, Any] = {}
     for role, _ in CULL_ROLES:
@@ -337,14 +440,30 @@ def run_cull(arguments: argparse.Namespace) -> int:
         rows[role]["lineage"] = carry_lineage(
             parents[role], out, drives_boundaries=(role == "init")
         )
+        # Digests AFTER the lineage carry, because that is the file a row
+        # pins: `woof hex register --cull-receipt` checks the grid and static
+        # it is handed against these, and the parent's against its row.  The
+        # init and vertical are not digested: no row pins them, and on a
+        # global parent they are the multi-GB files a cull should not reread.
+        if role in DIGESTED_ROLES:
+            rows[role]["parent_sha256"] = sha256_file(parents[role])
+            rows[role]["out_sha256"] = sha256_file(out)
+        if role == "vertical" and vertical_check is not None:
+            rows[role]["parent_vertical"] = vertical_check
 
     receipt_path = Path(
         getattr(arguments, "receipt", None) or out_dir / f"{name}.cull.json"
     ).expanduser().absolute()
+    try:
+        region_document = json.loads(region.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        region_document = None
     receipt = {
         "schema": "gpuwm-hex.cull-door/v1",
         "name": name,
         "region": str(region),
+        "region_sha256": sha256_file(region),
+        "region_document": region_document,
         "engine": str(engine),
         "out_dir": str(out_dir),
         "files": rows,
@@ -367,6 +486,22 @@ def run_cull(arguments: argparse.Namespace) -> int:
     grid = rows.get("grid", {}).get("out")
     if grid:
         print(
+            f"NEXT woof hex register --grid {grid} --static "
+            f"{rows.get('static', {}).get('out', '<CULLED-STATIC.nc>')} "
+            f"--parent-row <PARENT-ROW> --cull-receipt {receipt_path} "
+            f"--name <ROW> --rows <mesh-rows.json>",
+            flush=True,
+        )
+        vertical_out = rows.get("vertical", {}).get("out")
+        if vertical_out and "init" not in rows:
+            print(
+                f"NEXT woof hex init --met <MET/FILE:YYYY-MM-DD_HH> --static "
+                f"{rows.get('static', {}).get('out', '<CULLED-STATIC.nc>')} "
+                f"--capsule {vertical_out} --reference {vertical_out} "
+                f"--out <CULLED-INIT.nc> --start-time ...",
+                flush=True,
+            )
+        print(
             "NEXT rw_mpas_lbc --source unstructured-port-stream "
             f"--grid {rows.get('init', {}).get('out', '<CULLED-INIT.nc>')} "
             "--parent-grid <PARENT-INIT.nc> --out-dir <LBC-DIR> "
@@ -387,7 +522,7 @@ def run_cull(arguments: argparse.Namespace) -> int:
 def add_cull_parser(commands: Any) -> None:
     parser = commands.add_parser(
         "cull",
-        help="cut a limited-area grid, static and initial condition out of a global case",
+        help="cut a limited-area grid, static, vertical artifact and initial condition out of a global case",
         description=(
             "Cut a limited-area case out of a global one with "
             "rw_mpas_mesh --cull-parent. This is the SUPPORTED way to get a "
@@ -404,6 +539,11 @@ def add_cull_parser(commands: Any) -> None:
     parser.add_argument(
         "--parent-static", type=Path, default=None, metavar="FILE",
         help="the global static file generated with that grid")
+    parser.add_argument(
+        "--parent-vertical", type=Path, default=None, metavar="FILE",
+        help="the global vertical artifact minted on that grid with `woof hex "
+             "vertical`; cut beside the static so the child's vertical IS the "
+             "parent's, cell for cell, and the cut can be initialised from it")
     parser.add_argument(
         "--parent-init", type=Path, default=None, metavar="FILE",
         help="the global initial condition. CUTTING THIS IS THE POINT: it is "

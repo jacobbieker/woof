@@ -174,6 +174,78 @@ def test_a_document_of_another_schema_is_refused(tmp_path: Path) -> None:
         mesh_rows.read_rows(tmp_path / "missing.json")
 
 
+def _generic(pair: dict[str, Path], **extra) -> mesh_rows.MeshRow:
+    return mesh_rows.describe_generated(
+        name="g.raster.12", grid=pair["grid"], static=pair["static"],
+        dt_seconds=20.0, n_levels=7, admission={"dual_edge_admission": {"ok": True}},
+        spec_sha256="ab" * 32, nominal_dx_m=2500.0,
+        region={"source": "grid attribute", "name": "raster density",
+                "region_kinds": ["raster"], "background_km": 60.0,
+                "spec": {"background_km": 60.0,
+                         "regions": [{"shape": "raster", "path": "d.nc"}]}},
+        background_km=60.0, **extra,
+    )
+
+
+def test_a_row_with_no_point_cap_round_trips_and_says_what_it_is(pair) -> None:
+    row = _generic(pair, timestep_evidence=mesh_rows.ANCHORED_TIMESTEP_EVIDENCE)
+    assert row.point_deg is None and row.core_radius_km is None and row.fine_dx_m is None
+    assert row.nominal_dx_m == 2500.0 and row.n_interfaces == 8
+    assert row.generator_receipt is None and row.static_receipt is None
+    path = mesh_rows.write_rows(pair["dir"] / "generic.json", [row])
+    back = mesh_rows.read_rows(path)
+    assert back == [row]
+    notes = row.notes()
+    assert notes.startswith(mesh_rows.GENERATED_GLOBAL_ROW_MARKER)
+    assert "raster" in notes and "abababababababab" in notes
+    assert "EXPERIMENTAL" not in notes
+    # A cull of it carries the region and needs no pad scale.
+    cull_grid = _grid(pair["dir"] / "gc.grid.nc", 8, 20, zone=7)
+    cull_static = _grid(pair["dir"] / "gc.static.nc", 8, 20, zone=7)
+    receipt = pair["dir"] / "gc.cull.json"
+    receipt.write_text("{}", encoding="utf-8")
+    cull = mesh_rows.describe_cull(
+        name="gc", parent=row, grid=cull_grid, static=cull_static, cull_receipt=receipt,
+        cull_region={"kind": "polygon"}, cull_pad_scale=None, lbc_source="lbc",
+        admission={},
+    )
+    assert cull.cull_pad_scale is None and cull.region == row.region
+    assert cull.timestep_evidence == mesh_rows.ANCHORED_TIMESTEP_EVIDENCE
+    assert "cut with rw_mpas_mesh" in cull.notes()
+    path = mesh_rows.write_rows(pair["dir"] / "generic.json", [row, cull])
+    assert mesh_rows.read_rows(path) == [row, cull]
+
+
+def test_an_experimental_row_says_so_in_its_notes(pair) -> None:
+    row = _generic(pair, timestep_evidence=mesh_rows.EXPERIMENTAL_TIMESTEP_EVIDENCE)
+    assert row.experimental
+    assert "EXPERIMENTAL-UNANCHORED" in row.notes()
+
+
+def test_a_row_needs_a_nominal_spacing_and_a_known_evidence_label(pair) -> None:
+    with pytest.raises(MeshRowRefusal) as refusal:
+        mesh_rows.describe_generated(
+            name="g", grid=pair["grid"], static=pair["static"], dt_seconds=20.0,
+            n_levels=7, admission={},
+        )
+    assert "nominal dx" in str(refusal.value)
+    with pytest.raises(MeshRowRefusal):
+        _generic(pair, timestep_evidence="trust-me")
+    raw = _generic(pair).as_dict()
+    raw["timestep_evidence"] = "trust-me"
+    with pytest.raises(MeshRowRefusal):
+        mesh_rows.MeshRow.from_dict(raw)
+
+
+def test_a_row_written_before_the_cap_fields_became_optional_still_reads(pair) -> None:
+    raw = _parent(pair).as_dict()
+    for key in ("region", "timestep_evidence"):
+        raw.pop(key)
+    back = mesh_rows.MeshRow.from_dict(raw)
+    assert back.point_deg == (39.1, -94.58) and back.timestep_evidence is None
+    assert back.notes().startswith(mesh_rows.GENERATED_ROW_MARKER)
+
+
 def test_the_registry_module_applies_runtime_rows_where_it_builds_the_table() -> None:
     text = (PACKAGE_DIR / "drivers" / "mpas_mesh_binding.py").read_text(encoding="utf-8")
     assert "mesh_rows.apply_rows(MESH_BINDINGS, MeshBinding)" in text
