@@ -397,6 +397,54 @@ def test_the_plan_review_carries_the_disk_projection(
     assert "this child will write about" in printed
 
 
+def test_the_plan_review_names_the_child_history_selection(
+        tmp_path, capsys, monkeypatch):
+    """The plan says which [output] the child writes, on both routes: a
+    --point child the full inventory, and a --child-config child the
+    preset its file names, here with per-domain LES keys beside it (the
+    route ``woof energy plan --topology wrf-tiles`` writes tiles for)."""
+
+    import re
+
+    monkeypatch.delenv(KEEP_CHECKPOINTS_ENV, raising=False)
+    args = _fitting_point_args(tmp_path)
+    assert cli_main([*args, "--dry-run"]) == 0
+    capsys.readouterr()
+    plan = json.loads(downscale_plan_path(
+        tmp_path / "child-run", dry_run=True).read_text(encoding="utf-8"))
+    assert plan["history_selection"] == "preset=full"
+
+    text = Path(plan["child_config"]).read_text(encoding="utf-8")
+    les = {"km_opt": 3, "bl_pbl_physics": 0, "mix_isotropic": 1,
+           "diff_opt": 2, "cu_physics": 0}
+    for key, value in les.items():
+        # Replaced where the derived [run] names the key, else added to
+        # [run] (the fixture's restart evidence leaves some at defaults).
+        text, count = re.subn(rf"(?m)^{key} = .*$", f"{key} = {value}", text)
+        if count == 0:
+            text = text.replace("\n[run]\n", f"\n[run]\n{key} = {value}\n", 1)
+        assert re.search(rf"(?m)^{key} = {value}$", text), key
+    child = tmp_path / "energy-child.toml"
+    child.write_text(text + '\n[output]\npreset = "energy"\n',
+                     encoding="utf-8")
+    placement = plan["placement"]
+    assert cli_main([
+        "downscale", str(tmp_path),
+        "--parent-restart", args[args.index("--parent-restart") + 1],
+        "--child-config", str(child),
+        "--ratio", str(placement["ratio"]),
+        "--i-parent-start", str(placement["i_parent_start"]),
+        "--j-parent-start", str(placement["j_parent_start"]),
+        "--parent-terrain", "--out", str(tmp_path / "energy-run"),
+        "--dry-run"]) == 0
+    capsys.readouterr()
+    plan = json.loads(downscale_plan_path(
+        tmp_path / "energy-run", dry_run=True).read_text(encoding="utf-8"))
+    assert plan["history_selection"] == "preset=energy"
+    values = plan["child_settings"]["values"]
+    assert {key: values[key] for key in les} == les
+
+
 def test_a_child_its_disk_cannot_hold_is_refused_before_it_starts(
         tmp_path, capsys, monkeypatch):
     import woof.offline_child_run as offline_child_run
