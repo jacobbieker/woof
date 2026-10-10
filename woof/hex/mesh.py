@@ -543,6 +543,15 @@ def spherical_arc_tolerance(
     stand in for it, so it is capped at what binary32 storage actually needs
     (``8 * eps`` ~ 9.5e-7) rather than the 2.0e-5 that let metre-scale
     corruption hide at coarse spacing.
+
+    The same 0.5 m binary32 quantum governs anything COMPUTED from the
+    absolute coordinates in binary32, not just this check.  At 50 m it is 1 %
+    of an edge, and the v8.4.1 deformation weights built that way were off by
+    up to 18 %; :mod:`woof.hex.mixing_v841` therefore evaluates them in
+    binary64 about each cell centre below 500 m spacing
+    (``LOCAL64_GEOMETRY_QUANTUM_RATIO``).  Keep any new per-cell or per-edge
+    geometry on the same footing: difference the binary64 coordinates first,
+    cast the finished coefficient last.
     """
 
     spacing = float(np.spacing(np.asarray(abs(radius), dtype=coordinate_dtype)))
