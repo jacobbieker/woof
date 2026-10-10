@@ -4384,6 +4384,16 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
         # direction for a VRAM estimate.
         shapes["olr"] = s2
         # Classic LW call/packing arrays are priced as transients below.
+    if ra_lw_physics or ra_sw_physics:
+        # History's COSZEN buffer (PhysicsDriver.radiation_coszen): every
+        # built-in radiation callable declares ``publishes_coszen``.
+        shapes["radiation_coszen"] = s2
+    if ra_sw_physics == 4:
+        # History's SWDDNI/SWDDIF buffers (PhysicsDriver.surface_dni /
+        # surface_dif), allocated when the shortwave leaf declares
+        # ``supplies_surface_direct`` -- both 4-shortwave variants do.
+        shapes["surface_dni"] = s2
+        shapes["surface_dif"] = s2
     return shapes
 
 

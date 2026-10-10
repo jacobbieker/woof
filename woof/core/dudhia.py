@@ -258,6 +258,14 @@ def dudhia_shortwave_columns(
 class DudhiaShortwaveRadiation:
     """GPU-resident adapter for WRF ``ra_sw_physics=1``."""
 
+    #: The returned COSZEN is the radiation-time cosine the column solve ran
+    #: at, so the driver may publish it as WRF's COSZEN.  Dudhia computes no
+    #: direct/diffuse split (WRF fills SWDDIR/SWDDIF for it with the
+    #: driver's empirical Ruiz-Arias model), so it declares no
+    #: ``supplies_surface_direct`` and a Dudhia run publishes no SWDDNI or
+    #: SWDDIF rather than a statistical split presented as model output.
+    publishes_coszen = True
+
     start_time: datetime
     latitude_deg: object
     longitude_deg: object

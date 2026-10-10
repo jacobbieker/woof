@@ -90,6 +90,10 @@ def analytic_clear_sky_forcing(
 class AnalyticClearSkyRadiation:
     """Adapt the clear-sky proxy to the production radiation-slot API."""
 
+    #: The returned COSZEN is WRF's radiation-clock geometry (below), so it
+    #: is published as COSZEN; the proxy has no direct/diffuse split.
+    publishes_coszen = True
+
     start_time: datetime
     latitude_deg: object
     longitude_deg: object

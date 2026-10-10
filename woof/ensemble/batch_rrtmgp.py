@@ -74,6 +74,7 @@ def _adapter_metadata(adapter):
             "trace_gas_overrides": _scalar(adapter.trace_gas_overrides),
             "trace_vmr": _scalar(adapter.trace_vmr),
             "surface_diffuse_requested": bool(getattr(adapter, "surface_diffuse_requested", False)),
+            "surface_direct_requested": bool(getattr(adapter, "surface_direct_requested", False)),
             "workspace_policy": workspace_policy}
 
 

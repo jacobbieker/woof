@@ -929,7 +929,18 @@ DRIVER_SERIALIZED_ATTRS = frozenset({
 #: publishes zeros because WRF's does (``misc``, zero-initialised, and
 #: the time-0 write precedes the first radiation call).  A restart is not
 #: the first call of a run; it is the middle of one.
-DRIVER_CHECKPOINT_ONLY_ATTRS = frozenset({"olr"})
+#:
+#: ``surface_dni``, ``surface_dif`` and ``radiation_coszen`` (history's
+#: SWDDNI, SWDDIF and COSZEN) join on OLR's terms exactly: written by the
+#: shortwave scheme on radiation's cadence, held between calls, published
+#: into history frames, and ``None`` when the attached scheme declares no
+#: such output.  WRF restart-carries all three (Registry.EM_COMMON:997,
+#: :1719, :1723 carry ``r``).  Absent-tolerant on restore in both
+#: directions within this build, like OLR, so a checkpoint written before
+#: they existed still restores.  As with any new ``diag/`` member, a build
+#: that predates them refuses a checkpoint that carries them.
+DRIVER_CHECKPOINT_ONLY_ATTRS = frozenset(
+    {"olr", "surface_dni", "surface_dif", "radiation_coszen"})
 
 #: Raw PBL rates read by GF and New Tiedtke between producer calls.
 #: WRF Registry RTHBLTEN/RQVBLTEN are restart-carried for the same reason.

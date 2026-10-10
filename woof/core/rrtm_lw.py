@@ -1066,6 +1066,9 @@ class RRTMDudhiaRadiation:
 
     publishes_olr = True
     glw_provenance = "scheme"
+    #: COSZEN is the Dudhia leaf's radiation-time cosine; see
+    #: ``DudhiaShortwaveRadiation.publishes_coszen``.
+    publishes_coszen = True
 
     def __post_init__(self) -> None:
         from woof.core.dudhia import DudhiaShortwaveRadiation

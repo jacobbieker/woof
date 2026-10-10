@@ -58,6 +58,17 @@ class ComposedRadiation:
         self.longwave_adapter = longwave_adapter
         self.shortwave_adapter = shortwave_adapter
         self.publishes_olr = bool(getattr(longwave_adapter, "publishes_olr", False))
+        # COSZEN is always a radiation-time cosine here: the shortwave
+        # leaf's own, or the radiation-clock geometry computed below when
+        # no shortwave spectrum is selected.
+        self.publishes_coszen = True
+        # The surface direct/diffuse pair exists exactly when the shortwave
+        # leaf computes it from its own solve.  A mirror for callers that
+        # inspect the composition: PhysicsDriver allocates the SWDDNI/SWDDIF
+        # history buffers from the LEAF declarations (radiation_adapters)
+        # and sets surface_direct_requested on this object and the leaf.
+        self.supplies_surface_direct = bool(
+            getattr(shortwave_adapter, "supplies_surface_direct", False))
         self.glw_provenance = "scheme" if longwave_adapter is not None else "declared"
 
     @property
@@ -129,8 +140,13 @@ class ComposedRadiation:
             # The interpolation fits the scheme's direct beam. Preserve
             # the original off-mode result while carrying SWDDIR through
             # compositions with independently selected spectra when on.
+            # The driver's history request (surface_direct_requested)
+            # carries it too; the BEP+BEM consumer keeps the composition's
+            # original off-mode split itself (PhysicsDriver._run_radiation).
             swddir=(getattr(sw, "swddir", None) if sw is not None
-                    and int(getattr(cfg, "swint_opt", 0)) == 1 else None),
+                    and (int(getattr(cfg, "swint_opt", 0)) == 1
+                         or getattr(self, "surface_direct_requested", False))
+                    else None),
             swddif=getattr(sw, "swddif", None) if sw is not None else None)
 
     def restart_identity(self):

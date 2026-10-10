@@ -630,6 +630,9 @@ def set_carrier_scalars(state, values) -> None:
 #: surprise.
 OUTPUT_ONLY_DRIVER_ATTRS: tuple[str, ...] = (
     "olr", "hmix_k_diag", "sase_flux_diag", "last_sase_ledger",
+    # History's SWDDNI/SWDDIF/COSZEN, on OLR's terms (the restart carries
+    # them checkpoint-only; the trajectory never reads them back).
+    "surface_dni", "surface_dif", "radiation_coszen",
 )
 
 
