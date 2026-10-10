@@ -2231,11 +2231,17 @@ def _downscale_main(args, reservation: _OutputReservation,
     # so before it started.
     from woof.offline_child_run import child_disk_projection
     from woof.config import load_history_selection
+    history_selection = load_history_selection(child_config)
     disk = child_disk_projection(
         cfg, child_clock, keep_checkpoints=keep_checkpoints,
         render_products=render_products, outdir=Path(args.out),
-        history_selection=load_history_selection(child_config))
+        history_selection=history_selection)
     plan["disk"] = disk
+    # WHICH variables the child's history tape keeps: the child config's
+    # [output] block, in the one-line spelling the forecast door's disk
+    # rows carry (woof.disk_budget), so a reviewer reads the preset off
+    # the plan instead of inferring it from the projected bytes.
+    plan["history_selection"] = history_selection.spelling()
     print("woof downscale: " + _disk_line(disk, Path(args.out)))
     if disk["refusal"] is not None:
         refusal = disk["refusal"][0].upper() + disk["refusal"][1:] + "."
