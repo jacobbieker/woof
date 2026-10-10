@@ -788,7 +788,7 @@ def test_a_bridge_that_predates_the_contract_is_missing_not_ok(
                      "gpuwm_mapped_engine", "static_fields", "obs_regrid", "obs_score",
                      "rw_isobaric", "rw_sitesample",
                      "rw_mpas_mesh", "rw_mpas_static", "rw_mpas_init", "rw_mpas_geometry", "rw_mpas_hostprep",
-                     "rw_mpas_convert", "rw_mpas_lbc", "arwen-tui", "rw_zarr", "rw_netcdf",
+                     "rw_mpas_convert", "rw_mpas_lbc", "rw_mpas_remap", "arwen-tui", "rw_zarr", "rw_netcdf",
                      "rw_mlexport", "rw_simradar",
                      "rw_compare", "rw_verify"}
 

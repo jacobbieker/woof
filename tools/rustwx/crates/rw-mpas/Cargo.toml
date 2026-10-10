@@ -55,6 +55,11 @@ path = "src/bin/rw_mpas_lbc.rs"
 name = "rw_mpas_mesh"
 path = "src/bin/rw_mpas_mesh.rs"
 
+# Mesh-to-mesh state remap: an init/restart state on one mesh onto another.
+[[bin]]
+name = "rw_mpas_remap"
+path = "src/bin/rw_mpas_remap.rs"
+
 # The writer the mesh registry pins, and the one `gpuwm mesh` runs.
 [[bin]]
 name = "rw_mpas_static"
