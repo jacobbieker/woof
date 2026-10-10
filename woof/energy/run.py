@@ -26,7 +26,9 @@ It does no numerical work itself: every forecast is a ``woof`` subprocess.
   ``run_dir`` only until the parent has run (a dry run shows that, and
   says so in its notes).
 * A ``hex-swath`` domain runs each argv in ``PlanDomain.extra["commands"]``
-  in order.
+  in order.  ``extra["env_paths"]`` (environment name -> plan-relative
+  path, e.g. ``WOOF_HEX_MESH_ROWS``) is exported as absolute paths to
+  every one of them.
 
 Each command runs as ``[sys.executable, "-m", "woof", *argv]`` with the
 plan's directory as the working directory, so the relative paths a planner
@@ -130,6 +132,9 @@ class Step:
     run_dir: str
     parent: str | None = None       # domain whose output forces this step
     notes: list[str] = field(default_factory=list)
+    #: environment name -> plan-relative path, exported as an absolute
+    #: path to every command of the step (``extra["env_paths"]``).
+    env_paths: dict[str, str] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
@@ -195,16 +200,25 @@ def _string_argv(value: Any, what: str) -> list[str]:
     return list(value)
 
 
-def _child_env() -> dict[str, str]:
+def _step_env(step: "Step", plan_dir: Path) -> dict[str, str]:
+    """The step's ``env_paths`` as absolute paths (empty for most steps)."""
+
+    return {name: str((plan_dir / path).resolve())
+            for name, path in step.env_paths.items()}
+
+
+def _child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """Environment for a child ``woof``: this process's, plus its checkout.
 
     When woof was imported from a source checkout (a ``pyproject.toml``
     beside the package), that checkout leads ``PYTHONPATH`` so ``-m woof``
     in the plan directory runs the same code as this process.  An
-    installed woof needs nothing.
+    installed woof needs nothing.  ``extra`` (a step's exported paths) is
+    laid over this process's environment.
     """
 
     env = dict(os.environ)
+    env.update(extra or {})
     import woof
 
     root = Path(woof.__file__).resolve().parent.parent
@@ -215,16 +229,18 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-def _execute(argv: list[str], cwd: Path, log) -> int:
+def _execute(argv: list[str], cwd: Path, log,
+             env: dict[str, str] | None = None) -> int:
     """Run one command to completion, output to ``log``; return its code.
 
     Tests replace this.  On Ctrl-C the child (which received the same
     SIGINT from the terminal) is given a grace period, then terminated,
-    then killed, and the interrupt is re-raised.
+    then killed, and the interrupt is re-raised.  ``env`` is passed only
+    for a step that exports paths.
     """
 
     process = subprocess.Popen(argv, cwd=cwd, stdout=log,
-                               stderr=subprocess.STDOUT, env=_child_env())
+                               stderr=subprocess.STDOUT, env=_child_env(env))
     try:
         return process.wait()
     except KeyboardInterrupt:
@@ -352,10 +368,22 @@ def _hex_step(domain: PlanDomain) -> Step:
                 raise RunRefusal(f"{domain.domain_id}: extra['commands']"
                                  f"[{index}] is only 'woof'")
         commands.append(argv)
+    env_paths = domain.extra.get("env_paths") or {}
+    if not isinstance(env_paths, dict) or not all(
+            isinstance(k, str) and k and isinstance(v, str) and v
+            and not Path(v).is_absolute() for k, v in env_paths.items()):
+        raise RunRefusal(f"{domain.domain_id}: extra['env_paths'] must map "
+                         "environment names to plan-relative paths; got "
+                         f"{env_paths!r}")
+    if env_paths:
+        notes.append("exports " + ", ".join(
+            f"{k}=<plan>/{v}" for k, v in sorted(env_paths.items()))
+            + " to every command")
     parent = domain.parent
     return Step(step_id=domain.domain_id, kind="hex",
                 domain_ids=[domain.domain_id], commands=commands,
-                run_dir=domain.run_dir, parent=parent, notes=notes)
+                run_dir=domain.run_dir, parent=parent, notes=notes,
+                env_paths=dict(env_paths))
 
 
 # --------------------------------------------------------------------------
@@ -696,6 +724,8 @@ def _run_step(plan: Plan, step: Step, manifest: dict,
     _write_manifest(manifest, manifest_path)
 
     returncode = 0
+    exported = _step_env(step, plan_dir)
+    extra = {"env": exported} if exported else {}
     try:
         with open(live_log, "w") as log:
             for argv in commands:
@@ -703,7 +733,7 @@ def _run_step(plan: Plan, step: Step, manifest: dict,
                 log.write(f"# {_utc_now()} woof energy run [{step.step_id}]: "
                           f"woof {' '.join(argv)}\n")
                 log.flush()
-                returncode = _execute(full, plan_dir, log)
+                returncode = _execute(full, plan_dir, log, **extra)
                 log.write(f"# {_utc_now()} exit {returncode}\n")
                 log.flush()
                 if returncode != 0:
