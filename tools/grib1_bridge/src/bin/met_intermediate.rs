@@ -133,6 +133,29 @@ enum SnowDepthRule {
     /// `scr2d / SNOW_DEN` when the centre reports a density, else
     /// `scr2d * 0.004` (250:1).
     EcmwfReportedDensity,
+    /// The centre publishes physical snow depth itself (DWD's H_SNOW), so
+    /// SNOWH comes from the Vtable or not at all: there is no density of
+    /// the producer's own to derive one with, so none is guessed.
+    PublishedOnly,
+}
+
+/// Rules that belong to one producer's encoding rather than to `rrpr.F`.
+///
+/// `rrpr.F` has no arm for these centres, so their conversions are this
+/// tool's, written out in `apply_centre_rules` and reported in the same
+/// ledger as the `rrpr` repairs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CentreRules {
+    /// The WPS centres: every rule they need is one of `rrpr.F`'s.
+    Wps,
+    /// DWD ICON: geopotential to height, half-level heights to full-level
+    /// heights, column soil water to volumetric moisture and the TERRA
+    /// soil-temperature nodes onto the soil layers.
+    Dwd,
+    /// The Met Office: its open data is NetCDF and the Met Office door
+    /// converts it.  The label exists so a receipt can name the centre,
+    /// and it refuses the one record whose meaning it cannot settle.
+    Ukmo,
 }
 
 /// A producing centre, and every decision that depends on knowing it.
@@ -176,10 +199,14 @@ struct MapSource {
     /// WPS hardcodes the radius by centre.  This value lands in every
     /// record header and metgrid uses it.
     grib1_earth_radius_km: f32,
+    /// The producer-specific conversions `apply_centre_rules` runs.
+    centre_rules: CentreRules,
 }
 
-/// Every centre whose rules have been read out of WPS source.
-const KNOWN_MAP_SOURCES: [MapSource; 4] = [
+/// Every centre whose rules have been read out of WPS source, plus the
+/// two (DWD and the Met Office) that `rrpr.F` has no arm for, whose rules
+/// are this tool's own (`CentreRules`).
+const KNOWN_MAP_SOURCES: [MapSource; 6] = [
     MapSource {
         label: "ncep-gfs",
         header: "NCEP GFS Analysis",
@@ -190,6 +217,7 @@ const KNOWN_MAP_SOURCES: [MapSource; 4] = [
         nearest_neighbour_pressure_twins: true,
         snow_depth: SnowDepthRule::TwoHundredToOne,
         grib1_earth_radius_km: 6371.229,
+        centre_rules: CentreRules::Wps,
     },
     MapSource {
         label: "ncep-gefs",
@@ -201,6 +229,7 @@ const KNOWN_MAP_SOURCES: [MapSource; 4] = [
         nearest_neighbour_pressure_twins: false,
         snow_depth: SnowDepthRule::TwoHundredToOne,
         grib1_earth_radius_km: 6371.229,
+        centre_rules: CentreRules::Wps,
     },
     MapSource {
         label: "ncep-cdas-cfsv2",
@@ -212,6 +241,7 @@ const KNOWN_MAP_SOURCES: [MapSource; 4] = [
         nearest_neighbour_pressure_twins: false,
         snow_depth: SnowDepthRule::TwoHundredToOne,
         grib1_earth_radius_km: 6371.229,
+        centre_rules: CentreRules::Wps,
     },
     MapSource {
         label: "ecmwf",
@@ -223,6 +253,43 @@ const KNOWN_MAP_SOURCES: [MapSource; 4] = [
         nearest_neighbour_pressure_twins: false,
         snow_depth: SnowDepthRule::EcmwfReportedDensity,
         grib1_earth_radius_km: 6367.47,
+        centre_rules: CentreRules::Wps,
+    },
+    // DWD ICON.  rrpr.F has no DWD arm, so the header text is this tool's
+    // own; it matches none of rrpr.F's substring tests ("NCEP", "ECMWF"),
+    // and none of those repairs is DWD's.  ICON reports RELHUM over liquid
+    // water at every temperature, publishes the land fraction (FR_LAND)
+    // rather than a flag, publishes snow water equivalent unhalved (W_SNOW,
+    // kg m-2) and physical snow depth (H_SNOW, m), and integrates on a
+    // sphere of 6371.229 km.
+    MapSource {
+        label: "dwd",
+        header: "DWD",
+        rh_over_ice: false,
+        masked_surface_repair: false,
+        snow_water_equivalent_doubled: false,
+        landsea_to_flag: true,
+        nearest_neighbour_pressure_twins: false,
+        snow_depth: SnowDepthRule::PublishedOnly,
+        grib1_earth_radius_km: 6371.229,
+        centre_rules: CentreRules::Dwd,
+    },
+    // The Met Office global deterministic model.  Its open data is NetCDF
+    // and the Met Office door converts it; the label is here so receipts
+    // can name the centre.  "UKMO" matches none of rrpr.F's substring
+    // tests, so no rrpr repair runs.  A pressure-level RH record refuses
+    // under this label (see `apply_centre_rules`).
+    MapSource {
+        label: "ukmo",
+        header: "UKMO",
+        rh_over_ice: false,
+        masked_surface_repair: false,
+        snow_water_equivalent_doubled: false,
+        landsea_to_flag: true,
+        nearest_neighbour_pressure_twins: false,
+        snow_depth: SnowDepthRule::PublishedOnly,
+        grib1_earth_radius_km: 6371.229,
+        centre_rules: CentreRules::Ukmo,
     },
 ];
 
@@ -270,6 +337,11 @@ struct VtableRow {
     /// `None` means the Vtable wildcard `*` -- match every level.
     g1_level1: Option<i64>,
     g1_level2: Option<i64>,
+    /// Level1 in tenths of the column's unit.  Integer cells carry it too
+    /// (`10 * g1_level1`); a one-decimal cell carries ONLY this, and is
+    /// admitted only on a single-depth type-106 row, where the column is
+    /// centimetres and DWD's TERRA node at 0.5 cm needs the decimal.
+    g1_level1_tenths: Option<i64>,
 
     g2_discipline: Option<u16>,
     g2_category: Option<u16>,
@@ -304,11 +376,24 @@ impl FieldMeta {
     }
 }
 
+/// The Vtable "Level Type" (GRIB1 Table 3) that declares a row a SINGLE
+/// depth below the land surface, as opposed to 112, a layer between two.
+/// A type-106 GRIB2 row carrying it and a Level1 alone matches that one
+/// depth and nothing else (`grib2_level_bounds_match`).  Rows that do
+/// not carry it keep the open match they always had, so the packaged
+/// tables that rely on it (Vtable.ERA5_CDO) decode as before.
+const SINGLE_DEPTH_LEVEL_TYPE: u16 = 111;
+
 /// Parse a WPS Vtable.  Columns are pipe-separated; the GRIB2 columns
 /// are optional (ECMWF tables omit them entirely).
 fn parse_vtable(path: &Path) -> Result<Vec<VtableRow>, String> {
     let text = fs::read_to_string(path)
         .map_err(|e| format!("cannot read Vtable {}: {e}", path.display()))?;
+    parse_vtable_text(&text, &path.display().to_string())
+}
+
+/// The Vtable grammar itself; `label` names the table in refusals.
+fn parse_vtable_text(text: &str, label: &str) -> Result<Vec<VtableRow>, String> {
     let mut rows = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim_start();
@@ -342,11 +427,58 @@ fn parse_vtable(path: &Path) -> Result<Vec<VtableRow>, String> {
         } else {
             (None, None, None, None)
         };
+        let bad_level = |cell: &str, which: &str| {
+            format!(
+                "Vtable {}: row {name}: {which} {:?} is neither blank, `*`, an integer nor \
+                 a one-decimal depth; refusing rather than reading it as a wildcard",
+                label,
+                cell.trim()
+            )
+        };
+        let (g1_level1, g1_level1_tenths) =
+            parse_level(cells[2]).ok_or_else(|| bad_level(cells[2], "Level1"))?;
+        let (g1_level2, level2_tenths) =
+            parse_level(cells[3]).ok_or_else(|| bad_level(cells[3], "Level2"))?;
+        // A decimal is a single-depth soil node and nothing else: anywhere
+        // else every comparison is integral and a decimal would never
+        // match, silently.
+        if g1_level2.is_none() && level2_tenths.is_some() {
+            return Err(format!(
+                "Vtable {}: row {name}: Level2 {:?} is a decimal; only a single-depth \
+                 type-106 row's Level1 may be one",
+                label,
+                cells[3].trim()
+            ));
+        }
+        if g1_level1.is_none()
+            && g1_level1_tenths.is_some()
+            && (g2_level_type != Some(106)
+                || g1_level_type != Some(SINGLE_DEPTH_LEVEL_TYPE)
+                || level2_tenths.is_some()
+                || parse_opt_u16(cells[0]).is_some())
+        {
+            return Err(format!(
+                "Vtable {}: row {name}: Level1 {:?} is a decimal, which only a single-depth \
+                 type-106 row (Level Type 111, blank Level2, no GRIB1 parameter) may carry",
+                label,
+                cells[2].trim()
+            ));
+        }
+        if g1_level_type == Some(SINGLE_DEPTH_LEVEL_TYPE)
+            && g2_level_type == Some(106)
+            && g1_level1_tenths.is_none()
+        {
+            return Err(format!(
+                "Vtable {label}: row {name}: a single-depth row (Level Type 111) on GRIB2 \
+                 surface 106 names no depth in Level1, so it would match no message"
+            ));
+        }
         rows.push(VtableRow {
             g1_param: parse_opt_u16(cells[0]),
             g1_level_type,
-            g1_level1: parse_opt_level(cells[2]),
-            g1_level2: parse_opt_level(cells[3]),
+            g1_level1,
+            g1_level2,
+            g1_level1_tenths,
             g2_discipline,
             g2_category,
             g2_param,
@@ -357,7 +489,7 @@ fn parse_vtable(path: &Path) -> Result<Vec<VtableRow>, String> {
         });
     }
     if rows.is_empty() {
-        return Err(format!("Vtable {} declares no fields", path.display()));
+        return Err(format!("Vtable {} declares no fields", label));
     }
     Ok(rows)
 }
@@ -393,13 +525,30 @@ fn parse_opt_u16(cell: &str) -> Option<u16> {
 /// level, blank means the level is not part of the key -- but both are
 /// represented as `None` here because in both cases the row places no
 /// constraint on that column.
-fn parse_opt_level(cell: &str) -> Option<i64> {
+///
+/// Returns `(integer, tenths)`.  An integer cell gives both; a decimal
+/// with one fractional digit gives only the tenths; blank and `*` give
+/// neither.  Anything else is `None`, which the caller refuses: before
+/// this, an unparseable cell became a silent wildcard.
+fn parse_level(cell: &str) -> Option<(Option<i64>, Option<i64>)> {
     let t = cell.trim();
     if t.is_empty() || t == "*" {
-        None
-    } else {
-        t.parse::<i64>().ok()
+        return Some((None, None));
     }
+    if let Ok(v) = t.parse::<i64>() {
+        return Some((Some(v), v.checked_mul(10)));
+    }
+    let (whole, frac) = t.split_once('.')?;
+    if frac.len() != 1
+        || !frac.bytes().all(|b| b.is_ascii_digit())
+        || whole.is_empty()
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let whole: i64 = whole.parse().ok()?;
+    let tenths = whole.checked_mul(10)?.checked_add(frac.parse::<i64>().ok()?)?;
+    Some((None, Some(tenths)))
 }
 
 // ---------------------------------------------------------------------
@@ -483,6 +632,16 @@ fn xlvl_for_grib2_level(level_type: u16, level_value: f64) -> Option<f32> {
         // its own named field, all at the surface sentinel, exactly like
         // the depth-bounded type-106 layers.
         151 => Some(XLVL_SURFACE),
+        // Generalized vertical height coordinate (type 150): DWD ICON's
+        // model levels.  WPS records a model level by its number, as
+        // ungrib does for hybrid levels, so each ordinal is its own
+        // `xlvl` -- far below every pressure in pascals and every
+        // sentinel, so the level sort keeps them apart.  A file that
+        // mixes these with isobaric levels is refused (`run`): the init
+        // keys its level table on `xlvl` alone.
+        150 if (1.0..1000.0).contains(&level_value) && level_value.fract() == 0.0 => {
+            Some(level_value as f32)
+        }
         _ => None,
     }
 }
@@ -703,6 +862,10 @@ struct Collector {
     slabs: BTreeMap<SlabKey, Slab>,
     messages_seen: usize,
     messages_matched: usize,
+    /// GRIB2 vertical coordinates (100 isobaric, 150 model level) that
+    /// reached the store.  Both at once is refused: their `xlvl`s are
+    /// different quantities in one level table.
+    vertical_coordinates: BTreeSet<u8>,
 }
 
 impl Collector {
@@ -718,6 +881,7 @@ impl Collector {
             slabs: BTreeMap::new(),
             messages_seen: 0,
             messages_matched: 0,
+            vertical_coordinates: BTreeSet::new(),
         }
     }
 
@@ -788,7 +952,7 @@ fn collect_grib2(path: &Path, vtable: &[VtableRow], out: &mut Collector) -> Resu
                 && r.g2_category == Some(product.parameter_category as u16)
                 && r.g2_param == Some(product.parameter_number as u16)
                 && r.g2_level_type == Some(product.level_type as u16)
-                && grib2_level_bounds_match(r, product.level_value, product.second_level_value, product.level_type)
+                && grib2_level_bounds_match(r, product.level_value, product.second_level_value, product.level_type, product.second_level_type)
         });
         let Some(row) = row else { continue };
         let Some(xlvl) = xlvl_for_grib2_level(product.level_type as u16, product.level_value) else {
@@ -830,6 +994,9 @@ fn collect_grib2(path: &Path, vtable: &[VtableRow], out: &mut Collector) -> Resu
                 .map_err(|e| format!("{}: field {}: {e}", path.display(), row.name))?;
         out.masked_points += mark_masked(&mut data);
         out.messages_matched += 1;
+        if matches!(product.level_type, 100 | 150) {
+            out.vertical_coordinates.insert(product.level_type);
+        }
         out.insert(Slab {
             name: row.name.clone(),
             xlvl,
@@ -957,7 +1124,7 @@ fn grib1_valid_time(pds: &grib_core::grib1::ProductDefinitionSection) -> Result<
 /// Soil-layer rows key on the layer bounds as well as the surface type.
 /// GRIB2 records those bounds as scaled values in metres; the Vtable
 /// writes them in centimetres, as WPS has since PREGRID.
-fn grib2_level_bounds_match(row: &VtableRow, level1: f64, level2: f64, level_type: u8) -> bool {
+fn grib2_level_bounds_match(row: &VtableRow, level1: f64, level2: f64, level_type: u8, second_level_type: u8) -> bool {
     // Height above ground.  A global GRIB carries temperature at 2 m and
     // at 80 m, and wind at 10 m, 80 m and 100 m, all under the same
     // discipline/category/parameter and the same surface type -- so a
@@ -985,8 +1152,34 @@ fn grib2_level_bounds_match(row: &VtableRow, level1: f64, level2: f64, level_typ
             _ => false,
         };
     }
+    // Generalized vertical height coordinate (type 150): DWD's ICON
+    // model levels, numbered 1..120 from the top (full levels) and
+    // 1..121 (half levels, HHL).  A Level1 in the table names one
+    // level; a wildcard takes every one, each at its own `xlvl`.
+    if level_type == 150 {
+        return match row.g1_level1 {
+            Some(want) => level1.round() as i64 == want,
+            None => true,
+        };
+    }
     if level_type != 106 {
         return true;
+    }
+    // A single depth (Level Type 111, Level1 only): DWD's TERRA soil
+    // temperature lives at nine nodes, each its own message with no second
+    // surface.  A blank Level2 otherwise matches every depth and whichever
+    // node the files stored last wins the row, silently.  A 111 row names
+    // its node, compared in millimetres (0.5 cm is one of them), and a
+    // depth-BOUNDED message never satisfies it.
+    if row.g1_level_type == Some(SINGLE_DEPTH_LEVEL_TYPE) && row.g1_level2.is_none() {
+        return match row.g1_level1_tenths {
+            Some(want_tenths_cm) => {
+                second_level_type == 255 && (level1 * 1000.0).round() as i64 == want_tenths_cm
+            }
+            // A 111 row with no depth names nothing: refusing to match is
+            // the only reading that cannot pick a node by read order.
+            None => false,
+        };
     }
     let (Some(want1), Some(want2)) = (row.g1_level1, row.g1_level2) else {
         return true;
@@ -1052,6 +1245,11 @@ fn collect_grib1(
         .map_err(|e| format!("{}: field {}: {e}", path.display(), row.name))?;
         out.masked_points += mark_masked(&mut data);
         out.messages_matched += 1;
+        // GRIB1 isobaric levels share the GRIB2 type-100 code, and are as
+        // much pascals in the level table.
+        if pds.level_type == 100 {
+            out.vertical_coordinates.insert(100);
+        }
         out.insert(Slab {
             name: row.name.clone(),
             xlvl,
@@ -1134,6 +1332,488 @@ impl RuleLedger {
     }
 }
 
+// ---------------------------------------------------------------------
+// Producer rules rrpr.F has no arm for
+// ---------------------------------------------------------------------
+
+/// The 3-D fields whose levels make up the init's first-guess column.
+const PROFILE_FIELD_NAMES: [&str; 7] = ["TT", "RH", "SPECHUMD", "GHT", "PRES", "UU", "VV"];
+
+/// WMO GRIB2 identities (discipline, category, parameter) of the two
+/// TERRA soil fields, on fixed-surface type 106: soil temperature
+/// (2-3-18) at single depths and column-integrated soil moisture
+/// (2-3-20, kg m-2) between two depths.  WMO Code Table 4.2 entries, not
+/// a producer's local numbering.
+const SOIL_TEMPERATURE_ID: (u16, u16, u16) = (2, 3, 18);
+const SOIL_COLUMN_WATER_ID: (u16, u16, u16) = (2, 3, 20);
+
+/// The density of liquid water, kg m-3, that turns a layer's water mass
+/// per square metre into a volume fraction.
+const WATER_DENSITY: f32 = 1000.0;
+
+/// Refuse a vertical coordinate this run cannot write meaningfully.
+///
+/// Isobaric and model levels together: the init keys its level table on
+/// `xlvl` alone, and a pressure in pascals and a model-level number are
+/// different quantities in that one table.  Model levels (type 150) under
+/// any centre but DWD: the ordinal convention and the HHL height rule are
+/// DWD's, and no other producer's type-150 encoding has been read.
+fn refuse_unwritable_vertical_coordinates(
+    collector: &Collector,
+    source: &MapSource,
+) -> Result<(), String> {
+    let coordinates = &collector.vertical_coordinates;
+    if coordinates.contains(&100) && coordinates.contains(&150) {
+        return Err(
+            "the matched messages mix isobaric levels (type 100) with model levels (type \
+             150); one intermediate file carries one vertical coordinate, so write the \
+             pressure-level and model-level files separately (Vtable.ICON-GLOBAL.rw and \
+             Vtable.ICON-GLOBAL-ML.rw)"
+                .to_string(),
+        );
+    }
+    if coordinates.contains(&150) && source.centre_rules != CentreRules::Dwd {
+        return Err(format!(
+            "messages on fixed-surface type 150 (generalized vertical height) matched under \
+             --map-source {}; only DWD ICON's model levels on that surface have been read, \
+             with their ordinal numbering and their HHL heights, so this tool refuses \
+             rather than write another producer's type-150 levels on DWD's terms",
+            source.label
+        ));
+    }
+    Ok(())
+}
+
+/// A value the bitmap or a missing code made absent.
+fn is_absent(value: f32) -> bool {
+    !value.is_finite() || value.abs() > MISSING_MAGNITUDE
+}
+
+/// The DWD rules, in the order they run.
+const DWD_RULE_NAMES: [&str; 5] =
+    ["ght_from_fi", "ght_from_hhl", "dwd_heights_complete", "soilm_from_w_so", "soilt_from_t_so"];
+
+/// The Met Office rules.
+const UKMO_RULE_NAMES: [&str; 1] = ["ukmo_isobaric_rh_refused"];
+
+/// Apply the conversions that belong to one producer's encoding, before
+/// the `rrpr.F` rules.  These are the ones that can refuse: a soil column
+/// or a height column delivered in part is an error, not a gap.  Every
+/// centre reports every one of them, the WPS centres as off.
+fn apply_centre_rules(
+    collector: &mut Collector,
+    source: &MapSource,
+    vtable: &[VtableRow],
+    ledger: &mut RuleLedger,
+) -> Result<(), String> {
+    if source.centre_rules == CentreRules::Dwd {
+        ght_from_fi(collector, ledger);
+        ght_from_hhl(collector, ledger)?;
+        dwd_heights_complete(collector, ledger)?;
+        soilm_from_w_so(collector, vtable, ledger)?;
+        soilt_from_t_so(collector, vtable, ledger)?;
+    } else {
+        for rule in DWD_RULE_NAMES {
+            ledger.off(rule, format!("{} is not DWD", source.header));
+        }
+    }
+    if source.centre_rules == CentreRules::Ukmo {
+        let aloft = collector
+            .slabs
+            .keys()
+            .filter(|(name, lvl)| name == "RH" && lvl.0 != XLVL_SURFACE)
+            .count();
+        if aloft > 0 {
+            return Err(format!(
+                "--map-source ukmo: {aloft} RH records off the surface.  Whether the Met \
+                 Office's RH aloft is over liquid water or over ice below freezing is not \
+                 settled for this label, and the over-ice conversion is a difference of tens \
+                 of points in cold air, so it is refused here.  Convert it in the Met Office \
+                 door, where the product says which"
+            ));
+        }
+        ledger.off(
+            "ukmo_isobaric_rh_refused",
+            "UKMO: no RH record off the surface reached the store".into(),
+        );
+    } else {
+        for rule in UKMO_RULE_NAMES {
+            ledger.off(rule, format!("{} is not the Met Office", source.header));
+        }
+    }
+    Ok(())
+}
+
+/// Divide a geopotential field by `rrpr.F`'s gravity into a height field,
+/// at every level that carries `from` and no `to`.  Returns (levels,
+/// points).  `keep_masks` leaves a masked point masked; the ECMWF rule
+/// does not, because `rrpr.F` divides whatever is there and this tool
+/// writes the file `ungrib` would have written.
+fn geopotential_to_height(
+    collector: &mut Collector,
+    from: &str,
+    to: &str,
+    keep_masks: bool,
+) -> (usize, usize) {
+    let derived: Vec<Slab> = collector
+        .slabs
+        .iter()
+        .filter(|((n, lvl), _)| n == from && collector.get(to, lvl.0).is_none())
+        .map(|((_, lvl), s)| Slab {
+            name: to.to_string(),
+            xlvl: lvl.0,
+            grid: s.grid.clone(),
+            values: s
+                .values
+                .iter()
+                .map(|v| if keep_masks && is_absent(*v) { MASKED_SENTINEL } else { v / GRAVITY })
+                .collect(),
+        })
+        .collect();
+    let levels = derived.len();
+    let points = derived.iter().map(|s| s.values.len()).sum();
+    for slab in derived {
+        collector.insert(slab);
+    }
+    (levels, points)
+}
+
+/// DWD publishes geopotential (FI, m2 s-2) on pressure levels and no
+/// height.  `GHT = FI / 9.81` at every level that carries an FI and no
+/// GHT, in single precision with `rrpr.F`'s gravity: the same arithmetic
+/// this tool applies to ECMWF's GEOPT, so a height means the same thing
+/// whichever centre it came from.  A masked point stays masked.
+fn ght_from_fi(collector: &mut Collector, ledger: &mut RuleLedger) {
+    let (levels, points) = geopotential_to_height(collector, "FI", "GHT", true);
+    if levels == 0 {
+        ledger.off("ght_from_fi", "DWD: no FI level lacks a GHT".into());
+        return;
+    }
+    ledger.on(
+        "ght_from_fi",
+        "DWD publishes geopotential FI, not height".into(),
+        points,
+        format!("GHT = FI / 9.81 on {levels} levels"),
+    );
+}
+
+/// DWD's model levels carry their heights as HHL: the geometric height
+/// of the 121 half levels (interfaces), numbered from the top, so full
+/// level k lies between half levels k and k+1.  `GHT(k) = (HHL(k) +
+/// HHL(k+1)) / 2`, the arithmetic mean of the bounding interfaces --
+/// ICON's own definition of a full level's height.
+fn ght_from_hhl(collector: &mut Collector, ledger: &mut RuleLedger) -> Result<(), String> {
+    let half: BTreeMap<i64, &Slab> = collector
+        .slabs
+        .iter()
+        .filter(|((n, lvl), _)| n == "HHL" && lvl.0 < XLVL_SURFACE)
+        .map(|((_, lvl), s)| (lvl.0 as i64, s))
+        .collect();
+    if half.is_empty() {
+        ledger.off("ght_from_hhl", "DWD: no HHL half-level heights in the store".into());
+        return Ok(());
+    }
+    let mut derived: Vec<Slab> = Vec::new();
+    for (k, upper) in &half {
+        let Some(lower) = half.get(&(k + 1)) else { continue };
+        if collector.get("GHT", *k as f32).is_some() {
+            continue;
+        }
+        if lower.grid != upper.grid || lower.values.len() != upper.values.len() {
+            return Err(format!(
+                "HHL half levels {k} and {} are on different grids; one intermediate file \
+                 has one grid",
+                k + 1
+            ));
+        }
+        let values: Vec<f32> = upper
+            .values
+            .iter()
+            .zip(lower.values.iter())
+            .map(|(a, b)| {
+                if is_absent(*a) || is_absent(*b) {
+                    MASKED_SENTINEL
+                } else {
+                    0.5 * (a + b)
+                }
+            })
+            .collect();
+        derived.push(Slab { name: "GHT".into(), xlvl: *k as f32, grid: upper.grid.clone(), values });
+    }
+    let made = derived.len();
+    let points: usize = derived.iter().map(|s| s.values.len()).sum();
+    for slab in derived {
+        collector.insert(slab);
+    }
+    if made == 0 {
+        ledger.off(
+            "ght_from_hhl",
+            "DWD: no full level is bounded by two HHL half levels lacking a GHT".into(),
+        );
+        return Ok(());
+    }
+    ledger.on(
+        "ght_from_hhl",
+        "DWD publishes model-level heights as half-level HHL".into(),
+        points,
+        format!("GHT(k) = (HHL(k) + HHL(k+1)) / 2 on {made} full levels"),
+    );
+    Ok(())
+}
+
+/// Every level a DWD profile field arrived on must carry a height once
+/// the two height rules have run.  A level with no height is refused,
+/// naming what is missing, rather than written for the init to drop or
+/// misplace -- most often a model-level lead after step 0 run without
+/// the step-0 HHL as an invariant, or a pressure level whose FI object
+/// did not arrive.
+fn dwd_heights_complete(collector: &Collector, ledger: &mut RuleLedger) -> Result<(), String> {
+    let mut missing: Vec<f32> = collector
+        .slabs
+        .keys()
+        .filter(|(n, lvl)| {
+            PROFILE_FIELD_NAMES.contains(&n.as_str())
+                && n != "GHT"
+                && lvl.0 != XLVL_SURFACE
+                && lvl.0 != XLVL_MSL
+        })
+        .map(|(_, lvl)| lvl.0)
+        .filter(|xlvl| collector.get("GHT", *xlvl).is_none())
+        .collect();
+    missing.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    missing.dedup();
+    let model_levels =
+        collector.vertical_coordinates.contains(&150) || collector.has_field("HHL");
+    if !missing.is_empty() {
+        let shown: Vec<String> = missing.iter().map(|v| format!("{v}")).collect();
+        return Err(if model_levels {
+            format!(
+                "model levels [{}] carry profile fields but no height: full level k needs HHL \
+                 half levels k and k+1, and they are not both in the inputs or the invariant \
+                 files (HHL is published at step 0 only; pass the step-0 file with \
+                 --invariant and --invariant-field GHT, or --invariant-field HHL)",
+                shown.join(", ")
+            )
+        } else {
+            format!(
+                "levels [{}] (Pa) carry profile fields but no height: GHT comes from FI, and \
+                 no FI reached the store at those levels",
+                shown.join(", ")
+            )
+        });
+    }
+    let checked = collector
+        .slabs
+        .keys()
+        .filter(|(n, lvl)| n == "GHT" && lvl.0 != XLVL_SURFACE)
+        .count();
+    if checked == 0 {
+        ledger.off("dwd_heights_complete", "DWD: no profile level in the store".into());
+    } else {
+        ledger.on(
+            "dwd_heights_complete",
+            "DWD: every profile level must carry a height".into(),
+            0,
+            format!("{checked} profile levels, each with a GHT"),
+        );
+    }
+    Ok(())
+}
+
+/// The layer bounds, in centimetres, of a derived soil row: blank GRIB2
+/// parameter (nothing decodes into it), its name under `prefix`, and both
+/// Level columns set.  The Vtable is where the target soil column lives.
+fn derived_soil_layers<'a>(vtable: &'a [VtableRow], prefix: &str) -> Vec<(&'a VtableRow, i64, i64)> {
+    let mut seen = BTreeSet::new();
+    vtable
+        .iter()
+        .filter(|r| r.g2_param.is_none() && r.g1_param.is_none() && r.name.starts_with(prefix))
+        .filter_map(|r| Some((r, r.g1_level1?, r.g1_level2?)))
+        .filter(|(r, _, _)| seen.insert(r.name.clone()))
+        .collect()
+}
+
+fn row_has_id(row: &VtableRow, id: (u16, u16, u16)) -> bool {
+    row.g2_discipline == Some(id.0)
+        && row.g2_category == Some(id.1)
+        && row.g2_param == Some(id.2)
+        && row.g2_level_type == Some(106)
+}
+
+/// DWD's W_SO is the water (liquid plus ice) in one TERRA layer, as a
+/// mass per unit area (kg m-2).  The init reads a volume fraction, so
+/// `SOILM = W_SO / (1000 kg m-3 * thickness)`, the thickness in metres
+/// taken from the layer's own bounds: layer 0-1 cm divides by 10 kg m-2,
+/// layer 729-2187 cm by 14580.
+///
+/// The target layers are the Vtable's derived SOILM rows (blank GRIB2
+/// parameter, Level1/Level2 the bounds in cm), each filled from the W_SO
+/// row with exactly those bounds.  A target with no W_SO layer is refused
+/// when any W_SO reached the store; with none at all the rule is off (an
+/// input set without soil, such as a boundary-only lead).
+fn soilm_from_w_so(
+    collector: &mut Collector,
+    vtable: &[VtableRow],
+    ledger: &mut RuleLedger,
+) -> Result<(), String> {
+    let targets = derived_soil_layers(vtable, "SOILM");
+    if targets.is_empty() {
+        ledger.off("soilm_from_w_so", "DWD: the Vtable declares no derived SOILM layer".into());
+        return Ok(());
+    }
+    let sources: Vec<(i64, i64, &VtableRow)> = vtable
+        .iter()
+        .filter(|r| row_has_id(r, SOIL_COLUMN_WATER_ID))
+        .filter_map(|r| Some((r.g1_level1?, r.g1_level2?, r)))
+        .filter(|(_, _, r)| collector.has_surface(&r.name))
+        .collect();
+    if sources.is_empty() {
+        ledger.off("soilm_from_w_so", "DWD: no W_SO layer reached the store".into());
+        return Ok(());
+    }
+    let mut made = Vec::new();
+    let mut points = 0usize;
+    for (target, top, bottom) in &targets {
+        if bottom <= top {
+            return Err(format!(
+                "Vtable row {}: soil layer {top}-{bottom} cm has no thickness",
+                target.name
+            ));
+        }
+        let Some((_, _, row)) = sources.iter().find(|(a, b, _)| a == top && b == bottom) else {
+            return Err(format!(
+                "{}: no W_SO layer {top}-{bottom} cm reached the store, but {} other W_SO \
+                 layers did; a soil column delivered in part is refused rather than written \
+                 with a hole",
+                target.name,
+                sources.len()
+            ));
+        };
+        let src = collector.surface(&row.name).expect("filtered on presence");
+        let divisor = WATER_DENSITY * ((bottom - top) as f32 / 100.0);
+        let values: Vec<f32> = src
+            .values
+            .iter()
+            .map(|w| if is_absent(*w) { MASKED_SENTINEL } else { w / divisor })
+            .collect();
+        let grid = src.grid.clone();
+        points += values.len();
+        made.push(format!("{} = {} / {divisor}", target.name, row.name));
+        collector.insert(Slab { name: target.name.clone(), xlvl: XLVL_SURFACE, grid, values });
+    }
+    ledger.on(
+        "soilm_from_w_so",
+        "DWD publishes soil water as kg m-2 per TERRA layer".into(),
+        points,
+        format!("SOILM = W_SO / (1000 kg m-3 * layer thickness m): {}", made.join(", ")),
+    );
+    Ok(())
+}
+
+/// DWD's T_SO is soil temperature at single depths (nodes); the init
+/// reads one temperature per layer.  Each derived SOILT layer takes the
+/// temperature at its MIDPOINT depth, interpolated linearly in depth
+/// between the two nodes that bracket it.
+///
+/// For TERRA this is exact, not an approximation: the eight layers are
+/// 0-1, 1-3, 3-9, 9-27, 27-81, 81-243, 243-729 and 729-2187 cm, and the
+/// nodes below the surface sit at 0.5, 2, 6, 18, 54, 162, 486 and 1458
+/// cm -- each layer's midpoint.  So every layer copies one node, the 0 cm
+/// (surface) node feeds none, and nine depths become eight layers whose
+/// count equals SOILM's.  A target whose midpoint no two nodes bracket
+/// is refused rather than extrapolated.
+fn soilt_from_t_so(
+    collector: &mut Collector,
+    vtable: &[VtableRow],
+    ledger: &mut RuleLedger,
+) -> Result<(), String> {
+    let targets = derived_soil_layers(vtable, "SOILT");
+    if targets.is_empty() {
+        ledger.off("soilt_from_t_so", "DWD: the Vtable declares no derived SOILT layer".into());
+        return Ok(());
+    }
+    // (depth in tenths of a cm, row)
+    let mut nodes: Vec<(i64, &VtableRow)> = vtable
+        .iter()
+        .filter(|r| row_has_id(r, SOIL_TEMPERATURE_ID) && r.g1_level2.is_none())
+        .filter_map(|r| Some((r.g1_level1_tenths?, r)))
+        .filter(|(_, r)| collector.has_surface(&r.name))
+        .collect();
+    if nodes.is_empty() {
+        ledger.off("soilt_from_t_so", "DWD: no T_SO node reached the store".into());
+        return Ok(());
+    }
+    nodes.sort_by_key(|(d, _)| *d);
+    nodes.dedup_by_key(|(d, _)| *d);
+    let mut made = Vec::new();
+    let mut points = 0usize;
+    for (target, top, bottom) in &targets {
+        if bottom <= top {
+            return Err(format!(
+                "Vtable row {}: soil layer {top}-{bottom} cm has no thickness",
+                target.name
+            ));
+        }
+        // Midpoint in twentieths of a cm keeps every comparison integral.
+        let mid = 10 * (top + bottom);
+        let exact = nodes.iter().find(|(d, _)| 2 * d == mid);
+        let (values, grid, how) = if let Some((_, row)) = exact {
+            let src = collector.surface(&row.name).expect("filtered on presence");
+            (src.values.clone(), src.grid.clone(), format!("{} = {}", target.name, row.name))
+        } else {
+            let above = nodes.iter().rev().find(|(d, _)| 2 * d < mid);
+            let below = nodes.iter().find(|(d, _)| 2 * d > mid);
+            let (Some((d0, r0)), Some((d1, r1))) = (above, below) else {
+                return Err(format!(
+                    "{}: layer {top}-{bottom} cm has its midpoint outside the T_SO nodes \
+                     that reached the store ({} nodes, {:.1}-{:.1} cm); refusing to \
+                     extrapolate a soil temperature",
+                    target.name,
+                    nodes.len(),
+                    nodes[0].0 as f32 / 10.0,
+                    nodes[nodes.len() - 1].0 as f32 / 10.0
+                ));
+            };
+            let a = collector.surface(&r0.name).expect("filtered on presence");
+            let b = collector.surface(&r1.name).expect("filtered on presence");
+            if a.grid != b.grid || a.values.len() != b.values.len() {
+                return Err(format!(
+                    "T_SO nodes {} and {} are on different grids",
+                    r0.name, r1.name
+                ));
+            }
+            let w = (mid - 2 * d0) as f32 / (2 * (d1 - d0)) as f32;
+            let values: Vec<f32> = a
+                .values
+                .iter()
+                .zip(b.values.iter())
+                .map(|(x, y)| {
+                    if is_absent(*x) || is_absent(*y) {
+                        MASKED_SENTINEL
+                    } else {
+                        x + w * (y - x)
+                    }
+                })
+                .collect();
+            (
+                values,
+                a.grid.clone(),
+                format!("{} = {} + {w} * ({} - {})", target.name, r0.name, r1.name, r0.name),
+            )
+        };
+        points += values.len();
+        made.push(how);
+        collector.insert(Slab { name: target.name.clone(), xlvl: XLVL_SURFACE, grid, values });
+    }
+    ledger.on(
+        "soilt_from_t_so",
+        "DWD publishes soil temperature at single-depth TERRA nodes".into(),
+        points,
+        format!("SOILT = T_SO at the layer midpoint, linear in depth: {}", made.join(", ")),
+    );
+    Ok(())
+}
+
 /// Apply, in `rrpr.F`'s own order, every rule this tool reproduces.
 ///
 /// The order is not cosmetic.  `fix_gfs_miss` zeroes masked snow before
@@ -1156,23 +1836,10 @@ fn apply_ungrib_rules(collector: &mut Collector, source: &MapSource, ledger: &mu
 /// `rrpr.F`: `scr2d = scr2d / 9.81`, at every pressure level that has a
 /// geopotential and no height.  Single precision, as there.
 fn height_from_geopotential(collector: &mut Collector, ledger: &mut RuleLedger) {
-    let sources: Vec<(f32, Vec<f32>, SlabGrid)> = collector
-        .slabs
-        .iter()
-        .filter(|((n, _), _)| n == "GEOPT")
-        .filter(|((_, lvl), _)| collector.get("HGT", lvl.0).is_none())
-        .map(|((_, lvl), s)| (lvl.0, s.values.clone(), s.grid.clone()))
-        .collect();
-    if sources.is_empty() {
+    let (levels, points) = geopotential_to_height(collector, "GEOPT", "HGT", false);
+    if levels == 0 {
         ledger.off("hgt_from_geopt", "no GEOPT level lacks an HGT".into());
         return;
-    }
-    let mut points = 0usize;
-    let levels = sources.len();
-    for (xlvl, values, grid) in sources {
-        let derived: Vec<f32> = values.iter().map(|v| v / GRAVITY).collect();
-        points += derived.len();
-        collector.insert(Slab { name: "HGT".into(), xlvl, grid, values: derived });
     }
     ledger.on(
         "hgt_from_geopt",
@@ -1538,6 +2205,17 @@ fn snow_depth_from_snow(collector: &mut Collector, source: &MapSource, ledger: &
         ledger.off("snowh_from_snow", "no SNOW to derive a depth from".into());
         return;
     };
+    if source.snow_depth == SnowDepthRule::PublishedOnly {
+        ledger.off(
+            "snowh_from_snow",
+            format!(
+                "{} publishes physical snow depth itself and none was decoded; no \
+                 density of the producer's own exists to derive one, so SNOWH is absent",
+                source.header
+            ),
+        );
+        return;
+    }
     let grid = snow.grid.clone();
     let water_equivalent = snow.values.clone();
     let density = collector.surface("SNOW_DEN").map(|s| s.values.clone());
@@ -1561,6 +2239,7 @@ fn snow_depth_from_snow(collector: &mut Collector, source: &MapSource, ledger: &
                 "SNOWH = SNOW * 0.004 (250:1; no SNOW_DEN in the file)".to_string(),
             ),
         },
+        SnowDepthRule::PublishedOnly => unreachable!("returned above"),
     };
 
     let points = values.len();
@@ -1882,8 +2561,10 @@ fn run() -> Result<(), String> {
         ));
     }
     let invariant_sources = merge_invariants(&config, &vtable, &mut collector)?;
+    refuse_unwritable_vertical_coordinates(&collector, config.source)?;
 
     let mut ledger = RuleLedger::default();
+    apply_centre_rules(&mut collector, config.source, &vtable, &mut ledger)?;
     apply_ungrib_rules(&mut collector, config.source, &mut ledger);
 
     if collector.slabs.is_empty() {
@@ -2046,15 +2727,45 @@ fn collect_file(
     }
 }
 
+/// The decoded fields that carry a named invariant field.
+///
+/// A field with a decodable Vtable row carries itself.  A DERIVED field
+/// (no GRIB parameter on any of its rows) is carried by what its centre
+/// rule derives it from: for DWD, GHT comes from HHL on model levels and
+/// from FI on pressure levels, whichever of the two the Vtable decodes.
+/// So `--invariant-field GHT` with the step-0 file brings ICON's HHL --
+/// published at step 0 only -- into a later lead, and `ght_from_hhl`
+/// turns it into the full-level heights there.
+fn invariant_carriers(source: &MapSource, vtable: &[VtableRow], name: &str) -> Vec<String> {
+    let decodable = |field: &str| {
+        vtable
+            .iter()
+            .any(|r| r.name == field && (r.g1_param.is_some() || r.g2_param.is_some()))
+    };
+    if decodable(name) {
+        return vec![name.to_string()];
+    }
+    if source.centre_rules == CentreRules::Dwd && name == "GHT" {
+        let carriers: Vec<String> =
+            ["HHL", "FI"].iter().filter(|f| decodable(f)).map(|f| f.to_string()).collect();
+        if !carriers.is_empty() {
+            return carriers;
+        }
+    }
+    vec![name.to_string()]
+}
+
 /// Fill the named invariant fields the main inputs lack from the
 /// `--invariant` files, and say where each one came from.
 ///
 /// An invariant file is decoded into its own store with no valid-time
 /// selection (a land mask published once at hour zero is the point),
-/// and only the named fields cross over.  A named field the main inputs
-/// already carry keeps the main inputs' value; one that neither carries
-/// is a refusal; one on a different grid from the rest of the file is a
-/// refusal, because a record header cannot say "this one is elsewhere".
+/// and only the named fields -- or, for a derived field, the fields that
+/// carry it (`invariant_carriers`) -- cross over.  A named field the main
+/// inputs already carry keeps the main inputs' value; one that neither
+/// carries is a refusal; one on a different grid from the rest of the
+/// file is a refusal, because a record header cannot say "this one is
+/// elsewhere".
 fn merge_invariants(
     config: &Config,
     vtable: &[VtableRow],
@@ -2064,13 +2775,21 @@ fn merge_invariants(
     if config.invariants.is_empty() {
         return Ok(decided);
     }
+    let carried_by: Vec<(&String, Vec<String>)> = config
+        .invariant_fields
+        .iter()
+        .map(|name| (name, invariant_carriers(config.source, vtable, name)))
+        .collect();
+    let in_inputs = |collector: &Collector, name: &str, carriers: &[String]| {
+        collector.has_field(name) || carriers.iter().any(|c| collector.has_field(c))
+    };
     // Decode only what is still needed, and only its rows: the invariant
     // file is a whole hour-zero product, and unpacking every matched
     // message in it to keep two fields would double each lead's decode.
-    let needed: Vec<&String> = config
-        .invariant_fields
+    let needed: Vec<&String> = carried_by
         .iter()
-        .filter(|name| !collector.has_field(name))
+        .filter(|(name, carriers)| !in_inputs(collector, name, carriers))
+        .flat_map(|(_, carriers)| carriers.iter())
         .collect();
     let rows: Vec<VtableRow> = vtable
         .iter()
@@ -2084,22 +2803,27 @@ fn merge_invariants(
         }
     }
     let reference_grid = collector.slabs.values().next().map(|s| s.grid.clone());
-    for name in &config.invariant_fields {
-        if collector.has_field(name) {
-            decided.push((name.clone(), "inputs"));
+    for (name, carriers) in &carried_by {
+        if in_inputs(collector, name, carriers) {
+            decided.push(((*name).clone(), "inputs"));
             continue;
         }
         let keys: Vec<SlabKey> = store
             .slabs
             .keys()
-            .filter(|(n, _)| n == name)
+            .filter(|(n, _)| carriers.contains(n))
             .cloned()
             .collect();
         if keys.is_empty() {
             return Err(format!(
                 "--invariant-field {name}: neither the inputs nor the invariant files ({}) \
-                 carry it under any Vtable row",
-                json_paths(&config.invariants)
+                 carry it under any Vtable row{}",
+                json_paths(&config.invariants),
+                if carriers.len() == 1 && &carriers[0] == *name {
+                    String::new()
+                } else {
+                    format!(" (it is derived, and carried by {})", carriers.join(" or "))
+                }
             ));
         }
         for key in keys {
@@ -2118,8 +2842,13 @@ fn merge_invariants(
             }
             collector.insert(slab);
         }
-        decided.push((name.clone(), "invariant"));
+        decided.push(((*name).clone(), "invariant"));
     }
+    // Only needed fields were decoded and every one of them crossed over
+    // (or this returned above), so the store's coordinates are theirs.
+    collector
+        .vertical_coordinates
+        .extend(store.vertical_coordinates.iter().copied());
     Ok(decided)
 }
 
@@ -2135,6 +2864,13 @@ fn grib_edition(path: &Path) -> Result<u8, String> {
     }
     Ok(head[7])
 }
+
+/// The remapper's regular lat-lon encoder, for tests that need real GRIB2
+/// bytes shaped exactly as `gdt101_remap` hands them to this tool.
+#[cfg(test)]
+#[allow(dead_code, clippy::all)]
+#[path = "../gdt101_remap_core.rs"]
+mod core101;
 
 #[cfg(test)]
 mod tests {
@@ -2618,6 +3354,7 @@ mod tests {
             g1_level_type: None,
             g1_level1: Some(0),
             g1_level2: Some(10),
+            g1_level1_tenths: Some(0),
             g2_discipline: None,
             g2_category: None,
             g2_param: None,
@@ -2626,12 +3363,12 @@ mod tests {
             units: String::new(),
             desc: String::new(),
         };
-        assert!(grib2_level_bounds_match(&r, 0.0, 0.1, 106));
-        assert!(!grib2_level_bounds_match(&r, 0.1, 0.4, 106));
-        assert!(grib2_level_bounds_match(&r, 0.0, 0.0, 1));
+        assert!(grib2_level_bounds_match(&r, 0.0, 0.1, 106, 106));
+        assert!(!grib2_level_bounds_match(&r, 0.1, 0.4, 106, 106));
+        assert!(grib2_level_bounds_match(&r, 0.0, 0.0, 1, 255));
         r.g1_level1 = Some(2);
-        assert!(grib2_level_bounds_match(&r, 2.0, 0.0, 103));
-        assert!(!grib2_level_bounds_match(&r, 80.0, 0.0, 103));
+        assert!(grib2_level_bounds_match(&r, 2.0, 0.0, 103, 255));
+        assert!(!grib2_level_bounds_match(&r, 80.0, 0.0, 103, 255));
     }
 
     #[test]
@@ -2659,5 +3396,717 @@ mod tests {
         assert_eq!(c.surface("ST000010").unwrap().values[1], SOIL_FILL);
         assert_eq!(c.surface("SNOW").unwrap().values[1], 0.0);
         assert!(decision(&ledger, "masked_surface_fields").applied);
+    }
+
+    // -----------------------------------------------------------------
+    // The WPS centres write the same bytes they wrote before DWD and the
+    // Met Office joined the vocabulary
+    // -----------------------------------------------------------------
+
+    const GOLDEN_GFS_VTABLE: &str = "\
+     | 100  |   *  |      | HGT      | m        | Height                                   |  0  |  3  |  5  | 100 |\n\
+     | 100  |   *  |      | TT       | K        | Temperature                              |  0  |  0  |  0  | 100 |\n\
+     | 100  |   *  |      | RH       | %        | Relative Humidity                        |  0  |  1  |  1  | 100 |\n\
+     |   1  |   0  |      | LANDSEA  | proprtn  | Land/Sea flag                            |  2  |  0  |  0  |  1  |\n\
+     |   1  |   0  |      | SNOW     | kg m-2   |Water Equivalent of Accumulated Snow Depth|  0  |  1  | 13  |  1  |\n\
+     |   6  |   0  |      | PMAXW    | Pa       | Pressure of max wind level               |  0  |  3  |  0  |  6  |\n\
+     |   6  |   0  |      | PMAXWNN  | Pa       | PMAXW, used for nearest neighbor interp  |     |     |     |  6  |\n\
+     |   1  |   0  |      | SNOWH    | m        | Physical Snow Depth                      |     |     |     |  1  |\n\
+     | 112  |   0  |  10  | SM000010 | fraction | Soil Moist 0-10 cm below grn layer (Up)  |  2  |  0  | 192 | 106 |\n\
+     | 112  |   0  |  10  | ST000010 | K        | T 0-10 cm below ground layer (Upper)     |  2  |  0  |  2  | 106 |\n";
+
+    const GOLDEN_ECMWF_VTABLE: &str = "\
+     | 100  |   *  |      | GEOPT    | m2 s-2   |                                          |  0  |  3  |  4  | 100 |\n\
+     | 100  |   *  |      | HGT      | m        | Height                                   |  0  |  3  |  5  | 100 |\n\
+     | 100  |   *  |      | TT       | K        | Temperature                              |  0  |  0  |  0  | 100 |\n\
+     | 100  |   *  |      | RH       | %        | Relative Humidity                        |  0  |  1  |  1  | 100 |\n\
+     | 105  |   2  |      | DEWPT    | K        |                                          |  0  |  0  |  6  | 103 |\n\
+     |   1  |   0  |      | LANDSEA  | proprtn  | Land/Sea flag                            |  2  |  0  |  0  |  1  |\n\
+     |   1  |   0  |      | SOILGEO  | m2 s-2   |                                          |  0  |  3  |  4  |  1  |\n\
+     |   1  |   0  |      | SOILHGT  | m        | Terrain field of source analysis         |     |     |     |  1  |\n\
+     |   1  |   0  |      | SNOW_EC  | m        |                                          |  0  |  1  | 254 |  1  |\n\
+     |   1  |   0  |      | SNOW_DEN | kg m-3   |                                          |  0  |  1  | 61  |  1  |\n\
+     |   1  |   0  |      | SNOW     | kg m-2   |Water Equivalent of Accumulated Snow Depth|     |     |     |  1  |\n\
+     |   1  |   0  |      | SNOWH    | m        | Physical Snow Depth                      |     |     |     |  1  |\n";
+
+    fn golden_metas(text: &str) -> Vec<FieldMeta> {
+        field_metas(&vtable_rows(text))
+    }
+
+    /// Slabs that drive every rrpr rule each centre runs: RH over ice in
+    /// the cold, the masked soil and snow repair, the soil-moisture clip,
+    /// the snow doubling and depth, the max-wind twin, the land-sea flag,
+    /// HGT and SOILHGT from geopotential and 2 m RH from dewpoint.
+    fn golden_store(label: &str) -> Collector {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        let cold = vec![230.0, 250.0, 265.0, 280.0];
+        if label == "ncep-gfs" {
+            c.insert(slab("TT", 50_000.0, cold.clone()));
+            c.insert(slab("RH", 50_000.0, vec![40.0, 60.0, 80.0, 95.0]));
+            c.insert(slab("HGT", 50_000.0, vec![5500.0, 5510.0, 5520.0, 5530.0]));
+            c.insert(slab("TT", XLVL_SURFACE, vec![270.0, 280.0, 290.0, 300.0]));
+            c.insert(slab("LANDSEA", XLVL_SURFACE, vec![0.0, 1.0, 1.0, 0.0]));
+            c.insert(slab("SNOW", XLVL_SURFACE, vec![9.999e20, 3.5, 0.0, 9.999e20]));
+            c.insert(slab("PMAXW", XLVL_SURFACE, vec![25_000.0, 24_000.0, 23_000.0, 22_000.0]));
+            c.insert(slab("SM000010", XLVL_SURFACE, vec![9.999e20, 0.31, 0.52, 9.999e20]));
+            c.insert(slab("ST000010", XLVL_SURFACE, vec![9.999e20, 281.0, 283.0, 9.999e20]));
+        } else {
+            c.insert(slab("TT", 50_000.0, cold));
+            c.insert(slab("RH", 50_000.0, vec![40.0, 60.0, 80.0, 95.0]));
+            c.insert(slab("GEOPT", 50_000.0, vec![53_955.0, 54_000.0, 54_100.0, 54_200.0]));
+            c.insert(slab("TT", XLVL_SURFACE, vec![270.0, 280.0, 290.0, 300.0]));
+            c.insert(slab("DEWPT", XLVL_SURFACE, vec![268.0, 275.0, 285.0, 290.0]));
+            c.insert(slab("LANDSEA", XLVL_SURFACE, vec![0.0, 0.3, 0.7, 1.0]));
+            c.insert(slab("SOILGEO", XLVL_SURFACE, vec![0.0, 981.0, 1962.0, 9810.0]));
+            c.insert(slab("SNOW_EC", XLVL_SURFACE, vec![0.0, 0.01, 0.2, 1.5]));
+            c.insert(slab("SNOW_DEN", XLVL_SURFACE, vec![100.0, 250.0, 300.0, 400.0]));
+        }
+        c
+    }
+
+    fn golden_bytes(label: &str, vtable_text: &str) -> Vec<u8> {
+        let source = resolve_map_source(label).unwrap();
+        let metas = golden_metas(vtable_text);
+        let mut c = golden_store(label);
+        let mut ledger = RuleLedger::default();
+        centre_rules_hook(&mut c, source, vtable_text, &mut ledger);
+        apply_ungrib_rules(&mut c, source, &mut ledger);
+        let (emissions, _) = emission_order(&c, &metas);
+        let mut out = Vec::new();
+        for e in &emissions {
+            write_slab(&mut out, e, "2026-10-11_00:00:00", source.header).unwrap();
+        }
+        out
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn the_wps_centres_write_the_bytes_they_wrote_before_dwd_and_ukmo_joined() {
+        // Digests captured by running this same fixture through the
+        // jacob/main build of this file (695a0a9e), before the DWD and
+        // UKMO rows, the centre rules, the single-depth soil match and the
+        // model-level coordinate existed.  A change here is a change to
+        // what GFS, GEFS, CFSv2 or ECMWF users get.
+        let gfs = golden_bytes("ncep-gfs", GOLDEN_GFS_VTABLE);
+        let ecmwf = golden_bytes("ecmwf", GOLDEN_ECMWF_VTABLE);
+        assert_eq!(sha256_hex(&gfs), GOLDEN_GFS_SHA256);
+        assert_eq!(sha256_hex(&ecmwf), GOLDEN_ECMWF_SHA256);
+    }
+
+    const GOLDEN_GFS_SHA256: &str = "b9b3d4b7de7278d1393cb71f2af39ce06a8cfc51ba0a0bfe51dcd129f6d219e3";
+    const GOLDEN_ECMWF_SHA256: &str = "7b526345221296819cccb31ebdd727e2784eacda9eb79a027b93745a7585d073";
+
+    /// The run's own order: producer rules, then rrpr's.
+    fn centre_rules_hook(c: &mut Collector, s: &MapSource, vtable_text: &str, l: &mut RuleLedger) {
+        let rows = vtable_rows(vtable_text);
+        apply_centre_rules(c, s, &rows, l).unwrap();
+    }
+
+    fn vtable_rows(text: &str) -> Vec<VtableRow> {
+        parse_vtable_text(text, "test").unwrap()
+    }
+
+    fn vtable_error(text: &str) -> String {
+        parse_vtable_text(text, "test").unwrap_err()
+    }
+
+    fn dwd() -> &'static MapSource {
+        resolve_map_source("dwd").unwrap()
+    }
+
+    fn packaged_vtable(name: &str) -> Vec<VtableRow> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../woof/data/vtables").join(name);
+        parse_vtable(&path).unwrap()
+    }
+
+    fn centre_rules(c: &mut Collector, source: &MapSource, rows: &[VtableRow]) -> Result<RuleLedger, String> {
+        let mut ledger = RuleLedger::default();
+        apply_centre_rules(c, source, rows, &mut ledger)?;
+        Ok(ledger)
+    }
+
+    // -----------------------------------------------------------------
+    // DWD and the Met Office in the vocabulary
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn dwd_and_ukmo_resolve_and_say_which_repairs_they_take() {
+        assert_eq!(dwd().header, "DWD");
+        assert_eq!(resolve_map_source("UKMO").unwrap().header, "UKMO");
+        // ICON reports RELHUM over water, publishes FR_LAND as a fraction
+        // and W_SNOW unhalved; none of the NCEP repairs is DWD's.
+        assert!(!dwd().rh_over_ice && dwd().landsea_to_flag);
+        assert!(!dwd().masked_surface_repair && !dwd().snow_water_equivalent_doubled);
+        assert_eq!(dwd().centre_rules, CentreRules::Dwd);
+        assert_eq!(resolve_map_source("ukmo").unwrap().centre_rules, CentreRules::Ukmo);
+        for source in KNOWN_MAP_SOURCES {
+            // Neither header may trip an rrpr.F substring test.
+            if matches!(source.centre_rules, CentreRules::Dwd | CentreRules::Ukmo) {
+                assert!(!source.header.contains("NCEP") && !source.header.contains("ECMWF"));
+            } else {
+                assert_eq!(source.centre_rules, CentreRules::Wps);
+            }
+        }
+        let list = known_map_source_list();
+        assert!(list.contains("dwd") && list.contains("ukmo"), "{list}");
+    }
+
+    #[test]
+    fn the_dwd_land_fraction_becomes_a_flag_and_its_rh_is_left_alone() {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("LANDSEA", XLVL_SURFACE, vec![0.0, 0.5, 0.51, 1.0]));
+        c.insert(slab("TT", 50_000.0, vec![230.0]));
+        c.insert(slab("RH", 50_000.0, vec![80.0]));
+        let mut ledger = RuleLedger::default();
+        apply_ungrib_rules(&mut c, dwd(), &mut ledger);
+        assert_eq!(c.surface("LANDSEA").unwrap().values, vec![0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(c.get("RH", 50_000.0).unwrap().values, vec![80.0]);
+        assert!(!decision(&ledger, "rh_over_ice_to_liquid").applied);
+    }
+
+    #[test]
+    fn dwd_snow_depth_is_published_not_derived() {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("SNOW", XLVL_SURFACE, vec![10.0]));
+        let mut ledger = RuleLedger::default();
+        apply_ungrib_rules(&mut c, dwd(), &mut ledger);
+        assert!(c.surface("SNOWH").is_none());
+        assert!(decision(&ledger, "snowh_from_snow").basis.contains("publishes physical snow depth"));
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("SNOW", XLVL_SURFACE, vec![10.0]));
+        c.insert(slab("SNOWH", XLVL_SURFACE, vec![0.04]));
+        let mut ledger = RuleLedger::default();
+        apply_ungrib_rules(&mut c, dwd(), &mut ledger);
+        assert_eq!(c.surface("SNOWH").unwrap().values, vec![0.04]);
+    }
+
+    #[test]
+    fn ukmo_refuses_relative_humidity_aloft_and_accepts_the_rest() {
+        let ukmo = resolve_map_source("ukmo").unwrap();
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("RH", XLVL_SURFACE, vec![70.0]));
+        c.insert(slab("PSFC", XLVL_SURFACE, vec![100_000.0]));
+        let ledger = centre_rules(&mut c, ukmo, &[]).unwrap();
+        assert!(!decision(&ledger, "ukmo_isobaric_rh_refused").applied);
+        c.insert(slab("RH", 50_000.0, vec![70.0]));
+        let err = centre_rules(&mut c, ukmo, &[]).err().unwrap();
+        assert!(err.contains("--map-source ukmo") && err.contains("over ice"), "{err}");
+    }
+
+    #[test]
+    fn every_centre_rule_reports_for_every_centre() {
+        for source in KNOWN_MAP_SOURCES {
+            let mut c = Collector::new(DEFAULT_PMIN_PA);
+            let ledger = centre_rules(&mut c, &source, &[]).unwrap();
+            for rule in DWD_RULE_NAMES.iter().chain(UKMO_RULE_NAMES.iter()) {
+                let d = decision(&ledger, rule);
+                assert!(!d.applied, "{} {rule}", source.label);
+                assert!(!d.basis.is_empty());
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Vtable levels
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_level_cell_is_an_integer_a_one_decimal_depth_a_wildcard_or_a_refusal() {
+        assert_eq!(parse_level("  18 "), Some((Some(18), Some(180))));
+        assert_eq!(parse_level(" 0.5 "), Some((None, Some(5))));
+        assert_eq!(parse_level("1458.0"), Some((None, Some(14580))));
+        assert_eq!(parse_level(" * "), Some((None, None)));
+        assert_eq!(parse_level("   "), Some((None, None)));
+        for bad in ["0.25", "x", ".5", "-0.5", "1e3", "5."] {
+            assert_eq!(parse_level(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_or_misplaced_level_is_refused_not_read_as_a_wildcard() {
+        let err = vtable_error(
+            "     | 100  |  abc |      | TT       | K        | Temperature   |  0  |  0  |  0  | 100 |\n",
+        );
+        assert!(err.contains("Level1") && err.contains("wildcard"), "{err}");
+        // A decimal on an isobaric row would never match, silently.
+        let err = vtable_error(
+            "     | 100  |  0.5 |      | TT       | K        | Temperature   |  0  |  0  |  0  | 100 |\n",
+        );
+        assert!(err.contains("single-depth type-106"), "{err}");
+        // ...and on a bounded soil row too.
+        let err = vtable_error(
+            "     | 112  |  0.5 |   1  | W        | kg m-2   |               |  2  |  3  | 20  | 106 |\n",
+        );
+        assert!(err.contains("single-depth"), "{err}");
+        let err = vtable_error(
+            "     | 112  |   0  |  1.5 | W        | kg m-2   |               |  2  |  3  | 20  | 106 |\n",
+        );
+        assert!(err.contains("Level2"), "{err}");
+    }
+
+    fn row_at(level1: &str, level2: &str, level_type: u16) -> VtableRow {
+        let (g1_level1, g1_level1_tenths) = parse_level(level1).unwrap();
+        let (g1_level2, _) = parse_level(level2).unwrap();
+        VtableRow {
+            g1_param: None,
+            g1_level_type: Some(111),
+            g1_level1,
+            g1_level2,
+            g1_level1_tenths,
+            g2_discipline: Some(2),
+            g2_category: Some(3),
+            g2_param: Some(18),
+            g2_level_type: Some(level_type),
+            name: "T".into(),
+            units: "K".into(),
+            desc: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_single_depth_row_matches_its_own_node_and_no_other() {
+        // The nine TERRA nodes, in metres as the GRIB2 carries them, and in
+        // centimetres as the Vtable writes them.  Before this, a blank
+        // Level2 matched every depth and the node read last won the row.
+        let metres = [0.0, 0.005, 0.02, 0.06, 0.18, 0.54, 1.62, 4.86, 14.58];
+        let cm = ["0", "0.5", "2", "6", "18", "54", "162", "486", "1458"];
+        for (i, want) in cm.iter().enumerate() {
+            let row = row_at(want, "", 106);
+            for (j, depth) in metres.iter().enumerate() {
+                assert_eq!(
+                    grib2_level_bounds_match(&row, *depth, 0.0, 106, 255),
+                    i == j,
+                    "row {want} cm against node {depth} m"
+                );
+            }
+            // A depth-bounded message never satisfies a single-depth row.
+            assert!(!grib2_level_bounds_match(&row, metres[i], 0.03, 106, 106));
+        }
+        // The bounded rule keeps its centimetre arithmetic.
+        let bounded = row_at("1", "3", 106);
+        assert!(grib2_level_bounds_match(&bounded, 0.01, 0.03, 106, 106));
+        assert!(!grib2_level_bounds_match(&bounded, 0.0, 0.01, 106, 106));
+        // Both blank keeps the old open match, for the tables that rely on it.
+        let mut open = row_at("", "", 106);
+        open.g1_level_type = Some(112);
+        assert!(grib2_level_bounds_match(&open, 0.18, 0.0, 106, 255));
+    }
+
+    #[test]
+    fn model_levels_are_written_at_their_number() {
+        assert_eq!(xlvl_for_grib2_level(150, 120.0), Some(120.0));
+        assert_eq!(xlvl_for_grib2_level(150, 1.0), Some(1.0));
+        assert_eq!(xlvl_for_grib2_level(150, 0.0), None);
+        assert_eq!(xlvl_for_grib2_level(150, 12.5), None);
+        let any = row_at("*", "", 150);
+        assert!(grib2_level_bounds_match(&any, 37.0, 38.0, 150, 150));
+        let one = row_at("120", "", 150);
+        assert!(grib2_level_bounds_match(&one, 120.0, 121.0, 150, 150));
+        assert!(!grib2_level_bounds_match(&one, 119.0, 120.0, 150, 150));
+    }
+
+    #[test]
+    fn a_store_mixing_isobaric_and_model_levels_is_refused() {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.vertical_coordinates.insert(100);
+        assert!(refuse_unwritable_vertical_coordinates(&c, dwd()).is_ok());
+        assert!(refuse_unwritable_vertical_coordinates(&c, gfs()).is_ok());
+        c.vertical_coordinates.insert(150);
+        let err = refuse_unwritable_vertical_coordinates(&c, dwd()).unwrap_err();
+        assert!(err.contains("one vertical coordinate"), "{err}");
+    }
+
+    #[test]
+    fn model_levels_are_dwd_s_alone() {
+        // Type 150 used to be skipped for every centre.  It is admitted
+        // now for DWD's ICON levels, and refused, not reinterpreted, for a
+        // centre whose type-150 encoding has not been read.
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.vertical_coordinates.insert(150);
+        assert!(refuse_unwritable_vertical_coordinates(&c, dwd()).is_ok());
+        for label in ["ecmwf", "ncep-gfs", "ukmo"] {
+            let err = refuse_unwritable_vertical_coordinates(&c, resolve_map_source(label).unwrap())
+                .unwrap_err();
+            assert!(err.contains("type 150") && err.contains(label), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_single_depth_row_is_declared_by_level_type_111_and_others_keep_the_open_match() {
+        // Vtable.ERA5_CDO's soil rows are Level Type 1 with Level1 0 and a
+        // blank Level2 on GRIB2 surface 106: an open match it relies on.
+        let mut era5 = row_at("0", "", 106);
+        era5.g1_level_type = Some(1);
+        assert!(grib2_level_bounds_match(&era5, 0.0, 0.07, 106, 106));
+        assert!(grib2_level_bounds_match(&era5, 0.28, 1.0, 106, 106));
+        // The packaged table itself still parses and keeps those rows.
+        let rows = packaged_vtable("Vtable.ERA5_CDO");
+        assert!(rows.iter().any(|r| r.name == "ST000007" && r.g1_level_type == Some(1)));
+        // A 111 row with no depth on surface 106 would match nothing.
+        let err = vtable_error(
+            "     | 111  |   *  |      | T        | K        |               |  2  |  3  | 18  | 106 |\n",
+        );
+        assert!(err.contains("names no depth"), "{err}");
+        // A decimal is a 111 row's privilege.
+        let err = vtable_error(
+            "     |   1  |  0.5 |      | T        | K        |               |  2  |  3  | 18  | 106 |\n",
+        );
+        assert!(err.contains("Level Type 111"), "{err}");
+    }
+
+    #[test]
+    fn a_model_level_run_without_any_hhl_is_refused() {
+        // The common slip: a lead after step 0 run without the step-0 HHL.
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.vertical_coordinates.insert(150);
+        c.insert(slab("TT", 120.0, vec![280.0]));
+        c.insert(slab("PRES", 120.0, vec![99_000.0]));
+        c.insert(slab("TT", XLVL_SURFACE, vec![282.0]));
+        let err = centre_rules(&mut c, dwd(), &[]).err().unwrap();
+        assert!(err.contains("model levels [120]") && err.contains("--invariant-field HHL"), "{err}");
+    }
+
+    #[test]
+    fn a_pressure_level_without_fi_is_refused() {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.vertical_coordinates.insert(100);
+        c.insert(slab("FI", 50_000.0, vec![54_936.0]));
+        c.insert(slab("TT", 50_000.0, vec![250.0]));
+        c.insert(slab("TT", 85_000.0, vec![270.0]));
+        let err = centre_rules(&mut c, dwd(), &[]).err().unwrap();
+        assert!(err.contains("[85000]") && err.contains("FI"), "{err}");
+        // A surface-only store has no profile level to check.
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("TT", XLVL_SURFACE, vec![282.0]));
+        c.insert(slab("PMSL", XLVL_MSL, vec![101_000.0]));
+        let ledger = centre_rules(&mut c, dwd(), &[]).unwrap();
+        assert!(!decision(&ledger, "dwd_heights_complete").applied);
+    }
+
+    // -----------------------------------------------------------------
+    // GHT from the step-0 HHL, through --invariant-field GHT, in real
+    // GRIB2 bytes shaped as gdt101_remap writes them
+    // -----------------------------------------------------------------
+
+    /// One ICON-like message on a 2x2 regular lat-lon window, encoded by
+    /// the remapper's own writer from a GDT-101 template that carries the
+    /// product section (centre 78, 2026-09-15 00 UTC, `lead_hours`).
+    #[allow(clippy::too_many_arguments)]
+    fn icon_record(
+        category: u8,
+        parameter: u8,
+        level_type: u8,
+        level: u32,
+        second_type: u8,
+        second: u32,
+        lead_hours: u32,
+        values: [f64; 4],
+    ) -> Vec<u8> {
+        fn section(number: u8, length: usize) -> Vec<u8> {
+            let mut bytes = vec![0; length];
+            bytes[..4].copy_from_slice(&(length as u32).to_be_bytes());
+            bytes[4] = number;
+            bytes
+        }
+        let mut s1 = section(1, 21);
+        s1[5..7].copy_from_slice(&78u16.to_be_bytes());
+        s1[9] = 30;
+        s1[12..14].copy_from_slice(&2026u16.to_be_bytes());
+        s1[14] = 9;
+        s1[15] = 15;
+        s1[20] = 1;
+        let mut s3 = section(3, 35);
+        s3[6..10].copy_from_slice(&4u32.to_be_bytes());
+        s3[12..14].copy_from_slice(&101u16.to_be_bytes());
+        let mut s4 = section(4, 34);
+        s4[9] = category;
+        s4[10] = parameter;
+        s4[11] = 2;
+        s4[17] = 1;
+        s4[18..22].copy_from_slice(&lead_hours.to_be_bytes());
+        s4[22] = level_type;
+        s4[24..28].copy_from_slice(&level.to_be_bytes());
+        s4[28] = second_type;
+        s4[30..34].copy_from_slice(&second.to_be_bytes());
+        let mut s5 = section(5, 21);
+        s5[5..9].copy_from_slice(&4u32.to_be_bytes());
+        let mut s6 = section(6, 6);
+        s6[5] = 255;
+        let mut raw = vec![0; 16];
+        raw[..4].copy_from_slice(b"GRIB");
+        raw[7] = 2;
+        for s in [s1, s3, s4, s5, s6, section(7, 5)] {
+            raw.extend(s);
+        }
+        raw.extend(b"7777");
+        let n = raw.len() as u64;
+        raw[8..16].copy_from_slice(&n.to_be_bytes());
+        let target = core101::Target { west: 10.0, south: 50.0, dx: 0.125, dy: 0.125, nx: 2, ny: 2 };
+        core101::encode_regular(&raw, target, &values).unwrap()
+    }
+
+    #[test]
+    fn ght_comes_from_the_step_0_hhl_when_the_door_names_ght_as_an_invariant() {
+        let dir = std::env::temp_dir().join(format!(
+            "met_intermediate_hhl_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // The lead (f003): T and P on full levels 119 and 120 (150/150),
+        // the surface fields, and no HHL -- DWD publishes HHL at step 0 only.
+        let mut lead = Vec::new();
+        for k in [119u32, 120] {
+            lead.extend(icon_record(0, 0, 150, k, 150, k + 1, 3, [280.0; 4]));
+            lead.extend(icon_record(3, 0, 150, k, 150, k + 1, 3, [95_000.0; 4]));
+        }
+        lead.extend(icon_record(0, 0, 103, 2, 255, 0, 3, [281.0; 4]));
+        // The step-0 file the door names with --invariant: HHL 119..121
+        // (150 with a second surface of 101, as the real objects carry it),
+        // plus FR_LAND and HSURF.
+        let mut step0 = Vec::new();
+        for (k, h) in [(119u32, 300.0), (120, 100.0), (121, 20.0)] {
+            step0.extend(icon_record(3, 6, 150, k, 101, 0, 0, [h, h + 10.0, h + 20.0, h + 30.0]));
+        }
+        let lead_path = dir.join("f003.grib2");
+        let step0_path = dir.join("f000.grib2");
+        std::fs::write(&lead_path, &lead).unwrap();
+        std::fs::write(&step0_path, &step0).unwrap();
+        let vtable = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../woof/data/vtables/Vtable.ICON-GLOBAL-ML.rw");
+        let Invocation::Run(config) = parse_args(args(&[
+            "--vtable", vtable.to_str().unwrap(), "--date", "2026-09-15_03:00:00", "--out",
+            dir.join("out").to_str().unwrap(), "--map-source", "dwd", "--select-valid-time",
+            "--invariant", step0_path.to_str().unwrap(), "--invariant-field", "GHT",
+            lead_path.to_str().unwrap(),
+        ]))
+        .unwrap() else {
+            panic!("help")
+        };
+        let rows = parse_vtable(&config.vtable_path).unwrap();
+        let mut c = Collector::new(config.pmin_pa);
+        c.select_valid_time = Some(config.valid_time);
+        collect_file(&lead_path, &rows, config.source, &mut c).unwrap();
+        assert!(!c.has_field("HHL"));
+        let decided = merge_invariants(&config, &rows, &mut c).unwrap();
+        assert_eq!(decided, vec![("GHT".to_string(), "invariant")]);
+        refuse_unwritable_vertical_coordinates(&c, config.source).unwrap();
+        let ledger = centre_rules(&mut c, config.source, &rows).unwrap();
+        assert!(decision(&ledger, "ght_from_hhl").applied);
+        let ght119 = &c.get("GHT", 119.0).unwrap().values;
+        let ght120 = &c.get("GHT", 120.0).unwrap().values;
+        // Means of the bounding half levels, point by point.
+        assert_eq!(ght119.len(), 4);
+        for i in 0..4 {
+            let off = 10.0 * i as f32;
+            assert_eq!(ght119[i], 0.5 * ((300.0 + off) + (100.0 + off)));
+            assert_eq!(ght120[i], 0.5 * ((100.0 + off) + (20.0 + off)));
+        }
+        // Without the invariant, the same lead is refused by name.
+        let mut bare = Collector::new(config.pmin_pa);
+        bare.select_valid_time = Some(config.valid_time);
+        collect_file(&lead_path, &rows, config.source, &mut bare).unwrap();
+        let err = centre_rules(&mut bare, config.source, &rows).err().unwrap();
+        assert!(err.contains("--invariant-field HHL") || err.contains("HHL"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_decodable_invariant_carries_itself_and_dwd_ght_is_carried_by_its_sources() {
+        let ml = packaged_vtable("Vtable.ICON-GLOBAL-ML.rw");
+        let pl = packaged_vtable("Vtable.ICON-GLOBAL.rw");
+        assert_eq!(invariant_carriers(dwd(), &ml, "LANDSEA"), vec!["LANDSEA"]);
+        assert_eq!(invariant_carriers(dwd(), &ml, "SOILHGT"), vec!["SOILHGT"]);
+        assert_eq!(invariant_carriers(dwd(), &ml, "GHT"), vec!["HHL"]);
+        assert_eq!(invariant_carriers(dwd(), &pl, "GHT"), vec!["FI"]);
+        // Only DWD derives GHT so; any other centre names the field itself.
+        assert_eq!(invariant_carriers(ecmwf(), &ml, "GHT"), vec!["GHT"]);
+    }
+
+    // -----------------------------------------------------------------
+    // The DWD rules
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn dwd_geopotential_becomes_ght_with_rrprs_gravity_and_masks_survive() {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("FI", 50_000.0, vec![54_936.0, MASKED_SENTINEL]));
+        c.insert(slab("FI", 85_000.0, vec![14_715.0, 14_700.0]));
+        let ledger = centre_rules(&mut c, dwd(), &[]).unwrap();
+        assert_eq!(c.get("GHT", 50_000.0).unwrap().values, vec![54_936.0f32 / 9.81, MASKED_SENTINEL]);
+        assert_eq!(c.get("GHT", 85_000.0).unwrap().values[0], 14_715.0f32 / 9.81);
+        assert!(decision(&ledger, "ght_from_fi").applied);
+        // No HGT: the init reads GHT, and the ECMWF rule stays off.
+        let mut ledger = RuleLedger::default();
+        apply_ungrib_rules(&mut c, dwd(), &mut ledger);
+        assert!(c.get("HGT", 50_000.0).is_none());
+    }
+
+    #[test]
+    fn model_level_height_is_the_mean_of_its_two_half_levels() {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("HHL", 119.0, vec![120.0, 300.0]));
+        c.insert(slab("HHL", 120.0, vec![40.0, 220.0]));
+        c.insert(slab("HHL", 121.0, vec![0.0, MASKED_SENTINEL]));
+        c.insert(slab("TT", 119.0, vec![280.0, 280.0]));
+        c.insert(slab("TT", 120.0, vec![281.0, 281.0]));
+        c.insert(slab("TT", XLVL_SURFACE, vec![282.0, 282.0]));
+        let ledger = centre_rules(&mut c, dwd(), &[]).unwrap();
+        assert_eq!(c.get("GHT", 119.0).unwrap().values, vec![80.0, 260.0]);
+        assert_eq!(c.get("GHT", 120.0).unwrap().values, vec![20.0, MASKED_SENTINEL]);
+        // Half level 121 is the bottom interface, not a full level.
+        assert!(c.get("GHT", 121.0).is_none());
+        assert!(decision(&ledger, "ght_from_hhl").applied);
+    }
+
+    #[test]
+    fn a_model_level_without_both_half_levels_is_refused() {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("HHL", 119.0, vec![120.0]));
+        c.insert(slab("HHL", 120.0, vec![40.0]));
+        c.insert(slab("TT", 119.0, vec![280.0]));
+        c.insert(slab("PRES", 120.0, vec![99_000.0]));
+        let err = centre_rules(&mut c, dwd(), &[]).err().unwrap();
+        assert!(err.contains("[120]") && err.contains("HHL half levels k and k+1"), "{err}");
+    }
+
+    /// A store holding one value per TERRA node and layer, decoded the way
+    /// the packaged pressure-level Vtable names them.
+    fn terra_store(rows: &[VtableRow]) -> Collector {
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        for row in rows {
+            if row_has_id(row, SOIL_TEMPERATURE_ID) {
+                // 280 K at the surface warming 1 K per node, masked at the
+                // second point (water).
+                let node = row.name.trim_start_matches("T_SO_N").parse::<f32>().unwrap();
+                c.insert(slab(&row.name, XLVL_SURFACE, vec![280.0 + node, MASKED_SENTINEL]));
+            } else if row_has_id(row, SOIL_COLUMN_WATER_ID) {
+                // 0.25 m3 m-3 in every layer, as kg m-2 per that layer.
+                let thickness_m = (row.g1_level2.unwrap() - row.g1_level1.unwrap()) as f32 / 100.0;
+                c.insert(slab(&row.name, XLVL_SURFACE, vec![250.0 * thickness_m, MASKED_SENTINEL]));
+            }
+        }
+        c
+    }
+
+    #[test]
+    fn the_packaged_icon_tables_carry_eight_matching_soil_layers() {
+        for name in ["Vtable.ICON-GLOBAL.rw", "Vtable.ICON-GLOBAL-ML.rw"] {
+            let rows = packaged_vtable(name);
+            let nodes: Vec<&VtableRow> =
+                rows.iter().filter(|r| row_has_id(r, SOIL_TEMPERATURE_ID)).collect();
+            let layers: Vec<&VtableRow> =
+                rows.iter().filter(|r| row_has_id(r, SOIL_COLUMN_WATER_ID)).collect();
+            assert_eq!(nodes.len(), 9, "{name}");
+            assert_eq!(layers.len(), 8, "{name}");
+            // Every soil source row names its depth(s): none is the open
+            // match that lets read order pick a node.
+            assert!(nodes.iter().all(|r| r.g1_level1_tenths.is_some() && r.g1_level2.is_none()));
+            assert!(layers.iter().all(|r| r.g1_level1.is_some() && r.g1_level2.is_some()));
+            assert!(rows
+                .iter()
+                .filter(|r| r.g2_level_type == Some(106) && r.g2_param.is_some())
+                .all(|r| r.g1_level1_tenths.is_some()));
+            // The derived layers carry the names and thicknesses
+            // rw_mpas_init dispatches.
+            for prefix in ["SOILT", "SOILM"] {
+                let targets = derived_soil_layers(&rows, prefix);
+                let got: Vec<(String, i64)> =
+                    targets.iter().map(|(r, a, b)| (r.name.clone(), b - a)).collect();
+                let want: Vec<(String, i64)> = [
+                    ("001", 1), ("002", 2), ("006", 6), ("018", 18), ("054", 54), ("162", 162),
+                    ("486", 486), ("999", 1458),
+                ]
+                .iter()
+                .map(|(s, t)| (format!("{prefix}{s}"), *t))
+                .collect();
+                assert_eq!(got, want, "{name} {prefix}");
+                assert!(targets.iter().all(|(r, _, _)| !r.desc.is_empty()));
+            }
+            // Raw soil and the scratch fields are consumed, never published.
+            for row in &rows {
+                let scratch = row.name.starts_with("T_SO_")
+                    || row.name.starts_with("W_SO_")
+                    || ["FI", "HHL", "DEWPT"].contains(&row.name.as_str());
+                assert_eq!(row.desc.is_empty(), scratch, "{name} {}", row.name);
+            }
+        }
+    }
+
+    #[test]
+    fn terra_soil_becomes_eight_volumetric_moisture_and_temperature_layers() {
+        let rows = packaged_vtable("Vtable.ICON-GLOBAL.rw");
+        let mut c = terra_store(&rows);
+        let ledger = centre_rules(&mut c, dwd(), &rows).unwrap();
+        let suffixes = ["001", "002", "006", "018", "054", "162", "486", "999"];
+        for (k, sfx) in suffixes.iter().enumerate() {
+            let sm = &c.surface(&format!("SOILM{sfx}")).unwrap().values;
+            assert!((sm[0] - 0.25).abs() < 1e-6, "SOILM{sfx} {}", sm[0]);
+            assert_eq!(sm[1], MASKED_SENTINEL);
+            // Layer k's midpoint is node k+1 exactly: a copy, not a blend.
+            let st = &c.surface(&format!("SOILT{sfx}")).unwrap().values;
+            assert_eq!(st[0], 280.0 + (k + 1) as f32, "SOILT{sfx}");
+            assert_eq!(st[1], MASKED_SENTINEL);
+        }
+        assert!(decision(&ledger, "soilm_from_w_so").detail.contains("SOILM999 = W_SO_L8 / 14580"));
+        assert!(decision(&ledger, "soilt_from_t_so").detail.contains("SOILT001 = T_SO_N1,"));
+        // And what reaches the file: sixteen soil records, none raw.
+        let metas = field_metas(&rows);
+        let (emissions, _) = emission_order(&c, &metas);
+        let names: Vec<&str> = emissions.iter().map(|e| e.meta.name.as_str()).collect();
+        assert_eq!(names.iter().filter(|n| n.starts_with("SOILT")).count(), 8);
+        assert_eq!(names.iter().filter(|n| n.starts_with("SOILM")).count(), 8);
+        assert!(!names.iter().any(|n| n.starts_with("T_SO") || n.starts_with("W_SO")));
+    }
+
+    #[test]
+    fn the_model_level_table_runs_the_same_soil_rules() {
+        let rows = packaged_vtable("Vtable.ICON-GLOBAL-ML.rw");
+        let mut c = terra_store(&rows);
+        centre_rules(&mut c, dwd(), &rows).unwrap();
+        assert!(c.surface("SOILM054").is_some() && c.surface("SOILT999").is_some());
+    }
+
+    #[test]
+    fn a_soil_temperature_layer_between_nodes_is_interpolated_at_its_midpoint() {
+        // A target layer 0-4 cm has its midpoint at 2 cm (node), 4-8 cm at
+        // 6 cm (node), and 2-12 cm at 7 cm: between the 6 and 18 cm nodes.
+        let text = "\
+     | 111  |   6  |      | N6       | K        |                  |  2  |  3  | 18  | 106 |\n\
+     | 111  |  18  |      | N18      | K        |                  |  2  |  3  | 18  | 106 |\n\
+     | 112  |   2  |  12  | SOILT010 | K        | T of 2-12 cm     |     |     |     | 106 |\n";
+        let rows = vtable_rows(text);
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("N6", XLVL_SURFACE, vec![280.0, 290.0]));
+        c.insert(slab("N18", XLVL_SURFACE, vec![292.0, MASKED_SENTINEL]));
+        centre_rules(&mut c, dwd(), &rows).unwrap();
+        let v = &c.surface("SOILT010").unwrap().values;
+        assert!((v[0] - 281.0).abs() < 1e-4, "{}", v[0]);
+        assert_eq!(v[1], MASKED_SENTINEL);
+    }
+
+    #[test]
+    fn a_soil_column_delivered_in_part_or_beyond_the_nodes_is_refused() {
+        let rows = packaged_vtable("Vtable.ICON-GLOBAL.rw");
+        // One W_SO layer missing.
+        let mut c = terra_store(&rows);
+        c.slabs.remove(&("W_SO_L5".to_string(), OrderedF32(XLVL_SURFACE)));
+        let err = centre_rules(&mut c, dwd(), &rows).err().unwrap();
+        assert!(err.contains("SOILM054") && err.contains("27-81 cm"), "{err}");
+        // The deepest node missing: layer 729-2187 cm would extrapolate.
+        let mut c = terra_store(&rows);
+        c.slabs.remove(&("T_SO_N8".to_string(), OrderedF32(XLVL_SURFACE)));
+        let err = centre_rules(&mut c, dwd(), &rows).err().unwrap();
+        assert!(err.contains("SOILT999") && err.contains("extrapolate"), "{err}");
+        // No soil at all is a gap the rules report, not an error.
+        let mut c = Collector::new(DEFAULT_PMIN_PA);
+        c.insert(slab("TT", XLVL_SURFACE, vec![250.0]));
+        let ledger = centre_rules(&mut c, dwd(), &rows).unwrap();
+        assert!(!decision(&ledger, "soilm_from_w_so").applied);
+        assert!(!decision(&ledger, "soilt_from_t_so").applied);
     }
 }

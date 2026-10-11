@@ -40,4 +40,34 @@ trailing comment block says which fields are derived, which are dropped and why.
   `Vtable.ECMWF`, with native level-type 112 soil rows plus the CDO-flattened
   level-type 1 aliases that `Vtable.ERA5_CDO` uses.
 
+## Vtable.ICON-GLOBAL.rw, Vtable.ICON-GLOBAL-ML.rw
+
+DWD ICON global for `met_intermediate --map-source dwd`: pressure levels and
+model levels (fixed-surface type 150).  Both read the regional regular lat-lon
+GRIB2 that `gdt101_remap` writes from ICON's native GDT 3.101 objects, which
+keeps each object's product section.  The digests below are informational and
+not pinned by a test.  The Rust tests in `met_intermediate` parse both files
+and check their soil rows.
+
+Source: Deutscher Wetterdienst (DWD), CC BY 4.0.
+
+- `Vtable.ICON-GLOBAL.rw` (sha256 `4c1b53d7d21ed2d6cee3d809ba88ea7609b4208bd4bed6321f3c29f63d29627b`):
+  T, RELHUM, U, V and FI on the eighteen 1000-30 hPa levels.  GHT is
+  FI / 9.81.
+- `Vtable.ICON-GLOBAL-ML.rw` (sha256 `f796d5fb9ba133a736577e0e599500cee43917770ea00e0c17a142b1b46247a0`):
+  T, QV (SPECHUMD), U, V and P (PRES) on the full model levels.  GHT is the
+  mean of the two bounding HHL half-level heights.
+- Both tables carry the same surface and soil rows.  T_SO is read at nine
+  single depths, matched by depth.  W_SO is read per TERRA layer by both
+  bounds.  They become SOILT/SOILM 001, 002, 006, 018, 054, 162, 486 and 999,
+  the eight layers `rw_mpas_init` reads (1-1458 cm thick).  SOILM is
+  W_SO / (1000 x layer thickness).  SOILT is T_SO at the layer midpoint,
+  which is exactly one TERRA node per layer.
+- The GRIB2 identifiers were read off real DWD v1 objects from run
+  2026-10-11T00:00 (opendata.dwd.de/weather/nwp/v1/m/icon/p/).  W_SO carries
+  both depth surfaces (106/106), T_SO carries one (106/255), full model levels
+  are 150/150 between half levels k and k+1, and HHL is 150 with a second
+  surface of 101.  HSURF and HHL share parameter 0-3-6 and differ only by level
+  type.  PMSL is 0-3-1.
+
 WPS Vtables carry the WRF public-domain license.
