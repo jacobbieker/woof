@@ -541,6 +541,10 @@ class RucSoilState:
     #: as :class:`woof.ingest.soil.NoahSoilState`'s; EMPTY when no land
     #: column needed it.
     soil_temperature_repair: Mapping[str, object] = field(default_factory=dict)
+    #: The init ceilings, spelled as :class:`woof.ingest.soil.NoahSoilState`'s:
+    #: the Noah call's snow cap and this arm's own soil-moisture cap on RUC's
+    #: levels against ``STAS-RUC``'s MAXSMC.  EMPTY when neither capped.
+    init_caps: Mapping[str, object] = field(default_factory=dict)
 
 
 def _midpoint_cm(name: str, prefix: str) -> int:
@@ -781,7 +785,10 @@ def preprocess_ruc_soil(
         source_orography=source_orography,
         water_temperature=water_temperature,
         water_temperature_policy=water_temperature_policy,
-        route=route)
+        route=route,
+        # Noah's four layers are discarded below; RUC's own levels are
+        # capped against RUC's own porosity instead.
+        soil_moisture_cap=False)
 
     if terrain is not None:
         # The Noah call above validated the all-or-none pairing and
@@ -803,9 +810,13 @@ def preprocess_ruc_soil(
     # so it commutes with the vertical remap on either geometry arm: doing
     # it here means the levels RUC integrates carry the target grid's own
     # texture without this seam having to know RUC's level table.
+    # RUC's own table, for the reconstitution below and the porosity cap
+    # after the remap: STAS-RUC, not Noah's STAS.
+    from woof.core.noah import SOIL_COLS, load_tables, pack_params
+
+    ruc_params = pack_params(load_tables(mminsl="STAS-RUC"))
     downscale_receipt: Mapping[str, object] = {}
     if soil_mesh is not None:
-        from woof.core.noah import load_tables, pack_params
         from woof.ingest.soil_downscale import downscale_soil_moisture
 
         terrestrial = (_host(landmask) if landmask is not None
@@ -815,7 +826,7 @@ def preprocess_ruc_soil(
             terrestrial[_host(lake_mask).astype(bool)] = False
         moisture, downscale_receipt = downscale_soil_moisture(
             moisture, soil_type=soil_type, terrestrial=terrestrial,
-            params=pack_params(load_tables(mminsl="STAS-RUC")),
+            params=ruc_params,
             plan=soil_mesh,
             # RUC's source profiles are not on Noah's four thicknesses, and
             # the layer/level geometry differs per source, so the soil-water
@@ -874,8 +885,19 @@ def preprocess_ruc_soil(
             surface.deep_soil_temperature)[:, rebuilt_columns].astype(
                 soil_temperature.dtype)
 
-    soil_moisture = columns.soil_moisture
-    liquid_moisture = np.array(columns.soil_moisture, copy=True)
+    # The porosity ceiling on the levels LSMRUC integrates, against the
+    # table it integrates them with (woof.ingest.soil.
+    # cap_land_moisture_at_smcmax), before SH2O's placeholder copy is taken.
+    from woof.ingest.soil import cap_land_moisture_at_smcmax
+
+    soil_moisture, moisture_cap = cap_land_moisture_at_smcmax(
+        columns.soil_moisture, repair_land, _host(soil_type),
+        ruc_params.soil[:ruc_params.slcats, SOIL_COLS.index("smcmax")],
+        table="SOILPARM.TBL STAS-RUC MAXSMC")
+    init_caps = dict(surface.init_caps)
+    if moisture_cap:
+        init_caps["soil_moisture"] = moisture_cap
+    liquid_moisture = np.array(soil_moisture, copy=True)
     tsk = surface.tsk
     if fractional_seaice:
         sea_water = None
@@ -906,6 +928,7 @@ def preprocess_ruc_soil(
         level_thicknesses=columns.level_thicknesses,
         soil_texture_downscale=downscale_receipt,
         soil_temperature_repair=temperature_repair,
+        init_caps=init_caps,
     )
 
 

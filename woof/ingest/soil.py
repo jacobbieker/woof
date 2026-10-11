@@ -122,6 +122,12 @@ class NoahSoilState:
     #: EMPTY whenever no land column needed it, the ``moisture_floor``
     #: discipline.
     soil_temperature_repair: Mapping[str, object] = field(default_factory=dict)
+    #: The two init ceilings (:func:`cap_snow_water`,
+    #: :func:`cap_land_moisture_at_smcmax`): ``"snow"`` and/or
+    #: ``"soil_moisture"``, each with its cap value, the cells it capped and
+    #: the largest value it met.  EMPTY whenever neither capped a cell, the
+    #: ``moisture_floor`` discipline.
+    init_caps: Mapping[str, object] = field(default_factory=dict)
 
 
 _TEMP_NAMES = ("ST000007", "ST007028", "ST028100", "ST100289")
@@ -554,6 +560,33 @@ def _snow_undershoot_fraction() -> float:
 _SNOW_WATER_CEILING_KG_M2 = 2.0e4
 _SNOW_DEPTH_CEILING_M = 1.0e2
 
+#: The one place snow water above that ceiling is real: an ice sheet.  Met
+#: Office Global publishes the snow store of its ice-sheet tiles, 51 800
+#: kg m-2 over Greenland on 2026-10-11 and up to 68 800 further north.  So
+#: a snow water value above 20 000 kg m-2 is admitted, up to this second
+#: ceiling (about three times the largest seen), where it lies on land ice
+#: -- soil category 16 -- or in a patch of such values that touches land
+#: ice, which is how interpolation smears an ice-sheet store over the
+#: target's ice margin.  Anywhere else it is still the factor of 1000
+#: above, and still refused.  Admission is not acceptance:
+#: :func:`cap_snow_water` then puts every value above 5000 kg m-2 on that
+#: cap and says so.
+_ICE_SHEET_SNOW_WATER_CEILING_KG_M2 = 2.0e5
+
+#: The snow water equivalent the initial state carries at most, kg m-2:
+#: WRF's Noah-MP initialisation (``module_sf_noahmpdrv.F``,
+#: ``NOAHMP_INIT``: "cap SWE at 5000mm ... cap SNOW at 5000, maintain
+#: density"), which is also Noah-MP's own glacier equilibrium in
+#: ``SNOWWATER`` (woof/core/noahmp_snow.py).  ``rw_mpas_init`` applies the
+#: same ceiling on the hex path (tools/rustwx/crates/rw-mpas/src/init/caps.rs).
+SNOW_WATER_CAP_KG_M2 = 5000.0
+
+#: ``SOILPARM.TBL``'s land-ice soil category, which real.exe assigns with
+#: sea ice turned land (``module_soil_pre.F:adjust_for_seaice_pre``) and
+#: geogrid's soil data with glaciers, and which the land models run as
+#: glacier rather than as a soil column.
+_LAND_ICE_SOIL_CATEGORY = 16
+
 #: A route that declares no source mesh is announced once per process, not
 #: once per forcing time and per domain, on the same reasoning as
 #: ``horiz.py``'s ``_REPORTED_FRACTIONAL_RECOVERY``: the fact is a property
@@ -562,8 +595,25 @@ _SNOW_DEPTH_CEILING_M = 1.0e2
 _REPORTED_MISSING_SOIL_MESH: set = set()
 
 
+def _reaches(seed, through):
+    """Cells of ``through`` 8-connected to ``seed`` through ``through``."""
+    reached = seed & through
+    while True:
+        grown = reached.copy()
+        padded = np.pad(reached, 1)
+        for dj in (0, 1, 2):
+            for di in (0, 1, 2):
+                grown |= padded[dj:dj + reached.shape[0],
+                                di:di + reached.shape[1]]
+        grown &= through
+        if np.array_equal(grown, reached):
+            return reached
+        reached = grown
+
+
 def _admitted_snow_field(name: str, value: np.ndarray, shape,
-                         ceiling: float, unit: str) -> np.ndarray:
+                         ceiling: float, unit: str, *,
+                         land_ice=None) -> np.ndarray:
     """Admit one snow field, repairing bounded overshoot at zero.
 
     Snow water and snow depth are physically non-negative, so a negative
@@ -584,7 +634,9 @@ def _admitted_snow_field(name: str, value: np.ndarray, shape,
     which the field is not a snowpack at all (see
     ``_SNOW_WATER_CEILING_KG_M2``), and it is checked whatever the
     minimum is -- the early return below is for the overshoot repair,
-    not for admission.
+    not for admission.  ``land_ice`` (snow water only) admits values up to
+    ``_ICE_SHEET_SNOW_WATER_CEILING_KG_M2`` on land ice and on patches of
+    above-ceiling values that touch it: an ice sheet's snow store.
     """
     if value.shape != tuple(shape):
         raise ValueError(
@@ -595,11 +647,20 @@ def _admitted_snow_field(name: str, value: np.ndarray, shape,
             f"{name} carries {int(np.count_nonzero(~np.isfinite(value)))} "
             f"non-finite value(s) of {value.size}")
     largest = float(np.max(value))
-    if largest > ceiling:
+    above = value > ceiling
+    if land_ice is not None and above.any() \
+            and largest <= _ICE_SHEET_SNOW_WATER_CEILING_KG_M2:
+        above = above & ~_reaches(np.asarray(land_ice, dtype=bool), above)
+    if above.any():
         raise ValueError(
             f"{name} is above the plausibility ceiling of {ceiling:.6g} "
-            f"{unit}: {int(np.count_nonzero(value > ceiling))} value(s) "
-            f"of {value.size}, field maximum {largest:.6g} {unit}")
+            f"{unit}: {int(np.count_nonzero(above))} value(s) "
+            f"of {value.size}, field maximum {largest:.6g} {unit}"
+            + ("" if land_ice is None else
+               f" (an ice sheet's snow store is admitted up to "
+               f"{_ICE_SHEET_SNOW_WATER_CEILING_KG_M2:.6g} {unit} on land "
+               f"ice, soil category {_LAND_ICE_SOIL_CATEGORY}, and on the "
+               f"patches touching it; these are not)"))
     smallest = float(np.min(value))
     if smallest >= 0.0:
         return value
@@ -614,6 +675,132 @@ def _admitted_snow_field(name: str, value: np.ndarray, shape,
             f"{value.size}, most negative {smallest:.6g}, field maximum "
             f"{largest:.6g}; a fill value or a broken decode, not snow")
     return np.maximum(value, 0.0)
+
+
+def cap_snow_water(snow, snowh):
+    """Cap snow water equivalent at :data:`SNOW_WATER_CAP_KG_M2`, density kept.
+
+    ``NOAHMP_INIT``'s rule, at every cell: where ``SNOW > 5000`` the snow
+    depth is multiplied by ``5000 / SNOW`` and ``SNOW`` is set to 5000, so
+    the snowpack keeps its density.  Values at or below the cap are
+    untouched, and when none is above it both inputs are returned as they
+    came with an empty receipt.  Otherwise the receipt holds the cap, the
+    count, the largest snow water and depth met and their bounding box, and
+    one line says so on stderr.
+    """
+    over = np.asarray(snow) > SNOW_WATER_CAP_KG_M2
+    if not over.any():
+        return snow, snowh, {}
+    snow_dtype = np.asarray(snow).dtype
+    snowh_dtype = np.asarray(snowh).dtype
+    snow = np.asarray(snow, dtype=np.float64)
+    snowh = np.asarray(snowh, dtype=np.float64)
+    factor = np.ones_like(snow)
+    np.divide(SNOW_WATER_CAP_KG_M2, snow, out=factor, where=over)
+    receipt = {
+        "cap_kg_m2": SNOW_WATER_CAP_KG_M2,
+        "cells_capped": int(np.count_nonzero(over)),
+        "cells": int(snow.size),
+        "source_max_kg_m2": float(np.max(snow)),
+        "source_max_snow_depth_m": float(np.max(snowh)),
+        "rule": ("SNOW > 5000 kg m-2: SNOWH = SNOWH * 5000 / SNOW, SNOW = "
+                 "5000 (WRF module_sf_noahmpdrv.F NOAHMP_INIT, density "
+                 "kept)"),
+        "bounding_box": _grid_box(over),
+    }
+    print(
+        f"snow cap: capped SNOW at {SNOW_WATER_CAP_KG_M2:g} kg m-2 on "
+        f"{receipt['cells_capped']} of {receipt['cells']} cell(s) (source "
+        f"value up to {receipt['source_max_kg_m2']:.6g} kg m-2, snow depth "
+        f"up to {receipt['source_max_snow_depth_m']:.6g} m), snow depth "
+        "scaled to keep the density; WRF NOAHMP_INIT's ceiling",
+        file=sys.stderr)
+    # Back in the dtype each field came in, so a capped field is shaped
+    # exactly like one the cap left alone.
+    return (np.where(over, SNOW_WATER_CAP_KG_M2, snow).astype(snow_dtype),
+            np.where(over, snowh * factor, snowh).astype(snowh_dtype),
+            receipt)
+
+
+def cap_land_moisture_at_smcmax(soil_m, terrestrial, soil_type, smcmax_table,
+                                *, table: str, subject: str = "soil moisture"):
+    """Cap land soil moisture at the cell's soil-category SMCMAX.
+
+    ``NOAHMP_INIT``'s ``IF ( SMOIS > SMCMAX ) SMOIS = SMCMAX``: water the
+    soil column cannot hold is not carried into the forecast.  ICON's peat
+    (its soil type 8, porosity 0.863) reaches 0.86, above every STAS land
+    category, and a value interpolated from a source cell of one texture
+    can sit above the porosity of the target cell's.
+
+    ``smcmax_table`` is ``MAXSMC`` by category (index 0 is category 1) from
+    the table the receiving land model reads, named by ``table``.  Only
+    terrestrial cells whose category is in the table are judged, and not
+    the land-ice category (16), which the land models run as glacier.
+    ``soil_m`` is ``(levels, ny, nx)``.  Values at or below the ceiling are
+    untouched; when none is above it the input is returned as it came
+    (same object) with an empty receipt.
+    """
+    categories = np.asarray(soil_type, dtype=np.float64)
+    smcmax_table = np.asarray(smcmax_table, dtype=np.float64)
+    in_table = (np.isfinite(categories)
+                & (categories == np.floor(categories))
+                & (categories >= 1) & (categories <= smcmax_table.size))
+    rows = np.where(in_table, categories, 1).astype(np.int64) - 1
+    smcmax = smcmax_table[rows]
+    eligible = (np.asarray(terrestrial, dtype=bool) & in_table
+                & (categories != _LAND_ICE_SOIL_CATEGORY) & (smcmax > 0.0))
+    # Judged in the moisture's own precision: a float32 column holding a
+    # table value exactly (0.439 rounded to float32 is a hair above the
+    # float64 0.439) is AT its ceiling, not above it.
+    soil_m = np.asarray(soil_m)
+    limit = np.where(eligible, smcmax, np.inf)
+    if np.issubdtype(soil_m.dtype, np.floating):
+        limit = limit.astype(soil_m.dtype)
+    over = eligible[None, ...] & (soil_m > limit)
+    if not over.any():
+        return soil_m, {}
+    result = np.array(soil_m, copy=True)
+    per_level = {}
+    for level in range(soil_m.shape[0]):
+        mask = over[level]
+        count = int(np.count_nonzero(mask))
+        if count:
+            per_level[f"SMOIS_L{level + 1}"] = {
+                "capped_cells": count,
+                "max_pre_cap": float(np.max(soil_m[level][mask])),
+            }
+            result[level][mask] = smcmax[mask]
+    columns = over.any(axis=0)
+    by_category = {}
+    for category in np.unique(categories[columns]).astype(int):
+        here = columns & (categories == category)
+        by_category[str(category)] = {
+            "smcmax": float(smcmax_table[category - 1]),
+            "cells": int(np.count_nonzero(here)),
+            "max_pre_cap": float(np.max(soil_m[:, here])),
+        }
+    receipt = {
+        "table": table,
+        "rule": ("SMOIS > SMCMAX(ISLTYP): SMOIS = SMCMAX on land that is "
+                 "not land ice (WRF module_sf_noahmpdrv.F NOAHMP_INIT)"),
+        "cells_capped": int(np.count_nonzero(columns)),
+        "layer_values_capped": int(np.count_nonzero(over)),
+        "source_max": float(np.max(soil_m[over])),
+        "fields": per_level,
+        "by_category": by_category,
+        "bounding_box": _grid_box(columns),
+    }
+    ceilings = ", ".join(
+        f"category {category} at {entry['smcmax']:g} on {entry['cells']}"
+        for category, entry in by_category.items())
+    print(
+        f"{subject} cap: capped at the cell's {table} on "
+        f"{receipt['cells_capped']} land cell(s), "
+        f"{receipt['layer_values_capped']} layer value(s) (source value up "
+        f"to {receipt['source_max']:.6g} m3 m-3; {ceilings}); WRF "
+        "NOAHMP_INIT's ceiling",
+        file=sys.stderr)
+    return result, receipt
 
 
 def clamp_soil_moisture_overshoot(moisture, *, land=None, subject: str):
@@ -1212,7 +1399,8 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
                          water_temperature=None,
                          water_temperature_policy=None,
                          soil_mesh=None,
-                         route=None, fractional_seaice: bool = False) -> NoahSoilState:
+                         route=None, fractional_seaice: bool = False,
+                         soil_moisture_cap: bool = True) -> NoahSoilState:
     """Map ERA5 layers, GFS Noah layers, or native HRRR depth nodes to Noah.
 
     This is ``module_soil_pre.F:init_soil_2_real`` with layer input:
@@ -1255,6 +1443,11 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
     stock-WRF certification.  See
     :func:`woof.ingest.water_temperature.require_assembled_water_temperature`
     for why a mapping WITHOUT an SST is the identity and passes.
+
+    ``soil_moisture_cap`` (default on) caps land SMOIS at the cell's
+    ``STAS`` SMCMAX (:func:`cap_land_moisture_at_smcmax`).  The RUC arm
+    turns it off because it discards these four layers and caps its own
+    levels against ``STAS-RUC``; the snow cap is not optional.
 
     ``terrain`` and ``source_orography`` (all-or-none) enable WRF's
     ``adjust_soil_temp_new`` elevation lapse: land skin and soil temperature
@@ -1520,15 +1713,21 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
         snow = np.zeros(shape, dtype=np.float64)
     snowh = (_host(fields["SNOWH"]) if snowh_present
              else np.zeros(shape, dtype=np.float64))
+    categories = np.asarray(_host(soil_type))
+    land_ice = (terrestrial & (categories == _LAND_ICE_SOIL_CATEGORY)
+                if categories.shape == shape else None)
     snow, snowh = (
         _admitted_snow_field("snow water", snow, shape,
-                             _SNOW_WATER_CEILING_KG_M2, "kg m-2"),
+                             _SNOW_WATER_CEILING_KG_M2, "kg m-2",
+                             land_ice=land_ice),
         _admitted_snow_field("snow depth", snowh, shape,
                              _SNOW_DEPTH_CEILING_M, "m"))
     if not snow_present and snowh_present:
         snow = snowh * (1000.0 / 5.0)
     elif snow_present and not snowh_present:
         snowh = snow / 1000.0 * 5.0
+    # The snow ceiling, on the reconciled pair so the depth scales with it.
+    snow, snowh, snow_cap = cap_snow_water(snow, snowh)
     # real.exe's TSLB reasonableness rebuild, on every soil source alike:
     # a land column carrying a source soil temperature outside 170..400 K
     # is held at TSK through the vertical mapping below and rebuilt
@@ -1682,7 +1881,7 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
     if not np.isfinite(tmn).all() or np.any((tmn < 170.0) | (tmn > 400.0)):
         raise ValueError("deep soil temperature is outside 170..400 K")
 
-    from woof.core.noah import load_tables, pack_params, sh2o_init
+    from woof.core.noah import SOIL_COLS, load_tables, pack_params, sh2o_init
 
     soil_type = _host(soil_type)
     if soil_type.shape != shape:
@@ -1720,8 +1919,21 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
             file=sys.stderr)
     else:
         downscale_receipt = {}
+    # The porosity ceiling, last, on the moisture the forecast integrates and
+    # before SH2O is derived from it.  Where the reconstitution above ran it
+    # already bounded each cell at its SMCMAX, so this caps only what it did
+    # not reach (no source mesh, the declared stock-WRF opt-out, land with
+    # no usable texture).
+    moisture_cap = {}
+    if soil_moisture_cap:
+        soil_m, moisture_cap = cap_land_moisture_at_smcmax(
+            soil_m, terrestrial, soil_type,
+            noah_params.soil[:noah_params.slcats, SOIL_COLS.index("smcmax")],
+            table="SOILPARM.TBL STAS MAXSMC")
     liquid_m = sh2o_init(soil_m, soil_t, soil_type, noah_params)
     liquid_m[:, sea_ice] = 0.0
+    init_caps = {key: value for key, value in (
+        ("snow", snow_cap), ("soil_moisture", moisture_cap)) if value}
 
     return NoahSoilState(
         soil_temperature=soil_t,
@@ -1738,10 +1950,12 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
         deep_soil_repair=deep_repair,
         soil_texture_downscale=downscale_receipt,
         soil_temperature_repair=temperature_repair,
+        init_caps=init_caps,
     )
 
 
-__all__ = ["ERA5_LAYER_BOTTOMS_M", "HRRR_SOIL_NODE_DEPTHS_M",
+__all__ = ["SNOW_WATER_CAP_KG_M2", "cap_land_moisture_at_smcmax",
+           "cap_snow_water", "ERA5_LAYER_BOTTOMS_M", "HRRR_SOIL_NODE_DEPTHS_M",
            "NOAH_LAYER_MIDPOINTS_M", "clamp_soil_moisture_overshoot",
            "NOAH_LAYER_THICKNESS_M", "NoahSoilState",
            "SOIL_TEMPERATURE_RECONCILER_NAMES", "SST_RECONCILER_NAMES",
