@@ -143,7 +143,21 @@ _DERIVATION_ARGUMENTS = {
         {"sea_level_pressure", "level_height", "pressure", "surface_height"},
         set(),
     ),
+    # Earth-relative components from a published speed and METEOROLOGICAL
+    # direction (degrees the wind blows FROM, clockwise from north; CF
+    # standard_name wind_from_direction): u = -speed*sin(dir),
+    # v = -speed*cos(dir).  For producers that publish no components (the
+    # Met Office global NetCDF), on a regular latitude/longitude grid
+    # whose north is true north, so no rotation follows.
+    "eastward_wind_from_speed_direction": ({"speed", "direction"}, set()),
+    "northward_wind_from_speed_direction": ({"speed", "direction"}, set()),
 }
+#: The speed/direction pair, and the only direction convention it reads.
+_SPEED_DIRECTION_OPERATIONS = frozenset({
+    "eastward_wind_from_speed_direction", "northward_wind_from_speed_direction",
+})
+_WIND_FROM_DIRECTION_STANDARD_NAME = "wind_from_direction"
+_DIRECTION_UNITS = frozenset({"degree", "degrees"})
 #: Surface fields a mapping may carry with their source's missing mask
 #: intact (``preserve_mask``), besides the soil column: the water state.
 #: Each is read only by a consumer that takes water values from water
@@ -1186,6 +1200,135 @@ _WHEN_ABSENT_OPERATIONS = {
 }
 
 
+def _scalar_time_declared(time_contract: Mapping[str, object]) -> bool:
+    """Whether the mapping opts into a 0-d (scalar) time coordinate."""
+
+    return (time_contract.get("time_coordinate") == "scalar"
+            or time_contract.get("kind") == "scalar")
+
+
+def _scalar_time_axis_refusal(name: str) -> str:
+    """One sentence, spoken by both engines, for a time axis under scalar time."""
+
+    return (
+        f"fields.{name}.source_axes names a 'time' axis, but the mapping's "
+        "time coordinate is scalar: each file holds one valid time as a 0-d "
+        "coordinate, so no variable has a time dimension to index"
+    )
+
+
+#: The widest screen height a mapping may declare, in metres.  Screen
+#: level is the 1.5-2 m band operational centres publish (the Met Office
+#: 1.5 m, most others 2 m); anything taller is a different quantity.
+_SCREEN_HEIGHT_LIMIT_M = 10.0
+
+
+def _validate_screen_height(
+    name: str, field: Mapping[str, object], source_format: str,
+) -> None:
+    """``fields.<name>.screen_height_m``: the source's own screen level.
+
+    The value is used AS PUBLISHED: a 1.5 m screen temperature enters the
+    2 m slot unadjusted, and the declared height rides on the field's
+    source references (``@screen_height_m=<h>``) so the frame header says
+    what height the bytes were measured at.  On NetCDF the declaration is
+    also checked against the variable's own scalar ``height`` coordinate
+    when the file carries one.
+    """
+
+    label = f"fields.{name}.screen_height_m"
+    if source_format != "netcdf":
+        raise ValueError(
+            f"{label} is read by the NetCDF decoder only, which checks it "
+            "against the file's scalar height coordinate; a GRIB selector "
+            "already names its level in level_type/level_value")
+    if not field.get("selectors"):
+        raise ValueError(
+            f"{label} describes decoded bytes, so the field must declare "
+            "selectors; a derived field inherits the height through its "
+            "operands' source references")
+    if tuple(field["target_axes"]) != ("y", "x") or field["location"] != "surface":
+        raise ValueError(f"{label} applies to surface ('y', 'x') fields only")
+    value = field["screen_height_m"]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) \
+            or not math.isfinite(float(value)) \
+            or not 0.0 < float(value) <= _SCREEN_HEIGHT_LIMIT_M:
+        raise ValueError(
+            f"{label} must be a number of metres in (0, "
+            f"{_SCREEN_HEIGHT_LIMIT_M:g}]")
+
+
+def _validate_speed_direction_operands(
+    index: int,
+    derivation: Mapping[str, object],
+    fields: Mapping[str, Mapping[str, object]],
+    source_format: str,
+) -> None:
+    """The speed/direction pair reads ONE direction convention, proven.
+
+    A direction the wind blows TOWARD (oceanographic) or an angle measured
+    counter-clockwise from east would decode without a complaint and turn
+    every wind around, so the operand must declare degrees with no unit
+    transform, and on NetCDF every selector must pin the CF
+    ``standard_name`` ``wind_from_direction`` through ``attributes`` (which
+    the decoder enforces on the variable, never by name alone).
+
+    NetCDF only, because the NetCDF decoder admits regular latitude/
+    longitude grids only, where north is true north.  A GRIB2 wind
+    direction on a projected grid (HRRR's Lambert WDIR) is grid-relative
+    under its resolution flags, and these components would skip the
+    grid-to-earth rotation that only direct wind fields receive.
+    """
+
+    label = f"derivations[{index}]"
+    if source_format != "netcdf":
+        raise ValueError(
+            f"{label} ({derivation['operation']}) is read on NetCDF mappings "
+            "only, whose decoder admits regular latitude/longitude grids "
+            "alone; a GRIB direction may be grid-relative and the derived "
+            "components would skip the grid-to-earth rotation")
+    speed_name = str(derivation["speed"])
+    direction_name = str(derivation["direction"])
+    speed = fields.get(speed_name)
+    direction = fields.get(direction_name)
+    if speed is None or direction is None:
+        return  # refused below as a dependency on unmapped fields
+    if speed["units"]["target"] != "m s-1":
+        raise ValueError(
+            f"{label}.speed names {speed_name!r}, whose target units "
+            f"{speed['units']['target']!r} are not 'm s-1'")
+    units = direction["units"]
+    if (units["source"] not in _DIRECTION_UNITS
+            or units["target"] not in _DIRECTION_UNITS
+            or float(units.get("scale", 1.0)) != 1.0
+            or float(units.get("offset", 0.0)) != 0.0):
+        raise ValueError(
+            f"{label}.direction names {direction_name!r}, which must be "
+            f"degrees in and out ({sorted(_DIRECTION_UNITS)}) with no unit "
+            "scale or offset; the derivation reads meteorological "
+            "direction, the degrees the wind blows FROM clockwise from north")
+    selectors = direction.get("selectors") or []
+    if not selectors:
+        raise ValueError(
+            f"{label}.direction names {direction_name!r}, which is not a "
+            "directly decoded field; the direction convention is proven on "
+            "the decoded variable")
+    for position, selector in enumerate(selectors):
+        attributes = selector.get("attributes") or {}
+        if attributes.get("standard_name") != _WIND_FROM_DIRECTION_STANDARD_NAME:
+            raise ValueError(
+                f"fields.{direction_name}.selectors[{position}] must pin "
+                f"attributes.standard_name="
+                f"{_WIND_FROM_DIRECTION_STANDARD_NAME!r}; the "
+                f"{derivation['operation']} derivation reads only the "
+                "direction the wind blows FROM, and a name alone does "
+                "not prove that convention")
+    if tuple(speed["target_axes"]) != tuple(direction["target_axes"]):
+        raise ValueError(
+            f"{label} speed {speed_name!r} and direction {direction_name!r} "
+            "must share target axes")
+
+
 def _validate_when_absent(
     name: str,
     field: Mapping[str, object],
@@ -1434,23 +1577,43 @@ def load_mapping(
     time = _object(
         coordinates["time"],
         "mapping.coordinates.time",
-        allowed={"kind", "selector", "units", "calendar"},
+        allowed={
+            "kind", "selector", "units", "calendar", "time_coordinate",
+            "reference_time_selector",
+        },
         required={"kind"},
     )
-    if time["kind"] == "dimension":
+    if time["kind"] in {"dimension", "scalar"}:
         if source_format != "netcdf":
-            raise ValueError("dimension time coordinates are only supported for NetCDF")
+            raise ValueError(
+                f"{time['kind']} time coordinates are only supported for NetCDF")
         for name in ("selector", "units"):
             if name not in time:
-                raise ValueError(f"time dimension is missing {name}")
+                raise ValueError(f"time {time['kind']} is missing {name}")
         _validate_dimension_selector(time["selector"], "time.selector")
         _string(time["units"], "time.units")
         if time.get("calendar") is not None:
             _string(time["calendar"], "time.calendar")
     elif time["kind"] != "embedded_metadata":
         raise ValueError(f"unsupported time coordinate kind {time['kind']!r}")
-    if source_format == "netcdf" and time["kind"] != "dimension":
-        raise ValueError("NetCDF mappings require a dimension time coordinate")
+    # ``time_coordinate: "scalar"`` is the opt-in for a file whose valid
+    # time is a 0-d coordinate (the Iris/CF writers' spelling of one time
+    # per file); ``kind: "scalar"`` says the same.  Never inferred.
+    if "time_coordinate" in time and time["time_coordinate"] != "scalar":
+        raise ValueError(
+            "mapping.coordinates.time.time_coordinate may only be 'scalar'; "
+            "a dimension time coordinate needs no opt-in")
+    if "reference_time_selector" in time:
+        if not _scalar_time_declared(time):
+            raise ValueError(
+                "mapping.coordinates.time.reference_time_selector is read "
+                "beside a scalar time coordinate only "
+                "(time_coordinate='scalar')")
+        _validate_dimension_selector(
+            time["reference_time_selector"], "time.reference_time_selector")
+    if source_format == "netcdf" and time["kind"] not in {"dimension", "scalar"}:
+        raise ValueError(
+            "NetCDF mappings require a dimension or scalar time coordinate")
 
     member = coordinates.get("member")
     if member is not None:
@@ -1481,6 +1644,7 @@ def load_mapping(
                 "selectors", "derivation", "units", "source_axes", "target_axes",
                 "location", "staggering", "missing", "selector_stack_axis",
                 "time_binding", "provider", "when_absent", "dependency_only",
+                "screen_height_m",
             },
             required={"units", "source_axes", "target_axes", "location", "missing"},
         )
@@ -1593,6 +1757,10 @@ def load_mapping(
         _number(unit.get("offset", 0.0), f"fields.{name}.units.offset")
         source_axes = _axes(field["source_axes"], f"fields.{name}.source_axes")
         _axes(field["target_axes"], f"fields.{name}.target_axes")
+        if _scalar_time_declared(time) and "time" in source_axes:
+            raise ValueError(_scalar_time_axis_refusal(name))
+        if "screen_height_m" in field:
+            _validate_screen_height(name, field, source_format)
         if selector_stack_axis is not None and selector_stack_axis not in source_axes:
             raise ValueError(
                 f"fields.{name}.selector_stack_axis is absent from source_axes"
@@ -1729,6 +1897,7 @@ def load_mapping(
                 "layer_mass", "layer_bounds_m", "water_density_kg_m3",
                 "specific_humidity", "surface_geopotential_height", "exclude",
                 "sea_level_pressure", "level_height", "surface_height",
+                "speed", "direction",
             },
             required={"name", "operation"},
         )
@@ -1836,6 +2005,9 @@ def load_mapping(
                     f"derivations[{index}].water_density_kg_m3 must be "
                     "finite and positive"
                 )
+        if operation in _SPEED_DIRECTION_OPERATIONS:
+            _validate_speed_direction_operands(
+                index, derivation, fields, str(source_format))
         derivation_dependencies[name] = tuple(dependencies)
 
     field_derivations: dict[str, str] = {}
@@ -2833,6 +3005,180 @@ def _layer_slice_position(
     return dimensions.index(dimension), int(matches[0])
 
 
+#: CF duration units a scalar ``forecast_period`` may carry, in seconds.
+#: The same unit vocabulary the reference-time grammar reads.
+_FORECAST_PERIOD_SECONDS = {
+    **dict.fromkeys(("s", "sec", "secs", "second", "seconds"), 1),
+    **dict.fromkeys(("min", "mins", "minute", "minutes"), 60),
+    **dict.fromkeys(("h", "hr", "hrs", "hour", "hours"), 3600),
+    **dict.fromkeys(("d", "day", "days"), 86400),
+}
+
+
+#: The longest forecast_period read, in seconds: one century.  A larger
+#: number is not a lead time, and it would overflow the calendar.
+_MAX_FORECAST_PERIOD_S = 100 * 366 * 86400
+
+
+def _scalar_time_shape_refusal(
+    role: str, name: str, dimensions: Sequence[str],
+) -> str:
+    return (
+        f"{role} variable {name!r} has dimensions {list(dimensions)}; a "
+        "scalar time coordinate and its companions must be 0-d"
+    )
+
+
+def _scalar_companion(dataset, standard_name: str, source: Path):
+    """The one variable carrying a CF standard name, or None."""
+
+    found = [
+        variable for variable in dataset.variables.values()
+        if getattr(variable, "standard_name", None) == standard_name
+    ]
+    if len(found) > 1:
+        raise ValueError(
+            f"NetCDF file {source} carries {len(found)} variables with "
+            f"standard_name {standard_name!r} "
+            f"({', '.join(sorted(str(item.name) for item in found))}); the "
+            "scalar time check reads at most one"
+        )
+    if not found:
+        return None
+    variable = found[0]
+    if tuple(variable.dimensions):
+        raise ValueError(_scalar_time_shape_refusal(
+            standard_name, str(variable.name), tuple(variable.dimensions)))
+    return variable
+
+
+def _scalar_time_cycle(
+    dataset,
+    time_contract: Mapping[str, object],
+    valid_time: datetime,
+    source: Path,
+    report: list[dict[str, object]] | None = None,
+) -> datetime:
+    """The forecast cycle of a scalar-time file, checked against its time.
+
+    With ``time.reference_time_selector`` declared, the selected 0-d CF
+    reference time IS the cycle, so every lead of one run shares it (the
+    Met Office writes ``forecast_reference_time`` beside ``time``); when
+    the file also carries a 0-d CF ``forecast_period``, ``time`` must equal
+    reference + period exactly.  Without the selector the valid time
+    stands in for the cycle, as it does for every dimension-time NetCDF
+    source.  ``ncdf::scalar_time_cycle`` makes the same checks in the same
+    order with the same sentences.
+    """
+
+    selector = time_contract.get("reference_time_selector")
+    if selector is None:
+        return valid_time
+    reference = _resolve_nc_variable(dataset, selector, "reference time", report)
+    if tuple(reference.dimensions):
+        raise ValueError(_scalar_time_shape_refusal(
+            "reference time", str(reference.name), tuple(reference.dimensions)))
+    calendar = getattr(reference, "calendar", "standard")
+    if calendar not in {"standard", "gregorian", "proleptic_gregorian"}:
+        raise ValueError(
+            f"reference time variable {str(reference.name)!r} calendar "
+            f"{calendar!r} is not supported for WRF initialization"
+        )
+    try:
+        reference_times = reference.times()
+    except netcdf_bridge.NetcdfDecodeError:
+        reference_times = ()
+    if len(reference_times) != 1:
+        raise ValueError(
+            f"reference time variable {str(reference.name)!r} units "
+            f"{getattr(reference, 'units', None)!r} are not a CF reference "
+            "time"
+        )
+    reference_time = _utc_datetime(reference_times[0], "reference time")
+    if valid_time < reference_time:
+        raise ValueError(
+            f"NetCDF file {source} scalar time {valid_time.isoformat()} "
+            f"precedes its reference time {reference_time.isoformat()}"
+        )
+    period = _scalar_companion(dataset, "forecast_period", source)
+    if period is None:
+        return reference_time
+    units = getattr(period, "units", None)
+    factor = _FORECAST_PERIOD_SECONDS.get(
+        units.strip().lower() if isinstance(units, str) else None)
+    if factor is None:
+        raise ValueError(
+            f"forecast_period variable {str(period.name)!r} units {units!r} "
+            "are not a duration in seconds, minutes, hours or days"
+        )
+    raw = np.asarray(period[:], dtype=np.float64).reshape(-1)
+    seconds = float(raw[0]) * factor if raw.size == 1 else math.nan
+    if not math.isfinite(seconds) or seconds != math.floor(seconds) \
+            or abs(seconds) > _MAX_FORECAST_PERIOD_S:
+        raise ValueError(
+            f"forecast_period variable {str(period.name)!r} is not one whole "
+            "number of seconds"
+        )
+    expected = reference_time + timedelta(seconds=int(seconds))
+    if expected != valid_time:
+        raise ValueError(
+            f"NetCDF file {source} scalar time {valid_time.isoformat()} is "
+            f"not reference time {reference_time.isoformat()} plus "
+            f"forecast_period {int(seconds)} s ({expected.isoformat()})"
+        )
+    return reference_time
+
+
+def _screen_height_references(field: Mapping[str, object]) -> tuple[str, ...]:
+    """The declared screen height, carried as a source reference."""
+
+    if "screen_height_m" not in field:
+        return ()
+    return (f"@screen_height_m={float(field['screen_height_m'])!r}",)
+
+
+def _require_screen_height(dataset, variable, declared: float, field_name: str) -> None:
+    """Hold a declared screen height to the variable's own height coordinate.
+
+    The CF ``coordinates`` attribute names the variable's auxiliary
+    coordinates; one of them with ``standard_name = height`` is the
+    measured height (the Met Office writes a 0-d ``height`` of 1.5 m on
+    every screen field).  When it is there it must be 0-d metres and equal
+    the declaration; when it is not, the declaration stands alone.
+    """
+
+    named = str(getattr(variable, "coordinates", "") or "").split()
+    heights = [
+        dataset.variables[name] for name in named
+        if name in dataset.variables
+        and getattr(dataset.variables[name], "standard_name", None) == "height"
+    ]
+    if not heights:
+        return
+    if len(heights) > 1:
+        raise ValueError(
+            f"{field_name} variable {str(variable.name)!r} names "
+            f"{len(heights)} height coordinates; its screen height is "
+            "ambiguous"
+        )
+    height = heights[0]
+    values = np.asarray(height[:], dtype=np.float64).reshape(-1)
+    units = getattr(height, "units", None)
+    if tuple(height.dimensions) or units != "m" or values.size != 1:
+        raise ValueError(
+            f"{field_name} height coordinate {str(height.name)!r} must be one "
+            f"0-d value in 'm' (units {units!r})"
+        )
+    # A height stored as float32 (the Met Office's 1.5 is) matches its
+    # declaration at either precision; 1.2 m in float32 is not 1.2 in f64.
+    if float(values[0]) not in (declared, float(np.float32(declared))):
+        raise ValueError(
+            f"{field_name} declares screen_height_m={declared!r}, and "
+            f"variable {str(variable.name)!r} sits at height "
+            f"{float(values[0])!r} m"
+        )
+
+
 def _decode_netcdf(mapping: Mapping[str, object], files: Sequence[Path]) -> _DecodedCollection:
     coordinates = mapping["coordinates"]
     horizontal = coordinates["horizontal"]
@@ -2927,9 +3273,25 @@ def _decode_netcdf(mapping: Mapping[str, object], files: Sequence[Path]) -> _Dec
                         vertical_selection = (vertical_dimension, indices)
                         vertical_values = explicit_levels
 
-            time_dimension, time_variable = _resolve_nc_dimension(
-                dataset, time_contract["selector"], "time", resolution
-            )
+            scalar_time = _scalar_time_declared(time_contract)
+            if scalar_time:
+                # One valid time per file, written as a 0-d coordinate
+                # (Iris and the Met Office write `time`,
+                # `forecast_reference_time` and `forecast_period` this
+                # way).  Opted into by the mapping, never inferred: a
+                # dimension mapping meeting a scalar file still refuses.
+                time_dimension = None
+                time_variable = _resolve_nc_variable(
+                    dataset, time_contract["selector"], "time", resolution
+                )
+                if tuple(time_variable.dimensions):
+                    raise ValueError(_scalar_time_shape_refusal(
+                        "time", str(time_variable.name),
+                        tuple(time_variable.dimensions)))
+            else:
+                time_dimension, time_variable = _resolve_nc_dimension(
+                    dataset, time_contract["selector"], "time", resolution
+                )
             declared_time_units = str(time_contract["units"])
             if getattr(time_variable, "units", None) != declared_time_units:
                 raise ValueError("NetCDF time units differ from mapping")
@@ -2949,6 +3311,16 @@ def _decode_netcdf(mapping: Mapping[str, object], files: Sequence[Path]) -> _Dec
             )
             if len(set(times)) != len(times):
                 raise ValueError(f"NetCDF file {source} contains duplicate valid times")
+            # The cycle a valid time belongs to.  A dimension time axis
+            # names none, so the valid time stands in (the historical
+            # NetCDF answer); a scalar file that also carries the CF
+            # forecast_reference_time and forecast_period is held to
+            # time = reference + period, and the reference is the cycle.
+            source_cycle = (
+                _scalar_time_cycle(
+                    dataset, time_contract, times[0], source, resolution)
+                if scalar_time else None
+            )
 
             member_dimension = None
             member_value = None
@@ -3071,6 +3443,8 @@ def _decode_netcdf(mapping: Mapping[str, object], files: Sequence[Path]) -> _Dec
                 variable_axes = list(source_axes)
                 if stack_axis is not None:
                     variable_axes.remove(str(stack_axis))
+                if scalar_time and "time" in variable_axes:
+                    raise ValueError(_scalar_time_axis_refusal(field_name))
                 if "vertical" in variable_axes and vertical_values is None:
                     # The lazy resolution above kept the reason; a field that
                     # needs the coordinate gets it, not a vaguer one.
@@ -3092,6 +3466,11 @@ def _decode_netcdf(mapping: Mapping[str, object], files: Sequence[Path]) -> _Dec
                             f"{field_name} source units "
                             f"{getattr(variable, 'units', None)!r} differ from mapping "
                             f"{declared_source_units!r}"
+                        )
+                    if "screen_height_m" in field:
+                        _require_screen_height(
+                            dataset, variable, float(field["screen_height_m"]),
+                            field_name,
                         )
                     layer = _layer_slice_position(
                         dataset, variable, selector, field_name
@@ -3226,19 +3605,34 @@ def _decode_netcdf(mapping: Mapping[str, object], files: Sequence[Path]) -> _Dec
                         name=field_name,
                         valid_time=valid_time,
                         member=member_value,
-                        source_cycle=valid_time,
+                        source_cycle=(
+                            valid_time if source_cycle is None else source_cycle
+                        ),
                         axes=target_axes,
                         values=converted,
                         missing_count=missing_count,
                         references=tuple(
                             f"{source.resolve()}:{variable.name}"
                             for variable, _selector in resolved
-                        ),
+                        ) + _screen_height_references(field),
                     )
                     if key in direct:
                         raise ValueError(f"duplicate mapped field {field_name} at {valid_time}")
+                    cycle = valid_time if source_cycle is None else source_cycle
+                    known_cycle = cycles.get((valid_time, member_value))
+                    if known_cycle is not None and known_cycle != cycle:
+                        # One frame is one run.  A one-field-per-file
+                        # producer can hand over two runs' files for one
+                        # valid time; each passes its own reference +
+                        # period check, so the mix is refused here.
+                        raise ValueError(
+                            f"NetCDF files mix source cycles at "
+                            f"{valid_time.isoformat()}: "
+                            f"{known_cycle.isoformat()} and "
+                            f"{cycle.isoformat()} ({source})"
+                        )
                     direct[key] = value
-                    cycles[(valid_time, member_value)] = valid_time
+                    cycles[(valid_time, member_value)] = cycle
                 supplied_by[field_name] = source
         # Emitted once per file, after every selector in it has resolved, so
         # the notice lists the whole drift rather than one line per variable.
@@ -5655,6 +6049,42 @@ def _surface_pressure_from_sea_level(
     return values
 
 
+def _wind_component_from_speed_direction(
+    kind: str, speed: CanonicalField, direction: CanonicalField, name: str,
+) -> np.ndarray:
+    """One earth-relative component from speed and meteorological direction.
+
+    ``u = -speed * sin(dir)``, ``v = -speed * cos(dir)``, dir in radians
+    as ``dir_deg * (pi / 180)``: float64 throughout, in this operation
+    order, which ``derive.rs`` repeats so the two engines agree to the
+    byte.  A missing (NaN) operand stays missing.  The range check is on
+    finite values only, and it refuses rather than wraps: a direction
+    past 360 or below 0 is not a convention this reads.
+    """
+
+    if speed.axes != direction.axes or speed.values.shape != direction.values.shape:
+        raise ValueError(f"{name} speed/direction dependencies disagree")
+    if speed.units != "m s-1" or direction.units not in _DIRECTION_UNITS:
+        raise ValueError(
+            f"{name} requires speed in 'm s-1' and direction in degrees; got "
+            f"{speed.units!r} and {direction.units!r}")
+    speed_values = np.asarray(speed.values, dtype=np.float64)
+    direction_values = np.asarray(direction.values, dtype=np.float64)
+    outside = int(np.count_nonzero(
+        (direction_values < 0.0) | (direction_values > 360.0)))
+    if outside:
+        raise ValueError(
+            f"{name} reads {outside} wind direction value(s) outside "
+            "[0, 360] degrees")
+    negative = int(np.count_nonzero(speed_values < 0.0))
+    if negative:
+        raise ValueError(f"{name} reads {negative} negative wind speed value(s)")
+    radians = direction_values * (np.pi / 180.0)
+    if kind == "eastward_wind_from_speed_direction":
+        return -speed_values * np.sin(radians)
+    return -speed_values * np.cos(radians)
+
+
 def _evaluate_derivation(
     operation: Mapping[str, object],
     available: Mapping[str, CanonicalField],
@@ -5949,6 +6379,13 @@ def _evaluate_derivation(
             *surface_height.source_references,
             *pressure.source_references,
         )
+    elif kind in _SPEED_DIRECTION_OPERATIONS:
+        speed = dependency("speed")
+        direction = dependency("direction")
+        raw = _wind_component_from_speed_direction(
+            kind, speed, direction, name)
+        axes = speed.axes
+        references = (*speed.source_references, *direction.source_references)
     else:
         raise ValueError(f"unsupported derivation operation {kind!r}")
 

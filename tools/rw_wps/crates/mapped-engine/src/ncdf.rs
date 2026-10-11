@@ -691,14 +691,34 @@ fn parse_cf_units(units: &str) -> Result<Option<CfReference>> {
     let Some((unit_text, rest)) = lowered.split_once(" since ") else {
         return Ok(None);
     };
-    let unit = match unit_text.trim() {
-        "s" | "sec" | "secs" | "second" | "seconds" => CfUnit::Seconds,
-        "min" | "mins" | "minute" | "minutes" => CfUnit::Minutes,
-        "h" | "hr" | "hrs" | "hour" | "hours" => CfUnit::Hours,
-        "d" | "day" | "days" => CfUnit::Days,
-        _ => return Ok(None),
+    let Some(unit) = CfUnit::parse(unit_text) else {
+        return Ok(None);
     };
     Ok(parse_cf_epoch(rest.trim())?.map(|epoch| CfReference { unit, epoch }))
+}
+
+impl CfUnit {
+    /// The CF duration vocabulary, shared by the reference-time grammar
+    /// and the scalar `forecast_period` check so the two never drift.
+    /// Case and surrounding space are ignored.
+    fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "s" | "sec" | "secs" | "second" | "seconds" => Some(CfUnit::Seconds),
+            "min" | "mins" | "minute" | "minutes" => Some(CfUnit::Minutes),
+            "h" | "hr" | "hrs" | "hour" | "hours" => Some(CfUnit::Hours),
+            "d" | "day" | "days" => Some(CfUnit::Days),
+            _ => None,
+        }
+    }
+
+    fn seconds(self) -> f64 {
+        match self {
+            CfUnit::Seconds => 1.0,
+            CfUnit::Minutes => 60.0,
+            CfUnit::Hours => 3600.0,
+            CfUnit::Days => 86_400.0,
+        }
+    }
 }
 
 /// The widest UTC-offset designator accepted, in seconds: 18 hours
@@ -1193,6 +1213,232 @@ fn recover_dimension_scales(file: &NcFile, variables: &mut Vec<NcVariable>) {
     }
 }
 
+/// Whether the mapping opts into a 0-d (scalar) time coordinate:
+/// `mapped_source._scalar_time_declared`.
+fn scalar_time_declared(time_contract: &Node) -> bool {
+    time_contract.field("time_coordinate").and_then(Node::as_str) == Some("scalar")
+        || time_contract.field("kind").and_then(Node::as_str) == Some("scalar")
+}
+
+/// `mapped_source._scalar_time_axis_refusal`.
+fn scalar_time_axis_refusal(name: &str) -> String {
+    format!(
+        "fields.{name}.source_axes names a 'time' axis, but the mapping's \
+         time coordinate is scalar: each file holds one valid time as a 0-d \
+         coordinate, so no variable has a time dimension to index"
+    )
+}
+
+/// `mapped_source._scalar_time_shape_refusal`.
+fn scalar_time_shape_refusal(role: &str, name: &str, dimensions: &[String]) -> String {
+    format!(
+        "{role} variable {} has dimensions {}; a scalar time coordinate and \
+         its companions must be 0-d",
+        crate::refusal::python_repr(name),
+        crate::refusal::python_list_repr(dimensions)
+    )
+}
+
+/// The longest forecast_period read, in seconds: one century
+/// (`mapped_source._MAX_FORECAST_PERIOD_S`).
+const MAX_FORECAST_PERIOD_S: f64 = 100.0 * 366.0 * 86_400.0;
+
+/// `mapped_source._FORECAST_PERIOD_SECONDS`: a CF duration unit in seconds.
+fn forecast_period_factor(units: &str) -> Option<f64> {
+    CfUnit::parse(units).map(CfUnit::seconds)
+}
+
+/// `mapped_source._scalar_companion`: the one 0-d variable carrying a CF
+/// standard name, or `None`.
+fn scalar_companion<'a>(
+    variables: &'a [NcVariable],
+    standard_name: &str,
+    source: &str,
+) -> Result<Option<&'a NcVariable>> {
+    let found: Vec<&NcVariable> = variables
+        .iter()
+        .filter(|variable| {
+            attribute_string(variable, "standard_name").as_deref() == Some(standard_name)
+        })
+        .collect();
+    if found.len() > 1 {
+        let mut names: Vec<&str> = found.iter().map(|variable| variable.name()).collect();
+        names.sort_unstable();
+        return Err(frame_invalid(format!(
+            "NetCDF file {source} carries {} variables with standard_name {} \
+             ({}); the scalar time check reads at most one",
+            found.len(),
+            crate::refusal::python_repr(standard_name),
+            names.join(", ")
+        )));
+    }
+    let Some(variable) = found.first().copied() else {
+        return Ok(None);
+    };
+    if !variable.dimensions().is_empty() {
+        return Err(frame_invalid(scalar_time_shape_refusal(
+            standard_name,
+            variable.name(),
+            variable.dimensions(),
+        )));
+    }
+    Ok(Some(variable))
+}
+
+/// `mapped_source._scalar_time_cycle`: the forecast cycle of a scalar-time
+/// file, checked against its valid time.
+///
+/// With `time.reference_time_selector` declared, the selected 0-d CF
+/// reference time IS the cycle, so every lead of one run shares it; when
+/// the file also carries a 0-d CF `forecast_period`, the valid time must
+/// equal reference + period exactly.  Without the selector the valid time
+/// stands in for the cycle.  Same checks, same order, same sentences as
+/// the Python twin.
+fn scalar_time_cycle(
+    variables: &[NcVariable],
+    time_contract: &Node,
+    valid_time: NaiveDateTime,
+    source: &str,
+) -> Result<NaiveDateTime> {
+    let Some(selector) = time_contract.field("reference_time_selector") else {
+        return Ok(valid_time);
+    };
+    let reference = resolve_variable(variables, selector, "reference time")?;
+    if !reference.dimensions().is_empty() {
+        return Err(frame_invalid(scalar_time_shape_refusal(
+            "reference time",
+            reference.name(),
+            reference.dimensions(),
+        )));
+    }
+    let calendar = attribute_string(reference, "calendar").unwrap_or_else(|| "standard".to_owned());
+    if !matches!(calendar.as_str(), "standard" | "gregorian" | "proleptic_gregorian") {
+        return Err(frame_invalid(format!(
+            "reference time variable {} calendar {} is not supported for WRF \
+             initialization",
+            crate::refusal::python_repr(reference.name()),
+            crate::refusal::python_repr(&calendar)
+        )));
+    }
+    let units = attribute_string(reference, "units");
+    let parsed = units
+        .as_deref()
+        .and_then(|text| parse_cf_units(text).ok().flatten());
+    let decoded = match parsed {
+        Some(cf) => {
+            let (_shape, raw) = read_values(reference)?;
+            decode_times(&cf, &raw).ok().filter(|times| times.len() == 1)
+        }
+        None => None,
+    };
+    let Some(reference_time) = decoded.map(|times| times[0]) else {
+        return Err(frame_invalid(format!(
+            "reference time variable {} units {} are not a CF reference time",
+            crate::refusal::python_repr(reference.name()),
+            optional_repr(units.as_deref())
+        )));
+    };
+    if valid_time < reference_time {
+        return Err(frame_invalid(format!(
+            "NetCDF file {source} scalar time {} precedes its reference time {}",
+            crate::frames::naive_isoformat(valid_time),
+            crate::frames::naive_isoformat(reference_time)
+        )));
+    }
+    let Some(period) = scalar_companion(variables, "forecast_period", source)? else {
+        return Ok(reference_time);
+    };
+    let period_units = attribute_string(period, "units");
+    let Some(factor) = period_units.as_deref().and_then(forecast_period_factor) else {
+        return Err(frame_invalid(format!(
+            "forecast_period variable {} units {} are not a duration in \
+             seconds, minutes, hours or days",
+            crate::refusal::python_repr(period.name()),
+            optional_repr(period_units.as_deref())
+        )));
+    };
+    let (_shape, raw) = read_values(period)?;
+    let seconds = if raw.len() == 1 { raw[0] * factor } else { f64::NAN };
+    if !seconds.is_finite() || seconds != seconds.floor() || seconds.abs() > MAX_FORECAST_PERIOD_S {
+        return Err(frame_invalid(format!(
+            "forecast_period variable {} is not one whole number of seconds",
+            crate::refusal::python_repr(period.name())
+        )));
+    }
+    let whole = seconds as i64;
+    let expected = reference_time + Duration::seconds(whole);
+    if expected != valid_time {
+        return Err(frame_invalid(format!(
+            "NetCDF file {source} scalar time {} is not reference time {} plus \
+             forecast_period {whole} s ({})",
+            crate::frames::naive_isoformat(valid_time),
+            crate::frames::naive_isoformat(reference_time),
+            crate::frames::naive_isoformat(expected)
+        )));
+    }
+    Ok(reference_time)
+}
+
+/// A field's declared `screen_height_m`, when it declares one.
+fn screen_height(field: &crate::model::FieldSpec<'_>) -> Option<f64> {
+    field.raw.field("screen_height_m").and_then(Node::as_f64)
+}
+
+/// `mapped_source._screen_height_references`.
+fn screen_height_reference(declared: f64) -> String {
+    format!("@screen_height_m={}", crate::refusal::python_float_repr(declared))
+}
+
+/// `mapped_source._require_screen_height`: hold a declared screen height
+/// to the variable's own `standard_name = height` auxiliary coordinate,
+/// named through CF `coordinates`, when the file carries one.
+fn require_screen_height(
+    variables: &[NcVariable],
+    variable: &NcVariable,
+    declared: f64,
+    field_name: &str,
+) -> Result<()> {
+    let named = attribute_string(variable, "coordinates").unwrap_or_default();
+    let heights: Vec<&NcVariable> = named
+        .split_whitespace()
+        .filter_map(|name| variables.iter().find(|item| item.name() == name))
+        .filter(|item| attribute_string(item, "standard_name").as_deref() == Some("height"))
+        .collect();
+    let Some(height) = heights.first().copied() else {
+        return Ok(());
+    };
+    if heights.len() > 1 {
+        return Err(frame_invalid(format!(
+            "{field_name} variable {} names {} height coordinates; its screen \
+             height is ambiguous",
+            crate::refusal::python_repr(variable.name()),
+            heights.len()
+        )));
+    }
+    let (_shape, values) = read_values(height)?;
+    let units = attribute_string(height, "units");
+    if !height.dimensions().is_empty() || units.as_deref() != Some("m") || values.len() != 1 {
+        return Err(frame_invalid(format!(
+            "{field_name} height coordinate {} must be one 0-d value in 'm' \
+             (units {})",
+            crate::refusal::python_repr(height.name()),
+            optional_repr(units.as_deref())
+        )));
+    }
+    // A height stored as float32 (the Met Office's 1.5 is) matches its
+    // declaration at either precision; 1.2 m in float32 is not 1.2 in f64.
+    if values[0] != declared && values[0] != f64::from(declared as f32) {
+        return Err(frame_invalid(format!(
+            "{field_name} declares screen_height_m={}, and variable {} sits at \
+             height {} m",
+            crate::refusal::python_float_repr(declared),
+            crate::refusal::python_repr(variable.name()),
+            crate::refusal::python_float_repr(values[0])
+        )));
+    }
+    Ok(())
+}
+
 /// `mapped_source._decode_netcdf`.
 pub fn decode_netcdf(mapping: &Mapping, files: &[String]) -> Result<DecodedCollection> {
     let coordinates = mapping.coordinates()?;
@@ -1294,7 +1540,23 @@ pub fn decode_netcdf(mapping: &Mapping, files: &[String]) -> Result<DecodedColle
             .get("selector")
             .ok_or_else(|| mapping_invalid("coordinates.time.selector is required"))?;
         let time_variable = resolve_variable(&variables, time_selector, "time")?;
-        let time_dimension = coordinate_dimension(time_variable, "time")?;
+        // One valid time per file as a 0-d coordinate (Iris and the Met
+        // Office write `time`, `forecast_reference_time` and
+        // `forecast_period` this way), opted into by the mapping and never
+        // inferred: a dimension mapping meeting a scalar file still refuses.
+        let scalar_time = scalar_time_declared(time_contract);
+        let time_dimension: Option<String> = if scalar_time {
+            if !time_variable.dimensions().is_empty() {
+                return Err(frame_invalid(scalar_time_shape_refusal(
+                    "time",
+                    time_variable.name(),
+                    time_variable.dimensions(),
+                )));
+            }
+            None
+        } else {
+            Some(coordinate_dimension(time_variable, "time")?)
+        };
         let declared_time_units = time_contract
             .get("units")
             .and_then(Node::as_str)
@@ -1332,6 +1594,14 @@ pub fn decode_netcdf(mapping: &Mapping, files: &[String]) -> Result<DecodedColle
                 "NetCDF file {source} contains duplicate valid times"
             )));
         }
+        // The cycle a valid time belongs to: the valid time itself for a
+        // dimension time axis (the historical NetCDF answer), the declared
+        // reference time for a scalar file that names one.
+        let source_cycle: Option<NaiveDateTime> = if scalar_time {
+            Some(scalar_time_cycle(&variables, time_contract, times[0], source)?)
+        } else {
+            None
+        };
 
         let mut member_dimension: Option<String> = None;
         let mut member_value: Option<String> = None;
@@ -1484,6 +1754,9 @@ pub fn decode_netcdf(mapping: &Mapping, files: &[String]) -> Result<DecodedColle
             if let Some(axis) = stack_axis {
                 variable_axes.retain(|item| item != axis);
             }
+            if scalar_time && variable_axes.iter().any(|axis| axis == "time") {
+                return Err(frame_invalid(scalar_time_axis_refusal(&name)));
+            }
             if variable_axes.iter().any(|axis| axis == "vertical") && vertical_values.is_none() {
                 let detail = vertical_error
                     .as_ref()
@@ -1513,6 +1786,9 @@ pub fn decode_netcdf(mapping: &Mapping, files: &[String]) -> Result<DecodedColle
                         optional_repr(observed_units.as_deref()),
                         crate::refusal::python_repr(declared_source_units)
                     )));
+                }
+                if let Some(declared) = screen_height(&field) {
+                    require_screen_height(&variables, variable, declared, &name)?;
                 }
                 let layer = layer_slice_position(&variables, variable, selector, &name)?;
                 let mut dimensions: Vec<String> = variable.dimensions().to_vec();
@@ -1565,7 +1841,7 @@ pub fn decode_netcdf(mapping: &Mapping, files: &[String]) -> Result<DecodedColle
                     ("vertical", vertical_dimension.clone()),
                     ("y", Some(latitude_dimension.clone())),
                     ("x", Some(longitude_dimension.clone())),
-                    ("time", Some(time_dimension.clone())),
+                    ("time", time_dimension.clone()),
                     ("member", member_dimension.clone()),
                 ] {
                     let Some(axis) = variable_axes.iter().position(|item| item == role) else {
@@ -1630,10 +1906,14 @@ pub fn decode_netcdf(mapping: &Mapping, files: &[String]) -> Result<DecodedColle
                 arrays.remove(0)
             };
 
-            let references: Vec<String> = resolved
+            let mut references: Vec<String> = resolved
                 .iter()
                 .map(|(variable, _selector)| format!("{source}:{}", variable.name()))
                 .collect();
+            if let Some(declared) = screen_height(&field) {
+                references.push(screen_height_reference(declared));
+            }
+            let cycle_of = |valid: NaiveDateTime| source_cycle.unwrap_or(valid);
             for (time_index, valid_time) in times.iter().enumerate() {
                 let mut selected = data.clone();
                 let mut selected_axes = source_axes.clone();
@@ -1661,20 +1941,34 @@ pub fn decode_netcdf(mapping: &Mapping, files: &[String]) -> Result<DecodedColle
                         "duplicate mapped field {name} at {valid_time}"
                     )));
                 }
+                // One frame is one run: two runs' files for one valid time
+                // each pass their own reference + period check, so the mix
+                // is refused here (`mapped_source._decode_netcdf`).
+                let cycle = cycle_of(*valid_time);
+                if let Some(known) = cycles.get(&(*valid_time, member_value.clone())) {
+                    if *known != cycle {
+                        return Err(frame_invalid(format!(
+                            "NetCDF files mix source cycles at {}: {} and {} ({source})",
+                            crate::frames::naive_isoformat(*valid_time),
+                            crate::frames::naive_isoformat(*known),
+                            crate::frames::naive_isoformat(cycle)
+                        )));
+                    }
+                }
                 direct.insert(
                     key,
                     DirectValue {
                         name: name.clone(),
                         valid_time: *valid_time,
                         member: member_value.clone(),
-                        source_cycle: *valid_time,
+                        source_cycle: cycle_of(*valid_time),
                         axes: target_axes,
                         values: converted,
                         missing_count,
                         references: references.clone(),
                     },
                 );
-                cycles.insert((*valid_time, member_value.clone()), *valid_time);
+                cycles.insert((*valid_time, member_value.clone()), cycle);
             }
             supplied.insert(name.clone());
         }
@@ -2118,5 +2412,28 @@ mod tests {
             declared_level_indices(&[1000.0, 850.0], &[1000.0, 850.0], "file").unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn forecast_period_units_read_the_cf_duration_vocabulary() {
+        assert_eq!(forecast_period_factor("seconds"), Some(1.0));
+        assert_eq!(forecast_period_factor(" Hours "), Some(3600.0));
+        assert_eq!(forecast_period_factor("days"), Some(86_400.0));
+        assert_eq!(forecast_period_factor("seconds since 1970-01-01"), None);
+        assert_eq!(forecast_period_factor("1"), None);
+    }
+
+    #[test]
+    fn the_scalar_opt_in_reads_either_spelling() {
+        let parse = |text: &str| Node::parse(text.as_bytes()).expect("parses");
+        assert!(scalar_time_declared(&parse(r#"{"kind": "dimension", "time_coordinate": "scalar"}"#)));
+        assert!(scalar_time_declared(&parse(r#"{"kind": "scalar"}"#)));
+        assert!(!scalar_time_declared(&parse(r#"{"kind": "dimension"}"#)));
+    }
+
+    #[test]
+    fn a_declared_screen_height_is_spelled_as_python_repr() {
+        assert_eq!(screen_height_reference(1.5), "@screen_height_m=1.5");
+        assert_eq!(screen_height_reference(2.0), "@screen_height_m=2.0");
     }
 }

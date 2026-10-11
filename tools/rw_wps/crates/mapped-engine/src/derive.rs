@@ -426,6 +426,8 @@ pub fn derivation_dependencies(operation: &Node, vertical: &Node, name: &str) ->
     let labels: &[&str] = match kind {
         "copy" | "soil_surface_node_from_shallowest" | "height_from_interfaces" | "mass_fraction_rebase" => &["source"],
         "wind_speed" => &["u", "v"],
+        "eastward_wind_from_speed_direction" | "northward_wind_from_speed_direction" =>
+            &["speed", "direction"],
         "geopotential_height" => &["geopotential"],
         "pressure_from_vertical_coordinate" => &[],
         "geopotential_height_hydrostatic" =>
@@ -478,6 +480,8 @@ pub fn derivation_shape_operand(operation: &Node) -> Option<(&'static str, bool)
         "copy" => Some(("source", false)),
         "soil_surface_node_from_shallowest" => Some(("source", true)),
         "wind_speed" => Some(("u", false)),
+        "eastward_wind_from_speed_direction" | "northward_wind_from_speed_direction" =>
+            Some(("speed", false)),
         "geopotential_height" => Some(("geopotential", false)),
         "relative_humidity_from_dewpoint" => Some(("dewpoint", false)),
         "specific_humidity_from_rh" | "specific_humidity_from_dewpoint" => Some(("temperature", false)),
@@ -615,6 +619,67 @@ pub fn surface_pressure_from_sea_level(
         values.push(result);
     }
     Ok(values)
+}
+
+/// The direction units the speed/direction pair reads
+/// (`mapped_source._DIRECTION_UNITS`).
+const DIRECTION_UNITS: [&str; 2] = ["degree", "degrees"];
+
+/// `mapped_source._wind_component_from_speed_direction`: one earth-relative
+/// component from speed and METEOROLOGICAL direction (degrees the wind
+/// blows FROM, clockwise from north).
+///
+/// `u = -speed * sin(dir)`, `v = -speed * cos(dir)`, dir in radians as
+/// `dir_deg * (PI / 180.0)`, f64 throughout and in numpy's operation order
+/// (`np.pi` is `f64::consts::PI`; negation is exact), so the bytes equal the
+/// Python engine's.  NaN stays NaN; finite values outside [0, 360] degrees
+/// or below zero speed refuse rather than wrap.
+pub fn wind_component_from_speed_direction(
+    kind: &str,
+    speed: &CanonicalField,
+    direction: &CanonicalField,
+    name: &str,
+) -> Result<Vec<f64>> {
+    if speed.axes != direction.axes || speed.values.shape() != direction.values.shape() {
+        return Err(frame_invalid(format!(
+            "{name} speed/direction dependencies disagree"
+        )));
+    }
+    if speed.units != "m s-1" || !DIRECTION_UNITS.contains(&direction.units.as_str()) {
+        return Err(frame_invalid(format!(
+            "{name} requires speed in 'm s-1' and direction in degrees; got {} and {}",
+            crate::refusal::python_repr(&speed.units),
+            crate::refusal::python_repr(&direction.units)
+        )));
+    }
+    let speed_values = array::contiguous(&speed.values);
+    let direction_values = array::contiguous(&direction.values);
+    let outside = direction_values
+        .iter()
+        .filter(|value| **value < 0.0 || **value > 360.0)
+        .count();
+    if outside > 0 {
+        return Err(frame_invalid(format!(
+            "{name} reads {outside} wind direction value(s) outside [0, 360] degrees"
+        )));
+    }
+    let negative = speed_values.iter().filter(|value| **value < 0.0).count();
+    if negative > 0 {
+        return Err(frame_invalid(format!(
+            "{name} reads {negative} negative wind speed value(s)"
+        )));
+    }
+    let to_radians = std::f64::consts::PI / 180.0;
+    let eastward = kind == "eastward_wind_from_speed_direction";
+    Ok(speed_values
+        .iter()
+        .zip(direction_values.iter())
+        .map(|(speed, direction)| {
+            let radians = direction * to_radians;
+            let trig = if eastward { radians.sin() } else { radians.cos() };
+            -speed * trig
+        })
+        .collect())
 }
 
 /// `mapped_source._specific_humidity_from_rh`.
@@ -779,6 +844,23 @@ pub fn evaluate_derivation(
                 ArrayD::from_shape_vec(IxDyn(u.values.shape()), values)
                     .expect("shape preserved elementwise"),
                 u.axes.clone(),
+                references,
+            )
+        }
+        "eastward_wind_from_speed_direction" | "northward_wind_from_speed_direction" => {
+            let (Some(speed), Some(direction)) = (
+                dependency(operation, "speed", available),
+                dependency(operation, "direction", available),
+            ) else {
+                return Ok(None);
+            };
+            let values = wind_component_from_speed_direction(kind, speed, direction, name)?;
+            let mut references = speed.source_references.clone();
+            references.extend(direction.source_references.iter().cloned());
+            (
+                ArrayD::from_shape_vec(IxDyn(speed.values.shape()), values)
+                    .expect("shape preserved elementwise"),
+                speed.axes.clone(),
                 references,
             )
         }
@@ -2012,5 +2094,54 @@ mod tests {
         assert_eq!(completed_fields("pressure", &required), vec!["geopotential_height"]);
         assert!(completed_fields("hybrid", &required).is_empty());
         assert!(completed_fields("pressure", &std::collections::BTreeSet::new()).is_empty());
+    }
+
+    fn wind_operands(speed: f64, direction: f64) -> (CanonicalField, CanonicalField) {
+        let mut speed_field = constant_field("speed", &["y", "x"], &[1, 2], speed);
+        speed_field.units = "m s-1".to_owned();
+        let mut direction_field = constant_field("direction", &["y", "x"], &[1, 2], direction);
+        direction_field.units = "degrees".to_owned();
+        (speed_field, direction_field)
+    }
+
+    #[test]
+    fn speed_and_meteorological_direction_give_earth_relative_components() {
+        // FROM the west blows east (u > 0), FROM the north blows south
+        // (v < 0); the formula is u = -s sin(dir), v = -s cos(dir).
+        for (direction, expected_u, expected_v) in
+            [(270.0, 10.0, 0.0), (0.0, 0.0, -10.0), (90.0, -10.0, 0.0), (180.0, 0.0, 10.0)]
+        {
+            let (speed, from) = wind_operands(10.0, direction);
+            let u = wind_component_from_speed_direction(
+                "eastward_wind_from_speed_direction", &speed, &from, "u").unwrap();
+            let v = wind_component_from_speed_direction(
+                "northward_wind_from_speed_direction", &speed, &from, "v").unwrap();
+            assert!((u[0] - expected_u).abs() < 1e-12, "{direction}: u={}", u[0]);
+            assert!((v[0] - expected_v).abs() < 1e-12, "{direction}: v={}", v[0]);
+            assert_eq!(u[0], -10.0 * (direction * (std::f64::consts::PI / 180.0)).sin());
+        }
+    }
+
+    #[test]
+    fn speed_direction_refuses_what_it_cannot_read() {
+        let (speed, from) = wind_operands(10.0, 361.0);
+        let error = wind_component_from_speed_direction(
+            "eastward_wind_from_speed_direction", &speed, &from, "u").unwrap_err();
+        assert!(error.message.contains("2 wind direction value(s) outside [0, 360]"), "{error}");
+        let (speed, from) = wind_operands(-1.0, 10.0);
+        let error = wind_component_from_speed_direction(
+            "eastward_wind_from_speed_direction", &speed, &from, "u").unwrap_err();
+        assert!(error.message.contains("negative wind speed"), "{error}");
+        let (speed, mut from) = wind_operands(1.0, 10.0);
+        from.units = "radians".to_owned();
+        let error = wind_component_from_speed_direction(
+            "eastward_wind_from_speed_direction", &speed, &from, "u").unwrap_err();
+        assert!(error.message.contains("direction in degrees"), "{error}");
+        // A missing value stays missing.
+        let (speed, mut from) = wind_operands(1.0, 10.0);
+        from.values[[0, 1]] = f64::NAN;
+        let values = wind_component_from_speed_direction(
+            "northward_wind_from_speed_direction", &speed, &from, "v").unwrap();
+        assert!(values[1].is_nan() && values[0].is_finite());
     }
 }
