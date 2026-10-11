@@ -671,10 +671,14 @@ def integration_plan(dt_seconds: float, mesh: str, hours: float = 6.0) -> dict[s
     }
 
 
-#: The level count the full-physics forecast lane binds today
-#: (``woof.hex.drivers.run_cuda_v841_full_physics_x4.N_LEVELS``).  Quoted, not
-#: imported: importing that driver pulls the CUDA stack into a host-only plan.
-FULL_PHYSICS_PINNED_LEVELS = 55
+#: The deepest column the full-physics forecast lane binds.  The driver's
+#: ``N_LEVELS = 55`` is the native x4 column and NOT a limit:
+#: ``mpas_mesh_binding.bind_mesh`` rebinds it to the registered row's own
+#: count and refuses only past ``woof.hex.vertical_spec.HEX_MAX_COLUMN_LEVELS``
+#: (measured: an 80-level 100 m Greenland cull bound and integrated on this
+#: lane).  Quoted, not imported, as the driver constant was: a host-only plan
+#: keeps its imports light; ``test_dt_mint_regional_plan`` pins the two equal.
+FULL_PHYSICS_MAX_LEVELS = 80
 
 #: Earth radius MPAS scales a unit-sphere grid by (``mpas_constants``).
 _MPAS_EARTH_RADIUS_M = 6_371_229.0
@@ -932,10 +936,10 @@ def regional_mint_plan(
             "no level count was measured (pass --init); the class key and the "
             "full-physics bind both need it"
         )
-    elif int(levels) != FULL_PHYSICS_PINNED_LEVELS:
+    elif int(levels) > FULL_PHYSICS_MAX_LEVELS:
         integration_blockers.append(
             f"the cull has {levels} levels and the full-physics forecast lane "
-            f"binds {FULL_PHYSICS_PINNED_LEVELS} today, so the integration "
+            f"binds at most {FULL_PHYSICS_MAX_LEVELS}, so the integration "
             f"arms (part 2) and their control (part 3) would be refused at "
             f"bind.  The dry regional mint pair (part 4) reads its levels off "
             f"the init and is not affected"

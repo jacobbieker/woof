@@ -544,6 +544,20 @@ def test_requirements_name_each_feature_and_parse_with_real_parsers(
             assert "choose from" not in row["why_not"]
 
 
+def test_intermediate_check_admits_the_global_rows_the_door_runs():
+    from woof.hex.met_intermediate_door import GLOBAL_SOURCES
+
+    for source in GLOBAL_SOURCES:
+        argv = ["hex", "intermediate", "--source", source, "--grib-dir", "g"]
+        assert plan_hex._intermediate_refusal(argv) is None, source
+    for source in ("hrrr", "wrfout"):
+        assert plan_hex._intermediate_refusal(
+            ["hex", "intermediate", "--source", source]) is None, source
+    refused = plan_hex._intermediate_refusal(
+        ["hex", "intermediate", "--source", "no-such-model"])
+    assert refused and "refuses it at run time" in refused
+
+
 def test_main_reports_the_missing_features(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(plan_hex, "load_sites", lambda path: _compact_sites())
     args = _args(tmp_path, dx_m=100.0, corridor_km=1.0, hours=6.0,

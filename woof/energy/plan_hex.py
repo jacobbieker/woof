@@ -1486,7 +1486,8 @@ def full_chain_commands(*, dt_seconds: float, density: str, dx_m: float,
         "-o", parent_highres, "--terrain", "glo30", "--landuse", "cglc"]))
     chain.append(("register-parent", [
         "hex", "register", "--grid", parent_grid, "--static", parent_highres,
-        "--name", parent_row, "--dt-seconds", dt_text, "--rows", rows]))
+        "--name", parent_row, "--dt-seconds", dt_text, "--rows", rows,
+        "--experimental-dt"]))
     chain.append(("vertical", [
         "hex", "vertical", "--grid", parent_grid, "--static", parent_highres,
         "--vertical-spec", "vertical_spec.json", "-o", parent_vertical]))
@@ -1502,7 +1503,8 @@ def full_chain_commands(*, dt_seconds: float, density: str, dx_m: float,
         "hex", "register", "--grid", cull_grid, "--static", cull_static,
         "--parent-row", parent_row,
         "--cull-receipt", f"{run}/{CULL_NAME}.cull.json",
-        "--name", cull_row, "--dt-seconds", dt_text, "--rows", rows]))
+        "--name", cull_row, "--dt-seconds", dt_text, "--rows", rows,
+        "--experimental-dt"]))
     window = ["--cycle", start, "--hours", f"0-{whole_hours}",
               "--point", point, "--radius-km", radius,
               "--margin-km", f"{MET_MARGIN_KM:g}",
@@ -1560,7 +1562,8 @@ STAGE_REQUIREMENTS: dict[str, tuple[dict[str, Any], ...]] = {
               "what": "regional generation window"}),
     "static-highres": ({"feature": "woof hex static-highres", "unit": 13,
                         "what": "GLO-30 terrain / CGLC land cover statics"},),
-    "register-parent": ({"feature": "woof hex register", "unit": 10,
+    "register-parent": ({"feature": "woof hex register --experimental-dt",
+                         "unit": 10,
                          "what": "runtime mesh row for an authored mesh"},),
     "vertical": ({"feature": "woof hex vertical", "unit": 10,
                   "what": "native-free vertical artifact on the parent"},),
@@ -1645,8 +1648,18 @@ def _intermediate_refusal(argv: Sequence[str]) -> str | None:
         from woof.hex.hrrr_intermediate import source_row
     except ImportError:
         return None
+    source = _flag_value(argv, "--source")
+    # The door hands the uniform lat-lon rows to met_intermediate before it
+    # consults the projected table, so asking only that table refuses
+    # sources the door runs (hrrr_intermediate.run_intermediate).
     try:
-        source_row(_flag_value(argv, "--source"))
+        from woof.hex.met_intermediate_door import GLOBAL_SOURCES
+    except ImportError:
+        GLOBAL_SOURCES = {}
+    if source.strip().lower() in GLOBAL_SOURCES:
+        return None
+    try:
+        source_row(source)
     except MpasPortError as error:
         return f"woof hex intermediate refuses it at run time: {error}"
     except Exception:                       # noqa: BLE001 - not our call

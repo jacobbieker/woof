@@ -229,6 +229,20 @@ def test_the_vertical_door_takes_its_level_count_from_the_spec(chain) -> None:
     assert receipt["invariants"]["n_vert_levels"] == LEVELS
 
 
+def test_the_vertical_door_takes_a_named_preset_like_init_does(chain, tmp_path) -> None:
+    out = tmp_path / "les.vertical.nc"
+    assert hex_main([
+        "vertical", "--grid", str(chain.grid), "--static", str(chain.static),
+        "--vertical-spec", "preset:les:levels=60,dz_surface_m=40", "-o", str(out),
+    ]) == 0
+    with netCDF4.Dataset(str(out)) as ds:
+        assert len(ds.dimensions["nVertLevels"]) == 60
+    receipt = json.loads(out.with_name(out.name + ".receipt.json").read_text())
+    spec = receipt["inputs"]["vertical_spec"]
+    assert spec["preset"] == "preset:les:levels=60,dz_surface_m=40"
+    assert Path(spec["path"]).is_file()
+
+
 def test_the_vertical_door_refuses_a_regional_grid_with_the_authority_message(chain, tmp_path) -> None:
     with pytest.raises(VerticalDoorRefusal) as refusal:
         mint_vertical(
@@ -392,6 +406,29 @@ def test_the_experimental_lane_skips_only_the_anchor_and_labels_the_row(chain, t
     assert cull.experimental and cull.dt_seconds == 7.0
     assert [row.timestep_evidence for row in mesh_rows.read_rows(rows)] == [
         "experimental-unanchored", "experimental-unanchored"]
+
+
+def test_the_command_line_opens_the_experimental_lane_by_flag_or_environment(
+        chain, tmp_path, monkeypatch, capsys) -> None:
+    argv = ["register", "--grid", str(chain.grid), "--static", str(chain.static),
+            "--vertical", str(chain.vertical), "--dt-seconds", "7.0"]
+    monkeypatch.delenv("WOOF_HEX_EXPERIMENTAL_DT", raising=False)
+    assert hex_main(argv + ["--name", "gshut", "--rows", str(tmp_path / "shut.json")]) != 0
+    assert "holds no timestep anchor" in capsys.readouterr().err
+    assert not (tmp_path / "shut.json").exists()
+    rows = tmp_path / "flag.json"
+    assert hex_main(argv + ["--name", "gflag", "--rows", str(rows),
+                            "--experimental-dt"]) == 0
+    monkeypatch.setenv("WOOF_HEX_EXPERIMENTAL_DT", "1")
+    assert hex_main(argv + ["--name", "genv", "--rows", str(rows)]) == 0
+    assert [(row.name, row.timestep_evidence, row.dt_seconds)
+            for row in mesh_rows.read_rows(rows)] == [
+        ("gflag", mesh_rows.EXPERIMENTAL_TIMESTEP_EVIDENCE, 7.0),
+        ("genv", mesh_rows.EXPERIMENTAL_TIMESTEP_EVIDENCE, 7.0)]
+    monkeypatch.setenv("WOOF_HEX_EXPERIMENTAL_DT", "yes")
+    capsys.readouterr()
+    assert hex_main(argv + ["--name", "gbad", "--rows", str(rows)]) != 0
+    assert "neither 1" in capsys.readouterr().err
 
 
 def test_register_refuses_a_spec_that_is_not_the_grids_own(chain, tmp_path) -> None:

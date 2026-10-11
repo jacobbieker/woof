@@ -33,8 +33,11 @@ mesh's Courant limit admits is chosen (a cull defaults to its parent's).
 An explicit one must pass Courant AND hold an ``ADMITTED_TIMESTEPS`` row,
 refused with that table's own message otherwise.  The Python API's
 ``experimental=True`` skips the anchor lookup ONLY and labels the row
-``experimental-unanchored``; this door adds no command-line switch for it
-(the experimental lane owns that switch).
+``experimental-unanchored``.  On the command line that is the experimental
+lane's own switch, ``--experimental-dt`` (or ``WOOF_HEX_EXPERIMENTAL_DT=1``),
+read exactly as ``woof hex forecast`` reads it: without it a row authored
+for a sub-anchor timestep -- the 0.5 s a 100 m mesh needs -- cannot be
+registered at all, and the forecast that would run it has no row to bind.
 """
 
 from __future__ import annotations
@@ -577,6 +580,30 @@ def register_mesh(
     return row, rows_path
 
 
+def experimental_dt_requested(flag: bool, environ: Any = None) -> bool:
+    """The flag, or the experimental lane's environment switch.
+
+    The same rule as ``woof hex forecast``: ``1`` opens the lane, empty or
+    ``0`` leaves it shut, and any other value is refused rather than read
+    either way.
+    """
+
+    from .dt_admission import EXPERIMENTAL_DT_ENV
+
+    if flag:
+        return True
+    raw = (os.environ if environ is None else environ).get(EXPERIMENTAL_DT_ENV, "")
+    value = str(raw).strip()
+    if value in ("", "0"):
+        return False
+    if value == "1":
+        return True
+    raise _refuse(
+        f"{EXPERIMENTAL_DT_ENV}={raw!r} is neither 1 (open the experimental "
+        f"sub-anchor timestep lane) nor 0/empty (leave it shut)"
+    )
+
+
 def run_register(arguments: argparse.Namespace) -> int:
     def log(message: str) -> None:
         print(message, file=sys.stderr, flush=True)
@@ -589,6 +616,7 @@ def run_register(arguments: argparse.Namespace) -> int:
         static_receipt=arguments.static_receipt,
         vertical_spec=arguments.vertical_spec, vertical=arguments.vertical,
         lbc_source=arguments.lbc_source, cull_pad_scale=arguments.cull_pad_scale,
+        experimental=experimental_dt_requested(getattr(arguments, "experimental_dt", False)),
         log=log,
     )
     from .mesh_rows import MESH_ROWS_ENVIRONMENT
@@ -656,6 +684,13 @@ def add_register_parser(commands: Any) -> None:
     parser.add_argument("--cull-pad-scale", type=float, default=None, metavar="X",
                         help="cull rows: the cut as a multiple of the parent's core "
                              "radius (default: derived for a cap cut of a point row)")
+    parser.add_argument("--experimental-dt", action="store_true",
+                        help="EXPERIMENTAL, unanchored: accept an explicit --dt-seconds "
+                             "below every anchored timestep on the Courant check alone "
+                             "and label the row experimental-unanchored (a cull of such "
+                             "a parent needs it too).  The forecast then needs "
+                             "`woof hex forecast --experimental-dt`.  Also opened by "
+                             "WOOF_HEX_EXPERIMENTAL_DT=1")
     parser.set_defaults(handler=run_register)
 
 

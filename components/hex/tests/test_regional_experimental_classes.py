@@ -15,6 +15,7 @@ CPU-only.  What these tests hold:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -577,3 +578,22 @@ def test_a_deck_receipt_supplies_its_own_column_count(tmp_path):
             experimental=True,
         )
     assert "80 levels" in str(error.value)
+
+
+def test_the_door_hands_its_flag_to_the_frozen_driver_through_the_switch(monkeypatch):
+    # The regional opener inside the frozen driver reads only the
+    # environment; a run opened by --experimental-dt alone must reach it.
+    from woof.hex import forecast_door
+    from woof.hex.cuda_backend import regional_admission as ra
+
+    monkeypatch.delenv(ra.EXPERIMENTAL_DT_ENVIRONMENT, raising=False)
+    assert not ra.experimental_lane_requested()
+    with forecast_door.driver_experimental_environment(True):
+        assert ra.experimental_lane_requested()
+    assert not ra.experimental_lane_requested()
+    with forecast_door.driver_experimental_environment(False):
+        assert not ra.experimental_lane_requested()
+    monkeypatch.setenv(ra.EXPERIMENTAL_DT_ENVIRONMENT, "0")
+    with forecast_door.driver_experimental_environment(True):
+        assert ra.experimental_lane_requested()
+    assert os.environ[ra.EXPERIMENTAL_DT_ENVIRONMENT] == "0"

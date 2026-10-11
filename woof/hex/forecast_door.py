@@ -755,6 +755,40 @@ def experimental_dt_requested(
     )
 
 
+class driver_experimental_environment:
+    """Export the run's experimental decision to the in-process driver.
+
+    The frozen regional opener (``open_regional_forecast_v841``) asks
+    ``require_regional_anchor`` with no ``experimental`` argument, so it
+    reads the lane from ``WOOF_HEX_EXPERIMENTAL_DT`` and from nowhere else.
+    A run opened by ``--experimental-dt`` alone was therefore admitted here,
+    as experimental-unminted, and then refused inside the driver as an
+    unminted class -- the flag and the switch the help calls equivalent were
+    not.  This scope sets the switch for the driver call only and restores
+    whatever was there; a closed lane changes nothing.
+    """
+
+    def __init__(self, experimental: bool) -> None:
+        from .dt_admission import EXPERIMENTAL_DT_ENV
+
+        self._name = EXPERIMENTAL_DT_ENV
+        self._open = bool(experimental)
+        self._saved: str | None = None
+
+    def __enter__(self) -> "driver_experimental_environment":
+        if self._open:
+            self._saved = os.environ.get(self._name)
+            os.environ[self._name] = "1"
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._open:
+            if self._saved is None:
+                os.environ.pop(self._name, None)
+            else:
+                os.environ[self._name] = self._saved
+
+
 def experimental_dt_warning(request: "ForecastRequest") -> str:
     """The loud line the door prints before an experimental run."""
 
@@ -2457,7 +2491,8 @@ def run_forecast(arguments: argparse.Namespace) -> int:
     # door's own earlier refusals still catch a pre-existing --out/--scratch
     # by name; creation belongs to the driver alone.
     try:
-        rc = int(driver.main(driver_argv))
+        with driver_experimental_environment(bool(getattr(request, "experimental_dt", False))):
+            rc = int(driver.main(driver_argv))
     except MemoryError as error:
         raise _refuse(
             f"the driver's own device-memory floor refused this run: {error}  "

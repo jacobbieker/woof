@@ -96,17 +96,29 @@ def mint_vertical(
     *,
     grid: Path,
     static: Path,
-    vertical_spec: Path,
+    vertical_spec: Path | str,
     output: Path,
     receipt: Path | None = None,
 ) -> dict[str, Any]:
-    """Mint the artifact on a global grid, refusing a regional one by name."""
+    """Mint the artifact on a global grid, refusing a regional one by name.
 
-    from .vertical_spec import VerticalSpec, materialize_vertical_artifact
+    ``vertical_spec`` is a declaration file or a named preset
+    (``preset:les[:key=value,...]``), the same grammar ``woof hex init`` and
+    ``woof hex mesh-plan --vertical-spec`` take.
+    """
+
+    from .vertical_spec import (
+        is_preset_reference,
+        load_vertical_spec,
+        materialize_vertical_artifact,
+    )
 
     grid = _require_file(grid, "--grid")
     static = _require_file(static, "--static")
-    vertical_spec = _require_file(vertical_spec, "--vertical-spec")
+    if not is_preset_reference(str(vertical_spec)):
+        vertical_spec = _require_file(Path(vertical_spec), "--vertical-spec")
+    else:
+        vertical_spec = str(vertical_spec)
     output = Path(output).expanduser().absolute()
     # resolve(): a `..` or a symlink must not slip an input past this check.
     if output.resolve() in (grid.resolve(), static.resolve()):
@@ -123,7 +135,7 @@ def mint_vertical(
                 f"--parent-vertical`, which carries the parent's vertical onto "
                 f"the child cell for cell"
             )
-    spec = VerticalSpec.from_file(vertical_spec)
+    spec = load_vertical_spec(vertical_spec)
     started = time.perf_counter()
     payload = materialize_vertical_artifact(
         grid=grid,
@@ -142,7 +154,7 @@ def mint_vertical(
         "schema": "gpuwm-hex.vertical-door/v1",
         "grid": str(grid),
         "static": str(static),
-        "vertical_spec": str(vertical_spec),
+        "vertical_spec": str(payload["inputs"]["vertical_spec"]["path"]),
         "vertical_spec_sha256": spec.sha256(),
         "n_vert_levels": int(spec.n_vert_levels),
         "ztop_m": float(spec.ztop_m),
@@ -193,9 +205,10 @@ def add_vertical_parser(commands: Any) -> None:
         "--static", type=Path, required=True, metavar="FILE",
         help="the static generated with that grid (carries ter)")
     parser.add_argument(
-        "--vertical-spec", type=Path, required=True, metavar="JSON",
-        help="gpuwm-hex.vertical-spec/v1 declaration; its n_vert_levels sets "
-             "the level count and its smoothing keys the terrain smoothing")
+        "--vertical-spec", required=True, metavar="JSON",
+        help="gpuwm-hex.vertical-spec/v1 declaration, or a named preset "
+             "(preset:default, preset:les[:levels=N,...]); its n_vert_levels "
+             "sets the level count and its smoothing keys the terrain smoothing")
     parser.add_argument(
         "-o", "--output", type=Path, required=True, metavar="FILE",
         help="vertical artifact to write")
