@@ -23,6 +23,7 @@ List the whole registry with `woof prep --list-sources`, or one row with
 | `hrrr-native` | `hrrr-mapped-native` | 1 h | f048 | 1799x1059 Lambert at 3 km, native hybrid levels; same-cycle pressure product supplies analysis soil |
 | `gem-gdps` | `gem`, `gdps`, `gem-global` | 3 h | f240 | global |
 | `icon-global` | `icon`, `icon-13km`, `dwd-icon`, `dwd-icon-global` | 3 h | f180 (00/12Z), f120 (06/18Z) | global, 2,949,120-cell icosahedral mesh at nominally 13 km |
+| `icon-global-ml` | `icon-ml`, `icon-global-model-level`, `dwd-icon-global-ml` | 3 h | f180 (00/12Z), f120 (06/18Z); at most 13 leads per window | global, the same mesh on its 120 native model levels |
 | `icon-eu` | `dwd-icon-eu`, `icon-eu-regular` | 1 h | f120 | lat 29.5..70.5, lon -23.5..62.5 |
 | `icon-d2` | `icon-2km`, `dwd-icon-d2` | 1 h | f048 | lat 44.0..57.3, lon 0.0..17.3, 542,040-cell icosahedral mesh at nominally 2.2 km |
 | `gfs` | `gfs-0p25`, `gfs-0.25` | 3 h | f384 | global |
@@ -50,7 +51,7 @@ The older `rap` pressure product remains a separate 32 km source with a
 The boundary cadence column is the default. `--cadence N` writes another
 spacing when the publisher posts every lead of the window at it and the
 source's preparation takes it: `gdas`, `icon-eu`, `icon-d2`, `icon-global`,
-`gefs`, `ecmwf-open-data`, `gem-gdps`, `hrrr-prs`, `rap`, `rrfs`, `aigfs`,
+`icon-global-ml`, `gefs`, `ecmwf-open-data`, `gem-gdps`, `hrrr-prs`, `rap`, `rrfs`, `aigfs`,
 `aigefs` and `aifs` take any whole multiple of the spacing their publisher
 posts (`icon-global` posts hourly to f078, then every 3 h), so
 `woof domain --source gdas --hours 9 --cadence 3` writes
@@ -112,7 +113,7 @@ predate it. `docs/public/DATA.md` publishes the working command for each.
 
 | how the bytes arrive | sources |
 |---|---|
-| table route (whole published objects, in parallel) | `hrrr-prs`, `hrrr-native`, `rap`, `rap-native`, `rrfs`, `gefs`, `aigfs`, `aigefs`, `ecmwf-open-data`, `aifs`, `icon-global`, `icon-eu`, `icon-d2`, `gem-gdps` |
+| table route (whole published objects, in parallel) | `hrrr-prs`, `hrrr-native`, `rap`, `rap-native`, `rrfs`, `gefs`, `aigfs`, `aigefs`, `ecmwf-open-data`, `aifs`, `icon-global`, `icon-global-ml`, `icon-eu`, `icon-d2`, `gem-gdps` |
 | hand-written transport (publisher-side subsetting) | `gfs`, `gdas` (NOMADS grib-filter or the S3 archive), `hrrr` (`.idx` byte ranges, live-cycle wait), `era5` (the public ARCO Zarr store with no key, or a Copernicus CDS retrieval under your own key) |
 
 `woof domain` emits the `[fetch]` table and the runnable step 1 for every
@@ -225,6 +226,24 @@ mapping operations, including the condensate contribution to moist mass.
 Data: Deutscher Wetterdienst, https://opendata.dwd.de, CC BY 4.0. Anything
 you publish from it carries the attribution "Source: Deutscher
 Wetterdienst".
+
+## ICON global on model levels
+
+`--source icon-global-ml` (aliases `icon-ml`, `icon-global-model-level`,
+`dwd-icon-global-ml`) reads the same global ICON run as `icon-global`, but
+on its 120 native model levels rather than 18 pressure levels: pressure,
+temperature, specific humidity and wind on every level, plus the 121
+half-level heights that place them. Soil, surface and sea ice are read as
+`icon-global` reads them. The bytes come from DWD's v1 open-data tree, which
+keeps about a day of runs. Older runs come from the source.coop mirror of
+the same tree.
+
+Every lead is about 2 GB, since each field is 120 files of about 3.3 MB.
+So the fetch refuses a window of more than 13 leads before downloading
+anything, names the limit, and suggests a coarser `--cadence` or
+`--source icon-global`. See `docs/public/ICON-GLOBAL.md`.
+
+Source: Deutscher Wetterdienst (DWD), CC BY 4.0.
 
 ## Adding a source
 

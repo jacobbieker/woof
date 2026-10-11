@@ -89,7 +89,9 @@ ROUTE_TABLE_SHA256 = (
     # breakage), and cadence_note states the grammar that replaces it.
     # Native-level atmosphere and analysis-soil routes are table entries,
     # merged with the ecmwf-ens and rrfs-ens input-ensemble rows.
-    "6e7155e6461fa9c9093d9c564cef498dc003849cc3a79f99c8aa40d58bd0b9b2"
+    # Then icon-global-ml: ICON global's 120 model levels from DWD's v1
+    # tree, source.coop's mirror as the archive rung, a window_limit.
+    "131a1054b9fc4cc696b73d8f8d6e0b30224b0463f15f1be43328cb4f4c24de29"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own
@@ -110,7 +112,17 @@ PATH_TOKENS = frozenset({
     "YYYY", "MM", "DD", "HH", "YYYYMMDD", "YYYYMMDDHH", "YYYYMMDDHHMMSS",
     "F", "FF", "FFF", "MEMBER", "FIELD", "field_lower", "leveltype",
     "LEVEL", "LEVEL_SUFFIX",
+    # DWD's v1 tree (opendata.dwd.de/weather/nwp/v1/m/icon/p/...) spells
+    # the run as ``YYYY-MM-DDTHH:MM`` and the step as ``PT{HHH}H00M``.
+    "RUN_ISO", "STEP_ISO",
 })
+
+#: Local layouts a route may declare.  ``flat`` keeps the object's last
+#: path component and ``upstream`` the whole key below ``upstream/``.
+#: ``v1-tree`` keeps the whole key as it is: DWD's v1 tree names every
+#: object ``PT{HHH}H00M.grib2`` and tells them apart only by directory,
+#: so the tree below the route's base IS the object's name.
+ROUTE_LAYOUTS = frozenset({"flat", "upstream", "v1-tree"})
 
 _TOKEN_RE = re.compile(r"\{([A-Za-z_]+)\}")
 
@@ -265,6 +277,10 @@ class Route:
     #: (:class:`PostingRow`).  Every loaded route has one: the loader
     #: refuses a row without it.
     posting: "PostingRow | None" = None
+    #: The most leads one window may ask for, with why and a remedy, for a
+    #: source whose every lead is gigabytes (``icon-global-ml``: about
+    #: 2 GB of model-level objects per lead).  None: no table ceiling.
+    window_limit: Mapping[str, object] | None = None
 
     def lag_rule(self, cycle_hour: int, lead: int = 0) -> LagRule:
         """The publication rule for one UTC cycle hour and lead."""
@@ -738,8 +754,24 @@ def _build_routes() -> Mapping[str, Route]:
                     prep_refusal=str(era.get("prep_refusal", "")),
                     steps=tuple((int(last), int(step)) for last, step in era.get("steps", [])),
                 ) for era in raw.get("publication_eras", [])),
+            window_limit=(MappingProxyType(dict(raw["window_limit"]))
+                          if raw.get("window_limit") else None),
         )
     for route in routes.values():
+        if route.layout not in ROUTE_LAYOUTS:
+            raise ValueError(
+                f"{ROUTE_TABLE_NAME}: route {route.source_id} declares layout "
+                f"{route.layout!r}; the planner writes {sorted(ROUTE_LAYOUTS)}")
+        limit = route.window_limit
+        if limit is not None:
+            leads = limit.get("max_leads")
+            if (isinstance(leads, bool) or not isinstance(leads, int)
+                    or leads < 2 or not str(limit.get("why", "")).strip()
+                    or not str(limit.get("remedy", "")).strip()):
+                raise ValueError(
+                    f"{ROUTE_TABLE_NAME}: route {route.source_id} window_limit "
+                    "must give max_leads (an integer of at least 2, the "
+                    "fewest a boundary series has), a why and a remedy")
         if not route.hosts:
             raise ValueError(
                 f"{ROUTE_TABLE_NAME}: route {route.source_id} names no "
@@ -1473,6 +1505,24 @@ def resolve_leads(route: Route, cycle: datetime, hours: int, *,
         raise ValueError(
             f"--source {route.source_id}: the requested window resolves to "
             "no forecast lead at all")
+    limit = route.window_limit
+    if limit is not None and len(wanted) > int(limit["max_leads"]):
+        most = int(limit["max_leads"])
+        published = set(ladder)
+        # The finest spacing that fits this same window, if one does.
+        fits = next((step for step in range(cadence + 1, hours + 1)
+                     if hours % step == 0 and hours // step + 1 <= most
+                     and all(lead in published
+                             for lead in range(start_hour, last + 1, step))),
+                    None)
+        nearest = (f" Over this window, --cadence {fits} is {hours // fits + 1} "
+                   "leads and fits." if fits is not None else "")
+        raise ValueError(
+            f"--source {route.source_id}: this window asks for "
+            f"{len(wanted)} leads (f{wanted[0]:03d}..f{wanted[-1]:03d} every "
+            f"{cadence} h) and the route takes at most {most} per window.\n"
+            f"  why: {limit['why']}\n"
+            f"  remedy: {limit['remedy']}.{nearest}")
     return tuple(wanted)
 
 
@@ -1683,7 +1733,13 @@ def _cycle_context(cycle: datetime) -> dict[str, str]:
         "HH": f"{cycle:%H}", "YYYYMMDD": f"{cycle:%Y%m%d}",
         "YYYYMMDDHH": f"{cycle:%Y%m%d%H}",
         "YYYYMMDDHHMMSS": f"{cycle:%Y%m%d%H}0000",
+        "RUN_ISO": f"{cycle:%Y-%m-%dT%H:%M}",
     }
+
+
+def _lead_context(lead: int) -> dict[str, str]:
+    return {"F": str(lead), "FF": f"{lead:02d}", "FFF": f"{lead:03d}",
+            "STEP_ISO": f"PT{lead:03d}H00M"}
 
 
 def _render(template: str, context: Mapping[str, str]) -> str:
@@ -1711,7 +1767,10 @@ def _axis_entries(route: Route, axis: str) -> tuple[dict[str, str], ...]:
         for name in group["names"]:
             if levels:
                 for level in levels:
-                    text = prefix + (fmt % int(level))
+                    # A string level is the publisher's own spelling,
+                    # used verbatim (DWD v1 soil depths are "0.005").
+                    text = prefix + (level if isinstance(level, str)
+                                     else fmt % int(level))
                     entries.append({
                         "FIELD": str(name),
                         "field_lower": str(name).lower(),
@@ -1736,6 +1795,8 @@ def _axis_entries(route: Route, axis: str) -> tuple[dict[str, str], ...]:
 def _relpath(route: Route, key: str) -> str:
     if route.layout == "upstream":
         return f"upstream/{key}"
+    if route.layout == "v1-tree":
+        return key
     return key.rsplit("/", 1)[-1]
 
 
@@ -1839,8 +1900,7 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
     def emit(row: FileRow, lead: int | None) -> None:
         lead_context = dict(context)
         if lead is not None:
-            lead_context.update({
-                "F": str(lead), "FF": f"{lead:02d}", "FFF": f"{lead:03d}"})
+            lead_context.update(_lead_context(lead))
         for entry in (_axis_entries(route, row.axis) if row.axis else ({},)):
             key = _render(row.path, {**lead_context, **entry})
             if key in seen:
@@ -1904,8 +1964,7 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
             if not parts:
                 continue
             lead_context = dict(context)
-            lead_context.update({
-                "F": str(lead), "FF": f"{lead:02d}", "FFF": f"{lead:03d}"})
+            lead_context.update(_lead_context(lead))
             compose.append(ComposeStep(
                 kind=row.kind, name=_render(row.name, lead_context),
                 primary=row.primary, lead=lead, parts=parts))
@@ -1946,7 +2005,10 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
                 Path(obj.relpath) for obj in objects
                 if obj.role == role
                 and (select is None or f"_{select}." in obj.relpath
-                     or f"_{select}_" in obj.relpath))
+                     or f"_{select}_" in obj.relpath
+                     # A tree layout names the field by its top directory.
+                     or (route.layout == "v1-tree"
+                         and obj.relpath.split("/", 1)[0] == select)))
         else:
             raise ValueError(
                 f"{ROUTE_TABLE_NAME}: route {route.source_id} declares an "

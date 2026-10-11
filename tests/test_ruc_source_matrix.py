@@ -68,6 +68,7 @@ EXPECTED_POLICY = {
     "icon-d2": "node_point_samples",
     "icon-eu": "node_point_samples",
     "icon-global": "node_point_samples",
+    "icon-global-ml": "node_point_samples",
     "rap": "node_point_samples",
     "rap-native": "node_point_samples",
     "rrfs": "node_point_samples",
@@ -93,6 +94,7 @@ EXPECTED_SCALE = {
     "icon-d2": 1000,
     "icon-eu": 1000,
     "icon-global": 1000,
+    "icon-global-ml": 1000,
 }
 
 

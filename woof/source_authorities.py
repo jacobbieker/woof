@@ -186,6 +186,21 @@ _PACKAGED_PROFILES = MappingProxyType({
         input_normalizer="icon-gdt101-pressure-v1",
         normalization="d1fc9b43d7c4815cbb1f09e0a456a68097310718643a66b9b887001cc0106e07",
     ),
+    # The same R03B07 mesh on DWD's 120 native model levels (v1 tree):
+    # P, T, QV, U and V on full levels and the 121 HHL half-level heights,
+    # the ICON-D2 model-level grammar on the global mesh.  Selectors were
+    # read from real 2026-10-11 00Z v1 objects (grib2_inventory).
+    "icon-global-ml-grib2-v1": _profile(
+        "rw-wps-icon-global-ml-grib2",
+        source_format="grib2",
+        mapping="083446b376d47f71e9f095a1ed9119dde7d5e59b426d2f2c6b96168f6c3308f3",
+        composition="b08bc349cc1ebc88defabf0a2c34485bdaf74495856b8b7591eef3bbb62b7cd1",
+        provenance="07a4057a22c8d78c64253d109443ce80203f3d2ef7bd9e014cd110a1aa9e27c6",
+        data_role="icon_global_ml_invariant_surface",
+        provenance_role="icon_global_ml_invariant_surface_provenance",
+        input_normalizer="icon-global-ml-gdt101-model-level-v1",
+        normalization="eb0f9c58b887037c259b4593b6237c524aafc2f0189007c1240b0ee7a8c9f8cf",
+    ),
     # DWD's 2.2 km ICON-D2 on its native R19B07 mesh (542,040 cells), the
     # same GDT-101 normalization with its own mesh, ladder and cadence rows.
     # DWD also publishes a regular-lat-lon ICON-D2, but that product masks

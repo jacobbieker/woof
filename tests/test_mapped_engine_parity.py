@@ -2587,6 +2587,15 @@ def test_the_compose_registry_covers_every_registered_composition_source():
         # The same GDT-101 normalization, on DWD's regional mesh.
         "icon-d2": "compose inputs are produced by the normalization "
                    "stage, not published",
+        # The same GDT-101 normalization on ICON global's 120 model levels:
+        # its compose inputs are 1,377 intermediates per two-lead window,
+        # written by the remapper from about 4 GB of raw v1 objects, so a
+        # staged row would regenerate its own inputs as icon-global's
+        # would.  Its decode grammar (model_level with half-level heights
+        # and height_from_interfaces) is icon-d2's, exempt for the same
+        # reason.
+        "icon-global-ml": "compose inputs are produced by the "
+                          "normalization stage, not published",
     }
     registered = {
         adapter.source_id for adapter in source_adapters()

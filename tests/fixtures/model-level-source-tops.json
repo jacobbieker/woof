@@ -51,6 +51,38 @@
         "ny": 37
       },
       "frames_sha256": "dbf2600074da4fb6591aa84ddbfbf35b8ff8d395ba1092c6ed11ab4433e6bdde"
+    },
+    "icon-global-ml-grib2-v1": {
+      "source_cycle": "2026-10-11T00:00:00Z",
+      "forecast_hours": [
+        0,
+        1
+      ],
+      "measurement": "Maximum level-1 pressure over all 2,949,120 cells of the raw global P objects of model level 1 (between half levels 1 and 2) at f000 and f001; HHL levels 1 and 2 are the same height in every cell.",
+      "measurement_source": "grib2_dump of the objects fetched from DWD's v1 tree on 2026-10-11",
+      "record_url_template": "https://opendata.dwd.de/weather/nwp/v1/m/icon/p/P/lvt1/150/lv1/1/r/2026-10-11T00:00/s/PT{lead:03d}H00M.grib2",
+      "measured_maximum_pa": 2.3362274169921875,
+      "upper_interface_height_m": 75000.0,
+      "lower_interface_height_m": 73420.6015625,
+      "warm_season_reference": {
+        "report_id": "NOAA-S/T 76-1562",
+        "title": "U.S. Standard Atmosphere, 1976",
+        "table": "layer base values (geopotential 71 km and 84.852 km), as geometric heights",
+        "profile": "standard atmosphere",
+        "source_url": "https://ntrs.nasa.gov/citations/19770009539",
+        "height_m": [
+          71802.0,
+          86000.0
+        ],
+        "pressure_pa": [
+          3.9564,
+          0.37338
+        ],
+        "interpolation": "linear log pressure with height",
+        "pressure_at_mass_height_pa": 2.651012618240053,
+        "coverage_rule": "lower altitude bracket pressure",
+        "basis": "The 74210.3 m mass height lies between the standard atmosphere's 71 km and 84.852 km geopotential layer bases (71802 m and 86000 m geometric). Log-pressure interpolation gives 2.65 Pa; the lower bracket supplies a 3.9564 Pa bound. A standard atmosphere is not a seasonal envelope, which is why the measured maximum is carried beside it; both are more than a thousand times lower in pressure than the 5000 Pa default model top."
+      }
     }
   }
 }

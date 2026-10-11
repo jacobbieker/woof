@@ -1386,6 +1386,9 @@ def runner_capabilities() -> dict[str, object]:
                 "ecmwf-open-data": "uniform-positive-whole-hour",
                 "icon-eu": "uniform-positive-whole-hour",
                 "icon-d2": "uniform-positive-whole-hour",
+                # 1 h DWD posts to f078, then 3 h; the window takes any
+                # uniform whole-hour series the ladder publishes.
+                "icon-global-ml": "uniform-positive-whole-hour",
                 "rap": "uniform-positive-whole-hour",
                 "rap-native": "uniform-positive-whole-hour",
                 "rrfs": "uniform-positive-whole-hour",
