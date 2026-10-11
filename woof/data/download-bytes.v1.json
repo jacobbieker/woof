@@ -278,7 +278,7 @@
     "windowed_layers": 198,
     "global_axes": {"longitude_first": -179.9296875, "latitude_first": -89.953125, "longitude_step_degrees": 0.140625, "latitude_step_degrees": 0.09375, "nx": 2560, "ny": 1920},
     "bytes_per_value": 8,
-    "measured": "the engine's frames for a real f000 + f003 compose of 2026-10-11 00Z by gpuwm_mapped_engine on 2026-10-11 (a 100 x 80 UK target at 9 km): 18 fields per frame, six on the 33-level ladder, ten surface fields and the two soil fields of the four GDAS layers, so 216 layers and 8,493,465,600 bytes per valid time on the whole grid before the atmospheric window crops its 198 3-D layers",
+    "measured": "the engine's frames for a real f000 + f003 compose of 2026-10-11 00Z by gpuwm_mapped_engine on 2026-10-11 (a 100 x 80 UK target at 9 km): 18 fields per frame, six on the 33-level ladder, ten surface fields and the two soil fields of the four GDAS layers, so 216 layers and 8,493,465,600 bytes per valid time on the whole grid before the atmospheric window crops its 198 3-D layers"
    },
    "icon-global-ml": {
     "mapping": "rw-wps-icon-global-ml-grib2.mapping.json",
