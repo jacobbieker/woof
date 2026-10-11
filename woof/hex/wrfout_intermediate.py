@@ -905,6 +905,11 @@ def request_from_arguments(arguments: argparse.Namespace) -> WrfoutRequest:
                 f"{flag} belongs to a GRIB row; --source {row.name} reads its valid times "
                 f"from the wrfout files named by --wrfout-glob"
             )
+    if getattr(arguments, "grid", None) is not None:
+        raise IntermediateRefusal(
+            f"--grid names the mesh for the ICON rows; --source {row.name} takes its box "
+            f"from the wrfout domain or --cull-region"
+        )
     if arguments.wrfout_glob is None:
         raise IntermediateRefusal(f"--source {row.name} needs --wrfout-glob: the WRF history to convert")
     edge = DEFAULT_WRF_EDGE_CELLS if arguments.wrf_edge_cells is None else int(arguments.wrf_edge_cells)

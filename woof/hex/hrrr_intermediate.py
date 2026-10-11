@@ -897,9 +897,9 @@ def _intermediate_sources() -> tuple[str, ...]:
     then the uniform lat-lon rows :mod:`woof.hex.met_intermediate_door`
     writes through ``met_intermediate`` (stdlib-only at import)."""
 
-    from .met_intermediate_door import GLOBAL_SOURCES
+    from .met_intermediate_door import GLOBAL_SOURCES, ICON_SOURCES
 
-    return (*SOURCE_ROWS, *GLOBAL_SOURCES)
+    return (*SOURCE_ROWS, *GLOBAL_SOURCES, *ICON_SOURCES)
 
 
 INTERMEDIATE_SOURCES = _intermediate_sources()
@@ -952,6 +952,10 @@ def add_intermediate_parser(commands: Any) -> None:
                              "analysis time)")
     parser.add_argument("--vtable", type=Path, default=None, metavar="FILE",
                         help="global sources: a Vtable overriding the packaged one")
+    parser.add_argument("--grid", type=Path, default=None, metavar="MESH.nc",
+                        help="icon-global, icon-global-ml: the MPAS mesh (grid, static or "
+                             "init file) the intermediates are for; a global mesh gets the "
+                             "full-sphere 0.125-degree regrid of the native ICON fields")
     parser.add_argument("--from-plan", type=Path, default=None, metavar="JSON",
                         help="derive the target box from a mesh-plan --point receipt's cull region")
     parser.add_argument("--point", default=None, metavar="LAT,LON",
@@ -998,6 +1002,11 @@ def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest
                 f"{flag} belongs to --source wrfout; --source {row.name} is a GRIB row "
                 f"read from --grib-dir"
             )
+    if getattr(arguments, "grid", None) is not None:
+        raise IntermediateRefusal(
+            f"--grid names the mesh for the ICON rows; --source {row.name} covers the "
+            f"--from-plan/--point box"
+        )
     for flag, value in (("--grib-dir", arguments.grib_dir), ("--cycle", arguments.cycle)):
         if value is None:
             raise IntermediateRefusal(f"--source {row.name} needs {flag}; it has no default")
@@ -1040,11 +1049,15 @@ def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest
 def run_intermediate(arguments: argparse.Namespace) -> int:
     from .met_intermediate_door import (
         GLOBAL_SOURCES,
+        ICON_SOURCES,
         refuse_unknown_source,
         run_global_intermediate,
+        run_icon_intermediate,
     )
 
     key = str(arguments.source).strip().lower()
+    if key in ICON_SOURCES:
+        return run_icon_intermediate(arguments)
     if key in GLOBAL_SOURCES:
         return run_global_intermediate(arguments)
     if key not in SOURCE_ROWS:
