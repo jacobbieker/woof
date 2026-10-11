@@ -215,13 +215,14 @@ process, so a GRIB2 mapped command needs no `--grib2-inventory` /
 `--grib2-dump` paths at all, and an input manifest seals the ENGINE as
 its decoder rather than the subprocess pair.
 
-Three paths are still decoded by the Python engine on a bare run: a
-cross-source composition, a mapping whose `format` is `grib1`, and a
-mapping whose `format` is `netcdf`. All three are unported work rather
-than a decision, all three are printed by `woof doctor`, and
-`gpuwm_mapped_engine capabilities` is the binary's own statement of what
-it can do -- so if you are authoring a GRIB1 or NetCDF mapping today,
-nothing about the document changes, only which engine reads it.
+The engine reads GRIB1, GRIB2 and NetCDF for `decode`, `inspect` and
+`compose` alike, cross-source compositions included; NetCDF goes through
+the vendored pure-Rust `netcrust` reader in process (chunked,
+zlib-compressed NetCDF-4 included; the Met Office global files are read
+this way). The Python engine reaches the same bytes through `rw_netcdf`. `gpuwm_mapped_engine capabilities` is the binary's own statement
+of what it can do, `woof doctor` prints it, and the parity battery
+(`tests/test_mapped_engine_parity.py`) holds the Rust engine to the
+Python engine's bytes on every format.
 
 `--mapped-engine python` (or `GPUWM_MAPPED_ENGINE=python`) runs the
 Python decode path instead. It is a WORKAROUND for a decode the Rust
@@ -290,3 +291,138 @@ mixing ratios derived from them. A field the target requires cannot be
 `dependency_only`; that mapping is refused because its frames would lack
 the field. A field a composition borrows from a donor is published even
 when the donor's own mapping marks it `dependency_only`.
+
+
+## Scalar-time NetCDF, speed/direction winds and screen height
+
+These keys exist for producers that write CF NetCDF the way Iris does,
+the Met Office global deterministic model being the first: one variable
+per file, the valid time as a 0-d coordinate, winds as speed and
+direction, and screen fields at 1.5 m. Both engines read them, and their
+output is byte-identical (`tests/test_mapped_netcdf_scalar_time.py`).
+An existing mapping that declares none of them decodes exactly as before.
+
+### Scalar time
+
+```json
+"time": {
+  "kind": "dimension",
+  "time_coordinate": "scalar",
+  "selector": {"name": ["time"], "standard_name": "time"},
+  "units": "seconds since 1970-01-01 00:00:00",
+  "calendar": "standard",
+  "reference_time_selector": {
+    "name": ["forecast_reference_time"],
+    "standard_name": "forecast_reference_time"
+  }
+}
+```
+
+- `time_coordinate: "scalar"` is the opt-in, and `"scalar"` is its only
+  value. `kind: "scalar"` turns it on as well. A mapping without the
+  opt-in still refuses a file whose time has no dimension.
+- `selector` must resolve one 0-d variable. Its `units` must equal the
+  declared units, as for a dimension time, and each file supplies one
+  valid time.
+- `reference_time_selector` is optional and is read only beside the
+  opt-in. It must resolve one 0-d variable with CF reference-time units.
+  - When it is declared, that time is the frame's source cycle, so every
+    lead of one run shares one cycle. Same-cycle borrows such as
+    `source_cycle_analysis_broadcast` and `cycle_invariant_broadcast` rely
+    on that.
+  - A valid time earlier than the reference time is refused, and so is a
+    reference `calendar` other than standard, gregorian or
+    proleptic_gregorian.
+  - Files of two runs for one valid time are refused ("NetCDF files mix
+    source cycles"). Each file passes its own check, but one frame is
+    one run.
+  - If the file also carries a 0-d variable with `standard_name`
+    `forecast_period`, the valid time must equal reference plus period,
+    or the decode refuses. The period must be a whole number of seconds,
+    in units of seconds, minutes, hours or days.
+  - Without the selector, the valid time is the source cycle, as for
+    every dimension-time NetCDF source.
+- No field may list `time` in `source_axes` under scalar time.
+
+A composition supplement decoded from a scalar-time file uses the same
+contract, because its partition is a copy of the mapping. The Met Office
+orography at step 0 is one: its scalar time is the cycle time.
+
+### Wind components from speed and direction
+
+```json
+{"name": "u-from-speed", "operation": "eastward_wind_from_speed_direction",
+ "speed": "wind_speed", "direction": "wind_from_direction"},
+{"name": "v-from-speed", "operation": "northward_wind_from_speed_direction",
+ "speed": "wind_speed", "direction": "wind_from_direction"}
+```
+
+The direction is meteorological: the degrees the wind blows FROM,
+clockwise from north (CF `wind_from_direction`). The two operations
+compute `u = -speed * sin(dir)` and `v = -speed * cos(dir)`, with
+`dir = degrees * (pi / 180)` in float64. The result is earth-relative on
+the source's regular latitude/longitude grid, so no rotation follows.
+`load_mapping` refuses any other convention:
+
+- the mapping must be NetCDF, whose decoder admits only regular
+  latitude/longitude grids. A GRIB direction on a projected grid can be
+  grid-relative, and the derived components would skip the rotation;
+- the `direction` field must be directly decoded, in `degree` or
+  `degrees` on both sides, with no unit scale or offset;
+- every selector of the direction field must pin
+  `"attributes": {"standard_name": "wind_from_direction"}`, so the
+  decoder checks the variable's own CF identity and not only its name;
+- the `speed` field's target units must be `m s-1`, and the two fields
+  must share `target_axes`.
+
+At evaluation, a finite direction outside [0, 360] or a negative speed
+refuses by count. A missing value stays missing. Mark the speed and
+direction fields `"dependency_only": true` when the frame should carry
+only the components.
+
+### Screen height
+
+```json
+"air_temperature_2m": {"selectors": [...], "screen_height_m": 1.5, ...}
+```
+
+`screen_height_m` declares the height a screen-level field was measured
+at. It is allowed on directly decoded NetCDF surface (`["y", "x"]`)
+fields, in (0, 10] m.
+
+- The value is used as published. A 1.5 m temperature, dew point or
+  humidity fills the 2 m slot without adjustment: the 0.5 m difference is
+  within the screen layer's own spread, and any adjustment would need a
+  stability profile the source does not publish.
+- The height is recorded as the source reference `@screen_height_m=1.5`
+  on the field. A field derived from it, such as `specific_humidity_2m`
+  from a dew point, inherits that reference, so the frame header says
+  which height the bytes come from.
+- When the variable's CF `coordinates` attribute names a 0-d
+  `standard_name = height` coordinate, it must be in `m` and equal the
+  declaration, or the decode refuses.
+
+### Pressure levels and the Met Office grid
+
+- The Met Office files give pressure in Pa, highest first, with 37 levels
+  for temperature, height and wind and 33 for relative humidity. Declare
+  the common levels in `coordinates.vertical.levels` (units `"Pa"`), and
+  each file is cut to that ladder by value.
+- Latitude ascends from the south and longitude runs from -180 to 180.
+- `grid_mapping` names a `latitude_longitude` container with a spherical
+  `earth_radius`. That is the supported regular grid, and the radius is
+  not read.
+- The data are float32, chunked and zlib-compressed. The files declare no
+  `_FillValue`, and the step-0 files hold no default-fill values.
+- Several files reuse a variable name: `air_temperature` on pressure
+  levels and at screen level, and `wind_speed`, `wind_from_direction` and
+  `relative_humidity` on pressure levels and at screen or 10 m height.
+  Each file is read for every field, so pin the level family through the
+  CF `coordinates` attribute, which the selector's `attributes` match
+  exactly:
+  - pressure-level files: `"forecast_period forecast_reference_time time"`;
+  - screen and 10 m files: `"forecast_period forecast_reference_time height time"`.
+
+  Without the pin, the pressure-level selector also resolves the screen
+  variable, and the decode refuses on rank or on two fields claiming one
+  variable.
