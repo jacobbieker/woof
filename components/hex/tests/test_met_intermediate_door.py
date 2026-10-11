@@ -90,7 +90,8 @@ def test_the_contract_sources_are_exactly_the_admitted_rows() -> None:
     contract = {"hrrr", "gfs", "gdas", "ecmwf-open-data", "era5", "aifs",
                 "icon-global", "icon-global-ml"}
     assert contract <= set(INTERMEDIATE_SOURCES)
-    assert set(INTERMEDIATE_SOURCES) == set(SOURCE_ROWS) | set(door.GLOBAL_SOURCES)
+    assert set(INTERMEDIATE_SOURCES) == (set(SOURCE_ROWS) | set(door.GLOBAL_SOURCES)
+                                         | set(door.ICON_SOURCES))
     assert not set(SOURCE_ROWS) & set(door.GLOBAL_SOURCES)
     # The ICON rows are admitted; ICON-EU stays refused by name.
     assert "icon-global" not in door.REFUSED_SOURCES and "icon-eu" in door.REFUSED_SOURCES

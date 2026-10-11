@@ -8,15 +8,30 @@
 //! plan is applied to. Coordinate records are numbered in local tables, so
 //! compiling a coordinate parameter number in here would be compiling in a
 //! producer.
+//!
+//! `--global [--dx-deg D]` (D defaults to 0.125) targets the full sphere
+//! instead of a regional window: `plan --global` takes no TARGET file and
+//! writes a global plan, `apply --global` requires one.  The donor search,
+//! weights, methods, level-type rules and product-section handling are the
+//! regional ones; only the target envelope differs.  The global verbs print
+//! one JSON receipt on stdout (with per-field timings); the regional verbs
+//! print nothing, as before.
 #[path = "../gdt101_remap_core.rs"]
 mod core101;
 use core101::{Plan, Target, Method, Result};
 use grib_core::grib2::{Grib2File, unpack_message};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::time::Instant;
 
 const MAX_OBJECT: u64 = 256 * 1024 * 1024;
+/// A regional plan file is bounded at 128 MiB, as it always was.  A global
+/// plan at the largest admitted target (8M points x 49 bytes) is ~392 MB.
+const MAX_REGIONAL_PLAN_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_GLOBAL_PLAN_BYTES: u64 = 512 * 1024 * 1024;
+/// The spacing `--global` uses when `--dx-deg` is not given.
+const DEFAULT_GLOBAL_DX_DEG: f64 = 0.125;
 /// The mesh a caller declares: how many cells it has, and which centre
 /// publishes it. Both are table data on the caller's side.
 #[derive(Clone, Copy, Debug)]
@@ -124,14 +139,67 @@ fn plan(args: &[String]) -> Result<()> {
     if args.len() != 11 {
         return Err("plan requires LATITUDE LAT_SELECTOR LONGITUDE LON_SELECTOR LAND_FRACTION LAND_SELECTOR TARGET.txt PLAN.bin CYCLE CELLS CENTRE".into());
     }
-    let mesh = Mesh { cells: token(&args[9], "mesh cell count")?,
-                      centre: token(&args[10], "originating centre")? };
+    let mesh = declared_mesh(&args[9], &args[10])?;
+    let (lat, lon, land) = plan_records(&args[..6], &args[8], mesh)?;
+    let target_text = fs::read_to_string(&args[6]).map_err(|e|e.to_string())?;
+    let target = Target::parse(&target_text)?;
+    let p = core101::build_plan(&lat.values, &lon.values, &land.values, lat.grid.clone(),
+                                mesh.centre, target, 80_000.)?;
+    write_plan(&p, &args[7])
+}
+/// `plan --global`: the same records, selectors and search onto the full
+/// sphere at `dx` degrees.  No TARGET file: the grid is `Target::global(dx)`.
+fn plan_global(args: &[String], dx: f64) -> Result<()> {
+    if args.len() != 10 {
+        return Err("plan --global requires LATITUDE LAT_SELECTOR LONGITUDE LON_SELECTOR LAND_FRACTION LAND_SELECTOR PLAN.bin CYCLE CELLS CENTRE (no TARGET: the grid is the full sphere at --dx-deg)".into());
+    }
+    let started = Instant::now();
+    let target = Target::global(dx)?;
+    let mesh = declared_mesh(&args[8], &args[9])?;
+    let (lat, lon, land) = plan_records(&args[..6], &args[7], mesh)?;
+    let decoded = started.elapsed().as_secs_f64();
+    let p = core101::build_global_plan(&lat.values, &lon.values, &land.values, lat.grid.clone(),
+                                       mesh.centre, target, 80_000.)?;
+    let searched = started.elapsed().as_secs_f64();
+    drop((lat, lon, land));
+    write_plan(&p, &args[6])?;
+    let bytes = fs::metadata(&args[6]).map_err(|e| e.to_string())?.len();
+    println!("{{\"contract\":\"{}\",\"mode\":\"{}\",\"global\":true,\"verb\":\"plan\",\
+              \"target\":{{\"west\":{},\"south\":{},\"dx\":{},\"dy\":{},\"nx\":{},\"ny\":{},\"points\":{}}},\
+              \"source_cells\":{},\"centre\":{},\"grid_uuid\":\"{}\",\"unpublished_cells\":{},\
+              \"plan_bytes\":{},\"decode_seconds\":{:.3},\"search_seconds\":{:.3},\"total_seconds\":{:.3}}}",
+             core101::CONTRACT, core101::GLOBAL_MODE,
+             target.west, target.south, target.dx, target.dy, target.nx, target.ny, target.len(),
+             p.source_count, p.centre, grid_uuid(&p.source_grid), p.unpublished.len(),
+             bytes, decoded, searched - decoded, started.elapsed().as_secs_f64());
+    Ok(())
+}
+/// WMO GDT 3.101 octets 20-35: the mesh's UUID, as lower-case hex.
+fn grid_uuid(section3: &[u8]) -> String {
+    section3.get(19..35).map_or_else(String::new,
+        |bytes| bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+fn declared_mesh(cells: &str, centre: &str) -> Result<Mesh> {
+    let mesh = Mesh { cells: token(cells, "mesh cell count")?,
+                      centre: token(centre, "originating centre")? };
     if !(4..=core101::MAX_SOURCE).contains(&mesh.cells) {
         return Err("declared mesh cell count is outside the supported envelope".into());
     }
-    let lat = decode(Path::new(&args[0]), mesh, selector(&args[1])?, &args[8],0)?;
-    let lon = decode(Path::new(&args[2]), mesh, selector(&args[3])?, &args[8],0)?;
-    let land = decode(Path::new(&args[4]), mesh, selector(&args[5])?, &args[8],0)?;
+    Ok(mesh)
+}
+fn write_plan(p: &Plan, path: &str) -> Result<()> {
+    let file = OpenOptions::new().write(true).create_new(true).open(path).map_err(|e|e.to_string())?;
+    p.write(BufWriter::new(&file))?;
+    file.sync_all().map_err(|e|e.to_string())?;
+    Ok(())
+}
+/// The three plan records (latitude, longitude, land fraction), each read
+/// by its caller-declared selector, checked to share one full GDT-101
+/// identity and to be geographical degrees.
+fn plan_records(args: &[String], cycle: &str, mesh: Mesh) -> Result<(Decoded, Decoded, Decoded)> {
+    let lat = decode(Path::new(&args[0]), mesh, selector(&args[1])?, cycle,0)?;
+    let lon = decode(Path::new(&args[2]), mesh, selector(&args[3])?, cycle,0)?;
+    let land = decode(Path::new(&args[4]), mesh, selector(&args[5])?, cycle,0)?;
     if lat.grid != lon.grid || lat.grid != land.grid {
         return Err("the coordinate and land-fraction records have different full GDT-101 identities/UUIDs".into());
     }
@@ -150,14 +218,7 @@ fn plan(args: &[String]) -> Result<()> {
     {
         return Err("the coordinate records are not geographical degrees reaching past the radian band".into());
     }
-    let target_text = fs::read_to_string(&args[6]).map_err(|e|e.to_string())?;
-    let target = Target::parse(&target_text)?;
-    let p = core101::build_plan(&lat.values, &lon.values, &land.values, lat.grid.clone(),
-                                mesh.centre, target, 80_000.)?;
-    let file = OpenOptions::new().write(true).create_new(true).open(&args[7]).map_err(|e|e.to_string())?;
-    p.write(BufWriter::new(&file))?;
-    file.sync_all().map_err(|e|e.to_string())?;
-    Ok(())
+    Ok((lat, lon, land))
 }
 fn token<T: std::str::FromStr>(s: &str, label: &str) -> Result<T> {
     s.parse().map_err(|_|format!("invalid {label} in remap job"))
@@ -185,7 +246,10 @@ fn level_type_reason(first_type: u8) -> &'static str {
         _ => "the level admits any implemented method",
     }
 }
-fn job(plan: &Plan, mesh: Mesh, line: &str) -> Result<()> {
+/// Wall time of one job's phases, reported by the global verb.
+#[derive(Default)]
+struct JobTiming { output: String, method: String, decode: f64, remap: f64, encode: f64, write: f64 }
+fn job(plan: &Plan, mesh: Mesh, line: &str) -> Result<JobTiming> {
     let p: Vec<_> = line.split('\t').collect();
     if p.len() != 12 { return Err("a remap job must have input, output, seven selector values, method, cycle and lead seconds".into()); }
     let spec = spec_from(&p[2..9])?;
@@ -195,26 +259,50 @@ fn job(plan: &Plan, mesh: Mesh, line: &str) -> Result<()> {
             "remap method {} cannot be used on level type {}: {}; declare a method the level admits",
             p[9], spec.first_type, level_type_reason(spec.first_type)));
     }
+    let mut timing = JobTiming { output: p[1].to_string(), method: p[9].to_string(), ..Default::default() };
+    let clock = Instant::now();
     let decoded = decode(Path::new(p[0]),mesh,spec,p[10],token(p[11],"forecast seconds")?)?;
     if decoded.grid != plan.source_grid {
         return Err("native field grid identity/UUID does not match the remapping plan".into());
     }
+    timing.decode = clock.elapsed().as_secs_f64();
     let values = core101::apply(plan,&decoded.values,method)?;
-    let output = core101::encode_regular(&decoded.raw,plan.target,&values)?;
+    timing.remap = clock.elapsed().as_secs_f64() - timing.decode;
+    let output = core101::encode_for(plan,&decoded.raw,&values)?;
+    drop(values);
+    drop(decoded);
+    timing.encode = clock.elapsed().as_secs_f64() - timing.decode - timing.remap;
     // The caller stages in a temporary directory and publishes atomically.
     // Never overwrite an arbitrary destination supplied in a job.
     let mut file = OpenOptions::new().write(true).create_new(true).open(p[1]).map_err(|e|e.to_string())?;
     file.write_all(&output).map_err(|e|e.to_string())?;
     file.sync_all().map_err(|e|e.to_string())?;
-    Ok(())
+    timing.write = clock.elapsed().as_secs_f64() - timing.decode - timing.remap - timing.encode;
+    Ok(timing)
 }
-fn apply(args: &[String]) -> Result<()> {
+fn apply(args: &[String], global: bool) -> Result<()> {
     if args.len() != 2 { return Err("apply requires PLAN.bin JOBS.tsv".into()); }
-    let plan_file = File::open(&args[0]).map_err(|e|e.to_string())?;
-    if plan_file.metadata().map_err(|e|e.to_string())?.len() > 128 * 1024 * 1024 {
+    let started = Instant::now();
+    let mut plan_file = File::open(&args[0]).map_err(|e|e.to_string())?;
+    // The plan's own magic names its envelope; the caller's verb must agree,
+    // so a global plan is never applied by a caller expecting a window, nor
+    // a regional plan by one expecting the sphere.
+    let mut magic = [0u8; 8];
+    let is_global = plan_file.read_exact(&mut magic).is_ok() && Plan::is_global_magic(&magic);
+    if is_global != global {
+        return Err(if is_global {
+            "this is a global remap plan; apply it with apply --global".into()
+        } else {
+            "apply --global needs a plan built by plan --global; this plan is regional or not a remap plan".into()
+        });
+    }
+    plan_file.seek(SeekFrom::Start(0)).map_err(|e|e.to_string())?;
+    let bound = if global { MAX_GLOBAL_PLAN_BYTES } else { MAX_REGIONAL_PLAN_BYTES };
+    if plan_file.metadata().map_err(|e|e.to_string())?.len() > bound {
         return Err("oversized remap plan file".into());
     }
     let p = Plan::read(BufReader::new(plan_file))?;
+    let plan_seconds = started.elapsed().as_secs_f64();
     // The plan IS the mesh identity: it was built from the coordinate records
     // of this exact grid, and every field is compared to its Section 3 bytes.
     let mesh = Mesh { cells: p.source_count, centre: p.centre };
@@ -223,22 +311,89 @@ fn apply(args: &[String]) -> Result<()> {
         return Err("oversized remap job list".into());
     }
     let mut count=0;
+    let mut timings = Vec::new();
     for line in BufReader::new(jobs).lines() {
         let line=line.map_err(|e|e.to_string())?;
         if line.is_empty() { return Err("blank remap job row".into()); }
-        job(&p,mesh,&line)?;count+=1;
+        timings.push(job(&p,mesh,&line)?);count+=1;
         if count>10_000 {return Err("too many remap jobs".into());}
     }
     if count==0 {return Err("empty remap job list".into());}
+    if global {
+        let fields: Vec<String> = timings.iter().map(|t| format!(
+            "{{\"output\":{},\"method\":{},\"decode_seconds\":{:.3},\"remap_seconds\":{:.3},\
+             \"encode_seconds\":{:.3},\"write_seconds\":{:.3},\"total_seconds\":{:.3}}}",
+            json_string(&t.output), json_string(&t.method), t.decode, t.remap, t.encode, t.write,
+            t.decode + t.remap + t.encode + t.write)).collect();
+        println!("{{\"contract\":\"{}\",\"mode\":\"{}\",\"global\":true,\"verb\":\"apply\",\
+                  \"target\":{{\"west\":{},\"south\":{},\"dx\":{},\"dy\":{},\"nx\":{},\"ny\":{}}},\
+                  \"grid_uuid\":\"{}\",\"plan_read_seconds\":{:.3},\"total_seconds\":{:.3},\"fields\":[{}]}}",
+                 core101::CONTRACT, core101::GLOBAL_MODE,
+                 p.target.west, p.target.south, p.target.dx, p.target.dy, p.target.nx, p.target.ny,
+                 grid_uuid(&p.source_grid), plan_seconds, started.elapsed().as_secs_f64(),
+                 fields.join(","));
+    }
     Ok(())
+}
+fn json_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""), '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+/// `--global` and `--dx-deg D` may stand anywhere on the command line;
+/// everything else is the verb and its positional arguments, unchanged.
+struct Mode { global: bool, dx: Option<f64>, rest: Vec<String> }
+fn split_mode(args: Vec<String>) -> Result<Mode> {
+    let mut mode = Mode { global: false, dx: None, rest: Vec::with_capacity(args.len()) };
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--global" {
+            if mode.global { return Err("--global was given twice".into()); }
+            mode.global = true;
+        } else if arg == "--dx-deg" || arg.starts_with("--dx-deg=") {
+            let text = match arg.strip_prefix("--dx-deg=") {
+                Some(text) => text.to_string(),
+                None => iter.next().ok_or("--dx-deg needs a spacing in degrees")?,
+            };
+            if mode.dx.is_some() { return Err("--dx-deg was given twice".into()); }
+            mode.dx = Some(text.parse().map_err(|_| format!("--dx-deg {text:?} is not a number"))?);
+        } else {
+            mode.rest.push(arg);
+        }
+    }
+    if mode.dx.is_some() && !mode.global {
+        return Err("--dx-deg sets the --global grid spacing; a regional plan's spacing is in its TARGET file".into());
+    }
+    Ok(mode)
+}
+fn usage() -> String {
+    format!("{}\nusage: gdt101_remap plan LATITUDE LAT_SELECTOR LONGITUDE LON_SELECTOR LAND_FRACTION LAND_SELECTOR TARGET PLAN CYCLE CELLS CENTRE\n       gdt101_remap apply PLAN JOBS\n       gdt101_remap plan --global [--dx-deg D] LATITUDE LAT_SELECTOR LONGITUDE LON_SELECTOR LAND_FRACTION LAND_SELECTOR PLAN CYCLE CELLS CENTRE\n       gdt101_remap apply --global PLAN JOBS\n       a SELECTOR is discipline,category,parameter,first_level_type,first_level_value,second_level_type,second_level_value\n       --global targets the full sphere at --dx-deg (default {DEFAULT_GLOBAL_DX_DEG}) and prints a JSON receipt ({})",
+            core101::CONTRACT, core101::GLOBAL_MODE)
 }
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let mode = split_mode(args)?;
+    let args = mode.rest;
+    if mode.global {
+        let dx = mode.dx.unwrap_or(DEFAULT_GLOBAL_DX_DEG);
+        return match args.first().map(String::as_str) {
+            Some("plan") => plan_global(&args[1..], dx),
+            Some("apply") => apply(&args[1..], true),
+            _ => Err(usage()),
+        };
+    }
     match args.first().map(String::as_str) {
         Some("--contract") if args.len()==1 => {println!("{}",core101::CONTRACT);Ok(())},
         Some("plan") => plan(&args[1..]),
-        Some("apply") => apply(&args[1..]),
-        _ => Err(format!("{}\nusage: gdt101_remap plan LATITUDE LAT_SELECTOR LONGITUDE LON_SELECTOR LAND_FRACTION LAND_SELECTOR TARGET PLAN CYCLE CELLS CENTRE\n       gdt101_remap apply PLAN JOBS\n       a SELECTOR is discipline,category,parameter,first_level_type,first_level_value,second_level_type,second_level_value",core101::CONTRACT)),
+        Some("apply") => apply(&args[1..], false),
+        _ => Err(usage()),
     }
 }
 fn main() {
@@ -434,5 +589,116 @@ mod integration_tests {
         let file = Grib2File::from_bytes(&bytes).unwrap();
         let decoded = unpack_message(&file.messages[0]).unwrap();
         assert_eq!(decoded.len(), 4); assert!(decoded.iter().all(|x| x.is_nan()));
+    }
+
+    // ---- --global ---------------------------------------------------
+    fn strings(values: &[&str]) -> Vec<String> { values.iter().map(|s| s.to_string()).collect() }
+    #[test]
+    fn global_flags_stand_anywhere_and_dx_needs_global() {
+        let mode = split_mode(strings(&["--global", "--dx-deg", "0.25", "plan", "a"])).unwrap();
+        assert!(mode.global);
+        assert_eq!((mode.dx, mode.rest), (Some(0.25), strings(&["plan", "a"])));
+        let mode = split_mode(strings(&["apply", "--global", "p", "j"])).unwrap();
+        assert!(mode.global && mode.dx.is_none());
+        assert_eq!(mode.rest, strings(&["apply", "p", "j"]));
+        let mode = split_mode(strings(&["plan", "--dx-deg=0.1", "--global"])).unwrap();
+        assert_eq!(mode.dx, Some(0.1));
+        // A regional command line is passed through untouched.
+        let regional = strings(&["plan", "a", "b", "c"]);
+        let mode = split_mode(regional.clone()).unwrap();
+        assert!(!mode.global && mode.dx.is_none());
+        assert_eq!(mode.rest, regional);
+        assert!(split_mode(strings(&["--dx-deg", "0.125", "plan"])).is_err());
+        assert!(split_mode(strings(&["--global", "--dx-deg"])).is_err());
+        assert!(split_mode(strings(&["--global", "--dx-deg", "x"])).is_err());
+        assert!(split_mode(strings(&["--global", "--global"])).is_err());
+    }
+    /// One field on an unstructured mesh, IEEE-packed (template 5.4) so the
+    /// values can vary per cell: the bytes grib-core decodes in production.
+    fn ieee_record(values: &[f32], discipline: u8, category: u8, parameter: u8,
+                   level_type: u8, level_value: u32) -> Vec<u8> {
+        let mut bytes = constant_record(values.len(), 0., discipline, category, parameter,
+                                        level_type, level_value);
+        // Replace sections 5-7 of the constant record with IEEE packing.
+        let s5_start = 16 + 21 + 35 + 34;
+        bytes.truncate(s5_start);
+        let mut s5 = section(5, 12);
+        s5[5..9].copy_from_slice(&(values.len() as u32).to_be_bytes());
+        s5[9..11].copy_from_slice(&4u16.to_be_bytes()); s5[11] = 1;
+        let mut s6 = section(6, 6); s6[5] = 255;
+        let mut s7 = section(7, 5 + 4 * values.len());
+        for (k, v) in values.iter().enumerate() { s7[5 + 4 * k..9 + 4 * k].copy_from_slice(&v.to_be_bytes()); }
+        for s in [s5, s6, s7] { bytes.extend(s); }
+        bytes.extend(b"7777");
+        let n = bytes.len() as u64;
+        bytes[8..16].copy_from_slice(&n.to_be_bytes());
+        bytes
+    }
+    /// The Fibonacci lattice: a full-sphere mesh about 55 km between cells.
+    fn sphere(n: usize) -> (Vec<f32>, Vec<f32>) {
+        let golden = std::f64::consts::PI * (3. - 5f64.sqrt());
+        (0..n).map(|k| {
+            let z = 1. - (2. * k as f64 + 1.) / n as f64;
+            (z.asin().to_degrees() as f32,
+             (((golden * k as f64).to_degrees() + 180.).rem_euclid(360.) - 180.) as f32)
+        }).unzip()
+    }
+    #[test]
+    fn plan_global_then_apply_global_write_a_pole_to_pole_grid() {
+        const CELLS: usize = 160_000;
+        let (lat, lon) = sphere(CELLS);
+        let land: Vec<f32> = lat.iter().map(|&l| if l > 0. { 1. } else { 0. }).collect();
+        let lat_file = Fixture::new(&ieee_record(&lat, 0, 191, 1, 1, 0));
+        let lon_file = Fixture::new(&ieee_record(&lon, 0, 191, 2, 1, 0));
+        let land_file = Fixture::new(&ieee_record(&land, 2, 0, 0, 1, 0));
+        let field: Vec<f32> = lat.iter().map(|&l| 250. + l).collect();
+        let field_file = Fixture::new(&ieee_record(&field, 0, 0, 0, 100, 85000));
+        let plan_path = scratch("global.plan");
+        let args = strings(&[
+            lat_file.0.to_str().unwrap(), "0,191,1,1,0,255,0",
+            lon_file.0.to_str().unwrap(), "0,191,2,1,0,255,0",
+            land_file.0.to_str().unwrap(), "2,0,0,1,0,255,0",
+            plan_path.to_str().unwrap(), "2026091500", &CELLS.to_string(), "78",
+        ]);
+        plan_global(&args, 1.).expect("a global plan from caller-declared records");
+        let built = Plan::read(BufReader::new(File::open(&plan_path).unwrap())).unwrap();
+        assert!(built.global);
+        assert_eq!((built.target.nx, built.target.ny), (360, 181));
+        // The regional verb refuses the global plan, and vice versa.
+        let output = scratch("global-t850.grib2");
+        let jobs = scratch("global.jobs");
+        fs::write(&jobs, format!("{}\t{}\t0\t0\t0\t100\t85000\t255\t0\tidw4\t2026091500\t0\n",
+                                 field_file.0.display(), output.display())).unwrap();
+        let plan_arg = plan_path.to_str().unwrap().to_string();
+        let jobs_arg = jobs.to_str().unwrap().to_string();
+        let refused = apply(&[plan_arg.clone(), jobs_arg.clone()], false).unwrap_err();
+        assert!(refused.contains("apply --global"), "{refused}");
+        assert!(!output.exists());
+        apply(&[plan_arg.clone(), jobs_arg.clone()], true).expect("apply --global");
+        let file = Grib2File::from_bytes(&fs::read(&output).unwrap()).unwrap();
+        let msg = &file.messages[0];
+        assert_eq!((msg.grid.template, msg.grid.nx, msg.grid.ny, msg.grid.scan_mode), (0, 360, 181, 0x40));
+        assert_eq!(msg.product.level_value, 85000.);
+        let (glat, glon) = grib_core::grib2::grid_latlon(&msg.grid).unwrap();
+        assert!((glat[0] + 90.).abs() < 1e-8 && (glat[glat.len() - 1] - 90.).abs() < 1e-8);
+        assert!(glon[0].abs() < 1e-8 && (glon[359].rem_euclid(360.) - 359.).abs() < 1e-8);
+        let values = unpack_message(msg).unwrap();
+        assert!(values.iter().all(|x| x.is_finite()));
+        for (k, v) in values.iter().enumerate() {
+            assert!((v - (250. + glat[k])).abs() < 0.5, "point {k}: {v} at {}", glat[k]);
+        }
+        // A regional plan is refused by the global verb before it is read.
+        let regional_plan = scratch("regional.plan");
+        fs::write(&regional_plan, b"GDT101P3").unwrap();
+        let refused = apply(&[regional_plan.to_str().unwrap().to_string(), jobs_arg], true).unwrap_err();
+        assert!(refused.contains("plan --global"), "{refused}");
+        for path in [plan_path, output, jobs, regional_plan] { let _ = fs::remove_file(path); }
+    }
+    #[test]
+    fn plan_global_refuses_a_target_file_and_a_bad_spacing() {
+        let too_many = strings(&["a", "s", "b", "s", "c", "s", "TARGET", "plan", "2026091500", "4", "78"]);
+        assert!(plan_global(&too_many, 0.125).unwrap_err().contains("no TARGET"));
+        let args = strings(&["a", "s", "b", "s", "c", "s", "plan", "2026091500", "4", "78"]);
+        assert!(plan_global(&args, 0.7).unwrap_err().contains("whole steps"));
     }
 }

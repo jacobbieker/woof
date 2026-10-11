@@ -9,11 +9,24 @@
 use std::io::{Read, Write};
 
 pub const CONTRACT: &str = "arwen.gdt101-regional-remap.v1";
+/// The global mode is ADDITIVE to the contract above, not a new version of
+/// it: the regional CLI, plan wire and GRIB bytes are unchanged, and that id
+/// is pinned by the WRF route's normalization documents, caches and release
+/// gates.  A global plan carries its own magic, so a build without the mode
+/// refuses the plan rather than misreading it, and this literal is the
+/// static capability marker a caller checks before passing `--global`.
+pub const GLOBAL_MODE: &str = "arwen.gdt101-regional-remap.v1+global-latlon";
 pub const MAX_TARGET: usize = 2_000_000;
+/// A full-sphere target at 0.1 degrees is 3600 x 1801 = 6.48M points; this
+/// bound keeps a global plan (49 bytes a target on disk, 56 in memory) under
+/// half a gigabyte.  The regional envelope above is untouched by it.
+pub const MAX_GLOBAL_TARGET: usize = 8_000_000;
 pub const MAX_SOURCE: usize = 20_000_000;
 // P3 adds the unpublished-cell inventory after the stencils; a P2 plan has
 // no such list and is refused rather than read as a mesh with none.
 const PLAN_MAGIC: &[u8; 8] = b"GDT101P3";
+/// A full-sphere plan: the P3 layout, read against the global envelope.
+const GLOBAL_PLAN_MAGIC: &[u8; 8] = b"GDT101G1";
 const EARTH_RADIUS_M: f64 = 6_371_229.;
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -48,6 +61,56 @@ impl Target {
         }
         Ok(())
     }
+    /// The full-sphere target of `--global --dx-deg D`: columns from 0 E
+    /// eastward with no repeated 360-degree column (the GFS convention a
+    /// periodic reader wraps itself), rows from the South Pole to the North
+    /// Pole inclusive.  D must divide both 360 and 180 into whole steps.
+    pub fn global(dx: f64) -> Result<Self> {
+        if !dx.is_finite() || !(dx > 0. && dx <= 1.) {
+            return Err(format!("--dx-deg {dx} is not a positive spacing no coarser than one degree"));
+        }
+        let columns = 360. / dx;
+        let rows = 180. / dx;
+        if (columns - columns.round()).abs() > 1e-9 * columns
+            || (rows - rows.round()).abs() > 1e-9 * rows
+        {
+            return Err(format!("--dx-deg {dx} does not divide 360 and 180 degrees into whole steps"));
+        }
+        let value = Self { west: 0., south: -90., dx, dy: dx,
+                           nx: columns.round() as usize, ny: rows.round() as usize + 1 };
+        value.validate_global()?;
+        Ok(value)
+    }
+    /// The global envelope: exactly the grid `Target::global` builds, and
+    /// nothing a regional window could be mistaken for.  The 2M-point,
+    /// sub-180-degree and +/-88-degree limits of `validate` do not apply;
+    /// `validate` itself is unchanged and still governs every regional plan.
+    pub fn validate_global(&self) -> Result<()> {
+        if ![self.west, self.south, self.dx, self.dy].iter().all(|x| x.is_finite()) {
+            return Err("nonfinite target geometry".into());
+        }
+        if !(self.dx > 0. && self.dx <= 1.) || self.dx != self.dy || self.nx < 2 || self.ny < 2 {
+            return Err("a global target has one positive spacing no coarser than one degree".into());
+        }
+        if self.nx.checked_mul(self.ny).map_or(true, |n| n > MAX_GLOBAL_TARGET) {
+            return Err("global target exceeds the memory envelope".into());
+        }
+        if self.west != 0. || self.south != -90.
+            || (self.nx as f64 * self.dx - 360.).abs() > 1e-6
+            || ((self.ny - 1) as f64 * self.dy - 180.).abs() > 1e-6
+        {
+            return Err("a global target starts at 0 E and 90 S and spans 360 x 180 degrees \
+                        with no repeated column".into());
+        }
+        Ok(())
+    }
+    fn validate_mode(&self, global: bool) -> Result<()> {
+        if global { self.validate_global() } else { self.validate() }
+    }
+    /// Latitude of row `j`.  A global grid's last row is the pole itself,
+    /// and accumulating a decimal spacing may overshoot it by an ulp; a
+    /// regional row is at most 88 degrees, where the clamp is the identity.
+    fn latitude(&self, j: usize) -> f64 { (self.south + j as f64 * self.dy).clamp(-90., 90.) }
     pub fn len(&self) -> usize { self.nx * self.ny }
     pub fn parse(text: &str) -> Result<Self> {
         let p: Vec<_> = text.split_whitespace().collect();
@@ -146,10 +209,14 @@ pub struct Plan {
     /// in `apply`, because the plan could not classify that cell.  Empty for
     /// a mesh whose land fraction is complete, which is every global mesh.
     pub unpublished: Vec<u32>,
+    /// A full-sphere plan (`--global`): validated against the global
+    /// envelope and written under its own magic.  False for every regional
+    /// plan, whose bytes are unchanged.
+    pub global: bool,
 }
 impl Plan {
     pub fn validate(&self) -> Result<()> {
-        self.target.validate()?;
+        self.target.validate_mode(self.global)?;
         if !(4..=MAX_SOURCE).contains(&self.source_count)
             || self.stencils.len() != self.target.len()
             || self.source_grid.len() < 30 || self.source_grid.len() > 256
@@ -186,7 +253,8 @@ impl Plan {
     }
     pub fn write<W: Write>(&self, mut w: W) -> Result<()> {
         self.validate()?;
-        w.write_all(PLAN_MAGIC).map_err(|e| e.to_string())?;
+        w.write_all(if self.global { GLOBAL_PLAN_MAGIC } else { PLAN_MAGIC })
+            .map_err(|e| e.to_string())?;
         put_u32(&mut w, self.source_count as u32)?;
         put_u32(&mut w, self.centre as u32)?;
         put_u32(&mut w, self.source_grid.len() as u32)?;
@@ -208,7 +276,9 @@ impl Plan {
     pub fn read<R: Read>(mut r: R) -> Result<Self> {
         let mut magic = [0u8; 8];
         r.read_exact(&mut magic).map_err(|e| e.to_string())?;
-        if &magic != PLAN_MAGIC { return Err("unknown remap plan version".into()); }
+        let global = if &magic == PLAN_MAGIC { false }
+                     else if &magic == GLOBAL_PLAN_MAGIC { true }
+                     else { return Err("unknown remap plan version".into()) };
         let source_count = get_u32(&mut r)? as usize;
         if !(4..=MAX_SOURCE).contains(&source_count) { return Err("invalid plan source count".into()); }
         let centre = get_u32(&mut r)?;
@@ -223,7 +293,7 @@ impl Plan {
             dx: get_f64(&mut r)?, dy: get_f64(&mut r)?,
             nx: get_u32(&mut r)? as usize, ny: get_u32(&mut r)? as usize,
         };
-        target.validate()?;
+        target.validate_mode(global)?;
         let mut stencils = Vec::with_capacity(target.len());
         for _ in 0..target.len() {
             let mut ids = [0; 4];
@@ -242,10 +312,12 @@ impl Plan {
         if r.read(&mut extra).map_err(|e| e.to_string())? != 0 {
             return Err("trailing bytes after the remap plan".into());
         }
-        let plan = Self { source_count, centre, source_grid, target, stencils, unpublished };
+        let plan = Self { source_count, centre, source_grid, target, stencils, unpublished, global };
         plan.validate()?;
         Ok(plan)
     }
+    /// Whether the first eight bytes of a plan file name the global envelope.
+    pub fn is_global_magic(magic: &[u8]) -> bool { magic == GLOBAL_PLAN_MAGIC }
 }
 fn put_u32<W: Write>(w: &mut W, v: u32) -> Result<()> {
     w.write_all(&v.to_le_bytes()).map_err(|e| e.to_string())
@@ -261,7 +333,20 @@ fn get_f64<R: Read>(r: &mut R) -> Result<f64> {
 
 pub fn build_plan(lat: &[f64], lon: &[f64], land: &[f64], source_grid: Vec<u8>,
                   centre: u16, target: Target, max_distance_m: f64) -> Result<Plan> {
-    target.validate()?;
+    build_plan_mode(lat, lon, land, source_grid, centre, target, max_distance_m, false)
+}
+/// The same donor search, weights and land classes as `build_plan`, onto
+/// the full-sphere target of `Target::global`.  The search is on the unit
+/// sphere, so the dateline and both poles need no special case: a target at
+/// a pole has every longitude at one point and draws the same four donors.
+pub fn build_global_plan(lat: &[f64], lon: &[f64], land: &[f64], source_grid: Vec<u8>,
+                         centre: u16, target: Target, max_distance_m: f64) -> Result<Plan> {
+    build_plan_mode(lat, lon, land, source_grid, centre, target, max_distance_m, true)
+}
+#[allow(clippy::too_many_arguments)]
+fn build_plan_mode(lat: &[f64], lon: &[f64], land: &[f64], source_grid: Vec<u8>,
+                   centre: u16, target: Target, max_distance_m: f64, global: bool) -> Result<Plan> {
+    target.validate_mode(global)?;
     if lat.len() != lon.len() || lat.len() != land.len()
         || !(4..=MAX_SOURCE).contains(&lat.len())
         || !max_distance_m.is_finite() || max_distance_m <= 0. || max_distance_m > 1_000_000.
@@ -289,33 +374,67 @@ pub fn build_plan(lat: &[f64], lon: &[f64], land: &[f64], source_grid: Vec<u8>,
     }
     partition(&mut points, 0);
     let max_d2 = (2. * (max_distance_m / EARTH_RADIUS_M / 2.).sin()).powi(2);
-    let mut stencils = Vec::with_capacity(target.len());
-    for j in 0..target.ny {
-        for i in 0..target.nx {
-            let q = xyz(target.south + j as f64 * target.dy,
-                        (target.west + i as f64 * target.dx + 180.).rem_euclid(360.) - 180.)?;
-            let mut best = [EMPTY; 4];
-            search(&points, &q, 0, &mut best);
-            if best[3].d2 > max_d2 || best[3].id == u32::MAX {
-                return Err(format!("four native donors do not reach target i={i}, j={j} within {max_distance_m} m"));
-            }
-            let mut weights = [0.; 4];
-            if best[0].d2 <= 1e-24 { weights[0] = 1.; }
-            else {
-                let sum: f64 = best.iter().map(|p| 1. / p.d2).sum();
-                for n in 0..4 { weights[n] = (1. / best[n].d2) / sum; }
-            }
-            let ids = [best[0].id, best[1].id, best[2].id, best[3].id];
-            let mut land_bits = 0;
-            for (n, &id) in ids.iter().enumerate() {
-                if land[id as usize] >= 0.5 { land_bits |= 1 << n; }
-            }
-            stencils.push(Stencil { ids, weights, land_bits });
-        }
-    }
-    let plan = Plan { source_count: lat.len(), centre, source_grid, target, stencils, unpublished };
+    // Each target row is independent and the search is deterministic, so
+    // rows are split across threads and stitched back in row order: the
+    // plan is the same bytes whatever the thread count.
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 16);
+    let chunk = ((target.ny + workers - 1) / workers).max(1);
+    let points = &points[..];
+    let target_ref = &target;
+    // Each thread fills its own disjoint run of rows in the one plan-sized
+    // vector, so the build never holds the stencils twice.
+    let empty = Stencil { ids: [0; 4], weights: [0.; 4], land_bits: 0 };
+    let mut stencils = vec![empty; target.len()];
+    let results: Vec<Result<()>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = stencils.chunks_mut(chunk * target.nx).enumerate().map(|(block, rows)| {
+            scope.spawn(move || -> Result<()> {
+                let first = block * chunk;
+                for (k, slot) in rows.iter_mut().enumerate() {
+                    let (j, i) = (first + k / target_ref.nx, k % target_ref.nx);
+                    *slot = stencil_at(points, land, target_ref, i, j, max_d2, max_distance_m)?;
+                }
+                Ok(())
+            })
+        }).collect();
+        handles.into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err("remap plan worker panicked".into())))
+            .collect()
+    });
+    for result in results { result?; }
+    let plan = Plan { source_count: lat.len(), centre, source_grid, target, stencils, unpublished, global };
     plan.validate()?;
     Ok(plan)
+}
+fn stencil_at(points: &[Point], land: &[f64], target: &Target, i: usize, j: usize,
+              max_d2: f64, max_distance_m: f64) -> Result<Stencil> {
+    let lat = target.latitude(j);
+    // A pole row is one point named 2880 times.  Measured on the R03B07
+    // mesh: five cell centres sit exactly equidistant from each pole (a
+    // pentagon vertex), so the 1e-17 position differences that cos(90 deg)
+    // leaves between the row's longitudes chose different four-of-five
+    // donor sets along the row (5 distinct sets; a 0.24 K spread in 850 hPa
+    // T at the South Pole).  The pole is searched once, at longitude 0, so
+    // every column carries the same value.  A regional row never reaches it.
+    let lon = if lat.abs() == 90. { 0. }
+              else { (target.west + i as f64 * target.dx + 180.).rem_euclid(360.) - 180. };
+    let q = xyz(lat, lon)?;
+    let mut best = [EMPTY; 4];
+    search(points, &q, 0, &mut best);
+    if best[3].d2 > max_d2 || best[3].id == u32::MAX {
+        return Err(format!("four native donors do not reach target i={i}, j={j} within {max_distance_m} m"));
+    }
+    let mut weights = [0.; 4];
+    if best[0].d2 <= 1e-24 { weights[0] = 1.; }
+    else {
+        let sum: f64 = best.iter().map(|p| 1. / p.d2).sum();
+        for n in 0..4 { weights[n] = (1. / best[n].d2) / sum; }
+    }
+    let ids = [best[0].id, best[1].id, best[2].id, best[3].id];
+    let mut land_bits = 0;
+    for (n, &id) in ids.iter().enumerate() {
+        if land[id as usize] >= 0.5 { land_bits |= 1 << n; }
+    }
+    Ok(Stencil { ids, weights, land_bits })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -424,6 +543,15 @@ fn sign_magnitude(degrees: f64) -> u32 {
 fn longitude(degrees: f64) -> u32 { (degrees.rem_euclid(360.) * 1_000_000.).round() as u32 }
 pub fn regular_grid(target: Target) -> Result<Vec<u8>> {
     target.validate()?;
+    Ok(grid_section(target))
+}
+/// The Section 3 of a `Target::global` grid: the same template 3.0 octets
+/// as a regional window (rows south to north, columns 0..360-dx east).
+pub fn global_grid(target: Target) -> Result<Vec<u8>> {
+    target.validate_global()?;
+    Ok(grid_section(target))
+}
+fn grid_section(target: Target) -> Vec<u8> {
     let mut s = section(3, 72);
     s[6..10].copy_from_slice(&(target.len() as u32).to_be_bytes());
     s[14] = 6; // WMO Table 3.2: sphere of radius 6,371,229 m.
@@ -439,21 +567,34 @@ pub fn regular_grid(target: Target) -> Result<Vec<u8>> {
     s[63..67].copy_from_slice(&((target.dx * 1_000_000.).round() as u32).to_be_bytes());
     s[67..71].copy_from_slice(&((target.dy * 1_000_000.).round() as u32).to_be_bytes());
     s[71] = 0x40; // +i east, +j north, row-major, no alternating rows.
-    Ok(s)
+    s
 }
 
 /// Preserve identification, local metadata and the complete product section;
 /// replace only the horizontal grid, packing and values. IEEE f32 output
 /// avoids another lossy packing tolerance. Missing soil on water uses a bitmap.
 pub fn encode_regular(template: &[u8], target: Target, values: &[f64]) -> Result<Vec<u8>> {
+    let s3 = regular_grid(target)?;
+    encode_on(template, s3, target.len(), values)
+}
+/// `encode_regular` onto a `Target::global` grid: the same product-section
+/// preservation, IEEE packing and missing-value bitmap.
+pub fn encode_global(template: &[u8], target: Target, values: &[f64]) -> Result<Vec<u8>> {
+    let s3 = global_grid(target)?;
+    encode_on(template, s3, target.len(), values)
+}
+/// `encode_regular` or `encode_global`, as the plan's envelope says.
+pub fn encode_for(plan: &Plan, template: &[u8], values: &[f64]) -> Result<Vec<u8>> {
+    if plan.global { encode_global(template, plan.target, values) }
+    else { encode_regular(template, plan.target, values) }
+}
+fn encode_on(template: &[u8], s3: Vec<u8>, points: usize, values: &[f64]) -> Result<Vec<u8>> {
     let e = envelope(template)?;
-    target.validate()?;
-    if values.len() != target.len() { return Err("output field/target count mismatch".into()); }
+    if values.len() != points { return Err("output field/target count mismatch".into()); }
     if values.iter().any(|x| x.is_infinite() || (x.is_finite() && !(*x as f32).is_finite())) {
         return Err("field overflows finite IEEE f32 encoding".into());
     }
     let present = values.iter().filter(|x| x.is_finite()).count();
-    let s3 = regular_grid(target)?;
     let mut s5 = if present == 0 { section(5, 21) } else { section(5, 12) };
     s5[5..9].copy_from_slice(&(present as u32).to_be_bytes());
     if present != 0 { s5[9..11].copy_from_slice(&4u16.to_be_bytes()); s5[11] = 1; }
@@ -633,5 +774,205 @@ mod tests {
         let t=Target{south:-30.,west:179.875,..target()};let s=regular_grid(t).unwrap();
         assert_eq!(u32::from_be_bytes(s[46..50].try_into().unwrap()),0x80000000|30_000_000);
         assert_eq!(u32::from_be_bytes(s[59..63].try_into().unwrap()),180_000_000);
+    }
+
+    // ---- regional byte identity -------------------------------------
+    //
+    // The digest below was computed by the core as it stood before the
+    // global mode existed (the `arwen.gdt101-regional-remap.v1` plan and
+    // wire), on this exact problem.  Any change to a regional plan's bytes
+    // or a regional field's GRIB bytes moves it.
+    /// FNV-1a 64 over a byte stream: the regional golden needs no
+    /// dependency, and a collision would need a crafted input.
+    fn fnv(bytes: &[u8], mut hash: u64) -> u64 {
+        for &b in bytes { hash ^= b as u64; hash = hash.wrapping_mul(0x0100_0000_01b3); }
+        hash
+    }
+    fn wire_section(number: u8, length: usize) -> Vec<u8> {
+        let mut s = vec![0; length];
+        s[..4].copy_from_slice(&(length as u32).to_be_bytes());
+        s[4] = number;
+        s
+    }
+    /// A deterministic regional problem exercising every method, the
+    /// unpublished-cell path and the missing-value bitmap; the digest of
+    /// its plan and every encoded field.
+    fn regional_wire_digest() -> u64 {
+        let n = 3000usize;
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || { state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                            ((state >> 11) as f64) / ((1u64 << 53) as f64) };
+        let (mut lat, mut lon, mut land) = (Vec::new(), Vec::new(), Vec::new());
+        for i in 0..n {
+            lat.push(20. + 20. * next());
+            lon.push(-10. + 30. * next());
+            let u = next();
+            land.push(if i % 997 == 0 { f64::NAN } else if u < 0.4 { 1. } else if u < 0.5 { 0.3 } else { 0. });
+        }
+        let mut grid = wire_section(3, 35);
+        grid[6..10].copy_from_slice(&(n as u32).to_be_bytes());
+        grid[12..14].copy_from_slice(&101u16.to_be_bytes());
+        let target = Target { west: -5., south: 25., dx: 0.25, dy: 0.2, nx: 40, ny: 30 };
+        let plan = build_plan(&lat, &lon, &land, grid.clone(), 78, target, 200_000.).unwrap();
+        let mut bytes = Vec::new();
+        plan.write(&mut bytes).unwrap();
+        let mut hash = fnv(&bytes, 0xcbf2_9ce4_8422_2325);
+        let mut template = vec![0; 16];
+        template[..4].copy_from_slice(b"GRIB"); template[7] = 2;
+        for part in [wire_section(1, 21), grid, wire_section(4, 34), wire_section(5, 21),
+                     wire_section(6, 6), wire_section(7, 5)] {
+            template.extend_from_slice(&part);
+        }
+        template.extend_from_slice(b"7777");
+        let length = template.len() as u64;
+        template[8..16].copy_from_slice(&length.to_be_bytes());
+        let smooth: Vec<f64> = (0..n).map(|i| if land[i].is_nan() { f64::NAN }
+            else { 280. + 10. * lat[i].to_radians().sin() + 0.1 * lon[i] }).collect();
+        let soil: Vec<f64> = (0..n).map(|i| if land[i] >= 0.5 { smooth[i] - 5. } else { f64::NAN }).collect();
+        let ice: Vec<f64> = (0..n).map(|i| if land[i] < 0.5 { (lat[i] - 20.) / 20. } else { f64::NAN }).collect();
+        for (field, method) in [(&smooth, Method::Idw4), (&smooth, Method::SurfaceIdw4), (&smooth, Method::Nearest),
+                                (&soil, Method::SoilNearest), (&ice, Method::SeaIceNearest)] {
+            let values = apply(&plan, field, method).unwrap();
+            hash = fnv(&encode_regular(&template, target, &values).unwrap(), hash);
+        }
+        hash
+    }
+    #[test] fn regional_plan_and_wire_bytes_are_unchanged_by_the_global_mode() {
+        assert_eq!(regional_wire_digest(), 0x5e4a_51a0_93b4_228d);
+    }
+    #[test] fn the_regional_envelope_is_exactly_as_it_was() {
+        // 2M points, a sub-180-degree span and +/-88 degrees still bound a
+        // regional window, whatever the global mode admits.
+        let wide = Target { west: -100., south: 0., dx: 0.125, dy: 0.125, nx: 1441, ny: 2 };
+        assert!(wide.validate().is_err());
+        assert!(Target { nx: 1440, ..wide }.validate().is_ok());
+        let big = Target { west: 0., south: 0., dx: 0.01, dy: 0.01, nx: 1415, ny: 1414 };
+        assert!(big.validate().is_err());
+        assert!(Target { south: -88.125, ..target() }.validate().is_err());
+        assert!(Target::global(0.125).unwrap().validate().is_err());
+    }
+
+    // ---- the global mode --------------------------------------------
+    #[test] fn the_global_target_is_the_whole_sphere_without_a_repeated_column() {
+        let t = Target::global(0.125).unwrap();
+        assert_eq!((t.nx, t.ny, t.len()), (2880, 1441, 4_150_080));
+        assert_eq!((t.west, t.south, t.dx, t.dy), (0., -90., 0.125, 0.125));
+        assert_eq!(t.latitude(t.ny - 1), 90.);
+        let tenth = Target::global(0.1).unwrap();
+        assert_eq!((tenth.nx, tenth.ny), (3600, 1801));
+        assert_eq!(tenth.latitude(tenth.ny - 1), 90.);
+        for bad in [0., -0.125, 1.5, 0.7, f64::NAN, f64::INFINITY] {
+            assert!(Target::global(bad).is_err(), "{bad}");
+        }
+        // Only the grid Target::global builds passes the global envelope.
+        assert!(Target { west: -180., ..t }.validate_global().is_err());
+        assert!(Target { nx: 2881, ..t }.validate_global().is_err());
+        assert!(Target { ny: 1440, ..t }.validate_global().is_err());
+        assert!(Target { dy: 0.25, ny: 721, ..t }.validate_global().is_err());
+        assert!(Target::global(0.05).is_err(), "beyond the global memory envelope");
+        assert!(target().validate_global().is_err());
+    }
+    /// A quasi-uniform full-sphere mesh: the Fibonacci lattice, about 55 km
+    /// between centres at 160k cells, land north of the equator.
+    fn sphere(n: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let golden = std::f64::consts::PI * (3. - 5f64.sqrt());
+        let (mut lat, mut lon, mut land) = (Vec::new(), Vec::new(), Vec::new());
+        for k in 0..n {
+            let z = 1. - (2. * k as f64 + 1.) / n as f64;
+            lat.push(z.asin().to_degrees());
+            lon.push(((golden * k as f64).to_degrees() + 180.).rem_euclid(360.) - 180.);
+            land.push(if z > 0. { 1. } else { 0. });
+        }
+        (lat, lon, land)
+    }
+    fn global_plan(dx: f64) -> (Plan, Vec<f64>, Vec<f64>) {
+        let (lat, lon, land) = sphere(160_000);
+        let plan = build_global_plan(&lat, &lon, &land, native_grid(lat.len()), 78,
+                                     Target::global(dx).unwrap(), 80_000.).unwrap();
+        (plan, lat, lon)
+    }
+    #[test] fn a_global_plan_wraps_the_dateline_and_closes_both_poles() {
+        let (plan, lat, lon) = global_plan(1.);
+        assert!(plan.global && plan.unpublished.is_empty());
+        assert_eq!(plan.stencils.len(), 360 * 181);
+        // A field that is smooth on the sphere (linear in the unit vector)
+        // stays smooth across the 0/360 column wrap and the 180 E column.
+        let field: Vec<f64> = (0..lat.len()).map(|k| {
+            let p = xyz(lat[k], lon[k]).unwrap(); 280. + 10. * p[0] + 20. * p[1] + 5. * p[2]
+        }).collect();
+        let out = apply(&plan, &field, Method::Idw4).unwrap();
+        let at = |i: usize, j: usize| out[j * 360 + i];
+        for j in 1..180 {
+            let exact = |i: usize| { let p = xyz(-90. + j as f64, i as f64).unwrap();
+                                     280. + 10. * p[0] + 20. * p[1] + 5. * p[2] };
+            for i in [0, 179, 180, 181, 359] {
+                assert!((at(i, j) - exact(i)).abs() < 0.2, "i={i} j={j}: {} vs {}", at(i, j), exact(i));
+            }
+            assert!((at(0, j) - at(359, j)).abs() < 0.6, "seam at j={j}");
+        }
+        // Each pole row is one point: one donor set, one value.
+        for j in [0, 180] {
+            let row = &plan.stencils[j * 360..(j + 1) * 360];
+            assert!(row.iter().all(|s| s.ids == row[0].ids && s.weights == row[0].weights));
+            assert!(out[j * 360..(j + 1) * 360].iter().all(|&x| x == at(0, j) && x.is_finite()));
+        }
+        assert!((at(0, 0) - 275.).abs() < 0.2 && (at(0, 180) - 285.).abs() < 0.2);
+    }
+    #[test] fn a_global_plan_preserves_constants_and_land_classes() {
+        let (plan, lat, _) = global_plan(1.);
+        for x in apply(&plan, &vec![273.15; lat.len()], Method::Idw4).unwrap() {
+            assert!((x - 273.15).abs() < 1e-12);
+        }
+        let soil: Vec<f64> = lat.iter().map(|&l| if l > 0. { 290. } else { f64::NAN }).collect();
+        let out = apply(&plan, &soil, Method::SoilNearest).unwrap();
+        assert!(out[..360].iter().all(|x| x.is_nan()), "the South Pole is water here");
+        assert!(out[180 * 360..].iter().all(|&x| x == 290.), "the North Pole is land here");
+    }
+    #[test] fn a_global_plan_roundtrips_under_its_own_magic_only() {
+        let (plan, _, _) = global_plan(1.);
+        let mut bytes = Vec::new();
+        plan.write(&mut bytes).unwrap();
+        assert_eq!(&bytes[..8], b"GDT101G1");
+        assert!(Plan::is_global_magic(&bytes[..8]));
+        let back = Plan::read(&bytes[..]).unwrap();
+        assert!(back.global);
+        assert_eq!((back.target, back.stencils.len()), (plan.target, plan.stencils.len()));
+        // The same bytes under the regional magic are a 360-degree window,
+        // which the unchanged regional envelope refuses.
+        bytes[..8].copy_from_slice(b"GDT101P3");
+        assert!(Plan::read(&bytes[..]).is_err());
+        // And a regional plan keeps the regional magic.
+        let mut regional = Vec::new();
+        plan_fixture_regional().write(&mut regional).unwrap();
+        assert_eq!(&regional[..8], b"GDT101P3");
+        assert!(!Plan::is_global_magic(&regional[..8]));
+    }
+    fn plan_fixture_regional() -> Plan { plan() }
+    #[test] fn a_global_target_cannot_ride_a_regional_plan_or_encoder() {
+        let mut p = plan();
+        p.target = Target::global(1.).unwrap();
+        assert!(p.validate().is_err());
+        assert!(regular_grid(p.target).is_err());
+        assert!(encode_regular(&template(), p.target, &vec![0.; p.target.len()]).is_err());
+        assert!(global_grid(target()).is_err());
+        assert!(encode_global(&template(), target(), &[1., 2., 3., 4.]).is_err());
+    }
+    #[test] fn the_global_wire_spans_pole_to_pole_and_keeps_the_product() {
+        let t = Target::global(0.125).unwrap();
+        let s = global_grid(t).unwrap();
+        let word = |a: usize| u32::from_be_bytes(s[a..a + 4].try_into().unwrap());
+        assert_eq!((word(30), word(34)), (2880, 1441));
+        assert_eq!(word(46), 0x8000_0000 | 90_000_000);
+        assert_eq!((word(50), word(55), word(59)), (0, 90_000_000, 359_875_000));
+        assert_eq!((word(63), word(67), s[71]), (125_000, 125_000, 0x40));
+        assert_eq!(word(6) as usize, t.len());
+        let values: Vec<f64> = (0..t.len()).map(|i| if i % 7 == 0 { f64::NAN } else { i as f64 }).collect();
+        let original = template();
+        let out = encode_global(&original, t, &values).unwrap();
+        let (a, b) = (envelope(&original).unwrap(), envelope(&out).unwrap());
+        assert_eq!(a.sections[1], b.sections[1]);
+        assert_eq!(a.sections[4], b.sections[4]);
+        assert_eq!(b.sections[3].unwrap(), &s[..]);
+        assert_eq!(b.sections[6].unwrap().len(), 6 + (t.len() + 7) / 8);
     }
 }

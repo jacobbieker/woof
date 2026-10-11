@@ -265,7 +265,7 @@ def global_source(name: str) -> GlobalSource:
 
 def refuse_unknown_source(name: str) -> None:
     key = str(name).strip().lower()
-    admitted = ", ".join(["hrrr", *GLOBAL_SOURCES])
+    admitted = ", ".join(["hrrr", *GLOBAL_SOURCES, *ICON_SOURCES])
     if key in REFUSED_SOURCES:
         raise GlobalIntermediateRefusal(
             f"--source {name!r} is refused by this door: {REFUSED_SOURCES[key]}.  "
@@ -1003,6 +1003,81 @@ def _convert_series(
 
 
 # ---------------------------------------------------------------------------
+# ICON (native GDT-101): regional or global target
+# ---------------------------------------------------------------------------
+# MERGE SEAM.  ICON is not written as is: its native unstructured mesh is
+# regridded first, and WHERE TO depends on the MPAS mesh the intermediates
+# are for.  `icon_target_kind` is the one function that decides:
+#
+# * a global mesh (no regional boundary zone, cells tiling the sphere)
+#   -> the full-sphere 0.125-degree regrid, `woof.hex.icon_global_door`;
+# * a regional mesh, or a --from-plan/--point box -> the regional ICON door,
+#   `run_icon_regional_intermediate` below, which runs the ``field-files``
+#   rows of GLOBAL_SOURCES through `woof.hex.gdt101_door`.
+
+#: The ICON source ids this door admits, and what each carries.
+ICON_SOURCES: Mapping[str, str] = {
+    "icon-global": "DWD ICON global, pressure levels (native GDT 3.101, regridded)",
+    "icon-global-ml": "DWD ICON global, model levels (native GDT 3.101, regridded)",
+}
+
+
+def icon_target_kind(arguments: argparse.Namespace) -> tuple[str, dict[str, Any] | None]:
+    """``("global", mesh_facts)`` or ``("regional", mesh_facts_or_None)``, or a refusal.
+
+    ``--grid MESH.nc`` names the mesh; it is classified by content (a
+    nonempty bdyMask zone is regional, a sphere-tiling cell set is global).
+    Without it a --from-plan/--point box is a regional target, and nothing
+    at all is refused: the door does not guess which mesh it is writing for.
+    """
+
+    from .icon_global_door import classify_mesh
+
+    source = str(arguments.source).strip().lower()
+    boxed = [flag for flag, attribute in (("--from-plan", "from_plan"), ("--point", "point"))
+             if getattr(arguments, attribute, None) is not None]
+    grid = getattr(arguments, "grid", None)
+    if grid is not None:
+        mesh = classify_mesh(Path(grid))
+        if mesh["kind"] == "global" and boxed:
+            raise GlobalIntermediateRefusal(
+                f"--grid {grid} is a global mesh, which takes the full-sphere regrid; "
+                f"{', '.join(boxed)} cut a regional box.  Drop {', '.join(boxed)}, or "
+                f"pass the regional mesh"
+            )
+        return mesh["kind"], mesh
+    if boxed:
+        return "regional", None
+    raise GlobalIntermediateRefusal(
+        f"--source {source} needs the mesh it is for: --grid MESH.nc (an MPAS grid, "
+        f"static or init file; a global mesh gets the full-sphere {0.125:g}-degree "
+        f"regrid, a regional cull the regional door), or --from-plan/--point for a "
+        f"regional box"
+    )
+
+
+def run_icon_regional_intermediate(arguments: argparse.Namespace,
+                                   mesh: dict[str, Any] | None) -> int:
+    """The regional ICON door: the ``field-files`` rows of :data:`GLOBAL_SOURCES`.
+
+    The remap window comes from ``--grid`` (the regional mesh's extent plus
+    a halo, :func:`woof.hex.gdt101_door.choose_remap`); a --from-plan/--point
+    box is refused there by name.
+    """
+
+    return run_global_intermediate(arguments)
+
+
+def run_icon_intermediate(arguments: argparse.Namespace) -> int:
+    kind, mesh = icon_target_kind(arguments)
+    if kind == "global":
+        from .icon_global_door import run_icon_global_intermediate
+
+        return run_icon_global_intermediate(arguments, mesh or {})
+    return run_icon_regional_intermediate(arguments, mesh)
+
+
+# ---------------------------------------------------------------------------
 # argparse glue (the parser itself lives in hrrr_intermediate)
 # ---------------------------------------------------------------------------
 def request_from_arguments(arguments: argparse.Namespace) -> GlobalRequest:
@@ -1045,6 +1120,7 @@ def request_from_arguments(arguments: argparse.Namespace) -> GlobalRequest:
     foreign = [flag for flag, attribute in (
         ("--wrfout-glob", "wrfout_glob"), ("--cull-region", "cull_region"),
         ("--halo-km", "halo_km"), ("--wrf-edge-cells", "wrf_edge_cells"),
+        ("--grid", "grid"),
     ) if getattr(arguments, attribute, None) is not None]
     if foreign:
         raise GlobalIntermediateRefusal(
@@ -1111,11 +1187,13 @@ __all__ = [
     "GlobalIntermediateRefusal",
     "GlobalRequest",
     "GlobalSource",
+    "ICON_SOURCES",
     "LeadPlan",
     "REFUSED_SOURCES",
     "build_global_intermediates",
     "engine_argv",
     "global_source",
+    "icon_target_kind",
     "init_switches",
     "locate_inputs",
     "packaged_vtable",
@@ -1127,6 +1205,8 @@ __all__ = [
     "request_from_arguments",
     "resolve_engine",
     "run_global_intermediate",
+    "run_icon_intermediate",
+    "run_icon_regional_intermediate",
     "stage_field_files",
     "validate_intermediate",
 ]

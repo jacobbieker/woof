@@ -897,9 +897,9 @@ def _intermediate_sources() -> tuple[str, ...]:
     then the uniform lat-lon rows :mod:`woof.hex.met_intermediate_door`
     writes through ``met_intermediate`` (stdlib-only at import)."""
 
-    from .met_intermediate_door import GLOBAL_SOURCES
+    from .met_intermediate_door import GLOBAL_SOURCES, ICON_SOURCES
 
-    return (*SOURCE_ROWS, *GLOBAL_SOURCES)
+    return tuple(dict.fromkeys((*SOURCE_ROWS, *GLOBAL_SOURCES, *ICON_SOURCES)))
 
 
 INTERMEDIATE_SOURCES = _intermediate_sources()
@@ -936,10 +936,11 @@ def add_intermediate_parser(commands: Any) -> None:
                              "there; for icon-global and icon-global-ml the root of DWD's v1 "
                              "tree, PARAM/.../r/CYCLE/s/PTnnnH00M.grib2, or its p/ parent)")
     parser.add_argument("--grid", type=Path, default=None, metavar="GRID.nc",
-                        help="icon-global, icon-global-ml: the limited-area hex mesh (grid, "
-                             "static or init file) the intermediates must cover; the remap "
-                             "window is its extent plus a 1-degree halo (required there, "
-                             "refused for every other source)")
+                        help="icon-global, icon-global-ml: the MPAS mesh (grid, static or "
+                             "init file) the intermediates are for; a regional mesh gets a "
+                             "remap window of its extent plus a 1-degree halo, a global mesh "
+                             "the full-sphere 0.125-degree regrid (required there, refused "
+                             "for every other source)")
     parser.add_argument("--cycle", default=None, metavar="YYYY-MM-DDTHH",
                         help="the cycle the files came from, UTC (GRIB rows; required there)")
     parser.add_argument("--wrfout-glob", default=None, metavar="GLOB",
@@ -1060,11 +1061,15 @@ def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest
 def run_intermediate(arguments: argparse.Namespace) -> int:
     from .met_intermediate_door import (
         GLOBAL_SOURCES,
+        ICON_SOURCES,
         refuse_unknown_source,
         run_global_intermediate,
+        run_icon_intermediate,
     )
 
     key = str(arguments.source).strip().lower()
+    if key in ICON_SOURCES:
+        return run_icon_intermediate(arguments)
     if key in GLOBAL_SOURCES:
         return run_global_intermediate(arguments)
     if key not in SOURCE_ROWS:
