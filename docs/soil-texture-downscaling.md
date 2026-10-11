@@ -108,6 +108,15 @@ SMC_new = SMCDRY_target + SRATIO * (SMCMAX_target - SMCDRY_target)
 `[SMCDRY_target, SMCMAX_target]` cell by cell, by construction. Water,
 sea ice, and land cells whose soil category is water are untouched.
 
+After this step the initializer caps any land layer still above its cell's
+`SMCMAX` at that `SMCMAX`.  That is WRF Noah-MP's `NOAHMP_INIT` rule,
+applied by `woof.ingest.soil.cap_land_moisture_at_smcmax` with `STAS-RUC`
+on the RUC arm.  Where this reconstitution ran, nothing is left for the cap
+to do.  It catches what the reconstitution does not reach: a route with no
+source mesh, land with no usable texture, and the stock-WRF opt-out below.
+Each capped cell is counted in the preparation proof's `init_caps` block
+and logged on one line.
+
 ### Why this is better and not merely different
 
 1. **It is the only operation that adds real sub-source-cell structure.**
@@ -197,7 +206,10 @@ soil_texture_downscale = false
 
 That restores the byte-exact previous behaviour: both halves return their
 input arrays untouched, and the run receipt records that the switch was
-declared. It is the **only** value that turns anything off: silence means
+declared.  The porosity cap above still applies.  Stock real.exe has no such
+cap, though stock Noah-MP applies the same one at physics start-up.  A cell
+where an interpolated value exceeds its own `SMCMAX` is therefore capped,
+counted and logged, where stock real.exe would pass it through. It is the **only** value that turns anything off: silence means
 on, because a bare default run must stop showing the defect.
 
 `[ingest]` is a table of its own rather than a `[case_data]` key because

@@ -52,6 +52,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 from typing import Any, Callable, Mapping, Sequence
 
@@ -807,6 +808,14 @@ def validate_intermediate(
     if declared:
         facts["supplement_fields"] = sorted(declared)
         facts["supplement_grid"] = supplement_grid
+    # What the init's snow and soil-moisture ceilings will meet in this
+    # file (woof/hex/init_caps.py); the door changes no number, it says so.
+    from .init_caps import preview_intermediate
+
+    preview = preview_intermediate(path, seen["fields"], label=hdate)
+    for note in preview["notes"]:
+        sys.stderr.write(f"woof hex intermediate: {note}\n")
+    facts["init_caps_preview"] = preview
     return facts
 
 

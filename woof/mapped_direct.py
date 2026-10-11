@@ -2555,6 +2555,10 @@ def prepare_mapped_wrf(
                 # column of the root.
                 **({"soil_temperature_repair": soil_temperature_repair}
                    if soil_temperature_repair is not None else {}),
+                # Present only when an init ceiling (snow water above
+                # 5000 kg m-2, soil moisture above its SMCMAX) capped a cell.
+                **({"init_caps": dict(soil.init_caps)}
+                   if getattr(soil, "init_caps", None) else {}),
                 forcing_key: list(forcing_axis),
                 "boundary_interval_seconds": boundary_interval_seconds,
                 "target_contract": target_contract,
@@ -2677,6 +2681,10 @@ def prepare_mapped_wrf(
             # column, so a healthy proof is unchanged.
             **({"soil_temperature_repair": soil_temperature_repair}
                if soil_temperature_repair is not None else {}),
+            # Present only when an init ceiling (snow water above
+            # 5000 kg m-2, soil moisture above its SMCMAX) capped a cell.
+            **({"init_caps": dict(soil.init_caps)}
+               if getattr(soil, "init_caps", None) else {}),
             forcing_key: list(forcing_axis),
             "boundary_interval_seconds": boundary_interval_seconds,
             "execution_inputs": {
@@ -3058,6 +3066,9 @@ def _prepare_chained_mapped_tree(c) -> dict[str, object]:
             # column of the root.
             **({"soil_temperature_repair": c.soil_temperature_repair}
                if c.soil_temperature_repair is not None else {}),
+            # Present only when an init ceiling capped a cell of the root.
+            **({"init_caps": dict(c.soil.init_caps)}
+               if getattr(c.soil, "init_caps", None) else {}),
             forcing_key: list(forcing_axis),
             "boundary_interval_seconds": c.boundary_interval_seconds,
             "target_contract": c.target_contract,

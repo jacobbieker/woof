@@ -76,7 +76,10 @@ the remapped HSURF and FR_LAND (and, on the model-level row, HHL) as its
 longitude, inside +/-88 degrees, at most two million points); a global mesh
 is refused by name and pointed at `gdt101_remap --global --dx-deg 0.125`.
 The receipt carries DWD's attribution, "Source: Deutscher Wetterdienst
-(DWD), CC BY 4.0".
+(DWD), CC BY 4.0".  ICON's soil water converts to volumetric moisture up to
+0.86 at its peat points, above any Noah porosity, and its glaciers carry up
+to 15,185 kg m-2 of snow.  The init caps both and says so; see
+[Init ceilings](#init-ceilings-snow-water-and-soil-moisture).
 
 ```
 woof hex intermediate --source icon-global --grib-dir DIR \
@@ -111,7 +114,10 @@ woof hex intermediate --source met-office-global --input-dir MO \
 * **Conversions.** Wind speed and the direction it blows from become
   `u = -s sin d`, `v = -s cos d`; relative humidity goes from a fraction
   to percent; snow water equivalent (published as a liquid-water thickness
-  in metres) becomes kg m-2; the 1.5 m screen temperature and humidity are
+  in metres) becomes kg m-2.  Over the Greenland ice sheet that is about
+  51,800 kg m-2, which the init caps at 5000 kg m-2 and records (see
+  [Init ceilings](#init-ceilings-snow-water-and-soil-moisture)).  The 1.5 m
+  screen temperature and humidity are
   written at the 2 m surface level 200100, the height recorded in the
   receipt.  No PSFC is written: `rw_mpas_init` interpolates surface
   pressure from the isobaric column and `rw_mpas_lbc` reads none.
@@ -134,6 +140,55 @@ levels; `woof hex init` (`--nfglevels 34 --nfgsoillevels 4 --use-spechumd
 no --extrap-airtemp lapse-rate`) exits 0 using 182 records, and `woof hex
 lbc` writes both boundary files.  At 250 hPa the Met Office wind at the
 centre is u, v = +15.0, +15.0 m/s against GDAS's +15.6, +15.7.
+
+## Init ceilings: snow water and soil moisture
+
+`rw_mpas_init` applies two ceilings that native MPAS `init_atmosphere` does
+not (`tools/rustwx/crates/rw-mpas/src/init/caps.rs`).  Both are the ones
+WRF's Noah-MP initialisation applies (`module_sf_noahmpdrv.F`,
+`NOAHMP_INIT`).  They hold for every source, not only the two that prompted
+them.
+
+* **Snow water equivalent above 5000 kg m-2 is set to 5000 kg m-2**, and the
+  snow depth is scaled by the same factor so the density is kept.  Case 7
+  takes the depth as `snow * 5 / 1000`, so the Met Office's Greenland
+  ice-sheet store (about 51,800 kg m-2) would otherwise start the land model
+  under 259 m of snow.  It applies at every cell, after the sea-ice step has
+  cleared snow off open water.
+* **Soil moisture above the cell's porosity is set to that porosity**:
+  `MAXSMC` for the cell's soil category in `SOILPARM.TBL`'s `STAS` block, the
+  table the Noah land model reads, on land cells that are not land ice
+  (`ivgtyp == isice` or soil category 16, run as glacier).  ICON's peat (its soil type 8,
+  porosity 0.863) reaches 0.86 m3 m-3.  No STAS land category holds more
+  than 0.484.
+
+Each cap leaves a note.  The `rw_mpas_init` receipt carries a `caps` block
+for both ceilings, with the cap value, the cells capped and the largest
+value met, even when the count is zero.  `woof hex init` copies the block
+into its provenance receipt as `init_caps`, adds `init_cap_notes`, and prints
+one line per ceiling that capped a cell.  The intermediate doors cannot know
+the target cell's soil category, so each file's receipt entry carries an
+`init_caps_preview`: the source points above 5000 kg m-2 of snow, and the
+land soil-moisture values above 0.484.  The door logs a line when either
+count is non-zero.
+
+Outputs this changes, measured on real data: GFS and GDAS are untouched by
+the snow cap (their snow water equivalent peaks at 415 kg m-2, on
+2026-10-11 00Z), while ECMWF IFS open data and ERA5 carry 10,000 kg m-2 on
+permanent snow and ICON carries up to 15,185 kg m-2, so their ice-sheet
+cells now start at 5000 kg m-2 and half the snow depth.  The soil cap
+changes any source wherever an interpolated value sits above the porosity
+of the target cell's own soil category.  The measurements:
+
+* **Met Office, Greenland cull** (2026-10-11 00Z, 24,133 cells): `capped
+  SNOW at 5000 kg m-2 on 24133 cell(s) (source value up to 51948.72 kg m-2,
+  snow depth up to 259.7436 m)`.  The init then holds SNOW at 5000 kg m-2
+  and SNOWH at 25 m on every cell.  The earlier ECMWF open-data init of the
+  same cull held 10,000 kg m-2 and 50 m.
+* **ICON, a 469-cell Scotland cut** of the same global parent (2026-10-11
+  00Z): the door reports 2,956 land soil-moisture values above 0.484 (up to
+  0.859).  The init capped 8 of the 71 land cells, 32 layers in all (source
+  value up to 0.850; 7 loam cells at 0.439, 1 sandy-loam cell at 0.434).
 
 ## Sources with a runnable registry route
 

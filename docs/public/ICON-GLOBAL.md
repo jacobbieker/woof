@@ -105,6 +105,48 @@ and an hourly adapter would work until exactly that hour and then stop.
 A six-hour request is 352 objects: 116 for each of f000, f003 and f006
 plus four invariants, about 1.1 GB.
 
+## Peat soil moisture is capped at init
+
+ICON's soil water `W_SO` is a column mass per layer. Dividing by water density
+and layer thickness (`volumetric_soil_moisture_from_layer_mass`, and
+`met_intermediate --map-source dwd` on the hex side) gives volumetric moisture
+up to **0.86** at ICON's peat points (its soil type 8, porosity 0.863).
+Mineral soils stay at 0.43 or below. The land models WOOF hands it to cannot
+hold that much water: Noah's porosity (`MAXSMC` in `SOILPARM.TBL`) is at most
+0.484 for any land category, 0.439 for organic soil, and RUC's is at most
+0.492.
+
+So the initial state caps each land layer at its own cell's porosity:
+`MAXSMC` for the cell's soil category, from the table the receiving land
+model reads (`STAS` for Noah and Noah-MP, `STAS-RUC` for RUC). This is
+WRF Noah-MP's own initialisation rule (`NOAHMP_INIT`: `IF (SMOIS > SMCMAX)
+SMOIS = SMCMAX`). Land-ice cells (soil category 16, run as glacier) are
+left alone. Values at or below the porosity are untouched.
+
+The cap is never silent:
+
+- **WRF route.** `woof prep` logs `soil moisture cap: capped at the cell's
+  SOILPARM.TBL STAS MAXSMC on K land cell(s), L layer value(s) (source value
+  up to X m3 m-3; category C at SMCMAX on N, ...)`. The mapped preparation proof
+  carries an `init_caps` block with per-layer and per-category counts. Where
+  the soil-texture downscaling runs (the default for a route with a source
+  mesh) it already bounds each cell at its porosity, so the cap catches
+  only what it does not reach. Measured by running the init stage on the
+  real 2026-10-11 00Z soil column over Scotland, at 0.125 degrees with no
+  source mesh, and soil categories from a hex static (not a full `woof
+  prep`): 252 of 794 land points capped (source up to 0.857) on Noah's four
+  layers, and the same 252 on RUC's nine levels.
+- **hex.** `woof hex intermediate` records (`init_caps_preview`) how many
+  land source values exceed 0.484, logging 2,956 over the Scotland window.
+  `woof hex init` prints `rw_mpas_init: capped soil moisture at the cell's
+  SOILPARM.TBL STAS MAXSMC on K land cell(s) ...` and stores the counts in
+  its receipt (`init_caps`). It capped 8 of 71 land cells on a 469-cell
+  Scotland cut.
+
+ICON's glaciers also carry up to 15,185 kg m-2 of snow water. The init caps
+snow at 5000 kg m-2 for every source and scales the depth with it (see
+[MET-OFFICE-GLOBAL.md](MET-OFFICE-GLOBAL.md)).
+
 ## How the native grid is handled
 
 ICON's cells are an unstructured mesh. WMO grid-definition template 101 says

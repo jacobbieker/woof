@@ -16,6 +16,7 @@
 #![allow(clippy::needless_range_loop)]
 
 pub mod capsule;
+pub mod caps;
 pub mod dynamics;
 pub mod emit;
 pub mod hinterp;
@@ -313,6 +314,10 @@ pub struct InitReceipt {
     pub hydrostatic_cells_hitting_the_cap: usize,
     pub soil: soil::SoilCounts,
     pub seaice: soil::SeaiceCounts,
+    /// The two init ceilings native MPAS does not apply (snow water
+    /// equivalent and soil moisture above porosity): cap values, counts and
+    /// the largest value each met.  See [`caps`].
+    pub caps: caps::InitCaps,
     pub emit: emit::EmitLedger,
     /// Named loudly so nobody markets a capsule-fed init as a from-scratch one.
     pub deferrals: Vec<String>,
@@ -981,6 +986,21 @@ pub fn build_init(cfg: &InitConfig) -> MpasResult<InitReceipt> {
         &mut sh2o,
         &mut smcrel,
     );
+    // The two ceilings, on the state the land model will start from: after
+    // the sea-ice step has cleared snow off open water and turned sea-ice
+    // points into land ice.
+    receipt.caps.snow = caps::cap_snow(&mut snow, &mut snowh);
+    receipt.caps.soil_moisture = caps::cap_soil_moisture(
+        &statics.landmask,
+        &ivgtyp,
+        statics.isice_lu,
+        &isltyp,
+        &mut smois,
+        &mut sh2o,
+    );
+    for note in receipt.caps.notes() {
+        eprintln!("{note}");
+    }
     let q2: Vec<f32> = (0..n_cells)
         .map(|c| dynamics::diagnose_q2(t2m[c], psfc[c], rh2[c]))
         .collect();

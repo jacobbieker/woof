@@ -83,6 +83,39 @@ companion `namelist.wps`. The 00 and 12 UTC runs post hourly to f054,
 to f054 and 3-hourly to f069. The three-hour series this route prepares
 therefore ends at f144 (00/12Z) or f069 (06/18Z).
 
+## Snow over the ice sheets is capped at init
+
+Over the Greenland ice sheet the product's `snow_depth_water_equivalent` is
+the snow store of its ice-sheet tiles, about 51.8 m of water: 51,800 kg m-2
+on the 2026-10-11 00Z run, up to 68,800 kg m-2 further north.  At the 5:1
+depth rule both WRF real and MPAS init use, that is 259 m of snow.  The
+value is passed on as published.  The initial state then caps snow water
+equivalent at 5000 kg m-2, the ceiling WRF's Noah-MP initialisation applies
+(`NOAHMP_INIT`), and scales the snow depth by the same factor so the density
+is kept.
+
+The cap is never silent:
+
+- **WRF route.** `woof prep` logs `snow cap: capped SNOW at 5000 kg m-2 on K
+  of N cell(s) (source value up to X kg m-2, ...)`. The mapped preparation proof
+  carries an `init_caps` block with the cap, the count, the largest value
+  and its bounding box. The init's unit-error ceiling of 20,000 kg m-2
+  (`_SNOW_WATER_CEILING_KG_M2` in `woof/ingest/soil.py`) used to refuse this
+  source over Greenland outright. It still applies everywhere else. On land
+  ice (soil category 16), and on any patch of such values that touches land
+  ice (the ice margin as interpolation smears it), an ice-sheet store is
+  admitted up to 200,000 kg m-2 and then capped.
+- **hex.** `woof hex intermediate` logs and records (`init_caps_preview`)
+  how many source points exceed 5000 kg m-2. `woof hex init` prints
+  `rw_mpas_init: capped SNOW at 5000 kg m-2 on K cell(s) ...` and stores the
+  counts in its receipt (`init_caps`). On the Greenland 100 m cull, all
+  24,133 cells were capped, from up to 51,949 kg m-2.
+
+The cap applies to every source. GFS and GDAS never reach it; ECMWF IFS,
+ERA5 and ICON do on permanent snow. The soil moisture borrowed from GDAS
+is capped at the cell's porosity in the same way (see
+[ICON-GLOBAL.md](ICON-GLOBAL.md)).
+
 ## Surface pressure
 
 The product publishes no surface pressure. At every lead it is rebuilt from

@@ -676,7 +676,10 @@ MAPPED_PREPARATION_TELEMETRY_KEYS = frozenset({
 #: era ladder), so a full-ladder bundle's proof is unchanged.
 #: ``soil_temperature_repair`` likewise: written only when real.exe's TSLB
 #: reasonableness rebuild, or the snow-covered rebuild beside it, touched
-#: a land column of the root.  ``initial_perturbation`` likewise: written
+#: a land column of the root.  ``init_caps`` likewise: written only when
+#: an init ceiling -- snow water above 5000 kg m-2, land soil moisture
+#: above its category's SMCMAX (woof.ingest.soil, NoahSoilState.init_caps) --
+#: capped a cell of the root.  ``initial_perturbation`` likewise: written
 #: only on a tree whose experiment carries a [perturbation] block, which
 #: the tree runner applies at start (woof.experiment
 #: deferred_initial_perturbation).
@@ -688,7 +691,7 @@ MAPPED_PREPARATION_TELEMETRY_KEYS = frozenset({
 #: such bundle as an unknown top-level inventory.
 MAPPED_OPTIONAL_PROOF_KEYS = frozenset({
     "statics_corridor", "source_vertical_ladder", "soil_temperature_repair",
-    "initial_perturbation", "posting", "initial_source", "source_pairing"})
+    "init_caps", "initial_perturbation", "posting", "initial_source", "source_pairing"})
 _SOURCE_ADAPTER = {
     # The generic mapped adapter, truthfully: a packaged profile is
     # prepared by `woof.mapped_direct` with nothing model-specific in

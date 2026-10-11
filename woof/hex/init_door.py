@@ -694,6 +694,13 @@ def run_init_command(arguments: argparse.Namespace) -> int:
         engine_receipt = json.loads(completed.stdout)
     except json.JSONDecodeError:
         engine_receipt = {"unparsed_stdout": completed.stdout}
+    # The two init ceilings (woof/hex/init_caps.py): every one that capped a
+    # cell is said here, once, and lands in this door's receipt.
+    from .init_caps import engine_cap_notes
+
+    init_caps, cap_notes = engine_cap_notes(engine_receipt)
+    for note in cap_notes:
+        sys.stderr.write(f"woof hex init: {note}\n")
     if not out.is_file():
         _refuse(
             f"the engine reported success but {out} does not exist; rebuild the current rw_mpas_init "
@@ -754,6 +761,12 @@ def run_init_command(arguments: argparse.Namespace) -> int:
         },
         "engine_argv": argv,
         "engine_receipt": engine_receipt,
+        "init_caps": init_caps if init_caps is not None else {
+            "reported": False,
+            "why": "this rw_mpas_init build reports no caps block; it predates the snow "
+                   "and soil-moisture ceilings",
+        },
+        "init_cap_notes": cap_notes,
         "run_declarations": declarations,
         "output": _described(out),
         "door_seconds": round(time.time() - started, 3),
@@ -776,6 +789,7 @@ def run_init_command(arguments: argparse.Namespace) -> int:
                 "n_vert_levels": engine_receipt.get("n_vert_levels"),
                 "met_records_used": engine_receipt.get("met_records_used"),
                 "engine_seconds": engine_receipt.get("seconds"),
+                "init_cap_notes": cap_notes,
             },
             indent=2,
         )
