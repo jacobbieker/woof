@@ -757,12 +757,18 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                start: str | None = None, hours: float = 24.0,
                source: str | None = None, card: str | None = None,
                vram_gib: float | None = None, max_domains: int | None = None,
-               nz: int | None = None) -> Plan:
+               nz: int | None = None, now: datetime | None = None) -> Plan:
     """Emit the domains for ``sites`` under ``outdir`` and return the plan
-    (already written to ``outdir/plan.json``)."""
+    (already written to ``outdir/plan.json``).
+
+    ``now`` fixes the clock the source availability windows are judged
+    against (:func:`woof.energy.source_window.window_refusal`)."""
 
     from woof.domain_wizard import _SPEC_BDY_WIDTH
     from woof.energy.geometry import cover_with_rectangles
+    from woof.energy.source_window import (canonical_source,
+                                           newest_landed_start, registry_gap,
+                                           source_notes, window_refusal)
 
     outdir = Path(outdir)
     if len(sites) == 0:
@@ -782,7 +788,23 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     if nz is not None and int(nz) < 4:
         raise TilePlanRefusal("--nz must be at least 4 (the vertical "
                               "stencil width)")
-    start_text = _parse_start(start)
+    start_text = _parse_start(start) if start is not None \
+        else default_start(now)
+    if source is not None:
+        gap = registry_gap(source)
+        if gap is not None:
+            raise TilePlanRefusal(gap)
+        source = canonical_source(source)
+        if start is None:
+            # the newest cycle by the clock may not have landed yet
+            start_text = newest_landed_start(
+                source, datetime.strptime(start_text, "%Y-%m-%dT%H"),
+                hours_f, now=now).strftime("%Y-%m-%dT%H")
+        refusal = window_refusal(
+            source, datetime.strptime(start_text, "%Y-%m-%dT%H"), hours_f,
+            now=now)
+        if refusal is not None:
+            raise TilePlanRefusal(refusal)
     capacity, capacity_flags, card_note = _resolve_capacity(card, vram_gib)
 
     if parent_dx_m is not None:
@@ -1028,6 +1050,8 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                          corridor_m=corridor_m, leaf_levels_n=leaf_levels_n,
                          source=source, start=start_text,
                          explicit_start=start is not None)
+    if source is not None:
+        notes += source_notes(source)
     plan = Plan(topology=TOPOLOGY, dx_m=dx_m, start=start_text,
                 hours=float(hours_i), domains=domains, source=source,
                 sites_ref={"count": len(sites),

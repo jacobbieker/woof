@@ -147,6 +147,7 @@ from woof.energy.contracts import (
     file_ref,
     load_sites,
 )
+from woof.energy.source_window import WINDOWS as SOURCE_WINDOWS
 from woof.hex.errors import MpasPortError
 from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
 from woof.hex.mesh_point import (
@@ -1292,13 +1293,21 @@ BLOCKED_STAGES: tuple[dict[str, str], ...] = (
 #: ``--hex-density``: how the full chain hands the generator its density.
 DENSITY_MODES = ("raster", "polygons")
 #: Met sources the full chain fetches and turns into WPS intermediates
-#: (``woof hex intermediate --source``); the first is the default.
-CHAIN_SOURCES = ("gfs", "ecmwf-open-data", "gdas", "era5", "aifs", "hrrr")
+#: (``woof hex intermediate --source``); the first is the default.  The
+#: last three are the ~10 km global sources
+#: (:data:`woof.energy.source_window.WINDOWS`); a build whose registry,
+#: fetch or intermediate door lacks one refuses it by name at plan time.
+CHAIN_SOURCES = ("gfs", "ecmwf-open-data", "gdas", "era5", "aifs", "hrrr",
+                 "icon-global", "icon-global-ml", "met-office-global")
 #: Hours between the forecast leads each source publishes and the chain
-#: fetches (``woof fetch --cadence``).  An hourly source is fetched hourly
-#: so the intermediate's contiguous ``--hours 0-N`` finds every lead.
+#: fetches (``woof fetch --cadence``, and ``woof hex intermediate
+#: --interval-hours`` for a global row).  An hourly source is fetched
+#: hourly so the intermediate's contiguous ``--hours 0-N`` finds every lead.
 SOURCE_CADENCE_HOURS = {"gfs": 1, "gdas": 1, "era5": 1, "hrrr": 1,
-                        "ecmwf-open-data": 3, "aifs": 6}
+                        "ecmwf-open-data": 3, "aifs": 6,
+                        # the cadence the availability window judges
+                        **{source: window.cadence_hours
+                           for source, window in SOURCE_WINDOWS.items()}}
 #: The GDAS ladder ends at f009 (``woof fetch --source gdas``).
 GDAS_MAX_HOURS = 9
 #: The source name the chain records when a WRF parent run forces it.
@@ -1329,6 +1338,11 @@ PARENT_STEM = "parent"
 #: HRRR's is the shipped point recipe's (``woof.hex.mesh_point``).
 FIRST_GUESS_LEVELS = {"hrrr": 51, "gfs": 64, "gdas": 64,
                       "ecmwf-open-data": 64, "era5": 64, "aifs": 64,
+                      # 18 pressure levels (1000 to 30 hPa) and 37/33 (to
+                      # 10 hPa) sit under the pressure-level ceiling; 120
+                      # model levels (121 half levels) under the WRF one
+                      "icon-global": 64, "met-office-global": 64,
+                      "icon-global-ml": 140,
                       WRFOUT_SOURCE: 140}
 #: The rest of the init's explicit switches: the shipped point recipe's
 #: (``woof.hex.mesh_point`` ``next``), agreeing with the LES vertical's
@@ -1428,6 +1442,82 @@ def _start_stamp(start: str, hours: float = 0.0) -> str:
     return when.strftime("%Y-%m-%d_%H:%M:%S")
 
 
+def intermediate_shape(source: str) -> str | None:
+    """How this build's ``woof hex intermediate`` takes ``source``.
+
+    ``"global"``: a uniform lat-lon row of
+    :data:`woof.hex.met_intermediate_door.GLOBAL_SOURCES`, written on its
+    own grid; the door refuses ``--point``/``--radius-km`` (there is no
+    box to cut) and reads the lead spacing from ``--interval-hours``.
+    ``"boxed"``: a projected row the engine's decoder regrids onto a box
+    (``--point``, ``--radius-km``, ``--margin-km``).  None: the door has no
+    row for it.
+    """
+
+    key = str(source).strip().lower()
+    try:
+        from woof.hex.met_intermediate_door import GLOBAL_SOURCES
+    except ImportError:                     # pragma: no cover - in-tree
+        GLOBAL_SOURCES = {}
+    if key in GLOBAL_SOURCES:
+        return "global"
+    try:
+        from woof.hex.hrrr_intermediate import SOURCE_ROWS
+    except ImportError:                     # pragma: no cover - in-tree
+        return None
+    row = SOURCE_ROWS.get(key)
+    if row is not None and getattr(row, "door", None) == "engine-decoder":
+        return "boxed"
+    return None
+
+
+def _fetch_takes_point(source: str) -> bool:
+    """Does ``woof fetch --source`` accept a ``--point`` crop for it?
+
+    The table routes take whole objects and refuse a crop at run time.
+    """
+
+    from woof.fetch import fetch_accepts_area
+
+    try:
+        return bool(fetch_accepts_area(source))
+    except Exception:                       # noqa: BLE001 - no crop then
+        return False
+
+
+def _chain_source_gap(source: str) -> str | None:
+    """Why this build cannot run the chain's fetch or met step for ``source``.
+
+    Asked at plan time so a missing registry row, fetch route or
+    intermediate row is a named refusal, not a failure after the mesh,
+    statics and cut are built.
+    """
+
+    from woof.energy.source_window import registry_gap
+
+    gap = registry_gap(source)
+    if gap is not None:
+        return gap
+    from woof.fetch import fetch_front_door_sources
+
+    if source not in fetch_front_door_sources():
+        return (f"--source {source}: `woof fetch` in this build has no "
+                "route for it, so the chain's fetch step cannot run")
+    if intermediate_shape(source) is None:
+        reason = "it has no row for it"
+        try:
+            from woof.hex.met_intermediate_door import refuse_unknown_source
+
+            refuse_unknown_source(source)
+        except MpasPortError as error:
+            reason = str(error)
+        except Exception:                   # noqa: BLE001 - keep the default
+            pass
+        return (f"--source {source}: `woof hex intermediate` in this build "
+                f"cannot write its met intermediates: {reason}")
+    return None
+
+
 def full_chain_commands(*, dt_seconds: float, density: str, dx_m: float,
                         background_km: float, window_cells: int,
                         start: str, hours: float, source: str,
@@ -1505,9 +1595,20 @@ def full_chain_commands(*, dt_seconds: float, density: str, dx_m: float,
         "--cull-receipt", f"{run}/{CULL_NAME}.cull.json",
         "--name", cull_row, "--dt-seconds", dt_text, "--rows", rows,
         "--experimental-dt"]))
-    window = ["--cycle", start, "--hours", f"0-{whole_hours}",
-              "--point", point, "--radius-km", radius,
-              "--margin-km", f"{MET_MARGIN_KM:g}",
+    shape = "boxed" if wrfout_glob is not None else intermediate_shape(source)
+    if shape is None:
+        raise HexPlanRefusal(_chain_source_gap(source) or (
+            f"--source {source}: `woof hex intermediate` has no row for it"))
+    if shape == "global":
+        # A global row is written on its own lat-lon grid: the door refuses
+        # a box (--point/--radius-km) and spaces the leads by
+        # --interval-hours, which must be the fetch's cadence or an hourly
+        # fetch is read every 3 h (and an off-ladder --hours is refused).
+        area = ["--interval-hours", str(cadence)]
+    else:
+        area = ["--point", point, "--radius-km", radius,
+                "--margin-km", f"{MET_MARGIN_KM:g}"]
+    window = ["--cycle", start, "--hours", f"0-{whole_hours}", *area,
               "--out-dir", met_dir, "--prefix", "MET"]
     if wrfout_glob is not None:
         chain.append(("intermediate", [
@@ -1515,9 +1616,10 @@ def full_chain_commands(*, dt_seconds: float, density: str, dx_m: float,
             "--wrfout-glob", wrfout_glob, *window]))
     else:
         fetch = ["fetch", "--source", source, "--cycle", start,
-                 "--hours", str(whole_hours), "--cadence", str(cadence),
-                 "--point", point, "--radius-km", fetch_radius,
-                 "--out", f"{run}/grib"]
+                 "--hours", str(whole_hours), "--cadence", str(cadence)]
+        if _fetch_takes_point(source):
+            fetch += ["--point", point, "--radius-km", fetch_radius]
+        fetch += ["--out", f"{run}/grib"]
         if source == "era5":
             fetch.append("--retrieve")
         chain.append(("fetch", fetch))
@@ -1573,7 +1675,8 @@ STAGE_REQUIREMENTS: dict[str, tuple[dict[str, Any], ...]] = {
                                   "--cull-receipt", "unit": 10,
                        "what": "runtime mesh row for the cut"},),
     "intermediate": ({"feature": "woof hex intermediate --source "
-                                 "gfs|ecmwf-open-data|gdas|era5|aifs",
+                                 + "|".join(s for s in CHAIN_SOURCES
+                                            if s != "hrrr"),
                       "unit": 11, "what": "global-source WPS intermediates",
                       "forcing": "global"},
                      {"feature": "woof hex intermediate --source wrfout "
@@ -1652,11 +1755,7 @@ def _intermediate_refusal(argv: Sequence[str]) -> str | None:
     # The door hands the uniform lat-lon rows to met_intermediate before it
     # consults the projected table, so asking only that table refuses
     # sources the door runs (hrrr_intermediate.run_intermediate).
-    try:
-        from woof.hex.met_intermediate_door import GLOBAL_SOURCES
-    except ImportError:
-        GLOBAL_SOURCES = {}
-    if source.strip().lower() in GLOBAL_SOURCES:
+    if intermediate_shape(source) is not None:
         return None
     try:
         source_row(source)
@@ -1767,15 +1866,22 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                vram_gib: float | None = None, max_domains: int | None = None,
                nz: int | None = None, experimental_dt: bool = False,
                density: str | None = None,
-               wrfout_glob: str | None = None) -> Plan:
+               wrfout_glob: str | None = None,
+               now: datetime | None = None) -> Plan:
     """Emit the domains for ``sites`` under ``outdir`` and return the plan
     (already written to ``outdir/plan.json``).
 
     ``experimental_dt`` (``--hex-experimental-dt``) plans the full chain on
     the EXPERIMENTAL sub-5 s timestep lane; ``density``
     (``--hex-density``) and ``wrfout_glob`` (``--hex-forcing-wrfout``)
-    shape that chain and are refused without it.
+    shape that chain and are refused without it.  ``now`` fixes the clock
+    the source availability windows are judged against
+    (:func:`woof.energy.source_window.window_refusal`).
     """
+
+    from woof.energy.source_window import (canonical_source,
+                                           newest_landed_start, source_notes,
+                                           window_refusal)
 
     outdir = Path(outdir)
     if len(sites) == 0:
@@ -1802,7 +1908,8 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     levels = HEX_LEVELS if nz is None else int(nz)
     if max_domains is not None and max_domains < 1:
         raise HexPlanRefusal("--max-domains must allow the one hex mesh")
-    start = _check_start(start) if start is not None else default_start()
+    start_defaulted = start is None
+    start = _check_start(start) if start is not None else default_start(now)
 
     timestep: dict[str, Any] | None = None
     vertical_doc: dict[str, Any] | None = None
@@ -1822,7 +1929,8 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                     "forcing; a WRF parent run IS the source, so give one")
             chain_source = WRFOUT_SOURCE
         else:
-            chain_source = CHAIN_SOURCES[0] if source is None else source
+            chain_source = (CHAIN_SOURCES[0] if source is None
+                            else canonical_source(source))
             if chain_source not in CHAIN_SOURCES:
                 raise HexPlanRefusal(
                     f"--source {source!r} has no hex regional met route; the "
@@ -1833,6 +1941,19 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                     f"--source gdas publishes leads to f{GDAS_MAX_HOURS:03d} "
                     f"only; --hours {hours:g} needs boundaries past that.  "
                     "Use --source gfs")
+            gap = _chain_source_gap(chain_source)
+            if gap is not None:
+                raise HexPlanRefusal(gap)
+            if start_defaulted:
+                # the newest cycle by the clock may not have landed yet
+                start = newest_landed_start(
+                    chain_source, datetime.strptime(start, "%Y-%m-%dT%H"),
+                    hours, now=now).strftime("%Y-%m-%dT%H")
+            refusal = window_refusal(
+                chain_source, datetime.strptime(start, "%Y-%m-%dT%H"),
+                hours, now=now)
+            if refusal is not None:
+                raise HexPlanRefusal(refusal)
         floor = spacing_floor_m(dx_m)
         if dx_m >= floor["floor_dx_m"]:
             raise HexPlanRefusal(
@@ -2107,6 +2228,8 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
             f"({FIRST_GUESS_LEVELS[WRFOUT_SOURCE if wrfout_glob else chain_source]}); "
             "the intermediate receipt prints the exact count",
         ]
+        if wrfout_glob is None:
+            chain_notes.extend(source_notes(chain_source))
         if missing:
             chain_notes.append(
                 f"this build parses {len(requires) - len(missing)} of "
@@ -2236,7 +2359,8 @@ def main(args) -> int:
 __all__ = [
     "TOPOLOGY", "RUN_DIR", "OUTPUT_GLOB", "HexPlanRefusal", "background_km_for",
     "build_plan", "capacity_verdict", "chain_requirements",
-    "experimental_timestep", "full_chain_commands", "hex_commands", "ladder",
+    "experimental_timestep", "full_chain_commands", "hex_commands",
+    "intermediate_shape", "ladder",
     "les_vertical_spec", "main",
     "spacing_at_distance", "spacing_floor_m", "steepest_gradient_percent",
 ]

@@ -357,6 +357,49 @@ def test_bad_start_refused(tmp_path):
                          dx_m=100.0, start="tomorrow")
 
 
+#: Twelve hours after the test start: every boundary source has landed it.
+NOW = datetime(2026, 10, 10, 12)
+
+
+def test_icon_global_parent_is_forced_by_icon(tmp_path, cover):
+    plan = tiles.build_plan(load_sites(SITES_WALES), outdir=tmp_path,
+                            dx_m=1000.0, start="2026-10-10T00", hours=6,
+                            source="dwd-icon", now=NOW)
+    assert plan.source == "icon-global"
+    import tomllib
+
+    raw = tomllib.loads((tmp_path / "parent" / "parent.toml").read_text())
+    assert raw["fetch"]["source"] == "icon-global"
+    assert any(note.startswith("icon-global: DWD ICON global")
+               for note in plan.notes)
+
+
+@pytest.mark.parametrize("source", ["icon-global-ml", "met-office-global",
+                                    "um-global"])
+def test_planned_source_without_a_registry_row_is_refused(
+        tmp_path, monkeypatch, source):
+    from woof import source_adapters
+
+    for name in ("icon-global-ml", "met-office-global", "metoffice-global",
+                 "ukmo-global", "um-global"):
+        monkeypatch.delitem(source_adapters._ALIASES, name, raising=False)
+    with pytest.raises(tiles.TilePlanRefusal, match="no registry row"):
+        tiles.build_plan(load_sites(SITES_WALES), outdir=tmp_path,
+                         start="2026-10-10T00", source=source, now=NOW)
+    assert not list(tmp_path.iterdir())
+
+
+def test_cycle_outside_the_source_window_is_refused(tmp_path):
+    with pytest.raises(tiles.TilePlanRefusal) as caught:
+        tiles.build_plan(load_sites(SITES_WALES), outdir=tmp_path,
+                         start="2026-08-01T12", source="icon-global", now=NOW)
+    assert "source.coop" in str(caught.value)
+    with pytest.raises(tiles.TilePlanRefusal, match="lands about"):
+        tiles.build_plan(load_sites(SITES_WALES), outdir=tmp_path,
+                         start="2026-10-10T12", source="icon-global", now=NOW)
+    assert not list(tmp_path.iterdir())
+
+
 def test_empty_sites_refused(tmp_path):
     with pytest.raises(tiles.TilePlanRefusal, match="no sites"):
         tiles.build_plan(SiteSet(sites=[], heights_m=(10.0,)),

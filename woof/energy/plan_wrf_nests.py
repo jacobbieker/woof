@@ -924,7 +924,11 @@ def _limit_refusal(layout: _Layout, limit: int, max_domains: int | None
 
 def _ensure_sources(source: str | None) -> str:
     from woof import domain_wizard as dw
+    from woof.energy.source_window import registry_gap
 
+    gap = registry_gap(source) if source is not None else None
+    if gap is not None:
+        raise PlanRefused(gap)
     try:
         resolved = dw.resolve_source(source or DEFAULT_SOURCE)
     except ValueError as error:
@@ -1000,6 +1004,16 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
     source = _ensure_sources(source)
     start_defaulted = start is None
     start_time = parse_start(start, now=now)
+    from woof.energy.source_window import (newest_landed_start,
+                                           source_notes, window_refusal)
+
+    if start_defaulted:
+        # the newest cycle by the clock may not have landed yet
+        start_time = newest_landed_start(source, start_time, float(hours),
+                                         now=now)
+    refusal = window_refusal(source, start_time, float(hours), now=now)
+    if refusal is not None:
+        raise PlanRefused(refusal)
     budget = _resolve_budget(card, vram_gib)
     target = _fit_target_bytes(budget)
     if target <= 0:
@@ -1145,6 +1159,7 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
                      "recent 00/06/12/18 UTC cycle by the clock; the source "
                      "may not have published it yet (GFS posts about 3.5-5 h "
                      "after the cycle), in which case pass an earlier --start")
+    notes.extend(source_notes(source))
     notes.extend(leaf_notes)
     notes.extend(fetch_notes)
     if len(attempts) > 1:
