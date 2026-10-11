@@ -2587,6 +2587,13 @@ def test_the_compose_registry_covers_every_registered_composition_source():
         # The same GDT-101 normalization, on DWD's regional mesh.
         "icon-d2": "compose inputs are produced by the normalization "
                    "stage, not published",
+        # Met Office Global objects (one ~150-230 MB NetCDF-4 variable per
+        # pressure-level object, plus a same-cycle GDAS analysis donor) are
+        # not in the staging tree on any box this battery has run on.  The
+        # nearest_coordinate_index join its composition uses is graded by
+        # the shared parity table both engines read
+        # (tests/data/cross_source/nearest-coordinate-index-cases.json).
+        "met-office-global": "no staged Met Office NetCDF corpus",
     }
     registered = {
         adapter.source_id for adapter in source_adapters()

@@ -1,0 +1,53 @@
+{
+  "schema": "gpuwm-cross-source-hybrid-provenance-v1",
+  "source": "Met Office Unified Model global deterministic forecast on the global 10 km standard grid (NetCDF-4, one variable per object), with the land-surface state and sea ice the product does not publish borrowed from the SAME cycle's NCEP GDAS 0.25-degree analysis",
+  "licence": {
+    "met_office": "British Crown copyright, the Met Office, CC BY-SA 4.0 (share-alike applies to derived outputs). Supplied on a free, unsupported basis and not for critical business purposes.",
+    "share_alike": "every product derived from these bytes (prepared WRF inputs, forecasts, renders) inherits CC BY-SA 4.0 and must carry the attribution above",
+    "gdas": "NCEP GDAS analysis: NOAA/NWS/NCEP operational data, United States government work with no copyright restriction; attribute as 'NOAA NCEP Global Data Assimilation System'"
+  },
+  "contributing_sources": {
+    "primary_atmosphere": {
+      "product": "Met Office global deterministic 10 km (mosg__model_configuration gl_det, mosg__grid_version 1.7.0, um_version 13.8 measured 2026-10-11)",
+      "front_door": "s3://met-office-atmospheric-model-data/global-deterministic-10km/<RUN YYYYMMDDTHHMMZ>/<VALID YYYYMMDDTHHMMZ>-PT<HHHH>H00M-<variable>.nc (eu-west-2, anonymous HTTPS; registry.opendata.aws/met-office-global-deterministic)",
+      "grid": "regular latitude/longitude, 2560 x 1920 cell centres, 0.140625 deg x 0.09375 deg, longitudes -179.9296875..179.9296875, latitudes -89.953125..89.953125 south to north (MEASURED 2026-10-11 00Z)",
+      "time": "time, forecast_reference_time and forecast_period are 0-d scalar variables in every object (seconds since 1970-01-01 00:00:00); the source cycle is read from forecast_reference_time, so every lead of one run is one cycle",
+      "supplies": {
+        "air_temperature": "temperature_on_pressure_levels (air_temperature, 37 levels 1000..0.4 hPa)",
+        "geopotential_height": "geopotential_height_on_pressure_levels (geopotential_height, 37 levels)",
+        "winds": "wind_speed_on_pressure_levels and wind_direction_on_pressure_levels (37 levels), turned into earth-relative u/v by the eastward/northward_wind_from_speed_direction derivations; direction is the meteorological FROM direction (standard_name wind_from_direction, degrees)",
+        "specific_humidity": "relative_humidity_on_pressure_levels (units '1', 33 levels 1000..10 hPa) through specific_humidity_from_rh",
+        "surface_pressure": "derived at every lead from pressure_at_mean_sea_level at the step-0 height_of_orography through that lead's own isobaric heights (surface_pressure_from_sea_level, WRF real's sfcprs3 relation); the product publishes no surface pressure",
+        "terrain_height": "height_of_orography (surface_altitude), published at PT0000H00M only and carried to every lead as the terrain supplement under cycle_invariant_broadcast",
+        "skin_temperature": "temperature_at_surface (surface_temperature)",
+        "screen_level": "temperature_at_screen_level and relative_humidity_at_screen_level, both on the 0-d height coordinate 1.5 m, declared screen_height_m 1.5 and used as published (the canonical 2 m fields carry the 1.5 m values); specific humidity from the screen RH at the derived surface pressure",
+        "ten_metre_wind": "wind_speed_at_10m and wind_direction_at_10m (height 10 m), through the same speed/direction derivations",
+        "snow_water_equivalent": "snow_depth_water_equivalent (lwe_thickness_of_surface_snow_amount, m), times 1000 kg m-3"
+      },
+      "near_surface_namesakes": "the pressure-level and near-surface objects use the same variable names (air_temperature, relative_humidity, wind_speed, wind_from_direction); every selector pins the CF coordinates attribute, which lists the scalar height coordinate only on the near-surface objects",
+      "model_top": "the profile's ladder stops at 10 hPa, the highest level where all four 3-D fields exist: relative humidity is published on 33 levels to 10 hPa while temperature, height and wind continue to 0.4 hPa, and the levels above 10 hPa are cut by value from the 37-level objects",
+      "below_ground": "the pressure-level objects carry values at levels below the model surface, flagged by the ancillary status_flag variable (below_surface_pressure); the values are read as published and the vertical interpolation to WRF levels uses the derived surface pressure",
+      "absent": "soil temperature and moisture, land-sea mask, sea ice, surface pressure, specific humidity and model levels are not published (MEASURED by listing 2026-10-11 00Z)",
+      "timing": "f000 lands at about + 5 h 30 min, f001..f054 at about + 5 h 45 min, later batches up to + 6 h 30 min (MEASURED on 9 runs by the fetch route); the same-cycle GDAS donor lands at + 6 h 48 min or later, so the route is donor-gated",
+      "earlier_era": "height_of_orography exists from run 20251211T1200Z onward; earlier runs have no step-0 orography, the terrain supplement has nothing to bind, and they refuse by naming it rather than borrow terrain from elsewhere. From 20251211T1200Z through 20260121T0600Z the 3-D height object is named height_ASL_on_pressure_levels (geopotential_height_on_pressure_levels from 20260121T1200Z); its variable carries standard_name geopotential_height (MEASURED in the header bytes of the 20251201T0000Z object), so the height selector resolves it through its standard_name and the decode reports that rescue. That middle era has not been prepared end to end",
+      "ladders": "00/12Z runs post hourly to f054, 3-hourly to f144 and 6-hourly to f168; 06/18Z runs hourly to f054 and 3-hourly to f069 (f066 through 20260121T0600Z), MEASURED by the fetch route from paginated listings; this profile prepares the uniform 3-hour series, so it reaches f144 on 00/12Z and f069 on 06/18Z"
+    },
+    "physical_analysis_surface": {
+      "product": "NCEP GDAS 0.25-degree pgrb2 analysis (f000) of the SAME cycle as the primary",
+      "front_doors": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/gdas.<YYYYMMDD>/<CC>/atmos/gdas.t<CC>z.pgrb2.0p25.f000 and the noaa-gfs-bdp-pds AWS mirror; full files, written by the fetch route to donor-gdas/ and bound as --supplement physical_analysis_surface_data=<file>",
+      "mapping": "gdas-pgrb2-0p25-analysis-land-ice-donor-grib2-native (rw-wps-gdas-pgrb2-land-ice-donor.mapping.json): the shipped GDAS donor table plus ONE row, sea_ice_fraction from ICEC (discipline 10, category 2, parameter 0, surface) under preserve_mask; the shared donor AIGFS and AIGEFS pin is unchanged",
+      "supplies": "land_fraction (LAND), sea_ice_fraction (ICEC) and the four-layer 0-10/10-40/40-100/100-200 cm soil temperature and volumetric moisture column",
+      "clock": "source_cycle_analysis_broadcast: exactly one donor analysis record whose valid time must BE the primary source cycle, carried unchanged to every lead; a donor from any other cycle refuses by naming the source-cycle rule",
+      "grid_alignment": "nearest_coordinate_index: the GDAS 0.25-degree grid and the Met Office grid share no cells, so each Met Office row and column takes the nearest GDAS row and column (axis by axis, modulo 360 on longitude, ties to the lower index). Nothing is interpolated: every borrowed value is a GDAS cell value, repeated about 2 x 3 times across the finer Met Office grid, so the borrowed land mask, soil column and ice edge follow the 0.25-degree GDAS coastline, not the Met Office one. The donor must cover the whole primary extent, so a regional GDAS subset refuses"
+    }
+  },
+  "why_hybrid": "the Met Office product publishes the full 3-D atmosphere and the screen-level, 10 m and skin state, but no soil, no land-sea mask and no sea ice; the land-surface initial state is undefined from its bytes alone, so it is borrowed from the same cycle's physical GDAS analysis through the donor's own SHA-256-pinned mapping",
+  "frozen_surface_caveat": "soil, land mask and sea ice borrowed under the analysis-broadcast clock are FROZEN at the analysis while the Met Office atmosphere advances; for a regional run of a few days this is the same class of approximation as WRF's own no-SST-update default, and the receipt names every carried valid time",
+  "deliberate_exclusions": {
+    "vertical_velocity": "wind_vertical_velocity_on_pressure_levels is published but not bound; the vertical_velocity policy is the validated explicit zero",
+    "snow_depth": "no physical snow depth is published; only the water equivalent is bound",
+    "cloud_and_precipitation": "cloud amounts and precipitation rates are diagnostics, not hydrometeor mixing ratios; the hydrometeor policies are the validated explicit zero"
+  },
+  "input_identity": "dynamic file paths and SHA-256 values are owned by the mapped-source input manifest, gpuwm-mapped-source-inputs-v1; the donor mapping document is pinned transitively (the composition pins its SHA-256, the manifest pins the composition)",
+  "qualification": "Implementation route, not a live-cycle or unchanged-stock-WRF certification"
+}

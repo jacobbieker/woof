@@ -619,6 +619,129 @@ fn binding_subset_indices(
     Ok((latitude, longitude))
 }
 
+/// `mapped_composition._GRID_NEAREST_INDEX`.
+pub const GRID_NEAREST_INDEX: &str = "nearest_coordinate_index";
+
+/// `mapped_composition._REGULAR_AXIS_REL_TOL`.
+const REGULAR_AXIS_REL_TOL: f64 = 1e-3;
+
+/// `mapped_composition._NEAREST_RECEIPT`.
+const NEAREST_RECEIPT: [(&str, &str); 5] = [
+    ("coordinate_match", "nearest_coordinate_index_separable"),
+    ("longitude_equivalence", "modulo_360_nearest"),
+    ("tie_break", "lower_index"),
+    ("interpolation", "none"),
+    (
+        "resolution_note",
+        "every borrowed value is a donor cell value repeated by nearest \
+         index where the primary grid is finer; borrowed land/sea \
+         boundaries follow the donor grid",
+    ),
+];
+
+/// `mapped_composition._regular_axis_step`.
+fn regular_axis_step(axis: &[f64], label: &str) -> Result<f64> {
+    if axis.len() < 2 {
+        return Err(frame_invalid(format!(
+            "{label} must be a 1-D axis of at least two coordinates for \
+             nearest_coordinate_index"
+        )));
+    }
+    if axis.iter().any(|value| !value.is_finite()) {
+        return Err(frame_invalid(format!("{label} carries non-finite coordinates")));
+    }
+    let step = axis[1] - axis[0];
+    let irregular = axis
+        .windows(2)
+        .any(|pair| ((pair[1] - pair[0]) - step).abs() > REGULAR_AXIS_REL_TOL * step.abs());
+    if step == 0.0 || irregular {
+        return Err(frame_invalid(format!(
+            "{label} is not a regular axis (constant spacing, strictly \
+             monotone); nearest_coordinate_index borrows only between \
+             regular latitude/longitude grids"
+        )));
+    }
+    Ok(step.abs())
+}
+
+/// `mapped_composition._nearest_coordinate_indices`.
+///
+/// Distances are measured on the axis alone, modulo 360 on a longitude
+/// axis (floor-modulo: `rem_euclid`, as `np.mod`), and the LOWER index
+/// wins a tie (strict `<`, as `np.argmin`).  A primary coordinate more
+/// than half a donor spacing from every donor coordinate refuses.
+pub fn nearest_coordinate_indices(
+    donor: &[f64],
+    primary: &[f64],
+    label: &str,
+    cyclic_degrees: bool,
+) -> Result<Vec<usize>> {
+    let spacing = regular_axis_step(donor, &format!("donor {label}"))?;
+    if primary.is_empty() {
+        return Err(frame_invalid(format!(
+            "primary {label} must be a non-empty 1-D axis"
+        )));
+    }
+    if primary.len() > 1 {
+        regular_axis_step(primary, &format!("primary {label}"))?;
+    } else if primary.iter().any(|value| !value.is_finite()) {
+        return Err(frame_invalid(format!(
+            "primary {label} carries non-finite coordinates"
+        )));
+    }
+    let bound = 0.5 * spacing * (1.0 + REGULAR_AXIS_REL_TOL);
+    let mut indices = Vec::with_capacity(primary.len());
+    for value in primary {
+        let mut best_index = 0usize;
+        let mut best_distance = f64::INFINITY;
+        for (index, candidate) in donor.iter().enumerate() {
+            let distance = if cyclic_degrees {
+                let folded = (candidate - value).rem_euclid(360.0);
+                folded.min(360.0 - folded)
+            } else {
+                (candidate - value).abs()
+            };
+            if distance < best_distance {
+                best_distance = distance;
+                best_index = index;
+            }
+        }
+        if best_distance > bound {
+            return Err(frame_invalid(format!(
+                "the donor grid does not cover primary {label} {}: the nearest \
+                 donor {label} is more than half a donor spacing away",
+                python_float_repr(*value)
+            )));
+        }
+        indices.push(best_index);
+    }
+    Ok(indices)
+}
+
+/// `mapped_composition._binding_subset_indices` under
+/// `nearest_coordinate_index`.
+fn nearest_binding_indices(
+    primary: &PrimaryHeader,
+    donor: &DecodedCollection,
+    binding_name: &str,
+) -> Result<(Vec<usize>, Vec<usize>)> {
+    let wrap = |error: crate::refusal::Refusal| -> crate::refusal::Refusal {
+        frame_invalid(format!(
+            "contributing source binding {} declares nearest_coordinate_index \
+             and refuses ({})",
+            crate::refusal::python_repr(binding_name),
+            error.message
+        ))
+    };
+    let latitude =
+        nearest_coordinate_indices(&donor.latitude, primary.latitude, "latitude", false)
+            .map_err(wrap)?;
+    let longitude =
+        nearest_coordinate_indices(&donor.longitude, primary.longitude, "longitude", true)
+            .map_err(wrap)?;
+    Ok((latitude, longitude))
+}
+
 /// One contributing-source borrow, resolved before a primary valid time
 /// is read.
 ///
@@ -751,7 +874,21 @@ pub fn plan_bound_fields(
              does not declare"
         )));
     }
-    let (latitude_indices, longitude_indices) = binding_subset_indices(primary, donor, binding_name)?;
+    let grid_alignment = binding.grid_alignment.as_str();
+    if !crate::compose::BOUND_GRID_ALIGNMENTS.contains(&grid_alignment) {
+        let mut allowed = crate::compose::BOUND_GRID_ALIGNMENTS.to_vec();
+        allowed.sort_unstable();
+        return Err(frame_invalid(format!(
+            "binding grid_alignment must be one of {}, got {}",
+            python_list_repr(&allowed),
+            crate::refusal::python_repr(grid_alignment)
+        )));
+    }
+    let (latitude_indices, longitude_indices) = if grid_alignment == GRID_NEAREST_INDEX {
+        nearest_binding_indices(primary, donor, binding_name)?
+    } else {
+        binding_subset_indices(primary, donor, binding_name)?
+    };
     let keys = primary.keys();
     let primary_cycles: Vec<NaiveDateTime> = primary
         .source_cycles
@@ -898,7 +1035,7 @@ pub fn plan_bound_fields(
         .collect();
     let mut fields = binding.fields.clone();
     fields.sort();
-    let receipt = json!({
+    let mut receipt = json!({
         "schema": BINDING_RECEIPT_SCHEMA,
         "status": "PASS",
         "binding": binding_name,
@@ -941,6 +1078,15 @@ pub fn plan_bound_fields(
             .collect::<Vec<String>>(),
         "field_subset_sha256": subset_hashes,
     });
+    if grid_alignment == GRID_NEAREST_INDEX {
+        // `mapped_composition._NEAREST_RECEIPT`: fixed strings in place of
+        // the exact-subset claims, so both engines write the same receipt.
+        if let Some(object) = receipt.as_object_mut() {
+            for (key, text) in NEAREST_RECEIPT {
+                object.insert(key.to_owned(), json!(text));
+            }
+        }
+    }
     Ok((
         // The composed frame keeps the PRIMARY's vertical identity, its
         // hybrid coefficient ladder included: the slice
@@ -967,6 +1113,67 @@ fn mixed_cycles(label: &str, cycles: &[NaiveDateTime]) -> crate::refusal::Refusa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One axis of the shared nearest-index table: a list, or
+    /// `{start, step, count, float32}` expanded exactly as the Python
+    /// test expands it (float64 `start + step * i`, rounded through f32).
+    fn nearest_case_axis(spec: &Value) -> Vec<f64> {
+        if let Some(values) = spec.as_array() {
+            return values.iter().map(|value| value.as_f64().unwrap()).collect();
+        }
+        let start = spec["start"].as_f64().unwrap();
+        let step = spec["step"].as_f64().unwrap();
+        let count = spec["count"].as_u64().unwrap();
+        let float32 = spec["float32"].as_bool().unwrap();
+        (0..count)
+            .map(|index| {
+                let value = start + step * index as f64;
+                if float32 {
+                    value as f32 as f64
+                } else {
+                    value
+                }
+            })
+            .collect()
+    }
+
+    /// The Rust half of `tests/data/cross_source/nearest-coordinate-index-cases.json`;
+    /// `tests/test_cross_source_composition.py` grades the Python half
+    /// against the same rows, indices and refusal texts alike.
+    #[test]
+    fn nearest_index_matches_the_shared_parity_table() {
+        let table = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(4)
+            .unwrap()
+            .join("tests")
+            .join("data")
+            .join("cross_source")
+            .join("nearest-coordinate-index-cases.json");
+        let document: Value = serde_json::from_slice(&std::fs::read(table).unwrap()).unwrap();
+        let cases = document["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let donor = nearest_case_axis(&case["donor"]);
+            let primary = nearest_case_axis(&case["primary"]);
+            let label = case["label"].as_str().unwrap();
+            let cyclic = case["cyclic"].as_bool().unwrap();
+            let outcome = nearest_coordinate_indices(&donor, &primary, label, cyclic);
+            if let Some(refusal) = case.get("refusal") {
+                let error = outcome.expect_err(name);
+                assert_eq!(error.message, refusal.as_str().unwrap(), "{name}");
+            } else {
+                let expected: Vec<usize> = case["indices"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_u64().unwrap() as usize)
+                    .collect();
+                assert_eq!(outcome.expect(name), expected, "{name}");
+            }
+        }
+    }
 
     #[test]
     fn an_exact_subset_solves_to_its_index_window() {

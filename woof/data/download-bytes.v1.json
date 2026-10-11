@@ -74,7 +74,10 @@
    "measured": "Content-Length of the 2026-09-25 00Z f000 and f006 pres and sfc objects of the default member, read on 2026-09-26; its GDAS donor is priced by the gdas full-file row"},
   {"source": "gem-gdps", "mode": "full-file",
    "objects": {"state": 1058000, "analysis-invariant": 190600, "terrain": 723800},
-   "measured": "mean of 1044 state, 4 analysis-invariant and 2 terrain objects, 2026-09-26 00Z f00 to f06, two fetches"}
+   "measured": "mean of 1044 state, 4 analysis-invariant and 2 terrain objects, 2026-09-26 00Z f00 to f06, two fetches"},
+  {"source": "met-office-global", "mode": "full-file",
+   "objects": {"state": 70750629, "terrain": 3226432},
+   "measured": "bucket listing sizes, read 2026-10-11: mean of the 468 state objects (13 variables, f000 to f003) of the 9 runs 2026-10-09 00Z to 2026-10-11 00Z, five pressure-level files of 120 to 229 MB and eight surface files of 1.7 to 8.1 MB a lead, and the 9 step-0 orography objects, all 3,226,432 B; its GDAS donor is priced by the gdas full-file row"}
  ],
  "preparation": {
   "prepared:hrrr": {
@@ -262,6 +265,17 @@
     "windowed_layers": 0,
     "bytes_per_value": 8,
     "measured": "the window is the one its normalization document computes around the target (the same function the normalization runs); the layers are its mapping's fields and ladder and the ICON soil column, 9 temperature and 8 water layers and the two volumetric moistures derived from them, counted as the engine wrote them for ICON-EU, whose mapping has the same soil fields"
+   },
+   "met-office-global": {
+    "mapping": "rw-wps-met-office-global-netcdf.mapping.json",
+    "grid": "2560 x 1920, 0.140625 x 0.09375 degree global",
+    "grid_points": 4915200,
+    "layers_per_valid_time": 216,
+    "soil_layers": 8,
+    "windowed_layers": 198,
+    "global_axes": {"longitude_first": -179.9296875, "latitude_first": -89.953125, "longitude_step_degrees": 0.140625, "latitude_step_degrees": 0.09375, "nx": 2560, "ny": 1920},
+    "bytes_per_value": 8,
+    "measured": "the engine's frames for a real f000 + f003 compose of 2026-10-11 00Z by gpuwm_mapped_engine on 2026-10-11 (a 100 x 80 UK target at 9 km): 18 fields per frame, six on the 33-level ladder, ten surface fields and the two soil fields of the four GDAS layers, so 216 layers and 8,493,465,600 bytes per valid time on the whole grid before the atmospheric window crops its 198 3-D layers"
    }
   }
  }

@@ -591,6 +591,45 @@ _PACKAGED_PROFILES = MappingProxyType({
             },
         },
     ),
+    # The Met Office global deterministic 10 km forecast: one NetCDF-4
+    # variable per object on a regular 2560 x 1920 grid, scalar time
+    # coordinates (the source cycle is forecast_reference_time), winds as
+    # speed and meteorological from-direction, and a 1.5 m screen level.
+    # The ladder stops at 10 hPa, where humidity ends.  Orography is
+    # published at step 0 only, so it is the terrain supplement carried to
+    # every lead; surface pressure is derived at every lead from that
+    # lead's mean-sea-level pressure at the orography.  The product
+    # publishes no soil, land mask or sea ice: they are borrowed from the
+    # SAME cycle's GDAS 0.25-degree analysis through the land-and-ice
+    # donor table (the shipped GDAS donor plus one sea-ice row), on the
+    # nearest_coordinate_index grid alignment because the two grids share
+    # no cells.  Selectors were authored from real 2026-10-11 00Z bytes.
+    "met-office-global-netcdf": _profile(
+        "rw-wps-met-office-global-netcdf",
+        source_format="netcdf",
+        mapping="3d0cb7f5885557653e2999ab8ab3848760ff820a3c70765347c736931762c2fa",
+        composition="0102420c54d8c14b5b98cd016d82753f8a29fe9c9b61447886a38f414177871f",
+        provenance="8df36ca0fd6d7c3aa42c83ab5604c8adc87fbc9f54c3b24d6205b5779cae1e1a",
+        data_role="met_office_global_invariant_surface",
+        provenance_role="met_office_global_invariant_surface_provenance",
+        # The GDAS borrow carries its own evidence, so the two provenance
+        # roles never bind one file twice.
+        contributing_provenances={
+            "physical_analysis_surface_provenance": {
+                "file": "rw-wps-gdas-pgrb2-land-ice-donor.provenance.json",
+                "sha256": "188c8e30e0a6849a629e689f607f44fb9d1f755fa3da1b94878ec0f4265cdd4c",
+            },
+        },
+        contributing_mappings={
+            "physical_analysis_surface_mapping": {
+                "file": "rw-wps-gdas-pgrb2-land-ice-donor.mapping.json",
+                "sha256": (
+                    "d7cf604f022585ab4bfdaad292b0d27a09436e4504ff6c43"
+                    "a7d80bbf38366536"
+                ),
+            },
+        },
+    ),
 })
 
 

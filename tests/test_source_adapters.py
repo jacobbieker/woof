@@ -63,6 +63,7 @@ EXPECTED_SOURCE_IDS = (
     "ecmwf-open-data",
     "ecmwf-ens",
     "aifs",
+    "met-office-global",
     "rap-native",
     "hrrr-native",
     "rap",
@@ -124,6 +125,11 @@ def test_registry_covers_bound_inventory_and_external_source_routes():
     adapters = source_adapters()
     assert tuple(adapter.source_id for adapter in adapters) == EXPECTED_SOURCE_IDS
     assert len({adapter.source_id for adapter in adapters}) == len(EXPECTED_SOURCE_IDS)
+    # The Met Office row has its fetch route before its packaged profile
+    # ships, and claims runnable only once the distribution carries it.
+    met_office = (["met-office-global"]
+                  if "met-office-global-netcdf" in packaged_profile_ids()
+                  else [])
     assert [adapter.source_id for adapter in adapters if adapter.runnable] == [
         "hrrr",
         "hrrr-prs",
@@ -139,6 +145,7 @@ def test_registry_covers_bound_inventory_and_external_source_routes():
         "ecmwf-open-data",
         "ecmwf-ens",
         "aifs",
+        *met_office,
         "rap-native",
         "hrrr-native",
         "rap",

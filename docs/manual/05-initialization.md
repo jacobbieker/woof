@@ -109,6 +109,12 @@ Cross-source donors are fetched for you: AIGFS and AIGEFS publish no soil, land
 mask, orography, skin temperature, surface pressure, or 2 m humidity, so the
 packaged profiles bind those canonicals to the same-cycle GDAS analysis and the
 fetch pulls the donor into `<out>/donor-gdas/` [docs/public/DATA.md].
+`met-office-global` borrows the same way for the state it does not publish (soil
+temperature and moisture, land mask, sea ice). Its 0.140625 x 0.09375 degree grid
+shares no cells with GDAS's 0.25 degrees, so its binding uses the
+`nearest_coordinate_index` grid alignment: the nearest GDAS row and column, no
+interpolation, and a borrowed coastline that follows GDAS
+[docs/public/MET-OFFICE-GLOBAL.md].
 
 Host choice can be a correctness question, carried as table data: AIGFS is
 NOMADS-only on purpose, because the public S3 bucket publishes objects under

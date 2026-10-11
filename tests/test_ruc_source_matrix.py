@@ -68,6 +68,8 @@ EXPECTED_POLICY = {
     "icon-d2": "node_point_samples",
     "icon-eu": "node_point_samples",
     "icon-global": "node_point_samples",
+    # Soil borrowed from the same-cycle GDAS analysis: the GDAS layer column.
+    "met-office-global": "layer_midpoint_samples",
     "rap": "node_point_samples",
     "rap-native": "node_point_samples",
     "rrfs": "node_point_samples",
@@ -98,8 +100,23 @@ EXPECTED_SCALE = {
 
 def _soil_contract(profile_id):
     authorities = packaged_authorities(profile_id)
-    composition = load_composition(
-        authorities["composition"], authorities["mapping"])
+    try:
+        composition = load_composition(
+            authorities["composition"], authorities["mapping"])
+    except ValueError as refusal:
+        if "time_coordinate" not in str(refusal):
+            raise
+        # A checkout whose mapping engine predates the scalar NetCDF time
+        # coordinate (coordinates.time.time_coordinate, which the Met Office
+        # objects need) refuses that mapping by naming the key.  The soil
+        # contract does not depend on it: a borrowed soil column is
+        # validated against the donor's layer geometry with no primary
+        # mapping at all, exactly as load_composition does it.
+        import json
+        from woof.ingest.soil_contract import validate_soil_layer_contract
+        composition = json.loads(
+            Path(authorities["composition"]).read_text(encoding="utf-8"))
+        validate_soil_layer_contract(composition["soil_layers"], mapping=None)
     return composition.get("soil_layers")
 
 

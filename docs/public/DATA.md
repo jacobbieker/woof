@@ -521,6 +521,17 @@ process), prepare too: both forms are declared, and where the ensemble
 octets are gone the `memNNN` folder is the member identity that is
 checked.
 
+`met-office-global` borrows from the same-cycle GDAS analysis too, but
+only what it does not publish: soil temperature and moisture, the land
+mask and sea ice. Its 0.140625 x 0.09375 degree grid shares no cells with
+GDAS's 0.25 degrees, so its binding uses the `nearest_coordinate_index`
+grid alignment. Each Met Office cell takes the nearest GDAS cell's value,
+nothing is interpolated, and the borrowed coastline is GDAS's. Its
+step-0 `height_of_orography` is bound as a second supplement and carried
+to every lead. The Met Office data are British Crown copyright, CC BY-SA
+4.0, and share-alike applies to everything prepared from them; see
+[MET-OFFICE-GLOBAL.md](MET-OFFICE-GLOBAL.md).
+
 **Ensembles keep member identity in the path.** Every AIGEFS member's
 leaf filename is byte-identical, so the download preserves the
 upstream-relative tree under `<out>/upstream/` and the handoff names the
