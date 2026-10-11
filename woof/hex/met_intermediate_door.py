@@ -1120,7 +1120,6 @@ def request_from_arguments(arguments: argparse.Namespace) -> GlobalRequest:
     foreign = [flag for flag, attribute in (
         ("--wrfout-glob", "wrfout_glob"), ("--cull-region", "cull_region"),
         ("--halo-km", "halo_km"), ("--wrf-edge-cells", "wrf_edge_cells"),
-        ("--grid", "grid"),
     ) if getattr(arguments, attribute, None) is not None]
     if foreign:
         raise GlobalIntermediateRefusal(

@@ -112,7 +112,9 @@ def test_the_icon_rows_are_admitted_sources() -> None:
     assert {"icon-global", "icon-global-ml"} <= set(INTERMEDIATE_SOURCES)
     assert set(door.ICON_SOURCES) == set(icon.ICON_GLOBAL_ROWS)
     assert "icon-global" not in door.REFUSED_SOURCES
-    assert not set(door.ICON_SOURCES) & set(door.GLOBAL_SOURCES)
+    # The regional half runs the field-files rows of GLOBAL_SOURCES.
+    assert set(door.ICON_SOURCES) <= set(door.GLOBAL_SOURCES)
+    assert {door.GLOBAL_SOURCES[name].layout for name in door.ICON_SOURCES} == {"field-files"}
 
 
 def test_a_global_grid_chooses_the_global_regrid(tmp_path: Path) -> None:
@@ -137,12 +139,13 @@ def test_a_box_on_a_global_mesh_is_refused(tmp_path: Path) -> None:
         door.icon_target_kind(arguments)
 
 
-def test_the_regional_half_is_refused_by_name_in_this_build(tmp_path: Path, capsys) -> None:
+def test_a_regional_mesh_reaches_the_regional_door(tmp_path: Path, monkeypatch) -> None:
+    seen = []
+    monkeypatch.setattr(door, "run_global_intermediate", lambda arguments: seen.append(arguments.source) or 0)
     code = hex_main(["intermediate", "--source", "icon-global", "--grib-dir", str(tmp_path),
                      "--cycle", "2026-09-27T12", "--out-dir", str(tmp_path / "o"),
                      "--grid", str(write_mesh(tmp_path / "r.nc", bdy=True))])
-    assert code == 2
-    assert "regional ICON target" in capsys.readouterr().err
+    assert code == 0 and seen == ["icon-global"]
 
 
 def test_grid_is_refused_by_the_rows_that_do_not_read_it(tmp_path: Path) -> None:
@@ -151,13 +154,13 @@ def test_grid_is_refused_by_the_rows_that_do_not_read_it(tmp_path: Path) -> None
     gfs = build_parser().parse_args([
         "intermediate", "--source", "gfs", "--grib-dir", str(tmp_path), "--cycle",
         "2026-09-27T12", "--out-dir", str(tmp_path / "o"), "--grid", str(tmp_path / "g.nc")])
-    with pytest.raises(GlobalIntermediateRefusal, match="--grid belong to another"):
+    with pytest.raises(GlobalIntermediateRefusal, match="--grid places the remap window"):
         door.request_from_arguments(gfs)
     hrrr = build_parser().parse_args([
         "intermediate", "--source", "hrrr", "--grib-dir", str(tmp_path), "--cycle",
         "2026-09-27T12", "--out-dir", str(tmp_path / "o"), "--grid", str(tmp_path / "g.nc"),
         "--point", "40,-100", "--radius-km", "50"])
-    with pytest.raises(IntermediateRefusal, match="--grid names the mesh for the ICON rows"):
+    with pytest.raises(IntermediateRefusal, match="--grid places the remap window of icon-global"):
         hi.request_from_arguments(hrrr)
 
 
