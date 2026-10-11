@@ -229,6 +229,20 @@ def test_the_vertical_door_takes_its_level_count_from_the_spec(chain) -> None:
     assert receipt["invariants"]["n_vert_levels"] == LEVELS
 
 
+def test_the_vertical_door_takes_a_named_preset_like_init_does(chain, tmp_path) -> None:
+    out = tmp_path / "les.vertical.nc"
+    assert hex_main([
+        "vertical", "--grid", str(chain.grid), "--static", str(chain.static),
+        "--vertical-spec", "preset:les:levels=60,dz_surface_m=40", "-o", str(out),
+    ]) == 0
+    with netCDF4.Dataset(str(out)) as ds:
+        assert len(ds.dimensions["nVertLevels"]) == 60
+    receipt = json.loads(out.with_name(out.name + ".receipt.json").read_text())
+    spec = receipt["inputs"]["vertical_spec"]
+    assert spec["preset"] == "preset:les:levels=60,dz_surface_m=40"
+    assert Path(spec["path"]).is_file()
+
+
 def test_the_vertical_door_refuses_a_regional_grid_with_the_authority_message(chain, tmp_path) -> None:
     with pytest.raises(VerticalDoorRefusal) as refusal:
         mint_vertical(
