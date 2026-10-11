@@ -1117,6 +1117,35 @@ impl KdTree {
             self.search2(flo, fhi, t, best, second);
         }
     }
+
+    /// Every cell whose squared distance from `t` is at most `r2`.
+    fn within(&self, t: [f64; 3], r2: f64, out: &mut Vec<usize>) {
+        self.within_range(0, self.order.len(), t, r2, out);
+    }
+
+    fn within_range(&self, lo: usize, hi: usize, t: [f64; 3], r2: f64, out: &mut Vec<usize>) {
+        if hi <= lo {
+            return;
+        }
+        let mid = lo + (hi - lo) / 2;
+        let idx = self.order[mid] as usize;
+        let p = self.points[idx];
+        let d = (p[0] - t[0]).powi(2) + (p[1] - t[1]).powi(2) + (p[2] - t[2]).powi(2);
+        if d <= r2 {
+            out.push(idx);
+        }
+        let a = self.axis[mid] as usize;
+        let delta = t[a] - p[a];
+        let (nlo, nhi, flo, fhi) = if delta < 0.0 {
+            (lo, mid, mid + 1, hi)
+        } else {
+            (mid + 1, hi, lo, mid)
+        };
+        self.within_range(nlo, nhi, t, r2, out);
+        if delta * delta <= r2 {
+            self.within_range(flo, fhi, t, r2, out);
+        }
+    }
 }
 
 fn xyz(radius: f64, lat: f64, lon: f64) -> [f64; 3] {
@@ -1372,28 +1401,39 @@ fn tile_map(
     tile_map_counted(mesh, tree, max_distance2, ds, tile, factor).map(|(map, _)| map)
 }
 
-/// The one cell every sub-sample of a source pixel maps to, when that can be
-/// PROVEN without searching for each of them; `None` sends the pixel down
-/// the per-sub-sample path.
+/// How a source pixel's sub-samples are resolved without searching the whole
+/// tree for each of them.
 ///
 /// Why this exists: the categorical sampling rate is set by the mesh's
 /// SMALLEST cell and applied to every tile, so on a variable-resolution mesh
-/// with a 100 m core the 30-arc-second land-use pass searches 15 x 15
+/// with a 100 m core the 30-arc-second land-use pass searched 15 x 15
 /// sub-samples per pixel over the whole planet -- about 2e11 kd queries per
 /// dataset -- although nearly every pixel lies wholly inside one 100 km
 /// cell.  Measured on a 121,762-cell 100 m point mesh: 33 GB and no end in
 /// sight on the first categorical dataset.
 ///
-/// Exact, not approximate: every sub-sample lies within `rho` of the pixel
-/// centre (twice the farthest of the eight extreme sub-samples, so the
-/// bound holds for any smooth projection at pixel scale).  When the nearest
-/// centre `c1` beats the second-nearest by more than `2 rho`, the triangle
-/// inequality makes `c1` the strict, unique nearest of every sub-sample;
-/// when `(d1 + rho)^2` is inside the search radius every sub-sample is
-/// accepted; and an outermost-ring cell, whose acceptance needs the
-/// containment test per point, is never shortcut.  The map is therefore the
-/// one the per-sub-sample loop writes, entry for entry.
-fn whole_pixel_owner(
+/// Exact, not approximate.  Every sub-sample lies within `rho` of the pixel
+/// centre (twice the farthest of the eight extreme sub-samples, so the bound
+/// holds for any smooth projection at pixel scale), and the nearest centre
+/// to the pixel centre is `c1` at distance `d1`.  By the triangle inequality
+/// a sub-sample is never farther than `d1 + rho` from `c1`, and a cell
+/// farther than `d1 + 2 rho` from the centre is farther than that from every
+/// sub-sample, so the per-sub-sample nearest is always among the cells
+/// within `d1 + 2 rho` ([`PixelPlan::Candidates`]).  When `c1` is the only
+/// such cell, its whole sub-sample block is inside the search radius and it
+/// is not an outermost-ring cell, every sub-sample maps to `c1`
+/// ([`PixelPlan::Whole`]).
+enum PixelPlan {
+    Whole(usize),
+    Candidates(Vec<usize>),
+}
+
+/// Margin, in metres, added to the candidate radius so f64 rounding in the
+/// distances can never leave a possible owner out.  Extra candidates cost a
+/// distance each and cannot change an answer.
+const CANDIDATE_SLACK_M: f64 = 1.0;
+
+fn pixel_plan(
     mesh: &Mesh,
     tree: &KdTree,
     max_distance2: f64,
@@ -1401,7 +1441,7 @@ fn whole_pixel_owner(
     x_center: f64,
     y_center: f64,
     factor: usize,
-) -> Option<usize> {
+) -> Option<PixelPlan> {
     let at = |x: f64, y: f64| {
         let (lat, lon) = ds.source_xy_to_latlon(x, y);
         xyz(mesh.sphere_radius, lat, lon)
@@ -1432,20 +1472,46 @@ fn whole_pixel_owner(
         return None;
     }
     let (d1, d2) = (d1sq.sqrt(), d2sq.sqrt());
-    if !(d2 - d1 > 2.0 * rho) {
-        return None;
-    }
     let reach = d1 + rho;
-    if !(reach * reach <= max_distance2) {
+    if d2 - d1 > 2.0 * rho + CANDIDATE_SLACK_M
+        && reach * reach <= max_distance2
+        && mesh.bdy_mask_cell[cell] != REGIONAL_OUTERMOST_MASK
+    {
+        return Some(PixelPlan::Whole(cell));
+    }
+    let radius = d1 + 2.0 * rho + CANDIDATE_SLACK_M;
+    let mut candidates = Vec::with_capacity(4);
+    tree.within(pc, radius * radius, &mut candidates);
+    if !candidates.contains(&cell) {
         return None;
     }
-    if mesh.bdy_mask_cell[cell] == REGIONAL_OUTERMOST_MASK {
-        return None;
-    }
-    Some(cell)
+    Some(PixelPlan::Candidates(candidates))
 }
 
-/// [`tile_map`], and how many pixels [`whole_pixel_owner`] decided.
+/// The nearest of `candidates` to `p` and its squared distance, computed with
+/// the kd search's own expression so the distance is the same f64; `None`
+/// on an exact tie, where only the tree's visiting order decides.
+fn nearest_of(tree: &KdTree, candidates: &[usize], p: [f64; 3]) -> Option<(usize, f64)> {
+    let mut best = (usize::MAX, f64::INFINITY);
+    let mut tied = false;
+    for &idx in candidates {
+        let q = tree.points[idx];
+        let d = (q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2) + (q[2] - p[2]).powi(2);
+        if d < best.1 {
+            best = (idx, d);
+            tied = false;
+        } else if d == best.1 {
+            tied = true;
+        }
+    }
+    if tied || best.0 == usize::MAX {
+        None
+    } else {
+        Some(best)
+    }
+}
+
+/// [`tile_map`], and how many pixels [`PixelPlan::Whole`] decided.
 fn tile_map_counted(
     mesh: &Mesh,
     tree: &KdTree,
@@ -1471,15 +1537,20 @@ fn tile_map_counted(
         for i in 0..ds.index.tile_x as usize {
             let x_center = tile.xs as f64 + i as f64;
             let y_center = tile.ys as f64 + j as f64;
-            if factor > 1 {
-                if let Some(cell) =
-                    whole_pixel_owner(mesh, tree, max_distance2, ds, x_center, y_center, factor)
-                {
-                    out.extend(std::iter::repeat(cell as i32).take(factor * factor));
-                    shortcut += 1;
-                    continue;
-                }
+            let plan = if factor > 1 {
+                pixel_plan(mesh, tree, max_distance2, ds, x_center, y_center, factor)
+            } else {
+                None
+            };
+            if let Some(PixelPlan::Whole(cell)) = plan {
+                out.extend(std::iter::repeat(cell as i32).take(factor * factor));
+                shortcut += 1;
+                continue;
             }
+            let candidates = match &plan {
+                Some(PixelPlan::Candidates(c)) => Some(c.as_slice()),
+                _ => None,
+            };
             for sj in 0..factor {
                 for si in 0..factor {
                     let x = x_center - 0.5 + (si as f64 + 0.5) / factor as f64;
@@ -1490,7 +1561,9 @@ fn tile_map_counted(
                         out.push(-1);
                         continue;
                     }
-                    let (cell, d2) = tree.nearest(p);
+                    let (cell, d2) = candidates
+                        .and_then(|c| nearest_of(tree, c, p))
+                        .unwrap_or_else(|| tree.nearest(p));
                     // The native regional rule (init_atm_static, nBdyLayers=7):
                     // a pixel is accepted unconditionally at mask < 7, and on
                     // an outermost-ring cell only when it is geometrically
@@ -4735,7 +4808,7 @@ mod tests {
     }
 
     /// The per-sub-sample loop exactly as it stood before
-    /// [`whole_pixel_owner`] existed: the reference the shortcut is held to.
+    /// [`pixel_plan`] existed: the reference the shortcut is held to.
     fn tile_map_every_subsample(
         mesh: &Mesh,
         tree: &KdTree,
@@ -4836,6 +4909,13 @@ mod tests {
             assert_eq!(d1, d[0].0, "nearest distance at probe {k}");
             assert_eq!(d2, d[1].0, "second-nearest distance at probe {k}");
             assert_eq!(cell, tree.nearest(t).0, "nearest2 and nearest disagree at probe {k}");
+            let r2 = d[7].0;
+            let mut got = Vec::new();
+            tree.within(t, r2, &mut got);
+            got.sort_unstable();
+            let mut want: Vec<usize> = d.iter().filter(|(dd, _)| *dd <= r2).map(|(_, c)| *c).collect();
+            want.sort_unstable();
+            assert_eq!(got, want, "within() at probe {k}");
         }
     }
 
