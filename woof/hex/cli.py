@@ -438,8 +438,11 @@ def build_parser() -> argparse.ArgumentParser:
     # is resampled onto a regular lat-lon intermediate.  The global lat-lon
     # sources (gfs, gdas, ecmwf-open-data, era5, aifs) share the command and
     # dispatch to woof.hex.met_intermediate_door, which drives the Rust
-    # met_intermediate writer without regridding.  Deferred import: the door
-    # pulls numpy and the engine's ingest.
+    # met_intermediate writer without regridding.  ICON global (icon-global,
+    # icon-global-ml) dispatches there too, through a gdt101_remap stage
+    # (woof.hex.gdt101_door) that writes its icosahedral mesh onto a window
+    # over --grid first.  Deferred import: the door pulls numpy and the
+    # engine's ingest.
     from .hrrr_intermediate import add_intermediate_parser, add_lbc_parser
 
     add_intermediate_parser(commands)

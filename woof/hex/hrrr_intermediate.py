@@ -910,23 +910,36 @@ def add_intermediate_parser(commands: Any) -> None:
         "intermediate",
         help="write WPS intermediates for hex init/LBC: a projected regional source "
              "(HRRR, or a WOOF WRF run's wrfout) regridded to lat-lon through the "
-             "engine's own operator, or a global lat-lon source (GFS, GDAS, ECMWF "
-             "open data, ERA5, AIFS) through met_intermediate",
+             "engine's own operator, a global lat-lon source (GFS, GDAS, ECMWF "
+             "open data, ERA5, AIFS) through met_intermediate, or DWD ICON global "
+             "remapped from its icosahedral mesh by gdt101_remap first",
         description=(
             "Write the WPS intermediates the init and boundary engines read.  "
             "--source hrrr resamples the projected HRRR onto a regular lat-lon "
             "box through the engine's own decoder and operator.  The global "
             "sources (gfs, gdas, ecmwf-open-data, era5, aifs) are already "
             "uniform lat-lon and are written on their own grid by the Rust "
-            "met_intermediate writer with a packaged Vtable.  Every file is "
-            "read back and checked before the receipt is written."
+            "met_intermediate writer with a packaged Vtable.  DWD ICON global "
+            "(icon-global on pressure levels, icon-global-ml on model levels) "
+            "publishes one file per field and level on an icosahedral mesh: "
+            "gdt101_remap writes it onto a 0.125-degree window over the --grid "
+            "mesh plus a 1-degree halo (limited-area meshes only), then "
+            "met_intermediate converts each lead.  Every file is read back and "
+            "checked before the receipt is written."
         ),
     )
     parser.add_argument("--source", default="hrrr", metavar="{" + ",".join(INTERMEDIATE_SOURCES) + "}",
                         help="the source the files came from (default hrrr); any other "
                              "name is refused with the reason")
     parser.add_argument("--grib-dir", type=Path, default=None, metavar="DIR",
-                        help="where `woof fetch --source hrrr` wrote the cycle (GRIB rows; required there)")
+                        help="where `woof fetch --source hrrr` wrote the cycle (GRIB rows; required "
+                             "there; for icon-global and icon-global-ml the root of DWD's v1 "
+                             "tree, PARAM/.../r/CYCLE/s/PTnnnH00M.grib2, or its p/ parent)")
+    parser.add_argument("--grid", type=Path, default=None, metavar="GRID.nc",
+                        help="icon-global, icon-global-ml: the limited-area hex mesh (grid, "
+                             "static or init file) the intermediates must cover; the remap "
+                             "window is its extent plus a 1-degree halo (required there, "
+                             "refused for every other source)")
     parser.add_argument("--cycle", default=None, metavar="YYYY-MM-DDTHH",
                         help="the cycle the files came from, UTC (GRIB rows; required there)")
     parser.add_argument("--wrfout-glob", default=None, metavar="GLOB",
@@ -944,10 +957,12 @@ def add_intermediate_parser(commands: Any) -> None:
     parser.add_argument("--hours", default=None, metavar="SPEC",
                         help="forecast hours to write, contiguous (default 0-3)")
     parser.add_argument("--interval-hours", type=int, default=None, metavar="H",
-                        help="global sources (gfs, gdas, ecmwf-open-data, era5, aifs): "
+                        help="global sources (gfs, gdas, ecmwf-open-data, era5, aifs, "
+                             "icon-global, icon-global-ml): "
                              "--hours is START-END stepped by this many hours (default: "
                              "the source's published cadence -- gfs 3, gdas 1, "
-                             "ecmwf-open-data 3, aifs 6, era5 6; --hours defaults to 0, "
+                             "ecmwf-open-data 3, aifs 6, era5 6, icon-global 3; --hours "
+                             "defaults to 0, "
                              "the init time only; for era5 --cycle is the first "
                              "analysis time)")
     parser.add_argument("--vtable", type=Path, default=None, metavar="FILE",
@@ -989,6 +1004,11 @@ def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest
                 f"{flag} applies to the global sources; --source {row.name} writes "
                 f"every contiguous hour through the engine's own decoder"
             )
+    if getattr(arguments, "grid", None) is not None:
+        raise IntermediateRefusal(
+            f"--grid places the remap window of icon-global/icon-global-ml; --source "
+            f"{row.name} takes its box from --from-plan or --point"
+        )
     for flag, value in (("--wrfout-glob", getattr(arguments, "wrfout_glob", None)),
                         ("--cull-region", getattr(arguments, "cull_region", None)),
                         ("--halo-km", getattr(arguments, "halo_km", None)),

@@ -193,7 +193,9 @@ _BRIDGE_CONSUMERS = {
                     "icon-global or icon-d2), whose input-normalization "
                     "stage writes its regional intermediates with this "
                     "binary and "
-                    "refuses rather than falling back without it",
+                    "refuses rather than falling back without it; "
+                    "woof hex intermediate --source icon-global|"
+                    "icon-global-ml remaps through it too",
 }
 
 #: The doors a box without CuPy cannot open, and the half it keeps.
@@ -2436,13 +2438,14 @@ def _met_intermediate_check() -> Check:
     """The WPS-intermediate writer behind ``woof hex intermediate``'s global sources.
 
     Non-blocking: it opens one door (hex init/LBC from GFS, GDAS, ECMWF
-    open data, ERA5 or AIFS) and no default path degrades without it, and
-    bundles published before it joined do not carry it.  Presence,
+    open data, ERA5, AIFS or ICON global) and no default path degrades
+    without it, and bundles published before it joined do not carry it.  Presence,
     launchability and the contract marker are all reported.
     """
 
     name = "hex intermediate writer (met_intermediate)"
-    degrades = ("woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs "
+    degrades = ("woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs|"
+                "icon-global|icon-global-ml "
                 "refuses")
     try:
         found = bridges.find_bridge("met_intermediate")

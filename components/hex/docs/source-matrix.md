@@ -55,6 +55,30 @@ woof hex intermediate --source ecmwf-open-data --grib-dir DIR \
   --cycle 2026-09-24T12 --hours 0-12 --out-dir MET
 ```
 
+DWD ICON global joins the door as two rows, `icon-global` (18 pressure
+levels, 1000-30 hPa) and `icon-global-ml` (120 model levels plus the 121
+hour-zero HHL half levels; specific humidity aloft, so `--use-spechumd
+yes`).  ICON is not lat-lon: it publishes one file per field and level on
+an icosahedral GDT-101 mesh, in DWD's v1 tree
+`<PARAM>[/lvt1/<type>/lv1/<value>]/r/<YYYY-MM-DDTHH:MM>/s/PT<HHH>H00M.grib2`.
+These rows use the `field-files` layout (`woof/hex/gdt101_door.py`): the door
+collects every file each lead needs and names the missing ones, takes the
+window from the target mesh (`--grid`, its cells and vertices plus a
+1-degree halo, snapped to 0.125 degrees), builds one `gdt101_remap` plan from
+the hour-zero CLAT, CLON and FR_LAND, remaps each lead into one regular
+GRIB2 file, and runs `met_intermediate --map-source dwd` once per lead with
+the remapped HSURF and FR_LAND (and, on the model-level row, HHL) as its
+`--invariant` file.  The window must be regional (under 180 degrees of
+longitude, inside +/-88 degrees, at most two million points); a global mesh
+is refused by name and pointed at `gdt101_remap --global --dx-deg 0.125`.
+The receipt carries DWD's attribution, "Source: Deutscher Wetterdienst
+(DWD), CC BY 4.0".
+
+```
+woof hex intermediate --source icon-global --grib-dir DIR \
+  --cycle 2026-10-11T00 --hours 0-3 --grid cull.grid.nc --out-dir MET
+```
+
 ## Sources with a runnable registry route
 
 | source | bytes driven | verdict |
@@ -72,6 +96,7 @@ woof hex intermediate --source ecmwf-open-data --grib-dir DIR \
 | `rap` | RAP awip32 f00, 2026-08-17 00Z | **refused by design**: same uniformity refusal, measured deviation 0.104305 deg (AWIPS grid 221, 32 km Lambert).  The JPEG2000 packing decodes fine (openjp2 is in the build); the grid is the boundary. |
 | `rrfs` | RRFS prslev f000 (ops), 2026-08-17 00Z | **refused by design**: same uniformity refusal; RRFS rides HRRR's byte-identical Lambert. |
 | `icon-eu` | DWD ICON-EU regular lat-lon bz2 set, 2026-08-17 00Z | **refused, table row named**: *"unknown --map-source \"dwd\". known --map-source labels: ncep-gfs ... ncep-gefs ... ncep-cdas-cfsv2 ... ecmwf ... The label is not decoration: it selects the RH over-ice conversion, the masked-surface-field repair, the snow water equivalent and snow depth rules, the land-sea flag conversion and the GRIB1 earth radius"*, the regular-lat-lon grid family is inside the writer's admission.  **This row previously said the remediation was one `KNOWN_MAP_SOURCES` row, a Vtable and bz2 staging.  That was measured on 2026-08-24 and it is not true.**  Those three are real and each is cheap, every semantic the refusal names is an existing `bool` or a two-arm enum (`rh_over_ice: false`, `masked_surface_repair: false`, `snow_water_equivalent_doubled: false`, `landsea_to_flag: true`, and the GRIB1 earth radius is unused because ICON is GRIB2 and the shape-of-earth code is read from the message); the Vtable is plain data like `Vtable.ECMWF-OD.rw`; and bz2 is already a magic-byte dispatch table in two places, so it is operator staging, not a capability.  What blocks the row is a FOURTH piece nobody had named: ICON publishes soil moisture (`W_SO`) as column-integrated layer mass in kg m-2, and the WPS-intermediate writer has **no unit-conversion slot at all**, `FieldMeta.units` is copied into the record header, the Vtable format has no column that transforms a value, and none of the seven `MapSource` fields can select one.  Authoring `SM000001` from `2-3-20` without it would write kg m-2 into a field the consumer reads as a fraction: a structurally perfect intermediate with wrong numbers and exit status 0, which is the exact failure this writer's refusals exist to prevent.  Closing it needs an eleventh rule in `apply_ungrib_rules` plus per-layer bounds carriage: a new mechanism, so it is NOT table work and is not being bandaided in.  Two further facts for whoever takes it: the registry row for `icon-eu` needs no change, because it already declares a runnable mapped route that converts this field correctly (`volumetric_soil_moisture_from_layer_mass`); and `met_intermediate` is not a bundled binary, so any row at all costs a rebuild and a new exe digest in the instruments table above. |
+| `icon-global`, `icon-global-ml` | DWD ICON R03B07 v1 open data, 2026-10-11 00Z f000+f003, over the 24,133-cell Greenland 100 m cull (72N 42W) | **door wired, no PASS claimed yet**.  Measured: the remap stage writes a 25 x 19 window at 0.125 degrees (-43.5..-40.5 E, 70.875..73.125 N) from 232 lead records plus 2 invariants on the pressure row in about 25 s, and decodes to plausible ice-sheet values (HSURF 2700-3106 m, surface pressure 670-708 hPa).  The model-level row was remapped over its bottom 20 levels only, for the data budget.  The next tool refuses: *"met_intermediate: unknown --map-source \"dwd\"."*  The `dwd` label and `Vtable.ICON-GLOBAL.rw` / `Vtable.ICON-GLOBAL-ML.rw` arrive with the met_intermediate DWD work (W_SO kg m-2 to volumetric, the eight TERRA SOILT layers); init and LBC follow once they land. |
 | `gem-gdps` | GDPS 15 km lat-lon f000, 2026-08-16 00Z | **refused, table row named**: same closed-vocabulary refusal for `eccc-gdps`.  Grid is uniform lat-lon; JPEG2000 decodes; one label row + one Vtable away. |
 | `20crv3` | 20CRv3 member 072 pl+sfc, 1932-03-21 00Z | **refused, table row named**: same closed-vocabulary refusal for `ncep-20crv3`.  (If a label existed, the member files' grid would still face the Gaussian-spacing gate (20CRv3's native grid is Gaussian) so this source likely needs iproj-4 writer support as well.) |
 | `20crv3-cf` | NOAA PSL NetCDF SI series | **refused by design** at the intermediate writer: *"skt.nc does not begin with a GRIB envelope"*, the WPS-intermediate chain is GRIB-only; 20CRv3's NetCDF form is a mapped-route (rw_netcdf) source. |
