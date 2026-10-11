@@ -234,6 +234,36 @@ it for that run, because those flags pin which binary reads the bytes.
 contract, the refusal-class table and the parity gate are in
 `docs/dev/decode-vendor-design.md`.
 
+### Which `exp`, `log`, `sin` and `cos` a derivation uses
+
+A transcendental's last bit depends on the library that computes it, so
+both engines use the same library for each call:
+
+- **Portable** (the `libm` crate, a Rust port of musl's libm, the same
+  bits on every host). The Python engine calls it through
+  `woof.core.portable_math`, and the Rust engine links the same crate
+  and version. These are `relative_humidity_from_dewpoint`,
+  `specific_humidity_from_rh`, `specific_humidity_from_dewpoint`, the two
+  speed/direction wind operations, `geopotential_height_hydrostatic`, and
+  composition's `height_at_surface_pressure`.
+- **Host C library** (glibc, the MSVC runtime). The Rust engine calls the
+  `f64` methods. These are `surface_pressure_from_sea_level` and the
+  hypsometric completion of `geopotential_height` on pressure levels,
+  where the Python engine calls `math.*` one value at a time. The Lambert
+  projection and grid-relative wind rotation are on this list too,
+  because they follow WPS's own calls. There the Python engine calls
+  `woof.core.host_libm`, and NumPy for `sin` and `cos`, which give the C
+  library's answer.
+
+A Python engine without the CPU preprocessing library (`tools/grib1_bridge`,
+or `woof fetch-bridges`) falls back to the host C library for the portable
+list. It says so on stderr, and the portable fields then match neither the
+Rust engine nor another host. A new derivation that calls a
+transcendental joins one list, in both engines, and
+`tests/test_mapped_engine_math_parity.py` drives both engines over it.
+The full table is in the "Transcendentals" section of
+`tools/rw_wps/crates/mapped-engine/src/derive.rs`.
+
 ## Current boundary
 
 This slice removes source-family dispatch, manual manifest JSON, and the two
@@ -360,7 +390,9 @@ orography at step 0 is one: its scalar time is the cycle time.
 The direction is meteorological: the degrees the wind blows FROM,
 clockwise from north (CF `wind_from_direction`). The two operations
 compute `u = -speed * sin(dir)` and `v = -speed * cos(dir)`, with
-`dir = degrees * (pi / 180)` in float64. The result is earth-relative on
+`dir = degrees * (pi / 180)` in float64, and `sin` and `cos` are the
+portable ones (see "Which `exp`, `log`, `sin` and `cos` a derivation
+uses" above). The result is earth-relative on
 the source's regular latitude/longitude grid, so no rotation follows.
 `load_mapping` refuses any other convention:
 
