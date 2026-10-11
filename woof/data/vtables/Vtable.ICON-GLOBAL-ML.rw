@@ -1,0 +1,79 @@
+GRIB1| Level| From |  To  | metgrid  | metgrid  | metgrid                                  |GRIB2|GRIB2|GRIB2|GRIB2|
+Param| Type |Level1|Level2| Name     | Units    | Description                              |Discp|Catgy|Param|Level|
+-----+------+------+------+----------+----------+------------------------------------------+-----------------------+
+     | 109  |   *  |      | HHL      | m        |                                          |  0  |  3  |  6  | 150 |
+     | 109  |   *  |      | GHT      | m        | Height                                   |     |     |     | 150 |
+     | 109  |   *  |      | PRES     | Pa       | Pressure                                 |  0  |  3  |  0  | 150 |
+     | 109  |   *  |      | TT       | K        | Temperature                              |  0  |  0  |  0  | 150 |
+     | 109  |   *  |      | UU       | m s-1    | U                                        |  0  |  2  |  2  | 150 |
+     | 109  |   *  |      | VV       | m s-1    | V                                        |  0  |  2  |  3  | 150 |
+     | 109  |   *  |      | SPECHUMD | kg kg-1  | Specific Humidity                        |  0  |  1  |  0  | 150 |
+     | 105  |  10  |      | UU       | m s-1    | U                    At 10 m             |  0  |  2  |  2  | 103 |
+     | 105  |  10  |      | VV       | m s-1    | V                    At 10 m             |  0  |  2  |  3  | 103 |
+     | 105  |   2  |      | TT       | K        | Temperature          At  2 m             |  0  |  0  |  0  | 103 |
+     | 105  |   2  |      | DEWPT    | K        |                                          |  0  |  0  |  6  | 103 |
+     | 105  |   2  |      | RH       | %        | Relative Humidity    At  2 m             |  0  |  1  |  1  | 103 |
+     |   1  |   0  |      | PSFC     | Pa       | Surface Pressure                         |  0  |  3  |  0  |  1  |
+     |   1  |   0  |      | PMSL     | Pa       | Sea-level Pressure                       |  0  |  3  |  1  | 101 |
+     |   1  |   0  |      | LANDSEA  | proprtn  | Land/Sea flag                            |  2  |  0  |  0  |  1  |
+     |   1  |   0  |      | SOILHGT  | m        | Terrain field of source analysis         |  0  |  3  |  6  |  1  |
+     |   1  |   0  |      | SKINTEMP | K        | Skin temperature                         |  0  |  0  |  0  |  1  |
+     |   1  |   0  |      | SNOW     | kg m-2   |Water Equivalent of Accumulated Snow Depth|  0  |  1  | 60  |  1  |
+     |   1  |   0  |      | SNOWH    | m        | Physical Snow Depth                      |  0  |  1  | 11  |  1  |
+     |   1  |   0  |      | SEAICE   | proprtn  | Sea-Ice Fraction                         | 10  |  2  |  0  |  1  |
+     | 111  |   0  |      | T_SO_N0  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 111  |  0.5 |      | T_SO_N1  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 111  |   2  |      | T_SO_N2  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 111  |   6  |      | T_SO_N3  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 111  |  18  |      | T_SO_N4  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 111  |  54  |      | T_SO_N5  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 111  | 162  |      | T_SO_N6  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 111  | 486  |      | T_SO_N7  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 111  | 1458 |      | T_SO_N8  | K        |                                          |  2  |  3  | 18  | 106 |
+     | 112  |   0  |   1  | W_SO_L1  | kg m-2   |                                          |  2  |  3  | 20  | 106 |
+     | 112  |   1  |   3  | W_SO_L2  | kg m-2   |                                          |  2  |  3  | 20  | 106 |
+     | 112  |   3  |   9  | W_SO_L3  | kg m-2   |                                          |  2  |  3  | 20  | 106 |
+     | 112  |   9  |  27  | W_SO_L4  | kg m-2   |                                          |  2  |  3  | 20  | 106 |
+     | 112  |  27  |  81  | W_SO_L5  | kg m-2   |                                          |  2  |  3  | 20  | 106 |
+     | 112  |  81  | 243  | W_SO_L6  | kg m-2   |                                          |  2  |  3  | 20  | 106 |
+     | 112  | 243  | 729  | W_SO_L7  | kg m-2   |                                          |  2  |  3  | 20  | 106 |
+     | 112  | 729  | 2187 | W_SO_L8  | kg m-2   |                                          |  2  |  3  | 20  | 106 |
+     | 112  |   0  |   1  | SOILT001 | K        | T of 0-1 cm ground layer                 |     |     |     | 106 |
+     | 112  |   1  |   3  | SOILT002 | K        | T of 1-3 cm ground layer                 |     |     |     | 106 |
+     | 112  |   3  |   9  | SOILT006 | K        | T of 3-9 cm ground layer                 |     |     |     | 106 |
+     | 112  |   9  |  27  | SOILT018 | K        | T of 9-27 cm ground layer                |     |     |     | 106 |
+     | 112  |  27  |  81  | SOILT054 | K        | T of 27-81 cm ground layer               |     |     |     | 106 |
+     | 112  |  81  | 243  | SOILT162 | K        | T of 81-243 cm ground layer              |     |     |     | 106 |
+     | 112  | 243  | 729  | SOILT486 | K        | T of 243-729 cm ground layer             |     |     |     | 106 |
+     | 112  | 729  | 2187 | SOILT999 | K        | T of 729-2187 cm ground layer            |     |     |     | 106 |
+     | 112  |   0  |   1  | SOILM001 | m3 m-3   | Soil moisture of 0-1 cm ground layer     |     |     |     | 106 |
+     | 112  |   1  |   3  | SOILM002 | m3 m-3   | Soil moisture of 1-3 cm ground layer     |     |     |     | 106 |
+     | 112  |   3  |   9  | SOILM006 | m3 m-3   | Soil moisture of 3-9 cm ground layer     |     |     |     | 106 |
+     | 112  |   9  |  27  | SOILM018 | m3 m-3   | Soil moisture of 9-27 cm ground layer    |     |     |     | 106 |
+     | 112  |  27  |  81  | SOILM054 | m3 m-3   | Soil moisture of 27-81 cm ground layer   |     |     |     | 106 |
+     | 112  |  81  | 243  | SOILM162 | m3 m-3   | Soil moisture of 81-243 cm ground layer  |     |     |     | 106 |
+     | 112  | 243  | 729  | SOILM486 | m3 m-3   | Soil moisture of 243-729 cm ground layer |     |     |     | 106 |
+     | 112  | 729  | 2187 | SOILM999 | m3 m-3   | Soil moisture of 729-2187 cm ground layer|     |     |     | 106 |
+-----+------+------+------+----------+----------+------------------------------------------+-----+-----+-----+-----+
+#
+#  DWD ICON global (R03B07, about 13 km) MODEL-LEVEL GRIB2 for the Rust
+#  met_intermediate writer, map source "dwd".  Source: Deutscher Wetterdienst
+#  (DWD), CC BY 4.0.  The pressure-level twin is Vtable.ICON-GLOBAL.rw, which
+#  documents the surface and soil rows repeated here unchanged.
+#
+#  ICON's native GDT 3.101 mesh is not a lat-lon grid: these rows read the
+#  regional regular lat-lon GRIB2 that gdt101_remap writes, which keeps each
+#  object's product section.  GRIB2 only.
+#
+#  * Model levels are fixed-surface type 150 (generalized vertical height),
+#    numbered from the model top: full levels 1..120 (T, QV, U, V, P, each
+#    bounded by half levels k and k+1), half levels 1..121 (HHL, the
+#    geometric height of each interface, published at step 0 only -- pass
+#    it with --invariant and --invariant-field HHL for later leads).  Each
+#    level is written at xlvl = its number.  A file mixing these with
+#    pressure levels is refused.
+#  * PRES is P, SPECHUMD is QV.  GHT is derived (rule ght_from_hhl) as the
+#    mean of the two bounding half-level heights, (HHL(k) + HHL(k+1)) / 2;
+#    a full level whose two half levels are not both present is refused.
+#    The non-zero 3-D PRES is what selects the init's model-level branch.
+#  * HHL has a blank description: read and consumed, never published.
