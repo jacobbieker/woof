@@ -7,9 +7,9 @@
     "experiment": "the config-driven experiment route: one experiment TOML with its [case_data] inputs, prepared and integrated in this process (what `woof run CONFIG` executes)",
     "prepared": "the native prepared-cache route: authority, fetch, manifest, preparation, forecast and render, in the documented order (what `woof go CONFIG` executes) -- for sources the config-driven route cannot decode"
   },
-  "runnable_source_count": 23,
+  "runnable_source_count": 25,
   "schema": "gpuwm.run-plan.sources.v1",
-  "source_count": 38,
+  "source_count": 40,
   "sources": [
     {
       "aliases": [],
@@ -87,7 +87,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "one wrfnat and one wrfprs object with their .idx per lead, posted in lead order: f000 from + 49 min, f018 from + 1 h 13 min (synoptic) or 1 h 24 min, f048 from + 1 h 46 min; the 30 Sep 06Z and 07Z runs posted 30 to 55 min late"
         },
         "refusal": null,
@@ -209,7 +209,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "one wrfprs object and its .idx per lead, posted in lead order: f000 from + 49 min, f018 from + 1 h 13 min (synoptic) or 1 h 24 min, f048 from + 1 h 46 min; the 30 Sep 06Z and 07Z runs posted 30 to 55 min late"
         },
         "refusal": null,
@@ -285,7 +285,7 @@
           "ready_check": "objects",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "about 175 single-message files per lead on dd.weather.gc.ca, no index, posted in lead order: f000 at + 3 h 50 min, f240 at + 4 h 49 min"
         },
         "refusal": null,
@@ -362,7 +362,7 @@
           "ready_check": "objects",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "one GRIB2 object per field, level and lead on opendata.dwd.de's v1 tree, no index, posted in lead order over about 41 min: f000 at + 2 h 37 min, f180 at + 3 h 18 min (10 Oct 06Z to 11 Oct 00Z)"
         },
         "refusal": null,
@@ -404,6 +404,86 @@
       "source_id": "icon-global",
       "source_kind": "deterministic_state",
       "title": "ICON global 13 km (DWD)",
+      "upstream_ingest": "native_gdt101_normalization_then_packaged_profile",
+      "upstream_model_id": "icon",
+      "wizard_planable": true
+    },
+    {
+      "aliases": [
+        "icon-ml",
+        "icon-global-model-level",
+        "dwd-icon-global-ml"
+      ],
+      "composition_requirement": null,
+      "coverage": null,
+      "credentials": {
+        "items": [],
+        "required": false,
+        "summary": "this registry row declares no credential requirement"
+      },
+      "decoder": "gdt101_remap + vendored grib-core + mapped engine",
+      "default_product": "icosahedral-model-level",
+      "display_name": "ICON global 13 km, 120 model levels (DWD)",
+      "fetch": {
+        "kind": "table_route",
+        "posting": {
+          "late_after_minutes": 60.0,
+          "poll_seconds": 30.0,
+          "publication_lag": [
+            {
+              "cycle_hours": null,
+              "from_lead": 0,
+              "hours": 2.62,
+              "late_hours": 0.2,
+              "measured": "2026-10-11 v1 directory listings, model level 90 temperature: the 2026-10-11 00Z run's f000 at + 2 h 37 min, f078 at + 3 h 04 min and f180 at + 3 h 19 min; the 2026-10-10 18Z run's f000 at + 2 h 40 min and f120 at + 3 h 10 min",
+              "per_lead_hours": 0.0042
+            }
+          ],
+          "ready_check": "objects",
+          "shape": "rolling",
+          "streams": true,
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
+          "why": "626 per-field, per-level objects per lead (600 model-level) on opendata.dwd.de, no index, posted in lead order over about 40 min: f000 at + 2 h 37 min, f180 at + 3 h 19 min (2026-10-11 00Z)"
+        },
+        "refusal": null,
+        "route_id": "icon-global-ml"
+      },
+      "file_family": "GRIB2",
+      "forcing_interval_seconds": 10800.0,
+      "maturity": {
+        "cadence_mapping": "selected-uniform-three-hour-forecast-series-v1",
+        "field_mapping": "packaged-rw-wps-icon-global-ml-grib2-v1",
+        "level_mapping": "120-height-model-level-to-explicit-wrf-eta-v1",
+        "runnable": true,
+        "status": "runnable_mapping_not_stock_wrf_certified",
+        "stock_wrf_gate": "live-unchanged-stock-wrf-gate-pending"
+      },
+      "max_forecast_hour": 180,
+      "member_set": null,
+      "notes": "DWD global R03B07, nominal 13 km, 2,949,120 native cells, on its 120 native model levels from DWD's v1 open-data tree (source.coop mirror for older runs): pressure, temperature, specific humidity and wind on full levels and the 121 half-level heights (HHL, step 0) that place them. The same GDT-101 normalization as --source icon-global remaps the WPS domain plus a 1-degree halo to 0.125 degrees and seals raw-to-normalized provenance before prep. TERRA soil and sea ice as icon-global. About 2 GB per lead (600 model-level objects), so a window takes at most 13 leads; three-hour forcing by default, 00/12Z to f180, 06/18Z to f120. Source: Deutscher Wetterdienst (DWD), CC BY 4.0. No observation assimilation or stock-WRF certification is implied.",
+      "packaged_profile": "icon-global-ml-grib2-v1",
+      "record_kind": "forecast",
+      "required_products": [
+        "model-level",
+        "single-level",
+        "soil-level",
+        "time-invariant",
+        "grid-coordinates"
+      ],
+      "run_plan": {
+        "intent_chain": "prepared:staged",
+        "intent_refusal": null,
+        "intent_routes": [
+          "prepared"
+        ],
+        "intent_supported": true,
+        "requires_source_root": false,
+        "source_root_reason": null
+      },
+      "runner": "mapped_composition_v1",
+      "source_id": "icon-global-ml",
+      "source_kind": "deterministic_state",
+      "title": "ICON global 13 km, 120 model levels (DWD)",
       "upstream_ingest": "native_gdt101_normalization_then_packaged_profile",
       "upstream_model_id": "icon",
       "wizard_planable": true
@@ -471,7 +551,7 @@
           "ready_check": "objects",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "about 125 per-field bz2 objects per lead on opendata.dwd.de, no index, posted in lead order: f000 at + 2 h 40 min, f120 at + 3 h 33 min"
         },
         "refusal": null,
@@ -566,7 +646,7 @@
           "ready_check": "objects",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "about 675 per-field and per-level bz2 objects per lead on opendata.dwd.de, no index, posted in lead order at about 0.6 min per lead: f000 at + 44 min, f048 at + 1 h 12 min to 1 h 14 min (eight cycles)"
         },
         "refusal": null,
@@ -701,7 +781,7 @@
           "ready_check": "objects",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "one pgrb2.0p25 object per lead, posted in lead order: f000 at + 3 h 31 min, f384 at + 5 h 12 min; the .idx is the record-count bar after download"
         },
         "refusal": null,
@@ -776,7 +856,7 @@
           "ready_check": "objects",
           "shape": "whole_cycle",
           "streams": false,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "f000 to f009 post together, within about 16 min, from + 6 h 48 min after the cycle (the 30 Sep 00Z run from + 7 h 44 min); a run is capped at 9 h, so there is nothing to wait for inside a cycle"
         },
         "refusal": null,
@@ -860,7 +940,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "one pgrb2a/pgrb2b pair with their .idx per member and lead, posted in lead order: f000 at + 3 h 45 min, f384 at + 6 h 02 min; the 00Z extension past f384 a day later"
         },
         "refusal": null,
@@ -935,7 +1015,7 @@
           "ready_check": "objects_and_index",
           "shape": "donor_gated",
           "streams": false,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "every AI lead is posted by + 4 h 13 min to 5 h 19 min, but the same-cycle GDAS donor lands at + 6 h 48 min to 7 h 44 min and the engine refuses a donor from another cycle, so the donor decides the start and nothing is left to wait for"
         },
         "refusal": null,
@@ -1010,7 +1090,7 @@
           "ready_check": "objects_and_index",
           "shape": "donor_gated",
           "streams": false,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "every AI lead is posted by + 4 h 29 min to 5 h 29 min, but the same-cycle GDAS donor lands at + 6 h 48 min to 7 h 44 min and the engine refuses a donor from another cycle, so the donor decides the start and nothing is left to wait for"
         },
         "refusal": null,
@@ -1152,7 +1232,7 @@
           "ready_check": "objects",
           "shape": "whole_cycle",
           "streams": false,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "the files only appear complete: every lead of a run posts within a minute, at + 7 h 34 min for 00/12Z and + 6 h 27 min for 06/18Z"
         },
         "refusal": null,
@@ -1227,7 +1307,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "Individual member records are selected from each posted object and its index; later leads are not needed to admit the verified prefix."
         },
         "refusal": null,
@@ -1302,7 +1382,7 @@
           "ready_check": "objects",
           "shape": "whole_cycle",
           "streams": false,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "every lead of a run lands within about 3 min, at + 5 h 27 min to 5 h 40 min on the AWS rung (nine runs, 28 to 30 Sep); data.ecmwf.int's per-lead Last-Modified is its dissemination schedule, not the posting"
         },
         "refusal": null,
@@ -1342,6 +1422,85 @@
       "title": "ECMWF AIFS single (open data)",
       "upstream_ingest": "declarative_mapping_v1_over_packaged_profile",
       "upstream_model_id": "aifs",
+      "wizard_planable": true
+    },
+    {
+      "aliases": [
+        "metoffice-global",
+        "ukmo-global",
+        "um-global"
+      ],
+      "composition_requirement": "The open data publishes no soil temperature or moisture, no land-sea mask, no sea ice and no surface pressure; the composition borrows the land state from the SAME CYCLE's GDAS 0.25-degree analysis (the fetch brings it in donor-gdas/) and rebuilds surface pressure from the mean sea level pressure and the run's own step-0 orography, which every window fetches as its terrain supplement.",
+      "coverage": null,
+      "credentials": {
+        "items": [],
+        "required": false,
+        "summary": "this registry row declares no credential requirement"
+      },
+      "decoder": "packaged Met Office global NetCDF profile + rw_netcdf/netcrust (woof.netcdf_bridge)",
+      "default_product": "global-deterministic-10km",
+      "display_name": "Met Office global 10 km (UM, AWS open data)",
+      "fetch": {
+        "kind": "table_route",
+        "posting": {
+          "late_after_minutes": 60.0,
+          "poll_seconds": 30.0,
+          "publication_lag": [
+            {
+              "cycle_hours": null,
+              "from_lead": 0,
+              "hours": 5.5,
+              "late_hours": 0.49,
+              "measured": "2026-10-11 bucket listing (each object's own LastModified, the 14 variables this route fetches): 9 runs 2026-10-09 00Z to 2026-10-11 00Z: f000 at + 5 h 30 min to 5 h 31 min, the later leads in batches at about + 5 h 45 min, 6 h 00 min, 6 h 15 min and 6 h 30 min, f168 of the 00/12Z runs at + 6 h 30 min to 6 h 31 min and f069 of the 06/18Z runs at + 6 h 00 min to 6 h 16 min. The latest posting seen was 29 min past this line (the 9 Oct 06Z f063). Runs of October 2024 posted about 2.5 h later, from + 8 h 01 min; June 2025 runs already posted at + 5 h 30 min",
+              "per_lead_hours": 0.0043
+            }
+          ],
+          "ready_check": "objects",
+          "shape": "donor_gated",
+          "streams": false,
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
+          "why": "every lead's 13 objects (and the step-0 orography) are posted by + 5 h 30 min to 6 h 31 min, but the same-cycle GDAS donor lands at + 6 h 48 min to 7 h 44 min and the engine refuses a donor from another cycle, so the donor decides the start"
+        },
+        "refusal": null,
+        "route_id": "met-office-global"
+      },
+      "file_family": "NetCDF-CF",
+      "forcing_interval_seconds": 10800.0,
+      "maturity": {
+        "cadence_mapping": "uniform-three-hour-forecast-series-v1",
+        "field_mapping": "packaged-rw-wps-met-office-global-netcdf",
+        "level_mapping": "pending",
+        "runnable": true,
+        "status": "runnable_mapping_not_stock_wrf_certified",
+        "stock_wrf_gate": "live-unchanged-stock-wrf-gate-pending"
+      },
+      "max_forecast_hour": 144,
+      "member_set": null,
+      "notes": "The Met Office Unified Model global deterministic forecast from the AWS Open Data bucket met-office-atmospheric-model-data: a regular 2560 x 1920 latitude-longitude grid (about 10 km), one NetCDF-4 file per variable per step, 00/12Z runs hourly to f054, 3-hourly to f144 and 6-hourly to f168, 06/18Z runs hourly to f054 and 3-hourly to f069; a rolling two years of runs.  `woof fetch --source met-office-global` takes the 13 state variables a preparation reads, the step-0 orography and the same-cycle GDAS analysis.  LICENCE: British Crown copyright, the Met Office, CC BY-SA 4.0; the share-alike term reaches derived outputs, so a forecast prepared from these bytes is shared under the same licence with the attribution.  Supplied on a free, unsupported basis and not for critical business purposes.  Runs before 2025-12-11 12Z publish no orography and are refused by name.  Not yet accepted by unchanged stock WRF.",
+      "packaged_profile": "met-office-global-netcdf",
+      "record_kind": "forecast",
+      "required_products": [
+        "pressure-level temperature, height, humidity and wind",
+        "surface and screen-level state",
+        "step-0 height_of_orography",
+        "same-cycle GDAS 0.25-degree analysis"
+      ],
+      "run_plan": {
+        "intent_chain": "prepared:staged",
+        "intent_refusal": null,
+        "intent_routes": [
+          "prepared"
+        ],
+        "intent_supported": true,
+        "requires_source_root": false,
+        "source_root_reason": null
+      },
+      "runner": "mapped_composition_v1",
+      "source_id": "met-office-global",
+      "source_kind": "deterministic_state",
+      "title": "Met Office global 10 km (UM, AWS open data)",
+      "upstream_ingest": "declarative_mapping_v1_over_packaged_profile",
+      "upstream_model_id": null,
       "wizard_planable": true
     },
     {
@@ -1396,7 +1555,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "One native-level object and its index per lead; objects and index must be available before preparation."
         },
         "refusal": null,
@@ -1490,7 +1649,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "One native-level object and its index per lead; objects and index must be available before preparation."
         },
         "refusal": null,
@@ -1584,7 +1743,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "one awip32 object and its .idx per lead, posted in lead order: a whole cycle lands within about 20 min, f000 at + 47 min, f051 at + 1 h 07 min"
         },
         "refusal": null,
@@ -2048,7 +2207,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "one prslev and one 2dfld object with their .idx per lead, posted in lead order over about 1 h 40 min; its f000 alone spreads 36 min (+ 1 h 13 min to 1 h 49 min), so the budget is 90 min"
         },
         "refusal": null,
@@ -2143,7 +2302,7 @@
           "ready_check": "objects_and_index",
           "shape": "rolling",
           "streams": true,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "Each member pressure and surface pair is posted per lead; prefix completeness requires both products and their indexes."
         },
         "refusal": null,
@@ -2461,22 +2620,22 @@
       "credentials": {
         "items": [
           {
-            "absent_message": "No Copernicus CDS key at <USER_HOME>/.cdsapirc: the retrieval cannot be requested at all -- this source is not downloaded by gpuwm but by the provider's own client, which reads a personal account key from that file and fails several commands later with its own exception if it is absent.  Obtain one at https://cds.climate.copernicus.eu.",
-            "breakage": "the retrieval cannot be requested at all -- this source is not downloaded by gpuwm but by the provider's own client, which reads a personal account key from that file and fails several commands later with its own exception if it is absent",
+            "absent_message": "No Copernicus CDS key at /home/jacob/.cdsapirc: the retrieval cannot be requested at all -- this source is not downloaded by woof but by the provider's own client, which reads a personal account key from that file and fails several commands later with its own exception if it is absent.  Obtain one at https://cds.climate.copernicus.eu.",
+            "breakage": "the retrieval cannot be requested at all -- this source is not downloaded by woof but by the provider's own client, which reads a personal account key from that file and fails several commands later with its own exception if it is absent",
             "credential_id": "copernicus-cds-api-key",
             "display_name": "Copernicus CDS key",
             "location": ".cdsapirc",
-            "location_display": "<USER_HOME>/.cdsapirc",
+            "location_display": "/home/jacob/.cdsapirc",
             "location_kind": "home_file",
             "needed_for": "acquisition",
             "obtain_url": "https://cds.climate.copernicus.eu",
             "present": true,
-            "present_message": "Copernicus CDS key is present (<USER_HOME>/.cdsapirc); acquisition can proceed.",
-            "status_message": "Copernicus CDS key is present (<USER_HOME>/.cdsapirc); acquisition can proceed."
+            "present_message": "Copernicus CDS key is present (/home/jacob/.cdsapirc); acquisition can proceed.",
+            "status_message": "Copernicus CDS key is present (/home/jacob/.cdsapirc); acquisition can proceed."
           }
         ],
         "required": true,
-        "summary": "this registry row declares 1 credential: Copernicus CDS key (<USER_HOME>/.cdsapirc), needed for acquisition"
+        "summary": "this registry row declares 1 credential: Copernicus CDS key (/home/jacob/.cdsapirc), needed for acquisition"
       },
       "decoder": "rusty-weather/grib-core",
       "default_product": "pressure-level+single-level",
@@ -2500,7 +2659,7 @@
           "ready_check": null,
           "shape": "brokered",
           "streams": false,
-          "table_sha256": "64335d4a27caeb8b50563373d033671df385a947eede9276360d719f56793876",
+          "table_sha256": "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83",
           "why": "the default provider, the Copernicus CDS, is a keyed job API: the file exists only when the job finishes and there is no object to HEAD, so the fetch runs its job and a run starts when the job's file verifies"
         },
         "refusal": null,
@@ -2554,22 +2713,22 @@
       "credentials": {
         "items": [
           {
-            "absent_message": "No Copernicus CDS key at <USER_HOME>/.cdsapirc: the retrieval cannot be requested at all -- this source is not downloaded by gpuwm but by the provider's own client, which reads a personal account key from that file and fails several commands later with its own exception if it is absent.  Obtain one at https://cds.climate.copernicus.eu.",
-            "breakage": "the retrieval cannot be requested at all -- this source is not downloaded by gpuwm but by the provider's own client, which reads a personal account key from that file and fails several commands later with its own exception if it is absent",
+            "absent_message": "No Copernicus CDS key at /home/jacob/.cdsapirc: the retrieval cannot be requested at all -- this source is not downloaded by woof but by the provider's own client, which reads a personal account key from that file and fails several commands later with its own exception if it is absent.  Obtain one at https://cds.climate.copernicus.eu.",
+            "breakage": "the retrieval cannot be requested at all -- this source is not downloaded by woof but by the provider's own client, which reads a personal account key from that file and fails several commands later with its own exception if it is absent",
             "credential_id": "copernicus-cds-api-key",
             "display_name": "Copernicus CDS key",
             "location": ".cdsapirc",
-            "location_display": "<USER_HOME>/.cdsapirc",
+            "location_display": "/home/jacob/.cdsapirc",
             "location_kind": "home_file",
             "needed_for": "acquisition",
             "obtain_url": "https://cds.climate.copernicus.eu",
             "present": true,
-            "present_message": "Copernicus CDS key is present (<USER_HOME>/.cdsapirc); acquisition can proceed.",
-            "status_message": "Copernicus CDS key is present (<USER_HOME>/.cdsapirc); acquisition can proceed."
+            "present_message": "Copernicus CDS key is present (/home/jacob/.cdsapirc); acquisition can proceed.",
+            "status_message": "Copernicus CDS key is present (/home/jacob/.cdsapirc); acquisition can proceed."
           }
         ],
         "required": true,
-        "summary": "this registry row declares 1 credential: Copernicus CDS key (<USER_HOME>/.cdsapirc), needed for acquisition"
+        "summary": "this registry row declares 1 credential: Copernicus CDS key (/home/jacob/.cdsapirc), needed for acquisition"
       },
       "decoder": "packaged ERA5 model-level profile + vendored rusty-weather GRIB2/GRIB1 bridges",
       "default_product": "model-level+pressure-level-surface",
@@ -2690,7 +2849,7 @@
         "required": false,
         "summary": "this registry row declares no credential requirement"
       },
-      "decoder": "packaged 20CRv3 NetCDF profile + rw_netcdf/netcrust (gpuwm.netcdf_bridge)",
+      "decoder": "packaged 20CRv3 NetCDF profile + rw_netcdf/netcrust (woof.netcdf_bridge)",
       "default_product": "si-subdaily-pressure+surface+subsurface",
       "display_name": "20CRv3 reanalysis (ensemble mean, NetCDF)",
       "fetch": {
@@ -2752,7 +2911,7 @@
         "required": false,
         "summary": "this registry row declares no credential requirement"
       },
-      "decoder": "rw-wps.mapping.v1 + gpuwm.mapped_source + vendored rusty-weather GRIB bridges",
+      "decoder": "rw-wps.mapping.v1 + woof.mapped_source + vendored rusty-weather GRIB bridges",
       "default_product": "mapping-declared-inputs",
       "display_name": "Generic mapped source (rw-wps mapping v1)",
       "fetch": {
