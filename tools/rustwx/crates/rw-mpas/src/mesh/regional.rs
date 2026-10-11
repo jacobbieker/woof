@@ -805,6 +805,7 @@ mod tests {
                 transition: TransitionField::Km(1500.0),
             }],
             name: None,
+            rasters: Vec::new(),
         }
         .prepared();
         let leaves = quadrature_leaves(&graded).unwrap();
@@ -825,6 +826,7 @@ mod tests {
                 transition: TransitionField::Km(1200.0),
             }],
             name: None,
+            rasters: Vec::new(),
         }
     }
 

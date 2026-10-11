@@ -1074,6 +1074,49 @@ impl KdTree {
             self.search(flo, fhi, t, best);
         }
     }
+
+    /// The nearest cell, its squared distance, and the squared distance of
+    /// the SECOND-nearest cell (infinite on a one-cell mesh).
+    fn nearest2(&self, target: [f64; 3]) -> (usize, f64, f64) {
+        let mut best = (usize::MAX, f64::INFINITY);
+        let mut second = f64::INFINITY;
+        self.search2(0, self.order.len(), target, &mut best, &mut second);
+        (best.0, best.1, second)
+    }
+
+    fn search2(
+        &self,
+        lo: usize,
+        hi: usize,
+        t: [f64; 3],
+        best: &mut (usize, f64),
+        second: &mut f64,
+    ) {
+        if hi <= lo {
+            return;
+        }
+        let mid = lo + (hi - lo) / 2;
+        let idx = self.order[mid] as usize;
+        let p = self.points[idx];
+        let d = (p[0] - t[0]).powi(2) + (p[1] - t[1]).powi(2) + (p[2] - t[2]).powi(2);
+        if d < best.1 {
+            *second = best.1;
+            *best = (idx, d);
+        } else if d < *second {
+            *second = d;
+        }
+        let a = self.axis[mid] as usize;
+        let delta = t[a] - p[a];
+        let (nlo, nhi, flo, fhi) = if delta < 0.0 {
+            (lo, mid, mid + 1, hi)
+        } else {
+            (mid + 1, hi, lo, mid)
+        };
+        self.search2(nlo, nhi, t, best, second);
+        if delta * delta < *second {
+            self.search2(flo, fhi, t, best, second);
+        }
+    }
 }
 
 fn xyz(radius: f64, lat: f64, lon: f64) -> [f64; 3] {
@@ -1326,7 +1369,93 @@ fn tile_map(
     tile: &TileRef,
     factor: usize,
 ) -> MpasResult<Vec<i32>> {
+    tile_map_counted(mesh, tree, max_distance2, ds, tile, factor).map(|(map, _)| map)
+}
+
+/// The one cell every sub-sample of a source pixel maps to, when that can be
+/// PROVEN without searching for each of them; `None` sends the pixel down
+/// the per-sub-sample path.
+///
+/// Why this exists: the categorical sampling rate is set by the mesh's
+/// SMALLEST cell and applied to every tile, so on a variable-resolution mesh
+/// with a 100 m core the 30-arc-second land-use pass searches 15 x 15
+/// sub-samples per pixel over the whole planet -- about 2e11 kd queries per
+/// dataset -- although nearly every pixel lies wholly inside one 100 km
+/// cell.  Measured on a 121,762-cell 100 m point mesh: 33 GB and no end in
+/// sight on the first categorical dataset.
+///
+/// Exact, not approximate: every sub-sample lies within `rho` of the pixel
+/// centre (twice the farthest of the eight extreme sub-samples, so the
+/// bound holds for any smooth projection at pixel scale).  When the nearest
+/// centre `c1` beats the second-nearest by more than `2 rho`, the triangle
+/// inequality makes `c1` the strict, unique nearest of every sub-sample;
+/// when `(d1 + rho)^2` is inside the search radius every sub-sample is
+/// accepted; and an outermost-ring cell, whose acceptance needs the
+/// containment test per point, is never shortcut.  The map is therefore the
+/// one the per-sub-sample loop writes, entry for entry.
+fn whole_pixel_owner(
+    mesh: &Mesh,
+    tree: &KdTree,
+    max_distance2: f64,
+    ds: &GeogDataset,
+    x_center: f64,
+    y_center: f64,
+    factor: usize,
+) -> Option<usize> {
+    let at = |x: f64, y: f64| {
+        let (lat, lon) = ds.source_xy_to_latlon(x, y);
+        xyz(mesh.sphere_radius, lat, lon)
+    };
+    let pc = at(x_center, y_center);
+    let h = 0.5 - 0.5 / factor as f64;
+    let mut rho2 = 0.0f64;
+    for (dx, dy) in [
+        (-h, -h),
+        (h, -h),
+        (-h, h),
+        (h, h),
+        (0.0, -h),
+        (0.0, h),
+        (-h, 0.0),
+        (h, 0.0),
+    ] {
+        let p = at(x_center + dx, y_center + dy);
+        let d2 = (p[0] - pc[0]).powi(2) + (p[1] - pc[1]).powi(2) + (p[2] - pc[2]).powi(2);
+        rho2 = rho2.max(d2);
+    }
+    let rho = 2.0 * rho2.sqrt();
+    if !rho.is_finite() {
+        return None;
+    }
+    let (cell, d1sq, d2sq) = tree.nearest2(pc);
+    if cell == usize::MAX {
+        return None;
+    }
+    let (d1, d2) = (d1sq.sqrt(), d2sq.sqrt());
+    if !(d2 - d1 > 2.0 * rho) {
+        return None;
+    }
+    let reach = d1 + rho;
+    if !(reach * reach <= max_distance2) {
+        return None;
+    }
+    if mesh.bdy_mask_cell[cell] == REGIONAL_OUTERMOST_MASK {
+        return None;
+    }
+    Some(cell)
+}
+
+/// [`tile_map`], and how many pixels [`whole_pixel_owner`] decided.
+fn tile_map_counted(
+    mesh: &Mesh,
+    tree: &KdTree,
+    max_distance2: f64,
+    ds: &GeogDataset,
+    tile: &TileRef,
+    factor: usize,
+) -> MpasResult<(Vec<i32>, usize)> {
     validate_supersample(factor)?;
+    let mut shortcut = 0usize;
     let far = FarReject::new(mesh, max_distance2);
     let pixels = (ds.index.tile_x as usize)
         .checked_mul(ds.index.tile_y as usize)
@@ -1342,6 +1471,15 @@ fn tile_map(
         for i in 0..ds.index.tile_x as usize {
             let x_center = tile.xs as f64 + i as f64;
             let y_center = tile.ys as f64 + j as f64;
+            if factor > 1 {
+                if let Some(cell) =
+                    whole_pixel_owner(mesh, tree, max_distance2, ds, x_center, y_center, factor)
+                {
+                    out.extend(std::iter::repeat(cell as i32).take(factor * factor));
+                    shortcut += 1;
+                    continue;
+                }
+            }
             for sj in 0..factor {
                 for si in 0..factor {
                     let x = x_center - 0.5 + (si as f64 + 0.5) / factor as f64;
@@ -1366,7 +1504,7 @@ fn tile_map(
             }
         }
     }
-    Ok(out)
+    Ok((out, shortcut))
 }
 
 // ---------------------------------------------------------------------------
@@ -4594,6 +4732,111 @@ mod tests {
         }
         assert!(refused > 0, "no pixel was out of reach: {refused}/{mapped}");
         assert!(mapped > 0, "no pixel reached a cell at all");
+    }
+
+    /// The per-sub-sample loop exactly as it stood before
+    /// [`whole_pixel_owner`] existed: the reference the shortcut is held to.
+    fn tile_map_every_subsample(
+        mesh: &Mesh,
+        tree: &KdTree,
+        max_distance2: f64,
+        ds: &GeogDataset,
+        tile: &TileRef,
+        factor: usize,
+    ) -> Vec<i32> {
+        let far = FarReject::new(mesh, max_distance2);
+        let mut out = Vec::new();
+        for j in 0..ds.index.tile_y as usize {
+            for i in 0..ds.index.tile_x as usize {
+                let x_center = tile.xs as f64 + i as f64;
+                let y_center = tile.ys as f64 + j as f64;
+                for sj in 0..factor {
+                    for si in 0..factor {
+                        let x = x_center - 0.5 + (si as f64 + 0.5) / factor as f64;
+                        let y = y_center - 0.5 + (sj as f64 + 0.5) / factor as f64;
+                        let (lat, lon) = ds.source_xy_to_latlon(x, y);
+                        let p = xyz(mesh.sphere_radius, lat, lon);
+                        if far.certainly_out(p) {
+                            out.push(-1);
+                            continue;
+                        }
+                        let (cell, d2) = tree.nearest(p);
+                        let accepted = d2 <= max_distance2
+                            && (mesh.bdy_mask_cell[cell] != REGIONAL_OUTERMOST_MASK
+                                || point_in_cell(mesh, cell, p));
+                        out.push(if accepted { cell as i32 } else { -1 });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_whole_pixel_shortcut_writes_the_per_subsample_map_entry_for_entry() {
+        // The shortcut may only skip work, never move a sub-sample: on a
+        // band mesh (refused pixels in the tile), with some cells marked
+        // outermost-ring (containment per point), at the rates the
+        // categorical passes use, every entry must match the reference loop
+        // -- and the shortcut must actually fire, or this proves nothing.
+        let case = SyntheticCase::build("shortcut");
+        let ds = GeogDataset::open(&case.cont1).expect("fixture opens");
+        for outermost in [false, true] {
+            let mut mesh = synthetic_mesh(120);
+            if outermost {
+                for c in (0..mesh.n_cells).step_by(5) {
+                    mesh.bdy_mask_cell[c] = REGIONAL_OUTERMOST_MASK;
+                }
+            }
+            let tree = KdTree::new(&mesh);
+            let max_d2 = mesh.max_search_distance2();
+            for factor in [1usize, 2, 4, 15] {
+                let mut fired = 0usize;
+                let mut fell_back = 0usize;
+                for tile in &ds.tiles {
+                    let (map, shortcut) =
+                        tile_map_counted(&mesh, &tree, max_d2, &ds, tile, factor)
+                            .expect("tile map");
+                    let reference = tile_map_every_subsample(&mesh, &tree, max_d2, &ds, tile, factor);
+                    assert_eq!(
+                        map, reference,
+                        "factor {factor}, outermost {outermost}, tile ({}, {}): the shortcut moved a sub-sample",
+                        tile.xs, tile.ys
+                    );
+                    fired += shortcut;
+                    fell_back += (ds.index.tile_x * ds.index.tile_y) as usize - shortcut;
+                }
+                if factor == 1 {
+                    assert_eq!(fired, 0, "factor 1 has nothing to skip and must not take the shortcut");
+                } else {
+                    assert!(fired > 0, "factor {factor}: the shortcut never fired");
+                    assert!(fell_back > 0, "factor {factor}: no pixel took the per-sub-sample path");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nearest2_agrees_with_a_brute_force_scan() {
+        let mesh = synthetic_mesh(120);
+        let tree = KdTree::new(&mesh);
+        let r = MPAS_EARTH_RADIUS_M;
+        for k in 0..400 {
+            let lat = ((k as f64 * 0.37).sin()) * 1.2;
+            let lon = (k as f64 * 2.399).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+            let t = xyz(r, lat, lon);
+            let mut d: Vec<(f64, usize)> = (0..mesh.n_cells)
+                .map(|c| {
+                    let p = [mesh.x_cell[c], mesh.y_cell[c], mesh.z_cell[c]];
+                    ((p[0] - t[0]).powi(2) + (p[1] - t[1]).powi(2) + (p[2] - t[2]).powi(2), c)
+                })
+                .collect();
+            d.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (cell, d1, d2) = tree.nearest2(t);
+            assert_eq!(d1, d[0].0, "nearest distance at probe {k}");
+            assert_eq!(d2, d[1].0, "second-nearest distance at probe {k}");
+            assert_eq!(cell, tree.nearest(t).0, "nearest2 and nearest disagree at probe {k}");
+        }
     }
 
     #[test]
