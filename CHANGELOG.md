@@ -57,6 +57,36 @@ New:
   on disk, and whether the optional `xarray`, `zarr` and `icechunk`
   packages import. It contacts no host. The guide is
   `docs/energy-forecasts.md`.
+- The hex (MPAS) model reaches 100 m and 50 m cells. An opt-in
+  experimental timestep lane (`woof hex forecast --experimental-dt`,
+  `WOOF_HEX_EXPERIMENTAL_DT=1`) admits whole-millisecond timesteps below
+  the 5 s anchors, 0.5 s at 100 m and 0.25 s at 50 m, when Courant,
+  radiation divisibility and binary64 clock closure hold. Every receipt
+  and history file is stamped `experimental-unanchored`, and the anchor
+  table is unchanged. Below the anchors the CUDA path recovers theta
+  increments with compensated summation.
+- The MPAS v8.4.1 LES closure is ported: `woof hex forecast --les-model
+  {off,3d_smagorinsky,prognostic_tke}` with `--pbl off`. The column takes
+  its level count from the vertical file, up to 80 levels, and the `les`
+  vertical preset puts fine layers near the ground.
+- Adaptive meshing: `woof hex density` writes `woof-hex.density.v1`
+  spacing rasters from sites, assets, terrain or forecast fields, and
+  `woof mesh --density-raster` generates from them. `woof mesh
+  --regional-window` relaxes only inside a window, and generated meshes
+  default to incremental triangulation. `woof hex remap` moves a state
+  between meshes conservatively, and `woof hex adapt` turns forecast
+  history into the next cycle's density raster.
+- New hex doors: `woof hex register`, `woof hex vertical`, `woof hex
+  static-highres` (GLO-30 terrain and CGLC land use), `woof hex
+  intermediate --source {gfs,gdas,ecmwf-open-data,era5,aifs}` through the
+  Rust `met_intermediate`, and `--source wrfout` to force a hex limited
+  area from a WOOF WRF run. Hex history gains `SWDDNI`, `SWDDIF`,
+  `COSZEN`, `zgrid` and `xtime`, and output-variable selection.
+- `woof energy plan --topology hex-swath --hex-experimental-dt` emits the
+  full hex command chain, and `wrf-tiles` tiles now carry the LES physics
+  and the `energy` output preset through `woof downscale --child-config`.
+- `components/hex/tools/mint_dt_anchor.py --regional-plan` plans a
+  sub-second timestep mint on a limited-area cull without running it.
 
 ## 1.0.3
 
