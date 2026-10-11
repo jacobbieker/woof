@@ -84,7 +84,7 @@ is now tracked.
 
 Offline posture is now the shipped one: `cargo build --locked --offline`
 and `cargo test --locked --offline` both pass with no network, resolving
-every crates.io dependency from `vendor/crates-io` (91 packages, ~57 MB).
+every crates.io dependency from `vendor/crates-io` (92 packages since `libm` joined, ~58 MB).
 
 `serde_json` is built with the **`float_roundtrip`** feature, and that is
 a correctness requirement rather than a preference: its default float
@@ -167,6 +167,22 @@ so standalone facade builds use the same corrected fractal-heap parser as
 this workspace. Its Rust sources match the existing 0.3.0 registry mirror;
 the additional snapshot records its origin in its own `VENDOR.md`.
 The historical manifest checksum below remains the original donor record.
+
+## The libm crate in the mapped engine
+
+`vendor/crates-io/libm-0.2.16` is a byte-identical copy of
+`tools/grib1_bridge/vendor/crates-io/libm`, with its
+`.cargo-checksum.json`. The lockfile checksum is the same in both
+workspaces. `crates/mapped-engine` depends on it (default features, as
+`tools/grib1_bridge` does) for the derivations whose Python twin calls
+`woof.core.portable_math`, which runs that crate inside the CPU
+preprocessing library. The two engines must take the same `exp`, `log`,
+`sin` and `cos` to agree to the byte; see `docs/dev/decode-vendor-design.md`
+§4.2. `tools/zarr_bridge` links `mapped-engine` as well, so it vendors
+the same crate (`vendor/crates-io/libm-0.2.16`), its lock lists it, and
+`tools/update_zarr_license_notice.py` accounts for it in the Zarr
+notices. Moving any copy off 0.2.16 moves them all, together with
+`portable_math.IMPLEMENTATION`.
 
 ## File list (sha256, path relative to this directory)
 

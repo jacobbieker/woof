@@ -31,6 +31,15 @@ bzip2 = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 grib-core = { path = "../../../grib1_bridge/vendor/grib-core", default-features = false, features = ["jpeg2000"] }
 ndarray = "0.17"
+# A pure Rust port of musl's libm, the same crate and version the CPU
+# preprocessing library (tools/grib1_bridge) runs `woof.core.portable_math`
+# on.  The derivations whose Python twin computes through portable_math
+# call it here, so the two engines agree to the bit on every host; see
+# the "Transcendentals" section of src/derive.rs for which calls go where.
+# Pinned exactly: a different libm release can round differently, and
+# tests/test_mapped_engine_math_parity.py checks every lock that links it
+# against `portable_math.IMPLEMENTATION`.
+libm = "=0.2.16"
 netcrust = { path = "../../../rustwx/vendor/netcrust" }
 # Message decode is pure per-message work and a large complex-packed
 # object carries hundreds of them; see `src/threads.rs` for the one rule

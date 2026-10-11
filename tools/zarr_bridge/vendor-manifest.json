@@ -1,6 +1,6 @@
 {
   "schema": "arwen.zarr-vendor.v1",
-  "lock_sha256": "ede24c77959987eb9df504486b5a593cd22b9c068f75a6c3bf1fed130f326729",
+  "lock_sha256": "eb574bb9e6f5978c821a1ccbc2de9294d20699707ff8b352fc494e1cb77414a2",
   "command": "cd tools/zarr_bridge && cargo vendor --locked --offline --versioned-dirs vendor/crates-io",
   "packages": [
     {
@@ -680,6 +680,13 @@
       "version": "0.2.189",
       "package_sha256": "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2",
       "license": "MIT OR Apache-2.0",
+      "license_file": null
+    },
+    {
+      "name": "libm",
+      "version": "0.2.16",
+      "package_sha256": "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981",
+      "license": "MIT",
       "license_file": null
     },
     {

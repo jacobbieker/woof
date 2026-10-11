@@ -21,6 +21,7 @@ import numpy as np
 import pytest
 
 from woof import mapped_engine_bridge as engine_bridge
+from woof.core import portable_math as pm
 from woof.mapped_source import _decode_mapped_source_python, load_mapping
 
 from test_mapped_source import POLICY, SURFACE, THREE_D
@@ -359,7 +360,26 @@ def _require_engine():
         pytest.skip(f"gpuwm_mapped_engine is not built: {error}")
 
 
+def _require_portable_math():
+    """Skip a byte comparison the Python engine cannot make here.
+
+    The speed/direction winds and the humidity derivations take
+    ``portable_math`` in the Python engine and the same ``libm`` crate in
+    the Rust engine.  Without the CPU preprocessing library the Python
+    side falls back to the host C library, which is a build fact, not an
+    engine verdict, so it is said by name.
+    """
+
+    if pm.implementation() != pm.IMPLEMENTATION:
+        pytest.skip("the CPU preprocessing library with the portable math "
+                    "entries is not built here, so the Python engine runs "
+                    "the host C library fallback, not the portable contract")
+
+
 def _rust_decode(mapping: Path, files, work: Path):
+    """The Rust engine's frames, for a byte comparison with the Python's."""
+
+    _require_portable_math()
     _require_engine()
     directory = work / "frameset"
     engine_bridge.run_engine("decode", mapping=mapping, files=files,
@@ -429,8 +449,9 @@ def test_speed_and_direction_become_earth_relative_components(tmp_path, cycle_fi
     radians = _direction_grid().astype(np.float64) * (np.pi / 180.0)
     u10 = frame.fields["eastward_wind_10m"].values
     v10 = frame.fields["northward_wind_10m"].values
-    assert np.array_equal(u10, -speed * np.sin(radians))
-    assert np.array_equal(v10, -speed * np.cos(radians))
+    # The portable sin and cos, which the Rust engine's libm crate repeats.
+    assert np.array_equal(u10, -speed * pm.sin(radians))
+    assert np.array_equal(v10, -speed * pm.cos(radians))
     # Speed is preserved, and the meteorological convention holds: FROM
     # the north (0 and 360) blows southward.
     assert np.allclose(np.hypot(u10, v10), speed, rtol=0, atol=1e-12)

@@ -60,6 +60,13 @@ pub const COMPLETED_FIELD_REFERENCE_PREFIX: &str = "@completed.";
 ///
 /// Read from the mapping's own declarations, so a new model is table
 /// work: nothing here names a source.
+///
+/// Most of these derivations now take the portable `libm` crate in both
+/// engines (the "Transcendentals" section of `derive.rs`), so their arrays
+/// no longer depend on the box.  The set is unchanged anyway: it is part
+/// of the versioned portable-header rule both engines and the committed
+/// goldens hash, and the sea-level reduction and the Lambert rotation
+/// still take the host C library.
 pub fn libm_dependent_fields(mapping: &crate::model::Mapping) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let Ok(fields) = mapping.fields() else {

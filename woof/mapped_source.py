@@ -4011,6 +4011,13 @@ def libm_dependent_fields(mapping: Mapping[str, object]) -> frozenset[str]:
 
     Read from the mapping's own declarations, so a new model is table
     work: nothing here names a source.
+
+    Most of these derivations now take the portable ``libm`` crate in
+    both engines (the "Transcendentals" section of the engine's
+    ``derive.rs``), so their arrays no longer depend on the box.  The set
+    is unchanged anyway: it is part of the versioned portable-header rule
+    both engines and the committed goldens hash, and the sea-level
+    reduction and the Lambert rotation still take the host C library.
     """
 
     fields = mapping.get("fields", {})
@@ -6057,7 +6064,10 @@ def _wind_component_from_speed_direction(
     ``u = -speed * sin(dir)``, ``v = -speed * cos(dir)``, dir in radians
     as ``dir_deg * (pi / 180)``: float64 throughout, in this operation
     order, which ``derive.rs`` repeats so the two engines agree to the
-    byte.  A missing (NaN) operand stays missing.  The range check is on
+    byte.  ``sin`` and ``cos`` are :mod:`woof.core.portable_math`'s, the
+    libm crate the engine calls too, so the components are the same bits
+    on every host; NumPy's would be the host C library's, whatever the
+    engine's.  A missing (NaN) operand stays missing.  The range check is on
     finite values only, and it refuses rather than wraps: a direction
     past 360 or below 0 is not a convention this reads.
     """
@@ -6081,8 +6091,8 @@ def _wind_component_from_speed_direction(
         raise ValueError(f"{name} reads {negative} negative wind speed value(s)")
     radians = direction_values * (np.pi / 180.0)
     if kind == "eastward_wind_from_speed_direction":
-        return -speed_values * np.sin(radians)
-    return -speed_values * np.cos(radians)
+        return -speed_values * pm.sin(radians)
+    return -speed_values * pm.cos(radians)
 
 
 def _evaluate_derivation(

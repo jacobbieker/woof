@@ -74,6 +74,7 @@ import pytest
 
 from woof import bridges
 from woof import mapped_engine_bridge as engine_bridge
+from woof.core import portable_math
 from woof.mapped_source import (_array_sha256, _decode_mapped_source_python,
                                  _FORMATS as _MAPPED_SOURCE_FORMATS,
                                  _inspect_mapped_source_python, _sha256,
@@ -744,6 +745,7 @@ def decode_with_python_engine(source: str):
 
     entry = STAGED_SOURCES[source]
     mapping = _mapping_of(entry)
+    requires_portable_math(source, (mapping,))
     tools = _python_tools(_format_of(entry))
     try:
         frames = _decode_mapped_source_python(
@@ -765,6 +767,7 @@ def inspect_with_python_engine(source: str):
     """
 
     entry = STAGED_SOURCES[source]
+    requires_portable_math(source, (_mapping_of(entry),))
     tools = _python_tools(_format_of(entry))
     try:
         return _inspect_mapped_source_python(
@@ -849,6 +852,48 @@ def golden_document(source: str) -> dict[str, object]:
 
     return {**measure_decode_document(source),
             GOLDEN_PLATFORM_KEY: measuring_platform()}
+
+
+#: The operations whose Python twin computes through
+#: ``woof.core.portable_math`` while the Rust engine runs the same ``libm``
+#: crate (the "Transcendentals" section of the engine's ``derive.rs``):
+#: declared derivations, and the ``when_absent`` terrain derivation.
+PORTABLE_MATH_OPERATIONS = frozenset({
+    "relative_humidity_from_dewpoint", "specific_humidity_from_rh",
+    "specific_humidity_from_dewpoint", "eastward_wind_from_speed_direction",
+    "northward_wind_from_speed_direction", "geopotential_height_hydrostatic",
+    "height_at_surface_pressure",
+})
+
+
+def requires_portable_math(source: str, mappings) -> None:
+    """Skip, by name, a Python-engine run that would not run the contract.
+
+    Without the CPU preprocessing library ``portable_math`` falls back to
+    the host C library, so every field produced by an operation in
+    :data:`PORTABLE_MATH_OPERATIONS` differs between the engines in the
+    last bit.  Reporting that as an engine defect would be wrong, so it is
+    reported as the missing library, the way a missing decoder executable
+    is.  Called where the Python engine runs, so a comparison of the Rust
+    engine with a committed golden never skips for it.
+    """
+
+    if portable_math.implementation() == portable_math.IMPLEMENTATION:
+        return
+    operations = set()
+    for mapping in mappings:
+        document = json.loads(Path(mapping).read_text(encoding="utf-8"))
+        operations.update(item.get("operation")
+                          for item in document.get("derivations", ()))
+        for field in document.get("fields", {}).values():
+            if isinstance(field, dict) and isinstance(field.get("when_absent"), dict):
+                operations.add(field["when_absent"].get("operation"))
+    used = sorted(operations & PORTABLE_MATH_OPERATIONS)
+    if used:
+        pytest.skip(
+            f"{source}: the CPU preprocessing library with the portable math "
+            "entries is absent, so the Python engine takes the host C "
+            f"library for {used}; build tools/grib1_bridge")
 
 
 def requires(source: str) -> None:
@@ -1407,6 +1452,8 @@ def compose_with_python_engine(source: str, work: Path):
     from woof.mapped_composition import decode_composed_source
 
     recipe = composed_recipe(source)
+    requires_portable_math(
+        source, (recipe["mapping"], *recipe["contributing"].values()))
     tools = _python_tools(_composed_formats(recipe))
     manifest = Path(work) / "input-manifest.json"
     with _python_engine_pinned():

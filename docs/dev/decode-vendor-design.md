@@ -416,6 +416,68 @@ Re-measuring a golden on a different platform is a deliberate act:
 `tools/extract_mapped_engine_goldens.py` names the platform change in
 its refusal and `--force` is what moves a golden's home box.
 
+### 4.2 One implementation per transcendental (normative)
+
+Keeping the operation order is not enough for byte parity: an `exp`,
+`log`, `sin` or `cos` also takes its last bit from the library that
+computes it.  Each call in the engine therefore uses the same library as
+its Python twin, from one of two lists:
+
+* **Portable: the `libm` crate 0.2.16** (a Rust port of musl's libm),
+  vendored at `tools/rw_wps/vendor/crates-io/libm-0.2.16` and pinned
+  exactly.  The Python twin calls `woof.core.portable_math`, which runs
+  the same crate inside the CPU preprocessing library.  This list covers
+  the humidity relations (`real._surface_relative_humidity`,
+  `real._saturation_mixing_ratio`), the speed/direction wind components,
+  the per-layer `log` of `geopotential_height_hydrostatic`, and
+  composition's `height_at_surface_pressure`.
+* **System: the platform C library** (`f64::ln`, `f64::exp` and the other
+  `f64` methods).  The Python twin takes the C library on purpose.  The
+  sea-level reduction calls `math.*` one value at a time
+  (`_libm_log`/`_libm_exp`), and so does the hypsometric completion.  The
+  Lambert projection and rotation follow `woof.static.lambert`, a
+  transcription of WPS: `woof.core.host_libm` for `log10`, `tan`, `atan`,
+  `atan2` and `pow`, and NumPy for `sin`, `cos` and `sqrt`, which
+  `host_libm` records as giving the C library's answer with and without
+  NumPy's AVX-512 loops.
+
+Until 2026-10 the engine took the system library for the portable list
+as well.  On a glibc box about one argument in ten rounds differently
+from musl, so `specific_humidity_from_rh`,
+`specific_humidity_from_dewpoint` and the two heights differed from the
+Python engine in the last bit.  A live dual-engine row of §4.1 fails on
+those fields for any humidity source.  On a synthetic decode of 823,685
+values, 50,788 `specific_humidity` values differed, and so did 61,413 of
+988,422 hydrostatic heights.  The goldens measured on Windows hid it,
+because on Windows the battery compares against the committed file
+instead.
+
+The speed/direction winds joined the portable list in the same change.
+NumPy's `sin` and `cos` would have matched Rust's on one host, since both
+reach that host's C library, but they would not have matched across hosts.
+These winds are a derivation like the humidity relations, which are
+portable, and portable winds give the same bits on every host.  The Met
+Office route had no golden or pin to move.
+
+What holds the rule: `tests/test_mapped_engine_math_parity.py` decodes
+synthetic sources of 164,737 random cells per plane, plus edge cases,
+through both engines and requires byte equality.  The sources cover every
+portable decode derivation and the sea-level reduction.  The test also
+pins sha256 digests of four portable kernels over 100,000 splitmix64
+arguments each: the humidity relations, the winds and the height at the
+surface pressure.  `mod portable_pins` in `derive.rs` asserts the same
+digests.  It checks every `Cargo.lock` that links `libm` against
+`portable_math.IMPLEMENTATION`.  Making the portable list portable also
+makes those fields' committed numbers portable for GOLD-PORTABLE.  The
+system list, and so the rotated Lambert winds and the sea-level surface
+pressure, stays per-platform.
+
+A Python engine without the CPU preprocessing library falls back to the
+host library for the portable list and warns once on stderr.  Its numbers
+then match neither the Rust engine nor another box.  So the two-engine
+tests, and every battery run of the Python engine on a source that uses a
+portable operation, skip by name rather than report an engine defect.
+
 ## 5. Lanes (disjoint; branch from `lane/decode-vendor`)
 
 | Lane | Branch | Files (exclusive) | Done means |

@@ -7,6 +7,50 @@
 //! `100.0 * exp(k * (1/T - 1/D))` keeps its parenthesisation, and the
 //! Bolton chain keeps its `max(candidate, 1e-6)` floor on the same side of
 //! the validity test.
+//!
+//! # Transcendentals
+//!
+//! Operation order is not enough: an `exp`, `log`, `sin` or `cos` takes
+//! its last bit from whichever implementation runs it, so every call here
+//! uses the SAME implementation as its Python twin, and the two lists
+//! below are the whole contract.
+//!
+//! * **Portable (`libm` crate, musl's libm in Rust).**  The Python twin
+//!   calls `woof.core.portable_math`, which runs this very crate and
+//!   version inside the CPU preprocessing library.  These give the same
+//!   bits on every host and C library:
+//!   - [`surface_relative_humidity`] (`real._surface_relative_humidity`),
+//!     the `exp`;
+//!   - [`saturation_mixing_ratio`] (`real._saturation_mixing_ratio_serial`),
+//!     the `exp` behind `specific_humidity_from_rh` and
+//!     `specific_humidity_from_dewpoint`;
+//!   - [`wind_component_from_speed_direction`]
+//!     (`mapped_source._wind_component_from_speed_direction`), `sin`/`cos`;
+//!   - `geopotential_height_hydrostatic`, the per-layer `log` ratio;
+//!   - [`height_at_surface_pressure`]
+//!     (`mapped_source._height_at_surface_pressure`), the dewpoint `exp`
+//!     and all three `log` terms.
+//! * **System (`f64::ln`/`f64::exp`, the platform C library).**  The Python
+//!   twin calls the C library through `math.*` one value at a time, on
+//!   purpose:
+//!   - [`surface_pressure_from_sea_level`]
+//!     (`mapped_source._surface_pressure_from_sea_level`, through
+//!     `_libm_log`/`_libm_exp`);
+//!   - [`complete_geopotential_height`]
+//!     (`mapped_source._complete_geopotential_height`, `math.log`);
+//!   - the hydrostatic top-level `alpha = ln 2` (`math.log(2.0)`; both
+//!     libraries round it the same).
+//!
+//! A new transcendental joins one list or the other with its twin, never
+//! neither.  `tests/test_mapped_engine_math_parity.py` decodes through both
+//! engines with every portable decode derivation, and pins four of the
+//! portable kernels against `mod portable_pins` below.  The Lambert
+//! projection and wind rotation (`lambert.rs`) are host-library
+//! transcriptions of WPS, matched to `woof.static.lambert`: that module
+//! takes `woof.core.host_libm` for `log10`, `tan`, `atan`, `atan2` and
+//! `pow`, and NumPy for `sin`, `cos` and `sqrt`, which `host_libm` records
+//! as the C library's answer with and without NumPy's AVX-512 loops.
+//! `hypot` (`wind_speed`) is the C library's on both sides.
 
 use ndarray::{ArrayD, IxDyn};
 
@@ -497,7 +541,7 @@ pub fn surface_relative_humidity(dewpoint: &[f64], temperature: &[f64]) -> Vec<f
     dewpoint
         .iter()
         .zip(temperature.iter())
-        .map(|(d, t)| 100.0 * (xlv_over_rv * (1.0 / t - 1.0 / d)).exp())
+        .map(|(d, t)| 100.0 * libm::exp(xlv_over_rv * (1.0 / t - 1.0 / d)))
         .collect()
 }
 
@@ -514,7 +558,7 @@ pub fn saturation_mixing_ratio(
         .map(|((t, p), rh)| {
             let rh = rh.clamp(0.0, 100.0);
             let es_hpa =
-                (rh * 0.01) * (10.0 * SVP1) * (SVP2 * (t - SVPT0) / (t - SVP3)).exp();
+                (rh * 0.01) * (10.0 * SVP1) * libm::exp(SVP2 * (t - SVPT0) / (t - SVP3));
             let candidate = 0.622 * es_hpa / (p / 100.0 - es_hpa);
             // rh_to_mxrat1's own EPS = 0.622, NOT module ep_2 = 0.62175.
             let valid = *t != 0.0 && es_hpa.is_finite() && es_hpa < p / 100.0;
@@ -543,7 +587,9 @@ const SEA_LEVEL_SHALLOW_M: f64 = 50.0;
 /// whose heights bracket it, or, when it lies below every level,
 /// between sea level and the second level (WRF's own choice) or the
 /// first level under the sea-level pressure.  The loop bounds keep
-/// WRF's excluded top levels.
+/// WRF's excluded top levels.  The logarithm and exponential are the
+/// system `f64::ln`/`f64::exp`, because the twin calls `math.log`/`math.exp`
+/// (`_libm_log`/`_libm_exp`), not `portable_math`.
 pub fn surface_pressure_from_sea_level(
     sea_level_pressure: &[f64],
     level_height: &[f64],
@@ -631,9 +677,10 @@ const DIRECTION_UNITS: [&str; 2] = ["degree", "degrees"];
 ///
 /// `u = -speed * sin(dir)`, `v = -speed * cos(dir)`, dir in radians as
 /// `dir_deg * (PI / 180.0)`, f64 throughout and in numpy's operation order
-/// (`np.pi` is `f64::consts::PI`; negation is exact), so the bytes equal the
-/// Python engine's.  NaN stays NaN; finite values outside [0, 360] degrees
-/// or below zero speed refuse rather than wrap.
+/// (`np.pi` is `f64::consts::PI`; negation is exact), with the `libm`
+/// crate's `sin`/`cos` that the twin takes through `portable_math`, so the
+/// bytes equal the Python engine's.  NaN stays NaN; finite values outside
+/// [0, 360] degrees or below zero speed refuse rather than wrap.
 pub fn wind_component_from_speed_direction(
     kind: &str,
     speed: &CanonicalField,
@@ -676,7 +723,7 @@ pub fn wind_component_from_speed_direction(
         .zip(direction_values.iter())
         .map(|(speed, direction)| {
             let radians = direction * to_radians;
-            let trig = if eastward { radians.sin() } else { radians.cos() };
+            let trig = if eastward { libm::sin(radians) } else { libm::cos(radians) };
             -speed * trig
         })
         .collect())
@@ -1018,9 +1065,9 @@ pub fn evaluate_derivation(
                     let below = ladder[(level + 1) * plane + cell];
                     let above = ladder[level * plane + cell];
                     let positive_above = above > 0.0;
-                    let log_ratio = (below
-                        / if positive_above { above } else { HYDROSTATIC_TOP_PA })
-                        .ln();
+                    let log_ratio = libm::log(
+                        below / if positive_above { above } else { HYDROSTATIC_TOP_PA },
+                    );
                     let alpha = if positive_above {
                         1.0 - (above / (below - above)) * log_ratio
                     } else {
@@ -1408,13 +1455,13 @@ pub fn height_at_surface_pressure(
             below_ladder += 1;
             let dewpoint = dewpoints[cell];
             let vapour_hpa =
-                (10.0 * SVP1) * (SVP2 * (dewpoint - SVPT0) / (dewpoint - SVP3)).exp();
+                (10.0 * SVP1) * libm::exp(SVP2 * (dewpoint - SVPT0) / (dewpoint - SVP3));
             let humidity = 0.622 * vapour_hpa / (pressure / 100.0 - 0.378 * vapour_hpa);
             (surface_temperatures[cell], humidity)
         } else {
             let below = order[position - 1];
-            let weight = (pressure.ln() - levels_pa[above].ln())
-                / (levels_pa[below].ln() - levels_pa[above].ln());
+            let weight = (libm::log(pressure) - libm::log(levels_pa[above]))
+                / (libm::log(levels_pa[below]) - libm::log(levels_pa[above]));
             let t_above = at(temperatures, above);
             let q_above = at(humidities, above);
             (
@@ -1426,7 +1473,7 @@ pub fn height_at_surface_pressure(
             at(temperatures, above) * (1.0 + HYDROSTATIC_VIRTUAL * at(humidities, above));
         let virtual_surface = surface_t * (1.0 + HYDROSTATIC_VIRTUAL * surface_q);
         let height = at(heights, above)
-            - scale * (0.5 * (virtual_above + virtual_surface)) * (pressure / levels_pa[above]).ln();
+            - scale * (0.5 * (virtual_above + virtual_surface)) * libm::log(pressure / levels_pa[above]);
         if !height.is_finite() {
             unreadable += 1;
         }
@@ -2118,7 +2165,8 @@ mod tests {
                 "northward_wind_from_speed_direction", &speed, &from, "v").unwrap();
             assert!((u[0] - expected_u).abs() < 1e-12, "{direction}: u={}", u[0]);
             assert!((v[0] - expected_v).abs() < 1e-12, "{direction}: v={}", v[0]);
-            assert_eq!(u[0], -10.0 * (direction * (std::f64::consts::PI / 180.0)).sin());
+            assert_eq!(u[0], -10.0 * libm::sin(direction * (std::f64::consts::PI / 180.0)));
+            assert_eq!(v[0], -10.0 * libm::cos(direction * (std::f64::consts::PI / 180.0)));
         }
     }
 
@@ -2143,5 +2191,166 @@ mod tests {
         let values = wind_component_from_speed_direction(
             "northward_wind_from_speed_direction", &speed, &from, "v").unwrap();
         assert!(values[1].is_nan() && values[0].is_finite());
+    }
+}
+
+/// The portable kernels against pinned digests that the Python twins'
+/// test (`tests/test_mapped_engine_math_parity.py`) asserts too.
+///
+/// Each kernel runs over 100,000 splitmix64 arguments plus edge cases,
+/// generated by the same integer arithmetic and the same IEEE scaling on
+/// both sides, and the sha256 of its little-endian answers is pinned.  The
+/// same pin on both sides means the two engines agree to the bit on any
+/// host and C library, because these kernels call only the `libm` crate
+/// and IEEE arithmetic.  A change that moves a pin here moves the Python
+/// pin with it, or the engines have parted.
+#[cfg(test)]
+mod portable_pins {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    const COUNT: u64 = 100_000;
+
+    /// splitmix64's `index`-th output (1-based) from `seed`.
+    fn splitmix64(seed: u64, index: u64) -> u64 {
+        let mut z = seed.wrapping_add(index.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// `edges`, then `COUNT` uniform values in `[low, high)`.
+    fn arguments(edges: &[f64], seed: u64, low: f64, high: f64) -> Vec<f64> {
+        let unit = 2.0f64.powi(-53);
+        edges
+            .iter()
+            .copied()
+            .chain((1..=COUNT).map(|index| {
+                low + (high - low) * ((splitmix64(seed, index) >> 11) as f64 * unit)
+            }))
+            .collect()
+    }
+
+    fn digest(outputs: &[&[f64]]) -> String {
+        let mut hasher = Sha256::new();
+        for output in outputs {
+            for value in output.iter() {
+                hasher.update(value.to_le_bytes());
+            }
+        }
+        crate::digest::hex_digest(hasher)
+    }
+
+    fn field(name: &str, units: &str, values: Vec<f64>) -> CanonicalField {
+        let count = values.len();
+        CanonicalField {
+            name: name.to_owned(),
+            units: units.to_owned(),
+            axes: vec!["y".to_owned(), "x".to_owned()],
+            location: "surface".to_owned(),
+            staggering: "none".to_owned(),
+            values: ArrayD::from_shape_vec(IxDyn(&[1, count]), values).unwrap(),
+            missing_count: 0,
+            source_references: vec![format!("@test.{name}")],
+        }
+    }
+
+    #[test]
+    fn splitmix64_matches_the_reference_stream() {
+        // The published first output from seed 0, so both sides start
+        // from the textbook generator and not merely from each other.
+        assert_eq!(splitmix64(0, 1), 0xE220_A839_7B1D_CDAF);
+    }
+
+    #[test]
+    fn surface_relative_humidity_is_pinned() {
+        let dewpoint = arguments(&[273.15, 180.0, 320.0, 300.0, 250.5], 1, 180.0, 320.0);
+        let temperature = arguments(&[273.15, 330.0, 180.0, 300.0, 260.25], 2, 180.0, 330.0);
+        let values = surface_relative_humidity(&dewpoint, &temperature);
+        assert_eq!(
+            digest(&[&values]),
+            "93040713b9a02fcbac20ef77cc68aed81b84417beef7367ccfe3c9586833150a"
+        );
+    }
+
+    #[test]
+    fn saturation_mixing_ratio_is_pinned() {
+        // Freezing point; T = 0 (refused by the T != 0 test); T = SVP3,
+        // where the exponent divides by zero; both clamps of RH and past
+        // them; a pressure below the saturation pressure (the 1e-6 floor).
+        let temperature =
+            arguments(&[273.15, 0.0, SVP3, 300.0, 300.0, 300.0, 300.0, 380.0], 3, 150.0, 380.0);
+        let pressure = arguments(
+            &[101_325.0, 101_325.0, 101_325.0, 101_325.0, 101_325.0, 101_325.0, 1.0, 50_000.0],
+            4,
+            100.0,
+            110_000.0,
+        );
+        let relative_humidity =
+            arguments(&[100.0, 50.0, 50.0, 0.0, -1.0, 150.0, 50.0, 100.0], 5, -10.0, 120.0);
+        let mixing_ratio = saturation_mixing_ratio(&temperature, &pressure, &relative_humidity);
+        let specific = specific_humidity_from_rh(&relative_humidity, &temperature, &pressure);
+        assert_eq!(
+            digest(&[&mixing_ratio, &specific]),
+            "f8d57c329cc5d221ce07539924ed08981619f044e172108ba7e0aaca6730029a"
+        );
+    }
+
+    #[test]
+    fn wind_components_from_speed_direction_are_pinned() {
+        let directions = [0.0, 360.0, 90.0, 180.0, 270.0, 45.0, 1.0e-9, 359.999_999];
+        let speed = field("speed", "m s-1", arguments(&[10.0; 8], 6, 0.0, 100.0));
+        let direction = field("direction", "degrees", arguments(&directions, 7, 0.0, 360.0));
+        let u = wind_component_from_speed_direction(
+            "eastward_wind_from_speed_direction", &speed, &direction, "u").unwrap();
+        let v = wind_component_from_speed_direction(
+            "northward_wind_from_speed_direction", &speed, &direction, "v").unwrap();
+        assert_eq!(
+            digest(&[&u, &v]),
+            "443a18dbfd70a9e30d01f25b77b4abed8cce7c124f63817da3f6f7b7195277b6"
+        );
+    }
+
+    /// Declared out of order on purpose; the kernel sorts the ladder.
+    const LEVELS_PA: [f64; 7] =
+        [50_000.0, 100_000.0, 85_000.0, 10_000.0, 92_500.0, 30_000.0, 70_000.0];
+    const LEVEL_HEIGHTS_M: [f64; 7] =
+        [5_600.0, 110.0, 1_450.0, 16_200.0, 760.0, 9_200.0, 3_000.0];
+
+    #[test]
+    fn height_at_surface_pressure_is_pinned() {
+        // Surface pressures on a level, between two, and below the
+        // deepest (the dewpoint branch).
+        let surface = arguments(
+            &[92_500.0, 100_000.0, 101_325.0, 10_000.5, 108_000.0], 8, 40_000.0, 108_000.0);
+        let cells = surface.len();
+        let mut heights = Vec::new();
+        let mut temperature = Vec::new();
+        let mut humidity = Vec::new();
+        for (level, mean) in LEVEL_HEIGHTS_M.iter().enumerate() {
+            let seed = 100 + 10 * level as u64;
+            heights.extend(arguments(&[*mean; 5], seed, mean - 50.0, mean + 50.0));
+            temperature.extend(arguments(&[250.0; 5], seed + 1, 200.0, 310.0));
+            humidity.extend(arguments(&[0.005; 5], seed + 2, 0.0, 0.02));
+        }
+        let column = |values: Vec<f64>| {
+            ArrayD::from_shape_vec(IxDyn(&[LEVELS_PA.len(), 1, cells]), values).unwrap()
+        };
+        let plane = |values: Vec<f64>| ArrayD::from_shape_vec(IxDyn(&[1, cells]), values).unwrap();
+        let derived = height_at_surface_pressure(
+            &LEVELS_PA,
+            &column(heights),
+            &column(temperature),
+            &column(humidity),
+            &plane(surface),
+            &plane(arguments(&[288.0, 288.0, 288.0, 288.0, 300.0], 9, 220.0, 320.0)),
+            &plane(arguments(&[280.0, 280.0, 280.0, 200.0, 299.0], 10, 200.0, 305.0)),
+        )
+        .unwrap();
+        assert!(derived.below_ladder > 0 && derived.below_ladder < cells);
+        assert_eq!(
+            digest(&[array::contiguous(&derived.values).as_ref()]),
+            "b8f60d610cfa263c97c4e1ba7d6025824946400fc7eaf1b8f4f51baddc503f2e"
+        );
     }
 }
