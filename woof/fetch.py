@@ -1712,7 +1712,13 @@ def cycle_publication_check(source: str, cycle: datetime, last_hour: int, *,
     ladder = fetch_endpoints.serving_ladder(source, cycle=cycle, now=now, pinned=transport)
     unheard: list[str] = []
     for endpoint in ladder:
-        urls = cycle_probe_urls(source, cycle, last_hour, transport=endpoint.name, **options)
+        try:
+            urls = cycle_probe_urls(source, cycle, last_hour, transport=endpoint.name, **options)
+        except fetch_routes.CycleAgedOff as error:
+            # A cycle no layout of the route plans and no host keeps any
+            # more has no object to ask about: it has aged off.
+            return PublicationCheck(
+                "not-published", f"{error}; pass a newer --cycle, or --cycle latest")
         if not urls:
             continue
         answer, url = _rung_answer(urls, probe)
@@ -1770,23 +1776,16 @@ def _passed_cycle_refusal(source: str, cycle: datetime, last_hour: int,
     a cycle that would never appear.
     """
 
-    rungs = fetch_endpoints.ladder(source)
-    age = fetch_endpoints.cycle_age_hours(cycle, now)
-    if rungs and not any(rung.covers(age) for rung in rungs):
-        hosts = list(dict.fromkeys(rung.host for rung in rungs))
-        kept = max(float(rung.retention_hours) for rung in rungs)
-        one = len(hosts) == 1
-        return (f"{named} is no longer on the server: {' and '.join(hosts)} "
-                f"{'keeps' if one else 'keep'} only about the newest {kept:g} h "
-                f"of {source.upper()} cycles and this one is {age:.0f} h old, "
-                f"with no archive behind {'it' if one else 'them'}, so it will "
-                "not appear by waiting")
+    aged_off = fetch_endpoints.aged_off_reason(source, cycle, now)
+    if aged_off is not None:
+        return f"{named} is no longer on the server: {aged_off}"
     if newest is None or not cycle < newest:
         return None
     hosts = list(dict.fromkeys(rung.host for rung in asked)) or [source.upper()]
     said = (f"{named} is not on {' or '.join(hosts)} through f{last_hour:03d}, "
             "and waiting will not bring it: a newer cycle is already complete")
-    keepers = [rung.name for rung in rungs
+    age = fetch_endpoints.cycle_age_hours(cycle, now)
+    keepers = [rung.name for rung in fetch_endpoints.ladder(source)
                if pinned is not None and rung.name != pinned and rung.covers(age)]
     if keepers:
         said += (f"; {' and '.join(keepers)} also "

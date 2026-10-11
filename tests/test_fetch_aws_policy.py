@@ -23,7 +23,8 @@ def test_transport_names_come_from_the_declared_aws_endpoints():
     assert fetch_endpoints.FETCH_POLICY_CONTRACT == "aws-streaming-v1"
     for source in ("gfs", "gdas", "hrrr"):
         assert fetch_endpoints.aws_transport_for_source(source) == "s3"
-    for source in ("hrrr-prs", "rap", "rrfs", "gefs", "aigefs", "ecmwf-open-data", "aifs"):
+    for source in ("hrrr-prs", "rap", "rrfs", "gefs", "aigefs", "ecmwf-open-data", "aifs",
+                   "met-office-global"):
         assert fetch_endpoints.aws_transport_for_source(source) == "aws"
     for source in ("aigfs", "icon-global", "icon-eu", "gem-gdps", "era5"):
         assert fetch_endpoints.aws_transport_for_source(source) is None

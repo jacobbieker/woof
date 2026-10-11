@@ -89,7 +89,10 @@ ROUTE_TABLE_SHA256 = (
     # breakage), and cadence_note states the grammar that replaces it.
     # Native-level atmosphere and analysis-soil routes are table entries,
     # merged with the ecmwf-ens and rrfs-ens input-ensemble rows.
-    "6e7155e6461fa9c9093d9c564cef498dc003849cc3a79f99c8aa40d58bd0b9b2"
+    # Then the met-office-global row: the AWS open-data bucket's
+    # NetCDF-4 objects, its dated naming and orography eras, its terrain
+    # supplement and its same-cycle GDAS donor (measured 2026-10-11).
+    "fb826c2d453e2dbc2ea0e219784428e520ffef2fd99ef0b4e7b102b647b1bdc5"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own
@@ -110,6 +113,10 @@ PATH_TOKENS = frozenset({
     "YYYY", "MM", "DD", "HH", "YYYYMMDD", "YYYYMMDDHH", "YYYYMMDDHHMMSS",
     "F", "FF", "FFF", "MEMBER", "FIELD", "field_lower", "leveltype",
     "LEVEL", "LEVEL_SUFFIX",
+    # The Met Office's ISO 8601 spellings: the run and the valid time as
+    # ``20261011T0000Z`` and the step as ``PT0006H00M``.  Its object names
+    # START with the valid time, so a lead's key needs both instants.
+    "RUN_MO", "VALID_MO", "STEP_MO",
 })
 
 _TOKEN_RE = re.compile(r"\{([A-Za-z_]+)\}")
@@ -1176,6 +1183,19 @@ def route_for(source: str) -> Route:
 # --------------------------------------------------------------------------
 
 
+class CycleAgedOff(ValueError):
+    """A cycle no host of the route keeps any more, and no layout plans.
+
+    Raised by :func:`resolve_request` in place of the era refusal when
+    the cycle is also past every host's declared retention: a rolling
+    door dates its first era from the oldest run it held when measured,
+    so a cycle before that era, or in an era that cannot be prepared,
+    that has also aged off is refused as gone rather than for its
+    layout.  The publication check reads it as the "no longer on the
+    server" answer.
+    """
+
+
 def publication_era(route: Route, cycle: datetime) -> PublicationEra | None:
     """Select the UTC half-open date interval without probing a server."""
 
@@ -1683,7 +1703,18 @@ def _cycle_context(cycle: datetime) -> dict[str, str]:
         "HH": f"{cycle:%H}", "YYYYMMDD": f"{cycle:%Y%m%d}",
         "YYYYMMDDHH": f"{cycle:%Y%m%d%H}",
         "YYYYMMDDHHMMSS": f"{cycle:%Y%m%d%H}0000",
+        "RUN_MO": f"{cycle:%Y%m%dT%H%MZ}",
     }
+
+
+def _lead_context(context: Mapping[str, str], cycle: datetime,
+                  lead: int) -> dict[str, str]:
+    """CONTEXT with the tokens that spell one forecast lead of CYCLE."""
+
+    valid = cycle + timedelta(hours=int(lead))
+    return {**context, "F": str(lead), "FF": f"{lead:02d}",
+            "FFF": f"{lead:03d}", "VALID_MO": f"{valid:%Y%m%dT%H%MZ}",
+            "STEP_MO": f"PT{int(lead):04d}H00M"}
 
 
 def _render(template: str, context: Mapping[str, str]) -> str:
@@ -1796,8 +1827,24 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
             "  where the crop happens: `woof prep` maps the source onto "
             "your domain, so the namelist geometry is the crop.")
     resolve_cycle(route, cycle)
-    era = publication_era(route, cycle)
+
+    def gone() -> CycleAgedOff | None:
+        reason = fetch_endpoints.aged_off_reason(route.source_id, cycle, now)
+        return None if reason is None else CycleAgedOff(
+            f"{route.source_id.upper()} cycle {cycle:%Y-%m-%dT%H}Z is no "
+            f"longer on the server: {reason}")
+
+    try:
+        era = publication_era(route, cycle)
+    except ValueError:
+        aged = gone()
+        if aged is not None:
+            raise aged from None
+        raise
     if era is not None and era.prep_refusal:
+        aged = gone()
+        if aged is not None:
+            raise aged
         first = first_preparable_cycle(route)
         remedy = (f" Use a cycle from {first:%Y-%m-%dT%H} UTC onward, the first "
                   "publication this preparation can read." if first is not None else "")
@@ -1837,10 +1884,8 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
     step0_only: list[str] = []
 
     def emit(row: FileRow, lead: int | None) -> None:
-        lead_context = dict(context)
-        if lead is not None:
-            lead_context.update({
-                "F": str(lead), "FF": f"{lead:02d}", "FFF": f"{lead:03d}"})
+        lead_context = (dict(context) if lead is None
+                        else _lead_context(context, cycle, lead))
         for entry in (_axis_entries(route, row.axis) if row.axis else ({},)):
             key = _render(row.path, {**lead_context, **entry})
             if key in seen:
@@ -1903,9 +1948,7 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
                 or (role in step0_roles and lead == leads[0]))
             if not parts:
                 continue
-            lead_context = dict(context)
-            lead_context.update({
-                "F": str(lead), "FF": f"{lead:02d}", "FFF": f"{lead:03d}"})
+            lead_context = _lead_context(context, cycle, lead)
             compose.append(ComposeStep(
                 kind=row.kind, name=_render(row.name, lead_context),
                 primary=row.primary, lead=lead, parts=parts))
@@ -1998,6 +2041,51 @@ def _magic_for(plan: FetchPlan, role: str) -> str:
     return "GRIB"
 
 
+#: Declared magic names whose leading bytes are not the name itself.  A
+#: file row says ``"magic": "HDF5"`` (what NetCDF-4 is written in) and
+#: the bytes it means are the HDF5 format signature, which is not ASCII.
+#: Every other declared magic is its own ASCII spelling (``GRIB``,
+#: ``BZh``).
+NAMED_MAGIC = MappingProxyType({"HDF5": b"\x89HDF\r\n\x1a\n"})
+
+
+def _magic_bytes(magic: str) -> bytes:
+    return NAMED_MAGIC.get(magic) or magic.encode("ascii")
+
+
+def _hdf5_end_of_file(head: bytes) -> int | None:
+    """The end-of-file address an HDF5 superblock at offset 0 declares.
+
+    Superblock versions 0 and 1 hold it after the base and free-space
+    addresses, versions 2 and 3 after the base and superblock-extension
+    addresses (HDF5 File Format Specification, section II.A).  It is the
+    base address plus that offset; None for a version this does not read
+    or an undefined address.
+    """
+
+    if len(head) < 14:
+        return None
+    version = head[8]
+    if version in (0, 1):
+        width = head[13]
+        base_at = 24 if version == 0 else 28
+        eof_at = base_at + 2 * width
+    elif version in (2, 3):
+        width = head[9]
+        base_at = 12
+        eof_at = base_at + 2 * width
+    else:
+        return None
+    if width not in (2, 4, 8) or len(head) < eof_at + width:
+        return None
+    undefined = (1 << (8 * width)) - 1
+    base = int.from_bytes(head[base_at:base_at + width], "little")
+    end = int.from_bytes(head[eof_at:eof_at + width], "little")
+    if base == undefined or end == undefined:
+        return None
+    return base + end
+
+
 def _verify_payload(path: Path, *, magic: str, label: str) -> None:
     """The cheapest accurate completeness bar for a downloaded object.
 
@@ -2005,15 +2093,19 @@ def _verify_payload(path: Path, *, magic: str, label: str) -> None:
     served with HTTP 200; the GRIB2 end marker separates a complete
     object from a truncated transfer, which is the failure a
     length-only check misses when the server closes the connection
-    early and reports no length at all.
+    early and reports no length at all.  HDF5 has no end marker; its
+    superblock states where the file ends instead, so an object shorter
+    than that is the same truncation, and a superblock that does not say
+    is refused rather than taken unchecked.
     """
 
     size = path.stat().st_size
     if size == 0:
         raise ValueError(f"{label}: the server returned an empty object")
+    expected = _magic_bytes(magic)
     with path.open("rb") as handle:
-        head = handle.read(len(magic))
-        if head != magic.encode("ascii"):
+        head = handle.read(len(expected))
+        if head != expected:
             raise ValueError(
                 f"{label}: expected a {magic} payload and the first bytes "
                 f"are {head!r} -- the host answered with something that is "
@@ -2024,6 +2116,21 @@ def _verify_payload(path: Path, *, magic: str, label: str) -> None:
                 raise ValueError(
                     f"{label}: the GRIB2 end marker is missing, so the "
                     f"transfer is truncated at {size} bytes")
+        elif magic == "HDF5":
+            handle.seek(0)
+            head = handle.read(64)
+            end = _hdf5_end_of_file(head)
+            if end is None:
+                raise ValueError(
+                    f"{label}: the HDF5 superblock (version "
+                    f"{head[8] if len(head) > 8 else 'absent'}) does not state "
+                    "where the file ends in a form this reads, so a "
+                    "truncated transfer could not be told from a whole one")
+            if size < end:
+                raise ValueError(
+                    f"{label}: the HDF5 superblock says the file ends at "
+                    f"byte {end} and the transfer stopped at {size} bytes, "
+                    "so it is truncated")
 
 
 def _object_token(obj: PlannedObject) -> str | None:

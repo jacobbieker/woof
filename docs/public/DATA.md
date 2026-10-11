@@ -8,7 +8,7 @@ geography tree `woof fetch-geog` downloads and stages. `woof fetch
 | | sources |
 |---|---|
 | hand-written transports (this page, in detail) | `gfs`, `gdas`, `hrrr`, `era5` |
-| [packaged route table](#every-other-source-the-packaged-route-table) | `hrrr-prs`, `hrrr-native`, `rap`, `rap-native`, `rrfs`, `gefs`, `aigfs`, `aigefs`, `ecmwf-open-data`, `aifs`, `icon-global`, `icon-eu`, `icon-d2`, `gem-gdps` |
+| [packaged route table](#every-other-source-the-packaged-route-table) | `hrrr-prs`, `hrrr-native`, `rap`, `rap-native`, `rrfs`, `gefs`, `aigfs`, `aigefs`, `ecmwf-open-data`, `aifs`, `icon-global`, `icon-eu`, `icon-d2`, `gem-gdps`, `met-office-global` |
 | refused by name, with a remedy | `era5-l137`, `20crv3`, `20crv3-cf`, `mapped` -- no bytes at a path a fetch can resolve; the refusal prints the `woof prep` line that runs on a folder you fill (`--source-root DIR`), or for `mapped` on your own mapping (see [SOURCES.md](SOURCES.md#sources-with-no-fetch-door)) |
 
 Registry aliases work everywhere a source id does: `gdps`, `ifs`,
@@ -468,7 +468,22 @@ woof fetch --source icon-eu  --cycle 2026-08-17T12 --hours 6 --out data/icon
 woof fetch --source icon-d2  --cycle 2026-09-27T12 --hours 3 --out data/icon-d2
 woof fetch --source gefs     --cycle 2026-08-17T00 --hours 6 --out data/gefs --member c00
 woof fetch --source aigfs    --cycle 2026-08-17T06 --hours 6 --out data/aigfs
+woof fetch --source met-office-global --cycle 2026-10-11T00 --hours 3 --out data/metoffice
 ```
+
+**Met Office global** (`met-office-global`) comes from the AWS Open Data
+bucket `met-office-atmospheric-model-data`, read anonymously over HTTPS.
+Each lead is 13 NetCDF-4 files, about 920 MB (five pressure-level files
+of 120 to 229 MB and eight surface files of 2 to 8 MB, measured from the
+bucket listing on 2026-10-11). Every window also takes the run's 3.2 MB
+step-0 `height_of_orography` file, bound as the terrain supplement and
+kept out of `inputs.txt`, and the same cycle's GDAS analysis in
+`<out>/donor-gdas/`. A 0 and 3 h window is therefore about 1.85 GB plus
+the GDAS file. Each file's HDF5 signature and the length its superblock
+declares are checked before it is kept. The data are British Crown
+copyright, the Met Office, under CC BY-SA 4.0, and the share-alike term
+covers what you publish from them (see
+[SOURCES.md](SOURCES.md#met-office-global)).
 
 Each run leaves the output directory as a front door, not a pile:
 
@@ -1070,6 +1085,7 @@ $GPUWM_CASE_DATA_ROOT/
 | HRRR, default whole files | ~1.1 GB/h (~21 GB for f00..f18) -- `wrfnat` 704 MB + `wrfprs` 427 MB, measured | per case |
 | HRRR, `--mode idx-subset` | ~0.44 GB/h (~8.4 GB for f00..f18), measured; saves bandwidth, costs wall clock | per case |
 | ERA5 retrieval | tens of MB per valid time (regional box) | per case |
+| Met Office global, whole files | ~0.92 GB per lead (13 NetCDF-4 files), plus 3.2 MB orography and the same-cycle GDAS analysis once per window, measured | per case |
 | Output frames (`wrfout`) | grid-dependent; ~198 MB/frame on a 250x200x49 domain; 20.1 GB for the four-domain 6 h reference run | per run |
 | Restart checkpoints | ~5.7 GB per four-domain checkpoint on the reference case | per `restart_interval_s` |
 

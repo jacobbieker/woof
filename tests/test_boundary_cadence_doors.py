@@ -225,13 +225,17 @@ def test_every_table_route_takes_a_spacing_unless_a_breakage_refuses_it(
 
     route = fetch_routes.route_for(source)
     adapter = get_source_adapter(route.prep.get("source", source))
-    target = packaged_mapping_target(adapter.packaged_profile)
+    # A route whose packaged profile has not shipped yet has no
+    # preparation to refuse a spacing; only its ladder can.
+    target = (packaged_mapping_target(adapter.packaged_profile)
+              if adapter.packaged_profile else None)
     for cycle in fetch_routes.planning_cycles(route):
         published = set(fetch_routes.ladder_for(route, cycle))
         for cadence in range(1, 25):
             wanted = (0, cadence, 2 * cadence)
             on_ladder = all(lead in published for lead in wanted)
-            taken = boundary_interval_refusal(target, cadence * 3600) is None
+            taken = (target is None
+                     or boundary_interval_refusal(target, cadence * 3600) is None)
             if on_ladder and taken:
                 assert fetch_routes.resolve_leads(
                     route, cycle, 2 * cadence, cadence=cadence) == wanted
@@ -344,6 +348,9 @@ RETIRED_CADENCES = {
     "rrfs": (1, 3, 6), "gefs": (3, 6), "aigfs": (6,), "aigefs": (6,),
     "ecmwf-open-data": (3, 6), "aifs": (6,), "icon-eu": (1, 3, 6),
     "icon-d2": (1, 3, 6), "gem-gdps": (3, 6),
+    # Added after A173, so no list ever shipped: its default 3 h is what a
+    # window that names no cadence must keep resolving to.
+    "met-office-global": (3,),
 }
 
 

@@ -656,6 +656,35 @@ _MSC_DATAMART_DOOR = ArchiveWindow(
     ("https://dd.weather.gc.ca/",),
     checked_at="2026-09-25", retention_hours=696.0,
 )
+#: Two rolling years, counted from the bucket's own run listing on
+#: 2026-10-11 (oldest run 20241009T1800Z, 17534 h old).  Not an archive
+#: in the ladder's sense: a run older than the window is gone.
+_MET_OFFICE_GLOBAL_DOOR = ArchiveWindow(
+    "aws", "",
+    "The Met Office's AWS open-data bucket keeps a rolling two years of "
+    "global runs and nothing older.",
+    ("https://registry.opendata.aws/met-office-global-deterministic/",
+     "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/"
+     "?list-type=2&delimiter=/&prefix=global-deterministic-10km/"),
+    checked_at="2026-10-11", retention_hours=17520.0,
+)
+
+#: The packaged profile the Met Office global row decodes through.  The
+#: row claims it, and runnability, only once the distribution ships it:
+#: a row naming a profile the wheel lacks would be refused by every
+#: preparation after the download was paid for.
+_MET_OFFICE_GLOBAL_PROFILE = "met-office-global-netcdf"
+_MET_OFFICE_GLOBAL_STATE = (
+    dict(upstream_ingest="declarative_mapping_v1_over_packaged_profile",
+         status=AdapterStatus.RUNNABLE_NOT_CERTIFIED,
+         field_mapping="packaged-rw-wps-met-office-global-netcdf",
+         stock_wrf_gate="live-unchanged-stock-wrf-gate-pending",
+         runnable=True, packaged_profile=_MET_OFFICE_GLOBAL_PROFILE)
+    if _MET_OFFICE_GLOBAL_PROFILE in packaged_profile_ids() else
+    dict(upstream_ingest="registry_only",
+         status=AdapterStatus.COMPOSITION_REQUIRED,
+         field_mapping="pending", stock_wrf_gate="not_run",
+         runnable=False, packaged_profile=None))
 
 
 # The order is canonical: the 23 rusty-weather ModelId values, the ERA5 GRIB1
@@ -1370,6 +1399,61 @@ _ADAPTERS = (
             "emulator publishes no hydrometeors and its fields are not "
             "constrained by a dynamical balance, so spin-up behaviour is "
             "not the certified-source baseline.  Not yet accepted by "
+            "unchanged stock WRF."
+        ),
+    ),
+    _adapter(
+        "met-office-global",
+        archives=(_MET_OFFICE_GLOBAL_DOOR,),
+        name="Met Office global 10 km (UM, AWS open data)",
+        aliases=("metoffice-global", "ukmo-global", "um-global"),
+        upstream_model_id=None,
+        file_family="NetCDF-CF",
+        decoder=(
+            "packaged Met Office global NetCDF profile + rw_netcdf/netcrust "
+            "(woof.netcdf_bridge)"
+        ),
+        default_product="global-deterministic-10km",
+        required_products=(
+            "pressure-level temperature, height, humidity and wind",
+            "surface and screen-level state",
+            "step-0 height_of_orography",
+            "same-cycle GDAS 0.25-degree analysis",
+        ),
+        # The uniform 3 h series ends at f144: the 00/12Z runs post
+        # 6-hourly from f144 to f168 and the 06/18Z runs stop at f069
+        # (paginated listings of the 9 runs 2026-10-09 00Z to
+        # 2026-10-11 00Z).  The fetch still plans the 6-hourly tail.
+        max_hour=144,
+        **_MET_OFFICE_GLOBAL_STATE,
+        cadence_mapping="uniform-three-hour-forecast-series-v1",
+        runner="mapped_composition_v1",
+        forcing_interval_seconds=10800.0,
+        composition=(
+            "The open data publishes no soil temperature or moisture, no "
+            "land-sea mask, no sea ice and no surface pressure; the "
+            "composition borrows the land state from the SAME CYCLE's "
+            "GDAS 0.25-degree analysis (the fetch brings it in donor-gdas/) "
+            "and rebuilds surface pressure from the mean sea level pressure "
+            "and the run's own step-0 orography, which every window "
+            "fetches as its terrain supplement."
+        ),
+        notes=(
+            "The Met Office Unified Model global deterministic forecast "
+            "from the AWS Open Data bucket met-office-atmospheric-model-"
+            "data: a regular 2560 x 1920 latitude-longitude grid (about "
+            "10 km), one NetCDF-4 file per variable per step, 00/12Z runs "
+            "hourly to f054, 3-hourly to f144 and 6-hourly to f168, 06/18Z "
+            "runs hourly to f054 and 3-hourly to f069; a rolling two years "
+            "of runs.  `woof fetch --source met-office-global` takes the 13 "
+            "state variables a preparation reads, the step-0 orography and "
+            "the same-cycle GDAS analysis.  LICENCE: British Crown "
+            "copyright, the Met Office, CC BY-SA 4.0; the share-alike term "
+            "reaches derived outputs, so a forecast prepared from these "
+            "bytes is shared under the same licence with the attribution.  "
+            "Supplied on a free, unsupported basis and not for critical "
+            "business purposes.  Runs before 2025-12-11 12Z publish no "
+            "orography and are refused by name.  Not yet accepted by "
             "unchanged stock WRF."
         ),
     ),
