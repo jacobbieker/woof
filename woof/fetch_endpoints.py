@@ -286,6 +286,28 @@ def cycle_age_hours(cycle: datetime, now: datetime | None = None) -> float:
     return (now - cycle).total_seconds() / 3600.0
 
 
+def aged_off_reason(source_id: str, cycle: datetime,
+                    now: datetime | None = None) -> str | None:
+    """Why no host of ``source_id`` keeps ``cycle`` any more, or None.
+
+    None while any rung's declared retention still covers the cycle's
+    age, or when a rung is an archive.  The one wording of "aged off",
+    read by the publication check and by the route planner alike.
+    """
+
+    rungs = ladder(source_id)
+    age = cycle_age_hours(cycle, now)
+    if not rungs or any(rung.covers(age) for rung in rungs):
+        return None
+    hosts = list(dict.fromkeys(rung.host for rung in rungs))
+    kept = max(float(rung.retention_hours) for rung in rungs)
+    one = len(hosts) == 1
+    return (f"{' and '.join(hosts)} {'keeps' if one else 'keep'} only about "
+            f"the newest {kept:g} h of {source_id.upper()} cycles and this "
+            f"one is {age:.0f} h old, with no archive behind "
+            f"{'it' if one else 'them'}, so it will not appear by waiting")
+
+
 def serving_ladder(source_id: str, *, cycle: datetime,
                    now: datetime | None = None,
                    pinned: str | None = None) -> tuple[Endpoint, ...]:

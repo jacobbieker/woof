@@ -428,7 +428,8 @@ def test_only_producers_with_step0_statics_declare_them():
     IFS open data carries its land mask and surface geopotential in every
     step (its f024 and f150 starts prepared, 2026-09-30); ICON's statics
     are cycle objects with no lead; AIGFS borrows a same-cycle analysis.
-    AIFS and GDPS publish theirs at the analysis step only.
+    AIFS and GDPS publish theirs at the analysis step only, and so does
+    the Met Office its orography (PT0000H00M alone, 2026-10-11).
     """
 
     step0_supplement = sorted(
@@ -440,7 +441,8 @@ def test_only_producers_with_step0_statics_declare_them():
         if any(row.leads == "step0"
                for row in fetch_routes.route_for(source).files))
     assert step0_supplement == ["aifs"]
-    assert step0_rows == ["gem-gdps", "hrrr-native", "hrrr-prs"]
+    assert step0_rows == ["gem-gdps", "hrrr-native", "hrrr-prs",
+                          "met-office-global"]
 
 
 def test_icon_eu_expands_125_field_objects_a_lead_plus_two_invariants():
@@ -966,3 +968,254 @@ def test_every_route_prints_the_whole_prep_line_it_published(source,
         assert flag in comments, flag
     for role in document["unbound_supplement_roles"]:
         assert f"--supplement {role}=" in comments, role
+
+
+# --------------------------------------------------------------------------
+# Met Office global (AWS open data): measured 2026-10-11
+# --------------------------------------------------------------------------
+
+_MO_BASE = ("https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/"
+            "global-deterministic-10km/")
+_MO_STATE = (
+    "temperature_on_pressure_levels", "geopotential_height_on_pressure_levels",
+    "relative_humidity_on_pressure_levels", "wind_speed_on_pressure_levels",
+    "wind_direction_on_pressure_levels", "pressure_at_mean_sea_level",
+    "temperature_at_surface", "temperature_at_screen_level",
+    "temperature_of_dew_point_at_screen_level",
+    "relative_humidity_at_screen_level", "wind_speed_at_10m",
+    "wind_direction_at_10m", "snow_depth_water_equivalent")
+
+
+def test_met_office_aliases_resolve_to_its_route():
+    for alias in ("met-office-global", "metoffice-global", "ukmo-global",
+                  "um-global", "UM_GLOBAL"):
+        assert fetch_routes.route_for(alias).source_id == "met-office-global"
+
+
+def test_met_office_keys_start_with_the_valid_time_under_the_run():
+    """The measured key: ``<RUN>/<VALID>-PT<HHHH>H00M-<variable>.nc``."""
+
+    plan = fetch_routes.resolve_request(
+        "met-office-global", cycle=datetime(2026, 10, 10, 18), hours=6,
+        start_hour=63)
+    assert plan.leads == (63, 66, 69)
+    assert plan.host.name == "aws"
+    urls = {obj.url for obj in plan.objects}
+    for lead, valid in ((63, "20261013T0900Z"), (69, "20261013T1500Z")):
+        for name in _MO_STATE:
+            assert (f"{_MO_BASE}20261010T1800Z/{valid}-PT00{lead}H00M-{name}.nc"
+                    in urls)
+    assert (f"{_MO_BASE}20261010T1800Z/20261013T1500Z-PT0069H00M-"
+            "pressure_at_mean_sea_level.nc") in urls
+    assert len(plan.objects) == 3 * len(_MO_STATE) + 1
+    assert all(row.magic == "HDF5" for row in plan.files)
+
+
+def test_met_office_ladders_are_the_measured_ones():
+    route = fetch_routes.route_for("met-office-global")
+    ladder = fetch_routes.ladder_for(route, datetime(2026, 10, 11, 0))
+    assert ladder == (*range(55), *range(57, 145, 3), 150, 156, 162, 168)
+    ladder = fetch_routes.ladder_for(route, datetime(2026, 10, 11, 6))
+    assert ladder == (*range(55), 57, 60, 63, 66, 69)
+    # The 06/18Z runs reached f066 until 2026-01-21 06Z.
+    assert fetch_routes.ladder_for(
+        route, datetime(2026, 1, 21, 6))[-1] == 66
+    assert fetch_routes.ladder_for(
+        route, datetime(2026, 1, 21, 18))[-1] == 69
+
+
+def test_a_met_office_window_past_f000_fetches_the_step0_orography_as_terrain(
+        tmp_path):
+    """Orography exists at PT0000H00M alone, and the composition binds it
+    as the terrain supplement: fetched for every window, never an input."""
+
+    plan = fetch_routes.resolve_request(
+        "met-office-global", cycle=datetime(2026, 10, 11, 0), hours=3,
+        start_hour=6)
+    orography = "20261011T0000Z-PT0000H00M-height_of_orography.nc"
+    assert plan.leads == (6, 9)
+    terrain = [obj for obj in plan.objects if obj.role == "terrain"]
+    assert [(obj.relpath, obj.lead) for obj in terrain] == [(orography, 0)]
+    assert terrain[0].url == f"{_MO_BASE}20261011T0000Z/{orography}"
+    # Nothing else of the cycle's step 0 is fetched for a later window.
+    assert {obj.lead for obj in plan.objects if obj.role == "state"} == {6, 9}
+    assert Path(orography) not in plan.primary_files
+    assert len(plan.primary_files) == 2 * len(_MO_STATE)
+    assert plan.supplement_role == "met_office_global_invariant_surface"
+    assert plan.supplement_files == (Path(orography),)
+
+    donor = tmp_path / "donor-gdas" / "gdas.t00z.pgrb2.0p25.f000"
+    fetch_routes.write_handoff(
+        plan, tmp_path, donor_files={"physical_analysis_surface_data": donor})
+    listed = (tmp_path / fetch_routes.INPUT_LIST_NAME).read_text().splitlines()
+    assert len(listed) == 2 * len(_MO_STATE)
+    assert not any("height_of_orography" in line for line in listed)
+    argv = json.loads(
+        (tmp_path / fetch_routes.PREP_ARGUMENTS_NAME).read_text())["argv"]
+    bindings = [argv[i + 1] for i, token in enumerate(argv)
+                if token == "--supplement"]
+    assert bindings == [
+        f"met_office_global_invariant_surface={(tmp_path / orography).resolve()}",
+        f"physical_analysis_surface_data={donor.resolve()}"]
+
+
+def test_a_met_office_window_from_f000_lists_no_orography_input():
+    plan = fetch_routes.resolve_request(
+        "met-office-global", cycle=datetime(2026, 10, 11, 0), hours=3)
+    assert plan.leads == (0, 3)
+    assert [obj.relpath for obj in plan.objects if obj.role == "terrain"] == [
+        "20261011T0000Z-PT0000H00M-height_of_orography.nc"]
+    assert not any("height_of_orography" in str(path)
+                   for path in plan.primary_files)
+    assert len(plan.primary_files) == 2 * len(_MO_STATE)
+
+
+def test_met_office_plans_its_same_cycle_gdas_donor():
+    plan = fetch_routes.resolve_request(
+        "met-office-global", cycle=datetime(2026, 10, 11, 12), hours=3)
+    assert [(donor.source, donor.role, donor.leads, donor.cycle)
+            for donor in plan.donors] == [
+        ("gdas", "physical_analysis_surface_data", (0,),
+         datetime(2026, 10, 11, 12))]
+
+
+def test_met_office_reads_the_height_asl_name_before_2026_01_21_12z():
+    before = fetch_routes.resolve_request(
+        "met-office-global", cycle=datetime(2026, 1, 21, 6), hours=3)
+    after = fetch_routes.resolve_request(
+        "met-office-global", cycle=datetime(2026, 1, 21, 12), hours=3)
+    names = lambda plan: " ".join(obj.relpath for obj in plan.objects)
+    assert "height_ASL_on_pressure_levels" in names(before)
+    assert "geopotential_height_on_pressure_levels" not in names(before)
+    assert "geopotential_height_on_pressure_levels" in names(after)
+    assert "height_ASL" not in names(after)
+    assert "height_of_orography" in names(before)
+
+
+def test_a_met_office_run_without_orography_is_refused_by_name():
+    with pytest.raises(ValueError) as error:
+        fetch_routes.resolve_request(
+            "met-office-global", cycle=datetime(2025, 12, 11, 6), hours=3,
+            now=datetime(2026, 10, 12, 0))
+    message = str(error.value)
+    assert "no height_of_orography" in message
+    assert "from 2025-12-11T12 UTC onward" in message
+
+
+@pytest.mark.parametrize("cycle", [
+    datetime(2024, 10, 1, 0),       # before the oldest run measured
+    datetime(2024, 10, 11, 0),      # inside the first era, since aged off
+])
+def test_a_met_office_run_past_the_rolling_window_is_refused_as_gone(cycle):
+    now = datetime(2026, 10, 12, 0)
+    with pytest.raises(fetch_routes.CycleAgedOff) as error:
+        fetch_routes.resolve_request(
+            "met-office-global", cycle=cycle, hours=3, now=now)
+    message = str(error.value)
+    assert message.startswith(
+        f"MET-OFFICE-GLOBAL cycle {cycle:%Y-%m-%dT%H}Z is no longer on the server")
+    assert "keeps only about the newest 17520 h" in message
+    assert "no archive behind it" in message
+    assert "orography" not in message
+
+
+def test_a_met_office_run_inside_the_window_is_refused_for_its_layout_only():
+    """The same first-era cycle a year earlier: kept, but not preparable."""
+
+    with pytest.raises(ValueError) as error:
+        fetch_routes.resolve_request(
+            "met-office-global", cycle=datetime(2024, 10, 12, 0), hours=3,
+            now=datetime(2025, 10, 12, 0))
+    assert not isinstance(error.value, fetch_routes.CycleAgedOff)
+    assert "no height_of_orography" in str(error.value)
+
+
+def test_a_met_office_window_naming_no_cadence_takes_three_hours():
+    route = fetch_routes.route_for("met-office-global")
+    cycle = datetime(2026, 10, 11, 0)
+    assert route.default_cadence == 3
+    assert fetch_routes.window_cadence(route, 0, 6, cycle=cycle) == 3
+    assert fetch_routes.resolve_leads(route, cycle, 6) == (0, 3, 6)
+    # Past f144 the 00Z ladder is 6-hourly, and the window takes it.
+    assert fetch_routes.resolve_leads(route, cycle, 12, start_hour=144) == (
+        144, 150, 156)
+    # A named 3 h series past f144 is refused naming the lead and ladder.
+    with pytest.raises(ValueError) as error:
+        fetch_routes.resolve_leads(route, cycle, 6, cadence=3, start_hour=144)
+    assert "does not publish f147 at --cadence 3" in str(error.value)
+    assert "f000..f054 every 1 h, then f057..f144 every 3 h, then " \
+           "f150..f168 every 6 h" in str(error.value)
+
+
+def test_the_met_office_row_claims_its_profile_and_runnability_together():
+    from woof.source_authorities import packaged_profile_ids
+
+    row = source_adapters.get_source_adapter("met-office-global")
+    assert source_adapters._MET_OFFICE_GLOBAL_PROFILE == "met-office-global-netcdf"
+    shipped = "met-office-global-netcdf" in packaged_profile_ids()
+    assert row.runnable is shipped
+    assert row.packaged_profile == ("met-office-global-netcdf" if shipped else None)
+    assert row.runner == "mapped_composition_v1"
+    assert row.forcing_interval_seconds == 10800.0
+    assert "CC BY-SA 4.0" in row.notes and "Crown copyright" in row.notes
+
+
+def test_a_met_office_lead_off_the_ladder_is_refused_by_name():
+    with pytest.raises(ValueError, match="forecasts through f069"):
+        fetch_routes.resolve_request(
+            "met-office-global", cycle=datetime(2026, 10, 11, 6), hours=72)
+
+
+def _hdf5(size: int, *, declared: int | None = None) -> bytes:
+    """A superblock-v2 head (as the Met Office files carry) padded to SIZE."""
+
+    head = (b"\x89HDF\r\n\x1a\n" + bytes([2, 8, 8, 0])
+            + (0).to_bytes(8, "little") + b"\xff" * 8
+            + (size if declared is None else declared).to_bytes(8, "little")
+            + (48).to_bytes(8, "little") + b"\0" * 4)
+    return head + b"\0" * (size - len(head))
+
+
+def test_an_hdf5_payload_is_verified_by_its_signature_and_its_end(tmp_path):
+    whole = tmp_path / "whole.nc"
+    whole.write_bytes(_hdf5(4096))
+    fetch_routes._verify_payload(whole, magic="HDF5", label="whole.nc")
+
+    page = tmp_path / "page.nc"
+    page.write_bytes(b"<?xml version='1.0'?><Error><Code>AccessDenied</Code>")
+    with pytest.raises(ValueError, match="expected a HDF5 payload"):
+        fetch_routes._verify_payload(page, magic="HDF5", label="page.nc")
+
+    cut = tmp_path / "cut.nc"
+    cut.write_bytes(_hdf5(4096, declared=8192))
+    with pytest.raises(ValueError, match="ends at byte 8192.*4096 bytes"):
+        fetch_routes._verify_payload(cut, magic="HDF5", label="cut.nc")
+
+    unread = tmp_path / "unread.nc"
+    body = bytearray(_hdf5(4096))
+    body[8] = 7                       # a superblock version this does not read
+    unread.write_bytes(bytes(body))
+    with pytest.raises(ValueError, match=r"superblock \(version 7\)"):
+        fetch_routes._verify_payload(unread, magic="HDF5", label="unread.nc")
+
+
+def test_a_met_office_route_moves_and_verifies_hdf5_objects(tmp_path):
+    plan = fetch_routes.resolve_request(
+        "met-office-global", cycle=datetime(2026, 10, 11, 0), hours=3)
+    seen: list[str] = []
+
+    def download(url, dest, *, magic, opener=None):
+        seen.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(_hdf5(256))
+        fetch_routes._verify_payload(dest, magic=magic, label=dest.name)
+        body = dest.read_bytes()
+        return {"name": dest.name, "bytes": len(body),
+                "sha256": __import__("hashlib").sha256(body).hexdigest(),
+                "url": url}
+
+    payload = fetch_routes.run_plan(plan, out=tmp_path, downloader=download,
+                                    progress=lambda *_: None)
+    assert len(seen) == 2 * len(_MO_STATE) + 1
+    assert len(payload["files"]) == len(seen)
+    assert (tmp_path / "20261011T0000Z-PT0000H00M-height_of_orography.nc").is_file()

@@ -1811,6 +1811,110 @@
         "source": "gem-gdps",
         "supplement": {"from": "role:terrain", "role": "gdps_analysis_invariant_surface"}
       }
+    },
+
+    "met-office-global": {
+      "label": "Met Office global deterministic 10 km regular lat-lon, NetCDF-4 objects (AWS open data)",
+      "measured": "2026-10-11",
+      "hosts": [
+        {"name": "aws", "base": "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com", "default": true, "retention_hours": 17520, "why": "the publisher's own and only door, the met-office-atmospheric-model-data bucket in eu-west-2 under the AWS Open Data programme (registry.opendata.aws/met-office-global-deterministic), read anonymously over HTTPS with no account. It keeps a rolling two years of runs and nothing older: measured 2026-10-11 08:33 UTC, the listing of global-deterministic-10km/ held 2926 runs at every 6 h from 20241009T1800Z (17534 h old) to 20261011T0000Z with no gap, so 730 days (17520 h) are counted. A key it does not hold answers 404 (anonymous listing is allowed). 192 one-kilobyte range GETs at 8 in flight on 2026-10-11 answered 206 every time, with no S3 SlowDown"}
+      ],
+      "host_note": "LICENCE: British Crown copyright, the Met Office, released under CC BY-SA 4.0. The share-alike term reaches derived outputs: a forecast prepared from these bytes is shared under the same licence, with the attribution. The Met Office supplies the data on a free, unsupported basis, and it is not for critical business purposes. One NetCDF-4 (HDF5) file per variable per step, CF conventions with mosg__ attributes; object names start with the VALID time, not the run time.",
+      "coverage_note": "Global source on a regular 2560 x 1920 latitude-longitude grid (about 10 km): 0.140625 degrees in longitude by 0.09375 in latitude, cell centres from -179.930 and -89.953 (measured from the 2026-10-11 00Z files; the eras' resolution_degrees is the coarser, longitude, spacing). Prep selects the regional extent plus halo, as for the other global sources.",
+      "publication_era_note": "Intervals are inclusive at valid_from and exclusive at valid_until, in UTC, measured by bisecting the bucket's run listing on each run's own objects. height_of_orography first appears at the 20251211T1200Z run (20251211T0600Z has none at any step). The 3-D height field is named height_ASL_on_pressure_levels through the 20260121T0600Z run and geopotential_height_on_pressure_levels from 20260121T1200Z. The 06/18Z runs reach f066 through 20260121T0600Z and f069 from 20260121T1800Z. The first era starts at the oldest run the rolling window held when it was measured.",
+      "publication_era_measured": "2026-10-11",
+      "publication_era_sources": [
+        "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/?list-type=2&delimiter=/&prefix=global-deterministic-10km/",
+        "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/?list-type=2&prefix=global-deterministic-10km/20251211T0600Z/20251211T0600Z-PT0000H00M-",
+        "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/?list-type=2&prefix=global-deterministic-10km/20251211T1200Z/20251211T1200Z-PT0000H00M-",
+        "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/?list-type=2&prefix=global-deterministic-10km/20260121T0600Z/",
+        "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/?list-type=2&prefix=global-deterministic-10km/20260121T1200Z/",
+        "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/?list-type=2&prefix=global-deterministic-10km/20260121T1800Z/"
+      ],
+      "publication_eras": [
+        {"label": "Met Office global 10 km, no orography", "valid_from": "2024-10-09T18", "valid_until": "2025-12-11T12", "cycle_hours": [0, 12], "resolution_degrees": 0.140625,
+         "steps": [[54, 1], [144, 3], [168, 6]],
+         "files": [
+           {"role": "state", "primary": true, "leads": "all", "axis": "field_height_asl", "path": "global-deterministic-10km/{RUN_MO}/{VALID_MO}-{STEP_MO}-{FIELD}.nc", "idx_sidecar": null, "magic": "HDF5"}
+         ],
+         "prep_refusal": "cannot be prepared: these runs publish no height_of_orography, and the packaged composition rebuilds surface pressure from mean sea level pressure at the orography height and binds terrain from that file, so it would refuse the window for want of terrain."},
+        {"label": "Met Office global 10 km, no orography", "valid_from": "2024-10-09T18", "valid_until": "2025-12-11T12", "cycle_hours": [6, 18], "resolution_degrees": 0.140625,
+         "steps": [[54, 1], [66, 3]],
+         "files": [
+           {"role": "state", "primary": true, "leads": "all", "axis": "field_height_asl", "path": "global-deterministic-10km/{RUN_MO}/{VALID_MO}-{STEP_MO}-{FIELD}.nc", "idx_sidecar": null, "magic": "HDF5"}
+         ],
+         "prep_refusal": "cannot be prepared: these runs publish no height_of_orography, and the packaged composition rebuilds surface pressure from mean sea level pressure at the orography height and binds terrain from that file, so it would refuse the window for want of terrain."},
+        {"label": "Met Office global 10 km, height_ASL naming", "valid_from": "2025-12-11T12", "valid_until": "2026-01-21T12", "cycle_hours": [0, 12], "resolution_degrees": 0.140625,
+         "steps": [[54, 1], [144, 3], [168, 6]],
+         "files": [
+           {"role": "state", "primary": true, "leads": "all", "axis": "field_height_asl", "path": "global-deterministic-10km/{RUN_MO}/{VALID_MO}-{STEP_MO}-{FIELD}.nc", "idx_sidecar": null, "magic": "HDF5"},
+           {"role": "terrain", "primary": false, "leads": "step0", "path": "global-deterministic-10km/{RUN_MO}/{VALID_MO}-{STEP_MO}-height_of_orography.nc", "idx_sidecar": null, "magic": "HDF5"}
+         ]},
+        {"label": "Met Office global 10 km, height_ASL naming", "valid_from": "2025-12-11T12", "valid_until": "2026-01-21T12", "cycle_hours": [6, 18], "resolution_degrees": 0.140625,
+         "steps": [[54, 1], [66, 3]],
+         "files": [
+           {"role": "state", "primary": true, "leads": "all", "axis": "field_height_asl", "path": "global-deterministic-10km/{RUN_MO}/{VALID_MO}-{STEP_MO}-{FIELD}.nc", "idx_sidecar": null, "magic": "HDF5"},
+           {"role": "terrain", "primary": false, "leads": "step0", "path": "global-deterministic-10km/{RUN_MO}/{VALID_MO}-{STEP_MO}-height_of_orography.nc", "idx_sidecar": null, "magic": "HDF5"}
+         ]},
+        {"label": "Met Office global 10 km", "valid_from": "2026-01-21T12", "valid_until": null, "cycle_hours": [0, 12], "resolution_degrees": 0.140625,
+         "steps": [[54, 1], [144, 3], [168, 6]]},
+        {"label": "Met Office global 10 km", "valid_from": "2026-01-21T12", "valid_until": null, "cycle_hours": [6, 18], "resolution_degrees": 0.140625,
+         "steps": [[54, 1], [69, 3]]}
+      ],
+      "cycle_hours": [0, 6, 12, 18],
+      "publication_lag": [
+        {"cycle_hours": null, "hours": 5.5, "per_lead_hours": 0.0043, "late_hours": 0.49, "measured": "2026-10-11 bucket listing (each object's own LastModified, the 14 variables this route fetches): 9 runs 2026-10-09 00Z to 2026-10-11 00Z: f000 at + 5 h 30 min to 5 h 31 min, the later leads in batches at about + 5 h 45 min, 6 h 00 min, 6 h 15 min and 6 h 30 min, f168 of the 00/12Z runs at + 6 h 30 min to 6 h 31 min and f069 of the 06/18Z runs at + 6 h 00 min to 6 h 16 min. The latest posting seen was 29 min past this line (the 9 Oct 06Z f063). Runs of October 2024 posted about 2.5 h later, from + 8 h 01 min; June 2025 runs already posted at + 5 h 30 min"}
+      ],
+      "posting": {"shape": "donor_gated", "ready_check": "objects", "late_after_minutes": 60, "poll_seconds": 30, "why": "every lead's 13 objects (and the step-0 orography) are posted by + 5 h 30 min to 6 h 31 min, but the same-cycle GDAS donor lands at + 6 h 48 min to 7 h 44 min and the engine refuses a donor from another cycle, so the donor decides the start"},
+      "ladders": [
+        {"cycle_hours": [0, 12], "steps": [[54, 1], [144, 3], [168, 6]]},
+        {"cycle_hours": [6, 18], "steps": [[54, 1], [69, 3]]}
+      ],
+      "default_cadence": 3,
+      "layout": "flat",
+      "axes": {
+        "field": [
+          {"names": ["temperature_on_pressure_levels", "geopotential_height_on_pressure_levels", "relative_humidity_on_pressure_levels", "wind_speed_on_pressure_levels", "wind_direction_on_pressure_levels",
+                     "pressure_at_mean_sea_level", "temperature_at_surface", "temperature_at_screen_level", "temperature_of_dew_point_at_screen_level", "relative_humidity_at_screen_level",
+                     "wind_speed_at_10m", "wind_direction_at_10m", "snow_depth_water_equivalent"], "levels": null}
+        ],
+        "field_height_asl": [
+          {"names": ["temperature_on_pressure_levels", "height_ASL_on_pressure_levels", "relative_humidity_on_pressure_levels", "wind_speed_on_pressure_levels", "wind_direction_on_pressure_levels",
+                     "pressure_at_mean_sea_level", "temperature_at_surface", "temperature_at_screen_level", "temperature_of_dew_point_at_screen_level", "relative_humidity_at_screen_level",
+                     "wind_speed_at_10m", "wind_direction_at_10m", "snow_depth_water_equivalent"], "levels": null}
+        ]
+      },
+      "files": [
+        {
+          "role": "state",
+          "primary": true,
+          "leads": "all",
+          "axis": "field",
+          "path": "global-deterministic-10km/{RUN_MO}/{VALID_MO}-{STEP_MO}-{FIELD}.nc",
+          "idx_sidecar": null,
+          "magic": "HDF5"
+        },
+        {
+          "role": "terrain",
+          "primary": false,
+          "leads": "step0",
+          "path": "global-deterministic-10km/{RUN_MO}/{VALID_MO}-{STEP_MO}-height_of_orography.nc",
+          "idx_sidecar": null,
+          "magic": "HDF5"
+        }
+      ],
+      "donors": [
+        {"source": "gdas", "role": "physical_analysis_surface_data", "leads": [0], "cycle": "same", "why": "the Met Office global open data publishes no soil temperature or moisture, no land-sea mask and no sea ice. The packaged profile met-office-global-netcdf binds those canonicals to the SAME-CYCLE GDAS 0.25-degree analysis through the cross-source composition, and a donor from another cycle or grid refuses by name. Without the donor `woof prep --source met-office-global` refuses at init naming the missing surfaces."}
+      ],
+      "record_subset": {
+        "supported": false,
+        "why": "each object is already one variable at one step, a NetCDF-4 (HDF5) file whose compressed chunks the decoder reads whole; picking the 13 state variables out of the 62 to 70 a run publishes is the subset, and byte ranges inside an HDF5 file are not offered"
+      },
+      "prep": {
+        "source": "met-office-global",
+        "supplement": {"from": "role:terrain", "role": "met_office_global_invariant_surface",
+                       "why": "height_of_orography exists only at PT0000H00M (measured 2026-10-11: absent at every later step of the 9 runs listed), and the decoder carries no primary field across leads, so the composition binds terrain from the cycle's step-0 file as a cycle-invariant supplement. The file is fetched for every window, including one that starts past f000, and is never one of the ordered inputs: listed there it would give terrain two providers and the composition refuses that."}
+      }
     }
   },
 

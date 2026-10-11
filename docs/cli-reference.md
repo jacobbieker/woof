@@ -233,6 +233,7 @@ test refuses any drift between the two.
 | `hgefs` | `hybrid-gefs` |
 | `ecmwf-open-data` | `ecmwf`, `ifs` |
 | `aifs` | `aifs-v2`, `aifs-single` |
+| `met-office-global` | `metoffice-global`, `ukmo-global`, `um-global` |
 | `rap` | `rap-awip32` |
 | `nam` | -- |
 | `hiresw` | `hires` |

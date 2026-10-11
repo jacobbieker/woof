@@ -115,6 +115,9 @@ predate it. `docs/public/DATA.md` publishes the working command for each.
 | table route (whole published objects, in parallel) | `hrrr-prs`, `hrrr-native`, `rap`, `rap-native`, `rrfs`, `gefs`, `aigfs`, `aigefs`, `ecmwf-open-data`, `aifs`, `icon-global`, `icon-eu`, `icon-d2`, `gem-gdps` |
 | hand-written transport (publisher-side subsetting) | `gfs`, `gdas` (NOMADS grib-filter or the S3 archive), `hrrr` (`.idx` byte ranges, live-cycle wait), `era5` (the public ARCO Zarr store with no key, or a Copernicus CDS retrieval under your own key) |
 
+The route table also carries `met-office-global` (see "Met Office global"
+below), whose fetch door is open before its preparation profile ships.
+
 `woof domain` emits the `[fetch]` table and the runnable step 1 for every
 one of them, because the wizard asks the fetch module the question rather
 than carrying a list:
@@ -225,6 +228,57 @@ mapping operations, including the condensate contribution to moist mass.
 Data: Deutscher Wetterdienst, https://opendata.dwd.de, CC BY 4.0. Anything
 you publish from it carries the attribution "Source: Deutscher
 Wetterdienst".
+
+## Met Office global
+
+`--source met-office-global` (aliases `metoffice-global`, `ukmo-global`,
+`um-global`) is the Met Office Unified Model global deterministic forecast
+from the AWS Open Data bucket `met-office-atmospheric-model-data`
+(registry.opendata.aws/met-office-global-deterministic): a regular
+2560 x 1920 latitude-longitude grid, about 10 km, one NetCDF-4 file per
+variable per step. The 00 and 12 UTC runs go hourly to 54 h, 3-hourly to
+144 h and 6-hourly to 168 h; the 06 and 18 UTC runs go hourly to 54 h and
+3-hourly to 69 h. A run's first step appears about 5 h 30 min after its
+start and its last by about 6 h 31 min (measured on 2026-10-11 from the
+bucket's own object times). The bucket keeps a rolling two years of runs.
+
+```
+woof fetch --source met-office-global --cycle latest --hours 3 --out mo
+```
+
+The fetch reads the bucket anonymously over HTTPS and needs no account.
+It downloads the 13 variables the preparation reads at every lead (about
+920 MB a lead, most of it the five pressure-level files), checks each
+file's HDF5 signature and declared length, and adds two more files to
+every window:
+
+- the run's step-0 `height_of_orography` file, bound as the terrain
+  supplement. The Met Office publishes orography at step 0 only, so a
+  window that starts later fetches it too. It is not one of the ordered
+  inputs.
+- the same cycle's GDAS 0.25-degree analysis, in `donor-gdas/`. The open
+  data has no soil temperature or moisture, no land-sea mask and no sea
+  ice, so the preparation borrows them from it. Surface pressure is
+  rebuilt from the mean sea level pressure and the orography.
+
+GDAS appears at about 6 h 48 min, after the Met Office run, so
+`--cycle latest` picks the newest run whose donor is out too.
+
+Runs before 2025-12-11 12 UTC publish no orography and are refused by
+name. Before 2026-01-21 12 UTC the 3-D height file was named
+`height_ASL_on_pressure_levels`, and the fetch asks for that name for
+those runs. A run older than the bucket's two years is refused as gone.
+
+The preparation decodes these files through the packaged profile
+`met-office-global-netcdf`. `woof prep --show-source met-office-global`
+says whether this install ships it; until it does, the row is not
+runnable and the wizard does not plan for it.
+
+Licence: British Crown copyright, the Met Office, CC BY-SA 4.0. The
+share-alike term covers derived outputs: a forecast you publish from these
+bytes must be shared under the same licence, with the attribution. The
+Met Office supplies the data free and unsupported, and not for critical
+business purposes.
 
 ## Adding a source
 

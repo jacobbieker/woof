@@ -80,7 +80,7 @@ def test_every_waited_row_has_measured_timing():
     ("icon-eu", 60, 60), ("icon-d2", 60, 60), ("gem-gdps", 60, 70),
     ("ecmwf-open-data", 60, 60), ("aifs", 60, 60),
     ("rrfs", 90, 90), ("gdas", 90, 115), ("aigfs", 90, 110),
-    ("aigefs", 90, 105),
+    ("aigefs", 90, 105), ("met-office-global", 60, 60),
 ])
 def test_late_budgets_outlast_the_row_s_own_late_spread(source, floor, minutes):
     """A budget is the row's measured late spread plus the margin, never
@@ -126,6 +126,9 @@ def test_the_shapes_are_the_design_s():
     # read as a rolling posting, is its dissemination schedule.
     assert shapes["ecmwf-open-data"] == shapes["gdas"] == shapes["aifs"] == "whole_cycle"
     assert shapes["aigfs"] == shapes["aigefs"] == "donor_gated"
+    # Every Met Office lead is out by + 6 h 31 min; its same-cycle GDAS
+    # donor lands from + 6 h 48 min.
+    assert shapes["met-office-global"] == "donor_gated"
     assert shapes["era5"] == "brokered"
     assert fetch_routes.posting_for("era5", provider="arco").shape == "archive"
     assert {source for source, shape in shapes.items() if shape == "rolling"} == {
