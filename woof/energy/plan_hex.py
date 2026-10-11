@@ -1645,8 +1645,18 @@ def _intermediate_refusal(argv: Sequence[str]) -> str | None:
         from woof.hex.hrrr_intermediate import source_row
     except ImportError:
         return None
+    source = _flag_value(argv, "--source")
+    # The door hands the uniform lat-lon rows to met_intermediate before it
+    # consults the projected table, so asking only that table refuses
+    # sources the door runs (hrrr_intermediate.run_intermediate).
     try:
-        source_row(_flag_value(argv, "--source"))
+        from woof.hex.met_intermediate_door import GLOBAL_SOURCES
+    except ImportError:
+        GLOBAL_SOURCES = {}
+    if source.strip().lower() in GLOBAL_SOURCES:
+        return None
+    try:
+        source_row(source)
     except MpasPortError as error:
         return f"woof hex intermediate refuses it at run time: {error}"
     except Exception:                       # noqa: BLE001 - not our call
