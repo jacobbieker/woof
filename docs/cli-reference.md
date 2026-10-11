@@ -222,6 +222,7 @@ test refuses any drift between the two.
 | `hrrr-prs` | `hrrr-pressure`, `hrrr-wrfprs` |
 | `gem-gdps` | `gem`, `gdps`, `gem-global` |
 | `icon-global` | `icon`, `icon-13km`, `dwd-icon`, `dwd-icon-global` |
+| `icon-global-ml` | `icon-ml`, `icon-global-model-level`, `dwd-icon-global-ml` |
 | `icon-eu` | `dwd-icon-eu`, `icon-eu-regular` |
 | `icon-d2` | `icon-2km`, `dwd-icon-d2` |
 | `hrrr-ak` | `hrrrak`, `hrrr-alaska` |

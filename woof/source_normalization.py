@@ -139,11 +139,23 @@ class NormalizationSpec:
             f"{self.source_id} publishes cycles "
             f"{sorted(self.cadence['cycle_hours'])} UTC, not {cycle_hour:02d}")
 
-    def levels_for(self, name: str) -> tuple[int, ...]:
+    def levels_for(self, name: str) -> tuple[int | str, ...]:
         levels = self.fields[name].get("levels")
         if levels is None:
             return ()
-        return tuple(int(x) for x in levels["values"])
+        return tuple(_level_key(x) for x in levels["values"])
+
+    @property
+    def matches_path(self) -> bool:
+        """Whether the object grammar reads the path, not only the name.
+
+        A publisher that names every object the same and tells them apart
+        by directory (DWD's v1 tree: ``.../T/lvt1/150/lv1/90/r/<run>/s/
+        PT000H00M.grib2``) declares ``objects.match = "path"``; its pattern
+        is then searched against the end of the object's path.
+        """
+
+        return self.document["objects"].get("match", "name") == "path"  # type: ignore[index]
 
     def selector_for(self, name: str, level: int | None):
         """The seven message-metadata values the native side checks."""
@@ -176,6 +188,29 @@ class NormalizationSpec:
         return path.name.removesuffix(".bz2").replace(
             rename["from"], rename["to"], 1)
 
+    def output_name_for(self, obj: "InputObject") -> str:
+        """The normalized file's name: renamed, or built from the identity.
+
+        A path-matched publisher's object names collide (every v1 object
+        is ``PT{HHH}H00M.grib2``), so its document declares an
+        ``output_template`` and the name is spelt from what the object IS.
+        """
+
+        template = self.document["objects"].get("output_template")  # type: ignore[index]
+        if template is None:
+            return self.output_name(obj.path)
+        return str(template).format(
+            kind=obj.kind, cycle=obj.cycle, field=obj.field,
+            lead_suffix="" if obj.lead is None else f"_{obj.lead:03d}",
+            level_suffix="" if obj.level is None else f"_{obj.level}")
+
+
+def _level_key(value) -> int | str:
+    """A ladder key: an integer, or the publisher's own decimal spelling."""
+
+    text = str(value)
+    return int(text) if text.isdigit() else text
+
 
 def _check_document(document, path: Path) -> None:
     schema = document.get("schema") if isinstance(document, dict) else None
@@ -188,6 +223,18 @@ def _check_document(document, path: Path) -> None:
                 "target", "limits", "fields", "methods"):
         if key not in document:
             raise ValueError(f"{path.name} omits the required key {key!r}")
+    objects = document["objects"]
+    match = objects.get("match", "name")
+    if match not in ("name", "path"):
+        raise ValueError(
+            f"{path.name} objects.match is {match!r}; the stage reads an "
+            "object's 'name' or its 'path'")
+    if match == "path" and not isinstance(objects.get("output_template"), str):
+        # Named breakage: path-matched objects share one file name, and the
+        # renamed outputs would overwrite each other in one directory.
+        raise ValueError(
+            f"{path.name} matches object paths and must declare an "
+            "output_template, because its objects share their file names")
     fields = document["fields"]
     for name, row in fields.items():
         if row.get("mode") not in REMAP_METHODS:
@@ -279,7 +326,7 @@ class InputObject:
     kind: str
     field: str
     lead: int | None
-    level: int | None
+    level: int | str | None
 
     @property
     def identity(self):
@@ -289,7 +336,7 @@ class InputObject:
     def output_name(self) -> str:
         # The name describes the output, and paths are never taken from an
         # upstream object or receipt without confinement checks.
-        return self.spec.output_name(self.path)
+        return self.spec.output_name_for(self)
 
     @property
     def mode(self) -> str:
@@ -308,32 +355,47 @@ class InputObject:
 def parse_object(spec: NormalizationSpec, path: str | Path) -> InputObject:
     path = Path(path).resolve()
     _path_token(path)
-    match = spec.pattern.fullmatch(path.name)
+    by_path = spec.matches_path
+    # A path-matched object's name is the same for every object, so a
+    # message names the whole path.
+    label = path.as_posix() if by_path else path.name
+    match = (spec.pattern.search(path.as_posix()) if by_path
+             else spec.pattern.fullmatch(path.name))
     if match is None:
         raise ValueError(
             f"{spec.source_id} requires its publisher's native object names, "
-            f"not {path.name!r}")
+            f"not {label!r}")
     g = match.groupdict()
     try:
         cycle = datetime.strptime(g["cycle"], spec.cycle_format)
     except ValueError as exc:
-        raise ValueError(f"invalid {spec.source_id} cycle in {path.name}") from exc
-    if cycle.hour not in spec.cadence["cycle_hours"]:
+        raise ValueError(f"invalid {spec.source_id} cycle in {label}") from exc
+    if cycle.hour not in spec.cadence["cycle_hours"] or cycle.minute:
         raise ValueError(
             f"{spec.source_id} cycles are "
             + ", ".join(f"{h:02d}" for h in spec.cadence["cycle_hours"])
             + " UTC")
     lead = None if g["lead"] is None else int(g["lead"])
-    level = None if g["level"] is None else int(g["level"])
-    field, kind = g["field"], g["kind"]
+    level = None if g["level"] is None else _level_key(g["level"])
+    field = g["field"]
     row = spec.fields.get(field)
+    # A tree names no kind: the field's own row does.
+    kind = g.get("kind") or (row["kind"] if row is not None else None)
     valid = row is not None and row["kind"] == kind
+    if valid and g.get("level_type") is not None:
+        # The tree's level-type directory must be the one the field's
+        # selector reads: a pressure-level T must not pass for a model level.
+        valid = int(g["level_type"]) == int(row["selector"]["level_type"])
     if valid and kind == INVARIANT_KIND:
         declared = spec.levels_for(field)
         invariant_level = g.get("invariant_level")
         if declared and invariant_level is not None:
             level = int(invariant_level)
-        valid = lead is None and ((level in declared) if declared else (level is None and invariant_level in (None, "0")))
+        if by_path:
+            # The tree files a once-per-cycle object under step 0.
+            valid = lead == 0
+            lead = None
+        valid = valid and lead is None and ((level in declared) if declared else (level is None and invariant_level in (None, "0")))
     elif valid:
         step = int(spec.cadence["step_hours"])
         horizon = spec.horizon_hours(cycle.hour)
@@ -343,8 +405,10 @@ def parse_object(spec: NormalizationSpec, path: str | Path) -> InputObject:
     if not valid:
         raise ValueError(
             f"object is outside the {spec.source_id} product/cadence "
-            f"contract: {path.name}")
-    return InputObject(spec, path, g["cycle"], kind, field, lead, level)
+            f"contract: {label}")
+    # The native stage reads the cycle as YYYYMMDDHH whatever the
+    # publisher spells (gdt101_remap's same_reference_time).
+    return InputObject(spec, path, f"{cycle:%Y%m%d%H}", kind, field, lead, level)
 
 
 def _expected_state(spec: NormalizationSpec) -> set[tuple[str, str, int | None]]:
@@ -408,7 +472,8 @@ def validate_inventory(spec: NormalizationSpec,
                 f" ({len(missing)} missing records)")
     return tuple(sorted(objects,
                         key=lambda o: (o.lead if o.lead is not None else -1,
-                                       o.kind, o.field, o.level or 0)))
+                                       o.kind, o.field,
+                                       0.0 if o.level is None else float(o.level))))
 
 
 # ---------------------------------------------------------------------------
@@ -640,9 +705,9 @@ def _check_cache(spec: NormalizationSpec, directory: Path, request: dict) -> dic
             or not all(isinstance(row, dict) for row in rows)):
         raise ValueError("normalization cache lacks its output inventory")
     geometry = set(spec.names_with_role("geometry"))
-    expected_names = {parse_object(spec, row["path"]).output_name
-                      for row in request["inputs"]
-                      if parse_object(spec, row["path"]).field not in geometry}
+    parsed = [parse_object(spec, row["path"]) for row in request["inputs"]]
+    expected_names = {obj.output_name for obj in parsed
+                      if obj.field not in geometry}
     if any(not isinstance(row.get("name"), str) for row in rows):
         raise ValueError("cache output names must be strings")
     if ({row["name"] for row in rows} != expected_names
@@ -826,7 +891,7 @@ def _check_wps_time_coverage(spec: NormalizationSpec, path: Path,
         raise ValueError(
             f"{spec.source_id} requires WPS interval_seconds={spacing}, "
             f"not {interval!r}")
-    cycle = datetime.strptime(objects[0].cycle, spec.cycle_format)
+    cycle = datetime.strptime(objects[0].cycle, "%Y%m%d%H")
     earliest = cycle + timedelta(hours=min(leads))
     latest = cycle + timedelta(hours=max(leads))
     declared = []

@@ -649,6 +649,21 @@ _ICON_D2_DOOR = ArchiveWindow(
     ("https://opendata.dwd.de/weather/nwp/icon-d2/grib/00/t_2m/",),
     checked_at="2026-09-27", retention_hours=24.0,
 )
+_ICON_V1_DOOR = ArchiveWindow(
+    "dwd", "",
+    "DWD's v1 open-data tree keeps about one day of ICON global runs; the "
+    "source.coop mirror of the same tree is the archive behind it.",
+    ("https://opendata.dwd.de/weather/nwp/v1/m/icon/p/PS/r/",),
+    checked_at="2026-10-11", retention_hours=24.0,
+)
+_ICON_COOP_ARCHIVE = ArchiveWindow(
+    "source-coop", "2026-08-25T12",
+    "The source.coop mirror of DWD's v1 ICON tree begins at the 2026-08-25 "
+    "12Z run; its completeness is per run and per field, and an object it "
+    "lacks fails the fetch by name.",
+    ("https://data.source.coop/bkr/icon?list-type=2&delimiter=/&prefix=icon/icon/p/HHL/lvt1/150/lv1/121/r/",),
+    checked_at="2026-10-11",
+)
 _MSC_DATAMART_DOOR = ArchiveWindow(
     "msc", "",
     "MSC Datamart keeps 30 day directories with the oldest partly pruned, "
@@ -894,6 +909,43 @@ _ADAPTERS = (
             "18 pressure levels (30..1000 hPa), TERRA soil and sea ice. "
             "Three-hour forcing; 00/12Z to f180, 06/18Z to f120. "
             "No observation assimilation or stock-WRF certification is implied."
+        ),
+    ),
+    _adapter(
+        "icon-global-ml",
+        archives=(_ICON_V1_DOOR, _ICON_COOP_ARCHIVE),
+        name="ICON global 13 km, 120 model levels (DWD)",
+        aliases=("icon-ml", "icon-global-model-level", "dwd-icon-global-ml"),
+        upstream_model_id="icon",
+        default_product="icosahedral-model-level",
+        required_products=("model-level", "single-level", "soil-level",
+                           "time-invariant", "grid-coordinates"),
+        max_hour=180,
+        decoder="gdt101_remap + vendored grib-core + mapped engine",
+        upstream_ingest="native_gdt101_normalization_then_packaged_profile",
+        status=AdapterStatus.RUNNABLE_NOT_CERTIFIED,
+        field_mapping="packaged-rw-wps-icon-global-ml-grib2-v1",
+        level_mapping="120-height-model-level-to-explicit-wrf-eta-v1",
+        cadence_mapping="selected-uniform-three-hour-forecast-series-v1",
+        stock_wrf_gate="live-unchanged-stock-wrf-gate-pending",
+        runnable=True,
+        runner="mapped_composition_v1",
+        packaged_profile="icon-global-ml-grib2-v1",
+        forcing_interval_seconds=10800.0,
+        notes=(
+            "DWD global R03B07, nominal 13 km, 2,949,120 native cells, on "
+            "its 120 native model levels from DWD's v1 open-data tree "
+            "(source.coop mirror for older runs): pressure, temperature, "
+            "specific humidity and wind on full levels and the 121 "
+            "half-level heights (HHL, step 0) that place them. The same "
+            "GDT-101 normalization as --source icon-global remaps the WPS "
+            "domain plus a 1-degree halo to 0.125 degrees and seals "
+            "raw-to-normalized provenance before prep. TERRA soil and sea "
+            "ice as icon-global. About 2 GB per lead (600 model-level "
+            "objects), so a window takes at most 13 leads; three-hour "
+            "forcing by default, 00/12Z to f180, 06/18Z to f120. Source: "
+            "Deutscher Wetterdienst (DWD), CC BY 4.0. No observation "
+            "assimilation or stock-WRF certification is implied."
         ),
     ),
     _adapter(

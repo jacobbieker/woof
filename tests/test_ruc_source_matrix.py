@@ -70,6 +70,7 @@ EXPECTED_POLICY = {
     "icon-global": "node_point_samples",
     # Soil borrowed from the same-cycle GDAS analysis: the GDAS layer column.
     "met-office-global": "layer_midpoint_samples",
+    "icon-global-ml": "node_point_samples",
     "rap": "node_point_samples",
     "rap-native": "node_point_samples",
     "rrfs": "node_point_samples",
@@ -95,6 +96,7 @@ EXPECTED_SCALE = {
     "icon-d2": 1000,
     "icon-eu": 1000,
     "icon-global": 1000,
+    "icon-global-ml": 1000,
 }
 
 

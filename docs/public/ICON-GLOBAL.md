@@ -161,6 +161,87 @@ The registry records this source as runnable: a strict implementation route
 exists and a real cycle prepares and runs end to end. WOOF's separate
 stock-WRF acceptance status is not claimed for it.
 
-What this route does not do in this release: model-level SLEVE/HHL ingestion,
-direct native-cell-to-target interpolation, ICON ensemble products, polar
-domains, or any historical archive.
+What this route does not do in this release: model-level SLEVE/HHL ingestion
+(that is `icon-global-ml`, below), direct native-cell-to-target
+interpolation, ICON ensemble products, polar domains, or any historical
+archive.
+
+## Model levels: `icon-global-ml`
+
+`icon-global-ml` (aliases `icon-ml`, `icon-global-model-level`,
+`dwd-icon-global-ml`) is the same deterministic R03B07 run, read on its 120
+native model levels instead of 18 pressure levels:
+
+- pressure (P), temperature (T), specific humidity (QV) and wind (U, V) on
+  every full level;
+- the 121 half-level heights (HHL) that place those levels. DWD publishes
+  them at step 0 of each run only.
+
+Soil, surface, snow, sea ice, land fraction and terrain are the same fields
+`icon-global` reads, taken from the same v1 tree as the model levels.
+
+```sh
+woof domain --point 53.5,-2.0 --card 16gb --root-dx 12 --hours 6 \
+  --source icon-global-ml --cycle latest --out uk-ml.toml
+woof go uk-ml.toml
+```
+
+### Where the bytes come from
+
+DWD's v1 open-data tree, `https://opendata.dwd.de/weather/nwp/v1/m/icon/p/`:
+
+- one plain GRIB2 message per object (GDT 3.101, CCSDS packing);
+- one directory per field, level and run, for example
+  `T/lvt1/150/lv1/90/r/2026-10-11T00:00/s/PT003H00M.grib2`.
+
+The fetch keeps that tree below `p/` as its local layout, because every
+object's file name is just its step. DWD keeps about a day of runs. An older
+run is read from the source.coop mirror of the same `p/` tree,
+`https://data.source.coop/bkr/icon/icon/p/`, which starts at the 2026-08-25
+12Z run. The mirror is complete for some runs and partial for others (field
+by field). An object the mirror lacks fails the fetch, naming the object.
+Runs are never mixed.
+
+### How the levels are used
+
+The mapping's vertical coordinate is `model_level`:
+
+- 120 mass levels with their own 3-D pressure;
+- 121 interfaces whose heights are the HHL records, broadcast to every valid
+  time. Each mass level's height is the mean of its two interfaces, computed
+  per column.
+
+QV is DWD's water-vapour mass fraction of moist air and is taken as the
+specific humidity. This route reads no condensate, so cloud and precipitation
+species start from zero, as on `icon-global`. The top full level is at about
+74 km and about 2.3 Pa (measured over the whole globe, 2026-10-11 00Z), far
+above any model top a configuration asks for.
+
+The GDT-101 normalization is the same stage as `icon-global`'s, from
+`rw-wps-icon-global-ml-grib2.normalization.json`. That document declares
+`objects.match = "path"`, so the object grammar reads the tree. It also
+declares an `output_template`, which names each regional intermediate after
+its field, level and lead, because the raw file names collide.
+
+### Size
+
+Every lead is 626 objects, about 2.0 GB, almost all of it the 600
+model-level objects of about 3.3 MB each. The 121 HHL objects add about
+80 MB once per run.
+
+The route therefore takes at most 13 leads per window, about 26 GB. A longer
+window is refused before anything downloads, with the reason and the
+remedies: a coarser `--cadence` (6 or 12 h), a shorter window, or
+`--source icon-global`.
+
+The default cadence is 3 h. DWD posts hourly to f078 and every 3 h after
+that, to f180 from 00 and 12 UTC and to f120 from 06 and 18 UTC.
+
+Measured 2026-10-11, UK domain at 12 km, leads 0 and 1 h, CPU only:
+
+- fetch: 1,377 objects, 3.9 GiB;
+- normalization: about 3 min for 1,377 objects;
+- the rest of the preparation: 34 s.
+
+Data: Deutscher Wetterdienst, CC BY 4.0. "Source: Deutscher Wetterdienst
+(DWD), CC BY 4.0".

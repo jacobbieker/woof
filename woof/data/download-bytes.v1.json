@@ -63,6 +63,9 @@
   {"source": "icon-global", "mode": "full-file",
    "objects": {"state": 3101000, "invariant": 856300, "geometry": 1331000},
    "measured": "Content-Length of all 348 state, 2 invariant and 2 geometry objects of the 2026-09-26 00Z f000 to f006 window at 3 h, read on 2026-09-26"},
+  {"source": "icon-global-ml", "mode": "full-file",
+   "objects": {"state": 3215005, "surface": 2370361, "heights": 657243, "invariant": 1103866, "geometry": 2600115},
+   "measured": "mean size of all 1200 model-level, 52 single-level and soil, 121 HHL, 2 invariant and 2 geometry objects of the 2026-10-11 00Z f000 to f001 window at 1 h, fetched from DWD's v1 tree on 2026-10-11 (4,068,198,545 bytes): about 2.0 GB per lead"},
   {"source": "icon-d2", "mode": "full-file",
    "objects": {"state": 628500, "invariant": 208600, "geometry": 415200},
    "measured": "mean size of all 560 state, 3 invariant and 2 geometry objects of the 2026-09-27 12Z f000 to f006 window at 1 h, read from DWD's directory listing on 2026-09-27"},
@@ -275,7 +278,17 @@
     "windowed_layers": 198,
     "global_axes": {"longitude_first": -179.9296875, "latitude_first": -89.953125, "longitude_step_degrees": 0.140625, "latitude_step_degrees": 0.09375, "nx": 2560, "ny": 1920},
     "bytes_per_value": 8,
-    "measured": "the engine's frames for a real f000 + f003 compose of 2026-10-11 00Z by gpuwm_mapped_engine on 2026-10-11 (a 100 x 80 UK target at 9 km): 18 fields per frame, six on the 33-level ladder, ten surface fields and the two soil fields of the four GDAS layers, so 216 layers and 8,493,465,600 bytes per valid time on the whole grid before the atmospheric window crops its 198 3-D layers"
+    "measured": "the engine's frames for a real f000 + f003 compose of 2026-10-11 00Z by gpuwm_mapped_engine on 2026-10-11 (a 100 x 80 UK target at 9 km): 18 fields per frame, six on the 33-level ladder, ten surface fields and the two soil fields of the four GDAS layers, so 216 layers and 8,493,465,600 bytes per valid time on the whole grid before the atmospheric window crops its 198 3-D layers",
+   },
+   "icon-global-ml": {
+    "mapping": "rw-wps-icon-global-ml-grib2.mapping.json",
+    "normalization": "rw-wps-icon-global-ml-grib2.normalization.json",
+    "grid": "the regular window its normalization sizes around the target: 0.125 degree steps and a 1 degree halo",
+    "layers_per_valid_time": 887,
+    "soil_layers": 34,
+    "windowed_layers": 0,
+    "bytes_per_value": 8,
+    "measured": "Real DWD v1 run 2026-10-11 00Z, leads 0 and 1 h, normalized around a 12 km UK domain and composed by gpuwm_mapped_engine on 2026-10-11: each frame carried 23 fields, six of them on 120 mass levels, 121 interface heights, 12 surface layers and the 34 layers of the ICON soil column (9 temperature, 8 water and the two volumetric moistures derived from them), 887 layers per valid time, the grammar ICON-D2's measured 827 follow with 65 levels; the normalization document sizes the window around each target"
    }
   }
  }

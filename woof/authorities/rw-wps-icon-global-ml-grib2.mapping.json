@@ -1,0 +1,7263 @@
+{
+ "schema": "rw-wps.mapping.v1",
+ "name": "dwd-icon-global-13km-remapped-model-level-grib2",
+ "format": "grib2",
+ "coordinates": {
+  "horizontal": {
+   "kind": "embedded_grid"
+  },
+  "vertical": {
+   "kind": "model_level",
+   "units": "1",
+   "positive": "down",
+   "levels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120
+   ],
+   "interface_levels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121
+   ]
+  },
+  "time": {
+   "kind": "embedded_metadata"
+  }
+ },
+ "fields": {
+  "air_temperature": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 1,
+     "second_level_type": 150,
+     "second_level_value": 2
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 2,
+     "second_level_type": 150,
+     "second_level_value": 3
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 3,
+     "second_level_type": 150,
+     "second_level_value": 4
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 4,
+     "second_level_type": 150,
+     "second_level_value": 5
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 5,
+     "second_level_type": 150,
+     "second_level_value": 6
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 6,
+     "second_level_type": 150,
+     "second_level_value": 7
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 7,
+     "second_level_type": 150,
+     "second_level_value": 8
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 8,
+     "second_level_type": 150,
+     "second_level_value": 9
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 9,
+     "second_level_type": 150,
+     "second_level_value": 10
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 10,
+     "second_level_type": 150,
+     "second_level_value": 11
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 11,
+     "second_level_type": 150,
+     "second_level_value": 12
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 12,
+     "second_level_type": 150,
+     "second_level_value": 13
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 13,
+     "second_level_type": 150,
+     "second_level_value": 14
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 14,
+     "second_level_type": 150,
+     "second_level_value": 15
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 15,
+     "second_level_type": 150,
+     "second_level_value": 16
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 16,
+     "second_level_type": 150,
+     "second_level_value": 17
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 17,
+     "second_level_type": 150,
+     "second_level_value": 18
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 18,
+     "second_level_type": 150,
+     "second_level_value": 19
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 19,
+     "second_level_type": 150,
+     "second_level_value": 20
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 20,
+     "second_level_type": 150,
+     "second_level_value": 21
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 21,
+     "second_level_type": 150,
+     "second_level_value": 22
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 22,
+     "second_level_type": 150,
+     "second_level_value": 23
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 23,
+     "second_level_type": 150,
+     "second_level_value": 24
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 24,
+     "second_level_type": 150,
+     "second_level_value": 25
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 25,
+     "second_level_type": 150,
+     "second_level_value": 26
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 26,
+     "second_level_type": 150,
+     "second_level_value": 27
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 27,
+     "second_level_type": 150,
+     "second_level_value": 28
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 28,
+     "second_level_type": 150,
+     "second_level_value": 29
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 29,
+     "second_level_type": 150,
+     "second_level_value": 30
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 30,
+     "second_level_type": 150,
+     "second_level_value": 31
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 31,
+     "second_level_type": 150,
+     "second_level_value": 32
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 32,
+     "second_level_type": 150,
+     "second_level_value": 33
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 33,
+     "second_level_type": 150,
+     "second_level_value": 34
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 34,
+     "second_level_type": 150,
+     "second_level_value": 35
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 35,
+     "second_level_type": 150,
+     "second_level_value": 36
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 36,
+     "second_level_type": 150,
+     "second_level_value": 37
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 37,
+     "second_level_type": 150,
+     "second_level_value": 38
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 38,
+     "second_level_type": 150,
+     "second_level_value": 39
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 39,
+     "second_level_type": 150,
+     "second_level_value": 40
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 40,
+     "second_level_type": 150,
+     "second_level_value": 41
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 41,
+     "second_level_type": 150,
+     "second_level_value": 42
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 42,
+     "second_level_type": 150,
+     "second_level_value": 43
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 43,
+     "second_level_type": 150,
+     "second_level_value": 44
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 44,
+     "second_level_type": 150,
+     "second_level_value": 45
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 45,
+     "second_level_type": 150,
+     "second_level_value": 46
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 46,
+     "second_level_type": 150,
+     "second_level_value": 47
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 47,
+     "second_level_type": 150,
+     "second_level_value": 48
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 48,
+     "second_level_type": 150,
+     "second_level_value": 49
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 49,
+     "second_level_type": 150,
+     "second_level_value": 50
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 50,
+     "second_level_type": 150,
+     "second_level_value": 51
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 51,
+     "second_level_type": 150,
+     "second_level_value": 52
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 52,
+     "second_level_type": 150,
+     "second_level_value": 53
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 53,
+     "second_level_type": 150,
+     "second_level_value": 54
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 54,
+     "second_level_type": 150,
+     "second_level_value": 55
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 55,
+     "second_level_type": 150,
+     "second_level_value": 56
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 56,
+     "second_level_type": 150,
+     "second_level_value": 57
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 57,
+     "second_level_type": 150,
+     "second_level_value": 58
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 58,
+     "second_level_type": 150,
+     "second_level_value": 59
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 59,
+     "second_level_type": 150,
+     "second_level_value": 60
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 60,
+     "second_level_type": 150,
+     "second_level_value": 61
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 61,
+     "second_level_type": 150,
+     "second_level_value": 62
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 62,
+     "second_level_type": 150,
+     "second_level_value": 63
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 63,
+     "second_level_type": 150,
+     "second_level_value": 64
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 64,
+     "second_level_type": 150,
+     "second_level_value": 65
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 65,
+     "second_level_type": 150,
+     "second_level_value": 66
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 66,
+     "second_level_type": 150,
+     "second_level_value": 67
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 67,
+     "second_level_type": 150,
+     "second_level_value": 68
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 68,
+     "second_level_type": 150,
+     "second_level_value": 69
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 69,
+     "second_level_type": 150,
+     "second_level_value": 70
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 70,
+     "second_level_type": 150,
+     "second_level_value": 71
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 71,
+     "second_level_type": 150,
+     "second_level_value": 72
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 72,
+     "second_level_type": 150,
+     "second_level_value": 73
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 73,
+     "second_level_type": 150,
+     "second_level_value": 74
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 74,
+     "second_level_type": 150,
+     "second_level_value": 75
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 75,
+     "second_level_type": 150,
+     "second_level_value": 76
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 76,
+     "second_level_type": 150,
+     "second_level_value": 77
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 77,
+     "second_level_type": 150,
+     "second_level_value": 78
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 78,
+     "second_level_type": 150,
+     "second_level_value": 79
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 79,
+     "second_level_type": 150,
+     "second_level_value": 80
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 80,
+     "second_level_type": 150,
+     "second_level_value": 81
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 81,
+     "second_level_type": 150,
+     "second_level_value": 82
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 82,
+     "second_level_type": 150,
+     "second_level_value": 83
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 83,
+     "second_level_type": 150,
+     "second_level_value": 84
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 84,
+     "second_level_type": 150,
+     "second_level_value": 85
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 85,
+     "second_level_type": 150,
+     "second_level_value": 86
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 86,
+     "second_level_type": 150,
+     "second_level_value": 87
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 87,
+     "second_level_type": 150,
+     "second_level_value": 88
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 88,
+     "second_level_type": 150,
+     "second_level_value": 89
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 89,
+     "second_level_type": 150,
+     "second_level_value": 90
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 90,
+     "second_level_type": 150,
+     "second_level_value": 91
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 91,
+     "second_level_type": 150,
+     "second_level_value": 92
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 92,
+     "second_level_type": 150,
+     "second_level_value": 93
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 93,
+     "second_level_type": 150,
+     "second_level_value": 94
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 94,
+     "second_level_type": 150,
+     "second_level_value": 95
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 95,
+     "second_level_type": 150,
+     "second_level_value": 96
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 96,
+     "second_level_type": 150,
+     "second_level_value": 97
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 97,
+     "second_level_type": 150,
+     "second_level_value": 98
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 98,
+     "second_level_type": 150,
+     "second_level_value": 99
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 99,
+     "second_level_type": 150,
+     "second_level_value": 100
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 100,
+     "second_level_type": 150,
+     "second_level_value": 101
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 101,
+     "second_level_type": 150,
+     "second_level_value": 102
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 102,
+     "second_level_type": 150,
+     "second_level_value": 103
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 103,
+     "second_level_type": 150,
+     "second_level_value": 104
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 104,
+     "second_level_type": 150,
+     "second_level_value": 105
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 105,
+     "second_level_type": 150,
+     "second_level_value": 106
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 106,
+     "second_level_type": 150,
+     "second_level_value": 107
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 107,
+     "second_level_type": 150,
+     "second_level_value": 108
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 108,
+     "second_level_type": 150,
+     "second_level_value": 109
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 109,
+     "second_level_type": 150,
+     "second_level_value": 110
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 110,
+     "second_level_type": 150,
+     "second_level_value": 111
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 111,
+     "second_level_type": 150,
+     "second_level_value": 112
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 112,
+     "second_level_type": 150,
+     "second_level_value": 113
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 113,
+     "second_level_type": 150,
+     "second_level_value": 114
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 114,
+     "second_level_type": 150,
+     "second_level_value": 115
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 115,
+     "second_level_type": 150,
+     "second_level_value": 116
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 116,
+     "second_level_type": 150,
+     "second_level_value": 117
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 117,
+     "second_level_type": 150,
+     "second_level_value": 118
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 118,
+     "second_level_type": 150,
+     "second_level_value": 119
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 119,
+     "second_level_type": 150,
+     "second_level_value": 120
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 120,
+     "second_level_type": 150,
+     "second_level_value": 121
+    }
+   ],
+   "units": {
+    "source": "K",
+    "target": "K"
+   },
+   "source_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "location": "mass",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "eastward_wind": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 1,
+     "second_level_type": 150,
+     "second_level_value": 2
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 2,
+     "second_level_type": 150,
+     "second_level_value": 3
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 3,
+     "second_level_type": 150,
+     "second_level_value": 4
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 4,
+     "second_level_type": 150,
+     "second_level_value": 5
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 5,
+     "second_level_type": 150,
+     "second_level_value": 6
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 6,
+     "second_level_type": 150,
+     "second_level_value": 7
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 7,
+     "second_level_type": 150,
+     "second_level_value": 8
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 8,
+     "second_level_type": 150,
+     "second_level_value": 9
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 9,
+     "second_level_type": 150,
+     "second_level_value": 10
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 10,
+     "second_level_type": 150,
+     "second_level_value": 11
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 11,
+     "second_level_type": 150,
+     "second_level_value": 12
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 12,
+     "second_level_type": 150,
+     "second_level_value": 13
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 13,
+     "second_level_type": 150,
+     "second_level_value": 14
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 14,
+     "second_level_type": 150,
+     "second_level_value": 15
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 15,
+     "second_level_type": 150,
+     "second_level_value": 16
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 16,
+     "second_level_type": 150,
+     "second_level_value": 17
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 17,
+     "second_level_type": 150,
+     "second_level_value": 18
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 18,
+     "second_level_type": 150,
+     "second_level_value": 19
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 19,
+     "second_level_type": 150,
+     "second_level_value": 20
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 20,
+     "second_level_type": 150,
+     "second_level_value": 21
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 21,
+     "second_level_type": 150,
+     "second_level_value": 22
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 22,
+     "second_level_type": 150,
+     "second_level_value": 23
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 23,
+     "second_level_type": 150,
+     "second_level_value": 24
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 24,
+     "second_level_type": 150,
+     "second_level_value": 25
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 25,
+     "second_level_type": 150,
+     "second_level_value": 26
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 26,
+     "second_level_type": 150,
+     "second_level_value": 27
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 27,
+     "second_level_type": 150,
+     "second_level_value": 28
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 28,
+     "second_level_type": 150,
+     "second_level_value": 29
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 29,
+     "second_level_type": 150,
+     "second_level_value": 30
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 30,
+     "second_level_type": 150,
+     "second_level_value": 31
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 31,
+     "second_level_type": 150,
+     "second_level_value": 32
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 32,
+     "second_level_type": 150,
+     "second_level_value": 33
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 33,
+     "second_level_type": 150,
+     "second_level_value": 34
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 34,
+     "second_level_type": 150,
+     "second_level_value": 35
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 35,
+     "second_level_type": 150,
+     "second_level_value": 36
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 36,
+     "second_level_type": 150,
+     "second_level_value": 37
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 37,
+     "second_level_type": 150,
+     "second_level_value": 38
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 38,
+     "second_level_type": 150,
+     "second_level_value": 39
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 39,
+     "second_level_type": 150,
+     "second_level_value": 40
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 40,
+     "second_level_type": 150,
+     "second_level_value": 41
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 41,
+     "second_level_type": 150,
+     "second_level_value": 42
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 42,
+     "second_level_type": 150,
+     "second_level_value": 43
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 43,
+     "second_level_type": 150,
+     "second_level_value": 44
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 44,
+     "second_level_type": 150,
+     "second_level_value": 45
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 45,
+     "second_level_type": 150,
+     "second_level_value": 46
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 46,
+     "second_level_type": 150,
+     "second_level_value": 47
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 47,
+     "second_level_type": 150,
+     "second_level_value": 48
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 48,
+     "second_level_type": 150,
+     "second_level_value": 49
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 49,
+     "second_level_type": 150,
+     "second_level_value": 50
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 50,
+     "second_level_type": 150,
+     "second_level_value": 51
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 51,
+     "second_level_type": 150,
+     "second_level_value": 52
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 52,
+     "second_level_type": 150,
+     "second_level_value": 53
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 53,
+     "second_level_type": 150,
+     "second_level_value": 54
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 54,
+     "second_level_type": 150,
+     "second_level_value": 55
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 55,
+     "second_level_type": 150,
+     "second_level_value": 56
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 56,
+     "second_level_type": 150,
+     "second_level_value": 57
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 57,
+     "second_level_type": 150,
+     "second_level_value": 58
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 58,
+     "second_level_type": 150,
+     "second_level_value": 59
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 59,
+     "second_level_type": 150,
+     "second_level_value": 60
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 60,
+     "second_level_type": 150,
+     "second_level_value": 61
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 61,
+     "second_level_type": 150,
+     "second_level_value": 62
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 62,
+     "second_level_type": 150,
+     "second_level_value": 63
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 63,
+     "second_level_type": 150,
+     "second_level_value": 64
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 64,
+     "second_level_type": 150,
+     "second_level_value": 65
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 65,
+     "second_level_type": 150,
+     "second_level_value": 66
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 66,
+     "second_level_type": 150,
+     "second_level_value": 67
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 67,
+     "second_level_type": 150,
+     "second_level_value": 68
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 68,
+     "second_level_type": 150,
+     "second_level_value": 69
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 69,
+     "second_level_type": 150,
+     "second_level_value": 70
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 70,
+     "second_level_type": 150,
+     "second_level_value": 71
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 71,
+     "second_level_type": 150,
+     "second_level_value": 72
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 72,
+     "second_level_type": 150,
+     "second_level_value": 73
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 73,
+     "second_level_type": 150,
+     "second_level_value": 74
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 74,
+     "second_level_type": 150,
+     "second_level_value": 75
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 75,
+     "second_level_type": 150,
+     "second_level_value": 76
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 76,
+     "second_level_type": 150,
+     "second_level_value": 77
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 77,
+     "second_level_type": 150,
+     "second_level_value": 78
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 78,
+     "second_level_type": 150,
+     "second_level_value": 79
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 79,
+     "second_level_type": 150,
+     "second_level_value": 80
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 80,
+     "second_level_type": 150,
+     "second_level_value": 81
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 81,
+     "second_level_type": 150,
+     "second_level_value": 82
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 82,
+     "second_level_type": 150,
+     "second_level_value": 83
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 83,
+     "second_level_type": 150,
+     "second_level_value": 84
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 84,
+     "second_level_type": 150,
+     "second_level_value": 85
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 85,
+     "second_level_type": 150,
+     "second_level_value": 86
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 86,
+     "second_level_type": 150,
+     "second_level_value": 87
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 87,
+     "second_level_type": 150,
+     "second_level_value": 88
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 88,
+     "second_level_type": 150,
+     "second_level_value": 89
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 89,
+     "second_level_type": 150,
+     "second_level_value": 90
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 90,
+     "second_level_type": 150,
+     "second_level_value": 91
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 91,
+     "second_level_type": 150,
+     "second_level_value": 92
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 92,
+     "second_level_type": 150,
+     "second_level_value": 93
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 93,
+     "second_level_type": 150,
+     "second_level_value": 94
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 94,
+     "second_level_type": 150,
+     "second_level_value": 95
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 95,
+     "second_level_type": 150,
+     "second_level_value": 96
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 96,
+     "second_level_type": 150,
+     "second_level_value": 97
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 97,
+     "second_level_type": 150,
+     "second_level_value": 98
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 98,
+     "second_level_type": 150,
+     "second_level_value": 99
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 99,
+     "second_level_type": 150,
+     "second_level_value": 100
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 100,
+     "second_level_type": 150,
+     "second_level_value": 101
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 101,
+     "second_level_type": 150,
+     "second_level_value": 102
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 102,
+     "second_level_type": 150,
+     "second_level_value": 103
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 103,
+     "second_level_type": 150,
+     "second_level_value": 104
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 104,
+     "second_level_type": 150,
+     "second_level_value": 105
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 105,
+     "second_level_type": 150,
+     "second_level_value": 106
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 106,
+     "second_level_type": 150,
+     "second_level_value": 107
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 107,
+     "second_level_type": 150,
+     "second_level_value": 108
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 108,
+     "second_level_type": 150,
+     "second_level_value": 109
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 109,
+     "second_level_type": 150,
+     "second_level_value": 110
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 110,
+     "second_level_type": 150,
+     "second_level_value": 111
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 111,
+     "second_level_type": 150,
+     "second_level_value": 112
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 112,
+     "second_level_type": 150,
+     "second_level_value": 113
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 113,
+     "second_level_type": 150,
+     "second_level_value": 114
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 114,
+     "second_level_type": 150,
+     "second_level_value": 115
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 115,
+     "second_level_type": 150,
+     "second_level_value": 116
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 116,
+     "second_level_type": 150,
+     "second_level_value": 117
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 117,
+     "second_level_type": 150,
+     "second_level_value": 118
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 118,
+     "second_level_type": 150,
+     "second_level_value": 119
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 119,
+     "second_level_type": 150,
+     "second_level_value": 120
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 150,
+     "level_value": 120,
+     "second_level_type": 150,
+     "second_level_value": 121
+    }
+   ],
+   "units": {
+    "source": "m s-1",
+    "target": "m s-1"
+   },
+   "source_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "location": "mass",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "northward_wind": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 1,
+     "second_level_type": 150,
+     "second_level_value": 2
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 2,
+     "second_level_type": 150,
+     "second_level_value": 3
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 3,
+     "second_level_type": 150,
+     "second_level_value": 4
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 4,
+     "second_level_type": 150,
+     "second_level_value": 5
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 5,
+     "second_level_type": 150,
+     "second_level_value": 6
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 6,
+     "second_level_type": 150,
+     "second_level_value": 7
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 7,
+     "second_level_type": 150,
+     "second_level_value": 8
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 8,
+     "second_level_type": 150,
+     "second_level_value": 9
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 9,
+     "second_level_type": 150,
+     "second_level_value": 10
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 10,
+     "second_level_type": 150,
+     "second_level_value": 11
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 11,
+     "second_level_type": 150,
+     "second_level_value": 12
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 12,
+     "second_level_type": 150,
+     "second_level_value": 13
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 13,
+     "second_level_type": 150,
+     "second_level_value": 14
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 14,
+     "second_level_type": 150,
+     "second_level_value": 15
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 15,
+     "second_level_type": 150,
+     "second_level_value": 16
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 16,
+     "second_level_type": 150,
+     "second_level_value": 17
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 17,
+     "second_level_type": 150,
+     "second_level_value": 18
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 18,
+     "second_level_type": 150,
+     "second_level_value": 19
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 19,
+     "second_level_type": 150,
+     "second_level_value": 20
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 20,
+     "second_level_type": 150,
+     "second_level_value": 21
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 21,
+     "second_level_type": 150,
+     "second_level_value": 22
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 22,
+     "second_level_type": 150,
+     "second_level_value": 23
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 23,
+     "second_level_type": 150,
+     "second_level_value": 24
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 24,
+     "second_level_type": 150,
+     "second_level_value": 25
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 25,
+     "second_level_type": 150,
+     "second_level_value": 26
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 26,
+     "second_level_type": 150,
+     "second_level_value": 27
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 27,
+     "second_level_type": 150,
+     "second_level_value": 28
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 28,
+     "second_level_type": 150,
+     "second_level_value": 29
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 29,
+     "second_level_type": 150,
+     "second_level_value": 30
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 30,
+     "second_level_type": 150,
+     "second_level_value": 31
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 31,
+     "second_level_type": 150,
+     "second_level_value": 32
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 32,
+     "second_level_type": 150,
+     "second_level_value": 33
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 33,
+     "second_level_type": 150,
+     "second_level_value": 34
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 34,
+     "second_level_type": 150,
+     "second_level_value": 35
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 35,
+     "second_level_type": 150,
+     "second_level_value": 36
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 36,
+     "second_level_type": 150,
+     "second_level_value": 37
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 37,
+     "second_level_type": 150,
+     "second_level_value": 38
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 38,
+     "second_level_type": 150,
+     "second_level_value": 39
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 39,
+     "second_level_type": 150,
+     "second_level_value": 40
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 40,
+     "second_level_type": 150,
+     "second_level_value": 41
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 41,
+     "second_level_type": 150,
+     "second_level_value": 42
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 42,
+     "second_level_type": 150,
+     "second_level_value": 43
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 43,
+     "second_level_type": 150,
+     "second_level_value": 44
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 44,
+     "second_level_type": 150,
+     "second_level_value": 45
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 45,
+     "second_level_type": 150,
+     "second_level_value": 46
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 46,
+     "second_level_type": 150,
+     "second_level_value": 47
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 47,
+     "second_level_type": 150,
+     "second_level_value": 48
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 48,
+     "second_level_type": 150,
+     "second_level_value": 49
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 49,
+     "second_level_type": 150,
+     "second_level_value": 50
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 50,
+     "second_level_type": 150,
+     "second_level_value": 51
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 51,
+     "second_level_type": 150,
+     "second_level_value": 52
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 52,
+     "second_level_type": 150,
+     "second_level_value": 53
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 53,
+     "second_level_type": 150,
+     "second_level_value": 54
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 54,
+     "second_level_type": 150,
+     "second_level_value": 55
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 55,
+     "second_level_type": 150,
+     "second_level_value": 56
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 56,
+     "second_level_type": 150,
+     "second_level_value": 57
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 57,
+     "second_level_type": 150,
+     "second_level_value": 58
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 58,
+     "second_level_type": 150,
+     "second_level_value": 59
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 59,
+     "second_level_type": 150,
+     "second_level_value": 60
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 60,
+     "second_level_type": 150,
+     "second_level_value": 61
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 61,
+     "second_level_type": 150,
+     "second_level_value": 62
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 62,
+     "second_level_type": 150,
+     "second_level_value": 63
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 63,
+     "second_level_type": 150,
+     "second_level_value": 64
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 64,
+     "second_level_type": 150,
+     "second_level_value": 65
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 65,
+     "second_level_type": 150,
+     "second_level_value": 66
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 66,
+     "second_level_type": 150,
+     "second_level_value": 67
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 67,
+     "second_level_type": 150,
+     "second_level_value": 68
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 68,
+     "second_level_type": 150,
+     "second_level_value": 69
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 69,
+     "second_level_type": 150,
+     "second_level_value": 70
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 70,
+     "second_level_type": 150,
+     "second_level_value": 71
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 71,
+     "second_level_type": 150,
+     "second_level_value": 72
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 72,
+     "second_level_type": 150,
+     "second_level_value": 73
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 73,
+     "second_level_type": 150,
+     "second_level_value": 74
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 74,
+     "second_level_type": 150,
+     "second_level_value": 75
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 75,
+     "second_level_type": 150,
+     "second_level_value": 76
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 76,
+     "second_level_type": 150,
+     "second_level_value": 77
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 77,
+     "second_level_type": 150,
+     "second_level_value": 78
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 78,
+     "second_level_type": 150,
+     "second_level_value": 79
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 79,
+     "second_level_type": 150,
+     "second_level_value": 80
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 80,
+     "second_level_type": 150,
+     "second_level_value": 81
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 81,
+     "second_level_type": 150,
+     "second_level_value": 82
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 82,
+     "second_level_type": 150,
+     "second_level_value": 83
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 83,
+     "second_level_type": 150,
+     "second_level_value": 84
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 84,
+     "second_level_type": 150,
+     "second_level_value": 85
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 85,
+     "second_level_type": 150,
+     "second_level_value": 86
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 86,
+     "second_level_type": 150,
+     "second_level_value": 87
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 87,
+     "second_level_type": 150,
+     "second_level_value": 88
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 88,
+     "second_level_type": 150,
+     "second_level_value": 89
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 89,
+     "second_level_type": 150,
+     "second_level_value": 90
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 90,
+     "second_level_type": 150,
+     "second_level_value": 91
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 91,
+     "second_level_type": 150,
+     "second_level_value": 92
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 92,
+     "second_level_type": 150,
+     "second_level_value": 93
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 93,
+     "second_level_type": 150,
+     "second_level_value": 94
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 94,
+     "second_level_type": 150,
+     "second_level_value": 95
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 95,
+     "second_level_type": 150,
+     "second_level_value": 96
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 96,
+     "second_level_type": 150,
+     "second_level_value": 97
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 97,
+     "second_level_type": 150,
+     "second_level_value": 98
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 98,
+     "second_level_type": 150,
+     "second_level_value": 99
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 99,
+     "second_level_type": 150,
+     "second_level_value": 100
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 100,
+     "second_level_type": 150,
+     "second_level_value": 101
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 101,
+     "second_level_type": 150,
+     "second_level_value": 102
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 102,
+     "second_level_type": 150,
+     "second_level_value": 103
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 103,
+     "second_level_type": 150,
+     "second_level_value": 104
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 104,
+     "second_level_type": 150,
+     "second_level_value": 105
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 105,
+     "second_level_type": 150,
+     "second_level_value": 106
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 106,
+     "second_level_type": 150,
+     "second_level_value": 107
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 107,
+     "second_level_type": 150,
+     "second_level_value": 108
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 108,
+     "second_level_type": 150,
+     "second_level_value": 109
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 109,
+     "second_level_type": 150,
+     "second_level_value": 110
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 110,
+     "second_level_type": 150,
+     "second_level_value": 111
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 111,
+     "second_level_type": 150,
+     "second_level_value": 112
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 112,
+     "second_level_type": 150,
+     "second_level_value": 113
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 113,
+     "second_level_type": 150,
+     "second_level_value": 114
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 114,
+     "second_level_type": 150,
+     "second_level_value": 115
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 115,
+     "second_level_type": 150,
+     "second_level_value": 116
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 116,
+     "second_level_type": 150,
+     "second_level_value": 117
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 117,
+     "second_level_type": 150,
+     "second_level_value": 118
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 118,
+     "second_level_type": 150,
+     "second_level_value": 119
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 119,
+     "second_level_type": 150,
+     "second_level_value": 120
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 150,
+     "level_value": 120,
+     "second_level_type": 150,
+     "second_level_value": 121
+    }
+   ],
+   "units": {
+    "source": "m s-1",
+    "target": "m s-1"
+   },
+   "source_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "location": "mass",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "geopotential_height": {
+   "derivation": "height-from-interfaces",
+   "units": {
+    "source": "m",
+    "target": "m"
+   },
+   "source_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "location": "mass",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "specific_humidity": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 1,
+     "second_level_type": 150,
+     "second_level_value": 2
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 2,
+     "second_level_type": 150,
+     "second_level_value": 3
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 3,
+     "second_level_type": 150,
+     "second_level_value": 4
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 4,
+     "second_level_type": 150,
+     "second_level_value": 5
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 5,
+     "second_level_type": 150,
+     "second_level_value": 6
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 6,
+     "second_level_type": 150,
+     "second_level_value": 7
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 7,
+     "second_level_type": 150,
+     "second_level_value": 8
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 8,
+     "second_level_type": 150,
+     "second_level_value": 9
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 9,
+     "second_level_type": 150,
+     "second_level_value": 10
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 10,
+     "second_level_type": 150,
+     "second_level_value": 11
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 11,
+     "second_level_type": 150,
+     "second_level_value": 12
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 12,
+     "second_level_type": 150,
+     "second_level_value": 13
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 13,
+     "second_level_type": 150,
+     "second_level_value": 14
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 14,
+     "second_level_type": 150,
+     "second_level_value": 15
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 15,
+     "second_level_type": 150,
+     "second_level_value": 16
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 16,
+     "second_level_type": 150,
+     "second_level_value": 17
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 17,
+     "second_level_type": 150,
+     "second_level_value": 18
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 18,
+     "second_level_type": 150,
+     "second_level_value": 19
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 19,
+     "second_level_type": 150,
+     "second_level_value": 20
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 20,
+     "second_level_type": 150,
+     "second_level_value": 21
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 21,
+     "second_level_type": 150,
+     "second_level_value": 22
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 22,
+     "second_level_type": 150,
+     "second_level_value": 23
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 23,
+     "second_level_type": 150,
+     "second_level_value": 24
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 24,
+     "second_level_type": 150,
+     "second_level_value": 25
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 25,
+     "second_level_type": 150,
+     "second_level_value": 26
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 26,
+     "second_level_type": 150,
+     "second_level_value": 27
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 27,
+     "second_level_type": 150,
+     "second_level_value": 28
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 28,
+     "second_level_type": 150,
+     "second_level_value": 29
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 29,
+     "second_level_type": 150,
+     "second_level_value": 30
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 30,
+     "second_level_type": 150,
+     "second_level_value": 31
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 31,
+     "second_level_type": 150,
+     "second_level_value": 32
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 32,
+     "second_level_type": 150,
+     "second_level_value": 33
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 33,
+     "second_level_type": 150,
+     "second_level_value": 34
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 34,
+     "second_level_type": 150,
+     "second_level_value": 35
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 35,
+     "second_level_type": 150,
+     "second_level_value": 36
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 36,
+     "second_level_type": 150,
+     "second_level_value": 37
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 37,
+     "second_level_type": 150,
+     "second_level_value": 38
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 38,
+     "second_level_type": 150,
+     "second_level_value": 39
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 39,
+     "second_level_type": 150,
+     "second_level_value": 40
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 40,
+     "second_level_type": 150,
+     "second_level_value": 41
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 41,
+     "second_level_type": 150,
+     "second_level_value": 42
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 42,
+     "second_level_type": 150,
+     "second_level_value": 43
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 43,
+     "second_level_type": 150,
+     "second_level_value": 44
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 44,
+     "second_level_type": 150,
+     "second_level_value": 45
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 45,
+     "second_level_type": 150,
+     "second_level_value": 46
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 46,
+     "second_level_type": 150,
+     "second_level_value": 47
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 47,
+     "second_level_type": 150,
+     "second_level_value": 48
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 48,
+     "second_level_type": 150,
+     "second_level_value": 49
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 49,
+     "second_level_type": 150,
+     "second_level_value": 50
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 50,
+     "second_level_type": 150,
+     "second_level_value": 51
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 51,
+     "second_level_type": 150,
+     "second_level_value": 52
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 52,
+     "second_level_type": 150,
+     "second_level_value": 53
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 53,
+     "second_level_type": 150,
+     "second_level_value": 54
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 54,
+     "second_level_type": 150,
+     "second_level_value": 55
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 55,
+     "second_level_type": 150,
+     "second_level_value": 56
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 56,
+     "second_level_type": 150,
+     "second_level_value": 57
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 57,
+     "second_level_type": 150,
+     "second_level_value": 58
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 58,
+     "second_level_type": 150,
+     "second_level_value": 59
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 59,
+     "second_level_type": 150,
+     "second_level_value": 60
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 60,
+     "second_level_type": 150,
+     "second_level_value": 61
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 61,
+     "second_level_type": 150,
+     "second_level_value": 62
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 62,
+     "second_level_type": 150,
+     "second_level_value": 63
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 63,
+     "second_level_type": 150,
+     "second_level_value": 64
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 64,
+     "second_level_type": 150,
+     "second_level_value": 65
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 65,
+     "second_level_type": 150,
+     "second_level_value": 66
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 66,
+     "second_level_type": 150,
+     "second_level_value": 67
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 67,
+     "second_level_type": 150,
+     "second_level_value": 68
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 68,
+     "second_level_type": 150,
+     "second_level_value": 69
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 69,
+     "second_level_type": 150,
+     "second_level_value": 70
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 70,
+     "second_level_type": 150,
+     "second_level_value": 71
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 71,
+     "second_level_type": 150,
+     "second_level_value": 72
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 72,
+     "second_level_type": 150,
+     "second_level_value": 73
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 73,
+     "second_level_type": 150,
+     "second_level_value": 74
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 74,
+     "second_level_type": 150,
+     "second_level_value": 75
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 75,
+     "second_level_type": 150,
+     "second_level_value": 76
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 76,
+     "second_level_type": 150,
+     "second_level_value": 77
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 77,
+     "second_level_type": 150,
+     "second_level_value": 78
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 78,
+     "second_level_type": 150,
+     "second_level_value": 79
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 79,
+     "second_level_type": 150,
+     "second_level_value": 80
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 80,
+     "second_level_type": 150,
+     "second_level_value": 81
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 81,
+     "second_level_type": 150,
+     "second_level_value": 82
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 82,
+     "second_level_type": 150,
+     "second_level_value": 83
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 83,
+     "second_level_type": 150,
+     "second_level_value": 84
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 84,
+     "second_level_type": 150,
+     "second_level_value": 85
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 85,
+     "second_level_type": 150,
+     "second_level_value": 86
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 86,
+     "second_level_type": 150,
+     "second_level_value": 87
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 87,
+     "second_level_type": 150,
+     "second_level_value": 88
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 88,
+     "second_level_type": 150,
+     "second_level_value": 89
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 89,
+     "second_level_type": 150,
+     "second_level_value": 90
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 90,
+     "second_level_type": 150,
+     "second_level_value": 91
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 91,
+     "second_level_type": 150,
+     "second_level_value": 92
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 92,
+     "second_level_type": 150,
+     "second_level_value": 93
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 93,
+     "second_level_type": 150,
+     "second_level_value": 94
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 94,
+     "second_level_type": 150,
+     "second_level_value": 95
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 95,
+     "second_level_type": 150,
+     "second_level_value": 96
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 96,
+     "second_level_type": 150,
+     "second_level_value": 97
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 97,
+     "second_level_type": 150,
+     "second_level_value": 98
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 98,
+     "second_level_type": 150,
+     "second_level_value": 99
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 99,
+     "second_level_type": 150,
+     "second_level_value": 100
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 100,
+     "second_level_type": 150,
+     "second_level_value": 101
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 101,
+     "second_level_type": 150,
+     "second_level_value": 102
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 102,
+     "second_level_type": 150,
+     "second_level_value": 103
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 103,
+     "second_level_type": 150,
+     "second_level_value": 104
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 104,
+     "second_level_type": 150,
+     "second_level_value": 105
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 105,
+     "second_level_type": 150,
+     "second_level_value": 106
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 106,
+     "second_level_type": 150,
+     "second_level_value": 107
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 107,
+     "second_level_type": 150,
+     "second_level_value": 108
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 108,
+     "second_level_type": 150,
+     "second_level_value": 109
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 109,
+     "second_level_type": 150,
+     "second_level_value": 110
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 110,
+     "second_level_type": 150,
+     "second_level_value": 111
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 111,
+     "second_level_type": 150,
+     "second_level_value": 112
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 112,
+     "second_level_type": 150,
+     "second_level_value": 113
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 113,
+     "second_level_type": 150,
+     "second_level_value": 114
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 114,
+     "second_level_type": 150,
+     "second_level_value": 115
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 115,
+     "second_level_type": 150,
+     "second_level_value": 116
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 116,
+     "second_level_type": 150,
+     "second_level_value": 117
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 117,
+     "second_level_type": 150,
+     "second_level_value": 118
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 118,
+     "second_level_type": 150,
+     "second_level_value": 119
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 119,
+     "second_level_type": 150,
+     "second_level_value": 120
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 120,
+     "second_level_type": 150,
+     "second_level_value": 121
+    }
+   ],
+   "units": {
+    "source": "kg kg-1",
+    "target": "kg kg-1"
+   },
+   "source_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "location": "mass",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "air_pressure": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 1,
+     "second_level_type": 150,
+     "second_level_value": 2
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 2,
+     "second_level_type": 150,
+     "second_level_value": 3
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 3,
+     "second_level_type": 150,
+     "second_level_value": 4
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 4,
+     "second_level_type": 150,
+     "second_level_value": 5
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 5,
+     "second_level_type": 150,
+     "second_level_value": 6
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 6,
+     "second_level_type": 150,
+     "second_level_value": 7
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 7,
+     "second_level_type": 150,
+     "second_level_value": 8
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 8,
+     "second_level_type": 150,
+     "second_level_value": 9
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 9,
+     "second_level_type": 150,
+     "second_level_value": 10
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 10,
+     "second_level_type": 150,
+     "second_level_value": 11
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 11,
+     "second_level_type": 150,
+     "second_level_value": 12
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 12,
+     "second_level_type": 150,
+     "second_level_value": 13
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 13,
+     "second_level_type": 150,
+     "second_level_value": 14
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 14,
+     "second_level_type": 150,
+     "second_level_value": 15
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 15,
+     "second_level_type": 150,
+     "second_level_value": 16
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 16,
+     "second_level_type": 150,
+     "second_level_value": 17
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 17,
+     "second_level_type": 150,
+     "second_level_value": 18
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 18,
+     "second_level_type": 150,
+     "second_level_value": 19
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 19,
+     "second_level_type": 150,
+     "second_level_value": 20
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 20,
+     "second_level_type": 150,
+     "second_level_value": 21
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 21,
+     "second_level_type": 150,
+     "second_level_value": 22
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 22,
+     "second_level_type": 150,
+     "second_level_value": 23
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 23,
+     "second_level_type": 150,
+     "second_level_value": 24
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 24,
+     "second_level_type": 150,
+     "second_level_value": 25
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 25,
+     "second_level_type": 150,
+     "second_level_value": 26
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 26,
+     "second_level_type": 150,
+     "second_level_value": 27
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 27,
+     "second_level_type": 150,
+     "second_level_value": 28
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 28,
+     "second_level_type": 150,
+     "second_level_value": 29
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 29,
+     "second_level_type": 150,
+     "second_level_value": 30
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 30,
+     "second_level_type": 150,
+     "second_level_value": 31
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 31,
+     "second_level_type": 150,
+     "second_level_value": 32
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 32,
+     "second_level_type": 150,
+     "second_level_value": 33
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 33,
+     "second_level_type": 150,
+     "second_level_value": 34
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 34,
+     "second_level_type": 150,
+     "second_level_value": 35
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 35,
+     "second_level_type": 150,
+     "second_level_value": 36
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 36,
+     "second_level_type": 150,
+     "second_level_value": 37
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 37,
+     "second_level_type": 150,
+     "second_level_value": 38
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 38,
+     "second_level_type": 150,
+     "second_level_value": 39
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 39,
+     "second_level_type": 150,
+     "second_level_value": 40
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 40,
+     "second_level_type": 150,
+     "second_level_value": 41
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 41,
+     "second_level_type": 150,
+     "second_level_value": 42
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 42,
+     "second_level_type": 150,
+     "second_level_value": 43
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 43,
+     "second_level_type": 150,
+     "second_level_value": 44
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 44,
+     "second_level_type": 150,
+     "second_level_value": 45
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 45,
+     "second_level_type": 150,
+     "second_level_value": 46
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 46,
+     "second_level_type": 150,
+     "second_level_value": 47
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 47,
+     "second_level_type": 150,
+     "second_level_value": 48
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 48,
+     "second_level_type": 150,
+     "second_level_value": 49
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 49,
+     "second_level_type": 150,
+     "second_level_value": 50
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 50,
+     "second_level_type": 150,
+     "second_level_value": 51
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 51,
+     "second_level_type": 150,
+     "second_level_value": 52
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 52,
+     "second_level_type": 150,
+     "second_level_value": 53
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 53,
+     "second_level_type": 150,
+     "second_level_value": 54
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 54,
+     "second_level_type": 150,
+     "second_level_value": 55
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 55,
+     "second_level_type": 150,
+     "second_level_value": 56
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 56,
+     "second_level_type": 150,
+     "second_level_value": 57
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 57,
+     "second_level_type": 150,
+     "second_level_value": 58
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 58,
+     "second_level_type": 150,
+     "second_level_value": 59
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 59,
+     "second_level_type": 150,
+     "second_level_value": 60
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 60,
+     "second_level_type": 150,
+     "second_level_value": 61
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 61,
+     "second_level_type": 150,
+     "second_level_value": 62
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 62,
+     "second_level_type": 150,
+     "second_level_value": 63
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 63,
+     "second_level_type": 150,
+     "second_level_value": 64
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 64,
+     "second_level_type": 150,
+     "second_level_value": 65
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 65,
+     "second_level_type": 150,
+     "second_level_value": 66
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 66,
+     "second_level_type": 150,
+     "second_level_value": 67
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 67,
+     "second_level_type": 150,
+     "second_level_value": 68
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 68,
+     "second_level_type": 150,
+     "second_level_value": 69
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 69,
+     "second_level_type": 150,
+     "second_level_value": 70
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 70,
+     "second_level_type": 150,
+     "second_level_value": 71
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 71,
+     "second_level_type": 150,
+     "second_level_value": 72
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 72,
+     "second_level_type": 150,
+     "second_level_value": 73
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 73,
+     "second_level_type": 150,
+     "second_level_value": 74
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 74,
+     "second_level_type": 150,
+     "second_level_value": 75
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 75,
+     "second_level_type": 150,
+     "second_level_value": 76
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 76,
+     "second_level_type": 150,
+     "second_level_value": 77
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 77,
+     "second_level_type": 150,
+     "second_level_value": 78
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 78,
+     "second_level_type": 150,
+     "second_level_value": 79
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 79,
+     "second_level_type": 150,
+     "second_level_value": 80
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 80,
+     "second_level_type": 150,
+     "second_level_value": 81
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 81,
+     "second_level_type": 150,
+     "second_level_value": 82
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 82,
+     "second_level_type": 150,
+     "second_level_value": 83
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 83,
+     "second_level_type": 150,
+     "second_level_value": 84
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 84,
+     "second_level_type": 150,
+     "second_level_value": 85
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 85,
+     "second_level_type": 150,
+     "second_level_value": 86
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 86,
+     "second_level_type": 150,
+     "second_level_value": 87
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 87,
+     "second_level_type": 150,
+     "second_level_value": 88
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 88,
+     "second_level_type": 150,
+     "second_level_value": 89
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 89,
+     "second_level_type": 150,
+     "second_level_value": 90
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 90,
+     "second_level_type": 150,
+     "second_level_value": 91
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 91,
+     "second_level_type": 150,
+     "second_level_value": 92
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 92,
+     "second_level_type": 150,
+     "second_level_value": 93
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 93,
+     "second_level_type": 150,
+     "second_level_value": 94
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 94,
+     "second_level_type": 150,
+     "second_level_value": 95
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 95,
+     "second_level_type": 150,
+     "second_level_value": 96
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 96,
+     "second_level_type": 150,
+     "second_level_value": 97
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 97,
+     "second_level_type": 150,
+     "second_level_value": 98
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 98,
+     "second_level_type": 150,
+     "second_level_value": 99
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 99,
+     "second_level_type": 150,
+     "second_level_value": 100
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 100,
+     "second_level_type": 150,
+     "second_level_value": 101
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 101,
+     "second_level_type": 150,
+     "second_level_value": 102
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 102,
+     "second_level_type": 150,
+     "second_level_value": 103
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 103,
+     "second_level_type": 150,
+     "second_level_value": 104
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 104,
+     "second_level_type": 150,
+     "second_level_value": 105
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 105,
+     "second_level_type": 150,
+     "second_level_value": 106
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 106,
+     "second_level_type": 150,
+     "second_level_value": 107
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 107,
+     "second_level_type": 150,
+     "second_level_value": 108
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 108,
+     "second_level_type": 150,
+     "second_level_value": 109
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 109,
+     "second_level_type": 150,
+     "second_level_value": 110
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 110,
+     "second_level_type": 150,
+     "second_level_value": 111
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 111,
+     "second_level_type": 150,
+     "second_level_value": 112
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 112,
+     "second_level_type": 150,
+     "second_level_value": 113
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 113,
+     "second_level_type": 150,
+     "second_level_value": 114
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 114,
+     "second_level_type": 150,
+     "second_level_value": 115
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 115,
+     "second_level_type": 150,
+     "second_level_value": 116
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 116,
+     "second_level_type": 150,
+     "second_level_value": 117
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 117,
+     "second_level_type": 150,
+     "second_level_value": 118
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 118,
+     "second_level_type": 150,
+     "second_level_value": 119
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 119,
+     "second_level_type": 150,
+     "second_level_value": 120
+    },
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 150,
+     "level_value": 120,
+     "second_level_type": 150,
+     "second_level_value": 121
+    }
+   ],
+   "units": {
+    "source": "Pa",
+    "target": "Pa"
+   },
+   "source_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "vertical",
+    "y",
+    "x"
+   ],
+   "location": "mass",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "surface_pressure": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 0,
+     "level_type": 1,
+     "level_value": 0
+    }
+   ],
+   "units": {
+    "source": "Pa",
+    "target": "Pa"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "air_temperature_2m": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 103,
+     "level_value": 2
+    }
+   ],
+   "units": {
+    "source": "K",
+    "target": "K"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "relative_humidity_2m": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 1,
+     "level_type": 103,
+     "level_value": 2
+    }
+   ],
+   "units": {
+    "source": "%",
+    "target": "%"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "specific_humidity_2m": {
+   "derivation": "humidity-2m-from-rh",
+   "units": {
+    "source": "kg kg-1",
+    "target": "kg kg-1"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "eastward_wind_10m": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 2,
+     "level_type": 103,
+     "level_value": 10
+    }
+   ],
+   "units": {
+    "source": "m s-1",
+    "target": "m s-1"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "northward_wind_10m": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 2,
+     "parameter": 3,
+     "level_type": 103,
+     "level_value": 10
+    }
+   ],
+   "units": {
+    "source": "m s-1",
+    "target": "m s-1"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "skin_temperature": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 1,
+     "level_value": 0
+    }
+   ],
+   "units": {
+    "source": "K",
+    "target": "K"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "land_fraction": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 0,
+     "parameter": 0,
+     "level_type": 1,
+     "level_value": 0
+    }
+   ],
+   "units": {
+    "source": "1",
+    "target": "1"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   },
+   "time_binding": "cycle_invariant"
+  },
+  "terrain_height": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 6,
+     "level_type": 1,
+     "level_value": 0,
+     "second_level_type": 101,
+     "second_level_value": 0
+    }
+   ],
+   "units": {
+    "source": "m",
+    "target": "m"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "snow_depth": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 11,
+     "level_type": 1,
+     "level_value": 0,
+     "pdt": 0
+    }
+   ],
+   "units": {
+    "source": "m",
+    "target": "m"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "snow_water_equivalent": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 1,
+     "parameter": 60,
+     "level_type": 1,
+     "level_value": 0,
+     "pdt": 0
+    }
+   ],
+   "units": {
+    "source": "kg m-2",
+    "target": "kg m-2"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "soil_temperature": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 0.0
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 0.005
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 0.02
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 0.06
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 0.18
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 0.54
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 1.62
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 4.86
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 18,
+     "level_type": 106,
+     "level_value": 14.58
+    }
+   ],
+   "units": {
+    "source": "K",
+    "target": "K"
+   },
+   "source_axes": [
+    "soil",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "soil",
+    "y",
+    "x"
+   ],
+   "location": "soil",
+   "staggering": "none",
+   "missing": {
+    "kind": "landmask_water"
+   }
+  },
+  "soil_water_column": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 20,
+     "level_type": 106,
+     "level_value": 0.0,
+     "second_level_type": 106,
+     "second_level_value": 0.01
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 20,
+     "level_type": 106,
+     "level_value": 0.01,
+     "second_level_type": 106,
+     "second_level_value": 0.03
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 20,
+     "level_type": 106,
+     "level_value": 0.03,
+     "second_level_type": 106,
+     "second_level_value": 0.09
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 20,
+     "level_type": 106,
+     "level_value": 0.09,
+     "second_level_type": 106,
+     "second_level_value": 0.27
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 20,
+     "level_type": 106,
+     "level_value": 0.27,
+     "second_level_type": 106,
+     "second_level_value": 0.81
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 20,
+     "level_type": 106,
+     "level_value": 0.81,
+     "second_level_type": 106,
+     "second_level_value": 2.43
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 20,
+     "level_type": 106,
+     "level_value": 2.43,
+     "second_level_type": 106,
+     "second_level_value": 7.29
+    },
+    {
+     "format": "grib2",
+     "discipline": 2,
+     "category": 3,
+     "parameter": 20,
+     "level_type": 106,
+     "level_value": 7.29,
+     "second_level_type": 106,
+     "second_level_value": 21.87
+    }
+   ],
+   "units": {
+    "source": "kg m-2",
+    "target": "kg m-2"
+   },
+   "source_axes": [
+    "soil",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "soil",
+    "y",
+    "x"
+   ],
+   "location": "soil",
+   "staggering": "none",
+   "missing": {
+    "kind": "landmask_water"
+   }
+  },
+  "soil_water_column_volumetric": {
+   "derivation": "volumetric-from-layer-mass",
+   "units": {
+    "source": "m3 m-3",
+    "target": "m3 m-3"
+   },
+   "source_axes": [
+    "soil",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "soil",
+    "y",
+    "x"
+   ],
+   "location": "soil",
+   "staggering": "none",
+   "missing": {
+    "kind": "preserve_mask"
+   }
+  },
+  "volumetric_soil_moisture": {
+   "derivation": "volumetric-with-surface-node",
+   "units": {
+    "source": "m3 m-3",
+    "target": "m3 m-3"
+   },
+   "source_axes": [
+    "soil",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "soil",
+    "y",
+    "x"
+   ],
+   "location": "soil",
+   "staggering": "none",
+   "missing": {
+    "kind": "preserve_mask"
+   }
+  },
+  "sea_ice_fraction": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 10,
+     "category": 2,
+     "parameter": 0,
+     "level_type": 1
+    }
+   ],
+   "units": {
+    "source": "1",
+    "target": "1"
+   },
+   "source_axes": [
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "y",
+    "x"
+   ],
+   "location": "surface",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   }
+  },
+  "interface_height": {
+   "selectors": [
+    {
+     "format": "grib2",
+     "discipline": 0,
+     "category": 3,
+     "parameter": 6,
+     "level_type": 150,
+     "second_level_type": 101,
+     "second_level_value": 0
+    }
+   ],
+   "units": {
+    "source": "m",
+    "target": "m"
+   },
+   "source_axes": [
+    "half_level",
+    "y",
+    "x"
+   ],
+   "target_axes": [
+    "half_level",
+    "y",
+    "x"
+   ],
+   "location": "mass",
+   "staggering": "none",
+   "missing": {
+    "kind": "reject"
+   },
+   "time_binding": "cycle_invariant"
+  }
+ },
+ "derivations": [
+  {
+   "name": "height-from-interfaces",
+   "operation": "height_from_interfaces",
+   "source": "interface_height"
+  },
+  {
+   "name": "humidity-2m-from-rh",
+   "operation": "specific_humidity_from_rh",
+   "relative_humidity": "relative_humidity_2m",
+   "temperature": "air_temperature_2m",
+   "pressure": "surface_pressure"
+  },
+  {
+   "name": "volumetric-from-layer-mass",
+   "operation": "volumetric_soil_moisture_from_layer_mass",
+   "layer_mass": "soil_water_column",
+   "layer_bounds_m": [
+    [
+     0.0,
+     0.01
+    ],
+    [
+     0.01,
+     0.03
+    ],
+    [
+     0.03,
+     0.09
+    ],
+    [
+     0.09,
+     0.27
+    ],
+    [
+     0.27,
+     0.81
+    ],
+    [
+     0.81,
+     2.43
+    ],
+    [
+     2.43,
+     7.29
+    ],
+    [
+     7.29,
+     21.87
+    ]
+   ],
+   "water_density_kg_m3": 1000.0
+  },
+  {
+   "name": "volumetric-with-surface-node",
+   "operation": "soil_surface_node_from_shallowest",
+   "source": "soil_water_column_volumetric"
+  }
+ ],
+ "target": {
+  "name": "gpuwm/WRF-real DWD ICON global 13 km model-level source",
+  "physics_suite": "WSM6+YSU+classic-MM5+Noah4",
+  "max_dom": 4,
+  "require_lateral_boundaries": true,
+  "target_vertical_levels": 49,
+  "soil_layer_count": 9,
+  "boundary_interval_seconds": 3600,
+  "accept_boundary_interval_multiples": true,
+  "required_fields": [
+   {
+    "name": "air_temperature",
+    "axes": [
+     "vertical",
+     "y",
+     "x"
+    ],
+    "location": "mass",
+    "target_units": "K"
+   },
+   {
+    "name": "specific_humidity",
+    "axes": [
+     "vertical",
+     "y",
+     "x"
+    ],
+    "location": "mass",
+    "target_units": "kg kg-1"
+   },
+   {
+    "name": "eastward_wind",
+    "axes": [
+     "vertical",
+     "y",
+     "x"
+    ],
+    "location": "mass",
+    "target_units": "m s-1"
+   },
+   {
+    "name": "northward_wind",
+    "axes": [
+     "vertical",
+     "y",
+     "x"
+    ],
+    "location": "mass",
+    "target_units": "m s-1"
+   },
+   {
+    "name": "geopotential_height",
+    "axes": [
+     "vertical",
+     "y",
+     "x"
+    ],
+    "location": "mass",
+    "target_units": "m"
+   },
+   {
+    "name": "air_pressure",
+    "axes": [
+     "vertical",
+     "y",
+     "x"
+    ],
+    "location": "mass",
+    "target_units": "Pa"
+   },
+   {
+    "name": "surface_pressure",
+    "axes": [
+     "y",
+     "x"
+    ],
+    "location": "surface",
+    "target_units": "Pa"
+   },
+   {
+    "name": "terrain_height",
+    "axes": [
+     "y",
+     "x"
+    ],
+    "location": "surface",
+    "target_units": "m"
+   },
+   {
+    "name": "skin_temperature",
+    "axes": [
+     "y",
+     "x"
+    ],
+    "location": "surface",
+    "target_units": "K"
+   },
+   {
+    "name": "air_temperature_2m",
+    "axes": [
+     "y",
+     "x"
+    ],
+    "location": "surface",
+    "target_units": "K"
+   },
+   {
+    "name": "specific_humidity_2m",
+    "axes": [
+     "y",
+     "x"
+    ],
+    "location": "surface",
+    "target_units": "kg kg-1"
+   },
+   {
+    "name": "eastward_wind_10m",
+    "axes": [
+     "y",
+     "x"
+    ],
+    "location": "surface",
+    "target_units": "m s-1"
+   },
+   {
+    "name": "northward_wind_10m",
+    "axes": [
+     "y",
+     "x"
+    ],
+    "location": "surface",
+    "target_units": "m s-1"
+   },
+   {
+    "name": "land_fraction",
+    "axes": [
+     "y",
+     "x"
+    ],
+    "location": "surface",
+    "target_units": "1"
+   },
+   {
+    "name": "soil_temperature",
+    "axes": [
+     "soil",
+     "y",
+     "x"
+    ],
+    "location": "soil",
+    "target_units": "K"
+   },
+   {
+    "name": "volumetric_soil_moisture",
+    "axes": [
+     "soil",
+     "y",
+     "x"
+    ],
+    "location": "soil",
+    "target_units": "m3 m-3"
+   }
+  ],
+  "pressure_requirement": "air_pressure",
+  "policy_controlled_fields": [
+   "cloud_water_mixing_ratio",
+   "rain_water_mixing_ratio",
+   "cloud_ice_mixing_ratio",
+   "snow_mixing_ratio",
+   "graupel_or_hail_mixing_ratio",
+   "vertical_velocity",
+   "snow_water_equivalent",
+   "snow_depth",
+   "sea_ice_fraction"
+  ],
+  "initialization_policies": {
+   "cloud_water_mixing_ratio": "explicit_zero_with_adapter_validation",
+   "rain_water_mixing_ratio": "explicit_zero_with_adapter_validation",
+   "cloud_ice_mixing_ratio": "explicit_zero_with_adapter_validation",
+   "snow_mixing_ratio": "explicit_zero_with_adapter_validation",
+   "graupel_or_hail_mixing_ratio": "explicit_zero_with_adapter_validation",
+   "vertical_velocity": "explicit_zero_with_adapter_validation"
+  }
+ }
+}
