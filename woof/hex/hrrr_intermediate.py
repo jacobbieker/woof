@@ -895,11 +895,13 @@ def build_intermediates(request: IntermediateRequest, *, log: Callable[[str], No
 def _intermediate_sources() -> tuple[str, ...]:
     """Every ``--source`` the intermediate door admits: this module's rows,
     then the uniform lat-lon rows :mod:`woof.hex.met_intermediate_door`
-    writes through ``met_intermediate`` (stdlib-only at import)."""
+    writes through ``met_intermediate`` (stdlib-only at import), then the
+    NetCDF rows :mod:`woof.hex.metoffice_intermediate` reads itself."""
 
     from .met_intermediate_door import GLOBAL_SOURCES
+    from .metoffice_intermediate import METOFFICE_SOURCES
 
-    return (*SOURCE_ROWS, *GLOBAL_SOURCES)
+    return (*SOURCE_ROWS, *GLOBAL_SOURCES, *METOFFICE_SOURCES)
 
 
 INTERMEDIATE_SOURCES = _intermediate_sources()
@@ -910,15 +912,21 @@ def add_intermediate_parser(commands: Any) -> None:
         "intermediate",
         help="write WPS intermediates for hex init/LBC: a projected regional source "
              "(HRRR, or a WOOF WRF run's wrfout) regridded to lat-lon through the "
-             "engine's own operator, or a global lat-lon source (GFS, GDAS, ECMWF "
-             "open data, ERA5, AIFS) through met_intermediate",
+             "engine's own operator, a global lat-lon source (GFS, GDAS, ECMWF "
+             "open data, ERA5, AIFS) through met_intermediate, or the Met Office "
+             "global 10 km NetCDF cropped to the cull with a same-cycle GDAS land "
+             "supplement",
         description=(
             "Write the WPS intermediates the init and boundary engines read.  "
             "--source hrrr resamples the projected HRRR onto a regular lat-lon "
             "box through the engine's own decoder and operator.  The global "
             "sources (gfs, gdas, ecmwf-open-data, era5, aifs) are already "
             "uniform lat-lon and are written on their own grid by the Rust "
-            "met_intermediate writer with a packaged Vtable.  Every file is "
+            "met_intermediate writer with a packaged Vtable.  --source "
+            "met-office-global reads the Met Office NetCDF files from "
+            "--input-dir, crops them to the cull box on their own grid and "
+            "appends the soil, LANDSEA and SEAICE of the same-cycle GDAS "
+            "(--supplement-dir) as declared supplement records.  Every file is "
             "read back and checked before the receipt is written."
         ),
     )
@@ -941,15 +949,32 @@ def add_intermediate_parser(commands: Any) -> None:
     parser.add_argument("--wrf-edge-cells", type=int, default=None, metavar="N",
                         help="--source wrfout: relaxed WRF boundary rows the target may not "
                              "touch (default 5, WRF's spec_bdy_width)")
+    parser.add_argument("--input-dir", type=Path, default=None, metavar="DIR",
+                        help="--source met-office-global: where `woof fetch --source "
+                             "met-office-global` wrote the run's NetCDF files under their "
+                             "S3 names (flat, or in a RUN subdirectory; required there)")
+    parser.add_argument("--supplement-dir", type=Path, default=None, metavar="DIR",
+                        help="--source met-office-global: where `woof fetch --source gdas` "
+                             "(or gfs) wrote the same cycle; its soil, LANDSEA and SEAICE "
+                             "fill what the Met Office does not publish (required there)")
+    parser.add_argument("--supplement-source", choices=("gdas", "gfs"), default=None,
+                        help="--source met-office-global: the same-cycle NCEP run the land "
+                             "supplement comes from (default gdas, leads to f009; gfs for "
+                             "longer series)")
+    parser.add_argument("--mesh-grid", type=Path, default=None, metavar="GRID.nc",
+                        help="--source met-office-global: crop to the extent of this culled "
+                             "MPAS grid/static/init file plus --margin-km (or give "
+                             "--from-plan, --cull-region with --halo-km, or --point with "
+                             "--radius-km)")
     parser.add_argument("--hours", default=None, metavar="SPEC",
                         help="forecast hours to write, contiguous (default 0-3)")
     parser.add_argument("--interval-hours", type=int, default=None, metavar="H",
-                        help="global sources (gfs, gdas, ecmwf-open-data, era5, aifs): "
-                             "--hours is START-END stepped by this many hours (default: "
-                             "the source's published cadence -- gfs 3, gdas 1, "
-                             "ecmwf-open-data 3, aifs 6, era5 6; --hours defaults to 0, "
-                             "the init time only; for era5 --cycle is the first "
-                             "analysis time)")
+                        help="global sources (gfs, gdas, ecmwf-open-data, era5, aifs, "
+                             "met-office-global): --hours is START-END stepped by this "
+                             "many hours (default: the source's published cadence -- gfs "
+                             "3, gdas 1, ecmwf-open-data 3, aifs 6, era5 6, "
+                             "met-office-global 3; --hours defaults to 0, the init time "
+                             "only; for era5 --cycle is the first analysis time)")
     parser.add_argument("--vtable", type=Path, default=None, metavar="FILE",
                         help="global sources: a Vtable overriding the packaged one")
     parser.add_argument("--from-plan", type=Path, default=None, metavar="JSON",
@@ -968,10 +993,12 @@ def add_intermediate_parser(commands: Any) -> None:
                         help="file prefix, ungrib style PREFIX:YYYY-MM-DD_HH (default MET)")
     parser.add_argument("--decoder", type=Path, default=None, metavar="FILE",
                         help="the engine's decoder binary: hrrr_grib2_bridge for hrrr, "
-                             "met_intermediate for a global source (default: woof's "
-                             "bridge ladder)")
+                             "met_intermediate for a global source and for the "
+                             "met-office-global land supplement (default: woof's bridge "
+                             "ladder)")
     parser.add_argument("--workers", type=int, default=None, metavar="N",
-                        help="decoder workers, 1..13 (default 4)")
+                        help="decoder workers, 1..13 (default 4; for met-office-global, "
+                             "concurrent supplement decodes)")
     parser.set_defaults(handler=run_intermediate)
 
 
@@ -997,6 +1024,15 @@ def request_from_arguments(arguments: argparse.Namespace) -> IntermediateRequest
             raise IntermediateRefusal(
                 f"{flag} belongs to --source wrfout; --source {row.name} is a GRIB row "
                 f"read from --grib-dir"
+            )
+    for flag, value in (("--input-dir", getattr(arguments, "input_dir", None)),
+                        ("--supplement-dir", getattr(arguments, "supplement_dir", None)),
+                        ("--supplement-source", getattr(arguments, "supplement_source", None)),
+                        ("--mesh-grid", getattr(arguments, "mesh_grid", None))):
+        if value is not None:
+            raise IntermediateRefusal(
+                f"{flag} belongs to --source met-office-global; --source {row.name} is a "
+                f"GRIB row read from --grib-dir"
             )
     for flag, value in (("--grib-dir", arguments.grib_dir), ("--cycle", arguments.cycle)):
         if value is None:
@@ -1043,10 +1079,13 @@ def run_intermediate(arguments: argparse.Namespace) -> int:
         refuse_unknown_source,
         run_global_intermediate,
     )
+    from .metoffice_intermediate import METOFFICE_SOURCES, run_metoffice_intermediate
 
     key = str(arguments.source).strip().lower()
     if key in GLOBAL_SOURCES:
         return run_global_intermediate(arguments)
+    if key in METOFFICE_SOURCES:
+        return run_metoffice_intermediate(arguments)
     if key not in SOURCE_ROWS:
         refuse_unknown_source(key)
     if source_row(arguments.source).door == "wrfout":

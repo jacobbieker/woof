@@ -899,11 +899,16 @@ def request_from_arguments(arguments: argparse.Namespace) -> WrfoutRequest:
     row = source_row(arguments.source)
     for flag, value in (("--grib-dir", arguments.grib_dir), ("--cycle", arguments.cycle),
                         ("--decoder", arguments.decoder), ("--hours", arguments.hours),
-                        ("--workers", arguments.workers)):
+                        ("--workers", arguments.workers),
+                        ("--input-dir", getattr(arguments, "input_dir", None)),
+                        ("--supplement-dir", getattr(arguments, "supplement_dir", None)),
+                        ("--supplement-source", getattr(arguments, "supplement_source", None)),
+                        ("--mesh-grid", getattr(arguments, "mesh_grid", None))):
         if value is not None:
             raise IntermediateRefusal(
-                f"{flag} belongs to a GRIB row; --source {row.name} reads its valid times "
-                f"from the wrfout files named by --wrfout-glob"
+                f"{flag} belongs to a GRIB row (or the NetCDF met-office-global row); "
+                f"--source {row.name} reads its valid times from the wrfout files named "
+                f"by --wrfout-glob"
             )
     if arguments.wrfout_glob is None:
         raise IntermediateRefusal(f"--source {row.name} needs --wrfout-glob: the WRF history to convert")

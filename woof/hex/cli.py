@@ -438,8 +438,11 @@ def build_parser() -> argparse.ArgumentParser:
     # is resampled onto a regular lat-lon intermediate.  The global lat-lon
     # sources (gfs, gdas, ecmwf-open-data, era5, aifs) share the command and
     # dispatch to woof.hex.met_intermediate_door, which drives the Rust
-    # met_intermediate writer without regridding.  Deferred import: the door
-    # pulls numpy and the engine's ingest.
+    # met_intermediate writer without regridding; met-office-global
+    # dispatches to woof.hex.metoffice_intermediate, which reads the Met
+    # Office NetCDF itself and takes the missing land state from the
+    # same-cycle GDAS.  Deferred import: the door pulls numpy and the
+    # engine's ingest.
     from .hrrr_intermediate import add_intermediate_parser, add_lbc_parser
 
     add_intermediate_parser(commands)

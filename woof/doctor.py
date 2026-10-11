@@ -2436,14 +2436,15 @@ def _met_intermediate_check() -> Check:
     """The WPS-intermediate writer behind ``woof hex intermediate``'s global sources.
 
     Non-blocking: it opens one door (hex init/LBC from GFS, GDAS, ECMWF
-    open data, ERA5 or AIFS) and no default path degrades without it, and
+    open data, ERA5 or AIFS, and the Met Office global door's GDAS land
+    supplement) and no default path degrades without it, and
     bundles published before it joined do not carry it.  Presence,
     launchability and the contract marker are all reported.
     """
 
     name = "hex intermediate writer (met_intermediate)"
-    degrades = ("woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs "
-                "refuses")
+    degrades = ("woof hex intermediate --source "
+                "gfs|gdas|ecmwf-open-data|era5|aifs|met-office-global refuses")
     try:
         found = bridges.find_bridge("met_intermediate")
     except FileNotFoundError as error:

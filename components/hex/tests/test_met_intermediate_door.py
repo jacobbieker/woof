@@ -86,11 +86,14 @@ def engine_receipt(hdate: str, records: int, **extra) -> dict:
 # ---------------------------------------------------------------------------
 def test_the_contract_sources_are_exactly_the_admitted_rows() -> None:
     from woof.hex.hrrr_intermediate import INTERMEDIATE_SOURCES, SOURCE_ROWS
+    from woof.hex.metoffice_intermediate import METOFFICE_SOURCES
 
-    contract = {"hrrr", "gfs", "gdas", "ecmwf-open-data", "era5", "aifs"}
+    contract = {"hrrr", "gfs", "gdas", "ecmwf-open-data", "era5", "aifs", "met-office-global"}
     assert contract <= set(INTERMEDIATE_SOURCES)
-    assert set(INTERMEDIATE_SOURCES) == set(SOURCE_ROWS) | set(door.GLOBAL_SOURCES)
+    assert set(INTERMEDIATE_SOURCES) == \
+        set(SOURCE_ROWS) | set(door.GLOBAL_SOURCES) | set(METOFFICE_SOURCES)
     assert not set(SOURCE_ROWS) & set(door.GLOBAL_SOURCES)
+    assert not (set(SOURCE_ROWS) | set(door.GLOBAL_SOURCES)) & set(METOFFICE_SOURCES)
 
 
 @pytest.mark.parametrize("name", sorted(door.GLOBAL_SOURCES))

@@ -22,7 +22,9 @@ WHAT THIS DOOR OWNS, and nothing else:
 * validation: each file is read back through this tree's reader
   (:mod:`woof.hex.wps_intermediate`) and the init door's own met check
   (:func:`woof.hex.init_door.scan_met_file`), and the engine's receipt must
-  say every matched message was valid at the time the file is named for;
+  say every matched message was valid at the time the file is named for
+  (:func:`validate_intermediate` is shared with the Met Office door, whose
+  declared GDAS supplement records alone may sit on a second grid);
 * provenance: one receipt naming the source, the Vtable and engine digests,
   and every input file with its sha256.
 
@@ -210,8 +212,10 @@ def global_source(name: str) -> GlobalSource:
 
 
 def refuse_unknown_source(name: str) -> None:
+    from .metoffice_intermediate import METOFFICE_SOURCES
+
     key = str(name).strip().lower()
-    admitted = ", ".join(["hrrr", *GLOBAL_SOURCES])
+    admitted = ", ".join(["hrrr", *GLOBAL_SOURCES, *METOFFICE_SOURCES])
     if key in REFUSED_SOURCES:
         raise GlobalIntermediateRefusal(
             f"--source {name!r} is refused by this door: {REFUSED_SOURCES[key]}.  "
@@ -510,14 +514,44 @@ def parse_engine_receipt(stdout: str) -> dict[str, Any]:
     return receipt
 
 
+def _grid_key(record: Mapping[str, Any]) -> tuple:
+    projection = record["projection"]
+    return (int(record["nx"]), int(record["ny"]), str(projection["name"]),
+            round(float(projection["start_latitude"]), 6),
+            round(float(projection["start_longitude"]), 6),
+            round(float(projection["delta_latitude"]), 6),
+            round(float(projection["delta_longitude"]), 6))
+
+
+def _grid_dict(key: tuple) -> dict[str, Any]:
+    nx, ny, _, start_lat, start_lon, dlat, dlon = key
+    return {"nx": nx, "ny": ny, "projection": "latlon", "start_lat": start_lat,
+            "start_lon": start_lon, "dlat": dlat, "dlon": dlon}
+
+
+#: Fields ``rw_mpas_init`` interpolates with ``LANDSEA`` as a mask, reading
+#: the mask at the field's own (i, j): they must share the mask's grid.
+def _masked_by_landsea(name: str) -> bool:
+    from .init_door import _SOIL_PREFIXES
+
+    return name == "SEAICE" or name.startswith(_SOIL_PREFIXES)
+
+
 def validate_intermediate(
-    path: Path, *, hdate: str, engine_receipt: Mapping[str, Any] | None = None
+    path: Path, *, hdate: str, engine_receipt: Mapping[str, Any] | None = None,
+    supplement_fields: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Read a written intermediate back and apply the init door's met check.
 
     Returns the facts the receipt and the init/boundary switches need.
     Refuses when the file is not one ``rw_mpas_init`` would accept for
     ``hdate``.
+
+    ``supplement_fields`` names records a door declared as a supplement from
+    another source (the Met Office door's same-cycle GDAS soil, LANDSEA and
+    SEAICE).  Those records alone may sit on a second grid -- ``rw_mpas_init``
+    reads each record on its own projection -- and they must share one grid
+    among themselves.  Every other record is held to the single-grid rule.
     """
 
     from .init_door import InitDoorRefusal, scan_met_file
@@ -544,17 +578,36 @@ def validate_intermediate(
         raise GlobalIntermediateRefusal(
             f"{path.name}: record headers carry valid times {stamps}, not {hdate}"
         )
-    grids = sorted({
-        (int(r["nx"]), int(r["ny"]), str(r["projection"]["name"]),
-         round(float(r["projection"]["start_latitude"]), 6),
-         round(float(r["projection"]["start_longitude"]), 6),
-         round(float(r["projection"]["delta_latitude"]), 6),
-         round(float(r["projection"]["delta_longitude"]), 6))
-        for r in records
-    })
+    declared = frozenset(supplement_fields)
+    grids = sorted({_grid_key(r) for r in records if r["field"] not in declared})
     if len(grids) != 1 or grids[0][2] != "latlon":
         raise GlobalIntermediateRefusal(
             f"{path.name}: records are not on one regular lat-lon grid ({grids})"
+        )
+    supplement_grid = None
+    if declared:
+        carried = {str(r["field"]) for r in records if r["field"] in declared}
+        if carried != declared:
+            raise GlobalIntermediateRefusal(
+                f"{path.name}: the declared supplement fields "
+                f"{sorted(declared - carried)} are absent"
+            )
+        supplement_grids = sorted({_grid_key(r) for r in records if r["field"] in declared})
+        if len(supplement_grids) != 1 or supplement_grids[0][2] != "latlon":
+            raise GlobalIntermediateRefusal(
+                f"{path.name}: the declared supplement records are not on one regular "
+                f"lat-lon grid ({supplement_grids})"
+            )
+        supplement_grid = _grid_dict(supplement_grids[0])
+    landsea = [_grid_key(r) for r in records if r["field"] == "LANDSEA"]
+    strays = sorted({str(r["field"]) for r in records
+                     if _masked_by_landsea(str(r["field"])) and landsea
+                     and _grid_key(r) != landsea[0]})
+    if strays:
+        raise GlobalIntermediateRefusal(
+            f"{path.name}: {', '.join(strays)} are not on LANDSEA's grid; rw_mpas_init "
+            f"masks them with LANDSEA index by index, so a field on another grid would "
+            f"be masked at the wrong points"
         )
     profile_levels = sorted({float(r["level"]) for r in records if r["field"] in PROFILE_FIELDS})
     isobaric = [lvl for lvl in profile_levels if lvl not in (SURFACE_LEVEL, MSL_LEVEL)]
@@ -570,14 +623,11 @@ def validate_intermediate(
             f"{len(soil_m)} soil moisture layers ({soil_m}); the init's soil "
             f"column is one count"
         )
-    nx, ny, _, start_lat, start_lon, dlat, dlon = grids[0]
-    return {
+    facts = {
         "path": str(path), "bytes": int(seen["bytes"]), "sha256": str(seen["sha256"]),
         "valid_time": hdate, "field_records": int(seen["field_records"]),
         "fields": dict(seen["fields"]),
-        "grid": {"nx": nx, "ny": ny, "projection": "latlon",
-                 "start_lat": start_lat, "start_lon": start_lon,
-                 "dlat": dlat, "dlon": dlon},
+        "grid": _grid_dict(grids[0]),
         "profile_levels": len(profile_levels),
         "isobaric_levels": len(isobaric),
         "top_pressure_pa": min(isobaric) if isobaric else None,
@@ -586,6 +636,10 @@ def validate_intermediate(
         "has_rh": any(r["field"] == "RH" and float(r["level"]) not in (SURFACE_LEVEL, MSL_LEVEL) for r in records),
         "has_spechumd": any(r["field"] == "SPECHUMD" and float(r["level"]) not in (SURFACE_LEVEL, MSL_LEVEL) for r in records),
     }
+    if declared:
+        facts["supplement_fields"] = sorted(declared)
+        facts["supplement_grid"] = supplement_grid
+    return facts
 
 
 def init_switches(source: GlobalSource, files: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -773,6 +827,8 @@ def request_from_arguments(arguments: argparse.Namespace) -> GlobalRequest:
     foreign = [flag for flag, attribute in (
         ("--wrfout-glob", "wrfout_glob"), ("--cull-region", "cull_region"),
         ("--halo-km", "halo_km"), ("--wrf-edge-cells", "wrf_edge_cells"),
+        ("--input-dir", "input_dir"), ("--mesh-grid", "mesh_grid"),
+        ("--supplement-dir", "supplement_dir"), ("--supplement-source", "supplement_source"),
     ) if getattr(arguments, attribute, None) is not None]
     if foreign:
         raise GlobalIntermediateRefusal(

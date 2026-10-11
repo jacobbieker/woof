@@ -55,6 +55,58 @@ woof hex intermediate --source ecmwf-open-data --grib-dir DIR \
   --cycle 2026-09-24T12 --hours 0-12 --out-dir MET
 ```
 
+## Met Office global 10 km (`met-office-global`): its own door
+
+The Met Office global deterministic model on AWS open data
+(`registry.opendata.aws/met-office-global-deterministic`) is NetCDF, one
+file per variable per lead, so it is not a `met_intermediate` row.
+`woof/hex/metoffice_intermediate.py` reads it with `netCDF4`, crops it to
+the cull and writes the WPS records itself:
+
+```
+woof hex intermediate --source met-office-global --input-dir MO \
+  --cycle 2026-10-11T00 --hours 0-3 --supplement-dir GDAS \
+  --mesh-grid cull.grid.nc --out-dir MET
+```
+
+* **The box** comes from `--mesh-grid` (the culled grid, static or init:
+  the extent of its cells and vertices), `--from-plan`, `--cull-region`
+  with `--halo-km`, or `--point` with `--radius-km`; `--margin-km` widens
+  it and three source cells are kept beyond that for the init's stencil.
+  Only that window is read, one pressure level at a time, on the source's
+  own 0.140625 x 0.09375 degree grid: nothing is regridded.
+* **Levels.** Relative humidity is published on 33 levels (to 10 hPa), the
+  rest on 37 (to 0.4 hPa).  Only levels carrying all of TT, GHT, RH, UU and
+  VV are written, so the column tops at 10 hPa, above the 30 km model top,
+  and the init and boundary switches are `--extrap-airtemp lapse-rate`.
+  The levels left out are named in the receipt.
+* **Conversions.** Wind speed and the direction it blows from become
+  `u = -s sin d`, `v = -s cos d`; relative humidity goes from a fraction
+  to percent; snow water equivalent (published as a liquid-water thickness
+  in metres) becomes kg m-2; the 1.5 m screen temperature and humidity are
+  written at the 2 m surface level 200100, the height recorded in the
+  receipt.  No PSFC is written: `rw_mpas_init` interpolates surface
+  pressure from the isobaric column and `rw_mpas_lbc` reads none.
+* **The land state** the product does not publish (soil temperature and
+  moisture, LANDSEA, SEAICE) comes from the same-cycle GDAS (`--supplement-source
+  gfs` past f009) through `met_intermediate --map-source ncep-gfs` with a
+  subset of `Vtable.GFS.rw`.  Those records are cropped on their own
+  0.25-degree grid and appended as **declared supplement records**: the
+  shared validation relaxes its single-grid rule for them alone, and
+  requires them to share one grid among themselves because `rw_mpas_init`
+  masks soil and sea ice with LANDSEA index by index.
+* **Licence.** British Crown copyright, the Met Office, CC BY-SA 4.0; the
+  share-alike term applies to derived outputs.  The receipt carries it
+  beside the GDAS attribution.
+
+Measured 2026-10-11 on the 00Z run, leads 0 and 3, over the Greenland
+100 m cull (72 N 42 W, 24,133 cells): each intermediate holds 183 records
+(173 Met Office on a 16 x 26 window, 10 GDAS on 11 x 19), 34 profile
+levels; `woof hex init` (`--nfglevels 34 --nfgsoillevels 4 --use-spechumd
+no --extrap-airtemp lapse-rate`) exits 0 using 182 records, and `woof hex
+lbc` writes both boundary files.  At 250 hPa the Met Office wind at the
+centre is u, v = +15.0, +15.0 m/s against GDAS's +15.6, +15.7.
+
 ## Sources with a runnable registry route
 
 | source | bytes driven | verdict |
