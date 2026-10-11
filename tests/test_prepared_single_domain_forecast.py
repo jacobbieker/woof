@@ -380,6 +380,7 @@ def test_prepared_runner_capability_query_is_side_effect_free_without_run_args(
         "icon-d2": "uniform-positive-whole-hour",
         "met-office-global": [3],
         "icon-global-ml": "uniform-positive-whole-hour",
+        "icon-global": "uniform-positive-whole-hour",
         "rap": "uniform-positive-whole-hour",
         "rap-native": "uniform-positive-whole-hour",
         "rrfs": "uniform-positive-whole-hour",

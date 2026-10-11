@@ -8,7 +8,9 @@ latitude/longitude grid.
 
 Data source: Deutscher Wetterdienst, https://opendata.dwd.de. DWD open data
 is published under CC BY 4.0; anything you publish from it carries the
-attribution "Source: Deutscher Wetterdienst".
+attribution "Source: Deutscher Wetterdienst (DWD), CC BY 4.0". The fetch
+manifest, `prep-command.txt` and the profile's provenance document carry
+that line too.
 
 ## Run one
 
@@ -22,18 +24,71 @@ woof go icon-global-case.toml
 forecast and renders the products. The two halves also run on their own:
 
 ```sh
-woof fetch --source icon-global --cycle 2026-09-15T12 --hours 6 --out data/icon
+woof fetch --source icon-global --cycle 2026-10-11T00 --hours 6 --out data/icon
 woof prep --source icon-global --input-list data/icon/inputs.txt ...
 ```
 
 The fetch writes `inputs.txt`, `prep-command.txt` and `prep-arguments.json`,
 including the native HSURF supplement binding. Use that handoff rather than
-enumerating hundreds of objects by hand. `--area` is not a provider-side
-subset on this route: complete global objects transfer, and the regional
-reduction happens on this machine before preparation.
+enumerating hundreds of objects by hand. `--area` is refused on this route:
+there is no provider-side subset, complete global objects transfer, and the
+regional reduction happens on this machine before preparation.
 
-DWD's endpoint is a rolling publisher, not a historical archive. A cycle that
-has aged out is gone; `--cycle latest` resolves what is actually there.
+## Where the bytes come from
+
+Two hosts, asked in order (measured 2026-10-11):
+
+| Rung | Host | Holds |
+| --- | --- | --- |
+| `dwd` | `https://opendata.dwd.de/weather/nwp/v1/m/icon` | the last four runs, about 27 h |
+| `source-coop` | `https://data.source.coop/bkr/icon/icon` | runs from 2026-08-25 12 UTC, about a day and a half behind DWD |
+
+Both serve DWD's open-data v1 layout, one plain GRIB2 message (CCSDS
+packing) per field, level and step:
+
+```
+p/<FIELD>/r/<YYYY-MM-DDTHH:MM>/s/PT<HHH>H00M.grib2
+p/<FIELD>/lvt1/<type>/lv1/<level>/r/<YYYY-MM-DDTHH:MM>/s/PT<HHH>H00M.grib2
+```
+
+The colon in the run is literal in the key. The level is DWD's own spelling
+of the first fixed surface: `lvt1/100` is isobaric in Pa (`85000`), `lvt1/106`
+is soil depth in metres (`0.005`; soil water by its layer top, `0.01`). HSURF,
+FR_LAND, CLAT and CLON are posted at `PT000H00M` only. The fetch writes
+each object under `--out` at its key below `p/`, with the run directory's
+colon dropped, because Windows file systems (NTFS, exFAT) refuse a colon in
+a file name; for example
+`data/icon/T/lvt1/100/lv1/85000/r/2026-10-11T0000/s/PT000H00M.grib2`. The
+normalization and the hex ICON door read that layout and the colon form
+(`r/2026-10-11T00:00/`) that fetches before this change wrote, and no two
+objects share a path.
+
+A run DWD still holds is fetched from DWD alone; an older run goes
+straight to the mirror (`--transport source-coop` asks the mirror for any
+run). The mirror is never a per-object fall-through behind DWD, because it
+holds many runs only in part (on 2026-10-11, two of nine runs listed for an
+f000/f003 window were whole) and a part-run from two hosts is not a
+forcing series. Before anything is fetched from it the run is listed, and
+a run missing any requested object is refused with the count per field and
+the missing keys named:
+
+```
+fetch icon-global: source-coop (data.source.coop) holds run 2026-08-25T12:00 only in part: 178 of 236 requested objects are missing, so nothing is fetched from it.
+  missing by field: RELHUM 36, T 36, U 36, V 36, T_SO 18, W_SO 16
+```
+
+Pick another `--cycle` then. A run the mirror has not copied at all (it
+runs about a day and a half behind, so a run DWD dropped in the last few
+hours is usually not there yet) is refused as not held, and a run before
+2026-08-25 12 UTC that DWD no longer holds is refused before anything
+moves. Objects fetched from the legacy tree before this change still
+prepare: the normalization accepts both layouts. Only the mirror's `p/` tree
+is read; its yearly archives are not.
+
+DWD's legacy `/weather/nwp/icon/grib/` tree of bz2-wrapped objects, which
+this route read until 2026-10-11, stops after 30 November 2026 (DWD
+open-data newsletter, September 2026). It held the same runs as the v1 tree
+for the same day, so the route reads v1 alone and keeps no dated era for it.
 
 ## What the source gives you
 
@@ -47,7 +102,8 @@ Output exists hourly early in the run, but this route publishes the uniform
 three-hour series deliberately: the provider's own cadence changes at hour 78,
 and an hourly adapter would work until exactly that hour and then stop.
 
-A six-hour request is 352 objects: f000, f003 and f006 plus four invariants.
+A six-hour request is 352 objects: 116 for each of f000, f003 and f006
+plus four invariants, about 1.1 GB.
 
 ## How the native grid is handled
 
@@ -57,8 +113,8 @@ separate CLAT and CLON records. No structured-grid decoder can read that, so
 the source declares a normalization stage that runs before the ordinary
 mapped preparation.
 
-The stage is table-driven. Every ICON-specific fact -- the object-name
-grammar, the cycle grid and cadence, each field's GRIB selector octets and
+The stage is table-driven. Every ICON-specific fact -- the v1 key-path
+grammar (`objects.match = "path"`), the cycle grid and cadence, each field's GRIB selector octets and
 remap method, the pressure ladder, the soil-depth semantics, the intermediate
 window's spacing and envelope -- lives in
 `woof/authorities/rw-wps-icon-global-grib2.normalization.json`, a fourth
@@ -163,8 +219,8 @@ stock-WRF acceptance status is not claimed for it.
 
 What this route does not do in this release: model-level SLEVE/HHL ingestion
 (that is `icon-global-ml`, below), direct native-cell-to-target
-interpolation, ICON ensemble products, polar domains, or any historical
-archive.
+interpolation, ICON ensemble products, polar domains, or runs before the
+source.coop mirror's first (2026-08-25 12 UTC).
 
 ## Model levels: `icon-global-ml`
 
@@ -195,12 +251,14 @@ DWD's v1 open-data tree, `https://opendata.dwd.de/weather/nwp/v1/m/icon/p/`:
   `T/lvt1/150/lv1/90/r/2026-10-11T00:00/s/PT003H00M.grib2`.
 
 The fetch keeps that tree below `p/` as its local layout, because every
-object's file name is just its step. DWD keeps about a day of runs. An older
-run is read from the source.coop mirror of the same `p/` tree,
+object's file name is just its step, and writes the run directory without its
+colon (`r/2026-10-11T0000/`), as `icon-global` does. The hosts are the same
+two rungs as `icon-global`: DWD keeps about a day of runs, and an older run
+is read from the source.coop mirror of the same `p/` tree,
 `https://data.source.coop/bkr/icon/icon/p/`, which starts at the 2026-08-25
 12Z run. The mirror is complete for some runs and partial for others (field
-by field). An object the mirror lacks fails the fetch, naming the object.
-Runs are never mixed.
+by field), so a mirror run is listed before anything moves and a part-run is
+refused with the missing objects named. Runs are never mixed.
 
 ### How the levels are used
 
@@ -219,9 +277,11 @@ above any model top a configuration asks for.
 
 The GDT-101 normalization is the same stage as `icon-global`'s, from
 `rw-wps-icon-global-ml-grib2.normalization.json`. That document declares
-`objects.match = "path"`, so the object grammar reads the tree. It also
-declares an `output_template`, which names each regional intermediate after
-its field, level and lead, because the raw file names collide.
+`objects.match = "path"`, so the object grammar reads the tree, with
+`level_match = "key"`: a level directory is the ladder key itself (model
+level `90`, HHL interface `121`, soil top `0.005`). Its `output_template`
+names each regional intermediate after its field, level and lead, because the
+raw file names collide.
 
 ### Size
 

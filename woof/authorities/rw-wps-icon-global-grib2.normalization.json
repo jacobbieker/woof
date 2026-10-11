@@ -484,11 +484,17 @@
   },
   "objects": {
     "cycle_format": "%Y%m%d%H",
-    "output_rename": {
-      "from": "icon_global_icosahedral_",
-      "to": "icon_global_regular-lat-lon_"
-    },
-    "pattern": "icon_global_icosahedral_(?P<kind>pressure-level|single-level|soil-level|time-invariant)_(?P<cycle>\\d{10})(?:_(?P<lead>\\d{3})(?:_(?P<level>\\d+))?)?_(?P<field>[A-Z][A-Z0-9_]*)\\.grib2(?:\\.bz2)?\\Z"
+    "level_match": "first_surface_value",
+    "layout_note": "DWD open-data v1 keys below p/ (opendata.dwd.de/weather/nwp/v1/m/icon/p/ and its source.coop mirror), measured 2026-10-11: FIELD/r/RUN/s/STEP.grib2 for single-level and time-invariant fields, FIELD/lvt1/TYPE/lv1/LEVEL/r/RUN/s/STEP.grib2 for levels, RUN spelt 2026-10-11T00:00 in the key and STEP PT003H00M. The fetch writes the run directory without its colon (2026-10-11T0000), which Windows file systems refuse; both spellings are read, so trees fetched with the colon still prepare. A level directory is the first fixed-surface value in SI units (85000 Pa; 0.005 m; W_SO by its layer top), the value each field's selector resolves its ladder key to. Time-invariant fields are posted at PT000H00M only. Source: Deutscher Wetterdienst (DWD), CC BY 4.0",
+    "match": "path",
+    "name_pattern": "icon_global_icosahedral_(?P<kind>pressure-level|single-level|soil-level|time-invariant)_(?P<cycle>\\d{10})(?:_(?P<lead>\\d{3})(?:_(?P<level>\\d+))?)?_(?P<field>[A-Z][A-Z0-9_]*)\\.grib2(?:\\.bz2)?\\Z",
+    "name_pattern_note": "the file names of DWD's legacy /weather/nwp/icon/grib/ tree (bz2-wrapped; DWD stops it after 2026-11-30), still accepted so objects fetched from it before 2026-10-11 prepare; the route no longer downloads them",
+    "output_template": "icon_global_regular-lat-lon_{kind}_{cycle}{lead_part}{level_part}_{field}.grib2",
+    "path_cycle_format": [
+      "%Y-%m-%dT%H%M",
+      "%Y-%m-%dT%H:%M"
+    ],
+    "pattern": "(?:^|/)(?P<field>[A-Z][A-Z0-9_]*)(?:/lvt1/(?P<surface>100|106)/lv1/(?P<level>[0-9]+(?:\\.[0-9]+)?))?/r/(?P<cycle>\\d{4}-\\d{2}-\\d{2}T\\d{2}:?\\d{2})/s/PT(?P<lead>\\d{3})H00M\\.grib2\\Z"
   },
   "plan_fields": [
     "CLAT",

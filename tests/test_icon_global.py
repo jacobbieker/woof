@@ -41,9 +41,12 @@ def request(hours=0, cycle=CYCLE):
 def inventory(spec, root, hours=0, *, write=False):
     paths = [root / name for name in request(hours).primary_files]
     if write:
-        root.mkdir(parents=True, exist_ok=True)
         for path in paths:
-            path.write_bytes(b"GRIBfake-transport-only:" + path.name.encode())
+            # A v1 key's directories are its identity, so each object
+            # lands under its own field/level/run tree.
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"GRIBfake-transport-only:"
+                             + path.as_posix().encode())
     return norm.validate_inventory(spec, paths)
 
 
@@ -103,8 +106,99 @@ def test_reference_three_hour_inventory_and_no_eu_levels(spec):
     levels = {o.level for o in objects if o.kind == "pressure-level"}
     assert len(levels) == 18 and levels == set(spec.levels_for("T"))
     assert not levels.intersection({775, 825, 875})
-    assert all("/icon/grib/" in obj.url for obj in plan.objects)
-    assert all("icosahedral" in obj.url for obj in plan.objects)
+    # DWD's open-data v1 keys, plain GRIB2: never the legacy bz2 tree,
+    # and never the mirror's year archives.
+    assert all(obj.key.startswith("p/") and obj.key.endswith(".grib2")
+               for obj in plan.objects)
+    assert not any("/icon/grib/" in obj.url or ".bz2" in obj.url
+                   or ".zarr" in obj.url for obj in plan.objects)
+
+
+def test_a_fresh_run_is_asked_of_dwd_v1_alone():
+    """The measured example key.  The mirror is the table's second rung,
+    but a mirror whose runs can be incomplete is never a fall-through
+    behind the publisher: it serves a run only whole, as the head."""
+
+    from woof import fetch_endpoints
+
+    cycle = datetime(2026, 10, 11, 0)
+    plan = fetch_routes.resolve_request(
+        "icon-global", cycle=cycle, hours=3, now=cycle + timedelta(hours=4))
+    assert [rung.name for rung in fetch_endpoints.ladder("icon-global")] == [
+        "dwd", "source-coop"]
+    assert [rung.name for rung in plan.ladder] == ["dwd"]
+    t850 = next(obj for obj in plan.objects
+                if obj.key.startswith("p/T/lvt1/100/lv1/85000/")
+                and obj.lead == 0)
+    assert t850.url == ("https://opendata.dwd.de/weather/nwp/v1/m/icon/p/T/"
+                        "lvt1/100/lv1/85000/r/2026-10-11T00:00/s/PT000H00M.grib2")
+    coop = fetch_endpoints.endpoint_named("icon-global", "source-coop")
+    assert coop.url(t850.key) == (
+        "https://data.source.coop/bkr/icon/icon/p/T/lvt1/100/lv1/85000/r/"
+        "2026-10-11T00:00/s/PT000H00M.grib2")
+    # The local layout mirrors the key below p/ with the run directory's
+    # colon dropped: Windows file systems refuse a colon in a file name.
+    assert t850.relpath == "T/lvt1/100/lv1/85000/r/2026-10-11T0000/s/PT000H00M.grib2"
+    assert not any(":" in obj.relpath for obj in plan.objects)
+    keys = {obj.key for obj in plan.objects}
+    assert "p/T_SO/lvt1/106/lv1/0.005/r/2026-10-11T00:00/s/PT003H00M.grib2" in keys
+    assert "p/W_SO/lvt1/106/lv1/7.29/r/2026-10-11T00:00/s/PT000H00M.grib2" in keys
+    assert "p/T_2M/r/2026-10-11T00:00/s/PT003H00M.grib2" in keys
+    # Invariants and coordinates are posted at step 0 only, once.
+    for field in ("HSURF", "FR_LAND", "CLAT", "CLON"):
+        assert [obj.key for obj in plan.objects
+                if obj.key.startswith(f"p/{field}/")] == [
+            f"p/{field}/r/2026-10-11T00:00/s/PT000H00M.grib2"]
+    assert plan.supplement_files == (
+        Path("HSURF/r/2026-10-11T0000/s/PT000H00M.grib2"),)
+    assert all(row.magic == "GRIB" for row in plan.files)
+
+
+def test_a_run_dwd_has_dropped_goes_straight_to_the_mirror():
+    cycle = datetime(2026, 10, 8, 0)
+    plan = fetch_routes.resolve_request(
+        "icon-global", cycle=cycle, hours=3, now=datetime(2026, 10, 11, 9))
+    assert [rung.name for rung in plan.ladder] == ["source-coop"]
+    assert all(obj.url.startswith("https://data.source.coop/bkr/icon/icon/p/")
+               for obj in plan.objects)
+
+
+def test_the_mirror_is_never_asked_for_a_run_before_its_first():
+    from woof import fetch_endpoints
+
+    before = datetime(2026, 8, 25, 6)
+    assert [rung.name for rung in fetch_endpoints.serving_ladder(
+        "icon-global", cycle=before, now=datetime(2026, 10, 11))] == ["dwd"]
+    assert [rung.name for rung in fetch_endpoints.serving_ladder(
+        "icon-global", cycle=datetime(2026, 8, 25, 12),
+        now=datetime(2026, 10, 11))] == ["source-coop"]
+
+
+def test_the_v1_level_directory_is_the_selector_surface_value(spec):
+    """85000 Pa is the 850 hPa key, 0.005 m soil key 5, W_SO by its top."""
+
+    run = "2026-10-11T00:00"
+    t850 = norm.parse_object(
+        spec, Path(f"/f/T/lvt1/100/lv1/85000/r/{run}/s/PT003H00M.grib2"))
+    assert (t850.kind, t850.field, t850.level, t850.lead) == (
+        "pressure-level", "T", 850, 3)
+    assert t850.selector[4] == 85000.0
+    soil = norm.parse_object(
+        spec, Path(f"/f/T_SO/lvt1/106/lv1/0.005/r/{run}/s/PT000H00M.grib2"))
+    assert soil.level == 5 and soil.selector == (2, 3, 18, 106, .005, 255, 0.)
+    water = norm.parse_object(
+        spec, Path(f"/f/W_SO/lvt1/106/lv1/0.03/r/{run}/s/PT000H00M.grib2"))
+    assert water.level == 3 and water.selector == (2, 3, 20, 106, .03, 106, .09)
+    hsurf = norm.parse_object(spec, Path(f"/f/HSURF/r/{run}/s/PT000H00M.grib2"))
+    assert (hsurf.kind, hsurf.lead, hsurf.level) == ("time-invariant", None, None)
+    # The normalized names are the ones the legacy tree's objects got,
+    # so nothing downstream of the remap sees the layout change.
+    assert t850.output_name == (
+        "icon_global_regular-lat-lon_pressure-level_2026101100_003_850_T.grib2")
+    assert soil.output_name == (
+        "icon_global_regular-lat-lon_soil-level_2026101100_000_5_T_SO.grib2")
+    assert hsurf.output_name == (
+        "icon_global_regular-lat-lon_time-invariant_2026101100_HSURF.grib2")
 
 
 @pytest.mark.parametrize("hour,limit", [(0, 180), (6, 120), (12, 180), (18, 120)])
@@ -163,7 +257,7 @@ def test_field_specific_remapping_mode(tmp_path, field, mode, spec):
                 if o.field == field).mode == mode
 
 
-def test_soil_filename_five_is_half_a_centimetre(tmp_path, spec):
+def test_soil_key_five_is_half_a_centimetre(tmp_path, spec):
     obj = next(o for o in inventory(spec, tmp_path)
                if o.field == "T_SO" and o.level == 5)
     assert obj.selector == (2, 3, 18, 106, .005, 255, 0.)
@@ -190,7 +284,9 @@ def test_inventory_refuses_incomplete_or_ambiguous_state(tmp_path, change, spec)
     elif change == "duplicate":
         paths += [Path(str(paths[0]) + ".bz2")]
     elif change == "mixed-cycle":
-        paths[-1] = Path(str(paths[-1]).replace("2026091500", "2026091512"))
+        mixed = Path(str(paths[-1]).replace("2026-09-15T0000", "2026-09-15T1200"))
+        assert mixed != paths[-1]
+        paths[-1] = mixed
     else:
         paths = [o.path for o in objects if o.lead != 3]
     with pytest.raises(ValueError):
@@ -198,18 +294,67 @@ def test_inventory_refuses_incomplete_or_ambiguous_state(tmp_path, change, spec)
 
 
 @pytest.mark.parametrize("name", [
-    "icon-eu_europe_regular-lat-lon_single-level_2026091500_000_PS.grib2",
+    # The legacy tree's names keep their own contract; v1 keys carry no bz2.
     "icon_global_icosahedral_pressure-level_2026091500_000_775_T.grib2",
+    "icon_global_icosahedral_single-level_2026091500_181_PS.grib2",
+    "PS/r/2026-09-15T00:00/s/PT000H00M.grib2.bz2",
+    # A level off the ladder, in hPa rather than Pa, or on the wrong surface.
+    "T/lvt1/100/lv1/77500/r/2026-09-15T00:00/s/PT000H00M.grib2",
+    "T/lvt1/100/lv1/850/r/2026-09-15T00:00/s/PT000H00M.grib2",
+    "T/lvt1/106/lv1/85000/r/2026-09-15T00:00/s/PT000H00M.grib2",
+    "T_SO/lvt1/106/lv1/0.04/r/2026-09-15T00:00/s/PT000H00M.grib2",
+    "T_SO/lvt1/106/lv1/5/r/2026-09-15T00:00/s/PT000H00M.grib2",
+    "T/r/2026-09-15T00:00/s/PT000H00M.grib2",
+    "PS/lvt1/100/lv1/85000/r/2026-09-15T00:00/s/PT000H00M.grib2",
     # f001 was refused here while the contract was three-hourly; DWD posts
     # it (A173).  A lead past the 00Z cycle's f180 is not a time it runs.
-    "icon_global_icosahedral_single-level_2026091500_181_PS.grib2",
-    "icon_global_icosahedral_single-level_2026091506_123_PS.grib2",
-    "icon_global_icosahedral_single-level_2026091530_000_PS.grib2",
-    "icon_global_icosahedral_single-level_2026091500_000_UNKNOWN.grib2",
+    "PS/r/2026-09-15T00:00/s/PT181H00M.grib2",
+    "PS/r/2026-09-15T06:00/s/PT123H00M.grib2",
+    "PS/r/2026-09-15T03:00/s/PT000H00M.grib2",
+    "PS/r/2026-09-15T00:30/s/PT000H00M.grib2",
+    "PS/r/2026-09-15T00:00/s/PT000H30M.grib2",
+    # The colon-free run directory the fetch writes keeps the same contract.
+    "PS/r/2026-09-15T0300/s/PT000H00M.grib2",
+    "PS/r/2026-09-15T0030/s/PT000H00M.grib2",
+    "PS/r/2026-09-15T000/s/PT000H00M.grib2",
+    "HSURF/r/2026-09-15T0000/s/PT003H00M.grib2",
+    "UNKNOWN/r/2026-09-15T00:00/s/PT000H00M.grib2",
+    # Invariants are posted at step 0 only.
+    "HSURF/r/2026-09-15T00:00/s/PT003H00M.grib2",
 ])
 def test_object_contract_rejects_wrong_product_time_or_field(name, spec):
     with pytest.raises(ValueError):
-        norm.parse_object(spec, name)
+        norm.parse_object(spec, Path("/f") / name)
+
+
+def test_both_run_directory_spellings_are_one_object(spec):
+    """The fetch writes ``2026-09-15T0000`` (no colon, for Windows); a tree
+    fetched before that holds ``2026-09-15T00:00``.  Both read, as one."""
+
+    colon_free = norm.parse_object(spec, Path(
+        "/f/T/lvt1/100/lv1/85000/r/2026-09-15T0000/s/PT003H00M.grib2"))
+    colon = norm.parse_object(spec, Path(
+        "/g/T/lvt1/100/lv1/85000/r/2026-09-15T00:00/s/PT003H00M.grib2"))
+    assert colon_free.identity == colon.identity == (
+        "2026091500", "pressure-level", "T", 3, 850)
+    assert colon_free.output_name == colon.output_name
+    with pytest.raises(ValueError, match="duplicate object identity"):
+        norm.validate_inventory(spec, [colon_free.path, colon.path])
+
+
+def test_objects_fetched_from_the_legacy_tree_still_prepare(spec):
+    """Bytes already on disk from the bz2 tree normalize to the same names."""
+
+    legacy = norm.parse_object(spec, Path(
+        "/f/icon_global_icosahedral_soil-level_2026091500_003_5_T_SO.grib2.bz2"))
+    v1 = norm.parse_object(spec, Path(
+        "/f/T_SO/lvt1/106/lv1/0.005/r/2026-09-15T00:00/s/PT003H00M.grib2"))
+    assert legacy.identity == v1.identity
+    assert legacy.output_name == v1.output_name == (
+        "icon_global_regular-lat-lon_soil-level_2026091500_003_5_T_SO.grib2")
+    # The two layouts are one identity, so holding both is a duplicate.
+    with pytest.raises(ValueError, match="duplicate object identity"):
+        norm.validate_inventory(spec, [legacy.path, v1.path])
 
 
 def test_targets_cross_dateline_without_becoming_global(spec):

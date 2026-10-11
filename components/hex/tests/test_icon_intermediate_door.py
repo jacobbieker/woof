@@ -76,9 +76,14 @@ def test_the_model_level_row_needs_every_level_and_the_half_levels() -> None:
 
 def test_the_paths_are_the_v1_tree() -> None:
     t500 = next(r for r in g101.ICON_GLOBAL_PL.per_lead if r.label == "T@50000")
-    assert str(t500.relative(CYCLE, 3)) == "T/lvt1/100/lv1/50000/r/2026-10-11T00:00/s/PT003H00M.grib2"
+    # The run directory the fetch writes has no colon (Windows refuses
+    # one); the colon spelling older fetches wrote is looked for second.
+    assert str(t500.relative(CYCLE, 3)) == "T/lvt1/100/lv1/50000/r/2026-10-11T0000/s/PT003H00M.grib2"
+    assert [str(p) for p in t500.spellings(CYCLE, 3)] == [
+        "T/lvt1/100/lv1/50000/r/2026-10-11T0000/s/PT003H00M.grib2",
+        "T/lvt1/100/lv1/50000/r/2026-10-11T00:00/s/PT003H00M.grib2"]
     clat = g101.ICON_GLOBAL_PL.geometry[0]
-    assert str(clat.relative(CYCLE, 0)) == "CLAT/r/2026-10-11T00:00/s/PT000H00M.grib2"
+    assert str(clat.relative(CYCLE, 0)) == "CLAT/r/2026-10-11T0000/s/PT000H00M.grib2"
     w_so = [r for r in g101.ICON_GLOBAL_PL.per_lead if r.param == "W_SO"]
     assert [r.level for r in w_so] == ["0.0", "0.01", "0.03", "0.09", "0.27", "0.81", "2.43", "7.29"]
     # A layer's selector carries its top and bottom; the directory is the top.
@@ -117,14 +122,16 @@ def test_published_leads_pass() -> None:
 # ---------------------------------------------------------------------------
 # locating the files
 # ---------------------------------------------------------------------------
-def _tree(root: Path, product, leads, *, skip: tuple[str, ...] = ()) -> list[Path]:
-    """Every file ``product`` needs for ``leads``, as tiny stand-ins."""
+def _tree(root: Path, product, leads, *, skip: tuple[str, ...] = (),
+          run_format: str | None = None) -> list[Path]:
+    """Every file ``product`` needs for ``leads``, as tiny stand-ins, the run
+    directory spelt ``run_format`` (default: the colon-free form)."""
 
     written = []
     wanted = [(r, 0) for r in (*product.geometry, product.land_fraction, *product.invariants)]
     wanted += [(r, lead) for lead in leads for r in product.per_lead]
     for record, lead in wanted:
-        path = root / record.relative(CYCLE, lead)
+        path = root / record.relative(CYCLE, lead, run_format)
         if f"f{lead:03d} {record.label}" in skip:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,6 +149,21 @@ def test_a_complete_tree_is_located_under_the_dir_or_its_p_child(tmp_path: Path)
     assert all("PT003H00M" in p.name for _, p in found.leads[3])
 
 
+@pytest.mark.parametrize("run_format", g101.RUN_DIR_FORMATS)
+def test_a_tree_in_either_run_spelling_is_located(tmp_path: Path, run_format: str) -> None:
+    """``2026-10-11T0000`` (what the fetch writes) and ``2026-10-11T00:00``
+    (what fetches before the Windows fix wrote) both locate whole."""
+
+    written = _tree(tmp_path / "grib", g101.ICON_GLOBAL_PL, (0, 3), run_format=run_format)
+    found = g101.locate_field_files(g101.ICON_GLOBAL_PL, tmp_path / "grib", CYCLE, (0, 3))
+    assert found.root == tmp_path / "grib"
+    located = {*found.geometry, found.land_fraction,
+               *(p for _, p in found.invariants),
+               *(p for lead in found.leads.values() for _, p in lead)}
+    assert located == set(written)
+    assert all(f"{CYCLE:{run_format}}" in str(p) for p in located)
+
+
 def test_missing_files_are_named_with_their_count(tmp_path: Path) -> None:
     _tree(tmp_path / "grib", g101.ICON_GLOBAL_PL, (0, 3),
           skip=("f003 RELHUM@85000", "f000 HSURF"))
@@ -152,7 +174,7 @@ def test_missing_files_are_named_with_their_count(tmp_path: Path) -> None:
         door.locate_inputs(request)
     text = str(caught.value)
     assert "missing 2 icon-global" in text
-    assert "f003 RELHUM@85000 (RELHUM/lvt1/100/lv1/85000/r/2026-10-11T00:00/s/PT003H00M.grib2)" in text
+    assert "f003 RELHUM@85000 (RELHUM/lvt1/100/lv1/85000/r/2026-10-11T0000/s/PT003H00M.grib2)" in text
     assert "f000 HSURF" in text and "woof fetch --source icon-global" in text
 
 

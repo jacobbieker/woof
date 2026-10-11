@@ -18,7 +18,10 @@ WHAT THIS MODULE OWNS, and nothing else:
   native record a lead needs, its seven GRIB selector values, the remap
   method its level admits, and its path in DWD's v1 open-data tree
   ``<PARAM>[/lvt1/<type>/lv1/<value>]/r/<YYYY-MM-DDTHH:MM>/s/PT<HHH>H00M.grib2``
-  (the tree ``woof fetch --source icon-global`` mirrors under its ``--out``);
+  (the tree ``woof fetch --source icon-global`` mirrors under its ``--out``,
+  with the run directory spelt ``YYYY-MM-DDTHHMM``: Windows file systems
+  refuse the key's colon.  The colon spelling, which fetches before
+  2026-10-11 wrote, is read as well);
 * locating those files, all of them, refusing with the missing ones named;
 * the window: :func:`choose_remap` reads the target mesh and decides between
   the regional window and a global target.  A global target is refused here
@@ -77,6 +80,13 @@ def _refuse(message: str) -> NoReturn:
 # ---------------------------------------------------------------------------
 # the product table
 # ---------------------------------------------------------------------------
+#: A run directory's on-disk spellings, in the order they are looked for:
+#: ``2026-10-11T0000``, which ``woof fetch`` writes (a colon is not a legal
+#: file-name character on Windows), then DWD's key spelling
+#: ``2026-10-11T00:00``, which fetches before 2026-10-11 wrote.
+RUN_DIR_FORMATS = ("%Y-%m-%dT%H%M", "%Y-%m-%dT%H:%M")
+
+
 @dataclass(frozen=True)
 class NativeRecord:
     """One native field object: where it sits in the tree, how it is read."""
@@ -98,12 +108,23 @@ class NativeRecord:
     def label(self) -> str:
         return self.param if self.level is None else f"{self.param}@{self.level}"
 
-    def relative(self, cycle: datetime, lead: int) -> Path:
+    def relative(self, cycle: datetime, lead: int,
+                 run_format: str | None = None) -> Path:
+        """The object's path below the tree root; the run directory spelt
+        ``run_format``, by default the colon-free form ``woof fetch``
+        writes (:data:`RUN_DIR_FORMATS`)."""
+
         parts = [self.param]
         if self.level_type is not None:
             parts += ["lvt1", str(self.level_type), "lv1", str(self.level)]
-        parts += ["r", f"{cycle:%Y-%m-%dT%H:%M}", "s", f"PT{int(lead):03d}H00M.grib2"]
+        run = f"{cycle:{run_format or RUN_DIR_FORMATS[0]}}"
+        parts += ["r", run, "s", f"PT{int(lead):03d}H00M.grib2"]
         return Path(*parts)
+
+    def spellings(self, cycle: datetime, lead: int) -> tuple[Path, ...]:
+        """:meth:`relative` in every on-disk run spelling, in look-up order."""
+
+        return tuple(self.relative(cycle, lead, fmt) for fmt in RUN_DIR_FORMATS)
 
     def job_tokens(self) -> list[str]:
         d, c, p, t1, v1, t2, v2 = self.selector
@@ -265,11 +286,12 @@ class LocatedFieldFiles:
 def _tree_root(product: FieldFileProduct, grib_dir: Path, cycle: datetime) -> Path:
     """``--grib-dir`` itself, or its ``p/`` child, whichever holds this cycle."""
 
-    probe = product.geometry[0].relative(cycle, 0)
-    candidates = [root for root in (grib_dir, grib_dir / "p") if (root / probe).is_file()]
+    probes = product.geometry[0].spellings(cycle, 0)
+    candidates = [root for root in (grib_dir, grib_dir / "p")
+                  if any((root / probe).is_file() for probe in probes)]
     if len(candidates) > 1:
         _refuse(
-            f"{grib_dir} and {grib_dir / 'p'} both hold {probe}; one --grib-dir is one "
+            f"{grib_dir} and {grib_dir / 'p'} both hold {probes[0]}; one --grib-dir is one "
             f"tree, so move one aside"
         )
     return candidates[0] if candidates else grib_dir
@@ -288,13 +310,16 @@ def locate_field_files(product: FieldFileProduct, grib_dir: Path, cycle: datetim
     missing: dict[tuple[int, str], list[tuple[NativeRecord, Path]]] = {}
 
     def find(record: NativeRecord, lead: int) -> Path:
+        # The colon-free run directory first, then the colon one an older
+        # fetch wrote; a missing object is named by the colon-free path.
+        for relative in record.spellings(cycle, lead):
+            if (root / relative).is_file():
+                return root / relative
         relative = record.relative(cycle, lead)
-        path = root / relative
-        if not path.is_file():
-            group = missing.setdefault((int(lead), record.param), [])
-            if all(seen != relative for _, seen in group):
-                group.append((record, relative))
-        return path
+        group = missing.setdefault((int(lead), record.param), [])
+        if all(seen != relative for _, seen in group):
+            group.append((record, relative))
+        return root / relative
 
     geometry = [find(record, 0) for record in product.geometry]
     land = find(product.land_fraction, 0)
@@ -666,6 +691,7 @@ __all__ = [
     "LocatedFieldFiles",
     "NativeRecord",
     "REMAP_CONTRACT",
+    "RUN_DIR_FORMATS",
     "RegionalWindow",
     "RemapChoice",
     "RemapResult",

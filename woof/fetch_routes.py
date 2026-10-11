@@ -91,10 +91,12 @@ ROUTE_TABLE_SHA256 = (
     # merged with the ecmwf-ens and rrfs-ens input-ensemble rows.
     # Then the met-office-global row: the AWS open-data bucket's
     # NetCDF-4 objects, its dated naming and orography eras, its terrain
-    # supplement and its same-cycle GDAS donor (measured 2026-10-11), and
-    # icon-global-ml: ICON global's 120 model levels from DWD's v1
-    # tree, source.coop's mirror as the archive rung, a window_limit.
-    "RECOMPUTE"
+    # supplement and its same-cycle GDAS donor (measured 2026-10-11);
+    # icon-global reading DWD's open-data v1 tree (plain GRIB2 keys under
+    # p/, a two-rung ladder with the source.coop mirror, serves_from,
+    # run_listing and the DWD attribution); and icon-global-ml, ICON
+    # global's 120 model levels on the same ladder, with a window_limit.
+    "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own
@@ -119,17 +121,19 @@ PATH_TOKENS = frozenset({
     # ``20261011T0000Z`` and the step as ``PT0006H00M``.  Its object names
     # START with the valid time, so a lead's key needs both instants.
     "RUN_MO", "VALID_MO", "STEP_MO",
-    # DWD's v1 tree (opendata.dwd.de/weather/nwp/v1/m/icon/p/...) spells
-    # the run as ``YYYY-MM-DDTHH:MM`` and the step as ``PT{HHH}H00M``.
+    # DWD's open-data v1 spelling of a run and a step:
+    # ``2026-10-11T00:00`` (the colon is literal in the key) and
+    # ``PT003H00M``.
     "RUN_ISO", "STEP_ISO",
 })
 
-#: Local layouts a route may declare.  ``flat`` keeps the object's last
-#: path component and ``upstream`` the whole key below ``upstream/``.
-#: ``v1-tree`` keeps the whole key as it is: DWD's v1 tree names every
-#: object ``PT{HHH}H00M.grib2`` and tells them apart only by directory,
-#: so the tree below the route's base IS the object's name.
-ROUTE_LAYOUTS = frozenset({"flat", "upstream", "v1-tree"})
+#: The local layouts a route may declare.  ``flat`` keeps an object's
+#: file name; ``upstream`` keeps its whole key under ``upstream/``;
+#: ``mirror`` keeps its key below the route's ``mirror_prefix``, for a
+#: publisher whose file names alone collide (every DWD v1 object is
+#: called ``PT{HHH}H00M.grib2``).  No layout writes a colon to disk
+#: (:func:`_relpath`).
+ROUTE_LAYOUTS = frozenset({"flat", "upstream", "mirror"})
 
 _TOKEN_RE = re.compile(r"\{([A-Za-z_]+)\}")
 
@@ -288,6 +292,11 @@ class Route:
     #: source whose every lead is gigabytes (``icon-global-ml``: about
     #: 2 GB of model-level objects per lead).  None: no table ceiling.
     window_limit: Mapping[str, object] | None = None
+    #: The key prefix a ``mirror`` layout drops (``p/`` for DWD v1).
+    mirror_prefix: str = ""
+    #: The attribution the publisher's licence asks for, carried into
+    #: every manifest of this route; empty when the row declares none.
+    attribution: str = ""
 
     def lag_rule(self, cycle_hour: int, lead: int = 0) -> LagRule:
         """The publication rule for one UTC cycle hour and lead."""
@@ -763,12 +772,10 @@ def _build_routes() -> Mapping[str, Route]:
                 ) for era in raw.get("publication_eras", [])),
             window_limit=(MappingProxyType(dict(raw["window_limit"]))
                           if raw.get("window_limit") else None),
+            mirror_prefix=str(raw.get("mirror_prefix", "")),
+            attribution=str(raw.get("attribution", "")),
         )
     for route in routes.values():
-        if route.layout not in ROUTE_LAYOUTS:
-            raise ValueError(
-                f"{ROUTE_TABLE_NAME}: route {route.source_id} declares layout "
-                f"{route.layout!r}; the planner writes {sorted(ROUTE_LAYOUTS)}")
         limit = route.window_limit
         if limit is not None:
             leads = limit.get("max_leads")
@@ -798,12 +805,26 @@ def _build_routes() -> Mapping[str, Route]:
                     "cannot resolve its dated grid and file layout")
         files = route.files + tuple(
             row for era in route.publication_eras for row in era.files)
+        if route.layout not in ROUTE_LAYOUTS:
+            raise ValueError(
+                f"{ROUTE_TABLE_NAME}: route {route.source_id} declares layout "
+                f"{route.layout!r}; the engine writes {sorted(ROUTE_LAYOUTS)}")
         for row in files:
             bad = unknown_tokens(row.path)
             if bad:
                 raise ValueError(
                     f"{ROUTE_TABLE_NAME}: route {route.source_id} file "
                     f"{row.role} spells unknown token(s) {list(bad)}")
+            # Named breakage: a mirror row whose key does not start with
+            # its prefix would land outside the layout the preparation
+            # reads (or, with an empty prefix, collide on file names).
+            if route.layout == "mirror" and (
+                    not route.mirror_prefix
+                    or not row.path.startswith(route.mirror_prefix)):
+                raise ValueError(
+                    f"{ROUTE_TABLE_NAME}: route {route.source_id} file "
+                    f"{row.role} is mirrored below {route.mirror_prefix!r}, "
+                    f"which its key {row.path!r} does not start with")
         supplement_specs = tuple(route.prep.get("extra_supplements") or ())
         if route.prep.get("supplement"):
             supplement_specs = (route.prep["supplement"], *supplement_specs)
@@ -1729,6 +1750,9 @@ class FetchPlan:
     #: decision: it disables fall-through and it IS the request's
     #: identity, where an unpinned request's identity is the ladder.
     pinned_host: str | None = None
+    #: The clock the ladder was chosen against (None: the wall clock),
+    #: so the transfer stage ages the cycle exactly as the plan did.
+    now: datetime | None = None
 
     @property
     def source_id(self) -> str:
@@ -1793,8 +1817,9 @@ def _axis_entries(route: Route, axis: str) -> tuple[dict[str, str], ...]:
         for name in group["names"]:
             if levels:
                 for level in levels:
-                    # A string level is the publisher's own spelling,
-                    # used verbatim (DWD v1 soil depths are "0.005").
+                    # A string level is the publisher's own spelling and
+                    # is used verbatim: DWD v1 names soil depths in
+                    # metres ("0.005"), which no integer format renders.
                     text = prefix + (level if isinstance(level, str)
                                      else fmt % int(level))
                     entries.append({
@@ -1821,8 +1846,12 @@ def _axis_entries(route: Route, axis: str) -> tuple[dict[str, str], ...]:
 def _relpath(route: Route, key: str) -> str:
     if route.layout == "upstream":
         return f"upstream/{key}"
-    if route.layout == "v1-tree":
-        return key
+    if route.layout == "mirror":
+        # A colon is not a legal file-name character on Windows (NTFS,
+        # exFAT), and DWD's v1 run directory carries one
+        # (``r/2026-10-11T00:00/``): the local tree spells it
+        # ``2026-10-11T0000``.  The remote key keeps its colon.
+        return key[len(route.mirror_prefix):].replace(":", "")
     return key.rsplit("/", 1)[-1]
 
 
@@ -1864,6 +1893,55 @@ def endpoint_ladder(route: Route, cycle: datetime, *,
 
     return fetch_endpoints.serving_ladder(
         route.source_id, cycle=cycle, now=now, pinned=host)
+
+
+def _refuse_unheld_cycle(route: Route, cycle: datetime,
+                         ladder: Sequence[Endpoint], *,
+                         now: datetime | None = None) -> None:
+    """Refuse, before any byte moves, a cycle no rung can hold.
+
+    Two measured facts together: the cycle is older than every
+    rolling rung's retention, and it predates every archive rung's
+    first mirrored run (``serves_from``).  Retention alone is never a
+    bar (the whole ladder is still asked); it is the archive's start,
+    which is a bound, that makes the ask certain to fail.  Asked by
+    :func:`run_plan` and not by :func:`resolve_request`: planning a
+    cycle stays possible for every date (the download budget prices
+    stand-in cycles), and only moving bytes for it is refused.
+    """
+
+    unheld = [rung for rung in ladder if not rung.holds(cycle)]
+    age = fetch_endpoints.cycle_age_hours(cycle, now)
+    before = [rung for rung in route.hosts if not rung.holds(cycle)]
+    if unheld:
+        rung = unheld[0]
+        raise ValueError(
+            f"--source {route.source_id} --cycle {cycle:%Y-%m-%dT%H}: "
+            f"{rung.name} ({rung.host}) holds runs from "
+            f"{rung.serves_from:%Y-%m-%dT%H} UTC, so it does not have this "
+            "one.")
+    if before and not any(rung.covers(age) for rung in ladder):
+        kept = ", ".join(
+            f"{rung.name} keeps about {rung.retention_hours:g} h"
+            for rung in ladder if rung.retention_hours is not None)
+        starts = ", ".join(
+            f"{rung.name} ({rung.host}) holds runs from "
+            f"{rung.serves_from:%Y-%m-%dT%H} UTC" for rung in before)
+        raise ValueError(
+            f"--source {route.source_id} --cycle {cycle:%Y-%m-%dT%H}: no host "
+            f"holds this run: it is {age:.0f} h old ({kept}) and {starts}.")
+
+
+def refuse_unheld_plan(plan: "FetchPlan") -> None:
+    """:func:`_refuse_unheld_cycle` for a resolved plan, before any waiting.
+
+    The fetch front door asks this before it starts an as-posted wait:
+    a run no host can hold would otherwise be waited for and reported as
+    "not posted yet" when it will never post.
+    """
+
+    _refuse_unheld_cycle(plan.route, plan.cycle, plan.ladder or (plan.host,),
+                         now=plan.now)
 
 
 def resolve_request(source: str, *, cycle: datetime, hours: int,
@@ -2046,9 +2124,8 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
                 if obj.role == role
                 and (select is None or f"_{select}." in obj.relpath
                      or f"_{select}_" in obj.relpath
-                     # A tree layout names the field by its top directory.
-                     or (route.layout == "v1-tree"
-                         and obj.relpath.split("/", 1)[0] == select)))
+                     # A mirrored key names its field as a directory.
+                     or f"/{select}/" in f"/{obj.relpath}"))
         else:
             raise ValueError(
                 f"{ROUTE_TABLE_NAME}: route {route.source_id} declares an "
@@ -2061,7 +2138,7 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
         supplement_role=supplement_role,
         member_set=(str(route.prep["member_prep"])
                     if route.prep.get("member_prep") else None),
-        out=out, ladder=ladder, pinned_host=host)
+        out=out, ladder=ladder, pinned_host=host, now=now)
 
 
 # --------------------------------------------------------------------------
@@ -2420,6 +2497,217 @@ def _probe_transfer_ladders(
                      "available": available}
 
 
+#: The most a run-listing page may be.  An S3 ListObjectsV2 page holds at
+#: most 1000 keys of a few hundred bytes each; anything larger is not a
+#: listing.
+_LISTING_PAGE_LIMIT = 4 * 1024 * 1024
+#: The most pages one directory's listing may take before it is refused
+#: rather than followed for ever.
+_LISTING_PAGE_CAP = 100
+#: How many missing objects an incomplete-run refusal names one by one.
+_MISSING_NAMED = 12
+
+
+def list_run_directory(endpoint: Endpoint, directory: str, *, opener=None,
+                       timeout: float = 60.0) -> frozenset[str]:
+    """Every object key ``endpoint`` holds below one key ``directory``.
+
+    One S3 ListObjectsV2 walk, continuation tokens followed, keys
+    returned in the route's own key space (the endpoint's
+    ``key_prefix`` removed).  Sent with this fetch's User-Agent: the
+    source.coop mirror answered urllib's default client with 403
+    (2026-10-11).  Each page rides :func:`woof.fetch_endpoints.ask_along_ladder`,
+    so a page no retry could fetch is a :class:`TransferRefusal` naming it.
+    """
+
+    import xml.etree.ElementTree as ElementTree
+    from urllib.request import Request
+    from woof.nomads_governor import paced_urlopen
+
+    prefix = endpoint.run_listing["key_prefix"]
+    keys: set[str] = set()
+    token: str | None = None
+    for _page in range(_LISTING_PAGE_CAP):
+        url = fetch_endpoints.run_listing_url(endpoint, directory, token)
+
+        def page(_rung: Endpoint, url: str = url) -> bytes:
+            with paced_urlopen(
+                    Request(url, headers={"User-Agent": _USER_AGENT}),
+                    timeout=timeout,
+                    **({"opener": opener} if opener is not None else {})
+            ) as response:
+                return response.read(_LISTING_PAGE_LIMIT + 1)
+
+        # The tree's one retry: transient faults and a throttling host are
+        # asked again exactly as an object transfer would be.
+        _rung, body = fetch_endpoints.ask_along_ladder(
+            (endpoint,), page, label=f"list {endpoint.name}", name=url,
+            progress=lambda _line: None, attempts=_TRANSFER_ATTEMPTS)
+        if len(body) > _LISTING_PAGE_LIMIT:
+            raise ValueError(
+                f"{endpoint.name}: listing {url} is larger than "
+                f"{_LISTING_PAGE_LIMIT} bytes, which no listing page is")
+        try:
+            root = ElementTree.fromstring(body)
+        except ElementTree.ParseError as error:
+            raise ValueError(
+                f"{endpoint.name}: listing {url} is not an S3 listing: "
+                f"{error}") from error
+        namespace = root.tag[:root.tag.index("}") + 1] if "}" in root.tag else ""
+        for element in root.iter(f"{namespace}Key"):
+            key = element.text or ""
+            if key.startswith(prefix):
+                keys.add(key[len(prefix):])
+        truncated = (root.findtext(f"{namespace}IsTruncated") or "").strip()
+        token = root.findtext(f"{namespace}NextContinuationToken")
+        if truncated.lower() != "true":
+            return frozenset(keys)
+        if not token:
+            raise ValueError(
+                f"{endpoint.name}: listing {url} says it is truncated and "
+                "names no continuation token")
+    raise ValueError(
+        f"{endpoint.name}: listing of {directory} ran past "
+        f"{_LISTING_PAGE_CAP} pages")
+
+
+def listed_head(plan: FetchPlan) -> bool:
+    """Whether the rung serving ``plan`` is a mirror whose runs are listed.
+
+    Such a run is not POSTED in lead order the way the publisher posts
+    it: the mirror copies it some time later, and it is either held
+    whole or not.  So it is not waited on as posted and not probed lead
+    by lead; :func:`run_plan` lists it once and refuses a part-run with
+    the missing objects named (:func:`_check_listed_run`).
+    """
+
+    ladder = plan.ladder or (plan.host,)
+    return ladder[0].run_listing is not None
+
+
+#: Listings this process already made, by (bucket URL, directory), with
+#: when.  The front door's publication check and the transfer stage ask
+#: about the same run seconds apart; a mirror that copies runs a day and
+#: more late does not change between them, so the second asks nothing.
+_LISTINGS: dict[tuple[str, str], tuple[float, frozenset[str]]] = {}
+_LISTING_REUSE_S = 600.0
+
+
+def _listed_keys(endpoint: Endpoint, directory: str, *, opener=None) -> frozenset[str]:
+    """:func:`list_run_directory`, reused within ``_LISTING_REUSE_S``."""
+
+    if opener is not None:
+        return list_run_directory(endpoint, directory, opener=opener)
+    key = (endpoint.run_listing["bucket"] + "?" + endpoint.run_listing["key_prefix"],
+           directory)
+    hit = _LISTINGS.get(key)
+    if hit is not None and time.monotonic() - hit[0] < _LISTING_REUSE_S:
+        return hit[1]
+    keys = list_run_directory(endpoint, directory)
+    _LISTINGS[key] = (time.monotonic(), keys)
+    return keys
+
+
+def check_listed_run(plan: FetchPlan, *, lister=None, workers: int | None = None,
+                     progress=print) -> dict | None:
+    """The whole-run check of :func:`run_plan`, asked on its own.
+
+    The fetch front door's publication check: a run a listed mirror holds
+    only in part is refused here with the missing objects named, before
+    anything else is asked.  None when the plan's head is not listed.
+    """
+
+    return _check_listed_run(
+        plan, plan.objects, progress=progress,
+        workers=fetch_pool.resolve_file_workers(workers),
+        lister=_listed_keys if lister is None else lister)
+
+
+def _check_listed_run(plan: FetchPlan, objects: Sequence[PlannedObject], *,
+                      lister, workers: int, progress) -> dict | None:
+    """Refuse a run the head rung holds only in part, before any transfer.
+
+    Applies when the rung that will serve this request declares a
+    ``run_listing`` -- a mirror whose runs can be incomplete.  Every key
+    directory the pending objects live in is listed once (a v1 run is
+    one directory per field and level, all leads beside each other), and
+    a run missing any requested object is refused with the missing
+    objects named.  The alternative it replaces is worse in both
+    directions: fetching the objects that are there and failing on the
+    first 404 leaves a part-run on disk and names one object out of
+    perhaps hundreds.  Returns the receipt, or None when nothing was
+    listed.
+    """
+
+    ladder = plan.ladder or (plan.host,)
+    head = ladder[0]
+    keyed = [obj for obj in objects if obj.key]
+    if head.run_listing is None or not keyed:
+        return None
+    directories = sorted({obj.key.rsplit("/", 1)[0] + "/" for obj in keyed})
+
+    def listed(directory: str) -> dict:
+        return {"directory": directory, "keys": lister(head, directory)}
+
+    entries, _receipt = fetch_pool.run_transfers(
+        [fetch_pool.TransferJob(
+            name=directory,
+            url=fetch_endpoints.run_listing_url(head, directory),
+            action=functools.partial(listed, directory))
+         for directory in directories],
+        workers=workers)
+    held: set[str] = set()
+    for entry in entries:
+        held.update(entry["keys"])
+    missing = [obj.key for obj in keyed if obj.key not in held]
+    if len(missing) == len(keyed):
+        age = fetch_endpoints.cycle_age_hours(plan.cycle, plan.now)
+        kept = ", ".join(
+            f"{rung.name} keeps about {rung.retention_hours:g} h"
+            for rung in plan.route.hosts
+            if rung.retention_hours is not None and not rung.covers(age))
+        raise ValueError(
+            f"fetch {plan.source_id}: {head.name} ({head.host}) holds none of "
+            f"the {len(keyed)} requested objects of run "
+            f"{plan.cycle:%Y-%m-%dT%H:%M}: the mirror copies runs some time "
+            "after they are published and has not copied this one"
+            + (f", and it is older than the publisher keeps ({kept})"
+               if kept else "")
+            + f".\n  first missing: {missing[0]}.\n"
+            f"  why it is listed first: {head.run_listing.get('why', '')}.\n"
+            "  remedy: pick another --cycle, an older run the mirror holds "
+            "whole or one the publisher still holds.")
+    if missing:
+        # By key directory head (the field, for a v1 key) first, so a
+        # reader sees WHAT is absent before the individual keys.
+        counts: dict[str, int] = {}
+        for key in missing:
+            head_part = key[len(plan.route.mirror_prefix):] if (
+                plan.route.mirror_prefix
+                and key.startswith(plan.route.mirror_prefix)) else key
+            name = head_part.split("/", 1)[0]
+            counts[name] = counts.get(name, 0) + 1
+        by_field = ", ".join(f"{name} {count}" for name, count in counts.items())
+        named = ", ".join(missing[:_MISSING_NAMED])
+        more = (f" and {len(missing) - _MISSING_NAMED} more"
+                if len(missing) > _MISSING_NAMED else "")
+        raise ValueError(
+            f"fetch {plan.source_id}: {head.name} ({head.host}) holds run "
+            f"{plan.cycle:%Y-%m-%dT%H:%M} only in part: {len(missing)} of "
+            f"{len(keyed)} requested objects are missing, so nothing is "
+            f"fetched from it.\n  missing by field: {by_field}.\n"
+            f"  missing: {named}{more}.\n"
+            f"  why it is listed first: {head.run_listing.get('why', '')}.\n"
+            "  remedy: pick another --cycle; a run the mirror holds whole is "
+            "fetched as usual.")
+    progress(
+        f"fetch {plan.source_id}: {head.name} holds run "
+        f"{plan.cycle:%Y-%m-%dT%H:%M} whole: all {len(keyed)} requested "
+        f"objects listed in {len(directories)} directories")
+    return {"endpoint": head.name, "directories": len(directories),
+            "objects": len(keyed), "complete": True}
+
+
 def _prior_entries(out: Path) -> dict[str, dict]:
     out = _io_path(out)
     manifest = out / MANIFEST_NAME
@@ -2625,7 +2913,7 @@ def _quarantine(out: Path, progress) -> Path | None:
 def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
              file_workers: int | None = None, progress=print,
              opener=None, downloader=None, probe=None,
-             lead_gate=None, on_lead=None) -> dict:
+             lead_gate=None, on_lead=None, lister=None) -> dict:
     """Move the planned objects, compose the primaries, write the receipts.
 
     Every file rides :mod:`woof.fetch_pool`, so a table route is
@@ -2652,6 +2940,11 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
     composition and after the manifest is republished for the verified
     prefix with ``complete: false``; the last manifest says
     ``complete: true``.  Without the hooks nothing here changes.
+
+    ``lister`` is the run-listing question (``endpoint, directory ->
+    keys``, defaulting to :func:`list_run_directory`), asked only when
+    the rung heading the ladder declares a ``run_listing``: such a run
+    is checked whole before anything moves (:func:`_check_listed_run`).
     """
 
     out = _io_path(Path(out))
@@ -2701,6 +2994,15 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
             reuse[obj.relpath] = known
         else:
             pending.append(obj)
+
+    # A mirror whose runs can be incomplete is listed before anything is
+    # fetched from it, and a part-run is refused naming what is missing.
+    if pending:
+        _refuse_unheld_cycle(plan.route, plan.cycle, ladder, now=plan.now)
+    listing_receipt = _check_listed_run(
+        plan, pending, workers=workers, progress=progress,
+        lister=(functools.partial(_listed_keys, opener=opener)
+                if lister is None else lister))
 
     # AHEAD of the transfers, not behind them: the throughput rung is
     # asked which of the pending objects it already holds, and each one
@@ -2838,7 +3140,7 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
         composed_so_far.extend(composed_now)
         _write_json(out / MANIFEST_NAME, _plan_manifest(
             plan, list(admitted), list(composed_so_far), None,
-            complete=False))
+            complete=False, listing_receipt=listing_receipt))
         _write_sha256sums(out, admitted, composed_so_far)
         on_lead(group, [item for item, owner in zip(admitted, groups)
                         if owner == group], composed_now)
@@ -2854,14 +3156,16 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
                 else _run_compose(plan, out, progress=progress))
     payload = _plan_manifest(plan, entries, composed, receipt,
                              probe_receipt=probe_receipt,
-                             complete=True if on_lead is not None else None)
+                             complete=True if on_lead is not None else None,
+                             listing_receipt=listing_receipt)
     _write_json(out / MANIFEST_NAME, payload)
     _write_sha256sums(out, entries, composed)
     return payload
 
 
 def _plan_manifest(plan: FetchPlan, entries, composed, receipt, *,
-                   probe_receipt=None, complete: bool | None = None) -> dict:
+                   probe_receipt=None, complete: bool | None = None,
+                   listing_receipt=None) -> dict:
     """The route manifest for ``entries``; ``complete`` only on an as-posted fetch."""
 
     payload = {
@@ -2892,6 +3196,11 @@ def _plan_manifest(plan: FetchPlan, entries, composed, receipt, *,
                                  for path in plan.supplement_files],
         },
     }
+    if listing_receipt is not None:
+        payload["endpoints"]["run_listing"] = dict(listing_receipt)
+    if plan.route.attribution:
+        # The publisher's licence asks for it wherever its data travels.
+        payload["attribution"] = plan.route.attribution
     if complete is not None:
         # The as-posted fetch republishes this file as each lead lands;
         # a reader tells the verified prefix from the whole window here.
@@ -3062,6 +3371,8 @@ def write_handoff(plan: FetchPlan, out: Path, *,
                         for entry in (plan.ladder or (plan.host,)))
         + f" (see {MANIFEST_NAME} for which one served each file)",
     ]
+    if plan.route.attribution:
+        header.append(f"# {plan.route.attribution}")
     if plan.member:
         header.append(f"# member {plan.member}")
     if plan.member_set:
@@ -3277,4 +3588,6 @@ __all__ = [
     "route_for", "route_ids", "run_plan", "table_route", "unknown_tokens",
     "write_handoff", "SOURCE_ROOT_FORMATS", "local_input_remedy",
     "local_prep_line", "sniff_format", "source_root_layout",
+    "ROUTE_LAYOUTS", "check_listed_run", "list_run_directory", "listed_head",
+    "refuse_unheld_plan",
 ]

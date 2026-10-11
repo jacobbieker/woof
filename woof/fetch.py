@@ -1865,7 +1865,25 @@ def require_published_cycle(source: str, cycle: datetime, last_hour: int, *,
     The question itself is :func:`cycle_publication_check`: a cycle not
     published is refused with its sentence, and a host that could not be
     heard is said on ``progress`` before the fetch goes ahead.
+
+    A run served by a mirror whose runs can be incomplete is not probed
+    lead by lead: it is listed whole (:func:`woof.fetch_routes.check_listed_run`)
+    and a part-run is refused with the missing objects named.
     """
+    if source in fetch_routes.route_ids():
+        try:
+            plan = fetch_routes.resolve_request(
+                source, cycle=cycle, hours=last_hour - start_hour,
+                cadence=cadence, start_hour=start_hour, host=transport,
+                member=member, now=now)
+        except ValueError:
+            plan = None          # the publication check below names it
+        if plan is not None and fetch_routes.listed_head(plan):
+            try:
+                fetch_routes.check_listed_run(plan, progress=progress)
+            except ValueError as error:
+                raise RuntimeError(str(error)) from None
+            return
     check = cycle_publication_check(
         source, cycle, last_hour, now=now, probe=probe, transport=transport,
         cadence=cadence, start_hour=start_hour, member=member)
@@ -2243,6 +2261,10 @@ def _posting_loop(source: str, cycle: datetime, args, *, leads,
     from woof.source_posting import posting
 
     if not cycle_is_probeable(source) or not posting(source).waited:
+        return None
+    # A run a listed mirror serves is not posted lead by lead; it is held
+    # whole or not, and the transfer lists it (fetch_routes.check_listed_run).
+    if plan is not None and fetch_routes.listed_head(plan):
         return None
     window = readiness.Window(
         source=source, cycle=cycle, leads=tuple(leads),
@@ -6628,6 +6650,9 @@ def _route_fetch_main(args, source: str) -> int:
         if not args.force_refetch:
             fetch_routes.check_prior_request(args.out, plan)
         loop = None
+        # A run no host can hold is refused now, not waited for as posting.
+        if args.force_refetch or not fetch_routes.request_cached(plan, args.out):
+            fetch_routes.refuse_unheld_plan(plan)
         if as_posted and (args.force_refetch
                           or not fetch_routes.request_cached(plan, args.out)):
             loop = _posting_loop(source, cycle, args, leads=plan.leads,

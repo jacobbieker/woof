@@ -327,7 +327,13 @@ def test_printed_chain_parses_with_matching_acquisition(
 
     _stop_at_remote_acquisition(monkeypatch)
 
-    rc, out = _emit(tmp_path / "command paths", source, "--explain")
+    # ICON global's hosts (both rows) hold DWD's last ~27 h and the
+    # source.coop mirror from 2026-08-25 12Z, so the shared 2026-08-17 cycle
+    # is refused before any host is asked; a cycle the mirror holds reaches
+    # the transport.
+    cycle = {"icon-global": "2026-09-29T12",
+             "icon-global-ml": "2026-09-29T12"}.get(source, "2026-08-17T00")
+    rc, out = _emit(tmp_path / "command paths", source, "--explain", cycle=cycle)
     assert rc == 0
     printed = capsys.readouterr().out
     for argv in _printed_fetch_arguments(printed):

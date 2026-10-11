@@ -61,6 +61,10 @@ hour-zero HHL half levels; specific humidity aloft, so `--use-spechumd
 yes`).  ICON is not lat-lon: it publishes one file per field and level on
 an icosahedral GDT-101 mesh, in DWD's v1 tree
 `<PARAM>[/lvt1/<type>/lv1/<value>]/r/<YYYY-MM-DDTHH:MM>/s/PT<HHH>H00M.grib2`.
+`woof fetch` writes that tree with the run directory spelt
+`<YYYY-MM-DDTHHMM>` (`r/2026-10-11T0000/`), because Windows file systems
+refuse the colon; the door reads both spellings, so a tree fetched with the
+colon still works.
 These rows use the `field-files` layout (`woof/hex/gdt101_door.py`): the door
 collects every file each lead needs and names the missing ones, takes the
 window from the target mesh (`--grid`, its cells and vertices plus a

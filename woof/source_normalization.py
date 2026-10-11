@@ -98,6 +98,9 @@ class NormalizationSpec:
     path: Path
     document: Mapping[str, object]
     pattern: re.Pattern = _field(repr=False, default=None)  # type: ignore[assignment]
+    #: A path-matched document's grammar for the file names of the layout
+    #: it replaced, still accepted; None when it declares none.
+    name_pattern: re.Pattern | None = _field(repr=False, default=None)
 
     @property
     def fields(self) -> Mapping[str, Mapping[str, object]]:
@@ -145,18 +148,6 @@ class NormalizationSpec:
             return ()
         return tuple(_level_key(x) for x in levels["values"])
 
-    @property
-    def matches_path(self) -> bool:
-        """Whether the object grammar reads the path, not only the name.
-
-        A publisher that names every object the same and tells them apart
-        by directory (DWD's v1 tree: ``.../T/lvt1/150/lv1/90/r/<run>/s/
-        PT000H00M.grib2``) declares ``objects.match = "path"``; its pattern
-        is then searched against the end of the object's path.
-        """
-
-        return self.document["objects"].get("match", "name") == "path"  # type: ignore[index]
-
     def selector_for(self, name: str, level: int | None):
         """The seven message-metadata values the native side checks."""
 
@@ -183,26 +174,38 @@ class NormalizationSpec:
                 int(s["level_type"]), float(first),
                 int(s["second_level_type"]), float(second))
 
+    @property
+    def matches_paths(self) -> bool:
+        """Whether objects are named by their key path, not their file name.
+
+        DWD's open-data v1 tree calls every object ``PT{HHH}H00M.grib2``;
+        the field, level and run are the directories above it, so a
+        document reading that layout declares ``objects.match = "path"``.
+        """
+
+        return self.document["objects"].get("match") == "path"  # type: ignore[index]
+
     def output_name(self, path: Path) -> str:
         rename = self.document["objects"]["output_rename"]  # type: ignore[index]
         return path.name.removesuffix(".bz2").replace(
             rename["from"], rename["to"], 1)
 
     def output_name_for(self, obj: "InputObject") -> str:
-        """The normalized file's name: renamed, or built from the identity.
+        """One object's normalized file name, from what it IS.
 
-        A path-matched publisher's object names collide (every v1 object
-        is ``PT{HHH}H00M.grib2``), so its document declares an
-        ``output_template`` and the name is spelt from what the object IS.
+        A path-matched object's own file name says only its step, so its
+        output is named from its identity through ``objects.output_template``
+        (tokens ``{kind}``, ``{cycle}``, ``{field}``, ``{lead_part}`` --
+        ``_FFF`` or empty -- and ``{level_part}`` -- ``_LEVEL`` or empty).
         """
 
-        template = self.document["objects"].get("output_template")  # type: ignore[index]
-        if template is None:
+        if not self.matches_paths:
             return self.output_name(obj.path)
-        return str(template).format(
+        template = str(self.document["objects"]["output_template"])  # type: ignore[index]
+        return template.format(
             kind=obj.kind, cycle=obj.cycle, field=obj.field,
-            lead_suffix="" if obj.lead is None else f"_{obj.lead:03d}",
-            level_suffix="" if obj.level is None else f"_{obj.level}")
+            lead_part="" if obj.lead is None else f"_{obj.lead:03d}",
+            level_part="" if obj.level is None else f"_{obj.level}")
 
 
 def _level_key(value) -> int | str:
@@ -210,6 +213,67 @@ def _level_key(value) -> int | str:
 
     text = str(value)
     return int(text) if text.isdigit() else text
+
+
+#: The tokens a path-matched document's ``output_template`` may spell.
+OUTPUT_TEMPLATE_TOKENS = frozenset({"kind", "cycle", "field", "lead_part",
+                                    "level_part"})
+#: How a path-matched document reads a level directory: as a ladder KEY
+#: (the default), or as the field's first fixed-surface VALUE, which is
+#: what DWD v1 names its level directories by (85000 Pa, 0.005 m).
+PATH_LEVEL_MATCHES = frozenset({"key", "first_surface_value"})
+
+
+def _check_path_objects(objects, path: Path) -> None:
+    """A path-matched document's ``objects`` block, checked at load."""
+
+    try:
+        pattern = re.compile(str(objects.get("pattern")))
+    except re.error as exc:
+        raise ValueError(f"{path.name} objects.pattern does not compile: {exc}") from exc
+    groups = set(pattern.groupindex)
+    if not {"field", "cycle", "lead"} <= groups:
+        raise ValueError(
+            f"{path.name} objects.pattern must capture field, cycle and lead; "
+            f"it captures {sorted(groups)}")
+    if objects.get("name_pattern") is not None:
+        try:
+            legacy = re.compile(str(objects["name_pattern"]))
+        except re.error as exc:
+            raise ValueError(
+                f"{path.name} objects.name_pattern does not compile: {exc}") from exc
+        if not {"kind", "cycle", "lead", "level", "field"} <= set(legacy.groupindex):
+            raise ValueError(
+                f"{path.name} objects.name_pattern must capture kind, cycle, "
+                "lead, level and field")
+    formats = objects.get("path_cycle_format")
+    if not (isinstance(formats, str) or (
+            isinstance(formats, list) and formats
+            and all(isinstance(item, str) for item in formats))):
+        raise ValueError(
+            f"{path.name} objects must name its path_cycle_format (one "
+            "strptime format, or a list of them tried in order)")
+    if objects.get("level_match", "key") not in PATH_LEVEL_MATCHES:
+        raise ValueError(
+            f"{path.name} objects.level_match is {objects.get('level_match')!r}; "
+            f"the stage reads {sorted(PATH_LEVEL_MATCHES)}")
+    template = objects.get("output_template")
+    if not isinstance(template, str):
+        raise ValueError(f"{path.name} objects must name its output_template")
+    import string
+    tokens = {name for _text, name, _spec, _conv in string.Formatter().parse(template)
+              if name is not None}
+    # Named breakage: a template without the cycle, lead or level names
+    # distinct inputs alike, and each normalized output overwrites the
+    # last, leaving one lead of a field where the series had several.
+    required = OUTPUT_TEMPLATE_TOKENS - {"kind"}
+    if not tokens <= OUTPUT_TEMPLATE_TOKENS or not required <= tokens:
+        raise ValueError(
+            f"{path.name} objects.output_template spells {sorted(tokens)}; it "
+            f"must name {sorted(required)} and reads only "
+            f"{sorted(OUTPUT_TEMPLATE_TOKENS)}")
+    if "/" in template or "\\" in template:
+        raise ValueError(f"{path.name} objects.output_template must name a file")
 
 
 def _check_document(document, path: Path) -> None:
@@ -224,17 +288,12 @@ def _check_document(document, path: Path) -> None:
         if key not in document:
             raise ValueError(f"{path.name} omits the required key {key!r}")
     objects = document["objects"]
-    match = objects.get("match", "name")
-    if match not in ("name", "path"):
+    if objects.get("match", "name") not in ("name", "path"):
         raise ValueError(
-            f"{path.name} objects.match is {match!r}; the stage reads an "
-            "object's 'name' or its 'path'")
-    if match == "path" and not isinstance(objects.get("output_template"), str):
-        # Named breakage: path-matched objects share one file name, and the
-        # renamed outputs would overwrite each other in one directory.
-        raise ValueError(
-            f"{path.name} matches object paths and must declare an "
-            "output_template, because its objects share their file names")
+            f"{path.name} objects.match is {objects.get('match')!r}; the stage "
+            "matches an object by its file 'name' or its key 'path'")
+    if objects.get("match") == "path":
+        _check_path_objects(objects, path)
     fields = document["fields"]
     for name, row in fields.items():
         if row.get("mode") not in REMAP_METHODS:
@@ -295,7 +354,9 @@ def load_document(path: Path) -> NormalizationSpec:
         bridge=str(document["bridge"]), source_id=str(document["source_id"]),
         profile=str(document["profile"]), path=path,
         document=MappingProxyType(document),
-        pattern=re.compile(str(document["objects"]["pattern"])))
+        pattern=re.compile(str(document["objects"]["pattern"])),
+        name_pattern=(re.compile(str(document["objects"]["name_pattern"]))
+                      if document["objects"].get("name_pattern") else None))
 
 
 def load_normalization(name: str) -> NormalizationSpec:
@@ -352,50 +413,151 @@ class InputObject:
         return self.spec.selector_for(self.field, self.level)
 
 
+def _path_level(spec: NormalizationSpec, field: str, surface: str | None,
+                text: str) -> int | None:
+    """The ladder key a v1 level directory names, or None when it names none.
+
+    ``surface`` (the ``lvt1`` directory) must be the field's own first
+    fixed-surface type.  With ``level_match = "first_surface_value"`` the
+    directory is the surface VALUE the selector resolves to -- 85000 for
+    the 850 hPa key, 0.005 for soil key 5 -- so the ladder the document
+    already declares is the whole translation and no second table can
+    disagree with it.
+    """
+
+    row = spec.fields[field]
+    if row.get("levels") is None:
+        return None
+    if surface is not None and int(surface) != int(row["selector"]["level_type"]):
+        return None
+    if spec.document["objects"].get("level_match", "key") == "first_surface_value":
+        try:
+            value = float(text)
+        except ValueError:
+            return None
+        for key in spec.levels_for(field):
+            first = spec.selector_for(field, key)[4]
+            if math.isclose(first, value, rel_tol=1e-9, abs_tol=1e-12):
+                return key
+        return None
+    keys = {str(key) for key in row["levels"]["values"]}
+    # A decimal key is the publisher's own spelling (DWD v1 soil "0.005").
+    return _level_key(text) if text in keys else None
+
+
+def path_cycle_formats(objects: Mapping[str, object]) -> tuple[str, ...]:
+    """A path-matched document's run spellings, in the order they are tried.
+
+    One format, or a list: the fetch writes DWD's v1 run directory without
+    its colon (``2026-10-11T0000``, as Windows file systems require) while
+    the key, and trees fetched before that change, spell it
+    ``2026-10-11T00:00``, so a document names both.
+    """
+
+    formats = objects["path_cycle_format"]
+    return (formats,) if isinstance(formats, str) else tuple(formats)  # type: ignore[arg-type]
+
+
+def _path_cycle(spec: NormalizationSpec, text: str, label: str) -> datetime:
+    for fmt in path_cycle_formats(spec.document["objects"]):  # type: ignore[arg-type]
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"invalid {spec.source_id} run in {label}")
+
+
+def _parse_path_object(spec: NormalizationSpec, path: Path) -> InputObject:
+    """One object of a key-path layout (``objects.match = "path"``).
+
+    The pattern is searched against the TAIL of the POSIX path, so the
+    object can sit under any output directory; the kind comes from the
+    field's own row, and a time-invariant object, which the publisher
+    posts at step 0 only, carries no lead.
+    """
+
+    text = path.as_posix()
+    match = spec.pattern.search(text)
+    if match is None:
+        raise ValueError(
+            f"{spec.source_id} requires its publisher's key layout "
+            f"(FIELD[/lvt1/TYPE/lv1/LEVEL]/r/RUN/s/STEP.grib2), not {text!r}")
+    g = match.groupdict()
+    moment = _path_cycle(spec, g["cycle"], text)
+    if moment.minute or moment.second:
+        raise ValueError(f"invalid {spec.source_id} run in {text}")
+    if moment.hour not in spec.cadence["cycle_hours"]:
+        raise ValueError(
+            f"{spec.source_id} cycles are "
+            + ", ".join(f"{h:02d}" for h in spec.cadence["cycle_hours"])
+            + " UTC")
+    cycle = moment.strftime(spec.cycle_format)
+    field = g["field"]
+    row = spec.fields.get(field)
+    lead = int(g["lead"])
+    level_text, surface = g.get("level"), g.get("surface")
+    valid = row is not None
+    level = None
+    kind = str(row["kind"]) if row is not None else ""
+    if valid:
+        declared = spec.levels_for(field)
+        if level_text is None:
+            valid = not declared and surface is None
+        else:
+            level = _path_level(spec, field, surface, level_text)
+            valid = level is not None
+    if valid and kind == INVARIANT_KIND:
+        valid = lead == 0
+        lead = None
+    elif valid:
+        step = int(spec.cadence["step_hours"])
+        valid = 0 <= lead <= spec.horizon_hours(moment.hour) and lead % step == 0
+    if not valid:
+        raise ValueError(
+            f"object is outside the {spec.source_id} product/cadence "
+            f"contract: {text}")
+    return InputObject(spec, path, cycle, kind, field, lead, level)
+
+
 def parse_object(spec: NormalizationSpec, path: str | Path) -> InputObject:
     path = Path(path).resolve()
     _path_token(path)
-    by_path = spec.matches_path
-    # A path-matched object's name is the same for every object, so a
-    # message names the whole path.
-    label = path.as_posix() if by_path else path.name
-    match = (spec.pattern.search(path.as_posix()) if by_path
-             else spec.pattern.fullmatch(path.name))
+    pattern = spec.pattern
+    if spec.matches_paths:
+        # A path-matched document may still name the file-name grammar of
+        # the layout it replaced (``objects.name_pattern``), so bytes
+        # already on disk from that layout still prepare.
+        if spec.name_pattern is None or spec.pattern.search(path.as_posix()):
+            return _parse_path_object(spec, path)
+        if spec.name_pattern.fullmatch(path.name) is None:
+            return _parse_path_object(spec, path)
+        pattern = spec.name_pattern
+    match = pattern.fullmatch(path.name)
     if match is None:
         raise ValueError(
             f"{spec.source_id} requires its publisher's native object names, "
-            f"not {label!r}")
+            f"not {path.name!r}")
     g = match.groupdict()
     try:
         cycle = datetime.strptime(g["cycle"], spec.cycle_format)
     except ValueError as exc:
-        raise ValueError(f"invalid {spec.source_id} cycle in {label}") from exc
-    if cycle.hour not in spec.cadence["cycle_hours"] or cycle.minute:
+        raise ValueError(f"invalid {spec.source_id} cycle in {path.name}") from exc
+    if cycle.hour not in spec.cadence["cycle_hours"]:
         raise ValueError(
             f"{spec.source_id} cycles are "
             + ", ".join(f"{h:02d}" for h in spec.cadence["cycle_hours"])
             + " UTC")
     lead = None if g["lead"] is None else int(g["lead"])
-    level = None if g["level"] is None else _level_key(g["level"])
-    field = g["field"]
+    level = None if g["level"] is None else int(g["level"])
+    field, kind = g["field"], g["kind"]
     row = spec.fields.get(field)
-    # A tree names no kind: the field's own row does.
-    kind = g.get("kind") or (row["kind"] if row is not None else None)
     valid = row is not None and row["kind"] == kind
-    if valid and g.get("level_type") is not None:
-        # The tree's level-type directory must be the one the field's
-        # selector reads: a pressure-level T must not pass for a model level.
-        valid = int(g["level_type"]) == int(row["selector"]["level_type"])
     if valid and kind == INVARIANT_KIND:
         declared = spec.levels_for(field)
         invariant_level = g.get("invariant_level")
         if declared and invariant_level is not None:
             level = int(invariant_level)
-        if by_path:
-            # The tree files a once-per-cycle object under step 0.
-            valid = lead == 0
-            lead = None
-        valid = valid and lead is None and ((level in declared) if declared else (level is None and invariant_level in (None, "0")))
+        valid = lead is None and ((level in declared) if declared else (level is None and invariant_level in (None, "0")))
     elif valid:
         step = int(spec.cadence["step_hours"])
         horizon = spec.horizon_hours(cycle.hour)
@@ -405,10 +567,8 @@ def parse_object(spec: NormalizationSpec, path: str | Path) -> InputObject:
     if not valid:
         raise ValueError(
             f"object is outside the {spec.source_id} product/cadence "
-            f"contract: {label}")
-    # The native stage reads the cycle as YYYYMMDDHH whatever the
-    # publisher spells (gdt101_remap's same_reference_time).
-    return InputObject(spec, path, f"{cycle:%Y%m%d%H}", kind, field, lead, level)
+            f"contract: {path.name}")
+    return InputObject(spec, path, g["cycle"], kind, field, lead, level)
 
 
 def _expected_state(spec: NormalizationSpec) -> set[tuple[str, str, int | None]]:
@@ -891,7 +1051,7 @@ def _check_wps_time_coverage(spec: NormalizationSpec, path: Path,
         raise ValueError(
             f"{spec.source_id} requires WPS interval_seconds={spacing}, "
             f"not {interval!r}")
-    cycle = datetime.strptime(objects[0].cycle, "%Y%m%d%H")
+    cycle = datetime.strptime(objects[0].cycle, spec.cycle_format)
     earliest = cycle + timedelta(hours=min(leads))
     latest = cycle + timedelta(hours=max(leads))
     declared = []

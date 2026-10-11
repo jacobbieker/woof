@@ -25,7 +25,10 @@ FIXTURE = (Path(__file__).with_name("fixtures")
 NORMALIZER = "icon-global-ml-gdt101-model-level-v1"
 PROFILE = "icon-global-ml-grib2-v1"
 CYCLE = datetime(2026, 10, 11, 0)
+#: The run as DWD's key spells it, and as the fetch writes it on disk
+#: (no colon: Windows file systems refuse one in a file name).
 RUN = "2026-10-11T00:00"
+LOCAL_RUN = "2026-10-11T0000"
 MODEL_LEVELS = tuple(range(1, 121))
 HALF_LEVELS = tuple(range(1, 122))
 MESH_CELLS = 2949120
@@ -153,21 +156,33 @@ def test_objects_are_named_by_the_v1_tree_below_p_on_both_rungs():
     plan = fetch_routes.resolve_request("icon-global-ml", cycle=CYCLE, hours=1,
                                         cadence=1)
     names = {obj.relpath for obj in plan.objects}
-    assert f"T/lvt1/150/lv1/120/r/{RUN}/s/PT001H00M.grib2" in names
-    assert f"HHL/lvt1/150/lv1/121/r/{RUN}/s/PT000H00M.grib2" in names
-    assert f"T_SO/lvt1/106/lv1/0.005/r/{RUN}/s/PT000H00M.grib2" in names
-    assert f"W_SO/lvt1/106/lv1/7.29/r/{RUN}/s/PT001H00M.grib2" in names
-    assert f"PS/r/{RUN}/s/PT001H00M.grib2" in names
+    assert f"T/lvt1/150/lv1/120/r/{LOCAL_RUN}/s/PT001H00M.grib2" in names
+    assert f"HHL/lvt1/150/lv1/121/r/{LOCAL_RUN}/s/PT000H00M.grib2" in names
+    assert f"T_SO/lvt1/106/lv1/0.005/r/{LOCAL_RUN}/s/PT000H00M.grib2" in names
+    assert f"W_SO/lvt1/106/lv1/7.29/r/{LOCAL_RUN}/s/PT001H00M.grib2" in names
+    assert f"PS/r/{LOCAL_RUN}/s/PT001H00M.grib2" in names
     # HHL is published at step 0 only, whatever lead the window starts at.
     assert not any(name.startswith("HHL/") and "PT000H00M" not in name
                    for name in names)
+    # The key keeps DWD's colon; the local path is the key below p/ with
+    # the run directory's colon dropped.
     for obj in plan.objects:
-        assert obj.relpath == obj.key and not obj.relpath.startswith(("p/", "upstream/"))
-        assert obj.url == f"https://opendata.dwd.de/weather/nwp/v1/m/icon/p/{obj.key}"
-    assert plan.supplement_files == (Path(f"HSURF/r/{RUN}/s/PT000H00M.grib2"),)
-    mirror = fetch_routes.route_for("icon-global-ml").host("source-coop")
-    assert mirror.base == "https://data.source.coop/bkr/icon/icon/p"
-    assert mirror.retention_hours is None
+        assert obj.key.startswith("p/") and f"/r/{RUN}/" in obj.key
+        assert obj.relpath == obj.key[2:].replace(RUN, LOCAL_RUN)
+        assert ":" not in obj.relpath
+        assert obj.url == f"https://opendata.dwd.de/weather/nwp/v1/m/icon/{obj.key}"
+    assert plan.supplement_files == (Path(f"HSURF/r/{LOCAL_RUN}/s/PT000H00M.grib2"),)
+    route = fetch_routes.route_for("icon-global-ml")
+    assert (route.layout, route.mirror_prefix) == ("mirror", "p/")
+    assert route.attribution == "Source: Deutscher Wetterdienst (DWD), CC BY 4.0"
+    # The same two rungs as icon-global, the mirror's runs listed first.
+    pressure = fetch_routes.route_for("icon-global")
+    assert ([(h.name, h.base, h.retention_hours, h.serves_from) for h in route.hosts]
+            == [(h.name, h.base, h.retention_hours, h.serves_from)
+                for h in pressure.hosts])
+    mirror = route.host("source-coop")
+    assert mirror.base == "https://data.source.coop/bkr/icon/icon"
+    assert mirror.retention_hours is None and mirror.run_listing is not None
 
 
 def test_a_later_window_still_fetches_the_step0_invariants():
@@ -220,8 +235,9 @@ def test_the_route_table_loader_refuses_an_unknown_layout_or_bare_ceiling(monkey
 def test_tokens_render_the_v1_spellings():
     context = fetch_routes._cycle_context(datetime(2026, 8, 25, 12))
     assert context["RUN_ISO"] == "2026-08-25T12:00"
-    assert fetch_routes._lead_context(7)["STEP_ISO"] == "PT007H00M"
-    assert fetch_routes._lead_context(180)["STEP_ISO"] == "PT180H00M"
+    cycle = datetime(2026, 8, 25, 12)
+    assert fetch_routes._lead_context(context, cycle, 7)["STEP_ISO"] == "PT007H00M"
+    assert fetch_routes._lead_context(context, cycle, 180)["STEP_ISO"] == "PT180H00M"
     assert {"RUN_ISO", "STEP_ISO"} <= fetch_routes.PATH_TOKENS
     route = SimpleNamespace(axes=MappingProxyType({"soil": (MappingProxyType({
         "names": ["T_SO"], "levels": ["0.0", "0.005", "14.58"]}),)}))
@@ -257,6 +273,24 @@ def test_every_invariant_height_is_required(spec):
         norm.validate_inventory(spec, paths)
 
 
+@pytest.mark.parametrize("run", [LOCAL_RUN, RUN])
+def test_both_run_directory_spellings_read_as_one_object(run, spec):
+    """The colon-free directory the fetch writes, and the colon one that
+    fetches before it wrote, are the same object with the same output."""
+
+    t90 = norm.parse_object(
+        spec, Path(f"/data/icon/T/lvt1/150/lv1/90/r/{run}/s/PT003H00M.grib2"))
+    assert t90.identity == ("2026101100", "model-level", "T", 3, 90)
+    assert t90.output_name == (
+        "icon_global_ml_regular-lat-lon_model-level_2026101100_003_90_T.grib2")
+    soil = norm.parse_object(
+        spec, Path(f"/data/icon/T_SO/lvt1/106/lv1/0.005/r/{run}/s/PT000H00M.grib2"))
+    assert (soil.field, soil.level, soil.lead) == ("T_SO", "0.005", 0)
+    hhl = norm.parse_object(
+        spec, Path(f"/data/icon/HHL/lvt1/150/lv1/121/r/{run}/s/PT000H00M.grib2"))
+    assert (hhl.kind, hhl.level, hhl.lead) == ("time-invariant", 121, None)
+
+
 @pytest.mark.parametrize("key", [
     # temperature on a pressure level is not a model level
     f"T/lvt1/100/lv1/100/r/{RUN}/s/PT000H00M.grib2",
@@ -275,6 +309,8 @@ def test_every_invariant_height_is_required(spec):
     # not a cycle hour, and not on the hour
     "PS/r/2026-10-11T03:00/s/PT000H00M.grib2",
     "PS/r/2026-10-11T00:30/s/PT000H00M.grib2",
+    "PS/r/2026-10-11T0300/s/PT000H00M.grib2",
+    "PS/r/2026-10-11T0030/s/PT000H00M.grib2",
     # the legacy flat name is a different product's grammar
     "icon_global_icosahedral_single-level_2026101100_000_PS.grib2",
 ])

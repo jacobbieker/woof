@@ -272,10 +272,29 @@ def test_a_level_one_field_lacks_is_named(tmp_path: Path) -> None:
 
 def test_a_missing_surface_field_and_mesh_record_are_named(tmp_path: Path) -> None:
     root = icon.tree_root(make_tree(tmp_path, skip=("PS", "CLON")))
-    with pytest.raises(GlobalIntermediateRefusal, match="p/PS/r/2026-09-27T12:00/s/PT000H00M.grib2"):
+    with pytest.raises(GlobalIntermediateRefusal, match="p/PS/r/2026-09-27T1200/s/PT000H00M.grib2"):
         icon.locate_lead(root, icon.ICON_GLOBAL_ROWS["icon-global"], CYCLE, 0)
     with pytest.raises(GlobalIntermediateRefusal, match="CLON"):
         icon.locate_invariants(root, CYCLE)
+
+
+def test_a_tree_written_with_the_colon_still_reads(tmp_path: Path) -> None:
+    """New fetches write ``r/2026-09-27T1200/`` (Windows refuses a colon);
+    a tree fetched before that holds ``r/2026-09-27T12:00/``."""
+
+    make_tree(tmp_path / "new")
+    new = icon.tree_root(tmp_path / "new")
+    assert (new / "PS" / "r" / "2026-09-27T1200").is_dir()
+    old_root = tmp_path / "old" / "p"
+    for path in new.rglob("*.grib2"):
+        moved = old_root / Path(str(path.relative_to(new)).replace("T1200", "T12:00"))
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        moved.write_bytes(path.read_bytes())
+    old = icon.tree_root(tmp_path / "old")
+    objects = icon.locate_lead(old, icon.ICON_GLOBAL_ROWS["icon-global"], CYCLE, 0)
+    assert len(objects) == 5 * len(PL) + 10 + 3 + 3
+    assert all("/r/2026-09-27T12:00/" in o.path.as_posix() for o in objects)
+    assert set(icon.locate_invariants(old, CYCLE)) == {"CLAT", "CLON", "FR_LAND", "HSURF"}
 
 
 def test_model_levels_need_one_more_half_level(tmp_path: Path) -> None:
@@ -292,6 +311,9 @@ def test_the_tree_root_is_found_or_refused(tmp_path: Path) -> None:
     make_tree(tmp_path)
     assert icon.tree_root(tmp_path) == tmp_path / "p"
     assert icon.tree_root(tmp_path / "p") == tmp_path / "p"
+    # ``woof fetch`` writes the tree below p/: its --out is the root.
+    (tmp_path / "fetched" / "CLAT").mkdir(parents=True)
+    assert icon.tree_root(tmp_path / "fetched") == tmp_path / "fetched"
     (tmp_path / "flat").mkdir()
     with pytest.raises(GlobalIntermediateRefusal, match="holds no p/ tree"):
         icon.tree_root(tmp_path / "flat")

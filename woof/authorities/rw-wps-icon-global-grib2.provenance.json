@@ -1,6 +1,8 @@
 {
  "schema": "gpuwm-icon-global-invariant-surface-provenance-v1",
  "source": "DWD ICON global R03B07 (nominal 13 km), GDT 101, normalized by gdt101_remap",
+ "attribution": "Source: Deutscher Wetterdienst (DWD), CC BY 4.0",
+ "acquisition": "DWD open-data v1 tree (opendata.dwd.de/weather/nwp/v1/m/icon/p/), or its source.coop mirror (data.source.coop/bkr/icon/icon/p/) for runs DWD has dropped",
  "field": "terrain_height",
  "selector": {
   "format": "grib2",

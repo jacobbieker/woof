@@ -28,9 +28,13 @@ the GFS and ECMWF rows use:
 Inputs are the ICON v1 open-data tree as DWD publishes it, mirrored under
 ``--grib-dir``::
 
-    p/<PARAM>[/lvt1/<100|150|106>/lv1/<Pa|ordinal|metres>]/r/<YYYY-MM-DDTHH:MM>/s/PT<HHH>H00M.grib2
+    [p/]<PARAM>[/lvt1/<100|150|106>/lv1/<Pa|ordinal|metres>]/r/<YYYY-MM-DDTHHMM>/s/PT<HHH>H00M.grib2
 
 (historical runs come from the same ``p/`` tree on the source.coop mirror).
+``woof fetch`` writes the tree below ``p/`` and spells the run directory
+without the key's colon (``2026-10-11T0000``; Windows file systems refuse a
+colon); a tree written with the colon (``2026-10-11T00:00``), as fetches
+before 2026-10-11 wrote it, is read as well.
 The regional half of the ICON door -- a limited-area mesh, or a
 ``--from-plan``/``--point`` box -- is not this module's; see
 :func:`woof.hex.met_intermediate_door.icon_target_kind`.
@@ -292,28 +296,49 @@ def classify_mesh(path: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # the inputs: the v1 tree under --grib-dir
 # ---------------------------------------------------------------------------
+#: A run directory's on-disk spellings, in the order they are looked for:
+#: ``2026-10-11T0000``, which ``woof fetch`` writes (a colon is not a legal
+#: file-name character on Windows), then DWD's key spelling
+#: ``2026-10-11T00:00``, which fetches before 2026-10-11 wrote.
+RUN_DIR_FORMATS = ("%Y-%m-%dT%H%M", "%Y-%m-%dT%H:%M")
+
+
 def tree_root(grib_dir: Path) -> Path:
-    """The ``p/`` directory of the mirrored v1 tree, or a refusal."""
+    """The root of the mirrored v1 tree, or a refusal.
+
+    That is the ``p/`` directory when there is one, as on the publisher;
+    ``woof fetch`` writes the tree below ``p/``, so a ``--grib-dir`` holding
+    the per-field directories itself (its ``CLAT`` mesh record first) is
+    the root too.
+    """
 
     root = Path(grib_dir).expanduser()
     if not root.is_dir():
         raise GlobalIntermediateRefusal(f"--grib-dir {root} is not a directory")
     if (root / "p").is_dir():
         return root / "p"
-    if root.name == "p":
+    if root.name == "p" or (root / "CLAT").is_dir():
         return root
     raise GlobalIntermediateRefusal(
         f"--grib-dir {root} holds no p/ tree; the ICON door reads the v1 layout "
-        f"p/<PARAM>[/lvt1/<type>/lv1/<level>]/r/<YYYY-MM-DDTHH:MM>/s/PT<HHH>H00M.grib2"
+        f"[p/]<PARAM>[/lvt1/<type>/lv1/<level>]/r/<YYYY-MM-DDTHHMM>/s/PT<HHH>H00M.grib2"
     )
 
 
 def object_path(root: Path, field: IconField, level_text: str | None,
                 cycle: datetime, lead: int) -> Path:
+    """Where one object is: the colon-free run directory, or the colon one.
+
+    The colon-free path (:data:`RUN_DIR_FORMATS`) unless only the colon
+    spelling is on disk; a missing object is named by the colon-free path.
+    """
+
     base = root / field.name
     if field.levels is not None:
         base = base / "lvt1" / str(field.level_type_path()) / "lv1" / str(level_text)
-    return base / "r" / f"{cycle:%Y-%m-%dT%H:%M}" / "s" / f"PT{int(lead):03d}H00M.grib2"
+    paths = [base / "r" / f"{cycle:{fmt}}" / "s" / f"PT{int(lead):03d}H00M.grib2"
+             for fmt in RUN_DIR_FORMATS]
+    return next((path for path in paths if path.is_file()), paths[0])
 
 
 def levels_present(root: Path, field: IconField, cycle: datetime, lead: int) -> list[str]:
@@ -899,4 +924,5 @@ __all__ = [
     "resolve_remap",
     "run_icon_global_intermediate",
     "tree_root",
+    "RUN_DIR_FORMATS",
 ]

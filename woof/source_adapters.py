@@ -634,6 +634,28 @@ _ECMWF_OPEN_DOOR = ArchiveWindow(
     ("https://data.ecmwf.int/forecasts/",),
     checked_at="2026-09-25", retention_hours=72.0,
 )
+#: ICON global's two hosts, measured 2026-10-11: DWD's open-data v1 tree
+#: keeps the last four runs, and the source.coop mirror of the same p/
+#: keys is the archive behind it.  Both icon-global and icon-global-ml
+#: read them.  Only the p/ tree is read; the year
+#: archives under the mirror are not.
+_ICON_GLOBAL_DOOR = ArchiveWindow(
+    "dwd", "",
+    "DWD's open-data v1 tree keeps the last four ICON global runs and "
+    "drops the oldest while the next one posts, so a run is served for "
+    "about 27 h; older runs are read from the source.coop mirror.",
+    ("https://opendata.dwd.de/weather/nwp/v1/m/icon/p/T_2M/r/",),
+    checked_at="2026-10-11", retention_hours=27.0,
+)
+_ICON_GLOBAL_SOURCE_COOP = ArchiveWindow(
+    "source-coop", "2026-08-25T12",
+    "The source.coop mirror of DWD's v1 p/ tree holds runs from "
+    "2026-08-25 12Z, about a day and a half behind DWD. Some runs are "
+    "absent or held only in part; the fetch lists each run first and "
+    "refuses a part-run with the missing objects named.",
+    ("https://data.source.coop/bkr?list-type=2&delimiter=/&prefix=icon/icon/p/T/lvt1/100/lv1/85000/r/",),
+    checked_at="2026-10-11",
+)
 _ICON_EU_DOOR = ArchiveWindow(
     "dwd", "",
     "DWD's open-data door keeps about one day of ICON-EU cycles and there "
@@ -648,21 +670,6 @@ _ICON_D2_DOOR = ArchiveWindow(
     "to publish, and there is no archive behind it.",
     ("https://opendata.dwd.de/weather/nwp/icon-d2/grib/00/t_2m/",),
     checked_at="2026-09-27", retention_hours=24.0,
-)
-_ICON_V1_DOOR = ArchiveWindow(
-    "dwd", "",
-    "DWD's v1 open-data tree keeps about one day of ICON global runs; the "
-    "source.coop mirror of the same tree is the archive behind it.",
-    ("https://opendata.dwd.de/weather/nwp/v1/m/icon/p/PS/r/",),
-    checked_at="2026-10-11", retention_hours=24.0,
-)
-_ICON_COOP_ARCHIVE = ArchiveWindow(
-    "source-coop", "2026-08-25T12",
-    "The source.coop mirror of DWD's v1 ICON tree begins at the 2026-08-25 "
-    "12Z run; its completeness is per run and per field, and an object it "
-    "lacks fails the fetch by name.",
-    ("https://data.source.coop/bkr/icon?list-type=2&delimiter=/&prefix=icon/icon/p/HHL/lvt1/150/lv1/121/r/",),
-    checked_at="2026-10-11",
 )
 _MSC_DATAMART_DOOR = ArchiveWindow(
     "msc", "",
@@ -883,6 +890,7 @@ _ADAPTERS = (
     ),
     _adapter(
         "icon-global",
+        archives=(_ICON_GLOBAL_DOOR, _ICON_GLOBAL_SOURCE_COOP),
         name="ICON global 13 km (DWD)",
         aliases=("icon", "icon-13km", "dwd-icon", "dwd-icon-global"),
         upstream_model_id="icon",
@@ -908,12 +916,18 @@ _ADAPTERS = (
             "degrees, and seals raw-to-normalized provenance before prep. "
             "18 pressure levels (30..1000 hPa), TERRA soil and sea ice. "
             "Three-hour forcing; 00/12Z to f180, 06/18Z to f120. "
+            "Fetched as plain GRIB2 from DWD's open-data v1 tree "
+            "(opendata.dwd.de/weather/nwp/v1/m/icon/p/, the last four runs), "
+            "then from the source.coop mirror of the same keys for runs "
+            "from 2026-08-25 12Z; a mirror run is listed first and a "
+            "part-run is refused naming the missing objects. "
+            "Source: Deutscher Wetterdienst (DWD), CC BY 4.0. "
             "No observation assimilation or stock-WRF certification is implied."
         ),
     ),
     _adapter(
         "icon-global-ml",
-        archives=(_ICON_V1_DOOR, _ICON_COOP_ARCHIVE),
+        archives=(_ICON_GLOBAL_DOOR, _ICON_GLOBAL_SOURCE_COOP),
         name="ICON global 13 km, 120 model levels (DWD)",
         aliases=("icon-ml", "icon-global-model-level", "dwd-icon-global-ml"),
         upstream_model_id="icon",
