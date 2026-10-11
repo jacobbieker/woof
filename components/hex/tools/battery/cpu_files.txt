@@ -304,6 +304,10 @@ tests/test_met_intermediate_door.py
 # ICON global (GDT-101 field files) through gdt101_remap and met_intermediate:
 # window, file location and the whole door against stand-in binaries.
 tests/test_icon_intermediate_door.py
+# The Met Office global NetCDF door: synthetic Met Office files written with
+# netCDF4 and a stand-in met_intermediate for the GDAS land supplement (the
+# real binary is used over the tiny GDAS fixtures when it is built).
+tests/test_metoffice_intermediate.py
 # Mesh-to-mesh state remap door (one real rw_mpas_remap run when staged).
 tests/test_remap_door.py
 # GLO-30 / CGLC statics for hex cells (synthetic mesh and DEM; no network).

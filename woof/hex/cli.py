@@ -441,7 +441,10 @@ def build_parser() -> argparse.ArgumentParser:
     # met_intermediate writer without regridding.  ICON global (icon-global,
     # icon-global-ml) dispatches there too, through a gdt101_remap stage
     # (woof.hex.gdt101_door) that writes its icosahedral mesh onto a window
-    # over --grid first.  Deferred import: the door pulls numpy and the
+    # over --grid first; met-office-global dispatches to
+    # woof.hex.metoffice_intermediate, which reads the Met Office NetCDF
+    # itself and takes the missing land state from the same-cycle GDAS.
+    # Deferred import: the door pulls numpy and the
     # engine's ingest.
     from .hrrr_intermediate import add_intermediate_parser, add_lbc_parser
 

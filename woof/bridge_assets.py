@@ -320,14 +320,15 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
     # workspace since the hex source matrix minted six global sources
     # through it by hand; `woof hex intermediate --source gfs|gdas|
     # ecmwf-open-data|era5|aifs|icon-global|icon-global-ml` is the door that
-    # drives it, and a door whose binary no bundle carries is a capability
+    # drives it (and met-office-global, for its same-cycle GDAS land
+    # supplement), and a door whose binary no bundle carries is a capability
     # nobody can reach.
     BundledArtifact(
         "met_intermediate", "executable", bridges.CRATE_RELATIVE,
         bridges.BRIDGE_ENV["met_intermediate"],
         "global-source WPS intermediates for hex init/LBC "
         "(woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs|"
-        "icon-global|icon-global-ml)"),
+        "icon-global|icon-global-ml|met-office-global)"),
     BundledArtifact(
         "gpuwm_preprocess_cpu", "library", bridges.CRATE_RELATIVE,
         "WOOF_CPU_PREPROCESS_BRIDGE",
