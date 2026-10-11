@@ -394,6 +394,29 @@ def test_the_experimental_lane_skips_only_the_anchor_and_labels_the_row(chain, t
         "experimental-unanchored", "experimental-unanchored"]
 
 
+def test_the_command_line_opens_the_experimental_lane_by_flag_or_environment(
+        chain, tmp_path, monkeypatch, capsys) -> None:
+    argv = ["register", "--grid", str(chain.grid), "--static", str(chain.static),
+            "--vertical", str(chain.vertical), "--dt-seconds", "7.0"]
+    monkeypatch.delenv("WOOF_HEX_EXPERIMENTAL_DT", raising=False)
+    assert hex_main(argv + ["--name", "gshut", "--rows", str(tmp_path / "shut.json")]) != 0
+    assert "holds no timestep anchor" in capsys.readouterr().err
+    assert not (tmp_path / "shut.json").exists()
+    rows = tmp_path / "flag.json"
+    assert hex_main(argv + ["--name", "gflag", "--rows", str(rows),
+                            "--experimental-dt"]) == 0
+    monkeypatch.setenv("WOOF_HEX_EXPERIMENTAL_DT", "1")
+    assert hex_main(argv + ["--name", "genv", "--rows", str(rows)]) == 0
+    assert [(row.name, row.timestep_evidence, row.dt_seconds)
+            for row in mesh_rows.read_rows(rows)] == [
+        ("gflag", mesh_rows.EXPERIMENTAL_TIMESTEP_EVIDENCE, 7.0),
+        ("genv", mesh_rows.EXPERIMENTAL_TIMESTEP_EVIDENCE, 7.0)]
+    monkeypatch.setenv("WOOF_HEX_EXPERIMENTAL_DT", "yes")
+    capsys.readouterr()
+    assert hex_main(argv + ["--name", "gbad", "--rows", str(rows)]) != 0
+    assert "neither 1" in capsys.readouterr().err
+
+
 def test_register_refuses_a_spec_that_is_not_the_grids_own(chain, tmp_path) -> None:
     spec = tmp_path / "other.json"
     spec.write_text(json.dumps({"background_km": 500.0, "regions": []}))
