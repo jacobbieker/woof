@@ -350,7 +350,7 @@ RETIRED_CADENCES = {
     "icon-d2": (1, 3, 6), "gem-gdps": (3, 6),
     # Added after A173, so no list ever shipped: its default 3 h is what a
     # window that names no cadence must keep resolving to.
-    "met-office-global": (3,),
+    "met-office-global": (3,), "icon-global-ml": (3,),
 }
 
 
