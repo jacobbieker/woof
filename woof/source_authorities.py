@@ -174,17 +174,21 @@ _PACKAGED_PROFILES = MappingProxyType({
     # A173 moved the mapping and normalization digests: DWD posts every
     # field hourly to f078 (listed 2026-10-01 00Z), so both now declare the
     # publisher's 1 h spacing and take its whole multiples; 3 h stays the
-    # default (the registry row and the route's default_cadence).
+    # default (the registry row and the route's default_cadence).  The
+    # provenance and normalization digests moved again when the route
+    # read DWD's open-data v1 tree (2026-10-11): the normalization names
+    # objects by their v1 key path, and the provenance carries the DWD
+    # attribution and the two acquisition hosts.
     "icon-global-grib2-v1": _profile(
         "rw-wps-icon-global-grib2",
         source_format="grib2",
         mapping="7bf357241b1be4682df42371a2c722db1437b8df9d004d1e7851e00a61e7853f",
         composition="a75dc9deabf72d750eb5d3f333274ed85d2d190e69a09f5aaf08f5c44891604b",
-        provenance="1770e4b1c4092d53db0ee5b18aa371465215c04325f4de2610f0d4f740eb0b09",
+        provenance="1eefcffb219da2d1bdee82be49f0beba220dfaa95590814a7e1d3d04e0824b11",
         data_role="icon_global_invariant_surface",
         provenance_role="icon_global_invariant_surface_provenance",
         input_normalizer="icon-gdt101-pressure-v1",
-        normalization="d1fc9b43d7c4815cbb1f09e0a456a68097310718643a66b9b887001cc0106e07",
+        normalization="a331733db17118979cea8f98bacd08475053522cd1361f5407cfc8651f5dc286",
     ),
     # DWD's 2.2 km ICON-D2 on its native R19B07 mesh (542,040 cells), the
     # same GDT-101 normalization with its own mesh, ladder and cadence rows.

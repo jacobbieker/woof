@@ -217,9 +217,9 @@ def test_the_stage_reads_its_limits_from_the_document(tmp_path, shipped):
     document["limits"]["max_input_files"] = 2
     spec = norm.load_document(write(tmp_path, document))
     names = [
-        "icon_global_icosahedral_time-invariant_2026091500_CLAT.grib2",
-        "icon_global_icosahedral_time-invariant_2026091500_CLON.grib2",
-        "icon_global_icosahedral_time-invariant_2026091500_HSURF.grib2",
+        "CLAT/r/2026-09-15T00:00/s/PT000H00M.grib2",
+        "CLON/r/2026-09-15T00:00/s/PT000H00M.grib2",
+        "HSURF/r/2026-09-15T00:00/s/PT000H00M.grib2",
     ]
     with pytest.raises(ValueError, match="bounded file count"):
         norm.validate_inventory(spec, [tmp_path / n for n in names])
@@ -243,7 +243,42 @@ def test_a_cycle_hour_outside_the_declared_grid_is_named(tmp_path, shipped):
     spec = norm.load_document(write(tmp_path, copy.deepcopy(shipped)))
     with pytest.raises(ValueError, match="cycles are 00, 06, 12, 18 UTC"):
         norm.parse_object(
-            spec, tmp_path /
-            "icon_global_icosahedral_time-invariant_2026091503_CLAT.grib2")
+            spec, tmp_path / "CLAT/r/2026-09-15T03:00/s/PT000H00M.grib2")
     with pytest.raises(ValueError, match="not 03"):
         spec.horizon_hours(3)
+
+
+@pytest.mark.parametrize("change,message", [
+    (("match", "suffix"), "objects.match"),
+    (("output_template", None), "output_template"),
+    (("output_template", "{field}_{member}.grib2"), "output_template"),
+    # Every lead of a field would land on one name and overwrite the last.
+    (("output_template", "icon_{kind}_{cycle}{level_part}_{field}.grib2"),
+     "must name"),
+    (("name_pattern", r"icon_(?P<field>[A-Z]+)\.grib2"), "name_pattern must capture"),
+    (("output_template", "sub/{cycle}{lead_part}{level_part}_{field}.grib2"),
+     "must name a file"),
+    (("level_match", "nearest"), "level_match"),
+    (("path_cycle_format", None), "path_cycle_format"),
+    (("pattern", r"(?P<field>[A-Z]+)/r/(?P<cycle>[^/]+)\.grib2\Z"),
+     "capture field, cycle and lead"),
+])
+def test_a_path_matched_document_is_checked_at_load(tmp_path, shipped, change, message):
+    """A key-path layout's grammar fails at load, naming the key, not at the first object."""
+
+    document = copy.deepcopy(shipped)
+    key, value = change
+    if value is None:
+        document["objects"].pop(key)
+    else:
+        document["objects"][key] = value
+    with pytest.raises(ValueError, match=message):
+        norm.load_document(write(tmp_path, document))
+
+
+def test_a_path_matched_object_sits_under_any_output_directory(tmp_path, shipped):
+    spec = norm.load_document(write(tmp_path, copy.deepcopy(shipped)))
+    for root in (tmp_path, tmp_path / "a" / "deeper" / "fetch"):
+        obj = norm.parse_object(
+            spec, root / "U_10M/r/2026-09-15T12:00/s/PT078H00M.grib2")
+        assert obj.identity == ("2026091512", "single-level", "U_10M", 78, None)

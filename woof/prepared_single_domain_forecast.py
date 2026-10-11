@@ -1386,6 +1386,7 @@ def runner_capabilities() -> dict[str, object]:
                 "ecmwf-open-data": "uniform-positive-whole-hour",
                 "icon-eu": "uniform-positive-whole-hour",
                 "icon-d2": "uniform-positive-whole-hour",
+                "icon-global": "uniform-positive-whole-hour",
                 "rap": "uniform-positive-whole-hour",
                 "rap-native": "uniform-positive-whole-hour",
                 "rrfs": "uniform-positive-whole-hour",

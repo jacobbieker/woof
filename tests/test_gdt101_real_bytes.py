@@ -1,18 +1,23 @@
 """Real DWD octets, against the selectors the shipped document declares.
 
 The fixture beside this file holds GRIB2 Sections 0 through 6, verbatim, of
-twenty-six objects downloaded from opendata.dwd.de for the 2026-09-15 12 UTC
-ICON global cycle.  Section 7 is left out on purpose: these octets are the
-field IDENTITY, which is exactly what a selector addresses, and carrying the
-packed values would add megabytes that prove nothing more.
+twenty-six objects downloaded from DWD's open-data v1 tree
+(opendata.dwd.de/weather/nwp/v1/m/icon/p/) for the 2026-10-11 00 UTC ICON
+global cycle, each named by its key below p/ -- the layout the fetch writes.
+Section 7 is left out on purpose: these octets are the field IDENTITY, which
+is exactly what a selector addresses, and carrying the packed values would add
+megabytes that prove nothing more.  (v1 objects are single plain GRIB2
+messages with CCSDS packing, template 5.42; the whole 236-object f000/f003
+window was checked the same way and decoded through gdt101_remap.)
 
 Everything the normalization document claims about those bytes is checked here
 against the bytes: originating centre, grid template, cell count, product
 template, reference time, the forecast unit and lead, and every field's
 discipline, category, parameter and both fixed surfaces.  A selector edited in
-the document without DWD having changed its product fails this test.
+the document without DWD having changed its product fails this test, and so
+does a v1 level directory that is not the surface value its selector names.
 
-Source: Deutscher Wetterdienst (CC BY 4.0).
+Source: Deutscher Wetterdienst (DWD), CC BY 4.0.
 """
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ import pytest
 from woof import source_normalization as norm
 
 FIXTURE = (Path(__file__).with_name("fixtures")
-           / "icon-global-2026091512-headers.json")
+           / "icon-global-2026101100-v1-headers.json")
 MISSING_OCTET = 0xFF
 MISSING_WORD = 0xFFFF_FFFF
 
@@ -111,7 +116,7 @@ def test_every_real_object_carries_the_declared_identity(fixture, spec, index):
     # Only product template 0 is addressed by a seven-value selector; an
     # ensemble or statistically-processed template would need its own.
     assert seen["product_template"] == 0
-    assert seen["reference_time"] == (2026, 9, 15, 12, 0, 0)
+    assert seen["reference_time"] == (2026, 10, 11, 0, 0, 0)
 
 
 @pytest.mark.parametrize("index", range(26))
@@ -142,15 +147,15 @@ def test_the_forecast_lead_is_minutes_and_matches_the_object_name(
 def test_the_soil_filename_five_really_is_half_a_centimetre(fixture, spec):
     """The one number in this product a reader would get wrong by division."""
 
-    row = next(r for r in fixture["objects"] if r["object"].endswith("_5_T_SO.grib2"))
+    row = next(r for r in fixture["objects"] if r["object"].startswith("T_SO/lvt1/106/lv1/0.005/"))
     assert observed(row)["level_value"] == pytest.approx(0.005)
     deeper = next(r for r in fixture["objects"]
-                  if r["object"].endswith("_2_T_SO.grib2"))
+                  if r["object"].startswith("T_SO/lvt1/106/lv1/0.02/"))
     assert observed(deeper)["level_value"] == pytest.approx(0.02)
 
 
 def test_the_water_column_layers_are_bounded_pairs(fixture, spec):
-    row = next(r for r in fixture["objects"] if r["object"].endswith("_3_W_SO.grib2"))
+    row = next(r for r in fixture["objects"] if r["object"].startswith("W_SO/lvt1/106/lv1/0.03/"))
     seen = observed(row)
     assert seen["level_type"] == 106 and seen["second_level_type"] == 106
     assert (seen["level_value"], seen["second_level_value"]) == pytest.approx((0.03, 0.09))
@@ -159,7 +164,7 @@ def test_the_water_column_layers_are_bounded_pairs(fixture, spec):
 def test_terrain_rides_a_bounded_surface_not_a_bare_ground_level(fixture, spec):
     """HSURF's second surface is type 101 (mean sea level), and the selector says so."""
 
-    row = next(r for r in fixture["objects"] if r["object"].endswith("_HSURF.grib2"))
+    row = next(r for r in fixture["objects"] if r["object"].startswith("HSURF/"))
     seen = observed(row)
     assert (seen["discipline"], seen["category"], seen["parameter"]) == (0, 3, 6)
     assert (seen["level_type"], seen["second_level_type"]) == (1, 101)

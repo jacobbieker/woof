@@ -61,18 +61,31 @@
   },
   "routes": {
     "icon-global": {
-      "label": "DWD ICON global 13 km native GDT-101, bz2 objects",
-      "measured": "2026-09-15 (catalogue inspection; live decode gate pending)",
+      "label": "DWD ICON global 13 km native GDT-101, open-data v1 GRIB2 objects",
+      "measured": "2026-10-11 (DWD v1 tree and the source.coop mirror listed and HEADed; v1 bytes decoded through gdt101_remap)",
+      "attribution": "Source: Deutscher Wetterdienst (DWD), CC BY 4.0",
       "hosts": [
         {
           "name": "dwd",
-          "base": "https://opendata.dwd.de/weather/nwp/icon/grib",
+          "base": "https://opendata.dwd.de/weather/nwp/v1/m/icon",
           "default": true,
-          "retention_hours": 24,
-          "why": "DWD rolling native ICON publisher; no historical archive is claimed"
+          "retention_hours": 27,
+          "why": "DWD's open-data v1 tree, the publisher: it keeps the last four runs and drops the oldest while the next one posts, so a run is served for about 24 h plus the next day's posting time. Measured 2026-10-11 on p/T_2M/r/: the 10 Oct 06Z run was still listed at 08:52 UTC, 26 h 52 min after its cycle, with the 11 Oct 06Z run posting beside it, and was gone at 09:14 UTC (27 h 14 min). The legacy /weather/nwp/icon/ tree this row replaced stops after 2026-11-30 (DWD open-data newsletter, September 2026)"
+        },
+        {
+          "name": "source-coop",
+          "base": "https://data.source.coop/bkr/icon/icon",
+          "retention_hours": null,
+          "serves_from": "2026-08-25T12:00",
+          "run_listing": {
+            "bucket": "https://data.source.coop/bkr",
+            "key_prefix": "icon/icon/",
+            "why": "the mirror holds many runs only in part: on 2026-10-11 p/T/lvt1/100/lv1/85000 at 2026-08-25T12:00 listed only an index.html mirror page with the GRIB answering 404, and 2026-09-24T12:00 listed nothing; of nine runs listed for this route's f000 and f003 objects (236 each), only 2026-09-29T12:00 and 2026-10-08T00:00 were whole, the others lacking 16 to 220 objects (2026-10-10T00:00, still being copied, lacked the invariants and FI). So each run is listed before anything is fetched from it, and a run missing any requested object is refused with the missing objects named"
+          },
+          "why": "the source.coop mirror of DWD's v1 p/ tree, the same keys under icon/icon/: the archive for runs DWD has dropped. Listed 2026-10-11: runs from 2026-08-25T12:00 (166 runs of T at 850 hPa, some cycles absent), the newest 2026-10-10T00:00, about a day and a half behind DWD; no expiry is claimed. It answers urllib's default client with HTTP 403 and serves the same request with a User-Agent, which every fetch here sends"
         }
       ],
-      "host_note": "Rolling publisher directory, not a historical archive. Publication lag is a conservative planning allowance, not a measured guarantee.",
+      "host_note": "DWD keeps about a day; source.coop mirrors the p/ tree from 2026-08-25T12Z with a lag of about a day and a half, so a run can sit between the two for a while. Only DWD's v1 p/ layout is read: the legacy bz2 tree and the year archives under the mirror are not.",
       "coverage_note": "Global source. Prep selects the regional WPS extent plus halo and rejects pole-containing or more-than-180-degree intermediate windows explicitly.",
       "cycle_hours": [
         0,
@@ -81,9 +94,9 @@
         18
       ],
       "publication_lag": [
-        {"cycle_hours": null, "hours": 2.64, "per_lead_hours": 0.0045, "late_hours": 0.2, "measured": "2026-09-30 posting watch (each object's own time on the ladder head: directory listings and HEAD, leads HEADed as they posted): 4 cycles 29 Sep 12Z to 30 Sep 06Z: f000 at + 2 h 40 min to 2 h 43 min, f180 at + 3 h 29 min"}
+        {"cycle_hours": null, "hours": 2.62, "per_lead_hours": 0.0038, "late_hours": 0.1, "measured": "2026-10-11 DWD v1 directory listings, 4 cycles 10 Oct 06Z to 11 Oct 00Z: f000 at + 2 h 37 min to 2 h 40 min, f120 at + 3 h 09 min to 3 h 11 min, f180 at + 3 h 18 min to 3 h 20 min; late_hours rounded up from the 3 min spread"}
       ],
-      "posting": {"shape": "rolling", "ready_check": "objects", "late_after_minutes": 60, "poll_seconds": 30, "why": "about 116 per-field bz2 objects per lead on opendata.dwd.de, no index, posted in lead order over about 50 min: f000 at + 2 h 40 min, f180 at + 3 h 29 min (29 Sep 12Z to 30 Sep 06Z)"},
+      "posting": {"shape": "rolling", "ready_check": "objects", "late_after_minutes": 60, "poll_seconds": 30, "why": "one GRIB2 object per field, level and lead on opendata.dwd.de's v1 tree, no index, posted in lead order over about 41 min: f000 at + 2 h 37 min, f180 at + 3 h 18 min (10 Oct 06Z to 11 Oct 00Z)"},
       "ladders": [
         {
           "cycle_hours": [
@@ -119,9 +132,10 @@
         }
       ],
       "default_cadence": 3,
-      "layout": "flat",
+      "layout": "mirror",
+      "mirror_prefix": "p/",
       "axes": {
-        "field": [
+        "pressure": [
           {
             "names": [
               "FI",
@@ -133,26 +147,28 @@
             "leveltype": "pressure-level",
             "level_format": "%d",
             "levels": [
-              30,
-              50,
-              70,
-              100,
-              150,
-              200,
-              250,
-              300,
-              400,
-              500,
-              600,
-              700,
-              800,
-              850,
-              900,
-              925,
-              950,
-              1000
+              3000,
+              5000,
+              7000,
+              10000,
+              15000,
+              20000,
+              25000,
+              30000,
+              40000,
+              50000,
+              60000,
+              70000,
+              80000,
+              85000,
+              90000,
+              92500,
+              95000,
+              100000
             ]
-          },
+          }
+        ],
+        "single": [
           {
             "names": [
               "H_SNOW",
@@ -167,23 +183,24 @@
             ],
             "leveltype": "single-level",
             "levels": null
-          },
+          }
+        ],
+        "soil": [
           {
             "names": [
               "T_SO"
             ],
             "leveltype": "soil-level",
-            "level_format": "%d",
             "levels": [
-              0,
-              2,
-              5,
-              6,
-              18,
-              54,
-              162,
-              486,
-              1458
+              "0.0",
+              "0.005",
+              "0.02",
+              "0.06",
+              "0.18",
+              "0.54",
+              "1.62",
+              "4.86",
+              "14.58"
             ]
           },
           {
@@ -191,16 +208,15 @@
               "W_SO"
             ],
             "leveltype": "soil-level",
-            "level_format": "%d",
             "levels": [
-              0,
-              1,
-              3,
-              9,
-              27,
-              81,
-              243,
-              729
+              "0.0",
+              "0.01",
+              "0.03",
+              "0.09",
+              "0.27",
+              "0.81",
+              "2.43",
+              "7.29"
             ]
           }
         ],
@@ -230,33 +246,51 @@
           "role": "state",
           "primary": true,
           "leads": "all",
-          "axis": "field",
-          "path": "{HH}/{field_lower}/icon_global_icosahedral_{leveltype}_{YYYYMMDDHH}_{FFF}{LEVEL_SUFFIX}_{FIELD}.grib2.bz2",
+          "axis": "pressure",
+          "path": "p/{FIELD}/lvt1/100/lv1/{LEVEL}/r/{RUN_ISO}/s/{STEP_ISO}.grib2",
           "idx_sidecar": null,
-          "magic": "BZh"
+          "magic": "GRIB"
+        },
+        {
+          "role": "state",
+          "primary": true,
+          "leads": "all",
+          "axis": "single",
+          "path": "p/{FIELD}/r/{RUN_ISO}/s/{STEP_ISO}.grib2",
+          "idx_sidecar": null,
+          "magic": "GRIB"
+        },
+        {
+          "role": "state",
+          "primary": true,
+          "leads": "all",
+          "axis": "soil",
+          "path": "p/{FIELD}/lvt1/106/lv1/{LEVEL}/r/{RUN_ISO}/s/{STEP_ISO}.grib2",
+          "idx_sidecar": null,
+          "magic": "GRIB"
         },
         {
           "role": "invariant",
           "primary": true,
           "leads": "none",
           "axis": "invariant",
-          "path": "{HH}/{field_lower}/icon_global_icosahedral_time-invariant_{YYYYMMDDHH}_{FIELD}.grib2.bz2",
+          "path": "p/{FIELD}/r/{RUN_ISO}/s/PT000H00M.grib2",
           "idx_sidecar": null,
-          "magic": "BZh"
+          "magic": "GRIB"
         },
         {
           "role": "geometry",
           "primary": true,
           "leads": "none",
           "axis": "geometry",
-          "path": "{HH}/{field_lower}/icon_global_icosahedral_time-invariant_{YYYYMMDDHH}_{FIELD}.grib2.bz2",
+          "path": "p/{FIELD}/r/{RUN_ISO}/s/PT000H00M.grib2",
           "idx_sidecar": null,
-          "magic": "BZh"
+          "magic": "GRIB"
         }
       ],
       "record_subset": {
         "supported": false,
-        "why": "each object is already ONE GRIB2 message after bunzip2 -- the file IS the record, so there is nothing left to subset"
+        "why": "each v1 object is already ONE plain GRIB2 message -- the file IS the record, so there is nothing left to subset"
       },
       "prep": {
         "source": "icon-global",

@@ -966,3 +966,197 @@ def test_every_route_prints_the_whole_prep_line_it_published(source,
         assert flag in comments, flag
     for role in document["unbound_supplement_roles"]:
         assert f"--supplement {role}=" in comments, role
+
+
+# --------------------------------------------------------------------------
+# DWD open-data v1 keys and a mirror whose runs can be incomplete
+# --------------------------------------------------------------------------
+
+_V1_RUN = datetime(2026, 10, 8, 0)
+_V1_NOW = datetime(2026, 10, 11, 9)
+
+
+def _v1_plan(cycle=_V1_RUN, now=_V1_NOW, **options):
+    return fetch_routes.resolve_request(
+        "icon-global", cycle=cycle, hours=3, now=now, **options)
+
+
+def test_v1_run_and_step_tokens_and_verbatim_string_levels():
+    plan = _v1_plan(cycle=datetime(2026, 10, 11, 18),
+                    now=datetime(2026, 10, 11, 22))
+    keys = {obj.key for obj in plan.objects}
+    # The colon is literal in the key; the step is PT{HHH}H00M.
+    assert "p/T/lvt1/100/lv1/3000/r/2026-10-11T18:00/s/PT003H00M.grib2" in keys
+    # A string level is the publisher's spelling, kept exactly: metres
+    # with the trailing zero DWD writes, never an integer format of them.
+    assert "p/T_SO/lvt1/106/lv1/0.0/r/2026-10-11T18:00/s/PT000H00M.grib2" in keys
+    assert "p/W_SO/lvt1/106/lv1/0.01/r/2026-10-11T18:00/s/PT000H00M.grib2" in keys
+    assert "p/T_SO/lvt1/106/lv1/14.58/r/2026-10-11T18:00/s/PT003H00M.grib2" in keys
+    assert {"RUN_ISO", "STEP_ISO"} <= fetch_routes.PATH_TOKENS
+    # 116 objects a lead (90 pressure, 9 single, 17 soil) and four invariants.
+    assert len(plan.objects) == 2 * 116 + 4
+    assert len({obj.relpath for obj in plan.objects}) == len(plan.objects)
+
+
+def test_a_mirror_layout_must_name_the_prefix_every_key_starts_with(monkeypatch):
+    document = json.loads(fetch_routes._table_path().read_text())
+    row = document["routes"]["icon-global"]
+    row["mirror_prefix"] = "q/"
+    monkeypatch.setattr(fetch_routes, "_load_table", lambda: document)
+    with pytest.raises(ValueError, match="is mirrored below 'q/'"):
+        fetch_routes._build_routes()
+    row["mirror_prefix"] = "p/"
+    row["layout"] = "nested"
+    with pytest.raises(ValueError, match="declares layout 'nested'"):
+        fetch_routes._build_routes()
+
+
+def _held(plan, *, drop=()):
+    keys = {obj.key for obj in plan.objects} - set(drop)
+
+    def lister(endpoint, directory):
+        assert endpoint.name == "source-coop"
+        return frozenset(key for key in keys if key.startswith(directory))
+    return lister
+
+
+def test_a_whole_mirror_run_is_listed_then_fetched_with_its_receipts(tmp_path):
+    plan = _v1_plan()
+    assert fetch_routes.listed_head(plan)
+    seen: list[str] = []
+    lines: list[str] = []
+    payload = fetch_routes.run_plan(
+        plan, out=tmp_path, downloader=_fake_downloader(seen),
+        lister=_held(plan), progress=lines.append)
+    assert len(seen) == len(plan.objects)
+    assert all(url.startswith("https://data.source.coop/bkr/icon/icon/p/")
+               for url in seen)
+    assert payload["endpoints"]["run_listing"] == {
+        "endpoint": "source-coop", "directories": 120,
+        "objects": len(plan.objects), "complete": True}
+    assert payload["attribution"] == "Source: Deutscher Wetterdienst (DWD), CC BY 4.0"
+    assert any("holds run 2026-10-08T00:00 whole" in line for line in lines)
+    assert (tmp_path / "T/lvt1/100/lv1/85000/r/2026-10-08T00:00/s/"
+            "PT003H00M.grib2").is_file()
+
+
+def test_a_part_run_on_the_mirror_is_refused_naming_what_is_missing(tmp_path):
+    plan = _v1_plan()
+    gone = ["p/HSURF/r/2026-10-08T00:00/s/PT000H00M.grib2"]
+    gone += [obj.key for obj in plan.objects if obj.key.startswith("p/FI/")][:3]
+    seen: list[str] = []
+    with pytest.raises(ValueError) as refusal:
+        fetch_routes.run_plan(plan, out=tmp_path,
+                              downloader=_fake_downloader(seen),
+                              lister=_held(plan, drop=gone),
+                              progress=lambda *_: None)
+    text = str(refusal.value)
+    assert "holds run 2026-10-08T00:00 only in part: 4 of 236" in text
+    assert "missing by field: HSURF 1, FI 3" in text
+    for key in gone:
+        assert key in text
+    assert seen == []
+
+
+def test_a_run_the_mirror_has_not_copied_is_refused_as_not_held(tmp_path):
+    plan = _v1_plan(cycle=datetime(2026, 10, 10, 0))
+    with pytest.raises(ValueError) as refusal:
+        fetch_routes.run_plan(plan, out=tmp_path,
+                              downloader=_fake_downloader([]),
+                              lister=_held(plan, drop=[o.key for o in plan.objects]),
+                              progress=lambda *_: None)
+    text = str(refusal.value)
+    assert "holds none of the 236 requested objects of run 2026-10-10T00:00" in text
+    assert "has not copied this one" in text
+    assert "dwd keeps about 27 h" in text
+
+
+def test_a_listed_rung_names_itself_in_a_whole_ladder_refusal():
+    """The run listing must not make the endpoint unusable as a table key."""
+
+    from woof import fetch_endpoints
+
+    rungs = fetch_endpoints.ladder("icon-global")
+    assert len({rung: True for rung in rungs}) == 2
+    text = fetch_endpoints.ladder_refusal(
+        "fetch icon-global", [(rungs[0], "404"), (rungs[1], "404")])
+    assert "source-coop" in text and "dwd" in text
+
+
+def test_dwd_serves_a_fresh_run_without_any_listing(tmp_path):
+    plan = _v1_plan(cycle=datetime(2026, 10, 11, 0),
+                    now=datetime(2026, 10, 11, 4))
+    assert not fetch_routes.listed_head(plan)
+
+    def lister(endpoint, directory):
+        raise AssertionError("a run DWD serves is not listed on the mirror")
+    payload = fetch_routes.run_plan(
+        plan, out=tmp_path, downloader=_fake_downloader([]), lister=lister,
+        progress=lambda *_: None)
+    assert "run_listing" not in payload["endpoints"]
+
+
+def test_a_run_before_the_mirror_and_past_dwd_is_refused_before_a_byte(tmp_path):
+    plan = _v1_plan(cycle=datetime(2026, 8, 1, 0), now=None)
+    assert [rung.name for rung in plan.ladder] == ["dwd"]
+    seen: list[str] = []
+    with pytest.raises(ValueError, match=(
+            r"no host holds this run: .*source-coop \(data\.source\.coop\) "
+            r"holds runs from 2026-08-25T12 UTC")):
+        fetch_routes.run_plan(plan, out=tmp_path,
+                              downloader=_fake_downloader(seen),
+                              progress=lambda *_: None)
+    assert seen == []
+    pinned = _v1_plan(cycle=datetime(2026, 8, 1, 0), now=None,
+                      host="source-coop")
+    with pytest.raises(ValueError, match="holds runs from 2026-08-25T12 UTC"):
+        fetch_routes.run_plan(pinned, out=tmp_path / "pinned",
+                              downloader=_fake_downloader(seen),
+                              progress=lambda *_: None)
+    assert seen == []
+
+
+def test_the_run_listing_follows_continuations_and_sends_a_user_agent():
+    from woof import fetch_endpoints
+
+    coop = fetch_endpoints.endpoint_named("icon-global", "source-coop")
+    ns = 'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"'
+    pages = [
+        f'<ListBucketResult {ns}><IsTruncated>true</IsTruncated>'
+        '<NextContinuationToken>a+b/c=</NextContinuationToken>'
+        '<Contents><Key>icon/icon/p/T/r/2026-10-08T00:00/s/PT000H00M.grib2</Key></Contents>'
+        '</ListBucketResult>',
+        f'<ListBucketResult {ns}><IsTruncated>false</IsTruncated>'
+        '<Contents><Key>icon/icon/p/T/r/2026-10-08T00:00/s/PT003H00M.grib2</Key></Contents>'
+        '<Contents><Key>icon/icon/p/T/r/2026-10-08T00:00/s/index.html</Key></Contents>'
+        '</ListBucketResult>',
+    ]
+    asked = []
+
+    class Reply:
+        def __init__(self, body):
+            self.body = body.encode()
+            self.status = 200
+
+        def read(self, limit=-1):
+            return self.body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def opener(request, timeout=None):
+        asked.append((request.full_url, request.get_header("User-agent")))
+        return Reply(pages[len(asked) - 1])
+
+    keys = fetch_routes.list_run_directory(
+        coop, "p/T/r/2026-10-08T00:00/s/", opener=opener)
+    assert keys == {"p/T/r/2026-10-08T00:00/s/PT000H00M.grib2",
+                    "p/T/r/2026-10-08T00:00/s/PT003H00M.grib2",
+                    "p/T/r/2026-10-08T00:00/s/index.html"}
+    assert asked[0][0] == ("https://data.source.coop/bkr?list-type=2&prefix="
+                           "icon/icon/p/T/r/2026-10-08T00%3A00/s/")
+    assert asked[1][0].endswith("&continuation-token=a%2Bb%2Fc%3D")
+    assert all(agent for _url, agent in asked)

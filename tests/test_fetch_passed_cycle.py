@@ -51,11 +51,10 @@ def _rolling_door(source: str, *, lag_hours: int = 3, dropped=()):
 #: ICON-EU's measured publication lag (f000 at + 2 h 40 min, 2026-09-29) now
 #: starts the walk at its 09Z run, which the door holds at + 3 h; the route
 #: used to declare 5 h and so never asked about it.  ICON global declares 5 h.
-_NEWEST = {"icon-global": "2026-09-28T06Z", "icon-eu": "2026-09-28T09Z"}
+_NEWEST = {"icon-eu": "2026-09-28T09Z"}
 
 
 @pytest.mark.parametrize("source,cycle,age", [
-    ("icon-global", datetime(2026, 9, 27, 0), 36),
     ("icon-eu", datetime(2026, 9, 27, 6), 30),
 ])
 def test_a_cycle_past_the_doors_retention_is_refused_as_gone(source, cycle, age):
@@ -76,7 +75,7 @@ def test_a_cycle_past_the_doors_retention_is_refused_as_gone(source, cycle, age)
                                       progress=lambda line: None)
 
 
-@pytest.mark.parametrize("source", ["icon-global", "icon-eu"])
+@pytest.mark.parametrize("source", ["icon-eu"])
 def test_a_cycle_not_yet_published_is_still_told_to_wait(source):
     cycle = datetime(2026, 9, 28, 12)
 
@@ -112,8 +111,25 @@ def _rolling_doors():
 
 
 def test_the_rolling_doors_are_table_rows():
-    # The two ICON routes the defect was met on are among them by their rows alone.
-    assert {"icon-global", "icon-eu"} <= set(_rolling_doors())
+    # The ICON route the defect was met on is among them by its row alone.
+    # ICON global, where it was met too, now has the source.coop mirror of
+    # DWD's v1 tree behind it, so it is no longer a rolling door.
+    assert "icon-eu" in set(_rolling_doors())
+    assert "icon-global" not in set(_rolling_doors())
+
+
+def test_an_icon_global_run_past_dwds_window_goes_straight_to_the_mirror():
+    """The 2026-09-27T00 run the defect was met on is now fetched, from the mirror."""
+
+    cycle = datetime(2026, 9, 27, 0)
+    assert [rung.name for rung in fetch_endpoints.serving_ladder(
+        "icon-global", cycle=cycle, now=NOW)] == ["source-coop"]
+    assert [rung.name for rung in fetch_endpoints.serving_ladder(
+        "icon-global", cycle=NOW.replace(hour=6), now=NOW)] == ["dwd"]
+    plan = fetch_routes.resolve_request("icon-global", cycle=cycle, hours=3, now=NOW)
+    assert fetch_routes.listed_head(plan)
+    assert all(obj.url.startswith("https://data.source.coop/bkr/icon/icon/p/")
+               for obj in plan.objects)
 
 
 @pytest.mark.parametrize("source", _rolling_doors())
@@ -178,11 +194,30 @@ def test_the_route_table_declares_each_doors_measured_retention():
     """
 
     doors = _declared_doors()
-    assert {"ecmwf-open-data", "aifs", "gem-gdps", "icon-eu", "icon-d2"} <= {
+    assert {"ecmwf-open-data", "aifs", "gem-gdps", "icon-eu", "icon-d2",
+            "icon-global"} <= {
         source for source, _window in doors}
     for source, window in doors:
         host = fetch_endpoints.endpoint_named(source, window.transport)
         assert host.retention_hours == window.retention_hours, (source, window.transport)
+
+
+def test_an_archive_rungs_first_run_is_the_date_guidances_first_run():
+    """One measurement of where a mirror begins, read by the fetch and the calendar."""
+
+    from woof import source_adapters
+    from woof.source_availability import parse_cycle
+
+    checked = 0
+    for source in fetch_routes.route_ids():
+        windows = {window.transport: window for window in
+                   source_adapters.get_source_adapter(source).archive_windows}
+        for rung in fetch_endpoints.ladder(source):
+            if rung.serves_from is None:
+                continue
+            assert parse_cycle(windows[rung.name].start) == rung.serves_from, source
+            checked += 1
+    assert checked >= 1
 
 
 @pytest.mark.parametrize("source", ["ecmwf-open-data", "aifs"])
@@ -220,3 +255,30 @@ def test_a_gem_cycle_past_the_door_is_refused_as_gone():
                               "dd.weather.gc.ca keeps only about the newest 696 h of "
                               "GEM-GDPS cycles and this one is 756 h old, with no archive "
                               "behind it, so it will not appear by waiting")
+
+
+def test_a_mirror_run_is_listed_whole_as_the_publication_check(monkeypatch):
+    """No lead-by-lead probe of a listed mirror: the run is listed, and a part-run named."""
+
+    cycle = datetime(2026, 9, 27, 0)
+    plan = fetch_routes.resolve_request("icon-global", cycle=cycle, hours=3, now=NOW)
+    held = {obj.key for obj in plan.objects}
+    gone = "p/W_SO/lvt1/106/lv1/7.29/r/2026-09-27T00:00/s/PT003H00M.grib2"
+    assert gone in held
+
+    def listed(endpoint, directory):
+        return frozenset(key for key in held if key.startswith(directory))
+
+    held.discard(gone)
+
+    def probe(url):
+        raise AssertionError("a listed mirror is not probed lead by lead")
+
+    monkeypatch.setattr(fetch_routes, "_listed_keys", listed)
+    with pytest.raises(RuntimeError, match="only in part: 1 of 236") as refusal:
+        fetch.require_published_cycle("icon-global", cycle, 3, now=NOW, probe=probe,
+                                      progress=lambda line: None)
+    assert gone in str(refusal.value)
+    held.add(gone)
+    fetch.require_published_cycle("icon-global", cycle, 3, now=NOW, probe=probe,
+                                  progress=lambda line: None)

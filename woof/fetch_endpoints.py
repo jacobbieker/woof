@@ -54,7 +54,7 @@ beats a refusal that never asked.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import errno
 import functools
@@ -186,6 +186,21 @@ class Endpoint:
     retention_hours: float | None
     why: str
     transfer_rank: int = 0
+    #: The first cycle an archive holds, measured from its own listing;
+    #: None when it holds everything its retention covers.  A cycle
+    #: before it is never asked of this rung: nothing before the first
+    #: run the archive mirrored exists there, so the ask is certain to
+    #: fail, and unlike retention this is a bound and not an estimate.
+    serves_from: datetime | None = None
+    #: How to list one run on this rung before fetching from it
+    #: (:func:`run_listing_url`), for a mirror whose runs can be
+    #: incomplete: an S3 ListObjectsV2 ``bucket`` URL and the
+    #: ``key_prefix`` that maps an object key to a bucket key.  None:
+    #: the rung serves whole runs and is asked object by object.  Kept
+    #: out of equality and the hash: endpoints key the refusal and
+    #: throttle tables, and a mapping is not hashable.
+    run_listing: Mapping[str, str] | None = field(
+        default=None, hash=False, compare=False)
 
     @property
     def host(self) -> str:
@@ -196,6 +211,15 @@ class Endpoint:
     @property
     def archive(self) -> bool:
         return self.retention_hours is None
+
+    def holds(self, cycle: datetime) -> bool:
+        """Can this endpoint hold ``cycle`` at all (see ``serves_from``)?"""
+
+        if self.serves_from is None:
+            return True
+        if cycle.tzinfo is not None:
+            cycle = cycle.astimezone(timezone.utc).replace(tzinfo=None)
+        return cycle >= self.serves_from
 
     def covers(self, age_hours: float) -> bool:
         """Does this endpoint still serve a cycle ``age_hours`` old?"""
@@ -213,6 +237,20 @@ class Endpoint:
 def _endpoint(raw: Mapping[str, object], position: int) -> Endpoint:
     retention = raw.get("retention_hours")
     rank = raw.get("transfer_rank")
+    serves_from = raw.get("serves_from")
+    listing = raw.get("run_listing")
+    if listing is not None:
+        listing = dict(listing)
+        # Named breakage: a listing row without its bucket or key prefix
+        # would list the wrong keys and call a complete run incomplete
+        # (or the reverse), and one without its evidence cannot be
+        # re-checked when the mirror changes.
+        if (not str(listing.get("bucket", "")).startswith("https://")
+                or "key_prefix" not in listing
+                or not str(listing.get("why", "")).strip()):
+            raise ValueError(
+                f"{TABLE_NAME}: endpoint {raw.get('name')} run_listing names "
+                "an https bucket, a key_prefix and why")
     return Endpoint(
         name=str(raw["name"]),
         base=str(raw["base"]),
@@ -223,6 +261,11 @@ def _endpoint(raw: Mapping[str, object], position: int) -> Endpoint:
         # and the transfer order are then the same tuple, and nothing
         # is ever probed.
         transfer_rank=(position if rank is None else int(rank)),
+        serves_from=(None if serves_from is None
+                     else datetime.fromisoformat(str(serves_from))),
+        run_listing=(None if listing is None
+                     else MappingProxyType({key: str(value)
+                                            for key, value in listing.items()})),
     )
 
 
@@ -305,9 +348,40 @@ def serving_ladder(source_id: str, *, cycle: datetime,
         return ()
     if pinned is not None:
         return (endpoint_named(source_id, pinned),)
+    # An archive whose first mirrored run is later than this cycle is
+    # not asked at all: unlike retention, ``serves_from`` is a bound.
+    holding = tuple(entry for entry in rungs if entry.holds(cycle)) or rungs
     age = cycle_age_hours(cycle, now)
-    covering = tuple(entry for entry in rungs if entry.covers(age))
-    return covering or rungs
+    serving = tuple(entry for entry in holding if entry.covers(age)) or holding
+    # A mirror whose runs can be incomplete (``run_listing``) serves a run
+    # only as its head, where the run is listed whole before anything is
+    # fetched.  Behind a publisher it would be asked object by object
+    # after a publisher failure and could leave a part-run from two hosts
+    # on disk, so it is not a fall-through rung.
+    if serving[0].run_listing is None:
+        serving = tuple(entry for entry in serving if entry.run_listing is None)
+    return serving
+
+
+def run_listing_url(endpoint: Endpoint, prefix: str,
+                    continuation: str | None = None) -> str:
+    """One S3 ListObjectsV2 page of ``prefix``, an object-key directory.
+
+    The bucket key prefix and continuation token are percent-encoded;
+    ``/`` is kept because it is the listing's own separator.
+    """
+
+    from urllib.parse import quote
+
+    if endpoint.run_listing is None:
+        raise ValueError(f"{endpoint.name} declares no run listing")
+    listing = endpoint.run_listing
+    bucket_prefix = listing["key_prefix"] + prefix.lstrip("/")
+    url = (f"{listing['bucket']}?list-type=2&prefix="
+           f"{quote(bucket_prefix, safe='/')}")
+    if continuation:
+        url += f"&continuation-token={quote(continuation, safe='')}"
+    return url
 
 
 # --------------------------------------------------------------------------
@@ -1058,7 +1132,7 @@ __all__ = [
     "cycle_age_hours", "document", "endpoint_named", "fault_reason",
     "has_ladder", "host_cap_why", "host_caps", "host_worker_cap", "ladder", "object_answer",
     "ladder_refusal", "object_available", "promote", "retry_delay",
-    "serving_ladder",
+    "run_listing_url", "serving_ladder",
     "SETTLE_BACKOFF_S", "SETTLE_PACE_BUDGET_S", "settled_object_answer",
     "TRANSIENT_ATTEMPTS", "TRANSIENT_WAIT_LIMIT_S", "Throttle", "TransferRefusal",
     "answer_code", "throttle_policy", "throttled",
