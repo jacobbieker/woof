@@ -112,3 +112,6 @@ tools/arwen-ui-vendor/**/__pycache__/
 .pixi/*
 !.pixi/config.toml
 tools/rustwx/target
+
+# A symlinked build directory is a file to git, so the target/ patterns miss it.
+tools/*/target
