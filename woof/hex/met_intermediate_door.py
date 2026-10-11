@@ -1,4 +1,4 @@
-"""Global lat-lon sources onto WPS intermediates: ``woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs``.
+"""Global sources onto WPS intermediates: ``woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs|icon-global|icon-global-ml``.
 
 THE GAP THIS CLOSES.  ``components/hex/docs/source-matrix.md`` drove GFS,
 GDAS, ECMWF IFS open data, ERA5 and AIFS through the whole hex chain to a
@@ -28,6 +28,15 @@ WHAT THIS DOOR OWNS, and nothing else:
 
 Decoding, unit conversion and the ``rrpr`` repairs are the engine's.  The
 door adds no numbers.
+
+DWD ICON global (``icon-global`` on pressure levels, ``icon-global-ml`` on
+model levels) is the one row that is not already lat-lon: it publishes one
+file per field and level on an unstructured (GDT-101) mesh.  Its rows use the
+``field-files`` layout: :mod:`woof.hex.gdt101_door` collects every file a
+lead needs, remaps them through ``gdt101_remap`` onto a regular window over
+the target mesh (``--grid``), and hands the engine one regular GRIB2 file per
+lead plus the hour-zero invariants.  From there the series is checked
+exactly like every other row.
 """
 
 from __future__ import annotations
@@ -39,11 +48,13 @@ from datetime import datetime, timedelta
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import time
 from typing import Any, Callable, Mapping, Sequence
 
 from .errors import MpasPortError
+from .gdt101_door import ICON_GLOBAL_ML, ICON_GLOBAL_PL, FieldFileProduct
 
 GLOBAL_SCHEMA = "gpuwm-hex.global-intermediate/v1"
 #: The receipt the engine prints on stdout; the door requires this one,
@@ -88,7 +99,9 @@ class GlobalSource:
     #: The interval between published leads the fetch writes by default.
     default_interval_hours: int
     #: "per-lead": one file per forecast lead; "combined": one file holds
-    #: the series and each valid time is selected out of it.
+    #: the series and each valid time is selected out of it;
+    #: "field-files": one file per field and level on an unstructured mesh,
+    #: remapped onto a window over the target mesh first (``product``).
     layout: str = "per-lead"
     #: Leads the source publishes, inclusive; None when unbounded here.
     max_hour: int | None = None
@@ -98,6 +111,10 @@ class GlobalSource:
     use_spechumd: str = "no"
     #: A short note on what the product does not carry.
     notes: str = ""
+    #: The field table and native mesh of a "field-files" row.
+    product: FieldFileProduct | None = None
+    #: The attribution the publisher's licence requires, copied into the receipt.
+    attribution: str = ""
 
     def lead_files(self, root: Path, cycle: datetime, hour: int) -> list[Path]:
         return [root / pattern.format(cycle=cycle, hour=hour) for pattern in self.file_patterns]
@@ -170,6 +187,45 @@ GLOBAL_SOURCES: Mapping[str, GlobalSource] = {
         default_interval_hours=6,
         layout="combined",
     ),
+    "icon-global": GlobalSource(
+        name="icon-global",
+        description="DWD ICON global R03B07 (~13 km icosahedral, GDT-101), 18 "
+                    "pressure levels 1000-30 hPa, from DWD's v1 open-data tree "
+                    "(one file per field and level), remapped to a 0.125-degree "
+                    "window over the target mesh",
+        map_source="dwd",
+        vtable="Vtable.ICON-GLOBAL.rw",
+        file_patterns=(),
+        default_interval_hours=3,
+        layout="field-files",
+        max_hour=180,
+        invariant_fields=("LANDSEA", "SOILHGT"),
+        product=ICON_GLOBAL_PL,
+        attribution=ICON_GLOBAL_PL.attribution,
+        notes="limited-area meshes only (a global mesh needs gdt101_remap "
+              "--global); the land mask and terrain ride the 0-hour HSURF and "
+              "FR_LAND objects",
+    ),
+    "icon-global-ml": GlobalSource(
+        name="icon-global-ml",
+        description="DWD ICON global R03B07 (~13 km icosahedral, GDT-101), 120 "
+                    "model levels with the 121 hour-zero HHL half levels, from "
+                    "DWD's v1 open-data tree, remapped to a 0.125-degree window "
+                    "over the target mesh",
+        map_source="dwd",
+        vtable="Vtable.ICON-GLOBAL-ML.rw",
+        file_patterns=(),
+        default_interval_hours=3,
+        layout="field-files",
+        max_hour=180,
+        invariant_fields=("LANDSEA", "SOILHGT", "GHT"),
+        use_spechumd="yes",
+        product=ICON_GLOBAL_ML,
+        attribution=ICON_GLOBAL_ML.attribution,
+        notes="limited-area meshes only (a global mesh needs gdt101_remap "
+              "--global); specific humidity aloft (QV, no model-level RH); "
+              "heights come from the 0-hour HHL",
+    ),
 }
 
 #: Sources with a registry row that this door refuses, by name, with the
@@ -191,8 +247,6 @@ REFUSED_SOURCES: Mapping[str, str] = {
                 "native wrfnat pair instead",
     "icon-eu": "met_intermediate has no 'dwd' map source and no slot to convert "
                "ICON's layer-mass soil moisture (kg m-2) to a fraction",
-    "icon-global": "an unstructured (GDT-101) grid, outside the WPS "
-                   "intermediate chain",
     "gem-gdps": "met_intermediate has no 'eccc-gdps' map source",
     "20crv3": "met_intermediate has no 'ncep-20crv3' map source, and the "
               "native grid is Gaussian",
@@ -234,7 +288,8 @@ def packaged_vtable(name: str) -> Path:
     if not path.is_file():
         raise GlobalIntermediateRefusal(
             f"the packaged Vtable {name} is missing from {path.parent}; this "
-            f"install is incomplete (reinstall woof)"
+            f"install is incomplete (reinstall woof) or predates the source's "
+            f"Vtable (pass --vtable FILE)"
         )
     return path
 
@@ -273,6 +328,28 @@ def resolve_engine(explicit: Path | None = None) -> Path:
             f"({evidence}); rebuild tools/grib1_bridge"
         )
     return Path(found)
+
+
+def refuse_engine_without_map_source(engine: Path, label: str) -> None:
+    """Refuse an engine whose bytes do not carry ``label`` at all.
+
+    Static and one-sided, like the contract-marker check: the engine's map
+    sources are string literals in its table, so a build without the label
+    cannot carry its bytes.  A build that does carry them may still refuse,
+    and then says so itself.
+    """
+
+    try:
+        carried = label.encode() in engine.read_bytes()
+    except OSError as error:
+        raise GlobalIntermediateRefusal(f"{engine} cannot be read ({error})") from error
+    if not carried:
+        raise GlobalIntermediateRefusal(
+            f"{engine} carries no {label!r} map source (met_intermediate's "
+            f"KNOWN_MAP_SOURCES); this build predates the {label} rules, so it would "
+            f"refuse every lead after the remap.  Rebuild tools/grib1_bridge with them, "
+            f"or pass --decoder pointing at one that has them"
+        )
 
 
 def _described(path: Path, cache: dict[Path, dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -361,6 +438,10 @@ class GlobalRequest:
     engine: Path | None = None
     vtable: Path | None = None
     workers: int = 4
+    #: "field-files" rows: the hex mesh the remap window covers.
+    window_grid: Path | None = None
+    #: "field-files" rows: a gdt101_remap overriding the bridge ladder.
+    remapper: Path | None = None
 
 
 @dataclass
@@ -371,6 +452,8 @@ class LeadPlan:
     invariants: list[Path]
     out: Path
     argv: list[str] = field(default_factory=list)
+    #: "field-files" rows: the native objects the remapped input came from.
+    native: list[Path] = field(default_factory=list)
 
     @property
     def hdate(self) -> str:
@@ -396,6 +479,12 @@ def locate_inputs(request: GlobalRequest) -> dict[int, tuple[list[Path], list[Pa
     missing: list[str] = []
     ambiguous: list[str] = []
     found: dict[int, tuple[list[Path], list[Path]]] = {}
+    if source.layout == "field-files":
+        located = _locate_field_files(request)
+        shared = list(dict.fromkeys([*located.geometry, located.land_fraction,
+                                     *(path for _, path in located.invariants)]))
+        return {lead: ([path for _, path in located.leads[lead]], shared)
+                for lead in request.leads}
     if source.layout == "combined":
         hits = _existing(source.lead_files(root, request.cycle, 0))
         if not hits:
@@ -449,6 +538,60 @@ def locate_inputs(request: GlobalRequest) -> dict[int, tuple[list[Path], list[Pa
     return found
 
 
+def _locate_field_files(request: GlobalRequest):
+    from .gdt101_door import locate_field_files
+
+    if request.source.product is None:
+        raise GlobalIntermediateRefusal(
+            f"{request.source.name} declares the field-files layout without a product table"
+        )
+    return locate_field_files(request.source.product, Path(request.grib_dir),
+                              request.cycle, request.leads)
+
+
+def stage_field_files(request: GlobalRequest, out_dir: Path, *,
+                      log: Callable[[str], None] = print):
+    """Locate, choose the window, and remap a field-files row into ``out_dir/remap``.
+
+    Returns the :class:`woof.hex.gdt101_door.RemapResult`; the caller
+    removes the remap directory if the series later fails.
+    """
+
+    from .gdt101_door import (
+        REMAP_DIR,
+        choose_remap,
+        read_target_coordinates,
+        remap_series,
+        resolve_remapper,
+    )
+
+    source = request.source
+    if request.window_grid is None:
+        raise GlobalIntermediateRefusal(
+            f"--source {source.name} is remapped from its native mesh onto a window over "
+            f"the target hex mesh; pass --grid GRID.nc (the grid, static or init file "
+            f"of the mesh the intermediates must cover)"
+        )
+    located = _locate_field_files(request)
+    lat, lon, basis = read_target_coordinates(Path(request.window_grid))
+    choice = choose_remap(lat, lon, basis)
+    remapper = resolve_remapper(request.remapper)
+    refuse_occupied_out_dir(out_dir)
+    remap_dir = out_dir / REMAP_DIR
+    if remap_dir.exists():
+        raise GlobalIntermediateRefusal(
+            f"--out-dir {out_dir} already holds {REMAP_DIR}/ from an earlier run; pass a "
+            f"fresh --out-dir"
+        )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        return remap_series(source.product, located, choice, request.cycle, remap_dir,
+                            remapper=remapper, workers=request.workers, log=log)
+    except BaseException:
+        shutil.rmtree(remap_dir, ignore_errors=True)
+        raise
+
+
 def engine_argv(
     engine: Path, vtable: Path, source: GlobalSource, plan: LeadPlan, partial: Path
 ) -> list[str]:
@@ -467,9 +610,25 @@ def engine_argv(
     return argv
 
 
-def plan_leads(request: GlobalRequest, engine: Path, vtable: Path) -> list[LeadPlan]:
-    found = locate_inputs(request)
+def plan_leads(request: GlobalRequest, engine: Path, vtable: Path,
+               staged: Any = None) -> list[LeadPlan]:
+    """One engine run per lead.  A field-files row plans over its remapped
+    GRIB (``staged``, from :func:`stage_field_files`), not the native files."""
+
     out_dir = Path(request.out_dir).expanduser().absolute()
+    native: dict[int, list[Path]] = {}
+    if request.source.layout == "field-files":
+        if staged is None:
+            raise GlobalIntermediateRefusal(
+                f"--source {request.source.name} is remapped before the engine runs; "
+                f"build_global_intermediates stages it"
+            )
+        found = {lead: ([staged.lead_gribs[lead]], [staged.invariant_grib])
+                 for lead in request.leads}
+        native = {lead: [path for _, path in staged.located.leads[lead]]
+                  for lead in request.leads}
+    else:
+        found = locate_inputs(request)
     plans: list[LeadPlan] = []
     for lead in request.leads:
         inputs, invariants = found[lead]
@@ -479,6 +638,7 @@ def plan_leads(request: GlobalRequest, engine: Path, vtable: Path) -> list[LeadP
             lead=lead, valid_time=valid,
             inputs=[p.absolute() for p in inputs],
             invariants=[p.absolute() for p in invariants], out=out,
+            native=[p.absolute() for p in native.get(lead, [])],
         )
         plan.argv = engine_argv(engine, vtable, request.source, plan, _partial(out))
         plans.append(plan)
@@ -557,7 +717,13 @@ def validate_intermediate(
             f"{path.name}: records are not on one regular lat-lon grid ({grids})"
         )
     profile_levels = sorted({float(r["level"]) for r in records if r["field"] in PROFILE_FIELDS})
-    isobaric = [lvl for lvl in profile_levels if lvl not in (SURFACE_LEVEL, MSL_LEVEL)]
+    # A 3-D pressure field selects the engines' model-level branch: its
+    # levels are model-level ordinals, not pressures, and the column top is
+    # the lowest pressure the file carries.
+    model_level = any(r["field"] in ("PRES", "PRESSURE")
+                      and float(r["level"]) not in (SURFACE_LEVEL, MSL_LEVEL) for r in records)
+    isobaric = [] if model_level else [
+        lvl for lvl in profile_levels if lvl not in (SURFACE_LEVEL, MSL_LEVEL)]
     soil_t = sorted({str(r["field"]) for r in records if str(r["field"]).startswith(("ST", "SOILT"))})
     soil_m = sorted({str(r["field"]) for r in records if str(r["field"]).startswith(("SM", "SOILM"))})
     try:
@@ -579,13 +745,38 @@ def validate_intermediate(
                  "start_lat": start_lat, "start_lon": start_lon,
                  "dlat": dlat, "dlon": dlon},
         "profile_levels": len(profile_levels),
+        "vertical": "model-level" if model_level else "isobaric",
         "isobaric_levels": len(isobaric),
-        "top_pressure_pa": min(isobaric) if isobaric else None,
+        "top_pressure_pa": (_lowest_model_pressure(path) if model_level
+                            else (min(isobaric) if isobaric else None)),
         "soil_layers": len(soil_t),
         "soil_fields": soil_t + soil_m,
         "has_rh": any(r["field"] == "RH" and float(r["level"]) not in (SURFACE_LEVEL, MSL_LEVEL) for r in records),
         "has_spechumd": any(r["field"] == "SPECHUMD" and float(r["level"]) not in (SURFACE_LEVEL, MSL_LEVEL) for r in records),
     }
+
+
+def _lowest_model_pressure(path: Path) -> float:
+    import numpy as np
+
+    from .wps_intermediate import WpsIntermediateReader
+
+    lowest: float | None = None
+    with WpsIntermediateReader(path) as reader:
+        for item in reader.iter_fields(include={"PRES", "PRESSURE"}):
+            if float(item.level) in (SURFACE_LEVEL, MSL_LEVEL) or item.values is None:
+                continue
+            values = np.asarray(item.values, dtype=np.float64)
+            if not np.all(np.isfinite(values)) or float(values.min()) <= 0.0:
+                raise GlobalIntermediateRefusal(
+                    f"{path.name}: model level {item.level:g} of {item.field} holds a "
+                    f"missing or non-positive pressure"
+                )
+            low = float(values.min())
+            lowest = low if lowest is None else min(lowest, low)
+    if lowest is None:
+        raise GlobalIntermediateRefusal(f"{path.name}: no model-level pressure could be read")
+    return lowest
 
 
 def init_switches(source: GlobalSource, files: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -657,9 +848,50 @@ def build_global_intermediates(
     else:
         vtable = packaged_vtable(source.vtable)
     out_dir = Path(request.out_dir).expanduser().absolute()
-    plans = plan_leads(request, engine, vtable)
-    refuse_occupied_out_dir(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if source.layout != "field-files":
+        plans = plan_leads(request, engine, vtable)
+        refuse_occupied_out_dir(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return _convert_series(request, engine, vtable, out_dir, plans, None, log=log)
+    # Refuse before the remap, which reads every native object: an engine
+    # that cannot take this row's label would only refuse after it.
+    refuse_engine_without_map_source(engine, source.map_source)
+    staged = stage_field_files(request, out_dir, log=log)
+    try:
+        plans = plan_leads(request, engine, vtable, staged)
+        return _convert_series(request, engine, vtable, out_dir, plans, staged, log=log)
+    except BaseException:
+        # A series is published whole or not at all, its remap included.
+        shutil.rmtree(staged.directory, ignore_errors=True)
+        raise
+
+
+def _remap_receipt(source: GlobalSource, staged: Any,
+                   digests: dict[Path, dict[str, Any]]) -> dict[str, Any]:
+    product = source.product
+    window = staged.choice.window
+    return {
+        "regridding": (
+            f"gdt101_remap {staged.choice.mode}: the native GDT-101 mesh "
+            f"({product.cells:,} cells) remapped onto a regular {window.step:g}-degree "
+            f"window over the target mesh plus its halo, from a four-neighbour plan "
+            f"built on the same-cycle CLAT, CLON and FR_LAND; atmosphere by inverse "
+            f"squared chord distance, surface fields from same-class donors, soil "
+            f"from the nearest land column, sea ice nearest on water"
+        ),
+        "remap": staged.receipt(lambda p: _described(p, digests), product),
+        "publisher": product.publisher,
+        "archive": product.archive,
+        "licence": product.licence,
+        "attribution": source.attribution,
+    }
+
+
+def _convert_series(
+    request: GlobalRequest, engine: Path, vtable: Path, out_dir: Path,
+    plans: list[LeadPlan], staged: Any, *, log: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    source = request.source
     workers = max(1, min(int(request.workers), len(plans)))
     log(f"{source.name}: {len(plans)} valid time(s) "
         f"{plans[0].hdate}..{plans[-1].hdate} through {engine.name}, {workers} worker(s)")
@@ -675,11 +907,15 @@ def build_global_intermediates(
         discard_partials()
         plan, done = failures[0]
         tail = (done.stderr or done.stdout or "").strip().splitlines()
+        # The engine's own "met_intermediate: ..." line names the fault; a
+        # multi-line refusal explains it below that line.
+        said = next((line for line in tail if line.startswith(f"{ENGINE_NAME}:")),
+                    tail[-1] if tail else "")
         raise GlobalIntermediateRefusal(
             f"met_intermediate exited {done.returncode} for f{plan.lead:03d} "
             f"({len(failures)} of {len(plans)} valid times failed); its log is "
             f"{out_dir / f'met_intermediate.f{plan.lead:03d}.log'}"
-            + (f".  It said: {tail[-1]}" if tail else "")
+            + (f".  It said: {said}" if said else "")
         )
     # Validate every file before publishing any: a series is published
     # whole or not at all, so no half-series is left for `woof hex lbc`.
@@ -701,6 +937,17 @@ def build_global_intermediates(
     except Exception:
         discard_partials()
         raise
+    # A field-files row reads hundreds of native objects per lead: digest
+    # them on the worker pool rather than one after another.
+    natives = list(dict.fromkeys(path for plan in plans for path in plan.native))
+    if staged is not None:
+        natives += [path for path in (*staged.located.geometry,
+                                      *(p for _, p in staged.located.invariants))
+                    if path not in digests]
+    if natives:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for path, row in zip(natives, pool.map(_described, natives)):
+                digests[path] = row
     for plan, receipt, elapsed, checked in checked_all:
         os.replace(_partial(plan.out), plan.out)
         checked["path"] = str(plan.out)
@@ -708,6 +955,8 @@ def build_global_intermediates(
         checked["engine_seconds"] = round(elapsed, 2)
         checked["inputs"] = [_described(p, digests) for p in plan.inputs]
         checked["invariants"] = [_described(p, digests) for p in plan.invariants]
+        if plan.native:
+            checked["native_inputs"] = [_described(p, digests) for p in plan.native]
         checked["engine_receipt"] = {
             key: receipt.get(key) for key in (
                 "schema", "map_source", "grib_messages_read", "grib_messages_matched",
@@ -740,6 +989,10 @@ def build_global_intermediates(
         "files": files,
         "init_switches": switches,
     }
+    if staged is not None:
+        receipt.update(_remap_receipt(source, staged, digests))
+    elif source.attribution:
+        receipt["attribution"] = source.attribution
     receipt_path = out_dir / "intermediate-receipt.json"
     receipt_path.write_text(
         json.dumps(receipt, indent=2, sort_keys=True, default=str) + "\n",
@@ -761,12 +1014,31 @@ def request_from_arguments(arguments: argparse.Namespace) -> GlobalRequest:
         ("--point", getattr(arguments, "point", None)),
         ("--radius-km", getattr(arguments, "radius_km", None)),
     ) if value is not None]
+    remapped = source.layout == "field-files"
+    if boxed and remapped:
+        raise GlobalIntermediateRefusal(
+            f"{', '.join(boxed)} cut a regridding box, and --source {source.name} takes "
+            f"its remap window from the target mesh itself: pass --grid GRID.nc"
+        )
     if boxed:
         raise GlobalIntermediateRefusal(
             f"{', '.join(boxed)} cut a regridding box, and --source {source.name} "
             f"is not regridded: it is written on its own uniform lat-lon grid.  "
             f"Fetch an area subset instead (`woof fetch --area`) if the file "
             f"size matters"
+        )
+    grid = getattr(arguments, "grid", None)
+    if grid is not None and not remapped:
+        raise GlobalIntermediateRefusal(
+            f"--grid places the remap window of an unstructured-mesh source "
+            f"({', '.join(n for n, s in GLOBAL_SOURCES.items() if s.layout == 'field-files')}); "
+            f"--source {source.name} is written on its own uniform lat-lon grid"
+        )
+    if remapped and grid is None:
+        raise GlobalIntermediateRefusal(
+            f"--source {source.name} is remapped from its native mesh onto a window over "
+            f"the target hex mesh; pass --grid GRID.nc (the grid, static or init file "
+            f"of the mesh the intermediates must cover)"
         )
     # Flags that belong to other rows of the shared parser (some exist only
     # once the wrfout door is in the tree; getattr keeps this row agnostic).
@@ -798,6 +1070,7 @@ def request_from_arguments(arguments: argparse.Namespace) -> GlobalRequest:
         prefix=str(getattr(arguments, "prefix", "MET") or "MET"),
         engine=getattr(arguments, "decoder", None),
         vtable=getattr(arguments, "vtable", None), workers=workers,
+        window_grid=None if grid is None else Path(grid),
     )
 
 
@@ -817,6 +1090,8 @@ def run_global_intermediate(arguments: argparse.Namespace) -> int:
         "init_switches": switches,
         "next": f"woof hex init --met {first} ... {flags}",
     }
+    if receipt.get("attribution"):
+        summary["attribution"] = receipt["attribution"]
     if len(receipt["files"]) > 1:
         summary["next_lbc"] = (
             f"woof hex lbc --grid INIT.nc --met-dir {Path(request.out_dir).expanduser().absolute()} "
@@ -852,5 +1127,6 @@ __all__ = [
     "request_from_arguments",
     "resolve_engine",
     "run_global_intermediate",
+    "stage_field_files",
     "validate_intermediate",
 ]

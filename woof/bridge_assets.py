@@ -298,7 +298,8 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
         "gdt101_remap", "executable", bridges.CRATE_RELATIVE,
         bridges.BRIDGE_ENV["gdt101_remap"],
         "unstructured GDT-101 source normalization "
-        "(woof go --source icon-global or icon-d2)"),
+        "(woof go --source icon-global or icon-d2; woof hex intermediate "
+        "--source icon-global|icon-global-ml)"),
     BundledArtifact(
         "gfs_grib2_bridge", "executable", bridges.CRATE_RELATIVE,
         bridges.BRIDGE_ENV["gfs_grib2_bridge"],
@@ -318,13 +319,15 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
     # The WPS-intermediate writer.  Its source has been in the decoder
     # workspace since the hex source matrix minted six global sources
     # through it by hand; `woof hex intermediate --source gfs|gdas|
-    # ecmwf-open-data|era5|aifs` is the door that drives it, and a door
-    # whose binary no bundle carries is a capability nobody can reach.
+    # ecmwf-open-data|era5|aifs|icon-global|icon-global-ml` is the door that
+    # drives it, and a door whose binary no bundle carries is a capability
+    # nobody can reach.
     BundledArtifact(
         "met_intermediate", "executable", bridges.CRATE_RELATIVE,
         bridges.BRIDGE_ENV["met_intermediate"],
         "global-source WPS intermediates for hex init/LBC "
-        "(woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs)"),
+        "(woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs|"
+        "icon-global|icon-global-ml)"),
     BundledArtifact(
         "gpuwm_preprocess_cpu", "library", bridges.CRATE_RELATIVE,
         "WOOF_CPU_PREPROCESS_BRIDGE",

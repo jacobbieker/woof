@@ -899,7 +899,8 @@ def request_from_arguments(arguments: argparse.Namespace) -> WrfoutRequest:
     row = source_row(arguments.source)
     for flag, value in (("--grib-dir", arguments.grib_dir), ("--cycle", arguments.cycle),
                         ("--decoder", arguments.decoder), ("--hours", arguments.hours),
-                        ("--workers", arguments.workers)):
+                        ("--workers", arguments.workers),
+                        ("--grid", getattr(arguments, "grid", None))):
         if value is not None:
             raise IntermediateRefusal(
                 f"{flag} belongs to a GRIB row; --source {row.name} reads its valid times "

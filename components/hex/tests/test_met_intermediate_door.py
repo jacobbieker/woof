@@ -87,22 +87,29 @@ def engine_receipt(hdate: str, records: int, **extra) -> dict:
 def test_the_contract_sources_are_exactly_the_admitted_rows() -> None:
     from woof.hex.hrrr_intermediate import INTERMEDIATE_SOURCES, SOURCE_ROWS
 
-    contract = {"hrrr", "gfs", "gdas", "ecmwf-open-data", "era5", "aifs"}
+    contract = {"hrrr", "gfs", "gdas", "ecmwf-open-data", "era5", "aifs",
+                "icon-global", "icon-global-ml"}
     assert contract <= set(INTERMEDIATE_SOURCES)
     assert set(INTERMEDIATE_SOURCES) == set(SOURCE_ROWS) | set(door.GLOBAL_SOURCES)
     assert not set(SOURCE_ROWS) & set(door.GLOBAL_SOURCES)
+    # The ICON rows are admitted; ICON-EU stays refused by name.
+    assert "icon-global" not in door.REFUSED_SOURCES and "icon-eu" in door.REFUSED_SOURCES
 
 
 @pytest.mark.parametrize("name", sorted(door.GLOBAL_SOURCES))
 def test_every_row_names_a_packaged_vtable_and_a_known_map_source(name: str) -> None:
     source = door.GLOBAL_SOURCES[name]
-    assert source.map_source in {"ncep-gfs", "ncep-gefs", "ncep-cdas-cfsv2", "ecmwf"}
+    assert source.map_source in {"ncep-gfs", "ncep-gefs", "ncep-cdas-cfsv2", "ecmwf", "dwd"}
+    packaged = Path(door.__file__).resolve().parents[1] / "data" / "vtables" / source.vtable
+    if source.map_source == "dwd" and not packaged.is_file():
+        pytest.skip(f"{source.vtable} ships with met_intermediate's dwd map source")
     text = door.packaged_vtable(source.vtable).read_text()
     rows = [line.split("|") for line in text.splitlines()
             if not line.lstrip().startswith(("#", "-"))]
     names = {cells[4].strip() for cells in rows if len(cells) >= 7}
     assert "LANDSEA" in names
-    assert any(n.startswith("ST") for n in names) and any(n.startswith("SM") for n in names)
+    assert any(n.startswith(("ST", "SOILT")) for n in names)
+    assert any(n.startswith(("SM", "SOILM")) for n in names)
     assert {"TT", "UU", "VV", "PSFC", "SKINTEMP"} <= names
 
 
