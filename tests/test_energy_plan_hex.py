@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import math
 from pathlib import Path
@@ -357,6 +358,23 @@ def _flag(argv, flag):
     return argv[argv.index(flag) + 1]
 
 
+def _door_accepts(argv):
+    """The intermediate door's own request builder takes ``argv``.
+
+    The parser takes any flag; the door refuses a box on a global row and
+    an --interval-hours on a projected one only when it builds the
+    request, which reads no file.
+    """
+
+    from woof.hex import hrrr_intermediate, met_intermediate_door
+    from woof.hex.cli import build_parser as hex_parser
+
+    args = hex_parser().parse_args(list(argv[1:]))
+    if args.source in met_intermediate_door.GLOBAL_SOURCES:
+        return met_intermediate_door.request_from_arguments(args)
+    return hrrr_intermediate.request_from_arguments(args)
+
+
 def test_floor_refusal_names_the_experimental_lane(tmp_path):
     with pytest.raises(plan_hex.HexPlanRefusal) as caught:
         _plan(tmp_path, dx_m=100.0)
@@ -443,9 +461,16 @@ def test_experimental_chain_uses_the_frozen_contracts(tmp_path):
     assert _flag(stage["fetch"], "--hours") == "6"
     assert _flag(stage["intermediate"], "--source") == "gfs"
     assert _flag(stage["intermediate"], "--hours") == "0-6"
+    # gfs is a global row: the door writes it on its own lat-lon grid and
+    # refuses a box, so the box rides the fetch (a NOMADS crop) alone, and
+    # the intermediate reads the hourly fetch at its own spacing
+    for flag in ("--point", "--radius-km", "--margin-km"):
+        assert flag not in stage["intermediate"], flag
+    assert _flag(stage["intermediate"], "--interval-hours") == "1"
+    assert "--point" in stage["fetch"]
     assert int(_flag(stage["fetch"], "--radius-km")) > \
-        int(_flag(stage["intermediate"], "--radius-km")) + \
-        float(_flag(stage["intermediate"], "--margin-km"))
+        2.0 * plan_hex.MET_MARGIN_KM
+    _door_accepts(stage["intermediate"])
     init = stage["init"]
     assert _flag(init, "--capsule") == _flag(init, "--reference") == \
         f"{run}/corridor.vertical.nc"
@@ -733,3 +758,198 @@ def test_run_exports_the_rows_path(tmp_path, monkeypatch):
                 {"WOOF_HEX_MESH_ROWS": 3}, ["WOOF_HEX_MESH_ROWS"]):
         with pytest.raises(run.RunRefusal, match="env_paths"):
             run._hex_step(domain(bad))
+
+
+# --------------------------------------------------------------------------
+# the met step's argv, and the ~10 km global sources
+
+#: The clock the availability windows are judged against: twelve hours
+#: after the default test start, so every source has landed it.
+NOW = datetime(2026, 10, 10, 12)
+NEW_SOURCES = ("icon-global", "icon-global-ml", "met-office-global")
+
+
+def _register(monkeypatch, source):
+    """Make ``source`` a registered, fetchable row of the intermediate door.
+
+    The registry row, the fetch route and the door row land separately;
+    a build that already has one keeps it, and a stand-in carries only
+    what the planner asks of a missing one.
+    """
+
+    import dataclasses
+
+    from woof import fetch as fetch_module
+    from woof import source_adapters
+    from woof.hex import met_intermediate_door as door
+
+    try:
+        source_adapters.get_source_adapter(source)
+    except ValueError:
+        template = source_adapters.get_source_adapter("icon-global")
+        monkeypatch.setitem(source_adapters._ALIASES, source,
+                            dataclasses.replace(template, source_id=source,
+                                                aliases=()))
+    from woof import fetch_routes
+
+    if source not in fetch_module.fetch_front_door_sources():
+        # the fetch parser resolves --source through the route table
+        from types import MappingProxyType
+
+        template = fetch_routes.route_for("icon-global")
+        monkeypatch.setattr(fetch_routes, "_ROUTES", MappingProxyType({
+            **fetch_routes._ROUTES,
+            source: dataclasses.replace(template, source_id=source)}))
+    if plan_hex.intermediate_shape(source) is None:
+        monkeypatch.setitem(door.GLOBAL_SOURCES, source, dataclasses.replace(
+            door.GLOBAL_SOURCES["gfs"], name=source,
+            default_interval_hours=3, max_hour=180))
+
+
+@pytest.mark.parametrize("source", ["gfs", "gdas", "ecmwf-open-data", "era5",
+                                    "aifs"])
+def test_global_rows_get_the_argv_the_door_accepts(tmp_path, source):
+    from woof.cli import build_parser
+
+    domain = _xplan(tmp_path, source=source).domains[0]
+    stage = _by_stage(domain)
+    met = stage["intermediate"]
+    assert plan_hex.intermediate_shape(source) == "global"
+    # the door refuses a box on a global row (met_intermediate_door
+    # request_from_arguments): the argv must not carry one
+    for flag in ("--point", "--radius-km", "--margin-km"):
+        assert flag not in met, (source, flag)
+    cadence = plan_hex.SOURCE_CADENCE_HOURS[source]
+    assert _flag(met, "--interval-hours") == str(cadence)
+    request = _door_accepts(met)
+    last = int(_flag(met, "--hours").split("-")[1])
+    assert request.leads == tuple(range(0, last + 1, cadence))
+    assert request.interval_hours == cadence
+    # the crop rides the fetch where the fetch takes one; a table route
+    # takes whole objects and refuses --point
+    assert ("--point" in stage["fetch"]) == (source in ("gfs", "gdas", "era5"))
+    build_parser().parse_args(stage["fetch"])
+
+
+def test_hourly_global_window_off_the_three_hour_ladder(tmp_path):
+    # 7 h of hourly GFS: the door's own 3 h default would refuse 0-7
+    domain = _xplan(tmp_path, hours=7.0).domains[0]
+    met = _by_stage(domain)["intermediate"]
+    assert _flag(met, "--hours") == "0-7"
+    assert _door_accepts(met).leads == tuple(range(8))
+
+
+def test_projected_rows_keep_the_box():
+    chain = dict(plan_hex.full_chain_commands(
+        dt_seconds=0.5, density="raster", dx_m=100.0, background_km=120.0,
+        window_cells=1000, start="2026-10-10T00", hours=6.0, source="hrrr",
+        wrfout_glob=None, centre=(39.0, -105.0), met_radius_km=40.0,
+        parent_row="p", cull_row="c"))
+    met = chain["intermediate"]
+    assert plan_hex.intermediate_shape("hrrr") == "boxed"
+    assert "--interval-hours" not in met
+    assert int(_flag(chain["fetch"], "--radius-km")) > \
+        int(_flag(met, "--radius-km")) + float(_flag(met, "--margin-km"))
+    request = _door_accepts(met)
+    assert request.target_basis["reach_km"] == 40.0
+
+
+@pytest.mark.parametrize("source,levels", [("icon-global", "64"),
+                                           ("icon-global-ml", "140"),
+                                           ("met-office-global", "64")])
+def test_new_global_sources_plan_when_this_build_has_them(
+        tmp_path, monkeypatch, source, levels):
+    from woof.cli import build_parser
+    from woof.hex.cli import build_parser as hex_parser
+
+    _register(monkeypatch, source)
+    plan = _xplan(tmp_path, source=source, now=NOW)
+    domain = plan.domains[0]
+    stage = _by_stage(domain)
+    assert plan.source == source
+    assert domain.extra["forcing"] == {"source": source}
+    fetch = stage["fetch"]
+    assert fetch[:3] == ["fetch", "--source", source]
+    assert _flag(fetch, "--cadence") == "3" and _flag(fetch, "--hours") == "6"
+    assert ("--point" in fetch) == plan_hex._fetch_takes_point(source)
+    met = stage["intermediate"]
+    assert _flag(met, "--source") == source
+    assert _flag(met, "--hours") == "0-6"
+    if plan_hex.intermediate_shape(source) == "global":
+        for flag in ("--point", "--radius-km", "--margin-km"):
+            assert flag not in met, flag
+        assert _flag(met, "--interval-hours") == "3"
+    _door_accepts(met)
+    assert _flag(stage["init"], "--nfglevels") == levels
+    assert _flag(stage["lbc"], "--nfglevels") == levels
+    build_parser().parse_args(fetch)
+    for name in ("intermediate", "init", "lbc"):
+        assert callable(hex_parser().parse_args(stage[name][1:]).handler)
+    rows = {row["stage"]: row for row in domain.extra["requires"]}
+    for name in ("fetch", "intermediate", "init", "lbc"):
+        assert rows[name]["available_in_this_build"], rows[name]
+    notes = " ".join(plan.notes)
+    assert f"{source}: " in notes
+    if source == "met-office-global":
+        assert "same-cycle GDAS" in notes
+
+
+def test_feature_string_names_every_global_chain_source():
+    feature = plan_hex.STAGE_REQUIREMENTS["intermediate"][0]["feature"]
+    for source in plan_hex.CHAIN_SOURCES:
+        if source != "hrrr":
+            assert source in feature.split("--source ")[1].split("|")
+        assert source in plan_hex.SOURCE_CADENCE_HOURS
+        assert source in plan_hex.FIRST_GUESS_LEVELS
+
+
+@pytest.mark.parametrize("source", NEW_SOURCES)
+def test_new_sources_this_build_lacks_are_refused_by_name(
+        tmp_path, monkeypatch, source):
+    from woof import source_adapters
+    from woof.hex import hrrr_intermediate
+    from woof.hex import met_intermediate_door as door
+
+    # no registry row
+    monkeypatch.delitem(source_adapters._ALIASES, source, raising=False)
+    with pytest.raises(plan_hex.HexPlanRefusal) as caught:
+        _xplan(tmp_path, source=source, now=NOW)
+    assert "no registry row" in str(caught.value)
+    assert source in str(caught.value)
+    monkeypatch.undo()
+    monkeypatch.setattr(plan_hex, "_generator_sizing", lambda spec: None)
+
+    # a registry row and a fetch route, but no intermediate row
+    _register(monkeypatch, source)
+    monkeypatch.delitem(door.GLOBAL_SOURCES, source, raising=False)
+    monkeypatch.delitem(hrrr_intermediate.SOURCE_ROWS, source, raising=False)
+    with pytest.raises(plan_hex.HexPlanRefusal) as caught:
+        _xplan(tmp_path, source=source, now=NOW)
+    assert "`woof hex intermediate` in this build cannot write" in \
+        str(caught.value)
+    assert not (tmp_path / "xplan" / "plan.json").exists()
+
+
+def test_a_cycle_outside_the_source_window_is_refused(tmp_path, monkeypatch):
+    for source in NEW_SOURCES:
+        _register(monkeypatch, source)
+    # before the source.coop archive's first cycle
+    with pytest.raises(plan_hex.HexPlanRefusal) as caught:
+        _xplan(tmp_path, source="icon-global", start="2026-08-01T00",
+               now=NOW)
+    assert "2026-08-25T12Z" in str(caught.value)
+    assert "source.coop" in str(caught.value)
+    # past the 06Z run's last lead
+    with pytest.raises(plan_hex.HexPlanRefusal, match="f120"):
+        _xplan(tmp_path, source="icon-global-ml", start="2026-10-09T06",
+               hours=126.0, now=NOW)
+    # a run that has not landed yet
+    with pytest.raises(plan_hex.HexPlanRefusal, match="lands about"):
+        _xplan(tmp_path, source="met-office-global", start="2026-10-10T12",
+               now=NOW)
+    assert not (tmp_path / "xplan" / "plan.json").exists()
+    # ... but a start left out steps back to the newest run that has
+    # landed by the same clock
+    plan = _xplan(tmp_path, source="met-office-global", start=None,
+                  now=datetime(2026, 10, 10, 13))
+    assert plan.start < "2026-10-10T12" and plan.start >= "2026-10-10T00"

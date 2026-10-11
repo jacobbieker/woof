@@ -301,6 +301,52 @@ def test_hrrr_source_refused(tmp_path):
                          source="hrrr", vram_gib=24.0)
 
 
+#: Twelve hours after START: every boundary source has landed it.
+NOW = datetime(2026, 10, 10, 12)
+
+
+def test_icon_global_plans_with_its_window_noted(tmp_path):
+    plan = nests.build_plan(load_sites(SITES), outdir=tmp_path, dx_m=1000.0,
+                            start=START, source="icon", vram_gib=24.0,
+                            now=NOW)
+    assert plan.source == "icon-global"
+    raw = tomllib.loads(next(tmp_path.glob("*.toml")).read_text())
+    assert raw["fetch"]["source"] == "icon-global"
+    # the table route takes whole objects: no crop in the fetch hints
+    assert "area" not in raw["fetch"]
+    notes = " ".join(plan.notes)
+    assert "icon-global: DWD ICON global" in notes
+    assert "06/18Z runs reach 120 h" in notes
+
+
+@pytest.mark.parametrize("source", ["icon-global-ml", "met-office-global",
+                                    "ukmo-global"])
+def test_planned_source_without_a_registry_row_is_refused(
+        tmp_path, monkeypatch, source):
+    from woof import source_adapters
+
+    for name in ("icon-global-ml", "met-office-global", "metoffice-global",
+                 "ukmo-global", "um-global"):
+        monkeypatch.delitem(source_adapters._ALIASES, name, raising=False)
+    with pytest.raises(nests.PlanRefused, match="no registry row"):
+        nests.build_plan(load_sites(SITES), outdir=tmp_path, start=START,
+                         source=source, vram_gib=24.0, now=NOW)
+    assert not list(tmp_path.iterdir())
+
+
+def test_icon_cycle_outside_its_window_is_refused(tmp_path):
+    with pytest.raises(nests.PlanRefused) as caught:
+        nests.build_plan(load_sites(SITES), outdir=tmp_path, dx_m=1000.0,
+                         start="2026-08-20T00", source="icon-global",
+                         vram_gib=24.0, now=NOW)
+    assert "2026-08-25T12Z" in str(caught.value)
+    with pytest.raises(nests.PlanRefused, match="f120"):
+        nests.build_plan(load_sites(SITES), outdir=tmp_path, dx_m=1000.0,
+                         start="2026-10-09T18", hours=123.0,
+                         source="icon-global", vram_gib=24.0, now=NOW)
+    assert not list(tmp_path.iterdir())
+
+
 def test_nz_below_stencil_refused(tmp_path):
     with pytest.raises(nests.PlanRefused, match="--nz"):
         nests.build_plan(load_sites(SITES), outdir=tmp_path, start=START,

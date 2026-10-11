@@ -253,6 +253,47 @@ Emitted WRF configurations write history with the `energy` output preset
 including the direct normal (`SWDDNI`) and diffuse (`SWDDIF`) irradiance
 behind `dni` and `dhi`.
 
+#### The ~10 km global boundary sources
+
+All three topologies take the two ~10 km global models as `--source`, next
+to the NCEP and ECMWF sources:
+
+| `--source` | Model | Levels | Boundaries |
+|---|---|---|---|
+| `icon-global` | DWD ICON global | 18 pressure levels, 1000 to 30 hPa | every 3 h |
+| `icon-global-ml` | DWD ICON global | 120 model levels | every 3 h |
+| `met-office-global` | Met Office global deterministic | 37 or 33 pressure levels, to 10 hPa | every 3 h |
+
+`met-office-global` publishes no soil, land mask or sea ice. Those come from
+the GDAS analysis of the same cycle. Its aliases are `metoffice-global`,
+`ukmo-global` and `um-global`.
+
+The planner refuses a start that the source cannot serve, and says which
+limit it hit:
+
+- ICON runs reach 180 h from 00 and 12 UTC and 120 h from 06 and 18 UTC.
+  DWD open data (`opendata.dwd.de/weather/nwp/v1/m/icon/p/`) keeps about
+  the last 24 h. The source.coop archive (`data.source.coop/bkr/icon/icon/`,
+  `p/` tree) holds runs from 2026-08-25 12 UTC onward. An earlier cycle is
+  refused.
+- Met Office runs reach 168 h from 00 and 12 UTC and 69 h from 06 and
+  18 UTC. Each run lands about 5.5 h after its run time. The AWS open-data
+  archive keeps a rolling two years.
+- A forecast longer than the run, or a run that has not landed yet by the
+  clock, is refused.
+
+Where this build has a fetch route for the source, the planner takes the
+cycle hours, the lead ladder and the publication delay from that route, and
+refuses a forecast that needs a lead the ladder skips. If every host on
+that route keeps only recent runs (an ICON route that reads DWD open data
+alone, for example), a run older than that is refused too, and the plan
+notes say so. A build whose source registry does not have one of these
+sources yet refuses it by name, without writing anything.
+
+When you leave out `--start`, the planner starts from the newest cycle that
+has landed for the chosen source, rather than from the newest cycle by the
+clock. A `--start` you give is never moved.
+
 ### 4. Running: `run`
 
 `woof energy run PLAN.json` runs every domain in parent-first order:
@@ -439,9 +480,20 @@ accepts the command and, for the met step, the build knows the source. The
 one tells you before anything runs.
 
 Sources that publish hourly (`gfs`, `gdas`, `era5`, `hrrr`) are fetched
-every hour. `ecmwf-open-data` publishes every 3 hours and `aifs` every 6,
-and the met step has to accept that coarser spacing. `gdas` stops at 9
-hours, so a longer `--hours` is refused.
+every hour. `ecmwf-open-data`, `icon-global`, `icon-global-ml` and
+`met-office-global` are fetched every 3 hours and `aifs` every 6, and the
+met step has to accept that coarser spacing. `gdas` stops at 9 hours, so a
+longer `--hours` is refused.
+
+The met step's flags depend on the source. A global lat-lon source (`gfs`,
+`gdas`, `ecmwf-open-data`, `era5`, `aifs`) is written on its own grid, so
+`woof hex intermediate` refuses `--point` and `--radius-km` for it. The plan
+passes `--interval-hours` set to the fetch spacing instead. Where the fetch
+can crop (`gfs`, `gdas`, `era5`), the crop goes on the fetch. `hrrr` is
+regridded onto a box, so it keeps `--point`, `--radius-km` and
+`--margin-km`. The planner asks the intermediate step which kind each source
+is. A source that `woof fetch` or `woof hex intermediate` cannot take in
+this build is refused when you plan, not after the mesh is built.
 
 #### Capacity at 50 m and 100 m
 
