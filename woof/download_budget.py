@@ -662,7 +662,9 @@ def _global_window_points(exp, axes: Mapping[str, Any], grid_points: int, *,
 
     ``axes`` is the row's ``global_axes``: the canonical axes the engine
     publishes a whole ring on (ascending latitude from ``latitude_first``,
-    longitude from ``longitude_first``, one ``step_degrees`` apart).  The
+    longitude from ``longitude_first``, one ``step_degrees`` apart, or
+    ``longitude_step_degrees`` and ``latitude_step_degrees`` apart where the
+    two spacings differ).  The
     window is granted only where every stencil of the target is clear of
     the ring's stored cut (:func:`woof.ingest.horiz.global_ring_cut`, the
     rule :func:`woof.ingest.atmospheric_window.atmospheric_window_for_grids`
@@ -689,17 +691,20 @@ def _global_window_points(exp, axes: Mapping[str, Any], grid_points: int, *,
              "truelat2": projection.truelat2, "stand_lon": projection.stand_lon},
             int(root.nx), int(root.ny), float(root.dx))
         pairs = (grid.latlon_mass(), grid.latlon_u(), grid.latlon_v())
-        step = float(axes["step_degrees"])
+        # One step for a square grid; a grid whose spacings differ (the
+        # Met Office's 0.140625 x 0.09375 degrees) names each axis's own.
+        x_step = float(axes.get("longitude_step_degrees", axes.get("step_degrees")))
+        y_step = float(axes.get("latitude_step_degrees", axes.get("step_degrees")))
         nx, ny = int(axes["nx"]), int(axes["ny"])
         west = float(axes["longitude_first"])
-        longitude_axis = west + step * np.arange(nx, dtype=np.float64)
+        longitude_axis = west + x_step * np.arange(nx, dtype=np.float64)
         longitudes = [np.asarray(longitude, dtype=np.float64) for _, longitude in pairs]
         if ring and global_ring_cut(longitude_axis, *longitudes) is not None:
             return None
         latitude = np.concatenate([np.asarray(lat, dtype=np.float64).ravel() for lat, _ in pairs])
         longitude = np.concatenate([values.ravel() for values in longitudes])
-        x = np.mod(longitude - west, 360.0) / step
-        y = (latitude - float(axes["latitude_first"])) / step
+        x = np.mod(longitude - west, 360.0) / x_step
+        y = (latitude - float(axes["latitude_first"])) / y_step
     except (AttributeError, KeyError, TypeError, ValueError):
         return grid_points
     if not (np.isfinite(x).all() and np.isfinite(y).all()):

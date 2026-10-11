@@ -1,0 +1,14 @@
+{
+  "schema": "gpuwm-cross-source-donor-provenance-v1",
+  "role": "physical_analysis_surface_provenance",
+  "source": "NCEP GDAS 0.25-degree pgrb2 analysis (gdas.tCCz.pgrb2.0p25.f000) of the SAME cycle as the Met Office Global primary, borrowed for the land state and sea ice the primary does not publish",
+  "licence": "NCEP GDAS analysis: NOAA/NWS/NCEP operational data, United States government work with no copyright restriction; attribute as 'NOAA NCEP Global Data Assimilation System'",
+  "product": "NCEP GDAS 0.25-degree pgrb2 analysis (f000) of the SAME cycle as the primary",
+  "front_doors": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/gdas.<YYYYMMDD>/<CC>/atmos/gdas.t<CC>z.pgrb2.0p25.f000 and the noaa-gfs-bdp-pds AWS mirror; full files, written by the fetch route to donor-gdas/ and bound as --supplement physical_analysis_surface_data=<file>",
+  "mapping": "gdas-pgrb2-0p25-analysis-land-ice-donor-grib2-native (rw-wps-gdas-pgrb2-land-ice-donor.mapping.json): the shipped GDAS donor table plus ONE row, sea_ice_fraction from ICEC (discipline 10, category 2, parameter 0, surface) under preserve_mask; the shared donor AIGFS and AIGEFS pin is unchanged",
+  "supplies": "land_fraction (LAND), sea_ice_fraction (ICEC) and the four-layer 0-10/10-40/40-100/100-200 cm soil temperature and volumetric moisture column",
+  "clock": "source_cycle_analysis_broadcast: exactly one donor analysis record whose valid time must BE the primary source cycle, carried unchanged to every lead; a donor from any other cycle refuses by naming the source-cycle rule",
+  "grid_alignment": "nearest_coordinate_index: the GDAS 0.25-degree grid and the Met Office grid share no cells, so each Met Office row and column takes the nearest GDAS row and column (axis by axis, modulo 360 on longitude, ties to the lower index). Nothing is interpolated: every borrowed value is a GDAS cell value, repeated about 2 x 3 times across the finer Met Office grid, so the borrowed land mask, soil column and ice edge follow the 0.25-degree GDAS coastline, not the Met Office one. The donor must cover the whole primary extent, so a regional GDAS subset refuses",
+  "measured": "decoded through the land-ice donor table from the 2026-10-11 00Z f000 (462,644,562 bytes): 721 x 1440 regular grid; LAND and ICEC complete (ICEC is 0 over land, no bitmap); the soil column missing over water (2,233,476 temperature and 2,748,980 moisture cells across the four layers); borrowed onto the Met Office grid by nearest index, a UK window held GDAS's land mask, with every soil cell over GDAS water missing and every one over GDAS land present",
+  "input_identity": "dynamic file paths and SHA-256 values are owned by the mapped-source input manifest, gpuwm-mapped-source-inputs-v1"
+}

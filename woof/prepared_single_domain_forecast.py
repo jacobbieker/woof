@@ -1386,6 +1386,7 @@ def runner_capabilities() -> dict[str, object]:
                 "ecmwf-open-data": "uniform-positive-whole-hour",
                 "icon-eu": "uniform-positive-whole-hour",
                 "icon-d2": "uniform-positive-whole-hour",
+                "met-office-global": [3],
                 "rap": "uniform-positive-whole-hour",
                 "rap-native": "uniform-positive-whole-hour",
                 "rrfs": "uniform-positive-whole-hour",
@@ -5210,7 +5211,13 @@ def _validate_packaged_mapped_evidence(
                 "source_id": terrain_binding.get("source_id"),
                 "grid_alignment": terrain_binding.get("grid_alignment"),
                 "time_alignment": terrain_binding.get("time_alignment"),
-                "coordinate_match": "exact_equivalent_contiguous_subset",
+                # The receipt's own claim for the declared alignment:
+                # nearest_coordinate_index repeats donor cells and says so.
+                "coordinate_match": (
+                    "nearest_coordinate_index_separable"
+                    if terrain_binding.get("grid_alignment")
+                    == "nearest_coordinate_index"
+                    else "exact_equivalent_contiguous_subset"),
             }
             matched = alignment.get("matched_primary_valid_times") \
                 if isinstance(alignment, dict) else None
@@ -6796,6 +6803,7 @@ def preflight_prepared_forecast(
             f"HRRR forcing cadence of {cadence_hours} h is not hourly; the "
             "native HRRR route prepares contiguous hourly leads")
     if (source == "gfs" and cadence_hours not in {1, 3}) \
+            or (source == "met-office-global" and cadence_hours != 3) \
             or (source == "era5" and cadence_hours < 1) \
             or (source in _MAPPED_SOURCES
                 and cadence_hours < 1):
@@ -6804,7 +6812,8 @@ def preflight_prepared_forecast(
         # boundary forcing, not a broken preparation.
         warn(f"{source.upper()} forcing cadence of {cadence_hours} h is "
              "outside the set this runner has demonstrated "
-             "(1 h/3 h for GFS); continuing with it as prepared")
+             "(1 h/3 h for GFS, 3 h for the Met Office global model); "
+             "continuing with it as prepared")
     boundary_interval_seconds = cadence_hours * 3600
     if (proof.get("boundary_interval_seconds") != boundary_interval_seconds
             or forcing_hours[-1] * 3600 < run_seconds):

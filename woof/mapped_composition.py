@@ -25,8 +25,11 @@ source's OWN sealed mapping document by SHA-256, and declares a
 grid-alignment and a cycle/time-alignment rule.  The primary mapping
 declares each borrowed field as ``provider: "composition_bound"`` so the
 gap is a declaration, never an absence.  Same-grid contributions (an exact
-coordinate subset) land; a cross-grid contribution refuses by NAMING the
-horizontal regrid capability this composition does not have; a
+coordinate subset) land; between two regular latitude/longitude grids that
+share no cells a binding may opt into ``nearest_coordinate_index``, which
+repeats the nearest donor cell and never interpolates; any other cross-grid
+contribution refuses by NAMING the horizontal regrid capability this
+composition does not have; a
 member-bearing donor refuses by naming member alignment; a vertical-bearing
 borrow on a different ladder refuses by naming vertical alignment.  The
 contributing mapping document is deliberately NOT a row of the input
@@ -51,6 +54,7 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from woof.mapped_source import (
+    GRID_FAMILY_REGULAR,
     MappedSourceFrame,
     NothingMatched,
     _DecodedCollection,
@@ -62,6 +66,7 @@ from woof.mapped_source import (
     _load_json_document,
     _load_json_bytes,
     _mapped_engine_choice,
+    _mapping_grid_declaration,
     _materialize_frames,
     _require_authority_snapshot,
     _snapshot_authority,
@@ -113,11 +118,31 @@ _BOUND_TIME_ALIGNMENTS = frozenset({
     "source_cycle_analysis_broadcast",
 })
 
-#: The only landed grid relationship for a borrowed field: the donor grid
-#: contains the primary grid as an exact coordinate subset (identical grids
-#: are the degenerate full subset).  Anything else is cross-grid and
-#: refuses by naming the regrid capability.
-_BOUND_GRID_ALIGNMENTS = frozenset({"exact_coordinate_subset"})
+#: The landed grid relationships for a borrowed field.
+#: ``exact_coordinate_subset``: the donor grid contains the primary grid as
+#: an exact coordinate subset (identical grids are the degenerate full
+#: subset).  ``nearest_coordinate_index``: an opt-in for two REGULAR
+#: latitude/longitude grids that share no cells, where each primary row and
+#: column takes the donor row and column nearest to it, axis by axis, ties
+#: to the lower index.  Nothing is interpolated: every borrowed value is a
+#: donor value, repeated where the primary grid is finer, so a borrowed
+#: land/sea boundary follows the DONOR grid.  The donor must cover the
+#: primary extent (every primary coordinate within half a donor spacing of
+#: a donor coordinate) and both grids must be regular, or the binding
+#: refuses by name.  Anything else is cross-grid and refuses by naming the
+#: regrid capability.
+_GRID_EXACT_SUBSET = "exact_coordinate_subset"
+_GRID_NEAREST_INDEX = "nearest_coordinate_index"
+_BOUND_GRID_ALIGNMENTS = frozenset({_GRID_EXACT_SUBSET, _GRID_NEAREST_INDEX})
+
+#: Relative tolerance on a regular axis's spacing and on the half-spacing
+#: coverage bound.  The axes compared are decoded coordinates: float32
+#: NetCDF values widened to float64 move a 0.1-degree step by up to about
+#: 2e-4 of itself near 180 degrees, and GRIB axes are micro-degree
+#: integers.  A spacing that moves by more than a thousandth of itself is
+#: not a regular grid.  The tolerance picks no cell: the nearest search
+#: itself is exact.
+_REGULAR_AXIS_REL_TOL = 1e-3
 
 _BINDING_KEYS = {
     "source_id", "mapping_role", "mapping_sha256", "data_role",
@@ -887,11 +912,121 @@ def _bind_manifest_member(
     )
 
 
+def _regular_axis_step(axis: np.ndarray, label: str) -> float:
+    """The constant spacing of a 1-D regular axis, or a named refusal."""
+
+    if axis.ndim != 1 or axis.size < 2:
+        raise ValueError(
+            f"{label} must be a 1-D axis of at least two coordinates for "
+            "nearest_coordinate_index"
+        )
+    if not np.isfinite(axis).all():
+        raise ValueError(f"{label} carries non-finite coordinates")
+    steps = np.diff(axis)
+    step = float(steps[0])
+    if step == 0.0 or bool(np.any(
+            np.abs(steps - step) > _REGULAR_AXIS_REL_TOL * abs(step))):
+        raise ValueError(
+            f"{label} is not a regular axis (constant spacing, strictly "
+            "monotone); nearest_coordinate_index borrows only between "
+            "regular latitude/longitude grids"
+        )
+    return abs(step)
+
+
+def _nearest_coordinate_indices(
+    donor: np.ndarray,
+    primary: np.ndarray,
+    label: str,
+    *,
+    cyclic_degrees: bool = False,
+) -> np.ndarray:
+    """Per primary coordinate, the index of the nearest donor coordinate.
+
+    Distances are measured on the axis alone (latitude and longitude are
+    separable on a regular grid), modulo 360 on a longitude axis, and the
+    LOWER index wins a tie.  The donor must cover the primary: a primary
+    coordinate further than half a donor spacing from every donor
+    coordinate lies outside the donor's cells and refuses.
+    """
+
+    donor = np.asarray(donor, dtype=np.float64)
+    primary = np.asarray(primary, dtype=np.float64)
+    spacing = _regular_axis_step(donor, f"donor {label}")
+    if primary.ndim != 1 or primary.size < 1:
+        raise ValueError(f"primary {label} must be a non-empty 1-D axis")
+    if primary.size > 1:
+        _regular_axis_step(primary, f"primary {label}")
+    elif not np.isfinite(primary).all():
+        raise ValueError(f"primary {label} carries non-finite coordinates")
+    bound = 0.5 * spacing * (1.0 + _REGULAR_AXIS_REL_TOL)
+    indices = np.empty(primary.size, dtype=np.int64)
+    for position, value in enumerate(primary):
+        if cyclic_degrees:
+            folded = np.mod(donor - value, 360.0)
+            distance = np.minimum(folded, 360.0 - folded)
+        else:
+            distance = np.abs(donor - value)
+        index = int(np.argmin(distance))
+        if float(distance[index]) > bound:
+            raise ValueError(
+                f"the donor grid does not cover primary {label} "
+                f"{float(value)!r}: the nearest donor {label} is more than "
+                "half a donor spacing away"
+            )
+        indices[position] = index
+    return indices
+
+
+def _require_nearest_regular_grids(
+    binding_name: str,
+    binding: Mapping[str, object],
+    mapping: Mapping[str, object],
+    donor_mapping: Mapping[str, object],
+) -> None:
+    """A nearest_coordinate_index binding joins two DECLARED regular grids.
+
+    A projected grid's decoded axes are evenly spaced too (metres from the
+    grid origin), so the axis check alone cannot tell it from latitude and
+    longitude; the mappings' own grid declarations can.  The Rust compose
+    (``compose.rs``) repeats this check with the same refusal text, so a
+    direct engine call refuses too.
+    """
+
+    if str(binding["grid_alignment"]) != _GRID_NEAREST_INDEX:
+        return
+    for side, document in (("primary", mapping), ("contributing", donor_mapping)):
+        family = _mapping_grid_declaration(document).get("family")
+        if family != GRID_FAMILY_REGULAR:
+            raise ValueError(
+                f"contributing source binding {binding_name!r} declares "
+                "nearest_coordinate_index, which borrows only between "
+                f"regular latitude/longitude grids; the {side} mapping "
+                f"declares a {family!r} grid"
+            )
+
+
 def _binding_subset_indices(
     primary: _DecodedCollection,
     donor: _DecodedCollection,
     binding_name: str,
+    grid_alignment: str = _GRID_EXACT_SUBSET,
 ) -> tuple[np.ndarray, np.ndarray]:
+    if grid_alignment == _GRID_NEAREST_INDEX:
+        try:
+            latitude = _nearest_coordinate_indices(
+                donor.latitude, primary.latitude, "latitude",
+            )
+            longitude = _nearest_coordinate_indices(
+                donor.longitude, primary.longitude, "longitude",
+                cyclic_degrees=True,
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"contributing source binding {binding_name!r} declares "
+                f"nearest_coordinate_index and refuses ({error})"
+            ) from error
+        return latitude, longitude
     try:
         latitude = _exact_subset_indices(
             donor.latitude, primary.latitude, "latitude",
@@ -908,6 +1043,22 @@ def _binding_subset_indices(
             "declare, so it refuses rather than interpolate"
         ) from error
     return latitude, longitude
+
+
+#: What a nearest_coordinate_index binding receipt says about itself, in
+#: place of the exact-subset claims.  Fixed strings only, so the two
+#: engines write identical receipts.
+_NEAREST_RECEIPT = MappingProxyType({
+    "coordinate_match": "nearest_coordinate_index_separable",
+    "longitude_equivalence": "modulo_360_nearest",
+    "tie_break": "lower_index",
+    "interpolation": "none",
+    "resolution_note": (
+        "every borrowed value is a donor cell value repeated by nearest "
+        "index where the primary grid is finer; borrowed land/sea "
+        "boundaries follow the donor grid"
+    ),
+})
 
 
 def _take_subset(
@@ -976,8 +1127,14 @@ def _compose_bound_fields(
             "cross-ladder borrowing requires a vertical interpolation "
             "capability this composition does not declare"
         )
+    grid_alignment = str(binding["grid_alignment"])
+    if grid_alignment not in _BOUND_GRID_ALIGNMENTS:
+        raise ValueError(
+            f"binding grid_alignment must be one of "
+            f"{sorted(_BOUND_GRID_ALIGNMENTS)}, got {grid_alignment!r}"
+        )
     latitude_indices, longitude_indices = _binding_subset_indices(
-        primary, donor, binding_name,
+        primary, donor, binding_name, grid_alignment,
     )
     primary_keys = tuple(sorted(
         primary.source_cycles, key=lambda item: (item[0], str(item[1]))
@@ -1077,9 +1234,12 @@ def _compose_bound_fields(
         "binding": binding_name,
         "source_id": str(binding["source_id"]),
         "fields": sorted(fields),
-        "grid_alignment": str(binding["grid_alignment"]),
-        "coordinate_match": "exact_equivalent_contiguous_subset",
-        "longitude_equivalence": "modulo_360_exact",
+        "grid_alignment": grid_alignment,
+        **(dict(_NEAREST_RECEIPT) if grid_alignment == _GRID_NEAREST_INDEX
+           else {
+               "coordinate_match": "exact_equivalent_contiguous_subset",
+               "longitude_equivalence": "modulo_360_exact",
+           }),
         "primary_shape": [int(primary.latitude.size), int(primary.longitude.size)],
         "donor_shape": [int(donor.latitude.size), int(donor.longitude.size)],
         "latitude_index_range": [
@@ -2127,6 +2287,9 @@ def decode_composed_source(
                         f"primary mapping ({ours!r}) and contributing source "
                         f"{binding['source_id']!r} ({theirs!r})"
                     )
+        _require_nearest_regular_grids(
+            binding_name, binding, mapping, donor_mapping,
+        )
         donor_mappings[binding_name] = donor_mapping
         donor_paths[binding_name] = donor_path
         contributing_snapshots[donor_path] = snapshot

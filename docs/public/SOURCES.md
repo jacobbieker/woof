@@ -23,6 +23,7 @@ List the whole registry with `woof prep --list-sources`, or one row with
 | `hrrr-native` | `hrrr-mapped-native` | 1 h | f048 | 1799x1059 Lambert at 3 km, native hybrid levels; same-cycle pressure product supplies analysis soil |
 | `gem-gdps` | `gem`, `gdps`, `gem-global` | 3 h | f240 | global |
 | `icon-global` | `icon`, `icon-13km`, `dwd-icon`, `dwd-icon-global` | 3 h | f180 (00/12Z), f120 (06/18Z) | global, 2,949,120-cell icosahedral mesh at nominally 13 km |
+| `met-office-global` | `metoffice-global`, `ukmo-global`, `um-global` | 3 h | f144 | global, regular 2560x1920 at 0.140625 x 0.09375 deg (~10 km); soil, land mask and sea ice from the same-cycle GDAS analysis |
 | `icon-eu` | `dwd-icon-eu`, `icon-eu-regular` | 1 h | f120 | lat 29.5..70.5, lon -23.5..62.5 |
 | `icon-d2` | `icon-2km`, `dwd-icon-d2` | 1 h | f048 | lat 44.0..57.3, lon 0.0..17.3, 542,040-cell icosahedral mesh at nominally 2.2 km |
 | `gfs` | `gfs-0p25`, `gfs-0.25` | 3 h | f384 | global |

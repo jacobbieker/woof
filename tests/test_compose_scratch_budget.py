@@ -152,9 +152,18 @@ def test_a_regional_row_prices_the_grid_its_coverage_window_declares():
             axes = row["global_axes"]
             assert window is None and row["windowed_layers"] > 0, source
             assert axes["nx"] * axes["ny"] == row["grid_points"], source
-            assert axes["nx"] * axes["step_degrees"] == pytest.approx(360.0), source
-            assert (axes["ny"] - 1) * axes["step_degrees"] == pytest.approx(180.0), source
-            assert (axes["longitude_first"], axes["latitude_first"]) == (-180.0, -90.0), source
+            x_step = axes.get("longitude_step_degrees", axes.get("step_degrees"))
+            y_step = axes.get("latitude_step_degrees", axes.get("step_degrees"))
+            assert axes["nx"] * x_step == pytest.approx(360.0), source
+            if (axes["longitude_first"], axes["latitude_first"]) == (-180.0, -90.0):
+                # Nodes on the poles: ny points span 180 degrees.
+                assert (axes["ny"] - 1) * y_step == pytest.approx(180.0), source
+            else:
+                # Cell centres (the Met Office grid): half a step in from
+                # the seam and the pole, ny cells spanning 180 degrees.
+                assert axes["ny"] * y_step == pytest.approx(180.0), source
+                assert axes["longitude_first"] == pytest.approx(-180.0 + x_step / 2), source
+                assert axes["latitude_first"] == pytest.approx(-90.0 + y_step / 2), source
         elif row["windowed_layers"]:
             assert window is not None and window.nx * window.ny == row["grid_points"], source
         else:

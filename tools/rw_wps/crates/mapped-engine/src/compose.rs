@@ -46,7 +46,8 @@ pub const EXTERNAL_FIELD: &str = "terrain_height";
 /// `mapped_composition._SOIL_PAIR`.
 pub const SOIL_PAIR: [&str; 2] = ["soil_temperature", "volumetric_soil_moisture"];
 /// `mapped_composition._BOUND_GRID_ALIGNMENTS`.
-pub const BOUND_GRID_ALIGNMENTS: [&str; 1] = ["exact_coordinate_subset"];
+pub const BOUND_GRID_ALIGNMENTS: [&str; 2] =
+    ["exact_coordinate_subset", "nearest_coordinate_index"];
 
 const COMPOSITION_KEYS: [&str; 6] = [
     "schema",
@@ -1099,6 +1100,24 @@ pub fn run_compose(invocation: &Invocation, progress: &mut dyn FnMut(Value)) -> 
                 python_repr(&binding.source_id),
                 python_repr(donor.name()?)
             )));
+        }
+        // `mapped_composition._require_nearest_regular_grids`: a projected
+        // grid's axes are evenly spaced too, so only the declarations can
+        // refuse one.
+        if binding.grid_alignment == crate::join::GRID_NEAREST_INDEX {
+            for (side, document) in [("primary", &mapping), ("contributing", &donor)] {
+                let family = document.grid_declaration()?.family;
+                if family != crate::model::GRID_FAMILY_REGULAR {
+                    return Err(mapping_invalid(format!(
+                        "contributing source binding {} declares \
+                         nearest_coordinate_index, which borrows only between \
+                         regular latitude/longitude grids; the {side} mapping \
+                         declares a {} grid",
+                        python_repr(&binding.name),
+                        python_repr(family)
+                    )));
+                }
+            }
         }
         let donor_files = &supplements[&binding.data_role];
         let donor_collection = crate::engine::decode_collection(

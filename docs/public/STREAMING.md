@@ -88,7 +88,7 @@ How each kind of source posts:
 |---|---|---|
 | rolling | hrrr, hrrr-prs, gfs, gefs, rap, rrfs, icon-global, icon-eu, icon-d2, gem-gdps, aifs | the first hours, then each hour at its seam |
 | whole cycle | ecmwf-open-data, gdas | the cycle, which appears complete at once |
-| donor gated | aigfs, aigefs | the same-cycle GDAS analysis, after which every lead is posted |
+| donor gated | aigfs, aigefs, met-office-global | the same-cycle GDAS analysis, after which every lead is posted |
 | archive | era5 (keyless ARCO copy), 20crv3-cf | nothing: a window before the archive's end starts at once, one past it is refused naming the end |
 | brokered | era5 (Copernicus CDS), era5-l137 | the job's file |
 

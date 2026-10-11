@@ -501,3 +501,161 @@ def test_a_vertical_bearing_borrow_requires_the_same_ladder():
         _compose_bound_fields(
             primary, donor, binding_name="donor", binding=binding,
         )
+
+
+# ---------------------------------------------------------------------------
+# nearest_coordinate_index: two regular grids that share no cells.
+# ---------------------------------------------------------------------------
+
+NEAREST_CASES = FIXTURES / "nearest-coordinate-index-cases.json"
+
+
+def _case_axis(spec) -> np.ndarray:
+    if isinstance(spec, list):
+        return np.asarray(spec, dtype=np.float64)
+    values = spec["start"] + spec["step"] * np.arange(
+        spec["count"], dtype=np.float64)
+    if spec["float32"]:
+        values = values.astype(np.float32).astype(np.float64)
+    return values
+
+
+def _nearest_cases():
+    return json.loads(NEAREST_CASES.read_text(encoding="utf-8"))["cases"]
+
+
+@pytest.mark.parametrize(
+    "case", _nearest_cases(), ids=[case["name"] for case in _nearest_cases()])
+def test_nearest_index_parity_table(case):
+    """The Python half of the shared table; join.rs grades the Rust half."""
+    from woof.mapped_composition import _nearest_coordinate_indices
+
+    donor = _case_axis(case["donor"])
+    primary = _case_axis(case["primary"])
+    if "refusal" in case:
+        with pytest.raises(ValueError) as refusal:
+            _nearest_coordinate_indices(
+                donor, primary, case["label"], cyclic_degrees=case["cyclic"])
+        assert str(refusal.value) == case["refusal"]
+        return
+    indices = _nearest_coordinate_indices(
+        donor, primary, case["label"], cyclic_degrees=case["cyclic"])
+    assert indices.tolist() == case["indices"]
+
+
+_NEAREST_BINDING = dict(_BINDING, grid_alignment="nearest_coordinate_index")
+
+
+def test_nearest_index_repeats_donor_cells_and_never_interpolates():
+    start = datetime(2026, 8, 17)
+    # A primary finer than the donor, inside the donor's cells.
+    primary = _primary(
+        (start, start + timedelta(hours=3)),
+        latitude=(51.5, 51.6, 51.7, 51.8),
+        longitude=(-100.1, -100.0, -99.9, -99.8, -99.7),
+    )
+    donor = _donor((start,), latitude=(52.0, 51.75, 51.5),
+                   longitude=(259.75, 260.0, 260.25))
+    combined, receipt = _compose_bound_fields(
+        primary, donor, binding_name="donor", binding=_NEAREST_BINDING,
+    )
+    base = donor.direct[(start, None, "terrain_height")].values
+    rows = [2, 2, 1, 1]          # 51.6 -> 51.5, 51.7 and 51.8 -> 51.75
+    # Longitudes compare modulo 360: -100.1 is 259.9, nearer 260.0 (0.1)
+    # than 259.75 (0.15); -99.8 is 260.2, nearer 260.25.
+    columns = [1, 1, 1, 2, 2]
+    expected = base[np.ix_(rows, columns)]
+    for time in (start, start + timedelta(hours=3)):
+        values = combined.direct[(time, None, "terrain_height")].values
+        np.testing.assert_array_equal(values, expected)
+        assert set(np.unique(values)) <= set(np.unique(base))
+    assert receipt["grid_alignment"] == "nearest_coordinate_index"
+    assert receipt["coordinate_match"] == "nearest_coordinate_index_separable"
+    assert receipt["longitude_equivalence"] == "modulo_360_nearest"
+    assert receipt["tie_break"] == "lower_index"
+    assert receipt["interpolation"] == "none"
+    assert "follow the donor grid" in receipt["resolution_note"]
+    assert receipt["latitude_index_range"] == [2, 1]
+    assert receipt["longitude_index_range"] == [1, 2]
+    assert receipt["broadcast_primary_valid_times"] == [
+        (start + timedelta(hours=3)).isoformat()]
+
+
+def test_nearest_index_keeps_a_donor_missing_cell_where_it_lands():
+    start = datetime(2026, 8, 17)
+    primary = _primary((start,), latitude=(51.5, 51.6),
+                       longitude=(260.0, 260.25))
+    base = np.arange(9, dtype=np.float64).reshape(3, 3)
+    base[2, 0] = np.nan
+    donor = _donor((start,), latitude=(52.0, 51.75, 51.5),
+                   longitude=(260.0, 260.25, 260.5), base=base)
+    combined, _receipt = _compose_bound_fields(
+        primary, donor, binding_name="donor", binding=_NEAREST_BINDING,
+    )
+    injected = combined.direct[(start, None, "terrain_height")]
+    assert injected.missing_count == 2
+    assert np.isnan(injected.values[:, 0]).all()
+
+
+def test_nearest_index_refuses_a_donor_that_does_not_cover_the_primary():
+    start = datetime(2026, 8, 17)
+    primary = _primary((start,), latitude=(51.5, 51.75),
+                       longitude=(250.0, 250.25))
+    donor = _donor((start,))
+    with pytest.raises(ValueError,
+                       match="'donor' declares nearest_coordinate_index.*"
+                             "does not cover primary longitude"):
+        _compose_bound_fields(
+            primary, donor, binding_name="donor", binding=_NEAREST_BINDING,
+        )
+
+
+def test_the_exact_subset_receipt_is_unchanged_by_the_nearest_option():
+    start = datetime(2026, 8, 17)
+    _combined, receipt = _compose_bound_fields(
+        _primary((start,)), _donor((start,)),
+        binding_name="donor", binding=_BINDING,
+    )
+    assert receipt["coordinate_match"] == "exact_equivalent_contiguous_subset"
+    assert receipt["longitude_equivalence"] == "modulo_360_exact"
+    assert not {"tie_break", "interpolation", "resolution_note"} & set(receipt)
+
+
+def test_an_undeclared_grid_alignment_still_refuses():
+    start = datetime(2026, 8, 17)
+    binding = dict(_BINDING, grid_alignment="bilinear")
+    with pytest.raises(ValueError, match="grid_alignment must be one of"):
+        _compose_bound_fields(
+            _primary((start,)), _donor((start,)),
+            binding_name="donor", binding=binding,
+        )
+
+
+def test_nearest_index_accepts_only_declared_regular_grids():
+    from woof.mapped_composition import _require_nearest_regular_grids
+
+    regular = {"name": "regular"}
+    lambert = {"name": "lambert", "grid": {"family": "lambert_conformal"}}
+    _require_nearest_regular_grids("donor", _NEAREST_BINDING, regular, regular)
+    # The exact-subset alignment is not this check's business.
+    _require_nearest_regular_grids("donor", _BINDING, lambert, lambert)
+    for primary, donor, side in ((lambert, regular, "primary"),
+                                 (regular, lambert, "contributing")):
+        with pytest.raises(ValueError,
+                           match=f"the {side} mapping declares a "
+                                 "'lambert_conformal' grid"):
+            _require_nearest_regular_grids(
+                "donor", _NEAREST_BINDING, primary, donor)
+
+
+def test_a_composition_may_declare_nearest_coordinate_index(tmp_path):
+    raw = _composition_raw()
+    raw["field_sources"]["physical_analysis_surface"]["grid_alignment"] = (
+        "nearest_coordinate_index")
+    contract = load_composition(_write(tmp_path, "nearest.json", raw), MAPPING)
+    binding = contract["field_sources"]["physical_analysis_surface"]
+    assert binding["grid_alignment"] == "nearest_coordinate_index"
+    raw["field_sources"]["physical_analysis_surface"]["grid_alignment"] = (
+        "bilinear")
+    with pytest.raises(ValueError, match="no landed regrid capability"):
+        load_composition(_write(tmp_path, "bilinear.json", raw), MAPPING)
