@@ -1344,6 +1344,13 @@ FIRST_GUESS_LEVELS = {"hrrr": 51, "gfs": 64, "gdas": 64,
                       "icon-global": 64, "met-office-global": 64,
                       "icon-global-ml": 140,
                       WRFOUT_SOURCE: 140}
+#: First-guess soil layers ``woof hex init`` is told per source
+#: (``--nfgsoillevels``; :data:`INIT_SWITCHES` carries the default 4).  The
+#: count must be the met files' own: a wrong one drops or zero-fills
+#: layers.  ICON's TERRA column is eight layers (SOILT/SOILM 001..999 in
+#: ``Vtable.ICON-GLOBAL.rw`` and ``-ML.rw``), which the door's receipt
+#: reports as its ``--nfgsoillevels``.
+FIRST_GUESS_SOIL_LEVELS = {"icon-global": 8, "icon-global-ml": 8}
 #: The rest of the init's explicit switches: the shipped point recipe's
 #: (``woof.hex.mesh_point`` ``next``), agreeing with the LES vertical's
 #: ``theta_adv_order`` / ``coef_3rd_order``.
@@ -1469,6 +1476,31 @@ def intermediate_shape(source: str) -> str | None:
     if row is not None and getattr(row, "door", None) == "engine-decoder":
         return "boxed"
     return None
+
+
+def _init_switches(source: str | None) -> list[str]:
+    """:data:`INIT_SWITCHES` with ``source``'s first-guess soil layers."""
+
+    switches = list(INIT_SWITCHES)
+    at = switches.index("--nfgsoillevels") + 1
+    switches[at] = str(FIRST_GUESS_SOIL_LEVELS.get(source, int(switches[at])))
+    return switches
+
+
+def _remapped_from_mesh(source: str) -> bool:
+    """Is ``source`` a ``field-files`` row of the intermediate door?
+
+    Those rows (ICON global, both level sets) are remapped from their
+    native mesh onto a window over the target mesh, so the door needs the
+    mesh's ``--grid``.
+    """
+
+    try:
+        from woof.hex.met_intermediate_door import GLOBAL_SOURCES
+    except ImportError:                     # pragma: no cover - in-tree
+        return False
+    row = GLOBAL_SOURCES.get(str(source).strip().lower())
+    return getattr(row, "layout", None) == "field-files"
 
 
 def _fetch_takes_point(source: str) -> bool:
@@ -1605,6 +1637,10 @@ def full_chain_commands(*, dt_seconds: float, density: str, dx_m: float,
         # --interval-hours, which must be the fetch's cadence or an hourly
         # fetch is read every 3 h (and an off-ladder --hours is refused).
         area = ["--interval-hours", str(cadence)]
+        if _remapped_from_mesh(source):
+            # An unstructured-mesh row (ICON) is remapped onto a window over
+            # the target mesh, which the door reads from --grid.
+            area += ["--grid", cull_grid]
     else:
         area = ["--point", point, "--radius-km", radius,
                 "--margin-km", f"{MET_MARGIN_KM:g}"]
@@ -1633,7 +1669,8 @@ def full_chain_commands(*, dt_seconds: float, density: str, dx_m: float,
         "hex", "init", "--met", first_met, "--static", cull_static,
         "--capsule", cull_vertical, "--reference", cull_vertical,
         "--out", cull_init, "--start-time", _start_stamp(start),
-        "--nfglevels", levels, *INIT_SWITCHES]))
+        "--nfglevels", levels,
+        *_init_switches(None if wrfout_glob is not None else source)]))
     chain.append(("lbc", [
         "hex", "lbc", "--grid", cull_init, "--met-dir", met_dir,
         "--out-dir", lbc_dir, "--start-time", _start_stamp(start),

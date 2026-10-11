@@ -65,8 +65,10 @@ class SourceWindow:
 
 #: The first cycle of the source.coop ICON archive (``p/`` tree).
 ICON_ARCHIVE_START = datetime(2026, 8, 25, 12)
-#: DWD open data (v1 tree) keeps about this many hours of runs.
-ICON_DWD_RETENTION_HOURS = 24.0
+#: DWD open data (v1 tree) keeps about this many hours of runs (the
+#: route table's dwd rung, measured 2026-10-11: the last four runs, each
+#: dropped about 27 h after its cycle).
+ICON_DWD_RETENTION_HOURS = 27.0
 #: The Met Office AWS open-data archive is a rolling two-year window.
 MET_OFFICE_RETENTION_HOURS = 2 * 365 * 24.0
 
@@ -91,7 +93,10 @@ WINDOWS: Mapping[str, SourceWindow] = {
         retention_hours=None, stores=_ICON_STORES),
     "met-office-global": SourceWindow(
         source="met-office-global", label="Met Office global deterministic",
-        cadence_hours=3, horizons={0: 168, 6: 69, 12: 168, 18: 69},
+        # The 00/12Z runs reach f168, but 3-hourly only to f144 (6-hourly
+        # after it), so a 3 h boundary series ends at f144: the registry
+        # row's max_forecast_hour and the route's ladder agree.
+        cadence_hours=3, horizons={0: 144, 6: 69, 12: 144, 18: 69},
         publication_lag_hours=5.5, archive_start=None,
         retention_hours=MET_OFFICE_RETENTION_HOURS,
         stores=("the AWS open-data archive "
@@ -182,7 +187,13 @@ def _route(source: str):
 
 
 def _rolling_endpoints(source: str) -> tuple[tuple[str, float], ...] | None:
-    """(name, retention) of every endpoint when ALL are rolling, else None."""
+    """(name, retention) of every endpoint when ALL are rolling, else None.
+
+    None too when the declared row's own rolling retention is no longer
+    than what the endpoints keep: then the rolling store IS the archive
+    (the Met Office bucket's two years), and there is no other one the
+    route could read.
+    """
 
     from woof import fetch_endpoints
 
@@ -191,6 +202,10 @@ def _rolling_endpoints(source: str) -> tuple[tuple[str, float], ...] | None:
     except Exception:                        # noqa: BLE001 - absent is absent
         return None
     if not rungs or any(rung.retention_hours is None for rung in rungs):
+        return None
+    declared = WINDOWS[source].retention_hours if source in WINDOWS else None
+    if declared is not None and max(
+            float(rung.retention_hours) for rung in rungs) >= declared:
         return None
     return tuple((rung.name, float(rung.retention_hours)) for rung in rungs)
 

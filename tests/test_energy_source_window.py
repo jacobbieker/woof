@@ -41,7 +41,7 @@ def test_icon_window(no_routes, source):
     assert ok is None
     early = sw.window_refusal(source, datetime(2026, 8, 25, 6), 6.0, now=NOW)
     assert "2026-08-25T12Z" in early and "source.coop" in early
-    assert "about the last 24 h" in early
+    assert "about the last 27 h" in early
     assert sw.window_refusal(source, datetime(2026, 8, 25, 12), 6.0,
                              now=NOW) is None
     # 00/12Z to 180 h, 06/18Z to 120 h, on 3 h boundaries
@@ -61,10 +61,11 @@ def test_icon_window(no_routes, source):
 
 def test_met_office_window(no_routes):
     source = "met-office-global"
-    assert sw.window_refusal(source, datetime(2026, 10, 9, 0), 168.0,
+    # 3-hourly to f144 (6-hourly after it), so a 3 h series ends there
+    assert sw.window_refusal(source, datetime(2026, 10, 9, 0), 144.0,
                              now=NOW) is None
-    assert "f168" in sw.window_refusal(source, datetime(2026, 10, 9, 0),
-                                       169.0, now=NOW)
+    assert "f144" in sw.window_refusal(source, datetime(2026, 10, 9, 0),
+                                       145.0, now=NOW)
     assert sw.window_refusal(source, datetime(2026, 10, 9, 6), 69.0,
                              now=NOW) is None
     short = sw.window_refusal(source, datetime(2026, 10, 9, 18), 70.0,
@@ -181,3 +182,36 @@ def test_met_office_notes_name_the_gdas_land_state(monkeypatch):
     assert "no soil, land mask or sea ice" in notes
     assert "same-cycle GDAS" in notes
     assert "06/18Z runs reach 69 h" in notes
+
+
+def test_the_declared_rows_agree_with_this_builds_real_routes():
+    """No stand-ins: the route table and registry rows are in the tree."""
+
+    from woof import fetch_routes
+    from woof.source_adapters import get_source_adapter
+
+    for source in ("icon-global", "icon-global-ml"):
+        route = fetch_routes.route_for(source)
+        dwd, coop = route.hosts
+        assert dwd.retention_hours == sw.ICON_DWD_RETENTION_HOURS
+        assert coop.serves_from == sw.ICON_ARCHIVE_START
+        notes = " ".join(sw.source_notes(source))
+        assert "about the last 27 h" in notes
+        assert "rolling publishers" not in notes
+        early = sw.window_refusal(source, datetime(2026, 8, 25, 6), 6.0, now=NOW)
+        assert "2026-08-25T12Z" in early
+        assert sw.window_refusal(source, datetime(2026, 9, 29, 12), 6.0,
+                                 now=NOW) is None
+    source = "met-office-global"
+    window = sw.WINDOWS[source]
+    assert max(window.horizons.values()) == get_source_adapter(
+        source).max_forecast_hour == 144
+    assert window.retention_hours == fetch_routes.route_for(
+        source).hosts[0].retention_hours
+    # The rolling bucket is the archive: no "until the route reads the
+    # archive" note for it.
+    assert "rolling publishers" not in " ".join(sw.source_notes(source))
+    assert sw.window_refusal(source, datetime(2026, 10, 9, 0), 144.0,
+                             now=NOW) is None
+    assert "publishes no f147" in sw.window_refusal(
+        source, datetime(2026, 10, 9, 0), 147.0, now=NOW)

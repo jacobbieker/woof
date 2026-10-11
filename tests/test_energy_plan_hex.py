@@ -879,9 +879,17 @@ def test_new_global_sources_plan_when_this_build_has_them(
         for flag in ("--point", "--radius-km", "--margin-km"):
             assert flag not in met, flag
         assert _flag(met, "--interval-hours") == "3"
+    # ICON is remapped onto a window over the culled mesh it must cover.
+    if source.startswith("icon-global"):
+        assert _flag(met, "--grid").endswith(f"{plan_hex.CULL_NAME}.grid.nc")
+    else:
+        assert "--grid" not in met
     _door_accepts(met)
     assert _flag(stage["init"], "--nfglevels") == levels
     assert _flag(stage["lbc"], "--nfglevels") == levels
+    # ICON's TERRA column is eight layers; the GDAS land state four.
+    assert _flag(stage["init"], "--nfgsoillevels") == (
+        "8" if source.startswith("icon-global") else "4")
     build_parser().parse_args(fetch)
     for name in ("intermediate", "init", "lbc"):
         assert callable(hex_parser().parse_args(stage[name][1:]).handler)

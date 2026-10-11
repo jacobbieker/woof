@@ -273,11 +273,12 @@ limit it hit:
 
 - ICON runs reach 180 h from 00 and 12 UTC and 120 h from 06 and 18 UTC.
   DWD open data (`opendata.dwd.de/weather/nwp/v1/m/icon/p/`) keeps about
-  the last 24 h. The source.coop archive (`data.source.coop/bkr/icon/icon/`,
+  the last 27 h (its last four runs). The source.coop archive (`data.source.coop/bkr/icon/icon/`,
   `p/` tree) holds runs from 2026-08-25 12 UTC onward. An earlier cycle is
   refused.
-- Met Office runs reach 168 h from 00 and 12 UTC and 69 h from 06 and
-  18 UTC. Each run lands about 5.5 h after its run time. The AWS open-data
+- Met Office runs reach 168 h from 00 and 12 UTC, but 3-hourly only to
+  144 h (6-hourly after), so a 3 h boundary series ends at 144 h; the 06
+  and 18 UTC runs reach 69 h. Each run lands about 5.5 h after its run time. The AWS open-data
   archive keeps a rolling two years.
 - A forecast longer than the run, or a run that has not landed yet by the
   clock, is refused.
