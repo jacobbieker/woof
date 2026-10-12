@@ -1395,8 +1395,16 @@ FROZEN_MODULE_DIGESTS = {
         # Exact-array gates and all five seeded digests match the base.
         # Re-pinned 2026-10-01 for aligned flavor weights and prefix padding.
         # Direct before/after output words match on RTX 4090 and RTX 5090.
-        'd13b914a28ad8b7ef88904977c7e33b9a7d7e800592473c0fb8debebca031edf',
-        '3c85ba59159dadd97d6e5215cc0b552c4a017539d9c23b99bb77e1a788dee964'),
+        # Re-pinned 2026-10-12, 256-level radiation: rrtmgp_planck_sources'
+        # fixed per-thread pfrac[128] (and its `nlay > 128` return) became a
+        # one-layer window, so no RRTMGP kernel bounds the column.  Reading,
+        # RTX A6000 (sm_86, NVRTC 12.9.86): lay/lev/sfc source words equal
+        # the base kernel's at 1, 2, 30, 74, 127 and 128 layers in both
+        # storage orders, and the whole driver's outputs at nz 49/64/115/127
+        # are byte-identical; frame 512 -> 0 B.  Not an mp=8 unit.
+        # Previously d13b914a/3c85ba59.
+        '66557cb1680e4ee29c86845f408dbf0cf3108ae0e158e830554e5b15b5b2c3ba',
+        'b256395c38b7ba68c585051ef8f12f9b3c4277306aa93a465c508543ae9a6cf8'),
     'rrtmgp_mcica': (
         # Re-pinned for shared seeds, exact clear paths, SASS-matched FP64
         # intrinsics, bit-major GF(2) jumps and MWC-only alias walks.

@@ -2239,7 +2239,11 @@ Three consequences worth stating plainly:
   (`RLW_MAXLAY`) per run: the shipped 128 for any column of at most 128
   layers, otherwise the layer count rounded up to a multiple of 64
   (`legacy_longwave_layer_tier`). At a 1 hPa top WRF's 4 hPa buffer adds
-  no longwave layer, so a 256-level ladder is a 256-layer column. The bounds are declared once in
+  no longwave layer, so a 256-level ladder is a 256-layer column. On the modern arm no
+  kernel holds a fixed per-layer array any more: the RTE solvers compile to
+  each call's own layer count and the Planck-source kernel walks a one-layer
+  window, so a 256-level column under a 1 hPa top radiates 256 longwave and
+  257 shortwave layers. The bounds are declared once in
   `woof/physics_vertical_contract.py` and refused by number in the
   resolved vertical preflight (`woof.physics_compat`), before anything
   is paid for. Until 2026-10 both longwave arms held a fixed 128-layer

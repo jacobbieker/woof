@@ -51,7 +51,7 @@
       "path": "woof/physics_vertical_contract.py",
       "size": 9225,
       "sha256": "85b5d509208e14a9aeb8f4265a9b58b33aa15b05f06707bf76e1844bef4ca609",
-      "reached": "outside_vertical_bounds and refuse_vertical_levels, bound at module scope by carried ysu.  Nothing in this package binds MAX_RRTMGP_LAYERS, and carried rrtmgp does not reach this file"
+      "reached": "outside_vertical_bounds and refuse_vertical_levels, bound at module scope by carried ysu, and MAX_RRTMGP_MODEL_LEVELS, bound at module scope by carried rrtmgp as its model-level refusal"
     },
     {
       "path": "woof/core/kf.py",

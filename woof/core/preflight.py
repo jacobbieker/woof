@@ -1803,6 +1803,10 @@ def read_compile_platform() -> tuple[str, str] | None:
 #: arrays moved into launcher-owned workspaces priced by
 #: :func:`wsm6_column_workspace_bytes` / :func:`wdm6_column_workspace_bytes`,
 #: and their rows here are now the one small frame each compiles to.)
+#: ``rrtmgp_rte`` compiles its solvers to each call's own radiation layer
+#: count; its row is the 128-layer default, the flat price of every
+#: column up to 128 layers, and a deeper column prices above it
+#: (:func:`rrtmgp_rte_frame_bytes`).
 #: Everything else launches as compiled.
 #:
 #: A module maximum is an UPPER bound over the kernels a scheme can launch --
@@ -2040,6 +2044,13 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # Another compiler-build move at a fixed sm_120: 0 B on NVRTC 13.0.48,
     # 40 B on 13.3.33.
     "rrtmgp_cloud": 40,
+    # The 512 B was the Planck-source kernel's fixed ``float pfrac[128]``.
+    # That array became a one-layer window on 2026-10 (no layer ceiling,
+    # bit-identical output) and the module reads 0 B on sm_86 at NVRTC
+    # 12.9.86 (kernel_frame_recordings.SM86_NVRTC_12_9_86).  The row stays
+    # at the ceiling over the recordings, which still carry 512 on the
+    # platforms nobody has re-read: an over-price under the 1,024 B default
+    # stack, so it reserves nothing either way.
     "rrtmgp_gas": 512,
     "rrtmgp_mcica": 0,
     # The RRTMGP optimisation took this from 5,152 to 3,600:
@@ -2052,7 +2063,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # (both are 5,120), so those runs reserved 32 B per resident thread
     # more backing store than any card compiles, 8,355,840 B on a 170-SM
     # card, and a P3 or microphysics-free one the whole 1,552 B,
-    # 405,258,240 B.
+    # 405,258,240 B.  This is the module at its 128-layer source default;
+    # the launchers compile RRTMGP_MAX_LAYERS to each call's own layer count
+    # and a column deeper than 128 layers is priced above this row by
+    # RRTMGP_RTE_SW_TIER_FRAME / rrtmgp_rte_frame_bytes.
     "rrtmgp_rte": 3600,
     "rrtmgp_validation": 0,
     "ruc": 144,
@@ -2475,6 +2489,62 @@ IEVA_TIER_FRAME = TieredKernelFrame("ieva", "IEVA_KMAX", 65, 16)
 #: ~0.5 GiB, which is the reason the bound is not simply compiled at 256.
 SASE_TIER_FRAME = TieredKernelFrame("sase", "SASE_KMAX", 128, 49,
                                     lowest_tier=32)
+
+#: ``rrtmgp_rte.cu``'s ``RRTMGP_MAX_LAYERS`` sizes the solvers' per-thread
+#: column arrays, and ``woof/core/rrtmgp.py`` (``_rte_kernel``) compiles it to
+#: each CALL's own radiation layer count -- the shortwave two-stream at
+#: ``nz + sw_upper`` and the longwave no-scattering solver at
+#: ``nz + lw_upper`` (WRF's above-model cap,
+#: :func:`woof.physics_vertical_contract.rrtmgp_above_model_layer_counts`).
+#: The shipped row of :data:`KERNEL_MAX_LOCAL_SIZE_BYTES` is the module at
+#: its 128-layer source default, and stays the FLAT price of every column up
+#: to 128 layers (an over-price below it, which is what every configuration
+#: was charged before; nothing shallower moves).  Above 128 the frame grows
+#: with the column, and until the model-level ceiling went from 128 radiation
+#: layers to 256 model levels (2026-10) a flat 3,600 B under-priced every
+#: such run: a 256-level 1 hPa column compiles the two-stream at 257 layers,
+#: 7,216 B.  So the column is priced by :func:`rrtmgp_rte_frame_bytes`.
+#:
+#: MEASURED 2026-10-12 on an RTX A6000 (sm_86, NVRTC 12.9.86) through the
+#: production loader (``load_module_int_defines``), compile-only, at 1, 2,
+#: 32, 64, 74, 96, 127-129, 160, 192, 200, 256, 257, 260, 269, 281 and 300
+#: layers: ``rrtmgp_sw_2stream`` = ``28 n + 12`` rounded up to 16 B (its
+#: ``float4 optics[n]``, ``float direct[n+1]`` and ``float2 adding[n+1]``)
+#: at every count from 2, and ``rrtmgp_lw_noscat`` = ``8 n`` (``trans`` and
+#: ``src_up``) at every count from 2; the module's other three exports hold
+#: no frame.  This tier reproduces the two-stream exactly wherever ``28 n +
+#: 12`` is not a multiple of 16 and over-prices by 16 B where it is (n = 3
+#: mod 4) -- a stated ceiling, the safe direction.  Other architectures and
+#: NVRTC builds were not re-read at depth: the per-layer slope is the arrays'
+#: own byte count, which no register allocation can shrink, and every
+#: recorded platform reads the same 3,600 B at the 128 default.
+RRTMGP_RTE_SW_TIER_FRAME = TieredKernelFrame(
+    "rrtmgp_rte", "RRTMGP_MAX_LAYERS", 128, 28, alignment_bytes=16)
+#: ``rrtmgp_lw_noscat``'s two ``float[RRTMGP_MAX_LAYERS]`` columns.
+RRTMGP_RTE_LW_BYTES_PER_LAYER = 8
+
+
+def rrtmgp_rte_frame_bytes(nz: int, p_top: float, *, longwave: bool = True,
+                           shortwave: bool = True) -> int:
+    """The widest ``rrtmgp_rte`` frame one RTE+RRTMGP domain launches.
+
+    Never below the shipped module row (the 128-layer default every
+    shallower column was always priced at).  ``p_top`` is the model top in
+    Pa; ``0`` (an idealized configuration whose initializer supplies the
+    top later) adds no cap layers, exactly as the workspace pricing reads it.
+    """
+    from woof.physics_vertical_contract import rrtmgp_above_model_layer_counts
+
+    nz = int(nz)
+    lw_upper, sw_upper = rrtmgp_above_model_layer_counts(float(p_top))
+    spec = RRTMGP_RTE_SW_TIER_FRAME
+    frame = int(KERNEL_MAX_LOCAL_SIZE_BYTES[spec.module])
+    if shortwave:
+        frame = max(frame, spec.frame_bytes(
+            max(spec.shipped_tier, nz + sw_upper)))
+    if longwave:
+        frame = max(frame, RRTMGP_RTE_LW_BYTES_PER_LAYER * (nz + lw_upper))
+    return frame
 
 #: Kernel source files that have no standalone local frame because they
 #: never compile alone: ``noahmp_driver.cu``, ``noahmp_energy.cu``,
@@ -3334,6 +3404,23 @@ def kernel_local_frame_bytes(
             dc, prices_refl=prices_refl)]
     if sase_frames:
         frames[SASE_TIER_FRAME.module] = max(sase_frames)
+
+    # ``rrtmgp_rte`` compiles its solvers to each call's radiation layer
+    # count, so a domain whose column passes 128 layers prices above the
+    # flat row (rrtmgp_rte_frame_bytes), per domain that launches it and
+    # per spectrum it selects.
+    p_top = float(getattr(getattr(exp, "vertical", None), "p_top", 0.0)
+                  or 0.0)
+    for dc in exp.domains:
+        if RRTMGP_RTE_SW_TIER_FRAME.module not in domain_kernel_modules(
+                dc, prices_refl=prices_refl):
+            continue
+        lw_scheme, sw_scheme = radiation_scheme_ids(dc.run)
+        frame = rrtmgp_rte_frame_bytes(
+            int(dc.run.nz), p_top,
+            longwave=lw_scheme == 4, shortwave=sw_scheme == 4)
+        if frame > frames.get(RRTMGP_RTE_SW_TIER_FRAME.module, -1):
+            frames[RRTMGP_RTE_SW_TIER_FRAME.module] = frame
     for module, shallow_frame in THOMPSON_SHALLOW_KERNEL_FRAMES.items():
         selected_levels = [int(dc.run.nz) for dc in exp.domains
                            if module in domain_kernel_modules(

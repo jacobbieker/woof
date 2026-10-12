@@ -677,6 +677,18 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
 #: other recording's rows for the two modules were re-read compile-only
 #: at that recording's own NVRTC build or dropped where the build was out
 #: of reach (13.0.48); see docs/kernel_local_memory_bounds.md section 10.
+#: TWO ROWS ADDED 2026-10-12 from the same compile platform on a different
+#: card: an RTX A6000 (sm_86, NVRTC 12.9.86, fresh process, zero launches,
+#: same instrument), when the RTE+RRTMGP chain went to 256 model levels.
+#: ``rrtmgp_gas`` reads 0 B there because the Planck-source kernel's fixed
+#: ``float pfrac[128]`` (its whole 512 B) became a one-layer window, and
+#: ``rrtmgp_rte`` reads its 3,600 B at the 128-layer source default (its
+#: per-layer growth above that is priced by
+#: ``woof.core.preflight.RRTMGP_RTE_SW_TIER_FRAME``).  They are written here
+#: so the driver gate holds this platform to the new kernel exactly; the
+#: other recordings keep the 512 B nobody has re-read, so the shipped
+#: ``rrtmgp_gas`` ceiling stays 512 B (an over-price under the default
+#: stack, which reserves nothing).
 SM86_NVRTC_12_9_86 = KernelFrameRecording(
     box='development-desktop',
     device='NVIDIA GeForce RTX 3080',
@@ -712,6 +724,8 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         # every other platform.  The per-run tiers read 1,568 / 3,136 /
         # 6,272 / 12,544 B at 32 / 64 / 128 / 256 (preflight.SASE_TIER_FRAME).
         'sase': 6272,
+        'rrtmgp_gas': 0,
+        'rrtmgp_rte': 3600,
         'thompson_aerosol_warm': 112,
         # WDM6 / WSM6 at the 2026-10-12 workspace cut, read through the
         # production loader (load_module, then local_size_bytes) on an RTX

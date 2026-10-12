@@ -2268,7 +2268,7 @@ def validate_resolved_physics_vertical_levels(
     from woof.physics_registry import CONSUMER_ROWS_KEY
     from woof.physics_vertical_contract import (
         MAX_LEGACY_SHORTWAVE_LAYERS,
-        MAX_RRTMGP_LAYERS,
+        MAX_RRTMGP_MODEL_LEVELS,
         legacy_radiation_layer_counts,
         max_legacy_longwave_layers,
         rrtmgp_above_model_layer_counts,
@@ -2336,6 +2336,11 @@ def validate_resolved_physics_vertical_levels(
                         f"<= {maximum} (nz <= {maximum - (total - nz)}), "
                         f"got {nz}+{total - nz}={total}")
         else:
+            # The bound is on MODEL levels; the cap layers above the model
+            # top ride on top of it at any p_top (no RRTMGP kernel holds a
+            # fixed per-layer array -- see MAX_RRTMGP_MODEL_LEVELS), so the
+            # radiation-layer maximum reported here is nz's ceiling plus
+            # this p_top's cap.
             lw_upper, sw_upper = rrtmgp_above_model_layer_counts(top_pressure)
             for index, kind, upper in ((0, "longwave", lw_upper), (1, "shortwave", sw_upper)):
                 if pair[index] != 4:
@@ -2343,10 +2348,13 @@ def validate_resolved_physics_vertical_levels(
                 total = nz + upper
                 checks.append({"component": f"RTE+RRTMGP {kind}",
                     "model_levels": nz, "above_model_layers": upper,
-                    "total_layers": total, "maximum": MAX_RRTMGP_LAYERS})
-                if total > MAX_RRTMGP_LAYERS:
-                    violations.append(f"RTE+RRTMGP {kind} requires model plus cap layers "
-                        f"<= {MAX_RRTMGP_LAYERS}, got {nz}+{upper}={total}")
+                    "total_layers": total,
+                    "maximum": MAX_RRTMGP_MODEL_LEVELS + upper,
+                    "maximum_model_levels": MAX_RRTMGP_MODEL_LEVELS})
+                if nz > MAX_RRTMGP_MODEL_LEVELS:
+                    violations.append(f"RTE+RRTMGP {kind} requires model levels "
+                        f"nz <= {MAX_RRTMGP_MODEL_LEVELS} (plus {upper} cap "
+                        f"layers above the model top), got {nz}+{upper}={total}")
 
     if violations:
         raise PhysicsVerticalPreflightError(

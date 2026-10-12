@@ -88,25 +88,58 @@ def test_component_owned_model_level_bound_inside_and_outside(
             _selection(outside, **selector))
 
 
-def test_rte_rrtmgp_model_plus_cap_bound_inside_and_outside():
+def test_rte_rrtmgp_model_level_bound_inside_and_outside():
+    """RTE+RRTMGP bounds MODEL levels at 256; the cap rides on top.
+
+    The old bound was 128 radiation layers including the cap (the
+    Planck-source kernel's fixed ``pfrac[128]``), so 104 levels under a
+    100 hPa top (+25 cap layers) used to be refused.  No RRTMGP kernel holds
+    a fixed per-layer array now, so a column of 256 model levels plus any
+    cap is admitted and 257 levels are refused by number.
+    """
     selector = {
         "mp_physics": 8,
         "ra_lw_physics": 4,
         "ra_sw_physics": 4,
     }
     receipt = validate_resolved_physics_vertical_levels(
-        _selection(103, **selector), p_top=10000.0)
+        _selection(104, **selector), p_top=10000.0)
     longwave = next(
         check for check in receipt["checks"]
         if check["component"] == "RTE+RRTMGP longwave")
     assert longwave["above_model_layers"] == 25
-    assert longwave["total_layers"] == 128
+    assert longwave["total_layers"] == 129
 
-    with pytest.raises(
-            PhysicsVerticalPreflightError,
-            match=r"RTE\+RRTMGP longwave.*104\+25=129"):
+    receipt = validate_resolved_physics_vertical_levels(
+        _selection(256, **selector), p_top=10000.0)
+    totals = {
+        check["component"]: (check["total_layers"], check["maximum"])
+        for check in receipt["checks"]
+        if check["component"].startswith("RTE+RRTMGP")
+    }
+    assert totals == {
+        "RTE+RRTMGP longwave": (281, 281),
+        "RTE+RRTMGP shortwave": (257, 257),
+    }
+    # The 1 hPa top: no LW cap layer (nint(100/400) = 0), one SW layer.
+    receipt = validate_resolved_physics_vertical_levels(
+        _selection(256, **selector), p_top=100.0)
+    totals = {
+        check["component"]: check["total_layers"]
+        for check in receipt["checks"]
+        if check["component"].startswith("RTE+RRTMGP")
+    }
+    assert totals == {"RTE+RRTMGP longwave": 256,
+                      "RTE+RRTMGP shortwave": 257}
+
+    with pytest.raises(PhysicsVerticalPreflightError) as caught:
         validate_resolved_physics_vertical_levels(
-            _selection(104, **selector), p_top=10000.0)
+            _selection(257, **selector), p_top=10000.0)
+    message = str(caught.value)
+    assert ("RTE+RRTMGP longwave requires model levels nz <= 256 "
+            "(plus 25 cap layers above the model top), got 257+25=282"
+            ) in message
+    assert "RTE+RRTMGP shortwave requires model levels nz <= 256" in message
 
 
 def test_legacy_rrtmg_engine_bounds_inside_and_outside():

@@ -1306,6 +1306,82 @@ reservation was 2.0 GiB at nz <= 128 and would have been about 4.2 /
 5.7 GiB at a 256-level frame bound. On an 84-SM A6000 the numbers are
 600.8 / 758.9 MiB.
 
+## 10. RTE+RRTMGP: a frame that follows the radiation column, to 256 levels
+
+Until 2026-10 RTE+RRTMGP refused any radiation column over 128 layers,
+cap included. That ceiling was owned by one array:
+`rrtmgp_planck_sources` (`woof/core/kernels/rrtmgp_gas.cu`, and the global
+model's copy under `woof/globe/core/kernels/`) held a per-thread
+`float pfrac[128]`, 512 B of frame. The RTE solvers already compiled
+`RRTMGP_MAX_LAYERS` to each call's own layer count (`_rte_kernel`).
+
+**The Planck array is gone, not resized.** A level source reads only the
+two layers on either side of it, so the kernel now walks a one-layer
+window (`pfrac_prev`) and keeps the surface layer's fraction (`pfrac_sfc`).
+The expressions and their operands are unchanged, so every output word is
+the old kernel's: on an RTX A6000 (sm_86, NVRTC 12.9.86) the source arrays
+are byte-identical to the base kernel's at 1, 2, 30, 74, 127 and 128 layers
+in both storage orders, for both copies, and so are the whole driver's
+fluxes and heating rates at nz 49, 64, 115 and 127. The frame went from
+512 B to 0 B (63 registers, up from 56). The other recordings keep their
+unread 512 B, so the shipped `rrtmgp_gas` ceiling stays 512 B. That is
+under the 1,024 B default stack, so it reserves nothing.
+
+The bound is now on **model levels**:
+`physics_vertical_contract.MAX_RRTMGP_MODEL_LEVELS = 256`, the dynamical
+core's ceiling. WRF's cap layers ride on top at any model top. At
+`p_top = 100 Pa` that is 256 LW layers (nint(100/400) = 0) and 257 SW. At
+`p_top = 10 kPa` it is 281 LW layers and 257 SW.
+
+**The solver frame is priced per layer above 128.** Measured through
+`load_module_int_defines` on the same card, compile-only, at 1 to 300
+layers:
+
+| layers | `rrtmgp_sw_2stream` | `rrtmgp_lw_noscat` |
+|---|---|---|
+| 64 | 1,808 B | 512 B |
+| 128 (source default, the shipped row) | 3,600 B | 1,024 B |
+| 129 | 3,632 B | 1,032 B |
+| 160 | 4,496 B | 1,280 B |
+| 192 | 5,392 B | 1,536 B |
+| 256 | 7,184 B | 2,048 B |
+| 257 (256 levels, 1 hPa top) | 7,216 B | 2,056 B |
+| 260 | 7,296 B | 2,080 B |
+| 269 | 7,552 B | 2,152 B |
+| 281 | 7,888 B | 2,248 B |
+
+The two-stream is `28 n + 12` rounded up to 16 B. Its arrays are
+`float4 optics[n]`, `float direct[n+1]` and `float2 adding[n+1]`. The LW
+solver is `8 n` (`trans`, `src_up`). Both hold at every count from 2 up.
+`preflight.RRTMGP_RTE_SW_TIER_FRAME` (3,600 B at the 128 tier plus 28 B per
+layer, 16 B alignment) reproduces the two-stream exactly wherever `28 n + 12`
+is not a multiple of 16. Where it is (n = 3 mod 4), it over-prices by 16 B.
+`preflight.rrtmgp_rte_frame_bytes(nz, p_top)` takes the wider of the SW
+tier at `nz + sw_upper` and the LW line at `nz + lw_upper`, for the spectra
+a domain selects, and never goes below the flat 3,600 B row. Every column
+of 128 radiation layers or fewer is therefore priced exactly as before.
+
+What this charges at depth, by the law, on the RTX 5090 reference profile
+(170 SMs x 1,536 threads):
+
+| column | frame | reservation |
+|---|---|---|
+| any column of 128 layers or fewer (unchanged) | 3,600 B | 641.5 MiB |
+| 256 levels, `p_top = 0` (no cap known) | 7,184 B | 1,534.0 MiB |
+| 256 levels, 1 hPa top (SW 257) | 7,216 B | 1,542.0 MiB |
+
+Before this change, the flat row under-priced the 1 hPa case by 900.5 MiB.
+
+Only the solver frames grow; `_rte_gpt_tile` reads the frame off the
+per-run compiled kernel (`local_size_bytes`), so the non-folding tile rule
+already sees the deeper frame. The production folds use fixed widths.
+
+Other architectures and NVRTC builds were not re-read at depth. The slope
+is the byte count of the arrays, which no register allocation can shrink,
+and every recorded platform reads the same 3,600 B at the 128 default.
+`tests/test_kernel_local_bounds.py::test_the_rrtmgp_rte_layer_frames_are_what_preflight_prices`
+re-reads the depths on whatever card runs it.
+
 ### Reproducing
 
 ```
@@ -1323,3 +1399,8 @@ GPUWM_NO_LOCAL_GPU=1 pytest tests/test_pbl_vertical_bounds.py \
 `test_the_frame_stays_under_the_default_stack` is the gate that does not
 depend on the platform. `test_no_column_array_is_left_on_the_stack` is the
 gate that reads the source and needs no GPU.
+
+pytest tests/test_rrtmgp.py -k "retired_ceiling or deep_column or 256_level or in_solver_planck or 257_model"
+pytest tests/test_kernel_local_bounds.py -k rrtmgp
+GPUWM_NO_LOCAL_GPU=1 pytest tests/test_preflight.py -k rrtmgp_rte_is_priced
+```

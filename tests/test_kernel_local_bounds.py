@@ -577,3 +577,45 @@ def test_the_acoustic_ceiling_is_still_refused_above_the_top_tier():
 
     with pytest.raises(ValueError, match="exceeds the in-thread solve limit"):
         acmod.wphi_level_tier(acmod.MAX_ACOUSTIC_LEVELS + 1)
+
+
+# ---------------------------------------------------------------------------
+# RTE+RRTMGP: compiled to each call's radiation layer count
+# ---------------------------------------------------------------------------
+
+def test_the_rrtmgp_rte_layer_frames_are_what_preflight_prices():
+    """``preflight.rrtmgp_rte_frame_bytes`` against the driver, past 128.
+
+    ``woof/core/rrtmgp.py`` compiles ``RRTMGP_MAX_LAYERS`` to the call's
+    own layer count (``_rte_kernel``), the two-stream at ``nz + sw_upper``
+    and the LW solver at ``nz + lw_upper``.  The price must never be below
+    what either kernel compiles to at the depths a 256-level column reaches
+    -- including the 1 hPa top (256 LW + 257 SW layers) and a 100 hPa top
+    (281 LW) -- and the two-stream's tier must be EXACT wherever 28 n + 12
+    is not a multiple of 16 (16 B over where it is, the stated ceiling).
+    """
+    from woof.core.rrtmgp import _rte_kernel
+    from woof.physics_vertical_contract import rrtmgp_above_model_layer_counts
+
+    spec = pf.RRTMGP_RTE_SW_TIER_FRAME
+    assert (spec.module, spec.define, spec.shipped_tier) == (
+        "rrtmgp_rte", "RRTMGP_MAX_LAYERS", 128)
+    for layers in (128, 129, 160, 192, 256, 257, 260, 269, 281):
+        sw = int(_rte_kernel("rrtmgp_sw_2stream", layers)
+                 .attributes["local_size_bytes"])
+        lw = int(_rte_kernel("rrtmgp_lw_noscat", layers)
+                 .attributes["local_size_bytes"])
+        priced = spec.frame_bytes(layers)
+        assert sw <= priced <= sw + 16, (layers, sw, priced)
+        if (28 * layers + 12) % 16:
+            assert priced == sw, (layers, sw, priced)
+        assert lw == pf.RRTMGP_RTE_LW_BYTES_PER_LAYER * layers, (layers, lw)
+    for nz, p_top in ((128, 100.0), (200, 5000.0), (256, 100.0),
+                      (256, 10000.0)):
+        lw_upper, sw_upper = rrtmgp_above_model_layer_counts(p_top)
+        compiled = max(
+            int(_rte_kernel("rrtmgp_sw_2stream", nz + sw_upper)
+                .attributes["local_size_bytes"]),
+            int(_rte_kernel("rrtmgp_lw_noscat", nz + lw_upper)
+                .attributes["local_size_bytes"]))
+        assert compiled <= pf.rrtmgp_rte_frame_bytes(nz, p_top), (nz, p_top)

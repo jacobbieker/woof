@@ -4635,6 +4635,50 @@ def test_wsm6_is_priced_as_a_workspace_that_follows_nz_not_a_tiered_frame():
     assert pf.kernel_local_frame_bytes(exp(96, mp_physics=10)).get("wsm6") is None
 
 
+def test_rrtmgp_rte_is_priced_per_radiation_layer_above_128():
+    """The RTE solvers compile RRTMGP_MAX_LAYERS to each call's own count.
+
+    Until the RTE+RRTMGP bound moved from 128 radiation layers to 256 model
+    levels the flat 3,600 B row was every column's price, which is right
+    up to 128 layers and short above: the two-stream at 257 layers (a
+    256-level column under a 1 hPa top) holds 7,216 B.  Below 128 nothing
+    moves.  The driver half is tests/test_kernel_local_bounds.py.
+    """
+    frame = pf.rrtmgp_rte_frame_bytes
+    row = pf.KERNEL_MAX_LOCAL_SIZE_BYTES["rrtmgp_rte"]
+    assert row == 3600
+    # Shallow columns: the flat row, at every model top.
+    for nz, p_top in ((49, 5000.0), (115, 5000.0), (127, 100.0),
+                      (103, 10000.0)):
+        assert frame(nz, p_top) == row, (nz, p_top)
+    # Measured on sm_86 / NVRTC 12.9.86 (see RRTMGP_RTE_SW_TIER_FRAME).
+    assert frame(128, 100.0) == 3632                # SW 129 layers
+    assert frame(256, 0.0) == 7184                  # SW 256 (no top known)
+    assert frame(256, 100.0) == 7216                # SW 257, the 1 hPa top
+    assert frame(256, 5000.0) == 7216               # SW 257, LW 269
+    # The longwave solver is 8 B/layer and never the widest of the two ...
+    assert frame(256, 10000.0, shortwave=False) == row
+    # ... so a LW-only RRTMGP domain keeps the flat row.
+    assert frame(256, 100.0, shortwave=False) == row
+
+    start = datetime(1974, 4, 3, 12)
+
+    def priced(nz, **radiation):
+        cfg = RunConfig(**{**_TINY, "nz": nz}, moist=True, mp_physics=8,
+                        **radiation)
+        return pf.kernel_local_frame_bytes(
+            experiment_from_run_config(cfg, start)).get("rrtmgp_rte")
+
+    both = {"ra_lw_physics": 4, "ra_sw_physics": 4}
+    assert priced(49, **both) == row
+    assert priced(256, **both) == 7184              # p_top 0: no cap layers
+    assert priced(256, ra_lw_physics=4, ra_sw_physics=1) == row
+    assert priced(256, ra_lw_physics=0, ra_sw_physics=0) is None
+
+
+    """Both rungs, against the driver measurements they were taken from.
+
+
 def test_sase_is_priced_at_the_tier_its_launcher_compiles():
     """SASE compiles ``SASE_KMAX`` per run at 32 / 64 / 128 / 256.
 

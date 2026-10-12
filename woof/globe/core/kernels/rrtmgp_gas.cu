@@ -287,17 +287,24 @@ extern "C" __global__ void rrtmgp_planck_sources(
     float* sfc_source, int ncol, int nlay, int ngas, int ngpt,
     int ntemp, int npres, int neta, int nband, int nplanck) {
   // One thread per (column, g-point).  The g-point loop this replaces was
-  // fully independent: `pfrac` is rebuilt from scratch inside every iteration
-  // and no output slot is written by two g-points.  Keeping `pfrac` in the
-  // thread (rather than staging it globally) is what makes this free -- the
-  // level sources still read their adjacent layers out of local memory, and
-  // consecutive threads now write consecutive g-points of every output.
+  // fully independent: the Planck fraction is rebuilt from scratch inside
+  // every iteration and no output slot is written by two g-points, and
+  // consecutive threads write consecutive g-points of every output.
+  //
+  // NO PER-LAYER THREAD STORAGE, so no layer ceiling.  This kernel used to
+  // hold a fixed `float pfrac[128]` (512 B of local frame) and refuse any
+  // column taller than that -- the one RRTMGP ceiling left once the RTE
+  // solvers compiled RRTMGP_MAX_LAYERS to each run's nlay.  Nothing needs
+  // the whole column: a level source reads the two layers either side of
+  // it, so a one-layer window (`pfrac_prev`) plus the surface layer's
+  // fraction (`pfrac_sfc`, the bottom layer whichever way the column is
+  // stored) carry everything.  The expressions and their operands are the
+  // array version's, so every output word is bit-identical to it at any
+  // nlay it could run; only the store ORDER of the level sources changed
+  // (each is written as soon as its upper layer is known), and no slot is
+  // written twice.  The RTE solver's in-solver Planck path
+  // (rrtmgp_rte.cu) walks the same window.
   const int tid = blockDim.x * blockIdx.x + threadIdx.x;
-  // Device-side belt for the pfrac[128] ceiling below.  The LOUD refusal
-  // lives on the host (_planck_sources raises before any launch, naming
-  // this array); this bare return only stops an out-of-bounds write if a
-  // future caller bypasses that door.
-  if (nlay > 128) return;
   const int col = tid / ngpt;
   const int gpt = tid - col * ngpt;
   if (col >= ncol) return;
@@ -307,7 +314,8 @@ extern "C" __global__ void rrtmgp_planck_sources(
                         / (nplanck - 1);
   const int sfc_lay = play[col * nlay] < play[col * nlay + nlay - 1]
       ? nlay - 1 : 0;
-  float pfrac[128];
+  float pfrac_prev = 0.0f;  // pfrac[lay - 1], the previous stored layer
+  float pfrac_sfc = 0.0f;   // pfrac[sfc_lay]
 
   {
     const int band = gpoint_bands[gpt];
@@ -351,22 +359,24 @@ extern "C" __global__ void rrtmgp_planck_sources(
             + w11 * planck_fraction[km_index(jtr, je + 1, jp + 1, gpt,
                                               neta, npressk, ngpt)];
       }
-      pfrac[lay] = pf;
       lay_source[(cell * ngpt) + gpt] = pf * planck_interp(
           t, band, totplnk, nplanck, nband, temp_ref[0], dplanck);
+      if (lay == 0) {
+        lev_source[(col * nlev) * ngpt + gpt] = pf * planck_interp(
+            tlev[col * nlev], band, totplnk, nplanck, nband,
+            temp_ref[0], dplanck);
+      } else {
+        lev_source[(col * nlev + lay) * ngpt + gpt] =
+            sqrtf(pfrac_prev * pf) * planck_interp(
+                tlev[col * nlev + lay], band, totplnk, nplanck, nband,
+                temp_ref[0], dplanck);
+      }
+      if (lay == sfc_lay) pfrac_sfc = pf;
+      pfrac_prev = pf;
     }
-    sfc_source[col * ngpt + gpt] = pfrac[sfc_lay] * planck_interp(
+    sfc_source[col * ngpt + gpt] = pfrac_sfc * planck_interp(
         tsfc[col], band, totplnk, nplanck, nband, temp_ref[0], dplanck);
-    lev_source[(col * nlev) * ngpt + gpt] = pfrac[0] * planck_interp(
-        tlev[col * nlev], band, totplnk, nplanck, nband,
-        temp_ref[0], dplanck);
-    for (int lev = 1; lev < nlay; ++lev) {
-      lev_source[(col * nlev + lev) * ngpt + gpt] =
-          sqrtf(pfrac[lev - 1] * pfrac[lev]) * planck_interp(
-              tlev[col * nlev + lev], band, totplnk, nplanck, nband,
-              temp_ref[0], dplanck);
-    }
-    lev_source[(col * nlev + nlay) * ngpt + gpt] = pfrac[nlay - 1]
+    lev_source[(col * nlev + nlay) * ngpt + gpt] = pfrac_prev
         * planck_interp(tlev[col * nlev + nlay], band, totplnk,
                         nplanck, nband, temp_ref[0], dplanck);
   }
