@@ -34,8 +34,14 @@
 // compile without a tier is invisible to it.  A kernel that grows its
 // frame silently moves the whole process's device footprint by
 // gigabytes, so being measurable matters more than being unbuildable
-// without the launcher.  The defaults MUST equal the launcher's tier;
-// tests/test_sase_gpu.py::test_sase_tpb_single_source pins that.
+// without the launcher.  SASE_TPB's default MUST equal the launcher's
+// block size.  SASE_KMAX is compiled PER RUN at the smallest of
+// 32/64/128/256 that holds nz (woof/core/sase_limits.py kmax_tier); the
+// default 128 is the census tier every platform's recorded frame was
+// read at, and preflight.SASE_TIER_FRAME prices the other tiers from it
+// (49 B per level, exactly linear).  SASE_KMAX only sizes per-thread
+// arrays -- no loop runs to it -- so the tier moves no output bit.
+// tests/test_sase_gpu.py::test_sase_tpb_single_source pins both.
 #ifndef SASE_TPB
 #define SASE_TPB 128
 #endif

@@ -609,7 +609,17 @@ targets, in order:
 | `shinhong_column` | 13,000 B on NVRTC 13.0 (17,160 on 13.3 and 13.4; sm_120, read 2026-09-28) | `bl_pbl_physics = 11` |
 | `myjpbl_column` | **9,232 B** | `bl_pbl_physics = 2` |
 | `wsm6_column` | 7,216 B | `mp_physics = 6` |
-| `sase_*` | 6,272 B | SASE |
+| `sase_*` | 6,272 B at the 128 tier; 49 B x the per-run `SASE_KMAX` tier (1,568 / 3,136 / 6,272 / 12,544 B at 32 / 64 / 128 / 256) | SASE |
+
+`sase_*` is already specialized: `woof/core/sase.py` compiles `SASE_KMAX`
+per run at the smallest power-of-two tier from 32 that holds `nz`
+(`woof.core.sase_limits.kmax_tier`), and preflight charges that tier's
+frame (`preflight.SASE_TIER_FRAME`, driver-read at all four rungs on
+sm_86, NVRTC 12.9.86). A 49-level run holds 3,136 B, a 256-level run
+12,544 B -- about 2.8 GiB of reservation on a 170-SM card, which is the
+price of the deepest column, not of selecting SASE. The tier only sizes
+per-thread arrays, so it moves no output bit
+(`tests/test_sase_gpu.py::test_sase_kmax_tier_is_bitwise_inert`).
 
 `myjpbl_column` deserves the emphasis: it is the *same* 9,232 B YSU
 carried, in one kernel with no template variants, so a MYJ run still pays

@@ -45,7 +45,6 @@ def test_the_contract_bounds_are_the_launchers_own_bounds():
     ("YSU_KMAX", "ysu", YSU_VERTICAL_LEVEL_BOUNDS),
     ("SHINHONG_KMAX", "shinhong", SHINHONG_VERTICAL_LEVEL_BOUNDS),
     ("MYJ_KMAX", "myjpbl", MYJ_VERTICAL_LEVEL_BOUNDS),
-    ("SASE_KMAX", "sase", SASE_VERTICAL_LEVEL_BOUNDS),
 ))
 def test_the_declared_ceiling_is_the_compiled_kernel_ceiling(
         define, module_name, bounds):
@@ -59,6 +58,30 @@ def test_the_declared_ceiling_is_the_compiled_kernel_ceiling(
     line = next(ln for ln in source.splitlines()
                 if ln.startswith(f"#define {define} "))
     assert int(line.split()[-1]) == bounds[1]
+
+
+def test_the_sase_ceiling_is_the_deepest_compiled_tier():
+    """SASE compiles ``SASE_KMAX`` per run, so its ceiling is a tier, not
+    the source's ``#ifndef`` default (the 128 census tier).
+
+    The declared ceiling must be the deepest tier the launcher can compile,
+    every column the contract admits must map to a tier that holds it, and
+    the source must keep the guard the tier is injected through.
+    """
+    from pathlib import Path
+
+    import woof.core.kernels as kernels
+    from woof.core import sase_limits
+
+    low, high = SASE_VERTICAL_LEVEL_BOUNDS
+    assert high == sase_limits.KMAX_TIERS[-1] == 256
+    for nz in (low, 32, 33, 64, 65, 128, 129, high):
+        assert nz <= sase_limits.kmax_tier(nz) <= high
+    with pytest.raises(ValueError, match="SASE_KMAX=256"):
+        sase_limits.kmax_tier(high + 1)
+    source = (Path(kernels.__file__).with_name("sase.cu")
+              .read_text(encoding="utf-8"))
+    assert "#ifndef SASE_KMAX" in source
 
 
 def _column(nz: int) -> np.ndarray:

@@ -671,6 +671,12 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         'nest_microphysics': 0,
         'noah': 224,
         'nssl2_fused_gs': 112,
+        # Read 2026-10-12 on an RTX A6000 (same sm_86 / NVRTC 12.9.86
+        # platform key, Linux) by the 256-level SASE lane, plain loader at
+        # the #ifndef SASE_KMAX = 128 census tier: 6,272 B, the same as
+        # every other platform.  The per-run tiers read 1,568 / 3,136 /
+        # 6,272 / 12,544 B at 32 / 64 / 128 / 256 (preflight.SASE_TIER_FRAME).
+        'sase': 6272,
         'thompson_aerosol_warm': 112,
         'ysu': 0,
     }),

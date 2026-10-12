@@ -1666,7 +1666,7 @@ refused, not warned about -- and the refusal states its own reason:
 | `khdif = 0.0`, `kvdif = 0.0` | constant-K diffusion may not silently stack on the SASE mixing |
 | `sf_sfclay_physics != 0` | its lower boundary condition is the surface layer's friction velocity, heat and moisture fluxes and gust-corrected wind speed; with the slot off those four fields do not exist |
 | `moist = true` | it mixes water vapour, cloud water and cloud ice alongside potential temperature, and forms its stability from the saturated Brunt-Vaisala frequency |
-| `nz <= 128` | the implicit vertical solve carries its tridiagonal columns in per-thread local memory at that fixed depth |
+| `nz <= 256` | the implicit vertical solve carries its tridiagonal columns in per-thread local memory, compiled per run at the smallest of 32, 64, 128 or 256 levels that holds `nz` (so a shallow run reserves only the frame its depth needs); 256 is the dycore's own column ceiling |
 
 The shared `bldt` setting also applies to SASE: zero calls every model
 step, while a positive value selects the surface/PBL interval in minutes.

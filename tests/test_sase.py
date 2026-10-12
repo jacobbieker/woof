@@ -11974,7 +11974,7 @@ def test_the_documented_configuration_is_the_one_the_loader_admits(tmp_path):
     from woof.config import SASE_MAX_NZ
     from woof.core.sase_limits import MAX_COLUMN_LEVELS
 
-    assert SASE_MAX_NZ == MAX_COLUMN_LEVELS == 128
+    assert SASE_MAX_NZ == MAX_COLUMN_LEVELS == 256
     assert f"`nz <= {SASE_MAX_NZ}`" in section[1]
     tall = tmp_path / "too_tall.toml"
     tall.write_text(text.replace("nz = 64", f"nz = {SASE_MAX_NZ + 1}", 1),

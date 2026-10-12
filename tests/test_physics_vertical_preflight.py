@@ -44,7 +44,7 @@ def _selection(nz: int, **overrides):
         ("MYJ PBL", {"bl_pbl_physics": 2}, 4, 3),
         ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 128, 129),
         ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 4, 3),
-        ("SASE PBL", {"bl_pbl_physics": 900}, 128, 129),
+        ("SASE PBL", {"bl_pbl_physics": 900}, 256, 257),
         ("SASE PBL", {"bl_pbl_physics": 900}, 2, 1),
         ("Kain-Fritsch cumulus", {"cu_physics": 1}, 8, 7),
         ("Kain-Fritsch cumulus", {"cu_physics": 1}, 128, 129),

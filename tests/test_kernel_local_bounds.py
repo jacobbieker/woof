@@ -228,6 +228,46 @@ def test_the_wsm6_tier_frame_is_what_the_driver_reports_at_both_rungs():
         assert observed <= priced, (bound, observed, priced)
 
 
+def test_the_sase_tier_frame_is_what_the_driver_reports_at_every_rung():
+    """SASE compiles ``SASE_KMAX`` per run at 32 / 64 / 128 / 256.
+
+    The widest of the module's exports at each rung is what a run on that
+    rung reserves, so every rung the launcher can compile is read back off
+    the driver and must equal ``SASE_TIER_FRAME`` exactly (49 B x tier,
+    zero intercept: 1,568 / 3,136 / 6,272 / 12,544 B).  The 128 rung is
+    also the plain loader's ``#ifndef`` default and so the recorded
+    ``KERNEL_MAX_LOCAL_SIZE_BYTES`` row.
+    """
+    import re
+    from pathlib import Path
+
+    import woof.core.kernels as kernels
+    from woof.core.kernels import load_module, load_module_int_defines
+    from woof.core.sase_limits import (KMAX_TIERS, SOURCE_DEFAULT_KMAX,
+                                       THREADS_PER_BLOCK)
+
+    spec = pf.SASE_TIER_FRAME
+    assert spec.define == "SASE_KMAX"
+    assert spec.shipped_tier == SOURCE_DEFAULT_KMAX
+    assert spec.lowest_tier == KMAX_TIERS[0]
+    source = (Path(kernels.__file__).parent / "sase.cu").read_text()
+    names = sorted(set(re.findall(
+        r'extern\s+"C"\s+__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)',
+        source)))
+
+    def widest(module):
+        return max(int(module.get_function(n).attributes["local_size_bytes"])
+                   for n in names)
+
+    plain = widest(load_module("sase"))
+    assert plain == spec.frame_bytes(spec.shipped_tier) == (
+        pf.KERNEL_MAX_LOCAL_SIZE_BYTES["sase"])
+    for tier in KMAX_TIERS:
+        module = load_module_int_defines(
+            "sase", (("SASE_KMAX", tier), ("SASE_TPB", THREADS_PER_BLOCK)))
+        assert widest(module) == spec.frame_bytes(tier) == 49 * tier, tier
+
+
 def test_the_unspecialized_source_still_compiles_to_the_recorded_ceiling():
     """The ``#ifndef`` guard must not move the default.  If it did, every
     historical measurement priced against ``KERNEL_MAX_LOCAL_SIZE_BYTES``

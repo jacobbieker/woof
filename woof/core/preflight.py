@@ -1978,14 +1978,14 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     #
     # The frame is EXACTLY LINEAR in the compiled level bound -- measured
     # 1,568 / 3,136 / 6,272 B at SASE_KMAX 32 / 64 / 128, i.e. 49 B per
-    # level with a zero intercept -- so this module is specializable the
-    # way kf and refl are, and at a 49-level configuration the frame
-    # would be 2,401 B and the reservation ~359 MiB.  It is NOT entered
-    # in LEVEL_SPECIALIZED_KERNEL_FRAMES here, because that table prices
-    # what the launcher actually compiles and this launcher compiles at
-    # the fixed tier.  Specializing it is a real ~0.93 GiB saving and a
-    # separate change; until then the stated bound is the compiled
-    # ceiling, which is the safe direction for a rail gate.
+    # level with a zero intercept, and 12,544 B at 256 (RTX A6000, sm_86,
+    # 2026-10-12) -- and the launcher now compiles SASE_KMAX PER RUN at
+    # the smallest of 32/64/128/256 holding nz
+    # (woof.core.sase_limits.kmax_tier).  So this row is the frame at the
+    # source's #ifndef default (the census tier every recording read), and
+    # what a run is CHARGED is :data:`SASE_TIER_FRAME` at its own tier.
+    # On a 170-SM card that is ~781 MiB less than this row at a 49-level
+    # run (the 64 tier) and ~1.53 GiB more at 256 levels.
     "sase": 6272,
     # The two MYNN-EDMF qn-family modules (4a0bb3f69) landed declared
     # UNMEASURED because their lane had no measurement platform; the
@@ -2432,13 +2432,22 @@ class TieredKernelFrame:
     shipped_tier: int
     bytes_per_level: int
     alignment_bytes: int = 8
+    #: Shallowest tier the launcher compiles; ``None`` means the shipped
+    #: tier is the shallowest.  Only a module MEASURED to have a zero
+    #: intercept (``sase``: 49 B x tier exactly) may price below its
+    #: shipped tier, because the line through the shipped row is then the
+    #: frame itself rather than a ceiling on it.
+    lowest_tier: int | None = None
 
     def frame_bytes(self, tier: int) -> int:
         tier = int(tier)
-        if tier < self.shipped_tier:
+        floor = (self.shipped_tier if self.lowest_tier is None
+                 else self.lowest_tier)
+        if tier < floor:
             raise ValueError(
-                f"{self.module}: {self.define}={tier} is below the shipped "
-                f"tier {self.shipped_tier}")
+                f"{self.module}: {self.define}={tier} is below the "
+                f"{'shipped' if self.lowest_tier is None else 'lowest'} "
+                f"tier {floor}")
         raw = (KERNEL_MAX_LOCAL_SIZE_BYTES[self.module]
                + self.bytes_per_level * (tier - self.shipped_tier))
         remainder = raw % self.alignment_bytes
@@ -2490,6 +2499,25 @@ WDM6_TIER_FRAME = TieredKernelFrame("wdm6", "WDM6_KMAX", 64, 144)
 #: same line; the launcher never compiles there, and the model is a stated
 #: ceiling on that band, which is the safe direction.)
 WSM6_TIER_FRAME = TieredKernelFrame("wsm6", "WSM6_KMAX", 64, 112)
+
+#: ``sase.cu``'s ``SASE_KMAX`` sizes the closure's per-thread FP64 columns
+#: (the Thomas sweeps' r/c'/d', the BL89 and moist-N2 staging columns and
+#: the plume's six), and ``woof/core/sase.py`` compiles it PER RUN at
+#: :func:`woof.core.sase_limits.kmax_tier` -- the smallest of 32 / 64 /
+#: 128 / 256 that holds ``nz``.  The source's ``#ifndef`` default (128) is
+#: the census tier, so the shipped row is the 128 frame and the ladder runs
+#: both ways from it.
+#:
+#: MEASURED on an RTX A6000 (sm_86, NVRTC 12.9.86, 2026-10-12) through the
+#: production int-define loader, widest export (``sase_plume_vent_flux``):
+#: 1,568 / 3,136 / 6,272 / 12,544 B at 32 / 64 / 128 / 256 -- exactly
+#: 49 B x tier, zero intercept, which this frame reproduces at every rung
+#: (the RTX 5090 read the same 32 / 64 / 128 values earlier).  So a
+#: 256-level SASE run reserves (12,544 - 1,024) x SMs x threads/SM --
+#: ~2.8 GiB on a 170-SM card -- and a 64-level run only the 3,136 B tier's
+#: ~0.5 GiB, which is the reason the bound is not simply compiled at 256.
+SASE_TIER_FRAME = TieredKernelFrame("sase", "SASE_KMAX", 128, 49,
+                                    lowest_tier=32)
 
 #: Kernel source files that have no standalone local frame because they
 #: never compile alone: ``noahmp_driver.cu``, ``noahmp_energy.cu``,
@@ -3291,6 +3319,23 @@ def kernel_local_frame_bytes(
         frame = IEVA_TIER_FRAME.frame_bytes(ieva_level_tier(int(dc.run.nz)))
         if frame > frames.get(IEVA_TIER_FRAME.module, -1):
             frames[IEVA_TIER_FRAME.module] = frame
+    # ``sase`` prices per domain that selects it, at that domain's own
+    # SASE_KMAX tier -- and REPLACES the flat row rather than raising it,
+    # because the flat row is the census tier (128) no run compiles unless
+    # its nz is in (64, 128].  A depth past the ceiling is the vertical
+    # contract's refusal to make, not this pricer's, so it is priced at the
+    # ceiling tier here.
+    from woof.core.sase_limits import (MAX_COLUMN_LEVELS as _SASE_MAX,
+                                       kmax_tier as sase_kmax_tier)
+
+    sase_frames = [
+        SASE_TIER_FRAME.frame_bytes(
+            sase_kmax_tier(min(max(int(dc.run.nz), 1), _SASE_MAX)))
+        for dc in exp.domains
+        if SASE_TIER_FRAME.module in domain_kernel_modules(
+            dc, prices_refl=prices_refl)]
+    if sase_frames:
+        frames[SASE_TIER_FRAME.module] = max(sase_frames)
     for module, shallow_frame in THOMPSON_SHALLOW_KERNEL_FRAMES.items():
         selected_levels = [int(dc.run.nz) for dc in exp.domains
                            if module in domain_kernel_modules(
@@ -12315,8 +12360,8 @@ __all__ = [
     "kernel_local_memory_bytes", "non_pool_device_bytes",
     "physics_kernel_modules", "refl_diagnostic_reachable",
     "LEVEL_SPECIALIZED_KERNEL_FRAMES", "LevelSpecializedFrame",
-    "ACOUSTIC_TIER_FRAME", "TieredKernelFrame", "WDM6_TIER_FRAME",
-    "WSM6_TIER_FRAME",
+    "ACOUSTIC_TIER_FRAME", "SASE_TIER_FRAME", "TieredKernelFrame",
+    "WDM6_TIER_FRAME", "WSM6_TIER_FRAME",
     "domain_kernel_modules", "kernel_local_frame_bytes",
     "ALLOCATOR_HEADROOM", "AllocReport", "CAL_D01_DEVICE_FOOTPRINT_BYTES",
     "CAL_D01_WORKSPACE_BYTES",

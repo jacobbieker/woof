@@ -361,7 +361,8 @@ These are limits of the current build, not opinions about LES.
   | legacy RRTMG, longwave | model + cap layers <= 128 | **115** |
   | WSM6 microphysics | `nz <= 80` | 80 |
   | Kain-Fritsch cumulus | `nz <= 128` | 128 |
-  | YSU / Shin-Hong / MYJ PBL, SASE | `nz <= 128` | 128 |
+  | YSU / Shin-Hong / MYJ PBL | `nz <= 128` | 128 |
+  | SASE PBL | `nz <= 256` (per-run `SASE_KMAX` tier 32/64/128/256) | 256 |
   | Kessler / Thompson / Thompson-aerosol / Morrison / NSSL-2 | `nz <= 256` | 256 |
   | MYNN PBL, Grell-Freitas cumulus | none | 256 (the solver's) |
   | acoustic solve | `nz <= 256` | 256 |

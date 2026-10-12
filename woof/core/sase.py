@@ -45,7 +45,8 @@ import numpy as np
 import cupy as cp
 
 from woof.core.kernels import get_kernel_int_defines
-from woof.core.sase_limits import THREADS_PER_BLOCK
+from woof.core.sase_limits import (KMAX_TIERS, THREADS_PER_BLOCK,
+                                    kmax_tier)
 from woof.core.state import DTYPE
 from woof.verify.sase_ref import (BL89_MIX_EXP, BLACKADAR_LAMBDA, C_E,
                                    MAX_COLUMN_LEVELS,
@@ -83,25 +84,36 @@ from woof.verify.sase_ref import (BL89_MIX_EXP, BLACKADAR_LAMBDA, C_E,
 #: generic loader.  Values must stay positive powers of two: SASE_TPB
 #: sizes shared-memory tree reductions (``for s = blockDim.x / 2``),
 #: which silently drop lanes on a non-power-of-two block.
-_INT_DEFINES: tuple[tuple[str, int], ...] = (
-    ("SASE_KMAX", MAX_COLUMN_LEVELS),
-    ("SASE_TPB", THREADS_PER_BLOCK),
-)
-assert all(v > 0 and (v & (v - 1)) == 0 for _, v in _INT_DEFINES), (
+#:
+#: ``SASE_KMAX`` is sized PER RUN: every launcher compiles the module at
+#: :func:`woof.core.sase_limits.kmax_tier` of its own column depth (32,
+#: 64, 128 or 256), so a run compiles one variant and launches only the
+#: frame its ``nz`` needs (``woof.core.preflight.SASE_TIER_FRAME`` prices
+#: exactly that).  The extent sizes per-thread arrays and nothing else --
+#: no loop runs to it -- so a shallower tier moves no output bit
+#: (``tests/test_sase_gpu.py::test_sase_kmax_tier_is_bitwise_inert``).
+#: The ceiling is the deepest tier.
+_KMAX = MAX_COLUMN_LEVELS
+_TPB = THREADS_PER_BLOCK
+assert all(v > 0 and (v & (v - 1)) == 0 for v in (*KMAX_TIERS, _TPB)), (
     "SASE integer defines must be positive powers of two "
     "(they size tree-reduction blocks)")
-_DEFINE_VALUES = dict(_INT_DEFINES)
-
-#: Threads per block, single-sourced with the device ``SASE_TPB``.
-_TPB = _DEFINE_VALUES["SASE_TPB"]
-#: Max column depth of the in-thread FP64 Thomas sweeps (sase.cu
-#: sase_thomas_*); single-sourced with the device ``SASE_KMAX``.
-_KMAX = _DEFINE_VALUES["SASE_KMAX"]
+assert KMAX_TIERS[-1] == _KMAX
 
 
-def _kern(func: str):
-    """One stable wrapper per SASE device symbol, compiled at the tier."""
-    return get_kernel_int_defines("sase", func, _INT_DEFINES)
+def _int_defines(nz: int) -> tuple[tuple[str, int], ...]:
+    """The integer tier a launch on an ``nz``-level field compiles at."""
+    return (("SASE_KMAX", kmax_tier(nz)), ("SASE_TPB", _TPB))
+
+
+def _kern(func: str, nz: int):
+    """One stable wrapper per SASE device symbol, compiled at ``nz``'s tier.
+
+    ``nz`` is the CELL level count of the launch's fields (a face field's
+    ``nz + 1`` extent is passed minus one), so every launcher of one run
+    lands on the same tier and the run compiles the module once.
+    """
+    return get_kernel_int_defines("sase", func, _int_defines(nz))
 
 
 def _check_field(name: str, arr, shape) -> None:
@@ -139,7 +151,7 @@ def launch_box_filter(field, width: int, out=None):
     else:
         _check_field("out", out, field.shape)
     grid, block = _tile(field.shape)
-    kern = _kern("sase_box_filter")
+    kern = _kern("sase_box_filter", nz)
     kern(grid, block, (field, out, np.int32(width),
                        np.int32(nz), np.int32(ny), np.int32(nx)))
     return out
@@ -158,7 +170,7 @@ def launch_structure_functions(u, v, w) -> dict[int, float]:
     nz, ny, nx = shape
     ncell = nz * ny * nx
     nblocks = (ncell + _TPB - 1) // _TPB
-    kern = _kern("sase_structure_partial")
+    kern = _kern("sase_structure_partial", nz)
     totals = np.zeros(3, dtype=np.float64)
     for comp in (u, v, w):
         partials = cp.zeros((3, nblocks), dtype=cp.float64)
@@ -225,7 +237,7 @@ def _z_stencil(shape, dz=None, dz_col=None):
             raise ValueError("per-column dz_col requires nz >= 2")
         coeffs = [cp.empty((nz, ny, nx), dtype=DTYPE) for _ in range(3)]
         grid, block = _flat(ny * nx)
-        _kern("sase_ddz_coefficients")(
+        _kern("sase_ddz_coefficients", nz)(
             grid, block, (dz_col, *coeffs, np.int32(nz), np.int32(ny),
                           np.int32(nx)))
         return (*coeffs, DTYPE(0.0), DTYPE(0.0), DTYPE(0.0), DTYPE(0.0),
@@ -292,7 +304,7 @@ def launch_strain(u, v, w, *, dx: float, dy: float, dz: float | None = None,
         shape, dz=dz, dz_col=dz_col)
     outs = [cp.empty(shape, dtype=DTYPE) for _ in range(6)]
     grid, block = _tile(shape)
-    kern = _kern("sase_strain")
+    kern = _kern("sase_strain", nz)
     kern(grid, block,
          (u, v, w, *outs, zcm, zc0, zcp,
           DTYPE(2.0 * float(dx)), DTYPE(2.0 * float(dy)),
@@ -316,11 +328,11 @@ def launch_germano_lift(u, v, w, *, width: int):
     filt = [launch_box_filter(a, width) for a in (u, v, w)]
     prods = [cp.empty(shape, dtype=DTYPE) for _ in range(6)]
     grid, block = _flat(ncell)
-    _kern("sase_velocity_products")(
+    _kern("sase_velocity_products", shape[0])(
         grid, block, (u, v, w, *prods, np.int64(ncell)))
     fprods = [launch_box_filter(p, width) for p in prods]
     lifts = [cp.empty(shape, dtype=DTYPE) for _ in range(6)]
-    _kern("sase_lift_combine")(
+    _kern("sase_lift_combine", shape[0])(
         grid, block, (*fprods, *filt, *lifts, np.int64(ncell)))
     return lifts
 
@@ -344,7 +356,7 @@ def launch_model_stress(e, s_list, c_nu: float, f: float,
     ncell = int(np.prod(shape))
     taus = [cp.empty(shape, dtype=DTYPE) for _ in range(6)]
     grid, block = _flat(ncell)
-    kern = _kern("sase_model_stress")
+    kern = _kern("sase_model_stress", shape[0])
     kern(grid, block,
          (e, *s_list, *taus,
           DTYPE(c_nu), DTYPE(f), DTYPE(delta_eddy), DTYPE(delta_mom),
@@ -378,7 +390,7 @@ def launch_governed_stress(e, s_list, c_nu: float, f: float, delta: float):
     km = cp.empty(shape, dtype=DTYPE)
     r = cp.empty(shape, dtype=DTYPE)
     grid, block = _flat(ncell)
-    kern = _kern("sase_model_stress_gov")
+    kern = _kern("sase_model_stress_gov", shape[0])
     kern(grid, block,
          (e, *s_list, *taus, km, r,
           DTYPE(c_nu), DTYPE(f), DTYPE(delta),
@@ -444,10 +456,10 @@ def launch_dynamic_solve(u, v, w, e, *, dx: float, dy: float, dz: float,
     # -2*delta*root_e*S_fine^dev (authority s_fine/refilt construction).
     s_fine = launch_strain(u, v, w, dx=dx, dy=dy, dz=dz)
     premul = [cp.empty(shape, dtype=DTYPE) for _ in range(6)]
-    _kern("sase_basis_premultiply")(
+    _kern("sase_basis_premultiply", shape[0])(
         grid, block, (e, *s_fine, *premul,
                       DTYPE(delta), DTYPE(E_MIN), np.int64(ncell)))
-    kern = _kern("sase_solve_partial")
+    kern = _kern("sase_solve_partial", shape[0])
     moments = np.zeros(5, dtype=np.float64)
     for width in (2, 4):
         filt = [launch_box_filter(a, width) for a in (u, v, w)]
@@ -525,7 +537,7 @@ def launch_bulk_richardson_zi(u, v, theta, *, dz: float | None = None,
         raise ValueError(f"out must be a C-contiguous float32 CuPy array "
                          f"with shape {(ny, nx)}")
     grid, block = _flat(ny * nx)
-    _kern("sase_zi_column")(
+    _kern("sase_zi_column", nz)(
         grid, block,
         (u, v, theta, t_arr, t_dz, t_mode, out,
          DTYPE(RIB_CRIT), DTYPE(RIB_WSPD2_FLOOR), DTYPE(G_ACCEL),
@@ -565,7 +577,7 @@ def launch_w_sensor_moments(w, e, n2=None, *,
     # has_n2 == 0 -- never dereferenced through the n2 slot.
     n2_arg = e if n2 is None else n2
     partials = cp.zeros((5, nblocks), dtype=cp.float64)
-    _kern("sase_w_sensor_partial")(
+    _kern("sase_w_sensor_partial", nz)(
         (nblocks,), (_TPB,),
         (w, e, n2_arg, np.int32(0 if n2 is None else 1),
          DTYPE(N2_SCREEN), DTYPE(E_MIN), partials,
@@ -680,7 +692,7 @@ def launch_implicit_vertical_diffusion(phi, kv, *, dt: float,
     has_sfc = sfc_flux is not None
     flux_arg = sfc_flux if has_sfc else kv
     rho_arg = sfc_rho1 if has_sfc else kv
-    _kern("sase_thomas_scalar")(
+    _kern("sase_thomas_scalar", nz)(
         grid, block,
         (phi, kv, flux_arg, np.int32(1 if has_sfc else 0), rho_arg,
          np.float64(fac), t_arr, dz_s, t_mode, DTYPE(dt), DTYPE(kfac),
@@ -760,7 +772,7 @@ def launch_vertical_channel(e, theta, *, f: float, n2=None,
     n2_arg = e if n2 is None else n2           # dummy pointer, gated off
     n2d_arg = e if n2_dry is None else n2_dry  # dummy pointer, gated off
     grid, block = _flat(ny * nx)
-    _kern("sase_vertical_channel")(
+    _kern("sase_vertical_channel", nz)(
         grid, block,
         (e, n2_arg, np.int32(0 if n2 is None else 1),
          n2d_arg, np.int32(0 if n2_dry is None else 1), theta,
@@ -800,7 +812,7 @@ def launch_blackadar_length(shape, *, dz: float | None = None, dz_col=None,
     else:
         _check_field("out", out, (nz, ny, nx))
     grid, block = _flat(ny * nx)
-    _kern("sase_blackadar_length")(
+    _kern("sase_blackadar_length", nz)(
         grid, block,
         (t_arr, t_dz, t_mode, out,
          np.float64(z0), np.float64(KARMAN), np.float64(BLACKADAR_LAMBDA),
@@ -1168,7 +1180,7 @@ def launch_sase_step(u, v, w, theta, e, *, dx: float, dy: float, dz: float,
     # its registered asymmetry are retired on this path; the vertical
     # leg remains the implicit 2*K_v transport).
     hflux = [cp.empty(shape, dtype=DTYPE) for _ in range(2)]
-    _kern("sase_e_hflux")(
+    _kern("sase_e_hflux", nz)(
         grid, block,
         (e, km, *hflux, two_dx, two_dy, DTYPE(E_MIN), *dims))
     # 4. Horizontal-explicit tendencies + the S3-6e P_h,e/P_h,heat
@@ -1176,7 +1188,7 @@ def launch_sase_step(u, v, w, theta, e, *, dx: float, dy: float, dz: float,
     # vertical flux is remodeled by the K_v channel).
     tend = [cp.empty(shape, dtype=DTYPE)
             for _ in range(5)]                 # du,dv,dw,ph_e,ph_heat
-    _kern("sase_split_tendencies")(
+    _kern("sase_split_tendencies", nz)(
         grid, block,
         (tau[0], tau[1], tau[3], tau[4], tau[5], u, v, w, e, r, *tend,
          two_dx, two_dy, DTYPE(E_MIN), *dims))
@@ -1205,7 +1217,7 @@ def launch_sase_step(u, v, w, theta, e, *, dx: float, dy: float, dz: float,
     # idiom (kv is a const input of this kernel; the alias sees only
     # const reads and none through the wspd slot when has_wspd == 0).
     wspd_arg = kv if wspd_sfc is None else wspd_sfc
-    _kern("sase_thomas_momentum")(
+    _kern("sase_thomas_momentum", nz)(
         col_grid, col_block,
         (u, v, w, tend[0], tend[1], tend[2], kv,
          ust_arg, np.int32(0 if ust is None else 1),
@@ -1217,7 +1229,7 @@ def launch_sase_step(u, v, w, theta, e, *, dx: float, dy: float, dz: float,
     # P_v from the implicit-solved (stored) fields -- the theorem's
     # identity-(ii) pairing.
     pv = cp.empty(shape, dtype=DTYPE)
-    _kern("sase_vertical_production")(
+    _kern("sase_vertical_production", nz)(
         grid, block, (u, v, w, kv, t_arr, t_dz, t_mode, pv, *dims))
     # S3-6e damping-layer taper weights (authority damp_taper_weights;
     # the driver passes cfg.zdamp under damp_opt == 3).  With no taper
@@ -1250,7 +1262,7 @@ def launch_sase_step(u, v, w, theta, e, *, dx: float, dy: float, dz: float,
     ncell = nz * ny * nx
     nblocks = (ncell + _TPB - 1) // _TPB
     partials_e = cp.zeros((4, nblocks), dtype=cp.float64)
-    _kern("sase_split_e_update")(
+    _kern("sase_split_e_update", nz)(
         (nblocks,), (_TPB,),
         (e, heat, theta, n2_arg, has_n2, n2d_arg, has_moist,
          kv, leps, lb_arg, has_ced, ph_e, ph_heat, pv,
@@ -1332,7 +1344,7 @@ def launch_n2(theta, *, dz: float | None = None, dz_col=None, out=None):
     zargs = _z_stencil(shape, dz=dz, dz_col=dz_col)
     zcm, zc0, zcp, dz_s, two_dz, h_lo, h_hi, z_mode = zargs
     grid, block = _tile(shape)
-    _kern("sase_n2")(
+    _kern("sase_n2", nz)(
         grid, block,
         (theta, out, zcm, zc0, zcp, DTYPE(0.0), DTYPE(0.0), dz_s, two_dz,
          h_lo, h_hi, z_mode, DTYPE(G_ACCEL),
@@ -1389,7 +1401,7 @@ def launch_moist_n2(theta, qv, qc, pressure, n2_dry, *, dz_col=None,
     else:
         _check_field("out", out, shape)
     grid, block = _flat(ny * nx)
-    _kern("sase_moist_n2")(
+    _kern("sase_moist_n2", nz)(
         grid, block,
         (theta, qv, qc, pressure, n2_dry, out, t_arr, t_dz, t_mode,
          np.float64(RD_AIR / CP_AIR), np.float64(P0_REF),
@@ -1486,7 +1498,7 @@ def launch_plume_vent_flux(theta, qv, qc, pressure, e_sgs, n2_moist,
     idx = (cp.empty((7, ny, nx), dtype=np.int32) if indices
            else cp.empty(1, dtype=np.int32))
     grid, block = _flat(ny * nx)
-    _kern("sase_plume_vent_flux")(
+    _kern("sase_plume_vent_flux", nz)(
         grid, block,
         (theta, qv, qc, pressure, e_sgs, n2_moist, n2_dry, rho1,
          out[0], out[1], out[2], idx, np.int32(1 if indices else 0),
@@ -1551,7 +1563,7 @@ def launch_vent_deposit_scale(f_theta, f_qv, f_qc, rho1, *, dt: float,
         raise ValueError("out must be a C-contiguous float64 CuPy array "
                          f"with shape {(ny, nx)}")
     grid, block = _flat(ny * nx)
-    _kern("sase_vent_deposit_scale")(
+    _kern("sase_vent_deposit_scale", nz)(
         grid, block,
         (f_theta, f_qv, f_qc, rho1, out, t_arr, t_dz, t_mode,
          np.float64(dt), np.float64(VENT_THETA_STEP_CAP),
@@ -1599,7 +1611,7 @@ def launch_vent_deposit(phi, f_row, scale, rho1, *, dt: float,
                          "vent_deposit_rescale has no uniform-dz mode")
     t_arr, t_dz, t_mode = _thickness_args(shape, dz_col=dz_col)
     grid, block = _tile(shape)
-    _kern("sase_vent_deposit")(
+    _kern("sase_vent_deposit", nz)(
         grid, block,
         (phi, f_row, scale, rho1, t_arr, t_dz, t_mode, np.float64(dt),
          np.int32(nz), np.int32(ny), np.int32(nx)))
@@ -1641,7 +1653,7 @@ def launch_vent_flux_diag(f_row, scale, out, *, fac: float = 1.0):
         raise ValueError("scale must be a C-contiguous float64 CuPy "
                          f"array with shape {(ny, nx)}")
     grid, block = _tile(fshape)
-    _kern("sase_vent_flux_diag")(
+    _kern("sase_vent_flux_diag", max(nzp1 - 1, 1))(
         grid, block,
         (f_row, scale, out, np.float64(fac),
          np.int32(nzp1), np.int32(ny), np.int32(nx)))
@@ -1701,7 +1713,7 @@ def launch_diff_flux_diag(phi, kv, rho1, out, *, kfac: float = 1.0,
                          "(nz >= 2); the solver is an identity at nz == 1")
     t_arr, t_dz, t_mode = _thickness_args(shape, dz=dz, dz_col=dz_col)
     grid, block = _tile((nz + 1, ny, nx))
-    _kern("sase_diff_flux_diag")(
+    _kern("sase_diff_flux_diag", nz)(
         grid, block,
         (phi, kv, rho1, out, t_arr, t_dz, t_mode,
          np.float64(kfac), np.float64(fac),
@@ -1764,15 +1776,15 @@ def launch_scalar_mix(s, e=None, *, kh_coef: float | None = None,
     dims = (np.int32(nz), np.int32(ny), np.int32(nx))
     grid, block = _tile(shape)
     if kh_field is None:
-        _kern("sase_scalar_hflux")(
+        _kern("sase_scalar_hflux", nz)(
             grid, block,
             (s, e, *flux, two_dx, two_dy, DTYPE(kh_coef), DTYPE(E_MIN),
              *dims))
     else:
-        _kern("sase_scalar_hflux_km")(
+        _kern("sase_scalar_hflux_km", nz)(
             grid, block,
             (s, kh_field, *flux, two_dx, two_dy, DTYPE(kh_fac), *dims))
-    _kern("sase_hflux_div")(
+    _kern("sase_hflux_div", nz)(
         grid, block, (*flux, out, two_dx, two_dy, *dims))
     return out
 

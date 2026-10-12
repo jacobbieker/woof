@@ -1506,9 +1506,10 @@ CUMULUS_ADVECTIVE_FORCING_SCHEMES = frozenset({3, 16})
 #: readiness authority is the registry entry and the constraints below.
 SASE_PBL_SCHEME = 900
 
-#: Deepest column the SASE vertical solve accepts, read from the closure's
-#: own authority module so the device define, the launcher's rejection and
-#: this admission check cannot drift apart.  ``sase_ref`` is NumPy-only, so
+#: Deepest column the SASE vertical solve accepts (the deepest per-run
+#: ``SASE_KMAX`` tier), read from the closure's own limits module so the
+#: device define, the launcher's rejection and this admission check cannot
+#: drift apart.  ``sase_ref`` is NumPy-only, so
 #: importing it here costs the config layer no CuPy dependency.
 SASE_MAX_NZ = _sase_limits.MAX_COLUMN_LEVELS
 
@@ -3297,12 +3298,14 @@ def validate_sase_config(cfg: RunConfig) -> None:
                 "MYJ, MYNN or Shin-Hong), which run dry.")
         if cfg.nz > SASE_MAX_NZ:
             # A compile-time bound, not a policy: the vertical solve keeps
-            # three FP64 columns of this depth in per-thread local memory.
+            # FP64 columns in per-thread local memory, compiled per run at
+            # a power-of-two tier of nz whose deepest rung is this ceiling.
             raise ValueError(
                 f"bl_pbl_physics={SASE_PBL_SCHEME} (SASE) is limited to "
                 f"nz <= {SASE_MAX_NZ}, got nz={cfg.nz}: the closure's "
                 "implicit vertical solve carries its tridiagonal columns "
-                "in per-thread local memory at that fixed depth.")
+                "in per-thread local memory, compiled per run at most "
+                f"{SASE_MAX_NZ} levels deep.")
     # The three knobs are fail-closed on their NON-default value only, so
     # every existing configuration keeps validating unchanged.
     for name, what in (
