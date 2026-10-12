@@ -6340,9 +6340,15 @@ def rrtmgp_workspace_phases(nz: int, column_chunk: int, p_top: float = 5000.0
     lw_g, sw_g = meta["ngpt_lw"], meta["ngpt_sw"]
     lw_upper, sw_upper = rrtmgp_above_model_layer_counts(p_top)
     lw_nz, sw_nz = int(nz) + lw_upper, int(nz) + sw_upper
-    if max(lw_nz, sw_nz) > 128:
+    # The bound is on MODEL levels (the RTE solvers compile to each call's
+    # own layer count and no RRTMGP kernel holds a fixed per-layer array);
+    # the above-model layers ride on top of it at any model top.
+    from woof.physics_vertical_contract import MAX_RRTMGP_MODEL_LEVELS
+
+    if int(nz) > MAX_RRTMGP_MODEL_LEVELS:
         raise ValueError(
-            "RRTMGP workspace cannot exceed the 128-layer CUDA solver limit")
+            "RRTMGP workspace requires model levels nz <= "
+            f"{MAX_RRTMGP_MODEL_LEVELS}, got nz={int(nz)}")
 
     # CARRIED FIRST.  An RTE phase reads back only a few of its optics
     # phase's slots, and `phase()` assigns offsets by walking the layout in

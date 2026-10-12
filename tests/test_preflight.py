@@ -6187,3 +6187,21 @@ def test_shinhong_workspace_pricing_tracks_the_tile_and_levels():
     exp = experiment_from_run_config(
         dataclasses.replace(cfg, bl_pbl_physics=1), datetime(2000, 1, 1))
     assert pf.shinhong_column_workspace_bytes(exp, profile=profile) == 0
+
+
+def test_the_rrtmgp_workspace_admits_256_model_levels_at_any_top():
+    """The workspace pricer bounds MODEL levels, as the engine does.
+
+    It used to refuse any column past 128 radiation layers ("the 128-layer
+    CUDA solver limit") after the engine itself had stopped holding a fixed
+    per-layer array, so a 256-level RTE+RRTMGP configuration could not even
+    be sized.  The above-model layers ride on top of the 256.
+    """
+    from woof.physics_vertical_contract import MAX_RRTMGP_MODEL_LEVELS
+
+    assert MAX_RRTMGP_MODEL_LEVELS == 256
+    for p_top in (100.0, 5000.0, 0.0):
+        phases = pf.rrtmgp_workspace_phases(256, 64, p_top=p_top)
+        assert phases, p_top
+    with pytest.raises(ValueError, match="nz <= 256, got nz=257"):
+        pf.rrtmgp_workspace_phases(257, 64, p_top=100.0)
