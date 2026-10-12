@@ -106,9 +106,24 @@ def test_myj_refuses_out_of_range_levels_by_name():
     from woof.core.myjpbl import launch_myj_pbl
 
     with pytest.raises(PhysicsVerticalPreflightError) as caught:
-        launch_myj_pbl({"dz": _column(130)}, {"psfc": np.zeros((2, 2))},
+        launch_myj_pbl({"dz": _column(257)}, {"psfc": np.zeros((2, 2))},
                        None, None, None, dtturbl=60.0, flqi=False)
-    assert ("MYJ PBL requires 4 <= nz <= 128, got nz=130"
+    assert ("MYJ PBL requires 4 <= nz <= 256, got nz=257"
+            in str(caught.value))
+    with pytest.raises(PhysicsVerticalPreflightError) as caught:
+        launch_myj_pbl({"dz": _column(3)}, {"psfc": np.zeros((2, 2))},
+                       None, None, None, dtturbl=60.0, flqi=False)
+    assert "MYJ PBL requires 4 <= nz <= 256, got nz=3" in str(caught.value)
+
+
+def test_myjurb_refuses_out_of_range_levels_by_name():
+    """The urban companion carries the same contract pair as MYJ."""
+    from woof.core.myjurb import launch_myjurb
+
+    with pytest.raises(PhysicsVerticalPreflightError) as caught:
+        launch_myjurb({"dz": _column(257)}, {"psfc": np.zeros((2, 2))},
+                      None, None, dtturbl=60.0, bep={}, frc_urb2d=None)
+    assert ("MYJURB PBL requires 4 <= nz <= 256, got nz=257"
             in str(caught.value))
 
 

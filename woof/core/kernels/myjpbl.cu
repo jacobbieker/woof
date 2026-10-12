@@ -32,8 +32,8 @@
 // species-INDEPENDENT (:1465-1495), so the kernel builds them once and
 // then runs one species at a time through a single RSS scratch row.  That
 // is the same arithmetic in the same order as the Fortran's inner
-// DO M=MSS,NSPEC, and it is what keeps the per-thread local footprint at
-// YSU's scale instead of four times it.
+// DO M=MSS,NSPEC, and it is what keeps the column workspace at nineteen
+// slots instead of four species rows more.
 //
 // Conformance status: CPU-vs-CUDA agreement is asserted by
 // tests/test_myj_port.py within a documented tolerance; NO oracle
@@ -47,9 +47,55 @@
 // seam is WRF's.  DIFCOF's T argument feeds only its commented-out
 // inversion block (:1275-1322) and is therefore not passed.
 
+// COLUMN CEILING.  MYJ_KMAX is a REFUSAL guard and nothing else: no array
+// in this file is sized by it.  woof/core/myjpbl.py refuses a column
+// outside [MYJ_MIN_COLUMN_LEVELS, MYJ_MAX_COLUMN_LEVELS] before launch and
+// the kernel returns early on the same bound; tests/test_myj_port.py keeps
+// the two equal.
 #ifndef MYJ_KMAX
-#define MYJ_KMAX 128
+#define MYJ_KMAX 256
 #endif
+
+// ==========================================================================
+// Per-thread column workspace (docs/kernel_local_memory_bounds.md, MYJ)
+// ==========================================================================
+// One thread owns one whole column, and until 2026-10-12 the nineteen
+// column arrays below were function-scope locals sized to a compile-time
+// MYJ_KMAX = 128: a 9,232 B frame whose launch-time reservation is
+// (frame - default stack) x SMs x threads/SM, ~2 GiB on a 170-SM card, and
+// which would have doubled again at a 256-level bound.  They live in a
+// caller-provided GLOBAL workspace instead, the route ysu.cu, shinhong.cu
+// and kf.cu took: woof/core/myjpbl.py sizes it to the columns IN FLIGHT
+// (a tile) and to the RUNTIME level count, so a 49-level run holds 50
+// levels of arrays, not 128.  Every array keeps its extent, its name and
+// its access order, so this is a PLACEMENT change and nothing else.
+//
+// LANE INTERLEAVING, exactly as local memory is laid out: one contiguous
+// region per BLOCK, element k of slot s for lane t at
+//   block_base + (s * wskp + k) * MYJWS_LANES + t
+// so a warp reading arr[k] touches 32 consecutive floats.  MYJWS_LANES is
+// the launch block width, pinned by woof/core/physics_inventory.MYJ_BLOCK
+// and tests/test_myj_workspace.py; a launch at any other width would alias
+// lanes.  wskp (>= nz + 1, zh carries the ground row) is the per-slot
+// extent.
+#define MYJWS_SLOTS 19
+#define MYJWS_LANES 32
+
+//: A column array living in the workspace.  Indexes like the
+//: `real[MYJ_KMAX]` it replaced; the stride is what makes it coalesce.
+struct MyjCol {
+    real *p;
+    __device__ __forceinline__ real &operator[](int k) const {
+        return p[(size_t)k * (size_t)MYJWS_LANES];
+    }
+};
+
+#define MYJWS_AT(base, idx, kp) \
+    (MyjCol{(base) + (size_t)(idx) * (size_t)(kp) * (size_t)MYJWS_LANES})
+//: This thread's lane inside its block's workspace region.
+#define MYJWS_LANE_BASE(ws, kp) \
+    ((ws) + (size_t)blockIdx.x * (size_t)MYJWS_SLOTS * (size_t)(kp) \
+     * (size_t)MYJWS_LANES + (size_t)threadIdx.x)
 
 // ---- share/module_model_constants.F ----
 #define MYJP_G       9.81f
@@ -159,11 +205,16 @@ extern "C" __global__ void myjpbl_column(
     // outputs (n)
     real* __restrict__ pblh_a, int* __restrict__ kpbl_a,
     real* __restrict__ mixht_a,
-    real dtturbl, int flqi, int nz, int n)
+    real dtturbl, int flqi, int nz, int n,
+    // column workspace (blocks, MYJWS_SLOTS, wskp, MYJWS_LANES) and the
+    // first column of this tile: the state arrays are (nz, ny, nx), so a
+    // tile is a column OFFSET, not a slice.
+    real* __restrict__ ws, int wskp, int col0)
 {
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int col = col0 + blockIdx.x * blockDim.x + threadIdx.x;
     if (col >= n) return;
     if (nz > MYJ_KMAX || nz < 4) return;      // launcher refuses these
+    if (wskp < nz + 1) return;                // zh needs the ground row
     size_t st = (size_t)n;
 #define MYJ_UP(a, kup) a[(size_t)(kup) * st + col]
 
@@ -172,15 +223,28 @@ extern "C" __global__ void myjpbl_column(
     real rdtturbl = 1.0f / dtturbl;
     real dtdif = dtturbl;
 
-    // Persistent MYJ-layout columns.
-    real zh[MYJ_KMAX + 1];
-    real uk[MYJ_KMAX], vk[MYJ_KMAX], tk[MYJ_KMAX];
-    real the[MYJ_KMAX], qk[MYJ_KMAX], cwm[MYJ_KMAX], qcik[MYJ_KMAX];
-    real q2[MYJ_KMAX], rhok[MYJ_KMAX];
-    real gm[MYJ_KMAX], gh[MYJ_KMAX], el[MYJ_KMAX];
-    real akm[MYJ_KMAX], akh[MYJ_KMAX];
+    // Persistent MYJ-layout columns, in the workspace (header above).
+    real* wsb = MYJWS_LANE_BASE(ws, wskp);
+    MyjCol zh = MYJWS_AT(wsb, 0, wskp);       // nz + 1 rows
+    MyjCol uk = MYJWS_AT(wsb, 1, wskp);
+    MyjCol vk = MYJWS_AT(wsb, 2, wskp);
+    MyjCol tk = MYJWS_AT(wsb, 3, wskp);
+    MyjCol the = MYJWS_AT(wsb, 4, wskp);
+    MyjCol qk = MYJWS_AT(wsb, 5, wskp);
+    MyjCol cwm = MYJWS_AT(wsb, 6, wskp);
+    MyjCol qcik = MYJWS_AT(wsb, 7, wskp);
+    MyjCol q2 = MYJWS_AT(wsb, 8, wskp);
+    MyjCol rhok = MYJWS_AT(wsb, 9, wskp);
+    MyjCol gm = MYJWS_AT(wsb, 10, wskp);
+    MyjCol gh = MYJWS_AT(wsb, 11, wskp);
+    MyjCol el = MYJWS_AT(wsb, 12, wskp);
+    MyjCol akm = MYJWS_AT(wsb, 13, wskp);
+    MyjCol akh = MYJWS_AT(wsb, 14, wskp);
     // Scratch, reused between phases (documented at each use).
-    real s1[MYJ_KMAX], s2[MYJ_KMAX], s3[MYJ_KMAX], s4[MYJ_KMAX];
+    MyjCol s1 = MYJWS_AT(wsb, 15, wskp);
+    MyjCol s2 = MYJWS_AT(wsb, 16, wskp);
+    MyjCol s3 = MYJWS_AT(wsb, 17, wskp);
+    MyjCol s4 = MYJWS_AT(wsb, 18, wskp);
 
     // ---- flip on load (:364-383) --------------------------------------
     zh[nz] = 0.0f;                             // ZHK(LMH+1) = HT, cancels
@@ -487,7 +551,7 @@ mixlen_110:
         int nspec = flqi ? 4 : 3;
         real ct_species0 = 0.0f;    // CTS(1)=CT, zeroed by MIXLEN (:852)
         for (int s = 0; s < nspec; ++s) {
-            real* var = (s == 0) ? the : (s == 1) ? qk
+            MyjCol var = (s == 0) ? the : (s == 1) ? qk
                         : (s == 2) ? cwm : qcik;
             // SZ0/CLOW/CTS (:569-585): only rows 1 and 2 are nonzero.
             real sz0 = (s == 0) ? thz0 : (s == 1) ? qz0 : 0.0f;
@@ -559,7 +623,7 @@ mixlen_110:
                              + rhok[lmh - 1]);
         real dtozak = dtozs * akms_dens;
         for (int comp = 0; comp < 2; ++comp) {
-            real* var = comp ? vk : uk;
+            MyjCol var = comp ? vk : uk;
             real sz0 = comp ? vz0 : uz0;
             gm[0] = var[0] * rhok[0];                            // RSU/RSV
             for (int m = 1; m < nv; ++m) {

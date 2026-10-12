@@ -607,14 +607,14 @@ targets, in order:
 | kernel | frame | selector |
 |---|---|---|
 | `shinhong_column` | 13,000 B on NVRTC 13.0 (17,160 on 13.3 and 13.4; sm_120, read 2026-09-28) | `bl_pbl_physics = 11` |
-| `myjpbl_column` | **9,232 B** | `bl_pbl_physics = 2` |
+| ~~`myjpbl_column`~~ | ~~9,232 B~~ -> **0 B**, done 2026-10-12 (section 10); `myjurb_column` (10,256-12,304 B) with it | `bl_pbl_physics = 2` |
 | `wsm6_column` | 7,216 B | `mp_physics = 6` |
 | `sase_*` | 6,272 B | SASE |
 
-`myjpbl_column` deserves the emphasis: it is the *same* 9,232 B YSU
-carried, in one kernel with no template variants, so a MYJ run still pays
-the full ~842 MiB that YSU used to. The technique in this section applies
-to it unchanged.
+`myjpbl_column` deserved the emphasis: it was the *same* 9,232 B YSU
+carried, in one kernel with no template variants, so a MYJ run still paid
+the full ~842 MiB that YSU used to. The technique in this section applied
+to it unchanged, and section 10 records the cut.
 
 What is NOT a target, and why it looks like one: `thompson` (11,264 B) and
 `morrison` (5,120 B) top out in their `KMAX = 256` template instantiations,
@@ -899,3 +899,151 @@ on whatever box runs it, including boxes with no recorded frame row.
 `test_the_two_stack_arrays_are_the_measured_pair` is the one that stops a
 later pass from "finishing the job" on `tv_env` or `positive_energy`
 without reading this section first.
+
+---
+
+## 10. MYJ and MYJURB: the frame that stood between MYJ and 256 levels
+
+`myjpbl_column` (`bl_pbl_physics = 2`) and `myjurb_column` (MYJ under
+`sf_urban_physics = 2/3`) were the last PBL kernels holding a whole column
+in per-thread local arrays sized by a compile-time bound, `MYJ_KMAX = 128`:
+19 and 24 arrays, 9,232 B and 10,256 B frames (12,304 B for `myjurb` on
+sm_120 under NVRTC 12.9.86). The 256-level target (nz = 256 at
+p_top = 1 hPa) would have needed `MYJ_KMAX = 256`, about 18.4 KB and
+20.5 KB per thread, roughly 2.1 GiB and 2.3 GiB of reservation on an
+84-SM card. Raising the define was not a real option.
+
+Both kernels now take the section 8 route. Every column array lives in a
+global workspace that `woof/core/myjpbl.py` / `woof/core/myjurb.py`
+allocate per call. The workspace is sized to the columns IN FLIGHT and
+to the RUNTIME level count: `blocks x slots x (nz + 1) x 32` floats,
+lane-interleaved (`block_base + (s * wskp + k) * 32 + t`). The
+launch block is 32. Columns go in tiles offset by a new `col0`
+argument, because the state arrays are `(nz, ny, nx)`. `MYJ_KMAX`
+is now a refusal guard and sizes nothing. It is 256 in both kernels, and
+the contract (`MYJ_VERTICAL_LEVEL_BOUNDS = (4, 256)`) and both launchers
+match it. The arrays keep their names, extents and access order. Only
+`real x[MYJ_KMAX]` became a `MyjCol x = MYJWS_AT(wsb, slot, wskp)` view,
+and the two `real* var` species/component selectors became views.
+
+### The reservation, measured
+
+RTX A6000, 84 SMs x 1,536, sm_86, NVRTC 12.9.86 (CuPy 14.2.0). Fresh
+process per row, zero-work launch, `cudaMemGetInfo` on either side. The
+pre-cut kernel is the source at 7950e4171 compiled beside the new one.
+
+| kernel | frame before | reserved before | law | frame after | reserved after |
+|---|---|---|---|---|---|
+| `myjpbl_column` | 9,232 B | **1,012.0 MiB** | 1,010.0 | 0 B | **2.0 MiB** (module load) |
+| `myjurb_column` | 10,256 B | **1,138.0 MiB** | 1,136.0 | 0 B | **2.0 MiB** |
+
+Compile-only readings were taken with NVRTC through the production source
+assembly and options, then `cuobjdump --dump-resource-usage`. The same
+reader reproduces every pre-cut row the recordings carried (9,232 /
+10,256 / 12,304 B). After the cut, every compiler that could be loaded
+here reads **0 B** for both kernels: NVRTC 12.9.86, 13.0.88, 13.3.33 and
+13.4.92 on sm_86, sm_89 and sm_120. `kernel_frame_recordings` was updated
+from these readings. The sm_86 12.9.86 rows are device reads through the
+production loader. The sm_120 12.9.86 / 13.0.88 / 13.3.33 / 13.4.92 and
+sm_89 13.4.92 rows are compile-only reads at each recording's own build.
+The two NVRTC 13.0.48 recordings had their `myjpbl` row DROPPED rather
+than back-filled, because that compiler was not in reach. The shipped
+ceiling `KERNEL_MAX_LOCAL_SIZE_BYTES["myjpbl"/"myjurb"]` is 0.
+
+### Bit-identity
+
+`myjpbl.cu` uses plain `+`/`*`, so it had the same contraction exposure
+that cost `ysu.cu` its bit-identity (section 8). Measured, not argued, by
+`tests/test_myj_workspace.py`, which compiles the pre-cut source from git
+beside the shipped one and compares every output word as a `uint32`
+pattern: the eight tendencies/EL/EXCH, PBLH/KPBL/MIXHT, the carried TKE
+and the THZ0/QZ0/QSFC/CT INOUT state. It uses 333 randomized columns per
+case, mixing stable, convective, cloudy, iced, water, sea-ice and snow
+columns so neighbouring lanes take different branches.
+
+| kernel | arms | nz = 49 | nz = 100 | nz = 128 |
+|---|---|---|---|---|
+| `myjpbl_column` | `flqi` on / off | 149,184 words, **0 differ** | 302,031, **0** | 385,947, **0** |
+| `myjurb_column` | BEP on / rural / `idiff = 1` | 149,184, **0** | 302,031, **0** | 385,947, **0** |
+
+* Perturbed-input control (one `th` word, one ULP): the outputs move, so
+  the harness can see a single ULP.
+* Tiling control (forced 32-column tiles, so the workspace is reused
+  across many launches and the last block is partial) at nz = 4, 49 and
+  256: 0 words move.
+* Residue control (workspace poisoned with -7e30 and then 3.5e30): 0 words
+  move, so no slot is read before it is written.
+* `tests/test_myjurb_wrf471_parity.py`, the WRF v4.7.1 word-for-word oracle,
+  is green unchanged. So is the CPU-authority conformance in
+  `tests/test_myj_port.py`.
+
+Unlike YSU, no bisect was needed. On this toolchain NVRTC made the same
+contraction choices with the arrays in global memory as with them on the
+stack. `myjurb.cu` pins its multiplies with `FMUL` (`__fmul_rn`), so it
+could not have diverged that way at all.
+
+### 256 levels
+
+`test_a_256_level_column_completes_with_sane_tke_and_fluxes` runs 126
+columns at nz = 256 with a 48 km top (p_top 1.6 hPa), on a geometric
+stretch from a 15-60 m first layer, through both kernels. Results:
+
+* every output is finite;
+* TKE is 0.1 (the EPSQ2/2 floor) to 3.5 / 3.6 m2/s2 for MYJ / MYJURB;
+* PBLH is 154-2,506 m and KPBL is 4-73, so the PBL never reaches the
+  stretched upper column;
+* EXCH_H in the upper half of the column is 1e-4 of its 867 m2/s maximum;
+* the heating tendency peaks at 0.017 K/s (MYJ) and 0.005 K/s (MYJURB),
+  and the momentum tendency at 0.015 m/s2.
+
+`test_a_256_level_column_agrees_with_the_cpu_authority` holds one
+256-level column to the float32 CPU authority `woof.verify.myj_ref`
+under the same 5e-3 relative bar the 30-level conformance test uses.
+KPBL and PBLH are exact.
+
+### The tile is 12 blocks/SM
+
+51,200 columns, median of 7, A6000. Kernel residency at block 32 is 12
+blocks/SM for `myjpbl` (136 registers) and 16 for `myjurb` (104 registers).
+
+| blocks/SM | tile | ws @ nz=49 | wall @ 49 | wall @ 128 | wall @ 256 | ws @ 256 |
+|---|---|---|---|---|---|---|
+| pre-cut (local frame) | -- | 0, plus 1,012 MiB reserved | 3.10 ms | 8.02 ms | -- | -- |
+| 2 | 5,376 | 19.5 MiB | 7.19 | 29.67 | 62.82 | 100.1 MiB |
+| 4 | 10,752 | 39.0 | 6.02 | 16.71 | 34.32 | 200.3 |
+| 8 | 21,504 | 77.9 | 4.50 | 11.91 | 24.26 | 400.6 |
+| **12** | **32,256** | **116.9** | **3.74** | **9.71** | **19.60** | **600.8** |
+| 16 | 43,008 | 155.9 | 4.65 | 12.08 | 24.42 | 801.1 |
+
+`MYJ_TILE_BLOCKS_PER_SM = 12` (`woof/core/physics_inventory.py`) is both
+the residency and the plateau. `myj_tile_columns` takes the smaller of
+that value and the live occupancy query, so it can only go down. The
+residual 1.2x on the kernel (3.74 against 3.10 ms at nz = 49) is the cost
+of global addressing over local, about what GF and KF measured.
+`myjurb` uses the same tile.
+
+### Pricing
+
+`preflight.myj_column_workspace_bytes` prices the worst MYJ domain at
+`min(nx*ny, SMs x 12 x 32)` columns and the runtime nz. It uses 24 slots
+when `sf_urban_physics` is 2 or 3 (MYJURB replaces the MYJPBL call there)
+and 19 otherwise. `column_workspace_bytes` now sums it with the GF / KF /
+YSU / Shin-Hong / New Tiedtke / UW workspaces, and the `woof check`
+non-pool line prints it. On a 170-SM card at nz = 256 that is 1.19 GiB
+(`myjpbl`) or 1.50 GiB (`myjurb`) of ordinary allocation. The old
+reservation was 2.0 GiB at nz <= 128 and would have been about 4.2 /
+5.7 GiB at a 256-level frame bound. On an 84-SM A6000 the numbers are
+600.8 / 758.9 MiB.
+
+### Reproducing
+
+```
+pytest tests/test_myj_workspace.py tests/test_myj_port.py \
+       tests/test_myjurb_wrf471_parity.py tests/test_kernel_local_bounds.py
+GPUWM_NO_LOCAL_GPU=1 pytest tests/test_pbl_vertical_bounds.py \
+       tests/test_physics_vertical_preflight.py tests/test_kernel_frame_recordings.py
+```
+
+`test_the_frame_stays_under_the_default_stack` is the gate that does not
+depend on the platform. `test_no_column_array_is_left_on_the_stack` is the
+gate that reads the source and needs no GPU.

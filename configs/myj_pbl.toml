@@ -7,10 +7,11 @@
 # `woof check` raised and woof/core/model.py died on the same call.
 # This config is the standing check that both rows are there.
 #
-# MYJ carries the widest per-thread local frame of any PBL in the tree
-# (myjpbl, 9,232 B at the compiled MYJ_KMAX = 128 tier, ~2.00 GiB of
-# launch-time backing store on the reference card), which is exactly the
-# reservation the preflight exists to price before a run meets it.
+# MYJ used to carry the widest per-thread local frame of any PBL in the
+# tree (myjpbl, 9,232 B at a compiled MYJ_KMAX = 128, ~2.00 GiB of
+# launch-time backing store on the reference card).  Since 2026-10-12 the
+# column lives in a global workspace sized to the runtime nz (up to 256
+# levels), which the preflight prices instead (myj_column_workspace_bytes).
 #
 # Noah is selected on purpose: MYJ's land branch inverts the latent-heat
 # flux to rebuild QSFC (module_bl_myjpbl.F:554-557), so with

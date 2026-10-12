@@ -84,10 +84,15 @@ YSU_VERTICAL_LEVEL_BOUNDS = (4, 128)
 #: than aliased to YSU's: the two kernels are separate translation units a
 #: future change could size differently.
 SHINHONG_VERTICAL_LEVEL_BOUNDS = (4, 128)
-#: MYJ.  ``MYJ_KMAX`` in ``kernels/myjpbl.cu`` for the ceiling; the floor is
+#: MYJ (and MYJURB, its urban companion).  The ceiling is the ``MYJ_KMAX``
+#: refusal guard in ``kernels/myjpbl.cu`` / ``kernels/myjurb.cu``: since
+#: 2026-10-12 neither kernel sizes an array by it -- the column lives in a
+#: global workspace the launcher sizes to the runtime nz
+#: (docs/kernel_local_memory_bounds.md section 10) -- so 256 is the level
+#: count the end-to-end target runs at, not a frame budget.  The floor is
 #: where VDIFQ's tridiagonal chain still has interior rows and MIXLEN's
 #: profile smoothing can read ``REL(K-1)``/``REL(K+1)``.
-MYJ_VERTICAL_LEVEL_BOUNDS = (4, 128)
+MYJ_VERTICAL_LEVEL_BOUNDS = (4, 256)
 #: SASE.  ``SASE_KMAX`` in ``kernels/sase.cu``, which is the same number as
 #: ``woof.core.sase_limits.MAX_COLUMN_LEVELS`` and ``woof.config
 #: .SASE_MAX_NZ``: the implicit vertical solve keeps three FP64 columns of
