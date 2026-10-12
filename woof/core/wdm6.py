@@ -48,21 +48,45 @@ import cupy as cp
 
 from woof.config import RunConfig
 from woof.core import constants as c
-from woof.core.kernels import get_kernel, get_kernel_int_defines
+from woof.core.kernels import get_kernel
 from woof.core.state import DTYPE, DomainState
-from woof.core.wdm6_constants import (WDM6_DEEP_KMAX, WDM6_NUMBER_SPECIES,
-                                       WDM6_SHALLOW_KMAX,
+from woof.core.wdm6_constants import (WDM6_BLOCK, WDM6_MAX_LEVELS,
+                                       WDM6_NUMBER_SPECIES,
+                                       WDM6_TILE_BLOCKS_PER_SM,
                                        WDM6_VERTICAL_LEVEL_BOUNDS,
-                                       wdm6_level_tier)
+                                       wdm6_workspace_extent,
+                                       wdm6_workspace_floats)
 
-_COLUMN_TPB = 32
-# The ladder itself lives in wdm6_constants (a CuPy-free leaf) so the memory
-# preflight can price a WDM6 configuration on a host with no device; these
-# names are the adapter's local spelling of it.
-_SHALLOW_KMAX = WDM6_SHALLOW_KMAX
-_KMAX = WDM6_DEEP_KMAX
+_COLUMN_TPB = WDM6_BLOCK
+_KMAX = WDM6_MAX_LEVELS
 VERTICAL_LEVEL_BOUNDS = WDM6_VERTICAL_LEVEL_BOUNDS
-_kernel_capacity = wdm6_level_tier
+
+
+def wdm6_tile_columns(fn, ncol: int) -> int:
+    """Columns to keep in flight: enough to fill the card, and no more.
+
+    The workspace replaced a local-memory backing store the driver charged
+    at the card's whole resident-thread capacity; it is charged per column
+    in flight instead.  The device's occupancy query only ever lowers the
+    measured blocks-per-SM constant.
+    """
+    try:
+        sms = int(cp.cuda.Device().attributes["MultiProcessorCount"])
+    except Exception:                              # noqa: BLE001
+        # No device to size against (a host-side test drives the launcher
+        # with a stand-in kernel): one tile, the whole domain.
+        return int(max(WDM6_BLOCK, int(ncol)))
+    per_sm = WDM6_TILE_BLOCKS_PER_SM
+    try:
+        from cupy_backends.cuda.api import driver
+
+        resident = driver.occupancyMaxActiveBlocksPerMultiprocessor(
+            fn.kernel.ptr, WDM6_BLOCK, 0)
+        per_sm = min(per_sm, int(resident))
+    except Exception:                              # noqa: BLE001
+        pass                                       # keep the measured value
+    per_sm = max(1, int(per_sm))
+    return int(max(WDM6_BLOCK, min(int(ncol), sms * per_sm * WDM6_BLOCK)))
 
 
 def launch_wdm6(theta, qv, qc, qr, qi, qs, qg, nn, nc, nr,
@@ -75,7 +99,7 @@ def launch_wdm6(theta, qv, qc, qr, qi, qs, qg, nn, nc, nr,
     if len(shape) != 3:
         raise ValueError(f"WDM6 fields must be 3-D, got {shape}")
     nz, ny, nx = shape
-    capacity = _kernel_capacity(nz)
+    wskp = wdm6_workspace_extent(nz)
     if not np.isfinite(dt) or dt <= 0.0:
         raise ValueError(f"dt must be finite and positive, got {dt}")
     with np.errstate(over='ignore', under='ignore'):
@@ -111,23 +135,31 @@ def launch_wdm6(theta, qv, qc, qr, qi, qs, qg, nn, nc, nr,
         if not value.flags.c_contiguous:
             raise ValueError(f"{name} must be C-contiguous")
     ncol = ny * nx
-    blocks = (ncol + _COLUMN_TPB - 1) // _COLUMN_TPB
     if count_status is None:
         count_status = cp.empty((1,), dtype=cp.uint32)
     if count_status.shape != (1,) or count_status.dtype != np.dtype('uint32'):
         raise ValueError('WDM6 count status must be one uint32 word')
     count_status.fill(cp.uint32(0))
-    kernel = (get_kernel("wdm6", "wdm6_column")
-              if capacity == _SHALLOW_KMAX else
-              get_kernel_int_defines(
-                  "wdm6", "wdm6_column", (("WDM6_KMAX", capacity),)))
-    kernel(
-        (blocks,), (_COLUMN_TPB,),
-        (theta, qv, qc, qi, qr, qs, qg, nn, nc, nr,
-         rho, pressure, pii, dz, xland,
-         rainnc, rainncv, snownc, snowncv, graupelnc, graupelncv, sr,
-         effc, effi, effs, device_dt, np.int32(hail_opt),
-         np.int32(nz), np.int32(ny), np.int32(nx), count_status))
+    kernel = get_kernel("wdm6", "wdm6_column")
+    # The column arrays live in a global workspace sized to the columns in
+    # flight and to this call's nz (kernels/wdm6.cu says why); columns go in
+    # tiles offset by `col0`.  Every tile ORs into the one status word.
+    tile = wdm6_tile_columns(kernel, ncol)
+    ws = cp.empty(wdm6_workspace_floats(nz, tile), dtype=DTYPE)
+    try:
+        for col0 in range(0, ncol, tile):
+            count = min(tile, ncol - col0)
+            blocks = (count + _COLUMN_TPB - 1) // _COLUMN_TPB
+            kernel(
+                (blocks,), (_COLUMN_TPB,),
+                (theta, qv, qc, qi, qr, qs, qg, nn, nc, nr,
+                 rho, pressure, pii, dz, xland,
+                 rainnc, rainncv, snownc, snowncv, graupelnc, graupelncv, sr,
+                 effc, effi, effs, device_dt, np.int32(hail_opt),
+                 np.int32(nz), np.int32(ny), np.int32(nx), count_status,
+                 ws, np.int32(wskp), np.int32(col0)))
+    finally:
+        del ws
     from woof.core import health_ledger
     def describe(flags):
         if flags & 1:
@@ -217,4 +249,5 @@ def apply(state: DomainState, cfg: RunConfig, dt: float, *,
         graupelnc=graupelnc, graupelncv=graupelncv)
 
 
-__all__ = ["WDM6_NUMBER_SPECIES", "apply", "column_land_mask", "launch_wdm6"]
+__all__ = ["WDM6_NUMBER_SPECIES", "apply", "column_land_mask", "launch_wdm6",
+           "wdm6_tile_columns"]

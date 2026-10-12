@@ -79,21 +79,35 @@ def test_les_preset_refuses_a_column_the_forecast_cannot_run():
         VerticalSpec.les(levels=HEX_MAX_COLUMN_LEVELS + 1)
 
 
-def test_the_column_ceiling_is_the_engines_wsm6_tier():
+def test_the_column_ceiling_is_within_the_engines_wsm6_ceiling():
+    """WSM6 keeps its column arrays in a runtime-sized workspace, so its
+    ceiling is a 256-level refusal bound and its frame no longer follows the
+    column.  The hex column cap may not exceed it, and the admission model's
+    stdlib restatements must agree with the engine's constants."""
     from woof.core import wsm6_constants
     from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
 
-    assert HEX_MAX_COLUMN_LEVELS == wsm6_constants.WSM6_DEEP_KMAX
-    assert device_admission.WSM6_DEEP_TIER_LEVELS == wsm6_constants.WSM6_DEEP_KMAX
-    assert device_admission.WSM6_SHALLOW_TIER_LEVELS == wsm6_constants.WSM6_SHALLOW_KMAX
-    from woof.core import preflight
-
-    frame = preflight.WSM6_TIER_FRAME
-    assert device_admission.WSM6_FRAME_BYTES_PER_LEVEL == frame.bytes_per_level
-    for levels in (55, 64, 70, 80):
-        assert device_admission.wsm6_local_frame_bytes(levels) == frame.frame_bytes(
-            wsm6_constants.wsm6_level_tier(levels)
+    assert HEX_MAX_COLUMN_LEVELS <= wsm6_constants.WSM6_MAX_LEVELS
+    assert device_admission.WSM6_MAX_LEVELS == wsm6_constants.WSM6_MAX_LEVELS == 256
+    for levels in (55, 64, 70, 80, 128, 256):
+        assert device_admission.wsm6_local_frame_bytes(levels) == (
+            device_admission.WIDEST_LAUNCHED_LOCAL_FRAME_BYTES
         )
+    with pytest.raises(ValueError, match="WSM6"):
+        device_admission.wsm6_local_frame_bytes(257)
+
+    workspace = device_admission.WSM6_WORKSPACE
+    assert workspace in device_admission.TILED_WORKSPACES
+    assert workspace.slots == wsm6_constants.WSM6WS_SLOTS
+    assert workspace.block == wsm6_constants.WSM6_BLOCK
+    assert workspace.blocks_per_sm == wsm6_constants.WSM6_TILE_BLOCKS_PER_SM
+    card = device_admission.REFERENCE_CARD
+    for levels in (55, 80, 256):
+        for cells in (1_000, 40_962, 163_842):
+            columns = min(cells, workspace.knee_cells(card))
+            assert workspace.bytes_for(cells, card, levels) == (
+                wsm6_constants.wsm6_workspace_floats(levels, columns) * 4
+            )
 
 
 def test_les_preset_passes_the_vertical_construction(tmp_path):
@@ -252,14 +266,25 @@ def test_the_per_cell_slope_scales_with_a_deeper_column():
     assert "DERIVED" in record["level_scaling"]
 
 
-def test_the_deep_wsm6_tier_charges_its_wider_local_frame():
+def test_a_deep_column_charges_the_wsm6_workspace_not_a_wider_frame():
+    """The 80-level WSM6 tier's 1,792 B wider frame is retired: a deeper
+    column now costs WSM6 workspace (nz + 1 levels per slot), and the
+    256-level ceiling is the only refusal left."""
     card = device_admission.REFERENCE_CARD
+    cells = 163_842
     at64 = device_admission.model_for_card(card, levels=64)
     at80 = device_admission.model_for_card(card, levels=80)
-    assert at64.local_store_extra_bytes() == 0
-    assert at80.local_store_extra_bytes() == 1_792 * card.resident_threads
+    at256 = device_admission.model_for_card(card, levels=256)
+    for model in (at64, at80, at256):
+        assert model.local_store_extra_bytes() == 0
+    workspace = device_admission.WSM6_WORKSPACE.name
+    assert (at64.tiled_breakdown(cells)[workspace]
+            < at80.tiled_breakdown(cells)[workspace]
+            < at256.tiled_breakdown(cells)[workspace])
+    assert at256.tiled_breakdown(cells)[workspace] == (
+        16 * 32 * card.multiprocessors * 30 * 257 * 4)
     with pytest.raises(ValueError, match="WSM6"):
-        device_admission.model_for_card(card, levels=81).predict_bytes(10)
+        device_admission.model_for_card(card, levels=257).predict_bytes(10)
 
 
 def test_a_shallower_column_keeps_the_measured_slope():
@@ -297,7 +322,7 @@ def test_the_door_prices_the_rows_column(tmp_path):
     with pytest.raises(door.ForecastDoorRefusal, match="WSM6"):
         door.resolve_request(
             _door_namespace(tmp_path / "deep", mesh="les"),
-            registry={"les": door.MeshRow("les", 40_000, 5.0, 937.5, levels=100)},
+            registry={"les": door.MeshRow("les", 40_000, 5.0, 937.5, levels=257)},
         )
     native = door.resolve_request(
         _door_namespace(tmp_path / "n", mesh="les"),

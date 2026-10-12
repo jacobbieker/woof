@@ -719,10 +719,15 @@ A mesh row declares its column (`nVertLevels`), measured from the init it
 was registered with. The bind holds the run's init to it and refuses a
 disagreeing one by name; the bound modules, the GWDO kernel and every
 allocation then use that count. 55 levels stays the default for every
-existing row. The deepest column a forecast runs is 80 levels: the
-engine's WSM6 compiles at most that many, and a deeper row is refused at
-the door and at the bind. The device footprint is priced per level: the
+existing row. The deepest column a forecast runs is the hex column cap
+(`woof.hex.vertical_spec.HEX_MAX_COLUMN_LEVELS`), and a deeper row is
+refused at the door and at the bind. The engine's WSM6 no longer sets
+that cap: since 2026-10-12 its column arrays live in a workspace sized to
+the run's own level count, so it admits up to 256 levels (a deeper row is
+refused by name, "WSM6"). The device footprint is priced per level: the
 per-cell slope scales by `levels / 55` above 55 (derived, labelled so in
-the receipt), and above 64 levels the wider WSM6 local frame is charged
-too. Build an LES-ready column with `woof hex init --vertical-spec
+the receipt), and WSM6's column workspace (`wsm6_column_workspace`, 30
+slots of `levels + 1`) is charged beside the GF and YSU workspaces at
+`min(cells, tile)`; there is no wider WSM6 local frame to charge any more.
+Build an LES-ready column with `woof hex init --vertical-spec
 preset:les` (chapter 5).

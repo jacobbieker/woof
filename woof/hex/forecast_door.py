@@ -53,7 +53,7 @@ import time
 from typing import Any, Mapping, Sequence
 
 from .device_admission import (
-    WSM6_DEEP_TIER_LEVELS,
+    WSM6_MAX_LEVELS,
     DEFAULT_HEADROOM_BYTES,
     FOOTPRINT_MODEL,
     REFERENCE_CARD,
@@ -1399,13 +1399,13 @@ def resolve_request(
     steps, captures = _schedule(hours, history_every_minutes, row.dt_seconds, mesh)
 
     levels = int(getattr(row, "levels", 55))
-    if levels > WSM6_DEEP_TIER_LEVELS:
+    if levels > WSM6_MAX_LEVELS:
         raise _refuse(
             f"--mesh {mesh} declares a {levels}-level column, deeper than the "
-            f"{WSM6_DEEP_TIER_LEVELS} levels the engine's WSM6 compiles; the "
+            f"{WSM6_MAX_LEVELS} levels the engine's WSM6 admits; the "
             "run would stop at its first microphysics call, after the card is "
             "reserved.  Rebuild the vertical with at most "
-            f"{WSM6_DEEP_TIER_LEVELS} levels (e.g. --vertical-spec preset:les)"
+            f"{WSM6_MAX_LEVELS} levels"
         )
 
     # The PBL slot, answered from the row alone (its nominal spacing and the

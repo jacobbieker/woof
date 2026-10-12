@@ -283,13 +283,13 @@ SM120_NVRTC_13_0_48 = KernelFrameRecording(
         'tke_budget': 0,
         'uh_diag': 0,
         'vert_interp': 768,
-        # RE-READ 2026-09-28, RTX 5090 (a development machine), NVRTC 13.0.48,
-        # after 308c2d39e (WDM6 rain mass and number conservation)
-        # took falk and falkn, two per-level arrays, off the stack:
-        # 9,776 -> 9,264 B at WDM6_KMAX 64, 11,568 B at 80.
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): the 9,264 B / 7,216 B KMAX-64
+        # frames this row carried describe a source that no longer exists, and
+        # this NVRTC build was not available to re-read the new one, so the two
+        # rows are DROPPED rather than carried stale.  Every build that was read
+        # (sm_86 driver; sm_86/89/120 compile-only; NVRTC 12.9.86 and 13.4.92)
+        # reads 0 B.
         'wdm6_refl': 16128,
-        'wsm6': 7216,
         'ysu': 0,
         'ysu_validation': 0,
     }),
@@ -410,13 +410,13 @@ SM120_NVRTC_13_3_33 = KernelFrameRecording(
         'tke_budget': 0,
         'uh_diag': 0,
         'vert_interp': 768,
-        # RE-READ 2026-09-28, RTX 5070 Ti (a development machine), NVRTC 13.3.33,
-        # after 308c2d39e (WDM6 rain mass and number conservation)
-        # took falk and falkn, two per-level arrays, off the stack:
-        # 9,776 -> 9,264 B at WDM6_KMAX 64, 11,568 B at 80.
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): the 9,264 B / 7,216 B KMAX-64
+        # frames this row carried describe a source that no longer exists, and
+        # this NVRTC build was not available to re-read the new one, so the two
+        # rows are DROPPED rather than carried stale.  Every build that was read
+        # (sm_86 driver; sm_86/89/120 compile-only; NVRTC 12.9.86 and 13.4.92)
+        # reads 0 B.
         'wdm6_refl': 16128,
-        'wsm6': 7216,
         'ysu': 0,
         'ysu_validation': 0,
     }),
@@ -608,14 +608,13 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
         'tke_budget': 0,
         'uh_diag': 0,
         'vert_interp': 768,
-        # The source this read no longer exists: 308c2d39e took the
-        # frame to 9,264 B on every sm_120 build read 2026-09-28
-        # (NVRTC 12.9.86, 13.0.48, 13.0.88, 13.3.33, 13.4.92).  This
-        # card was read again at the 2.8.0 cut's Windows step
-        # (2026-09-29): 9,264 B at WDM6_KMAX 64 on sm_86 as well.
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): the 9,264 B / 7,216 B KMAX-64
+        # frames this row carried describe a source that no longer exists, and
+        # this NVRTC build was not available to re-read the new one, so the two
+        # rows are DROPPED rather than carried stale.  Every build that was read
+        # (sm_86 driver; sm_86/89/120 compile-only; NVRTC 12.9.86 and 13.4.92)
+        # reads 0 B.
         'wdm6_refl': 16128,
-        'wsm6': 7216,
         # RE-READ 2026-08-21 on this card at the post-workspace
         # source: 0 B, as on both sm_120 builds.  The 7,184 B this row
         # used to carry described ysu.cu BEFORE the column workspace.
@@ -672,7 +671,32 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         'noah': 224,
         'nssl2_fused_gs': 112,
         'thompson_aerosol_warm': 112,
+        # WDM6 / WSM6 at the 2026-10-12 workspace cut, read through the
+        # production loader (load_module, then local_size_bytes) on an RTX
+        # A6000 -- the same sm_86 / NVRTC 12.9.86 compile platform -- in a
+        # fresh process: 0 B each.
+        'wdm6': 0,
+        'wsm6': 0,
         'ysu': 0,
+    }),
+)
+
+
+#: An RTX A6000 (sm_86) under NVRTC 13.4.92, the CUDA-13 environment of the
+#: same box, read 2026-10-12 through the production loader at the WDM6 /
+#: WSM6 workspace cut.  PARTIAL: it read only the two modules that cut
+#: changed.  0 B each, the same as this box's NVRTC 12.9.86 reading.
+SM86_NVRTC_13_4_92 = KernelFrameRecording(
+    box='rtx-a6000-workstation',
+    device='NVIDIA RTX A6000',
+    compute_capability='86',
+    nvrtc_build='13.4.92',
+    platform_family='linux',
+    measured='2026-10-12',
+    complete=False,
+    frames=MappingProxyType({
+        'wdm6': 0,
+        'wsm6': 0,
     }),
 )
 
@@ -896,9 +920,16 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         # step that gives the Rust bridge's bits (9cd3a755f) is 512 B, where
         # the 2026-09-28 reading of the older source was 768 B.
         'vert_interp': 512,
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): both kernels' column arrays
+        # left the stack for a launcher-owned workspace, so the 9,264 B / 7,216 B
+        # KMAX-64 frames this row carried describe a source that no longer
+        # exists.  RE-READ compile-only at the new source on a box with this
+        # NVRTC build (NVRTC -> cubin for sm_120, ptxas -v): 0 B stack frame and
+        # 0 B spill for both; the same source read 0 B through the production
+        # loader and driver on sm_86 (RTX A6000) at 12.9.86 and 13.4.92.
+        'wdm6': 0,
         'wdm6_refl': 16128,
-        'wsm6': 7216,
+        'wsm6': 0,
         'ysu': 0,
         'ysu_validation': 0,
         # The urban canopy models joined after this reading.  Read on this
@@ -1077,9 +1108,16 @@ SM120_NVRTC_12_9_86 = KernelFrameRecording(
         # cache, the GPU forcing-preparation lane's merge 843d2043e): the
         # WRF-real vertical step that gives the Rust bridge's bits is 512 B.
         'vert_interp': 512,
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): both kernels' column arrays
+        # left the stack for a launcher-owned workspace, so the 9,264 B / 7,216 B
+        # KMAX-64 frames this row carried describe a source that no longer
+        # exists.  RE-READ compile-only at the new source on a box with this
+        # NVRTC build (NVRTC -> cubin for sm_120, ptxas -v): 0 B stack frame and
+        # 0 B spill for both; the same source read 0 B through the production
+        # loader and driver on sm_86 (RTX A6000) at 12.9.86 and 13.4.92.
+        'wdm6': 0,
         'wdm6_refl': 16128,
-        'wsm6': 7216,
+        'wsm6': 0,
         'ysu': 0,
         'ysu_validation': 0,
     }),
@@ -1248,9 +1286,16 @@ SM89_NVRTC_13_4_92 = KernelFrameRecording(
         # (843d2043e): the WRF-real vertical step that gives the Rust
         # bridge's bits is 512 B, where the older source read 768 B.
         'vert_interp': 512,
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): both kernels' column arrays
+        # left the stack for a launcher-owned workspace, so the 9,264 B / 7,216 B
+        # KMAX-64 frames this row carried describe a source that no longer
+        # exists.  RE-READ compile-only at the new source on a box with this
+        # NVRTC build (NVRTC -> cubin for sm_89, ptxas -v): 0 B stack frame and
+        # 0 B spill for both; the same source read 0 B through the production
+        # loader and driver on sm_86 (RTX A6000) at 12.9.86 and 13.4.92.
+        'wdm6': 0,
         'wdm6_refl': 16128,
-        'wsm6': 7216,
+        'wsm6': 0,
         'ysu': 0,
         'ysu_validation': 0,
     }),
@@ -1443,13 +1488,13 @@ KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
             'tke_budget': 0,
             'uh_diag': 0,
             'vert_interp': 768,
-            # RE-READ 2026-09-28, RTX 5070 Ti (a development machine), NVRTC 13.0.88,
-            # after 308c2d39e (WDM6 rain mass and number conservation)
-            # took falk and falkn, two per-level arrays, off the stack:
-            # 9,776 -> 9,264 B at WDM6_KMAX 64, 11,568 B at 80.
-            'wdm6': 9264,
+            # WDM6 / WSM6 workspace cut (2026-10-12): the 9,264 B / 7,216 B KMAX-64
+            # frames this row carried describe a source that no longer exists, and
+            # this NVRTC build was not available to re-read the new one, so the two
+            # rows are DROPPED rather than carried stale.  Every build that was read
+            # (sm_86 driver; sm_86/89/120 compile-only; NVRTC 12.9.86 and 13.4.92)
+            # reads 0 B.
             'wdm6_refl': 16128,
-            'wsm6': 7216,
             'ysu': 0,
             'ysu_validation': 0,
         }),
@@ -1473,6 +1518,9 @@ KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
     # beside this architecture's other recording, where the eight stems it
     # read and why those eight are written out.
     SM86_NVRTC_12_9_86,
+    # The same sm_86 architecture on NVRTC 13.4.92, read 2026-10-12 for the
+    # WDM6 / WSM6 workspace cut only.  Defined above.
+    SM86_NVRTC_13_4_92,
     # What a fresh gpu-cu13 install compiles on since 2026-09-16, read
     # 2026-09-28 on an RTX 5090 and an RTX 5070 Ti.  Defined above.
     SM120_NVRTC_13_4_92,

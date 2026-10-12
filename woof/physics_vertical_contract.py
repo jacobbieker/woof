@@ -13,11 +13,14 @@ import math
 
 import numpy as np
 
-# The one component bound that is OWNED elsewhere: WDM6's ceiling is the
-# deepest ``WDM6_KMAX`` tier its constants module compiles, and that module
-# is CuPy-free and staged wherever this one is, so the value is imported
-# rather than transcribed.  Re-exported under its own name below.
+# The two component bounds that are OWNED elsewhere: WSM6's and WDM6's
+# ceilings are the 256-level refusal ceilings their constants modules
+# declare (both kernels keep their column arrays in a runtime-sized
+# workspace, so nothing is compiled per level count).  Those modules are
+# CuPy-free and staged wherever this one is, so the values are imported
+# rather than transcribed.  Re-exported under their own names below.
 from woof.core.wdm6_constants import WDM6_VERTICAL_LEVEL_BOUNDS
+from woof.core.wsm6_constants import WSM6_VERTICAL_LEVEL_BOUNDS
 
 
 class PhysicsVerticalPreflightError(ValueError):
@@ -108,7 +111,7 @@ KF_VERTICAL_LEVEL_BOUNDS = (8, 128)
 # integer-define tier, so there is no fixed upper bound to declare.
 GF_VERTICAL_LEVEL_BOUNDS = (12, None)
 KESSLER_VERTICAL_LEVEL_BOUNDS = (None, 256)
-WSM6_VERTICAL_LEVEL_BOUNDS = (2, 80)
+#: WSM6 (mp_physics=6): imported above from ``woof.core.wsm6_constants``.
 THOMPSON_VERTICAL_LEVEL_BOUNDS = (2, 256)
 #: Aerosol-aware Thompson (mp_physics=28).  Identical to the classic
 #: Thompson bound and NOT a copy of a number: the mp=28 sedimentation
@@ -132,9 +135,9 @@ NSSL2_VERTICAL_LEVEL_BOUNDS = (3, 256)
 #: existed the gate SKIPPED mp=9 silently, so a 300-level Milbrandt-Yau run
 #: passed ``woof check`` and died on its first microphysics call.
 MILBRANDT2_VERTICAL_LEVEL_BOUNDS = (3, 256)
-#: WDM6 (mp_physics=16): the deepest compiled ``WDM6_KMAX`` tier, imported
-#: from the CuPy-free constants module at the top of this file rather than
-#: retyped as 80 (``WDM6_VERTICAL_LEVEL_BOUNDS``).
+#: WDM6 (mp_physics=16): the 256-level refusal ceiling, imported from the
+#: CuPy-free constants module at the top of this file rather than retyped
+#: (``WDM6_VERTICAL_LEVEL_BOUNDS``).
 #: P3 one-category (mp_physics=50).  No per-thread column ceiling: the port
 #: works on global ``(ncol, nk)`` workspaces (kbot=0, ktop=nk-1) and compiles
 #: no level tier, so like Grell-Freitas the row is a floor with no declared

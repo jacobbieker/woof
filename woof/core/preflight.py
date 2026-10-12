@@ -1793,15 +1793,16 @@ def read_compile_platform() -> tuple[str, str] | None:
 #: ``wdm6_refl`` compile their column arrays to the
 #: configuration's own level count
 #: (:data:`LEVEL_SPECIALIZED_KERNEL_FRAMES`), so their rows here are the
-#: CEILING, not the price.  Three more are TIERED, and those are the only
+#: CEILING, not the price.  Two more are TIERED, and those are the only
 #: ones that can price ABOVE their row.  ``acoustic`` compiles the implicit
 #: w''-phi'' solve at a coarse ``WPHI_MAX_LEV`` tier chosen by ``nz``
 #: (:data:`ACOUSTIC_TIER_FRAME`), so this row is its price at the shipped
 #: 129 tier -- every ``nz <= 128`` configuration -- and the deeper tiers add
-#: to it.  ``wdm6`` and ``wsm6`` are the same shape, each with a two-rung
-#: ladder (:data:`WDM6_TIER_FRAME`, :data:`WSM6_TIER_FRAME`): each row is
-#: that module's ``KMAX = 64`` default, every ``nz <= 64`` configuration,
-#: and the 80 tier prices above it.
+#: to it; ``ieva`` is the same shape (:data:`IEVA_TIER_FRAME`).  (``wdm6``
+#: and ``wsm6`` were tiered too, at 64/80, until 2026-10-12: their column
+#: arrays moved into launcher-owned workspaces priced by
+#: :func:`wsm6_column_workspace_bytes` / :func:`wdm6_column_workspace_bytes`,
+#: and their rows here are now the one small frame each compiles to.)
 #: Everything else launches as compiled.
 #:
 #: A module maximum is an UPPER bound over the kernels a scheme can launch --
@@ -2139,35 +2140,21 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "real_init": 0,
     "real_init_math": 48,
     "vert_interp": 768,
-    # WDM6 (mp_physics=16).  MEASURED 2026-08-10 on the reference RTX 5090
-    # the same NVRTC + driver way as every other row: the module's one
-    # kernel, ``wdm6_column``, holds 9,776 B at the source's ``#ifndef``
-    # default ``WDM6_KMAX = 64`` (88 registers).  One thread owns a whole
-    # column, so the frame is that bound's ~30 per-thread work arrays.
-    #
-    # This row is the 64 TIER, not a ceiling: the launcher compiles the 80
-    # tier for 65 <= nz <= 80 and that frame is WIDER (12,208 B measured).
-    # :data:`WDM6_TIER_FRAME` carries the ladder, and the measurements
-    # behind it -- exactly 152 B per level between the two rungs -- are
-    # re-read off the driver by tests/test_kernel_local_bounds.py.
-    #
-    # 308c2d39e (WDM6 rain mass and number conservation) shrank the frame:
-    # 9,264 B at 64 and 11,568 B at 80, 144 B per level, on every sm_120
-    # build read 2026-09-28 (RTX 5090: NVRTC 12.9.86, 13.0.48, 13.4.92;
-    # RTX 5070 Ti: 13.0.88, 13.3.33), and the three sm_120 recordings in
-    # woof/core/kernel_frame_recordings.py carry it.  This row is the
-    # element-wise maximum over the recordings, so it stays at the sm_86
-    # recording, which the RTX 3080 re-read at the 2.8.0 cut's Windows
-    # step (2026-09-29): 9,264 B at 64 and 11,568 B at 80 on sm_86 too,
-    # with NVRTC 13.4.92 and 13.0, so every recorded card now agrees.
-    "wdm6": 9264,
-    # WSM6 (mp_physics=6).  This row is the 64 TIER, not a ceiling: the
-    # launcher compiles the 80 tier for 65 <= nz <= 80 and that frame is
-    # WIDER (9,008 B measured).  :data:`WSM6_TIER_FRAME` carries the ladder
-    # and the measurements behind it -- exactly 112 B per level between the
-    # two rungs -- and tests/test_kernel_local_bounds.py re-reads both off
-    # the driver.
-    "wsm6": 7216,
+    # WDM6 (mp_physics=16) and WSM6 (mp_physics=6).  Until 2026-10-12 both
+    # kept a whole column per thread in the local frame, sized by a
+    # compile-time KMAX tier the launchers chose from nz: WDM6 9,264 B at
+    # 64 and 11,568 B at 80 (144 B/level), WSM6 7,216 B at 64 and 9,008 B
+    # at 80 (112 B/level), on every recorded platform -- priced through
+    # the retired WDM6_TIER_FRAME / WSM6_TIER_FRAME ladders.  The column
+    # arrays now live in global workspaces sized to the columns in flight
+    # and to the runtime nz (woof/core/kernels/wsm6.cu and wdm6.cu; priced
+    # by wsm6_column_workspace_bytes / wdm6_column_workspace_bytes), and
+    # both now compile to a 0 B frame: read through the production loader
+    # on sm_86 (RTX A6000) at NVRTC 12.9.86 and 13.4.92, and compile-only
+    # (ptxas -v) for sm_89 and sm_120 at both builds.  The rows in
+    # kernel_frame_recordings say which platforms read them and how.
+    "wdm6": 0,
+    "wsm6": 0,
     # YSU (bl_pbl_physics = 1, the SHIPPED DEFAULT).  One thread still owns
     # one whole column, but the column arrays no longer live in the
     # per-thread local frame: woof/core/kernels/ysu.cu keeps them in a
@@ -2453,43 +2440,12 @@ ACOUSTIC_TIER_FRAME = TieredKernelFrame("acoustic", "WPHI_MAX_LEV", 129, 4)
 #: (:data:`woof.core.ieva_constants.IEVA_LEVEL_TIERS`), read exactly so.
 IEVA_TIER_FRAME = TieredKernelFrame("ieva", "IEVA_KMAX", 65, 16)
 
-#: ``wdm6.cu``'s ``WDM6_KMAX`` sizes the whole per-thread column stack, and
-#: ``woof/core/wdm6.py`` compiles it at one of two rungs
-#: (``wdm6_constants.WDM6_KERNEL_LEVEL_TIERS`` = 64, 80) rather than at
-#: ``nz``.  That is why WDM6 is priced HERE and not in
-#: :data:`LEVEL_SPECIALIZED_KERNEL_FRAMES`: an nz-linear model would price
-#: a 49-level WDM6 run at 7,056 B when the kernel it actually launches
-#: holds 9,264 B, and under-pricing a rail gate is the direction that put a
-#: run 1,630 MiB over.
-#:
-#: MEASURED on the reference RTX 5090 over sixteen bounds from 2 to 80, and
-#: re-read after 308c2d39e on every sm_120 build and on the RTX 3080 (sm_86).
-#: The two rungs the launcher can compile are exactly linear in the bound --
-#: 9,264 B at 64 and 11,568 B at 80, 2,304 B over 16 levels = 144 B/level --
-#: which is what this frame reproduces, exactly, at both.  (Between the
-#: rungs the driver's frame wanders by up to 16 B against the same line; the
-#: launcher never compiles there, and the model is a ceiling on that band,
-#: which is the safe direction.)
-WDM6_TIER_FRAME = TieredKernelFrame("wdm6", "WDM6_KMAX", 64, 144)
-
-#: ``wsm6.cu``'s ``WSM6_KMAX`` sizes the whole per-thread column stack, and
-#: ``woof/core/wsm6.py`` compiles it at one of two rungs
-#: (``wsm6_constants.WSM6_KERNEL_LEVEL_TIERS`` = 64, 80) rather than at
-#: ``nz``.  Until 1.8.9 the flat row above WAS the price for every WSM6
-#: configuration, so an ``nz = 72`` run -- the six shipped tornado-LES
-#: configs -- was priced at the 64-tier 7,216 B while the kernel it
-#: actually launches holds 9,008 B.  1,792 B/thread of backing store the
-#: pool never reports, which is the direction that put a run 1,630 MiB
-#: over.
-#:
-#: RE-MEASURED 2026-08-10 on the reference RTX 5090, NVRTC + driver,
-#: eighteen bounds from 2 to 80: ``wsm6_column`` holds 7,216 B at the
-#: source's ``#ifndef`` default of 64 and 9,008 B at 80 -- 1,792 B over 16
-#: levels = exactly 112 B per level -- which this frame reproduces at both
-#: rungs.  (Between the rungs the driver's frame sits up to 16 B below the
-#: same line; the launcher never compiles there, and the model is a stated
-#: ceiling on that band, which is the safe direction.)
-WSM6_TIER_FRAME = TieredKernelFrame("wsm6", "WSM6_KMAX", 64, 112)
+#: ``WDM6_TIER_FRAME`` and ``WSM6_TIER_FRAME`` priced ``wdm6.cu`` /
+#: ``wsm6.cu`` at the 64/80 ``KMAX`` tier their launchers compiled (144 and
+#: 112 B per level above the 64-tier rows).  RETIRED 2026-10-12 with the
+#: tiers themselves: both kernels keep their column arrays in a workspace
+#: (:func:`wsm6_column_workspace_bytes`, :func:`wdm6_column_workspace_bytes`)
+#: and compile ONE frame at every level count up to 256.
 
 #: Kernel source files that have no standalone local frame because they
 #: never compile alone: ``noahmp_driver.cu``, ``noahmp_energy.cu``,
@@ -3249,39 +3205,8 @@ def kernel_local_frame_bytes(
         frame = ACOUSTIC_TIER_FRAME.frame_bytes(tier)
         if frame > frames.get(ACOUSTIC_TIER_FRAME.module, -1):
             frames[ACOUSTIC_TIER_FRAME.module] = frame
-    # ``wdm6`` and ``wsm6`` are the CONDITIONAL tiered modules, so
-    # unlike acoustic it is priced PER DOMAIN THAT SELECTS IT.  Both halves
-    # of that matter: a 40-level WDM6 child beside a 100-level WSM6 parent
-    # must be priced at WDM6's own 64 tier, not raised to a tier WDM6 has no
-    # kernel for -- and the parent's 100 levels must not reach WDM6's
-    # level-bound refusal at all, because the parent never launches it.  The
-    # ladder lives in the CuPy-free constants leaf, so this still prices on
-    # a host with no device.
-    from woof.core.wdm6_constants import wdm6_level_tier
-
-    for dc in exp.domains:
-        if WDM6_TIER_FRAME.module not in domain_kernel_modules(
-                dc, prices_refl=prices_refl):
-            continue
-        frame = WDM6_TIER_FRAME.frame_bytes(wdm6_level_tier(int(dc.run.nz)))
-        if frame > frames.get(WDM6_TIER_FRAME.module, -1):
-            frames[WDM6_TIER_FRAME.module] = frame
-    # ``wsm6`` prices the same way, and the same two halves matter: a
-    # 40-level WSM6 child beside a 100-level Morrison parent takes WSM6's
-    # own 64 tier rather than a tier WSM6 has no kernel for, and the
-    # parent's 100 levels never reach WSM6's level-bound refusal on behalf
-    # of a domain that does not launch it.
-    from woof.core.wsm6_constants import wsm6_level_tier
-
-    for dc in exp.domains:
-        if WSM6_TIER_FRAME.module not in domain_kernel_modules(
-                dc, prices_refl=prices_refl):
-            continue
-        frame = WSM6_TIER_FRAME.frame_bytes(wsm6_level_tier(int(dc.run.nz)))
-        if frame > frames.get(WSM6_TIER_FRAME.module, -1):
-            frames[WSM6_TIER_FRAME.module] = frame
     # ``ieva`` prices per domain that turns zadvect_implicit on, at that
-    # domain's own tier, exactly as wdm6/wsm6 do.
+    # domain's own tier (as wdm6/wsm6 did before their workspace cut).
     from woof.core.ieva_constants import level_tier as ieva_level_tier
 
     for dc in exp.domains:
@@ -3451,7 +3376,72 @@ def column_workspace_bytes(
             + ysu_column_workspace_bytes(exp, profile=profile)
             + shinhong_column_workspace_bytes(exp, profile=profile)
             + ntiedtke_column_workspace_bytes(exp, profile=profile)
-            + uwpbl_column_workspace_bytes(exp, profile=profile))
+            + uwpbl_column_workspace_bytes(exp, profile=profile)
+            + wsm6_column_workspace_bytes(exp, profile=profile)
+            + wdm6_column_workspace_bytes(exp, profile=profile))
+
+
+def wsm6_column_workspace_bytes(
+        exp: ExperimentConfig, *,
+        profile: DeviceLocalMemoryProfile | None = None) -> int:
+    """Device bytes the WSM6 column workspace holds, or zero.
+
+    The term that REPLACED WSM6's local-memory reservation (2026-10-12).
+    ``woof/core/kernels/wsm6.cu`` used to keep ~30 column arrays per
+    thread in the local frame at a compile-time 64/80 tier -- 7,216 /
+    9,008 B per thread times the card's whole resident-thread capacity --
+    and could not run deeper than 80 levels.  The arrays now live in a
+    global workspace ``woof/core/wsm6.py`` allocates per call, sized to
+    the columns in flight -- ``SMs x WSM6_TILE_BLOCKS_PER_SM x WSM6_BLOCK``
+    -- and to the RUNTIME ``nz`` (``nz + 1`` per slot), so it follows the
+    level count linearly up to the scheme's 256-level ceiling.
+
+    Bounded by the column count: a domain smaller than one tile never
+    allocates a whole tile.  The worst domain, because the workspace is a
+    per-call transient released between domains.  Zero for every
+    configuration that does not select ``mp_physics = 6``.
+    """
+    # wsm6_constants, not wsm6: the launcher imports cupy at module scope.
+    from woof.core.wsm6_constants import (
+        WSM6_BLOCK, WSM6_TILE_BLOCKS_PER_SM, wsm6_workspace_floats)
+
+    profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
+    tile_cap = (profile.multiprocessor_count * WSM6_TILE_BLOCKS_PER_SM
+                * WSM6_BLOCK)
+    worst = 0
+    for dc in exp.domains:
+        if int(dc.run.mp_physics) != 6:
+            continue
+        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        worst = max(worst, wsm6_workspace_floats(int(dc.run.nz), columns) * 4)
+    return int(worst)
+
+
+def wdm6_column_workspace_bytes(
+        exp: ExperimentConfig, *,
+        profile: DeviceLocalMemoryProfile | None = None) -> int:
+    """Device bytes the WDM6 column workspace holds, or zero.
+
+    WSM6's cut (:func:`wsm6_column_workspace_bytes`) applied to
+    ``woof/core/kernels/wdm6.cu``: ~37 column arrays per thread that were a
+    9,264 / 11,568 B frame at the 64/80 tier now live in a workspace
+    ``woof/core/wdm6.py`` sizes to the columns in flight and to the runtime
+    ``nz``.  Zero for every configuration that does not select
+    ``mp_physics = 16``.
+    """
+    from woof.core.wdm6_constants import (
+        WDM6_BLOCK, WDM6_TILE_BLOCKS_PER_SM, wdm6_workspace_floats)
+
+    profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
+    tile_cap = (profile.multiprocessor_count * WDM6_TILE_BLOCKS_PER_SM
+                * WDM6_BLOCK)
+    worst = 0
+    for dc in exp.domains:
+        if int(dc.run.mp_physics) != 16:
+            continue
+        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        worst = max(worst, wdm6_workspace_floats(int(dc.run.nz), columns) * 4)
+    return int(worst)
 
 
 def uwpbl_column_workspace_bytes(
@@ -12311,12 +12301,12 @@ __all__ = [
     "device_rail_free_bytes", "device_wide_used_bytes",
     "column_workspace_bytes", "gf_column_workspace_bytes",
     "kf_column_workspace_bytes", "ysu_column_workspace_bytes",
-    "shinhong_column_workspace_bytes",
+    "shinhong_column_workspace_bytes", "wsm6_column_workspace_bytes",
+    "wdm6_column_workspace_bytes",
     "kernel_local_memory_bytes", "non_pool_device_bytes",
     "physics_kernel_modules", "refl_diagnostic_reachable",
     "LEVEL_SPECIALIZED_KERNEL_FRAMES", "LevelSpecializedFrame",
-    "ACOUSTIC_TIER_FRAME", "TieredKernelFrame", "WDM6_TIER_FRAME",
-    "WSM6_TIER_FRAME",
+    "ACOUSTIC_TIER_FRAME", "TieredKernelFrame",
     "domain_kernel_modules", "kernel_local_frame_bytes",
     "ALLOCATOR_HEADROOM", "AllocReport", "CAL_D01_DEVICE_FOOTPRINT_BYTES",
     "CAL_D01_WORKSPACE_BYTES",

@@ -44,9 +44,9 @@ def test_graph_replay_reports_count_failure_at_existing_ledger_drain():
 
 
 def test_count_guard_stays_within_the_registered_column_frames():
+    # One binary at every nz since the column workspace (2026-10-12): the
+    # count guard must not put a column array back on the stack.
     from woof.core import preflight
-    from woof.core.kernels import get_kernel,get_kernel_int_defines
-    for bound in (64,80):
-        kernel=(get_kernel('wdm6','wdm6_column') if bound==64 else
-                get_kernel_int_defines('wdm6','wdm6_column',(('WDM6_KMAX',bound),)))
-        assert kernel.attributes['local_size_bytes'] <= preflight.WDM6_TIER_FRAME.frame_bytes(bound)
+    from woof.core.kernels import get_kernel
+    kernel=get_kernel('wdm6','wdm6_column')
+    assert kernel.attributes['local_size_bytes'] <= preflight.KERNEL_MAX_LOCAL_SIZE_BYTES['wdm6']
