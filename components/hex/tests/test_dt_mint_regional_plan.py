@@ -307,23 +307,27 @@ def test_a_unit_sphere_grid_without_its_radius_attribute_is_still_scaled(mint, t
 
 def test_the_plan_reads_the_level_ceiling_the_bind_applies(mint, tmp_path):
     # The bind rebinds the driver's 55 to the row's own column up to the
-    # vertical spec's ceiling, so an 80-level cull's integration arms bind
-    # and only a deeper column is blocked.
-    from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
+    # frozen lane's physics ceiling, so a cull at that ceiling has its
+    # integration arms bind and only a deeper column is blocked.
+    from woof.hex.vertical_spec import hex_column_level_ceiling
 
-    assert mint.FULL_PHYSICS_MAX_LEVELS == HEX_MAX_COLUMN_LEVELS
-    grid, init = synthetic_cull(tmp_path / "cull", levels=80)
+    ceiling = hex_column_level_ceiling()
+    assert mint.FULL_PHYSICS_MAX_LEVELS == ceiling
+    grid, init = synthetic_cull(tmp_path / "cull", levels=ceiling)
     facts = mint.measure_regional_mesh(grid, init)
     plan = mint.regional_mint_plan(0.5, mesh_row="x", facts=facts)
     assert plan["blockers"] == [] and plan["integration_blockers"] == []
     assert plan["runnable"] is True
-    assert plan["parts"]["regional_forecast_mint_pair"]["class_key"]["n_vert_levels"] == 80
+    assert (
+        plan["parts"]["regional_forecast_mint_pair"]["class_key"]["n_vert_levels"]
+        == ceiling
+    )
     assert not plan["parts"]["integration_anchor"]["blocked_by"]
-    grid, init = synthetic_cull(tmp_path / "deep", levels=81)
+    grid, init = synthetic_cull(tmp_path / "deep", levels=ceiling + 1)
     facts = mint.measure_regional_mesh(grid, init)
     plan = mint.regional_mint_plan(0.5, mesh_row="x", facts=facts)
     assert plan["runnable"] is False
-    assert any("81 levels" in b for b in plan["integration_blockers"])
+    assert any(f"{ceiling + 1} levels" in b for b in plan["integration_blockers"])
     assert plan["parts"]["integration_anchor"]["blocked_by"]
 
 

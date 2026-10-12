@@ -2229,28 +2229,22 @@ not a limitation, and it is why HRRR's default differs from the others'.
 
 Three consequences worth stating plainly:
 
-* **Layer ceiling.** The default carries the same one the legacy arm
-  does: **both** 4/4 engines bound a longwave column at 128 radiation
-  layers. The legacy number is `RLW_MAXLAY`, a compile-time constant of
-  the longwave chain kernel (`woof/core/kernels/rrtmg_lw_chain.cu`,
-  asserted host-side as `MAX_RADIATION_LAYERS` in
-  `woof/core/rrtmg_lw.py`); the modern one is owned by the
-  Planck-source kernel's fixed `pfrac[128]` (`woof/core/rrtmgp.py`),
-  while the RTE solvers themselves compile to the run's own layer count
-  and add no bound of their own. Both numbers are declared once, as
-  `MAX_LEGACY_LONGWAVE_LAYERS` and `MAX_RRTMGP_LAYERS` in
-  `woof/physics_vertical_contract.py`, and both are refused by number
-  in the resolved vertical preflight (`woof.physics_compat`), before
-  anything is paid for. A column carries more layers than the ladder
-  has levels because a cap is built above the model top either way, and
-  at `p_top = 5000` Pa the two arms add the same 13 longwave layers: a
-  51-level ladder is 64 longwave layers on both, 115 levels reach the
-  bound exactly, and 116 levels are refused on both. Earlier revisions
-  of this page called 64 a wrapper cap; it is not a cap at all, it is
-  the layer count that ladder reaches. The one asymmetry is shortwave:
-  the legacy shortwave workspace is sized at run time and declares no
-  ceiling (`woof/core/rrtmg_sw.py`), while the modern arm holds both
-  streams to the same 128.
+* **Layer ceiling.** Both arms take the same model column as every
+  other scheme, `nz <= 256`, and size their radiation column per run:
+  `nz` model levels plus the cap layers built above the model top. The
+  cap layers ride on top of the 256 rather than eating into it. At
+  `p_top = 5000` Pa the two arms add the same 13 longwave layers, so a
+  51-level ladder is a 64-layer longwave column on both and a 256-level
+  ladder a 269-layer one. The bounds are declared once in
+  `woof/physics_vertical_contract.py` and refused by number in the
+  resolved vertical preflight (`woof.physics_compat`), before anything
+  is paid for. Until 2026-10 both longwave arms held a fixed 128-layer
+  column: the legacy chain kernel's `RLW_MAXLAY` and the RRTMGP
+  Planck-source kernel's `pfrac[128]`. At this `p_top` that refused any
+  ladder deeper than 115 levels. Both now follow the run's layer count,
+  as the legacy shortwave workspace and the RTE solvers already did, and
+  any per-thread frame that grows with the column is charged per level in
+  the device sizing (measured on sm_86 only).
 * **Card cost.** The full-radiation default costs roughly 1.8 GiB more
   peak envelope than the suite it replaced, and no longer fits the
   minimum 12 km layout on a 12 GiB card. The sizing refusal now names a

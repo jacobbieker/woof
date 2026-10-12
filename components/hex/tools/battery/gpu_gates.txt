@@ -82,3 +82,7 @@ tests/test_deformation_geometry_precision_gpu.py
 # CPU authority on a synthetic patch, and the dt 0.5/0.25 s stepping loop
 # reproduces the CPU probe's loss numbers with and without compensation.
 tests/test_cuda_compensated_recovery_gpu.py
+# The YSU-GWDO kernel compiled per run at 55, 160 and 256 levels against its
+# FP32 CPU oracle, and the frame each column compiles held to the per-level
+# price woof.hex.device_admission charges for it.
+tests/test_gwdo_deep_column_gpu.py

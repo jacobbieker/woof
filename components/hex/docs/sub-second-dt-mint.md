@@ -65,8 +65,12 @@ and `runnable` is false:
 - a real boundary zone (`bdyMaskCell`)
 - the configuration is not already anchored
 
-The level count is checked as well. The full-physics lane binds 55 levels
-today, so a cull at any other count is listed under `integration_blockers`.
+The level count is checked as well. The full-physics lane binds any column
+up to its physics ceiling (`woof.hex.vertical_spec.hex_column_level_ceiling`,
+256 levels on the frozen WSM6 + YSU lane), so only a deeper cull is listed
+under `integration_blockers`. Every existing anchor was measured at 55
+levels, so a cull at another count mints a new `-l<levels>` class rather
+than reusing one.
 
 The plan prints, for each part, the exact command, the inputs it reads and
 the outputs it writes. The authorization appears only as the name

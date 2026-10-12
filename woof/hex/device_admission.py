@@ -166,6 +166,9 @@ __all__ = [
     "FOOTPRINT_MODEL",
     "FootprintModel",
     "GRELL_FREITAS_WORKSPACE",
+    "GWDO_FRAME_BYTES_PER_LEVEL",
+    "GWDO_FRAME_FIXED_BYTES",
+    "GWDO_MAX_FRAME_LEVELS",
     "KNOWN_CARDS",
     "MIB",
     "MODEL_VERTICAL_LEVELS",
@@ -182,7 +185,9 @@ __all__ = [
     "TiledWorkspace",
     "YSU_WORKSPACE",
     "card_profile_from_attributes",
+    "gwdo_local_frame_bytes",
     "model_at_levels",
+    "widest_launched_local_frame_bytes",
     "wsm6_local_frame_bytes",
     "model_for_card",
     "native_device_floor_bytes",
@@ -503,6 +508,58 @@ def wsm6_local_frame_bytes(levels: int) -> int:
     )
 
 
+#: The hex YSU-GWDO kernel's local frame, which -- unlike every other frame
+#: in the core -- follows the RUN's column: ``woof.hex.cuda_gwdo_v841``
+#: compiles it per run with ``GWDO_NLEV`` = the column, and twelve FP32
+#: column arrays live in per-thread local memory.  MEASURED with NVRTC
+#: ``local_size_bytes`` on sm_86 (RTX A6000, CUDA 13, 2026-10-12) at 3, 10,
+#: 30, 40, 55, 57, 63, 64, 65, 80, 81, 100, 128, 129, 160, 161, 200, 230, 255
+#: and 256 levels: 2,528 B at 55, 7,168 B at 160, 11,392 B at 256, and
+#: exactly 44 B per level from 40 levels up.  ``44 * levels + 168`` is at or
+#: above every one of those twenty points (equal at 10), so the price is a
+#: bound, not a fit.  Below about 161 levels it stays under the measured
+#: widest frame (:data:`WIDEST_LAUNCHED_LOCAL_FRAME_BYTES`) and adds nothing;
+#: at 256 it is the widest frame launched and the backing store grows by its
+#: excess times the resident threads.  Re-measure on another architecture
+#: before quoting it there: a frame is a property of the compiler and the
+#: target, and only sm_86 was measured.
+GWDO_FRAME_BYTES_PER_LEVEL = 44
+GWDO_FRAME_FIXED_BYTES = 168
+#: The deepest column the GWDO kernel compiles (restates
+#: ``woof.hex.cuda_gwdo_v841.GWDO_MAX_LEVELS`` so this module stays
+#: stdlib-only; a test holds them equal).
+GWDO_MAX_FRAME_LEVELS = 256
+
+
+def gwdo_local_frame_bytes(levels: int) -> int:
+    """The hex YSU-GWDO kernel's per-thread local frame at this column."""
+
+    levels = int(levels)
+    if not 3 <= levels <= GWDO_MAX_FRAME_LEVELS:
+        raise ValueError(
+            f"{levels} levels is outside the 3..{GWDO_MAX_FRAME_LEVELS} column "
+            "the YSU-GWDO kernel compiles; no frame exists for it"
+        )
+    return GWDO_FRAME_FIXED_BYTES + GWDO_FRAME_BYTES_PER_LEVEL * levels
+
+
+def widest_launched_local_frame_bytes(levels: int) -> int:
+    """The widest per-thread frame a run at this column launches.
+
+    CUDA backs local memory for the WIDEST frame any launched kernel needs,
+    so the column-dependent frames are compared and the widest wins: WSM6's
+    compiled tier (:func:`wsm6_local_frame_bytes`) and the per-run GWDO
+    (:func:`gwdo_local_frame_bytes`).  Never below the measured core's own
+    :data:`WIDEST_LAUNCHED_LOCAL_FRAME_BYTES`, which the core already holds.
+    """
+
+    return max(
+        WIDEST_LAUNCHED_LOCAL_FRAME_BYTES,
+        wsm6_local_frame_bytes(levels),
+        gwdo_local_frame_bytes(levels),
+    )
+
+
 # ---------------------------------------------------------------------------
 # the model
 # ---------------------------------------------------------------------------
@@ -551,17 +608,21 @@ class ShapedFootprintModel:
         return float(self.bytes_per_cell) * self.level_scale()
 
     def local_store_extra_bytes(self) -> int:
-        """Backing store a deeper WSM6 tier adds to the measured core.
+        """Backing store a deeper column's wider frame adds to the core.
 
         The core holds CUDA's per-context local-memory backing store at the
         64-tier frame (:data:`WIDEST_LAUNCHED_LOCAL_FRAME_BYTES`) times the
-        card's resident threads.  Above 64 levels WSM6 compiles its 80 tier,
-        whose frame is 1,792 B wider, and CUDA reserves that much more per
-        resident thread at first launch -- memory the pool never reports.
-        Zero for every column of 64 levels or fewer.
+        card's resident threads.  A column whose widest launched frame
+        (:func:`widest_launched_local_frame_bytes`: WSM6's tier, or the
+        per-run YSU-GWDO past about 161 levels) is wider makes CUDA reserve
+        the difference per resident thread at first launch -- memory the
+        pool never reports.  Zero for every column of 64 levels or fewer.
         """
 
-        extra = wsm6_local_frame_bytes(int(self.levels)) - WIDEST_LAUNCHED_LOCAL_FRAME_BYTES
+        extra = (
+            widest_launched_local_frame_bytes(int(self.levels))
+            - WIDEST_LAUNCHED_LOCAL_FRAME_BYTES
+        )
         return max(0, extra) * int(self.card.resident_threads)
 
     def tiled_bytes(self, cells: int) -> int:

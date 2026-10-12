@@ -286,7 +286,7 @@ The nested child sits on the bold row. **The cost of the shared vertical
 grid is 4.8 points of resolved TKE fraction**: 0.873 against 0.921 at
 `nz=128`. That is the deepest rung of this sweep, not the model's ceiling:
 §4 records receipted runs at nz=160 and nz=192 and a solver that admits 256,
-with radiation the binding constraint on a real-data column.
+which every physics scheme now admits too, radiation included.
 Put the other way round, the subgrid model carries **12.7% of the
 turbulence instead of 7.9%: about 60% more of it is parameterized** than
 at the ceiling. Peak resolved `var(w)` normalised by w² is 15% low
@@ -348,31 +348,38 @@ These are limits of the current build, not opinions about LES.
   `docs/superpowers/receipts/les/p2-nz-tier-2026-08-04/P2-DEVICE-ACCEPTANCE.md`.
   **`nz > 192` is still unrun**: the 257 tier is compiled, frame-measured
   (1,056 B) and gated, but no integration has been run there.
-- **Radiation, not the acoustic solver, is the vertical ceiling on a
-  real-data run.** Every bound below is refused by name at the door
-  (`woof check`; `woof/physics_compat.py`, single-sourced from
-  `woof/physics_vertical_contract.py`). The radiation bounds count model
-  levels PLUS the cap layers above the model top, so they move with `p_top`:
+- **Every scheme now runs to the acoustic solver's 256 levels.** Every
+  bound below is refused by name at the door (`woof check`;
+  `woof/physics_compat.py`, single-sourced from
+  `woof/physics_vertical_contract.py`). Radiation sizes its column per run
+  at `nz` model levels PLUS the cap layers WRF builds above the model top
+  (13 longwave layers at `p_top = 5,000 Pa`), so the cap layers ride on top
+  of the 256 and `p_top` no longer lowers the ceiling:
 
-  | component | the bound | max `nz` at `p_top = 5,000 Pa` |
+  | component | the bound | max `nz` |
   |---|---|---|
-  | legacy RRTMG, shortwave | model + wrapper layers <= 64 | **63** |
-  | RTE+RRTMGP, longwave | model + cap layers <= 128 | **115** |
-  | legacy RRTMG, longwave | model + cap layers <= 128 | **115** |
-  | WSM6 microphysics | `nz <= 80` | 80 |
-  | Kain-Fritsch cumulus | `nz <= 128` | 128 |
-  | YSU / Shin-Hong / MYJ PBL, SASE | `nz <= 128` | 128 |
-  | Kessler / Thompson / Thompson-aerosol / Morrison / NSSL-2 | `nz <= 256` | 256 |
-  | MYNN PBL, Grell-Freitas cumulus | none | 256 (the solver's) |
+  | legacy RRTMG, longwave and shortwave | `nz <= 256`, plus the cap layers | 256 |
+  | RTE+RRTMGP, longwave and shortwave | `nz <= 256`, plus the cap layers | 256 |
+  | WSM6 / WDM6 microphysics | `nz <= 256` (column workspace) | 256 |
+  | Kessler / Thompson / Thompson-aerosol / Morrison / NSSL-2 / Milbrandt-Yau | `nz <= 256` | 256 |
+  | P3 microphysics | none (column workspace) | 256 (the solver's) |
+  | Kain-Fritsch cumulus | `nz <= 256` | 256 |
+  | YSU / Shin-Hong PBL, SASE | `nz <= 256` | 256 |
+  | MYJ / MYJ-urban PBL | `nz <= 256` (column workspace) | 256 |
+  | MYNN / UW PBL, Grell-Freitas / New Tiedtke cumulus | none | 256 (the solver's) |
   | acoustic solve | `nz <= 256` | 256 |
 
+  Until 2026-10 this table read 63 (legacy shortwave, a stale entry: its
+  workspace was already sized per run), 115 (both longwave arms at
+  `p_top = 5,000 Pa`), 80 (WSM6) and 128 (KF, YSU, Shin-Hong, MYJ, SASE).
+  The kernels that held a fixed per-thread column now either compile their
+  depth from the run or keep the column in a global workspace, and every
+  per-thread frame that grows with `nz` is charged per level in the device
+  sizing. Those frame rows were re-measured on sm_86 (RTX A6000) only.
   The deep runs above were idealized dry CBL cases with radiation off, which
-  is why they reached 160 and 192. **A full-physics real-data column is capped
-  at 115 levels by RRTMGP at the usual `p_top`, and at 63 if legacy RRTMG
-  shortwave is selected**, both below the acoustic solver's 256, and the
-  shortwave one below every other ceiling in the model. The cap-layer counts
-  fall as `p_top` rises: at `p_top = 10,000 Pa` the RRTMGP ceiling is 103.
-  §2 prices what the vertical grid costs: at 128 the resolved fraction is
+  is why they reached 160 and 192. **No full-physics real-data column above
+  192 levels has been integrated yet**, so 256 is the admitted ceiling, not a
+  measured one. §2 prices what the vertical grid costs: at 128 the resolved fraction is
   0.921, and the nested child's shared 49-level grid gives up 4.8 points
   of it. The battery extends that sweep, strictly monotone: **0.92476 at
   nz=160 and 0.92941 at nz=192**.

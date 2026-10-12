@@ -67,7 +67,7 @@ New:
   increments with compensated summation.
 - The MPAS v8.4.1 LES closure is ported: `woof hex forecast --les-model
   {off,3d_smagorinsky,prognostic_tke}` with `--pbl off`. The column takes
-  its level count from the vertical file, up to 80 levels, and the `les`
+  its level count from the vertical file, up to 256 levels, and the `les`
   vertical preset puts fine layers near the ground.
 - Adaptive meshing: `woof hex density` writes `woof-hex.density.v1`
   spacing rasters from sites, assets, terrain or forecast fields, and
@@ -87,6 +87,41 @@ New:
   and the `energy` output preset through `woof downscale --child-config`.
 - `components/hex/tools/mint_dt_anchor.py --regional-plan` plans a
   sub-second timestep mint on a limited-area cull without running it.
+- Every physics scheme in the regional, hex (MPAS) and global models runs
+  up to `nz = 256` vertical levels, which is also the acoustic solver's
+  ceiling. Before, WSM6 and WDM6 stopped at 80 levels; Kain-Fritsch, YSU,
+  Shin-Hong, MYJ, MYJ-urban and SASE at 128; and both longwave radiation
+  arms at 128 layers, which is 115 levels at `p_top = 5000` Pa. Radiation
+  now sizes its column for each run as `nz` plus the cap layers above the
+  model top, so `p_top` no longer lowers the ceiling. WSM6, WDM6 and MYJ
+  keep their columns in global workspaces. Device sizing prices each
+  per-thread frame that grows with `nz` per level. Those frames were
+  re-measured on sm_86 only. `woof check` refuses a deeper column and names
+  the scheme. No full-physics real-data run above 192 levels has been
+  integrated yet.
+- The hex model's level ceiling now comes from the physics a run selects:
+  the smallest bound of its schemes in `woof/physics_vertical_contract.py`,
+  capped at the hex column's own 256. Before, it was a copy of WSM6's 80,
+  which also refused P3 and aerosol-aware Thompson columns that those
+  schemes can run. `woof hex forecast`, the mesh bind, `woof energy plan
+  --nz` and the dt-mint plan use it. The forecast driver checks again with
+  the run's own microphysics and model-top pressure before it seals the
+  physics seam. The YSU gravity-wave-drag kernel compiles for the run's
+  column up to 256 levels (was 160). Device admission prices it at 44 B
+  per level: 11,392 B per thread at 256 levels. The `les` preset still
+  defaults to 80 levels. Timestep anchors and regional classes are still
+  measured at 55 levels only.
+- WOOF Global admits `[vertical] nlev` up to 256 (was 64). The Level-3
+  spectral prototype keeps `primitive.nlev <= 32`. It integrates its fast
+  modes explicitly and carries no physics, so a deeper column only shrinks
+  its stable step.
+
+Fixed:
+
+- WOOF Global now holds explicit `[vertical] a_half_pa`/`b_half` arrays to
+  the same level range as `nlev`. Before, they skipped the check, so an
+  over-deep column passed config validation and was refused only at the
+  first physics call.
 
 ## 1.0.3
 

@@ -88,7 +88,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
             "ee30ffca73d05b738c353d2f54115320c0bd0db4694d5ec43172ae4c5be2625a"
         ),
         "src/hexcore/cuda_gwdo_v841.py": (
-            "4c039df184f1d7f8d29f4f9e6e95af09d6de8c6e69ff665744d5727a035ccf17"
+            "1238ab0c5f09d6380e214a881fb1a2e6a242bcd10a3c21632b9984b6875ab527"
         ),
         "src/hexcore/cuda_physics_v841.py": (
             "8522176f6cc036eb9cbf078e95f5617b2618b6ce6729bd7bf1cb0dc09c3616eb"

@@ -149,7 +149,7 @@ from woof.energy.contracts import (
 )
 from woof.energy.source_window import WINDOWS as SOURCE_WINDOWS
 from woof.hex.errors import MpasPortError
-from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
+from woof.hex.vertical_spec import LES_DEFAULT_LEVELS, hex_column_level_ceiling
 from woof.hex.mesh_point import (
     DEFAULT_BACKGROUND_KM,
     DEFAULT_CULL_PAD_SCALE,
@@ -206,11 +206,13 @@ BOUNDARY_RINGS = SWATH_BOUNDARY_RINGS
 #: checks the init against the row).
 HEX_LEVELS = DEFAULT_LEVELS
 #: The column range ``--nz`` admits.  The floor is the vertical operators'
-#: three layers; the ceiling is the deepest column the forecast runs
-#: (``woof.hex.vertical_spec.HEX_MAX_COLUMN_LEVELS``: the engine's WSM6
-#: compiles at most 80 levels).
+#: three layers; the ceiling is the deepest column the planned physics lane
+#: runs (``woof.hex.vertical_spec.hex_column_level_ceiling`` for the frozen
+#: WSM6 + YSU lane a plan writes): the minimum of each selected scheme's
+#: bound in ``woof.physics_vertical_contract`` and the hex column's own 256,
+#: so it moves with the schemes' kernels rather than restating one of them.
 HEX_MIN_LEVELS = 3
-HEX_MAX_LEVELS = HEX_MAX_COLUMN_LEVELS
+HEX_MAX_LEVELS = hex_column_level_ceiling()
 #: A line chain is split where consecutive sites are farther apart than this
 #: (separate parts of a multi-part asset), so no ring bridges open ground.
 CHAIN_GAP_KM = 25.0
@@ -1312,10 +1314,12 @@ SOURCE_CADENCE_HOURS = {"gfs": 1, "gdas": 1, "era5": 1, "hrrr": 1,
 GDAS_MAX_HOURS = 9
 #: The source name the chain records when a WRF parent run forces it.
 WRFOUT_SOURCE = "wrfout"
-#: Vertical levels of the LES vertical the full chain writes by default.
-LES_LEVELS = HEX_MAX_COLUMN_LEVELS
+#: Vertical levels of the LES vertical the full chain writes by default: the
+#: LES preset's measured default (80), not the ceiling, so a deeper physics
+#: bound does not silently deepen -- and re-price -- every default plan.
+LES_LEVELS = LES_DEFAULT_LEVELS
 #: Bounds on ``--nz`` for the LES vertical.
-LES_LEVELS_RANGE = (40, HEX_MAX_COLUMN_LEVELS)
+LES_LEVELS_RANGE = (40, HEX_MAX_LEVELS)
 #: The LES vertical: lowest layer depth, geometric growth per layer, model
 #: top.  Layers grow from the surface until they reach a uniform cap,
 #: solved so the column closes at the top exactly.
@@ -1940,8 +1944,9 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         raise HexPlanRefusal(
             f"--nz {nz} is outside the hex column range "
             f"{HEX_MIN_LEVELS}..{HEX_MAX_LEVELS}: below it the vertical "
-            f"operators have no interior layer, above it the engine's WSM6 "
-            f"refuses the column at its first call")
+            f"operators have no interior layer, above it a scheme of the "
+            f"planned physics lane (woof.hex.vertical_spec."
+            f"hex_column_level_terms) refuses the column at its first call")
     levels = HEX_LEVELS if nz is None else int(nz)
     if max_domains is not None and max_domains < 1:
         raise HexPlanRefusal("--max-domains must allow the one hex mesh")
