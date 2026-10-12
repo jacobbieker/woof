@@ -718,6 +718,12 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         'nest_microphysics': 0,
         'noah': 224,
         'nssl2_fused_gs': 112,
+        # WRF aer_opt = 3 (rrtmg_aer3.cu), read 2026-10-12 on an RTX A6000
+        # (same sm_86 / NVRTC 12.9.86 platform key, Linux, fresh process)
+        # by test_the_recorded_local_frames_match_the_driver's production
+        # reader: 24 B, where sm_120 compiles the same source to 0 B.
+        # Below the 1,024 B default stack, so it reserves nothing.
+        'rrtmg_aer3': 24,
         # Read 2026-10-12 on an RTX A6000 (same sm_86 / NVRTC 12.9.86
         # platform key, Linux) by the 256-level SASE lane, plain loader at
         # the #ifndef SASE_KMAX = 128 census tier: 6,272 B, the same as

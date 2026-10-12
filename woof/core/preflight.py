@@ -2138,7 +2138,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "swint": 0,
     # Production loader on RTX 5090, NVRTC 13.4.92, 2026-10-04.
     "solar_albedo": 0,
-    "rrtmg_aer3": 0,
+    # WRF aer_opt = 3: 0 B on sm_120, 24 B on sm_86 at NVRTC 12.9.86
+    # (kernel_frame_recordings).
+    "rrtmg_aer3": 24,
     "uh_diag": 0,
     # The UW moist-turbulence PBL (bl_pbl_physics = 9): uwpbl_columns keeps
     # CAM's automatic arrays in a global per-column workspace
