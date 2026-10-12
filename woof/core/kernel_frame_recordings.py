@@ -656,6 +656,19 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
 #: which is why ``complete`` is False and no other key is written here.
 #: The ceiling does not move: every value is at or below the element-wise
 #: maximum the other recordings already carry.
+#:
+#: TWO ROWS ADDED 2026-10-12 from the same compile platform on a different
+#: card: an RTX A6000 (sm_86, NVRTC 12.9.86, fresh process, zero launches,
+#: same instrument), when the RTE+RRTMGP chain went to 256 model levels.
+#: ``rrtmgp_gas`` reads 0 B there because the Planck-source kernel's fixed
+#: ``float pfrac[128]`` (its whole 512 B) became a one-layer window, and
+#: ``rrtmgp_rte`` reads its 3,600 B at the 128-layer source default (its
+#: per-layer growth above that is priced by
+#: ``woof.core.preflight.RRTMGP_RTE_SW_TIER_FRAME``).  They are written here
+#: so the driver gate holds this platform to the new kernel exactly; the
+#: other recordings keep the 512 B nobody has re-read, so the shipped
+#: ``rrtmgp_gas`` ceiling stays 512 B (an over-price under the default
+#: stack, which reserves nothing).
 SM86_NVRTC_12_9_86 = KernelFrameRecording(
     box='development-desktop',
     device='NVIDIA GeForce RTX 3080',
@@ -671,6 +684,8 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         'nest_microphysics': 0,
         'noah': 224,
         'nssl2_fused_gs': 112,
+        'rrtmgp_gas': 0,
+        'rrtmgp_rte': 3600,
         'thompson_aerosol_warm': 112,
         'ysu': 0,
     }),

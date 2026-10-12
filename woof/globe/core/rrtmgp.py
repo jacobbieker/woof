@@ -524,7 +524,23 @@ def scheme_has_snow_species(scheme: str) -> bool:
 # applied directly to woof's model top).
 RRTMGP_TOA_PRESSURE_PA = 1.005183574463
 WRF_LW_UPPER_DELTA_P_PA = 400.0
-MAX_RADIATION_LAYERS = 128
+# The ceiling is on MODEL levels; WRF's above-model cap layers ride on top of
+# it at any model top.  No kernel on the RRTMGP chain holds a fixed per-layer
+# array (the RTE solvers compile RRTMGP_MAX_LAYERS to each call's nlay, the
+# Planck-source kernel walks a one-layer window), so the radiation column is
+# nz + nint(p_top / 400 Pa) LW / nz + {0, 1} SW layers.  The engine's
+# CuPy-free contract owns the number (the regional copy reads the same one).
+from woof.physics_vertical_contract import (  # noqa: E402
+    MAX_RRTMGP_MODEL_LEVELS as MAX_RADIATION_MODEL_LEVELS)
+
+
+def _refuse_model_levels(nz: int) -> None:
+    """The one first-call refusal for a column deeper than the contract."""
+    if int(nz) > MAX_RADIATION_MODEL_LEVELS:
+        raise ValueError(
+            "RRTMGP radiation supports at most "
+            f"{MAX_RADIATION_MODEL_LEVELS} model levels (plus the "
+            f"above-model cap layers), got nz={int(nz)}")
 
 # module_ra_rrtmg_lw.F:11904-11932.  Pressures are hPa.  The table is the
 # weighted standard-atmosphere mean used by WRF to temperature its 4-hPa
@@ -803,11 +819,7 @@ def _extend_above_model_profile(
     lw_upper, sw_upper = rrtmgp_above_model_layer_counts(
         p_top, pressure_floor=pressure_floor)
     upper_nlay = lw_upper if kind == "lw" else sw_upper
-    if model_nlay + upper_nlay > MAX_RADIATION_LAYERS:
-        raise ValueError(
-            "RRTMGP CUDA RTE supports at most "
-            f"{MAX_RADIATION_LAYERS} layers including the above-model "
-            f"column; got {model_nlay + upper_nlay}")
+    _refuse_model_levels(model_nlay)
     if validate_top:
         _validate_model_top_interface(plev, p_top, xp=xp)
     if upper_nlay == 0:
@@ -3398,12 +3410,7 @@ class RRTMGPRadiation:
         if self.latitude_deg.shape != (ny, nx):
             raise ValueError("radiation latitude/longitude must match state grid")
         declared_p_top = getattr(state, "p_top", None)
-        if declared_p_top is not None:
-            lw_upper, _ = rrtmgp_above_model_layer_counts(declared_p_top)
-            if nz + lw_upper > 128:
-                raise ValueError(
-                    "RRTMGP radiation supports at most 128 layers including "
-                    f"the above-model column, got {nz + lw_upper}")
+        _refuse_model_levels(nz)
         if atmosphere["exner"].shape != pressure.shape:
             raise ValueError(
                 f"exner must have shape {pressure.shape}, "
@@ -4781,18 +4788,11 @@ def _lw_rte(tau, lay_source, lev_source, sfc_source, sfc_emis,
     if tau.ndim != 3:
         raise ValueError("tau must have shape (ncol,nlay,ngpt)")
     ncol, nlay, ngpt = tau.shape
-    if nlay > 128:
-        # The ceiling's owner is the Planck-source kernel's fixed
-        # pfrac[128] (see _planck_sources), not the RTE: the solver
-        # kernels compile RRTMGP_MAX_LAYERS to this run's nlay.  This
-        # door-level copy stays because the LW chain feeds on Planck
-        # sources either way (fused or precomputed), and a taller column
-        # must refuse HERE, before any device allocation, rather than
-        # inside whichever stage first touches the fixed array
-        # (re-justified, stale-guard audit 2026-08-25).
-        raise ValueError(
-            "RRTMGP CUDA LW supports at most 128 layers (the Planck-"
-            f"source kernel's fixed pfrac[128]); got {nlay}")
+    # No layer ceiling: the LW solver compiles RRTMGP_MAX_LAYERS to this
+    # run's nlay, and the Planck sources it feeds on (precomputed or
+    # in-solver) keep no per-layer thread storage.  The 128-layer refusal
+    # that sat here guarded the Planck-source kernel's old fixed
+    # pfrac[128]; that array is a one-layer window now (rrtmgp_gas.cu).
     if planck is None:
         lay_source = _device_profile(lay_source, tau.shape, "lay_source")
         lev_source = _device_profile(
@@ -4882,11 +4882,9 @@ def _sw_rte(tau, ssa, g, mu0, sfc_alb_dir, sfc_alb_dif, inc_flux_dir,
     # No layer ceiling: the SW solver compiles RRTMGP_MAX_LAYERS to this
     # run's nlay and no kernel on the SW chain holds fixed per-layer
     # thread storage.  A 128-layer refusal used to sit here, inherited
-    # from the days before per-run specialization; the ceiling's real
-    # owner is the LW Planck-source kernel's pfrac[128], which has its
-    # own raise (retired here 2026-08-25, stale-guard audit -- proven by
-    # a 160-layer transparent-atmosphere run reproducing the analytic
-    # direct beam on the measurement card).
+    # from the days before per-run specialization (retired 2026-08-25,
+    # stale-guard audit -- proven by a 160-layer transparent-atmosphere
+    # run reproducing the analytic direct beam on the measurement card).
     ssa = _device_profile(ssa, tau.shape, "ssa")
     # On the fused path the asym cube does not exist; the ssa array is the
     # valid-dummy pointer for the never-read parameter.
@@ -4968,18 +4966,10 @@ def _planck_sources(tables: GasTables, play, plev, tlay, tlev, tsfc,
     if play.ndim != 2:
         raise ValueError("play must have shape (ncol,nlay)")
     ncol, nlay = play.shape
-    if nlay > 128:
-        # The OWNER of the RRTMGP layer ceiling: this kernel holds a fixed
-        # per-thread pfrac[128] and its device-side guard is a bare
-        # `return`, so without this raise a taller column came back as
-        # uninitialized source arrays that read as valid radiation
-        # (stale-guard audit 2026-08-25).  The RTE solvers themselves
-        # compile RRTMGP_MAX_LAYERS to this run's nlay and carry no such
-        # ceiling.
-        raise ValueError(
-            "RRTMGP CUDA Planck sources support at most 128 layers: the "
-            "rrtmgp_planck_sources kernel holds a fixed pfrac[128] per "
-            f"thread and this profile has {nlay} layers")
+    # No layer ceiling.  This kernel held a fixed per-thread pfrac[128] (and
+    # a bare device-side `return` above it) until 2026-10; it now walks a
+    # one-layer window, bit-identical at every depth the array admitted, so
+    # any nlay the RTE solvers compile for is a column it can source.
     # plev is validated because it is part of the public gas/source profile
     # contract even though Planck interpolation itself only consumes play.
     plev = _device_profile(plev, (ncol, nlay + 1), "plev")

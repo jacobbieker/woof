@@ -153,7 +153,19 @@ ACOUSTIC_VERTICAL_LEVEL_BOUNDS = (1, 256)
 
 RRTMGP_TOA_PRESSURE_PA = 1.005183574463
 WRF_LW_UPPER_DELTA_P_PA = 400.0
-MAX_RRTMGP_LAYERS = 128
+#: RTE+RRTMGP's ceiling is on MODEL levels, not on radiation layers.  No
+#: RRTMGP kernel holds a fixed per-layer array any more: the RTE solvers
+#: compile ``RRTMGP_MAX_LAYERS`` to each call's own layer count and the
+#: Planck-source kernel walks a one-layer window (it held ``pfrac[128]``,
+#: the old 128-layer cap, until 2026-10).  The radiation column is
+#: therefore ``nz`` plus WRF's above-model layers
+#: (:func:`rrtmgp_above_model_layer_counts`) at ANY model top -- up to
+#: 256 + nint(p_top / 400 Pa) longwave and 256 + 1 shortwave -- and the
+#: bound that remains is the depth the solvers are validated and priced
+#: at, which is the dynamical core's own (``ACOUSTIC_VERTICAL_LEVEL_BOUNDS``).
+#: The local frame that grows with the column is priced per layer
+#: (``woof.core.preflight.RRTMGP_RTE_LAYER_FRAME``).
+MAX_RRTMGP_MODEL_LEVELS = 256
 MAX_LEGACY_LONGWAVE_LAYERS = 128
 MAX_LEGACY_SHORTWAVE_LAYERS = None  # runtime-sized workspace; no fixed SW layer ceiling
 

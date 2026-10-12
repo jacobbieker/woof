@@ -315,7 +315,12 @@ def test_the_child_ladder_count_must_match_the_child_config(tmp_path):
 # --------------------------------------------------------------------------
 
 def test_offline_child_refuses_a_ladder_its_radiation_cannot_run(tmp_path):
-    """nz=120 + RRTMGP + the parent's p_top=5000 Pa exceeds the 128-layer cap.
+    """nz=257 + RRTMGP exceeds RTE+RRTMGP's 256-model-level bound.
+
+    (The bound was 128 radiation layers including the cap until the
+    Planck-source kernel's fixed ``pfrac[128]`` became a one-layer window;
+    then nz=120 under the parent's p_top=5000 Pa, 120+13=133, was the case
+    refused here.  It is the admitted control below now.)
 
     Reachable only once a child may carry its own nz.  ``RunConfig`` has no
     p_top of its own, so ``validate_run_config`` runs the p_top=None branch
@@ -325,36 +330,37 @@ def test_offline_child_refuses_a_ladder_its_radiation_cannot_run(tmp_path):
     """
     path = tmp_path / "parent.nc"
     _deep_history(path, datetime(1974, 4, 3, 12), nz=8, p_top=5000.0)
-    child_znw = _ladder(120, 2.5)
+    child_znw = _ladder(257, 2.5)
     initial = interpolate_parent_initial_state(
         path, _placement(), physics_binding=_physics_binding(tmp_path),
         backend="cpu", child_eta_levels=child_znw)
     with pytest.raises(OfflineChildContractError) as excinfo:
         build_offline_child_domain_state(
             initial,
-            _cfg(120, eta_levels=child_znw, ra_lw_physics=4, ra_sw_physics=4),
+            _cfg(257, eta_levels=child_znw, ra_lw_physics=4, ra_sw_physics=4),
             array_module=np)
     message = str(excinfo.value)
-    assert "model plus cap layers <= 128" in message
-    assert "120+13=133" in message
+    assert "RTE+RRTMGP longwave requires model levels nz <= 256" in message
+    assert "257+13=270" in message
 
 
 def test_a_ladder_inside_the_radiation_cap_is_admitted(tmp_path):
-    """NEGATIVE CONTROL: 100+13=113 <= 128 must run.
+    """NEGATIVE CONTROL: 120+13=133 radiation layers must run.
 
-    A gate that refuses every deep ladder is not a gate.
+    A gate that refuses every deep ladder is not a gate.  133 is past the
+    retired 128-layer cap, so this also proves the cap is gone.
     """
     path = tmp_path / "parent.nc"
     _deep_history(path, datetime(1974, 4, 3, 12), nz=8, p_top=5000.0)
-    child_znw = _ladder(100, 2.5)
+    child_znw = _ladder(120, 2.5)
     initial = interpolate_parent_initial_state(
         path, _placement(), physics_binding=_physics_binding(tmp_path),
         backend="cpu", child_eta_levels=child_znw)
     state = build_offline_child_domain_state(
         initial,
-        _cfg(100, eta_levels=child_znw, ra_lw_physics=4, ra_sw_physics=4),
+        _cfg(120, eta_levels=child_znw, ra_lw_physics=4, ra_sw_physics=4),
         array_module=np)
-    assert state.qv.shape[0] == 100
+    assert state.qv.shape[0] == 120
 
 
 def _bare_fields(ny=4, nx=4, nz=8):

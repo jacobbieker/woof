@@ -1091,9 +1091,9 @@ scheme.
 Two things it will refuse, both by name: a bare level count with no stretch
 (a uniform ladder under a stretched parent is a different atmosphere, not a
 finer sampling of one), and a ladder whose depth its own radiation cannot run
-(RRTMGP tops out at model plus cap layers <= 128, so `nz = 120` at
-`p_top = 5000 Pa` is refused at preparation rather than at the first radiative
-call).
+(RTE+RRTMGP tops out at 256 model levels, with the above-model cap on top, so
+`nz = 257` is refused at preparation rather than at the first radiative call;
+legacy RRTMG longwave still stops at 128 radiation layers including the cap).
 
 Those three coordinate parameters stay shared with the parent deliberately: they
 are what make the endpoints coincide, and a per-domain `p_top` would leave the
