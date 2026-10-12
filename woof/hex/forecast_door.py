@@ -53,7 +53,6 @@ import time
 from typing import Any, Mapping, Sequence
 
 from .device_admission import (
-    WSM6_DEEP_TIER_LEVELS,
     DEFAULT_HEADROOM_BYTES,
     FOOTPRINT_MODEL,
     REFERENCE_CARD,
@@ -1398,20 +1397,33 @@ def resolve_request(
             collected.append(str(error))
     steps, captures = _schedule(hours, history_every_minutes, row.dt_seconds, mesh)
 
-    levels = int(getattr(row, "levels", 55))
-    if levels > WSM6_DEEP_TIER_LEVELS:
-        raise _refuse(
-            f"--mesh {mesh} declares a {levels}-level column, deeper than the "
-            f"{WSM6_DEEP_TIER_LEVELS} levels the engine's WSM6 compiles; the "
-            "run would stop at its first microphysics call, after the card is "
-            "reserved.  Rebuild the vertical with at most "
-            f"{WSM6_DEEP_TIER_LEVELS} levels (e.g. --vertical-spec preset:les)"
-        )
-
     # The PBL slot, answered from the row alone (its nominal spacing and the
     # convection default at it); the bind re-takes it with the mesh's
     # measured finest edge.  The default ``ysu`` decides nothing new.
     pbl = str(getattr(arguments, "pbl", None) or "ysu")
+
+    # The column ceiling is the SELECTED physics' (woof.hex.vertical_spec.
+    # hex_column_level_ceiling, read off woof.physics_vertical_contract), not
+    # one scheme's tier.  The frozen row runs WSM6; a provider row names its
+    # scheme only inside its adapter, so its microphysics term is left to the
+    # driver, which checks the resolved configuration before it seals the
+    # seam.  An unknown --pbl is refused by name just below.
+    from .vertical_spec import DEFAULT_HEX_MICROPHYSICS, hex_column_level_refusal
+
+    levels = int(getattr(row, "levels", 55))
+    column_refusal = hex_column_level_refusal(
+        levels,
+        microphysics=(
+            DEFAULT_HEX_MICROPHYSICS if backend_row.name == DEFAULT_BACKEND else None
+        ),
+        pbl=pbl if pbl in ("ysu", "off") else None,
+    )
+    if column_refusal is not None:
+        raise _refuse(
+            f"--mesh {mesh} declares a {levels}-level column: {column_refusal}.  "
+            "Rebuild the vertical with fewer levels (e.g. --vertical-spec "
+            "preset:les) or select physics whose bound admits it"
+        )
     les_model = str(getattr(arguments, "les_model", None) or "off")
     allow_gray = bool(getattr(arguments, "allow_pbl_off_gray_zone", False))
     pbl_decision = None
@@ -2207,6 +2219,14 @@ def _bind(binding, driver, request: ForecastRequest) -> dict[str, Any]:
             pbl=request.pbl,
             les_model=request.les_model,
             allow_pbl_off_gray_zone=request.allow_pbl_off_gray_zone,
+            # The bind prices the frozen WSM6 lane by default; a provider
+            # row's scheme is not known here (see resolve_request), so its
+            # microphysics term is left to the driver.
+            **(
+                {}
+                if request.physics_backend == DEFAULT_BACKEND
+                else {"microphysics": None}
+            ),
         )
     except binding.MeshBindingError as error:
         raise _refuse(f"the mesh bind refused: {error}{_BIND_REMEDY}") from None

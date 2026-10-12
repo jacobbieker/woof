@@ -76,11 +76,18 @@ PI_F32 = np.float32(3.141592653589793)
 X4_N_VERT_LEVELS = 55
 #: The column the authority document and the pinned kernel digest name.
 GWDO_ANCHORED_LEVELS = 55
-#: Longest column the per-thread arrays may hold.  The kernel keeps twelve
-#: float columns per thread in local memory; at 160 levels that is 7.7 KiB,
-#: still inside the widest launched frame the device-admission model prices
-#: (``WIDEST_LAUNCHED_LOCAL_FRAME_BYTES``).
-GWDO_MAX_LEVELS = 160
+#: Longest column the per-thread arrays may hold: the hex column's own
+#: ceiling (``woof.hex.vertical_spec.HEX_MAX_COLUMN_LEVELS``; a test holds
+#: the two equal).  The kernel is compiled per run at the run's column
+#: (:func:`gwdo_kernel_source`), so its frame is what THAT column needs, not
+#: what this bound would: MEASURED on sm_86, 2,528 B at 55 levels, 7,168 B
+#: at 160 and 11,392 B at 256 (44 B per level).  Past about 161 levels that
+#: is wider than the widest frame the measured footprint core holds, so the
+#: device admission prices it per level
+#: (``woof.hex.device_admission.gwdo_local_frame_bytes``) rather than
+#: assuming it fits.  Raised from 160 on 2026-10-12; the source and its
+#: digest are unchanged, so every column up to 160 compiles the same bytes.
+GWDO_MAX_LEVELS = 256
 X4_DT_SECONDS_F32 = np.float32(120.0)
 X4_NOMINAL_MIN_DC_M_F32 = np.float32(25_000.0)
 
@@ -1524,7 +1531,7 @@ def gwdo_kernel_source(nlev: int) -> str:
     if not 3 <= nlev <= GWDO_MAX_LEVELS:
         raise ValueError(
             f"YSU-GWDO column of {nlev} levels is outside 3..{GWDO_MAX_LEVELS}; "
-            "its per-thread arrays would exceed the priced local frame"
+            f"{GWDO_MAX_LEVELS} is the deepest column it compiles (the hex column's ceiling)"
         )
     if _CUDA_SOURCE.count(_NLEV_DEFINE) != 1:  # pragma: no cover - source guard
         raise RuntimeError("GWDO source no longer carries one GWDO_NLEV define")

@@ -150,22 +150,184 @@ DYCORE_DAMPING_START_M = 22_000.0
 #: to the artifact, so every receipt still names a file and its digest.
 PRESET_PREFIX = "preset:"
 
-#: The deepest column the hex forecast can run.  Set by the engine's WSM6,
-#: whose kernel compiles a per-thread column at one of two tiers, 64 and 80
-#: (``woof.core.wsm6_constants.WSM6_DEEP_KMAX``), and refuses deeper
-#: columns at its first call -- MEASURED: a 100-level column reached the
-#: first post-RK microphysics call and stopped with "WSM6 requires 2 <= nz
-#: <= 80, got 100".  Restated here (a test holds the two equal) so the
-#: preset, the bind and the planner refuse such a column before an init is
-#: built rather than at step one.
-HEX_MAX_COLUMN_LEVELS = 80
+#: The hex column's STRUCTURAL ceiling: the deepest column the hex model
+#: itself compiles for, whatever physics a run selects.  The hex dycore holds
+#: every column in ``[nVertLevels, nCells]`` device arrays and compiles no
+#: level count; the one hex-owned kernel that does is the YSU-GWDO, which is
+#: compiled per run at the run's own column up to
+#: ``woof.hex.cuda_gwdo_v841.GWDO_MAX_LEVELS`` (a test holds the two equal)
+#: and priced per level in :mod:`woof.hex.device_admission`.  256 is also the
+#: deepest bound any physics row in :mod:`woof.physics_vertical_contract`
+#: declares, so no selection could use a deeper column.
+#:
+#: NOT the ceiling a run gets.  A run's ceiling is
+#: :func:`hex_column_level_ceiling`: this value lowered to the bound of every
+#: physics scheme the run selects, read from the contract rather than
+#: restated here, so a scheme whose kernel moves to a deeper bound moves the
+#: hex ceiling with it.  (Until 2026-10 this constant WAS that ceiling, as a
+#: copy of WSM6's 80-level tier, so a P3 or Thompson column was refused at
+#: 81 levels it could run.)
+HEX_MAX_COLUMN_LEVELS = 256
 
-#: The LES preset's defaults: the deepest column the forecast runs
-#: (:data:`HEX_MAX_COLUMN_LEVELS`), 20 m near the ground, a 30 km top so the
-#: pinned 22 km damping layer keeps several layers above it.
+#: The microphysics and PBL a hex configuration selects when it names none:
+#: the frozen lane (``V841MpasColumnPhysicsConfig.config_microp_scheme`` and
+#: ``config_pbl_scheme``).  The planner, the LES preset and the mint plan
+#: price this lane, so their ceiling is :func:`hex_column_level_ceiling`
+#: with these defaults.
+DEFAULT_HEX_MICROPHYSICS = "mp_wsm6"
+DEFAULT_HEX_PBL = "bl_ysu"
+
+#: Every hex microphysics name (the ``config_microp_scheme`` value AND the
+#: engine's ``microphysics_scheme``) -> its row in
+#: :mod:`woof.physics_vertical_contract`.  A name absent here is refused by
+#: :func:`hex_column_level_terms`: a ceiling that silently skipped a scheme
+#: would admit a column its first call refuses.
+_MICROPHYSICS_CONTRACT_ROWS = {
+    "mp_wsm6": ("WSM6", "WSM6_VERTICAL_LEVEL_BOUNDS"),
+    "wsm6": ("WSM6", "WSM6_VERTICAL_LEVEL_BOUNDS"),
+    "mp_p3": ("P3", "P3_VERTICAL_LEVEL_BOUNDS"),
+    "p3": ("P3", "P3_VERTICAL_LEVEL_BOUNDS"),
+    "mp_thompson_aerosols": (
+        "aerosol-aware Thompson", "THOMPSON_AEROSOL_VERTICAL_LEVEL_BOUNDS"),
+    "thompson_aero": (
+        "aerosol-aware Thompson", "THOMPSON_AEROSOL_VERTICAL_LEVEL_BOUNDS"),
+}
+#: PBL names (the door's ``--pbl`` request and ``config_pbl_scheme``) -> row.
+#: ``off`` (WRF bl_pbl_physics=0) runs no PBL kernel and so adds no bound.
+_PBL_CONTRACT_ROWS = {
+    "ysu": ("YSU", "YSU_VERTICAL_LEVEL_BOUNDS"),
+    "bl_ysu": ("YSU", "YSU_VERTICAL_LEVEL_BOUNDS"),
+    "off": None,
+}
+
+
+def hex_column_level_terms(
+    *,
+    microphysics: str | None = DEFAULT_HEX_MICROPHYSICS,
+    pbl: str | None = DEFAULT_HEX_PBL,
+    p_top_pa: float | None = None,
+) -> tuple[tuple[str, int], ...]:
+    """Every ceiling a hex column of this physics must stay under.
+
+    ``(label, maximum levels)`` pairs, the structural ceiling first.  Each
+    physics term is the selected scheme's row in
+    :mod:`woof.physics_vertical_contract` -- the same numbers the regional
+    preparation gate and the schemes' own first-call refusals use -- so the
+    hex ceiling follows a scheme whose kernel is resized without an edit
+    here.  Grell-Freitas and P3 declare no ceiling (workspaces sized from the
+    column at launch) and contribute none; ``pbl="off"`` contributes none.
+
+    ``microphysics=None`` / ``pbl=None`` mean "not decided at this door":
+    the term is left to the door that knows it (the forecast driver checks
+    the resolved configuration before it seals the physics seam).
+
+    The legacy RRTMG longwave adds WRF's above-top layers to the column
+    (``legacy_radiation_layer_counts``), and how many depends on the model
+    top PRESSURE, so its term is included only when ``p_top_pa`` is given:
+    the driver knows it, a plan does not.
+    """
+
+    from woof import physics_vertical_contract as contract
+
+    terms: list[tuple[str, int]] = [
+        ("the hex column (dycore and YSU-GWDO)", HEX_MAX_COLUMN_LEVELS)
+    ]
+
+    def row(table: Mapping[str, Any], name: str | None, what: str) -> None:
+        if name is None:
+            return
+        key = str(name).strip().lower()
+        if key not in table:
+            raise VerticalSpecError(
+                f"{what} {name!r} has no vertical-bound row for the hex "
+                f"column; known: {sorted(table)}.  A ceiling that skipped it "
+                "would admit a column the scheme refuses at its first call"
+            )
+        entry = table[key]
+        if entry is None:
+            return
+        label, constant = entry
+        maximum = getattr(contract, constant)[1]
+        if maximum is not None:
+            terms.append((label, int(maximum)))
+
+    row(_MICROPHYSICS_CONTRACT_ROWS, microphysics, "microphysics scheme")
+    row(_PBL_CONTRACT_ROWS, pbl, "PBL scheme")
+    if p_top_pa is not None:
+        maximum = contract.MAX_LEGACY_LONGWAVE_LAYERS
+        if maximum is not None:
+            # The above-top count depends on p_top alone, not on nz.
+            total, _ = contract.legacy_radiation_layer_counts(0, float(p_top_pa))
+            terms.append((
+                f"legacy RRTMG longwave ({int(maximum)} layers including "
+                f"{int(total)} above the model top at p_top={float(p_top_pa):g} Pa)",
+                int(maximum) - int(total),
+            ))
+    return tuple(terms)
+
+
+def hex_column_level_ceiling(
+    *,
+    microphysics: str | None = DEFAULT_HEX_MICROPHYSICS,
+    pbl: str | None = DEFAULT_HEX_PBL,
+    p_top_pa: float | None = None,
+) -> int:
+    """The deepest column this physics selection runs on the hex model.
+
+    The minimum over :func:`hex_column_level_terms`.  With the defaults it is
+    the frozen WSM6 + YSU lane's ceiling: 80 while WSM6 compiles its 80-level
+    tier, and whatever the contract's WSM6 and YSU rows say once they move.
+    """
+
+    return min(
+        maximum
+        for _, maximum in hex_column_level_terms(
+            microphysics=microphysics, pbl=pbl, p_top_pa=p_top_pa
+        )
+    )
+
+
+def hex_column_level_refusal(
+    levels: int,
+    *,
+    microphysics: str | None = DEFAULT_HEX_MICROPHYSICS,
+    pbl: str | None = DEFAULT_HEX_PBL,
+    p_top_pa: float | None = None,
+) -> str | None:
+    """``None`` when ``levels`` fits, else the sentence naming what refuses it.
+
+    Every binding term is named, so a reader learns which scheme to change
+    (or that the column is past the hex model's own ceiling) rather than a
+    bare number.  Callers raise it in their own error type.
+    """
+
+    levels = int(levels)
+    over = [
+        (label, maximum)
+        for label, maximum in hex_column_level_terms(
+            microphysics=microphysics, pbl=pbl, p_top_pa=p_top_pa
+        )
+        if levels > maximum
+    ]
+    if not over:
+        return None
+    named = "; ".join(f"{label} runs at most {maximum}" for label, maximum in over)
+    ceiling = min(maximum for _, maximum in over)
+    return (
+        f"a column of {levels} levels is deeper than this physics selection runs "
+        f"({named}).  The deepest admitted column is {ceiling} levels; a "
+        "scheme past its bound refuses at its first call, after the card is "
+        "reserved"
+    )
+
+
+#: The LES preset's defaults: an 80-level column (the deepest the frozen
+#: WSM6 lane ran when the preset was measured -- a default, NOT the ceiling,
+#: which is :func:`hex_column_level_ceiling`), 20 m near the ground, a 30 km
+#: top so the pinned 22 km damping layer keeps several layers above it.
 LES_DEFAULT_TOP_M = 30_000.0
 LES_DEFAULT_DZ_SURFACE_M = 20.0
-LES_DEFAULT_LEVELS = HEX_MAX_COLUMN_LEVELS
+LES_DEFAULT_LEVELS = 80
 #: Layers held at exactly the surface thickness before stretching starts.
 LES_DEFAULT_SURFACE_LAYERS = 4
 #: The largest layer-to-layer thickness ratio the preset admits.  "Gentle"
@@ -208,12 +370,12 @@ def les_interfaces(
         raise VerticalSpecError(
             f"LES preset dz_surface_m must be positive, got {dz_surface_m!r}"
         )
-    if levels > HEX_MAX_COLUMN_LEVELS:
+    refusal = hex_column_level_refusal(levels)
+    if refusal is not None:
         raise VerticalSpecError(
-            f"LES preset levels={levels} exceeds the {HEX_MAX_COLUMN_LEVELS}-level "
-            "column the hex forecast can run: the engine's WSM6 compiles at "
-            f"most {HEX_MAX_COLUMN_LEVELS} levels and refuses a deeper column "
-            "at its first call"
+            f"LES preset levels={levels}: {refusal}.  The preset prices the "
+            "default physics lane (woof.hex.vertical_spec."
+            "DEFAULT_HEX_MICROPHYSICS / DEFAULT_HEX_PBL)"
         )
     if not 1 <= surface_layers < levels:
         raise VerticalSpecError(
@@ -245,17 +407,18 @@ def les_interfaces(
             "thinner surface layer or a higher top"
         )
     if column_top(LES_MAX_STRETCH) < top:
+        deepest = hex_column_level_ceiling()
         needed = levels
         while (
-            needed <= HEX_MAX_COLUMN_LEVELS
+            needed <= deepest
             and column_top_for(needed, dz, surface_layers, LES_MAX_STRETCH) < top
         ):
             needed += 1
         remedy = (
             f"{needed} levels reach it at that ratio"
-            if needed <= HEX_MAX_COLUMN_LEVELS
+            if needed <= deepest
             else (
-                f"even the {HEX_MAX_COLUMN_LEVELS}-level column the forecast "
+                f"even the {deepest}-level column the forecast "
                 "runs cannot; use a thicker dz_surface_m or a lower top_m"
             )
         )

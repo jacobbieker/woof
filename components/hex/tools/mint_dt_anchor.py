@@ -65,6 +65,7 @@ if str(SRC) not in sys.path:
 
 from woof.hex import dt_admission  # noqa: E402
 from woof.hex.dt_admission import DtAdmissionError, DtAnchor  # noqa: E402
+from woof.hex.vertical_spec import hex_column_level_ceiling  # noqa: E402
 
 SCHEMA = "gpuwm-hex.dt-anchor-mint/v1"
 
@@ -674,11 +675,15 @@ def integration_plan(dt_seconds: float, mesh: str, hours: float = 6.0) -> dict[s
 #: The deepest column the full-physics forecast lane binds.  The driver's
 #: ``N_LEVELS = 55`` is the native x4 column and NOT a limit:
 #: ``mpas_mesh_binding.bind_mesh`` rebinds it to the registered row's own
-#: count and refuses only past ``woof.hex.vertical_spec.HEX_MAX_COLUMN_LEVELS``
-#: (measured: an 80-level 100 m Greenland cull bound and integrated on this
-#: lane).  Quoted, not imported, as the driver constant was: a host-only plan
-#: keeps its imports light; ``test_dt_mint_regional_plan`` pins the two equal.
-FULL_PHYSICS_MAX_LEVELS = 80
+#: count and refuses only past the lane's physics ceiling,
+#: ``woof.hex.vertical_spec.hex_column_level_ceiling()`` for the frozen
+#: WSM6 + YSU lane (80 while WSM6 compiles its 80-level tier; measured: an
+#: 80-level 100 m Greenland cull bound and integrated on this lane).  Read
+#: from the same function the bind calls, so the plan cannot quote a stale
+#: copy; it is host-only and imports no CUDA.  Only 55-level classes are
+#: MEASURED (``regional_admission.STANDARD_CLASS_LEVELS``): a deeper column
+#: binds, but its class key holds no anchor until one is minted at it.
+FULL_PHYSICS_MAX_LEVELS = hex_column_level_ceiling()
 
 #: Earth radius MPAS scales a unit-sphere grid by (``mpas_constants``).
 _MPAS_EARTH_RADIUS_M = 6_371_229.0

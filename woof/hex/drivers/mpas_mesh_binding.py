@@ -1738,7 +1738,13 @@ def _publish_timestep_evidence(forecast: Any, decision: Mapping[str, Any] | None
         forecast.TIMESTEP_EVIDENCE_DECISION = (
             None if decision is None else dict(decision)
         )
-def _inspect_init_column(init_path: Path | None, binding: MeshBinding) -> dict[str, Any]:
+def _inspect_init_column(
+    init_path: Path | None,
+    binding: MeshBinding,
+    *,
+    microphysics: str | None = "mp_wsm6",
+    pbl: str | None = "ysu",
+) -> dict[str, Any]:
     """The column the run's init carries, checked against the row.
 
     THE VERTICAL STRUCTURE IS A PROPERTY OF THE FILES, NOT OF THIS MODULE.
@@ -1758,15 +1764,20 @@ def _inspect_init_column(init_path: Path | None, binding: MeshBinding) -> dict[s
             f"mesh {binding.name!r}: the row declares nVertLevels={want_levels}; "
             "the vertical operators need at least three layers"
         )
-    from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
+    # The ceiling is the SELECTED physics', read from the contract
+    # (woof.hex.vertical_spec.hex_column_level_ceiling), not a copy of one
+    # scheme's tier.  A PBL request the slot does not know is left to
+    # pbl_admission, which refuses it by name further down.
+    from woof.hex import vertical_spec
 
-    if want_levels > HEX_MAX_COLUMN_LEVELS:
+    known_pbl = pbl if pbl in ("ysu", "bl_ysu", "off") else None
+    refusal = vertical_spec.hex_column_level_refusal(
+        want_levels, microphysics=microphysics, pbl=known_pbl
+    )
+    if refusal is not None:
         raise MeshBindingMismatch(
-            f"mesh {binding.name!r}: the row declares nVertLevels={want_levels}, "
-            f"deeper than the {HEX_MAX_COLUMN_LEVELS}-level column the forecast "
-            "can run: the engine's WSM6 compiles at most that many levels and "
-            "refuses a deeper column at its first call, after the card is "
-            "reserved"
+            f"mesh {binding.name!r}: the row declares nVertLevels={want_levels}: "
+            f"{refusal}"
         )
     if want_interfaces != want_levels + 1:
         raise MeshBindingMismatch(
@@ -1842,6 +1853,7 @@ def bind_mesh(
     pbl: str = "ysu",
     les_model: str | None = "off",
     allow_pbl_off_gray_zone: bool = False,
+    microphysics: str | None = "mp_wsm6",
     log=print,
 ) -> dict[str, Any]:
     """Cross-examine, Courant-admit, and bind one registered mesh before CUDA.
@@ -1858,6 +1870,11 @@ def bind_mesh(
     (``nVertLevels``) is held to the row's and the bound modules take that
     count.  ``pbl``/``les_model``/``allow_pbl_off_gray_zone`` decide the PBL
     slot (:mod:`woof.hex.pbl_admission`) from this mesh's finest spacing.
+    ``microphysics`` is the run's ``config_microp_scheme`` (the frozen WSM6
+    lane by default); with ``pbl`` it sets the deepest column the bind admits
+    (:func:`woof.hex.vertical_spec.hex_column_level_ceiling`).  ``None`` means
+    the caller cannot name it yet, and the forecast driver checks the
+    resolved scheme before it seals the physics seam.
     """
 
     if mesh_name not in MESH_BINDINGS:
@@ -1892,7 +1909,8 @@ def bind_mesh(
     observed["regional_admission"] = admit_regional_row(binding, observed)
     observed.update(_inspect_static(Path(files["static"]["path"]), binding, observed))
     observed["init_column"] = _inspect_init_column(
-        None if init is None else Path(init), binding
+        None if init is None else Path(init), binding,
+        microphysics=microphysics, pbl=pbl,
     )
     # Reconstruct the immutable authority through its public constructor -- the
     # same read a fingerprint baseline performs -- rather than trusting the

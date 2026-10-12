@@ -1174,6 +1174,28 @@ def build_forecast_constructor_values(
         area_cell=np.ascontiguousarray(proof._mesh_value(mesh, "areaCell")),
     )
 
+    # The column against EVERY scheme the resolved configuration runs,
+    # radiation included now that the model-top pressure is known (WRF's
+    # legacy RRTMG longwave adds its above-top layers to the column).  The
+    # door and the bind priced the lane before an expensive byte was read;
+    # this is the one place a provider row's own microphysics is named, and
+    # the last place to refuse before the seam is sealed and its first call
+    # refuses mid-step.
+    from woof.hex.vertical_spec import hex_column_level_refusal
+
+    column_refusal = hex_column_level_refusal(
+        int(N_LEVELS),
+        microphysics=_row_for_scheme(config.config_microp_scheme).engine_scheme,
+        pbl=config.config_pbl_scheme,
+        p_top_pa=float(p_top_pa),
+    )
+    if column_refusal is not None:
+        raise ConfigurationRefusal(
+            "nVertLevels", int(N_LEVELS), column_refusal,
+            "a column within every selected scheme's vertical bound "
+            "(woof.physics_vertical_contract)",
+        )
+
     # The seam's four clocks come from the CONFIG, never from the module
     # constant.  That is the whole of the 2026-08-26 rebinding fix: one
     # timestep travels from the bound mesh row through config_dt to here, so

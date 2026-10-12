@@ -393,6 +393,12 @@ def load_config(path: str | Path) -> GlobalSpectralRunConfig:
         )
     else:
         nlev = _integer(primitive.get("nlev", 4), "primitive.nlev")
+        # Deliberately NOT the forecast model's 256 (woof.globe.config.
+        # VERTICAL_MAX_NLEV).  This Level-3 prototype integrates its fast
+        # modes explicitly on equally spaced sigma layers and carries no
+        # physics: a deeper column only thins the layers its explicit CFL
+        # guard must resolve and buys the prototype nothing.  Columns deeper
+        # than 32 belong to the forecast model.
         if not 2 <= nlev <= 32:
             raise ValueError("primitive.nlev must lie in 2..32 for this explicit research core")
         sigma_half = tuple(np.linspace(0.0, 1.0, nlev + 1).tolist())
