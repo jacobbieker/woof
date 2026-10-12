@@ -2235,7 +2235,11 @@ Three consequences worth stating plainly:
   cap layers ride on top of the 256 rather than eating into it. At
   `p_top = 5000` Pa the two arms add the same 13 longwave layers, so a
   51-level ladder is a 64-layer longwave column on both and a 256-level
-  ladder a 269-layer one. The bounds are declared once in
+  ladder a 269-layer one. The legacy longwave chain compiles its per-thread column
+  (`RLW_MAXLAY`) per run: the shipped 128 for any column of at most 128
+  layers, otherwise the layer count rounded up to a multiple of 64
+  (`legacy_longwave_layer_tier`). At a 1 hPa top WRF's 4 hPa buffer adds
+  no longwave layer, so a 256-level ladder is a 256-layer column. The bounds are declared once in
   `woof/physics_vertical_contract.py` and refused by number in the
   resolved vertical preflight (`woof.physics_compat`), before anything
   is paid for. Until 2026-10 both longwave arms held a fixed 128-layer

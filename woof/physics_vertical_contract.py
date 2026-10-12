@@ -157,8 +157,52 @@ ACOUSTIC_VERTICAL_LEVEL_BOUNDS = (1, 256)
 RRTMGP_TOA_PRESSURE_PA = 1.005183574463
 WRF_LW_UPPER_DELTA_P_PA = 400.0
 MAX_RRTMGP_LAYERS = 128
-MAX_LEGACY_LONGWAVE_LAYERS = 128
+#: Legacy RRTMG longwave (ra_lw_physics = 4, ra_rrtmg_variant =
+#: "rrtmg_legacy") is bounded by the MODEL depth, not by a layer count.
+#: The engine's one per-thread column (``rlw_rtrn_march``'s
+#: atrans/atot/bbugas/bbutot, ``RLW_MAXLAY`` floats each) is compiled per
+#: run at :func:`legacy_longwave_layer_tier` of the run's layer count, so
+#: it holds whatever WRF builds; the ceiling is the dynamical core's own
+#: ``nz`` bound, and the radiation column may then carry WRF's 4 hPa
+#: buffer layers above the model top on top of it -- up to
+#: :func:`max_legacy_longwave_layers` ``(p_top)`` = 256 + nint(p_top/400 Pa)
+#: layers.  (Until 2026-10 this was a flat 128-layer
+#: ``MAX_LEGACY_LONGWAVE_LAYERS``, the then-fixed ``RLW_MAXLAY``.)
+MAX_LEGACY_LONGWAVE_MODEL_LEVELS = ACOUSTIC_VERTICAL_LEVEL_BOUNDS[1]
+#: ``RLW_MAXLAY`` as ``kernels/rrtmg_lw_chain.cu`` declares it by default:
+#: every run of at most this many LW layers compiles the unchanged source.
+LEGACY_LONGWAVE_SHIPPED_LAYER_TIER = 128
+#: Deeper runs round their layer count up to a multiple of this, so the
+#: few depths a deployment uses share a handful of compiled units (and
+#: their NVRTC cache entries) rather than one per layer count.
+LEGACY_LONGWAVE_LAYER_TIER_STEP = 64
 MAX_LEGACY_SHORTWAVE_LAYERS = None  # runtime-sized workspace; no fixed SW layer ceiling
+
+
+def legacy_longwave_layer_tier(nlayers: int) -> int:
+    """``RLW_MAXLAY`` the legacy LW chain is compiled at for ``nlayers``.
+
+    The shipped 128 for every column of at most 128 layers (the unchanged
+    translation unit, so those runs are bit-for-bit the pre-tier engine),
+    else ``nlayers`` rounded up to a multiple of
+    :data:`LEGACY_LONGWAVE_LAYER_TIER_STEP` (192, 256, 320, ...).
+    """
+    if isinstance(nlayers, bool) or int(nlayers) != nlayers or int(nlayers) < 1:
+        raise ValueError(
+            f"legacy LW layer count must be an integer >= 1, got {nlayers!r}")
+    count = int(nlayers)
+    if count <= LEGACY_LONGWAVE_SHIPPED_LAYER_TIER:
+        return LEGACY_LONGWAVE_SHIPPED_LAYER_TIER
+    step = LEGACY_LONGWAVE_LAYER_TIER_STEP
+    return -(-count // step) * step
+
+
+def max_legacy_longwave_layers(p_top: float) -> int:
+    """Deepest legacy LW radiation column a run at ``p_top`` [Pa] can build:
+    :data:`MAX_LEGACY_LONGWAVE_MODEL_LEVELS` model layers plus WRF's
+    ``nint(p_top/400 Pa)`` buffer layers above the model top."""
+    return legacy_radiation_layer_counts(
+        MAX_LEGACY_LONGWAVE_MODEL_LEVELS, p_top)[0]
 
 
 def rrtmgp_above_model_layer_counts(

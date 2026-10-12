@@ -909,3 +909,49 @@ on whatever box runs it, including boxes with no recorded frame row.
 `test_the_two_stack_arrays_are_the_measured_pair` is the one that stops a
 later pass from "finishing the job" on `tv_env` or `positive_energy`
 without reading this section first.
+
+## 10. Legacy RRTMG LW: `RLW_MAXLAY` became a per-run tier (2026-10)
+
+`rlw_rtrn_march` (and its coalesced twin) is the one legacy-LW kernel
+with a frame: four per-thread float columns of `RLW_MAXLAY` entries,
+2,048 B at the old fixed 128 -- which was also the reason a legacy run
+could not carry more than 128 longwave layers. `RLW_MAXLAY` is now an
+`#ifndef` default the host overrides per run at
+`legacy_longwave_layer_tier(nlayers)` (128 for any column of at most 128
+layers, else rounded up to a multiple of 64), so the frame follows the
+run's radiation column instead of bounding it.
+
+Read through the production loader
+(`woof.core.rrtmg_lw.gpu_local_frame_bytes(maxlay)`) on sm_86 (RTX
+A6000), widest kernel of the unit:
+
+| `RLW_MAXLAY` | NVRTC 12.9 | NVRTC 13.4 | reservation, 84 SM x 1,536 |
+|---|---|---|---|
+| 64  | 1,024 B | 1,024 B | 0 |
+| 100 | 1,600 B | -- | 70.9 MiB |
+| 128 (shipped) | 2,048 B | 2,048 B | 126.0 MiB |
+| 129 | 2,064 B | 2,064 B | 128.0 MiB |
+| 192 | 3,072 B | 3,072 B | 252.0 MiB |
+| 256 | 4,096 B | 4,096 B | 378.0 MiB |
+| 269 | 4,304 B | 4,304 B | 403.6 MiB |
+| 320 | 5,120 B | 5,120 B | 504.0 MiB |
+| 384 | 6,144 B | 6,144 B | 630.0 MiB |
+
+Exactly 16 B x `RLW_MAXLAY` at every bound on both compilers;
+`rlw_cldprmc` stays 64 B and every other kernel 0 B. Preflight prices
+the unit per domain with that law
+(`woof.core.preflight.rrtmg_lw_legacy_chain_frame_bytes`, from the run's
+`nz` and `p_top`), anchored on the shipped-tier row
+`CHAINED_TRANSLATION_UNIT_FRAMES["rrtmg_lw_legacy_chain"] = 2048` (which
+an import-time check holds to 16 x 128). sm_120 and sm_89 carry only the
+shipped-tier reading; their deeper tiers are priced by the same law and
+were not re-measured. On a 170 SM x 1,536 card a 256-level column at a
+1 hPa top (tier 256) reserves (4,096 - 1,024) x 261,120 B = 765 MiB,
+against 255 MiB at the shipped tier.
+
+Bit-identity: a column of at most 128 layers compiles the unchanged
+unit (no define is prepended), whose PTX is byte-identical to the
+pre-tier source on sm_86 at NVRTC 12.9 and 13.4. Deeper tiers are held
+to the NumPy port word for word by `tests/test_rrtmg_lw_deep_columns.py`,
+whose frame leg also re-reads 128/192/256/320 on whatever card runs it
+and fails if the driver reports more than preflight charges.

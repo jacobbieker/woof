@@ -201,13 +201,36 @@ def test_single_extra_layer_has_only_the_terminal_zero(native):
             assert_words(actual[field][column], scalar[field], field)
 
 
-def test_zero_extra_layers_remain_refused(native):
-    inputs = batch_inputs(native, 1)
+def test_zero_extra_layers_follow_wrf_and_fewer_are_refused(native):
+    """nlayers == kte is WRF's own column at p_top < 2 hPa (nint(p_top /
+    4 hPa) = 0, e.g. the 1 hPa top): the Cavallo loop is empty, the
+    model-top interface is overwritten with 0 and the top layer midpoint
+    recomputed against it, so the top model layer reaches the top of the
+    atmosphere.  Fewer layers than the model has stay refused."""
+    inputs = batch_inputs(native, 2, [100, 150])
     inputs["nlayers"] = 49
+    actual = prep.lwrad_prep_batch(**inputs)
+    assert actual["plev"].shape == (2, 50)
+    assert_words(actual["plev"][:, 49], [0, 0], "terminal zero")
+    assert_words(actual["play"][:, 48],
+                 F(.5) * (inputs["p8w"][:, 48] / F(100)), "top midpoint")
+    for column in range(2):
+        scalar = prep.lwrad_prep(**scalar_inputs(inputs, column))
+        for field in FIELDS:
+            assert np.isfinite(actual[field]).all(), field
+            assert_words(actual[field][column], scalar[field], field)
+    inputs["nlayers"] = 48
     for function, kwargs in ((prep.lwrad_prep_batch, inputs),
                              (prep.lwrad_prep, scalar_inputs(inputs, 0))):
-        with pytest.raises(ValueError, match="at least kte\\+1"):
+        with pytest.raises(ValueError, match="at least kte$"):
             function(**kwargs)
+    # WRF's optional LW*FLX kts..kte+2 profiles have no level kte+2 here
+    # (WRF would read past uflx), so the output mapping refuses them.
+    flux = np.ones(50, dtype=F)
+    with pytest.raises(ValueError, match="at least one buffer layer"):
+        prep.lwrad_outputs(uflx=flux, dflx=flux, uflxc=flux, dflxc=flux,
+                           hr=flux[:49], hrc=flux[:49],
+                           pi3d=np.ones(49, dtype=F))
 
 
 @pytest.mark.gpu
@@ -252,5 +275,13 @@ def test_actual_device_threshold_shallow_and_single_extra_paths(native):
     for field in FIELDS:
         assert_words(cp.asnumpy(one[field]), host_one[field], field)
     device["nlayers"] = 49
-    with pytest.raises(ValueError, match="at least kte\\+1"):
+    zero = lwrad_prep_batch_device(**device)
+    assert_words(cp.asnumpy(zero["plev"])[:, 49], np.zeros(5, dtype=F),
+                 "device no extra")
+    inputs["nlayers"] = 49
+    host_zero = prep.lwrad_prep_batch(**inputs)
+    for field in FIELDS:
+        assert_words(cp.asnumpy(zero[field]), host_zero[field], field)
+    device["nlayers"] = 48
+    with pytest.raises(ValueError, match="at least kte$"):
         lwrad_prep_batch_device(**device)

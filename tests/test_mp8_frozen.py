@@ -1294,8 +1294,17 @@ FROZEN_MODULE_DIGESTS = {
         '241382acf34bc312e6361822acc057ec3fedf2f31514b477ff939ef723632592',
         'e6b66fe0cd2f2fbceb2c37aa7ab21636c24944df42b997b8908196fe1444069a'),
     'rrtmg_lw_chain': (
-        'a71a779ea3a733e422414ee5d5d885cb904972fe32ac2bfe6438d6c5214c1252',
-        'ee8f4c95e52248d0b641a48a8532d44d6aff0b75344dda59a416a3905ae972c1'),
+        # Re-pinned for the per-run RLW_MAXLAY tier (levels256/rrtmg-lw):
+        # the 128 bound became an #ifndef default the host overrides for a
+        # column deeper than 128 layers.  Reading: at the shipped 128 the
+        # composed LW unit compiles to PTX byte-identical to the
+        # levels-256 base (sm_86, NVRTC 12.9 and 13.4), and the batched
+        # engine's outputs are uint32-identical to the base unit's on
+        # 87-, 114- and 128-layer columns; deeper tiers are graded against
+        # the NumPy port bitwise by tests/test_rrtmg_lw_deep_columns.py.
+        # Previously a71a779e/ee8f4c95.
+        '5241b302a4597e16db7c581baab4781af456af93df8f35a9af843f4e28161e16',
+        '33741d3d5e977e298e6a143bcedd72dee16c2f1eef29c75b898e5f2e2a028585'),
     'rrtmg_lw_taugb02_10_11_12': (
         'fe5d57d1eb2649005d2748ae40f849c340b03a5f3d3a61c7fb506d0c69792485',
         'f7d4c98b0ed523e2c5912d4810925c60c3bcbb52d3e1a40d06a2708686cb632c'),

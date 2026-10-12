@@ -122,18 +122,60 @@ def test_legacy_rrtmg_engine_bounds_inside_and_outside():
         "legacy RRTMG shortwave": 64,
     }
 
-    with pytest.raises(PhysicsVerticalPreflightError) as caught:
-        validate_resolved_physics_vertical_levels(
-            _selection(64, **selector), p_top=26000.0)
-    message = str(caught.value)
-    assert "legacy RRTMG longwave" in message
-    assert "64+65=129" in message
-    assert "legacy RRTMG shortwave" not in message
-    # SW storage scales with the layer count; the independent LW128 bound remains.
+    # The old flat 128-layer LW bound is gone: 64 + 65 = 129 builds.
+    receipt = validate_resolved_physics_vertical_levels(
+        _selection(64, **selector), p_top=26000.0)
+    longwave = next(check for check in receipt["checks"]
+                    if check["component"] == "legacy RRTMG longwave")
+    assert longwave["total_layers"] == 129
+    assert longwave["maximum"] == 256 + 65
+    # SW storage scales with the layer count and has no fixed ceiling.
     receipt = validate_resolved_physics_vertical_levels(
         _selection(79, **selector), p_top=5000.0)
     sw = next(check for check in receipt['checks'] if check['component'] == 'legacy RRTMG shortwave')
     assert sw['total_layers'] == 80 and sw['maximum'] is None
+
+
+@pytest.mark.parametrize(
+    ("p_top", "cap"),
+    # nint(p_top / 400 Pa), WRF's 4 hPa buffer layers above the model top:
+    # 1 hPa builds none, 50 hPa builds 12.5 -> 13 (half away from zero).
+    ((100.0, 0), (5000.0, 13), (26000.0, 65)))
+def test_legacy_rrtmg_longwave_is_bounded_by_model_depth_256(p_top, cap):
+    """Legacy LW refuses only past the dycore's nz <= 256, at any p_top;
+    the radiation column then carries WRF's cap layers on top of it."""
+    selector = {
+        "mp_physics": 8,
+        "ra_lw_physics": 4,
+        "ra_sw_physics": 4,
+        "ra_rrtmg_variant": "rrtmg_legacy",
+    }
+    receipt = validate_resolved_physics_vertical_levels(
+        _selection(256, **selector), p_top=p_top)
+    longwave = next(check for check in receipt["checks"]
+                    if check["component"] == "legacy RRTMG longwave")
+    assert longwave["model_levels"] == 256
+    assert longwave["above_model_layers"] == cap
+    assert longwave["total_layers"] == 256 + cap
+    assert longwave["maximum"] == 256 + cap
+
+    with pytest.raises(PhysicsVerticalPreflightError) as caught:
+        validate_resolved_physics_vertical_levels(
+            _selection(257, **selector), p_top=p_top)
+    message = str(caught.value)
+    assert "legacy RRTMG longwave" in message
+    assert f"(nz <= 256), got 257+{cap}={257 + cap}" in message
+    assert "legacy RRTMG shortwave" not in message
+
+
+def test_legacy_longwave_layer_tier_ladder():
+    from woof.physics_vertical_contract import legacy_longwave_layer_tier
+    expected = {1: 128, 74: 128, 128: 128, 129: 192, 192: 192, 193: 256,
+                256: 256, 257: 320, 269: 320, 321: 384}
+    assert {n: legacy_longwave_layer_tier(n) for n in expected} == expected
+    for bad in (0, -1, True, 1.5):
+        with pytest.raises(ValueError):
+            legacy_longwave_layer_tier(bad)
 
 
 def test_preflight_aggregates_more_than_one_resolved_component_failure():

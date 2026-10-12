@@ -715,8 +715,11 @@ BASELINE_PINNED: dict[str, str] = {
     # the measured node4 source-transition receipt records these raw bytes.
     "rrtmg_legacy_prep":
         "fba22c05ab15139df82653cc1e699b8f1a53d10d11359bc7b6c14da36012c15a",
+    # levels256/rrtmg-lw: regenerated from rrtmg_lw_chain.cu after its
+    # RLW_MAXLAY became an #ifndef default (the per-run layer tier); the
+    # shipped-tier unit's PTX is byte-identical to the base's.
     "rrtmg_lw_chain_coalesced":
-        "2682d172388d4a31ae11be0168bdd13b33be9c1b8e77e7ca92e86a8f9a822401",
+        "8998771ff5f3e7fe81da8e16ec9cf58dba99d983ac3f689edfbb1625deeb3250",
     "rrtmg_lw_zbatched":
         "5611794c5c9e44815ad00e28af7367428beda949afe205654ecb959665de7a8e",
     # lane/281-zadvect-implicit (A158): WRF 4.7.1's implicit-explicit

@@ -2614,9 +2614,12 @@ class ChainedTranslationUnitFrame:
 #:
 #: * LW unit: ``rlw_rtrn_march`` 2,048 B/thread (exactly its four
 #:   128-float per-thread work arrays atrans/atot/bbugas/bbutot at the
-#:   fixed RLW_MAXLAY = 128 bound -- NOT nz-specialized), ``rlw_cldprmc``
-#:   64 B, every other kernel 0 B.  Machine-wide store ~510 MiB, of which
-#:   the 1,024 B default-stack half already sits in CUDA_CONTEXT_BYTES.
+#:   shipped RLW_MAXLAY = 128 tier), ``rlw_cldprmc`` 64 B, every other
+#:   kernel 0 B.  Machine-wide store ~510 MiB, of which the 1,024 B
+#:   default-stack half already sits in CUDA_CONTEXT_BYTES.  The row below
+#:   is that SHIPPED-tier frame; since 2026-10 a column deeper than 128
+#:   layers compiles the unit at a deeper ``RLW_MAXLAY`` tier and is
+#:   priced per layer by :func:`rrtmg_lw_legacy_chain_frame_bytes`.
 #: * SW unit: every kernel 0 B after the spcvmc workspace restructure
 #:   (the old ~1.65 GiB hidden lmem reservation became pool-priced
 #:   transient VRAM, priced by ``legacy_radiation_vram_bytes``).
@@ -2739,6 +2742,57 @@ for _tu_name, _tu in CHAINED_TRANSLATION_UNIT_FRAMES.items():
             "chained translation unit")
     _seen_covers |= _tu.covers
 del _seen_covers, _tu_name, _tu
+
+#: ``rrtmg_lw_legacy_chain``'s frame follows the unit's compile-time
+#: ``RLW_MAXLAY`` -- the legacy LW column, model layers plus WRF's 4 hPa
+#: buffer layers above the model top, rounded up to the contract's tier
+#: (:func:`woof.physics_vertical_contract.legacy_longwave_layer_tier`:
+#: 128 for every column of at most 128 layers, else a multiple of 64) --
+#: at 16 B per layer: ``rlw_rtrn_march`` and its coalesced twin each hold
+#: four float columns (atrans/atot/bbugas/bbutot) of RLW_MAXLAY entries.
+#:
+#: MEASURED 2026-10-12 on sm_86 (RTX A6000) through the production loader
+#: (``woof.core.rrtmg_lw.gpu_local_frame_bytes(maxlay)``) at NVRTC 12.9 and
+#: NVRTC 13.4, RLW_MAXLAY = 64, 100 (12.9 only), 128, 129, 192, 256, 269,
+#: 320, 384: the unit's widest frame is exactly 16 x RLW_MAXLAY at every
+#: one on both compilers (1,024 / 1,600 / 2,048 / 2,064 / 3,072 / 4,096 /
+#: 4,304 / 5,120 / 6,144 B; ``rlw_cldprmc`` stays 64 B, every other kernel
+#: 0 B).  The shipped-tier 2,048 B is also the sm_120 / sm_89 reading the
+#: row above records; deeper tiers were NOT re-measured on those
+#: architectures and are priced by the same per-layer law (the frame is
+#: the four arrays and nothing else at every tier read).
+RRTMG_LW_LEGACY_CHAIN_BYTES_PER_LAYER = 16
+
+
+def rrtmg_lw_legacy_chain_frame_bytes(nlayers: int) -> int:
+    """Widest local frame of the legacy LW unit a column of ``nlayers``
+    radiation layers (``legacy_radiation_layer_counts(nz, p_top)[0]``)
+    launches: the shipped-tier row of
+    :data:`CHAINED_TRANSLATION_UNIT_FRAMES` plus 16 B per layer of tier
+    above 128."""
+    from woof.physics_vertical_contract import (
+        LEGACY_LONGWAVE_SHIPPED_LAYER_TIER, legacy_longwave_layer_tier)
+    tier = legacy_longwave_layer_tier(nlayers)
+    return (CHAINED_TRANSLATION_UNIT_FRAMES[
+                "rrtmg_lw_legacy_chain"].max_local_size_bytes
+            + RRTMG_LW_LEGACY_CHAIN_BYTES_PER_LAYER
+            * (tier - LEGACY_LONGWAVE_SHIPPED_LAYER_TIER))
+
+
+def _check_rrtmg_lw_legacy_chain_law() -> None:
+    from woof.physics_vertical_contract import (
+        LEGACY_LONGWAVE_SHIPPED_LAYER_TIER)
+    shipped = CHAINED_TRANSLATION_UNIT_FRAMES[
+        "rrtmg_lw_legacy_chain"].max_local_size_bytes
+    if shipped != (RRTMG_LW_LEGACY_CHAIN_BYTES_PER_LAYER
+                   * LEGACY_LONGWAVE_SHIPPED_LAYER_TIER):
+        raise RuntimeError(
+            "rrtmg_lw_legacy_chain: the shipped-tier frame no longer equals "
+            "16 B x RLW_MAXLAY, so the per-layer law that prices deeper "
+            "tiers is unmeasured; re-read the unit at several tiers")
+
+
+_check_rrtmg_lw_legacy_chain_law()
 
 #: Kernel modules every integration loads regardless of the physics
 #: selectors: dynamics, diffusion, nesting, lateral boundaries, health and
@@ -3265,6 +3319,21 @@ def kernel_local_frame_bytes(
             frame = specialized.frame_bytes(levels)
             if frame > frames.get(module, -1):
                 frames[module] = frame
+    # The legacy LW unit is priced above at its shipped RLW_MAXLAY = 128
+    # tier; a domain whose radiation column (model layers plus WRF's
+    # buffer layers above p_top) is deeper compiles, and is priced at,
+    # its own tier.
+    lw_top = float(getattr(exp.vertical, "p_top", 0.0) or 0.0)
+    for dc in exp.domains:
+        if "rrtmg_lw_legacy_chain" not in domain_kernel_modules(
+                dc, prices_refl=prices_refl):
+            continue
+        from woof.physics_vertical_contract import (
+            legacy_radiation_layer_counts)
+        frame = rrtmg_lw_legacy_chain_frame_bytes(
+            legacy_radiation_layer_counts(int(dc.run.nz), lw_top)[0])
+        if frame > frames.get("rrtmg_lw_legacy_chain", -1):
+            frames["rrtmg_lw_legacy_chain"] = frame
     # ``acoustic`` is in CORE_KERNEL_MODULES, so it is priced above at its
     # shipped-tier row; a domain deeper than the shipped tier raises that
     # row to its own tier.  The launcher owns the ladder (it is the thing
@@ -12351,6 +12420,7 @@ __all__ = [
     "UnderPricedKernelFrame", "under_priced_kernel_frames",
     "MEASURED_LOCAL_MEMORY_PROFILE",
     "CHAINED_TRANSLATION_UNIT_FRAMES", "ChainedTranslationUnitFrame",
+    "RRTMG_LW_LEGACY_CHAIN_BYTES_PER_LAYER", "rrtmg_lw_legacy_chain_frame_bytes",
     "UNMEASURED_KERNEL_MODULES", "local_memory_profile_from_device",
     "cap_free_to_physical", "cap_free_to_device_wide", "device_physical_total_bytes",
     "device_rail_free_bytes", "device_wide_used_bytes",
