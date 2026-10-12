@@ -28,16 +28,25 @@ def _cfg(**changes):
     return RunConfig(**_TINY, moist=True, mp_physics=6, **changes)
 
 
-def test_wsm6_vertical_kernel_tiers_cover_80_without_enlarging_z49():
-    from woof.core.wsm6 import _kernel_capacity
+def test_wsm6_workspace_follows_nz_up_to_256_levels():
+    """The 64/80 KMAX tier ladder is retired: the column arrays live in a
+    launcher-owned workspace whose per-slot extent is the runtime nz + 1,
+    and the scheme admits 2 <= nz <= 256."""
+    from woof.core import wsm6
+    from woof.core.wsm6_constants import (
+        WSM6WS_SLOTS, WSM6_BLOCK, wsm6_workspace_extent, wsm6_workspace_floats)
 
-    assert _kernel_capacity(49) == 64
-    assert _kernel_capacity(64) == 64
-    assert _kernel_capacity(65) == 80
-    assert _kernel_capacity(80) == 80
-    with pytest.raises(ValueError, match="2 <= nz <= 80"):
-        _kernel_capacity(81)
-
+    assert wsm6.VERTICAL_LEVEL_BOUNDS == (2, 256)
+    assert not hasattr(wsm6, "_kernel_capacity")
+    for nz in (2, 49, 64, 65, 80, 81, 128, 256):
+        assert wsm6_workspace_extent(nz) == nz + 1
+    # whole lane-interleaved blocks of WSM6WS_SLOTS slots
+    assert WSM6WS_SLOTS == 30 and WSM6_BLOCK == 32
+    assert wsm6_workspace_floats(49, 1) == 30 * 50 * 32
+    assert wsm6_workspace_floats(49, 33) == 2 * 30 * 50 * 32
+    for nz in (1, 257):
+        with pytest.raises(ValueError, match="2 <= nz <= 256"):
+            wsm6_workspace_extent(nz)
 
 def test_config_accepts_wsm6_and_validates_hail_mode(tmp_path):
     path = tmp_path / "wsm6.toml"

@@ -442,13 +442,20 @@ def test_the_shipped_model_is_the_measured_row() -> None:
         "off the shaped row is how a caller silently prices a mesh without "
         "the workspace terms"
     )
-    # x1.40962 at this row is the 8,874 MiB measured peak, within rounding.
-    predicted = door.FOOTPRINT_MODEL.predict_bytes(X1_CELLS) / MIB
-    assert predicted == pytest.approx(8874.0, abs=1.0)
-    # x4.163842 is the row's other fitted point: the 20,446 MiB peak.
-    assert door.FOOTPRINT_MODEL.predict_bytes(X4_CELLS) / MIB == pytest.approx(
-        20446.0, abs=1.0
-    )
+    # x1.40962 at this row is the 8,874 MiB measured peak, within rounding,
+    # PLUS the WSM6 column workspace: the row was measured before WSM6's
+    # column arrays left the local frame (2026-10-12), its core still carries
+    # that frame's backing store, and the workspace is charged on top as a
+    # stated over-count until a ledger arm at the new tip re-fits the core
+    # (woof/hex/device_admission.py WSM6_WORKSPACE).
+    from woof.hex.device_admission import WSM6_WORKSPACE
+
+    model = door.FOOTPRINT_MODEL
+    for cells, measured_mib in ((X1_CELLS, 8874.0), (X4_CELLS, 20446.0)):
+        extra = WSM6_WORKSPACE.bytes_for(cells, model.card, model.levels) / MIB
+        assert extra > 0.0
+        predicted = model.predict_bytes(cells) / MIB
+        assert predicted - extra == pytest.approx(measured_mib, abs=1.0)
 
 
 def test_a_twelve_gib_card_admits_the_published_global_mesh() -> None:

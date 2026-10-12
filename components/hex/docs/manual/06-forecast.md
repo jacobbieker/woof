@@ -742,7 +742,9 @@ YSU-GWDO kernel is compiled per run at the run's own column, at 44 B per
 level: 2,528 B at 55 levels, 7,168 B at 160 and 11,392 B at 256. Above about
 161 levels it is the widest frame launched, and the local-memory backing
 store is charged for its excess on every resident thread. WSM6 now keeps its
-column in a global workspace instead of a per-thread frame. These frame
+column in a global workspace instead of a per-thread frame. That workspace
+(`wsm6_column_workspace`, 30 slots of `levels + 1`) is charged beside the GF
+and YSU workspaces at `min(cells, tile)`. These frame
 prices were measured on sm_86 (RTX A6000) only, so re-measure them before
 quoting them for another architecture.
 

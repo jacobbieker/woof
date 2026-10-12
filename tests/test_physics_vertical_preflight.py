@@ -54,7 +54,7 @@ def _selection(nz: int, **overrides):
         ("Grell-Freitas cumulus", {"cu_physics": 3}, 12, 11),
         ("Kessler microphysics", {"mp_physics": 1}, 256, 257),
         ("WSM6 microphysics", {"mp_physics": 6}, 2, 1),
-        ("WSM6 microphysics", {"mp_physics": 6}, 80, 81),
+        ("WSM6 microphysics", {"mp_physics": 6}, 256, 257),
         ("Thompson microphysics", {"mp_physics": 8}, 2, 1),
         ("Thompson microphysics", {"mp_physics": 8}, 256, 257),
         ("Morrison microphysics", {"mp_physics": 10}, 2, 1),
@@ -66,7 +66,7 @@ def _selection(nz: int, **overrides):
         ("Milbrandt-Yau microphysics", {"mp_physics": 9}, 3, 2),
         ("Milbrandt-Yau microphysics", {"mp_physics": 9}, 256, 257),
         ("WDM6 microphysics", {"mp_physics": 16}, 2, 1),
-        ("WDM6 microphysics", {"mp_physics": 16}, 80, 81),
+        ("WDM6 microphysics", {"mp_physics": 16}, 256, 257),
         ("P3 microphysics", {"mp_physics": 50}, 1, 0),
         ("New Tiedtke cumulus", {"cu_physics": 16}, 4, 3),
         # Orographic drag is a run setting, not a registry component; its

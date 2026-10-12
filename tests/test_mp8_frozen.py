@@ -1717,14 +1717,20 @@ FROZEN_MODULE_DIGESTS = {
         # Moved again with the file by 508691422 (above).
         '5918c3f6b6572a5b3fbad923317bc2a55bd7ec7be712ae2d410d725eccd3bec7'),
     'wsm6': (
-        # Re-pinned for A146 (a98f2482e): every float division by a compile-time
-        # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
-        # multiply by the rounded reciprocal on Blackwell targets.  Reading:
-        # sm_89 unchanged (the compute_89 PTX with __fdiv_rn spelled '/' is
-        # identical to the base's); Blackwell cards now round these quotients
-        # IEEE-correctly.  Previously 0526192b/1a6d20da.
-        '0028b0c2d88d6087095cd2d4afab27bb2cb76b2a5bf51e3e5e908e0fdf2f0886',
-        'd6798c079bbf2c6343d6d6575be2cd5fd67a128612c401b36e8ebfc3f1c10451'),
+        # Re-pinned 2026-10-12 (levels256/wsm6-wdm6): the per-thread column
+        # arrays moved into a launcher-owned global workspace (lane-interleaved
+        # slot views, tiles offset by col0) so WSM6 runs to 256 levels with a
+        # 0 B local frame.  Reading: every output word bit-identical to the
+        # pre-cut kernel at nz 40/64/80, hail_opt 0/1, one and three minor
+        # loops, NVRTC 12.9.86 and 13.4.92 on sm_86 (21,274,624 words, 0
+        # differ; tests/test_wsm6_workspace.py,
+        # docs/kernel_local_memory_bounds.md section 10).  Previously
+        # 0028b0c2/d6798c07, re-pinned for A146 (a98f2482e): every float
+        # division by a compile-time constant is spelled __fdiv_rn, because
+        # NVRTC compiles x / C as a multiply by the rounded reciprocal on
+        # Blackwell targets (before that 0526192b/1a6d20da).
+        'a767fb613d295ddd55810b63e3cd2caea26ee972a3fe2080c3930eae2dfeeca7',
+        'be47cff7908a6925d68361aabb8a2b00134792a72ccb6328ad3a822d6c4deccb'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.

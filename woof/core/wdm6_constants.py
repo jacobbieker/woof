@@ -47,41 +47,50 @@ from woof.core.wsm6_constants import (WSM6RimedIceConstants, _rgmma,
 #: adapter can both name the set without an import cycle.
 WDM6_NUMBER_SPECIES = ("nn", "nc", "nr")
 
-#: ``kernels/wdm6.cu``'s ``WDM6_KMAX`` ladder.  One CUDA thread owns a whole
-#: column, so the bound sizes ~30 per-thread arrays and the driver reserves
-#: a local-memory backing store for the device's entire resident-thread
-#: capacity at first launch -- the law at the head of
-#: ``woof/core/preflight.py``.  The launcher therefore compiles the
-#: SHALLOWEST tier that holds the configuration's ``nz``, and it compiles a
-#: TIER rather than ``nz`` itself (kf/refl's shape) so that a nested tree
-#: with several level counts loads at most two WDM6 modules.
+#: ``kernels/wdm6.cu``'s column workspace -- the same cut as WSM6's
+#: (``woof.core.wsm6_constants`` carries the argument).  Until 2026-10-12 the
+#: ~37 per-thread column arrays were sized by a compile-time ``WDM6_KMAX``
+#: tier (64 or 80; 9,264 B and 11,568 B of frame, +144 B per level) that the
+#: driver priced at the card's whole resident-thread capacity.  They now live
+#: in a global workspace ``woof/core/wdm6.py`` allocates per call, sized to
+#: the columns in flight and to the runtime ``nz``; the tier ladder is gone.
 #:
-#: 64 is the ``#ifndef`` default baked into the source, which is why it is
-#: also the value the driver-regeneration gate
-#: (``tests/test_preflight.py::test_the_recorded_local_frames_match_the_
-#: driver``) reads back for the unspecialized module, and therefore the
-#: value recorded in ``KERNEL_MAX_LOCAL_SIZE_BYTES``.  The 80 tier prices
-#: ABOVE that row; ``preflight.WDM6_TIER_FRAME`` is what carries it.
-#:
-#: This ladder lives in the constants module, not in ``woof/core/wdm6.py``,
-#: for one reason: the adapter imports CuPy at module scope and the memory
-#: estimator must price a configuration on a host with no device at all.
-WDM6_SHALLOW_KMAX = 64
-WDM6_DEEP_KMAX = 80
-WDM6_KERNEL_LEVEL_TIERS = (WDM6_SHALLOW_KMAX, WDM6_DEEP_KMAX)
+#: ``WDM6WS_SLOTS`` / ``WDM6_BLOCK`` must match ``wdm6.cu``'s
+#: ``WDM6WS_SLOTS`` / ``WDM6WS_LANES`` (tests/test_wdm6_workspace.py).
+WDM6WS_SLOTS = 37
+WDM6_BLOCK = 32
+#: Blocks per SM the tile is sized for: 16 one-warp blocks is the per-SM
+#: block ceiling on sm_86 and the pre-cut kernel's own residency there, and
+#: the tile at that occupancy runs as fast as one launch over every column
+#: (docs/kernel_local_memory_bounds.md section 10).  The device occupancy
+#: query in the launcher only ever lowers it.
+WDM6_TILE_BLOCKS_PER_SM = 16
+#: The deepest column the kernel admits -- a REFUSAL CEILING that sizes
+#: nothing, because the workspace extent is the runtime ``nz``.
+WDM6_MAX_LEVELS = 256
+#: Retained name for :data:`WDM6_MAX_LEVELS` (it used to be the deepest
+#: compiled tier, 80).
+WDM6_DEEP_KMAX = WDM6_MAX_LEVELS
 #: ``(minimum, maximum)`` levels WDM6 admits: 2 (the scheme needs a layer
-#: above and below to sediment between) up to the deepest compiled tier.
-WDM6_VERTICAL_LEVEL_BOUNDS = (2, WDM6_DEEP_KMAX)
+#: above and below to sediment between) up to :data:`WDM6_MAX_LEVELS`.
+WDM6_VERTICAL_LEVEL_BOUNDS = (2, WDM6_MAX_LEVELS)
 
 
-def wdm6_level_tier(nz: int) -> int:
-    """Return the ``WDM6_KMAX`` tier ``wdm6.cu`` compiles for ``nz``."""
+def wdm6_workspace_extent(nz: int) -> int:
+    """Per-slot level extent: ``nz + 1`` (the interface arrays index nz)."""
     nz = int(nz)
     minimum, maximum = WDM6_VERTICAL_LEVEL_BOUNDS
     if not minimum <= nz <= maximum:
         raise ValueError(
             f"WDM6 requires {minimum} <= nz <= {maximum}, got {nz}")
-    return next(tier for tier in WDM6_KERNEL_LEVEL_TIERS if nz <= tier)
+    return nz + 1
+
+
+def wdm6_workspace_floats(nz: int, columns: int) -> int:
+    """Workspace floats for ``columns`` columns in flight at this ``nz``,
+    rounded up to whole lane-interleaved blocks."""
+    blocks = (int(columns) + WDM6_BLOCK - 1) // WDM6_BLOCK
+    return blocks * WDM6WS_SLOTS * wdm6_workspace_extent(nz) * WDM6_BLOCK
 
 
 @dataclass(frozen=True)
@@ -198,7 +207,8 @@ def coefficients(hail_opt: int = 0) -> WDM6Coefficients:
     )
 
 
-__all__ = ["WDM6Coefficients", "WDM6_DEEP_KMAX", "WDM6_KERNEL_LEVEL_TIERS",
-           "WDM6_NUMBER_SPECIES", "WDM6_SHALLOW_KMAX",
-           "WDM6_VERTICAL_LEVEL_BOUNDS", "coefficients",
-           "rimed_ice_constants", "wdm6_level_tier"]
+__all__ = ["WDM6Coefficients", "WDM6WS_SLOTS", "WDM6_BLOCK", "WDM6_DEEP_KMAX",
+           "WDM6_MAX_LEVELS", "WDM6_NUMBER_SPECIES",
+           "WDM6_TILE_BLOCKS_PER_SM", "WDM6_VERTICAL_LEVEL_BOUNDS",
+           "coefficients", "rimed_ice_constants", "wdm6_workspace_extent",
+           "wdm6_workspace_floats"]

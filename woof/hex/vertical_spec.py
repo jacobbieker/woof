@@ -254,7 +254,7 @@ def hex_column_level_terms(
     row(_MICROPHYSICS_CONTRACT_ROWS, microphysics, "microphysics scheme")
     row(_PBL_CONTRACT_ROWS, pbl, "PBL scheme")
     if p_top_pa is not None:
-        maximum = contract.MAX_LEGACY_LONGWAVE_LAYERS
+        maximum = contract.max_legacy_longwave_layers(float(p_top_pa))
         if maximum is not None:
             # The above-top count depends on p_top alone, not on nz.
             total, _ = contract.legacy_radiation_layer_counts(0, float(p_top_pa))

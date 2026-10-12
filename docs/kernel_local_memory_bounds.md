@@ -608,7 +608,7 @@ targets, in order:
 |---|---|---|
 | `shinhong_column` | 13,000 B on NVRTC 13.0 (17,160 on 13.3 and 13.4; sm_120, read 2026-09-28) | `bl_pbl_physics = 11` |
 | `myjpbl_column` | **9,232 B** | `bl_pbl_physics = 2` |
-| `wsm6_column` | 7,216 B | `mp_physics = 6` |
+| ~~`wsm6_column`~~ | ~~7,216 B~~ -> 0 B, done 2026-10-12 (section 10; `wdm6_column` with it) | `mp_physics = 6` |
 | `sase_*` | 6,272 B at the 128 tier; 49 B x the per-run `SASE_KMAX` tier (1,568 / 3,136 / 6,272 / 12,544 B at 32 / 64 / 128 / 256) | SASE |
 
 `sase_*` is already specialized: `woof/core/sase.py` compiles `SASE_KMAX`
@@ -1025,3 +1025,156 @@ in the vertical contract (`TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS`) read by
 until then a too-deep drag run passed `woof check` and failed at its first
 PBL call. Bit-identity at `nz <= 128` is shown the same way, and the WRF
 v4.7.1 parity suite is unchanged and green.
+
+---
+
+## 10. WSM6 and WDM6: the hex model's microphysics, and the 80-level wall
+
+`wsm6_column` is the hex (MPAS) model's default microphysics and a
+regional default in several shipped profiles; `wdm6_column` is its
+double-moment sibling. Both kept ~30 (WSM6) and ~37 (WDM6) whole-column
+arrays per thread, sized by a compile-time `*_KMAX` tier the launchers
+chose from `nz` -- 64 or 80 -- so the two schemes had two costs:
+
+* the frame: WSM6 7,216 B at 64 and 9,008 B at 80 (+112 B/level), WDM6
+  9,264 B and 11,568 B (+144 B/level), which the driver reserves times the
+  card's whole resident-thread capacity;
+* a hard 80-level ceiling. 256 levels would have been ~28.7 KB (WSM6) and
+  ~36.9 KB (WDM6) per thread -- several GiB of reservation -- so the tier
+  ladder simply stopped at 80, and with it every WSM6/WDM6 column, including
+  the hex model's.
+
+Both now keep their column arrays in a global workspace their launchers
+(`woof/core/wsm6.py`, `woof/core/wdm6.py`) allocate per call, sized to the
+columns IN FLIGHT and to the RUNTIME `nz`, exactly the YSU/KF route
+(sections 8-9). The `*_KMAX` define is a 256-level refusal ceiling that sizes
+nothing; the tier ladders (`WSM6_TIER_FRAME`, `WDM6_TIER_FRAME`,
+`*_KERNEL_LEVEL_TIERS`, `*_level_tier`) are retired; one binary serves every
+level count from 2 to 256.
+
+All measurements below: **RTX A6000, 84 SMs x 1,536, sm_86**, CuPy 14.2.0,
+NVRTC 12.9.86 and 13.4.92 (both read; they agree everywhere), 2026-10-12.
+
+### Layout
+
+Slot `s`, level `k`, lane `t` of a block lives at
+`block_base + (s * wskp + k) * 32 + t` with `wskp = nz + 1` (the PLM
+interface arrays index `nz`), one region of `SLOTS x wskp x 32` floats per
+one-warp block. WSM6 has 30 slots (15 in the column routine, 12 in
+`sediment_column`, 1 in `plm_arrival`, 2 in `plm_regular_remap`); WDM6 has
+37 (23 + 11 in the snow/graupel fallout + 1 + 2; the cloud-ice fallout runs
+after the snow/graupel fallout returns and reuses its slots). Slot ids are
+literals; `tests/test_wsm6_workspace.py` / `tests/test_wdm6_workspace.py`
+read them out of the source and fail on a duplicate, an overflow or a gap.
+
+The columns launch in tiles of `SMs x 16 x 32` offset by a `col0`
+argument (the `(nz, ny, nx)` fields make a column tile a strided scatter),
+with the device's occupancy query allowed only to lower the 16.
+
+### The register file decided the view type
+
+The obvious view -- a struct holding a 64-bit pointer per array, as
+`ysu.cu` does -- compiled to **160 registers**, which on sm_86 holds 12
+one-warp blocks per SM where the pre-cut kernel held 16 (the per-SM block
+ceiling). 65,536 columns, `nz = 55`, median of 7:
+
+| WSM6 variant | regs | frame | blocks/SM | wall |
+|---|---|---|---|---|
+| pre-cut (local arrays, 64 tier) | 96 | 7,216 B | 16 | 7.25 ms |
+| 64-bit pointer views | 160 | 0 B | 12 | 9.87 ms |
+| same, `__launch_bounds__(32, 16)` | 128 | **72 B** spill | 16 | 8.43 ms |
+| **one base pointer + 32-bit slot offsets (shipped)** | **116** | **0 B** | 16 | **8.32-8.44 ms** |
+
+WDM6 the same way: 160 regs / 0 B, 128 regs / 88 B with the bound, **116
+regs / 0 B** with offsets. The offsets need no launch bound, so none is
+shipped.
+
+### Before and after
+
+Frames, through the production loader and `local_size_bytes`:
+
+| kernel | pre-cut 64 tier | pre-cut 80 tier | cut, any nz <= 256 |
+|---|---|---|---|
+| `wsm6_column` | 7,216 B | 9,008 B | **0 B** |
+| `wdm6_column` | 9,264 B | 11,568 B | **0 B** |
+
+The 0 B was also read compile-only (NVRTC -> cubin, `ptxas -v`) for sm_89
+and sm_120 at both builds: 0 B stack frame, 0 B spill, everywhere.
+`kernel_frame_recordings.py` carries those readings and DROPS the old
+9,264 / 7,216 B rows from the recordings whose NVRTC builds were not
+available to re-read (sm_120 13.0.48, 13.0.88, 13.3.33; sm_86 13.0.48)
+rather than carry rows describing a source that no longer exists.
+
+What the workspace holds, at the shipped 16 blocks/SM (`tile = 43,008`
+columns on this card):
+
+| `nz` | WSM6 | WDM6 | pre-cut WSM6 reservation, by the law |
+|---|---|---|---|
+| 55 | 275.6 MiB | 339.9 MiB | 761.9 MiB (64 tier) |
+| 80 | 398.7 MiB | 491.7 MiB | 982.4 MiB (80 tier) |
+| 256 | 1,264.9 MiB | 1,560.1 MiB | not compilable |
+
+Wall clock, 65,536 columns (43,008 at `nz = 256`), dt 60 s, median of 7:
+
+| case | pre-cut | cut, 16 blocks/SM |
+|---|---|---|
+| WSM6 `nz = 55` | 7.25 ms | 8.32 ms (1.15x) |
+| WSM6 `nz = 80` | 10.88 ms | 12.57 ms (1.16x) |
+| WDM6 `nz = 55` | 11.90 ms | 13.12 ms (1.10x) |
+| WDM6 `nz = 80` | 20.72 ms | 22.23 ms (1.07x) |
+| WSM6 `nz = 256` | -- | 21.69 ms (32.12 at 8 blocks/SM, 58.24 at 4) |
+| WDM6 `nz = 256` | -- | 168.66 ms |
+
+16 is the tile, not 8: one thread is one column, so a ragged second tile
+costs nearly a whole column's latency, and a tile at full residency ran as
+fast as one launch over every column (8.44 ms vs 8.37 ms at `nz = 55`,
+balanced or not). Halving it halves the workspace and, at 256 levels,
+costs 1.5x on the kernel. WDM6's 256-level wall is its explicit rain
+sub-stepping on thin layers, not the workspace.
+
+### Bit-identity: measured, both schemes, both compilers
+
+`wsm6.cu` and `wdm6.cu` use plain `+`/`*`, so they are exposed to
+contraction re-decisions the way `ysu.cu` was. They did not move. Pre-cut
+kernel compiled from git (`7950e417`) at the tier its launcher chose,
+shipped kernel through the shipped launcher, ONE process, compared as
+`uint32` bit patterns:
+
+* WSM6: `nz` 40, 64 and 80 x `hail_opt` 0/1 x {two 20 s calls, one 300 s
+  call (three minor loops)}, 1,024-2,048 columns of varied soundings with
+  every hydrometeor present: **21,274,624 graded words, 0 differ**, under
+  NVRTC 12.9.86 and 13.4.92;
+* WDM6, the same grid plus `nn`/`nc`/`nr`, a numberless-rain sprinkle and a
+  land/sea mix: **25,821,184 words, 0 differ**, both builds;
+* controls fire: one constant moved one ULP in the pre-cut kernel moves
+  64,871 (WSM6) / 63,787 (WDM6) words; one `theta` word moved one ULP moves
+  28 / 25;
+* the residue gate (workspace pre-filled with NaN vs 1e30) and the tiled
+  gate (five ragged 64-column tiles vs one launch vs the shipped launcher)
+  are bit-identical;
+* the WDM6 CPU-mirror suites (`test_wdm6_sedimentation.py`,
+  `test_wdm6_count_safety.py`, `test_wdm6_numberless_rain.py`) pass
+  unchanged: the mirror keeps the pre-workspace `wdm6_column_impl` entry
+  point and the array helpers are templates over the array type.
+
+### What changed around it
+
+* `preflight.wsm6_column_workspace_bytes` / `wdm6_column_workspace_bytes`
+  price the workspaces (the worst selecting domain, bounded by the tile) and
+  join the `column_workspace_bytes` sum; the `wsm6`/`wdm6` frame rows are 0.
+* `woof.physics_vertical_contract` IMPORTS both bounds, `(2, 256)`, from
+  the CuPy-free constants modules instead of transcribing WSM6's.
+* The hex device admission charges `WSM6_WORKSPACE` as a tiled workspace
+  (30 slots, 32 lanes, 16 blocks/SM, `nz + 1`), its 80-tier
+  `local_store_extra_bytes` is zero, and its WSM6 ceiling is 256. Its
+  measured cores still carry the retired 7,216 B frame's reservation (no
+  ledger arm has been run at the new tip), so the workspace is an over-count
+  on top of them -- the safe direction -- until one is.
+
+### Reproducing
+
+```
+pytest tests/test_wsm6_workspace.py tests/test_wdm6_workspace.py
+pytest tests/test_kernel_local_bounds.py -k workspace_kernels
+GPUWM_NO_LOCAL_GPU=1 pytest tests/test_preflight.py -k "wsm6 or wdm6"
+```

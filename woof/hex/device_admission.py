@@ -184,6 +184,8 @@ __all__ = [
     "ShapedFootprintModel",
     "TiledWorkspace",
     "YSU_WORKSPACE",
+    "WSM6_MAX_LEVELS",
+    "WSM6_WORKSPACE",
     "card_profile_from_attributes",
     "gwdo_local_frame_bytes",
     "model_at_levels",
@@ -391,10 +393,37 @@ YSU_WORKSPACE = TiledWorkspace(
     ),
 )
 
+#: WSM6.  ``WSM6WS_SLOTS = 30``, ``WSM6_BLOCK = 32``,
+#: ``WSM6_TILE_BLOCKS_PER_SM = 16``, extent ``nz + 1``
+#: (``woof.core.wsm6_constants``).  NEW on 2026-10-12, when WSM6's column
+#: arrays left the per-thread local frame for a launcher-owned workspace so
+#: the scheme could run up to 256 levels.  No ledger arm has recorded this
+#: block yet, and the measured cores below still CARRY the 7,216 B frame's
+#: backing store it replaced (:data:`WIDEST_LAUNCHED_LOCAL_FRAME_BYTES`), so
+#: charging it on top is a stated over-count -- the safe direction -- until a
+#: ledger arm at the new tip re-fits the cores.
+WSM6_WORKSPACE = TiledWorkspace(
+    name="wsm6_column_workspace",
+    slots=30,
+    block=32,
+    blocks_per_sm=16,
+    level_offset=1,
+    level_floor=0,
+    dtype_bytes=4,
+    site="woof/core/wsm6_constants.py::wsm6_workspace_floats via wsm6_tile_columns",
+    provenance=(
+        "engine constants WSM6WS_SLOTS=30, WSM6_BLOCK=32, "
+        "WSM6_TILE_BLOCKS_PER_SM=16 (woof/core/wsm6_constants.py).  Not yet "
+        "on a per-allocation ledger: priced from the constants alone, on top "
+        "of cores that still carry the retired 7,216 B frame's reservation"
+    ),
+)
+
 #: The workspaces the model charges, in order.
 TILED_WORKSPACES: tuple[TiledWorkspace, ...] = (
     GRELL_FREITAS_WORKSPACE,
     YSU_WORKSPACE,
+    WSM6_WORKSPACE,
 )
 
 
@@ -472,40 +501,45 @@ CONVENTION_MARGIN_BYTES = int(round(11.2 * MIB))
 #: quote an under-statement without saying so.
 PIN_RESTATEMENT_BYTES = int(round(484.0 * MIB))
 
-#: The CUDA per-thread local frame the widest LAUNCHED kernel carries, from
-#: the ledger's ``local_memory_model.max_local_size_bytes`` at the merged tip
+#: The CUDA per-thread local frame the widest LAUNCHED kernel carried when
+#: the measured rows were taken, from the ledger's
+#: ``local_memory_model.max_local_size_bytes`` at the merged tip
 #: (``wsm6_column``, 7,216 B).  CUDA reserves one per-context backing store
 #: of this times the card's resident threads, at first launch, and never
-#: returns it -- so it is the largest card-scaled term in the core and the
-#: one a derived row rescales.  The reservation CUDA actually takes is for
-#: achievable occupancy and is therefore <= this product, which makes a
-#: derived row conservative.
+#: returns it -- so it is the largest card-scaled term in the measured cores
+#: and the one a derived row rescales.
+#:
+#: SINCE 2026-10-12 ``wsm6_column`` compiles to a 0 B frame: its column
+#: arrays moved into :data:`WSM6_WORKSPACE`.  The cores are measurements and
+#: are NOT re-fitted here -- no ledger arm has been run at the new tip, and
+#: which kernel is now the widest launched one is not measured -- so they
+#: keep this reservation and the workspace is charged on top: an over-count
+#: of at most this frame times the resident threads, which is the safe
+#: direction for a gate.
 WIDEST_LAUNCHED_LOCAL_FRAME_BYTES = 7_216
 
-#: ``wsm6_column``'s frame follows its compile-time tier, not the 55-level
-#: column every row was measured at: ``woof/core/wsm6.py`` compiles the 64
-#: tier up to 64 levels and the 80 tier above that, and the frame grows by
-#: exactly 112 B per level between them (7,216 B at 64, 9,008 B at 80,
-#: re-measured on the reference card; ``woof.core.preflight.WSM6_TIER_FRAME``).
-#: Restated so this module stays stdlib-only; a test holds them equal.
-WSM6_SHALLOW_TIER_LEVELS = 64
-WSM6_DEEP_TIER_LEVELS = 80
-WSM6_FRAME_BYTES_PER_LEVEL = 112
+#: The deepest column the engine's WSM6 runs (``woof.core.wsm6_constants.
+#: WSM6_MAX_LEVELS``), restated so this module stays stdlib-only; a test holds
+#: them equal.  Until 2026-10-12 WSM6 compiled a 64 or an 80 ``WSM6_KMAX``
+#: tier, refused deeper columns, and the 80 tier's frame was 1,792 B wider
+#: than the 64 tier's (``local_store_extra_bytes``).  The workspace cut
+#: retired both the ceiling and the tier: the frame no longer follows the
+#: column, and the column is priced through :data:`WSM6_WORKSPACE` instead.
+WSM6_MAX_LEVELS = 256
 
 
 def wsm6_local_frame_bytes(levels: int) -> int:
-    """The widest launched local frame at this column: WSM6 at its tier."""
+    """The widest launched local frame the measured cores carry at this
+    column -- the same at every level count WSM6 admits, because WSM6's
+    frame no longer follows the column (its arrays are a workspace)."""
 
     levels = int(levels)
-    if levels > WSM6_DEEP_TIER_LEVELS:
+    if levels > WSM6_MAX_LEVELS:
         raise ValueError(
-            f"{levels} levels is deeper than the {WSM6_DEEP_TIER_LEVELS}-level "
-            "WSM6 tier the engine compiles; no footprint exists for it"
+            f"{levels} levels is deeper than the {WSM6_MAX_LEVELS}-level "
+            "column the engine's WSM6 admits; no footprint exists for it"
         )
-    tier = WSM6_SHALLOW_TIER_LEVELS if levels <= WSM6_SHALLOW_TIER_LEVELS else WSM6_DEEP_TIER_LEVELS
-    return WIDEST_LAUNCHED_LOCAL_FRAME_BYTES + WSM6_FRAME_BYTES_PER_LEVEL * (
-        tier - WSM6_SHALLOW_TIER_LEVELS
-    )
+    return WIDEST_LAUNCHED_LOCAL_FRAME_BYTES
 
 
 #: The hex YSU-GWDO kernel's local frame, which -- unlike every other frame
@@ -612,11 +646,13 @@ class ShapedFootprintModel:
 
         The core holds CUDA's per-context local-memory backing store at the
         64-tier frame (:data:`WIDEST_LAUNCHED_LOCAL_FRAME_BYTES`) times the
-        card's resident threads.  A column whose widest launched frame
-        (:func:`widest_launched_local_frame_bytes`: WSM6's tier, or the
-        per-run YSU-GWDO past about 161 levels) is wider makes CUDA reserve
-        the difference per resident thread at first launch -- memory the
-        pool never reports.  Zero for every column of 64 levels or fewer.
+        card's resident threads.  WSM6's frame no longer follows the column
+        (since 2026-10-12 its arrays are :data:`WSM6_WORKSPACE`, charged in
+        :meth:`tiled_bytes`), so the only launched frame that can outgrow the
+        core's is the per-run YSU-GWDO's, past about 161 levels
+        (:func:`widest_launched_local_frame_bytes`); a wider frame makes CUDA
+        reserve the difference per resident thread at first launch -- memory
+        the pool never reports.  Zero for every column of 161 levels or fewer.
         """
 
         extra = (

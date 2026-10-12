@@ -2,7 +2,7 @@
 // float implementation without creating a CUDA context; it is a verification
 // tool, not a second science implementation.
 #define WSM6_CPU_MIRROR
-#include "../gpuwm/core/kernels/wsm6.cu"
+#include "../woof/core/kernels/wsm6.cu"
 #include <cstdio>
 #include <cstdlib>
 

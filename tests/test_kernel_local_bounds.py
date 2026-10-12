@@ -139,93 +139,25 @@ def test_the_specialized_frames_are_what_preflight_prices():
             assert observed == spec.frame_bytes(bound), (module, bound)
 
 
-def test_the_wdm6_tier_frame_is_what_the_driver_reports_at_both_rungs():
-    """WDM6 is TIERED, not nz-specialized, so both rungs are measured.
+@pytest.mark.parametrize("module", ["wdm6", "wsm6"])
+def test_the_microphysics_workspace_kernels_hold_no_column_on_the_stack(module):
+    """WDM6 and WSM6 are no longer TIERED.
 
-    ``woof/core/wdm6.py`` compiles ``WDM6_KMAX`` at 64 (the source's own
-    ``#ifndef`` default) or at 80, and never at ``nz``.  Only those two
-    binaries can ever launch, so those two are what the pricing model has
-    to reproduce exactly -- and it does, at 152 B per level with the 64
-    rung equal to the recorded ``KERNEL_MAX_LOCAL_SIZE_BYTES`` row.
-
-    An intermediate bound is measured too, and deliberately NOT asserted
-    equal: between the rungs the driver's frame sits up to 16 B below the
-    line, so the model is a CEILING there.  Asserting the inequality is
-    what makes that a stated property instead of a gap -- over-pricing a
-    band nothing compiles in is safe, under-pricing anything is not.
+    Until 2026-10-12 ``woof/core/{wdm6,wsm6}.py`` compiled ``*_KMAX`` at a
+    64 or an 80 rung and the two rungs' frames (WDM6 9,264 / 11,568 B,
+    WSM6 7,216 / 9,008 B) were priced through a tier ladder.  The column
+    arrays now live in a launcher-owned workspace, so ONE binary serves
+    every nz up to 256 and its frame is what the driver reports here: the
+    recorded row, and under the 1,024 B default stack on any platform, so
+    the driver reserves nothing for it.
     """
-    from woof.core.kernels import get_kernel, get_kernel_int_defines
-    from woof.core.wdm6_constants import (WDM6_KERNEL_LEVEL_TIERS,
-                                           wdm6_level_tier)
+    from woof.core.kernels import get_kernel
 
-    spec = pf.WDM6_TIER_FRAME
-    assert spec.define == "WDM6_KMAX"
-    assert WDM6_KERNEL_LEVEL_TIERS == (spec.shipped_tier, 80)
-
-    default = int(get_kernel("wdm6", "wdm6_column")
-                  .attributes["local_size_bytes"])
-    assert default == spec.frame_bytes(spec.shipped_tier) == 9264
-
-    for tier in WDM6_KERNEL_LEVEL_TIERS:
-        kernel = (get_kernel("wdm6", "wdm6_column")
-                  if tier == spec.shipped_tier else
-                  get_kernel_int_defines("wdm6", "wdm6_column",
-                                         (("WDM6_KMAX", tier),)))
-        observed = int(kernel.attributes["local_size_bytes"])
-        assert observed == spec.frame_bytes(tier), tier
-
-    for bound in (30, 49, 70):
-        observed = int(get_kernel_int_defines(
-            "wdm6", "wdm6_column", (("WDM6_KMAX", bound),)
-        ).attributes["local_size_bytes"])
-        priced = spec.frame_bytes(wdm6_level_tier(bound))
-        assert observed <= priced, (bound, observed, priced)
-
-
-def test_the_wsm6_tier_frame_is_what_the_driver_reports_at_both_rungs():
-    """WSM6 is TIERED, not nz-specialized, so both rungs are measured.
-
-    ``woof/core/wsm6.py`` compiles ``WSM6_KMAX`` at 64 (the source's own
-    ``#ifndef`` default) or at 80, and never at ``nz``.  Only those two
-    binaries can ever launch, so those two are what the pricing model has
-    to reproduce exactly -- and it does, at 112 B per level with the 64
-    rung equal to the recorded ``KERNEL_MAX_LOCAL_SIZE_BYTES`` row.  The
-    flat row alone used to be the price for both, so an nz = 72 run (the
-    six shipped tornado-LES configs) was under-priced by 1,792 B/thread.
-
-    Intermediate bounds are measured too, and deliberately NOT asserted
-    equal: between the rungs the driver's frame sits up to 16 B below the
-    line, so the model is a CEILING there.  Asserting the inequality is
-    what makes that a stated property instead of a gap -- over-pricing a
-    band nothing compiles in is safe, under-pricing anything is not.
-    """
-    from woof.core.kernels import get_kernel, get_kernel_int_defines
-    from woof.core.wsm6_constants import (WSM6_KERNEL_LEVEL_TIERS,
-                                           wsm6_level_tier)
-
-    spec = pf.WSM6_TIER_FRAME
-    assert spec.define == "WSM6_KMAX"
-    assert WSM6_KERNEL_LEVEL_TIERS == (spec.shipped_tier, 80)
-
-    default = int(get_kernel("wsm6", "wsm6_column")
-                  .attributes["local_size_bytes"])
-    assert default == spec.frame_bytes(spec.shipped_tier) == 7216
-
-    for tier in WSM6_KERNEL_LEVEL_TIERS:
-        kernel = (get_kernel("wsm6", "wsm6_column")
-                  if tier == spec.shipped_tier else
-                  get_kernel_int_defines("wsm6", "wsm6_column",
-                                         (("WSM6_KMAX", tier),)))
-        observed = int(kernel.attributes["local_size_bytes"])
-        assert observed == spec.frame_bytes(tier), tier
-    assert spec.frame_bytes(80) == 9008
-
-    for bound in (30, 49, 70, 76):
-        observed = int(get_kernel_int_defines(
-            "wsm6", "wsm6_column", (("WSM6_KMAX", bound),)
-        ).attributes["local_size_bytes"])
-        priced = spec.frame_bytes(wsm6_level_tier(bound))
-        assert observed <= priced, (bound, observed, priced)
+    observed = int(get_kernel(module, f"{module}_column")
+                   .attributes["local_size_bytes"])
+    assert observed <= pf.KERNEL_MAX_LOCAL_SIZE_BYTES[module] == 0
+    assert observed <= 1024
+    assert not hasattr(pf, f"{module.upper()}_TIER_FRAME")
 
 
 def test_the_sase_tier_frame_is_what_the_driver_reports_at_every_rung():
@@ -285,12 +217,15 @@ def test_the_unspecialized_source_still_compiles_to_the_recorded_ceiling():
     assert int(get_kernel("refl", "refl10cm_morrison_column")
                .attributes["local_size_bytes"]
                ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["refl"] == 18432
+    # 0, not 9,264 / 7,216: WDM6's and WSM6's column arrays left the stack
+    # for launcher-owned workspaces on 2026-10-12, and the KMAX bound is a
+    # refusal ceiling that sizes nothing.
     assert int(get_kernel("wdm6", "wdm6_column")
                .attributes["local_size_bytes"]
-               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wdm6"] == 9264
+               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wdm6"] == 0
     assert int(get_kernel("wsm6", "wsm6_column")
                .attributes["local_size_bytes"]
-               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wsm6"] == 7216
+               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wsm6"] == 0
 
 
 # ---------------------------------------------------------------------------
