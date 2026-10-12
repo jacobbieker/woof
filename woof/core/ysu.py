@@ -35,7 +35,10 @@ from woof.physics_vertical_contract import (
 
 _TPB = YSU_BLOCK
 _VALIDATE_TPB = 256
-_KMAX = 128
+#: ``YSU_KMAX`` in ``kernels/ysu.cu``: a refusal ceiling only.  No array is
+#: sized by it -- the column workspace's per-slot extent is the runtime nz --
+#: so it sits at the dynamical core's 256-level ceiling.
+_KMAX = 256
 
 
 def ysu_tile_columns(fn, ncol: int) -> int:
@@ -135,10 +138,12 @@ def launch_ysu(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
         raise refuse_vertical_levels(
             "YSU PBL", VERTICAL_LEVEL_BOUNDS, nz,
             breakage=(
-                "one CUDA thread owns a whole column and holds it in "
-                f"per-thread local memory at YSU_KMAX={_KMAX} "
-                "(kernels/ysu.cu), and the counter-gradient and entrainment "
-                "layers the scheme indexes need four levels to exist."))
+                "one CUDA thread owns a whole column, held in a global "
+                "column workspace sized to the runtime nz, and the kernel "
+                f"refuses any column deeper than YSU_KMAX={_KMAX} "
+                "(kernels/ysu.cu), the dynamical core's own ceiling; the "
+                "counter-gradient and entrainment layers the scheme indexes "
+                "need four levels to exist."))
     for name, arr in columns.items():
         if not isinstance(arr, cp.ndarray) or arr.shape != shape:
             raise ValueError(f"{name} must be a CuPy array with shape {shape}")

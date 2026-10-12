@@ -364,6 +364,7 @@ These are limits of the current build, not opinions about LES.
   | Kessler / Thompson / Thompson-aerosol / Morrison / NSSL-2 / Milbrandt-Yau | `nz <= 256` | 256 |
   | P3 microphysics | none (column workspace) | 256 (the solver's) |
   | Kain-Fritsch cumulus | `nz <= 256` | 256 |
+  | terrain drag (`gwd_opt` 1 or 3) | `nz <= 256` | 256 |
   | YSU / Shin-Hong PBL | `nz <= 256` | 256 |
   | SASE PBL | `nz <= 256` (per-run `SASE_KMAX` tier 32/64/128/256) | 256 |
   | MYJ / MYJ-urban PBL | `nz <= 256` (column workspace) | 256 |

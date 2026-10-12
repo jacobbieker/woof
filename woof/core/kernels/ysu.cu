@@ -8,7 +8,7 @@
 // pattern as kernels/acoustic.cu.  Float64 verification authority:
 // gpuwm.verify.npref.np_ysu_column.
 
-#define YSU_KMAX 128
+#define YSU_KMAX 256
 
 // ==========================================================================
 // Per-thread column workspace

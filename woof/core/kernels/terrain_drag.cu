@@ -34,7 +34,7 @@
 // fields (ny, nx); the four directional statistics OA1-4 and OL1-4 are
 // (4, ny, nx).  One thread owns one column.
 
-#define TD_KMAX 128
+#define TD_KMAX 256
 
 __device__ __forceinline__ float td_max(float a, float b)
 { return fmaxf(a, b); }

@@ -235,8 +235,11 @@ def ysu_output_plan(*, nz, ny, nx, members, reserved_bytes=0):
     """All-member one-launch YSU outputs plus its full launch workspace."""
     from woof.core.physics_inventory import ysu_workspace_floats
     nz, ny, nx, members = [_positive(v, n) for v, n in ((nz, "nz"), (ny, "ny"), (nx, "nx"), (members, "members"))]
-    if not 4 <= nz <= 128:
-        raise ValueError("YSU's vertical solve requires 4..128 levels")
+    from woof.physics_vertical_contract import (
+        YSU_VERTICAL_LEVEL_BOUNDS, outside_vertical_bounds)
+    if outside_vertical_bounds(nz, YSU_VERTICAL_LEVEL_BOUNDS):
+        low, high = YSU_VERTICAL_LEVEL_BOUNDS
+        raise ValueError(f"YSU's vertical solve requires {low}..{high} levels")
     specs = [BatchArraySpec(f"ysu:{name}", (nz, ny, nx), "member") for name in YSU_VOLUME_OUTPUTS]
     specs.extend(BatchArraySpec(f"ysu:{name}", (ny, nx), "member",
                                "int32" if name in ("kpbl", "cloudflg") else "float32")

@@ -74,16 +74,20 @@ def refuse_vertical_levels(label: str,
 
 
 MYNN_VERTICAL_LEVEL_BOUNDS = (5, None)
-#: YSU.  The ceiling is ``YSU_KMAX`` in ``kernels/ysu.cu``: one CUDA thread
-#: owns a whole column and holds it in per-thread local memory at that fixed
-#: depth.  The floor is the launcher's own ``nz >= 4`` -- the counter-gradient
-#: and entrainment layers the scheme indexes need four levels to exist.
-YSU_VERTICAL_LEVEL_BOUNDS = (4, 128)
-#: Shin-Hong, the same pair for the same two reasons (``SHINHONG_KMAX``, and
-#: the scheme shares YSU's column indexing).  Held as its own name rather
-#: than aliased to YSU's: the two kernels are separate translation units a
-#: future change could size differently.
-SHINHONG_VERTICAL_LEVEL_BOUNDS = (4, 128)
+#: YSU.  The ceiling is ``YSU_KMAX`` in ``kernels/ysu.cu`` (and the global
+#: port's ``woof/globe/core/kernels/ysu.cu``), which is now a REFUSAL
+#: ceiling and nothing else: the column arrays live in a global workspace
+#: whose per-slot extent is the runtime ``nz``, so no array is sized by it.
+#: It sits at the dynamical core's own 256-level ceiling.  The floor is the
+#: launcher's own ``nz >= 4`` -- the counter-gradient and entrainment layers
+#: the scheme indexes need four levels to exist.
+YSU_VERTICAL_LEVEL_BOUNDS = (4, 256)
+#: Shin-Hong, the same pair for the same two reasons (``SHINHONG_KMAX`` is
+#: likewise only a refusal ceiling over a runtime-sized workspace, and the
+#: scheme shares YSU's column indexing).  Held as its own name rather than
+#: aliased to YSU's: the two kernels are separate translation units a future
+#: change could size differently.
+SHINHONG_VERTICAL_LEVEL_BOUNDS = (4, 256)
 #: MYJ.  ``MYJ_KMAX`` in ``kernels/myjpbl.cu`` for the ceiling; the floor is
 #: where VDIFQ's tridiagonal chain still has interior rows and MIXLEN's
 #: profile smoothing can read ``REL(K-1)``/``REL(K+1)``.
@@ -103,7 +107,13 @@ SASE_VERTICAL_LEVEL_BOUNDS = (2, 256)
 #: where the implicit diffusion has an interior interface (compute_vdiff's
 #: k = 2..pver rows) and a Richardson number exists above the surface.
 UWPBL_VERTICAL_LEVEL_BOUNDS = (2, None)
-KF_VERTICAL_LEVEL_BOUNDS = (8, 128)
+#: Kain-Fritsch.  ``KF_KMAX`` in ``kernels/kf.cu`` is the refusal ceiling;
+#: it sizes only the two stack-resident arrays ``tv_env`` and
+#: ``positive_energy`` (2 x 4 x 256 = 2,048 B declared at 256, kept on the
+#: stack for bit-identity -- docs/kernel_local_memory_bounds.md section 9).
+#: Every other column array is in a runtime-``nz`` workspace.  The floor is
+#: the kernel's own ``nz >= 8`` refusal.
+KF_VERTICAL_LEVEL_BOUNDS = (8, 256)
 # Grell-Freitas: the inversion-layer search clamps kend to ktf-8 and its
 # second-derivative stencil then reaches ktf-1, so a column shorter than 12
 # levels leaves no search window at all; the certified fixture ran nz=40 and
@@ -148,6 +158,15 @@ P3_VERTICAL_LEVEL_BOUNDS = (1, None)
 #: so a column needs four levels before the cloud-base search has one
 #: interior row; no fixed ceiling, the workspaces are ``(ncol, nz)``.
 NEW_TIEDTKE_VERTICAL_LEVEL_BOUNDS = (4, None)
+#: Orographic gravity-wave drag (``gwd_opt`` 1 = KIM, 3 = GSL), launched
+#: inside the PBL driver by ``woof/core/terrain_drag.py``.  ``TD_KMAX`` in
+#: ``kernels/terrain_drag.cu`` sizes the per-thread stress profiles
+#: ``taup[TD_KMAX + 1]`` (and GSL's ``taufb``), so it is a real per-thread
+#: column ceiling; it sits at the dycore's 256.  The launchers declare no
+#: floor, so none is stated here.  ``gwd_opt`` is a run setting rather than a registry component,
+#: so ``validate_resolved_physics_vertical_levels`` reads this row directly
+#: whenever ``gwd_opt`` is 1 or 3.
+TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS = (None, 256)
 #: The dynamical core's own vertical bound, from the top ``WPHI_MAX_LEV``
 #: tier ``woof.core.acoustic`` compiles the implicit w''-phi'' solve at.
 #: Bound to the launcher's ladder by

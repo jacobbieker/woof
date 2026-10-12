@@ -666,7 +666,13 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
     complete=False,
     frames=MappingProxyType({
         'gf': 88,
-        'kf': 512,
+        # RE-READ 2026-10-12 on this platform key (sm_86, NVRTC 12.9.86;
+        # RTX A6000, Linux) after KF_KMAX went 128 -> 256: kf_column's frame
+        # is exactly the two stack-resident arrays (tv_env, positive_energy)
+        # at 2 x 4 B x KF_KMAX, so 512 -> 1,024 B -- AT the 1,024 B default
+        # stack, so still zero reservation.  KF_KMAX = 49 / 128 / 256 read
+        # 200 / 512 / 1,024 B on both the pre- and post-cut source.
+        'kf': 1024,
         'milbrandt2': 2048,
         'nest_microphysics': 0,
         'noah': 224,
@@ -1607,7 +1613,9 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "with -fmad=false --ftz=false; terrain_drag.cu fails standalone. "
         "Priced 1,184 B from sm_89 and sm_120 at NVRTC 13.4.59, measured "
         "2026-10-01 over every export; re-read 2026-10-02 on sm_120 at "
-        "13.4.59, 13.4.92 and 12.9.86 with the same maximum. Re-audited by "
+        "13.4.59, 13.4.92 and 12.9.86 with the same maximum. TD_KMAX "
+        "128 -> 256 (2026-10-12) re-priced it at 2,208 B, read on sm_86 at "
+        "NVRTC 12.9.86; the older rows predate that source. Re-audited by "
         "tests/test_terrain_drag_wrf471_parity.py::"
         "test_production_drag_frames_match_the_recorded_unit.",
 })
@@ -1617,8 +1625,19 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
 # export.  These are separate from standalone .cu recordings: the unit
 # requires the two glibc headers.  The source and options bind the readings
 # to the composition that was measured, rather than only to its filename.
+#
+# TD_KMAX went 128 -> 256 on 2026-10-12 (the dycore's level ceiling), which
+# doubles the per-thread stress profiles taup[TD_KMAX + 1] (KIM) and
+# taup/taufb (GSL).  The SHA below is the 256-level source; the
+# ("86", "12.9.86") row was read on it (RTX A6000, Linux): KIM 640 -> 1,152 B
+# and GSL 1,184 -> 2,208 B, exactly +4 B per added level per array, with the
+# pre-cut source reading 640 / 1,184 B on the same card.  The sm_89 / sm_120
+# rows were read on the 128-level source (SHA ee9a70df...) and could not be
+# re-read on this box; they are kept as provenance and are expected to grow
+# by the same +512 / +1,024 B.  Pricing is safe either way: the chained-unit
+# frame is the maximum over the rows, which the sm_86 reading sets.
 TERRAIN_DRAG_COMPOSED_SOURCE_SHA256 = (
-    "ee9a70dfaff59d8e9d36f6b4a0214fa9124c72742b0bb60726639460f7b60fcf")
+    "348623c967a05b2a0331c19d82a2f06432b175472d471b7e0c476f075b23af98")
 TERRAIN_DRAG_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({
     ("89", "13.4.59"): MappingProxyType({
@@ -1633,6 +1652,9 @@ TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({
     ("120", "12.9.86"): MappingProxyType({
         "topo_wind_static": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
+    ("86", "12.9.86"): MappingProxyType({
+        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "gwdo_column": 1152, "gwdo_gsl_column": 2208}),
 })
 
 

@@ -14,6 +14,14 @@ vanishes at 3 km and its small-scale wave and form drag vanish at 1 km.
 The port uses WRF's default `gsl_diss_ht_opt = 0`, with no dissipative
 heating. `gwd_opt = 2` is unavailable.
 
+Both drag kernels hold a column's stress profile per thread, so a run with
+`gwd_opt` 1 or 3 is limited to `nz <= 256`, the dynamical core's own
+ceiling. `woof check` refuses a deeper grid by name before preparation
+(`TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS` in
+`woof/physics_vertical_contract.py`). At 256 levels the option-3 kernel's
+per-thread frame is 2,208 B (1,152 B for option 1), measured on sm_86;
+the part above the 1,024 B default stack is priced by the VRAM preflight.
+
 With SASE, GSL uses SASE's bulk-Richardson PBL height and its corresponding
 upper-bracket level. This BL definition differs from a WRF PBL package.
 The diagnostic supplies drag locally and leaves the surface-layer PBL

@@ -95,7 +95,7 @@
 // authority transcribes them as np.maximum/np.minimum for exactly that
 // reason.
 
-#define SHINHONG_KMAX 128
+#define SHINHONG_KMAX 256
 #define SHINHONG_K2 (SHINHONG_KMAX + 2)
 
 // Interleaving levels across a warp keeps workspace accesses coalesced.

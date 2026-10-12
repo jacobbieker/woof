@@ -250,8 +250,8 @@ device-wide NVML, taken from outside the process, and it is 2,284 MiB under.
 
 ## 5. What this does not do
 
-- **The bound is still a ceiling, not a clamp.** `nz` past 128 (KF) or 256
-  (reflectivity) raises, as before. Specializing downward must never turn a
+- **The bound is still a ceiling, not a clamp.** `nz` past 128 (KF; 256
+  since 2026-10-12, §9) or 256 (reflectivity) raises, as before. Specializing downward must never turn a
   refusal into a silent truncation.
 - **One extra NVRTC compilation per distinct `nz`.** Configurations whose
   domains differ in level count compile `kf.cu`/`refl.cu` once per level
@@ -712,6 +712,31 @@ pytest tests/test_ysu.py tests/test_ysu_wrf461_parity.py
 is the platform-independent gate. Run against the pre-cut kernel, 5 of the
 7 nodes in that file fail, including that one and the tiling gate.
 
+### 2026-10-12: the ceiling went to 256, and it cost nothing
+
+Because the workspace extent is the runtime `nz`, `YSU_KMAX` stopped sizing
+anything when this cut landed: it was left as a 128-level refusal guard
+(`if (col >= st || nz > YSU_KMAX) return;`) over arrays that would have held
+any depth. It now sits at the dynamical core's own 256
+(`ACOUSTIC_VERTICAL_LEVEL_BOUNDS`), in `woof/core/kernels/ysu.cu`, the
+global port's `woof/globe/core/kernels/ysu.cu` (whose launcher reads the
+contract's `YSU_VERTICAL_LEVEL_BOUNDS` instead of its own literal), and the
+ensemble batch planner (`woof/ensemble/batch_physics.py`, which had its own
+`4 <= nz <= 128` and now imports the contract). Shin-Hong took the same
+route on 2026-09-30 and went the same way: `SHINHONG_KMAX` 256.
+
+* **Frames:** `ysu_column`, `ysu_column_bep`, `ysu_column_topo`, the global
+  `ysu_column`, `shinhong_column` all read **0 B** before and after (sm_86,
+  NVRTC 12.9.86). Nothing to re-price.
+* **Bit-identity at `nz <= 128`:** every output word of the shipped kernel
+  equals the same source compiled with `#define YSU_KMAX 128` (resp.
+  `SHINHONG_KMAX`), at `nz` 49 and 128, regional and global
+  (`tests/test_physics_256_levels_gpu.py`). That old-ceiling arm is the
+  pre-raise source to the byte once comments are stripped.
+* **256 levels to a 1 hPa top** run through the shipped launchers and come
+  back finite, with `hpbl > 0` and `1 <= kpbl < 256` in every column (same
+  file).
+
 ---
 
 ## 9. Kain-Fritsch: the other half of the pair, and how it stayed bit-exact
@@ -787,7 +812,9 @@ moved words. Force them into memory and the store breaks the fusion.
 
 So they keep their `float[KF_KMAX]` declarations. At the shipped
 `KF_KMAX = 128` that is 512 B, half the default stack, and the driver's
-reservation term is still exactly zero.
+reservation term is still exactly zero. (At the 256 it was raised to on
+2026-10-12 it is 1,024 B: AT the default stack, still zero -- see the end of
+this section.)
 
 ### Bit-identity, and the method that got there
 
@@ -871,7 +898,7 @@ launch shape at all.
 * `KF_KMAX` is a REFUSAL CEILING and nothing else. It sizes only the two
   stack-resident arrays, so `woof/core/kf.py` compiles the module ONCE
   instead of once per distinct level count. The `nz` outside [8, 128]
-  refusal is unchanged and is carried by
+  refusal (now [8, 256], below) is unchanged and is carried by
   `woof.physics_compat.validate_resolved_physics_vertical_levels`, which
   names Kain-Fritsch, plus the guard in `kf_column` itself.
 * `kf` left `LEVEL_SPECIALIZED_KERNEL_FRAMES`. Its 188 B/level model is
@@ -955,3 +982,46 @@ pre-tier source on sm_86 at NVRTC 12.9 and 13.4. Deeper tiers are held
 to the NumPy port word for word by `tests/test_rrtmg_lw_deep_columns.py`,
 whose frame leg also re-reads 128/192/256/320 on whatever card runs it
 and fails if the driver reports more than preflight charges.
+
+### 2026-10-12: `KF_KMAX` 256
+
+`KF_KMAX` went 128 -> 256, the dynamical core's own ceiling
+(`ACOUSTIC_VERTICAL_LEVEL_BOUNDS`), with the floor unchanged at 8. Because
+it still sizes `tv_env` and `positive_energy`, this is not a guard-only
+change, and both properties this section rests on were re-measured rather
+than argued:
+
+* **Frame, sm_86, NVRTC 12.9.86 (RTX A6000):** `KF_KMAX` = 49 / 128 / 256
+  read 200 / 512 / **1,024 B**, identically from the pre- and post-raise
+  source. 1,024 B is exactly the default stack, so the reservation term is
+  still zero and `test_the_kf_frame_stays_under_the_default_stack` (frame
+  `<=` 1,024) holds with no margin left: the next array to land on the
+  stack will be caught. The `kf` row of `KERNEL_MAX_LOCAL_SIZE_BYTES` and
+  the sm_86 / 12.9.86 recording are 1,024. The sm_120 and older sm_86
+  readings (512 B) predate the raise and could not be re-read here; the
+  sm_120 / 13.4.92 recording's `kf: 0` is very likely a symbol-regex
+  artefact (`extern "C" __global__ __launch_bounds__(256) void kf_column`
+  did not match the census regex, so the module read as having no kernel);
+  `tools/vram_reserve_probe.py` and the driver gate in
+  `tests/test_preflight.py` now accept the `__launch_bounds__` spelling.
+* **Bit-identity at `nz <= 128`:** every output word, all four
+  `KFPhaseMode`s, at `nz` 49 and 128, equals the kernel compiled with
+  `KF_KMAX = 128` (`tests/test_physics_256_levels_gpu.py`, which asserts
+  the two frames differ first so the A/B cannot compare an image with
+  itself, and that columns convected). The existing `KF_KMAX = nz` A/B in
+  `tests/test_kernel_local_bounds.py` and the WRF parity suite
+  `tests/test_kf.py` are unchanged and green.
+* **256 levels to a 1 hPa top:** a 64-column batch through `launch_kf`
+  triggers on 23 columns (3 deep, 20 shallow), every output finite.
+
+The same raise went to terrain drag (`TD_KMAX`, `gwd_opt` 1 and 3), whose
+per-thread stress profiles `taup[TD_KMAX + 1]` (and GSL's `taufb`) are real
+per-thread arrays: KIM 640 -> **1,152 B**, GSL 1,184 -> **2,208 B** on sm_86
+/ 12.9.86, so `gwd_opt = 3` reserves 1,184 B per resident thread (about
+146 MiB on an 84-SM x 1,536 card), priced through the
+`terrain_drag_composed` chained-unit frame. Terrain drag also gained a row
+in the vertical contract (`TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS`) read by
+`validate_resolved_physics_vertical_levels` whenever `gwd_opt` is 1 or 3:
+until then a too-deep drag run passed `woof check` and failed at its first
+PBL call. Bit-identity at `nz <= 128` is shown the same way, and the WRF
+v4.7.1 parity suite is unchanged and green.
