@@ -4601,6 +4601,50 @@ def test_wsm6_is_priced_at_the_tier_its_launcher_compiles_not_at_a_flat_row():
     assert frame(96, mp_physics=10) is None
 
 
+def test_sase_is_priced_at_the_tier_its_launcher_compiles():
+    """SASE compiles ``SASE_KMAX`` per run at 32 / 64 / 128 / 256.
+
+    The frame is 49 B x tier exactly (driver-read at every rung by
+    ``tests/test_kernel_local_bounds.py``), and the run is charged its OWN
+    tier: the flat 6,272 B row is only the census tier the plain loader
+    compiles, so it neither floors a shallow run nor caps a deep one.
+    """
+    from woof.config import SASE_PBL_SCHEME
+    from woof.core.sase_limits import KMAX_TIERS, kmax_tier
+
+    start = datetime(1974, 4, 3, 12)
+
+    def frame(nz, pbl=SASE_PBL_SCHEME):
+        cfg = RunConfig(**{**_TINY, "nz": nz}, moist=True,
+                        bl_pbl_physics=pbl, km_opt=0, khdif=0.0,
+                        kvdif=0.0, bldt=0.0)
+        return pf.kernel_local_frame_bytes(
+            experiment_from_run_config(cfg, start)).get("sase")
+
+    spec = pf.SASE_TIER_FRAME
+    assert (spec.define, spec.shipped_tier, spec.lowest_tier) == (
+        "SASE_KMAX", 128, KMAX_TIERS[0])
+    assert KMAX_TIERS == (32, 64, 128, 256)
+    for tier, measured in ((32, 1568), (64, 3136), (128, 6272),
+                           (256, 12544)):
+        assert spec.frame_bytes(tier) == measured, tier
+    assert spec.frame_bytes(spec.shipped_tier) == (
+        pf.KERNEL_MAX_LOCAL_SIZE_BYTES["sase"])
+    with pytest.raises(ValueError, match="below the lowest tier 32"):
+        spec.frame_bytes(16)
+    assert kmax_tier(1) == 32 and kmax_tier(256) == 256
+    assert frame(4) == frame(32) == 1568
+    assert frame(33) == frame(49) == frame(64) == 3136
+    assert frame(65) == frame(128) == 6272
+    assert frame(129) == frame(256) == 12544
+    # A scheme that does not launch SASE is never charged for it.
+    assert frame(64, pbl=1) is None
+    profile = pf.MEASURED_LOCAL_MEMORY_PROFILE
+    assert (profile.reservation_bytes(12544)
+            > profile.reservation_bytes(6272)
+            > profile.reservation_bytes(3136))
+
+
 def test_the_tiered_frame_model_agrees_with_the_wsm6_measurements():
     """Both rungs, against the driver measurements they were taken from.
 

@@ -335,41 +335,212 @@ def test_sase_tpb_single_source():
 
     The values are injected as a compile-time tier through this head's
     per-translation-unit define mechanism, so the closure carries its own
-    tier and no scheme name reaches the generic loader.  sase.cu must not
-    hard-define either name, and the host launch constants must be read
-    from the same tuple that is handed to the compiler.
+    tier and no scheme name reaches the generic loader.  The host launch
+    block size is the device SASE_TPB; SASE_KMAX is compiled PER RUN at
+    :func:`woof.core.sase_limits.kmax_tier` of the launch's column depth.
     """
     from pathlib import Path
     import woof.core.kernels as kernels
     import woof.core.sase as sase
+    from woof.core import sase_limits
     src = (Path(kernels.__file__).parent / "sase.cu").read_text()
     # The source carries #ifndef-guarded defaults -- the kf.cu/refl.cu
     # idiom -- so the plain loader can compile it and the local-frame
     # census can measure it.  What must never happen is the guard being
     # dropped (the tier would stop reaching the device) or the default
-    # drifting from the tier (the census would measure a frame no run
-    # ever has).  Both are pinned here.
+    # drifting: SASE_TPB's from the launch block, SASE_KMAX's from the
+    # census tier every recorded frame was read at.
+    defaults = {}
     for name in ("SASE_TPB", "SASE_KMAX"):
         assert f"#ifndef {name}" in src, (
             f"sase.cu must guard {name} so the launcher's tier wins")
-        assert name in sase._DEFINE_VALUES
-        default = next(
+        defaults[name] = next(
             int(line.split()[-1]) for line in src.splitlines()
             if line.startswith(f"#define {name} "))
-        assert default == sase._DEFINE_VALUES[name], (
-            f"{name} in-source default {default} has drifted from the "
-            f"launcher tier {sase._DEFINE_VALUES[name]}")
-    assert sase._TPB == sase._DEFINE_VALUES["SASE_TPB"]
-    assert sase._KMAX == sase._DEFINE_VALUES["SASE_KMAX"]
-    # The tier is what the loader is actually handed, not a second copy.
-    assert dict(sase._INT_DEFINES) == sase._DEFINE_VALUES
+    assert defaults["SASE_TPB"] == sase._TPB == sase_limits.THREADS_PER_BLOCK
+    assert defaults["SASE_KMAX"] == sase_limits.SOURCE_DEFAULT_KMAX
+    assert sase_limits.SOURCE_DEFAULT_KMAX in sase_limits.KMAX_TIERS
+    # The ceiling is the deepest tier, and the tier is what the loader is
+    # actually handed.
+    assert sase._KMAX == sase_limits.MAX_COLUMN_LEVELS == (
+        sase_limits.KMAX_TIERS[-1]) == 256
+    for nz, tier in ((1, 32), (32, 32), (33, 64), (64, 64), (65, 128),
+                     (128, 128), (129, 256), (256, 256)):
+        assert dict(sase._int_defines(nz)) == {
+            "SASE_KMAX": tier, "SASE_TPB": sase._TPB}, nz
+    with pytest.raises(ValueError, match="SASE_KMAX=256"):
+        sase._int_defines(257)
     # Every int define sizes a power-of-two shared-memory tree reduction,
     # and the int/float define namespaces must never collide (that would
     # emit two #defines for one name, last one silently winning).
     from woof.core.constants import CUDA_DEFINES
-    assert sase._DEFINE_VALUES.keys().isdisjoint(CUDA_DEFINES)
+    assert {"SASE_TPB", "SASE_KMAX"}.isdisjoint(CUDA_DEFINES)
     assert all(v > 0 and (v & (v - 1)) == 0
-               for v in sase._DEFINE_VALUES.values())
+               for v in (*sase_limits.KMAX_TIERS, sase._TPB))
+
+
+def _column_tier_probe(nz, ny=12, nx=16, seed=20261012, steps=2):
+    """Every SASE column kernel on one ``nz``-level moist tile, twice.
+
+    The five kernels whose per-thread frame ``SASE_KMAX`` sizes -- the BL89
+    vertical channel and the momentum Thomas sweep (inside
+    ``launch_sase_step``), the scalar Thomas sweep, the moist-N2 pass and
+    the plume venting limb -- plus the dry N2, run on a 0-30 km stretched
+    column (thicknesses ~ s**1.6) with a saturated 500-1400 m deck, so the
+    moist substitution and the plume both engage.  Returns every output
+    field and ledger scalar as host arrays, keyed for a byte comparison.
+    """
+    import cupy as cp
+    from woof.core.sase import (launch_implicit_vertical_diffusion,
+                                launch_moist_n2, launch_n2,
+                                launch_plume_vent_flux, launch_sase_step)
+    from woof.verify import sase_ref as sr
+    s = np.linspace(0.0, 1.0, nz + 1)
+    zf = 30000.0 * s ** 1.6
+    thick = np.diff(zf)
+    z = (0.5 * (zf[:-1] + zf[1:]))[:, None, None]
+    rng = np.random.default_rng(seed)
+
+    def noise(amp):
+        return amp * sr.box_filter(rng.standard_normal((nz, ny, nx)), 4)
+
+    theta = (300.0 + np.where(z < 1000.0, 5e-4 * z, 0.5 + 4e-3 * (z - 1000.0))
+             + np.where(z > 12000.0, 2e-2 * (z - 12000.0), 0.0)
+             + noise(0.2))
+    p = 1.0e5 * np.exp(-z / 8000.0) + 0.0 * theta
+    t = theta * (p / sr.P0_REF) ** (sr.RD_AIR / sr.CP_AIR)
+    es = 1000.0 * sr.SVP1 * np.exp(sr.SVP2 * (t - sr.SVPT0) / (t - sr.SVP3))
+    qs = sr.EP2_RV * es / (p - es)
+    deck = (z > 500.0) & (z < 1400.0)
+    qv = np.where(deck, 1.02 * qs, np.minimum(0.012 * np.exp(-z / 2000.0),
+                                              0.9 * qs))
+    qc = np.where(deck, 2.0e-4, 0.0) + 0.0 * theta
+    e = 0.3 * np.exp(-z / 800.0) + np.abs(noise(0.02))
+    u = 5.0 + 10.0 * np.tanh(z / 3000.0) + noise(0.5)
+    v = 2.0 + noise(0.5)
+    w = noise(0.1)
+
+    def f32(a):
+        return cp.asarray(np.ascontiguousarray(
+            np.broadcast_to(a, (nz, ny, nx))).astype(np.float32))
+
+    d = {k: f32(a) for k, a in dict(u=u, v=v, w=w, theta=theta, e=e, qv=qv,
+                                     qc=qc, p=p).items()}
+    thick = thick.astype(np.float32).astype(np.float64)
+    rho1 = cp.full((ny, nx), 1.2, dtype=cp.float32)
+    heat = cp.zeros((nz, ny, nx), dtype=cp.float32)
+    out = {}
+    for step in range(steps):
+        n2 = launch_n2(d["theta"], dz_col=thick)
+        n2m = launch_moist_n2(d["theta"], d["qv"], d["qc"], d["p"], n2,
+                              dz_col=thick)
+        vent = launch_plume_vent_flux(d["theta"], d["qv"], d["qc"], d["p"],
+                                      d["e"], n2m, n2, rho1, f_blend=0.3,
+                                      dz_col=thick)
+        ledger = launch_sase_step(d["u"], d["v"], d["w"], d["theta"], d["e"],
+                                  dx=500.0, dy=500.0, dz=200.0, delta=500.0,
+                                  dt=0.5, n2=n2m, dz_col=thick, heat=heat)
+        launch_implicit_vertical_diffusion(d["qv"], ledger["kv"], dt=0.5,
+                                           dz_col=thick, floor=0.0)
+        out[f"n2_{step}"] = cp.asnumpy(n2)
+        out[f"n2m_{step}"] = cp.asnumpy(n2m)
+        for i, a in enumerate(vent):
+            out[f"vent{i}_{step}"] = cp.asnumpy(a)
+        for k in ("kv", "km_h"):
+            out[f"{k}_{step}"] = cp.asnumpy(ledger[k])
+        for k in ("dKE", "dE", "dHeat", "c_nu", "f", "dKE_expl", "dKE_impl"):
+            out[f"{k}_{step}"] = np.float64(ledger[k])
+    for k, a in d.items():
+        out[k] = cp.asnumpy(a)
+    out["heat"] = cp.asnumpy(heat)
+    out["thick"] = thick
+    return out
+
+
+@requires_gpu
+@pytest.mark.parametrize("nz", [24, 48])
+def test_sase_kmax_tier_is_bitwise_inert(monkeypatch, nz):
+    """A shallower SASE_KMAX tier moves no output bit.
+
+    Before the per-run tier every run compiled SASE_KMAX = 128.  The
+    extent only sizes per-thread arrays (no loop runs to it), so a 24-level
+    run on the 32 tier and a 48-level run on the 64 tier must reproduce the
+    128-tier binary byte for byte across every column kernel -- the
+    128-tier build of this source IS the pre-change kernel (the .cu moved
+    only in comments).  Measured against the unmodified base checkout too
+    (nz = 24, 48, 100: 38 fields each, zero bytes moved).
+    """
+    import woof.core.sase as sase
+    assert sase.kmax_tier(nz) < 128
+    tiered = _column_tier_probe(nz)
+    monkeypatch.setattr(sase, "kmax_tier", lambda _nz: 128)
+    assert dict(sase._int_defines(nz))["SASE_KMAX"] == 128
+    base = _column_tier_probe(nz)
+    assert sorted(tiered) == sorted(base)
+    moved = [k for k in tiered if tiered[k].tobytes() != base[k].tobytes()]
+    assert not moved, f"nz={nz}: SASE_KMAX tier moved {moved}"
+    assert np.count_nonzero(tiered["vent0_1"]) > 0     # plume engaged
+
+
+@requires_gpu
+def test_sase_runs_a_256_level_column():
+    """The deepest tier: every column kernel on a 256-level column.
+
+    The full kernel sequence stays finite with e floored, the plume
+    engages, and the two column kernels with a unit authority -- the
+    scalar Thomas sweep and the moist-N2 pass -- hold their established
+    parity gates against the FP64 authority at 256 levels.
+    """
+    import cupy as cp
+    import woof.core.sase as sase
+    from woof.core.sase import (launch_implicit_vertical_diffusion,
+                                launch_moist_n2, launch_n2)
+    from woof.verify.sase_ref import (E_MIN, _face_average,
+                                       brunt_vaisala_n2,
+                                       implicit_vertical_diffusion,
+                                       moist_n2)
+    nz = 256
+    assert dict(sase._int_defines(nz))["SASE_KMAX"] == 256
+    out = _column_tier_probe(nz)
+    for key, arr in out.items():
+        assert np.all(np.isfinite(arr)), key
+    assert out["e"].min() >= np.float32(E_MIN)
+    assert np.count_nonzero(out["vent0_1"]) > 0
+    assert out["kv_1"].min() >= 0.0 and out["kv_1"].max() > 0.0
+
+    thick = out["thick"]
+    # Thomas parity + conservation at 256 levels on the run's own K_v.
+    kv32 = out["kv_1"]
+    rng = np.random.default_rng(SEED + 256)
+    phi32 = (1.0 + 0.1 * rng.standard_normal(kv32.shape)).astype(np.float32)
+    phi_dev = cp.asarray(phi32)
+    launch_implicit_vertical_diffusion(phi_dev, cp.asarray(kv32), dt=400.0,
+                                       dz_col=thick)
+    ref = implicit_vertical_diffusion(
+        phi32.astype(np.float64), _face_average(kv32.astype(np.float64)),
+        400.0, dz_col=thick)
+    got = cp.asnumpy(phi_dev)
+    rel, err = _max_rel(got, ref)
+    assert rel <= 2e-6, f"256-level thomas parity {rel:.3e} (gate 2e-6)"
+    t3 = thick[:, None, None]
+    before = float(np.sum(t3 * phi32.astype(np.float64)))
+    after = float(np.sum(t3 * got.astype(np.float64)))
+    assert abs(after - before) / float(np.sum(t3 * np.abs(phi32))) <= 1e-6
+
+    # Moist N2 at 256 levels: saturated cells to the M1 gate, the rest
+    # bitwise the dry field.
+    dev = {k: cp.asarray(out[k]) for k in ("theta", "qv", "qc", "p")}
+    n2_dev = launch_n2(dev["theta"], dz_col=thick)
+    got = cp.asnumpy(launch_moist_n2(dev["theta"], dev["qv"], dev["qc"],
+                                     dev["p"], n2_dev, dz_col=thick))
+    h = {k: out[k].astype(np.float64) for k in ("theta", "qv", "qc", "p")}
+    ref = moist_n2(h["theta"], h["qv"], h["qc"], h["p"], thick)
+    mask = ref != brunt_vaisala_n2(h["theta"], None, dz_col=thick)
+    assert mask.any()
+    rel, _ = _max_rel(got[mask], ref[mask])
+    assert rel <= 2e-6, f"256-level moist_n2 parity {rel:.3e} (gate 2e-6)"
+    dry = cp.asnumpy(n2_dev)
+    assert got[~mask].tobytes() == dry[~mask].tobytes()
 
 
 def _solve_fixture32(seed, shape, e_offset, e_amp, e_floor0):
@@ -1273,8 +1444,9 @@ def test_sase_step_launcher_validation():
     with pytest.raises(ValueError, match="shape"):
         launch_sase_step(u, u, u, u, u, dx=DX, dy=DY, dz=DZ,
                          delta=DELTA, dt=0.5, heat=small)  # heat shape
-    # The in-thread Thomas sweeps bound the column depth at SASE_KMAX.
-    deep = cp.zeros((256, 4, 4), dtype=cp.float32)
+    # The in-thread Thomas sweeps bound the column depth at the deepest
+    # SASE_KMAX tier (256); a column one level deeper is refused.
+    deep = cp.zeros((257, 4, 4), dtype=cp.float32)
     with pytest.raises(ValueError, match="SASE_KMAX"):
         launch_implicit_vertical_diffusion(deep, deep, dt=1.0, dz=50.0)
     with pytest.raises(ValueError, match="SASE_KMAX"):
@@ -1905,7 +2077,7 @@ def test_split_e_update_ld_blend_endpoints_bitwise_device():
             sase._z_stencil(shape, dz=DZ)
         partials = cp.zeros((4, nblocks), dtype=cp.float64)
         lepsd = cp.asarray(leps32)
-        _kern("sase_split_e_update")(
+        _kern("sase_split_e_update", nz)(
             (nblocks,), (sase._TPB,),
             (e_dev, heat, theta, cp.asarray(n232), np.int32(1),
              e_dev, np.int32(0),                 # gated M1 dry-n2 dummy
@@ -2601,10 +2773,10 @@ def test_moist_n2_device_parity_and_unsaturated_identity():
     with pytest.raises(ValueError, match="qv"):
         launch_moist_n2(dev["theta"], bad, dev["qc"], dev["p"],
                         dev["theta"], dz_col=c["thick"])
-    deep = cp.zeros((256, 2, 2), dtype=cp.float32)
+    deep = cp.zeros((257, 2, 2), dtype=cp.float32)
     with pytest.raises(ValueError, match="SASE_KMAX"):
         launch_moist_n2(deep, deep, deep, deep, deep,
-                        dz_col=np.full(256, 50.0))
+                        dz_col=np.full(257, 50.0))
 
 
 @requires_gpu
@@ -4603,12 +4775,12 @@ def test_m2_vent_launcher_validation():
         call(rho1=cp.zeros((2, 2), dtype=cp.float32))
     with pytest.raises(ValueError, match="rho1"):
         call(rho1=cp.zeros(ok["rho1"].shape, dtype=cp.float64))
-    deep = cp.zeros((256, 2, 2), dtype=cp.float32)
+    deep = cp.zeros((257, 2, 2), dtype=cp.float32)
     with pytest.raises(ValueError, match="SASE_KMAX"):
         launch_plume_vent_flux(deep, deep, deep, deep, deep, deep, deep,
                                cp.zeros((2, 2), dtype=cp.float32),
                                f_blend=0.0,
-                               dz_col=np.full(256, 50.0))
+                               dz_col=np.full(257, 50.0))
     f_th, f_qv, f_qc = _vent_launch(dev, thick, indices=False)[:3]
     fd = [cp.asarray(a) for a in (f_th, f_qv, f_qc)]
     with pytest.raises(ValueError, match="dz_col"):
@@ -6224,7 +6396,7 @@ def test_split_e_update_additive_channel_kernel_ulp_and_controls():
             sase._z_stencil(shape, dz=DZ)
         partials = cp.zeros((4, nblocks), dtype=cp.float64)
         lepsd = cp.asarray(leps32)
-        _kern("sase_split_e_update")(
+        _kern("sase_split_e_update", nz)(
             (nblocks,), (sase._TPB,),
             (e_dev, heat, theta, cp.asarray(n232), np.int32(1),
              e_dev, np.int32(0),                 # gated M1 dry-n2 dummy

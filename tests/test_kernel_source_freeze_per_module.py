@@ -376,8 +376,11 @@ BASELINE_PINNED: dict[str, str] = {
     # 9c57c4ee9 feat(sase): CUDA mirror of the S3-12 additive e^{3/2} dissipation channel, p
     # Re-pinned for A146 (a98f2482e): constant-divisor float divisions
     # spelled __fdiv_rn.  Previously 9c49c1d0.
+    # Re-pinned for the 256-level lane: header comment only (SASE_KMAX is
+    # now compiled per run at a power-of-two tier of nz); the preprocessor
+    # drops comments, so no compiled binary moves.  Previously af8c732f.
     "sase":
-        "af8c732fbc4945c517a965a7dc4c2e931667400064d01072f27728f4a67d7ae8",
+        "c1d5aeb507bdf53d812ed1df3e04450e01c32cb190b956e782d971e8f5e1d942",
     # a084e0aeb fix(shinhong): the ULP table moved because the kernel compiler did, so it is
     # RE-PINNED 2026-09-30 by the default-pieces speed lane (878435c39):
     # the column arrays move from a 17,160 B per-thread local frame into a

@@ -88,12 +88,15 @@ SHINHONG_VERTICAL_LEVEL_BOUNDS = (4, 128)
 #: where VDIFQ's tridiagonal chain still has interior rows and MIXLEN's
 #: profile smoothing can read ``REL(K-1)``/``REL(K+1)``.
 MYJ_VERTICAL_LEVEL_BOUNDS = (4, 128)
-#: SASE.  ``SASE_KMAX`` in ``kernels/sase.cu``, which is the same number as
-#: ``woof.core.sase_limits.MAX_COLUMN_LEVELS`` and ``woof.config
-#: .SASE_MAX_NZ``: the implicit vertical solve keeps three FP64 columns of
-#: that depth in per-thread local memory.  The floor is where the solve stops
-#: being an identity -- one interior face needs two levels.
-SASE_VERTICAL_LEVEL_BOUNDS = (2, 128)
+#: SASE.  The deepest ``SASE_KMAX`` tier ``woof/core/sase.py`` compiles
+#: ``kernels/sase.cu`` at (``woof.core.sase_limits.KMAX_TIERS``; the run's
+#: own tier is the smallest power of two from 32 that holds ``nz``), which is
+#: the same number as ``woof.core.sase_limits.MAX_COLUMN_LEVELS`` and
+#: ``woof.config.SASE_MAX_NZ``: the implicit vertical solve keeps FP64
+#: columns of that depth in per-thread local memory.  256 is the dycore's own
+#: ceiling.  The floor is where the solve stops being an identity -- one
+#: interior face needs two levels.
+SASE_VERTICAL_LEVEL_BOUNDS = (2, 256)
 #: UW moist turbulence (bl_pbl_physics=9).  No ceiling: the CAM automatic
 #: arrays live in a per-column global workspace sized from nz at launch
 #: (woof/core/uwpbl.py), so no level count is compiled in.  The floor is
