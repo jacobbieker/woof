@@ -18,8 +18,13 @@
 
 // rtrnmc module data rec_6 (0.166667_rb).
 #define RLW_REC6 0.166667f
-// rlw_rtrn_march_coalesced keeps per-layer profiles in thread-local arrays.
+// rlw_rtrn_march_coalesced keeps per-layer profiles in thread-local arrays.  The
+// host compiles a deeper column with RLW_MAXLAY defined ahead of this unit
+// (woof.physics_vertical_contract.legacy_longwave_layer_tier); 128 is the
+// shipped default every column of at most 128 layers runs.
+#ifndef RLW_MAXLAY
 #define RLW_MAXLAY 128
+#endif
 
 // ---------------------------------------------------------------------
 // inatm -- one thread per column, serial layers (sequential amttl/wvttl

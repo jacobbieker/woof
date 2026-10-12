@@ -145,14 +145,18 @@ from woof.core import rrtmg_sw as _sw
 from woof.core import rrtmg_aerosol_optics as _aer3
 
 __all__ = [
-    "MAX_LONGWAVE_LAYERS", "MAX_SHORTWAVE_LAYERS",
+    "MAX_LONGWAVE_MODEL_LEVELS", "MAX_SHORTWAVE_LAYERS",
     "ParentOzoneProvider", "RRTMGLegacyRadiation",
     "legacy_radiation_layer_counts", "legacy_radiation_vram_bytes",
     "radconst", "calc_coszen",
 ]
 
 F = np.float32
-MAX_LONGWAVE_LAYERS = _lw.MAX_RADIATION_LAYERS
+#: The LW engine compiles its per-thread column for the run's layer count
+#: (woof.core.rrtmg_lw.rlw_maxlay_tier), so its bound is the model depth:
+#: the dynamical core's own nz ceiling, plus WRF's buffer layers above it.
+from woof.physics_vertical_contract import (  # noqa: E402
+    MAX_LEGACY_LONGWAVE_MODEL_LEVELS as MAX_LONGWAVE_MODEL_LEVELS)
 MAX_SHORTWAVE_LAYERS = _sw.MAX_RADIATION_LAYERS
 
 
@@ -1568,11 +1572,11 @@ class RRTMGLegacyRadiation:
                     "state.p_top) to build WRF's Cavallo buffer layers")
             p_top = float(declared)
         nlayers, sw_layers = legacy_radiation_layer_counts(nz, p_top)
-        if self.longwave and nlayers > MAX_LONGWAVE_LAYERS:
+        if self.longwave and nz > MAX_LONGWAVE_MODEL_LEVELS:
             raise ValueError(
-                f"LW nlayers={nlayers} exceeds the batched engine's "
-                f"{MAX_LONGWAVE_LAYERS}-layer bound "
-                "(rlw_rtrn_march RLW_MAXLAY)")
+                f"legacy RRTMG LW supports nz <= {MAX_LONGWAVE_MODEL_LEVELS} "
+                f"model levels (plus WRF's buffer layers above p_top), got "
+                f"nz={nz} ({nlayers} radiation layers)")
 
         mp_physics = int(getattr(cfg, "mp_physics", 0))
         warm_rain = mp_physics == 1

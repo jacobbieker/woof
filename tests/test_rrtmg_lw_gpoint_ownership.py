@@ -291,8 +291,8 @@ def test_public_batched_fluxes_match_wrf_after_poison(native_deck, monkeypatch, 
     original = lw._gpu_kernel
     launches = []
 
-    def kernel(name):
-        function = original(name)
+    def kernel(name, *tier):
+        function = original(name, *tier)
         if name != "rlw_taumol_batched":
             return function
 

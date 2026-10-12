@@ -2229,25 +2229,28 @@ not a limitation, and it is why HRRR's default differs from the others'.
 
 Three consequences worth stating plainly:
 
-* **Layer ceiling.** The default carries the same one the legacy arm
-  does: **both** 4/4 engines bound a longwave column at 128 radiation
-  layers. The legacy number is `RLW_MAXLAY`, a compile-time constant of
-  the longwave chain kernel (`woof/core/kernels/rrtmg_lw_chain.cu`,
-  asserted host-side as `MAX_RADIATION_LAYERS` in
-  `woof/core/rrtmg_lw.py`); the modern one is owned by the
+* **Layer ceiling.** The two 4/4 engines bound a longwave column
+  differently. The legacy arm's `RLW_MAXLAY` (the per-thread column of
+  the longwave chain kernel, `woof/core/kernels/rrtmg_lw_chain.cu`) is
+  compiled per run for the run's layer count -- the shipped 128 for any
+  column of at most 128 layers, otherwise the count rounded up to a
+  multiple of 64 (`legacy_longwave_layer_tier`) -- so the legacy arm is
+  bounded by model depth alone: `nz <= 256`, the dynamical core's own
+  ceiling (`MAX_LEGACY_LONGWAVE_MODEL_LEVELS`), with WRF's 4 hPa buffer
+  layers above the model top carried on top of it (256 + nint(p_top /
+  400 Pa) layers; none at a 1 hPa top). The modern bound is owned by the
   Planck-source kernel's fixed `pfrac[128]` (`woof/core/rrtmgp.py`),
   while the RTE solvers themselves compile to the run's own layer count
-  and add no bound of their own. Both numbers are declared once, as
-  `MAX_LEGACY_LONGWAVE_LAYERS` and `MAX_RRTMGP_LAYERS` in
-  `woof/physics_vertical_contract.py`, and both are refused by number
-  in the resolved vertical preflight (`woof.physics_compat`), before
-  anything is paid for. A column carries more layers than the ladder
-  has levels because a cap is built above the model top either way, and
-  at `p_top = 5000` Pa the two arms add the same 13 longwave layers: a
-  51-level ladder is 64 longwave layers on both, 115 levels reach the
-  bound exactly, and 116 levels are refused on both. Earlier revisions
-  of this page called 64 a wrapper cap; it is not a cap at all, it is
-  the layer count that ladder reaches. The one asymmetry is shortwave:
+  and add no bound of their own. Both are declared once in
+  `woof/physics_vertical_contract.py` (`MAX_LEGACY_LONGWAVE_MODEL_LEVELS`,
+  `MAX_RRTMGP_LAYERS`) and refused by number in the resolved vertical
+  preflight (`woof.physics_compat`), before anything is paid for. A
+  column carries more layers than the ladder has levels because a cap is
+  built above the model top either way: at `p_top = 5000` Pa both arms
+  add 13 longwave layers, so a 51-level ladder is 64 longwave layers on
+  both; the modern arm reaches its bound at 115 levels, the legacy arm
+  at 256. Earlier revisions of this page called 64 a wrapper cap; it is
+  not a cap at all, it is the layer count that ladder reaches. Shortwave:
   the legacy shortwave workspace is sized at run time and declares no
   ceiling (`woof/core/rrtmg_sw.py`), while the modern arm holds both
   streams to the same 128.

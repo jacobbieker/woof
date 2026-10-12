@@ -1557,9 +1557,14 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "rrtmg_lw.cu + rrtmg_lw_chain.cu + its address-only twin "
         "rrtmg_lw_chain_coalesced.cu + the four rrtmg_lw_taugb* band "
         "fragments + the batched entries rrtmg_lw_zbatched.cu as one unit (woof/core/rrtmg_lw.py section 10); the "
-        "fragments fail NVRTC standalone.  Priced 2,048 B from a single "
-        "sm_120 / cupy 14.0.1 reading, 2026-07-27; bounded on a device by "
-        "tests/test_rrtmg_lw_cuda.py (LOCAL_FRAME_BOUNDS).",
+        "fragments fail NVRTC standalone.  Priced 2,048 B at the shipped "
+        "RLW_MAXLAY = 128 tier from a single sm_120 / cupy 14.0.1 reading, "
+        "2026-07-27; deeper per-run tiers (a column past 128 layers) at "
+        "16 B per tier layer (preflight.rrtmg_lw_legacy_chain_frame_bytes), "
+        "a law read exactly on sm_86 at NVRTC 12.9 and 13.4 for RLW_MAXLAY "
+        "64..384 on 2026-10-12 and not re-measured on sm_120/sm_89; "
+        "bounded on a device by tests/test_rrtmg_lw_cuda.py "
+        "(LOCAL_FRAME_BOUNDS) and tests/test_rrtmg_lw_deep_columns.py.",
     "rrtmg_sw_legacy":
         "rrtmg_sw.cu through its own unit (woof/core/rrtmg_sw.py); the "
         "fragment fails NVRTC standalone.  Priced 0 B from the same "

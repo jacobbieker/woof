@@ -2267,10 +2267,10 @@ def validate_resolved_physics_vertical_levels(
 
     from woof.physics_registry import CONSUMER_ROWS_KEY
     from woof.physics_vertical_contract import (
-        MAX_LEGACY_LONGWAVE_LAYERS,
         MAX_LEGACY_SHORTWAVE_LAYERS,
         MAX_RRTMGP_LAYERS,
         legacy_radiation_layer_counts,
+        max_legacy_longwave_layers,
         rrtmgp_above_model_layer_counts,
     )
 
@@ -2304,8 +2304,11 @@ def validate_resolved_physics_vertical_levels(
         top_pressure = 0.0 if p_top is None else float(p_top)
         if rrtmg_variant(settings) == RRTMG_VARIANT_LEGACY:
             lw_layers, sw_layers = legacy_radiation_layer_counts(nz, top_pressure)
+            # The LW maximum is the model-depth ceiling plus THIS run's cap
+            # layers, so exceeding it is exactly nz > 256 at any p_top.
             for index, kind, total, maximum in (
-                    (0, "longwave", lw_layers, MAX_LEGACY_LONGWAVE_LAYERS),
+                    (0, "longwave", lw_layers,
+                     max_legacy_longwave_layers(top_pressure)),
                     (1, "shortwave", sw_layers, MAX_LEGACY_SHORTWAVE_LAYERS)):
                 if pair[index] != 4:
                     continue
@@ -2314,7 +2317,8 @@ def validate_resolved_physics_vertical_levels(
                     "total_layers": total, "maximum": maximum})
                 if maximum is not None and total > maximum:
                     violations.append(f"legacy RRTMG {kind} requires model plus cap layers "
-                        f"<= {maximum}, got {nz}+{total - nz}={total}")
+                        f"<= {maximum} (nz <= {maximum - (total - nz)}), "
+                        f"got {nz}+{total - nz}={total}")
         else:
             lw_upper, sw_upper = rrtmgp_above_model_layer_counts(top_pressure)
             for index, kind, upper in ((0, "longwave", lw_upper), (1, "shortwave", sw_upper)):

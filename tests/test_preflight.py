@@ -4234,6 +4234,32 @@ CONFIG_4DOM_MYNN_KF = ROOT / "configs" / "real74_4dom_mynn_norad.toml"
 CONFIG_4DOM_MYNN_NOCU = (
     ROOT / "configs" / "real74_4dom_mynn_norad_nocu.toml")
 
+@pytest.mark.parametrize(
+    ("nz", "p_top", "frame"),
+    # (nz + nint(p_top / 400 Pa)) radiation layers -> RLW_MAXLAY tier
+    # (128, else a multiple of 64) -> 16 B per tier layer.
+    ((40, 0.0, 2048), (128, 0.0, 2048), (129, 0.0, 3072),
+     (200, 0.0, 4096), (256, 0.0, 4096), (256, 100.0, 4096),
+     (256, 5000.0, 5120), (100, 26000.0, 3072)))
+def test_legacy_lw_chain_frame_follows_the_compiled_layer_tier(
+        nz, p_top, frame):
+    """The legacy LW unit's ``rlw_rtrn_march`` column is compiled at the
+    run's ``RLW_MAXLAY`` tier, so its frame -- and the launch-time
+    backing store -- is priced per layer of that tier (measured exactly
+    16 B x RLW_MAXLAY on sm_86 at NVRTC 12.9 and 13.4; the 2,048 B
+    shipped-tier row is the sm_120 reading too)."""
+    run = RunConfig(**dict(_TINY, nz=nz), ra_physics=4,
+                    ra_rrtmg_variant="rrtmg_legacy")
+    exp = experiment_from_run_config(run, datetime(1974, 4, 3, 12))
+    exp = dataclasses.replace(
+        exp, vertical=dataclasses.replace(exp.vertical, p_top=p_top))
+    assert pf.rrtmg_lw_legacy_chain_frame_bytes(
+        nz + int(p_top / 400.0 + 0.5)) == frame
+    assert pf.kernel_local_frame_bytes(exp)["rrtmg_lw_legacy_chain"] == frame
+    assert (pf.kernel_local_memory_bytes(exp)
+            >= pf.MEASURED_LOCAL_MEMORY_PROFILE.reservation_bytes(frame))
+
+
 #: The per-thread frame ``kf_column`` compiled to BEFORE its column
 #: workspace landed (2026-08-21): 188 B per level, rounded up to the local
 #: frame's 8-byte granularity, at whatever ``KF_KMAX`` the launcher chose.
