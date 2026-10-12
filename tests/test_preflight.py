@@ -4676,9 +4676,6 @@ def test_rrtmgp_rte_is_priced_per_radiation_layer_above_128():
     assert priced(256, ra_lw_physics=0, ra_sw_physics=0) is None
 
 
-    """Both rungs, against the driver measurements they were taken from.
-
-
 def test_sase_is_priced_at_the_tier_its_launcher_compiles():
     """SASE compiles ``SASE_KMAX`` per run at 32 / 64 / 128 / 256.
 
