@@ -3395,7 +3395,7 @@ def test_check_cli_estimator_json(capsys):
     assert frames_4dom["rrtmgp_rte"] == 3600
     assert frames_4dom["morrison"] == max(frames_4dom.values()) == 5120
     assert "kf" in payload["kernel_modules"]
-    assert frames_4dom["kf"] == 512
+    assert frames_4dom["kf"] == 1024  # 512 until KF_KMAX 128 -> 256
     assert pf.kf_column_workspace_bytes(
         exp_4dom, profile=reference) == 443555840
     # Same +349,962,240 B context shift as ``reserve_bytes`` above, the
@@ -4265,13 +4265,14 @@ def test_the_local_memory_law_reproduces_every_measurement():
                 f"vs measured {measured_mib} MiB")
     # MEASURED_KF_RESERVATION_MIB was read off `kf_column`'s first launch
     # at KF_KMAX = 128, so the law is checked against THAT frame and not
-    # against today's row -- today's row is 512 B and reserves nothing,
-    # which is the point of the workspace, not a counter-example to the law.
+    # against today's row -- today's row is 1,024 B (512 B until KF_KMAX
+    # went 128 -> 256) and reserves nothing, which is the point of the
+    # workspace, not a counter-example to the law.
     kf_predicted = profile.reservation_bytes(
         KF_AS_BUILT_FRAME.frame_bytes(128)) / 1024 ** 2
     assert abs(kf_predicted - MEASURED_KF_RESERVATION_MIB) <= 1.0
-    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 512
-    assert profile.reservation_bytes(512) == 0
+    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 1024
+    assert profile.reservation_bytes(1024) == 0
 
 
 def test_a_frame_inside_the_default_stack_reserves_nothing():
@@ -4304,7 +4305,7 @@ def test_the_reservation_does_not_grow_with_domain_count():
             == pf.kernel_local_memory_bytes(exp4)
             == pf.MEASURED_LOCAL_MEMORY_PROFILE.reservation_bytes(5120))
     # ... and it is no longer `kf` that sets it.
-    assert pf.kernel_local_frame_bytes(exp4)["kf"] == 512
+    assert pf.kernel_local_frame_bytes(exp4)["kf"] == 1024
 
 
 @requires_reference_bundle
@@ -4314,7 +4315,8 @@ def test_the_kf_reservation_stopped_growing_with_the_level_count():
     Its frame used to be 188 B per level -- 9,216 B at 49, 18,424 B at 98 --
     which is why preflight priced it per domain.  The column workspace
     (2026-08-21) took 52 of its 54 column arrays off the stack, so the frame
-    is now a flat 512 B at every level count and the module is compiled ONCE
+    is now a flat 512 B (1,024 B since KF_KMAX went 128 -> 256) at every
+    level count and the module is compiled ONCE
     instead of once per nz.  A level-linear model would now UNDER-price
     nothing and OVER-price everything, so it is retired rather than refitted;
     `refl` still carries one and still moves.
@@ -4324,8 +4326,8 @@ def test_the_kf_reservation_stopped_growing_with_the_level_count():
         dataclasses.replace(dc, run=dataclasses.replace(dc.run, nz=98))
         for dc in exp.domains))
     assert "kf" not in pf.LEVEL_SPECIALIZED_KERNEL_FRAMES
-    assert pf.kernel_local_frame_bytes(exp)["kf"] == 512
-    assert pf.kernel_local_frame_bytes(deeper)["kf"] == 512
+    assert pf.kernel_local_frame_bytes(exp)["kf"] == 1024
+    assert pf.kernel_local_frame_bytes(deeper)["kf"] == 1024
     # The model that IS still level-specialized still grows with nz.
     refl = pf.LEVEL_SPECIALIZED_KERNEL_FRAMES["refl"]
     assert refl.frame_bytes(98) > refl.frame_bytes(49)
@@ -4686,8 +4688,9 @@ def test_the_widest_frame_is_no_longer_the_cumulus_kernel():
 
     History in one place: `kf_column` held 24,064 B at the unspecialized
     KF_KMAX = 128, then 9,216 B once the bound compiled to nz = 49
-    (2026-07-26), and now 512 B with its column arrays in a global
-    workspace (2026-08-21).  Under the 1,024 B default stack it reserves
+    (2026-07-26), then 512 B with its column arrays in a global
+    workspace (2026-08-21), and 1,024 B since KF_KMAX went 128 -> 256
+    (2026-10-12).  At or under the 1,024 B default stack it reserves
     NOTHING, so the widest launched frame here is `morrison`'s 5,120 B --
     the runner-up that never moved.  Nothing MYNN owns has ever been in
     this contest; that is the other half of the claim and it still holds.
@@ -4697,8 +4700,8 @@ def test_the_widest_frame_is_no_longer_the_cumulus_kernel():
     widest = max(frames, key=lambda m: frames[m])
     assert widest == "morrison"
     assert frames["morrison"] == 5120
-    assert frames["kf"] == 512
-    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 512
+    assert frames["kf"] == 1024
+    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 1024
     assert pf.MEASURED_LOCAL_MEMORY_PROFILE.reservation_bytes(
         frames["kf"]) == 0
     assert max(f for m, f in frames.items() if m.startswith("mynn")) == 0
@@ -5037,7 +5040,11 @@ def test_the_recorded_local_frames_match_the_driver():
 
     kdir = ROOT / "woof" / "core" / "kernels"
     symbol = re.compile(
-        r'extern\s+"C"\s+__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)')
+        # ``__launch_bounds__`` may sit between ``__global__`` and ``void``
+        # (kf_column, noah_column): without it they were read as absent.
+        r'extern\s+"C"\s+__global__\s+'
+        r'(?:__launch_bounds__\s*\([^)]*\)\s*)?'
+        r'void\s+([A-Za-z_][A-Za-z0-9_]*)')
     probe = subprocess.run(
         [sys.executable, "-c",
          "import cupy as cp\n"

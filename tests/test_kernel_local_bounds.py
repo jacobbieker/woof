@@ -234,13 +234,14 @@ def test_the_unspecialized_source_still_compiles_to_the_recorded_ceiling():
     would silently be describing a different binary."""
     from woof.core.kernels import get_kernel
 
-    # 512, not 24,064: ``kf``'s row is no longer a ceiling over a family of
-    # bounds, it is the ONE frame the one compiled binary holds, because
+    # 1,024, not 24,064: ``kf``'s row is no longer a ceiling over a family
+    # of bounds, it is the ONE frame the one compiled binary holds, because
     # the launcher stopped specializing when the column arrays left the
     # stack.  The assertion is the same claim -- the recorded row is what
-    # this source compiles to -- against a source that changed.
+    # this source compiles to -- against a source that changed.  (512 B
+    # until KF_KMAX went 128 -> 256; read 1,024 B on sm_86, NVRTC 12.9.86.)
     assert int(get_kernel("kf", "kf_column").attributes["local_size_bytes"]
-               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 512
+               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 1024
     assert int(get_kernel("refl", "refl10cm_morrison_column")
                .attributes["local_size_bytes"]
                ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["refl"] == 18432
@@ -316,8 +317,9 @@ def test_kf_is_bitwise_identical_at_the_specialized_bound():
 
     It survives the column workspace with its meaning INTACT but narrower.
     ``KF_KMAX`` now sizes only ``tv_env`` and ``positive_energy``, the two
-    arrays that stayed on the stack, so the frames it compares are 512 B
-    and 200 B rather than 24,064 B and 9,216 B.  The 52 in the workspace
+    arrays that stayed on the stack, so the frames it compares are 1,024 B
+    (512 B before KF_KMAX went 128 -> 256) and 200 B rather than 24,064 B
+    and 9,216 B.  The 52 in the workspace
     are sized by the runtime ``nz`` in BOTH arms, and their out-of-bounds
     check is tests/test_kf_workspace.py's residue gate instead.
     """
@@ -474,8 +476,8 @@ def test_the_production_launchers_compile_to_the_field_not_the_ceiling():
                 if row[0] == "plain" and row[1] == "refl"]
     # KF asks for the PLAIN kernel now, and that is the point: with its
     # column arrays in a global workspace, ``KF_KMAX`` sizes 8 B per level
-    # instead of 188, the frame is 512 B either way and reserves nothing
-    # either way, so a compile per distinct level count buys nothing.  The
+    # instead of 188, the frame is at most 1,024 B (KF_KMAX = 256) and
+    # reserves nothing either way, so a compile per distinct level count buys nothing.  The
     # regression this half guards is the opposite of the other half's: a
     # kf launcher that started specializing again would recompile the
     # module once per nz for no bytes.
@@ -490,8 +492,8 @@ def test_the_ceiling_is_still_refused_above_the_compiled_bound():
     from woof.core import kf as kfmod
     from woof.core import refl as reflmod
 
-    with pytest.raises(ValueError, match="KF requires 8 <= nz <= 128"):
-        kfmod.kernel_capacity(129)
+    with pytest.raises(ValueError, match="KF requires 8 <= nz <= 256"):
+        kfmod.kernel_capacity(257)
     with pytest.raises(ValueError, match="exceeds REFL_KMAX=256"):
         reflmod.kernel_capacity(257)
 

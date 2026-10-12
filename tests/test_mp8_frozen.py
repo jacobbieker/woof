@@ -692,8 +692,17 @@ FROZEN_MODULE_DIGESTS = {
         # / C as a multiply by the rounded reciprocal on Blackwell targets.
         # Reading: sm_89 unchanged; Blackwell cards now round these quotients
         # IEEE-correctly. Previously 30308b1b/7d81bfc9.
-        '9aacb2a0941882da4705e52265f1038b6c819500fe16d6a62689d6b8af51027d',
-        'fa65105d02ebcebce435a99d3017ce9333eaa8bede9399f9aaecdec4d05e382f'),
+        #
+        # RE-PINNED 2026-10-12 (levels256/guards): KF_KMAX 128 -> 256, the
+        # dycore's level ceiling.  It sizes only the refusal and the two
+        # stack-resident arrays (frame 512 -> 1,024 B on sm_86, NVRTC
+        # 12.9.86, still at the default stack).  Reading: every output word
+        # of every KFPhaseMode bit-identical to the 128-level source at
+        # nz <= 128 (tests/test_physics_256_levels_gpu.py), and
+        # tests/test_kernel_local_bounds.py's KF_KMAX = nz A/B unchanged.
+        # Previously 9aacb2a0/fa65105d.
+        '6b536e6199ff5eb0a852b98971f5701414f4ef5f265f97a32a0dec9af54d0213',
+        '633c43ad42ae3042ffcbdc992787d3e2c001c7b531ef708ea1d0b0fc229f9b95'),
     'lbc_flow': (
         # 4febd041f supplies resolved WDM6/NSSL inflow concentrations.
         # docs/dev/qnn-specified-inflow.md records 4 CPU + 10 GPU
@@ -1788,8 +1797,16 @@ FROZEN_MODULE_DIGESTS = {
         # loader's effective options), and tests/test_ysu_wrf461_parity.py's
         # ULP table did not move on either card.  The arm is graded against
         # WRF v4.7.1 by tests/test_terrain_drag_wrf471_parity.py.
-        '2ce2203aca80967d48843d1de9ffdb1c85c18fe3ab17a03f9a91fdeb4c3c94bc',
-        '01cd5d4c3967a5af0e38a5b7554a909dc4012a07ef7b3b8410a03825f95c8d29'),
+        #
+        # RE-PINNED 2026-10-12 (levels256/guards): YSU_KMAX 128 -> 256, the
+        # dycore's level ceiling.  A refusal guard only (no array is sized
+        # by it); frame 0 B before and after on sm_86.  The edit is the one
+        # digit, so every line the registry cites keeps its number.  Reading: every
+        # output word bit-identical to the 128-level source at nz <= 128
+        # (tests/test_physics_256_levels_gpu.py).  Previously
+        # 2ce2203a/01cd5d4c.
+        'aa96755cc85a417be59fe62ef13a8a8fefd967d4ce32936ee74e7e77cb0d3382',
+        '0d81fd98095161eff5ba386610d46ff4e53f9ccce89b95efcf56c9676e30597b'),
 }
 
 # -- R2 --------------------------------------------------------------------

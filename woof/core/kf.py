@@ -22,9 +22,11 @@ _TPB = 256
 _WS_LANES = 32
 _VALIDATION_TPB = 256
 #: ``KF_KMAX`` in ``kernels/kf.cu`` and the ceiling on nz.  It is a REFUSAL
-#: ceiling and nothing else since the column workspace landed: no array in
-#: that file is sized by it.
-_KMAX = 128
+#: ceiling since the column workspace landed, and otherwise sizes only the
+#: two arrays kept on the stack for bit-identity (``tv_env`` and
+#: ``positive_energy``, docs/kernel_local_memory_bounds.md section 9).  It
+#: sits at the dynamical core's 256-level ceiling.
+_KMAX = 256
 VERTICAL_LEVEL_BOUNDS = (8, _KMAX)
 DTYPE = np.float32
 
@@ -97,8 +99,9 @@ def kf_tile_columns(fn, ncol: int) -> int:
 def kernel_capacity(nz: int) -> int:
     """Validate ``nz`` against ``KF_KMAX`` and return it.
 
-    Nothing in ``kernels/kf.cu`` is sized by ``KF_KMAX`` any more -- the
-    column arrays live in a runtime-sized global workspace -- so the module
+    Nothing in ``kernels/kf.cu`` but the two stack-resident arrays is sized
+    by ``KF_KMAX`` any more -- the column arrays live in a runtime-sized
+    global workspace -- so the module
     is compiled ONCE, at the source's own ceiling, instead of once per
     distinct level count.  What this still owns is the contract the ceiling
     names: ``nz`` past it is refused rather than silently truncated, which is

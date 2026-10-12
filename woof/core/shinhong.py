@@ -41,7 +41,10 @@ from woof.core.physics_inventory import (
 
 _TPB = SHINHONG_BLOCK
 _VALIDATE_TPB = 256
-_KMAX = 128
+#: ``SHINHONG_KMAX`` in ``kernels/shinhong.cu``: a refusal ceiling only.  The
+#: column arrays are in a global workspace sized ``nz + 2`` per slot at
+#: launch, so nothing is sized by it; it sits at the dycore's 256 levels.
+_KMAX = 256
 
 #: The launcher's first-call vertical bound, restated for front doors by
 #: ``woof.physics_vertical_contract.SHINHONG_VERTICAL_LEVEL_BOUNDS`` and
@@ -118,9 +121,11 @@ def launch_shinhong(u, v, theta, qv, qc, qi, p, p_interface, exner, dz,
         raise refuse_vertical_levels(
             "Shin-Hong PBL", VERTICAL_LEVEL_BOUNDS, nz,
             breakage=(
-                "one CUDA thread owns a whole column and holds it in "
-                f"a global column workspace bounded by SHINHONG_KMAX={_KMAX} "
-                "(kernels/shinhong.cu), and the scheme's YSU-inherited "
+                "one CUDA thread owns a whole column, held in a global "
+                "column workspace sized to the runtime nz, and the kernel "
+                f"refuses any column deeper than SHINHONG_KMAX={_KMAX} "
+                "(kernels/shinhong.cu), the dynamical core's own ceiling; "
+                "the scheme's YSU-inherited "
                 "counter-gradient and entrainment indexing needs four levels "
                 "to exist."))
     for name, arr in columns.items():

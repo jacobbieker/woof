@@ -2296,6 +2296,22 @@ def validate_resolved_physics_vertical_levels(
             bounded(str(window["label"]),
                     (window.get("minimum"), window.get("maximum")))
 
+    # Orographic gravity-wave drag is a run setting (``gwd_opt``), not a
+    # registry component, so it has no consumer row to read; its per-thread
+    # stress profile is sized by ``TD_KMAX`` and a deeper column used to
+    # pass every gate and fail at the first PBL-driver call.
+    raw_gwd = _selection_value(settings, "gwd_opt")
+    try:
+        gwd_opt = (0 if raw_gwd is None or isinstance(raw_gwd, bool)
+                   else int(raw_gwd))
+    except (TypeError, ValueError):
+        gwd_opt = 0
+    if gwd_opt in (1, 3):
+        from woof.physics_vertical_contract import (
+            TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS)
+        bounded(f"Terrain drag gwd_opt={gwd_opt}",
+                TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS)
+
     from types import SimpleNamespace
     from woof.config import radiation_scheme_ids
     radiation_settings = (SimpleNamespace(**settings) if isinstance(settings, Mapping) else settings)

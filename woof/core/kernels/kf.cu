@@ -11,17 +11,17 @@
  *   3009-3039  KF_LUTAB bilinear interpolation
  */
 
-/* KF_KMAX is now the REFUSAL CEILING and nothing else.  It used to be the
- * compile-time extent of kf_column's column arrays, and gpuwm/core/kf.py
- * recompiled the module once per distinct nz to shrink it; those arrays
- * moved off the per-thread stack into a global workspace on 2026-08-21
- * (see below), the workspace extent is the RUNTIME nz, and no array in this
- * file is sized by KF_KMAX any more.  What survives is the contract: nz
+/* KF_KMAX is the REFUSAL CEILING (the dycore's 256) and sizes only the two
+ * stack arrays kept for bit-identity (tv_env, positive_energy).  It used to
+ * size all of kf_column's column arrays, and gpuwm/core/kf.py recompiled
+ * the module once per distinct nz to shrink it; those arrays moved off the
+ * per-thread stack into a global workspace on 2026-08-21 (see below), whose
+ * extent is the RUNTIME nz.  What survives is the contract: nz
  * outside [8, KF_KMAX] is refused, here and in gpuwm/core/kf.py's
  * VERTICAL_LEVEL_BOUNDS, rather than silently truncated.
  */
 #ifndef KF_KMAX
-#define KF_KMAX 128
+#define KF_KMAX 256
 #endif
 
 /* ==========================================================================
@@ -533,8 +533,8 @@ void kf_column(
     // dilbe*9.81f); forced into memory, the store breaks the fusion and the
     // CAPE closure amplifies the difference.  Leaving them declared is what
     // keeps ptxas making the same choice, and it costs nothing worth
-    // counting: 512 B of frame at KF_KMAX = 128, half the 1,024 B default
-    // stack, so the driver still reserves exactly zero.
+    // counting: 1,024 B of frame at KF_KMAX = 256 (sm_86, 512 B at 128), AT
+    // the 1,024 B default stack, so the driver still reserves exactly zero.
     float tv_env[KF_KMAX];
     float positive_energy[KF_KMAX];
     float z_interface = 0.0f;

@@ -389,8 +389,12 @@ BASELINE_PINNED: dict[str, str] = {
     # Re-pinned for A146 on top of that: constant-divisor float divisions
     # spelled __fdiv_rn, because NVRTC compiles x / C as a multiply by the
     # rounded reciprocal on Blackwell targets. Previously be8bf6ea.
+    # Re-pinned 2026-10-12 (levels256/guards): SHINHONG_KMAX 128 -> 256, a
+    # refusal guard only (frame 0 B before and after on sm_86); every output
+    # word bit-identical to the 128-level source at nz <= 128
+    # (tests/test_physics_256_levels_gpu.py).  Previously 6fd615d0.
     "shinhong":
-        "6fd615d06165a26b806fa768e1088f9af1976ead1eedad447aa49474787109b7",
+        "f1184b751c0898936e3090a9512a7aeb1186a6c0e63182639e230192fc606949",
     # 58dfd599c feat(shinhong): CUDA mirror on the RTX 5090 -- dtheta bitwise, br DAZ counte
     "shinhong_validation":
         "e3714616c403a3f272600499164cf9b0215879d567dadcda31287dd33c600b87",
@@ -632,8 +636,13 @@ BASELINE_PINNED: dict[str, str] = {
     # Re-pinned for the SASE upper-bracket PBL-top helper.  The complete
     # module, its bit oracles, helper and mutation controls pass on
     # sm_89 and sm_120; the WRF scheme arithmetic is unchanged.
+    # Re-pinned 2026-10-12 (levels256/guards): TD_KMAX 128 -> 256, the
+    # dycore's level ceiling; the stress profiles double (KIM 640 -> 1,152 B,
+    # GSL 1,184 -> 2,208 B on sm_86, NVRTC 12.9.86).  Every output word
+    # bit-identical to the 128-level source at nz <= 128
+    # (tests/test_physics_256_levels_gpu.py).  Previously eff25247.
     "terrain_drag":
-        "eff252477f8d467e16b179023b8857ffd95feeedb94110ee72fe0d7a879e79d3",
+        "7bb86babae6e2ee53b5072a27a0e343bc64b3f125400120688f44c500c11e80f",
     # ebcf4edd2 lane/urban-bep: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
     "urban_bep":

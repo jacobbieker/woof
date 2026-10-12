@@ -38,16 +38,16 @@ def _selection(nz: int, **overrides):
         # memory at a compiled KMAX, and their implicit vertical solves need
         # a minimum number of interior rows.  Both ends are first-call
         # rejections inside the launcher, so both belong in the preflight.
-        ("YSU PBL", {"bl_pbl_physics": 1}, 128, 129),
+        ("YSU PBL", {"bl_pbl_physics": 1}, 256, 257),
         ("YSU PBL", {"bl_pbl_physics": 1}, 4, 3),
         ("MYJ PBL", {"bl_pbl_physics": 2}, 128, 129),
         ("MYJ PBL", {"bl_pbl_physics": 2}, 4, 3),
-        ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 128, 129),
+        ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 256, 257),
         ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 4, 3),
         ("SASE PBL", {"bl_pbl_physics": 900}, 128, 129),
         ("SASE PBL", {"bl_pbl_physics": 900}, 2, 1),
         ("Kain-Fritsch cumulus", {"cu_physics": 1}, 8, 7),
-        ("Kain-Fritsch cumulus", {"cu_physics": 1}, 128, 129),
+        ("Kain-Fritsch cumulus", {"cu_physics": 1}, 256, 257),
         # GF's floor is the inversion-layer search window (kend clamps to
         # ktf-8, the stencil then reaches ktf-1); no upper bound -- the
         # kernel recompiles its level bound through the int-define tier.
@@ -69,6 +69,10 @@ def _selection(nz: int, **overrides):
         ("WDM6 microphysics", {"mp_physics": 16}, 80, 81),
         ("P3 microphysics", {"mp_physics": 50}, 1, 0),
         ("New Tiedtke cumulus", {"cu_physics": 16}, 4, 3),
+        # Orographic drag is a run setting, not a registry component; its
+        # per-thread stress profile is sized by TD_KMAX = 256.
+        ("Terrain drag gwd_opt=1", {"gwd_opt": 1}, 256, 257),
+        ("Terrain drag gwd_opt=3", {"gwd_opt": 3}, 256, 257),
     ),
 )
 def test_component_owned_model_level_bound_inside_and_outside(
@@ -146,7 +150,7 @@ def test_preflight_aggregates_more_than_one_resolved_component_failure():
         ))
     message = str(caught.value)
     assert "MYNN PBL requires nz >= 5" in message
-    assert "Kain-Fritsch cumulus requires 8 <= nz <= 128" in message
+    assert "Kain-Fritsch cumulus requires 8 <= nz <= 256" in message
     assert "NSSL-2 microphysics" not in message
 
 

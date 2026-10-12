@@ -360,8 +360,10 @@ These are limits of the current build, not opinions about LES.
   | RTE+RRTMGP, longwave | model + cap layers <= 128 | **115** |
   | legacy RRTMG, longwave | model + cap layers <= 128 | **115** |
   | WSM6 microphysics | `nz <= 80` | 80 |
-  | Kain-Fritsch cumulus | `nz <= 128` | 128 |
-  | YSU / Shin-Hong / MYJ PBL, SASE | `nz <= 128` | 128 |
+  | MYJ PBL, SASE | `nz <= 128` | 128 |
+  | Kain-Fritsch cumulus | `nz <= 256` | 256 |
+  | YSU / Shin-Hong PBL | `nz <= 256` | 256 |
+  | terrain drag (`gwd_opt` 1 or 3) | `nz <= 256` | 256 |
   | Kessler / Thompson / Thompson-aerosol / Morrison / NSSL-2 | `nz <= 256` | 256 |
   | MYNN PBL, Grell-Freitas cumulus | none | 256 (the solver's) |
   | acoustic solve | `nz <= 256` | 256 |

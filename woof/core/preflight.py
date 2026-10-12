@@ -1906,12 +1906,15 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # 512 B, not 0: ``tv_env`` and ``positive_energy`` stay on the stack
     # because they are the only two whose PLACEMENT moves an output bit
     # (kf.cu says why), and at the unspecialized KF_KMAX = 128 the compiler
-    # materialises 512 B of them.  That is half the 1,024 B default stack,
-    # so the row reserves nothing on any card -- and it no longer moves
-    # with nz, which is what retired kf's LEVEL_SPECIALIZED_KERNEL_FRAMES
-    # entry and the per-nz recompile that entry priced.
+    # materialised 512 B of them.  KF_KMAX went 128 -> 256 on 2026-10-12
+    # (the dycore's level ceiling), which doubles them: 1,024 B, read on
+    # sm_86 at NVRTC 12.9.86.  That is AT the 1,024 B default stack, so the
+    # row still reserves nothing on any card -- and it does not move with
+    # nz, which is what retired kf's LEVEL_SPECIALIZED_KERNEL_FRAMES entry
+    # and the per-nz recompile that entry priced.  The other platforms'
+    # 512 B readings predate the raise (see kernel_frame_recordings.py).
     # The workspace itself is priced by :func:`kf_column_workspace_bytes`.
-    "kf": 512,
+    "kf": 1024,
     "kf_validation": 0,
     "lbc_flow": 0,
     "lbc_state": 0,
@@ -2687,10 +2690,13 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         max_local_size_bytes=1040,
         covers=frozenset()),
     # Production loader, NVRTC 13.4.59 on sm_89 and sm_120: topo_wind
-    # and the SASE top helper 0 B, KIM 640 B, GSL 1,184 B on both cards.
+    # and the SASE top helper 0 B, KIM 640 B, GSL 1,184 B on both cards at
+    # TD_KMAX = 128.  TD_KMAX 256 (2026-10-12, the dycore's level ceiling)
+    # doubles the stress profiles: KIM 1,152 B, GSL 2,208 B on sm_86 at
+    # NVRTC 12.9.86, so GSL reserves (2,208 - 1,024) B per resident thread.
     "terrain_drag_composed": ChainedTranslationUnitFrame(
         module="terrain_drag_composed",
-        max_local_size_bytes=1184,
+        max_local_size_bytes=2208,
         covers=frozenset({"terrain_drag"})),
 }
 
