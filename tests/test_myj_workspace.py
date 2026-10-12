@@ -7,7 +7,7 @@ each a launch-time reservation of ``(frame - 1,024) x SMs x threads/SM``,
 and twice that at a 256-level bound.  Both now keep those arrays in a
 global workspace their launchers size to the runtime ``nz`` and to the
 columns in flight (the route ysu.cu, shinhong.cu and kf.cu took;
-docs/kernel_local_memory_bounds.md, section 10).
+docs/kernel_local_memory_bounds.md, section 12).
 
 What this file asserts, beyond the geometry gates:
 

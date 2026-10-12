@@ -631,7 +631,7 @@ MYJ_BLOCK = 32
 #: myjpbl_column's hardware residency at block 32 (136 registers) and the
 #: wall-clock plateau -- 3.74 ms at nz = 49 against 4.50 at 8 and 4.65 at
 #: 16 -- for 116.9 MiB of workspace at nz = 49 and 600.8 MiB at nz = 256
-#: (docs/kernel_local_memory_bounds.md section 10).
+#: (docs/kernel_local_memory_bounds.md section 12).
 MYJ_TILE_BLOCKS_PER_SM = 12
 
 

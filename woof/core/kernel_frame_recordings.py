@@ -362,7 +362,7 @@ SM120_NVRTC_13_3_33 = KernelFrameRecording(
         'morrison': 5120,
         # Re-read 2026-10-12 at the column-workspace source
         # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
-        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # memory_bounds.md section 12), compile-only: this NVRTC build
         # through the production source assembly and options to an sm
         # cubin, frame from cuobjdump --dump-resource-usage (the same
         # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
@@ -676,7 +676,7 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
 #: new source taken through the production loader on a device.  Every
 #: other recording's rows for the two modules were re-read compile-only
 #: at that recording's own NVRTC build or dropped where the build was out
-#: of reach (13.0.48); see docs/kernel_local_memory_bounds.md section 10.
+#: of reach (13.0.48); see docs/kernel_local_memory_bounds.md section 12.
 #: TWO ROWS ADDED 2026-10-12 from the same compile platform on a different
 #: card: an RTX A6000 (sm_86, NVRTC 12.9.86, fresh process, zero launches,
 #: same instrument), when the RTE+RRTMGP chain went to 256 model levels.
@@ -896,7 +896,7 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         'morrison': 5120,
         # Re-read 2026-10-12 at the column-workspace source
         # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
-        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # memory_bounds.md section 12), compile-only: this NVRTC build
         # through the production source assembly and options to an sm
         # cubin, frame from cuobjdump --dump-resource-usage (the same
         # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
@@ -1007,7 +1007,7 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         # preflight.CHAINED_TRANSLATION_UNIT_FRAMES.
         # Re-read 2026-10-12 at the column-workspace source
         # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
-        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # memory_bounds.md section 12), compile-only: this NVRTC build
         # through the production source assembly and options to an sm
         # cubin, frame from cuobjdump --dump-resource-usage (the same
         # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
@@ -1112,7 +1112,7 @@ SM120_NVRTC_12_9_86 = KernelFrameRecording(
         'morrison': 5120,
         # Re-read 2026-10-12 at the column-workspace source
         # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
-        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # memory_bounds.md section 12), compile-only: this NVRTC build
         # through the production source assembly and options to an sm
         # cubin, frame from cuobjdump --dump-resource-usage (the same
         # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
@@ -1120,7 +1120,7 @@ SM120_NVRTC_12_9_86 = KernelFrameRecording(
         'myjsfc': 0,
         # Re-read 2026-10-12 at the column-workspace source
         # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
-        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # memory_bounds.md section 12), compile-only: this NVRTC build
         # through the production source assembly and options to an sm
         # cubin, frame from cuobjdump --dump-resource-usage (the same
         # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
@@ -1292,7 +1292,7 @@ SM89_NVRTC_13_4_92 = KernelFrameRecording(
         'morrison': 5120,
         # Re-read 2026-10-12 at the column-workspace source
         # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
-        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # memory_bounds.md section 12), compile-only: this NVRTC build
         # through the production source assembly and options to an sm
         # cubin, frame from cuobjdump --dump-resource-usage (the same
         # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
@@ -1300,7 +1300,7 @@ SM89_NVRTC_13_4_92 = KernelFrameRecording(
         'myjsfc': 0,
         # Re-read 2026-10-12 at the column-workspace source
         # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
-        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # memory_bounds.md section 12), compile-only: this NVRTC build
         # through the production source assembly and options to an sm
         # cubin, frame from cuobjdump --dump-resource-usage (the same
         # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).

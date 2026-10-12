@@ -607,8 +607,8 @@ targets, in order:
 | kernel | frame | selector |
 |---|---|---|
 | `shinhong_column` | 13,000 B on NVRTC 13.0 (17,160 on 13.3 and 13.4; sm_120, read 2026-09-28) | `bl_pbl_physics = 11` |
-| ~~`myjpbl_column`~~ | ~~9,232 B~~ -> **0 B**, done 2026-10-12 (section 10); `myjurb_column` (10,256-12,304 B) with it | `bl_pbl_physics = 2` |
-| ~~`wsm6_column`~~ | ~~7,216 B~~ -> 0 B, done 2026-10-12 (section 10; `wdm6_column` with it) | `mp_physics = 6` |
+| ~~`myjpbl_column`~~ | ~~9,232 B~~ -> **0 B**, done 2026-10-12 (section 12); `myjurb_column` (10,256-12,304 B) with it | `bl_pbl_physics = 2` |
+| ~~`wsm6_column`~~ | ~~7,216 B~~ -> 0 B, done 2026-10-12 (section 11; `wdm6_column` with it) | `mp_physics = 6` |
 | `sase_*` | 6,272 B at the 128 tier; 49 B x the per-run `SASE_KMAX` tier (1,568 / 3,136 / 6,272 / 12,544 B at 32 / 64 / 128 / 256) | SASE |
 
 `sase_*` is already specialized: `woof/core/sase.py` compiles `SASE_KMAX`
@@ -624,7 +624,7 @@ per-thread arrays, so it moves no output bit
 `myjpbl_column` deserved the emphasis: it was the *same* 9,232 B YSU
 carried, in one kernel with no template variants, so a MYJ run still paid
 the full ~842 MiB that YSU used to. The technique in this section applied
-to it unchanged, and section 10 records the cut.
+to it unchanged, and section 12 records the cut.
 
 What is NOT a target, and why it looks like one: `thompson` (11,264 B) and
 `morrison` (5,120 B) top out in their `KMAX = 256` template instantiations,
@@ -1028,7 +1028,7 @@ v4.7.1 parity suite is unchanged and green.
 
 ---
 
-## 10. WSM6 and WDM6: the hex model's microphysics, and the 80-level wall
+## 11. WSM6 and WDM6: the hex model's microphysics, and the 80-level wall
 
 `wsm6_column` is the hex (MPAS) model's default microphysics and a
 regional default in several shipped profiles; `wdm6_column` is its
@@ -1173,7 +1173,7 @@ shipped kernel through the shipped launcher, ONE process, compared as
 
 ---
 
-## 10. MYJ and MYJURB: the frame that stood between MYJ and 256 levels
+## 12. MYJ and MYJURB: the frame that stood between MYJ and 256 levels
 
 `myjpbl_column` (`bl_pbl_physics = 2`) and `myjurb_column` (MYJ under
 `sf_urban_physics = 2/3`) were the last PBL kernels holding a whole column
@@ -1306,7 +1306,7 @@ reservation was 2.0 GiB at nz <= 128 and would have been about 4.2 /
 5.7 GiB at a 256-level frame bound. On an 84-SM A6000 the numbers are
 600.8 / 758.9 MiB.
 
-## 10. RTE+RRTMGP: a frame that follows the radiation column, to 256 levels
+## 13. RTE+RRTMGP: a frame that follows the radiation column, to 256 levels
 
 Until 2026-10 RTE+RRTMGP refused any radiation column over 128 layers,
 cap included. That ceiling was owned by one array:

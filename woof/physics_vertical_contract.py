@@ -95,7 +95,7 @@ SHINHONG_VERTICAL_LEVEL_BOUNDS = (4, 256)
 #: refusal guard in ``kernels/myjpbl.cu`` / ``kernels/myjurb.cu``: since
 #: 2026-10-12 neither kernel sizes an array by it -- the column lives in a
 #: global workspace the launcher sizes to the runtime nz
-#: (docs/kernel_local_memory_bounds.md section 10) -- so 256 is the level
+#: (docs/kernel_local_memory_bounds.md section 12) -- so 256 is the level
 #: count the end-to-end target runs at, not a frame budget.  The floor is
 #: where VDIFQ's tridiagonal chain still has interior rows and MIXLEN's
 #: profile smoothing can read ``REL(K-1)``/``REL(K+1)``.

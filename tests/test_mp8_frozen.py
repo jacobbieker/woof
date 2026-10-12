@@ -1732,7 +1732,7 @@ FROZEN_MODULE_DIGESTS = {
         # pre-cut kernel at nz 40/64/80, hail_opt 0/1, one and three minor
         # loops, NVRTC 12.9.86 and 13.4.92 on sm_86 (21,274,624 words, 0
         # differ; tests/test_wsm6_workspace.py,
-        # docs/kernel_local_memory_bounds.md section 10).  Previously
+        # docs/kernel_local_memory_bounds.md section 11).  Previously
         # 0028b0c2/d6798c07, re-pinned for A146 (a98f2482e): every float
         # division by a compile-time constant is spelled __fdiv_rn, because
         # NVRTC compiles x / C as a multiply by the rounded reciprocal on

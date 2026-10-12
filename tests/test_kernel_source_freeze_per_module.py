@@ -611,7 +611,7 @@ BASELINE_PINNED: dict[str, str] = {
     # pre-cut kernel at nz 40/64/80, hail_opt 0/1, one and three minor
     # loops, NVRTC 12.9.86 and 13.4.92 on sm_86 (25,821,184 words, 0
     # differ; tests/test_wdm6_workspace.py, docs/kernel_local_memory_bounds.md
-    # section 10).  Previously e1c1a666.
+    # section 11).  Previously e1c1a666.
     "wdm6":
         "4ec73b6a5c438dbb3d331898aa55646f88f382ca85d8a2bff567eb5a0c3ce4c3",
     # 5165b9485 chore(wdm6): the divergence gets a citation, the constants get one home

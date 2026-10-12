@@ -62,7 +62,7 @@ WDM6_BLOCK = 32
 #: Blocks per SM the tile is sized for: 16 one-warp blocks is the per-SM
 #: block ceiling on sm_86 and the pre-cut kernel's own residency there, and
 #: the tile at that occupancy runs as fast as one launch over every column
-#: (docs/kernel_local_memory_bounds.md section 10).  The device occupancy
+#: (docs/kernel_local_memory_bounds.md section 11).  The device occupancy
 #: query in the launcher only ever lowers it.
 WDM6_TILE_BLOCKS_PER_SM = 16
 #: The deepest column the kernel admits -- a REFUSAL CEILING that sizes
