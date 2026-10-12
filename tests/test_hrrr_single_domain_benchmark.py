@@ -865,14 +865,13 @@ def test_the_legacy_arm_bounds_its_longwave_column_by_model_depth():
 @pytest.mark.parametrize(
     ("profile", "inside", "outside", "refusal"),
     (
-     # 128 + 31 = 159 radiation layers, 31 past the old 128-layer cap.  The
-     # inside case stays at 128 levels because this suite's YSU PBL owns a
-     # bound of its own there; the radiation refusal is checked by number
-     # at 257 whatever the PBL says.
-     (THOMPSON_RTE_RRTMGP_PROFILE_ID, 128, 257,
-      # The model-level refusal needs no p_top, so the first (RunConfig,
-      # p_top-free) pass of the preflight already says it.
-      "RTE+RRTMGP longwave requires model levels nz <= 256")))
+     # 256 + 31 = 287 radiation layers, 159 past the old 128-layer cap,
+     # and 256 is also this suite's YSU PBL ceiling.  The model-level
+     # refusal needs no p_top, so the first (RunConfig, p_top-free) pass
+     # of the preflight already says it.
+     (THOMPSON_RTE_RRTMGP_PROFILE_ID, 256, 257,
+      "RTE+RRTMGP longwave requires model levels nz <= 256"),
+    ))
 def test_either_radiation_arm_bounds_a_longwave_column_by_number(
         profile, inside, outside, refusal):
     """The one real limit these two suites carry, both directions.

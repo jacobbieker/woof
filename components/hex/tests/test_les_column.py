@@ -151,6 +151,7 @@ def test_the_column_ceiling_is_within_the_engines_wsm6_ceiling():
     column.  The hex column cap may not exceed it, and the admission model's
     stdlib restatements must agree with the engine's constants."""
     from woof.core import wsm6_constants
+    from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
 
     assert HEX_MAX_COLUMN_LEVELS <= wsm6_constants.WSM6_MAX_LEVELS
     assert device_admission.WSM6_MAX_LEVELS == wsm6_constants.WSM6_MAX_LEVELS == 256
@@ -344,14 +345,21 @@ def test_the_per_cell_slope_scales_with_a_deeper_column():
 def test_a_deep_column_charges_the_wsm6_workspace_not_a_wider_frame():
     """The 80-level WSM6 tier's 1,792 B wider frame is retired: a deeper
     column now costs WSM6 workspace (nz + 1 levels per slot), and the
-    256-level ceiling is the only refusal left."""
+    256-level ceiling is the only refusal left.  The one frame that still
+    follows the column is the per-run YSU-GWDO's, which outgrows the core's
+    past about 161 levels, so a 256-level column's extra backing store is
+    exactly that and nothing of WSM6's."""
     card = device_admission.REFERENCE_CARD
     cells = 163_842
     at64 = device_admission.model_for_card(card, levels=64)
     at80 = device_admission.model_for_card(card, levels=80)
     at256 = device_admission.model_for_card(card, levels=256)
-    for model in (at64, at80, at256):
+    for model in (at64, at80):
         assert model.local_store_extra_bytes() == 0
+    assert at256.local_store_extra_bytes() == (
+        (device_admission.gwdo_local_frame_bytes(256)
+         - device_admission.WIDEST_LAUNCHED_LOCAL_FRAME_BYTES)
+        * card.resident_threads) > 0
     workspace = device_admission.WSM6_WORKSPACE.name
     assert (at64.tiled_breakdown(cells)[workspace]
             < at80.tiled_breakdown(cells)[workspace]
