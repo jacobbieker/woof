@@ -390,7 +390,7 @@ _PACKAGED_PROFILES = MappingProxyType({
     "ecmwf-open-data-oper-grib2-v1": _profile(
         "rw-wps-ecmwf-open-data-oper-grib2",
         source_format="grib2",
-        mapping="95ff9698d9db7f346f3973333936e58fda5860c9f2e4f76da76b2ed2c1284185",
+        mapping="044f54576b4edd3536c9a69d138b4f29370f7dc174f92cfd9a3a14b921773b42",
         composition="3bd9c9cc25c74b53169b586e9d9ff499aeef3f512ef35c8dd551fd769fdfe5c1",
         provenance="c574a07fb303620eab432eea89dad3e765ccd510d965f2b0734c4e278d435b8b",
         data_role="ecmwf_open_data_in_band_surface",

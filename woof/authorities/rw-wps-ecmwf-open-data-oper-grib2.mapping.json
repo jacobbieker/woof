@@ -125,6 +125,12 @@
       "source_axes": ["y", "x"], "target_axes": ["y", "x"],
       "location": "surface", "staggering": "none", "missing": {"kind": "reject"}
     },
+    "snow_water_equivalent": {
+      "selectors": [{"format": "grib2", "discipline": 0, "category": 1, "parameter": 254, "center": 98, "subcenter": 0, "master_table_version": 32, "local_table_version": 1, "level_type": 1, "pdt": 0}],
+      "units": {"source": "m", "target": "kg m-2", "scale": 1000.0},
+      "source_axes": ["y", "x"], "target_axes": ["y", "x"],
+      "location": "surface", "staggering": "none", "missing": {"kind": "reject"}
+    },
     "soil_temperature": {
       "selectors": [
         {"format": "grib2", "discipline": 2, "category": 3, "parameter": 18, "level_type": 151, "level_value": 0, "second_level_type": 151, "second_level_value": 1},
@@ -188,9 +194,9 @@
       "snow_mixing_ratio": "explicit_zero_with_adapter_validation",
       "graupel_or_hail_mixing_ratio": "explicit_zero_with_adapter_validation",
       "vertical_velocity": "explicit_zero_with_adapter_validation",
-      "snow_water_equivalent": "source_publishes_only_local_table_snow_candidates_not_yet_bound",
-      "snow_depth": "source_publishes_only_local_table_snow_candidates_not_yet_bound",
-      "sea_ice_fraction": "source_available_but_bitmap_semantics_not_yet_bound"
+      "snow_water_equivalent": "bound_as_ecmwf_local_snow_depth_water_equivalent_at_water_density",
+      "snow_depth": "real_derives_snowh_from_snow_water_equivalent_at_5_to_1",
+      "sea_ice_fraction": "source_publishes_sea_ice_thickness_only_no_area_fraction"
     }
   }
 }

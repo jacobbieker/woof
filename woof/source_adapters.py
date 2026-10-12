@@ -1377,9 +1377,11 @@ _ADAPTERS = (
             "LICENSING: this profile is authored against the 0.25-degree "
             "open-data distribution (CC-BY-4.0); ECMWF's native 9 km HRES "
             "is access-restricted -- a data-licensing fact, not a "
-            "capability gap.  Snow and sea-ice fields remain "
-            "policy-controlled (local-table/bitmap semantics not yet "
-            "bound), and the route is not yet accepted by unchanged stock "
+            "capability gap.  Snow water equivalent is bound from IFS sd "
+            "(ECMWF local 0/1/254, m of water at 1000 kg m-3) and SNOWH "
+            "follows real.exe's 5:1 rule; the product publishes sea-ice "
+            "THICKNESS (10/2/1) but no sea-ice area fraction, so SEAICE "
+            "stays zero.  The route is not yet accepted by unchanged stock "
             "WRF."
         ),
     ),
