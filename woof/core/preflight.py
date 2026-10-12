@@ -1951,25 +1951,22 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "milbrandt2_zet": 0,
     "morrison": 5120,
     "microphysics_validation": 0,
-    # MYJ.  MEASURED on an RTX 5090 by the driver sweep this table is
-    # checked against, at the kernel's compiled MYJ_KMAX = 128 tier: the
-    # PBL translation unit holds 9,232 B and the Eta surface layer holds
-    # none.  One thread owns one whole column and MYJPBL carries MIXLEN's
-    # GM/GH/EL/Q2, DIFCOF's AKM/AKH, VDIFH's tridiagonal coefficients and
-    # the species stack all at once, which is where the frame goes; the
-    # surface layer is scalar per column, so it has nothing to hold.
-    #
-    # This closes the port's own open question ("nobody has measured the
-    # local-memory cost of this kernel at production width").  By the
+    # MYJ.  0 B since 2026-10-12, on every compiler that could re-read it
+    # (NVRTC 12.9.86, 13.0.88, 13.3.33 and 13.4.92 on sm_86/89/120; the
+    # sm_86 12.9.86 row through the production loader on an RTX A6000).
+    # Until then one thread held the whole column -- MIXLEN's GM/GH/EL/Q2,
+    # DIFCOF's AKM/AKH, VDIFH's tridiagonal coefficients and the species
+    # stack -- in a 9,232 B frame at a compiled MYJ_KMAX = 128, which the
     # reservation model at the head of docs/kernel_local_memory_bounds.md
-    # that frame reserves (9232 - 1024) * 1536 * 170 = 2,143,764,480 B
-    # ~ 2.00 GiB on first launch, for the life of the process -- more than
-    # SASE's and a third of GF's, and it is the price of selecting MYJ at
-    # all, not of the domain size.  Like SASE's, it should be linear in
-    # the compiled level bound and is therefore specializable; that is a
-    # separate change, and until then the stated bound is the compiled
-    # ceiling, which is the safe direction for a rail gate.
-    "myjpbl": 9232,
+    # charged (9232 - 1024) x 1536 x 170 B ~ 2.00 GiB on a 170-SM card, and
+    # which a 256-level bound would have doubled.  The nineteen column
+    # arrays now live in a global workspace woof/core/myjpbl.py sizes to
+    # the runtime nz and the columns in flight, priced by
+    # :func:`myj_column_workspace_bytes`; MYJ_KMAX is a refusal guard only.
+    # Bit-identical to the pre-cut kernel at nz = 49, 100 and 128
+    # (tests/test_myj_workspace.py).  The surface layer is scalar per
+    # column and holds nothing.
+    "myjpbl": 0,
     "myjsfc": 0,
     # SASE.  MEASURED on an RTX 5090 over all 29 kernels in the module at
     # the closure's compiled tier (SASE_KMAX = 128): the maximum is
@@ -2185,14 +2182,15 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # urban_ucm 72 B on sm_89 and 0 B on sm_120 since its green-roof
     # constants moved to __constant__ memory (both under the 1,024 B
     # default stack, so neither reserves anything); urban_bep and
-    # urban_bep_couple 0 B; myjurb, the MYJ column under BEP, 10,256 B on
-    # both, which DOES reserve: (10,256 - 1,024) B x SMs x threads per SM.
-    # A167: sm_120 under NVRTC 12.9.86, the default [gpu] extra's compiler,
-    # compiles three of them wider (kernel_frame_recordings.
-    # SM120_NVRTC_12_9_86): myjurb 12,304 B, which was 0.205 GiB of
-    # reservation uncharged on an RTX 5070 Ti; urban_ucm 552 B and
+    # urban_bep_couple 0 B; myjurb, the MYJ column under BEP, was 10,256 B
+    # on both (12,304 B on sm_120 under NVRTC 12.9.86, A167) until its 24
+    # column arrays moved into the global workspace woof/core/myjurb.py
+    # sizes to the runtime nz on 2026-10-12, as myjpbl's did: 0 B on every
+    # compiler that could re-read it, priced instead by
+    # :func:`myj_column_workspace_bytes`.  A167: sm_120 under NVRTC 12.9.86,
+    # the default [gpu] extra's compiler, compiles urban_ucm 552 B and
     # urban_bep 16 B, both under the default stack.
-    "myjurb": 12304,
+    "myjurb": 0,
     "urban_bep": 16,
     "urban_bep_couple": 0,
     "urban_ucm": 552,
@@ -2986,14 +2984,12 @@ _PBL_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
     # ``validate_myj_pbl_outputs`` is a host reduction over the returned
     # fields (woof/core/physics.py:2625) and compiles nothing.
     #
-    # The frame this selects is the widest of any PBL in the tree --
-    # KERNEL_MAX_LOCAL_SIZE_BYTES["myjpbl"] = 9,232 B at the compiled
-    # MYJ_KMAX = 128 tier, ~2.00 GiB of reservation on the reference card
-    # by the model at the head of docs/kernel_local_memory_bounds.md.  It
-    # is a flat row and not a tiered one because woof/core/myjpbl.py
-    # compiles at the source's fixed bound rather than at nz, so it is the
-    # price of selecting MYJ at all; the row's own comment records that
-    # specializing it is a real saving and a separate change.
+    # The frame this selects was the widest of any PBL in the tree --
+    # 9,232 B at the compiled MYJ_KMAX = 128 tier, ~2.00 GiB of
+    # reservation on the reference card -- until 2026-10-12, when the
+    # column moved into a global workspace sized to the runtime nz
+    # (KERNEL_MAX_LOCAL_SIZE_BYTES["myjpbl"] = 0; the workspace is priced
+    # by myj_column_workspace_bytes).
     MYJ_PBL_SCHEME: ("myjpbl",),
     # MYNN-EDMF.  THREE modules (row widened by the 2026-08-31 scheme-5
     # enumeration fix; it said one module and hid two): the launcher stack
@@ -3089,9 +3085,11 @@ _SELECTOR_TABLES = (
 #: and BEP+BEM's composed unit ``urban_bem_composed`` (woof/core/
 #: urban_bem.py) with the same couple.  Under MYJ, options 2 and 3 replace
 #: the MYJ PBL call with MYJURB (woof/core/physics.py), whose
-#: myjurb.cu frame is 10,256 B on sm_89 at NVRTC 13.4.92: on an RTX 4090
-#: that is a 1.7 GiB launch-time reservation the fit gate did not charge
-#: before this row existed.
+#: myjurb.cu frame was 10,256 B on sm_89 at NVRTC 13.4.92 -- a 1.7 GiB
+#: launch-time reservation on an RTX 4090 -- until its column moved into a
+#: global workspace (0 B since 2026-10-12, priced by
+#: myj_column_workspace_bytes).  The module stays listed so a regression
+#: of its frame is priced.
 _URBAN_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
     0: (),
     1: ("urban_ucm",),
@@ -3495,6 +3493,7 @@ def column_workspace_bytes(
             + kf_column_workspace_bytes(exp, profile=profile)
             + ysu_column_workspace_bytes(exp, profile=profile)
             + shinhong_column_workspace_bytes(exp, profile=profile)
+            + myj_column_workspace_bytes(exp, profile=profile)
             + ntiedtke_column_workspace_bytes(exp, profile=profile)
             + uwpbl_column_workspace_bytes(exp, profile=profile)
             + wsm6_column_workspace_bytes(exp, profile=profile)
@@ -3689,6 +3688,44 @@ def shinhong_column_workspace_bytes(
         columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
         worst = max(worst,
                     shinhong_workspace_floats(int(dc.run.nz), columns) * 4)
+    return int(worst)
+
+
+def myj_column_workspace_bytes(
+        exp: ExperimentConfig, *,
+        profile: DeviceLocalMemoryProfile | None = None) -> int:
+    """Device bytes the MYJ (or MYJURB) column workspace holds, or zero.
+
+    The term that REPLACED MYJ's local-memory reservation on 2026-10-12.
+    ``woof/core/kernels/myjpbl.cu`` (19 column arrays) and
+    ``woof/core/kernels/myjurb.cu`` (24, its sf_urban_physics 2/3
+    companion, which replaces the MYJPBL call on that domain) keep their
+    columns in a global workspace instead of a per-thread frame, sized to
+    the columns in flight -- ``SMs x MYJ_TILE_BLOCKS_PER_SM x MYJ_BLOCK``
+    -- and to the RUNTIME level count rather than to a compile-time bound.
+    The frames they replaced were 9,232 B and 10,256-12,304 B at a
+    128-level bound, ~2 GiB of reservation each on a 170-SM card, and
+    would have doubled at the 256-level ceiling this made reachable.
+
+    Worst domain, not a sum over domains: the launcher allocates the
+    workspace per call and the pool keeps the largest block.
+    """
+    from woof.core.physics_inventory import (
+        MYJ_BLOCK, MYJ_TILE_BLOCKS_PER_SM, MYJURBWS_SLOTS, MYJWS_SLOTS,
+        myj_workspace_floats)
+
+    profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
+    tile_cap = (profile.multiprocessor_count * MYJ_TILE_BLOCKS_PER_SM
+                * MYJ_BLOCK)
+    worst = 0
+    for dc in exp.domains:
+        if int(dc.run.bl_pbl_physics) != MYJ_PBL_SCHEME:
+            continue
+        urban = int(getattr(dc.run, "sf_urban_physics", 0) or 0)
+        slots = MYJURBWS_SLOTS if urban in (2, 3) else MYJWS_SLOTS
+        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        worst = max(worst, myj_workspace_floats(
+            int(dc.run.nz), columns, slots=slots) * 4)
     return int(worst)
 
 
@@ -11679,6 +11716,7 @@ def check_main(args) -> int:
         kf_ws = kf_column_workspace_bytes(exp, profile=profile)
         ysu_ws = ysu_column_workspace_bytes(exp, profile=profile)
         shinhong_ws = shinhong_column_workspace_bytes(exp, profile=profile)
+        myj_ws = myj_column_workspace_bytes(exp, profile=profile)
         # Kept out of the f-string: a line break inside an f-string
         # expression is PEP 701 (Python 3.12+) syntax, and the supported
         # floor is 3.11 -- the 1.2.0 release workflow failed on exactly
@@ -11689,7 +11727,7 @@ def check_main(args) -> int:
         # to the per-card term (task 206).
         context_bytes = profile.cuda_context_bytes
         remeasured_bytes = (estimate.alloc_estimate_bytes + widest
-                            + gf_ws + kf_ws + ysu_ws + shinhong_ws
+                            + gf_ws + kf_ws + ysu_ws + shinhong_ws + myj_ws
                             + context_bytes
                             + reserve.retention_residual_bytes)
         gf_ws_term = (f" + GF column workspace {_format_bytes(gf_ws)}"
@@ -11701,6 +11739,8 @@ def check_main(args) -> int:
         ysu_ws_term += (" + Shin-Hong column workspace "
                         f"{_format_bytes(shinhong_ws)}"
                         if shinhong_ws else "")
+        ysu_ws_term += (f" + MYJ column workspace {_format_bytes(myj_ws)}"
+                        if myj_ws else "")
         print(f"  NON-POOL: CUDA context "
               f"{_format_bytes(context_bytes)} + local-memory backing "
               f"store {_format_bytes(widest)} "
@@ -12423,7 +12463,7 @@ __all__ = [
     "column_workspace_bytes", "gf_column_workspace_bytes",
     "kf_column_workspace_bytes", "ysu_column_workspace_bytes",
     "shinhong_column_workspace_bytes", "wsm6_column_workspace_bytes",
-    "wdm6_column_workspace_bytes",
+    "wdm6_column_workspace_bytes", "myj_column_workspace_bytes",
     "kernel_local_memory_bytes", "non_pool_device_bytes",
     "physics_kernel_modules", "refl_diagnostic_reachable",
     "LEVEL_SPECIALIZED_KERNEL_FRAMES", "LevelSpecializedFrame",

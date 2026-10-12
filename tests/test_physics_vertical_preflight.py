@@ -40,7 +40,9 @@ def _selection(nz: int, **overrides):
         # rejections inside the launcher, so both belong in the preflight.
         ("YSU PBL", {"bl_pbl_physics": 1}, 256, 257),
         ("YSU PBL", {"bl_pbl_physics": 1}, 4, 3),
-        ("MYJ PBL", {"bl_pbl_physics": 2}, 128, 129),
+        # MYJ's column lives in a runtime workspace (2026-10-12), so its
+        # ceiling is the 256-level refusal guard, not a frame budget.
+        ("MYJ PBL", {"bl_pbl_physics": 2}, 256, 257),
         ("MYJ PBL", {"bl_pbl_physics": 2}, 4, 3),
         ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 256, 257),
         ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 4, 3),

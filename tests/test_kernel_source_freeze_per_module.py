@@ -295,8 +295,13 @@ BASELINE_PINNED: dict[str, str] = {
     "milbrandt2_zet":
         "dfab83f02bc23e2f4d019015203fb942cd4fbfe02bae4dc342b6816b062f532c",
     # f1e9adbf1 fix(myj): seed TKE_MYJ at WRF's EPSQ2, make the mutation controls real, decl
+    # RE-PINNED 2026-10-12 (levels256/myj): the nineteen column arrays moved
+    # from the per-thread frame into a runtime (nz + 1)-level global
+    # workspace and MYJ_KMAX became a 256-level refusal guard; bit-identical
+    # to the previous pin at nz = 49/100/128 (tests/test_myj_workspace.py).
+    # Previously d0e0b3dd.
     "myjpbl":
-        "d0e0b3dde6ba1729460694a3bf730ac82420e85d3979327953a7e45bf85719f1",
+        "3efbb82f1f486cc51dbbc0a22e06c259cadce74df5b39a0471bd8416fc82762a",
     # f1e9adbf1 fix(myj): seed TKE_MYJ at WRF's EPSQ2, make the mutation controls real, decl
     # RE-PINNED by the WRF-parity PBLH seed repair (MYJ-01): the height
     # accumulator seeded from ``dz_a[0]`` -- layer 0 of COLUMN 0 -- for every
@@ -636,8 +641,12 @@ BASELINE_PINNED: dict[str, str] = {
     # spelled __fdiv_rn, because NVRTC compiles x / C as a multiply by the
     # rounded reciprocal for sm_120 under -ftz=true.  sm_89 compiles the
     # same division either way.  Previously a25a77f1.
+    # RE-PINNED 2026-10-12 (levels256/myj): the 24 column arrays moved into
+    # a runtime global workspace, MYJ_KMAX a 256-level refusal guard;
+    # bit-identical to the previous pin at nz = 49/100/128
+    # (tests/test_myj_workspace.py).  Previously ff8c000f.
     "myjurb":
-        "ff8c000f5fdbe9f43f903a00ef9a20c760635c5321e2912257ebfe2d172a26e8",
+        "fb6e913711c15948317681cf72641f2ca4dbc3b747ed6f2203dff142ad43c24e",
     # lane/282-terrain-drag: sub-grid terrain drag from WRF v4.7.1, the
     # topo_wind static coefficients (start_em.F:1539-1626), gwd_opt = 1
     # (module_bl_gwdo.F -> bl_gwdo.F90) and gwd_opt = 3 (module_bl_gwdo_gsl.F),

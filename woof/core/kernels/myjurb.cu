@@ -10,9 +10,30 @@
 // VDIFX is not called by MYJURB. MYJURBINIT is initialization, not a step.
 // Oracle comparison is pending; compilation alone does not prove identity.
 // module_bl_myjurb.F:130-771
+// MYJ_KMAX is a REFUSAL guard only; no array is sized by it.  The 24
+// column arrays live in a caller-provided global workspace sized to the
+// runtime level count and the columns in flight (woof/core/myjurb.py),
+// laid out lane-interleaved exactly as myjpbl.cu's: element k of slot s
+// for lane t at block_base + (s * wskp + k) * MYJURBWS_LANES + t.  Every
+// array keeps its extent and access order; the arithmetic is FMUL-pinned,
+// so the placement cannot move a contraction decision.
 #ifndef MYJ_KMAX
-#define MYJ_KMAX 128
+#define MYJ_KMAX 256
 #endif
+#define MYJURBWS_SLOTS 24
+#define MYJURBWS_LANES 32
+struct MyjUrbCol {
+    real *p;
+    __device__ __forceinline__ real &operator[](int k) const {
+        return p[(size_t)k * (size_t)MYJURBWS_LANES];
+    }
+};
+#define MYJURBWS_AT(base, idx, kp) \
+    (MyjUrbCol{(base) + (size_t)(idx) * (size_t)(kp) \
+               * (size_t)MYJURBWS_LANES})
+#define MYJURBWS_LANE_BASE(ws, kp) \
+    ((ws) + (size_t)blockIdx.x * (size_t)MYJURBWS_SLOTS * (size_t)(kp) \
+     * (size_t)MYJURBWS_LANES + (size_t)threadIdx.x)
 
 // module_bl_myjurb.F:28-124 MYJP_G = 9.81f
 #define MYJP_G 9.8100004196166992f
@@ -191,11 +212,13 @@ extern "C" __global__ void myjurb_column(
     const real* __restrict__ vl_bep,
     const real* __restrict__ sf_bep,
     const real* __restrict__ frc_urb2d, const real* __restrict__ ht,
-    real dtturbl, int flag_bep, int idiff, int nz, int n)
+    real dtturbl, int flag_bep, int idiff, int nz, int n,
+    real* __restrict__ ws, int wskp, int col0)
 {
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int col = col0 + blockIdx.x * blockDim.x + threadIdx.x;
     if (col >= n) return;
     if (nz > MYJ_KMAX || nz < 4) return;
+    if (wskp < nz + 1) return;
     size_t st = (size_t)n;
 #define MYJ_UP(a, kup) a[(size_t)(kup) * st + col]
 
@@ -204,15 +227,31 @@ extern "C" __global__ void myjurb_column(
     real rdtturbl = (1.0f / dtturbl);
     real dtdif = dtturbl;
 
-    real zh[MYJ_KMAX + 1];
-    real uk[MYJ_KMAX], vk[MYJ_KMAX], tk[MYJ_KMAX];
-    real the[MYJ_KMAX], qk[MYJ_KMAX], cwm[MYJ_KMAX];
-    real q2[MYJ_KMAX], rhok[MYJ_KMAX];
-    real gm[MYJ_KMAX], gh[MYJ_KMAX], el[MYJ_KMAX];
-    real akm[MYJ_KMAX], akh[MYJ_KMAX];
-    real sf[MYJ_KMAX], vl[MYJ_KMAX], dl[MYJ_KMAX];
-    real be[MYJ_KMAX], beface[MYJ_KMAX], dzk[MYJ_KMAX];
-    real s1[MYJ_KMAX], s2[MYJ_KMAX], s3[MYJ_KMAX], s4[MYJ_KMAX];
+    real* wsb = MYJURBWS_LANE_BASE(ws, wskp);
+    MyjUrbCol zh = MYJURBWS_AT(wsb, 0, wskp);
+    MyjUrbCol uk = MYJURBWS_AT(wsb, 1, wskp);
+    MyjUrbCol vk = MYJURBWS_AT(wsb, 2, wskp);
+    MyjUrbCol tk = MYJURBWS_AT(wsb, 3, wskp);
+    MyjUrbCol the = MYJURBWS_AT(wsb, 4, wskp);
+    MyjUrbCol qk = MYJURBWS_AT(wsb, 5, wskp);
+    MyjUrbCol cwm = MYJURBWS_AT(wsb, 6, wskp);
+    MyjUrbCol q2 = MYJURBWS_AT(wsb, 7, wskp);
+    MyjUrbCol rhok = MYJURBWS_AT(wsb, 8, wskp);
+    MyjUrbCol gm = MYJURBWS_AT(wsb, 9, wskp);
+    MyjUrbCol gh = MYJURBWS_AT(wsb, 10, wskp);
+    MyjUrbCol el = MYJURBWS_AT(wsb, 11, wskp);
+    MyjUrbCol akm = MYJURBWS_AT(wsb, 12, wskp);
+    MyjUrbCol akh = MYJURBWS_AT(wsb, 13, wskp);
+    MyjUrbCol sf = MYJURBWS_AT(wsb, 14, wskp);
+    MyjUrbCol vl = MYJURBWS_AT(wsb, 15, wskp);
+    MyjUrbCol dl = MYJURBWS_AT(wsb, 16, wskp);
+    MyjUrbCol be = MYJURBWS_AT(wsb, 17, wskp);
+    MyjUrbCol beface = MYJURBWS_AT(wsb, 18, wskp);
+    MyjUrbCol dzk = MYJURBWS_AT(wsb, 19, wskp);
+    MyjUrbCol s1 = MYJURBWS_AT(wsb, 20, wskp);
+    MyjUrbCol s2 = MYJURBWS_AT(wsb, 21, wskp);
+    MyjUrbCol s3 = MYJURBWS_AT(wsb, 22, wskp);
+    MyjUrbCol s4 = MYJURBWS_AT(wsb, 23, wskp);
 
     // module_bl_myjurb.F:283-351
     zh[nz] = ht[col];
@@ -504,7 +543,7 @@ mixlen_110:
             s2[m] = FMUL(FMUL(akh[m], ((zh[m] - zh[(m + 2)]))), (FMUL(0.5f, ct_a[col])));
         }
         for (int species = 0; species < 3; ++species) {
-            real* var = ((species == 0) ? the : ((species == 1) ? qk : cwm));
+            MyjUrbCol var = ((species == 0) ? the : ((species == 1) ? qk : cwm));
             // module_bl_myjurb.F:1499-1526 forward sweep.
             for (int m = 0; m < nh; ++m) {
                 int kup = ((nz - 1) - m);
@@ -575,7 +614,7 @@ mixlen_110:
             s3[m] = FMUL(-s1[m], akm[m]);
         }
         for (int comp = 0; comp < 2; ++comp) {
-            real* var = (comp ? vk : uk);
+            MyjUrbCol var = (comp ? vk : uk);
             // module_bl_myjurb.F:1706-1722 forward sweep.
             for (int m = 0; m < nv; ++m) {
                 int kup = ((nz - 1) - m);

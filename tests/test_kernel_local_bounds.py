@@ -228,6 +228,19 @@ def test_the_unspecialized_source_still_compiles_to_the_recorded_ceiling():
                ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wsm6"] == 0
 
 
+def test_the_myj_frames_are_the_recorded_zero_rows():
+    """MYJ and MYJURB hold their columns in a runtime workspace
+    (2026-10-12), so the one compiled binary of each reserves nothing and
+    its row says so.  Before, both were 9,232-12,304 B at MYJ_KMAX = 128,
+    a bound the 256-level contract would have doubled."""
+    from woof.core.kernels import get_kernel
+
+    for module, func in (("myjpbl", "myjpbl_column"),
+                         ("myjurb", "myjurb_column")):
+        assert int(get_kernel(module, func).attributes["local_size_bytes"]
+                   ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES[module] == 0, module
+
+
 # ---------------------------------------------------------------------------
 # ... and that the shrink moves no arithmetic
 # ---------------------------------------------------------------------------

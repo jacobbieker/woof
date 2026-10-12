@@ -232,7 +232,11 @@ SM120_NVRTC_13_0_48 = KernelFrameRecording(
         'microphysics_validation': 0,
         'milbrandt2': 2048,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # 'myjpbl' (9,232 B) was a reading of the PRE-CUT source, whose
+        # column arrays moved to a global workspace on 2026-10-12.  NVRTC
+        # 13.0.48 was not available to re-read it, so the row is DROPPED
+        # rather than back-filled; every compiler that was (12.9.86,
+        # 13.0.88, 13.3.33, 13.4.92, on sm_86/89/120) reads 0 B.
         'myjsfc': 0,
         'mynn_pbl': 0,
         'mynn_surface': 0,
@@ -356,7 +360,13 @@ SM120_NVRTC_13_3_33 = KernelFrameRecording(
         'microphysics_validation': 0,
         'milbrandt2': 2048,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjpbl': 0,
         'myjsfc': 0,
         'mynn_pbl': 0,
         'mynn_surface': 0,
@@ -534,7 +544,11 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
         # frame is what one compiler emitted for one architecture.
         'milbrandt2_zet': 0,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # 'myjpbl' (9,232 B) was a reading of the PRE-CUT source, whose
+        # column arrays moved to a global workspace on 2026-10-12.  NVRTC
+        # 13.0.48 was not available to re-read it, so the row is DROPPED
+        # rather than back-filled; every compiler that was (12.9.86,
+        # 13.0.88, 13.3.33, 13.4.92, on sm_86/89/120) reads 0 B.
         'myjsfc': 0,
         # MEASURED 2026-08-31 on this card at this NVRTC (13.0.48), the
         # sm_86 campaign that closed the "no measurement platform in this
@@ -655,6 +669,14 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
 #: which is why ``complete`` is False and no other key is written here.
 #: The ceiling does not move: every value is at or below the element-wise
 #: maximum the other recordings already carry.
+#:
+#: 2026-10-12: ``myjpbl`` and ``myjurb`` added, read at this platform key
+#: (sm_86, NVRTC 12.9.86, build CL-36037853) on an RTX A6000 when their
+#: column arrays moved into a global workspace -- the one reading of the
+#: new source taken through the production loader on a device.  Every
+#: other recording's rows for the two modules were re-read compile-only
+#: at that recording's own NVRTC build or dropped where the build was out
+#: of reach (13.0.48); see docs/kernel_local_memory_bounds.md section 10.
 SM86_NVRTC_12_9_86 = KernelFrameRecording(
     box='development-desktop',
     device='NVIDIA GeForce RTX 3080',
@@ -673,6 +695,14 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         # 200 / 512 / 1,024 B on both the pre- and post-cut source.
         'kf': 1024,
         'milbrandt2': 2048,
+        # Read 2026-10-12 at the column-workspace source (kernels/myjpbl.cu
+        # / myjurb.cu headers) on an RTX A6000 -- the same platform key,
+        # sm_86 at NVRTC 12.9.86 -- through the production loader
+        # (load_module(...).get_function(...).local_size_bytes): 0 B each,
+        # where the pre-cut source compiled beside it read 9,232 and
+        # 10,256 B.
+        'myjpbl': 0,
+        'myjurb': 0,
         'nest_microphysics': 0,
         'noah': 224,
         'nssl2_fused_gs': 112,
@@ -850,7 +880,13 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         'milbrandt2': 2048,
         'milbrandt2_zet': 0,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjpbl': 0,
         'myjsfc': 0,
         'mynn_dmp_sibling': 0,
         'mynn_pbl': 0,
@@ -952,9 +988,16 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         # SM89_NVRTC_13_4_92), urban_bep and urban_bep_couple 0 B, and
         # myjurb 10,256 B -- MYJ's 9,232 B myjpbl frame plus MYJURB's
         # urban arrays, a (10,256 - 1,024) B x 170 SMs x 1,536 threads =
-        # 2.2 GiB launch-time reservation.  BEP+BEM's composed unit is
-        # priced in preflight.CHAINED_TRANSLATION_UNIT_FRAMES.
-        'myjurb': 10256,
+        # 2.2 GiB launch-time reservation (retired 2026-10-12, below).
+        # BEP+BEM's composed unit is priced in
+        # preflight.CHAINED_TRANSLATION_UNIT_FRAMES.
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjurb': 0,
         'urban_bep': 0,
         'urban_bep_couple': 0,
         'urban_ucm': 0,
@@ -1053,9 +1096,21 @@ SM120_NVRTC_12_9_86 = KernelFrameRecording(
         'milbrandt2': 2048,
         'milbrandt2_zet': 0,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjpbl': 0,
         'myjsfc': 0,
-        'myjurb': 12304,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjurb': 0,
         'mynn_dmp_sibling': 0,
         'mynn_pbl': 0,
         'mynn_scalar_mix': 0,
@@ -1221,9 +1276,21 @@ SM89_NVRTC_13_4_92 = KernelFrameRecording(
         'milbrandt2': 2048,
         'milbrandt2_zet': 0,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjpbl': 0,
         'myjsfc': 0,
-        'myjurb': 10256,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 10), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjurb': 0,
         'mynn_dmp_sibling': 0,
         'mynn_pbl': 0,
         'mynn_scalar_mix': 0,
@@ -1446,7 +1513,11 @@ KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
             'microphysics_validation': 0,
             'milbrandt2': 2048,
             'morrison': 5120,
-            'myjpbl': 9232,
+            # Re-read 2026-10-12 at the column-workspace source,
+            # compile-only at this NVRTC build (13.0.88, sm_120 cubin,
+            # cuobjdump): 0 B, where the same reader gives the pre-cut
+            # source the 9,232 B this row used to carry.
+            'myjpbl': 0,
             'myjsfc': 0,
             'mynn_dmp_sibling': 0,
             'mynn_pbl': 0,

@@ -13,9 +13,13 @@ That is why its surface pairing is not negotiable: the lower boundary of
 every one of those solves is ``AKHS``/``AKMS``/``THZ0``/``QZ0``/``UZ0``/
 ``VZ0``, which only the Eta surface layer produces.
 
-COLUMN LIMIT.  The kernel keeps the whole column in per-thread local
-arrays, as YSU's does, so it carries the same compile-time ceiling.  A
-deeper column is refused here rather than silently truncated.
+COLUMN LIMIT.  The kernel's nineteen column arrays live in a global
+workspace this module allocates (``kernels/myjpbl.cu`` header), sized to
+the RUNTIME level count and to the columns in flight, not in a per-thread
+frame sized to a compile-time bound.  The ceiling is therefore a refusal
+bound and nothing else: 256 levels, the contract's
+``MYJ_VERTICAL_LEVEL_BOUNDS``.  A deeper column is refused here rather
+than silently truncated.
 
 Conformance status: implemented-unverified.  ``tests/test_myj_port.py``
 asserts CPU-vs-CUDA agreement and physical sanity; NO oracle comparison
@@ -28,16 +32,19 @@ import cupy as cp
 import numpy as np
 
 from woof.core.kernels import get_kernel
+from woof.core.physics_inventory import (MYJ_BLOCK, MYJ_TILE_BLOCKS_PER_SM,
+                                          MYJWS_SLOTS, myj_workspace_floats)
 from woof.core.state import DTYPE
 from woof.physics_vertical_contract import (
     outside_vertical_bounds, refuse_vertical_levels)
 
-_TPB = 128
+#: The launch block IS the workspace's lane width (``MYJWS_LANES``).
+_TPB = MYJ_BLOCK
 
-#: Deepest column ``kernels/myjpbl.cu``'s per-thread arrays hold
-#: (``MYJ_KMAX``).  Kept in step with the kernel by
-#: ``tests/test_myj_port.py``.
-MYJ_MAX_COLUMN_LEVELS = 128
+#: Deepest column the launcher accepts, equal to the kernel's ``MYJ_KMAX``
+#: refusal guard (kept in step by ``tests/test_myj_port.py``).  No array is
+#: sized by it any more: the workspace follows the runtime ``nz``.
+MYJ_MAX_COLUMN_LEVELS = 256
 
 #: Shallowest column the tridiagonal chain is defined on.  VDIFQ solves
 #: over ``LMH-2`` interior rows (module_bl_myjpbl.F:1376-1403) and MIXLEN's
@@ -59,6 +66,27 @@ MYJ_PBL_COLUMN_OUTPUTS = ("rublten", "rvblten", "rthblten", "rqvblten",
 MYJ_PBL_SURFACE_OUTPUTS = ("pblh", "kpbl", "mixht")
 
 
+def myj_tile_columns(fn, ncol: int) -> int:
+    """Columns per launch: bounded to what the card can hold resident.
+
+    The workspace is charged per column IN FLIGHT, so a tile larger than
+    the kernel's resident capacity buys workspace no thread uses.  The
+    occupancy query only ever lowers :data:`MYJ_TILE_BLOCKS_PER_SM`.
+    """
+    sms = cp.cuda.Device().attributes["MultiProcessorCount"]
+    per_sm = MYJ_TILE_BLOCKS_PER_SM
+    try:
+        from cupy_backends.cuda.api import driver
+
+        resident = driver.occupancyMaxActiveBlocksPerMultiprocessor(
+            fn.kernel.ptr, MYJ_BLOCK, 0)
+        per_sm = min(per_sm, int(resident))
+    except Exception:  # noqa: BLE001 -- the constant is the safe cap
+        pass
+    per_sm = max(1, int(per_sm))
+    return int(max(MYJ_BLOCK, min(int(ncol), sms * per_sm * MYJ_BLOCK)))
+
+
 def launch_myj_pbl(columns, surface, state, tke, outputs, *,
                    dtturbl: float, flqi: bool) -> None:
     """Run one MYJ PBL step in place.
@@ -76,11 +104,11 @@ def launch_myj_pbl(columns, surface, state, tke, outputs, *,
         raise refuse_vertical_levels(
             "MYJ PBL", bounds, nz,
             breakage=(
-                "the kernel holds at most "
-                f"{MYJ_MAX_COLUMN_LEVELS} levels per column (MYJ_KMAX in "
-                "kernels/myjpbl.cu) -- raise the define and re-measure "
-                "rather than truncating -- and below the floor its TKE "
-                "tridiagonal solve has no interior rows."))
+                "the kernel refuses more than "
+                f"{MYJ_MAX_COLUMN_LEVELS} levels per column (the MYJ_KMAX "
+                "guard in kernels/myjpbl.cu) rather than truncating, and "
+                "below the floor its TKE tridiagonal solve has no interior "
+                "rows."))
     column_arrays = []
     for name in _COLUMN_INPUTS:
         array = columns.get(name)
@@ -110,16 +138,26 @@ def launch_myj_pbl(columns, surface, state, tke, outputs, *,
             raise ValueError("launch_myj_pbl requires same-shape contiguous "
                              "surface arrays (float32, kpbl int32)")
     n = int(np.prod(shape))
-    blocks = (n + _TPB - 1) // _TPB
     kernel = get_kernel("myjpbl", "myjpbl_column")
-    kernel((blocks,), (_TPB,),
-           tuple(column_arrays) + (tke,)
-           + tuple(surface[name] for name in _SURFACE_INPUTS)
-           + tuple(state[name] for name in MYJ_PBL_INOUT)
-           + tuple(outputs[name] for name in MYJ_PBL_COLUMN_OUTPUTS)
-           + tuple(outputs[name] for name in MYJ_PBL_SURFACE_OUTPUTS)
-           + (DTYPE(dtturbl), np.int32(bool(flqi)), np.int32(nz),
-              np.int32(n)))
+    # The column arrays live in a global workspace sized to the columns in
+    # flight (a tile), not to the card's whole resident-thread capacity,
+    # and to the runtime nz.  Tiles keep the one-thread-one-column mapping,
+    # shifted by col0 because the state arrays are (nz, ny, nx) and a tile
+    # of columns is a column offset rather than a slice.
+    tile = myj_tile_columns(kernel, n)
+    wskp = nz + 1
+    ws = cp.empty(myj_workspace_floats(nz, tile, slots=MYJWS_SLOTS),
+                  dtype=DTYPE)
+    args = (tuple(column_arrays) + (tke,)
+            + tuple(surface[name] for name in _SURFACE_INPUTS)
+            + tuple(state[name] for name in MYJ_PBL_INOUT)
+            + tuple(outputs[name] for name in MYJ_PBL_COLUMN_OUTPUTS)
+            + tuple(outputs[name] for name in MYJ_PBL_SURFACE_OUTPUTS)
+            + (DTYPE(dtturbl), np.int32(bool(flqi)), np.int32(nz),
+               np.int32(n), ws, np.int32(wskp)))
+    for col0 in range(0, n, tile):
+        blocks = (min(tile, n - col0) + _TPB - 1) // _TPB
+        kernel((blocks,), (_TPB,), args + (np.int32(col0),))
 
 
 def myj_pbl_step(columns, surface, state, tke, *,
