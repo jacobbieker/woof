@@ -206,7 +206,7 @@ _PACKAGED_PROFILES = MappingProxyType({
         data_role="icon_global_ml_invariant_surface",
         provenance_role="icon_global_ml_invariant_surface_provenance",
         input_normalizer="icon-global-ml-gdt101-model-level-v1",
-        normalization="75cad138a81f08852be32446ecab552571444263d28b095cb336fc811a82a902",
+        normalization="5cf1838df730d7000eabdc321502871d3ee2257d7f2db5a7356721b53a2ff39e",
     ),
     # DWD's 2.2 km ICON-D2 on its native R19B07 mesh (542,040 cells), the
     # same GDT-101 normalization with its own mesh, ladder and cadence rows.

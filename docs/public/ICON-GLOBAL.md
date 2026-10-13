@@ -331,10 +331,13 @@ Every lead is 626 objects, about 2.0 GB, almost all of it the 600
 model-level objects of about 3.3 MB each. The 121 HHL objects add about
 80 MB once per run.
 
-The route therefore takes at most 13 leads per window, about 26 GB. A longer
-window is refused before anything downloads, with the reason and the
-remedies: a coarser `--cadence` (6 or 12 h), a shorter window, or
-`--source icon-global`.
+The route therefore takes at most 61 leads per window: a whole 00 or 12 UTC
+run every 3 h (f000 to f180), about 122 GB, or a 48 h window at 3 h (17 leads,
+about 34 GB). The normalization remaps one object at a time, so its memory and
+its per-object time limit do not grow with the window; the bound is on bytes
+staged. A longer window (hourly beyond 60 h, say) is refused before anything
+downloads, with the reason and the remedies: a coarser `--cadence`, a shorter
+window, or `--source icon-global`.
 
 The default cadence is 3 h. DWD posts hourly to f078 and every 3 h after
 that, to f180 from 00 and 12 UTC and to f120 from 06 and 18 UTC.

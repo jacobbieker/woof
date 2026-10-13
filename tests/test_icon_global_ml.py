@@ -197,22 +197,24 @@ def test_a_later_window_still_fetches_the_step0_invariants():
 def test_a_window_beyond_the_ceiling_is_refused_before_any_byte_moves():
     route = fetch_routes.route_for("icon-global-ml")
     limit = route.window_limit["max_leads"]
-    assert limit == 13
+    assert limit == 61
+    # The ceiling is a whole 00/12Z run every 3 h, f000 to f180 ...
     plan = fetch_routes.resolve_request("icon-global-ml", cycle=CYCLE,
                                         hours=3 * (limit - 1))
     assert len(plan.leads) == limit
+    # ... so a 48 h window at the default 3 h cadence is admitted.
+    assert len(fetch_routes.resolve_request(
+        "icon-global-ml", cycle=CYCLE, hours=48).leads) == 17
+    # Hourly over three days is 73 leads, past it, and is refused before
+    # anything moves, naming the finest spacing that fits the same window.
     with pytest.raises(ValueError) as refused:
-        fetch_routes.resolve_request("icon-global-ml", cycle=CYCLE, hours=3 * limit)
+        fetch_routes.resolve_request("icon-global-ml", cycle=CYCLE, hours=72,
+                                     cadence=1)
     text = str(refused.value)
-    assert "asks for 14 leads" in text and "at most 13" in text
+    assert "asks for 73 leads" in text and "at most 61" in text
     assert "why:" in text and "2.0 GB" in text
     assert "remedy:" in text and "--source icon-global" in text
-    # The refusal names the finest spacing that fits the same window.
-    with pytest.raises(ValueError, match=r"--cadence 4 is 13 leads and fits"):
-        fetch_routes.resolve_request("icon-global-ml", cycle=CYCLE, hours=48)
-    # The ceiling counts leads, so a coarser cadence reaches further.
-    assert len(fetch_routes.resolve_request(
-        "icon-global-ml", cycle=CYCLE, hours=72, cadence=6).leads) == 13
+    assert "--cadence 2 is 37 leads and fits" in text
 
 
 def test_the_normalization_bound_holds_the_largest_window_the_route_takes(spec):
