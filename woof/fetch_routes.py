@@ -96,7 +96,7 @@ ROUTE_TABLE_SHA256 = (
     # p/, a two-rung ladder with the source.coop mirror, serves_from,
     # run_listing and the DWD attribution); and icon-global-ml, ICON
     # global's 120 model levels on the same ladder, with a window_limit.
-    "3a675c76dbadb2db3fa51506b619ff34175e23514e9c5c163c54c36d71583e83"
+    "bc2c735211a8c041b8275cfedf88c7cabb7fbecd1c0ee69435c3dc1b9708e771"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own

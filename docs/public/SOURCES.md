@@ -24,7 +24,7 @@ List the whole registry with `woof prep --list-sources`, or one row with
 | `gem-gdps` | `gem`, `gdps`, `gem-global` | 3 h | f240 | global |
 | `icon-global` | `icon`, `icon-13km`, `dwd-icon`, `dwd-icon-global` | 3 h | f180 (00/12Z), f120 (06/18Z) | global, 2,949,120-cell icosahedral mesh at nominally 13 km |
 | `met-office-global` | `metoffice-global`, `ukmo-global`, `um-global` | 3 h | f144 | global, regular 2560x1920 at 0.140625 x 0.09375 deg (~10 km); soil, land mask and sea ice from the same-cycle GDAS analysis |
-| `icon-global-ml` | `icon-ml`, `icon-global-model-level`, `dwd-icon-global-ml` | 3 h | f180 (00/12Z), f120 (06/18Z); at most 13 leads per window | global, the same mesh on its 120 native model levels |
+| `icon-global-ml` | `icon-ml`, `icon-global-model-level`, `dwd-icon-global-ml` | 3 h | f180 (00/12Z), f120 (06/18Z); at most 61 leads per window | global, the same mesh on its 120 native model levels |
 | `icon-eu` | `dwd-icon-eu`, `icon-eu-regular` | 1 h | f120 | lat 29.5..70.5, lon -23.5..62.5 |
 | `icon-d2` | `icon-2km`, `dwd-icon-d2` | 1 h | f048 | lat 44.0..57.3, lon 0.0..17.3, 542,040-cell icosahedral mesh at nominally 2.2 km |
 | `gfs` | `gfs-0p25`, `gfs-0.25` | 3 h | f384 | global |
@@ -294,7 +294,8 @@ keeps about a day of runs. Older runs come from the source.coop mirror of
 the same tree.
 
 Every lead is about 2 GB, since each field is 120 files of about 3.3 MB.
-So the fetch refuses a window of more than 13 leads before downloading
+So the fetch refuses a window of more than 61 leads (a whole 00/12Z run at
+3 h) before downloading
 anything, names the limit, and suggests a coarser `--cadence` or
 `--source icon-global`. See `docs/public/ICON-GLOBAL.md`.
 

@@ -2916,7 +2916,7 @@
   },
   "limits": {
     "max_expanded_object_bytes": 268435456,
-    "max_input_files": 8263,
+    "max_input_files": 38311,
     "native_stage_timeout_seconds": 600
   },
   "methods": {
