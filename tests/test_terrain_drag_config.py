@@ -434,7 +434,7 @@ def test_terrain_drag_has_resident_workspace_and_kernel_memory_prices(
     modules = pf.domain_kernel_modules(dc, prices_refl=False)
     assert ("terrain_drag_composed" in modules) is bool(topo or gwd)
     assert pf.CHAINED_TRANSLATION_UNIT_FRAMES[
-        "terrain_drag_composed"].max_local_size_bytes == 1184
+        "terrain_drag_composed"].max_local_size_bytes == 2208  # TD_KMAX 256
     if not topo and not gwd:
         assert not transients
         assert not any(name.startswith("terrain_drag/") for name in items)

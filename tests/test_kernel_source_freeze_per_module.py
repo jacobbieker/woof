@@ -295,8 +295,13 @@ BASELINE_PINNED: dict[str, str] = {
     "milbrandt2_zet":
         "dfab83f02bc23e2f4d019015203fb942cd4fbfe02bae4dc342b6816b062f532c",
     # f1e9adbf1 fix(myj): seed TKE_MYJ at WRF's EPSQ2, make the mutation controls real, decl
+    # RE-PINNED 2026-10-12 (levels256/myj): the nineteen column arrays moved
+    # from the per-thread frame into a runtime (nz + 1)-level global
+    # workspace and MYJ_KMAX became a 256-level refusal guard; bit-identical
+    # to the previous pin at nz = 49/100/128 (tests/test_myj_workspace.py).
+    # Previously d0e0b3dd.
     "myjpbl":
-        "d0e0b3dde6ba1729460694a3bf730ac82420e85d3979327953a7e45bf85719f1",
+        "3efbb82f1f486cc51dbbc0a22e06c259cadce74df5b39a0471bd8416fc82762a",
     # f1e9adbf1 fix(myj): seed TKE_MYJ at WRF's EPSQ2, make the mutation controls real, decl
     # RE-PINNED by the WRF-parity PBLH seed repair (MYJ-01): the height
     # accumulator seeded from ``dz_a[0]`` -- layer 0 of COLUMN 0 -- for every
@@ -376,8 +381,11 @@ BASELINE_PINNED: dict[str, str] = {
     # 9c57c4ee9 feat(sase): CUDA mirror of the S3-12 additive e^{3/2} dissipation channel, p
     # Re-pinned for A146 (a98f2482e): constant-divisor float divisions
     # spelled __fdiv_rn.  Previously 9c49c1d0.
+    # Re-pinned for the 256-level lane: header comment only (SASE_KMAX is
+    # now compiled per run at a power-of-two tier of nz); the preprocessor
+    # drops comments, so no compiled binary moves.  Previously af8c732f.
     "sase":
-        "af8c732fbc4945c517a965a7dc4c2e931667400064d01072f27728f4a67d7ae8",
+        "c1d5aeb507bdf53d812ed1df3e04450e01c32cb190b956e782d971e8f5e1d942",
     # a084e0aeb fix(shinhong): the ULP table moved because the kernel compiler did, so it is
     # RE-PINNED 2026-09-30 by the default-pieces speed lane (878435c39):
     # the column arrays move from a 17,160 B per-thread local frame into a
@@ -389,8 +397,12 @@ BASELINE_PINNED: dict[str, str] = {
     # Re-pinned for A146 on top of that: constant-divisor float divisions
     # spelled __fdiv_rn, because NVRTC compiles x / C as a multiply by the
     # rounded reciprocal on Blackwell targets. Previously be8bf6ea.
+    # Re-pinned 2026-10-12 (levels256/guards): SHINHONG_KMAX 128 -> 256, a
+    # refusal guard only (frame 0 B before and after on sm_86); every output
+    # word bit-identical to the 128-level source at nz <= 128
+    # (tests/test_physics_256_levels_gpu.py).  Previously 6fd615d0.
     "shinhong":
-        "6fd615d06165a26b806fa768e1088f9af1976ead1eedad447aa49474787109b7",
+        "f1184b751c0898936e3090a9512a7aeb1186a6c0e63182639e230192fc606949",
     # 58dfd599c feat(shinhong): CUDA mirror on the RTX 5090 -- dtheta bitwise, br DAZ counte
     "shinhong_validation":
         "e3714616c403a3f272600499164cf9b0215879d567dadcda31287dd33c600b87",
@@ -592,8 +604,16 @@ BASELINE_PINNED: dict[str, str] = {
     # Re-pinned for A146 (a98f2482e) on top: constant-divisor float
     # divisions spelled __fdiv_rn.  A144 alone was 53ac977a, A146 alone
     # 0df1f08e; previously 6f528e1b1df03047 (a3f158bef).
+    # RE-PINNED 2026-10-12 (levels256/wsm6-wdm6): the per-thread column
+    # arrays moved into a launcher-owned global workspace so WDM6 runs to
+    # 256 levels with a 0 B local frame; the CPU mirror keeps its
+    # pre-workspace entry point.  Every output word bit-identical to the
+    # pre-cut kernel at nz 40/64/80, hail_opt 0/1, one and three minor
+    # loops, NVRTC 12.9.86 and 13.4.92 on sm_86 (25,821,184 words, 0
+    # differ; tests/test_wdm6_workspace.py, docs/kernel_local_memory_bounds.md
+    # section 11).  Previously e1c1a666.
     "wdm6":
-        "e1c1a666004e43f2471b69469b6938ec188d43e542330c741ed546c3a8d771aa",
+        "4ec73b6a5c438dbb3d331898aa55646f88f382ca85d8a2bff567eb5a0c3ce4c3",
     # 5165b9485 chore(wdm6): the divergence gets a citation, the constants get one home
     "wdm6_refl":
         "5dff160d671d68c2236c964bfac94e0b8f275a6897b8840f860c0e1ddbf9fdcf",
@@ -621,8 +641,12 @@ BASELINE_PINNED: dict[str, str] = {
     # spelled __fdiv_rn, because NVRTC compiles x / C as a multiply by the
     # rounded reciprocal for sm_120 under -ftz=true.  sm_89 compiles the
     # same division either way.  Previously a25a77f1.
+    # RE-PINNED 2026-10-12 (levels256/myj): the 24 column arrays moved into
+    # a runtime global workspace, MYJ_KMAX a 256-level refusal guard;
+    # bit-identical to the previous pin at nz = 49/100/128
+    # (tests/test_myj_workspace.py).  Previously ff8c000f.
     "myjurb":
-        "ff8c000f5fdbe9f43f903a00ef9a20c760635c5321e2912257ebfe2d172a26e8",
+        "fb6e913711c15948317681cf72641f2ca4dbc3b747ed6f2203dff142ad43c24e",
     # lane/282-terrain-drag: sub-grid terrain drag from WRF v4.7.1, the
     # topo_wind static coefficients (start_em.F:1539-1626), gwd_opt = 1
     # (module_bl_gwdo.F -> bl_gwdo.F90) and gwd_opt = 3 (module_bl_gwdo_gsl.F),
@@ -632,8 +656,13 @@ BASELINE_PINNED: dict[str, str] = {
     # Re-pinned for the SASE upper-bracket PBL-top helper.  The complete
     # module, its bit oracles, helper and mutation controls pass on
     # sm_89 and sm_120; the WRF scheme arithmetic is unchanged.
+    # Re-pinned 2026-10-12 (levels256/guards): TD_KMAX 128 -> 256, the
+    # dycore's level ceiling; the stress profiles double (KIM 640 -> 1,152 B,
+    # GSL 1,184 -> 2,208 B on sm_86, NVRTC 12.9.86).  Every output word
+    # bit-identical to the 128-level source at nz <= 128
+    # (tests/test_physics_256_levels_gpu.py).  Previously eff25247.
     "terrain_drag":
-        "eff252477f8d467e16b179023b8857ffd95feeedb94110ee72fe0d7a879e79d3",
+        "7bb86babae6e2ee53b5072a27a0e343bc64b3f125400120688f44c500c11e80f",
     # ebcf4edd2 lane/urban-bep: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
     "urban_bep":
@@ -712,8 +741,11 @@ BASELINE_PINNED: dict[str, str] = {
     # the measured node4 source-transition receipt records these raw bytes.
     "rrtmg_legacy_prep":
         "fba22c05ab15139df82653cc1e699b8f1a53d10d11359bc7b6c14da36012c15a",
+    # levels256/rrtmg-lw: regenerated from rrtmg_lw_chain.cu after its
+    # RLW_MAXLAY became an #ifndef default (the per-run layer tier); the
+    # shipped-tier unit's PTX is byte-identical to the base's.
     "rrtmg_lw_chain_coalesced":
-        "2682d172388d4a31ae11be0168bdd13b33be9c1b8e77e7ca92e86a8f9a822401",
+        "8998771ff5f3e7fe81da8e16ec9cf58dba99d983ac3f689edfbb1625deeb3250",
     "rrtmg_lw_zbatched":
         "5611794c5c9e44815ad00e28af7367428beda949afe205654ecb959665de7a8e",
     # lane/281-zadvect-implicit (A158): WRF 4.7.1's implicit-explicit

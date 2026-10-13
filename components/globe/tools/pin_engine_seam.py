@@ -104,8 +104,8 @@ SEAM: tuple[tuple[str, str], ...] = (
      "tokens carried rrtmgp binds"),
     ("woof/physics_vertical_contract.py",
      "outside_vertical_bounds and refuse_vertical_levels, bound at module "
-     "scope by carried ysu.  Nothing in this package binds "
-     "MAX_RRTMGP_LAYERS, and carried rrtmgp does not reach this file"),
+     "scope by carried ysu, and MAX_RRTMGP_MODEL_LEVELS, bound at module "
+     "scope by carried rrtmgp as its model-level refusal"),
     ("woof/core/kf.py",
      "_model_clock_dt, imported at module scope by carried gf"),
     ("woof/core/health_ledger.py",

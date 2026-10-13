@@ -349,16 +349,25 @@ def test_wdm6_microphysics_dispatch_is_lazy_and_forwards_diagflag(
                             refl_10cm_due=True) is sentinel
 
 
-def test_wdm6_vertical_kernel_tiers_cover_80_without_enlarging_z49():
-    from woof.core.wdm6 import _kernel_capacity
+def test_wdm6_workspace_follows_nz_up_to_256_levels():
+    """The 64/80 KMAX tier ladder is retired: the column arrays live in a
+    launcher-owned workspace whose per-slot extent is the runtime nz + 1,
+    and the scheme admits 2 <= nz <= 256."""
+    from woof.core import wdm6
+    from woof.core.wdm6_constants import (
+        WDM6WS_SLOTS, WDM6_BLOCK, wdm6_workspace_extent, wdm6_workspace_floats)
 
-    assert _kernel_capacity(49) == 64
-    assert _kernel_capacity(64) == 64
-    assert _kernel_capacity(65) == 80
-    assert _kernel_capacity(80) == 80
-    with pytest.raises(ValueError, match="2 <= nz <= 80"):
-        _kernel_capacity(81)
-
+    assert wdm6.VERTICAL_LEVEL_BOUNDS == (2, 256)
+    assert not hasattr(wdm6, "_kernel_capacity")
+    for nz in (2, 49, 64, 65, 80, 81, 128, 256):
+        assert wdm6_workspace_extent(nz) == nz + 1
+    # whole lane-interleaved blocks of WDM6WS_SLOTS slots
+    assert WDM6WS_SLOTS == 37 and WDM6_BLOCK == 32
+    assert wdm6_workspace_floats(49, 1) == 37 * 50 * 32
+    assert wdm6_workspace_floats(49, 33) == 2 * 37 * 50 * 32
+    for nz in (1, 257):
+        with pytest.raises(ValueError, match="2 <= nz <= 256"):
+            wdm6_workspace_extent(nz)
 
 def test_the_adapter_refuses_a_state_with_no_land_mask():
     from woof.core.wdm6 import column_land_mask

@@ -145,10 +145,51 @@ bitwise over the full fixture decks at 4 chunk sizes, end-to-end
 max_ulp 0 vs the oracle at batch width, ≥50k-column replica
 determinism, accurate VRAM pricing (`*_batched_vram_bytes`, estimate ==
 measured pool peak), local-frame audits (worst frame:
-`rlw_rtrn_march` 2048 B/thread ⇒ ~510 MiB machine-wide reservation;
+`rlw_rtrn_march` 2048 B/thread at the shipped `RLW_MAXLAY = 128` tier
+⇒ ~510 MiB machine-wide reservation, 16 B per layer at deeper tiers;
 every SW kernel 0 B after the spcvmc workspace restructure, which
 converted a hidden ~1.65 GiB lmem reservation into pool-priced
 transient VRAM). All dual-run.
+
+**Layer bound (2026-10, levels256/rrtmg-lw).** `rlw_rtrn_march` keeps
+four per-thread float columns (`atrans/atot/bbugas/bbutot`) of
+`RLW_MAXLAY` entries. `RLW_MAXLAY` was a fixed 128 and the adapter
+refused any longwave column deeper than that (`nz + nint(p_top/400 Pa)
+> 128`). It is now an `#ifndef` default in `kernels/rrtmg_lw_chain.cu`
+(and its generated twin), and the host compiles the LW unit per run at
+`legacy_longwave_layer_tier(nlayers)`
+(`woof/physics_vertical_contract.py`): the shipped 128 for every column
+of at most 128 layers -- no define is prepended, the composed source is
+the pre-tier unit and its PTX is byte-identical to it (sm_86, NVRTC 12.9
+and 13.4) -- otherwise the layer count rounded up to a multiple of 64
+(192, 256, 320, ...), each tier its own module in the direct-NVRTC disk
+cache (~6-9 s cold compile on sm_86). The adapter
+(`RRTMGLegacyRadiation`) and the resolved vertical preflight now refuse
+only `nz > 256` (`MAX_LEGACY_LONGWAVE_MODEL_LEVELS`, the dycore's
+ceiling); WRF's buffer layers above `p_top` ride on top. The march frame
+is exactly 16 B x `RLW_MAXLAY` on sm_86 (NVRTC 12.9 and 13.4, read at
+64, 100, 128, 129, 192, 256, 269, 320, 384), and
+`woof.core.preflight.rrtmg_lw_legacy_chain_frame_bytes` prices the unit
+at that law per domain (2,048 / 3,072 / 4,096 / 5,120 B at tiers 128 /
+192 / 256 / 320). sm_120 and sm_89 were read only at the shipped tier
+(2,048 B); their deeper tiers are priced by the same law, not
+re-measured. `tests/test_rrtmg_lw_deep_columns.py` holds the device
+chain (single-column, batched, device-resident) to the NumPy port
+bitwise on a 256-level column at a 1 hPa top (256 radiation layers)
+and a 150-level column at 50 hPa (163 layers), and shows a <=128-layer
+column gives the same words in a deeper tier.
+
+A 1 hPa top builds **no** buffer layer (nint(0.25) = 0, nlayers = kte).
+WRF runs that column: the Cavallo loop is empty, `plev(kte+1)` is
+overwritten with 0 and `play(kte)` recomputed against it, so the top
+model layer reaches the top of the atmosphere. The wrapper ports
+(`lwrad_prep`, `lwrad_prep_batch`, `lwrad_prep_batch_device`) used to
+refuse `nlayers < kte + 1`; they now admit `nlayers == kte` and run
+exactly those statements (host and device bitwise,
+`tests/test_rrtmg_lw_buffer_grid.py`). Only WRF's optional `LW*FLX`
+profiles over `kts..kte+2`, which would read one level past `uflx` in
+WRF, are refused by `lwrad_outputs[_batch]` for such a column; the
+forecast adapter does not produce them.
 
 ## 7. Audit fold-in (LW + SW xhigh audits, 2026-07-27)
 

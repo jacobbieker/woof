@@ -154,8 +154,8 @@ def _prep(sw, kw):
     if not nk:
         raise ValueError("empty vertical profile")
     nl = nk+1 if sw else int(k["nlayers"])
-    if nl < nk+1:
-        raise ValueError("nlayers must be at least kte+1")
+    if nl < nk:   # nl == nk: WRF's p_top < 2 hPa column, no buffer layer
+        raise ValueError("nlayers must be at least kte")
     prof = {n: _profile(cp, k[n], (ncol, nk+1 if n in ("p8w", "t8w") else nk), n)
             for n in ("p3d", "p8w", "t3d", "t8w", "dz8w", "qv3d")}
     zero = cp.zeros((ncol, nk), np.float32)

@@ -2267,10 +2267,10 @@ def validate_resolved_physics_vertical_levels(
 
     from woof.physics_registry import CONSUMER_ROWS_KEY
     from woof.physics_vertical_contract import (
-        MAX_LEGACY_LONGWAVE_LAYERS,
         MAX_LEGACY_SHORTWAVE_LAYERS,
-        MAX_RRTMGP_LAYERS,
+        MAX_RRTMGP_MODEL_LEVELS,
         legacy_radiation_layer_counts,
+        max_legacy_longwave_layers,
         rrtmgp_above_model_layer_counts,
     )
 
@@ -2296,6 +2296,22 @@ def validate_resolved_physics_vertical_levels(
             bounded(str(window["label"]),
                     (window.get("minimum"), window.get("maximum")))
 
+    # Orographic gravity-wave drag is a run setting (``gwd_opt``), not a
+    # registry component, so it has no consumer row to read; its per-thread
+    # stress profile is sized by ``TD_KMAX`` and a deeper column used to
+    # pass every gate and fail at the first PBL-driver call.
+    raw_gwd = _selection_value(settings, "gwd_opt")
+    try:
+        gwd_opt = (0 if raw_gwd is None or isinstance(raw_gwd, bool)
+                   else int(raw_gwd))
+    except (TypeError, ValueError):
+        gwd_opt = 0
+    if gwd_opt in (1, 3):
+        from woof.physics_vertical_contract import (
+            TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS)
+        bounded(f"Terrain drag gwd_opt={gwd_opt}",
+                TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS)
+
     from types import SimpleNamespace
     from woof.config import radiation_scheme_ids
     radiation_settings = (SimpleNamespace(**settings) if isinstance(settings, Mapping) else settings)
@@ -2304,8 +2320,11 @@ def validate_resolved_physics_vertical_levels(
         top_pressure = 0.0 if p_top is None else float(p_top)
         if rrtmg_variant(settings) == RRTMG_VARIANT_LEGACY:
             lw_layers, sw_layers = legacy_radiation_layer_counts(nz, top_pressure)
+            # The LW maximum is the model-depth ceiling plus THIS run's cap
+            # layers, so exceeding it is exactly nz > 256 at any p_top.
             for index, kind, total, maximum in (
-                    (0, "longwave", lw_layers, MAX_LEGACY_LONGWAVE_LAYERS),
+                    (0, "longwave", lw_layers,
+                     max_legacy_longwave_layers(top_pressure)),
                     (1, "shortwave", sw_layers, MAX_LEGACY_SHORTWAVE_LAYERS)):
                 if pair[index] != 4:
                     continue
@@ -2314,8 +2333,14 @@ def validate_resolved_physics_vertical_levels(
                     "total_layers": total, "maximum": maximum})
                 if maximum is not None and total > maximum:
                     violations.append(f"legacy RRTMG {kind} requires model plus cap layers "
-                        f"<= {maximum}, got {nz}+{total - nz}={total}")
+                        f"<= {maximum} (nz <= {maximum - (total - nz)}), "
+                        f"got {nz}+{total - nz}={total}")
         else:
+            # The bound is on MODEL levels; the cap layers above the model
+            # top ride on top of it at any p_top (no RRTMGP kernel holds a
+            # fixed per-layer array -- see MAX_RRTMGP_MODEL_LEVELS), so the
+            # radiation-layer maximum reported here is nz's ceiling plus
+            # this p_top's cap.
             lw_upper, sw_upper = rrtmgp_above_model_layer_counts(top_pressure)
             for index, kind, upper in ((0, "longwave", lw_upper), (1, "shortwave", sw_upper)):
                 if pair[index] != 4:
@@ -2323,10 +2348,13 @@ def validate_resolved_physics_vertical_levels(
                 total = nz + upper
                 checks.append({"component": f"RTE+RRTMGP {kind}",
                     "model_levels": nz, "above_model_layers": upper,
-                    "total_layers": total, "maximum": MAX_RRTMGP_LAYERS})
-                if total > MAX_RRTMGP_LAYERS:
-                    violations.append(f"RTE+RRTMGP {kind} requires model plus cap layers "
-                        f"<= {MAX_RRTMGP_LAYERS}, got {nz}+{upper}={total}")
+                    "total_layers": total,
+                    "maximum": MAX_RRTMGP_MODEL_LEVELS + upper,
+                    "maximum_model_levels": MAX_RRTMGP_MODEL_LEVELS})
+                if nz > MAX_RRTMGP_MODEL_LEVELS:
+                    violations.append(f"RTE+RRTMGP {kind} requires model levels "
+                        f"nz <= {MAX_RRTMGP_MODEL_LEVELS} (plus {upper} cap "
+                        f"layers above the model top), got {nz}+{upper}={total}")
 
     if violations:
         raise PhysicsVerticalPreflightError(

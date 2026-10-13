@@ -88,7 +88,18 @@ from woof.core import noahmp_libm as _libm
 
 F = np.float32
 _U32 = 0xFFFFFFFF
-MAX_RADIATION_LAYERS = 128
+
+# The GPU engine has no fixed layer ceiling any more: rlw_rtrn_march's
+# per-thread column is RLW_MAXLAY floats x 4, and RLW_MAXLAY is compiled
+# per run at the contract's tier of the run's layer count (128, the
+# shipped unchanged unit, for every column of at most 128 layers; else the
+# count rounded up to a multiple of 64).  The model-depth bound a legacy
+# run is held to lives in woof.physics_vertical_contract
+# (MAX_LEGACY_LONGWAVE_MODEL_LEVELS), enforced by woof.core.rrtmg_legacy.
+from woof.physics_vertical_contract import (  # noqa: E402
+    LEGACY_LONGWAVE_SHIPPED_LAYER_TIER as RLW_MAXLAY_SHIPPED,
+    legacy_longwave_layer_tier as rlw_maxlay_tier,
+)
 
 # ---------------------------------------------------------------------------
 # Section 0 -- glibc 2.39 FP32 libm (logf, expf, powf).
@@ -3719,7 +3730,12 @@ _GPU_KERNELS = {}
 _GPU_PREFLIGHTED = set()
 
 
-def _gpu_source():
+def _gpu_source(maxlay=RLW_MAXLAY_SHIPPED):
+    """The LW translation unit NVRTC compiles, with ``RLW_MAXLAY`` =
+    ``maxlay``.  At the shipped 128 the string is exactly the unit as it
+    was before the bound became a compile-time tier (no define is
+    prepended; kernels/rrtmg_lw_chain.cu's ``#ifndef`` default supplies
+    it), so every column of at most 128 layers runs the same binary."""
     import re
     import glob as _glob
     import os as _os
@@ -3757,7 +3773,19 @@ def _gpu_source():
                 r"\1if (gpoint == \3) \2", ghelper)
             part = part[:end] + "\n" + helper + "\n" + ghelper + part[end:]
         parts[index] = part
-    return "\n".join(parts)
+    source = "\n".join(parts)
+    maxlay = _rlw_maxlay_value(maxlay)
+    if maxlay == RLW_MAXLAY_SHIPPED:
+        return source
+    return "#define RLW_MAXLAY %d\n" % maxlay + source
+
+
+def _rlw_maxlay_value(maxlay):
+    """Validate a compile-time RLW_MAXLAY (any positive int; production
+    passes :func:`rlw_maxlay_tier` values, measurements pass others)."""
+    if isinstance(maxlay, bool) or int(maxlay) != maxlay or int(maxlay) < 1:
+        raise ValueError(f"RLW_MAXLAY must be a positive integer, got {maxlay!r}")
+    return int(maxlay)
 
 
 #: First line of kernels/rrtmg_lw_chain_coalesced.cu, the committed output of
@@ -3801,8 +3829,12 @@ def _write_coalesced_twin():
 
 
 @cuda_cache(maxsize=None)
-def _gpu_module():
+def _gpu_module(maxlay=RLW_MAXLAY_SHIPPED):
     """Compile the translation unit via NVRTC DIRECTLY and load the PTX.
+
+    ``maxlay`` is the unit's compile-time ``RLW_MAXLAY`` (see
+    :func:`_gpu_source`); each value is its own module, compiled once per
+    device and kept in the direct-NVRTC disk cache.
 
     cupy.RawModule cannot be used here: CuPy's _compile_with_cache_cuda
     appends '-ftz=true' AFTER user options unconditionally (verified in
@@ -3823,42 +3855,50 @@ def _gpu_module():
     target changes.
     """
     import cupy as cp
+    maxlay = _rlw_maxlay_value(maxlay)
     device = int(cp.cuda.Device().id)
-    if device not in _GPU_MODULE:
+    key = (device, maxlay)
+    if key not in _GPU_MODULE:
         import cupy as cp
         from woof import nvrtc_ptx_cache as _cc
         ptx, _mapping = _cc.compile_using_nvrtc(
-            _gpu_source(),
+            _gpu_source(maxlay),
             ("-std=c++17", "--ftz=false"),
             None, "rrtmg_lw.cu")
         mod = cp.cuda.function.Module()
         mod.load(ptx.encode() if isinstance(ptx, str) else ptx)
-        _GPU_MODULE[device] = mod
-    return _GPU_MODULE[device]
+        _GPU_MODULE[key] = mod
+    return _GPU_MODULE[key]
 
 
 @cuda_cache(maxsize=None)
-def _gpu_kernel(name):
+def _gpu_kernel(name, maxlay=RLW_MAXLAY_SHIPPED):
+    """Kernel ``name`` from the unit compiled at ``RLW_MAXLAY = maxlay``.
+    Only the rtrn march kernels read the bound; a deep run takes every
+    kernel of its pipeline from its own tier's unit so it compiles one."""
     import cupy as cp
-    key = (int(cp.cuda.Device().id), name)
+    maxlay = _rlw_maxlay_value(maxlay)
+    key = (int(cp.cuda.Device().id), name, maxlay)
     if key not in _GPU_KERNELS:
-        _GPU_KERNELS[key] = _gpu_module().get_function(name)
+        _GPU_KERNELS[key] = _gpu_module(maxlay).get_function(name)
     return _GPU_KERNELS[key]
 
 
-def gpu_preflight(force=False):
+def gpu_preflight(force=False, maxlay=RLW_MAXLAY_SHIPPED):
     """Prove toolchain behaviour on the live device: subnormal survival
     through __fmul_rn under our compile options, and the device libm
-    transcriptions equal the host ones bitwise on probe values."""
+    transcriptions equal the host ones bitwise on probe values.  Run on
+    the unit compiled at ``maxlay`` (the one the caller will launch)."""
     import cupy as cp
+    maxlay = _rlw_maxlay_value(maxlay)
     device = int(cp.cuda.Device().id)
-    if device in _GPU_PREFLIGHTED and not force:
+    if (device, maxlay) in _GPU_PREFLIGHTED and not force:
         return
     import cupy as cp
     x = cp.asarray(np.array(
         [1.0e-30, 1.0e-10, -100.0, 3.14159, 1.5, 0.65], dtype=np.float32))
     o = cp.zeros(4, dtype=cp.float32)
-    _gpu_kernel("rlw_probe")((1,), (32,), (x, o, np.int32(4)))
+    _gpu_kernel("rlw_probe", maxlay)((1,), (32,), (x, o, np.int32(4)))
     got = cp.asnumpy(o)
     want = np.array([
         np.float32(1.0e-30) * np.float32(1.0e-10),
@@ -3870,7 +3910,7 @@ def gpu_preflight(force=False):
         raise RuntimeError(
             "rrtmg_lw GPU preflight failed: got %r want %r (subnormal "
             "flush or libm divergence on this toolchain)" % (got, want))
-    _GPU_PREFLIGHTED.add(device)
+    _GPU_PREFLIGHTED.add((device, maxlay))
 
 
 def gpu_pack_taumol_state(st, ncol=1):
@@ -4053,9 +4093,10 @@ def gpu_rtrnmc(nlayers, istart, iend, iout, pz, semiss, ncbands, cldfmc,
                C, ncol=1):
     """Device rtrnmc pipeline; returns the NumPy-rtrnmc dict."""
     import cupy as cp
-    gpu_preflight()
     nl = int(nlayers)
-    assert nl <= MAX_RADIATION_LAYERS, "rlw_rtrn_march RLW_MAXLAY"
+    # The march's per-thread column is compiled to hold this column.
+    maxlay = rlw_maxlay_tier(nl)
+    gpu_preflight(maxlay=maxlay)
     if (istart, iend, iout) != (1, 16, 0):
         raise NotImplementedError("istart/iend/iout fixed to 1/16/0")
 
@@ -4065,7 +4106,7 @@ def gpu_rtrnmc(nlayers, istart, iend, iout, pz, semiss, ncbands, cldfmc,
     cldfmc_d = dev(cldfmc)
     taucmc_d = dev(taucmc)
     secdiff = cp.zeros((ncol, NBNDLW), dtype=cp.float32)
-    _gpu_kernel("rlw_rtrn_secdiff")(
+    _gpu_kernel("rlw_rtrn_secdiff", maxlay)(
         (1,), (64,),
         (np.int32(ncol), dev(np.atleast_1d(np.float32(pwvcm))),
          dev(A0), dev(A1), dev(A2), secdiff))
@@ -4074,7 +4115,7 @@ def gpu_rtrnmc(nlayers, istart, iend, iout, pz, semiss, ncbands, cldfmc,
     efclfrac = cp.zeros((ncol, NGPTLW, nl), dtype=cp.float32)
     icldlyr = cp.zeros((ncol, nl), dtype=cp.int32)
     total = ncol * nl
-    _gpu_kernel("rlw_rtrn_prol")(
+    _gpu_kernel("rlw_rtrn_prol", maxlay)(
         ((total + 127) // 128,), (128,),
         (np.int32(ncol), np.int32(nl), cldfmc_d, taucmc_d, secdiff,
          dev(C["wvn/ngb"], np.int32), odcld, efclfrac, icldlyr))
@@ -4086,7 +4127,7 @@ def gpu_rtrnmc(nlayers, istart, iend, iout, pz, semiss, ncbands, cldfmc,
     radlu_sfc = cp.zeros((ncol, NGPTLW), dtype=cp.float32)
     radclru_sfc = cp.zeros((ncol, NGPTLW), dtype=cp.float32)
     total = ncol * NGPTLW
-    _gpu_kernel("rlw_rtrn_march")(
+    _gpu_kernel("rlw_rtrn_march", maxlay)(
         ((total + 127) // 128,), (128,),
         (np.int32(ncol), np.int32(nl), cldfmc_d, odcld, efclfrac,
          icldlyr, secdiff, dev(semiss).reshape(ncol, NBNDLW),
@@ -4103,7 +4144,7 @@ def gpu_rtrnmc(nlayers, istart, iend, iout, pz, semiss, ncbands, cldfmc,
     totuclfl = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     totdclfl = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     total = ncol * (nl + 1)
-    _gpu_kernel("rlw_rtrn_accum")(
+    _gpu_kernel("rlw_rtrn_accum", maxlay)(
         ((total + 127) // 128,), (128,),
         (np.int32(ncol), np.int32(nl), radld_p, radclrd_p, radlu_p,
          radclru_p, iclddn_p, radlu_sfc, radclru_sfc,
@@ -4114,7 +4155,7 @@ def gpu_rtrnmc(nlayers, istart, iend, iout, pz, semiss, ncbands, cldfmc,
     fnetc = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     htr = cp.zeros((ncol, nl + 1), dtype=cp.float32)
     htrc = cp.zeros((ncol, nl + 1), dtype=cp.float32)
-    _gpu_kernel("rlw_rtrn_final")(
+    _gpu_kernel("rlw_rtrn_final", maxlay)(
         (1,), (64,),
         (np.int32(ncol), np.int32(nl), dev(pz).reshape(ncol, nl + 1),
          np.float32(C["con/fluxfac"]), np.float32(C["con/heatfac"]),
@@ -4401,22 +4442,26 @@ LW_GPU_KERNEL_NAMES = (
 ) + tuple("rlw_taugb%d" % b for b in range(1, 17))
 
 
-def gpu_local_frame_bytes():
-    """CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES for every LW kernel.
+def gpu_local_frame_bytes(maxlay=RLW_MAXLAY_SHIPPED):
+    """CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES for every LW kernel of the unit
+    compiled at ``RLW_MAXLAY = maxlay``.
 
     A per-thread local frame of F bytes reserves roughly
     F x (max resident threads) = F x 1536 x 170 bytes machine-wide on the
     RTX 5090 at first launch (the KF_KMAX lesson), so frames are audited
-    and bounded by tests/test_rrtmg_lw_cuda.py.
+    and bounded by tests/test_rrtmg_lw_cuda.py.  ``rlw_rtrn_march`` (and
+    its coalesced twin) is the one kernel whose frame follows ``maxlay``:
+    16 B per layer, its four per-thread float columns
+    (woof.core.preflight.rrtmg_lw_legacy_chain_frame_bytes prices it).
     """
     from cupy.cuda import driver
     out = {}
     for name in LW_GPU_KERNEL_NAMES:
-        fn = _gpu_kernel(name)
+        fn = _gpu_kernel(name, maxlay)
         out[name] = int(driver.funcGetAttribute(
             driver.CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, fn.ptr))
         if name in ("rlw_cldprmc", "rlw_rtrn_prol", "rlw_rtrn_march", "rlw_rtrn_accum"):
-            twin = _gpu_kernel(name + "_coalesced")
+            twin = _gpu_kernel(name + "_coalesced", maxlay)
             out[name] = max(out[name], int(driver.funcGetAttribute(
                 driver.CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, twin.ptr)))
     return out
@@ -4709,14 +4754,16 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
     if mcica_layout not in ("gpoint", "column"):
         raise ValueError("mcica_layout must be gpoint or column")
     import cupy as cp
-    gpu_preflight()
     if icld < 1:
         raise ValueError(
             "icld < 1: WRF never drives this path and the Fortran would "
             "read undefined inflag/iceflag/liqflag (documented divergence)")
     nl = int(nlay)
     ncol = int(ncol)
-    assert nl <= MAX_RADIATION_LAYERS, "rlw_rtrn_march RLW_MAXLAY"
+    # Every kernel of the pipeline comes from the unit whose
+    # rlw_rtrn_march_coalesced column holds this run's layer count.
+    maxlay = rlw_maxlay_tier(nl)
+    gpu_preflight(maxlay=maxlay)
     chunk = (int(column_chunk) if column_chunk
              else batch_column_chunk(NGPTLW, LW_BATCH_COLUMN_CHUNK_CEILING))
     if chunk < 1:
@@ -4776,7 +4823,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         coldry_d = cp.empty((nc, nl), dtype=cp.float32)
         wbrodl_d = cp.empty((nc, nl), dtype=cp.float32)
         pwvcm_d = cp.empty(nc, dtype=cp.float32)
-        _gpu_kernel("rlw_inatm")(
+        _gpu_kernel("rlw_inatm", maxlay)(
             ((nc + 31) // 32,), (32,),
             (i32(nc), i32(nl), plev_d, K["grav"], K["avogad"],
              wkl_d, wx_d, coldry_d, wbrodl_d, pwvcm_d))
@@ -4784,7 +4831,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         # ---- cldprmc ----------------------------------------------------
         ncb_flag = cp.zeros(nc, dtype=cp.int32)
         total = nc * NGPTLW
-        _gpu_kernel("rlw_cldprmc_coalesced")(
+        _gpu_kernel("rlw_cldprmc_coalesced", maxlay)(
             ((total + 127) // 128,), (128,),
             (i32(nc), i32(nl), i32(inflglw), i32(iceflglw), i32(liqflglw),
              cldfmc_d, ciwpmc_d, clwpmc_d, cswpmc_d,
@@ -4812,7 +4859,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         def IV(name):
             return isv_d[islot[name]]
 
-        _gpu_kernel("rlw_setcoef")(
+        _gpu_kernel("rlw_setcoef", maxlay)(
             ((nc + 63) // 64,), (64,),
             (i32(nc), i32(nl), i32(1),
              FV("pavel"), tlay_d, tlev_d, tsfc_d, emis_d,
@@ -4841,7 +4888,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         fracs_d = cp.empty((nc, nl, NGPTLW), dtype=cp.float32)
         total = nc * nl
         blocks = (total * 16 + 127) // 128
-        _gpu_kernel("rlw_taumol_batched")(
+        _gpu_kernel("rlw_taumol_batched", maxlay)(
             (blocks, 16), (128,),
             (i32(nc), i32(nl), laytrop_d, fs_d, isv_d, wx_d,
              K["chi"], K["oneminus"], K["bandptrs"], taug_d, fracs_d))
@@ -4852,14 +4899,14 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         # ---- taut --------------------------------------------------------
         taut_d = cp.empty((nc, nl, NGPTLW), dtype=cp.float32)
         total = nc * nl * NGPTLW
-        _gpu_kernel("rlw_taut")(
+        _gpu_kernel("rlw_taut", maxlay)(
             ((total + 127) // 128,), (128,),
             (i32(nc), i32(nl), taug_d, taua_d, K["ngb"], taut_d))
         del taug_d, taua_d
 
         # ---- rtrnmc pipeline ----------------------------------------------
         secdiff = cp.empty((nc, NBNDLW), dtype=cp.float32)
-        _gpu_kernel("rlw_rtrn_secdiff")(
+        _gpu_kernel("rlw_rtrn_secdiff", maxlay)(
             ((nc + 63) // 64,), (64,),
             (i32(nc), pwvcm_d, K["a0"], K["a1"], K["a2"], secdiff))
 
@@ -4867,7 +4914,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         efclfrac = cp.empty((nc, nl, NGPTLW), dtype=cp.float32)
         icldlyr = cp.zeros((nc, nl), dtype=cp.int32)
         total = nc * nl
-        _gpu_kernel("rlw_rtrn_prol_gpoints")(
+        _gpu_kernel("rlw_rtrn_prol_gpoints", maxlay)(
             (total,), (128,),
             (i32(nc), i32(nl), cldfmc_d, taucmc_d, secdiff, K["ngb"],
              odcld, efclfrac, icldlyr))
@@ -4881,7 +4928,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         radlu_sfc = scratch.take("radlu_sfc", (nc, NGPTLW), dtype=cp.float32)
         radclru_sfc = scratch.take("radclru_sfc", (nc, NGPTLW), dtype=cp.float32)
         total = nc * NGPTLW
-        _gpu_kernel("rlw_rtrn_march_coalesced")(
+        _gpu_kernel("rlw_rtrn_march_coalesced", maxlay)(
             ((total + 127) // 128,), (128,),
             (i32(nc), i32(nl), cldfmc_d, odcld, efclfrac, icldlyr,
              secdiff, emis_d, planklay, planklev, plankbnd,
@@ -4899,7 +4946,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         totuclfl = cp.empty((nc, nl + 1), dtype=cp.float32)
         totdclfl = cp.empty((nc, nl + 1), dtype=cp.float32)
         total = nc * (nl + 1)
-        _gpu_kernel("rlw_rtrn_accum_rows")(
+        _gpu_kernel("rlw_rtrn_accum_rows", maxlay)(
             ((total + 63) // 64,), (64,),
             (i32(nc), i32(nl), radld_p, radclrd_p, radlu_p, radclru_p,
              iclddn_p, radlu_sfc, radclru_sfc,
@@ -4912,7 +4959,7 @@ def gpu_rrtmg_lw_batched_device(ncol, nlay, icld, play, plev, tlay, tlev,
         fnetc = cp.empty((nc, nl + 1), dtype=cp.float32)
         htr = cp.empty((nc, nl + 1), dtype=cp.float32)
         htrc = cp.empty((nc, nl + 1), dtype=cp.float32)
-        _gpu_kernel("rlw_rtrn_final")(
+        _gpu_kernel("rlw_rtrn_final", maxlay)(
             ((nc + 63) // 64,), (64,),
             (i32(nc), i32(nl), plev_d, K["fluxfac"], K["heatfac"],
              totuflux, totdflux, totuclfl, totdclfl,

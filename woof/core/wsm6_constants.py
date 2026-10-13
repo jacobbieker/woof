@@ -132,43 +132,73 @@ def coefficients(hail_opt: int = 0) -> WSM6Coefficients:
     )
 
 
-#: ``kernels/wsm6.cu``'s ``WSM6_KMAX`` ladder.  One CUDA thread owns a whole
-#: column, so the bound sizes the per-thread work arrays and the driver
-#: reserves a local-memory backing store for the device's entire resident
-#: -thread capacity at first launch -- the law at the head of
-#: ``woof/core/preflight.py``.  ``woof/core/wsm6.py`` therefore compiles the
-#: SHALLOWEST tier that holds the configuration's ``nz``, and compiles a TIER
-#: rather than ``nz`` itself so a nested tree with several level counts loads
-#: at most two WSM6 modules.
+#: ``kernels/wsm6.cu``'s column workspace.  One CUDA thread owns a whole
+#: column, and until 2026-10-12 its ~30 column arrays were per-thread locals
+#: sized by a compile-time ``WSM6_KMAX`` tier (64 or 80): the driver reserved
+#: that frame -- 7,216 B at 64, 9,008 B at 80, +112 B per level -- times the
+#: card's WHOLE resident-thread capacity at first launch, and at 256 levels
+#: it would have been ~28.7 KB per thread (several GiB).  The arrays now live
+#: in a global workspace ``woof/core/wsm6.py`` allocates per call, sized to
+#: the columns IN FLIGHT and to the RUNTIME level count, so nothing is
+#: compiled per level count and the tier ladder is retired.
 #:
-#: 64 is the ``#ifndef`` default baked into the source, which is why it is
-#: also the value the driver-regeneration gate reads back for the
-#: unspecialized module and therefore the value recorded in
-#: ``KERNEL_MAX_LOCAL_SIZE_BYTES``.  The 80 tier prices ABOVE that row;
-#: ``preflight.WSM6_TIER_FRAME`` is what carries it.
+#: These live here, not in ``woof/core/wsm6.py``, because the adapter
+#: imports CuPy at module scope and the memory estimator (and the hex
+#: device admission) must price a configuration on a host with no device.
 #:
-#: This ladder lives in the constants module, not in ``woof/core/wsm6.py``,
-#: for one reason: the adapter imports CuPy at module scope and the memory
-#: estimator must price a configuration on a host with no device at all.
-WSM6_SHALLOW_KMAX = 64
-WSM6_DEEP_KMAX = 80
-WSM6_KERNEL_LEVEL_TIERS = (WSM6_SHALLOW_KMAX, WSM6_DEEP_KMAX)
+#: ``WSM6WS_SLOTS`` and ``WSM6_BLOCK`` must match ``wsm6.cu``'s
+#: ``WSM6WS_SLOTS`` / ``WSM6WS_LANES``; ``tests/test_wsm6_workspace.py``
+#: re-derives them from the source and fails if either side moves alone.
+WSM6WS_SLOTS = 30
+#: Launch block and the workspace's lane interleave: one warp.
+WSM6_BLOCK = 32
+#: Blocks per SM the tile is sized for: 16 one-warp blocks is the per-SM
+#: block ceiling on sm_86 and the pre-cut kernel's own residency there, and
+#: the tile at that occupancy runs as fast as one launch over every column
+#: (docs/kernel_local_memory_bounds.md section 11).  The device occupancy
+#: query in the launcher only ever lowers it.
+WSM6_TILE_BLOCKS_PER_SM = 16
+#: The deepest column the kernel admits.  A REFUSAL CEILING only: it sizes
+#: nothing, because the workspace extent is the runtime ``nz``.  256 matches
+#: the other column microphysics (Thompson, Morrison, NSSL, Kessler).
+WSM6_MAX_LEVELS = 256
+#: Retained name for :data:`WSM6_MAX_LEVELS`.  It used to be the deepest
+#: compiled tier (80); the hex column cap and its tests read it.
+WSM6_DEEP_KMAX = WSM6_MAX_LEVELS
 #: ``(minimum, maximum)`` levels WSM6 admits: 2 (the scheme needs a layer
-#: above and below to sediment between) up to the deepest compiled tier.
-WSM6_VERTICAL_LEVEL_BOUNDS = (2, WSM6_DEEP_KMAX)
+#: above and below to sediment between) up to :data:`WSM6_MAX_LEVELS`.
+WSM6_VERTICAL_LEVEL_BOUNDS = (2, WSM6_MAX_LEVELS)
 
 
-def wsm6_level_tier(nz: int) -> int:
-    """Return the ``WSM6_KMAX`` tier ``wsm6.cu`` compiles for ``nz``."""
+def wsm6_workspace_extent(nz: int) -> int:
+    """Per-slot level extent: ``nz + 1`` (the interface arrays index nz)."""
     nz = int(nz)
     minimum, maximum = WSM6_VERTICAL_LEVEL_BOUNDS
     if not minimum <= nz <= maximum:
         raise ValueError(
             f"WSM6 requires {minimum} <= nz <= {maximum}, got {nz}")
-    return next(tier for tier in WSM6_KERNEL_LEVEL_TIERS if nz <= tier)
+    return nz + 1
+
+
+def wsm6_workspace_floats(nz: int, columns: int) -> int:
+    """Workspace floats for ``columns`` columns in flight at this ``nz``.
+
+    Rounded up to whole blocks: the kernel interleaves the workspace by lane
+    within a block, the way CUDA lays local memory out across a warp, so the
+    unit of allocation is one block's region, not one column's.
+    """
+    blocks = (int(columns) + WSM6_BLOCK - 1) // WSM6_BLOCK
+    return blocks * WSM6WS_SLOTS * wsm6_workspace_extent(nz) * WSM6_BLOCK
+
+
+def wsm6_workspace_bytes_per_column(nz: int) -> int:
+    """FP32 workspace bytes one column in flight holds at this ``nz``."""
+    return WSM6WS_SLOTS * wsm6_workspace_extent(nz) * 4
 
 
 __all__ = ["WSM6Coefficients", "WSM6RimedIceConstants",
-           "WSM6_DEEP_KMAX", "WSM6_KERNEL_LEVEL_TIERS", "WSM6_SHALLOW_KMAX",
-           "WSM6_VERTICAL_LEVEL_BOUNDS", "coefficients",
-           "rimed_ice_constants", "wsm6_level_tier"]
+           "WSM6WS_SLOTS", "WSM6_BLOCK", "WSM6_DEEP_KMAX", "WSM6_MAX_LEVELS",
+           "WSM6_TILE_BLOCKS_PER_SM", "WSM6_VERTICAL_LEVEL_BOUNDS",
+           "coefficients", "rimed_ice_constants",
+           "wsm6_workspace_bytes_per_column", "wsm6_workspace_extent",
+           "wsm6_workspace_floats"]

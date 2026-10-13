@@ -692,8 +692,17 @@ FROZEN_MODULE_DIGESTS = {
         # / C as a multiply by the rounded reciprocal on Blackwell targets.
         # Reading: sm_89 unchanged; Blackwell cards now round these quotients
         # IEEE-correctly. Previously 30308b1b/7d81bfc9.
-        '9aacb2a0941882da4705e52265f1038b6c819500fe16d6a62689d6b8af51027d',
-        'fa65105d02ebcebce435a99d3017ce9333eaa8bede9399f9aaecdec4d05e382f'),
+        #
+        # RE-PINNED 2026-10-12 (levels256/guards): KF_KMAX 128 -> 256, the
+        # dycore's level ceiling.  It sizes only the refusal and the two
+        # stack-resident arrays (frame 512 -> 1,024 B on sm_86, NVRTC
+        # 12.9.86, still at the default stack).  Reading: every output word
+        # of every KFPhaseMode bit-identical to the 128-level source at
+        # nz <= 128 (tests/test_physics_256_levels_gpu.py), and
+        # tests/test_kernel_local_bounds.py's KF_KMAX = nz A/B unchanged.
+        # Previously 9aacb2a0/fa65105d.
+        '6b536e6199ff5eb0a852b98971f5701414f4ef5f265f97a32a0dec9af54d0213',
+        '633c43ad42ae3042ffcbdc992787d3e2c001c7b531ef708ea1d0b0fc229f9b95'),
     'lbc_flow': (
         # 4febd041f supplies resolved WDM6/NSSL inflow concentrations.
         # docs/dev/qnn-specified-inflow.md records 4 CPU + 10 GPU
@@ -1294,8 +1303,17 @@ FROZEN_MODULE_DIGESTS = {
         '241382acf34bc312e6361822acc057ec3fedf2f31514b477ff939ef723632592',
         'e6b66fe0cd2f2fbceb2c37aa7ab21636c24944df42b997b8908196fe1444069a'),
     'rrtmg_lw_chain': (
-        'a71a779ea3a733e422414ee5d5d885cb904972fe32ac2bfe6438d6c5214c1252',
-        'ee8f4c95e52248d0b641a48a8532d44d6aff0b75344dda59a416a3905ae972c1'),
+        # Re-pinned for the per-run RLW_MAXLAY tier (levels256/rrtmg-lw):
+        # the 128 bound became an #ifndef default the host overrides for a
+        # column deeper than 128 layers.  Reading: at the shipped 128 the
+        # composed LW unit compiles to PTX byte-identical to the
+        # levels-256 base (sm_86, NVRTC 12.9 and 13.4), and the batched
+        # engine's outputs are uint32-identical to the base unit's on
+        # 87-, 114- and 128-layer columns; deeper tiers are graded against
+        # the NumPy port bitwise by tests/test_rrtmg_lw_deep_columns.py.
+        # Previously a71a779e/ee8f4c95.
+        '5241b302a4597e16db7c581baab4781af456af93df8f35a9af843f4e28161e16',
+        '33741d3d5e977e298e6a143bcedd72dee16c2f1eef29c75b898e5f2e2a028585'),
     'rrtmg_lw_taugb02_10_11_12': (
         'fe5d57d1eb2649005d2748ae40f849c340b03a5f3d3a61c7fb506d0c69792485',
         'f7d4c98b0ed523e2c5912d4810925c60c3bcbb52d3e1a40d06a2708686cb632c'),
@@ -1377,8 +1395,16 @@ FROZEN_MODULE_DIGESTS = {
         # Exact-array gates and all five seeded digests match the base.
         # Re-pinned 2026-10-01 for aligned flavor weights and prefix padding.
         # Direct before/after output words match on RTX 4090 and RTX 5090.
-        'd13b914a28ad8b7ef88904977c7e33b9a7d7e800592473c0fb8debebca031edf',
-        '3c85ba59159dadd97d6e5215cc0b552c4a017539d9c23b99bb77e1a788dee964'),
+        # Re-pinned 2026-10-12, 256-level radiation: rrtmgp_planck_sources'
+        # fixed per-thread pfrac[128] (and its `nlay > 128` return) became a
+        # one-layer window, so no RRTMGP kernel bounds the column.  Reading,
+        # RTX A6000 (sm_86, NVRTC 12.9.86): lay/lev/sfc source words equal
+        # the base kernel's at 1, 2, 30, 74, 127 and 128 layers in both
+        # storage orders, and the whole driver's outputs at nz 49/64/115/127
+        # are byte-identical; frame 512 -> 0 B.  Not an mp=8 unit.
+        # Previously d13b914a/3c85ba59.
+        '66557cb1680e4ee29c86845f408dbf0cf3108ae0e158e830554e5b15b5b2c3ba',
+        'b256395c38b7ba68c585051ef8f12f9b3c4277306aa93a465c508543ae9a6cf8'),
     'rrtmgp_mcica': (
         # Re-pinned for shared seeds, exact clear paths, SASS-matched FP64
         # intrinsics, bit-major GF(2) jumps and MWC-only alias walks.
@@ -1699,14 +1725,20 @@ FROZEN_MODULE_DIGESTS = {
         # Moved again with the file by 508691422 (above).
         '5918c3f6b6572a5b3fbad923317bc2a55bd7ec7be712ae2d410d725eccd3bec7'),
     'wsm6': (
-        # Re-pinned for A146 (a98f2482e): every float division by a compile-time
-        # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
-        # multiply by the rounded reciprocal on Blackwell targets.  Reading:
-        # sm_89 unchanged (the compute_89 PTX with __fdiv_rn spelled '/' is
-        # identical to the base's); Blackwell cards now round these quotients
-        # IEEE-correctly.  Previously 0526192b/1a6d20da.
-        '0028b0c2d88d6087095cd2d4afab27bb2cb76b2a5bf51e3e5e908e0fdf2f0886',
-        'd6798c079bbf2c6343d6d6575be2cd5fd67a128612c401b36e8ebfc3f1c10451'),
+        # Re-pinned 2026-10-12 (levels256/wsm6-wdm6): the per-thread column
+        # arrays moved into a launcher-owned global workspace (lane-interleaved
+        # slot views, tiles offset by col0) so WSM6 runs to 256 levels with a
+        # 0 B local frame.  Reading: every output word bit-identical to the
+        # pre-cut kernel at nz 40/64/80, hail_opt 0/1, one and three minor
+        # loops, NVRTC 12.9.86 and 13.4.92 on sm_86 (21,274,624 words, 0
+        # differ; tests/test_wsm6_workspace.py,
+        # docs/kernel_local_memory_bounds.md section 11).  Previously
+        # 0028b0c2/d6798c07, re-pinned for A146 (a98f2482e): every float
+        # division by a compile-time constant is spelled __fdiv_rn, because
+        # NVRTC compiles x / C as a multiply by the rounded reciprocal on
+        # Blackwell targets (before that 0526192b/1a6d20da).
+        'a767fb613d295ddd55810b63e3cd2caea26ee972a3fe2080c3930eae2dfeeca7',
+        'be47cff7908a6925d68361aabb8a2b00134792a72ccb6328ad3a822d6c4deccb'),
     # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
     # labels), proven equal with comments stripped; the preprocessor drops
     # comments, so the compiled binary does not move.
@@ -1788,8 +1820,16 @@ FROZEN_MODULE_DIGESTS = {
         # loader's effective options), and tests/test_ysu_wrf461_parity.py's
         # ULP table did not move on either card.  The arm is graded against
         # WRF v4.7.1 by tests/test_terrain_drag_wrf471_parity.py.
-        '2ce2203aca80967d48843d1de9ffdb1c85c18fe3ab17a03f9a91fdeb4c3c94bc',
-        '01cd5d4c3967a5af0e38a5b7554a909dc4012a07ef7b3b8410a03825f95c8d29'),
+        #
+        # RE-PINNED 2026-10-12 (levels256/guards): YSU_KMAX 128 -> 256, the
+        # dycore's level ceiling.  A refusal guard only (no array is sized
+        # by it); frame 0 B before and after on sm_86.  The edit is the one
+        # digit, so every line the registry cites keeps its number.  Reading: every
+        # output word bit-identical to the 128-level source at nz <= 128
+        # (tests/test_physics_256_levels_gpu.py).  Previously
+        # 2ce2203a/01cd5d4c.
+        'aa96755cc85a417be59fe62ef13a8a8fefd967d4ce32936ee74e7e77cb0d3382',
+        '0d81fd98095161eff5ba386610d46ff4e53f9ccce89b95efcf56c9676e30597b'),
 }
 
 # -- R2 --------------------------------------------------------------------

@@ -579,3 +579,42 @@ def test_sponge_toml_door_defaults_identity_and_refusals(tmp_path):
         ValueError, match="sponge_lid_relaxation_time_s.*retired"
     ):
         load_config(retired_tau)
+
+
+def _with_vertical(tmp_path, name: str, table: str) -> Path:
+    text = Path(CONFIG).read_text(encoding="utf-8")
+    start = text.index("[vertical]")
+    end = text.index("\n[", start + 1)
+    path = tmp_path / f"{name}.toml"
+    path.write_text(text[:start] + table + text[end:], encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("coordinate", ["surface_stretched", "pressure_blend", "jet_refined"])
+def test_a_256_level_column_validates_and_257_is_refused(tmp_path, coordinate):
+    from woof.globe.config import VERTICAL_MAX_NLEV
+
+    assert VERTICAL_MAX_NLEV == 256
+    deep = load_config(_with_vertical(
+        tmp_path, f"{coordinate}-256",
+        f'[vertical]\ncoordinate = "{coordinate}"\nnlev = 256\np_top_pa = 100.0\n'))
+    assert deep.vertical.nlev == 256
+    with pytest.raises(ValueError, match=r"vertical\.nlev must lie in 2\.\.256"):
+        load_config(_with_vertical(
+            tmp_path, f"{coordinate}-257",
+            f'[vertical]\ncoordinate = "{coordinate}"\nnlev = 257\np_top_pa = 100.0\n'))
+
+
+def test_the_level_range_applies_to_explicit_hybrid_arrays(tmp_path):
+    # The explicit A/B door bypassed the nlev check entirely; the one range
+    # now holds for both ways of declaring a column.
+    def table(nlev: int) -> str:
+        coordinate = HybridCoordinate.pressure_blend(nlev, 100.0)
+        a = ", ".join(repr(float(v)) for v in coordinate.a_half_pa)
+        b = ", ".join(repr(float(v)) for v in coordinate.b_half)
+        return f"[vertical]\na_half_pa = [{a}]\nb_half = [{b}]\n"
+
+    ok = load_config(_with_vertical(tmp_path, "explicit-256", table(256)))
+    assert ok.vertical.nlev == 256
+    with pytest.raises(ValueError, match="declare 257 levels"):
+        load_config(_with_vertical(tmp_path, "explicit-257", table(257)))

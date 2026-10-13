@@ -38,23 +38,25 @@ def _selection(nz: int, **overrides):
         # memory at a compiled KMAX, and their implicit vertical solves need
         # a minimum number of interior rows.  Both ends are first-call
         # rejections inside the launcher, so both belong in the preflight.
-        ("YSU PBL", {"bl_pbl_physics": 1}, 128, 129),
+        ("YSU PBL", {"bl_pbl_physics": 1}, 256, 257),
         ("YSU PBL", {"bl_pbl_physics": 1}, 4, 3),
-        ("MYJ PBL", {"bl_pbl_physics": 2}, 128, 129),
+        # MYJ's column lives in a runtime workspace (2026-10-12), so its
+        # ceiling is the 256-level refusal guard, not a frame budget.
+        ("MYJ PBL", {"bl_pbl_physics": 2}, 256, 257),
         ("MYJ PBL", {"bl_pbl_physics": 2}, 4, 3),
-        ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 128, 129),
+        ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 256, 257),
         ("Shin-Hong PBL", {"bl_pbl_physics": 11}, 4, 3),
-        ("SASE PBL", {"bl_pbl_physics": 900}, 128, 129),
+        ("SASE PBL", {"bl_pbl_physics": 900}, 256, 257),
         ("SASE PBL", {"bl_pbl_physics": 900}, 2, 1),
         ("Kain-Fritsch cumulus", {"cu_physics": 1}, 8, 7),
-        ("Kain-Fritsch cumulus", {"cu_physics": 1}, 128, 129),
+        ("Kain-Fritsch cumulus", {"cu_physics": 1}, 256, 257),
         # GF's floor is the inversion-layer search window (kend clamps to
         # ktf-8, the stencil then reaches ktf-1); no upper bound -- the
         # kernel recompiles its level bound through the int-define tier.
         ("Grell-Freitas cumulus", {"cu_physics": 3}, 12, 11),
         ("Kessler microphysics", {"mp_physics": 1}, 256, 257),
         ("WSM6 microphysics", {"mp_physics": 6}, 2, 1),
-        ("WSM6 microphysics", {"mp_physics": 6}, 80, 81),
+        ("WSM6 microphysics", {"mp_physics": 6}, 256, 257),
         ("Thompson microphysics", {"mp_physics": 8}, 2, 1),
         ("Thompson microphysics", {"mp_physics": 8}, 256, 257),
         ("Morrison microphysics", {"mp_physics": 10}, 2, 1),
@@ -66,9 +68,13 @@ def _selection(nz: int, **overrides):
         ("Milbrandt-Yau microphysics", {"mp_physics": 9}, 3, 2),
         ("Milbrandt-Yau microphysics", {"mp_physics": 9}, 256, 257),
         ("WDM6 microphysics", {"mp_physics": 16}, 2, 1),
-        ("WDM6 microphysics", {"mp_physics": 16}, 80, 81),
+        ("WDM6 microphysics", {"mp_physics": 16}, 256, 257),
         ("P3 microphysics", {"mp_physics": 50}, 1, 0),
         ("New Tiedtke cumulus", {"cu_physics": 16}, 4, 3),
+        # Orographic drag is a run setting, not a registry component; its
+        # per-thread stress profile is sized by TD_KMAX = 256.
+        ("Terrain drag gwd_opt=1", {"gwd_opt": 1}, 256, 257),
+        ("Terrain drag gwd_opt=3", {"gwd_opt": 3}, 256, 257),
     ),
 )
 def test_component_owned_model_level_bound_inside_and_outside(
@@ -82,25 +88,58 @@ def test_component_owned_model_level_bound_inside_and_outside(
             _selection(outside, **selector))
 
 
-def test_rte_rrtmgp_model_plus_cap_bound_inside_and_outside():
+def test_rte_rrtmgp_model_level_bound_inside_and_outside():
+    """RTE+RRTMGP bounds MODEL levels at 256; the cap rides on top.
+
+    The old bound was 128 radiation layers including the cap (the
+    Planck-source kernel's fixed ``pfrac[128]``), so 104 levels under a
+    100 hPa top (+25 cap layers) used to be refused.  No RRTMGP kernel holds
+    a fixed per-layer array now, so a column of 256 model levels plus any
+    cap is admitted and 257 levels are refused by number.
+    """
     selector = {
         "mp_physics": 8,
         "ra_lw_physics": 4,
         "ra_sw_physics": 4,
     }
     receipt = validate_resolved_physics_vertical_levels(
-        _selection(103, **selector), p_top=10000.0)
+        _selection(104, **selector), p_top=10000.0)
     longwave = next(
         check for check in receipt["checks"]
         if check["component"] == "RTE+RRTMGP longwave")
     assert longwave["above_model_layers"] == 25
-    assert longwave["total_layers"] == 128
+    assert longwave["total_layers"] == 129
 
-    with pytest.raises(
-            PhysicsVerticalPreflightError,
-            match=r"RTE\+RRTMGP longwave.*104\+25=129"):
+    receipt = validate_resolved_physics_vertical_levels(
+        _selection(256, **selector), p_top=10000.0)
+    totals = {
+        check["component"]: (check["total_layers"], check["maximum"])
+        for check in receipt["checks"]
+        if check["component"].startswith("RTE+RRTMGP")
+    }
+    assert totals == {
+        "RTE+RRTMGP longwave": (281, 281),
+        "RTE+RRTMGP shortwave": (257, 257),
+    }
+    # The 1 hPa top: no LW cap layer (nint(100/400) = 0), one SW layer.
+    receipt = validate_resolved_physics_vertical_levels(
+        _selection(256, **selector), p_top=100.0)
+    totals = {
+        check["component"]: check["total_layers"]
+        for check in receipt["checks"]
+        if check["component"].startswith("RTE+RRTMGP")
+    }
+    assert totals == {"RTE+RRTMGP longwave": 256,
+                      "RTE+RRTMGP shortwave": 257}
+
+    with pytest.raises(PhysicsVerticalPreflightError) as caught:
         validate_resolved_physics_vertical_levels(
-            _selection(104, **selector), p_top=10000.0)
+            _selection(257, **selector), p_top=10000.0)
+    message = str(caught.value)
+    assert ("RTE+RRTMGP longwave requires model levels nz <= 256 "
+            "(plus 25 cap layers above the model top), got 257+25=282"
+            ) in message
+    assert "RTE+RRTMGP shortwave requires model levels nz <= 256" in message
 
 
 def test_legacy_rrtmg_engine_bounds_inside_and_outside():
@@ -122,18 +161,60 @@ def test_legacy_rrtmg_engine_bounds_inside_and_outside():
         "legacy RRTMG shortwave": 64,
     }
 
-    with pytest.raises(PhysicsVerticalPreflightError) as caught:
-        validate_resolved_physics_vertical_levels(
-            _selection(64, **selector), p_top=26000.0)
-    message = str(caught.value)
-    assert "legacy RRTMG longwave" in message
-    assert "64+65=129" in message
-    assert "legacy RRTMG shortwave" not in message
-    # SW storage scales with the layer count; the independent LW128 bound remains.
+    # The old flat 128-layer LW bound is gone: 64 + 65 = 129 builds.
+    receipt = validate_resolved_physics_vertical_levels(
+        _selection(64, **selector), p_top=26000.0)
+    longwave = next(check for check in receipt["checks"]
+                    if check["component"] == "legacy RRTMG longwave")
+    assert longwave["total_layers"] == 129
+    assert longwave["maximum"] == 256 + 65
+    # SW storage scales with the layer count and has no fixed ceiling.
     receipt = validate_resolved_physics_vertical_levels(
         _selection(79, **selector), p_top=5000.0)
     sw = next(check for check in receipt['checks'] if check['component'] == 'legacy RRTMG shortwave')
     assert sw['total_layers'] == 80 and sw['maximum'] is None
+
+
+@pytest.mark.parametrize(
+    ("p_top", "cap"),
+    # nint(p_top / 400 Pa), WRF's 4 hPa buffer layers above the model top:
+    # 1 hPa builds none, 50 hPa builds 12.5 -> 13 (half away from zero).
+    ((100.0, 0), (5000.0, 13), (26000.0, 65)))
+def test_legacy_rrtmg_longwave_is_bounded_by_model_depth_256(p_top, cap):
+    """Legacy LW refuses only past the dycore's nz <= 256, at any p_top;
+    the radiation column then carries WRF's cap layers on top of it."""
+    selector = {
+        "mp_physics": 8,
+        "ra_lw_physics": 4,
+        "ra_sw_physics": 4,
+        "ra_rrtmg_variant": "rrtmg_legacy",
+    }
+    receipt = validate_resolved_physics_vertical_levels(
+        _selection(256, **selector), p_top=p_top)
+    longwave = next(check for check in receipt["checks"]
+                    if check["component"] == "legacy RRTMG longwave")
+    assert longwave["model_levels"] == 256
+    assert longwave["above_model_layers"] == cap
+    assert longwave["total_layers"] == 256 + cap
+    assert longwave["maximum"] == 256 + cap
+
+    with pytest.raises(PhysicsVerticalPreflightError) as caught:
+        validate_resolved_physics_vertical_levels(
+            _selection(257, **selector), p_top=p_top)
+    message = str(caught.value)
+    assert "legacy RRTMG longwave" in message
+    assert f"(nz <= 256), got 257+{cap}={257 + cap}" in message
+    assert "legacy RRTMG shortwave" not in message
+
+
+def test_legacy_longwave_layer_tier_ladder():
+    from woof.physics_vertical_contract import legacy_longwave_layer_tier
+    expected = {1: 128, 74: 128, 128: 128, 129: 192, 192: 192, 193: 256,
+                256: 256, 257: 320, 269: 320, 321: 384}
+    assert {n: legacy_longwave_layer_tier(n) for n in expected} == expected
+    for bad in (0, -1, True, 1.5):
+        with pytest.raises(ValueError):
+            legacy_longwave_layer_tier(bad)
 
 
 def test_preflight_aggregates_more_than_one_resolved_component_failure():
@@ -146,7 +227,7 @@ def test_preflight_aggregates_more_than_one_resolved_component_failure():
         ))
     message = str(caught.value)
     assert "MYNN PBL requires nz >= 5" in message
-    assert "Kain-Fritsch cumulus requires 8 <= nz <= 128" in message
+    assert "Kain-Fritsch cumulus requires 8 <= nz <= 256" in message
     assert "NSSL-2 microphysics" not in message
 
 

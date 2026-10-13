@@ -187,6 +187,21 @@ def test_other_controls_are_refused(tmp_path):
     assert "levels" not in native.mesh
 
 
+def test_the_nz_ceiling_is_the_planned_lanes_physics_bound():
+    # The planner's --nz ceiling is the frozen WSM6 + YSU lane's, derived
+    # from woof.physics_vertical_contract (not a copy of one scheme's tier),
+    # and the LES default stays the measured 80-level column however deep
+    # the ceiling moves.
+    from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS, hex_column_level_ceiling
+
+    assert plan_hex.HEX_MAX_LEVELS == hex_column_level_ceiling()
+    assert plan_hex.HEX_MAX_LEVELS <= HEX_MAX_COLUMN_LEVELS == 256
+    assert plan_hex.LES_LEVELS == 80
+    assert plan_hex.LES_LEVELS_RANGE == (40, plan_hex.HEX_MAX_LEVELS)
+    with pytest.raises(plan_hex.HexPlanRefusal, match="outside the LES"):
+        plan_hex.les_vertical_spec(plan_hex.HEX_MAX_LEVELS + 1)
+
+
 def test_a_declared_column_is_priced_at_its_level_count(tmp_path):
     native = _plan(tmp_path / "a").domains[0]
     deep = _plan(tmp_path / "b", nz=80).domains[0]

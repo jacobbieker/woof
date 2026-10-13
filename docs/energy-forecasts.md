@@ -458,8 +458,10 @@ With the flag, the plan holds the whole chain in `extra["commands"]`, and
 3. Static fields upgraded to GLO-30 terrain and CGLC land cover.
 4. A runtime mesh row for the parent.
 5. The LES vertical from `vertical_spec.json`: 80 levels by default
-   (`--nz` changes it, up to 80, the engine's WSM6 limit), a 20 m lowest
-   layer and a 30 km top (it must sit above the 22 km damping layer).
+   (`--nz` changes it, up to the planned physics' ceiling of 256 levels;
+   the planner reads it from `woof.hex.vertical_spec.hex_column_level_ceiling`),
+   a 20 m lowest layer and a 30 km top (it must sit above the 22 km damping
+   layer).
 6. The cut, made with `cull_region.json` and carrying its own vertical.
 7. A runtime mesh row for the cut.
 8. Met intermediates from `--source`, which defaults to `gfs`. Pass
@@ -500,8 +502,9 @@ this build is refused when you plan, not after the mesh is built.
 
 Only the cut runs on the GPU. The planner prices its cells on the
 limited-area device row at the LES vertical's level count; the device model
-scales its per-cell cost with the level count (and charges the wider WSM6
-frame above 64 levels).
+scales its per-cell cost with the level count, and charges each per-thread
+frame that grows with the column at that column (the YSU gravity-wave-drag
+frame passes the measured widest frame above about 161 levels).
 
 A 48 GiB card holds about 460,000 limited-area cells at 55 levels. At 100 m
 that is a cut of roughly 63 km by 63 km at the fine spacing. At the LES

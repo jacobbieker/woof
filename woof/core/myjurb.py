@@ -14,12 +14,18 @@ import cupy as cp
 import numpy as np
 
 from woof.core.kernels import get_kernel
+from woof.core.myjpbl import myj_tile_columns
+from woof.core.physics_inventory import MYJ_BLOCK, myjurb_workspace_floats
 from woof.core.state import DTYPE
 from woof.physics_vertical_contract import (
     outside_vertical_bounds, refuse_vertical_levels)
 
-_TPB = 128
-MYJURB_MAX_COLUMN_LEVELS = 128
+#: The launch block IS the workspace's lane width (``MYJURBWS_LANES``).
+_TPB = MYJ_BLOCK
+#: Refusal ceiling, equal to kernels/myjurb.cu's MYJ_KMAX guard.  The 24
+#: column arrays live in a workspace sized to the runtime nz, so no array
+#: is sized by it.
+MYJURB_MAX_COLUMN_LEVELS = 256
 MYJURB_MIN_COLUMN_LEVELS = 4
 _COLUMN_INPUTS = ("dz", "u", "v", "t", "th", "exner", "qv", "qc", "p")
 _SURFACE_INPUTS = ("psfc", "ust", "tsk", "chklowq", "xland", "sice", "snow",
@@ -45,7 +51,7 @@ def launch_myjurb(columns, surface, state, tke, *, dtturbl: float,
     (kernels/myjpbl.cu header), which differs from WRF only in float32
     rounding -- the oracle test passes the fixture's HT to grade WRF's
     arithmetic exactly. ``flag_bep=False`` uses the Fortran's rural arm.
-    Four to 128 full levels are supported, with WRF LOWLYR=1.
+    Four to 256 full levels are supported, with WRF LOWLYR=1.
 
     Optional ``outputs`` supplies carried EXCH_H/M: Fortran writes only their
     levels 1..nz-1 and leaves level 0 unchanged (:453-463). Fresh allocations
@@ -60,8 +66,9 @@ def launch_myjurb(columns, surface, state, tke, *, dtturbl: float,
         raise refuse_vertical_levels(
             "MYJURB PBL", bounds, nz,
             breakage=(
-                "the kernel holds at most 128 levels per column (MYJ_KMAX "
-                "in kernels/myjurb.cu); below four levels the TKE "
+                f"the kernel refuses more than {MYJURB_MAX_COLUMN_LEVELS} "
+                "levels per column (the MYJ_KMAX guard in "
+                "kernels/myjurb.cu); below four levels the TKE "
                 "tridiagonal solve has no interior rows."))
     if len(shape) != 2:
         raise ValueError("launch_myjurb requires (ny, nx) surface arrays")
@@ -98,17 +105,23 @@ def launch_myjurb(columns, surface, state, tke, *, dtturbl: float,
     for name in MYJURB_SURFACE_OUTPUTS:
         check(outputs[name], shape, cp.int32 if name == "kpbl" else DTYPE)
     n = int(np.prod(shape))
-    blocks = (n + _TPB - 1) // _TPB
     kernel = get_kernel("myjurb", "myjurb_column")
-    kernel((blocks,), (_TPB,),
-           tuple(column_arrays) + (tke,)
-           + tuple(surface[name] for name in _SURFACE_INPUTS)
-           + tuple(state[name] for name in MYJURB_INOUT)
-           + tuple(outputs[name] for name in MYJURB_COLUMN_OUTPUTS)
-           + tuple(outputs[name] for name in MYJURB_SURFACE_OUTPUTS)
-           + tuple(bep[name] for name in BEP_INPUTS) + (frc_urb2d, ht)
-           + (DTYPE(dtturbl), np.int32(bool(flag_bep)), np.int32(idiff),
-              np.int32(nz), np.int32(n)))
+    # Column arrays in a global workspace sized to the tile in flight and
+    # the runtime nz (kernels/myjurb.cu header); tiles offset by col0.
+    tile = myj_tile_columns(kernel, n)
+    wskp = nz + 1
+    ws = cp.empty(myjurb_workspace_floats(nz, tile), dtype=DTYPE)
+    args = (tuple(column_arrays) + (tke,)
+            + tuple(surface[name] for name in _SURFACE_INPUTS)
+            + tuple(state[name] for name in MYJURB_INOUT)
+            + tuple(outputs[name] for name in MYJURB_COLUMN_OUTPUTS)
+            + tuple(outputs[name] for name in MYJURB_SURFACE_OUTPUTS)
+            + tuple(bep[name] for name in BEP_INPUTS) + (frc_urb2d, ht)
+            + (DTYPE(dtturbl), np.int32(bool(flag_bep)), np.int32(idiff),
+               np.int32(nz), np.int32(n), ws, np.int32(wskp)))
+    for col0 in range(0, n, tile):
+        blocks = (min(tile, n - col0) + _TPB - 1) // _TPB
+        kernel((blocks,), (_TPB,), args + (np.int32(col0),))
     # MYJURB has no ice arm (module_bl_myjurb.F diffuses QV and CWM only),
     # so RQIBLTEN is a published zero -- present because the MYJ slot's
     # validation reads it -- and no ``dqi`` alias is returned, so nothing

@@ -719,8 +719,12 @@ def lwrad_prep(*, p3d, p8w, t3d, t8w, dz8w,
     nlayers = int(nlayers)
     if p8w.shape[0] != kte + 1:
         raise ValueError("p8w must have kte+1 interface values")
-    if nlayers < kte + 1:
-        raise ValueError("nlayers must be at least kte+1")
+    # nlayers == kte is WRF's own p_top < 2 hPa column (nint(p_top/4 hPa)
+    # = 0 buffer layers): the buffer loop is empty and plev(kte+1) is
+    # overwritten with 0, so the top model layer reaches the top of the
+    # atmosphere -- the statements below, unchanged.
+    if nlayers < kte:
+        raise ValueError("nlayers must be at least kte")
 
     gases = lw_trace_gases(yr, trace_gas_overrides)
 
@@ -907,6 +911,18 @@ def lwrad_prep(*, p3d, p8w, t3d, t8w, dz8w,
     }
 
 
+def _require_flux_profile_levels(ntop, kte):
+    """WRF's optional LW*FLX profiles copy uflx/dflx over kts..kte+2, one
+    level past the model top; a column with no buffer layer (nlayers ==
+    kte, p_top < 2 hPa) has no such level -- WRF would read past its
+    array -- so the profiles are refused rather than invented."""
+    if ntop < kte + 1:
+        raise ValueError(
+            "the LW*FLX kts..kte+2 profiles need at least one buffer layer "
+            "above the model top (nlayers >= kte+1, p_top >= 2 hPa); got "
+            f"nlayers={ntop} for kte={kte}")
+
+
 def lwrad_outputs(*, uflx, dflx, hr, uflxc, dflxc, hrc, pi3d,
                   uflxcln=None, dflxcln=None, calc_clean_atm_diag=0):
     """RRTMG_LWRAD's WRF-level output mapping after the rrtmg_lw call.
@@ -929,6 +945,7 @@ def lwrad_outputs(*, uflx, dflx, hr, uflxc, dflxc, hrc, pi3d,
     pi3d = _f32(pi3d)
     kte = pi3d.shape[0]
     ntop = uflx.shape[0] - 1               # nlayers+1-th Fortran level
+    _require_flux_profile_levels(ntop, kte)
 
     out = {
         "glw": dflx[0],
@@ -1713,8 +1730,12 @@ def lwrad_prep_batch(*, p3d, p8w, t3d, t8w, dz8w,
     if ncol == 0:
         raise ValueError("empty batch (ncol == 0)")
     nlayers = int(nlayers)
-    if nlayers < kte + 1:
-        raise ValueError("nlayers must be at least kte+1")
+    # nlayers == kte is WRF's own p_top < 2 hPa column (nint(p_top/4 hPa)
+    # = 0 buffer layers): the buffer loop is empty and plev(kte+1) is
+    # overwritten with 0, so the top model layer reaches the top of the
+    # atmosphere -- the statements below, unchanged.
+    if nlayers < kte:
+        raise ValueError("nlayers must be at least kte")
     p8w = _prof_b(xp, p8w, ncol, kte + 1, "p8w")
     t3d = _prof_b(xp, t3d, ncol, kte, "t3d")
     t8w = _prof_b(xp, t8w, ncol, kte + 1, "t8w")
@@ -1950,6 +1971,7 @@ def lwrad_outputs_batch(*, uflx, dflx, hr, uflxc, dflxc, hrc, pi3d,
         raise ValueError("lwrad_outputs_batch expects (ncol, kte) pi3d")
     kte = pi3d.shape[1]
     ntop = uflx.shape[1] - 1               # nlayers+1-th Fortran level
+    _require_flux_profile_levels(ntop, kte)
 
     out = {
         "glw": dflx[:, 0].copy(),

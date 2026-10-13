@@ -359,7 +359,9 @@ bought against a model top a violent supercell cannot punch through. This
 is a configuration moving *within* the ratified bounds, not a change to
 them, which is why it did not require a new ruling. An earlier estimate
 that the raised lid would need nz ≈ 78–79 and brush WSM6's 80-level
-ceiling was **wrong**, and is corrected here.
+ceiling was **wrong**, and is corrected here. (WSM6's ceiling was 80 when
+this was written; it has since moved to a column workspace and runs to 256
+levels, like every other scheme.)
 
 ### E2.8: registered before revision b runs
 

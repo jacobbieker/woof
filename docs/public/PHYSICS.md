@@ -253,11 +253,11 @@ closure is genuinely missing.
 | option | WRF id | maturity | evidence, in one line |
 |---|---|---|---|
 | Kessler | 1 | supported | warm-rain certified slice; idealized + runtime gates |
-| WSM6 | 6 | supported | runtime-supported slice; earlier WRF comparisons reported reflectivity correlation 0.977 at F2 and 0.815 at F5 on d03, but no run date, engine revision or receipt is published here. These historical numbers do not measure the current release or accuracy against observations |
+| WSM6 | 6 | supported | runtime-supported slice; runs 2 to 256 levels (column arrays in a launcher-owned workspace sized to the run's level count since 2026-10-12, no per-thread local frame); earlier WRF comparisons reported reflectivity correlation 0.977 at F2 and 0.815 at F5 on d03, but no run date, engine revision or receipt is published here. These historical numbers do not measure the current release or accuracy against observations |
 | Thompson | 8 | **wrf-matched-run** (historical evidence) | one historical matched 6 h, 4-domain run to 500 m against WRF v4.6.1 on 2026-07-28, using legacy RRTMG and initial states that failed the t=0 digest on all four domains; [decay tables](VERIFICATION.md). The kernels changed in 2.7.4 and on 2026-09-23 and that matched run has not been repeated. Current component agreement is limited to the recorded column comparisons; this row supplies no observation score. WRF coefficient tables are packaged and SHA-256-checked at load |
 | Milbrandt-Yau 2-moment | 9 | implemented-unverified | **no oracle has been run.** Line-by-line transcription of `phys/module_mp_milbrandt2mom.F`; what is tested is a column smoke through the shipped seams (finite, bounded, water budget closing to 1.3e-4 relative or better on three seeding layouts, each resolving a named family of source/sink terms) plus a mutation control. Graupel and hail are separate prognostic categories and all twelve moments are transported. A preset selects it (with New Tiedtke and the legacy RRTMG engine) and it is also a per-domain override; the modern RTE+RRTMGP coupling is also implemented, with the radius derivation described below |
 | Morrison 2-moment | 10 | implemented-unverified | 28-column oracle vs unmodified WRF `MP_MORR_TWO_MOMENT`: theta within 154 ULP, but hydrometeor fields cross branch points and are not bitwise; both rimed-ice identities (graupel/hail) implemented. **Declared divergence:** deposition-freezing nucleation is bounded by the vapour excess over ice saturation and the nucleated number scales with it; WRF (F:2902-2905) applies no availability test and its FUDGEF rescale (F:3009-3015) tests only matching sign pairs, so below the 159.4887 K POLYSVP crossover -- where the extrapolated liquid curve falls under the ice curve and F:1315 clamps `QVI==QVS` -- the unbounded term drove qv to -1.87e-4 kg/kg out of 5.55e-8 available, dt-independent. That state is unreachable in WRF and in any p_top-limited regional domain; the bound also engages at 189.88-199.96 K where WRF does reach, scaling the number moment by 0.197-0.898 and moving the oracle fixture's ni by up to 67% relative, qi by 1.4e-3 and qv by 1.8e-16, with no pinned per-field max_ulp moved and the fixture mismatch count 3,512 -> 3,554 of 10,948 |
-| WDM6 double-moment warm rain | 16 | implemented-unverified | **no oracle comparison against the WRF Fortran has been run** -- the CUDA kernel and `wdm6init` are transcribed line by line from the byte-frozen `phys/module_mp_wdm6.F` with file:line citations, the float64 coefficient block pins the kernel's baked FP32 literals, and a column smoke through the shipped seams asserts finiteness, WDM6's own bounds, water conservation to the surface flux, and that CCN activation actually moves number from `nn` into `nc`; the oracle campaign is the declared next stage. WDM5 (14) and WDM7 (26) are refused by name. A preset selects it (with Grell-Freitas and RTE+RRTMGP) and it is also a per-domain override |
+| WDM6 double-moment warm rain | 16 | implemented-unverified | **no oracle comparison against the WRF Fortran has been run** -- the CUDA kernel and `wdm6init` are transcribed line by line from the byte-frozen `phys/module_mp_wdm6.F` with file:line citations, the float64 coefficient block pins the kernel's baked FP32 literals, and a column smoke through the shipped seams asserts finiteness, WDM6's own bounds, water conservation to the surface flux, and that CCN activation actually moves number from `nn` into `nc`; the oracle campaign is the declared next stage. Runs 2 to 256 levels (column arrays in a launcher-owned workspace since 2026-10-12, bit-identical to the earlier 64/80-level kernels where those ran). WDM5 (14) and WDM7 (26) are refused by name. A preset selects it (with Grell-Freitas and RTE+RRTMGP) and it is also a per-domain override |
 | NSSL 2-moment | 18 | **wrf-matched-run-candidate** (default lane) / implemented-unverified (variants) | full CUDA port with fused-process oracles and a 500 m WRF reference comparison accepted by the project; the comparison is not described here and no receipt is linked. It supplies no observation-validation claim and is explicitly not the default. The hail-off and diagnosed-CCN variants below carry column smoke and treatment proofs only, with no oracle comparison |
 | Thompson aerosol-aware | 28 | implemented-unverified | 22 WRF column fixtures end to end, 23 quantities each: 18 clear a flat 2e-6 gate, 3 do not, 1 clears only under one named allowance (numbers below); it runs multi-step and stays bounded; the one matched WRF forecast comparison is idealized only -- a single-domain doubly periodic warm bubble, [wrf-comparison/mp28-matched-trajectory.md](wrf-comparison/mp28-matched-trajectory.md), which publishes a failed declared condition alongside a control showing that condition fails for WRF against its own recompilation -- and no real-data or nested mp=28 forecast has been compared against a matched WRF run; a preset on the prepared-domain-tree route selects it (with MYJ, the Eta surface layer and RTE+RRTMGP) and it is also a per-domain override. The fixed-template routes do not offer that preset: their cold-start contract has no arm for the aerosol-aware boundary species |
 | P3 one-category | 50 | implemented-unverified | **measured against WRF's own Fortran**, unmodified `phys/module_mp_p3.F` (P3 v4.5.2, byte-identical across WRF v4.6.1/v4.7.1/v4.8.0) compiled at -O0 -ffp-contract=off and driven through `mp_p3_wrapper_wrf` over twelve discriminating fixtures: 4 of 12 bit-identical, F02/F06/F08/F09/F11 within 2–7 ULP, F12 at 829 ULP (6.3e-5 relative); the two long mixed-phase cases (F07, F10) are exact for the first steps and then bifurcate, a property of the system, not the port (a one-ULP nudge to the Fortran's own input diverges it from itself by 100% within ten steps, measured); the parsed lookup table is exact (substituting the Fortran's own generated tables changes nothing); the column smoke still holds through the shipped seams (finite, non-negative, total water closing to 1e-4 against surface precipitation, rime mass ≤ ice mass, 50 ≤ rime density ≤ 900); STILL OPEN: an unexplained 1–6 ULP CUDA-specific `qib` residual on F06/F08/F11, and F09's separate, broader disagreement; no matched WRF forecast run and no comparison against observations, per-step agreement with Fortran is not evidence of forecast skill; reachable through the registered HRRR template `p3-mp50-ysu-mm5-noah-rrtmg-legacy-v1` and as a per-domain override on the tree route |
@@ -1087,7 +1087,7 @@ Notes with teeth:
 | option | WRF id | maturity | evidence, in one line |
 |---|---|---|---|
 | YSU | 1 | implemented-unverified | 24-column oracle vs unmodified `bl_ysu.F90`: theta tendency 1 ULP, exchange coefficients 7 ULP, PBLH 1 ULP; momentum/moisture tendencies 4.2e-8 m/s2 / 3.1e-11 kg/kg/s (near-total cancellations); part of the option set used in the one historical matched run against WRF, alongside Thompson; no current whole-suite match is implied |
-| MYJ (Mellor-Yamada-Janjic 2.5) | 2 | implemented-unverified | float32 CPU authority transcribed line by line from the byte-frozen `module_bl_myjpbl.F`, with the CUDA translation unit agreeing with it on land and water columns inside a stated tolerance; column smokes assert finiteness, the `EPSQ2` TKE floor, non-negative mixing length and exchange coefficients, and vapour conservation in a surface-sealed column, each with a mutation control that stubs the ported routine itself. TKE cold-starts at WRF's `epsq2` = 0.2 (`MYJPBLINIT`), not zero -- the seed decides the first-step PBL depth. **Declared divergence:** interface heights are carried above ground rather than above sea level (WRF seeds `ZINT(KTE+1)=HT`), which cancels exactly in real arithmetic and to within 69 ULP in float32 over 4.4 km terrain, with `KPBL` unchanged; woof's column is the better-conditioned one. **No oracle comparison against the WRF Fortran has been run** -- there is no gfortran replay, no fixture of WRF words and no ULP table -- so nothing here claims bit agreement with WRF; that campaign is the declared next stage. Selectable only as the 2/2 pair with the Eta similarity surface layer |
+| MYJ (Mellor-Yamada-Janjic 2.5) | 2 | implemented-unverified | float32 CPU authority transcribed line by line from the byte-frozen `module_bl_myjpbl.F`, with the CUDA translation unit agreeing with it on land and water columns inside a stated tolerance; column smokes assert finiteness, the `EPSQ2` TKE floor, non-negative mixing length and exchange coefficients, and vapour conservation in a surface-sealed column, each with a mutation control that stubs the ported routine itself. TKE cold-starts at WRF's `epsq2` = 0.2 (`MYJPBLINIT`), not zero -- the seed decides the first-step PBL depth. **Declared divergence:** interface heights are carried above ground rather than above sea level (WRF seeds `ZINT(KTE+1)=HT`), which cancels exactly in real arithmetic and to within 69 ULP in float32 over 4.4 km terrain, with `KPBL` unchanged; woof's column is the better-conditioned one. **No oracle comparison against the WRF Fortran has been run** -- there is no gfortran replay, no fixture of WRF words and no ULP table -- so nothing here claims bit agreement with WRF; that campaign is the declared next stage. Selectable only as the 2/2 pair with the Eta similarity surface layer. Column depth 4 to 256 levels: the kernel keeps its column in a global workspace sized to the run's level count (no per-thread frame), bit-identical to the earlier 128-level frame kernel at nz = 49, 100 and 128; the same holds for MYJURB, the MYJ column under BEP/BEP+BEM |
 | MYNN (EDMF) | 5 | implemented-unverified | assembled driver bitwise on the warm step vs unmodified `module_bl_mynn.F`; 300-step coupled forecast gate; composes with every radiation pairing the loader admits and with the MYNN (5), classic MM5 (91) or revised MM5 (1) surface layer -- see the MYNN scope note below |
 | UW moist turbulence (CAM5, Bretherton and Park 2009) | 9 | implemented-unverified | ported from WRF v4.7.1 (`module_bl_camuwpbl_driver.F` and the CAM modules it calls) in binary64, the scheme's own precision; every output word equals a gfortran -O0 build of the byte-unmodified sources (tools/uwpbl_wrf471_oracle) on the card and in the CPU reference, over six regime families (convective day, stable night, stratocumulus, valley cold pool, mixed-phase, shallow cumulus) on 35, 44 and 61 levels plus 48 branch-probe columns; cos and acos are correctly rounded rather than glibc's LGPL code, and float32 subnormal lanes under the loader's flush-to-zero are counted in tests/test_uwpbl_ftz_wrf471_parity.py; no matched forecast or observation score yet. Needs a surface layer that writes UST/HFX/QFX (1, 5 or 91) and `moist = true`; imports natively from a WRF namelist |
 | Shin-Hong (scale-aware) | 11 | implemented-unverified | float32 CPU authority reproduces every output field of both `ctopo` arms at **max ULP 0** against the byte-frozen `module_bl_shinhong.F`, over 30 cases x 6 grid spacings x 40 levels; the CUDA mirror's heat tendency is bitwise (0 ULP through both tridiagonal solves), PBLH/WSTAR/DELTA 1 ULP, `EXCH_H` 8; and its resolved/subgrid partition was scored across a 3200-100 m ladder against pre-registered Honnert (2011) envelope bands -- every gated rung inside, 100 m LES anchor held ([receipts](receipts/grayzone/)) |
@@ -1666,7 +1666,7 @@ refused, not warned about -- and the refusal states its own reason:
 | `khdif = 0.0`, `kvdif = 0.0` | constant-K diffusion may not silently stack on the SASE mixing |
 | `sf_sfclay_physics != 0` | its lower boundary condition is the surface layer's friction velocity, heat and moisture fluxes and gust-corrected wind speed; with the slot off those four fields do not exist |
 | `moist = true` | it mixes water vapour, cloud water and cloud ice alongside potential temperature, and forms its stability from the saturated Brunt-Vaisala frequency |
-| `nz <= 128` | the implicit vertical solve carries its tridiagonal columns in per-thread local memory at that fixed depth |
+| `nz <= 256` | the implicit vertical solve carries its tridiagonal columns in per-thread local memory, compiled per run at the smallest of 32, 64, 128 or 256 levels that holds `nz` (so a shallow run reserves only the frame its depth needs); 256 is the dycore's own column ceiling |
 
 The shared `bldt` setting also applies to SASE: zero calls every model
 step, while a positive value selects the surface/PBL interval in minutes.
@@ -1869,8 +1869,8 @@ with Grell-Freitas, SASE on the revised MM5 surface layer, and the three
 large-eddy closures (1.5-order TKE, 3D Smagorinsky, constant K). None of
 them reads anything source-specific, so none of them is a source's
 choice to make, and every source that names any suite at all names all
-six. On the prepared single-domain route that is twenty-two of its
-twenty-three sources; the other one is the caller-supplied composition row,
+six. On the prepared single-domain route that is twenty-four of its
+twenty-five sources; the other one is the caller-supplied composition row,
 which names no suite because the caller states the physics. A source
 with no measured suite of its own is not emptied: it reports the suites
 that route names for every source it HAS measured, with the limitation
@@ -2229,28 +2229,30 @@ not a limitation, and it is why HRRR's default differs from the others'.
 
 Three consequences worth stating plainly:
 
-* **Layer ceiling.** The default carries the same one the legacy arm
-  does: **both** 4/4 engines bound a longwave column at 128 radiation
-  layers. The legacy number is `RLW_MAXLAY`, a compile-time constant of
-  the longwave chain kernel (`woof/core/kernels/rrtmg_lw_chain.cu`,
-  asserted host-side as `MAX_RADIATION_LAYERS` in
-  `woof/core/rrtmg_lw.py`); the modern one is owned by the
-  Planck-source kernel's fixed `pfrac[128]` (`woof/core/rrtmgp.py`),
-  while the RTE solvers themselves compile to the run's own layer count
-  and add no bound of their own. Both numbers are declared once, as
-  `MAX_LEGACY_LONGWAVE_LAYERS` and `MAX_RRTMGP_LAYERS` in
-  `woof/physics_vertical_contract.py`, and both are refused by number
-  in the resolved vertical preflight (`woof.physics_compat`), before
-  anything is paid for. A column carries more layers than the ladder
-  has levels because a cap is built above the model top either way, and
-  at `p_top = 5000` Pa the two arms add the same 13 longwave layers: a
-  51-level ladder is 64 longwave layers on both, 115 levels reach the
-  bound exactly, and 116 levels are refused on both. Earlier revisions
-  of this page called 64 a wrapper cap; it is not a cap at all, it is
-  the layer count that ladder reaches. The one asymmetry is shortwave:
-  the legacy shortwave workspace is sized at run time and declares no
-  ceiling (`woof/core/rrtmg_sw.py`), while the modern arm holds both
-  streams to the same 128.
+* **Layer ceiling.** Both arms take the same model column as every
+  other scheme, `nz <= 256`, and size their radiation column per run:
+  `nz` model levels plus the cap layers built above the model top. The
+  cap layers ride on top of the 256 rather than eating into it. At
+  `p_top = 5000` Pa the two arms add the same 13 longwave layers, so a
+  51-level ladder is a 64-layer longwave column on both and a 256-level
+  ladder a 269-layer one. The legacy longwave chain compiles its per-thread column
+  (`RLW_MAXLAY`) per run: the shipped 128 for any column of at most 128
+  layers, otherwise the layer count rounded up to a multiple of 64
+  (`legacy_longwave_layer_tier`). At a 1 hPa top WRF's 4 hPa buffer adds
+  no longwave layer, so a 256-level ladder is a 256-layer column. On the modern arm no
+  kernel holds a fixed per-layer array any more: the RTE solvers compile to
+  each call's own layer count and the Planck-source kernel walks a one-layer
+  window, so a 256-level column under a 1 hPa top radiates 256 longwave and
+  257 shortwave layers. The bounds are declared once in
+  `woof/physics_vertical_contract.py` and refused by number in the
+  resolved vertical preflight (`woof.physics_compat`), before anything
+  is paid for. Until 2026-10 both longwave arms held a fixed 128-layer
+  column: the legacy chain kernel's `RLW_MAXLAY` and the RRTMGP
+  Planck-source kernel's `pfrac[128]`. At this `p_top` that refused any
+  ladder deeper than 115 levels. Both now follow the run's layer count,
+  as the legacy shortwave workspace and the RTE solvers already did, and
+  any per-thread frame that grows with the column is charged per level in
+  the device sizing (measured on sm_86 only).
 * **Card cost.** The full-radiation default costs roughly 1.8 GiB more
   peak envelope than the suite it replaced, and no longer fits the
   minimum 12 km layout on a 12 GiB card. The sizing refusal now names a

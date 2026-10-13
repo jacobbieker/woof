@@ -422,14 +422,27 @@ def test_above_model_profile_guard_and_model_flux_slice():
         _extend_above_model_profile(
             play, plev, tlay, tlev, qv, p_top=5000.0, kind="lw",
             pressure_floor=RRTMGP_TOA_PRESSURE_PA, xp=np)
-    with pytest.raises(ValueError, match="128"):
+    # The bound is on MODEL levels (256); the cap rides on top at any p_top.
+    # 120 + 25 = 145 radiation layers was refused while the Planck-source
+    # kernel held a fixed pfrac[128]; it is a column like any other now.
+    def column(nz):
+        return (np.broadcast_to(play[:, :1], (1, nz)),
+                np.linspace(100000.0, 10000.0, nz + 1)[None],
+                np.broadcast_to(tlay[:, :1], (1, nz)),
+                np.linspace(290.0, 220.0, nz + 1)[None],
+                np.broadcast_to(qv[:, :1], (1, nz)))
+
+    deep = _extend_above_model_profile(
+        *column(120), p_top=10000.0, kind="lw",
+        pressure_floor=RRTMGP_TOA_PRESSURE_PA, xp=np)
+    assert deep.play.shape == (1, 145)
+    deepest = _extend_above_model_profile(
+        *column(256), p_top=10000.0, kind="lw",
+        pressure_floor=RRTMGP_TOA_PRESSURE_PA, xp=np)
+    assert deepest.play.shape == (1, 281)
+    with pytest.raises(ValueError, match=r"at most 256 model levels.*nz=257"):
         _extend_above_model_profile(
-            np.broadcast_to(play[:, :1], (1, 120)),
-            np.linspace(100000.0, 10000.0, 121)[None],
-            np.broadcast_to(tlay[:, :1], (1, 120)),
-            np.linspace(290.0, 220.0, 121)[None],
-            np.broadcast_to(qv[:, :1], (1, 120)),
-            p_top=10000.0, kind="lw",
+            *column(257), p_top=10000.0, kind="lw",
             pressure_floor=RRTMGP_TOA_PRESSURE_PA, xp=np)
 
     full_flux = np.arange(2 * 28, dtype=np.float32).reshape(2, 28)
@@ -1082,32 +1095,282 @@ def test_rrtmgp_rejects_temperature_below_table_before_kernel(entrypoint):
                 cp.asarray([285.0], dtype=cp.float32), vmr)
 
 
+def _deep_clear_column(tables, nlay, *, ncol=2, p_top=1.1):
+    """A smooth clear-sky column of ``nlay`` layers inside the gas tables.
+
+    Pressures are log-spaced from the surface to ``p_top`` Pa, the
+    temperature is a standard-atmosphere-like profile clamped inside the
+    table range, water vapour decays with height and ozone peaks in the
+    stratosphere; the well-mixed gases take present-day values.  Column
+    ``c`` is shifted by ``2 c`` K so the columns differ.
+    """
+    plev = np.geomspace(101000.0, p_top, nlay + 1)
+    play = np.sqrt(plev[:-1] * plev[1:])
+
+    def temperature(p):
+        z = 7.0 * np.log(101000.0 / p)          # rough height in km
+        t = np.where(z < 11.0, 290.0 - 6.5 * z,
+                     np.where(z < 20.0, 218.5, 218.5 + 1.8 * (z - 20.0)))
+        return np.clip(t, 200.0, 280.0)
+
+    tmin = float(np.min(tables.temp_ref)) + 1.0
+    tmax = float(np.max(tables.temp_ref)) - 1.0
+    shift = 2.0 * np.arange(ncol)[:, None]
+    tlay = np.clip(temperature(play)[None] + shift, tmin, tmax)
+    tlev = np.clip(temperature(plev)[None] + shift, tmin, tmax)
+    tsfc = np.clip(tlev[:, 0] + 1.5, tmin, tmax)
+    vmr = np.zeros((ncol, nlay, tables.ngas + 1), np.float64)
+    vmr[:, :, tables.gas_index["h2o"]] = np.clip(
+        1.5e-2 * (play / 101000.0) ** 3, 3e-6, None)[None]
+    vmr[:, :, tables.gas_index["o3"]] = (
+        8e-6 * np.exp(-((np.log(play) - np.log(1000.0)) / 1.2) ** 2)
+        + 3e-8)[None]
+    for gas, value in (("co2", 4.2e-4), ("ch4", 1.9e-6), ("n2o", 3.3e-7),
+                       ("o2", 0.209), ("n2", 0.781), ("co", 1.0e-7)):
+        if gas in tables.gas_index:
+            vmr[:, :, tables.gas_index[gas]] = value
+    plev = np.broadcast_to(plev, (ncol, nlay + 1)).copy()
+    play = np.broadcast_to(play, (ncol, nlay)).copy()
+    return play, plev, tlay, tlev, tsfc, vmr
+
+
+#: The regional engine's RRTMGP and the global model's carried copy
+#: (woof/globe/core/rrtmgp.py, its own kernels under woof/globe/core/kernels)
+#: lost the same pfrac[128] ceiling; every deep-column test runs both.
+_RRTMGP_COPIES = ("woof.core.rrtmgp", "woof.globe.core.rrtmgp")
+
+
 @pytest.mark.gpu
 @requires_gpu
-def test_planck_sources_refuses_a_column_taller_than_its_kernel_holds():
-    """The 128-layer ceiling's OWNER refuses loudly, not silently.
+@pytest.mark.parametrize("copy", _RRTMGP_COPIES)
+@pytest.mark.parametrize("nlay", [129, 257, 281])
+def test_planck_sources_run_a_column_taller_than_the_retired_ceiling(
+        nlay, copy):
+    """The Planck-source kernel has no layer ceiling left.
 
-    The RTE solvers compile ``RRTMGP_MAX_LAYERS`` to this run's nlay, so
-    the ceiling is NOT theirs; it belongs to the unspecialized
-    Planck-source kernel, whose per-thread ``pfrac[128]`` is fixed and
-    whose device-side guard is a bare ``return`` -- with no host raise,
-    a 129-layer call came back as uninitialized source arrays that read
-    as valid radiation (stale-guard audit 2026-08-25, RRTMGP nlay
-    adjudication).
+    It held a fixed per-thread ``pfrac[128]`` (and a host refusal above
+    128 layers, the last RRTMGP ceiling) until the array became a
+    one-layer window.  257 is a 256-level column under a 1 hPa top (one SW
+    cap layer; the LW cap is nint(100/400) = 0) and 281 the same column
+    under a 100 hPa top's 25 LW cap layers.  Held against the float64
+    mirror at the same tolerance as the RFMIP spot check, both storage
+    orders (the surface layer is found by pressure).
     """
+    import importlib
     import cupy as cp
-    from woof.core.rrtmgp import load_gas_tables, planck_sources
+    from woof.verify.npref import np_rrtmgp_planck_sources
 
+    rrtmgp = importlib.import_module(copy)
+    load_gas_tables, planck_sources = (
+        rrtmgp.load_gas_tables, rrtmgp.planck_sources)
     tables = load_gas_tables("lw")
-    ncol, nlay = 1, 129
-    play = cp.full((ncol, nlay), 50000.0, dtype=cp.float32)
-    plev = cp.full((ncol, nlay + 1), 50000.0, dtype=cp.float32)
-    tlay = cp.full((ncol, nlay), 250.0, dtype=cp.float32)
-    tlev = cp.full((ncol, nlay + 1), 250.0, dtype=cp.float32)
-    tsfc = cp.asarray([285.0], dtype=cp.float32)
-    vmr = cp.zeros((ncol, nlay, tables.ngas + 1), dtype=cp.float32)
-    with pytest.raises(ValueError, match=r"128 layers.*pfrac"):
-        planck_sources(tables, play, plev, tlay, tlev, tsfc, vmr)
+    play, plev, tlay, tlev, tsfc, vmr = _deep_clear_column(tables, nlay)
+    for flip in (False, True):
+        args = (play, plev, tlay, tlev)
+        if flip:
+            args = tuple(np.ascontiguousarray(a[:, ::-1]) for a in args)
+        flipped_vmr = np.ascontiguousarray(vmr[:, ::-1]) if flip else vmr
+        ref = np_rrtmgp_planck_sources(
+            tables, *args, tsfc, flipped_vmr)
+        got = planck_sources(
+            tables, *(cp.asarray(a, dtype=cp.float32) for a in args),
+            cp.asarray(tsfc, dtype=cp.float32),
+            cp.asarray(flipped_vmr, dtype=cp.float32))
+        assert got.lay_source.shape == (2, nlay, tables.ngpt)
+        assert got.lev_source.shape == (2, nlay + 1, tables.ngpt)
+        for name in ("lay_source", "lev_source", "sfc_source"):
+            np.testing.assert_allclose(
+                cp.asnumpy(getattr(got, name)), getattr(ref, name),
+                rtol=8e-5, atol=2e-7, err_msg=f"{name} flip={flip}")
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize("copy", _RRTMGP_COPIES)
+@pytest.mark.parametrize("nlay", [129, 257, 281])
+def test_rte_solvers_match_float64_mirrors_on_a_deep_column(nlay, copy):
+    """Both RTE solvers, compiled to a > 128-layer bound, against float64.
+
+    ``_rte_kernel`` compiles ``RRTMGP_MAX_LAYERS`` to the call's own layer
+    count; this is the same check as the 7-layer mirror test at the depths
+    a 256-level column reaches.
+    """
+    import importlib
+    import cupy as cp
+    from woof.verify.npref import (
+        np_rrtmgp_delta_scale, np_rrtmgp_lw_rte, np_rrtmgp_sw_rte,
+    )
+
+    rrtmgp = importlib.import_module(copy)
+    delta_scale, lw_rte, sw_rte = (
+        rrtmgp.delta_scale, rrtmgp.lw_rte, rrtmgp.sw_rte)
+    rng = np.random.default_rng(nlay)
+    ncol, ngpt = 3, 6
+    tau = rng.uniform(1e-4, 0.08, (ncol, nlay, ngpt))
+    lay = rng.uniform(0.1, 30.0, tau.shape)
+    lev = rng.uniform(0.1, 30.0, (ncol, nlay + 1, ngpt))
+    sfc = rng.uniform(5.0, 35.0, (ncol, ngpt))
+    emis = rng.uniform(0.9, 1.0, (ncol, ngpt))
+    f32 = lambda a: cp.asarray(a, dtype=cp.float32)  # noqa: E731
+    for top_at_1 in (False, True):
+        ref = np_rrtmgp_lw_rte(tau, lay, lev, sfc, emis, top_at_1=top_at_1)
+        got = lw_rte(f32(tau), f32(lay), f32(lev), f32(sfc), f32(emis),
+                     top_at_1=top_at_1)
+        for name in ("flux_up", "flux_dn"):
+            np.testing.assert_allclose(
+                cp.asnumpy(getattr(got, name)), getattr(ref, name),
+                rtol=1e-4, atol=1e-3, err_msg=f"LW {name} {top_at_1}")
+
+    ssa = rng.uniform(0.0, 1.0, tau.shape)
+    asym = rng.uniform(0.0, 0.9, tau.shape)
+    dt, ds, dg = np_rrtmgp_delta_scale(tau, ssa, asym)
+    dev = delta_scale(f32(tau), f32(ssa), f32(asym))
+    mu0 = rng.uniform(0.2, 0.95, ncol)
+    alb_dir = rng.uniform(0.02, 0.35, (ncol, ngpt))
+    alb_dif = rng.uniform(0.02, 0.35, (ncol, ngpt))
+    inc = rng.uniform(0.1, 25.0, (ncol, ngpt))
+    ref = np_rrtmgp_sw_rte(dt, ds, dg, mu0, alb_dir, alb_dif, inc,
+                           top_at_1=True)
+    got = sw_rte(*dev, f32(mu0), f32(alb_dir), f32(alb_dif), f32(inc),
+                 top_at_1=True)
+    assert got.flux_dn.shape == (ncol, nlay + 1)
+    for name in ("flux_up", "flux_dn", "flux_dir"):
+        np.testing.assert_allclose(
+            cp.asnumpy(getattr(got, name)), getattr(ref, name),
+            rtol=4e-4, atol=2e-3, err_msg=f"SW {name}")
+
+
+def _deep_driver_column(nz, p_top, *, nx=2):
+    """Driver inputs for one smooth clear-sky atmosphere at ``nz`` levels.
+
+    The interfaces are evenly spaced in log pressure from 1000 hPa to the
+    model top, so any two level counts sample the same atmosphere and the
+    boundary fluxes must agree to within discretisation.
+    """
+    plev_col = np.geomspace(100000.0, p_top, nz + 1)
+    play_col = np.sqrt(plev_col[:-1] * plev_col[1:])
+    z = 7.0 * np.log(100000.0 / play_col)
+    t_col = np.where(z < 11.0, 290.0 - 6.5 * z,
+                     np.where(z < 20.0, 218.5, 218.5 + 2.0 * (z - 20.0)))
+    t_col = np.clip(t_col, 205.0, 295.0)
+    exner_col = (play_col / 100000.0) ** (287.0 / 1004.0)
+    qv_col = np.clip(1.0e-2 * (play_col / 100000.0) ** 3, 3.0e-6, None)
+    shape = (nz, 1, nx)
+
+    def expand(x):
+        return np.broadcast_to(np.asarray(x)[:, None, None], shape).copy()
+
+    return {
+        "pressure": expand(play_col),
+        "p_interface": np.broadcast_to(
+            plev_col[:, None, None], (nz + 1, 1, nx)).copy(),
+        "temperature": expand(t_col),
+        "theta": expand(t_col / exner_col),
+        "exner": expand(exner_col),
+        "qv": expand(qv_col),
+    }
+
+
+@pytest.mark.parametrize("copy", _RRTMGP_COPIES)
+def test_both_rrtmgp_copies_refuse_257_model_levels_by_the_contract(copy):
+    """The first-call refusal reads the contract's model-level bound."""
+    import importlib
+    from woof.physics_vertical_contract import MAX_RRTMGP_MODEL_LEVELS
+
+    rrtmgp = importlib.import_module(copy)
+    assert rrtmgp.MAX_RADIATION_MODEL_LEVELS == MAX_RRTMGP_MODEL_LEVELS == 256
+    assert not hasattr(rrtmgp, "MAX_RADIATION_LAYERS")
+    rrtmgp._refuse_model_levels(256)
+    with pytest.raises(ValueError, match=r"at most 256 model levels.*nz=257"):
+        rrtmgp._refuse_model_levels(257)
+
+
+def _run_deep_driver(nz, p_top, copy="woof.core.rrtmgp"):
+    import importlib
+    from datetime import datetime
+    from types import SimpleNamespace
+    import cupy as cp
+
+    RRTMGPRadiation = importlib.import_module(copy).RRTMGPRadiation
+
+    host = _deep_driver_column(nz, p_top)
+    shape = host["pressure"].shape
+    atmosphere = {name: cp.asarray(value, dtype=cp.float32)
+                  for name, value in host.items()}
+    atmosphere["qc"] = cp.zeros(shape, cp.float32)
+    atmosphere["qi"] = cp.zeros(shape, cp.float32)
+    fields = {
+        "tsk": cp.full(shape[1:], 291.0, cp.float32),
+        "albedo": cp.full(shape[1:], 0.18, cp.float32),
+        "emiss": cp.full(shape[1:], 0.96, cp.float32),
+    }
+    radiation = RRTMGPRadiation(
+        datetime(2024, 6, 21, 18), cp.asarray([[40.0, 40.0]]),
+        cp.asarray([[-100.0, -60.0]]))
+    state = SimpleNamespace(elapsed_seconds=0.0, qc=atmosphere["qc"],
+                            qr=cp.zeros(shape, cp.float32), p_top=p_top)
+    result = radiation(atmosphere=atmosphere, fields=fields, state=state,
+                       cfg=SimpleNamespace(mp_physics=1, dt=60.0, radt=12.0,
+                                           radt_minutes=12.0))
+    out = {name: cp.asnumpy(getattr(result, name))
+           for name in ("swdown", "glw", "olr", "gsw",
+                        "rthratenlw", "rthratensw")}
+    return host, out
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize("copy", _RRTMGP_COPIES)
+@pytest.mark.parametrize(("nz", "p_top", "coarse"),
+                         [(256, 100.0, 64), (200, 5000.0, 50)])
+def test_driver_radiates_a_256_level_column_like_a_coarse_one(
+        nz, p_top, coarse, copy):
+    """End to end: the production driver on columns past the old cap.
+
+    256 levels under a 1 hPa top is 256 LW + 257 SW radiation layers;
+    200 levels under a 50 hPa top is 213 LW layers (12 of them WRF's
+    400 Pa cap) -- both refused while the Planck-source kernel held
+    ``pfrac[128]``.  The reference is the SAME atmosphere at a quarter of
+    the levels (a depth every earlier revision ran): surface and top
+    fluxes are boundary values of one smooth atmosphere and agree to
+    within discretisation, and each fine heating rate, averaged over the
+    pressure span of a coarse layer, matches that coarse layer's.
+    """
+    fine_host, fine = _run_deep_driver(nz, p_top, copy)
+    _, coarse_out = _run_deep_driver(coarse, p_top, copy)
+    for name in ("rthratenlw", "rthratensw"):
+        assert fine[name].shape == (nz, 1, 2)
+        assert np.isfinite(fine[name]).all(), name
+    for name in ("swdown", "glw", "olr", "gsw"):
+        assert np.isfinite(fine[name]).all(), name
+    # Physical ranges (the 1974 column driver test's) and the zenith order.
+    assert np.all((fine["swdown"] >= 0.0) & (fine["swdown"] <= 1200.0))
+    assert np.all((fine["glw"] >= 150.0) & (fine["glw"] <= 450.0))
+    assert np.all((fine["olr"] >= 150.0) & (fine["olr"] <= 350.0))
+    assert fine["swdown"][0, 0] > fine["swdown"][0, 1] > 0.0
+    # Measured on an RTX A6000: at most 0.47 W m-2 apart at 256 vs 64
+    # levels and 0.11 at 256 vs 128 -- first-order convergence.
+    for name, tol in (("swdown", 1.0), ("gsw", 1.0), ("glw", 1.0),
+                      ("olr", 1.0)):
+        np.testing.assert_allclose(fine[name], coarse_out[name], rtol=0.0,
+                                   atol=tol, err_msg=name)
+    # Pressure-weighted fine heating over each coarse layer.  Exner and
+    # the flux convergence both scale with the layer, so compare the
+    # temperature tendency (theta tendency x exner) weighted by dp.
+    ratio = nz // coarse
+    if nz % coarse == 0:
+        plev = fine_host["p_interface"][:, 0, 0]
+        dp = -np.diff(plev)
+        exner = fine_host["exner"][:, 0, 0]
+        coarse_host = _deep_driver_column(coarse, p_top)
+        cdp = -np.diff(coarse_host["p_interface"][:, 0, 0])
+        cexner = coarse_host["exner"][:, 0, 0]
+        for name in ("rthratenlw", "rthratensw"):
+            dT = fine[name][:, 0, :] * exner[:, None] * dp[:, None]
+            dT = dT.reshape(coarse, ratio, 2).sum(axis=1) / cdp[:, None]
+            cT = coarse_out[name][:, 0, :] * cexner[:, None]
+            scale = max(1e-5, float(np.abs(cT).max()))
+            assert float(np.abs(dT - cT).max()) <= 0.05 * scale, name
 
 
 @pytest.mark.gpu
@@ -1115,8 +1378,9 @@ def test_planck_sources_refuses_a_column_taller_than_its_kernel_holds():
 def test_sw_rte_runs_a_column_taller_than_the_retired_ceiling():
     """The SW solver has no 128-layer ceiling left to enforce.
 
-    The 128 ceiling belongs to the Planck-source kernel's fixed
-    ``pfrac[128]`` -- an LW-only stage.  The SW chain's kernels either
+    The 128 ceiling belonged to the Planck-source kernel's fixed
+    ``pfrac[128]`` -- an LW-only stage, a one-layer window since.  The
+    SW chain's kernels either
     compile ``RRTMGP_MAX_LAYERS`` to this run's nlay (the two-stream
     solver) or hold no per-layer thread storage at all (delta scaling,
     gas optics, cloud optics, McICA), so refusing a 129+ layer SW column
@@ -3966,7 +4230,9 @@ def test_in_solver_planck_matches_the_kernel():
     tables = rrtmgp.load_gas_tables("lw")
     ngpt = tables.ngpt
     rng = np.random.default_rng(23)
-    for ncol, nlay in ((96, 30), (7, 12)):
+    # (3, 260): a column past the retired pfrac[128], where the windowed
+    # standalone kernel and the in-solver window must still agree bitwise.
+    for ncol, nlay in ((96, 30), (7, 12), (3, 260)):
         nlev = nlay + 1
         edge = np.linspace(101325.0, 2.0, nlev)
         play = cp.asarray(np.tile(0.5 * (edge[:-1] + edge[1:]), (ncol, 1)),

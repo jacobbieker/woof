@@ -613,6 +613,45 @@ def shinhong_workspace_floats(nz: int, columns: int) -> int:
     return blocks * SHWS_SLOTS * (int(nz) + 2) * SHINHONG_BLOCK
 
 
+# ---------------------------------------------------------------------------
+# The MYJ / MYJURB per-thread column workspaces (kernels/myjpbl.cu,
+# kernels/myjurb.cu), priced without a runtime for the same reason as YSU's.
+# ---------------------------------------------------------------------------
+# MYJWS_SLOTS / MYJURBWS_SLOTS and the lane width must match the kernels'
+# defines; tests/test_myj_workspace.py re-derives them from the .cu source.
+MYJWS_SLOTS = 19
+MYJURBWS_SLOTS = 24
+
+#: Launch block and lane width of both kernels' workspace interleave.
+MYJ_BLOCK = 32
+
+#: Blocks per SM the MYJ/MYJURB tile is sized for; the occupancy query in
+#: :func:`woof.core.myjpbl.myj_tile_columns` only ever lowers it.
+#: MEASURED on an RTX A6000 (sm_86, NVRTC 12.9.86, 51,200 columns): 12 is
+#: myjpbl_column's hardware residency at block 32 (136 registers) and the
+#: wall-clock plateau -- 3.74 ms at nz = 49 against 4.50 at 8 and 4.65 at
+#: 16 -- for 116.9 MiB of workspace at nz = 49 and 600.8 MiB at nz = 256
+#: (docs/kernel_local_memory_bounds.md section 12).
+MYJ_TILE_BLOCKS_PER_SM = 12
+
+
+def myj_workspace_floats(nz: int, columns: int, *,
+                         slots: int = MYJWS_SLOTS) -> int:
+    """Workspace floats for ``columns`` MYJ columns in flight at this ``nz``.
+
+    Whole blocks, lane-interleaved; the per-slot extent is ``nz + 1``
+    because ``zh`` carries the ground interface.  ``slots`` is
+    :data:`MYJURBWS_SLOTS` for the urban companion.
+    """
+    blocks = (int(columns) + MYJ_BLOCK - 1) // MYJ_BLOCK
+    return blocks * int(slots) * (int(nz) + 1) * MYJ_BLOCK
+
+
+def myjurb_workspace_floats(nz: int, columns: int) -> int:
+    """:func:`myj_workspace_floats` at MYJURB's 24 slots."""
+    return myj_workspace_floats(nz, columns, slots=MYJURBWS_SLOTS)
+
+
 __all__ = [
     "spec_zone_ring_save_slots", "spec_zone_ring_slices",
     "MYJ_PBL_STATE_3D", "MYJ_SFCLAY_FIELDS_2D", "MYJ_SFCLAY_INOUT",
@@ -622,6 +661,8 @@ __all__ = [
     "UWPBL_I4_SLOTS_PER_LEVEL", "UWPBL_WORKSPACE_BUDGET_BYTES",
     "uwpbl_workspace_slots", "uwpbl_chunk_columns", "uwpbl_workspace_bytes",
     "MYJ_SFCLAY_OUTPUTS",
+    "MYJWS_SLOTS", "MYJURBWS_SLOTS", "MYJ_BLOCK", "MYJ_TILE_BLOCKS_PER_SM",
+    "myj_workspace_floats", "myjurb_workspace_floats",
     "MYNN_PBL_DIAGNOSTICS_2D", "MYNN_PBL_DIAGNOSTICS_INT_2D",
     "MYNN_PBL_STATE_3D", "MYNN_SURFACE_OUTPUTS",
     "PBL_RQI_MICROPHYSICS", "PHYSICS_SLOT_DISPATCH", "REFL_10CM_MICROPHYSICS",

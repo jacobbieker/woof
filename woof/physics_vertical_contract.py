@@ -13,11 +13,14 @@ import math
 
 import numpy as np
 
-# The one component bound that is OWNED elsewhere: WDM6's ceiling is the
-# deepest ``WDM6_KMAX`` tier its constants module compiles, and that module
-# is CuPy-free and staged wherever this one is, so the value is imported
-# rather than transcribed.  Re-exported under its own name below.
+# The two component bounds that are OWNED elsewhere: WSM6's and WDM6's
+# ceilings are the 256-level refusal ceilings their constants modules
+# declare (both kernels keep their column arrays in a runtime-sized
+# workspace, so nothing is compiled per level count).  Those modules are
+# CuPy-free and staged wherever this one is, so the values are imported
+# rather than transcribed.  Re-exported under their own names below.
 from woof.core.wdm6_constants import WDM6_VERTICAL_LEVEL_BOUNDS
+from woof.core.wsm6_constants import WSM6_VERTICAL_LEVEL_BOUNDS
 
 
 class PhysicsVerticalPreflightError(ValueError):
@@ -74,33 +77,51 @@ def refuse_vertical_levels(label: str,
 
 
 MYNN_VERTICAL_LEVEL_BOUNDS = (5, None)
-#: YSU.  The ceiling is ``YSU_KMAX`` in ``kernels/ysu.cu``: one CUDA thread
-#: owns a whole column and holds it in per-thread local memory at that fixed
-#: depth.  The floor is the launcher's own ``nz >= 4`` -- the counter-gradient
-#: and entrainment layers the scheme indexes need four levels to exist.
-YSU_VERTICAL_LEVEL_BOUNDS = (4, 128)
-#: Shin-Hong, the same pair for the same two reasons (``SHINHONG_KMAX``, and
-#: the scheme shares YSU's column indexing).  Held as its own name rather
-#: than aliased to YSU's: the two kernels are separate translation units a
-#: future change could size differently.
-SHINHONG_VERTICAL_LEVEL_BOUNDS = (4, 128)
-#: MYJ.  ``MYJ_KMAX`` in ``kernels/myjpbl.cu`` for the ceiling; the floor is
+#: YSU.  The ceiling is ``YSU_KMAX`` in ``kernels/ysu.cu`` (and the global
+#: port's ``woof/globe/core/kernels/ysu.cu``), which is now a REFUSAL
+#: ceiling and nothing else: the column arrays live in a global workspace
+#: whose per-slot extent is the runtime ``nz``, so no array is sized by it.
+#: It sits at the dynamical core's own 256-level ceiling.  The floor is the
+#: launcher's own ``nz >= 4`` -- the counter-gradient and entrainment layers
+#: the scheme indexes need four levels to exist.
+YSU_VERTICAL_LEVEL_BOUNDS = (4, 256)
+#: Shin-Hong, the same pair for the same two reasons (``SHINHONG_KMAX`` is
+#: likewise only a refusal ceiling over a runtime-sized workspace, and the
+#: scheme shares YSU's column indexing).  Held as its own name rather than
+#: aliased to YSU's: the two kernels are separate translation units a future
+#: change could size differently.
+SHINHONG_VERTICAL_LEVEL_BOUNDS = (4, 256)
+#: MYJ (and MYJURB, its urban companion).  The ceiling is the ``MYJ_KMAX``
+#: refusal guard in ``kernels/myjpbl.cu`` / ``kernels/myjurb.cu``: since
+#: 2026-10-12 neither kernel sizes an array by it -- the column lives in a
+#: global workspace the launcher sizes to the runtime nz
+#: (docs/kernel_local_memory_bounds.md section 12) -- so 256 is the level
+#: count the end-to-end target runs at, not a frame budget.  The floor is
 #: where VDIFQ's tridiagonal chain still has interior rows and MIXLEN's
 #: profile smoothing can read ``REL(K-1)``/``REL(K+1)``.
-MYJ_VERTICAL_LEVEL_BOUNDS = (4, 128)
-#: SASE.  ``SASE_KMAX`` in ``kernels/sase.cu``, which is the same number as
-#: ``woof.core.sase_limits.MAX_COLUMN_LEVELS`` and ``woof.config
-#: .SASE_MAX_NZ``: the implicit vertical solve keeps three FP64 columns of
-#: that depth in per-thread local memory.  The floor is where the solve stops
-#: being an identity -- one interior face needs two levels.
-SASE_VERTICAL_LEVEL_BOUNDS = (2, 128)
+MYJ_VERTICAL_LEVEL_BOUNDS = (4, 256)
+#: SASE.  The deepest ``SASE_KMAX`` tier ``woof/core/sase.py`` compiles
+#: ``kernels/sase.cu`` at (``woof.core.sase_limits.KMAX_TIERS``; the run's
+#: own tier is the smallest power of two from 32 that holds ``nz``), which is
+#: the same number as ``woof.core.sase_limits.MAX_COLUMN_LEVELS`` and
+#: ``woof.config.SASE_MAX_NZ``: the implicit vertical solve keeps FP64
+#: columns of that depth in per-thread local memory.  256 is the dycore's own
+#: ceiling.  The floor is where the solve stops being an identity -- one
+#: interior face needs two levels.
+SASE_VERTICAL_LEVEL_BOUNDS = (2, 256)
 #: UW moist turbulence (bl_pbl_physics=9).  No ceiling: the CAM automatic
 #: arrays live in a per-column global workspace sized from nz at launch
 #: (woof/core/uwpbl.py), so no level count is compiled in.  The floor is
 #: where the implicit diffusion has an interior interface (compute_vdiff's
 #: k = 2..pver rows) and a Richardson number exists above the surface.
 UWPBL_VERTICAL_LEVEL_BOUNDS = (2, None)
-KF_VERTICAL_LEVEL_BOUNDS = (8, 128)
+#: Kain-Fritsch.  ``KF_KMAX`` in ``kernels/kf.cu`` is the refusal ceiling;
+#: it sizes only the two stack-resident arrays ``tv_env`` and
+#: ``positive_energy`` (2 x 4 x 256 = 2,048 B declared at 256, kept on the
+#: stack for bit-identity -- docs/kernel_local_memory_bounds.md section 9).
+#: Every other column array is in a runtime-``nz`` workspace.  The floor is
+#: the kernel's own ``nz >= 8`` refusal.
+KF_VERTICAL_LEVEL_BOUNDS = (8, 256)
 # Grell-Freitas: the inversion-layer search clamps kend to ktf-8 and its
 # second-derivative stencil then reaches ktf-1, so a column shorter than 12
 # levels leaves no search window at all; the certified fixture ran nz=40 and
@@ -108,7 +129,7 @@ KF_VERTICAL_LEVEL_BOUNDS = (8, 128)
 # integer-define tier, so there is no fixed upper bound to declare.
 GF_VERTICAL_LEVEL_BOUNDS = (12, None)
 KESSLER_VERTICAL_LEVEL_BOUNDS = (None, 256)
-WSM6_VERTICAL_LEVEL_BOUNDS = (2, 80)
+#: WSM6 (mp_physics=6): imported above from ``woof.core.wsm6_constants``.
 THOMPSON_VERTICAL_LEVEL_BOUNDS = (2, 256)
 #: Aerosol-aware Thompson (mp_physics=28).  Identical to the classic
 #: Thompson bound and NOT a copy of a number: the mp=28 sedimentation
@@ -132,9 +153,9 @@ NSSL2_VERTICAL_LEVEL_BOUNDS = (3, 256)
 #: existed the gate SKIPPED mp=9 silently, so a 300-level Milbrandt-Yau run
 #: passed ``woof check`` and died on its first microphysics call.
 MILBRANDT2_VERTICAL_LEVEL_BOUNDS = (3, 256)
-#: WDM6 (mp_physics=16): the deepest compiled ``WDM6_KMAX`` tier, imported
-#: from the CuPy-free constants module at the top of this file rather than
-#: retyped as 80 (``WDM6_VERTICAL_LEVEL_BOUNDS``).
+#: WDM6 (mp_physics=16): the 256-level refusal ceiling, imported from the
+#: CuPy-free constants module at the top of this file rather than retyped
+#: (``WDM6_VERTICAL_LEVEL_BOUNDS``).
 #: P3 one-category (mp_physics=50).  No per-thread column ceiling: the port
 #: works on global ``(ncol, nk)`` workspaces (kbot=0, ktop=nk-1) and compiles
 #: no level tier, so like Grell-Freitas the row is a floor with no declared
@@ -145,6 +166,15 @@ P3_VERTICAL_LEVEL_BOUNDS = (1, None)
 #: so a column needs four levels before the cloud-base search has one
 #: interior row; no fixed ceiling, the workspaces are ``(ncol, nz)``.
 NEW_TIEDTKE_VERTICAL_LEVEL_BOUNDS = (4, None)
+#: Orographic gravity-wave drag (``gwd_opt`` 1 = KIM, 3 = GSL), launched
+#: inside the PBL driver by ``woof/core/terrain_drag.py``.  ``TD_KMAX`` in
+#: ``kernels/terrain_drag.cu`` sizes the per-thread stress profiles
+#: ``taup[TD_KMAX + 1]`` (and GSL's ``taufb``), so it is a real per-thread
+#: column ceiling; it sits at the dycore's 256.  The launchers declare no
+#: floor, so none is stated here.  ``gwd_opt`` is a run setting rather than a registry component,
+#: so ``validate_resolved_physics_vertical_levels`` reads this row directly
+#: whenever ``gwd_opt`` is 1 or 3.
+TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS = (None, 256)
 #: The dynamical core's own vertical bound, from the top ``WPHI_MAX_LEV``
 #: tier ``woof.core.acoustic`` compiles the implicit w''-phi'' solve at.
 #: Bound to the launcher's ladder by
@@ -153,9 +183,65 @@ ACOUSTIC_VERTICAL_LEVEL_BOUNDS = (1, 256)
 
 RRTMGP_TOA_PRESSURE_PA = 1.005183574463
 WRF_LW_UPPER_DELTA_P_PA = 400.0
-MAX_RRTMGP_LAYERS = 128
-MAX_LEGACY_LONGWAVE_LAYERS = 128
+#: RTE+RRTMGP's ceiling is on MODEL levels, not on radiation layers.  No
+#: RRTMGP kernel holds a fixed per-layer array any more: the RTE solvers
+#: compile ``RRTMGP_MAX_LAYERS`` to each call's own layer count and the
+#: Planck-source kernel walks a one-layer window (it held ``pfrac[128]``,
+#: the old 128-layer cap, until 2026-10).  The radiation column is
+#: therefore ``nz`` plus WRF's above-model layers
+#: (:func:`rrtmgp_above_model_layer_counts`) at ANY model top -- up to
+#: 256 + nint(p_top / 400 Pa) longwave and 256 + 1 shortwave -- and the
+#: bound that remains is the depth the solvers are validated and priced
+#: at, which is the dynamical core's own (``ACOUSTIC_VERTICAL_LEVEL_BOUNDS``).
+#: The local frame that grows with the column is priced per layer
+#: (``woof.core.preflight.RRTMGP_RTE_LAYER_FRAME``).
+MAX_RRTMGP_MODEL_LEVELS = 256
+#: Legacy RRTMG longwave (ra_lw_physics = 4, ra_rrtmg_variant =
+#: "rrtmg_legacy") is bounded by the MODEL depth, not by a layer count.
+#: The engine's one per-thread column (``rlw_rtrn_march``'s
+#: atrans/atot/bbugas/bbutot, ``RLW_MAXLAY`` floats each) is compiled per
+#: run at :func:`legacy_longwave_layer_tier` of the run's layer count, so
+#: it holds whatever WRF builds; the ceiling is the dynamical core's own
+#: ``nz`` bound, and the radiation column may then carry WRF's 4 hPa
+#: buffer layers above the model top on top of it -- up to
+#: :func:`max_legacy_longwave_layers` ``(p_top)`` = 256 + nint(p_top/400 Pa)
+#: layers.  (Until 2026-10 this was a flat 128-layer
+#: ``MAX_LEGACY_LONGWAVE_LAYERS``, the then-fixed ``RLW_MAXLAY``.)
+MAX_LEGACY_LONGWAVE_MODEL_LEVELS = ACOUSTIC_VERTICAL_LEVEL_BOUNDS[1]
+#: ``RLW_MAXLAY`` as ``kernels/rrtmg_lw_chain.cu`` declares it by default:
+#: every run of at most this many LW layers compiles the unchanged source.
+LEGACY_LONGWAVE_SHIPPED_LAYER_TIER = 128
+#: Deeper runs round their layer count up to a multiple of this, so the
+#: few depths a deployment uses share a handful of compiled units (and
+#: their NVRTC cache entries) rather than one per layer count.
+LEGACY_LONGWAVE_LAYER_TIER_STEP = 64
 MAX_LEGACY_SHORTWAVE_LAYERS = None  # runtime-sized workspace; no fixed SW layer ceiling
+
+
+def legacy_longwave_layer_tier(nlayers: int) -> int:
+    """``RLW_MAXLAY`` the legacy LW chain is compiled at for ``nlayers``.
+
+    The shipped 128 for every column of at most 128 layers (the unchanged
+    translation unit, so those runs are bit-for-bit the pre-tier engine),
+    else ``nlayers`` rounded up to a multiple of
+    :data:`LEGACY_LONGWAVE_LAYER_TIER_STEP` (192, 256, 320, ...).
+    """
+    if isinstance(nlayers, bool) or int(nlayers) != nlayers or int(nlayers) < 1:
+        raise ValueError(
+            f"legacy LW layer count must be an integer >= 1, got {nlayers!r}")
+    count = int(nlayers)
+    if count <= LEGACY_LONGWAVE_SHIPPED_LAYER_TIER:
+        return LEGACY_LONGWAVE_SHIPPED_LAYER_TIER
+    step = LEGACY_LONGWAVE_LAYER_TIER_STEP
+    return -(-count // step) * step
+
+
+def max_legacy_longwave_layers(p_top: float) -> int:
+    """Deepest legacy LW radiation column a run at ``p_top`` [Pa] can build:
+    :data:`MAX_LEGACY_LONGWAVE_MODEL_LEVELS` model layers plus WRF's
+    ``nint(p_top/400 Pa)`` buffer layers above the model top."""
+    return legacy_radiation_layer_counts(
+        MAX_LEGACY_LONGWAVE_MODEL_LEVELS, p_top)[0]
 
 
 def rrtmgp_above_model_layer_counts(

@@ -139,93 +139,65 @@ def test_the_specialized_frames_are_what_preflight_prices():
             assert observed == spec.frame_bytes(bound), (module, bound)
 
 
-def test_the_wdm6_tier_frame_is_what_the_driver_reports_at_both_rungs():
-    """WDM6 is TIERED, not nz-specialized, so both rungs are measured.
+@pytest.mark.parametrize("module", ["wdm6", "wsm6"])
+def test_the_microphysics_workspace_kernels_hold_no_column_on_the_stack(module):
+    """WDM6 and WSM6 are no longer TIERED.
 
-    ``woof/core/wdm6.py`` compiles ``WDM6_KMAX`` at 64 (the source's own
-    ``#ifndef`` default) or at 80, and never at ``nz``.  Only those two
-    binaries can ever launch, so those two are what the pricing model has
-    to reproduce exactly -- and it does, at 152 B per level with the 64
-    rung equal to the recorded ``KERNEL_MAX_LOCAL_SIZE_BYTES`` row.
-
-    An intermediate bound is measured too, and deliberately NOT asserted
-    equal: between the rungs the driver's frame sits up to 16 B below the
-    line, so the model is a CEILING there.  Asserting the inequality is
-    what makes that a stated property instead of a gap -- over-pricing a
-    band nothing compiles in is safe, under-pricing anything is not.
+    Until 2026-10-12 ``woof/core/{wdm6,wsm6}.py`` compiled ``*_KMAX`` at a
+    64 or an 80 rung and the two rungs' frames (WDM6 9,264 / 11,568 B,
+    WSM6 7,216 / 9,008 B) were priced through a tier ladder.  The column
+    arrays now live in a launcher-owned workspace, so ONE binary serves
+    every nz up to 256 and its frame is what the driver reports here: the
+    recorded row, and under the 1,024 B default stack on any platform, so
+    the driver reserves nothing for it.
     """
-    from woof.core.kernels import get_kernel, get_kernel_int_defines
-    from woof.core.wdm6_constants import (WDM6_KERNEL_LEVEL_TIERS,
-                                           wdm6_level_tier)
+    from woof.core.kernels import get_kernel
 
-    spec = pf.WDM6_TIER_FRAME
-    assert spec.define == "WDM6_KMAX"
-    assert WDM6_KERNEL_LEVEL_TIERS == (spec.shipped_tier, 80)
-
-    default = int(get_kernel("wdm6", "wdm6_column")
-                  .attributes["local_size_bytes"])
-    assert default == spec.frame_bytes(spec.shipped_tier) == 9264
-
-    for tier in WDM6_KERNEL_LEVEL_TIERS:
-        kernel = (get_kernel("wdm6", "wdm6_column")
-                  if tier == spec.shipped_tier else
-                  get_kernel_int_defines("wdm6", "wdm6_column",
-                                         (("WDM6_KMAX", tier),)))
-        observed = int(kernel.attributes["local_size_bytes"])
-        assert observed == spec.frame_bytes(tier), tier
-
-    for bound in (30, 49, 70):
-        observed = int(get_kernel_int_defines(
-            "wdm6", "wdm6_column", (("WDM6_KMAX", bound),)
-        ).attributes["local_size_bytes"])
-        priced = spec.frame_bytes(wdm6_level_tier(bound))
-        assert observed <= priced, (bound, observed, priced)
+    observed = int(get_kernel(module, f"{module}_column")
+                   .attributes["local_size_bytes"])
+    assert observed <= pf.KERNEL_MAX_LOCAL_SIZE_BYTES[module] == 0
+    assert observed <= 1024
+    assert not hasattr(pf, f"{module.upper()}_TIER_FRAME")
 
 
-def test_the_wsm6_tier_frame_is_what_the_driver_reports_at_both_rungs():
-    """WSM6 is TIERED, not nz-specialized, so both rungs are measured.
+def test_the_sase_tier_frame_is_what_the_driver_reports_at_every_rung():
+    """SASE compiles ``SASE_KMAX`` per run at 32 / 64 / 128 / 256.
 
-    ``woof/core/wsm6.py`` compiles ``WSM6_KMAX`` at 64 (the source's own
-    ``#ifndef`` default) or at 80, and never at ``nz``.  Only those two
-    binaries can ever launch, so those two are what the pricing model has
-    to reproduce exactly -- and it does, at 112 B per level with the 64
-    rung equal to the recorded ``KERNEL_MAX_LOCAL_SIZE_BYTES`` row.  The
-    flat row alone used to be the price for both, so an nz = 72 run (the
-    six shipped tornado-LES configs) was under-priced by 1,792 B/thread.
-
-    Intermediate bounds are measured too, and deliberately NOT asserted
-    equal: between the rungs the driver's frame sits up to 16 B below the
-    line, so the model is a CEILING there.  Asserting the inequality is
-    what makes that a stated property instead of a gap -- over-pricing a
-    band nothing compiles in is safe, under-pricing anything is not.
+    The widest of the module's exports at each rung is what a run on that
+    rung reserves, so every rung the launcher can compile is read back off
+    the driver and must equal ``SASE_TIER_FRAME`` exactly (49 B x tier,
+    zero intercept: 1,568 / 3,136 / 6,272 / 12,544 B).  The 128 rung is
+    also the plain loader's ``#ifndef`` default and so the recorded
+    ``KERNEL_MAX_LOCAL_SIZE_BYTES`` row.
     """
-    from woof.core.kernels import get_kernel, get_kernel_int_defines
-    from woof.core.wsm6_constants import (WSM6_KERNEL_LEVEL_TIERS,
-                                           wsm6_level_tier)
+    import re
+    from pathlib import Path
 
-    spec = pf.WSM6_TIER_FRAME
-    assert spec.define == "WSM6_KMAX"
-    assert WSM6_KERNEL_LEVEL_TIERS == (spec.shipped_tier, 80)
+    import woof.core.kernels as kernels
+    from woof.core.kernels import load_module, load_module_int_defines
+    from woof.core.sase_limits import (KMAX_TIERS, SOURCE_DEFAULT_KMAX,
+                                       THREADS_PER_BLOCK)
 
-    default = int(get_kernel("wsm6", "wsm6_column")
-                  .attributes["local_size_bytes"])
-    assert default == spec.frame_bytes(spec.shipped_tier) == 7216
+    spec = pf.SASE_TIER_FRAME
+    assert spec.define == "SASE_KMAX"
+    assert spec.shipped_tier == SOURCE_DEFAULT_KMAX
+    assert spec.lowest_tier == KMAX_TIERS[0]
+    source = (Path(kernels.__file__).parent / "sase.cu").read_text()
+    names = sorted(set(re.findall(
+        r'extern\s+"C"\s+__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)',
+        source)))
 
-    for tier in WSM6_KERNEL_LEVEL_TIERS:
-        kernel = (get_kernel("wsm6", "wsm6_column")
-                  if tier == spec.shipped_tier else
-                  get_kernel_int_defines("wsm6", "wsm6_column",
-                                         (("WSM6_KMAX", tier),)))
-        observed = int(kernel.attributes["local_size_bytes"])
-        assert observed == spec.frame_bytes(tier), tier
-    assert spec.frame_bytes(80) == 9008
+    def widest(module):
+        return max(int(module.get_function(n).attributes["local_size_bytes"])
+                   for n in names)
 
-    for bound in (30, 49, 70, 76):
-        observed = int(get_kernel_int_defines(
-            "wsm6", "wsm6_column", (("WSM6_KMAX", bound),)
-        ).attributes["local_size_bytes"])
-        priced = spec.frame_bytes(wsm6_level_tier(bound))
-        assert observed <= priced, (bound, observed, priced)
+    plain = widest(load_module("sase"))
+    assert plain == spec.frame_bytes(spec.shipped_tier) == (
+        pf.KERNEL_MAX_LOCAL_SIZE_BYTES["sase"])
+    for tier in KMAX_TIERS:
+        module = load_module_int_defines(
+            "sase", (("SASE_KMAX", tier), ("SASE_TPB", THREADS_PER_BLOCK)))
+        assert widest(module) == spec.frame_bytes(tier) == 49 * tier, tier
 
 
 def test_the_unspecialized_source_still_compiles_to_the_recorded_ceiling():
@@ -234,22 +206,39 @@ def test_the_unspecialized_source_still_compiles_to_the_recorded_ceiling():
     would silently be describing a different binary."""
     from woof.core.kernels import get_kernel
 
-    # 512, not 24,064: ``kf``'s row is no longer a ceiling over a family of
-    # bounds, it is the ONE frame the one compiled binary holds, because
+    # 1,024, not 24,064: ``kf``'s row is no longer a ceiling over a family
+    # of bounds, it is the ONE frame the one compiled binary holds, because
     # the launcher stopped specializing when the column arrays left the
     # stack.  The assertion is the same claim -- the recorded row is what
-    # this source compiles to -- against a source that changed.
+    # this source compiles to -- against a source that changed.  (512 B
+    # until KF_KMAX went 128 -> 256; read 1,024 B on sm_86, NVRTC 12.9.86.)
     assert int(get_kernel("kf", "kf_column").attributes["local_size_bytes"]
-               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 512
+               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 1024
     assert int(get_kernel("refl", "refl10cm_morrison_column")
                .attributes["local_size_bytes"]
                ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["refl"] == 18432
+    # 0, not 9,264 / 7,216: WDM6's and WSM6's column arrays left the stack
+    # for launcher-owned workspaces on 2026-10-12, and the KMAX bound is a
+    # refusal ceiling that sizes nothing.
     assert int(get_kernel("wdm6", "wdm6_column")
                .attributes["local_size_bytes"]
-               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wdm6"] == 9264
+               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wdm6"] == 0
     assert int(get_kernel("wsm6", "wsm6_column")
                .attributes["local_size_bytes"]
-               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wsm6"] == 7216
+               ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wsm6"] == 0
+
+
+def test_the_myj_frames_are_the_recorded_zero_rows():
+    """MYJ and MYJURB hold their columns in a runtime workspace
+    (2026-10-12), so the one compiled binary of each reserves nothing and
+    its row says so.  Before, both were 9,232-12,304 B at MYJ_KMAX = 128,
+    a bound the 256-level contract would have doubled."""
+    from woof.core.kernels import get_kernel
+
+    for module, func in (("myjpbl", "myjpbl_column"),
+                         ("myjurb", "myjurb_column")):
+        assert int(get_kernel(module, func).attributes["local_size_bytes"]
+                   ) == pf.KERNEL_MAX_LOCAL_SIZE_BYTES[module] == 0, module
 
 
 # ---------------------------------------------------------------------------
@@ -316,8 +305,9 @@ def test_kf_is_bitwise_identical_at_the_specialized_bound():
 
     It survives the column workspace with its meaning INTACT but narrower.
     ``KF_KMAX`` now sizes only ``tv_env`` and ``positive_energy``, the two
-    arrays that stayed on the stack, so the frames it compares are 512 B
-    and 200 B rather than 24,064 B and 9,216 B.  The 52 in the workspace
+    arrays that stayed on the stack, so the frames it compares are 1,024 B
+    (512 B before KF_KMAX went 128 -> 256) and 200 B rather than 24,064 B
+    and 9,216 B.  The 52 in the workspace
     are sized by the runtime ``nz`` in BOTH arms, and their out-of-bounds
     check is tests/test_kf_workspace.py's residue gate instead.
     """
@@ -474,8 +464,8 @@ def test_the_production_launchers_compile_to_the_field_not_the_ceiling():
                 if row[0] == "plain" and row[1] == "refl"]
     # KF asks for the PLAIN kernel now, and that is the point: with its
     # column arrays in a global workspace, ``KF_KMAX`` sizes 8 B per level
-    # instead of 188, the frame is 512 B either way and reserves nothing
-    # either way, so a compile per distinct level count buys nothing.  The
+    # instead of 188, the frame is at most 1,024 B (KF_KMAX = 256) and
+    # reserves nothing either way, so a compile per distinct level count buys nothing.  The
     # regression this half guards is the opposite of the other half's: a
     # kf launcher that started specializing again would recompile the
     # module once per nz for no bytes.
@@ -490,8 +480,8 @@ def test_the_ceiling_is_still_refused_above_the_compiled_bound():
     from woof.core import kf as kfmod
     from woof.core import refl as reflmod
 
-    with pytest.raises(ValueError, match="KF requires 8 <= nz <= 128"):
-        kfmod.kernel_capacity(129)
+    with pytest.raises(ValueError, match="KF requires 8 <= nz <= 256"):
+        kfmod.kernel_capacity(257)
     with pytest.raises(ValueError, match="exceeds REFL_KMAX=256"):
         reflmod.kernel_capacity(257)
 
@@ -587,3 +577,45 @@ def test_the_acoustic_ceiling_is_still_refused_above_the_top_tier():
 
     with pytest.raises(ValueError, match="exceeds the in-thread solve limit"):
         acmod.wphi_level_tier(acmod.MAX_ACOUSTIC_LEVELS + 1)
+
+
+# ---------------------------------------------------------------------------
+# RTE+RRTMGP: compiled to each call's radiation layer count
+# ---------------------------------------------------------------------------
+
+def test_the_rrtmgp_rte_layer_frames_are_what_preflight_prices():
+    """``preflight.rrtmgp_rte_frame_bytes`` against the driver, past 128.
+
+    ``woof/core/rrtmgp.py`` compiles ``RRTMGP_MAX_LAYERS`` to the call's
+    own layer count (``_rte_kernel``), the two-stream at ``nz + sw_upper``
+    and the LW solver at ``nz + lw_upper``.  The price must never be below
+    what either kernel compiles to at the depths a 256-level column reaches
+    -- including the 1 hPa top (256 LW + 257 SW layers) and a 100 hPa top
+    (281 LW) -- and the two-stream's tier must be EXACT wherever 28 n + 12
+    is not a multiple of 16 (16 B over where it is, the stated ceiling).
+    """
+    from woof.core.rrtmgp import _rte_kernel
+    from woof.physics_vertical_contract import rrtmgp_above_model_layer_counts
+
+    spec = pf.RRTMGP_RTE_SW_TIER_FRAME
+    assert (spec.module, spec.define, spec.shipped_tier) == (
+        "rrtmgp_rte", "RRTMGP_MAX_LAYERS", 128)
+    for layers in (128, 129, 160, 192, 256, 257, 260, 269, 281):
+        sw = int(_rte_kernel("rrtmgp_sw_2stream", layers)
+                 .attributes["local_size_bytes"])
+        lw = int(_rte_kernel("rrtmgp_lw_noscat", layers)
+                 .attributes["local_size_bytes"])
+        priced = spec.frame_bytes(layers)
+        assert sw <= priced <= sw + 16, (layers, sw, priced)
+        if (28 * layers + 12) % 16:
+            assert priced == sw, (layers, sw, priced)
+        assert lw == pf.RRTMGP_RTE_LW_BYTES_PER_LAYER * layers, (layers, lw)
+    for nz, p_top in ((128, 100.0), (200, 5000.0), (256, 100.0),
+                      (256, 10000.0)):
+        lw_upper, sw_upper = rrtmgp_above_model_layer_counts(p_top)
+        compiled = max(
+            int(_rte_kernel("rrtmgp_sw_2stream", nz + sw_upper)
+                .attributes["local_size_bytes"]),
+            int(_rte_kernel("rrtmgp_lw_noscat", nz + lw_upper)
+                .attributes["local_size_bytes"]))
+        assert compiled <= pf.rrtmgp_rte_frame_bytes(nz, p_top), (nz, p_top)

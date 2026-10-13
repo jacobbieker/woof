@@ -204,8 +204,25 @@ _IN_MCICA = ("cldfmcl", "taucmcl", "ciwpmcl", "clwpmcl", "cswpmcl")
 #: rlw_cldprmc 64 B (icb[16] table), every other kernel 0 B.  Bounds are
 #: those measurements rounded up half a KiB for toolchain drift; a frame
 #: regression past them is exactly what this gate must catch.
-LOCAL_FRAME_BOUNDS = {"rlw_rtrn_march": 2560, "rlw_cldprmc": 512}
+#:
+#: Since 2026-10 RLW_MAXLAY is a per-run compile-time tier
+#: (woof.physics_vertical_contract.legacy_longwave_layer_tier), so the
+#: march bound scales per compiled layer: 16 B x RLW_MAXLAY (the four
+#: float columns; measured exactly so on sm_86 at NVRTC 12.9 and 13.4 for
+#: RLW_MAXLAY 64..384) plus the same half-KiB drift allowance.  At the
+#: shipped 128 that is the 2,560 B this table always carried.
+LOCAL_FRAME_BYTES_PER_LAYER = {"rlw_rtrn_march": 16}
+LOCAL_FRAME_DRIFT_BYTES = 512
+LOCAL_FRAME_BOUNDS = {"rlw_rtrn_march": 16 * 128 + 512, "rlw_cldprmc": 512}
 LOCAL_FRAME_DEFAULT_BOUND = 512
+
+
+def local_frame_bound(name, maxlay=128):
+    """The frame bound for kernel ``name`` compiled at RLW_MAXLAY=maxlay."""
+    per_layer = LOCAL_FRAME_BYTES_PER_LAYER.get(name)
+    if per_layer is not None:
+        return per_layer * maxlay + LOCAL_FRAME_DRIFT_BYTES
+    return LOCAL_FRAME_BOUNDS.get(name, LOCAL_FRAME_DEFAULT_BOUND)
 #: Machine-wide reservation implied by a frame at max occupancy.
 RESIDENT_THREADS = 1536 * 170
 
@@ -282,17 +299,20 @@ def _group_expected(ref, idx, key):
     return np.concatenate([ref[i][key] for i in idx], axis=0)
 
 
-def test_gpu_local_frames():
-    """Bound every kernel's local frame; report the implied machine-wide
-    reservation.  Restructuring is only warranted past ~8 KiB frame AND
-    ~2 GiB reservation; the march kernel sits far below both."""
-    port.gpu_preflight(force=True)
-    runs = [port.gpu_local_frame_bytes() for _ in range(DUAL_RUNS)]
+@pytest.mark.parametrize("maxlay", [128, 256, 320])
+def test_gpu_local_frames(maxlay):
+    """Bound every kernel's local frame at the shipped tier and at the
+    deeper tiers a 256-level model compiles (256 layers at a 1 hPa top,
+    320 for up to 64 buffer layers above it); report the implied
+    machine-wide reservation.  Restructuring is only warranted past ~8 KiB
+    frame AND ~2 GiB reservation; the march kernel sits below both."""
+    port.gpu_preflight(force=True, maxlay=maxlay)
+    runs = [port.gpu_local_frame_bytes(maxlay) for _ in range(DUAL_RUNS)]
     assert runs[0] == runs[1], "local frame query not stable"
     frames = runs[0]
     assert set(frames) == set(port.LW_GPU_KERNEL_NAMES)
     for name, nbytes in sorted(frames.items(), key=lambda kv: -kv[1]):
-        bound = LOCAL_FRAME_BOUNDS.get(name, LOCAL_FRAME_DEFAULT_BOUND)
+        bound = local_frame_bound(name, maxlay)
         implied = nbytes * RESIDENT_THREADS
         print(f"local frame {name}: {nbytes} B "
               f"(implied reservation {implied / 2**20:.1f} MiB)")

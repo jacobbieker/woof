@@ -20,21 +20,46 @@ import cupy as cp
 
 from woof.config import RunConfig
 from woof.core import constants as c
-from woof.core.kernels import get_kernel, get_kernel_int_defines
+from woof.core.kernels import get_kernel
 from woof.core.state import DTYPE, DomainState
 
-from woof.core.wsm6_constants import (WSM6_DEEP_KMAX, WSM6_SHALLOW_KMAX,
+from woof.core.wsm6_constants import (WSM6_BLOCK, WSM6_MAX_LEVELS,
+                                       WSM6_TILE_BLOCKS_PER_SM,
                                        WSM6_VERTICAL_LEVEL_BOUNDS,
-                                       wsm6_level_tier)
+                                       wsm6_workspace_extent,
+                                       wsm6_workspace_floats)
 
-_COLUMN_TPB = 32
-# The ladder itself lives in wsm6_constants (a CuPy-free leaf) so the memory
-# preflight can price a WSM6 configuration on a host with no device; these
-# names are the adapter's local spelling of it.
-_SHALLOW_KMAX = WSM6_SHALLOW_KMAX
-_KMAX = WSM6_DEEP_KMAX
+_COLUMN_TPB = WSM6_BLOCK
+_KMAX = WSM6_MAX_LEVELS
 VERTICAL_LEVEL_BOUNDS = WSM6_VERTICAL_LEVEL_BOUNDS
-_kernel_capacity = wsm6_level_tier
+
+
+def wsm6_tile_columns(fn, ncol: int) -> int:
+    """Columns to keep in flight: enough to fill the card, and no more.
+
+    The workspace is charged per column IN FLIGHT where the local-memory
+    backing store it replaced was charged per thread the card could ever
+    hold; over-sizing the tile hands that ratio back.  The device's
+    occupancy query only ever lowers the measured blocks-per-SM constant.
+    """
+    try:
+        sms = int(cp.cuda.Device().attributes["MultiProcessorCount"])
+    except Exception:                              # noqa: BLE001
+        # No device to size against (a host-side test drives the launcher
+        # with a stand-in kernel): one tile, the whole domain.
+        return int(max(WSM6_BLOCK, int(ncol)))
+    per_sm = WSM6_TILE_BLOCKS_PER_SM
+    try:
+        from cupy_backends.cuda.api import driver
+
+        resident = driver.occupancyMaxActiveBlocksPerMultiprocessor(
+            fn.kernel.ptr, WSM6_BLOCK, 0)
+        per_sm = min(per_sm, int(resident))
+    except Exception:                              # noqa: BLE001
+        pass                                       # keep the measured value
+    per_sm = max(1, int(per_sm))
+    # Floored at one block: the tile is the STEP of the launcher's loop.
+    return int(max(WSM6_BLOCK, min(int(ncol), sms * per_sm * WSM6_BLOCK)))
 
 
 def launch_wsm6(theta, qv, qc, qr, qi, qs, qg, rho, pii, pressure, dz,
@@ -46,7 +71,7 @@ def launch_wsm6(theta, qv, qc, qr, qi, qs, qg, rho, pii, pressure, dz,
     if len(shape) != 3:
         raise ValueError(f"WSM6 fields must be 3-D, got {shape}")
     nz, ny, nx = shape
-    capacity = _kernel_capacity(nz)
+    wskp = wsm6_workspace_extent(nz)
     if not np.isfinite(dt) or dt <= 0.0:
         raise ValueError(f"dt must be finite and positive, got {dt}")
     if int(hail_opt) not in (0, 1):
@@ -76,17 +101,27 @@ def launch_wsm6(theta, qv, qc, qr, qi, qs, qg, rho, pii, pressure, dz,
         if not value.flags.c_contiguous:
             raise ValueError(f"{name} must be C-contiguous")
     ncol = ny * nx
-    blocks = (ncol + _COLUMN_TPB - 1) // _COLUMN_TPB
-    kernel = (get_kernel("wsm6", "wsm6_column")
-              if capacity == _SHALLOW_KMAX else
-              get_kernel_int_defines(
-                  "wsm6", "wsm6_column", (("WSM6_KMAX", capacity),)))
-    kernel(
-        (blocks,), (_COLUMN_TPB,),
-        (theta, qv, qc, qi, qr, qs, qg, rho, pressure, pii, dz,
-         rainnc, rainncv, snownc, snowncv, graupelnc, graupelncv, sr,
-         effc, effi, effs, DTYPE(dt), np.int32(hail_opt),
-         np.int32(nz), np.int32(ny), np.int32(nx)))
+    kernel = get_kernel("wsm6", "wsm6_column")
+    # The column arrays live in a global workspace sized to the columns in
+    # flight and to this call's nz (kernels/wsm6.cu says why).  Columns go
+    # in tiles of `tile`, each launched with the SAME one-thread-one-column
+    # mapping, shifted by `col0` because the (nz, ny, nx) fields make a
+    # column tile a strided scatter rather than a slice.
+    tile = wsm6_tile_columns(kernel, ncol)
+    ws = cp.empty(wsm6_workspace_floats(nz, tile), dtype=DTYPE)
+    try:
+        for col0 in range(0, ncol, tile):
+            count = min(tile, ncol - col0)
+            blocks = (count + _COLUMN_TPB - 1) // _COLUMN_TPB
+            kernel(
+                (blocks,), (_COLUMN_TPB,),
+                (theta, qv, qc, qi, qr, qs, qg, rho, pressure, pii, dz,
+                 rainnc, rainncv, snownc, snowncv, graupelnc, graupelncv, sr,
+                 effc, effi, effs, DTYPE(dt), np.int32(hail_opt),
+                 np.int32(nz), np.int32(ny), np.int32(nx),
+                 ws, np.int32(wskp), np.int32(col0)))
+    finally:
+        del ws
 
 
 def apply(state: DomainState, cfg: RunConfig, dt: float, *,
@@ -141,4 +176,4 @@ def apply(state: DomainState, cfg: RunConfig, dt: float, *,
         graupelnc=graupelnc, graupelncv=graupelncv)
 
 
-__all__ = ["apply", "launch_wsm6"]
+__all__ = ["apply", "launch_wsm6", "wsm6_tile_columns"]

@@ -374,7 +374,15 @@ _PHYSICS_ALLOCATION_INVENTORY = {
     # test_preflights_myj_output_roster_matches_the_launchers.  Without
     # that gate this row would price a roster nothing checks, which is
     # the state it shipped in until the port's re-verification.
+    #
+    # The fifth is the column workspace of the 2026-10-12 frame move
+    # (kernels/myjpbl.cu header): ws = cp.empty in launch_myj_pbl, bound
+    # myj_workspace_floats(nz, tile) * 4 bytes for the columns in flight,
+    # priced by preflight.myj_column_workspace_bytes.  It replaces a
+    # 9,232 B per-thread local frame the driver charged at the card's full
+    # resident-thread capacity.
     'woof/core/myjpbl.py': {
+        'launch_myj_pbl': 1,
         'myj_pbl_step': 4,
     },
     # The Eta surface layer allocates NOTHING per call: it writes into the
@@ -751,17 +759,36 @@ _PHYSICS_ALLOCATION_INVENTORY = {
     # count-safety tests).  Entered here with its bound because a3f158bef
     # did not, and the gate was red for it on every box since
     # (proof/node-reds-276).
-    'woof/core/wdm6.py': {'launch_wdm6': 1},
-    'woof/core/wsm6.py': {},
+    #
+    # TWO since the column workspace (2026-10-12): the second is
+    # ``ws = cp.empty`` in launch_wdm6, bound wdm6_workspace_floats(nz,
+    # tile) * 4 bytes for the columns in flight, priced by
+    # preflight.wdm6_column_workspace_bytes.  It replaces the 9,264 /
+    # 11,568 B per-thread local frame (64/80 tier) the driver charged at the
+    # card's full resident-thread capacity, and is what lets WDM6 run to
+    # 256 levels.
+    'woof/core/wdm6.py': {'launch_wdm6': 2},
+    # WSM6: ONE site since the column workspace (2026-10-12), ``ws =
+    # cp.empty`` in launch_wsm6, bound wsm6_workspace_floats(nz, tile) * 4
+    # bytes for the columns in flight (SMs x 16 blocks x 32 lanes, nz + 1
+    # levels, 30 slots), priced by preflight.wsm6_column_workspace_bytes.
+    # It replaces the 7,216 / 9,008 B per-thread local frame (64/80 tier)
+    # the driver charged at the card's full resident-thread capacity.
+    # Everything else the adapter works in is still a named state.scratch
+    # slot, as the empty row this replaces asserted.
+    'woof/core/wsm6.py': {'launch_wsm6': 1},
     # ---- the urban canopy models (sf_urban_physics 1-3), 2026-09-30 --------
     # MYJURB (MYJ under BEP/BEM): ``launch_myjurb``'s per-call bundle, the MYJ
     # roster plus EXCH_M -- eight (nz, ny, nx) outputs from one comprehension,
     # PBLH/MIXHT/KPBL planes, RQIBLTEN's published zero and HT when a caller
     # passes none (physics.py passes the state's).  Priced by preflight's
     # myj_output_transient_shapes under sf_urban_physics 2/3, held to the
-    # launcher by tests/test_myjurb_wrf471_parity.py.
+    # launcher by tests/test_myjurb_wrf471_parity.py.  The seventh is the
+    # column workspace (kernels/myjurb.cu header), bound
+    # myjurb_workspace_floats(nz, tile) * 4 bytes and priced by
+    # preflight.myj_column_workspace_bytes.
     'woof/core/myjurb.py': {
-        'launch_myjurb': 6,
+        'launch_myjurb': 7,
     },
     # BEP: ``_class_for_table`` builds the class tables once per (device,
     # table) and caches them (CLASS_BYTES, 11 x 795 view words and the

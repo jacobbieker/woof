@@ -250,8 +250,8 @@ device-wide NVML, taken from outside the process, and it is 2,284 MiB under.
 
 ## 5. What this does not do
 
-- **The bound is still a ceiling, not a clamp.** `nz` past 128 (KF) or 256
-  (reflectivity) raises, as before. Specializing downward must never turn a
+- **The bound is still a ceiling, not a clamp.** `nz` past 128 (KF; 256
+  since 2026-10-12, §9) or 256 (reflectivity) raises, as before. Specializing downward must never turn a
   refusal into a silent truncation.
 - **One extra NVRTC compilation per distinct `nz`.** Configurations whose
   domains differ in level count compile `kf.cu`/`refl.cu` once per level
@@ -607,14 +607,24 @@ targets, in order:
 | kernel | frame | selector |
 |---|---|---|
 | `shinhong_column` | 13,000 B on NVRTC 13.0 (17,160 on 13.3 and 13.4; sm_120, read 2026-09-28) | `bl_pbl_physics = 11` |
-| `myjpbl_column` | **9,232 B** | `bl_pbl_physics = 2` |
-| `wsm6_column` | 7,216 B | `mp_physics = 6` |
-| `sase_*` | 6,272 B | SASE |
+| ~~`myjpbl_column`~~ | ~~9,232 B~~ -> **0 B**, done 2026-10-12 (section 12); `myjurb_column` (10,256-12,304 B) with it | `bl_pbl_physics = 2` |
+| ~~`wsm6_column`~~ | ~~7,216 B~~ -> 0 B, done 2026-10-12 (section 11; `wdm6_column` with it) | `mp_physics = 6` |
+| `sase_*` | 6,272 B at the 128 tier; 49 B x the per-run `SASE_KMAX` tier (1,568 / 3,136 / 6,272 / 12,544 B at 32 / 64 / 128 / 256) | SASE |
 
-`myjpbl_column` deserves the emphasis: it is the *same* 9,232 B YSU
-carried, in one kernel with no template variants, so a MYJ run still pays
-the full ~842 MiB that YSU used to. The technique in this section applies
-to it unchanged.
+`sase_*` is already specialized: `woof/core/sase.py` compiles `SASE_KMAX`
+per run at the smallest power-of-two tier from 32 that holds `nz`
+(`woof.core.sase_limits.kmax_tier`), and preflight charges that tier's
+frame (`preflight.SASE_TIER_FRAME`, driver-read at all four rungs on
+sm_86, NVRTC 12.9.86). A 49-level run holds 3,136 B, a 256-level run
+12,544 B -- about 2.8 GiB of reservation on a 170-SM card, which is the
+price of the deepest column, not of selecting SASE. The tier only sizes
+per-thread arrays, so it moves no output bit
+(`tests/test_sase_gpu.py::test_sase_kmax_tier_is_bitwise_inert`).
+
+`myjpbl_column` deserved the emphasis: it was the *same* 9,232 B YSU
+carried, in one kernel with no template variants, so a MYJ run still paid
+the full ~842 MiB that YSU used to. The technique in this section applied
+to it unchanged, and section 12 records the cut.
 
 What is NOT a target, and why it looks like one: `thompson` (11,264 B) and
 `morrison` (5,120 B) top out in their `KMAX = 256` template instantiations,
@@ -702,6 +712,31 @@ pytest tests/test_ysu.py tests/test_ysu_wrf461_parity.py
 is the platform-independent gate. Run against the pre-cut kernel, 5 of the
 7 nodes in that file fail, including that one and the tiling gate.
 
+### 2026-10-12: the ceiling went to 256, and it cost nothing
+
+Because the workspace extent is the runtime `nz`, `YSU_KMAX` stopped sizing
+anything when this cut landed: it was left as a 128-level refusal guard
+(`if (col >= st || nz > YSU_KMAX) return;`) over arrays that would have held
+any depth. It now sits at the dynamical core's own 256
+(`ACOUSTIC_VERTICAL_LEVEL_BOUNDS`), in `woof/core/kernels/ysu.cu`, the
+global port's `woof/globe/core/kernels/ysu.cu` (whose launcher reads the
+contract's `YSU_VERTICAL_LEVEL_BOUNDS` instead of its own literal), and the
+ensemble batch planner (`woof/ensemble/batch_physics.py`, which had its own
+`4 <= nz <= 128` and now imports the contract). Shin-Hong took the same
+route on 2026-09-30 and went the same way: `SHINHONG_KMAX` 256.
+
+* **Frames:** `ysu_column`, `ysu_column_bep`, `ysu_column_topo`, the global
+  `ysu_column`, `shinhong_column` all read **0 B** before and after (sm_86,
+  NVRTC 12.9.86). Nothing to re-price.
+* **Bit-identity at `nz <= 128`:** every output word of the shipped kernel
+  equals the same source compiled with `#define YSU_KMAX 128` (resp.
+  `SHINHONG_KMAX`), at `nz` 49 and 128, regional and global
+  (`tests/test_physics_256_levels_gpu.py`). That old-ceiling arm is the
+  pre-raise source to the byte once comments are stripped.
+* **256 levels to a 1 hPa top** run through the shipped launchers and come
+  back finite, with `hpbl > 0` and `1 <= kpbl < 256` in every column (same
+  file).
+
 ---
 
 ## 9. Kain-Fritsch: the other half of the pair, and how it stayed bit-exact
@@ -777,7 +812,9 @@ moved words. Force them into memory and the store breaks the fusion.
 
 So they keep their `float[KF_KMAX]` declarations. At the shipped
 `KF_KMAX = 128` that is 512 B, half the default stack, and the driver's
-reservation term is still exactly zero.
+reservation term is still exactly zero. (At the 256 it was raised to on
+2026-10-12 it is 1,024 B: AT the default stack, still zero -- see the end of
+this section.)
 
 ### Bit-identity, and the method that got there
 
@@ -861,7 +898,7 @@ launch shape at all.
 * `KF_KMAX` is a REFUSAL CEILING and nothing else. It sizes only the two
   stack-resident arrays, so `woof/core/kf.py` compiles the module ONCE
   instead of once per distinct level count. The `nz` outside [8, 128]
-  refusal is unchanged and is carried by
+  refusal (now [8, 256], below) is unchanged and is carried by
   `woof.physics_compat.validate_resolved_physics_vertical_levels`, which
   names Kain-Fritsch, plus the guard in `kf_column` itself.
 * `kf` left `LEVEL_SPECIALIZED_KERNEL_FRAMES`. Its 188 B/level model is
@@ -899,3 +936,471 @@ on whatever box runs it, including boxes with no recorded frame row.
 `test_the_two_stack_arrays_are_the_measured_pair` is the one that stops a
 later pass from "finishing the job" on `tv_env` or `positive_energy`
 without reading this section first.
+
+## 10. Legacy RRTMG LW: `RLW_MAXLAY` became a per-run tier (2026-10)
+
+`rlw_rtrn_march` (and its coalesced twin) is the one legacy-LW kernel
+with a frame: four per-thread float columns of `RLW_MAXLAY` entries,
+2,048 B at the old fixed 128 -- which was also the reason a legacy run
+could not carry more than 128 longwave layers. `RLW_MAXLAY` is now an
+`#ifndef` default the host overrides per run at
+`legacy_longwave_layer_tier(nlayers)` (128 for any column of at most 128
+layers, else rounded up to a multiple of 64), so the frame follows the
+run's radiation column instead of bounding it.
+
+Read through the production loader
+(`woof.core.rrtmg_lw.gpu_local_frame_bytes(maxlay)`) on sm_86 (RTX
+A6000), widest kernel of the unit:
+
+| `RLW_MAXLAY` | NVRTC 12.9 | NVRTC 13.4 | reservation, 84 SM x 1,536 |
+|---|---|---|---|
+| 64  | 1,024 B | 1,024 B | 0 |
+| 100 | 1,600 B | -- | 70.9 MiB |
+| 128 (shipped) | 2,048 B | 2,048 B | 126.0 MiB |
+| 129 | 2,064 B | 2,064 B | 128.0 MiB |
+| 192 | 3,072 B | 3,072 B | 252.0 MiB |
+| 256 | 4,096 B | 4,096 B | 378.0 MiB |
+| 269 | 4,304 B | 4,304 B | 403.6 MiB |
+| 320 | 5,120 B | 5,120 B | 504.0 MiB |
+| 384 | 6,144 B | 6,144 B | 630.0 MiB |
+
+Exactly 16 B x `RLW_MAXLAY` at every bound on both compilers;
+`rlw_cldprmc` stays 64 B and every other kernel 0 B. Preflight prices
+the unit per domain with that law
+(`woof.core.preflight.rrtmg_lw_legacy_chain_frame_bytes`, from the run's
+`nz` and `p_top`), anchored on the shipped-tier row
+`CHAINED_TRANSLATION_UNIT_FRAMES["rrtmg_lw_legacy_chain"] = 2048` (which
+an import-time check holds to 16 x 128). sm_120 and sm_89 carry only the
+shipped-tier reading; their deeper tiers are priced by the same law and
+were not re-measured. On a 170 SM x 1,536 card a 256-level column at a
+1 hPa top (tier 256) reserves (4,096 - 1,024) x 261,120 B = 765 MiB,
+against 255 MiB at the shipped tier.
+
+Bit-identity: a column of at most 128 layers compiles the unchanged
+unit (no define is prepended), whose PTX is byte-identical to the
+pre-tier source on sm_86 at NVRTC 12.9 and 13.4. Deeper tiers are held
+to the NumPy port word for word by `tests/test_rrtmg_lw_deep_columns.py`,
+whose frame leg also re-reads 128/192/256/320 on whatever card runs it
+and fails if the driver reports more than preflight charges.
+
+### 2026-10-12: `KF_KMAX` 256
+
+`KF_KMAX` went 128 -> 256, the dynamical core's own ceiling
+(`ACOUSTIC_VERTICAL_LEVEL_BOUNDS`), with the floor unchanged at 8. Because
+it still sizes `tv_env` and `positive_energy`, this is not a guard-only
+change, and both properties this section rests on were re-measured rather
+than argued:
+
+* **Frame, sm_86, NVRTC 12.9.86 (RTX A6000):** `KF_KMAX` = 49 / 128 / 256
+  read 200 / 512 / **1,024 B**, identically from the pre- and post-raise
+  source. 1,024 B is exactly the default stack, so the reservation term is
+  still zero and `test_the_kf_frame_stays_under_the_default_stack` (frame
+  `<=` 1,024) holds with no margin left: the next array to land on the
+  stack will be caught. The `kf` row of `KERNEL_MAX_LOCAL_SIZE_BYTES` and
+  the sm_86 / 12.9.86 recording are 1,024. The sm_120 and older sm_86
+  readings (512 B) predate the raise and could not be re-read here; the
+  sm_120 / 13.4.92 recording's `kf: 0` is very likely a symbol-regex
+  artefact (`extern "C" __global__ __launch_bounds__(256) void kf_column`
+  did not match the census regex, so the module read as having no kernel);
+  `tools/vram_reserve_probe.py` and the driver gate in
+  `tests/test_preflight.py` now accept the `__launch_bounds__` spelling.
+* **Bit-identity at `nz <= 128`:** every output word, all four
+  `KFPhaseMode`s, at `nz` 49 and 128, equals the kernel compiled with
+  `KF_KMAX = 128` (`tests/test_physics_256_levels_gpu.py`, which asserts
+  the two frames differ first so the A/B cannot compare an image with
+  itself, and that columns convected). The existing `KF_KMAX = nz` A/B in
+  `tests/test_kernel_local_bounds.py` and the WRF parity suite
+  `tests/test_kf.py` are unchanged and green.
+* **256 levels to a 1 hPa top:** a 64-column batch through `launch_kf`
+  triggers on 23 columns (3 deep, 20 shallow), every output finite.
+
+The same raise went to terrain drag (`TD_KMAX`, `gwd_opt` 1 and 3), whose
+per-thread stress profiles `taup[TD_KMAX + 1]` (and GSL's `taufb`) are real
+per-thread arrays: KIM 640 -> **1,152 B**, GSL 1,184 -> **2,208 B** on sm_86
+/ 12.9.86, so `gwd_opt = 3` reserves 1,184 B per resident thread (about
+146 MiB on an 84-SM x 1,536 card), priced through the
+`terrain_drag_composed` chained-unit frame. Terrain drag also gained a row
+in the vertical contract (`TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS`) read by
+`validate_resolved_physics_vertical_levels` whenever `gwd_opt` is 1 or 3:
+until then a too-deep drag run passed `woof check` and failed at its first
+PBL call. Bit-identity at `nz <= 128` is shown the same way, and the WRF
+v4.7.1 parity suite is unchanged and green.
+
+---
+
+## 11. WSM6 and WDM6: the hex model's microphysics, and the 80-level wall
+
+`wsm6_column` is the hex (MPAS) model's default microphysics and a
+regional default in several shipped profiles; `wdm6_column` is its
+double-moment sibling. Both kept ~30 (WSM6) and ~37 (WDM6) whole-column
+arrays per thread, sized by a compile-time `*_KMAX` tier the launchers
+chose from `nz` -- 64 or 80 -- so the two schemes had two costs:
+
+* the frame: WSM6 7,216 B at 64 and 9,008 B at 80 (+112 B/level), WDM6
+  9,264 B and 11,568 B (+144 B/level), which the driver reserves times the
+  card's whole resident-thread capacity;
+* a hard 80-level ceiling. 256 levels would have been ~28.7 KB (WSM6) and
+  ~36.9 KB (WDM6) per thread -- several GiB of reservation -- so the tier
+  ladder simply stopped at 80, and with it every WSM6/WDM6 column, including
+  the hex model's.
+
+Both now keep their column arrays in a global workspace their launchers
+(`woof/core/wsm6.py`, `woof/core/wdm6.py`) allocate per call, sized to the
+columns IN FLIGHT and to the RUNTIME `nz`, exactly the YSU/KF route
+(sections 8-9). The `*_KMAX` define is a 256-level refusal ceiling that sizes
+nothing; the tier ladders (`WSM6_TIER_FRAME`, `WDM6_TIER_FRAME`,
+`*_KERNEL_LEVEL_TIERS`, `*_level_tier`) are retired; one binary serves every
+level count from 2 to 256.
+
+All measurements below: **RTX A6000, 84 SMs x 1,536, sm_86**, CuPy 14.2.0,
+NVRTC 12.9.86 and 13.4.92 (both read; they agree everywhere), 2026-10-12.
+
+### Layout
+
+Slot `s`, level `k`, lane `t` of a block lives at
+`block_base + (s * wskp + k) * 32 + t` with `wskp = nz + 1` (the PLM
+interface arrays index `nz`), one region of `SLOTS x wskp x 32` floats per
+one-warp block. WSM6 has 30 slots (15 in the column routine, 12 in
+`sediment_column`, 1 in `plm_arrival`, 2 in `plm_regular_remap`); WDM6 has
+37 (23 + 11 in the snow/graupel fallout + 1 + 2; the cloud-ice fallout runs
+after the snow/graupel fallout returns and reuses its slots). Slot ids are
+literals; `tests/test_wsm6_workspace.py` / `tests/test_wdm6_workspace.py`
+read them out of the source and fail on a duplicate, an overflow or a gap.
+
+The columns launch in tiles of `SMs x 16 x 32` offset by a `col0`
+argument (the `(nz, ny, nx)` fields make a column tile a strided scatter),
+with the device's occupancy query allowed only to lower the 16.
+
+### The register file decided the view type
+
+The obvious view -- a struct holding a 64-bit pointer per array, as
+`ysu.cu` does -- compiled to **160 registers**, which on sm_86 holds 12
+one-warp blocks per SM where the pre-cut kernel held 16 (the per-SM block
+ceiling). 65,536 columns, `nz = 55`, median of 7:
+
+| WSM6 variant | regs | frame | blocks/SM | wall |
+|---|---|---|---|---|
+| pre-cut (local arrays, 64 tier) | 96 | 7,216 B | 16 | 7.25 ms |
+| 64-bit pointer views | 160 | 0 B | 12 | 9.87 ms |
+| same, `__launch_bounds__(32, 16)` | 128 | **72 B** spill | 16 | 8.43 ms |
+| **one base pointer + 32-bit slot offsets (shipped)** | **116** | **0 B** | 16 | **8.32-8.44 ms** |
+
+WDM6 the same way: 160 regs / 0 B, 128 regs / 88 B with the bound, **116
+regs / 0 B** with offsets. The offsets need no launch bound, so none is
+shipped.
+
+### Before and after
+
+Frames, through the production loader and `local_size_bytes`:
+
+| kernel | pre-cut 64 tier | pre-cut 80 tier | cut, any nz <= 256 |
+|---|---|---|---|
+| `wsm6_column` | 7,216 B | 9,008 B | **0 B** |
+| `wdm6_column` | 9,264 B | 11,568 B | **0 B** |
+
+The 0 B was also read compile-only (NVRTC -> cubin, `ptxas -v`) for sm_89
+and sm_120 at both builds: 0 B stack frame, 0 B spill, everywhere.
+`kernel_frame_recordings.py` carries those readings and DROPS the old
+9,264 / 7,216 B rows from the recordings whose NVRTC builds were not
+available to re-read (sm_120 13.0.48, 13.0.88, 13.3.33; sm_86 13.0.48)
+rather than carry rows describing a source that no longer exists.
+
+What the workspace holds, at the shipped 16 blocks/SM (`tile = 43,008`
+columns on this card):
+
+| `nz` | WSM6 | WDM6 | pre-cut WSM6 reservation, by the law |
+|---|---|---|---|
+| 55 | 275.6 MiB | 339.9 MiB | 761.9 MiB (64 tier) |
+| 80 | 398.7 MiB | 491.7 MiB | 982.4 MiB (80 tier) |
+| 256 | 1,264.9 MiB | 1,560.1 MiB | not compilable |
+
+Wall clock, 65,536 columns (43,008 at `nz = 256`), dt 60 s, median of 7:
+
+| case | pre-cut | cut, 16 blocks/SM |
+|---|---|---|
+| WSM6 `nz = 55` | 7.25 ms | 8.32 ms (1.15x) |
+| WSM6 `nz = 80` | 10.88 ms | 12.57 ms (1.16x) |
+| WDM6 `nz = 55` | 11.90 ms | 13.12 ms (1.10x) |
+| WDM6 `nz = 80` | 20.72 ms | 22.23 ms (1.07x) |
+| WSM6 `nz = 256` | -- | 21.69 ms (32.12 at 8 blocks/SM, 58.24 at 4) |
+| WDM6 `nz = 256` | -- | 168.66 ms |
+
+16 is the tile, not 8: one thread is one column, so a ragged second tile
+costs nearly a whole column's latency, and a tile at full residency ran as
+fast as one launch over every column (8.44 ms vs 8.37 ms at `nz = 55`,
+balanced or not). Halving it halves the workspace and, at 256 levels,
+costs 1.5x on the kernel. WDM6's 256-level wall is its explicit rain
+sub-stepping on thin layers, not the workspace.
+
+### Bit-identity: measured, both schemes, both compilers
+
+`wsm6.cu` and `wdm6.cu` use plain `+`/`*`, so they are exposed to
+contraction re-decisions the way `ysu.cu` was. They did not move. Pre-cut
+kernel compiled from git (`7950e417`) at the tier its launcher chose,
+shipped kernel through the shipped launcher, ONE process, compared as
+`uint32` bit patterns:
+
+* WSM6: `nz` 40, 64 and 80 x `hail_opt` 0/1 x {two 20 s calls, one 300 s
+  call (three minor loops)}, 1,024-2,048 columns of varied soundings with
+  every hydrometeor present: **21,274,624 graded words, 0 differ**, under
+  NVRTC 12.9.86 and 13.4.92;
+* WDM6, the same grid plus `nn`/`nc`/`nr`, a numberless-rain sprinkle and a
+  land/sea mix: **25,821,184 words, 0 differ**, both builds;
+* controls fire: one constant moved one ULP in the pre-cut kernel moves
+  64,871 (WSM6) / 63,787 (WDM6) words; one `theta` word moved one ULP moves
+  28 / 25;
+* the residue gate (workspace pre-filled with NaN vs 1e30) and the tiled
+  gate (five ragged 64-column tiles vs one launch vs the shipped launcher)
+  are bit-identical;
+* the WDM6 CPU-mirror suites (`test_wdm6_sedimentation.py`,
+  `test_wdm6_count_safety.py`, `test_wdm6_numberless_rain.py`) pass
+  unchanged: the mirror keeps the pre-workspace `wdm6_column_impl` entry
+  point and the array helpers are templates over the array type.
+
+### What changed around it
+
+* `preflight.wsm6_column_workspace_bytes` / `wdm6_column_workspace_bytes`
+  price the workspaces (the worst selecting domain, bounded by the tile) and
+  join the `column_workspace_bytes` sum; the `wsm6`/`wdm6` frame rows are 0.
+* `woof.physics_vertical_contract` IMPORTS both bounds, `(2, 256)`, from
+  the CuPy-free constants modules instead of transcribing WSM6's.
+* The hex device admission charges `WSM6_WORKSPACE` as a tiled workspace
+  (30 slots, 32 lanes, 16 blocks/SM, `nz + 1`), its 80-tier
+  `local_store_extra_bytes` is zero, and its WSM6 ceiling is 256. Its
+  measured cores still carry the retired 7,216 B frame's reservation (no
+  ledger arm has been run at the new tip), so the workspace is an over-count
+  on top of them -- the safe direction -- until one is.
+
+---
+
+## 12. MYJ and MYJURB: the frame that stood between MYJ and 256 levels
+
+`myjpbl_column` (`bl_pbl_physics = 2`) and `myjurb_column` (MYJ under
+`sf_urban_physics = 2/3`) were the last PBL kernels holding a whole column
+in per-thread local arrays sized by a compile-time bound, `MYJ_KMAX = 128`:
+19 and 24 arrays, 9,232 B and 10,256 B frames (12,304 B for `myjurb` on
+sm_120 under NVRTC 12.9.86). The 256-level target (nz = 256 at
+p_top = 1 hPa) would have needed `MYJ_KMAX = 256`, about 18.4 KB and
+20.5 KB per thread, roughly 2.1 GiB and 2.3 GiB of reservation on an
+84-SM card. Raising the define was not a real option.
+
+Both kernels now take the section 8 route. Every column array lives in a
+global workspace that `woof/core/myjpbl.py` / `woof/core/myjurb.py`
+allocate per call. The workspace is sized to the columns IN FLIGHT and
+to the RUNTIME level count: `blocks x slots x (nz + 1) x 32` floats,
+lane-interleaved (`block_base + (s * wskp + k) * 32 + t`). The
+launch block is 32. Columns go in tiles offset by a new `col0`
+argument, because the state arrays are `(nz, ny, nx)`. `MYJ_KMAX`
+is now a refusal guard and sizes nothing. It is 256 in both kernels, and
+the contract (`MYJ_VERTICAL_LEVEL_BOUNDS = (4, 256)`) and both launchers
+match it. The arrays keep their names, extents and access order. Only
+`real x[MYJ_KMAX]` became a `MyjCol x = MYJWS_AT(wsb, slot, wskp)` view,
+and the two `real* var` species/component selectors became views.
+
+### The reservation, measured
+
+RTX A6000, 84 SMs x 1,536, sm_86, NVRTC 12.9.86 (CuPy 14.2.0). Fresh
+process per row, zero-work launch, `cudaMemGetInfo` on either side. The
+pre-cut kernel is the source at 7950e4171 compiled beside the new one.
+
+| kernel | frame before | reserved before | law | frame after | reserved after |
+|---|---|---|---|---|---|
+| `myjpbl_column` | 9,232 B | **1,012.0 MiB** | 1,010.0 | 0 B | **2.0 MiB** (module load) |
+| `myjurb_column` | 10,256 B | **1,138.0 MiB** | 1,136.0 | 0 B | **2.0 MiB** |
+
+Compile-only readings were taken with NVRTC through the production source
+assembly and options, then `cuobjdump --dump-resource-usage`. The same
+reader reproduces every pre-cut row the recordings carried (9,232 /
+10,256 / 12,304 B). After the cut, every compiler that could be loaded
+here reads **0 B** for both kernels: NVRTC 12.9.86, 13.0.88, 13.3.33 and
+13.4.92 on sm_86, sm_89 and sm_120. `kernel_frame_recordings` was updated
+from these readings. The sm_86 12.9.86 rows are device reads through the
+production loader. The sm_120 12.9.86 / 13.0.88 / 13.3.33 / 13.4.92 and
+sm_89 13.4.92 rows are compile-only reads at each recording's own build.
+The two NVRTC 13.0.48 recordings had their `myjpbl` row DROPPED rather
+than back-filled, because that compiler was not in reach. The shipped
+ceiling `KERNEL_MAX_LOCAL_SIZE_BYTES["myjpbl"/"myjurb"]` is 0.
+
+### Bit-identity
+
+`myjpbl.cu` uses plain `+`/`*`, so it had the same contraction exposure
+that cost `ysu.cu` its bit-identity (section 8). Measured, not argued, by
+`tests/test_myj_workspace.py`, which compiles the pre-cut source from git
+beside the shipped one and compares every output word as a `uint32`
+pattern: the eight tendencies/EL/EXCH, PBLH/KPBL/MIXHT, the carried TKE
+and the THZ0/QZ0/QSFC/CT INOUT state. It uses 333 randomized columns per
+case, mixing stable, convective, cloudy, iced, water, sea-ice and snow
+columns so neighbouring lanes take different branches.
+
+| kernel | arms | nz = 49 | nz = 100 | nz = 128 |
+|---|---|---|---|---|
+| `myjpbl_column` | `flqi` on / off | 149,184 words, **0 differ** | 302,031, **0** | 385,947, **0** |
+| `myjurb_column` | BEP on / rural / `idiff = 1` | 149,184, **0** | 302,031, **0** | 385,947, **0** |
+
+* Perturbed-input control (one `th` word, one ULP): the outputs move, so
+  the harness can see a single ULP.
+* Tiling control (forced 32-column tiles, so the workspace is reused
+  across many launches and the last block is partial) at nz = 4, 49 and
+  256: 0 words move.
+* Residue control (workspace poisoned with -7e30 and then 3.5e30): 0 words
+  move, so no slot is read before it is written.
+* `tests/test_myjurb_wrf471_parity.py`, the WRF v4.7.1 word-for-word oracle,
+  is green unchanged. So is the CPU-authority conformance in
+  `tests/test_myj_port.py`.
+
+Unlike YSU, no bisect was needed. On this toolchain NVRTC made the same
+contraction choices with the arrays in global memory as with them on the
+stack. `myjurb.cu` pins its multiplies with `FMUL` (`__fmul_rn`), so it
+could not have diverged that way at all.
+
+### 256 levels
+
+`test_a_256_level_column_completes_with_sane_tke_and_fluxes` runs 126
+columns at nz = 256 with a 48 km top (p_top 1.6 hPa), on a geometric
+stretch from a 15-60 m first layer, through both kernels. Results:
+
+* every output is finite;
+* TKE is 0.1 (the EPSQ2/2 floor) to 3.5 / 3.6 m2/s2 for MYJ / MYJURB;
+* PBLH is 154-2,506 m and KPBL is 4-73, so the PBL never reaches the
+  stretched upper column;
+* EXCH_H in the upper half of the column is 1e-4 of its 867 m2/s maximum;
+* the heating tendency peaks at 0.017 K/s (MYJ) and 0.005 K/s (MYJURB),
+  and the momentum tendency at 0.015 m/s2.
+
+`test_a_256_level_column_agrees_with_the_cpu_authority` holds one
+256-level column to the float32 CPU authority `woof.verify.myj_ref`
+under the same 5e-3 relative bar the 30-level conformance test uses.
+KPBL and PBLH are exact.
+
+### The tile is 12 blocks/SM
+
+51,200 columns, median of 7, A6000. Kernel residency at block 32 is 12
+blocks/SM for `myjpbl` (136 registers) and 16 for `myjurb` (104 registers).
+
+| blocks/SM | tile | ws @ nz=49 | wall @ 49 | wall @ 128 | wall @ 256 | ws @ 256 |
+|---|---|---|---|---|---|---|
+| pre-cut (local frame) | -- | 0, plus 1,012 MiB reserved | 3.10 ms | 8.02 ms | -- | -- |
+| 2 | 5,376 | 19.5 MiB | 7.19 | 29.67 | 62.82 | 100.1 MiB |
+| 4 | 10,752 | 39.0 | 6.02 | 16.71 | 34.32 | 200.3 |
+| 8 | 21,504 | 77.9 | 4.50 | 11.91 | 24.26 | 400.6 |
+| **12** | **32,256** | **116.9** | **3.74** | **9.71** | **19.60** | **600.8** |
+| 16 | 43,008 | 155.9 | 4.65 | 12.08 | 24.42 | 801.1 |
+
+`MYJ_TILE_BLOCKS_PER_SM = 12` (`woof/core/physics_inventory.py`) is both
+the residency and the plateau. `myj_tile_columns` takes the smaller of
+that value and the live occupancy query, so it can only go down. The
+residual 1.2x on the kernel (3.74 against 3.10 ms at nz = 49) is the cost
+of global addressing over local, about what GF and KF measured.
+`myjurb` uses the same tile.
+
+### Pricing
+
+`preflight.myj_column_workspace_bytes` prices the worst MYJ domain at
+`min(nx*ny, SMs x 12 x 32)` columns and the runtime nz. It uses 24 slots
+when `sf_urban_physics` is 2 or 3 (MYJURB replaces the MYJPBL call there)
+and 19 otherwise. `column_workspace_bytes` now sums it with the GF / KF /
+YSU / Shin-Hong / New Tiedtke / UW workspaces, and the `woof check`
+non-pool line prints it. On a 170-SM card at nz = 256 that is 1.19 GiB
+(`myjpbl`) or 1.50 GiB (`myjurb`) of ordinary allocation. The old
+reservation was 2.0 GiB at nz <= 128 and would have been about 4.2 /
+5.7 GiB at a 256-level frame bound. On an 84-SM A6000 the numbers are
+600.8 / 758.9 MiB.
+
+## 13. RTE+RRTMGP: a frame that follows the radiation column, to 256 levels
+
+Until 2026-10 RTE+RRTMGP refused any radiation column over 128 layers,
+cap included. That ceiling was owned by one array:
+`rrtmgp_planck_sources` (`woof/core/kernels/rrtmgp_gas.cu`, and the global
+model's copy under `woof/globe/core/kernels/`) held a per-thread
+`float pfrac[128]`, 512 B of frame. The RTE solvers already compiled
+`RRTMGP_MAX_LAYERS` to each call's own layer count (`_rte_kernel`).
+
+**The Planck array is gone, not resized.** A level source reads only the
+two layers on either side of it, so the kernel now walks a one-layer
+window (`pfrac_prev`) and keeps the surface layer's fraction (`pfrac_sfc`).
+The expressions and their operands are unchanged, so every output word is
+the old kernel's: on an RTX A6000 (sm_86, NVRTC 12.9.86) the source arrays
+are byte-identical to the base kernel's at 1, 2, 30, 74, 127 and 128 layers
+in both storage orders, for both copies, and so are the whole driver's
+fluxes and heating rates at nz 49, 64, 115 and 127. The frame went from
+512 B to 0 B (63 registers, up from 56). The other recordings keep their
+unread 512 B, so the shipped `rrtmgp_gas` ceiling stays 512 B. That is
+under the 1,024 B default stack, so it reserves nothing.
+
+The bound is now on **model levels**:
+`physics_vertical_contract.MAX_RRTMGP_MODEL_LEVELS = 256`, the dynamical
+core's ceiling. WRF's cap layers ride on top at any model top. At
+`p_top = 100 Pa` that is 256 LW layers (nint(100/400) = 0) and 257 SW. At
+`p_top = 10 kPa` it is 281 LW layers and 257 SW.
+
+**The solver frame is priced per layer above 128.** Measured through
+`load_module_int_defines` on the same card, compile-only, at 1 to 300
+layers:
+
+| layers | `rrtmgp_sw_2stream` | `rrtmgp_lw_noscat` |
+|---|---|---|
+| 64 | 1,808 B | 512 B |
+| 128 (source default, the shipped row) | 3,600 B | 1,024 B |
+| 129 | 3,632 B | 1,032 B |
+| 160 | 4,496 B | 1,280 B |
+| 192 | 5,392 B | 1,536 B |
+| 256 | 7,184 B | 2,048 B |
+| 257 (256 levels, 1 hPa top) | 7,216 B | 2,056 B |
+| 260 | 7,296 B | 2,080 B |
+| 269 | 7,552 B | 2,152 B |
+| 281 | 7,888 B | 2,248 B |
+
+The two-stream is `28 n + 12` rounded up to 16 B. Its arrays are
+`float4 optics[n]`, `float direct[n+1]` and `float2 adding[n+1]`. The LW
+solver is `8 n` (`trans`, `src_up`). Both hold at every count from 2 up.
+`preflight.RRTMGP_RTE_SW_TIER_FRAME` (3,600 B at the 128 tier plus 28 B per
+layer, 16 B alignment) reproduces the two-stream exactly wherever `28 n + 12`
+is not a multiple of 16. Where it is (n = 3 mod 4), it over-prices by 16 B.
+`preflight.rrtmgp_rte_frame_bytes(nz, p_top)` takes the wider of the SW
+tier at `nz + sw_upper` and the LW line at `nz + lw_upper`, for the spectra
+a domain selects, and never goes below the flat 3,600 B row. Every column
+of 128 radiation layers or fewer is therefore priced exactly as before.
+
+What this charges at depth, by the law, on the RTX 5090 reference profile
+(170 SMs x 1,536 threads):
+
+| column | frame | reservation |
+|---|---|---|
+| any column of 128 layers or fewer (unchanged) | 3,600 B | 641.5 MiB |
+| 256 levels, `p_top = 0` (no cap known) | 7,184 B | 1,534.0 MiB |
+| 256 levels, 1 hPa top (SW 257) | 7,216 B | 1,542.0 MiB |
+
+Before this change, the flat row under-priced the 1 hPa case by 900.5 MiB.
+
+Only the solver frames grow; `_rte_gpt_tile` reads the frame off the
+per-run compiled kernel (`local_size_bytes`), so the non-folding tile rule
+already sees the deeper frame. The production folds use fixed widths.
+
+Other architectures and NVRTC builds were not re-read at depth. The slope
+is the byte count of the arrays, which no register allocation can shrink,
+and every recorded platform reads the same 3,600 B at the 128 default.
+`tests/test_kernel_local_bounds.py::test_the_rrtmgp_rte_layer_frames_are_what_preflight_prices`
+re-reads the depths on whatever card runs it.
+
+### Reproducing
+
+```
+pytest tests/test_wsm6_workspace.py tests/test_wdm6_workspace.py
+pytest tests/test_kernel_local_bounds.py -k workspace_kernels
+GPUWM_NO_LOCAL_GPU=1 pytest tests/test_preflight.py -k "wsm6 or wdm6"
+```
+
+pytest tests/test_myj_workspace.py tests/test_myj_port.py \
+       tests/test_myjurb_wrf471_parity.py tests/test_kernel_local_bounds.py
+GPUWM_NO_LOCAL_GPU=1 pytest tests/test_pbl_vertical_bounds.py \
+       tests/test_physics_vertical_preflight.py tests/test_kernel_frame_recordings.py
+```
+
+`test_the_frame_stays_under_the_default_stack` is the gate that does not
+depend on the platform. `test_no_column_array_is_left_on_the_stack` is the
+gate that reads the source and needs no GPU.
+
+pytest tests/test_rrtmgp.py -k "retired_ceiling or deep_column or 256_level or in_solver_planck or 257_model"
+pytest tests/test_kernel_local_bounds.py -k rrtmgp
+GPUWM_NO_LOCAL_GPU=1 pytest tests/test_preflight.py -k rrtmgp_rte_is_priced
+```

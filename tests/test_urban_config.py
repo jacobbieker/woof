@@ -153,10 +153,12 @@ def test_the_memory_checks_price_the_urban_arrays():
 def test_the_memory_check_prices_the_urban_kernels(option, pbl, expected):
     """An urban run launches kernels the fit gate has to charge for.
 
-    myjurb's 10,256 B frame is a launch-time reservation of (10,256 - 1,024)
-    B per resident thread -- 1.7 GiB on an RTX 4090 -- and before the urban
-    row existed in woof/core/preflight.py an MYJ + BEP run was admitted
-    without it."""
+    myjurb's 10,256 B frame was a launch-time reservation of (10,256 -
+    1,024) B per resident thread -- 1.7 GiB on an RTX 4090 -- and before the
+    urban row existed in woof/core/preflight.py an MYJ + BEP run was admitted
+    without it.  Since 2026-10-12 the row is 0 B (its column lives in a
+    workspace priced by preflight.myj_column_workspace_bytes); it stays
+    listed so a frame regression is priced."""
     from datetime import datetime
 
     from woof.core import preflight as pf

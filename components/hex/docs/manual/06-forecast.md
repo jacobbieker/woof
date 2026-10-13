@@ -719,10 +719,37 @@ A mesh row declares its column (`nVertLevels`), measured from the init it
 was registered with. The bind holds the run's init to it and refuses a
 disagreeing one by name; the bound modules, the GWDO kernel and every
 allocation then use that count. 55 levels stays the default for every
-existing row. The deepest column a forecast runs is 80 levels: the
-engine's WSM6 compiles at most that many, and a deeper row is refused at
-the door and at the bind. The device footprint is priced per level: the
-per-cell slope scales by `levels / 55` above 55 (derived, labelled so in
-the receipt), and above 64 levels the wider WSM6 local frame is charged
-too. Build an LES-ready column with `woof hex init --vertical-spec
-preset:les` (chapter 5).
+existing row.
+
+The deepest column a forecast runs depends on the physics it selects. It
+is the smallest of the hex column's own 256 levels and the bound of each
+selected scheme, read from `woof/physics_vertical_contract.py` (the same
+table the regional model's `woof check` uses). Every scheme the hex model
+selects (WSM6, P3 and aerosol-aware Thompson microphysics, YSU, Grell-Freitas
+and the legacy RRTMG radiation) runs to 256 levels, so every hex run reaches
+256. Radiation adds the cap layers WRF builds above the model top to its
+own column and sizes that column per run, so the model top no longer lowers
+the ceiling. A deeper column is refused by name at the door and at the bind,
+and again by the driver once the run's microphysics and model-top pressure
+are known, before the physics seam is sealed. The refusal names the scheme
+that sets the ceiling. `woof energy plan --nz` and the dt-mint plan read
+the same ceiling.
+
+The device footprint is priced per level. The per-cell slope scales by
+`levels / 55` above 55 (derived, and labelled so in the receipt). Each kernel
+whose per-thread frame grows with the column is charged at that column. The
+YSU-GWDO kernel is compiled per run at the run's own column, at 44 B per
+level: 2,528 B at 55 levels, 7,168 B at 160 and 11,392 B at 256. Above about
+161 levels it is the widest frame launched, and the local-memory backing
+store is charged for its excess on every resident thread. WSM6 now keeps its
+column in a global workspace instead of a per-thread frame. That workspace
+(`wsm6_column_workspace`, 30 slots of `levels + 1`) is charged beside the GF
+and YSU workspaces at `min(cells, tile)`. These frame
+prices were measured on sm_86 (RTX A6000) only, so re-measure them before
+quoting them for another architecture.
+
+Only 55-level classes are measured. Every timestep anchor and every regional
+class the program holds ran at 55 levels, plus one 80-level 100 m cull that
+bound and integrated. A deeper column binds and runs, but its regional class
+(`graded-...-l<levels>`) holds no anchor until one is minted at it. Build an
+LES-ready column with `woof hex init --vertical-spec preset:les` (chapter 5).

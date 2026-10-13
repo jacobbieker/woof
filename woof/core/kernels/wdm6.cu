@@ -41,6 +41,7 @@
 
 #ifdef WDM6_CPU_MIRROR
 #include <cmath>
+#include <vector>
 using std::isfinite;
 #define __device__
 #define __forceinline__ inline
@@ -51,9 +52,69 @@ using std::isfinite;
 static inline float __fdiv_rn(float a, float b) { return a / b; }
 #endif
 
+// WDM6_KMAX is a REFUSAL CEILING and sizes nothing.  Until the column
+// workspace below it sized every per-thread column array, so the module was
+// compiled at a 64 or an 80 tier and the driver reserved that frame times the
+// card's whole resident-thread capacity (9,264 B / 11,568 B per thread).
 #ifndef WDM6_KMAX
-#define WDM6_KMAX 64
+#define WDM6_KMAX 256
 #endif
+
+// ==========================================================================
+// Per-thread column workspace
+// ==========================================================================
+// The same cut, for the same reason, as kernels/wsm6.cu (whose header
+// carries the full argument): the ~37 column arrays one thread owns live in
+// a caller-provided GLOBAL workspace sized to the columns in flight and to
+// the RUNTIME level count (`wskp = nz + 1`; the interface arrays index nz),
+// instead of a per-thread local frame the driver prices at the card's whole
+// resident-thread capacity.  woof/core/wdm6.py owns the allocation and the
+// tiling.  Same lane interleave as ysu.cu/kf.cu/gf.cu/wsm6.cu:
+//   block_base + (s * wskp + k) * WDM6WS_LANES + t
+//
+// Slot ids are literal; WDM6WS_SLOTS is their count and
+// tests/test_wdm6_workspace.py reads both out of this file.
+//   0..22  wdm6_column_impl: t qv qc qi qr qs qg nn nc nr den delz cpm xl
+//                            qsw qsi rhw rhi xni_pre work1r workn rslope3r
+//                            wic
+//  23..33  wdm6_sediment_snow_graupel: qq qq2 wd ww qn qn2 zi za dza qa qa2
+//          (wdm6_sediment_ice runs after it and reuses qq qn zi za dza qa)
+//  34      wdm6_plm_arrival: wi
+//  35..36  wdm6_plm_remap: qmi qpi
+//
+// The device helpers that take column arrays are templates over the array
+// type, so the CPU mirror (tests/test_wdm6_sedimentation.py and friends)
+// can still drive them with plain float pointers.
+#define WDM6WS_SLOTS 37
+#ifdef WDM6_CPU_MIRROR
+#define WDM6WS_LANES 1
+#else
+#define WDM6WS_LANES 32
+#endif
+
+//: A column array living in the workspace.  Indexes like the
+//: `float[WDM6_KMAX]` it replaced; the stride is what makes it coalesce.
+//: Every view shares the lane's one base pointer and carries a 32-bit
+//: slot offset: 64-bit per-view pointers took 160 registers (12 blocks/SM
+//: on sm_86) or, capped at 128, spilled 72-88 B; offsets compile to ~116
+//: registers and a 0 B frame (docs/kernel_local_memory_bounds.md s. 10).
+//: The largest offset, 36 slots x 257 levels x 32 lanes, is far inside int.
+struct Wdm6Col {
+    float *b;
+    int off;
+    __device__ __forceinline__ float &operator[](int k) const {
+        return b[off + k * WDM6WS_LANES];
+    }
+};
+
+//: This thread's slots: its lane's base and the per-slot extent.
+struct Wdm6Ws {
+    float *base;
+    int kp;
+    __device__ __forceinline__ Wdm6Col at(int slot) const {
+        return Wdm6Col{base, slot * kp * WDM6WS_LANES};
+    }
+};
 
 // The limit is the signed counter's first unrepresentable positive value.
 // Check the exact FP32 schedule expression before converting it to int.
@@ -133,9 +194,10 @@ struct WdmRainFallout {
     float number;     // m-2 leaving the bottom interface this sub-step
 };
 
+template <class QR, class NR, class DEN, class DZ, class MR, class NRT>
 __device__ __forceinline__ WdmRainFallout wdm6_rain_substep(
-    float *qr, float *nr, const float *den, const float *dz,
-    const float *mass_rate, const float *number_rate, int nz, float dt)
+    QR qr, NR nr, DEN den, DZ dz,
+    MR mass_rate, NRT number_rate, int nz, float dt)
 {
     float incoming_mass = 0.0f, incoming_number = 0.0f;
     for (int k = nz - 1; k >= 0; --k) {
@@ -256,11 +318,11 @@ __device__ __forceinline__ float wdm6_qsat(float t, float p, bool ice) {
 // deformed density concentrations.  Arrays with nz+1 entries are
 // interfaces; qq2 may be null for the single-species (ice) call.
 __device__ __forceinline__ void wdm6_plm_arrival(
-    const float *qq, const float *qq2, const float *ww, const float *dz,
-    int nz, float dt, float *zi, float *za, float *dza,
-    float *qa, float *qa2)
+    Wdm6Col qq, const Wdm6Col *qq2, Wdm6Col ww, Wdm6Col dz,
+    int nz, float dt, Wdm6Col zi, Wdm6Col za, Wdm6Col dza,
+    Wdm6Col qa, const Wdm6Col *qa2, const Wdm6Ws &ws)
 {
-    float wi[WDM6_KMAX + 1];
+    Wdm6Col wi = ws.at(34);
     zi[0] = 0.0f;
     for (int k = 0; k < nz; ++k) zi[k + 1] = zi[k] + dz[k];
 
@@ -290,20 +352,20 @@ __device__ __forceinline__ void wdm6_plm_arrival(
     dza[nz] = zi[nz] - za[nz];
     for (int k = 0; k < nz; ++k) {
         qa[k] = qq[k] * dz[k] / dza[k];
-        if (qq2) qa2[k] = qq2[k] * dz[k] / dza[k];
+        if (qq2) (*qa2)[k] = (*qq2)[k] * dz[k] / dza[k];
     }
     qa[nz] = 0.0f;
-    if (qq2) qa2[nz] = 0.0f;
+    if (qq2) (*qa2)[nz] = 0.0f;
 }
 
 // Monotone PLM interface reconstruction, remap to the regular grid, and
 // the rain-out integral (:2843-2939 / :2582-2677).  Returns the fallen
 // mass per area (the Fortran's precip).
 __device__ __forceinline__ float wdm6_plm_remap(
-    const float *qa, const float *zi, const float *za, const float *dza,
-    int nz, float *qn)
+    Wdm6Col qa, Wdm6Col zi, Wdm6Col za, Wdm6Col dza,
+    int nz, Wdm6Col qn, const Wdm6Ws &ws)
 {
-    float qmi[WDM6_KMAX + 1], qpi[WDM6_KMAX + 1];
+    Wdm6Col qmi = ws.at(35), qpi = ws.at(36);
     for (int k = 1; k < nz; ++k) {
         float dip = (qa[k + 1] - qa[k]) / (dza[k + 1] + dza[k]);
         float dim = (qa[k] - qa[k - 1]) / (dza[k - 1] + dza[k]);
@@ -398,14 +460,14 @@ __device__ __forceinline__ float wdm6_plm_remap(
 // snow and graupel share the mass-weighted combined fall speed, one
 // arrival-velocity iteration averages departure and arrival winds.
 __device__ void wdm6_sediment_snow_graupel(
-    float *qs, float *qg, const float *den, const float *dz,
-    const float *temp, int nz, float dt, const WdmRimed &g,
-    float *precip_s, float *precip_g)
+    Wdm6Col qs, Wdm6Col qg, Wdm6Col den, Wdm6Col dz,
+    Wdm6Col temp, int nz, float dt, const WdmRimed &g,
+    float *precip_s, float *precip_g, const Wdm6Ws &ws)
 {
-    float qq[WDM6_KMAX], qq2[WDM6_KMAX], wd[WDM6_KMAX], ww[WDM6_KMAX];
-    float qn[WDM6_KMAX], qn2[WDM6_KMAX];
-    float zi[WDM6_KMAX + 1], za[WDM6_KMAX + 1];
-    float dza[WDM6_KMAX + 1], qa[WDM6_KMAX + 1], qa2[WDM6_KMAX + 1];
+    Wdm6Col qq = ws.at(23), qq2 = ws.at(24), wd = ws.at(25), ww = ws.at(26);
+    Wdm6Col qn = ws.at(27), qn2 = ws.at(28);
+    Wdm6Col zi = ws.at(29), za = ws.at(30);
+    Wdm6Col dza = ws.at(31), qa = ws.at(32), qa2 = ws.at(33);
     *precip_s = 0.0f; *precip_g = 0.0f;
     float allold = 0.0f;
     for (int k = 0; k < nz; ++k) {
@@ -424,7 +486,7 @@ __device__ void wdm6_sediment_snow_graupel(
     }
     if (allold <= 0.0f) return;                    // :2740-2746
 
-    wdm6_plm_arrival(qq, qq2, ww, dz, nz, dt, zi, za, dza, qa, qa2);
+    wdm6_plm_arrival(qq, &qq2, ww, dz, nz, dt, zi, za, dza, qa, &qa2, ws);
     // iter = 1 (:2812-2835): one arrival-velocity estimate, mean wind.
     for (int k = 0; k < nz; ++k) {
         float q1 = qa[k] / den[k];
@@ -437,10 +499,10 @@ __device__ void wdm6_sediment_snow_graupel(
         float wa = total > 1.0e-15f ? (vs * q1 + vg * q2) / total : 0.0f;
         ww[k] = 0.5f * (wd[k] + wa);
     }
-    wdm6_plm_arrival(qq, qq2, ww, dz, nz, dt, zi, za, dza, qa, qa2);
+    wdm6_plm_arrival(qq, &qq2, ww, dz, nz, dt, zi, za, dza, qa, &qa2, ws);
 
-    *precip_s = wdm6_plm_remap(qa, zi, za, dza, nz, qn);
-    *precip_g = wdm6_plm_remap(qa2, zi, za, dza, nz, qn2);
+    *precip_s = wdm6_plm_remap(qa, zi, za, dza, nz, qn, ws);
+    *precip_g = wdm6_plm_remap(qa2, zi, za, dza, nz, qn2, ws);
     for (int k = 0; k < nz; ++k) {
         qs[k] = fmaxf(qn[k] / den[k], 0.0f);       // :873-876
         qg[k] = fmaxf(qn2[k] / den[k], 0.0f);
@@ -450,12 +512,13 @@ __device__ void wdm6_sediment_snow_graupel(
 // Caller block :955-983 + nislfv_rain_plmr with iter=0 (departure wind,
 // no velocity iteration): cloud-ice fallout on its own HDC 5a fall speed.
 __device__ float wdm6_sediment_ice(
-    float *qi, const float *ww, const float *den, const float *dz, int nz,
-    float dt)
+    Wdm6Col qi, Wdm6Col ww, Wdm6Col den, Wdm6Col dz, int nz,
+    float dt, const Wdm6Ws &ws)
 {
-    float qq[WDM6_KMAX], qn[WDM6_KMAX];
-    float zi[WDM6_KMAX + 1], za[WDM6_KMAX + 1];
-    float dza[WDM6_KMAX + 1], qa[WDM6_KMAX + 1];
+    // The snow/graupel call has finished with these slots.
+    Wdm6Col qq = ws.at(23), qn = ws.at(27);
+    Wdm6Col zi = ws.at(29), za = ws.at(30);
+    Wdm6Col dza = ws.at(31), qa = ws.at(32);
     float allold = 0.0f;
     for (int k = 0; k < nz; ++k) {
         qq[k] = qi[k] * den[k];
@@ -463,8 +526,8 @@ __device__ float wdm6_sediment_ice(
     }
     if (allold <= 0.0f) return 0.0f;
     wdm6_plm_arrival(qq, nullptr, ww, dz, nz, dt, zi, za, dza, qa,
-                     nullptr);
-    float precip = wdm6_plm_remap(qa, zi, za, dza, nz, qn);
+                     nullptr, ws);
+    float precip = wdm6_plm_remap(qa, zi, za, dza, nz, qn, ws);
     for (int k = 0; k < nz; ++k)
         qi[k] = fmaxf(qn[k] / den[k], 0.0f);       // :976-980
     return precip;
@@ -478,7 +541,8 @@ __device__ unsigned int wdm6_column_impl(
     float *rainnc, float *rainncv, float *snownc, float *snowncv,
     float *graupelnc, float *graupelncv, float *sr,
     float *effc, float *effi, float *effs,
-    float delt, int hail_opt, int nz, int stride, int col)
+    float delt, int hail_opt, int nz, int stride, int col,
+    const Wdm6Ws &ws)
 {
     if (!isfinite(delt) || delt <= 0.0f) return 1u;
     int loops = wdm6_checked_steps(__fdiv_rn(delt, 120.0f) + 0.5f);
@@ -487,13 +551,13 @@ __device__ unsigned int wdm6_column_impl(
     int mstep = 1;
     unsigned int count_flags = 0u;
     const WdmRimed gcn = wdm6_rimed_constants(hail_opt);
-    float t[WDM6_KMAX], qv[WDM6_KMAX], qc[WDM6_KMAX], qi[WDM6_KMAX];
-    float qr[WDM6_KMAX], qs[WDM6_KMAX], qg[WDM6_KMAX];
-    float nn[WDM6_KMAX], nc[WDM6_KMAX], nr[WDM6_KMAX];
-    float den[WDM6_KMAX], delz[WDM6_KMAX], cpm[WDM6_KMAX], xl[WDM6_KMAX];
-    float qsw[WDM6_KMAX], qsi[WDM6_KMAX], rhw[WDM6_KMAX], rhi[WDM6_KMAX];
-    float xni_pre[WDM6_KMAX], work1r[WDM6_KMAX], workn[WDM6_KMAX];
-    float rslope3r[WDM6_KMAX];
+    Wdm6Col t = ws.at(0), qv = ws.at(1), qc = ws.at(2), qi = ws.at(3);
+    Wdm6Col qr = ws.at(4), qs = ws.at(5), qg = ws.at(6);
+    Wdm6Col nn = ws.at(7), nc = ws.at(8), nr = ws.at(9);
+    Wdm6Col den = ws.at(10), delz = ws.at(11), cpm = ws.at(12), xl = ws.at(13);
+    Wdm6Col qsw = ws.at(14), qsi = ws.at(15), rhw = ws.at(16), rhi = ws.at(17);
+    Wdm6Col xni_pre = ws.at(18), work1r = ws.at(19), workn = ws.at(20);
+    Wdm6Col rslope3r = ws.at(21);
 
     for (int k = 0; k < nz; ++k) {
         int id = col + k * stride;
@@ -577,7 +641,7 @@ __device__ unsigned int wdm6_column_impl(
         // ---- snow + graupel paired semi-Lagrangian fallout (:858-884) -----
         float ps_sfc_mass, pg_sfc_mass;
         wdm6_sediment_snow_graupel(qs, qg, den, delz, t, nz, dtcld, gcn,
-                                   &ps_sfc_mass, &pg_sfc_mass);
+                                   &ps_sfc_mass, &pg_sfc_mass, ws);
         float fall2_sfc = ps_sfc_mass / delz[0] / dtcld;   // :881-884
         float fall3_sfc = pg_sfc_mass / delz[0] / dtcld;
 
@@ -633,7 +697,7 @@ __device__ unsigned int wdm6_column_impl(
         // ---- cloud-ice fallout, HDC 5a speed on the PRE-sediment xni
         // (:955-983) --------------------------------------------------------
         {
-            float wic[WDM6_KMAX];
+            Wdm6Col wic = ws.at(22);
             for (int k = nz - 1; k >= 0; --k) {
                 if (qi[k] <= 0.0f) {
                     wic[k] = 0.0f;
@@ -644,7 +708,8 @@ __device__ unsigned int wdm6_column_impl(
                     wic[k] = 1.49e4f * expf(logf(diameter) * 1.31f);
                 }
             }
-            float pi_ice = wdm6_sediment_ice(qi, wic, den, delz, nz, dtcld);
+            float pi_ice = wdm6_sediment_ice(qi, wic, den, delz, nz, dtcld,
+                                             ws);
             float fallc_sfc = pi_ice / delz[0] / dtcld;    // :981-983
 
             // ---- surface precipitation accounting (:988-1017) -------------
@@ -1374,7 +1439,31 @@ __device__ unsigned int wdm6_column_impl(
     return 0u;
 }
 
-#ifndef WDM6_CPU_MIRROR
+#ifdef WDM6_CPU_MIRROR
+// The CPU mirror's entry point keeps the pre-workspace signature: it owns a
+// one-column workspace (WDM6WS_LANES is 1 on the host) for the call.
+unsigned int wdm6_column_impl(
+    float *theta, float *qv_g, float *qc_g, float *qi_g, float *qr_g,
+    float *qs_g, float *qg_g, float *nn_g, float *nc_g, float *nr_g,
+    const float *den_g, const float *p, const float *pii,
+    const float *dz_g, const float *xland,
+    float *rainnc, float *rainncv, float *snownc, float *snowncv,
+    float *graupelnc, float *graupelncv, float *sr,
+    float *effc, float *effi, float *effs,
+    float delt, int hail_opt, int nz, int stride, int col)
+{
+    if (nz < 1 || nz > WDM6_KMAX) return 1u;
+    std::vector<float> scratch((size_t)WDM6WS_SLOTS * (size_t)(nz + 1));
+    const Wdm6Ws ws{scratch.data(), nz + 1};
+    return wdm6_column_impl(theta, qv_g, qc_g, qi_g, qr_g, qs_g, qg_g,
+                            nn_g, nc_g, nr_g, den_g, p, pii, dz_g, xland,
+                            rainnc, rainncv, snownc, snowncv,
+                            graupelnc, graupelncv, sr, effc, effi, effs,
+                            delt, hail_opt, nz, stride, col, ws);
+}
+#else
+// `ws` holds (blocks, WDM6WS_SLOTS, wskp, WDM6WS_LANES) floats for the
+// blocks of THIS launch; `col0` is the tile's first column.
 extern "C" __global__ void wdm6_column(
     float *theta, float *qv, float *qc, float *qi, float *qr,
     float *qs, float *qg, float *nn, float *nc, float *nr,
@@ -1384,16 +1473,20 @@ extern "C" __global__ void wdm6_column(
     float *graupelnc, float *graupelncv, float *sr,
     float *effc, float *effi, float *effs,
     float delt, int hail_opt, int nz, int ny, int nx,
-    unsigned int *count_status)
+    unsigned int *count_status, float *ws, int wskp, int col0)
 {
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int col = col0 + blockIdx.x * blockDim.x + threadIdx.x;
     int stride = ny * nx;
-    if (col >= stride || nz > WDM6_KMAX) return;
+    if (col >= stride || nz > WDM6_KMAX || wskp < nz + 1
+        || wskp > WDM6_KMAX + 1 || blockDim.x != WDM6WS_LANES) return;
+    const Wdm6Ws lane{ws + (size_t)blockIdx.x * (size_t)WDM6WS_SLOTS
+                           * (size_t)wskp * (size_t)WDM6WS_LANES
+                         + (size_t)threadIdx.x, wskp};
     unsigned int flags = wdm6_column_impl(theta, qv, qc, qi, qr, qs, qg, nn, nc, nr,
                      den, p, pii, dz, xland,
                      rainnc, rainncv, snownc, snowncv,
                      graupelnc, graupelncv, sr, effc, effi, effs,
-                     delt, hail_opt, nz, stride, col);
+                     delt, hail_opt, nz, stride, col, lane);
     if (flags) atomicOr(count_status, flags);
 }
 #endif

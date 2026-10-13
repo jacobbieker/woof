@@ -49,6 +49,9 @@ from typing import Mapping
 
 import numpy as np
 
+from woof.physics_vertical_contract import (
+    TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS, outside_vertical_bounds,
+    refuse_vertical_levels)
 from woof.static.orographic import (GSL_LS_FIELDS, GSL_SS_FIELDS,
                                     GWD_FIELDS, GWDO_FIELDS,
                                     TOPO_WIND_FIELDS, required_static_fields)
@@ -62,7 +65,13 @@ MODULE_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 MODULE_KEY = "woof.core.terrain_drag:terrain_drag"
 _SOURCES = ("glibc_flt32.cuh", "glibc_trig_flt32.cuh", "terrain_drag.cu")
 _BLOCK = 128
-_KMAX = 128
+#: ``TD_KMAX`` in ``kernels/terrain_drag.cu``: the extent of the per-thread
+#: stress profiles, so the deepest column the kernels hold.
+_KMAX = 256
+#: The launchers' first-call bound, restated for front doors by
+#: ``woof.physics_vertical_contract.TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS`` and
+#: bound to it by ``tests/test_pbl_vertical_bounds.py``.
+VERTICAL_LEVEL_BOUNDS = (None, _KMAX)
 #: A null device pointer for the kernels' optional diagnostic outputs.
 _NULL = np.uintp(0)
 
@@ -234,6 +243,18 @@ def _column_inputs(cp, atmosphere, nz, ny, nx):
     return out
 
 
+def _refuse_depth(gwd_opt: int, nz: int) -> None:
+    """The first-call refusal, in the preflight's own grammar."""
+    if outside_vertical_bounds(nz, VERTICAL_LEVEL_BOUNDS):
+        raise refuse_vertical_levels(
+            f"Terrain drag gwd_opt={gwd_opt}", VERTICAL_LEVEL_BOUNDS, nz,
+            breakage=(
+                "one CUDA thread owns a whole column and holds its stress "
+                f"profile in per-thread local memory at TD_KMAX={_KMAX} "
+                "(kernels/terrain_drag.cu); the kernel would skip every "
+                "deeper column and the run would carry no orographic drag."))
+
+
 def launch_gwdo(atmosphere: Mapping[str, object], du, dv, *, var, con, oa,
                 ol, sina, cosa, dx: float, dt: float, diagnostics=None):
     """gwd_opt = 1: add WRF's KIM orographic drag to ``du``/``dv`` in place.
@@ -246,9 +267,7 @@ def launch_gwdo(atmosphere: Mapping[str, object], du, dv, *, var, con, oa,
     import cupy as cp
 
     nz, ny, nx = du.shape
-    if nz > _KMAX:
-        raise ValueError(f"gwd_opt = 1 holds a column of at most {_KMAX} "
-                         f"levels per thread, got {nz}")
+    _refuse_depth(1, nz)
     col = _column_inputs(cp, atmosphere, nz, ny, nx)
     shape2 = (ny, nx)
     oa4 = _stack4(cp, oa, shape2, "oa")
@@ -295,9 +314,7 @@ def launch_gwdo_gsl(atmosphere: Mapping[str, object], du, dv, *, ls, ss,
     import cupy as cp
 
     nz, ny, nx = du.shape
-    if nz > _KMAX:
-        raise ValueError(f"gwd_opt = 3 holds a column of at most {_KMAX} "
-                         f"levels per thread, got {nz}")
+    _refuse_depth(3, nz)
     col = _column_inputs(cp, atmosphere, nz, ny, nx)
     shape2 = (ny, nx)
     kpbl = cp.ascontiguousarray(cp.asarray(kpbl, dtype=cp.int32))

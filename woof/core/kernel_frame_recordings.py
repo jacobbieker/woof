@@ -232,7 +232,11 @@ SM120_NVRTC_13_0_48 = KernelFrameRecording(
         'microphysics_validation': 0,
         'milbrandt2': 2048,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # 'myjpbl' (9,232 B) was a reading of the PRE-CUT source, whose
+        # column arrays moved to a global workspace on 2026-10-12.  NVRTC
+        # 13.0.48 was not available to re-read it, so the row is DROPPED
+        # rather than back-filled; every compiler that was (12.9.86,
+        # 13.0.88, 13.3.33, 13.4.92, on sm_86/89/120) reads 0 B.
         'myjsfc': 0,
         'mynn_pbl': 0,
         'mynn_surface': 0,
@@ -283,13 +287,13 @@ SM120_NVRTC_13_0_48 = KernelFrameRecording(
         'tke_budget': 0,
         'uh_diag': 0,
         'vert_interp': 768,
-        # RE-READ 2026-09-28, RTX 5090 (a development machine), NVRTC 13.0.48,
-        # after 308c2d39e (WDM6 rain mass and number conservation)
-        # took falk and falkn, two per-level arrays, off the stack:
-        # 9,776 -> 9,264 B at WDM6_KMAX 64, 11,568 B at 80.
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): the 9,264 B / 7,216 B KMAX-64
+        # frames this row carried describe a source that no longer exists, and
+        # this NVRTC build was not available to re-read the new one, so the two
+        # rows are DROPPED rather than carried stale.  Every build that was read
+        # (sm_86 driver; sm_86/89/120 compile-only; NVRTC 12.9.86 and 13.4.92)
+        # reads 0 B.
         'wdm6_refl': 16128,
-        'wsm6': 7216,
         'ysu': 0,
         'ysu_validation': 0,
     }),
@@ -356,7 +360,13 @@ SM120_NVRTC_13_3_33 = KernelFrameRecording(
         'microphysics_validation': 0,
         'milbrandt2': 2048,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 12), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjpbl': 0,
         'myjsfc': 0,
         'mynn_pbl': 0,
         'mynn_surface': 0,
@@ -410,13 +420,13 @@ SM120_NVRTC_13_3_33 = KernelFrameRecording(
         'tke_budget': 0,
         'uh_diag': 0,
         'vert_interp': 768,
-        # RE-READ 2026-09-28, RTX 5070 Ti (a development machine), NVRTC 13.3.33,
-        # after 308c2d39e (WDM6 rain mass and number conservation)
-        # took falk and falkn, two per-level arrays, off the stack:
-        # 9,776 -> 9,264 B at WDM6_KMAX 64, 11,568 B at 80.
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): the 9,264 B / 7,216 B KMAX-64
+        # frames this row carried describe a source that no longer exists, and
+        # this NVRTC build was not available to re-read the new one, so the two
+        # rows are DROPPED rather than carried stale.  Every build that was read
+        # (sm_86 driver; sm_86/89/120 compile-only; NVRTC 12.9.86 and 13.4.92)
+        # reads 0 B.
         'wdm6_refl': 16128,
-        'wsm6': 7216,
         'ysu': 0,
         'ysu_validation': 0,
     }),
@@ -534,7 +544,11 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
         # frame is what one compiler emitted for one architecture.
         'milbrandt2_zet': 0,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # 'myjpbl' (9,232 B) was a reading of the PRE-CUT source, whose
+        # column arrays moved to a global workspace on 2026-10-12.  NVRTC
+        # 13.0.48 was not available to re-read it, so the row is DROPPED
+        # rather than back-filled; every compiler that was (12.9.86,
+        # 13.0.88, 13.3.33, 13.4.92, on sm_86/89/120) reads 0 B.
         'myjsfc': 0,
         # MEASURED 2026-08-31 on this card at this NVRTC (13.0.48), the
         # sm_86 campaign that closed the "no measurement platform in this
@@ -608,14 +622,13 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
         'tke_budget': 0,
         'uh_diag': 0,
         'vert_interp': 768,
-        # The source this read no longer exists: 308c2d39e took the
-        # frame to 9,264 B on every sm_120 build read 2026-09-28
-        # (NVRTC 12.9.86, 13.0.48, 13.0.88, 13.3.33, 13.4.92).  This
-        # card was read again at the 2.8.0 cut's Windows step
-        # (2026-09-29): 9,264 B at WDM6_KMAX 64 on sm_86 as well.
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): the 9,264 B / 7,216 B KMAX-64
+        # frames this row carried describe a source that no longer exists, and
+        # this NVRTC build was not available to re-read the new one, so the two
+        # rows are DROPPED rather than carried stale.  Every build that was read
+        # (sm_86 driver; sm_86/89/120 compile-only; NVRTC 12.9.86 and 13.4.92)
+        # reads 0 B.
         'wdm6_refl': 16128,
-        'wsm6': 7216,
         # RE-READ 2026-08-21 on this card at the post-workspace
         # source: 0 B, as on both sm_120 builds.  The 7,184 B this row
         # used to carry described ysu.cu BEFORE the column workspace.
@@ -656,6 +669,26 @@ SM86_NVRTC_13_0_48 = KernelFrameRecording(
 #: which is why ``complete`` is False and no other key is written here.
 #: The ceiling does not move: every value is at or below the element-wise
 #: maximum the other recordings already carry.
+#:
+#: 2026-10-12: ``myjpbl`` and ``myjurb`` added, read at this platform key
+#: (sm_86, NVRTC 12.9.86, build CL-36037853) on an RTX A6000 when their
+#: column arrays moved into a global workspace -- the one reading of the
+#: new source taken through the production loader on a device.  Every
+#: other recording's rows for the two modules were re-read compile-only
+#: at that recording's own NVRTC build or dropped where the build was out
+#: of reach (13.0.48); see docs/kernel_local_memory_bounds.md section 12.
+#: TWO ROWS ADDED 2026-10-12 from the same compile platform on a different
+#: card: an RTX A6000 (sm_86, NVRTC 12.9.86, fresh process, zero launches,
+#: same instrument), when the RTE+RRTMGP chain went to 256 model levels.
+#: ``rrtmgp_gas`` reads 0 B there because the Planck-source kernel's fixed
+#: ``float pfrac[128]`` (its whole 512 B) became a one-layer window, and
+#: ``rrtmgp_rte`` reads its 3,600 B at the 128-layer source default (its
+#: per-layer growth above that is priced by
+#: ``woof.core.preflight.RRTMGP_RTE_SW_TIER_FRAME``).  They are written here
+#: so the driver gate holds this platform to the new kernel exactly; the
+#: other recordings keep the 512 B nobody has re-read, so the shipped
+#: ``rrtmgp_gas`` ceiling stays 512 B (an over-price under the default
+#: stack, which reserves nothing).
 SM86_NVRTC_12_9_86 = KernelFrameRecording(
     box='development-desktop',
     device='NVIDIA GeForce RTX 3080',
@@ -666,13 +699,66 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
     complete=False,
     frames=MappingProxyType({
         'gf': 88,
-        'kf': 512,
+        # RE-READ 2026-10-12 on this platform key (sm_86, NVRTC 12.9.86;
+        # RTX A6000, Linux) after KF_KMAX went 128 -> 256: kf_column's frame
+        # is exactly the two stack-resident arrays (tv_env, positive_energy)
+        # at 2 x 4 B x KF_KMAX, so 512 -> 1,024 B -- AT the 1,024 B default
+        # stack, so still zero reservation.  KF_KMAX = 49 / 128 / 256 read
+        # 200 / 512 / 1,024 B on both the pre- and post-cut source.
+        'kf': 1024,
         'milbrandt2': 2048,
+        # Read 2026-10-12 at the column-workspace source (kernels/myjpbl.cu
+        # / myjurb.cu headers) on an RTX A6000 -- the same platform key,
+        # sm_86 at NVRTC 12.9.86 -- through the production loader
+        # (load_module(...).get_function(...).local_size_bytes): 0 B each,
+        # where the pre-cut source compiled beside it read 9,232 and
+        # 10,256 B.
+        'myjpbl': 0,
+        'myjurb': 0,
         'nest_microphysics': 0,
         'noah': 224,
         'nssl2_fused_gs': 112,
+        # WRF aer_opt = 3 (rrtmg_aer3.cu), read 2026-10-12 on an RTX A6000
+        # (same sm_86 / NVRTC 12.9.86 platform key, Linux, fresh process)
+        # by test_the_recorded_local_frames_match_the_driver's production
+        # reader: 24 B, where sm_120 compiles the same source to 0 B.
+        # Below the 1,024 B default stack, so it reserves nothing.
+        'rrtmg_aer3': 24,
+        # Read 2026-10-12 on an RTX A6000 (same sm_86 / NVRTC 12.9.86
+        # platform key, Linux) by the 256-level SASE lane, plain loader at
+        # the #ifndef SASE_KMAX = 128 census tier: 6,272 B, the same as
+        # every other platform.  The per-run tiers read 1,568 / 3,136 /
+        # 6,272 / 12,544 B at 32 / 64 / 128 / 256 (preflight.SASE_TIER_FRAME).
+        'sase': 6272,
+        'rrtmgp_gas': 0,
+        'rrtmgp_rte': 3600,
         'thompson_aerosol_warm': 112,
+        # WDM6 / WSM6 at the 2026-10-12 workspace cut, read through the
+        # production loader (load_module, then local_size_bytes) on an RTX
+        # A6000 -- the same sm_86 / NVRTC 12.9.86 compile platform -- in a
+        # fresh process: 0 B each.
+        'wdm6': 0,
+        'wsm6': 0,
         'ysu': 0,
+    }),
+)
+
+
+#: An RTX A6000 (sm_86) under NVRTC 13.4.92, the CUDA-13 environment of the
+#: same box, read 2026-10-12 through the production loader at the WDM6 /
+#: WSM6 workspace cut.  PARTIAL: it read only the two modules that cut
+#: changed.  0 B each, the same as this box's NVRTC 12.9.86 reading.
+SM86_NVRTC_13_4_92 = KernelFrameRecording(
+    box='rtx-a6000-workstation',
+    device='NVIDIA RTX A6000',
+    compute_capability='86',
+    nvrtc_build='13.4.92',
+    platform_family='linux',
+    measured='2026-10-12',
+    complete=False,
+    frames=MappingProxyType({
+        'wdm6': 0,
+        'wsm6': 0,
     }),
 )
 
@@ -814,7 +900,13 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         'milbrandt2': 2048,
         'milbrandt2_zet': 0,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 12), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjpbl': 0,
         'myjsfc': 0,
         'mynn_dmp_sibling': 0,
         'mynn_pbl': 0,
@@ -896,9 +988,16 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         # step that gives the Rust bridge's bits (9cd3a755f) is 512 B, where
         # the 2026-09-28 reading of the older source was 768 B.
         'vert_interp': 512,
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): both kernels' column arrays
+        # left the stack for a launcher-owned workspace, so the 9,264 B / 7,216 B
+        # KMAX-64 frames this row carried describe a source that no longer
+        # exists.  RE-READ compile-only at the new source on a box with this
+        # NVRTC build (NVRTC -> cubin for sm_120, ptxas -v): 0 B stack frame and
+        # 0 B spill for both; the same source read 0 B through the production
+        # loader and driver on sm_86 (RTX A6000) at 12.9.86 and 13.4.92.
+        'wdm6': 0,
         'wdm6_refl': 16128,
-        'wsm6': 7216,
+        'wsm6': 0,
         'ysu': 0,
         'ysu_validation': 0,
         # The urban canopy models joined after this reading.  Read on this
@@ -909,9 +1008,16 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         # SM89_NVRTC_13_4_92), urban_bep and urban_bep_couple 0 B, and
         # myjurb 10,256 B -- MYJ's 9,232 B myjpbl frame plus MYJURB's
         # urban arrays, a (10,256 - 1,024) B x 170 SMs x 1,536 threads =
-        # 2.2 GiB launch-time reservation.  BEP+BEM's composed unit is
-        # priced in preflight.CHAINED_TRANSLATION_UNIT_FRAMES.
-        'myjurb': 10256,
+        # 2.2 GiB launch-time reservation (retired 2026-10-12, below).
+        # BEP+BEM's composed unit is priced in
+        # preflight.CHAINED_TRANSLATION_UNIT_FRAMES.
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 12), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjurb': 0,
         'urban_bep': 0,
         'urban_bep_couple': 0,
         'urban_ucm': 0,
@@ -1010,9 +1116,21 @@ SM120_NVRTC_12_9_86 = KernelFrameRecording(
         'milbrandt2': 2048,
         'milbrandt2_zet': 0,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 12), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjpbl': 0,
         'myjsfc': 0,
-        'myjurb': 12304,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 12), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjurb': 0,
         'mynn_dmp_sibling': 0,
         'mynn_pbl': 0,
         'mynn_scalar_mix': 0,
@@ -1077,9 +1195,16 @@ SM120_NVRTC_12_9_86 = KernelFrameRecording(
         # cache, the GPU forcing-preparation lane's merge 843d2043e): the
         # WRF-real vertical step that gives the Rust bridge's bits is 512 B.
         'vert_interp': 512,
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): both kernels' column arrays
+        # left the stack for a launcher-owned workspace, so the 9,264 B / 7,216 B
+        # KMAX-64 frames this row carried describe a source that no longer
+        # exists.  RE-READ compile-only at the new source on a box with this
+        # NVRTC build (NVRTC -> cubin for sm_120, ptxas -v): 0 B stack frame and
+        # 0 B spill for both; the same source read 0 B through the production
+        # loader and driver on sm_86 (RTX A6000) at 12.9.86 and 13.4.92.
+        'wdm6': 0,
         'wdm6_refl': 16128,
-        'wsm6': 7216,
+        'wsm6': 0,
         'ysu': 0,
         'ysu_validation': 0,
     }),
@@ -1171,9 +1296,21 @@ SM89_NVRTC_13_4_92 = KernelFrameRecording(
         'milbrandt2': 2048,
         'milbrandt2_zet': 0,
         'morrison': 5120,
-        'myjpbl': 9232,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 12), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjpbl': 0,
         'myjsfc': 0,
-        'myjurb': 10256,
+        # Re-read 2026-10-12 at the column-workspace source
+        # (kernels/myjpbl.cu / myjurb.cu headers, docs/kernel_local_
+        # memory_bounds.md section 12), compile-only: this NVRTC build
+        # through the production source assembly and options to an sm
+        # cubin, frame from cuobjdump --dump-resource-usage (the same
+        # reader reproduces the pre-cut 9,232 / 10,256 / 12,304 B rows).
+        'myjurb': 0,
         'mynn_dmp_sibling': 0,
         'mynn_pbl': 0,
         'mynn_scalar_mix': 0,
@@ -1248,9 +1385,16 @@ SM89_NVRTC_13_4_92 = KernelFrameRecording(
         # (843d2043e): the WRF-real vertical step that gives the Rust
         # bridge's bits is 512 B, where the older source read 768 B.
         'vert_interp': 512,
-        'wdm6': 9264,
+        # WDM6 / WSM6 workspace cut (2026-10-12): both kernels' column arrays
+        # left the stack for a launcher-owned workspace, so the 9,264 B / 7,216 B
+        # KMAX-64 frames this row carried describe a source that no longer
+        # exists.  RE-READ compile-only at the new source on a box with this
+        # NVRTC build (NVRTC -> cubin for sm_89, ptxas -v): 0 B stack frame and
+        # 0 B spill for both; the same source read 0 B through the production
+        # loader and driver on sm_86 (RTX A6000) at 12.9.86 and 13.4.92.
+        'wdm6': 0,
         'wdm6_refl': 16128,
-        'wsm6': 7216,
+        'wsm6': 0,
         'ysu': 0,
         'ysu_validation': 0,
     }),
@@ -1389,7 +1533,11 @@ KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
             'microphysics_validation': 0,
             'milbrandt2': 2048,
             'morrison': 5120,
-            'myjpbl': 9232,
+            # Re-read 2026-10-12 at the column-workspace source,
+            # compile-only at this NVRTC build (13.0.88, sm_120 cubin,
+            # cuobjdump): 0 B, where the same reader gives the pre-cut
+            # source the 9,232 B this row used to carry.
+            'myjpbl': 0,
             'myjsfc': 0,
             'mynn_dmp_sibling': 0,
             'mynn_pbl': 0,
@@ -1443,13 +1591,13 @@ KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
             'tke_budget': 0,
             'uh_diag': 0,
             'vert_interp': 768,
-            # RE-READ 2026-09-28, RTX 5070 Ti (a development machine), NVRTC 13.0.88,
-            # after 308c2d39e (WDM6 rain mass and number conservation)
-            # took falk and falkn, two per-level arrays, off the stack:
-            # 9,776 -> 9,264 B at WDM6_KMAX 64, 11,568 B at 80.
-            'wdm6': 9264,
+            # WDM6 / WSM6 workspace cut (2026-10-12): the 9,264 B / 7,216 B KMAX-64
+            # frames this row carried describe a source that no longer exists, and
+            # this NVRTC build was not available to re-read the new one, so the two
+            # rows are DROPPED rather than carried stale.  Every build that was read
+            # (sm_86 driver; sm_86/89/120 compile-only; NVRTC 12.9.86 and 13.4.92)
+            # reads 0 B.
             'wdm6_refl': 16128,
-            'wsm6': 7216,
             'ysu': 0,
             'ysu_validation': 0,
         }),
@@ -1473,6 +1621,9 @@ KERNEL_LOCAL_FRAME_RECORDINGS: tuple[KernelFrameRecording, ...] = (
     # beside this architecture's other recording, where the eight stems it
     # read and why those eight are written out.
     SM86_NVRTC_12_9_86,
+    # The same sm_86 architecture on NVRTC 13.4.92, read 2026-10-12 for the
+    # WDM6 / WSM6 workspace cut only.  Defined above.
+    SM86_NVRTC_13_4_92,
     # What a fresh gpu-cu13 install compiles on since 2026-09-16, read
     # 2026-09-28 on an RTX 5090 and an RTX 5070 Ti.  Defined above.
     SM120_NVRTC_13_4_92,
@@ -1557,9 +1708,14 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "rrtmg_lw.cu + rrtmg_lw_chain.cu + its address-only twin "
         "rrtmg_lw_chain_coalesced.cu + the four rrtmg_lw_taugb* band "
         "fragments + the batched entries rrtmg_lw_zbatched.cu as one unit (woof/core/rrtmg_lw.py section 10); the "
-        "fragments fail NVRTC standalone.  Priced 2,048 B from a single "
-        "sm_120 / cupy 14.0.1 reading, 2026-07-27; bounded on a device by "
-        "tests/test_rrtmg_lw_cuda.py (LOCAL_FRAME_BOUNDS).",
+        "fragments fail NVRTC standalone.  Priced 2,048 B at the shipped "
+        "RLW_MAXLAY = 128 tier from a single sm_120 / cupy 14.0.1 reading, "
+        "2026-07-27; deeper per-run tiers (a column past 128 layers) at "
+        "16 B per tier layer (preflight.rrtmg_lw_legacy_chain_frame_bytes), "
+        "a law read exactly on sm_86 at NVRTC 12.9 and 13.4 for RLW_MAXLAY "
+        "64..384 on 2026-10-12 and not re-measured on sm_120/sm_89; "
+        "bounded on a device by tests/test_rrtmg_lw_cuda.py "
+        "(LOCAL_FRAME_BOUNDS) and tests/test_rrtmg_lw_deep_columns.py.",
     "rrtmg_sw_legacy":
         "rrtmg_sw.cu through its own unit (woof/core/rrtmg_sw.py); the "
         "fragment fails NVRTC standalone.  Priced 0 B from the same "
@@ -1596,7 +1752,9 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "with -fmad=false --ftz=false; terrain_drag.cu fails standalone. "
         "Priced 1,184 B from sm_89 and sm_120 at NVRTC 13.4.59, measured "
         "2026-10-01 over every export; re-read 2026-10-02 on sm_120 at "
-        "13.4.59, 13.4.92 and 12.9.86 with the same maximum. Re-audited by "
+        "13.4.59, 13.4.92 and 12.9.86 with the same maximum. TD_KMAX "
+        "128 -> 256 (2026-10-12) re-priced it at 2,208 B, read on sm_86 at "
+        "NVRTC 12.9.86; the older rows predate that source. Re-audited by "
         "tests/test_terrain_drag_wrf471_parity.py::"
         "test_production_drag_frames_match_the_recorded_unit.",
 })
@@ -1606,8 +1764,19 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
 # export.  These are separate from standalone .cu recordings: the unit
 # requires the two glibc headers.  The source and options bind the readings
 # to the composition that was measured, rather than only to its filename.
+#
+# TD_KMAX went 128 -> 256 on 2026-10-12 (the dycore's level ceiling), which
+# doubles the per-thread stress profiles taup[TD_KMAX + 1] (KIM) and
+# taup/taufb (GSL).  The SHA below is the 256-level source; the
+# ("86", "12.9.86") row was read on it (RTX A6000, Linux): KIM 640 -> 1,152 B
+# and GSL 1,184 -> 2,208 B, exactly +4 B per added level per array, with the
+# pre-cut source reading 640 / 1,184 B on the same card.  The sm_89 / sm_120
+# rows were read on the 128-level source (SHA ee9a70df...) and could not be
+# re-read on this box; they are kept as provenance and are expected to grow
+# by the same +512 / +1,024 B.  Pricing is safe either way: the chained-unit
+# frame is the maximum over the rows, which the sm_86 reading sets.
 TERRAIN_DRAG_COMPOSED_SOURCE_SHA256 = (
-    "ee9a70dfaff59d8e9d36f6b4a0214fa9124c72742b0bb60726639460f7b60fcf")
+    "348623c967a05b2a0331c19d82a2f06432b175472d471b7e0c476f075b23af98")
 TERRAIN_DRAG_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({
     ("89", "13.4.59"): MappingProxyType({
@@ -1622,6 +1791,9 @@ TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({
     ("120", "12.9.86"): MappingProxyType({
         "topo_wind_static": 0, "terrain_pbl_top": 0,
         "gwdo_column": 640, "gwdo_gsl_column": 1184}),
+    ("86", "12.9.86"): MappingProxyType({
+        "topo_wind_static": 0, "terrain_pbl_top": 0,
+        "gwdo_column": 1152, "gwdo_gsl_column": 2208}),
 })
 
 

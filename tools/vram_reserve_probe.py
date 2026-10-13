@@ -206,7 +206,11 @@ def mode_law() -> dict:
 # ---------------------------------------------------------------------------
 
 _SYMBOL = re.compile(
-    r'extern\s+"C"\s+__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)')
+    # ``__launch_bounds__`` may sit between ``__global__`` and ``void``
+    # (kf_column, noah_column): without it they were read as absent.
+    r'extern\s+"C"\s+__global__\s+'
+    r'(?:__launch_bounds__\s*\([^)]*\)\s*)?'
+    r'void\s+([A-Za-z_][A-Za-z0-9_]*)')
 
 
 def mode_frames() -> dict:

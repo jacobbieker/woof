@@ -26,11 +26,27 @@ from woof.hex.vertical_spec import (
     LES_MAX_STRETCH,
     VerticalSpec,
     VerticalSpecError,
+    hex_column_level_ceiling,
+    hex_column_level_terms,
     les_interfaces,
     les_layer_report,
     load_vertical_spec,
     resolve_preset,
 )
+
+
+def _default_lane_ceiling() -> tuple[int, str]:
+    """The frozen WSM6 + YSU lane's ceiling and the scheme that sets it.
+
+    Read from the same contract the code reads, so these tests hold the
+    MECHANISM (refuse one past the binding scheme's bound, naming it) and
+    stay true when a scheme's kernel moves to a deeper bound.
+    """
+
+    terms = hex_column_level_terms()
+    ceiling = min(maximum for _, maximum in terms)
+    label = next(label for label, maximum in terms if maximum == ceiling)
+    return ceiling, label
 
 
 # ---------------------------------------------------------------------------
@@ -72,28 +88,92 @@ def test_les_preset_refuses_a_column_it_cannot_build_gently():
 
 
 def test_les_preset_refuses_a_column_the_forecast_cannot_run():
-    from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
+    import re
 
-    assert VerticalSpec.les(levels=HEX_MAX_COLUMN_LEVELS).n_vert_levels == 80
-    with pytest.raises(VerticalSpecError, match="WSM6"):
-        VerticalSpec.les(levels=HEX_MAX_COLUMN_LEVELS + 1)
+    ceiling, label = _default_lane_ceiling()
+    assert VerticalSpec.les(levels=ceiling).n_vert_levels == ceiling
+    with pytest.raises(VerticalSpecError, match=re.escape(label)):
+        VerticalSpec.les(levels=ceiling + 1)
+    # The default is the measured 80-level column, not the ceiling: a deeper
+    # bound must not silently deepen every default LES vertical.
+    assert VerticalSpec.les().n_vert_levels == 80
 
 
-def test_the_column_ceiling_is_the_engines_wsm6_tier():
+def test_the_column_ceiling_is_the_selected_physics_bound():
+    from woof import physics_vertical_contract as contract
+    from woof.core import wsm6_constants
+    from woof.hex import cuda_gwdo_v841 as gwdo
+    from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS, hex_column_level_refusal
+
+    # The structural ceiling: the hex column, the GWDO compile bound and its
+    # price in the device admission are one number, and no contract row
+    # declares a deeper column.
+    assert HEX_MAX_COLUMN_LEVELS == 256
+    assert gwdo.GWDO_MAX_LEVELS == HEX_MAX_COLUMN_LEVELS
+    assert device_admission.GWDO_MAX_FRAME_LEVELS == HEX_MAX_COLUMN_LEVELS
+    # The run's ceiling is the min over the selected schemes' contract rows.
+    wsm6 = contract.WSM6_VERTICAL_LEVEL_BOUNDS[1]
+    ysu = contract.YSU_VERTICAL_LEVEL_BOUNDS[1]
+    assert wsm6 == wsm6_constants.WSM6_VERTICAL_LEVEL_BOUNDS[1]
+    assert hex_column_level_ceiling() == min(256, wsm6, ysu)
+    assert hex_column_level_ceiling(microphysics="mp_wsm6", pbl="off") == min(256, wsm6)
+    # P3 compiles no level tier, so with the PBL slot off nothing but the
+    # hex column bounds it -- the 80-level WSM6 copy once refused this.
+    assert hex_column_level_ceiling(microphysics="mp_p3", pbl="off") == 256
+    assert hex_column_level_ceiling(microphysics="p3", pbl="ysu") == min(256, ysu)
+    aero = contract.THOMPSON_AEROSOL_VERTICAL_LEVEL_BOUNDS[1]
+    assert hex_column_level_ceiling(
+        microphysics="thompson_aero", pbl="off") == min(256, aero)
+    # Radiation adds WRF's above-top layers, so it binds only with p_top.
+    lw = contract.max_legacy_longwave_layers(1_200.0)
+    with_rad = hex_column_level_ceiling(
+        microphysics="mp_p3", pbl="off", p_top_pa=1_200.0)
+    if lw is None:
+        assert with_rad == 256
+    else:
+        caps, _ = contract.legacy_radiation_layer_counts(0, 1_200.0)
+        assert caps == 3
+        assert with_rad == min(256, lw - caps)
+    # Undecided slots add no term; unknown names are refused, not skipped.
+    assert hex_column_level_ceiling(microphysics=None, pbl=None) == 256
+    with pytest.raises(VerticalSpecError, match="no vertical-bound row"):
+        hex_column_level_ceiling(microphysics="mp_kessler")
+    with pytest.raises(VerticalSpecError, match="no vertical-bound row"):
+        hex_column_level_ceiling(pbl="mynn")
+    assert hex_column_level_refusal(256, microphysics="mp_p3", pbl="off") is None
+    refusal = hex_column_level_refusal(257, microphysics="mp_p3", pbl="off")
+    assert "hex column" in refusal and "257 levels" in refusal
+
+
+def test_the_column_ceiling_is_within_the_engines_wsm6_ceiling():
+    """WSM6 keeps its column arrays in a runtime-sized workspace, so its
+    ceiling is a 256-level refusal bound and its frame no longer follows the
+    column.  The hex column cap may not exceed it, and the admission model's
+    stdlib restatements must agree with the engine's constants."""
     from woof.core import wsm6_constants
     from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS
 
-    assert HEX_MAX_COLUMN_LEVELS == wsm6_constants.WSM6_DEEP_KMAX
-    assert device_admission.WSM6_DEEP_TIER_LEVELS == wsm6_constants.WSM6_DEEP_KMAX
-    assert device_admission.WSM6_SHALLOW_TIER_LEVELS == wsm6_constants.WSM6_SHALLOW_KMAX
-    from woof.core import preflight
-
-    frame = preflight.WSM6_TIER_FRAME
-    assert device_admission.WSM6_FRAME_BYTES_PER_LEVEL == frame.bytes_per_level
-    for levels in (55, 64, 70, 80):
-        assert device_admission.wsm6_local_frame_bytes(levels) == frame.frame_bytes(
-            wsm6_constants.wsm6_level_tier(levels)
+    assert HEX_MAX_COLUMN_LEVELS <= wsm6_constants.WSM6_MAX_LEVELS
+    assert device_admission.WSM6_MAX_LEVELS == wsm6_constants.WSM6_MAX_LEVELS == 256
+    for levels in (55, 64, 70, 80, 128, 256):
+        assert device_admission.wsm6_local_frame_bytes(levels) == (
+            device_admission.WIDEST_LAUNCHED_LOCAL_FRAME_BYTES
         )
+    with pytest.raises(ValueError, match="WSM6"):
+        device_admission.wsm6_local_frame_bytes(257)
+
+    workspace = device_admission.WSM6_WORKSPACE
+    assert workspace in device_admission.TILED_WORKSPACES
+    assert workspace.slots == wsm6_constants.WSM6WS_SLOTS
+    assert workspace.block == wsm6_constants.WSM6_BLOCK
+    assert workspace.blocks_per_sm == wsm6_constants.WSM6_TILE_BLOCKS_PER_SM
+    card = device_admission.REFERENCE_CARD
+    for levels in (55, 80, 256):
+        for cells in (1_000, 40_962, 163_842):
+            columns = min(cells, workspace.knee_cells(card))
+            assert workspace.bytes_for(cells, card, levels) == (
+                wsm6_constants.wsm6_workspace_floats(levels, columns) * 4
+            )
 
 
 def test_les_preset_passes_the_vertical_construction(tmp_path):
@@ -192,8 +272,18 @@ def test_an_init_whose_column_disagrees_with_the_row_refuses(tmp_path):
         _inspect_init_column(soil, _row(80))
     with pytest.raises(MeshBindingMismatch, match="does not exist"):
         _inspect_init_column(tmp_path / "missing.nc", _row(80))
-    with pytest.raises(MeshBindingMismatch, match="WSM6"):
-        _inspect_init_column(None, _row(100))
+    import re
+
+    ceiling, label = _default_lane_ceiling()
+    with pytest.raises(MeshBindingMismatch, match=re.escape(label)):
+        _inspect_init_column(None, _row(ceiling + 1))
+    # The bind's ceiling is the run's physics', not one scheme's copy: with
+    # a scheme that compiles no tier and no PBL, only the hex column binds.
+    deep = _init(tmp_path / "deep.nc", 256)
+    record = _inspect_init_column(deep, _row(256), microphysics="mp_p3", pbl="off")
+    assert record["nVertLevels"] == 256
+    with pytest.raises(MeshBindingMismatch, match="hex column"):
+        _inspect_init_column(None, _row(257), microphysics="mp_p3", pbl="off")
 
 
 def test_a_row_that_describes_no_column_refuses():
@@ -252,14 +342,32 @@ def test_the_per_cell_slope_scales_with_a_deeper_column():
     assert "DERIVED" in record["level_scaling"]
 
 
-def test_the_deep_wsm6_tier_charges_its_wider_local_frame():
+def test_a_deep_column_charges_the_wsm6_workspace_not_a_wider_frame():
+    """The 80-level WSM6 tier's 1,792 B wider frame is retired: a deeper
+    column now costs WSM6 workspace (nz + 1 levels per slot), and the
+    256-level ceiling is the only refusal left.  The one frame that still
+    follows the column is the per-run YSU-GWDO's, which outgrows the core's
+    past about 161 levels, so a 256-level column's extra backing store is
+    exactly that and nothing of WSM6's."""
     card = device_admission.REFERENCE_CARD
+    cells = 163_842
     at64 = device_admission.model_for_card(card, levels=64)
     at80 = device_admission.model_for_card(card, levels=80)
-    assert at64.local_store_extra_bytes() == 0
-    assert at80.local_store_extra_bytes() == 1_792 * card.resident_threads
+    at256 = device_admission.model_for_card(card, levels=256)
+    for model in (at64, at80):
+        assert model.local_store_extra_bytes() == 0
+    assert at256.local_store_extra_bytes() == (
+        (device_admission.gwdo_local_frame_bytes(256)
+         - device_admission.WIDEST_LAUNCHED_LOCAL_FRAME_BYTES)
+        * card.resident_threads) > 0
+    workspace = device_admission.WSM6_WORKSPACE.name
+    assert (at64.tiled_breakdown(cells)[workspace]
+            < at80.tiled_breakdown(cells)[workspace]
+            < at256.tiled_breakdown(cells)[workspace])
+    assert at256.tiled_breakdown(cells)[workspace] == (
+        16 * 32 * card.multiprocessors * 30 * 257 * 4)
     with pytest.raises(ValueError, match="WSM6"):
-        device_admission.model_for_card(card, levels=81).predict_bytes(10)
+        device_admission.model_for_card(card, levels=257).predict_bytes(10)
 
 
 def test_a_shallower_column_keeps_the_measured_slope():
@@ -294,10 +402,15 @@ def test_the_door_prices_the_rows_column(tmp_path):
     model = door.resolve_admission_model(request)
     assert model.levels == 80
     assert model.level_scale() == pytest.approx(80 / 55)
-    with pytest.raises(door.ForecastDoorRefusal, match="WSM6"):
+    import re
+
+    ceiling, label = _default_lane_ceiling()
+    with pytest.raises(door.ForecastDoorRefusal, match=re.escape(label)):
         door.resolve_request(
             _door_namespace(tmp_path / "deep", mesh="les"),
-            registry={"les": door.MeshRow("les", 40_000, 5.0, 937.5, levels=100)},
+            registry={
+                "les": door.MeshRow("les", 40_000, 5.0, 937.5, levels=ceiling + 1)
+            },
         )
     native = door.resolve_request(
         _door_namespace(tmp_path / "n", mesh="les"),
@@ -613,8 +726,48 @@ def test_the_gwdo_kernel_source_is_unchanged_at_55_and_sized_otherwise():
     variant = gwdo.gwdo_kernel_variant(100)
     assert variant["anchored_kernel_sha256"] == gwdo.CUDA_GWDO_V841_KERNEL_SHA256
     assert variant["kernel_sha256"] != gwdo.CUDA_GWDO_V841_KERNEL_SHA256
+    deepest = gwdo.gwdo_kernel_source(256)
+    assert "#define GWDO_NLEV 256\n" in deepest
+    assert deepest.replace("#define GWDO_NLEV 256\n", "#define GWDO_NLEV 55\n") == gwdo._CUDA_SOURCE
     with pytest.raises(ValueError, match="outside"):
         gwdo.gwdo_kernel_source(gwdo.GWDO_MAX_LEVELS + 1)
+    with pytest.raises(ValueError, match="outside"):
+        gwdo.gwdo_kernel_source(257)
+
+
+def test_the_gwdo_frame_is_priced_per_level(monkeypatch):
+    # The measured sm_86 frames (local_size_bytes, CUDA 13 NVRTC): the price
+    # must be at or above every one, or a deep column is under-reserved.
+    measured = {
+        3: 240, 10: 608, 30: 1_440, 40: 1_888, 55: 2_528, 57: 2_624,
+        63: 2_880, 64: 2_944, 65: 2_976, 80: 3_648, 81: 3_680, 100: 4_528,
+        128: 5_760, 129: 5_792, 160: 7_168, 161: 7_200, 200: 8_928,
+        230: 10_240, 255: 11_328, 256: 11_392,
+    }
+    for levels, frame in measured.items():
+        priced = device_admission.gwdo_local_frame_bytes(levels)
+        assert frame <= priced <= frame + 64, levels
+    with pytest.raises(ValueError, match="YSU-GWDO"):
+        device_admission.gwdo_local_frame_bytes(257)
+    # At or below WSM6's tiers the GWDO frame is never the widest: the
+    # admission is unchanged for every column it admitted before.
+    for levels in (40, 55, 64, 70, 80):
+        assert device_admission.widest_launched_local_frame_bytes(levels) == max(
+            device_admission.WIDEST_LAUNCHED_LOCAL_FRAME_BYTES,
+            device_admission.wsm6_local_frame_bytes(levels),
+        )
+    # Past about 161 levels the GWDO frame is the widest launched, and the
+    # backing store grows by its excess per resident thread.  WSM6 is taken
+    # out of the comparison here (as a workspace-backed WSM6 would be) so
+    # the GWDO term is measured on its own.
+    monkeypatch.setattr(device_admission, "wsm6_local_frame_bytes", lambda levels: 0)
+    card = device_admission.REFERENCE_CARD
+    at160 = device_admission.model_for_card(card, levels=160)
+    at256 = device_admission.model_for_card(card, levels=256)
+    assert at160.local_store_extra_bytes() == 0
+    excess = 168 + 44 * 256 - device_admission.WIDEST_LAUNCHED_LOCAL_FRAME_BYTES
+    assert at256.local_store_extra_bytes() == excess * card.resident_threads
+    assert at256.predict_bytes(10_000) > at160.predict_bytes(10_000)
 
 
 # ---------------------------------------------------------------------------

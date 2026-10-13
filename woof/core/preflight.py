@@ -1793,15 +1793,20 @@ def read_compile_platform() -> tuple[str, str] | None:
 #: ``wdm6_refl`` compile their column arrays to the
 #: configuration's own level count
 #: (:data:`LEVEL_SPECIALIZED_KERNEL_FRAMES`), so their rows here are the
-#: CEILING, not the price.  Three more are TIERED, and those are the only
+#: CEILING, not the price.  Two more are TIERED, and those are the only
 #: ones that can price ABOVE their row.  ``acoustic`` compiles the implicit
 #: w''-phi'' solve at a coarse ``WPHI_MAX_LEV`` tier chosen by ``nz``
 #: (:data:`ACOUSTIC_TIER_FRAME`), so this row is its price at the shipped
 #: 129 tier -- every ``nz <= 128`` configuration -- and the deeper tiers add
-#: to it.  ``wdm6`` and ``wsm6`` are the same shape, each with a two-rung
-#: ladder (:data:`WDM6_TIER_FRAME`, :data:`WSM6_TIER_FRAME`): each row is
-#: that module's ``KMAX = 64`` default, every ``nz <= 64`` configuration,
-#: and the 80 tier prices above it.
+#: to it; ``ieva`` is the same shape (:data:`IEVA_TIER_FRAME`).  (``wdm6``
+#: and ``wsm6`` were tiered too, at 64/80, until 2026-10-12: their column
+#: arrays moved into launcher-owned workspaces priced by
+#: :func:`wsm6_column_workspace_bytes` / :func:`wdm6_column_workspace_bytes`,
+#: and their rows here are now the one small frame each compiles to.)
+#: ``rrtmgp_rte`` compiles its solvers to each call's own radiation layer
+#: count; its row is the 128-layer default, the flat price of every
+#: column up to 128 layers, and a deeper column prices above it
+#: (:func:`rrtmgp_rte_frame_bytes`).
 #: Everything else launches as compiled.
 #:
 #: A module maximum is an UPPER bound over the kernels a scheme can launch --
@@ -1906,12 +1911,15 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # 512 B, not 0: ``tv_env`` and ``positive_energy`` stay on the stack
     # because they are the only two whose PLACEMENT moves an output bit
     # (kf.cu says why), and at the unspecialized KF_KMAX = 128 the compiler
-    # materialises 512 B of them.  That is half the 1,024 B default stack,
-    # so the row reserves nothing on any card -- and it no longer moves
-    # with nz, which is what retired kf's LEVEL_SPECIALIZED_KERNEL_FRAMES
-    # entry and the per-nz recompile that entry priced.
+    # materialised 512 B of them.  KF_KMAX went 128 -> 256 on 2026-10-12
+    # (the dycore's level ceiling), which doubles them: 1,024 B, read on
+    # sm_86 at NVRTC 12.9.86.  That is AT the 1,024 B default stack, so the
+    # row still reserves nothing on any card -- and it does not move with
+    # nz, which is what retired kf's LEVEL_SPECIALIZED_KERNEL_FRAMES entry
+    # and the per-nz recompile that entry priced.  The other platforms'
+    # 512 B readings predate the raise (see kernel_frame_recordings.py).
     # The workspace itself is priced by :func:`kf_column_workspace_bytes`.
-    "kf": 512,
+    "kf": 1024,
     "kf_validation": 0,
     "lbc_flow": 0,
     "lbc_state": 0,
@@ -1947,25 +1955,22 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "milbrandt2_zet": 0,
     "morrison": 5120,
     "microphysics_validation": 0,
-    # MYJ.  MEASURED on an RTX 5090 by the driver sweep this table is
-    # checked against, at the kernel's compiled MYJ_KMAX = 128 tier: the
-    # PBL translation unit holds 9,232 B and the Eta surface layer holds
-    # none.  One thread owns one whole column and MYJPBL carries MIXLEN's
-    # GM/GH/EL/Q2, DIFCOF's AKM/AKH, VDIFH's tridiagonal coefficients and
-    # the species stack all at once, which is where the frame goes; the
-    # surface layer is scalar per column, so it has nothing to hold.
-    #
-    # This closes the port's own open question ("nobody has measured the
-    # local-memory cost of this kernel at production width").  By the
+    # MYJ.  0 B since 2026-10-12, on every compiler that could re-read it
+    # (NVRTC 12.9.86, 13.0.88, 13.3.33 and 13.4.92 on sm_86/89/120; the
+    # sm_86 12.9.86 row through the production loader on an RTX A6000).
+    # Until then one thread held the whole column -- MIXLEN's GM/GH/EL/Q2,
+    # DIFCOF's AKM/AKH, VDIFH's tridiagonal coefficients and the species
+    # stack -- in a 9,232 B frame at a compiled MYJ_KMAX = 128, which the
     # reservation model at the head of docs/kernel_local_memory_bounds.md
-    # that frame reserves (9232 - 1024) * 1536 * 170 = 2,143,764,480 B
-    # ~ 2.00 GiB on first launch, for the life of the process -- more than
-    # SASE's and a third of GF's, and it is the price of selecting MYJ at
-    # all, not of the domain size.  Like SASE's, it should be linear in
-    # the compiled level bound and is therefore specializable; that is a
-    # separate change, and until then the stated bound is the compiled
-    # ceiling, which is the safe direction for a rail gate.
-    "myjpbl": 9232,
+    # charged (9232 - 1024) x 1536 x 170 B ~ 2.00 GiB on a 170-SM card, and
+    # which a 256-level bound would have doubled.  The nineteen column
+    # arrays now live in a global workspace woof/core/myjpbl.py sizes to
+    # the runtime nz and the columns in flight, priced by
+    # :func:`myj_column_workspace_bytes`; MYJ_KMAX is a refusal guard only.
+    # Bit-identical to the pre-cut kernel at nz = 49, 100 and 128
+    # (tests/test_myj_workspace.py).  The surface layer is scalar per
+    # column and holds nothing.
+    "myjpbl": 0,
     "myjsfc": 0,
     # SASE.  MEASURED on an RTX 5090 over all 29 kernels in the module at
     # the closure's compiled tier (SASE_KMAX = 128): the maximum is
@@ -1978,14 +1983,14 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     #
     # The frame is EXACTLY LINEAR in the compiled level bound -- measured
     # 1,568 / 3,136 / 6,272 B at SASE_KMAX 32 / 64 / 128, i.e. 49 B per
-    # level with a zero intercept -- so this module is specializable the
-    # way kf and refl are, and at a 49-level configuration the frame
-    # would be 2,401 B and the reservation ~359 MiB.  It is NOT entered
-    # in LEVEL_SPECIALIZED_KERNEL_FRAMES here, because that table prices
-    # what the launcher actually compiles and this launcher compiles at
-    # the fixed tier.  Specializing it is a real ~0.93 GiB saving and a
-    # separate change; until then the stated bound is the compiled
-    # ceiling, which is the safe direction for a rail gate.
+    # level with a zero intercept, and 12,544 B at 256 (RTX A6000, sm_86,
+    # 2026-10-12) -- and the launcher now compiles SASE_KMAX PER RUN at
+    # the smallest of 32/64/128/256 holding nz
+    # (woof.core.sase_limits.kmax_tier).  So this row is the frame at the
+    # source's #ifndef default (the census tier every recording read), and
+    # what a run is CHARGED is :data:`SASE_TIER_FRAME` at its own tier.
+    # On a 170-SM card that is ~781 MiB less than this row at a 49-level
+    # run (the 64 tier) and ~1.53 GiB more at 256 levels.
     "sase": 6272,
     # The two MYNN-EDMF qn-family modules (4a0bb3f69) landed declared
     # UNMEASURED because their lane had no measurement platform; the
@@ -2039,6 +2044,13 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # Another compiler-build move at a fixed sm_120: 0 B on NVRTC 13.0.48,
     # 40 B on 13.3.33.
     "rrtmgp_cloud": 40,
+    # The 512 B was the Planck-source kernel's fixed ``float pfrac[128]``.
+    # That array became a one-layer window on 2026-10 (no layer ceiling,
+    # bit-identical output) and the module reads 0 B on sm_86 at NVRTC
+    # 12.9.86 (kernel_frame_recordings.SM86_NVRTC_12_9_86).  The row stays
+    # at the ceiling over the recordings, which still carry 512 on the
+    # platforms nobody has re-read: an over-price under the 1,024 B default
+    # stack, so it reserves nothing either way.
     "rrtmgp_gas": 512,
     "rrtmgp_mcica": 0,
     # The RRTMGP optimisation took this from 5,152 to 3,600:
@@ -2051,7 +2063,10 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # (both are 5,120), so those runs reserved 32 B per resident thread
     # more backing store than any card compiles, 8,355,840 B on a 170-SM
     # card, and a P3 or microphysics-free one the whole 1,552 B,
-    # 405,258,240 B.
+    # 405,258,240 B.  This is the module at its 128-layer source default;
+    # the launchers compile RRTMGP_MAX_LAYERS to each call's own layer count
+    # and a column deeper than 128 layers is priced above this row by
+    # RRTMGP_RTE_SW_TIER_FRAME / rrtmgp_rte_frame_bytes.
     "rrtmgp_rte": 3600,
     "rrtmgp_validation": 0,
     "ruc": 144,
@@ -2123,7 +2138,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "swint": 0,
     # Production loader on RTX 5090, NVRTC 13.4.92, 2026-10-04.
     "solar_albedo": 0,
-    "rrtmg_aer3": 0,
+    # WRF aer_opt = 3: 0 B on sm_120, 24 B on sm_86 at NVRTC 12.9.86
+    # (kernel_frame_recordings).
+    "rrtmg_aer3": 24,
     "uh_diag": 0,
     # The UW moist-turbulence PBL (bl_pbl_physics = 9): uwpbl_columns keeps
     # CAM's automatic arrays in a global per-column workspace
@@ -2139,35 +2156,21 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "real_init": 0,
     "real_init_math": 48,
     "vert_interp": 768,
-    # WDM6 (mp_physics=16).  MEASURED 2026-08-10 on the reference RTX 5090
-    # the same NVRTC + driver way as every other row: the module's one
-    # kernel, ``wdm6_column``, holds 9,776 B at the source's ``#ifndef``
-    # default ``WDM6_KMAX = 64`` (88 registers).  One thread owns a whole
-    # column, so the frame is that bound's ~30 per-thread work arrays.
-    #
-    # This row is the 64 TIER, not a ceiling: the launcher compiles the 80
-    # tier for 65 <= nz <= 80 and that frame is WIDER (12,208 B measured).
-    # :data:`WDM6_TIER_FRAME` carries the ladder, and the measurements
-    # behind it -- exactly 152 B per level between the two rungs -- are
-    # re-read off the driver by tests/test_kernel_local_bounds.py.
-    #
-    # 308c2d39e (WDM6 rain mass and number conservation) shrank the frame:
-    # 9,264 B at 64 and 11,568 B at 80, 144 B per level, on every sm_120
-    # build read 2026-09-28 (RTX 5090: NVRTC 12.9.86, 13.0.48, 13.4.92;
-    # RTX 5070 Ti: 13.0.88, 13.3.33), and the three sm_120 recordings in
-    # woof/core/kernel_frame_recordings.py carry it.  This row is the
-    # element-wise maximum over the recordings, so it stays at the sm_86
-    # recording, which the RTX 3080 re-read at the 2.8.0 cut's Windows
-    # step (2026-09-29): 9,264 B at 64 and 11,568 B at 80 on sm_86 too,
-    # with NVRTC 13.4.92 and 13.0, so every recorded card now agrees.
-    "wdm6": 9264,
-    # WSM6 (mp_physics=6).  This row is the 64 TIER, not a ceiling: the
-    # launcher compiles the 80 tier for 65 <= nz <= 80 and that frame is
-    # WIDER (9,008 B measured).  :data:`WSM6_TIER_FRAME` carries the ladder
-    # and the measurements behind it -- exactly 112 B per level between the
-    # two rungs -- and tests/test_kernel_local_bounds.py re-reads both off
-    # the driver.
-    "wsm6": 7216,
+    # WDM6 (mp_physics=16) and WSM6 (mp_physics=6).  Until 2026-10-12 both
+    # kept a whole column per thread in the local frame, sized by a
+    # compile-time KMAX tier the launchers chose from nz: WDM6 9,264 B at
+    # 64 and 11,568 B at 80 (144 B/level), WSM6 7,216 B at 64 and 9,008 B
+    # at 80 (112 B/level), on every recorded platform -- priced through
+    # the retired WDM6_TIER_FRAME / WSM6_TIER_FRAME ladders.  The column
+    # arrays now live in global workspaces sized to the columns in flight
+    # and to the runtime nz (woof/core/kernels/wsm6.cu and wdm6.cu; priced
+    # by wsm6_column_workspace_bytes / wdm6_column_workspace_bytes), and
+    # both now compile to a 0 B frame: read through the production loader
+    # on sm_86 (RTX A6000) at NVRTC 12.9.86 and 13.4.92, and compile-only
+    # (ptxas -v) for sm_89 and sm_120 at both builds.  The rows in
+    # kernel_frame_recordings say which platforms read them and how.
+    "wdm6": 0,
+    "wsm6": 0,
     # YSU (bl_pbl_physics = 1, the SHIPPED DEFAULT).  One thread still owns
     # one whole column, but the column arrays no longer live in the
     # per-thread local frame: woof/core/kernels/ysu.cu keeps them in a
@@ -2195,14 +2198,15 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # urban_ucm 72 B on sm_89 and 0 B on sm_120 since its green-roof
     # constants moved to __constant__ memory (both under the 1,024 B
     # default stack, so neither reserves anything); urban_bep and
-    # urban_bep_couple 0 B; myjurb, the MYJ column under BEP, 10,256 B on
-    # both, which DOES reserve: (10,256 - 1,024) B x SMs x threads per SM.
-    # A167: sm_120 under NVRTC 12.9.86, the default [gpu] extra's compiler,
-    # compiles three of them wider (kernel_frame_recordings.
-    # SM120_NVRTC_12_9_86): myjurb 12,304 B, which was 0.205 GiB of
-    # reservation uncharged on an RTX 5070 Ti; urban_ucm 552 B and
+    # urban_bep_couple 0 B; myjurb, the MYJ column under BEP, was 10,256 B
+    # on both (12,304 B on sm_120 under NVRTC 12.9.86, A167) until its 24
+    # column arrays moved into the global workspace woof/core/myjurb.py
+    # sizes to the runtime nz on 2026-10-12, as myjpbl's did: 0 B on every
+    # compiler that could re-read it, priced instead by
+    # :func:`myj_column_workspace_bytes`.  A167: sm_120 under NVRTC 12.9.86,
+    # the default [gpu] extra's compiler, compiles urban_ucm 552 B and
     # urban_bep 16 B, both under the default stack.
-    "myjurb": 12304,
+    "myjurb": 0,
     "urban_bep": 16,
     "urban_bep_couple": 0,
     "urban_ucm": 552,
@@ -2432,13 +2436,22 @@ class TieredKernelFrame:
     shipped_tier: int
     bytes_per_level: int
     alignment_bytes: int = 8
+    #: Shallowest tier the launcher compiles; ``None`` means the shipped
+    #: tier is the shallowest.  Only a module MEASURED to have a zero
+    #: intercept (``sase``: 49 B x tier exactly) may price below its
+    #: shipped tier, because the line through the shipped row is then the
+    #: frame itself rather than a ceiling on it.
+    lowest_tier: int | None = None
 
     def frame_bytes(self, tier: int) -> int:
         tier = int(tier)
-        if tier < self.shipped_tier:
+        floor = (self.shipped_tier if self.lowest_tier is None
+                 else self.lowest_tier)
+        if tier < floor:
             raise ValueError(
-                f"{self.module}: {self.define}={tier} is below the shipped "
-                f"tier {self.shipped_tier}")
+                f"{self.module}: {self.define}={tier} is below the "
+                f"{'shipped' if self.lowest_tier is None else 'lowest'} "
+                f"tier {floor}")
         raw = (KERNEL_MAX_LOCAL_SIZE_BYTES[self.module]
                + self.bytes_per_level * (tier - self.shipped_tier))
         remainder = raw % self.alignment_bytes
@@ -2453,43 +2466,87 @@ ACOUSTIC_TIER_FRAME = TieredKernelFrame("acoustic", "WPHI_MAX_LEV", 129, 4)
 #: (:data:`woof.core.ieva_constants.IEVA_LEVEL_TIERS`), read exactly so.
 IEVA_TIER_FRAME = TieredKernelFrame("ieva", "IEVA_KMAX", 65, 16)
 
-#: ``wdm6.cu``'s ``WDM6_KMAX`` sizes the whole per-thread column stack, and
-#: ``woof/core/wdm6.py`` compiles it at one of two rungs
-#: (``wdm6_constants.WDM6_KERNEL_LEVEL_TIERS`` = 64, 80) rather than at
-#: ``nz``.  That is why WDM6 is priced HERE and not in
-#: :data:`LEVEL_SPECIALIZED_KERNEL_FRAMES`: an nz-linear model would price
-#: a 49-level WDM6 run at 7,056 B when the kernel it actually launches
-#: holds 9,264 B, and under-pricing a rail gate is the direction that put a
-#: run 1,630 MiB over.
-#:
-#: MEASURED on the reference RTX 5090 over sixteen bounds from 2 to 80, and
-#: re-read after 308c2d39e on every sm_120 build and on the RTX 3080 (sm_86).
-#: The two rungs the launcher can compile are exactly linear in the bound --
-#: 9,264 B at 64 and 11,568 B at 80, 2,304 B over 16 levels = 144 B/level --
-#: which is what this frame reproduces, exactly, at both.  (Between the
-#: rungs the driver's frame wanders by up to 16 B against the same line; the
-#: launcher never compiles there, and the model is a ceiling on that band,
-#: which is the safe direction.)
-WDM6_TIER_FRAME = TieredKernelFrame("wdm6", "WDM6_KMAX", 64, 144)
+#: ``WDM6_TIER_FRAME`` and ``WSM6_TIER_FRAME`` priced ``wdm6.cu`` /
+#: ``wsm6.cu`` at the 64/80 ``KMAX`` tier their launchers compiled (144 and
+#: 112 B per level above the 64-tier rows).  RETIRED 2026-10-12 with the
+#: tiers themselves: both kernels keep their column arrays in a workspace
+#: (:func:`wsm6_column_workspace_bytes`, :func:`wdm6_column_workspace_bytes`)
+#: and compile ONE frame at every level count up to 256.
 
-#: ``wsm6.cu``'s ``WSM6_KMAX`` sizes the whole per-thread column stack, and
-#: ``woof/core/wsm6.py`` compiles it at one of two rungs
-#: (``wsm6_constants.WSM6_KERNEL_LEVEL_TIERS`` = 64, 80) rather than at
-#: ``nz``.  Until 1.8.9 the flat row above WAS the price for every WSM6
-#: configuration, so an ``nz = 72`` run -- the six shipped tornado-LES
-#: configs -- was priced at the 64-tier 7,216 B while the kernel it
-#: actually launches holds 9,008 B.  1,792 B/thread of backing store the
-#: pool never reports, which is the direction that put a run 1,630 MiB
-#: over.
+#: ``sase.cu``'s ``SASE_KMAX`` sizes the closure's per-thread FP64 columns
+#: (the Thomas sweeps' r/c'/d', the BL89 and moist-N2 staging columns and
+#: the plume's six), and ``woof/core/sase.py`` compiles it PER RUN at
+#: :func:`woof.core.sase_limits.kmax_tier` -- the smallest of 32 / 64 /
+#: 128 / 256 that holds ``nz``.  The source's ``#ifndef`` default (128) is
+#: the census tier, so the shipped row is the 128 frame and the ladder runs
+#: both ways from it.
 #:
-#: RE-MEASURED 2026-08-10 on the reference RTX 5090, NVRTC + driver,
-#: eighteen bounds from 2 to 80: ``wsm6_column`` holds 7,216 B at the
-#: source's ``#ifndef`` default of 64 and 9,008 B at 80 -- 1,792 B over 16
-#: levels = exactly 112 B per level -- which this frame reproduces at both
-#: rungs.  (Between the rungs the driver's frame sits up to 16 B below the
-#: same line; the launcher never compiles there, and the model is a stated
-#: ceiling on that band, which is the safe direction.)
-WSM6_TIER_FRAME = TieredKernelFrame("wsm6", "WSM6_KMAX", 64, 112)
+#: MEASURED on an RTX A6000 (sm_86, NVRTC 12.9.86, 2026-10-12) through the
+#: production int-define loader, widest export (``sase_plume_vent_flux``):
+#: 1,568 / 3,136 / 6,272 / 12,544 B at 32 / 64 / 128 / 256 -- exactly
+#: 49 B x tier, zero intercept, which this frame reproduces at every rung
+#: (the RTX 5090 read the same 32 / 64 / 128 values earlier).  So a
+#: 256-level SASE run reserves (12,544 - 1,024) x SMs x threads/SM --
+#: ~2.8 GiB on a 170-SM card -- and a 64-level run only the 3,136 B tier's
+#: ~0.5 GiB, which is the reason the bound is not simply compiled at 256.
+SASE_TIER_FRAME = TieredKernelFrame("sase", "SASE_KMAX", 128, 49,
+                                    lowest_tier=32)
+
+#: ``rrtmgp_rte.cu``'s ``RRTMGP_MAX_LAYERS`` sizes the solvers' per-thread
+#: column arrays, and ``woof/core/rrtmgp.py`` (``_rte_kernel``) compiles it to
+#: each CALL's own radiation layer count -- the shortwave two-stream at
+#: ``nz + sw_upper`` and the longwave no-scattering solver at
+#: ``nz + lw_upper`` (WRF's above-model cap,
+#: :func:`woof.physics_vertical_contract.rrtmgp_above_model_layer_counts`).
+#: The shipped row of :data:`KERNEL_MAX_LOCAL_SIZE_BYTES` is the module at
+#: its 128-layer source default, and stays the FLAT price of every column up
+#: to 128 layers (an over-price below it, which is what every configuration
+#: was charged before; nothing shallower moves).  Above 128 the frame grows
+#: with the column, and until the model-level ceiling went from 128 radiation
+#: layers to 256 model levels (2026-10) a flat 3,600 B under-priced every
+#: such run: a 256-level 1 hPa column compiles the two-stream at 257 layers,
+#: 7,216 B.  So the column is priced by :func:`rrtmgp_rte_frame_bytes`.
+#:
+#: MEASURED 2026-10-12 on an RTX A6000 (sm_86, NVRTC 12.9.86) through the
+#: production loader (``load_module_int_defines``), compile-only, at 1, 2,
+#: 32, 64, 74, 96, 127-129, 160, 192, 200, 256, 257, 260, 269, 281 and 300
+#: layers: ``rrtmgp_sw_2stream`` = ``28 n + 12`` rounded up to 16 B (its
+#: ``float4 optics[n]``, ``float direct[n+1]`` and ``float2 adding[n+1]``)
+#: at every count from 2, and ``rrtmgp_lw_noscat`` = ``8 n`` (``trans`` and
+#: ``src_up``) at every count from 2; the module's other three exports hold
+#: no frame.  This tier reproduces the two-stream exactly wherever ``28 n +
+#: 12`` is not a multiple of 16 and over-prices by 16 B where it is (n = 3
+#: mod 4) -- a stated ceiling, the safe direction.  Other architectures and
+#: NVRTC builds were not re-read at depth: the per-layer slope is the arrays'
+#: own byte count, which no register allocation can shrink, and every
+#: recorded platform reads the same 3,600 B at the 128 default.
+RRTMGP_RTE_SW_TIER_FRAME = TieredKernelFrame(
+    "rrtmgp_rte", "RRTMGP_MAX_LAYERS", 128, 28, alignment_bytes=16)
+#: ``rrtmgp_lw_noscat``'s two ``float[RRTMGP_MAX_LAYERS]`` columns.
+RRTMGP_RTE_LW_BYTES_PER_LAYER = 8
+
+
+def rrtmgp_rte_frame_bytes(nz: int, p_top: float, *, longwave: bool = True,
+                           shortwave: bool = True) -> int:
+    """The widest ``rrtmgp_rte`` frame one RTE+RRTMGP domain launches.
+
+    Never below the shipped module row (the 128-layer default every
+    shallower column was always priced at).  ``p_top`` is the model top in
+    Pa; ``0`` (an idealized configuration whose initializer supplies the
+    top later) adds no cap layers, exactly as the workspace pricing reads it.
+    """
+    from woof.physics_vertical_contract import rrtmgp_above_model_layer_counts
+
+    nz = int(nz)
+    lw_upper, sw_upper = rrtmgp_above_model_layer_counts(float(p_top))
+    spec = RRTMGP_RTE_SW_TIER_FRAME
+    frame = int(KERNEL_MAX_LOCAL_SIZE_BYTES[spec.module])
+    if shortwave:
+        frame = max(frame, spec.frame_bytes(
+            max(spec.shipped_tier, nz + sw_upper)))
+    if longwave:
+        frame = max(frame, RRTMGP_RTE_LW_BYTES_PER_LAYER * (nz + lw_upper))
+    return frame
 
 #: Kernel source files that have no standalone local frame because they
 #: never compile alone: ``noahmp_driver.cu``, ``noahmp_energy.cu``,
@@ -2586,9 +2643,12 @@ class ChainedTranslationUnitFrame:
 #:
 #: * LW unit: ``rlw_rtrn_march`` 2,048 B/thread (exactly its four
 #:   128-float per-thread work arrays atrans/atot/bbugas/bbutot at the
-#:   fixed RLW_MAXLAY = 128 bound -- NOT nz-specialized), ``rlw_cldprmc``
-#:   64 B, every other kernel 0 B.  Machine-wide store ~510 MiB, of which
-#:   the 1,024 B default-stack half already sits in CUDA_CONTEXT_BYTES.
+#:   shipped RLW_MAXLAY = 128 tier), ``rlw_cldprmc`` 64 B, every other
+#:   kernel 0 B.  Machine-wide store ~510 MiB, of which the 1,024 B
+#:   default-stack half already sits in CUDA_CONTEXT_BYTES.  The row below
+#:   is that SHIPPED-tier frame; since 2026-10 a column deeper than 128
+#:   layers compiles the unit at a deeper ``RLW_MAXLAY`` tier and is
+#:   priced per layer by :func:`rrtmg_lw_legacy_chain_frame_bytes`.
 #: * SW unit: every kernel 0 B after the spcvmc workspace restructure
 #:   (the old ~1.65 GiB hidden lmem reservation became pool-priced
 #:   transient VRAM, priced by ``legacy_radiation_vram_bytes``).
@@ -2687,10 +2747,13 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         max_local_size_bytes=1040,
         covers=frozenset()),
     # Production loader, NVRTC 13.4.59 on sm_89 and sm_120: topo_wind
-    # and the SASE top helper 0 B, KIM 640 B, GSL 1,184 B on both cards.
+    # and the SASE top helper 0 B, KIM 640 B, GSL 1,184 B on both cards at
+    # TD_KMAX = 128.  TD_KMAX 256 (2026-10-12, the dycore's level ceiling)
+    # doubles the stress profiles: KIM 1,152 B, GSL 2,208 B on sm_86 at
+    # NVRTC 12.9.86, so GSL reserves (2,208 - 1,024) B per resident thread.
     "terrain_drag_composed": ChainedTranslationUnitFrame(
         module="terrain_drag_composed",
-        max_local_size_bytes=1184,
+        max_local_size_bytes=2208,
         covers=frozenset({"terrain_drag"})),
 }
 
@@ -2711,6 +2774,57 @@ for _tu_name, _tu in CHAINED_TRANSLATION_UNIT_FRAMES.items():
             "chained translation unit")
     _seen_covers |= _tu.covers
 del _seen_covers, _tu_name, _tu
+
+#: ``rrtmg_lw_legacy_chain``'s frame follows the unit's compile-time
+#: ``RLW_MAXLAY`` -- the legacy LW column, model layers plus WRF's 4 hPa
+#: buffer layers above the model top, rounded up to the contract's tier
+#: (:func:`woof.physics_vertical_contract.legacy_longwave_layer_tier`:
+#: 128 for every column of at most 128 layers, else a multiple of 64) --
+#: at 16 B per layer: ``rlw_rtrn_march`` and its coalesced twin each hold
+#: four float columns (atrans/atot/bbugas/bbutot) of RLW_MAXLAY entries.
+#:
+#: MEASURED 2026-10-12 on sm_86 (RTX A6000) through the production loader
+#: (``woof.core.rrtmg_lw.gpu_local_frame_bytes(maxlay)``) at NVRTC 12.9 and
+#: NVRTC 13.4, RLW_MAXLAY = 64, 100 (12.9 only), 128, 129, 192, 256, 269,
+#: 320, 384: the unit's widest frame is exactly 16 x RLW_MAXLAY at every
+#: one on both compilers (1,024 / 1,600 / 2,048 / 2,064 / 3,072 / 4,096 /
+#: 4,304 / 5,120 / 6,144 B; ``rlw_cldprmc`` stays 64 B, every other kernel
+#: 0 B).  The shipped-tier 2,048 B is also the sm_120 / sm_89 reading the
+#: row above records; deeper tiers were NOT re-measured on those
+#: architectures and are priced by the same per-layer law (the frame is
+#: the four arrays and nothing else at every tier read).
+RRTMG_LW_LEGACY_CHAIN_BYTES_PER_LAYER = 16
+
+
+def rrtmg_lw_legacy_chain_frame_bytes(nlayers: int) -> int:
+    """Widest local frame of the legacy LW unit a column of ``nlayers``
+    radiation layers (``legacy_radiation_layer_counts(nz, p_top)[0]``)
+    launches: the shipped-tier row of
+    :data:`CHAINED_TRANSLATION_UNIT_FRAMES` plus 16 B per layer of tier
+    above 128."""
+    from woof.physics_vertical_contract import (
+        LEGACY_LONGWAVE_SHIPPED_LAYER_TIER, legacy_longwave_layer_tier)
+    tier = legacy_longwave_layer_tier(nlayers)
+    return (CHAINED_TRANSLATION_UNIT_FRAMES[
+                "rrtmg_lw_legacy_chain"].max_local_size_bytes
+            + RRTMG_LW_LEGACY_CHAIN_BYTES_PER_LAYER
+            * (tier - LEGACY_LONGWAVE_SHIPPED_LAYER_TIER))
+
+
+def _check_rrtmg_lw_legacy_chain_law() -> None:
+    from woof.physics_vertical_contract import (
+        LEGACY_LONGWAVE_SHIPPED_LAYER_TIER)
+    shipped = CHAINED_TRANSLATION_UNIT_FRAMES[
+        "rrtmg_lw_legacy_chain"].max_local_size_bytes
+    if shipped != (RRTMG_LW_LEGACY_CHAIN_BYTES_PER_LAYER
+                   * LEGACY_LONGWAVE_SHIPPED_LAYER_TIER):
+        raise RuntimeError(
+            "rrtmg_lw_legacy_chain: the shipped-tier frame no longer equals "
+            "16 B x RLW_MAXLAY, so the per-layer law that prices deeper "
+            "tiers is unmeasured; re-read the unit at several tiers")
+
+
+_check_rrtmg_lw_legacy_chain_law()
 
 #: Kernel modules every integration loads regardless of the physics
 #: selectors: dynamics, diffusion, nesting, lateral boundaries, health and
@@ -2942,14 +3056,12 @@ _PBL_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
     # ``validate_myj_pbl_outputs`` is a host reduction over the returned
     # fields (woof/core/physics.py:2625) and compiles nothing.
     #
-    # The frame this selects is the widest of any PBL in the tree --
-    # KERNEL_MAX_LOCAL_SIZE_BYTES["myjpbl"] = 9,232 B at the compiled
-    # MYJ_KMAX = 128 tier, ~2.00 GiB of reservation on the reference card
-    # by the model at the head of docs/kernel_local_memory_bounds.md.  It
-    # is a flat row and not a tiered one because woof/core/myjpbl.py
-    # compiles at the source's fixed bound rather than at nz, so it is the
-    # price of selecting MYJ at all; the row's own comment records that
-    # specializing it is a real saving and a separate change.
+    # The frame this selects was the widest of any PBL in the tree --
+    # 9,232 B at the compiled MYJ_KMAX = 128 tier, ~2.00 GiB of
+    # reservation on the reference card -- until 2026-10-12, when the
+    # column moved into a global workspace sized to the runtime nz
+    # (KERNEL_MAX_LOCAL_SIZE_BYTES["myjpbl"] = 0; the workspace is priced
+    # by myj_column_workspace_bytes).
     MYJ_PBL_SCHEME: ("myjpbl",),
     # MYNN-EDMF.  THREE modules (row widened by the 2026-08-31 scheme-5
     # enumeration fix; it said one module and hid two): the launcher stack
@@ -3045,9 +3157,11 @@ _SELECTOR_TABLES = (
 #: and BEP+BEM's composed unit ``urban_bem_composed`` (woof/core/
 #: urban_bem.py) with the same couple.  Under MYJ, options 2 and 3 replace
 #: the MYJ PBL call with MYJURB (woof/core/physics.py), whose
-#: myjurb.cu frame is 10,256 B on sm_89 at NVRTC 13.4.92: on an RTX 4090
-#: that is a 1.7 GiB launch-time reservation the fit gate did not charge
-#: before this row existed.
+#: myjurb.cu frame was 10,256 B on sm_89 at NVRTC 13.4.92 -- a 1.7 GiB
+#: launch-time reservation on an RTX 4090 -- until its column moved into a
+#: global workspace (0 B since 2026-10-12, priced by
+#: myj_column_workspace_bytes).  The module stays listed so a regression
+#: of its frame is priced.
 _URBAN_KERNEL_MODULES: dict[int, tuple[str, ...]] = {
     0: (),
     1: ("urban_ucm",),
@@ -3237,6 +3351,21 @@ def kernel_local_frame_bytes(
             frame = specialized.frame_bytes(levels)
             if frame > frames.get(module, -1):
                 frames[module] = frame
+    # The legacy LW unit is priced above at its shipped RLW_MAXLAY = 128
+    # tier; a domain whose radiation column (model layers plus WRF's
+    # buffer layers above p_top) is deeper compiles, and is priced at,
+    # its own tier.
+    lw_top = float(getattr(exp.vertical, "p_top", 0.0) or 0.0)
+    for dc in exp.domains:
+        if "rrtmg_lw_legacy_chain" not in domain_kernel_modules(
+                dc, prices_refl=prices_refl):
+            continue
+        from woof.physics_vertical_contract import (
+            legacy_radiation_layer_counts)
+        frame = rrtmg_lw_legacy_chain_frame_bytes(
+            legacy_radiation_layer_counts(int(dc.run.nz), lw_top)[0])
+        if frame > frames.get("rrtmg_lw_legacy_chain", -1):
+            frames["rrtmg_lw_legacy_chain"] = frame
     # ``acoustic`` is in CORE_KERNEL_MODULES, so it is priced above at its
     # shipped-tier row; a domain deeper than the shipped tier raises that
     # row to its own tier.  The launcher owns the ladder (it is the thing
@@ -3249,39 +3378,8 @@ def kernel_local_frame_bytes(
         frame = ACOUSTIC_TIER_FRAME.frame_bytes(tier)
         if frame > frames.get(ACOUSTIC_TIER_FRAME.module, -1):
             frames[ACOUSTIC_TIER_FRAME.module] = frame
-    # ``wdm6`` and ``wsm6`` are the CONDITIONAL tiered modules, so
-    # unlike acoustic it is priced PER DOMAIN THAT SELECTS IT.  Both halves
-    # of that matter: a 40-level WDM6 child beside a 100-level WSM6 parent
-    # must be priced at WDM6's own 64 tier, not raised to a tier WDM6 has no
-    # kernel for -- and the parent's 100 levels must not reach WDM6's
-    # level-bound refusal at all, because the parent never launches it.  The
-    # ladder lives in the CuPy-free constants leaf, so this still prices on
-    # a host with no device.
-    from woof.core.wdm6_constants import wdm6_level_tier
-
-    for dc in exp.domains:
-        if WDM6_TIER_FRAME.module not in domain_kernel_modules(
-                dc, prices_refl=prices_refl):
-            continue
-        frame = WDM6_TIER_FRAME.frame_bytes(wdm6_level_tier(int(dc.run.nz)))
-        if frame > frames.get(WDM6_TIER_FRAME.module, -1):
-            frames[WDM6_TIER_FRAME.module] = frame
-    # ``wsm6`` prices the same way, and the same two halves matter: a
-    # 40-level WSM6 child beside a 100-level Morrison parent takes WSM6's
-    # own 64 tier rather than a tier WSM6 has no kernel for, and the
-    # parent's 100 levels never reach WSM6's level-bound refusal on behalf
-    # of a domain that does not launch it.
-    from woof.core.wsm6_constants import wsm6_level_tier
-
-    for dc in exp.domains:
-        if WSM6_TIER_FRAME.module not in domain_kernel_modules(
-                dc, prices_refl=prices_refl):
-            continue
-        frame = WSM6_TIER_FRAME.frame_bytes(wsm6_level_tier(int(dc.run.nz)))
-        if frame > frames.get(WSM6_TIER_FRAME.module, -1):
-            frames[WSM6_TIER_FRAME.module] = frame
     # ``ieva`` prices per domain that turns zadvect_implicit on, at that
-    # domain's own tier, exactly as wdm6/wsm6 do.
+    # domain's own tier (as wdm6/wsm6 did before their workspace cut).
     from woof.core.ieva_constants import level_tier as ieva_level_tier
 
     for dc in exp.domains:
@@ -3291,6 +3389,40 @@ def kernel_local_frame_bytes(
         frame = IEVA_TIER_FRAME.frame_bytes(ieva_level_tier(int(dc.run.nz)))
         if frame > frames.get(IEVA_TIER_FRAME.module, -1):
             frames[IEVA_TIER_FRAME.module] = frame
+    # ``sase`` prices per domain that selects it, at that domain's own
+    # SASE_KMAX tier -- and REPLACES the flat row rather than raising it,
+    # because the flat row is the census tier (128) no run compiles unless
+    # its nz is in (64, 128].  A depth past the ceiling is the vertical
+    # contract's refusal to make, not this pricer's, so it is priced at the
+    # ceiling tier here.
+    from woof.core.sase_limits import (MAX_COLUMN_LEVELS as _SASE_MAX,
+                                       kmax_tier as sase_kmax_tier)
+
+    sase_frames = [
+        SASE_TIER_FRAME.frame_bytes(
+            sase_kmax_tier(min(max(int(dc.run.nz), 1), _SASE_MAX)))
+        for dc in exp.domains
+        if SASE_TIER_FRAME.module in domain_kernel_modules(
+            dc, prices_refl=prices_refl)]
+    if sase_frames:
+        frames[SASE_TIER_FRAME.module] = max(sase_frames)
+
+    # ``rrtmgp_rte`` compiles its solvers to each call's radiation layer
+    # count, so a domain whose column passes 128 layers prices above the
+    # flat row (rrtmgp_rte_frame_bytes), per domain that launches it and
+    # per spectrum it selects.
+    p_top = float(getattr(getattr(exp, "vertical", None), "p_top", 0.0)
+                  or 0.0)
+    for dc in exp.domains:
+        if RRTMGP_RTE_SW_TIER_FRAME.module not in domain_kernel_modules(
+                dc, prices_refl=prices_refl):
+            continue
+        lw_scheme, sw_scheme = radiation_scheme_ids(dc.run)
+        frame = rrtmgp_rte_frame_bytes(
+            int(dc.run.nz), p_top,
+            longwave=lw_scheme == 4, shortwave=sw_scheme == 4)
+        if frame > frames.get(RRTMGP_RTE_SW_TIER_FRAME.module, -1):
+            frames[RRTMGP_RTE_SW_TIER_FRAME.module] = frame
     for module, shallow_frame in THOMPSON_SHALLOW_KERNEL_FRAMES.items():
         selected_levels = [int(dc.run.nz) for dc in exp.domains
                            if module in domain_kernel_modules(
@@ -3450,8 +3582,74 @@ def column_workspace_bytes(
             + kf_column_workspace_bytes(exp, profile=profile)
             + ysu_column_workspace_bytes(exp, profile=profile)
             + shinhong_column_workspace_bytes(exp, profile=profile)
+            + myj_column_workspace_bytes(exp, profile=profile)
             + ntiedtke_column_workspace_bytes(exp, profile=profile)
-            + uwpbl_column_workspace_bytes(exp, profile=profile))
+            + uwpbl_column_workspace_bytes(exp, profile=profile)
+            + wsm6_column_workspace_bytes(exp, profile=profile)
+            + wdm6_column_workspace_bytes(exp, profile=profile))
+
+
+def wsm6_column_workspace_bytes(
+        exp: ExperimentConfig, *,
+        profile: DeviceLocalMemoryProfile | None = None) -> int:
+    """Device bytes the WSM6 column workspace holds, or zero.
+
+    The term that REPLACED WSM6's local-memory reservation (2026-10-12).
+    ``woof/core/kernels/wsm6.cu`` used to keep ~30 column arrays per
+    thread in the local frame at a compile-time 64/80 tier -- 7,216 /
+    9,008 B per thread times the card's whole resident-thread capacity --
+    and could not run deeper than 80 levels.  The arrays now live in a
+    global workspace ``woof/core/wsm6.py`` allocates per call, sized to
+    the columns in flight -- ``SMs x WSM6_TILE_BLOCKS_PER_SM x WSM6_BLOCK``
+    -- and to the RUNTIME ``nz`` (``nz + 1`` per slot), so it follows the
+    level count linearly up to the scheme's 256-level ceiling.
+
+    Bounded by the column count: a domain smaller than one tile never
+    allocates a whole tile.  The worst domain, because the workspace is a
+    per-call transient released between domains.  Zero for every
+    configuration that does not select ``mp_physics = 6``.
+    """
+    # wsm6_constants, not wsm6: the launcher imports cupy at module scope.
+    from woof.core.wsm6_constants import (
+        WSM6_BLOCK, WSM6_TILE_BLOCKS_PER_SM, wsm6_workspace_floats)
+
+    profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
+    tile_cap = (profile.multiprocessor_count * WSM6_TILE_BLOCKS_PER_SM
+                * WSM6_BLOCK)
+    worst = 0
+    for dc in exp.domains:
+        if int(dc.run.mp_physics) != 6:
+            continue
+        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        worst = max(worst, wsm6_workspace_floats(int(dc.run.nz), columns) * 4)
+    return int(worst)
+
+
+def wdm6_column_workspace_bytes(
+        exp: ExperimentConfig, *,
+        profile: DeviceLocalMemoryProfile | None = None) -> int:
+    """Device bytes the WDM6 column workspace holds, or zero.
+
+    WSM6's cut (:func:`wsm6_column_workspace_bytes`) applied to
+    ``woof/core/kernels/wdm6.cu``: ~37 column arrays per thread that were a
+    9,264 / 11,568 B frame at the 64/80 tier now live in a workspace
+    ``woof/core/wdm6.py`` sizes to the columns in flight and to the runtime
+    ``nz``.  Zero for every configuration that does not select
+    ``mp_physics = 16``.
+    """
+    from woof.core.wdm6_constants import (
+        WDM6_BLOCK, WDM6_TILE_BLOCKS_PER_SM, wdm6_workspace_floats)
+
+    profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
+    tile_cap = (profile.multiprocessor_count * WDM6_TILE_BLOCKS_PER_SM
+                * WDM6_BLOCK)
+    worst = 0
+    for dc in exp.domains:
+        if int(dc.run.mp_physics) != 16:
+            continue
+        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        worst = max(worst, wdm6_workspace_floats(int(dc.run.nz), columns) * 4)
+    return int(worst)
 
 
 def uwpbl_column_workspace_bytes(
@@ -3579,6 +3777,44 @@ def shinhong_column_workspace_bytes(
         columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
         worst = max(worst,
                     shinhong_workspace_floats(int(dc.run.nz), columns) * 4)
+    return int(worst)
+
+
+def myj_column_workspace_bytes(
+        exp: ExperimentConfig, *,
+        profile: DeviceLocalMemoryProfile | None = None) -> int:
+    """Device bytes the MYJ (or MYJURB) column workspace holds, or zero.
+
+    The term that REPLACED MYJ's local-memory reservation on 2026-10-12.
+    ``woof/core/kernels/myjpbl.cu`` (19 column arrays) and
+    ``woof/core/kernels/myjurb.cu`` (24, its sf_urban_physics 2/3
+    companion, which replaces the MYJPBL call on that domain) keep their
+    columns in a global workspace instead of a per-thread frame, sized to
+    the columns in flight -- ``SMs x MYJ_TILE_BLOCKS_PER_SM x MYJ_BLOCK``
+    -- and to the RUNTIME level count rather than to a compile-time bound.
+    The frames they replaced were 9,232 B and 10,256-12,304 B at a
+    128-level bound, ~2 GiB of reservation each on a 170-SM card, and
+    would have doubled at the 256-level ceiling this made reachable.
+
+    Worst domain, not a sum over domains: the launcher allocates the
+    workspace per call and the pool keeps the largest block.
+    """
+    from woof.core.physics_inventory import (
+        MYJ_BLOCK, MYJ_TILE_BLOCKS_PER_SM, MYJURBWS_SLOTS, MYJWS_SLOTS,
+        myj_workspace_floats)
+
+    profile = MEASURED_LOCAL_MEMORY_PROFILE if profile is None else profile
+    tile_cap = (profile.multiprocessor_count * MYJ_TILE_BLOCKS_PER_SM
+                * MYJ_BLOCK)
+    worst = 0
+    for dc in exp.domains:
+        if int(dc.run.bl_pbl_physics) != MYJ_PBL_SCHEME:
+            continue
+        urban = int(getattr(dc.run, "sf_urban_physics", 0) or 0)
+        slots = MYJURBWS_SLOTS if urban in (2, 3) else MYJWS_SLOTS
+        columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
+        worst = max(worst, myj_workspace_floats(
+            int(dc.run.nz), columns, slots=slots) * 4)
     return int(worst)
 
 
@@ -6106,9 +6342,15 @@ def rrtmgp_workspace_phases(nz: int, column_chunk: int, p_top: float = 5000.0
     lw_g, sw_g = meta["ngpt_lw"], meta["ngpt_sw"]
     lw_upper, sw_upper = rrtmgp_above_model_layer_counts(p_top)
     lw_nz, sw_nz = int(nz) + lw_upper, int(nz) + sw_upper
-    if max(lw_nz, sw_nz) > 128:
+    # The bound is on MODEL levels (the RTE solvers compile to each call's
+    # own layer count and no RRTMGP kernel holds a fixed per-layer array);
+    # the above-model layers ride on top of it at any model top.
+    from woof.physics_vertical_contract import MAX_RRTMGP_MODEL_LEVELS
+
+    if int(nz) > MAX_RRTMGP_MODEL_LEVELS:
         raise ValueError(
-            "RRTMGP workspace cannot exceed the 128-layer CUDA solver limit")
+            "RRTMGP workspace requires model levels nz <= "
+            f"{MAX_RRTMGP_MODEL_LEVELS}, got nz={int(nz)}")
 
     # CARRIED FIRST.  An RTE phase reads back only a few of its optics
     # phase's slots, and `phase()` assigns offsets by walking the layout in
@@ -11569,6 +11811,7 @@ def check_main(args) -> int:
         kf_ws = kf_column_workspace_bytes(exp, profile=profile)
         ysu_ws = ysu_column_workspace_bytes(exp, profile=profile)
         shinhong_ws = shinhong_column_workspace_bytes(exp, profile=profile)
+        myj_ws = myj_column_workspace_bytes(exp, profile=profile)
         # Kept out of the f-string: a line break inside an f-string
         # expression is PEP 701 (Python 3.12+) syntax, and the supported
         # floor is 3.11 -- the 1.2.0 release workflow failed on exactly
@@ -11579,7 +11822,7 @@ def check_main(args) -> int:
         # to the per-card term (task 206).
         context_bytes = profile.cuda_context_bytes
         remeasured_bytes = (estimate.alloc_estimate_bytes + widest
-                            + gf_ws + kf_ws + ysu_ws + shinhong_ws
+                            + gf_ws + kf_ws + ysu_ws + shinhong_ws + myj_ws
                             + context_bytes
                             + reserve.retention_residual_bytes)
         gf_ws_term = (f" + GF column workspace {_format_bytes(gf_ws)}"
@@ -11591,6 +11834,8 @@ def check_main(args) -> int:
         ysu_ws_term += (" + Shin-Hong column workspace "
                         f"{_format_bytes(shinhong_ws)}"
                         if shinhong_ws else "")
+        ysu_ws_term += (f" + MYJ column workspace {_format_bytes(myj_ws)}"
+                        if myj_ws else "")
         print(f"  NON-POOL: CUDA context "
               f"{_format_bytes(context_bytes)} + local-memory backing "
               f"store {_format_bytes(widest)} "
@@ -12306,17 +12551,18 @@ __all__ = [
     "UnderPricedKernelFrame", "under_priced_kernel_frames",
     "MEASURED_LOCAL_MEMORY_PROFILE",
     "CHAINED_TRANSLATION_UNIT_FRAMES", "ChainedTranslationUnitFrame",
+    "RRTMG_LW_LEGACY_CHAIN_BYTES_PER_LAYER", "rrtmg_lw_legacy_chain_frame_bytes",
     "UNMEASURED_KERNEL_MODULES", "local_memory_profile_from_device",
     "cap_free_to_physical", "cap_free_to_device_wide", "device_physical_total_bytes",
     "device_rail_free_bytes", "device_wide_used_bytes",
     "column_workspace_bytes", "gf_column_workspace_bytes",
     "kf_column_workspace_bytes", "ysu_column_workspace_bytes",
-    "shinhong_column_workspace_bytes",
+    "shinhong_column_workspace_bytes", "wsm6_column_workspace_bytes",
+    "wdm6_column_workspace_bytes", "myj_column_workspace_bytes",
     "kernel_local_memory_bytes", "non_pool_device_bytes",
     "physics_kernel_modules", "refl_diagnostic_reachable",
     "LEVEL_SPECIALIZED_KERNEL_FRAMES", "LevelSpecializedFrame",
-    "ACOUSTIC_TIER_FRAME", "TieredKernelFrame", "WDM6_TIER_FRAME",
-    "WSM6_TIER_FRAME",
+    "ACOUSTIC_TIER_FRAME", "SASE_TIER_FRAME", "TieredKernelFrame",
     "domain_kernel_modules", "kernel_local_frame_bytes",
     "ALLOCATOR_HEADROOM", "AllocReport", "CAL_D01_DEVICE_FOOTPRINT_BYTES",
     "CAL_D01_WORKSPACE_BYTES",

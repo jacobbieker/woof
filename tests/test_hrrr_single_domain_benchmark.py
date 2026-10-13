@@ -808,8 +808,8 @@ def test_native_hrrr_experiment_threads_admitted_explicit_vertical_grid(nz):
     # the four-level geometry control remains independent of the MYNN
     # route default's five-level minimum. At p_top = 12_345 Pa each 4/4 arm builds
     # 31 cap layers above the model top, so the deepest case is
-    # 80 + 31 = 111 radiation layers against a bound of 128 on either
-    # engine (MAX_LEGACY_LONGWAVE_LAYERS and MAX_RRTMGP_LAYERS,
+    # 80 + 31 = 111 radiation layers, inside both engines' 256 model levels
+    # (MAX_LEGACY_LONGWAVE_MODEL_LEVELS and MAX_RRTMGP_MODEL_LEVELS,
     # woof/physics_vertical_contract.py).  The deep case used to swap
     # to a shallower-bounded suite to dodge a 64-layer shortwave cap
     # that no engine holds: 64 is the layer count a 51-level ladder
@@ -845,25 +845,49 @@ def _deep_column_experiment(nz, profile):
         physics_profile=profile)
 
 
+def test_the_legacy_arm_bounds_its_longwave_column_by_model_depth():
+    """The legacy LW engine compiles its per-thread column (RLW_MAXLAY) for
+    the run's layer count, so it no longer refuses at 128 radiation layers:
+    98 + 31 = 129 and 128 + 31 = 159 build, and its own refusal is the
+    dycore's nz <= 256 (the 31 cap layers ride on top).  At 129 levels this
+    suite's YSU PBL refuses first; that is YSU's bound, not radiation's."""
+    from woof.physics_compat import PhysicsVerticalPreflightError
+
+    profile = THOMPSON_LEGACY_RRTMG_PROFILE_ID
+    assert _deep_column_experiment(98, profile).root.run.nz == 98
+    assert _deep_column_experiment(128, profile).root.run.nz == 128
+    with pytest.raises(PhysicsVerticalPreflightError) as caught:
+        _deep_column_experiment(257, profile)
+    assert "legacy RRTMG longwave requires" in str(caught.value)
+    assert "(nz <= 256)" in str(caught.value)
+
+
 @pytest.mark.parametrize(
-    ("profile", "engine"),
-    ((THOMPSON_LEGACY_RRTMG_PROFILE_ID, "legacy RRTMG"),
-     (THOMPSON_RTE_RRTMGP_PROFILE_ID, "RTE+RRTMGP")))
-def test_either_radiation_arm_bounds_a_longwave_column_at_the_same_number(
-        profile, engine):
+    ("profile", "inside", "outside", "refusal"),
+    (
+     # 256 + 31 = 287 radiation layers, 159 past the old 128-layer cap,
+     # and 256 is also this suite's YSU PBL ceiling.  The model-level
+     # refusal needs no p_top, so the first (RunConfig, p_top-free) pass
+     # of the preflight already says it.
+     (THOMPSON_RTE_RRTMGP_PROFILE_ID, 256, 257,
+      "RTE+RRTMGP longwave requires model levels nz <= 256"),
+    ))
+def test_either_radiation_arm_bounds_a_longwave_column_by_number(
+        profile, inside, outside, refusal):
     """The one real limit these two suites carry, both directions.
 
-    They differ in the radiation engine and nothing else, and the engine
-    is NOT what the limit depends on: each 4/4 longwave engine bounds a
-    column at 128 radiation layers -- the legacy one at WRF's
-    RLW_MAXLAY, the modern one at the Planck-source kernel's fixed
-    pfrac[128] -- and the resolved vertical preflight refuses either by
-    number, before a preparation has been paid for.  A column is deeper
-    than the ladder because a cap is built above the model top, 31
-    layers at this p_top on both arms, so the depth that refuses is the
-    same depth on both.  Binding this to the route default would make
-    the test follow whichever arm the route currently names and stop
-    covering the other; both are named instead.
+    They differ in the radiation engine and nothing else, and each engine
+    states its own bound.  The legacy 4/4 longwave has its own test above
+    (its RLW_MAXLAY became a per-run tier, so it too bounds model levels at
+    256).  The modern one bounds
+    MODEL levels at 256 and builds its cap on top at any p_top: no RRTMGP
+    kernel holds a fixed per-layer array since the Planck-source kernel's
+    ``pfrac[128]`` became a one-layer window.  A column is deeper than the
+    ladder because a cap is built above the model top, 31 layers at this
+    p_top on both arms.  The resolved vertical preflight refuses either by
+    number, before a preparation has been paid for.  Binding this to the
+    route default would make the test follow whichever arm the route
+    currently names and stop covering the other; both are named instead.
     """
     from woof.physics_compat import PhysicsVerticalPreflightError
 
@@ -871,13 +895,12 @@ def test_either_radiation_arm_bounds_a_longwave_column_at_the_same_number(
     # one: the shortwave workspaces are sized to the run on both arms.
     assert _deep_column_experiment(49, profile).root.run.nz == 49
     assert _deep_column_experiment(80, profile).root.run.nz == 80
-    # 97 + 31 = 128 reaches the bound exactly and still builds.
-    assert _deep_column_experiment(97, profile).root.run.nz == 97
-    # 98 + 31 = 129 is over it, and the refusal says so in numbers.
+    # The deepest admitted column builds ...
+    assert _deep_column_experiment(inside, profile).root.run.nz == inside
+    # ... and one level more is refused, and the refusal says so in numbers.
     with pytest.raises(PhysicsVerticalPreflightError) as caught:
-        _deep_column_experiment(98, profile)
-    assert (f"{engine} longwave requires model plus cap layers <= 128, "
-            "got 98+31=129") in str(caught.value)
+        _deep_column_experiment(outside, profile)
+    assert refusal in str(caught.value)
 
 
 def test_the_route_default_activates_the_explicit_fork_composition():

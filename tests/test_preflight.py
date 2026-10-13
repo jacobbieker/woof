@@ -3395,7 +3395,7 @@ def test_check_cli_estimator_json(capsys):
     assert frames_4dom["rrtmgp_rte"] == 3600
     assert frames_4dom["morrison"] == max(frames_4dom.values()) == 5120
     assert "kf" in payload["kernel_modules"]
-    assert frames_4dom["kf"] == 512
+    assert frames_4dom["kf"] == 1024  # 512 until KF_KMAX 128 -> 256
     assert pf.kf_column_workspace_bytes(
         exp_4dom, profile=reference) == 443555840
     # Same +349,962,240 B context shift as ``reserve_bytes`` above, the
@@ -4234,6 +4234,32 @@ CONFIG_4DOM_MYNN_KF = ROOT / "configs" / "real74_4dom_mynn_norad.toml"
 CONFIG_4DOM_MYNN_NOCU = (
     ROOT / "configs" / "real74_4dom_mynn_norad_nocu.toml")
 
+@pytest.mark.parametrize(
+    ("nz", "p_top", "frame"),
+    # (nz + nint(p_top / 400 Pa)) radiation layers -> RLW_MAXLAY tier
+    # (128, else a multiple of 64) -> 16 B per tier layer.
+    ((40, 0.0, 2048), (128, 0.0, 2048), (129, 0.0, 3072),
+     (200, 0.0, 4096), (256, 0.0, 4096), (256, 100.0, 4096),
+     (256, 5000.0, 5120), (100, 26000.0, 3072)))
+def test_legacy_lw_chain_frame_follows_the_compiled_layer_tier(
+        nz, p_top, frame):
+    """The legacy LW unit's ``rlw_rtrn_march`` column is compiled at the
+    run's ``RLW_MAXLAY`` tier, so its frame -- and the launch-time
+    backing store -- is priced per layer of that tier (measured exactly
+    16 B x RLW_MAXLAY on sm_86 at NVRTC 12.9 and 13.4; the 2,048 B
+    shipped-tier row is the sm_120 reading too)."""
+    run = RunConfig(**dict(_TINY, nz=nz), ra_physics=4,
+                    ra_rrtmg_variant="rrtmg_legacy")
+    exp = experiment_from_run_config(run, datetime(1974, 4, 3, 12))
+    exp = dataclasses.replace(
+        exp, vertical=dataclasses.replace(exp.vertical, p_top=p_top))
+    assert pf.rrtmg_lw_legacy_chain_frame_bytes(
+        nz + int(p_top / 400.0 + 0.5)) == frame
+    assert pf.kernel_local_frame_bytes(exp)["rrtmg_lw_legacy_chain"] == frame
+    assert (pf.kernel_local_memory_bytes(exp)
+            >= pf.MEASURED_LOCAL_MEMORY_PROFILE.reservation_bytes(frame))
+
+
 #: The per-thread frame ``kf_column`` compiled to BEFORE its column
 #: workspace landed (2026-08-21): 188 B per level, rounded up to the local
 #: frame's 8-byte granularity, at whatever ``KF_KMAX`` the launcher chose.
@@ -4265,13 +4291,14 @@ def test_the_local_memory_law_reproduces_every_measurement():
                 f"vs measured {measured_mib} MiB")
     # MEASURED_KF_RESERVATION_MIB was read off `kf_column`'s first launch
     # at KF_KMAX = 128, so the law is checked against THAT frame and not
-    # against today's row -- today's row is 512 B and reserves nothing,
-    # which is the point of the workspace, not a counter-example to the law.
+    # against today's row -- today's row is 1,024 B (512 B until KF_KMAX
+    # went 128 -> 256) and reserves nothing, which is the point of the
+    # workspace, not a counter-example to the law.
     kf_predicted = profile.reservation_bytes(
         KF_AS_BUILT_FRAME.frame_bytes(128)) / 1024 ** 2
     assert abs(kf_predicted - MEASURED_KF_RESERVATION_MIB) <= 1.0
-    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 512
-    assert profile.reservation_bytes(512) == 0
+    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 1024
+    assert profile.reservation_bytes(1024) == 0
 
 
 def test_a_frame_inside_the_default_stack_reserves_nothing():
@@ -4304,7 +4331,7 @@ def test_the_reservation_does_not_grow_with_domain_count():
             == pf.kernel_local_memory_bytes(exp4)
             == pf.MEASURED_LOCAL_MEMORY_PROFILE.reservation_bytes(5120))
     # ... and it is no longer `kf` that sets it.
-    assert pf.kernel_local_frame_bytes(exp4)["kf"] == 512
+    assert pf.kernel_local_frame_bytes(exp4)["kf"] == 1024
 
 
 @requires_reference_bundle
@@ -4314,7 +4341,8 @@ def test_the_kf_reservation_stopped_growing_with_the_level_count():
     Its frame used to be 188 B per level -- 9,216 B at 49, 18,424 B at 98 --
     which is why preflight priced it per domain.  The column workspace
     (2026-08-21) took 52 of its 54 column arrays off the stack, so the frame
-    is now a flat 512 B at every level count and the module is compiled ONCE
+    is now a flat 512 B (1,024 B since KF_KMAX went 128 -> 256) at every
+    level count and the module is compiled ONCE
     instead of once per nz.  A level-linear model would now UNDER-price
     nothing and OVER-price everything, so it is retired rather than refitted;
     `refl` still carries one and still moves.
@@ -4324,8 +4352,8 @@ def test_the_kf_reservation_stopped_growing_with_the_level_count():
         dataclasses.replace(dc, run=dataclasses.replace(dc.run, nz=98))
         for dc in exp.domains))
     assert "kf" not in pf.LEVEL_SPECIALIZED_KERNEL_FRAMES
-    assert pf.kernel_local_frame_bytes(exp)["kf"] == 512
-    assert pf.kernel_local_frame_bytes(deeper)["kf"] == 512
+    assert pf.kernel_local_frame_bytes(exp)["kf"] == 1024
+    assert pf.kernel_local_frame_bytes(deeper)["kf"] == 1024
     # The model that IS still level-specialized still grows with nz.
     refl = pf.LEVEL_SPECIALIZED_KERNEL_FRAMES["refl"]
     assert refl.frame_bytes(98) > refl.frame_bytes(49)
@@ -4387,66 +4415,67 @@ def test_the_run_door_prices_wdm6_instead_of_refusing_mp_16():
     modules = pf.physics_kernel_modules(exp)
     assert "wdm6" in modules and "wsm6" not in modules
     frames = pf.kernel_local_frame_bytes(exp)
-    # nz = 4 compiles the 64 tier, which is the recorded row.
-    assert frames["wdm6"] == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wdm6"] == 9264
-    assert pf.kernel_local_memory_bytes(exp) > 0
+    # One frame at every nz since the 2026-10-12 workspace cut, and it is
+    # the recorded row; the column arrays are priced as workspace instead.
+    assert frames["wdm6"] == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wdm6"] == 0
+    assert pf.wdm6_column_workspace_bytes(exp) > 0
+    assert pf.kernel_local_memory_bytes(exp) >= 0
     estimate = pf.estimate_experiment(exp)
     assert estimate.alloc_estimate_bytes > 0
 
 
-def test_wdm6_is_priced_at_the_tier_its_launcher_compiles_not_at_nz():
-    """The two rungs, and the two ways an nz-linear model would be wrong.
+def test_wdm6_is_priced_as_a_workspace_that_follows_nz_not_a_tiered_frame():
+    """WDM6's column arrays left the local frame on 2026-10-12.
 
-    ``woof/core/wdm6.py`` compiles ``WDM6_KMAX`` at 64 or 80, never at
-    ``nz``, so a 49-level WDM6 run launches the 64-tier kernel and holds
-    its 9,264 B frame.  Pricing 144 x 49 = 7,056 B there would under-price
-    the reservation by 2,208 B/thread -- about 550 MiB of device memory the pool
-    never reports -- which is the direction the header at the top of
-    preflight.py says put a run 1,630 MiB over.
+    ``woof/core/wdm6.py`` used to compile ``WDM6_KMAX`` at a 64 or 80 tier
+    (9,264 / 11,568 B per thread, times the card's whole resident-thread
+    capacity) and refused anything deeper.  It now compiles ONE 0 B frame
+    and keeps the arrays in a workspace sized to the columns in flight and
+    to the runtime ``nz`` -- so the frame no longer moves with ``nz``, the
+    workspace does (``nz + 1`` levels per slot), and the ceiling is 256.
     """
+    from woof.core.wdm6_constants import (WDM6_BLOCK, WDM6_TILE_BLOCKS_PER_SM,
+                                           WDM6WS_SLOTS)
+
     start = datetime(1974, 4, 3, 12)
 
-    def frame(nz, mp_physics=16):
-        cfg = RunConfig(**{**_TINY, "nz": nz}, moist=True, moist_cq=True,
-                        mp_physics=mp_physics)
-        return pf.kernel_local_frame_bytes(
-            experiment_from_run_config(cfg, start)).get("wdm6")
+    def exp(nz, mp_physics=16, nx=_TINY["nx"], ny=_TINY["ny"]):
+        cfg = RunConfig(**{**_TINY, "nz": nz, "nx": nx, "ny": ny},
+                        moist=True, moist_cq=True, mp_physics=mp_physics)
+        return experiment_from_run_config(cfg, start)
 
-    assert frame(4) == frame(49) == frame(64) == 9264
-    assert frame(65) == frame(80) == 11568
-    profile = pf.MEASURED_LOCAL_MEMORY_PROFILE
-    assert (profile.reservation_bytes(9264) - profile.reservation_bytes(7056)
-            ) > 500 * 1024 ** 2
-    # Deeper than the deepest compiled tier is a refusal, not a guess.
-    with pytest.raises(ValueError, match="WDM6 requires 2 <= nz <= 80"):
-        frame(96)
+    for nz in (4, 49, 64, 65, 80, 128, 256):
+        assert pf.kernel_local_frame_bytes(exp(nz)).get("wdm6") == 0, nz
+    # The workspace: whole blocks of lane-interleaved slots, nz + 1 deep,
+    # for min(columns, tile) columns.
+    small = _TINY["nx"] * _TINY["ny"]
+    blocks = -(-small // WDM6_BLOCK)
+    assert pf.wdm6_column_workspace_bytes(exp(49)) == (
+        blocks * WDM6WS_SLOTS * 50 * WDM6_BLOCK * 4)
+    big = exp(256, nx=600, ny=600)
+    tile = (pf.MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
+            * WDM6_TILE_BLOCKS_PER_SM * WDM6_BLOCK)
+    assert pf.wdm6_column_workspace_bytes(big) == (
+        tile * WDM6WS_SLOTS * 257 * 4)
+    assert pf.column_workspace_bytes(big) >= pf.wdm6_column_workspace_bytes(big)
+    # Deeper than the ceiling is a refusal, not a guess ...
+    with pytest.raises(ValueError, match="WDM6 requires 2 <= nz <= 256"):
+        pf.wdm6_column_workspace_bytes(exp(257))
     # ... and a scheme that does not launch WDM6 never reaches that bound.
-    # Morrison, not WSM6: WSM6 became the SECOND conditionally tiered module
-    # at 1.9 and carries its own 2 <= nz <= 80 ladder, so mp_physics=6 at
-    # nz = 96 is refused on WSM6's own bound before this assertion can say
-    # anything about WDM6.  The control needs a scheme that launches neither,
-    # which is what the WSM6 half of this pair uses in the mirror direction.
-    assert frame(96, mp_physics=10) is None
+    assert pf.wdm6_column_workspace_bytes(exp(300, mp_physics=10)) == 0
+    assert pf.kernel_local_frame_bytes(exp(96, mp_physics=10)).get("wdm6") is None
 
 
-def test_the_tiered_frame_model_agrees_with_the_wdm6_measurements():
-    """Both rungs, against the driver measurements they were taken from.
+def test_the_wdm6_tier_ladder_is_retired():
+    """The CPU half of the workspace cut: no tier, no tier frame, and the
+    front-door bound is the constants module's own 256."""
+    from woof.core import wdm6_constants
 
-    ``tests/test_kernel_local_bounds.py`` re-reads them off the card; this
-    is the CPU half, so a model edit fails somewhere even on a host with no
-    device.
-    """
-    from woof.core.wdm6_constants import (WDM6_KERNEL_LEVEL_TIERS,
-                                           wdm6_level_tier)
-
-    assert pf.WDM6_TIER_FRAME.define == "WDM6_KMAX"
-    assert WDM6_KERNEL_LEVEL_TIERS == (64, 80)
-    for tier, measured in ((64, 9264), (80, 11568)):
-        assert pf.WDM6_TIER_FRAME.frame_bytes(tier) == measured, tier
-    assert (pf.WDM6_TIER_FRAME.frame_bytes(pf.WDM6_TIER_FRAME.shipped_tier)
-            == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wdm6"])
-    assert wdm6_level_tier(64) == 64 and wdm6_level_tier(65) == 80
-
+    assert not hasattr(pf, "WDM6_TIER_FRAME")
+    assert not hasattr(wdm6_constants, "WDM6_KERNEL_LEVEL_TIERS")
+    assert wdm6_constants.WDM6_VERTICAL_LEVEL_BOUNDS == (2, 256)
+    from woof.physics_vertical_contract import WDM6_VERTICAL_LEVEL_BOUNDS
+    assert WDM6_VERTICAL_LEVEL_BOUNDS is wdm6_constants.WDM6_VERTICAL_LEVEL_BOUNDS
 
 def test_the_rqi_budget_shapes_materialization_and_physics_name_one_set():
     """The agreement the ``--alloc`` comment asks for, enforced.
@@ -4569,114 +4598,193 @@ def test_the_alloc_counter_advance_records_why_p3_is_out():
     assert any(slot.startswith("p3_") for slot in registry)
 
 
-def test_wsm6_is_priced_at_the_tier_its_launcher_compiles_not_at_a_flat_row():
-    """The two rungs, and the way the flat row was wrong above 64 levels.
+def test_wsm6_is_priced_as_a_workspace_that_follows_nz_not_a_tiered_frame():
+    """WSM6's column arrays left the local frame on 2026-10-12.
 
-    ``woof/core/wsm6.py`` compiles ``WSM6_KMAX`` at 64 or 80, never at
-    ``nz``, and until 1.8.9 preflight priced BOTH at the 64 row.  An
-    nz = 72 WSM6 run -- the six shipped tornado-LES configs -- therefore
-    reserved against 7,216 B while the kernel it launches holds 9,008 B:
-    1,792 B/thread, +446.2 MiB of backing store the pool never reports,
-    the direction the header at the top of preflight.py says put a run
-    1,630 MiB over.
+    ``woof/core/wsm6.py`` used to compile ``WSM6_KMAX`` at a 64 or 80 tier
+    (7,216 / 9,008 B per thread, times the card's whole resident-thread
+    capacity) and refused anything deeper.  It now compiles ONE 0 B frame
+    and keeps the arrays in a workspace sized to the columns in flight and
+    to the runtime ``nz``, up to a 256-level ceiling.
     """
+    from woof.core.wsm6_constants import (WSM6_BLOCK, WSM6_TILE_BLOCKS_PER_SM,
+                                           WSM6WS_SLOTS)
+
     start = datetime(1974, 4, 3, 12)
 
-    def frame(nz, mp_physics=6):
-        cfg = RunConfig(**{**_TINY, "nz": nz}, moist=True, moist_cq=True,
-                        mp_physics=mp_physics)
-        return pf.kernel_local_frame_bytes(
-            experiment_from_run_config(cfg, start)).get("wsm6")
+    def exp(nz, mp_physics=6, nx=_TINY["nx"], ny=_TINY["ny"]):
+        cfg = RunConfig(**{**_TINY, "nz": nz, "nx": nx, "ny": ny},
+                        moist=True, moist_cq=True, mp_physics=mp_physics)
+        return experiment_from_run_config(cfg, start)
 
-    assert frame(4) == frame(49) == frame(64) == 7216
-    assert frame(65) == frame(72) == frame(80) == 9008
-    profile = pf.MEASURED_LOCAL_MEMORY_PROFILE
-    moved = (profile.reservation_bytes(9008)
-             - profile.reservation_bytes(7216))
-    assert moved == 467927040                       # +446.2 MiB, measured
-    # Deeper than the deepest compiled tier is a refusal, not a guess.
-    with pytest.raises(ValueError, match="WSM6 requires 2 <= nz <= 80"):
-        frame(96)
+    for nz in (4, 49, 64, 65, 72, 80, 128, 256):
+        assert pf.kernel_local_frame_bytes(exp(nz)).get("wsm6") == 0, nz
+    small = _TINY["nx"] * _TINY["ny"]
+    blocks = -(-small // WSM6_BLOCK)
+    assert pf.wsm6_column_workspace_bytes(exp(72)) == (
+        blocks * WSM6WS_SLOTS * 73 * WSM6_BLOCK * 4)
+    big = exp(256, nx=600, ny=600)
+    tile = (pf.MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
+            * WSM6_TILE_BLOCKS_PER_SM * WSM6_BLOCK)
+    assert pf.wsm6_column_workspace_bytes(big) == tile * WSM6WS_SLOTS * 257 * 4
+    assert pf.column_workspace_bytes(big) >= pf.wsm6_column_workspace_bytes(big)
+    with pytest.raises(ValueError, match="WSM6 requires 2 <= nz <= 256"):
+        pf.wsm6_column_workspace_bytes(exp(257))
     # ... and a scheme that does not launch WSM6 never reaches that bound.
-    assert frame(96, mp_physics=10) is None
+    assert pf.wsm6_column_workspace_bytes(exp(300, mp_physics=10)) == 0
+    assert pf.kernel_local_frame_bytes(exp(96, mp_physics=10)).get("wsm6") is None
 
 
-def test_the_tiered_frame_model_agrees_with_the_wsm6_measurements():
-    """Both rungs, against the driver measurements they were taken from.
+def test_rrtmgp_rte_is_priced_per_radiation_layer_above_128():
+    """The RTE solvers compile RRTMGP_MAX_LAYERS to each call's own count.
 
-    ``tests/test_kernel_local_bounds.py`` re-reads them off the card; this
-    is the CPU half, so a model edit fails somewhere even on a host with
-    no device.
+    Until the RTE+RRTMGP bound moved from 128 radiation layers to 256 model
+    levels the flat 3,600 B row was every column's price, which is right
+    up to 128 layers and short above: the two-stream at 257 layers (a
+    256-level column under a 1 hPa top) holds 7,216 B.  Below 128 nothing
+    moves.  The driver half is tests/test_kernel_local_bounds.py.
     """
-    from woof.core.wsm6_constants import (WSM6_KERNEL_LEVEL_TIERS,
-                                           wsm6_level_tier)
+    frame = pf.rrtmgp_rte_frame_bytes
+    row = pf.KERNEL_MAX_LOCAL_SIZE_BYTES["rrtmgp_rte"]
+    assert row == 3600
+    # Shallow columns: the flat row, at every model top.
+    for nz, p_top in ((49, 5000.0), (115, 5000.0), (127, 100.0),
+                      (103, 10000.0)):
+        assert frame(nz, p_top) == row, (nz, p_top)
+    # Measured on sm_86 / NVRTC 12.9.86 (see RRTMGP_RTE_SW_TIER_FRAME).
+    assert frame(128, 100.0) == 3632                # SW 129 layers
+    assert frame(256, 0.0) == 7184                  # SW 256 (no top known)
+    assert frame(256, 100.0) == 7216                # SW 257, the 1 hPa top
+    assert frame(256, 5000.0) == 7216               # SW 257, LW 269
+    # The longwave solver is 8 B/layer and never the widest of the two ...
+    assert frame(256, 10000.0, shortwave=False) == row
+    # ... so a LW-only RRTMGP domain keeps the flat row.
+    assert frame(256, 100.0, shortwave=False) == row
 
-    assert pf.WSM6_TIER_FRAME.define == "WSM6_KMAX"
-    assert WSM6_KERNEL_LEVEL_TIERS == (64, 80)
-    for tier, measured in ((64, 7216), (80, 9008)):
-        assert pf.WSM6_TIER_FRAME.frame_bytes(tier) == measured, tier
-    assert (pf.WSM6_TIER_FRAME.frame_bytes(pf.WSM6_TIER_FRAME.shipped_tier)
-            == pf.KERNEL_MAX_LOCAL_SIZE_BYTES["wsm6"])
-    assert wsm6_level_tier(64) == 64 and wsm6_level_tier(65) == 80
-    # The launcher and the estimator read ONE ladder, so the adapter cannot
-    # compile a tier the model has never heard of.
+    start = datetime(1974, 4, 3, 12)
+
+    def priced(nz, **radiation):
+        cfg = RunConfig(**{**_TINY, "nz": nz}, moist=True, mp_physics=8,
+                        **radiation)
+        return pf.kernel_local_frame_bytes(
+            experiment_from_run_config(cfg, start)).get("rrtmgp_rte")
+
+    both = {"ra_lw_physics": 4, "ra_sw_physics": 4}
+    assert priced(49, **both) == row
+    assert priced(256, **both) == 7184              # p_top 0: no cap layers
+    assert priced(256, ra_lw_physics=4, ra_sw_physics=1) == row
+    assert priced(256, ra_lw_physics=0, ra_sw_physics=0) is None
+
+
+def test_sase_is_priced_at_the_tier_its_launcher_compiles():
+    """SASE compiles ``SASE_KMAX`` per run at 32 / 64 / 128 / 256.
+
+    The frame is 49 B x tier exactly (driver-read at every rung by
+    ``tests/test_kernel_local_bounds.py``), and the run is charged its OWN
+    tier: the flat 6,272 B row is only the census tier the plain loader
+    compiles, so it neither floors a shallow run nor caps a deep one.
+    """
+    from woof.config import SASE_PBL_SCHEME
+    from woof.core.sase_limits import KMAX_TIERS, kmax_tier
+
+    start = datetime(1974, 4, 3, 12)
+
+    def frame(nz, pbl=SASE_PBL_SCHEME):
+        cfg = RunConfig(**{**_TINY, "nz": nz}, moist=True,
+                        bl_pbl_physics=pbl, km_opt=0, khdif=0.0,
+                        kvdif=0.0, bldt=0.0)
+        return pf.kernel_local_frame_bytes(
+            experiment_from_run_config(cfg, start)).get("sase")
+
+    spec = pf.SASE_TIER_FRAME
+    assert (spec.define, spec.shipped_tier, spec.lowest_tier) == (
+        "SASE_KMAX", 128, KMAX_TIERS[0])
+    assert KMAX_TIERS == (32, 64, 128, 256)
+    for tier, measured in ((32, 1568), (64, 3136), (128, 6272),
+                           (256, 12544)):
+        assert spec.frame_bytes(tier) == measured, tier
+    assert spec.frame_bytes(spec.shipped_tier) == (
+        pf.KERNEL_MAX_LOCAL_SIZE_BYTES["sase"])
+    with pytest.raises(ValueError, match="below the lowest tier 32"):
+        spec.frame_bytes(16)
+    assert kmax_tier(1) == 32 and kmax_tier(256) == 256
+    assert frame(4) == frame(32) == 1568
+    assert frame(33) == frame(49) == frame(64) == 3136
+    assert frame(65) == frame(128) == 6272
+    assert frame(129) == frame(256) == 12544
+    # A scheme that does not launch SASE is never charged for it.
+    assert frame(64, pbl=1) is None
+    profile = pf.MEASURED_LOCAL_MEMORY_PROFILE
+    assert (profile.reservation_bytes(12544)
+            > profile.reservation_bytes(6272)
+            > profile.reservation_bytes(3136))
+
+
+def test_the_wsm6_tier_ladder_is_retired():
+    """The CPU half of the workspace cut, and the front door bound.
+
+    ``physics_vertical_contract`` used to keep its own literal ``(2, 80)``
+    for WSM6, and nothing bound it to the launcher's ladder, which is how
+    the deepest tier and the admitted maximum could part company.  It now
+    IMPORTS the constants module's bound, so the two are one object.
+    """
+    from woof.core import wsm6_constants
     from woof.core import wsm6 as wsm6_adapter
-    assert wsm6_adapter._kernel_capacity is wsm6_level_tier
 
-    # And the front-door bound agrees with it.  physics_vertical_contract
-    # keeps its own literal deliberately -- it is a top-level module the
-    # standalone preprocessing distribution imports without staging any
-    # CUDA-backed component -- and its docstring says component tests bind
-    # these values to their runtime counterparts.  For WSM6 nothing did,
-    # which is how the deepest tier and the admitted maximum could part
-    # company and let a front door accept an nz the launcher refuses.
+    assert not hasattr(pf, "WSM6_TIER_FRAME")
+    assert not hasattr(wsm6_constants, "WSM6_KERNEL_LEVEL_TIERS")
+    assert not hasattr(wsm6_adapter, "_kernel_capacity")
+    assert wsm6_adapter.VERTICAL_LEVEL_BOUNDS == (2, 256)
     from woof.physics_vertical_contract import WSM6_VERTICAL_LEVEL_BOUNDS
-    from woof.core.wsm6_constants import (
-        WSM6_VERTICAL_LEVEL_BOUNDS as ladder_bounds)
-    assert WSM6_VERTICAL_LEVEL_BOUNDS == ladder_bounds == (2, 80)
-    assert WSM6_VERTICAL_LEVEL_BOUNDS[1] == WSM6_KERNEL_LEVEL_TIERS[-1]
+    assert WSM6_VERTICAL_LEVEL_BOUNDS is wsm6_constants.WSM6_VERTICAL_LEVEL_BOUNDS
+    assert WSM6_VERTICAL_LEVEL_BOUNDS == (2, wsm6_constants.WSM6_MAX_LEVELS) == (2, 256)
 
 
 def test_the_six_tornado_les_configs_are_the_ones_this_moves():
-    """Reachability, named: which shipped configs the tier actually changes.
+    """Reachability, named: which shipped configs the workspace cut moves.
 
-    All six are nz = 72 four-domain WSM6 trees, so all six were priced at
-    the 64 rung.  Their local TOTAL used not to move, because ``ysu`` held
-    9,232 B on these compositions -- 224 B wider than WSM6's 80-tier frame
-    -- and the reservation is a MAX over the selected modules, so WSM6's
-    under-pricing hid behind YSU's frame.
-
-    It does not hide any more.  The YSU column workspace (2026-08-21) took
-    that frame to 0, so WSM6's 9,008 B is what these six configurations
-    now reserve against, and the tier ladder is what stands between them
-    and a mispriced rail.  That is the reachability this test names.
+    All six are nz = 72 four-domain WSM6 trees.  Until 2026-10-12 they
+    launched WSM6's 80 tier, whose 9,008 B frame was the WIDEST any of them
+    launched (YSU's went to 0 with its own workspace on 2026-08-21), so it
+    set their whole local-memory reservation.  WSM6 now compiles a 0 B
+    frame and its column arrays are a priced workspace instead, so the
+    widest launched frame on these trees is ``refl``'s, and the WSM6 term
+    moves to ``wsm6_column_workspace_bytes``.
     """
     from woof.experiment import load_experiment
+    from woof.core.wsm6_constants import wsm6_workspace_floats
 
-    frames = []
+    rows = []
     for path in sorted((ROOT / "configs").glob("les_tornado_100m_*.toml")):
         exp = load_experiment(path)
         f = pf.kernel_local_frame_bytes(exp)
         assert {int(d.run.nz) for d in exp.domains} == {72}, path.name
-        frames.append((path.name, f["wsm6"], max(f.values())))
-    assert len(frames) == 6, [name for name, _, _ in frames]
-    assert all(wsm6 == 9008 and widest == 9008
-               for _, wsm6, widest in frames), frames
+        rows.append((path.name, f["wsm6"], max(f.values()),
+                     pf.wsm6_column_workspace_bytes(exp)))
+    assert len(rows) == 6, [name for name, *_ in rows]
+    assert all(wsm6 == 0 and widest < 9008 and workspace > 0
+               for _, wsm6, widest, workspace in rows), rows
 
-    # WSM6 widest: the total moves by the frame's whole reservation delta.
+    # The reservation no longer moves with nz on WSM6's account; the
+    # workspace does, linearly in nz + 1.
     start = datetime(2021, 12, 10, 3)
-    totals = {}
+    reserved, workspace = {}, {}
     for nz in (64, 72):
         cfg = RunConfig(nx=400, ny=400, nz=nz, dx=100.0, dy=100.0,
                         ztop=18000.0, dt=0.5, run_seconds=60.0,
                         moist=True, moist_cq=True, mp_physics=6)
         exp = experiment_from_run_config(cfg, start)
-        assert max(pf.kernel_local_frame_bytes(exp),
-                   key=pf.kernel_local_frame_bytes(exp).get) == "wsm6"
-        totals[nz] = pf.kernel_local_memory_bytes(exp)
-    assert totals[64] == 1616855040                 # 1542.0 MiB, unchanged
-    assert totals[72] == 2084782080                 # 1988.2 MiB
-    assert totals[72] - totals[64] == 467927040     # +446.2 MiB
+        assert pf.kernel_local_frame_bytes(exp)["wsm6"] == 0
+        reserved[nz] = pf.kernel_local_memory_bytes(exp)
+        workspace[nz] = pf.wsm6_column_workspace_bytes(exp)
+    assert reserved[64] == reserved[72]
+    tile = (pf.MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count * 16 * 32)
+    for nz in (64, 72):
+        assert workspace[nz] == wsm6_workspace_floats(nz, tile) * 4
+    assert workspace[72] * 65 == workspace[64] * 73
+    # The 1,988.2 MiB the 80-tier frame used to reserve at nz = 72 on the
+    # measured profile, against what the workspace holds instead.
+    assert workspace[72] < 2084782080
 
 
 @requires_reference_bundle
@@ -4686,8 +4794,9 @@ def test_the_widest_frame_is_no_longer_the_cumulus_kernel():
 
     History in one place: `kf_column` held 24,064 B at the unspecialized
     KF_KMAX = 128, then 9,216 B once the bound compiled to nz = 49
-    (2026-07-26), and now 512 B with its column arrays in a global
-    workspace (2026-08-21).  Under the 1,024 B default stack it reserves
+    (2026-07-26), then 512 B with its column arrays in a global
+    workspace (2026-08-21), and 1,024 B since KF_KMAX went 128 -> 256
+    (2026-10-12).  At or under the 1,024 B default stack it reserves
     NOTHING, so the widest launched frame here is `morrison`'s 5,120 B --
     the runner-up that never moved.  Nothing MYNN owns has ever been in
     this contest; that is the other half of the claim and it still holds.
@@ -4697,8 +4806,8 @@ def test_the_widest_frame_is_no_longer_the_cumulus_kernel():
     widest = max(frames, key=lambda m: frames[m])
     assert widest == "morrison"
     assert frames["morrison"] == 5120
-    assert frames["kf"] == 512
-    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 512
+    assert frames["kf"] == 1024
+    assert pf.KERNEL_MAX_LOCAL_SIZE_BYTES["kf"] == 1024
     assert pf.MEASURED_LOCAL_MEMORY_PROFILE.reservation_bytes(
         frames["kf"]) == 0
     assert max(f for m, f in frames.items() if m.startswith("mynn")) == 0
@@ -5037,7 +5146,11 @@ def test_the_recorded_local_frames_match_the_driver():
 
     kdir = ROOT / "woof" / "core" / "kernels"
     symbol = re.compile(
-        r'extern\s+"C"\s+__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)')
+        # ``__launch_bounds__`` may sit between ``__global__`` and ``void``
+        # (kf_column, noah_column): without it they were read as absent.
+        r'extern\s+"C"\s+__global__\s+'
+        r'(?:__launch_bounds__\s*\([^)]*\)\s*)?'
+        r'void\s+([A-Za-z_][A-Za-z0-9_]*)')
     probe = subprocess.run(
         [sys.executable, "-c",
          "import cupy as cp\n"
@@ -6071,3 +6184,21 @@ def test_shinhong_workspace_pricing_tracks_the_tile_and_levels():
     exp = experiment_from_run_config(
         dataclasses.replace(cfg, bl_pbl_physics=1), datetime(2000, 1, 1))
     assert pf.shinhong_column_workspace_bytes(exp, profile=profile) == 0
+
+
+def test_the_rrtmgp_workspace_admits_256_model_levels_at_any_top():
+    """The workspace pricer bounds MODEL levels, as the engine does.
+
+    It used to refuse any column past 128 radiation layers ("the 128-layer
+    CUDA solver limit") after the engine itself had stopped holding a fixed
+    per-layer array, so a 256-level RTE+RRTMGP configuration could not even
+    be sized.  The above-model layers ride on top of the 256.
+    """
+    from woof.physics_vertical_contract import MAX_RRTMGP_MODEL_LEVELS
+
+    assert MAX_RRTMGP_MODEL_LEVELS == 256
+    for p_top in (100.0, 5000.0, 0.0):
+        phases = pf.rrtmgp_workspace_phases(256, 64, p_top=p_top)
+        assert phases, p_top
+    with pytest.raises(ValueError, match="nz <= 256, got nz=257"):
+        pf.rrtmgp_workspace_phases(257, 64, p_top=100.0)

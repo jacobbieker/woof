@@ -278,6 +278,20 @@ VERTICAL_DEFAULT_NLEV = {
     "pressure_blend": 6,
     "jet_refined": 48,
 }
+#: The [vertical] level range, for every way a column is declared (a
+#: coordinate with ``nlev`` AND explicit ``a_half_pa``/``b_half`` arrays).
+#: The ceiling is the deepest column every carried physics scheme runs:
+#: Morrison compiles its 256-level tier, and YSU, RTE+RRTMGP, Grell-Freitas,
+#: New Tiedtke and the surface stack size their columns from the run (the
+#: per-thread YSU column and the RRTMGP layer budget follow
+#: ``woof.physics_vertical_contract``, which each scheme's first call also
+#: enforces).  The dycore's own cost is linear in nlev except the vertical
+#: Helmholtz/implicit solves, which are nlev^2 per column and small at 256.
+#: The floor is two layers, the fewest a hybrid column has an interior
+#: interface in.  The research spectral prototype keeps its own, lower
+#: bound (``woof.globe.spectral.config``).
+VERTICAL_MIN_NLEV = 2
+VERTICAL_MAX_NLEV = 256
 
 
 @dataclass(frozen=True)
@@ -892,6 +906,15 @@ def load_config(path: str | Path) -> ArwenGlobalConfig:
             np.asarray([_finite(v, "vertical.a_half_pa[]") for v in vertical["a_half_pa"]]),
             np.asarray([_finite(v, "vertical.b_half[]") for v in vertical["b_half"]]),
         )
+        # The level range applies to an explicit column too (the coordinate
+        # itself already refuses fewer than two layers).  It was the one
+        # declaration the nlev check below never saw, so an over-deep array
+        # pair validated here and died at the first physics call instead.
+        if not VERTICAL_MIN_NLEV <= coordinate.nlev <= VERTICAL_MAX_NLEV:
+            raise ValueError(
+                f"vertical.a_half_pa/b_half declare {coordinate.nlev} levels; "
+                f"the column must lie in {VERTICAL_MIN_NLEV}..{VERTICAL_MAX_NLEV}"
+            )
         coordinate_name = "explicit"
     else:
         # Default surface_stretched at 40 levels (fixed means default): the
@@ -908,8 +931,10 @@ def load_config(path: str | Path) -> ArwenGlobalConfig:
         default_nlev = VERTICAL_DEFAULT_NLEV[coordinate_name]
         nlev = _integer(vertical.get("nlev", default_nlev), "vertical.nlev")
         p_top = _finite(vertical.get("p_top_pa", 100.0), "vertical.p_top_pa")
-        if not 2 <= nlev <= 64:
-            raise ValueError("vertical.nlev must lie in 2..64")
+        if not VERTICAL_MIN_NLEV <= nlev <= VERTICAL_MAX_NLEV:
+            raise ValueError(
+                f"vertical.nlev must lie in {VERTICAL_MIN_NLEV}..{VERTICAL_MAX_NLEV}"
+            )
         coordinate = VERTICAL_COORDINATES[coordinate_name](nlev, p_top)
 
     initial = _table(raw, "initial")
