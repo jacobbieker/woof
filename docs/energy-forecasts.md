@@ -29,6 +29,7 @@ woof energy plan            ->  plan/plan.json   woof-energy.plan.v1  (+ emitted
 woof energy run             ->  one run per plan domain (runs/manifest.json)
 woof energy extract         ->  forecast.nc      woof-energy.forecast.v1
 woof energy rating          ->  products.nc
+woof energy power           ->  power.nc         woof-energy.power.v1
 ```
 
 `woof energy` with no subcommand prints this overview. Every flag is listed
@@ -331,6 +332,13 @@ specific build. `woof doctor` reports whether it is found.
 `woof energy rating FORECAST.nc -o products.nc` computes the products named
 in `--products` (default `dlr,icing,wind-power,pv-power,turbine-icing`). See
 [Products and their assumptions](#products-and-their-assumptions).
+
+### 7. Wind farm power: `power`
+
+`woof energy power FORECAST.nc --assets ASSETS.geojson -o power.nc` gives
+power per wind farm from turbine-specific curves matched by make and model
+(or rating and rotor), with density correction, high-wind shutdown, wakes
+and losses. See [Wind farm power](energy-hindcast/power.md).
 
 ## Choosing a topology
 
@@ -725,6 +733,15 @@ woof energy rating wales/forecast.nc --products dlr,icing -o wales/products.nc
 line voltage. Name one with `--conductor NAME`, or supply your own table with
 `--conductor-table FILE.json`.
 
+**7. Wind farm power with wakes:**
+
+```bash
+woof energy power wales/forecast.nc --assets wales/assets.geojson --matches wales/matches.json -o wales/power.nc
+```
+
+This needs wind sites in the forecast: build `sites.json` with
+`--kinds line,plant,generator` rather than `--kinds line` before planning.
+
 The same steps fit a national grid. Fetch a larger box or a `--polygon`, use
 `--topology wrf-tiles`, and set `--max-domains` as a guard on how many tiles
 you are prepared to run.
@@ -742,6 +759,7 @@ rating methodology.
 | `dlr` | IEEE 738 steady-state conductor heat balance: convective and radiative cooling against solar and Joule heating | `line_normal_wind`, `wind_attack_angle`, `air_temperature`, `air_density`, `ghi`, `dni`, `dhi`, `bearing_deg` | The conductor (diameter, resistance, maximum temperature, emissivity and absorptivity) from `--conductor` or the table; sites with no bearing get no rating |
 | `icing` | Makkonen accretion on a cylinder, with ISO 12494 conventions | `cloud_liquid_mixing_ratio`, `rain_mixing_ratio`, `air_temperature`, `wind_speed`, `air_density` | An assumed droplet median volume diameter (MVD), because the model's microphysics does not forecast one; a reference conductor diameter |
 | `wind-power` | A generic IEC-style power curve, density-corrected | `wind_speed` and `air_density` at hub height, `capacity_mw`, `hub_height_m` | One generic curve for every turbine, scaled by capacity; no wake losses, availability or curtailment |
+| `power` (`woof energy power`) | Turbine-specific power curves matched by make and model, else rating and rotor, else a generic class curve; rotor-equivalent wind, IEC density correction, high-wind shutdown with hysteresis, Jensen or Bastankhah wakes from the layout, availability, icing and electrical losses; per plant (`woof-energy.power.v1`) | `wind_speed`, `air_density` (or `air_pressure`, `air_temperature`), `u`, `v`, the assets document | The matched curve (see `--matches`), a fallback wake table for plants without a layout, no curtailment or inter-farm wakes; [details](energy-hindcast/power.md) |
 | `pv-power` | A PVWatts-like plane-of-array and cell-temperature model | `ghi`, `dni`, `dhi`, `cos_solar_zenith`, `t2`, `wind_speed_10m`, `capacity_mw` | Assumed tilt, azimuth, temperature coefficient and system losses; no shading, soiling or inverter clipping detail |
 | `turbine-icing` | Hub-height icing: Makkonen accretion on the ISO 12494 reference collector (instrumental icing) and on a rotating-blade proxy (rotor icing), meteorological icing, the IEA Wind Task 19 ice class and a production-loss estimate. See [Turbine icing at hub height](energy-hindcast/icing.md) | `air_temperature`, `wind_speed`, `air_density` (or `air_pressure`), `cloud_liquid_mixing_ratio`, `rain_mixing_ratio`, `cloud_number_mixing_ratio`, `air_pressure`, `relative_humidity`, `hub_height_m` | A generic blade (tip-speed ratio, tip-speed limit, leading-edge size); the default droplet number where the run has no Thompson `QNCLOUD`; no ice shedding; an uncalibrated loss model |
 | `wind-resource` | Rotor-equivalent wind speed (IEC 61400-12-1:2017), power-law shear, veer across the rotor, turbulence intensity, density-corrected generic-curve power and capacity factor | `wind_speed` profile, `u`/`v` or `wind_from_direction`, `air_density`, `hub_height_m`, `capacity_mw`, optional `rotor_diameter_m` | Rotor diameter equal to the hub height where unknown; turbulence intensity is resolved variance only and needs 1-5 min output; generic curves, no wakes |

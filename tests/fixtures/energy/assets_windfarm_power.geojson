@@ -1,0 +1,474 @@
+{
+ "type": "FeatureCollection",
+ "woof": {
+  "schema": "woof-energy.assets.v1",
+  "sources": [
+   {
+    "source": "synthetic",
+    "license": "CC0-1.0",
+    "attribution": "hand-built test fixture; invented geometry and attributes"
+   }
+  ]
+ },
+ "features": [
+  {
+   "type": "Feature",
+   "id": "synthetic:plant/10",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.605,
+       52.095
+      ],
+      [
+       -3.575,
+       52.095
+      ],
+      [
+       -3.575,
+       52.105
+      ],
+      [
+       -3.605,
+       52.105
+      ],
+      [
+       -3.605,
+       52.095
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:plant/10",
+    "kind": "plant",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Exact Farm",
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 9.0,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/101",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.6,
+     52.1
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/101",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 94.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/10",
+     "manufacturer": "Vestas",
+     "model": "V112-3.0 MW"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/102",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.591811,
+     52.1
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/102",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 94.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/10",
+     "manufacturer": "Vestas",
+     "model": "V112-3.0 MW"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/103",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.583621,
+     52.1
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/103",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 94.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/10",
+     "manufacturer": "Vestas",
+     "model": "V112-3.0 MW"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:plant/11",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       1.995,
+       53.495
+      ],
+      [
+       2.005,
+       53.495
+      ],
+      [
+       2.005,
+       53.51
+      ],
+      [
+       1.995,
+       53.51
+      ],
+      [
+       1.995,
+       53.495
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:plant/11",
+    "kind": "plant",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Fuzzy Farm",
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 7.2,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {
+     "offshore": "yes"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/111",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     2.0,
+     53.5
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/111",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.6,
+    "hub_height_m": 90.0,
+    "rotor_diameter_m": 120.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/11",
+     "manufacturer": "Siemens Gamesa",
+     "model": "SWT3.6/120 DD",
+     "offshore": "yes"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/112",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     2.0,
+     53.507546
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/112",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.6,
+    "hub_height_m": 90.0,
+    "rotor_diameter_m": 120.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/11",
+     "manufacturer": "Siemens Gamesa",
+     "model": "SWT3.6/120 DD",
+     "offshore": "yes"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:plant/12",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.705,
+       52.295
+      ],
+      [
+       -3.685,
+       52.295
+      ],
+      [
+       -3.685,
+       52.305
+      ],
+      [
+       -3.705,
+       52.305
+      ],
+      [
+       -3.705,
+       52.295
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:plant/12",
+    "kind": "plant",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Size Farm",
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 6.0,
+    "hub_height_m": null,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/121",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.7,
+     52.3
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/121",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 90.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/12"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/122",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.693419,
+     52.3
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/122",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 3.0,
+    "hub_height_m": 90.0,
+    "rotor_diameter_m": 112.0,
+    "license": "CC0-1.0",
+    "tags": {
+     "plant": "synthetic:plant/12"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:generator/131",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.8,
+     52.4
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:generator/131",
+    "kind": "generator",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": null,
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 2.0,
+    "hub_height_m": 80.0,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {
+     "manufacturer": "Unknown Works",
+     "model": "Brand X-1"
+    }
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "synthetic:plant/14",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.95,
+       52.45
+      ],
+      [
+       -3.9,
+       52.45
+      ],
+      [
+       -3.9,
+       52.48
+      ],
+      [
+       -3.95,
+       52.48
+      ],
+      [
+       -3.95,
+       52.45
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "asset_id": "synthetic:plant/14",
+    "kind": "plant",
+    "source": "synthetic",
+    "source_ref": null,
+    "name": "Synthetic Outline Farm",
+    "operator": null,
+    "voltage_kv": [],
+    "circuits": null,
+    "cables": null,
+    "frequency_hz": null,
+    "generator_source": "wind",
+    "capacity_mw": 50.0,
+    "hub_height_m": 100.0,
+    "rotor_diameter_m": null,
+    "license": "CC0-1.0",
+    "tags": {}
+   }
+  }
+ ]
+}

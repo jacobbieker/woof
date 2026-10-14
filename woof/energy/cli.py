@@ -23,6 +23,7 @@ the subcommand runs::
     woof energy worker    woof.energy.worker          drain a queue, one loop per GPU
     woof energy deploy render  woof.energy.deploy      AWS/GCP Batch, k8s, Slurm
     woof energy icechunk  woof.energy.icechunk_store  shared store init/verify
+    woof energy power     woof.energy.power_farm      turbine-aware farm power
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from __future__ import annotations
 import argparse
 from importlib import import_module
 
-from woof.cli_numbers import nonnegative_float, positive_float, positive_int
+from woof.cli_numbers import float_between, nonnegative_float, positive_float, positive_int
 
 _KINDS = ("line", "minor_line", "cable", "substation", "plant", "generator",
           "tower")
@@ -934,6 +935,60 @@ def _register_deploy(sub) -> None:
     p.set_defaults(func=_dispatch("woof.energy.deploy"))
 
 
+def _availability(text: str) -> float:
+    value = float_between(0.0, 1.0)(text)
+    if value <= 0.0:
+        raise argparse.ArgumentTypeError(
+            f"must be a number above 0 and at most 1, not {text!r}")
+    return value
+
+
+def _register_power(sub) -> None:
+    p = sub.add_parser(
+        "power", help="turbine-aware wind farm power from a forecast.v1")
+    p.add_argument("forecast", metavar="FORECAST.nc",
+                   help="woof-energy.forecast.v1 netCDF file")
+    p.add_argument("--assets", default=None, metavar="ASSETS.geojson",
+                   help="the woof-energy.assets.v1 document the sites came "
+                        "from: turbine models, rotors and plant membership "
+                        "(without it every turbine is generic and its own "
+                        "plant)")
+    p.add_argument("--library", default=None, metavar="FILE.json",
+                   help="turbine library replacing the built-in one "
+                        "(woof-energy.turbine-library.v1)")
+    p.add_argument("--wake-model", default="jensen",
+                   choices=("jensen", "bastankhah", "none"),
+                   help="wake model for plants with a turbine layout "
+                        "(default jensen)")
+    p.add_argument("--hub-only", action="store_true",
+                   help="always use hub-height wind, never the "
+                        "rotor-equivalent wind speed")
+    p.add_argument("--availability", type=_availability, default=1.0,
+                   help="availability factor in (0, 1] (default 1)")
+    p.add_argument("--electrical-losses", type=float_between(0.0, 0.5),
+                   default=0.02,
+                   help="electrical loss fraction, 0 to 0.5 (default 0.02)")
+    p.add_argument("--icing-loss", default=None, metavar="FILE.nc[:VAR]",
+                   help="netCDF with a (time, site) icing loss fraction on "
+                        "the forecast's axes (default variable "
+                        "icing_loss_fraction)")
+    p.add_argument("--gust-shutdown", action="store_true",
+                   help="also stop turbines when the forecast gust exceeds "
+                        "the gust limit")
+    p.add_argument("--gust-var", default=None, metavar="NAME",
+                   help="(time, site) gust variable in the forecast file "
+                        "(implies --gust-shutdown; default: the first of "
+                        "wind_speed_of_gust, wind_gust, gust, wind_gust_10m)")
+    p.add_argument("--per-turbine", action="store_true",
+                   help="also write (time, turbine) power and wind series")
+    p.add_argument("--matches", default=None, metavar="MATCHES.json",
+                   help="also write the per-turbine curve matches "
+                        "(woof-energy.turbine-matches.v1)")
+    p.add_argument("-o", "--output", required=True, metavar="POWER.nc",
+                   help="where to write the woof-energy.power.v1 netCDF")
+    p.set_defaults(func=_dispatch("woof.energy.power_farm"))
+
+
 def register_cli(subparsers) -> None:
     """Add ``woof energy`` to the product CLI."""
 
@@ -956,6 +1011,7 @@ def register_cli(subparsers) -> None:
     _register_worker(sub)
     _register_deploy(sub)
     _register_icechunk(sub)
+    _register_power(sub)
 
 
 __all__ = ["register_cli"]

@@ -19,6 +19,13 @@ plus the substations, turbines and the PV farm. It is not `woof energy
 sites` output; it exists so units that consume sites can test without the
 sites builder.
 
+`assets_windfarm_power.geojson` is a hand-built, synthetic
+`woof-energy.assets.v1` document for `tests/test_energy_hindcast_power.py`.
+Its farms, names, models and coordinates are invented: one plant per
+turbine-matching rung (a Vestas model named exactly, a Siemens model spelled
+loosely, untagged turbines matched by rating and rotor, a lone turbine of an
+unknown make) and a wind farm known only by its outline and capacity.
+
 `overpass_wales_a.json`, `overpass_wales_b.json` and `overpass_timeout.json`
 are hand-written Overpass API answers for `tests/test_energy_osm.py`. Their
 ids, names, coordinates and tags are invented. They are not OpenStreetMap
