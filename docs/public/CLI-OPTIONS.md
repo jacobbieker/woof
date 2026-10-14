@@ -652,7 +652,10 @@ Takes no options of its own.
 |---|---|
 | `--format {netcdf,zarr,icechunk,csv}` | output format (default netcdf) |
 | `--heights-m` | override the sites document's heights |
-| `--output PATH` | output file or store |
+| `--icechunk-group GROUP` | group inside the repository (region default: forecast) |
+| `--icechunk-mode {replace,region}` | replace: rewrite the repository with this forecast (default); region: write this job's times and sites into a store made by `woof energy icechunk init`, beside concurrent jobs |
+| `--job-id ID` | job identifier recorded in the commit metadata |
+| `--output PATH` | output file or store; --format icechunk also takes s3://, gs://, file:// and memory:// URLs |
 | `--sites SITES.json` | sites document (default: the one the plan names) |
 | `--vars NAME[,NAME]` | forecast.v1 variables to write (default all the runs can supply) |
 
@@ -745,6 +748,51 @@ Takes no options of its own.
 | `--jobs` | list every job |
 | `--status {pending,materialized,running,complete,failed}` | list the jobs in this state |
 
+## `woof energy icechunk`
+
+Takes no options of its own.
+
+## `woof energy icechunk init`
+
+| argument | what it does |
+|---|---|
+| `REPO` | s3://bucket/prefix, gs://bucket/prefix, file:///path, memory://name or a local path |
+
+| option | what it does |
+|---|---|
+| `--allow-http` | allow a plain-HTTP S3 endpoint |
+| `--anonymous` | no credentials (public buckets) |
+| `--branch` | branch (default main) |
+| `--end YYYY-MM-DDTHH:MM` | last valid time, UTC (inclusive) |
+| `--endpoint-url URL` | S3-compatible endpoint, e.g. MinIO (default: AWS_ENDPOINT_URL_S3, AWS_ENDPOINT_URL) |
+| `--group` | group inside the repository (default forecast) |
+| `--heights-m` | override the sites document's heights |
+| `--interval` | time step: seconds, or with s/min/h (default 15min) |
+| `--job-id ID` | identifier recorded in the commit metadata |
+| `--region` | S3 region (default: AWS_REGION, AWS_DEFAULT_REGION) |
+| `--site-chunk` | sites per chunk (default 64) |
+| `--sites SITES.json` | woof-energy.sites.v1 document (site order) |
+| `--start YYYY-MM-DDTHH:MM` | first valid time, UTC |
+| `--time-chunk` | steps per time chunk (default one day) |
+| `--vars NAME[,NAME]` | forecast.v1 variables to allocate (default all) |
+| `--zstd-clevel` | Blosc zstd level (default 5) |
+
+## `woof energy icechunk verify`
+
+| argument | what it does |
+|---|---|
+| `REPO` | repository URL or path |
+
+| option | what it does |
+|---|---|
+| `--allow-http` | allow a plain-HTTP S3 endpoint |
+| `--anonymous` | no credentials (public buckets) |
+| `--branch` | branch (default main) |
+| `--endpoint-url URL` | S3-compatible endpoint, e.g. MinIO (default: AWS_ENDPOINT_URL_S3, AWS_ENDPOINT_URL) |
+| `--group` | report only this group |
+| `--no-coverage` | skip reading the written masks |
+| `--region` | S3 region (default: AWS_REGION, AWS_DEFAULT_REGION) |
+
 ## `woof energy import`
 
 | argument | what it does |
@@ -836,7 +884,8 @@ Takes no options of its own.
 | `--nz` | vertical levels (default: the planner's ladder; hex-swath: 55, or 3..80 priced at that column) |
 | `--outdir DIR` | directory for plan.json and emitted configs |
 | `--parent-dx-m` | outer parent grid spacing (default: chosen by the planner) |
-| `--source` | initial/boundary condition source (default: the one woof domain emits) |
+| `--source` | initial/boundary condition source (default: the one woof domain emits); auto (wrf-tiles, wrf-nests) picks the first source of --source-priority that covers the sites, holds the --start cycle and reaches --hours, and writes the woof-energy.source-choice.v1 receipt |
+| `--source-priority SRC[,SRC]` | with --source auto: candidate sources, best first (default hrrr-native,hrrr,rap,met-office-global,ecmwf-open-data,gfs,era5) |
 | `--start YYYY-MM-DDTHH` | forecast start, UTC (default: the most recent 00/06/12/18 cycle) |
 | `--topology {wrf-nests,wrf-tiles,hex-swath}` | wrf-nests: sibling nests in one run; wrf-tiles: one parent run plus offline child tiles (no count limit); hex-swath: MPAS corridor mesh |
 | `--vram-gib` | size each domain for this many GiB |
@@ -865,6 +914,77 @@ Takes no options of its own.
 | `--topology {wrf-tiles,wrf-nests}` | planner to use (default: the cluster's recommendation) |
 | `--vram-gib` | size for this many GiB (no local probe) |
 
+## `woof energy power`
+
+| argument | what it does |
+|---|---|
+| `FORECAST.nc` | woof-energy.forecast.v1 netCDF file |
+
+| option | what it does |
+|---|---|
+| `--assets ASSETS.geojson` | the woof-energy.assets.v1 document the sites came from: turbine models, rotors and plant membership (without it every turbine is generic and its own plant) |
+| `--availability` | availability factor in (0, 1] (default 1) |
+| `--electrical-losses` | electrical loss fraction, 0 to 0.5 (default 0.02) |
+| `--gust-shutdown` | also stop turbines when the forecast gust exceeds the gust limit |
+| `--gust-var NAME` | (time, site) gust variable in the forecast file (implies --gust-shutdown; default: the first of wind_speed_of_gust, wind_gust, gust, wind_gust_10m) |
+| `--hub-only` | always use hub-height wind, never the rotor-equivalent wind speed |
+| `--icing-loss FILE.nc[:VAR]` | netCDF with a (time, site) icing loss fraction on the forecast's axes (default variable icing_loss_fraction) |
+| `--library FILE.json` | turbine library replacing the built-in one (woof-energy.turbine-library.v1) |
+| `--matches MATCHES.json` | also write the per-turbine curve matches (woof-energy.turbine-matches.v1) |
+| `--output POWER.nc` | where to write the woof-energy.power.v1 netCDF |
+| `--per-turbine` | also write (time, turbine) power and wind series |
+| `--wake-model {jensen,bastankhah,none}` | wake model for plants with a turbine layout (default jensen) |
+
+## `woof energy queue`
+
+Takes no options of its own.
+
+## `woof energy queue init`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--backoff-base-s` | wait after the first failure, doubling per failure (default 60) |
+| `--backoff-max-s` | backoff ceiling (default 3600) |
+| `--heartbeat-s` | lease renewal interval, at most half of --lease-s (default min(120, lease/4)) |
+| `--lease-s` | lease length; a worker silent this long loses its job (default 900) |
+| `--max-attempts` | charged failures before a job is dead (default 3) |
+
+## `woof energy queue push`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+| `JOB [JOB ...]` | job JSON files, or directories of *.json |
+
+| option | what it does |
+|---|---|
+| `--schema` | job document schema to accept (default woof-energy.hindcast-job.v1) |
+
+## `woof energy queue requeue`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--all-dead` | requeue every dead job |
+| `--job ID` | job id to requeue (repeatable) |
+
+## `woof energy queue status`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--jobs` | list every job with its state and lease |
+
 ## `woof energy rating`
 
 | argument | what it does |
@@ -876,7 +996,13 @@ Takes no options of its own.
 | `--conductor` | conductor name from the table, or auto (by line voltage; default) |
 | `--conductor-table FILE.json` | conductor table replacing the built-in one |
 | `--output PRODUCTS.nc` | where to write the products netCDF |
-| `--products` | products to compute (comma list; default dlr,icing,wind-power,pv-power,turbine-icing) |
+| `--power-curve NAME` | generic power curve from power_curves.json for wind-power, wind-resource and ramps (generic_iec_class_i, generic_iec_class_ii, generic_iec_class_iii, generic_offshore; default the table's default, class II) |
+| `--products` | products to compute (comma list of dlr,icing,wind-power,pv-power,turbine-icing,wind-resource,ramps; default dlr,icing,wind-power,pv-power,turbine-icing) |
+| `--ramp-threshold FRACTION` | ramps: change, as a fraction of capacity, that makes a ramp (default 0.2) |
+| `--ramp-windows LIST` | ramps: threshold windows, e.g. 15m,1h,4h (default) or 5m:0.1,1h:0.3 with per-window thresholds |
+| `--rotor-diameter-m M` | wind-resource/ramps: rotor diameter for sites without rotor_diameter_m (default: the hub height) |
+| `--sda-tolerance FRACTION` | ramps: swinging-door tolerance, fraction of capacity (default 0.05) |
+| `--ti-window-min MIN` | wind-resource: trailing window of the resolved turbulence intensity (default 10) |
 
 ## `woof energy run`
 
@@ -906,6 +1032,26 @@ Takes no options of its own.
 | `--pv-grid-m` | sample solar farm polygons on a grid of this spacing (default: one site at the centroid) |
 | `--region FILE.geojson` | keep only sites inside this Polygon/MultiPolygon |
 | `--spacing-m` | sample spacing along lines and cables (default 100) |
+
+## `woof energy worker`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--exit-when-empty` | exit once every job is done or dead |
+| `--fake-gpus N` | testing: N stand-in GPU identities, no device read (set WOOF_GPU_LOCK_ROOT) |
+| `--gpus all\|N\|UUID[,UUID]` | GPUs to run on: all (default), the first N, or UUIDs |
+| `--max-idle-s` | exit after this long with nothing to claim |
+| `--no-gpu` | CPU slots only (no GPU lock, CUDA_VISIBLE_DEVICES=-1) |
+| `--poll-s` | idle poll interval, jittered (default 30) |
+| `--runner-cmd TEMPLATE` | command run per job; placeholders {python}, {job}, {job_id}, {attempt}, {workdir}, {result}, {gpu_uuid}, {queue} (default: {python} -m woof energy hindcast run-local {job}) |
+| `--slots` | with --no-gpu: CPU slots to run (default 1) |
+| `--term-grace-s` | SIGTERM to SIGKILL grace for the runner (default 20) |
+| `--timeout-s` | runner wall-clock limit (default 86400) |
+| `--workdir DIR` | local scratch for job files and logs (default: a fresh directory under the system temp) |
 
 ## `woof enprod`
 

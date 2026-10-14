@@ -201,8 +201,10 @@ _SEVERE_EXTRA_FIELDS: frozenset[str] = frozenset({
 _ENERGY_FIELDS: frozenset[str] = frozenset({
     # Column dynamics and the vertical coordinate.
     "U", "V", "W", "T", "PH", "PHB", "HGT", "P", "PB",
-    # Moisture and hydrometeors (icing, loading).
-    "QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP",
+    # Moisture and hydrometeors (icing, loading).  QNCLOUD is Thompson
+    # mp 28's droplet number: turbine icing takes the droplet median volume
+    # diameter from it (woof.energy.icing_turbine) and otherwise assumes one.
+    "QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP", "QNCLOUD",
     # Near-surface state.
     "T2", "Q2", "U10", "V10", "PSFC",
     # Surface shortwave: global, direct-normal, diffuse, zenith cosine.
