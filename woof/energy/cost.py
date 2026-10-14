@@ -102,6 +102,7 @@ import math
 import sys
 import tomllib
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -438,10 +439,18 @@ def store_layout(preset: str, nz: int,
                                  if n in _WINDFARM_NON_PLANES]}}
 
 
+@lru_cache(maxsize=None)
+def _frame_planes(preset: str, nz: int, hub_heights: int) -> tuple[int, int]:
+    """``(planes, extra_bytes)`` of :func:`store_layout`, cached: the
+    estimator asks for it once per domain, card, offer and band."""
+    layout = store_layout(preset, nz, hub_heights)
+    return layout["planes"], layout["extra_bytes"]
+
+
 def _frame_bytes(preset: str, nx: int, ny: int, nz: int,
                  hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS) -> int:
-    layout = store_layout(preset, nz, hub_heights)
-    return layout["planes"] * nx * ny * 4 + layout["extra_bytes"]
+    planes, extra = _frame_planes(preset, int(nz), int(hub_heights))
+    return planes * nx * ny * 4 + extra
 
 
 def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
@@ -1003,9 +1012,8 @@ def _storage(leaf_rows: Sequence[DomainWork], campaign: Campaign, *,
         interior = max(1, row.nx - 2 * TILE_RIM_CELLS) * \
             max(1, row.ny - 2 * TILE_RIM_CELLS)
         columns += interior * row.count
-        layout = store_layout(preset, row.nz, hub_heights)
-        raw += (layout["planes"] * interior * 4
-                + layout["extra_bytes"]) * row.count
+        planes, extra = _frame_planes(preset, int(row.nz), int(hub_heights))
+        raw += (planes * interior * 4 + extra) * row.count
     raw_total = raw * frames_per_segment * campaign.segments
     stored = raw_total * ratio
     layout = store_layout(preset, leaf_rows[0].nz if leaf_rows else 60,

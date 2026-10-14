@@ -15,8 +15,8 @@ New:
   is the one preset without the structural `T`/`PHB` volumes, needs
   `hub_wind`/`hub_heights_m`, and lists a reason for every field
   (`woof.io.history_selection.WINDFARM_FIELD_REASONS`). At six hub
-  heights a frame is 99 planes, against about 860 for `energy` and
-  2,700 for `full` on a 60-level leaf. The hub scalars are produced only
+  heights a frame is 99 planes, against about 700 for `energy` and
+  2,240 for `full` on the hindcast's 49-level leaf. The hub scalars are produced only
   when a selection names them, so existing `full`/`energy` hub-wind runs
   write what they did before
   (docs/energy-forecasts.md#wind-farm-output-without-3-d-volumes-the-windfarm-preset).
@@ -32,7 +32,11 @@ New:
   and records it in the job. `woof energy estimate --store-preset
   windfarm [--hub-heights N]` prices the store from the preset's own
   field list (the worldwide example: about 72 TB, against 0.63 PB for
-  `energy` and 2.0 PB for `full`).
+  `energy` and 2.0 PB for `full`). `woof energy hindcast optimize` now
+  prices `--store-preset windfarm` by default, the leaves the hindcast
+  writes, and its recipe carries the preset to the estimate step. A
+  re-plan that would switch the leaf preset under segments already
+  written is refused.
 
 - `woof energy plan --topology wrf-tiles|wrf-nests --source auto` picks
   the boundary source for the sites and the `--start` cycle from

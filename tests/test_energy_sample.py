@@ -621,3 +621,11 @@ def test_volumes_win_when_a_history_carries_both(tmp_path):
                                rtol=1e-5, atol=1e-5)
     assert "TEMP" not in result.profile
     assert any("omitted TEMP" in n for n in result.notes)
+
+
+def test_a_hub_height_variable_without_records_is_refused_by_name(tmp_path):
+    meta = sample._FileMeta(path=tmp_path / "x", attrs={}, dims=(1, 1, 1),
+                            times=(), sources=frozenset({"HUB_HEIGHT"}),
+                            hub_heights=None)
+    with pytest.raises(SampleUnavailable, match="no hub heights"):
+        sample._hub_indices([meta], np.array([80.0]))

@@ -244,8 +244,8 @@ _ENERGY_FIELDS: frozenset[str] = frozenset({
 #: volumes :data:`STRUCTURAL_FIELDS` otherwise forces onto every tape
 #: (``T`` and ``PHB``), so a windfarm tape is a file ``rw_wrfbatch`` will
 #: not open -- the measured cost of the ``T`` row above, accepted on
-#: purpose: on a 60-level leaf those two volumes are 121 planes, more than
-#: every plane this preset keeps at six hub heights.
+#: purpose: on the hindcast's 49-level leaf those two volumes are 99
+#: planes, as many as every plane this preset keeps at six hub heights.
 #:
 #: A member the run does not produce is absent, the rule every preset
 #: follows: the gust family needs ``nwp_diagnostics = 1``, the hub planes

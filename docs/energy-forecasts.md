@@ -347,7 +347,7 @@ Every wind-farm product reads a handful of numbers at rotor height: wind
 speed and direction, temperature, pressure, air density, humidity, cloud
 water, rain and droplet number. The `energy` preset gets them by keeping
 the whole column: winds, theta, pressure, geopotential and six
-hydrometeors on every level, about 860 planes per frame on a 60-level
+hydrometeors on every level, about 700 planes per frame on a 49-level
 leaf. Most of that is never read.
 
 `[output] preset = "windfarm"` writes only 2-D planes instead. The model
@@ -366,8 +366,8 @@ GPU, every frame (`woof/core/hub_wind_diag.py`), and the tape carries:
 
 The reason for each field is in
 `woof.io.history_selection.WINDFARM_FIELD_REASONS`. At six hub heights
-that is 99 planes per frame, against about 860 for `energy` and about
-2,700 for `full` on a 60-level leaf. The preset needs the hub-height
+that is 99 planes per frame, against about 700 for `energy` and about
+2,240 for `full` on the hindcast's 49-level leaf. The preset needs the hub-height
 diagnostic (`hub_wind = true` or `hub_heights_m`), and it is the one
 preset that does not carry the structural `T` and `PHB` volumes, so its
 tape is not a file `rw_wrfbatch` opens; its reader is `woof energy

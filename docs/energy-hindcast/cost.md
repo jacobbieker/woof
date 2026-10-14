@@ -463,7 +463,9 @@ At the default, the year costs **about $133k on g5.xlarge spot ($80k-$403k)
 with about 440 instances for 30 days**, or $154k on 25 p4d.24xlarge. Storage
 is separate: the `full` preset on every level is about 0.94 PB compressed
 at this spacing (about $22k a month on S3 Standard); `--store-preset
-energy` is about a third of that.
+energy` is about a third of that, and `--store-preset windfarm`, the
+hindcast's default leaf output (99 planes per frame at six hub heights
+against 2,242 for `full` at 49 levels), about 42 TB.
 
 ### The recipe
 

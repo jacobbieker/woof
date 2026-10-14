@@ -548,6 +548,10 @@ def _hub_indices(metas: list[_FileMeta], heights: np.ndarray) -> list[int]:
     interpolated between hub planes.
     """
     levels = metas[0].hub_heights
+    if not levels:
+        raise SampleUnavailable(
+            f"{metas[0].path} has a HUB_HEIGHT variable but no hub heights "
+            "in it (no records); its hub planes cannot be placed in height")
     for meta in metas[1:]:
         if meta.hub_heights != levels:
             raise SampleUnavailable(
@@ -603,18 +607,19 @@ def hub_wind_at_sites(speed: np.ndarray, direction: np.ndarray,
     """
     nh, ny, nx = speed.shape
     j0, i0, wx, wy = _stencil_cells(fi, fj, ny, nx)
-    out = []
-    for comp in (np.sin, np.cos):
-        corners = []
-        for dj, di in ((0, 0), (0, 1), (1, 0), (1, 1)):
-            s = speed[:, j0 + dj, i0 + di].astype(np.float64)
-            d = np.radians(direction[:, j0 + dj, i0 + di].astype(np.float64))
-            corners.append(-s * comp(d))                      # (H, S)
-        sw, se, nw, ne = corners
+    u_corners, v_corners = [], []
+    for dj, di in ((0, 0), (0, 1), (1, 0), (1, 1)):
+        s = speed[:, j0 + dj, i0 + di].astype(np.float64)       # (H, S)
+        d = np.radians(direction[:, j0 + dj, i0 + di].astype(np.float64))
+        u_corners.append(-s * np.sin(d))
+        v_corners.append(-s * np.cos(d))
+
+    def blend(sw, se, nw, ne):
         south = (1.0 - wx) * sw + wx * se
         north = (1.0 - wx) * nw + wx * ne
-        out.append(((1.0 - wy) * south + wy * north).T)       # (S, H)
-    return out[0], out[1]
+        return ((1.0 - wy) * south + wy * north).T            # (S, H)
+
+    return blend(*u_corners), blend(*v_corners)
 
 
 def _levels_needed(zagl: np.ndarray, top: float) -> int:
@@ -853,7 +858,7 @@ def sample_wrfout(paths: Sequence[Path], lat: np.ndarray, lon: np.ndarray,
                 ds.close()
         levels = (f", lowest {deepest} of {grid.nz} levels"
                   if sample_profiles and not hub_mode else
-                  f", {nh} of {len(metas[0].hub_heights)} hub planes"
+                  f", {nh} of {len(metas[0].hub_heights or ())} hub planes"
                   if hub_mode else "")
         notes.append(
             f"window j[{window.j0}:{window.j1}] i[{window.i0}:{window.i1}] "

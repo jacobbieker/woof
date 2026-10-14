@@ -491,7 +491,8 @@ def spinup_sensitivity(chosen: Mapping[str, Any], *, partitions_for,
 # recipe, rendering, CLI
 # --------------------------------------------------------------------------
 def recipe(chosen: Mapping[str, Any], *, sites: str, params: Mapping[str, Any],
-           deadline_days: float, market: str) -> list[str]:
+           deadline_days: float, market: str,
+           store_preset: str = "windfarm") -> list[str]:
     """The commands that run the chosen configuration (start/end are the
     reader's)."""
 
@@ -523,12 +524,15 @@ def recipe(chosen: Mapping[str, Any], *, sites: str, params: Mapping[str, Any],
                   "--spinup-hours", str(chosen["spinup_hours"]),
                   "--nz", str(chosen["nz"]), "--parent-nz", str(chosen["nz"]),
                   "--instance", chosen["offer"], "--market", market_flag,
-                  "--deadline-days", f"{deadline_days:g}"]),
+                  "--deadline-days", f"{deadline_days:g}",
+                  "--store-preset", store_preset]),
         " ".join(["woof energy hindcast plan --partition", partition_path,
                   "--start YYYY-MM-DD --end YYYY-MM-DD",
                   "--segment-hours", str(chosen["segment_hours"]),
                   "--spinup-hours", str(chosen["spinup_hours"]),
                   "--nz", str(chosen["nz"]), "--card", chosen["card"],
+                  *(["--leaf-output-preset", store_preset]
+                    if store_preset != "windfarm" else []),
                   "-o", "hindcast"]),
     ]
 
@@ -722,7 +726,7 @@ def run(args, *, log=None, today: date | None = None) -> dict[str, Any]:
         packing_efficiency=args.packing_efficiency)
     chosen["recipe"] = recipe(chosen, sites=sites_label, params=params,
                               deadline_days=float(args.deadline_days),
-                              market=market)
+                              market=market, store_preset=args.store_preset)
     as_of = date.fromisoformat(str(table["as_of"]))
     today = today or datetime.now(timezone.utc).date()
     age = (today - as_of).days

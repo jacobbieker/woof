@@ -793,3 +793,15 @@ def test_an_omitted_spinup_that_would_leave_the_cycle_is_refused(segment):
                    "--start", "2025-11-01", "--end", "2025-11-02",
                    "--segment-hours", str(segment), "-o", "unused"])
     assert args.func(args) == 2
+
+
+def test_a_replan_cannot_switch_the_leaf_preset_under_written_segments(
+        tmp_path):
+    manifest = hc.plan_hindcast(_request(tmp_path), now=NOW)
+    done = manifest["planned_job_ids"][0]
+    hc.update_job(tmp_path / "hc", done, status="complete")
+    with pytest.raises(hc.HindcastRefused, match="mix two schemas"):
+        hc.plan_hindcast(_request(tmp_path, leaf_output_preset="full"),
+                         resume=True, now=NOW)
+    # The same preset re-plans as before.
+    hc.plan_hindcast(_request(tmp_path), resume=True, now=NOW)

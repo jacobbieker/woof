@@ -152,7 +152,7 @@ see the table above.
 The `windfarm` preset is the one exception, and it is deliberate: its
 reader is `woof energy extract`, which reads the hub-height planes, not
 a WRF post-processor, and the two structural volumes `T` and `PHB` would
-be 121 planes on a 60-level leaf, more than every plane the preset keeps
+be 99 planes on a 49-level leaf, as many as every plane the preset keeps
 at six hub heights. A `windfarm` tape therefore does not open in
 `rw_wrfbatch`, and the plan-time warning says so (0 render products).
 Every other structural field stays forced.

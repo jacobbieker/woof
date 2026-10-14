@@ -1186,6 +1186,21 @@ def _merge(previous: dict, request_record: dict, request_sha: str,
            clusters: dict, fresh: dict, notes: list[str]) -> dict:
     manifest = dict(previous)
     jobs = dict(previous["jobs"])
+    # One gridded store per leaf holds the whole hindcast: a re-plan may
+    # not switch what the leaves write under segments already written.
+    was = (previous.get("request") or {}).get("leaf_output_preset",
+                                               LEGACY_LEAF_OUTPUT_PRESET)
+    now = request_record.get("leaf_output_preset", LEGACY_LEAF_OUTPUT_PRESET)
+    started = sorted(job_id for job_id, r in jobs.items()
+                     if r.get("status") in ("running", "complete"))
+    if was != now and started:
+        raise HindcastRefused(
+            f"this hindcast's leaves write the {was!r} preset and "
+            f"{len(started)} job(s) ({', '.join(started[:3])}"
+            f"{' ...' if len(started) > 3 else ''}) have already written it "
+            f"into the per-leaf gridded stores; re-planning with "
+            f"--leaf-output-preset {now} would mix two schemas in one store. "
+            f"Pass --leaf-output-preset {was}, or plan into a new directory.")
     by_key = {(r["cluster_id"], r["cycle"]): job_id
               for job_id, r in jobs.items()}
     merge_notes = []
@@ -1703,9 +1718,15 @@ def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
                                   "child_config / child_config_sha256")
         path = plan.resolve(relative)
         original = path.read_text(encoding="utf-8")
-        text = _set_run_key(original, "output_interval_s", leaf_s)
+        cfg_now = resolve_child_run_config(path)
+        text = original
+        # Only what differs is rewritten: a value already right (inherited,
+        # defaulted or spelled differently) keeps its line and the sha.
+        if not math.isclose(float(cfg_now.output_interval_s), leaf_s):
+            text = _set_run_key(text, "output_interval_s", leaf_s)
         # The tiles' interval wind maxima and UPP gust (wind_gust_diag).
-        text = _ensure_run_key(text, "nwp_diagnostics", 1)
+        if int(getattr(cfg_now, "nwp_diagnostics", 0)) != 1:
+            text = _ensure_run_key(text, "nwp_diagnostics", 1)
         # The leaf's [output]: the job's preset with its hub-height planes.
         # A job planned before the key existed keeps the planner's table.
         if recorded:

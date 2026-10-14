@@ -424,6 +424,7 @@ def _module(device_id: int):
         return cp.RawModule(code=KERNEL_SOURCE, options=KERNEL_OPTIONS)
 
 
+@lru_cache(maxsize=None)
 def _kernel(device_id: int, name: str = "hub_wind_columns"):
     """One kernel of the module: ``hub_wind_columns`` (the default) or
     ``hub_scalar_columns``."""
@@ -858,13 +859,24 @@ class HubWindDiagnostic:
                 raise HubWindError(
                     f"hub-height scalars need contiguous float32 {label}, got "
                     f"{array.dtype} (contiguous={array.flags.c_contiguous})")
-        if state.thp.shape != (nz, self.ny, self.nx):
-            raise HubWindError(
-                f"theta' has shape {state.thp.shape}; this diagnostic was "
-                f"built for a {(self.ny, self.nx)} mass grid")
-        # An absent member is never dereferenced (has_q/has_nc = 0); the
-        # kernel still needs a valid pointer in its slot, and a buffer of
-        # its own so no __restrict__ argument aliases another.
+        mass = (nz, self.ny, self.nx)
+        stag = (nz + 1, self.ny, self.nx)
+        want = {"thp": (mass,), "p": (mass,), "ph": (stag,),
+                "phb": (stag, (nz + 1,)), "thb": (mass, (nz,)),
+                "ht": ((self.ny, self.nx),),
+                "qv": (mass,), "qc": (mass,), "qr": (mass,), "nc": (mass,)}
+        for label, array in inputs:
+            if tuple(array.shape) not in want[label]:
+                raise HubWindError(
+                    f"hub-height scalars: {label} has shape {array.shape}; "
+                    f"this diagnostic was built for a {mass} mass grid "
+                    f"(expected one of {list(want[label])})")
+        # An absent member is never dereferenced (has_q/has_nc = 0), but
+        # its slot needs a valid pointer: one 1-element spare fills every
+        # absent slot.  They alias each other (and absent output slots), so
+        # the kernel must keep every access to them behind has_q/has_nc --
+        # an unconditional read or write of one would be undefined under
+        # __restrict__.
         if getattr(self, "_spare", None) is None:
             self._spare = self.xp.zeros(1, dtype=DTYPE)
         spare = self._spare

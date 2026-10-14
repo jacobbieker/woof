@@ -1224,9 +1224,10 @@ def register_optimize(sub, name: str = "optimize") -> argparse.ArgumentParser:
                    help="woof-energy.cloud-prices.v1 table (default: the "
                         "dated table shipped in woof/data/energy)")
     p.add_argument("--store-preset", choices=("full", "energy", "windfarm"),
-                   default="full",
-                   help="fields stored per leaf frame (windfarm: 2-D and "
-                        "six hub-height planes only)")
+                   default="windfarm",
+                   help="fields stored per leaf frame (default windfarm, the "
+                        "hindcast's default leaf output: 2-D and six "
+                        "hub-height planes only)")
     p.add_argument("--packing-efficiency", type=positive_float, default=0.85,
                    help="fraction of paid GPU time doing work (default 0.85)")
     p.add_argument("--top", type=positive_int, default=10,

@@ -776,7 +776,7 @@ Takes no options of its own.
 | `--rank-market {spot,on-demand}` | market ranked on (default spot; the other is reported) |
 | `--sites SITES.json` | sites document, re-partitioned per card memory and leaf spacing |
 | `--spinup-hours H[,H]` | spin-up hours per run (default 3, the hindcast's; e.g. 0,1,2,3 to rank them) |
-| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame (windfarm: 2-D and six hub-height planes only) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame (default windfarm, the hindcast's default leaf output: 2-D and six hub-height planes only) |
 | `--top` | rows to keep and print (default 10) |
 
 ## `woof energy hindcast plan`
