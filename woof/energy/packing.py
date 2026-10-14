@@ -13,35 +13,24 @@ render`` cannot drift apart:
   declared reservations.  An assumption, not a measurement: the CUDA
   driver, an MPS server and allocator fragmentation that a job's priced
   peak does not hold.
+
+The numbers and the grammar themselves live in :mod:`woof.gpu_packing`,
+shared with ``woof multi-run``'s ``runs_per_gpu``; this module pins the
+energy flag's name onto them.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-SLOTS_AUTO = "auto"
-AUTO_MAX_SLOTS_PER_GPU = 8
-DEFAULT_MEM_MARGIN_GIB = 1.0
+from woof.gpu_packing import (AUTO_MAX_SLOTS_PER_GPU, DEFAULT_MEM_MARGIN_GIB,
+                              SLOTS_AUTO, parse_count_or_auto)
 
 
 def parse_slots_per_gpu(value: Any) -> int | str:
     """``"auto"`` or a positive int; anything else is a ValueError."""
 
-    if isinstance(value, bool):
-        raise ValueError(f"--slots-per-gpu takes a positive count or 'auto', "
-                         f"not {value!r}")
-    if isinstance(value, int):
-        if value >= 1:
-            return value
-        raise ValueError(f"--slots-per-gpu takes a positive count or 'auto', "
-                         f"not {value!r}")
-    text = str(value).strip()
-    if text.lower() == SLOTS_AUTO:
-        return SLOTS_AUTO
-    if text.isascii() and text.isdigit() and int(text) >= 1:
-        return int(text)
-    raise ValueError(f"--slots-per-gpu takes a positive count or 'auto', "
-                     f"not {value!r}")
+    return parse_count_or_auto(value, flag="--slots-per-gpu")
 
 
 __all__ = ["AUTO_MAX_SLOTS_PER_GPU", "DEFAULT_MEM_MARGIN_GIB", "SLOTS_AUTO",

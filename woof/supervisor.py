@@ -1303,6 +1303,42 @@ def _warn_once(action: str, *, why: str) -> None:
     warn(action, why=why)
 
 
+#: How :func:`measured_device_memory` reads a card's free memory, and so
+#: the basis every shared-GPU admission (a run door's, and ``woof
+#: multi-run``'s packed admission) records.
+SHARED_ADMISSION_BASIS = (
+    "NVML device total minus device-wide used, which counts a "
+    "co-tenant's memory whether or not its per-process framebuffer "
+    "was reported")
+
+
+def measured_device_memory(gpu_uuid: str) -> dict:
+    """One card's NVML total, device-wide used and free bytes, measured now.
+
+    The numbers :func:`shared_gpu_admission` prices a shared card from,
+    exposed so a door that packs several runs onto one card (``woof
+    multi-run`` with ``runs_per_gpu``) admits against the SAME measurement
+    the run it launches will re-check.  ``device_total_bytes`` and so
+    ``device_free_bytes`` are None when NVML cannot report the total;
+    nvidia-smi failing to report the used figure fails closed
+    (:class:`GPUPreflightError`), because an unmeasured rail must never
+    read as headroom.
+    """
+
+    from woof.core.preflight import (device_physical_total_bytes,
+                                      device_wide_used_bytes)
+
+    used = int(device_wide_used_bytes(device_id=gpu_uuid))
+    total = device_physical_total_bytes(device_id=gpu_uuid)
+    return {
+        "device_total_bytes": None if total is None else int(total),
+        "device_wide_used_bytes": used,
+        "device_free_bytes": (None if total is None
+                              else max(0, int(total) - used)),
+        "basis": SHARED_ADMISSION_BASIS,
+    }
+
+
 def shared_gpu_admission(gpu_uuid: str, conflicts, reservation_bytes=None, *,
                          decide: bool = True) -> dict:
     """Price one shared card rather than refusing it for being shared.
@@ -1324,13 +1360,8 @@ def shared_gpu_admission(gpu_uuid: str, conflicts, reservation_bytes=None, *,
     itself failing still fails closed, through ``device_wide_used_bytes``.
     """
 
-    from woof.core.preflight import (device_physical_total_bytes,
-                                      device_wide_used_bytes)
-
     detail = _cotenant_detail(conflicts)
-    basis = ("NVML device total minus device-wide used, which counts a "
-             "co-tenant's memory whether or not its per-process framebuffer "
-             "was reported")
+    basis = SHARED_ADMISSION_BASIS
     if not conflicts:
         # An exclusive card asks the device nothing: there is no co-tenant
         # to price against, and a query here would be a second nvidia-smi
@@ -1346,9 +1377,10 @@ def shared_gpu_admission(gpu_uuid: str, conflicts, reservation_bytes=None, *,
             "basis": "no CUDA co-tenant on this device",
             "verdict": "exclusive",
         }
-    used = device_wide_used_bytes(device_id=gpu_uuid)
-    total = device_physical_total_bytes(device_id=gpu_uuid)
-    free = None if total is None else max(0, int(total) - int(used))
+    measured = measured_device_memory(gpu_uuid)
+    used = measured["device_wide_used_bytes"]
+    total = measured["device_total_bytes"]
+    free = measured["device_free_bytes"]
     receipt = {
         "gpu_uuid": gpu_uuid,
         "cotenants": detail,
@@ -3028,6 +3060,7 @@ __all__ = [
     "priced_reservation_bytes", "quarantine_file", "read_heartbeat",
     "register_cli",
     "replace_file_with_retry", "resolved_input_hashes", "select_gpu",
+    "SHARED_ADMISSION_BASIS", "measured_device_memory",
     "shared_gpu_admission",
     "SHARED_INPUT_AUTHORITY_ROOT_ENV", "snapshot_resolved_input_files",
     "stale_threshold_seconds", "supervise_experiment",
