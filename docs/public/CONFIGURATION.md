@@ -56,6 +56,16 @@ enter the restart identity, so a trimmed run resumes a full run's
 checkpoints. Full page:
 [OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md).
 
+The same table configures the in-model hub-height wind diagnostic
+([docs/energy-hindcast/hub-wind.md](../energy-hindcast/hub-wind.md)):
+
+| key | type | default | meaning |
+|---|---|---|---|
+| `hub_wind` | boolean | off | `true` turns hub-height wind on at the default heights |
+| `hub_heights_m` | array of numbers | `[40, 80, 100, 120, 150, 200]` | heights in m above ground, strictly increasing, at most 32, each in (0, 2000]; setting it turns the diagnostic on |
+| `hub_sites` | string or array | unset | a sites.v1 JSON path (`woof energy sites`), or inline `{ site_id = "...", lat = ..., lon = ... }` tables, to sample per site |
+| `hub_sample_interval_s` | number | `60` | per-site sampling cadence in model seconds; needs `hub_sites` |
+
 ## `[case_data]` -- the inputs a config-driven run declares
 
 `woof run CONFIG.toml` is the config-driven route, and `[case_data]` is

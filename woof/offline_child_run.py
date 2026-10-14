@@ -3450,6 +3450,16 @@ def _run(args: argparse.Namespace,
     stepper = streaming.make_stepper(
         child, cfg, tiles, decision=streaming_decision,
         build=streaming.standalone_domain_builder(grid_id=int(cfg.grid_id)))
+    # The child config's [output] hub-height wind window, if it asks for
+    # one (woof/core/hub_wind_diag.py): folded by every dycore step,
+    # restarted in emit_output below.  Refused by name when streamed.
+    if getattr(history_selection, "hub_wind", None) is not None:
+        from woof.core.hub_wind_diag import attach_hub_wind
+        attach_hub_wind(
+            child, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
+            dy=cfg.dy, grid_id=int(cfg.grid_id),
+            latlon=lambda: (initial.fields["XLAT"], initial.fields["XLONG"]),
+            streamed=streaming.is_streaming(stepper))
     streaming_report = streaming.streaming_receipt(
         tiles, {int(cfg.grid_id): streaming_decision})
     if streaming_report:
@@ -3492,6 +3502,10 @@ def _run(args: argparse.Namespace,
         # writer above snapshotted the accumulator already).
         from woof.core.uh_diag import reset_up_heli_max
         reset_up_heli_max(child)
+        from woof.core import interval_diagnostics
+        interval_diagnostics.close_interval(
+            child, valid_time=valid, output_dir=outdir,
+            grid_id=int(cfg.grid_id))
         _log("child_output", elapsed_seconds=float(clock.elapsed_seconds),
              path=str(path), bytes=path.stat().st_size)
         progress.output_committed(domain=int(cfg.grid_id),

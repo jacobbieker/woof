@@ -40,9 +40,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import difflib
+import math
+from pathlib import Path
 
 from woof.explain import warn
 from woof.io.wrf_output_schema import (HISTORY_FIELDS_BY_NETCDF_NAME,
+                                        HUB_WIND_OUTPUT_FIELDS,
                                         REGISTRY_VAR_META)
 
 
@@ -147,6 +150,10 @@ _MINIMAL_FIELDS: frozenset[str] = frozenset({
     "SNOW", "SNOWC", "SNOWH",
     # Column extremes a severe-weather surface panel reads.
     "UP_HELI_MAX",
+    # Hub-height wind planes and their interval statistics: present only
+    # when [output] asks for them (hub_heights_m), and 2-D per height, so
+    # they belong with the surface panel rather than the volumes.
+    *HUB_WIND_OUTPUT_FIELDS,
     # Grid metadata: 2-D, cheap, and what a staggered reader needs.
     "XLAT_U", "XLONG_U", "XLAT_V", "XLONG_V",
     "MAPFAC_M", "MAPFAC_U", "MAPFAC_V", "F", "E", "SINALPHA", "COSALPHA",
@@ -204,6 +211,9 @@ _ENERGY_FIELDS: frozenset[str] = frozenset({
     "RAINNC", "RAINC",
     # Grid rotation and georeference.
     "SINALPHA", "COSALPHA", "XLAT", "XLONG",
+    # In-model hub-height wind and its per-interval MAX/MIN/MEAN
+    # (woof/core/hub_wind_diag.py), when [output] hub_heights_m asks.
+    *HUB_WIND_OUTPUT_FIELDS,
 })
 
 #: Named presets: name -> the set of droppable fields it keeps, or
@@ -276,9 +286,265 @@ PRODUCT_COUNT_BASIS = (
     "measured with rw_wrfbatch --list-products on one 1 km frame of the "
     "proof run (49 levels, WSM6, RRTMG), one field at a time")
 
-#: The keys ``[output]`` accepts.
+#: The keys ``[output]`` accepts.  The four ``hub_*`` keys configure the
+#: in-model hub-height wind diagnostic (:class:`HubWindRequest`).
 OUTPUT_KEYS: frozenset[str] = frozenset(
-    {"preset", "history_vars", "history_drop"})
+    {"preset", "history_vars", "history_drop",
+     "hub_wind", "hub_heights_m", "hub_sample_interval_s", "hub_sites"})
+
+#: ``hub_heights_m`` when ``hub_wind = true`` names none: the common
+#: onshore/offshore turbine hub range, in m above ground level.
+DEFAULT_HUB_HEIGHTS_M: tuple[float, ...] = (40.0, 80.0, 100.0, 120.0,
+                                            150.0, 200.0)
+#: ``hub_sample_interval_s`` when ``hub_sites`` is given without one.
+DEFAULT_HUB_SAMPLE_INTERVAL_S = 60.0
+#: Upper bounds that keep a typo from becoming a silent allocation.  A
+#: wind 2 km above ground is not a hub height, and 32 levels is already
+#: more than any turbine fleet spans.
+MAX_HUB_HEIGHT_M = 2000.0
+MAX_HUB_HEIGHTS = 32
+
+
+class HubWindConfigError(ValueError):
+    """An ``[output] hub_*`` key the diagnostic cannot honour as written."""
+
+
+@dataclass(frozen=True)
+class HubWindRequest:
+    """The validated ``[output] hub_*`` keys of one domain.
+
+    PINNED: ``heights_m`` is strictly increasing, every entry in
+    ``(0, MAX_HUB_HEIGHT_M]``; ``sites`` is ``(site_id, lat, lon)``
+    triples with unique ids, longitudes normalised to ``[-180, 180)``;
+    ``sample_interval_s`` is ``None`` exactly when ``sites`` is empty.
+    Everything here is plain tuples and floats so ``dataclasses.asdict``
+    (the resolved-TOML and identity walks) serialises it unchanged.
+    """
+
+    heights_m: tuple[float, ...] = DEFAULT_HUB_HEIGHTS_M
+    sample_interval_s: float | None = None
+    sites: tuple[tuple[str, float, float], ...] = ()
+    #: Where the sites came from (a sites.v1 path, or "inline").
+    sites_source: str | None = None
+
+    def spelling(self) -> str:
+        parts = ["hub_heights_m=" + ",".join(f"{h:g}" for h in self.heights_m)]
+        if self.sites:
+            parts.append(f"hub_sites={len(self.sites)}")
+            parts.append(f"hub_sample_interval_s={self.sample_interval_s:g}")
+        return " ".join(parts)
+
+
+def _finite_number(value, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HubWindConfigError(f"{what} must be a number, got {value!r}.")
+    number = float(value)
+    if not math.isfinite(number):
+        raise HubWindConfigError(f"{what} must be finite, got {value!r}.")
+    return number
+
+
+def _resolve_sites_path(text: str, *, base_dir, source: str) -> Path:
+    """A sites file named relative to the config, else the working directory.
+
+    The config's own directory FIRST: a case folder that carries its sites
+    file must sample those turbines from wherever it is launched, and an
+    unrelated ``sites.json`` in the launch directory must not win.
+    """
+    path = Path(text).expanduser()
+    if path.is_absolute():
+        candidates = [path]
+    else:
+        candidates = []
+        if base_dir is not None:
+            candidates.append(Path(base_dir) / path)
+        candidates.append(Path.cwd() / path)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    raise HubWindConfigError(
+        f"[output] hub_sites of {source} names {text!r}, which is not a "
+        f"file (looked at {[str(c) for c in candidates]}).  hub_sites is a "
+        "sites.v1 JSON document (woof energy sites) or an inline list of "
+        '{ site_id = "...", lat = ..., lon = ... } tables.')
+
+
+def _parse_sites(value, *, base_dir, source: str
+                 ) -> tuple[tuple[tuple[str, float, float], ...], str]:
+    rows: list[tuple[str, float, float]] = []
+    if isinstance(value, str):
+        from woof.energy.contracts import ContractError, load_sites
+
+        path = _resolve_sites_path(value, base_dir=base_dir, source=source)
+        try:
+            site_set = load_sites(path)
+        except ContractError as err:
+            raise HubWindConfigError(
+                f"[output] hub_sites of {source}: {path} is not a valid "
+                f"sites.v1 document: {err}") from None
+        rows = [(site.site_id, float(site.lat), float(site.lon))
+                for site in site_set.sites]
+        origin = str(path)
+    elif isinstance(value, (list, tuple)):
+        for index, row in enumerate(value):
+            if not isinstance(row, dict) or set(row) != {"site_id", "lat", "lon"}:
+                raise HubWindConfigError(
+                    f"[output] hub_sites[{index}] of {source} must be a table "
+                    'with exactly site_id, lat and lon, e.g. { site_id = '
+                    '"hornsea-1", lat = 53.88, lon = 1.92 }, got '
+                    f"{row!r}.")
+            site_id = row["site_id"]
+            if not isinstance(site_id, str) or not site_id:
+                raise HubWindConfigError(
+                    f"[output] hub_sites[{index}] of {source}: site_id must "
+                    f"be a non-empty string, got {site_id!r}.")
+            rows.append((site_id,
+                         _finite_number(row["lat"], f"hub_sites[{index}].lat"),
+                         _finite_number(row["lon"], f"hub_sites[{index}].lon")))
+        origin = "inline"
+    else:
+        raise HubWindConfigError(
+            f"[output] hub_sites of {source} must be a sites.v1 file path or "
+            f"a list of site tables, got {value!r}.")
+    if not rows:
+        raise HubWindConfigError(
+            f"[output] hub_sites of {source} names no sites.  Delete the key "
+            "to turn site sampling off.")
+    seen: set[str] = set()
+    normalised = []
+    for site_id, lat, lon in rows:
+        if site_id in seen:
+            raise HubWindConfigError(
+                f"[output] hub_sites of {source} repeats site_id {site_id!r}.")
+        seen.add(site_id)
+        if not -90.0 <= lat <= 90.0:
+            raise HubWindConfigError(
+                f"[output] hub_sites of {source}: {site_id} latitude {lat} "
+                "is outside [-90, 90].")
+        if not -180.0 <= lon < 360.0:
+            raise HubWindConfigError(
+                f"[output] hub_sites of {source}: {site_id} longitude {lon} "
+                "is outside [-180, 360).")
+        # Only the [180, 360) half moves, so a longitude already in range
+        # keeps its exact float.
+        normalised.append((site_id, lat, lon - 360.0 if lon >= 180.0 else lon))
+    return tuple(normalised), origin
+
+
+def output_key_rows():
+    """Declared rows (type, default, one-line doc) for every ``[output]`` key.
+
+    The whole table, not only the keys no typed field carries: a front end
+    reading :func:`woof.config.declared_key_rows` learns ``[output]`` from
+    here, and a partial table would read as "these are all the keys".
+    """
+    from woof.config_keys import KeyRow, key_rows
+
+    return key_rows(
+        KeyRow("preset", "string", "full",
+               "Named history set: full (default), minimal, severe or "
+               "energy."),
+        KeyRow("history_vars", "array", None,
+               "Explicit list of wrfout variables to keep; excludes "
+               "history_drop and a non-full preset.", items="string"),
+        KeyRow("history_drop", "array", None,
+               "Wrfout variables to drop from the preset; structural "
+               "fields refuse.", items="string"),
+        KeyRow("hub_wind", "boolean", False,
+               "true turns the in-model hub-height wind fields on at the "
+               "default heights."),
+        KeyRow("hub_heights_m", "array", list(DEFAULT_HUB_HEIGHTS_M),
+               "Heights above ground (m, strictly increasing) of the "
+               "in-model hub-height wind fields; setting it turns them on.",
+               items="number"),
+        KeyRow("hub_sample_interval_s", "number",
+               DEFAULT_HUB_SAMPLE_INTERVAL_S,
+               "Cadence in model seconds of per-site hub-wind sampling "
+               "into the hubwind sidecar; needs hub_sites."),
+        KeyRow("hub_sites", ("string", "array"), None,
+               "Sites to sample every hub_sample_interval_s: a sites.v1 "
+               "JSON path or a list of {site_id, lat, lon} tables."),
+    )
+
+
+def parse_hub_wind(table, *, source: str = "<config>", base_dir=None
+                   ) -> HubWindRequest | None:
+    """The ``hub_*`` keys of one ``[output]`` table, or ``None`` (off).
+
+    Off unless asked: ``hub_wind = true`` turns the diagnostic on at
+    :data:`DEFAULT_HUB_HEIGHTS_M`; ``hub_heights_m`` on its own turns it on
+    at those heights.  ``hub_sites`` adds per-site sampling every
+    ``hub_sample_interval_s`` (default :data:`DEFAULT_HUB_SAMPLE_INTERVAL_S`).
+    Every contradiction is refused by name rather than resolved.
+    """
+    keys = {"hub_wind", "hub_heights_m", "hub_sample_interval_s",
+            "hub_sites"} & set(table)
+    if not keys:
+        return None
+    switch = table.get("hub_wind")
+    if switch is not None and not isinstance(switch, bool):
+        raise HubWindConfigError(
+            f"[output] hub_wind of {source} must be true or false, got "
+            f"{switch!r}.")
+    if switch is False:
+        others = sorted(keys - {"hub_wind"})
+        if others:
+            raise HubWindConfigError(
+                f"[output] of {source} sets hub_wind = false together with "
+                f"{others}.  Those keys configure the diagnostic the switch "
+                "turns off -- delete them, or set hub_wind = true.")
+        return None
+    heights = DEFAULT_HUB_HEIGHTS_M
+    if "hub_heights_m" in table:
+        raw = table["hub_heights_m"]
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
+            raise HubWindConfigError(
+                f"[output] hub_heights_m of {source} must be a LIST of "
+                f"heights in m above ground, e.g. [80, 100, 120], got {raw!r}.")
+        if not raw:
+            raise HubWindConfigError(
+                f"[output] hub_heights_m of {source} is an empty list.  Name "
+                "the heights you want, or set hub_wind = true for the "
+                f"defaults {list(DEFAULT_HUB_HEIGHTS_M)}.")
+        heights = tuple(_finite_number(h, f"[output] hub_heights_m of {source}")
+                        for h in raw)
+    if len(heights) > MAX_HUB_HEIGHTS:
+        raise HubWindConfigError(
+            f"[output] hub_heights_m of {source} names {len(heights)} heights; "
+            f"at most {MAX_HUB_HEIGHTS} are carried.")
+    for height in heights:
+        if not 0.0 < height <= MAX_HUB_HEIGHT_M:
+            raise HubWindConfigError(
+                f"[output] hub_heights_m of {source} contains {height:g} m; "
+                f"every height must be in (0, {MAX_HUB_HEIGHT_M:g}] m above "
+                "ground.")
+    if list(heights) != sorted(set(heights)):
+        raise HubWindConfigError(
+            f"[output] hub_heights_m of {source} must be strictly increasing "
+            f"with no repeats, got {list(heights)}.")
+    sites: tuple[tuple[str, float, float], ...] = ()
+    origin = None
+    interval = None
+    if "hub_sites" in table:
+        sites, origin = _parse_sites(table["hub_sites"], base_dir=base_dir,
+                                     source=source)
+        interval = DEFAULT_HUB_SAMPLE_INTERVAL_S
+    if "hub_sample_interval_s" in table:
+        if not sites:
+            raise HubWindConfigError(
+                f"[output] of {source} sets hub_sample_interval_s without "
+                "hub_sites: the interval is the cadence of per-site sampling "
+                "and there are no sites to sample.  Add hub_sites or delete "
+                "the key.")
+        interval = _finite_number(table["hub_sample_interval_s"],
+                                  f"[output] hub_sample_interval_s of {source}")
+        if interval <= 0.0:
+            raise HubWindConfigError(
+                f"[output] hub_sample_interval_s of {source} must be "
+                f"positive, got {interval:g}.")
+    return HubWindRequest(heights_m=tuple(float(h) for h in heights),
+                          sample_interval_s=interval, sites=sites,
+                          sites_source=origin)
 
 #: How many dropped names the plan-time warning spells out before it
 #: switches to a count.  See :meth:`HistorySelection.warn_lost_products`.
@@ -389,6 +655,12 @@ class HistorySelection:
     history_drop: tuple[str, ...] = ()
     #: Where this block was read from, for refusal text only.
     source: str = "<config>"
+    #: The in-model hub-height wind diagnostic this domain asked for, or
+    #: ``None`` (the default: no diagnostic, no hub fields, nothing moves).
+    #: It lives here and not on RunConfig for the reason the rest of
+    #: [output] does: it reads model state and writes only its own
+    #: buffers, so it binds no restart identity.
+    hub_wind: HubWindRequest | None = None
 
     # ``_include`` -- the resolved include set, or None for "everything
     # produced" -- is NOT a dataclass field, deliberately.
@@ -452,11 +724,25 @@ class HistorySelection:
         else:
             include = HISTORY_PRESETS[self.preset]
         object.__setattr__(self, "_include", include)
+        if self.hub_wind is not None and not any(
+                self.keeps(name) for name in HUB_WIND_OUTPUT_FIELDS
+                if name not in ("HUB_HEIGHT", "HUB_WINDOW_S")):
+            raise HubWindConfigError(
+                f"[output] of {self.source} asks for hub-height wind but its "
+                "selection keeps none of "
+                f"{list(HUB_WIND_OUTPUT_FIELDS[2:])}: the diagnostic would "
+                "run every step and publish nothing.  Keep at least one of "
+                "them, or delete the hub_* keys.")
 
     @classmethod
-    def from_mapping(cls, table, *, source: str = "<config>"
+    def from_mapping(cls, table, *, source: str = "<config>", base_dir=None
                      ) -> "HistorySelection":
-        """Validate one ``[output]`` table.  ``None`` gives :data:`FULL`."""
+        """Validate one ``[output]`` table.  ``None`` gives :data:`FULL`.
+
+        ``base_dir`` is the config file's directory: a relative
+        ``hub_sites`` path resolves from there first, then from the
+        working directory.
+        """
         if table is None:
             return FULL
         if not isinstance(table, dict):
@@ -502,6 +788,7 @@ class HistorySelection:
             history_vars=tuple(table.get("history_vars", ()) or ()),
             history_drop=tuple(table.get("history_drop", ()) or ()),
             source=source,
+            hub_wind=parse_hub_wind(table, source=source, base_dir=base_dir),
         )
 
     @property
@@ -575,6 +862,8 @@ class HistorySelection:
             parts.append("history_vars=" + ",".join(self.history_vars))
         if self.history_drop:
             parts.append("history_drop=" + ",".join(self.history_drop))
+        if self.hub_wind is not None:
+            parts.append(self.hub_wind.spelling())
         return " ".join(parts)
 
     def product_cost(self) -> tuple[int, int, bool]:
@@ -722,10 +1011,15 @@ __all__ = [
     "PRODUCT_LOSS_ATTRIBUTION",
     "SEPARATELY_MEASURED_PRESET_PRODUCT_COUNTS",
     "HISTORY_VOCABULARY",
+    "DEFAULT_HUB_HEIGHTS_M",
+    "DEFAULT_HUB_SAMPLE_INTERVAL_S",
     "HistorySelection",
+    "HubWindConfigError",
+    "HubWindRequest",
     "OUTPUT_KEYS",
     "PRODUCT_HISTORY_INPUTS",
     "STRUCTURAL_FIELDS",
     "lost_products",
+    "parse_hub_wind",
     "resolve",
 ]

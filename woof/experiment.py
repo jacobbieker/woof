@@ -3491,8 +3491,11 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     # a trimmed tape is a thing a user asks for.  Like [tiles] it
     # contributes nothing to the restart identity -- see the `output`
     # field's docstring on ExperimentConfig.
+    # A relative [output] hub_sites path resolves beside the config file,
+    # the physics_params idiom above.
+    output_base_dir = Path(source).parent if Path(source).is_file() else None
     output = history_selection_module.HistorySelection.from_mapping(
-        raw.get("output"), source=source)
+        raw.get("output"), source=source, base_dir=output_base_dir)
     simulated_radar = simulated_radar_module.SimulatedRadarOptions.from_mapping(
         raw.get("simulated_radar"), source=source)
 
@@ -3964,7 +3967,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             domain_output = (
                 history_selection_module.HistorySelection.from_mapping(
                     dict(dom["output"]),
-                    source=f"[[domain]] grid_id = {grid_id} of {source}"))
+                    source=f"[[domain]] grid_id = {grid_id} of {source}",
+                    base_dir=output_base_dir))
 
         # Flags: root takes external specified LBCs, children are nested
         # -- WRF &bdy_control, bundle namelist.input specified=T,F,F,F /
@@ -5331,6 +5335,11 @@ def _public_config_value(value):
                     for item in fields(value)
                     if not (isinstance(value, FollowConfig)
                             and value.field != "attribute" and item.name in ATTRIBUTE_KEYS)}
+        if (isinstance(value, history_selection_module.HistorySelection)
+                and value.hub_wind is None):
+            # Hub-height wind is off unless asked; an [output] block that
+            # does not ask keeps its pre-feature public bytes.
+            document.pop("hub_wind", None)
         run_document = (document if isinstance(value, RunConfig) else
                         document.get("run") if isinstance(value, DomainConfig) else None)
         if isinstance(run_document, dict):

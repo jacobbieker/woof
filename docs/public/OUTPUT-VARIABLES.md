@@ -306,3 +306,28 @@ WOOF writes them with WRF's own schema (name, units, description,
 stagger). They make the default full inventory larger than releases
 before this one: `COSZEN` on every run with radiation on, and
 `SWDDNI`/`SWDDIF` as well on a run with `ra_sw_physics = 4`.
+
+## Hub-height wind fields
+
+Off by default. `[output] hub_wind = true` (the default heights 40, 80,
+100, 120, 150 and 200 m above ground) or `hub_heights_m = [...]` turns on
+an in-model diagnostic computed after every model step, with one
+`hub_height` axis:
+
+| variable | dimensions | meaning |
+|---|---|---|
+| `HUB_HEIGHT` | `Time, hub_height` | the configured heights, m above ground |
+| `HUB_WINDOW_S` | `Time` | model seconds the MAX/MIN/MEAN window covers |
+| `WSPD_HUB` | `Time, hub_height, south_north, west_east` | wind speed at the frame's valid time, m s-1 |
+| `WDIR_HUB` | same | earth-relative direction the wind blows from, degrees |
+| `WSPD_HUB_MAX` | same | maximum speed since the previous history frame |
+| `WSPD_HUB_MIN` | same | minimum speed since the previous history frame |
+| `WSPD_HUB_MEAN` | same | time-weighted mean speed since the previous history frame |
+
+The window restarts after each history write, so a ramp within a
+15-minute file shows up as `WSPD_HUB_MAX - WSPD_HUB_MIN`. `hub_sites`
+also samples each site every `hub_sample_interval_s` (60 s by default)
+into a `hubwind_d0N_<time>.nc` sidecar per history write. The `energy`,
+`minimal` and `severe` presets keep these fields. The arithmetic, the
+restart behaviour and what is not supported are in
+[docs/energy-hindcast/hub-wind.md](../energy-hindcast/hub-wind.md).

@@ -2827,7 +2827,8 @@ def load_history_selection(path: str | Path):
 
     authority = read_config_authority(path)
     raw = tomllib.load(io.BytesIO(authority.payload))
-    return HistorySelection.from_mapping(raw.get("output"), source=str(path))
+    return HistorySelection.from_mapping(raw.get("output"), source=str(path),
+                                         base_dir=Path(path).parent)
 
 
 def load_device_options(path: str | Path):
@@ -5697,5 +5698,10 @@ def declared_key_rows() -> dict[str, dict[str, dict]]:
         "ingest": INGEST_TABLE_ROWS,
         "simulated_radar": radar_key_rows(),
     }
+    # [output], on the tree-wide table and on a
+    # domain's own output = {...} override alike (one parser reads both).
+    from woof.io.history_selection import output_key_rows
+    tables["output"] = output_key_rows()
+    tables["domain.output"] = output_key_rows()
     return {table: {name: row.to_json() for name, row in rows.items()}
             for table, rows in tables.items()}

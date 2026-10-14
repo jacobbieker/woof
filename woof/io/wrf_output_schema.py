@@ -1005,6 +1005,24 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
     # exactly when the run carries the accumulator (nwp_diagnostics = 1;
     # woof.core.uh_diag owns the per-step update and the post-write reset).
     "UP_HELI_MAX": ("MAX UPDRAFT HELICITY", "m2 s-2"),
+    # Hub-height wind (woof/core/hub_wind_diag.py; ``[output]
+    # hub_heights_m``).  Not WRF Registry rows: woof's own diagnostic,
+    # present exactly when a domain's [output] asks for it.  The five
+    # gridded fields share the ``hub_height`` dimension whose coordinate
+    # is HUB_HEIGHT (HUB_HEIGHT_DIMENSIONED_FIELDS below); the window
+    # length says how many model seconds the MAX/MIN/MEAN cover.
+    "HUB_HEIGHT": ("HUB HEIGHT ABOVE GROUND OF THE WSPD_HUB LEVELS", "m"),
+    "HUB_WINDOW_S": ("MODEL SECONDS COVERED BY THE WSPD_HUB_MAX/MIN/MEAN "
+                     "WINDOW", "s"),
+    "WSPD_HUB": ("WIND SPEED AT HUB HEIGHT AGL", "m s-1"),
+    "WDIR_HUB": ("EARTH-RELATIVE WIND DIRECTION (FROM) AT HUB HEIGHT AGL",
+                 "degree"),
+    "WSPD_HUB_MAX": ("MAX WIND SPEED AT HUB HEIGHT OVER HISTORY INTERVAL",
+                     "m s-1"),
+    "WSPD_HUB_MIN": ("MIN WIND SPEED AT HUB HEIGHT OVER HISTORY INTERVAL",
+                     "m s-1"),
+    "WSPD_HUB_MEAN": ("TIME-MEAN WIND SPEED AT HUB HEIGHT OVER HISTORY "
+                      "INTERVAL", "m s-1"),
     "HGT": ("Terrain Height", "m"),
     "PSFC": ("SFC PRESSURE", "Pa"),
     # RAINC/RAINSH/RAINNC/SNOWNC/GRAUPELNC/HAILNC used to live here.  They
@@ -1108,8 +1126,29 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
 }
 
 
+#: Every history name the hub-height wind diagnostic emits, in the order
+#: it emits them (woof/core/hub_wind_diag.py).
+HUB_WIND_OUTPUT_FIELDS: tuple[str, ...] = (
+    "HUB_HEIGHT", "HUB_WINDOW_S", "WSPD_HUB", "WDIR_HUB",
+    "WSPD_HUB_MAX", "WSPD_HUB_MIN", "WSPD_HUB_MEAN")
+
+#: The (n_hub, ny, nx) members, written on ``(Time, hub_height,
+#: south_north, west_east)``.  The writer routes them BY NAME, never by
+#: shape: an ``n_hub`` equal to ``nz`` would otherwise land on
+#: ``bottom_top`` and lie about what the axis is.
+HUB_HEIGHT_DIMENSIONED_FIELDS: frozenset[str] = frozenset({
+    "WSPD_HUB", "WDIR_HUB", "WSPD_HUB_MAX", "WSPD_HUB_MIN",
+    "WSPD_HUB_MEAN"})
+
+#: The name of that axis in the file.
+HUB_HEIGHT_DIMENSION = "hub_height"
+
+
 __all__ = [
     "HISTORY_FIELDS_BY_NETCDF_NAME",
+    "HUB_HEIGHT_DIMENSION",
+    "HUB_HEIGHT_DIMENSIONED_FIELDS",
+    "HUB_WIND_OUTPUT_FIELDS",
     "MYNN_PBL_OUTPUT_FIELDS",
     "NETCDF_DTYPE_BY_REGISTRY_TYPE",
     "NOAHMP_OUTPUT_FIELDS",

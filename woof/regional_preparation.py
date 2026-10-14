@@ -254,6 +254,10 @@ def _experiment_identity(exp):
     for domain in exp.domains:
         selection = asdict(resolve(exp.output, domain.output))
         selection.pop('source', None)
+        if selection.get('hub_wind') is None:
+            # Off unless asked: identities written before the key existed
+            # keep their bytes.
+            selection.pop('hub_wind', None)
         output.append(dict(history_interval_s=domain.history_interval_s, selection=selection,
                            tiles=(domain.tiles or exp.tiles or streaming.OFF).to_mapping()))
     return dict(start_time=exp.start_time.isoformat(), run_seconds=exp.run_seconds,
