@@ -41,6 +41,15 @@ New:
   output is still `woof-energy.assets.v1`. `woof energy inventory
   download` fetches USWTDB and EMODnet. See
   `docs/energy-hindcast/inventory.md`.
+- `woof energy queue init|push|status|requeue` keeps energy hindcast
+  jobs in an object-store work queue (`file://`, `s3://` with
+  conditional writes, `gs://` with generation preconditions), and
+  `woof energy worker` drains it with one loop per GPU on any number of
+  nodes: leases with heartbeat renewal and expiry, bounded retries with
+  backoff, a dead-letter state, exactly-once completion markers, runner
+  logs uploaded per attempt, and SIGTERM releasing the lease uncharged
+  for spot and preemptible machines.  See
+  `docs/energy-hindcast/queue-worker.md`.
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals
