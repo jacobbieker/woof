@@ -667,6 +667,7 @@ Takes no options of its own.
 | `--forcing-gb-per-cycle GB` | one cycle's download instead of the measured per-object sizes |
 | `--forcing-objects-per-cycle N` | objects (GET/PUT requests) per cycle |
 | `--forcing-source SOURCE` | boundary source a cycle's download is sized for (default met-office-global) |
+| `--hub-heights` | hub heights a windfarm frame carries (default: the --job's, else 6, the hub diagnostic's default) |
 | `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
 | `--instances` | instances of each offer running at once, for the wall clock (default 1) |
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
@@ -687,7 +688,7 @@ Takes no options of its own.
 | `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
 | `--slots-per-gpu N\|auto` | price N jobs sharing each card, as `woof energy worker --slots-per-gpu` runs them (copies bounded by card memory; auto = up to 8); small domains gain, card-filling ones do not (default 1) |
 | `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
-| `--store-preset {full,energy}` | fields stored per leaf frame (default full: all variables) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame: full (all variables), energy (3-D site-forecast volumes) or windfarm (2-D planes and hub-height planes only); default the --job's leaf output preset, else full |
 
 ## `woof energy extract`
 
@@ -740,6 +741,7 @@ Takes no options of its own.
 | `--forcing-gb-per-cycle GB` | one cycle's download instead of the measured per-object sizes |
 | `--forcing-objects-per-cycle N` | objects (GET/PUT requests) per cycle |
 | `--forcing-source SOURCE` | boundary source a cycle's download is sized for (default met-office-global) |
+| `--hub-heights` | hub heights a windfarm frame carries (default: the --job's, else 6, the hub diagnostic's default) |
 | `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
 | `--instances` | instances of each offer running at once, for the wall clock (default 1) |
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
@@ -760,7 +762,7 @@ Takes no options of its own.
 | `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
 | `--slots-per-gpu N\|auto` | price N jobs sharing each card, as `woof energy worker --slots-per-gpu` runs them (copies bounded by card memory; auto = up to 8); small domains gain, card-filling ones do not (default 1) |
 | `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
-| `--store-preset {full,energy}` | fields stored per leaf frame (default full: all variables) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame: full (all variables), energy (3-D site-forecast volumes) or windfarm (2-D planes and hub-height planes only); default the --job's leaf output preset, else full |
 
 ## `woof energy hindcast materialize`
 
@@ -809,7 +811,7 @@ Takes no options of its own.
 | `--rank-market {spot,on-demand}` | market ranked on (default spot; the other is reported) |
 | `--sites SITES.json` | sites document, re-partitioned per card memory and leaf spacing |
 | `--spinup-hours H[,H]` | spin-up hours per run (default 3, the hindcast's; e.g. 0,1,2,3 to rank them) |
-| `--store-preset {full,energy}` | fields stored per leaf frame |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame (default windfarm, the hindcast's default leaf output: 2-D and six hub-height planes only) |
 | `--top` | rows to keep and print (default 10) |
 
 ## `woof energy hindcast plan`
@@ -827,6 +829,7 @@ Takes no options of its own.
 | `--forcing-cache URL` | fetch each (source, cycle) once into this shared cache (s3://, gs://, file:// or a path) and have every job of the cycle mirror from it: adds prefetch jobs the forecast jobs depend on (docs/energy-hindcast/forcing-cache.md) |
 | `--gridded-url TEMPLATE` | gridded store per cluster leaf |
 | `--leaf-history-interval-s` | leaf history cadence (default 900; finer such as 300 allowed) |
+| `--leaf-output-preset {windfarm,energy,full}` | history preset of every leaf domain (default windfarm: only 2-D wind-farm planes, hub-height wind and scalars at the sites' heights; energy and full keep their 3-D volumes) |
 | `--max-domains` | refuse plans with more high-resolution domains |
 | `--nz` | model levels of the wind-energy column every domain carries (default 49: the smallest with >= 8 layers below 250 m and no layer deeper than 1000 m) |
 | `--outdir DIR` | hindcast directory (manifest, jobs, clusters) |
