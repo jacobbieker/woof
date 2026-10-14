@@ -39,14 +39,30 @@ The model (what is pinned)
 Per domain and segment, on a card with bandwidth ``B`` GB/s and ``S`` SMs:
 
 * ``steps = ceil(run_seconds / dt)``; ``cells = nx * ny * nz``.
-* ``throughput = K * B * cells / (cells + S * HALF_SATURATION_CELLS_PER_SM)``
-  cell-steps per second, where ``K`` is :func:`calibration`'s fit (cell-
-  steps/s per GB/s at saturation) and the second factor is an occupancy
-  knee: a grid with few cells per SM cannot use the card.
-* ``compute = steps * cells * acoustic / throughput`` with
+* ``throughput = K * B * cells / (cells + S * h)`` cell-steps per second,
+  where ``K`` is :func:`calibration`'s fit (cell-steps/s per GB/s at
+  saturation) and the second factor is an occupancy knee: a grid with few
+  cells per SM cannot fill the card (``h`` cells per SM reach half of it).
+* ``compute = steps * acoustic * (cells / throughput + L)`` with
   ``acoustic = (n_sound + LARGE_STEP_WEIGHT) / (4 + LARGE_STEP_WEIGHT)``:
   the receipts ran WRF's 4 acoustic substeps and a large step is assumed
-  to cost as much as 4 of them (:data:`LARGE_STEP_WEIGHT`).
+  to cost as much as 4 of them (:data:`LARGE_STEP_WEIGHT`).  ``L`` is a
+  fixed per-step cost (kernel launches and their tails) that no amount of
+  bandwidth removes.
+
+Utilisation (the honesty term).  Throughput is NOT linear in cells: the
+knee ``h`` and the per-step cost ``L`` together make a small domain on a
+big, fast card pay for idle SMs and launch latency, which is what keeps
+the card ranking from favouring an H100 for a 0.3 M-cell tile; and a
+large domain on a small card pays for the extra tiles and rims the memory
+fit forces (:func:`synth_cluster`).  ``h`` and ``L`` are ASSUMPTIONS, not
+measurements: :data:`UTILISATION` holds an optimistic, a central and a
+pessimistic pair, ``K`` is refitted on the receipts for each pair (so
+each reproduces the receipts), and the cost band takes the envelope over
+the pairs (below).  Every offer reports its work-weighted utilisation
+(saturated time / modelled time) under each pair.  Replace them with a
+measured curve (one domain swept from 0.1 M to 20 M cells on the rented
+card) before trusting a card ranking at either end.
 * ``output`` and ``checkpoint``: frame and restart bytes over a device-
   to-host rate (:data:`D2H_GBPS`, the staged-copy rate measured in
   ``tilestream/multigpu.py``), exposed on the step loop.
@@ -59,8 +75,10 @@ instance-hours = GPU-hours / (GPUs per instance * packing efficiency);
 wall clock for ``--instances`` instances = the larger of billed hours /
 instances and one segment's critical path (parent, intermediates, one
 leaf tile: segments and tiles are independent, the chain is not); spot
-cost carries ``spot_rework_fraction`` extra time.  The low/high band
-scales throughput by :data:`THROUGHPUT_BAND`.
+cost carries ``spot_rework_fraction`` extra time.  The band: ``low`` is
+the cheapest of the :data:`UTILISATION` pairs at the optimistic end of
+:data:`THROUGHPUT_BAND` (1.5x), ``high`` the dearest at the pessimistic
+end (0.5x), so it covers both the bandwidth scaling and the knee.
 
 Storage: leaf tiles' stored hours (segment hours minus spin-up) at the
 history cadence, ``--store-preset`` fields (``full``/``energy``: 3-D
@@ -111,6 +129,39 @@ class CostRefusal(ValueError):
 #: throughput.  An assumption (one 4,096-cell slab per SM), chosen so the
 #: receipts below sit at 83-97% occupancy; it only matters for small grids.
 HALF_SATURATION_CELLS_PER_SM = 4096
+
+#: Fixed GPU seconds per large step (at 4 acoustic substeps; scaled like
+#: the step's work by the substep count): kernel launches and their tails,
+#: which bandwidth does not shorten.  An assumption: about 200 launches a
+#: step at about 5 us each.  CUDA graphs would cut it.
+STEP_OVERHEAD_S = 0.001
+
+
+@dataclass(frozen=True)
+class Utilisation:
+    """One assumed occupancy knee and per-step cost (see the module
+    docstring); none of the three is a measurement."""
+
+    label: str
+    half_saturation_cells_per_sm: float
+    step_overhead_s: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"half_saturation_cells_per_sm": self.half_saturation_cells_per_sm,
+                "step_overhead_s": self.step_overhead_s}
+
+
+#: The utilisation pairs the band spans: a knee at 2,048 / 4,096 / 16,384
+#: cells per SM and 0.5 / 1 / 3 ms per step.  The pessimistic knee puts an
+#: H100 (132 SMs) at half throughput below 2.2 M cells, the optimistic one
+#: at 0.27 M.  Assumptions until a card is swept (module docstring).
+UTILISATION: Mapping[str, Utilisation] = {
+    "optimistic": Utilisation("optimistic", 2048.0, 0.0005),
+    "central": Utilisation("central", float(HALF_SATURATION_CELLS_PER_SM),
+                           STEP_OVERHEAD_S),
+    "pessimistic": Utilisation("pessimistic", 16384.0, 0.003),
+}
+CENTRAL = UTILISATION["central"]
 
 #: WRF's default acoustic substeps; every receipt ran with it.
 REFERENCE_SOUND_STEPS = 4
@@ -169,14 +220,16 @@ EXCLUDED_RECEIPTS: tuple[Mapping[str, str], ...] = (
 )
 
 
-def _occupancy(cells: float, sm_count: int) -> float:
-    return cells / (cells + sm_count * HALF_SATURATION_CELLS_PER_SM)
+def _occupancy(cells: float, sm_count: int,
+               half_saturation: float = HALF_SATURATION_CELLS_PER_SM) -> float:
+    return cells / (cells + sm_count * half_saturation)
 
 
-def calibration() -> dict[str, Any]:
+def calibration(utilisation: Utilisation = CENTRAL) -> dict[str, Any]:
     """Fit ``K`` (cell-steps/s per GB/s at saturation) on the receipts.
 
-    Each receipt gives ``K_i = sum(steps * cells / occupancy) / (wall * B)``;
+    Each receipt gives ``K_i = sum(steps * cells / occupancy) / ((wall -
+    steps * L) * B)`` under ``utilisation``'s knee and per-step cost ``L``;
     ``K`` is their geometric mean.  Pure: recomputed from the table above
     every call, so an edited receipt moves every estimate.
     """
@@ -184,9 +237,16 @@ def calibration() -> dict[str, Any]:
     fits = []
     for receipt in CALIBRATION_RECEIPTS:
         card = CARD_CATALOG[receipt["card"]]
-        work = sum(nx * ny * nz * steps / _occupancy(nx * ny * nz, card.sm_count)
+        work = sum(nx * ny * nz * steps / _occupancy(
+            nx * ny * nz, card.sm_count, utilisation.half_saturation_cells_per_sm)
                    for nx, ny, nz, steps in receipt["domains"])
-        k = work / (float(receipt["wall_s"]) * card.bandwidth_gbs)
+        steps_total = sum(steps for *_, steps in receipt["domains"])
+        busy = float(receipt["wall_s"]) - steps_total * utilisation.step_overhead_s
+        if busy <= 0:
+            raise CostRefusal(f"receipt {receipt['id']}: the per-step cost "
+                              f"{utilisation.step_overhead_s:g} s exceeds its "
+                              "wall time")
+        k = work / (busy * card.bandwidth_gbs)
         raw = sum(nx * ny * nz * steps for nx, ny, nz, steps in receipt["domains"])
         fits.append({"id": receipt["id"], "card": card.key,
                      "cell_steps_per_s": round(raw / float(receipt["wall_s"])),
@@ -197,6 +257,8 @@ def calibration() -> dict[str, Any]:
                  / len(fits))
     return {"k_cell_steps_per_s_per_gbs": round(k, 1), "receipts": fits,
             "excluded": [dict(row) for row in EXCLUDED_RECEIPTS],
+            "utilisation": {"label": utilisation.label,
+                            **utilisation.as_dict()},
             "fit": "geometric mean of per-receipt K"}
 
 
@@ -280,9 +342,17 @@ SECONDS_PER_KM = 5.0
 DEFAULT_PARENT_NZ = 49
 DEFAULT_HISTORY_S = 900.0
 DEFAULT_RESTART_S = 3600.0
-DEFAULT_SEGMENTS = 365
-DEFAULT_SEGMENT_HOURS = 30.0
-DEFAULT_SPINUP_HOURS = 6.0
+#: Stored hours a campaign covers when no segment count is given: one
+#: year.  The default segment count is ``ceil(8760 / stored hours)``.
+DEFAULT_PERIOD_HOURS = 8760.0
+#: The hindcast driver's defaults (woof.energy.hindcast, held equal by
+#: test): one 9 h forecast per 00/06/12/18 UTC init, 3 h spin-up, 6 h
+#: kept, so a year is 1,460 segments; 300 m leaves on the 49-level
+#: wind-energy column (woof.energy.vertical.HINDCAST_NZ).
+DEFAULT_SEGMENT_HOURS = 9.0
+DEFAULT_SPINUP_HOURS = 3.0
+DEFAULT_LEAF_DX_M = 300.0
+DEFAULT_LEAF_NZ = 49
 
 
 @dataclass(frozen=True)
@@ -376,21 +446,28 @@ def _frame_bytes(preset: str, nx: int, ny: int, nz: int,
 
 def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
                    factor: float = 1.0, leaf_preset: str = "full",
+                   utilisation: Utilisation = CENTRAL,
                    hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS
                    ) -> dict[str, float]:
     """GPU seconds for one copy of ``domain`` on ``card``, by component.
 
     ``factor`` scales throughput (the band); overheads are not scaled.
+    ``k`` must be :func:`calibration`'s fit under the same ``utilisation``.
     A leaf writes ``leaf_preset`` frames (the fields the store keeps); a
     parent or intermediate writes the full tape its children are built from.
+    ``saturated_s`` is the compute a fully occupied card with no per-step
+    cost would take; ``saturated_s / compute_s`` is the utilisation.
     """
 
     steps = math.ceil(domain.run_seconds / domain.dt_s)
     cells = domain.cells
-    throughput = k * factor * card.bandwidth_gbs * _occupancy(cells, card.sm_count)
+    saturated = k * factor * card.bandwidth_gbs
+    throughput = saturated * _occupancy(
+        cells, card.sm_count, utilisation.half_saturation_cells_per_sm)
     acoustic = ((domain.sound_steps + LARGE_STEP_WEIGHT)
                 / (REFERENCE_SOUND_STEPS + LARGE_STEP_WEIGHT))
-    compute = steps * cells * acoustic / throughput
+    compute = steps * acoustic * (cells / throughput
+                                  + utilisation.step_overhead_s)
     preset = leaf_preset if domain.role == "leaf" else "full"
     frames = int(domain.run_seconds // domain.history_s) + 1
     frame_bytes = _frame_bytes(preset, domain.nx, domain.ny, domain.nz,
@@ -402,6 +479,7 @@ def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
     startup = PREP_INTERCEPT_S + PREP_S_PER_MCELL * cells / 1e6
     return {"steps": steps, "compute_s": compute, "output_s": output,
             "checkpoint_s": checkpoint, "startup_s": startup,
+            "saturated_s": steps * acoustic * cells / saturated,
             "total_s": compute + output + checkpoint + startup}
 
 
@@ -690,15 +768,29 @@ class ClusterSpec:
 def clusters_from_partition(path: str | Path, *, leaf_dx_m: float,
                             cover_factor: float,
                             base_dir: Path | None = None) -> list[ClusterSpec]:
+    """Cluster rows from a partition document file (see
+    :func:`clusters_from_document`)."""
+
+    path = Path(path)
+    return clusters_from_document(_read_json(path, "partition"), path,
+                                  leaf_dx_m=leaf_dx_m,
+                                  cover_factor=cover_factor, base_dir=base_dir)
+
+
+def clusters_from_document(document: Mapping[str, Any], path: str | Path, *,
+                           leaf_dx_m: float, cover_factor: float,
+                           base_dir: Path | None = None) -> list[ClusterSpec]:
     """Cluster rows from a partition document, read duck-typed.
 
+    ``path`` names the document in refusals and anchors relative region
+    paths.  A row's own ``leaf_dx_m``/``dx_m`` wins over ``leaf_dx_m``
+    (the caller refuses a disagreeing flag, :func:`partition_leaf_dx`).
     An explicit area key is farm footprint and is multiplied by
     ``cover_factor``; a ``region`` (bbox or GeoJSON, inline or a path) is
     taken as the leaf cover as drawn and is not.
     """
 
     path = Path(path)
-    document = _read_json(path, "partition")
     rows = document.get("clusters")
     if not isinstance(rows, list) or not rows:
         raise CostRefusal(f"{path} has no 'clusters' list to price")
@@ -738,6 +830,32 @@ def clusters_from_partition(path: str | Path, *, leaf_dx_m: float,
                                int(tiles) if tiles else None,
                                float(footprint) if footprint is not None else None))
     return out
+
+
+def partition_leaf_dx(clusters: Sequence[ClusterSpec], wanted: float | None,
+                      *, origin: str, path: str | Path) -> None:
+    """Refuse a leaf spacing ``wanted`` (from ``origin``) that disagrees
+    with a partition cluster's own ``leaf_dx_m``.
+
+    A partition's clusters were cut and sized at their own leaf spacing,
+    so pricing them at another would quietly price a partition that was
+    never made; re-partition at the spacing instead (``woof energy
+    partition --leaf-dx-m``, or ``woof energy hindcast optimize``, which
+    re-partitions per spacing and card).
+    """
+
+    if wanted is None:
+        return
+    own = sorted({c.leaf_dx_m for c in clusters
+                  if abs(c.leaf_dx_m - float(wanted)) > 1e-6})
+    if own:
+        raise CostRefusal(
+            f"{origin} {float(wanted):g} m disagrees with the partition "
+            f"{path}, whose clusters were cut at {', '.join(f'{v:g}' for v in own)} m "
+            "leaves; the estimate never re-cuts a partition silently.  "
+            "Re-partition (woof energy partition --leaf-dx-m "
+            f"{float(wanted):g}) or let woof energy hindcast optimize "
+            "re-partition per spacing")
 
 
 # --------------------------------------------------------------------------
@@ -830,6 +948,17 @@ def select_offers(table: Mapping[str, Any],
 # --------------------------------------------------------------------------
 # the estimate
 # --------------------------------------------------------------------------
+def default_segments(segment_hours: float, spinup_hours: float, *,
+                     period_hours: float = DEFAULT_PERIOD_HOURS) -> int:
+    """Segments whose stored hours cover ``period_hours``."""
+
+    keep = float(segment_hours) - float(spinup_hours)
+    if keep <= 0:
+        raise CostRefusal(f"spin-up {spinup_hours:g} h leaves nothing stored "
+                          f"of a {segment_hours:g} h segment")
+    return max(1, math.ceil(float(period_hours) / keep - 1e-9))
+
+
 @dataclass(frozen=True)
 class Campaign:
     segments: int
@@ -843,17 +972,19 @@ class Campaign:
 
 def _sum_seconds(domains: Sequence[DomainWork], card: CardRow, k: float,
                  factor: float, leaf_preset: str = "full",
+                 utilisation: Utilisation = CENTRAL,
                  hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS
                  ) -> tuple[dict[str, float], float]:
     """Totals by component over ``domains`` (counts applied) and the
     critical path: the costliest copy at each chain level, summed."""
 
     totals = {"compute_s": 0.0, "output_s": 0.0, "checkpoint_s": 0.0,
-              "startup_s": 0.0, "total_s": 0.0}
+              "startup_s": 0.0, "saturated_s": 0.0, "total_s": 0.0}
     by_level: dict[int, float] = {}
     for domain in domains:
         one = domain_seconds(domain, card, k, factor=factor,
-                             leaf_preset=leaf_preset, hub_heights=hub_heights)
+                             leaf_preset=leaf_preset, utilisation=utilisation,
+                             hub_heights=hub_heights)
         for key in totals:
             totals[key] += one[key] * domain.count
         by_level[domain.level] = max(by_level.get(domain.level, 0.0),
@@ -908,7 +1039,7 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
              deadline_days: float | None = None, markets: Sequence[str] = ("on_demand", "spot"),
              plan_domains: Sequence[DomainWork] | None = None,
              clusters: Sequence[ClusterSpec] | None = None,
-             leaf_nz: int = 60, parent_nz: int = DEFAULT_PARENT_NZ,
+             leaf_nz: int = DEFAULT_LEAF_NZ, parent_nz: int = DEFAULT_PARENT_NZ,
              store_preset: str = "full",
              hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS,
              compression_ratio: float = DEFAULT_COMPRESSION_RATIO,
@@ -926,7 +1057,9 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
         raise CostRefusal("--compression-ratio must be in (0, 1.5]")
     store_layout(store_preset, leaf_nz, hub_heights)      # refuse up front
     cal = calibration()
-    k = cal["k_cell_steps_per_s_per_gbs"]
+    # K refitted under each utilisation pair: each reproduces the receipts.
+    k_by = {label: calibration(u)["k_cell_steps_per_s_per_gbs"]
+            for label, u in UTILISATION.items()}
     run_s = campaign.segment_hours * 3600.0
     spot_rework = float((price_table.get("defaults") or {})
                         .get("spot_rework_fraction", 0.10))
@@ -969,36 +1102,57 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
                               f"--card {card.key} to price this offer")
             out_offers.append(row)
             continue
-        bands = {}
+        bands: dict[str, float] = {}
         critical = 0.0
         components = None
         cluster_rows = []
-        for label, factor in (("central", 1.0), ("low", THROUGHPUT_BAND[1]),
-                              ("high", THROUGHPUT_BAND[0])):
+        utilised: dict[str, float] = {}
+        # (band, throughput factor, utilisation pair): central once; low
+        # and high as the envelope over the pairs at either band end.
+        evaluations = [("central", 1.0, "central")] + [
+            (band, factor, label) for band, factor in (
+                ("low", THROUGHPUT_BAND[1]), ("high", THROUGHPUT_BAND[0]))
+            for label in UTILISATION]
+        for band, factor, ulabel in evaluations:
             seg_total = 0.0
             seg_components = {"compute_s": 0.0, "output_s": 0.0,
                               "checkpoint_s": 0.0, "startup_s": 0.0}
+            saturated = 0.0
             path = 0.0
             for cid, domains in per_cluster:
-                totals, crit = _sum_seconds(domains, card, k, factor,
+                totals, crit = _sum_seconds(domains, card, k_by[ulabel], factor,
                                             leaf_preset=store_preset,
+                                            utilisation=UTILISATION[ulabel],
                                             hub_heights=hub_heights)
                 seg_total += totals["total_s"]
+                saturated += totals["saturated_s"]
                 for key in seg_components:
                     seg_components[key] += totals[key]
                 path = max(path, crit)
-                if label == "central" and mode != "plan":
+                if band == "central" and mode != "plan":
                     cluster_rows.append({
                         "cluster_id": cid,
                         "leaf_tiles": sum(d.count for d in domains if d.role == "leaf"),
                         "gpu_hours": round(totals["total_s"] * campaign.segments / 3600.0, 2)})
-            bands[label] = seg_total * campaign.segments
-            if label == "central":
+            value = seg_total * campaign.segments
+            if band == "central":
+                bands["central"] = value
                 critical = path
                 components = {key[:-2] + "_h": round(
                     value * campaign.segments / 3600.0, 2)
                     for key, value in seg_components.items()}
-        gpu_hours = {key: round(value / 3600.0, 2) for key, value in bands.items()}
+            elif band == "low":
+                bands["low"] = min(bands.get("low", value), value)
+            else:
+                bands["high"] = max(bands.get("high", value), value)
+            if band == "central" or (band, ulabel) in (
+                    ("low", "optimistic"), ("high", "pessimistic")):
+                name = {"central": "central", "low": "optimistic",
+                        "high": "pessimistic"}[band]
+                utilised[name] = (round(saturated / seg_components["compute_s"], 3)
+                                  if seg_components["compute_s"] else 1.0)
+        gpu_hours = {key: round(bands[key] / 3600.0, 2)
+                     for key in ("central", "low", "high")}
         billed = {key: value / (gpus * packing_efficiency)
                   for key, value in gpu_hours.items()}
         # Spot pays for, and waits on, the rework its interruptions cost.
@@ -1026,6 +1180,7 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
             "instance_hours": {key: round(v, 2) for key, v in billed.items()},
             "wall_clock_days": wall(billed),
             "critical_path_hours_per_segment": round(critical / 3600.0, 3),
+            "utilisation": utilised,
             "cost_usd": cost,
         })
         if "spot" in cost:
@@ -1092,10 +1247,24 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
             "calibration": cal,
             "throughput_band": {"pessimistic": THROUGHPUT_BAND[0],
                                 "optimistic": THROUGHPUT_BAND[1],
-                                "meaning": "'low' cost/time uses the optimistic "
-                                           "throughput, 'high' the pessimistic"},
+                                "meaning": "'low' cost/time is the cheapest "
+                                           "utilisation pair at the optimistic "
+                                           "throughput, 'high' the dearest at "
+                                           "the pessimistic"},
+            "utilisation": {
+                "pairs": {label: u.as_dict() for label, u in UTILISATION.items()},
+                "k_by_pair": k_by,
+                "meaning": "throughput is not linear in cells: an occupancy "
+                           "knee (half_saturation_cells_per_sm) and a fixed "
+                           "per-step cost (step_overhead_s); each offer's "
+                           "'utilisation' is saturated time / modelled time, "
+                           "work-weighted",
+                "status": "ASSUMPTIONS, not measurements: replace with a "
+                          "cells sweep timed on the rented card",
+            },
             "assumptions": {
                 "half_saturation_cells_per_sm": HALF_SATURATION_CELLS_PER_SM,
+                "step_overhead_s": STEP_OVERHEAD_S,
                 "large_step_weight_in_sound_steps": LARGE_STEP_WEIGHT,
                 "d2h_gbps": D2H_GBPS, "restart_3d_fields": RESTART_3D_FIELDS,
                 "prep_intercept_s": PREP_INTERCEPT_S,
@@ -1156,7 +1325,7 @@ def render_table(document: Mapping[str, Any]) -> str:
         f"woof energy estimate ({document['mode']}): {camp['clusters']} "
         f"cluster(s) x {camp['segments']} segments x {camp['segment_hours']:g} h "
         f"(prices as of {document['prices']['as_of']}; ESTIMATE, band = "
-        "optimistic..pessimistic throughput)",
+        "optimistic..pessimistic throughput and utilisation)",
         f"{'offer':<26} {'card':<15} {'GPU-h':>10} {'GPU-h band':>19} "
         f"{'inst-h':>9} {'wall d':>8} {'on-demand':>22} {'spot':>22} "
         f"{'store TB':>9}",
@@ -1254,14 +1423,15 @@ def run(args) -> dict[str, Any]:
             raise CostRefusal(f"{key} {value!r} (from the job) is not a "
                               "number") from error
 
-    segments = pick(args.segments, "segments", DEFAULT_SEGMENTS, int)
+    segments = pick(args.segments, "segments", None, int)
     spinup = pick(args.spinup_hours, "spinup_hours", DEFAULT_SPINUP_HOURS, float)
-    leaf_dx = pick(args.leaf_dx_m, "leaf_dx_m", 200.0, float)
-    leaf_nz = pick(args.nz, "nz", 60, int)
+    leaf_dx_given = pick(args.leaf_dx_m, "leaf_dx_m", None, float)
+    leaf_dx = DEFAULT_LEAF_DX_M if leaf_dx_given is None else leaf_dx_given
+    leaf_nz = pick(args.nz, "nz", DEFAULT_LEAF_NZ, int)
     parent_nz = args.parent_nz if args.parent_nz is not None else DEFAULT_PARENT_NZ
     cover_factor = (args.cover_factor if args.cover_factor is not None
                     else DEFAULT_COVER_FACTOR)
-    if segments < 1 or leaf_dx <= 0 or leaf_nz < 1:
+    if (segments is not None and segments < 1) or leaf_dx <= 0 or leaf_nz < 1:
         raise CostRefusal("segments, leaf spacing and levels must be positive")
     inputs: dict[str, Any] = {}
     notes: list[str] = []
@@ -1282,13 +1452,27 @@ def run(args) -> dict[str, Any]:
     else:
         segment_hours = float(segment_hours or DEFAULT_SEGMENT_HOURS)
         chain = _parse_chain(args.chain_m)
-        if chain and abs(chain[-1] - leaf_dx) > 1e-6:
+        # A partition's clusters carry their own leaves: without an explicit
+        # spacing the chain lands on the clusters it ends at (below).
+        if chain and (mode == "summary" or leaf_dx_given is not None) \
+                and abs(chain[-1] - leaf_dx) > 1e-6:
             raise CostRefusal(f"--chain-m ends at {chain[-1]:g} m but the leaf "
                               f"spacing is {leaf_dx:g} m")
         if mode == "partition":
             part = Path(args.partition)
             clusters = clusters_from_partition(part, leaf_dx_m=leaf_dx,
                                                cover_factor=cover_factor)
+            partition_leaf_dx(
+                clusters, leaf_dx_given, path=part,
+                origin=("--leaf-dx-m" if args.leaf_dx_m is not None
+                        else "the job's leaf spacing"))
+            if chain and not any(abs(c.leaf_dx_m - chain[-1]) <= 1e-6
+                                 for c in clusters):
+                raise CostRefusal(
+                    f"--chain-m ends at {chain[-1]:g} m but no cluster of "
+                    f"{part} has that leaf (they are "
+                    f"{', '.join(sorted({f'{c.leaf_dx_m:g}' for c in clusters}))} m); "
+                    "it would be ignored")
             if chain:
                 # The flag's chain applies only where it ends at the
                 # cluster's own leaf; a cluster with another leaf keeps its
@@ -1318,12 +1502,30 @@ def run(args) -> dict[str, Any]:
     if args.job:
         inputs["job"] = {"path": str(args.job), **{k: v for k, v in job.items()
                                                     if v is not None}}
-    campaign = Campaign(int(segments), float(segment_hours), spinup)
-    if campaign.spinup_hours < 0:
+    spinup_given = (args.spinup_hours is not None
+                    or job.get("spinup_hours") is not None)
+    if (not spinup_given and args.segment_hours is not None
+            and float(segment_hours) != DEFAULT_SEGMENT_HOURS):
+        keep = float(segment_hours) - spinup
+        if keep <= 0 or keep % 6:
+            # The hindcast driver refuses the same omission.
+            raise CostRefusal(
+                f"--segment-hours {float(segment_hours):g} without "
+                f"--spinup-hours: the default {spinup:g} h spin-up would keep "
+                f"{keep:g} h per run, off the 6-hourly cycle; give "
+                "--spinup-hours explicitly (0 keeps each run whole)")
+    if spinup < 0:
         raise CostRefusal(f"--spinup-hours {spinup:g} is negative")
-    if campaign.spinup_hours >= campaign.segment_hours:
+    if spinup >= float(segment_hours):
         raise CostRefusal(f"spin-up {spinup:g} h leaves nothing stored of a "
                           f"{segment_hours:g} h segment")
+    if segments is None:
+        # One year of stored hours (the hindcast's 6 h kept windows: 1,460).
+        segments = default_segments(float(segment_hours), spinup)
+        notes.append(f"no --segments: {segments} segments of "
+                     f"{float(segment_hours):g} h ({spinup:g} h spin-up) store "
+                     f"one year ({DEFAULT_PERIOD_HOURS:g} h)")
+    campaign = Campaign(int(segments), float(segment_hours), spinup)
     table, price_notes = load_prices(args.prices)
     notes.extend(price_notes)
     offers = select_offers(table, args.instance)

@@ -20,6 +20,11 @@ What is pinned here:
   1.15, :data:`DEFAULT_DZSTRETCH_U` 1.1, :data:`DEFAULT_MAX_DZ_M` 1000 m at
   :data:`DEFAULT_NZ` 70 mass levels; any of them may be overridden, or the
   whole ladder replaced with ``--eta-levels``.
+* **Hindcast levels.**  ``woof energy hindcast`` runs :data:`HINDCAST_NZ`
+  (49) levels by default: the smallest count whose column keeps the rotor
+  layers above AND no layer deeper than ``max_dz``
+  (:func:`lean_column_refusal`, :func:`smallest_column_nz`), 70% of the
+  70-level column's cells at the same rotor resolution.
 * **Rotor layers.**  At least :data:`DEFAULT_MIN_ROTOR_LAYERS` (8) whole
   model layers below :data:`ROTOR_TOP_M` (250 m) in the reference column, or
   the column is refused.  The defaults give 10 (12, 26, 41, 59, 80, 104,
@@ -71,6 +76,18 @@ DEFAULT_MAX_DZ_M = 1000.0
 ROTOR_TOP_M = 250.0
 #: Whole model layers the preset demands below :data:`ROTOR_TOP_M`.
 DEFAULT_MIN_ROTOR_LAYERS = 8
+#: The hindcast's level count: the smallest ``nz`` whose preset column
+#: (12 m lowest layer, top 5500 Pa ~ 19.97 km) keeps at least
+#: :data:`DEFAULT_MIN_ROTOR_LAYERS` layers below :data:`ROTOR_TOP_M` AND has
+#: no layer deeper than :data:`DEFAULT_MAX_DZ_M` (:func:`lean_column_refusal`,
+#: found by :func:`smallest_column_nz`).  Pinned by test: 49 gives 10 rotor
+#: layers and a 966 m deepest layer; 48 still builds but WRF stretches its
+#: top layer to 1091 m (compute_eta admits up to 1.5 x max_dz), 47 breaks
+#: even that and 46 or fewer cannot reach the top at all.  Cost scales with ``nz``: 49 levels
+#: are 70% of the :data:`DEFAULT_NZ` = 70 column's cells with the same
+#: rotor-layer resolution (the extra 21 levels of the 70-level column all
+#: sit above the rotor, thinning the free troposphere and stratosphere).
+HINDCAST_NZ = 49
 
 #: WRF's reference surface pressure (Pa), the column heights are quoted for.
 REFERENCE_SURFACE_PA = 100000.0
@@ -357,6 +374,62 @@ def wind_energy_column(nz: int | None = None,
         receipt=resolved["receipt"], wizard=resolved)
 
 
+def deepest_layer_m(column: WindEnergyColumn) -> float:
+    """The deepest layer of ``column``'s reference heights (m)."""
+
+    full = column.full_level_m
+    return max(full[k + 1] - full[k] for k in range(len(full) - 1))
+
+
+def lean_column_refusal(nz: int, *, p_top_pa: float | None = None,
+                        max_dz_m: float | None = None,
+                        source: str | None = None) -> str | None:
+    """Why the preset column at ``nz`` levels is not a lean hindcast column,
+    or ``None``.
+
+    Lean means everything :func:`wind_energy_column` proves (top at most
+    20 km, at least :data:`DEFAULT_MIN_ROTOR_LAYERS` layers below 250 m, a
+    ladder WRF ``compute_eta`` can build) AND no layer deeper than
+    ``max_dz_m`` (default :data:`DEFAULT_MAX_DZ_M`): WRF's generator admits
+    a top layer up to 1.5 x ``max_dz``, which this check does not.
+    """
+
+    limit = DEFAULT_MAX_DZ_M if max_dz_m is None else float(max_dz_m)
+    try:
+        column = wind_energy_column(nz=int(nz), p_top_pa=p_top_pa,
+                                    max_dz_m=max_dz_m, source=source)
+    except VerticalRefused as error:
+        return str(error)
+    deepest = deepest_layer_m(column)
+    if deepest > limit + 1e-6:
+        return (f"nz {int(nz)}: the column's deepest layer is "
+                f"{deepest:.0f} m, deeper than max_dz {limit:g} m (WRF "
+                "stretched its upper layers to reach p_top); use more levels")
+    return None
+
+
+def smallest_column_nz(*, start: int = 20, stop: int = 256,
+                       p_top_pa: float | None = None,
+                       max_dz_m: float | None = None,
+                       source: str | None = None) -> int:
+    """The smallest ``nz`` in ``[start, stop]`` that passes
+    :func:`lean_column_refusal`; refuses when none does.
+
+    The preset defaults give :data:`HINDCAST_NZ` (pinned by test).  Each
+    probe runs WRF ``compute_eta`` through the native bridge, so this is a
+    planning-time search, not something a hot path calls.
+    """
+
+    last = None
+    for nz in range(int(start), int(stop) + 1):
+        last = lean_column_refusal(nz, p_top_pa=p_top_pa, max_dz_m=max_dz_m,
+                                   source=source)
+        if last is None:
+            return nz
+    raise VerticalRefused(f"no nz in [{start}, {stop}] gives a lean "
+                          f"wind-energy column; the last refusal: {last}")
+
+
 #: ``woof energy plan`` dests the column reads (``--nz`` is not one of
 #: them: alone it keeps the planners' old meaning).
 COLUMN_FLAGS = (("p_top_pa", "--p-top-pa"), ("eta_levels", "--eta-levels"),
@@ -418,7 +491,9 @@ __all__ = [
     "VERTICAL_SCHEMA", "MAX_MODEL_TOP_M", "MIN_P_TOP_PA", "DEFAULT_P_TOP_PA",
     "DEFAULT_NZ", "DEFAULT_DZBOT_M", "DEFAULT_DZSTRETCH_S",
     "DEFAULT_DZSTRETCH_U", "DEFAULT_MAX_DZ_M", "ROTOR_TOP_M",
-    "DEFAULT_MIN_ROTOR_LAYERS", "COLUMN_FLAGS", "VerticalRefused",
+    "DEFAULT_MIN_ROTOR_LAYERS", "HINDCAST_NZ", "COLUMN_FLAGS",
+    "VerticalRefused", "deepest_layer_m", "lean_column_refusal",
+    "smallest_column_nz",
     "WindEnergyColumn", "isa_height_m", "isa_pressure_pa", "column_heights",
     "rotor_layers", "model_top_refusal", "wind_energy_column",
     "column_flags_given", "column_request", "column_from_values",

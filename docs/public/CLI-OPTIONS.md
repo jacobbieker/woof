@@ -663,18 +663,18 @@ Takes no options of its own.
 | `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
 | `--instances` | instances of each offer running at once, for the wall clock (default 1) |
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
-| `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 200) |
+| `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 300); with --partition it must match the clusters' own spacing or is refused |
 | `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
-| `--nz` | leaf model levels (default: the job's, else 60) |
+| `--nz` | leaf model levels (default: the job's, else 49, the hindcast's wind-energy column) |
 | `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
 | `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
 | `--parent-nz` | parent model levels (default 49) |
 | `--partition PARTITION.json` | partition document with a 'clusters' list |
 | `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
 | `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
-| `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 30) |
-| `--segments` | segments to run (default: the job's, else 365) |
-| `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 6) |
+| `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 9: one run per 00/06/12/18 UTC init) |
+| `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
+| `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
 | `--store-preset {full,energy,windfarm}` | fields stored per leaf frame: full (all variables), energy (3-D site-forecast volumes) or windfarm (2-D planes and hub-height planes only); default the --job's leaf output preset, else full |
 
 ## `woof energy extract`
@@ -727,18 +727,18 @@ Takes no options of its own.
 | `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
 | `--instances` | instances of each offer running at once, for the wall clock (default 1) |
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
-| `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 200) |
+| `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 300); with --partition it must match the clusters' own spacing or is refused |
 | `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
-| `--nz` | leaf model levels (default: the job's, else 60) |
+| `--nz` | leaf model levels (default: the job's, else 49, the hindcast's wind-energy column) |
 | `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
 | `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
 | `--parent-nz` | parent model levels (default 49) |
 | `--partition PARTITION.json` | partition document with a 'clusters' list |
 | `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
 | `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
-| `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 30) |
-| `--segments` | segments to run (default: the job's, else 365) |
-| `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 6) |
+| `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 9: one run per 00/06/12/18 UTC init) |
+| `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
+| `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
 | `--store-preset {full,energy,windfarm}` | fields stored per leaf frame: full (all variables), energy (3-D site-forecast volumes) or windfarm (2-D planes and hub-height planes only); default the --job's leaf output preset, else full |
 
 ## `woof energy hindcast materialize`
@@ -752,6 +752,33 @@ Takes no options of its own.
 | `--dir DIR` | hindcast directory a bare job id is in |
 | `--force` | re-plan (earlier plan moved aside) |
 
+## `woof energy hindcast optimize`
+
+| option | what it does |
+|---|---|
+| `--corridor-km` | corridor half-width around each site |
+| `--deadline-days` | wall-clock days the campaign must finish in |
+| `--instance PROVIDER[:INSTANCE]` | offers to rank (repeatable; aws or gcp for a provider's rows; default: every row) |
+| `--keep-hours H[,H]` | kept hours per run, multiples of the 6-hourly cycle (default 6: one run per init) |
+| `--leaf-dx-m DX[,DX]` | leaf spacings, each 100 to 300 m (default 300,250,200) |
+| `--linkage-km` | single-linkage distance for the re-cut |
+| `--max-extent-km` | bisect re-cut clusters wider than this |
+| `--max-instances` | most instances of one offer that can run at once (spot capacity); rows needing more are not ranked |
+| `--max-sites` | bisect re-cut clusters with more sites |
+| `--no-repartition` | price --partition as cut: its spacing only, cards with at least the memory it was sized for |
+| `--nz N[,N]` | level counts; each must give a lean wind-energy column, 49 or more with the preset (default 49,60,70) |
+| `--output OPTIMIZE.json` | also write the woof-energy.cost-optimize.v1 JSON here |
+| `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
+| `--partition PARTITION.json` | partition whose sites and parameters are re-partitioned per card and spacing (or priced as cut with --no-repartition) |
+| `--partition-dir DIR` | keep (and reuse) each re-cut partition here, so the chosen one can be planned |
+| `--period-days` | days of reanalysis to store (default 365) |
+| `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
+| `--rank-market {spot,on-demand}` | market ranked on (default spot; the other is reported) |
+| `--sites SITES.json` | sites document, re-partitioned per card memory and leaf spacing |
+| `--spinup-hours H[,H]` | spin-up hours per run (default 3, the hindcast's; e.g. 0,1,2,3 to rank them) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame (windfarm: 2-D and six hub-height planes only) |
+| `--top` | rows to keep and print (default 10) |
+
 ## `woof energy hindcast plan`
 
 | option | what it does |
@@ -762,13 +789,13 @@ Takes no options of its own.
 | `--corridor-km` | corridor half-width (default 2) |
 | `--cycle-hour` | UTC hour runs start from (default 0) |
 | `--dry-run` | print the manifest and an example job; write nothing |
-| `--dx-m` | leaf spacing (default: the cluster's, else 100) |
+| `--dx-m` | leaf spacing, 100 to 300 m (default: the cluster's, else 300, the cheapest) |
 | `--end YYYY-MM-DD[THH]` | exclusive bound on segment run starts |
 | `--gridded-url TEMPLATE` | gridded store per cluster leaf |
 | `--leaf-history-interval-s` | leaf history cadence (default 900; finer such as 300 allowed) |
 | `--leaf-output-preset {windfarm,energy,full}` | history preset of every leaf domain (default windfarm: only 2-D wind-farm planes, hub-height wind and scalars at the sites' heights; energy and full keep their 3-D volumes) |
 | `--max-domains` | refuse plans with more high-resolution domains |
-| `--nz` | vertical levels (default: the planner's) |
+| `--nz` | model levels of the wind-energy column every domain carries (default 49: the smallest with >= 8 layers below 250 m and no layer deeper than 1000 m) |
 | `--outdir DIR` | hindcast directory (manifest, jobs, clusters) |
 | `--output-root URL` | root of the output stores, e.g. s3://bucket/x (default: icechunk/ in the hindcast directory) |
 | `--p-top-pa` | model top the source must reach and the plan must carry (default 5500 Pa, 19.97 km; above 20 km is refused) |
@@ -776,12 +803,12 @@ Takes no options of its own.
 | `--parent-history-interval-s` | wrf-nests parent cadence (default 3600) |
 | `--partition PARTITION.json` | woof-energy.partition.v1 document: one job chain per cluster |
 | `--resume` | merge into an existing manifest, keeping statuses |
-| `--segment-hours` | run length of every segment (default 6: one forecast per 00/06/12/18 UTC global init, stitched into one continuous analysis) |
+| `--segment-hours` | run length of every segment (default 9: one forecast per 00/06/12/18 UTC global init, its hours 3-9 stitched into one continuous analysis) |
 | `--sites SITES.json` | sites document planned as one cluster (or the sites a --partition refers to) |
 | `--sites-url TEMPLATE` | site-series store per cluster |
 | `--source` | one source for every segment (default: chosen per segment by the source selector) |
 | `--source-priority SRC[,SRC]` | preference order handed to the selector |
-| `--spinup-hours` | leading hours discarded as spin-up (default 0); each segment keeps segment - spinup hours |
+| `--spinup-hours` | leading hours discarded as spin-up (default 3, refused when another --segment-hours would then keep a window off the 6-hourly cycle); each segment keeps segment - spinup hours |
 | `--start YYYY-MM-DD[THH]` | first segment's day (its run starts at --cycle-hour) |
 | `--topology {wrf-nests,wrf-tiles}` | planner for clusters that do not name one (default wrf-nests) |
 | `--vram-gib` | size each domain for this many GiB |
@@ -921,7 +948,7 @@ Takes no options of its own.
 | `--card` | size for this GPU tier or model (no local probe); default 24gb |
 | `--corridor-km` | half-width of the high-resolution corridor around each site (default 2) |
 | `--hardware-json FILE.json` | size for a selected target hardware snapshot's measured GPU capacity (no local probe) |
-| `--leaf-dx-m` | leaf grid spacing, 100 to 300 m (default 200) |
+| `--leaf-dx-m` | leaf grid spacing, 100 to 300 m (default 300, the cheapest; finer on request) |
 | `--linkage-km` | single-linkage distance: sites closer than this share a cluster (default 30) |
 | `--max-extent-km` | bisect clusters wider than this (default 250) |
 | `--max-sites` | bisect clusters with more sites than this (default 20000) |

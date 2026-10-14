@@ -326,8 +326,56 @@ New:
   below 250 m. The column record is written to `vertical.json`
   (`woof-energy.vertical.v1`). Without the flags, nothing changes. See
   `docs/energy-hindcast/vertical.md`.
+- `woof energy hindcast optimize` ranks leaf spacing x levels x segment
+  layout x cloud offer by estimated cost and keeps the rows that meet
+  `--deadline-days` (and `--max-instances`). It re-partitions the sites
+  in-process once per card memory and spacing, with the cuts cached under
+  `--partition-dir`. Every row is marked an estimate with its throughput
+  and utilisation band and the price table's age. The chosen row carries
+  the partition, estimate and plan commands, and its cost at 0-3 h of
+  spin-up. The output is `woof-energy.cost-optimize.v1`. See
+  `docs/energy-hindcast/cost.md`.
+- The cost model now has a documented utilisation term. Throughput is not
+  linear in cells: an occupancy knee plus a fixed per-step cost, in three
+  assumed pairs (optimistic, central, pessimistic). Each pair has `K`
+  refitted on the receipts, and the band is the envelope over the pairs.
+  Every offer reports its utilisation, so a small domain is no longer
+  priced as if it filled a big card. These are assumptions to replace
+  with a cells sweep on the rented card.
+- The price table has AWS `g6.xlarge`/`g6.12xlarge` (L4 24 GB) and
+  `g5.12xlarge`/`g5.48xlarge` (A10G) rows, with on-demand prices as of
+  its 2025-07-01 date and illustrative spot prices.
+
+Changed:
+
+- Hindcast defaults are now the cost-efficient end of the requirement.
+  On the US + EU-offshore partition (AWS spot, central) they bring the
+  year from about $439k (200 m, 70 levels, 8 h runs with 2 h spin-up, on
+  g5.xlarge) to about $133k:
+  - `woof energy partition --leaf-dx-m` and the hindcast leaf spacing
+    default to 300 m, not 200 m and 100 m. 100-250 m is on request.
+  - `woof energy hindcast plan --nz` defaults to 49
+    (`woof.energy.vertical.HINDCAST_NZ`). That is the smallest wind-energy
+    column with at least 8 layers below 250 m, a 12 m lowest layer, a top
+    at most 20 km and no layer deeper than 1000 m, and it keeps the
+    70-level preset's 10 rotor layers at about 0.76x the cost.
+  - Segments are 9 h runs from each 00/06/12/18 UTC init with 3 h of
+    spin-up, keeping `[init + 3 h, init + 9 h)`. They were 6 h runs with
+    no spin-up. `--segment-hours 6 --spinup-hours 0` restores the old
+    layout at about 0.68x the cost. `--segment-hours 6` alone is refused
+    rather than read as 3 h windows off the 6-hourly cycle.
+- `woof energy estimate` defaults follow the driver: 9 h segments with
+  3 h spin-up, 300 m leaves and 49 levels. Without `--segments`, the
+  count stores one year (`ceil(8760 / kept hours)`, 1,460 by default).
+  The old defaults were 365 x 30 h with 6 h spin-up, 200 m and 60 levels.
 
 Fixed:
+
+- `woof energy estimate --partition` silently ignored `--leaf-dx-m`, and a
+  job's spacing, when the partition's clusters carried their own
+  `leaf_dx_m`. A spacing that disagrees is now refused, and the refusal
+  says to re-partition (`woof energy partition --leaf-dx-m`, or `woof
+  energy hindcast optimize`, which re-cuts per spacing).
 
 - WOOF Global now holds explicit `[vertical] a_half_pa`/`b_half` arrays to
   the same level range as `nlev`. Before, they skipped the check, so an

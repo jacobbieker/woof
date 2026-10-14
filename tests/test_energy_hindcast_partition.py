@@ -51,12 +51,13 @@ def _cli(*argv: str) -> tuple[int, str]:
 
 @pytest.fixture(scope="module")
 def world(tmp_path_factory):
-    """The fixture partitioned for an 80 GiB card, through the CLI."""
+    """The fixture partitioned for an 80 GiB card at 200 m leaves (pinned
+    explicitly: the default is 300 m), through the CLI."""
 
     root = tmp_path_factory.mktemp("world")
     output = root / "partition.json"
     code, out = _cli("partition", str(SITES_WORLD), "--vram-gib", "80",
-                     "-o", str(output))
+                     "--leaf-dx-m", "200", "-o", str(output))
     assert code == 0
     return part.load_partition(output), json.loads(out), root
 
@@ -230,7 +231,7 @@ def test_partition_is_independent_of_document_order(world, tmp_path):
     random.Random(7).shuffle(shuffled)
     again = part.build_partition(
         SiteSet(sites=shuffled, heights_m=sites.heights_m),
-        sites_ref=partition.sites_ref, vram_gib=80.0)
+        sites_ref=partition.sites_ref, vram_gib=80.0, leaf_dx_m=200.0)
     assert again.to_json()["clusters"] == partition.to_json()["clusters"]
 
 
@@ -578,6 +579,9 @@ def test_tile_region_refuses_more_than_half_the_globe():
 
 def test_cli_defaults_are_the_module_constants():
     from woof.energy import cli
+
+    # The cost-efficient default: the coarse end of the 100-300 m range.
+    assert part.DEFAULT_LEAF_DX_M == 300.0 == part.LEAF_DX_MAX_M
 
     assert cli._PARTITION_DEFAULTS == {
         "linkage_km": part.DEFAULT_LINKAGE_KM,
