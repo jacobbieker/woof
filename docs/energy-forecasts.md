@@ -254,6 +254,7 @@ every configuration it emits. The common flags:
 | `--card` or `--vram-gib` | Size each domain for a GPU tier or a memory budget |
 | `--max-domains` | Refuse a plan with more high-resolution domains than this |
 | `--nz` | Vertical levels (default: the planner's ladder; `hex-swath`: 55, or 3 to 80 with the device footprint priced at that column) |
+| `--p-top-pa`, `--eta-levels`, `--dzbot`, `--dzstretch-s`, `--dzstretch-u`, `--max-dz` | `wrf-nests` and `wrf-tiles` only: build the wind-energy column (model top at most 20 km, at least 8 layers below 250 m; [energy-hindcast/vertical.md](energy-hindcast/vertical.md)) |
 
 Emitted WRF configurations write history with the `energy` output preset
 (`[output] preset = "energy"`), which keeps the fields the extractor reads,

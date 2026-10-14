@@ -463,8 +463,12 @@ def _run_domain_wizard(argv: list[str], cwd: Path,
 def _emit_parent(*, outdir: Path, region: dict, parent_dx_m: float,
                  buffer_m: float, start: str, hours: int,
                  source: str | None, capacity_flags: list[str],
-                 vram_gib: float) -> _Parent:
-    """Emit, validate and load the parent configuration."""
+                 vram_gib: float, column=None) -> _Parent:
+    """Emit, validate and load the parent configuration.
+
+    ``column`` (a :class:`woof.energy.vertical.WindEnergyColumn`) is handed
+    to ``woof domain`` as ``--p-top-pa`` and an ``--eta-levels`` file, so
+    the parent carries the wind-energy column verbatim."""
 
     from woof.downscale import CADENCE_GUIDANCE_SECONDS
     from woof.experiment import load_experiment
@@ -486,6 +490,16 @@ def _emit_parent(*, outdir: Path, region: dict, parent_dx_m: float,
             "--out", str(toml.resolve()), *capacity_flags]
     if source is not None:
         argv += ["--source", str(source)]
+    if column is not None:
+        eta_path = parent_dir / "eta_levels.txt"
+        staging = eta_path.with_name(eta_path.name + ".partial")
+        staging.write_text(
+            "# woof energy plan wind-energy column (woof.energy.vertical): "
+            f"nz = {column.nz}, p_top = {column.p_top_pa:g} Pa\n"
+            + "\n".join(repr(level) for level in column.eta_levels) + "\n")
+        staging.replace(eta_path)
+        argv += ["--p-top-pa", repr(float(column.p_top_pa)),
+                 "--eta-levels", str(eta_path.resolve())]
     # The wizard writes [fetch].out relative to its working directory, and
     # `woof go` reads it relative to the launch directory, while
     # [case_data] paths are relative to the TOML.  Emitting from the plan
@@ -690,6 +704,9 @@ class _Tile:
     overrides: dict = field(default_factory=dict)
     #: The parent's epssm was the model's choice (see :class:`_Parent`).
     parent_auto_epssm: bool = False
+    #: ``levels`` are the wind-energy column (woof.energy.vertical) rather
+    #: than a ``--child-levels N,STRETCH`` ladder.
+    wind_energy_column: bool = False
 
 
 def _placement_point(start: int, span: int) -> int:
@@ -856,7 +873,8 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                source: str | None = None, card: str | None = None,
                vram_gib: float | None = None, max_domains: int | None = None,
                nz: int | None = None, now: datetime | None = None,
-               source_priority: Sequence[str] | None = None) -> Plan:
+               source_priority: Sequence[str] | None = None,
+               column_request: dict | None = None) -> Plan:
     """Emit the domains for ``sites`` under ``outdir`` and return the plan
     (already written to ``outdir/plan.json``).
 
@@ -867,7 +885,15 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     :func:`woof.energy.source_select.select_source` (``source_priority``
     replaces its default list) for the parent each chain would emit,
     records its receipt in the plan's ``source_choice`` and writes it to
-    ``outdir/source-choice.json``."""
+    ``outdir/source-choice.json``.
+
+    ``column_request`` holds the explicit-column flags (``p_top_pa``,
+    ``eta_levels``, ``dzbot``, ``dzstretch_s``, ``dzstretch_u``,
+    ``max_dz``).  When any is set the parent and every leaf tile carry the
+    :func:`woof.energy.vertical.wind_energy_column` built from them (and
+    ``nz``), the leaves are held to their physics level rows at its
+    ``p_top``, and the column record is written to ``outdir/vertical.json``;
+    when none is, the plan is what it always was."""
 
     from woof.energy.geometry import cover_with_rectangles
     from woof.energy.source_select import is_auto, record_choice
@@ -924,13 +950,18 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         if refusal is not None:
             raise TilePlanRefusal(refusal)
     capacity, capacity_flags, card_note = _resolve_capacity(card, vram_gib)
+    from woof.energy.vertical import column_from_values
+
+    column = column_from_values(nz=nz, source=source,
+                                **(column_request or {}))
 
     arrays = sites.as_arrays()
     lat = arrays["lat"]
     lon = arrays["lon"]
     site_ids = arrays["site_id"]
     region = _sites_region(lon, lat)
-    leaf_levels_n = (int(nz) if nz is not None
+    leaf_levels_n = (column.nz if column is not None
+                     else int(nz) if nz is not None
                      else DEFAULT_LES_CHILD_NZ if dx_m <= LES_CHILD_DX_M
                      else None)
 
@@ -960,7 +991,7 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                 outdir=outdir, region=region, parent_dx_m=pdx,
                 buffer_m=buffer_m, start=start_text, hours=hours_i,
                 source=source, capacity_flags=capacity_flags,
-                vram_gib=capacity)
+                vram_gib=capacity, column=column)
         except _ParentDoesNotFit as error:
             tried.append(f"{pdx:g} m: {error.message}")
             continue
@@ -985,9 +1016,12 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
             stale.unlink()
     # A refused re-plan must not leave an older plan.json pointing at the
     # tile specs just removed and the parent just re-emitted, nor the
-    # source-choice receipt that plan carried.
+    # source-choice receipt that plan carried, nor an older vertical.json
+    # describing a column this plan does not carry.
     (outdir / "plan.json").unlink(missing_ok=True)
     (outdir / SOURCE_CHOICE_FILE).unlink(missing_ok=True)
+    (outdir / "vertical.json").unlink(missing_ok=True)
+    physics_checked: set[tuple] = set()
 
     counter = {"leaf": 0, "inter": 0}
     all_tiles: list[_Tile] = []
@@ -1015,7 +1049,11 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         mapfac = float(np.max(np.asarray(grid.map_factor(m_lat),
                                          dtype=np.float64)))
         levels = None
-        if leaf and leaf_levels_n is not None:
+        if leaf and column is not None:
+            # The wind-energy column, verbatim: the leaf resolves the rotor
+            # on the same ladder the parent carries.
+            levels = tuple(column.eta_levels)
+        elif leaf and leaf_levels_n is not None:
             from woof.downscale import build_child_eta_levels
 
             levels = build_child_eta_levels(leaf_levels_n,
@@ -1102,6 +1140,16 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
             peak, merged = pricer.price(
                 key, cfg, ratio=ratio, nx=child_nx, ny=child_ny,
                 **{**price_kwargs, "centre_lat": c_lat})
+            if column is not None and key not in physics_checked:
+                # The vertical physics rows read nz, the physics and the
+                # top, all fixed per pricer key; nx/ny do not enter.
+                from woof.energy.vertical import check_physics_levels
+
+                physics_checked.add(key)
+                check_physics_levels(
+                    merged, p_top_pa=column.p_top_pa,
+                    what=f"a {child_nx}x{child_ny} tile at {cdx:g} m under "
+                         f"{parent_id}")
             if leaf:
                 counter["leaf"] += 1
                 domain_id = f"tile-{counter['leaf']:04d}"
@@ -1123,7 +1171,9 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                 levels=levels,
                 min_edge_distance_m=float(np.min(edge_cells)) * cdx / mapfac,
                 overrides=dict(overrides),
-                parent_auto_epssm=bool(parent_auto_epssm))
+                parent_auto_epssm=bool(parent_auto_epssm),
+                wind_energy_column=bool(column is not None
+                                        and levels is not None))
             all_tiles.append(tile)
             if not leaf:
                 inner_clearance = (int(merged["spec_bdy_width"])
@@ -1156,6 +1206,8 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                parent_auto_epssm=parent.auto_epssm)
 
     domains = [_parent_domain(parent, outdir)]
+    if column is not None:
+        domains[0].extra["vertical"] = column.summary()
     for tile in all_tiles:
         domains.append(_tile_domain(
             tile, outdir=outdir, site_ids=site_ids, capacity=capacity,
@@ -1163,12 +1215,24 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
             start=start_text))
 
     notes += _plan_notes(parent=parent, chain=chain, dx_m=dx_m,
-                         corridor_m=corridor_m, leaf_levels_n=leaf_levels_n,
+                         corridor_m=corridor_m,
+                         leaf_levels_n=(None if column is not None
+                                        else leaf_levels_n),
                          source=source, start=start_text,
                          explicit_start=start is not None)
+    if column is not None:
+        notes += column.header_lines() + [
+            f"the parent and every leaf tile carry this {column.nz}-level "
+            f"column (eta {column.origin}, p_top {column.p_top_pa:g} Pa); "
+            "intermediate tiles inherit the parent's; the full column is "
+            "in vertical.json"]
     if source is not None:
         notes += source_notes(source)
     receipt = record_choice(source_choice, outdir, notes)
+    if column is not None:
+        # Written once every tile has been accepted, beside the plan.json
+        # it describes (dump_plan below).
+        column.write(outdir / "vertical.json")
     plan = Plan(topology=TOPOLOGY, dx_m=dx_m, start=start_text,
                 hours=float(hours_i), domains=domains, source=source,
                 sites_ref={"count": len(sites),
@@ -1453,8 +1517,12 @@ def _tile_domain(tile: _Tile, *, outdir: Path, site_ids: np.ndarray,
         },
         "child_levels": (None if tile.levels is None else
                          {"nz": len(tile.levels) - 1,
-                          "stretch": CHILD_LEVEL_STRETCH, "applied": True,
-                          "via": f"eta_levels in {child.relpath}"}),
+                          "stretch": (None if tile.wind_energy_column
+                                      else CHILD_LEVEL_STRETCH),
+                          "applied": True,
+                          "via": f"eta_levels in {child.relpath}",
+                          **({"column": "vertical.json"}
+                             if tile.wind_energy_column else {})}),
         "lateral_zone": {
             key: tile.run_config[key]
             for key in ("spec_zone", "relax_zone", "spec_bdy_width",
@@ -1601,6 +1669,7 @@ def main(args) -> int:
     """``woof energy plan --topology wrf-tiles``."""
 
     from woof.energy.source_select import choice_summary
+    from woof.energy.vertical import column_request as vertical_column_request
 
     sites_path = Path(args.sites)
     outdir = Path(args.outdir)
@@ -1612,7 +1681,8 @@ def main(args) -> int:
             start=args.start, hours=args.hours, source=args.source,
             card=args.card, vram_gib=args.vram_gib,
             max_domains=args.max_domains, nz=args.nz,
-            source_priority=getattr(args, "source_priority", None))
+            source_priority=getattr(args, "source_priority", None),
+            column_request=vertical_column_request(args))
     except EnergyNotImplemented as error:
         import sys
 
@@ -1649,6 +1719,7 @@ def main(args) -> int:
             "ny": parent.extra["ny"],
             "peak_envelope_gib": parent.extra["peak_envelope_gib"],
         },
+        "vertical": parent.extra.get("vertical"),
         "tile_count": len(tiles),
         "leaf_tiles": len(leaves),
         "intermediate_tiles": len(tiles) - len(leaves),

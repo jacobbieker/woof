@@ -997,6 +997,288 @@ def emitted_model_top_pa(source: str | None) -> float:
     return max(DEFAULT_MODEL_TOP_PA, float(ceiling))
 
 
+# --------------------------------------------------------------------------
+# Explicit model column: --p-top-pa, --eta-levels, --dzbot/--dzstretch-s/
+# --dzstretch-u/--max-dz.  Absent every one of these flags the emission is
+# byte-for-byte what it was (the default ladder, resampled by --nz, under
+# emitted_model_top_pa); present, the emitted [shared] carries the column
+# they name as explicit ``eta_levels`` + ``p_top``.
+
+
+class VerticalColumnRefused(ValueError):
+    """The requested model column cannot be emitted as asked."""
+
+
+#: argparse dest -> flag, for the WRF ``compute_eta`` generator controls
+#: (``woof.ingest.eta.WRF_ETA_DEFAULTS`` names; ``auto_levels_opt`` stays
+#: WRF's own default 2, the stretched generator these controls drive).
+VERTICAL_GENERATOR_FLAGS = (("dzbot", "--dzbot"),
+                            ("dzstretch_s", "--dzstretch-s"),
+                            ("dzstretch_u", "--dzstretch-u"),
+                            ("max_dz", "--max-dz"))
+#: Every argparse dest the explicit-column flags write.
+VERTICAL_COLUMN_FLAGS = (("p_top_pa", "--p-top-pa"),
+                         ("eta_levels", "--eta-levels"),
+                         *VERTICAL_GENERATOR_FLAGS)
+#: The dynamical core's level bound (``ACOUSTIC_VERTICAL_LEVEL_BOUNDS``,
+#: the 256-level ceiling every physics row also sits at).
+_MAX_COLUMN_NZ = 256
+
+
+#: ``--eta-levels``' argparse type (comma list or file), shared with
+#: ``woof energy plan``.
+from woof.cli_numbers import eta_levels_list as parse_eta_levels  # noqa: E402
+
+
+def validate_eta_ladder(levels, *, what: str = "eta_levels"
+                        ) -> tuple[float, ...]:
+    """Refuse any full-level ladder that is not 1 -> 0 strictly decreasing.
+
+    Pinned: first level exactly 1.0, last exactly 0.0, every step strictly
+    decreasing, every value finite, 4 <= nz <= 256 (the vertical stencil
+    width and the dynamical core's ceiling).  Returns the ladder as floats.
+    """
+
+    ladder = tuple(float(level) for level in levels)
+    nz = len(ladder) - 1
+    if nz < 4:
+        raise VerticalColumnRefused(
+            f"{what} has {len(ladder)} full levels (nz={nz}); at least 5 "
+            "(nz >= 4, the vertical stencil width) are needed")
+    if nz > _MAX_COLUMN_NZ:
+        raise VerticalColumnRefused(
+            f"{what} has nz={nz} mass levels; the dynamical core and every "
+            f"physics row stop at nz <= {_MAX_COLUMN_NZ}")
+    bad = [index for index, level in enumerate(ladder)
+           if not math.isfinite(level)]
+    if bad:
+        raise VerticalColumnRefused(
+            f"{what}[{bad[0]}] = {ladder[bad[0]]!r} is not finite")
+    if ladder[0] != 1.0 or ladder[-1] != 0.0:
+        raise VerticalColumnRefused(
+            f"{what} must start at exactly 1.0 (the surface) and end at "
+            f"exactly 0.0 (the model top); got {ladder[0]!r} ... "
+            f"{ladder[-1]!r}")
+    for index in range(nz):
+        if not ladder[index] > ladder[index + 1]:
+            raise VerticalColumnRefused(
+                f"{what} must decrease strictly from 1 to 0; level "
+                f"{index + 1} ({ladder[index + 1]!r}) does not lie below "
+                f"level {index} ({ladder[index]!r})")
+    return ladder
+
+
+def source_model_top_refusal(source: str | None, p_top_pa: float
+                             ) -> str | None:
+    """Why SOURCE cannot initialise a model top at ``p_top_pa``, or None.
+
+    The registry row's reach: ``extendable_source_top_pa`` when its fetch
+    extends upward, else ``certified_source_top_pa``.  A row declaring
+    neither is left to the preparation's vertical-coverage refusal
+    (``woof.adapt``), which reads the levels actually fetched.
+    """
+
+    if source is None:
+        return None
+    adapter = get_source_adapter(source)
+    reach = adapter.extendable_source_top_pa
+    if reach is None:
+        reach = adapter.certified_source_top_pa
+    if reach is None or float(p_top_pa) >= float(reach):
+        return None
+    return (f"model top {float(p_top_pa):g} Pa lies above the top of "
+            f"source {source!r}, which reaches {float(reach):g} Pa; a model "
+            "top the source column does not cover would be refused at "
+            f"preparation.  Choose --p-top-pa >= {float(reach):g}")
+
+
+def _float32_shortest(values) -> tuple[float, ...]:
+    """The generator's float32 levels as their shortest decimal spelling
+    (exact round trip to the same float32, so ordering is preserved)."""
+
+    return tuple(float(str(np.float32(value))) for value in values)
+
+
+def resolve_vertical_column(*, source: str | None, nz: int | None = None,
+                            p_top_pa: float | None = None,
+                            eta_levels=None,
+                            dzbot: float | None = None,
+                            dzstretch_s: float | None = None,
+                            dzstretch_u: float | None = None,
+                            max_dz: float | None = None,
+                            cpu_bridge=None) -> dict | None:
+    """The explicit model column the vertical flags name, or ``None``.
+
+    ``None`` when no explicit-column flag was given: the caller keeps the
+    default ladder (resampled by ``nz``) under :func:`emitted_model_top_pa`.
+    Otherwise a dict ``render_config(vertical=...)`` writes into
+    ``[shared]``: ``nz``, ``eta_levels`` (full levels, 1 -> 0), ``p_top``
+    (Pa), ``origin`` and the generator ``controls`` / ``receipt``.
+
+    * ``eta_levels`` given: used verbatim; ``nz`` must agree with it.
+    * any generator control given: WRF 4.6.1 ``compute_eta``
+      (``woof.ingest.eta.generate_wrf_eta``, auto_levels_opt 2) builds
+      ``nz + 1`` levels (``nz`` default 49) for this ``p_top``; controls not
+      given keep WRF's own defaults.
+    * only ``p_top_pa``: the default ladder (resampled by ``nz``) under it.
+
+    ``eta_levels`` and generator controls together are refused; so is a
+    ``p_top_pa`` above the source's reach (:func:`source_model_top_refusal`).
+    """
+
+    generator = {name: value for name, value in (
+        ("dzbot", dzbot), ("dzstretch_s", dzstretch_s),
+        ("dzstretch_u", dzstretch_u), ("max_dz", max_dz))
+        if value is not None}
+    if p_top_pa is None and eta_levels is None and not generator:
+        return None
+    if eta_levels is not None and generator:
+        flags = ", ".join(flag for name, flag in VERTICAL_GENERATOR_FLAGS
+                          if name in generator)
+        raise VerticalColumnRefused(
+            f"--eta-levels names the column outright; {flags} would "
+            "generate a different one.  Give one or the other")
+    if nz is not None and (isinstance(nz, bool) or int(nz) < 4):
+        raise VerticalColumnRefused(
+            "--nz must be at least 4 (the vertical stencil width)")
+    for name, value in generator.items():
+        if isinstance(value, bool) or not math.isfinite(float(value)) \
+                or float(value) <= 0.0:
+            flag = dict(VERTICAL_GENERATOR_FLAGS)[name]
+            raise VerticalColumnRefused(
+                f"{flag} must be a positive finite number; got {value!r}")
+    if p_top_pa is not None:
+        p_top = float(p_top_pa)
+        if isinstance(p_top_pa, bool) or not math.isfinite(p_top) \
+                or not 0.0 < p_top < 100000.0:
+            raise VerticalColumnRefused(
+                f"--p-top-pa must be a pressure in Pa strictly between 0 and "
+                f"100000 (the reference surface); got {p_top_pa!r}")
+        refusal = source_model_top_refusal(source, p_top)
+        if refusal is not None:
+            raise VerticalColumnRefused(refusal)
+    else:
+        p_top = emitted_model_top_pa(source)
+    base_temp = float(_SHARED_GRID_AND_DYNAMICS["base_temp"])
+    controls: dict = {}
+    receipt = None
+    if eta_levels is not None:
+        ladder = validate_eta_ladder(eta_levels, what="--eta-levels")
+        if nz is not None and int(nz) != len(ladder) - 1:
+            raise VerticalColumnRefused(
+                f"--nz {int(nz)} disagrees with --eta-levels, which names "
+                f"{len(ladder)} full levels (nz={len(ladder) - 1})")
+        origin = "explicit"
+    elif generator:
+        from woof.ingest.eta import generate_wrf_eta
+
+        e_vert = (int(nz) if nz is not None
+                  else int(_SHARED_GRID_AND_DYNAMICS["nz"])) + 1
+        try:
+            generated, receipt = generate_wrf_eta(
+                e_vert, domains={name: [float(value)]
+                                 for name, value in generator.items()},
+                p_top=p_top, base_temp=base_temp, cpu_bridge=cpu_bridge)
+        except ValueError as error:
+            raise VerticalColumnRefused(
+                f"WRF compute_eta cannot build {e_vert} levels to "
+                f"p_top {p_top:g} Pa with {generator}: {error}") from error
+        ladder = validate_eta_ladder(_float32_shortest(generated),
+                                     what="generated eta_levels")
+        controls = dict(receipt["controls"])
+        origin = "wrf-compute-eta"
+    else:
+        from woof.core.grid import resample_eta_levels
+
+        resampled = (resample_eta_levels(_ETA_LEVELS, int(nz))
+                     if nz is not None else _ETA_LEVELS)
+        ladder = validate_eta_ladder(resampled)
+        origin = "default-ladder"
+    return {"nz": len(ladder) - 1, "eta_levels": ladder, "p_top": p_top,
+            "origin": origin, "controls": controls, "receipt": receipt,
+            "base_temp": base_temp}
+
+
+def add_vertical_column_arguments(parser, *, defaults: str | None = None
+                                  ) -> None:
+    """Add the explicit-column flags to ``parser`` (``woof domain`` and
+    ``woof energy plan``).  ``defaults`` replaces the default wording for a
+    door whose absent controls are a preset rather than WRF's own."""
+
+    from woof.cli_numbers import positive_float
+
+    unset = defaults or "WRF's own default"
+    parser.add_argument(
+        "--p-top-pa", type=positive_float, default=None, metavar="PA",
+        help="model top pressure in Pa, written as [shared].p_top (default: "
+             "50 hPa, raised where the source's column stops lower); refused "
+             "above the top the source can supply")
+    parser.add_argument(
+        "--eta-levels", type=parse_eta_levels, default=None,
+        metavar="LIST|FILE",
+        help="explicit full eta levels, 1 -> 0 strictly decreasing, as a "
+             "comma list or a file of numbers; nz is their count minus one. "
+             "Excludes --dzbot/--dzstretch-s/--dzstretch-u/--max-dz")
+    for flag, wrf_default, words in (
+            ("--dzbot", 50.0, "lowest layer depth in m"),
+            ("--dzstretch-s", 1.3, "layer stretch factor near the surface"),
+            ("--dzstretch-u", 1.1, "layer stretch factor aloft"),
+            ("--max-dz", 1000.0, "deepest allowed layer in m")):
+        parser.add_argument(
+            flag, type=positive_float, default=None, metavar="X",
+            help=f"{words} for WRF compute_eta level generation "
+                 f"(auto_levels_opt 2; WRF default {wrf_default:g}); any of "
+                 f"these generates --nz levels to the model top, unset ones "
+                 f"take {unset}")
+
+
+def vertical_column_from_args(args, *, source: str | None) -> dict | None:
+    """:func:`resolve_vertical_column` from a parsed ``woof domain``."""
+
+    return resolve_vertical_column(
+        source=source, nz=getattr(args, "nz", None),
+        **{name: getattr(args, name, None)
+           for name, _ in VERTICAL_COLUMN_FLAGS})
+
+
+def vertical_column_header(vertical: dict) -> list[str]:
+    """The emitted file's own statement of where its column came from."""
+
+    lines = [f"VERTICAL COLUMN: nz = {vertical['nz']} mass levels, "
+             f"p_top = {float(vertical['p_top']):g} Pa, eta_levels "
+             f"{vertical['origin']}"]
+    if vertical.get("controls"):
+        lines.append("  WRF 4.6.1 compute_eta controls: " + ", ".join(
+            f"{key} = {value:g}" for key, value in vertical["controls"].items()))
+    for line in vertical.get("header", ()):
+        lines.append(line)
+    return lines
+
+
+def vertical_column_note(vertical: dict) -> str:
+    """One spoken line: the column, its top and its lowest layers, with
+    heights for a standard atmosphere over a 1000 hPa surface
+    (:func:`woof.energy.vertical.column_heights`)."""
+
+    from woof.energy.vertical import (ROTOR_TOP_M, column_heights,
+                                      isa_height_m, rotor_layers)
+
+    head = (f"column nz={vertical['nz']}, p_top "
+            f"{float(vertical['p_top']):g} Pa")
+    try:
+        heights = column_heights(vertical["eta_levels"], vertical["p_top"])
+        top_km = isa_height_m(vertical["p_top"]) / 1000.0
+    except ValueError:
+        # A top above the standard-atmosphere table (84.9 km): the column
+        # is still the one written; only its heights cannot be quoted.
+        return f"{head}, eta {vertical['origin']}"
+    lowest = ", ".join(f"{z:.0f}" for z in heights["full_level_m"][1:6])
+    below = rotor_layers(heights["full_level_m"])
+    return (f"{head} (~{top_km:.2f} km, standard atmosphere), eta "
+            f"{vertical['origin']}; lowest full levels ~{lowest} m AGL, "
+            f"{below} layer(s) below {ROTOR_TOP_M:g} m")
+
+
 _SHARED_GRID_AND_DYNAMICS = {
     "nz": 49, "ztop": 20000.0, "p_top": DEFAULT_MODEL_TOP_PA,
     "eta_levels": _ETA_LEVELS,
@@ -3755,7 +4037,8 @@ def render_config(*, name: str, start_time: datetime, hours: int,
                   profile: str | None = DEFAULT_PHYSICS_PROFILE,
                   cumulus_requested: bool = False,
                   interactive: bool = False,
-                  nz: int | None = None, tiles: str | None = None,
+                  nz: int | None = None, vertical: dict | None = None,
+                  tiles: str | None = None,
                   level_buffers_km: tuple[float, ...] | None = None,
                   history_interval_s: float | None = None,
                   nest_history_interval_s: float | None = None,
@@ -3807,7 +4090,16 @@ def render_config(*, name: str, start_time: datetime, hours: int,
         "restart_interval_s": min(DEFAULT_RESTART_INTERVAL_S, float(hours * 3600)),
     }
     shared = shared_physics(profile)
-    if nz is not None:
+    if vertical is not None:
+        # The explicit column (resolve_vertical_column), already validated.
+        if nz is not None and int(nz) != int(vertical["nz"]):
+            raise VerticalColumnRefused(
+                f"--nz {nz} disagrees with the explicit column's "
+                f"nz={vertical['nz']}")
+        shared["nz"] = int(vertical["nz"])
+        shared["eta_levels"] = tuple(float(level)
+                                     for level in vertical["eta_levels"])
+    elif nz is not None:
         from woof.core.grid import resample_eta_levels
 
         levels = resample_eta_levels(_ETA_LEVELS, nz)
@@ -3825,8 +4117,9 @@ def render_config(*, name: str, start_time: datetime, hours: int,
     # The vertical default is bounded by the source's certified column:
     # the ladder is eta-normalized, so only p_top moves (see
     # DEFAULT_MODEL_TOP_PA / emitted_model_top_pa).
-    shared["p_top"] = emitted_model_top_pa(
-        (fetch_hints or {}).get("source"))
+    shared["p_top"] = (float(vertical["p_top"]) if vertical is not None
+                       else emitted_model_top_pa(
+                           (fetch_hints or {}).get("source")))
     shared["map_proj"] = WRF_MAP_PROJ_CODES[projection["map_proj"]]
     # Nocturnal validity of the emitted radiation pairing, stated in the
     # header of EVERY emitted file and, where the pairing is asymmetric
@@ -4040,6 +4333,9 @@ def render_config(*, name: str, start_time: datetime, hours: int,
             "# the parent chain and are never hand-typed "
             "(woof/experiment.py).\n")
     header += nocturnal_note
+    if vertical is not None:
+        for line in vertical_column_header(vertical):
+            header += f"# {line}\n"
     for note in cadence_notes:
         header += "# " + note + "\n"
     if time_step != recommended_time_step:
@@ -4741,7 +5037,8 @@ def fit_ladder(*, ladder: str | None = None, free_bytes: int, hours: int,
                cumulus_requested: bool = False,
                vram_gib: float | None = None,
                device_profile=None, target_machine=None,
-               nz: int | None = None, tiles: str | None = None,
+               nz: int | None = None, vertical: dict | None = None,
+               tiles: str | None = None,
                forcing_interval_seconds: float | None = None,
                forcing_intervals: int | None = None,
                history_interval_s: float | None = None,
@@ -4876,7 +5173,7 @@ def fit_ladder(*, ladder: str | None = None, free_bytes: int, hours: int,
                 # prices, and sizing against one the file will not carry
                 # would fit a smaller domain than the card can hold.
                 cumulus_requested=cumulus_requested,
-                acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+                acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
                 history_interval_s=history_interval_s,
                 nest_history_interval_s=nest_history_interval_s,
                 physics_mix=physics_mix, clock=clock)
@@ -5098,7 +5395,7 @@ def fit_ladder(*, ladder: str | None = None, free_bytes: int, hours: int,
                 # Pricing a suite the user would have to NAME to get,
                 # so it is priced as a named suite: verbatim.
                 cumulus_requested=True,
-                acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+                acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
                 history_interval_s=history_interval_s,
                 nest_history_interval_s=nest_history_interval_s,
                 physics_mix=candidate_mix, clock=clock)
@@ -5170,7 +5467,7 @@ def fit_ladder(*, ladder: str | None = None, free_bytes: int, hours: int,
                     case_data=None, root_dx_m=root_dx_m,
                     profile=shallower_profile,
                     cumulus_requested=cumulus_requested,
-                    acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+                    acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
                     history_interval_s=history_interval_s,
                     nest_history_interval_s=nest_history_interval_s,
                     physics_mix=physics_mix, clock=clock)
@@ -5579,7 +5876,8 @@ def fit_polygon_ladder(*, footprint: PolygonFootprint,
                        buffers_km: tuple[float, ...],
                        free_bytes: int, hours: int,
                        device_profile=None, target_machine=None,
-                       nz: int | None = None, tiles: str | None = None,
+                       nz: int | None = None, vertical: dict | None = None,
+                       tiles: str | None = None,
                        forcing_interval_seconds: float | None = None,
                        forcing_intervals: int | None = None,
                        history_interval_s: float | None = None,
@@ -5644,7 +5942,7 @@ def fit_polygon_ladder(*, footprint: PolygonFootprint,
             fetch_hints=_candidate_fetch_hints(source), case_data=None,
             root_dx_m=root_dx_m, profile=profile,
             cumulus_requested=cumulus_requested,
-            acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+            acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
             history_interval_s=history_interval_s,
             nest_history_interval_s=nest_history_interval_s,
             physics_mix=physics_mix, clock=clock)
@@ -6456,6 +6754,13 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
     tiles = getattr(args, "tiles", None)
     if nz is not None and nz < 4:
         raise ValueError("--nz must be at least 4 (the vertical stencil width)")
+    # The explicit column (--p-top-pa / --eta-levels / --dzbot ...), before
+    # any geometry: a column the source cannot cover or WRF's generator
+    # cannot build is refused before a fit is priced.  None keeps the
+    # default ladder and emitted_model_top_pa, byte for byte.
+    vertical = vertical_column_from_args(args, source=args.source)
+    if vertical is not None:
+        nz = int(vertical["nz"])
     polygon = None
     level_buffer_values = None
     polygon_path = getattr(args, "polygon", None)
@@ -6794,7 +7099,7 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
                 vram_gib=vram_gib,
                 device_profile=device_profile,
                 target_machine=target_machine,
-                acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+                acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
                 forcing_interval_seconds=forcing_interval_seconds,
                 forcing_intervals=forcing_intervals,
                 history_interval_s=args.history_interval,
@@ -6816,7 +7121,7 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
                 vram_gib=vram_gib,
                 device_profile=device_profile,
                 target_machine=target_machine,
-                acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+                acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
                 forcing_interval_seconds=forcing_interval_seconds,
                 forcing_intervals=forcing_intervals,
                 history_interval_s=args.history_interval,
@@ -6857,7 +7162,7 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
                         vram_gib=vram_gib,
                         device_profile=device_profile,
                         target_machine=target_machine,
-                        acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+                        acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
                         forcing_interval_seconds=forcing_interval_seconds,
                         forcing_intervals=forcing_intervals,
                         history_interval_s=args.history_interval,
@@ -6881,7 +7186,7 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
                         cumulus_requested=cumulus_requested,
                         vram_gib=vram_gib, device_profile=device_profile,
                         target_machine=target_machine,
-                        acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+                        acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
                         forcing_interval_seconds=forcing_interval_seconds,
                         forcing_intervals=forcing_intervals,
                         history_interval_s=args.history_interval,
@@ -7098,7 +7403,7 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
         level_buffers_km=level_buffers,
         history_interval_s=args.history_interval,
         nest_history_interval_s=args.nest_history_interval,
-        acknowledgements=acknowledgements, nz=nz, tiles=tiles,
+        acknowledgements=acknowledgements, nz=nz, vertical=vertical, tiles=tiles,
         physics_mix=physics_mix, clock=clock)
     text = with_surface_flux_option(text, getattr(args, "isftcflx", None))
     from woof.static.source_defaults import with_source_static_defaults_text
@@ -7210,6 +7515,8 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
             for domain in exp.domains)
         print(f"domain: fitted grid {grid_extents}; contains the requested "
               "polygon and buffers")
+    if vertical is not None:
+        print("domain: " + vertical_column_note(vertical))
     # The spoken half of snap_cadences_to_clock: what the author moved
     # to keep its own two derivations compatible, one line each, or
     # nothing (UX finding N14 -- the silent alternative was exit 2).
@@ -7682,6 +7989,7 @@ def register_cli(subparsers) -> None:
     parser.add_argument("--nz", type=int, default=None, metavar="N",
                         help="vertical mass levels (default: 49); resamples "
                              "the default eta ladder while preserving its stretching")
+    add_vertical_column_arguments(parser)
     parser.add_argument("--tiles", nargs="?", const="auto", default=None,
                         choices=("off", "auto", "on"),
                         help="streaming mode (bare --tiles means auto); sizes "

@@ -31,7 +31,8 @@ from __future__ import annotations
 import argparse
 from importlib import import_module
 
-from woof.cli_numbers import float_between, nonnegative_float, positive_float, positive_int
+from woof.cli_numbers import (eta_levels_list, float_between, nonnegative_float,
+                              positive_float, positive_int)
 
 _KINDS = ("line", "minor_line", "cable", "substation", "plant", "generator",
           "tower")
@@ -147,6 +148,19 @@ def _plan(args) -> int:
                   f"only to --topology {' or '.join(_AUTO_SOURCE_TOPOLOGIES)}"
                   f"; name the source for --topology {args.topology}",
                   file=sys.stderr)
+            return 2
+    if args.topology == "hex-swath":
+        # The explicit wind-energy column is read only by the WRF planners.
+        from woof.energy.vertical import column_flags_given
+
+        given = column_flags_given(args)
+        if given:
+            import sys
+
+            print(f"woof energy plan: REFUSED: {', '.join(given)} applies "
+                  "only to --topology wrf-nests and wrf-tiles; --topology "
+                  "hex-swath builds its MPAS column from --nz and would "
+                  "ignore it", file=sys.stderr)
             return 2
     return import_module(_TOPOLOGY_MODULES[args.topology]).main(args)
 
@@ -358,7 +372,36 @@ def _register_plan(sub) -> None:
                    help="refuse plans with more high-resolution domains")
     p.add_argument("--nz", type=positive_int, default=None,
                    help="vertical levels (default: the planner's ladder; "
-                        "hex-swath: 55, or 3..80 priced at that column)")
+                        "hex-swath: 55, or 3..80 priced at that column; "
+                        "with a wind-energy column flag: 70, the whole "
+                        "column's count)")
+    column = p.add_argument_group(
+        "wind-energy column (wrf-nests, wrf-tiles)",
+        "any of these builds the woof.energy.vertical preset column: model "
+        "top at most 20 km, >= 8 layers below 250 m; refused with "
+        "hex-swath.  With none, the planner's ladder is unchanged")
+    column.add_argument(
+        "--p-top-pa", type=positive_float, default=None, metavar="PA",
+        help="model top pressure in Pa (default 5500, ~19.97 km); refused "
+             "above 20 km in the standard atmosphere (below 5475 Pa) or "
+             "above the source's reach")
+    column.add_argument(
+        "--eta-levels", type=eta_levels_list, default=None,
+        metavar="LIST|FILE",
+        help="explicit full eta levels, 1 -> 0 strictly decreasing (comma "
+             "list or file); excludes the --dz* controls")
+    column.add_argument(
+        "--dzbot", type=positive_float, default=None, metavar="M",
+        help="lowest layer depth for WRF compute_eta (default 12)")
+    column.add_argument(
+        "--dzstretch-s", type=positive_float, default=None, metavar="X",
+        help="surface stretch factor for WRF compute_eta (default 1.15)")
+    column.add_argument(
+        "--dzstretch-u", type=positive_float, default=None, metavar="X",
+        help="upper stretch factor for WRF compute_eta (default 1.1)")
+    column.add_argument(
+        "--max-dz", type=positive_float, default=None, metavar="M",
+        help="deepest layer for WRF compute_eta (default 1000)")
     hex_lane = p.add_argument_group(
         "hex-swath experimental lane",
         "read only with --topology hex-swath; refused with any other")
