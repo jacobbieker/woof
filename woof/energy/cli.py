@@ -13,6 +13,7 @@ the subcommand runs::
     woof energy run       woof.energy.run             run every plan domain
     woof energy extract   woof.energy.extract         plan runs -> forecast.v1
     woof energy rating    woof.energy.products        line rating, icing, power
+    woof energy deploy render  woof.energy.deploy      AWS/GCP Batch, k8s, Slurm
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ _TOPOLOGY_MODULES = {
     "hex-swath": "woof.energy.plan_hex",
 }
 _PRODUCTS = ("dlr", "icing", "wind-power", "pv-power")
+#: ``woof energy deploy render --backend``; woof.energy.deploy.BACKENDS.
+_DEPLOY_BACKENDS = ("aws-batch", "gcp-batch", "k8s", "slurm")
 
 
 def _bbox(value: str) -> tuple[float, float, float, float]:
@@ -315,6 +318,62 @@ def _register_rating(sub) -> None:
     p.set_defaults(func=_dispatch("woof.energy.products"))
 
 
+def _register_deploy(sub) -> None:
+    deploy = sub.add_parser(
+        "deploy", help="render cloud and cluster deployments of "
+                       "woof energy worker")
+    deploy_sub = deploy.add_subparsers(dest="energy_deploy_command",
+                                       required=True)
+    p = deploy_sub.add_parser(
+        "render", help="write AWS Batch, GCP Batch, Kubernetes or Slurm "
+                       "files that start a fleet of queue workers")
+    p.add_argument("--backend", required=True, choices=_DEPLOY_BACKENDS,
+                   help="aws-batch: compute environment, queue, job "
+                        "definition and array job; gcp-batch: Batch job "
+                        "JSON; k8s: Indexed Job YAML; slurm: sbatch array")
+    p.add_argument("--config", default=None, metavar="DEPLOY.toml",
+                   help="deployment configuration (TOML or .json); the "
+                        "flags below override its top-level keys")
+    p.add_argument("--name", default=None,
+                   help="deployment name (lower-case, 40 characters at "
+                        "most; prefixes every cloud resource)")
+    p.add_argument("--image", default=None, metavar="IMAGE:TAG",
+                   help="worker container image, pinned by tag or digest")
+    p.add_argument("--queue", default=None, metavar="URL",
+                   help="job queue the workers drain (s3://, gs:// or "
+                        "file://)")
+    p.add_argument("--output-url", default=None, metavar="URL",
+                   help="Icechunk output repository passed to every worker "
+                        "as WOOF_ENERGY_OUTPUT_URL")
+    p.add_argument("--workers", type=positive_int, default=None,
+                   help="number of workers (array size / task count / "
+                        "completions)")
+    p.add_argument("--parallelism", type=positive_int, default=None,
+                   help="workers running at once (default all)")
+    p.add_argument("--gpus-per-worker", type=positive_int, default=None,
+                   help="GPUs each worker is given (default: the machine's "
+                        "on AWS and GCP; required for k8s and slurm)")
+    p.add_argument("--geog-url", default=None, metavar="URL",
+                   help="WPS_GEOG tree the container syncs to local scratch "
+                        "at start (WOOF_GEOG_URL)")
+    p.add_argument("--highres-cache-url", default=None, metavar="URL",
+                   help="high-resolution static cache synced the same way "
+                        "(WOOF_HIGHRES_CACHE_URL)")
+    capacity = p.add_mutually_exclusive_group()
+    capacity.add_argument("--spot", dest="spot", action="store_true",
+                          default=None,
+                          help="run on spot / preemptible capacity")
+    capacity.add_argument("--on-demand", dest="spot", action="store_false",
+                          help="run on on-demand / standard capacity")
+    p.add_argument("--strict", action="store_true",
+                   help="refuse instead of writing REPLACE_ME_ placeholders "
+                        "for missing account identifiers")
+    p.add_argument("-o", "--output", required=True, metavar="DIR",
+                   help="directory to write the files and deploy.json "
+                        "(woof-energy.deploy.v1) into")
+    p.set_defaults(func=_dispatch("woof.energy.deploy"))
+
+
 def register_cli(subparsers) -> None:
     """Add ``woof energy`` to the product CLI."""
 
@@ -330,6 +389,7 @@ def register_cli(subparsers) -> None:
     _register_run(sub)
     _register_extract(sub)
     _register_rating(sub)
+    _register_deploy(sub)
 
 
 __all__ = ["register_cli"]

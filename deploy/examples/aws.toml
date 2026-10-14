@@ -1,0 +1,41 @@
+# Example `woof energy deploy render --config` for AWS: one year of the
+# wind-farm hindcast drained by 64 p5.48xlarge workers (8 x H100 each).
+# Renders for --backend aws-batch, k8s (EKS, [k8s] cloud = "aws") and
+# slurm (AWS ParallelCluster).  Account identifiers are examples; replace
+# them.  No credentials go here: workers use the job role / IRSA role.
+
+name = "windfarm-2024"
+image = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/woof-energy:1.0.3-cu12"
+queue_url = "s3://example-woof-hindcast/queues/windfarm-2024/"
+output_url = "s3://example-woof-hindcast/icechunk/windfarm-2024"
+geog_url = "s3://example-woof-static/WPS_GEOG"
+highres_cache_url = "s3://example-woof-static/highres-cache"
+workers = 64
+parallelism = 32
+gpus_per_worker = 8
+spot = true
+max_runtime_hours = 72
+retries = 3
+labels = { project = "windfarm-reanalysis", year = "2024" }
+
+[aws_batch]
+region = "eu-west-2"
+instance_types = ["p5.48xlarge", "p5e.48xlarge"]
+subnets = ["subnet-0123456789abcdef0", "subnet-0fedcba9876543210"]
+security_group_ids = ["sg-0123456789abcdef0"]
+instance_role_arn = "arn:aws:iam::123456789012:instance-profile/woof-batch-instance"
+job_role_arn = "arn:aws:iam::123456789012:role/woof-energy-worker"
+
+[k8s]
+cloud = "aws"
+namespace = "woof-energy"
+iam_role_arn = "arn:aws:iam::123456789012:role/woof-energy-worker"
+node_selector = { "node.kubernetes.io/instance-type" = "p5.48xlarge" }
+cpu = "180"
+memory_gib = 1800
+scratch_host_path = "/mnt/k8s-disks/0"
+
+[slurm]
+partition = "gpu-p5"
+runtime = "pyxis"
+cpus_per_task = 192

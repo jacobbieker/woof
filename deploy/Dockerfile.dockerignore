@@ -1,0 +1,14 @@
+# Build context exclusions for deploy/Dockerfile (BuildKit reads
+# <Dockerfile>.dockerignore beside the Dockerfile).  Vendored crates keep
+# their own src/target directories, so only the crates' build outputs are
+# excluded, never **/target.
+.git
+.pixi
+.claude
+.pytest_cache
+tools/*/target
+**/__pycache__
+**/*.pyc
+build
+dist
+out
