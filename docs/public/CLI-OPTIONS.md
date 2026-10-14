@@ -618,6 +618,30 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 
+## `woof energy deploy`
+
+Takes no options of its own.
+
+## `woof energy deploy render`
+
+| option | what it does |
+|---|---|
+| `--backend {aws-batch,gcp-batch,k8s,slurm}` | aws-batch: compute environment, queue, job definition and array job; gcp-batch: Batch job JSON; k8s: Indexed Job YAML; slurm: sbatch array |
+| `--config DEPLOY.toml` | deployment configuration (TOML or .json); the flags below override its top-level keys |
+| `--geog-url URL` | WPS_GEOG tree the container syncs to local scratch at start (WOOF_GEOG_URL) |
+| `--gpus-per-worker` | GPUs each worker is given (default: the machine's on AWS and GCP; required for k8s and slurm) |
+| `--highres-cache-url URL` | high-resolution static cache synced the same way (WOOF_HIGHRES_CACHE_URL) |
+| `--image IMAGE:TAG` | worker container image, pinned by tag or digest |
+| `--name` | deployment name (lower-case, 40 characters at most; prefixes every cloud resource) |
+| `--on-demand` | run on on-demand / standard capacity |
+| `--output DIR` | directory to write the files and deploy.json (woof-energy.deploy.v1) into |
+| `--output-url URL` | Icechunk output repository passed to every worker as WOOF_ENERGY_OUTPUT_URL |
+| `--parallelism` | workers running at once (default all) |
+| `--queue URL` | job queue the workers drain (s3://, gs:// or file://) |
+| `--spot` | run on spot / preemptible capacity |
+| `--strict` | refuse instead of writing REPLACE_ME_ placeholders for missing account identifiers |
+| `--workers` | number of workers (array size / task count / completions) |
+
 ## `woof energy extract`
 
 | argument | what it does |

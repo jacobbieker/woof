@@ -50,6 +50,22 @@ New:
   logs uploaded per attempt, and SIGTERM releasing the lease uncharged
   for spot and preemptible machines.  See
   `docs/energy-hindcast/queue-worker.md`.
+- `woof energy deploy render --backend aws-batch|gcp-batch|k8s|slurm`
+  writes the files that start a fleet of `woof energy worker` queue
+  workers: an AWS Batch compute environment, job queue, GPU job
+  definition and array job; a GCP Batch job; a Kubernetes Indexed Job
+  with workload identity; or a Slurm sbatch array. It renders
+  deterministically from a typed TOML/JSON configuration and records
+  the result in `deploy.json` (`woof-energy.deploy.v1`). No credentials
+  are written, and a secret-looking `env` entry is refused. Missing
+  account identifiers become `REPLACE_ME_` placeholders, which
+  `submit.sh` refuses to run with and `--strict` refuses to render.
+  `deploy/Dockerfile` (CUDA 12, or CUDA 13 with `--build-arg CUDA=13`)
+  builds the locked pixi environment, the native bridges and the tables
+  into a non-root image with a `woof doctor` healthcheck. Its entrypoint
+  copies WPS_GEOG and the high-resolution cache from `WOOF_GEOG_URL` and
+  `WOOF_HIGHRES_CACHE_URL` onto local scratch. The guide is
+  `docs/energy-hindcast/deploy.md`.
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals
