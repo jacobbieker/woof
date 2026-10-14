@@ -40,9 +40,9 @@ preset = "minimal"
 | preset | what the tape carries |
 |---|---|
 | `"full"` | **the default.** Every variable the run produces. |
-| `"minimal"` | the 2-D surface state and the accumulators: `T2`, `Q2`, `TH2`, `PSFC`, `U10`/`V10`, `TSK`, the surface energy budget (`HFX`, `LH`, `QFX`, `GRDFLX`, `SWDOWN`, `GLW`, `OLR`), `PBLH`, the precipitation and snow accumulators, `UP_HELI_MAX`, the grid metadata and the land identity, plus the two structural volumes below. |
+| `"minimal"` | the 2-D surface state and the accumulators: `T2`, `Q2`, `TH2`, `PSFC`, `U10`/`V10`, `TSK`, the surface energy budget (`HFX`, `LH`, `QFX`, `GRDFLX`, `SWDOWN`, `GLW`, `OLR`), `PBLH`, the precipitation and snow accumulators, `UP_HELI_MAX` and the interval wind extremes (`WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX`, produced under `nwp_diagnostics = 1`), the grid metadata and the land identity, plus the two structural volumes below. |
 | `"severe"` | `minimal` plus the storm-scale volumes: `U`, `V`, `W`, `PH`, `P`, `PB`, the hydrometeor mixing ratios and number concentrations, and `REFL_10CM`. It sheds the restart-only scheme carriers no render product reads. |
-| `"energy"` | what a forecast along power lines, substations and renewable sites is sampled from (`woof energy extract`): the column winds and theta (`U`, `V`, `W`, `T`), the height and pressure coordinate (`PH`, `PHB`, `HGT`, `P`, `PB`), `QVAPOR`, `QCLOUD`, `QRAIN`, `QICE`, `QSNOW`, `QGRAUP`, the near-surface state (`T2`, `Q2`, `U10`, `V10`, `PSFC`), the surface shortwave trio (`SWDOWN`, `SWDDNI`, `SWDDIF`, `COSZEN`), `RAINNC`, `RAINC`, `SINALPHA`/`COSALPHA` and the georeference. |
+| `"energy"` | what a forecast along power lines, substations and renewable sites is sampled from (`woof energy extract`): the column winds and theta (`U`, `V`, `W`, `T`), the height and pressure coordinate (`PH`, `PHB`, `HGT`, `P`, `PB`), `QVAPOR`, `QCLOUD`, `QRAIN`, `QICE`, `QSNOW`, `QGRAUP`, the near-surface state (`T2`, `Q2`, `U10`, `V10`, `PSFC`), the surface shortwave trio (`SWDOWN`, `SWDDNI`, `SWDDIF`, `COSZEN`), `RAINNC`, `RAINC`, `SINALPHA`/`COSALPHA`, the georeference, and the history-interval wind extremes `WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX` when the run sets `nwp_diagnostics = 1` (see [Wind maxima and gusts](#wind-maxima-and-gusts)). |
 
 A preset is a filter over what the run produced, so a member the run
 does not produce is simply absent from the tape, never zero-filled:
@@ -306,3 +306,25 @@ WOOF writes them with WRF's own schema (name, units, description,
 stagger). They make the default full inventory larger than releases
 before this one: `COSZEN` on every run with radiation on, and
 `SWDDNI`/`SWDDIF` as well on a run with `ra_sw_physics = 4`.
+
+## Wind maxima and gusts
+
+With `nwp_diagnostics = 1` (`&time_control`, or the RunConfig key of the
+same name) every domain folds six running maxima on every model step and
+restarts them after each history write, so each frame carries the
+extreme over the interval since the previous frame:
+
+| variable | units | meaning |
+|---|---|---|
+| `WSPD10MAX` | m s-1 | maximum 10 m wind speed in the interval (WRF `nwp_diagnostics`). |
+| `U10MAX` | m s-1 | 10 m U component at the instant of `WSPD10MAX`. |
+| `V10MAX` | m s-1 | 10 m V component at the instant of `WSPD10MAX`. |
+| `GUST` | m s-1 | maximum surface wind gust in the interval, NCEP UPP `CALGUST` method (PBL momentum mixed down). |
+| `W_UP_MAX` | m s-1 | strongest updraft below 400 hPa in the interval (WRF `nwp_diagnostics`). |
+| `W_DN_MAX` | m s-1 | strongest downdraft below 400 hPa in the interval (negative). |
+
+They ride beside `UP_HELI_MAX`, are carried through checkpoints, and
+are selected by the `minimal`, `severe` and `energy` presets (a preset selects them; it does
+not switch the diagnostic on). The method, its sources and where WOOF
+differs from WRF are in
+[docs/energy-hindcast/gusts.md](../energy-hindcast/gusts.md).

@@ -4655,6 +4655,12 @@ def integrate_prepared_case(
         from woof.core.uh_diag import reset_up_heli_max
         reset_up_heli_max(state)
         _reset_streamed_up_heli_max(stepper if streamed else None)
+        # The other history-interval maxima (woof/core/interval_maxima.py).
+        from woof.core.interval_maxima import (
+            reset_history_interval_maxima,
+            reset_streamed_history_interval_maxima)
+        reset_history_interval_maxima(state)
+        reset_streamed_history_interval_maxima(stepper if streamed else None)
         if counters is not None:
             counters.history_consumed(start_time)
     elif restart_path is not None:
@@ -4864,6 +4870,12 @@ def integrate_prepared_case(
             from woof.core.uh_diag import reset_up_heli_max
             reset_up_heli_max(state)
             _reset_streamed_up_heli_max(stepper if streamed else None)
+            from woof.core.interval_maxima import (
+                reset_history_interval_maxima,
+                reset_streamed_history_interval_maxima)
+            reset_history_interval_maxima(state)
+            reset_streamed_history_interval_maxima(
+                stepper if streamed else None)
             if counters is not None:
                 counters.history_consumed(valid)
         requested_restart = restart_request.pending()
@@ -6103,6 +6115,9 @@ def _submit_tree_history_frame(writers, node, ticks: int) -> None:
     # here can never race the staged copy.
     from woof.core.uh_diag import reset_up_heli_max
     reset_up_heli_max(node.state)
+    # And every other history-interval running max of this domain.
+    from woof.core.interval_maxima import reset_history_interval_maxima
+    reset_history_interval_maxima(node.state)
 
 
 def resolved_tree_config_report(exp: ExperimentConfig,

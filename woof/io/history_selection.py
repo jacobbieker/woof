@@ -145,8 +145,11 @@ _MINIMAL_FIELDS: frozenset[str] = frozenset({
     # Precipitation and snow accumulators.
     "RAINC", "RAINNC", "RAINSH", "SNOWNC", "GRAUPELNC", "HAILNC",
     "SNOW", "SNOWC", "SNOWH",
-    # Column extremes a severe-weather surface panel reads.
-    "UP_HELI_MAX",
+    # Column extremes a severe-weather surface panel reads: updraft
+    # helicity and, from the same nwp_diagnostics family, the interval
+    # wind, gust and vertical-motion extremes (woof/core/wind_gust_diag.py).
+    "UP_HELI_MAX", "WSPD10MAX", "U10MAX", "V10MAX", "GUST",
+    "W_UP_MAX", "W_DN_MAX",
     # Grid metadata: 2-D, cheap, and what a staggered reader needs.
     "XLAT_U", "XLONG_U", "XLAT_V", "XLONG_V",
     "MAPFAC_M", "MAPFAC_U", "MAPFAC_V", "F", "E", "SINALPHA", "COSALPHA",
@@ -183,6 +186,12 @@ _SEVERE_EXTRA_FIELDS: frozenset[str] = frozenset({
 #:   ``SWDDNI``, diffuse ``SWDDIF`` and the zenith cosine ``COSZEN``.
 #: * ``SINALPHA``/``COSALPHA`` to rotate grid winds to earth-relative
 #:   bearings against a line's azimuth, and the georeference.
+#: * The history-interval wind extremes a wind-farm or line-rating reader
+#:   needs between frames: ``WSPD10MAX`` with its direction
+#:   (``U10MAX``/``V10MAX``), the UPP surface ``GUST`` and
+#:   ``W_UP_MAX``/``W_DN_MAX``.  They are produced only under
+#:   ``nwp_diagnostics = 1``; the preset selects them, it does not switch
+#:   the diagnostic on.
 #:
 #: A member the run does not produce is simply absent from its tape, the
 #: rule every preset already follows (a preset is a filter over what the
@@ -204,6 +213,10 @@ _ENERGY_FIELDS: frozenset[str] = frozenset({
     "RAINNC", "RAINC",
     # Grid rotation and georeference.
     "SINALPHA", "COSALPHA", "XLAT", "XLONG",
+    # History-interval wind extremes (nwp_diagnostics = 1,
+    # woof/core/wind_gust_diag.py): the peak 10 m wind and its direction,
+    # the UPP surface gust, and the column updraft/downdraft extremes.
+    "WSPD10MAX", "U10MAX", "V10MAX", "GUST", "W_UP_MAX", "W_DN_MAX",
 })
 
 #: Named presets: name -> the set of droppable fields it keeps, or

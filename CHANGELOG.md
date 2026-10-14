@@ -4,6 +4,15 @@
 
 New:
 
+- `nwp_diagnostics = 1` now also writes the wind members of WRF's
+  `nwp_diagnostics` family, `WSPD10MAX`, `W_UP_MAX` and `W_DN_MAX`, plus
+  `U10MAX`/`V10MAX` (the 10 m wind at the instant of the speed maximum)
+  and `GUST`, the interval-maximum surface gust from the NCEP UPP
+  `CALGUST` method. Each is folded on every model step on the GPU, reset
+  after each history frame and carried in checkpoints. The `energy`
+  preset selects them. The method and where WOOF differs from WRF are in
+  `docs/energy-hindcast/gusts.md`.
+
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals

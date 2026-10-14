@@ -593,7 +593,7 @@ def test_trajectory_inertness_bitwise(tmp_path):
     """THE essential gate: knob on vs off over real dycore steps leaves
     every model field bitwise identical, THROUGH to actual wrfout files --
     every variable common to both files is byte-identical and the on-file
-    differs exactly by carrying UP_HELI_MAX."""
+    differs exactly by carrying UP_HELI_MAX and the wind maxima."""
     import cupy as cp
     from netCDF4 import Dataset
 
@@ -621,7 +621,12 @@ def test_trajectory_inertness_bitwise(tmp_path):
 
     on_fields = _live_state_history_fields(s_on)
     off_fields = _live_state_history_fields(s_off)
-    assert set(on_fields) - set(off_fields) == {"UP_HELI_MAX"}
+    # The knob also carries the wind members of the same family
+    # (woof/core/wind_gust_diag.py); they are equally output-only, and the
+    # model-field equality above covers them too.
+    from woof.core.wind_gust_diag import WIND_MAXIMA_FIELDS
+    diagnostic_names = {"UP_HELI_MAX", *(n for n, _ in WIND_MAXIMA_FIELDS)}
+    assert set(on_fields) - set(off_fields) == diagnostic_names
     # Precipitation accumulators (scratch) are equally untouched.
     np.testing.assert_array_equal(
         cp.asnumpy(s_on.scratch((cfg_on.ny, cfg_on.nx), "mp_rainnc")),
@@ -641,7 +646,7 @@ def test_trajectory_inertness_bitwise(tmp_path):
     with Dataset(paths["off"]) as off_nc, Dataset(paths["on"]) as on_nc:
         off_vars = set(off_nc.variables)
         on_vars = set(on_nc.variables)
-        assert on_vars - off_vars == {"UP_HELI_MAX"}
+        assert on_vars - off_vars == diagnostic_names
         assert off_vars - on_vars == set()
         for name in sorted(off_vars):
             if name == "Times":

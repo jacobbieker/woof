@@ -127,6 +127,7 @@ from woof.core.uh_diag import (
     TRACKER_WINDOW_SLOTS as _TRACKER_WINDOW_SLOTS,
     UH_FOLLOW_WINDOW_PREFIX as _UH_FOLLOW_WINDOW_PREFIX,
     is_tracker_window_slot as _is_tracker_window_slot)
+from woof.core.wind_gust_diag import WIND_MAXIMA_SLOTS
 from woof.core.nssl2_contract import (
     CONTRACT_ID as NSSL2_CONTRACT_ID,
     DEFAULT_RESTART_FIELDS as NSSL2_DEFAULT_RESTART_FIELDS,
@@ -587,6 +588,11 @@ SERIALIZED_SCRATCH_SLOTS = frozenset({
     # a checkpoint written before the slot existed restores it zeroed with
     # a note, never a refusal (woof/core/uh_diag.py owns the lifecycle).
     "up_heli_max",
+    # The wind members of the same nwp_output family and the UPP gust
+    # (woof/core/wind_gust_diag.WIND_MAXIMA_SLOTS): the same running-max
+    # class and the same tolerant restore, so a resumed run continues the
+    # interval the checkpoint was written inside.
+    *WIND_MAXIMA_SLOTS,
 })
 
 #: Cross-step accumulators that are deliberately NOT checkpointed.
@@ -4322,7 +4328,14 @@ def _validate_nssl2_stored_restart_state(
     optional_scratch = {key for key in stored_scratch
                         if (_is_tracker_window_slot(key[len("scratch/"):])
                             or key == REFL_STORE_KEY)}
-    missing_scratch = sorted(expected_scratch - stored_scratch)
+    # The wind running maxima (woof/core/wind_gust_diag.py) postdate every
+    # MP18 checkpoint written before them and are diagnostic-only: absent
+    # restores zeroed with a note, present under nwp_diagnostics = 0 is
+    # dropped with a note, by the generic reader -- never an inventory
+    # refusal here.
+    wind_maxima = {f"scratch/{slot}" for slot in WIND_MAXIMA_SLOTS}
+    optional_scratch |= stored_scratch & wind_maxima
+    missing_scratch = sorted(expected_scratch - stored_scratch - wind_maxima)
     extra_scratch = sorted(stored_scratch - expected_scratch - optional_scratch)
     if missing_scratch or extra_scratch:
         raise RestartMismatchError(
@@ -6704,7 +6717,8 @@ def _apply_validated_restart(validated: _ValidatedRestart,
         if key.startswith("scratch/"):
             slot = key[len("scratch/"):]
             stored_scratch.add(slot)
-            if (slot == "up_heli_max" or _is_tracker_window_slot(slot)) \
+            if (slot == "up_heli_max" or _is_tracker_window_slot(slot)
+                    or slot in WIND_MAXIMA_SLOTS) \
                     and state.existing_scratch(slot) is None:
                 # The eagerly allocated diagnostic accumulator and the
                 # consumer tracking windows beside it: a state prepared
