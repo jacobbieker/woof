@@ -126,5 +126,51 @@ def float_between(low: float, high: float) -> Callable[[str], float]:
     return parse
 
 
-__all__ = ["finite_float", "float_between", "int_at_least", "int_between",
-           "nonnegative_float", "nonnegative_int", "positive_float", "positive_int"]
+def eta_levels_list(value: str) -> tuple[float, ...]:
+    """``--eta-levels``: a comma list of numbers, or a file of them.
+
+    A value naming an existing file is read as numbers separated by commas,
+    whitespace or newlines (``#`` starts a comment), so a WRF namelist
+    ``eta_levels`` row pasted into a text file works.  Anything else is a
+    comma list.  Every value must be finite; the ladder's shape (1 -> 0,
+    strictly decreasing) is checked by
+    :func:`woof.domain_wizard.validate_eta_ladder`, not here.
+    """
+
+    import re
+    from pathlib import Path
+
+    text = str(value)
+    path = Path(text).expanduser()
+    try:
+        # A comma list is never a file name; and a long one would make
+        # stat() raise ENAMETOOLONG on Python < 3.13 rather than say no.
+        is_file = "," not in text and path.is_file()
+    except OSError:
+        is_file = False
+    if is_file:
+        body = "\n".join(line.split("#", 1)[0]
+                         for line in path.read_text("utf-8").splitlines())
+        tokens = re.split(r"[\s,]+", body.strip())
+        where = f"file {text!r}"
+    else:
+        tokens = [token.strip() for token in text.split(",")]
+        where = repr(text)
+    tokens = [token for token in tokens if token]
+    try:
+        levels = tuple(float(token) for token in tokens)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            f"must be a comma list of numbers or a file of them; {where} "
+            f"holds a non-number ({error})") from error
+    if not levels:
+        raise argparse.ArgumentTypeError(f"{where} holds no levels")
+    if not all(math.isfinite(level) for level in levels):
+        raise argparse.ArgumentTypeError(
+            f"every level must be finite; {where} holds a nan or inf")
+    return levels
+
+
+__all__ = ["eta_levels_list", "finite_float", "float_between",
+           "int_at_least", "int_between", "nonnegative_float",
+           "nonnegative_int", "positive_float", "positive_int"]

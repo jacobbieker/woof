@@ -703,8 +703,11 @@ def render_plan_config(layout: _Layout, *, name: str, start: datetime,
                        hours: float, projection: dict, source: str,
                        profile: str | None, nz: int | None,
                        fetch_hints: dict | None, case_data: dict | None,
-                       leaf_output: dict) -> str:
-    """The emitted TOML: ``woof domain``'s author with a sibling tree."""
+                       leaf_output: dict, column=None) -> str:
+    """The emitted TOML: ``woof domain``'s author with a sibling tree.
+
+    ``column`` (a :class:`woof.energy.vertical.WindEnergyColumn`) replaces
+    the default ladder and model top with the wind-energy column."""
 
     from woof import domain_wizard as dw
     import tomllib
@@ -716,7 +719,9 @@ def render_plan_config(layout: _Layout, *, name: str, start: datetime,
         name=name, start_time=start, hours=hours, projection=projection,
         dims=template_dims, ratios=ratios, fetch_hints=fetch_hints,
         case_data=case_data, root_dx_m=layout.spacings[0], profile=profile,
-        nz=nz, history_interval_s=PARENT_HISTORY_INTERVAL_S,
+        nz=(nz if column is None else column.nz),
+        vertical=(None if column is None else column.wizard_vertical()),
+        history_interval_s=PARENT_HISTORY_INTERVAL_S,
         nest_history_interval_s=LEAF_HISTORY_INTERVAL_S, clock="fixed")
     raw = tomllib.loads(text)
     templates = raw["domain"]
@@ -955,7 +960,8 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                vram_gib: float | None = None, max_domains: int | None = None,
                nz: int | None = None, sites_path: Path | None = None,
                name: str | None = None,
-               now: datetime | None = None) -> Plan:
+               now: datetime | None = None,
+               column_request: dict | None = None) -> Plan:
     """Emit the domains for ``sites`` under ``outdir`` and return the plan
     (already written to ``outdir/plan.json``).
 
@@ -963,13 +969,19 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     without it a copy of ``sites`` is written to ``outdir/sites.json``.
     ``name`` names the emitted configuration (default from the sites file
     and ``dx_m``).  ``now`` fixes the clock the default start reads.
+    ``column_request`` holds the explicit-column flags (``p_top_pa``,
+    ``eta_levels``, ``dzbot``, ``dzstretch_s``, ``dzstretch_u``,
+    ``max_dz``); when any is set every domain carries the
+    :func:`woof.energy.vertical.wind_energy_column` they name (with
+    ``nz``) and its record is written to ``outdir/vertical.json``.
     """
 
     plan, _ = _build(sites, outdir=outdir, dx_m=dx_m,
                      corridor_km=corridor_km, parent_dx_m=parent_dx_m,
                      start=start, hours=hours, source=source, card=card,
                      vram_gib=vram_gib, max_domains=max_domains, nz=nz,
-                     sites_path=sites_path, name=name, now=now)
+                     sites_path=sites_path, name=name, now=now,
+                     column_request=column_request)
     return plan
 
 
@@ -977,7 +989,8 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
            parent_dx_m: float | None, start: str | None, hours: float,
            source: str | None, card: str | None, vram_gib: float | None,
            max_domains: int | None, nz: int | None, sites_path: Path | None,
-           name: str | None, now: datetime | None) -> tuple[Plan, dict]:
+           name: str | None, now: datetime | None,
+           column_request: dict | None = None) -> tuple[Plan, dict]:
     """:func:`build_plan`, also returning the sizing record ``main`` prints."""
 
     from woof import domain_wizard as dw
@@ -1014,6 +1027,10 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
     refusal = window_refusal(source, start_time, float(hours), now=now)
     if refusal is not None:
         raise PlanRefused(refusal)
+    from woof.energy.vertical import column_from_values
+
+    column = column_from_values(nz=nz, source=source,
+                                **(column_request or {}))
     budget = _resolve_budget(card, vram_gib)
     target = _fit_target_bytes(budget)
     if target <= 0:
@@ -1073,7 +1090,7 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
             layout, name=name, start=start_time, hours=float(hours),
             projection=projection, source=source, profile=profile, nz=nz,
             fetch_hints=fetch_hints, case_data=case_data,
-            leaf_output=leaf_output)
+            leaf_output=leaf_output, column=column)
         try:
             exp = dw.experiment_from_text(text, source=str(config_path))
         except (ValueError, TypeError, KeyError) as error:
@@ -1101,6 +1118,13 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
     # ownership and footprints come from the accepted in-memory experiment.
     domains = _plan_domains(exp, layout, sites, x, y, config_path=config_path,
                             wps_path=wps_path, outdir=outdir, name=name)
+    if column is not None:
+        from woof.energy.vertical import check_physics_levels
+
+        for domain in exp.domains:
+            check_physics_levels(domain.run, p_top_pa=column.p_top_pa,
+                                 what=f"d{domain.grid_id:02d}")
+        domains[0].extra["vertical"] = column.summary()
     wps_text = render_plan_wps(layout, projection, source=source)
 
     outdir.mkdir(parents=True, exist_ok=True)
@@ -1110,6 +1134,11 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
     dw._write_atomic(config_path, text)
     dw._write_atomic(wps_path, wps_text)
     written = [config_path, wps_path]
+    if column is not None:
+        written.append(column.write(outdir / "vertical.json"))
+    else:
+        # A re-plan without a column must not leave an older one behind.
+        (outdir / "vertical.json").unlink(missing_ok=True)
     if source == "era5":
         vtable = outdir / dw._PACKAGED_VTABLE.name
         if not vtable.exists():
@@ -1160,6 +1189,8 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
                      "may not have published it yet (GFS posts about 3.5-5 h "
                      "after the cycle), in which case pass an earlier --start")
     notes.extend(source_notes(source))
+    if column is not None:
+        notes.extend(column.header_lines())
     notes.extend(leaf_notes)
     notes.extend(fetch_notes)
     if len(attempts) > 1:
@@ -1244,6 +1275,8 @@ def _plan_domains(exp, layout: _Layout, sites: SiteSet, x: np.ndarray,
 def main(args) -> int:
     """``woof energy plan SITES --topology wrf-nests``."""
 
+    from woof.energy.vertical import column_request
+
     sites_path = Path(args.sites)
     try:
         sites = load_sites(sites_path)
@@ -1262,7 +1295,8 @@ def main(args) -> int:
                 start=args.start, hours=args.hours, source=args.source,
                 card=args.card, vram_gib=args.vram_gib,
                 max_domains=args.max_domains, nz=args.nz,
-                sites_path=sites_path, name=None, now=None)
+                sites_path=sites_path, name=None, now=None,
+                column_request=column_request(args))
     except (PlanRefused, ContractError, ValueError) as error:
         # ValueError: the wizard's own refusals (fetch hints, coverage,
         # projection) reach here unchanged and are reported as refusals.
@@ -1292,6 +1326,7 @@ def main(args) -> int:
                  "fit_target_gib": _gib(summary["target_bytes"]),
                  "alloc_estimate_gib": _gib(summary["alloc_bytes"]),
                  "binding_phase": summary["binding_phase"]},
+        "vertical": plan.domains[0].extra.get("vertical"),
         "run_dir": plan.domains[0].run_dir,
         "notes": plan.notes,
     }

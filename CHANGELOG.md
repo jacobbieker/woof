@@ -115,6 +115,20 @@ New:
   spectral prototype keeps `primitive.nlev <= 32`. It integrates its fast
   modes explicitly and carries no physics, so a deeper column only shrinks
   its stable step.
+- `woof domain` takes an explicit model column: `--p-top-pa`,
+  `--eta-levels` (a comma list or a file) and `--dzbot`, `--dzstretch-s`,
+  `--dzstretch-u` and `--max-dz` (WRF 4.6.1 `compute_eta` level
+  generation). The column is written as explicit `eta_levels` and
+  `p_top`. It must run strictly from 1 down to 0 with at most 256 levels,
+  and its top must lie inside the source's reach. `woof energy plan
+  --topology wrf-nests|wrf-tiles` takes the same flags. With any of them
+  set, the planner builds the wind-energy column
+  (`woof.energy.vertical`). Its defaults are a 5500 Pa top (19.97 km),
+  70 levels and a 12 m lowest layer. It refuses a model top above 20 km
+  in the standard atmosphere and any column with fewer than 8 layers
+  below 250 m. The column record is written to `vertical.json`
+  (`woof-energy.vertical.v1`). Without the flags, nothing changes. See
+  `docs/energy-hindcast/vertical.md`.
 
 Fixed:
 
