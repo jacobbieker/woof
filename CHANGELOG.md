@@ -4,6 +4,21 @@
 
 New:
 
+- `woof energy power FORECAST.nc --assets ASSETS.geojson -o power.nc`
+  estimates wind farm power from turbine-specific curves. Each turbine is
+  matched to a curve by make and model (exact, then fuzzy), else by rating
+  and rotor diameter, else a generic class curve, and the match is
+  recorded (`--matches`). It uses the rotor-equivalent wind where the
+  forecast heights span the rotor, the IEC density correction, high-wind
+  shutdown with hysteresis (optionally on gusts), Jensen or Bastankhah
+  wakes from the turbine layout (a fallback table for plants known only by
+  capacity), and availability, icing and electrical losses. Output is
+  `woof-energy.power.v1`: power, gross power, wake loss and capacity factor
+  per plant, with optional per-turbine series. The turbine library
+  (`woof/data/energy/turbine_library.json`, about 200 machines) derives from
+  the Open Energy Platform Wind Turbine Library (ODbL-1.0, (c) Reiner
+  Lemoine Institut) and is rebuilt by `tools/build_turbine_library.py`. See
+  `docs/energy-hindcast/power.md`.
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals

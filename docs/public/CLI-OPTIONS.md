@@ -686,6 +686,27 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--topology {wrf-nests,wrf-tiles,hex-swath}` | wrf-nests: sibling nests in one run; wrf-tiles: one parent run plus offline child tiles (no count limit); hex-swath: MPAS corridor mesh |
 | `--vram-gib` | size each domain for this many GiB |
 
+## `woof energy power`
+
+| argument | what it does |
+|---|---|
+| `FORECAST.nc` | woof-energy.forecast.v1 netCDF file |
+
+| option | what it does |
+|---|---|
+| `--assets ASSETS.geojson` | the woof-energy.assets.v1 document the sites came from: turbine models, rotors and plant membership (without it every turbine is generic and its own plant) |
+| `--availability` | availability factor in (0, 1] (default 1) |
+| `--electrical-losses` | electrical loss fraction, 0 to 0.5 (default 0.02) |
+| `--gust-shutdown` | also stop turbines when the forecast gust exceeds the gust limit |
+| `--gust-var NAME` | (time, site) gust variable in the forecast file (implies --gust-shutdown; default: the first of wind_speed_of_gust, wind_gust, gust, wind_gust_10m) |
+| `--hub-only` | always use hub-height wind, never the rotor-equivalent wind speed |
+| `--icing-loss FILE.nc[:VAR]` | netCDF with a (time, site) icing loss fraction on the forecast's axes (default variable icing_loss_fraction) |
+| `--library FILE.json` | turbine library replacing the built-in one (woof-energy.turbine-library.v1) |
+| `--matches MATCHES.json` | also write the per-turbine curve matches (woof-energy.turbine-matches.v1) |
+| `--output POWER.nc` | where to write the woof-energy.power.v1 netCDF |
+| `--per-turbine` | also write (time, turbine) power and wind series |
+| `--wake-model {jensen,bastankhah,none}` | wake model for plants with a turbine layout (default jensen) |
+
 ## `woof energy rating`
 
 | argument | what it does |
