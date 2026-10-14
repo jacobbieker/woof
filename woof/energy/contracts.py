@@ -43,6 +43,8 @@ ASSETS_SCHEMA = "woof-energy.assets.v1"
 SITES_SCHEMA = "woof-energy.sites.v1"
 PLAN_SCHEMA = "woof-energy.plan.v1"
 FORECAST_SCHEMA = "woof-energy.forecast.v1"
+#: The receipt ``--source auto`` records (:mod:`woof.energy.source_select`).
+SOURCE_CHOICE_SCHEMA = "woof-energy.source-choice.v1"
 
 #: Asset kinds, named after the OSM ``power=*`` values they come from.
 ASSET_KINDS = (
@@ -608,6 +610,11 @@ class Plan:
     sites_ref: dict | None = None
     notes: list[str] = field(default_factory=list)
     path: Path | None = field(default=None, compare=False)
+    #: The ``woof-energy.source-choice.v1`` receipt when ``--source auto``
+    #: chose ``source`` (:mod:`woof.energy.source_select`); None when the
+    #: source was named.  Written to the document only when present; not
+    #: part of plan equality (it carries the clock the choice was made at).
+    source_choice: dict | None = field(default=None, compare=False)
 
     def __post_init__(self):
         if self.topology not in TOPOLOGIES:
@@ -674,10 +681,14 @@ class Plan:
             record["footprint"] = [list(p) for p in domain.footprint]
             record["site_ids"] = list(domain.site_ids)
             domains.append(record)
-        return {"schema": PLAN_SCHEMA, "topology": self.topology,
-                "dx_m": self.dx_m, "start": self.start, "hours": self.hours,
-                "source": self.source, "sites": self.sites_ref,
-                "notes": list(self.notes), "domains": domains}
+        document = {"schema": PLAN_SCHEMA, "topology": self.topology,
+                    "dx_m": self.dx_m, "start": self.start,
+                    "hours": self.hours, "source": self.source,
+                    "sites": self.sites_ref, "notes": list(self.notes),
+                    "domains": domains}
+        if self.source_choice is not None:
+            document["source_choice"] = dict(self.source_choice)
+        return document
 
     @classmethod
     def from_json(cls, document: Mapping[str, Any], *,
@@ -701,9 +712,23 @@ class Plan:
                        domains=domains, source=document.get("source"),
                        sites_ref=document.get("sites"),
                        notes=list(document.get("notes") or []),
-                       path=Path(path) if path is not None else None)
+                       path=Path(path) if path is not None else None,
+                       source_choice=_source_choice(
+                           document.get("source_choice")))
         except KeyError as error:
             raise ContractError(f"plan document lacks {error}") from error
+
+
+def _source_choice(record: Any) -> dict | None:
+    """A plan's ``source_choice`` member, refused when not a receipt."""
+
+    if record is None:
+        return None
+    if not isinstance(record, Mapping) or record.get("schema") != \
+            SOURCE_CHOICE_SCHEMA:
+        raise ContractError(f"plan source_choice is not a "
+                            f"{SOURCE_CHOICE_SCHEMA} receipt")
+    return dict(record)
 
 
 def load_plan(path: str | Path) -> Plan:

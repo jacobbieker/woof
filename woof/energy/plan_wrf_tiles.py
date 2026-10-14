@@ -116,6 +116,8 @@ from woof.energy.contracts import (
     dump_plan,
     load_sites,
 )
+# Where --source auto writes its receipt, beside plan.json.
+from woof.energy.source_select import RECEIPT_FILE as SOURCE_CHOICE_FILE
 
 TOPOLOGY = "wrf-tiles"
 
@@ -129,6 +131,7 @@ DOWNSCALE_HEALTH_INTERVAL_S = 60.0
 
 #: Schema of the per-tile spec document written to ``tiles/<id>.json``.
 TILE_SCHEMA = "woof-energy.wrf-tile.v1"
+
 
 #: The step the planner prefers when it chooses the chain itself.
 DEFAULT_STEP_RATIO = 5
@@ -752,20 +755,88 @@ def tile_overrides(parent_cfg: dict, *, child_dx_m: float,
 # the plan
 
 
+def _chains(dx_m: float, parent_dx_m: float | None) -> list[tuple[int, ...]]:
+    """The refinement chains :func:`build_plan` tries, finest parent first."""
+
+    if parent_dx_m is not None:
+        total = float(parent_dx_m) / dx_m
+        if not math.isfinite(total) or abs(total - round(total)) > 1e-6 * max(total, 1.0):
+            raise TilePlanRefusal(
+                f"--parent-dx-m {parent_dx_m:g} is not a whole multiple of "
+                f"--dx-m {dx_m:g}; woof downscale refines by integer ratios")
+        return [factor_chain(int(round(total)))]
+    return [(DEFAULT_STEP_RATIO,) * steps
+            for steps in range(1, MAX_CHAIN_STEPS + 1)]
+
+
+def _parent_buffer_m(chain: Sequence[int], dx_m: float,
+                     corridor_m: float) -> float:
+    """The buffer ``woof domain`` is asked to put around the sites' box
+    for a parent refining by ``chain`` down to ``dx_m``."""
+
+    from woof.domain_wizard import _SPEC_BDY_WIDTH
+
+    pdx = dx_m * math.prod(chain)
+    margins = _level_margins(chain, pdx, corridor_m)
+    # The wizard's root keeps spec_bdy_width = 5; two more cells cover
+    # snapping and the minimum-span growth of a small tile.
+    parent_clearance = _SPEC_BDY_WIDTH + TERRAIN_BLEND_ROWS + SINT_STENCIL_ROWS
+    return margins[0] + (parent_clearance + 2) * pdx
+
+
+def _auto_source(sites: SiteSet, *, start: str, defaulted: bool,
+                 hours: float, dx_m: float, corridor_m: float,
+                 chain: Sequence[int], priority: Sequence[str] | None,
+                 now: datetime | None):
+    """``--source auto``: the selector's choice for these sites and the
+    parent ``chain`` would emit.
+
+    The coverage margin is that parent's own buffer
+    (:func:`_parent_buffer_m`) plus
+    :data:`woof.energy.source_select.PLANNER_SLACK_KM`; :func:`build_plan`
+    asks again for each coarser chain it falls back to.  A defaulted start
+    is searched back from the clock's newest cycle
+    (:func:`woof.energy.source_select.select_newest`).
+    """
+
+    from woof.domain_wizard import DEFAULT_MODEL_TOP_PA
+    from woof.energy.source_select import (PLANNER_SLACK_KM,
+                                           SourceSelectRefused,
+                                           select_newest, select_source)
+
+    arrays = sites.as_arrays()
+    region = _sites_region(arrays["lon"], arrays["lat"])
+    margin_km = (_parent_buffer_m(chain, dx_m, corridor_m) / 1000.0
+                 + PLANNER_SLACK_KM)
+    select = select_newest if defaulted else select_source
+    try:
+        return select(region, start, hours, p_top_pa=DEFAULT_MODEL_TOP_PA,
+                      priority=priority, now=now, margin_km=margin_km)
+    except SourceSelectRefused as error:
+        raise TilePlanRefusal(f"--source auto: {error}") from error
+
+
 def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                corridor_km: float = 2.0, parent_dx_m: float | None = None,
                start: str | None = None, hours: float = 24.0,
                source: str | None = None, card: str | None = None,
                vram_gib: float | None = None, max_domains: int | None = None,
-               nz: int | None = None, now: datetime | None = None) -> Plan:
+               nz: int | None = None, now: datetime | None = None,
+               source_priority: Sequence[str] | None = None) -> Plan:
     """Emit the domains for ``sites`` under ``outdir`` and return the plan
     (already written to ``outdir/plan.json``).
 
     ``now`` fixes the clock the source availability windows are judged
-    against (:func:`woof.energy.source_window.window_refusal`)."""
+    against (:func:`woof.energy.source_window.window_refusal`).
 
-    from woof.domain_wizard import _SPEC_BDY_WIDTH
+    ``source="auto"`` hands the choice to
+    :func:`woof.energy.source_select.select_source` (``source_priority``
+    replaces its default list) for the parent each chain would emit,
+    records its receipt in the plan's ``source_choice`` and writes it to
+    ``outdir/source-choice.json``."""
+
     from woof.energy.geometry import cover_with_rectangles
+    from woof.energy.source_select import is_auto, record_choice
     from woof.energy.source_window import (canonical_source,
                                            newest_landed_start, registry_gap,
                                            source_notes, window_refusal)
@@ -790,13 +861,26 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                               "stencil width)")
     start_text = _parse_start(start) if start is not None \
         else default_start(now)
+    chains = _chains(dx_m, parent_dx_m)
+    source_choice = None
+    if source_priority is not None and not is_auto(source):
+        raise TilePlanRefusal("--source-priority applies only with "
+                              "--source auto")
+    if is_auto(source):
+        source_choice = _auto_source(
+            sites, start=start_text, defaulted=start is None, hours=hours_f,
+            dx_m=dx_m, corridor_m=corridor_m, chain=chains[0],
+            priority=source_priority, now=now)
+        source = source_choice.source
+        start_text = source_choice.cycle.strftime("%Y-%m-%dT%H")
     if source is not None:
         gap = registry_gap(source)
         if gap is not None:
             raise TilePlanRefusal(gap)
         source = canonical_source(source)
-        if start is None:
-            # the newest cycle by the clock may not have landed yet
+        if start is None and source_choice is None:
+            # the newest cycle by the clock may not have landed yet (an
+            # auto choice already judged this cycle: its receipt binds it)
             start_text = newest_landed_start(
                 source, datetime.strptime(start_text, "%Y-%m-%dT%H"),
                 hours_f, now=now).strftime("%Y-%m-%dT%H")
@@ -806,17 +890,6 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         if refusal is not None:
             raise TilePlanRefusal(refusal)
     capacity, capacity_flags, card_note = _resolve_capacity(card, vram_gib)
-
-    if parent_dx_m is not None:
-        total = float(parent_dx_m) / dx_m
-        if not math.isfinite(total) or abs(total - round(total)) > 1e-6 * max(total, 1.0):
-            raise TilePlanRefusal(
-                f"--parent-dx-m {parent_dx_m:g} is not a whole multiple of "
-                f"--dx-m {dx_m:g}; woof downscale refines by integer ratios")
-        chains = [factor_chain(int(round(total)))]
-    else:
-        chains = [(DEFAULT_STEP_RATIO,) * steps
-                  for steps in range(1, MAX_CHAIN_STEPS + 1)]
 
     arrays = sites.as_arrays()
     lat = arrays["lat"]
@@ -835,12 +908,19 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     chain: tuple[int, ...] = ()
     for candidate in chains:
         pdx = dx_m * math.prod(candidate)
-        margins = _level_margins(candidate, pdx, corridor_m)
-        # The wizard's root keeps spec_bdy_width = 5; two more cells cover
-        # snapping and the minimum-span growth of a small tile.
-        parent_clearance = (_SPEC_BDY_WIDTH + TERRAIN_BLEND_ROWS
-                            + SINT_STENCIL_ROWS)
-        buffer_m = margins[0] + (parent_clearance + 2) * pdx
+        buffer_m = _parent_buffer_m(candidate, dx_m, corridor_m)
+        if source_choice is not None and candidate != chains[0]:
+            # a coarser parent reaches further: ask again for its buffer,
+            # at the cycle already chosen (keeping the search's note)
+            searched = tuple(note for note in source_choice.notes
+                             if note.startswith("default start:"))
+            source_choice = _auto_source(
+                sites, start=start_text, defaulted=False, hours=hours_f,
+                dx_m=dx_m, corridor_m=corridor_m, chain=candidate,
+                priority=source_priority, now=now)
+            source_choice = dataclasses.replace(
+                source_choice, notes=source_choice.notes + searched)
+            source = source_choice.source
         try:
             parent = _emit_parent(
                 outdir=outdir, region=region, parent_dx_m=pdx,
@@ -870,8 +950,10 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
         for stale in tiles_dir.glob(pattern):
             stale.unlink()
     # A refused re-plan must not leave an older plan.json pointing at the
-    # tile specs just removed and the parent just re-emitted.
+    # tile specs just removed and the parent just re-emitted, nor the
+    # source-choice receipt that plan carried.
     (outdir / "plan.json").unlink(missing_ok=True)
+    (outdir / SOURCE_CHOICE_FILE).unlink(missing_ok=True)
 
     counter = {"leaf": 0, "inter": 0}
     all_tiles: list[_Tile] = []
@@ -1052,11 +1134,12 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                          explicit_start=start is not None)
     if source is not None:
         notes += source_notes(source)
+    receipt = record_choice(source_choice, outdir, notes)
     plan = Plan(topology=TOPOLOGY, dx_m=dx_m, start=start_text,
                 hours=float(hours_i), domains=domains, source=source,
                 sites_ref={"count": len(sites),
                            "content_sha256": _content_sha256(sites)},
-                notes=notes)
+                notes=notes, source_choice=receipt)
     dump_plan(plan, outdir / "plan.json")
     return plan
 
@@ -1483,6 +1566,8 @@ def _plan_notes(*, parent: _Parent, chain: tuple[int, ...], dx_m: float,
 def main(args) -> int:
     """``woof energy plan --topology wrf-tiles``."""
 
+    from woof.energy.source_select import choice_summary
+
     sites_path = Path(args.sites)
     outdir = Path(args.outdir)
     sites = load_sites(sites_path)
@@ -1492,7 +1577,8 @@ def main(args) -> int:
             corridor_km=args.corridor_km, parent_dx_m=args.parent_dx_m,
             start=args.start, hours=args.hours, source=args.source,
             card=args.card, vram_gib=args.vram_gib,
-            max_domains=args.max_domains, nz=args.nz)
+            max_domains=args.max_domains, nz=args.nz,
+            source_priority=getattr(args, "source_priority", None))
     except EnergyNotImplemented as error:
         import sys
 
@@ -1517,6 +1603,10 @@ def main(args) -> int:
         "start": plan.start,
         "hours": plan.hours,
         "dx_m": plan.dx_m,
+        "source": plan.source,
+        **({} if plan.source_choice is None else {
+            "source_choice": choice_summary(plan.source_choice),
+            "source_choice_receipt": str(outdir / SOURCE_CHOICE_FILE)}),
         "parent": {
             "config": str(outdir / parent.config),
             "wps_namelist": str(outdir / parent.wps_namelist),
