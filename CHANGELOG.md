@@ -4,6 +4,34 @@
 
 New:
 
+- `woof multi-run` can now pack several ordinary forecasts onto one GPU. Set
+  `[devices] runs_per_gpu = N|"auto"` in the plan or pass
+  `--runs-per-gpu N|auto`. `auto` allows at most 8 runs per card. The default
+  of 1 is the old behaviour: a second run on a card is refused.
+  Each run is priced before anything is claimed, the way `woof check` and its
+  own `woof run` supervisor price it. A run starts when three things hold:
+  its card has fewer than N of the plan's runs; the live siblings' priced
+  peaks plus its own plus a margin fit the card's NVML total; and its priced
+  peak plus the margin fit the card's measured free memory, less the growth
+  its siblings may still make. The margin is `mem_margin_gib` or
+  `--mem-margin-gib`, default 1 GiB.
+  Memory used by other processes, such as a forecast already on the card,
+  reduces what is admitted. A run that does not fit waits for a sibling to
+  finish. A run that does not fit while none of the plan's runs hold its card
+  is refused as `not_admitted`, and the other runs continue. A run whose priced
+  peak can never fit its card refuses the whole plan before anything is
+  claimed, naming the run.
+  Each child keeps its own caches and gets its own `WOOF_GPU_LOCK_ROOT`, and
+  its supervisor still runs the measured shared-GPU admission itself. The
+  multi-run holds each packed card's machine-wide UUID lock, so no other woof
+  run starts beside the packed runs. A card whose lock another forecast
+  already holds is shared by measurement.
+  `--mps` (or `[devices] mps = true`) runs the CUDA MPS control daemon.
+  The receipt's `packing` block records card totals, priced peaks and their
+  basis, and every admission event with measured used and free memory.
+  The MPS daemon code now lives in `woof/gpu_packing.py`, shared with
+  `woof energy worker --mps`. See docs/public/HARDWARE.md, "Several runs on
+  one card".
 - `woof energy worker --slots-per-gpu N|auto` runs several hindcast jobs
   on one GPU. A slot claims only a job whose declared
   `resources.gpu_mem_gib` fits beside the card's live reservations plus a

@@ -154,6 +154,10 @@ from typing import Any, Callable
 from woof.energy.packing import (AUTO_MAX_SLOTS_PER_GPU,
                                  DEFAULT_MEM_MARGIN_GIB, SLOTS_AUTO,
                                  parse_slots_per_gpu)
+from woof.gpu_packing import (MPS_COMMAND_TIMEOUT_S,  # noqa: F401
+                              MPS_CONTROL, MPS_PIPE_PATH_MAX)
+from woof.gpu_packing import MPSUnavailable as _MPSUnavailable
+from woof.gpu_packing import MpsDaemon as _MpsDaemon
 from woof.energy.workqueue import (
     PERMANENT_EXIT_CODES, Claim, JobSpecError, LeaseLost, QueueError,
     WorkQueue, declared_gpu_mem_gib, iso_utc, tail_text)
@@ -166,13 +170,9 @@ RESERVATION_SCHEMA = "woof-energy.worker-reservation.v1"
 #: ``--slots-per-gpu auto``, its slot cap and the default memory margin
 #: (GiB) live in :mod:`woof.energy.packing`, shared with the estimate and
 #: the deploy renderers.
-#: The MPS control binary ``--mps`` starts.
-MPS_CONTROL = "nvidia-cuda-mps-control"
-#: Longest ``<pipe dir>/control`` socket path accepted (AF_UNIX paths
-#: stop at 107 bytes on Linux; the rest is margin).
-MPS_PIPE_PATH_MAX = 100
-#: Seconds an MPS control command may take before it is a failure.
-MPS_COMMAND_TIMEOUT_S = 30.0
+#: The MPS control binary ``--mps`` starts, the longest control-socket
+#: path accepted and the control command timeout live in
+#: :mod:`woof.gpu_packing`, shared with ``woof multi-run --mps``.
 
 #: File in a slot's work directory holding the running runner's
 #: process-group id (the parent kills it on a second signal).
@@ -230,7 +230,7 @@ class PackingError(WorkerError, ValueError):
     """``--slots-per-gpu`` and its memory flags cannot be honoured as asked."""
 
 
-class MPSUnavailable(WorkerError):
+class MPSUnavailable(WorkerError, _MPSUnavailable):
     """``--mps`` was asked for and the MPS control daemon cannot run."""
 
 
@@ -655,122 +655,17 @@ def card_memory_gib(gpu, override: float | None) -> tuple[float, str]:
     return total / 1024 ** 3, "NVML memory.total"
 
 
-class MpsDaemon:
-    """The CUDA MPS control daemon a packed worker uses (module docstring)."""
+class MpsDaemon(_MpsDaemon):
+    """The CUDA MPS control daemon a packed worker uses (module docstring).
 
-    def __init__(self, root: Path | None, devices: list[str], *,
-                 thread_percentage: int | None = None):
-        external = os.environ.get("CUDA_MPS_PIPE_DIRECTORY")
-        self.external = bool(external)
-        if external:
-            self.pipe_dir = Path(external)
-            self.log_dir = Path(os.environ.get("CUDA_MPS_LOG_DIRECTORY")
-                                or self.pipe_dir)
-        else:
-            root = Path(root) if root is not None else (
-                Path(tempfile.gettempdir()) / f"woof-mps-{os.getpid()}")
-            self.pipe_dir = root / "pipe"
-            self.log_dir = root / "log"
-        self.devices = list(devices)
-        self.thread_percentage = thread_percentage
-        self.control: str | None = None
-        self.owned = False
-        self.started = False
-        self.reused = False
+    :class:`woof.gpu_packing.MpsDaemon`, shared with ``woof multi-run
+    --mps``; here its refusal is a :class:`MPSUnavailable` (a
+    ``WorkerError``) and its notes carry the worker's prefix."""
 
-    def _env(self) -> dict[str, str]:
-        env = dict(os.environ)
-        env.update(self.environment())
-        env.pop("CUDA_MPS_ACTIVE_THREAD_PERCENTAGE", None)
-        if self.devices:
-            env["CUDA_VISIBLE_DEVICES"] = ",".join(self.devices)
-        return env
+    unavailable_error = MPSUnavailable
 
-    def environment(self) -> dict[str, str]:
-        """What every slot (and so every runner) gets."""
-
-        env = {"CUDA_MPS_PIPE_DIRECTORY": str(self.pipe_dir),
-               "CUDA_MPS_LOG_DIRECTORY": str(self.log_dir)}
-        if self.thread_percentage is not None:
-            env["CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"] = str(
-                self.thread_percentage)
-        return env
-
-    def _command(self, *argv: str, stdin: str | None = None
-                 ) -> subprocess.CompletedProcess:
-        assert self.control is not None
-        return subprocess.run([self.control, *argv], input=stdin,
-                              capture_output=True, text=True,
-                              env=self._env(), timeout=MPS_COMMAND_TIMEOUT_S)
-
-    def answers(self) -> bool:
-        try:
-            return self._command(stdin="get_server_list\n").returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-
-    def start(self) -> "MpsDaemon":
-        self.control = shutil.which(MPS_CONTROL)
-        if self.control is None:
-            raise MPSUnavailable(
-                f"--mps needs {MPS_CONTROL} on PATH (the NVIDIA driver's MPS "
-                "control daemon; in a container, the NVIDIA container "
-                "toolkit mounts it with the compute and utility "
-                "capabilities); none was found")
-        socket_path = str(self.pipe_dir / "control")
-        if len(socket_path) > MPS_PIPE_PATH_MAX:
-            raise MPSUnavailable(
-                f"the MPS control socket {socket_path} is "
-                f"{len(socket_path)} characters, over the "
-                f"{MPS_PIPE_PATH_MAX} a UNIX socket path allows here; give "
-                "a shorter --mps-dir")
-        if self.external:
-            if not self.answers():
-                raise MPSUnavailable(
-                    f"CUDA_MPS_PIPE_DIRECTORY={self.pipe_dir} is set but no "
-                    "MPS control daemon answers there")
-            self.reused = True
-            return self
-        self.pipe_dir.mkdir(parents=True, exist_ok=True)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        if (self.pipe_dir / "control").exists() and self.answers():
-            self.reused = True
-            return self
-        try:
-            started = self._command("-d")
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise MPSUnavailable(f"{MPS_CONTROL} -d failed: {error}") \
-                from error
-        if started.returncode != 0:
-            raise MPSUnavailable(
-                f"{MPS_CONTROL} -d exited {started.returncode}: "
-                f"{(started.stderr or started.stdout).strip()[-500:]}")
-        self.owned = self.started = True
-        deadline = time.monotonic() + MPS_COMMAND_TIMEOUT_S
-        while not self.answers():
-            if time.monotonic() >= deadline:
-                self.stop()
-                raise MPSUnavailable(
-                    f"the MPS control daemon started at {self.pipe_dir} "
-                    "does not answer get_server_list")
-            time.sleep(0.2)
-        return self
-
-    def stop(self) -> None:
-        if not self.owned:
-            return
-        self.owned = False
-        try:
-            self._command(stdin="quit\n")
-        except (OSError, subprocess.TimeoutExpired) as error:
-            _note(f"MPS control daemon did not stop cleanly ({error})")
-
-    def summary(self) -> dict[str, Any]:
-        return {"pipe_dir": str(self.pipe_dir), "log_dir": str(self.log_dir),
-                "control": self.control, "started_here": self.started,
-                "reused_running_daemon": self.reused,
-                "external": self.external,
-                "active_thread_percentage": self.thread_percentage}
+    def note(self, message: str) -> None:
+        _note(message)
 
 
 # --------------------------------------------------------------------------

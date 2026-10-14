@@ -1560,7 +1560,12 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--mem-margin-gib GiB` | card memory kept free beside packed runs' priced peaks (default 1; only with --runs-per-gpu above 1 or auto) |
+| `--mps, --no-mps` | start (or reuse) the CUDA MPS control daemon so packed runs' kernels share the card instead of time-slicing; stopped on exit if started here (overrides the plan's [devices] mps) |
+| `--mps-active-thread-percentage P` | CUDA_MPS_ACTIVE_THREAD_PERCENTAGE for each run (with --mps) |
+| `--mps-dir DIR` | where the MPS pipe and log directories go (with --mps) |
 | `--preflight {estimate,alloc,off}` | override the plan's woof check mode: estimate, alloc, or off |
+| `--runs-per-gpu N\|auto` | let up to N runs (auto: up to 8) share one GPU, each admitted when its priced forecast peak plus the margin fits the card's measured free memory beside its siblings; runs that do not fit wait for a sibling to finish (overrides the plan's [devices] runs_per_gpu; default 1, one run per GPU) |
 | `--summary SUMMARY.json` | summary path relative to the plan (default PLAN.summary.json) |
 
 ## `woof obs`

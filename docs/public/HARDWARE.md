@@ -75,7 +75,9 @@ those intervals; supply a narrower input window to reduce them.
 A prepared single-domain forecast can use several cards through
 [`[devices]`](MULTIGPU.md). On a host with several cards,
 `woof multi-run` starts any number of independent production runners at
-once, with one unique physical GPU per process. The convenient form invokes
+once, with one unique physical GPU per process (or several per GPU, admitted
+by memory: [Several runs on one card](#several-runs-on-one-card)). The
+convenient form invokes
 `woof run`:
 
 ```toml
@@ -245,6 +247,103 @@ heartbeat and failure capsule even if the original directory is restored
 before validation. The store path is collision/isolation checked and its SHA
 entries are listed in the summary. Ordinary single `woof run` invocations
 keep their historical direct-input behavior and do not create this store.
+
+### Several runs on one card
+
+Small forecasts rarely fill a card. A plan can pack several runs onto one
+GPU instead of refusing a second run on it:
+
+```toml
+schema = "gpuwm.multi-run-plan/v1"
+
+[devices]               # the plan's packing, not an experiment's [devices]
+runs_per_gpu = 3        # or "auto" (at most 8 per card); default 1
+mem_margin_gib = 1.0    # kept free beside the runs' priced peaks
+# mps = true            # CUDA MPS, see below
+
+[[run]]
+name = "small-a"
+device = 0
+config = "configs/small-a.toml"
+...
+
+[[run]]
+name = "small-b"
+device = 0              # the same card
+...
+```
+
+`woof multi-run plan.toml --runs-per-gpu N|auto` (with `--mem-margin-gib`,
+`--mps/--no-mps`, `--mps-dir` and `--mps-active-thread-percentage`) does the
+same from the command line, and a flag wins over the plan. The receipt names
+the source of each setting. The default, `runs_per_gpu = 1`, is the behaviour
+above, unchanged: two runs that resolve to one card are refused. A margin
+or MPS setting without packing is refused, not ignored.
+
+Each run is priced before anything is claimed. A config run is priced with
+`woof.supervisor.priced_reservation_bytes` on the captured config bytes. This
+is the forecast peak envelope `woof check` reviews, and the run's own
+supervisor prices it again at launch. A module run is priced with its prepared
+runner's own reservation. Each card's budget is its NVML `memory.total`. A run
+whose priced peak plus the margin is larger than its card's total can never
+be admitted there. The whole plan is then refused before any directory is
+claimed, and the refusal names every such run. A card NVML cannot size is
+also refused.
+
+Runs on one card start in plan order. The run at the head of a card's queue
+starts only when all three of these hold:
+
+1. fewer than `runs_per_gpu` of this plan's runs hold the card;
+2. the live siblings' priced peaks, plus this run's priced peak, plus the
+   margin, fit the card's total;
+3. this run's priced peak plus the margin fit the card's measured free memory
+   (NVML total minus device-wide used, the figure `woof run` admits against).
+   Each sibling's outstanding growth is taken off first. That is its priced
+   peak minus the memory NVML attributes to its process tree, never below zero.
+
+Memory held by processes the multi-run does not own, such as another forecast
+already on the card, is part of the measured figure, so it reduces what is
+admitted. A run that does not fit waits. It is checked again as soon as a
+sibling on its card finishes, and every 5 s for memory freed by other
+processes. A run that does not fit while none of the plan's runs hold its
+card is refused as `not_admitted`. Only processes the plan does not own could
+free that memory, so waiting would never end. The other runs carry on, and
+the aggregate exit is 1. The one exception is the first 5 s after a sibling
+on the card finishes: its memory may not be released yet, so the run waits
+and the card is measured again before any refusal. A run that cannot be
+priced runs alone on its card. Its own supervisor still prices it against
+measured free memory. `preflight = "alloc"` checks allocate the priced peak,
+so they are admitted by the same rule before the forecasts. `"estimate"`
+checks hold no forecast memory and are held only to `runs_per_gpu`.
+
+Every packed child keeps its own output, scratch, TMP, CuPy and CUDA caches.
+It also gets its own `WOOF_GPU_LOCK_ROOT` under the machine-wide lock root, so
+the siblings' `woof run` UUID locks do not refuse each other. These per-run
+lock roots are removed when every child has finished. The multi-run itself
+holds each packed card's machine-wide UUID lock until the end. Another
+`woof run`, energy worker or exclusive multi-run therefore does not start on
+the card beside packed runs it cannot see growing. If another woof process
+already holds that lock, for example a forecast started earlier, the card is
+shared by measurement. The receipt's `shared_gpu_lock` records which case
+applied. Every child's supervisor still sees its siblings (and any other
+process) as CUDA co-tenants. It runs the shared-GPU admission on its own
+priced reservation before its worker starts. The receipt's
+`packing` block records the rule, the margin, each card's total and runs with
+their priced peaks and basis, and every admission event: verdict, rule,
+measured used and free, sibling growth, headroom and reason. Each run's
+`packing.admission` holds the decision that started it, or that refused it.
+
+Without MPS, kernels from separate processes time-slice on the card. Packing
+then hides launch gaps, host work and I/O, but two runs' kernels never run side
+by side. `--mps` (or `mps = true`) starts `nvidia-cuda-mps-control -d` under
+`--mps-dir`, or reuses a daemon already answering there or at
+`CUDA_MPS_PIPE_DIRECTORY`. An `--mps-dir` inside any plan path is refused.
+It gives every child the MPS variables and stops
+the daemon on exit if it was started here. The daemon is left running while a
+child's completion was not observed (Ctrl-C). The command refuses when the
+control binary is missing. This is the same daemon code as
+`woof energy worker --mps` (`woof/gpu_packing.py`). Packing and MPS have not
+been timed on hardware by this tree.
 
 ### Small Windows cards are MEASURED now (2026-08-19, RTX 3080 10 GiB)
 
