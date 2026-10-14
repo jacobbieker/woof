@@ -11,6 +11,7 @@ profile, shape (time, site, height):
     ``THETA``      potential temperature (T + 300), K
     ``PRES``       full pressure (P + PB), Pa
     ``QVAPOR``, ``QCLOUD``, ``QRAIN``, ``QICE``, ``QSNOW``, ``QGRAUP``  kg/kg
+    ``QNCLOUD``    cloud droplet number, kg-1 (double-moment cloud only)
 surface, shape (time, site):
     ``U10``, ``V10`` earth-relative; ``T2``, ``Q2``, ``PSFC``, ``SWDOWN``,
     ``SWDDNI``, ``SWDDIF``, ``RAINNC``, ``RAINC``, ``COSZEN`` as written.
@@ -71,7 +72,7 @@ from typing import Sequence
 import numpy as np
 
 PROFILE_VARS = ("U", "V", "W", "THETA", "PRES", "QVAPOR", "QCLOUD", "QRAIN",
-                "QICE", "QSNOW", "QGRAUP")
+                "QICE", "QSNOW", "QGRAUP", "QNCLOUD")
 SURFACE_VARS = ("U10", "V10", "T2", "Q2", "PSFC", "SWDOWN", "SWDDNI",
                 "SWDDIF", "RAINNC", "RAINC", "COSZEN")
 
@@ -101,7 +102,7 @@ _SOURCE_DIMS = {
     "PHB": ("Time", "bottom_top_stag", "south_north", "west_east"),
     "T": _MASS3, "P": _MASS3, "PB": _MASS3,
     **{name: _MASS3 for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE",
-                                 "QSNOW", "QGRAUP")},
+                                 "QSNOW", "QGRAUP", "QNCLOUD")},
     **{name: _PLANE for name in ("XLAT", "XLONG", "HGT", "SINALPHA",
                                  "COSALPHA", *SURFACE_VARS)},
     "Times": ("Time", "DateStrLen"),
@@ -119,7 +120,7 @@ _KEY_SOURCES: dict[str, tuple[str, ...]] = {
     "THETA": ("T",),
     "PRES": ("P", "PB"),
     **{name: (name,) for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE",
-                                  "QSNOW", "QGRAUP")},
+                                  "QSNOW", "QGRAUP", "QNCLOUD")},
     "U10": ("U10", "V10", *_ROTATION),
     "V10": ("U10", "V10", *_ROTATION),
     **{name: (name,) for name in ("T2", "Q2", "PSFC", "SWDOWN", "SWDDNI",
@@ -131,7 +132,8 @@ _SCALAR_PROFILES = {
     "THETA": ("T", None, 300.0),
     "PRES": ("P", "PB", 0.0),
     **{name: (name, None, 0.0) for name in ("QVAPOR", "QCLOUD", "QRAIN",
-                                            "QICE", "QSNOW", "QGRAUP")},
+                                            "QICE", "QSNOW", "QGRAUP",
+                                            "QNCLOUD")},
 }
 #: Global attributes that must agree across the files of one domain.
 _GRID_ATTRS = ("MAP_PROJ", "TRUELAT1", "TRUELAT2", "STAND_LON", "CEN_LAT",

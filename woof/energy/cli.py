@@ -49,6 +49,7 @@ _STATUSES = ("operating", "construction", "pre-construction", "announced",
 _INVENTORY_DATASETS = ("uswtdb", "emodnet", "gem", "osm")
 #: ``woof energy deploy render --backend``; woof.energy.deploy.BACKENDS.
 _DEPLOY_BACKENDS = ("aws-batch", "gcp-batch", "k8s", "slurm")
+_PRODUCTS = ("dlr", "icing", "wind-power", "pv-power", "turbine-icing")
 
 
 def _bbox(value: str) -> tuple[float, float, float, float]:
@@ -503,7 +504,7 @@ def _register_rating(sub) -> None:
     p.add_argument("--products", type=_choices_list(_PRODUCTS, "--products"),
                    default=_PRODUCTS,
                    help="products to compute (comma list; default "
-                        "dlr,icing,wind-power,pv-power)")
+                        "dlr,icing,wind-power,pv-power,turbine-icing)")
     p.add_argument("-o", "--output", required=True, metavar="PRODUCTS.nc",
                    help="where to write the products netCDF")
     p.set_defaults(func=_dispatch("woof.energy.products"))

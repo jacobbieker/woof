@@ -133,6 +133,7 @@ REQUIREMENTS: dict[str, tuple[tuple[str, ...], ...]] = {
     "rain_mixing_ratio": (("QRAIN",),),
     "ice_mixing_ratio": (("QICE",),),
     "snow_mixing_ratio": (("QSNOW",),),
+    "cloud_number_mixing_ratio": (("QNCLOUD",),),
     "t2": (("T2",),),
     "q2": (("Q2",),),
     "rh2": (("T2", "Q2", "PSFC"),),
@@ -166,6 +167,9 @@ METHOD_NOTES: dict[str, str] = {
            f"{SATURATION_FORMULA}; clipped to [0, 100]",
     "precipitation_rate": "d(RAINNC + RAINC)/dt over the interval ending at "
                           "each valid time; NaN at the first time",
+    "cloud_number_mixing_ratio": "QNCLOUD as written (Thompson mp_physics=28 "
+                                 "and other double-moment cloud schemes); "
+                                 "absent for single-moment cloud water",
 }
 
 
@@ -496,7 +500,8 @@ def derive_domain(result, choice: Mapping[str, tuple[str, ...]], *,
                 notes("relative_humidity",
                       f"{clipped} value(s) outside [0, 100] clipped")
         elif name in ("cloud_liquid_mixing_ratio", "rain_mixing_ratio",
-                      "ice_mixing_ratio", "snow_mixing_ratio"):
+                      "ice_mixing_ratio", "snow_mixing_ratio",
+                      "cloud_number_mixing_ratio"):
             out[name] = need(profile, keys[0])
         elif name in ("t2", "q2", "u10", "v10", "psfc"):
             out[name] = need(surface, keys[0])

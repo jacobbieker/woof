@@ -78,6 +78,19 @@ New:
   bounded, jittered retries, so no write is lost, and re-runs are
   idempotent. `woof energy icechunk verify` reports the snapshot and how
   much of the axis is written. See `docs/energy-hindcast/icechunk.md`.
+- `woof energy rating --products turbine-icing` estimates wind-turbine
+  icing at each turbine's hub height. It reports liquid water content, the
+  droplet median volume diameter (from Thompson `QNCLOUD`, or a documented
+  default droplet number) and meteorological icing. It accretes ice
+  (Makkonen, with Finstad collision efficiency) on the ISO 12494 reference
+  collector, which gives instrumental icing and the ISO class, and on a
+  rotating-blade proxy, which gives rotor icing. It also reports the IEA
+  Wind Task 19 ice class and an uncalibrated production-loss estimate.
+  `woof.energy.icing_turbine.turbine_icing_dataset` runs the same model on
+  wrfout or Icechunk grids (xarray in and out, dask- and CuPy-capable,
+  chunked hindcasts continue exactly). `forecast.v1` gains
+  `cloud_number_mixing_ratio`, sampled from `QNCLOUD`. See
+  `docs/energy-hindcast/icing.md`.
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals

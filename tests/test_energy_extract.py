@@ -46,7 +46,7 @@ def fake_result(times, lat, heights, *, profile_vars=PROFILE_VARS,
     base = {
         "U": u, "V": v, "W": 0.1, "THETA": theta, "PRES": pres, "QVAPOR": qv,
         "QCLOUD": 1e-5, "QRAIN": 2e-5, "QICE": 3e-6, "QSNOW": 4e-6,
-        "QGRAUP": 0.0,
+        "QGRAUP": 0.0, "QNCLOUD": 1.0e8,
     }
     profile = {k: np.full((nt, ns, nh), base[k], dtype=np.float64)
                for k in profile_vars}
