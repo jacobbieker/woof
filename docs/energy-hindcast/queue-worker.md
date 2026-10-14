@@ -70,12 +70,42 @@ S3-compatible stores work if they implement conditional writes
 - **Clocks.**  Expiry uses each host's wall clock, so hosts need NTP;
   the defaults (15 min lease, 2 min heartbeat) leave minutes of margin.
 
+## Dependencies
+
+A job document may carry `depends_on`, a list of job ids that must finish
+first. The hindcast planned with `--forcing-cache` uses it: each forecast
+job depends on the prefetch job (`kind: prefetch`, id
+`prefetch-<source>-<YYYYMMDDTHH>Z-<sha12>`) that fetches its cycle into
+the forcing cache ([forcing-cache.md](forcing-cache.md)).
+
+- A job is claimed only when every dependency **that is queued** is
+  `done` or `dead`. A dead prefetch does not block its cycle: its jobs
+  run and fetch their own forcing. A dependency that was never pushed
+  does not block either, so `push` pushes the `kind: prefetch` documents
+  of a batch before the others.
+- Fresh `prefetch-` jobs are tried before other fresh jobs, so a fleet
+  fetches a cycle before it starts that cycle's forecasts.
+- Job documents are immutable, so each worker reads a job's
+  `depends_on` once and keeps it (an id and a short list per job); a claim
+  makes at most 256 such first reads, and the document read for the
+  dependency check is reused by the claim itself.
+- `push` refuses a `depends_on` that is not a list of job ids or that
+  names the job itself (`JobSpecError`, exit 2).
+- `status` counts a waiting job as `pending`.
+
+A document without `depends_on` is claimed exactly as before, and the
+default runner (`woof energy hindcast run-local {job}`) runs both kinds:
+it dispatches on `kind`.
+
 ## Setting up a queue
 
 ```bash
 woof energy queue init s3://bkt/wf2024/queue --max-attempts 3 --lease-s 900
 woof energy queue push s3://bkt/wf2024/queue jobs/
 ```
+
+A hindcast directory keeps each job in `jobs/<id>/job.json`; push them
+with a glob (`hc/jobs/*/job.json`), prefetch jobs included.
 
 `init` is idempotent with the same settings and refuses different ones
 (`QueueConfigConflict`).  `push` takes files or directories of `*.json`,

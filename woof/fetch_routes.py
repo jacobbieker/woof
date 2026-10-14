@@ -2796,6 +2796,45 @@ def request_cached(plan: FetchPlan, out: Path) -> bool:
                for obj in plan.objects)
 
 
+def adopt_verified_objects(plan: FetchPlan, out: Path,
+                           entries: Mapping[str, Mapping[str, object]]) -> int:
+    """Record objects copied into OUT as this request's own receipts.
+
+    For a directory filled from another fetch of the SAME request (the
+    energy hindcast's forcing cache copies a cycle's objects to each
+    job's download folder): writes the recovery request and, for each
+    planned object whose relpath ENTRIES names, the per-object receipt
+    :func:`run_plan` writes after a transfer, in the same form.  ENTRIES
+    maps relpath -> the other fetch's manifest entry (name, bytes,
+    sha256, url, endpoint).
+
+    Nothing is trusted by this: the next fetch into OUT reuses an object
+    only when its size, leading magic, end marker and sha256 still match
+    the receipt (:func:`_reusable_entry`), and moves it otherwise.  A
+    directory recorded for a different request is refused
+    (:func:`check_prior_request`).  Returns the receipts written.
+    """
+
+    out = _io_path(Path(out))
+    out.mkdir(parents=True, exist_ok=True)
+    check_prior_request(out, plan)
+    identity = _request_identity(plan)
+    _write_json(out / _RECOVERY_REQUEST_NAME, {
+        "schema": _RECOVERY_SCHEMA, "request": identity})
+    (out / _RECOVERY_DIRECTORY).mkdir(exist_ok=True)
+    written = 0
+    for obj in plan.objects:
+        entry = entries.get(obj.relpath)
+        if entry is None:
+            continue
+        _write_json(_recovery_path(out, obj), {
+            "request": identity, "key": obj.key,
+            "file": {**dict(entry), "relpath": obj.relpath, "role": obj.role,
+                     "lead": obj.lead, "reused": False}})
+        written += 1
+    return written
+
+
 #: What an unpinned request records where it used to record one host.
 #:
 #: The guard below exists to stop two different CYCLES publishing one
@@ -3589,5 +3628,5 @@ __all__ = [
     "write_handoff", "SOURCE_ROOT_FORMATS", "local_input_remedy",
     "local_prep_line", "sniff_format", "source_root_layout",
     "ROUTE_LAYOUTS", "check_listed_run", "list_run_directory", "listed_head",
-    "refuse_unheld_plan",
+    "refuse_unheld_plan", "adopt_verified_objects", "request_cached",
 ]

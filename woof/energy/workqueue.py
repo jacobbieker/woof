@@ -56,6 +56,17 @@ What is pinned:
 * **Time is wall-clock UTC seconds** from every host.  Hosts must keep
   their clocks synchronised (NTP) to well inside ``lease_s``; the defaults
   leave minutes of margin.
+* **Dependencies.**  A job document may carry ``depends_on``: job ids that
+  must finish first (the hindcast's forecast jobs name the prefetch job
+  that fills the forcing cache for their cycle).  A job is claimed only
+  when every dependency that is queued is ``done`` or ``dead``: a dead
+  prefetch does not hold its cycle hostage, its forecast jobs then fetch
+  for themselves.  A dependency that is not queued does not block, so
+  ``push`` pushes ``kind: prefetch`` jobs of a batch first.  Job
+  documents are immutable, so each worker reads a job's dependencies once
+  (at most :data:`MAX_DEPENDENCY_READS_PER_CLAIM` new reads per claim) and
+  tries ``prefetch-`` jobs before the others.  A document without
+  ``depends_on`` claims exactly as before.
 
 Queue-level refusals raise a named :class:`QueueError` subclass; nothing
 is coerced.
@@ -110,6 +121,14 @@ MAX_LEASE_READS_PER_CLAIM = 64
 
 #: Error tail carried in failed/ and dead/ documents.
 ERROR_TAIL_BYTES = 4000
+
+#: Job documents a claim reads at most to learn their ``depends_on``
+#: (each is read once per worker; documents are immutable).
+MAX_DEPENDENCY_READS_PER_CLAIM = 256
+
+#: Ids of the jobs that unblock others (the hindcast's prefetch jobs,
+#: :data:`woof.energy.forcing_cache.PREFETCH_ID_PREFIX`); tried first.
+PREFETCH_ID_PREFIX = "prefetch-"
 
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_LEASE_S = 900.0
@@ -653,7 +672,23 @@ def job_from_document(document: Any, *, schema: str = JOB_SCHEMA,
         raise JobSpecError(
             f"{source}: job_id {job_id!r} must match "
             f"{JOB_ID_PATTERN.pattern} (it becomes an object key)")
+    depends_on = document.get("depends_on")
+    if depends_on is not None:
+        if (not isinstance(depends_on, list) or not all(
+                isinstance(d, str) and JOB_ID_PATTERN.fullmatch(d)
+                for d in depends_on)):
+            raise JobSpecError(f"{source}: depends_on must be a list of job "
+                               f"ids; got {depends_on!r}")
+        if job_id in depends_on:
+            raise JobSpecError(f"{source}: job {job_id!r} depends on itself")
     return job_id, document
+
+
+def dependencies_of(document: dict[str, Any]) -> tuple[str, ...]:
+    """A job document's ``depends_on`` ids (empty when it has none)."""
+
+    raw = document.get("depends_on") or ()
+    return tuple(d for d in raw if isinstance(d, str))
 
 
 def read_job_files(paths: Iterable[str | Path], *,
@@ -737,6 +772,9 @@ class WorkQueue:
         self.clock = clock
         self._settings: QueueSettings | None = None
         self.last_view: dict[str, set[str]] | None = None
+        # job id -> depends_on, read once (job documents are immutable).
+        self._dependencies: dict[str, tuple[str, ...]] = {}
+        self._last_document: tuple[str, bytes] | None = None
 
     @classmethod
     def open(cls, url: str, **clients) -> "WorkQueue":
@@ -866,13 +904,22 @@ class WorkQueue:
         finished = view["done"] | view["dead"]
         fresh = sorted(view["jobs"] - view["leases"] - finished)
         rng.shuffle(fresh)
+        # Jobs that unblock others first; the shuffle holds within each.
+        fresh.sort(key=lambda j: not j.startswith(PREFETCH_ID_PREFIX))
+        budget = [MAX_DEPENDENCY_READS_PER_CLAIM]
         for job_id in fresh:
+            if self.waiting_on(job_id, view, budget=budget,
+                               finished=finished) != ():
+                continue
             claim = self._take(job_id, None, owner)
             if claim is not None:
                 return claim
         held = sorted((view["leases"] & view["jobs"]) - finished)
         rng.shuffle(held)
         for job_id in held[:MAX_LEASE_READS_PER_CLAIM]:
+            if self.waiting_on(job_id, view, budget=budget,
+                               finished=finished) != ():
+                continue
             key = f"leases/{job_id}.json"
             found = self.store.get(key)
             if found is None:
@@ -895,6 +942,45 @@ class WorkQueue:
             if claim is not None:
                 return claim
         return None
+
+    def dependencies(self, job_id: str) -> tuple[str, ...] | None:
+        """The job's ``depends_on`` (read once), or None if it is gone."""
+
+        if job_id in self._dependencies:
+            return self._dependencies[job_id]
+        key = f"jobs/{job_id}.json"
+        found = self.store.get(key)
+        if found is None:
+            return None
+        self._last_document = (job_id, found[0])
+        dependencies = dependencies_of(decode(found[0], key))
+        self._dependencies[job_id] = dependencies
+        return dependencies
+
+    def waiting_on(self, job_id: str, view: dict[str, set[str]], *,
+                   budget: list[int] | None = None,
+                   finished: set[str] | None = None
+                   ) -> tuple[str, ...] | None:
+        """Queued dependencies of ``job_id`` that are neither done nor dead
+        (``()`` when it may run).  None when learning them would take a
+        read past ``budget`` (a one-element list, decremented per read) or
+        the job is gone: not claimable this time.  ``finished`` is
+        ``view["done"] | view["dead"]`` when the caller already has it."""
+
+        if job_id not in self._dependencies:
+            if budget is not None:
+                if budget[0] <= 0:
+                    return None
+                budget[0] -= 1
+            if self.dependencies(job_id) is None:
+                return None
+        dependencies = self._dependencies[job_id]
+        if not dependencies:
+            return ()
+        if finished is None:
+            finished = view["done"] | view["dead"]
+        return tuple(d for d in dependencies
+                     if d in view["jobs"] and d not in finished)
 
     def _take(self, job_id: str,
               prior: tuple[dict[str, Any], str] | None,
@@ -952,7 +1038,13 @@ class WorkQueue:
                                  error_tail="", log_key=None,
                                  failures=failures)
         claim_ = Claim(job_id, {}, b"", lease, version)
-        job = self.store.get(f"jobs/{job_id}.json")
+        if self._last_document is not None and \
+                self._last_document[0] == job_id:
+            # Read moments ago for its dependencies; documents are immutable.
+            job = (self._last_document[1], "")
+        else:
+            job = self.store.get(f"jobs/{job_id}.json")
+        self._last_document = None
         if (job is None or self.is_done(job_id)
                 or self.store.get(f"dead/{job_id}.json") is not None):
             # Finished (or withdrawn) between the listing and the claim.
@@ -1338,6 +1430,9 @@ def _cmd_push(args) -> int:
     queue = WorkQueue.open(args.queue)
     queue.settings()
     jobs = read_job_files(args.jobs, schema=args.schema)
+    # Jobs others depend on go first: a dependency not yet queued does not
+    # block, so a forecast pushed before its prefetch could start early.
+    jobs.sort(key=lambda item: item[1].get("kind") != "prefetch")
     results: dict[str, str] = {}
     conflicts: list[str] = []
     for job_id, document in jobs:
@@ -1393,6 +1488,8 @@ __all__ = [
     "QUEUE_SCHEMA", "QueueBackendUnavailable", "QueueConfigConflict",
     "QueueError", "QueueNotInitialized", "QueueSettings",
     "QueueSettingsError", "QueueURLError", "RequeueRefused", "S3Store",
-    "STATUS_SCHEMA", "WorkQueue", "job_from_document", "main", "open_store",
+    "STATUS_SCHEMA", "WorkQueue", "dependencies_of", "job_from_document",
+    "main", "open_store", "MAX_DEPENDENCY_READS_PER_CLAIM",
+    "PREFETCH_ID_PREFIX",
     "read_job_files", "tail_text",
 ]

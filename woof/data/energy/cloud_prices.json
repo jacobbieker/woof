@@ -76,10 +76,12 @@
   ],
   "storage": {
     "aws": {"service": "S3 Standard", "usd_per_gb_month": 0.023,
-            "usd_per_1000_put": 0.005, "egress_usd_per_gb": 0.09,
-            "note": "first-tier rates; S3 Standard drops to 0.021 above 500 TB and internet egress falls by volume tier"},
+            "usd_per_1000_put": 0.005, "usd_per_1000_get": 0.0004,
+            "egress_usd_per_gb": 0.09, "in_region_usd_per_gb": 0.0,
+            "note": "first-tier rates; S3 Standard drops to 0.021 above 500 TB and internet egress falls by volume tier; transfer from S3 to EC2 in the same region is free"},
     "gcp": {"service": "Cloud Storage Standard", "usd_per_gb_month": 0.020,
-            "usd_per_1000_put": 0.005, "egress_usd_per_gb": 0.12,
-            "note": "first-tier rates; premium-tier internet egress falls by volume tier"}
+            "usd_per_1000_put": 0.005, "usd_per_1000_get": 0.0004,
+            "egress_usd_per_gb": 0.12, "in_region_usd_per_gb": 0.0,
+            "note": "first-tier rates (GET is a Class B operation); premium-tier internet egress falls by volume tier; reads by a VM in the bucket's region are free"}
   }
 }

@@ -530,6 +530,44 @@ written atomically), with a table on stderr:
 A refusal exits 2 with `{"schema": "woof-energy.cost-optimize.v1",
 "refused": "..."}`.
 
+## Forcing downloads: per job versus once per cycle
+
+The `forcing` section prices fetching the boundary data, with and without
+the forcing cache ([forcing-cache.md](forcing-cache.md)). One cycle's
+download is the bytes and objects `woof.download_budget` measures for
+`--forcing-source` (default `met-office-global`) over the segment's fetch
+window, or `--forcing-gb-per-cycle` (and `--forcing-objects-per-cycle`).
+Cycles are the segments and jobs per cycle are the clusters, so a `--plan`
+(one cluster) shows no saving and says so.
+
+| | per job (no cache) | per cycle (cache) |
+|---|---|---|
+| downloads from the publisher | jobs | cycles |
+| GPU-slot hours | jobs x cycle bytes / `--publisher-mbps` | cycles x cycle bytes / `--publisher-mbps` + jobs x cycle bytes / `--cache-read-mbps` |
+| requests | jobs x objects publisher GETs | cycles x objects cache PUTs + jobs x objects cache GETs |
+| storage | - | cycles x cycle bytes x `--forcing-cache-days` / 30.4 GB-months |
+
+Assumptions, all labelled in `forcing.assumptions`: one job draws
+`--publisher-mbps` (default 100 MB/s) from a publisher and
+`--cache-read-mbps` (default 400 MB/s) from a cache in its own region; a
+cycle stays in the cache `--forcing-cache-days` (default 7); the publisher
+charges `--publisher-egress-usd-per-gb` (default 0, the public open-data
+buckets) and same-region reads are free. Download time is priced as
+GPU-slot time (the instance price over its GPUs: the card idles while its
+job waits for bytes), on each priced market, in each offer's
+`forcing_usd` (`per_job_fetch`, `per_cycle_cache`, `saving`); PUT, GET and
+storage use the offer's provider rates from the price table
+(`usd_per_1000_put`, `usd_per_1000_get`, `usd_per_gb_month`). A source the
+cache does not share (`gfs`, `hrrr`, `era5`) shows the same figures on
+both sides and the reason. The forcing figures are reported beside the
+GPU-hours, not added to them, and the cache does not change decode or
+preparation time. `--no-forcing` leaves the section out.
+
+For the worldwide year (440 clusters x 1,460 cycles of Met Office global,
+3.246 GB and 41 objects per cycle) the cache avoids 2,080 TB of downloads
+and 4,331 GPU-slot hours: $29.8k on p5.48xlarge and $47.7k on
+a3-highgpu-8g at on-demand rates.
+
 ## Output document
 
 `woof-energy.cost-estimate.v1` holds:
@@ -558,7 +596,12 @@ A refusal exits 2 with `{"schema": "woof-energy.cost-optimize.v1",
     and `wall_clock_days_spot`
   - `instances_for_deadline` (with `--deadline-days`), `storage` and
     `storage_usd`
+  - `forcing_usd` per market: forcing downloads per job, through the
+    cache, and the saving
   - in partition mode, a `clusters` row per cluster
+- **Forcing**: `forcing` (source, shared or why not, one cycle's bytes and
+  objects with their basis, `per_job_fetch`, `per_cycle_cache`, `saving`,
+  `assumptions`), unless `--no-forcing`.
 - **Notes**: `notes`, such as the price table's age.
 
 A refusal exits 2 and prints `{"schema": ..., "refused": "..."}`.

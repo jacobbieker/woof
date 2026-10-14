@@ -4,6 +4,30 @@
 
 New:
 
+- Hindcast forcing cache: `woof energy hindcast plan --forcing-cache URL`
+  (`s3://`, `gs://`, `file://` or a path) fetches each (source, cycle)
+  once instead of once per cluster. Every table-route source (Met Office
+  global, ECMWF open data, HRRR native, RAP, ICON, ...) gets one prefetch
+  job per cycle (`kind: prefetch` in `woof-energy.hindcast-job.v1`), and
+  each forecast job of that cycle carries `forcing` and `depends_on`
+  (job ids unchanged). `woof energy hindcast prefetch DIR` (or the queue)
+  runs the cycle's `woof fetch` once and publishes it to a
+  content-addressed cache (`woof-energy.forcing-cache.v1` entries, sha256
+  blobs, idempotent, create-only). Before running, `run-local` (and
+  `woof energy hindcast mirror JOB`) copies the objects the job's own
+  fetch would download into the exact folder `woof go` picks, sha256
+  verified, with the receipts `woof fetch` writes
+  (`woof.fetch_routes.adopt_verified_objects`), so the job's fetch reuses
+  every object and asks no host; anything the cache lacks is fetched by
+  the job and listed in `forcing-mirror.json`. Sources whose fetch crops to
+  the cluster's area (`gfs`, `gdas`, legacy `hrrr`, `era5`) are marked
+  `direct` with the reason. `woof energy queue` claims a job only when its
+  queued dependencies are done or dead, and pushes and tries prefetch jobs
+  first. `woof energy estimate` adds a `forcing` section: downloads per
+  job versus per cycle, measured per object, with GPU-slot time, requests
+  and cache storage priced per offer (for the worldwide year about 2,080
+  TB and 4,331 slot-hours avoided; every rate an assumption). See
+  `docs/energy-hindcast/forcing-cache.md`.
 - `woof energy plan --topology wrf-tiles|wrf-nests --source auto` picks
   the boundary source for the sites and the `--start` cycle from
   `--source-priority` (default
@@ -347,6 +371,14 @@ Fixed:
   says to re-partition (`woof energy partition --leaf-dx-m`, or `woof
   energy hindcast optimize`, which re-cuts per spacing).
 
+- `woof energy hindcast run-local --force` on a job the manifest called
+  complete marked it `running` and then returned "skipped", leaving it
+  stuck; a forced run now runs.
+- `woof energy hindcast materialize` of a partition cluster handed
+  `woof.energy.partition.plan_cluster` a `sites_path` it passed on to the
+  planner (a second one on wrf-nests, an unknown one on wrf-tiles), so
+  every partition job was refused with a TypeError; `plan_cluster` binds
+  its own sites file.
 - WOOF Global now holds explicit `[vertical] a_half_pa`/`b_half` arrays to
   the same level range as `nlev`. Before, they skipped the check, so an
   over-deep column passed config validation and was refused only at the
