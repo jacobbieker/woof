@@ -84,6 +84,14 @@ command, it does the following:
 4. Exports `WOOF_THOMPSON_TABLE_ROOT` and `WOOF_WIF_DATA_ROOT`, pointing at
    the tables staged in the image under `/opt/woof-home/.woof`. These sit
    outside `$HOME`, so Apptainer, which replaces `$HOME`, still finds them.
+5. Adds the packing flags to a `woof energy worker` command, in worker mode
+   or on a full command line, unless the command already has them.
+   `WOOF_SLOTS_PER_GPU=N|auto` adds `--slots-per-gpu`.
+   `WOOF_ENABLE_MPS=1` adds `--mps --mps-dir $WOOF_SCRATCH/mps/<worker
+   index>`: the worker starts the CUDA MPS control daemon with its pipe and
+   log directories there and stops it on exit. Any other value of
+   `WOOF_ENABLE_MPS` exits 2. See "Several jobs per GPU" in
+   [queue-worker.md](queue-worker.md).
 
 | Invocation | Runs |
 |---|---|
@@ -136,8 +144,10 @@ directory whose `deploy.json` is something else is refused.
 | `parallelism` | `workers` | workers running at once, capped at `workers` |
 | `gpus_per_worker` | the machine's GPU count on AWS and GCP; required on k8s and Slurm | GPUs each worker is given |
 | `worker_gpus` | `all` | the worker's `--gpus` |
+| `slots_per_gpu` | `"1"` | the worker's `--slots-per-gpu`: `"1"` (one job per card), a count, or `"auto"`, as a string. Above 1 the worker packs jobs whose declared memory fits each card |
+| `mps` | false | the worker's `--mps`: CUDA MPS for the packed slots, so their kernels run concurrently. Needs `slots_per_gpu` above 1 |
 | `exit_when_empty` | true | add `--exit-when-empty`, so a worker exits and frees its machine once the queue is drained |
-| `worker_args` | `[]` | extra worker flags. `--queue`, `--gpus` and `--exit-when-empty` are refused here |
+| `worker_args` | `[]` | extra worker flags. `--queue`, `--gpus`, `--exit-when-empty`, `--slots-per-gpu` and `--mps` are refused here |
 | `spot` | false | spot or preemptible capacity |
 | `geog_url`, `highres_cache_url` | none | sources the entrypoint stages (see above) |
 | `max_runtime_hours` | 72 | per-attempt limit (Batch timeout, `maxRunDuration`, `activeDeadlineSeconds`, `--time`) |
@@ -231,6 +241,17 @@ because one worker runs per VM.
 `kubectl apply`. Backoff per index and pod failure policies need
 Kubernetes 1.29 or later.
 
+With `mps = true`, each worker pod starts its own MPS control daemon for
+the GPUs it was given. The image needs the driver's
+`nvidia-cuda-mps-control`, and the worker refuses without it. The renderer
+also writes `mps-sharing.example.yaml`, in which every line is commented.
+It shows the NVIDIA device plugin's MPS sharing configuration (`sharing.mps`,
+a ConfigMap selected per node) for clusters where the plugin owns MPS. In
+that mode the plugin runs the daemon on each node and splits every GPU into
+replicas, each with its own memory and SM share. The worker finds the
+plugin's daemon through `CUDA_MPS_PIPE_DIRECTORY` and neither starts nor
+stops it. Neither mode has been run on a cluster by this tree.
+
 `[k8s]` keys:
 
 - `cloud`: `aws`, `gcp` or `generic`
@@ -309,9 +330,17 @@ directory. `--strict` refuses at render time instead.
 
 ## Sizing for the year-long run
 
-Each worker runs one queue job per GPU. Total throughput therefore scales
-with the number of GPUs, and `workers` × GPUs per worker is the number of
-jobs in flight.
+By default each worker runs one queue job per GPU. Total throughput then
+scales with the number of GPUs, and `workers` × GPUs per worker is the
+number of jobs in flight.
+
+- **Pack small farms.** Most clusters are single small farms whose domains
+  (0.3-2 M cells) leave a datacentre card mostly idle. With
+  `slots_per_gpu = "auto"` and `mps = true`, a worker packs as many jobs per
+  card as their declared memory, the card's CPUs and a cap of 8 allow.
+  `woof energy estimate --slots-per-gpu auto --mps` prices the difference
+  (docs/energy-hindcast/cost.md). A machine with more vCPUs per GPU (p5,
+  a3) packs deeper than a 4-vCPU g5.xlarge.
 
 - **Spot.** Use spot capacity with `exit_when_empty = true`. The queue's
   leases make a reclaimed worker's job reappear for another worker, and

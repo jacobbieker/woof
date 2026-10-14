@@ -52,12 +52,87 @@ What is pinned:
 
 Exit codes: 0 drained or idle, 1 a slot failed, 2 refused, 75 stopped by
 SIGTERM (work remains), 130 stopped by SIGINT.
+
+Packing several jobs on one GPU (``--slots-per-gpu N|auto``)
+------------------------------------------------------------
+
+Most hindcast clusters are one small farm whose domains (0.3-2 M cells)
+cannot fill a datacentre card, so one job per GPU rents a card that idles
+between kernel launches.  ``--slots-per-gpu`` starts several slots per
+GPU.  The default, 1, is the behaviour above, unchanged.  With N > 1 or
+``auto``:
+
+* the parent holds the per-UUID worker lock (``energy-worker-<digest>
+  .lock``, the file a single-slot worker's slot holds) and hands it to its
+  slots, so one worker owns a card whatever its slot count and a
+  single-slot worker and a packed one still exclude each other;
+* slot *k* of a card holds ``energy-worker-<digest>.slot-<k>.lock`` and,
+  while it runs a job, writes the job's memory reservation beside it
+  (``.slot-<k>.json``, :data:`RESERVATION_SCHEMA`).  The runner inherits
+  the slot lock's descriptor, so a reservation stays live while its runner
+  lives, even if the slot itself is killed; a reservation whose lock
+  nobody holds is stale and ignored;
+* **memory-aware admission.**  Under the card's admission lock
+  (``.admit.lock``) a slot reads the live reservations and claims only a
+  job whose declared memory fits: ``sum(reserved) + need + margin <=
+  card``, where ``need`` is the job's ``resources.gpu_mem_gib`` (the
+  planner's priced peak, which includes the CUDA context) and ``margin``
+  is ``--mem-margin-gib`` (default :data:`DEFAULT_MEM_MARGIN_GIB`, an
+  assumption: driver, MPS server and allocator fragmentation the priced
+  peak does not hold).  A job that declares nothing is priced at
+  ``--default-job-mem-gib``, or -- the conservative default -- the whole
+  card, so it only ever runs alone.  An idle card admits any one job,
+  however large, so every job can always run (as it would with one slot).
+  A job declaring 0 GiB -- a ``kind: prefetch`` forcing download, which
+  counts as 0 even undeclared -- is never held back and reserves nothing.
+  The queue gates on dependencies (``depends_on``) before memory, so a
+  forecast job waits for its cycle's prefetch first;
+* ``auto`` starts ``min(8, floor((card - margin) / 3.4 GiB), CPUs per
+  GPU)`` slots: 3.4 GiB is the smallest job the cost model's memory fit
+  prices (its fixed intercept, :data:`woof.energy.cost.VRAM_INTERCEPT_GIB`)
+  and each slot drives its kernels from one CPU core;
+* each slot's runner gets its own ``WOOF_GPU_LOCK_ROOT``
+  (``.slot-<k>.runner-locks``), so the runners' own ``woof run`` UUID
+  locks do not refuse each other.  A ``woof run`` still sees the sibling
+  runners as CUDA co-tenants and prices its own reservation against the
+  device's measured free memory (:func:`woof.supervisor.shared_gpu_admission`),
+  a second, measured check behind the declared one;
+* the slot still waits while a woof process outside the queue holds the
+  card's supervisor lock; one started while packed jobs run is admitted or
+  refused by that same measured shared-GPU admission;
+* when a slot dies unexpectedly the parent kills the runner it recorded
+  before restarting it (its lease would expire anyway).
+
+Card memory comes from NVML (``nvidia-smi``) or ``--gpu-mem-gib``, which
+``--fake-gpus`` needs.  A large job can wait while small ones keep a card
+busy; it runs once the queue's small jobs drain or a card goes idle.
+
+**CUDA MPS** (``--mps``).  Without MPS, kernels from separate processes
+time-slice: the card runs one context at a time, so packing hides launch
+gaps, host-side work and I/O but never runs two small grids' kernels side
+by side.  The Multi-Process Service funnels every slot's work through one
+server context, so kernels from different processes run concurrently and
+small grids share the SMs.  ``--mps`` starts ``nvidia-cuda-mps-control
+-d`` with ``CUDA_MPS_PIPE_DIRECTORY``/``CUDA_MPS_LOG_DIRECTORY`` under
+``--mps-dir`` (default a short directory under the system temp: the
+control socket path must stay under :data:`MPS_PIPE_PATH_MAX` characters),
+gives the slots the same variables, optionally
+``CUDA_MPS_ACTIVE_THREAD_PERCENTAGE`` (``--mps-active-thread-percentage``),
+and stops the daemon (``quit``) on exit.  When ``CUDA_MPS_PIPE_DIRECTORY``
+is already set (a daemon this process does not own, such as the NVIDIA
+device plugin's MPS sharing) or a daemon already answers at that pipe
+directory, it is used and left running.  The worker refuses when the
+control binary is not on ``PATH``.  MPS has not been timed on hardware by
+this tree; ``woof energy estimate --slots-per-gpu --mps`` models it.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import errno
 import json
+import math
 import os
 import random
 import re
@@ -76,13 +151,28 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from woof.energy.packing import (AUTO_MAX_SLOTS_PER_GPU,
+                                 DEFAULT_MEM_MARGIN_GIB, SLOTS_AUTO,
+                                 parse_slots_per_gpu)
 from woof.energy.workqueue import (
-    PERMANENT_EXIT_CODES, Claim, LeaseLost, QueueError, WorkQueue, iso_utc,
-    tail_text)
+    PERMANENT_EXIT_CODES, Claim, JobSpecError, LeaseLost, QueueError,
+    WorkQueue, declared_gpu_mem_gib, iso_utc, tail_text)
 
 WORKER_SUMMARY_SCHEMA = "woof-energy.worker-summary.v1"
 SLOT_SUMMARY_SCHEMA = "woof-energy.worker-slot.v1"
 SLOT_CONFIG_SCHEMA = "woof-energy.worker-slot-config.v1"
+RESERVATION_SCHEMA = "woof-energy.worker-reservation.v1"
+
+#: ``--slots-per-gpu auto``, its slot cap and the default memory margin
+#: (GiB) live in :mod:`woof.energy.packing`, shared with the estimate and
+#: the deploy renderers.
+#: The MPS control binary ``--mps`` starts.
+MPS_CONTROL = "nvidia-cuda-mps-control"
+#: Longest ``<pipe dir>/control`` socket path accepted (AF_UNIX paths
+#: stop at 107 bytes on Linux; the rest is margin).
+MPS_PIPE_PATH_MAX = 100
+#: Seconds an MPS control command may take before it is a failure.
+MPS_COMMAND_TIMEOUT_S = 30.0
 
 #: File in a slot's work directory holding the running runner's
 #: process-group id (the parent kills it on a second signal).
@@ -136,6 +226,14 @@ class RunnerTemplateError(WorkerError, ValueError):
     """``--runner-cmd`` is empty or uses an unknown placeholder."""
 
 
+class PackingError(WorkerError, ValueError):
+    """``--slots-per-gpu`` and its memory flags cannot be honoured as asked."""
+
+
+class MPSUnavailable(WorkerError):
+    """``--mps`` was asked for and the MPS control daemon cannot run."""
+
+
 def _note(message: str) -> None:
     print(f"woof energy worker: {message}", file=sys.stderr, flush=True)
 
@@ -161,6 +259,9 @@ class RunnerRequest:
     #: Called with the runner's process-group id once it starts, so the
     #: worker can kill a runner that outlives its slot.
     on_start: Callable[[int], None] | None = None
+    #: Descriptors the runner process inherits: a packed slot's lock, so
+    #: the slot's memory reservation stays live while the runner does.
+    pass_fds: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -231,7 +332,8 @@ class SubprocessRunner:
                 process = subprocess.Popen(
                     argv, stdin=subprocess.DEVNULL, stdout=log,
                     stderr=subprocess.STDOUT, env=request.env,
-                    cwd=request.workdir, start_new_session=True)
+                    cwd=request.workdir, start_new_session=True,
+                    pass_fds=tuple(request.pass_fds))
             except OSError as error:
                 return RunnerOutcome(None, error=f"runner could not start: "
                                                  f"{error}")
@@ -348,6 +450,330 @@ def gpu_is_free(gpu_uuid: str) -> bool:
 
 
 # --------------------------------------------------------------------------
+# Packing (several slots per GPU)
+# --------------------------------------------------------------------------
+
+
+def gpu_is_free_shared(gpu_uuid: str) -> bool:
+    """Whether no process holds the supervisor's UUID lock exclusively.
+
+    A packed card's slots probe with a SHARED lock, so sibling slots
+    probing at the same instant never see each other as "another woof
+    process" (:func:`gpu_is_free` takes the lock exclusively, which is
+    right for a card's only slot).  Nothing is written."""
+
+    import fcntl
+
+    from woof.supervisor import default_lock_path
+
+    try:
+        fd = os.open(default_lock_path(gpu_uuid), os.O_RDONLY)
+    except FileNotFoundError:
+        return True
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError as error:
+        if error.errno in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+            return False
+        raise
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return True
+    finally:
+        os.close(fd)
+
+
+def _lock_held(path: Path) -> bool:
+    """Whether another open file description holds ``path``'s flock."""
+
+    import fcntl
+
+    try:
+        fd = os.open(path, os.O_RDWR)
+    except FileNotFoundError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as error:
+        if error.errno in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+            return True
+        raise
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+class CardLedger:
+    """One packed slot's view of its card: its lock, its reservation and
+    the admission rule (see the module docstring)."""
+
+    def __init__(self, gpu_uuid: str, index: int, *, card_gib: float,
+                 margin_gib: float, default_job_gib: float | None):
+        base = worker_lock_path(gpu_uuid)
+        stem = base.name[:-len(".lock")] if base.name.endswith(".lock") \
+            else base.name
+        self.gpu_uuid = gpu_uuid
+        self.index = index
+        self.card_gib = float(card_gib)
+        self.margin_gib = float(margin_gib)
+        self.default_job_gib = default_job_gib
+        self.directory = base.parent
+        self.stem = stem
+        self.slot_lock_path = self.directory / f"{stem}.slot-{index}.lock"
+        self.reservation_path = self.directory / f"{stem}.slot-{index}.json"
+        self.admit_lock_path = self.directory / f"{stem}.admit.lock"
+        self.runner_lock_root = (self.directory
+                                 / f"{stem}.slot-{index}.runner-locks")
+
+    def need_gib(self, declared: float | None) -> tuple[float, str]:
+        """What a job is priced at, and on what basis."""
+
+        if declared is not None:
+            return float(declared), "declared"
+        if self.default_job_gib is not None:
+            return float(self.default_job_gib), "--default-job-mem-gib"
+        return self.card_gib, "undeclared: the whole card"
+
+    def live_reservations(self) -> list[dict[str, Any]]:
+        """Reservations of the card's other slots whose lock is held."""
+
+        rows = []
+        for path in sorted(self.directory.glob(f"{self.stem}.slot-*.json")):
+            if path == self.reservation_path:
+                continue
+            if not _lock_held(path.with_suffix(".lock")):
+                continue  # stale: nobody holds that slot any more
+            try:
+                row = json.loads(path.read_text("utf-8"))
+            except (OSError, ValueError):
+                continue  # removed or being replaced: not a reservation
+            if (isinstance(row, dict) and row.get("schema") == RESERVATION_SCHEMA
+                    and isinstance(row.get("gpu_mem_gib"), (int, float))
+                    and row["gpu_mem_gib"] > 0):
+                rows.append(row)
+        return rows
+
+    def fits(self, declared: float | None,
+             live: list[dict[str, Any]]) -> bool:
+        if declared is not None and declared <= 0:
+            return True  # no GPU (a prefetch job): never held back
+        if not live:
+            return True  # an idle card admits any one job
+        used = sum(float(row["gpu_mem_gib"]) for row in live)
+        need, _ = self.need_gib(declared)
+        return used + need + self.margin_gib <= self.card_gib + 1e-9
+
+    def reserve(self, claim: Claim, declared: float | None,
+                live: list[dict[str, Any]]) -> dict[str, Any]:
+        need, basis = self.need_gib(declared)
+        if need <= 0:
+            # No GPU (a prefetch job): nothing to reserve, so it never
+            # counts against the card or keeps an idle card from a big job.
+            self.clear()
+            return {"gpu_mem_gib": 0.0, "basis": "no GPU (declared 0)",
+                    "reserved_beside_gib": round(sum(
+                        float(r["gpu_mem_gib"]) for r in live), 3)}
+        document = {
+            "schema": RESERVATION_SCHEMA, "gpu_uuid": self.gpu_uuid,
+            "slot": self.index, "pid": os.getpid(), "job_id": claim.job_id,
+            "attempt": claim.attempt, "gpu_mem_gib": need, "basis": basis,
+            "reserved_beside_gib": round(sum(float(r["gpu_mem_gib"])
+                                             for r in live), 3),
+            "card_gib": self.card_gib, "margin_gib": self.margin_gib,
+            "at_utc": iso_utc(time.time())}
+        from woof.supervisor import atomic_write_json
+
+        atomic_write_json(self.reservation_path, document)
+        return document
+
+    def clear(self) -> None:
+        self.reservation_path.unlink(missing_ok=True)
+
+    @contextlib.contextmanager
+    def admission(self, stop: threading.Event, poll_s: float = 0.05):
+        """The card's admission lock; yields False if ``stop`` came first."""
+
+        import fcntl
+
+        self.directory.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self.admit_lock_path, os.O_RDWR | os.O_CREAT, 0o666)
+        try:
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as error:
+                    if error.errno not in (errno.EAGAIN, errno.EACCES,
+                                           errno.EWOULDBLOCK):
+                        raise
+                if stop.wait(poll_s):
+                    yield False
+                    return
+            try:
+                yield True
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def auto_slots_per_gpu(card_gib: float, margin_gib: float, gpus: int,
+                       cpus: int | None = None) -> int:
+    """``--slots-per-gpu auto``: memory-, CPU- and :data:`AUTO_MAX_SLOTS_PER_GPU`-
+    bound (module docstring)."""
+
+    from woof.energy.cost import VRAM_INTERCEPT_GIB
+
+    if cpus is None:
+        try:
+            cpus = len(os.sched_getaffinity(0))
+        except (AttributeError, OSError):
+            cpus = os.cpu_count() or 1
+    by_memory = int(math.floor((card_gib - margin_gib) / VRAM_INTERCEPT_GIB))
+    by_cpu = max(1, int(cpus) // max(1, gpus))
+    return max(1, min(AUTO_MAX_SLOTS_PER_GPU, by_memory, by_cpu))
+
+
+def card_memory_gib(gpu, override: float | None) -> tuple[float, str]:
+    """The admission budget of one card and where it came from."""
+
+    if override is not None:
+        return float(override), "--gpu-mem-gib"
+    if gpu.driver_version == "fake":
+        raise PackingError(
+            "--fake-gpus have no memory to read; give --gpu-mem-gib with "
+            "--slots-per-gpu above 1 or auto")
+    from woof.core.preflight import device_physical_total_bytes
+
+    total = device_physical_total_bytes(device_id=gpu.uuid)
+    if total is None:
+        raise PackingError(
+            f"GPU {gpu.uuid}: NVML did not report its memory, so packing "
+            "has no budget; give --gpu-mem-gib")
+    return total / 1024 ** 3, "NVML memory.total"
+
+
+class MpsDaemon:
+    """The CUDA MPS control daemon a packed worker uses (module docstring)."""
+
+    def __init__(self, root: Path | None, devices: list[str], *,
+                 thread_percentage: int | None = None):
+        external = os.environ.get("CUDA_MPS_PIPE_DIRECTORY")
+        self.external = bool(external)
+        if external:
+            self.pipe_dir = Path(external)
+            self.log_dir = Path(os.environ.get("CUDA_MPS_LOG_DIRECTORY")
+                                or self.pipe_dir)
+        else:
+            root = Path(root) if root is not None else (
+                Path(tempfile.gettempdir()) / f"woof-mps-{os.getpid()}")
+            self.pipe_dir = root / "pipe"
+            self.log_dir = root / "log"
+        self.devices = list(devices)
+        self.thread_percentage = thread_percentage
+        self.control: str | None = None
+        self.owned = False
+        self.started = False
+        self.reused = False
+
+    def _env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        env.update(self.environment())
+        env.pop("CUDA_MPS_ACTIVE_THREAD_PERCENTAGE", None)
+        if self.devices:
+            env["CUDA_VISIBLE_DEVICES"] = ",".join(self.devices)
+        return env
+
+    def environment(self) -> dict[str, str]:
+        """What every slot (and so every runner) gets."""
+
+        env = {"CUDA_MPS_PIPE_DIRECTORY": str(self.pipe_dir),
+               "CUDA_MPS_LOG_DIRECTORY": str(self.log_dir)}
+        if self.thread_percentage is not None:
+            env["CUDA_MPS_ACTIVE_THREAD_PERCENTAGE"] = str(
+                self.thread_percentage)
+        return env
+
+    def _command(self, *argv: str, stdin: str | None = None
+                 ) -> subprocess.CompletedProcess:
+        assert self.control is not None
+        return subprocess.run([self.control, *argv], input=stdin,
+                              capture_output=True, text=True,
+                              env=self._env(), timeout=MPS_COMMAND_TIMEOUT_S)
+
+    def answers(self) -> bool:
+        try:
+            return self._command(stdin="get_server_list\n").returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    def start(self) -> "MpsDaemon":
+        self.control = shutil.which(MPS_CONTROL)
+        if self.control is None:
+            raise MPSUnavailable(
+                f"--mps needs {MPS_CONTROL} on PATH (the NVIDIA driver's MPS "
+                "control daemon; in a container, the NVIDIA container "
+                "toolkit mounts it with the compute and utility "
+                "capabilities); none was found")
+        socket_path = str(self.pipe_dir / "control")
+        if len(socket_path) > MPS_PIPE_PATH_MAX:
+            raise MPSUnavailable(
+                f"the MPS control socket {socket_path} is "
+                f"{len(socket_path)} characters, over the "
+                f"{MPS_PIPE_PATH_MAX} a UNIX socket path allows here; give "
+                "a shorter --mps-dir")
+        if self.external:
+            if not self.answers():
+                raise MPSUnavailable(
+                    f"CUDA_MPS_PIPE_DIRECTORY={self.pipe_dir} is set but no "
+                    "MPS control daemon answers there")
+            self.reused = True
+            return self
+        self.pipe_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        if (self.pipe_dir / "control").exists() and self.answers():
+            self.reused = True
+            return self
+        try:
+            started = self._command("-d")
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise MPSUnavailable(f"{MPS_CONTROL} -d failed: {error}") \
+                from error
+        if started.returncode != 0:
+            raise MPSUnavailable(
+                f"{MPS_CONTROL} -d exited {started.returncode}: "
+                f"{(started.stderr or started.stdout).strip()[-500:]}")
+        self.owned = self.started = True
+        deadline = time.monotonic() + MPS_COMMAND_TIMEOUT_S
+        while not self.answers():
+            if time.monotonic() >= deadline:
+                self.stop()
+                raise MPSUnavailable(
+                    f"the MPS control daemon started at {self.pipe_dir} "
+                    "does not answer get_server_list")
+            time.sleep(0.2)
+        return self
+
+    def stop(self) -> None:
+        if not self.owned:
+            return
+        self.owned = False
+        try:
+            self._command(stdin="quit\n")
+        except (OSError, subprocess.TimeoutExpired) as error:
+            _note(f"MPS control daemon did not stop cleanly ({error})")
+
+    def summary(self) -> dict[str, Any]:
+        return {"pipe_dir": str(self.pipe_dir), "log_dir": str(self.log_dir),
+                "control": self.control, "started_here": self.started,
+                "reused_running_daemon": self.reused,
+                "external": self.external,
+                "active_thread_percentage": self.thread_percentage}
+
+
+# --------------------------------------------------------------------------
 # Slot
 # --------------------------------------------------------------------------
 
@@ -366,6 +792,19 @@ class SlotConfig:
     poll_s: float = DEFAULT_POLL_S
     term_grace_s: float = DEFAULT_TERM_GRACE_S
     parent_pid: int | None = None
+    #: Whether this slot packs (module docstring): set by the parent from
+    #: the request, so a card ``auto`` gives one slot still packs (the
+    #: parent holds the card's worker lock either way).
+    packed: bool = False
+    #: Slots on this slot's GPU.
+    slots_per_gpu: int = 1
+    #: This slot's index among its GPU's slots.
+    gpu_slot: int = 0
+    #: Packed admission: the card's budget, the margin kept free and the
+    #: price of a job that declares no memory (None: the whole card).
+    card_mem_gib: float | None = None
+    mem_margin_gib: float = DEFAULT_MEM_MARGIN_GIB
+    default_job_mem_gib: float | None = None
 
     def document(self) -> dict[str, Any]:
         return {"schema": SLOT_CONFIG_SCHEMA, **asdict(self)}
@@ -446,6 +885,19 @@ class Slot:
         self.owner = {"worker_id": config.worker_id,
                       "host": socket.gethostname(), "pid": os.getpid(),
                       "slot": config.slot, "gpu_uuid": config.gpu_uuid}
+        self.ledger: CardLedger | None = None
+        self._slot_lock = None
+        if config.packed:
+            if not config.gpu_uuid or config.card_mem_gib is None:
+                raise PackingError(
+                    f"slot {config.slot} packs but its configuration names "
+                    "no GPU or no card_mem_gib")
+            self.owner["gpu_slot"] = config.gpu_slot
+            self.ledger = CardLedger(
+                config.gpu_uuid, config.gpu_slot,
+                card_gib=config.card_mem_gib,
+                margin_gib=config.mem_margin_gib,
+                default_job_gib=config.default_job_mem_gib)
 
     def request_stop(self, signum: int | None = None) -> None:
         self.stop_signal = signum
@@ -468,7 +920,33 @@ class Slot:
         except QueueError as error:
             return SlotResult(EXIT_REFUSED, f"{type(error).__name__}: {error}")
         lock = None
-        if self.config.gpu_uuid:
+        if self.ledger is not None:
+            # Packed: the parent holds the card's worker lock; this slot
+            # holds its own index.  A runner a previous incarnation of this
+            # slot left behind still holds it (it inherited the
+            # descriptor), and its memory with it: wait for that runner.
+            lock = GPUFileLock(self.config.gpu_uuid,
+                               path=self.ledger.slot_lock_path,
+                               run_id=self.config.worker_id)
+            waited = False
+            while True:
+                try:
+                    lock.acquire()
+                    break
+                except GPUAlreadyLockedError:
+                    if not waited:
+                        _note(f"slot {self.config.slot}: "
+                              f"{self.ledger.slot_lock_path.name} is held (a "
+                              "runner left by an earlier slot process?); "
+                              "waiting for it")
+                        waited = True
+                    if self.stop.wait(self.config.poll_s):
+                        return SlotResult(
+                            EXIT_STOPPED if self.stop_signal != signal.SIGINT
+                            else EXIT_INTERRUPTED, "stopped", self.counts)
+            self._slot_lock = lock
+            self.ledger.clear()
+        elif self.config.gpu_uuid:
             lock = GPUFileLock(self.config.gpu_uuid,
                                path=worker_lock_path(self.config.gpu_uuid),
                                run_id=self.config.worker_id)
@@ -481,8 +959,11 @@ class Slot:
         try:
             reason = self._loop(settings)
         finally:
+            if self.ledger is not None:
+                self.ledger.clear()
             if lock is not None:
                 lock.release()
+            self._slot_lock = None
         if reason == "error":
             return SlotResult(EXIT_FAILED, reason, self.counts)
         if self.stop_signal is not None:
@@ -504,13 +985,13 @@ class Slot:
                 _note(f"slot {self.config.slot}: parent worker is gone; "
                       "stopping")
                 return "parent-gone"
-            if self.config.gpu_uuid and not gpu_is_free(self.config.gpu_uuid):
+            if self.config.gpu_uuid and not self._gpu_free():
                 _note(f"slot {self.config.slot}: GPU {self.config.gpu_uuid} "
                       "is held by another woof process; waiting")
                 self._wait()
                 continue
             try:
-                claim = self.queue.claim(self.owner, rng=self.rng)
+                claim = self._claim()
                 errors = 0
             except Exception as error:
                 errors += 1
@@ -521,6 +1002,9 @@ class Slot:
                 self._wait()
                 continue
             if claim is None:
+                if self.ledger is not None and self.queue.last_unadmitted:
+                    # Work is waiting for room on this card: not idle.
+                    idle_since = time.monotonic()
                 try:
                     if (self.config.exit_when_empty
                             and self.queue.drained(reuse_last=True)):
@@ -534,12 +1018,17 @@ class Slot:
                     return "idle"
                 self._wait()
                 continue
-            if self.config.gpu_uuid and not gpu_is_free(self.config.gpu_uuid):
+            if self.config.gpu_uuid and not self._gpu_free():
                 # Taken while the claim listed the queue: hand it back
                 # uncharged rather than let the runner's lock refusal
                 # (exit 2) kill the job.
-                self._settle(lambda: self.queue.release(
-                    claim, "GPU taken by another woof process before start"))
+                try:
+                    self._settle(lambda: self.queue.release(
+                        claim, "GPU taken by another woof process before "
+                               "start"))
+                finally:
+                    if self.ledger is not None:
+                        self.ledger.clear()
                 self._wait()
                 continue
             try:
@@ -557,6 +1046,9 @@ class Slot:
                     _note(f"slot {self.config.slot}: could not record the "
                           f"failure ({settle_error}); the lease will expire")
                 outcome = "failed-worker-error"
+            finally:
+                if self.ledger is not None:
+                    self.ledger.clear()
             self.counts[outcome] = self.counts.get(outcome, 0) + 1
             idle_since = time.monotonic()
             if outcome.startswith("failed"):
@@ -569,6 +1061,53 @@ class Slot:
             else:
                 failed_in_a_row = 0
         return "stopped"
+
+    def _gpu_free(self) -> bool:
+        if self.ledger is not None:
+            return gpu_is_free_shared(self.config.gpu_uuid)
+        return gpu_is_free(self.config.gpu_uuid)
+
+    def _claim(self) -> Claim | None:
+        """One claim; packed, under the card's admission lock and only of
+        a job that fits beside the live reservations."""
+
+        ledger = self.ledger
+        if ledger is None:
+            return self.queue.claim(self.owner, rng=self.rng)
+        # The listing (the expensive part on an object store) happens
+        # outside the card's admission lock; a stale view is safe, because
+        # taking a lease is a create-only or compare-and-swap write and a
+        # finished job is checked again when it is taken.  Inside the lock:
+        # the reservations, declared-memory reads (cached per job) and the
+        # lease write -- the check and the reservation must be one step.
+        view = self.queue.snapshot()
+        with ledger.admission(self.stop) as entered:
+            if not entered:
+                return None
+            live = ledger.live_reservations()
+            claim = self.queue.claim(
+                self.owner, rng=self.rng, view=view,
+                admit=lambda _job_id, gib: ledger.fits(gib, live))
+            if claim is None:
+                return None
+            try:
+                declared = declared_gpu_mem_gib(claim.job)
+            except JobSpecError:
+                declared = None
+            try:
+                reservation = ledger.reserve(claim, declared, live)
+            except Exception:
+                # Without its reservation this job could be packed past
+                # the card's budget: hand it back rather than run it.
+                self._settle(lambda: self.queue.release(
+                    claim, "could not record the slot's memory reservation"))
+                raise
+        _note(f"slot {self.config.slot}: reserved "
+              f"{reservation['gpu_mem_gib']:g} GiB ({reservation['basis']}) "
+              f"for {claim.job_id} beside "
+              f"{reservation['reserved_beside_gib']:g} GiB on "
+              f"{ledger.card_gib:g} GiB")
+        return claim
 
     def _settle(self, action: Callable[[], Any]) -> Any:
         """Run a queue settle call through transient store errors."""
@@ -611,12 +1150,25 @@ class Slot:
                     "WOOF_ENERGY_JOB_PATH": str(job_path),
                     "WOOF_ENERGY_RESULT_PATH": str(result_path),
                     "WOOF_ENERGY_QUEUE": self.queue.url})
+        pass_fds: tuple[int, ...] = ()
+        if self.ledger is not None:
+            from woof.supervisor import GPU_LOCK_ROOT_ENV
+
+            # The runner's own `woof run` locks under this slot's root, so
+            # sibling runners on the card do not refuse each other.
+            self.ledger.runner_lock_root.mkdir(parents=True, exist_ok=True)
+            env[GPU_LOCK_ROOT_ENV] = str(self.ledger.runner_lock_root)
+            env["WOOF_ENERGY_GPU_SLOT"] = str(config.gpu_slot)
+            stream = getattr(self._slot_lock, "_stream", None)
+            if stream is not None and os.name == "posix":
+                pass_fds = (stream.fileno(),)
         pgid_path = Path(config.workdir) / RUNNER_PGID_FILE
         request = RunnerRequest(
             claim.job_id, job_path, claim.attempt, attempt_dir, log_path,
             result_path, env, config.timeout_s, cancel, config.gpu_uuid,
             self.queue.url,
-            on_start=lambda pgid: pgid_path.write_text(f"{pgid}\n"))
+            on_start=lambda pgid: pgid_path.write_text(f"{pgid}\n"),
+            pass_fds=pass_fds)
         _note(f"slot {config.slot}: running {claim.job_id} attempt "
               f"{claim.attempt}")
         heartbeat = Heartbeat(self.queue, claim, settings.heartbeat_s, cancel)
@@ -789,17 +1341,119 @@ class _SlotProcess:
     restarts: int = 0
     exit_code: int | None = None
     pids: list[int] = field(default_factory=list)
+    #: Descriptors the slot inherits (the card's worker lock when packed).
+    pass_fds: tuple[int, ...] = ()
+    #: Set when the slot was never started (its card was refused).
+    refused: str | None = None
 
     def start(self) -> None:
         self.process = subprocess.Popen(
             [sys.executable, "-m", "woof.energy.worker", "--slot-config",
              str(self.config_path)],
-            env=self.env, stdin=subprocess.DEVNULL, start_new_session=True)
+            env=self.env, stdin=subprocess.DEVNULL, start_new_session=True,
+            pass_fds=self.pass_fds)
         self.pids.append(self.process.pid)
 
 
-def main(args: argparse.Namespace) -> int:
+@dataclass
+class _Packing:
+    """The parent's resolved packing request."""
+
+    slots_per_gpu: int | str = 1
+    mem_margin_gib: float = DEFAULT_MEM_MARGIN_GIB
+    gpu_mem_gib: float | None = None
+    default_job_mem_gib: float | None = None
+    mps: bool = False
+    mps_dir: str | None = None
+    mps_active_thread_percentage: int | None = None
+
+    @property
+    def packed(self) -> bool:
+        return self.slots_per_gpu != 1
+
+
+def _packing(args, devices: list) -> _Packing:
+    """Validate the packing flags against the devices; named refusals."""
+
+    raw = getattr(args, "slots_per_gpu", 1)
     try:
+        slots = parse_slots_per_gpu(str(raw)) if raw is not None else 1
+    except ValueError as error:
+        raise PackingError(str(error)) from None
+    packing = _Packing(
+        slots_per_gpu=slots,
+        mem_margin_gib=getattr(args, "mem_margin_gib", None),
+        gpu_mem_gib=getattr(args, "gpu_mem_gib", None),
+        default_job_mem_gib=getattr(args, "default_job_mem_gib", None),
+        mps=bool(getattr(args, "mps", False)),
+        mps_dir=getattr(args, "mps_dir", None),
+        mps_active_thread_percentage=getattr(
+            args, "mps_active_thread_percentage", None))
+    memory_flags = {"--mem-margin-gib": packing.mem_margin_gib,
+                    "--gpu-mem-gib": packing.gpu_mem_gib,
+                    "--default-job-mem-gib": packing.default_job_mem_gib}
+    if not packing.packed:
+        given = [flag for flag, value in memory_flags.items()
+                 if value is not None]
+        if given:
+            raise PackingError(
+                f"{', '.join(given)} price jobs on a shared card; they apply "
+                "only with --slots-per-gpu above 1 or auto")
+        if packing.mps:
+            raise PackingError(
+                "--mps lets several slots' kernels share a GPU; with one slot "
+                "per GPU there is nothing to share (add --slots-per-gpu N or "
+                "auto)")
+    if packing.mps_dir is not None and not packing.mps:
+        raise PackingError("--mps-dir applies only with --mps")
+    if packing.mps_active_thread_percentage is not None:
+        if not packing.mps:
+            raise PackingError(
+                "--mps-active-thread-percentage applies only with --mps")
+        if not 1 <= packing.mps_active_thread_percentage <= 100:
+            raise PackingError(
+                "--mps-active-thread-percentage must be 1-100, not "
+                f"{packing.mps_active_thread_percentage}")
+    if not packing.packed:
+        packing.mem_margin_gib = DEFAULT_MEM_MARGIN_GIB
+        return packing
+    if any(gpu is None for gpu in devices):
+        raise PackingError(
+            "--slots-per-gpu packs GPUs; --no-gpu runs CPU slots (use "
+            "--slots for more of them)")
+    if os.name != "posix":
+        raise PackingError(
+            "--slots-per-gpu above 1 needs POSIX flock and descriptor "
+            "inheritance; run one slot per GPU on this platform")
+    if packing.mem_margin_gib is None:
+        packing.mem_margin_gib = DEFAULT_MEM_MARGIN_GIB
+    for flag, value in memory_flags.items():
+        if value is not None and (not math.isfinite(value) or value < 0
+                                  or (value == 0 and flag != "--mem-margin-gib")):
+            raise PackingError(f"{flag} {value!r} must be a positive number "
+                               "of GiB")
+    return packing
+
+
+def main(args: argparse.Namespace) -> int:
+    # A SIGTERM/SIGINT before the slots' handlers exist (the MPS daemon can
+    # take seconds to answer) is remembered, not fatal, so a daemon this
+    # worker started is always stopped.
+    early: list[int] = []
+    previous = {signum: signal.signal(signum,
+                                      lambda signum, _f: early.append(signum))
+                for signum in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        return _main(args, early)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _main(args: argparse.Namespace, early: list[int]) -> int:
+    mps: MpsDaemon | None = None
+    try:
+        args.queue = _queue_url(args)
         queue = WorkQueue.open(args.queue)
         queue.settings()
         SubprocessRunner(args.runner_cmd, term_grace_s=args.term_grace_s)
@@ -811,6 +1465,30 @@ def main(args: argparse.Namespace) -> int:
                 "name a runner with --runner-cmd (a missing door exits 2, "
                 "which would mark every job dead)")
         devices = _devices(args)
+        packing = _packing(args, devices)
+        cards: dict[str, dict[str, Any]] = {}
+        if packing.packed:
+            for gpu in devices:
+                budget, basis = card_memory_gib(gpu, packing.gpu_mem_gib)
+                if budget <= packing.mem_margin_gib:
+                    raise PackingError(
+                        f"GPU {gpu.uuid}: {budget:g} GiB leaves nothing "
+                        f"beside the {packing.mem_margin_gib:g} GiB margin")
+                count = (auto_slots_per_gpu(budget, packing.mem_margin_gib,
+                                            len(devices))
+                         if packing.slots_per_gpu == SLOTS_AUTO
+                         else int(packing.slots_per_gpu))
+                cards[gpu.uuid] = {"card_mem_gib": round(budget, 3),
+                                   "card_mem_basis": basis, "slots": count,
+                                   "mem_margin_gib": packing.mem_margin_gib,
+                                   "default_job_mem_gib":
+                                       packing.default_job_mem_gib}
+        if packing.mps:
+            mps = MpsDaemon(
+                None if packing.mps_dir is None else Path(packing.mps_dir),
+                [gpu.uuid for gpu in devices],
+                thread_percentage=packing.mps_active_thread_percentage)
+            mps.start()
     except (QueueError, WorkerError) as error:
         print(f"woof energy worker: REFUSED: {type(error).__name__}: {error}",
               file=sys.stderr)
@@ -822,30 +1500,85 @@ def main(args: argparse.Namespace) -> int:
             print(f"woof energy worker: REFUSED: {error}", file=sys.stderr)
             return EXIT_REFUSED
         raise
+    try:
+        return _run_slots(args, queue, devices, packing, cards, mps, early)
+    finally:
+        if mps is not None:
+            mps.stop()
+
+
+def _queue_url(args) -> str:
+    positional = getattr(args, "queue", None)
+    flag = getattr(args, "queue_flag", None)
+    if positional and flag and positional != flag:
+        raise WorkerError(f"the queue is named twice, differently: "
+                          f"{positional!r} and --queue {flag!r}")
+    url = positional or flag
+    if not url:
+        raise WorkerError("name the queue: woof energy worker QUEUE_URL (or "
+                          "--queue QUEUE_URL)")
+    return url
+
+
+def _run_slots(args, queue: WorkQueue, devices: list, packing: _Packing,
+               cards: dict[str, dict[str, Any]],
+               mps: "MpsDaemon | None", early: list[int] | None = None) -> int:
+    from woof.supervisor import GPUAlreadyLockedError, GPUFileLock
+
     host = socket.gethostname()
     run_id = f"{_short(host)}-{os.getpid()}-{uuid.uuid4().hex[:6]}"
     root = Path(args.workdir) if args.workdir else (
         Path(tempfile.gettempdir()) / "woof-energy-worker" / run_id)
     root.mkdir(parents=True, exist_ok=True)
     slots: list[_SlotProcess] = []
-    for index, gpu in enumerate(devices):
-        slot_dir = root / f"slot-{index}"
-        slot_dir.mkdir(parents=True, exist_ok=True)
-        config = SlotConfig(
-            queue=args.queue, slot=index, worker_id=f"{run_id}-s{index}",
-            workdir=str(slot_dir), gpu_uuid=None if gpu is None else gpu.uuid,
-            runner_cmd=args.runner_cmd, timeout_s=args.timeout_s,
-            exit_when_empty=args.exit_when_empty, max_idle_s=args.max_idle_s,
-            poll_s=args.poll_s, term_grace_s=args.term_grace_s,
-            parent_pid=os.getpid())
-        config_path = slot_dir / "slot-config.json"
-        config_path.write_text(json.dumps(config.document(), indent=2) + "\n",
-                               "utf-8")
-        (slot_dir / "summary.json").unlink(missing_ok=True)
-        slots.append(_SlotProcess(config, config_path,
-                                  _slot_environment(gpu, index, slot_dir)))
+    card_locks: list = []
+    index = 0
+    for gpu in devices:
+        card = cards.get(gpu.uuid) if gpu is not None else None
+        count = card["slots"] if card else 1
+        pass_fds: tuple[int, ...] = ()
+        refused = None
+        if card is not None:
+            # One worker owns a card: the lock a single-slot worker's slot
+            # holds, held here and inherited by every slot of the card.
+            lock = GPUFileLock(gpu.uuid, path=worker_lock_path(gpu.uuid),
+                               run_id=run_id)
+            try:
+                lock.acquire()
+                card_locks.append(lock)
+                pass_fds = (lock._stream.fileno(),)
+            except GPUAlreadyLockedError:
+                refused = (f"GPU {gpu.uuid} already has an energy worker on "
+                           "this host")
+                _note(f"REFUSED: {refused}; its slots do not start")
+        for gpu_slot in range(count):
+            slot_dir = root / f"slot-{index}"
+            slot_dir.mkdir(parents=True, exist_ok=True)
+            config = SlotConfig(
+                queue=args.queue, slot=index, worker_id=f"{run_id}-s{index}",
+                workdir=str(slot_dir),
+                gpu_uuid=None if gpu is None else gpu.uuid,
+                runner_cmd=args.runner_cmd, timeout_s=args.timeout_s,
+                exit_when_empty=args.exit_when_empty,
+                max_idle_s=args.max_idle_s, poll_s=args.poll_s,
+                term_grace_s=args.term_grace_s, parent_pid=os.getpid(),
+                packed=card is not None,
+                slots_per_gpu=count, gpu_slot=gpu_slot,
+                card_mem_gib=card["card_mem_gib"] if card else None,
+                mem_margin_gib=packing.mem_margin_gib,
+                default_job_mem_gib=packing.default_job_mem_gib)
+            config_path = slot_dir / "slot-config.json"
+            config_path.write_text(
+                json.dumps(config.document(), indent=2) + "\n", "utf-8")
+            (slot_dir / "summary.json").unlink(missing_ok=True)
+            env = _slot_environment(gpu, index, slot_dir)
+            if mps is not None:
+                env.update(mps.environment())
+            slots.append(_SlotProcess(config, config_path, env,
+                                      pass_fds=pass_fds, refused=refused))
+            index += 1
 
-    stopping: list[int] = []
+    stopping: list[int] = list(early or [])
 
     def forward(signum, _frame):
         stopping.append(signum)
@@ -861,11 +1594,17 @@ def main(args: argparse.Namespace) -> int:
 
     previous = {signum: signal.signal(signum, forward)
                 for signum in (signal.SIGTERM, signal.SIGINT)}
-    _note(f"{len(slots)} slot(s) on {host} draining {queue.url} "
-          f"(workdir {root})")
+    runnable = [slot for slot in slots if slot.refused is None]
+    _note(f"{len(runnable)} slot(s) on {host} draining {queue.url} "
+          f"(workdir {root})"
+          + ("" if not cards else "; packed: " + ", ".join(
+              f"{uuid_} {card['slots']} slot(s) on {card['card_mem_gib']:g} "
+              f"GiB ({card['card_mem_basis']})"
+              for uuid_, card in cards.items()))
+          + ("" if mps is None else f"; CUDA MPS at {mps.pipe_dir}"))
     try:
         live = []
-        for slot in slots:
+        for slot in runnable:
             if stopping:
                 break  # a signal arrived during start-up
             slot.start()
@@ -883,6 +1622,9 @@ def main(args: argparse.Namespace) -> int:
                         and not stopping
                         and slot.restarts < MAX_SLOT_RESTARTS):
                     slot.restarts += 1
+                    # Its lease is no longer renewed and, packed, its
+                    # runner still holds the slot: stop that runner first.
+                    _kill_runner(slot)
                     _note(f"slot {slot.config.slot} exited {code}; restart "
                           f"{slot.restarts}/{MAX_SLOT_RESTARTS}")
                     slot.start()
@@ -892,6 +1634,8 @@ def main(args: argparse.Namespace) -> int:
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
+        for lock in card_locks:
+            lock.release()
     rows = []
     for slot in slots:
         summary_path = Path(slot.config.workdir) / "summary.json"
@@ -899,12 +1643,18 @@ def main(args: argparse.Namespace) -> int:
             summary = json.loads(summary_path.read_text("utf-8"))
         except (OSError, json.JSONDecodeError):
             summary = {}
-        rows.append({"slot": slot.config.slot,
-                     "worker_id": slot.config.worker_id,
-                     "gpu_uuid": slot.config.gpu_uuid,
-                     "exit_code": slot.exit_code, "restarts": slot.restarts,
-                     "pids": slot.pids, "reason": summary.get("reason"),
-                     "counts": summary.get("counts", {})})
+        if slot.refused is not None:
+            slot.exit_code = EXIT_REFUSED
+            summary = {"reason": slot.refused}
+        row = {"slot": slot.config.slot,
+               "worker_id": slot.config.worker_id,
+               "gpu_uuid": slot.config.gpu_uuid,
+               "exit_code": slot.exit_code, "restarts": slot.restarts,
+               "pids": slot.pids, "reason": summary.get("reason"),
+               "counts": summary.get("counts", {})}
+        if slot.config.packed:
+            row["gpu_slot"] = slot.config.gpu_slot
+        rows.append(row)
     totals: dict[str, int] = {}
     for row in rows:
         for name, count in row["counts"].items():
@@ -918,10 +1668,23 @@ def main(args: argparse.Namespace) -> int:
         code = EXIT_FAILED
     else:
         code = EXIT_OK
-    print(json.dumps({"schema": WORKER_SUMMARY_SCHEMA, "queue": queue.url,
-                      "host": host, "workdir": str(root), "exit_code": code,
-                      "totals": totals, "slots": rows},
-                     sort_keys=True, indent=2))
+    document = {"schema": WORKER_SUMMARY_SCHEMA, "queue": queue.url,
+                "host": host, "workdir": str(root), "exit_code": code,
+                "totals": totals, "slots": rows}
+    if packing.packed:
+        document["packing"] = {
+            "slots_per_gpu": packing.slots_per_gpu,
+            "cards": cards,
+            "admission": "sum(reserved) + need + margin <= card; an idle "
+                         "card admits any one job",
+            "undeclared_job_mem": (
+                f"{packing.default_job_mem_gib:g} GiB "
+                "(--default-job-mem-gib)"
+                if packing.default_job_mem_gib is not None
+                else "the whole card (runs alone)")}
+    if mps is not None:
+        document["mps"] = mps.summary()
+    print(json.dumps(document, sort_keys=True, indent=2))
     return code
 
 

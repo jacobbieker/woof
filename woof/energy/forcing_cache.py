@@ -1017,7 +1017,11 @@ def prefetch_job(request: Mapping[str, Any], cache_url: str, *,
                     "shareability": why},
         "segment": {"cycle": f"{cycle:%Y-%m-%dT%H:%M:%SZ}"},
         "source": {"name": request["source"]},
-        "resources": {"gpus": 0},
+        # CPU and network only: a packed worker (--slots-per-gpu) neither
+        # reserves card memory for it nor holds it back for lack of room.
+        "resources": {"gpus": 0, "gpu_mem_gib": 0,
+                      "gpu_mem_basis": "prefetch: fetches forcing on CPU "
+                                       "and network, no GPU"},
         "paths": {"hindcast_dir": "../..", "receipt": PREFETCH_RECEIPT_NAME},
     }
 

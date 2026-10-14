@@ -804,6 +804,79 @@ def default_cost_estimate(job: Mapping[str, Any], plan: Plan | None = None
 
 
 # --------------------------------------------------------------------------
+# declared GPU memory (resources.gpu_mem_gib)
+
+_GIB = 1024 ** 3
+
+
+def default_gpu_mem_pricer(job: Mapping[str, Any], sites: SiteSet, *,
+                           now: datetime | None = None) -> dict:
+    """The job's priced GPU memory for ``resources.gpu_mem_gib``.
+
+    What a packed worker (``woof energy worker --slots-per-gpu``) admits a
+    job against.  Pinned per topology:
+
+    * ``wrf-nests``: :func:`woof.energy.plan_wrf_nests.price_plan` -- the
+      planner's own layout and memory-fit loop, priced by
+      :mod:`woof.core.preflight`, stopped before it writes; the accepted
+      tree's priced peak envelope (CUDA context included).  It is the
+      figure the materialized plan's notes give;
+    * ``wrf-tiles``: the planner's per-domain fit ceiling on the card
+      (``woof.downscale._budget_bytes``), an UPPER bound: the parent and
+      every tile are sized under it and run one at a time, but the tiles
+      are not derived before materialize, so their own peaks are not known
+      here;
+    * no ``--card``/``--vram-gib``: unpriced (None), because the planner
+      then sizes on the worker's own card at materialize;
+    * a planner refusal or any pricing error: unpriced, with the reason.
+
+    Unpriced is ``None``, never a guess: the worker prices it with its
+    conservative default (the whole card unless ``--default-job-mem-gib``).
+    """
+
+    kwargs = dict(job["planner"]["kwargs"])
+    topology = job["planner"]["topology"]
+    card, vram_gib = kwargs.get("card"), kwargs.get("vram_gib")
+    if card is None and vram_gib is None:
+        return {"gpu_mem_gib": None,
+                "basis": "unpriced: no --card/--vram-gib, so the planner "
+                         "sizes this job on the worker's own card at "
+                         "materialize"}
+    try:
+        if topology == "wrf-nests":
+            import io
+
+            from woof.energy.plan_wrf_nests import price_plan
+
+            # The emitted configuration's own load notes (output presets)
+            # are materialize's to print, once, not one set per cluster.
+            with contextlib.redirect_stderr(io.StringIO()):
+                sizing = price_plan(sites, now=now, **kwargs)
+            return {"gpu_mem_gib": round(sizing["peak_bytes"] / _GIB, 3),
+                    "basis": (f"wrf-nests planner priced peak "
+                              f"({sizing['binding_phase']} phase, "
+                              f"{sizing['domains']} domain(s)) on a "
+                              f"{sizing['vram_gib']:g} GiB card")}
+        if topology == "wrf-tiles":
+            from woof.downscale import _budget_bytes
+            from woof.energy.plan_wrf_tiles import _resolve_capacity
+
+            capacity, _, _ = _resolve_capacity(card, vram_gib)
+            _, ceiling = _budget_bytes(capacity)
+            return {"gpu_mem_gib": round(ceiling / _GIB, 3),
+                    "basis": (f"wrf-tiles per-domain fit ceiling on a "
+                              f"{capacity:g} GiB card (an upper bound: tiles "
+                              "are derived at materialize)")}
+    except Exception as error:  # noqa: BLE001 - pricing never fails a plan
+        lines = str(error).strip().splitlines()
+        text = lines[0] if lines else type(error).__name__
+        return {"gpu_mem_gib": None,
+                "basis": f"unpriced: {type(error).__name__}: {text[:300]}"}
+    return {"gpu_mem_gib": None,
+            "basis": f"unpriced: topology {topology!r} has no pricer"}
+
+
+# --------------------------------------------------------------------------
 # plan
 
 
@@ -834,6 +907,22 @@ def _planner_kwargs(request: HindcastRequest, cluster: Cluster,
     return topology, kwargs
 
 
+def _written_gpu_mem(outdir: Path, job_id: str) -> dict | None:
+    """The priced memory an existing ``job.json`` already records."""
+
+    path = Path(outdir) / JOBS_DIR / job_id / JOB_NAME
+    if not path.is_file():
+        return None
+    try:
+        resources = json.loads(path.read_text("utf-8")).get("resources") or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    if "gpu_mem_basis" not in resources:
+        return None
+    return {"gpu_mem_gib": resources.get("gpu_mem_gib"),
+            "basis": resources.get("gpu_mem_basis")}
+
+
 def _cluster_sites_bytes(site_set: SiteSet) -> bytes:
     # The bytes woof.energy.contracts._write_json would write.
     return (json.dumps(site_set.to_json(), indent=1, sort_keys=False)
@@ -844,10 +933,16 @@ def _build_jobs(request: HindcastRequest, clusters: list[Cluster],
                 site_set: SiteSet, sites_path: Path,
                 partition_ref: dict | None, *, selector: Callable[..., Any],
                 selector_name: str, cost_estimator: Callable[..., dict],
-                now: datetime | None
+                now: datetime | None,
+                gpu_mem_pricer: Callable[..., dict] | None = None
                 ) -> tuple[list[dict], dict[str, bytes], dict]:
     """Job documents, cluster site files (relative path -> bytes), and the
-    per-cluster summary."""
+    per-cluster summary.
+
+    ``gpu_mem_pricer(job, sites, now=...)`` fills ``resources.gpu_mem_gib``
+    and ``resources.gpu_mem_basis``; it is called once per cluster, topology,
+    source and planner arguments (the segment start aside: the layout does
+    not depend on it) and its answer reused for every such segment."""
 
     outdir = request.outdir
     segments = segment_windows(request.start, request.end,
@@ -861,6 +956,7 @@ def _build_jobs(request: HindcastRequest, clusters: list[Cluster],
     jobs: list[dict] = []
     files: dict[str, bytes] = {}
     summary: dict[str, dict] = {}
+    priced: dict[bytes, dict] = {}
     for cluster in clusters:
         slug = _slug(cluster.cluster_id)
         subset = _subset(site_set, cluster.site_ids,
@@ -990,6 +1086,25 @@ def _build_jobs(request: HindcastRequest, clusters: list[Cluster],
                           "materialized": MATERIALIZED_NAME,
                           "sites_forecast": SITES_FORECAST_NAME},
             }
+            if gpu_mem_pricer is not None:
+                price_key = _canonical({
+                    "sites": content_sha, "topology": topology,
+                    "kwargs": {k: v for k, v in kwargs.items()
+                               if k != "start"}})
+                written = _written_gpu_mem(outdir, job_id)
+                if price_key not in priced and written is not None:
+                    # A re-plan: the job.json on disk is never rewritten,
+                    # so its price is the one that counts; nothing to run.
+                    priced[price_key] = written
+                if price_key not in priced:
+                    answer = dict(gpu_mem_pricer(job, subset, now=now))
+                    answer["basis"] = (f"{answer.get('basis')}; priced on "
+                                       f"the {_iso(segment.run_start)} "
+                                       "segment")
+                    priced[price_key] = answer
+                answer = priced[price_key]
+                job["resources"]["gpu_mem_gib"] = answer.get("gpu_mem_gib")
+                job["resources"]["gpu_mem_basis"] = answer.get("basis")
             job["cost"] = cost_estimator(job, None)
             jobs.append(job)
             previous = choice.source
@@ -1177,8 +1292,13 @@ def plan_hindcast(request: HindcastRequest, *, dry_run: bool = False,
                   resume: bool = False,
                   source_selector: Callable[..., Any] | None = None,
                   cost_estimator: Callable[..., dict] | None = None,
-                  now: datetime | None = None) -> dict:
+                  now: datetime | None = None,
+                  gpu_mem_pricer: Callable[..., dict] | None = None) -> dict:
     """Expand the request into jobs and write them with the manifest.
+
+    Every job's ``resources.gpu_mem_gib`` is ``gpu_mem_pricer``'s answer
+    (default :func:`default_gpu_mem_pricer`; None when unpriced, with the
+    reason in ``resources.gpu_mem_basis``).
 
     Re-running an identical request is a no-op that keeps every job's
     status.  A different request into a directory that already holds a
@@ -1199,7 +1319,8 @@ def plan_hindcast(request: HindcastRequest, *, dry_run: bool = False,
     jobs, files, cluster_summary = _build_jobs(
         request, clusters, site_set, sites_path, partition_ref,
         selector=selector, selector_name=selector_name,
-        cost_estimator=cost_estimator or default_cost_estimate, now=now)
+        cost_estimator=cost_estimator or default_cost_estimate, now=now,
+        gpu_mem_pricer=gpu_mem_pricer or default_gpu_mem_pricer)
     prefetch = _attach_forcing(request, jobs)
     outdir = request.outdir
     request_record = request.to_json()
@@ -2733,6 +2854,7 @@ __all__ = [
     "PARTITION_SCHEMA", "JOB_STATUSES", "TOPOLOGIES", "Cluster",
     "HindcastRefused", "HindcastRequest", "Segment", "SourceChoice",
     "default_cluster_planner", "default_cost_estimate",
+    "default_gpu_mem_pricer",
     "default_post_step", "default_source_selector", "fallback_select",
     "hindcast_status", "load_clusters", "load_job", "locate_job",
     "materialize_job", "mirror_forcing", "parse_utc", "patch_domain_tables",

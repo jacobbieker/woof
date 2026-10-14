@@ -71,7 +71,9 @@ card) before trusting a card ranking at either end.
   because the card is rented while it runs.
 
 Per offer (provider, instance): GPU-hours on that offer's card; billed
-instance-hours = GPU-hours / (GPUs per instance * packing efficiency);
+instance-hours = GPU-hours / (GPUs per instance * packing efficiency),
+where the packing efficiency is the fraction of paid card time a job holds
+the card at all (parents waited on, staging, the tail of a batch);
 wall clock for ``--instances`` instances = the larger of billed hours /
 instances and one segment's critical path (parent, intermediates, one
 leaf tile: segments and tiles are independent, the chain is not); spot
@@ -79,6 +81,35 @@ cost carries ``spot_rework_fraction`` extra time.  The band: ``low`` is
 the cheapest of the :data:`UTILISATION` pairs at the optimistic end of
 :data:`THROUGHPUT_BAND` (1.5x), ``high`` the dearest at the pessimistic
 end (0.5x), so it covers both the bandwidth scaling and the knee.
+
+**Several jobs per card** (``--slots-per-gpu N|auto``, the worker's flag
+of the same name; ``--mps`` for CUDA MPS).  ``k`` copies of a domain share
+one card, ``k = min(N, floor((card memory - PACKING_MARGIN_GIB) / the
+domain's priced peak))`` (``auto``: N = :data:`AUTO_MAX_SLOTS_PER_GPU`,
+capped at the offer's vCPUs per GPU when the deploy machine tables know
+the instance, as the worker caps it at its CPUs),
+so a large domain packs once and gains nothing.  Compute splits into the
+occupancy-bound part, ``cells / (K B u(c))`` per step with ``u(c) = c / (c
++ S h)`` (the utilisation pair's knee ``h``), and the per-step cost ``L``:
+
+* with ``--mps`` kernels of separate processes run concurrently: ``k``
+  copies fill the card like one grid of ``k * c`` cells, so the ideal gain
+  on the occupancy-bound part is ``u(k c) / u(c)`` -- close to ``k`` for a
+  grid far below the knee, close to 1 for one that already fills the card
+  -- and one copy's launches overlap the others' kernels, so the ideal gain
+  on ``L`` is ``k``.  Without MPS kernels time-slice and both gains are 1;
+* either way, startup, output and checkpoint time of one job overlap the
+  others' work: the ideal is that ``1 - 1/k`` of it is hidden;
+* a fraction ``r`` of each ideal is realised, ``r`` =
+  :data:`PACKING_REALISATION` (pessimistic, central, optimistic) -- an
+  assumption, because no packed run has been timed by this tree; the band
+  pairs the pessimistic ``r`` with the pessimistic throughput and
+  utilisation pair, the optimistic with the optimistic.
+
+Card-seconds per copy are then ``bandwidth / (1 + r (u(kc)/u(c) - 1)) +
+launch / (1 + r (k - 1)) + overheads (1 - r (1 - 1/k))``.  The critical
+path stretches: a packed copy shares the card, so its compute wall is
+``k`` times its card share.
 
 Storage: leaf tiles' stored hours (segment hours minus spin-up) at the
 history cadence, ``--store-preset`` fields on every model level, times
@@ -313,6 +344,17 @@ DEFAULT_COMPRESSION_RATIO = 0.35
 #: parent, stages data or idles at the tail of a batch).  An assumption.
 DEFAULT_PACKING_EFFICIENCY = 0.85
 
+#: Most copies ``--slots-per-gpu auto`` packs on one card, and the card
+#: memory kept free beside packed jobs (GiB): the worker's own numbers
+#: (:mod:`woof.energy.packing`).
+from woof.energy.packing import AUTO_MAX_SLOTS_PER_GPU  # noqa: E402
+from woof.energy.packing import DEFAULT_MEM_MARGIN_GIB as PACKING_MARGIN_GIB  # noqa: E402
+
+#: Fraction of the ideal packing gain realised: (pessimistic, central,
+#: optimistic).  An assumption, not a measurement: MPS contention, shared
+#: L2 and memory bandwidth, and CPU launch threads all take some of it.
+PACKING_REALISATION = (0.5, 0.75, 1.0)
+
 # --------------------------------------------------------------------------
 # synthesis constants (summary and partition modes)
 # --------------------------------------------------------------------------
@@ -409,10 +451,82 @@ def _stored_fields(preset: str, nz: int) -> int:
     return three_d * nz + two_d
 
 
+def domain_peak_gib(domain: DomainWork) -> float:
+    """The domain's priced peak, or the memory fit's figure for its cells."""
+
+    if domain.peak_gib is not None:
+        return float(domain.peak_gib)
+    return VRAM_INTERCEPT_GIB + domain.cells * VRAM_KIB_PER_CELL * KIB / GIB
+
+
+def offer_vcpus_per_gpu(offer: Mapping[str, Any]) -> int | None:
+    """vCPUs per GPU of an offer, from the deploy renderers' machine tables
+    (None when the instance is not in them)."""
+
+    from woof.energy.deploy import AWS_GPU_INSTANCES, GCP_GPU_MACHINES
+
+    table = {"aws": AWS_GPU_INSTANCES, "gcp": GCP_GPU_MACHINES}.get(
+        str(offer.get("provider")), {})
+    shape = table.get(str(offer.get("instance")))
+    if shape is None or shape.gpus < 1:
+        return None
+    return max(1, shape.vcpus // shape.gpus)
+
+
+def packed_copies(domain: DomainWork, card: CardRow,
+                  slots_per_gpu: int | str,
+                  vcpus_per_gpu: int | None = None) -> int:
+    """Copies of ``domain`` one card holds at once (module docstring).
+
+    ``auto`` is also bounded by ``vcpus_per_gpu`` (one CPU core drives each
+    slot's kernels), as the worker's ``auto`` is."""
+
+    if slots_per_gpu == "auto":
+        cap = AUTO_MAX_SLOTS_PER_GPU
+        if vcpus_per_gpu is not None:
+            cap = min(cap, vcpus_per_gpu)
+    else:
+        cap = int(slots_per_gpu)
+    if cap <= 1:
+        return 1
+    by_memory = int((card.memory_gib - PACKING_MARGIN_GIB)
+                    // domain_peak_gib(domain))
+    return max(1, min(cap, by_memory))
+
+
+def packing_factors(domain: DomainWork, card: CardRow, copies: int, *,
+                    mps: bool, realisation: float,
+                    utilisation: Utilisation = CENTRAL) -> dict[str, float]:
+    """Multipliers on one copy's card-seconds when ``copies`` share a card.
+
+    ``bandwidth`` scales the occupancy-bound part of compute, ``launch``
+    the per-step cost, ``overhead`` startup, output and checkpoint (module
+    docstring)."""
+
+    if copies <= 1:
+        return {"copies": 1, "ideal_compute_gain": 1.0, "compute_gain": 1.0,
+                "ideal_launch_gain": 1.0, "launch_gain": 1.0,
+                "bandwidth": 1.0, "launch": 1.0, "overhead": 1.0}
+    cells = domain.cells
+    knee = utilisation.half_saturation_cells_per_sm
+    ideal = (_occupancy(copies * cells, card.sm_count, knee)
+             / _occupancy(cells, card.sm_count, knee)) if mps else 1.0
+    ideal_launch = float(copies) if mps else 1.0
+    gain = 1.0 + realisation * (ideal - 1.0)
+    launch_gain = 1.0 + realisation * (ideal_launch - 1.0)
+    return {"copies": copies, "ideal_compute_gain": ideal,
+            "compute_gain": gain, "ideal_launch_gain": ideal_launch,
+            "launch_gain": launch_gain, "bandwidth": 1.0 / gain,
+            "launch": 1.0 / launch_gain,
+            "overhead": 1.0 - realisation * (1.0 - 1.0 / copies)}
+
+
 def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
                    factor: float = 1.0,
                    leaf_preset: str = "full",
-                   utilisation: Utilisation = CENTRAL) -> dict[str, float]:
+                   utilisation: Utilisation = CENTRAL,
+                   packing: Mapping[str, float] | None = None
+                   ) -> dict[str, float]:
     """GPU seconds for one copy of ``domain`` on ``card``, by component.
 
     ``factor`` scales throughput (the band); overheads are not scaled.
@@ -421,6 +535,10 @@ def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
     parent or intermediate writes the full tape its children are built from.
     ``saturated_s`` is the compute a fully occupied card with no per-step
     cost would take; ``saturated_s / compute_s`` is the utilisation.
+    ``packing`` (:func:`packing_factors`, priced under the same
+    ``utilisation``) turns them into the card-seconds one of several
+    co-resident copies costs; ``wall_s`` is then that copy's own wall time
+    on the shared card.
     """
 
     steps = math.ceil(domain.run_seconds / domain.dt_s)
@@ -430,8 +548,9 @@ def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
         cells, card.sm_count, utilisation.half_saturation_cells_per_sm)
     acoustic = ((domain.sound_steps + LARGE_STEP_WEIGHT)
                 / (REFERENCE_SOUND_STEPS + LARGE_STEP_WEIGHT))
-    compute = steps * acoustic * (cells / throughput
-                                  + utilisation.step_overhead_s)
+    bandwidth = steps * acoustic * cells / throughput
+    launch = steps * acoustic * utilisation.step_overhead_s
+    compute = bandwidth + launch
     preset = leaf_preset if domain.role == "leaf" else "full"
     frames = int(domain.run_seconds // domain.history_s) + 1
     frame_bytes = _stored_fields(preset, domain.nz) * domain.nx * domain.ny * 4
@@ -440,10 +559,20 @@ def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
                 if domain.restart_s else 0)
     checkpoint = restarts * RESTART_3D_FIELDS * cells * 4 / (D2H_GBPS * 1e9)
     startup = PREP_INTERCEPT_S + PREP_S_PER_MCELL * cells / 1e6
+    overheads = output + checkpoint + startup
+    wall = compute + overheads
+    if packing is not None and packing["copies"] > 1:
+        compute = (bandwidth * packing["bandwidth"]
+                   + launch * packing["launch"])
+        output *= packing["overhead"]
+        checkpoint *= packing["overhead"]
+        startup *= packing["overhead"]
+        wall = compute * packing["copies"] + overheads
     return {"steps": steps, "compute_s": compute, "output_s": output,
             "checkpoint_s": checkpoint, "startup_s": startup,
             "saturated_s": steps * acoustic * cells / saturated,
-            "total_s": compute + output + checkpoint + startup}
+            "total_s": compute + output + checkpoint + startup,
+            "wall_s": wall}
 
 
 # --------------------------------------------------------------------------
@@ -930,21 +1059,33 @@ class Campaign:
 
 def _sum_seconds(domains: Sequence[DomainWork], card: CardRow, k: float,
                  factor: float, leaf_preset: str = "full",
-                 utilisation: Utilisation = CENTRAL
+                 utilisation: Utilisation = CENTRAL, *,
+                 slots_per_gpu: int | str = 1, mps: bool = False,
+                 realisation: float = 1.0,
+                 packing_rows: list | None = None,
+                 vcpus_per_gpu: int | None = None
                  ) -> tuple[dict[str, float], float]:
     """Totals by component over ``domains`` (counts applied) and the
-    critical path: the costliest copy at each chain level, summed."""
+    critical path: the costliest copy at each chain level, summed.
+    ``packing_rows`` collects each domain's packing record."""
 
     totals = {"compute_s": 0.0, "output_s": 0.0, "checkpoint_s": 0.0,
               "startup_s": 0.0, "saturated_s": 0.0, "total_s": 0.0}
     by_level: dict[int, float] = {}
     for domain in domains:
+        packing = packing_factors(
+            domain, card, packed_copies(domain, card, slots_per_gpu,
+                                        vcpus_per_gpu),
+            mps=mps, realisation=realisation, utilisation=utilisation)
+        if packing_rows is not None:
+            packing_rows.append((domain, packing))
         one = domain_seconds(domain, card, k, factor=factor,
-                             leaf_preset=leaf_preset, utilisation=utilisation)
+                             leaf_preset=leaf_preset, utilisation=utilisation,
+                             packing=packing)
         for key in totals:
             totals[key] += one[key] * domain.count
         by_level[domain.level] = max(by_level.get(domain.level, 0.0),
-                                     one["total_s"])
+                                     one["wall_s"])
     return totals, sum(by_level.values())
 
 
@@ -1121,6 +1262,7 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
              compression_ratio: float = DEFAULT_COMPRESSION_RATIO,
              chunk_mib: float = 8.0,
              packing_efficiency: float = DEFAULT_PACKING_EFFICIENCY,
+             slots_per_gpu: int | str = 1, mps: bool = False,
              inputs: Mapping[str, Any] | None = None,
              notes: Sequence[str] = (),
              forcing: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -1131,6 +1273,15 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
 
     if instances < 1:
         raise CostRefusal("--instances must be at least 1")
+    if slots_per_gpu != "auto" and (isinstance(slots_per_gpu, bool)
+                                    or not isinstance(slots_per_gpu, int)
+                                    or slots_per_gpu < 1):
+        raise CostRefusal(f"--slots-per-gpu {slots_per_gpu!r} must be a "
+                          "positive count or 'auto'")
+    packed = slots_per_gpu != 1
+    if mps and not packed:
+        raise CostRefusal("--mps models concurrent kernels of packed jobs; "
+                          "with --slots-per-gpu 1 nothing is packed")
     if not 0 < packing_efficiency <= 1:
         raise CostRefusal("--packing-efficiency must be in (0, 1]")
     if not 0 < compression_ratio <= 1.5:
@@ -1182,10 +1333,16 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
             out_offers.append(row)
             continue
         bands: dict[str, float] = {}
+        unpacked: dict[str, float] = {}
         critical = 0.0
         components = None
         cluster_rows = []
         utilised: dict[str, float] = {}
+        packing_rows: list = []
+        vcpus_per_gpu = offer_vcpus_per_gpu(offer) if packed else None
+        realisations = {"central": PACKING_REALISATION[1],
+                        "low": PACKING_REALISATION[2],
+                        "high": PACKING_REALISATION[0]}
         # (band, throughput factor, utilisation pair): central once; low
         # and high as the envelope over the pairs at either band end.
         evaluations = [("central", 1.0, "central")] + [
@@ -1194,14 +1351,24 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
             for label in UTILISATION]
         for band, factor, ulabel in evaluations:
             seg_total = 0.0
+            seg_unpacked = 0.0
             seg_components = {"compute_s": 0.0, "output_s": 0.0,
                               "checkpoint_s": 0.0, "startup_s": 0.0}
             saturated = 0.0
             path = 0.0
             for cid, domains in per_cluster:
-                totals, crit = _sum_seconds(domains, card, k_by[ulabel], factor,
-                                            leaf_preset=store_preset,
-                                            utilisation=UTILISATION[ulabel])
+                totals, crit = _sum_seconds(
+                    domains, card, k_by[ulabel], factor,
+                    leaf_preset=store_preset, utilisation=UTILISATION[ulabel],
+                    slots_per_gpu=slots_per_gpu, mps=mps,
+                    realisation=realisations[band],
+                    packing_rows=packing_rows if band == "central" else None,
+                    vcpus_per_gpu=vcpus_per_gpu)
+                if packed:
+                    seg_unpacked += _sum_seconds(
+                        domains, card, k_by[ulabel], factor,
+                        leaf_preset=store_preset,
+                        utilisation=UTILISATION[ulabel])[0]["total_s"]
                 seg_total += totals["total_s"]
                 saturated += totals["saturated_s"]
                 for key in seg_components:
@@ -1213,16 +1380,20 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
                         "leaf_tiles": sum(d.count for d in domains if d.role == "leaf"),
                         "gpu_hours": round(totals["total_s"] * campaign.segments / 3600.0, 2)})
             value = seg_total * campaign.segments
+            plain = seg_unpacked * campaign.segments
             if band == "central":
                 bands["central"] = value
+                unpacked["central"] = plain
                 critical = path
                 components = {key[:-2] + "_h": round(
                     value * campaign.segments / 3600.0, 2)
                     for key, value in seg_components.items()}
             elif band == "low":
                 bands["low"] = min(bands.get("low", value), value)
+                unpacked["low"] = min(unpacked.get("low", plain), plain)
             else:
                 bands["high"] = max(bands.get("high", value), value)
+                unpacked["high"] = max(unpacked.get("high", plain), plain)
             if band == "central" or (band, ulabel) in (
                     ("low", "optimistic"), ("high", "pessimistic")):
                 name = {"central": "central", "low": "optimistic",
@@ -1252,6 +1423,12 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
             cost[market] = {"usd_per_instance_hour": price, **{
                 key: round(value * float(price), 2)
                 for key, value in hours.items()}}
+        if packed:
+            row["packing"] = _packing_row(packing_rows, slots_per_gpu, mps)
+            row["packing"]["vcpus_per_gpu"] = vcpus_per_gpu
+            row["gpu_hours_one_job_per_gpu"] = {
+                key: round(value / 3600.0, 2)
+                for key, value in unpacked.items()}
         row.update({
             "gpu_hours": gpu_hours,
             "gpu_hours_by_component": components,
@@ -1304,6 +1481,14 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
         if forcing is not None:
             row["forcing_usd"] = _forcing_usd(forcing, offer, storage_rates,
                                               markets)
+            if packed:
+                # The two sections are priced independently: a download
+                # here holds a whole GPU, so with jobs sharing cards the
+                # slot cost of waiting on forcing is an upper bound.
+                row["forcing_usd"]["note"] = (
+                    "slot-hours are priced at a whole GPU; with "
+                    "--slots-per-gpu the card is shared while a job waits "
+                    "on forcing, so these are upper bounds")
         if mode != "plan":
             row["work_per_segment"] = _work_summary(mode, per_cluster)
         if work_doc is None:
@@ -1350,6 +1535,24 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
                 "prep_intercept_s": PREP_INTERCEPT_S,
                 "prep_s_per_mcell": PREP_S_PER_MCELL,
                 "packing_efficiency": packing_efficiency,
+                "slots_per_gpu": slots_per_gpu,
+                "mps": mps,
+                "packing_margin_gib": PACKING_MARGIN_GIB,
+                "packing_realisation": {
+                    "pessimistic": PACKING_REALISATION[0],
+                    "central": PACKING_REALISATION[1],
+                    "optimistic": PACKING_REALISATION[2],
+                    "meaning": "fraction of the ideal packing gain realised "
+                               "(an assumption: no packed run has been "
+                               "timed); 'low' cost uses the optimistic "
+                               "value, 'high' the pessimistic"},
+                "packing_curve": (
+                    "copies k = min(slots, (card GiB - margin) // domain "
+                    "peak GiB); under MPS the occupancy-bound compute gains "
+                    "1 + r*(u(k*c)/u(c) - 1) with u the pair's knee and the "
+                    "per-step cost gains 1 + r*(k - 1); without MPS "
+                    "(time-slicing) both gain 1; overheads x (1 - r*(1 - "
+                    "1/k))"),
                 "spot_rework_fraction": spot_rework,
                 "vram_kib_per_cell": VRAM_KIB_PER_CELL,
                 "vram_intercept_gib": VRAM_INTERCEPT_GIB,
@@ -1366,6 +1569,36 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
         "offers": out_offers,
         "notes": notes,
     }
+
+
+def _packing_row(rows, slots_per_gpu: int | str, mps: bool) -> dict:
+    """Per-role packing summary for one offer (central realisation)."""
+
+    by_role: dict[str, dict[str, Any]] = {}
+    for domain, packing in rows:
+        agg = by_role.setdefault(domain.role, {
+            "domains": 0, "copies_min": None, "copies_max": None,
+            "compute_gain_min": None, "compute_gain_max": None,
+            "launch_gain_min": None, "launch_gain_max": None,
+            "peak_gib_max": 0.0})
+        agg["domains"] += domain.count
+        for key, value in (("copies", packing["copies"]),
+                           ("compute_gain", packing["compute_gain"]),
+                           ("launch_gain", packing["launch_gain"])):
+            low, high = agg[f"{key}_min"], agg[f"{key}_max"]
+            agg[f"{key}_min"] = value if low is None else min(low, value)
+            agg[f"{key}_max"] = value if high is None else max(high, value)
+        agg["peak_gib_max"] = max(agg["peak_gib_max"],
+                                  domain_peak_gib(domain))
+    for agg in by_role.values():
+        for key in ("compute_gain_min", "compute_gain_max", "launch_gain_min",
+                    "launch_gain_max", "peak_gib_max"):
+            agg[key] = round(agg[key], 3)
+    return {"slots_per_gpu": slots_per_gpu, "mps": mps,
+            "by_role": by_role,
+            "basis": "central realisation; copies bounded by the card's "
+                     "memory less the margin, divided by each domain's "
+                     "priced peak"}
 
 
 def _work_summary(mode: str, per_cluster) -> Any:
@@ -1474,6 +1707,15 @@ def render_table(document: Mapping[str, Any]) -> str:
     instances = document["offers"][0]["instances"] if document["offers"] else 1
     lines.append(f"wall clock is for {instances} instance(s) of each offer; "
                  "GPU-hours exclude the packing loss, instance-hours include it")
+    assumptions = (document.get("model") or {}).get("assumptions") or {}
+    if assumptions.get("slots_per_gpu", 1) != 1:
+        lines.append(
+            f"packed: --slots-per-gpu {assumptions['slots_per_gpu']}"
+            + (" with CUDA MPS" if assumptions.get("mps") else
+               " without MPS (time-sliced kernels: overheads overlap, "
+               "compute does not)")
+            + "; GPU-hours are card-hours with jobs sharing cards "
+            "(gpu_hours_one_job_per_gpu in the JSON is the unpacked figure)")
     for note in document.get("notes") or []:
         lines.append(f"note: {note}")
     return "\n".join(lines)
@@ -1494,6 +1736,17 @@ def _parse_chain(text: str | None) -> tuple[float, ...] | None:
         raise CostRefusal(f"--chain-m {text!r} must list positive spacings, "
                           "coarsest first, ending at the leaf")
     return chain
+
+
+def _slots_arg(value: Any) -> int | str:
+    from woof.energy.packing import parse_slots_per_gpu
+
+    if value is None:
+        return 1
+    try:
+        return parse_slots_per_gpu(value)
+    except ValueError as error:
+        raise CostRefusal(str(error)) from None
 
 
 def run(args) -> dict[str, Any]:
@@ -1686,6 +1939,8 @@ def run(args) -> dict[str, Any]:
         leaf_nz=leaf_nz, parent_nz=parent_nz,
         store_preset=args.store_preset, compression_ratio=args.compression_ratio,
         chunk_mib=args.chunk_mib, packing_efficiency=args.packing_efficiency,
+        slots_per_gpu=_slots_arg(getattr(args, "slots_per_gpu", 1)),
+        mps=bool(getattr(args, "mps", False)),
         inputs=inputs, notes=notes, forcing=forcing)
     document["prices"]["path"] = str(Path(args.prices) if args.prices else DEFAULT_PRICES)
     return document
