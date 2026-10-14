@@ -995,6 +995,38 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     return plan
 
 
+def price_plan(sites: SiteSet, *, dx_m: float = 100.0,
+               corridor_km: float = 2.0, parent_dx_m: float | None = None,
+               start: str | None = None, hours: float = 24.0,
+               source: str | None = None, card: str | None = None,
+               vram_gib: float | None = None, max_domains: int | None = None,
+               nz: int | None = None, now: datetime | None = None,
+               column_request: dict | None = None) -> dict:
+    """The priced peak of the plan :func:`build_plan` would emit, writing
+    nothing.
+
+    The same layout and memory-fit loop (the emitted configuration priced
+    by ``woof.domain_wizard._sizing_phases``, i.e.
+    :mod:`woof.core.preflight`, shrinking leaves until the tree fits the
+    card's fit target), stopped before any file is written.  Returns
+    ``peak_bytes`` (the accepted tree's priced peak envelope, CUDA context
+    included), ``target_bytes``, ``alloc_bytes``, ``binding_phase``,
+    ``vram_gib``, ``domains`` and the ``attempts``.  Raises what
+    :func:`build_plan` would (:class:`PlanRefused` and its subclasses).
+    """
+
+    import tempfile
+
+    _, sizing = _build(
+        sites, outdir=Path(tempfile.gettempdir()) / "woof-price-only",
+        dx_m=dx_m, corridor_km=corridor_km, parent_dx_m=parent_dx_m,
+        start=start, hours=hours, source=source, card=card,
+        vram_gib=vram_gib, max_domains=max_domains, nz=nz, sites_path=None,
+        name="price-only", now=now, column_request=column_request,
+        price_only=True)
+    return sizing
+
+
 def _planner_refusal(source: str) -> str | None:
     """Why this door cannot emit for ``source`` (the selector's ``planner``
     check), or None: :func:`_ensure_sources`'s own refusal, so a source
@@ -1059,8 +1091,13 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
            max_domains: int | None, nz: int | None, sites_path: Path | None,
            name: str | None, now: datetime | None,
            source_priority: Sequence[str] | None = None,
-           column_request: dict | None = None) -> tuple[Plan, dict]:
-    """:func:`build_plan`, also returning the sizing record ``main`` prints."""
+           column_request: dict | None = None,
+           price_only: bool = False) -> tuple[Plan | None, dict]:
+    """:func:`build_plan`, also returning the sizing record ``main`` prints.
+
+    ``price_only`` stops once the memory-fit loop has accepted a layout and
+    returns ``(None, sizing)`` without writing anything (:func:`price_plan`).
+    """
 
     from woof import domain_wizard as dw
 
@@ -1196,6 +1233,12 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
                 "larger --card/--vram-gib, narrow --corridor-km or coarsen "
                 "--dx-m.")
         cap = new_cap
+
+    if price_only:
+        return None, {"peak_bytes": peak, "target_bytes": target,
+                      "alloc_bytes": alloc, "binding_phase": phase,
+                      "vram_gib": budget.vram_gib, "domains": layout.count,
+                      "attempts": attempts}
 
     # Every check that can refuse runs before a byte is written: the
     # ownership and footprints come from the accepted in-memory experiment.
@@ -1425,7 +1468,7 @@ def main(args) -> int:
     return 0
 
 
-__all__ = ["TOPOLOGY", "build_plan", "main", "PlanRefused",
+__all__ = ["TOPOLOGY", "build_plan", "price_plan", "main", "PlanRefused",
            "DomainLimitRefused", "VramRefused", "default_start_cycle",
            "parse_start", "chain_ratios", "build_layout", "project_sites",
            "choose_projection"]

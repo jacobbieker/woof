@@ -86,7 +86,10 @@ For each offer (provider and instance):
 
 - **GPU-hours** are counted on that offer's card.
 - **Instance-hours** = GPU-hours / (GPUs per instance × `--packing-efficiency`,
-  default 0.85).
+  default 0.85). The packing efficiency is the fraction of paid card time
+  that a job holds the card at all. The rest is spent waiting on a parent,
+  staging data or idling at the tail of a batch. Several jobs sharing one
+  card are a separate question (`--slots-per-gpu`, below).
 - **Wall clock** for `--instances` instances is the larger of instance-hours
   / instances and one segment's critical path. Segments and the tiles inside
   a segment run independently, but a segment's parent must finish before
@@ -114,6 +117,46 @@ For each offer (provider and instance):
 - **Plan mode only**: a plan whose tiles were sized for a bigger card than
   the offer's is refused for that offer, with the `--card` to re-plan with.
   Summary and partition modes size tiles to each offer's card.
+
+### Several jobs per GPU (`--slots-per-gpu`, `--mps`)
+
+`woof energy worker --slots-per-gpu N|auto [--mps]` packs jobs onto each
+card (docs/energy-hindcast/queue-worker.md). The estimate prices that with
+the same flags. It is a model, not a measurement: no packed run has been
+timed by this tree.
+
+- **Copies.** `k = min(N, floor((card GiB - 1 GiB margin) / the domain's
+  priced peak))`. With `auto`, N is 8, capped at the offer's vCPUs per GPU
+  when the deploy machine tables know the instance, as the worker caps it
+  at its CPUs. The cap is 4 on g5/g6e.xlarge and 8 on p5/p4d. A domain
+  priced at most of the card packs once and gains nothing.
+- **Utilisation curve.** Compute has two parts: the occupancy-bound part,
+  under the utilisation pair's knee `u(c) = c / (c + S h)`, and the
+  per-step cost `L`. Under **CUDA MPS** (`--mps`) kernels of separate
+  processes run concurrently, so `k` copies of a grid of `c` cells fill the
+  card like one grid of `k * c` cells. The ideal gain on the
+  occupancy-bound part is `u(k c) / u(c)`. That is close to `k` for a grid
+  far below the knee and close to 1 for a grid that already fills the card,
+  so it saturates with cells. One copy's launches also overlap the other
+  copies' kernels, so the ideal gain on `L` is `k`. **Without MPS** kernels
+  time-slice and both gains are 1.
+- **Overlap.** Either way, a job's startup, output and checkpoint time
+  overlaps the other jobs' work. Ideally `1 - 1/k` of it is hidden.
+- **Realisation.** A fraction `r` of each ideal is realised: 0.5
+  pessimistic, 0.75 central, 1.0 optimistic. This is an assumption, and it
+  stands for MPS contention, shared L2 and memory bandwidth, and CPU launch
+  threads. The `high` band pairs the pessimistic `r` with the pessimistic
+  throughput and utilisation pair, and `low` pairs the optimistic ones.
+- **Card-seconds per copy** = `bandwidth / (1 + r (u(kc)/u(c) - 1)) +
+  launch / (1 + r (k - 1)) + overheads × (1 - r (1 - 1/k))`. The critical
+  path gets longer, because a packed copy's compute wall is `k` times its
+  share of the card.
+
+With `--slots-per-gpu 1` (the default) every figure is unchanged. When
+packing, `gpu_hours` are card-hours with jobs sharing cards.
+`gpu_hours_one_job_per_gpu` gives the unpacked figure, and each offer's
+`packing` block gives the copies, the compute gain and the launch gain per
+role. `--mps` without packing is refused.
 
 In summary and partition modes, each cluster gets the planner's default
 chain: a parent at 5x the leaf spacing, forced directly by the global
@@ -380,9 +423,27 @@ What moves these numbers most:
 - **Cluster size.** The central scenario's 4,000 clusters average about
   146 km² of leaf cover. That is one roughly 82x82x60 tile, 0.4 M cells,
   which fills less than half an H100 under the occupancy knee. Fewer,
-  larger clusters, or several small tiles sharing one GPU (CUDA MPS or
-  several processes per card, which this model does not credit), would
-  reduce GPU-hours.
+  larger clusters would reduce GPU-hours, and so would several small jobs
+  sharing one GPU (next).
+- **Packing.** The same command with `--slots-per-gpu auto --mps` packs 8
+  copies per H100 or A100 (4 per L40S on g6e.xlarge, capped by its 4
+  vCPUs). The model then gives the following. These are ESTIMATES: the
+  realisation `r` is an assumption, and nothing packed has been timed.
+
+  | AWS instance | GPU-hours, one job per GPU | packed + MPS | spot, one job per GPU | packed + MPS |
+  |---|---:|---:|---:|---:|
+  | p5.48xlarge | 395k | 197k (106k-697k) | $1.76M | $0.87M ($0.47M-$3.10M) |
+  | p4d.24xlarge | 699k | 393k (219k-1.32M) | $1.00M | $0.56M ($0.31M-$1.88M) |
+  | g6e.xlarge | 1.40M | 843k (438k-3.55M) | $1.36M | $0.82M ($0.43M-$3.45M) |
+
+  The spot instances needed for 30 days on p5 fall from 89 to 45. The
+  pessimistic end narrows the most (1.78M to 0.70M GPU-hours on p5),
+  because packing hides the per-step cost that dominates small grids under
+  the pessimistic utilisation pair. Without MPS (`--slots-per-gpu auto`
+  alone) the model credits only the overlap of startup and output, about
+  2% here. Time-sliced kernels never share the
+  SMs, so MPS is the half of this that matters. Time one packed Wales job
+  on the card you will rent before you rely on it.
 - **Parent overhead.** Each cluster's 1 km parent carries a 16 km buffer.
   Across 4,000 small clusters that is about 10% of compute.
 - **Spot capacity.** 8-GPU spot capacity (p5, a3) is often unavailable at
@@ -558,6 +619,8 @@ A refusal exits 2 with `{"schema": "woof-energy.cost-optimize.v1",
     and `wall_clock_days_spot`
   - `instances_for_deadline` (with `--deadline-days`), `storage` and
     `storage_usd`
+  - with `--slots-per-gpu` above 1: `packing` (slots, MPS, vCPUs per GPU,
+    copies and compute gain per role) and `gpu_hours_one_job_per_gpu`
   - in partition mode, a `clusters` row per cluster
 - **Notes**: `notes`, such as the price table's age.
 

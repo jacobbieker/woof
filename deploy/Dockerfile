@@ -94,9 +94,14 @@ COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=build --chown=10001:10001 /opt/woof /opt/woof
 COPY --from=build --chown=10001:10001 /opt/woof-home /opt/woof-home
 COPY --chmod=0755 deploy/entrypoint.sh /usr/local/bin/woof-entrypoint
+# compute: the CUDA driver libraries and the MPS binaries
+# (nvidia-cuda-mps-control/-server) that `woof energy worker --mps`
+# (WOOF_ENABLE_MPS=1) starts; utility: nvidia-smi, which the worker reads
+# for each card's memory.  The CUDA base image's own default, pinned here.
 ENV PATH=/opt/woof/env/bin:${PATH} \
     HOME=/home/woof \
-    WOOF_SCRATCH=/scratch
+    WOOF_SCRATCH=/scratch \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
 USER 10001:10001
 WORKDIR /home/woof
 # `woof doctor` (no sync).  Docker and ECS honour this; Batch and Kubernetes

@@ -15,7 +15,8 @@ woof energy queue status s3://bkt/wf2024/queue          JSON counts by state
 ```
 
 Code: `woof/energy/workqueue.py` (queue and backends) and
-`woof/energy/worker.py` (worker).  Tests: `tests/test_energy_hindcast_queue.py`.
+`woof/energy/worker.py` (worker).  Tests: `tests/test_energy_hindcast_queue.py`
+and `tests/test_energy_worker_packing.py` (several jobs per GPU, MPS).
 
 ## Backends
 
@@ -152,6 +153,133 @@ each run.
 Programs embedding the worker pass any callable taking a
 `RunnerRequest` and returning a `RunnerOutcome` to `Slot(runner=...)`.
 
+## Several jobs per GPU (`--slots-per-gpu`, `--mps`)
+
+Most hindcast clusters are one small farm whose domains (0.3-2 M cells)
+cannot fill an A10G, A100 or H100: with one job per card the card idles
+between kernel launches while the host drives a small grid.  Packing
+several jobs onto each card is the cheapest lever on the bill.
+
+```bash
+woof energy worker s3://bkt/wf2024/queue --gpus all --exit-when-empty \
+    --slots-per-gpu auto --mps
+```
+
+`--slots-per-gpu 1` (the default) is everything above, unchanged.  With
+`N` or `auto` the worker starts that many slots per card and admits jobs
+by memory:
+
+- **Declared memory.**  A job may carry `resources.gpu_mem_gib`, the GiB
+  it needs on the card.  `woof energy hindcast plan` writes the planner's
+  priced peak there (below); `queue push` refuses a value that is not a
+  positive number.
+- **Admission.**  Under the card's admission lock a slot reads the live
+  reservations of the card's other slots and claims only a job that fits:
+  `sum(reserved) + need + margin <= card`.  `need` is the declared figure,
+  which includes the CUDA context because the planner's priced peak does.
+  The margin is `--mem-margin-gib` (default 1 GiB).  That figure is an
+  assumption, not a measurement: it covers the driver, an MPS server and
+  allocator fragmentation.  A job that declares nothing costs
+  `--default-job-mem-gib`, or by default the whole card, so it runs
+  alone.  An idle card admits any one job, however large, so every job
+  can still run as it would with one slot.  Jobs that do not fit are left
+  unleased for another slot or node.
+- **Card memory.**  NVML's `memory.total`, or `--gpu-mem-gib`
+  (`--fake-gpus` needs it).
+- **`auto`.**  The slot count is `min(8, floor((card - margin) / 3.4 GiB),
+  CPUs per GPU)`.  3.4 GiB is the smallest job the cost model's memory
+  fit prices (its fixed intercept), and each slot drives its kernels from
+  one CPU core.  On a g5.xlarge (A10G, 4 vCPUs) that is 4 slots; on a
+  p5.48xlarge (H100 80 GB, 24 vCPUs per GPU) it is 8.
+- **Locks.**  The parent holds the card's worker lock
+  (`energy-worker-gpu-<digest>.lock`, the file a single-slot worker's
+  slot holds) and hands it to its slots, so one worker owns a card
+  whatever its slot count.  Slot *k* holds `.slot-<k>.lock`.  While it
+  runs a job it writes its reservation to `.slot-<k>.json`
+  (`woof-energy.worker-reservation.v1`).  The runner inherits the slot
+  lock's descriptor, so a reservation stays live as long as its runner
+  does, even if the slot process is killed.  A reservation whose lock
+  nobody holds is stale and is ignored.
+- **The runner's own lock.**  Each slot's runner gets its own
+  `WOOF_GPU_LOCK_ROOT` (`.slot-<k>.runner-locks`), so the runners'
+  `woof run` UUID locks do not refuse each other.  A `woof run` still sees
+  its sibling runners as CUDA co-tenants and prices its reservation
+  against the device's measured free memory (the supervisor's shared-GPU
+  admission).  That is a second check, by measurement, behind the
+  declared one.
+- **Outside forecasts.**  Before each claim a slot still waits while a
+  woof process outside the queue holds the card's supervisor lock.  Packed
+  slots probe it with a shared lock, so siblings probing at the same
+  moment never take each other for an outside process.  A
+  forecast started while packed jobs run is admitted or refused by that
+  same measured shared-GPU admission.
+- **Crashes.**  When a slot dies unexpectedly the parent kills the runner
+  it recorded before restarting it.  Its lease would expire anyway, and a
+  runner left alive would keep its slot and its memory.
+- **Fairness.**  A large job can wait while small ones keep a card busy.
+  It runs once the queue's small jobs drain or a card goes idle (an idle
+  card admits anything).
+
+Leases, heartbeats, exactly-once completion, SIGTERM release and exit
+codes are those of a single slot.  The summary gains a `packing` table
+(slots, card memory and its source, margin) and per-slot `gpu_slot`.
+
+### CUDA MPS
+
+Without MPS, kernels from separate processes **time-slice**: the GPU runs
+one context at a time.  Packing then hides launch gaps, host-side work
+(preparation, I/O, extraction) and device-to-host copies behind another
+job, but it never runs two small grids' kernels side by side.  With the
+**Multi-Process Service**, every slot's work goes through one server
+context, so kernels from different processes run **concurrently** and
+small grids share the SMs.  That is the gain the occupancy knee in the
+cost model says small domains leave on the table.
+
+`--mps` makes the worker start `nvidia-cuda-mps-control -d` before the
+slots.  The daemon sees the selected GPUs, and `CUDA_MPS_PIPE_DIRECTORY`
+and `CUDA_MPS_LOG_DIRECTORY` point to `pipe/` and `log/` under `--mps-dir`.
+The default is a short directory under the system temp, because the
+control socket path must stay under 100 characters.  The container
+entrypoint uses `$WOOF_SCRATCH/mps/<worker index>`.  Every slot gets the
+same two variables, and with `--mps-active-thread-percentage P` also
+`CUDA_MPS_ACTIVE_THREAD_PERCENTAGE` (default unset: MPS shares SMs
+dynamically).  The worker stops the daemon (`quit`) on exit.
+
+- Refused (exit 2, `MPSUnavailable`) when `nvidia-cuda-mps-control` is not
+  on `PATH`.  In a container the NVIDIA container toolkit mounts it with
+  the `compute` capability, which `deploy/Dockerfile` pins.
+- When `CUDA_MPS_PIPE_DIRECTORY` is already set, or a daemon already
+  answers at the pipe directory, that daemon is used and left running.
+  The first case is a daemon this process does not own, such as the
+  NVIDIA device plugin's MPS sharing on Kubernetes.
+- `--mps` with one slot per GPU is refused (nothing to share), as are the
+  memory flags without packing.
+- MPS needs the card in `DEFAULT` or `EXCLUSIVE_PROCESS` compute mode
+  with no other MPS daemon holding it.  An MPS client fault can take down
+  the other clients on that server.  The queue's lease and retry rules
+  absorb that like any other failed runner.
+
+Neither packing nor MPS has been timed on a datacentre card by this tree.
+`woof energy estimate --slots-per-gpu N|auto [--mps]` models what they
+should buy (docs/energy-hindcast/cost.md).
+
+### Declared memory from the planner
+
+`woof energy hindcast plan` fills `resources.gpu_mem_gib` and
+`resources.gpu_mem_basis` on every job:
+
+| Topology | Figure | Basis |
+|---|---|---|
+| `wrf-nests` | the tree's priced peak envelope | `woof.energy.plan_wrf_nests.price_plan`: the planner's own layout and memory-fit loop priced by `woof.core.preflight`, stopped before it writes |
+| `wrf-tiles` | the per-domain fit ceiling on the card | an upper bound: the parent and every tile are sized under it and run one at a time, but the tiles are derived only at materialize |
+| no `--card`/`--vram-gib` | `null` | the planner then sizes on the worker's own card, which is not known at plan time |
+
+A cluster is priced once per topology, source and planner arguments (the
+segment start does not change the layout), and the segment it was
+priced on is named in the basis.  A planner refusal or pricing error
+leaves the job unpriced, with the reason.  It never fails the plan.  The
+job id does not depend on these fields.
+
 ## Status and requeue
 
 ```bash
@@ -178,3 +306,15 @@ end-to-end test starts three workers on a `file://` queue with a fake
 runner, SIGKILLs the worker holding a lease, and checks that the lease
 expires, the job is charged one `lease-expired` failure, runs again and
 completes exactly once.
+
+The packing end-to-end test (`tests/test_energy_worker_packing.py`)
+starts a worker with three fake GPUs, `--slots-per-gpu auto` and 16 GiB
+cards on a `file://` queue.  The 18 jobs declare 2-22 GiB, and one
+declares nothing.  The fake runner records which jobs share each card.
+The test SIGKILLs that worker, its slots and their runners mid-flight,
+then drains the queue with a second packed worker.  It checks that
+concurrent jobs on a card never exceed `card - margin`, that the 15 GiB,
+over-the-card and undeclared jobs run alone, that the killed jobs are
+reclaimed after their leases expire, and that every job runs to the end
+exactly once.  A fake `nvidia-cuda-mps-control` on `PATH` checks the MPS
+start, environment and stop.

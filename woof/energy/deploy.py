@@ -29,6 +29,15 @@ workers on one of four backends, from one typed :class:`DeployConfig`:
     was given (``--gres=gpu:N``), run through Apptainer, Pyxis/enroot or a
     native pixi checkout.  Plus ``submit.sh``.
 
+**Several jobs per GPU.**  ``slots_per_gpu`` (``"1"``, a count or
+``"auto"``) and ``mps`` reach every backend's worker command as
+``--slots-per-gpu`` and ``--mps`` (docs/energy-hindcast/queue-worker.md):
+the worker packs jobs whose declared memory fits each card and, with MPS,
+lets their kernels run concurrently.  The worker starts its own MPS control
+daemon inside the container; on Kubernetes the NVIDIA device plugin can
+instead own MPS through its sharing configuration, and the k8s backend
+writes a commented ``mps-sharing.example.yaml`` showing it.
+
 Every backend also gets ``deploy.json`` (``woof-energy.deploy.v1``): the
 normalized configuration, its SHA-256, the worker command, the files with
 their SHA-256 and the placeholders left in them.
@@ -299,6 +308,11 @@ class DeployConfig:
     gpus_per_worker: int | None = None
     #: The worker's ``--gpus``: ``all`` or a count.
     worker_gpus: str = "all"
+    #: The worker's ``--slots-per-gpu``: ``"1"`` (one job per card), a
+    #: count, or ``"auto"``.
+    slots_per_gpu: str = "1"
+    #: The worker's ``--mps`` (CUDA MPS for packed slots).
+    mps: bool = False
     exit_when_empty: bool = True
     worker_args: tuple[str, ...] = ()
     spot: bool = False
@@ -489,6 +503,17 @@ def _check_image(image: str) -> None:
             "tag or a digest so every worker runs the same build")
 
 
+def _slots(config: DeployConfig) -> int | str | None:
+    """``slots_per_gpu`` parsed as the worker parses it (None if invalid)."""
+
+    from woof.energy.packing import parse_slots_per_gpu
+
+    try:
+        return parse_slots_per_gpu(config.slots_per_gpu)
+    except ValueError:
+        return None
+
+
 def _check_common(config: DeployConfig) -> None:
     if not _NAME.match(config.name):
         raise DeployRefused(
@@ -509,6 +534,15 @@ def _check_common(config: DeployConfig) -> None:
             config.worker_gpus.isdigit() and int(config.worker_gpus) >= 1):
         raise DeployRefused(f"worker_gpus must be 'all' or a positive count; "
                             f"got {config.worker_gpus!r}")
+    if _slots(config) is None:
+        raise DeployRefused(f"slots_per_gpu must be 'auto' or a positive "
+                            f"count (as a string); got "
+                            f"{config.slots_per_gpu!r}")
+    if config.mps and _slots(config) == 1:
+        raise DeployRefused(
+            "mps = true shares a GPU between packed slots; set "
+            "slots_per_gpu to a count above 1 or 'auto' (one slot per GPU "
+            "has nothing to share)")
     if not (0.0 < config.max_runtime_hours <= 24.0 * 14):
         raise DeployRefused("max_runtime_hours must be in (0, 336]; got "
                             f"{config.max_runtime_hours}")
@@ -521,6 +555,10 @@ def _check_common(config: DeployConfig) -> None:
             raise DeployRefused(
                 f"worker_args may not carry {flag}: the renderer passes it "
                 "from queue_url / worker_gpus")
+        if flag in ("--slots-per-gpu", "--mps"):
+            raise DeployRefused(
+                f"worker_args may not carry {flag}: set slots_per_gpu / mps "
+                "so every backend renders it")
         if flag == "--exit-when-empty":
             raise DeployRefused("worker_args may not carry --exit-when-empty; "
                                 "set exit_when_empty = true instead")
@@ -587,6 +625,11 @@ def worker_command(config: DeployConfig) -> list[str]:
             "--gpus", config.worker_gpus]
     if config.exit_when_empty:
         argv.append("--exit-when-empty")
+    slots = _slots(config)
+    if slots is not None and slots != 1:
+        argv.extend(["--slots-per-gpu", str(slots)])
+    if config.mps:
+        argv.append("--mps")
     argv.extend(config.worker_args)
     return argv
 
@@ -1202,17 +1245,88 @@ def render_k8s(config: DeployConfig, ph: _Placeholders,
         },
     }
     documents.append(job)
+    files: dict[str, str] = {}
+    if config.mps:
+        files["mps-sharing.example.yaml"] = _k8s_mps_example(config, gpus)
+        notes.append(
+            "k8s: mps = true starts an MPS control daemon inside each worker "
+            "pod (the image needs the driver's nvidia-cuda-mps-control; the "
+            "worker refuses without it).  If the cluster's NVIDIA device "
+            "plugin owns MPS instead, apply its sharing configuration "
+            "(mps-sharing.example.yaml, commented) and the worker uses that "
+            "daemon through CUDA_MPS_PIPE_DIRECTORY")
     body = (
         f"namespace={shlex.quote(options.namespace)}\n"
         'kubectl create namespace "$namespace" --dry-run=client -o yaml '
         "| kubectl apply -f -\n"
         'kubectl apply -f "$here/job.yaml"\n')
-    return {
+    files.update({
         "job.yaml": yaml_documents(documents),
         "submit.sh": _script(
             f"Kubernetes: Indexed Job of {config.workers} woof energy "
             "worker(s)", body),
-    }
+    })
+    return files
+
+
+def _k8s_mps_example(config: DeployConfig, gpus: int) -> str:
+    """A commented NVIDIA device plugin MPS sharing configuration."""
+
+    from woof.energy.packing import AUTO_MAX_SLOTS_PER_GPU
+
+    slots = _slots(config)
+    replicas = AUTO_MAX_SLOTS_PER_GPU if slots == "auto" else int(slots)
+    lines = [
+        "# NVIDIA device plugin: CUDA MPS sharing (EXAMPLE, every line "
+        "commented).",
+        "#",
+        "# The worker command in job.yaml carries --mps, so each pod starts "
+        "its own",
+        "# MPS control daemon for the GPU(s) it was given and packs "
+        f"--slots-per-gpu {config.slots_per_gpu} jobs on them.  That needs "
+        "the driver's",
+        "# nvidia-cuda-mps-control in the container and a GPU not in "
+        "EXCLUSIVE_PROCESS",
+        "# mode held by another daemon.",
+        "#",
+        "# On clusters where the device plugin (k8s-device-plugin >= 0.15 or "
+        "the GPU",
+        "# Operator) owns MPS, the plugin runs the control daemon per node "
+        "and splits",
+        "# each GPU into replicas with a memory and SM-share limit each.  "
+        "Configure it",
+        "# like this, then give each worker one replica per slot (or run "
+        "--slots-per-gpu 1",
+        "# workers, one per replica); the worker finds the plugin's daemon "
+        "through",
+        "# CUDA_MPS_PIPE_DIRECTORY and neither starts nor stops it.  See "
+        "the plugin's",
+        "# README, 'Shared Access to GPUs' (sharing.mps).",
+        "#",
+        "# apiVersion: v1",
+        "# kind: ConfigMap",
+        "# metadata:",
+        "#   name: nvidia-device-plugin-config",
+        "#   namespace: nvidia-device-plugin   # or gpu-operator",
+        "# data:",
+        "#   mps-sharing: |-",
+        "#     version: v1",
+        "#     sharing:",
+        "#       mps:",
+        "#         renameByDefault: false",
+        "#         resources:",
+        "#         - name: nvidia.com/gpu",
+        f"#           replicas: {replicas}"
+        + ("   # auto starts at most this many slots per GPU; match "
+           "the slot count you run" if slots == "auto" else ""),
+        "#",
+        "# Select it per node (GPU Operator: label the nodes",
+        "# nvidia.com/device-plugin.config=mps-sharing) and request",
+        f"# nvidia.com/gpu: {gpus * replicas} per pod for {gpus} GPU(s) x "
+        f"{replicas} replicas.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1438,6 +1552,7 @@ def _overrides(args) -> dict:
                            ("workers", "workers"),
                            ("parallelism", "parallelism"),
                            ("gpus_per_worker", "gpus_per_worker"),
+                           ("slots_per_gpu", "slots_per_gpu"),
                            ("geog_url", "geog_url"),
                            ("highres_cache_url", "highres_cache_url")):
         value = getattr(args, attribute, None)
@@ -1445,6 +1560,8 @@ def _overrides(args) -> dict:
             out[key] = value
     if getattr(args, "spot", None) is not None:
         out["spot"] = bool(args.spot)
+    if getattr(args, "mps", None) is not None:
+        out["mps"] = bool(args.mps)
     return out
 
 

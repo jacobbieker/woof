@@ -4,6 +4,32 @@
 
 New:
 
+- `woof energy worker --slots-per-gpu N|auto` runs several hindcast jobs
+  on one GPU. A slot claims only a job whose declared
+  `resources.gpu_mem_gib` fits beside the card's live reservations plus a
+  margin (`--mem-margin-gib`, default 1 GiB). A job that declares nothing
+  costs the whole card unless `--default-job-mem-gib` is given. An idle
+  card admits any one job.
+  `auto` = min(8, card memory / 3.4 GiB, CPUs per GPU). One worker still
+  owns a card, a slot's reservation lives as long as its runner, and each
+  runner's `woof run` locks under its own `WOOF_GPU_LOCK_ROOT`.
+  The default of 1 is the old behaviour.
+  `--mps` starts (or reuses) the CUDA MPS control daemon, so packed
+  slots' kernels run concurrently instead of time-slicing. Its pipe and
+  log directories go under `--mps-dir`, and it is stopped on exit. The
+  worker refuses when `nvidia-cuda-mps-control` is missing.
+  `woof energy hindcast plan` records each job's priced GPU memory: the
+  wrf-nests planner's priced peak, the wrf-tiles fit ceiling, or `null`
+  without a card. `woof energy estimate --slots-per-gpu N|auto [--mps]`
+  prices packing with a stated utilisation curve and band. In the
+  worldwide example, `auto --mps` on p5 cuts GPU-hours from 395k to 197k
+  (106k-697k); this is an estimate, and nothing packed has been timed.
+  The deploy renderers pass `slots_per_gpu`/`mps` to all four backends,
+  and k8s also gets a commented device-plugin MPS sharing example. The
+  container entrypoint reads `WOOF_SLOTS_PER_GPU` and `WOOF_ENABLE_MPS=1`.
+  `woof energy worker` now also takes the queue as `--queue URL`, the form
+  the renderers and the entrypoint already wrote.
+  See docs/energy-hindcast/queue-worker.md.
 - `woof energy plan --topology wrf-tiles|wrf-nests --source auto` picks
   the boundary source for the sites and the `--start` cycle from
   `--source-priority` (default

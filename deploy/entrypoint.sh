@@ -25,6 +25,20 @@
 # copy finished on this node is recorded in `.woof-synced` and not
 # repeated; concurrent workers on one node wait on a lock instead of
 # copying twice.  WOOF_SYNC_ON_START=0 skips staging.
+#
+# Packing several jobs per GPU (docs/energy-hindcast/queue-worker.md), for a
+# `woof energy worker` command (worker mode or the full command):
+#
+#   WOOF_SLOTS_PER_GPU=N|auto  adds --slots-per-gpu N|auto unless the command
+#                              already carries it
+#   WOOF_ENABLE_MPS=1          adds --mps --mps-dir $WOOF_SCRATCH/mps/<index>
+#                              (the worker starts nvidia-cuda-mps-control -d
+#                              with its pipe/ and log/ there, hands
+#                              CUDA_MPS_PIPE_DIRECTORY/CUDA_MPS_LOG_DIRECTORY
+#                              to its slots and stops it on exit; it refuses
+#                              when the control binary is missing).  MPS runs
+#                              packed slots' kernels concurrently instead of
+#                              time-slicing them.
 set -euo pipefail
 
 log() { printf 'woof-entrypoint: %s\n' "$*" >&2; }
@@ -164,6 +178,37 @@ case "$mode" in
     set -- woof energy worker --queue "$WOOF_ENERGY_QUEUE_URL" \
       --gpus "${WOOF_ENERGY_GPUS:-all}" "$@" ;;
 esac
+
+# has_arg FLAG ARGS...: whether ARGS carries FLAG (alone or as FLAG=...).
+has_arg() {
+  local flag="$1" arg
+  shift
+  for arg in "$@"; do
+    case "$arg" in
+      "$flag"|"$flag"=*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+if [ "$#" -ge 3 ] && [ "$1" = woof ] && [ "$2" = energy ] && [ "$3" = worker ]; then
+  if [ -n "${WOOF_SLOTS_PER_GPU:-}" ] && ! has_arg --slots-per-gpu "$@"; then
+    set -- "$@" --slots-per-gpu "$WOOF_SLOTS_PER_GPU"
+  fi
+  case "${WOOF_ENABLE_MPS:-0}" in
+    1|true|yes)
+      if ! has_arg --mps "$@"; then
+        set -- "$@" --mps
+      fi
+      if ! has_arg --mps-dir "$@"; then
+        mps_dir="$WOOF_SCRATCH/mps/$WOOF_WORKER_INDEX"
+        mkdir -p "$mps_dir"
+        set -- "$@" --mps-dir "$mps_dir"
+      fi ;;
+    0|false|no|"") ;;
+    *) log "REFUSED: WOOF_ENABLE_MPS=$WOOF_ENABLE_MPS is not 0 or 1"; exit 2 ;;
+  esac
+fi
 
 log "worker index $WOOF_WORKER_INDEX on $(hostname): $*"
 exec "$@"

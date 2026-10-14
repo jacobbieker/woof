@@ -638,12 +638,15 @@ Takes no options of its own.
 | `--gpus-per-worker` | GPUs each worker is given (default: the machine's on AWS and GCP; required for k8s and slurm) |
 | `--highres-cache-url URL` | high-resolution static cache synced the same way (WOOF_HIGHRES_CACHE_URL) |
 | `--image IMAGE:TAG` | worker container image, pinned by tag or digest |
+| `--mps` | workers run CUDA MPS for their packed slots (needs --slots-per-gpu above 1 or auto) |
 | `--name` | deployment name (lower-case, 40 characters at most; prefixes every cloud resource) |
+| `--no-mps` | no CUDA MPS (overrides the configuration) |
 | `--on-demand` | run on on-demand / standard capacity |
 | `--output DIR` | directory to write the files and deploy.json (woof-energy.deploy.v1) into |
 | `--output-url URL` | Icechunk output repository passed to every worker as WOOF_ENERGY_OUTPUT_URL |
 | `--parallelism` | workers running at once (default all) |
 | `--queue URL` | job queue the workers drain (s3://, gs:// or file://) |
+| `--slots-per-gpu N\|auto` | jobs each worker packs per GPU (woof energy worker --slots-per-gpu; default 1) |
 | `--spot` | run on spot / preemptible capacity |
 | `--strict` | refuse instead of writing REPLACE_ME_ placeholders for missing account identifiers |
 | `--workers` | number of workers (array size / task count / completions) |
@@ -664,15 +667,17 @@ Takes no options of its own.
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
 | `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 300); with --partition it must match the clusters' own spacing or is refused |
 | `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
+| `--mps` | with --slots-per-gpu: price CUDA MPS (concurrent kernels lift the occupancy knee); without it only startup/output overlap |
 | `--nz` | leaf model levels (default: the job's, else 49, the hindcast's wind-energy column) |
 | `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
-| `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
+| `--packing-efficiency` | fraction of paid GPU time a job holds the card at all: parents waited on, staging, batch tails (default 0.85) |
 | `--parent-nz` | parent model levels (default 49) |
 | `--partition PARTITION.json` | partition document with a 'clusters' list |
 | `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
 | `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
 | `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 9: one run per 00/06/12/18 UTC init) |
 | `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
+| `--slots-per-gpu N\|auto` | price N jobs sharing each card, as `woof energy worker --slots-per-gpu` runs them (copies bounded by card memory; auto = up to 8); small domains gain, card-filling ones do not (default 1) |
 | `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
 | `--store-preset {full,energy}` | fields stored per leaf frame (default full: all variables) |
 
@@ -727,15 +732,17 @@ Takes no options of its own.
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
 | `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 300); with --partition it must match the clusters' own spacing or is refused |
 | `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
+| `--mps` | with --slots-per-gpu: price CUDA MPS (concurrent kernels lift the occupancy knee); without it only startup/output overlap |
 | `--nz` | leaf model levels (default: the job's, else 49, the hindcast's wind-energy column) |
 | `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
-| `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
+| `--packing-efficiency` | fraction of paid GPU time a job holds the card at all: parents waited on, staging, batch tails (default 0.85) |
 | `--parent-nz` | parent model levels (default 49) |
 | `--partition PARTITION.json` | partition document with a 'clusters' list |
 | `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
 | `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
 | `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 9: one run per 00/06/12/18 UTC init) |
 | `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
+| `--slots-per-gpu N\|auto` | price N jobs sharing each card, as `woof energy worker --slots-per-gpu` runs them (copies bounded by card memory; auto = up to 8); small domains gain, card-filling ones do not (default 1) |
 | `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
 | `--store-preset {full,energy}` | fields stored per leaf frame (default full: all variables) |
 
@@ -1133,18 +1140,26 @@ Takes no options of its own.
 
 | argument | what it does |
 |---|---|
-| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+| `[QUEUE_URL]` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
 
 | option | what it does |
 |---|---|
+| `--default-job-mem-gib GIB` | price of a job with no resources.gpu_mem_gib (default: the whole card, so it runs alone) |
 | `--exit-when-empty` | exit once every job is done or dead |
 | `--fake-gpus N` | testing: N stand-in GPU identities, no device read (set WOOF_GPU_LOCK_ROOT) |
+| `--gpu-mem-gib GIB` | admission budget per card (default: NVML memory.total; required with --fake-gpus) |
 | `--gpus all\|N\|UUID[,UUID]` | GPUs to run on: all (default), the first N, or UUIDs |
 | `--max-idle-s` | exit after this long with nothing to claim |
+| `--mem-margin-gib GIB` | card memory kept free beside the reservations (default 1, an assumption) |
+| `--mps` | start (or reuse) the CUDA MPS control daemon so packed slots' kernels run concurrently instead of time-slicing; refused when nvidia-cuda-mps-control is missing |
+| `--mps-active-thread-percentage PCT` | CUDA_MPS_ACTIVE_THREAD_PERCENTAGE for every slot (1-100; default unset: MPS shares SMs dynamically) |
+| `--mps-dir DIR` | MPS pipe/ and log/ directories (default: a short directory under the system temp; the entrypoint uses $WOOF_SCRATCH/mps) |
 | `--no-gpu` | CPU slots only (no GPU lock, CUDA_VISIBLE_DEVICES=-1) |
 | `--poll-s` | idle poll interval, jittered (default 30) |
+| `--queue QUEUE_URL` | the queue, as a flag (what the deploy renderers and the container entrypoint write) |
 | `--runner-cmd TEMPLATE` | command run per job; placeholders {python}, {job}, {job_id}, {attempt}, {workdir}, {result}, {gpu_uuid}, {queue} (default: {python} -m woof energy hindcast run-local {job}) |
 | `--slots` | with --no-gpu: CPU slots to run (default 1) |
+| `--slots-per-gpu N\|auto` | concurrent jobs per GPU (default 1: one job per card, as before); auto = min(8, card memory / 3.4 GiB, CPUs per GPU). Above 1 a slot claims only a job whose declared memory fits the card |
 | `--term-grace-s` | SIGTERM to SIGKILL grace for the runner (default 20) |
 | `--timeout-s` | runner wall-clock limit (default 86400) |
 | `--workdir DIR` | local scratch for job files and logs (default: a fresh directory under the system temp) |

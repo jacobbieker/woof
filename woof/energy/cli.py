@@ -901,15 +901,29 @@ def _register_queue(sub) -> None:
 
 
 def _register_worker(sub) -> None:
+    from woof.energy.packing import (AUTO_MAX_SLOTS_PER_GPU,
+                                     DEFAULT_MEM_MARGIN_GIB,
+                                     parse_slots_per_gpu)
     from woof.energy.worker import (DEFAULT_POLL_S, DEFAULT_RUNNER_TEMPLATE,
                                     DEFAULT_TERM_GRACE_S, DEFAULT_TIMEOUT_S,
                                     RUNNER_PLACEHOLDERS)
 
+    def slots_per_gpu(text: str):
+        try:
+            return parse_slots_per_gpu(text)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(str(error)) from None
+
     p = sub.add_parser(
-        "worker", help="drain a hindcast queue, one loop per GPU")
-    p.add_argument("queue", metavar="QUEUE_URL",
+        "worker", help="drain a hindcast queue, one loop per GPU (or "
+                       "several, --slots-per-gpu)")
+    p.add_argument("queue", metavar="QUEUE_URL", nargs="?", default=None,
                    help="file:///abs/dir, s3://bucket/prefix or "
                         "gs://bucket/prefix")
+    p.add_argument("--queue", dest="queue_flag", default=None,
+                   metavar="QUEUE_URL",
+                   help="the queue, as a flag (what the deploy renderers "
+                        "and the container entrypoint write)")
     p.add_argument("--gpus", default=None, metavar="all|N|UUID[,UUID]",
                    help="GPUs to run on: all (default), the first N, or "
                         "UUIDs")
@@ -946,6 +960,44 @@ def _register_worker(sub) -> None:
     p.add_argument("--workdir", default=None, metavar="DIR",
                    help="local scratch for job files and logs (default: a "
                         "fresh directory under the system temp)")
+    packing = p.add_argument_group(
+        "packing several jobs on one GPU",
+        "docs/energy-hindcast/queue-worker.md: memory-aware admission "
+        "against each job's resources.gpu_mem_gib")
+    packing.add_argument(
+        "--slots-per-gpu", type=slots_per_gpu, default=1, metavar="N|auto",
+        help="concurrent jobs per GPU (default 1: one job per card, as "
+             "before); auto = min(" + str(AUTO_MAX_SLOTS_PER_GPU)
+             + ", card memory / 3.4 GiB, CPUs per GPU).  Above 1 a slot "
+               "claims only a job whose declared memory fits the card")
+    packing.add_argument(
+        "--gpu-mem-gib", type=positive_float, default=None, metavar="GIB",
+        help="admission budget per card (default: NVML memory.total; "
+             "required with --fake-gpus)")
+    packing.add_argument(
+        "--mem-margin-gib", type=nonnegative_float, default=None,
+        metavar="GIB",
+        help="card memory kept free beside the reservations (default "
+             f"{DEFAULT_MEM_MARGIN_GIB:g}, an assumption)")
+    packing.add_argument(
+        "--default-job-mem-gib", type=positive_float, default=None,
+        metavar="GIB",
+        help="price of a job with no resources.gpu_mem_gib (default: the "
+             "whole card, so it runs alone)")
+    packing.add_argument(
+        "--mps", action="store_true",
+        help="start (or reuse) the CUDA MPS control daemon so packed "
+             "slots' kernels run concurrently instead of time-slicing; "
+             "refused when nvidia-cuda-mps-control is missing")
+    packing.add_argument(
+        "--mps-dir", default=None, metavar="DIR",
+        help="MPS pipe/ and log/ directories (default: a short directory "
+             "under the system temp; the entrypoint uses $WOOF_SCRATCH/mps)")
+    packing.add_argument(
+        "--mps-active-thread-percentage", type=int, default=None,
+        metavar="PCT",
+        help="CUDA_MPS_ACTIVE_THREAD_PERCENTAGE for every slot (1-100; "
+             "default unset: MPS shares SMs dynamically)")
     p.set_defaults(func=_dispatch("woof.energy.worker"))
 def _register_deploy(sub) -> None:
     deploy = sub.add_parser(
@@ -982,6 +1034,15 @@ def _register_deploy(sub) -> None:
     p.add_argument("--gpus-per-worker", type=positive_int, default=None,
                    help="GPUs each worker is given (default: the machine's "
                         "on AWS and GCP; required for k8s and slurm)")
+    p.add_argument("--slots-per-gpu", default=None, metavar="N|auto",
+                   help="jobs each worker packs per GPU (woof energy worker "
+                        "--slots-per-gpu; default 1)")
+    mps = p.add_mutually_exclusive_group()
+    mps.add_argument("--mps", dest="mps", action="store_true", default=None,
+                     help="workers run CUDA MPS for their packed slots "
+                          "(needs --slots-per-gpu above 1 or auto)")
+    mps.add_argument("--no-mps", dest="mps", action="store_false",
+                     help="no CUDA MPS (overrides the configuration)")
     p.add_argument("--geog-url", default=None, metavar="URL",
                    help="WPS_GEOG tree the container syncs to local scratch "
                         "at start (WOOF_GEOG_URL)")
@@ -1140,7 +1201,18 @@ def register_estimate(sub, name: str = "estimate") -> argparse.ArgumentParser:
     p.add_argument("--chunk-mib", type=positive_float, default=8.0,
                    help="compressed chunk size for the PUT count (default 8)")
     p.add_argument("--packing-efficiency", type=positive_float, default=0.85,
-                   help="fraction of paid GPU time doing work (default 0.85)")
+                   help="fraction of paid GPU time a job holds the card at "
+                        "all: parents waited on, staging, batch tails "
+                        "(default 0.85)")
+    p.add_argument("--slots-per-gpu", default="1", metavar="N|auto",
+                   help="price N jobs sharing each card, as `woof energy "
+                        "worker --slots-per-gpu` runs them (copies bounded "
+                        "by card memory; auto = up to 8); small domains "
+                        "gain, card-filling ones do not (default 1)")
+    p.add_argument("--mps", action="store_true",
+                   help="with --slots-per-gpu: price CUDA MPS (concurrent "
+                        "kernels lift the occupancy knee); without it only "
+                        "startup/output overlap")
     p.add_argument("-o", "--output", default=None,
                    metavar="ESTIMATE.json",
                    help="also write the woof-energy.cost-estimate.v1 JSON "
