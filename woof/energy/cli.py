@@ -771,6 +771,13 @@ def _register_hindcast(sub) -> None:
     forcing.add_argument("--source-priority", type=_names, default=None,
                          metavar="SRC[,SRC]",
                          help="preference order handed to the selector")
+    forcing.add_argument("--forcing-cache", default=None, metavar="URL",
+                         help="fetch each (source, cycle) once into this "
+                              "shared cache (s3://, gs://, file:// or a "
+                              "path) and have every job of the cycle mirror "
+                              "from it: adds prefetch jobs the forecast "
+                              "jobs depend on (docs/energy-hindcast/"
+                              "forcing-cache.md)")
     out = p.add_argument_group("history and outputs")
     out.add_argument("--leaf-history-interval-s", type=positive_float,
                      default=900.0,
@@ -826,6 +833,50 @@ def _register_hindcast(sub) -> None:
     p.add_argument("--writer", default=None, metavar="MODULE:CALLABLE",
                    help="callable handed the kept-window forecast and "
                         "targets (e.g. the Icechunk writer)")
+    p.add_argument("--no-forcing-cache", action="store_true",
+                   help="do not mirror the job's forcing from its cache; "
+                        "the run fetches everything itself")
+    p.add_argument("--fetcher", default=None, metavar="MODULE:CALLABLE",
+                   help="prefetch transport called as fetcher(request, "
+                        "out) (default: woof fetch)")
+
+    p = verbs.add_parser(
+        "prefetch", help="fetch each (source, cycle) once into the forcing "
+                         "cache (the plan's prefetch jobs)")
+    p.add_argument("dir", metavar="DIR", help="hindcast directory")
+    p.add_argument("--cycle", action="append", default=None,
+                   metavar="YYYY-MM-DDTHH",
+                   help="only this cycle (repeatable)")
+    p.add_argument("--source", action="append", default=None,
+                   help="only this source (repeatable)")
+    p.add_argument("--job", action="append", default=None, metavar="ID",
+                   help="only this prefetch job (repeatable)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print each fetch, its cache entry and its "
+                        "measured download size; fetch nothing")
+    p.add_argument("--force", action="store_true",
+                   help="also run prefetch jobs the manifest calls complete "
+                        "(the cache is checked; nothing complete is "
+                        "fetched again)")
+    p.add_argument("--refetch", action="store_true",
+                   help="fetch and publish again even when the cache "
+                        "entry is complete")
+    p.add_argument("--fetcher", default=None, metavar="MODULE:CALLABLE",
+                   help="transport called as fetcher(request, out) "
+                        "(default: woof fetch)")
+
+    p = verbs.add_parser(
+        "mirror", help="materialize a job and mirror its forcing from the "
+                       "cache into the folders woof go will use")
+    p.add_argument("job", metavar="JOB",
+                   help="job.json, its directory, or a job id with --dir")
+    p.add_argument("--dir", default=None, metavar="DIR",
+                   help="hindcast directory a bare job id is in")
+    p.add_argument("--no-prefetch", action="store_true",
+                   help="do not run a missing cache entry's prefetch inline")
+    p.add_argument("--fetcher", default=None, metavar="MODULE:CALLABLE",
+                   help="transport for an inline prefetch (default: woof "
+                        "fetch)")
 def _register_queue(sub) -> None:
     from woof.energy.workqueue import (DEFAULT_BACKOFF_BASE_S,
                                        DEFAULT_BACKOFF_MAX_S,
@@ -1123,6 +1174,37 @@ def register_estimate(sub, name: str = "estimate") -> argparse.ArgumentParser:
                    help="compressed chunk size for the PUT count (default 8)")
     p.add_argument("--packing-efficiency", type=positive_float, default=0.85,
                    help="fraction of paid GPU time doing work (default 0.85)")
+    forcing = p.add_argument_group(
+        "forcing downloads (per job vs once per cycle through the forcing "
+        "cache; every rate an assumption)")
+    forcing.add_argument("--forcing-source", default=None, metavar="SOURCE",
+                         help="boundary source a cycle's download is sized "
+                              "for (default met-office-global)")
+    forcing.add_argument("--forcing-gb-per-cycle", type=positive_float,
+                         default=None, metavar="GB",
+                         help="one cycle's download instead of the measured "
+                              "per-object sizes")
+    forcing.add_argument("--forcing-objects-per-cycle", type=positive_int,
+                         default=None, metavar="N",
+                         help="objects (GET/PUT requests) per cycle")
+    forcing.add_argument("--publisher-mbps", type=positive_float,
+                         default=None, metavar="MB/S",
+                         help="one job's download rate from the publisher "
+                              "(default 100)")
+    forcing.add_argument("--cache-read-mbps", type=positive_float,
+                         default=None, metavar="MB/S",
+                         help="one job's read rate from a same-region cache "
+                              "(default 400)")
+    forcing.add_argument("--forcing-cache-days", type=nonnegative_float,
+                         default=None, metavar="DAYS",
+                         help="days a cycle stays in the cache (default 7)")
+    forcing.add_argument("--publisher-egress-usd-per-gb",
+                         type=nonnegative_float, default=None,
+                         metavar="USD",
+                         help="what the publisher charges per GB (default "
+                              "0: public open data)")
+    forcing.add_argument("--no-forcing", action="store_true",
+                         help="leave the forcing section out")
     p.add_argument("-o", "--output", default=None,
                    metavar="ESTIMATE.json",
                    help="also write the woof-energy.cost-estimate.v1 JSON "

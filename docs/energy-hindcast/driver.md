@@ -129,6 +129,9 @@ jobs/<job_id>/job.json           woof-energy.hindcast-job.v1
 jobs/<job_id>/plan/plan.json     woof-energy.plan.v1 (after materialize)
 jobs/<job_id>/materialized.json  woof-energy.hindcast-materialized.v1
 jobs/<job_id>/sites-forecast.nc  forecast.v1, kept window (after run-local)
+jobs/<job_id>/forcing-mirror.json  woof-energy.forcing-mirror.v1 (with --forcing-cache)
+jobs/<prefetch_id>/job.json      a prefetch job, kind "prefetch" (with --forcing-cache)
+jobs/<prefetch_id>/prefetch.json woof-energy.forcing-prefetch.v1
 ```
 
 A job id looks like `<cluster>-<YYYYMMDDTHH>Z-<sha12>`. The hash covers
@@ -179,6 +182,29 @@ cycle replaces the old one, unless the old one is `complete` or
 existing `job.json` is never rewritten, and job directories are never
 deleted.
 
+## Forcing cache
+
+`--forcing-cache URL` (`s3://`, `gs://`, `file://` or a path) fetches
+each (source, cycle) once instead of once per cluster
+([forcing-cache.md](forcing-cache.md)). For every source the cache shares
+(the table fetch routes: Met Office global, ECMWF open data, HRRR native,
+RAP, ICON, ...) the plan adds one prefetch job per (source, cycle) and
+gives each forecast job of that cycle `forcing` (`mode: shared`, the cache
+entry, the prefetch id) and `depends_on: [<prefetch id>]`. Jobs of
+`gfs`, `hrrr` (legacy) and `era5`, whose fetch crops to the cluster's
+area, get `forcing.mode: direct` with the reason and fetch as before.
+Prefetch jobs live in the manifest's own `prefetch` table, and neither
+field changes a forecast job's id, so they are the one part of an existing
+`job.json` a re-plan (`--resume` with the flag) rewrites, never while the
+job runs. Without the flag nothing changes.
+
+`run-local` mirrors a shared job's forcing from the cache into the exact
+download folder `woof go` will pick before it runs the plan, so the job's
+fetch reuses every object and asks no host; whatever the cache lacks is
+fetched by the job and listed in `forcing-mirror.json`. In a hindcast
+directory a missing cache entry is first fetched by running the job's
+prefetch job inline. `--no-forcing-cache` skips the mirror.
+
 ## Commands
 
 ```bash
@@ -189,6 +215,10 @@ woof energy hindcast materialize JOB_ID --dir hindcast
 woof energy run hindcast/jobs/JOB_ID/plan/plan.json --dry-run
 woof energy hindcast run-local JOB_ID --dir hindcast --dry-run
 woof energy hindcast run-local JOB_ID --dir hindcast --writer mypackage.store:write_segment
+woof energy hindcast plan --sites tests/fixtures/energy/sites_wales.json --start 2025-11-01 --end 2025-11-04 --vram-gib 80 --forcing-cache s3://bkt/wf2024/forcing -o hindcast
+woof energy hindcast prefetch hindcast --dry-run
+woof energy hindcast prefetch hindcast
+woof energy hindcast mirror JOB_ID --dir hindcast
 ```
 
 - `plan --dry-run` prints the manifest it would write and one full job,
@@ -217,7 +247,15 @@ woof energy hindcast run-local JOB_ID --dir hindcast --writer mypackage.store:wr
   refuses to re-plan a `running` or `complete` job without `--force`.
 - `status` reports counts by status, and for each cluster: kept-window
   coverage with any gaps or overlaps, the sources used, and how many times
-  the source changed. `--status failed` lists the failed jobs.
+  the source changed. `--status failed` lists the failed jobs. With a
+  forcing cache it adds a `prefetch` summary (jobs, counts, sources).
+- `prefetch` runs the prefetch jobs the manifest does not call complete
+  (`--cycle`, `--source`, `--job` select; `--dry-run` prints each fetch
+  and its measured size; `--refetch` publishes a complete entry again).
+  `run-local` on a prefetch job runs that one. A cache entry already
+  complete is not fetched again.
+- `mirror` materializes a job if needed and mirrors its forcing without
+  running it (CPU only), printing the `forcing-mirror.json` receipt.
 
 The Python entry points take the same injection hooks: `source_selector`,
 `cost_estimator`, `cluster_planner`, `runner`, `post_step` and `writer`.
