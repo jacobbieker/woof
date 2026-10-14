@@ -752,9 +752,9 @@ def _register_hindcast(sub) -> None:
                            "chain's, else the planner's)")
     grid.add_argument("--nz", type=positive_int, default=None,
                       help="vertical levels (default: the planner's)")
-    grid.add_argument("--p-top-pa", type=positive_float, default=5000.0,
+    grid.add_argument("--p-top-pa", type=positive_float, default=5500.0,
                       help="model top the source must reach and the plan "
-                           "must carry (default 5000 Pa, about 20 km)")
+                           "must carry (default 5500 Pa, 19.97 km; above 20 km is refused)")
     capacity = grid.add_mutually_exclusive_group()
     capacity.add_argument("--card", default=None,
                           help="size each domain for this GPU tier")

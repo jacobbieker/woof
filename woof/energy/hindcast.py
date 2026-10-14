@@ -496,8 +496,8 @@ def segment_windows(start: datetime, end: datetime, *, segment_hours: int,
 def _bbox_region(sites: Sequence[Site]) -> dict:
     lons = [s.lon for s in sites]
     lats = [s.lat for s in sites]
-    return {"west": min(lons), "south": min(lats), "east": max(lons),
-            "north": max(lats)}
+    # The form woof.energy.source_select.region_bbox reads.
+    return {"bbox": [min(lons), min(lats), max(lons), max(lats)]}
 
 
 def _subset(site_set: SiteSet, site_ids: Sequence[str], *, cluster_id: str,
@@ -1322,7 +1322,17 @@ def _key_pattern(key: str) -> re.Pattern:
     return re.compile(rf"^\s*{re.escape(key)}\s*=")
 
 
-def patch_domain_tables(text: str, settings: Mapping[int, Mapping[str, float]]
+class _TomlLiteral(str):
+    """A value :func:`patch_domain_tables` writes verbatim (an inline table)."""
+
+
+#: What the leaves of a segment write: every history field (the hindcast's
+#: "all variables"), plus the in-model hub-height wind and its interval
+#: MAX/MIN/MEAN.  Parents keep the planner's own light preset.
+LEAF_OUTPUT = _TomlLiteral('{ preset = "full", hub_wind = true }')
+
+
+def patch_domain_tables(text: str, settings: Mapping[int, Mapping[str, Any]]
                         ) -> str:
     """Set keys on ``[[domain]]`` tables by ``grid_id`` (others untouched).
 
@@ -1343,7 +1353,8 @@ def patch_domain_tables(text: str, settings: Mapping[int, Mapping[str, float]]
             continue
         found.add(grid_id)
         for key, value in settings[grid_id].items():
-            rendered = f"{key} = {float(value)!r}"
+            rendered = (f"{key} = {value}" if isinstance(value, _TomlLiteral)
+                        else f"{key} = {float(value)!r}")
             pattern = _key_pattern(key)
             hits = [i for i, line in enumerate(block) if pattern.match(line)]
             if hits:
@@ -1388,6 +1399,7 @@ def _apply_nests_history(plan: Plan, job: Mapping[str, Any]) -> list[str]:
     leaf_s = float(history["leaf_interval_s"])
     parent_s = float(history["parent_interval_s"])
     configs = sorted({d.config for d in plan.domains})
+    parents = {d.parent for d in plan.domains if d.parent is not None}
     notes = []
     for config in configs:
         members = [d for d in plan.domains if d.config == config]
@@ -1399,10 +1411,13 @@ def _apply_nests_history(plan: Plan, job: Mapping[str, Any]) -> list[str]:
                       leaf_s if domain.role == "child" else parent_s}
             if begin:
                 values["history_begin_s"] = begin
+            if domain.role == "child" and domain.domain_id not in parents:
+                values["output"] = LEAF_OUTPUT
             settings[int(domain.grid_id)] = values
         path = plan.resolve(config)
         text = patch_domain_tables(path.read_text(encoding="utf-8"),
                                    settings)
+        text = _enable_wind_diagnostics(text)
 
         def check(candidate: Path, settings=settings) -> None:
             try:
@@ -1415,6 +1430,8 @@ def _apply_nests_history(plan: Plan, job: Mapping[str, Any]) -> list[str]:
             got = {int(dc.grid_id): dc for dc in experiment.domains}
             for grid_id, values in settings.items():
                 for key, want in values.items():
+                    if isinstance(want, _TomlLiteral):
+                        continue  # the loader above accepted it
                     have = float(getattr(got[grid_id], key))
                     if not math.isclose(have, want):
                         raise HindcastRefused(
@@ -1429,7 +1446,8 @@ def _apply_nests_history(plan: Plan, job: Mapping[str, Any]) -> list[str]:
         _replace_atomically_after(path, text, check)
         notes.append(f"{config}: history_begin_s = {begin:g} on every "
                      f"domain, leaves every {leaf_s:g} s, parents every "
-                     f"{parent_s:g} s (woof energy hindcast)")
+                     f"{parent_s:g} s, leaves the full preset with hub_wind, "
+                     "nwp_diagnostics = 1 (woof energy hindcast)")
     return notes
 
 
@@ -1463,6 +1481,80 @@ def _set_run_key(text: str, key: str, value: float) -> str:
     return "\n".join(lines)
 
 
+def _ensure_run_key(text: str, key: str, value: int) -> str:
+    """Set ``key`` in the ``[run]`` table of a legacy child config, adding
+    the line when the table does not carry it yet."""
+
+    lines = text.split("\n")
+    in_run, header, hits = False, None, []
+    for index, line in enumerate(lines):
+        if _TABLE_HEADER.match(line):
+            in_run = bool(_RUN_HEADER.match(line))
+            if in_run:
+                header = index
+            continue
+        if in_run and _key_pattern(key).match(line):
+            hits.append(index)
+    if len(hits) > 1:
+        raise HindcastRefused(f"the child config's [run] table has "
+                              f"{len(hits)} {key} lines; expected one")
+    if hits:
+        lines[hits[0]] = f"{key} = {int(value)}"
+    elif header is not None:
+        lines.insert(header + 1, f"{key} = {int(value)}")
+    else:
+        raise HindcastRefused("the child config has no [run] table")
+    return "\n".join(lines)
+
+
+def _enable_wind_diagnostics(text: str) -> str:
+    """Switch on the in-model wind diagnostics in an experiment TOML:
+    ``[shared] nwp_diagnostics = 1`` (WSPD10MAX, U10MAX/V10MAX,
+    W_UP_MAX/W_DN_MAX, UPP GUST; woof.core.wind_gust_diag) and
+    ``[output] hub_wind = true`` (hub-height wind and its interval
+    MAX/MIN/MEAN; woof.core.hub_wind_diag) unless the file already names
+    its hub heights.  The output presets only select these fields; the
+    run configuration is what computes them."""
+
+    lines = text.split("\n")
+    table = None
+    shared_at = output_at = None
+    nwp_at, hub_named = None, False
+    for index, line in enumerate(lines):
+        if _TABLE_HEADER.match(line):
+            table = line.strip()
+            if table == "[shared]":
+                shared_at = index
+            elif table == "[output]":
+                output_at = index
+            continue
+        if table == "[shared]" and _key_pattern("nwp_diagnostics").match(line):
+            nwp_at = index
+        if table == "[output]" and (_key_pattern("hub_wind").match(line)
+                                     or _key_pattern("hub_heights_m").match(line)):
+            hub_named = True
+    if nwp_at is not None:
+        lines[nwp_at] = "nwp_diagnostics = 1"
+    elif shared_at is not None:
+        lines.insert(shared_at + 1, "nwp_diagnostics = 1")
+        if output_at is not None and output_at > shared_at:
+            output_at += 1
+    else:
+        while lines and lines[-1] == "":
+            lines.pop()
+        lines += ["", "[shared]", "nwp_diagnostics = 1", ""]
+    if not hub_named:
+        if output_at is not None:
+            lines.insert(output_at + 1, "hub_wind = true")
+        else:
+            # A table header after the last [[domain]] closes that array
+            # entry, so a new [output] table is valid at the end.
+            while lines and lines[-1] == "":
+                lines.pop()
+            lines += ["", "[output]", "hub_wind = true", ""]
+    return "\n".join(lines)
+
+
 def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
                          ) -> tuple[Plan, list[str]]:
     from woof.offline_child import resolve_child_run_config
@@ -1482,11 +1574,14 @@ def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
                                   "child_config / child_config_sha256")
         path = plan.resolve(relative)
         cfg_now = resolve_child_run_config(path)
-        if math.isclose(float(cfg_now.output_interval_s), leaf_s):
+        if (math.isclose(float(cfg_now.output_interval_s), leaf_s)
+                and int(getattr(cfg_now, "nwp_diagnostics", 0)) == 1):
             domains.append(domain)
             continue
         text = _set_run_key(path.read_text(encoding="utf-8"),
                             "output_interval_s", leaf_s)
+        # The tiles' interval wind maxima and UPP gust (wind_gust_diag).
+        text = _ensure_run_key(text, "nwp_diagnostics", 1)
 
         def check(candidate: Path) -> None:
             try:
@@ -1498,6 +1593,9 @@ def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
                     f"invalid for woof downscale: {error}") from error
             if not math.isclose(float(cfg.output_interval_s), leaf_s):
                 raise HindcastRefused(f"{relative}: output_interval_s did "
+                                      "not read back as written")
+            if int(getattr(cfg, "nwp_diagnostics", 0)) != 1:
+                raise HindcastRefused(f"{relative}: nwp_diagnostics = 1 did "
                                       "not read back as written")
 
         _replace_atomically_after(path, text, check)
@@ -1514,7 +1612,8 @@ def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
                 document["history"]["interval_s"] = leaf_s
             _write_json(spec, document)
         domains.append(dataclasses.replace(domain, extra=extra))
-        notes.append(f"{relative}: output_interval_s = {leaf_s:g} "
+        notes.append(f"{relative}: output_interval_s = {leaf_s:g}, "
+                     "nwp_diagnostics = 1 "
                      f"(woof energy hindcast); --child-config-sha256 "
                      f"rebound {old_sha[:12]}... -> {new_sha[:12]}...")
     plan.domains = domains

@@ -218,7 +218,9 @@ def test_selector_choices_and_changes_are_recorded_per_job(tmp_path):
     result = hc.plan_hindcast(request, source_selector=selector, now=NOW)
     assert len(calls) == 3
     region, cycle, hours, p_top, priority, now = calls[0]
-    assert set(region) == {"west", "south", "east", "north"}
+    assert set(region) == {"bbox"}
+    west, south, east, north = region["bbox"]
+    assert west <= east and south <= north
     assert cycle == datetime(2025, 11, 1) and hours == 30.0
     assert p_top == 5500.0 and priority == ("met-office-global", "gfs")
     assert now == NOW
@@ -646,3 +648,22 @@ def test_the_cli_plans_shows_status_and_refuses_cleanly(tmp_path, capsys):
     args = _parse(["energy", "hindcast", "materialize", "no-such-job",
                    "--dir", str(outdir)])
     assert args.func(args) == 2
+
+
+def test_segment_configs_switch_on_the_wind_diagnostics():
+    # nwp_diagnostics = 1 computes the interval wind maxima and the UPP gust;
+    # [output] hub_wind computes hub-height wind and its MAX/MIN/MEAN.  The
+    # presets only select those fields, so the segment config must ask.
+    from woof.energy.hindcast import _enable_wind_diagnostics
+
+    text = ('[experiment]\nname = "x"\n\n[shared]\nnz = 70\nnwp_diagnostics = 0\n'
+            '\n[[domain]]\ngrid_id = 1\n')
+    out = _enable_wind_diagnostics(text)
+    assert "nwp_diagnostics = 1" in out and "nwp_diagnostics = 0" not in out
+    assert out.rstrip().endswith('[output]\nhub_wind = true')
+    added = _enable_wind_diagnostics('[shared]\nnz = 70\n\n[output]\npreset = "energy"\n')
+    assert added.split("\n")[:2] == ["[shared]", "nwp_diagnostics = 1"]
+    assert "[output]\nhub_wind = true\npreset" in added
+    named = '[shared]\nnz = 70\n\n[output]\nhub_heights_m = [100.0]\n'
+    assert "hub_wind" not in _enable_wind_diagnostics(named)
+    assert _enable_wind_diagnostics(out) == out

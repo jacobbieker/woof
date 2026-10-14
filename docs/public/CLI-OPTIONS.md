@@ -768,7 +768,7 @@ Takes no options of its own.
 | `--nz` | vertical levels (default: the planner's) |
 | `--outdir DIR` | hindcast directory (manifest, jobs, clusters) |
 | `--output-root URL` | root of the output stores, e.g. s3://bucket/x (default: icechunk/ in the hindcast directory) |
-| `--p-top-pa` | model top the source must reach and the plan must carry (default 5000 Pa, about 20 km) |
+| `--p-top-pa` | model top the source must reach and the plan must carry (default 5500 Pa, 19.97 km; above 20 km is refused) |
 | `--parent-dx-m` | outer parent spacing (default: the cluster chain's, else the planner's) |
 | `--parent-history-interval-s` | wrf-nests parent cadence (default 3600) |
 | `--partition PARTITION.json` | woof-energy.partition.v1 document: one job chain per cluster |
