@@ -13,6 +13,9 @@ the subcommand runs::
     woof energy run       woof.energy.run             run every plan domain
     woof energy extract   woof.energy.extract         plan runs -> forecast.v1
     woof energy rating    woof.energy.products        line rating, icing, power
+    woof energy estimate  woof.energy.cost            GPU-hours and $ for a hindcast
+                                                      (also ``hindcast estimate``
+                                                      once that group exists)
 """
 
 from __future__ import annotations
@@ -315,6 +318,94 @@ def _register_rating(sub) -> None:
     p.set_defaults(func=_dispatch("woof.energy.products"))
 
 
+def register_estimate(sub, name: str = "estimate") -> argparse.ArgumentParser:
+    """Register the cost estimator under ``name`` on a subparser group.
+
+    ``woof energy estimate`` today; a ``woof energy hindcast`` group calls
+    this with its own subparsers so ``woof energy hindcast estimate`` is the
+    same parser (docs/energy-hindcast/cost.md).
+    """
+
+    p = sub.add_parser(
+        name, help="estimate GPU-hours, wall clock and cloud cost of a "
+                   "hindcast (an estimate, never a measurement)")
+    source = p.add_argument_group(
+        "what to price (exactly one)",
+        "a plan prices its own domains; a partition or the summary "
+        "statistics synthesise wrf-tiles-shaped domains per cluster")
+    source.add_argument("--plan", default=None, metavar="PLAN.json",
+                        help="woof-energy.plan.v1 (wrf-tiles or wrf-nests) "
+                             "priced as one segment")
+    source.add_argument("--partition", default=None, metavar="PARTITION.json",
+                        help="partition document with a 'clusters' list")
+    source.add_argument("--clusters", type=positive_int, default=None,
+                        metavar="N",
+                        help="summary mode: number of clusters "
+                             "(with --footprint-km2)")
+    source.add_argument("--footprint-km2", type=positive_float, default=None,
+                        metavar="A",
+                        help="summary mode: total farm footprint over all "
+                             "clusters, km2")
+    p.add_argument("--job", default=None, metavar="JOB.json",
+                   help="hindcast job document: segments, segment hours and "
+                        "spin-up when present (flags override)")
+    p.add_argument("--segments", type=positive_int, default=None,
+                   help="segments to run (default: the job's, else 365)")
+    p.add_argument("--segment-hours", type=positive_float, default=None,
+                   help="hours per segment including spin-up (default: the "
+                        "job's, the plan's hours, else 30)")
+    p.add_argument("--spinup-hours", type=float, default=None,
+                   help="spin-up hours per segment not stored (default: "
+                        "the job's, else 6)")
+    p.add_argument("--leaf-dx-m", type=positive_float, default=None,
+                   help="leaf spacing for synthesised clusters (default: "
+                        "the job's, else 200)")
+    p.add_argument("--chain-m", default=None, metavar="DX,DX,...",
+                   help="refinement chain in metres, coarsest first, ending "
+                        "at the leaf (default: leaf x 5, then the leaf)")
+    p.add_argument("--nz", type=positive_int, default=None,
+                   help="leaf model levels (default: the job's, else 60)")
+    p.add_argument("--parent-nz", type=positive_int, default=None,
+                   help="parent model levels (default 49)")
+    p.add_argument("--cover-factor", type=positive_float, default=None,
+                   help="leaf-cover km2 per km2 of farm footprint "
+                        "(default 2.0)")
+    p.add_argument("--instance", action="append", default=None,
+                   metavar="PROVIDER[:INSTANCE]",
+                   help="price only this offer (repeatable; e.g. "
+                        "aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for "
+                        "every AWS row; default: every row)")
+    p.add_argument("--market", choices=("both", "on-demand", "spot"),
+                   default="both", help="price on-demand, spot or both "
+                                        "(default both)")
+    p.add_argument("--instances", type=positive_int, default=1,
+                   help="instances of each offer running at once, for the "
+                        "wall clock (default 1)")
+    p.add_argument("--deadline-days", type=positive_float, default=None,
+                   help="also report the instances needed to finish in "
+                        "this many days")
+    p.add_argument("--prices", default=None, metavar="PRICES.json",
+                   help="woof-energy.cloud-prices.v1 table (default: the "
+                        "dated table shipped in woof/data/energy)")
+    p.add_argument("--store-preset", choices=("full", "energy"),
+                   default="full",
+                   help="fields stored per leaf frame (default full: all "
+                        "variables)")
+    p.add_argument("--compression-ratio", type=positive_float, default=0.35,
+                   help="stored/raw bytes of the Icechunk store (default "
+                        "0.35, an assumption)")
+    p.add_argument("--chunk-mib", type=positive_float, default=8.0,
+                   help="compressed chunk size for the PUT count (default 8)")
+    p.add_argument("--packing-efficiency", type=positive_float, default=0.85,
+                   help="fraction of paid GPU time doing work (default 0.85)")
+    p.add_argument("-o", "--output", default=None,
+                   metavar="ESTIMATE.json",
+                   help="also write the woof-energy.cost-estimate.v1 JSON "
+                        "here (stdout always carries it)")
+    p.set_defaults(func=_dispatch("woof.energy.cost"))
+    return p
+
+
 def register_cli(subparsers) -> None:
     """Add ``woof energy`` to the product CLI."""
 
@@ -330,6 +421,7 @@ def register_cli(subparsers) -> None:
     _register_run(sub)
     _register_extract(sub)
     _register_rating(sub)
+    register_estimate(sub)
 
 
-__all__ = ["register_cli"]
+__all__ = ["register_cli", "register_estimate"]

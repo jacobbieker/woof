@@ -4,6 +4,25 @@
 
 New:
 
+- `woof energy estimate` prices a wind-farm hindcast before any GPU is
+  rented. It reads a `wrf-tiles`/`wrf-nests` plan, a partition document, or
+  summary statistics (`--clusters N --footprint-km2 A`) and reports
+  GPU-hours, instance-hours, wall clock for `--instances` (or the instances
+  a `--deadline-days` needs), on-demand and spot dollars per cloud instance,
+  and the Icechunk store's size and monthly cost. The output is a
+  `woof-energy.cost-estimate.v1` JSON on stdout and a table on stderr.
+  Throughput is calibrated on two consumer-card timing receipts and scaled
+  by memory bandwidth, so every figure carries a 0.5x-1.5x band. Prices
+  come from a dated, editable `woof/data/energy/cloud_prices.json`
+  (as of 2025-07-01) and are never fetched live.
+  See docs/energy-hindcast/cost.md, including a worked estimate for every
+  public wind farm worldwide at 200 m for one year.
+- `--card` accepts cloud datacentre parts: `h100-80gb`/`h100-sxm`/
+  `h100-pcie`, `h200`, `a100-80gb`, `a100-40gb`, `l40s`, `l4` and `a10g`.
+  Each part sizes against the capacity it reports rather than its marketing
+  size (an L40S at 45.0 GiB). These rows live in the new `woof.card_catalog`
+  with SM count and bandwidth and are marked declared, not measured locally.
+
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals

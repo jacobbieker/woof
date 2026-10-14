@@ -474,7 +474,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--ack ID` | declare a governed experiment, written verbatim into the emitted [experiment].acknowledgements. Repeatable. This door used to write the nocturnal declaration for you, which silenced the load guard at check/run/go/run-plan and both prepared runners for the life of the file; it no longer does, and refuses instead. The id it accepts is asymmetric-radiation-nocturnal-window-v1: a longwave-OFF suite over a window that includes local night, which you are running deliberately as a daytime-only experiment |
 | `--buffer-km KM[,KM...]` | with --polygon, nonnegative geometry buffer in kilometres; one value applies to every domain, or supply exactly one outer-to-inner value per level. Every value is measured from the polygon itself, not from the next inner grid: '800,300,0' puts the outer grid 800 km from the polygon, about 500 km beyond the middle one. With --ladder auto, a multi-value list selects the preset of that depth (default: zero) |
 | `--cadence HOURS` | boundary spacing in whole hours, validated against the selected product |
-| `--card` | GPU to size for: a tier (12gb/16gb/24gb/32gb), a size ('10gb'), or a model with a recorded size ('RTX 3080', '5070 Ti'); sets the VRAM budget with no local probe. With no --card, --vram-gib or --hardware-json the wizard MEASURES the local card's capacity (short-lived probe, suppressed by GPUWM_NO_LOCAL_GPU) and refuses, naming both flags, when there is nothing to measure |
+| `--card` | GPU to size for: a tier (12gb/16gb/24gb/32gb), a size ('10gb'), a model with a recorded size ('RTX 3080', '5070 Ti') or a cloud part ('h100-80gb', 'a100-40gb', 'l40s', 'a10g'); sets the VRAM budget with no local probe. With no --card, --vram-gib or --hardware-json the wizard MEASURES the local card's capacity (short-lived probe, suppressed by GPUWM_NO_LOCAL_GPU) and refuses, naming both flags, when there is nothing to measure |
 | `--chain R1,R2,...` | custom nest refinement ratios, integers in [2, 8] (e.g. --root-dx 3 --chain 4 for 3 km -> 750 m); omit for a single domain at --root-dx. Sized by the same estimator fit loop as the presets |
 | `--clock {auto,adaptive,fixed}` | how the run steps. adaptive: each grid starts at the emitted time_step and then follows its own Courant number between 3 and 8 s per km of its spacing (WRF's use_adaptive_time_step, written into [shared]); the terrain clock still caps it over steep ground at launch. fixed: one step throughout. auto (default): adaptive when every grid starts inside those bounds and lies within the 500 m to 12 km spacings the terrain clock measured, fixed otherwise (the tropical clock's 2.5 s per km is always fixed). adaptive on a grid outside the bounds is refused, naming the grid |
 | `--cumulus {suite,grid}` | who decides the root's cumulus scheme. suite: the suite's own scheme at any spacing (what naming --physics-profile means when this is left out). grid: the suite's scheme is turned off on a root finer than the 4 km convection-permitting bound, where the dynamics resolve deep convection (what an unnamed suite gets) |
@@ -617,6 +617,34 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | option | what it does |
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof energy estimate`
+
+| option | what it does |
+|---|---|
+| `--chain-m DX,DX,...` | refinement chain in metres, coarsest first, ending at the leaf (default: leaf x 5, then the leaf) |
+| `--chunk-mib` | compressed chunk size for the PUT count (default 8) |
+| `--clusters N` | summary mode: number of clusters (with --footprint-km2) |
+| `--compression-ratio` | stored/raw bytes of the Icechunk store (default 0.35, an assumption) |
+| `--cover-factor` | leaf-cover km2 per km2 of farm footprint (default 2.0) |
+| `--deadline-days` | also report the instances needed to finish in this many days |
+| `--footprint-km2 A` | summary mode: total farm footprint over all clusters, km2 |
+| `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
+| `--instances` | instances of each offer running at once, for the wall clock (default 1) |
+| `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
+| `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 200) |
+| `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
+| `--nz` | leaf model levels (default: the job's, else 60) |
+| `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
+| `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
+| `--parent-nz` | parent model levels (default 49) |
+| `--partition PARTITION.json` | partition document with a 'clusters' list |
+| `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
+| `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
+| `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 30) |
+| `--segments` | segments to run (default: the job's, else 365) |
+| `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 6) |
+| `--store-preset {full,energy}` | fields stored per leaf frame (default full: all variables) |
 
 ## `woof energy extract`
 

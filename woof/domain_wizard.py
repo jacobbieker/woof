@@ -171,8 +171,11 @@ _CARD_VENDOR_WORDS = ("nvidia", "geforce", "quadro", "tesla", "rtx", "gtx")
 def card_capacity_gib(card: str) -> float | None:
     """The VRAM capacity a ``--card`` spelling names, or ``None``.
 
-    Three spellings are read, in order: a tier (``12gb``/``16gb``/``24gb``/
-    ``32gb``), a size written into the name (``10gb``, ``"RTX 3080 10GB"``,
+    Four spellings are read, in order: a tier (``12gb``/``16gb``/``24gb``/
+    ``32gb``), a cloud datacentre part spelled exactly as a
+    :data:`woof.card_catalog.CARD_CATALOG` row (``h100-80gb``, ``l40s``,
+    ``a10g``; its reported capacity, declared not measured locally),
+    a size written into the name (``10gb``, ``"RTX 3080 10GB"``,
     a bare ``10``), and a model with a row in :data:`KNOWN_CARD_VRAM_GIB`
     (``"RTX 3080"``, ``rtx3080``, ``"5070 Ti"``).  ``None`` means the
     spelling carries no capacity, which is the only thing the sizing door
@@ -181,6 +184,14 @@ def card_capacity_gib(card: str) -> float | None:
     text = str(card).strip().lower()
     if text in CARD_VRAM_GIB:
         return CARD_VRAM_GIB[text]
+    # A cloud datacentre part named exactly (``h100-80gb``, ``l40s``,
+    # ``a10g``) sizes against the capacity that part presents, which is
+    # below its marketing size (an L40S shows 46,068 MiB); declared, not
+    # measured locally (woof.card_catalog).
+    from woof.card_catalog import cloud_card_row
+    cloud = cloud_card_row(text)
+    if cloud is not None:
+        return cloud.memory_gib
     sized = _CARD_SIZE_IN_NAME.search(text)
     if sized:
         return float(sized.group(1))
@@ -7664,8 +7675,9 @@ def register_cli(subparsers) -> None:
                              "center)")
     parser.add_argument("--card", default=None,
                         help="GPU to size for: a tier (12gb/16gb/24gb/32gb), "
-                             "a size ('10gb'), or a model with a recorded "
-                             "size ('RTX 3080', '5070 Ti'); sets the VRAM "
+                             "a size ('10gb'), a model with a recorded "
+                             "size ('RTX 3080', '5070 Ti') or a cloud part "
+                             "('h100-80gb', 'a100-40gb', 'l40s', 'a10g'); sets the VRAM "
                              "budget with no local probe. With no --card, --vram-gib or "
                              "--hardware-json the wizard MEASURES the local "
                              "card's capacity (short-lived probe, "
