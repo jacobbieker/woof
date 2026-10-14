@@ -9,7 +9,7 @@ run``'s own ``run_plan``.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import sys
@@ -633,7 +633,8 @@ def test_the_cli_plans_shows_status_and_refuses_cleanly(tmp_path, capsys):
                    "-o", str(outdir)])
     assert args.func(args) == 0
     shown = json.loads(capsys.readouterr().out)
-    # Three days at the 6-hourly default: twelve forecasts.
+    # Three days at the 6-hourly default (9 h runs, 3 h spin-up): twelve
+    # forecasts.
     assert shown["jobs"] == 12 and shown["example_job"]["schema"] == \
         hc.JOB_SCHEMA
     args = _parse(["energy", "hindcast", "plan", "--sites", str(SITES),
@@ -673,20 +674,62 @@ def test_segment_configs_switch_on_the_wind_diagnostics():
     assert _enable_wind_diagnostics(out) == out
 
 
-def test_the_default_is_one_six_hour_forecast_per_global_cycle():
-    # 00/06/12/18 UTC inits, each kept whole and half-open, so the forecasts
-    # stitch into one continuous analysis with every frame from the freshest
-    # init.
+def test_the_default_is_one_nine_hour_forecast_per_global_cycle():
+    # 00/06/12/18 UTC inits, each run 9 h with its first 3 h discarded, so
+    # the kept windows [init+3, init+9) stitch into one continuous analysis.
     request = hc.HindcastRequest(outdir=Path("/unused"),
                                  start=datetime(2025, 11, 1),
                                  end=datetime(2025, 11, 2), sites_path=SITES,
                                  source="gfs")
-    assert (request.segment_hours, request.spinup_hours) == (6, 0)
+    assert (request.segment_hours, request.spinup_hours) == (9, 3)
+    assert request.keep_hours == 6
     segments = hc.segment_windows(datetime(2025, 11, 1), datetime(2025, 11, 2),
                                   segment_hours=request.segment_hours,
                                   spinup_hours=request.spinup_hours,
                                   cycle_hour=0)
     assert [s.run_start.hour for s in segments] == [0, 6, 12, 18]
-    assert all(s.keep_start == s.run_start for s in segments)
+    assert [s.keep_start.hour for s in segments] == [3, 9, 15, 21]
+    assert all(s.keep_end - s.keep_start == timedelta(hours=6)
+               for s in segments)
     assert all(a.keep_end == b.keep_start for a, b in zip(segments, segments[1:]))
-    assert segments[-1].keep_end == datetime(2025, 11, 2)
+    assert segments[-1].keep_end == datetime(2025, 11, 2, 3)
+    # The 6 h / 0 h layout (each forecast kept from its init) stays a flag.
+    whole = hc.segment_windows(datetime(2025, 11, 1), datetime(2025, 11, 2),
+                               segment_hours=6, spinup_hours=0, cycle_hour=0)
+    assert all(s.keep_start == s.run_start for s in whole)
+
+
+def test_the_default_grid_is_300_m_on_the_lean_wind_energy_column():
+    from woof.energy import cli, vertical
+
+    request = hc.HindcastRequest(outdir=Path("/unused"),
+                                 start=datetime(2025, 11, 1),
+                                 end=datetime(2025, 11, 2), sites_path=SITES,
+                                 source="gfs")
+    assert hc.DEFAULT_DX_M == 300.0
+    assert request.nz == hc.DEFAULT_NZ == vertical.HINDCAST_NZ == 49
+    assert cli._HINDCAST_DEFAULT_NZ == hc.DEFAULT_NZ
+    args = _parse(["energy", "hindcast", "plan", "--sites", str(SITES),
+                   "--start", "2025-11-01", "--end", "2025-11-02",
+                   "-o", "unused"])
+    assert (args.segment_hours, args.nz) == (9, 49)
+    assert args.dx_m is None            # the cluster's, else DEFAULT_DX_M
+    assert args.spinup_hours is None    # 3 h, held to the cycle below
+    assert hc._request_from_args(args).spinup_hours == 3
+
+
+@pytest.mark.parametrize("segment, spinup", [(9, 3), (15, 3), (27, 3)])
+def test_an_omitted_spinup_is_3_h_where_runs_stay_on_the_cycle(segment, spinup):
+    assert hc.default_spinup_for(segment) == spinup
+
+
+@pytest.mark.parametrize("segment", [6, 8, 30])
+def test_an_omitted_spinup_that_would_leave_the_cycle_is_refused(segment):
+    # --segment-hours 6 alone (the old default) would keep 3 h windows and
+    # start runs at 03/09/15/21Z: refused, never reinterpreted.
+    with pytest.raises(hc.HindcastRefused, match="give --spinup-hours"):
+        hc.default_spinup_for(segment)
+    args = _parse(["energy", "hindcast", "plan", "--sites", str(SITES),
+                   "--start", "2025-11-01", "--end", "2025-11-02",
+                   "--segment-hours", str(segment), "-o", "unused"])
+    assert args.func(args) == 2

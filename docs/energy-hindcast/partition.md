@@ -117,7 +117,7 @@ Each cluster record:
 | `crosses_antimeridian` | `bbox` reaches past ±180 |
 | `region` | The box buffered by `corridor_km`, as GeoJSON in [-180, 180]: a Polygon, or a MultiPolygon split at 180 degrees when the buffered box crosses it (RFC 7946 §3.1.9) |
 | `extent_km` | `[x, y]` extent of the members in the local azimuthal-equidistant frame |
-| `leaf_dx_m` | Leaf spacing, `--leaf-dx-m` (100 to 300 m, default 200) |
+| `leaf_dx_m` | Leaf spacing, `--leaf-dx-m` (100 to 300 m, default 300, the cheapest; see [cost.md](cost.md#cheapest-configuration)) |
 | `parent_chain` | `{ratios, parent_dx_m, dx_m, parent_cells}`: the shortest chain of ×5 steps (at most 3) whose parent fits the card. The parent is the cluster extent plus the buffer the tile planner adds. `dx_m` runs from the parent to the leaf |
 | `projection` | `lambert`, `mercator` or `polar`: what `woof domain` selects for the box's centre latitude |
 | `topology` | `wrf-tiles` or `wrf-nests`: the planner recommended for the cluster |

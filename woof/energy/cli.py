@@ -589,11 +589,16 @@ def _register_rating(sub) -> None:
     p.set_defaults(func=_dispatch("woof.energy.products"))
 
 
+#: ``woof energy hindcast plan --nz`` default, held equal to
+#: :data:`woof.energy.hindcast.DEFAULT_NZ` and
+#: :data:`woof.energy.vertical.HINDCAST_NZ` by their tests.
+_HINDCAST_DEFAULT_NZ = 49
+
 #: ``woof energy partition`` defaults, held equal to the constants of
 #: :mod:`woof.energy.partition` by its tests (the module is imported only
 #: when the subcommand runs).
 _PARTITION_DEFAULTS = {"linkage_km": 30.0, "max_extent_km": 250.0,
-                       "max_sites": 20_000, "leaf_dx_m": 200.0,
+                       "max_sites": 20_000, "leaf_dx_m": 300.0,
                        "corridor_km": 2.0}
 _PARTITION_TOPOLOGIES = ("auto", "wrf-tiles", "wrf-nests")
 
@@ -634,7 +639,8 @@ def _register_partition(sub) -> None:
     p.add_argument("--leaf-dx-m", type=positive_float,
                    default=d["leaf_dx_m"],
                    help="leaf grid spacing, 100 to 300 m "
-                        f"(default {d['leaf_dx_m']:g})")
+                        f"(default {d['leaf_dx_m']:g}, the cheapest; finer "
+                        "on request)")
     p.add_argument("--corridor-km", type=positive_float,
                    default=d["corridor_km"],
                    help="half-width of the high-resolution corridor around "
@@ -709,6 +715,7 @@ def _register_hindcast(sub) -> None:
     verbs = hindcast.add_subparsers(dest="hindcast_command", required=False)
     # The cost estimator, the same parser as ``woof energy estimate``.
     register_estimate(verbs)
+    register_optimize(verbs)
 
     p = verbs.add_parser(
         "plan", help="expand clusters x [start, end) into segment jobs")
@@ -731,13 +738,15 @@ def _register_hindcast(sub) -> None:
                            "--cycle-hour)")
     when.add_argument("--end", required=True, metavar="YYYY-MM-DD[THH]",
                       help="exclusive bound on segment run starts")
-    when.add_argument("--segment-hours", type=positive_int, default=6,
-                      help="run length of every segment (default 6: one "
-                           "forecast per 00/06/12/18 UTC global init, "
-                           "stitched into one continuous analysis)")
-    when.add_argument("--spinup-hours", type=_non_negative_int, default=0,
-                      help="leading hours discarded as spin-up (default 0); "
-                           "each segment keeps segment - spinup hours")
+    when.add_argument("--segment-hours", type=positive_int, default=9,
+                      help="run length of every segment (default 9: one "
+                           "forecast per 00/06/12/18 UTC global init, its "
+                           "hours 3-9 stitched into one continuous analysis)")
+    when.add_argument("--spinup-hours", type=_non_negative_int, default=None,
+                      help="leading hours discarded as spin-up (default 3, "
+                           "refused when another --segment-hours would then "
+                           "keep a window off the 6-hourly cycle); each "
+                           "segment keeps segment - spinup hours")
     when.add_argument("--cycle-hour", type=_hours_of_day, default=0,
                       help="UTC hour runs start from (default 0)")
     grid = p.add_argument_group("planner passthrough")
@@ -746,14 +755,19 @@ def _register_hindcast(sub) -> None:
                       help="planner for clusters that do not name one "
                            "(default wrf-nests)")
     grid.add_argument("--dx-m", type=positive_float, default=None,
-                      help="leaf spacing (default: the cluster's, else 100)")
+                      help="leaf spacing, 100 to 300 m (default: the "
+                           "cluster's, else 300, the cheapest)")
     grid.add_argument("--corridor-km", type=positive_float, default=2.0,
                       help="corridor half-width (default 2)")
     grid.add_argument("--parent-dx-m", type=positive_float, default=None,
                       help="outer parent spacing (default: the cluster "
                            "chain's, else the planner's)")
-    grid.add_argument("--nz", type=positive_int, default=None,
-                      help="vertical levels (default: the planner's)")
+    grid.add_argument("--nz", type=positive_int,
+                      default=_HINDCAST_DEFAULT_NZ,
+                      help="model levels of the wind-energy column every "
+                           f"domain carries (default {_HINDCAST_DEFAULT_NZ}: "
+                           "the smallest with >= 8 layers below 250 m and no "
+                           "layer deeper than 1000 m)")
     grid.add_argument("--p-top-pa", type=positive_float, default=5500.0,
                       help="model top the source must reach and the plan "
                            "must carry (default 5500 Pa, 19.97 km; above 20 km is refused)")
@@ -1075,21 +1089,25 @@ def register_estimate(sub, name: str = "estimate") -> argparse.ArgumentParser:
                    help="hindcast job document: segments, segment hours and "
                         "spin-up when present (flags override)")
     p.add_argument("--segments", type=positive_int, default=None,
-                   help="segments to run (default: the job's, else 365)")
+                   help="segments to run (default: the job's, else enough "
+                        "to store one year: 1460 at the 9 h / 3 h default)")
     p.add_argument("--segment-hours", type=positive_float, default=None,
                    help="hours per segment including spin-up (default: the "
-                        "job's, the plan's hours, else 30)")
+                        "job's, the plan's hours, else 9: one run per "
+                        "00/06/12/18 UTC init)")
     p.add_argument("--spinup-hours", type=float, default=None,
                    help="spin-up hours per segment not stored (default: "
-                        "the job's, else 6)")
+                        "the job's, else 3)")
     p.add_argument("--leaf-dx-m", type=positive_float, default=None,
                    help="leaf spacing for synthesised clusters (default: "
-                        "the job's, else 200)")
+                        "the job's, else 300); with --partition it must "
+                        "match the clusters' own spacing or is refused")
     p.add_argument("--chain-m", default=None, metavar="DX,DX,...",
                    help="refinement chain in metres, coarsest first, ending "
                         "at the leaf (default: leaf x 5, then the leaf)")
     p.add_argument("--nz", type=positive_int, default=None,
-                   help="leaf model levels (default: the job's, else 60)")
+                   help="leaf model levels (default: the job's, else 49, "
+                        "the hindcast's wind-energy column)")
     p.add_argument("--parent-nz", type=positive_int, default=None,
                    help="parent model levels (default 49)")
     p.add_argument("--cover-factor", type=positive_float, default=None,
@@ -1131,6 +1149,80 @@ def register_estimate(sub, name: str = "estimate") -> argparse.ArgumentParser:
     return p
 
 
+def register_optimize(sub, name: str = "optimize") -> argparse.ArgumentParser:
+    """Register ``woof energy hindcast optimize`` (woof.energy.cost_optimize):
+    the cheapest configuration x offer meeting a deadline."""
+
+    p = sub.add_parser(
+        name, help="rank leaf spacing x levels x segment layout x cloud "
+                   "offer by estimated cost meeting a deadline")
+    what = p.add_argument_group("what to cut (exactly one)")
+    what.add_argument("--sites", default=None, metavar="SITES.json",
+                      help="sites document, re-partitioned per card memory "
+                           "and leaf spacing")
+    what.add_argument("--partition", default=None, metavar="PARTITION.json",
+                      help="partition whose sites and parameters are "
+                           "re-partitioned per card and spacing (or priced "
+                           "as cut with --no-repartition)")
+    p.add_argument("--no-repartition", action="store_true",
+                   help="price --partition as cut: its spacing only, cards "
+                        "with at least the memory it was sized for")
+    p.add_argument("--deadline-days", type=positive_float, required=True,
+                   help="wall-clock days the campaign must finish in")
+    p.add_argument("--period-days", type=positive_float, default=365.0,
+                   help="days of reanalysis to store (default 365)")
+    space = p.add_argument_group("search space (comma lists)")
+    space.add_argument("--leaf-dx-m", default=None, metavar="DX[,DX]",
+                       help="leaf spacings, each 100 to 300 m "
+                            "(default 300,250,200)")
+    space.add_argument("--nz", default=None, metavar="N[,N]",
+                       help="level counts; each must give a lean "
+                            "wind-energy column, 49 or more with the preset "
+                            "(default 49,60,70)")
+    space.add_argument("--spinup-hours", default=None, metavar="H[,H]",
+                       help="spin-up hours per run (default 3, the "
+                            "hindcast's; e.g. 0,1,2,3 to rank them)")
+    space.add_argument("--keep-hours", default=None, metavar="H[,H]",
+                       help="kept hours per run, multiples of the 6-hourly "
+                            "cycle (default 6: one run per init)")
+    space.add_argument("--instance", action="append", default=None,
+                       metavar="PROVIDER[:INSTANCE]",
+                       help="offers to rank (repeatable; aws or gcp for a "
+                            "provider's rows; default: every row)")
+    p.add_argument("--rank-market", choices=("spot", "on-demand"),
+                   default="spot", help="market ranked on (default spot; "
+                                        "the other is reported)")
+    p.add_argument("--max-instances", type=positive_int, default=None,
+                   help="most instances of one offer that can run at once "
+                        "(spot capacity); rows needing more are not ranked")
+    part = p.add_argument_group("partition parameters (default: the "
+                                "--partition's, else woof energy partition's)")
+    part.add_argument("--linkage-km", type=positive_float, default=None,
+                      help="single-linkage distance for the re-cut")
+    part.add_argument("--max-extent-km", type=positive_float, default=None,
+                      help="bisect re-cut clusters wider than this")
+    part.add_argument("--max-sites", type=positive_int, default=None,
+                      help="bisect re-cut clusters with more sites")
+    part.add_argument("--corridor-km", type=positive_float, default=None,
+                      help="corridor half-width around each site")
+    p.add_argument("--partition-dir", default=None, metavar="DIR",
+                   help="keep (and reuse) each re-cut partition here, so the "
+                        "chosen one can be planned")
+    p.add_argument("--prices", default=None, metavar="PRICES.json",
+                   help="woof-energy.cloud-prices.v1 table (default: the "
+                        "dated table shipped in woof/data/energy)")
+    p.add_argument("--store-preset", choices=("full", "energy"),
+                   default="full", help="fields stored per leaf frame")
+    p.add_argument("--packing-efficiency", type=positive_float, default=0.85,
+                   help="fraction of paid GPU time doing work (default 0.85)")
+    p.add_argument("--top", type=positive_int, default=10,
+                   help="rows to keep and print (default 10)")
+    p.add_argument("-o", "--output", default=None, metavar="OPTIMIZE.json",
+                   help="also write the woof-energy.cost-optimize.v1 JSON here")
+    p.set_defaults(func=_dispatch("woof.energy.cost_optimize"))
+    return p
+
+
 def register_cli(subparsers) -> None:
     """Add ``woof energy`` to the product CLI."""
 
@@ -1157,4 +1249,4 @@ def register_cli(subparsers) -> None:
     register_estimate(sub)
 
 
-__all__ = ["register_cli", "register_estimate"]
+__all__ = ["register_cli", "register_estimate", "register_optimize"]

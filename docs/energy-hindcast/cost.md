@@ -10,14 +10,15 @@ Icechunk store the run would fill. The JSON document
 **Every number it prints is an estimate.** The throughput model is fitted on
 two timing receipts from consumer cards in this repository and scaled to
 other cards by memory bandwidth. No datacentre card has been timed by this
-tree. Each figure comes with a band (0.5x to 1.5x of the fitted throughput),
-and the JSON lists the receipts and every assumption, so you can see what a
+tree. Each figure comes with a band (0.5x to 1.5x of the fitted throughput,
+widened by an assumed utilisation curve, see [the model](#the-model)), and
+the JSON lists the receipts and every assumption, so you can see what a
 number rests on.
 
-> **Command name.** The estimator is registered as `woof energy estimate`.
-> When the `woof energy hindcast` group lands, it mounts the same parser as
-> `woof energy hindcast estimate` through `woof.energy.cli.register_estimate`.
-> The flags and output are identical.
+> **Command names.** The estimator is `woof energy estimate` and, with the
+> same parser, `woof energy hindcast estimate`. `woof energy hindcast
+> optimize` searches leaf spacing, levels, segment layout and offers for the
+> cheapest hindcast that meets a deadline ([below](#cheapest-configuration)).
 
 ## Three ways to say what to price
 
@@ -29,8 +30,15 @@ number rests on.
 
 `--job JOB.json` (a `woof-energy.hindcast-job.v1`-like document) supplies
 the segment count, segment hours and spin-up when they are present. Flags
-override it. With neither, a campaign is 365 segments of 30 h with 6 h of
-spin-up, and 24 h of each segment is stored.
+override it. With neither, a campaign is the hindcast driver's default:
+9 h runs from each 00/06/12/18 UTC init with 3 h of spin-up, so 6 h of each
+run is stored, and enough runs to store one year (1,460). Without
+`--segments` the count is always one year of stored hours
+(`ceil(8760 / (segment hours - spin-up))`, noted in `notes`). As in the
+driver, a `--segment-hours` other than 9 with no spin-up given is refused
+when the default 3 h would leave a window off the 6-hourly cycle. Synthesised
+leaves default to 300 m with 49 levels (`--leaf-dx-m`, `--nz`), the
+hindcast's own defaults.
 
 Partition and job documents are read by duck typing, so a sibling's schema
 can change without breaking the estimator:
@@ -54,12 +62,15 @@ For each domain and segment, on a card with memory bandwidth `B` (GB/s) and
 `S` streaming multiprocessors:
 
 - `steps = ceil(run_seconds / dt)` and `cells = nx * ny * nz`.
-- `throughput = K * B * cells / (cells + S * 4096)` cell-steps per second.
+- `throughput = K * B * cells / (cells + S * h)` cell-steps per second.
   `K` is the fitted constant. The second factor is an occupancy knee: a
-  grid with few cells per SM cannot fill the card.
-- `compute = steps * cells * (n_sound + 4) / (4 + 4) / throughput`. The
-  receipts ran WRF's 4 acoustic substeps, and one large step is assumed to
-  cost as much as 4 substeps.
+  grid with few cells per SM cannot fill the card (`h` = 4,096 cells per
+  SM reach half of it, central).
+- `compute = steps * (n_sound + 4) / (4 + 4) * (cells / throughput + L)`.
+  The receipts ran WRF's 4 acoustic substeps, and one large step is assumed
+  to cost as much as 4 substeps. `L` (1 ms per step, central) is a fixed
+  per-step cost, kernel launches and their tails, that no bandwidth
+  removes.
 - `output` and `checkpoint` are the bytes of each history frame and each
   hourly restart (60 3-D fields, assumed), moved at 10 GB/s device to host.
   That is the staged-copy rate measured in `tilestream/multigpu.py`. A leaf
@@ -90,7 +101,16 @@ For each offer (provider and instance):
   `--leaf-dx-m`, `--nz`, `--parent-nz` and `--cover-factor`, and
   `--partition` refuses `--footprint-km2`. A `--chain-m` given with a
   partition applies only to clusters whose leaf it ends at.
-- **Band**: `low` uses 1.5x the fitted throughput and `high` uses 0.5x.
+- **Partition spacing**: a partition's clusters were cut at their own
+  `leaf_dx_m`, so a `--leaf-dx-m` (or a job's spacing) that disagrees with
+  any of them is **refused**, naming the partition's spacing. It used to be
+  silently ignored. Re-partition at the spacing you want
+  (`woof energy partition --leaf-dx-m`), or let `woof energy hindcast
+  optimize` re-partition per spacing and card. Rows with no spacing of
+  their own take the flag.
+- **Band**: `low` is the cheapest utilisation pair (below) at 1.5x the
+  fitted throughput and `high` the dearest at 0.5x, so the band covers both
+  the bandwidth scaling and the utilisation curve.
 - **Plan mode only**: a plan whose tiles were sized for a bigger card than
   the offer's is refused for that offer, with the `--card` to re-plan with.
   Summary and partition modes size tiles to each offer's card.
@@ -106,16 +126,43 @@ which adds intermediate tiles. The domains are shaped as follows:
   ends of the fit in section 8.1 of the operational envelope. Each tile has
   an 11-cell lateral rim.
 - **Clock**: 5 s per km of spacing.
-- **Levels**: 49 for parents; 60 for LES leaves and intermediates at 250 m
-  or finer (`--nz`, `--parent-nz`).
+- **Levels**: 49 for parents (`--parent-nz`); leaves and LES intermediates
+  at 250 m or finer take `--nz`, default 49, the hindcast's wind-energy
+  column. The optimizer prices parents at the leaf count too, because the
+  hindcast's column is the whole model's.
+
+### Utilisation: small domains do not saturate big cards
+
+Throughput is not linear in cells. The knee `h` and the per-step cost `L`
+make a small domain on a big, fast card pay for idle SMs and launch
+latency. Without them, the ranking would favour an H100 for a 0.3 M-cell
+tile. A large domain on a small card pays for the extra tiles and rims the
+memory fit forces. **Both curves are assumptions, not measurements.** Three
+pairs span them:
+
+| pair | `h` (cells per SM at half throughput) | `L` (per step) | H100 half throughput at |
+|---|---:|---:|---:|
+| optimistic | 2,048 | 0.5 ms | 0.27 M cells |
+| central | 4,096 | 1 ms | 0.54 M cells |
+| pessimistic | 16,384 | 3 ms | 2.2 M cells |
+
+`K` is refitted on the receipts for each pair, so each pair reproduces
+them, and the band is the envelope over the pairs. Every offer reports its
+work-weighted `utilisation` (saturated time / modelled time) under the
+optimistic, central and pessimistic pairs. On the US + EU-offshore
+partition at 300 m with 49 levels, the central utilisation is 0.59 on an
+H100, 0.66 on an A100 40 GB, 0.74 on an A10G and 0.80 on an L4. The
+pessimistic pair takes the H100 to about 0.3. Replace the pairs with a
+measured curve before trusting a card ranking at either end: sweep one
+domain from 0.1 M to 20 M cells on the card you will rent.
 
 ### Calibration receipts
 
 | receipt | card | what was timed | K (cell-steps/s per GB/s) |
 |---|---|---|---:|
-| [FIRST-LIGHT.md](../public/FIRST-LIGHT.md) section 3 | RTX 4070, 504 GB/s, 46 SMs | 342x272x49, 2160 steps in 523 s, output included | 38,896 |
-| `woof/live_products.py` docstring | RTX 5070 Ti, 896 GB/s, 70 SMs | 12/3/1 km stack (170², 336², 408x402) at 170 s per model hour; nz 49 and the 60/15/5 s clock are assumed | 49,183 |
-| fitted `K` | | geometric mean | **43,738** |
+| [FIRST-LIGHT.md](../public/FIRST-LIGHT.md) section 3 | RTX 4070, 504 GB/s, 46 SMs | 342x272x49, 2160 steps in 523 s, output included | 39,057 |
+| `woof/live_products.py` docstring | RTX 5070 Ti, 896 GB/s, 70 SMs | 12/3/1 km stack (170², 336², 408x402) at 170 s per model hour; nz 49 and the 60/15/5 s clock are assumed | 49,480 |
+| fitted `K` | | geometric mean | **43,961** |
 
 One receipt was read and deliberately left out of the fit. The RTX 5090
 acceptance run in FIRST-LIGHT.md section 5 (250x200x49, 361 steps in about
@@ -183,13 +230,15 @@ GPUWM_NO_LOCAL_GPU=1 woof domain --point 51.72,-4.26 --card h100-80gb \
 dated, editable table:
 
 - **Contents**: hourly on-demand and spot prices for AWS `p5.48xlarge`,
-  `p4d.24xlarge`, `g6e.xlarge`/`12xlarge`/`48xlarge` and `g5.xlarge`, and
-  GCP `a3-highgpu-8g`, `a2-ultragpu-1g` and `g2-standard-4`, with the region
-  and the card each instance carries. It also has S3 and GCS rates per
+  `p4d.24xlarge`, `g6e.xlarge`/`12xlarge`/`48xlarge`,
+  `g5.xlarge`/`12xlarge`/`48xlarge` (A10G 24 GB) and `g6.xlarge`/`12xlarge`
+  (L4 24 GB), and GCP `a3-highgpu-8g`, `a2-ultragpu-1g` and
+  `g2-standard-4`, with the region and the card each instance carries. It also has S3 and GCS rates per
   GB-month, per 1,000 PUTs and per GB of internet egress, and a `sources`
   URL for each block.
 - **Date**: it is dated **2025-07-01**. On-demand rows are list prices as of
-  that date. The P5/P4d rows reflect AWS's June 2025 on-demand price cut.
+  that date, the G5/G6 multi-GPU rows included (they were not part of AWS's
+  June 2025 price cut, which the P5/P4d rows reflect).
 - **Spot rows** are illustrative typical values. Spot prices change hourly,
   and spot capacity for 8-GPU instances is often unavailable.
 - **No live prices**: nothing is fetched. The estimator notes when the table
@@ -217,19 +266,20 @@ The plan has two domains:
 - one 520x180x60 LES leaf tile at 200 m with a 1 s step, a 7.3 GiB peak and
   15-minute history
 
-Then price 365 daily 30 h segments:
+Then price 365 daily 30 h segments with 6 h of spin-up (the daily layout,
+given explicitly; the default is the 6-hourly one):
 
 ```bash
 woof energy estimate --plan plan-wales-200m/plan.json --segments 365 \
-    --segment-hours 30 --instance aws:p5.48xlarge \
+    --segment-hours 30 --spinup-hours 6 --instance aws:p5.48xlarge \
     --instance gcp:a3-highgpu-8g --instance aws:g6e.xlarge
 ```
 
 ```text
 offer                      card                 GPU-h          GPU-h band    inst-h   wall d              on-demand                   spot  store TB
-aws:p5.48xlarge            h100-sxm-80gb          482       324-957              71     2.96    $3.9k ($2.6k-$7.7k)    $2.1k ($1.4k-$4.3k)      10.6
-gcp:a3-highgpu-8g          h100-sxm-80gb          482       324-957              71     2.96   $6.3k ($4.2k-$12.4k)    $1.7k ($1.2k-$3.4k)      10.6
-aws:g6e.xlarge             l40s-48gb            1,862     1,244-3,717         2,191    91.30    $4.1k ($2.7k-$8.1k)    $1.8k ($1.2k-$3.6k)      10.6
+aws:p5.48xlarge            h100-sxm-80gb          493       320-1,140            73     3.02    $4.0k ($2.6k-$9.2k)    $2.2k ($1.4k-$5.1k)      10.6
+gcp:a3-highgpu-8g          h100-sxm-80gb          493       320-1,140            73     3.02   $6.4k ($4.2k-$14.8k)    $1.8k ($1.1k-$4.1k)      10.6
+aws:g6e.xlarge             l40s-48gb            1,866     1,204-4,383         2,195    91.48    $4.1k ($2.6k-$9.6k)    $1.8k ($1.2k-$4.3k)      10.6
 ```
 
 The two H100 offers need the same GPU-hours and differ only in price. With
@@ -254,14 +304,15 @@ below is an assumption, stated with its uncertainty.
 | leaf cover factor | 1.5 | | rectangle cover and corridor over large footprints (`--cover-factor`) |
 | leaves | 200 m, 60 levels to 20 km | | the planner's LES leaf ladder |
 | parent | 1 km, 49 levels | | the default ratio-5 chain |
-| segments | 365 × 30 h | | 6 h spin-up, 24 h stored per day |
+| segments | 365 × 30 h | | 6 h spin-up, 24 h stored per day (the daily layout; the driver's default is now 6-hourly, below) |
 
 The citations above are the author's reading of public totals. Check them
 against the current GEM and USWTDB releases before quoting them.
 
 ```bash
 woof energy estimate --clusters 4000 --footprint-km2 390000 \
-    --cover-factor 1.5 --leaf-dx-m 200 --segments 365 --segment-hours 30 \
+    --cover-factor 1.5 --leaf-dx-m 200 --nz 60 --segments 365 \
+    --segment-hours 30 --spinup-hours 6 \
     --instance aws:p5.48xlarge --instance aws:p4d.24xlarge \
     --instance aws:g6e.xlarge --instance aws:g6e.48xlarge \
     --instances 100 --deadline-days 30
@@ -269,35 +320,44 @@ woof energy estimate --clusters 4000 --footprint-km2 390000 \
 
 ```text
 offer                      card                 GPU-h          GPU-h band    inst-h   wall d              on-demand                   spot  store TB
-aws:p5.48xlarge            h100-sxm-80gb      344,076   233,857-674,734      50,599    21.08 $2.78M ($1.89M-$5.46M) $1.53M ($1.04M-$3.00M)   1,998.4
-aws:p4d.24xlarge           a100-40gb          649,799   437,672-1,286,180    95,559    39.82 $2.10M ($1.41M-$4.15M) $925.0k ($623.0k-$1.83M)   1,998.4
-aws:g6e.xlarge             l40s-48gb        1,352,452   906,108-2,691,487 1,591,120   662.97 $2.96M ($1.98M-$5.89M) $1.31M ($879.5k-$2.61M)   1,998.4
-aws:g6e.48xlarge           l40s-48gb        1,352,452   906,108-2,691,487   198,890    82.87 $5.99M ($4.01M-$11.93M) $2.64M ($1.77M-$5.25M)   1,998.4
+aws:p5.48xlarge            h100-sxm-80gb      394,962   198,213-1,778,525    58,083    24.20 $3.20M ($1.60M-$14.40M) $1.76M ($881.8k-$7.91M)   1,998.4
+aws:p4d.24xlarge           a100-40gb          699,137   355,427-3,098,748   102,814    42.84 $2.26M ($1.15M-$10.01M) $995.2k ($506.0k-$4.41M)   1,998.4
+aws:g6e.xlarge             l40s-48gb        1,398,232   673,632-6,805,020 1,644,979   685.41 $3.06M ($1.47M-$14.90M) $1.36M ($653.8k-$6.60M)   1,998.4
+aws:g6e.48xlarge           l40s-48gb        1,398,232   673,632-6,805,020   205,622    85.68 $6.20M ($2.98M-$30.15M) $2.73M ($1.31M-$13.26M)   1,998.4
 ```
 
 AWS compute for the central scenario:
 
 | AWS instance | GPU-hours | on-demand | spot | spot instances to finish in 30 days | on-demand wall clock on 100 instances |
 |---|---:|---:|---:|---:|---:|
-| p5.48xlarge (8x H100) | 344k (234k-675k) | $2.8M ($1.9M-$5.5M) | $1.5M ($1.0M-$3.0M) | 78 (53-152) | 21 days |
-| p4d.24xlarge (8x A100 40GB) | 650k (438k-1.29M) | $2.1M ($1.4M-$4.2M) | $0.93M ($0.62M-$1.8M) | 146 (99-289) | 40 days |
-| g6e.xlarge (1x L40S) | 1.35M (0.91M-2.69M) | $3.0M ($2.0M-$5.9M) | $1.3M ($0.88M-$2.6M) | 2,431 | 663 days |
-| g6e.48xlarge (8x L40S) | 1.35M | $6.0M ($4.0M-$11.9M) | $2.6M ($1.8M-$5.3M) | 304 | 83 days |
+| p5.48xlarge (8x H100) | 395k (198k-1.78M) | $3.2M ($1.6M-$14.4M) | $1.8M ($0.88M-$7.9M) | 89 (45-400) | 24 days |
+| p4d.24xlarge (8x A100 40GB) | 699k (355k-3.10M) | $2.3M ($1.2M-$10.0M) | $1.0M ($0.51M-$4.4M) | 158 (80-697) | 43 days |
+| g6e.xlarge (1x L40S) | 1.40M (0.67M-6.81M) | $3.1M ($1.5M-$14.9M) | $1.4M ($0.65M-$6.6M) | 2,514 | 685 days |
+| g6e.48xlarge (8x L40S) | 1.40M | $6.2M ($3.0M-$30.2M) | $2.7M ($1.3M-$13.3M) | 315 | 86 days |
 
 The instance counts are sized on spot hours, which include the 10% rework.
-On-demand needs about 10% fewer instances (71 p5.48xlarge).
+On-demand needs about 10% fewer instances.
+
+The bands are wide here because the clusters are small: about 146 km² of
+leaf cover each, one 0.4 M-cell tile, which the central utilisation curve
+puts at 0.36 of an H100 and the pessimistic one at 0.14. That is the
+utilisation term doing its job: a tiny domain on a big card is not priced
+as if it saturated the card.
 
 Bracketing scenarios (p5.48xlarge):
 
-- **Low**: 2,000 clusters over 140,000 km². 159k GPU-hours, $1.29M
-  on-demand, $0.71M spot, 36 spot instances for 30 days.
-- **High**: 8,000 clusters over 650,000 km². 658k GPU-hours, $5.3M
-  on-demand, $2.9M spot, 148 spot instances for 30 days.
+- **Low**: 2,000 clusters over 140,000 km². 184k GPU-hours, $1.49M
+  on-demand, $0.82M spot, 42 spot instances for 30 days.
+- **High**: 8,000 clusters over 650,000 km². 760k GPU-hours, $6.2M
+  on-demand, $3.4M spot, 171 spot instances for 30 days.
 
-Combining the scenario spread with the throughput band, **the year costs
-roughly $0.3M to $10M in AWS compute on p4d or p5 (spot at the low end,
-on-demand at the high end). The central estimate is about $1.5M on p5
-spot, or about $0.9M on p4d spot if 40 GB tiles are acceptable.**
+Combining the scenario spread with the throughput and utilisation band,
+**this daily-layout, 200 m, 60-level year costs roughly $0.4M to $28M in
+AWS compute on p4d or p5 (spot at the low end, on-demand at the high end).
+The central estimate is about $1.8M on p5 spot, or about $1.0M on p4d spot
+if 40 GB tiles are acceptable.** The real inventory partition and the
+cost-efficient defaults below bring the central estimate down by an order
+of magnitude.
 
 Storage is the other large bill:
 
@@ -313,9 +373,10 @@ quantising before compression, cuts the store by an order of magnitude.
 
 What moves these numbers most:
 
-- **Throughput on the real card.** The band is ±2x around a bandwidth-scaled
-  guess. Time one Wales tile on the instance you will rent and update the
-  calibration table.
+- **Throughput on the real card.** The band is about 0.5x to 4x around a
+  bandwidth-scaled guess with an assumed utilisation curve. Time one Wales
+  tile, and a cells sweep, on the instance you will rent and update the
+  calibration table and the utilisation pairs.
 - **Cluster size.** The central scenario's 4,000 clusters average about
   146 km² of leaf cover. That is one roughly 82x82x60 tile, 0.4 M cells,
   which fills less than half an H100 under the occupancy knee. Fewer,
@@ -328,6 +389,147 @@ What moves these numbers most:
   the scale of 70+ instances. Plan on a mix, or on capacity blocks or
   committed-use pricing, which the table does not carry.
 
+## Cheapest configuration
+
+The requirement is a year of 100-300 m leaves under a model top of at most
+20 km, with at least 8 model layers below 250 m. Four levers move the bill,
+in this order:
+
+1. **Leaf spacing.** A leaf's cost goes about as `dx^-3` (cells times
+   steps). 300 m is the coarse end of the requirement and costs about a
+   third of 200 m and a twentieth of 100 m.
+2. **Spin-up.** Each run is `6 h + spin-up` long but stores 6 h, so 3 h of
+   spin-up costs 1.5x the 0 h layout, 2 h costs 1.33x and 1 h 1.17x.
+3. **Levels.** The smallest lean wind-energy column (`HINDCAST_NZ` = 49, see
+   [vertical.md](vertical.md)) keeps the 70-level preset's 10 rotor layers
+   and costs about 0.76x of it.
+4. **Card.** At 300 m the leaf tiles are small, and the A10G (`g5.xlarge`)
+   wins on spot price per useful GPU-hour. The H100 is the dearest despite
+   being the fastest, because its utilisation on these tiles is about 0.59.
+
+### Measured on the real partition
+
+These figures come from the estimator and optimizer on the US +
+EU-offshore inventory (78,002 sites, 440 clusters). They are AWS spot,
+central with the band in brackets, 1,460 runs (one per 6-hourly init for a
+year), the 2025-07-01 price table, and a re-partition at each spacing and
+card. They are **estimates**: the band is the throughput and utilisation
+band above, and spot prices are illustrative.
+
+| leaf dx | levels | run / spin-up | g5.xlarge (A10G) | p4d.24xlarge (A100 40 GB) | g6e.xlarge (L40S) | p5.48xlarge (H100) |
+|---:|---:|---|---:|---:|---:|---:|
+| 200 m | 70 | 8 h / 2 h | $439k ($285k-$1.01M) | $466k | $581k | $725k |
+| 100 m | 70 | 8 h / 2 h | $3.08M ($2.05M-$6.16M) | $3.10M | $3.82M | $4.55M |
+| 300 m | 70 | 8 h / 2 h | $156k ($98k-$426k) | $176k | $221k | $293k |
+| 300 m | 49 | 8 h / 2 h | $118k ($72k-$358k) | $138k | $176k | $238k |
+| 300 m | 49 | 6 h / 0 h | $90k ($55k-$270k) | $106k | $133k | $185k |
+| **300 m** | **49** | **9 h / 3 h (default)** | **$133k ($80k-$403k)** | $154k | $197k | $264k |
+
+The first rows reproduce what was measured before the defaults changed:
+$434k on g5 and $456k on p4d at 200 m / 70 levels / 8 h with 2 h spin-up,
+$153k and $169k at 300 m, $118k and $135k at 300 m with 50 levels, and
+$90k and $103k with 6 h runs and no spin-up. They differ by a few per cent
+because the model now charges a per-step cost. 100 m was about $3.1M.
+
+The **defaults are now the cost-efficient end of the requirement**:
+
+- `woof energy partition --leaf-dx-m` and `woof energy hindcast plan`
+  default to **300 m** (100-250 m on request).
+- Every hindcast domain carries the **49-level** wind-energy column
+  (`--nz` overrides; the column still refuses a count that breaks the
+  rotor or top rules).
+- Runs are **9 h from each 00/06/12/18 UTC init with 3 h spin-up**, keeping
+  `[init + 3 h, init + 9 h)`, so the 6 h windows stitch continuously. That
+  costs 1.48x the spin-up-free layout (`--segment-hours 6 --spinup-hours 0`)
+  in exchange for no frame younger than 3 h into its run.
+- `woof energy estimate` prices the same campaign by default.
+
+At the default, the year costs **about $133k on g5.xlarge spot ($80k-$403k)
+with about 440 instances for 30 days**, or $154k on 25 p4d.24xlarge. Storage
+is separate: the `full` preset on every level is about 0.94 PB compressed
+at this spacing (about $22k a month on S3 Standard); `--store-preset
+energy` is about a third of that.
+
+### The recipe
+
+```bash
+# 1. Let the optimizer pick spacing, levels and offer for the deadline,
+#    keeping each cut partition so the chosen one can be planned.
+woof energy hindcast optimize --sites sites.json --deadline-days 30 \
+    --instance aws --partition-dir partitions -o optimize.json
+# 2. Run the chosen row's recipe (optimize.json "chosen" -> "recipe"), e.g.
+woof energy partition sites.json --leaf-dx-m 300 --card a10g-24gb \
+    -o partitions/partition-300m-22gib.json
+woof energy hindcast plan --partition partitions/partition-300m-22gib.json \
+    --start 2025-01-01 --end 2026-01-01 --card a10g-24gb -o hindcast
+```
+
+Before committing the budget, time one tile on the chosen instance and a
+cells sweep for the utilisation curve, and refresh the price table.
+
+## `woof energy hindcast optimize`
+
+The optimizer ranks configuration x offer rows by estimated cost and keeps
+only those that meet a deadline.
+
+**What it searches**: the product of these, each held to the requirement
+or refused by name:
+
+- `--leaf-dx-m` (default `300,250,200`): each must be within 100-300 m.
+- `--nz` (default `49,60,70`): each must give a lean wind-energy column
+  (at least 8 layers below 250 m, a 12 m lowest layer, top at most 20 km, no
+  layer deeper than 1000 m). Below 49 is refused with the preset.
+- `--spinup-hours` (default `3`, the driver's) and `--keep-hours` (default
+  `6`, one run per init). Pass `--spinup-hours 0,1,2,3` to rank the
+  spin-ups too.
+- Every price-table offer, narrowed with `--instance aws` or
+  `--instance aws:g5.xlarge`.
+
+**Re-partitioning**: the clusters depend on the card's memory (a parent
+chain must fit) and on the spacing. The optimizer therefore re-cuts the
+sites in-process with `woof energy partition`'s own code, once per
+(memory rounded to the GiB, spacing). A10G and L4 share a cut, and so do
+H100 and A100 80 GB. A 78k-site cut takes about a second. `--sites` cuts a
+sites document. `--partition` re-cuts the partition's own sites with its
+linkage, extent, site-count and corridor parameters. `--partition
+--no-repartition` prices the partition as cut, at its spacing only and on
+cards with at least its memory. `--partition-dir` keeps each cut and reuses
+it on the next search.
+
+**Deadline**: a row meets `--deadline-days` when one run's critical path
+fits and, with `--max-instances` (spot capacity), the instance count the
+central estimate needs is within the cap. The count the pessimistic band
+needs is reported beside it. When nothing meets the deadline, the refusal
+names the closest row and why it misses.
+
+**Ranking**: rows are ranked by `--rank-market` (default spot) central
+cost, then pessimistic cost, then wall clock. The other market is reported
+on every row and ranked separately in `top_by_other_market`. Storage is
+reported but not ranked.
+
+**Output**: `woof-energy.cost-optimize.v1` goes to stdout (and to `-o`,
+written atomically), with a table on stderr:
+
+- `inputs`: the sites or partition, with sha256.
+- `search`: the candidate lists, the offers, every partition cut (spacing,
+  card, GiB, clusters, path, built or reused, seconds) and the row count.
+- `constraints` and `ranking`.
+- `model`: the throughput band, the utilisation pairs with their refitted
+  `K`, and the status "estimate".
+- `prices`: `as_of`, `age_days`, `stale`, and the spot caveat.
+- `top`: the ranked rows. Each has the configuration, offer, card,
+  `gpu_hours`, `instance_hours`, `cost_usd` per market with the band,
+  `deadline` (instances, instances needed central/high, wall clock),
+  `utilisation`, storage, the partition used, and `"kind": "estimate"`.
+- `chosen`: the first row plus a `recipe` (partition, estimate and plan
+  commands).
+- `spinup_sensitivity`: the chosen row re-priced at 0, 1, 2 and 3 h of
+  spin-up, relative to the chosen one.
+- `excluded` and `notes`.
+
+A refusal exits 2 with `{"schema": "woof-energy.cost-optimize.v1",
+"refused": "..."}`.
+
 ## Output document
 
 `woof-energy.cost-estimate.v1` holds:
@@ -339,8 +541,9 @@ What moves these numbers most:
   otherwise it gives totals per role for the first offer, and each offer
   carries its own, because synthesised tiles are sized to each card.
 - **Model and prices**: `model` (the calibration with its receipts and the
-  excluded receipt, the throughput band, every assumption) and `prices` (the
-  table's `as_of`, sources and path).
+  excluded receipt, the throughput band, the `utilisation` pairs with each
+  pair's refitted `K`, every assumption) and `prices` (the table's `as_of`,
+  sources and path).
 - **Storage**: `storage` (preset, fields per frame, stored leaf columns,
   frames per segment, raw and stored bytes, PUT count) for the offer it
   names in `offer`. Each offer also carries its own `storage` byte counts.
@@ -349,6 +552,8 @@ What moves these numbers most:
   - `gpu_hours` and `instance_hours`, each with `central`/`low`/`high`, and
     `gpu_hours_by_component`
   - `wall_clock_days` and `critical_path_hours_per_segment`
+  - `utilisation`: work-weighted saturated / modelled time under the
+    optimistic, central and pessimistic pairs
   - `cost_usd` per market; when spot is priced, also `spot_instance_hours`
     and `wall_clock_days_spot`
   - `instances_for_deadline` (with `--deadline-days`), `storage` and

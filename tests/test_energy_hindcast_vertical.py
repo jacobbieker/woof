@@ -321,3 +321,27 @@ def test_wrf_nests_carry_the_column_in_the_one_config(tmp_path):
     assert plan.domains[0].extra["vertical"]["nz"] == 45
     assert math.isclose(plan.domains[0].extra["vertical"]["p_top_pa"], 6000.0)
     assert (outdir / "vertical.json").is_file()
+
+
+@requires_wrf_eta_bridge
+def test_the_hindcast_column_is_the_smallest_lean_one():
+    # 49 levels: >= 8 layers below 250 m, a 12 m lowest layer, top 19.97 km
+    # and no layer deeper than max_dz (1000 m).  48 still builds but WRF
+    # stretches its top layer past max_dz; 47 passes even WRF's 1.5 x max_dz
+    # and 46 or fewer cannot reach the top.
+    assert v.smallest_column_nz() == v.HINDCAST_NZ == 49
+    lean = v.wind_energy_column(nz=v.HINDCAST_NZ)
+    assert lean.rotor_layers >= v.DEFAULT_MIN_ROTOR_LAYERS
+    assert lean.full_level_m[1] == pytest.approx(v.DEFAULT_DZBOT_M, rel=0.1)
+    assert lean.model_top_m <= v.MAX_MODEL_TOP_M
+    assert v.deepest_layer_m(lean) <= v.DEFAULT_MAX_DZ_M
+    assert v.lean_column_refusal(v.HINDCAST_NZ) is None
+    stretched = v.wind_energy_column(nz=48)
+    assert v.deepest_layer_m(stretched) > v.DEFAULT_MAX_DZ_M
+    assert "deeper than max_dz" in v.lean_column_refusal(48)
+    assert "1.5 * max_dz" in v.lean_column_refusal(47)
+    assert "not enough eta levels" in v.lean_column_refusal(46)
+    # The rotor layers are the 70-level preset's: the extra levels sit aloft.
+    preset = v.wind_energy_column()
+    assert lean.full_level_m[1:lean.rotor_layers + 1] == pytest.approx(
+        preset.full_level_m[1:lean.rotor_layers + 1], rel=0.05)
