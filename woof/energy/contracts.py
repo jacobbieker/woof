@@ -750,6 +750,8 @@ FORECAST_VARIABLES: dict[str, tuple[tuple[str, ...], str, str]] = {
     "rain_mixing_ratio": (PROFILE_DIMS, "kg kg-1", "rain mixing ratio"),
     "ice_mixing_ratio": (PROFILE_DIMS, "kg kg-1", "cloud ice mixing ratio"),
     "snow_mixing_ratio": (PROFILE_DIMS, "kg kg-1", "snow mixing ratio"),
+    "cloud_number_mixing_ratio": (PROFILE_DIMS, "kg-1",
+                                  "cloud droplet number per kg of air"),
     "t2": (SURFACE_DIMS, "K", "2 m air temperature"),
     "q2": (SURFACE_DIMS, "kg kg-1", "2 m water vapour mixing ratio"),
     "rh2": (SURFACE_DIMS, "%", "2 m relative humidity"),

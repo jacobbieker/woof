@@ -162,6 +162,7 @@ Data variables (`FORECAST_VARIABLES`):
 | `rain_mixing_ratio` | time, site, height | kg kg-1 | rain mixing ratio |
 | `ice_mixing_ratio` | time, site, height | kg kg-1 | cloud ice mixing ratio |
 | `snow_mixing_ratio` | time, site, height | kg kg-1 | snow mixing ratio |
+| `cloud_number_mixing_ratio` | time, site, height | kg-1 | cloud droplet number per kg of air |
 | `t2` | time, site | K | 2 m air temperature |
 | `q2` | time, site | kg kg-1 | 2 m water vapour mixing ratio |
 | `rh2` | time, site | % | 2 m relative humidity |
@@ -323,7 +324,7 @@ specific build. `woof doctor` reports whether it is found.
 ### 6. Products: `rating`
 
 `woof energy rating FORECAST.nc -o products.nc` computes the products named
-in `--products` (default `dlr,icing,wind-power,pv-power`). See
+in `--products` (default `dlr,icing,wind-power,pv-power,turbine-icing`). See
 [Products and their assumptions](#products-and-their-assumptions).
 
 ## Choosing a topology
@@ -737,6 +738,7 @@ rating methodology.
 | `icing` | Makkonen accretion on a cylinder, with ISO 12494 conventions | `cloud_liquid_mixing_ratio`, `rain_mixing_ratio`, `air_temperature`, `wind_speed`, `air_density` | An assumed droplet median volume diameter (MVD), because the model's microphysics does not forecast one; a reference conductor diameter |
 | `wind-power` | A generic IEC-style power curve, density-corrected | `wind_speed` and `air_density` at hub height, `capacity_mw`, `hub_height_m` | One generic curve for every turbine, scaled by capacity; no wake losses, availability or curtailment |
 | `pv-power` | A PVWatts-like plane-of-array and cell-temperature model | `ghi`, `dni`, `dhi`, `cos_solar_zenith`, `t2`, `wind_speed_10m`, `capacity_mw` | Assumed tilt, azimuth, temperature coefficient and system losses; no shading, soiling or inverter clipping detail |
+| `turbine-icing` | Hub-height icing: Makkonen accretion on the ISO 12494 reference collector (instrumental icing) and on a rotating-blade proxy (rotor icing), meteorological icing, the IEA Wind Task 19 ice class and a production-loss estimate. See [Turbine icing at hub height](energy-hindcast/icing.md) | `air_temperature`, `wind_speed`, `air_density` (or `air_pressure`), `cloud_liquid_mixing_ratio`, `rain_mixing_ratio`, `cloud_number_mixing_ratio`, `air_pressure`, `relative_humidity`, `hub_height_m` | A generic blade (tip-speed ratio, tip-speed limit, leading-edge size); the default droplet number where the run has no Thompson `QNCLOUD`; no ice shedding; an uncalibrated loss model |
 
 ## Limitations
 

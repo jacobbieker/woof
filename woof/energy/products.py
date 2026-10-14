@@ -1,6 +1,6 @@
 """Energy products from a ``forecast.v1`` file: ``woof energy rating``.
 
-Four products are derived from the per-site forecast time series written by
+Five products are derived from the per-site forecast time series written by
 ``woof energy extract``:
 
 ``dlr``
@@ -71,6 +71,16 @@ Four products are derived from the per-site forecast time series written by
     output is clipped at it.  Without ``dni``/``dhi`` the Erbs decomposition
     of ``ghi`` is used and labelled.
 
+``turbine-icing``
+    Turbines (kind ``turbine``, and ``plant`` sites that carry a hub
+    height): icing at ``hub_height_m`` by :mod:`woof.energy.icing_turbine`
+    -- liquid water content, the droplet median volume diameter from
+    Thompson's droplet number (``cloud_number_mixing_ratio``) or a
+    documented default, Makkonen accretion on the ISO 12494 reference
+    collector (instrumental icing, ISO class) and on a rotating-blade proxy
+    (rotor icing), meteorological icing, the IEA Wind Task 19 ice class and
+    a simple documented production-loss model.
+
 Python boundary: these are per-site time series of a few hundred thousand
 sites at most, computed once per forecast with numpy on (time, site)
 vectors.  Nothing here touches gridded model fields; the bulk sampling of
@@ -102,7 +112,7 @@ from woof.energy.contracts import (
     sha256_file,
 )
 
-PRODUCTS = ("dlr", "icing", "wind-power", "pv-power")
+PRODUCTS = ("dlr", "icing", "wind-power", "pv-power", "turbine-icing")
 PRODUCTS_SCHEMA = "woof-energy.products.v1"
 CONDUCTORS_SCHEMA = "woof-energy.conductors.v1"
 POWER_CURVES_SCHEMA = "woof-energy.power-curves.v1"
@@ -121,6 +131,7 @@ PRODUCT_KINDS: dict[str, tuple[str, ...]] = {
     "icing": ("line_sample", "tower", "substation", "turbine", "pv", "plant"),
     "wind-power": TURBINE_KINDS,
     "pv-power": PV_KINDS,
+    "turbine-icing": TURBINE_KINDS,
 }
 
 #: Required forecast variables (``FORECAST_VARIABLES``) and coordinates
@@ -133,12 +144,16 @@ REQUIRED_VARIABLES: dict[str, list[Any]] = {
     "wind-power": ["wind_speed",
                    (("air_density",), ("air_pressure", "air_temperature"))],
     "pv-power": ["ghi", "t2", "wind_speed_10m"],
+    "turbine-icing": ["air_temperature", "wind_speed",
+                      "cloud_liquid_mixing_ratio",
+                      (("air_density",), ("air_pressure",))],
 }
 REQUIRED_COORDINATES: dict[str, list[str]] = {
     "dlr": ["kind", "lat", "lon", "bearing_deg", "terrain_height"],
     "icing": ["kind"],
     "wind-power": ["kind", "hub_height_m", "capacity_mw"],
     "pv-power": ["kind", "lat", "lon", "capacity_mw"],
+    "turbine-icing": ["kind", "hub_height_m"],
 }
 
 #: Extra per-site coordinates the extract unit adds to forecast.v1.
@@ -1400,7 +1415,7 @@ def _compute(forecast_path: Path, *, output: Path, conductor: str = "auto",
     refusals: list[str] = []
     for product in products:
         kinds = PRODUCT_KINDS[product]
-        if product == "wind-power":
+        if product in ("wind-power", "turbine-icing"):
             present = bool(_wind_mask(header.kind, header.hub_height_m).any())
         else:
             present = bool(np.isin(header.kind, list(kinds)).any())
@@ -1449,23 +1464,29 @@ def _compute(forecast_path: Path, *, output: Path, conductor: str = "auto",
         "icing": ("rain_mixing_ratio", "air_pressure", "wind_attack_angle"),
         "wind-power": (),
         "pv-power": ("dni", "dhi", "cos_solar_zenith"),
+        "turbine-icing": ("rain_mixing_ratio", "cloud_number_mixing_ratio",
+                          "air_pressure", "relative_humidity"),
     }
     for product in run:
         needed.update(optional[product])
     needed &= variables
     forecast = read_forecast(forecast_path, needed=sorted(needed))
     outputs: list[ProductOutput] = []
-    curve = None
+    curve = load_power_curve() if {"wind-power", "turbine-icing"} & \
+        set(run) else None
     for product in run:
         if product == "dlr":
             outputs += compute_dlr(forecast, table, conductor, notes)
         elif product == "icing":
             outputs += compute_icing(forecast, table, conductor, notes)
         elif product == "wind-power":
-            curve = load_power_curve()
             outputs += compute_wind_power(forecast, curve, notes)
         elif product == "pv-power":
             outputs += compute_pv_power(forecast, notes)
+        elif product == "turbine-icing":
+            from woof.energy.icing_turbine import compute_turbine_icing
+
+            outputs += compute_turbine_icing(forecast, curve, notes)
     attrs: dict[str, Any] = {
         "schema": PRODUCTS_SCHEMA,
         "title": "woof energy products",

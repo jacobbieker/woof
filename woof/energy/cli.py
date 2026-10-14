@@ -31,7 +31,7 @@ _TOPOLOGY_MODULES = {
     "wrf-tiles": "woof.energy.plan_wrf_tiles",
     "hex-swath": "woof.energy.plan_hex",
 }
-_PRODUCTS = ("dlr", "icing", "wind-power", "pv-power")
+_PRODUCTS = ("dlr", "icing", "wind-power", "pv-power", "turbine-icing")
 
 
 def _bbox(value: str) -> tuple[float, float, float, float]:
@@ -309,7 +309,7 @@ def _register_rating(sub) -> None:
     p.add_argument("--products", type=_choices_list(_PRODUCTS, "--products"),
                    default=_PRODUCTS,
                    help="products to compute (comma list; default "
-                        "dlr,icing,wind-power,pv-power)")
+                        "dlr,icing,wind-power,pv-power,turbine-icing)")
     p.add_argument("-o", "--output", required=True, metavar="PRODUCTS.nc",
                    help="where to write the products netCDF")
     p.set_defaults(func=_dispatch("woof.energy.products"))

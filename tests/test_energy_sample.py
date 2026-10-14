@@ -71,6 +71,7 @@ def _fields(seed: int) -> dict[str, np.ndarray]:
     fields["PB"] = np.broadcast_to(fields["PB"], (NZ, NY, NX)).copy()
     for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP"):
         fields[name] = rng.uniform(0, 1e-3, (NZ, NY, NX))
+    fields["QNCLOUD"] = rng.uniform(0, 3e8, (NZ, NY, NX))
     for name in SURFACE_VARS:
         fields[name] = rng.uniform(-5, 5, (NY, NX))
     return fields
@@ -158,7 +159,8 @@ def oracle(rec: dict[str, np.ndarray], fi: float, fj: float, heights):
         "THETA": _bilinear(rec["T"] + 300.0, fi, fj),
         "PRES": _bilinear(rec["P"] + rec["PB"], fi, fj),
     }
-    for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP"):
+    for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP",
+                 "QNCLOUD"):
         columns[name] = _bilinear(rec[name], fi, fj)
     profile = {k: _vertical(col, zagl, heights) for k, col in columns.items()}
     surface = {k: _bilinear(rec[k], fi, fj) for k in SURFACE_VARS}

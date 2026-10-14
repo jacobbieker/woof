@@ -697,7 +697,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--conductor` | conductor name from the table, or auto (by line voltage; default) |
 | `--conductor-table FILE.json` | conductor table replacing the built-in one |
 | `--output PRODUCTS.nc` | where to write the products netCDF |
-| `--products` | products to compute (comma list; default dlr,icing,wind-power,pv-power) |
+| `--products` | products to compute (comma list; default dlr,icing,wind-power,pv-power,turbine-icing) |
 
 ## `woof energy run`
 
