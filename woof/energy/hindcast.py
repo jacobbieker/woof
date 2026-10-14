@@ -76,6 +76,30 @@ planner's.
     jobs/<job_id>/plan/plan.json    woof-energy.plan.v1 (materialize)
     jobs/<job_id>/materialized.json woof-energy.hindcast-materialized.v1
     jobs/<job_id>/sites-forecast.nc forecast.v1, kept window (run-local)
+    jobs/<job_id>/forcing-mirror.json woof-energy.forcing-mirror.v1
+    jobs/<prefetch_id>/job.json     a prefetch job (``kind: prefetch``)
+    jobs/<prefetch_id>/prefetch.json woof-energy.forcing-prefetch.v1
+
+**Forcing cache.**  With ``--forcing-cache URL`` every source the cache
+shares (a table fetch route, :func:`woof.energy.forcing_cache.shareability`)
+gets one **prefetch job** per (source, cycle) -- the same
+``woof-energy.hindcast-job.v1`` schema with ``kind: prefetch`` and an id
+``prefetch-<source>-<YYYYMMDDTHH>Z-<sha12>`` -- that fetches the cycle once
+into the cache, and each forecast job of that cycle carries ``forcing``
+(``mode: shared``, the cache entry, the prefetch id) and ``depends_on:
+[<prefetch id>]``.  Before it runs, a forecast job mirrors the objects
+its own ``woof go`` fetch would download from the cache into the folder
+``woof go`` will use (:func:`mirror_forcing`); whatever the cache lacks
+the job still fetches itself, and ``forcing-mirror.json`` says which.
+Jobs of a source the cache does not share carry ``forcing.mode =
+direct`` and the reason.  The manifest keeps prefetch jobs in their own
+``prefetch`` table (``prefetch_counts``), so the forecast job table, its
+counts and coverage are what they were.  ``forcing`` and ``depends_on``
+are not part of a job's identity: a cache changes where forcing bytes
+come from, never what they are, so they are the one thing a re-plan
+rewrites in an existing ``job.json`` (when every other field agrees and
+the job is not running).  Without ``--forcing-cache`` nothing here
+changes.
 
 Paths inside job documents are relative to the job directory.  Every JSON
 document is written to ``<name>.partial`` and renamed.  The manifest is
@@ -86,7 +110,8 @@ filesystem do not lose each other's status.
 ``running``, ``complete`` (every plan domain complete and the post-step
 returned), ``failed`` (with a reason).  ``run-local`` skips a complete job
 unless forced; a failed job reruns with ``--resume`` passed on to
-``woof energy run``.
+``woof energy run``.  Prefetch jobs use the same statuses (``complete``
+once the cache entry is published or found complete).
 
 Python boundary: orchestration over a few hundred records per cluster; no
 field data is touched except the time slice of the extracted site series.
@@ -262,9 +287,14 @@ class HindcastRequest:
     output_root: str = DEFAULT_OUTPUT_ROOT
     gridded_template: str = DEFAULT_GRIDDED_TEMPLATE
     sites_template: str = DEFAULT_SITES_TEMPLATE
+    forcing_cache: str | None = None
 
     def __post_init__(self):
         self.outdir = Path(self.outdir)
+        if self.forcing_cache is not None:
+            from woof.energy.forcing_cache import normalize_url
+
+            self.forcing_cache = normalize_url(self.forcing_cache)
         if self.sites_path is None and self.partition_path is None:
             raise HindcastRefused("give --sites (one cluster) or --partition")
         if self.cluster_id is not None and self.partition_path is not None:
@@ -356,6 +386,10 @@ class HindcastRequest:
                 value = list(value)
             record[item.name] = value
         record.pop("outdir", None)
+        if record.get("forcing_cache") is None:
+            # A request without a cache keeps the record (and so the
+            # request sha) it had before the forcing cache existed.
+            record.pop("forcing_cache", None)
         return record
 
 
@@ -1082,6 +1116,75 @@ def _build_jobs(request: HindcastRequest, clusters: list[Cluster],
     return jobs, files, summary
 
 
+def _attach_forcing(request: HindcastRequest, jobs: list[dict]
+                    ) -> list[tuple[dict, list[str]]]:
+    """With ``--forcing-cache``: one prefetch job per (source, cycle) of the
+    sources the cache shares, each forecast job bound to it
+    (``forcing``, ``depends_on``); the others marked ``direct`` with the
+    reason.  Without a cache the job documents are left as they were.
+
+    Neither field is part of a job's identity: the cache changes where the
+    forcing bytes come from, never what they are (the job's own fetch
+    verifies every one)."""
+
+    if request.forcing_cache is None:
+        return []
+    from woof.energy import forcing_cache as fc
+
+    groups: dict[str, dict] = {}
+    for job in jobs:
+        source = job["source"]["name"]
+        mode, why = fc.shareability(source)
+        if mode != fc.MODE_SHARED:
+            job["forcing"] = {"mode": fc.MODE_DIRECT, "reason": why}
+            continue
+        run_start = datetime.strptime(job["segment"]["run_start"],
+                                      "%Y-%m-%dT%H:%M:%SZ")
+        predicted = fc.predicted_request(source, run_start,
+                                         job["segment"]["run_hours"])
+        group = groups.setdefault(
+            json.dumps(fc.family(predicted), sort_keys=True),
+            {"request": predicted, "jobs": []})
+        if predicted["hours"] > group["request"]["hours"]:
+            group["request"] = predicted     # the longest window serves all
+        group["jobs"].append(job)
+    prefetch = []
+    for group in sorted(groups.values(),
+                        key=lambda g: (g["request"]["cycle"],
+                                       g["request"]["source"])):
+        document = fc.prefetch_job(group["request"], request.forcing_cache,
+                                   job_schema=JOB_SCHEMA)
+        for job in group["jobs"]:
+            job["forcing"] = {
+                "mode": fc.MODE_SHARED,
+                "cache_url": document["forcing"]["cache_url"],
+                "entry": document["forcing"]["entry"],
+                "key": document["forcing"]["key"],
+                "request": group["request"],
+                "prefetch_job_id": document["job_id"]}
+            job["depends_on"] = [document["job_id"]]
+        prefetch.append((document, [job["job_id"] for job in group["jobs"]]))
+    return prefetch
+
+
+def _without_binding(job: Mapping[str, Any]) -> dict:
+    """A job document without its forcing binding (not identity)."""
+
+    return {k: v for k, v in job.items()
+            if k not in ("forcing", "depends_on")}
+
+
+def _prefetch_record(document: Mapping[str, Any], dependents: list[str]
+                     ) -> dict:
+    return {"source": document["source"]["name"],
+            "cycle": document["segment"]["cycle"],
+            "entry": document["forcing"]["entry"],
+            "job": f"{JOBS_DIR}/{document['job_id']}/{JOB_NAME}",
+            "dependents": sorted(dependents),
+            "status": "pending", "attempts": 0, "start_utc": None,
+            "end_utc": None, "reason": None, "notes": []}
+
+
 def _manifest_record(job: Mapping[str, Any]) -> dict:
     return {"cluster_id": job["cluster"]["cluster_id"],
             "cycle": job["segment"]["cycle"],
@@ -1136,7 +1239,26 @@ def _write_manifest(hindcast_dir: Path, manifest: dict) -> Path:
     for record in manifest["jobs"].values():
         counts[record["status"]] = counts.get(record["status"], 0) + 1
     manifest["counts"] = counts
+    if isinstance(manifest.get("prefetch"), dict):
+        manifest["prefetch_counts"] = _status_counts(
+            manifest["prefetch"].values())
     return _write_json(Path(hindcast_dir) / MANIFEST_NAME, manifest)
+
+
+def _status_counts(records: Iterable[Mapping[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record["status"]] = counts.get(record["status"], 0) + 1
+    return counts
+
+
+def _record_of(manifest: Mapping[str, Any], job_id: str) -> dict | None:
+    """A forecast job's or a prefetch job's manifest record."""
+
+    record = manifest["jobs"].get(job_id)
+    if record is None and isinstance(manifest.get("prefetch"), dict):
+        record = manifest["prefetch"].get(job_id)
+    return record
 
 
 def update_job(hindcast_dir: Path | None, job_id: str, **changes: Any
@@ -1151,7 +1273,7 @@ def update_job(hindcast_dir: Path | None, job_id: str, **changes: Any
         return None
     with _manifest_lock(hindcast_dir):
         manifest = read_manifest(hindcast_dir)
-        record = manifest["jobs"].get(job_id)
+        record = _record_of(manifest, job_id)
         if record is None:
             raise HindcastRefused(f"job {job_id} is not in "
                                   f"{hindcast_dir / MANIFEST_NAME}")
@@ -1199,6 +1321,7 @@ def plan_hindcast(request: HindcastRequest, *, dry_run: bool = False,
         selector=selector, selector_name=selector_name,
         cost_estimator=cost_estimator or default_cost_estimate, now=now,
         gpu_mem_pricer=gpu_mem_pricer or default_gpu_mem_pricer)
+    prefetch = _attach_forcing(request, jobs)
     outdir = request.outdir
     request_record = request.to_json()
     request_record["sites_path"] = str(Path(sites_path).resolve())
@@ -1219,14 +1342,32 @@ def plan_hindcast(request: HindcastRequest, *, dry_run: bool = False,
                          f"{change['from']} -> {change['to']} at "
                          f"{change['cycle']} ({change['job_id']})")
     fresh = {job["job_id"]: _manifest_record(job) for job in jobs}
+    fresh_prefetch = ({document["job_id"]: _prefetch_record(document,
+                                                            dependents)
+                       for document, dependents in prefetch}
+                      if request.forcing_cache is not None else None)
+    if request.forcing_cache is not None:
+        direct = sorted({job["source"]["name"] for job in jobs
+                         if job["forcing"]["mode"] != "shared"})
+        shared = sum(len(d) for _, d in prefetch)
+        notes.append(
+            f"forcing cache {request.forcing_cache}: {len(prefetch)} prefetch "
+            f"job(s) serve {shared} forecast job(s)"
+            + (f"; {len(jobs) - shared} job(s) fetch for themselves "
+               f"({', '.join(direct)}: not shareable)" if direct else ""))
 
     if dry_run:
         manifest = _new_manifest(request_record, request_sha,
-                                 cluster_summary, fresh, notes)
+                                 cluster_summary, fresh, notes,
+                                 prefetch=fresh_prefetch)
         manifest["counts"] = {"pending": len(fresh)}
         manifest["order"] = [job["job_id"] for job in jobs]
-        return {"dry_run": True, "hindcast_dir": str(outdir),
-                "manifest": manifest, "jobs": jobs}
+        result = {"dry_run": True, "hindcast_dir": str(outdir),
+                  "manifest": manifest, "jobs": jobs}
+        if fresh_prefetch is not None:
+            manifest["prefetch_counts"] = {"pending": len(fresh_prefetch)}
+            result["prefetch_jobs"] = [document for document, _ in prefetch]
+        return result
 
     with _manifest_lock(outdir):
         previous = read_manifest(outdir)
@@ -1242,39 +1383,90 @@ def plan_hindcast(request: HindcastRequest, *, dry_run: bool = False,
                 _write_bytes(target, data)
         if previous is None:
             manifest = _new_manifest(request_record, request_sha,
-                                     cluster_summary, fresh, notes)
+                                     cluster_summary, fresh, notes,
+                                     prefetch=fresh_prefetch)
         else:
             manifest = _merge(previous, request_record, request_sha,
-                              cluster_summary, fresh, notes)
+                              cluster_summary, fresh, notes,
+                              prefetch=fresh_prefetch)
         # Only jobs the manifest adopted get a job.json: a planned job a
         # complete one was kept in place of is not written.
         adopted = [job for job in jobs if job["job_id"] in manifest["jobs"]]
+        unbound: list[str] = []
+        rebound = 0
         for job in adopted:
             # A job id binds its identity: an existing job.json is the one
             # its runs used (and holds the source history it was planned
-            # with), so it is never rewritten.
+            # with), so it is never rewritten -- except to change its
+            # forcing binding (``forcing``, ``depends_on``), which is not
+            # part of its identity, and never while it runs.
             target = outdir / JOBS_DIR / job["job_id"] / JOB_NAME
             if not target.exists():
                 _write_json(target, job)
+                continue
+            if request.forcing_cache is None:
+                continue
+            existing = _read_json(target, "hindcast job")
+            fresh_doc = json.loads(json.dumps(job))
+            if (existing.get("forcing") == fresh_doc.get("forcing")
+                    and existing.get("depends_on")
+                    == fresh_doc.get("depends_on")):
+                continue
+            if (_without_binding(existing) != _without_binding(fresh_doc)
+                    or manifest["jobs"][job["job_id"]]["status"]
+                    == "running"):
+                # Planned from other inputs, or running: keep it as it is,
+                # and do not count it as served by the new prefetch jobs.
+                unbound.append(job["job_id"])
+                continue
+            _write_json(target, job)
+            rebound += 1
+        if rebound:
+            manifest["notes"].append(
+                f"{rebound} job(s) already on disk rebound to the forcing "
+                f"cache {request.forcing_cache} (forcing, depends_on; ids "
+                "unchanged)")
+        if unbound and isinstance(manifest.get("prefetch"), dict):
+            for record in manifest["prefetch"].values():
+                record["dependents"] = [d for d in record["dependents"]
+                                        if d not in unbound]
+        if unbound:
+            manifest["notes"].append(
+                f"{len(unbound)} job(s) already on disk keep their old "
+                f"forcing binding (e.g. {unbound[0]}): running, or planned "
+                "from other inputs; plan again once they finish")
+        for document, _ in prefetch:
+            target = outdir / JOBS_DIR / document["job_id"] / JOB_NAME
+            if not target.exists():
+                _write_json(target, document)
         _write_manifest(outdir, manifest)
     manifest["manifest_path"] = str(outdir / MANIFEST_NAME)
     manifest["planned_job_ids"] = [job["job_id"] for job in adopted]
     manifest["not_adopted_job_ids"] = [job["job_id"] for job in jobs
                                        if job["job_id"] not in manifest["jobs"]]
+    if prefetch:
+        manifest["planned_prefetch_job_ids"] = [document["job_id"]
+                                                for document, _ in prefetch]
     return manifest
 
 
 def _new_manifest(request_record: dict, request_sha: str,
-                  clusters: dict, jobs: dict, notes: list[str]) -> dict:
-    return {"schema": MANIFEST_SCHEMA, "job_schema": JOB_SCHEMA,
-            "created_utc": _utc_now(), "updated_utc": None,
-            "request": request_record, "request_sha256": request_sha,
-            "requests": [{"sha256": request_sha, "planned_utc": _utc_now()}],
-            "clusters": clusters, "jobs": jobs, "notes": list(notes)}
+                  clusters: dict, jobs: dict, notes: list[str], *,
+                  prefetch: dict | None = None) -> dict:
+    manifest = {"schema": MANIFEST_SCHEMA, "job_schema": JOB_SCHEMA,
+                "created_utc": _utc_now(), "updated_utc": None,
+                "request": request_record, "request_sha256": request_sha,
+                "requests": [{"sha256": request_sha,
+                              "planned_utc": _utc_now()}],
+                "clusters": clusters, "jobs": jobs, "notes": list(notes)}
+    if prefetch is not None:
+        manifest["prefetch"] = dict(prefetch)
+    return manifest
 
 
 def _merge(previous: dict, request_record: dict, request_sha: str,
-           clusters: dict, fresh: dict, notes: list[str]) -> dict:
+           clusters: dict, fresh: dict, notes: list[str], *,
+           prefetch: dict | None = None) -> dict:
     manifest = dict(previous)
     jobs = dict(previous["jobs"])
     by_key = {(r["cluster_id"], r["cycle"]): job_id
@@ -1298,6 +1490,18 @@ def _merge(previous: dict, request_record: dict, request_sha: str,
         jobs[job_id] = record
         by_key[key] = job_id
     manifest["jobs"] = jobs
+    if prefetch is not None or isinstance(previous.get("prefetch"), dict):
+        table = {key: dict(value) for key, value in
+                 (previous.get("prefetch") or {}).items()}
+        for job_id, record in (prefetch or {}).items():
+            # Dependents are only the forecast jobs this manifest holds.
+            dependents = [d for d in record["dependents"] if d in jobs]
+            if job_id in table:
+                table[job_id]["dependents"] = sorted(
+                    set(table[job_id].get("dependents") or ()) | set(dependents))
+            else:
+                table[job_id] = {**record, "dependents": dependents}
+        manifest["prefetch"] = table
     manifest["clusters"] = {**previous.get("clusters", {}), **clusters}
     if previous.get("request_sha256") != request_sha:
         manifest["request"] = request_record
@@ -1339,8 +1543,16 @@ def load_job(path: Path) -> dict:
         raise HindcastRefused(f"{path} declares schema "
                               f"{document.get('schema')!r}; this woof reads "
                               f"{JOB_SCHEMA}")
-    for key in ("job_id", "cluster", "segment", "source", "planner",
-                "history", "outputs", "paths"):
+    kind = document.get("kind", "forecast")
+    if kind == "prefetch":
+        required: tuple[str, ...] = ("job_id", "forcing", "segment", "paths")
+    elif kind == "forecast":
+        required = ("job_id", "cluster", "segment", "source", "planner",
+                    "history", "outputs", "paths")
+    else:
+        raise HindcastRefused(f"{path} declares job kind {kind!r}; this woof "
+                              "runs 'forecast' and 'prefetch' jobs")
+    for key in required:
         if key not in document:
             raise HindcastRefused(f"{path} lacks {key!r}")
     return document
@@ -1415,8 +1627,10 @@ def default_cluster_planner(job: Mapping[str, Any], plan_dir: Path, *,
             loader = getattr(partition_mod, "load_partition", None)
             partition = (loader(partition_path) if loader is not None
                          else _read_json(partition_path, "partition"))
-            offered = {"outdir": plan_dir, "topology": topology,
-                       "sites_path": sites_path, "now": now,
+            # No sites_path: plan_cluster writes and binds the cluster's own
+            # sites.json, and its **kwargs would hand a second one to the
+            # planner (a TypeError on both topologies).
+            offered = {"outdir": plan_dir, "topology": topology, "now": now,
                        **{k: v for k, v in kwargs.items() if v is not None}}
             result = plan_cluster(partition, job["cluster"]["cluster_id"],
                                   **_filter_kwargs(plan_cluster, offered))
@@ -1833,6 +2047,9 @@ def materialize_job(job_ref: str | Path, *, hindcast_dir: Path | None = None,
 
     job_path = locate_job(job_ref, hindcast_dir=hindcast_dir)
     job = load_job(job_path)
+    if job.get("kind") == "prefetch":
+        raise HindcastRefused(f"{job['job_id']} is a prefetch job: it has no "
+                              "plan (run it with run-local or prefetch)")
     job_dir = job_path.parent
     home = _hindcast_dir_of(job_path, job)
     plan_dir = job_dir / PLAN_DIR
@@ -2032,7 +2249,7 @@ def _claim(home: Path | None, job_id: str, *, force: bool) -> str:
         return "pending"
     with _manifest_lock(home):
         manifest = read_manifest(home)
-        record = manifest["jobs"].get(job_id)
+        record = _record_of(manifest, job_id)
         if record is None:
             raise HindcastRefused(f"job {job_id} is not in "
                                   f"{home / MANIFEST_NAME}")
@@ -2050,6 +2267,160 @@ def _claim(home: Path | None, job_id: str, *, force: bool) -> str:
         return found
 
 
+def run_prefetch(job_ref: str | Path, *, hindcast_dir: Path | None = None,
+                 dry_run: bool = False, force: bool = False,
+                 refetch: bool = False,
+                 fetcher: Callable[..., Any] | None = None) -> dict:
+    """Run one prefetch job: fetch its (source, cycle) once into the forcing
+    cache (:func:`woof.energy.forcing_cache.prefetch`) and record it.
+
+    Idempotent: an entry already complete in the cache is not fetched again
+    (``status: cached``) unless ``refetch``.  A job the manifest calls
+    complete is skipped unless ``force``.  ``dry_run`` returns the fetch
+    argv, the cache entry and the download's measured size estimate."""
+
+    from woof.energy import forcing_cache as fc
+
+    job_path = locate_job(job_ref, hindcast_dir=hindcast_dir)
+    job = load_job(job_path)
+    if not fc.is_prefetch(job):
+        raise HindcastRefused(f"{job['job_id']} is not a prefetch job")
+    job_dir = job_path.parent
+    home = _hindcast_dir_of(job_path, job)
+    forcing = job["forcing"]
+    if home is not None and not force and not dry_run:
+        record = _record_of(read_manifest(home), job["job_id"]) or {}
+        if record.get("status") == "complete":
+            return {"job_id": job["job_id"], "kind": "prefetch",
+                    "skipped": True,
+                    "reason": "complete in the manifest (pass --force to "
+                              "check the cache again)"}
+    if dry_run:
+        from woof import download_budget
+
+        estimate = download_budget.download_estimate(
+            fc.fetch_hints(forcing["request"]))
+        return {"job_id": job["job_id"], "kind": "prefetch", "dry_run": True,
+                "cache_url": forcing["cache_url"], "entry": forcing["entry"],
+                "request": forcing["request"], "argv": forcing["argv"],
+                "download_estimate": {k: estimate.get(k) for k in
+                                      ("bytes", "objects", "mode", "basis")}}
+    if _claim(home, job["job_id"], force=force) == "complete" and not force:
+        return {"job_id": job["job_id"], "kind": "prefetch", "skipped": True,
+                "reason": "completed by another worker meanwhile"}
+    try:
+        receipt = fc.prefetch(forcing["request"], forcing["cache_url"],
+                              fetcher=fetcher, workdir=job_dir,
+                              force=refetch, job_id=job["job_id"])
+    except KeyboardInterrupt:
+        update_job(home, job["job_id"], status="failed",
+                   reason="interrupted (Ctrl-C)", end_utc=_utc_now())
+        raise
+    except Exception as error:
+        update_job(home, job["job_id"], status="failed",
+                   reason=f"{type(error).__name__}: {error}",
+                   end_utc=_utc_now())
+        raise
+    _write_json(job_dir / fc.PREFETCH_RECEIPT_NAME, receipt)
+    update_job(home, job["job_id"], status="complete", reason=None,
+               end_utc=_utc_now(),
+               prefetch={k: receipt.get(k) for k in
+                         ("status", "files", "bytes", "uploaded_bytes",
+                          "fetch_seconds", "seconds")})
+    return {"job_id": job["job_id"], "kind": "prefetch", "ok": True,
+            **{k: v for k, v in receipt.items() if k != "schema"}}
+
+
+def _forcing_summary(receipt: Mapping[str, Any] | None) -> dict | None:
+    if receipt is None:
+        return None
+    return {k: receipt.get(k) for k in ("mode", "status", "fallback",
+                                        "totals", "seconds", "reason")
+            if receipt.get(k) is not None}
+
+
+def mirror_forcing(job_ref: str | Path, *, hindcast_dir: Path | None = None,
+                   cluster_planner: Callable[..., Any] | None = None,
+                   fetcher: Callable[..., Any] | None = None,
+                   prefetch_inline: bool = True,
+                   now: datetime | None = None) -> dict:
+    """Materialize the job (if needed) and mirror its forcing from the cache
+    into the download folders its ``woof go`` steps will use
+    (:func:`woof.energy.forcing_cache.mirror_job`); return the receipt.
+
+    In a hindcast directory, an entry the cache lacks is first fetched by
+    running the job's prefetch job inline (``prefetch_inline``).  A cache
+    that cannot be read is never fatal: the receipt says ``error`` and the
+    job's own fetch downloads everything, as without a cache."""
+
+    from woof.energy import forcing_cache as fc
+
+    job_path = locate_job(job_ref, hindcast_dir=hindcast_dir)
+    job = load_job(job_path)
+    if fc.is_prefetch(job):
+        raise HindcastRefused(f"{job['job_id']} is a prefetch job; mirror "
+                              "runs for forecast jobs")
+    receipt = materialize_job(job_path, cluster_planner=cluster_planner,
+                              now=now, allow_running=True)
+    return _mirror(job, job_path, receipt, fetcher=fetcher,
+                   prefetch_inline=prefetch_inline)
+
+
+def _mirror(job: Mapping[str, Any], job_path: Path, materialized: dict, *,
+            fetcher: Callable[..., Any] | None = None,
+            prefetch_inline: bool = True) -> dict:
+    from woof.energy import forcing_cache as fc
+
+    job_dir = job_path.parent
+    plan_path = job_dir / materialized["plan"]
+    home = _hindcast_dir_of(job_path, job)
+    forcing = job.get("forcing")
+    notes = []
+    try:
+        receipt = fc.mirror_job(job, plan_path, job_dir=job_dir)
+        missing_entry = any(c.get("status") == "entry-missing"
+                            for c in receipt.get("configs") or ())
+        prefetch_id = (forcing or {}).get("prefetch_job_id")
+        if (missing_entry and prefetch_inline and home is not None
+                and prefetch_id):
+            prefetch_path = home / JOBS_DIR / prefetch_id / JOB_NAME
+            if prefetch_path.is_file():
+                record = _record_of(read_manifest(home), prefetch_id) or {}
+                try:
+                    # Complete in the manifest but gone from the cache (a
+                    # lifecycle rule expired it): fetch it again.
+                    pre = run_prefetch(
+                        prefetch_path, fetcher=fetcher,
+                        force=record.get("status") == "complete")
+                except KeyboardInterrupt:
+                    raise
+                except Exception as error:
+                    notes.append(f"the cache lacked {forcing['entry']} and "
+                                 f"prefetch {prefetch_id} could not run "
+                                 f"inline ({type(error).__name__}: {error}); "
+                                 "the job fetches for itself")
+                else:
+                    notes.append(f"the cache lacked {forcing['entry']}; "
+                                 f"prefetch {prefetch_id} ran inline "
+                                 f"({pre.get('status') or pre.get('reason')})")
+                    receipt = fc.mirror_job(job, plan_path, job_dir=job_dir)
+    except KeyboardInterrupt:
+        raise
+    except Exception as error:
+        receipt = {"schema": fc.MIRROR_SCHEMA, "job_id": job.get("job_id"),
+                   "mode": (forcing or {}).get("mode"), "status": "error",
+                   "fallback": True,
+                   "reason": f"{type(error).__name__}: {error}; the job's own "
+                             "fetch downloads its forcing"}
+        if (forcing or {}).get("mode") is not None:
+            _write_json(job_dir / fc.MIRROR_NAME, receipt)
+    if notes:
+        receipt["notes"] = list(receipt.get("notes") or []) + notes
+        if (forcing or {}).get("mode") is not None:
+            _write_json(job_dir / fc.MIRROR_NAME, receipt)
+    return receipt
+
+
 def run_local(job_ref: str | Path, *, hindcast_dir: Path | None = None,
               dry_run: bool = False, resume: bool = False,
               force: bool = False, extract: bool = True,
@@ -2057,9 +2428,16 @@ def run_local(job_ref: str | Path, *, hindcast_dir: Path | None = None,
               runner: Callable[..., dict] | None = None,
               post_step: Callable[..., dict] | None = None,
               cluster_planner: Callable[..., Any] | None = None,
+              fetcher: Callable[..., Any] | None = None,
+              mirror: bool = True,
               now: datetime | None = None) -> dict:
     """Materialize (if needed), run every plan domain on this machine with
     :func:`woof.energy.run.run_plan`, then the post-step; return a record.
+
+    A prefetch job (``kind: prefetch``) runs :func:`run_prefetch` instead.
+    A forecast job planned with a forcing cache first mirrors its forcing
+    (:func:`mirror_forcing`; ``mirror=False`` skips it and the run fetches
+    everything itself).
 
     A job the manifest calls complete is skipped unless ``force``.
     ``dry_run`` materializes (CPU only) and returns ``run_plan``'s ordered
@@ -2068,6 +2446,9 @@ def run_local(job_ref: str | Path, *, hindcast_dir: Path | None = None,
 
     job_path = locate_job(job_ref, hindcast_dir=hindcast_dir)
     job = load_job(job_path)
+    if job.get("kind") == "prefetch":
+        return run_prefetch(job_path, dry_run=dry_run, force=force,
+                            fetcher=fetcher)
     job_dir = job_path.parent
     home = _hindcast_dir_of(job_path, job)
     if home is not None and not force:
@@ -2088,18 +2469,36 @@ def run_local(job_ref: str | Path, *, hindcast_dir: Path | None = None,
         from woof.energy.run import run_plan as runner
     if dry_run:
         run = runner(plan_path, dry_run=True, resume=resume)
-        return {"job_id": job["job_id"], "dry_run": True,
-                "plan": str(plan_path), "materialized": receipt,
-                "run": run,
-                "post_step": ("extract the kept window "
-                              f"{job['outputs']['time_window']} to "
-                              f"{SITES_FORECAST_NAME}" if extract
-                              else "no extract")
-                             + ("; then the writer" if writer else "")}
-    if _claim(home, job["job_id"], force=force) == "complete":
+        record = {"job_id": job["job_id"], "dry_run": True,
+                  "plan": str(plan_path), "materialized": receipt,
+                  "run": run,
+                  "post_step": ("extract the kept window "
+                                f"{job['outputs']['time_window']} to "
+                                f"{SITES_FORECAST_NAME}" if extract
+                                else "no extract")
+                               + ("; then the writer" if writer else "")}
+        if isinstance(job.get("forcing"), Mapping):
+            record["forcing"] = {
+                k: job["forcing"].get(k) for k in
+                ("mode", "cache_url", "entry", "prefetch_job_id", "reason")
+                if job["forcing"].get(k) is not None}
+            record["forcing"]["will"] = (
+                "mirror the cache entry into each woof go download folder "
+                "before the run" if mirror and job["forcing"].get("mode")
+                == "shared" else "fetch for itself")
+        return record
+    if _claim(home, job["job_id"], force=force) == "complete" and not force:
         return {"job_id": job["job_id"], "skipped": True,
                 "reason": "completed by another worker meanwhile"}
+    forcing_receipt = None
     try:
+        if mirror and isinstance(job.get("forcing"), Mapping):
+            # Never fatal (a cache it cannot read means the run fetches
+            # for itself); inside the try so Ctrl-C still marks it failed.
+            forcing_receipt = _mirror(job, job_path, receipt,
+                                      fetcher=fetcher)
+            update_job(home, job["job_id"],
+                       forcing=_forcing_summary(forcing_receipt))
         from woof.energy.run import RunRefusal
 
         try:
@@ -2132,8 +2531,11 @@ def run_local(job_ref: str | Path, *, hindcast_dir: Path | None = None,
         raise
     update_job(home, job["job_id"], status="complete", reason=None,
                end_utc=_utc_now(), post_step=post)
-    return {"job_id": job["job_id"], "ok": True,
-            "run_manifest": run.get("manifest_path"), "post_step": post}
+    record = {"job_id": job["job_id"], "ok": True,
+              "run_manifest": run.get("manifest_path"), "post_step": post}
+    if forcing_receipt is not None:
+        record["forcing"] = _forcing_summary(forcing_receipt)
+    return record
 
 
 # --------------------------------------------------------------------------
@@ -2189,6 +2591,14 @@ def hindcast_status(hindcast_dir: Path, *, cluster: str | None = None,
            "jobs": len(jobs), "counts": counts, "clusters": per_cluster,
            "updated_utc": manifest.get("updated_utc"),
            "notes": manifest.get("notes") or []}
+    if isinstance(manifest.get("prefetch"), dict):
+        table = manifest["prefetch"]
+        out["prefetch"] = {"jobs": len(table),
+                           "counts": _status_counts(table.values()),
+                           "sources": sorted({r["source"]
+                                              for r in table.values()})}
+        if list_jobs:
+            out["prefetch"]["selected"] = table
     if status is not None:
         out["selected"] = {k: v for k, v in jobs.items()
                            if v["status"] == status}
@@ -2197,25 +2607,91 @@ def hindcast_status(hindcast_dir: Path, *, cluster: str | None = None,
     return out
 
 
+def prefetch_pending(hindcast_dir: Path, *, cycles: Sequence[str] | None = None,
+                     sources: Sequence[str] | None = None,
+                     job_ids: Sequence[str] | None = None,
+                     dry_run: bool = False, force: bool = False,
+                     refetch: bool = False,
+                     fetcher: Callable[..., Any] | None = None) -> dict:
+    """Run the hindcast's prefetch jobs (those not complete, or every one
+    with ``force``), one after another; ``cycles`` (``YYYY-MM-DDTHH``),
+    ``sources`` and ``job_ids`` select.  A failed prefetch is recorded and
+    the rest still run; its forecast jobs fetch for themselves."""
+
+    hindcast_dir = Path(hindcast_dir)
+    manifest = read_manifest(hindcast_dir)
+    if manifest is None:
+        raise HindcastRefused(f"{hindcast_dir} holds no {MANIFEST_NAME}")
+    table = manifest.get("prefetch")
+    if not isinstance(table, dict):
+        raise HindcastRefused(f"{hindcast_dir / MANIFEST_NAME} has no "
+                              "prefetch jobs: plan with --forcing-cache URL")
+    if job_ids:
+        unknown = sorted(set(job_ids) - set(table))
+        if unknown:
+            raise HindcastRefused(f"no prefetch job {unknown[0]!r} in "
+                                  f"{hindcast_dir / MANIFEST_NAME}")
+    selected = []
+    for job_id, record in sorted(table.items(),
+                                 key=lambda kv: (kv[1]["cycle"],
+                                                 kv[1]["source"])):
+        if job_ids and job_id not in job_ids:
+            continue
+        if cycles and record["cycle"][:13] not in {c[:13] for c in cycles}:
+            continue
+        if sources and record["source"] not in sources:
+            continue
+        if record["status"] == "complete" and not (force or dry_run):
+            continue
+        selected.append(job_id)
+    results = {}
+    failed = 0
+    for job_id in selected:
+        try:
+            results[job_id] = run_prefetch(job_id, hindcast_dir=hindcast_dir,
+                                           dry_run=dry_run, force=force,
+                                           refetch=refetch, fetcher=fetcher)
+        except Exception as error:  # botocore, google.api_core, ...
+            failed += 1
+            results[job_id] = {"job_id": job_id, "ok": False,
+                               "reason": f"{type(error).__name__}: {error}"}
+    counts: dict[str, int] = {}
+    for result in results.values():
+        state = ("dry-run" if result.get("dry_run") else
+                 "failed" if result.get("ok") is False else
+                 "skipped" if result.get("skipped") else
+                 str(result.get("status")))
+        counts[state] = counts.get(state, 0) + 1
+    return {"hindcast_dir": str(hindcast_dir), "selected": len(selected),
+            "counts": counts, "failed": failed, "jobs": results}
+
+
 # --------------------------------------------------------------------------
 # CLI
 
 
-def _load_writer(spec: str | None) -> Callable[..., Any] | None:
+def _load_callable(spec: str | None, flag: str
+                   ) -> Callable[..., Any] | None:
+    """``MODULE:CALLABLE`` named by ``flag``, imported; None when absent."""
+
     if spec is None:
         return None
     module_name, _, attribute = spec.partition(":")
     if not module_name or not attribute:
-        raise HindcastRefused(f"--writer {spec!r} must be MODULE:CALLABLE")
+        raise HindcastRefused(f"{flag} {spec!r} must be MODULE:CALLABLE")
     try:
         module = importlib.import_module(module_name)
     except ImportError as error:
-        raise HindcastRefused(f"--writer: cannot import {module_name}: "
+        raise HindcastRefused(f"{flag}: cannot import {module_name}: "
                               f"{error}") from error
-    writer = getattr(module, attribute, None)
-    if not callable(writer):
-        raise HindcastRefused(f"--writer: {spec} is not callable")
-    return writer
+    found = getattr(module, attribute, None)
+    if not callable(found):
+        raise HindcastRefused(f"{flag}: {spec} is not callable")
+    return found
+
+
+def _load_writer(spec: str | None) -> Callable[..., Any] | None:
+    return _load_callable(spec, "--writer")
 
 
 def default_spinup_for(segment_hours: int) -> int:
@@ -2260,7 +2736,8 @@ def _request_from_args(args) -> HindcastRequest:
         leaf_history_interval_s=args.leaf_history_interval_s,
         parent_history_interval_s=args.parent_history_interval_s,
         output_root=args.output_root, gridded_template=args.gridded_url,
-        sites_template=args.sites_url)
+        sites_template=args.sites_url,
+        forcing_cache=getattr(args, "forcing_cache", None))
 
 
 def _print(document: Any) -> None:
@@ -2273,20 +2750,30 @@ def _main_plan(args) -> int:
                            resume=bool(args.resume))
     if result.get("dry_run"):
         jobs = result["jobs"]
-        _print({"command": "woof energy hindcast plan", "dry_run": True,
-                "hindcast_dir": result["hindcast_dir"],
-                "jobs": len(jobs), "manifest": result["manifest"],
-                "example_job": jobs[0] if jobs else None})
+        document = {"command": "woof energy hindcast plan", "dry_run": True,
+                    "hindcast_dir": result["hindcast_dir"],
+                    "jobs": len(jobs), "manifest": result["manifest"],
+                    "example_job": jobs[0] if jobs else None}
+        if "prefetch_jobs" in result:
+            document["prefetch_jobs"] = len(result["prefetch_jobs"])
+            document["example_prefetch_job"] = (
+                result["prefetch_jobs"][0] if result["prefetch_jobs"]
+                else None)
+        _print(document)
         return 0
-    _print({"command": "woof energy hindcast plan", "dry_run": False,
-            "manifest": result["manifest_path"],
-            "jobs_planned": len(result["planned_job_ids"]),
-            "jobs_in_manifest": len(result["jobs"]),
-            "counts": result["counts"],
-            "first_job": (f"{JOBS_DIR}/{result['planned_job_ids'][0]}/"
-                          f"{JOB_NAME}" if result["planned_job_ids"]
-                          else None),
-            "notes": result["notes"]})
+    document = {"command": "woof energy hindcast plan", "dry_run": False,
+                "manifest": result["manifest_path"],
+                "jobs_planned": len(result["planned_job_ids"]),
+                "jobs_in_manifest": len(result["jobs"]),
+                "counts": result["counts"],
+                "first_job": (f"{JOBS_DIR}/{result['planned_job_ids'][0]}/"
+                              f"{JOB_NAME}" if result["planned_job_ids"]
+                              else None),
+                "notes": result["notes"]}
+    if "prefetch" in result:
+        document["prefetch_jobs_in_manifest"] = len(result["prefetch"])
+        document["prefetch_counts"] = result.get("prefetch_counts")
+    _print(document)
     return 0
 
 
@@ -2303,19 +2790,45 @@ def _main_materialize(args) -> int:
     return 0
 
 
+def _load_fetcher(spec: str | None) -> Callable[..., Any] | None:
+    """``--fetcher MODULE:CALLABLE`` (called as ``fetcher(request, out)``)."""
+
+    return _load_callable(spec, "--fetcher")
+
+
 def _main_run_local(args) -> int:
     record = run_local(args.job, hindcast_dir=args.dir,
                        dry_run=bool(args.dry_run), resume=bool(args.resume),
                        force=bool(args.force), extract=not args.no_extract,
-                       writer=_load_writer(args.writer))
+                       writer=_load_writer(args.writer),
+                       mirror=not getattr(args, "no_forcing_cache", False),
+                       fetcher=_load_fetcher(getattr(args, "fetcher", None)))
     _print({"command": "woof energy hindcast run-local", **record})
     if record.get("dry_run") or record.get("skipped"):
         return 0
     return 0 if record.get("ok") else 1
 
 
+def _main_prefetch(args) -> int:
+    result = prefetch_pending(
+        Path(args.dir), cycles=args.cycle, sources=args.source,
+        job_ids=args.job, dry_run=bool(args.dry_run), force=bool(args.force),
+        refetch=bool(args.refetch), fetcher=_load_fetcher(args.fetcher))
+    _print({"command": "woof energy hindcast prefetch", **result})
+    return 1 if result["failed"] else 0
+
+
+def _main_mirror(args) -> int:
+    receipt = mirror_forcing(args.job, hindcast_dir=args.dir,
+                             fetcher=_load_fetcher(args.fetcher),
+                             prefetch_inline=not args.no_prefetch)
+    _print({"command": "woof energy hindcast mirror", **receipt})
+    return 0
+
+
 _COMMANDS = {"plan": _main_plan, "status": _main_status,
-             "materialize": _main_materialize, "run-local": _main_run_local}
+             "materialize": _main_materialize, "run-local": _main_run_local,
+             "prefetch": _main_prefetch, "mirror": _main_mirror}
 
 
 def main(args) -> int:
@@ -2344,6 +2857,7 @@ __all__ = [
     "default_gpu_mem_pricer",
     "default_post_step", "default_source_selector", "fallback_select",
     "hindcast_status", "load_clusters", "load_job", "locate_job",
-    "materialize_job", "parse_utc", "patch_domain_tables", "plan_hindcast",
-    "read_manifest", "run_local", "segment_windows", "update_job", "main",
+    "materialize_job", "mirror_forcing", "parse_utc", "patch_domain_tables",
+    "plan_hindcast", "prefetch_pending", "read_manifest", "run_local",
+    "run_prefetch", "segment_windows", "update_job", "main",
 ]

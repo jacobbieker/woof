@@ -82,7 +82,11 @@ GPU.  The default, 1, is the behaviour above, unchanged.  With N > 1 or
   peak does not hold).  A job that declares nothing is priced at
   ``--default-job-mem-gib``, or -- the conservative default -- the whole
   card, so it only ever runs alone.  An idle card admits any one job,
-  however large, so every job can always run (as it would with one slot);
+  however large, so every job can always run (as it would with one slot).
+  A job declaring 0 GiB -- a ``kind: prefetch`` forcing download, which
+  counts as 0 even undeclared -- is never held back and reserves nothing.
+  The queue gates on dependencies (``depends_on``) before memory, so a
+  forecast job waits for its cycle's prefetch first;
 * ``auto`` starts ``min(8, floor((card - margin) / 3.4 GiB), CPUs per
   GPU)`` slots: 3.4 GiB is the smallest job the cost model's memory fit
   prices (its fixed intercept, :data:`woof.energy.cost.VRAM_INTERCEPT_GIB`)
@@ -546,12 +550,15 @@ class CardLedger:
             except (OSError, ValueError):
                 continue  # removed or being replaced: not a reservation
             if (isinstance(row, dict) and row.get("schema") == RESERVATION_SCHEMA
-                    and isinstance(row.get("gpu_mem_gib"), (int, float))):
+                    and isinstance(row.get("gpu_mem_gib"), (int, float))
+                    and row["gpu_mem_gib"] > 0):
                 rows.append(row)
         return rows
 
     def fits(self, declared: float | None,
              live: list[dict[str, Any]]) -> bool:
+        if declared is not None and declared <= 0:
+            return True  # no GPU (a prefetch job): never held back
         if not live:
             return True  # an idle card admits any one job
         used = sum(float(row["gpu_mem_gib"]) for row in live)
@@ -561,6 +568,13 @@ class CardLedger:
     def reserve(self, claim: Claim, declared: float | None,
                 live: list[dict[str, Any]]) -> dict[str, Any]:
         need, basis = self.need_gib(declared)
+        if need <= 0:
+            # No GPU (a prefetch job): nothing to reserve, so it never
+            # counts against the card or keeps an idle card from a big job.
+            self.clear()
+            return {"gpu_mem_gib": 0.0, "basis": "no GPU (declared 0)",
+                    "reserved_beside_gib": round(sum(
+                        float(r["gpu_mem_gib"]) for r in live), 3)}
         document = {
             "schema": RESERVATION_SCHEMA, "gpu_uuid": self.gpu_uuid,
             "slot": self.index, "pid": os.getpid(), "job_id": claim.job_id,

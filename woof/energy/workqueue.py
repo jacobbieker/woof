@@ -57,15 +57,31 @@ What is pinned:
   their clocks synchronised (NTP) to well inside ``lease_s``; the defaults
   leave minutes of margin.
 * **Declared GPU memory.**  A job may declare the device memory it needs
-  as ``resources.gpu_mem_gib`` (a positive number of GiB;
+  as ``resources.gpu_mem_gib`` (a non-negative number of GiB;
   ``woof energy hindcast plan`` writes the planner's priced peak there).
-  ``push`` refuses any other value (:class:`JobSpecError`).  A claim may
+  ``push`` refuses any other value (:class:`JobSpecError`); 0 says
+  the job uses no GPU, and a ``kind: prefetch`` job that declares
+  nothing counts as 0 (it fetches forcing on CPU and network).  A claim may
   pass an ``admit`` callable: a job it rejects is skipped, not leased, so
   a worker packing several jobs on one card only takes what fits
   (``woof energy worker --slots-per-gpu``).  The declared figure of each
   job is read once per queue object and cached (job documents are
   immutable); a claim reads at most :data:`MAX_ADMISSION_READS_PER_CLAIM`
   job documents it has not seen.
+  A claim gates on dependencies first, then on ``admit``: a job is
+  taken only when its queued dependencies are done or dead AND it
+  fits.  One read of a job document fills both caches.
+* **Dependencies.**  A job document may carry ``depends_on``: job ids that
+  must finish first (the hindcast's forecast jobs name the prefetch job
+  that fills the forcing cache for their cycle).  A job is claimed only
+  when every dependency that is queued is ``done`` or ``dead``: a dead
+  prefetch does not hold its cycle hostage, its forecast jobs then fetch
+  for themselves.  A dependency that is not queued does not block, so
+  ``push`` pushes ``kind: prefetch`` jobs of a batch first.  Job
+  documents are immutable, so each worker reads a job's dependencies once
+  (at most :data:`MAX_DEPENDENCY_READS_PER_CLAIM` new reads per claim) and
+  tries ``prefetch-`` jobs before the others.  A document without
+  ``depends_on`` claims exactly as before.
 
 Queue-level refusals raise a named :class:`QueueError` subclass; nothing
 is coerced.
@@ -128,6 +144,14 @@ ADMISSION_CACHE_LIMIT = 200_000
 
 #: Error tail carried in failed/ and dead/ documents.
 ERROR_TAIL_BYTES = 4000
+
+#: Job documents a claim reads at most to learn their ``depends_on``
+#: (each is read once per worker; documents are immutable).
+MAX_DEPENDENCY_READS_PER_CLAIM = 256
+
+#: Ids of the jobs that unblock others (the hindcast's prefetch jobs,
+#: :data:`woof.energy.forcing_cache.PREFETCH_ID_PREFIX`); tried first.
+PREFETCH_ID_PREFIX = "prefetch-"
 
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_LEASE_S = 900.0
@@ -660,27 +684,30 @@ def declared_gpu_mem_gib(document: Any, *, source: str = "<job>"
                          ) -> float | None:
     """The job's ``resources.gpu_mem_gib``, or None when it declares none.
 
-    A declared value must be a finite positive number (GiB); anything else
-    is :class:`JobSpecError`, never coerced.  ``None`` (or no
-    ``resources`` table) is "not declared": the worker prices it with its
-    own conservative default.
+    A declared value must be a finite non-negative number (GiB; 0 means
+    the job uses no GPU); anything else is :class:`JobSpecError`, never
+    coerced.  ``None`` (or no ``resources`` table) is "not declared": the
+    worker prices it with its own conservative default -- except a
+    ``kind: prefetch`` job, which only fetches forcing (CPU and network) and
+    counts as 0.
     """
 
     if not isinstance(document, dict):
         return None
+    no_gpu = 0.0 if document.get("kind") == "prefetch" else None
     resources = document.get("resources")
     if resources is None:
-        return None
+        return no_gpu
     if not isinstance(resources, dict):
         raise JobSpecError(f"{source}: resources must be a JSON object")
     value = resources.get("gpu_mem_gib")
     if value is None:
-        return None
+        return no_gpu
     if (isinstance(value, bool) or not isinstance(value, (int, float))
-            or not math.isfinite(float(value)) or float(value) <= 0):
+            or not math.isfinite(float(value)) or float(value) < 0):
         raise JobSpecError(
-            f"{source}: resources.gpu_mem_gib {value!r} must be a positive "
-            "number of GiB (or absent)")
+            f"{source}: resources.gpu_mem_gib {value!r} must be a "
+            "non-negative number of GiB (0: no GPU), or absent")
     return float(value)
 
 
@@ -700,7 +727,23 @@ def job_from_document(document: Any, *, schema: str = JOB_SCHEMA,
             f"{source}: job_id {job_id!r} must match "
             f"{JOB_ID_PATTERN.pattern} (it becomes an object key)")
     declared_gpu_mem_gib(document, source=source)
+    depends_on = document.get("depends_on")
+    if depends_on is not None:
+        if (not isinstance(depends_on, list) or not all(
+                isinstance(d, str) and JOB_ID_PATTERN.fullmatch(d)
+                for d in depends_on)):
+            raise JobSpecError(f"{source}: depends_on must be a list of job "
+                               f"ids; got {depends_on!r}")
+        if job_id in depends_on:
+            raise JobSpecError(f"{source}: job {job_id!r} depends on itself")
     return job_id, document
+
+
+def dependencies_of(document: dict[str, Any]) -> tuple[str, ...]:
+    """A job document's ``depends_on`` ids (empty when it has none)."""
+
+    raw = document.get("depends_on") or ()
+    return tuple(d for d in raw if isinstance(d, str))
 
 
 def read_job_files(paths: Iterable[str | Path], *,
@@ -788,6 +831,9 @@ class WorkQueue:
         #: ``admit`` rejected them (claimable, but not here and now).
         self.last_unadmitted = 0
         self._declared: dict[str, float | None] = {}
+        # job id -> depends_on, read once (job documents are immutable).
+        self._dependencies: dict[str, tuple[str, ...]] = {}
+        self._last_document: tuple[str, bytes] | None = None
 
     @classmethod
     def open(cls, url: str, **clients) -> "WorkQueue":
@@ -913,14 +959,22 @@ class WorkQueue:
         """``(known, gib)``: the job's declared GPU memory, from the cache
         or one GET (``known`` False when the job document is gone)."""
 
-        if job_id in self._declared:
-            return True, self._declared[job_id]
+        if job_id not in self._declared and not self._learn(job_id):
+            return False, None
+        return True, self._declared[job_id]
+
+    def _learn(self, job_id: str) -> bool:
+        """Read a job document once and cache what claims need of it (its
+        dependencies and declared GPU memory); False if it is gone."""
+
         key = f"jobs/{job_id}.json"
         found = self.store.get(key)
         if found is None:
-            return False, None
+            return False
+        self._last_document = (job_id, found[0])
+        document = decode(found[0], key)
         try:
-            gib = declared_gpu_mem_gib(decode(found[0], key), source=key)
+            gib = declared_gpu_mem_gib(document, source=key)
         except JobSpecError:
             # Pushed by an older client or written by hand: the worker
             # treats it as undeclared and the runner decides.
@@ -928,7 +982,8 @@ class WorkQueue:
         if len(self._declared) >= ADMISSION_CACHE_LIMIT:
             self._declared.clear()
         self._declared[job_id] = gib
-        return True, gib
+        self._dependencies[job_id] = dependencies_of(document)
+        return True
 
     def claim(self, owner: dict[str, Any], *,
               rng: random.Random | None = None,
@@ -972,7 +1027,13 @@ class WorkQueue:
         finished = view["done"] | view["dead"]
         fresh = sorted(view["jobs"] - view["leases"] - finished)
         rng.shuffle(fresh)
+        # Jobs that unblock others first; the shuffle holds within each.
+        fresh.sort(key=lambda j: not j.startswith(PREFETCH_ID_PREFIX))
+        budget = [MAX_DEPENDENCY_READS_PER_CLAIM]
         for job_id in fresh:
+            if self.waiting_on(job_id, view, budget=budget,
+                               finished=finished) != ():
+                continue
             if not admitted(job_id):
                 continue
             claim = self._take(job_id, None, owner)
@@ -981,6 +1042,9 @@ class WorkQueue:
         held = sorted((view["leases"] & view["jobs"]) - finished)
         rng.shuffle(held)
         for job_id in held[:MAX_LEASE_READS_PER_CLAIM]:
+            if self.waiting_on(job_id, view, budget=budget,
+                               finished=finished) != ():
+                continue
             key = f"leases/{job_id}.json"
             found = self.store.get(key)
             if found is None:
@@ -1005,6 +1069,38 @@ class WorkQueue:
             if claim is not None:
                 return claim
         return None
+
+    def dependencies(self, job_id: str) -> tuple[str, ...] | None:
+        """The job's ``depends_on`` (read once), or None if it is gone."""
+
+        if job_id not in self._dependencies and not self._learn(job_id):
+            return None
+        return self._dependencies[job_id]
+
+    def waiting_on(self, job_id: str, view: dict[str, set[str]], *,
+                   budget: list[int] | None = None,
+                   finished: set[str] | None = None
+                   ) -> tuple[str, ...] | None:
+        """Queued dependencies of ``job_id`` that are neither done nor dead
+        (``()`` when it may run).  None when learning them would take a
+        read past ``budget`` (a one-element list, decremented per read) or
+        the job is gone: not claimable this time.  ``finished`` is
+        ``view["done"] | view["dead"]`` when the caller already has it."""
+
+        if job_id not in self._dependencies:
+            if budget is not None:
+                if budget[0] <= 0:
+                    return None
+                budget[0] -= 1
+            if self.dependencies(job_id) is None:
+                return None
+        dependencies = self._dependencies[job_id]
+        if not dependencies:
+            return ()
+        if finished is None:
+            finished = view["done"] | view["dead"]
+        return tuple(d for d in dependencies
+                     if d in view["jobs"] and d not in finished)
 
     def _take(self, job_id: str,
               prior: tuple[dict[str, Any], str] | None,
@@ -1062,7 +1158,13 @@ class WorkQueue:
                                  error_tail="", log_key=None,
                                  failures=failures)
         claim_ = Claim(job_id, {}, b"", lease, version)
-        job = self.store.get(f"jobs/{job_id}.json")
+        if self._last_document is not None and \
+                self._last_document[0] == job_id:
+            # Read moments ago for its dependencies; documents are immutable.
+            job = (self._last_document[1], "")
+        else:
+            job = self.store.get(f"jobs/{job_id}.json")
+        self._last_document = None
         if (job is None or self.is_done(job_id)
                 or self.store.get(f"dead/{job_id}.json") is not None):
             # Finished (or withdrawn) between the listing and the claim.
@@ -1448,6 +1550,9 @@ def _cmd_push(args) -> int:
     queue = WorkQueue.open(args.queue)
     queue.settings()
     jobs = read_job_files(args.jobs, schema=args.schema)
+    # Jobs others depend on go first: a dependency not yet queued does not
+    # block, so a forecast pushed before its prefetch could start early.
+    jobs.sort(key=lambda item: item[1].get("kind") != "prefetch")
     results: dict[str, str] = {}
     conflicts: list[str] = []
     for job_id, document in jobs:
@@ -1504,6 +1609,7 @@ __all__ = [
     "QueueError", "QueueNotInitialized", "QueueSettings",
     "QueueSettingsError", "QueueURLError", "RequeueRefused", "S3Store",
     "STATUS_SCHEMA", "WorkQueue", "declared_gpu_mem_gib",
-    "job_from_document", "main", "open_store",
+    "dependencies_of", "job_from_document", "main", "open_store",
+    "MAX_DEPENDENCY_READS_PER_CLAIM", "PREFETCH_ID_PREFIX",
     "read_job_files", "tail_text",
 ]

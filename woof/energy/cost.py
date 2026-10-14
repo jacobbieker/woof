@@ -117,6 +117,24 @@ history cadence, ``--store-preset`` fields on every model level, times
 float32 fields; an assumption), priced per GB-month, per PUT (one per
 ``--chunk-mib`` chunk) and per GB of one full download.
 
+Forcing downloads (``forcing``): what fetching the boundary data costs,
+per job versus once per cycle through the forcing cache
+(docs/energy-hindcast/forcing-cache.md).  One cycle's download is the
+bytes and objects :func:`woof.download_budget.download_estimate` measures
+for ``--forcing-source`` over the segment's fetch window (or
+``--forcing-gb-per-cycle``).  **Per job**, every cluster downloads it
+from the publisher at ``--publisher-mbps``; **per cycle**, one prefetch
+downloads it at that rate and every job reads it from a same-region cache
+at ``--cache-read-mbps``, plus the cache's PUTs, GETs and storage for
+``--forcing-cache-days``.  Download time is priced as GPU-slot time (the
+instance price over its GPUs: the card idles while its job waits for
+bytes); publisher egress is ``--publisher-egress-usd-per-gb`` (0: the
+public open-data buckets charge the requester nothing) and same-region
+cache reads are free.  Both rates and the retention are assumptions,
+labelled as such in the document.  A source the cache does not share
+(``woof.energy.forcing_cache.shareability``) shows no saving and says why.
+The forcing figures are reported beside, not added to, the GPU-hours.
+
 Prices come from ``woof/data/energy/cloud_prices.json`` (``--prices`` for
 another copy) and are never fetched; a table older than its
 ``stale_after_days`` is noted, not refused.
@@ -375,6 +393,24 @@ DEFAULT_SEGMENT_HOURS = 9.0
 DEFAULT_SPINUP_HOURS = 3.0
 DEFAULT_LEAF_DX_M = 300.0
 DEFAULT_LEAF_NZ = 49
+
+#: The source a forcing estimate prices when none is named: the global
+#: model the selector takes outside the HRRR/RAP domain.
+DEFAULT_FORCING_SOURCE = "met-office-global"
+#: The cycle a forcing estimate sizes one download on (sizes are per
+#: object and do not move with the date inside one publication era).
+FORCING_REFERENCE_CYCLE = "2026-06-01T00"
+#: Sustained MB/s one job's fetch draws from a publisher (a public cloud
+#: open-data bucket in the same cloud).  An assumption: a NOMADS-class
+#: server paces far lower, and 440 jobs of one cycle share its limits.
+DEFAULT_PUBLISHER_MBPS = 100.0
+#: Sustained MB/s one job reads the forcing cache in its own region.  An
+#: assumption (parallel GETs from one instance).
+DEFAULT_CACHE_READ_MBPS = 400.0
+#: Days a cycle's cache entry is kept before a lifecycle rule deletes it.
+DEFAULT_FORCING_CACHE_DAYS = 7.0
+#: Days per storage-month.
+_DAYS_PER_MONTH = 30.4
 
 
 @dataclass(frozen=True)
@@ -1081,6 +1117,141 @@ def _storage(leaf_rows: Sequence[DomainWork], campaign: Campaign, *,
     }
 
 
+def forcing_transfer(*, source: str, segment_hours: float, cycles: int,
+                     jobs_per_cycle: int,
+                     gb_per_cycle: float | None = None,
+                     objects_per_cycle: int | None = None,
+                     publisher_mbps: float = DEFAULT_PUBLISHER_MBPS,
+                     cache_read_mbps: float = DEFAULT_CACHE_READ_MBPS,
+                     cache_days: float = DEFAULT_FORCING_CACHE_DAYS,
+                     publisher_egress_usd_per_gb: float = 0.0) -> dict[str, Any]:
+    """Download volume and time per job versus per cycle (the forcing
+    section of the estimate, before prices)."""
+
+    from woof.download_budget import download_estimate
+    from woof.energy.forcing_cache import MODE_SHARED, shareability
+
+    if publisher_mbps <= 0 or cache_read_mbps <= 0:
+        raise CostRefusal("--publisher-mbps and --cache-read-mbps must be "
+                          "positive")
+    if cache_days < 0:
+        raise CostRefusal("--forcing-cache-days must not be negative")
+    try:
+        mode, why = shareability(source)
+    except Exception as error:
+        raise CostRefusal(f"--forcing-source {source!r}: {error}") from error
+    basis = None
+    if gb_per_cycle is None:
+        from woof.domain_wizard import fetch_window
+
+        cadence, hours = fetch_window(source, float(segment_hours), 0)
+        request: dict[str, Any] = {"source": source,
+                                   "cycle": FORCING_REFERENCE_CYCLE,
+                                   "hours": hours}
+        if cadence is not None:
+            request["cadence"] = cadence
+        measured = download_estimate(request)
+        if measured.get("bytes") is None:
+            raise CostRefusal(
+                f"--forcing-source {source}: {measured.get('basis')}; give "
+                "--forcing-gb-per-cycle")
+        cycle_bytes = float(measured["bytes"])
+        objects = int(measured.get("objects") or 1)
+        basis = (f"woof.download_budget for {source} {FORCING_REFERENCE_CYCLE} "
+                 f"+ {hours} h: {measured.get('basis')}")
+    else:
+        if gb_per_cycle <= 0:
+            raise CostRefusal("--forcing-gb-per-cycle must be positive")
+        cycle_bytes = gb_per_cycle * 1e9
+        objects = int(objects_per_cycle or 1)
+        basis = "--forcing-gb-per-cycle (as given)"
+    if objects_per_cycle is not None:
+        objects = int(objects_per_cycle)
+    jobs = cycles * jobs_per_cycle
+    shared = mode == MODE_SHARED
+    fetch_h = cycle_bytes / (publisher_mbps * 1e6) / 3600.0
+    read_h = cycle_bytes / (cache_read_mbps * 1e6) / 3600.0
+    per_job = {"downloads": jobs, "bytes_from_publishers": int(jobs * cycle_bytes),
+               "slot_hours": round(jobs * fetch_h, 3),
+               "publisher_get_requests": jobs * objects}
+    if shared:
+        per_cycle = {
+            "downloads": cycles,
+            "bytes_from_publishers": int(cycles * cycle_bytes),
+            "prefetch_slot_hours": round(cycles * fetch_h, 3),
+            "cache_read_bytes": int(jobs * cycle_bytes),
+            "cache_read_slot_hours": round(jobs * read_h, 3),
+            "slot_hours": round(cycles * fetch_h + jobs * read_h, 3),
+            "cache_put_requests": cycles * objects,
+            "cache_get_requests": jobs * objects,
+            "cache_gb_months": round(cycles * cycle_bytes / 1e9 * cache_days
+                                     / _DAYS_PER_MONTH, 3)}
+    else:
+        per_cycle = {**per_job, "cache_put_requests": 0,
+                     "cache_get_requests": 0, "cache_gb_months": 0.0,
+                     "note": f"not cached: {why}"}
+    return {
+        "source": source, "shared": shared, "why": why,
+        "cycles": cycles, "jobs_per_cycle": jobs_per_cycle, "jobs": jobs,
+        "per_cycle_download": {"bytes": int(cycle_bytes), "gb": round(
+            cycle_bytes / 1e9, 3), "objects": objects, "basis": basis},
+        "per_job_fetch": per_job,
+        "per_cycle_cache": per_cycle,
+        "saving": {
+            "bytes_from_publishers": int(per_job["bytes_from_publishers"]
+                                         - per_cycle["bytes_from_publishers"]),
+            "slot_hours": round(per_job["slot_hours"]
+                                - per_cycle["slot_hours"], 3),
+            "download_fraction_avoided": round(
+                1.0 - per_cycle["bytes_from_publishers"]
+                / max(1.0, per_job["bytes_from_publishers"]), 6)},
+        "assumptions": {
+            "publisher_mbps": publisher_mbps,
+            "cache_read_mbps": cache_read_mbps,
+            "forcing_cache_days": cache_days,
+            "publisher_egress_usd_per_gb": publisher_egress_usd_per_gb,
+            "basis": "download time is GPU-slot time (the card idles while "
+                     "its job waits); rates and retention are assumptions, "
+                     "not measurements; the prefetch runs on the same "
+                     "fleet; decode and preparation time are unchanged by "
+                     "the cache and not counted here"},
+    }
+
+
+def _forcing_usd(forcing: Mapping[str, Any], offer: Mapping[str, Any],
+                 storage_rates: Mapping[str, Any] | None,
+                 markets: Sequence[str]) -> dict[str, Any]:
+    """The forcing section priced on one offer."""
+
+    gpus = int(offer["gpus"])
+    rates = storage_rates or {}
+    put = float(rates.get("usd_per_1000_put", 0.0)) / 1000.0
+    get = float(rates.get("usd_per_1000_get", 0.0)) / 1000.0
+    month = float(rates.get("usd_per_gb_month", 0.0))
+    egress = float(forcing["assumptions"]["publisher_egress_usd_per_gb"])
+    per_job = forcing["per_job_fetch"]
+    cache = forcing["per_cycle_cache"]
+    out: dict[str, Any] = {}
+    for market in markets:
+        price = offer.get("on_demand_usd_per_hour" if market == "on_demand"
+                          else "spot_usd_per_hour")
+        if price is None:
+            continue
+        slot = float(price) / gpus
+        direct = (per_job["slot_hours"] * slot
+                  + per_job["bytes_from_publishers"] / 1e9 * egress)
+        cached = (cache["slot_hours"] * slot
+                  + cache["bytes_from_publishers"] / 1e9 * egress
+                  + cache["cache_put_requests"] * put
+                  + cache["cache_get_requests"] * get
+                  + cache["cache_gb_months"] * month)
+        out[market] = {"slot_usd_per_hour": round(slot, 4),
+                       "per_job_fetch": round(direct, 2),
+                       "per_cycle_cache": round(cached, 2),
+                       "saving": round(direct - cached, 2)}
+    return out
+
+
 def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any]],
              price_table: Mapping[str, Any], instances: int = 1,
              deadline_days: float | None = None, markets: Sequence[str] = ("on_demand", "spot"),
@@ -1093,8 +1264,12 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
              packing_efficiency: float = DEFAULT_PACKING_EFFICIENCY,
              slots_per_gpu: int | str = 1, mps: bool = False,
              inputs: Mapping[str, Any] | None = None,
-             notes: Sequence[str] = ()) -> dict[str, Any]:
-    """The ``woof-energy.cost-estimate.v1`` document."""
+             notes: Sequence[str] = (),
+             forcing: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The ``woof-energy.cost-estimate.v1`` document.
+
+    ``forcing`` is :func:`forcing_transfer`'s section; each offer then
+    carries ``forcing_usd`` (per job versus per cycle, per market)."""
 
     if instances < 1:
         raise CostRefusal("--instances must be at least 1")
@@ -1303,6 +1478,17 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
                 "egress_full_download_once": round(
                     gb * float(storage_rates.get("egress_usd_per_gb", 0.0)), 2),
             }
+        if forcing is not None:
+            row["forcing_usd"] = _forcing_usd(forcing, offer, storage_rates,
+                                              markets)
+            if packed:
+                # The two sections are priced independently: a download
+                # here holds a whole GPU, so with jobs sharing cards the
+                # slot cost of waiting on forcing is an upper bound.
+                row["forcing_usd"]["note"] = (
+                    "slot-hours are priced at a whole GPU; with "
+                    "--slots-per-gpu the card is shared while a job waits "
+                    "on forcing, so these are upper bounds")
         if mode != "plan":
             row["work_per_segment"] = _work_summary(mode, per_cluster)
         if work_doc is None:
@@ -1379,6 +1565,7 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
                    "currency": price_table.get("currency", "USD"),
                    "sources": price_table.get("sources")},
         "storage": storage_doc,
+        **({"forcing": dict(forcing)} if forcing is not None else {}),
         "offers": out_offers,
         "notes": notes,
     }
@@ -1480,6 +1667,37 @@ def render_table(document: Mapping[str, Any]) -> str:
             f"{row['wall_clock_days']['central']:>8,.2f} "
             f"{cell('on_demand'):>22} {cell('spot'):>22} "
             f"{row['storage']['stored_tb']:>9,.1f}")
+    forcing = document.get("forcing")
+    if forcing:
+        save = forcing["saving"]
+
+        def volume(n: float) -> str:
+            return f"{n / 1e12:,.2f} TB" if n >= 1e12 else f"{n / 1e9:,.2f} GB"
+
+        def hours(h: float) -> str:
+            return f"{h:,.0f}" if h >= 100 else f"{h:,.2f}"
+
+        lines.append(
+            f"forcing ({forcing['source']}, "
+            f"{forcing['per_cycle_download']['gb']:g} GB per cycle, "
+            f"{forcing['jobs_per_cycle']} job(s) per cycle): per job "
+            f"{volume(forcing['per_job_fetch']['bytes_from_publishers'])} "
+            f"and {hours(forcing['per_job_fetch']['slot_hours'])} slot-h; "
+            f"cached per cycle "
+            f"{volume(forcing['per_cycle_cache']['bytes_from_publishers'])} "
+            f"and {hours(forcing['per_cycle_cache']['slot_hours'])} slot-h"
+            + ("" if forcing["shared"] else f" (not shared: {forcing['why']})"))
+        for row in document["offers"]:
+            priced = (row.get("forcing_usd") or {}).get("on_demand")
+            if priced:
+                lines.append(
+                    f"  {row['provider']}:{row['instance']}: forcing "
+                    f"{_money(priced['per_job_fetch'])} per job vs "
+                    f"{_money(priced['per_cycle_cache'])} cached (saves "
+                    f"{_money(priced['saving'])}, on-demand slot time; "
+                    "rates are assumptions)")
+        lines.append(f"forcing saving: {volume(save['bytes_from_publishers'])} "
+                     f"not downloaded, {hours(save['slot_hours'])} slot-h")
     storage = document.get("storage")
     if storage:
         lines.append(f"store: compressed Icechunk TB ({storage['preset']} "
@@ -1676,6 +1894,44 @@ def run(args) -> dict[str, Any]:
     offers = select_offers(table, args.instance)
     markets = {"both": ("on_demand", "spot"), "on-demand": ("on_demand",),
                "spot": ("spot",)}[args.market]
+    forcing = None
+    if not getattr(args, "no_forcing", False):
+        jobs_per_cycle = (sum(c.count for c in clusters)
+                          if clusters is not None else 1)
+        # Asked for by name, a forcing figure that cannot be made is a
+        # refusal; the default section is a note when it cannot be sized
+        # (a window past the default source's horizon), never the reason
+        # the GPU-hours are refused.
+        asked = any(getattr(args, name, None) is not None for name in (
+            "forcing_source", "forcing_gb_per_cycle",
+            "forcing_objects_per_cycle", "publisher_mbps",
+            "cache_read_mbps", "forcing_cache_days",
+            "publisher_egress_usd_per_gb"))
+        try:
+            forcing = forcing_transfer(
+                source=getattr(args, "forcing_source", None)
+                or DEFAULT_FORCING_SOURCE,
+                segment_hours=campaign.segment_hours, cycles=campaign.segments,
+                jobs_per_cycle=jobs_per_cycle,
+                gb_per_cycle=getattr(args, "forcing_gb_per_cycle", None),
+                objects_per_cycle=getattr(args, "forcing_objects_per_cycle", None),
+                publisher_mbps=getattr(args, "publisher_mbps", None)
+                or DEFAULT_PUBLISHER_MBPS,
+                cache_read_mbps=getattr(args, "cache_read_mbps", None)
+                or DEFAULT_CACHE_READ_MBPS,
+                cache_days=(DEFAULT_FORCING_CACHE_DAYS
+                            if getattr(args, "forcing_cache_days", None) is None
+                            else args.forcing_cache_days),
+                publisher_egress_usd_per_gb=getattr(
+                    args, "publisher_egress_usd_per_gb", None) or 0.0)
+        except CostRefusal as error:
+            if asked:
+                raise
+            notes.append(f"forcing section left out: {error}")
+        if forcing is not None and mode == "plan":
+            notes.append("forcing: a --plan prices one cluster, so one job "
+                         "per cycle and no cache saving; price a partition "
+                         "or --clusters N to see it")
     document = estimate(
         mode=mode, campaign=campaign, offers=offers, price_table=table,
         instances=args.instances, deadline_days=args.deadline_days,
@@ -1685,7 +1941,7 @@ def run(args) -> dict[str, Any]:
         chunk_mib=args.chunk_mib, packing_efficiency=args.packing_efficiency,
         slots_per_gpu=_slots_arg(getattr(args, "slots_per_gpu", 1)),
         mps=bool(getattr(args, "mps", False)),
-        inputs=inputs, notes=notes)
+        inputs=inputs, notes=notes, forcing=forcing)
     document["prices"]["path"] = str(Path(args.prices) if args.prices else DEFAULT_PRICES)
     return document
 

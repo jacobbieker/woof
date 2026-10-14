@@ -68,7 +68,8 @@ def test_declared_gpu_memory_is_validated_at_push(tmp_path):
     queue = _queue(tmp_path / "q")
     assert queue.push("a", _job("a", 4.5)) == "queued"
     assert queue.push("b", _job("b")) == "queued"
-    for bad in (0, -1, "8", float("nan"), True):
+    assert queue.push("z", _job("z", 0)) == "queued"  # 0: no GPU
+    for bad in (-0.5, -1, "8", float("nan"), True):
         with pytest.raises(wq.JobSpecError, match="gpu_mem_gib"):
             queue.push("c", {"schema": wq.JOB_SCHEMA, "job_id": "c",
                              "resources": {"gpu_mem_gib": bad}})
@@ -101,16 +102,70 @@ def test_an_admission_filtered_claim_skips_what_does_not_fit(tmp_path):
 
 
 def test_admission_reads_are_bounded_and_cached(tmp_path, monkeypatch):
+    # One document read serves both gates, so the tighter budget binds.
     monkeypatch.setattr(wq, "MAX_ADMISSION_READS_PER_CLAIM", 3)
+    monkeypatch.setattr(wq, "MAX_DEPENDENCY_READS_PER_CLAIM", 3)
     queue = _queue(tmp_path / "q")
     for index in range(8):
         queue.push(f"j{index}", _job(f"j{index}", 50.0))
+    reads = []
+    original = queue.store.get
+    monkeypatch.setattr(queue.store, "get", lambda key: (
+        reads.append(key), original(key))[1])
     assert queue.claim(OWNER, admit=lambda *_: False) is None
-    assert len(queue._declared) == 3
-    assert queue.last_unadmitted == 8
+    assert len(queue._declared) == 3 and len(queue._dependencies) == 3
+    assert len([k for k in reads if k.startswith("jobs/")]) == 3
+    assert queue.last_unadmitted == 3
     for _ in range(3):
         queue.claim(OWNER, admit=lambda *_: False)
     assert len(queue._declared) == 8
+
+
+def test_a_claim_needs_its_dependencies_done_and_its_memory_to_fit(tmp_path):
+    queue = _queue(tmp_path / "q")
+    queue.push("prefetch-c0", _job("prefetch-c0", kind="prefetch"))
+    queue.push("f1", _job("f1", 6.0, depends_on=["prefetch-c0"]))
+    queue.push("f2", _job("f2", 2.0, depends_on=["prefetch-c0"]))
+    assert wq.declared_gpu_mem_gib(_job("x", kind="prefetch")) == 0.0
+    seen = []
+
+    def admit(job_id, gib):
+        seen.append((job_id, gib))
+        return gib <= 4.0
+
+    first = queue.claim(OWNER, admit=admit)
+    assert first.job_id == "prefetch-c0" and seen == [("prefetch-c0", 0.0)]
+    # Its dependents wait for it, whatever their memory.
+    assert queue.claim(OWNER, admit=admit) is None
+    assert queue.last_unadmitted == 0
+    assert queue.complete(first, {"exit_code": 0})
+    claim = queue.claim(OWNER, admit=admit)
+    assert claim.job_id == "f2"  # f1 is ready but does not fit
+    assert queue.claim(OWNER, admit=admit) is None
+    assert queue.last_unadmitted == 1
+
+
+def test_a_prefetch_is_never_held_back_and_reserves_nothing(tmp_path,
+                                                            monkeypatch):
+    from woof.supervisor import GPUFileLock
+
+    monkeypatch.setenv("WOOF_GPU_LOCK_ROOT", str(tmp_path / "locks"))
+    big, other = _ledger(0), _ledger(1)
+    held = GPUFileLock("x", path=big.slot_lock_path).acquire()
+    try:
+        big.reserve(_claim("huge"), 22.0, [])  # over the card, running alone
+        live = other.live_reservations()
+        assert not other.fits(2.0, live)
+        assert other.fits(0.0, live)
+        lock = GPUFileLock("y", path=other.slot_lock_path).acquire()
+        try:
+            other.reserve(_claim("prefetch-c0"), 0.0, live)
+            assert not other.reservation_path.exists()
+            assert [r["job_id"] for r in big.live_reservations()] == []
+        finally:
+            lock.release()
+    finally:
+        held.release()
 
 
 # --------------------------------------------------------------------------
@@ -441,7 +496,10 @@ import fcntl, json, os, sys, time
 job_path, result, root, sleep = sys.argv[1:5]
 job = json.load(open(job_path))
 gib = (job.get("resources") or {}).get("gpu_mem_gib")
+if job.get("kind") == "prefetch":
+    gib = 0.0
 host = os.environ["FAKE_HOST"]
+started = time.time()
 gpu = os.environ["CUDA_VISIBLE_DEVICES"]
 card = os.path.join(root, "cards", host, gpu)
 os.makedirs(card, exist_ok=True)
@@ -458,11 +516,13 @@ with open(os.path.join(root, "occupancy.lock"), "a") as guard:
             pass
     with open(os.path.join(root, "occupancy.jsonl"), "a") as log:
         log.write(json.dumps({"host": host, "gpu": gpu, "job": job["job_id"],
-                              "present": present}) + "\n")
+                              "present": present, "at": started}) + "\n")
 time.sleep(float(sleep))
 with open(os.path.join(root, "ran", f"{job['job_id']}.{os.getpid()}"), "w") as f:
     f.write(os.environ["WOOF_ENERGY_JOB_ATTEMPT"])
 os.remove(mine)
+with open(os.path.join(root, "ends.jsonl"), "a") as log:
+    log.write(json.dumps({"job": job["job_id"], "at": time.time()}) + "\n")
 json.dump({"job_id": job["job_id"], "gpu": gpu}, open(result, "w"))
 """
 
@@ -492,10 +552,17 @@ def _descendants(root_pid: int) -> list[int]:
     return found
 
 
+#: Prefetch jobs (CPU and network only) and the jobs that need them.
+E2E_PREFETCH = {"prefetch-c0": [f"p{i:02d}" for i in range(0, 6)],
+                "prefetch-c1": [f"p{i:02d}" for i in range(6, 10)]}
+
+
 def _check_occupancy(rows, card_gib=16.0, margin_gib=1.0):
+    """GPU jobs sharing a card fit; 0 GiB (prefetch) rides along free."""
+
     packed = 0
     for row in rows:
-        present = row["present"]
+        present = [gib for gib in row["present"] if gib != 0]
         if len(present) > 1:
             packed += 1
             assert None not in present, row
@@ -512,9 +579,15 @@ def test_end_to_end_three_packed_gpus_and_a_killed_worker(tmp_path):
     runner.write_text(OCCUPANCY_RUNNER)
     jobs = tmp_path / "jobs"
     jobs.mkdir()
+    needs = {job: pre for pre, deps in E2E_PREFETCH.items() for job in deps}
     for index, gib in enumerate(E2E_GIB):
-        (jobs / f"p{index:02d}.json").write_text(
-            json.dumps(_job(f"p{index:02d}", gib)))
+        job_id = f"p{index:02d}"
+        extra = {"depends_on": [needs[job_id]]} if job_id in needs else {}
+        (jobs / f"{job_id}.json").write_text(
+            json.dumps(_job(job_id, gib, **extra)))
+    for job_id in E2E_PREFETCH:  # undeclared: kind prefetch counts as 0
+        (jobs / f"{job_id}.json").write_text(
+            json.dumps(_job(job_id, kind="prefetch")))
     _woof("energy", "queue", "init", url, "--lease-s", "5",
           "--heartbeat-s", "1", "--backoff-base-s", "0.5")
     _woof("energy", "queue", "push", url, str(jobs))
@@ -579,10 +652,12 @@ def test_end_to_end_three_packed_gpus_and_a_killed_worker(tmp_path):
     card = summary["packing"]["cards"]["GPU-fake-0000"]
     assert card["slots"] == 4 and card["card_mem_gib"] == 16.0
     status = json.loads(_woof("energy", "queue", "status", url).stdout)
-    assert status["counts"]["done"] == len(E2E_GIB) and status["drained"]
+    assert status["counts"]["done"] == len(E2E_GIB) + len(E2E_PREFETCH)
+    assert status["drained"]
     # Exactly once: every job ran to the end once, A's killed copies never.
     ran = sorted(path.name.split(".")[0] for path in (root / "ran").iterdir())
-    assert ran == sorted(f"p{i:02d}" for i in range(len(E2E_GIB)))
+    assert ran == sorted([f"p{i:02d}" for i in range(len(E2E_GIB))]
+                         + list(E2E_PREFETCH))
     for job_id in killed:
         done = json.loads(store.get(f"done/{job_id}.json")[0])
         assert done["attempt"] >= 2 and done["owner"]["host"]
@@ -596,7 +671,16 @@ def test_end_to_end_three_packed_gpus_and_a_killed_worker(tmp_path):
     alone = [row for row in rows if row["job"] in ("p15", "p16", "p17")
              and row["host"] == "B"]
     for row in alone:
-        assert len(row["present"]) == 1, row
+        assert len([g for g in row["present"] if g != 0]) == 1, row
+    # Dependencies before memory: no dependent started before its
+    # prefetch finished (a killed prefetch never finished).
+    ends = {}
+    for line in (root / "ends.jsonl").read_text().splitlines():
+        end = json.loads(line)
+        ends[end["job"]] = end["at"]
+    for prefetch, dependents in E2E_PREFETCH.items():
+        starts = [row["at"] for row in rows if row["job"] in dependents]
+        assert starts and min(starts) >= ends[prefetch], prefetch
 
 
 # --------------------------------------------------------------------------
