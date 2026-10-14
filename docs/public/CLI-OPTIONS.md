@@ -1093,6 +1093,7 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--heights-m` | heights above ground to sample every site at (comma list; default 10,30,100); turbine hub heights are added |
+| `--hub-height-step-m M` | round the turbine hub heights added to the output heights to this step (default 10; 0 keeps them to 0.1 m); each site keeps its exact hub height |
 | `--include-towers` | add a site at every power=tower node |
 | `--kinds` | asset kinds to keep (comma list; default all) |
 | `--min-voltage-kv` | drop lines and substations below this voltage |

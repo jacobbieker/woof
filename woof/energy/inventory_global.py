@@ -607,8 +607,10 @@ _USWTDB_TAGS = ("t_state", "t_county", "t_fips", "p_name", "p_year",
 
 
 def _uswtdb_rows(path: Path) -> tuple[list[dict[str, Any]], str]:
-    if path.suffix.lower() == ".json":
-        text, _ = _importers()._read_text(path)
+    # The API has served both JSON and CSV at the same URL, so the content,
+    # not the file name, says which: JSON opens with '[' or '{'.
+    text, _ = _importers()._read_text(path)
+    if text.lstrip()[:1] in ("[", "{"):
         try:
             document = json.loads(text)
         except json.JSONDecodeError as error:
@@ -1833,10 +1835,33 @@ def download(dataset: str, output: str | Path, *, timeout_s: float = 300.0
             if not block:
                 break
             handle.write(block)
+    notes: list[str] = []
+    if dataset == "emodnet":
+        notes += _relabel_crs84(staging)
     staging.replace(output)
     return {"dataset": dataset, "url": url, "output": str(output),
+            "notes": notes,
             "sha256": file_ref(output)["sha256"],
             "retrieved_utc": _importers()._now_utc()}
+
+
+def _relabel_crs84(path: Path) -> list[str]:
+    """EMODnet's GeoServer answers a CRS84 request with longitude-first
+    GeoJSON (RFC 7946 order, checked on 2026-10-14) but labels it
+    ``urn:ogc:def:crs:EPSG::4326``, a latitude-first code the importer
+    rightly refuses.  The request named CRS84, so the label is corrected
+    here, where that is known, and nowhere else."""
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    crs = document.get("crs") if isinstance(document, dict) else None
+    name = ((crs or {}).get("properties") or {}).get("name")
+    if name is None or name == "urn:ogc:def:crs:OGC:1.3:CRS84":
+        return []
+    document["crs"] = {"type": "name", "properties": {
+        "name": "urn:ogc:def:crs:OGC:1.3:CRS84"}}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return [f"relabelled crs {name} to CRS84: the request asked for CRS84 "
+            "and the server writes longitude-first coordinates"]
 
 
 # --------------------------------------------------------------------------

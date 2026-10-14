@@ -321,6 +321,11 @@ def _register_sites(sub) -> None:
                    help="heights above ground to sample every site at "
                         "(comma list; default 10,30,100); turbine hub "
                         "heights are added")
+    p.add_argument("--hub-height-step-m", type=float, default=10.0,
+                   metavar="M",
+                   help="round the turbine hub heights added to the output "
+                        "heights to this step (default 10; 0 keeps them to "
+                        "0.1 m); each site keeps its exact hub height")
     p.add_argument("--include-towers", action="store_true",
                    help="add a site at every power=tower node")
     p.add_argument("--pv-grid-m", type=positive_float, default=None,

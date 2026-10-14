@@ -819,3 +819,27 @@ def test_cli_import_formats_match_the_importers():
     from woof.energy import importers
 
     assert energy_cli._IMPORT_FORMATS == importers.FORMATS
+
+
+def test_uswtdb_reads_csv_content_whatever_the_file_is_called(tmp_path):
+    # The USGS API now serves CSV at the URL that used to serve JSON.
+    named_json = tmp_path / "uswtdb_download.json"
+    named_json.write_bytes((INVENTORY / "uswtdb_sample.csv").read_bytes())
+    from_csv = inv.import_uswtdb(INVENTORY / "uswtdb_sample.csv")
+    assert ([a.asset_id for a in inv.import_uswtdb(named_json).assets]
+            == [a.asset_id for a in from_csv.assets])
+
+
+def test_emodnet_download_relabels_the_geoserver_crs84_answer(tmp_path):
+    document = json.loads((INVENTORY / "emodnet_sample.geojson").read_text())
+    document["crs"] = {"type": "name", "properties": {
+        "name": "urn:ogc:def:crs:EPSG::4326"}}
+    path = tmp_path / "emodnet.json"
+    path.write_text(json.dumps(document))
+    notes = inv._relabel_crs84(path)
+    assert notes and "CRS84" in notes[0]
+    relabelled = json.loads(path.read_text())
+    assert relabelled["crs"]["properties"]["name"] == \
+        "urn:ogc:def:crs:OGC:1.3:CRS84"
+    assert relabelled["features"] == document["features"]
+    assert inv._relabel_crs84(path) == []

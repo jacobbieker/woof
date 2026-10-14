@@ -259,10 +259,16 @@ it unchanged.
   duplicate site, not a lost farm.
 - Phases of one project that GEM stores under different location IDs stay
   separate plants.
-- `woof energy sites` adds every distinct turbine hub height (rounded to
-  0.1 m) to the set-wide `heights_m`. A world inventory has hundreds of
-  distinct heights. Planners that sample on model levels should read the
-  per-site `hub_height_m`, not rely on `heights_m` staying short.
+- `woof energy sites` adds the turbines' hub heights to the set-wide
+  `heights_m` rounded to `--hub-height-step-m` (default 10 m), so a world
+  inventory's hundred-odd distinct heights become about a dozen output
+  heights. Each site keeps its exact `hub_height_m`, which the products
+  interpolate to; `--hub-height-step-m 0` restores the 0.1 m rounding.
+- `woof energy inventory download --dataset uswtdb` saves whatever the
+  USGS API serves (CSV as of 2026-10); the importer reads the content, so the
+  file name does not matter. `--dataset emodnet` asks EMODnet's WFS for
+  CRS84; its GeoServer writes longitude-first GeoJSON but labels it
+  `urn:ogc:def:crs:EPSG::4326`, so the download relabels it CRS84 and says so.
 - Scale: the merge does per-asset bookkeeping with one KD-tree per pass.
   A synthetic world-sized input (300k OSM-like turbines, 70k USWTDB-like
   turbines, 30k GEM-like plants) merged in about 20 s on one core, peaking
