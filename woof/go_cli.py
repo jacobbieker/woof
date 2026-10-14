@@ -4172,6 +4172,21 @@ def _require_forecast_device() -> None:
             checked.detail + ("\n" + checked.remedy if checked.remedy else "")))
 
 
+def _forecast_memory_refusal(gate: dict, *, prepare_only: bool) -> None:
+    """Refuse a forecast the card cannot hold; under --prepare-only, say so.
+
+    The gate prices the forecast, and --prepare-only starts none, so its
+    verdict is a warning about the forecast this bundle is for rather than
+    a refusal of the preparation.  Breakage it prevents: a continuation's
+    prepare-only producer refused while the resumed forecast held the card.
+    """
+    if not prepare_only:
+        raise GoRefusal(memory_refusal_text(gate))
+    print("warning: the forecast these inputs are for does not fit this card "
+          "now; --prepare-only starts no forecast, so preparation continues.",
+          file=sys.stderr)
+
+
 def failed_line(fields: dict, *, explain: bool) -> str:
     """What ``woof go`` prints for a plan run's ``failed`` event, before a stage's log tail.
 
@@ -4205,6 +4220,14 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
 
     prepared_root = getattr(args, "prepared_root", None)
     declared_inputs = "case_data" in payload and prepared_root is None
+    prepare_only = bool(getattr(args, "prepare_only", False))
+    if prepare_only and (declared_inputs or prepared_root is not None
+                         or getattr(args, "restart", None) is not None
+                         or getattr(args, "wps_namelist", None) is not None):
+        raise GoRefusal(
+            "--prepare-only fetches and prepares a [fetch] source's inputs; "
+            "[case_data], --prepared-root, --restart and --wps-namelist name "
+            "inputs that already exist. Next: drop --prepare-only.")
     if declared_inputs and args.data_dir is not None:
         raise GoRefusal(
             "This config names its input files directly, so --data-dir is unused. "
@@ -4307,6 +4330,10 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
             options[key] = str(Path(value).resolve())
     if getattr(args, "input_cycle", None) is not None:
         options["input_cycle"] = args.input_cycle
+    if prepare_only:
+        # The run plan stops at the prepared bundle's seal: no forecast
+        # and no render (runplan._RUN_OPTION_DEFAULTS["prepare_only"]).
+        options["prepare_only"] = True
     if getattr(args, "supplement", None):
         from woof.launch_supplements import bindings
         options["supplement"] = bindings(args.supplement, base=Path.cwd())
@@ -4334,7 +4361,11 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
               if bundle is not None else
               ["prepare", "forecast"] if declared_inputs and plan.fetch_arguments is None
               else ["fetch", "prepare", "forecast"])
-    if str(options["render_products"]).strip().lower() != "none":
+    if prepare_only:
+        # What this launch runs, and nothing it does not.  It printed
+        # "fetch -> prepare -> forecast" and then ran that forecast.
+        stages = [stage for stage in stages if stage != "forecast"]
+    elif str(options["render_products"]).strip().lower() != "none":
         stages.append("render")
     print(f"go: {source}, {len(exp.domains)} domain(s); " + " -> ".join(stages))
     pinned_line = (transport_note(pinned, pinned_from, fetch.get("transport"))
@@ -4369,16 +4400,18 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
               *([] if section is None else [f"--section={section}"]),
               *([] if keep is None else ["--keep-checkpoints", str(keep)]),
               *(["--run-stamp", "off"] if not stamp else []),
-              *(["--no-memory-gate"] if args.no_memory_gate else [])]))
+              *(["--no-memory-gate"] if args.no_memory_gate else []),
+              *(["--prepare-only"] if prepare_only else [])]))
         return 0
     capabilities.require_for_command("go")
-    _require_forecast_device()
+    if not prepare_only:
+        _require_forecast_device()
     if bundle is None and not getattr(args, "no_memory_gate", False):
         gate = memory_gate({"config": config, "source": source,
                             "cadence": fetch.get("cadence")}, experiment=exp)
         print(f"go: memory -- {gate['verdict']}")
         if gate["refuse"]:
-            raise GoRefusal(memory_refusal_text(gate))
+            _forecast_memory_refusal(gate, prepare_only=prepare_only)
         if gate["warn"]:
             print("warning: memory admission has limited headroom or an "
                   f"unmeasured phase; see woof check {_quote(config)} --explain.",
@@ -4398,7 +4431,7 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
     else:
         print("go: existing prepared inputs; restore memory and payload checks "
               "run in the simulation runner")
-    if str(args.render_products or "").strip().lower() != "none":
+    if not prepare_only and str(args.render_products or "").strip().lower() != "none":
         missing = render_extra_missing()
         if missing is not None:
             from woof.explain import layered
@@ -4456,10 +4489,12 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
                 if _first_showing(said):
                     print(said, file=errors, flush=True)
             elif event == "completed":
+                completed.update(fields.get("summary") or {})
                 print(f"go: complete. Output: {output}", file=terminal, flush=True)
             return record
 
     output_lock = threading.RLock()
+    completed: dict = {}
 
     class LaunchOutput(io.TextIOBase):
         # Every line goes to the log and each advisory reaches the
@@ -4529,7 +4564,19 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
                             contextlib.redirect_stderr(LaunchOutput(errors, log, "stderr")), \
                             source_cli.redirect_adapter_output(sys.stdout, sys.stderr):
                         code = runplan.execute_plan(plan, events=events)
-                        return 74 if log.failure is not None else code
+                        if log.failure is not None:
+                            return 74
+                        if prepare_only and code == 0:
+                            prepared = completed.get("prepared_root")
+                            if not prepared:
+                                print("go: the preparation completed without naming "
+                                      f"its prepared_root.\nDetails: {log_path}",
+                                      file=errors, flush=True)
+                                return 1
+                            print(json.dumps({"status": "PREPARED",
+                                              "prepared_root": prepared}, sort_keys=True),
+                                  file=terminal, flush=True)
+                        return code
                 finally:
                     finished.set()
                     worker.join()
@@ -4797,6 +4844,9 @@ def go_main(args, *, observer=None) -> int:
     if getattr(args, "command", None) == "ensemble" and request is None and Path(args.config).is_file():
         raise GoRefusal("ensemble requires --members N or [ensemble].members in CONFIG")
     if getattr(args, "restart_roster", None) is not None:
+        if getattr(args, "prepare_only", False):
+            raise GoRefusal("--restart-roster resumes a forecast, and "
+                            "--prepare-only starts none. Next: drop one of them.")
         if request is None:
             raise GoRefusal("--restart-roster requires the original ensemble configuration")
         from woof.ensemble.restart_roster import resume_prepared_roster
@@ -5052,8 +5102,6 @@ def _go_recipe(args, request, *, observer=None) -> int:
     if cycle is not None:
         config, payload = _at_flag_cycle(args, config, payload, cycle)
     _extend_outdir(args, config, payload)
-    if getattr(args, "prepare_only", False):
-        return _prepare_only_launch(args, config=config, payload=payload, observer=observer)
     with _checkpoint_retention(getattr(args, "keep_checkpoints", None)):
         return recipe_door.run_recipe_ensemble(args, request, observer=observer,
                                                options=posting)
@@ -5118,54 +5166,6 @@ def _go_launch(args, *, observer=None) -> int:
     return _go_prepared_main(args, observer=observer)
 
 
-def _prepare_only_launch(args, *, config, payload, observer=None):
-    """Run the source's ordinary live producer without starting a forecast."""
-    import hashlib
-    from woof import runplan
-    from woof.experiment import load_experiment
-    from woof.ensemble.runtime_context import current_session
-    if any(getattr(args, key, None) is not None for key in
-           ("restart", "prepared_root", "restart_roster")) or current_session() is not None:
-        raise GoRefusal("--prepare-only requires one source trajectory without a restart")
-    fetch = payload.get("fetch") or {}
-    chain = runplan.prepared_chain_for_source(str(fetch.get("source")),
-                                            source_root=fetch.get("source_root"))
-    if chain == "prepared:go":
-        return _go_prepared_main(args, observer=observer)
-    if chain not in ("prepared:hrrr", "prepared:staged"):
-        raise GoRefusal("--prepare-only requires a native prepared source route")
-    output = Path(args.outdir or config.parent / (config.stem + "-prepare"))
-    options = {key: str(Path(getattr(args, key)).resolve()) for key in
-               ("data_dir", "geog_root") if getattr(args, key, None) is not None}
-    if getattr(args, "transport", None) is not None:
-        options["transport"] = args.transport
-    if getattr(args, "whole_cycle", False):
-        options["as_posted"] = False
-    if getattr(args, "late_after_minutes", None) is not None:
-        options["late_after_minutes"] = args.late_after_minutes
-    if getattr(args, "supplement", None):
-        from woof.launch_supplements import bindings
-        options["supplement"] = bindings(args.supplement, base=Path.cwd())
-    raw = {"schema": runplan.PLAN_SCHEMA, "name": config.stem, "route": "prepared",
-           "config": {"path": str(config.resolve())}, "output_root": str(output.resolve()),
-           "run_options": options}
-    plan = runplan.build_plan(raw, source="woof go --prepare-only", base_dir=config.parent,
-                             sha256=hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest())
-    events = None
-    if observer is None:
-        events = runplan.EventStream(output / "preparation-events.jsonl")
-        observer = runplan.RunObserver(events)
-    operation = runplan._hrrr_chain if chain == "prepared:hrrr" else runplan._staged_chain
-    try:
-        result = operation(plan, config_path=config, exp=load_experiment(config),
-                           observer=observer, run_dir=output, prepare_only=True)
-    finally:
-        if events is not None:
-            events.close()
-    print(json.dumps({"status": "PREPARED", "prepared_root": result["prepared_root"]}, sort_keys=True))
-    return 0
-
-
 def _disk_admission(plan: dict, args) -> None:
     """Refuse, before the run folder is claimed or a byte is fetched, a run its disks cannot hold.
 
@@ -5219,6 +5219,13 @@ def _scratch_caution(message: str, detail: str, folder: str | None) -> None:
     """Say, before the download, that the preparation's frame stream may not fit its disk."""
 
     print(f"go: WARNING -- {message}" + (f"  {detail}" if detail else ""))
+
+
+def _prepare_only_line(args, plan: dict) -> None:
+    """The GFS chain's plan line under ``--prepare-only``: the stages it runs."""
+    if getattr(args, "prepare_only", False):
+        print(f"go: {plan['source']}, {plan.get('domains', 1)} domain(s); "
+              "fetch -> prepare")
 
 
 def _go_prepared_main(args, *, observer=None) -> int:
@@ -5314,6 +5321,7 @@ def _go_prepared_main(args, *, observer=None) -> int:
         print(f"go: {plan['config']} -- source {plan['source']}, cycle "
               f"{plan['cycle']}, {plan['hours']} h, "
               f"{_physics_words(plan)}{_lead_note(plan)}")
+        _prepare_only_line(args, plan)
         print(_run_folder_note(plan))
         pinned = transport_note(plan.get("transport"), plan.get("transport_from"),
                                 plan.get("transport_table"))
@@ -5358,6 +5366,9 @@ def _go_prepared_main(args, *, observer=None) -> int:
                   "3:\n     " + whole)
         else:
             print("4. prepare\n     " + whole)
+        if getattr(args, "prepare_only", False):
+            # --prepare-only stops at the seal of step 4.
+            return 0
         # Branched the way the real run branches in `_run_forecast`: a
         # tree binds ONE preparation receipt, so printing the
         # single-domain three-digest relay for it would show a command
@@ -5417,6 +5428,7 @@ def _go_prepared_main(args, *, observer=None) -> int:
     print(f"go: {plan['config']} -- source {plan['source']}, cycle "
           f"{plan['cycle']}, {plan['hours']} h, {_physics_words(plan)}"
           f"{_lead_note(plan)}")
+    _prepare_only_line(args, plan)
     pinned = transport_note(plan.get("transport"), plan.get("transport_from"),
                             plan.get("transport_table"))
     if pinned is not None:
@@ -5453,7 +5465,8 @@ def _go_prepared_main(args, *, observer=None) -> int:
             gate = memory_gate(plan)
             print(f"go: memory -- {gate['verdict']}")
             if gate["refuse"]:
-                raise GoRefusal(memory_refusal_text(gate))
+                _forecast_memory_refusal(
+                    gate, prepare_only=getattr(args, "prepare_only", False))
             if gate["warn"]:
                 print("go: WARNING -- that is above the reserved budget, "
                       "though it fits the free VRAM measured just now.  "
@@ -5464,7 +5477,8 @@ def _go_prepared_main(args, *, observer=None) -> int:
             if gate.get("decode_warning"):
                 print(f"go: WARNING -- {gate['decode_warning']}.")
 
-        _require_forecast_device()
+        if not getattr(args, "prepare_only", False):
+            _require_forecast_device()
         # Same rule as the memory gate, same side of the download.
         geography = geography_refusal(geog_root)
         if geography is not None:
@@ -5634,8 +5648,12 @@ def _go_prepared_main(args, *, observer=None) -> int:
                 raise
 
         def head_ready(head_sha256):
-            print("go: preparation head published; the forecast starts "
-                  "while the remaining boundary intervals are prepared",
+            print("go: preparation head published; "
+                  + ("--prepare-only, so no forecast starts and the remaining "
+                     "boundary intervals are prepared to the seal"
+                     if getattr(args, "prepare_only", False) else
+                     "the forecast starts while the remaining boundary "
+                     "intervals are prepared"),
                   flush=True)
             if hosted_relay is not None:
                 # The head read every start need: a lead the fetch asks for
@@ -5908,7 +5926,8 @@ def register_cli(subparsers) -> None:
                         help="continue an existing checkpoint; prepared-cache runs "
                              "also need --prepared-root, and use fresh output")
     parser.add_argument("--prepare-only", action="store_true",
-                        help="fetch and stream prepared inputs without starting a forecast")
+                        help="fetch and prepare inputs, stop once the prepared bundle is "
+                             "sealed and print its prepared_root; no forecast starts")
     parser.add_argument("--prepared-root", type=Path, default=None, metavar="DIR",
                         help="run this existing prepared bundle without fetch or "
                              "preparation; add --restart to continue its checkpoint")

@@ -473,6 +473,20 @@ Fixed:
   the same level range as `nlev`. Before, they skipped the check, so an
   over-deep column passed config validation and was refused only at the
   first physics call.
+- `woof go CONFIG --prepare-only` now stops once the prepared bundle is
+  sealed on every prepared route, prints `{"status": "PREPARED",
+  "prepared_root": ...}` and exits 0. Before, a config on the staged
+  route (ICON, IFS and the other `woof prep` sources) or the native HRRR
+  route was sent to the full run plan: it printed `fetch -> prepare ->
+  forecast`, prepared, sealed and then ran the whole forecast. The run
+  plan now carries the stop as `run_options.prepare_only`, so the launch
+  keeps its gates, `launch.log`, events and shared download cache. The
+  plan line reads `fetch -> prepare`, and `--dry-run` with it lists only
+  those stages. `--prepare-only` with `[case_data]`, `--prepared-root`,
+  `--restart`, `--wps-namelist` or `--restart-roster` is refused, since
+  those inputs already exist. Under `--prepare-only` the forecast memory
+  gate warns instead of refusing and the forecast-device check is
+  skipped, since no forecast starts.
 
 ## 1.0.3
 

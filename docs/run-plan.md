@@ -412,6 +412,7 @@ test rather than falling through to whatever the chain happened to do.
 | `cycle` | `null` | `woof go --cycle`: the cycle the run starts from (`YYYY-MM-DDTHH`, or `latest`, resolved once under the run's posting rule); wins over the config's `[fetch] cycle` or the intent's `cycle`. A `config.path` configuration is re-timed (start time, delayed nests, WPS and route namelists) into `<run_dir>/cycle-config/`; an inline one is refused. A site schedule names the cycle rather than launching `latest` (`prepared` route only) |
 | `physics_profile` | `null` | passed to the HRRR preparer when stated (`prepared` route only) |
 | `health_debug` | `false` | enable debug phase health attribution |
+| `prepare_only` | `false` | `woof go --prepare-only`: fetch and prepare, then complete at the prepared bundle's seal with no forecast or render. The `completed` event's `summary` carries `prepared_root` and `forecast_started: false`. Refused with `prepared_root` or `restart` (`prepared` route only) |
 
 `run-plan` integrates in **this** process rather than re-executing under
 woof's own supervisor, so the pid in the manifest is the pid doing the
