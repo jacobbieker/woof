@@ -8,8 +8,14 @@ Inside a masked child, CUDA device ordinal zero is therefore the selected
 process-local device; isolation does not depend on the import state of the
 calling ``woof.cli`` process.
 
-Each run gets independent output, temporary, CuPy-cache, and driver-JIT-cache
-directories.  A versioned JSON summary is published from a fully written
+Each run gets independent output and temporary directories.  GPU kernel
+caches (CuPy's and the CUDA driver's JIT cache) are shared and persistent
+by default (``[cache] kernels`` / ``--kernel-cache``,
+:class:`woof.gpu_packing.KernelCache`), so only the first run on a machine
+compiles; ``per-run`` restores one new, empty cache per run.  A module-form
+run that names a prepared root but no binding digests is bound at plan load
+exactly as ``woof sim`` binds that root (:func:`_bind_prepared_runner`).
+A versioned JSON summary is published from a fully written
 sibling through atomic create-only publication after every child has finished
 (or after the parent is interrupted).  Interrupts do not terminate children:
 a supervised ``woof run`` may itself own a fresh CUDA worker, so killing only
@@ -35,6 +41,7 @@ starts.  ``--mps`` adds the CUDA MPS control daemon
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import importlib
 import json
@@ -54,8 +61,9 @@ from typing import Callable, Mapping, Sequence
 
 from woof.filesystem_paths import publish_new
 from woof.gpu_packing import (AUTO_MAX_SLOTS_PER_GPU, DEFAULT_MEM_MARGIN_GIB,
-                              SLOTS_AUTO, MPSUnavailable, MpsDaemon,
-                              parse_count_or_auto)
+                              SLOTS_AUTO, KernelCache, MPSUnavailable,
+                              MpsDaemon, parse_count_or_auto,
+                              parse_kernel_cache)
 from woof.supervisor import (GPUFileLock, GPUIdentity, GPU_LOCK_ROOT_ENV,
                               SHARED_ADMISSION_BASIS,
                               SHARED_INPUT_AUTHORITY_ROOT_ENV,
@@ -87,8 +95,37 @@ _NON_FORECAST_ARGUMENTS = frozenset({
     "--materialize-authorities", "--show-capabilities",
 })
 _TOP_LEVEL_KEYS = frozenset(
-    {"schema", "summary", "preflight", "devices", "run"})
+    {"schema", "summary", "preflight", "devices", "cache", "run"})
 _DEVICES_KEYS = frozenset({"runs_per_gpu", "mem_margin_gib", "mps"})
+_CACHE_KEYS = frozenset({"kernels"})
+#: The digest options each prepared runner binds its preparation with.
+#: Their values are lowercase SHA-256 digests, never paths, so they are
+#: outside the ``{inputN}`` path rules.
+_RUNNER_BINDING_FLAGS = {
+    "woof.prepared_single_domain_forecast": (
+        "--prepared-head-sha256", "--proof-sha256",
+        "--source-manifest-sha256", "--prepared-content-sha256"),
+    "woof.prepared_domain_tree_forecast": (
+        "--prepared-head-sha256", "--preparation-receipt-sha256",
+        "--experiment-config-sha256"),
+}
+_HEAD_BINDING_FLAG = "--prepared-head-sha256"
+_SEALED_BINDING_FLAGS = {
+    "woof.prepared_single_domain_forecast": (
+        "--proof-sha256", "--prepared-content-sha256"),
+    "woof.prepared_domain_tree_forecast": ("--preparation-receipt-sha256",),
+}
+_TREE_RUNNER = "woof.prepared_domain_tree_forecast"
+#: How a module run's preparation binding is derived, verbatim in receipts.
+PREPARED_BINDING_BASIS = (
+    "woof.stage_cli.sim_command's binding of the declared --prepared-root, "
+    "the one `woof sim` and `woof go --prepared-root` give the same root: "
+    "a sealed preparation binds its proof (single domain: proof, source "
+    "manifest and prepared-cache digests; tree: its preparation receipt "
+    "and the experiment config digest), a chained preparation still being "
+    "prepared binds its head. Digests the plan gives are kept and must "
+    "equal these; a given --prepared-head-sha256 on a sealed chained "
+    "preparation must be the head its proof records")
 #: Seconds between re-measurements of a card while the run at the head of
 #: its queue waits: a sibling finishing re-evaluates at once, this catches
 #: memory freed by processes this multi-run does not own.
@@ -165,6 +202,12 @@ class RunSpec:
     arguments: tuple[str, ...]
     inputs: tuple[Path, ...]
     input_bindings: tuple[InputBinding, ...] = ()
+    #: The argv template as the plan wrote it; ``arguments`` is the one
+    #: launched (with any derived binding digests inserted).
+    plan_arguments: tuple[str, ...] | None = None
+    #: What :func:`_bind_prepared_runner` derived and verified.
+    prepared_binding: Mapping[str, object] | None = field(
+        default=None, compare=False, hash=False)
 
     @property
     def log(self) -> Path:
@@ -239,6 +282,7 @@ class MultiRunPlan:
     preflight: str
     runs: tuple[RunSpec, ...]
     packing: PackingRequest = PackingRequest()
+    kernel_cache: KernelCache = KernelCache()
 
 
 @dataclass(frozen=True)
@@ -246,13 +290,16 @@ class PlannedRun:
     """A plan entry bound to one physical GPU.
 
     ``environment_overrides`` are applied last by :func:`child_environment`
-    (a packed plan's CUDA MPS variables)."""
+    (a packed plan's CUDA MPS variables).  ``kernel_cache`` says whether
+    the child shares the persistent GPU kernel cache (the default) or
+    starts from its own empty ``<cache>/cupy`` and ``<cache>/cuda``."""
 
     spec: RunSpec
     gpu: GPUIdentity
     lock_root: Path | None = None
     input_authority_store: Path | None = None
     environment_overrides: tuple[tuple[str, str], ...] = ()
+    kernel_cache: KernelCache = KernelCache()
 
 
 @dataclass
@@ -845,9 +892,386 @@ def packing_request(plan_request: PackingRequest,
     return request
 
 
+def _plan_kernel_cache(value: object, base: Path) -> KernelCache:
+    """The plan's optional ``[cache]`` table; ``kernels`` defaults shared."""
+
+    if value is None:
+        return KernelCache()
+    if not isinstance(value, dict):
+        raise ValueError("multi-run plan [cache] must be a TOML table")
+    unknown = sorted(set(value) - _CACHE_KEYS)
+    if unknown:
+        raise ValueError(f"multi-run plan [cache] has unknown keys: "
+                         f"{unknown}; known: {sorted(_CACHE_KEYS)}")
+    if "kernels" not in value:
+        return KernelCache()
+    return parse_kernel_cache(
+        value["kernels"], flag="[cache] kernels", base=base,
+        source="plan [cache]")
+
+
+def kernel_cache_request(plan: MultiRunPlan,
+                         args: argparse.Namespace | None = None
+                         ) -> KernelCache:
+    """The plan's ``[cache] kernels`` with ``--kernel-cache`` laid over it.
+
+    A shared directory must lie outside every path the plan owns (it is
+    written by every child and kept after them); refused by name if not.
+    """
+
+    request = plan.kernel_cache
+    flag = getattr(args, "kernel_cache", None)
+    if flag is not None:
+        request = parse_kernel_cache(
+            flag, flag="--kernel-cache", base=Path.cwd(),
+            source="--kernel-cache")
+    if request.directory is not None:
+        _validate_outside_plan_paths(
+            plan, request.directory, "shared kernel cache",
+            "give [cache] kernels / --kernel-cache a directory outside every "
+            "plan, input, summary, output, scratch, and cache path")
+    return request
+
+
+def _is_digest(value: object) -> bool:
+    return (isinstance(value, str) and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value))
+
+
+@functools.lru_cache(maxsize=None)
+def _runner_option_strings(module: str) -> frozenset[str]:
+    """Every option string the prepared runner's own parser accepts."""
+
+    runner = importlib.import_module(module)
+    return frozenset(runner.build_parser()._option_string_actions)
+
+
+def _given_binding(module: str, arguments: Sequence[str],
+                   label: str) -> dict[str, str]:
+    """The binding digests a run's argv gives, in their one canonical form.
+
+    ``--flag=VALUE``, an abbreviation argparse would expand into a binding
+    flag, a repeated flag, a missing value or a value that is not a
+    lowercase SHA-256 digest is refused by name: a digest the runner would
+    read differently from this reading is never inserted beside.
+    """
+
+    flags = _RUNNER_BINDING_FLAGS[module]
+    known = _runner_option_strings(module)
+    for argument in arguments:
+        if not argument.startswith("--") or argument == "--":
+            continue
+        option = argument.split("=", 1)[0]
+        if option in flags and "=" in argument:
+            raise ValueError(
+                f"{label} gives {option} as {argument!r}; use the separate "
+                f"form {option!r}, VALUE")
+        if option not in known:
+            expanded = [flag for flag in flags if flag.startswith(option)]
+            if expanded:
+                raise ValueError(
+                    f"{label} abbreviates {expanded} as {option!r}; spell "
+                    "the binding option out")
+    values: dict[str, str] = {}
+    for flag in flags:
+        positions = [index for index, argument in enumerate(arguments)
+                     if argument == flag]
+        if len(positions) > 1:
+            raise ValueError(
+                f"{label} gives {flag} {len(positions)} times; at most once")
+        if not positions:
+            continue
+        index = positions[0]
+        if index + 1 >= len(arguments):
+            raise ValueError(f"{label} {flag} is missing its value")
+        value = arguments[index + 1]
+        if not _is_digest(value):
+            raise ValueError(
+                f"{label} {flag} must be a lowercase SHA-256 digest (64 hex "
+                f"characters), got {value!r}; omit it and multi-run derives "
+                "it from the prepared root")
+        values[flag] = value
+    return values
+
+
+def _binding_from_command(command: Sequence[str],
+                          flags: Sequence[str]) -> dict[str, str]:
+    """The binding digests a composed runner command carries, in order."""
+
+    found = {}
+    for index, token in enumerate(command[:-1]):
+        if token in flags:
+            found[token] = str(command[index + 1])
+    return found
+
+
+def _execution_input_check(
+        bundle: Mapping[str, object], key: str, declared: Path,
+        declared_sha256: str | None, label: str,
+        prepared_root: Path) -> dict[str, object]:
+    """The declared config/namelist held to the preparation's own record.
+
+    A mapped preparation records the experiment config and WPS namelist it
+    was prepared from in ``execution_inputs`` (path, bytes, sha256); its
+    runner refuses any other bytes, after the card was admitted.  Refused
+    here by name instead, pointing at the file that does match when one
+    is still on disk.  Routes whose proof records no such entry bind the
+    file through their own source manifest; that is recorded, not checked.
+    """
+
+    payload = bundle.get("payload")
+    execution = (payload.get("execution_inputs")
+                 if isinstance(payload, Mapping) else None)
+    recorded = (execution.get(key) if isinstance(execution, Mapping)
+                else None)
+    recorded_sha256 = (recorded.get("sha256")
+                       if isinstance(recorded, Mapping) else None)
+    row: dict[str, object] = {
+        "declared": str(declared), "declared_sha256": declared_sha256,
+        "recorded_path": (recorded.get("path")
+                          if isinstance(recorded, Mapping) else None),
+        "recorded_sha256": recorded_sha256,
+    }
+    if not _is_digest(recorded_sha256):
+        row.update(status="NOT_RECORDED", basis=(
+            f"the preparation document records no execution_inputs.{key}; "
+            "the runner binds this file through its own source manifest"))
+        return row
+    if declared_sha256 == recorded_sha256:
+        row["status"] = "MATCH"
+        return row
+    candidates = []
+    recorded_path = row["recorded_path"]
+    if isinstance(recorded_path, str) and recorded_path:
+        candidates.append(Path(recorded_path))
+    own = {"experiment_config": ("experiment.toml",),
+           "wps_namelist": ("namelist.wps",)}.get(key, ())
+    candidates.extend(prepared_root / name for name in own)
+    matching = []
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and _file_sha256(candidate) \
+                    == recorded_sha256:
+                matching.append(str(candidate))
+        except OSError:
+            continue
+    where = (f" {matching[0]} still holds those bytes: declare it as this "
+             "run's input instead" if matching else
+             f" No file holding those bytes was found (the record names "
+             f"{recorded_path!r}); prepare again from the file this run "
+             "declares, or restore the one it was prepared from")
+    raise ValueError(
+        f"{label}: declared {key.replace('_', ' ')} {declared} (sha256 "
+        f"{declared_sha256}) is not the file the preparation at "
+        f"{prepared_root} was made from: its document records sha256 "
+        f"{recorded_sha256} in execution_inputs.{key}, and the runner "
+        f"refuses any other bytes.{where}.")
+
+
+def _bind_prepared_runner(spec: RunSpec) -> RunSpec:
+    """Bind a module run to its preparation the way ``woof sim`` does.
+
+    Reads the declared ``--prepared-root`` (:func:`woof.stage_cli.
+    resolve_bundle`, or the live head of a chained preparation still being
+    prepared, :func:`woof.stage_cli.unsealed_head_bundle`) and composes the
+    runner command with :func:`woof.stage_cli.sim_command`; its binding
+    digests (:data:`PREPARED_BINDING_BASIS`) are the derived ones.
+
+    What is pinned:
+
+    * no digest given: every derived digest is inserted after the
+      ``--prepared-root`` pair, and the single-domain runner's absent
+      ``--source`` is the bundle's own;
+    * digests given: each is kept and must equal the derived one, or the
+      plan is refused naming flag, given, expected and where it came
+      from.  A given head binding on a sealed chained preparation must be
+      the head its proof records (``boundary_stream.head_sha256``), and is
+      read back through that head's own digest check
+      (:func:`woof.stage_cli.resolve_head_bundle`);
+    * the declared experiment config and WPS namelist must be the bytes
+      the preparation records in ``execution_inputs``
+      (:func:`_execution_input_check`);
+    * a root that cannot be bound is refused here, before any directory is
+      claimed or device touched, with the reason ``woof sim`` gives.
+
+    Digests are values, not paths: the ``{inputN}`` rules are unchanged.
+    """
+
+    assert spec.module is not None
+    from woof import stage_cli
+
+    module = spec.module
+    label = f"run {spec.name!r}"
+    flags = _RUNNER_BINDING_FLAGS[module]
+    given = _given_binding(module, spec.arguments, f"{label} args")
+    rendered = _render_arguments(spec)
+    paths = _runner_path_values(module, rendered, f"{label} args")
+    root = Path(paths["--prepared-root"])
+    config = Path(paths["--experiment-config"])
+    wps_value = paths.get("--wps-namelist")
+    wps = None if wps_value is None else Path(wps_value)
+    layout = "tree" if module == _TREE_RUNNER else "single"
+    try:
+        bundle, live = stage_cli.resolve_sim_bundle(root)
+        if layout == "tree" and bundle["layout"] != "tree":
+            raise ValueError(
+                f"{label}: {bundle['document']} is a single-domain "
+                f"preparation ({bundle['schema']}); its runner is "
+                "woof.prepared_single_domain_forecast")
+
+        def compose(chosen: Mapping[str, object]) -> dict[str, str]:
+            return _binding_from_command(stage_cli.sim_command(
+                chosen, experiment_config=config, wps_namelist=wps,
+                outdir=spec.outdir, runner=layout), flags)
+
+        derived = compose(bundle)
+        head_given = _HEAD_BINDING_FLAG in given
+        sealed_given = [flag for flag in _SEALED_BINDING_FLAGS[module]
+                        if flag in given]
+        if head_given and sealed_given:
+            raise ValueError(
+                f"{label} gives {_HEAD_BINDING_FLAG} and {sealed_given}; a "
+                "prepared forecast binds a head or a sealed proof, not both")
+        expected = derived
+        expected_from = ("derived from the "
+                         + ("live chained head" if live else "sealed")
+                         + f" preparation document {bundle['document']}")
+        if head_given and not live:
+            stream = bundle["payload"].get("boundary_stream")
+            recorded = (stream.get("head_sha256")
+                        if isinstance(stream, Mapping) else None)
+            if not _is_digest(recorded):
+                raise ValueError(
+                    f"{label} gives {_HEAD_BINDING_FLAG}, but "
+                    f"{bundle['document']} is sealed and records no chained "
+                    "head (boundary_stream.head_sha256), so there is no head "
+                    "to bind; omit the binding digests and multi-run binds "
+                    "its proof")
+            if given[_HEAD_BINDING_FLAG] != recorded:
+                raise ValueError(
+                    f"{label} {_HEAD_BINDING_FLAG} {given[_HEAD_BINDING_FLAG]}"
+                    f" is not the head {bundle['document']} records "
+                    f"(boundary_stream.head_sha256 {recorded}); omit the "
+                    "binding digests and multi-run binds the preparation")
+            expected = compose(stage_cli.resolve_head_bundle(root, recorded))
+            expected_from = (
+                f"read from the head {recorded} that {bundle['document']} "
+                "records (boundary-stream/head.json, checked against its "
+                "own digest)")
+        elif sealed_given and live:
+            raise ValueError(
+                f"{label} gives {sealed_given}, but {root} is still being "
+                "prepared and has no sealed document to bind yet; omit the "
+                "binding digests and multi-run binds its head")
+    except (stage_cli.StageRefusal, OSError) as refusal:
+        raise ValueError(
+            f"{label}: the prepared root {root} cannot be bound: "
+            f"{refusal}") from None
+
+    mode = ("prepared_head" if _HEAD_BINDING_FLAG in expected
+            else "sealed_receipt" if layout == "tree" else "sealed_proof")
+    digests = []
+    inserted: list[str] = []
+    for flag in flags:
+        want = expected.get(flag)
+        have = given.get(flag)
+        if have is None:
+            if want is not None:
+                inserted.extend((flag, want))
+                digests.append({"flag": flag, "sha256": want,
+                                "source": "derived", "basis": expected_from})
+            continue
+        if want is None:
+            if mode == "prepared_head" and flag == "--source-manifest-sha256":
+                # An as-posted head names no manifest: it binds its input
+                # plan, which the runner holds the given value to.
+                digests.append({
+                    "flag": flag, "sha256": have, "source": "given",
+                    "basis": ("not verified here: an as-posted head names no "
+                              "source manifest until its seal; the runner "
+                              "holds this value to the head's input plan")})
+                continue
+            raise ValueError(
+                f"{label} gives {flag}, which is not part of the {mode} "
+                f"binding of {root} ({expected_from}); omit it")
+        if have != want:
+            raise ValueError(
+                f"{label} {flag} {have} does not match the preparation: "
+                f"expected {want}, {expected_from}. Omit the binding digests "
+                "and multi-run derives them, or point --prepared-root at the "
+                "preparation these digests name")
+        digests.append({"flag": flag, "sha256": have,
+                        "source": "given, verified", "basis": expected_from})
+
+    arguments = list(spec.arguments)
+    source_record = None
+    if layout == "single":
+        bundle_source = str(bundle["source"])
+        given_source = _runner_option_value(arguments, "--source")
+        if given_source is None:
+            arguments[0:0] = ["--source", bundle_source]
+            source_record = {"value": bundle_source, "source": "derived",
+                             "basis": f"the source {bundle['document']} "
+                                      "names (woof.stage_cli.resolve_bundle)"}
+        elif bundle_source != "mapped" and given_source != bundle_source:
+            raise ValueError(
+                f"{label} --source {given_source!r}, but "
+                f"{bundle['document']} was prepared from {bundle_source!r}; "
+                "omit --source and multi-run takes the bundle's own")
+        else:
+            source_record = {"value": given_source, "source": (
+                "given, verified" if given_source == bundle_source
+                else "given; the bundle names no packaged profile, the "
+                     "runner verifies it")}
+    if inserted:
+        anchor = arguments.index("--prepared-root") + 2
+        arguments[anchor:anchor] = inserted
+
+    by_path = {binding.path: binding for binding in spec.input_bindings}
+    execution_inputs: dict[str, object] = {}
+    for key, path in (("experiment_config", config), ("wps_namelist", wps)):
+        if path is None:
+            continue
+        if layout == "tree":
+            # The tree runner holds the recorded config digest as
+            # preparation identity only: a forecast may extend its stop
+            # time, and its typed per-domain checks compare what changes
+            # the prepared state.  Byte equality would refuse runs it takes.
+            execution_inputs[key] = {
+                "declared": str(path), "status": "NOT_CHECKED",
+                "basis": ("the tree runner binds this config by "
+                          "--experiment-config-sha256 and checks each "
+                          "per-domain setting itself; it need not be the "
+                          "bytes the preparation recorded")}
+            continue
+        binding = by_path.get(path)
+        execution_inputs[key] = _execution_input_check(
+            bundle, key, path, None if binding is None else binding.sha256,
+            label, root)
+    record = {
+        "basis": PREPARED_BINDING_BASIS,
+        "bundle_source": str(bundle["source"]),
+        "digests": digests,
+        "document": str(bundle["document"]),
+        "execution_inputs": execution_inputs,
+        "layout": bundle["layout"],
+        "mode": mode,
+        "prepared_root": str(root),
+        "schema": bundle["schema"],
+        "source_option": source_record,
+        "state": "being_prepared" if live else "sealed",
+    }
+    return replace(spec, arguments=tuple(arguments),
+                   plan_arguments=spec.arguments, prepared_binding=record)
+
+
 def load_plan(path: str | Path, *, summary_override: str | Path | None = None,
               preflight_override: str | None = None) -> MultiRunPlan:
-    """Parse and path-check a versioned TOML plan without touching CUDA."""
+    """Parse and path-check a versioned TOML plan without touching CUDA.
+
+    Module-form runs are bound to their preparation here
+    (:func:`_bind_prepared_runner`), so a plan needs no hand-copied
+    digests and a wrong one is refused before anything is claimed."""
 
     plan_path = Path(path).expanduser().resolve()
     if not plan_path.is_file():
@@ -896,6 +1320,7 @@ def load_plan(path: str | Path, *, summary_override: str | Path | None = None,
             f"{preflight!r}")
 
     packing = _plan_packing(raw.get("devices"))
+    kernel_cache = _plan_kernel_cache(raw.get("cache"), base)
 
     entries = raw.get("run")
     if not isinstance(entries, list) or not entries:
@@ -976,10 +1401,14 @@ def load_plan(path: str | Path, *, summary_override: str | Path | None = None,
                 binding_cache[path] = _bind_input(
                     path, capture_bytes=path in config_paths)
             bindings.append(binding_cache[path])
-        bound_runs.append(replace(run, input_bindings=tuple(bindings)))
+        bound = replace(run, input_bindings=tuple(bindings))
+        if bound.module is not None:
+            bound = _bind_prepared_runner(bound)
+        bound_runs.append(bound)
     return MultiRunPlan(
         plan_path, plan_sha256, plan_signature_after, summary,
-        input_authority_store, preflight, tuple(bound_runs), packing)
+        input_authority_store, preflight, tuple(bound_runs), packing,
+        kernel_cache)
 
 
 def resolve_devices(
@@ -1023,7 +1452,8 @@ def resolve_devices(
                 "runs_per_gpu or --runs-per-gpu N|auto)")
         used.setdefault(gpu.uuid, spec.name)
         resolved.append(PlannedRun(
-            spec, gpu, lock_root, plan.input_authority_store))
+            spec, gpu, lock_root, plan.input_authority_store,
+            kernel_cache=plan.kernel_cache))
     return tuple(resolved)
 
 
@@ -1086,7 +1516,12 @@ def _validate_lock_root_isolation(
 
 def child_environment(run: PlannedRun,
                       parent: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Copy the parent environment and isolate only device/temp/cache state."""
+    """Copy the parent environment and isolate device/temp state.
+
+    TMP/TEMP/TMPDIR are always the run's own scratch.  The GPU kernel
+    caches follow ``run.kernel_cache``: shared (inherited, or a plan-level
+    directory) by default, or the run's own ``<cache>/cupy`` and
+    ``<cache>/cuda`` with ``per-run``."""
 
     from woof.config_authority import (CONFIG_PAYLOAD_ENV,
                                         CONFIG_SHA256_ENV,
@@ -1098,10 +1533,9 @@ def child_environment(run: PlannedRun,
     lock_root = (run.lock_root if run.lock_root is not None
                  else _parent_lock_root(environment))
     scratch = str(run.spec.scratch_dir)
+    run.kernel_cache.apply(environment, run.spec.cache)
     environment.update({
         "CUDA_VISIBLE_DEVICES": run.gpu.uuid,
-        "CUDA_CACHE_PATH": str(run.spec.cache / "cuda"),
-        "CUPY_CACHE_DIR": str(run.spec.cache / "cupy"),
         GPU_LOCK_ROOT_ENV: str(lock_root),
         "TEMP": scratch,
         "TMP": scratch,
@@ -1346,6 +1780,35 @@ def _new_process_group_kwargs() -> dict[str, object]:
     return {"start_new_session": True}
 
 
+def _last_log_line(path: Path, limit: int = 8192) -> str | None:
+    """The last non-empty line of a child's log, or None (advisory)."""
+
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - limit))
+            tail = stream.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    lines = [line.strip() for line in tail.splitlines() if line.strip()]
+    return lines[-1][:400] if lines else None
+
+
+def _print_failure_line(phase: str, record: ProcessRecord) -> None:
+    """Say why a child failed where the operator is looking.
+
+    A refusal inside a child (a wrong digest, a missing input) used to
+    show only as ``exit=2`` here, its reason buried in the run log."""
+
+    if record.exit_code in (None, 0):
+        return
+    line = _last_log_line(record.log)
+    if line is not None:
+        print(f"multi-run {phase} {record.name}: last log line: {line}",
+              file=sys.stderr, flush=True)
+
+
 def _execute_group(
         runs: Sequence[PlannedRun], *, phase: str,
         command_for: Callable[[PlannedRun], tuple[str, ...]],
@@ -1426,6 +1889,7 @@ def _execute_group(
                     f"{record.completed_at_utc} exit={record.exit_code} "
                     f"duration={record.duration_seconds:.3f}s "
                     f"log={record.log}", flush=True)
+                _print_failure_line(phase, record)
             active = remaining
             if active:
                 time.sleep(poll_seconds)
@@ -2228,6 +2692,7 @@ def _execute_packed_group(
                         f"{record.completed_at_utc} exit={record.exit_code} "
                         f"duration={record.duration_seconds:.3f}s "
                         f"log={record.log}", flush=True)
+                    _print_failure_line(phase, record)
                 live[gpu_uuid] = remaining
             if not progressed and (
                     any(queues.values())
@@ -2317,13 +2782,25 @@ def _prepare_directories(
             f"{plan.input_authority_store}: {error}; no child was launched") \
             from error
 
+    try:
+        # A shared kernel-cache directory persists across plans: created
+        # if absent, never claimed (nothing here may remove it).
+        plan.kernel_cache.prepare()
+    except OSError as error:
+        raise ValueError(
+            f"could not create the shared kernel cache "
+            f"{plan.kernel_cache.directory}: {error}; no child was "
+            "launched") from error
     for run in plan.runs:
         directories = [
             ("scratch", run.scratch_dir),
             ("cache", run.cache),
-            ("CuPy cache", run.cache / "cupy"),
-            ("CUDA cache", run.cache / "cuda"),
         ]
+        if not plan.kernel_cache.shared:
+            directories.extend((
+                ("CuPy cache", run.cache / "cupy"),
+                ("CUDA cache", run.cache / "cuda"),
+            ))
         # ``woof run`` accepts an existing output directory, so creating it
         # is an atomic claim. Prepared production runners intentionally claim
         # their own absent --outdir; leave it absent for that contract.
@@ -2629,8 +3106,16 @@ def _summary_payload(
     for run in runs:
         spec = run.spec
         process = execution_by_name.get(spec.name)
+        cupy_cache, cuda_cache = run.kernel_cache.paths(
+            spec.cache, os.environ)
         rows.append({
             "arguments": list(spec.arguments),
+            "plan_arguments": (None if spec.plan_arguments is None
+                               else list(spec.plan_arguments)),
+            "prepared_binding": (None if spec.prepared_binding is None
+                                 else dict(spec.prepared_binding)),
+            "kernel_cache": {"cuda": cuda_cache, "cupy": cupy_cache,
+                             "mode": run.kernel_cache.label},
             "cache": str(spec.cache),
             "config": None if spec.config is None else str(spec.config),
             "config_sha256": (
@@ -2679,6 +3164,7 @@ def _summary_payload(
         "exit_code": exit_code,
         "file_authority_verification": dict(file_verification),
         "input_authority_store": _input_authority_store_record(plan),
+        "kernel_cache": plan.kernel_cache.receipt(),
         "orchestration": dict(orchestration),
         "packing": (_exclusive_packing_receipt(plan.packing)
                     if packing is None else packing.receipt()),
@@ -2764,6 +3250,58 @@ def _unstarted_authority_verification(reason: str) -> dict[str, object]:
     }
 
 
+DRY_RUN_SCHEMA = "gpuwm.multi-run-dry-run/v1"
+
+
+def _print_dry_run(plan: MultiRunPlan) -> None:
+    """Print what the plan would launch; touch no device, claim nothing.
+
+    The plan has been loaded exactly as a real launch loads it (paths,
+    inputs, prepared bindings, packing and kernel-cache settings), so a
+    plan that passes here fails later only on device, memory or runtime
+    grounds.  Device selectors are printed as written: no ``nvidia-smi``
+    is asked."""
+
+    runs = []
+    for spec in plan.runs:
+        if spec.config is not None:
+            command = ["woof", "run", str(spec.config), "--outdir",
+                       str(spec.outdir), "--gpu-uuid", "<resolved at launch>"]
+        else:
+            command = [sys.executable, "-m", str(spec.module),
+                       *_render_arguments(spec)]
+        cupy, cuda = plan.kernel_cache.paths(spec.cache, os.environ)
+        runs.append({
+            "command": command,
+            "device": spec.device_selector,
+            "inputs": [binding.as_dict() for binding in spec.input_bindings],
+            "kernel_cache": {"cuda": cuda, "cupy": cupy},
+            "name": spec.name,
+            "outdir": str(spec.outdir),
+            "plan_arguments": (None if spec.plan_arguments is None
+                               else list(spec.plan_arguments)),
+            "prepared_binding": (None if spec.prepared_binding is None
+                                 else dict(spec.prepared_binding)),
+            "scratch": str(spec.scratch_dir),
+        })
+    print(json.dumps({
+        "kernel_cache": plan.kernel_cache.receipt(),
+        "packing": {"runs_per_gpu": plan.packing.runs_per_gpu,
+                    "mem_margin_gib": plan.packing.margin_gib,
+                    "mps": plan.packing.mps,
+                    "settings_source": dict(plan.packing.sources)},
+        "plan": str(plan.path),
+        "plan_sha256": plan.sha256,
+        "preflight": plan.preflight,
+        "runs": runs,
+        "schema": DRY_RUN_SCHEMA,
+        "summary": str(plan.summary),
+    }, indent=2, sort_keys=True), flush=True)
+    print("multi-run --dry-run: the plan loads and every prepared run is "
+          "bound; no device was queried and nothing was claimed or "
+          "launched", file=sys.stderr, flush=True)
+
+
 def multi_run_main(args: argparse.Namespace) -> int:
     """CLI implementation for ``woof multi-run PLAN.toml``."""
 
@@ -2820,7 +3358,11 @@ def multi_run_main(args: argparse.Namespace) -> int:
         plan = load_plan(
             args.plan, summary_override=getattr(args, "summary", None),
             preflight_override=getattr(args, "preflight", None))
-        plan = replace(plan, packing=packing_request(plan.packing, args))
+        plan = replace(plan, packing=packing_request(plan.packing, args),
+                       kernel_cache=kernel_cache_request(plan, args))
+        if getattr(args, "dry_run", False):
+            _print_dry_run(plan)
+            return 0
 
         state.stage = "lock_root_resolution"
         lock_root = _validate_lock_root_isolation(
@@ -3138,6 +3680,19 @@ def register_cli(subparsers: argparse._SubParsersAction) -> None:
         "--mps-active-thread-percentage", type=int, default=None,
         metavar="P",
         help="CUDA_MPS_ACTIVE_THREAD_PERCENTAGE for each run (with --mps)")
+    parser.add_argument(
+        "--kernel-cache", default=None, metavar="shared|per-run|DIR",
+        help=("where runs keep compiled GPU kernels: shared (default: the "
+              "persistent CuPy and CUDA caches an ordinary woof run uses, "
+              "so only the first run compiles), per-run (each run's own "
+              "empty <cache>/cupy and <cache>/cuda, for cross-device "
+              "comparisons and forensics) or a shared directory DIR "
+              "(overrides the plan's [cache] kernels)"))
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help=("load and bind the plan, print every run's command, derived "
+              "prepared digests and kernel caches as JSON, and stop: no "
+              "device is queried and nothing is claimed or launched"))
     parser.set_defaults(func=multi_run_main)
 
 
@@ -3147,11 +3702,13 @@ if __name__ == "__main__":
 
 __all__ = [
     "PLAN_SCHEMA", "PREFLIGHT_MODES", "SUMMARY_SCHEMA",
-    "SUPPORTED_PREPARED_RUNNERS", "GroupExecutionError", "GroupOutcome",
+    "SUPPORTED_PREPARED_RUNNERS", "DRY_RUN_SCHEMA",
+    "PREPARED_BINDING_BASIS", "GroupExecutionError", "GroupOutcome",
     "MultiRunPlan", "PlannedRun", "ProcessRecord", "RunSpec",
     "ADMISSION_RECHECK_SECONDS", "CardMeter", "PACKED_ADMISSION_RULE",
     "PackingPlan", "PackingRequest", "RunPricing",
-    "child_environment", "load_plan", "multi_run_main", "packed_admission",
+    "child_environment", "kernel_cache_request", "load_plan",
+    "multi_run_main", "packed_admission",
     "packing_request", "plan_packing", "price_run", "register_cli",
     "resolve_devices",
 ]

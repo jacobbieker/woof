@@ -576,6 +576,25 @@ def resolve_head_bundle(prepared_root: Path, head_sha256: str) -> dict:
     }
 
 
+def resolve_sim_bundle(prepared_root: Path) -> tuple[dict, bool]:
+    """``(bundle, live)``: what ``woof sim`` binds for this root.
+
+    The sealed document (:func:`resolve_bundle`) when there is one; else
+    the head of a chained preparation still being prepared
+    (:func:`unsealed_head_bundle`, ``live`` true); else the sealed
+    refusal.  ONE rule for every door that binds an existing root
+    (``woof sim``, ``woof multi-run``), so they cannot drift apart.
+    """
+
+    try:
+        return resolve_bundle(prepared_root), False
+    except StageRefusal:
+        bundle = unsealed_head_bundle(prepared_root)
+        if bundle is None:
+            raise
+        return bundle, True
+
+
 def unsealed_head_bundle(prepared_root: Path) -> dict | None:
     """The head bundle of a chained preparation that has not sealed yet.
 
@@ -1123,15 +1142,11 @@ def sim_main(args) -> int:
         except ValueError as refusal:
             # Before the bundle is opened or a run folder is claimed.
             raise StageRefusal(str(refusal)) from refusal
-        try:
-            bundle = resolve_bundle(args.prepared_root)
-        except StageRefusal:
-            # A chained preparation still producing its later boundary
-            # intervals (here, or copied here arrays first and markers
-            # last): the forecast binds its head and waits at each seam.
-            bundle = unsealed_head_bundle(args.prepared_root)
-            if bundle is None:
-                raise
+        # A chained preparation still producing its later boundary
+        # intervals (here, or copied here arrays first and markers
+        # last): the forecast binds its head and waits at each seam.
+        bundle, live = resolve_sim_bundle(args.prepared_root)
+        if live:
             print(f"sim: {args.prepared_root} is still being prepared; "
                   f"binding its head {bundle['head_sha256']} and starting "
                   "the forecast beside it", file=sys.stderr)

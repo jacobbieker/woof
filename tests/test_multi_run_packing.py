@@ -16,7 +16,9 @@ import pytest
 
 import woof.cli as cli
 import woof.multi_run as multi_run
-from woof.gpu_packing import AUTO_MAX_SLOTS_PER_GPU, MpsDaemon
+from dataclasses import replace
+
+from woof.gpu_packing import AUTO_MAX_SLOTS_PER_GPU, KernelCache, MpsDaemon
 from woof.multi_run import (CardMeter, PackingRequest, RunPricing,
                              child_environment, load_plan, packed_admission,
                              packing_request, plan_packing, resolve_devices)
@@ -778,12 +780,123 @@ def test_packed_child_environment_keeps_isolation(tmp_path, monkeypatch):
     _packing, runs = plan_packing(
         plan, runs, lock_root=tmp_path / "locks",
         meter=FakeMeter({"GPU-alpha": FakeCard(24)}))
-    first, second = (child_environment(run, {"TMPDIR": "/elsewhere"})
-                     for run in runs)
+    parent = {"TMPDIR": "/elsewhere", "CUPY_CACHE_DIR": "/warm/cupy"}
+    first, second = (child_environment(run, parent) for run in runs)
     assert first["TMPDIR"] == str(runs[0].spec.scratch_dir)
-    assert first["CUPY_CACHE_DIR"] != second["CUPY_CACHE_DIR"]
+    assert first["TMPDIR"] != second["TMPDIR"]
+    # The kernel cache is shared (inherited) by default ...
+    assert first["CUPY_CACHE_DIR"] == second["CUPY_CACHE_DIR"] == "/warm/cupy"
+    assert "CUDA_CACHE_PATH" not in first
     assert first[GPU_LOCK_ROOT_ENV] != second[GPU_LOCK_ROOT_ENV]
     assert first["CUDA_VISIBLE_DEVICES"] == second["CUDA_VISIBLE_DEVICES"]
+    # ... and per-run restores one empty cache per run.
+    isolated = [replace(run, kernel_cache=KernelCache("per-run"))
+                for run in runs]
+    first, second = (child_environment(run, parent) for run in isolated)
+    assert first["CUPY_CACHE_DIR"] == str(runs[0].spec.cache / "cupy")
+    assert second["CUDA_CACHE_PATH"] == str(runs[1].spec.cache / "cuda")
+
+
+# -- GPU kernel caches -------------------------------------------------------
+
+
+def _append(plan: Path, text: str) -> None:
+    body = plan.read_text(encoding="utf-8")
+    head, _sep, runs = body.partition("[[run]]")
+    plan.write_text(head + text + "\n\n[[run]]" + runs, encoding="utf-8")
+
+
+def test_packed_runs_share_one_kernel_cache_and_keep_their_own_tmp(
+        tmp_path, monkeypatch):
+    """The default: two runs on one card start from one warm cache."""
+
+    shared = tmp_path / "warm"
+    monkeypatch.setenv("CUPY_CACHE_DIR", str(shared / "cupy"))
+    monkeypatch.setenv("CUDA_CACHE_PATH", str(shared / "cuda"))
+    plan, _meter, runners = _packed(
+        tmp_path, monkeypatch, cards={"GPU-alpha": FakeCard(24)},
+        need={"run_a": 6, "run_b": 6}, devices=(0, 0),
+        table="runs_per_gpu = 2")
+    assert _main(plan) == 0
+    environments = [kwargs["env"] for _name, kwargs in runners.launched]
+    assert {env["CUPY_CACHE_DIR"] for env in environments} == {
+        str(shared / "cupy")}
+    assert {env["CUDA_CACHE_PATH"] for env in environments} == {
+        str(shared / "cuda")}
+    assert len({env["TMPDIR"] for env in environments}) == 2
+    summary = _summary(plan)
+    assert summary["kernel_cache"]["mode"] == "shared"
+    assert summary["kernel_cache"]["source"] == "default"
+    assert summary["kernel_cache"]["cupy_cache"] == str(shared / "cupy")
+    assert "os.replace" in summary["kernel_cache"]["concurrency"]
+    assert summary["runs"][0]["kernel_cache"]["cupy"] == str(shared / "cupy")
+    # No per-run cache directories are made for a shared cache.
+    assert not Path(summary["runs"][0]["cache"], "cupy").exists()
+
+
+def test_per_run_kernel_cache_restores_the_old_isolation(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("CUPY_CACHE_DIR", str(tmp_path / "warm"))
+    plan, _meter, runners = _packed(
+        tmp_path, monkeypatch, cards={"GPU-alpha": FakeCard(24)},
+        need={"run_a": 6, "run_b": 6}, devices=(0, 0),
+        table="runs_per_gpu = 2")
+    assert _main(plan, kernel_cache="per-run") == 0
+    environments = [kwargs["env"] for _name, kwargs in runners.launched]
+    caches = [Path(env["CUPY_CACHE_DIR"]) for env in environments]
+    assert len(set(caches)) == 2
+    assert all(path.name == "cupy" and path.is_dir() for path in caches)
+    assert all(Path(env["CUDA_CACHE_PATH"]).is_dir()
+               for env in environments)
+    summary = _summary(plan)
+    assert summary["kernel_cache"]["mode"] == "per-run"
+    assert summary["kernel_cache"]["source"] == "--kernel-cache"
+
+
+def test_plan_kernel_cache_directory_is_shared_and_persistent(
+        tmp_path, monkeypatch):
+    plan, _meter, runners = _packed(
+        tmp_path, monkeypatch, cards={"GPU-alpha": FakeCard(24)},
+        need={"run_a": 6, "run_b": 6}, devices=(0, 0),
+        table="runs_per_gpu = 2")
+    _append(plan, '[cache]\nkernels = "./kernels"')
+    assert _main(plan) == 0
+    directory = plan.parent / "kernels"
+    environments = [kwargs["env"] for _name, kwargs in runners.launched]
+    assert {env["CUPY_CACHE_DIR"] for env in environments} == {
+        str(directory / "cupy")}
+    assert {env["CUDA_CACHE_PATH"] for env in environments} == {
+        str(directory / "cuda")}
+    assert (directory / "cupy").is_dir() and (directory / "cuda").is_dir()
+    summary = _summary(plan)
+    assert summary["kernel_cache"]["directory"] == str(directory)
+    assert summary["kernel_cache"]["source"] == "plan [cache]"
+
+
+@pytest.mark.parametrize("value,match", [
+    ('"per_run"', "write ./per_run"),
+    ('"Shared"', "write ./Shared"),
+    ("1", "takes 'shared', 'per-run' or a directory"),
+])
+def test_kernel_cache_setting_is_never_coerced(tmp_path, value, match):
+    plan = _write_plan(tmp_path, devices=(0,))
+    _append(plan, f"[cache]\nkernels = {value}")
+    with pytest.raises(ValueError, match=match):
+        load_plan(plan)
+    text = plan.read_text(encoding="utf-8").replace(
+        f"[cache]\nkernels = {value}", '[cache]\nmode = "shared"')
+    plan.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown keys"):
+        load_plan(plan)
+
+
+def test_kernel_cache_directory_inside_a_plan_path_is_refused(
+        tmp_path, monkeypatch):
+    plan, _meter, _runners = _packed(
+        tmp_path, monkeypatch, cards={"GPU-alpha": FakeCard(24)},
+        need={"run_a": 6}, devices=(0,), table=None)
+    with pytest.raises(ValueError, match="shared kernel cache .* overlaps"):
+        _main(plan, kernel_cache=str(plan.parent / "output_a" / "kc"))
 
 
 def test_price_run_prices_the_captured_bytes_through_the_run_door(

@@ -1199,6 +1199,7 @@ Takes no options of its own.
 | `--fake-gpus N` | testing: N stand-in GPU identities, no device read (set WOOF_GPU_LOCK_ROOT) |
 | `--gpu-mem-gib GIB` | admission budget per card (default: NVML memory.total; required with --fake-gpus) |
 | `--gpus all\|N\|UUID[,UUID]` | GPUs to run on: all (default), the first N, or UUIDs |
+| `--kernel-cache shared\|per-slot\|DIR` | where slots keep compiled GPU kernels: shared (default: the persistent CuPy and CUDA caches an ordinary woof run uses, so only the first job on the machine compiles), per-slot (each slot's own empty cache under --workdir, the old isolation) or a shared directory DIR |
 | `--max-idle-s` | exit after this long with nothing to claim |
 | `--mem-margin-gib GIB` | card memory kept free beside the reservations (default 1, an assumption) |
 | `--mps` | start (or reuse) the CUDA MPS control daemon so packed slots' kernels run concurrently instead of time-slicing; refused when nvidia-cuda-mps-control is missing |
@@ -1559,7 +1560,9 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
+| `--dry-run` | load and bind the plan, print every run's command, derived prepared digests and kernel caches as JSON, and stop: no device is queried and nothing is claimed or launched |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--kernel-cache shared\|per-run\|DIR` | where runs keep compiled GPU kernels: shared (default: the persistent CuPy and CUDA caches an ordinary woof run uses, so only the first run compiles), per-run (each run's own empty <cache>/cupy and <cache>/cuda, for cross-device comparisons and forensics) or a shared directory DIR (overrides the plan's [cache] kernels) |
 | `--mem-margin-gib GiB` | card memory kept free beside packed runs' priced peaks (default 1; only with --runs-per-gpu above 1 or auto) |
 | `--mps, --no-mps` | start (or reuse) the CUDA MPS control daemon so packed runs' kernels share the card instead of time-slicing; stopped on exit if started here (overrides the plan's [devices] mps) |
 | `--mps-active-thread-percentage P` | CUDA_MPS_ACTIVE_THREAD_PERCENTAGE for each run (with --mps) |

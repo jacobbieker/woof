@@ -4,6 +4,39 @@
 
 New:
 
+- `woof multi-run` binds a prepared run to its preparation itself. A
+  module-form run (`woof.prepared_single_domain_forecast` or
+  `woof.prepared_domain_tree_forecast`) needs no hand-copied digests. At plan
+  load the declared `--prepared-root` is bound as `woof sim` and
+  `woof go --prepared-root` bind it: the sealed proof (or tree receipt and
+  config digest), or the head of a chained preparation still being prepared.
+  The digests are inserted into the argv, and the single-domain runner's
+  absent `--source` comes from the bundle. Digests a plan gives are kept and
+  must equal the derived ones; a mismatch refuses the plan, naming both. A
+  head pinned on a sealed chained preparation is accepted when it is the head
+  its proof records. A mapped single-domain preparation's declared
+  experiment config and WPS namelist must be the bytes its
+  `execution_inputs` record, or the plan is refused, naming the file that
+  still matches. The summary records each
+  run's `prepared_binding` (every digest marked `derived` or
+  `given, verified`) and the plan's argv as written (`plan_arguments`).
+  `woof multi-run --dry-run` prints the bound plan as JSON without touching a
+  device or claiming anything. A child that fails now prints the last line of
+  its log beside its exit code.
+- GPU kernel caches are shared and persistent across `woof multi-run` runs
+  and `woof energy worker` slots and jobs. Before, every child started from
+  a new, empty CuPy and CUDA cache and recompiled every kernel (typically 1-3
+  minutes per run, per job). By default children now use the cache an
+  ordinary `woof run` uses, so only the first run on a machine compiles.
+  `[cache] kernels = "shared" | "per-run" | "<dir>"` (multi-run plan),
+  `woof multi-run --kernel-cache shared|per-run|DIR` and
+  `woof energy worker --kernel-cache shared|per-slot|DIR` choose. `per-run`
+  and `per-slot` restore the old isolation for cross-device comparisons and
+  forensics. Temp directories, outputs and GPU locks stay per child.
+  CuPy writes cache entries atomically (temporary file and `os.replace`,
+  SHA-1 checked on read), so concurrent writers are safe; the receipts record
+  the mode, the paths and this basis.
+
 - `woof multi-run` can now pack several ordinary forecasts onto one GPU. Set
   `[devices] runs_per_gpu = N|"auto"` in the plan or pass
   `--runs-per-gpu N|auto`. `auto` allows at most 8 runs per card. The default
@@ -455,6 +488,11 @@ Changed:
 
 Fixed:
 
+- `woof go` refused a sealed mapped single-domain preparation (for example
+  `icon-global-ml`) at the forecast stage, calling it "a multi-domain
+  hierarchy product", because its proof records no top-level
+  `input_manifest_sha256`. It now binds the evidence manifest, the one
+  `woof sim` binds.
 - `woof energy estimate --partition` silently ignored `--leaf-dx-m`, and a
   job's spacing, when the partition's clusters carried their own
   `leaf_dx_m`. A spacing that disagrees is now refused, and the refusal

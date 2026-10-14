@@ -1018,6 +1018,14 @@ def _register_worker(sub) -> None:
     p.add_argument("--workdir", default=None, metavar="DIR",
                    help="local scratch for job files and logs (default: a "
                         "fresh directory under the system temp)")
+    p.add_argument("--kernel-cache", default=None,
+                   metavar="shared|per-slot|DIR",
+                   help="where slots keep compiled GPU kernels: shared "
+                        "(default: the persistent CuPy and CUDA caches an "
+                        "ordinary woof run uses, so only the first job on "
+                        "the machine compiles), per-slot (each slot's own "
+                        "empty cache under --workdir, the old isolation) or "
+                        "a shared directory DIR")
     packing = p.add_argument_group(
         "packing several jobs on one GPU",
         "docs/energy-hindcast/queue-worker.md: memory-aware admission "

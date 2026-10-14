@@ -128,8 +128,9 @@ first `N`, or a comma list of UUIDs).  Each slot:
 
 1. holds a slot lock for its GPU UUID (`energy-worker-gpu-<digest>.lock`
    under `WOOF_GPU_LOCK_ROOT`), so two workers never share a card;
-2. runs with `CUDA_VISIBLE_DEVICES=<uuid>` and its own temp, CuPy and
-   CUDA caches (the environment `woof multi-run` gives its children);
+2. runs with `CUDA_VISIBLE_DEVICES=<uuid>` and its own temp directory
+   (the environment `woof multi-run` gives its children). Compiled GPU
+   kernels go to one shared, persistent cache (see below);
 3. waits while another woof process holds the card's supervisor lock (a
    forecast started outside the queue);
 4. claims a job, writes the job document to its work directory and runs
@@ -138,6 +139,40 @@ first `N`, or a comma list of UUIDs).  Each slot:
 
 The runner's own supervisor takes the card's UUID lock; the slot lock is
 a separate file so it does not refuse its own job.
+
+### GPU kernel cache (`--kernel-cache`)
+
+A forecast's first run on a machine compiles its GPU kernels (NVRTC,
+typically 1-3 minutes) into CuPy's on-disk cache and the CUDA driver's
+JIT cache. Every later run that finds them there starts in seconds. A
+hindcast is thousands of short jobs, so by default every slot and every
+job share one persistent cache: `--kernel-cache shared`. That is the cache
+an ordinary `woof run` from the same shell uses: the inherited
+`CUPY_CACHE_DIR` and `CUDA_CACHE_PATH`, or CuPy's `~/.cupy/kernel_cache`
+and the driver's per-user `~/.nv/ComputeCache` when they are unset. Only
+the first job on a node pays the compile.
+
+- `--kernel-cache DIR` shares one directory instead
+  (`CUPY_CACHE_DIR=DIR/cupy`, `CUDA_CACHE_PATH=DIR/cuda`). A container
+  fleet can point it at a volume that outlives the container. A directory
+  is spelled as a path (`./kc`, `/scratch/kc`). A bare word that is not a
+  keyword is refused, not turned into a directory. A directory inside
+  `--workdir`, or one that cannot be created, is refused before any slot
+  starts.
+- `--kernel-cache per-slot` is the old isolation: each slot gets its own
+  empty `cache/cupy` and `cache/cuda` under `--workdir`. Every slot
+  compiles every kernel once.
+
+Concurrent writers are safe. CuPy (14.x, `DiskKernelCacheBackend`) writes
+each kernel to a temporary file in the cache directory and publishes it
+with `os.replace`. Every read checks the SHA-1 the entry starts with, so
+another slot never sees a half-written entry, and an unreadable one is
+compiled again. The cache key includes the source, every option, the NVRTC
+version and the card's architecture, so one cache can serve mixed cards.
+The driver's JIT cache is the per-user cache every CUDA process shares by
+default. Temp directories, outputs and GPU locks stay per slot in every
+mode. The worker summary's `kernel_cache` block records the mode, the two
+paths and where the setting came from.
 
 If another woof process takes the card between the claim and the
 runner's start, the slot releases the job uncharged and waits.

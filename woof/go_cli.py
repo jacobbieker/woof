@@ -1561,8 +1561,6 @@ def proof_digests(prepared_root: Path) -> dict:
     not compute a digest the runner will then compare against itself.
     """
 
-    from woof.fetch import sha256_file
-
     proof_path = Path(prepared_root) / "proof.json"
     if not proof_path.is_file():
         raise GoRefusal(
@@ -1571,17 +1569,26 @@ def proof_digests(prepared_root: Path) -> dict:
     payload = json.loads(proof_path.read_text(encoding="utf-8"))
     cache = payload.get("prepared_cache")
     content = cache.get("content_sha256") if isinstance(cache, dict) else None
-    manifest_digest = payload.get("input_manifest_sha256")
-    if not isinstance(content, str) or not isinstance(manifest_digest, str):
+    if not isinstance(content, str):
         raise GoRefusal(
             f"{proof_path} carries no single prepared-cache identity, "
             "which is what a multi-domain hierarchy product looks like.  "
             "Its runner is woof-prepared-tree-forecast (module form: "
             "python -m woof.prepared_domain_tree_forecast); see "
             f"{MANUAL_CHAIN}")
-    return {"proof": sha256_file(proof_path),
-            "source_manifest": manifest_digest,
-            "prepared_content": content}
+    # A mapped route (icon-global-ml, aifs, ...) records no top-level
+    # input_manifest_sha256: its manifest is the evidence copy the runner
+    # re-hashes.  The triple is the one `woof sim` binds, read by the same
+    # function, instead of calling a single-domain proof a hierarchy
+    # product.
+    from woof.stage_cli import StageRefusal, single_domain_digests
+
+    try:
+        digests = single_domain_digests(
+            {"document": proof_path, "payload": payload, "layout": "single"})
+    except StageRefusal as refusal:
+        raise GoRefusal(str(refusal)) from None
+    return dict(digests)
 
 
 def head_digests(prepared_root: Path, head_sha256: str) -> dict:

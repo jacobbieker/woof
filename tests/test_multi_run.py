@@ -64,10 +64,31 @@ def _write_plan(tmp_path: Path, **kwargs) -> Path:
     return plan
 
 
+#: A schema ``woof sim`` reads as a domain tree / a single domain.
+TREE_SCHEMA = "gpuwm-gfs-native-hierarchy-proof-v2"
+SINGLE_SCHEMA = "gpuwm-gfs-direct-wrf-proof-v3"
+
+
+def _bindable_prepared(prepared: Path, layout: str = "tree") -> Path:
+    """A prepared root ``woof.stage_cli.resolve_bundle`` identifies.
+
+    Multi-run binds every module run to its preparation at plan load, so
+    a bare directory is refused; these documents carry just enough for
+    the binding to be derived (the runner itself is never started)."""
+
+    prepared.mkdir(parents=True, exist_ok=True)
+    document = ({"schema": TREE_SCHEMA, "domain_count": 2}
+                if layout == "tree" else
+                {"schema": SINGLE_SCHEMA, "input_manifest_sha256": "a" * 64,
+                 "prepared_cache": {"content_sha256": "b" * 64}})
+    (prepared / "proof.json").write_text(json.dumps(document),
+                                         encoding="utf-8")
+    return prepared
+
+
 def _write_module_plan(tmp_path: Path, *, run_count: int = 1) -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
-    prepared = tmp_path / "prepared"
-    prepared.mkdir()
+    _bindable_prepared(tmp_path / "prepared")
     config = tmp_path / "experiment.toml"
     config.write_text("[experiment]\nname = 'fixture'\n", encoding="utf-8")
     lines = [
@@ -171,6 +192,15 @@ def test_module_runner_uses_shell_free_argv_and_shared_read_only_inputs(
     assert plan.runs[0].input_bindings[1].sha256 == hashlib.sha256(
         plan.runs[0].inputs[1].read_bytes()).hexdigest()
 
+    # Bound at plan load as `woof sim` binds a sealed tree.
+    binding = plan.runs[0].prepared_binding
+    assert binding["mode"] == "sealed_receipt"
+    assert [row["flag"] for row in binding["digests"]] == [
+        "--preparation-receipt-sha256", "--experiment-config-sha256"]
+    # The tree runner may run a config the preparation did not record
+    # (a later stop time), so the bytes are not held to the record.
+    assert binding["execution_inputs"]["experiment_config"]["status"] \
+        == "NOT_CHECKED"
     command = multi_run._run_command(runs[0])
     assert command[:4] == (
         multi_run.sys.executable, "-m", "woof.multi_run", "worker")
@@ -183,14 +213,15 @@ def test_module_runner_uses_shell_free_argv_and_shared_read_only_inputs(
     multi_run._prepare_directories(plan)
     assert plan.runs[0].scratch_dir.is_dir()
     assert plan.runs[0].cache.is_dir()
-    assert (plan.runs[0].cache / "cupy").is_dir()
-    assert (plan.runs[0].cache / "cuda").is_dir()
+    # Shared kernel caches (the default) create no per-run cupy/cuda.
+    assert not (plan.runs[0].cache / "cupy").exists()
+    assert not (plan.runs[0].cache / "cuda").exists()
     # The production runner owns the atomic output-directory claim.
     assert not plan.runs[0].outdir.exists()
 
 
 def test_single_prepared_runner_binds_all_schema_known_path_flags(tmp_path):
-    (tmp_path / "prepared").mkdir()
+    _bindable_prepared(tmp_path / "prepared", "single")
     (tmp_path / "experiment.toml").write_text(
         "[experiment]\nname='fixture'\n", encoding="utf-8")
     (tmp_path / "namelist.wps").write_text(
@@ -495,10 +526,9 @@ def test_child_environment_preserves_parent_and_isolates_runtime_paths(
     environment = child_environment(run, parent)
 
     expected = dict(parent)
+    # The kernel caches are shared by default: inherited untouched.
     expected.update({
         "CUDA_VISIBLE_DEVICES": "GPU-beta",
-        "CUDA_CACHE_PATH": str(run.spec.cache / "cuda"),
-        "CUPY_CACHE_DIR": str(run.spec.cache / "cupy"),
         GPU_LOCK_ROOT_ENV: str(
             (tmp_path / "parent-temp" / "woof" / "locks").resolve()),
         SHARED_INPUT_AUTHORITY_ROOT_ENV: str(
