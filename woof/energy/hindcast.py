@@ -13,12 +13,12 @@ Pinned here
 -----------
 
 **Segments.**  Segment ``k`` of a request runs from ``first + k * keep``
-for ``segment_hours`` (default :data:`DEFAULT_SEGMENT_HOURS`, 30 h), where
-``keep = segment_hours - spinup_hours`` (default 24 h) and ``first`` is
+for ``segment_hours`` (default :data:`DEFAULT_SEGMENT_HOURS`, 6 h), where
+``keep = segment_hours - spinup_hours`` (default 6 h) and ``first`` is
 ``--start`` at ``--cycle-hour`` (default 00 UTC).  Segments are generated
 while their run start is before ``--end`` (exclusive), so ``--start
-2025-11-01 --end 2025-11-04`` is three daily segments.  Its first
-``spinup_hours`` (default :data:`DEFAULT_SPINUP_HOURS`, 6 h) are spin-up;
+2025-11-01 --end 2025-11-04`` is twelve 6-hourly segments.  Its first
+``spinup_hours`` (default :data:`DEFAULT_SPINUP_HOURS`, 0 h) are spin-up;
 the **kept window** is ``[run_start + spinup, run_end)``, half-open, so
 consecutive segments tile time with no gap and no duplicate frame.
 Everything is naive UTC arithmetic on :class:`datetime.datetime`: month
@@ -127,8 +127,13 @@ TOPOLOGIES = ("wrf-nests", "wrf-tiles")
 _PLANNER_MODULES = {"wrf-nests": "woof.energy.plan_wrf_nests",
                     "wrf-tiles": "woof.energy.plan_wrf_tiles"}
 
-DEFAULT_SEGMENT_HOURS = 30
-DEFAULT_SPINUP_HOURS = 6
+#: One forecast per global cycle: each 6 h run starts at a 00/06/12/18 UTC
+#: init and is kept whole, half-open, so the 6-hourly forecasts stitch into
+#: one continuous analysis ([00, 06), [06, 12), ...) with every frame from
+#: the freshest init.  ``--spinup-hours`` > 0 trades that alignment for a
+#: discarded lead: 7 h runs with 1 h spin-up keep [01, 07), [07, 13), ...
+DEFAULT_SEGMENT_HOURS = 6
+DEFAULT_SPINUP_HOURS = 0
 DEFAULT_CYCLE_HOUR = 0
 DEFAULT_TOPOLOGY = "wrf-nests"
 DEFAULT_DX_M = 100.0

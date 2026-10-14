@@ -31,9 +31,12 @@ RING = ((-4.0, 51.6), (-3.9, 51.6), (-3.9, 51.7), (-4.0, 51.7), (-4.0, 51.6))
 
 
 def _request(tmp_path, **overrides):
+    # These tests pin the daily layout (30 h runs, 6 h spin-up) explicitly;
+    # the 6-hourly default is pinned on its own below.
     record = dict(outdir=tmp_path / "hc", start=datetime(2025, 11, 1),
                   end=datetime(2025, 11, 4), sites_path=SITES,
-                  source="gfs", vram_gib=80.0)
+                  source="gfs", vram_gib=80.0, segment_hours=30,
+                  spinup_hours=6)
     record.update(overrides)
     return hc.HindcastRequest(**record)
 
@@ -630,7 +633,8 @@ def test_the_cli_plans_shows_status_and_refuses_cleanly(tmp_path, capsys):
                    "-o", str(outdir)])
     assert args.func(args) == 0
     shown = json.loads(capsys.readouterr().out)
-    assert shown["jobs"] == 3 and shown["example_job"]["schema"] == \
+    # Three days at the 6-hourly default: twelve forecasts.
+    assert shown["jobs"] == 12 and shown["example_job"]["schema"] == \
         hc.JOB_SCHEMA
     args = _parse(["energy", "hindcast", "plan", "--sites", str(SITES),
                    "--start", "2025-11-01", "--end", "2025-11-04",
@@ -639,7 +643,7 @@ def test_the_cli_plans_shows_status_and_refuses_cleanly(tmp_path, capsys):
     capsys.readouterr()
     args = _parse(["energy", "hindcast", "status", str(outdir)])
     assert args.func(args) == 0
-    assert json.loads(capsys.readouterr().out)["counts"] == {"pending": 3}
+    assert json.loads(capsys.readouterr().out)["counts"] == {"pending": 12}
     args = _parse(["energy", "hindcast", "plan", "--sites", str(SITES),
                    "--start", "2025-11-01T06", "--end", "2025-11-04",
                    "--source", "gfs", "-o", str(outdir)])
@@ -667,3 +671,22 @@ def test_segment_configs_switch_on_the_wind_diagnostics():
     named = '[shared]\nnz = 70\n\n[output]\nhub_heights_m = [100.0]\n'
     assert "hub_wind" not in _enable_wind_diagnostics(named)
     assert _enable_wind_diagnostics(out) == out
+
+
+def test_the_default_is_one_six_hour_forecast_per_global_cycle():
+    # 00/06/12/18 UTC inits, each kept whole and half-open, so the forecasts
+    # stitch into one continuous analysis with every frame from the freshest
+    # init.
+    request = hc.HindcastRequest(outdir=Path("/unused"),
+                                 start=datetime(2025, 11, 1),
+                                 end=datetime(2025, 11, 2), sites_path=SITES,
+                                 source="gfs")
+    assert (request.segment_hours, request.spinup_hours) == (6, 0)
+    segments = hc.segment_windows(datetime(2025, 11, 1), datetime(2025, 11, 2),
+                                  segment_hours=request.segment_hours,
+                                  spinup_hours=request.spinup_hours,
+                                  cycle_hour=0)
+    assert [s.run_start.hour for s in segments] == [0, 6, 12, 18]
+    assert all(s.keep_start == s.run_start for s in segments)
+    assert all(a.keep_end == b.keep_start for a, b in zip(segments, segments[1:]))
+    assert segments[-1].keep_end == datetime(2025, 11, 2)

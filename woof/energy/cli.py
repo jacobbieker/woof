@@ -731,10 +731,12 @@ def _register_hindcast(sub) -> None:
                            "--cycle-hour)")
     when.add_argument("--end", required=True, metavar="YYYY-MM-DD[THH]",
                       help="exclusive bound on segment run starts")
-    when.add_argument("--segment-hours", type=positive_int, default=30,
-                      help="run length of every segment (default 30)")
-    when.add_argument("--spinup-hours", type=_non_negative_int, default=6,
-                      help="leading hours discarded as spin-up (default 6); "
+    when.add_argument("--segment-hours", type=positive_int, default=6,
+                      help="run length of every segment (default 6: one "
+                           "forecast per 00/06/12/18 UTC global init, "
+                           "stitched into one continuous analysis)")
+    when.add_argument("--spinup-hours", type=_non_negative_int, default=0,
+                      help="leading hours discarded as spin-up (default 0); "
                            "each segment keeps segment - spinup hours")
     when.add_argument("--cycle-hour", type=_hours_of_day, default=0,
                       help="UTC hour runs start from (default 0)")

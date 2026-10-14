@@ -8,8 +8,10 @@ reanalysis at 100-300 m. The code is in `woof/energy/hindcast.py`.
 A year can't be one run. No boundary source forecasts a year ahead, and a
 run restarted from its own checkpoint can't switch to a new forcing cycle
 (only the HRRR route chains restarts across cycles). So each segment is a
-fresh cold start from one source cycle, and its first hours are thrown away
-as spin-up.
+fresh cold start from one source cycle. By default each global cycle
+(00/06/12/18 UTC) gets one 6 h forecast at 15-minute output, kept whole, and
+the forecasts stitch into one continuous analysis; `--spinup-hours` discards
+leading hours instead (see "Spin-up" below).
 
 ## Segments
 
@@ -17,18 +19,40 @@ as spin-up.
 |---|---|---|
 | `--start` | required | first segment's day (`YYYY-MM-DD`, or `YYYY-MM-DDTHH` on `--cycle-hour`) |
 | `--end` | required | exclusive bound on segment run starts |
-| `--segment-hours` | 30 | run length of every segment |
-| `--spinup-hours` | 6 | leading hours discarded |
+| `--segment-hours` | 6 | run length of every segment |
+| `--spinup-hours` | 0 | leading hours discarded |
 | `--cycle-hour` | 0 | UTC hour each run starts from |
 
 Segment `k` runs from `start + k * keep` for `segment-hours`, where
-`keep = segment-hours - spinup-hours` (24 h by default). Its kept window
+`keep = segment-hours - spinup-hours` (6 h by default). Its kept window
 is `[run_start + spinup, run_end)`, which is half-open, so consecutive
-segments tile time with no gap and no duplicate frame. With the defaults,
-`--start 2025-11-01 --end 2025-11-04` makes three jobs: runs from 00Z on
-the 1st, 2nd and 3rd, keeping 06Z to 06Z. To keep whole UTC days (00Z to
-24Z), pass `--cycle-hour 18` and start the day before. A 2024 hindcast is
-366 segments and a 2025 one is 365.
+segments tile time with no gap and no duplicate frame: the 06:00 frame
+comes from the 06Z init, never the 00Z forecast's last step. With the
+defaults, `--start 2025-11-01 --end 2025-11-04` makes twelve jobs, one per
+00/06/12/18Z init, and a year is 1,460 segments (1,464 in a leap year).
+The daily layout of earlier versions is `--segment-hours 30 --spinup-hours
+6` (365 segments a year, kept 06Z to 06Z).
+
+### Spin-up
+
+A cold start from a 9–13 km global analysis needs time before its fields
+are in balance with the 100–300 m grid:
+
+| What adjusts | Typical time |
+|---|---|
+| acoustic and gravity-wave noise from interpolating the analysis onto the fine terrain | 30–60 min |
+| resolved boundary-layer turbulence on the LES leaves (from smooth initial fields) | 30–60 min by day, 1–2 h in stable nights |
+| cloud and rain water (little or none in the global analyses; icing depends on it) | 2–6 h |
+| mesoscale circulations the analysis does not resolve (sea breezes, valley flows, low-level jet timing) | 6–12 h |
+
+Inflow turbulence also needs *fetch*: a 250 m child's inflow spin-up was
+measured to cover most of its own domain
+([GRAYZONE-NEST.md](../public/GRAYZONE-NEST.md)), and no amount of time
+spin-up removes that until the inflow generator lands. The model is
+numerically stable from the first step; spin-up is about realism, not
+blow-ups (those are a time-step and terrain question). Every stitch is a
+switch to a new init, so expect a step change at the join; `--spinup-hours`
+shrinks it, and ramp detection should treat join times as suspect.
 
 All times are naive UTC. Month ends, 29 February and daylight-saving
 changes are just datetime arithmetic. An input with a non-UTC offset

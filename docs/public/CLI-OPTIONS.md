@@ -773,12 +773,12 @@ Takes no options of its own.
 | `--parent-history-interval-s` | wrf-nests parent cadence (default 3600) |
 | `--partition PARTITION.json` | woof-energy.partition.v1 document: one job chain per cluster |
 | `--resume` | merge into an existing manifest, keeping statuses |
-| `--segment-hours` | run length of every segment (default 30) |
+| `--segment-hours` | run length of every segment (default 6: one forecast per 00/06/12/18 UTC global init, stitched into one continuous analysis) |
 | `--sites SITES.json` | sites document planned as one cluster (or the sites a --partition refers to) |
 | `--sites-url TEMPLATE` | site-series store per cluster |
 | `--source` | one source for every segment (default: chosen per segment by the source selector) |
 | `--source-priority SRC[,SRC]` | preference order handed to the selector |
-| `--spinup-hours` | leading hours discarded as spin-up (default 6); each segment keeps segment - spinup hours |
+| `--spinup-hours` | leading hours discarded as spin-up (default 0); each segment keeps segment - spinup hours |
 | `--start YYYY-MM-DD[THH]` | first segment's day (its run starts at --cycle-hour) |
 | `--topology {wrf-nests,wrf-tiles}` | planner for clusters that do not name one (default wrf-nests) |
 | `--vram-gib` | size each domain for this many GiB |
