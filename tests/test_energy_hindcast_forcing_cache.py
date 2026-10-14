@@ -141,7 +141,10 @@ def _request(tmp_path, **overrides):
     record = dict(outdir=tmp_path / "hc", start=CYCLE,
                   end=datetime(2025, 11, 2), sites_path=SITES,
                   source="ecmwf-open-data", vram_gib=80.0,
-                  forcing_cache=str(tmp_path / "cache"))
+                  forcing_cache=str(tmp_path / "cache"),
+                  # The cache is under test, not the run layout: 6 h runs
+                  # kept whole, so each cycle fetches f000..f006.
+                  segment_hours=6, spinup_hours=0)
     record.update(overrides)
     return hc.HindcastRequest(**record)
 
@@ -772,7 +775,8 @@ def test_the_estimate_shows_the_per_cycle_saving(capsys):
     # A default section that cannot be sized is a note, not a refusal.
     args = parser.parse_args(
         ["energy", "estimate", "--clusters", "2", "--footprint-km2", "20",
-         "--segments", "3", "--segment-hours", "200", "--instance",
+         "--segments", "3", "--segment-hours", "200", "--spinup-hours",
+         "0", "--instance",
          "aws:p5.48xlarge"])
     assert args.func(args) == 0
     doc = json.loads(capsys.readouterr().out)

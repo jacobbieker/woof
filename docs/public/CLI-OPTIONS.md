@@ -652,6 +652,7 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
+| `--cache-read-mbps MB/S` | one job's read rate from a same-region cache (default 400) |
 | `--chain-m DX,DX,...` | refinement chain in metres, coarsest first, ending at the leaf (default: leaf x 5, then the leaf) |
 | `--chunk-mib` | compressed chunk size for the PUT count (default 8) |
 | `--clusters N` | summary mode: number of clusters (with --footprint-km2) |
@@ -659,11 +660,16 @@ Takes no options of its own.
 | `--cover-factor` | leaf-cover km2 per km2 of farm footprint (default 2.0) |
 | `--deadline-days` | also report the instances needed to finish in this many days |
 | `--footprint-km2 A` | summary mode: total farm footprint over all clusters, km2 |
+| `--forcing-cache-days DAYS` | days a cycle stays in the cache (default 7) |
+| `--forcing-gb-per-cycle GB` | one cycle's download instead of the measured per-object sizes |
+| `--forcing-objects-per-cycle N` | objects (GET/PUT requests) per cycle |
+| `--forcing-source SOURCE` | boundary source a cycle's download is sized for (default met-office-global) |
 | `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
 | `--instances` | instances of each offer running at once, for the wall clock (default 1) |
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
 | `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 300); with --partition it must match the clusters' own spacing or is refused |
 | `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
+| `--no-forcing` | leave the forcing section out |
 | `--nz` | leaf model levels (default: the job's, else 49, the hindcast's wind-energy column) |
 | `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
 | `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
@@ -671,6 +677,8 @@ Takes no options of its own.
 | `--partition PARTITION.json` | partition document with a 'clusters' list |
 | `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
 | `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
+| `--publisher-egress-usd-per-gb USD` | what the publisher charges per GB (default 0: public open data) |
+| `--publisher-mbps MB/S` | one job's download rate from the publisher (default 100) |
 | `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 9: one run per 00/06/12/18 UTC init) |
 | `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
 | `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
@@ -715,6 +723,7 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
+| `--cache-read-mbps MB/S` | one job's read rate from a same-region cache (default 400) |
 | `--chain-m DX,DX,...` | refinement chain in metres, coarsest first, ending at the leaf (default: leaf x 5, then the leaf) |
 | `--chunk-mib` | compressed chunk size for the PUT count (default 8) |
 | `--clusters N` | summary mode: number of clusters (with --footprint-km2) |
@@ -722,11 +731,16 @@ Takes no options of its own.
 | `--cover-factor` | leaf-cover km2 per km2 of farm footprint (default 2.0) |
 | `--deadline-days` | also report the instances needed to finish in this many days |
 | `--footprint-km2 A` | summary mode: total farm footprint over all clusters, km2 |
+| `--forcing-cache-days DAYS` | days a cycle stays in the cache (default 7) |
+| `--forcing-gb-per-cycle GB` | one cycle's download instead of the measured per-object sizes |
+| `--forcing-objects-per-cycle N` | objects (GET/PUT requests) per cycle |
+| `--forcing-source SOURCE` | boundary source a cycle's download is sized for (default met-office-global) |
 | `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
 | `--instances` | instances of each offer running at once, for the wall clock (default 1) |
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
 | `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 300); with --partition it must match the clusters' own spacing or is refused |
 | `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
+| `--no-forcing` | leave the forcing section out |
 | `--nz` | leaf model levels (default: the job's, else 49, the hindcast's wind-energy column) |
 | `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
 | `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
@@ -734,6 +748,8 @@ Takes no options of its own.
 | `--partition PARTITION.json` | partition document with a 'clusters' list |
 | `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
 | `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
+| `--publisher-egress-usd-per-gb USD` | what the publisher charges per GB (default 0: public open data) |
+| `--publisher-mbps MB/S` | one job's download rate from the publisher (default 100) |
 | `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 9: one run per 00/06/12/18 UTC init) |
 | `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
 | `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
@@ -749,6 +765,18 @@ Takes no options of its own.
 |---|---|
 | `--dir DIR` | hindcast directory a bare job id is in |
 | `--force` | re-plan (earlier plan moved aside) |
+
+## `woof energy hindcast mirror`
+
+| argument | what it does |
+|---|---|
+| `JOB` | job.json, its directory, or a job id with --dir |
+
+| option | what it does |
+|---|---|
+| `--dir DIR` | hindcast directory a bare job id is in |
+| `--fetcher MODULE:CALLABLE` | transport for an inline prefetch (default: woof fetch) |
+| `--no-prefetch` | do not run a missing cache entry's prefetch inline |
 
 ## `woof energy hindcast optimize`
 
@@ -789,6 +817,7 @@ Takes no options of its own.
 | `--dry-run` | print the manifest and an example job; write nothing |
 | `--dx-m` | leaf spacing, 100 to 300 m (default: the cluster's, else 300, the cheapest) |
 | `--end YYYY-MM-DD[THH]` | exclusive bound on segment run starts |
+| `--forcing-cache URL` | fetch each (source, cycle) once into this shared cache (s3://, gs://, file:// or a path) and have every job of the cycle mirror from it: adds prefetch jobs the forecast jobs depend on (docs/energy-hindcast/forcing-cache.md) |
 | `--gridded-url TEMPLATE` | gridded store per cluster leaf |
 | `--leaf-history-interval-s` | leaf history cadence (default 900; finer such as 300 allowed) |
 | `--max-domains` | refuse plans with more high-resolution domains |
@@ -810,6 +839,22 @@ Takes no options of its own.
 | `--topology {wrf-nests,wrf-tiles}` | planner for clusters that do not name one (default wrf-nests) |
 | `--vram-gib` | size each domain for this many GiB |
 
+## `woof energy hindcast prefetch`
+
+| argument | what it does |
+|---|---|
+| `DIR` | hindcast directory |
+
+| option | what it does |
+|---|---|
+| `--cycle YYYY-MM-DDTHH` | only this cycle (repeatable) |
+| `--dry-run` | print each fetch, its cache entry and its measured download size; fetch nothing |
+| `--fetcher MODULE:CALLABLE` | transport called as fetcher(request, out) (default: woof fetch) |
+| `--force` | also run prefetch jobs the manifest calls complete (the cache is checked; nothing complete is fetched again) |
+| `--job ID` | only this prefetch job (repeatable) |
+| `--refetch` | fetch and publish again even when the cache entry is complete |
+| `--source` | only this source (repeatable) |
+
 ## `woof energy hindcast run-local`
 
 | argument | what it does |
@@ -820,8 +865,10 @@ Takes no options of its own.
 |---|---|
 | `--dir DIR` | hindcast directory a bare job id is in |
 | `--dry-run` | materialize and print woof energy run's argv |
+| `--fetcher MODULE:CALLABLE` | prefetch transport called as fetcher(request, out) (default: woof fetch) |
 | `--force` | run a job the manifest calls complete |
 | `--no-extract` | skip extracting the kept window at the sites |
+| `--no-forcing-cache` | do not mirror the job's forcing from its cache; the run fetches everything itself |
 | `--resume` | pass --resume to woof energy run |
 | `--writer MODULE:CALLABLE` | callable handed the kept-window forecast and targets (e.g. the Icechunk writer) |
 
