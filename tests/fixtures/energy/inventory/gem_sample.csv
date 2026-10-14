@@ -1,0 +1,11 @@
+Date Last Researched,Country/Area,Project Name,Phase Name,Project Name in Local Language / Script,Other Name(s),Capacity (MW),Installation Type,Status,Start Year,Retired Year,Operator,Owner,Latitude,Longitude,Location Accuracy,City,State/Province,Subregion,Region,GEM location ID,GEM phase ID,Wiki URL
+2026-01-01,United States,Synthetic Prairie Wind Farm,,,,10,onshore,operating,2015,,Synthetic Operator,Synthetic Owner,32.404,-101.4925,approximate,,Texas,Northern America,Americas,L900001,G900001,https://example.invalid/prairie
+2026-01-01,United Kingdom,Synthetic Fferm Wynt Cafe - Brecon,,,,24,onshore,operating,2012,,Synthetic Wind Ltd,Synthetic Wind Ltd,51.962,-3.455,exact,,Wales,Northern Europe,Europe,L900002,G900002,
+2026-01-01,United Kingdom,Synthetic North Sea Array 1,Phase 1,,,200,offshore hard mount,operating,2018,,,Synthetic Offshore Owner,54.0,2.0,exact,,,Northern Europe,Europe,L900003,G900003,
+2026-01-01,United Kingdom,Synthetic North Sea Array 1,Phase 2,,,100,offshore hard mount,operating,2019,,,Synthetic Offshore Owner,54.0,2.0,exact,,,Northern Europe,Europe,L900003,G900004,
+2026-01-01,United Kingdom,Synthetic North Sea Array 2,,,,400,offshore floating,operating,2021,,,Synthetic Offshore Owner,54.0,2.12,exact,,,Northern Europe,Europe,L900004,G900005,
+2026-01-01,United Kingdom,Synthetic Offshore,,,,300,offshore hard mount,construction,,,,,51.214,-4.865,exact,,Wales,Northern Europe,Europe,L900005,G900006,
+2026-01-01,Brazil,Synthetic Dream Wind,,,,500,onshore,announced,,,,,-5.0,-36.0,approximate,,,Latin America and the Caribbean,Americas,L900006,G900007,
+2026-01-01,Brazil,Synthetic Shelf Wind,,,,50,onshore,shelved - inferred 2 y,,,,,-6.0,-37.0,approximate,,,Latin America and the Caribbean,Americas,L900008,G900009,
+2026-01-01,Germany,Synthetic Lost Wind,,,,20,onshore,operating,2005,,,,,,approximate,,,Western Europe,Europe,L900009,G900010,
+2026-01-01,Germany,Synthetic Hill Wind Farm,,,,30,onshore,operating,2008,,,Synthetic Hill GmbH,51.002,10.004,approximate,,Thuringia,Western Europe,Europe,L900007,G900008,

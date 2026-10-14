@@ -1,0 +1,15 @@
+[
+ {"type": "node", "id": 9100001, "lat": 51.003, "lon": 10.0, "tags": {"power": "generator", "generator:source": "wind", "generator:method": "wind_turbine", "height:hub": "100"}},
+ {"type": "node", "id": 9100002, "lat": 51.003, "lon": 10.004, "tags": {"power": "generator", "generator:source": "wind", "generator:method": "wind_turbine", "height:hub": "100"}},
+ {"type": "node", "id": 9100003, "lat": 51.003, "lon": 10.008, "tags": {"power": "generator", "generator:source": "wind", "generator:method": "wind_turbine"}},
+ {"type": "node", "id": 9100004, "lat": 51.1, "lon": 10.1, "tags": {"power": "generator", "generator:source": "solar"}},
+ {"type": "node", "id": 9100005, "lat": 32.40005, "lon": -101.50015, "tags": {"power": "generator", "generator:source": "wind", "rotor:diameter": "100", "generator:output:electricity": "2.5 MW"}},
+ {"type": "node", "id": 9100006, "lat": 51.96, "lon": -3.456, "tags": {"power": "generator", "generator:source": "wind"}},
+ {"type": "way", "id": 9200001, "nodes": [1, 2, 3, 4, 1],
+  "geometry": [{"lat": 51.0, "lon": 9.999}, {"lat": 51.0, "lon": 10.01}, {"lat": 51.006, "lon": 10.01}, {"lat": 51.006, "lon": 9.999}, {"lat": 51.0, "lon": 9.999}],
+  "tags": {"power": "plant", "plant:source": "wind", "name": "Synthetic Hill Windpark"}},
+ {"type": "relation", "id": 9300001,
+  "members": [{"type": "way", "ref": 5, "role": "outer", "geometry": [{"lat": 50.0, "lon": 12.0}, {"lat": 50.0, "lon": 12.02}, {"lat": 50.01, "lon": 12.02}, {"lat": 50.01, "lon": 12.0}, {"lat": 50.0, "lon": 12.0}]}],
+  "tags": {"type": "multipolygon", "power": "plant", "plant:source": "wind", "name": "Synthetic Relation Farm", "plant:output:electricity": "40 MW"}},
+ {"type": "node", "id": 9100007, "tags": {"power": "generator", "generator:source": "wind"}}
+]
