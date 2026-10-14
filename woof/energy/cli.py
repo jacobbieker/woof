@@ -13,6 +13,8 @@ the subcommand runs::
     woof energy run       woof.energy.run             run every plan domain
     woof energy extract   woof.energy.extract         plan runs -> forecast.v1
     woof energy rating    woof.energy.products        line rating, icing, power
+    woof energy queue     woof.energy.workqueue       object-store job queue
+    woof energy worker    woof.energy.worker          drain a queue, one loop per GPU
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from __future__ import annotations
 import argparse
 from importlib import import_module
 
-from woof.cli_numbers import positive_float, positive_int
+from woof.cli_numbers import nonnegative_float, positive_float, positive_int
 
 _KINDS = ("line", "minor_line", "cable", "substation", "plant", "generator",
           "tower")
@@ -315,6 +317,115 @@ def _register_rating(sub) -> None:
     p.set_defaults(func=_dispatch("woof.energy.products"))
 
 
+def _register_queue(sub) -> None:
+    from woof.energy.workqueue import (DEFAULT_BACKOFF_BASE_S,
+                                       DEFAULT_BACKOFF_MAX_S,
+                                       DEFAULT_LEASE_S, DEFAULT_MAX_ATTEMPTS,
+                                       JOB_SCHEMA)
+
+    p = sub.add_parser(
+        "queue", help="object-store work queue for hindcast jobs "
+                      "(file://, s3://, gs://)")
+    p.set_defaults(func=_dispatch("woof.energy.workqueue"), queue_command=None)
+    queue = p.add_subparsers(dest="queue_command", required=False)
+    url = {"metavar": "QUEUE_URL",
+           "help": "file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix"}
+
+    init = queue.add_parser("init", help="create queue.json (settings)")
+    init.add_argument("queue", **url)
+    init.add_argument("--max-attempts", type=positive_int,
+                      default=DEFAULT_MAX_ATTEMPTS,
+                      help="charged failures before a job is dead "
+                           f"(default {DEFAULT_MAX_ATTEMPTS})")
+    init.add_argument("--lease-s", type=positive_float, default=DEFAULT_LEASE_S,
+                      help="lease length; a worker silent this long loses "
+                           f"its job (default {DEFAULT_LEASE_S:g})")
+    init.add_argument("--heartbeat-s", type=positive_float, default=None,
+                      help="lease renewal interval, at most half of "
+                           "--lease-s (default min(120, lease/4))")
+    init.add_argument("--backoff-base-s", type=nonnegative_float,
+                      default=DEFAULT_BACKOFF_BASE_S,
+                      help="wait after the first failure, doubling per "
+                           f"failure (default {DEFAULT_BACKOFF_BASE_S:g})")
+    init.add_argument("--backoff-max-s", type=nonnegative_float,
+                      default=DEFAULT_BACKOFF_MAX_S,
+                      help=f"backoff ceiling (default {DEFAULT_BACKOFF_MAX_S:g})")
+    init.set_defaults(func=_dispatch("woof.energy.workqueue"))
+
+    push = queue.add_parser("push", help="queue job specs (idempotent)")
+    push.add_argument("queue", **url)
+    push.add_argument("jobs", nargs="+", metavar="JOB",
+                      help="job JSON files, or directories of *.json")
+    push.add_argument("--schema", default=JOB_SCHEMA,
+                      help=f"job document schema to accept (default "
+                           f"{JOB_SCHEMA})")
+    push.set_defaults(func=_dispatch("woof.energy.workqueue"))
+
+    status = queue.add_parser("status", help="count jobs by state (JSON)")
+    status.add_argument("queue", **url)
+    status.add_argument("--jobs", action="store_true",
+                        help="list every job with its state and lease")
+    status.set_defaults(func=_dispatch("woof.energy.workqueue"))
+
+    requeue = queue.add_parser(
+        "requeue", help="make dead or backed-off jobs claimable again")
+    requeue.add_argument("queue", **url)
+    requeue.add_argument("--job", action="append", metavar="ID",
+                         help="job id to requeue (repeatable)")
+    requeue.add_argument("--all-dead", action="store_true",
+                         help="requeue every dead job")
+    requeue.set_defaults(func=_dispatch("woof.energy.workqueue"))
+
+
+def _register_worker(sub) -> None:
+    from woof.energy.worker import (DEFAULT_POLL_S, DEFAULT_RUNNER_TEMPLATE,
+                                    DEFAULT_TERM_GRACE_S, DEFAULT_TIMEOUT_S,
+                                    RUNNER_PLACEHOLDERS)
+
+    p = sub.add_parser(
+        "worker", help="drain a hindcast queue, one loop per GPU")
+    p.add_argument("queue", metavar="QUEUE_URL",
+                   help="file:///abs/dir, s3://bucket/prefix or "
+                        "gs://bucket/prefix")
+    p.add_argument("--gpus", default=None, metavar="all|N|UUID[,UUID]",
+                   help="GPUs to run on: all (default), the first N, or "
+                        "UUIDs")
+    devices = p.add_mutually_exclusive_group()
+    devices.add_argument("--no-gpu", action="store_true",
+                         help="CPU slots only (no GPU lock, "
+                              "CUDA_VISIBLE_DEVICES=-1)")
+    devices.add_argument("--fake-gpus", type=positive_int, default=None,
+                         metavar="N",
+                         help="testing: N stand-in GPU identities, no "
+                              "device read (set WOOF_GPU_LOCK_ROOT)")
+    p.add_argument("--slots", type=positive_int, default=None,
+                   help="with --no-gpu: CPU slots to run (default 1)")
+    p.add_argument("--runner-cmd", default=DEFAULT_RUNNER_TEMPLATE,
+                   metavar="TEMPLATE",
+                   help="command run per job; placeholders "
+                        + ", ".join("{%s}" % n for n in RUNNER_PLACEHOLDERS)
+                        + f" (default: {DEFAULT_RUNNER_TEMPLATE})")
+    p.add_argument("--timeout-s", type=positive_float,
+                   default=DEFAULT_TIMEOUT_S,
+                   help=f"runner wall-clock limit (default "
+                        f"{DEFAULT_TIMEOUT_S:g})")
+    p.add_argument("--term-grace-s", type=nonnegative_float,
+                   default=DEFAULT_TERM_GRACE_S,
+                   help="SIGTERM to SIGKILL grace for the runner "
+                        f"(default {DEFAULT_TERM_GRACE_S:g})")
+    p.add_argument("--exit-when-empty", action="store_true",
+                   help="exit once every job is done or dead")
+    p.add_argument("--max-idle-s", type=positive_float, default=None,
+                   help="exit after this long with nothing to claim")
+    p.add_argument("--poll-s", type=positive_float, default=DEFAULT_POLL_S,
+                   help=f"idle poll interval, jittered (default "
+                        f"{DEFAULT_POLL_S:g})")
+    p.add_argument("--workdir", default=None, metavar="DIR",
+                   help="local scratch for job files and logs (default: a "
+                        "fresh directory under the system temp)")
+    p.set_defaults(func=_dispatch("woof.energy.worker"))
+
+
 def register_cli(subparsers) -> None:
     """Add ``woof energy`` to the product CLI."""
 
@@ -330,6 +441,8 @@ def register_cli(subparsers) -> None:
     _register_run(sub)
     _register_extract(sub)
     _register_rating(sub)
+    _register_queue(sub)
+    _register_worker(sub)
 
 
 __all__ = ["register_cli"]

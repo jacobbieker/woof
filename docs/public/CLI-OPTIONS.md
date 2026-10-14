@@ -686,6 +686,56 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--topology {wrf-nests,wrf-tiles,hex-swath}` | wrf-nests: sibling nests in one run; wrf-tiles: one parent run plus offline child tiles (no count limit); hex-swath: MPAS corridor mesh |
 | `--vram-gib` | size each domain for this many GiB |
 
+## `woof energy queue`
+
+Takes no options of its own.
+
+## `woof energy queue init`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--backoff-base-s` | wait after the first failure, doubling per failure (default 60) |
+| `--backoff-max-s` | backoff ceiling (default 3600) |
+| `--heartbeat-s` | lease renewal interval, at most half of --lease-s (default min(120, lease/4)) |
+| `--lease-s` | lease length; a worker silent this long loses its job (default 900) |
+| `--max-attempts` | charged failures before a job is dead (default 3) |
+
+## `woof energy queue push`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+| `JOB [JOB ...]` | job JSON files, or directories of *.json |
+
+| option | what it does |
+|---|---|
+| `--schema` | job document schema to accept (default woof-energy.hindcast-job.v1) |
+
+## `woof energy queue requeue`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--all-dead` | requeue every dead job |
+| `--job ID` | job id to requeue (repeatable) |
+
+## `woof energy queue status`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--jobs` | list every job with its state and lease |
+
 ## `woof energy rating`
 
 | argument | what it does |
@@ -727,6 +777,26 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--pv-grid-m` | sample solar farm polygons on a grid of this spacing (default: one site at the centroid) |
 | `--region FILE.geojson` | keep only sites inside this Polygon/MultiPolygon |
 | `--spacing-m` | sample spacing along lines and cables (default 100) |
+
+## `woof energy worker`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--exit-when-empty` | exit once every job is done or dead |
+| `--fake-gpus N` | testing: N stand-in GPU identities, no device read (set WOOF_GPU_LOCK_ROOT) |
+| `--gpus all\|N\|UUID[,UUID]` | GPUs to run on: all (default), the first N, or UUIDs |
+| `--max-idle-s` | exit after this long with nothing to claim |
+| `--no-gpu` | CPU slots only (no GPU lock, CUDA_VISIBLE_DEVICES=-1) |
+| `--poll-s` | idle poll interval, jittered (default 30) |
+| `--runner-cmd TEMPLATE` | command run per job; placeholders {python}, {job}, {job_id}, {attempt}, {workdir}, {result}, {gpu_uuid}, {queue} (default: {python} -m woof energy hindcast run-local {job}) |
+| `--slots` | with --no-gpu: CPU slots to run (default 1) |
+| `--term-grace-s` | SIGTERM to SIGKILL grace for the runner (default 20) |
+| `--timeout-s` | runner wall-clock limit (default 86400) |
+| `--workdir DIR` | local scratch for job files and logs (default: a fresh directory under the system temp) |
 
 ## `woof enprod`
 
