@@ -341,6 +341,91 @@ power per wind farm from turbine-specific curves matched by make and model
 (or rating and rotor), with density correction, high-wind shutdown, wakes
 and losses. See [Wind farm power](energy-hindcast/power.md).
 
+## Wind-farm output without 3-D volumes: the `windfarm` preset
+
+Every wind-farm product reads a handful of numbers at rotor height: wind
+speed and direction, temperature, pressure, air density, humidity, cloud
+water, rain and droplet number. The `energy` preset gets them by keeping
+the whole column: winds, theta, pressure, geopotential and six
+hydrometeors on every level, about 700 planes per frame on a 49-level
+leaf. Most of that is never read.
+
+`[output] preset = "windfarm"` writes only 2-D planes instead. The model
+interpolates what the products need to the hub heights itself, on the
+GPU, every frame (`woof/core/hub_wind_diag.py`), and the tape carries:
+
+| group | fields | why |
+|---|---|---|
+| hub-height wind | `WSPD_HUB`, `WDIR_HUB`, and `WSPD_HUB_MAX`/`MIN`/`MEAN` over the history interval | power, wakes, ramps, cut-out excursions inside an interval |
+| hub-height scalars | `T_HUB`, `P_HUB`, `RHO_HUB`, `QV_HUB`, `QC_HUB`, `QR_HUB`, `QNC_HUB` | density correction, icing (temperature, water content, droplet size), humidity |
+| near surface | `U10`, `V10`, `T2`, `Q2`, `PSFC`, `TSK` | shear below the rotor, surface and air-sea stability |
+| boundary layer | `PBLH`, `UST`, `HFX`, `LH`, `SWDOWN` | stability (Obukhov length), wake recovery, low-level jets |
+| precipitation | `RAINNC`, `RAINC`, `SNOWNC` | blade erosion, icing context |
+| interval extremes | `WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX` | gust shutdown, convective gusts (`nwp_diagnostics = 1`) |
+| georeference | `XLAT`, `XLONG`, `HGT`, `SINALPHA`/`COSALPHA`, `LANDMASK`, and the eta columns and time coordinate | placing the sites, rotating the 10 m wind |
+
+The reason for each field is in
+`woof.io.history_selection.WINDFARM_FIELD_REASONS`. At six hub heights
+that is 99 planes per frame, against about 700 for `energy` and about
+2,240 for `full` on the hindcast's 49-level leaf. The preset needs the hub-height
+diagnostic (`hub_wind = true` or `hub_heights_m`), and it is the one
+preset that does not carry the structural `T` and `PHB` volumes, so its
+tape is not a file `rw_wrfbatch` opens; its reader is `woof energy
+extract`.
+
+**Extracting from it.** `woof energy extract` takes the profile variables
+from the hub planes whenever the history has no `PH`/`PHB`:
+
+- `u`, `v`, `wind_speed`, `wind_from_direction` from `WSPD_HUB` and
+  `WDIR_HUB`. They are earth-relative already, and are turned into
+  components at each stencil cell before the bilinear blend, so a
+  direction is never averaged across north.
+- `air_temperature` is `T_HUB` and `air_density` is `RHO_HUB` as the
+  model wrote them, and `relative_humidity` comes from `T_HUB`, `P_HUB`
+  and `QV_HUB`.
+- `air_pressure`, `specific_humidity`, `cloud_liquid_mixing_ratio`,
+  `rain_mixing_ratio` and `cloud_number_mixing_ratio` come from `P_HUB`,
+  `QV_HUB`, `QC_HUB`, `QR_HUB` and `QNC_HUB`.
+
+The forecast heights are the history's `HUB_HEIGHT` levels. Each
+requested height, from the sites document or `--heights-m`, must be one
+of them. Nothing is interpolated between hub planes, and a height the
+history does not carry is refused with the list it does. `w`,
+`ice_mixing_ratio` and `snow_mixing_ratio` have no hub plane and are left
+out with a note.
+
+Three differences from the volume path are written to the forecast's
+`notes`:
+
+- The model holds the lowest (highest) mass level's value for a hub height
+  below (above) the column, where the volume path writes NaN.
+- The model interpolates in each column and the sampler then blends the
+  four stencil columns; the volume path blends the columns first and then
+  interpolates in height. Over flat ground the two are the same. Over
+  steep terrain they differ at second order.
+- `w` is not available.
+
+A history that carries both the volumes and the hub planes (`energy` with
+`hub_wind`) is always sampled from the volumes.
+
+On one tiny moist GPU run (36 x 30 x 30 at 250 m, five hub heights, 60
+model seconds), a `windfarm` frame was 280 kB against 1.73 MB for the
+same frame written in full. The forecast extracted from the hub planes
+and the one extracted from the full frames agreed to 1.4e-7 relative. The
+`rating --products turbine-icing,wind-resource,ramps` and `power` products
+both ran on it.
+
+**In a hindcast.** `woof energy hindcast plan` gives every leaf
+`--leaf-output-preset windfarm` by default, with `hub_heights_m` set to
+the cluster sites document's `heights_m`, so the extracted forecast
+lands on the heights of the site store. `energy` and `full` keep their
+volumes and add `hub_wind = true`. The preset and the heights are
+recorded in the job document and are part of its identity. `woof energy
+estimate --store-preset windfarm` prices the store from the preset's own
+field list (`--hub-heights N`, or the job's). For the worldwide example
+in [the cost estimate](energy-hindcast/cost.md), that is about 72 TB,
+against 0.63 PB for `energy` and 2.0 PB for `full`.
+
 ## Choosing a topology
 
 | | `wrf-nests` | `wrf-tiles` | `hex-swath` |

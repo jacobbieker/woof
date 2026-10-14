@@ -25,6 +25,7 @@ from woof.io.history_selection import (
     DEFAULT_HUB_HEIGHTS_M, HISTORY_PRESETS, HISTORY_VOCABULARY,
     HistorySelection, HubWindConfigError, HubWindRequest)
 from woof.io.wrf_output_schema import (HUB_HEIGHT_DIMENSIONED_FIELDS,
+                                        HUB_SCALAR_OUTPUT_FIELDS,
                                         HUB_WIND_OUTPUT_FIELDS)
 
 REPO = Path(__file__).resolve().parents[1]
@@ -34,7 +35,7 @@ G = np.float32(9.81)
 #: re-run the GPU tier below and re-pin (the kernels/*.cu freeze discipline,
 #: tests/test_kernel_source_freeze_per_module.py, applied to an inline unit).
 KERNEL_SOURCE_SHA256 = (
-    "19faada0c001a5e05e7f1b7c65fc00571e71ecd65d2e95096eb39aca05d1d045")
+    "0e3989d04342300d7917480382017726ee31453c528f2f54a9f4e020886effb3")
 
 
 # ---------------------------------------------------------------------------
@@ -524,7 +525,7 @@ def test_the_writer_puts_the_hub_fields_on_their_own_axis(tmp_path, n_hub):
         writer.write_frame("2025-01-01_00:00:00", frame)
     with netCDF4.Dataset(path) as ds:
         assert len(ds.dimensions["hub_height"]) == n_hub
-        for name in HUB_HEIGHT_DIMENSIONED_FIELDS:
+        for name in HUB_HEIGHT_DIMENSIONED_FIELDS & set(frame):
             var = ds.variables[name]
             assert var.dimensions == ("Time", "hub_height", "south_north",
                                       "west_east"), name
@@ -629,3 +630,224 @@ def test_an_output_block_that_does_not_ask_keeps_its_public_bytes():
     assert "hub_wind" not in _public_config_value(HistorySelection())
     on = _public_config_value(HistorySelection.from_mapping({"hub_wind": True}))
     assert tuple(on["hub_wind"]["heights_m"]) == DEFAULT_HUB_HEIGHTS_M
+
+
+# ---------------------------------------------------------------------------
+# the hub-height scalars (the windfarm preset's thermodynamics)
+# ---------------------------------------------------------------------------
+
+def _thermo(state, *, theta=lambda z: 290.0 + 0.004 * z,
+            pressure=lambda z: 101000.0 * np.exp(-z / 8000.0),
+            qv=lambda z: 0.008 - 1e-6 * z, qc=lambda z: 1e-4 + 0.0 * z,
+            qr=lambda z: 2e-5 + 0.0 * z, nc=None, thb_1d=True, moist=True):
+    """Give a :func:`_column_state` the thermodynamic arrays the scalars read.
+
+    Profiles are functions of the column's own mass-level heights AGL;
+    theta is split into a base column ``thb`` and a perturbation ``thp``
+    so the kernel's ``thp + thb`` is exercised.
+    """
+    z = hw.mass_heights_agl_np(state.php, state.phb, state.ht).astype(np.float64)
+    nz, ny, nx = z.shape
+    total = theta(z)
+    base = np.full(nz, 285.0) if thb_1d else np.full((nz, ny, nx), 285.0)
+    state.thb = np.asarray(base, dtype=np.float32)
+    state.thp = np.ascontiguousarray(
+        total - (base[:, None, None] if thb_1d else base), dtype=np.float32)
+    state.p = np.ascontiguousarray(pressure(z), dtype=np.float32)
+    if moist:
+        state.qv = np.ascontiguousarray(qv(z), dtype=np.float32)
+        state.qc = np.ascontiguousarray(qc(z), dtype=np.float32)
+        state.qr = np.ascontiguousarray(qr(z), dtype=np.float32)
+    else:
+        state.qv = state.qc = state.qr = None
+    state.nc = (None if nc is None
+                else np.ascontiguousarray(nc(z), dtype=np.float32))
+    return state
+
+
+def _scalar_diag(state, heights=(40.0, 80.0, 100.0)):
+    ny, nx = state.ht.shape
+    return hw.HubWindDiagnostic(HubWindRequest(heights_m=tuple(heights)),
+                                ny=ny, nx=nx, scalars=True)
+
+
+def _f64_reference(state, heights):
+    """Independent float64 evaluation of the pinned scalar formulas."""
+    from woof.core.constants import CP, P0, RD
+
+    z = hw.mass_heights_agl_np(state.php, state.phb, state.ht)[:, 0, 0]
+    z = z.astype(np.float64)
+    thb = state.thb if state.thb.ndim == 1 else state.thb[:, 0, 0]
+    col = {"theta": state.thp[:, 0, 0].astype(np.float64) + thb,
+           "p": state.p[:, 0, 0].astype(np.float64)}
+    if state.qv is not None:
+        for name in ("qv", "qc", "qr"):
+            col[name] = getattr(state, name)[:, 0, 0].astype(np.float64)
+    if state.nc is not None:
+        col["nc"] = state.nc[:, 0, 0].astype(np.float64)
+    at = {k: np.interp(heights, z, v) for k, v in col.items()}  # holds ends
+    t = at["theta"] * (at["p"] / P0) ** (RD / CP)
+    q = at.get("qv", 0.0 * t)
+    rho = at["p"] / (RD * t * (1.0 + 0.608 * q / (1.0 + q)))
+    return {"T_HUB": t, "P_HUB": at["p"], "RHO_HUB": rho,
+            **({"QV_HUB": at["qv"], "QC_HUB": at["qc"], "QR_HUB": at["qr"]}
+               if "qv" in at else {}),
+            **({"QNC_HUB": at["nc"]} if "nc" in at else {})}
+
+
+@pytest.mark.parametrize("thb_1d", [True, False])
+def test_scalars_match_an_independent_float64_evaluation(thb_1d):
+    state = _thermo(_column_state(nz=12, dz=40.0, hgt=250.0),
+                    nc=lambda z: 1e8 - 1e4 * z, thb_1d=thb_1d)
+    heights = (5.0, 40.0, 100.0, 133.3, 470.0, 900.0)   # below, in, above
+    got = hw.hub_scalars_np(state.php, state.phb, state.ht, state.thp,
+                            state.thb, state.p, heights, qv=state.qv,
+                            qc=state.qc, qr=state.qr, nc=state.nc)
+    assert tuple(got) == HUB_SCALAR_OUTPUT_FIELDS
+    want = _f64_reference(state, heights)
+    for name, value in got.items():
+        assert value.shape == (len(heights), 4, 5) and value.dtype == np.float32
+        np.testing.assert_allclose(value[:, 0, 0], want[name], rtol=3e-6,
+                                   err_msg=name)
+        # A horizontally uniform column gives a horizontally uniform answer.
+        assert np.all(value == value[:, :1, :1]), name
+    # extract's own derivations from the interpolated inputs agree: T_HUB
+    # and RHO_HUB are what air_temperature/air_density would give.
+    from woof.energy import extract
+    theta_h = want["T_HUB"] / (want["P_HUB"] / 1e5) ** (2.0 / 7.0)
+    np.testing.assert_allclose(
+        extract.air_temperature(theta_h, want["P_HUB"]),
+        got["T_HUB"][:, 0, 0], rtol=3e-6)
+    np.testing.assert_allclose(
+        extract.air_density(want["P_HUB"], want["T_HUB"], want["QV_HUB"]),
+        got["RHO_HUB"][:, 0, 0], rtol=3e-6)
+
+
+def test_scalars_hold_the_end_levels_like_the_wind():
+    state = _thermo(_column_state(nz=6, dz=50.0))   # mass levels 25 .. 275 m
+    got = hw.hub_scalars_np(state.php, state.phb, state.ht, state.thp,
+                            state.thb, state.p, (1.0, 2.0, 275.5, 999.0),
+                            qv=state.qv, qc=state.qc, qr=state.qr)
+    # Below the lowest and above the top mass level: that level's own bytes.
+    assert got["P_HUB"][0, 0, 0] == state.p[0, 0, 0]
+    assert got["P_HUB"][3, 0, 0] == state.p[-1, 0, 0]
+    assert got["QV_HUB"][1, 0, 0] == state.qv[0, 0, 0]
+    assert got["QC_HUB"][2, 0, 0] == state.qc[-1, 0, 0]
+
+
+def test_a_dry_state_writes_no_moisture_planes_and_dry_density():
+    from woof.core.constants import RD
+
+    state = _thermo(_column_state(), moist=False)
+    got = hw.hub_scalars_np(state.php, state.phb, state.ht, state.thp,
+                            state.thb, state.p, (80.0,))
+    assert tuple(got) == ("T_HUB", "P_HUB", "RHO_HUB")
+    np.testing.assert_allclose(got["RHO_HUB"],
+                               got["P_HUB"] / (RD * got["T_HUB"]), rtol=1e-6)
+    with pytest.raises(hw.HubWindError, match="together"):
+        hw.hub_scalars_np(state.php, state.phb, state.ht, state.thp,
+                          state.thb, state.p, (80.0,), qv=state.p)
+    diag = _scalar_diag(state)
+    assert tuple(diag.history_fields(state)) == (
+        HUB_WIND_OUTPUT_FIELDS + ("T_HUB", "P_HUB", "RHO_HUB"))
+
+
+def test_scalars_are_read_at_the_frame_not_at_the_step(tmp_path):
+    state = _thermo(_column_state(u_of_z=lambda z: 5.0 + 0.0 * z),
+                    nc=lambda z: 5e7 + 0.0 * z)
+    diag = _scalar_diag(state)
+    diag.on_step(state, 10.0)
+    # The post-RK microphysics adjustment moves theta and the hydrometeors
+    # AFTER the epilogue the wind window folds in; the frame must see it.
+    state.qc[...] = np.float32(3e-4)
+    state.thp[...] += np.float32(2.0)
+    fields = diag.history_fields(state)
+    assert tuple(fields) == HUB_WIND_OUTPUT_FIELDS + HUB_SCALAR_OUTPUT_FIELDS
+    np.testing.assert_array_equal(fields["QC_HUB"], np.float32(3e-4))
+    want = hw.hub_scalars_np(state.php, state.phb, state.ht, state.thp,
+                             state.thb, state.p, diag.heights_m, qv=state.qv,
+                             qc=state.qc, qr=state.qr, nc=state.nc)
+    for name in HUB_SCALAR_OUTPUT_FIELDS:
+        np.testing.assert_array_equal(fields[name], want[name], err_msg=name)
+    # Instantaneous: closing the interval leaves nothing to restart.
+    diag.close_interval(state, valid_time=datetime(2025, 1, 1),
+                        output_dir=tmp_path, grid_id=1)
+    again = diag.history_fields(state)
+    np.testing.assert_array_equal(again["T_HUB"], want["T_HUB"])
+
+
+def test_scalars_are_off_unless_the_selection_names_them():
+    on = HistorySelection.from_mapping({"preset": "windfarm",
+                                        "hub_wind": True})
+    assert on.hub_scalars
+    for table in ({"hub_wind": True},                      # full
+                  {"preset": "energy", "hub_wind": True},
+                  {"preset": "minimal", "hub_wind": True},
+                  {"preset": "windfarm", "hub_wind": True,
+                   "history_drop": list(HUB_SCALAR_OUTPUT_FIELDS)}):
+        assert not HistorySelection.from_mapping(table).hub_scalars, table
+    assert HistorySelection.from_mapping(
+        {"history_vars": ["WSPD_HUB", "RHO_HUB"], "hub_wind": True}
+    ).hub_scalars
+    # attach carries the flag, and a re-attach with another flag is refused.
+    state = _thermo(_column_state())
+    ny, nx = state.ht.shape
+    diag = hw.attach_hub_wind(state, on, nx=nx, ny=ny, dx=100.0, dy=100.0,
+                              grid_id=3)
+    assert diag.scalars
+    assert set(HUB_SCALAR_OUTPUT_FIELDS) - {"QNC_HUB"} <= set(
+        diag.history_fields(state))
+    with pytest.raises(hw.HubWindError, match="different"):
+        hw.attach_hub_wind(state, HistorySelection.from_mapping(
+            {"preset": "energy", "hub_wind": True}), nx=nx, ny=ny, dx=100.0,
+            dy=100.0, grid_id=3)
+    other = _thermo(_column_state())
+    plain = hw.attach_hub_wind(
+        other, HistorySelection.from_mapping({"hub_wind": True}),
+        nx=nx, ny=ny, dx=100.0, dy=100.0, grid_id=3)
+    assert not plain.scalars
+    assert tuple(plain.history_fields(other)) == HUB_WIND_OUTPUT_FIELDS
+
+
+def test_the_windfarm_preset_needs_the_hub_diagnostic():
+    with pytest.raises(HubWindConfigError, match="windfarm"):
+        HistorySelection.from_mapping({"preset": "windfarm"})
+
+
+def test_the_writer_puts_the_scalars_on_the_hub_axis(tmp_path):
+    import netCDF4
+    from woof.io.wrfout import WrfoutWriter
+
+    nz, ny, nx = 4, 5, 6
+    state = _thermo(_column_state(nz=nz, ny=ny, nx=nx, dz=60.0),
+                    nc=lambda z: 1e8 + 0.0 * z)
+    diag = _scalar_diag(state, heights=(60.0, 90.0, 120.0, 150.0))
+    frame = {"T": np.zeros((nz, ny, nx), np.float32),
+             **diag.history_fields(state)}
+    path = tmp_path / "wrfout_d01_hub_scalars"
+    with WrfoutWriter(path, nx=nx, ny=ny, nz=nz, dx=100.0, dy=100.0,
+                      field_schema=frame, engine="python") as writer:
+        writer.write_frame("2025-01-01_00:00:00", frame)
+    with netCDF4.Dataset(path) as ds:
+        for name in HUB_SCALAR_OUTPUT_FIELDS:
+            var = ds.variables[name]
+            assert var.dimensions == ("Time", "hub_height", "south_north",
+                                      "west_east"), name
+            np.testing.assert_array_equal(var[0], frame[name])
+        assert ds.variables["RHO_HUB"].units == "kg m-3"
+        assert ds.variables["T_HUB"].units == "K"
+
+
+def test_disk_pricing_counts_the_scalars_the_run_carries():
+    windfarm = HistorySelection.from_mapping(
+        {"preset": "windfarm", "hub_heights_m": [80, 120]})
+    shapes = hw.hub_history_shapes(windfarm, 10, 20)
+    assert {"T_HUB", "P_HUB", "RHO_HUB", "QV_HUB", "QC_HUB",
+            "QR_HUB"} <= set(shapes) and "QNC_HUB" not in shapes
+    assert shapes["RHO_HUB"] == (2, 10, 20)
+    assert "QNC_HUB" in hw.hub_history_shapes(windfarm, 10, 20,
+                                              droplet_number=True)
+    assert "QV_HUB" not in hw.hub_history_shapes(windfarm, 10, 20,
+                                                 moist=False)
+    assert not set(HUB_SCALAR_OUTPUT_FIELDS) & set(hw.hub_history_shapes(
+        HistorySelection.from_mapping({"hub_wind": True}), 10, 20))

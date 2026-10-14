@@ -46,7 +46,7 @@ def fake_result(times, lat, heights, *, profile_vars=PROFILE_VARS,
     base = {
         "U": u, "V": v, "W": 0.1, "THETA": theta, "PRES": pres, "QVAPOR": qv,
         "QCLOUD": 1e-5, "QRAIN": 2e-5, "QICE": 3e-6, "QSNOW": 4e-6,
-        "QGRAUP": 0.0, "QNCLOUD": 1.0e8,
+        "QGRAUP": 0.0, "QNCLOUD": 1.0e8, "TEMP": 280.0, "RHO": 1.25,
     }
     profile = {k: np.full((nt, ns, nh), base[k], dtype=np.float64)
                for k in profile_vars}
@@ -651,3 +651,49 @@ def test_icechunk_round_trip(tmp_path, fake, capsys):
     session = repo.readonly_session("main")
     with xr.open_zarr(session.store, consolidated=False) as ds:
         np.testing.assert_allclose(ds["wind_speed"].values, 5.0, rtol=1e-6)
+
+
+# ------------------------------------------------- hub-plane (windfarm) road
+
+HUB_KEYS = {"U", "V", "PRES", "TEMP", "RHO", "QVAPOR", "QCLOUD", "QRAIN",
+            "QNCLOUD", "U10", "V10", "T2", "Q2", "PSFC", "SWDOWN", "RAINNC",
+            "RAINC"}
+
+
+def test_hub_plane_history_supplies_every_wind_farm_variable(tmp_path, fake):
+    sampler = fake(available={"tile0": HUB_KEYS})
+    plan = make_plan(tmp_path)
+    data = extract.build_forecast(plan)
+    v = data.variables
+    # What turbine-icing, wind-resource, ramps and power read.
+    for name in ("u", "v", "wind_speed", "wind_from_direction",
+                 "air_temperature", "air_pressure", "air_density",
+                 "specific_humidity", "relative_humidity",
+                 "cloud_liquid_mixing_ratio", "rain_mixing_ratio",
+                 "cloud_number_mixing_ratio"):
+        assert name in v, name
+    np.testing.assert_allclose(v["air_temperature"], 280.0)
+    np.testing.assert_allclose(v["air_density"], 1.25)    # RHO_HUB as written
+    rh, _ = extract.relative_humidity(np.float64(90000.0), np.float64(280.0),
+                                      np.float64(0.005))
+    np.testing.assert_allclose(v["relative_humidity"], rh)
+    assert "w" not in v and "ice_mixing_ratio" not in v
+    assert any("T_HUB" in n for n in data.variable_notes["air_temperature"])
+    assert any("RHO_HUB" in n for n in data.variable_notes["air_density"])
+    # Only hub keys were asked of the sampler: no THETA, no W.
+    asked = set(sampler.calls[0]["profile"])
+    assert {"TEMP", "RHO", "PRES", "QVAPOR"} <= asked
+    assert not {"THETA", "W"} & asked
+
+
+def test_volumes_are_still_preferred_when_both_are_offered(fake, tmp_path):
+    sampler = fake(available={"tile0": WRF_KEYS | {"TEMP", "RHO"}})
+    plan = make_plan(tmp_path)
+    data = extract.build_forecast(plan, variables=["air_temperature",
+                                                   "air_density"])
+    asked = set(sampler.calls[0]["profile"])
+    assert {"THETA", "PRES", "QVAPOR"} <= asked
+    assert not {"TEMP", "RHO"} & asked
+    np.testing.assert_allclose(
+        data.variables["air_temperature"],
+        extract.air_temperature(290.0, 90000.0))

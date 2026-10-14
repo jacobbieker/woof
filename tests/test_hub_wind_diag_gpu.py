@@ -148,3 +148,118 @@ def test_gpu_dycore_steps_are_inert_and_the_window_restarts(tmp_path):
         np.testing.assert_array_equal(
             cp.asnumpy(getattr(s_on, name)), cp.asnumpy(getattr(s_off, name)),
             err_msg=f"the hub-wind window moved model field {name}")
+
+
+# ---------------------------------------------------------------------------
+# the hub-height scalars
+# ---------------------------------------------------------------------------
+
+_SCALAR_INPUTS = ("php", "phb", "ht", "thp", "thb", "p", "qv", "qc", "qr",
+                  "nc")
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize("base_3d", [False, True])
+@pytest.mark.parametrize("droplets", [False, True])
+def test_gpu_scalar_kernel_matches_the_reference(base_3d, droplets):
+    """P/QV/QC/QR/QNC bit-identical to the mirror (no FMA, the same
+    bracketing); T and RHO pass through powf and agree to rtol 2e-6."""
+    import cupy as cp
+
+    from test_hub_wind_diag import _thermo
+
+    rng = np.random.default_rng(11)
+    nz, ny, nx = 30, 40, 40
+    host = _column_state(nz=nz, ny=ny, nx=nx, dz=35.0, hgt=0.0,
+                         phb_1d=not base_3d)
+    host.ht[...] = rng.uniform(0.0, 800.0, (ny, nx)).astype(np.float32)
+    host.php[...] = (host.ht[None] * G + rng.uniform(
+        -30.0, 30.0, (nz + 1, ny, nx)) * G).astype(np.float32)
+    host = _thermo(host, thb_1d=not base_3d,
+                   nc=(lambda z: 1e8 + 0.0 * z) if droplets else None)
+    host.thp += rng.normal(0.0, 1.5, host.thp.shape).astype(np.float32)
+    host.p *= rng.uniform(0.99, 1.01, host.p.shape).astype(np.float32)
+    host.qv *= rng.uniform(0.5, 1.5, host.qv.shape).astype(np.float32)
+    host.qc[...] = rng.uniform(0.0, 5e-4, host.qc.shape).astype(np.float32)
+    host.qr[...] = rng.uniform(0.0, 2e-4, host.qr.shape).astype(np.float32)
+    if droplets:
+        host.nc[...] = rng.uniform(1e7, 3e8, host.nc.shape).astype(np.float32)
+    heights = (5.0, 20.0, 40.0, 80.0, 100.0, 120.0, 150.0, 200.0, 2000.0)
+    device = SimpleNamespace(
+        **{name: (None if getattr(host, name) is None
+                  else cp.asarray(getattr(host, name)))
+           for name in _SCALAR_INPUTS})
+    request = HubWindRequest(heights_m=heights)
+    dev_diag = hw.HubWindDiagnostic(request, ny=ny, nx=nx, xp=cp,
+                                    device_id=int(device.php.device.id),
+                                    scalars=True)
+    got = dev_diag._scalar_fields(device)
+    want = hw.hub_scalars_np(host.php, host.phb, host.ht, host.thp, host.thb,
+                             host.p, heights, qv=host.qv, qc=host.qc,
+                             qr=host.qr, nc=host.nc)
+    assert tuple(got) == tuple(want)
+    for name in want:
+        if name in ("T_HUB", "RHO_HUB"):
+            np.testing.assert_allclose(cp.asnumpy(got[name]), want[name],
+                                       rtol=2e-6, atol=0, err_msg=name)
+        else:
+            np.testing.assert_array_equal(cp.asnumpy(got[name]), want[name],
+                                          err_msg=name)
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_gpu_dycore_frame_scalars_are_the_post_microphysics_state(tmp_path):
+    """Real moist dycore steps (30 model seconds): the frame's scalars are
+    the mirror evaluated on the state the frame is written from, the
+    window moves no model byte, and the windfarm frame carries no volume."""
+    import cupy as cp
+    from woof.core.dycore import step
+    from woof.io.wrfout import state_frame
+    from test_mp_spec_zone_ring import _square_moist_state
+
+    def make():
+        state, cfg = _square_moist_state(ny=12, nx=14, nz=30, dt=10.0,
+                                         open_x=True, open_y=True)
+        z = state.height_half()
+        shear = (6.0 + 0.004 * z).astype(np.float32)
+        state.u[...] = cp.asarray(np.broadcast_to(shear[:, None, None],
+                                                  state.u.shape))
+        return state, cfg
+
+    s_off, cfg = make()
+    s_on, _ = make()
+    selection = HistorySelection.from_mapping(
+        {"preset": "windfarm", "hub_heights_m": [40, 100, 150, 200]})
+    diag = hw.attach_hub_wind(s_on, selection, nx=cfg.nx, ny=cfg.ny,
+                              dx=cfg.dx, dy=cfg.dy, grid_id=1)
+    assert diag.scalars
+    for _ in range(3):
+        step(s_off, cfg)
+        step(s_on, cfg)
+    fields = interval_diagnostics.history_fields(s_on)
+    host = {name: (None if getattr(s_on, name, None) is None
+                   else cp.asnumpy(getattr(s_on, name)))
+            for name in _SCALAR_INPUTS}
+    want = hw.hub_scalars_np(host["php"], host["phb"], host["ht"],
+                             host["thp"], host["thb"], host["p"],
+                             diag.heights_m, qv=host["qv"], qc=host["qc"],
+                             qr=host["qr"], nc=host["nc"])
+    for name, value in want.items():
+        got = cp.asnumpy(fields[name])
+        if name in ("T_HUB", "RHO_HUB"):
+            np.testing.assert_allclose(got, value, rtol=2e-6, err_msg=name)
+        else:
+            np.testing.assert_array_equal(got, value, err_msg=name)
+    rho = cp.asnumpy(fields["RHO_HUB"])
+    assert 0.5 < float(rho.min()) and float(rho.max()) < 1.5
+    frame = selection.apply(state_frame(s_on,
+                                        include_diagnostic_pressure=True))[0]
+    assert {"RHO_HUB", "T_HUB", "WSPD_HUB", "HGT"} <= set(frame)
+    assert not {"T", "PHB", "U", "V", "W", "PH", "P", "PB",
+                "QVAPOR"} & set(frame)
+    for name in ("u", "v", "w", "thp", "php", "mup", "p", "qv", "qc", "qr"):
+        np.testing.assert_array_equal(
+            cp.asnumpy(getattr(s_on, name)), cp.asnumpy(getattr(s_off, name)),
+            err_msg=f"the hub scalars moved model field {name}")

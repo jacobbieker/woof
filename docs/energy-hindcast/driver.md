@@ -148,6 +148,24 @@ planner's files.
 `hex-swath` has no history window and is an experimental lane, so it is
 refused.
 
+**What a leaf writes.** `--leaf-output-preset` (default `windfarm`) sets
+every leaf's `[output]`: a `wrf-nests` leaf `[[domain]]` gets
+`output = { ... }` and a `wrf-tiles` leaf tile's child config gets its
+`[output]` table replaced (and its `--child-config-sha256` rebound).
+
+| `--leaf-output-preset` | leaf `[output]` |
+|---|---|
+| `windfarm` (default) | `preset = "windfarm"`, `hub_heights_m` = the cluster sites document's `heights_m`: only 2-D planes, the hub-height wind and scalars at exactly the heights the site store holds ([the windfarm preset](../energy-forecasts.md#wind-farm-output-without-3-d-volumes-the-windfarm-preset)) |
+| `energy` | `preset = "energy"`, `hub_wind = true`: the 3-D site-forecast volumes plus hub wind at the default heights |
+| `full` | `preset = "full"`, `hub_wind = true`: every variable |
+
+`windfarm` refuses, at plan time, a cluster whose sites carry more than
+32 heights or a height outside (0, 2000] m: rebuild the sites with a
+coarser `--hub-height-step-m`, or use `energy`. The job records
+`history.leaf_output_preset` and `history.leaf_hub_heights_m`, and both
+are part of the job identity. A job document written before the option
+existed has neither and keeps the `full` leaves it was planned with.
+
 ## Jobs and the manifest
 
 ```text

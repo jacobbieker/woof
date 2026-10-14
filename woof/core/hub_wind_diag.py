@@ -20,6 +20,21 @@ and publishes, per configured height above ground:
 ``HUB_HEIGHT`` (the ``hub_height`` coordinate) and ``HUB_WINDOW_S``
     The heights, and how many model seconds the window covers.
 
+and, when the domain's ``[output]`` selection NAMES them (the
+``windfarm`` preset, or ``history_vars``), the hub-height SCALARS a
+wind-farm product reads instead of a 3-D volume:
+
+``T_HUB`` / ``P_HUB`` / ``RHO_HUB``
+    Air temperature (K), full pressure (Pa) and moist air density
+    (kg m-3) at the frame's valid time.
+``QV_HUB`` / ``QC_HUB`` / ``QR_HUB``
+    Water-vapour, cloud-water and rain mixing ratios (kg kg-1); moist
+    states only.
+``QNC_HUB``
+    Cloud droplet number mixing ratio (kg-1), only where the state
+    carries the droplet number QNCLOUD is written from (``nc``: Thompson
+    mp 28, Morrison, Milbrandt-Yau, WDM6).
+
 The gridded members share one ``hub_height`` axis
 (``Time, hub_height, south_north, west_east``) -- WRF's own precedent for
 height-level diagnostics is the ``z_lev_diags`` family on
@@ -56,6 +71,36 @@ speed is bit-identical to the mirror and the direction differs only by
    ``ue = u_h*COSALPHA - v_h*SINALPHA``, ``ve = v_h*COSALPHA + u_h*SINALPHA``
    and direction ``180 + atan2(ue, ve) * 180/pi`` wrapped to ``[0, 360)``;
    a calm (speed exactly 0) reports direction 0.
+
+THE SCALARS, PINNED (same heights, same bracketing, same hold rule as
+steps 1 and 3; mirrored by :func:`hub_scalars_np`)::
+
+    theta[k] = thp[k] + thb[k]                (total potential temperature)
+    theta_h, p_h, qv_h, qc_h, qr_h, nc_h      linear in z-AGL, step 3
+    T_HUB   = theta_h * (p_h / P0) ** (R_d / c_p)
+    RHO_HUB = p_h / (R_d * (T_HUB * (1 + 0.608 * qv_h / (1 + qv_h))))
+
+with WRF's ``P0 = 1e5``, ``R_d = 287``, ``c_p = 7 R_d / 2``
+(:mod:`woof.core.constants`): theta and pressure are interpolated and the
+temperature and density formed from the interpolated values, which is
+what ``woof energy extract`` does with the 3-D volumes (THETA, PRES,
+QVAPOR sampled, then ``air_temperature``/``air_density``), so a hub plane
+and a volume-sampled profile at the same height agree to the volumes'
+own float32 rounding.  A dry state (no ``qv``) uses ``qv = 0`` in the
+density and writes no moisture planes.  The kernel's interpolated
+P/QV/QC/QR/QNC are bit-identical to the mirror; T and RHO pass through
+``powf`` and differ from NumPy's ``float32`` power by a few ulps at most
+(measured on an RTX A6000, sm_86, 30 heights x 40 x 40 columns: T_HUB
+within 1 ulp and RHO_HUB within 2 ulp, on about 0.15% of the values;
+``tests/test_hub_wind_diag_gpu.py`` grades them at ``rtol = 2e-6``).
+
+WHEN THE SCALARS ARE EVALUATED.  At the FRAME, from the state the frame
+is written from -- never in the step epilogue: the dycore's post-RK
+microphysics adjustment and its ``update_diagnostics`` move theta,
+pressure and the hydrometeors after the epilogue runs, so an
+epilogue-time evaluation would describe a state the frame does not
+hold.  They are instantaneous, carry no window, and so have nothing to
+restart and nothing to lose on a resume.
 
 WHEN IT FOLDS, AND WHEN IT RESETS.  Folded in the dycore epilogue of every
 completed step (:func:`woof.core.dycore.step`, through
@@ -96,8 +141,10 @@ ensemble member capture, and nest relocation.
 
 DEVICE MEMORY.  ``6 * n_hub`` float32 planes per domain (instantaneous
 speed and direction, max, min, time-weighted sum and mean) plus the site
-buffer; these are not scratch slots, so the preflight VRAM plan does not
-price them: 6 heights on a 1500 x 1500 domain is 324 MB.
+buffer, and up to ``7 * n_hub`` more for the scalars when the selection
+names them; these are not scratch slots, so the preflight VRAM plan does
+not price them: 6 heights on a 1500 x 1500 domain is 324 MB (702 MB with
+every scalar).
 """
 from __future__ import annotations
 
@@ -110,8 +157,9 @@ from pathlib import Path
 
 import numpy as np
 
-from woof.core.constants import G
-from woof.io.wrf_output_schema import HUB_WIND_OUTPUT_FIELDS
+from woof.core.constants import CP, G, P0, RD
+from woof.io.wrf_output_schema import (HUB_SCALAR_OUTPUT_FIELDS,
+                                        HUB_WIND_OUTPUT_FIELDS)
 
 DTYPE = np.float32
 
@@ -126,6 +174,14 @@ _F360 = DTYPE(360.0)
 #: 180/pi rounded once to float32, the constant both the kernel and the
 #: mirror multiply by.
 _RAD2DEG = DTYPE(180.0 / math.pi)
+#: The scalar constants, each rounded once to float32 (kernel and mirror).
+_P0 = DTYPE(P0)
+_RCP = DTYPE(RD / CP)
+_RD = DTYPE(RD)
+_F1 = DTYPE(1.0)
+#: Virtual-temperature factor on specific humidity, the one
+#: ``woof.energy.extract.air_density`` uses.
+_VIRT = DTYPE(0.608)
 
 _THREADS = 256
 
@@ -259,8 +315,97 @@ __global__ void hub_wind_columns(
     }
 }
 
+__device__ __forceinline__ float hs_mix(const float* f, long long lo,
+                                        long long hi, float w, int hold)
+{
+    // hold: the bracketing level's value itself, no arithmetic.
+    return hold ? f[lo] : f[lo] + w * (f[hi] - f[lo]);
 }
-""".replace("HW_RAD2DEG", f"{float(_RAD2DEG):.9e}f")
+
+__device__ __forceinline__ void hs_emit(
+    const float* thp, const float* thb, int thb3d, const float* p,
+    const float* qv, const float* qc, const float* qr, const float* nc,
+    int has_q, int has_nc, long long plane, long long c, int k_lo, int k_hi,
+    float w, int hold, long long o,
+    float* t_out, float* p_out, float* rho_out, float* qv_out,
+    float* qc_out, float* qr_out, float* nc_out)
+{
+    const long long lo = (long long)k_lo * plane + c;
+    const long long hi = (long long)k_hi * plane + c;
+    const float th_lo = thp[lo] + (thb3d ? thb[lo] : thb[k_lo]);
+    const float th_hi = thp[hi] + (thb3d ? thb[hi] : thb[k_hi]);
+    const float th = hold ? th_lo : th_lo + w * (th_hi - th_lo);
+    const float pp = hs_mix(p, lo, hi, w, hold);
+    const float q = has_q ? hs_mix(qv, lo, hi, w, hold) : 0.0f;
+    const float t = th * powf(pp / HS_P0, HS_RCP);
+    const float sh = q / (1.0f + q);
+    t_out[o] = t;
+    p_out[o] = pp;
+    rho_out[o] = pp / (HS_RD * (t * (1.0f + HS_VIRT * sh)));
+    if (has_q) {
+        qv_out[o] = q;
+        qc_out[o] = hs_mix(qc, lo, hi, w, hold);
+        qr_out[o] = hs_mix(qr, lo, hi, w, hold);
+    }
+    if (has_nc) nc_out[o] = hs_mix(nc, lo, hi, w, hold);
+}
+
+__global__ void hub_scalar_columns(
+    const float* __restrict__ ph, const float* __restrict__ phb,
+    const int phb3d, const float* __restrict__ ht,
+    const float* __restrict__ thp, const float* __restrict__ thb,
+    const int thb3d, const float* __restrict__ p,
+    const float* __restrict__ qv, const float* __restrict__ qc,
+    const float* __restrict__ qr, const float* __restrict__ nc,
+    const int has_q, const int has_nc,
+    const float* __restrict__ heights, const int nh,
+    const int nz, const int ny, const int nx, const float grav,
+    float* t_out, float* p_out, float* rho_out, float* qv_out,
+    float* qc_out, float* qr_out, float* nc_out)
+{
+    const long long plane = (long long)ny * nx;
+    const long long c = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= plane) return;
+    const float hgt = ht[c];
+
+    float zw_hi = hw_zw(ph, phb, phb3d, plane, c, 1, grav);
+    float z_lo = 0.5f * (hw_zw(ph, phb, phb3d, plane, c, 0, grav) + zw_hi) - hgt;
+    int h = 0;
+    // Below the lowest mass level: hold level 0 (the wind path's rule).
+    while (h < nh && heights[h] < z_lo) {
+        hs_emit(thp, thb, thb3d, p, qv, qc, qr, nc, has_q, has_nc, plane, c,
+                0, 0, 0.0f, 1, (long long)h * plane + c,
+                t_out, p_out, rho_out, qv_out, qc_out, qr_out, nc_out);
+        ++h;
+    }
+    for (int k = 0; k + 1 < nz && h < nh; ++k) {
+        const float zw_next = hw_zw(ph, phb, phb3d, plane, c, k + 2, grav);
+        const float z_hi = 0.5f * (zw_hi + zw_next) - hgt;
+        while (h < nh && heights[h] < z_hi) {
+            const float w = (heights[h] - z_lo) / (z_hi - z_lo);
+            hs_emit(thp, thb, thb3d, p, qv, qc, qr, nc, has_q, has_nc,
+                    plane, c, k, k + 1, w, 0, (long long)h * plane + c,
+                    t_out, p_out, rho_out, qv_out, qc_out, qr_out, nc_out);
+            ++h;
+        }
+        zw_hi = zw_next;
+        z_lo = z_hi;
+    }
+    // Above the top mass level: hold the top level.
+    while (h < nh) {
+        hs_emit(thp, thb, thb3d, p, qv, qc, qr, nc, has_q, has_nc, plane, c,
+                nz - 1, nz - 1, 0.0f, 1, (long long)h * plane + c,
+                t_out, p_out, rho_out, qv_out, qc_out, qr_out, nc_out);
+        ++h;
+    }
+}
+
+}
+""".replace("HW_RAD2DEG", f"{float(_RAD2DEG):.9e}f") \
+   .replace("HS_P0", f"{float(_P0):.9e}f") \
+   .replace("HS_RCP", f"{float(_RCP):.9e}f") \
+   .replace("HS_RD", f"{float(_RD):.9e}f") \
+   .replace("HS_VIRT", f"{float(_VIRT):.9e}f")
 
 #: NVRTC options: no FMA contraction, so every multiply-add rounds twice
 #: exactly as the NumPy mirror's separate operators do.
@@ -271,13 +416,19 @@ KERNEL_SOURCE_SHA256 = hashlib.sha256(KERNEL_SOURCE.encode("utf-8")).hexdigest()
 
 
 @lru_cache(maxsize=None)
-def _kernel(device_id: int):
-    """The compiled kernel for one device (CuPy modules are per device)."""
+def _module(device_id: int):
+    """The compiled module for one device (CuPy modules are per device)."""
     import cupy as cp
 
     with cp.cuda.Device(device_id):
-        module = cp.RawModule(code=KERNEL_SOURCE, options=KERNEL_OPTIONS)
-        return module.get_function("hub_wind_columns")
+        return cp.RawModule(code=KERNEL_SOURCE, options=KERNEL_OPTIONS)
+
+
+@lru_cache(maxsize=None)
+def _kernel(device_id: int, name: str = "hub_wind_columns"):
+    """One kernel of the module: ``hub_wind_columns`` (the default) or
+    ``hub_scalar_columns``."""
+    return _module(device_id).get_function(name)
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +511,48 @@ def hub_wind_np(u, v, ph, phb, ht, sina, cosa, heights
     um, vm = destagger_np(u, v)
     uh, vh = interp_to_heights_np((um, vm), z, heights)
     return speed_direction_np(uh, vh, sina, cosa)
+
+
+def hub_scalars_np(ph, phb, ht, thp, thb, p, heights, *, qv=None, qc=None,
+                   qr=None, nc=None) -> dict[str, np.ndarray]:
+    """The hub-height scalars, each ``(n_hub, ny, nx)`` (module docstring).
+
+    ``thb`` is the base theta column ``(nz,)`` or volume ``(nz, ny, nx)``;
+    ``p`` is FULL pressure.  ``qv``/``qc``/``qr`` come together (a moist
+    state) or not at all; ``nc`` is the droplet number when carried.
+    Returns ``T_HUB``, ``P_HUB``, ``RHO_HUB`` and, when given, ``QV_HUB``,
+    ``QC_HUB``, ``QR_HUB``, ``QNC_HUB`` -- in
+    :data:`HUB_SCALAR_OUTPUT_FIELDS` order.
+    """
+    moist = (qv, qc, qr)
+    if any(f is None for f in moist) and any(f is not None for f in moist):
+        raise HubWindError("qv, qc and qr come together (a moist state) or "
+                           "not at all")
+    has_q = qv is not None
+    thb = np.asarray(thb, dtype=DTYPE)
+    if thb.ndim == 1:
+        thb = thb[:, None, None]
+    theta = np.asarray(thp, dtype=DTYPE) + thb
+    z = mass_heights_agl_np(ph, phb, ht)
+    fields = [theta, np.asarray(p, dtype=DTYPE)]
+    if has_q:
+        fields += [np.asarray(f, dtype=DTYPE) for f in moist]
+    if nc is not None:
+        fields.append(np.asarray(nc, dtype=DTYPE))
+    out = interp_to_heights_np(fields, z, heights)
+    theta_h, p_h = out[0], out[1]
+    q_h = out[2] if has_q else np.zeros_like(p_h)
+    t_h = (theta_h * np.power(p_h / _P0, _RCP)).astype(DTYPE)
+    sh = q_h / (_F1 + q_h)
+    rho = (p_h / (_RD * (t_h * (_F1 + _VIRT * sh)))).astype(DTYPE)
+    result = {"T_HUB": t_h, "P_HUB": p_h, "RHO_HUB": rho}
+    if has_q:
+        result.update(QV_HUB=out[2], QC_HUB=out[3], QR_HUB=out[4])
+    if nc is not None:
+        result["QNC_HUB"] = out[-1]
+    assert tuple(result) == tuple(n for n in HUB_SCALAR_OUTPUT_FIELDS
+                                  if n in result)
+    return result
 
 
 def fold_window_np(speed, smax, smin, ssum, dt, mode) -> None:
@@ -507,8 +700,14 @@ class HubWindDiagnostic:
 
     def __init__(self, request, *, ny: int, nx: int, xp=np,
                  device_id: int | None = None, site_rows=None,
-                 sites_outside=(), grid_id: int = 1):
+                 sites_outside=(), grid_id: int = 1, scalars: bool = False):
         self.request = request
+        #: Whether the frame also carries the hub-height scalars (the
+        #: selection names them; :attr:`HistorySelection.hub_scalars`).
+        self.scalars = bool(scalars)
+        #: name -> standing (n_hub, ny, nx) buffer, made at the first frame
+        #: (which members exist depends on the state: moist, droplet number).
+        self._scalar_buffers: dict = {}
         self.heights_m = np.asarray(request.heights_m, dtype=DTYPE)
         self.ny, self.nx = int(ny), int(nx)
         self.xp = xp
@@ -605,6 +804,7 @@ class HubWindDiagnostic:
             else:
                 smax, smin, smean = self.smax, self.smin, self.smean
                 self.xp.divide(self.ssum, DTYPE(self.window_s), out=smean)
+            scalars = self._scalar_fields(state) if self.scalars else {}
         fields = {
             "HUB_HEIGHT": self.heights_m.copy(),
             "HUB_WINDOW_S": np.asarray(self.window_s, dtype=DTYPE),
@@ -615,7 +815,88 @@ class HubWindDiagnostic:
             "WSPD_HUB_MEAN": smean,
         }
         assert tuple(fields) == HUB_WIND_OUTPUT_FIELDS
+        fields.update(scalars)
         return fields
+
+    def _scalar_fields(self, state) -> dict:
+        """The hub-height scalars of the state the frame is written from.
+
+        Evaluated here, at the frame, and never in :meth:`on_step`: the
+        post-RK microphysics adjustment moves theta, pressure and the
+        hydrometeors after the dycore epilogue (module docstring).
+        """
+        qv = getattr(state, "qv", None)
+        moist = qv is not None
+        nc = getattr(state, "nc", None)
+        names = ["T_HUB", "P_HUB", "RHO_HUB"]
+        if moist:
+            names += ["QV_HUB", "QC_HUB", "QR_HUB"]
+        if nc is not None:
+            names.append("QNC_HUB")
+        if tuple(self._scalar_buffers) != tuple(names):
+            shape = (len(self.heights_m), self.ny, self.nx)
+            self._scalar_buffers = {
+                name: self.xp.zeros(shape, dtype=DTYPE) for name in names}
+        out = self._scalar_buffers
+        if self.xp is np:
+            values = hub_scalars_np(
+                state.php, state.phb, state.ht, state.thp, state.thb,
+                state.p, self.heights_m,
+                qv=qv, qc=state.qc if moist else None,
+                qr=state.qr if moist else None, nc=nc)
+            for name, value in values.items():
+                out[name][...] = value
+            return dict(out)
+        nz = int(state.thp.shape[0])
+        inputs = [("ph", state.php), ("phb", state.phb), ("ht", state.ht),
+                  ("thp", state.thp), ("thb", state.thb), ("p", state.p)]
+        if moist:
+            inputs += [("qv", qv), ("qc", state.qc), ("qr", state.qr)]
+        if nc is not None:
+            inputs.append(("nc", nc))
+        for label, array in inputs:
+            if array.dtype != DTYPE or not array.flags.c_contiguous:
+                raise HubWindError(
+                    f"hub-height scalars need contiguous float32 {label}, got "
+                    f"{array.dtype} (contiguous={array.flags.c_contiguous})")
+        mass = (nz, self.ny, self.nx)
+        stag = (nz + 1, self.ny, self.nx)
+        want = {"thp": (mass,), "p": (mass,), "ph": (stag,),
+                "phb": (stag, (nz + 1,)), "thb": (mass, (nz,)),
+                "ht": ((self.ny, self.nx),),
+                "qv": (mass,), "qc": (mass,), "qr": (mass,), "nc": (mass,)}
+        for label, array in inputs:
+            if tuple(array.shape) not in want[label]:
+                raise HubWindError(
+                    f"hub-height scalars: {label} has shape {array.shape}; "
+                    f"this diagnostic was built for a {mass} mass grid "
+                    f"(expected one of {list(want[label])})")
+        # An absent member is never dereferenced (has_q/has_nc = 0), but
+        # its slot needs a valid pointer: one 1-element spare fills every
+        # absent slot.  They alias each other (and absent output slots), so
+        # the kernel must keep every access to them behind has_q/has_nc --
+        # an unconditional read or write of one would be undefined under
+        # __restrict__.
+        if getattr(self, "_spare", None) is None:
+            self._spare = self.xp.zeros(1, dtype=DTYPE)
+        spare = self._spare
+        plane = self.ny * self.nx
+        blocks = (plane + _THREADS - 1) // _THREADS
+        _kernel(int(state.thp.device.id), "hub_scalar_columns")(
+            (blocks,), (_THREADS,),
+            (state.php, state.phb,
+             np.int32(0 if state.phb.ndim == 1 else 1), state.ht,
+             state.thp, state.thb, np.int32(0 if state.thb.ndim == 1 else 1),
+             state.p,
+             qv if moist else spare, state.qc if moist else spare,
+             state.qr if moist else spare, spare if nc is None else nc,
+             np.int32(1 if moist else 0), np.int32(0 if nc is None else 1),
+             self._heights, np.int32(len(self.heights_m)), np.int32(nz),
+             np.int32(self.ny), np.int32(self.nx), _G,
+             out["T_HUB"], out["P_HUB"], out["RHO_HUB"],
+             out.get("QV_HUB", spare), out.get("QC_HUB", spare),
+             out.get("QR_HUB", spare), out.get("QNC_HUB", spare)))
+        return dict(out)
 
     def close_interval(self, state, *, valid_time, output_dir,
                        grid_id: int) -> Path | None:
@@ -757,9 +1038,10 @@ def attach_hub_wind(state, selection, *, nx: int, ny: int, dx: float,
             "reaches the dycore epilogue the window folds in, and the frame "
             "is built from the host store.  Run the domain resident (its "
             "own tiles = { mode = \"off\" }) or remove the hub_* keys.")
+    scalars = bool(getattr(selection, "hub_scalars", False))
     existing = interval_diagnostics.get(state, DIAGNOSTIC_NAME)
     if existing is not None:
-        if existing.request == request:
+        if existing.request == request and existing.scalars == scalars:
             return existing
         raise HubWindError(
             f"d{int(grid_id):02d} already carries a hub-height wind window "
@@ -786,7 +1068,7 @@ def attach_hub_wind(state, selection, *, nx: int, ny: int, dx: float,
     diagnostic = HubWindDiagnostic(
         request, ny=ny, nx=nx,
         xp=xp, device_id=device_id, site_rows=site_rows,
-        sites_outside=outside, grid_id=grid_id)
+        sites_outside=outside, grid_id=grid_id, scalars=scalars)
     interval_diagnostics.attach(state, diagnostic)
     return diagnostic
 
@@ -796,15 +1078,30 @@ def _to_host(array):
         array.get() if hasattr(array, "get") else array)
 
 
-def hub_history_shapes(selection, ny: int, nx: int) -> dict[str, tuple]:
-    """On-disk shapes the diagnostic adds to a frame (disk pricing)."""
+def hub_history_shapes(selection, ny: int, nx: int, *, moist: bool = True,
+                       droplet_number: bool = False) -> dict[str, tuple]:
+    """On-disk shapes the diagnostic adds to a frame (disk pricing).
+
+    The scalars are counted only when the selection names them
+    (``selection.hub_scalars``); ``moist`` and ``droplet_number`` say
+    whether the run carries ``qv/qc/qr`` and the droplet number, the
+    same presence rule :meth:`HubWindDiagnostic._scalar_fields` applies.
+    """
     request = getattr(selection, "hub_wind", None)
     if request is None:
         return {}
     n_hub = len(request.heights_m)
     shapes = {"HUB_HEIGHT": (n_hub,), "HUB_WINDOW_S": ()}
+    plane = (n_hub, int(ny), int(nx))
     for name in HUB_WIND_OUTPUT_FIELDS[2:]:
-        shapes[name] = (n_hub, int(ny), int(nx))
+        shapes[name] = plane
+    if getattr(selection, "hub_scalars", False):
+        for name in HUB_SCALAR_OUTPUT_FIELDS:
+            if name in ("QV_HUB", "QC_HUB", "QR_HUB") and not moist:
+                continue
+            if name == "QNC_HUB" and not droplet_number:
+                continue
+            shapes[name] = plane
     return shapes
 
 
@@ -820,6 +1117,7 @@ __all__ = [
     "destagger_np",
     "fold_window_np",
     "hub_history_shapes",
+    "hub_scalars_np",
     "hub_wind_np",
     "interp_to_heights_np",
     "locate_sites",

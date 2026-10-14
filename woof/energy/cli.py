@@ -800,6 +800,13 @@ def _register_hindcast(sub) -> None:
     out.add_argument("--parent-history-interval-s", type=positive_float,
                      default=None,
                      help="wrf-nests parent cadence (default 3600)")
+    out.add_argument("--leaf-output-preset",
+                     choices=("windfarm", "energy", "full"),
+                     default="windfarm",
+                     help="history preset of every leaf domain (default "
+                          "windfarm: only 2-D wind-farm planes, hub-height "
+                          "wind and scalars at the sites' heights; energy "
+                          "and full keep their 3-D volumes)")
     out.add_argument("--output-root", default="icechunk", metavar="URL",
                      help="root of the output stores, e.g. s3://bucket/x "
                           "(default: icechunk/ in the hindcast directory)")
@@ -1242,10 +1249,15 @@ def register_estimate(sub, name: str = "estimate") -> argparse.ArgumentParser:
     p.add_argument("--prices", default=None, metavar="PRICES.json",
                    help="woof-energy.cloud-prices.v1 table (default: the "
                         "dated table shipped in woof/data/energy)")
-    p.add_argument("--store-preset", choices=("full", "energy"),
-                   default="full",
-                   help="fields stored per leaf frame (default full: all "
-                        "variables)")
+    p.add_argument("--store-preset", choices=("full", "energy", "windfarm"),
+                   default=None,
+                   help="fields stored per leaf frame: full (all variables), "
+                        "energy (3-D site-forecast volumes) or windfarm (2-D "
+                        "planes and hub-height planes only); default the "
+                        "--job's leaf output preset, else full")
+    p.add_argument("--hub-heights", type=positive_int, default=None,
+                   help="hub heights a windfarm frame carries (default: the "
+                        "--job's, else 6, the hub diagnostic's default)")
     p.add_argument("--compression-ratio", type=positive_float, default=0.35,
                    help="stored/raw bytes of the Icechunk store (default "
                         "0.35, an assumption)")
@@ -1365,8 +1377,11 @@ def register_optimize(sub, name: str = "optimize") -> argparse.ArgumentParser:
     p.add_argument("--prices", default=None, metavar="PRICES.json",
                    help="woof-energy.cloud-prices.v1 table (default: the "
                         "dated table shipped in woof/data/energy)")
-    p.add_argument("--store-preset", choices=("full", "energy"),
-                   default="full", help="fields stored per leaf frame")
+    p.add_argument("--store-preset", choices=("full", "energy", "windfarm"),
+                   default="windfarm",
+                   help="fields stored per leaf frame (default windfarm, the "
+                        "hindcast's default leaf output: 2-D and six "
+                        "hub-height planes only)")
     p.add_argument("--packing-efficiency", type=positive_float, default=0.85,
                    help="fraction of paid GPU time doing work (default 0.85)")
     p.add_argument("--top", type=positive_int, default=10,

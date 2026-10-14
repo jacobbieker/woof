@@ -584,6 +584,91 @@ def test_campaign_stored_hours():
     assert ClusterSpec("c", 1.0, 200.0, None).region_km2 is None
 
 
+# --------------------------------------------------------------- windfarm
+
+
+def test_windfarm_bytes_come_from_the_presets_own_field_list():
+    from woof.io.history_selection import WINDFARM_FIELD_REASONS
+    from woof.io.wrf_output_schema import HUB_HEIGHT_DIMENSIONED_FIELDS
+
+    layout = cost.store_layout("windfarm", 60, hub_heights=6)
+    fields = layout["fields"]
+    assert set(fields["two_d"]) | set(fields["hub_height"]) | set(
+        fields["other"]) == set(WINDFARM_FIELD_REASONS)
+    assert set(fields["hub_height"]) == (set(WINDFARM_FIELD_REASONS)
+                                         & HUB_HEIGHT_DIMENSIONED_FIELDS)
+    assert layout["three_d"] == 0
+    assert layout["planes"] == len(fields["two_d"]) + 6 * len(
+        fields["hub_height"])
+    # 19-byte Times padded to 20, ZNU/ZNW columns, four scalars, HUB_HEIGHT.
+    assert layout["extra_bytes"] == 20 + 4 * (60 + 61) + 4 * 4 + 4 * 6
+    # Linear in the hub heights, independent of the levels (no volume).
+    two = cost.store_layout("windfarm", 60, hub_heights=2)
+    assert layout["planes"] - two["planes"] == 4 * len(fields["hub_height"])
+    assert cost.store_layout("windfarm", 120, 6)["planes"] == layout["planes"]
+    energy = cost.store_layout("energy", 60)
+    full = cost.store_layout("full", 60)
+    assert layout["planes"] * 8 < energy["planes"] < full["planes"]
+    with pytest.raises(cost.CostRefusal, match="not one of"):
+        cost.store_layout("severe", 60)
+
+
+def test_windfarm_two_d_members_are_planes_on_a_real_inventory():
+    """Every member counted as one plane is (ny, nx) on the writer's own
+    inventory: the cost model cannot price a volume as a plane."""
+    from woof.config import RunConfig
+    from woof.io.history_layout import produced_history_shapes
+
+    cfg = RunConfig(nx=20, ny=10, nz=8, dx=1000.0, dy=1000.0, ztop=10000.0,
+                    dt=6.0, run_seconds=60.0)
+    shapes = produced_history_shapes(cfg)
+    layout = cost.store_layout("windfarm", 8)
+    checked = [name for name in layout["fields"]["two_d"] if name in shapes]
+    assert {"XLAT", "XLONG", "HGT", "MUB", "SINALPHA"} <= set(checked)
+    for name in checked:
+        assert shapes[name] == (10, 20), name
+
+
+def test_store_preset_windfarm_prices_far_less_than_energy(tmp_path, capsys):
+    plan = write_plan(tmp_path)
+    _, energy, _ = _run(["--plan", str(plan), "--instance", "aws:p5.48xlarge",
+                         "--store-preset", "energy"], capsys)
+    _, wind, table = _run(["--plan", str(plan), "--instance",
+                           "aws:p5.48xlarge", "--store-preset", "windfarm"],
+                          capsys)
+    _, wind2, _ = _run(["--plan", str(plan), "--instance", "aws:p5.48xlarge",
+                        "--store-preset", "windfarm", "--hub-heights", "2"],
+                       capsys)
+    assert wind["storage"]["stored_bytes"] * 5 < energy["storage"]["stored_bytes"]
+    assert wind2["storage"]["stored_bytes"] < wind["storage"]["stored_bytes"]
+    per_frame = wind["storage"]["fields_per_frame"]
+    assert per_frame["three_d"] == 0 and per_frame["hub_heights"] == 6
+    assert "WSPD_HUB" in per_frame["fields"]["hub_height"]
+    assert "no 3-D field" in wind["storage"]["basis"]
+    assert "2-D and hub planes only" in table
+    assert wind["offers"][0]["gpu_hours_by_component"]["output_h"] < \
+        energy["offers"][0]["gpu_hours_by_component"]["output_h"]
+    code, refused, _ = _run(["--plan", str(plan), "--hub-heights", "3"], capsys)
+    assert code == 2 and "--hub-heights" in refused["refused"]
+
+
+def test_the_job_names_the_store_preset_and_hub_heights(tmp_path, capsys):
+    plan = write_plan(tmp_path)
+    job = tmp_path / "job.json"
+    job.write_text(json.dumps({
+        "segments": 4, "history": {"leaf_output_preset": "windfarm",
+                                   "leaf_hub_heights_m": [80.0, 100.0, 120.0]}}))
+    _, doc, _ = _run(["--plan", str(plan), "--job", str(job),
+                      "--instance", "aws:p5.48xlarge"], capsys)
+    assert doc["storage"]["preset"] == "windfarm"
+    assert doc["storage"]["fields_per_frame"]["hub_heights"] == 3
+    assert any("leaf_output_preset" in n for n in doc["notes"])
+    _, flagged, _ = _run(["--plan", str(plan), "--job", str(job),
+                          "--instance", "aws:p5.48xlarge",
+                          "--store-preset", "energy"], capsys)
+    assert flagged["storage"]["preset"] == "energy"
+
+
 # --------------------------------------------------------------------------
 # utilisation, defaults and the partition spacing gotcha
 # --------------------------------------------------------------------------

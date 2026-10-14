@@ -602,7 +602,9 @@ def history_frame_bytes(cfg, selection=None, *,
     # are read from.
     from woof.core.hub_wind_diag import hub_history_shapes
     run = _run_config(cfg)
-    shapes.update(hub_history_shapes(selection, run.ny, run.nx))
+    shapes.update(hub_history_shapes(
+        selection, run.ny, run.nx, moist="QVAPOR" in shapes,
+        droplet_number="QNCLOUD" in shapes))
     names = selection.select(shapes)
     payload = sum(4 * math.prod(shapes[name]) if name != "Times" else 20
                   for name in names)

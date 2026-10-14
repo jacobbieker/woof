@@ -43,6 +43,7 @@ preset = "minimal"
 | `"minimal"` | the 2-D surface state and the accumulators: `T2`, `Q2`, `TH2`, `PSFC`, `U10`/`V10`, `TSK`, the surface energy budget (`HFX`, `LH`, `QFX`, `GRDFLX`, `SWDOWN`, `GLW`, `OLR`), `PBLH`, the precipitation and snow accumulators, `UP_HELI_MAX` and the interval wind extremes (`WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX`, produced under `nwp_diagnostics = 1`), the grid metadata and the land identity, plus the two structural volumes below. |
 | `"severe"` | `minimal` plus the storm-scale volumes: `U`, `V`, `W`, `PH`, `P`, `PB`, the hydrometeor mixing ratios and number concentrations, and `REFL_10CM`. It sheds the restart-only scheme carriers no render product reads. |
 | `"energy"` | what a forecast along power lines, substations and renewable sites is sampled from (`woof energy extract`): the column winds and theta (`U`, `V`, `W`, `T`), the height and pressure coordinate (`PH`, `PHB`, `HGT`, `P`, `PB`), `QVAPOR`, `QCLOUD`, `QRAIN`, `QICE`, `QSNOW`, `QGRAUP`, the near-surface state (`T2`, `Q2`, `U10`, `V10`, `PSFC`), the surface shortwave trio (`SWDOWN`, `SWDDNI`, `SWDDIF`, `COSZEN`), `RAINNC`, `RAINC`, `SINALPHA`/`COSALPHA`, the georeference, and the history-interval wind extremes `WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX` when the run sets `nwp_diagnostics = 1` (see [Wind maxima and gusts](#wind-maxima-and-gusts)). |
+| `"windfarm"` | **only 2-D planes**, for a wind-farm reanalysis whose reader is `woof energy extract`: the hub-height wind and its interval statistics plus the hub-height scalars (`T_HUB`, `P_HUB`, `RHO_HUB`, `QV_HUB`, `QC_HUB`, `QR_HUB`, `QNC_HUB`; see [Hub-height wind fields](#hub-height-wind-fields)), the near-surface state (`U10`, `V10`, `T2`, `Q2`, `PSFC`, `TSK`), the boundary layer and surface fluxes (`PBLH`, `UST`, `HFX`, `LH`, `SWDOWN`), `RAINNC`, `RAINC`, `SNOWNC`, the interval wind extremes (`WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX`), `SINALPHA`/`COSALPHA`, `LANDMASK` and the georeference. **No 3-D volume**: it is the one preset that does not carry the structural `T` and `PHB` (see [What cannot be dropped](#what-cannot-be-dropped)). It needs `hub_wind = true` or `hub_heights_m`, and is refused without them. The reason for every field is the table `woof.io.history_selection.WINDFARM_FIELD_REASONS`. |
 
 A preset is a filter over what the run produced, so a member the run
 does not produce is simply absent from the tape, never zero-filled:
@@ -147,6 +148,14 @@ tape written without it is rejected outright by `rw_wrfbatch`, *"Open
 WRF ... failed and the file is not a supported post-processed WRF
 archive"*: the whole file, not one product. It costs one 3-D volume;
 see the table above.
+
+The `windfarm` preset is the one exception, and it is deliberate: its
+reader is `woof energy extract`, which reads the hub-height planes, not
+a WRF post-processor, and the two structural volumes `T` and `PHB` would
+be 99 planes on a 49-level leaf, as many as every plane the preset keeps
+at six hub heights. A `windfarm` tape therefore does not open in
+`rw_wrfbatch`, and the plan-time warning says so (0 render products).
+Every other structural field stays forced.
 
 `REFL_10CM` is deliberately **not** in that set. It is a large volume and
 dropping it is a legitimate thing to want: you just lose the
@@ -328,7 +337,22 @@ The window restarts after each history write, so a ramp within a
 15-minute file shows up as `WSPD_HUB_MAX - WSPD_HUB_MIN`. `hub_sites`
 also samples each site every `hub_sample_interval_s` (60 s by default)
 into a `hubwind_d0N_<time>.nc` sidecar per history write. The `energy`,
-`minimal` and `severe` presets keep these fields. The arithmetic, the
+`minimal`, `severe` and `windfarm` presets keep these fields.
+
+The same diagnostic also writes the hub-height **scalars** when the
+selection names them: the `windfarm` preset does, and so can
+`history_vars`. `full` does not switch them on, because a full tape
+already carries the volumes they are interpolated from. They are
+instantaneous at the frame's valid time, computed when the frame is
+written (after the step's microphysics), on the same `hub_height` axis:
+
+| variable | units | meaning |
+|---|---|---|
+| `T_HUB` | K | air temperature: theta and pressure interpolated linear in z, then `theta (p / 1e5)^(R_d/c_p)` |
+| `P_HUB` | Pa | full pressure |
+| `RHO_HUB` | kg m-3 | moist air density `p / (R_d T (1 + 0.608 q))`, `q = qv / (1 + qv)` |
+| `QV_HUB`, `QC_HUB`, `QR_HUB` | kg kg-1 | water vapour, cloud water and rain mixing ratios (moist runs) |
+| `QNC_HUB` | kg-1 | cloud droplet number, where the microphysics carries it (the array `QNCLOUD` is written from) | The arithmetic, the
 restart behaviour and what is not supported are in
 [docs/energy-hindcast/hub-wind.md](../energy-hindcast/hub-wind.md).
 
