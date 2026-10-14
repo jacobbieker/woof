@@ -32,3 +32,13 @@ antimeridian, a chain of 40 farms 10 km apart over about 400 km (one
 linkage component wider than the 250 km extent cap), and isolated farms
 on every continent in each projection band (Mercator, Lambert, polar).
 None of the coordinates are real wind farms.
+
+`inventory/` holds synthetic inputs for the global wind-farm inventory
+(`tests/test_energy_hindcast_inventory.py`). They follow the column layouts
+of the U.S. Wind Turbine Database (`uswtdb_sample.csv`, `uswtdb_sample.json`),
+the GEM Global Wind Power Tracker (`gem_sample.csv`, and `gem_sample.xlsx`,
+which holds the same rows behind an About sheet and a title row and is
+written by `write_xlsx` in the test module), EMODnet offshore wind farms
+(`emodnet_sample.geojson`) and Overpass-shaped OSM elements
+(`osm_wind_elements.json`). Every project name, identifier, capacity and
+coordinate in them is invented. They are not copies of those datasets.

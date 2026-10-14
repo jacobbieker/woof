@@ -5,7 +5,9 @@ arguments to ``main(args)`` in the module that does the work, imported when
 the subcommand runs::
 
     woof energy fetch     woof.energy.osm             OSM power data via Overpass
-    woof energy import    woof.energy.importers       PyPSA-Eur, REPD, GeoJSON, CSV
+    woof energy import    woof.energy.importers       PyPSA-Eur, REPD, GeoJSON, CSV,
+                                                      USWTDB, GEM, EMODnet, OSM pbf
+    woof energy inventory woof.energy.inventory_global  merge / download wind inventories
     woof energy sites     woof.energy.sites           assets -> forecast sites
     woof energy plan      woof.energy.plan_wrf_nests  --topology wrf-nests
                           woof.energy.plan_wrf_tiles  --topology wrf-tiles
@@ -34,6 +36,12 @@ _TOPOLOGY_MODULES = {
     "hex-swath": "woof.energy.plan_hex",
 }
 _PRODUCTS = ("dlr", "icing", "wind-power", "pv-power")
+_IMPORT_FORMATS = ("pypsa-eur", "repd", "geojson", "csv",
+                   "uswtdb", "gem", "emodnet", "osm-pbf")
+#: ``woof:status`` vocabulary (woof.energy.inventory_global.STATUSES).
+_STATUSES = ("operating", "construction", "pre-construction", "announced",
+             "shelved", "mothballed", "cancelled", "retired", "unknown")
+_INVENTORY_DATASETS = ("uswtdb", "emodnet", "gem", "osm")
 
 
 def _bbox(value: str) -> tuple[float, float, float, float]:
@@ -175,10 +183,19 @@ def _register_import(sub) -> None:
         "import", help="import grid or renewable assets from files")
     p.add_argument("sources", nargs="+", metavar="SRC",
                    help="input files (PyPSA-Eur CSV directory or files, "
-                        "REPD CSV, GeoJSON, CSV)")
-    p.add_argument("--format", required=True,
-                   choices=("pypsa-eur", "repd", "geojson", "csv"),
+                        "REPD CSV, GeoJSON, CSV, USWTDB CSV/JSON, GEM "
+                        "xlsx/CSV, EMODnet GeoJSON, OSM .osm.pbf)")
+    p.add_argument("--format", required=True, choices=_IMPORT_FORMATS,
                    help="input format")
+    p.add_argument("--status", type=_choices_list(_STATUSES, "--status"),
+                   default=None,
+                   help="development statuses to keep (comma list; "
+                        "default operating for uswtdb/gem/emodnet/osm-pbf, "
+                        "no filter for repd; other formats refuse it)")
+    p.add_argument("--osm-index", default=None, metavar="IDX",
+                   help="pyosmium node-location index for --format osm-pbf "
+                        "(default flex_mem; sparse_file_array,FILE for the "
+                        "planet)")
     p.add_argument("--merge", default=None, metavar="ASSETS.geojson",
                    help="existing assets document to merge into (duplicates "
                         "by source reference and proximity are dropped)")
@@ -194,6 +211,70 @@ def _register_import(sub) -> None:
     p.add_argument("-o", "--output", required=True, metavar="ASSETS.geojson",
                    help="where to write the woof-energy.assets.v1 document")
     p.set_defaults(func=_dispatch("woof.energy.importers"))
+
+
+def _register_inventory(sub) -> None:
+    p = sub.add_parser(
+        "inventory", help="merge and fetch global wind-farm inventories")
+    inv = p.add_subparsers(dest="inventory_command", required=True)
+    m = inv.add_parser(
+        "merge", help="deduplicate wind farms across assets documents")
+    m.add_argument("assets", nargs="+", metavar="ASSETS.geojson",
+                   help="woof-energy.assets.v1 documents to merge")
+    m.add_argument("--status", type=_choices_list(_STATUSES, "--status"),
+                   default=("operating",),
+                   help="development statuses to keep (comma list; "
+                        "default operating)")
+    m.add_argument("--keep-non-wind", action="store_true",
+                   help="pass non-wind assets through unmatched instead of "
+                        "dropping them")
+    m.add_argument("--turbine-match-m", type=positive_float, default=50.0,
+                   help="turbines of two sources this close are one "
+                        "(default 50)")
+    m.add_argument("--plant-near-m", type=positive_float, default=1000.0,
+                   help="plants this close match unless name or capacity "
+                        "disagree (default 1000)")
+    m.add_argument("--plant-match-m", type=positive_float, default=5000.0,
+                   help="plants this close match when their names agree "
+                        "(default 5000)")
+    m.add_argument("--name-threshold", type=float, default=0.7,
+                   help="name similarity that counts as agreement "
+                        "(default 0.7)")
+    m.add_argument("--name-floor", type=float, default=0.3,
+                   help="name similarity below which names disagree "
+                        "(default 0.3)")
+    m.add_argument("--capacity-tolerance", type=float, default=0.25,
+                   help="relative capacity difference still agreeing "
+                        "(default 0.25)")
+    m.add_argument("--plant-link-m", type=positive_float, default=10000.0,
+                   help="link turbines to a plant this far away when the "
+                        "project names agree (default 10000)")
+    m.add_argument("--plant-link-near-m", type=positive_float,
+                   default=2000.0,
+                   help="link unnamed turbines to a plant this close "
+                        "(default 2000)")
+    m.add_argument("--turbine-coverage", type=float, default=0.8,
+                   help="fraction of plant capacity linked turbines must "
+                        "cover for the plant to be turbine-level "
+                        "(default 0.8)")
+    m.add_argument("--prefer", type=_names, default=None,
+                   metavar="SRC[,SRC]",
+                   help="source order for each duplicate cluster's winner "
+                        "(default osm,uswtdb,emodnet,repd,gem)")
+    m.add_argument("-o", "--output", required=True, metavar="ASSETS.geojson",
+                   help="where to write the merged woof-energy.assets.v1 "
+                        "document")
+    m.set_defaults(func=_dispatch("woof.energy.inventory_global"))
+    d = inv.add_parser(
+        "download", help="fetch a public inventory dataset (network)")
+    d.add_argument("--dataset", required=True, choices=_INVENTORY_DATASETS,
+                   help="uswtdb (API JSON) or emodnet (WFS GeoJSON); gem "
+                        "and osm print where to get them")
+    d.add_argument("--timeout-s", type=positive_float, default=300.0,
+                   help="network timeout (default 300)")
+    d.add_argument("-o", "--output", required=True, metavar="FILE",
+                   help="where to save the download")
+    d.set_defaults(func=_dispatch("woof.energy.inventory_global"))
 
 
 def _register_sites(sub) -> None:
@@ -456,6 +537,7 @@ def register_cli(subparsers) -> None:
     sub = energy.add_subparsers(dest="energy_command", required=False)
     _register_fetch(sub)
     _register_import(sub)
+    _register_inventory(sub)
     _register_sites(sub)
     _register_plan(sub)
     _register_run(sub)

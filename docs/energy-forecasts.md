@@ -43,6 +43,7 @@ under the `woof energy` headings of
 | PyPSA-Eur network CSVs (buses, lines, links, transformers, generators) | `woof energy import --format pypsa-eur` | CC-BY 4.0 | Attribution |
 | UK Renewable Energy Planning Database (REPD) CSV | `woof energy import --format repd` | Open Government Licence v3 | Attribution |
 | Your own assets as GeoJSON or CSV | `woof energy import --format geojson` or `--format csv` | Yours | Yours |
+| U.S. Wind Turbine Database, GEM Global Wind Power Tracker, EMODnet offshore wind farms, OSM `.osm.pbf` extracts | `woof energy import --format uswtdb`, `gem`, `emodnet` or `osm-pbf`, then `woof energy inventory merge`; see [the global wind-farm inventory](energy-hindcast/inventory.md) | Public domain; CC-BY 4.0; CC-BY 4.0; ODbL 1.0 | Per asset, in `woof:licenses` |
 
 [OpenInfraMap](https://openinframap.org) is a map rendering of the same
 OpenStreetMap `power=*` data. `woof energy fetch` does not read OpenInfraMap
@@ -217,7 +218,11 @@ server-side Overpass timeout per tile.
 `--merge ASSETS.geojson` it adds the new assets to an existing document and
 drops duplicates by source reference and proximity. For a generic CSV, name
 the columns with `--lat-col`, `--lon-col` and `--id-col`, and give `--kind`
-when the file does not say what each row is.
+when the file does not say what each row is. The wind-farm inventory
+formats (`uswtdb`, `gem`, `emodnet`, `osm-pbf`) keep operating farms unless
+`--status` widens the filter. `woof energy inventory merge` deduplicates
+them across sources. Both are described in
+[the global wind-farm inventory](energy-hindcast/inventory.md).
 
 ### 2. Sites: `sites`
 

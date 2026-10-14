@@ -650,17 +650,53 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 
 | argument | what it does |
 |---|---|
-| `SRC [SRC ...]` | input files (PyPSA-Eur CSV directory or files, REPD CSV, GeoJSON, CSV) |
+| `SRC [SRC ...]` | input files (PyPSA-Eur CSV directory or files, REPD CSV, GeoJSON, CSV, USWTDB CSV/JSON, GEM xlsx/CSV, EMODnet GeoJSON, OSM .osm.pbf) |
 
 | option | what it does |
 |---|---|
-| `--format {pypsa-eur,repd,geojson,csv}` | input format |
+| `--format {pypsa-eur,repd,geojson,csv,uswtdb,gem,emodnet,osm-pbf}` | input format |
 | `--id-col` | CSV identifier column (--format csv) |
 | `--kind {line,minor_line,cable,substation,plant,generator,tower}` | asset kind for every row (--format csv/geojson when the input does not say) |
 | `--lat-col` | CSV latitude column (--format csv) |
 | `--lon-col` | CSV longitude column (--format csv) |
 | `--merge ASSETS.geojson` | existing assets document to merge into (duplicates by source reference and proximity are dropped) |
+| `--osm-index IDX` | pyosmium node-location index for --format osm-pbf (default flex_mem; sparse_file_array,FILE for the planet) |
 | `--output ASSETS.geojson` | where to write the woof-energy.assets.v1 document |
+| `--status` | development statuses to keep (comma list; default operating for uswtdb/gem/emodnet/osm-pbf, no filter for repd; other formats refuse it) |
+
+## `woof energy inventory`
+
+Takes no options of its own.
+
+## `woof energy inventory download`
+
+| option | what it does |
+|---|---|
+| `--dataset {uswtdb,emodnet,gem,osm}` | uswtdb (API JSON) or emodnet (WFS GeoJSON); gem and osm print where to get them |
+| `--output FILE` | where to save the download |
+| `--timeout-s` | network timeout (default 300) |
+
+## `woof energy inventory merge`
+
+| argument | what it does |
+|---|---|
+| `ASSETS.geojson [ASSETS.geojson ...]` | woof-energy.assets.v1 documents to merge |
+
+| option | what it does |
+|---|---|
+| `--capacity-tolerance` | relative capacity difference still agreeing (default 0.25) |
+| `--keep-non-wind` | pass non-wind assets through unmatched instead of dropping them |
+| `--name-floor` | name similarity below which names disagree (default 0.3) |
+| `--name-threshold` | name similarity that counts as agreement (default 0.7) |
+| `--output ASSETS.geojson` | where to write the merged woof-energy.assets.v1 document |
+| `--plant-link-m` | link turbines to a plant this far away when the project names agree (default 10000) |
+| `--plant-link-near-m` | link unnamed turbines to a plant this close (default 2000) |
+| `--plant-match-m` | plants this close match when their names agree (default 5000) |
+| `--plant-near-m` | plants this close match unless name or capacity disagree (default 1000) |
+| `--prefer SRC[,SRC]` | source order for each duplicate cluster's winner (default osm,uswtdb,emodnet,repd,gem) |
+| `--status` | development statuses to keep (comma list; default operating) |
+| `--turbine-coverage` | fraction of plant capacity linked turbines must cover for the plant to be turbine-level (default 0.8) |
+| `--turbine-match-m` | turbines of two sources this close are one (default 50) |
 
 ## `woof energy partition`
 

@@ -27,6 +27,20 @@ New:
   own parent. The wrf-tiles parent region now spans the sites' shortest
   longitude arc, so a site set across the antimeridian is planned
   rather than refused. See `docs/energy-hindcast/partition.md`.
+- `woof energy import` reads four more wind-farm sources: the U.S. Wind
+  Turbine Database (`--format uswtdb`, CSV or API JSON), Global Energy
+  Monitor's Global Wind Power Tracker (`--format gem`, `.xlsx` or CSV),
+  EMODnet offshore wind farms (`--format emodnet`) and OpenStreetMap
+  `.osm.pbf` extracts (`--format osm-pbf`, which needs pyosmium and is
+  refused without it). These formats keep operating farms only unless
+  `--status` asks for more. `woof energy inventory merge` folds several
+  assets documents into one wind inventory. It matches turbines by
+  distance and plants by distance, name and capacity. A plant whose
+  turbines are mapped gives way to those turbines. Each asset records
+  its sources and licences in `woof:provenance` and `woof:licenses`. The
+  output is still `woof-energy.assets.v1`. `woof energy inventory
+  download` fetches USWTDB and EMODnet. See
+  `docs/energy-hindcast/inventory.md`.
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals

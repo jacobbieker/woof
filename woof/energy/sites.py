@@ -38,7 +38,10 @@ A plant with a ``generator_source`` that has kept, in-region generators of
 the same source inside its polygon, or naming it through ``tags['plant']``,
 gets no site of its own: its members stand for it and its capacity is not
 counted twice.  For wind this is the "wind plant with turbines" rule; the
-same rule keeps a solar plant from doubling the capacity of its panels.
+same rule keeps a solar plant from doubling the capacity of its panels.  A
+plant tagged ``woof:turbines_partial`` (``woof energy inventory merge``
+found its mapped turbines cover too little of its capacity) always keeps
+its own site.
 
 Filters run in this order: ``kinds`` (asset kinds); ``min_voltage_kv``
 (lines, cables and substations, plus towers through their nearest line; an
@@ -617,7 +620,7 @@ def build_sites(assets: AssetCollection, *, spacing_m: float = 100.0,
     covered: set[str] = set()
     for plant in (a for a in kept if a.kind == "plant"):
         source = plant.generator_source
-        if source is None:
+        if source is None or plant.tags.get("woof:turbines_partial"):
             continue
         members = [(g, pos) for g, pos, ok in
                    zip(generators, member_pos, member_in)

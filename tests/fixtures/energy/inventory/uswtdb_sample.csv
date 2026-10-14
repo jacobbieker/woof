@@ -1,0 +1,9 @@
+case_id,faa_ors,faa_asn,usgs_pr_id,eia_id,t_state,t_county,t_fips,p_name,p_year,p_tnum,p_cap,t_manu,t_model,t_cap,t_hh,t_rd,t_rsa,t_ttlh,retrofit,retrofit_year,t_conf_atr,t_conf_loc,t_img_date,t_img_srce,xlong,ylat
+9000001,,,,,TX,Synthetic County,48999,Synthetic Prairie,2015,4,10,Synthetic Turbines,ST-2.5,2500,80,100,7854,130,0,,3,3,2016-01-01,Synthetic imagery,-101.5,32.4
+9000002,,,,,TX,Synthetic County,48999,Synthetic Prairie,2015,4,10,Synthetic Turbines,ST-2.5,2500,80,100,7854,130,0,,3,3,2016-01-01,Synthetic imagery,-101.495,32.4
+9000003,,,,,TX,Synthetic County,48999,Synthetic Prairie,2015,4,10,Synthetic Turbines,ST-2.5,2500,-9999,100,7854,-9999,0,,2,3,2016-01-01,Synthetic imagery,-101.49,32.4
+9000004,,,,,TX,Synthetic County,48999,Synthetic Prairie,2015,4,10,Synthetic Turbines,ST-2.5,2500,80,100,7854,130,0,,3,3,2016-01-01,Synthetic imagery,-101.485,32.4
+9000005,,,,,TX,Other County,48998,Synthetic Ridge,2019,2,6,Synthetic Turbines,ST-3.0,3000,90,120,11310,150,0,,3,3,2020-01-01,Synthetic imagery,-100.2,33.1
+9000006,,,,,TX,Other County,48998,Synthetic Ridge,2019,2,6,Synthetic Turbines,ST-3.0,3000,90,120,11310,150,0,,3,3,2020-01-01,Synthetic imagery,-100.195,33.1
+9000007,,,,,TX,Other County,48998,Synthetic Ridge,2019,2,6,Synthetic Turbines,ST-3.0,3000,90,120,11310,150,0,,1,1,2020-01-01,Synthetic imagery,-9999,-9999
+9000002,,,,,TX,Synthetic County,48999,Synthetic Prairie,2015,4,10,Synthetic Turbines,ST-2.5,2500,80,100,7854,130,0,,3,3,2016-01-01,Synthetic imagery,-101.495,32.4
