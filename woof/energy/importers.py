@@ -1,8 +1,11 @@
 """Grid and renewable asset importers for ``woof energy import``.
 
-``woof energy import`` reads one of four input formats and writes a
+``woof energy import`` reads one of the input formats below and writes a
 ``woof-energy.assets.v1`` document (:mod:`woof.energy.contracts`),
-optionally merged into an existing one.
+optionally merged into an existing one.  The global wind-farm formats
+``uswtdb``, ``gem``, ``emodnet`` and ``osm-pbf`` are read by
+:mod:`woof.energy.inventory_global`, which documents their layouts, the
+``--status`` filter and the cross-source ``woof energy inventory merge``.
 
 ``pypsa-eur``
     A PyPSA-Eur electricity network as CSV tables: ``buses.csv``,
@@ -124,7 +127,10 @@ from woof.energy.contracts import (
     sha256_file,
 )
 
-FORMATS = ("pypsa-eur", "repd", "geojson", "csv")
+FORMATS = ("pypsa-eur", "repd", "geojson", "csv",
+           "uswtdb", "gem", "emodnet", "osm-pbf")
+#: Formats ``--status`` applies to (they say what is built).
+STATUS_FORMATS = ("repd", "uswtdb", "gem", "emodnet", "osm-pbf")
 
 PYPSA_SOURCE = "pypsa-eur"
 REPD_SOURCE = "repd"
@@ -1525,8 +1531,16 @@ def _collection(assets: list[Asset], sources: list[dict]) -> AssetCollection:
 
 def import_assets(paths: Sequence[Path], *, fmt: str,
                   column_map: Mapping[str, str] | None = None,
-                  kind: str | None = None) -> AssetCollection:
+                  kind: str | None = None,
+                  statuses: Sequence[str] | None = None,
+                  osm_index: str | None = None) -> AssetCollection:
     """Read ``paths`` in format ``fmt``.  ``column_map`` keys: lat, lon, id.
+
+    ``statuses`` keeps assets of those ``woof:status`` values
+    (:data:`woof.energy.inventory_global.STATUSES`); it applies to
+    :data:`STATUS_FORMATS` only.  ``None`` means no filter for ``repd``
+    and ``operating`` only for the inventory formats.  ``osm_index`` is
+    the pyosmium location index for ``osm-pbf`` (default ``flex_mem``).
 
     ``pypsa-eur`` reads one network from all ``paths`` together; the other
     formats read each path on its own and fold them with
@@ -1551,10 +1565,23 @@ def import_assets(paths: Sequence[Path], *, fmt: str,
                             f"{sorted(unknown)}")
     if fmt != "csv" and ("lat" in column_map or "lon" in column_map):
         raise ImportRefused("--lat-col/--lon-col apply to --format csv only")
-    if fmt in ("pypsa-eur", "repd") and ("id" in column_map
-                                         or kind is not None):
+    if fmt not in ("geojson", "csv") and ("id" in column_map
+                                          or kind is not None):
         raise ImportRefused(f"--id-col/--kind do not apply to --format {fmt}")
+    if statuses is not None and fmt not in STATUS_FORMATS:
+        raise ImportRefused(f"--status applies to --format "
+                            f"{', '.join(STATUS_FORMATS)}; {fmt} records no "
+                            "development status")
+    if osm_index is not None and fmt != "osm-pbf":
+        raise ImportRefused("--osm-index applies to --format osm-pbf only")
 
+    from woof.energy import inventory_global as inventory
+
+    if statuses is not None:
+        try:
+            statuses = inventory._check_statuses(statuses)
+        except inventory.InventoryRefused as error:
+            raise ImportRefused(str(error)) from error
     if fmt == "pypsa-eur":
         collection = _import_pypsa(paths)
     else:
@@ -1563,7 +1590,7 @@ def import_assets(paths: Sequence[Path], *, fmt: str,
         for path in paths:
             if not path.is_file():
                 raise ImportRefused(f"{path} is not a file")
-            if fmt != "repd":
+            if fmt in ("geojson", "csv"):
                 name = _generic_source(fmt, path)
                 if name in stems and stems[name].resolve() != path.resolve():
                     raise ImportRefused(
@@ -1572,6 +1599,15 @@ def import_assets(paths: Sequence[Path], *, fmt: str,
                 stems[name] = path
             if fmt == "repd":
                 part = _import_repd(path)
+                if statuses is not None:
+                    part, dropped = inventory.filter_status(part, statuses)
+                    part.sources[-1]["status_filter"] = list(statuses)
+                    part.sources[-1]["rows_skipped"] = {
+                        **part.sources[-1].get("rows_skipped", {}),
+                        **{f"status {k}": v for k, v in dropped.items()}}
+            elif fmt in inventory.INVENTORY_FORMATS:
+                part = _import_inventory(inventory, fmt, path, statuses,
+                                         osm_index)
             elif fmt == "geojson":
                 part = _import_geojson(path, kind=kind,
                                        id_key=column_map.get("id"))
@@ -1583,14 +1619,36 @@ def import_assets(paths: Sequence[Path], *, fmt: str,
         reasons = Counter()
         for record in collection.sources:
             reasons.update(record.get("refusals") or {})
+        skipped = Counter()
+        for record in collection.sources:
+            skipped.update(record.get("rows_skipped") or {})
         detail = (f"; refusals: {dict(reasons)}" if reasons
-                  else "; the inputs hold no rows")
+                  else "" if skipped else "; the inputs hold no rows")
+        if skipped:
+            detail += f"; skipped: {dict(skipped)}"
         examples = [e for r in collection.sources
                     for e in r.get("refusal_examples") or []][:3]
         if examples:
             detail += f"; e.g. {examples}"
         raise ImportRefused(f"no assets imported from {fmt} input{detail}")
     return collection
+
+
+def _import_inventory(inventory, fmt: str, path: Path,
+                      statuses: Sequence[str] | None,
+                      osm_index: str | None) -> AssetCollection:
+    statuses = statuses or inventory.DEFAULT_STATUSES
+    try:
+        if fmt == "uswtdb":
+            return inventory.import_uswtdb(path, statuses=statuses)
+        if fmt == "gem":
+            return inventory.import_gem(path, statuses=statuses)
+        if fmt == "emodnet":
+            return inventory.import_emodnet(path, statuses=statuses)
+        return inventory.import_osm_pbf(path, statuses=statuses,
+                                        idx=osm_index or "flex_mem")
+    except inventory.InventoryRefused as error:
+        raise ImportRefused(str(error)) from error
 
 
 class _PointIndex:
@@ -1784,7 +1842,9 @@ def main(args) -> int:
     try:
         imported = import_assets([Path(p) for p in args.sources],
                                  fmt=args.format, column_map=column_map,
-                                 kind=args.kind)
+                                 kind=args.kind,
+                                 statuses=getattr(args, "status", None),
+                                 osm_index=getattr(args, "osm_index", None))
         collection, merge_report = imported, None
         if args.merge:
             base_path = Path(args.merge)
@@ -1808,7 +1868,7 @@ def main(args) -> int:
 
 
 __all__ = [
-    "FORMATS", "ImportRefused", "WKTError", "parse_wkt", "bng_to_osgb36",
+    "FORMATS", "STATUS_FORMATS", "ImportRefused", "WKTError", "parse_wkt", "bng_to_osgb36",
     "osgb36_to_wgs84", "bng_to_wgs84", "import_assets", "merge_collections",
     "merge_with_report", "main", "MERGE_POINT_M", "MERGE_LINE_END_M",
     "MERGE_LINE_LENGTH_FRACTION",

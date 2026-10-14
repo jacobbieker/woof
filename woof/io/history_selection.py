@@ -40,9 +40,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import difflib
+import math
+from pathlib import Path
 
 from woof.explain import warn
 from woof.io.wrf_output_schema import (HISTORY_FIELDS_BY_NETCDF_NAME,
+                                        HUB_SCALAR_OUTPUT_FIELDS,
+                                        HUB_WIND_OUTPUT_FIELDS,
                                         REGISTRY_VAR_META)
 
 
@@ -145,8 +149,15 @@ _MINIMAL_FIELDS: frozenset[str] = frozenset({
     # Precipitation and snow accumulators.
     "RAINC", "RAINNC", "RAINSH", "SNOWNC", "GRAUPELNC", "HAILNC",
     "SNOW", "SNOWC", "SNOWH",
-    # Column extremes a severe-weather surface panel reads.
-    "UP_HELI_MAX",
+    # Column extremes a severe-weather surface panel reads: updraft
+    # helicity and, from the same nwp_diagnostics family, the interval
+    # wind, gust and vertical-motion extremes (woof/core/wind_gust_diag.py).
+    "UP_HELI_MAX", "WSPD10MAX", "U10MAX", "V10MAX", "GUST",
+    "W_UP_MAX", "W_DN_MAX",
+    # Hub-height wind planes and their interval statistics: present only
+    # when [output] asks for them (hub_heights_m), and 2-D per height, so
+    # they belong with the surface panel rather than the volumes.
+    *HUB_WIND_OUTPUT_FIELDS,
     # Grid metadata: 2-D, cheap, and what a staggered reader needs.
     "XLAT_U", "XLONG_U", "XLAT_V", "XLONG_V",
     "MAPFAC_M", "MAPFAC_U", "MAPFAC_V", "F", "E", "SINALPHA", "COSALPHA",
@@ -183,6 +194,12 @@ _SEVERE_EXTRA_FIELDS: frozenset[str] = frozenset({
 #:   ``SWDDNI``, diffuse ``SWDDIF`` and the zenith cosine ``COSZEN``.
 #: * ``SINALPHA``/``COSALPHA`` to rotate grid winds to earth-relative
 #:   bearings against a line's azimuth, and the georeference.
+#: * The history-interval wind extremes a wind-farm or line-rating reader
+#:   needs between frames: ``WSPD10MAX`` with its direction
+#:   (``U10MAX``/``V10MAX``), the UPP surface ``GUST`` and
+#:   ``W_UP_MAX``/``W_DN_MAX``.  They are produced only under
+#:   ``nwp_diagnostics = 1``; the preset selects them, it does not switch
+#:   the diagnostic on.
 #:
 #: A member the run does not produce is simply absent from its tape, the
 #: rule every preset already follows (a preset is a filter over what the
@@ -194,8 +211,10 @@ _SEVERE_EXTRA_FIELDS: frozenset[str] = frozenset({
 _ENERGY_FIELDS: frozenset[str] = frozenset({
     # Column dynamics and the vertical coordinate.
     "U", "V", "W", "T", "PH", "PHB", "HGT", "P", "PB",
-    # Moisture and hydrometeors (icing, loading).
-    "QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP",
+    # Moisture and hydrometeors (icing, loading).  QNCLOUD is Thompson
+    # mp 28's droplet number: turbine icing takes the droplet median volume
+    # diameter from it (woof.energy.icing_turbine) and otherwise assumes one.
+    "QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP", "QNCLOUD",
     # Near-surface state.
     "T2", "Q2", "U10", "V10", "PSFC",
     # Surface shortwave: global, direct-normal, diffuse, zenith cosine.
@@ -204,16 +223,121 @@ _ENERGY_FIELDS: frozenset[str] = frozenset({
     "RAINNC", "RAINC",
     # Grid rotation and georeference.
     "SINALPHA", "COSALPHA", "XLAT", "XLONG",
+    # In-model hub-height wind and its per-interval MAX/MIN/MEAN
+    # (woof/core/hub_wind_diag.py), when [output] hub_heights_m asks.
+    *HUB_WIND_OUTPUT_FIELDS,
+    # History-interval wind extremes (nwp_diagnostics = 1,
+    # woof/core/wind_gust_diag.py): the peak 10 m wind and its direction,
+    # the UPP surface gust, and the column updraft/downdraft extremes.
+    "WSPD10MAX", "U10MAX", "V10MAX", "GUST", "W_UP_MAX", "W_DN_MAX",
 })
+
+#: The ``windfarm`` preset: ONLY 2-D planes -- what every wind-farm
+#: product (``woof energy extract`` -> ``rating`` turbine-icing /
+#: wind-resource / ramps, and ``power``) reads, with no 3-D volume at all.
+#: One row per field and the reason it is kept; the preset is the keys.
+#:
+#: Its reader is the energy site sampler, which builds ``forecast.v1`` from
+#: the hub planes when the volumes are absent
+#: (:func:`woof.energy.sample.sample_wrfout`), NOT a WRF post-processor:
+#: :data:`WINDFARM_STRUCTURAL_EXEMPT` lets this one preset shed the two
+#: volumes :data:`STRUCTURAL_FIELDS` otherwise forces onto every tape
+#: (``T`` and ``PHB``), so a windfarm tape is a file ``rw_wrfbatch`` will
+#: not open -- the measured cost of the ``T`` row above, accepted on
+#: purpose: on the hindcast's 49-level leaf those two volumes are 99
+#: planes, as many as every plane this preset keeps at six hub heights.
+#:
+#: A member the run does not produce is absent, the rule every preset
+#: follows: the gust family needs ``nwp_diagnostics = 1``, the hub planes
+#: need ``[output] hub_wind``/``hub_heights_m``, ``QV/QC/QR_HUB`` a moist
+#: scheme, ``QNC_HUB`` a scheme with a droplet number, ``SNOWNC`` an ice
+#: scheme.
+WINDFARM_FIELD_REASONS: dict[str, str] = {
+    # Georeference and time (the structural rows a site sampler reads).
+    "Times": "valid time of every frame (the sampler's time axis)",
+    "XTIME": "structural: minutes since the run start",
+    "ITIMESTEP": "structural: model step of the frame",
+    "XLAT": "site placement: cross-checked against the projection",
+    "XLONG": "site placement: cross-checked against the projection",
+    "HGT": "model terrain: the sampler's terrain_height and the datum the "
+           "hub heights are measured from",
+    "ZNU": "structural: eta of the mass levels (one column, not a volume)",
+    "ZNW": "structural: eta of the w levels (one column, not a volume)",
+    "P_TOP": "structural: model-top pressure (a scalar)",
+    "MUB": "structural: base-state column dry mass (2-D)",
+    "SINALPHA": "rotates U10/V10 (and U10MAX/V10MAX) to earth-relative",
+    "COSALPHA": "rotates U10/V10 (and U10MAX/V10MAX) to earth-relative",
+    "LANDMASK": "onshore or offshore: roughness and stability regime",
+    # Near-surface state.
+    "U10": "10 m wind (forecast u10, wind_speed_10m; shear below the rotor)",
+    "V10": "10 m wind (forecast v10, wind_speed_10m; shear below the rotor)",
+    "T2": "2 m temperature (forecast t2, rh2; surface-layer stability)",
+    "Q2": "2 m mixing ratio (forecast q2, rh2)",
+    "PSFC": "surface pressure (forecast psfc, rh2)",
+    "TSK": "skin / sea-surface temperature: air-sea stability offshore",
+    # Boundary layer and surface fluxes: stability, wakes, shear.
+    "PBLH": "boundary-layer depth: wake recovery and low-level jets",
+    "UST": "friction velocity: roughness and the Obukhov length",
+    "HFX": "sensible heat flux: the Obukhov length (stability)",
+    "LH": "latent heat flux: the buoyancy flux over water",
+    "SWDOWN": "surface shortwave (forecast ghi): diurnal stability",
+    # Precipitation accumulators (forecast precipitation_rate; blade
+    # leading-edge erosion; icing context).
+    "RAINNC": "grid-scale precipitation accumulator",
+    "RAINC": "convective precipitation accumulator",
+    "SNOWNC": "grid-scale snow accumulator (ice schemes)",
+    # History-interval wind extremes (nwp_diagnostics = 1,
+    # woof/core/wind_gust_diag.py).
+    "WSPD10MAX": "peak 10 m wind in the interval: gust shutdown context",
+    "U10MAX": "direction of the interval peak 10 m wind",
+    "V10MAX": "direction of the interval peak 10 m wind",
+    "GUST": "UPP surface gust: turbine gust load and shutdown",
+    "W_UP_MAX": "column updraft extreme: convective turbulence",
+    "W_DN_MAX": "column downdraft extreme: downbursts and gust fronts",
+    # Hub-height wind and its interval statistics (woof/core/hub_wind_diag.py).
+    "HUB_HEIGHT": "the hub_height coordinate (the forecast's heights)",
+    "HUB_WINDOW_S": "model seconds the MAX/MIN/MEAN window covers",
+    "WSPD_HUB": "hub wind speed (forecast wind_speed, u, v): power",
+    "WDIR_HUB": "hub wind direction (forecast wind_from_direction, u, v): "
+                "wakes and sector curves",
+    "WSPD_HUB_MAX": "interval max hub speed: ramps and cut-out excursions",
+    "WSPD_HUB_MIN": "interval min hub speed: ramps and cut-in dropouts",
+    "WSPD_HUB_MEAN": "time-weighted interval mean: energy yield",
+    # Hub-height scalars (same diagnostic): what the volumes were kept for.
+    "T_HUB": "hub air temperature (forecast air_temperature): icing, density",
+    "P_HUB": "hub pressure (forecast air_pressure): density, humidity",
+    "RHO_HUB": "hub air density (forecast air_density): power-curve density "
+               "correction, icing water content",
+    "QV_HUB": "hub vapour mixing ratio (forecast specific_humidity, "
+              "relative_humidity): icing",
+    "QC_HUB": "hub cloud water (forecast cloud_liquid_mixing_ratio): icing",
+    "QR_HUB": "hub rain water (forecast rain_mixing_ratio): freezing rain",
+    "QNC_HUB": "hub droplet number (forecast cloud_number_mixing_ratio): "
+               "icing droplet MVD",
+}
+
+#: :data:`STRUCTURAL_FIELDS` members the ``windfarm`` preset does NOT carry:
+#: the two volumes.  Every other structural field stays forced.
+WINDFARM_STRUCTURAL_EXEMPT: frozenset[str] = frozenset({"T", "PHB"})
+
+_WINDFARM_FIELDS: frozenset[str] = frozenset(WINDFARM_FIELD_REASONS)
+
+#: Per-preset structural exemptions (only ``windfarm`` has any).  Applies
+#: to the preset as named; ``history_vars`` has none.
+PRESET_STRUCTURAL_EXEMPT: dict[str, frozenset[str]] = {
+    "windfarm": WINDFARM_STRUCTURAL_EXEMPT,
+}
 
 #: Named presets: name -> the set of droppable fields it keeps, or
 #: ``None`` for "everything this run produces".  :data:`STRUCTURAL_FIELDS`
-#: is added to every non-``None`` set at selection time.
+#: (less the preset's :data:`PRESET_STRUCTURAL_EXEMPT`) is added to every
+#: non-``None`` set at selection time.
 HISTORY_PRESETS: dict[str, frozenset[str] | None] = {
     "full": None,
     "minimal": _MINIMAL_FIELDS,
     "severe": _MINIMAL_FIELDS | _SEVERE_EXTRA_FIELDS,
     "energy": _ENERGY_FIELDS,
+    "windfarm": _WINDFARM_FIELDS,
 }
 
 #: What each named preset costs in RENDER PRODUCTS, not in variables.
@@ -276,9 +400,265 @@ PRODUCT_COUNT_BASIS = (
     "measured with rw_wrfbatch --list-products on one 1 km frame of the "
     "proof run (49 levels, WSM6, RRTMG), one field at a time")
 
-#: The keys ``[output]`` accepts.
+#: The keys ``[output]`` accepts.  The four ``hub_*`` keys configure the
+#: in-model hub-height wind diagnostic (:class:`HubWindRequest`).
 OUTPUT_KEYS: frozenset[str] = frozenset(
-    {"preset", "history_vars", "history_drop"})
+    {"preset", "history_vars", "history_drop",
+     "hub_wind", "hub_heights_m", "hub_sample_interval_s", "hub_sites"})
+
+#: ``hub_heights_m`` when ``hub_wind = true`` names none: the common
+#: onshore/offshore turbine hub range, in m above ground level.
+DEFAULT_HUB_HEIGHTS_M: tuple[float, ...] = (40.0, 80.0, 100.0, 120.0,
+                                            150.0, 200.0)
+#: ``hub_sample_interval_s`` when ``hub_sites`` is given without one.
+DEFAULT_HUB_SAMPLE_INTERVAL_S = 60.0
+#: Upper bounds that keep a typo from becoming a silent allocation.  A
+#: wind 2 km above ground is not a hub height, and 32 levels is already
+#: more than any turbine fleet spans.
+MAX_HUB_HEIGHT_M = 2000.0
+MAX_HUB_HEIGHTS = 32
+
+
+class HubWindConfigError(ValueError):
+    """An ``[output] hub_*`` key the diagnostic cannot honour as written."""
+
+
+@dataclass(frozen=True)
+class HubWindRequest:
+    """The validated ``[output] hub_*`` keys of one domain.
+
+    PINNED: ``heights_m`` is strictly increasing, every entry in
+    ``(0, MAX_HUB_HEIGHT_M]``; ``sites`` is ``(site_id, lat, lon)``
+    triples with unique ids, longitudes normalised to ``[-180, 180)``;
+    ``sample_interval_s`` is ``None`` exactly when ``sites`` is empty.
+    Everything here is plain tuples and floats so ``dataclasses.asdict``
+    (the resolved-TOML and identity walks) serialises it unchanged.
+    """
+
+    heights_m: tuple[float, ...] = DEFAULT_HUB_HEIGHTS_M
+    sample_interval_s: float | None = None
+    sites: tuple[tuple[str, float, float], ...] = ()
+    #: Where the sites came from (a sites.v1 path, or "inline").
+    sites_source: str | None = None
+
+    def spelling(self) -> str:
+        parts = ["hub_heights_m=" + ",".join(f"{h:g}" for h in self.heights_m)]
+        if self.sites:
+            parts.append(f"hub_sites={len(self.sites)}")
+            parts.append(f"hub_sample_interval_s={self.sample_interval_s:g}")
+        return " ".join(parts)
+
+
+def _finite_number(value, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HubWindConfigError(f"{what} must be a number, got {value!r}.")
+    number = float(value)
+    if not math.isfinite(number):
+        raise HubWindConfigError(f"{what} must be finite, got {value!r}.")
+    return number
+
+
+def _resolve_sites_path(text: str, *, base_dir, source: str) -> Path:
+    """A sites file named relative to the config, else the working directory.
+
+    The config's own directory FIRST: a case folder that carries its sites
+    file must sample those turbines from wherever it is launched, and an
+    unrelated ``sites.json`` in the launch directory must not win.
+    """
+    path = Path(text).expanduser()
+    if path.is_absolute():
+        candidates = [path]
+    else:
+        candidates = []
+        if base_dir is not None:
+            candidates.append(Path(base_dir) / path)
+        candidates.append(Path.cwd() / path)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    raise HubWindConfigError(
+        f"[output] hub_sites of {source} names {text!r}, which is not a "
+        f"file (looked at {[str(c) for c in candidates]}).  hub_sites is a "
+        "sites.v1 JSON document (woof energy sites) or an inline list of "
+        '{ site_id = "...", lat = ..., lon = ... } tables.')
+
+
+def _parse_sites(value, *, base_dir, source: str
+                 ) -> tuple[tuple[tuple[str, float, float], ...], str]:
+    rows: list[tuple[str, float, float]] = []
+    if isinstance(value, str):
+        from woof.energy.contracts import ContractError, load_sites
+
+        path = _resolve_sites_path(value, base_dir=base_dir, source=source)
+        try:
+            site_set = load_sites(path)
+        except ContractError as err:
+            raise HubWindConfigError(
+                f"[output] hub_sites of {source}: {path} is not a valid "
+                f"sites.v1 document: {err}") from None
+        rows = [(site.site_id, float(site.lat), float(site.lon))
+                for site in site_set.sites]
+        origin = str(path)
+    elif isinstance(value, (list, tuple)):
+        for index, row in enumerate(value):
+            if not isinstance(row, dict) or set(row) != {"site_id", "lat", "lon"}:
+                raise HubWindConfigError(
+                    f"[output] hub_sites[{index}] of {source} must be a table "
+                    'with exactly site_id, lat and lon, e.g. { site_id = '
+                    '"hornsea-1", lat = 53.88, lon = 1.92 }, got '
+                    f"{row!r}.")
+            site_id = row["site_id"]
+            if not isinstance(site_id, str) or not site_id:
+                raise HubWindConfigError(
+                    f"[output] hub_sites[{index}] of {source}: site_id must "
+                    f"be a non-empty string, got {site_id!r}.")
+            rows.append((site_id,
+                         _finite_number(row["lat"], f"hub_sites[{index}].lat"),
+                         _finite_number(row["lon"], f"hub_sites[{index}].lon")))
+        origin = "inline"
+    else:
+        raise HubWindConfigError(
+            f"[output] hub_sites of {source} must be a sites.v1 file path or "
+            f"a list of site tables, got {value!r}.")
+    if not rows:
+        raise HubWindConfigError(
+            f"[output] hub_sites of {source} names no sites.  Delete the key "
+            "to turn site sampling off.")
+    seen: set[str] = set()
+    normalised = []
+    for site_id, lat, lon in rows:
+        if site_id in seen:
+            raise HubWindConfigError(
+                f"[output] hub_sites of {source} repeats site_id {site_id!r}.")
+        seen.add(site_id)
+        if not -90.0 <= lat <= 90.0:
+            raise HubWindConfigError(
+                f"[output] hub_sites of {source}: {site_id} latitude {lat} "
+                "is outside [-90, 90].")
+        if not -180.0 <= lon < 360.0:
+            raise HubWindConfigError(
+                f"[output] hub_sites of {source}: {site_id} longitude {lon} "
+                "is outside [-180, 360).")
+        # Only the [180, 360) half moves, so a longitude already in range
+        # keeps its exact float.
+        normalised.append((site_id, lat, lon - 360.0 if lon >= 180.0 else lon))
+    return tuple(normalised), origin
+
+
+def output_key_rows():
+    """Declared rows (type, default, one-line doc) for every ``[output]`` key.
+
+    The whole table, not only the keys no typed field carries: a front end
+    reading :func:`woof.config.declared_key_rows` learns ``[output]`` from
+    here, and a partial table would read as "these are all the keys".
+    """
+    from woof.config_keys import KeyRow, key_rows
+
+    return key_rows(
+        KeyRow("preset", "string", "full",
+               "Named history set: full (default), minimal, severe, "
+               "energy or windfarm."),
+        KeyRow("history_vars", "array", None,
+               "Explicit list of wrfout variables to keep; excludes "
+               "history_drop and a non-full preset.", items="string"),
+        KeyRow("history_drop", "array", None,
+               "Wrfout variables to drop from the preset; structural "
+               "fields refuse.", items="string"),
+        KeyRow("hub_wind", "boolean", False,
+               "true turns the in-model hub-height wind fields on at the "
+               "default heights."),
+        KeyRow("hub_heights_m", "array", list(DEFAULT_HUB_HEIGHTS_M),
+               "Heights above ground (m, strictly increasing) of the "
+               "in-model hub-height wind fields; setting it turns them on.",
+               items="number"),
+        KeyRow("hub_sample_interval_s", "number",
+               DEFAULT_HUB_SAMPLE_INTERVAL_S,
+               "Cadence in model seconds of per-site hub-wind sampling "
+               "into the hubwind sidecar; needs hub_sites."),
+        KeyRow("hub_sites", ("string", "array"), None,
+               "Sites to sample every hub_sample_interval_s: a sites.v1 "
+               "JSON path or a list of {site_id, lat, lon} tables."),
+    )
+
+
+def parse_hub_wind(table, *, source: str = "<config>", base_dir=None
+                   ) -> HubWindRequest | None:
+    """The ``hub_*`` keys of one ``[output]`` table, or ``None`` (off).
+
+    Off unless asked: ``hub_wind = true`` turns the diagnostic on at
+    :data:`DEFAULT_HUB_HEIGHTS_M`; ``hub_heights_m`` on its own turns it on
+    at those heights.  ``hub_sites`` adds per-site sampling every
+    ``hub_sample_interval_s`` (default :data:`DEFAULT_HUB_SAMPLE_INTERVAL_S`).
+    Every contradiction is refused by name rather than resolved.
+    """
+    keys = {"hub_wind", "hub_heights_m", "hub_sample_interval_s",
+            "hub_sites"} & set(table)
+    if not keys:
+        return None
+    switch = table.get("hub_wind")
+    if switch is not None and not isinstance(switch, bool):
+        raise HubWindConfigError(
+            f"[output] hub_wind of {source} must be true or false, got "
+            f"{switch!r}.")
+    if switch is False:
+        others = sorted(keys - {"hub_wind"})
+        if others:
+            raise HubWindConfigError(
+                f"[output] of {source} sets hub_wind = false together with "
+                f"{others}.  Those keys configure the diagnostic the switch "
+                "turns off -- delete them, or set hub_wind = true.")
+        return None
+    heights = DEFAULT_HUB_HEIGHTS_M
+    if "hub_heights_m" in table:
+        raw = table["hub_heights_m"]
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
+            raise HubWindConfigError(
+                f"[output] hub_heights_m of {source} must be a LIST of "
+                f"heights in m above ground, e.g. [80, 100, 120], got {raw!r}.")
+        if not raw:
+            raise HubWindConfigError(
+                f"[output] hub_heights_m of {source} is an empty list.  Name "
+                "the heights you want, or set hub_wind = true for the "
+                f"defaults {list(DEFAULT_HUB_HEIGHTS_M)}.")
+        heights = tuple(_finite_number(h, f"[output] hub_heights_m of {source}")
+                        for h in raw)
+    if len(heights) > MAX_HUB_HEIGHTS:
+        raise HubWindConfigError(
+            f"[output] hub_heights_m of {source} names {len(heights)} heights; "
+            f"at most {MAX_HUB_HEIGHTS} are carried.")
+    for height in heights:
+        if not 0.0 < height <= MAX_HUB_HEIGHT_M:
+            raise HubWindConfigError(
+                f"[output] hub_heights_m of {source} contains {height:g} m; "
+                f"every height must be in (0, {MAX_HUB_HEIGHT_M:g}] m above "
+                "ground.")
+    if list(heights) != sorted(set(heights)):
+        raise HubWindConfigError(
+            f"[output] hub_heights_m of {source} must be strictly increasing "
+            f"with no repeats, got {list(heights)}.")
+    sites: tuple[tuple[str, float, float], ...] = ()
+    origin = None
+    interval = None
+    if "hub_sites" in table:
+        sites, origin = _parse_sites(table["hub_sites"], base_dir=base_dir,
+                                     source=source)
+        interval = DEFAULT_HUB_SAMPLE_INTERVAL_S
+    if "hub_sample_interval_s" in table:
+        if not sites:
+            raise HubWindConfigError(
+                f"[output] of {source} sets hub_sample_interval_s without "
+                "hub_sites: the interval is the cadence of per-site sampling "
+                "and there are no sites to sample.  Add hub_sites or delete "
+                "the key.")
+        interval = _finite_number(table["hub_sample_interval_s"],
+                                  f"[output] hub_sample_interval_s of {source}")
+        if interval <= 0.0:
+            raise HubWindConfigError(
+                f"[output] hub_sample_interval_s of {source} must be "
+                f"positive, got {interval:g}.")
+    return HubWindRequest(heights_m=tuple(float(h) for h in heights),
+                          sample_interval_s=interval, sites=sites,
+                          sites_source=origin)
 
 #: How many dropped names the plan-time warning spells out before it
 #: switches to a count.  See :meth:`HistorySelection.warn_lost_products`.
@@ -389,6 +769,12 @@ class HistorySelection:
     history_drop: tuple[str, ...] = ()
     #: Where this block was read from, for refusal text only.
     source: str = "<config>"
+    #: The in-model hub-height wind diagnostic this domain asked for, or
+    #: ``None`` (the default: no diagnostic, no hub fields, nothing moves).
+    #: It lives here and not on RunConfig for the reason the rest of
+    #: [output] does: it reads model state and writes only its own
+    #: buffers, so it binds no restart identity.
+    hub_wind: HubWindRequest | None = None
 
     # ``_include`` -- the resolved include set, or None for "everything
     # produced" -- is NOT a dataclass field, deliberately.
@@ -409,7 +795,9 @@ class HistorySelection:
                 "the storm-scale volumes (winds, theta, hydrometeors, "
                 "REFL_10CM); 'energy' keeps what a power-grid site forecast "
                 "samples (column winds and theta, hydrometeors, the "
-                "near-surface state, SWDOWN/SWDDNI/SWDDIF/COSZEN).")
+                "near-surface state, SWDOWN/SWDDNI/SWDDIF/COSZEN); "
+                "'windfarm' keeps only 2-D planes: the hub-height wind and "
+                "scalars, the near-surface state and the gust family.")
         if self.history_vars and self.history_drop:
             raise ValueError(
                 f"[output] of {self.source} sets both history_vars and "
@@ -434,8 +822,11 @@ class HistorySelection:
                         f"variable.{_did_you_mean(name, HISTORY_VOCABULARY)}"
                         "  The valid set is: "
                         f"{', '.join(sorted(HISTORY_VOCABULARY))}.")
+        structural = STRUCTURAL_FIELDS - PRESET_STRUCTURAL_EXEMPT.get(
+            "" if self.history_vars else self.preset, frozenset())
+        object.__setattr__(self, "_structural", structural)
         for name in self.history_drop:
-            if name in STRUCTURAL_FIELDS:
+            if name in structural:
                 raise ValueError(
                     f"[output] history_drop of {self.source} names "
                     f"{name!r}, which is structural: it is part of the "
@@ -443,7 +834,7 @@ class HistorySelection:
                     "coordinate, and a wrfout without it is not a smaller "
                     "file but an unreadable one -- no reader can place a "
                     "value in space or time.  The structural set is "
-                    f"{sorted(STRUCTURAL_FIELDS)}.  Drop the science "
+                    f"{sorted(structural)}.  Drop the science "
                     "fields you do not need instead, or use preset = "
                     "'minimal'.")
         include: frozenset[str] | None
@@ -452,11 +843,37 @@ class HistorySelection:
         else:
             include = HISTORY_PRESETS[self.preset]
         object.__setattr__(self, "_include", include)
+        # The planes the diagnostic would publish: the scalars only where
+        # the selection names them (hub_scalars).
+        hub_planes = HUB_WIND_OUTPUT_FIELDS[2:] + (
+            HUB_SCALAR_OUTPUT_FIELDS if include is not None else ())
+        if self.hub_wind is not None and not any(
+                self.keeps(name) for name in hub_planes):
+            raise HubWindConfigError(
+                f"[output] of {self.source} asks for hub-height wind but its "
+                f"selection keeps none of {list(hub_planes)}: the diagnostic "
+                "would run every step and publish nothing.  Keep at least "
+                "one of them, or delete the hub_* keys.")
+        if (self.preset == "windfarm" and not self.history_vars
+                and self.hub_wind is None):
+            raise HubWindConfigError(
+                f"[output] of {self.source} sets preset = 'windfarm' without "
+                "hub_wind or hub_heights_m.  The preset carries no volume, so "
+                "its hub-height planes are the ONLY wind and thermodynamics "
+                "at rotor height a wind-farm product can read; without the "
+                "diagnostic the tape has none.  Add hub_wind = true (or "
+                "hub_heights_m = [...]), or use preset = 'minimal' for a "
+                "surface-only tape.")
 
     @classmethod
-    def from_mapping(cls, table, *, source: str = "<config>"
+    def from_mapping(cls, table, *, source: str = "<config>", base_dir=None
                      ) -> "HistorySelection":
-        """Validate one ``[output]`` table.  ``None`` gives :data:`FULL`."""
+        """Validate one ``[output]`` table.  ``None`` gives :data:`FULL`.
+
+        ``base_dir`` is the config file's directory: a relative
+        ``hub_sites`` path resolves from there first, then from the
+        working directory.
+        """
         if table is None:
             return FULL
         if not isinstance(table, dict):
@@ -502,6 +919,7 @@ class HistorySelection:
             history_vars=tuple(table.get("history_vars", ()) or ()),
             history_drop=tuple(table.get("history_drop", ()) or ()),
             source=source,
+            hub_wind=parse_hub_wind(table, source=source, base_dir=base_dir),
         )
 
     @property
@@ -509,9 +927,25 @@ class HistorySelection:
         """``True`` when this selection removes nothing from any frame."""
         return self._include is None and not self.history_drop
 
+    @property
+    def hub_scalars(self) -> bool:
+        """Whether the hub-height diagnostic also computes its scalars.
+
+        Only when the selection NAMES at least one of
+        :data:`HUB_SCALAR_OUTPUT_FIELDS` (the ``windfarm`` preset, or
+        ``history_vars``) and keeps it -- never under ``full``, whose
+        "everything produced" must not grow seven planes per height on
+        every hub-wind run that already writes the volumes they are
+        interpolated from.
+        """
+        if self.hub_wind is None or self._include is None:
+            return False
+        return any(name in self._include and self.keeps(name)
+                   for name in HUB_SCALAR_OUTPUT_FIELDS)
+
     def keeps(self, name: str) -> bool:
         """Whether one produced variable survives this selection."""
-        if name in STRUCTURAL_FIELDS:
+        if name in self._structural:
             return True
         if name in self.history_drop:
             return False
@@ -575,6 +1009,8 @@ class HistorySelection:
             parts.append("history_vars=" + ",".join(self.history_vars))
         if self.history_drop:
             parts.append("history_drop=" + ",".join(self.history_drop))
+        if self.hub_wind is not None:
+            parts.append(self.hub_wind.spelling())
         return " ".join(parts)
 
     def product_cost(self) -> tuple[int, int, bool]:
@@ -598,6 +1034,10 @@ class HistorySelection:
         if separate is not None and not self.history_vars:
             return separate[0], separate[1], exact
         total = PRESET_PRODUCT_COUNTS["full"]
+        if not self.keeps("T"):
+            # The ladder's first rung, measured: a tape without T does not
+            # open in rw_wrfbatch at all (the windfarm preset's choice).
+            return 0, total, exact
         kept = PRESET_PRODUCT_COUNTS.get(self.preset, total)
         return kept, total, exact
 
@@ -636,6 +1076,11 @@ class HistorySelection:
                     f"keeps at most {kept} of {total} render products (an "
                     f"upper bound: this selection narrows "
                     f"preset={self.preset} further; {separate[2]})")
+        elif not self.keeps("T"):
+            cost = (f"keeps 0 of {total} render products: it sheds T, and a "
+                    "tape without T does not open in rw_wrfbatch (the first "
+                    "rung of the measured ladder); its reader is woof energy "
+                    "extract, which samples the hub-height planes")
         elif kept < total:
             # The named rungs do not exhaust the loss: the ladder's own
             # 162 -> 160 step belongs to the rest of the inventory, and
@@ -718,14 +1163,22 @@ __all__ = [
     "FULL",
     "HISTORY_PRESETS",
     "PRESET_PRODUCT_COUNTS",
+    "PRESET_STRUCTURAL_EXEMPT",
     "PRODUCT_COUNT_BASIS",
     "PRODUCT_LOSS_ATTRIBUTION",
     "SEPARATELY_MEASURED_PRESET_PRODUCT_COUNTS",
     "HISTORY_VOCABULARY",
+    "DEFAULT_HUB_HEIGHTS_M",
+    "DEFAULT_HUB_SAMPLE_INTERVAL_S",
     "HistorySelection",
+    "HubWindConfigError",
+    "HubWindRequest",
     "OUTPUT_KEYS",
     "PRODUCT_HISTORY_INPUTS",
     "STRUCTURAL_FIELDS",
+    "WINDFARM_FIELD_REASONS",
+    "WINDFARM_STRUCTURAL_EXEMPT",
     "lost_products",
+    "parse_hub_wind",
     "resolve",
 ]

@@ -15,6 +15,7 @@ from woof.config import RunConfig, SASE_PBL_SCHEME, radiation_enabled
 from woof.core.physics_inventory import (PHYSICS_SLOT_DISPATCH,
                                           REFL_10CM_MICROPHYSICS,
                                           physics_driver_required)
+from woof.core.wind_gust_diag import WIND_MAXIMA_FIELDS, WIND_MAXIMA_SLOTS
 from woof.io.wrf_output_schema import SCHEME_OUTPUT_FIELDS
 
 CORE_DIRECT_STATE_FIELDS = {
@@ -159,6 +160,18 @@ def live_state_history_fields(state) -> dict[str, object]:
         up_heli_max = existing_scratch("up_heli_max")
         if up_heli_max is not None:
             fields["UP_HELI_MAX"] = up_heli_max
+        # The wind members of the same family and the UPP gust
+        # (woof.core.wind_gust_diag), same eager allocation, same rule:
+        # emitted as live views, reset by the call sites after the write.
+        for output_name, slot in WIND_MAXIMA_FIELDS:
+            value = existing_scratch(slot)
+            if value is not None:
+                fields[output_name] = value
+    # Per-history-interval diagnostics attached by the publisher (hub-height
+    # wind: woof/core/hub_wind_diag.py).  Same contract as UP_HELI_MAX: the
+    # post-write window restart is the publisher's, never this builder's.
+    from woof.core import interval_diagnostics
+    fields.update(interval_diagnostics.history_fields(state))
 
     physics = getattr(state, "physics", None)
     if physics is None:
@@ -488,7 +501,9 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
     state.p_top = 0.0
     state.physics = None
     uh = carrier(surface) if int(cfg.nwp_diagnostics) == 1 else None
-    state.existing_scratch = lambda name: uh if name == "up_heli_max" else None
+    diagnostic_slots = {"up_heli_max", *WIND_MAXIMA_SLOTS}
+    state.existing_scratch = (
+        lambda name: uh if name in diagnostic_slots else None)
     if physics_driver_required(cfg):
         allocated = physics_array_shapes(cfg)
         live_fields = {name.removeprefix("fields/"): carrier(shape)
@@ -582,6 +597,14 @@ def history_frame_bytes(cfg, selection=None, *,
     shapes = produced_history_shapes(
         cfg, include_reflectivity=include_reflectivity)
     selection = HistorySelection() if selection is None else selection
+    # The hub-height wind planes are asked for by the selection itself
+    # ([output] hub_heights_m), not by the RunConfig the carriers above
+    # are read from.
+    from woof.core.hub_wind_diag import hub_history_shapes
+    run = _run_config(cfg)
+    shapes.update(hub_history_shapes(
+        selection, run.ny, run.nx, moist="QVAPOR" in shapes,
+        droplet_number="QNCLOUD" in shapes))
     names = selection.select(shapes)
     payload = sum(4 * math.prod(shapes[name]) if name != "Times" else 20
                   for name in names)

@@ -486,7 +486,7 @@ def test_skips_product_without_its_sites(tmp_path):
         assert "wind-power: skipped" in ds.notes
         assert "pv_power_mw" not in ds.variables
         assert "rating_amps" in ds.variables
-        assert ds.skipped_products == "wind-power,pv-power"
+        assert ds.skipped_products == "wind-power,pv-power,turbine-icing"
 
 
 def test_refuses_when_no_product_applies(tmp_path):

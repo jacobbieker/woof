@@ -28,6 +28,10 @@ wrong; nothing is silently coerced.
     A netCDF/Zarr dataset with dimensions ``(time, site, height)``; the
     variable table is :data:`FORECAST_VARIABLES` and the coordinate table is
     :data:`FORECAST_COORDINATES`.
+
+The ramp-event table (:data:`RAMP_EVENT_COLUMNS`, one :class:`RampEvent` per
+row) travels inside a ``woof-energy.products.v1`` file along its
+``ramp_event`` dimension; :func:`load_ramp_events` reads and validates it.
 """
 
 from __future__ import annotations
@@ -43,6 +47,8 @@ ASSETS_SCHEMA = "woof-energy.assets.v1"
 SITES_SCHEMA = "woof-energy.sites.v1"
 PLAN_SCHEMA = "woof-energy.plan.v1"
 FORECAST_SCHEMA = "woof-energy.forecast.v1"
+#: The receipt ``--source auto`` records (:mod:`woof.energy.source_select`).
+SOURCE_CHOICE_SCHEMA = "woof-energy.source-choice.v1"
 
 #: Asset kinds, named after the OSM ``power=*`` values they come from.
 ASSET_KINDS = (
@@ -608,6 +614,11 @@ class Plan:
     sites_ref: dict | None = None
     notes: list[str] = field(default_factory=list)
     path: Path | None = field(default=None, compare=False)
+    #: The ``woof-energy.source-choice.v1`` receipt when ``--source auto``
+    #: chose ``source`` (:mod:`woof.energy.source_select`); None when the
+    #: source was named.  Written to the document only when present; not
+    #: part of plan equality (it carries the clock the choice was made at).
+    source_choice: dict | None = field(default=None, compare=False)
 
     def __post_init__(self):
         if self.topology not in TOPOLOGIES:
@@ -674,10 +685,14 @@ class Plan:
             record["footprint"] = [list(p) for p in domain.footprint]
             record["site_ids"] = list(domain.site_ids)
             domains.append(record)
-        return {"schema": PLAN_SCHEMA, "topology": self.topology,
-                "dx_m": self.dx_m, "start": self.start, "hours": self.hours,
-                "source": self.source, "sites": self.sites_ref,
-                "notes": list(self.notes), "domains": domains}
+        document = {"schema": PLAN_SCHEMA, "topology": self.topology,
+                    "dx_m": self.dx_m, "start": self.start,
+                    "hours": self.hours, "source": self.source,
+                    "sites": self.sites_ref, "notes": list(self.notes),
+                    "domains": domains}
+        if self.source_choice is not None:
+            document["source_choice"] = dict(self.source_choice)
+        return document
 
     @classmethod
     def from_json(cls, document: Mapping[str, Any], *,
@@ -701,9 +716,23 @@ class Plan:
                        domains=domains, source=document.get("source"),
                        sites_ref=document.get("sites"),
                        notes=list(document.get("notes") or []),
-                       path=Path(path) if path is not None else None)
+                       path=Path(path) if path is not None else None,
+                       source_choice=_source_choice(
+                           document.get("source_choice")))
         except KeyError as error:
             raise ContractError(f"plan document lacks {error}") from error
+
+
+def _source_choice(record: Any) -> dict | None:
+    """A plan's ``source_choice`` member, refused when not a receipt."""
+
+    if record is None:
+        return None
+    if not isinstance(record, Mapping) or record.get("schema") != \
+            SOURCE_CHOICE_SCHEMA:
+        raise ContractError(f"plan source_choice is not a "
+                            f"{SOURCE_CHOICE_SCHEMA} receipt")
+    return dict(record)
 
 
 def load_plan(path: str | Path) -> Plan:
@@ -750,6 +779,8 @@ FORECAST_VARIABLES: dict[str, tuple[tuple[str, ...], str, str]] = {
     "rain_mixing_ratio": (PROFILE_DIMS, "kg kg-1", "rain mixing ratio"),
     "ice_mixing_ratio": (PROFILE_DIMS, "kg kg-1", "cloud ice mixing ratio"),
     "snow_mixing_ratio": (PROFILE_DIMS, "kg kg-1", "snow mixing ratio"),
+    "cloud_number_mixing_ratio": (PROFILE_DIMS, "kg-1",
+                                  "cloud droplet number per kg of air"),
     "t2": (SURFACE_DIMS, "K", "2 m air temperature"),
     "q2": (SURFACE_DIMS, "kg kg-1", "2 m water vapour mixing ratio"),
     "rh2": (SURFACE_DIMS, "%", "2 m relative humidity"),
@@ -789,7 +820,209 @@ FORECAST_COORDINATES: dict[str, tuple[tuple[str, ...], str | None, str]] = {
 }
 
 
+# --------------------------------------------------------------------------
+# ramp events
+
+#: Ramp detection methods (``woof.energy.ramps``).
+RAMP_METHODS = ("threshold", "swinging_door")
+
+#: The ramp-event table: one row per detected ramp, along the ``ramp_event``
+#: dimension of a ``woof-energy.products.v1`` file (``woof energy rating
+#: --products ramps``) and of :func:`woof.energy.ramps.ramps_dataset`.
+#: name -> (units, meaning).  Magnitudes and rates are in the units of the
+#: ramp signal: a fraction of capacity (``1``, ``h-1``) in a products file.
+#: Start and end are sample times of the signal, CF-encoded with the
+#: forecast's time units in netCDF.
+RAMP_EVENT_COLUMNS: dict[str, tuple[str, str]] = {
+    "ramp_event_site_id": ("-", "site identifier"),
+    "ramp_event_method": ("-", "threshold or swinging_door"),
+    "ramp_event_window": ("min",
+                          "threshold window W; NaN for swinging_door"),
+    "ramp_event_direction": ("1", "+1 up ramp, -1 down ramp"),
+    "ramp_event_start": ("time", "sample time the ramp leaves its extreme"),
+    "ramp_event_end": ("time", "sample time the ramp reaches its extreme"),
+    "ramp_event_magnitude": ("1", "absolute signal change, end minus start"),
+    "ramp_event_duration": ("min", "end minus start"),
+    "ramp_event_max_rate": ("h-1", "largest sample-to-sample rate in the "
+                                   "ramp direction"),
+}
+
+
+@dataclass(frozen=True)
+class RampEvent:
+    """One row of the ramp-event table, validated."""
+
+    site_id: str
+    method: str
+    window_min: float | None
+    direction: int
+    start: Any
+    end: Any
+    magnitude: float
+    duration_min: float
+    max_rate_per_h: float
+
+    def __post_init__(self):
+        what = f"ramp event at {self.site_id!r}"
+        if not isinstance(self.site_id, str) or not self.site_id:
+            raise ContractError("ramp event site_id must be a non-empty "
+                                "string")
+        if self.method not in RAMP_METHODS:
+            raise ContractError(f"{what}: method {self.method!r} is not one "
+                                f"of {RAMP_METHODS}")
+        if self.method == "threshold":
+            window = _finite(self.window_min, f"{what} window")
+            if window <= 0.0:
+                raise ContractError(f"{what}: window must be positive")
+            object.__setattr__(self, "window_min", window)
+        elif self.window_min is not None and not math.isnan(
+                float(self.window_min)):
+            raise ContractError(f"{what}: a swinging_door event has no "
+                                "window")
+        else:
+            object.__setattr__(self, "window_min", None)
+        if self.direction not in (1, -1):
+            raise ContractError(f"{what}: direction must be +1 or -1, got "
+                                f"{self.direction!r}")
+        object.__setattr__(self, "direction", int(self.direction))
+        try:
+            span = (self.end - self.start).total_seconds() / 60.0
+        except (AttributeError, TypeError) as error:
+            raise ContractError(f"{what}: start and end must be datetimes, "
+                                f"got {self.start!r} and {self.end!r}") \
+                from error
+        if not span > 0.0:
+            raise ContractError(f"{what}: end {self.end} is not after start "
+                                f"{self.start}")
+        for name in ("magnitude", "duration_min", "max_rate_per_h"):
+            value = _finite(getattr(self, name), f"{what} {name}")
+            if value < 0.0:
+                raise ContractError(f"{what}: {name} is negative")
+            object.__setattr__(self, name, value)
+        # one second of slack: durations come from whole-second times
+        if abs(span - self.duration_min) > 1.0 / 60.0 + 1e-9:
+            raise ContractError(f"{what}: duration {self.duration_min} min "
+                                f"disagrees with end - start ({span} min)")
+
+
+def _ramp_columns_netcdf(path: Path) -> dict[str, Any]:
+    import netCDF4
+    import numpy as np
+
+    from woof.energy.products import PRODUCTS_SCHEMA
+
+    try:
+        dataset = netCDF4.Dataset(str(path), "r")
+    except OSError as error:
+        raise ContractError(f"{path} is not netCDF: {error}") from error
+    with dataset:
+        schema = getattr(dataset, "schema", None)
+        if schema != PRODUCTS_SCHEMA:
+            raise ContractError(f"{path} has schema {schema!r}, expected "
+                                f"{PRODUCTS_SCHEMA!r}")
+        missing = [name for name in RAMP_EVENT_COLUMNS
+                   if name not in dataset.variables]
+        if missing:
+            raise ContractError(f"{path} has no ramp-event table (missing "
+                                f"{', '.join(missing)})")
+        columns: dict[str, Any] = {}
+        for name in RAMP_EVENT_COLUMNS:
+            var = dataset.variables[name]
+            if var.dimensions != ("ramp_event",):
+                raise ContractError(f"{path}: {name} has dims "
+                                    f"{var.dimensions}, expected "
+                                    "('ramp_event',)")
+            data = var[:]
+            if np.ma.isMaskedArray(data):
+                data = data.filled(np.nan) if data.dtype.kind == "f" \
+                    else data.data
+            if name in ("ramp_event_start", "ramp_event_end"):
+                units = getattr(var, "units", None)
+                if not units:
+                    raise ContractError(f"{path}: {name} has no time units")
+                calendar = getattr(var, "calendar", "standard")
+                data = netCDF4.num2date(np.asarray(data, dtype=float), units,
+                                        calendar,
+                                        only_use_cftime_datetimes=False,
+                                        only_use_python_datetimes=True)
+            columns[name] = list(np.atleast_1d(data)) if np.size(data) \
+                else []
+    return columns
+
+
+def _ramp_columns_xarray(dataset: Any) -> dict[str, Any]:
+    import datetime as _dt
+
+    import numpy as np
+
+    missing = [name for name in RAMP_EVENT_COLUMNS
+               if name not in dataset.variables]
+    if missing:
+        raise ContractError("dataset has no ramp-event table (missing "
+                            f"{', '.join(missing)})")
+    columns: dict[str, Any] = {}
+    for name in RAMP_EVENT_COLUMNS:
+        var = dataset[name]
+        if tuple(var.dims) != ("ramp_event",):
+            raise ContractError(f"{name} has dims {var.dims}, expected "
+                                "('ramp_event',)")
+        values = np.asarray(var.values)
+        if values.dtype.kind == "M":
+            epoch = np.datetime64("1970-01-01T00:00:00", "us")
+            micros = (values.astype("datetime64[us]") - epoch).astype(
+                np.int64)
+            values = [_dt.datetime(1970, 1, 1)
+                      + _dt.timedelta(microseconds=int(m)) for m in micros]
+        columns[name] = list(values)
+    return columns
+
+
+def load_ramp_events(source: Any) -> list[RampEvent]:
+    """Read and validate the ramp-event table.
+
+    ``source`` is a ``woof-energy.products.v1`` netCDF path, or an xarray
+    Dataset from :func:`woof.energy.ramps.ramps_dataset`.  Every row must
+    satisfy :class:`RampEvent`; a missing column, a bad method, direction or
+    window, an end not after the start, a negative or non-finite magnitude,
+    duration or rate, start or end not datetimes, or a duration that
+    disagrees with end minus start by more than a second is a
+    :class:`ContractError`.
+    """
+
+    if isinstance(source, (str, Path)):
+        path = Path(source)
+        if not path.is_file():
+            raise ContractError(f"{path} does not exist")
+        columns = _ramp_columns_netcdf(path)
+    else:
+        columns = _ramp_columns_xarray(source)
+    lengths = {len(values) for values in columns.values()}
+    if len(lengths) > 1:
+        raise ContractError("ramp-event columns differ in length")
+    count = lengths.pop() if lengths else 0
+
+    def text(value: Any) -> str:
+        return value.decode("utf-8") if isinstance(value, bytes) \
+            else str(value)
+
+    events = []
+    for i in range(count):
+        window = float(columns["ramp_event_window"][i])
+        events.append(RampEvent(
+            site_id=text(columns["ramp_event_site_id"][i]),
+            method=text(columns["ramp_event_method"][i]),
+            window_min=None if math.isnan(window) else window,
+            direction=int(columns["ramp_event_direction"][i]),
+            start=columns["ramp_event_start"][i],
+            end=columns["ramp_event_end"][i],
+            magnitude=float(columns["ramp_event_magnitude"][i]),
+            duration_min=float(columns["ramp_event_duration"][i]),
+            max_rate_per_h=float(columns["ramp_event_max_rate"][i])))
+    return events
+
+
 __all__ = [
+    "RAMP_METHODS", "RAMP_EVENT_COLUMNS", "RampEvent", "load_ramp_events",
     "ASSETS_SCHEMA", "SITES_SCHEMA", "PLAN_SCHEMA", "FORECAST_SCHEMA",
     "ASSET_KINDS", "LINEAR_KINDS", "GENERATOR_SOURCES", "SITE_KINDS",
     "TOPOLOGIES", "DOMAIN_ROLES", "SITE_COLUMNS",

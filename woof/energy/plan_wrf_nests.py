@@ -86,6 +86,8 @@ import numpy as np
 from woof.energy.contracts import (ContractError, Plan, PlanDomain, SiteSet,
                                    dump_plan, dump_sites, file_ref,
                                    load_sites)
+# Where --source auto writes its receipt, beside plan.json.
+from woof.energy.source_select import RECEIPT_FILE as SOURCE_CHOICE_FILE
 
 TOPOLOGY = "wrf-nests"
 
@@ -703,8 +705,11 @@ def render_plan_config(layout: _Layout, *, name: str, start: datetime,
                        hours: float, projection: dict, source: str,
                        profile: str | None, nz: int | None,
                        fetch_hints: dict | None, case_data: dict | None,
-                       leaf_output: dict) -> str:
-    """The emitted TOML: ``woof domain``'s author with a sibling tree."""
+                       leaf_output: dict, column=None) -> str:
+    """The emitted TOML: ``woof domain``'s author with a sibling tree.
+
+    ``column`` (a :class:`woof.energy.vertical.WindEnergyColumn`) replaces
+    the default ladder and model top with the wind-energy column."""
 
     from woof import domain_wizard as dw
     import tomllib
@@ -716,7 +721,9 @@ def render_plan_config(layout: _Layout, *, name: str, start: datetime,
         name=name, start_time=start, hours=hours, projection=projection,
         dims=template_dims, ratios=ratios, fetch_hints=fetch_hints,
         case_data=case_data, root_dx_m=layout.spacings[0], profile=profile,
-        nz=nz, history_interval_s=PARENT_HISTORY_INTERVAL_S,
+        nz=(nz if column is None else column.nz),
+        vertical=(None if column is None else column.wizard_vertical()),
+        history_interval_s=PARENT_HISTORY_INTERVAL_S,
         nest_history_interval_s=LEAF_HISTORY_INTERVAL_S, clock="fixed")
     raw = tomllib.loads(text)
     templates = raw["domain"]
@@ -955,7 +962,9 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                vram_gib: float | None = None, max_domains: int | None = None,
                nz: int | None = None, sites_path: Path | None = None,
                name: str | None = None,
-               now: datetime | None = None) -> Plan:
+               now: datetime | None = None,
+               source_priority: Sequence[str] | None = None,
+               column_request: dict | None = None) -> Plan:
     """Emit the domains for ``sites`` under ``outdir`` and return the plan
     (already written to ``outdir/plan.json``).
 
@@ -963,22 +972,132 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
     without it a copy of ``sites`` is written to ``outdir/sites.json``.
     ``name`` names the emitted configuration (default from the sites file
     and ``dx_m``).  ``now`` fixes the clock the default start reads.
+
+    ``source="auto"`` hands the choice to
+    :func:`woof.energy.source_select.select_source` (``source_priority``
+    replaces its default list; sources this door refuses are ranked out
+    under the ``planner`` check), records its receipt in the plan's
+    ``source_choice`` and writes it to ``outdir/source-choice.json``.
+    ``column_request`` holds the explicit-column flags (``p_top_pa``,
+    ``eta_levels``, ``dzbot``, ``dzstretch_s``, ``dzstretch_u``,
+    ``max_dz``); when any is set every domain carries the
+    :func:`woof.energy.vertical.wind_energy_column` they name (with
+    ``nz``) and its record is written to ``outdir/vertical.json``.
     """
 
     plan, _ = _build(sites, outdir=outdir, dx_m=dx_m,
                      corridor_km=corridor_km, parent_dx_m=parent_dx_m,
                      start=start, hours=hours, source=source, card=card,
                      vram_gib=vram_gib, max_domains=max_domains, nz=nz,
-                     sites_path=sites_path, name=name, now=now)
+                     sites_path=sites_path, name=name, now=now,
+                     source_priority=source_priority,
+                     column_request=column_request)
     return plan
+
+
+def price_plan(sites: SiteSet, *, dx_m: float = 100.0,
+               corridor_km: float = 2.0, parent_dx_m: float | None = None,
+               start: str | None = None, hours: float = 24.0,
+               source: str | None = None, card: str | None = None,
+               vram_gib: float | None = None, max_domains: int | None = None,
+               nz: int | None = None, now: datetime | None = None,
+               column_request: dict | None = None) -> dict:
+    """The priced peak of the plan :func:`build_plan` would emit, writing
+    nothing.
+
+    The same layout and memory-fit loop (the emitted configuration priced
+    by ``woof.domain_wizard._sizing_phases``, i.e.
+    :mod:`woof.core.preflight`, shrinking leaves until the tree fits the
+    card's fit target), stopped before any file is written.  Returns
+    ``peak_bytes`` (the accepted tree's priced peak envelope, CUDA context
+    included), ``target_bytes``, ``alloc_bytes``, ``binding_phase``,
+    ``vram_gib``, ``domains`` and the ``attempts``.  Raises what
+    :func:`build_plan` would (:class:`PlanRefused` and its subclasses).
+    """
+
+    import tempfile
+
+    _, sizing = _build(
+        sites, outdir=Path(tempfile.gettempdir()) / "woof-price-only",
+        dx_m=dx_m, corridor_km=corridor_km, parent_dx_m=parent_dx_m,
+        start=start, hours=hours, source=source, card=card,
+        vram_gib=vram_gib, max_domains=max_domains, nz=nz, sites_path=None,
+        name="price-only", now=now, column_request=column_request,
+        price_only=True)
+    return sizing
+
+
+def _planner_refusal(source: str) -> str | None:
+    """Why this door cannot emit for ``source`` (the selector's ``planner``
+    check), or None: :func:`_ensure_sources`'s own refusal, so a source
+    the selector chooses is never one this door then refuses."""
+
+    try:
+        _ensure_sources(source)
+    except PlanRefused as error:
+        return str(error)
+    return None
+
+
+def _auto_margin_km(*, corridor_km: float, ratios: Sequence[int],
+                    parent_dx_m: float) -> float:
+    """How far past the sites' box the root may reach, in km.
+
+    The corridor, a middle buffer per nest level
+    (:data:`MIDDLE_BUFFER_KM`), the root buffer (:data:`ROOT_BUFFER_KM`)
+    and twice the wizard's clearance rows at the root spacing per level,
+    plus :data:`woof.energy.source_select.PLANNER_SLACK_KM`.  An estimate
+    made before the layout exists, deliberately on the wide side.
+    """
+
+    from woof import domain_wizard as dw
+    from woof.energy.source_select import PLANNER_SLACK_KM
+
+    levels = max(len(ratios), 1)
+    rows_km = 2.0 * (dw._CLEARANCE_ROWS + 2) * float(parent_dx_m) / 1000.0
+    return (float(corridor_km) + levels * (MIDDLE_BUFFER_KM + rows_km)
+            + ROOT_BUFFER_KM + PLANNER_SLACK_KM)
+
+
+def _auto_source(sites: SiteSet, *, start: datetime, defaulted: bool,
+                 hours: float, corridor_km: float, ratios: Sequence[int],
+                 parent_dx_m: float, priority: Sequence[str] | None,
+                 now: datetime | None):
+    """``--source auto``: the selector's choice for these sites; a
+    defaulted start is searched back from the clock's newest cycle
+    (:func:`woof.energy.source_select.select_newest`)."""
+
+    from woof.domain_wizard import DEFAULT_MODEL_TOP_PA
+    from woof.energy.source_select import (SourceSelectRefused,
+                                           select_newest, select_source)
+
+    arrays = sites.as_arrays()
+    points = list(zip(arrays["lon"].tolist(), arrays["lat"].tolist()))
+    select = select_newest if defaulted else select_source
+    try:
+        return select(
+            points, start, hours, p_top_pa=DEFAULT_MODEL_TOP_PA,
+            priority=priority, now=now,
+            margin_km=_auto_margin_km(corridor_km=corridor_km, ratios=ratios,
+                                      parent_dx_m=parent_dx_m),
+            refuse=_planner_refusal)
+    except SourceSelectRefused as error:
+        raise PlanRefused(f"--source auto: {error}") from error
 
 
 def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
            parent_dx_m: float | None, start: str | None, hours: float,
            source: str | None, card: str | None, vram_gib: float | None,
            max_domains: int | None, nz: int | None, sites_path: Path | None,
-           name: str | None, now: datetime | None) -> tuple[Plan, dict]:
-    """:func:`build_plan`, also returning the sizing record ``main`` prints."""
+           name: str | None, now: datetime | None,
+           source_priority: Sequence[str] | None = None,
+           column_request: dict | None = None,
+           price_only: bool = False) -> tuple[Plan | None, dict]:
+    """:func:`build_plan`, also returning the sizing record ``main`` prints.
+
+    ``price_only`` stops once the memory-fit loop has accepted a layout and
+    returns ``(None, sizing)`` without writing anything (:func:`price_plan`).
+    """
 
     from woof import domain_wizard as dw
 
@@ -1000,20 +1119,38 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
         parent_dx_m = dx_m * DEFAULT_PARENT_FACTOR
     ratios = chain_ratios(dx_m, float(parent_dx_m))
     limit = _domain_limit(max_domains)
+    from woof.energy.source_select import is_auto, record_choice
+
     source_defaulted = source is None
-    source = _ensure_sources(source)
     start_defaulted = start is None
     start_time = parse_start(start, now=now)
+    source_choice = None
+    if source_priority is not None and not is_auto(source):
+        raise PlanRefused("--source-priority applies only with --source auto")
+    if is_auto(source):
+        source_choice = _auto_source(
+            sites, start=start_time, defaulted=start_defaulted,
+            hours=float(hours), corridor_km=corridor_km, ratios=ratios,
+            parent_dx_m=float(parent_dx_m), priority=source_priority,
+            now=now)
+        source = source_choice.source
+        start_time = source_choice.cycle
+    source = _ensure_sources(source)
     from woof.energy.source_window import (newest_landed_start,
                                            source_notes, window_refusal)
 
-    if start_defaulted:
-        # the newest cycle by the clock may not have landed yet
+    if start_defaulted and source_choice is None:
+        # the newest cycle by the clock may not have landed yet (an auto
+        # choice already judged this cycle: its receipt binds it)
         start_time = newest_landed_start(source, start_time, float(hours),
                                          now=now)
     refusal = window_refusal(source, start_time, float(hours), now=now)
     if refusal is not None:
         raise PlanRefused(refusal)
+    from woof.energy.vertical import column_from_values
+
+    column = column_from_values(nz=nz, source=source,
+                                **(column_request or {}))
     budget = _resolve_budget(card, vram_gib)
     target = _fit_target_bytes(budget)
     if target <= 0:
@@ -1073,7 +1210,7 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
             layout, name=name, start=start_time, hours=float(hours),
             projection=projection, source=source, profile=profile, nz=nz,
             fetch_hints=fetch_hints, case_data=case_data,
-            leaf_output=leaf_output)
+            leaf_output=leaf_output, column=column)
         try:
             exp = dw.experiment_from_text(text, source=str(config_path))
         except (ValueError, TypeError, KeyError) as error:
@@ -1097,19 +1234,39 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
                 "--dx-m.")
         cap = new_cap
 
+    if price_only:
+        return None, {"peak_bytes": peak, "target_bytes": target,
+                      "alloc_bytes": alloc, "binding_phase": phase,
+                      "vram_gib": budget.vram_gib, "domains": layout.count,
+                      "attempts": attempts}
+
     # Every check that can refuse runs before a byte is written: the
     # ownership and footprints come from the accepted in-memory experiment.
     domains = _plan_domains(exp, layout, sites, x, y, config_path=config_path,
                             wps_path=wps_path, outdir=outdir, name=name)
+    if column is not None:
+        from woof.energy.vertical import check_physics_levels
+
+        for domain in exp.domains:
+            check_physics_levels(domain.run, p_top_pa=column.p_top_pa,
+                                 what=f"d{domain.grid_id:02d}")
+        domains[0].extra["vertical"] = column.summary()
     wps_text = render_plan_wps(layout, projection, source=source)
 
     outdir.mkdir(parents=True, exist_ok=True)
     stale_plan = outdir / "plan.json"
     if stale_plan.exists():
         stale_plan.unlink()
+    # nor the source-choice receipt that plan carried
+    (outdir / SOURCE_CHOICE_FILE).unlink(missing_ok=True)
     dw._write_atomic(config_path, text)
     dw._write_atomic(wps_path, wps_text)
     written = [config_path, wps_path]
+    if column is not None:
+        written.append(column.write(outdir / "vertical.json"))
+    else:
+        # A re-plan without a column must not leave an older one behind.
+        (outdir / "vertical.json").unlink(missing_ok=True)
     if source == "era5":
         vtable = outdir / dw._PACKAGED_VTABLE.name
         if not vtable.exists():
@@ -1160,6 +1317,9 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
                      "may not have published it yet (GFS posts about 3.5-5 h "
                      "after the cycle), in which case pass an earlier --start")
     notes.extend(source_notes(source))
+    receipt = record_choice(source_choice, outdir, notes)
+    if column is not None:
+        notes.extend(column.header_lines())
     notes.extend(leaf_notes)
     notes.extend(fetch_notes)
     if len(attempts) > 1:
@@ -1171,7 +1331,7 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
                 hours=float(hours), domains=domains, source=source,
                 sites_ref=file_ref(Path(sites_path).resolve(),
                                    relative_to=outdir),
-                notes=notes)
+                notes=notes, source_choice=receipt)
     dump_plan(plan, outdir / "plan.json")
     summary = {
         "config": config_path, "wps_namelist": wps_path,
@@ -1244,6 +1404,9 @@ def _plan_domains(exp, layout: _Layout, sites: SiteSet, x: np.ndarray,
 def main(args) -> int:
     """``woof energy plan SITES --topology wrf-nests``."""
 
+    from woof.energy.source_select import choice_summary
+    from woof.energy.vertical import column_request
+
     sites_path = Path(args.sites)
     try:
         sites = load_sites(sites_path)
@@ -1262,7 +1425,9 @@ def main(args) -> int:
                 start=args.start, hours=args.hours, source=args.source,
                 card=args.card, vram_gib=args.vram_gib,
                 max_domains=args.max_domains, nz=args.nz,
-                sites_path=sites_path, name=None, now=None)
+                sites_path=sites_path, name=None, now=None,
+                source_priority=getattr(args, "source_priority", None),
+                column_request=column_request(args))
     except (PlanRefused, ContractError, ValueError) as error:
         # ValueError: the wizard's own refusals (fetch hints, coverage,
         # projection) reach here unchanged and are reported as refusals.
@@ -1280,6 +1445,9 @@ def main(args) -> int:
         "wps_namelist": str(summary["wps_namelist"]),
         "written": [str(p) for p in summary["written"]],
         "source": plan.source, "start": plan.start, "hours": plan.hours,
+        **({} if plan.source_choice is None else {
+            "source_choice": choice_summary(plan.source_choice),
+            "source_choice_receipt": str(outdir / SOURCE_CHOICE_FILE)}),
         "dx_chain_m": list(layout.spacings),
         "ratios": list(layout.ratios),
         "domains": layout.count,
@@ -1292,6 +1460,7 @@ def main(args) -> int:
                  "fit_target_gib": _gib(summary["target_bytes"]),
                  "alloc_estimate_gib": _gib(summary["alloc_bytes"]),
                  "binding_phase": summary["binding_phase"]},
+        "vertical": plan.domains[0].extra.get("vertical"),
         "run_dir": plan.domains[0].run_dir,
         "notes": plan.notes,
     }
@@ -1299,7 +1468,7 @@ def main(args) -> int:
     return 0
 
 
-__all__ = ["TOPOLOGY", "build_plan", "main", "PlanRefused",
+__all__ = ["TOPOLOGY", "build_plan", "price_plan", "main", "PlanRefused",
            "DomainLimitRefused", "VramRefused", "default_start_cycle",
            "parse_start", "chain_ratios", "build_layout", "project_sites",
            "choose_projection"]

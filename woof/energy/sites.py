@@ -38,7 +38,10 @@ A plant with a ``generator_source`` that has kept, in-region generators of
 the same source inside its polygon, or naming it through ``tags['plant']``,
 gets no site of its own: its members stand for it and its capacity is not
 counted twice.  For wind this is the "wind plant with turbines" rule; the
-same rule keeps a solar plant from doubling the capacity of its panels.
+same rule keeps a solar plant from doubling the capacity of its panels.  A
+plant tagged ``woof:turbines_partial`` (``woof energy inventory merge``
+found its mapped turbines cover too little of its capacity) always keeps
+its own site.
 
 Filters run in this order: ``kinds`` (asset kinds); ``min_voltage_kv``
 (lines, cables and substations, plus towers through their nearest line; an
@@ -53,7 +56,11 @@ is counted by reason in ``provenance["drops"]``.  A result with no sites is
 refused (:class:`SitesRefused`) with that breakdown.
 
 ``heights_m`` is the sorted union of the requested heights and the distinct
-hub heights (rounded to 0.1 m) of the turbines that survive the filters.
+hub heights of the turbines that survive the filters, rounded to
+``hub_height_step_m`` (default 10 m; 0 rounds to 0.1 m as before).  A national
+or worldwide inventory has a hundred or more distinct hub heights, each of which
+would be an output height for every site; on a 10 m step the products still
+interpolate to each site's own ``hub_height_m``, which is kept exact.
 
 Python boundary (``docs/dev/static-rust-port.md``): this is per-site
 bookkeeping on small vectors (a national grid at 100 m is a few hundred
@@ -469,7 +476,8 @@ def build_sites(assets: AssetCollection, *, spacing_m: float = 100.0,
                 region: Sequence | None = None,
                 heights_m: Sequence[float] = (10.0, 30.0, 100.0),
                 include_towers: bool = False,
-                pv_grid_m: float | None = None) -> SiteSet:
+                pv_grid_m: float | None = None,
+                hub_height_step_m: float = 10.0) -> SiteSet:
     """``region`` is a list of polygons as in :mod:`woof.energy.geometry`.
 
     The returned set has no ``assets_ref``; :func:`main` binds the file.
@@ -617,7 +625,7 @@ def build_sites(assets: AssetCollection, *, spacing_m: float = 100.0,
     covered: set[str] = set()
     for plant in (a for a in kept if a.kind == "plant"):
         source = plant.generator_source
-        if source is None:
+        if source is None or plant.tags.get("woof:turbines_partial"):
             continue
         members = [(g, pos) for g, pos, ok in
                    zip(generators, member_pos, member_in)
@@ -693,7 +701,17 @@ def build_sites(assets: AssetCollection, *, spacing_m: float = 100.0,
             f"{drops or 'none'}")
 
     sites = [Site(**record) for record in out.sites]
-    hubs = {round(s.hub_height_m, 1) for s in sites
+    if not hub_height_step_m >= 0.0:
+        raise SitesRefused("hub_height_step_m must be 0 (exact to 0.1 m) or "
+                           f"a positive step in metres, got {hub_height_step_m!r}")
+
+    def _hub(height: float) -> float:
+        if hub_height_step_m == 0.0:
+            return round(height, 1)
+        return round(max(hub_height_step_m,
+                         round(height / hub_height_step_m) * hub_height_step_m), 1)
+
+    hubs = {_hub(s.hub_height_m) for s in sites
             if s.kind == "turbine" and s.hub_height_m is not None}
     heights = tuple(sorted(set(requested_heights) | hubs))
 
@@ -767,7 +785,8 @@ def main(args) -> int:
         collection, spacing_m=args.spacing_m, kinds=args.kinds,
         min_voltage_kv=args.min_voltage_kv, region=region,
         heights_m=args.heights_m, include_towers=args.include_towers,
-        pv_grid_m=args.pv_grid_m)
+        pv_grid_m=args.pv_grid_m,
+        hub_height_step_m=getattr(args, "hub_height_step_m", 10.0))
     output_dir = output.resolve().parent
     site_set.assets_ref = file_ref(assets_path, relative_to=output_dir)
     if args.region is not None:

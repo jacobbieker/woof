@@ -31,6 +31,11 @@ existing bundle travels beside it: `woof sim PREPARED --devices-table JSON`
 takes the table as JSON (for example `{"count": 2, "ids": [0, 1]}`), for a
 single domain or a tree. Neither relay changes the restart identity.
 
+This page splits one forecast across cards. For the opposite case, several
+independent forecasts sharing one card, see `woof multi-run` with
+`runs_per_gpu`. It is set in the multi-run plan's own `[devices]` table, not
+the experiment's ([Several runs on one card](HARDWARE.md#several-runs-on-one-card)).
+
 ## Nested trees
 
 On a tree, every grid is split by the same `count`, `grid` and `ids` unless

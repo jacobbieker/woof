@@ -261,8 +261,26 @@ def test_hub_heights_rounded_to_decimetre():
                                 "coordinates": [-4.0 + 0.01 * i, 51.6]},
                       generator_source="wind", hub_height_m=h)
                 for i, h in enumerate((80.04, 79.96, 101.27))]
-    site_set = build_sites(AssetCollection(turbines), heights_m=(10.0,))
+    site_set = build_sites(AssetCollection(turbines), heights_m=(10.0,),
+                           hub_height_step_m=0.0)
     assert site_set.heights_m == (10.0, 80.0, 101.3)
+
+
+def test_hub_heights_snap_to_the_default_ten_metre_step():
+    # A worldwide inventory has 100+ distinct hub heights; each would be an
+    # output height for every site.  The default 10 m step keeps the set
+    # small while every site keeps its exact hub_height_m.
+    heights = (80.04, 79.96, 101.27, 84.0, 87.5, 117.0, 3.0)
+    turbines = [Asset(asset_id=f"t:wt{i}", kind="generator", source="test",
+                      geometry={"type": "Point",
+                                "coordinates": [-4.0 + 0.01 * i, 51.6]},
+                      generator_source="wind", hub_height_m=h)
+                for i, h in enumerate(heights)]
+    site_set = build_sites(AssetCollection(turbines), heights_m=(10.0,))
+    assert site_set.heights_m == (10.0, 80.0, 90.0, 100.0, 120.0)
+    assert sorted(s.hub_height_m for s in site_set.sites) == sorted(heights)
+    with pytest.raises(SitesRefused):
+        build_sites(AssetCollection(turbines), hub_height_step_m=-1.0)
 
 
 def test_wind_plant_without_turbines_gets_plant_site(wales):

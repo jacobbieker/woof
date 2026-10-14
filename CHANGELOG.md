@@ -4,6 +4,276 @@
 
 New:
 
+- `woof multi-run` can now pack several ordinary forecasts onto one GPU. Set
+  `[devices] runs_per_gpu = N|"auto"` in the plan or pass
+  `--runs-per-gpu N|auto`. `auto` allows at most 8 runs per card. The default
+  of 1 is the old behaviour: a second run on a card is refused.
+  Each run is priced before anything is claimed, the way `woof check` and its
+  own `woof run` supervisor price it. A run starts when three things hold:
+  its card has fewer than N of the plan's runs; the live siblings' priced
+  peaks plus its own plus a margin fit the card's NVML total; and its priced
+  peak plus the margin fit the card's measured free memory, less the growth
+  its siblings may still make. The margin is `mem_margin_gib` or
+  `--mem-margin-gib`, default 1 GiB.
+  Memory used by other processes, such as a forecast already on the card,
+  reduces what is admitted. A run that does not fit waits for a sibling to
+  finish. A run that does not fit while none of the plan's runs hold its card
+  is refused as `not_admitted`, and the other runs continue. A run whose priced
+  peak can never fit its card refuses the whole plan before anything is
+  claimed, naming the run.
+  Each child keeps its own caches and gets its own `WOOF_GPU_LOCK_ROOT`, and
+  its supervisor still runs the measured shared-GPU admission itself. The
+  multi-run holds each packed card's machine-wide UUID lock, so no other woof
+  run starts beside the packed runs. A card whose lock another forecast
+  already holds is shared by measurement.
+  `--mps` (or `[devices] mps = true`) runs the CUDA MPS control daemon.
+  The receipt's `packing` block records card totals, priced peaks and their
+  basis, and every admission event with measured used and free memory.
+  The MPS daemon code now lives in `woof/gpu_packing.py`, shared with
+  `woof energy worker --mps`. See docs/public/HARDWARE.md, "Several runs on
+  one card".
+- `woof energy worker --slots-per-gpu N|auto` runs several hindcast jobs
+  on one GPU. A slot claims only a job whose declared
+  `resources.gpu_mem_gib` fits beside the card's live reservations plus a
+  margin (`--mem-margin-gib`, default 1 GiB). A job that declares nothing
+  costs the whole card unless `--default-job-mem-gib` is given. An idle
+  card admits any one job.
+  `auto` = min(8, card memory / 3.4 GiB, CPUs per GPU). One worker still
+  owns a card, a slot's reservation lives as long as its runner, and each
+  runner's `woof run` locks under its own `WOOF_GPU_LOCK_ROOT`.
+  The default of 1 is the old behaviour.
+  `--mps` starts (or reuses) the CUDA MPS control daemon, so packed
+  slots' kernels run concurrently instead of time-slicing. Its pipe and
+  log directories go under `--mps-dir`, and it is stopped on exit. The
+  worker refuses when `nvidia-cuda-mps-control` is missing.
+  `woof energy hindcast plan` records each job's priced GPU memory: the
+  wrf-nests planner's priced peak, the wrf-tiles fit ceiling, or `null`
+  without a card. `woof energy estimate --slots-per-gpu N|auto [--mps]`
+  prices packing with a stated utilisation curve and band. In the
+  worldwide example, `auto --mps` on p5 cuts GPU-hours from 395k to 197k
+  (106k-697k); this is an estimate, and nothing packed has been timed.
+  The deploy renderers pass `slots_per_gpu`/`mps` to all four backends,
+  and k8s also gets a commented device-plugin MPS sharing example. The
+  container entrypoint reads `WOOF_SLOTS_PER_GPU` and `WOOF_ENABLE_MPS=1`.
+  Queue claims gate on dependencies and then on memory; `kind: prefetch`
+  jobs declare `gpu_mem_gib = 0` and never reserve or wait for a card.
+  `woof energy worker` now also takes the queue as `--queue URL`, the form
+  the renderers and the entrypoint already wrote.
+  See docs/energy-hindcast/queue-worker.md.
+- Hindcast forcing cache: `woof energy hindcast plan --forcing-cache URL`
+  (`s3://`, `gs://`, `file://` or a path) fetches each (source, cycle)
+  once instead of once per cluster. Every table-route source (Met Office
+  global, ECMWF open data, HRRR native, RAP, ICON, ...) gets one prefetch
+  job per cycle (`kind: prefetch` in `woof-energy.hindcast-job.v1`), and
+  each forecast job of that cycle carries `forcing` and `depends_on`
+  (job ids unchanged). `woof energy hindcast prefetch DIR` (or the queue)
+  runs the cycle's `woof fetch` once and publishes it to a
+  content-addressed cache (`woof-energy.forcing-cache.v1` entries, sha256
+  blobs, idempotent, create-only). Before running, `run-local` (and
+  `woof energy hindcast mirror JOB`) copies the objects the job's own
+  fetch would download into the exact folder `woof go` picks, sha256
+  verified, with the receipts `woof fetch` writes
+  (`woof.fetch_routes.adopt_verified_objects`), so the job's fetch reuses
+  every object and asks no host; anything the cache lacks is fetched by
+  the job and listed in `forcing-mirror.json`. Sources whose fetch crops to
+  the cluster's area (`gfs`, `gdas`, legacy `hrrr`, `era5`) are marked
+  `direct` with the reason. `woof energy queue` claims a job only when its
+  queued dependencies are done or dead, and pushes and tries prefetch jobs
+  first. `woof energy estimate` adds a `forcing` section: downloads per
+  job versus per cycle, measured per object, with GPU-slot time, requests
+  and cache storage priced per offer (for the worldwide year about 2,080
+  TB and 4,331 slot-hours avoided; every rate an assumption). See
+  `docs/energy-hindcast/forcing-cache.md`.
+- `[output] preset = "windfarm"` writes only 2-D planes for a wind-farm
+  reanalysis: the hub-height wind and its interval MAX/MIN/MEAN, new
+  hub-height scalars `T_HUB`, `P_HUB`, `RHO_HUB`, `QV_HUB`, `QC_HUB`,
+  `QR_HUB` and `QNC_HUB` (interpolated by the in-model hub diagnostic on
+  the GPU at each frame, linear in z like the wind; a CPU NumPy
+  reference matches the kernel bit for bit except T/RHO, within 2 ulp),
+  the near-surface state, boundary-layer and surface-flux fields,
+  precipitation accumulators, the gust family and the georeference. It
+  is the one preset without the structural `T`/`PHB` volumes, needs
+  `hub_wind`/`hub_heights_m`, and lists a reason for every field
+  (`woof.io.history_selection.WINDFARM_FIELD_REASONS`). At six hub
+  heights a frame is 99 planes, against about 700 for `energy` and
+  2,240 for `full` on the hindcast's 49-level leaf. The hub scalars are produced only
+  when a selection names them, so existing `full`/`energy` hub-wind runs
+  write what they did before
+  (docs/energy-forecasts.md#wind-farm-output-without-3-d-volumes-the-windfarm-preset).
+- `woof energy extract` builds `forecast.v1` from the hub planes when the
+  history has no `PH`/`PHB`: winds from `WSPD_HUB`/`WDIR_HUB`,
+  `air_temperature` and `air_density` from `T_HUB`/`RHO_HUB`, humidity
+  and hydrometeors from the hub scalars, at the history's `HUB_HEIGHT`
+  levels (a height it does not carry is refused). The 3-D path is
+  unchanged and wins when both are present.
+- `woof energy hindcast plan --leaf-output-preset windfarm|energy|full`
+  (default `windfarm`, with `hub_heights_m` set to the cluster sites'
+  heights) sets every leaf's `[output]` on `wrf-nests` and `wrf-tiles`,
+  and records it in the job. `woof energy estimate --store-preset
+  windfarm [--hub-heights N]` prices the store from the preset's own
+  field list (the worldwide example: about 72 TB, against 0.63 PB for
+  `energy` and 2.0 PB for `full`). `woof energy hindcast optimize` now
+  prices `--store-preset windfarm` by default, the leaves the hindcast
+  writes, and its recipe carries the preset to the estimate step. A
+  re-plan that would switch the leaf preset under segments already
+  written is refused.
+
+- `woof energy plan --topology wrf-tiles|wrf-nests --source auto` picks
+  the boundary source for the sites and the `--start` cycle from
+  `--source-priority` (default
+  `hrrr-native,hrrr,rap,met-office-global,ecmwf-open-data,gfs,era5`):
+  the first that covers the sites' box plus the planner's margin, holds
+  the cycle (archive start, retention, publication era), reaches
+  `--hours` and the 5000 Pa model top. The choice and every passed-over
+  candidate's reasons are recorded in `plan.json` and
+  `source-choice.json` (`woof-energy.source-choice.v1`).
+  `woof.energy.source_select.select_source` is the same choice as a
+  function, read from the registry and route table with no network
+  (docs/energy-hindcast/source-select.md).
+- `woof energy partition` cuts a worldwide `woof-energy.sites.v1` set
+  into independent regional clusters (`woof-energy.partition.v1`):
+  great-circle single linkage (default 30 km, grid-hashed, about 3 s for
+  400 000 sites), bisection of clusters over `--max-extent-km`/
+  `--max-sites` or the card, stable hash ids, antimeridian-safe boxes,
+  a suggested parent chain, projection, topology and tile estimate per
+  cluster, sized for `--card`/`--vram-gib`/`--hardware-json` without a
+  local GPU probe. `woof energy plan-cluster` plans one cluster with its
+  own parent. The wrf-tiles parent region now spans the sites' shortest
+  longitude arc, so a site set across the antimeridian is planned
+  rather than refused. See `docs/energy-hindcast/partition.md`.
+- `woof energy import` reads four more wind-farm sources: the U.S. Wind
+  Turbine Database (`--format uswtdb`, CSV or API JSON), Global Energy
+  Monitor's Global Wind Power Tracker (`--format gem`, `.xlsx` or CSV),
+  EMODnet offshore wind farms (`--format emodnet`) and OpenStreetMap
+  `.osm.pbf` extracts (`--format osm-pbf`, which needs pyosmium and is
+  refused without it). These formats keep operating farms only unless
+  `--status` asks for more. `woof energy inventory merge` folds several
+  assets documents into one wind inventory. It matches turbines by
+  distance and plants by distance, name and capacity. A plant whose
+  turbines are mapped gives way to those turbines. Each asset records
+  its sources and licences in `woof:provenance` and `woof:licenses`. The
+  output is still `woof-energy.assets.v1`. `woof energy inventory
+  download` fetches USWTDB and EMODnet. See
+  `docs/energy-hindcast/inventory.md`.
+- `woof energy queue init|push|status|requeue` keeps energy hindcast
+  jobs in an object-store work queue (`file://`, `s3://` with
+  conditional writes, `gs://` with generation preconditions), and
+  `woof energy worker` drains it with one loop per GPU on any number of
+  nodes: leases with heartbeat renewal and expiry, bounded retries with
+  backoff, a dead-letter state, exactly-once completion markers, runner
+  logs uploaded per attempt, and SIGTERM releasing the lease uncharged
+  for spot and preemptible machines.  See
+  `docs/energy-hindcast/queue-worker.md`.
+- `woof energy deploy render --backend aws-batch|gcp-batch|k8s|slurm`
+  writes the files that start a fleet of `woof energy worker` queue
+  workers: an AWS Batch compute environment, job queue, GPU job
+  definition and array job; a GCP Batch job; a Kubernetes Indexed Job
+  with workload identity; or a Slurm sbatch array. It renders
+  deterministically from a typed TOML/JSON configuration and records
+  the result in `deploy.json` (`woof-energy.deploy.v1`). No credentials
+  are written, and a secret-looking `env` entry is refused. Missing
+  account identifiers become `REPLACE_ME_` placeholders, which
+  `submit.sh` refuses to run with and `--strict` refuses to render.
+  `deploy/Dockerfile` (CUDA 12, or CUDA 13 with `--build-arg CUDA=13`)
+  builds the locked pixi environment, the native bridges and the tables
+  into a non-root image with a `woof doctor` healthcheck. Its entrypoint
+  copies WPS_GEOG and the high-resolution cache from `WOOF_GEOG_URL` and
+  `WOOF_HIGHRES_CACHE_URL` onto local scratch. The guide is
+  `docs/energy-hindcast/deploy.md`.
+- Energy hindcast jobs can write into one shared Icechunk repository on
+  S3, GCS (`s3://`, `gs://`, `file://`, `memory://`) or a shared
+  filesystem, many nodes at once. Credentials come from the environment,
+  a role or workload identity. `woof energy icechunk init` allocates a
+  year-long `(time, site, height)` site store once, and `woof energy
+  extract --format icechunk --icechunk-mode region` writes one job's
+  times and sites into it. `tools/wrfout_to_netcdf.py --icechunk-group
+  --time-axis` writes one segment's wrfout frames for one domain onto a
+  shared time axis. Conflicting commits are rebased or re-applied with
+  bounded, jittered retries, so no write is lost, and re-runs are
+  idempotent. `woof energy icechunk verify` reports the snapshot and how
+  much of the axis is written. See `docs/energy-hindcast/icechunk.md`.
+- `woof energy rating --products turbine-icing` estimates wind-turbine
+  icing at each turbine's hub height. It reports liquid water content, the
+  droplet median volume diameter (from Thompson `QNCLOUD`, or a documented
+  default droplet number) and meteorological icing. It accretes ice
+  (Makkonen, with Finstad collision efficiency) on the ISO 12494 reference
+  collector, which gives instrumental icing and the ISO class, and on a
+  rotating-blade proxy, which gives rotor icing. It also reports the IEA
+  Wind Task 19 ice class and an uncalibrated production-loss estimate.
+  `woof.energy.icing_turbine.turbine_icing_dataset` runs the same model on
+  wrfout or Icechunk grids (xarray in and out, dask- and CuPy-capable,
+  chunked hindcasts continue exactly). `forecast.v1` gains
+  `cloud_number_mixing_ratio`, sampled from `QNCLOUD`. See
+  `docs/energy-hindcast/icing.md`.
+- `woof energy rating --products wind-resource,ramps` adds wind-farm
+  products. `wind-resource` gives the IEC 61400-12-1:2017 rotor-equivalent
+  wind speed, the power-law shear exponent, veer across the rotor,
+  turbulence intensity, density-corrected generic-curve power and capacity
+  factor. `ramps` finds ramp events in the power at any time step, from
+  15-minute down to 1-minute output, by two definitions: a change over a
+  window (15 min, 1 h and 4 h by default) and swinging-door segmentation.
+  It writes per-timestep ramp flags and rates and a validated event table
+  (`woof.energy.contracts.load_ramp_events`). `--power-curve` chooses
+  between new generic IEC class I, class III and offshore curves and the
+  existing class II curve. The same calculations are available as NumPy
+  and xarray functions in `woof.energy.ramps`. See
+  `docs/energy-hindcast/ramps.md`.
+- `woof energy power FORECAST.nc --assets ASSETS.geojson -o power.nc`
+  estimates wind farm power from turbine-specific curves. Each turbine is
+  matched to a curve by make and model (exact, then fuzzy), else by rating
+  and rotor diameter, else a generic class curve, and the match is
+  recorded (`--matches`). It uses the rotor-equivalent wind where the
+  forecast heights span the rotor, the IEC density correction, high-wind
+  shutdown with hysteresis (optionally on gusts), Jensen or Bastankhah
+  wakes from the turbine layout (a fallback table for plants known only by
+  capacity), and availability, icing and electrical losses. Output is
+  `woof-energy.power.v1`: power, gross power, wake loss and capacity factor
+  per plant, with optional per-turbine series. The turbine library
+  (`woof/data/energy/turbine_library.json`, about 200 machines) derives from
+  the Open Energy Platform Wind Turbine Library (ODbL-1.0, (c) Reiner
+  Lemoine Institut) and is rebuilt by `tools/build_turbine_library.py`. See
+  `docs/energy-hindcast/power.md`.
+- Hub-height wind inside the model. `[output] hub_wind = true` or
+  `hub_heights_m = [...]` writes `WSPD_HUB` and `WDIR_HUB` (wind speed and
+  earth-relative direction at each configured height above ground,
+  default 40 to 200 m) on a new `hub_height` axis. It also writes
+  `WSPD_HUB_MAX`, `WSPD_HUB_MIN` and the time-weighted `WSPD_HUB_MEAN`,
+  computed from every model step since the previous history frame, so a
+  ramp inside a 15-minute file is recorded. `HUB_WINDOW_S` gives how many
+  seconds those statistics cover. `hub_sites` with `hub_sample_interval_s`
+  writes a time × site × height sidecar,
+  `hubwind_d0N_<time>.nc`, for each history frame. The diagnostic
+  changes no model value and is not saved in checkpoints. After a resume
+  the statistics start again from the restart time, and `HUB_WINDOW_S`
+  shows that. Streamed (`[tiles]`) domains, ensemble capture and nest
+  relocation are refused by name. See docs/energy-hindcast/hub-wind.md.
+- `woof energy estimate` prices a wind-farm hindcast before any GPU is
+  rented. It reads a `wrf-tiles`/`wrf-nests` plan, a partition document, or
+  summary statistics (`--clusters N --footprint-km2 A`) and reports
+  GPU-hours, instance-hours, wall clock for `--instances` (or the instances
+  a `--deadline-days` needs), on-demand and spot dollars per cloud instance,
+  and the Icechunk store's size and monthly cost. The output is a
+  `woof-energy.cost-estimate.v1` JSON on stdout and a table on stderr.
+  Throughput is calibrated on two consumer-card timing receipts and scaled
+  by memory bandwidth, so every figure carries a 0.5x-1.5x band. Prices
+  come from a dated, editable `woof/data/energy/cloud_prices.json`
+  (as of 2025-07-01) and are never fetched live.
+  See docs/energy-hindcast/cost.md, including a worked estimate for every
+  public wind farm worldwide at 200 m for one year.
+- `--card` accepts cloud datacentre parts: `h100-80gb`/`h100-sxm`/
+  `h100-pcie`, `h200`, `a100-80gb`, `a100-40gb`, `l40s`, `l4` and `a10g`.
+  Each part sizes against the capacity it reports rather than its marketing
+  size (an L40S at 45.0 GiB). These rows live in the new `woof.card_catalog`
+  with SM count and bandwidth and are marked declared, not measured locally.
+- `nwp_diagnostics = 1` now also writes the wind members of WRF's
+  `nwp_diagnostics` family, `WSPD10MAX`, `W_UP_MAX` and `W_DN_MAX`, plus
+  `U10MAX`/`V10MAX` (the 10 m wind at the instant of the speed maximum)
+  and `GUST`, the interval-maximum surface gust from the NCEP UPP
+  `CALGUST` method. Each is folded on every model step on the GPU, reset
+  after each history frame and carried in checkpoints. The `energy`
+  preset selects them. The method and where WOOF differs from WRF are in
+  `docs/energy-hindcast/gusts.md`.
+
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals
@@ -115,9 +385,90 @@ New:
   spectral prototype keeps `primitive.nlev <= 32`. It integrates its fast
   modes explicitly and carries no physics, so a deeper column only shrinks
   its stable step.
+- `woof energy hindcast plan|status|materialize|run-local` runs a long
+  reanalysis as a chain of cold-started segments. Each cluster and date
+  range becomes daily `woof-energy.hindcast-job.v1` jobs: a 30 h run with
+  6 h of spin-up, keeping 24 h. Lengths and cycle hour are configurable,
+  and the job ids are deterministic. Every job records the boundary
+  source chosen for its segment and whether it changed from the previous
+  segment. On `wrf-nests`, `history_begin_s` is set on every domain and
+  leaves write every 900 s (or finer, such as 300 s). Each job carries
+  Icechunk targets and a cost hook. A `woof-energy.hindcast-manifest.v1`
+  manifest tracks status and resume. See
+  `docs/energy-hindcast/driver.md`.
+- `woof domain` takes an explicit model column: `--p-top-pa`,
+  `--eta-levels` (a comma list or a file) and `--dzbot`, `--dzstretch-s`,
+  `--dzstretch-u` and `--max-dz` (WRF 4.6.1 `compute_eta` level
+  generation). The column is written as explicit `eta_levels` and
+  `p_top`. It must run strictly from 1 down to 0 with at most 256 levels,
+  and its top must lie inside the source's reach. `woof energy plan
+  --topology wrf-nests|wrf-tiles` takes the same flags. With any of them
+  set, the planner builds the wind-energy column
+  (`woof.energy.vertical`). Its defaults are a 5500 Pa top (19.97 km),
+  70 levels and a 12 m lowest layer. It refuses a model top above 20 km
+  in the standard atmosphere and any column with fewer than 8 layers
+  below 250 m. The column record is written to `vertical.json`
+  (`woof-energy.vertical.v1`). Without the flags, nothing changes. See
+  `docs/energy-hindcast/vertical.md`.
+- `woof energy hindcast optimize` ranks leaf spacing x levels x segment
+  layout x cloud offer by estimated cost and keeps the rows that meet
+  `--deadline-days` (and `--max-instances`). It re-partitions the sites
+  in-process once per card memory and spacing, with the cuts cached under
+  `--partition-dir`. Every row is marked an estimate with its throughput
+  and utilisation band and the price table's age. The chosen row carries
+  the partition, estimate and plan commands, and its cost at 0-3 h of
+  spin-up. The output is `woof-energy.cost-optimize.v1`. See
+  `docs/energy-hindcast/cost.md`.
+- The cost model now has a documented utilisation term. Throughput is not
+  linear in cells: an occupancy knee plus a fixed per-step cost, in three
+  assumed pairs (optimistic, central, pessimistic). Each pair has `K`
+  refitted on the receipts, and the band is the envelope over the pairs.
+  Every offer reports its utilisation, so a small domain is no longer
+  priced as if it filled a big card. These are assumptions to replace
+  with a cells sweep on the rented card.
+- The price table has AWS `g6.xlarge`/`g6.12xlarge` (L4 24 GB) and
+  `g5.12xlarge`/`g5.48xlarge` (A10G) rows, with on-demand prices as of
+  its 2025-07-01 date and illustrative spot prices.
+
+Changed:
+
+- Hindcast defaults are now the cost-efficient end of the requirement.
+  On the US + EU-offshore partition (AWS spot, central) they bring the
+  year from about $439k (200 m, 70 levels, 8 h runs with 2 h spin-up, on
+  g5.xlarge) to about $133k:
+  - `woof energy partition --leaf-dx-m` and the hindcast leaf spacing
+    default to 300 m, not 200 m and 100 m. 100-250 m is on request.
+  - `woof energy hindcast plan --nz` defaults to 49
+    (`woof.energy.vertical.HINDCAST_NZ`). That is the smallest wind-energy
+    column with at least 8 layers below 250 m, a 12 m lowest layer, a top
+    at most 20 km and no layer deeper than 1000 m, and it keeps the
+    70-level preset's 10 rotor layers at about 0.76x the cost.
+  - Segments are 9 h runs from each 00/06/12/18 UTC init with 3 h of
+    spin-up, keeping `[init + 3 h, init + 9 h)`. They were 6 h runs with
+    no spin-up. `--segment-hours 6 --spinup-hours 0` restores the old
+    layout at about 0.68x the cost. `--segment-hours 6` alone is refused
+    rather than read as 3 h windows off the 6-hourly cycle.
+- `woof energy estimate` defaults follow the driver: 9 h segments with
+  3 h spin-up, 300 m leaves and 49 levels. Without `--segments`, the
+  count stores one year (`ceil(8760 / kept hours)`, 1,460 by default).
+  The old defaults were 365 x 30 h with 6 h spin-up, 200 m and 60 levels.
 
 Fixed:
 
+- `woof energy estimate --partition` silently ignored `--leaf-dx-m`, and a
+  job's spacing, when the partition's clusters carried their own
+  `leaf_dx_m`. A spacing that disagrees is now refused, and the refusal
+  says to re-partition (`woof energy partition --leaf-dx-m`, or `woof
+  energy hindcast optimize`, which re-cuts per spacing).
+
+- `woof energy hindcast run-local --force` on a job the manifest called
+  complete marked it `running` and then returned "skipped", leaving it
+  stuck; a forced run now runs.
+- `woof energy hindcast materialize` of a partition cluster handed
+  `woof.energy.partition.plan_cluster` a `sites_path` it passed on to the
+  planner (a second one on wrf-nests, an unknown one on wrf-tiles), so
+  every partition job was refused with a TypeError; `plan_cluster` binds
+  its own sites file.
 - WOOF Global now holds explicit `[vertical] a_half_pa`/`b_half` arrays to
   the same level range as `nlev`. Before, they skipped the check, so an
   over-deep column passed config validation and was refused only at the

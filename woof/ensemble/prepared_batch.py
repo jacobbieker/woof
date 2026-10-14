@@ -113,6 +113,11 @@ def native_prepared_eligibility(inputs, node=None, *, members=2, restart=None, k
         reasons.append("open or nested boundary graphs keep their original stage producers")
     if cfg.zadvect_implicit or cfg.nwp_diagnostics or cfg.tke_budget:
         reasons.append("implicit transport or optional diagnostics keep their original complete stage graph")
+    from woof.io.history_selection import resolve as resolve_output
+    if any(getattr(resolve_output(getattr(exp, "output", None),
+                                  getattr(dc, "output", None)),
+                   "hub_wind", None) is not None for dc in exp.domains):
+        reasons.append("[output] hub-height wind folds in the original dycore epilogue; its native batch binding is not qualified")
     if getattr(cfg, "hmix_k_diag", False):
         reasons.append("XKMH/XKHH output reads original dycore mixing scratch; its native diagnostic binding is not qualified")
     if cfg.time_step_sound < 2 or cfg.time_step_sound % 2:

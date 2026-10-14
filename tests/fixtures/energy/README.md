@@ -19,7 +19,33 @@ plus the substations, turbines and the PV farm. It is not `woof energy
 sites` output; it exists so units that consume sites can test without the
 sites builder.
 
+`assets_windfarm_power.geojson` is a hand-built, synthetic
+`woof-energy.assets.v1` document for `tests/test_energy_hindcast_power.py`.
+Its farms, names, models and coordinates are invented: one plant per
+turbine-matching rung (a Vestas model named exactly, a Siemens model spelled
+loosely, untagged turbines matched by rating and rotor, a lone turbine of an
+unknown make) and a wind farm known only by its outline and capacity.
+
 `overpass_wales_a.json`, `overpass_wales_b.json` and `overpass_timeout.json`
 are hand-written Overpass API answers for `tests/test_energy_osm.py`. Their
 ids, names, coordinates and tags are invented. They are not OpenStreetMap
 data.
+
+`sites_world.json` is a synthetic, worldwide `woof-energy.sites.v1`
+document for `tests/test_energy_hindcast_partition.py`: 415 turbine
+sites in invented wind farms. It holds two dense offshore arrays 20 km
+apart (one cluster at the 30 km linkage), a small farm across the
+antimeridian, a chain of 40 farms 10 km apart over about 400 km (one
+linkage component wider than the 250 km extent cap), and isolated farms
+on every continent in each projection band (Mercator, Lambert, polar).
+None of the coordinates are real wind farms.
+
+`inventory/` holds synthetic inputs for the global wind-farm inventory
+(`tests/test_energy_hindcast_inventory.py`). They follow the column layouts
+of the U.S. Wind Turbine Database (`uswtdb_sample.csv`, `uswtdb_sample.json`),
+the GEM Global Wind Power Tracker (`gem_sample.csv`, and `gem_sample.xlsx`,
+which holds the same rows behind an About sheet and a title row and is
+written by `write_xlsx` in the test module), EMODnet offshore wind farms
+(`emodnet_sample.geojson`) and Overpass-shaped OSM elements
+(`osm_wind_elements.json`). Every project name, identifier, capacity and
+coordinate in them is invented. They are not copies of those datasets.

@@ -78,6 +78,7 @@ PROFILE_SOURCES: dict[str, tuple[str, ...]] = {
     "QICE": ("qi",),
     "QSNOW": ("qs",),
     "QGRAUP": ("qg",),
+    "QNCLOUD": ("nc",),
 }
 SURFACE_SOURCES: dict[str, tuple[str, ...]] = {
     "U10": ("u10",),

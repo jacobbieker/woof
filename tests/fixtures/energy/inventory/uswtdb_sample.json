@@ -1,0 +1,4 @@
+[
+ {"case_id": 9000101, "t_state": "IA", "p_name": "Synthetic Cornfield", "p_year": 2010, "p_tnum": 2, "p_cap": 3.0, "t_cap": 1500, "t_hh": 80.0, "t_rd": 77.0, "t_ttlh": 118.5, "xlong": -93.6, "ylat": 42.0},
+ {"case_id": 9000102, "t_state": "IA", "p_name": "Synthetic Cornfield", "p_year": 2010, "p_tnum": 2, "p_cap": 3.0, "t_cap": 1500, "t_hh": null, "t_rd": 77.0, "t_ttlh": null, "xlong": -93.595, "ylat": 42.0}
+]

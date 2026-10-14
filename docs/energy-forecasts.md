@@ -29,6 +29,7 @@ woof energy plan            ->  plan/plan.json   woof-energy.plan.v1  (+ emitted
 woof energy run             ->  one run per plan domain (runs/manifest.json)
 woof energy extract         ->  forecast.nc      woof-energy.forecast.v1
 woof energy rating          ->  products.nc
+woof energy power           ->  power.nc         woof-energy.power.v1
 ```
 
 `woof energy` with no subcommand prints this overview. Every flag is listed
@@ -43,6 +44,7 @@ under the `woof energy` headings of
 | PyPSA-Eur network CSVs (buses, lines, links, transformers, generators) | `woof energy import --format pypsa-eur` | CC-BY 4.0 | Attribution |
 | UK Renewable Energy Planning Database (REPD) CSV | `woof energy import --format repd` | Open Government Licence v3 | Attribution |
 | Your own assets as GeoJSON or CSV | `woof energy import --format geojson` or `--format csv` | Yours | Yours |
+| U.S. Wind Turbine Database, GEM Global Wind Power Tracker, EMODnet offshore wind farms, OSM `.osm.pbf` extracts | `woof energy import --format uswtdb`, `gem`, `emodnet` or `osm-pbf`, then `woof energy inventory merge`; see [the global wind-farm inventory](energy-hindcast/inventory.md) | Public domain; CC-BY 4.0; CC-BY 4.0; ODbL 1.0 | Per asset, in `woof:licenses` |
 
 [OpenInfraMap](https://openinframap.org) is a map rendering of the same
 OpenStreetMap `power=*` data. `woof energy fetch` does not read OpenInfraMap
@@ -162,6 +164,7 @@ Data variables (`FORECAST_VARIABLES`):
 | `rain_mixing_ratio` | time, site, height | kg kg-1 | rain mixing ratio |
 | `ice_mixing_ratio` | time, site, height | kg kg-1 | cloud ice mixing ratio |
 | `snow_mixing_ratio` | time, site, height | kg kg-1 | snow mixing ratio |
+| `cloud_number_mixing_ratio` | time, site, height | kg-1 | cloud droplet number per kg of air |
 | `t2` | time, site | K | 2 m air temperature |
 | `q2` | time, site | kg kg-1 | 2 m water vapour mixing ratio |
 | `rh2` | time, site | % | 2 m relative humidity |
@@ -217,7 +220,11 @@ server-side Overpass timeout per tile.
 `--merge ASSETS.geojson` it adds the new assets to an existing document and
 drops duplicates by source reference and proximity. For a generic CSV, name
 the columns with `--lat-col`, `--lon-col` and `--id-col`, and give `--kind`
-when the file does not say what each row is.
+when the file does not say what each row is. The wind-farm inventory
+formats (`uswtdb`, `gem`, `emodnet`, `osm-pbf`) keep operating farms unless
+`--status` widens the filter. `woof energy inventory merge` deduplicates
+them across sources. Both are described in
+[the global wind-farm inventory](energy-hindcast/inventory.md).
 
 ### 2. Sites: `sites`
 
@@ -247,6 +254,7 @@ every configuration it emits. The common flags:
 | `--card` or `--vram-gib` | Size each domain for a GPU tier or a memory budget |
 | `--max-domains` | Refuse a plan with more high-resolution domains than this |
 | `--nz` | Vertical levels (default: the planner's ladder; `hex-swath`: 55, or 3 to 80 with the device footprint priced at that column) |
+| `--p-top-pa`, `--eta-levels`, `--dzbot`, `--dzstretch-s`, `--dzstretch-u`, `--max-dz` | `wrf-nests` and `wrf-tiles` only: build the wind-energy column (model top at most 20 km, at least 8 layers below 250 m; [energy-hindcast/vertical.md](energy-hindcast/vertical.md)) |
 
 Emitted WRF configurations write history with the `energy` output preset
 (`[output] preset = "energy"`), which keeps the fields the extractor reads,
@@ -323,8 +331,100 @@ specific build. `woof doctor` reports whether it is found.
 ### 6. Products: `rating`
 
 `woof energy rating FORECAST.nc -o products.nc` computes the products named
-in `--products` (default `dlr,icing,wind-power,pv-power`). See
+in `--products` (default `dlr,icing,wind-power,pv-power,turbine-icing`). See
 [Products and their assumptions](#products-and-their-assumptions).
+
+### 7. Wind farm power: `power`
+
+`woof energy power FORECAST.nc --assets ASSETS.geojson -o power.nc` gives
+power per wind farm from turbine-specific curves matched by make and model
+(or rating and rotor), with density correction, high-wind shutdown, wakes
+and losses. See [Wind farm power](energy-hindcast/power.md).
+
+## Wind-farm output without 3-D volumes: the `windfarm` preset
+
+Every wind-farm product reads a handful of numbers at rotor height: wind
+speed and direction, temperature, pressure, air density, humidity, cloud
+water, rain and droplet number. The `energy` preset gets them by keeping
+the whole column: winds, theta, pressure, geopotential and six
+hydrometeors on every level, about 700 planes per frame on a 49-level
+leaf. Most of that is never read.
+
+`[output] preset = "windfarm"` writes only 2-D planes instead. The model
+interpolates what the products need to the hub heights itself, on the
+GPU, every frame (`woof/core/hub_wind_diag.py`), and the tape carries:
+
+| group | fields | why |
+|---|---|---|
+| hub-height wind | `WSPD_HUB`, `WDIR_HUB`, and `WSPD_HUB_MAX`/`MIN`/`MEAN` over the history interval | power, wakes, ramps, cut-out excursions inside an interval |
+| hub-height scalars | `T_HUB`, `P_HUB`, `RHO_HUB`, `QV_HUB`, `QC_HUB`, `QR_HUB`, `QNC_HUB` | density correction, icing (temperature, water content, droplet size), humidity |
+| near surface | `U10`, `V10`, `T2`, `Q2`, `PSFC`, `TSK` | shear below the rotor, surface and air-sea stability |
+| boundary layer | `PBLH`, `UST`, `HFX`, `LH`, `SWDOWN` | stability (Obukhov length), wake recovery, low-level jets |
+| precipitation | `RAINNC`, `RAINC`, `SNOWNC` | blade erosion, icing context |
+| interval extremes | `WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX` | gust shutdown, convective gusts (`nwp_diagnostics = 1`) |
+| georeference | `XLAT`, `XLONG`, `HGT`, `SINALPHA`/`COSALPHA`, `LANDMASK`, and the eta columns and time coordinate | placing the sites, rotating the 10 m wind |
+
+The reason for each field is in
+`woof.io.history_selection.WINDFARM_FIELD_REASONS`. At six hub heights
+that is 99 planes per frame, against about 700 for `energy` and about
+2,240 for `full` on the hindcast's 49-level leaf. The preset needs the hub-height
+diagnostic (`hub_wind = true` or `hub_heights_m`), and it is the one
+preset that does not carry the structural `T` and `PHB` volumes, so its
+tape is not a file `rw_wrfbatch` opens; its reader is `woof energy
+extract`.
+
+**Extracting from it.** `woof energy extract` takes the profile variables
+from the hub planes whenever the history has no `PH`/`PHB`:
+
+- `u`, `v`, `wind_speed`, `wind_from_direction` from `WSPD_HUB` and
+  `WDIR_HUB`. They are earth-relative already, and are turned into
+  components at each stencil cell before the bilinear blend, so a
+  direction is never averaged across north.
+- `air_temperature` is `T_HUB` and `air_density` is `RHO_HUB` as the
+  model wrote them, and `relative_humidity` comes from `T_HUB`, `P_HUB`
+  and `QV_HUB`.
+- `air_pressure`, `specific_humidity`, `cloud_liquid_mixing_ratio`,
+  `rain_mixing_ratio` and `cloud_number_mixing_ratio` come from `P_HUB`,
+  `QV_HUB`, `QC_HUB`, `QR_HUB` and `QNC_HUB`.
+
+The forecast heights are the history's `HUB_HEIGHT` levels. Each
+requested height, from the sites document or `--heights-m`, must be one
+of them. Nothing is interpolated between hub planes, and a height the
+history does not carry is refused with the list it does. `w`,
+`ice_mixing_ratio` and `snow_mixing_ratio` have no hub plane and are left
+out with a note.
+
+Three differences from the volume path are written to the forecast's
+`notes`:
+
+- The model holds the lowest (highest) mass level's value for a hub height
+  below (above) the column, where the volume path writes NaN.
+- The model interpolates in each column and the sampler then blends the
+  four stencil columns; the volume path blends the columns first and then
+  interpolates in height. Over flat ground the two are the same. Over
+  steep terrain they differ at second order.
+- `w` is not available.
+
+A history that carries both the volumes and the hub planes (`energy` with
+`hub_wind`) is always sampled from the volumes.
+
+On one tiny moist GPU run (36 x 30 x 30 at 250 m, five hub heights, 60
+model seconds), a `windfarm` frame was 280 kB against 1.73 MB for the
+same frame written in full. The forecast extracted from the hub planes
+and the one extracted from the full frames agreed to 1.4e-7 relative. The
+`rating --products turbine-icing,wind-resource,ramps` and `power` products
+both ran on it.
+
+**In a hindcast.** `woof energy hindcast plan` gives every leaf
+`--leaf-output-preset windfarm` by default, with `hub_heights_m` set to
+the cluster sites document's `heights_m`, so the extracted forecast
+lands on the heights of the site store. `energy` and `full` keep their
+volumes and add `hub_wind = true`. The preset and the heights are
+recorded in the job document and are part of its identity. `woof energy
+estimate --store-preset windfarm` prices the store from the preset's own
+field list (`--hub-heights N`, or the job's). For the worldwide example
+in [the cost estimate](energy-hindcast/cost.md), that is about 72 TB,
+against 0.63 PB for `energy` and 2.0 PB for `full`.
 
 ## Choosing a topology
 
@@ -719,6 +819,15 @@ woof energy rating wales/forecast.nc --products dlr,icing -o wales/products.nc
 line voltage. Name one with `--conductor NAME`, or supply your own table with
 `--conductor-table FILE.json`.
 
+**7. Wind farm power with wakes:**
+
+```bash
+woof energy power wales/forecast.nc --assets wales/assets.geojson --matches wales/matches.json -o wales/power.nc
+```
+
+This needs wind sites in the forecast: build `sites.json` with
+`--kinds line,plant,generator` rather than `--kinds line` before planning.
+
 The same steps fit a national grid. Fetch a larger box or a `--polygon`, use
 `--topology wrf-tiles`, and set `--max-domains` as a guard on how many tiles
 you are prepared to run.
@@ -736,7 +845,20 @@ rating methodology.
 | `dlr` | IEEE 738 steady-state conductor heat balance: convective and radiative cooling against solar and Joule heating | `line_normal_wind`, `wind_attack_angle`, `air_temperature`, `air_density`, `ghi`, `dni`, `dhi`, `bearing_deg` | The conductor (diameter, resistance, maximum temperature, emissivity and absorptivity) from `--conductor` or the table; sites with no bearing get no rating |
 | `icing` | Makkonen accretion on a cylinder, with ISO 12494 conventions | `cloud_liquid_mixing_ratio`, `rain_mixing_ratio`, `air_temperature`, `wind_speed`, `air_density` | An assumed droplet median volume diameter (MVD), because the model's microphysics does not forecast one; a reference conductor diameter |
 | `wind-power` | A generic IEC-style power curve, density-corrected | `wind_speed` and `air_density` at hub height, `capacity_mw`, `hub_height_m` | One generic curve for every turbine, scaled by capacity; no wake losses, availability or curtailment |
+| `power` (`woof energy power`) | Turbine-specific power curves matched by make and model, else rating and rotor, else a generic class curve; rotor-equivalent wind, IEC density correction, high-wind shutdown with hysteresis, Jensen or Bastankhah wakes from the layout, availability, icing and electrical losses; per plant (`woof-energy.power.v1`) | `wind_speed`, `air_density` (or `air_pressure`, `air_temperature`), `u`, `v`, the assets document | The matched curve (see `--matches`), a fallback wake table for plants without a layout, no curtailment or inter-farm wakes; [details](energy-hindcast/power.md) |
 | `pv-power` | A PVWatts-like plane-of-array and cell-temperature model | `ghi`, `dni`, `dhi`, `cos_solar_zenith`, `t2`, `wind_speed_10m`, `capacity_mw` | Assumed tilt, azimuth, temperature coefficient and system losses; no shading, soiling or inverter clipping detail |
+| `turbine-icing` | Hub-height icing: Makkonen accretion on the ISO 12494 reference collector (instrumental icing) and on a rotating-blade proxy (rotor icing), meteorological icing, the IEA Wind Task 19 ice class and a production-loss estimate. See [Turbine icing at hub height](energy-hindcast/icing.md) | `air_temperature`, `wind_speed`, `air_density` (or `air_pressure`), `cloud_liquid_mixing_ratio`, `rain_mixing_ratio`, `cloud_number_mixing_ratio`, `air_pressure`, `relative_humidity`, `hub_height_m` | A generic blade (tip-speed ratio, tip-speed limit, leading-edge size); the default droplet number where the run has no Thompson `QNCLOUD`; no ice shedding; an uncalibrated loss model |
+| `wind-resource` | Rotor-equivalent wind speed (IEC 61400-12-1:2017), power-law shear, veer across the rotor, turbulence intensity, density-corrected generic-curve power and capacity factor | `wind_speed` profile, `u`/`v` or `wind_from_direction`, `air_density`, `hub_height_m`, `capacity_mw`, optional `rotor_diameter_m` | Rotor diameter equal to the hub height where unknown; turbulence intensity is resolved variance only and needs 1-5 min output; generic curves, no wakes |
+| `ramps` | Threshold-over-window ramps (15 min, 1 h, 4 h by default) and swinging-door ramps on power as a fraction of capacity, with a ramp-event table | as `wind-resource` | The 0.2-of-capacity threshold and 0.05 swinging-door tolerance; ramp timing is only as fine as the output time step |
+
+`wind-resource` and `ramps` run only when you name them in `--products`.
+`--power-curve` picks the generic IEC class I, II or III curve, or the
+offshore curve, for every wind product. Definitions, options and the
+event table are in [Ramps and wind-resource products](energy-hindcast/ramps.md).
+
+```bash
+woof energy rating wales/forecast.nc --products wind-power,wind-resource,ramps --ramp-windows 15m,1h,4h --power-curve generic_iec_class_iii -o wales/wind.nc
+```
 
 ## Limitations
 

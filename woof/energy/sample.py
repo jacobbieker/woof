@@ -11,9 +11,38 @@ profile, shape (time, site, height):
     ``THETA``      potential temperature (T + 300), K
     ``PRES``       full pressure (P + PB), Pa
     ``QVAPOR``, ``QCLOUD``, ``QRAIN``, ``QICE``, ``QSNOW``, ``QGRAUP``  kg/kg
+    ``QNCLOUD``    cloud droplet number, kg-1 (double-moment cloud only)
+    ``TEMP``       air temperature, K       (hub-plane histories only)
+    ``RHO``        moist air density, kg m-3 (hub-plane histories only)
 surface, shape (time, site):
     ``U10``, ``V10`` earth-relative; ``T2``, ``Q2``, ``PSFC``, ``SWDOWN``,
     ``SWDDNI``, ``SWDDIF``, ``RAINNC``, ``RAINC``, ``COSZEN`` as written.
+
+Two profile sources, chosen per history (never mixed)
+-----------------------------------------------------
+* **Volumes** -- the history carries ``PH`` and ``PHB``: every profile key
+  is interpolated from the 3-D fields as described below.  Unchanged.
+* **Hub planes** -- no ``PH``/``PHB`` but a ``HUB_HEIGHT`` coordinate (the
+  ``windfarm`` history preset, ``woof.io.history_selection``): the profile
+  keys come from the in-model hub-height planes
+  (``woof/core/hub_wind_diag.py``) -- ``U``/``V`` from ``WSPD_HUB`` and
+  ``WDIR_HUB`` (earth-relative already: ``u = -s sin d``, ``v = -s cos d``
+  per stencil cell), ``PRES`` from ``P_HUB``, ``TEMP`` from ``T_HUB``,
+  ``RHO`` from ``RHO_HUB``, ``QVAPOR``/``QCLOUD``/``QRAIN``/``QNCLOUD``
+  from ``QV_HUB``/``QC_HUB``/``QR_HUB``/``QNC_HUB``.  The heights are the
+  history's ``HUB_HEIGHT`` levels: every requested height must BE one of
+  them (within 1 mm) -- nothing is interpolated between hub planes, and a
+  height the history does not carry is refused with the heights it does.
+  Horizontal interpolation is the same bilinear stencil as the volume
+  path.  The model computed each plane linear in z between mass levels
+  (the volume path's rule) but HOLDS the lowest/highest mass level's value
+  for a height outside the column where the volume path gives NaN; that
+  difference is written to ``notes``.  The order differs too: the model
+  interpolates each column in height and this blends the four stencil
+  columns, where the volume path blends first and interpolates the
+  blended column -- identical over flat ground, a second-order
+  difference over steep terrain.  ``W`` and ``THETA`` have no hub
+  plane and are not available from such a history.
 
 Heights are metres above model terrain, interpolated linearly in height
 between mass levels (height AGL from ``(PH + PHB) / g - HGT``, destaggered).
@@ -71,7 +100,12 @@ from typing import Sequence
 import numpy as np
 
 PROFILE_VARS = ("U", "V", "W", "THETA", "PRES", "QVAPOR", "QCLOUD", "QRAIN",
-                "QICE", "QSNOW", "QGRAUP")
+                "QICE", "QSNOW", "QGRAUP", "QNCLOUD")
+#: Profile keys only a hub-plane history supplies (the model's own
+#: temperature and density at hub height; module docstring).
+HUB_PROFILE_VARS = ("TEMP", "RHO")
+#: Every profile key :func:`sample_wrfout` accepts.
+PROFILE_KEYS = PROFILE_VARS + HUB_PROFILE_VARS
 SURFACE_VARS = ("U10", "V10", "T2", "Q2", "PSFC", "SWDOWN", "SWDDNI",
                 "SWDDIF", "RAINNC", "RAINC", "COSZEN")
 
@@ -92,6 +126,12 @@ _MAP_PROJ = {1: "lambert", 2: "polar", 3: "mercator"}
 
 _MASS3 = ("Time", "bottom_top", "south_north", "west_east")
 _PLANE = ("Time", "south_north", "west_east")
+_HUB4 = ("Time", "hub_height", "south_north", "west_east")
+#: Hub-plane source variables (woof/core/hub_wind_diag.py).
+_HUB_PLANES = ("WSPD_HUB", "WDIR_HUB", "P_HUB", "T_HUB", "RHO_HUB",
+               "QV_HUB", "QC_HUB", "QR_HUB", "QNC_HUB")
+#: Requested and carried hub heights match within this (metres).
+HUB_HEIGHT_TOLERANCE_M = 1.0e-3
 #: Dimensions each source variable must have to be read.
 _SOURCE_DIMS = {
     "U": ("Time", "bottom_top", "south_north", "west_east_stag"),
@@ -101,10 +141,12 @@ _SOURCE_DIMS = {
     "PHB": ("Time", "bottom_top_stag", "south_north", "west_east"),
     "T": _MASS3, "P": _MASS3, "PB": _MASS3,
     **{name: _MASS3 for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE",
-                                 "QSNOW", "QGRAUP")},
+                                 "QSNOW", "QGRAUP", "QNCLOUD")},
     **{name: _PLANE for name in ("XLAT", "XLONG", "HGT", "SINALPHA",
                                  "COSALPHA", *SURFACE_VARS)},
     "Times": ("Time", "DateStrLen"),
+    **{name: _HUB4 for name in _HUB_PLANES},
+    "HUB_HEIGHT": ("Time", "hub_height"),
 }
 #: Locating sites, terrain and time: without these nothing is sampled.
 _BASE_SOURCES = ("Times", "XLAT", "XLONG", "HGT")
@@ -119,11 +161,23 @@ _KEY_SOURCES: dict[str, tuple[str, ...]] = {
     "THETA": ("T",),
     "PRES": ("P", "PB"),
     **{name: (name,) for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE",
-                                  "QSNOW", "QGRAUP")},
+                                  "QSNOW", "QGRAUP", "QNCLOUD")},
     "U10": ("U10", "V10", *_ROTATION),
     "V10": ("U10", "V10", *_ROTATION),
     **{name: (name,) for name in ("T2", "Q2", "PSFC", "SWDOWN", "SWDDNI",
                                   "SWDDIF", "RAINNC", "RAINC", "COSZEN")},
+}
+#: Hub-plane source variables behind each profile key (plus HUB_HEIGHT).
+_HUB_KEY_SOURCES: dict[str, tuple[str, ...]] = {
+    "U": ("WSPD_HUB", "WDIR_HUB"),
+    "V": ("WSPD_HUB", "WDIR_HUB"),
+    "PRES": ("P_HUB",),
+    "TEMP": ("T_HUB",),
+    "RHO": ("RHO_HUB",),
+    "QVAPOR": ("QV_HUB",),
+    "QCLOUD": ("QC_HUB",),
+    "QRAIN": ("QR_HUB",),
+    "QNCLOUD": ("QNC_HUB",),
 }
 #: Mass-field profile keys: key -> (source, added source, offset).
 _SCALAR_PROFILES = {
@@ -131,7 +185,8 @@ _SCALAR_PROFILES = {
     "THETA": ("T", None, 300.0),
     "PRES": ("P", "PB", 0.0),
     **{name: (name, None, 0.0) for name in ("QVAPOR", "QCLOUD", "QRAIN",
-                                            "QICE", "QSNOW", "QGRAUP")},
+                                            "QICE", "QSNOW", "QGRAUP",
+                                            "QNCLOUD")},
 }
 #: Global attributes that must agree across the files of one domain.
 _GRID_ATTRS = ("MAP_PROJ", "TRUELAT1", "TRUELAT2", "STAND_LON", "CEN_LAT",
@@ -193,14 +248,39 @@ def _sources(ds) -> set[str]:
             and tuple(ds.variables[name].dimensions) == dims}
 
 
+def _profile_mode(sources: set[str]) -> str | None:
+    """``"volume"`` (PH and PHB present), ``"hub"`` (no geopotential but a
+    HUB_HEIGHT coordinate), or None: where profile keys come from."""
+    if set(_PROFILE_BASE) <= sources:
+        return "volume"
+    if "HUB_HEIGHT" in sources:
+        return "hub"
+    return None
+
+
+def _needs(key: str, mode: str | None) -> tuple[str, ...]:
+    """Source variables behind ``key`` on this history's profile road."""
+    if key not in PROFILE_KEYS:
+        return _KEY_SOURCES[key]
+    if mode == "hub":
+        return _HUB_KEY_SOURCES.get(key, ()) + ("HUB_HEIGHT",)
+    if key in HUB_PROFILE_VARS:
+        return tuple(_HUB_KEY_SOURCES[key]) + ("HUB_HEIGHT",)
+    return _KEY_SOURCES[key] + _PROFILE_BASE
+
+
 def _keys(sources: set[str]) -> set[str]:
     if not set(_BASE_SOURCES) <= sources:
         return set()
-    keys = set()
-    for key, needs in _KEY_SOURCES.items():
-        if key in PROFILE_VARS:
-            needs = needs + _PROFILE_BASE
-        if set(needs) <= sources:
+    mode = _profile_mode(sources)
+    keys = {key for key in _KEY_SOURCES
+            if key not in PROFILE_KEYS and set(_KEY_SOURCES[key]) <= sources}
+    for key in PROFILE_KEYS:
+        if mode == "volume" and key in HUB_PROFILE_VARS:
+            continue
+        if mode == "hub" and key not in _HUB_KEY_SOURCES:
+            continue
+        if mode is not None and set(_needs(key, mode)) <= sources:
             keys.add(key)
     return keys
 
@@ -212,7 +292,9 @@ def available_variables(paths: Sequence[Path]) -> set[str]:
     with the expected dimensions (``U`` needs ``U``, ``V``, ``SINALPHA``,
     ``COSALPHA``, ``PH``, ``PHB``; ``THETA`` needs ``T``, ``PH``, ``PHB``;
     and so on), plus ``Times``, ``XLAT``, ``XLONG`` and ``HGT``, without
-    which no key is available.
+    which no key is available.  A history without ``PH``/``PHB`` but with
+    ``HUB_HEIGHT`` offers the hub-plane profile keys instead (``U``/``V``
+    need ``WSPD_HUB`` and ``WDIR_HUB``, ``TEMP`` needs ``T_HUB``, ...).
     """
 
     common: set[str] | None = None
@@ -230,6 +312,23 @@ class _FileMeta:
     dims: tuple[int, int, int]        # west_east, south_north, bottom_top
     times: tuple[np.datetime64, ...]
     sources: frozenset[str]
+    #: HUB_HEIGHT (metres AGL), one row for the whole file, or None.
+    hub_heights: tuple[float, ...] | None = None
+
+
+def _hub_heights(path: Path, ds) -> tuple[float, ...] | None:
+    """The file's HUB_HEIGHT levels; every record must carry the same."""
+    if "HUB_HEIGHT" not in ds.variables or tuple(
+            ds.variables["HUB_HEIGHT"].dimensions) != _SOURCE_DIMS["HUB_HEIGHT"]:
+        return None
+    rows = np.asarray(ds.variables["HUB_HEIGHT"][:], dtype=np.float64)
+    if rows.ndim != 2 or rows.shape[0] == 0:
+        return None
+    if not np.all(np.isfinite(rows)) or np.any(rows != rows[:1]):
+        raise SampleUnavailable(
+            f"{path}: HUB_HEIGHT differs between records or is not finite; "
+            "one history file holds one set of hub heights")
+    return tuple(float(h) for h in rows[0])
 
 
 @dataclass(frozen=True)
@@ -284,7 +383,8 @@ def _inspect(path: Path) -> _FileMeta:
             attrs={name: _attr(ds, name, path) for name in _GRID_ATTRS},
             dims=tuple(len(ds.dimensions[d]) for d in _GRID_DIMS),
             times=_times(path, ds),
-            sources=frozenset(_sources(ds)))
+            sources=frozenset(_sources(ds)),
+            hub_heights=_hub_heights(path, ds))
 
 
 def _one_domain(metas: list[_FileMeta]) -> _Grid:
@@ -440,6 +540,88 @@ def _read(ds, name: str, record: int, w: _Window,
     return data
 
 
+def _hub_indices(metas: list[_FileMeta], heights: np.ndarray) -> list[int]:
+    """Index of each requested height among the files' HUB_HEIGHT levels.
+
+    Every file must carry the same levels, and every requested height must
+    be one of them within :data:`HUB_HEIGHT_TOLERANCE_M`: nothing is
+    interpolated between hub planes.
+    """
+    levels = metas[0].hub_heights
+    if not levels:
+        raise SampleUnavailable(
+            f"{metas[0].path} has a HUB_HEIGHT variable but no hub heights "
+            "in it (no records); its hub planes cannot be placed in height")
+    for meta in metas[1:]:
+        if meta.hub_heights != levels:
+            raise SampleUnavailable(
+                f"{meta.path} carries HUB_HEIGHT {list(meta.hub_heights or ())}"
+                f" but {metas[0].path} carries {list(levels or ())}; one "
+                "domain's history must keep one set of hub heights")
+    carried = np.asarray(levels, dtype=np.float64)
+    indices, missing = [], []
+    for height in heights:
+        hit = np.flatnonzero(np.abs(carried - height) <= HUB_HEIGHT_TOLERANCE_M)
+        if hit.size:
+            indices.append(int(hit[0]))
+        else:
+            missing.append(f"{height:g}")
+    if missing:
+        raise SampleUnavailable(
+            f"this history has no 3-D volumes (no PH/PHB), so its profiles "
+            f"are its in-model hub-height planes, at HUB_HEIGHT "
+            f"{[f'{h:g}' for h in carried]} m; requested height(s) "
+            f"{', '.join(missing)} m are not among them and nothing is "
+            "interpolated between hub planes.  Request heights from that "
+            "list (woof energy extract --heights-m), or run with [output] "
+            "hub_heights_m set to the heights the sites need.")
+    return indices
+
+
+def _stencil_cells(fi: np.ndarray, fj: np.ndarray, ny: int, nx: int):
+    """``(j0, i0, wx, wy)`` of each site's bilinear stencil on an ``ny`` x
+    ``nx`` window -- the rule of ``rw-sitesample``'s ``stencil`` (a site on
+    the last row/column uses the last cell with weight one).  Sites with a
+    non-finite index get index 0 and NaN weights."""
+    ok = np.isfinite(fi) & np.isfinite(fj)
+    fi0 = np.where(ok, fi, 0.0)
+    fj0 = np.where(ok, fj, 0.0)
+    i0 = np.minimum(np.floor(fi0).astype(np.int64), nx - 2)
+    j0 = np.minimum(np.floor(fj0).astype(np.int64), ny - 2)
+    wx = np.where(ok, fi0 - i0, np.nan)
+    wy = np.where(ok, fj0 - j0, np.nan)
+    return j0, i0, wx, wy
+
+
+def hub_wind_at_sites(speed: np.ndarray, direction: np.ndarray,
+                      fi: np.ndarray, fj: np.ndarray
+                      ) -> tuple[np.ndarray, np.ndarray]:
+    """Earth-relative ``(U, V)``, each ``(S, H)``, from hub planes.
+
+    ``speed``/``direction`` are ``(H, ny, nx)`` WSPD_HUB/WDIR_HUB windows
+    (direction the wind blows FROM, degrees clockwise from north).  Only
+    the four stencil cells of each site are turned into components (``u =
+    -s sin d``, ``v = -s cos d``) -- per-site vectors, not the window --
+    and blended with the same bilinear weights as every other key; a
+    direction is never averaged across its 0/360 seam.
+    """
+    nh, ny, nx = speed.shape
+    j0, i0, wx, wy = _stencil_cells(fi, fj, ny, nx)
+    u_corners, v_corners = [], []
+    for dj, di in ((0, 0), (0, 1), (1, 0), (1, 1)):
+        s = speed[:, j0 + dj, i0 + di].astype(np.float64)       # (H, S)
+        d = np.radians(direction[:, j0 + dj, i0 + di].astype(np.float64))
+        u_corners.append(-s * np.sin(d))
+        v_corners.append(-s * np.cos(d))
+
+    def blend(sw, se, nw, ne):
+        south = (1.0 - wx) * sw + wx * se
+        north = (1.0 - wx) * nw + wx * ne
+        return ((1.0 - wy) * south + wy * north).T            # (S, H)
+
+    return blend(*u_corners), blend(*v_corners)
+
+
 def _levels_needed(zagl: np.ndarray, top: float) -> int:
     """Mass levels (from the bottom) that bracket every height up to ``top``
     at every site: the first level at or above ``top`` per site, the deepest
@@ -503,7 +685,7 @@ def sample_wrfout(paths: Sequence[Path], lat: np.ndarray, lon: np.ndarray,
 
     lat, lon = _site_arrays(lat, lon)
     heights = _heights(heights_m)
-    profile_req = _requested(profile_vars, PROFILE_VARS, "profile")
+    profile_req = _requested(profile_vars, PROFILE_KEYS, "profile")
     surface_req = _requested(surface_vars, SURFACE_VARS, "surface")
     files = _paths(paths)
     notes: list[str] = []
@@ -517,13 +699,22 @@ def sample_wrfout(paths: Sequence[Path], lat: np.ndarray, lon: np.ndarray,
             f"the history lacks {', '.join(absent)} (with wrfout "
             "dimensions); sites cannot be placed or heights measured")
     available = _keys(common)
+    mode = _profile_mode(common)
     profile_keys = [k for k in profile_req if k in available]
     surface_keys = [k for k in surface_req if k in available]
     for key in [*profile_req, *surface_req]:
         if key not in available:
-            needs = _KEY_SOURCES[key] + (
-                _PROFILE_BASE if key in PROFILE_VARS else ())
-            lacking = [n for n in dict.fromkeys(needs) if n not in common]
+            if mode == "volume" and key in HUB_PROFILE_VARS:
+                notes.append(f"omitted {key}: only a hub-plane history "
+                             "(no PH/PHB volumes) supplies it")
+                continue
+            if mode == "hub" and key in PROFILE_KEYS \
+                    and key not in _HUB_KEY_SOURCES:
+                notes.append(f"omitted {key}: the history carries hub-height "
+                             "planes, not volumes, and no hub plane holds it")
+                continue
+            lacking = [n for n in dict.fromkeys(_needs(key, mode))
+                       if n not in common]
             notes.append(f"omitted {key}: the history lacks "
                          f"{', '.join(lacking)}")
     if (profile_req or surface_req) and not (profile_keys or surface_keys):
@@ -551,6 +742,8 @@ def sample_wrfout(paths: Sequence[Path], lat: np.ndarray, lon: np.ndarray,
         notes.append(f"{outside} of {ns} site(s) outside the grid interior: "
                      "NaN, inside=False")
     sample_profiles = bool(profile_keys) and nh > 0
+    hub_mode = sample_profiles and mode == "hub"
+    hub_index = _hub_indices(metas, heights) if hub_mode else []
     worst = 0.0
     deepest = 0
     missed = np.zeros((int(inside.sum()), nh), dtype=bool)
@@ -582,7 +775,25 @@ def sample_wrfout(paths: Sequence[Path], lat: np.ndarray, lon: np.ndarray,
                 hgt = plane("HGT")
                 if t == 0:
                     terrain[:] = bridge.surface(hgt, fiw, fjw)
-                if sample_profiles:
+                if hub_mode:
+                    def hub(name: str) -> np.ndarray:
+                        return _read(ds, name, r, window)[hub_index]
+
+                    if "U" in profile or "V" in profile:
+                        ue, ve = hub_wind_at_sites(hub("WSPD_HUB"),
+                                                   hub("WDIR_HUB"), fiw, fjw)
+                        if "U" in profile:
+                            profile["U"][t] = ue
+                        if "V" in profile:
+                            profile["V"][t] = ve
+                    for key in profile_keys:
+                        if key in ("U", "V"):
+                            continue
+                        planes_h = hub(_HUB_KEY_SOURCES[key][0])
+                        profile[key][t] = np.stack(
+                            [bridge.surface(level, fiw, fjw)
+                             for level in planes_h], axis=-1)
+                elif sample_profiles:
                     def heights_agl(levels: int | None) -> np.ndarray:
                         return bridge.heights_agl(
                             _read(ds, "PH", r, window, levels=levels),
@@ -646,7 +857,9 @@ def sample_wrfout(paths: Sequence[Path], lat: np.ndarray, lon: np.ndarray,
             if ds is not None:
                 ds.close()
         levels = (f", lowest {deepest} of {grid.nz} levels"
-                  if sample_profiles else "")
+                  if sample_profiles and not hub_mode else
+                  f", {nh} of {len(metas[0].hub_heights or ())} hub planes"
+                  if hub_mode else "")
         notes.append(
             f"window j[{window.j0}:{window.j1}] i[{window.i0}:{window.i1}] "
             f"of {grid.ny}x{grid.nx} mass points{levels} read per record")
@@ -654,7 +867,17 @@ def sample_wrfout(paths: Sequence[Path], lat: np.ndarray, lon: np.ndarray,
             f"projection (MAP_PROJ={int(grid.attrs['MAP_PROJ'])}) agrees "
             f"with XLAT/XLONG within {worst:.3g} cells at the sites' "
             "nearest mass points")
-    if profile_keys:
+    if profile_keys and hub_mode:
+        notes.append(
+            "profiles from the in-model hub-height planes (no PH/PHB volumes "
+            "in the history): U/V from WSPD_HUB/WDIR_HUB (earth-relative), "
+            + ", ".join(f"{k} from {_HUB_KEY_SOURCES[k][0]}"
+                        for k in profile_keys if k not in ("U", "V"))
+            + "; heights are the history's HUB_HEIGHT levels, computed by "
+            "the model linear in z between mass levels, HOLDING the lowest "
+            "(highest) mass level's value below (above) the column where "
+            "the volume path writes NaN")
+    elif profile_keys:
         notes.append(f"heights above model terrain: (PH + PHB) / "
                      f"{WRF_GRAVITY} - HGT at mass levels, linear in "
                      "height, NaN outside the column")

@@ -1,0 +1,34 @@
+# Example `woof energy deploy render --config` for Google Cloud: the same
+# hindcast on 64 a3-highgpu-8g spot VMs (8 x H100 each).  Renders for
+# --backend gcp-batch and k8s (GKE, [k8s] cloud = "gcp").  Identifiers are
+# examples; replace them.  No credentials go here: workers use the VM
+# service account / Workload Identity.
+
+name = "windfarm-2024"
+image = "europe-west4-docker.pkg.dev/example-project/woof/woof-energy:1.0.3-cu12"
+queue_url = "gs://example-woof-hindcast/queues/windfarm-2024/"
+output_url = "gs://example-woof-hindcast/icechunk/windfarm-2024"
+geog_url = "gs://example-woof-static/WPS_GEOG"
+highres_cache_url = "gs://example-woof-static/highres-cache"
+workers = 64
+parallelism = 32
+gpus_per_worker = 8
+spot = true
+max_runtime_hours = 72
+retries = 3
+labels = { project = "windfarm-reanalysis", year = "2024" }
+
+[gcp_batch]
+project = "example-project"
+region = "europe-west4"
+machine_type = "a3-highgpu-8g"
+service_account_email = "woof-energy-worker@example-project.iam.gserviceaccount.com"
+scratch_disk_gb = 2000
+
+[k8s]
+cloud = "gcp"
+namespace = "woof-energy"
+gcp_service_account = "woof-energy-worker@example-project.iam.gserviceaccount.com"
+node_selector = { "cloud.google.com/gke-accelerator" = "nvidia-h100-80gb" }
+cpu = "200"
+memory_gib = 1700

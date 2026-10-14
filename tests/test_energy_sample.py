@@ -71,6 +71,7 @@ def _fields(seed: int) -> dict[str, np.ndarray]:
     fields["PB"] = np.broadcast_to(fields["PB"], (NZ, NY, NX)).copy()
     for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP"):
         fields[name] = rng.uniform(0, 1e-3, (NZ, NY, NX))
+    fields["QNCLOUD"] = rng.uniform(0, 3e8, (NZ, NY, NX))
     for name in SURFACE_VARS:
         fields[name] = rng.uniform(-5, 5, (NY, NX))
     return fields
@@ -158,7 +159,8 @@ def oracle(rec: dict[str, np.ndarray], fi: float, fj: float, heights):
         "THETA": _bilinear(rec["T"] + 300.0, fi, fj),
         "PRES": _bilinear(rec["P"] + rec["PB"], fi, fj),
     }
-    for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP"):
+    for name in ("QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP",
+                 "QNCLOUD"):
         columns[name] = _bilinear(rec[name], fi, fj)
     profile = {k: _vertical(col, zagl, heights) for k, col in columns.items()}
     surface = {k: _bilinear(rec[k], fi, fj) for k in SURFACE_VARS}
@@ -470,3 +472,160 @@ def test_the_doctor_reports_the_sampler():
     check = doctor._sitesample_check()
     assert check.name == "energy site sampler (rw-sitesample)"
     assert check.status == ("verified" if _REASON is None else "missing")
+
+
+# ---------------------------------------------------------------------------
+# Hub-plane histories (the windfarm preset: no volumes)
+# ---------------------------------------------------------------------------
+
+HUB_LEVELS = (40.0, 80.0, 100.0, 150.0)
+_HUB_SCALARS = {"P_HUB": "PRES", "T_HUB": "TEMP", "RHO_HUB": "RHO",
+                "QV_HUB": "QVAPOR", "QC_HUB": "QCLOUD", "QR_HUB": "QRAIN",
+                "QNC_HUB": "QNCLOUD"}
+
+
+def write_hub_wrfout(path: Path, times: list[str], *, seed: int = 0,
+                     levels=HUB_LEVELS, drop: tuple[str, ...] = (),
+                     volumes: bool = False) -> list[dict[str, np.ndarray]]:
+    """A windfarm-preset-like file: georeference, surface and hub planes,
+    no 3-D volume unless ``volumes`` (then the full fixture is written too).
+    Directions straddle north, so a 0/360 seam sits inside stencils."""
+    records = write_wrfout(path, times, seed=seed,
+                           drop=() if volumes else (
+                               "PH", "PHB", "U", "V", "W", "T", "P", "PB",
+                               "QVAPOR", "QCLOUD", "QRAIN", "QICE", "QSNOW",
+                               "QGRAUP", "QNCLOUD"))
+    nh = len(levels)
+    with netCDF4.Dataset(path, "a") as ds:
+        ds.createDimension("hub_height", nh)
+        var = ds.createVariable("HUB_HEIGHT", "f4", ("Time", "hub_height"))
+        for n in range(len(times)):
+            var[n] = np.asarray(levels, np.float32)
+        for n, rec in enumerate(records):
+            rng = np.random.default_rng(1000 + seed + n)
+            planes = {
+                "WSPD_HUB": rng.uniform(0.0, 25.0, (nh, NY, NX)),
+                "WDIR_HUB": np.mod(rng.uniform(-40.0, 40.0, (nh, NY, NX)), 360.0),
+                "P_HUB": rng.uniform(95000.0, 101000.0, (nh, NY, NX)),
+                "T_HUB": rng.uniform(260.0, 290.0, (nh, NY, NX)),
+                "RHO_HUB": rng.uniform(1.1, 1.35, (nh, NY, NX)),
+                "QV_HUB": rng.uniform(0.0, 1e-2, (nh, NY, NX)),
+                "QC_HUB": rng.uniform(0.0, 5e-4, (nh, NY, NX)),
+                "QR_HUB": rng.uniform(0.0, 2e-4, (nh, NY, NX)),
+                "QNC_HUB": rng.uniform(1e7, 3e8, (nh, NY, NX)),
+            }
+            for name, plane in planes.items():
+                if name in drop:
+                    continue
+                if name not in ds.variables:
+                    ds.createVariable(name, "f4", sample._SOURCE_DIMS[name])
+                ds.variables[name][n] = plane
+                rec[name] = plane.astype(np.float32).astype(np.float64)
+    return records
+
+
+def hub_oracle(rec, fi, fj, index):
+    s = rec["WSPD_HUB"][index]
+    d = np.radians(rec["WDIR_HUB"][index])
+    out = {"U": _bilinear(-s * np.sin(d), fi, fj),
+           "V": _bilinear(-s * np.cos(d), fi, fj)}
+    for source, key in _HUB_SCALARS.items():
+        out[key] = _bilinear(rec[source][index], fi, fj)
+    return out
+
+
+@needs_library
+def test_hub_plane_history_supplies_profiles_from_the_planes(tmp_path):
+    path = tmp_path / "wrfout_d01_hub"
+    times = ["2026-06-21_12:00:00", "2026-06-21_12:15:00"]
+    records = write_hub_wrfout(path, times)
+    keys = sample.available_variables([path])
+    assert {"U", "V", "PRES", "TEMP", "RHO", "QVAPOR", "QCLOUD", "QRAIN",
+            "QNCLOUD"} <= keys
+    assert not {"W", "THETA", "QICE"} & keys
+    fractional = _FRACTIONAL[:5]
+    lat, lon = _sites(fractional)
+    heights = [80.0, 150.0, 40.0]
+    index = [1, 3, 0]
+    result = sample.sample_wrfout(
+        [path], lat, lon, heights,
+        profile_vars=["U", "V", "PRES", "TEMP", "RHO", "QVAPOR", "QCLOUD",
+                      "QRAIN", "QNCLOUD", "W", "THETA"],
+        surface_vars=["U10", "T2"])
+    assert set(result.profile) == {"U", "V", "PRES", "TEMP", "RHO", "QVAPOR",
+                                   "QCLOUD", "QRAIN", "QNCLOUD"}
+    assert any("omitted W" in n and "no hub plane" in n for n in result.notes)
+    assert any("hub-height planes" in n and "HOLDING" in n
+               for n in result.notes)
+    for t, rec in enumerate(records):
+        for s, (fi, fj) in enumerate(fractional):
+            for h, k in enumerate(index):
+                want = hub_oracle(rec, fi, fj, k)
+                for key, value in want.items():
+                    np.testing.assert_allclose(
+                        result.profile[key][t, s, h], value, rtol=2e-6,
+                        atol=1e-9, err_msg=f"{key} t={t} s={s} h={h}")
+        np.testing.assert_allclose(result.surface["T2"][t],
+                                   [_bilinear(rec["T2"], fi, fj)
+                                    for fi, fj in fractional], rtol=2e-6)
+
+
+@needs_library
+def test_hub_wind_components_never_average_a_direction_across_north():
+    speed = np.full((1, 2, 2), 10.0, np.float32)
+    direction = np.array([[[350.0, 10.0], [350.0, 10.0]]], np.float32)
+    u, v = sample.hub_wind_at_sites(speed, direction, np.array([0.5]),
+                                    np.array([0.5]))
+    # Halfway between 350 and 10 degrees is a northerly (from 0): v < 0.
+    assert abs(u[0, 0]) < 1e-9
+    np.testing.assert_allclose(v[0, 0], -10.0 * np.cos(np.radians(10.0)))
+    # Same stencil rule as the Rust sampler at the far edge.
+    u, v = sample.hub_wind_at_sites(speed, direction, np.array([1.0]),
+                                    np.array([1.0]))
+    np.testing.assert_allclose(u[0, 0], -10.0 * np.sin(np.radians(10.0)),
+                               rtol=1e-6)
+    u, _ = sample.hub_wind_at_sites(speed, direction, np.array([np.nan]),
+                                    np.array([0.5]))
+    assert np.isnan(u[0, 0])
+
+
+@needs_library
+def test_a_height_the_hub_planes_do_not_carry_is_refused(tmp_path):
+    path = tmp_path / "wrfout_d01_hub"
+    write_hub_wrfout(path, ["2026-06-21_12:00:00"])
+    lat, lon = _sites(_FRACTIONAL[:2])
+    with pytest.raises(SampleUnavailable, match=r"HUB_HEIGHT.*120"):
+        sample.sample_wrfout([path], lat, lon, [80.0, 120.0],
+                             profile_vars=["U"], surface_vars=[])
+    # Two files with different hub levels are not one domain's history.
+    other = tmp_path / "wrfout_d01_hub2"
+    write_hub_wrfout(other, ["2026-06-21_12:15:00"], levels=(40.0, 80.0))
+    with pytest.raises(SampleUnavailable, match="one set of hub heights"):
+        sample.sample_wrfout([path, other], lat, lon, [80.0],
+                             profile_vars=["U"], surface_vars=[])
+
+
+@needs_library
+def test_volumes_win_when_a_history_carries_both(tmp_path):
+    path = tmp_path / "wrfout_d01_both"
+    records = write_hub_wrfout(path, ["2026-06-21_12:00:00"], volumes=True)
+    keys = sample.available_variables([path])
+    assert "THETA" in keys and "W" in keys
+    assert not {"TEMP", "RHO"} & keys
+    lat, lon = _sites(_FRACTIONAL[1:2])
+    result = sample.sample_wrfout([path], lat, lon, HEIGHTS,
+                                  profile_vars=["U", "TEMP"], surface_vars=[])
+    fi, fj = _FRACTIONAL[1]
+    want, _, _ = oracle(records[0], fi, fj, HEIGHTS)
+    np.testing.assert_allclose(result.profile["U"][0, 0], want["U"],
+                               rtol=1e-5, atol=1e-5)
+    assert "TEMP" not in result.profile
+    assert any("omitted TEMP" in n for n in result.notes)
+
+
+def test_a_hub_height_variable_without_records_is_refused_by_name(tmp_path):
+    meta = sample._FileMeta(path=tmp_path / "x", attrs={}, dims=(1, 1, 1),
+                            times=(), sources=frozenset({"HUB_HEIGHT"}),
+                            hub_heights=None)
+    with pytest.raises(SampleUnavailable, match="no hub heights"):
+        sample._hub_indices([meta], np.array([80.0]))

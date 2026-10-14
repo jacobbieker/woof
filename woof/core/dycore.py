@@ -72,6 +72,8 @@ from woof.core import tke_budget
 from woof.core.state import (DTYPE, DomainState, mu_at_u_faces,
                               mu_at_v_faces)
 from woof.core.uh_diag import update_up_heli_max
+from woof.core import interval_diagnostics
+from woof.core.wind_gust_diag import update_wind_maxima
 from woof.ingest.lateral_bc import (apply_state_boundary_values,
                                      apply_state_lateral_boundaries)
 
@@ -4046,6 +4048,16 @@ def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
         # diagnostic's own scratch slots -- inertness is pinned by
         # tests/test_uh_lifecycle.py.
         update_up_heli_max(state, cfg)
+        # The wind members (WSPD10MAX, U10MAX/V10MAX, W_UP_MAX/W_DN_MAX)
+        # and the UPP gust, folded from the same completed-step state;
+        # equally diagnostic-only (woof/core/wind_gust_diag.py).
+        update_wind_maxima(state, cfg)
+    # Per-history-interval diagnostics attached to this state by its
+    # history publisher (woof/core/interval_diagnostics.py; hub-height
+    # wind).  Same instant and same inertness contract as UP_HELI_MAX:
+    # reads the completed step's u/v/ph, writes only its own buffers.
+    # One getattr when nothing is attached.
+    interval_diagnostics.step(state, cfg)
     if cfg.mp_physics != 0:                           # post-RK3 adjustment
         # h_diabatic capture cadence: once per INTERNAL step with cfg.dt.
         # Under the reference case compatibility integrator (dt = clock_dt/8) this

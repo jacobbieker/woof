@@ -1,0 +1,24 @@
+{
+ "type": "FeatureCollection",
+ "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"}},
+ "features": [
+  {"type": "Feature", "id": "windfarmspoly.1",
+   "geometry": {"type": "Polygon", "coordinates": [[[1.95, 53.97], [2.05, 53.97], [2.05, 54.03], [1.95, 54.03], [1.95, 53.97]]]},
+   "properties": {"COUNTRY": "United Kingdom", "NAME": "Synthetic North Sea Array One", "N_TURBINES": 50, "POWER_MW": 300, "STATUS": "Production", "YEAR": 2018, "DIST_COAST": 120.5}},
+  {"type": "Feature", "id": "windfarmspoly.2",
+   "geometry": {"type": "Polygon", "coordinates": [[[2.08, 53.97], [2.16, 53.97], [2.16, 54.03], [2.08, 54.03], [2.08, 53.97]]]},
+   "properties": {"COUNTRY": "United Kingdom", "NAME": "Synthetic North Sea Array 2", "N_TURBINES": 27, "POWER_MW": 400, "STATUS": "Production", "YEAR": 2021}},
+  {"type": "Feature", "id": "windfarmspoly.3",
+   "geometry": {"type": "Polygon", "coordinates": [[[1.0, 53.0], [1.05, 53.0], [1.05, 53.05], [1.0, 53.05], [1.0, 53.0]]]},
+   "properties": {"COUNTRY": "United Kingdom", "NAME": "Synthetic Old Array", "N_TURBINES": 10, "POWER_MW": 20, "STATUS": "Dismantled", "YEAR": 1995}},
+  {"type": "Feature", "id": "windfarmspoly.4",
+   "geometry": {"type": "Polygon", "coordinates": [[[3.0, 54.5], [3.1, 54.5], [3.1, 54.6], [3.0, 54.6], [3.0, 54.5]]]},
+   "properties": {"COUNTRY": "Netherlands", "NAME": "Synthetic Future Array", "POWER_MW": 700, "STATUS": "Construction", "YEAR": 2027}},
+  {"type": "Feature", "id": "windfarms.5",
+   "geometry": {"type": "Point", "coordinates": [3.0, 55.0]},
+   "properties": {"COUNTRY": "Denmark", "NAME": "Synthetic Point Farm", "N_TURBINES": 4, "POWER_MW": 12, "STATUS": "Production", "YEAR": 2003}},
+  {"type": "Feature", "id": "windfarms.6",
+   "geometry": {"type": "LineString", "coordinates": [[4.0, 55.0], [4.1, 55.0]]},
+   "properties": {"COUNTRY": "Denmark", "NAME": "Synthetic Line", "STATUS": "Production"}}
+ ]
+}

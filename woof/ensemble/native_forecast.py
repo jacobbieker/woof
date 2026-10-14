@@ -134,6 +134,7 @@ def run_initialized_native_ensemble(inputs, node, *, members, member_ids=None, m
     pool_before = array_module.get_default_memory_pool().used_bytes()
     from woof.core.refl import consume_refl_10cm, refl_10cm_stash_is_due
     from woof.core.uh_diag import reset_up_heli_max
+    from woof.core.interval_maxima import reset_history_interval_maxima
     from woof.ensemble.batch_health import PreparedBatchStability, PreparedBatchStateHealth
     # LAUNCH PREPARATION. The pack is built and every launch audited inside
     # this stretch; the ordinary initialized node is only read. The native
@@ -226,6 +227,7 @@ def run_initialized_native_ensemble(inputs, node, *, members, member_ids=None, m
             # The ordinary history path resets after the synchronous consumer
             # has borrowed the completed frame. Absent UH remains a no-op.
             reset_up_heli_max(view)
+            reset_history_interval_maxima(view)
         last_history_ticks = int(clock.ticks)
         history.extend({"member_id": member, "grid_id": int(node.cfg.grid_id),
             "ticks": int(clock.ticks), "elapsed_seconds": float(clock.elapsed_seconds), **report}

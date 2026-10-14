@@ -1005,6 +1005,52 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
     # exactly when the run carries the accumulator (nwp_diagnostics = 1;
     # woof.core.uh_diag owns the per-step update and the post-write reset).
     "UP_HELI_MAX": ("MAX UPDRAFT HELICITY", "m2 s-2"),
+    # Hub-height wind (woof/core/hub_wind_diag.py; ``[output]
+    # hub_heights_m``).  Not WRF Registry rows: woof's own diagnostic,
+    # present exactly when a domain's [output] asks for it.  The five
+    # gridded fields share the ``hub_height`` dimension whose coordinate
+    # is HUB_HEIGHT (HUB_HEIGHT_DIMENSIONED_FIELDS below); the window
+    # length says how many model seconds the MAX/MIN/MEAN cover.
+    "HUB_HEIGHT": ("HUB HEIGHT ABOVE GROUND OF THE WSPD_HUB LEVELS", "m"),
+    "HUB_WINDOW_S": ("MODEL SECONDS COVERED BY THE WSPD_HUB_MAX/MIN/MEAN "
+                     "WINDOW", "s"),
+    "WSPD_HUB": ("WIND SPEED AT HUB HEIGHT AGL", "m s-1"),
+    "WDIR_HUB": ("EARTH-RELATIVE WIND DIRECTION (FROM) AT HUB HEIGHT AGL",
+                 "degree"),
+    "WSPD_HUB_MAX": ("MAX WIND SPEED AT HUB HEIGHT OVER HISTORY INTERVAL",
+                     "m s-1"),
+    "WSPD_HUB_MIN": ("MIN WIND SPEED AT HUB HEIGHT OVER HISTORY INTERVAL",
+                     "m s-1"),
+    "WSPD_HUB_MEAN": ("TIME-MEAN WIND SPEED AT HUB HEIGHT OVER HISTORY "
+                      "INTERVAL", "m s-1"),
+    # The hub-height SCALARS (same diagnostic, same hub_height axis):
+    # instantaneous at the frame's valid time, interpolated linear in z
+    # AGL between the bracketing mass levels exactly as WSPD_HUB is.
+    # Produced only when the selection NAMES them (preset "windfarm", or
+    # history_vars) -- see HUB_SCALAR_OUTPUT_FIELDS below.
+    "T_HUB": ("AIR TEMPERATURE AT HUB HEIGHT AGL", "K"),
+    "P_HUB": ("PRESSURE AT HUB HEIGHT AGL", "Pa"),
+    "RHO_HUB": ("MOIST AIR DENSITY AT HUB HEIGHT AGL", "kg m-3"),
+    "QV_HUB": ("WATER VAPOR MIXING RATIO AT HUB HEIGHT AGL", "kg kg-1"),
+    "QC_HUB": ("CLOUD WATER MIXING RATIO AT HUB HEIGHT AGL", "kg kg-1"),
+    "QR_HUB": ("RAIN WATER MIXING RATIO AT HUB HEIGHT AGL", "kg kg-1"),
+    "QNC_HUB": ("CLOUD DROPLET NUMBER MIXING RATIO AT HUB HEIGHT AGL",
+                "kg-1"),
+    # The wind members of the same nwp_output family (Registry.EM_COMMON:
+    # 2079-2081, IO "rh02", attribute text verbatim) and the U/V pair at the
+    # instant of the speed max (WRF's clim varstatisticsWIND rule; WRF's
+    # own U10MAX/V10MAX rows live in the output_diagnostics package and
+    # read "MAXIMUM U/V AT 10M HEIGHT IN DIAGNOSTIC OUTPUT INTERVAL", which
+    # misdescribes what that code stores).  GUST is the history-interval
+    # max of the UPP CALGUST estimate.  All six present exactly when the
+    # run carries nwp_diagnostics = 1 (woof.core.wind_gust_diag).
+    "WSPD10MAX": ("WIND SPD MAX 10 M", "m s-1"),
+    "U10MAX": ("U AT 10 M AT TIME OF WSPD10MAX", "m s-1"),
+    "V10MAX": ("V AT 10 M AT TIME OF WSPD10MAX", "m s-1"),
+    "W_UP_MAX": ("MAX Z-WIND UPDRAFT", "m s-1"),
+    "W_DN_MAX": ("MAX Z-WIND DOWNDRAFT", "m s-1"),
+    "GUST": ("MAX SURFACE WIND GUST (UPP CALGUST) IN HISTORY INTERVAL",
+             "m s-1"),
     "HGT": ("Terrain Height", "m"),
     "PSFC": ("SFC PRESSURE", "Pa"),
     # RAINC/RAINSH/RAINNC/SNOWNC/GRAUPELNC/HAILNC used to live here.  They
@@ -1108,8 +1154,41 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
 }
 
 
+#: Every history name the hub-height wind diagnostic emits, in the order
+#: it emits them (woof/core/hub_wind_diag.py).
+HUB_WIND_OUTPUT_FIELDS: tuple[str, ...] = (
+    "HUB_HEIGHT", "HUB_WINDOW_S", "WSPD_HUB", "WDIR_HUB",
+    "WSPD_HUB_MAX", "WSPD_HUB_MIN", "WSPD_HUB_MEAN")
+
+#: The (n_hub, ny, nx) members, written on ``(Time, hub_height,
+#: south_north, west_east)``.  The writer routes them BY NAME, never by
+#: shape: an ``n_hub`` equal to ``nz`` would otherwise land on
+#: ``bottom_top`` and lie about what the axis is.
+HUB_HEIGHT_DIMENSIONED_FIELDS: frozenset[str] = frozenset({
+    "WSPD_HUB", "WDIR_HUB", "WSPD_HUB_MAX", "WSPD_HUB_MIN",
+    "WSPD_HUB_MEAN",
+    "T_HUB", "P_HUB", "RHO_HUB", "QV_HUB", "QC_HUB", "QR_HUB", "QNC_HUB"})
+
+#: The hub-height SCALARS the same diagnostic emits after the wind fields,
+#: in emission order (woof/core/hub_wind_diag.py).  Instantaneous at the
+#: frame's valid time (no window, so nothing to restart or checkpoint).
+#: ``QV_HUB``/``QC_HUB``/``QR_HUB`` exist only on a moist state and
+#: ``QNC_HUB`` only where the microphysics carries a cloud droplet number
+#: (the state's ``nc``, the array QNCLOUD is written from); a member the
+#: run does not carry is absent, never zero-filled.
+HUB_SCALAR_OUTPUT_FIELDS: tuple[str, ...] = (
+    "T_HUB", "P_HUB", "RHO_HUB", "QV_HUB", "QC_HUB", "QR_HUB", "QNC_HUB")
+
+#: The name of that axis in the file.
+HUB_HEIGHT_DIMENSION = "hub_height"
+
+
 __all__ = [
     "HISTORY_FIELDS_BY_NETCDF_NAME",
+    "HUB_HEIGHT_DIMENSION",
+    "HUB_HEIGHT_DIMENSIONED_FIELDS",
+    "HUB_SCALAR_OUTPUT_FIELDS",
+    "HUB_WIND_OUTPUT_FIELDS",
     "MYNN_PBL_OUTPUT_FIELDS",
     "NETCDF_DTYPE_BY_REGISTRY_TYPE",
     "NOAHMP_OUTPUT_FIELDS",

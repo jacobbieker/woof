@@ -32,6 +32,7 @@ from woof.io.history_layout import (physics_history_fields,
                                     produced_history_shapes,
                                     surface_solar_history_fields)
 from woof.io.wrf_output_schema import (HISTORY_FIELDS_BY_NETCDF_NAME,
+                                       HUB_WIND_OUTPUT_FIELDS,
                                        OUTPUT_FIELDS_BY_NETCDF_NAME,
                                        SURFACE_SOLAR_OUTPUT_FIELDS)
 
@@ -40,7 +41,13 @@ ENERGY_SPEC = frozenset({
     "QRAIN", "QICE", "QSNOW", "QGRAUP", "T2", "Q2", "U10", "V10", "PSFC",
     "SWDOWN",
     "SWDDNI", "SWDDIF", "COSZEN", "RAINNC", "RAINC", "SINALPHA", "COSALPHA",
-    "XLAT", "XLONG",
+    "XLAT", "XLONG", "QNCLOUD",
+    # History-interval wind extremes and the UPP gust, written when the run
+    # carries nwp_diagnostics = 1 (woof.core.wind_gust_diag).
+    "WSPD10MAX", "U10MAX", "V10MAX", "GUST", "W_UP_MAX", "W_DN_MAX",
+    # Hub-height wind and its per-interval statistics, written only when
+    # [output] hub_wind or hub_heights_m asks (woof.core.hub_wind_diag).
+    *HUB_WIND_OUTPUT_FIELDS,
 })
 
 

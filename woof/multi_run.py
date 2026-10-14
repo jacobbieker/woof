@@ -15,6 +15,21 @@ sibling through atomic create-only publication after every child has finished
 a supervised ``woof run`` may itself own a fresh CUDA worker, so killing only
 the visible supervisor could orphan work.  The interrupted summary records
 every PID whose completion was not observed.
+
+Packing several runs onto one GPU (``[devices] runs_per_gpu`` /
+``--runs-per-gpu N|auto``) is opt-in; the default, 1, is the behaviour
+above, unchanged: one run per physical GPU and a second run resolving to
+the same card is refused.  With N > 1 or ``auto`` (at most
+:data:`woof.gpu_packing.AUTO_MAX_SLOTS_PER_GPU` per card) runs on one card
+are admitted by memory (:data:`PACKED_ADMISSION_RULE`), queue while they
+do not fit, and each child gets its own ``WOOF_GPU_LOCK_ROOT`` so the
+siblings' own ``woof run`` UUID locks do not refuse each other, while the
+parent holds each packed card's machine-wide UUID lock (when no other woof
+process already does) so no other woof run starts beside them; every
+child's supervisor still prices itself against the card's measured free
+memory (:func:`woof.supervisor.shared_gpu_admission`) before its worker
+starts.  ``--mps`` adds the CUDA MPS control daemon
+(:class:`woof.gpu_packing.MpsDaemon`).
 """
 
 from __future__ import annotations
@@ -23,8 +38,10 @@ import argparse
 import hashlib
 import importlib
 import json
+import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -36,8 +53,13 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from woof.filesystem_paths import publish_new
+from woof.gpu_packing import (AUTO_MAX_SLOTS_PER_GPU, DEFAULT_MEM_MARGIN_GIB,
+                              SLOTS_AUTO, MPSUnavailable, MpsDaemon,
+                              parse_count_or_auto)
 from woof.supervisor import (GPUFileLock, GPUIdentity, GPU_LOCK_ROOT_ENV,
+                              SHARED_ADMISSION_BASIS,
                               SHARED_INPUT_AUTHORITY_ROOT_ENV,
+                              measured_device_memory,
                               preflight_exclusive_gpu,
                               priced_reservation_bytes, query_gpus, utc_now)
 
@@ -64,7 +86,42 @@ _RUNNER_PATH_FLAGS = {
 _NON_FORECAST_ARGUMENTS = frozenset({
     "--materialize-authorities", "--show-capabilities",
 })
-_TOP_LEVEL_KEYS = frozenset({"schema", "summary", "preflight", "run"})
+_TOP_LEVEL_KEYS = frozenset(
+    {"schema", "summary", "preflight", "devices", "run"})
+_DEVICES_KEYS = frozenset({"runs_per_gpu", "mem_margin_gib", "mps"})
+#: Seconds between re-measurements of a card while the run at the head of
+#: its queue waits: a sibling finishing re-evaluates at once, this catches
+#: memory freed by processes this multi-run does not own.
+ADMISSION_RECHECK_SECONDS = 5.0
+#: The packed admission rule, recorded verbatim in every packed receipt.
+PACKED_ADMISSION_RULE = (
+    "A run starts on its GPU only when (1) fewer than runs_per_gpu of this "
+    "multi-run's runs hold the card; (2) the priced peaks of this "
+    "multi-run's live runs on the card, plus this run's priced peak, plus "
+    "the margin, fit the card's NVML total; and (3) this run's priced peak "
+    "plus the margin fit the card's MEASURED free memory less the growth "
+    "its live siblings may still make (each sibling's priced peak minus "
+    "the memory NVML attributes to its process tree, never below zero), so "
+    "memory held by processes this multi-run does not own is respected. "
+    "Runs on one card are admitted in plan order. A run that does not fit "
+    "waits for a sibling on its card to finish; one that does not fit "
+    "while none of this multi-run's runs hold the card is refused, because "
+    "only processes this multi-run does not own could free that memory, "
+    "except within one recheck of a sibling on the card finishing, when "
+    "it waits for that sibling's memory to be released. An unpriced run "
+    "runs alone on its card. Alloc-mode config checks are admitted by the "
+    "same rule before the forecasts; estimate-mode checks hold no forecast "
+    "memory and are held only to runs_per_gpu.")
+#: What a config-form run's priced peak is.
+CONFIG_PRICING_BASIS = (
+    "woof.supervisor.priced_reservation_bytes of the captured config "
+    "bytes: the admission_estimate peak envelope woof check reviews and "
+    "the run's own supervisor re-prices at launch")
+#: What a module-form run's priced peak is.
+MODULE_PRICING_BASIS = (
+    "the prepared runner's own reservation: priced_reservation_bytes of "
+    "its --experiment-config with its forcing source and prepared land "
+    "cover, the number its locked worker re-prices at launch")
 _COMMON_RUN_KEYS = frozenset(
     {"name", "device", "outdir", "scratch", "cache"})
 _RUN_KEYS = frozenset(
@@ -129,6 +186,48 @@ class RunSpec:
 
 
 @dataclass(frozen=True)
+class PackingRequest:
+    """How many of a plan's runs may share one physical GPU.
+
+    ``runs_per_gpu`` 1 (the default) is exclusive: today's one run per
+    card.  Above 1, or ``auto`` (at most :data:`AUTO_MAX_SLOTS_PER_GPU`),
+    runs share a card under :data:`PACKED_ADMISSION_RULE` with
+    ``mem_margin_gib`` kept free beside their priced peaks (default
+    :data:`DEFAULT_MEM_MARGIN_GIB`, an assumption: driver, MPS server and
+    allocator fragmentation a priced peak does not hold).  ``sources``
+    names where each setting came from (the plan's ``[devices]`` table,
+    a flag, or the default), for the receipt.
+    """
+
+    runs_per_gpu: int | str = 1
+    mem_margin_gib: float | None = None
+    mps: bool = False
+    mps_dir: Path | None = None
+    mps_active_thread_percentage: int | None = None
+    sources: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def packed(self) -> bool:
+        return self.runs_per_gpu != 1
+
+    @property
+    def cap(self) -> int:
+        """Most of this plan's runs one card holds at once."""
+
+        return (AUTO_MAX_SLOTS_PER_GPU if self.runs_per_gpu == SLOTS_AUTO
+                else int(self.runs_per_gpu))
+
+    @property
+    def margin_gib(self) -> float:
+        return (DEFAULT_MEM_MARGIN_GIB if self.mem_margin_gib is None
+                else float(self.mem_margin_gib))
+
+    @property
+    def margin_bytes(self) -> int:
+        return int(round(self.margin_gib * 1024 ** 3))
+
+
+@dataclass(frozen=True)
 class MultiRunPlan:
     """A parsed plan whose paths are absolute and collision-checked."""
 
@@ -139,16 +238,21 @@ class MultiRunPlan:
     input_authority_store: Path
     preflight: str
     runs: tuple[RunSpec, ...]
+    packing: PackingRequest = PackingRequest()
 
 
 @dataclass(frozen=True)
 class PlannedRun:
-    """A plan entry bound to one physical GPU."""
+    """A plan entry bound to one physical GPU.
+
+    ``environment_overrides`` are applied last by :func:`child_environment`
+    (a packed plan's CUDA MPS variables)."""
 
     spec: RunSpec
     gpu: GPUIdentity
     lock_root: Path | None = None
     input_authority_store: Path | None = None
+    environment_overrides: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -632,6 +736,115 @@ def _validate_path_isolation(plan_path: Path, summary: Path,
                     "with earlier output or temporary state")
 
 
+def _margin_gib(value: object, label: str) -> float:
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(float(value)) or float(value) < 0):
+        raise ValueError(
+            f"{label} must be a finite, nonnegative number of GiB, not "
+            f"{value!r}")
+    return float(value)
+
+
+def _plan_packing(value: object) -> PackingRequest:
+    """The plan's optional ``[devices]`` table, validated; never coerced."""
+
+    if value is None:
+        return PackingRequest()
+    if not isinstance(value, dict):
+        raise ValueError("multi-run plan [devices] must be a TOML table")
+    unknown = sorted(set(value) - _DEVICES_KEYS)
+    if unknown:
+        raise ValueError(f"multi-run plan [devices] has unknown keys: "
+                         f"{unknown}; known: {sorted(_DEVICES_KEYS)}")
+    sources = []
+    runs_per_gpu: int | str = 1
+    if "runs_per_gpu" in value:
+        runs_per_gpu = parse_count_or_auto(
+            value["runs_per_gpu"], flag="[devices] runs_per_gpu")
+        sources.append(("runs_per_gpu", "plan [devices]"))
+    margin = None
+    if "mem_margin_gib" in value:
+        margin = _margin_gib(value["mem_margin_gib"],
+                             "[devices] mem_margin_gib")
+        sources.append(("mem_margin_gib", "plan [devices]"))
+    mps = False
+    if "mps" in value:
+        if not isinstance(value["mps"], bool):
+            raise ValueError(
+                f"[devices] mps must be true or false, not "
+                f"{value['mps']!r}")
+        mps = value["mps"]
+        sources.append(("mps", "plan [devices]"))
+    return PackingRequest(runs_per_gpu=runs_per_gpu, mem_margin_gib=margin,
+                          mps=mps, sources=tuple(sources))
+
+
+def packing_request(plan_request: PackingRequest,
+                    args: argparse.Namespace | None = None
+                    ) -> PackingRequest:
+    """The plan's ``[devices]`` with the command-line flags laid over it.
+
+    A flag wins over the plan and the receipt says which one did.  Memory
+    and MPS settings without packing are named refusals, as are the MPS
+    sub-settings without MPS: a setting that would silently do nothing is
+    refused rather than dropped.
+    """
+
+    request = plan_request
+    sources = dict(request.sources)
+    flags = {
+        "runs_per_gpu": getattr(args, "runs_per_gpu", None),
+        "mem_margin_gib": getattr(args, "mem_margin_gib", None),
+        "mps": getattr(args, "mps", None),
+        "mps_dir": getattr(args, "mps_dir", None),
+        "mps_active_thread_percentage": getattr(
+            args, "mps_active_thread_percentage", None),
+    }
+    if flags["runs_per_gpu"] is not None:
+        request = replace(request, runs_per_gpu=parse_count_or_auto(
+            flags["runs_per_gpu"], flag="--runs-per-gpu"))
+        sources["runs_per_gpu"] = "--runs-per-gpu"
+    if flags["mem_margin_gib"] is not None:
+        request = replace(request, mem_margin_gib=_margin_gib(
+            flags["mem_margin_gib"], "--mem-margin-gib"))
+        sources["mem_margin_gib"] = "--mem-margin-gib"
+    if flags["mps"] is not None:
+        request = replace(request, mps=bool(flags["mps"]))
+        sources["mps"] = "--mps" if flags["mps"] else "--no-mps"
+    if flags["mps_dir"] is not None:
+        request = replace(request, mps_dir=Path(flags["mps_dir"]))
+        sources["mps_dir"] = "--mps-dir"
+    if flags["mps_active_thread_percentage"] is not None:
+        request = replace(request, mps_active_thread_percentage=int(
+            flags["mps_active_thread_percentage"]))
+        sources["mps_active_thread_percentage"] = (
+            "--mps-active-thread-percentage")
+    request = replace(request, sources=tuple(sorted(sources.items())))
+    if not request.packed:
+        if request.mem_margin_gib is not None:
+            raise ValueError(
+                f"mem_margin_gib ({sources['mem_margin_gib']}) prices runs "
+                "on a shared card; it applies only with runs_per_gpu above "
+                "1 or auto")
+        if request.mps:
+            raise ValueError(
+                f"mps ({sources['mps']}) lets several runs' kernels share a "
+                "GPU; with one run per GPU there is nothing to share (set "
+                "[devices] runs_per_gpu or --runs-per-gpu N|auto)")
+    if request.mps_dir is not None and not request.mps:
+        raise ValueError("--mps-dir applies only with --mps")
+    percentage = request.mps_active_thread_percentage
+    if percentage is not None:
+        if not request.mps:
+            raise ValueError(
+                "--mps-active-thread-percentage applies only with --mps")
+        if not 1 <= percentage <= 100:
+            raise ValueError(
+                f"--mps-active-thread-percentage must be 1-100, not "
+                f"{percentage}")
+    return request
+
+
 def load_plan(path: str | Path, *, summary_override: str | Path | None = None,
               preflight_override: str | None = None) -> MultiRunPlan:
     """Parse and path-check a versioned TOML plan without touching CUDA."""
@@ -681,6 +894,8 @@ def load_plan(path: str | Path, *, summary_override: str | Path | None = None,
         raise ValueError(
             f"preflight must be one of {PREFLIGHT_MODES}, got "
             f"{preflight!r}")
+
+    packing = _plan_packing(raw.get("devices"))
 
     entries = raw.get("run")
     if not isinstance(entries, list) or not entries:
@@ -764,13 +979,19 @@ def load_plan(path: str | Path, *, summary_override: str | Path | None = None,
         bound_runs.append(replace(run, input_bindings=tuple(bindings)))
     return MultiRunPlan(
         plan_path, plan_sha256, plan_signature_after, summary,
-        input_authority_store, preflight, tuple(bound_runs))
+        input_authority_store, preflight, tuple(bound_runs), packing)
 
 
 def resolve_devices(
         plan: MultiRunPlan, inventory: Sequence[GPUIdentity], *,
         lock_root: Path | None = None) -> tuple[PlannedRun, ...]:
-    """Resolve every selector and reject aliases to one physical device."""
+    """Resolve every selector; reject aliases to one device unless packed.
+
+    With the plan's packing at its default (``runs_per_gpu`` 1) two
+    selectors that resolve to one physical UUID are refused, exactly as
+    before packing existed.  A packed plan lets them share the card; its
+    admission (:func:`plan_packing`) decides when each one starts.
+    """
 
     by_index = {str(gpu.index): gpu for gpu in inventory
                 if gpu.index is not None}
@@ -794,11 +1015,13 @@ def resolve_devices(
                 f"run {spec.name!r} requested device "
                 f"{spec.device_selector!r}, not present in {available}")
         previous = used.get(gpu.uuid)
-        if previous is not None:
+        if previous is not None and not plan.packing.packed:
             raise ValueError(
                 f"runs {previous!r} and {spec.name!r} both resolve to GPU "
-                f"{gpu.uuid}; every run needs a unique physical device")
-        used[gpu.uuid] = spec.name
+                f"{gpu.uuid}; every run needs a unique physical device "
+                "unless the plan packs runs onto one card ([devices] "
+                "runs_per_gpu or --runs-per-gpu N|auto)")
+        used.setdefault(gpu.uuid, spec.name)
         resolved.append(PlannedRun(
             spec, gpu, lock_root, plan.input_authority_store))
     return tuple(resolved)
@@ -824,11 +1047,11 @@ def _parent_lock_root(environment: Mapping[str, str]) -> Path:
     return (Path(base).expanduser().resolve() / "woof" / "locks")
 
 
-def _validate_lock_root_isolation(
-        plan: MultiRunPlan, lock_root: Path) -> Path:
-    """Prove the shared UUID-lock namespace is outside every run path."""
+def _validate_outside_plan_paths(plan: MultiRunPlan, path: Path,
+                                 label: str, remedy: str) -> Path:
+    """Prove a host-wide directory is outside every path the plan owns."""
 
-    root = lock_root.expanduser().resolve()
+    root = path.expanduser().resolve()
     protected: list[tuple[str, Path]] = [
         ("plan", plan.path), ("summary", plan.summary)]
     for run in plan.runs:
@@ -838,17 +1061,25 @@ def _validate_lock_root_isolation(
             (f"run {run.name!r} cache", run.cache),
         ))
         protected.extend(
-            (f"run {run.name!r} input {index}", path)
-            for index, path in enumerate(run.inputs))
+            (f"run {run.name!r} input {index}", item)
+            for index, item in enumerate(run.inputs))
     protected.append(("shared input authority store",
                       plan.input_authority_store))
-    for label, path in protected:
-        if _same_or_nested(root, path):
-            raise ValueError(
-                f"shared GPU lock root {root} overlaps {label} {path}; set "
-                f"{GPU_LOCK_ROOT_ENV} to a stable machine-wide directory "
-                "outside every plan, input, summary, output, scratch, and "
-                "cache path")
+    for what, item in protected:
+        if _same_or_nested(root, item):
+            raise ValueError(f"{label} {root} overlaps {what} {item}; "
+                             f"{remedy}")
+    return root
+
+
+def _validate_lock_root_isolation(
+        plan: MultiRunPlan, lock_root: Path) -> Path:
+    """Prove the shared UUID-lock namespace is outside every run path."""
+
+    root = _validate_outside_plan_paths(
+        plan, lock_root, "shared GPU lock root",
+        f"set {GPU_LOCK_ROOT_ENV} to a stable machine-wide directory "
+        "outside every plan, input, summary, output, scratch, and cache path")
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -879,6 +1110,7 @@ def child_environment(run: PlannedRun,
     if run.input_authority_store is not None:
         environment[SHARED_INPUT_AUTHORITY_ROOT_ENV] = str(
             run.input_authority_store)
+    environment.update(dict(run.environment_overrides))
     if run.spec.config is not None:
         from woof.config_authority import authority_environment
 
@@ -1294,6 +1526,782 @@ def _execute_group(
         raise GroupExecutionError(phase, outcome, error) from error
 
 
+# ---------------------------------------------------------------------------
+# Packing several runs onto one GPU (``runs_per_gpu`` above 1 or ``auto``)
+# ---------------------------------------------------------------------------
+
+
+def _gib_text(value: int | float | None) -> str:
+    """:func:`woof.supervisor._gib`, the shared-GPU receipt's formatter,
+    with ``unknown`` for an unmeasured figure."""
+
+    from woof.supervisor import _gib
+
+    return "unknown" if value is None else _gib(value)
+
+
+@dataclass(frozen=True)
+class RunPricing:
+    """One run's priced forecast peak and the basis it was priced on."""
+
+    need_bytes: int | None
+    basis: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "basis": self.basis,
+            "priced_peak_bytes": self.need_bytes,
+            "priced_peak_gib": (
+                None if self.need_bytes is None
+                else round(self.need_bytes / 1024 ** 3, 3)),
+        }
+
+
+def price_run(spec: RunSpec) -> RunPricing:
+    """Price one run's forecast peak the way its own run door will.
+
+    Config form: :func:`woof.supervisor.priced_reservation_bytes` of the
+    experiment loaded from the bytes captured at plan load (never the
+    source read a second time) -- the number ``woof run``'s supervisor
+    prices the card from at launch and ``woof check`` reviews.  Module
+    form: the prepared runner's own :func:`_worker_reservation_bytes`, the
+    number its locked worker re-prices.  CPU only: no device is asked.
+    Unpriceable is ``None`` with the reason in the basis, never a number;
+    such a run is packed alone on its card.
+    """
+
+    try:
+        if spec.config is not None:
+            from woof.config_authority import ConfigAuthority
+            from woof.experiment import load_experiment
+
+            binding = spec.input_bindings[0]
+            if binding.captured_bytes is None or binding.sha256 is None:
+                return RunPricing(
+                    None, "unpriced: the config bytes were not captured")
+            experiment = load_experiment(spec.config, authority=ConfigAuthority(
+                binding.captured_bytes, spec.config, binding.sha256,
+                spec.captured_config))
+            need = priced_reservation_bytes(experiment)
+            basis = CONFIG_PRICING_BASIS
+        else:
+            assert spec.module is not None
+            need = _worker_reservation_bytes(
+                spec.module, _render_arguments(spec))
+            basis = MODULE_PRICING_BASIS
+    except Exception as error:  # noqa: BLE001 - pricing is advisory
+        return RunPricing(None, f"unpriced: {type(error).__name__}: {error}")
+    if need is None:
+        return RunPricing(
+            None, f"unpriced: no peak envelope could be priced ({basis})")
+    return RunPricing(int(need), basis)
+
+
+def _process_trees(roots: Sequence[int]) -> dict[int, set[int]]:
+    """Each root PID with its live descendants (Linux ``/proc``).
+
+    Elsewhere, or when ``/proc`` cannot be read, a root is only itself, so
+    less memory is attributed to a sibling and admission is more
+    conservative, never less."""
+
+    children: dict[int, list[int]] = {}
+    proc = Path("/proc")
+    try:
+        entries = [entry for entry in os.listdir(proc) if entry.isdigit()]
+    except OSError:
+        entries = []
+    for entry in entries:
+        try:
+            text = (proc / entry / "stat").read_text(
+                encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # ``pid (comm) state ppid ...``; comm may itself hold ')'.
+        fields = text.rsplit(")", 1)[-1].split()
+        if len(fields) >= 2 and fields[1].isdigit():
+            children.setdefault(int(fields[1]), []).append(int(entry))
+    trees: dict[int, set[int]] = {}
+    for root in roots:
+        found = {int(root)}
+        stack = [int(root)]
+        while stack:
+            for child in children.get(stack.pop(), ()):
+                if child not in found:
+                    found.add(child)
+                    stack.append(child)
+        trees[int(root)] = found
+    return trees
+
+
+class CardMeter:
+    """How a packed multi-run measures its cards (NVML through nvidia-smi).
+
+    ``measure`` is :func:`woof.supervisor.measured_device_memory`, the
+    numbers every child's own supervisor admits itself against.
+    ``process_bytes`` is the per-process framebuffer figure the run doors'
+    co-tenant check reads (:func:`woof.supervisor.query_compute_processes`:
+    compute-apps rows with pmon's figure where compute-apps has none),
+    which :meth:`PackingPlan.decide` attributes to a sibling through its
+    process tree so memory a sibling already holds is not counted twice.
+    When NVML cannot say (a PID namespace, an unreported row), nothing is
+    attributed and admission only gets more conservative.  Tests
+    substitute a fake.
+    """
+
+    def card_total_bytes(self, gpu_uuid: str) -> int | None:
+        from woof.core.preflight import device_physical_total_bytes
+
+        return device_physical_total_bytes(device_id=gpu_uuid)
+
+    def measure(self, gpu_uuid: str) -> Mapping[str, object]:
+        return measured_device_memory(gpu_uuid)
+
+    def process_bytes(self, gpu_uuid: str) -> dict[int, int]:
+        from woof.supervisor import query_compute_processes
+
+        try:
+            rows = query_compute_processes(gpu_uuid)
+        except Exception:  # noqa: BLE001 - attribution is advisory
+            return {}
+        return {row.pid: int(row.used_gpu_memory_mib) * 1024 ** 2
+                for row in rows if row.used_gpu_memory_mib}
+
+    def process_trees(self, roots: Sequence[int]) -> dict[int, set[int]]:
+        return _process_trees(roots)
+
+
+def _card_meter() -> CardMeter:
+    return CardMeter()
+
+
+def packed_admission(*, need_bytes: int | None, margin_bytes: int,
+                     card_total_bytes: int, cap: int,
+                     live: Sequence[Mapping[str, object]],
+                     observe: Callable[[], Mapping[str, int]],
+                     measure: Callable[[], Mapping[str, object]],
+                     settling: bool = False) -> dict[str, object]:
+    """Decide one run's admission onto one card (:data:`PACKED_ADMISSION_RULE`).
+
+    ``live`` rows are this multi-run's runs holding the card: ``name`` and
+    ``priced_bytes`` (None when unpriced).  Only when the measured rule is
+    reached is ``observe`` called (sibling name -> bytes NVML attributes to
+    its process tree, 0 when it cannot say) and THEN ``measure``
+    (:func:`woof.supervisor.measured_device_memory`'s mapping): memory a
+    sibling allocates between the two samples is in the used figure and
+    still counted as its outstanding growth -- counted twice, never
+    missed.  ``settling`` is true while a sibling on this card finished
+    less than one recheck ago: its memory may not be released yet, so a
+    run that does not fit then waits instead of being refused.
+
+    Returns the decision: ``verdict`` (``admitted``,
+    ``admitted-unpriced-alone``, ``waiting`` or ``refused``), the ``rule``
+    that decided it, a ``reason`` sentence and every number it used.
+    """
+
+    rows = [dict(row) for row in live]
+    names = [str(row["name"]) for row in rows]
+    decision: dict[str, object] = {
+        "card_total_bytes": int(card_total_bytes),
+        "headroom_bytes": None,
+        "margin_bytes": int(margin_bytes),
+        "measured_free_bytes": None,
+        "measured_used_bytes": None,
+        "measurement_basis": None,
+        "need_bytes": need_bytes,
+        "runs_per_gpu_cap": int(cap),
+        "siblings": rows,
+        "siblings_outstanding_bytes": None,
+        "siblings_priced_bytes": None,
+    }
+
+    def verdict(value: str, rule: str, reason: str) -> dict[str, object]:
+        decision.update(verdict=value, rule=rule, reason=reason)
+        return decision
+
+    def settle_or_refuse(rule: str, reason: str) -> dict[str, object]:
+        if settling:
+            return verdict(
+                "waiting", "sibling_memory_settling",
+                reason + "; a sibling on this card has just finished and "
+                "its memory may not be released yet, so the card is "
+                "measured again before the run is refused")
+        return verdict("refused", rule, reason)
+
+    if len(rows) >= cap:
+        return verdict(
+            "waiting", "runs_per_gpu_cap",
+            f"{len(rows)} of this multi-run's runs ({names}) hold the card, "
+            f"the runs_per_gpu cap of {cap}")
+    if need_bytes is None:
+        if rows:
+            return verdict(
+                "waiting", "unpriced_runs_alone",
+                f"this run could not be priced, so it runs alone on its "
+                f"card; it waits for {names} to finish")
+        return verdict(
+            "admitted-unpriced-alone", "unpriced_runs_alone",
+            "this run could not be priced, so it runs alone on its card; "
+            "its own supervisor prices the card's measured free memory at "
+            "launch")
+    unpriced = [str(row["name"]) for row in rows
+                if row.get("priced_bytes") is None]
+    if unpriced:
+        return verdict(
+            "waiting", "unpriced_sibling_alone",
+            f"unpriced sibling(s) {unpriced} hold the card alone")
+    need = int(need_bytes)
+    margin = int(margin_bytes)
+    priced_sum = sum(int(row["priced_bytes"]) for row in rows)
+    decision["siblings_priced_bytes"] = priced_sum
+    if priced_sum + need + margin > card_total_bytes:
+        return verdict(
+            "waiting", "card_total",
+            f"siblings' priced peaks {_gib_text(priced_sum)} + this run's "
+            f"{_gib_text(need)} + margin {_gib_text(margin)} exceed the "
+            f"card's {_gib_text(card_total_bytes)}; waits for {names} to "
+            "finish")
+    observed = dict(observe()) if rows else {}
+    for row in rows:
+        row["observed_bytes"] = int(observed.get(str(row["name"]), 0))
+    try:
+        measured = measure()
+    except Exception as error:  # noqa: BLE001 - named in the decision
+        detail = f"{type(error).__name__}: {error}"
+        if rows:
+            return verdict(
+                "waiting", "measurement_failed",
+                f"the card's memory could not be measured ({detail}); "
+                "re-measured when a sibling finishes")
+        return settle_or_refuse(
+            "measurement_failed",
+            "the card's memory could not be measured, so the run is not "
+            f"admitted (an unmeasured card never reads as headroom): "
+            f"{detail}")
+    used = int(measured["device_wide_used_bytes"])
+    free = measured.get("device_free_bytes")
+    free = (max(0, int(card_total_bytes) - used) if free is None
+            else int(free))
+    outstanding = sum(
+        max(0, int(row["priced_bytes"]) - int(row["observed_bytes"]))
+        for row in rows)
+    headroom = free - outstanding
+    decision.update(
+        headroom_bytes=headroom, measured_free_bytes=free,
+        measured_used_bytes=used,
+        measurement_basis=measured.get("basis", SHARED_ADMISSION_BASIS),
+        siblings_outstanding_bytes=outstanding)
+    sentence = (
+        f"priced peak {_gib_text(need)} + margin {_gib_text(margin)} "
+        f"against {_gib_text(headroom)} = measured free {_gib_text(free)} "
+        f"less siblings' outstanding growth {_gib_text(outstanding)}")
+    if need + margin <= headroom:
+        return verdict("admitted", "fits", sentence + ": fits")
+    if rows:
+        return verdict(
+            "waiting", "measured_free",
+            sentence + f": does not fit; waits for {names} to finish")
+    return settle_or_refuse(
+        "measured_free",
+        sentence + f": does not fit, and none of this multi-run's runs "
+        f"hold the card ({_gib_text(used)} is used device-wide by "
+        "processes this multi-run does not own), so waiting cannot free "
+        "it")
+
+
+@dataclass
+class PackingPlan:
+    """A packed plan's cards, pricing, admission ledger, locks and MPS."""
+
+    request: PackingRequest
+    cards: dict[str, dict[str, object]]
+    pricing: dict[str, RunPricing]
+    meter: CardMeter
+    lock_parent: Path
+    events: list[dict[str, object]] = field(default_factory=list)
+    decisions: dict[str, dict[str, dict[str, object]]] = field(
+        default_factory=dict)
+    mps: MpsDaemon | None = None
+    shared_locks: dict[str, dict[str, object]] = field(default_factory=dict)
+    _held_locks: list[GPUFileLock] = field(default_factory=list, repr=False)
+    _logged: dict[tuple[str, str], tuple[object, object]] = field(
+        default_factory=dict, repr=False)
+
+    def hold_shared_locks(self) -> None:
+        """Hold each packed card's machine-wide UUID lock for the run.
+
+        The children lock under their own roots, so without this a packed
+        card carries no lock the host's other woof processes can see: a
+        ``woof run``, an energy worker or an exclusive multi-run would
+        price the card while the siblings are still growing toward their
+        peaks.  Holding the shared lock keeps them out exactly as one
+        exclusive run on the card does.  A lock another process already
+        holds (a forecast started earlier on this card) is recorded, not
+        refused: that process is priced by measurement like any other
+        co-tenant, as its own run door priced the card it found.
+        """
+
+        from woof.supervisor import GPUAlreadyLockedError
+
+        for gpu_uuid in self.cards:
+            lock = GPUFileLock(
+                gpu_uuid, run_id=f"multi-run-packed-{os.getpid()}")
+            try:
+                lock.acquire()
+            except GPUAlreadyLockedError as error:
+                self.shared_locks[gpu_uuid] = {
+                    "held_by_this_multi_run": False, "path": str(lock.path),
+                    "detail": (
+                        f"{error}; another woof process holds this card's "
+                        "shared lock, so it is priced as a measured "
+                        "co-tenant")}
+                print("multi-run packing: GPU "
+                      f"{gpu_uuid}: "
+                      f"{self.shared_locks[gpu_uuid]['detail']}", flush=True)
+                continue
+            self._held_locks.append(lock)
+            self.shared_locks[gpu_uuid] = {
+                "held_by_this_multi_run": True, "path": str(lock.path),
+                "detail": ("held until every child is observed finished, so "
+                           "no other woof process starts on the card beside "
+                           "packed runs it cannot see growing")}
+
+    def release_shared_locks(self) -> None:
+        while self._held_locks:
+            self._held_locks.pop().release()
+
+    def decide(self, phase: str, run: PlannedRun,
+               live: Sequence[tuple[PlannedRun, int | None]], *,
+               settling: bool = False, priced: bool = True
+               ) -> dict[str, object]:
+        """Admission of ``run`` beside its live siblings ``(run, pid)``.
+
+        ``priced`` false is an estimate-mode config check, which holds no
+        forecast memory: only the ``runs_per_gpu`` cap applies to it."""
+
+        gpu_uuid = run.gpu.uuid
+        if not priced:
+            names = [sibling.spec.name for sibling, _pid in live]
+            decision: dict[str, object] = {
+                "runs_per_gpu_cap": self.request.cap, "siblings": names}
+            if len(live) >= self.request.cap:
+                decision.update(
+                    verdict="waiting", rule="runs_per_gpu_cap",
+                    reason=(f"{len(live)} of this multi-run's checks "
+                            f"({names}) hold the card, the runs_per_gpu cap "
+                            f"of {self.request.cap}"))
+            else:
+                decision.update(
+                    verdict="admitted", rule="estimate_check_cap_only",
+                    reason=("an estimate check holds no forecast memory, so "
+                            "only the runs_per_gpu cap applies"))
+            return self._record(phase, run, decision)
+        rows = [{"name": sibling.spec.name, "pid": pid,
+                 "priced_bytes": self.pricing[sibling.spec.name].need_bytes}
+                for sibling, pid in live]
+
+        def observe() -> dict[str, int]:
+            process_bytes = self.meter.process_bytes(gpu_uuid)
+            pids = [pid for _sibling, pid in live if pid is not None]
+            trees = self.meter.process_trees(pids) if pids else {}
+            return {
+                sibling.spec.name: sum(
+                    process_bytes.get(member, 0)
+                    for member in (() if pid is None
+                                   else trees.get(pid, {pid})))
+                for sibling, pid in live}
+
+        decision = packed_admission(
+            need_bytes=self.pricing[run.spec.name].need_bytes,
+            margin_bytes=self.request.margin_bytes,
+            card_total_bytes=int(self.cards[gpu_uuid]["total_bytes"]),
+            cap=self.request.cap, live=rows, observe=observe,
+            measure=lambda: self.meter.measure(gpu_uuid), settling=settling)
+        return self._record(phase, run, decision)
+
+    def _record(self, phase: str, run: PlannedRun,
+                decision: dict[str, object]) -> dict[str, object]:
+        gpu_uuid = run.gpu.uuid
+        decision.update({
+            "at_utc": utc_now(), "gpu_index": run.gpu.index,
+            "gpu_uuid": gpu_uuid, "phase": phase, "run": run.spec.name,
+        })
+        self.decisions.setdefault(run.spec.name, {})[phase] = decision
+        key = (phase, run.spec.name)
+        signature = (decision["verdict"], decision["rule"])
+        if self._logged.get(key) != signature:
+            # A waiting run is re-measured until it starts; the ledger
+            # records each change of verdict or rule, not every poll.
+            self._logged[key] = signature
+            self.events.append(decision)
+            print(
+                f"multi-run {phase} {run.spec.name}: {decision['verdict']} "
+                f"on GPU {gpu_uuid}: {decision['reason']}", flush=True)
+        return decision
+
+    def receipt(self) -> dict[str, object]:
+        return {
+            "admission_rule": PACKED_ADMISSION_RULE,
+            "cards": [
+                {
+                    "index": card["gpu"].index,
+                    "name": card["gpu"].name,
+                    "runs": [
+                        {"name": name, **self.pricing[name].as_dict()}
+                        for name in card["runs"]],
+                    "shared_gpu_lock": self.shared_locks.get(gpu_uuid),
+                    "total_basis": card["total_basis"],
+                    "total_bytes": card["total_bytes"],
+                    "uuid": gpu_uuid,
+                }
+                for gpu_uuid, card in self.cards.items()],
+            "events": list(self.events),
+            "measurement_basis": SHARED_ADMISSION_BASIS,
+            "mem_margin_bytes": self.request.margin_bytes,
+            "mem_margin_gib": self.request.margin_gib,
+            "mode": "packed",
+            "mps": None if self.mps is None else self.mps.summary(),
+            "per_run_gpu_lock_roots": str(self.lock_parent),
+            "runs_per_gpu": self.request.runs_per_gpu,
+            "runs_per_gpu_cap": self.request.cap,
+            "settings_source": dict(self.request.sources),
+        }
+
+
+def _exclusive_packing_receipt(request: PackingRequest) -> dict[str, object]:
+    return {
+        "basis": ("one run per physical GPU; a second run resolving to the "
+                  "same card is refused at device resolution"),
+        "mode": "exclusive",
+        "runs_per_gpu": 1,
+        "settings_source": dict(request.sources),
+    }
+
+
+def plan_packing(plan: MultiRunPlan, runs: Sequence[PlannedRun], *,
+                 lock_root: Path, meter: CardMeter
+                 ) -> tuple[PackingPlan, tuple[PlannedRun, ...]]:
+    """Price every run, budget every card, refuse what can never fit.
+
+    Each card's budget is its NVML ``memory.total``; a card NVML cannot
+    size is a named refusal (packing would have no budget).  A run whose
+    priced peak plus the margin exceeds its card's total can never be
+    admitted there, so the whole plan is refused before anything is
+    claimed or launched, naming every such run.  Each run gets its own
+    ``WOOF_GPU_LOCK_ROOT`` under ``lock_root`` (already proven outside
+    every plan path), so siblings' ``woof run`` UUID locks do not refuse
+    each other.  Prints the per-card assignment and pricing.
+    """
+
+    request = plan.packing
+    pricing = {run.spec.name: price_run(run.spec) for run in runs}
+    cards: dict[str, dict[str, object]] = {}
+    for run in runs:
+        card = cards.get(run.gpu.uuid)
+        if card is None:
+            total = meter.card_total_bytes(run.gpu.uuid)
+            if total is None or int(total) <= 0:
+                raise ValueError(
+                    f"GPU {run.gpu.uuid} (index {run.gpu.index}): NVML did "
+                    "not report its memory.total, so packing has no budget "
+                    "for this card; restore nvidia-smi or run one run per "
+                    "GPU (runs_per_gpu = 1)")
+            card = cards[run.gpu.uuid] = {
+                "gpu": run.gpu, "runs": [], "total_basis": "NVML memory.total",
+                "total_bytes": int(total)}
+        card["runs"].append(run.spec.name)
+    margin = request.margin_bytes
+    problems = []
+    for gpu_uuid, card in cards.items():
+        total = int(card["total_bytes"])
+        for name in card["runs"]:
+            need = pricing[name].need_bytes
+            if need is not None and need + margin > total:
+                problems.append(
+                    f"run {name!r} is priced at {_gib_text(need)} "
+                    f"({pricing[name].basis}); with the "
+                    f"{_gib_text(margin)} margin it needs "
+                    f"{_gib_text(need + margin)}, more than GPU "
+                    f"{gpu_uuid}'s {_gib_text(total)} total, so it can "
+                    "never be admitted there")
+    if problems:
+        raise ValueError(
+            "multi-run cannot pack this plan: " + "; ".join(problems)
+            + ". Put the run on a larger card, make it smaller, or lower "
+            "the margin (mem_margin_gib)")
+    lock_parent = (lock_root.expanduser().resolve()
+                   / f"multi-run-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    packed = tuple(
+        replace(run, lock_root=lock_parent / f"run-{index:03d}")
+        for index, run in enumerate(runs))
+    for gpu_uuid, card in cards.items():
+        listed = ", ".join(
+            f"{name} {_gib_text(pricing[name].need_bytes)}"
+            if pricing[name].need_bytes is not None
+            else f"{name} unpriced (runs alone)"
+            for name in card["runs"])
+        print(
+            f"multi-run packing: GPU {card['gpu'].index} {gpu_uuid} "
+            f"({_gib_text(card['total_bytes'])} NVML total, runs_per_gpu "
+            f"{request.runs_per_gpu}, cap {request.cap}, margin "
+            f"{_gib_text(margin)}): {listed}", flush=True)
+    return PackingPlan(request, cards, pricing, meter, lock_parent), packed
+
+
+def _execute_packed_group(
+        runs: Sequence[PlannedRun], *, phase: str,
+        command_for: Callable[[PlannedRun], tuple[str, ...]],
+        log_for: Callable[[PlannedRun], Path],
+        packing: PackingPlan,
+        popen: Callable[..., subprocess.Popen] | None = None,
+        poll_seconds: float = 0.10,
+        recheck_seconds: float | None = None,
+        priced: bool = True) -> GroupOutcome:
+    """Launch each run when its card admits it; report completion live.
+
+    :func:`_execute_group` with a per-card queue in plan order: the run at
+    the head of a card's queue is offered to :meth:`PackingPlan.decide`
+    whenever a sibling on that card starts or finishes, and otherwise
+    every ``recheck_seconds`` (default :data:`ADMISSION_RECHECK_SECONDS`)
+    so memory freed by processes this multi-run does not own is noticed.
+    For one recheck after a sibling on a card finishes, a run there that
+    does not fit waits rather than being refused (its memory may not be
+    released yet).  ``priced`` false (estimate-mode checks) applies only
+    the ``runs_per_gpu`` cap.
+    A refused run is recorded ``not_admitted`` with the decision's reason
+    and never launched.  Interrupt and failure semantics are
+    :func:`_execute_group`'s: children are never terminated; queued runs
+    are recorded ``not_started``.
+    """
+
+    if poll_seconds <= 0.0:
+        raise ValueError("poll_seconds must be positive")
+    recheck = (ADMISSION_RECHECK_SECONDS if recheck_seconds is None
+               else float(recheck_seconds))
+    group_started_at_utc = utc_now()
+    group_started_monotonic = time.monotonic()
+    launch = subprocess.Popen if popen is None else popen
+    records: list[ProcessRecord] = []
+    queues: dict[str, list[int]] = {}
+    live: dict[str, list[tuple[int, ProcessRecord, subprocess.Popen,
+                               object]]] = {}
+    dirty: dict[str, bool] = {}
+    evaluated_at: dict[str, float] = {}
+    finished_at: dict[str, float] = {}
+    pending_record: ProcessRecord | None = None
+    pending_process: subprocess.Popen | None = None
+    pending_stream = None
+
+    def unobserved(now: float) -> None:
+        nonlocal pending_record, pending_process, pending_stream
+        if pending_record is not None and any(
+                record is pending_record for entries in live.values()
+                for _index, record, _process, _stream in entries):
+            # Already in the live ledger: the live loop below records it.
+            pending_record = pending_process = pending_stream = None
+        if pending_stream is not None:
+            try:
+                pending_stream.close()
+            except BaseException:
+                pass
+        if pending_record is not None:
+            pending_record.status = (
+                "launch_unobserved" if pending_process is None
+                else "running_unobserved")
+            try:
+                pending_record.pid = (
+                    None if pending_process is None else pending_process.pid)
+            except BaseException:
+                pending_record.pid = None
+            pending_record.duration_seconds = round(
+                now - (pending_record._started_monotonic or now), 6)
+        for entries in live.values():
+            for _index, record, _process, stream in entries:
+                try:
+                    stream.close()
+                except BaseException:
+                    pass
+                if record.status not in {"succeeded", "failed"}:
+                    record.status = "running_unobserved"
+                    record.duration_seconds = round(
+                        now - (record._started_monotonic or now), 6)
+        for queue in queues.values():
+            for index in queue:
+                records[index].status = "not_started"
+
+    try:
+        for index, run in enumerate(runs):
+            records.append(ProcessRecord(
+                run.spec.name, phase, command_for(run), log_for(run)))
+            queues.setdefault(run.gpu.uuid, []).append(index)
+            live.setdefault(run.gpu.uuid, [])
+            dirty[run.gpu.uuid] = True
+            evaluated_at[run.gpu.uuid] = float("-inf")
+        while (any(queues.values())
+               or any(entries for entries in live.values())):
+            progressed = False
+            for gpu_uuid, queue in queues.items():
+                while queue:
+                    now = time.monotonic()
+                    if (not dirty[gpu_uuid]
+                            and now - evaluated_at[gpu_uuid] < recheck):
+                        break
+                    index = queue[0]
+                    run, record = runs[index], records[index]
+                    decision = packing.decide(phase, run, [
+                        (runs[item], record_.pid)
+                        for item, record_, _process, _stream
+                        in live[gpu_uuid]],
+                        settling=(now - finished_at.get(
+                            gpu_uuid, float("-inf")) < recheck),
+                        priced=priced)
+                    evaluated_at[gpu_uuid] = now
+                    dirty[gpu_uuid] = False
+                    if decision["verdict"] == "waiting":
+                        break
+                    queue.pop(0)
+                    progressed = True
+                    dirty[gpu_uuid] = True
+                    if decision["verdict"] == "refused":
+                        record.status = "not_admitted"
+                        record.error = str(decision["reason"])
+                        print(
+                            f"multi-run {phase} {record.name}: not admitted "
+                            f"on GPU {gpu_uuid}; nothing was launched",
+                            file=sys.stderr, flush=True)
+                        continue
+                    pending_record = record
+                    record.started_at_utc = utc_now()
+                    record._started_monotonic = time.monotonic()
+                    stream = None
+                    try:
+                        stream = record.log.open("xb")
+                        pending_stream = stream
+                        process = launch(
+                            list(record.command), env=child_environment(run),
+                            stdin=subprocess.DEVNULL, stdout=stream,
+                            stderr=subprocess.STDOUT, close_fds=True,
+                            **_new_process_group_kwargs())
+                        pending_process = process
+                    except OSError as error:
+                        if stream is not None:
+                            stream.close()
+                        pending_record = None
+                        pending_stream = None
+                        record.status = "launch_failed"
+                        record.completed_at_utc = utc_now()
+                        record.duration_seconds = round(
+                            time.monotonic() - record._started_monotonic, 6)
+                        record.error = f"{type(error).__name__}: {error}"
+                        print(
+                            f"multi-run {phase} {record.name}: launch failed; "
+                            f"see {record.log}", file=sys.stderr, flush=True)
+                        continue
+                    record.pid = process.pid
+                    record.status = "running"
+                    live[gpu_uuid].append((index, record, process, stream))
+                    pending_record = None
+                    pending_process = None
+                    pending_stream = None
+                    print(
+                        f"multi-run {phase} {record.name}: started "
+                        f"{record.started_at_utc} pid={record.pid} "
+                        f"device={gpu_uuid} log={record.log}", flush=True)
+            for gpu_uuid, entries in live.items():
+                remaining = []
+                for entry in entries:
+                    _index, record, process, stream = entry
+                    exit_code = process.poll()
+                    if exit_code is None:
+                        remaining.append(entry)
+                        continue
+                    record.exit_code = int(exit_code)
+                    record.status = "succeeded" if exit_code == 0 else "failed"
+                    record.completed_at_utc = utc_now()
+                    record.duration_seconds = round(
+                        time.monotonic() - record._started_monotonic, 6)
+                    stream.close()
+                    dirty[gpu_uuid] = True
+                    finished_at[gpu_uuid] = time.monotonic()
+                    progressed = True
+                    print(
+                        f"multi-run {phase} {record.name}: completed "
+                        f"{record.completed_at_utc} exit={record.exit_code} "
+                        f"duration={record.duration_seconds:.3f}s "
+                        f"log={record.log}", flush=True)
+                live[gpu_uuid] = remaining
+            if not progressed and (
+                    any(queues.values())
+                    or any(entries for entries in live.values())):
+                time.sleep(poll_seconds)
+        return GroupOutcome(
+            tuple(records), False, group_started_at_utc, utc_now(),
+            round(time.monotonic() - group_started_monotonic, 6))
+    except KeyboardInterrupt:
+        observed_at = utc_now()
+        now = time.monotonic()
+        unobserved(now)
+        pids = [record.pid for record in records
+                if record.status == "running_unobserved"]
+        print(
+            f"multi-run {phase}: interrupted at {observed_at}; child "
+            f"processes were not terminated, unobserved pids={pids}",
+            file=sys.stderr, flush=True)
+        return GroupOutcome(
+            tuple(records), True, group_started_at_utc, observed_at,
+            round(now - group_started_monotonic, 6))
+    except BaseException as error:
+        observed_at = utc_now()
+        now = time.monotonic()
+        unobserved(now)
+        if pending_record is not None:
+            pending_record.error = f"{type(error).__name__}: {error}"
+        outcome = GroupOutcome(
+            tuple(records), False, group_started_at_utc, observed_at,
+            round(now - group_started_monotonic, 6))
+        pids = [record.pid for record in records
+                if record.status == "running_unobserved"
+                and record.pid is not None]
+        print(
+            f"multi-run {phase}: orchestration failed at {observed_at}; "
+            f"child processes were not terminated, unobserved pids={pids}",
+            file=sys.stderr, flush=True)
+        raise GroupExecutionError(phase, outcome, error) from error
+
+
+def _release_packing(packing: PackingPlan,
+                     outcomes: Sequence[GroupOutcome | None]) -> None:
+    """Release the cards' shared locks, stop an MPS daemon this run
+    started and remove its per-run lock roots.
+
+    The shared locks go with this process whatever happens (an exiting
+    process releases them anyway).
+
+    The daemon and the lock roots are left in place while any child's
+    completion was not observed
+    (an interrupt, an orchestration failure): such a child may still be
+    an MPS client, and a lock file a live process holds must stay where
+    that process can find it.  Saying so is the receipt's job; the PIDs
+    are already recorded there."""
+
+    packing.release_shared_locks()
+    if any(outcome is not None and any(
+            record.status in {"running", "running_unobserved",
+                              "launch_unobserved"}
+            for record in outcome.records) for outcome in outcomes):
+        if packing.mps is not None and packing.mps.owned:
+            print(
+                f"multi-run: the MPS control daemon at "
+                f"{packing.mps.pipe_dir} is left running for children whose "
+                "completion was not observed; stop it with `echo quit | "
+                f"CUDA_MPS_PIPE_DIRECTORY={packing.mps.pipe_dir} "
+                "nvidia-cuda-mps-control` once they finish",
+                file=sys.stderr, flush=True)
+        return
+    if packing.mps is not None:
+        packing.mps.stop()
+    shutil.rmtree(packing.lock_parent, ignore_errors=True)
+
+
 def _prepare_directories(
         plan: MultiRunPlan,
         state: OrchestrationState | None = None) -> None:
@@ -1609,7 +2617,8 @@ def _summary_payload(
         preflight: GroupOutcome | None,
         execution: GroupOutcome | None,
         file_verification: Mapping[str, object],
-        orchestration: Mapping[str, object]) -> dict[str, object]:
+        orchestration: Mapping[str, object],
+        packing: PackingPlan | None = None) -> dict[str, object]:
     preflight_by_name = (
         {} if preflight is None
         else {record.name: record for record in preflight.records})
@@ -1653,6 +2662,11 @@ def _summary_payload(
                 if process is None else process.as_dict()),
             "scratch": str(spec.scratch_dir),
         })
+        if packing is not None:
+            rows[-1]["packing"] = {
+                "admission": dict(packing.decisions.get(spec.name, {})),
+                "pricing": packing.pricing[spec.name].as_dict(),
+            }
     execution_timing = _execution_timing(execution)
     if file_verification.get("status") != "PASS":
         execution_timing["overlap_ratio"] = None
@@ -1666,6 +2680,8 @@ def _summary_payload(
         "file_authority_verification": dict(file_verification),
         "input_authority_store": _input_authority_store_record(plan),
         "orchestration": dict(orchestration),
+        "packing": (_exclusive_packing_receipt(plan.packing)
+                    if packing is None else packing.receipt()),
         "plan": str(plan.path),
         "plan_sha256": plan.sha256,
         "preflight_mode": plan.preflight,
@@ -1759,6 +2775,7 @@ def multi_run_main(args: argparse.Namespace) -> int:
     preflight: GroupOutcome | None = None
     execution: GroupOutcome | None = None
     monitor: FileAuthorityMonitor | None = None
+    packing: PackingPlan | None = None
     verification: Mapping[str, object] = _unstarted_authority_verification(
         "plan and runtime paths have not yet been prepared")
 
@@ -1784,7 +2801,8 @@ def multi_run_main(args: argparse.Namespace) -> int:
             preflight=preflight, execution=execution,
             file_verification=verification,
             orchestration=_orchestration_record(
-                state, plan, preflight, execution))
+                state, plan, preflight, execution),
+            packing=packing)
         state.stage = "summary_publication"
         try:
             _write_summary(plan.summary, payload)
@@ -1802,6 +2820,7 @@ def multi_run_main(args: argparse.Namespace) -> int:
         plan = load_plan(
             args.plan, summary_override=getattr(args, "summary", None),
             preflight_override=getattr(args, "preflight", None))
+        plan = replace(plan, packing=packing_request(plan.packing, args))
 
         state.stage = "lock_root_resolution"
         lock_root = _validate_lock_root_isolation(
@@ -1813,6 +2832,41 @@ def multi_run_main(args: argparse.Namespace) -> int:
         except RuntimeError as error:
             raise ValueError(str(error)) from error
         runs = resolve_devices(plan, inventory, lock_root=lock_root)
+        if plan.packing.packed:
+            state.stage = "packing_admission_plan"
+            packing, runs = plan_packing(
+                plan, runs, lock_root=lock_root, meter=_card_meter())
+            packing.hold_shared_locks()
+            if plan.packing.mps:
+                state.stage = "mps_start"
+                daemon = MpsDaemon(
+                    plan.packing.mps_dir, sorted(packing.cards),
+                    thread_percentage=(
+                        plan.packing.mps_active_thread_percentage))
+                if not daemon.external:
+                    _validate_outside_plan_paths(
+                        plan, daemon.pipe_dir.parent, "MPS directory",
+                        "give --mps-dir a directory outside every plan, "
+                        "input, summary, output, scratch, and cache path")
+                try:
+                    daemon.start()
+                except MPSUnavailable as error:
+                    raise ValueError(f"multi-run --mps: {error}") from error
+                packing.mps = daemon
+                overrides = tuple(sorted(daemon.environment().items()))
+                runs = tuple(replace(run, environment_overrides=overrides)
+                             for run in runs)
+
+        def execute_group(group: Sequence[PlannedRun],
+                          **kwargs) -> GroupOutcome:
+            if packing is None:
+                return _execute_group(group, **kwargs)
+            # An estimate check holds no forecast memory; an alloc check
+            # allocates the priced peak, so it is admitted like the run.
+            priced = not (kwargs.get("phase") == "check"
+                          and plan.preflight == "estimate")
+            return _execute_packed_group(
+                group, packing=packing, priced=priced, **kwargs)
 
         state.stage = "summary_probe"
         _prepare_summary_destination(plan.summary, state)
@@ -1848,7 +2902,7 @@ def multi_run_main(args: argparse.Namespace) -> int:
                         "and memory gates run inside the locked child.",
                         flush=True)
             if checkable:
-                preflight = _execute_group(
+                preflight = execute_group(
                     checkable, phase="check",
                     command_for=lambda run: _check_command(
                         run, plan.preflight),
@@ -1880,7 +2934,7 @@ def multi_run_main(args: argparse.Namespace) -> int:
                 receipt_stage="config_checks")
 
         state.stage = "forecast"
-        execution = _execute_group(
+        execution = execute_group(
             runs, phase="run", command_for=_run_command,
             log_for=lambda run: run.spec.log)
 
@@ -1956,7 +3010,8 @@ def multi_run_main(args: argparse.Namespace) -> int:
             preflight=preflight, execution=execution,
             file_verification=verification,
             orchestration=_orchestration_record(
-                state, plan, preflight, execution))
+                state, plan, preflight, execution),
+            packing=packing)
         try:
             _write_summary(plan.summary, payload)
         except (OSError, ValueError) as error:
@@ -2011,7 +3066,8 @@ def multi_run_main(args: argparse.Namespace) -> int:
                     preflight=preflight, execution=execution,
                     file_verification=verification,
                     orchestration=_orchestration_record(
-                        state, plan, preflight, execution))
+                        state, plan, preflight, execution),
+                    packing=packing)
                 _write_summary(plan.summary, payload)
             except BaseException as publication_error:
                 print(
@@ -2025,6 +3081,8 @@ def multi_run_main(args: argparse.Namespace) -> int:
                     file=sys.stderr, flush=True)
         raise
     finally:
+        if packing is not None:
+            _release_packing(packing, (preflight, execution))
         # The monitor is deliberately non-daemon: never let an unexpected
         # exception strand it and keep interpreter shutdown alive.  Cleanup
         # errors are reported but cannot replace the active exception.
@@ -2044,7 +3102,8 @@ def register_cli(subparsers: argparse._SubParsersAction) -> None:
 
     parser = subparsers.add_parser(
         "multi-run",
-        help="launch independent production forecasts on unique GPUs")
+        help=("launch independent production forecasts, one per GPU or "
+              "packed several to a GPU by memory (--runs-per-gpu)"))
     parser.add_argument(
         "plan", type=Path, metavar="PLAN.toml",
         help="versioned plan with one or more [[run]] entries")
@@ -2054,6 +3113,31 @@ def register_cli(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--preflight", choices=PREFLIGHT_MODES, default=None,
         help="override the plan's woof check mode: estimate, alloc, or off")
+    parser.add_argument(
+        "--runs-per-gpu", default=None, metavar="N|auto",
+        help=("let up to N runs (auto: up to "
+              f"{AUTO_MAX_SLOTS_PER_GPU}) share one GPU, each admitted when "
+              "its priced forecast peak plus the margin fits the card's "
+              "measured free memory beside its siblings; runs that do not "
+              "fit wait for a sibling to finish (overrides the plan's "
+              "[devices] runs_per_gpu; default 1, one run per GPU)"))
+    parser.add_argument(
+        "--mem-margin-gib", type=float, default=None, metavar="GiB",
+        help=("card memory kept free beside packed runs' priced peaks "
+              f"(default {DEFAULT_MEM_MARGIN_GIB:g}; only with "
+              "--runs-per-gpu above 1 or auto)"))
+    parser.add_argument(
+        "--mps", action=argparse.BooleanOptionalAction, default=None,
+        help=("start (or reuse) the CUDA MPS control daemon so packed runs' "
+              "kernels share the card instead of time-slicing; stopped on "
+              "exit if started here (overrides the plan's [devices] mps)"))
+    parser.add_argument(
+        "--mps-dir", type=Path, default=None, metavar="DIR",
+        help="where the MPS pipe and log directories go (with --mps)")
+    parser.add_argument(
+        "--mps-active-thread-percentage", type=int, default=None,
+        metavar="P",
+        help="CUDA_MPS_ACTIVE_THREAD_PERCENTAGE for each run (with --mps)")
     parser.set_defaults(func=multi_run_main)
 
 
@@ -2065,6 +3149,9 @@ __all__ = [
     "PLAN_SCHEMA", "PREFLIGHT_MODES", "SUMMARY_SCHEMA",
     "SUPPORTED_PREPARED_RUNNERS", "GroupExecutionError", "GroupOutcome",
     "MultiRunPlan", "PlannedRun", "ProcessRecord", "RunSpec",
-    "child_environment", "load_plan", "multi_run_main", "register_cli",
+    "ADMISSION_RECHECK_SECONDS", "CardMeter", "PACKED_ADMISSION_RULE",
+    "PackingPlan", "PackingRequest", "RunPricing",
+    "child_environment", "load_plan", "multi_run_main", "packed_admission",
+    "packing_request", "plan_packing", "price_run", "register_cli",
     "resolve_devices",
 ]

@@ -361,10 +361,12 @@ class RunConfig:
     # (solve_em.F:369 forces diag_flag; module_first_rk_step_part2.F:533
     # calls cal_helicity) and resets them each history interval
     # (module_diag_nwp.F:246-269).  woof implements the UP_HELI_MAX
-    # member of that family (woof/core/uh_diag.py, dycore epilogue); the
-    # others (WSPD10MAX, W_UP_MAX, W_DN_MAX, W_MEAN, GRPL_MAX, HAIL_MAX*)
-    # are not carried and their absence from wrfouts is the accurate signal.
-    # The diagnostic is trajectory-inert by construction and by test.
+    # member (woof/core/uh_diag.py) and the wind members WSPD10MAX,
+    # W_UP_MAX, W_DN_MAX plus U10MAX/V10MAX and the UPP surface GUST
+    # (woof/core/wind_gust_diag.py), all in the dycore epilogue; the rest
+    # (W_MEAN, GRPL_MAX, REFD_MAX, HAIL_MAX*) are not carried and their
+    # absence from wrfouts is the accurate signal.  Every member is
+    # trajectory-inert by construction and by test.
     nwp_diagnostics: int = 0
     # Lane-K option exposure.  These fields are appended so positional
     # RunConfig construction keeps its historical order, and every default is
@@ -2827,7 +2829,8 @@ def load_history_selection(path: str | Path):
 
     authority = read_config_authority(path)
     raw = tomllib.load(io.BytesIO(authority.payload))
-    return HistorySelection.from_mapping(raw.get("output"), source=str(path))
+    return HistorySelection.from_mapping(raw.get("output"), source=str(path),
+                                         base_dir=Path(path).parent)
 
 
 def load_device_options(path: str | Path):
@@ -5420,7 +5423,8 @@ def validate_run_config(cfg: RunConfig) -> RunConfig:
     if cfg.nwp_diagnostics not in (0, 1):
         raise ValueError(
             "nwp_diagnostics must be 0 (off, the WRF default) or 1 "
-            "(per-step UP_HELI_MAX running-max diagnostic), got "
+            "(per-step UP_HELI_MAX, WSPD10MAX, U10MAX/V10MAX, W_UP_MAX/"
+            "W_DN_MAX and GUST running-max diagnostics), got "
             f"{cfg.nwp_diagnostics}."
         )
     if not math.isfinite(cfg.mp_tend_lim) or cfg.mp_tend_lim <= 0.0:
@@ -5697,5 +5701,10 @@ def declared_key_rows() -> dict[str, dict[str, dict]]:
         "ingest": INGEST_TABLE_ROWS,
         "simulated_radar": radar_key_rows(),
     }
+    # [output], on the tree-wide table and on a
+    # domain's own output = {...} override alike (one parser reads both).
+    from woof.io.history_selection import output_key_rows
+    tables["output"] = output_key_rows()
+    tables["domain.output"] = output_key_rows()
     return {table: {name: row.to_json() for name, row in rows.items()}
             for table, rows in tables.items()}

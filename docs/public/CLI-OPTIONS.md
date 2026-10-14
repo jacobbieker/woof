@@ -474,14 +474,18 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--ack ID` | declare a governed experiment, written verbatim into the emitted [experiment].acknowledgements. Repeatable. This door used to write the nocturnal declaration for you, which silenced the load guard at check/run/go/run-plan and both prepared runners for the life of the file; it no longer does, and refuses instead. The id it accepts is asymmetric-radiation-nocturnal-window-v1: a longwave-OFF suite over a window that includes local night, which you are running deliberately as a daytime-only experiment |
 | `--buffer-km KM[,KM...]` | with --polygon, nonnegative geometry buffer in kilometres; one value applies to every domain, or supply exactly one outer-to-inner value per level. Every value is measured from the polygon itself, not from the next inner grid: '800,300,0' puts the outer grid 800 km from the polygon, about 500 km beyond the middle one. With --ladder auto, a multi-value list selects the preset of that depth (default: zero) |
 | `--cadence HOURS` | boundary spacing in whole hours, validated against the selected product |
-| `--card` | GPU to size for: a tier (12gb/16gb/24gb/32gb), a size ('10gb'), or a model with a recorded size ('RTX 3080', '5070 Ti'); sets the VRAM budget with no local probe. With no --card, --vram-gib or --hardware-json the wizard MEASURES the local card's capacity (short-lived probe, suppressed by GPUWM_NO_LOCAL_GPU) and refuses, naming both flags, when there is nothing to measure |
+| `--card` | GPU to size for: a tier (12gb/16gb/24gb/32gb), a size ('10gb'), a model with a recorded size ('RTX 3080', '5070 Ti') or a cloud part ('h100-80gb', 'a100-40gb', 'l40s', 'a10g'); sets the VRAM budget with no local probe. With no --card, --vram-gib or --hardware-json the wizard MEASURES the local card's capacity (short-lived probe, suppressed by GPUWM_NO_LOCAL_GPU) and refuses, naming both flags, when there is nothing to measure |
 | `--chain R1,R2,...` | custom nest refinement ratios, integers in [2, 8] (e.g. --root-dx 3 --chain 4 for 3 km -> 750 m); omit for a single domain at --root-dx. Sized by the same estimator fit loop as the presets |
 | `--clock {auto,adaptive,fixed}` | how the run steps. adaptive: each grid starts at the emitted time_step and then follows its own Courant number between 3 and 8 s per km of its spacing (WRF's use_adaptive_time_step, written into [shared]); the terrain clock still caps it over steep ground at launch. fixed: one step throughout. auto (default): adaptive when every grid starts inside those bounds and lies within the 500 m to 12 km spacings the terrain clock measured, fixed otherwise (the tropical clock's 2.5 s per km is always fixed). adaptive on a grid outside the bounds is refused, naming the grid |
 | `--cumulus {suite,grid}` | who decides the root's cumulus scheme. suite: the suite's own scheme at any spacing (what naming --physics-profile means when this is left out). grid: the suite's scheme is turned off on a root finer than the 4 km convection-permitting bound, where the dynamics resolve deep convection (what an unnamed suite gets) |
 | `--cycle YYYY-MM-DDTHH\|latest` | the forcing CYCLE (UTC), which is the run's start time unless --forecast-start-hour moves it; 'latest' probes the public mirrors for the newest complete gfs/hrrr cycle covering the whole window and prints what it picked; sources without a probe use their declared publication delay) |
 | `--data-dir DIR` | explicit forcing directory; automatic go launches otherwise manage request-specific downloads. Manual acquisition and ERA5 paths default to data/<name> |
+| `--dzbot X` | lowest layer depth in m for WRF compute_eta level generation (auto_levels_opt 2; WRF default 50); any of these generates --nz levels to the model top, unset ones take WRF's own default |
+| `--dzstretch-s X` | layer stretch factor near the surface for WRF compute_eta level generation (auto_levels_opt 2; WRF default 1.3); any of these generates --nz levels to the model top, unset ones take WRF's own default |
+| `--dzstretch-u X` | layer stretch factor aloft for WRF compute_eta level generation (auto_levels_opt 2; WRF default 1.1); any of these generates --nz levels to the model top, unset ones take WRF's own default |
 | `--era5-product {reanalysis,ensemble_members}` | explicit ERA5 product; default reanalysis has no member axis |
 | `--era5-provider {cds,arco}` | ERA5 provider; ensemble_members requires CDS |
+| `--eta-levels LIST\|FILE` | explicit full eta levels, 1 -> 0 strictly decreasing, as a comma list or a file of numbers; nz is their count minus one. Excludes --dzbot/--dzstretch-s/--dzstretch-u/--max-dz |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--forcing GRIB` | era5: explicit forcing GRIB path(s) already on disk (default <data-dir>/era5-combined.grib) |
 | `--forecast-start-hour K` | initialize the run from the cycle's f{K} FORECAST lead instead of its analysis, so start_time = cycle + K h and the boundaries come from f{K+i}. This is how a window deep in a forecast (say f174..f240) is reached without integrating from f000. Every source whose registry row publishes forecast leads takes it; a row that declares none refuses it by name. The initial condition is then itself a K-hour forecast, and every receipt says so |
@@ -491,6 +495,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--hours N` | forecast length (run_seconds = N*3600) |
 | `--isftcflx {0,1,2}` | surface flux over water on every grid (WRF isftcflx): 0 standard MM5 roughness, 1 Donelan drag with constant heat and moisture roughness (the tropical cyclone option), 2 Donelan drag with Garratt heat and moisture roughness. Default: the suite's own (0) |
 | `--ladder {12,12-3,12-3-1,12-3-1-0.5,auto}` | preset nest dx chain in km (default: 12 -- one 12 km domain, the shape `woof go` runs end to end, same as the interactive session). Nest trees are explicit opt-in: a deeper preset, `auto` (the deepest preset that fits the card), or --root-dx / --chain for anything else; their closing block names the tree runner they route to |
+| `--max-dz X` | deepest allowed layer in m for WRF compute_eta level generation (auto_levels_opt 2; WRF default 1000); any of these generates --nz levels to the model top, unset ones take WRF's own default |
 | `--member` | ensemble trajectory member; defaults to the route's control |
 | `--mosaic-cat` | Noah mosaic tile count on every grid (WRF mosaic_cat) |
 | `--mosaic-urban-canopy {dominant,every_tile}` | where Noah mosaic runs the urban canopy with sf_urban_physics = 1: dominant (WRF's rule, the default: only cells that are mostly urban) or every_tile (also the town tiles of mostly rural cells) |
@@ -498,6 +503,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--nest-history-interval SECONDS` | the same, for every NESTED domain (default 900). Nests write more often than the root by default because resolving what the root cannot, over a shorter window, is the point of running one. Ignored for a single-domain ladder |
 | `--nz N` | vertical mass levels (default: 49); resamples the default eta ladder while preserving its stretching |
 | `--out TOML` | emitted experiment TOML path |
+| `--p-top-pa PA` | model top pressure in Pa, written as [shared].p_top (default: 50 hPa, raised where the source's column stops lower); refused above the top the source can supply |
 | `--physics-choices JSON` | schemes to run in place of the suite's own, family by family, as the physics composer picks them: '{"microphysics": "thompson-mp8", "pbl": "myj", "surface_layer": "eta-similarity"}'. Checked by the engine the way `woof physics-catalog --check` checks them and written into the config the way `--into` writes them, on every size the fit tries, so the card is priced for the schemes that run. The suite (--physics-profile, or the default at the finest grid) is the base the choices change; no suite is asserted, so a mix no named suite matches runs as written |
 | `--physics-profile {morrison-mp10-ysu-mm5-noah-kf-rte-rrtmgp-v1,nssl2-mp18-ysu-mm5-noah-kf-rte-rrtmgp-wrf-comparison-candidate-v1,nssl2-mp18-ysu-mm5-noah-kf-rrtmg-legacy-wrf-comparison-candidate-v1,thompson-mp8-ysu-mm5-noah-rte-rrtmgp-v1,thompson-mp8-ysu-mm5-noah-rrtmg-legacy-v1,thompson-mp8-shinhong-mm5-noah-rrtmg-legacy-v1,p3-mp50-ysu-mm5-noah-rrtmg-legacy-v1,wsm6-mynn-mynn-noah-rte-rrtmgp-implemented-unverified-v1,wsm6-mynn-mynn-ruc-rte-rrtmgp-implemented-unverified-v1,thompson-mp8-mynn-mynn-ruc-rte-rrtmgp-implemented-unverified-v1,thompson-mp8-ysu-mm5-noah-dudhia-daytime-v1,wsm6-ysu-mm5-noah-no-radiation-v1,wsm6-mynn-mynn-noah-no-radiation-implemented-unverified-v1,wsm6-ysu-mm5-ruc-no-radiation-implemented-unverified-v1,wsm6-mynn-mynn-ruc-no-radiation-implemented-unverified-v1,thompson-mp8-mynn-mynn-ruc-dudhia-implemented-unverified-v1,kessler-mp1-ysu-mm5-noah-dudhia-v1,thompson-mp8-mynn-mynn-ruc-monthly-rrtmg-legacy-v1,thompson-mp8-mynn-mynn-ruc-monthly-solar-rrtmg-legacy-v1,thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1,wsm6-ysu-mm5-noahmp-no-radiation-expert-only-v1,wsm6-mynn-mynn-noahmp-no-radiation-expert-only-v1,wsm6-mynn-mynn-noahmp-rte-rrtmgp-expert-only-v1,20crv3-wsm6-ysu-mm5-noah-kf-rte-rrtmgp-implemented-unverified-v1,milbrandt2mom-mp9-ysu-mm5-noah-ntiedtke-rrtmg-legacy-v1,wdm6-mp16-ysu-mm5-noah-grell-freitas-rte-rrtmgp-v1,thompson-aerosol-mp28-myj-eta-noah-rte-rrtmgp-v1,wsm6-sase-revised-mm5-noah-closure-supplied-v1,wsm6-pbl-off-mm5-noah-tke-1-5-order-v1,wsm6-pbl-off-mm5-noah-smagorinsky-3d-v1,wsm6-pbl-off-mm5-noah-constant-k-v1}` | shipped physics suite to emit; taken verbatim from the registry the prepared-forecast runner validates against, so the emitted config passes its guard as written. Read the resolved radiation selectors: a suite with shortwave ON and longwave OFF is a daytime-only experiment; selecting it for a window that includes local night is REFUSED unless you declare it yourself with --ack. NOT every profile runs on every route: --source gem-gdps cannot prepare wsm6-mynn-mynn-ruc-rte-rrtmgp-implemented-unverified-v1 or thompson-mp8-mynn-mynn-ruc-rte-rrtmgp-implemented-unverified-v1 or wsm6-ysu-mm5-ruc-no-radiation-implemented-unverified-v1 or wsm6-mynn-mynn-ruc-no-radiation-implemented-unverified-v1 or thompson-mp8-mynn-mynn-ruc-dudhia-implemented-unverified-v1 or thompson-mp8-mynn-mynn-ruc-monthly-rrtmg-legacy-v1 or thompson-mp8-mynn-mynn-ruc-monthly-solar-rrtmg-legacy-v1 or thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1 -- the wizard refuses those pairings and names the missing component rather than emitting a config the front door would reject. (--source era5, the default source, binds morrison-mp10-ysu-mm5-noah-kf-rte-rrtmgp-v1; a run whose finest grid is under 1 km binds thompson-mp8-mynn-mynn-ruc-rte-rrtmgp-implemented-unverified-v1 instead, on every source whose route admits it; every source has its own computed default and its own admissible set -- `woof run-plan --physics-profiles` prints the whole table) |
 | `--point LAT,LON` | domain center in decimal degrees. \|lat\| 90 is refused. A point carries no extent, so the fit chooses one: the largest layout the budget affords, capped at --point-extent-km per axis, kept clear of the projection pole, where lat-lon source interpolation and static-tile windowing do not work, and kept to less than one trip around the globe in longitude. These caps SHRINK the domain rather than refuse it, and the plan summary states which one bound; the pole refusal is left for a center so close to one that even the smallest layout contains it. Draw a --polygon to ask for more ground than the cap. The projection is auto-selected from \|lat\| (<25 Mercator, 25-60 Lambert conformal, >60 polar stereographic) unless --projection is set. Negative (southern/western) values work in both forms: --point -33.87,151.21 and --point=-33.87,151.21 |
@@ -618,6 +624,72 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 
+## `woof energy deploy`
+
+Takes no options of its own.
+
+## `woof energy deploy render`
+
+| option | what it does |
+|---|---|
+| `--backend {aws-batch,gcp-batch,k8s,slurm}` | aws-batch: compute environment, queue, job definition and array job; gcp-batch: Batch job JSON; k8s: Indexed Job YAML; slurm: sbatch array |
+| `--config DEPLOY.toml` | deployment configuration (TOML or .json); the flags below override its top-level keys |
+| `--geog-url URL` | WPS_GEOG tree the container syncs to local scratch at start (WOOF_GEOG_URL) |
+| `--gpus-per-worker` | GPUs each worker is given (default: the machine's on AWS and GCP; required for k8s and slurm) |
+| `--highres-cache-url URL` | high-resolution static cache synced the same way (WOOF_HIGHRES_CACHE_URL) |
+| `--image IMAGE:TAG` | worker container image, pinned by tag or digest |
+| `--mps` | workers run CUDA MPS for their packed slots (needs --slots-per-gpu above 1 or auto) |
+| `--name` | deployment name (lower-case, 40 characters at most; prefixes every cloud resource) |
+| `--no-mps` | no CUDA MPS (overrides the configuration) |
+| `--on-demand` | run on on-demand / standard capacity |
+| `--output DIR` | directory to write the files and deploy.json (woof-energy.deploy.v1) into |
+| `--output-url URL` | Icechunk output repository passed to every worker as WOOF_ENERGY_OUTPUT_URL |
+| `--parallelism` | workers running at once (default all) |
+| `--queue URL` | job queue the workers drain (s3://, gs:// or file://) |
+| `--slots-per-gpu N\|auto` | jobs each worker packs per GPU (woof energy worker --slots-per-gpu; default 1) |
+| `--spot` | run on spot / preemptible capacity |
+| `--strict` | refuse instead of writing REPLACE_ME_ placeholders for missing account identifiers |
+| `--workers` | number of workers (array size / task count / completions) |
+
+## `woof energy estimate`
+
+| option | what it does |
+|---|---|
+| `--cache-read-mbps MB/S` | one job's read rate from a same-region cache (default 400) |
+| `--chain-m DX,DX,...` | refinement chain in metres, coarsest first, ending at the leaf (default: leaf x 5, then the leaf) |
+| `--chunk-mib` | compressed chunk size for the PUT count (default 8) |
+| `--clusters N` | summary mode: number of clusters (with --footprint-km2) |
+| `--compression-ratio` | stored/raw bytes of the Icechunk store (default 0.35, an assumption) |
+| `--cover-factor` | leaf-cover km2 per km2 of farm footprint (default 2.0) |
+| `--deadline-days` | also report the instances needed to finish in this many days |
+| `--footprint-km2 A` | summary mode: total farm footprint over all clusters, km2 |
+| `--forcing-cache-days DAYS` | days a cycle stays in the cache (default 7) |
+| `--forcing-gb-per-cycle GB` | one cycle's download instead of the measured per-object sizes |
+| `--forcing-objects-per-cycle N` | objects (GET/PUT requests) per cycle |
+| `--forcing-source SOURCE` | boundary source a cycle's download is sized for (default met-office-global) |
+| `--hub-heights` | hub heights a windfarm frame carries (default: the --job's, else 6, the hub diagnostic's default) |
+| `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
+| `--instances` | instances of each offer running at once, for the wall clock (default 1) |
+| `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
+| `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 300); with --partition it must match the clusters' own spacing or is refused |
+| `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
+| `--mps` | with --slots-per-gpu: price CUDA MPS (concurrent kernels lift the occupancy knee); without it only startup/output overlap |
+| `--no-forcing` | leave the forcing section out |
+| `--nz` | leaf model levels (default: the job's, else 49, the hindcast's wind-energy column) |
+| `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
+| `--packing-efficiency` | fraction of paid GPU time a job holds the card at all: parents waited on, staging, batch tails (default 0.85) |
+| `--parent-nz` | parent model levels (default 49) |
+| `--partition PARTITION.json` | partition document with a 'clusters' list |
+| `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
+| `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
+| `--publisher-egress-usd-per-gb USD` | what the publisher charges per GB (default 0: public open data) |
+| `--publisher-mbps MB/S` | one job's download rate from the publisher (default 100) |
+| `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 9: one run per 00/06/12/18 UTC init) |
+| `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
+| `--slots-per-gpu N\|auto` | price N jobs sharing each card, as `woof energy worker --slots-per-gpu` runs them (copies bounded by card memory; auto = up to 8); small domains gain, card-filling ones do not (default 1) |
+| `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame: full (all variables), energy (3-D site-forecast volumes) or windfarm (2-D planes and hub-height planes only); default the --job's leaf output preset, else full |
+
 ## `woof energy extract`
 
 | argument | what it does |
@@ -628,7 +700,10 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 |---|---|
 | `--format {netcdf,zarr,icechunk,csv}` | output format (default netcdf) |
 | `--heights-m` | override the sites document's heights |
-| `--output PATH` | output file or store |
+| `--icechunk-group GROUP` | group inside the repository (region default: forecast) |
+| `--icechunk-mode {replace,region}` | replace: rewrite the repository with this forecast (default); region: write this job's times and sites into a store made by `woof energy icechunk init`, beside concurrent jobs |
+| `--job-id ID` | job identifier recorded in the commit metadata |
+| `--output PATH` | output file or store; --format icechunk also takes s3://, gs://, file:// and memory:// URLs |
 | `--sites SITES.json` | sites document (default: the one the plan names) |
 | `--vars NAME[,NAME]` | forecast.v1 variables to write (default all the runs can supply) |
 
@@ -646,21 +721,295 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--refresh` | revalidate cached Overpass responses |
 | `--timeout-s` | server-side Overpass timeout per tile (default 180) |
 
+## `woof energy hindcast`
+
+Takes no options of its own.
+
+## `woof energy hindcast estimate`
+
+| option | what it does |
+|---|---|
+| `--cache-read-mbps MB/S` | one job's read rate from a same-region cache (default 400) |
+| `--chain-m DX,DX,...` | refinement chain in metres, coarsest first, ending at the leaf (default: leaf x 5, then the leaf) |
+| `--chunk-mib` | compressed chunk size for the PUT count (default 8) |
+| `--clusters N` | summary mode: number of clusters (with --footprint-km2) |
+| `--compression-ratio` | stored/raw bytes of the Icechunk store (default 0.35, an assumption) |
+| `--cover-factor` | leaf-cover km2 per km2 of farm footprint (default 2.0) |
+| `--deadline-days` | also report the instances needed to finish in this many days |
+| `--footprint-km2 A` | summary mode: total farm footprint over all clusters, km2 |
+| `--forcing-cache-days DAYS` | days a cycle stays in the cache (default 7) |
+| `--forcing-gb-per-cycle GB` | one cycle's download instead of the measured per-object sizes |
+| `--forcing-objects-per-cycle N` | objects (GET/PUT requests) per cycle |
+| `--forcing-source SOURCE` | boundary source a cycle's download is sized for (default met-office-global) |
+| `--hub-heights` | hub heights a windfarm frame carries (default: the --job's, else 6, the hub diagnostic's default) |
+| `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
+| `--instances` | instances of each offer running at once, for the wall clock (default 1) |
+| `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
+| `--leaf-dx-m` | leaf spacing for synthesised clusters (default: the job's, else 300); with --partition it must match the clusters' own spacing or is refused |
+| `--market {both,on-demand,spot}` | price on-demand, spot or both (default both) |
+| `--mps` | with --slots-per-gpu: price CUDA MPS (concurrent kernels lift the occupancy knee); without it only startup/output overlap |
+| `--no-forcing` | leave the forcing section out |
+| `--nz` | leaf model levels (default: the job's, else 49, the hindcast's wind-energy column) |
+| `--output ESTIMATE.json` | also write the woof-energy.cost-estimate.v1 JSON here (stdout always carries it) |
+| `--packing-efficiency` | fraction of paid GPU time a job holds the card at all: parents waited on, staging, batch tails (default 0.85) |
+| `--parent-nz` | parent model levels (default 49) |
+| `--partition PARTITION.json` | partition document with a 'clusters' list |
+| `--plan PLAN.json` | woof-energy.plan.v1 (wrf-tiles or wrf-nests) priced as one segment |
+| `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
+| `--publisher-egress-usd-per-gb USD` | what the publisher charges per GB (default 0: public open data) |
+| `--publisher-mbps MB/S` | one job's download rate from the publisher (default 100) |
+| `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 9: one run per 00/06/12/18 UTC init) |
+| `--segments` | segments to run (default: the job's, else enough to store one year: 1460 at the 9 h / 3 h default) |
+| `--slots-per-gpu N\|auto` | price N jobs sharing each card, as `woof energy worker --slots-per-gpu` runs them (copies bounded by card memory; auto = up to 8); small domains gain, card-filling ones do not (default 1) |
+| `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 3) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame: full (all variables), energy (3-D site-forecast volumes) or windfarm (2-D planes and hub-height planes only); default the --job's leaf output preset, else full |
+
+## `woof energy hindcast materialize`
+
+| argument | what it does |
+|---|---|
+| `JOB` | job.json, its directory, or a job id with --dir |
+
+| option | what it does |
+|---|---|
+| `--dir DIR` | hindcast directory a bare job id is in |
+| `--force` | re-plan (earlier plan moved aside) |
+
+## `woof energy hindcast mirror`
+
+| argument | what it does |
+|---|---|
+| `JOB` | job.json, its directory, or a job id with --dir |
+
+| option | what it does |
+|---|---|
+| `--dir DIR` | hindcast directory a bare job id is in |
+| `--fetcher MODULE:CALLABLE` | transport for an inline prefetch (default: woof fetch) |
+| `--no-prefetch` | do not run a missing cache entry's prefetch inline |
+
+## `woof energy hindcast optimize`
+
+| option | what it does |
+|---|---|
+| `--corridor-km` | corridor half-width around each site |
+| `--deadline-days` | wall-clock days the campaign must finish in |
+| `--instance PROVIDER[:INSTANCE]` | offers to rank (repeatable; aws or gcp for a provider's rows; default: every row) |
+| `--keep-hours H[,H]` | kept hours per run, multiples of the 6-hourly cycle (default 6: one run per init) |
+| `--leaf-dx-m DX[,DX]` | leaf spacings, each 100 to 300 m (default 300,250,200) |
+| `--linkage-km` | single-linkage distance for the re-cut |
+| `--max-extent-km` | bisect re-cut clusters wider than this |
+| `--max-instances` | most instances of one offer that can run at once (spot capacity); rows needing more are not ranked |
+| `--max-sites` | bisect re-cut clusters with more sites |
+| `--no-repartition` | price --partition as cut: its spacing only, cards with at least the memory it was sized for |
+| `--nz N[,N]` | level counts; each must give a lean wind-energy column, 49 or more with the preset (default 49,60,70) |
+| `--output OPTIMIZE.json` | also write the woof-energy.cost-optimize.v1 JSON here |
+| `--packing-efficiency` | fraction of paid GPU time doing work (default 0.85) |
+| `--partition PARTITION.json` | partition whose sites and parameters are re-partitioned per card and spacing (or priced as cut with --no-repartition) |
+| `--partition-dir DIR` | keep (and reuse) each re-cut partition here, so the chosen one can be planned |
+| `--period-days` | days of reanalysis to store (default 365) |
+| `--prices PRICES.json` | woof-energy.cloud-prices.v1 table (default: the dated table shipped in woof/data/energy) |
+| `--rank-market {spot,on-demand}` | market ranked on (default spot; the other is reported) |
+| `--sites SITES.json` | sites document, re-partitioned per card memory and leaf spacing |
+| `--spinup-hours H[,H]` | spin-up hours per run (default 3, the hindcast's; e.g. 0,1,2,3 to rank them) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame (default windfarm, the hindcast's default leaf output: 2-D and six hub-height planes only) |
+| `--top` | rows to keep and print (default 10) |
+
+## `woof energy hindcast plan`
+
+| option | what it does |
+|---|---|
+| `--card` | size each domain for this GPU tier |
+| `--cluster-id` | name of the single --sites cluster (default: the sites file's stem) |
+| `--clusters ID[,ID]` | only these partition clusters |
+| `--corridor-km` | corridor half-width (default 2) |
+| `--cycle-hour` | UTC hour runs start from (default 0) |
+| `--dry-run` | print the manifest and an example job; write nothing |
+| `--dx-m` | leaf spacing, 100 to 300 m (default: the cluster's, else 300, the cheapest) |
+| `--end YYYY-MM-DD[THH]` | exclusive bound on segment run starts |
+| `--forcing-cache URL` | fetch each (source, cycle) once into this shared cache (s3://, gs://, file:// or a path) and have every job of the cycle mirror from it: adds prefetch jobs the forecast jobs depend on (docs/energy-hindcast/forcing-cache.md) |
+| `--gridded-url TEMPLATE` | gridded store per cluster leaf |
+| `--leaf-history-interval-s` | leaf history cadence (default 900; finer such as 300 allowed) |
+| `--leaf-output-preset {windfarm,energy,full}` | history preset of every leaf domain (default windfarm: only 2-D wind-farm planes, hub-height wind and scalars at the sites' heights; energy and full keep their 3-D volumes) |
+| `--max-domains` | refuse plans with more high-resolution domains |
+| `--nz` | model levels of the wind-energy column every domain carries (default 49: the smallest with >= 8 layers below 250 m and no layer deeper than 1000 m) |
+| `--outdir DIR` | hindcast directory (manifest, jobs, clusters) |
+| `--output-root URL` | root of the output stores, e.g. s3://bucket/x (default: icechunk/ in the hindcast directory) |
+| `--p-top-pa` | model top the source must reach and the plan must carry (default 5500 Pa, 19.97 km; above 20 km is refused) |
+| `--parent-dx-m` | outer parent spacing (default: the cluster chain's, else the planner's) |
+| `--parent-history-interval-s` | wrf-nests parent cadence (default 3600) |
+| `--partition PARTITION.json` | woof-energy.partition.v1 document: one job chain per cluster |
+| `--resume` | merge into an existing manifest, keeping statuses |
+| `--segment-hours` | run length of every segment (default 9: one forecast per 00/06/12/18 UTC global init, its hours 3-9 stitched into one continuous analysis) |
+| `--sites SITES.json` | sites document planned as one cluster (or the sites a --partition refers to) |
+| `--sites-url TEMPLATE` | site-series store per cluster |
+| `--source` | one source for every segment (default: chosen per segment by the source selector) |
+| `--source-priority SRC[,SRC]` | preference order handed to the selector |
+| `--spinup-hours` | leading hours discarded as spin-up (default 3, refused when another --segment-hours would then keep a window off the 6-hourly cycle); each segment keeps segment - spinup hours |
+| `--start YYYY-MM-DD[THH]` | first segment's day (its run starts at --cycle-hour) |
+| `--topology {wrf-nests,wrf-tiles}` | planner for clusters that do not name one (default wrf-nests) |
+| `--vram-gib` | size each domain for this many GiB |
+
+## `woof energy hindcast prefetch`
+
+| argument | what it does |
+|---|---|
+| `DIR` | hindcast directory |
+
+| option | what it does |
+|---|---|
+| `--cycle YYYY-MM-DDTHH` | only this cycle (repeatable) |
+| `--dry-run` | print each fetch, its cache entry and its measured download size; fetch nothing |
+| `--fetcher MODULE:CALLABLE` | transport called as fetcher(request, out) (default: woof fetch) |
+| `--force` | also run prefetch jobs the manifest calls complete (the cache is checked; nothing complete is fetched again) |
+| `--job ID` | only this prefetch job (repeatable) |
+| `--refetch` | fetch and publish again even when the cache entry is complete |
+| `--source` | only this source (repeatable) |
+
+## `woof energy hindcast run-local`
+
+| argument | what it does |
+|---|---|
+| `JOB` | job.json, its directory, or a job id with --dir |
+
+| option | what it does |
+|---|---|
+| `--dir DIR` | hindcast directory a bare job id is in |
+| `--dry-run` | materialize and print woof energy run's argv |
+| `--fetcher MODULE:CALLABLE` | prefetch transport called as fetcher(request, out) (default: woof fetch) |
+| `--force` | run a job the manifest calls complete |
+| `--no-extract` | skip extracting the kept window at the sites |
+| `--no-forcing-cache` | do not mirror the job's forcing from its cache; the run fetches everything itself |
+| `--resume` | pass --resume to woof energy run |
+| `--writer MODULE:CALLABLE` | callable handed the kept-window forecast and targets (e.g. the Icechunk writer) |
+
+## `woof energy hindcast status`
+
+| argument | what it does |
+|---|---|
+| `DIR` | hindcast directory |
+
+| option | what it does |
+|---|---|
+| `--cluster` | only this cluster |
+| `--jobs` | list every job |
+| `--status {pending,materialized,running,complete,failed}` | list the jobs in this state |
+
+## `woof energy icechunk`
+
+Takes no options of its own.
+
+## `woof energy icechunk init`
+
+| argument | what it does |
+|---|---|
+| `REPO` | s3://bucket/prefix, gs://bucket/prefix, file:///path, memory://name or a local path |
+
+| option | what it does |
+|---|---|
+| `--allow-http` | allow a plain-HTTP S3 endpoint |
+| `--anonymous` | no credentials (public buckets) |
+| `--branch` | branch (default main) |
+| `--end YYYY-MM-DDTHH:MM` | last valid time, UTC (inclusive) |
+| `--endpoint-url URL` | S3-compatible endpoint, e.g. MinIO (default: AWS_ENDPOINT_URL_S3, AWS_ENDPOINT_URL) |
+| `--group` | group inside the repository (default forecast) |
+| `--heights-m` | override the sites document's heights |
+| `--interval` | time step: seconds, or with s/min/h (default 15min) |
+| `--job-id ID` | identifier recorded in the commit metadata |
+| `--region` | S3 region (default: AWS_REGION, AWS_DEFAULT_REGION) |
+| `--site-chunk` | sites per chunk (default 64) |
+| `--sites SITES.json` | woof-energy.sites.v1 document (site order) |
+| `--start YYYY-MM-DDTHH:MM` | first valid time, UTC |
+| `--time-chunk` | steps per time chunk (default one day) |
+| `--vars NAME[,NAME]` | forecast.v1 variables to allocate (default all) |
+| `--zstd-clevel` | Blosc zstd level (default 5) |
+
+## `woof energy icechunk verify`
+
+| argument | what it does |
+|---|---|
+| `REPO` | repository URL or path |
+
+| option | what it does |
+|---|---|
+| `--allow-http` | allow a plain-HTTP S3 endpoint |
+| `--anonymous` | no credentials (public buckets) |
+| `--branch` | branch (default main) |
+| `--endpoint-url URL` | S3-compatible endpoint, e.g. MinIO (default: AWS_ENDPOINT_URL_S3, AWS_ENDPOINT_URL) |
+| `--group` | report only this group |
+| `--no-coverage` | skip reading the written masks |
+| `--region` | S3 region (default: AWS_REGION, AWS_DEFAULT_REGION) |
+
 ## `woof energy import`
 
 | argument | what it does |
 |---|---|
-| `SRC [SRC ...]` | input files (PyPSA-Eur CSV directory or files, REPD CSV, GeoJSON, CSV) |
+| `SRC [SRC ...]` | input files (PyPSA-Eur CSV directory or files, REPD CSV, GeoJSON, CSV, USWTDB CSV/JSON, GEM xlsx/CSV, EMODnet GeoJSON, OSM .osm.pbf) |
 
 | option | what it does |
 |---|---|
-| `--format {pypsa-eur,repd,geojson,csv}` | input format |
+| `--format {pypsa-eur,repd,geojson,csv,uswtdb,gem,emodnet,osm-pbf}` | input format |
 | `--id-col` | CSV identifier column (--format csv) |
 | `--kind {line,minor_line,cable,substation,plant,generator,tower}` | asset kind for every row (--format csv/geojson when the input does not say) |
 | `--lat-col` | CSV latitude column (--format csv) |
 | `--lon-col` | CSV longitude column (--format csv) |
 | `--merge ASSETS.geojson` | existing assets document to merge into (duplicates by source reference and proximity are dropped) |
+| `--osm-index IDX` | pyosmium node-location index for --format osm-pbf (default flex_mem; sparse_file_array,FILE for the planet) |
 | `--output ASSETS.geojson` | where to write the woof-energy.assets.v1 document |
+| `--status` | development statuses to keep (comma list; default operating for uswtdb/gem/emodnet/osm-pbf, no filter for repd; other formats refuse it) |
+
+## `woof energy inventory`
+
+Takes no options of its own.
+
+## `woof energy inventory download`
+
+| option | what it does |
+|---|---|
+| `--dataset {uswtdb,emodnet,gem,osm}` | uswtdb (API JSON) or emodnet (WFS GeoJSON); gem and osm print where to get them |
+| `--output FILE` | where to save the download |
+| `--timeout-s` | network timeout (default 300) |
+
+## `woof energy inventory merge`
+
+| argument | what it does |
+|---|---|
+| `ASSETS.geojson [ASSETS.geojson ...]` | woof-energy.assets.v1 documents to merge |
+
+| option | what it does |
+|---|---|
+| `--capacity-tolerance` | relative capacity difference still agreeing (default 0.25) |
+| `--keep-non-wind` | pass non-wind assets through unmatched instead of dropping them |
+| `--name-floor` | name similarity below which names disagree (default 0.3) |
+| `--name-threshold` | name similarity that counts as agreement (default 0.7) |
+| `--output ASSETS.geojson` | where to write the merged woof-energy.assets.v1 document |
+| `--plant-link-m` | link turbines to a plant this far away when the project names agree (default 10000) |
+| `--plant-link-near-m` | link unnamed turbines to a plant this close (default 2000) |
+| `--plant-match-m` | plants this close match when their names agree (default 5000) |
+| `--plant-near-m` | plants this close match unless name or capacity disagree (default 1000) |
+| `--prefer SRC[,SRC]` | source order for each duplicate cluster's winner (default osm,uswtdb,emodnet,repd,gem) |
+| `--status` | development statuses to keep (comma list; default operating) |
+| `--turbine-coverage` | fraction of plant capacity linked turbines must cover for the plant to be turbine-level (default 0.8) |
+| `--turbine-match-m` | turbines of two sources this close are one (default 50) |
+
+## `woof energy partition`
+
+| argument | what it does |
+|---|---|
+| `SITES.json` | woof-energy.sites.v1 document |
+
+| option | what it does |
+|---|---|
+| `--card` | size for this GPU tier or model (no local probe); default 24gb |
+| `--corridor-km` | half-width of the high-resolution corridor around each site (default 2) |
+| `--hardware-json FILE.json` | size for a selected target hardware snapshot's measured GPU capacity (no local probe) |
+| `--leaf-dx-m` | leaf grid spacing, 100 to 300 m (default 300, the cheapest; finer on request) |
+| `--linkage-km` | single-linkage distance: sites closer than this share a cluster (default 30) |
+| `--max-extent-km` | bisect clusters wider than this (default 250) |
+| `--max-sites` | bisect clusters with more sites than this (default 20000) |
+| `--nz` | leaf vertical levels the tile sizes are estimated at (default: the tile planner's ladder) |
+| `--output PARTITION.json` | where to write the woof-energy.partition.v1 document |
+| `--topology {auto,wrf-tiles,wrf-nests}` | planner every cluster is recommended for (auto: wrf-nests for a single small farm, else wrf-tiles) |
+| `--vram-gib` | size for this many GiB (no local probe) |
 
 ## `woof energy plan`
 
@@ -673,18 +1022,120 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--card` | size each domain for this GPU tier |
 | `--corridor-km` | half-width of the high-resolution corridor around each site (default 2) |
 | `--dx-m` | target grid spacing over the sites (default 100) |
+| `--dzbot M` | lowest layer depth for WRF compute_eta (default 12) |
+| `--dzstretch-s X` | surface stretch factor for WRF compute_eta (default 1.15) |
+| `--dzstretch-u X` | upper stretch factor for WRF compute_eta (default 1.1) |
+| `--eta-levels LIST\|FILE` | explicit full eta levels, 1 -> 0 strictly decreasing (comma list or file); excludes the --dz* controls |
 | `--hex-density {raster,polygons}` | with --hex-experimental-dt: hand the mesh generator a density raster built from the sites (raster, the default) or the planner's corridor polygon rows (polygons) |
 | `--hex-experimental-dt` | EXPERIMENTAL: lift the hex-swath spacing floor (about 819 m) by planning on an unanchored sub-5 s timestep (Courant, clock and radiation checks still apply) and emit the full chain: mesh, statics, vertical, cull, met, init, boundaries and an LES forecast. Every output is labelled experimental-unanchored |
 | `--hex-forcing-wrfout GLOB` | with --hex-experimental-dt: force the hex corridor from this WRF parent run's wrfout files instead of --source |
 | `--hours` | forecast length in hours (default 24) |
 | `--max-domains` | refuse plans with more high-resolution domains |
-| `--nz` | vertical levels (default: the planner's ladder; hex-swath: 55, or 3..80 priced at that column) |
+| `--max-dz M` | deepest layer for WRF compute_eta (default 1000) |
+| `--nz` | vertical levels (default: the planner's ladder; hex-swath: 55, or 3..80 priced at that column; with a wind-energy column flag: 70, the whole column's count) |
 | `--outdir DIR` | directory for plan.json and emitted configs |
+| `--p-top-pa PA` | model top pressure in Pa (default 5500, ~19.97 km); refused above 20 km in the standard atmosphere (below 5475 Pa) or above the source's reach |
 | `--parent-dx-m` | outer parent grid spacing (default: chosen by the planner) |
-| `--source` | initial/boundary condition source (default: the one woof domain emits) |
+| `--source` | initial/boundary condition source (default: the one woof domain emits); auto (wrf-tiles, wrf-nests) picks the first source of --source-priority that covers the sites, holds the --start cycle and reaches --hours, and writes the woof-energy.source-choice.v1 receipt |
+| `--source-priority SRC[,SRC]` | with --source auto: candidate sources, best first (default hrrr-native,hrrr,rap,met-office-global,ecmwf-open-data,gfs,era5) |
 | `--start YYYY-MM-DDTHH` | forecast start, UTC (default: the most recent 00/06/12/18 cycle) |
 | `--topology {wrf-nests,wrf-tiles,hex-swath}` | wrf-nests: sibling nests in one run; wrf-tiles: one parent run plus offline child tiles (no count limit); hex-swath: MPAS corridor mesh |
 | `--vram-gib` | size each domain for this many GiB |
+
+## `woof energy plan-cluster`
+
+| argument | what it does |
+|---|---|
+| `PARTITION.json` | woof-energy.partition.v1 document |
+
+| option | what it does |
+|---|---|
+| `--card` | size for this GPU tier or model (no local probe); default: the card the partition was sized for |
+| `--cluster ID` | cluster_id to plan |
+| `--corridor-km` | corridor half-width (default: the partition's) |
+| `--dry-run` | write the cluster's sites.json and print the planner call without planning |
+| `--dx-m` | leaf grid spacing (default: the cluster's) |
+| `--hardware-json FILE.json` | size for a selected target hardware snapshot's measured GPU capacity (no local probe) |
+| `--hours` | run length in hours (default 24) |
+| `--max-domains` | refuse plans with more high-resolution domains |
+| `--nz` | vertical levels (default: the planner's ladder) |
+| `--outdir DIR` | directory for sites.json, plan.json and emitted configs |
+| `--parent-dx-m` | outer parent grid spacing (default: chosen by the planner) |
+| `--source` | initial/boundary condition source (default: the one woof domain emits) |
+| `--start YYYY-MM-DDTHH` | run start, UTC (default: the planner's) |
+| `--topology {wrf-tiles,wrf-nests}` | planner to use (default: the cluster's recommendation) |
+| `--vram-gib` | size for this many GiB (no local probe) |
+
+## `woof energy power`
+
+| argument | what it does |
+|---|---|
+| `FORECAST.nc` | woof-energy.forecast.v1 netCDF file |
+
+| option | what it does |
+|---|---|
+| `--assets ASSETS.geojson` | the woof-energy.assets.v1 document the sites came from: turbine models, rotors and plant membership (without it every turbine is generic and its own plant) |
+| `--availability` | availability factor in (0, 1] (default 1) |
+| `--electrical-losses` | electrical loss fraction, 0 to 0.5 (default 0.02) |
+| `--gust-shutdown` | also stop turbines when the forecast gust exceeds the gust limit |
+| `--gust-var NAME` | (time, site) gust variable in the forecast file (implies --gust-shutdown; default: the first of wind_speed_of_gust, wind_gust, gust, wind_gust_10m) |
+| `--hub-only` | always use hub-height wind, never the rotor-equivalent wind speed |
+| `--icing-loss FILE.nc[:VAR]` | netCDF with a (time, site) icing loss fraction on the forecast's axes (default variable icing_loss_fraction) |
+| `--library FILE.json` | turbine library replacing the built-in one (woof-energy.turbine-library.v1) |
+| `--matches MATCHES.json` | also write the per-turbine curve matches (woof-energy.turbine-matches.v1) |
+| `--output POWER.nc` | where to write the woof-energy.power.v1 netCDF |
+| `--per-turbine` | also write (time, turbine) power and wind series |
+| `--wake-model {jensen,bastankhah,none}` | wake model for plants with a turbine layout (default jensen) |
+
+## `woof energy queue`
+
+Takes no options of its own.
+
+## `woof energy queue init`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--backoff-base-s` | wait after the first failure, doubling per failure (default 60) |
+| `--backoff-max-s` | backoff ceiling (default 3600) |
+| `--heartbeat-s` | lease renewal interval, at most half of --lease-s (default min(120, lease/4)) |
+| `--lease-s` | lease length; a worker silent this long loses its job (default 900) |
+| `--max-attempts` | charged failures before a job is dead (default 3) |
+
+## `woof energy queue push`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+| `JOB [JOB ...]` | job JSON files, or directories of *.json |
+
+| option | what it does |
+|---|---|
+| `--schema` | job document schema to accept (default woof-energy.hindcast-job.v1) |
+
+## `woof energy queue requeue`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--all-dead` | requeue every dead job |
+| `--job ID` | job id to requeue (repeatable) |
+
+## `woof energy queue status`
+
+| argument | what it does |
+|---|---|
+| `QUEUE_URL` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--jobs` | list every job with its state and lease |
 
 ## `woof energy rating`
 
@@ -697,7 +1148,13 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--conductor` | conductor name from the table, or auto (by line voltage; default) |
 | `--conductor-table FILE.json` | conductor table replacing the built-in one |
 | `--output PRODUCTS.nc` | where to write the products netCDF |
-| `--products` | products to compute (comma list; default dlr,icing,wind-power,pv-power) |
+| `--power-curve NAME` | generic power curve from power_curves.json for wind-power, wind-resource and ramps (generic_iec_class_i, generic_iec_class_ii, generic_iec_class_iii, generic_offshore; default the table's default, class II) |
+| `--products` | products to compute (comma list of dlr,icing,wind-power,pv-power,turbine-icing,wind-resource,ramps; default dlr,icing,wind-power,pv-power,turbine-icing) |
+| `--ramp-threshold FRACTION` | ramps: change, as a fraction of capacity, that makes a ramp (default 0.2) |
+| `--ramp-windows LIST` | ramps: threshold windows, e.g. 15m,1h,4h (default) or 5m:0.1,1h:0.3 with per-window thresholds |
+| `--rotor-diameter-m M` | wind-resource/ramps: rotor diameter for sites without rotor_diameter_m (default: the hub height) |
+| `--sda-tolerance FRACTION` | ramps: swinging-door tolerance, fraction of capacity (default 0.05) |
+| `--ti-window-min MIN` | wind-resource: trailing window of the resolved turbulence intensity (default 10) |
 
 ## `woof energy run`
 
@@ -720,6 +1177,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | option | what it does |
 |---|---|
 | `--heights-m` | heights above ground to sample every site at (comma list; default 10,30,100); turbine hub heights are added |
+| `--hub-height-step-m M` | round the turbine hub heights added to the output heights to this step (default 10; 0 keeps them to 0.1 m); each site keeps its exact hub height |
 | `--include-towers` | add a site at every power=tower node |
 | `--kinds` | asset kinds to keep (comma list; default all) |
 | `--min-voltage-kv` | drop lines and substations below this voltage |
@@ -727,6 +1185,34 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--pv-grid-m` | sample solar farm polygons on a grid of this spacing (default: one site at the centroid) |
 | `--region FILE.geojson` | keep only sites inside this Polygon/MultiPolygon |
 | `--spacing-m` | sample spacing along lines and cables (default 100) |
+
+## `woof energy worker`
+
+| argument | what it does |
+|---|---|
+| `[QUEUE_URL]` | file:///abs/dir, s3://bucket/prefix or gs://bucket/prefix |
+
+| option | what it does |
+|---|---|
+| `--default-job-mem-gib GIB` | price of a job with no resources.gpu_mem_gib (default: the whole card, so it runs alone) |
+| `--exit-when-empty` | exit once every job is done or dead |
+| `--fake-gpus N` | testing: N stand-in GPU identities, no device read (set WOOF_GPU_LOCK_ROOT) |
+| `--gpu-mem-gib GIB` | admission budget per card (default: NVML memory.total; required with --fake-gpus) |
+| `--gpus all\|N\|UUID[,UUID]` | GPUs to run on: all (default), the first N, or UUIDs |
+| `--max-idle-s` | exit after this long with nothing to claim |
+| `--mem-margin-gib GIB` | card memory kept free beside the reservations (default 1, an assumption) |
+| `--mps` | start (or reuse) the CUDA MPS control daemon so packed slots' kernels run concurrently instead of time-slicing; refused when nvidia-cuda-mps-control is missing |
+| `--mps-active-thread-percentage PCT` | CUDA_MPS_ACTIVE_THREAD_PERCENTAGE for every slot (1-100; default unset: MPS shares SMs dynamically) |
+| `--mps-dir DIR` | MPS pipe/ and log/ directories (default: a short directory under the system temp; the entrypoint uses $WOOF_SCRATCH/mps) |
+| `--no-gpu` | CPU slots only (no GPU lock, CUDA_VISIBLE_DEVICES=-1) |
+| `--poll-s` | idle poll interval, jittered (default 30) |
+| `--queue QUEUE_URL` | the queue, as a flag (what the deploy renderers and the container entrypoint write) |
+| `--runner-cmd TEMPLATE` | command run per job; placeholders {python}, {job}, {job_id}, {attempt}, {workdir}, {result}, {gpu_uuid}, {queue} (default: {python} -m woof energy hindcast run-local {job}) |
+| `--slots` | with --no-gpu: CPU slots to run (default 1) |
+| `--slots-per-gpu N\|auto` | concurrent jobs per GPU (default 1: one job per card, as before); auto = min(8, card memory / 3.4 GiB, CPUs per GPU). Above 1 a slot claims only a job whose declared memory fits the card |
+| `--term-grace-s` | SIGTERM to SIGKILL grace for the runner (default 20) |
+| `--timeout-s` | runner wall-clock limit (default 86400) |
+| `--workdir DIR` | local scratch for job files and logs (default: a fresh directory under the system temp) |
 
 ## `woof enprod`
 
@@ -1074,7 +1560,12 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | option | what it does |
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--mem-margin-gib GiB` | card memory kept free beside packed runs' priced peaks (default 1; only with --runs-per-gpu above 1 or auto) |
+| `--mps, --no-mps` | start (or reuse) the CUDA MPS control daemon so packed runs' kernels share the card instead of time-slicing; stopped on exit if started here (overrides the plan's [devices] mps) |
+| `--mps-active-thread-percentage P` | CUDA_MPS_ACTIVE_THREAD_PERCENTAGE for each run (with --mps) |
+| `--mps-dir DIR` | where the MPS pipe and log directories go (with --mps) |
 | `--preflight {estimate,alloc,off}` | override the plan's woof check mode: estimate, alloc, or off |
+| `--runs-per-gpu N\|auto` | let up to N runs (auto: up to 8) share one GPU, each admitted when its priced forecast peak plus the margin fits the card's measured free memory beside its siblings; runs that do not fit wait for a sibling to finish (overrides the plan's [devices] runs_per_gpu; default 1, one run per GPU) |
 | `--summary SUMMARY.json` | summary path relative to the plan (default PLAN.summary.json) |
 
 ## `woof obs`
