@@ -159,6 +159,11 @@ def live_state_history_fields(state) -> dict[str, object]:
         up_heli_max = existing_scratch("up_heli_max")
         if up_heli_max is not None:
             fields["UP_HELI_MAX"] = up_heli_max
+    # Per-history-interval diagnostics attached by the publisher (hub-height
+    # wind: woof/core/hub_wind_diag.py).  Same contract as UP_HELI_MAX: the
+    # post-write window restart is the publisher's, never this builder's.
+    from woof.core import interval_diagnostics
+    fields.update(interval_diagnostics.history_fields(state))
 
     physics = getattr(state, "physics", None)
     if physics is None:
@@ -582,6 +587,12 @@ def history_frame_bytes(cfg, selection=None, *,
     shapes = produced_history_shapes(
         cfg, include_reflectivity=include_reflectivity)
     selection = HistorySelection() if selection is None else selection
+    # The hub-height wind planes are asked for by the selection itself
+    # ([output] hub_heights_m), not by the RunConfig the carriers above
+    # are read from.
+    from woof.core.hub_wind_diag import hub_history_shapes
+    run = _run_config(cfg)
+    shapes.update(hub_history_shapes(selection, run.ny, run.nx))
     names = selection.select(shapes)
     payload = sum(4 * math.prod(shapes[name]) if name != "Times" else 20
                   for name in names)

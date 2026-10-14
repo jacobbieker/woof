@@ -36,7 +36,8 @@ from woof.config import NO_LAND_SURFACE_SOIL_LAYERS, soil_layer_count
 from woof.io.classic_tape import (ClassicDim, ClassicTape, ClassicVariable,
                                    classic_attr_value)
 from woof.io.wrf_output_schema import (
-    HISTORY_FIELDS_BY_NETCDF_NAME, PHYSICS_SELECTOR_GLOBALS,
+    HISTORY_FIELDS_BY_NETCDF_NAME, HUB_HEIGHT_DIMENSION,
+    HUB_HEIGHT_DIMENSIONED_FIELDS, PHYSICS_SELECTOR_GLOBALS,
     REGISTRY_VAR_META, SCHEME_OUTPUT_FIELDS, WRF_FIELD_TYPE_INTEGER,
     WRF_FIELD_TYPE_REAL,
 )
@@ -1216,6 +1217,23 @@ class WrfoutWriter:
                     "snso_layers_stag", snow_layers + self.soil_layers)
                 axis = "snso_layers_stag"
             return ("Time", axis, "south_north", "west_east")
+        if name in HUB_HEIGHT_DIMENSIONED_FIELDS or name == "HUB_HEIGHT":
+            # Hub-height wind (woof/core/hub_wind_diag.py), routed by NAME:
+            # an n_hub equal to nz must not land on bottom_top.  The axis
+            # is created lazily so a run without the diagnostic keeps its
+            # header byte-identical.
+            shape = tuple(shape)
+            n_hub = int(shape[0]) if shape else 0
+            expected = ((n_hub,) if name == "HUB_HEIGHT"
+                        else (n_hub, ny, nx))
+            if shape != expected or n_hub < 1:
+                raise ValueError(
+                    f"hub-height history field {name} has shape {shape}, "
+                    f"which is not {expected} over {(ny, nx)}")
+            self._ensure_dimension(HUB_HEIGHT_DIMENSION, n_hub)
+            if name == "HUB_HEIGHT":
+                return ("Time", HUB_HEIGHT_DIMENSION)
+            return ("Time", HUB_HEIGHT_DIMENSION, "south_north", "west_east")
         if name in _SOIL_LAYER_FIELDS:
             expected = (self.soil_layers, ny, nx)
             if tuple(shape) != expected:
@@ -2349,6 +2367,23 @@ def _carrier_attrs(policy: str, rows) -> dict:
     return attrs
 
 
+def _attach_hub_wind(node, case, selection, grid):
+    """Attach the hub-height wind window a domain's [output] asks for.
+
+    A no-op (``None``) for every selection without ``hub_*`` keys, so a
+    writer set built by a verification case or a test double is untouched.
+    """
+    if getattr(selection, "hub_wind", None) is None:
+        return None
+    from woof.core.hub_wind_diag import attach_hub_wind
+
+    run = node.cfg.run
+    return attach_hub_wind(
+        node.state, selection, nx=run.nx, ny=run.ny, dx=run.dx, dy=run.dy,
+        grid_id=node.cfg.grid_id, latlon=grid.latlon_mass,
+        streamed=getattr(case, "streamed_store", None) is not None)
+
+
 class PerDomainWrfoutWriters:
     """One asynchronous writer/side stream per domain in an experiment."""
 
@@ -2421,6 +2456,8 @@ class PerDomainWrfoutWriters:
         #: what the duplicate-valid-time guard in submit() is scoped to.
         self._published_paths = set()
         self._captured_paths = []
+        #: grid_id -> the hub-wind window this set attached (or None).
+        self._hub_wind_by_grid_id = {}
         self._abort_event = threading.Event()
         self._output_observer = None
         self._simulated_radar = None
@@ -2452,6 +2489,9 @@ class PerDomainWrfoutWriters:
                 grid_id=node.cfg.grid_id,
                 history_selection=self._selection_for(node.cfg),
                 device=_domain_output_device(node.state))
+            self._hub_wind_by_grid_id[int(node.cfg.grid_id)] = \
+                _attach_hub_wind(node, case, self._selection_for(node.cfg),
+                                 node.grid)
         self.last_durable_wrfout = None
         if simulated_radar is not None and simulated_radar.enabled:
             from woof.simulated_radar import LiveSimulatedRadar
@@ -2612,6 +2652,41 @@ class PerDomainWrfoutWriters:
                               else None),
             history_selection=self._selection_for(node.cfg),
             device=_domain_output_device(node.state))
+        self._hub_wind_by_grid_id[grid_id] = _attach_hub_wind(
+            node, case, self._selection_for(node.cfg), grid)
+
+    def _ensure_hub_wind(self, node) -> None:
+        """The domain's hub-wind window is on the state it publishes NOW.
+
+        A domain's ``DomainState`` can be replaced after this writer set
+        attached the window: a delayed-start nest is rebuilt at activation
+        (core/model.py on_domain_start), a descendant at a reground.  A
+        replacement whose old window never folded a step loses nothing, so
+        the window is re-attached to the new state; one that had folded
+        steps would publish a window that silently restarted mid-interval,
+        and is refused by name instead.
+        """
+        selection = self._selection_for(node.cfg)
+        if getattr(selection, "hub_wind", None) is None:
+            return
+        from woof.core import interval_diagnostics
+        from woof.core.hub_wind_diag import DIAGNOSTIC_NAME, HubWindError
+
+        if interval_diagnostics.get(node.state, DIAGNOSTIC_NAME) is not None:
+            return
+        grid_id = int(node.cfg.grid_id)
+        if not hasattr(self, "_hub_wind_by_grid_id"):
+            self._hub_wind_by_grid_id = {}
+        previous = self._hub_wind_by_grid_id.get(grid_id)
+        if previous is not None and previous.window_steps > 0:
+            raise HubWindError(
+                f"d{grid_id:02d}'s model state was replaced after its hub-wind "
+                f"window had folded {previous.window_steps} step(s); the "
+                "window would restart mid-interval and publish statistics "
+                "for less time than the frame claims")
+        case = self.model._prepared_by_grid_id[grid_id]
+        self._hub_wind_by_grid_id[grid_id] = _attach_hub_wind(
+            node, case, selection, node.grid)
 
     def remove_domain(self, grid_id: int) -> None:
         """Drain and close one retired episode without losing its paths."""
@@ -2643,6 +2718,16 @@ class PerDomainWrfoutWriters:
         grid_id = int(grid_id)
         node = self.model.node(grid_id)
         case = self.model._prepared_by_grid_id[grid_id]
+        # Asked of the SELECTION, not of node.state: by the time a mover
+        # calls this the state has already been replaced, and the new one
+        # carries no window to refuse with.
+        if getattr(self._selection_for(node.cfg), "hub_wind", None) is not None:
+            from woof.core.hub_wind_diag import HubWindUnsupportedRoad
+            raise HubWindUnsupportedRoad(
+                f"[output] hub-height wind is configured on d{grid_id:02d}, "
+                "which was relocated: its hub-wind window and site cells "
+                "belong to the footprint it no longer covers.  Remove the "
+                "hub_* keys from this domain's [output], or do not move it.")
         from woof.runtime import _global_wrf_attrs, _metadata_frame
 
         configured_start = getattr(node.cfg, "start_time", None)
@@ -2702,6 +2787,20 @@ class PerDomainWrfoutWriters:
         # PREVIOUS run is not that -- re-running into an existing output
         # directory has always overwritten, and refusing it here would
         # strand every repeat run instead of preventing a defect.
+        # The per-interval windows' refusals, before any bookkeeping says
+        # this frame was published.
+        from woof.core import interval_diagnostics
+        from woof.ensemble.runtime_context import current_capture
+        capture = current_capture()
+        self._ensure_hub_wind(node)
+        if capture is not None:
+            interval_diagnostics.refuse_unsupported_publisher(
+                node.state, "this run captures ensemble members, whose "
+                "frames are assembled without per-interval diagnostics")
+        if getattr(node.state, "_streamed_domain", None) is not None:
+            interval_diagnostics.refuse_unsupported_publisher(
+                node.state, "the domain runs [tiles]-streamed and its frame "
+                "is built from the host store")
         if path in self._published_paths:
             raise RuntimeError(
                 f"refusing to replace history frame {path}, which THIS run "
@@ -2711,8 +2810,6 @@ class PerDomainWrfoutWriters:
                 "frame. (A frame left by a PREVIOUS run at this path is "
                 "replaced as it always has been.)")
         self._published_paths.add(path)
-        from woof.ensemble.runtime_context import current_capture
-        capture = current_capture()
         if capture is not None:
             metadata = self._metadata_by_grid_id[node.cfg.grid_id]
             with self._write_beat(f"ensemble-history-d{int(node.cfg.grid_id):02d}",
@@ -2803,6 +2900,14 @@ class PerDomainWrfoutWriters:
                 refl_field=refl_field,
                 global_attrs=frame_attrs,
                 completed_observer=committed)
+        # The per-interval windows restart HERE, once, for every road that
+        # publishes through this writer set (the tree runner, both prepared
+        # runners): submit's producer-stream wait_event has fenced the D2H
+        # snapshot ahead of any later default-stream write, so restarting
+        # the window cannot race the staged copy.
+        interval_diagnostics.close_interval(
+            node.state, valid_time=valid_time, output_dir=base_dir,
+            grid_id=node.cfg.grid_id)
 
     def drain(self, *, before_domain=None) -> None:
         """Wait for every domain's durable files and output identities.

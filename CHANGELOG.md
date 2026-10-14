@@ -119,6 +119,21 @@ New:
   the Open Energy Platform Wind Turbine Library (ODbL-1.0, (c) Reiner
   Lemoine Institut) and is rebuilt by `tools/build_turbine_library.py`. See
   `docs/energy-hindcast/power.md`.
+- Hub-height wind inside the model. `[output] hub_wind = true` or
+  `hub_heights_m = [...]` writes `WSPD_HUB` and `WDIR_HUB` (wind speed and
+  earth-relative direction at each configured height above ground,
+  default 40 to 200 m) on a new `hub_height` axis. It also writes
+  `WSPD_HUB_MAX`, `WSPD_HUB_MIN` and the time-weighted `WSPD_HUB_MEAN`,
+  computed from every model step since the previous history frame, so a
+  ramp inside a 15-minute file is recorded. `HUB_WINDOW_S` gives how many
+  seconds those statistics cover. `hub_sites` with `hub_sample_interval_s`
+  writes a time × site × height sidecar,
+  `hubwind_d0N_<time>.nc`, for each history frame. The diagnostic
+  changes no model value and is not saved in checkpoints. After a resume
+  the statistics start again from the restart time, and `HUB_WINDOW_S`
+  shows that. Streamed (`[tiles]`) domains, ensemble capture and nest
+  relocation are refused by name. See docs/energy-hindcast/hub-wind.md.
+
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals

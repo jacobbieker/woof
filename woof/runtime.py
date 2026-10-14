@@ -4115,10 +4115,18 @@ def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,
 
     state = prepared.initial_result.state
     streamed = getattr(state, "_streamed_domain", None)
+    from woof.core import interval_diagnostics
     from woof.ensemble.runtime_context import current_capture
     capture = current_capture()
     captured_refl = None
+    if streamed is not None:
+        interval_diagnostics.refuse_unsupported_publisher(
+            state, "the domain runs [tiles]-streamed and its frame is built "
+            "from the host store")
     if capture is not None:
+        interval_diagnostics.refuse_unsupported_publisher(
+            state, "this run captures ensemble members, whose frames are "
+            "assembled without per-interval diagnostics")
         if (expect_refl_10cm
                 and prepared.cfg.mp_physics in REFL_10CM_MICROPHYSICS
                 and state.qv is not None):
@@ -4181,6 +4189,11 @@ def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,
             _retain_identity_handle=True,
             ) as writer:
         writer.write_frame(valid_time.strftime("%Y-%m-%d_%H:%M:%S"), frame)
+    # The frame above is a synchronous host copy, so the per-interval
+    # windows (hub-height wind) restart here, once per published frame.
+    interval_diagnostics.close_interval(
+        state, valid_time=valid_time, output_dir=output_dir,
+        grid_id=domain_id)
     proof = writer.complete_output_identity()
     if capture is not None:
         capture.history_committed(proof, grid_id=domain_id, valid_time=valid_time)
@@ -4592,6 +4605,15 @@ def integrate_prepared_case(
     from woof.ensemble.runtime_context import bind_current_member_state
     bind_current_member_state(prepared_case=prepared, state=state,
                               cfg=integration_cfg, grid=prepared.grid)
+    # The [output] hub-height wind window (woof/core/hub_wind_diag.py), if
+    # this domain asks for one: folded by every dycore step from here on,
+    # restarted by write_case_output.  Refused by name on a streamed road.
+    if getattr(history_selection, "hub_wind", None) is not None:
+        from woof.core.hub_wind_diag import attach_hub_wind
+        attach_hub_wind(
+            state, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
+            dy=cfg.dy, grid_id=domain_id,
+            latlon=prepared.grid.latlon_mass, streamed=streamed)
     if restart_write_steps is not None:
         # THE CHECKPOINT'S QUESTION, ASKED BEFORE STEP 0.  A run that will
         # write checkpoints must be able to NAME its physics setup, and
