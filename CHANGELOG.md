@@ -4,6 +4,36 @@
 
 New:
 
+- `[output] preset = "windfarm"` writes only 2-D planes for a wind-farm
+  reanalysis: the hub-height wind and its interval MAX/MIN/MEAN, new
+  hub-height scalars `T_HUB`, `P_HUB`, `RHO_HUB`, `QV_HUB`, `QC_HUB`,
+  `QR_HUB` and `QNC_HUB` (interpolated by the in-model hub diagnostic on
+  the GPU at each frame, linear in z like the wind; a CPU NumPy
+  reference matches the kernel bit for bit except T/RHO, within 2 ulp),
+  the near-surface state, boundary-layer and surface-flux fields,
+  precipitation accumulators, the gust family and the georeference. It
+  is the one preset without the structural `T`/`PHB` volumes, needs
+  `hub_wind`/`hub_heights_m`, and lists a reason for every field
+  (`woof.io.history_selection.WINDFARM_FIELD_REASONS`). At six hub
+  heights a frame is 99 planes, against about 860 for `energy` and
+  2,700 for `full` on a 60-level leaf. The hub scalars are produced only
+  when a selection names them, so existing `full`/`energy` hub-wind runs
+  write what they did before
+  (docs/energy-forecasts.md#wind-farm-output-without-3-d-volumes-the-windfarm-preset).
+- `woof energy extract` builds `forecast.v1` from the hub planes when the
+  history has no `PH`/`PHB`: winds from `WSPD_HUB`/`WDIR_HUB`,
+  `air_temperature` and `air_density` from `T_HUB`/`RHO_HUB`, humidity
+  and hydrometeors from the hub scalars, at the history's `HUB_HEIGHT`
+  levels (a height it does not carry is refused). The 3-D path is
+  unchanged and wins when both are present.
+- `woof energy hindcast plan --leaf-output-preset windfarm|energy|full`
+  (default `windfarm`, with `hub_heights_m` set to the cluster sites'
+  heights) sets every leaf's `[output]` on `wrf-nests` and `wrf-tiles`,
+  and records it in the job. `woof energy estimate --store-preset
+  windfarm [--hub-heights N]` prices the store from the preset's own
+  field list (the worldwide example: about 72 TB, against 0.63 PB for
+  `energy` and 2.0 PB for `full`).
+
 - `woof energy plan --topology wrf-tiles|wrf-nests --source auto` picks
   the boundary source for the sites and the `--start` cycle from
   `--source-priority` (default

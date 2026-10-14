@@ -113,6 +113,7 @@ def test_parse_utc_accepts_utc_spellings_and_refuses_offsets():
     (dict(end=datetime(2025, 11, 1)), "after --start"),
     (dict(topology="hex-swath"), "hex-swath"),
     (dict(sites_path=None), "--sites"),
+    (dict(leaf_output_preset="severe"), "leaf-output-preset"),
 ])
 def test_requests_that_cannot_be_honoured_are_refused(tmp_path, overrides,
                                                       match):
@@ -388,6 +389,14 @@ def test_materialize_nests_sets_history_begin_on_every_domain(tmp_path):
         assert table["history_begin_s"] == 21600.0
         want = 300.0 if table["grid_id"] in leaves else 3600.0
         assert table["history_interval_s"] == want
+        # The default leaf writes only the wind-farm 2-D planes, at the
+        # cluster sites' heights; a parent keeps the planner's own output.
+        if table["grid_id"] in leaves:
+            assert table["output"] == {
+                "preset": "windfarm",
+                "hub_heights_m": list(load_sites(SITES).heights_m)}
+        else:
+            assert table.get("output", {}).get("preset") != "windfarm"
     assert not list(plan_path.parent.glob("*hindcast-partial*"))
     for domain in plan.domains:
         assert domain.extra["hindcast"]["keep_window"] == [
@@ -423,6 +432,10 @@ def test_materialize_tiles_rebinds_the_leaf_child_config(tmp_path):
     toml_path = plan.resolve(leaf.extra["child_config"])
     child = tomllib.loads(toml_path.read_text())
     assert child["run"]["output_interval_s"] == 300.0
+    assert child["output"] == {
+        "preset": "windfarm",
+        "hub_heights_m": list(load_sites(SITES).heights_m)}
+    assert leaf.extra["history"]["preset"] == "windfarm"
     digest = sha256_file(toml_path)
     args = leaf.extra["downscale_args"]
     assert args[args.index("--child-config-sha256") + 1] == digest
@@ -690,3 +703,49 @@ def test_the_default_is_one_six_hour_forecast_per_global_cycle():
     assert all(s.keep_start == s.run_start for s in segments)
     assert all(a.keep_end == b.keep_start for a, b in zip(segments, segments[1:]))
     assert segments[-1].keep_end == datetime(2025, 11, 2)
+
+
+def test_the_leaf_output_preset_is_recorded_and_binds_the_job(tmp_path):
+    job = json.loads(_first_job(tmp_path / "a").read_text())
+    heights = list(load_sites(SITES).heights_m)
+    assert job["history"]["leaf_output_preset"] == "windfarm"
+    assert job["history"]["leaf_hub_heights_m"] == heights
+    assert hc.leaf_output(job["history"]) == (
+        '{ preset = "windfarm", hub_heights_m = '
+        f'[{", ".join(repr(float(h)) for h in heights)}] }}')
+    energy = json.loads(_first_job(tmp_path / "b",
+                                   leaf_output_preset="energy").read_text())
+    assert energy["history"]["leaf_hub_heights_m"] is None
+    assert hc.leaf_output(energy["history"]) == (
+        '{ preset = "energy", hub_wind = true }')
+    assert energy["identity_sha256"] != job["identity_sha256"]
+    # A job planned before the key existed keeps the full leaves it had.
+    legacy = {k: v for k, v in job["history"].items()
+              if not k.startswith("leaf_output") and k != "leaf_hub_heights_m"}
+    assert hc.leaf_output(legacy) == '{ preset = "full", hub_wind = true }'
+    with pytest.raises(hc.HindcastRefused, match="leaf_hub_heights_m"):
+        hc.leaf_output({"leaf_output_preset": "windfarm"})
+
+
+def test_windfarm_leaves_refuse_heights_the_diagnostic_cannot_carry(tmp_path):
+    from woof.energy.contracts import SiteSet
+
+    site_set = load_sites(SITES)
+    many = SiteSet(sites=site_set.sites,
+                   heights_m=tuple(float(h) for h in range(10, 340, 10)))
+    with pytest.raises(hc.HindcastRefused, match="at most|1 to 32"):
+        hc._leaf_hub_heights("windfarm", many, "c1")
+    assert hc._leaf_hub_heights("energy", many, "c1") is None
+
+
+def test_the_cli_takes_the_leaf_output_preset(tmp_path, capsys):
+    outdir = tmp_path / "hc"
+    args = _parse(["energy", "hindcast", "plan", "--sites", str(SITES),
+                   "--start", "2025-11-01", "--end", "2025-11-02",
+                   "--source", "gfs", "--leaf-output-preset", "full",
+                   "-o", str(outdir)])
+    assert args.func(args) == 0
+    capsys.readouterr()
+    job_path = next((outdir / "jobs").glob("*/job.json"))
+    assert json.loads(job_path.read_text())["history"][
+        "leaf_output_preset"] == "full"

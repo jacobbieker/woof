@@ -47,6 +47,15 @@ Derivations
     * ``T = THETA (PRES / P0) ** (R_d / c_p)`` with WRF's constants from
       :mod:`woof.core.constants`; ``air_density = PRES / (R_d T_v)`` with
       ``T_v = T (1 + 0.608 q)`` and ``q = qv / (1 + qv)``;
+    * a history with no volumes but in-model hub-height planes (the
+      ``windfarm`` preset; :mod:`woof.energy.sample`) supplies ``TEMP`` and
+      ``RHO`` instead of ``THETA``: ``air_temperature`` is ``T_HUB`` and
+      ``air_density`` is ``RHO_HUB`` as the model wrote them -- the same
+      two formulas, applied by the model to theta, pressure and vapour
+      interpolated to the hub height -- and ``relative_humidity`` uses
+      ``T_HUB`` with ``P_HUB`` and ``QV_HUB``; the forecast's heights are
+      then the history's ``HUB_HEIGHT`` levels (a requested height the
+      history does not carry is refused);
     * relative humidity uses vapour pressure ``e = qv p / (eps + qv)``
       (``eps = R_d / R_v``) over Bolton (1980) saturation vapour pressure
       over liquid water, ``e_s = 611.2 exp(17.67 (T - 273.15) / (T -
@@ -97,7 +106,7 @@ from woof.energy.contracts import (
     load_sites,
     sha256_file,
 )
-from woof.energy.sample import PROFILE_VARS, SURFACE_VARS, SampleUnavailable
+from woof.energy.sample import PROFILE_KEYS, SURFACE_VARS, SampleUnavailable
 
 FORMATS = ("netcdf", "zarr", "icechunk", "csv")
 
@@ -124,11 +133,12 @@ REQUIREMENTS: dict[str, tuple[tuple[str, ...], ...]] = {
     "wind_from_direction": (("U", "V"),),
     "line_normal_wind": (("U", "V"),),
     "wind_attack_angle": (("U", "V"),),
-    "air_temperature": (("THETA", "PRES"),),
+    "air_temperature": (("THETA", "PRES"), ("TEMP",)),
     "air_pressure": (("PRES",),),
-    "air_density": (("THETA", "PRES", "QVAPOR"),),
+    "air_density": (("THETA", "PRES", "QVAPOR"), ("RHO",)),
     "specific_humidity": (("QVAPOR",),),
-    "relative_humidity": (("THETA", "PRES", "QVAPOR"),),
+    "relative_humidity": (("THETA", "PRES", "QVAPOR"),
+                          ("TEMP", "PRES", "QVAPOR")),
     "cloud_liquid_mixing_ratio": (("QCLOUD",),),
     "rain_mixing_ratio": (("QRAIN",),),
     "ice_mixing_ratio": (("QICE",),),
@@ -413,7 +423,7 @@ def _keys_needed(choice: Mapping[str, tuple[str, ...]], available: set[str]
     for chosen in choice.values():
         keys.update(chosen)
     keys &= available
-    profile = [k for k in PROFILE_VARS if k in keys]
+    profile = [k for k in PROFILE_KEYS if k in keys]
     surface = [k for k in SURFACE_VARS if k in keys]
     return profile, surface
 
@@ -448,8 +458,16 @@ def derive_domain(result, choice: Mapping[str, tuple[str, ...]], *,
 
     def temperature():
         if "T" not in cache:
-            cache["T"] = air_temperature(need(profile, "THETA"),
-                                         need(profile, "PRES"))
+            if "THETA" in profile:
+                cache["T"] = air_temperature(need(profile, "THETA"),
+                                             need(profile, "PRES"))
+            else:
+                # Hub-plane history: the model's own T_HUB.
+                cache["T"] = need(profile, "TEMP")
+                notes("air_temperature", "T_HUB, the in-model hub-height "
+                      "temperature: theta and pressure interpolated linear "
+                      "in z to the hub height, then THETA (PRES / 1e5) ** "
+                      "(R_d / c_p)")
         return cache["T"]
 
     def cosz():
@@ -489,8 +507,14 @@ def derive_domain(result, choice: Mapping[str, tuple[str, ...]], *,
         elif name == "air_pressure":
             out[name] = need(profile, "PRES")
         elif name == "air_density":
-            out[name] = air_density(need(profile, "PRES"), temperature(),
-                                    need(profile, "QVAPOR"))
+            if keys == ("RHO",):
+                out[name] = need(profile, "RHO")
+                notes(name, "RHO_HUB, the in-model hub-height density: the "
+                      "same formula applied to the interpolated pressure, "
+                      "temperature and vapour")
+            else:
+                out[name] = air_density(need(profile, "PRES"), temperature(),
+                                        need(profile, "QVAPOR"))
         elif name == "specific_humidity":
             out[name] = specific_humidity(need(profile, "QVAPOR"))
         elif name == "relative_humidity":

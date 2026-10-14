@@ -56,7 +56,21 @@ the offline tiles read a legacy ``[run]`` table with no history window,
 so their spin-up frames are written and the kept window is applied at
 extraction (and handed to the writer).  A leaf tile's ``output_interval_s``
 is patched to the leaf interval and its ``--child-config-sha256`` binding
-recomputed.  Every interval must divide the kept window.  Patched files
+recomputed.
+
+**What a leaf writes.**  ``--leaf-output-preset`` (default
+:data:`DEFAULT_LEAF_OUTPUT_PRESET`, ``windfarm``) is the ``[output]`` of
+every leaf (a ``wrf-nests`` leaf's ``output = {...}``, a ``wrf-tiles``
+leaf tile's ``[output]`` table): ``windfarm`` writes only 2-D planes --
+the hub-height wind and scalars, the near-surface state and the gust
+family (``woof.io.history_selection.WINDFARM_FIELD_REASONS``) -- with
+``hub_heights_m`` set to the cluster sites document's ``heights_m``, so
+``woof energy extract`` reads the forecast heights straight off the hub
+planes; ``energy`` and ``full`` keep their 3-D volumes plus
+``hub_wind = true`` (the default six heights).  The preset and the hub
+heights are recorded in the job's ``history`` and bind its identity.  A
+job document written before this key existed carries no preset and
+keeps the ``full`` leaves it was planned with.  Every interval must divide the kept window.  Patched files
 are re-read through the door's own loader before they replace the
 planner's.
 
@@ -154,6 +168,13 @@ DEFAULT_P_TOP_PA = 5500.0
 DEFAULT_FALLBACK_PRIORITY = ("met-office-global", "gfs")
 #: Output roots without a URL scheme are relative to the hindcast dir.
 DEFAULT_OUTPUT_ROOT = "icechunk"
+#: What a leaf domain writes (``--leaf-output-preset``): the wind-farm 2-D
+#: set by default; ``energy``/``full`` keep their 3-D volumes.
+LEAF_OUTPUT_PRESETS = ("windfarm", "energy", "full")
+DEFAULT_LEAF_OUTPUT_PRESET = "windfarm"
+#: The preset a job document without ``history.leaf_output_preset`` was
+#: planned with (every job before the key existed).
+LEGACY_LEAF_OUTPUT_PRESET = "full"
 #: One gridded store per cluster leaf for the whole hindcast; each job
 #: writes its kept window into it.
 DEFAULT_GRIDDED_TEMPLATE = "{root}/gridded/{cluster_id}/{leaf}.icechunk"
@@ -237,6 +258,7 @@ class HindcastRequest:
     source_priority: tuple[str, ...] | None = None
     leaf_history_interval_s: float = DEFAULT_LEAF_HISTORY_INTERVAL_S
     parent_history_interval_s: float | None = None
+    leaf_output_preset: str = DEFAULT_LEAF_OUTPUT_PRESET
     output_root: str = DEFAULT_OUTPUT_ROOT
     gridded_template: str = DEFAULT_GRIDDED_TEMPLATE
     sites_template: str = DEFAULT_SITES_TEMPLATE
@@ -308,6 +330,10 @@ class HindcastRequest:
                 "--parent-history-interval-s with --topology wrf-tiles: the "
                 "parent's history is the tiles' boundary forcing, written at "
                 "the planner's cadence from t = 0; it is not a hindcast knob")
+        if self.leaf_output_preset not in LEAF_OUTPUT_PRESETS:
+            raise HindcastRefused(
+                f"--leaf-output-preset {self.leaf_output_preset!r} is not one "
+                f"of {', '.join(LEAF_OUTPUT_PRESETS)}")
         if not math.isfinite(float(self.p_top_pa)) or self.p_top_pa <= 0:
             raise HindcastRefused("--p-top-pa must be positive pascals")
         self.p_top_pa = float(self.p_top_pa)
@@ -818,6 +844,8 @@ def _build_jobs(request: HindcastRequest, clusters: list[Cluster],
         files[cluster_sites_rel] = data
         region = (cluster.region if cluster.region is not None
                   else _bbox_region(subset.sites))
+        leaf_hub_heights = _leaf_hub_heights(request.leaf_output_preset,
+                                             subset, cluster.cluster_id)
         previous: str | None = None
         changes = []
         for segment in segments:
@@ -857,6 +885,8 @@ def _build_jobs(request: HindcastRequest, clusters: list[Cluster],
                 "history_begin_s": float(request.spinup_hours * 3600),
                 "leaf_interval_s": request.leaf_history_interval_s,
                 "parent_interval_s": parent_interval,
+                "leaf_output_preset": request.leaf_output_preset,
+                "leaf_hub_heights_m": leaf_hub_heights,
                 "applies": (
                     "history_begin_s on every [[domain]]" if topology ==
                     "wrf-nests" else
@@ -1331,10 +1361,59 @@ class _TomlLiteral(str):
     """A value :func:`patch_domain_tables` writes verbatim (an inline table)."""
 
 
-#: What the leaves of a segment write: every history field (the hindcast's
-#: "all variables"), plus the in-model hub-height wind and its interval
-#: MAX/MIN/MEAN.  Parents keep the planner's own light preset.
-LEAF_OUTPUT = _TomlLiteral('{ preset = "full", hub_wind = true }')
+def _leaf_hub_heights(preset: str, site_set: SiteSet, cluster_id: str
+                      ) -> list[float] | None:
+    """The hub heights a ``windfarm`` leaf computes: the cluster's site
+    heights, so the forecast ``woof energy extract`` builds from the hub
+    planes lands on the heights the site store was made with.  ``None``
+    for a preset that keeps its volumes (those leaves take hub_wind's
+    defaults).  Refused, never trimmed, outside the diagnostic's limits."""
+
+    if preset != "windfarm":
+        return None
+    from woof.io.history_selection import MAX_HUB_HEIGHT_M, MAX_HUB_HEIGHTS
+
+    heights = sorted({float(h) for h in site_set.heights_m})
+    bad = [h for h in heights if not 0.0 < h <= MAX_HUB_HEIGHT_M]
+    if not heights or bad or len(heights) > MAX_HUB_HEIGHTS:
+        raise HindcastRefused(
+            f"cluster {cluster_id}: --leaf-output-preset windfarm computes "
+            f"the hub-height planes at the sites document's heights_m "
+            f"{heights}, which must be 1 to {MAX_HUB_HEIGHTS} heights in "
+            f"(0, {MAX_HUB_HEIGHT_M:g}] m; rebuild the sites with a coarser "
+            "hub_height_step_m, or use --leaf-output-preset energy")
+    return heights
+
+
+def _leaf_output_items(history: Mapping[str, Any]) -> list[str]:
+    """``key = value`` items of a leaf's ``[output]``, from the job's
+    recorded ``history`` (module docstring, *What a leaf writes*)."""
+
+    preset = history.get("leaf_output_preset", LEGACY_LEAF_OUTPUT_PRESET)
+    if preset not in LEAF_OUTPUT_PRESETS:
+        raise HindcastRefused(f"the job records leaf_output_preset "
+                              f"{preset!r}, not one of "
+                              f"{', '.join(LEAF_OUTPUT_PRESETS)}")
+    if preset != "windfarm":
+        return [f'preset = "{preset}"', "hub_wind = true"]
+    heights = history.get("leaf_hub_heights_m")
+    if not heights:
+        raise HindcastRefused("the job's windfarm leaves record no "
+                              "leaf_hub_heights_m; plan it again")
+    listed = ", ".join(f"{float(h)!r}" for h in heights)
+    return ['preset = "windfarm"', f"hub_heights_m = [{listed}]"]
+
+
+def leaf_output(history: Mapping[str, Any]) -> _TomlLiteral:
+    """The ``output = {...}`` inline table a ``wrf-nests`` leaf gets."""
+
+    return _TomlLiteral("{ " + ", ".join(_leaf_output_items(history)) + " }")
+
+
+def _leaf_output_table(history: Mapping[str, Any]) -> list[str]:
+    """The same selection as a ``wrf-tiles`` leaf's ``[output]`` table."""
+
+    return ["[output]", *_leaf_output_items(history)]
 
 
 def patch_domain_tables(text: str, settings: Mapping[int, Mapping[str, Any]]
@@ -1417,7 +1496,7 @@ def _apply_nests_history(plan: Plan, job: Mapping[str, Any]) -> list[str]:
             if begin:
                 values["history_begin_s"] = begin
             if domain.role == "child" and domain.domain_id not in parents:
-                values["output"] = LEAF_OUTPUT
+                values["output"] = leaf_output(history)
             settings[int(domain.grid_id)] = values
         path = plan.resolve(config)
         text = patch_domain_tables(path.read_text(encoding="utf-8"),
@@ -1451,8 +1530,9 @@ def _apply_nests_history(plan: Plan, job: Mapping[str, Any]) -> list[str]:
         _replace_atomically_after(path, text, check)
         notes.append(f"{config}: history_begin_s = {begin:g} on every "
                      f"domain, leaves every {leaf_s:g} s, parents every "
-                     f"{parent_s:g} s, leaves the full preset with hub_wind, "
-                     "nwp_diagnostics = 1 (woof energy hindcast)")
+                     f"{parent_s:g} s, leaves output = "
+                     f"{leaf_output(history)}, nwp_diagnostics = 1 "
+                     "(woof energy hindcast)")
     return notes
 
 
@@ -1560,11 +1640,33 @@ def _enable_wind_diagnostics(text: str) -> str:
     return "\n".join(lines)
 
 
+def _set_output_table(text: str, lines: Sequence[str]) -> str:
+    """Replace the ``[output]`` table of a child config with ``lines`` (or
+    append it): the leaf tile's whole selection, never merged key by key."""
+
+    rows = text.split("\n")
+    start = next((i for i, line in enumerate(rows)
+                  if re.match(r"^\s*\[\s*output\s*\]\s*(#.*)?$", line)), None)
+    if start is None:
+        while rows and rows[-1] == "":
+            rows.pop()
+        return "\n".join(rows + ["", *lines, ""])
+    end = next((i for i in range(start + 1, len(rows))
+                if _TABLE_HEADER.match(rows[i])), len(rows))
+    tail = rows[end:]
+    return "\n".join(rows[:start] + list(lines) + ([""] + tail if tail else [""]))
+
+
 def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
                          ) -> tuple[Plan, list[str]]:
+    from woof.config import load_history_selection
     from woof.offline_child import resolve_child_run_config
 
     leaf_s = float(job["history"]["leaf_interval_s"])
+    recorded = "leaf_output_preset" in job["history"]
+    output_lines = _leaf_output_table(job["history"]) if recorded else []
+    want_preset = job["history"].get("leaf_output_preset",
+                                     LEGACY_LEAF_OUTPUT_PRESET)
     notes = []
     domains = []
     for domain in plan.domains:
@@ -1578,15 +1680,17 @@ def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
             raise HindcastRefused(f"{domain.domain_id} carries no "
                                   "child_config / child_config_sha256")
         path = plan.resolve(relative)
-        cfg_now = resolve_child_run_config(path)
-        if (math.isclose(float(cfg_now.output_interval_s), leaf_s)
-                and int(getattr(cfg_now, "nwp_diagnostics", 0)) == 1):
-            domains.append(domain)
-            continue
-        text = _set_run_key(path.read_text(encoding="utf-8"),
-                            "output_interval_s", leaf_s)
+        original = path.read_text(encoding="utf-8")
+        text = _set_run_key(original, "output_interval_s", leaf_s)
         # The tiles' interval wind maxima and UPP gust (wind_gust_diag).
         text = _ensure_run_key(text, "nwp_diagnostics", 1)
+        # The leaf's [output]: the job's preset with its hub-height planes.
+        # A job planned before the key existed keeps the planner's table.
+        if recorded:
+            text = _set_output_table(text, output_lines)
+        if text == original:
+            domains.append(domain)
+            continue
 
         def check(candidate: Path) -> None:
             try:
@@ -1602,12 +1706,25 @@ def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
             if int(getattr(cfg, "nwp_diagnostics", 0)) != 1:
                 raise HindcastRefused(f"{relative}: nwp_diagnostics = 1 did "
                                       "not read back as written")
+            try:
+                selection = load_history_selection(candidate)
+            except ValueError as error:
+                raise HindcastRefused(
+                    f"the leaf [output] makes {relative} invalid for woof "
+                    f"downscale: {error}") from error
+            if recorded and (selection.preset != want_preset
+                             or selection.hub_wind is None):
+                raise HindcastRefused(
+                    f"{relative}: [output] preset = {want_preset!r} with the "
+                    "hub-height diagnostic did not read back as written")
 
         _replace_atomically_after(path, text, check)
         new_sha = sha256_file(path)
         extra = _replace_strings(extra, old_sha, new_sha)
         history = dict(extra.get("history") or {})
         history["interval_s"] = leaf_s
+        if recorded:
+            history["preset"] = want_preset
         extra["history"] = history
         spec = plan.resolve(domain.config) if domain.config else None
         if spec is not None and spec.suffix == ".json" and spec.is_file():
@@ -1615,10 +1732,14 @@ def _apply_tiles_history(plan: Plan, job: Mapping[str, Any]
                                         old_sha, new_sha)
             if isinstance(document.get("history"), dict):
                 document["history"]["interval_s"] = leaf_s
+                if recorded:
+                    document["history"]["preset"] = want_preset
             _write_json(spec, document)
         domains.append(dataclasses.replace(domain, extra=extra))
         notes.append(f"{relative}: output_interval_s = {leaf_s:g}, "
-                     "nwp_diagnostics = 1 "
+                     "nwp_diagnostics = 1"
+                     + ("; " + " ".join(output_lines) if recorded else "")
+                     + " "
                      f"(woof energy hindcast); --child-config-sha256 "
                      f"rebound {old_sha[:12]}... -> {new_sha[:12]}...")
     plan.domains = domains
@@ -2093,6 +2214,8 @@ def _request_from_args(args) -> HindcastRequest:
         source=args.source, source_priority=args.source_priority,
         leaf_history_interval_s=args.leaf_history_interval_s,
         parent_history_interval_s=args.parent_history_interval_s,
+        leaf_output_preset=getattr(args, "leaf_output_preset",
+                                   DEFAULT_LEAF_OUTPUT_PRESET),
         output_root=args.output_root, gridded_template=args.gridded_url,
         sites_template=args.sites_url)
 

@@ -153,7 +153,8 @@ def test_select_preserves_the_produced_order():
 # -------------------------------------------------------------------- presets
 
 def test_named_presets_are_reachable_and_full_is_the_default():
-    assert set(hs.HISTORY_PRESETS) == {"full", "minimal", "severe", "energy"}
+    assert set(hs.HISTORY_PRESETS) == {"full", "minimal", "severe", "energy",
+                                       "windfarm"}
     assert hs.HistorySelection.from_mapping({}).preset == "full"
 
 
@@ -179,9 +180,17 @@ def test_theta_is_structural_because_the_file_will_not_open_without_it():
 
 def test_every_preset_keeps_the_structural_set():
     for name in hs.HISTORY_PRESETS:
-        selection = hs.HistorySelection.from_mapping({"preset": name})
+        table = {"preset": name}
+        if name == "windfarm":
+            table["hub_wind"] = True
+        selection = hs.HistorySelection.from_mapping(table)
         produced = tuple(sorted(hs.HISTORY_VOCABULARY))
-        assert hs.STRUCTURAL_FIELDS <= set(selection.select(produced)), name
+        exempt = hs.PRESET_STRUCTURAL_EXEMPT.get(name, frozenset())
+        kept = set(selection.select(produced))
+        assert hs.STRUCTURAL_FIELDS - exempt <= kept, name
+        assert not exempt & kept, name
+    # Only windfarm is exempt, and only from the two volumes.
+    assert hs.PRESET_STRUCTURAL_EXEMPT == {"windfarm": frozenset({"T", "PHB"})}
 
 
 def test_severe_keeps_the_storm_volumes_minimal_drops():

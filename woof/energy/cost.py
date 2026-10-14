@@ -63,10 +63,13 @@ cost carries ``spot_rework_fraction`` extra time.  The low/high band
 scales throughput by :data:`THROUGHPUT_BAND`.
 
 Storage: leaf tiles' stored hours (segment hours minus spin-up) at the
-history cadence, ``--store-preset`` fields on every model level, times
-``--compression-ratio`` for an Icechunk/Zarr store (zstd + shuffle on
-float32 fields; an assumption), priced per GB-month, per PUT (one per
-``--chunk-mib`` chunk) and per GB of one full download.
+history cadence, ``--store-preset`` fields (``full``/``energy``: 3-D
+fields on every model level plus 2-D fields; ``windfarm``: the preset's
+own field list, :func:`store_layout` -- 2-D planes, the hub-height
+planes times ``--hub-heights``, and the few 1-D/scalar rows -- with no
+volume at all), times ``--compression-ratio`` for an Icechunk/Zarr store
+(zstd + shuffle on float32 fields; an assumption), priced per GB-month,
+per PUT (one per ``--chunk-mib`` chunk) and per GB of one full download.
 
 Prices come from ``woof/data/energy/cloud_prices.json`` (``--prices`` for
 another copy) and are never fetched; a table older than its
@@ -223,6 +226,23 @@ STORE_PRESETS: Mapping[str, tuple[int, int]] = {
     "energy": (14, 18),
     "full": (45, 37),
 }
+#: Every ``--store-preset``: the two counted above, and ``windfarm``, whose
+#: bytes are derived from woof.io.history_selection's own field table.
+STORE_PRESET_NAMES = ("full", "energy", "windfarm")
+
+#: Hub heights a ``windfarm`` frame is priced at when neither the flag nor
+#: the job says: the hub diagnostic's default (DEFAULT_HUB_HEIGHTS_M).
+DEFAULT_STORE_HUB_HEIGHTS = 6
+
+#: ``windfarm`` members that are not one (south_north, west_east) plane per
+#: frame: the time string (19 bytes, padded to 20 as the disk planner
+#: does), the eta columns (nz and nz + 1 values), the scalars and the hub
+#: coordinate (n_hub values).  Every other member is a 2-D plane, or n_hub
+#: planes when it is on the hub_height axis.
+_WINDFARM_NON_PLANES = {"Times": "time string", "ZNU": "column",
+                        "ZNW": "column", "P_TOP": "scalar",
+                        "XTIME": "scalar", "ITIMESTEP": "scalar",
+                        "HUB_WINDOW_S": "scalar", "HUB_HEIGHT": "hub column"}
 
 #: Default lossless compression ratio (stored/raw) of an Icechunk/Zarr
 #: store of float32 model fields with zstd + byte shuffle.  An assumption:
@@ -298,14 +318,66 @@ class DomainWork:
                 "count": self.count, "peak_gib": self.peak_gib}
 
 
-def _stored_fields(preset: str, nz: int) -> int:
-    three_d, two_d = STORE_PRESETS[preset]
-    return three_d * nz + two_d
+def store_layout(preset: str, nz: int,
+                 hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS) -> dict[str, Any]:
+    """What one stored frame of ``preset`` holds, per horizontal column.
+
+    ``planes`` is the float32 planes per frame (bytes per column = 4 x
+    planes); ``extra_bytes`` the per-frame bytes that do not scale with the
+    grid.  ``full``/``energy`` are :data:`STORE_PRESETS` counts.
+    ``windfarm`` is counted field by field from
+    :data:`woof.io.history_selection.WINDFARM_FIELD_REASONS` (the preset
+    itself, so a new row there is priced here) and is an UPPER bound: a
+    member the run does not produce (``QNC_HUB`` without a droplet number,
+    ``SNOWNC`` without ice) is counted anyway.
+    """
+
+    if preset not in STORE_PRESET_NAMES:
+        raise CostRefusal(f"--store-preset {preset!r} is not one of "
+                          f"{', '.join(STORE_PRESET_NAMES)}")
+    if preset != "windfarm":
+        three_d, two_d = STORE_PRESETS[preset]
+        return {"preset": preset, "three_d": three_d, "two_d": two_d,
+                "planes": three_d * nz + two_d, "extra_bytes": 0}
+    from woof.io.history_selection import WINDFARM_FIELD_REASONS
+    from woof.io.wrf_output_schema import HUB_HEIGHT_DIMENSIONED_FIELDS
+
+    if hub_heights < 1:
+        raise CostRefusal("--hub-heights must be at least 1")
+    two_d, hub, extra = [], [], 0
+    for name in WINDFARM_FIELD_REASONS:
+        kind = _WINDFARM_NON_PLANES.get(name)
+        if name in HUB_HEIGHT_DIMENSIONED_FIELDS:
+            hub.append(name)
+        elif kind is None:
+            two_d.append(name)
+        elif kind == "time string":
+            extra += 20
+        elif kind == "column":
+            extra += 4 * (nz + (1 if name == "ZNW" else 0))
+        elif kind == "hub column":
+            extra += 4 * hub_heights
+        else:
+            extra += 4
+    return {"preset": preset, "three_d": 0, "two_d": len(two_d),
+            "hub_planes": len(hub), "hub_heights": hub_heights,
+            "planes": len(two_d) + len(hub) * hub_heights,
+            "extra_bytes": extra,
+            "fields": {"two_d": two_d, "hub_height": hub,
+                       "other": [n for n in WINDFARM_FIELD_REASONS
+                                 if n in _WINDFARM_NON_PLANES]}}
+
+
+def _frame_bytes(preset: str, nx: int, ny: int, nz: int,
+                 hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS) -> int:
+    layout = store_layout(preset, nz, hub_heights)
+    return layout["planes"] * nx * ny * 4 + layout["extra_bytes"]
 
 
 def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
-                   factor: float = 1.0,
-                   leaf_preset: str = "full") -> dict[str, float]:
+                   factor: float = 1.0, leaf_preset: str = "full",
+                   hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS
+                   ) -> dict[str, float]:
     """GPU seconds for one copy of ``domain`` on ``card``, by component.
 
     ``factor`` scales throughput (the band); overheads are not scaled.
@@ -321,7 +393,8 @@ def domain_seconds(domain: DomainWork, card: CardRow, k: float, *,
     compute = steps * cells * acoustic / throughput
     preset = leaf_preset if domain.role == "leaf" else "full"
     frames = int(domain.run_seconds // domain.history_s) + 1
-    frame_bytes = _stored_fields(preset, domain.nz) * domain.nx * domain.ny * 4
+    frame_bytes = _frame_bytes(preset, domain.nx, domain.ny, domain.nz,
+                               hub_heights)
     output = frames * frame_bytes / (D2H_GBPS * 1e9)
     restarts = (int(domain.run_seconds // domain.restart_s)
                 if domain.restart_s else 0)
@@ -691,8 +764,13 @@ def read_job(path: str | Path) -> dict[str, Any]:
                           "number") from error
     if count is not None and count < 1:
         raise CostRefusal(f"job {path} lists no segments to price")
+    history = document.get("history") if isinstance(
+        document.get("history"), Mapping) else {}
+    heights = history.get("leaf_hub_heights_m")
     return {
         "cluster": document.get("cluster") or document.get("cluster_id"),
+        "leaf_output_preset": history.get("leaf_output_preset"),
+        "hub_heights": len(heights) if isinstance(heights, list) else None,
         "segments": count,
         "segment_hours": document.get("segment_hours"),
         "spinup_hours": document.get("spinup_hours", document.get("spin_up_hours")),
@@ -764,7 +842,8 @@ class Campaign:
 
 
 def _sum_seconds(domains: Sequence[DomainWork], card: CardRow, k: float,
-                 factor: float, leaf_preset: str = "full"
+                 factor: float, leaf_preset: str = "full",
+                 hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS
                  ) -> tuple[dict[str, float], float]:
     """Totals by component over ``domains`` (counts applied) and the
     critical path: the costliest copy at each chain level, summed."""
@@ -774,7 +853,7 @@ def _sum_seconds(domains: Sequence[DomainWork], card: CardRow, k: float,
     by_level: dict[int, float] = {}
     for domain in domains:
         one = domain_seconds(domain, card, k, factor=factor,
-                             leaf_preset=leaf_preset)
+                             leaf_preset=leaf_preset, hub_heights=hub_heights)
         for key in totals:
             totals[key] += one[key] * domain.count
         by_level[domain.level] = max(by_level.get(domain.level, 0.0),
@@ -783,7 +862,8 @@ def _sum_seconds(domains: Sequence[DomainWork], card: CardRow, k: float,
 
 
 def _storage(leaf_rows: Sequence[DomainWork], campaign: Campaign, *,
-             preset: str, ratio: float, chunk_mib: float) -> dict[str, Any]:
+             preset: str, ratio: float, chunk_mib: float,
+             hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS) -> dict[str, Any]:
     frames_per_segment = (campaign.stored_hours * 3600.0
                           / (leaf_rows[0].history_s if leaf_rows else DEFAULT_HISTORY_S))
     raw = 0.0
@@ -792,21 +872,34 @@ def _storage(leaf_rows: Sequence[DomainWork], campaign: Campaign, *,
         interior = max(1, row.nx - 2 * TILE_RIM_CELLS) * \
             max(1, row.ny - 2 * TILE_RIM_CELLS)
         columns += interior * row.count
-        raw += _stored_fields(preset, row.nz) * interior * 4 * row.count
+        layout = store_layout(preset, row.nz, hub_heights)
+        raw += (layout["planes"] * interior * 4
+                + layout["extra_bytes"]) * row.count
     raw_total = raw * frames_per_segment * campaign.segments
     stored = raw_total * ratio
+    layout = store_layout(preset, leaf_rows[0].nz if leaf_rows else 60,
+                          hub_heights)
+    per_frame = {"three_d": layout["three_d"], "two_d": layout["two_d"]}
+    if preset == "windfarm":
+        per_frame.update(hub_planes=layout["hub_planes"],
+                         hub_heights=layout["hub_heights"],
+                         planes=layout["planes"], fields=layout["fields"])
     return {
-        "preset": preset, "fields_per_frame": dict(zip(
-            ("three_d", "two_d"), STORE_PRESETS[preset])),
+        "preset": preset, "fields_per_frame": per_frame,
         "leaf_columns_stored": columns,
         "frames_per_segment": round(frames_per_segment, 3),
         "raw_bytes": int(raw_total), "compression_ratio": ratio,
         "stored_bytes": int(stored), "stored_tb": round(stored / 1e12, 3),
         "chunk_mib": chunk_mib,
         "put_requests": int(math.ceil(stored / (chunk_mib * 1024 ** 2))),
-        "basis": "leaf tile interiors (rim excluded), stored hours only "
-                 "(segment minus spin-up), every model level, float32 before "
-                 "compression; the ratio is an assumption",
+        "basis": ("leaf tile interiors (rim excluded), stored hours only "
+                  "(segment minus spin-up), "
+                  + ("the windfarm preset's 2-D and hub-height planes "
+                     "(woof.io.history_selection.WINDFARM_FIELD_REASONS, "
+                     "every member counted), no 3-D field"
+                     if preset == "windfarm" else "every model level")
+                  + ", float32 before compression; the ratio is an "
+                    "assumption"),
     }
 
 
@@ -817,6 +910,7 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
              clusters: Sequence[ClusterSpec] | None = None,
              leaf_nz: int = 60, parent_nz: int = DEFAULT_PARENT_NZ,
              store_preset: str = "full",
+             hub_heights: int = DEFAULT_STORE_HUB_HEIGHTS,
              compression_ratio: float = DEFAULT_COMPRESSION_RATIO,
              chunk_mib: float = 8.0,
              packing_efficiency: float = DEFAULT_PACKING_EFFICIENCY,
@@ -830,6 +924,7 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
         raise CostRefusal("--packing-efficiency must be in (0, 1]")
     if not 0 < compression_ratio <= 1.5:
         raise CostRefusal("--compression-ratio must be in (0, 1.5]")
+    store_layout(store_preset, leaf_nz, hub_heights)      # refuse up front
     cal = calibration()
     k = cal["k_cell_steps_per_s_per_gbs"]
     run_s = campaign.segment_hours * 3600.0
@@ -886,7 +981,8 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
             path = 0.0
             for cid, domains in per_cluster:
                 totals, crit = _sum_seconds(domains, card, k, factor,
-                                            leaf_preset=store_preset)
+                                            leaf_preset=store_preset,
+                                            hub_heights=hub_heights)
                 seg_total += totals["total_s"]
                 for key in seg_components:
                     seg_components[key] += totals[key]
@@ -953,7 +1049,8 @@ def estimate(*, mode: str, campaign: Campaign, offers: Sequence[Mapping[str, Any
         storage_rates = (price_table.get("storage") or {}).get(offer["provider"])
         leaf_rows = [d for _, ds in per_cluster for d in ds if d.role == "leaf"]
         storage = _storage(leaf_rows, campaign, preset=store_preset,
-                           ratio=compression_ratio, chunk_mib=chunk_mib)
+                           ratio=compression_ratio, chunk_mib=chunk_mib,
+                           hub_heights=hub_heights)
         # Synthesised tiles (and so their rims) depend on the card: every
         # offer carries its own store; the top level shows the first.
         row["storage"] = {key: storage[key] for key in
@@ -1089,8 +1186,10 @@ def render_table(document: Mapping[str, Any]) -> str:
             f"{row['storage']['stored_tb']:>9,.1f}")
     storage = document.get("storage")
     if storage:
+        levels = ("2-D and hub planes only" if storage["preset"] ==
+                  "windfarm" else "every level")
         lines.append(f"store: compressed Icechunk TB ({storage['preset']} "
-                     f"preset, every level, ratio "
+                     f"preset, {levels}, ratio "
                      f"{storage['compression_ratio']:g}); wall clock and "
                      "on-demand use instance-hours, spot adds its rework")
     instances = document["offers"][0]["instances"] if document["offers"] else 1
@@ -1230,12 +1329,24 @@ def run(args) -> dict[str, Any]:
     offers = select_offers(table, args.instance)
     markets = {"both": ("on_demand", "spot"), "on-demand": ("on_demand",),
                "spot": ("spot",)}[args.market]
+    store_preset = (args.store_preset if args.store_preset is not None
+                    else job.get("leaf_output_preset") or "full")
+    hub_heights = pick(args.hub_heights, "hub_heights",
+                       DEFAULT_STORE_HUB_HEIGHTS, int)
+    if args.hub_heights is not None and store_preset != "windfarm":
+        raise CostRefusal(f"--hub-heights prices the windfarm preset's "
+                          f"hub-height planes; --store-preset {store_preset} "
+                          "has none of its own")
+    if args.store_preset is None and job.get("leaf_output_preset"):
+        notes.append(f"store preset {store_preset} from the job's "
+                     "history.leaf_output_preset")
     document = estimate(
         mode=mode, campaign=campaign, offers=offers, price_table=table,
         instances=args.instances, deadline_days=args.deadline_days,
         markets=markets, plan_domains=plan_domains, clusters=clusters,
         leaf_nz=leaf_nz, parent_nz=parent_nz,
-        store_preset=args.store_preset, compression_ratio=args.compression_ratio,
+        store_preset=store_preset, hub_heights=hub_heights,
+        compression_ratio=args.compression_ratio,
         chunk_mib=args.chunk_mib, packing_efficiency=args.packing_efficiency,
         inputs=inputs, notes=notes)
     document["prices"]["path"] = str(Path(args.prices) if args.prices else DEFAULT_PRICES)

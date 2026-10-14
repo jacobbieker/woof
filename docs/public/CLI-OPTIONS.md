@@ -659,6 +659,7 @@ Takes no options of its own.
 | `--cover-factor` | leaf-cover km2 per km2 of farm footprint (default 2.0) |
 | `--deadline-days` | also report the instances needed to finish in this many days |
 | `--footprint-km2 A` | summary mode: total farm footprint over all clusters, km2 |
+| `--hub-heights` | hub heights a windfarm frame carries (default: the --job's, else 6, the hub diagnostic's default) |
 | `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
 | `--instances` | instances of each offer running at once, for the wall clock (default 1) |
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
@@ -674,7 +675,7 @@ Takes no options of its own.
 | `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 30) |
 | `--segments` | segments to run (default: the job's, else 365) |
 | `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 6) |
-| `--store-preset {full,energy}` | fields stored per leaf frame (default full: all variables) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame: full (all variables), energy (3-D site-forecast volumes) or windfarm (2-D planes and hub-height planes only); default the --job's leaf output preset, else full |
 
 ## `woof energy extract`
 
@@ -722,6 +723,7 @@ Takes no options of its own.
 | `--cover-factor` | leaf-cover km2 per km2 of farm footprint (default 2.0) |
 | `--deadline-days` | also report the instances needed to finish in this many days |
 | `--footprint-km2 A` | summary mode: total farm footprint over all clusters, km2 |
+| `--hub-heights` | hub heights a windfarm frame carries (default: the --job's, else 6, the hub diagnostic's default) |
 | `--instance PROVIDER[:INSTANCE]` | price only this offer (repeatable; e.g. aws:p5.48xlarge, gcp:a3-highgpu-8g, or aws for every AWS row; default: every row) |
 | `--instances` | instances of each offer running at once, for the wall clock (default 1) |
 | `--job JOB.json` | hindcast job document: segments, segment hours and spin-up when present (flags override) |
@@ -737,7 +739,7 @@ Takes no options of its own.
 | `--segment-hours` | hours per segment including spin-up (default: the job's, the plan's hours, else 30) |
 | `--segments` | segments to run (default: the job's, else 365) |
 | `--spinup-hours` | spin-up hours per segment not stored (default: the job's, else 6) |
-| `--store-preset {full,energy}` | fields stored per leaf frame (default full: all variables) |
+| `--store-preset {full,energy,windfarm}` | fields stored per leaf frame: full (all variables), energy (3-D site-forecast volumes) or windfarm (2-D planes and hub-height planes only); default the --job's leaf output preset, else full |
 
 ## `woof energy hindcast materialize`
 
@@ -764,6 +766,7 @@ Takes no options of its own.
 | `--end YYYY-MM-DD[THH]` | exclusive bound on segment run starts |
 | `--gridded-url TEMPLATE` | gridded store per cluster leaf |
 | `--leaf-history-interval-s` | leaf history cadence (default 900; finer such as 300 allowed) |
+| `--leaf-output-preset {windfarm,energy,full}` | history preset of every leaf domain (default windfarm: only 2-D wind-farm planes, hub-height wind and scalars at the sites' heights; energy and full keep their 3-D volumes) |
 | `--max-domains` | refuse plans with more high-resolution domains |
 | `--nz` | vertical levels (default: the planner's) |
 | `--outdir DIR` | hindcast directory (manifest, jobs, clusters) |

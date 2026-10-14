@@ -34,7 +34,9 @@ tree-wide one as a whole. Like the rest of `[output]`, these keys do not
 enter the restart identity or the prepared cache. A selection that would
 drop every hub field (for example `history_vars = ["T2"]`) is refused,
 because the diagnostic would run every step and write nothing. The
-`energy`, `minimal` and `severe` presets keep the hub fields.
+`energy`, `minimal`, `severe` and `windfarm` presets keep the hub fields.
+`windfarm` also keeps the hub-height scalars below and nothing 3-D, and
+is refused without `hub_wind` or `hub_heights_m`.
 
 ## Output
 
@@ -52,6 +54,18 @@ whose number of heights equals `nz` still never writes them on
 | `HUB_WINDOW_S` | `Time` | s |
 | `WSPD_HUB`, `WSPD_HUB_MAX`, `WSPD_HUB_MIN`, `WSPD_HUB_MEAN` | `Time, hub_height, south_north, west_east` | m s-1 |
 | `WDIR_HUB` | same | degree |
+| `T_HUB` | same | K |
+| `P_HUB` | same | Pa |
+| `RHO_HUB` | same | kg m-3 |
+| `QV_HUB`, `QC_HUB`, `QR_HUB` | same | kg kg-1 |
+| `QNC_HUB` | same | kg-1 |
+
+The last five rows are the hub-height scalars. They are written only when
+the selection names them (the `windfarm` preset, or `history_vars`), and
+`QV_HUB`/`QC_HUB`/`QR_HUB` only on a moist run, `QNC_HUB` only where the
+microphysics carries a cloud droplet number (`nc`: Thompson mp 28,
+Morrison, Milbrandt-Yau, WDM6). A member the run does not carry is
+absent, never zero.
 
 ## Arithmetic
 
@@ -70,10 +84,39 @@ whose number of heights equals `nz` still never writes them on
    Direction is `180 + atan2(ue, ve) * 180/pi`, wrapped to [0, 360). It is
    the bearing the wind blows from, clockwise from north. A calm reports 0.
 
+The scalars use the same heights, the same bracketing and the same
+hold rule:
+
+6. `theta = T' + theta_base` per mass level; theta, pressure, `qv`, `qc`,
+   `qr` and `nc` are interpolated linear in z between the bracketing mass
+   levels (held below the lowest and above the top level).
+7. `T_HUB = theta_h (p_h / 1e5)^(R_d/c_p)` and
+   `RHO_HUB = p_h / (R_d (T_HUB (1 + 0.608 qv_h / (1 + qv_h))))`, with
+   WRF's `R_d = 287` and `c_p = 7 R_d / 2`. A dry run uses `qv = 0`.
+
+This is what `woof energy extract` does with the 3-D volumes (theta,
+pressure and vapour sampled at the height, then `air_temperature` and
+`air_density`). On one tiny moist GPU run the forecast extracted from the
+hub planes and the one extracted from the same frames' volumes agreed to
+1.4e-7 relative in wind speed, direction, temperature, pressure, density
+and cloud water.
+
+**When the scalars are evaluated.** At the history frame, from the state
+the frame is written from, and not in the step epilogue. The dycore's
+microphysics adjustment and its pressure diagnosis run after the
+epilogue, so an epilogue value would describe a state the frame does not
+hold. The scalars are instantaneous: there is no window to restart and
+nothing is lost on a resume.
+
 The CUDA kernel uses one thread per column and is compiled with
 `--fmad=false`. Its speeds match the NumPy reference exactly, and its
 directions differ only by the rounding error of `atan2f`
-(`tests/test_hub_wind_diag_gpu.py`). The kernel source is inline and its
+(`tests/test_hub_wind_diag_gpu.py`). Its scalar kernel
+(`hub_scalar_columns`, in the same source) matches the reference exactly
+in `P_HUB`, `QV_HUB`, `QC_HUB`, `QR_HUB` and `QNC_HUB`; `T_HUB` and
+`RHO_HUB` go through `powf` and differ by at most 1 and 2 ulp
+respectively, on about 0.15% of the values (measured on an RTX A6000; the
+test grades them at `rtol = 2e-6`). The kernel source is inline and its
 SHA-256 is pinned in `tests/test_hub_wind_diag.py`. It is not a
 `woof/core/kernels/*.cu` file because those must have a measured
 local-memory frame for every per-architecture recording, and this kernel
@@ -158,7 +201,8 @@ eligible and fall back to the original runner.
 ## Memory and disk
 
 Each domain holds `6 x n_hub` float32 planes on the device, plus the site
-buffer. With 6 heights on a 1500 x 1500 domain that is 324 MB. These
+buffer, and up to `7 x n_hub` more when the scalars are on. With 6 heights
+on a 1500 x 1500 domain that is 324 MB, or 702 MB with every scalar. These
 buffers are not scratch slots, so the preflight VRAM plan does not count
 them. The disk planner (`history_frame_bytes`) does count the hub planes
 the selection writes.

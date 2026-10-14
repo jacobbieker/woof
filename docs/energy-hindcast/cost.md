@@ -236,7 +236,9 @@ The two H100 offers need the same GPU-hours and differ only in price. With
 the 2025-07 table, GCP spot is cheaper than AWS spot, and AWS on-demand is
 cheaper than GCP on-demand. Storing every variable on every level every
 15 minutes is 10.6 TB a year for this one tile. With `--store-preset energy`
-(the planner's leaf history preset) it is about 3.3 TB.
+(the planner's leaf history preset) it is about 3.3 TB, and with
+`--store-preset windfarm` (2-D and hub-height planes only, the hindcast's
+default leaf output) about 0.38 TB.
 
 ## Worked example: all public wind farms worldwide, 1 year, 200 m leaves
 
@@ -303,13 +305,26 @@ Storage is the other large bill:
 
 - **Size**: every variable on every model level at 15-minute cadence is
   about **2.0 PB** compressed in the central scenario (0.7-3.4 PB across the
-  scenarios). The `energy` field preset is about 0.63 PB.
+  scenarios). The `energy` field preset is about 0.63 PB, and the
+  `windfarm` preset (`--store-preset windfarm`: no 3-D field, six hub
+  heights) about **72 TB**.
 - **S3 Standard**: about $46k per month to hold, at the first-tier rate
   (cheaper at volume tiers).
 - **Egress**: about $180k to download once over the internet.
 
-Storing derived hub-height fields instead of full model levels, or
-quantising before compression, cuts the store by an order of magnitude.
+Storing the hub-height planes instead of full model levels (the
+`windfarm` preset) cuts the store by more than an order of magnitude;
+quantising before compression would cut it further.
+
+`--store-preset windfarm` is priced from the preset's own field list
+(`woof.io.history_selection.WINDFARM_FIELD_REASONS`), not from a fixed
+count: each 2-D member is one plane, each `hub_height` member is
+`--hub-heights` planes (default 6, or the `--job`'s recorded
+`leaf_hub_heights_m`), and the time string, eta columns, scalars and hub
+coordinate are added as bytes per frame. Members a run may not produce
+(`QNC_HUB` without a droplet number, `SNOWNC` without ice) are counted
+anyway, so the figure is an upper bound. With `--job`, the store preset
+defaults to the job's `history.leaf_output_preset`.
 
 What moves these numbers most:
 
