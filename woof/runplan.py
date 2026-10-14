@@ -891,6 +891,11 @@ def build_plan(raw: Mapping[str, Any], *, source: str,
         if resolved_options.get("wps_namelist") and not resolved_options.get("prepared_root"):
             raise PlanError("run_options.wps_namelist requires prepared_root; "
                             "it names the WPS authority of an existing bundle")
+        if resolved_options.get("prepare_only") and (
+                resolved_options.get("prepared_root") or resolved_options.get("restart")):
+            raise PlanError("run_options.prepare_only fetches and prepares a new "
+                            "bundle; prepared_root and restart name one that "
+                            "already exists")
         if resolved_options.get("prepared_root"):
             if fetch_arguments is not None:
                 raise PlanError("An existing prepared_root consumes no fetch stage; "
@@ -1231,6 +1236,11 @@ _RUN_OPTION_DEFAULTS: dict[str, Any] = {
     # A concrete assertion for supplied inputs, checked after acquisition.
     # Unlike cycle, this never retimes a config or changes a fetch request.
     "input_cycle": None,
+    # `woof go --prepare-only`: fetch and prepare to the bundle's seal,
+    # then complete without starting a forecast or a render.  The
+    # completed event's summary names the prepared_root.  Prepared route
+    # only, and never with a bundle or checkpoint that is already made.
+    "prepare_only": False,
 }
 
 
@@ -1254,7 +1264,7 @@ def _run_option(key: str, value: object, base: Path) -> Any:
             return bindings(value, base=base)
         except ValueError as error:
             raise PlanError(str(error)) from error
-    if key in ("dry_run", "health_debug", "verify_visuals"):
+    if key in ("dry_run", "health_debug", "verify_visuals", "prepare_only"):
         if not isinstance(value, bool):
             raise PlanError(f"{label} must be true or false")
         return value
@@ -4871,6 +4881,9 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
                                  run_dir=run_dir, observer=observer)
         observer.finish_stage(hierarchy_root=str(tree_root),
                               prepared=prepared)
+        if prepare_only:
+            # A continuation's tree published at its seal or reused whole.
+            return _prepared_chain_result(tree_root, config_path, None)
         _hrrr_tree_forecast(
             tree_root=tree_root, config_path=config_path,
             forecast_dir=forecast_dir, observer=observer,
@@ -6432,6 +6445,21 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
 
 
 
+def _prepare_only_summary(result: Mapping[str, Any]) -> dict[str, Any]:
+    """A prepare-only chain result as the completed event carries it.
+
+    The chain's own result holds the resolved bundle, whose paths are not
+    event fields; the summary keeps the paths a consumer binds next.
+    """
+
+    bundle = result.get("bundle") or {}
+    return {"prepared_root": str(result["prepared_root"]),
+            "experiment_config": result.get("experiment_config"),
+            "wps_namelist": result.get("wps_namelist"),
+            "layout": bundle.get("layout"), "source": bundle.get("source"),
+            "forecast_started": False}
+
+
 def _prepared_chain_result(root: Path, config: Path, namelist: Path | None, *, bundle=None) -> dict:
     """Relay a prepared bundle and its authority paths without forecasting."""
     from woof.stage_cli import resolve_bundle
@@ -6711,13 +6739,18 @@ def _execute_prepared_route(plan: RunPlan, *, exp, data, config_path,
     from woof.ensemble.runtime_context import current_session
 
     session = current_session()
-    recipe = None if session is None else session.request.recipe
-    if chain == "prepared:hrrr" and recipe is None:
-        return _hrrr_chain(plan, config_path=Path(config_path), exp=exp,
-                           observer=observer, run_dir=run_dir)
-    if chain == "prepared:staged" and recipe is None:
-        return _staged_chain(plan, config_path=Path(config_path), exp=exp,
-                             observer=observer, run_dir=run_dir)
+    # A prepare-only run prepares the config's one source trajectory, as
+    # `woof go --prepare-only` does (go_main), so it never takes the
+    # recipe arm: that arm re-enters go_main, whose --prepare-only door
+    # would lead straight back here.
+    prepare_only = bool(plan.run_options.get("prepare_only"))
+    recipe = None if session is None or prepare_only else session.request.recipe
+    if chain in ("prepared:hrrr", "prepared:staged") and recipe is None:
+        operation = _hrrr_chain if chain == "prepared:hrrr" else _staged_chain
+        result = operation(plan, config_path=Path(config_path), exp=exp,
+                           observer=observer, run_dir=run_dir,
+                           prepare_only=prepare_only)
+        return _prepare_only_summary(result) if prepare_only else result
 
     tokens = ["go", str(config_path), "--outdir",
               str(run_dir / "chain")]
@@ -6749,6 +6782,8 @@ def _execute_prepared_route(plan: RunPlan, *, exp, data, config_path,
     elif plan.run_options.get("late_after_minutes") is not None:
         tokens += ["--late-after-minutes",
                    f"{float(plan.run_options['late_after_minutes']):g}"]
+    if prepare_only:
+        tokens.append("--prepare-only")
     args = build_parser().parse_args(tokens)
     # Not a `woof go` CLI flag: it is stamped onto the namespace that
     # go_main reads, the same way go_main reads --outdir.  Adding a flag
@@ -6788,6 +6823,18 @@ def _execute_prepared_route(plan: RunPlan, *, exp, data, config_path,
             f"`{' '.join(tokens)}` exited {code}; the stage that stopped "
             "the chain is named in the failed event's warning above" +
             (f": {relay.failure['message']}" if relay.failure and relay.failure.get("message") else ""))
+    if prepare_only:
+        # `woof go --prepare-only` stopped at the seal: there is no
+        # forecast to summarize, only the bundle it prepared.
+        from woof import run_stamp as run_stamp_module
+
+        # The run folder is new (execute_plan refuses a used one), so the
+        # newest claim under it is this chain's own.
+        claimed = run_stamp_module.latest(run_dir / "chain") or run_dir / "chain"
+        prepared = claimed / "prepared"
+        if not prepared.is_dir():
+            raise PlanError(f"`woof go --prepare-only` exited 0 and left no {prepared}")
+        return {"prepared_root": str(prepared.resolve()), "forecast_started": False}
     if relay.native is not None:
         if relay.summary is None:
             raise PlanError("The native producer exited without its completion summary")
@@ -6824,7 +6871,7 @@ ROUTES: dict[str, Route] = {
                 "this process (what `woof run CONFIG` executes)",
         run_options=frozenset(_RUN_OPTION_DEFAULTS)
         - {"data_dir", "physics_profile", "prepared_root", "wps_namelist", "supplement",
-           "transport", "as_posted", "late_after_minutes", "cycle"},
+           "transport", "as_posted", "late_after_minutes", "cycle", "prepare_only"},
         execute=_execute_experiment_route),
 }
 

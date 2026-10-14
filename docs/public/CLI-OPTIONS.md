@@ -775,7 +775,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--no-probe` | with --readiness: compute the schedule from the source table only and ask no host |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged |
 | `--outdir DIR` | output root for one timestamped run folder per launch, with forecast files, pictures and diagnostics (default <config-stem>-go beside the config); an existing run-... folder is used directly |
-| `--prepare-only` | fetch and stream prepared inputs without starting a forecast |
+| `--prepare-only` | fetch and prepare inputs, stop once the prepared bundle is sealed and print its prepared_root; no forecast starts |
 | `--prepared-root DIR` | run this existing prepared bundle without fetch or preparation; add --restart to continue its checkpoint |
 | `--products LIST` | which products the render stage draws: a comma-separated list of catalog slugs, 'all' (the default -- the renderer's whole catalog), or 'none' to stop after the forecast. The same spelling `woof render --products` takes |
 | `--readiness` | print gpuwm.readiness.v1 for the config's fetch window on stdout and run nothing: exit 0 ready, 75 not yet, 2 refused |
@@ -901,7 +901,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--no-probe` | with --readiness: compute the schedule from the source table only and ask no host |
 | `--no-verify-visuals` | skip postforecast observation verification; the physical run is unchanged |
 | `--outdir DIR` | output root for one timestamped run folder per launch, with forecast files, pictures and diagnostics (default <config-stem>-go beside the config); an existing run-... folder is used directly |
-| `--prepare-only` | fetch and stream prepared inputs without starting a forecast |
+| `--prepare-only` | fetch and prepare inputs, stop once the prepared bundle is sealed and print its prepared_root; no forecast starts |
 | `--prepared-root DIR` | run this existing prepared bundle without fetch or preparation; add --restart to continue its checkpoint |
 | `--products LIST` | which products the render stage draws: a comma-separated list of catalog slugs, 'all' (the default -- the renderer's whole catalog), or 'none' to stop after the forecast. The same spelling `woof render --products` takes |
 | `--readiness` | print gpuwm.readiness.v1 for the config's fetch window on stdout and run nothing: exit 0 ready, 75 not yet, 2 refused |
