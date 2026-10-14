@@ -744,6 +744,17 @@ rating methodology.
 | `wind-power` | A generic IEC-style power curve, density-corrected | `wind_speed` and `air_density` at hub height, `capacity_mw`, `hub_height_m` | One generic curve for every turbine, scaled by capacity; no wake losses, availability or curtailment |
 | `pv-power` | A PVWatts-like plane-of-array and cell-temperature model | `ghi`, `dni`, `dhi`, `cos_solar_zenith`, `t2`, `wind_speed_10m`, `capacity_mw` | Assumed tilt, azimuth, temperature coefficient and system losses; no shading, soiling or inverter clipping detail |
 | `turbine-icing` | Hub-height icing: Makkonen accretion on the ISO 12494 reference collector (instrumental icing) and on a rotating-blade proxy (rotor icing), meteorological icing, the IEA Wind Task 19 ice class and a production-loss estimate. See [Turbine icing at hub height](energy-hindcast/icing.md) | `air_temperature`, `wind_speed`, `air_density` (or `air_pressure`), `cloud_liquid_mixing_ratio`, `rain_mixing_ratio`, `cloud_number_mixing_ratio`, `air_pressure`, `relative_humidity`, `hub_height_m` | A generic blade (tip-speed ratio, tip-speed limit, leading-edge size); the default droplet number where the run has no Thompson `QNCLOUD`; no ice shedding; an uncalibrated loss model |
+| `wind-resource` | Rotor-equivalent wind speed (IEC 61400-12-1:2017), power-law shear, veer across the rotor, turbulence intensity, density-corrected generic-curve power and capacity factor | `wind_speed` profile, `u`/`v` or `wind_from_direction`, `air_density`, `hub_height_m`, `capacity_mw`, optional `rotor_diameter_m` | Rotor diameter equal to the hub height where unknown; turbulence intensity is resolved variance only and needs 1-5 min output; generic curves, no wakes |
+| `ramps` | Threshold-over-window ramps (15 min, 1 h, 4 h by default) and swinging-door ramps on power as a fraction of capacity, with a ramp-event table | as `wind-resource` | The 0.2-of-capacity threshold and 0.05 swinging-door tolerance; ramp timing is only as fine as the output time step |
+
+`wind-resource` and `ramps` run only when you name them in `--products`.
+`--power-curve` picks the generic IEC class I, II or III curve, or the
+offshore curve, for every wind product. Definitions, options and the
+event table are in [Ramps and wind-resource products](energy-hindcast/ramps.md).
+
+```bash
+woof energy rating wales/forecast.nc --products wind-power,wind-resource,ramps --ramp-windows 15m,1h,4h --power-curve generic_iec_class_iii -o wales/wind.nc
+```
 
 ## Limitations
 

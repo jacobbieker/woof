@@ -91,6 +91,19 @@ New:
   chunked hindcasts continue exactly). `forecast.v1` gains
   `cloud_number_mixing_ratio`, sampled from `QNCLOUD`. See
   `docs/energy-hindcast/icing.md`.
+- `woof energy rating --products wind-resource,ramps` adds wind-farm
+  products. `wind-resource` gives the IEC 61400-12-1:2017 rotor-equivalent
+  wind speed, the power-law shear exponent, veer across the rotor,
+  turbulence intensity, density-corrected generic-curve power and capacity
+  factor. `ramps` finds ramp events in the power at any time step, from
+  15-minute down to 1-minute output, by two definitions: a change over a
+  window (15 min, 1 h and 4 h by default) and swinging-door segmentation.
+  It writes per-timestep ramp flags and rates and a validated event table
+  (`woof.energy.contracts.load_ramp_events`). `--power-curve` chooses
+  between new generic IEC class I, class III and offshore curves and the
+  existing class II curve. The same calculations are available as NumPy
+  and xarray functions in `woof.energy.ramps`. See
+  `docs/energy-hindcast/ramps.md`.
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals
