@@ -16,6 +16,17 @@ New:
   `woof.energy.source_select.select_source` is the same choice as a
   function, read from the registry and route table with no network
   (docs/energy-hindcast/source-select.md).
+- `woof energy partition` cuts a worldwide `woof-energy.sites.v1` set
+  into independent regional clusters (`woof-energy.partition.v1`):
+  great-circle single linkage (default 30 km, grid-hashed, about 3 s for
+  400 000 sites), bisection of clusters over `--max-extent-km`/
+  `--max-sites` or the card, stable hash ids, antimeridian-safe boxes,
+  a suggested parent chain, projection, topology and tile estimate per
+  cluster, sized for `--card`/`--vram-gib`/`--hardware-json` without a
+  local GPU probe. `woof energy plan-cluster` plans one cluster with its
+  own parent. The wrf-tiles parent region now spans the sites' shortest
+  longitude arc, so a site set across the antimeridian is planned
+  rather than refused. See `docs/energy-hindcast/partition.md`.
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals

@@ -662,6 +662,26 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--merge ASSETS.geojson` | existing assets document to merge into (duplicates by source reference and proximity are dropped) |
 | `--output ASSETS.geojson` | where to write the woof-energy.assets.v1 document |
 
+## `woof energy partition`
+
+| argument | what it does |
+|---|---|
+| `SITES.json` | woof-energy.sites.v1 document |
+
+| option | what it does |
+|---|---|
+| `--card` | size for this GPU tier or model (no local probe); default 24gb |
+| `--corridor-km` | half-width of the high-resolution corridor around each site (default 2) |
+| `--hardware-json FILE.json` | size for a selected target hardware snapshot's measured GPU capacity (no local probe) |
+| `--leaf-dx-m` | leaf grid spacing, 100 to 300 m (default 200) |
+| `--linkage-km` | single-linkage distance: sites closer than this share a cluster (default 30) |
+| `--max-extent-km` | bisect clusters wider than this (default 250) |
+| `--max-sites` | bisect clusters with more sites than this (default 20000) |
+| `--nz` | leaf vertical levels the tile sizes are estimated at (default: the tile planner's ladder) |
+| `--output PARTITION.json` | where to write the woof-energy.partition.v1 document |
+| `--topology {auto,wrf-tiles,wrf-nests}` | planner every cluster is recommended for (auto: wrf-nests for a single small farm, else wrf-tiles) |
+| `--vram-gib` | size for this many GiB (no local probe) |
+
 ## `woof energy plan`
 
 | argument | what it does |
@@ -685,6 +705,30 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--start YYYY-MM-DDTHH` | forecast start, UTC (default: the most recent 00/06/12/18 cycle) |
 | `--topology {wrf-nests,wrf-tiles,hex-swath}` | wrf-nests: sibling nests in one run; wrf-tiles: one parent run plus offline child tiles (no count limit); hex-swath: MPAS corridor mesh |
 | `--vram-gib` | size each domain for this many GiB |
+
+## `woof energy plan-cluster`
+
+| argument | what it does |
+|---|---|
+| `PARTITION.json` | woof-energy.partition.v1 document |
+
+| option | what it does |
+|---|---|
+| `--card` | size for this GPU tier or model (no local probe); default: the card the partition was sized for |
+| `--cluster ID` | cluster_id to plan |
+| `--corridor-km` | corridor half-width (default: the partition's) |
+| `--dry-run` | write the cluster's sites.json and print the planner call without planning |
+| `--dx-m` | leaf grid spacing (default: the cluster's) |
+| `--hardware-json FILE.json` | size for a selected target hardware snapshot's measured GPU capacity (no local probe) |
+| `--hours` | run length in hours (default 24) |
+| `--max-domains` | refuse plans with more high-resolution domains |
+| `--nz` | vertical levels (default: the planner's ladder) |
+| `--outdir DIR` | directory for sites.json, plan.json and emitted configs |
+| `--parent-dx-m` | outer parent grid spacing (default: chosen by the planner) |
+| `--source` | initial/boundary condition source (default: the one woof domain emits) |
+| `--start YYYY-MM-DDTHH` | run start, UTC (default: the planner's) |
+| `--topology {wrf-tiles,wrf-nests}` | planner to use (default: the cluster's recommendation) |
+| `--vram-gib` | size for this many GiB (no local probe) |
 
 ## `woof energy rating`
 

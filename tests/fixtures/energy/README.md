@@ -23,3 +23,12 @@ sites builder.
 are hand-written Overpass API answers for `tests/test_energy_osm.py`. Their
 ids, names, coordinates and tags are invented. They are not OpenStreetMap
 data.
+
+`sites_world.json` is a synthetic, worldwide `woof-energy.sites.v1`
+document for `tests/test_energy_hindcast_partition.py`: 415 turbine
+sites in invented wind farms. It holds two dense offshore arrays 20 km
+apart (one cluster at the 30 km linkage), a small farm across the
+antimeridian, a chain of 40 farms 10 km apart over about 400 km (one
+linkage component wider than the 250 km extent cap), and isolated farms
+on every continent in each projection band (Mercator, Lambert, polar).
+None of the coordinates are real wind farms.

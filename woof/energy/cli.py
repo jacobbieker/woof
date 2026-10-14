@@ -13,6 +13,8 @@ the subcommand runs::
     woof energy run       woof.energy.run             run every plan domain
     woof energy extract   woof.energy.extract         plan runs -> forecast.v1
     woof energy rating    woof.energy.products        line rating, icing, power
+    woof energy partition woof.energy.partition       worldwide sites -> clusters
+    woof energy plan-cluster  woof.energy.partition   plan one cluster
 """
 
 from __future__ import annotations
@@ -85,9 +87,9 @@ def _names(value: str) -> tuple[str, ...]:
     return names
 
 
-def _dispatch(module: str):
+def _dispatch(module: str, function: str = "main"):
     def run(args) -> int:
-        return import_module(module).main(args)
+        return getattr(import_module(module), function)(args)
     return run
 
 
@@ -343,6 +345,107 @@ def _register_rating(sub) -> None:
     p.set_defaults(func=_dispatch("woof.energy.products"))
 
 
+#: ``woof energy partition`` defaults, held equal to the constants of
+#: :mod:`woof.energy.partition` by its tests (the module is imported only
+#: when the subcommand runs).
+_PARTITION_DEFAULTS = {"linkage_km": 30.0, "max_extent_km": 250.0,
+                       "max_sites": 20_000, "leaf_dx_m": 200.0,
+                       "corridor_km": 2.0}
+_PARTITION_TOPOLOGIES = ("auto", "wrf-tiles", "wrf-nests")
+
+
+def _register_partition(sub) -> None:
+    d = _PARTITION_DEFAULTS
+
+    def capacity(parser, default: str) -> None:
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument("--card", default=None,
+                           help="size for this GPU tier or model (no local "
+                                "probe); " + default)
+        group.add_argument("--vram-gib", type=positive_float, default=None,
+                           help="size for this many GiB (no local probe)")
+        group.add_argument("--hardware-json", default=None,
+                           metavar="FILE.json",
+                           help="size for a selected target hardware "
+                                "snapshot's measured GPU capacity (no local "
+                                "probe)")
+
+    p = sub.add_parser(
+        "partition",
+        help="cut a worldwide sites set into independent regional clusters")
+    p.add_argument("sites", metavar="SITES.json",
+                   help="woof-energy.sites.v1 document")
+    p.add_argument("--linkage-km", type=positive_float,
+                   default=d["linkage_km"],
+                   help="single-linkage distance: sites closer than this "
+                        f"share a cluster (default {d['linkage_km']:g})")
+    p.add_argument("--max-extent-km", type=positive_float,
+                   default=d["max_extent_km"],
+                   help="bisect clusters wider than this "
+                        f"(default {d['max_extent_km']:g})")
+    p.add_argument("--max-sites", type=positive_int,
+                   default=d["max_sites"],
+                   help="bisect clusters with more sites than this "
+                        f"(default {d['max_sites']})")
+    p.add_argument("--leaf-dx-m", type=positive_float,
+                   default=d["leaf_dx_m"],
+                   help="leaf grid spacing, 100 to 300 m "
+                        f"(default {d['leaf_dx_m']:g})")
+    p.add_argument("--corridor-km", type=positive_float,
+                   default=d["corridor_km"],
+                   help="half-width of the high-resolution corridor around "
+                        f"each site (default {d['corridor_km']:g})")
+    p.add_argument("--nz", type=positive_int, default=None,
+                   help="leaf vertical levels the tile sizes are estimated "
+                        "at (default: the tile planner's ladder)")
+    p.add_argument("--topology", choices=_PARTITION_TOPOLOGIES, default="auto",
+                   help="planner every cluster is recommended for (auto: "
+                        "wrf-nests for a single small farm, else wrf-tiles)")
+    capacity(p, "default 24gb")
+    p.add_argument("-o", "--output", required=True, metavar="PARTITION.json",
+                   help="where to write the woof-energy.partition.v1 "
+                        "document")
+    p.set_defaults(func=_dispatch("woof.energy.partition"))
+
+    q = sub.add_parser(
+        "plan-cluster",
+        help="plan one cluster of a partition with its own parent")
+    q.add_argument("partition", metavar="PARTITION.json",
+                   help="woof-energy.partition.v1 document")
+    q.add_argument("--cluster", required=True, metavar="ID",
+                   help="cluster_id to plan")
+    q.add_argument("--topology", choices=("wrf-tiles", "wrf-nests"),
+                   default=None,
+                   help="planner to use (default: the cluster's "
+                        "recommendation)")
+    q.add_argument("--dx-m", type=positive_float, default=None,
+                   help="leaf grid spacing (default: the cluster's)")
+    q.add_argument("--corridor-km", type=positive_float, default=None,
+                   help="corridor half-width (default: the partition's)")
+    q.add_argument("--parent-dx-m", type=positive_float, default=None,
+                   help="outer parent grid spacing (default: chosen by the "
+                        "planner)")
+    q.add_argument("--start", default=None, metavar="YYYY-MM-DDTHH",
+                   help="run start, UTC (default: the planner's)")
+    q.add_argument("--hours", type=positive_float, default=24.0,
+                   help="run length in hours (default 24)")
+    q.add_argument("--source", default=None,
+                   help="initial/boundary condition source (default: the "
+                        "one woof domain emits)")
+    capacity(q, "default: the card the partition was sized for")
+    q.add_argument("--max-domains", type=positive_int, default=None,
+                   help="refuse plans with more high-resolution domains")
+    q.add_argument("--nz", type=positive_int, default=None,
+                   help="vertical levels (default: the planner's ladder)")
+    q.add_argument("--dry-run", action="store_true",
+                   help="write the cluster's sites.json and print the "
+                        "planner call without planning")
+    q.add_argument("-o", "--outdir", required=True, metavar="DIR",
+                   help="directory for sites.json, plan.json and emitted "
+                        "configs")
+    q.set_defaults(func=_dispatch("woof.energy.partition", "plan_cluster_main"))
+
+
 def register_cli(subparsers) -> None:
     """Add ``woof energy`` to the product CLI."""
 
@@ -358,6 +461,7 @@ def register_cli(subparsers) -> None:
     _register_run(sub)
     _register_extract(sub)
     _register_rating(sub)
+    _register_partition(sub)
 
 
 __all__ = ["register_cli"]

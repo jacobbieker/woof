@@ -368,15 +368,26 @@ class _Parent:
 
 
 def _sites_region(lon: np.ndarray, lat: np.ndarray) -> dict:
-    """GeoJSON Polygon of the sites' bounding box (what the parent must
-    contain before the buffer)."""
+    """GeoJSON of the sites' bounding box (what the parent must contain
+    before the buffer).
 
-    west, east = float(np.min(lon)), float(np.max(lon))
-    south, north = float(np.min(lat)), float(np.max(lat))
-    if east - west > 180.0:
+    The box spans the sites' minimum longitude arc (``woof domain``'s own
+    rule, :func:`woof.domain_wizard._minimum_longitude_arc`), so sites on
+    both sides of the antimeridian get one box across it, written as a
+    MultiPolygon split at 180 degrees (RFC 7946 section 3.1.9).  Sites
+    whose shortest arc is wider than 180 degrees are refused; ``woof
+    energy partition`` cuts such a set into regional clusters."""
+
+    from woof.domain_wizard import _minimum_longitude_arc
+
+    try:
+        _, west, east = _minimum_longitude_arc(lon)
+    except ValueError as error:
         raise TilePlanRefusal(
-            "the sites span more than 180 degrees of longitude (they cross "
-            "the antimeridian); plan each side of it separately")
+            "the sites span more than 180 degrees of longitude even on the "
+            "shortest arc; partition them into regional clusters (woof "
+            "energy partition) and plan each one") from error
+    south, north = float(np.min(lat)), float(np.max(lat))
     # A degenerate box (one site, or sites on one parallel) still needs a
     # ring with area; the buffer does the real sizing.
     pad = 1e-4
@@ -384,9 +395,32 @@ def _sites_region(lon: np.ndarray, lat: np.ndarray) -> dict:
         west, east = west - pad, east + pad
     if north - south < pad:
         south, north = south - pad, north + pad
-    ring = [[west, south], [east, south], [east, north], [west, north],
-            [west, south]]
-    return {"type": "Polygon", "coordinates": [ring]}
+    return lonlat_box(west, south, east, north)
+
+
+def lonlat_box(west: float, south: float, east: float, north: float, *,
+               digits: int | None = None) -> dict:
+    """GeoJSON of a longitude/latitude box given in any longitude frame
+    (``west <= east``, ``east - west < 360``): the box shifted so ``west``
+    is in [-180, 180), as a Polygon, or as a MultiPolygon split at 180
+    degrees when it reaches past it (RFC 7946 section 3.1.9).  ``digits``
+    rounds every coordinate."""
+
+    shift = 360.0 * math.floor((west + 180.0) / 360.0)
+    west, east = west - shift, east - shift
+
+    def ring(w: float, e: float) -> list:
+        corners = [[w, south], [e, south], [e, north], [w, north],
+                   [w, south]]
+        if digits is not None:
+            corners = [[round(a, digits), round(b, digits)]
+                       for a, b in corners]
+        return [corners]
+
+    if east <= 180.0:
+        return {"type": "Polygon", "coordinates": ring(west, east)}
+    return {"type": "MultiPolygon",
+            "coordinates": [ring(west, 180.0), ring(-180.0, east - 360.0)]}
 
 
 class _ParentDoesNotFit(Exception):
