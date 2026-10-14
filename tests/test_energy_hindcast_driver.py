@@ -220,7 +220,7 @@ def test_selector_choices_and_changes_are_recorded_per_job(tmp_path):
     region, cycle, hours, p_top, priority, now = calls[0]
     assert set(region) == {"west", "south", "east", "north"}
     assert cycle == datetime(2025, 11, 1) and hours == 30.0
-    assert p_top == 5000.0 and priority == ("met-office-global", "gfs")
+    assert p_top == 5500.0 and priority == ("met-office-global", "gfs")
     assert now == NOW
     jobs = [hc.load_job(tmp_path / "hc" / "jobs" / j / "job.json")
             for j in result["planned_job_ids"]]
@@ -377,7 +377,7 @@ def test_materialize_nests_sets_history_begin_on_every_domain(tmp_path):
     assert plan.start.startswith("2025-11-02T00") and plan.hours == 30.0
     config = tomllib.loads(plan.resolve(plan.domains[0].config).read_text())
     assert config["experiment"]["run_seconds"] == 30 * 3600.0
-    assert config["shared"]["p_top"] == 5000.0
+    assert config["shared"]["p_top"] == 5500.0
     leaves = {d.grid_id for d in plan.domains if d.role == "child"}
     for table in config["domain"]:
         assert table["history_begin_s"] == 21600.0

@@ -140,7 +140,10 @@ DEFAULT_LEAF_HISTORY_INTERVAL_S = 900.0
 DEFAULT_NESTS_PARENT_HISTORY_INTERVAL_S = 3600.0
 #: Model top the planners emit (about 20 km); passed to the selector and
 #: checked against the emitted configuration.
-DEFAULT_P_TOP_PA = 5000.0
+#: The wind-energy column's top (woof.energy.vertical.DEFAULT_P_TOP_PA):
+#: 5500 Pa is 19.97 km in the standard atmosphere, inside the hindcast's
+#: 20 km ceiling, where WRF's usual 5000 Pa is 20.58 km.
+DEFAULT_P_TOP_PA = 5500.0
 #: Built-in selector order when woof.energy.source_select is absent:
 #: the Met Office global model, then GFS.
 DEFAULT_FALLBACK_PRIORITY = ("met-office-global", "gfs")
@@ -762,7 +765,11 @@ def _planner_kwargs(request: HindcastRequest, cluster: Cluster,
               "start": segment.run_start.strftime("%Y-%m-%dT%H"),
               "hours": float(request.segment_hours), "source": source,
               "card": request.card, "vram_gib": request.vram_gib,
-              "max_domains": request.max_domains, "nz": request.nz}
+              "max_domains": request.max_domains, "nz": request.nz,
+              # Every domain carries the wind-energy column at this top
+              # (woof.energy.vertical.wind_energy_column: 12 m lowest layer,
+              # at least 8 layers below 250 m, refused above 20 km).
+              "column_request": {"p_top_pa": float(request.p_top_pa)}}
     return topology, kwargs
 
 
@@ -1539,8 +1546,8 @@ def _check_model_top(plan: Plan, job: Mapping[str, Any]) -> list[str]:
         if not math.isclose(float(p_top), want):
             raise HindcastRefused(
                 f"{config} has p_top = {float(p_top):g} Pa but the hindcast "
-                f"asked for {want:g} Pa; the planners do not take a model "
-                "top, so plan with the default --p-top-pa")
+                f"asked for {want:g} Pa; the planner did not apply the "
+                "wind-energy column (woof.energy.vertical)")
         ztop = shared.get("ztop")
         notes.append(f"{config}: p_top = {float(p_top):g} Pa"
                      + ("" if ztop is None else f", ztop = {float(ztop):g} m"))

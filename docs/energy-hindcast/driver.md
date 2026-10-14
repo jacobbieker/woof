@@ -66,8 +66,12 @@ returns an object with `.source` and, if it has them, `.reasons`.
 Each job records the selector, its reasons, the previous segment's source
 and whether the source changed. A source change is a discontinuity in the
 reanalysis, so the manifest notes it and `status` counts it. `--p-top-pa`
-(default 5000 Pa, about 20 km) is passed to the selector. At materialize it
-is checked against the `p_top` in the emitted configuration.
+(default 5500 Pa, 19.97 km in the standard atmosphere) is passed to the
+selector and, as `column_request`, to the planner, so every domain carries the
+wind-energy column of [the vertical page](vertical.md): explicit eta levels with
+a 12 m lowest layer, at least 8 layers below 250 m, and a top refused above
+20 km. At materialize it is checked against the `p_top` in the emitted
+configuration.
 
 ## History
 
