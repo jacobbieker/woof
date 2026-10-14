@@ -42,6 +42,12 @@ select_source(region, cycle, hours, p_top_pa=None, priority=None, *,
   planner's outer domain reaches past its sites).
 * `refuse(source_id)`: the caller's own refusal for a candidate.
 
+`select_newest(region, newest, hours, ...)` takes the same arguments for a
+start nobody named: it asks the 8 cycles every 6 h back from `newest` and
+keeps the choice whose source ranks best, the newest cycle among equals, so
+a preferred source's previous cycle beats a lower-ranked source's newest
+one.  Its receipt notes the cycles searched.
+
 No candidate qualifying raises `SourceSelectRefused` (a `ValueError`); its
 `choice` attribute holds the full receipt.  Nothing here reaches a server:
 every check reads the source registry, the fetch route table and the
@@ -71,7 +77,7 @@ failure, not only the first.
 | `coverage` | a sample of the region's box (widened by `margin_km`, 0.25 degree grid) lies outside the row's native-grid window |
 | `horizon` | the cycle's run (route lead ladder, else cycle-grid horizons, else `max_forecast_hour`) ends before `hours + spinup_hours`; a reanalysis has no horizon |
 | `column_top` | the model top is above the row's certified top and its fetch cannot extend to it; a row with no certified top passes and the preparation's vertical-coverage check is the gate |
-| `date` | the calendar's verdict is not yes: before the archive's first cycle, past a rolling door's retention, a publication era with a `prep_refusal`, a cycle hour the source does not run for that length, or a run not yet published by `now` |
+| `date` | the calendar's verdict is not yes: before the archive's first cycle, past a rolling door's retention, a publication era with a `prep_refusal`, a cycle hour the source does not run for that length, or a run not yet published by `now`; also a run younger than its source's usual whole-run publication delay (the cycle grid's `usual_delay`), which only the fetch's object probe could confirm earlier |
 | `window` | the planners' own window refusal (ICON global, Met Office global), asked only when `date` passed |
 
 ## The receipt: `woof-energy.source-choice.v1`
@@ -121,9 +127,12 @@ woof energy plan sites.json --topology wrf-nests --source auto --source-priority
 
 The planner asks for the 5000 Pa (about 20 km) model top `woof domain`
 emits by default and widens the sites' box by how far its outermost domain
-can reach past them (wrf-tiles: the widest parent buffer over the
-refinement chains it may try; wrf-nests: corridor, nest and root buffers
-and clearance rows), plus 10 km for the wizard's rounding.  The choice is
+can reach past them, plus 10 km for the wizard's rounding.  wrf-tiles uses
+the buffer of the parent it is about to emit and asks again, at the same
+cycle, for each coarser chain it falls back to when a parent does not fit
+the card; wrf-nests estimates corridor, nest and root buffers and
+clearance rows before its layout exists, and passes its own source refusal
+as the `planner` check.  The choice is
 
 * the plan's `source`, as if it had been named;
 * the receipt, in `plan.json` under `source_choice` and beside it as
@@ -135,6 +144,6 @@ and clearance rows), plus 10 km for the wizard's rounding.  The choice is
 
 `--source-priority` without `--source auto` is refused, as is either flag
 with `--topology hex-swath`.  With `--source auto` and no `--start`, the
-choice is made for the newest 00/06/12/18Z cycle by the clock, which a
-slow publisher may not have posted yet; pass `--start` for a reproducible
-plan.
+start is found by `select_newest` from the clock's newest 00/06/12/18Z
+cycle and the plan starts at the cycle it took; pass `--start` for a
+reproducible plan.

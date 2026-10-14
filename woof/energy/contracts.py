@@ -43,6 +43,8 @@ ASSETS_SCHEMA = "woof-energy.assets.v1"
 SITES_SCHEMA = "woof-energy.sites.v1"
 PLAN_SCHEMA = "woof-energy.plan.v1"
 FORECAST_SCHEMA = "woof-energy.forecast.v1"
+#: The receipt ``--source auto`` records (:mod:`woof.energy.source_select`).
+SOURCE_CHOICE_SCHEMA = "woof-energy.source-choice.v1"
 
 #: Asset kinds, named after the OSM ``power=*`` values they come from.
 ASSET_KINDS = (
@@ -610,8 +612,9 @@ class Plan:
     path: Path | None = field(default=None, compare=False)
     #: The ``woof-energy.source-choice.v1`` receipt when ``--source auto``
     #: chose ``source`` (:mod:`woof.energy.source_select`); None when the
-    #: source was named.  Written to the document only when present.
-    source_choice: dict | None = None
+    #: source was named.  Written to the document only when present; not
+    #: part of plan equality (it carries the clock the choice was made at).
+    source_choice: dict | None = field(default=None, compare=False)
 
     def __post_init__(self):
         if self.topology not in TOPOLOGIES:
@@ -722,9 +725,9 @@ def _source_choice(record: Any) -> dict | None:
     if record is None:
         return None
     if not isinstance(record, Mapping) or record.get("schema") != \
-            "woof-energy.source-choice.v1":
-        raise ContractError("plan source_choice is not a "
-                            "woof-energy.source-choice.v1 receipt")
+            SOURCE_CHOICE_SCHEMA:
+        raise ContractError(f"plan source_choice is not a "
+                            f"{SOURCE_CHOICE_SCHEMA} receipt")
     return dict(record)
 
 

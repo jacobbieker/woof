@@ -86,6 +86,8 @@ import numpy as np
 from woof.energy.contracts import (ContractError, Plan, PlanDomain, SiteSet,
                                    dump_plan, dump_sites, file_ref,
                                    load_sites)
+# Where --source auto writes its receipt, beside plan.json.
+from woof.energy.source_select import RECEIPT_FILE as SOURCE_CHOICE_FILE
 
 TOPOLOGY = "wrf-nests"
 
@@ -140,9 +142,6 @@ DEFAULT_SOURCE = "gfs"
 #: Sources this door refuses: their routes need documents only
 #: ``woof domain`` writes (HRRR's namelist pair and target document).
 _REFUSED_SOURCES = ("hrrr",)
-#: Where ``--source auto`` writes its ``woof-energy.source-choice.v1``
-#: receipt, beside ``plan.json``.
-SOURCE_CHOICE_FILE = "source-choice.json"
 
 
 class PlanRefused(ValueError):
@@ -986,11 +985,13 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
 
 def _planner_refusal(source: str) -> str | None:
     """Why this door cannot emit for ``source`` (the selector's ``planner``
-    check), or None."""
+    check), or None: :func:`_ensure_sources`'s own refusal, so a source
+    the selector chooses is never one this door then refuses."""
 
-    if source in _REFUSED_SOURCES:
-        return ("wrf-nests cannot emit it: its route reads namelists and a "
-                "target document that only `woof domain` writes")
+    try:
+        _ensure_sources(source)
+    except PlanRefused as error:
+        return str(error)
     return None
 
 
@@ -1014,19 +1015,23 @@ def _auto_margin_km(*, corridor_km: float, ratios: Sequence[int],
             + ROOT_BUFFER_KM + PLANNER_SLACK_KM)
 
 
-def _auto_source(sites: SiteSet, *, start: datetime, hours: float,
-                 corridor_km: float, ratios: Sequence[int],
+def _auto_source(sites: SiteSet, *, start: datetime, defaulted: bool,
+                 hours: float, corridor_km: float, ratios: Sequence[int],
                  parent_dx_m: float, priority: Sequence[str] | None,
                  now: datetime | None):
-    """``--source auto``: the selector's choice for these sites."""
+    """``--source auto``: the selector's choice for these sites; a
+    defaulted start is searched back from the clock's newest cycle
+    (:func:`woof.energy.source_select.select_newest`)."""
 
     from woof.domain_wizard import DEFAULT_MODEL_TOP_PA
-    from woof.energy.source_select import SourceSelectRefused, select_source
+    from woof.energy.source_select import (SourceSelectRefused,
+                                           select_newest, select_source)
 
     arrays = sites.as_arrays()
     points = list(zip(arrays["lon"].tolist(), arrays["lat"].tolist()))
+    select = select_newest if defaulted else select_source
     try:
-        return select_source(
+        return select(
             points, start, hours, p_top_pa=DEFAULT_MODEL_TOP_PA,
             priority=priority, now=now,
             margin_km=_auto_margin_km(corridor_km=corridor_km, ratios=ratios,
@@ -1065,7 +1070,7 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
         parent_dx_m = dx_m * DEFAULT_PARENT_FACTOR
     ratios = chain_ratios(dx_m, float(parent_dx_m))
     limit = _domain_limit(max_domains)
-    from woof.energy.source_select import is_auto, write_receipt
+    from woof.energy.source_select import is_auto, record_choice
 
     source_defaulted = source is None
     start_defaulted = start is None
@@ -1075,11 +1080,12 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
         raise PlanRefused("--source-priority applies only with --source auto")
     if is_auto(source):
         source_choice = _auto_source(
-            sites, start=start_time, hours=float(hours),
-            corridor_km=corridor_km, ratios=ratios,
+            sites, start=start_time, defaulted=start_defaulted,
+            hours=float(hours), corridor_km=corridor_km, ratios=ratios,
             parent_dx_m=float(parent_dx_m), priority=source_priority,
             now=now)
         source = source_choice.source
+        start_time = source_choice.cycle
     source = _ensure_sources(source)
     from woof.energy.source_window import (newest_landed_start,
                                            source_notes, window_refusal)
@@ -1185,6 +1191,8 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
     stale_plan = outdir / "plan.json"
     if stale_plan.exists():
         stale_plan.unlink()
+    # nor the source-choice receipt that plan carried
+    (outdir / SOURCE_CHOICE_FILE).unlink(missing_ok=True)
     dw._write_atomic(config_path, text)
     dw._write_atomic(wps_path, wps_text)
     written = [config_path, wps_path]
@@ -1238,12 +1246,7 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
                      "may not have published it yet (GFS posts about 3.5-5 h "
                      "after the cycle), in which case pass an earlier --start")
     notes.extend(source_notes(source))
-    receipt_path = outdir / SOURCE_CHOICE_FILE
-    if source_choice is not None:
-        notes.append(source_choice.note())
-        write_receipt(source_choice, receipt_path)
-    else:
-        receipt_path.unlink(missing_ok=True)
+    receipt = record_choice(source_choice, outdir, notes)
     notes.extend(leaf_notes)
     notes.extend(fetch_notes)
     if len(attempts) > 1:
@@ -1255,9 +1258,7 @@ def _build(sites: SiteSet, *, outdir: Path, dx_m: float, corridor_km: float,
                 hours=float(hours), domains=domains, source=source,
                 sites_ref=file_ref(Path(sites_path).resolve(),
                                    relative_to=outdir),
-                notes=notes,
-                source_choice=(None if source_choice is None
-                               else source_choice.to_json()))
+                notes=notes, source_choice=receipt)
     dump_plan(plan, outdir / "plan.json")
     summary = {
         "config": config_path, "wps_namelist": wps_path,

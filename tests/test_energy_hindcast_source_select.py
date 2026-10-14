@@ -139,6 +139,50 @@ def test_coverage_margin_reaches_past_the_sites():
     assert wide.region["sampled_bbox"][3] > 51.0 + 4.0
 
 
+def test_a_run_younger_than_its_usual_publication_delay_is_passed_over():
+    # GFS: a whole run is usually published 6 h after its start; the
+    # calendar's verdict leaves that to the fetch's probe, the selector
+    # (which reaches no server) does not take it
+    fresh = datetime(2026, 10, 14, 12, 5)
+    with pytest.raises(ss.SourceSelectRefused) as caught:
+        ss.select_source(WALES, "2026-10-14T12", 24, now=fresh,
+                         priority=["gfs"])
+    assert "usually published 6 h" in str(caught.value)
+    later = ss.select_source(WALES, "2026-10-14T12", 24,
+                             now=datetime(2026, 10, 14, 18, 5),
+                             priority=["gfs"])
+    assert later.source == "gfs"
+
+
+def test_a_defaulted_start_keeps_the_preferred_source():
+    # minutes after 12Z nothing has posted the 12Z run; the newest cycle
+    # the Met Office has published beats GFS's (or anyone's) newer one
+    fresh = datetime(2026, 10, 14, 12, 5)
+    choice = ss.select_newest(WALES, "2026-10-14T12", 24, p_top_pa=5000.0,
+                              now=fresh)
+    assert choice.source == "met-office-global"
+    assert choice.cycle < datetime(2026, 10, 14, 12)
+    assert any(note.startswith("default start: searched 8 cycles")
+               for note in choice.notes)
+    # a rank-1 source at the newest cycle stops the search there
+    texas = ss.select_newest(TEXAS, "2026-10-13T12", 24, now=NOW)
+    assert (texas.source, texas.cycle) == ("hrrr-native",
+                                            datetime(2026, 10, 13, 12))
+
+
+def test_a_defaulted_start_with_no_source_anywhere_is_refused():
+    with pytest.raises(ss.SourceSelectRefused) as caught:
+        ss.select_newest(WALES, "2019-06-01T12", 24, now=NOW,
+                         priority=["gfs"])
+    assert caught.value.choice is not None
+
+
+def test_the_margin_is_sampled_across_the_antimeridian():
+    lat, lon = ss._samples(ss._widen((-179.5, 51.0, -178.5, 52.0), 200.0))
+    assert lon.max() > 170.0 and lon.min() < -170.0
+    assert (lon >= -180.0).all() and (lon < 180.0).all()
+
+
 # --------------------------------------------------------------------------
 # column top
 
@@ -185,6 +229,7 @@ def test_priority_takes_aliases_and_a_comma_string():
 
 @pytest.mark.parametrize("priority, match", [
     (["gfs", "no-such-model"], "unregistered"),
+    (["auto", "gfs"], "'auto' cannot appear"),
     (["gfs", "gfs-0p25"], "twice"),
     ([], "empty"),
 ])
@@ -332,6 +377,11 @@ def test_plan_round_trips_the_receipt(tmp_path):
                 source_choice=receipt)
     loaded = load_plan(dump_plan(plan, tmp_path / "plan.json"))
     assert loaded.source_choice == receipt
+    # the receipt (it carries the clock) is not part of plan equality
+    later = dict(receipt, now="2030-01-01T00:00:00Z")
+    assert loaded == Plan(topology="wrf-tiles", dx_m=100.0,
+                          start="2026-01-15T00", hours=24.0, domains=[],
+                          source="met-office-global", source_choice=later)
     bare = Plan(topology="wrf-tiles", dx_m=100.0, start="2026-01-15T00",
                 hours=24.0, domains=[])
     assert "source_choice" not in bare.to_json()
@@ -416,6 +466,20 @@ def test_tiles_auto_records_the_choice(tmp_path):
                      start="2026-01-15T00", hours=6, source="gfs", now=NOW)
     assert not (tmp_path / "source-choice.json").exists()
     assert load_plan(tmp_path / "plan.json").source_choice is None
+
+
+def test_tiles_auto_with_a_defaulted_start_plans_the_cycle_it_chose(
+        tmp_path):
+    from woof.energy import plan_wrf_tiles as tiles
+
+    plan = tiles.build_plan(load_sites(SITES_WALES), outdir=tmp_path,
+                            dx_m=1000.0, hours=6, source="auto",
+                            now=datetime(2026, 10, 14, 12, 5))
+    assert plan.source == "met-office-global"
+    assert plan.start == plan.source_choice["cycle"]
+    assert plan.start < "2026-10-14T12"
+    assert any(note.startswith("default start: searched")
+               for note in plan.notes)
 
 
 def test_nests_auto_records_the_choice(tmp_path):

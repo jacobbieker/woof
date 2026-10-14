@@ -66,7 +66,15 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
-SCHEMA = "woof-energy.source-choice.v1"
+from woof.energy.contracts import SOURCE_CHOICE_SCHEMA as SCHEMA
+
+#: Where a planner writes the receipt, beside ``plan.json``.
+RECEIPT_FILE = "source-choice.json"
+
+#: A defaulted start (:func:`select_newest`) looks back this many cycles of
+#: :data:`LOOKBACK_STEP_HOURS` from the clock's newest 00/06/12/18Z cycle.
+LOOKBACK_CYCLES = 8
+LOOKBACK_STEP_HOURS = 6
 
 #: Regional sources first (each is ranked out wherever its grid does not
 #: reach), then the global ones in order of preference; ERA5 is the last
@@ -367,7 +375,9 @@ def _widen(bbox, margin_km: float) -> tuple[float, float, float, float]:
     south, north = max(south - dlat, -89.9), min(north + dlat, 89.9)
     widest = math.cos(math.radians(max(abs(south), abs(north))))
     dlon = margin_km / (_KM_PER_DEG * max(widest, 1e-3))
-    return (max(west - dlon, -180.0), south, min(east + dlon, 180.0), north)
+    # Not clamped at the antimeridian: the samples are wrapped instead
+    # (:func:`_samples`), so a margin reaching across it is checked.
+    return (west - dlon, south, east + dlon, north)
 
 
 def _samples(bbox) -> tuple[np.ndarray, np.ndarray]:
@@ -378,6 +388,7 @@ def _samples(bbox) -> tuple[np.ndarray, np.ndarray]:
         return np.linspace(lo, hi, max(2, min(count, COVERAGE_MAX_PER_AXIS)))
 
     lon, lat = np.meshgrid(axis(west, east), axis(south, north))
+    lon = (lon + 180.0) % 360.0 - 180.0
     return lat.ravel(), lon.ravel()
 
 
@@ -507,7 +518,7 @@ def _date_check(source: str, cycle: datetime, horizon: float, now: datetime,
     state = answer.get("state")
     reason = str(answer.get("why") or answer.get("reason") or "").strip()
     if state == "yes":
-        return None, None
+        return _usual_delay_check(source, cycle, now), None
     if state == "unknown":
         if accept_unknown:
             return None, (f"{source}: {reason} (accepted: "
@@ -517,6 +528,32 @@ def _date_check(source: str, cycle: datetime, horizon: float, now: datetime,
     fix = answer.get("fix")
     return (reason + (f"  {fix}" if fix else "")) or "no data for this cycle", \
         None
+
+
+def _usual_delay_check(source: str, cycle: datetime,
+                       now: datetime) -> str | None:
+    """A run younger than its source's usual whole-run publication delay.
+
+    The calendar's verdict leaves a run that recent to the fetch's object
+    probe; with no probe here the selector does not take it, so a fresh
+    cycle is never chosen for a source that has not posted it yet.
+    """
+
+    from woof.source_cycles import cycle_grid_for
+
+    try:
+        grid = cycle_grid_for(source)
+    except ValueError:
+        grid = None
+    if grid is None:
+        return None
+    delay = float(grid.usual_delay)
+    if delay <= 0.0 or now >= cycle + timedelta(hours=delay):
+        return None
+    return (f"a whole {cycle:%H}Z run is usually published {delay:g} h after "
+            f"its start (around {cycle + timedelta(hours=delay):%Y-%m-%dT%H:%M}"
+            f"Z) and the clock reads {now:%Y-%m-%dT%H:%M}Z; the selector "
+            "reaches no server to confirm an earlier posting")
 
 
 def _window_check(source: str, cycle: datetime, horizon: float,
@@ -581,6 +618,8 @@ def _priority(priority: Sequence[str] | str | None
         names = tuple(str(p).strip() for p in priority if str(p).strip())
     if not names:
         raise SourceSelectRefused("the source priority list is empty")
+    if any(name.lower() == "auto" for name in names):
+        raise SourceSelectRefused("'auto' cannot appear in a priority list")
     unknown = [name for name in names if _resolve(name) is None]
     if unknown:
         from woof.source_adapters import source_adapters
@@ -597,8 +636,6 @@ def _priority(priority: Sequence[str] | str | None
                 f"source priority lists {canonical} twice ({seen[canonical]!r}"
                 f" and {name!r})")
         seen[canonical] = name
-    if "auto" in seen:
-        raise SourceSelectRefused("'auto' cannot appear in a priority list")
     return names, "caller"
 
 
@@ -681,6 +718,76 @@ def select_source(region, cycle, hours, p_top_pa=None, priority=None, *,
     return choice
 
 
+def select_newest(region, newest, hours, p_top_pa=None, priority=None, *,
+                  now: datetime | None = None,
+                  lookback_cycles: int = LOOKBACK_CYCLES,
+                  step_hours: int = LOOKBACK_STEP_HOURS,
+                  **kwargs) -> SourceChoice:
+    """:func:`select_source` for a start the caller did not name.
+
+    Asks every cycle from ``newest`` back ``lookback_cycles`` steps of
+    ``step_hours`` and keeps the choice whose source ranks best in the
+    priority list, the newest cycle among equals: a preferred source's
+    previous cycle beats a lower-ranked source's newest one, as a named
+    source's newest *landed* cycle would.  The receipt's notes name the
+    cycles searched.  Refused (with the newest cycle's receipt) when no
+    cycle has a qualifying source.
+    """
+
+    first = parse_cycle(newest)
+    if int(lookback_cycles) < 1 or int(step_hours) < 1:
+        raise SourceSelectRefused("lookback_cycles and step_hours must be "
+                                  "at least 1")
+    best: SourceChoice | None = None
+    best_rank = None
+    refusal: SourceSelectRefused | None = None
+    for back in range(int(lookback_cycles)):
+        cycle = first - timedelta(hours=back * int(step_hours))
+        try:
+            choice = select_source(region, cycle, hours, p_top_pa, priority,
+                                   now=now, **kwargs)
+        except SourceSelectRefused as error:
+            if error.choice is None:
+                raise
+            refusal = refusal or error
+            continue
+        rank = choice.chosen().rank
+        if best is None or rank < best_rank:
+            best, best_rank = choice, rank
+        if rank == 1:
+            break
+    if best is None:
+        assert refusal is not None
+        raise refusal
+    searched = (f"default start: searched {lookback_cycles} cycles every "
+                f"{step_hours} h back from {first:%Y-%m-%dT%H}Z and took "
+                f"{best.cycle:%Y-%m-%dT%H}Z, where {best.source} (rank "
+                f"{best_rank}) is the best-ranked source that qualifies")
+    from dataclasses import replace
+
+    return replace(best, notes=best.notes + (searched,))
+
+
+def record_choice(choice: SourceChoice | None, outdir: str | Path,
+                  notes: list[str]) -> dict | None:
+    """A planner's bookkeeping for ``--source auto``.
+
+    Writes the receipt to ``outdir/source-choice.json`` and appends the
+    plan note when ``choice`` is given; removes a stale receipt when it
+    is None.  Returns the receipt for ``Plan.source_choice``.
+    """
+
+    path = Path(outdir) / RECEIPT_FILE
+    if choice is None:
+        path.unlink(missing_ok=True)
+        return None
+    notes.append(choice.note())
+    notes.extend(note for note in choice.notes
+                 if note.startswith("default start:"))
+    write_receipt(choice, path)
+    return choice.to_json()
+
+
 def write_receipt(choice: SourceChoice, path: str | Path) -> Path:
     """Write ``choice``'s receipt atomically (``.partial`` then rename)."""
 
@@ -709,17 +816,6 @@ def choice_summary(receipt: Mapping[str, Any]) -> dict[str, Any]:
                          if c["status"] == "rejected"}}
 
 
-def parse_priority(value: str) -> tuple[str, ...]:
-    """``--source-priority a,b,c`` as a tuple, refused when empty."""
-
-    names = tuple(part.strip() for part in str(value).split(",")
-                  if part.strip())
-    if not names:
-        raise SourceSelectRefused("--source-priority takes a comma list of "
-                                  "source ids")
-    return names
-
-
 def is_auto(source: str | None) -> bool:
     """Whether ``source`` asks for the selector (``--source auto``)."""
 
@@ -729,7 +825,9 @@ def is_auto(source: str | None) -> bool:
 __all__ = [
     "CHECKS", "Candidate", "COVERAGE_MAX_PER_AXIS", "COVERAGE_STEP_DEG",
     "choice_summary",
-    "DEFAULT_PRIORITY", "PLANNER_SLACK_KM", "Rejection", "SCHEMA", "SourceChoice",
+    "DEFAULT_PRIORITY", "LOOKBACK_CYCLES", "LOOKBACK_STEP_HOURS",
+    "PLANNER_SLACK_KM", "RECEIPT_FILE", "Rejection", "SCHEMA",
+    "SourceChoice", "record_choice", "select_newest",
     "SourceSelectRefused", "is_auto", "judge", "parse_cycle",
-    "parse_priority", "region_bbox", "select_source", "write_receipt",
+    "region_bbox", "select_source", "write_receipt",
 ]

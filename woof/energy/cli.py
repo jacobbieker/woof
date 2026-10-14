@@ -114,8 +114,9 @@ def _plan(args) -> int:
                   "would ignore it", file=sys.stderr)
             return 2
     if args.topology not in _AUTO_SOURCE_TOPOLOGIES:
-        auto = str(args.source or "").strip().lower() == "auto"
-        given = (["--source auto"] if auto else []) + (
+        from woof.energy.source_select import is_auto
+
+        given = (["--source auto"] if is_auto(args.source) else []) + (
             ["--source-priority"]
             if getattr(args, "source_priority", None) is not None else [])
         if given:
