@@ -1030,9 +1030,69 @@ def write_zarr(data: ForecastData, path: Path) -> Path:
     return path
 
 
-def write_icechunk(data: ForecastData, path: Path) -> tuple[Path, str]:
+#: ``--icechunk-mode`` values: ``replace`` rewrites the repository with this
+#: forecast (the default, and the only behaviour before remote stores);
+#: ``region`` writes this job's times and sites into a year-long site store
+#: made by ``woof energy icechunk init``, safely beside concurrent jobs.
+ICECHUNK_MODES = ("replace", "region")
+
+
+def _write_icechunk_store(data: ForecastData, url: str, *, mode: str,
+                          group: str | None, job_id: str | None
+                          ) -> tuple[str, str]:
+    """``write_icechunk`` for a store URL, or for ``mode="region"``."""
+
+    from woof.energy import icechunk_store as store
+
+    try:
+        if mode == "region":
+            summary = store.write_site_region(
+                url, data, group=group or "forecast", job_id=job_id)
+            return url, summary["snapshot"]
+        repo = store.open_repository(url)
+        return url, _commit_replace(data, repo, url, group=group,
+                                    job_id=job_id)
+    except store.IcechunkStoreRefused as error:
+        raise ExtractRefused(str(error)) from error
+
+
+def _commit_replace(data: ForecastData, repo, location, *,
+                    group: str | None, job_id: str | None) -> str:
+    """Replace ``group`` (or the root) with the forecast and commit,
+    through :func:`woof.energy.icechunk_store.commit_with_retry`: under the
+    filesystem commit lock, and re-applied when a concurrent commit got
+    there first."""
+
+    from woof.energy import icechunk_store as store
+
+    dataset = to_xarray(data)
+
+    def apply(session):
+        dataset.to_zarr(session.store, mode="w", group=group,
+                        consolidated=False, zarr_format=3)
+
+    result = store.commit_with_retry(
+        repo, branch="main", apply=apply,
+        message=(f"woof energy extract: {FORECAST_SCHEMA} "
+                 f"({data.times.size} times, "
+                 f"{len(data.coords['site_id'])} sites)"),
+        metadata={"job_id": job_id or ""},
+        lock=store.commit_lock(str(location)))
+    return result.snapshot
+
+
+def write_icechunk(data: ForecastData, path, *, mode: str = "replace",
+                   group: str | None = None, job_id: str | None = None
+                   ) -> tuple[Path | str, str]:
     """Commit the forecast to an Icechunk repository at ``path`` (branch
     ``main``), the approach of :func:`woof.ml_export.export_zarr_to_icechunk`.
+
+    ``path`` is a local directory or a store URL (``s3://``, ``gs://``,
+    ``file://``, ``memory://``; see :mod:`woof.energy.icechunk_store`).  A
+    local path in ``replace`` mode keeps the original refusals and layout,
+    and now commits under the filesystem commit lock.
+    ``mode="region"`` hands the data to
+    :func:`woof.energy.icechunk_store.write_site_region`.
     """
 
     try:
@@ -1041,7 +1101,14 @@ def write_icechunk(data: ForecastData, path: Path) -> tuple[Path, str]:
         raise ExtractRefused(
             "--format icechunk needs icechunk in the active environment"
         ) from error
-    dataset = to_xarray(data)
+    if mode not in ICECHUNK_MODES:
+        raise ExtractRefused(f"icechunk mode {mode!r} is not one of "
+                             f"{ICECHUNK_MODES}")
+    if mode == "region" or _is_store_url(path):
+        target = str(path) if _is_store_url(path) \
+            else str(Path(path).resolve())
+        return _write_icechunk_store(data, target, mode=mode, group=group,
+                                     job_id=job_id)
     path = Path(path).resolve()
     if path.exists() and not path.is_dir():
         raise ExtractRefused(f"output {path} exists and is not an Icechunk "
@@ -1052,13 +1119,14 @@ def write_icechunk(data: ForecastData, path: Path) -> tuple[Path, str]:
         raise ExtractRefused(f"output {path} is a non-empty directory that "
                              "is not an Icechunk repository")
     path.mkdir(parents=True, exist_ok=True)
+    from woof.energy.icechunk_store import IcechunkStoreRefused
+
     repo = ic.Repository.open_or_create(storage=storage)
-    session = repo.writable_session("main")
-    dataset.to_zarr(session.store, mode="w", consolidated=False,
-                    zarr_format=3)
-    snapshot = str(session.commit(
-        f"woof energy extract: {FORECAST_SCHEMA} "
-        f"({data.times.size} times, {len(data.coords['site_id'])} sites)"))
+    try:
+        snapshot = _commit_replace(data, repo, path, group=group,
+                                   job_id=job_id)
+    except IcechunkStoreRefused as error:
+        raise ExtractRefused(str(error)) from error
     return path, snapshot
 
 
@@ -1078,15 +1146,23 @@ def extract_forecast(plan_path: Path, *, output: Path,
     return path
 
 
-def _extract(plan_path, *, output, sites_path, heights_m, variables, fmt
+def _extract(plan_path, *, output, sites_path, heights_m, variables, fmt,
+             icechunk: Mapping[str, Any] | None = None
              ) -> tuple[Path, dict[str, Any]]:
     if fmt not in FORMATS:
         raise ExtractRefused(f"format {fmt!r} is not one of {FORMATS}")
+    if icechunk and fmt != "icechunk":
+        raise ExtractRefused(f"--icechunk-* and --job-id apply only to "
+                             f"--format icechunk, not {fmt}")
+    remote = fmt == "icechunk" and _is_store_url(output)
+    if not remote and _is_store_url(output):
+        raise ExtractRefused(f"--format {fmt} writes a local path; a store "
+                             "URL needs --format icechunk")
     data = build_forecast(Path(plan_path),
                           sites_path=None if sites_path is None
                           else Path(sites_path),
                           heights_m=heights_m, variables=variables)
-    output = Path(output)
+    output = str(output) if remote else Path(output)
     extra: dict[str, Any] = {}
     try:
         if fmt == "netcdf":
@@ -1096,9 +1172,13 @@ def _extract(plan_path, *, output, sites_path, heights_m, variables, fmt
         elif fmt == "zarr":
             written = write_zarr(data, output)
         else:
-            written, extra["snapshot"] = write_icechunk(data, output)
+            written, extra["snapshot"] = write_icechunk(
+                data, output, **dict(icechunk or {}))
+            extra.update({f"icechunk_{key}": value
+                          for key, value in (icechunk or {}).items()})
     except BaseException:
-        _clear(output.with_name(output.name + ".partial"))
+        if not remote:
+            _clear(output.with_name(output.name + ".partial"))
         raise
     times = data.times.astype("datetime64[s]")
     summary = {
@@ -1120,12 +1200,33 @@ def _extract(plan_path, *, output, sites_path, heights_m, variables, fmt
     return written, summary
 
 
+def _is_store_url(output) -> bool:
+    from woof.energy.icechunk_store import is_store_url
+
+    return is_store_url(output)
+
+
+def _icechunk_options(args) -> dict[str, Any] | None:
+    """The ``--icechunk-mode``, ``--icechunk-group`` and ``--job-id`` flags
+    as :func:`write_icechunk` keywords; ``None`` when none is set."""
+
+    options = {"mode": getattr(args, "icechunk_mode", None),
+               "group": getattr(args, "icechunk_group", None),
+               "job_id": getattr(args, "job_id", None)}
+    options = {key: value for key, value in options.items()
+               if value is not None}
+    return options or None
+
+
 def main(args) -> int:
     try:
+        output = args.output if _is_store_url(args.output) \
+            else Path(args.output)
         _, summary = _extract(
-            Path(args.plan), output=Path(args.output),
+            Path(args.plan), output=output,
             sites_path=None if args.sites is None else Path(args.sites),
-            heights_m=args.heights_m, variables=args.vars, fmt=args.format)
+            heights_m=args.heights_m, variables=args.vars, fmt=args.format,
+            icechunk=_icechunk_options(args))
     except (ExtractRefused, ContractError, EnergyNotImplemented,
             SampleUnavailable) as error:
         print(f"woof energy extract: refused: {error}", file=sys.stderr)
@@ -1144,5 +1245,5 @@ __all__ = [
     "wind_attack_angle", "air_temperature", "air_density",
     "specific_humidity", "relative_humidity", "saturation_vapour_pressure",
     "cos_solar_zenith", "precipitation_rate", "write_netcdf", "write_csv",
-    "write_zarr", "write_icechunk", "to_xarray",
+    "write_zarr", "write_icechunk", "to_xarray", "ICECHUNK_MODES",
 ]

@@ -628,7 +628,10 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 |---|---|
 | `--format {netcdf,zarr,icechunk,csv}` | output format (default netcdf) |
 | `--heights-m` | override the sites document's heights |
-| `--output PATH` | output file or store |
+| `--icechunk-group GROUP` | group inside the repository (region default: forecast) |
+| `--icechunk-mode {replace,region}` | replace: rewrite the repository with this forecast (default); region: write this job's times and sites into a store made by `woof energy icechunk init`, beside concurrent jobs |
+| `--job-id ID` | job identifier recorded in the commit metadata |
+| `--output PATH` | output file or store; --format icechunk also takes s3://, gs://, file:// and memory:// URLs |
 | `--sites SITES.json` | sites document (default: the one the plan names) |
 | `--vars NAME[,NAME]` | forecast.v1 variables to write (default all the runs can supply) |
 
@@ -645,6 +648,51 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--polygon FILE.geojson` | area to fetch as a GeoJSON Polygon/MultiPolygon |
 | `--refresh` | revalidate cached Overpass responses |
 | `--timeout-s` | server-side Overpass timeout per tile (default 180) |
+
+## `woof energy icechunk`
+
+Takes no options of its own.
+
+## `woof energy icechunk init`
+
+| argument | what it does |
+|---|---|
+| `REPO` | s3://bucket/prefix, gs://bucket/prefix, file:///path, memory://name or a local path |
+
+| option | what it does |
+|---|---|
+| `--allow-http` | allow a plain-HTTP S3 endpoint |
+| `--anonymous` | no credentials (public buckets) |
+| `--branch` | branch (default main) |
+| `--end YYYY-MM-DDTHH:MM` | last valid time, UTC (inclusive) |
+| `--endpoint-url URL` | S3-compatible endpoint, e.g. MinIO (default: AWS_ENDPOINT_URL_S3, AWS_ENDPOINT_URL) |
+| `--group` | group inside the repository (default forecast) |
+| `--heights-m` | override the sites document's heights |
+| `--interval` | time step: seconds, or with s/min/h (default 15min) |
+| `--job-id ID` | identifier recorded in the commit metadata |
+| `--region` | S3 region (default: AWS_REGION, AWS_DEFAULT_REGION) |
+| `--site-chunk` | sites per chunk (default 64) |
+| `--sites SITES.json` | woof-energy.sites.v1 document (site order) |
+| `--start YYYY-MM-DDTHH:MM` | first valid time, UTC |
+| `--time-chunk` | steps per time chunk (default one day) |
+| `--vars NAME[,NAME]` | forecast.v1 variables to allocate (default all) |
+| `--zstd-clevel` | Blosc zstd level (default 5) |
+
+## `woof energy icechunk verify`
+
+| argument | what it does |
+|---|---|
+| `REPO` | repository URL or path |
+
+| option | what it does |
+|---|---|
+| `--allow-http` | allow a plain-HTTP S3 endpoint |
+| `--anonymous` | no credentials (public buckets) |
+| `--branch` | branch (default main) |
+| `--endpoint-url URL` | S3-compatible endpoint, e.g. MinIO (default: AWS_ENDPOINT_URL_S3, AWS_ENDPOINT_URL) |
+| `--group` | report only this group |
+| `--no-coverage` | skip reading the written masks |
+| `--region` | S3 region (default: AWS_REGION, AWS_DEFAULT_REGION) |
 
 ## `woof energy import`
 

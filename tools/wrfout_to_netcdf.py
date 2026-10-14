@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -68,9 +69,40 @@ def convert_wrfout_directory(
     }
 
 
+def _is_store_url(text: object) -> bool:
+    from woof.energy.icechunk_store import is_store_url
+
+    return is_store_url(str(text))
+
+
+def _repo_location(value: str) -> "str | Path":
+    """``--icechunk-repo``: a store URL (s3://, gs://, file://, memory://)
+    is kept as given; anything else is a local directory."""
+
+    return value if _is_store_url(value) else Path(value).resolve()
+
+
+def _open_repo(repo_dir: "str | Path"):
+    """The Icechunk repository at a local directory or a store URL,
+    created when absent (woof.energy.icechunk_store.open_repository)."""
+
+    from woof.energy.icechunk_store import open_repository
+
+    return open_repository(str(repo_dir))
+
+
+def _commit_lock(repo_dir: "str | Path"):
+    """The filesystem commit lock other writers of the repository honour
+    (woof.energy.icechunk_store.commit_lock; a no-op for object stores)."""
+
+    from woof.energy.icechunk_store import commit_lock
+
+    return commit_lock(str(repo_dir))()
+
+
 def export_to_icechunk(
     source_dir: Path,
-    repo_dir: Path,
+    repo_dir: "str | Path",
     branch: str,
     message: str,
     compress_zstd_bitshuffle: bool,
@@ -96,10 +128,7 @@ def export_to_icechunk(
     if not wrfouts:
         raise FileNotFoundError(f"No wrfout files found in {source_dir}")
 
-    repo_dir.mkdir(parents=True, exist_ok=True)
-    repo = ic.Repository.open_or_create(
-        storage=ic.local_filesystem_storage(str(repo_dir))
-    )
+    repo = _open_repo(repo_dir)
     paths = [str(path) for path in wrfouts]
     datasets = [xr.open_dataset(path, engine="netcdf4") for path in paths]
     dataset = xr.concat(datasets, dim="Time", data_vars="all", coords="minimal")
@@ -125,7 +154,8 @@ def export_to_icechunk(
             zarr_format=3,
             encoding=encoding or None,
         )
-        snapshot = session.commit(message)
+        with _commit_lock(repo_dir):
+            snapshot = session.commit(message)
     finally:
         dataset.close()
         for item in datasets:
@@ -147,7 +177,7 @@ def export_to_icechunk(
 
 def stream_wrfout_to_icechunk(
     source_dir: Path,
-    repo_dir: Path,
+    repo_dir: "str | Path",
     branch: str,
     message_prefix: str,
     compress_zstd_bitshuffle: bool,
@@ -168,9 +198,9 @@ def stream_wrfout_to_icechunk(
         ) from error
 
     source_dir = source_dir.resolve()
-    repo_dir = repo_dir.resolve()
-    repo_dir.mkdir(parents=True, exist_ok=True)
-    repo = ic.Repository.open_or_create(storage=ic.local_filesystem_storage(str(repo_dir)))
+    if not _is_store_url(repo_dir):
+        repo_dir = Path(repo_dir).resolve()
+    repo = _open_repo(repo_dir)
 
     if state_file is None:
         state_file = source_dir / ".icechunk-export-state.json"
@@ -252,7 +282,8 @@ def stream_wrfout_to_icechunk(
                         zarr_format=3,
                         encoding=encoding,
                     )
-                    last_snapshot = str(session.commit(f"{message_prefix}: {seed.name}"))
+                    with _commit_lock(repo_dir):
+                        last_snapshot = str(session.commit(f"{message_prefix}: {seed.name}"))
                     reference_variables = tuple(dataset.variables.keys())
                     reference_set = set(reference_variables)
                 processed.add(seed.name)
@@ -303,7 +334,8 @@ def stream_wrfout_to_icechunk(
                     consolidated=True,
                     zarr_format=3,
                 )
-                last_snapshot = str(session.commit(f"{message_prefix}: {wrfout.name}"))
+                with _commit_lock(repo_dir):
+                    last_snapshot = str(session.commit(f"{message_prefix}: {wrfout.name}"))
             processed.add(wrfout.name)
             exported += 1
             if delete_after_icechunk:
@@ -354,12 +386,70 @@ def stream_wrfout_to_icechunk(
     }
 
 
+def _segment_main(args) -> int:
+    """One segment's frames into one group of a shared repository; the JSON
+    summary goes to stdout (and --manifest)."""
+
+    from woof.energy.icechunk_store import (
+        IcechunkStoreRefused,
+        TimeAxis,
+        write_gridded_segment,
+    )
+
+    source_dir = args.source_dir.resolve()
+    wrfouts = sorted(path for path in source_dir.iterdir() if _is_wrfout(path))
+    if not wrfouts:
+        raise SystemExit(f"No wrfout files found in {source_dir}")
+    try:
+        axis = None if args.time_axis is None else TimeAxis.parse(args.time_axis)
+        window = None
+        if args.window is not None:
+            parts = [part.strip() for part in args.window.split(",")]
+            if len(parts) != 2:
+                raise SystemExit(f"--window takes FIRST,END; got {args.window!r}")
+            window = (parts[0], parts[1])
+        summary = write_gridded_segment(
+            str(args.icechunk_repo),
+            wrfouts,
+            group=args.icechunk_group,
+            axis=axis,
+            branch=args.icechunk_branch,
+            job_id=args.job_id,
+            segment_id=args.segment_id,
+            window=window,
+            on_existing=args.on_existing,
+            time_chunk=int(args.time_chunk),
+            compress=bool(args.compress_zstd_bitshuffle),
+            zstd_clevel=int(args.zstd_clevel),
+        )
+    except IcechunkStoreRefused as error:
+        print(f"wrfout_to_netcdf: refused: {error}", file=sys.stderr)
+        return 2
+    if args.target_dir is not None:
+        summary["netcdf"] = convert_wrfout_directory(
+            source_dir=source_dir,
+            target_dir=args.target_dir.resolve(),
+            copy_files=args.copy,
+        )
+    if args.manifest is not None:
+        args.manifest.parent.mkdir(parents=True, exist_ok=True)
+        args.manifest.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Export wrfout files as explicit .nc NetCDF files."
     )
     parser.add_argument("source_dir", type=Path, help="Directory containing wrfout_d* files")
-    parser.add_argument("target_dir", type=Path, help="Directory to write .nc outputs")
+    parser.add_argument(
+        "target_dir",
+        type=Path,
+        nargs="?",
+        default=None,
+        help="Directory to write .nc outputs (optional with --icechunk-group)",
+    )
     parser.add_argument(
         "--copy",
         action="store_true",
@@ -373,9 +463,50 @@ def main() -> int:
     )
     parser.add_argument(
         "--icechunk-repo",
-        type=Path,
+        type=_repo_location,
         default=None,
-        help="Optional local Icechunk repository directory for Zarr export",
+        help=(
+            "Icechunk repository: s3://bucket/prefix, gs://bucket/prefix, "
+            "file:///path, memory://name or a local directory"
+        ),
+    )
+    parser.add_argument(
+        "--icechunk-group",
+        type=str,
+        default=None,
+        help=(
+            "Write this segment's frames into GROUP on a pre-allocated time axis "
+            "(parallel-safe; woof.energy.icechunk_store.write_gridded_segment)"
+        ),
+    )
+    parser.add_argument(
+        "--time-axis",
+        type=str,
+        default=None,
+        help="With --icechunk-group: START,END,INTERVAL of the group's axis (e.g. "
+        "2025-01-01T00:00,2025-12-31T23:45,15min); required to create the group",
+    )
+    parser.add_argument(
+        "--window",
+        type=str,
+        default=None,
+        help="With --icechunk-group: FIRST,END; keep frames with FIRST <= time < END",
+    )
+    parser.add_argument("--job-id", type=str, default=None, help="Job id for commit metadata")
+    parser.add_argument(
+        "--segment-id", type=str, default=None, help="Segment id for commit metadata"
+    )
+    parser.add_argument(
+        "--on-existing",
+        choices=("skip", "overwrite"),
+        default="skip",
+        help="With --icechunk-group: frames already written are skipped (default) or rewritten",
+    )
+    parser.add_argument(
+        "--time-chunk",
+        type=int,
+        default=1,
+        help="With --icechunk-group: frames per time chunk when creating the group (default 1)",
     )
     parser.add_argument(
         "--icechunk-branch",
@@ -432,11 +563,19 @@ def main() -> int:
 
     if args.watch_icechunk and args.icechunk_repo is None:
         raise SystemExit("--watch-icechunk requires --icechunk-repo")
+    if args.icechunk_group is not None:
+        if args.icechunk_repo is None:
+            raise SystemExit("--icechunk-group requires --icechunk-repo")
+        if args.watch_icechunk:
+            raise SystemExit("--icechunk-group and --watch-icechunk are exclusive")
+        return _segment_main(args)
+    if args.target_dir is None:
+        raise SystemExit("target_dir is required without --icechunk-group")
 
     if args.watch_icechunk:
         summary = stream_wrfout_to_icechunk(
             source_dir=args.source_dir.resolve(),
-            repo_dir=args.icechunk_repo.resolve(),
+            repo_dir=args.icechunk_repo,
             branch=args.icechunk_branch,
             message_prefix=args.icechunk_message,
             compress_zstd_bitshuffle=bool(args.compress_zstd_bitshuffle),
@@ -465,7 +604,7 @@ def main() -> int:
     if args.icechunk_repo is not None:
         summary["icechunk"] = export_to_icechunk(
             source_dir=args.source_dir.resolve(),
-            repo_dir=args.icechunk_repo.resolve(),
+            repo_dir=args.icechunk_repo,
             branch=args.icechunk_branch,
             message=args.icechunk_message,
             compress_zstd_bitshuffle=bool(args.compress_zstd_bitshuffle),
