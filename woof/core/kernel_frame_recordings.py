@@ -759,6 +759,12 @@ SM86_NVRTC_13_4_92 = KernelFrameRecording(
     frames=MappingProxyType({
         'wdm6': 0,
         'wsm6': 0,
+        # The nwp_diagnostics wind maxima and UPP gust fold
+        # (woof/core/kernels/wind_gust_diag.cu), read 2026-10-14 on this
+        # card through the production loader (get_kernel(...)
+        # .local_size_bytes), CuPy 14.2.0: 0 B, 72 registers -- and the
+        # same 0 B / 72 registers under this box's NVRTC 12.9.
+        'wind_gust_diag': 0,
     }),
 )
 
@@ -794,7 +800,10 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
     nvrtc_build='13.4.92',
     platform_family='linux',
     measured='2026-10-05',
-    complete=True,
+    # NOT COMPLETE since 2026-10-14: wind_gust_diag.cu (the nwp_diagnostics
+    # wind maxima) joined after this reading and has been read only on
+    # sm_86 (SM86_NVRTC_13_4_92, 0 B).  Re-read it here to restore the claim.
+    complete=False,
     frames=MappingProxyType({
         # Three standalone units the 2.8.6 staging line added without a row
         # (so this recording stopped being complete): the fork's order-five

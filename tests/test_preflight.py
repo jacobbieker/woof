@@ -498,22 +498,29 @@ def test_scratch_registry_feature_matrix(d01_cfg):
 
 
 def test_nwp_diagnostics_prices_exactly_the_uh_planes(d01_cfg):
-    """The UP_HELI_MAX lane costs FIVE (ny, nx) FP32 planes and nothing
+    """The nwp_diagnostics lane costs ELEVEN (ny, nx) FP32 planes and nothing
     else; the flagship (nwp_diagnostics = 0) registry is untouched.
 
-    Three were the diagnostic's own (the accumulator plus two per-launch
-    work planes).  The other two are the consumer-owned tracking windows
+    Three are UP_HELI_MAX's own (the accumulator plus two per-launch
+    work planes).  Two are the consumer-owned tracking windows
     added 2026-08-07: same running-max operator, folded in the same pass,
     but reset by the consumer that reads them instead of by the history
     writer, so a storm-following nest's placement stopped depending on
     the output cadence.  They are priced on this gate because that is the
-    gate that allocates them.
+    gate that allocates them.  The remaining six are the wind running
+    maxima of the same family (WSPD10MAX, U10MAX, V10MAX, W_UP_MAX,
+    W_DN_MAX, GUST; woof/core/wind_gust_diag.py), folded by one
+    column-local kernel with no work planes.
     """
     base = pf.scratch_slot_registry(d01_cfg, n_lbc_intervals=2)
     on_cfg = dataclasses.replace(d01_cfg, nwp_diagnostics=1)
     on = pf.scratch_slot_registry(on_cfg, n_lbc_intervals=2)
+    # Plus the six wind running maxima of the same family
+    # (woof/core/wind_gust_diag.py), allocated on the same gate.
     added = {"up_heli_max", "uh_diag_col", "uh_diag_use",
-             "uh_follow_window", "uh_spawn_window"}
+             "uh_follow_window", "uh_spawn_window",
+             "wspd10max", "u10max", "v10max", "w_up_max", "w_dn_max",
+             "gust_max"}
     assert set(on) - set(base) == added
     assert not added & set(base)
     for slot in added:

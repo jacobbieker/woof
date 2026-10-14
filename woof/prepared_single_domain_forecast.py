@@ -8946,6 +8946,7 @@ def run_prepared_forecast(
     )
     from woof.core.refl import consume_refl_10cm, domain_start_ticks_of
     from woof.core.uh_diag import reset_up_heli_max
+    from woof.core.interval_maxima import reset_history_interval_maxima
     from woof.ingest.hrrr_physics import initialize_prepared_physics
     from woof.runtime import declared_constant_glw
     from woof.ingest.prepared_cache import restore_prepared_cache
@@ -9491,6 +9492,8 @@ def run_prepared_forecast(
         # later default-stream mutation, so zeroing here cannot race the
         # staged copy.
         reset_up_heli_max(current.state)
+        # Every other history-interval running max, same placement.
+        reset_history_interval_maxima(current.state)
         memory_watch.sample()
 
     def progress_callback(**event):

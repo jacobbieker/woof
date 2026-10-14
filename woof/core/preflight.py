@@ -2142,6 +2142,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # (kernel_frame_recordings).
     "rrtmg_aer3": 24,
     "uh_diag": 0,
+    # nwp_diagnostics wind maxima + UPP gust: 0 B on sm_86 at NVRTC 13.4.92
+    # and 12.9 (kernel_frame_recordings.SM86_NVRTC_13_4_92).
+    "wind_gust_diag": 0,
     # The UW moist-turbulence PBL (bl_pbl_physics = 9): uwpbl_columns keeps
     # CAM's automatic arrays in a global per-column workspace
     # (:func:`uwpbl_column_workspace_bytes`), so what is left on the stack
@@ -4854,6 +4857,12 @@ def scratch_slot_registry(cfg: RunConfig, *,
         # field to carry them would move the frozen-config surface for
         # two (ny, nx) FP32 planes.
         slots.update(uh_follow_window=s2, uh_spawn_window=s2)
+        # woof/core/wind_gust_diag.py: the six serialized wind running
+        # maxima (WSPD10MAX, U10MAX, V10MAX, W_UP_MAX, W_DN_MAX, GUST),
+        # eagerly allocated on the same gate.  No work planes: the fold
+        # is one column-local kernel.
+        slots.update(wspd10max=s2, u10max=s2, v10max=s2,
+                     w_up_max=s2, w_dn_max=s2, gust_max=s2)
 
     if cfg.mp_physics == 1:
         # microphysics.py:143-163 (Kessler prep + accumulators).
@@ -5941,6 +5950,17 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "woof/core/uh_diag.py:update_up_heli_max,reset_up_heli_max; "
         "woof/io/restart.py:SERIALIZED_SCRATCH_SLOTS",
         "restart-visible running-max accumulator with a reset only at "
+        "history writes"),
+    # The wind running maxima and the UPP gust: the same carrying class
+    # as up_heli_max, read-modify-written by one column-local kernel each
+    # step and zeroed only after history writes.
+    ScratchSlotLifetime(
+        ("wspd10max", "u10max", "v10max", "w_up_max", "w_dn_max",
+         "gust_max"), "carrying",
+        "woof/core/wind_gust_diag.py:update_wind_maxima,reset_wind_maxima; "
+        "woof/core/interval_maxima.py:reset_history_interval_maxima; "
+        "woof/io/restart.py:SERIALIZED_SCRATCH_SLOTS",
+        "restart-visible running-max accumulators with a reset only at "
         "history writes"),
     # UP_HELI_MAX work planes: uh_columns writes every cell of both planes
     # (edge threads included) before uh_smooth_max reads them, all inside

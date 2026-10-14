@@ -151,6 +151,14 @@ New:
   Each part sizes against the capacity it reports rather than its marketing
   size (an L40S at 45.0 GiB). These rows live in the new `woof.card_catalog`
   with SM count and bandwidth and are marked declared, not measured locally.
+- `nwp_diagnostics = 1` now also writes the wind members of WRF's
+  `nwp_diagnostics` family, `WSPD10MAX`, `W_UP_MAX` and `W_DN_MAX`, plus
+  `U10MAX`/`V10MAX` (the 10 m wind at the instant of the speed maximum)
+  and `GUST`, the interval-maximum surface gust from the NCEP UPP
+  `CALGUST` method. Each is folded on every model step on the GPU, reset
+  after each history frame and carried in checkpoints. The `energy`
+  preset selects them. The method and where WOOF differs from WRF are in
+  `docs/energy-hindcast/gusts.md`.
 
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14

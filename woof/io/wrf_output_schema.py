@@ -1023,6 +1023,21 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
                      "m s-1"),
     "WSPD_HUB_MEAN": ("TIME-MEAN WIND SPEED AT HUB HEIGHT OVER HISTORY "
                       "INTERVAL", "m s-1"),
+    # The wind members of the same nwp_output family (Registry.EM_COMMON:
+    # 2079-2081, IO "rh02", attribute text verbatim) and the U/V pair at the
+    # instant of the speed max (WRF's clim varstatisticsWIND rule; WRF's
+    # own U10MAX/V10MAX rows live in the output_diagnostics package and
+    # read "MAXIMUM U/V AT 10M HEIGHT IN DIAGNOSTIC OUTPUT INTERVAL", which
+    # misdescribes what that code stores).  GUST is the history-interval
+    # max of the UPP CALGUST estimate.  All six present exactly when the
+    # run carries nwp_diagnostics = 1 (woof.core.wind_gust_diag).
+    "WSPD10MAX": ("WIND SPD MAX 10 M", "m s-1"),
+    "U10MAX": ("U AT 10 M AT TIME OF WSPD10MAX", "m s-1"),
+    "V10MAX": ("V AT 10 M AT TIME OF WSPD10MAX", "m s-1"),
+    "W_UP_MAX": ("MAX Z-WIND UPDRAFT", "m s-1"),
+    "W_DN_MAX": ("MAX Z-WIND DOWNDRAFT", "m s-1"),
+    "GUST": ("MAX SURFACE WIND GUST (UPP CALGUST) IN HISTORY INTERVAL",
+             "m s-1"),
     "HGT": ("Terrain Height", "m"),
     "PSFC": ("SFC PRESSURE", "Pa"),
     # RAINC/RAINSH/RAINNC/SNOWNC/GRAUPELNC/HAILNC used to live here.  They

@@ -577,6 +577,12 @@ BASELINE_PINNED: dict[str, str] = {
     # packaged oracle fixtures (tests/test_uwpbl_launcher_wrf471_parity.py).
     "uwpbl":
         "79ba54c179dbe7d3c7966de5e08d5d223eaf2c169fca02ba864f3baba0ec2423",
+    # The nwp_diagnostics wind maxima (WSPD10MAX, U10MAX/V10MAX,
+    # W_UP_MAX/W_DN_MAX) and the UPP CALGUST surface gust, held bit for bit
+    # to the NumPy mirror in woof/core/wind_gust_diag.py
+    # (tests/test_wind_gust_diag.py, GPU tier).
+    "wind_gust_diag":
+        "922c431776984b6e9643d52012c21a5d662d93e93b58b753524a9cf5a9aefae9",
     # RE-PINNED 2026-09-20 after three commits moved the file and none
     # re-pinned it (red on every box since 2026-09-13; proof/node-reds-276):
     #   * 07d1ef7e3 (2026-09-12) fix(physics): publish current WDM6

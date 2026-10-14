@@ -2691,10 +2691,12 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     # nwp_diagnostics (Registry.EM_COMMON:2210, &time_control, default 0):
     # mapped 1:1 onto the RunConfig field of the same name (knob-parity
     # conventions -- emitted only when supplied, WRF Registry default ==
-    # frozen RunConfig default).  woof implements the UP_HELI_MAX member
-    # of WRF's nwp_output family per step (woof/core/uh_diag.py); the
-    # unimplemented members (WSPD10MAX, W_UP_MAX/W_DN_MAX, W_MEAN,
-    # GRPL_MAX, HAIL_MAX*) are simply absent from wrfouts, and WRF's
+    # frozen RunConfig default).  woof implements the UP_HELI_MAX,
+    # WSPD10MAX and W_UP_MAX/W_DN_MAX members of WRF's nwp_output family
+    # per step, plus U10MAX/V10MAX and the UPP GUST
+    # (woof/core/uh_diag.py, woof/core/wind_gust_diag.py); the
+    # unimplemented members (W_MEAN, GRPL_MAX, REFD_MAX, HAIL_MAX*) are
+    # simply absent from wrfouts, and WRF's
     # every-step diagflag forcing (solve_em.F:369) changes only which
     # instant computes diagnostics WRF then discards -- the emitted
     # instantaneous REFL_10CM at history time is the same field either
@@ -2708,7 +2710,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             raise _err(
                 "time_control", "nwp_diagnostics", nwp_diagnostics_values,
                 "must be 0 (off, the WRF default) or 1 (per-step "
-                "UP_HELI_MAX running-max diagnostic).")
+                "UP_HELI_MAX, WSPD10MAX, U10MAX/V10MAX, W_UP_MAX/W_DN_MAX "
+                "and GUST running-max diagnostics).")
         nwp_diagnostics = value
 
     # WRF's Registry default is .true. for EVERY element -- Registry.EM_COMMON:

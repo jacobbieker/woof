@@ -952,6 +952,17 @@ class DomainState:
             # window the run actually folded.
             self.scratch((ny, nx), "uh_follow_window")
             self.scratch((ny, nx), "uh_spawn_window")
+            # The wind members of the same family plus the UPP gust
+            # (woof/core/wind_gust_diag.py owns the fold; the history
+            # writers reset them through woof/core/interval_maxima.py).
+            # Serialized running maxima, allocated eagerly for the same
+            # deterministic-manifest reason as up_heli_max.
+            self.scratch((ny, nx), "wspd10max")
+            self.scratch((ny, nx), "u10max")
+            self.scratch((ny, nx), "v10max")
+            self.scratch((ny, nx), "w_up_max")
+            self.scratch((ny, nx), "w_dn_max")
+            self.scratch((ny, nx), "gust_max")
 
     def load_base(self, coord: VerticalCoord, base: BaseState, *, native_host=False) -> None:
         """Copy the float64 setup-time coordinate/base arrays to device FP32."""

@@ -466,7 +466,7 @@ wrong answer reported as a success. Put them in `[shared]`.
 | `morr_rimed_ice` | `morr_rimed_ice` | 1 (hail) | 0, 1 | Morrison dense ice identity |
 | `wsm6_hail_opt` | `hail_opt` | 0 (graupel) | 0, 1 | WSM6 rimed-ice identity |
 | `ysu_topdown_pblmix` | `ysu_topdown_pblmix` | 1 | 0, 1 | YSU top-down radiation-driven mixing |
-| `nwp_diagnostics` | `nwp_diagnostics` (&time_control) | 0 | 0, 1 | per-step UP_HELI_MAX running max (2-5 km updraft helicity, WRF cal_helicity), reset each history frame, restart-carried, trajectory-inert; the other WRF nwp_output maxima are not carried; wizard configs set 1 |
+| `nwp_diagnostics` | `nwp_diagnostics` (&time_control) | 0 | 0, 1 | per-step running maxima, reset each history frame, restart-carried, trajectory-inert: UP_HELI_MAX (2-5 km updraft helicity, WRF cal_helicity), WSPD10MAX with U10MAX/V10MAX, W_UP_MAX/W_DN_MAX, and the UPP CALGUST surface GUST (docs/energy-hindcast/gusts.md); W_MEAN, GRPL_MAX, REFD_MAX and HAIL_MAX* are not carried; wizard configs set 1 |
 | `isftcflx` | `isftcflx` | 0 | 0, 1, 2 | MM5 sfclay water-point roughness (Garratt/Donelan) |
 | `iz0tlnd` | `iz0tlnd` | 0 | 0, 1, 2 | MM5 sfclay land thermal roughness |
 | `usemonalb` | `usemonalb` | false | bool | Monthly background albedo for Noah and RUC; the HRRR configuration recipe selects true |

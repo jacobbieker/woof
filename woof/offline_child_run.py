@@ -3506,6 +3506,8 @@ def _run(args: argparse.Namespace,
         interval_diagnostics.close_interval(
             child, valid_time=valid, output_dir=outdir,
             grid_id=int(cfg.grid_id))
+        from woof.core.interval_maxima import reset_history_interval_maxima
+        reset_history_interval_maxima(child)
         _log("child_output", elapsed_seconds=float(clock.elapsed_seconds),
              path=str(path), bytes=path.stat().st_size)
         progress.output_committed(domain=int(cfg.grid_id),
