@@ -13,17 +13,25 @@ Pinned here
 -----------
 
 **Segments.**  Segment ``k`` of a request runs from ``first + k * keep``
-for ``segment_hours`` (default :data:`DEFAULT_SEGMENT_HOURS`, 6 h), where
+for ``segment_hours`` (default :data:`DEFAULT_SEGMENT_HOURS`, 9 h), where
 ``keep = segment_hours - spinup_hours`` (default 6 h) and ``first`` is
 ``--start`` at ``--cycle-hour`` (default 00 UTC).  Segments are generated
 while their run start is before ``--end`` (exclusive), so ``--start
 2025-11-01 --end 2025-11-04`` is twelve 6-hourly segments.  Its first
-``spinup_hours`` (default :data:`DEFAULT_SPINUP_HOURS`, 0 h) are spin-up;
+``spinup_hours`` (default :data:`DEFAULT_SPINUP_HOURS`, 3 h) are spin-up;
 the **kept window** is ``[run_start + spinup, run_end)``, half-open, so
 consecutive segments tile time with no gap and no duplicate frame.
 Everything is naive UTC arithmetic on :class:`datetime.datetime`: month
 ends, 29 February and daylight-saving changes need no special case, and
 an input with a non-UTC offset is refused rather than converted.
+
+**Grid.**  A cluster's leaf spacing is its partition's ``leaf_dx_m``, else
+``--dx-m``, else :data:`DEFAULT_DX_M` (300 m); a ``--dx-m`` that disagrees
+with the partition is refused.  Every domain carries the wind-energy column
+(:mod:`woof.energy.vertical`) at ``--p-top-pa`` with ``--nz`` levels,
+default :data:`DEFAULT_NZ` (49, the smallest lean column).  Both defaults
+are the cost-efficient end of the requirement (docs/energy-hindcast/
+cost.md); finer spacing and more levels are flags.
 
 **Job identity.**  A job's id is ``<cluster>-<YYYYMMDDTHH>Z-<sha12>``,
 where the sha256 is over the canonical JSON of every input that changes
@@ -127,16 +135,30 @@ TOPOLOGIES = ("wrf-nests", "wrf-tiles")
 _PLANNER_MODULES = {"wrf-nests": "woof.energy.plan_wrf_nests",
                     "wrf-tiles": "woof.energy.plan_wrf_tiles"}
 
-#: One forecast per global cycle: each 6 h run starts at a 00/06/12/18 UTC
-#: init and is kept whole, half-open, so the 6-hourly forecasts stitch into
-#: one continuous analysis ([00, 06), [06, 12), ...) with every frame from
-#: the freshest init.  ``--spinup-hours`` > 0 trades that alignment for a
-#: discarded lead: 7 h runs with 1 h spin-up keep [01, 07), [07, 13), ...
-DEFAULT_SEGMENT_HOURS = 6
-DEFAULT_SPINUP_HOURS = 0
+#: One forecast per global cycle: each 9 h run starts at a 00/06/12/18 UTC
+#: init, its first 3 h are discarded as spin-up and the next 6 h are kept,
+#: half-open, so the forecasts stitch into one continuous analysis
+#: ([03, 09), [09, 15), [15, 21), [21, 03), ...) with no frame younger than
+#: 3 h into its run.  ``--segment-hours 6 --spinup-hours 0`` keeps each
+#: forecast from its init ([00, 06), ...) at two thirds of the GPU time;
+#: the 3 h spin-up costs 9/6 = 1.5x the simulated hours (docs/energy-
+#: hindcast/cost.md prices both).
+DEFAULT_SEGMENT_HOURS = 9
+DEFAULT_SPINUP_HOURS = 3
 DEFAULT_CYCLE_HOUR = 0
 DEFAULT_TOPOLOGY = "wrf-nests"
-DEFAULT_DX_M = 100.0
+#: Leaf spacing of a cluster that does not carry one (``--sites``): 300 m,
+#: the coarse end of the 100-300 m reanalysis range and the cheapest.
+#: Leaf cost scales about as dx**-3 (cells x steps), so 300 m costs about
+#: a third of 200 m and a twenty-seventh of 100 m (docs/energy-hindcast/
+#: cost.md, "Cheapest configuration"); finer spacing is ``--dx-m``.
+DEFAULT_DX_M = 300.0
+#: Model levels every planned domain carries: the smallest lean
+#: wind-energy column (woof.energy.vertical.HINDCAST_NZ, 49: >= 8 layers
+#: below 250 m, 12 m lowest layer, top <= 20 km, no layer deeper than
+#: 1000 m).  ``--nz`` overrides; the column still refuses a count that
+#: breaks the rotor or top rules.
+DEFAULT_NZ = 49
 DEFAULT_CORRIDOR_KM = 2.0
 #: Leaf history cadence (s): quarter-hourly energy products.
 DEFAULT_LEAF_HISTORY_INTERVAL_S = 900.0
@@ -228,7 +250,7 @@ class HindcastRequest:
     dx_m: float | None = None
     corridor_km: float = DEFAULT_CORRIDOR_KM
     parent_dx_m: float | None = None
-    nz: int | None = None
+    nz: int | None = DEFAULT_NZ
     card: str | None = None
     vram_gib: float | None = None
     max_domains: int | None = None
@@ -2075,9 +2097,32 @@ def _load_writer(spec: str | None) -> Callable[..., Any] | None:
     return writer
 
 
+def default_spinup_for(segment_hours: int) -> int:
+    """The spin-up an omitted ``--spinup-hours`` means for ``--segment-hours``.
+
+    :data:`DEFAULT_SPINUP_HOURS` (3 h), but only where the kept window it
+    leaves is a whole number of 6-hourly cycles, so every run still starts
+    at a global init.  Otherwise the omission is refused: a script that
+    passes the old ``--segment-hours 6`` alone would keep 3 h windows and
+    start runs at 03/09/15/21 UTC, which is never what it meant.
+    """
+
+    keep = int(segment_hours) - DEFAULT_SPINUP_HOURS
+    if int(segment_hours) == DEFAULT_SEGMENT_HOURS or (keep > 0 and keep % 6 == 0):
+        return DEFAULT_SPINUP_HOURS
+    raise HindcastRefused(
+        f"--segment-hours {segment_hours} without --spinup-hours: the default "
+        f"{DEFAULT_SPINUP_HOURS} h spin-up would keep {keep} h per run, so "
+        "runs would not start on the 00/06/12/18 UTC inits; give "
+        "--spinup-hours explicitly (0 keeps each run whole, as the old "
+        "6 h default did)")
+
+
 def _request_from_args(args) -> HindcastRequest:
     start, start_has_hour = parse_utc(args.start, "--start")
     end, _ = parse_utc(args.end, "--end")
+    spinup = (args.spinup_hours if args.spinup_hours is not None
+              else default_spinup_for(args.segment_hours))
     return HindcastRequest(
         outdir=Path(args.outdir), start=start, end=end,
         sites_path=None if args.sites is None else Path(args.sites),
@@ -2085,7 +2130,7 @@ def _request_from_args(args) -> HindcastRequest:
                         else Path(args.partition)),
         clusters=args.clusters, cluster_id=args.cluster_id,
         topology=args.topology, segment_hours=args.segment_hours,
-        spinup_hours=args.spinup_hours, cycle_hour=args.cycle_hour,
+        spinup_hours=spinup, cycle_hour=args.cycle_hour,
         start_has_hour=start_has_hour, dx_m=args.dx_m,
         corridor_km=args.corridor_km, parent_dx_m=args.parent_dx_m,
         nz=args.nz, card=args.card, vram_gib=args.vram_gib,

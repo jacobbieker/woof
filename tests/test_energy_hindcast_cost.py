@@ -253,6 +253,7 @@ def test_plan_estimate_end_to_end(tmp_path, capsys):
     plan = write_plan(tmp_path)
     out = tmp_path / "estimate.json"
     code, doc, err = _run(["--plan", str(plan), "--segments", "365",
+                           "--spinup-hours", "6",
                            "--instance", "aws:p5.48xlarge",
                            "--instance", "gcp:a3-highgpu-8g",
                            "--instance", "aws:g5.xlarge",
@@ -345,7 +346,7 @@ def test_store_preset_moves_leaf_output_time_and_bytes(tmp_path, capsys):
 
 def test_storage_is_per_offer_in_synthesised_modes(capsys):
     _, doc, _ = _run(["--clusters", "2", "--footprint-km2", "20000",
-                      "--instance", "aws:g5.xlarge",
+                      "--leaf-dx-m", "200", "--instance", "aws:g5.xlarge",
                       "--instance", "aws:p5.48xlarge"], capsys)
     g5, p5 = doc["offers"]
     # Smaller cards cut the cover into more tiles, each with its own rim.
@@ -378,7 +379,7 @@ def test_plan_domain_without_dx_is_refused(tmp_path):
 def test_partition_refuses_footprint_flag_and_mismatched_chains(tmp_path, capsys):
     doc = tmp_path / "p.json"
     doc.write_text(json.dumps({"clusters": [
-        {"id": "a", "area_km2": 10.0},
+        {"id": "a", "area_km2": 10.0, "dx_m": 200.0},
         {"id": "b", "area_km2": 10.0, "dx_m": 500.0}]}))
     code, out, _ = _run(["--partition", str(doc), "--footprint-km2", "9"], capsys)
     assert code == 2 and "--footprint-km2 is summary-mode" in out["refused"]
@@ -444,7 +445,8 @@ def test_synthesised_tiles_fit_the_card_and_split_when_large():
 
 
 def test_summary_is_n_times_one_cluster_and_matches_partition(tmp_path, capsys):
-    common = ["--instance", "aws:p5.48xlarge", "--segments", "10"]
+    common = ["--instance", "aws:p5.48xlarge", "--segments", "10",
+              "--leaf-dx-m", "200"]
     _, one, _ = _run(["--clusters", "1", "--footprint-km2", "50", *common], capsys)
     _, three, _ = _run(["--clusters", "3", "--footprint-km2", "150", *common],
                        capsys)
@@ -552,8 +554,8 @@ def test_price_table_refusals(tmp_path):
 @pytest.mark.parametrize("argv, match", [
     ([], "exactly one of"),
     (["--clusters", "3"], "needs --footprint-km2"),
-    (["--clusters", "3", "--footprint-km2", "10", "--chain-m", "1000,300"],
-     "ends at 300"),
+    (["--clusters", "3", "--footprint-km2", "10", "--chain-m", "1000,200"],
+     "ends at 200"),
     (["--clusters", "3", "--footprint-km2", "10", "--chain-m", "200,1000"],
      "coarsest first"),
     (["--clusters", "3", "--footprint-km2", "10", "--spinup-hours", "40"],
@@ -580,3 +582,141 @@ def test_register_estimate_mounts_under_another_group():
 def test_campaign_stored_hours():
     assert Campaign(365, 30.0, 6.0).stored_hours == 24.0
     assert ClusterSpec("c", 1.0, 200.0, None).region_km2 is None
+
+
+# --------------------------------------------------------------------------
+# utilisation, defaults and the partition spacing gotcha
+# --------------------------------------------------------------------------
+def test_every_utilisation_pair_reproduces_the_receipts():
+    for pair in cost.UTILISATION.values():
+        k = calibration(pair)["k_cell_steps_per_s_per_gbs"]
+        for receipt in cost.CALIBRATION_RECEIPTS:
+            card = CARD_CATALOG[receipt["card"]]
+            predicted = sum(
+                domain_seconds(DomainWork("r", "parent", nx, ny, nz, 1000.0, 1.0,
+                                          float(steps), restart_s=None,
+                                          history_s=1e12), card, k,
+                               utilisation=pair)["compute_s"]
+                for nx, ny, nz, steps in receipt["domains"])
+            assert predicted == pytest.approx(receipt["wall_s"], rel=0.15), \
+                (pair.label, receipt["id"])
+
+
+def test_small_domains_do_not_saturate_big_cards():
+    # Throughput is not linear in cells: utilisation rises with cells, and
+    # the pessimistic knee costs a big card more than a small one on a
+    # small domain (so the band never favours an H100 for a tiny tile).
+    h100, l4 = CARD_CATALOG["h100-sxm-80gb"], CARD_CATALOG["l4-24gb"]
+    pess = cost.UTILISATION["pessimistic"]
+    k_c = calibration()["k_cell_steps_per_s_per_gbs"]
+    k_p = calibration(pess)["k_cell_steps_per_s_per_gbs"]
+
+    def util(domain, card, k=k_c, pair=cost.CENTRAL):
+        one = domain_seconds(domain, card, k, utilisation=pair)
+        return one["saturated_s"] / one["compute_s"]
+
+    tiny, big = _domain(nx=60, ny=60), _domain(nx=900, ny=900)
+    assert util(tiny, h100) < util(big, h100) < 1.0
+    assert util(tiny, h100) < util(tiny, l4)
+
+    def ratio(card):
+        return (domain_seconds(tiny, card, k_p, utilisation=pess)["compute_s"]
+                / domain_seconds(tiny, card, k_c)["compute_s"])
+
+    assert ratio(h100) > ratio(l4) > 1.0
+
+
+def test_band_envelopes_throughput_and_utilisation(capsys):
+    _, doc, _ = _run(["--clusters", "2", "--footprint-km2", "200",
+                      "--instance", "aws:p5.48xlarge",
+                      "--instance", "aws:g5.xlarge"], capsys)
+    model = doc["model"]["utilisation"]
+    assert set(model["pairs"]) == {"optimistic", "central", "pessimistic"}
+    assert "ASSUMPTIONS" in model["status"]
+    for offer in doc["offers"]:
+        g = offer["gpu_hours"]
+        assert g["low"] < g["central"] < g["high"]
+        u = offer["utilisation"]
+        assert 0 < u["pessimistic"] < u["central"] < u["optimistic"] <= 1
+
+
+def test_estimate_defaults_are_the_hindcast_drivers(capsys):
+    from woof.energy import hindcast, partition, vertical
+
+    assert (cost.DEFAULT_SEGMENT_HOURS, cost.DEFAULT_SPINUP_HOURS) == (
+        hindcast.DEFAULT_SEGMENT_HOURS, hindcast.DEFAULT_SPINUP_HOURS) == (9, 3)
+    assert cost.DEFAULT_LEAF_DX_M == hindcast.DEFAULT_DX_M \
+        == partition.DEFAULT_LEAF_DX_M == 300.0
+    assert cost.DEFAULT_LEAF_NZ == vertical.HINDCAST_NZ == 49
+    _, doc, _ = _run(["--clusters", "1", "--footprint-km2", "20",
+                      "--instance", "aws:g5.xlarge"], capsys)
+    camp = doc["campaign"]
+    # One year of 6 h kept windows: four 9 h runs a day.
+    assert (camp["segments"], camp["segment_hours"], camp["spinup_hours"]) \
+        == (1460, 9.0, 3.0)
+    assert camp["stored_hours_per_segment"] * camp["segments"] == 8760
+    assert doc["inputs"]["summary"]["leaf_dx_m"] == 300.0
+    assert doc["inputs"]["summary"]["leaf_nz"] == 49
+    assert any("one year" in note for note in doc["notes"])
+    assert cost.default_segments(30, 6) == 365
+
+
+def test_leaf_dx_that_disagrees_with_a_partition_is_refused(tmp_path, capsys):
+    # The gotcha: a --partition's clusters keep their own spacing, so a
+    # --leaf-dx-m that disagrees would be silently ignored.  It is refused.
+    doc = tmp_path / "p.json"
+    doc.write_text(json.dumps({"clusters": [
+        {"id": "a", "area_km2": 10.0, "leaf_dx_m": 200.0},
+        {"id": "b", "area_km2": 10.0}]}))
+    code, out, err = _run(["--partition", str(doc), "--leaf-dx-m", "300",
+                           "--instance", "aws:g5.xlarge"], capsys)
+    assert code == 2 and "cut at 200 m" in out["refused"]
+    assert "woof energy partition --leaf-dx-m 300" in out["refused"]
+    # Agreeing spacing is priced; the row without one takes the flag.
+    code, out, _ = _run(["--partition", str(doc), "--leaf-dx-m", "200",
+                         "--instance", "aws:g5.xlarge"], capsys)
+    assert code == 0
+    assert out["offers"][0]["work_per_segment"]["leaf"]["dx_m"] == [200.0]
+    # A job's spacing is held to the same rule.
+    job = tmp_path / "job.json"
+    job.write_text(json.dumps({"segments": 4, "planner_args": {"dx_m": 100}}))
+    code, out, _ = _run(["--partition", str(doc), "--job", str(job),
+                         "--instance", "aws:g5.xlarge"], capsys)
+    assert code == 2 and "the job's leaf spacing 100 m" in out["refused"]
+    # Without a spacing, each cluster keeps its own (b takes the default).
+    code, out, _ = _run(["--partition", str(doc), "--instance",
+                         "aws:g5.xlarge"], capsys)
+    assert code == 0
+    assert out["offers"][0]["work_per_segment"]["leaf"]["dx_m"] == [200.0, 300.0]
+
+
+def test_flags_that_would_be_silently_reinterpreted_are_refused(tmp_path,
+                                                                  capsys):
+    # --segment-hours 6 alone (the old default) under the 3 h spin-up
+    # default would price 2,920 off-cycle 3 h windows.
+    code, out, _ = _run(["--clusters", "1", "--footprint-km2", "20",
+                         "--segment-hours", "6"], capsys)
+    assert code == 2 and "give --spinup-hours" in out["refused"]
+    code, out, _ = _run(["--clusters", "1", "--footprint-km2", "20",
+                         "--segment-hours", "6", "--spinup-hours", "0",
+                         "--instance", "aws:g5.xlarge"], capsys)
+    assert code == 0 and out["campaign"]["segments"] == 1460
+    # A --chain-m that lands on no partition cluster would be ignored.
+    doc = tmp_path / "p.json"
+    doc.write_text(json.dumps({"clusters": [
+        {"id": "a", "area_km2": 10.0, "leaf_dx_m": 300.0}]}))
+    code, out, _ = _run(["--partition", str(doc), "--chain-m", "1000,200"],
+                        capsys)
+    assert code == 2 and "no cluster" in out["refused"]
+
+
+def test_shipped_price_table_carries_the_small_aws_cards():
+    table, _ = load_prices(today=date(2025, 7, 2))
+    rows = {(r["provider"], r["instance"]): r for r in table["instances"]}
+    for name, card, gpus in (("g6.xlarge", "l4-24gb", 1),
+                             ("g6.12xlarge", "l4-24gb", 4),
+                             ("g5.12xlarge", "a10g-24gb", 4),
+                             ("g5.48xlarge", "a10g-24gb", 8)):
+        row = rows[("aws", name)]
+        assert (row["card"], row["gpus"]) == (card, gpus)
+        assert "illustrative" in row["note"] and row["source"]

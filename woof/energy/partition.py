@@ -136,8 +136,12 @@ DEFAULT_MAX_EXTENT_KM = 250.0
 #: A cluster with more sites than this is bisected.
 DEFAULT_MAX_SITES = 20_000
 
-#: Leaf spacing, and the range a reanalysis leaf may take.
-DEFAULT_LEAF_DX_M = 200.0
+#: Leaf spacing, and the range a reanalysis leaf may take.  The default is
+#: the coarse end of the range: a leaf's cost goes about as dx**-3 (cells x
+#: steps), so 300 m is the cheapest admissible reanalysis
+#: (docs/energy-hindcast/cost.md, "Cheapest configuration"); 100-250 m is
+#: ``--leaf-dx-m``.
+DEFAULT_LEAF_DX_M = 300.0
 LEAF_DX_MIN_M, LEAF_DX_MAX_M = 100.0, 300.0
 
 #: Half-width of the high-resolution corridor around each site (the

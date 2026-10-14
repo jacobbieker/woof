@@ -9,9 +9,13 @@ A year can't be one run. No boundary source forecasts a year ahead, and a
 run restarted from its own checkpoint can't switch to a new forcing cycle
 (only the HRRR route chains restarts across cycles). So each segment is a
 fresh cold start from one source cycle. By default each global cycle
-(00/06/12/18 UTC) gets one 6 h forecast at 15-minute output, kept whole, and
-the forecasts stitch into one continuous analysis; `--spinup-hours` discards
-leading hours instead (see "Spin-up" below).
+(00/06/12/18 UTC) gets one 9 h forecast at 15-minute output. Its first 3 h
+are discarded as spin-up and hours 3 to 9 are kept, so the kept windows
+`[init + 3 h, init + 9 h)` stitch into one continuous analysis (see
+"Spin-up" below). By default the leaves are 300 m and every domain carries
+the 49-level wind-energy column. These are the cost-efficient end of the
+requirement; [cost.md](cost.md#cheapest-configuration) prices them against
+the alternatives.
 
 ## Segments
 
@@ -19,19 +23,28 @@ leading hours instead (see "Spin-up" below).
 |---|---|---|
 | `--start` | required | first segment's day (`YYYY-MM-DD`, or `YYYY-MM-DDTHH` on `--cycle-hour`) |
 | `--end` | required | exclusive bound on segment run starts |
-| `--segment-hours` | 6 | run length of every segment |
-| `--spinup-hours` | 0 | leading hours discarded |
+| `--segment-hours` | 9 | run length of every segment |
+| `--spinup-hours` | 3 | leading hours discarded; omitted with another `--segment-hours`, it is refused unless the kept window is still a whole number of 6-hourly cycles |
 | `--cycle-hour` | 0 | UTC hour each run starts from |
 
 Segment `k` runs from `start + k * keep` for `segment-hours`, where
 `keep = segment-hours - spinup-hours` (6 h by default). Its kept window
 is `[run_start + spinup, run_end)`, which is half-open, so consecutive
-segments tile time with no gap and no duplicate frame: the 06:00 frame
-comes from the 06Z init, never the 00Z forecast's last step. With the
-defaults, `--start 2025-11-01 --end 2025-11-04` makes twelve jobs, one per
-00/06/12/18Z init, and a year is 1,460 segments (1,464 in a leap year).
-The daily layout of earlier versions is `--segment-hours 30 --spinup-hours
-6` (365 segments a year, kept 06Z to 06Z).
+segments tile time with no gap and no duplicate frame: the 09:00 frame
+comes from the 06Z init (3 h in), never the 00Z forecast's last step. With
+the defaults, `--start 2025-11-01 --end 2025-11-04` makes twelve jobs, one
+per 00/06/12/18Z init, kept from 03Z on the first day to 03Z after the
+last, and a year is 1,460 segments (1,464 in a leap year). The stored
+period is therefore `[start + 3 h, end + 3 h)`: to cover 00-03Z of the
+first day, start the request a day earlier (or one cycle earlier with
+`--cycle-hour 18`). Consecutive requests stitch with no gap.
+`--segment-hours 6` on its own is refused: with the 3 h default it would
+keep 3 h windows from runs at 03/09/15/21Z, so give `--spinup-hours`. The 3 h spin-up
+costs 1.5x the GPU time of keeping each 6 h forecast whole
+(`--segment-hours 6 --spinup-hours 0`, kept `[init, init + 6 h)`); 1 h and
+2 h are `--segment-hours 7 --spinup-hours 1` and `8 / 2`. The daily layout
+of earlier versions is `--segment-hours 30 --spinup-hours 6` (365 segments
+a year, kept 06Z to 06Z).
 
 ### Spin-up
 
@@ -50,9 +63,12 @@ measured to cover most of its own domain
 ([GRAYZONE-NEST.md](../public/GRAYZONE-NEST.md)), and no amount of time
 spin-up removes that until the inflow generator lands. The model is
 numerically stable from the first step; spin-up is about realism, not
-blow-ups (those are a time-step and terrain question). Every stitch is a
-switch to a new init, so expect a step change at the join; `--spinup-hours`
-shrinks it, and ramp detection should treat join times as suspect.
+blow-ups (those are a time-step and terrain question). The 3 h default
+covers the noise and most of the boundary-layer adjustment; it does not
+cover cloud water or mesoscale circulations, which would need 6-12 h at 2x
+to 3x the cost. Every stitch is a switch to a new init, so expect a step
+change at the join; `--spinup-hours` shrinks it, and ramp detection should
+treat join times as suspect.
 
 All times are naive UTC. Month ends, 29 February and daylight-saving
 changes are just datetime arithmetic. An input with a non-UTC offset
@@ -96,6 +112,18 @@ wind-energy column of [the vertical page](vertical.md): explicit eta levels with
 a 12 m lowest layer, at least 8 layers below 250 m, and a top refused above
 20 km. At materialize it is checked against the `p_top` in the emitted
 configuration.
+
+## Grid defaults
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--dx-m` | the cluster's `leaf_dx_m`, else 300 | leaf spacing, 100 to 300 m; a value that disagrees with the partition's is refused |
+| `--nz` | 49 | levels of the wind-energy column on every domain: the smallest with at least 8 layers below 250 m, a 12 m lowest layer, a top at most 20 km and no layer deeper than 1000 m (`woof.energy.vertical.HINDCAST_NZ`) |
+
+Both are the cheap end of the requirement. 300 m costs about a third of
+200 m, and 49 levels cost about 0.76x of the 70-level preset with the same
+10 rotor layers. Pass `--dx-m 200 --nz 70` (and a partition cut at 200 m)
+for the finer grid.
 
 ## History
 

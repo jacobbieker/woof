@@ -60,6 +60,29 @@ The emitted header states the column:
 `woof domain` also prints one `domain: column ...` line with the top
 height and the lowest full levels.
 
+## The hindcast's lean column: 49 levels
+
+`woof energy hindcast plan` gives every domain the preset column with
+`--nz 49` by default (`woof.energy.vertical.HINDCAST_NZ`). 49 is the
+smallest count whose column keeps everything the preset proves AND has no
+layer deeper than `max_dz` (`lean_column_refusal`, found by
+`smallest_column_nz`):
+
+| `nz` | Result with the preset controls |
+|---:|---|
+| 46 or fewer | refused by WRF `compute_eta`: not enough levels to reach `p_top` |
+| 47 | refused by WRF: the top layer would exceed 1.5 x `max_dz` |
+| 48 | builds, but WRF stretches the top layer to 1,091 m, deeper than `max_dz` |
+| **49** | **10 layers below 250 m, 12 m lowest layer, top 19.97 km, deepest layer 966 m** |
+| 70 | the `woof energy plan` preset: the same 10 rotor layers, deepest layer 453 m |
+
+The rotor layers come from `dzbot` and `dzstretch_s`, not from `nz`, so the
+21 extra levels of the 70-level column all sit above the rotor, in the
+free troposphere and stratosphere. 49 levels are 70% of the cells and about
+0.76x of the cost ([cost.md](cost.md#cheapest-configuration)). `--nz 70`
+restores the preset column. A count that breaks the rotor or top rules is
+still refused by the column.
+
 ## `woof energy plan`: the wind-energy preset
 
 Any of the six flags on a WRF planner builds
