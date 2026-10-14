@@ -130,6 +130,10 @@ DOWNSCALE_HEALTH_INTERVAL_S = 60.0
 #: Schema of the per-tile spec document written to ``tiles/<id>.json``.
 TILE_SCHEMA = "woof-energy.wrf-tile.v1"
 
+#: Where ``--source auto`` writes its ``woof-energy.source-choice.v1``
+#: receipt, beside ``plan.json``.
+SOURCE_CHOICE_FILE = "source-choice.json"
+
 #: The step the planner prefers when it chooses the chain itself.
 DEFAULT_STEP_RATIO = 5
 
@@ -752,20 +756,82 @@ def tile_overrides(parent_cfg: dict, *, child_dx_m: float,
 # the plan
 
 
+def _auto_margin_km(*, dx_m: float, corridor_m: float,
+                    parent_dx_m: float | None) -> float:
+    """How far past the sites' box the parent may reach, in km.
+
+    The largest buffer :func:`build_plan` hands ``woof domain`` over the
+    chains it may try (every chain when ``parent_dx_m`` is not given, as
+    a coarser chain is tried when the finer parent does not fit), plus
+    :data:`woof.energy.source_select.PLANNER_SLACK_KM`.  Conservative: a
+    regional source is ranked out unless it reaches the widest parent.
+    """
+
+    from woof.domain_wizard import _SPEC_BDY_WIDTH
+    from woof.energy.source_select import PLANNER_SLACK_KM
+
+    if parent_dx_m is not None:
+        chains = [factor_chain(int(round(float(parent_dx_m) / dx_m)))]
+    else:
+        chains = [(DEFAULT_STEP_RATIO,) * steps
+                  for steps in range(1, MAX_CHAIN_STEPS + 1)]
+    clearance = _SPEC_BDY_WIDTH + TERRAIN_BLEND_ROWS + SINT_STENCIL_ROWS
+    widest = 0.0
+    for chain in chains:
+        pdx = dx_m * math.prod(chain)
+        margins = _level_margins(chain, pdx, corridor_m)
+        widest = max(widest, margins[0] + (clearance + 2) * pdx)
+    return widest / 1000.0 + PLANNER_SLACK_KM
+
+
+def _auto_source(sites: SiteSet, *, start: str, hours: float, dx_m: float,
+                 corridor_m: float, parent_dx_m: float | None,
+                 priority: Sequence[str] | None, now: datetime | None):
+    """``--source auto``: the selector's choice for these sites."""
+
+    from woof.domain_wizard import DEFAULT_MODEL_TOP_PA
+    from woof.energy.source_select import SourceSelectRefused, select_source
+
+    if parent_dx_m is not None:
+        total = float(parent_dx_m) / dx_m
+        if not math.isfinite(total) or abs(total - round(total)) > \
+                1e-6 * max(total, 1.0):
+            raise TilePlanRefusal(
+                f"--parent-dx-m {parent_dx_m:g} is not a whole multiple of "
+                f"--dx-m {dx_m:g}; woof downscale refines by integer ratios")
+    arrays = sites.as_arrays()
+    region = _sites_region(arrays["lon"], arrays["lat"])
+    try:
+        return select_source(
+            region, start, hours, p_top_pa=DEFAULT_MODEL_TOP_PA,
+            priority=priority, now=now,
+            margin_km=_auto_margin_km(dx_m=dx_m, corridor_m=corridor_m,
+                                      parent_dx_m=parent_dx_m))
+    except SourceSelectRefused as error:
+        raise TilePlanRefusal(f"--source auto: {error}") from error
+
+
 def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                corridor_km: float = 2.0, parent_dx_m: float | None = None,
                start: str | None = None, hours: float = 24.0,
                source: str | None = None, card: str | None = None,
                vram_gib: float | None = None, max_domains: int | None = None,
-               nz: int | None = None, now: datetime | None = None) -> Plan:
+               nz: int | None = None, now: datetime | None = None,
+               source_priority: Sequence[str] | None = None) -> Plan:
     """Emit the domains for ``sites`` under ``outdir`` and return the plan
     (already written to ``outdir/plan.json``).
 
     ``now`` fixes the clock the source availability windows are judged
-    against (:func:`woof.energy.source_window.window_refusal`)."""
+    against (:func:`woof.energy.source_window.window_refusal`).
+
+    ``source="auto"`` hands the choice to
+    :func:`woof.energy.source_select.select_source` (``source_priority``
+    replaces its default list), records its receipt in the plan's
+    ``source_choice`` and writes it to ``outdir/source-choice.json``."""
 
     from woof.domain_wizard import _SPEC_BDY_WIDTH
     from woof.energy.geometry import cover_with_rectangles
+    from woof.energy.source_select import is_auto, write_receipt
     from woof.energy.source_window import (canonical_source,
                                            newest_landed_start, registry_gap,
                                            source_notes, window_refusal)
@@ -790,13 +856,24 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                               "stencil width)")
     start_text = _parse_start(start) if start is not None \
         else default_start(now)
+    source_choice = None
+    if source_priority is not None and not is_auto(source):
+        raise TilePlanRefusal("--source-priority applies only with "
+                              "--source auto")
+    if is_auto(source):
+        source_choice = _auto_source(
+            sites, start=start_text, hours=hours_f, dx_m=dx_m,
+            corridor_m=corridor_m, parent_dx_m=parent_dx_m,
+            priority=source_priority, now=now)
+        source = source_choice.source
     if source is not None:
         gap = registry_gap(source)
         if gap is not None:
             raise TilePlanRefusal(gap)
         source = canonical_source(source)
-        if start is None:
-            # the newest cycle by the clock may not have landed yet
+        if start is None and source_choice is None:
+            # the newest cycle by the clock may not have landed yet (an
+            # auto choice already judged this cycle: its receipt binds it)
             start_text = newest_landed_start(
                 source, datetime.strptime(start_text, "%Y-%m-%dT%H"),
                 hours_f, now=now).strftime("%Y-%m-%dT%H")
@@ -1052,11 +1129,19 @@ def build_plan(sites: SiteSet, *, outdir: Path, dx_m: float = 100.0,
                          explicit_start=start is not None)
     if source is not None:
         notes += source_notes(source)
+    receipt_path = outdir / SOURCE_CHOICE_FILE
+    if source_choice is not None:
+        notes.append(source_choice.note())
+        write_receipt(source_choice, receipt_path)
+    else:
+        receipt_path.unlink(missing_ok=True)
     plan = Plan(topology=TOPOLOGY, dx_m=dx_m, start=start_text,
                 hours=float(hours_i), domains=domains, source=source,
                 sites_ref={"count": len(sites),
                            "content_sha256": _content_sha256(sites)},
-                notes=notes)
+                notes=notes,
+                source_choice=(None if source_choice is None
+                               else source_choice.to_json()))
     dump_plan(plan, outdir / "plan.json")
     return plan
 
@@ -1483,6 +1568,8 @@ def _plan_notes(*, parent: _Parent, chain: tuple[int, ...], dx_m: float,
 def main(args) -> int:
     """``woof energy plan --topology wrf-tiles``."""
 
+    from woof.energy.source_select import choice_summary
+
     sites_path = Path(args.sites)
     outdir = Path(args.outdir)
     sites = load_sites(sites_path)
@@ -1492,7 +1579,8 @@ def main(args) -> int:
             corridor_km=args.corridor_km, parent_dx_m=args.parent_dx_m,
             start=args.start, hours=args.hours, source=args.source,
             card=args.card, vram_gib=args.vram_gib,
-            max_domains=args.max_domains, nz=args.nz)
+            max_domains=args.max_domains, nz=args.nz,
+            source_priority=getattr(args, "source_priority", None))
     except EnergyNotImplemented as error:
         import sys
 
@@ -1517,6 +1605,10 @@ def main(args) -> int:
         "start": plan.start,
         "hours": plan.hours,
         "dx_m": plan.dx_m,
+        "source": plan.source,
+        **({} if plan.source_choice is None else {
+            "source_choice": choice_summary(plan.source_choice),
+            "source_choice_receipt": str(outdir / SOURCE_CHOICE_FILE)}),
         "parent": {
             "config": str(outdir / parent.config),
             "wps_namelist": str(outdir / parent.wps_namelist),

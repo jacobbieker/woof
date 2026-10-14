@@ -97,6 +97,11 @@ _HEX_ONLY_FLAGS = (("hex_experimental_dt", "--hex-experimental-dt"),
                    ("hex_forcing_wrfout", "--hex-forcing-wrfout"))
 
 
+#: Topologies whose planners take ``--source auto`` and
+#: ``--source-priority`` (woof.energy.source_select).
+_AUTO_SOURCE_TOPOLOGIES = ("wrf-nests", "wrf-tiles")
+
+
 def _plan(args) -> int:
     if args.topology != "hex-swath":
         given = [flag for attribute, flag in _HEX_ONLY_FLAGS
@@ -107,6 +112,19 @@ def _plan(args) -> int:
             print(f"woof energy plan: REFUSED: {', '.join(given)} applies "
                   f"only to --topology hex-swath; --topology {args.topology} "
                   "would ignore it", file=sys.stderr)
+            return 2
+    if args.topology not in _AUTO_SOURCE_TOPOLOGIES:
+        auto = str(args.source or "").strip().lower() == "auto"
+        given = (["--source auto"] if auto else []) + (
+            ["--source-priority"]
+            if getattr(args, "source_priority", None) is not None else [])
+        if given:
+            import sys
+
+            print(f"woof energy plan: REFUSED: {', '.join(given)} applies "
+                  f"only to --topology {' or '.join(_AUTO_SOURCE_TOPOLOGIES)}"
+                  f"; name the source for --topology {args.topology}",
+                  file=sys.stderr)
             return 2
     return import_module(_TOPOLOGY_MODULES[args.topology]).main(args)
 
@@ -226,7 +244,16 @@ def _register_plan(sub) -> None:
                    help="forecast length in hours (default 24)")
     p.add_argument("--source", default=None,
                    help="initial/boundary condition source (default: the "
-                        "one woof domain emits)")
+                        "one woof domain emits); auto (wrf-tiles, "
+                        "wrf-nests) picks the first source of "
+                        "--source-priority that covers the sites, holds "
+                        "the --start cycle and reaches --hours, and "
+                        "writes the woof-energy.source-choice.v1 receipt")
+    p.add_argument("--source-priority", type=_names, default=None,
+                   metavar="SRC[,SRC]",
+                   help="with --source auto: candidate sources, best "
+                        "first (default hrrr-native,hrrr,rap,"
+                        "met-office-global,ecmwf-open-data,gfs,era5)")
     capacity = p.add_mutually_exclusive_group()
     capacity.add_argument("--card", default=None,
                           help="size each domain for this GPU tier")

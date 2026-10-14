@@ -4,6 +4,18 @@
 
 New:
 
+- `woof energy plan --topology wrf-tiles|wrf-nests --source auto` picks
+  the boundary source for the sites and the `--start` cycle from
+  `--source-priority` (default
+  `hrrr-native,hrrr,rap,met-office-global,ecmwf-open-data,gfs,era5`):
+  the first that covers the sites' box plus the planner's margin, holds
+  the cycle (archive start, retention, publication era), reaches
+  `--hours` and the 5000 Pa model top. The choice and every passed-over
+  candidate's reasons are recorded in `plan.json` and
+  `source-choice.json` (`woof-energy.source-choice.v1`).
+  `woof.energy.source_select.select_source` is the same choice as a
+  function, read from the registry and route table with no network
+  (docs/energy-hindcast/source-select.md).
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals
