@@ -1,7 +1,13 @@
 """Energy products from a ``forecast.v1`` file: ``woof energy rating``.
 
-Four products are derived from the per-site forecast time series written by
-``woof energy extract``:
+Six products are derived from the per-site forecast time series written by
+``woof energy extract``.  The first four run by default
+(:data:`DEFAULT_PRODUCTS`); ``wind-resource`` (shear, veer, turbulence
+intensity, rotor-equivalent wind speed, generic-curve power and capacity
+factor) and ``ramps`` (threshold-over-window and swinging-door ramp events)
+are asked for with ``--products`` and documented in
+:mod:`woof.energy.ramps`.  ``--power-curve`` picks any generic curve in
+``power_curves.json`` for the three wind products.
 
 ``dlr``
     Dynamic line rating of overhead conductors (sites of kind
@@ -58,8 +64,9 @@ Four products are derived from the per-site forecast time series written by
     Turbines (kind ``turbine``, and ``plant`` sites that carry a hub height):
     hub-height wind by log-linear interpolation between the bracketing
     forecast heights, the IEC 61400-12 density correction
-    ``v (rho / 1.225)^(1/3)``, the generic normalised IEC class II curve from
-    ``woof/data/energy/power_curves.json`` and ``capacity_mw``.
+    ``v (rho / 1.225)^(1/3)``, a generic normalised curve from
+    ``woof/data/energy/power_curves.json`` (IEC class II by default;
+    ``--power-curve`` for class I, III or offshore) and ``capacity_mw``.
 
 ``pv-power``
     PV sites (kind ``pv``): a PVWatts-like model with a fixed tilt of
@@ -102,7 +109,10 @@ from woof.energy.contracts import (
     sha256_file,
 )
 
-PRODUCTS = ("dlr", "icing", "wind-power", "pv-power")
+PRODUCTS = ("dlr", "icing", "wind-power", "pv-power", "wind-resource",
+            "ramps")
+#: What ``woof energy rating`` computes without ``--products``.
+DEFAULT_PRODUCTS = ("dlr", "icing", "wind-power", "pv-power")
 PRODUCTS_SCHEMA = "woof-energy.products.v1"
 CONDUCTORS_SCHEMA = "woof-energy.conductors.v1"
 POWER_CURVES_SCHEMA = "woof-energy.power-curves.v1"
@@ -113,6 +123,8 @@ DEFAULT_POWER_CURVES = DATA_DIR / "power_curves.json"
 
 LINE_KINDS = ("line_sample", "tower")
 TURBINE_KINDS = ("turbine", "plant")
+#: Products on turbines, and on plants that carry a hub height.
+WIND_PRODUCTS = ("wind-power", "wind-resource", "ramps")
 PV_KINDS = ("pv",)
 
 #: Products -> site kinds they apply to.  ``icing`` applies to every site.
@@ -121,6 +133,8 @@ PRODUCT_KINDS: dict[str, tuple[str, ...]] = {
     "icing": ("line_sample", "tower", "substation", "turbine", "pv", "plant"),
     "wind-power": TURBINE_KINDS,
     "pv-power": PV_KINDS,
+    "wind-resource": TURBINE_KINDS,
+    "ramps": TURBINE_KINDS,
 }
 
 #: Required forecast variables (``FORECAST_VARIABLES``) and coordinates
@@ -133,16 +147,25 @@ REQUIRED_VARIABLES: dict[str, list[Any]] = {
     "wind-power": ["wind_speed",
                    (("air_density",), ("air_pressure", "air_temperature"))],
     "pv-power": ["ghi", "t2", "wind_speed_10m"],
+    "wind-resource": ["wind_speed",
+                      (("air_density",), ("air_pressure", "air_temperature"))],
+    "ramps": ["wind_speed",
+              (("air_density",), ("air_pressure", "air_temperature"))],
 }
 REQUIRED_COORDINATES: dict[str, list[str]] = {
     "dlr": ["kind", "lat", "lon", "bearing_deg", "terrain_height"],
     "icing": ["kind"],
     "wind-power": ["kind", "hub_height_m", "capacity_mw"],
     "pv-power": ["kind", "lat", "lon", "capacity_mw"],
+    "wind-resource": ["kind", "hub_height_m"],
+    "ramps": ["kind", "hub_height_m"],
 }
 
 #: Extra per-site coordinates the extract unit adds to forecast.v1.
-SITE_EXTRA_COORDINATES = ("voltage_kv", "hub_height_m", "capacity_mw")
+#: ``rotor_diameter_m`` is read when present (``wind-resource``/``ramps``);
+#: ``woof energy extract`` does not write it.
+SITE_EXTRA_COORDINATES = ("voltage_kv", "hub_height_m", "capacity_mw",
+                          "rotor_diameter_m")
 
 # physical constants
 _KELVIN = 273.15
@@ -1188,11 +1211,11 @@ def compute_wind_power(forecast: Forecast, curve: Mapping[str, Any],
             rho = p / (_R_DRY * t)
             notes.add("wind-power: no air_density in the forecast; density "
                       "from air_pressure / (R_d air_temperature), dry air")
-        veq = speed * (rho / IEC_REFERENCE_DENSITY) ** (1.0 / 3.0)
-        fraction = np.interp(veq, curve["speeds"], curve["fraction"])
-        fraction = np.where((veq < curve["cut_in_ms"])
-                            | (veq > curve["cut_out_ms"]), 0.0, fraction)
-        fraction = np.where(np.isfinite(veq), fraction, np.nan)
+        from woof.energy.ramps import (curve_power_fraction,
+                                       density_corrected_speed)
+
+        veq = density_corrected_speed(speed, rho, IEC_REFERENCE_DENSITY)
+        fraction = curve_power_fraction(veq, curve)
         hub_speed[:, idx] = speed
         equivalent[:, idx] = veq
         power[:, idx] = fraction * capacity[idx][None, :]
@@ -1335,6 +1358,11 @@ def _write_dataset(netCDF4, tmp: Path, forecast: Forecast,
     with netCDF4.Dataset(str(tmp), "w", format="NETCDF4") as ds:
         ds.createDimension("time", len(forecast.times))
         ds.createDimension("site", forecast.n_site)
+        for item in outputs:
+            for axis, dim in enumerate(item.dims):
+                if dim not in ds.dimensions:
+                    # a zero-length dimension (no ramp events) is unlimited
+                    ds.createDimension(dim, item.data.shape[axis])
         tattrs = dict(forecast.time_var)
         values = tattrs.pop("_values")
         dtype = tattrs.pop("_dtype")
@@ -1347,7 +1375,7 @@ def _write_dataset(netCDF4, tmp: Path, forecast: Forecast,
             if name in SITE_EXTRA_COORDINATES and name not in \
                     FORECAST_COORDINATES:
                 units = {"voltage_kv": "kV", "hub_height_m": "m",
-                         "capacity_mw": "MW"}[name]
+                         "capacity_mw": "MW", "rotor_diameter_m": "m"}[name]
             if data.dtype == object:
                 var = ds.createVariable(name, str, ("site",))
                 var[:] = np.asarray(data, dtype=object)
@@ -1363,7 +1391,8 @@ def _write_dataset(netCDF4, tmp: Path, forecast: Forecast,
             data = item.data
             if data.dtype == object:
                 var = ds.createVariable(item.name, str, item.dims)
-                var[:] = data
+                if data.size:
+                    var[:] = data
             elif data.dtype == np.int8:
                 var = ds.createVariable(item.name, "i1", item.dims)
                 var[:] = data
@@ -1380,11 +1409,30 @@ def _write_dataset(netCDF4, tmp: Path, forecast: Forecast,
 
 def _compute(forecast_path: Path, *, output: Path, conductor: str = "auto",
              conductor_table: Path | None = None,
-             products: Sequence[str] = PRODUCTS
+             products: Sequence[str] = DEFAULT_PRODUCTS,
+             power_curve: str | None = None,
+             wind_options: Mapping[str, Any] | None = None
              ) -> tuple[Path, dict[str, Any]]:
+    from woof.energy import ramps as _ramps
+
     forecast_path = Path(forecast_path)
     output = Path(output)
     products = tuple(dict.fromkeys(products))
+    wind_options = dict(wind_options or {})
+    unknown_options = set(wind_options) - {
+        "ramp_windows", "ramp_threshold", "sda_tolerance", "ti_window_min",
+        "rotor_diameter_m"}
+    if unknown_options:
+        raise ProductsRefused(f"unknown wind options {sorted(unknown_options)}")
+    if "ramps" in products:
+        # Refuse a malformed window list before any file is read.
+        _ramps.parse_ramp_windows(
+            wind_options.get("ramp_windows", _ramps.DEFAULT_RAMP_WINDOWS),
+            threshold=wind_options.get("ramp_threshold",
+                                       _ramps.DEFAULT_RAMP_THRESHOLD))
+    if power_curve is not None:
+        # a misspelt curve is refused even when no wind product runs
+        load_power_curve(name=power_curve)
     unknown = [p for p in products if p not in PRODUCTS]
     if unknown or not products:
         raise ProductsRefused(f"unknown products {unknown}; choose from "
@@ -1400,7 +1448,7 @@ def _compute(forecast_path: Path, *, output: Path, conductor: str = "auto",
     refusals: list[str] = []
     for product in products:
         kinds = PRODUCT_KINDS[product]
-        if product == "wind-power":
+        if product in WIND_PRODUCTS:
             present = bool(_wind_mask(header.kind, header.hub_height_m).any())
         else:
             present = bool(np.isin(header.kind, list(kinds)).any())
@@ -1449,23 +1497,48 @@ def _compute(forecast_path: Path, *, output: Path, conductor: str = "auto",
         "icing": ("rain_mixing_ratio", "air_pressure", "wind_attack_angle"),
         "wind-power": (),
         "pv-power": ("dni", "dhi", "cos_solar_zenith"),
+        "wind-resource": ("u", "v", "wind_from_direction"),
+        "ramps": ("u", "v", "wind_from_direction"),
     }
     for product in run:
         needed.update(optional[product])
     needed &= variables
+    curve = load_power_curve(name=power_curve) \
+        if any(p in WIND_PRODUCTS for p in run) else None
     forecast = read_forecast(forecast_path, needed=sorted(needed))
     outputs: list[ProductOutput] = []
-    curve = None
+    rotor_diameter_m = wind_options.get("rotor_diameter_m")
+    shared_rotor = None
+    if "wind-resource" in run and "ramps" in run:
+        # one REWS/power evaluation serves both products
+        shared_rotor = _ramps.rotor_power(
+            forecast, curve, notes, "wind-resource and ramps",
+            rotor_diameter_m=rotor_diameter_m)
     for product in run:
         if product == "dlr":
             outputs += compute_dlr(forecast, table, conductor, notes)
         elif product == "icing":
             outputs += compute_icing(forecast, table, conductor, notes)
         elif product == "wind-power":
-            curve = load_power_curve()
             outputs += compute_wind_power(forecast, curve, notes)
         elif product == "pv-power":
             outputs += compute_pv_power(forecast, notes)
+        elif product == "wind-resource":
+            outputs += _ramps.compute_wind_resource(
+                forecast, curve, notes, rotor_diameter_m=rotor_diameter_m,
+                ti_window_min=wind_options.get(
+                    "ti_window_min", _ramps.DEFAULT_TI_WINDOW_MIN),
+                rotor=shared_rotor)
+        elif product == "ramps":
+            outputs += _ramps.compute_ramps(
+                forecast, curve, notes, rotor_diameter_m=rotor_diameter_m,
+                windows=wind_options.get("ramp_windows",
+                                         _ramps.DEFAULT_RAMP_WINDOWS),
+                threshold=wind_options.get("ramp_threshold",
+                                           _ramps.DEFAULT_RAMP_THRESHOLD),
+                sda_tolerance=wind_options.get(
+                    "sda_tolerance", _ramps.DEFAULT_SDA_TOLERANCE),
+                rotor=shared_rotor)
     attrs: dict[str, Any] = {
         "schema": PRODUCTS_SCHEMA,
         "title": "woof energy products",
@@ -1509,7 +1582,7 @@ def _summary(forecast: Forecast, outputs: list[ProductOutput], run: list[str],
             stats[item.name] = _stat(item.data)
     kinds, counts = np.unique(forecast.coord("kind").astype(str),
                               return_counts=True)
-    return {
+    summary = {
         "schema": PRODUCTS_SCHEMA,
         "output": str(output),
         "forecast_sha256": attrs["forecast_sha256"],
@@ -1522,31 +1595,54 @@ def _summary(forecast: Forecast, outputs: list[ProductOutput], run: list[str],
         "stats": stats,
         "notes": list(notes),
     }
+    by_name = {item.name: item.data for item in outputs}
+    if "ramp_event_method" in by_name:
+        from woof.energy.ramps import ramp_event_summary
+
+        summary["ramp_events"] = ramp_event_summary(
+            by_name["ramp_event_method"], by_name["ramp_event_window"])
+    return summary
 
 
 def compute_products(forecast_path: Path, *, output: Path,
                      conductor: str = "auto",
                      conductor_table: Path | None = None,
-                     products: Sequence[str] = PRODUCTS) -> Path:
+                     products: Sequence[str] = DEFAULT_PRODUCTS,
+                     power_curve: str | None = None,
+                     wind_options: Mapping[str, Any] | None = None) -> Path:
     """Compute energy products from a ``forecast.v1`` file into ``output``.
+
+    ``power_curve`` names a curve in ``power_curves.json`` (default: the
+    table's default) for ``wind-power``, ``wind-resource`` and ``ramps``.
+    ``wind_options`` may set ``ramp_windows``, ``ramp_threshold``,
+    ``sda_tolerance``, ``ti_window_min`` and ``rotor_diameter_m`` (see
+    :mod:`woof.energy.ramps`).
 
     Raises :class:`ProductsRefused` (a :class:`ContractError`) when the
     forecast, conductor table or requested products cannot be honoured.
     """
 
     path, _ = _compute(forecast_path, output=output, conductor=conductor,
-                       conductor_table=conductor_table, products=products)
+                       conductor_table=conductor_table, products=products,
+                       power_curve=power_curve, wind_options=wind_options)
     return path
 
 
 def main(args) -> int:
+    wind_options = {
+        key: getattr(args, key) for key in (
+            "ramp_windows", "ramp_threshold", "sda_tolerance",
+            "ti_window_min", "rotor_diameter_m")
+        if getattr(args, key, None) is not None}
     try:
         _, summary = _compute(
             Path(args.forecast), output=Path(args.output),
             conductor=args.conductor,
             conductor_table=Path(args.conductor_table)
             if args.conductor_table else None,
-            products=tuple(args.products))
+            products=tuple(args.products),
+            power_curve=getattr(args, "power_curve", None),
+            wind_options=wind_options)
     except ContractError as error:
         print(json.dumps({"schema": PRODUCTS_SCHEMA, "refused": str(error)},
                          indent=2))
@@ -1556,7 +1652,8 @@ def main(args) -> int:
 
 
 __all__ = [
-    "PRODUCTS", "PRODUCTS_SCHEMA", "ProductsRefused", "Conductor",
+    "PRODUCTS", "DEFAULT_PRODUCTS", "PRODUCTS_SCHEMA", "ProductsRefused",
+    "Conductor",
     "ConductorTable", "load_conductor_table", "load_power_curve",
     "ieee738_solar_angles", "ieee738_clear_sky_flux", "ieee738_air",
     "ieee738_steady_state", "solar_position", "erbs_decomposition",

@@ -697,7 +697,13 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--conductor` | conductor name from the table, or auto (by line voltage; default) |
 | `--conductor-table FILE.json` | conductor table replacing the built-in one |
 | `--output PRODUCTS.nc` | where to write the products netCDF |
-| `--products` | products to compute (comma list; default dlr,icing,wind-power,pv-power) |
+| `--power-curve NAME` | generic power curve from power_curves.json for wind-power, wind-resource and ramps (generic_iec_class_i, generic_iec_class_ii, generic_iec_class_iii, generic_offshore; default the table's default, class II) |
+| `--products` | products to compute (comma list of dlr,icing,wind-power,pv-power,wind-resource,ramps; default dlr,icing,wind-power,pv-power) |
+| `--ramp-threshold FRACTION` | ramps: change, as a fraction of capacity, that makes a ramp (default 0.2) |
+| `--ramp-windows LIST` | ramps: threshold windows, e.g. 15m,1h,4h (default) or 5m:0.1,1h:0.3 with per-window thresholds |
+| `--rotor-diameter-m M` | wind-resource/ramps: rotor diameter for sites without rotor_diameter_m (default: the hub height) |
+| `--sda-tolerance FRACTION` | ramps: swinging-door tolerance, fraction of capacity (default 0.05) |
+| `--ti-window-min MIN` | wind-resource: trailing window of the resolved turbulence intensity (default 10) |
 
 ## `woof energy run`
 

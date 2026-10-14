@@ -12,7 +12,8 @@ the subcommand runs::
                           woof.energy.plan_hex        --topology hex-swath
     woof energy run       woof.energy.run             run every plan domain
     woof energy extract   woof.energy.extract         plan runs -> forecast.v1
-    woof energy rating    woof.energy.products        line rating, icing, power
+    woof energy rating    woof.energy.products        line rating, icing, power,
+                          woof.energy.ramps           wind resource, ramps
 """
 
 from __future__ import annotations
@@ -31,7 +32,9 @@ _TOPOLOGY_MODULES = {
     "wrf-tiles": "woof.energy.plan_wrf_tiles",
     "hex-swath": "woof.energy.plan_hex",
 }
-_PRODUCTS = ("dlr", "icing", "wind-power", "pv-power")
+_PRODUCTS = ("dlr", "icing", "wind-power", "pv-power", "wind-resource",
+             "ramps")
+_DEFAULT_PRODUCTS = ("dlr", "icing", "wind-power", "pv-power")
 
 
 def _bbox(value: str) -> tuple[float, float, float, float]:
@@ -307,9 +310,35 @@ def _register_rating(sub) -> None:
     p.add_argument("--conductor-table", default=None, metavar="FILE.json",
                    help="conductor table replacing the built-in one")
     p.add_argument("--products", type=_choices_list(_PRODUCTS, "--products"),
-                   default=_PRODUCTS,
-                   help="products to compute (comma list; default "
-                        "dlr,icing,wind-power,pv-power)")
+                   default=_DEFAULT_PRODUCTS,
+                   help="products to compute (comma list of "
+                        f"{','.join(_PRODUCTS)}; default "
+                        f"{','.join(_DEFAULT_PRODUCTS)})")
+    p.add_argument("--power-curve", default=None, metavar="NAME",
+                   help="generic power curve from power_curves.json for "
+                        "wind-power, wind-resource and ramps "
+                        "(generic_iec_class_i, generic_iec_class_ii, "
+                        "generic_iec_class_iii, generic_offshore; default "
+                        "the table's default, class II)")
+    p.add_argument("--ramp-windows", default=None, metavar="LIST",
+                   help="ramps: threshold windows, e.g. 15m,1h,4h (default) "
+                        "or 5m:0.1,1h:0.3 with per-window thresholds")
+    p.add_argument("--ramp-threshold", type=positive_float, default=None,
+                   metavar="FRACTION",
+                   help="ramps: change, as a fraction of capacity, that "
+                        "makes a ramp (default 0.2)")
+    p.add_argument("--sda-tolerance", type=positive_float, default=None,
+                   metavar="FRACTION",
+                   help="ramps: swinging-door tolerance, fraction of "
+                        "capacity (default 0.05)")
+    p.add_argument("--ti-window-min", type=positive_float, default=None,
+                   metavar="MIN",
+                   help="wind-resource: trailing window of the resolved "
+                        "turbulence intensity (default 10)")
+    p.add_argument("--rotor-diameter-m", type=positive_float, default=None,
+                   metavar="M",
+                   help="wind-resource/ramps: rotor diameter for sites "
+                        "without rotor_diameter_m (default: the hub height)")
     p.add_argument("-o", "--output", required=True, metavar="PRODUCTS.nc",
                    help="where to write the products netCDF")
     p.set_defaults(func=_dispatch("woof.energy.products"))
