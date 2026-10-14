@@ -646,6 +646,81 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--refresh` | revalidate cached Overpass responses |
 | `--timeout-s` | server-side Overpass timeout per tile (default 180) |
 
+## `woof energy hindcast`
+
+Takes no options of its own.
+
+## `woof energy hindcast materialize`
+
+| argument | what it does |
+|---|---|
+| `JOB` | job.json, its directory, or a job id with --dir |
+
+| option | what it does |
+|---|---|
+| `--dir DIR` | hindcast directory a bare job id is in |
+| `--force` | re-plan (earlier plan moved aside) |
+
+## `woof energy hindcast plan`
+
+| option | what it does |
+|---|---|
+| `--card` | size each domain for this GPU tier |
+| `--cluster-id` | name of the single --sites cluster (default: the sites file's stem) |
+| `--clusters ID[,ID]` | only these partition clusters |
+| `--corridor-km` | corridor half-width (default 2) |
+| `--cycle-hour` | UTC hour runs start from (default 0) |
+| `--dry-run` | print the manifest and an example job; write nothing |
+| `--dx-m` | leaf spacing (default: the cluster's, else 100) |
+| `--end YYYY-MM-DD[THH]` | exclusive bound on segment run starts |
+| `--gridded-url TEMPLATE` | gridded store per cluster leaf |
+| `--leaf-history-interval-s` | leaf history cadence (default 900; finer such as 300 allowed) |
+| `--max-domains` | refuse plans with more high-resolution domains |
+| `--nz` | vertical levels (default: the planner's) |
+| `--outdir DIR` | hindcast directory (manifest, jobs, clusters) |
+| `--output-root URL` | root of the output stores, e.g. s3://bucket/x (default: icechunk/ in the hindcast directory) |
+| `--p-top-pa` | model top the source must reach and the plan must carry (default 5000 Pa, about 20 km) |
+| `--parent-dx-m` | outer parent spacing (default: the cluster chain's, else the planner's) |
+| `--parent-history-interval-s` | wrf-nests parent cadence (default 3600) |
+| `--partition PARTITION.json` | woof-energy.partition.v1 document: one job chain per cluster |
+| `--resume` | merge into an existing manifest, keeping statuses |
+| `--segment-hours` | run length of every segment (default 30) |
+| `--sites SITES.json` | sites document planned as one cluster (or the sites a --partition refers to) |
+| `--sites-url TEMPLATE` | site-series store per cluster |
+| `--source` | one source for every segment (default: chosen per segment by the source selector) |
+| `--source-priority SRC[,SRC]` | preference order handed to the selector |
+| `--spinup-hours` | leading hours discarded as spin-up (default 6); each segment keeps segment - spinup hours |
+| `--start YYYY-MM-DD[THH]` | first segment's day (its run starts at --cycle-hour) |
+| `--topology {wrf-nests,wrf-tiles}` | planner for clusters that do not name one (default wrf-nests) |
+| `--vram-gib` | size each domain for this many GiB |
+
+## `woof energy hindcast run-local`
+
+| argument | what it does |
+|---|---|
+| `JOB` | job.json, its directory, or a job id with --dir |
+
+| option | what it does |
+|---|---|
+| `--dir DIR` | hindcast directory a bare job id is in |
+| `--dry-run` | materialize and print woof energy run's argv |
+| `--force` | run a job the manifest calls complete |
+| `--no-extract` | skip extracting the kept window at the sites |
+| `--resume` | pass --resume to woof energy run |
+| `--writer MODULE:CALLABLE` | callable handed the kept-window forecast and targets (e.g. the Icechunk writer) |
+
+## `woof energy hindcast status`
+
+| argument | what it does |
+|---|---|
+| `DIR` | hindcast directory |
+
+| option | what it does |
+|---|---|
+| `--cluster` | only this cluster |
+| `--jobs` | list every job |
+| `--status {pending,materialized,running,complete,failed}` | list the jobs in this state |
+
 ## `woof energy import`
 
 | argument | what it does |

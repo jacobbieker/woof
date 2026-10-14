@@ -152,6 +152,17 @@ New:
   spectral prototype keeps `primitive.nlev <= 32`. It integrates its fast
   modes explicitly and carries no physics, so a deeper column only shrinks
   its stable step.
+- `woof energy hindcast plan|status|materialize|run-local` runs a long
+  reanalysis as a chain of cold-started segments. Each cluster and date
+  range becomes daily `woof-energy.hindcast-job.v1` jobs: a 30 h run with
+  6 h of spin-up, keeping 24 h. Lengths and cycle hour are configurable,
+  and the job ids are deterministic. Every job records the boundary
+  source chosen for its segment and whether it changed from the previous
+  segment. On `wrf-nests`, `history_begin_s` is set on every domain and
+  leaves write every 900 s (or finer, such as 300 s). Each job carries
+  Icechunk targets and a cost hook. A `woof-energy.hindcast-manifest.v1`
+  manifest tracks status and resume. See
+  `docs/energy-hindcast/driver.md`.
 
 Fixed:
 

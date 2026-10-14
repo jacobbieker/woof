@@ -17,6 +17,7 @@ the subcommand runs::
     woof energy rating    woof.energy.products        line rating, icing, power
     woof energy partition woof.energy.partition       worldwide sites -> clusters
     woof energy plan-cluster  woof.energy.partition   plan one cluster
+    woof energy hindcast  woof.energy.hindcast        year-long segment jobs
 """
 
 from __future__ import annotations
@@ -525,6 +526,140 @@ def _register_partition(sub) -> None:
                    help="directory for sites.json, plan.json and emitted "
                         "configs")
     q.set_defaults(func=_dispatch("woof.energy.partition", "plan_cluster_main"))
+def _hours_of_day(value: str) -> int:
+    hour = int(value)
+    if not 0 <= hour <= 23:
+        raise argparse.ArgumentTypeError(f"--cycle-hour {value} is not 0..23")
+    return hour
+
+
+def _non_negative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError(f"expected 0 or more; got {value}")
+    return number
+
+
+def _register_hindcast(sub) -> None:
+    hindcast = sub.add_parser(
+        "hindcast", help="a long reanalysis as re-initialised segment jobs")
+    hindcast.set_defaults(func=_dispatch("woof.energy.hindcast"))
+    verbs = hindcast.add_subparsers(dest="hindcast_command", required=False)
+
+    p = verbs.add_parser(
+        "plan", help="expand clusters x [start, end) into segment jobs")
+    what = p.add_argument_group("what to plan")
+    what.add_argument("--sites", default=None, metavar="SITES.json",
+                      help="sites document planned as one cluster (or the "
+                           "sites a --partition refers to)")
+    what.add_argument("--partition", default=None, metavar="PARTITION.json",
+                      help="woof-energy.partition.v1 document: one job "
+                           "chain per cluster")
+    what.add_argument("--clusters", type=_names, default=None,
+                      metavar="ID[,ID]",
+                      help="only these partition clusters")
+    what.add_argument("--cluster-id", default=None,
+                      help="name of the single --sites cluster (default: "
+                           "the sites file's stem)")
+    when = p.add_argument_group("segments (UTC)")
+    when.add_argument("--start", required=True, metavar="YYYY-MM-DD[THH]",
+                      help="first segment's day (its run starts at "
+                           "--cycle-hour)")
+    when.add_argument("--end", required=True, metavar="YYYY-MM-DD[THH]",
+                      help="exclusive bound on segment run starts")
+    when.add_argument("--segment-hours", type=positive_int, default=30,
+                      help="run length of every segment (default 30)")
+    when.add_argument("--spinup-hours", type=_non_negative_int, default=6,
+                      help="leading hours discarded as spin-up (default 6); "
+                           "each segment keeps segment - spinup hours")
+    when.add_argument("--cycle-hour", type=_hours_of_day, default=0,
+                      help="UTC hour runs start from (default 0)")
+    grid = p.add_argument_group("planner passthrough")
+    grid.add_argument("--topology", default="wrf-nests",
+                      choices=("wrf-nests", "wrf-tiles"),
+                      help="planner for clusters that do not name one "
+                           "(default wrf-nests)")
+    grid.add_argument("--dx-m", type=positive_float, default=None,
+                      help="leaf spacing (default: the cluster's, else 100)")
+    grid.add_argument("--corridor-km", type=positive_float, default=2.0,
+                      help="corridor half-width (default 2)")
+    grid.add_argument("--parent-dx-m", type=positive_float, default=None,
+                      help="outer parent spacing (default: the cluster "
+                           "chain's, else the planner's)")
+    grid.add_argument("--nz", type=positive_int, default=None,
+                      help="vertical levels (default: the planner's)")
+    grid.add_argument("--p-top-pa", type=positive_float, default=5000.0,
+                      help="model top the source must reach and the plan "
+                           "must carry (default 5000 Pa, about 20 km)")
+    capacity = grid.add_mutually_exclusive_group()
+    capacity.add_argument("--card", default=None,
+                          help="size each domain for this GPU tier")
+    capacity.add_argument("--vram-gib", type=positive_float, default=None,
+                          help="size each domain for this many GiB")
+    grid.add_argument("--max-domains", type=positive_int, default=None,
+                      help="refuse plans with more high-resolution domains")
+    forcing = p.add_argument_group("boundary source")
+    forcing.add_argument("--source", default=None,
+                         help="one source for every segment (default: "
+                              "chosen per segment by the source selector)")
+    forcing.add_argument("--source-priority", type=_names, default=None,
+                         metavar="SRC[,SRC]",
+                         help="preference order handed to the selector")
+    out = p.add_argument_group("history and outputs")
+    out.add_argument("--leaf-history-interval-s", type=positive_float,
+                     default=900.0,
+                     help="leaf history cadence (default 900; finer such "
+                          "as 300 allowed)")
+    out.add_argument("--parent-history-interval-s", type=positive_float,
+                     default=None,
+                     help="wrf-nests parent cadence (default 3600)")
+    out.add_argument("--output-root", default="icechunk", metavar="URL",
+                     help="root of the output stores, e.g. s3://bucket/x "
+                          "(default: icechunk/ in the hindcast directory)")
+    out.add_argument("--gridded-url",
+                     default="{root}/gridded/{cluster_id}/{leaf}.icechunk",
+                     metavar="TEMPLATE",
+                     help="gridded store per cluster leaf")
+    out.add_argument("--sites-url",
+                     default="{root}/sites/{cluster_id}.icechunk",
+                     metavar="TEMPLATE", help="site-series store per cluster")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the manifest and an example job; write "
+                        "nothing")
+    p.add_argument("--resume", action="store_true",
+                   help="merge into an existing manifest, keeping statuses")
+    p.add_argument("-o", "--outdir", required=True, metavar="DIR",
+                   help="hindcast directory (manifest, jobs, clusters)")
+
+    p = verbs.add_parser("status", help="job counts, coverage and sources")
+    p.add_argument("dir", metavar="DIR", help="hindcast directory")
+    p.add_argument("--cluster", default=None, help="only this cluster")
+    p.add_argument("--status", default=None,
+                   choices=("pending", "materialized", "running", "complete",
+                            "failed"),
+                   help="list the jobs in this state")
+    p.add_argument("--jobs", action="store_true", help="list every job")
+
+    for verb, text in (("materialize", "write a job's segment plan"),
+                       ("run-local", "run a job on this machine")):
+        p = verbs.add_parser(verb, help=text)
+        p.add_argument("job", metavar="JOB",
+                       help="job.json, its directory, or a job id with --dir")
+        p.add_argument("--dir", default=None, metavar="DIR",
+                       help="hindcast directory a bare job id is in")
+        p.add_argument("--force", action="store_true",
+                       help="re-plan (earlier plan moved aside)"
+                       if verb == "materialize" else
+                       "run a job the manifest calls complete")
+    p.add_argument("--dry-run", action="store_true",
+                   help="materialize and print woof energy run's argv")
+    p.add_argument("--resume", action="store_true",
+                   help="pass --resume to woof energy run")
+    p.add_argument("--no-extract", action="store_true",
+                   help="skip extracting the kept window at the sites")
+    p.add_argument("--writer", default=None, metavar="MODULE:CALLABLE",
+                   help="callable handed the kept-window forecast and "
+                        "targets (e.g. the Icechunk writer)")
 
 
 def register_cli(subparsers) -> None:
@@ -544,6 +679,7 @@ def register_cli(subparsers) -> None:
     _register_extract(sub)
     _register_rating(sub)
     _register_partition(sub)
+    _register_hindcast(sub)
 
 
 __all__ = ["register_cli"]
