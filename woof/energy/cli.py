@@ -21,6 +21,7 @@ the subcommand runs::
     woof energy queue     woof.energy.workqueue       object-store job queue
     woof energy worker    woof.energy.worker          drain a queue, one loop per GPU
     woof energy deploy render  woof.energy.deploy      AWS/GCP Batch, k8s, Slurm
+    woof energy icechunk  woof.energy.icechunk_store  shared store init/verify
 """
 
 from __future__ import annotations
@@ -409,8 +410,84 @@ def _register_extract(sub) -> None:
                    choices=("netcdf", "zarr", "icechunk", "csv"),
                    help="output format (default netcdf)")
     p.add_argument("-o", "--output", required=True, metavar="PATH",
-                   help="output file or store")
+                   help="output file or store; --format icechunk also takes "
+                        "s3://, gs://, file:// and memory:// URLs")
+    store = p.add_argument_group("icechunk store (--format icechunk)")
+    store.add_argument("--icechunk-mode", choices=("replace", "region"),
+                       default=None,
+                       help="replace: rewrite the repository with this "
+                            "forecast (default); region: write this job's "
+                            "times and sites into a store made by `woof "
+                            "energy icechunk init`, beside concurrent jobs")
+    store.add_argument("--icechunk-group", default=None, metavar="GROUP",
+                       help="group inside the repository (region default: "
+                            "forecast)")
+    store.add_argument("--job-id", default=None, metavar="ID",
+                       help="job identifier recorded in the commit metadata")
     p.set_defaults(func=_dispatch("woof.energy.extract"))
+
+
+def _storage_flags(p) -> None:
+    p.add_argument("--region", default=None,
+                   help="S3 region (default: AWS_REGION, AWS_DEFAULT_REGION)")
+    p.add_argument("--endpoint-url", default=None, metavar="URL",
+                   help="S3-compatible endpoint, e.g. MinIO (default: "
+                        "AWS_ENDPOINT_URL_S3, AWS_ENDPOINT_URL)")
+    p.add_argument("--allow-http", action="store_true",
+                   help="allow a plain-HTTP S3 endpoint")
+    p.add_argument("--anonymous", action="store_true",
+                   help="no credentials (public buckets)")
+
+
+def _register_icechunk(sub) -> None:
+    p = sub.add_parser(
+        "icechunk",
+        help="create or check a shared Icechunk store for many jobs")
+    p.set_defaults(func=_dispatch("woof.energy.icechunk_store"))
+    actions = p.add_subparsers(dest="icechunk_command", required=True)
+    init = actions.add_parser(
+        "init", help="pre-allocate a (time, site, height) site store once")
+    init.add_argument("repo", metavar="REPO",
+                      help="s3://bucket/prefix, gs://bucket/prefix, "
+                           "file:///path, memory://name or a local path")
+    init.add_argument("--sites", required=True, metavar="SITES.json",
+                      help="woof-energy.sites.v1 document (site order)")
+    init.add_argument("--start", required=True, metavar="YYYY-MM-DDTHH:MM",
+                      help="first valid time, UTC")
+    init.add_argument("--end", required=True, metavar="YYYY-MM-DDTHH:MM",
+                      help="last valid time, UTC (inclusive)")
+    init.add_argument("--interval", default="15min",
+                      help="time step: seconds, or with s/min/h "
+                           "(default 15min)")
+    init.add_argument("--heights-m", type=_heights, default=None,
+                      help="override the sites document's heights")
+    init.add_argument("--vars", type=_names, default=None,
+                      metavar="NAME[,NAME]",
+                      help="forecast.v1 variables to allocate (default all)")
+    init.add_argument("--group", default="forecast",
+                      help="group inside the repository (default forecast)")
+    init.add_argument("--branch", default="main",
+                      help="branch (default main)")
+    init.add_argument("--time-chunk", type=positive_int, default=None,
+                      help="steps per time chunk (default one day)")
+    init.add_argument("--site-chunk", type=positive_int, default=64,
+                      help="sites per chunk (default 64)")
+    init.add_argument("--zstd-clevel", type=positive_int, default=5,
+                      help="Blosc zstd level (default 5)")
+    init.add_argument("--job-id", default=None, metavar="ID",
+                      help="identifier recorded in the commit metadata")
+    _storage_flags(init)
+    verify = actions.add_parser(
+        "verify", help="open a repository and report its snapshot and "
+                       "coverage")
+    verify.add_argument("repo", metavar="REPO", help="repository URL or path")
+    verify.add_argument("--branch", default="main",
+                        help="branch (default main)")
+    verify.add_argument("--group", default=None,
+                        help="report only this group")
+    verify.add_argument("--no-coverage", action="store_true",
+                        help="skip reading the written masks")
+    _storage_flags(verify)
 
 
 def _register_rating(sub) -> None:
@@ -849,6 +926,7 @@ def register_cli(subparsers) -> None:
     _register_queue(sub)
     _register_worker(sub)
     _register_deploy(sub)
+    _register_icechunk(sub)
 
 
 __all__ = ["register_cli"]

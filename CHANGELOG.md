@@ -66,6 +66,18 @@ New:
   copies WPS_GEOG and the high-resolution cache from `WOOF_GEOG_URL` and
   `WOOF_HIGHRES_CACHE_URL` onto local scratch. The guide is
   `docs/energy-hindcast/deploy.md`.
+- Energy hindcast jobs can write into one shared Icechunk repository on
+  S3, GCS (`s3://`, `gs://`, `file://`, `memory://`) or a shared
+  filesystem, many nodes at once. Credentials come from the environment,
+  a role or workload identity. `woof energy icechunk init` allocates a
+  year-long `(time, site, height)` site store once, and `woof energy
+  extract --format icechunk --icechunk-mode region` writes one job's
+  times and sites into it. `tools/wrfout_to_netcdf.py --icechunk-group
+  --time-axis` writes one segment's wrfout frames for one domain onto a
+  shared time axis. Conflicting commits are rebased or re-applied with
+  bounded, jittered retries, so no write is lost, and re-runs are
+  idempotent. `woof energy icechunk verify` reports the snapshot and how
+  much of the axis is written. See `docs/energy-hindcast/icechunk.md`.
 - Station verification reads Dynamical.org's ASOS Parquet archive of
   the Iowa Environmental Mesonet's reports: the United States and 14
   other countries, about 4,060 stations in 2026. `woof verify-visuals
