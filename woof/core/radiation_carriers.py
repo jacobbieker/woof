@@ -395,7 +395,35 @@ class CarrierContract:
         required = consumer_carriers(scheme)
         if not required:
             return
-        deferred = health_ledger.active() is not None
+        ledger = health_ledger.active()
+        deferred = ledger is not None
+        # EXACT DEFERRAL (the resident-step ledger, woof.core.health_ledger
+        # .resident_step): the footprint is not read on the healthy path,
+        # but every branch that would REFUSE or DECLARE reads it first and
+        # returns when no cell consumes -- exactly the eager answer, with
+        # the blocking read paid only by a run that is about to stop or to
+        # relabel a carrier.  The finiteness verdict is masked by the same
+        # footprint on the device.  The tiled/graph ledger keeps the
+        # over-enforcing behaviour below, because a read inside capture is
+        # refused outright.
+        exact = deferred and bool(getattr(ledger, "footprint_reads", False))
+        footprint: dict[str, object] = {}
+
+        def absent() -> bool:
+            """True when no cell consumes (read lazily, at most once)."""
+            if not exact:
+                return False
+            if "host" not in footprint:
+                footprint["host"] = _consumer_cells_exist(fields)
+            return not footprint["host"]
+
+        def device_footprint():
+            if not exact:
+                return None
+            if "device" not in footprint:
+                footprint["device"] = _consumer_cells_device(fields)
+            return footprint["device"]
+
         if not deferred and not _consumer_cells_exist(fields):
             # CONSUMER-CELL AWARENESS (module docstring): the selected LSM
             # dispatches on the same land/ice predicate read here, so a
@@ -428,6 +456,8 @@ class CarrierContract:
             record = self.record(name)
             described = _CARRIER_NAMES.get(name, name)
             if record.source == CARRIER_SOURCE_UNWRITTEN:
+                if absent():
+                    return
                 if self.policy == SURFACE_RADIATION_POLICY_WRF_COMPAT_ZERO:
                     # THE DECLARED ESCAPE.  Label it -- never leave it
                     # unwritten -- so the receipt, the output metadata and
@@ -461,6 +491,8 @@ class CarrierContract:
                         "configuration for a real case.")
             if (self.policy == SURFACE_RADIATION_POLICY_REQUIRED
                     and record.source not in _PRODUCED_SOURCES):
+                if absent():
+                    return
                 raise CarrierContractError(
                     f"{described} carries source {record.source!r}, which "
                     f"is not a producer, and {consumer} "
@@ -483,11 +515,15 @@ class CarrierContract:
                     + ".  A non-finite flux entering a surface energy "
                     "budget produces NaN skin temperature and NaN 2 m "
                     "diagnostics, which propagate into every later step.")
-                _check_carrier_finite(array, name=name, message=message)
+                _check_carrier_finite(array, name=name, message=message,
+                                      footprint=device_footprint,
+                                      absent=absent)
             age = record.age_seconds(model_time)
             if age is None:
                 continue
             if age > tolerance or age < 0.0:
+                if absent():
+                    return
                 raise CarrierContractError(
                     f"{described} is stale: its producer ({record.source}) "
                     f"last wrote it at model second "
@@ -531,6 +567,42 @@ def _consumer_cells_exist(fields) -> bool:
     return bool(consuming.any())
 
 
+def _consumer_cells_device(fields):
+    """:func:`_consumer_cells_exist` without a device read.
+
+    Returns ``True``/``False`` when the answer is known on the host without
+    reading the device (no footprint at all, or host-resident arrays), or a
+    0-d device bool when it lives on the card.  The same predicate as
+    :func:`_consumer_cells_exist`, including its fail-closed ``True`` for an
+    unknown footprint.
+    """
+    if fields is None:
+        return True
+    xland = fields.get("xland")
+    if xland is None:
+        return True
+    xice = fields.get("xice")
+    on_device = [a for a in (xland, xice)
+                 if a is not None and hasattr(a, "__cuda_array_interface__")]
+    if not on_device:
+        return _consumer_cells_exist(fields)
+    import numpy as np
+
+    host_part = False
+    device_part = None
+    for array, test in ((xland, lambda a: a < 1.5), (xice, lambda a: a > 0.0)):
+        if array is None:
+            continue
+        if hasattr(array, "__cuda_array_interface__"):
+            hit = test(array).any()
+            device_part = hit if device_part is None else (device_part | hit)
+        else:
+            host_part = host_part or bool(np.any(test(np.asarray(array))))
+    if host_part:
+        return True
+    return device_part
+
+
 def _all_finite(array) -> bool:
     """True when every element of a device or host array is finite."""
     import numpy as np
@@ -544,7 +616,8 @@ def _all_finite(array) -> bool:
     return bool(module.all(module.isfinite(array)))
 
 
-def _check_carrier_finite(array, *, name: str, message: str) -> None:
+def _check_carrier_finite(array, *, name: str, message: str,
+                          footprint=None, absent=None) -> None:
     """Refuse a non-finite carrier now, or record it for the sweep drain.
 
     Eagerly this is the blocking read it always was: reduce, read, raise
@@ -562,19 +635,37 @@ def _check_carrier_finite(array, *, name: str, message: str) -> None:
 
     A host (NumPy) carrier has no capture problem and keeps the immediate
     read whatever the ledger state, matching ``health_ledger.check_finite``.
+
+    ``footprint`` (a 0-d device bool, or a callable returning one or
+    ``None``) and ``absent`` (a callable answering "no cell consumes") are
+    the resident ledger's exact form, supplied by
+    :meth:`CarrierContract.check_before_consumption`: a verdict is raised
+    only where the eager check would have run at all.
     """
     from woof.core import health_ledger
 
     ledger = health_ledger.active()
     is_device = hasattr(array, "__cuda_array_interface__")
-    if ledger is None or not is_device:
+    if (ledger is None or not is_device
+            or not health_ledger._admits(ledger, f"carrier-contract:{name}")):
         if not _all_finite(array):
+            if absent is not None and absent():
+                return
             raise CarrierContractError(message)
         return
     import cupy as cp
 
-    status = cp.logical_not(cp.isfinite(array).all()).astype(
-        cp.uint32).reshape(1)
+    footprint = footprint() if callable(footprint) else footprint
+    if footprint is False:
+        return                  # known on the host: no cell consumes
+    if footprint is None or footprint is True:
+        status = cp.logical_not(cp.isfinite(array).all()).astype(
+            cp.uint32).reshape(1)
+    else:
+        # The resident ledger's exact form: flagged only where the eager
+        # check would have run at all (some cell consumes).
+        status = (cp.logical_not(cp.isfinite(array).all())
+                  & footprint).astype(cp.uint32).reshape(1)
     ledger.record(
         f"carrier-contract:{name}", status,
         lambda _flags, _message=message: _raise_deferred_carrier(_message))

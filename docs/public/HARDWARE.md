@@ -437,6 +437,21 @@ control binary is missing. This is the same daemon code as
 `woof energy worker --mps` (`woof/gpu_packing.py`). Packing and MPS have not
 been timed on hardware by this tree.
 
+### Small domains: the host decides the step time
+
+Below about 0.5 M cells, a full-physics step costs more host time than GPU
+time. An ordinary wind-farm-suite step (Thompson, MYNN, Noah, RRTMGP) issues
+about 410 kernels and 130 copies and memsets, whatever the domain size. Each
+blocking read in a step stops the CPU until the card has finished everything
+queued, and on a shared card that includes the other processes' work.
+
+Each scheme's health check (non-finite outputs, invalid inputs) is now read
+once, at the end of the step, instead of where it is made. Set
+`WOOF_HEALTH_READBACK=immediate` to read each check where it is made, which
+stops at the failing check itself. The run receipt's `health_readback` block
+records the mode. The measurements and their method are in
+[docs/dev/perf-launch-overhead-20261015.md](../dev/perf-launch-overhead-20261015.md).
+
 ### Small Windows cards are MEASURED now (2026-08-19, RTX 3080 10 GiB)
 
 Windows/WDDM accounting used to come from exactly ONE machine -- a

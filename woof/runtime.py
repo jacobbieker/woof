@@ -48,6 +48,7 @@ from dataclasses import dataclass, replace as dataclass_replace
 from pathlib import Path
 from typing import Mapping
 
+from woof.core.health_ledger import resident_receipt as _health_readback_receipt
 from woof.core.restart_request import RESTART_REQUEST_ENV, RestartRequest
 
 import numpy as np
@@ -6087,7 +6088,8 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
         receipts={**seam_capsule_receipts(model),
                   "pool_trim": model._pool_trim_policy,
                   "health_check": model._health_check_policy,
-                  "checkpoint_writes": model._checkpoint_receipt})
+                  "checkpoint_writes": model._checkpoint_receipt,
+                  "health_readback": _health_readback_receipt()})
     return ExperimentRunSummary(
         wrfout_paths=paths,
         completed_seconds=model.root.clock.elapsed_seconds,

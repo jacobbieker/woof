@@ -688,6 +688,10 @@ def test_the_check_is_capturable_inside_a_cuda_graph():
         stream.synchronize()
     ledger.drain()                             # healthy: nothing flagged
     fields["glw"][0, 0] = cp.float32(np.nan)
+    # The write runs on the legacy default stream and the replay on a
+    # non-blocking one, which does not wait for it: without this the replay
+    # can read the finite value and the test passes or fails on timing.
+    cp.cuda.runtime.deviceSynchronize()
     with stream:
         graph.launch(stream)
         stream.synchronize()

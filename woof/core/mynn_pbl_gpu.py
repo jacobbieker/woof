@@ -25,6 +25,7 @@ from woof.core.device_cache import cuda_cache
 import cupy as cp
 import numpy as np
 
+from woof.core.health_ledger import deferred_note
 from woof.core.kernels import get_kernel, get_kernel_int_defines
 from woof.core.mynn_pbl_scratch import (
     MYNN_PBL_COLUMN_CHUNK,
@@ -427,6 +428,36 @@ def _flag_mask(kernel, arrays, flags) -> list[bool]:
     return mask
 
 
+def _lowest_bit(bits: int) -> int:
+    return (int(bits) & -int(bits)).bit_length() - 1
+
+
+def _flag_mask_deferred(kernel, arrays, flags, *, site: str,
+                        refuse) -> bool:
+    """:func:`_flag_mask` with its verdict deferred to the health ledger.
+
+    ``refuse(mask)`` receives the per-array verdicts the immediate read
+    would have produced and must raise exactly what the caller raises.
+    Returns ``False`` (nothing launched) when the read must stay immediate:
+    no ledger is active, or the group is longer than one flag block or one
+    ledger word.
+    """
+    from woof.core import health_ledger
+
+    arrays = tuple(arrays)
+    ledger = health_ledger.active()
+    if (ledger is None or not arrays or not ledger.admits(site)
+            or len(arrays) > min(int(flags.size),
+                                 health_ledger.SPAN_BITS_MAX)):
+        return False
+    _flag_launch(kernel, arrays, flags)
+    count = len(arrays)
+    return health_ledger.record_span_bits(
+        flags, [(i, i + 1) for i in range(count)], site=site,
+        describe=lambda bits: refuse(
+            [bool((int(bits) >> i) & 1) for i in range(count)]))
+
+
 def _tripped(kernel, arrays, flags) -> bool:
     """True when ``kernel`` reports nonzero for any array in the group."""
     return any(_flag_mask(kernel, arrays, flags))
@@ -466,12 +497,31 @@ def _first_refusal(checks, flags) -> str | None:
         offsets[key] = offset
         _flag_launch(kernel, arrays, flags[offset:offset + len(arrays)])
         offset += len(arrays)
+    # Under a health ledger the verdict is not read here: bit i of one
+    # deferred word is check i, and the drain raises the FIRST set check's
+    # message -- the one this function would have returned -- as the
+    # ValueError every caller raises with it.
+    from woof.core import health_ledger
+
+    messages = [message for _key, _lo, _hi, message in spans]
+    if health_ledger.record_span_bits(
+            flags,
+            [(offsets[key] + lo, offsets[key] + hi)
+             for key, lo, hi, _message in spans],
+            site="mynn-refusal:" + messages[0],
+            describe=lambda bits: _raise_deferred_refusal(
+                messages[_lowest_bit(bits)])):
+        return None
     words = flags[:offset].get()
     for key, lo, hi, message in spans:
         base = offsets[key]
         if words[base + lo:base + hi].any():
             return message
     return None
+
+
+def _raise_deferred_refusal(message: str) -> None:
+    raise ValueError(message + deferred_note())
 
 
 def dmp_registers_per_thread() -> int:
@@ -1211,17 +1261,23 @@ def mynn_tendencies_nomf_cuda(
     flags = work.flags()
     # One word per name, so the refusal message names the arrays that are
     # actually nonzero rather than the first one that tripped.
-    mask = _flag_mask(
-        _nonzero(),
-        [interfaces.get(name, columns.get(name))
-         for name in _TENDENCIES_ZERO_FORCING],
-        flags)
-    forced = [name for name, hit in zip(_TENDENCIES_ZERO_FORCING, mask) if hit]
-    if forced:
-        raise ValueError(
-            "this MYNN tendency lane admits only zero mass-flux, subsidence "
-            "and detrainment forcing; nonzero: " + ", ".join(sorted(forced))
-        )
+    forcing = [interfaces.get(name, columns.get(name))
+               for name in _TENDENCIES_ZERO_FORCING]
+
+    def refuse_forcing(mask, note=""):
+        forced = [name for name, hit in zip(_TENDENCIES_ZERO_FORCING, mask)
+                  if hit]
+        if forced:
+            raise ValueError(
+                "this MYNN tendency lane admits only zero mass-flux, "
+                "subsidence and detrainment forcing; nonzero: "
+                + ", ".join(sorted(forced)) + note
+            )
+
+    if not _flag_mask_deferred(
+            _nonzero(), forcing, flags, site="mynn-zero-forcing",
+            refuse=lambda mask: refuse_forcing(mask, deferred_note())):
+        refuse_forcing(_flag_mask(_nonzero(), forcing, flags))
     return _tendency_launch(columns, interfaces, scalars, ncol, nz, 0.0, work)
 
 

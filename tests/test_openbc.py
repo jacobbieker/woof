@@ -475,7 +475,7 @@ def test_step_emdiv_uses_direct_mudf_wiring():
     import cupy as cp
     from woof.core import dycore
     from woof.verify.npref import random_acoustic_state
-    source = inspect.getsource(dycore.step)
+    source = inspect.getsource(dycore._step_body)
     assert "mudf=mudf" in source
     assert "launch_emdiv_mudf" not in source
     s, cfg = random_acoustic_state(seed=67, ny=6)

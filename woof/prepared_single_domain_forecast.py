@@ -12,6 +12,7 @@ the experiment through woof's existing atomic writer and carry
 
 from __future__ import annotations
 
+from woof.core.health_ledger import resident_receipt as _health_readback_receipt
 from woof.physics_registry import canonical_template_id
 
 import argparse
@@ -10029,6 +10030,7 @@ def run_prepared_forecast(
         "pool_trim": getattr(model, "_pool_trim_policy", None),
         "health_check": getattr(model, "_health_check_policy", None),
         "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
+        "health_readback": _health_readback_receipt(),
         "source": inputs.source,
         "prepared_layout": inputs.layout,
         "scope": (
@@ -10376,7 +10378,8 @@ def run_prepared_forecast(
                   "health_check": getattr(
                       model, "_health_check_policy", None),
                   "checkpoint_writes": getattr(
-                      model, "_checkpoint_receipt", None)},
+                      model, "_checkpoint_receipt", None),
+                  "health_readback": _health_readback_receipt()},
     )
     _atomic_json(progress_path, {
         "schema": PROGRESS_SCHEMA,

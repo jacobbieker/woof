@@ -75,6 +75,7 @@ sys.path[:] = [entry for entry in sys.path
                if not _names_this_runners_tree(entry)]
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from woof.core.health_ledger import resident_receipt as _health_readback_receipt  # noqa: E402
 from woof.forecast_initialization import TreeInitialization  # noqa: E402
 from woof import __version__  # noqa: E402
 from woof import prepared_single_domain_forecast as prepared_single  # noqa: E402
@@ -4494,6 +4495,7 @@ def run_prepared_tree(
             "pool_trim": getattr(model, "_pool_trim_policy", None),
             "health_check": getattr(model, "_health_check_policy", None),
             "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
+            "health_readback": _health_readback_receipt(),
             "steps": int(execution.steps),
             "forces": int(execution.forces),
             "feedback_calls": int(execution.feedback_calls),
@@ -4679,7 +4681,8 @@ def run_prepared_tree(
             **_seam_capsule_receipts(model),
             "pool_trim": getattr(model, "_pool_trim_policy", None),
             "health_check": getattr(model, "_health_check_policy", None),
-            "checkpoint_writes": getattr(model, "_checkpoint_receipt", None)},
+            "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
+            "health_readback": _health_readback_receipt()},
     )
     runtime._finalizing_progress(observer, "publish-completion")
     _atomic_json(
