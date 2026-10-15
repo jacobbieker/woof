@@ -1,0 +1,4 @@
+case,status,iterations,sim_time_s,first_step_wall_s,rest_wall_s,sst_start_C,sst_end_C,mean_turbulent_heat_flux_Wm2,ocean_heat_budget_rel_residual,note
+periodic_catke_unpatched,OK,360,1800.0,49.65,15.94,20.0000,19.9759,473.69,1.32e-10,"ΔH=-8.5264e+05 J/m2 vs -ρc∫Jᵀdt=-8.5264e+05 J/m2"
+lam_catke_unpatched,OK,720,3600.0,48.54,29.90,20.0000,19.8134,577.26,8.55e-03,"ΔH=-2.0604e+06 J/m2 vs -ρc∫Jᵀdt=-2.0781e+06 J/m2"
+lam_catke_open_unpatched,OK,720,3600.0,20.12,38.27,20.0000,19.8136,577.15,NaN,"ΔH=-1.8756e+06 J/m2 vs -ρc∫Jᵀdt=-2.0777e+06 J/m2"

@@ -1,0 +1,1 @@
+Outcome("periodic_slab_unpatched", "NONFINITE", 100, 500.0, 4.136014287, 0.347494814, 20.0, NaN, NaN, NaN, "ΔH=NaN J/m2 vs -ρc∫Jᵀdt=NaN J/m2; interface flux first non-finite after step 1")
