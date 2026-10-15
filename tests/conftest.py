@@ -869,6 +869,31 @@ def _isolated_fetch_lock_root(tmp_path_factory):
         os.environ[fetch_guard.LOCK_ROOT_ENV] = previous
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolated_verify_stamps(tmp_path_factory):
+    """Keep digest stamps out of the user's cache, and the policy default.
+
+    :mod:`woof.verify_stamps` keeps one stamp per verified file under the
+    per-user cache.  The suite verifies thousands of throwaway files, so
+    its stamps go to the session's temp directory instead, and a
+    ``WOOF_VERIFY`` the developer exported for an audit does not change
+    what the suite asserts.  The stamp tests set their own per test.
+    """
+    from woof import verify_stamps
+
+    root = tmp_path_factory.mktemp("verify-stamps")
+    saved = {name: os.environ.get(name) for name in (
+        verify_stamps.STAMPS_ENV, verify_stamps.POLICY_ENV)}
+    os.environ[verify_stamps.STAMPS_ENV] = str(root)
+    os.environ.pop(verify_stamps.POLICY_ENV, None)
+    yield root
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
 @pytest.fixture(autouse=True)
 def _wizard_probe_pinned_to_a_24gib_card(monkeypatch):
     """Pin the ONE number the outside world moves in the domain wizard.

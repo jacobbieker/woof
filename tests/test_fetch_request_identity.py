@@ -1251,7 +1251,8 @@ def test_an_existing_files_digest_is_read_once_and_never_outlives_its_bytes(
     assert reads == [path.name, path.name]
 
     later = clock.time_ns() + 3_000_000_000
-    monkeypatch.setattr(fetch, "_digest_clock_ns", lambda: later)
+    from woof import verify_stamps
+    monkeypatch.setattr(verify_stamps, "_clock_ns", lambda: later)
     reads.clear()
     assert fetch.existing_file_digest(path) == first
     assert fetch.existing_file_digest(path) == first
