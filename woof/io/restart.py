@@ -80,12 +80,15 @@ tests) stay importable without a GPU.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import json
 import math
 import os
 import re
+import threading
+import time
 import uuid
 import zipfile
 from collections.abc import Mapping
@@ -158,9 +161,11 @@ from woof.state_serialization_contract import (
     STATE_DERIVED_SETUP_ARRAYS,
     STATE_SETUP_ARRAYS,
     STATE_SETUP_SCALARS,
+    _c_bytes,
     lateral_boundary_prefix_identity as _lateral_boundary_prefix_identity,
     setup_core_fingerprint as _shared_setup_core_fingerprint,
     setup_fingerprint as _shared_setup_fingerprint,
+    setup_fingerprints as _shared_setup_fingerprints,
 )
 
 #: Bump on any change to the key layout or classification tables; restores
@@ -1261,8 +1266,9 @@ def written_mode_note(mode: str, cfg, *, store: str | None = None) -> dict:
     ``None`` where it is not.  The shape is the domain's, taken from
     ``cfg`` so every writer spells it the same way.
 
-    WHO STAMPS IT TODAY.  The resident writer (:func:`_write_restart`)
-    does, and it is the only writer in this package.  The streamed
+    WHO STAMPS IT TODAY.  The resident writer (:func:`_prepare_restart`,
+    which heads both the synchronous and the asynchronous write) does, and
+    it is the only writer in this package.  The streamed
     writer builds its own header in
     ``tilestream.restart_stream.write_streamed_restart`` and does not
     call this yet, so a streamed archive carries no stamp and
@@ -1858,7 +1864,7 @@ def _array_setup_identity(value) -> dict:
     digest = hashlib.sha256()
     digest.update(str(tuple(host.shape)).encode("ascii"))
     digest.update(str(host.dtype).encode("ascii"))
-    digest.update(host.tobytes(order="C"))
+    digest.update(_c_bytes(host))
     return {
         "shape": list(host.shape),
         "dtype": str(host.dtype),
@@ -3515,7 +3521,7 @@ def write_restart(path, state, cfg, *, run_trackers=None,
     always written, which is what keeps every lifecycle-free checkpoint
     byte-identical.
     """
-    with perf_timing.stage("io.restart.write_restart"):
+    with perf_timing.stage("io.restart.write_restart"), _holding_staging():
         return _write_restart(
             path, state, cfg, run_trackers=run_trackers,
             tree_header=tree_header,
@@ -3529,6 +3535,72 @@ def _write_restart(path, state, cfg, *, run_trackers=None,
                    extra_scratch_slots=(),
                    sealed_forcing_extension: bool = False,
                    preserved_forcing_prefix: bool = False) -> Path:
+    return _publish_restart_plan(_prepare_restart(
+        path, state, cfg, run_trackers=run_trackers,
+        tree_header=tree_header, extra_scratch_slots=extra_scratch_slots,
+        sealed_forcing_extension=sealed_forcing_extension,
+        preserved_forcing_prefix=preserved_forcing_prefix))
+
+
+@dataclasses.dataclass
+class RestartPlan:
+    """One checkpoint member, decided on the model thread, not yet written.
+
+    PINNED: ``header`` is complete and final (it is the header the file
+    will carry, ``array_manifest`` included); ``members`` are the
+    archive's array members in archive order -- the sorted manifest keys,
+    which is the order :func:`np.savez` has always written them in.  Each
+    value is a DEVICE array of the live state or the host array
+    :func:`_host` made of it, held BY REFERENCE: the plan has to be written
+    (:func:`_publish_restart_plan`) or snapshotted
+    (:mod:`woof.io.async_checkpoint`) before the model mutates the state
+    again, exactly as the one-shot writer always read it.
+    """
+
+    path: Path
+    header: dict
+    members: tuple
+
+    @property
+    def nbytes(self) -> int:
+        return sum(int(getattr(value, "nbytes", 0) or 0)
+                   for _key, value in self.members)
+
+
+_DEVICE_ARRAY_TYPE: list = []
+
+
+def _device_array_type():
+    """``cupy.ndarray``, or ``None`` where CuPy cannot be imported."""
+    if not _DEVICE_ARRAY_TYPE:
+        try:
+            import cupy
+            _DEVICE_ARRAY_TYPE.append(cupy.ndarray)
+        except Exception:                # noqa: BLE001 - CPU-only install
+            _DEVICE_ARRAY_TYPE.append(None)
+    return _DEVICE_ARRAY_TYPE[0]
+
+
+def _is_device_array(value) -> bool:
+    kind = _device_array_type()
+    return kind is not None and isinstance(value, kind)
+
+
+def _prepare_restart(path, state, cfg, *, run_trackers=None,
+                     tree_header: dict | None = None,
+                     extra_scratch_slots=(),
+                     sealed_forcing_extension: bool = False,
+                     preserved_forcing_prefix: bool = False) -> RestartPlan:
+    """Validate, inventory and header one checkpoint member; copy nothing.
+
+    Everything :func:`write_restart` refuses is refused here, before a byte
+    of the member exists.  Device arrays are NOT copied to the host: the
+    manifest's shape and dtype are read off the device array (they are what
+    ``.get()`` returns), and the bytes are streamed into the archive later,
+    one member at a time.  The one-shot writer used to materialise a full
+    pageable host copy of the whole domain first, which is what made every
+    checkpoint of a large domain cost its size again in host RAM.
+    """
     if cfg.diff_opt == 1:
         from woof.core.dycore import initialize_coordinate_reference
         initialize_coordinate_reference(state, cfg)
@@ -3583,13 +3655,23 @@ def _write_restart(path, state, cfg, *, run_trackers=None,
     physics_setup = physics_setup_identity(state, cfg)
     physics_setup_sha256 = _json_sha256(physics_setup)
 
-    arrays = {}
+    members = []
     array_manifest = {}
     for key in sorted(manifest):
-        host = _host(manifest[key])
-        arrays[key] = host
-        array_manifest[key] = {"shape": list(host.shape),
-                               "dtype": str(host.dtype)}
+        value = manifest[key]
+        if not _is_device_array(value):
+            # Host (or host-like) members are what they always were.
+            value = _host(value)
+        members.append((key, value))
+        array_manifest[key] = {"shape": list(value.shape),
+                               "dtype": str(value.dtype)}
+    forcing_contract = sealed_forcing_extension or preserved_forcing_prefix
+    if forcing_contract:
+        # One pass over the setup core for both digests (they share it).
+        core_fingerprint, full_fingerprint = _shared_setup_fingerprints(
+            view, error_type=RestartManifestError)
+    else:
+        core_fingerprint, full_fingerprint = None, setup_fingerprint(view)
     config_echo = configuration_echo(cfg)
     header = {
         "format_version": RESTART_FORMAT_VERSION,
@@ -3601,16 +3683,16 @@ def _write_restart(path, state, cfg, *, run_trackers=None,
         # that is speaking rather than a hand-maintained constant.
         "producer": producer_identity(),
         # Provenance, excluded from every identity by construction; see
-        # written_mode_note.  The resident writer materialises a full host
-        # copy of the domain, which is what "resident" names here.  The
-        # streamed writer lives in another package and does not stamp
-        # yet, so a header with no key says "this file does not say".
+        # written_mode_note.  "resident" names a domain whose state is on
+        # the card (it is copied off it member by member).  The streamed
+        # writer lives in another package and does not stamp yet, so a
+        # header with no key says "this file does not say".
         WRITTEN_MODE_HEADER_KEY: written_mode_note(
             RESIDENT_WRITTEN_MODE, cfg),
         "elapsed_seconds": _admissible_elapsed_seconds(
             state.elapsed_seconds, "restart write"),
         "config": config_echo,
-        "setup_fingerprint": setup_fingerprint(view),
+        "setup_fingerprint": full_fingerprint,
         "physics_setup": physics_setup,
         "physics_setup_fingerprint": physics_setup_sha256,
         "driver": driver_header,
@@ -3620,11 +3702,11 @@ def _write_restart(path, state, cfg, *, run_trackers=None,
     }
     if stochastic_header is not None:
         header["ensemble_stochastic"] = stochastic_header
-    if sealed_forcing_extension or preserved_forcing_prefix:
+    if forcing_contract:
         header.update({
             "forcing_extension_mode": (PRESERVED_FORCING_PREFIX_MODE if preserved_forcing_prefix
                                        else SEALED_FORCING_EXTENSION_MODE),
-            "setup_core_fingerprint": setup_core_fingerprint(view),
+            "setup_core_fingerprint": core_fingerprint,
             "lateral_boundary_prefix": lateral_boundary_prefix_identity(view),
         })
     if stream is not None:
@@ -3640,20 +3722,179 @@ def _write_restart(path, state, cfg, *, run_trackers=None,
                 f"tree restart header may not replace base keys "
                 f"{sorted(overlap)}")
         header.update(dict(tree_header))
-    # ``allow_nan=False``: Python's json emits bare ``NaN``/``Infinity``
-    # tokens by default, which are not JSON, and the reader accepts them
-    # back.  A header that cannot express a non-finite clock is a header
-    # whose clock cannot poison resume arithmetic after every identity
-    # check has already passed.
-    payload = {_HEADER_KEY: np.frombuffer(
-        json.dumps(header, allow_nan=False).encode("utf-8"),
-        dtype=np.uint8)}
-    payload.update(arrays)
+    return RestartPlan(path=path, header=header, members=tuple(members))
+
+
+def _header_member(header: dict) -> np.ndarray:
+    """The ``__header__`` member's bytes.
+
+    ``allow_nan=False``: Python's json emits bare ``NaN``/``Infinity``
+    tokens by default, which are not JSON, and the reader accepts them
+    back.  A header that cannot express a non-finite clock is a header
+    whose clock cannot poison resume arithmetic after every identity check
+    has already passed.
+    """
+    return np.frombuffer(
+        json.dumps(header, allow_nan=False).encode("utf-8"), dtype=np.uint8)
+
+
+class HostBuffer:
+    """Host bytes that device members are copied into.
+
+    PINNED: ``pinned=True`` page-locks (``cupy.cuda.PinnedMemory``, freed
+    with this object -- never parked in CuPy's pinned pool) and raises when
+    CUDA refuses; ``pinned=None`` page-locks when CUDA grants it and falls
+    back to pageable memory otherwise; ``pinned=False`` is pageable.  The
+    bytes a copy lands are the bytes ``.get()`` returns either way, so no
+    archive depends on which one was had.
+    """
+
+    def __init__(self, nbytes: int, *, pinned: bool | None = None):
+        self.nbytes = int(nbytes)
+        self.pinned = False
+        self._memory = None
+        buffer = None
+        if pinned is not False and self.nbytes:
+            try:
+                from cupy.cuda import pinned_memory
+                self._memory = pinned_memory.PinnedMemory(self.nbytes)
+                buffer = np.frombuffer(
+                    pinned_memory.PinnedMemoryPointer(self._memory, 0),
+                    dtype=np.uint8, count=self.nbytes)
+                self.pinned = True
+            except Exception:            # noqa: BLE001 - see ``pinned``
+                if pinned:
+                    raise
+                self._memory = None
+                buffer = None
+        self._bytes = (np.empty(self.nbytes, dtype=np.uint8)
+                       if buffer is None else buffer)
+
+    def view(self, shape, dtype, offset: int = 0) -> np.ndarray:
+        dtype = np.dtype(dtype)
+        count = int(np.prod(shape, dtype=np.int64))
+        return (self._bytes[offset:offset + count * dtype.itemsize]
+                .view(dtype).reshape(shape))
+
+    def release(self) -> None:
+        """Drop this object's hold; views still alive keep the memory."""
+        self._bytes = None
+        self._memory = None
+
+
+#: The calling thread's staging buffer (see :func:`_staging_buffer`).
+_STAGING = threading.local()
+
+
+def _staging_buffer(nbytes: int) -> HostBuffer:
+    """The thread's ONE reusable staging buffer, grown to ``nbytes``.
+
+    PINNED: every device member of a synchronous write passes through it,
+    one at a time; it is the size of the largest member written while it
+    is held and is released when the outermost holder lets go
+    (:func:`_holding_staging`) -- the end of a direct :func:`write_restart`,
+    of a :func:`write_tree_restart` set, or of the executor leg whose
+    checkpoint writer holds it, so an hourly synchronous checkpoint does not
+    page-lock and free its buffer once per member file.
+    """
+    buffer = getattr(_STAGING, "buffer", None)
+    if buffer is None or buffer.nbytes < int(nbytes):
+        if buffer is not None:
+            buffer.release()
+        buffer = HostBuffer(int(nbytes))
+        _STAGING.buffer = buffer
+    return buffer
+
+
+def release_staging_buffer() -> None:
+    """Free the calling thread's staging buffer now."""
+    buffer = getattr(_STAGING, "buffer", None)
+    _STAGING.buffer = None
+    if buffer is not None:
+        buffer.release()
+
+
+def hold_staging_buffer() -> None:
+    """Keep the thread's staging buffer between writes (see below)."""
+    _STAGING.held = int(getattr(_STAGING, "held", 0)) + 1
+
+
+def unhold_staging_buffer() -> None:
+    """Undo one :func:`hold_staging_buffer`; the last one frees it."""
+    _STAGING.held = max(int(getattr(_STAGING, "held", 0)) - 1, 0)
+    if not _STAGING.held:
+        release_staging_buffer()
+
+
+@contextlib.contextmanager
+def _holding_staging():
+    hold_staging_buffer()
+    try:
+        yield
+    finally:
+        unhold_staging_buffer()
+
+
+class _StagedMember:
+    """A device member that becomes a host array only when it is written.
+
+    ``np.savez`` turns each member into an array (``np.asanyarray``)
+    immediately before writing it and drops it before the next, so this
+    object downloads its device array into the shared staging buffer at
+    exactly that moment.  The archive therefore holds ONE member's bytes in
+    host memory at a time, in the bytes ``.get()`` would have returned
+    (C order, the device array's shape and dtype), and ``np.savez`` -- the
+    one serializer every checkpoint has ever been written by -- writes the
+    same file it always wrote.
+    """
+
+    def __init__(self, value, staging: HostBuffer):
+        self._value = value
+        self._staging = staging
+
+    def __array__(self, dtype=None, copy=None):
+        value = self._value
+        out = self._staging.view(value.shape, value.dtype)
+        source = value
+        if not source.flags.c_contiguous:
+            import cupy
+            source = cupy.ascontiguousarray(source)
+        source.get(out=out)
+        if dtype is not None and np.dtype(dtype) != out.dtype:
+            return out.astype(dtype)
+        return out.copy() if copy else out
+
+
+def _publish_restart_plan(plan: RestartPlan) -> Path:
+    """Write ``plan`` synchronously, one member through the staging buffer."""
+    device_bytes = [int(value.nbytes) for _key, value in plan.members
+                    if _is_device_array(value)]
+    staging = (_staging_buffer(max(device_bytes)) if device_bytes
+               else None)
+    payload = {_HEADER_KEY: _header_member(plan.header)}
+    for key, value in plan.members:
+        payload[key] = (_StagedMember(value, staging)
+                        if _is_device_array(value) else value)
+    return _publish_npz(plan.path, payload)
+
+
+def _publish_npz(path, payload, *, unlink_published_on_failure: bool = False,
+                 before_replace=None) -> Path:
+    """Atomically publish ``payload`` as an uncompressed ``.npz`` at ``path``.
+
+    ``unlink_published_on_failure`` also removes ``path`` when the failure
+    came after the rename (the directory fsync); only a caller whose names
+    are unique to this write may ask for it.  ``before_replace`` is called
+    after the data is durable under its temporary name and before the
+    rename; raising there abandons the publication.
+    """
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Atomic publish: a crash mid-write must not leave a truncated file
     # under the valid gpuwmrst name (review F4).
     # Separate concurrent writers; each publishes one complete archive.
     temp = unique_temp_path(path)
+    replaced = False
     try:
         with temp.open("wb") as stream:
             np.savez(stream, **payload)
@@ -3664,10 +3905,15 @@ def _write_restart(path, state, cfg, *, run_trackers=None,
         # replaces; the checkpoint did not, and a checkpoint is the thing a
         # crash is supposed to leave behind.
         fsync_file(temp)
+        if before_replace is not None:
+            before_replace()
         os.replace(temp, path)
+        replaced = True
         _fsync_directory(path.parent)
     except BaseException:
         temp.unlink(missing_ok=True)
+        if replaced and unlink_published_on_failure:
+            path.unlink(missing_ok=True)
         raise
     return path
 
@@ -4423,8 +4669,16 @@ class _ValidatedRestart:
     elapsed: float
 
 
-def require_tree_checkpoint_legal(model) -> tuple[int, int]:
-    """Enforce the binding PERIOD_BEGIN tree checkpoint contract."""
+def require_tree_checkpoint_legal(model, *, history_ordered: bool = False
+                                  ) -> tuple[int, int]:
+    """Enforce the binding PERIOD_BEGIN tree checkpoint contract.
+
+    ``history_ordered`` says the caller holds a durability barrier over
+    every history frame still in flight (:mod:`woof.io.async_checkpoint`):
+    the root member will not be published before those frames are
+    durable, so they are ordered work, not pending work, and the D2H count
+    is not a refusal.  Every other pending count still is.
+    """
     from woof.core.model import PERIOD_BEGIN
 
     status = getattr(model, "_runtime_status", None)
@@ -4444,6 +4698,8 @@ def require_tree_checkpoint_legal(model) -> tuple[int, int]:
     io_manager = getattr(model, "_io_manager", None)
     if io_manager is not None:
         pending["D2H"] = max(pending["D2H"], int(io_manager.pending))
+    if history_ordered:
+        pending["D2H"] = 0
     active = {name: count for name, count in pending.items() if count}
     if active:
         raise RestartMismatchError(
@@ -5221,8 +5477,25 @@ def _node_placement(node):
 def write_tree_restart(directory, model, valid_time: datetime, *,
                        run_trackers_by_grid_id=None,
                        sealed_forcing_extension: bool = False,
-                       auto_epssm=None) -> Path:
+                       auto_epssm=None, on_published=None,
+                       progress_callback=None) -> Path:
     """Publish one immutable generation per domain, with d01 last.
+
+    Returns the ROOT member's path.
+
+    ASYNCHRONOUS when the executor published a checkpoint writer on the
+    model (``model._checkpoint_writer``, :mod:`woof.io.async_checkpoint`)
+    and nothing names a reason not to: the members are inventoried and
+    headed here, the device state is snapshotted, and this returns with the
+    set still being written -- the path it returns is the name the root
+    WILL be published under, not yet a file.  The set becomes the resume
+    point -- ``model._last_checkpoint``, retirement of superseded sets,
+    ``on_published(root_path, info)`` -- only once it is durable, on the
+    model thread; the executor drains it on every exit.  Without a writer
+    (every direct caller), or with a named synchronous fallback, it is
+    written here, and ``on_published`` has been called when this returns.
+    ``progress_callback`` is the route's progress object, for the writer's
+    drain beat.
 
     ``auto_epssm`` is the grid_ids whose ``epssm`` the model chose
     (:data:`AUTO_EPSSM_HEADER_KEY`); ``None`` reads them off the tree's
@@ -5245,10 +5518,25 @@ def write_tree_restart(directory, model, valid_time: datetime, *,
     """
     from woof.core.model import PERIOD_BEGIN
 
-    ticks, tick_den = require_tree_checkpoint_legal(model)
+    model_thread_started = time.perf_counter()
+    nodes = tuple(model.walk_parent_first())
+    writer = getattr(model, "_checkpoint_writer", None)
+    io_manager = getattr(model, "_io_manager", None)
+    fallback = None
+    barrier = None
+    if writer is not None:
+        fallback = writer.refusal(
+            nodes, sealed_forcing_extension=sealed_forcing_extension)
+        if fallback is None:
+            # Ordered after every frame already submitted (everything at or
+            # before this instant), instead of draining them here.
+            barrier = writer.order_history(io_manager)
+        else:
+            writer.synchronous(fallback, io_manager=io_manager)
+    ticks, tick_den = require_tree_checkpoint_legal(
+        model, history_ordered=barrier is not None)
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    nodes = tuple(model.walk_parent_first())
     ids = sorted(int(node.cfg.grid_id) for node in nodes)
     trackers = dict(run_trackers_by_grid_id or {})
     if auto_epssm is None:
@@ -5384,108 +5672,142 @@ def write_tree_restart(directory, model, valid_time: datetime, *,
                 path=directory / f"d{int(node.cfg.grid_id):02d}",
                 elapsed=sealed_elapsed)
     checkpoint_set_id = uuid.uuid4().hex
+    # Children first, root commit marker last.
+    members = []
+    for node in reversed(nodes):
+        gid = int(node.cfg.grid_id)
+        node.state.elapsed_seconds = ticks / tick_den
+        bits = int(np.float32(node.clock.dtbc_fp32).view(np.uint32))
+        started = bool(getattr(node, "_started", True))
+        lifecycle = "STARTED" if started else "NOT_STARTED"
+        domain_start_time = (
+            model.schedule.clock.start_time
+            if node.cfg.start_time is None
+            else node.cfg.start_time)
+        tree_header = {
+            "experiment_fingerprint": model.experiment_fingerprint,
+            # The named components the fingerprint is a digest of,
+            # when the building route publishes them.  Stored so a
+            # mismatch on restore can say WHICH one moved instead of
+            # reporting that a hash differs.  Absent for routes that
+            # build the fingerprint some other way; the comparison
+            # below degrades to the bare-hash message.
+            **({} if _fingerprint_components(model) is None else {
+                "experiment_fingerprint_components":
+                    _fingerprint_components(model)}),
+            "checkpoint_set_id": checkpoint_set_id,
+            "grid_id": gid,
+            "parent_id": int(node.cfg.parent_id),
+            "domain_ids": ids,
+            "elapsed_ticks": ticks,
+            "tick_den": tick_den,
+            "phase": PERIOD_BEGIN,
+            "domain_start_time": domain_start_time.isoformat(),
+            "domain_start_ticks": int(node.clock.spec.start_ticks),
+            "domain_lifecycle": lifecycle,
+            "nest_tables": (
+                "REBUILT" if started or node.parent is None
+                else "NOT_STARTED"),
+            "dtbc_fp32_bits": bits,
+            # THE LIVE CLOCK, for a resume under
+            # use_adaptive_time_step.  ABSENT when the feature is off,
+            # on the same convention [relocation] uses below and
+            # [perturbation] uses in the identity payload: a key that
+            # appears as null in every checkpoint would move every
+            # pre-feature digest for a field those runs never had.
+            # The reader treats absent as "the configured step",
+            # which is exactly what those runs were integrating.
+            #
+            # step_count is STORED, not derived.  The restore path
+            # recomputes it as (ticks - start) // step_ticks, which is
+            # exact only while every step was the same size; after a
+            # run whose step varied it is simply a wrong number, and
+            # it is what the physics driver's itimestep is built from.
+            **({} if not bool(node.cfg.run.use_adaptive_time_step)
+               else {"adaptive_clock": {
+                   "step_ticks": int(node.clock.step_ticks),
+                   "dt_fp32_bits": int(
+                       np.float32(node.clock.dt_fp32).view(np.uint32)),
+                   "step_count": int(node.clock.step_count),
+                   # The controller's own memory, including the CFL
+                   # state WRF does NOT checkpoint.
+                   "controller": getattr(
+                       node.clock, "adaptive_state", None),
+               }}),
+            # WHERE THIS DOMAIN ACTUALLY WAS.  A nest that has moved
+            # is not where its config says it is, and every setup
+            # array -- terrain, map factors, base state -- belongs to
+            # the placement it was at, not the one it started from.
+            # Without this a restore rebuilds the tree from the
+            # config, lands the nest on its ORIGINAL ground, and the
+            # setup fingerprint refuses (correctly) with a base-state
+            # mismatch.  The root has no placement of its own and
+            # writes nulls.
+            "placement": _node_placement(node),
+            # The ruled posture, on the member that carries it.  This
+            # block was computed here and then dropped on the floor,
+            # so every checkpoint written after a move claimed
+            # `relocation: null` and the restore-side warning that
+            # reads it could never fire.
+            **({} if relocation_header is None
+               else {"relocation": relocation_header}),
+            **auto_epssm_header(gid, auto_epssm),
+        }
+        # D3, closed: the posture block was computed and never
+        # attached, so the crossed-move warning in
+        # ``restore_tree_restart`` and the posture branch of
+        # ``tree_fingerprint_mismatch_reason`` could never fire from
+        # this writer -- a restart across a move refused as an
+        # unexplained hash.  On EVERY member, because the mismatch
+        # message is produced per member.
+        if relocation_header is not None:
+            tree_header["relocation"] = dict(relocation_header)
+        # The lifecycle block is a WHOLE-TREE fact and rides the root,
+        # which is the set's commit marker; children carry nothing, so
+        # a child member can never disagree with its parent.
+        if nest_lifecycle is not None and node.parent is None:
+            tree_header[NEST_LIFECYCLE_HEADER_KEY] = nest_lifecycle
+        base = Path(restart_filename(valid_time, f"d{gid:02d}"))
+        member = base.with_name(
+            f"{base.stem}__{checkpoint_set_id}{base.suffix}")
+        path = directory / member
+        members.append((node, gid, path, tree_header))
+    root_id = int(model.root.cfg.grid_id)
+    root_path = next(path for _node, gid, path, _header in members
+                     if gid == root_id)
+    plans = None
+    if writer is not None and fallback is None:
+        with perf_timing.stage("io.restart.async_snapshot"):
+            plans = [_prepare_restart(
+                         path, node.state, node.cfg.run,
+                         run_trackers=trackers.get(gid),
+                         tree_header=tree_header,
+                         extra_scratch_slots=window_slots_by_gid.get(gid, ()))
+                     for node, gid, path, tree_header in members]
+            fallback = writer.submit(
+                plans, directory=directory, root_path=root_path,
+                valid_time=valid_time, barrier=barrier,
+                on_published=on_published,
+                progress_callback=progress_callback,
+                model_thread_started=model_thread_started)
+        if fallback is None:
+            return root_path
+        writer.synchronous(fallback, io_manager=io_manager)
+    plan_by_gid = ({} if plans is None else
+                   {gid: plan for (_n, gid, _p, _h), plan
+                    in zip(members, plans)})
     published: list[Path] = []
+    hold_staging_buffer()
     try:
-        # Children first, root commit marker last.
-        for node in reversed(nodes):
-            gid = int(node.cfg.grid_id)
-            node.state.elapsed_seconds = ticks / tick_den
-            bits = int(np.float32(node.clock.dtbc_fp32).view(np.uint32))
-            started = bool(getattr(node, "_started", True))
-            lifecycle = "STARTED" if started else "NOT_STARTED"
-            domain_start_time = (
-                model.schedule.clock.start_time
-                if node.cfg.start_time is None
-                else node.cfg.start_time)
-            tree_header = {
-                "experiment_fingerprint": model.experiment_fingerprint,
-                # The named components the fingerprint is a digest of,
-                # when the building route publishes them.  Stored so a
-                # mismatch on restore can say WHICH one moved instead of
-                # reporting that a hash differs.  Absent for routes that
-                # build the fingerprint some other way; the comparison
-                # below degrades to the bare-hash message.
-                **({} if _fingerprint_components(model) is None else {
-                    "experiment_fingerprint_components":
-                        _fingerprint_components(model)}),
-                "checkpoint_set_id": checkpoint_set_id,
-                "grid_id": gid,
-                "parent_id": int(node.cfg.parent_id),
-                "domain_ids": ids,
-                "elapsed_ticks": ticks,
-                "tick_den": tick_den,
-                "phase": PERIOD_BEGIN,
-                "domain_start_time": domain_start_time.isoformat(),
-                "domain_start_ticks": int(node.clock.spec.start_ticks),
-                "domain_lifecycle": lifecycle,
-                "nest_tables": (
-                    "REBUILT" if started or node.parent is None
-                    else "NOT_STARTED"),
-                "dtbc_fp32_bits": bits,
-                # THE LIVE CLOCK, for a resume under
-                # use_adaptive_time_step.  ABSENT when the feature is off,
-                # on the same convention [relocation] uses below and
-                # [perturbation] uses in the identity payload: a key that
-                # appears as null in every checkpoint would move every
-                # pre-feature digest for a field those runs never had.
-                # The reader treats absent as "the configured step",
-                # which is exactly what those runs were integrating.
-                #
-                # step_count is STORED, not derived.  The restore path
-                # recomputes it as (ticks - start) // step_ticks, which is
-                # exact only while every step was the same size; after a
-                # run whose step varied it is simply a wrong number, and
-                # it is what the physics driver's itimestep is built from.
-                **({} if not bool(node.cfg.run.use_adaptive_time_step)
-                   else {"adaptive_clock": {
-                       "step_ticks": int(node.clock.step_ticks),
-                       "dt_fp32_bits": int(
-                           np.float32(node.clock.dt_fp32).view(np.uint32)),
-                       "step_count": int(node.clock.step_count),
-                       # The controller's own memory, including the CFL
-                       # state WRF does NOT checkpoint.
-                       "controller": getattr(
-                           node.clock, "adaptive_state", None),
-                   }}),
-                # WHERE THIS DOMAIN ACTUALLY WAS.  A nest that has moved
-                # is not where its config says it is, and every setup
-                # array -- terrain, map factors, base state -- belongs to
-                # the placement it was at, not the one it started from.
-                # Without this a restore rebuilds the tree from the
-                # config, lands the nest on its ORIGINAL ground, and the
-                # setup fingerprint refuses (correctly) with a base-state
-                # mismatch.  The root has no placement of its own and
-                # writes nulls.
-                "placement": _node_placement(node),
-                # The ruled posture, on the member that carries it.  This
-                # block was computed here and then dropped on the floor,
-                # so every checkpoint written after a move claimed
-                # `relocation: null` and the restore-side warning that
-                # reads it could never fire.
-                **({} if relocation_header is None
-                   else {"relocation": relocation_header}),
-                **auto_epssm_header(gid, auto_epssm),
-            }
-            # D3, closed: the posture block was computed and never
-            # attached, so the crossed-move warning in
-            # ``restore_tree_restart`` and the posture branch of
-            # ``tree_fingerprint_mismatch_reason`` could never fire from
-            # this writer -- a restart across a move refused as an
-            # unexplained hash.  On EVERY member, because the mismatch
-            # message is produced per member.
-            if relocation_header is not None:
-                tree_header["relocation"] = dict(relocation_header)
-            # The lifecycle block is a WHOLE-TREE fact and rides the root,
-            # which is the set's commit marker; children carry nothing, so
-            # a child member can never disagree with its parent.
-            if nest_lifecycle is not None and node.parent is None:
-                tree_header[NEST_LIFECYCLE_HEADER_KEY] = nest_lifecycle
-            base = Path(restart_filename(valid_time, f"d{gid:02d}"))
-            member = base.with_name(
-                f"{base.stem}__{checkpoint_set_id}{base.suffix}")
-            path = directory / member
+        for node, gid, path, tree_header in members:
             streamed = getattr(node.state, "_streamed_domain", None)
-            if streamed is not None and not sealed_forcing_extension:
+            if gid in plan_by_gid:
+                # Refused AFTER it was inventoried and headed: write what
+                # was decided rather than deciding it all again.
+                with perf_timing.stage("io.restart.write_restart"), \
+                        _holding_staging():
+                    paths[gid] = _publish_restart_plan(plan_by_gid[gid])
+            elif streamed is not None and not sealed_forcing_extension:
                 # Publish the canonical store, without refreshing a full GPU
                 # state. Bind the exact domain time, not the tile FP32 sum.
                 streamed.impose_clock(ticks / tick_den)
@@ -5511,12 +5833,22 @@ def write_tree_restart(directory, model, valid_time: datetime, *,
             except OSError:
                 pass
         raise
-    root_id = int(model.root.cfg.grid_id)
+    finally:
+        unhold_staging_buffer()
     model._last_checkpoint = paths[root_id]
     # Only after the whole new set is published: the sets it supersedes
     # go when the run's retention says so (woof.resume), never before.
     from woof.resume import retire_superseded_checkpoints
     retire_superseded_checkpoints(directory)
+    seconds = time.perf_counter() - model_thread_started
+    info = {"mode": "sync", "reason": fallback,
+            "model_thread_seconds": seconds, "wall_seconds": seconds}
+    if writer is not None:
+        info = writer.record_synchronous(
+            valid_time=valid_time, reason=fallback, path=paths[root_id],
+            model_thread_seconds=seconds)
+    if on_published is not None:
+        on_published(paths[root_id], dict(info))
     return paths[root_id]
 
 
@@ -7058,4 +7390,5 @@ __all__ = [
     "checkpoint_placements",
     "tree_restart_members",
     "write_tree_restart",
+    "release_staging_buffer",
 ]

@@ -9688,7 +9688,18 @@ def run_prepared_forecast(
     def restart_handler(tree, ticks):
         from woof.io.restart import write_tree_restart
         valid = exp.start_time + timedelta(seconds=ticks / tree.schedule.clock.tick_den)
-        started = time.perf_counter()
+
+        def published(path, info):
+            # Called once the set is DURABLE -- here for a synchronous
+            # write, at a later period commit for an asynchronous one
+            # (woof.io.async_checkpoint) -- so neither the report's list
+            # nor the step log can name a checkpoint that is not on disk.
+            checkpoints.append(str(Path(path).resolve()))
+            checkpoint_ticks[int(ticks)] = checkpoints[-1]
+            step_log.restart_written(
+                domain=exp.root.grid_id, valid_time=valid, path=path,
+                wall_seconds=float(info["wall_seconds"]))
+
         # Written between two model steps, at the stop tick too: its own
         # record, sized from the state it writes, or the supervisor times it
         # as a step (see runtime._writing_progress).
@@ -9698,13 +9709,9 @@ def run_prepared_forecast(
             # This door publishes no declared experiment, so it names the
             # model-chosen epssm itself: a child downscaled from the
             # checkpoint inherits that label (A181).
-            tree._last_checkpoint = write_tree_restart(
-                outdir, tree, valid, auto_epssm=exp.auto_epssm)
-        checkpoints.append(str(Path(tree._last_checkpoint).resolve()))
-        checkpoint_ticks[int(ticks)] = checkpoints[-1]
-        step_log.restart_written(
-            domain=exp.root.grid_id, valid_time=valid,
-            path=tree._last_checkpoint, wall_seconds=time.perf_counter() - started)
+            write_tree_restart(
+                outdir, tree, valid, auto_epssm=exp.auto_epssm,
+                on_published=published, progress_callback=observer)
 
     # Armed immediately before integration and disarmed by the first
     # completed step: the compile this names is paid inside step 1, and
@@ -9957,6 +9964,7 @@ def run_prepared_forecast(
         "schema": REPORT_SCHEMA,
         "status": "PASS",
         "pool_trim": getattr(model, "_pool_trim_policy", None),
+        "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
         "source": inputs.source,
         "prepared_layout": inputs.layout,
         "scope": (
@@ -10291,7 +10299,9 @@ def run_prepared_forecast(
         # step receipts are incomplete refuses a clean capsule here.
         receipts={"report": {"path": str((outdir / "report.json").resolve())},
                   **_seam_capsule_receipts(model),
-                  "pool_trim": getattr(model, "_pool_trim_policy", None)},
+                  "pool_trim": getattr(model, "_pool_trim_policy", None),
+                  "checkpoint_writes": getattr(
+                      model, "_checkpoint_receipt", None)},
     )
     _atomic_json(progress_path, {
         "schema": PROGRESS_SCHEMA,

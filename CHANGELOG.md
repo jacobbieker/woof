@@ -4,6 +4,37 @@
 
 New:
 
+- Checkpoints no longer stop the forecast while they are written. The
+  device state is copied into page-locked host memory on a side stream.
+  The model goes on stepping, and a background thread writes, `fsync`s and
+  renames the set. On a 294 x 506 x 256 domain each hourly checkpoint used
+  to stall the loop for a median 386 s with the GPU idle (35% of the run).
+  A checkpoint becomes the resume point (`last_checkpoint`, the step log,
+  retirement of older sets) only once it is durable. At most one is in
+  flight; if the next comes due first, the model waits and says so.
+  Every exit, including a failure or a signal, finishes or removes the
+  checkpoint in flight, and a failed write publishes nothing. History
+  frames are no longer drained before each checkpoint; the root member
+  is published only after the frames at or before its instant are
+  durable. The archives are the synchronous archives (same members,
+  order and header, apart from `created`), and results are bit-identical.
+  `[output] async_checkpoints = false` or `WOOF_ASYNC_CHECKPOINTS=0` turns
+  it off. A checkpoint is written synchronously, with the reason printed
+  and recorded, for a `[tiles]` streamed domain, the sealed forcing
+  extension, a state on several GPUs, too little host RAM, or no
+  page-locked memory. The receipt's `checkpoint_writes` block records the
+  mode, any fallback reasons, and each checkpoint's model-loop stall. See
+  PREPARED-RESTART.md.
+- The synchronous checkpoint writer copies one member at a time through
+  one reusable page-locked buffer instead of copying the whole state to
+  the host first. The files are byte-identical. On a 1.5 GiB test state,
+  peak host RSS during the write fell from 1552 MiB to 78 MiB above the
+  process baseline, and the write took 6 s instead of 12-17 s. The setup
+  fingerprint and forcing-prefix rows in each header are cached per
+  boundary inventory instead of rehashing every boundary table at every
+  checkpoint, and the digests hash arrays in place instead of through a
+  `tobytes()` copy.
+
 - `woof multi-run` binds a prepared run to its preparation itself. A
   module-form run (`woof.prepared_single_domain_forecast` or
   `woof.prepared_domain_tree_forecast`) needs no hand-copied digests. At plan
