@@ -252,7 +252,7 @@ def _argument_value(token: str, *, drop_interpreter: bool = False) -> Any:
             # ran it is not what makes one preparation differ from
             # another; the module named two tokens later is.
             return {"interpreter": True}
-        return {"name": path.name, "sha256": _sha256(path)}
+        return {"name": path.name, "sha256": _input_sha256(path)}
     if is_dir:
         return {"name": path.name, "directory": True}
     return token
@@ -264,6 +264,18 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _input_sha256(path: Path) -> str:
+    """sha256 of a published or argument file, reused while stat-identical.
+
+    Under the default policy a file whose (device, inode, size, mtime_ns,
+    ctime_ns) is identical to the full read that last proved it is not read
+    again (:mod:`woof.verify_stamps`); ``WOOF_VERIFY=full`` always reads.
+    """
+    from woof import verify_stamps
+    return verify_stamps.file_sha256(
+        path, hasher=lambda target: _sha256(Path(target))).digest
 
 
 def _published_files(root: Path, cache_roots: Sequence[Path]) -> dict:
@@ -284,7 +296,7 @@ def _published_files(root: Path, cache_roots: Sequence[Path]) -> dict:
             if not path.resolve().is_relative_to(root.resolve()):
                 raise ValueError(f"published artifact escapes its bundle: {relative}")
             result[relative.as_posix()] = {
-                "bytes": path.stat().st_size, "sha256": _sha256(path)}
+                "bytes": path.stat().st_size, "sha256": _input_sha256(path)}
     return result
 
 
@@ -514,6 +526,28 @@ def _recorded_engine(identity: Mapping[str, Any],
 
 def decide(root: Path, *, stated: Mapping[str, Any],
            arguments: Sequence[Any]) -> dict[str, Any]:
+    """Reuse, rebuild, or build the stage output at ``root`` (:func:`_decide`).
+
+    A reuse answer also carries ``verification``
+    (:func:`woof.verify_stamps.receipt`): the policy the published bytes
+    were proven under, and how many files and cache arrays were read
+    against how many a digest stamp of the stat-identical file vouched
+    for.  ``WOOF_VERIFY=full`` reads every byte.
+    """
+    from woof import verify_stamps
+
+    # Refused here, by name: inside the decision a ValueError reads as a
+    # payload difference, and a typo would quietly rebuild the stage.
+    verify_stamps.policy()
+    with verify_stamps.collecting() as tally:
+        answer = _decide(root, stated=stated, arguments=arguments)
+    if answer.get("decision") == REUSE:
+        answer["verification"] = verify_stamps.receipt(tally)
+    return answer
+
+
+def _decide(root: Path, *, stated: Mapping[str, Any],
+            arguments: Sequence[Any]) -> dict[str, Any]:
     """Reuse, rebuild, or build the stage output at ``root``.
 
     ``stated`` is what THIS run knows before the stage runs, keyed by

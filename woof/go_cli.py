@@ -4830,8 +4830,16 @@ def go_main(args, *, observer=None) -> int:
     go's own gate skipped.  It used to stop at go's gate, and the runner
     then refused that envelope again after the fetch and the preparation.
     """
+    from woof import verify_stamps
     from woof.core.resident_admission import memory_gate_override
     from woof.verification_visuals import verification_scope
+    try:
+        # Before anything is fetched or read: a typo in an audit request
+        # is refused here, and the policy reaches every stage go starts.
+        verify_stamps.apply(args)
+    except ValueError as error:
+        print(f"go: {error}", file=sys.stderr)
+        return 2
     enabled = getattr(args, "verify_visuals", None)
     if enabled is None:
         enabled = os.environ.get("WOOF_VERIFY_VISUALS", "1").lower() not in ("0", "false", "off")
@@ -5932,6 +5940,8 @@ def register_cli(subparsers) -> None:
     parser.add_argument("--restart", type=Path, default=None, metavar="CHECKPOINT",
                         help="continue an existing checkpoint; prepared-cache runs "
                              "also need --prepared-root, and use fresh output")
+    from woof import verify_stamps
+    verify_stamps.add_argument(parser)
     parser.add_argument("--prepare-only", action="store_true",
                         help="fetch and prepare inputs, stop once the prepared bundle is "
                              "sealed and print its prepared_root; no forecast starts")

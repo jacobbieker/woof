@@ -20,6 +20,8 @@ A forecast started on a chained preparation's head (see PIPELINE-STAGES.md) can 
 
 A checkpoint resumes only on the build that wrote it: 2.7.0 refuses every 2.6.5 checkpoint by name (see the CHANGELOG's "Restart and import compatibility" section, or run `woof doctor --since 2.6.5`).
 
+A resumed or repeated run checks the bundle against its digests at the preflight, as the first run did. It does not re-read files and cache arrays that are stat-identical to the full read that last proved them (device, inode, size, mtime and ctime unchanged). Anything rewritten since is read and checked again. `report.json` records which in `input_verification`. To make every check read every byte, run with `WOOF_VERIFY=full` (`woof go --verify-inputs full`); PIPELINE-STAGES.md explains what a stat check cannot see.
+
 History already committed at the checkpoint is retained in the previous output directory. The new directory contains only later frames. Restoring a checkpoint already at the configured stop performs no steps and writes no duplicate history. `--health-debug` on `sim` enables the shared per-step whole-domain validator, including the canonical store when streaming.
 
 ## Checkpoint format compatibility

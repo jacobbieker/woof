@@ -44,6 +44,7 @@ from datetime import datetime, timedelta, timezone
 import functools
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shlex
@@ -2754,35 +2755,140 @@ def _recovery_entry(out: Path, plan: FetchPlan, obj: PlannedObject) -> dict | No
         return None
 
 
-def _verified_reuse(dest: Path, entry: dict | None, *, magic: str) -> bool:
+def _sized_identity(dest: Path, entry: dict | None):
+    """DEST's stat identity when it is a regular file of ENTRY's size.
+
+    One ``stat`` -- on a network mount each costs a round trip, and a
+    finished ICON cycle is ten thousand files -- else None.
+    """
+    import stat as stat_module
+    from woof import verify_stamps
+
+    if not entry:
+        return None
+    try:
+        status = os.stat(_io_path(dest))
+    except OSError:
+        return None
+    if (not stat_module.S_ISREG(status.st_mode)
+            or status.st_size != entry.get("bytes")):
+        return None
+    return verify_stamps.Identity(status.st_dev, status.st_ino,
+                                  status.st_size, status.st_mtime_ns,
+                                  status.st_ctime_ns)
+
+
+def _verified_reuse(dest: Path, entry: dict | None, *, magic: str,
+                    tally=None, identity=None) -> str | None:
+    """How DEST was proven to hold ENTRY's bytes, or None when it does not.
+
+    The size must match first (a stat; ``identity`` when the caller took
+    it, which must be taken immediately before -- a stale one could vouch
+    for bytes rewritten since).  Then, under the default verification
+    policy, a digest stamp for the stat-identical file answers without
+    reading a byte: ``"stamp"`` (or ``"memo"``) when its sha256 is the
+    receipt's, None when it is not.  That digest came
+    from a full read of exactly this file, so the leading magic and end
+    marker the receipt's bytes passed when they were admitted are those
+    bytes'.  Otherwise the payload bars run again and the whole file is
+    read (``"hashed"``).  ``WOOF_VERIFY=full`` always reads
+    (:mod:`woof.verify_stamps`).  ``tally`` counts this one check only.
+    """
+    from woof import verify_stamps
+
     dest = _io_path(dest)
-    if not entry or not dest.is_file() or dest.stat().st_size != entry.get("bytes"):
-        return False
+    if identity is None:
+        identity = _sized_identity(dest, entry)
+    if identity is None:
+        return None
+    reused = verify_stamps.lookup(dest, identity=identity)
+    if reused is not None:
+        if reused.digest != entry.get("sha256"):
+            # A full read of exactly these bytes already found another
+            # digest: reading them again could only say so again.
+            return None
+        if tally is not None:
+            tally.add(reused.how, identity.size)
+        return reused.how
     try:
         _verify_payload(dest, magic=magic, label=dest.name)
     except ValueError:
-        return False
-    with dest.open("rb") as handle:
-        digest = hashlib.file_digest(handle, "sha256").hexdigest()
-    return digest == entry.get("sha256")
+        return None
+    try:
+        digest = verify_stamps.sha256_stream(dest)
+    except OSError:
+        return None
+    verify_stamps.record(dest, digest, before=identity)
+    if tally is not None:
+        tally.add(verify_stamps.HASHED, identity.size)
+    return verify_stamps.HASHED if digest == entry.get("sha256") else None
 
 
-def _reusable_entry(out: Path, plan: FetchPlan, obj: PlannedObject,
-                    prior: Mapping[str, dict]) -> dict | None:
-    """The receipt entry OBJ is reused from, or None when it must move."""
-    known = _recovery_entry(out, plan, obj) or prior.get(obj.relpath)
-    if _verified_reuse(out / obj.relpath, known, magic=_magic_for(plan, obj.role)):
-        return known
-    return None
+def _reusable_entries(out: Path, plan: FetchPlan, prior: Mapping[str, dict],
+                      *, tally=None, workers: int | None = None,
+                      stop_on_missing: bool = False
+                      ) -> dict[str, tuple[dict, str] | None] | None:
+    """The receipt entry each planned object is reused from, and how proven.
+
+    ``relpath -> (entry, how)``, or ``None`` for an object that must move.
+    Every question runs on a pool of ``workers`` threads
+    (:func:`woof.verify_stamps.default_workers` when None), so a finished
+    cycle of ten thousand files on a slow mount is stat'ed and, where
+    needed, read with several requests in flight rather than one.  The
+    cheap questions (a receipt entry, a regular file of the recorded size:
+    one stat each) are answered for every object before any byte is read,
+    and with ``stop_on_missing`` one object failing them answers None
+    outright.
+    """
+    from woof import verify_stamps
+
+    objects = list(plan.objects)
+    counted = verify_stamps.Tally()
+
+    def sized(obj: PlannedObject):
+        known = _recovery_entry(out, plan, obj) or prior.get(obj.relpath)
+        return known, _sized_identity(out / obj.relpath, known)
+
+    def check(item):
+        # The stat is taken again here, right before the stamp is asked:
+        # the cheap pass ran before any byte was read, and on a cycle
+        # where some files need a full read that can be many minutes ago.
+        obj, known = item
+        how = _verified_reuse(out / obj.relpath, known,
+                              magic=_magic_for(plan, obj.role),
+                              tally=counted)
+        return None if how is None else (known, how)
+
+    facts = verify_stamps.map_bounded(sized, objects, workers=workers)
+    answers: dict[str, tuple[dict, str] | None] = {}
+    candidates = []
+    for obj, (known, identity) in zip(objects, facts):
+        if identity is None:
+            if stop_on_missing:
+                return None
+            answers[obj.relpath] = None
+        else:
+            candidates.append((obj, known))
+    results = verify_stamps.map_bounded(check, candidates, workers=workers)
+    for (obj, _known), result in zip(candidates, results):
+        answers[obj.relpath] = result
+    # Counted on this thread, so a collector around the caller sees them.
+    if tally is not None:
+        tally.merge(counted)
+    verify_stamps.report(counted)
+    return {obj.relpath: answers.get(obj.relpath) for obj in objects}
 
 
 def request_cached(plan: FetchPlan, out: Path) -> bool:
     """Whether OUT already holds every object of PLAN, byte-verified.
 
-    Read-only: nothing is created, moved or written.  A yes means
+    Read-only: nothing is created, moved or written in OUT.  A yes means
     :func:`run_plan` would reuse every object and ask no host for any of
     them, so a caller may skip the provider's publication check.  A
-    directory recorded for a different request answers no.
+    directory recorded for a different request answers no.  The digests
+    proven here are remembered for the rest of the process and stamped
+    (:mod:`woof.verify_stamps`), so :func:`run_plan` asking again reads
+    nothing twice under the default policy.
     """
     out = _io_path(Path(out))
     if not out.is_dir():
@@ -2792,8 +2898,9 @@ def request_cached(plan: FetchPlan, out: Path) -> bool:
     except ValueError:
         return False
     prior = _prior_entries(out)
-    return all(_reusable_entry(out, plan, obj, prior) is not None
-               for obj in plan.objects)
+    answers = _reusable_entries(out, plan, prior, stop_on_missing=True)
+    return answers is not None and all(
+        answer is not None for answer in answers.values())
 
 
 def adopt_verified_objects(plan: FetchPlan, out: Path,
@@ -2810,7 +2917,7 @@ def adopt_verified_objects(plan: FetchPlan, out: Path,
 
     Nothing is trusted by this: the next fetch into OUT reuses an object
     only when its size, leading magic, end marker and sha256 still match
-    the receipt (:func:`_reusable_entry`), and moves it otherwise.  A
+    the receipt (:func:`_reusable_entries`), and moves it otherwise.  A
     directory recorded for a different request is refused
     (:func:`check_prior_request`).  Returns the receipts written.
     """
@@ -2986,6 +3093,11 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
     is checked whole before anything moves (:func:`_check_listed_run`).
     """
 
+    from woof import verify_stamps
+
+    # A bad WOOF_VERIFY is refused before a byte moves, not when the
+    # manifest of a finished download is written.
+    verify_stamps.policy()
     out = _io_path(Path(out))
     out.mkdir(parents=True, exist_ok=True)
     if force:
@@ -3025,10 +3137,15 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
 
     # Which objects this run still has to move -- the only ones worth
     # asking a host about.
-    reuse: dict[str, dict] = {}
+    # Read in parallel, and -- under the default verification policy --
+    # not read at all while a file is stat-identical to the full read
+    # that last proved it (woof.verify_stamps).  The manifest says which.
+    verification = verify_stamps.Tally()
+    reuse: dict[str, tuple[dict, str]] = {}
     pending: list[PlannedObject] = []
+    answers = _reusable_entries(out, plan, prior, tally=verification)
     for obj in plan.objects:
-        known = _reusable_entry(out, plan, obj, prior)
+        known = answers.get(obj.relpath)
         if known is not None:
             reuse[obj.relpath] = known
         else:
@@ -3073,15 +3190,18 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
         known = reuse.get(obj.relpath)
         if known is not None:
 
-            def _reuse(entry=known, relpath=obj.relpath, role=obj.role,
-                       lead=obj.lead) -> dict:
+            def _reuse(entry=known[0], how=known[1], relpath=obj.relpath,
+                       role=obj.role, lead=obj.lead) -> dict:
+                # ``verified``: how this run proved the bytes -- "hashed"
+                # (read), "memo" or "stamp" (a stat-identical file's
+                # digest from an earlier full read; woof.verify_stamps).
                 return {**entry, "relpath": relpath, "role": role,
-                        "lead": lead, "reused": True}
+                        "lead": lead, "reused": True, "verified": how}
 
             jobs.append(fetch_pool.TransferJob(
                 name=obj.relpath, url=None, action=_reuse,
                 token=_object_token(obj),
-                expected_bytes=known.get("bytes")))
+                expected_bytes=known[0].get("bytes")))
             continue
 
         rungs = promoted.get(obj.relpath, ladder)
@@ -3179,7 +3299,8 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
         composed_so_far.extend(composed_now)
         _write_json(out / MANIFEST_NAME, _plan_manifest(
             plan, list(admitted), list(composed_so_far), None,
-            complete=False, listing_receipt=listing_receipt))
+            complete=False, listing_receipt=listing_receipt,
+            verification=verify_stamps.receipt(verification)))
         _write_sha256sums(out, admitted, composed_so_far)
         on_lead(group, [item for item, owner in zip(admitted, groups)
                         if owner == group], composed_now)
@@ -3196,7 +3317,8 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
     payload = _plan_manifest(plan, entries, composed, receipt,
                              probe_receipt=probe_receipt,
                              complete=True if on_lead is not None else None,
-                             listing_receipt=listing_receipt)
+                             listing_receipt=listing_receipt,
+                             verification=verify_stamps.receipt(verification))
     _write_json(out / MANIFEST_NAME, payload)
     _write_sha256sums(out, entries, composed)
     return payload
@@ -3204,8 +3326,13 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
 
 def _plan_manifest(plan: FetchPlan, entries, composed, receipt, *,
                    probe_receipt=None, complete: bool | None = None,
-                   listing_receipt=None) -> dict:
-    """The route manifest for ``entries``; ``complete`` only on an as-posted fetch."""
+                   listing_receipt=None, verification=None) -> dict:
+    """The route manifest for ``entries``; ``complete`` only on an as-posted fetch.
+
+    ``verification`` is :func:`woof.verify_stamps.receipt` for the objects
+    already on disk: the policy they were proven under, and how many were
+    read against how many a digest stamp vouched for.
+    """
 
     payload = {
         "schema": ROUTE_MANIFEST_SCHEMA,
@@ -3237,6 +3364,8 @@ def _plan_manifest(plan: FetchPlan, entries, composed, receipt, *,
     }
     if listing_receipt is not None:
         payload["endpoints"]["run_listing"] = dict(listing_receipt)
+    if verification is not None:
+        payload["verification"] = dict(verification)
     if plan.route.attribution:
         # The publisher's licence asks for it wherever its data travels.
         payload["attribution"] = plan.route.attribution

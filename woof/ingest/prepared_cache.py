@@ -1309,14 +1309,7 @@ class _BundleWriter:
         self.payload_bytes += int(spec["nbytes"])
 
 
-def read_manifest_array(directory, key: str, spec) -> np.ndarray:
-    """Read one payload and prove it against its manifest row.
-
-    Shared by the sealed reader and the streamed boundary reader
-    (:mod:`woof.ingest.boundary_stream`), so a segment read before the seal
-    is held to the same shape, dtype and content digest as a sealed read.
-    """
-
+def _manifest_array_path(directory, key: str, spec) -> Path:
     try:
         filename = spec["file"]
     except (KeyError, TypeError) as exc:
@@ -1327,8 +1320,58 @@ def read_manifest_array(directory, key: str, spec) -> np.ndarray:
             or not str(filename).endswith(".npy")):
         raise PreparedCacheCorruptError(
             f"prepared cache array {key!r} has unsafe file name")
-    path = Path(directory) / filename
+    return Path(directory) / filename
+
+
+#: The digest-stamp algorithm of one prepared array file: the manifest's
+#: ``sha256`` over ``dtype;shape;bytes`` (:func:`_array_sha256`) of the
+#: array the file decodes to, with its shape, dtype and nbytes beside it
+#: (:mod:`woof.verify_stamps`).  Not the file's own sha256.
+PREPARED_ARRAY_ALGORITHM = "woof-prepared-array-sha256-v1"
+
+
+def _array_stamp_extra(spec) -> dict:
+    return {"shape": list(spec["shape"]), "dtype": str(spec["dtype"]),
+            "nbytes": int(spec["nbytes"])}
+
+
+def _stamp_array(path: Path, spec, before) -> None:
+    from woof import verify_stamps
+    verify_stamps.record(path, spec["sha256"], before=before,
+                         algorithm=PREPARED_ARRAY_ALGORITHM,
+                         extra=_array_stamp_extra(spec))
+
+
+def stamped_array(path: Path, spec, identity=None):
+    """A stamp vouching for ``spec`` on the stat-identical file, or None.
+
+    Matches only when the stamp's digest, shape, dtype and nbytes are
+    exactly the manifest row's (:mod:`woof.verify_stamps`).
+    """
+    from woof import verify_stamps
+    reused = verify_stamps.lookup(path, PREPARED_ARRAY_ALGORITHM,
+                                  identity=identity)
+    if (reused is None or reused.digest != spec["sha256"]
+            or reused.extra != _array_stamp_extra(spec)):
+        return None
+    return reused
+
+
+def read_manifest_array(directory, key: str, spec) -> np.ndarray:
+    """Read one payload and prove it against its manifest row.
+
+    Shared by the sealed reader and the streamed boundary reader
+    (:mod:`woof.ingest.boundary_stream`), so a segment read before the seal
+    is held to the same shape, dtype and content digest as a sealed read.
+    Always reads; a payload it proves is stamped for later verifications
+    (:mod:`woof.verify_stamps`), which never changes what a read returns.
+    """
+
+    from woof import verify_stamps
+
+    path = _manifest_array_path(directory, key, spec)
     try:
+        before = verify_stamps.Identity.of(path)
         with path.open("rb") as stream:
             array = np.load(stream, allow_pickle=False)
     except (OSError, EOFError, ValueError) as exc:
@@ -1341,7 +1384,124 @@ def read_manifest_array(directory, key: str, spec) -> np.ndarray:
             or _array_sha256(array) != spec["sha256"]):
         raise PreparedCacheCorruptError(
             f"prepared cache array {key!r} fails its manifest")
+    _stamp_array(path, spec, before)
     return array
+
+
+def _streamed_array_sha256(path: Path, key: str, spec) -> str | None:
+    """:func:`_array_sha256` of the array ``path`` decodes to, streamed.
+
+    Reads the NPY header, holds its shape, dtype and size to the manifest
+    row, then hashes the data region in large blocks without holding the
+    array in memory -- the same bytes, in the same order, under the same
+    ``dtype;shape;`` prefix as :func:`_array_sha256` (a 0-d array hashes
+    as shape ``[1]``, as ``np.ascontiguousarray`` presents it there).
+    ``None`` for a Fortran-ordered payload, whose C-order bytes only a
+    full decode produces; the caller reads that one whole.
+    """
+    from woof import verify_stamps
+    from woof.ingest.prepared_mmap import _read_array_header
+
+    try:
+        with open(path, "rb", buffering=0) as stream:
+            version = np.lib.format.read_magic(stream)
+            shape, fortran_order, dtype = _read_array_header(
+                stream, version, max_header_size=10_000)
+            if fortran_order and len(shape) > 1:
+                return None
+            if (dtype.hasobject or list(shape) != spec["shape"]
+                    or str(dtype) != spec["dtype"]):
+                raise PreparedCacheCorruptError(
+                    f"prepared cache array {key!r} fails its manifest")
+            nbytes = int(np.prod(shape, dtype=np.int64)) * dtype.itemsize
+            if nbytes != int(spec["nbytes"]):
+                raise PreparedCacheCorruptError(
+                    f"prepared cache array {key!r} fails its manifest")
+            digest = hashlib.sha256()
+            digest.update(dtype.str.encode("ascii"))
+            digest.update(b";")
+            digest.update(_canonical(
+                [1] if len(shape) == 0 else list(shape)).encode("ascii"))
+            digest.update(b";")
+            remaining = nbytes
+            while remaining:
+                block = stream.read(min(remaining, verify_stamps.READ_BYTES))
+                if not block:
+                    raise PreparedCacheCorruptError(
+                        f"prepared cache array {key!r} is unreadable "
+                        f"(truncated {remaining} bytes short)")
+                digest.update(block)
+                remaining -= len(block)
+    except PreparedCacheCorruptError:
+        # Its own finding (a row mismatch, a truncation), said as such:
+        # it is a ValueError, and the clause below would relabel it.
+        raise
+    except (OSError, EOFError, ValueError) as exc:
+        _raise_if_resource_limit(exc, context=f"prepared cache array {key!r}")
+        raise PreparedCacheCorruptError(
+            f"prepared cache array {key!r} is unreadable") from exc
+    return digest.hexdigest()
+
+
+def verify_manifest_array(directory, key: str, spec) -> str:
+    """Prove one payload against its manifest row; say how it was proven.
+
+    Under the default policy a digest stamp for the stat-identical file
+    that matches the row exactly answers without reading (``"stamp"`` or
+    ``"memo"``).  Otherwise the file is streamed and hashed against the
+    row (``"hashed"``) and the result stamped.  Raises
+    :class:`PreparedCacheCorruptError` exactly where
+    :func:`read_manifest_array` would.
+    """
+    return _verify_manifest_array(directory, key, spec)[0]
+
+
+def _verify_manifest_array(directory, key: str, spec) -> tuple[str, int]:
+    """:func:`verify_manifest_array`, with the file size it proved."""
+    from woof import verify_stamps
+
+    path = _manifest_array_path(directory, key, spec)
+    try:
+        identity = verify_stamps.Identity.of(path)
+    except OSError as exc:
+        _raise_if_resource_limit(exc, context=f"prepared cache array {key!r}")
+        raise PreparedCacheCorruptError(
+            f"prepared cache array {key!r} is unreadable") from exc
+    reused = stamped_array(path, spec, identity)
+    if reused is not None:
+        return reused.how, identity.size
+    digest = _streamed_array_sha256(path, key, spec)
+    if digest is None:
+        read_manifest_array(directory, key, spec)
+        return verify_stamps.HASHED, identity.size
+    if digest != spec["sha256"]:
+        raise PreparedCacheCorruptError(
+            f"prepared cache array {key!r} fails its manifest")
+    _stamp_array(path, spec, identity)
+    return verify_stamps.HASHED, identity.size
+
+
+def verify_manifest_arrays(directory, arrays: Mapping[str, Mapping],
+                           *, workers: int | None = None) -> dict:
+    """Prove every payload of ``arrays``; the verification receipt.
+
+    Full reads run ``workers`` at a time
+    (:func:`woof.verify_stamps.default_workers` when None), each streaming
+    its file in large blocks, so neither the pool nor the arrays' sizes
+    bound memory.  The first failing key in sorted order raises.  Returns
+    :func:`woof.verify_stamps.receipt` with the counts, which every
+    collector around the caller also receives.
+    """
+    from woof import verify_stamps
+
+    tally = verify_stamps.Tally()
+
+    def one(key):
+        tally.add(*_verify_manifest_array(directory, key, arrays[key]))
+
+    verify_stamps.map_bounded(one, sorted(arrays), workers=workers)
+    verify_stamps.report(tally)
+    return verify_stamps.receipt(tally)
 
 
 class PreparedCacheReader:
@@ -1472,8 +1632,21 @@ class PreparedCacheReader:
         return read_manifest_array(self.path, key, spec)
 
     def verify_all(self) -> dict[str, object]:
-        for key in sorted(self.arrays):
-            self.read_array(key)
+        """Prove every array against the manifest; the PASS receipt.
+
+        Under the default policy an array file whose stat is identical to
+        the full read that last proved it is not read again
+        (:func:`verify_manifest_arrays`); ``verification`` records the
+        policy and how many arrays were read and how many were vouched for
+        by a stamp.  ``WOOF_VERIFY=full`` reads every byte.
+
+        The returned dict is exactly what it always was -- callers seal it
+        into durable, relocatable receipts, which must not carry this
+        machine's stamp store or policy.  How the arrays were proven goes to
+        the collectors around the caller (:func:`woof.verify_stamps.collecting`)
+        and to :attr:`last_verification`.
+        """
+        self.last_verification = verify_manifest_arrays(self.path, self.arrays)
         return {
             "schema": PREPARED_CACHE_SCHEMA,
             "status": "PASS",
@@ -1555,8 +1728,8 @@ class PreparedHeadReader:
         return read_manifest_array(self.path, key, spec)
 
     def verify_all(self) -> dict[str, object]:
-        for key in sorted(self.arrays):
-            self.read_array(key)
+        """:meth:`PreparedCacheReader.verify_all` for the head's arrays."""
+        self.last_verification = verify_manifest_arrays(self.path, self.arrays)
         return {
             "schema": PREPARED_CACHE_SCHEMA,
             "status": "HEAD_PASS",

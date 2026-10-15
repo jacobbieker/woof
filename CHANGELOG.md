@@ -465,6 +465,37 @@ New:
 
 Changed:
 
+- Inputs are verified once, not on every re-run. Re-running `woof go`
+  on a finished 33 GB ICON cycle spent about 66 minutes in the fetch
+  stage re-hashing files it had already proven. The forecast preflight
+  and the post-run check then read the prepared inputs again.
+  - After a full read proves a file's or prepared-cache array's SHA-256,
+    woof keeps a digest stamp of the file's device, inode, size, mtime and
+    ctime in a per-user cache (`~/.cache/woof/verify-stamps`;
+    `WOOF_VERIFY_STAMPS` moves it, or `off` disables it). A later check of
+    a stat-identical file reuses the digest without reading it. Any
+    differing field, or a missing or corrupt stamp, means a full read, and
+    a file changed less than 2 s before its read is never stamped. This
+    applies to `woof fetch`'s already-present check, `woof go`'s
+    reused-preparation check, and the forecast preflight.
+  - The post-run "inputs changed during execution" check is now a stat
+    comparison against the preflight's reads. A rewrite always moves
+    ctime, so a rewritten input is still refused. A change that keeps
+    every stat field is not seen; `WOOF_VERIFY=full` or
+    `--verify-inputs full` on `woof fetch`/`woof go` reads every byte at
+    every check, as before. `full` is the default on Windows, where
+    `st_ctime` is the creation time. An unknown `WOOF_VERIFY` is refused
+    before anything is fetched or read.
+  - Receipts say which way each input was proven. Fetch manifests have a
+    `verification` block and a per-file `verified` (`hashed`, `memo` or
+    `stamp`), `report.json` has `input_verification.preflight`/`post_run`,
+    and a reused preparation's decision has `verification`.
+  - Full reads are faster too. Files and arrays are read 8 at a time
+    (`WOOF_VERIFY_WORKERS`) in 16 MiB blocks; prepared arrays are hashed
+    without loading them into memory. A table-route fetch (ICON, the DWD
+    tree) now asks once whether the request is already on disk. Before,
+    it asked up to three times, re-reading every file each time. See
+    DATA.md and PIPELINE-STAGES.md.
 - Hindcast defaults are now the cost-efficient end of the requirement.
   On the US + EU-offshore partition (AWS spot, central) they bring the
   year from about $439k (200 m, 70 levels, 8 h runs with 2 h spin-up, on

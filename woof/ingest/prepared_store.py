@@ -385,6 +385,12 @@ class _CachePayload:
     so missing, replaced or changed payloads are refused. Those checks cannot
     protect a mapping against concurrent in-place truncation; cache writers
     publish private completed files by rename and never modify them in place.
+
+    Under the default verification policy an array whose file is
+    stat-identical to the full read that last proved it against this exact
+    manifest row (a digest stamp, :mod:`woof.verify_stamps`) is mapped and
+    identity-checked but not hashed again; ``WOOF_VERIFY=full`` hashes every
+    array.  :attr:`verification` counts which.
     """
 
     def __init__(self, reader, *, verify: bool = True, log=print):
@@ -395,6 +401,10 @@ class _CachePayload:
         self._maps: dict = {}
         self._files: dict = {}
         self._verified: set = set()
+        from woof import verify_stamps
+        #: How each verified array was proven: read and hashed, or vouched
+        #: for by a digest stamp of the stat-identical file.
+        self.verification = verify_stamps.Tally()
         if verify:
             self.verify_all(log=log)
 
@@ -418,16 +428,29 @@ class _CachePayload:
                 f"prepared cache array {key!r} changed during mapped use")
 
     def _verify(self, keys):
-        from woof.ingest.prepared_cache import (
-            PreparedCacheCorruptError, _raise_if_resource_limit)
-        from woof.ingest.prepared_writer import (
-            batch_budget, hash_arrays, native_hasher)
+        from woof import verify_stamps
         for key in keys:
             if key in self._verified:
                 self._check_unchanged(key)
         keys = [key for key in keys if key not in self._verified]
         if not keys:
             return
+        before = self.verification.snapshot()
+        try:
+            self._verify_unverified(keys)
+        finally:
+            # On the calling thread, so the preflight's collector sees the
+            # arrays this payload proved -- including in its constructor.
+            verify_stamps.report(self.verification.since(before))
+
+    def _verify_unverified(self, keys):
+        from woof import verify_stamps
+        from woof.verify_stamps import Identity as _Identity
+        from woof.ingest.prepared_cache import (
+            PreparedCacheCorruptError, _raise_if_resource_limit,
+            _stamp_array, stamped_array)
+        from woof.ingest.prepared_writer import (
+            batch_budget, hash_arrays, native_hasher)
         try:
             entry = native_hasher()
         except OSError as exc:
@@ -451,14 +474,31 @@ class _CachePayload:
                     raise PreparedCacheCorruptError(
                         f"prepared cache array {key!r} fails its manifest")
                 self._verified.add(key)
+                _stamp_array(self._reader.path / self._specs[key]["file"],
+                             self._specs[key], _Identity(*self._files[key]))
+                self.verification.add(verify_stamps.HASHED,
+                                      self._files[key][2])
             pending.clear()
 
         for key in keys:
             mapped = self[key]
+            # A stat-identical payload a full read already proved against
+            # this exact row is not read again (woof.verify_stamps); the
+            # mapping above is still taken and identity-checked as before.
+            reused = stamped_array(
+                self._reader.path / self._specs[key]["file"],
+                self._specs[key], _Identity(*self._files[key]))
+            if reused is not None:
+                self._check_unchanged(key)
+                self._verified.add(key)
+                self.verification.add(reused.how, self._files[key][2])
+                continue
             if entry is None or not mapped.flags.c_contiguous:
                 self._reader.read_array(key)
                 self._check_unchanged(key)
                 self._verified.add(key)
+                self.verification.add(verify_stamps.HASHED,
+                                      self._files[key][2])
                 continue
             if pending and (len(pending) >= workers
                             or pending_bytes + mapped.nbytes > budget):
@@ -470,11 +510,17 @@ class _CachePayload:
 
     def verify_all(self, *, log=print):
         t0 = time.perf_counter()
+        before = self.verification.snapshot()
         self._verify(sorted(self._specs))
+        counts = self.verification.since(before).as_dict()
+        hashed = counts["hashed"]
+        stamped = counts["stamp_reused"] + counts["memo_reused"]
         log(f"    cache payload verified against its manifest: "
             f"{len(self._reader.arrays)} arrays, "
             f"{self._reader.payload_bytes / hoststore_gib():.2f} GiB, "
-            f"in {time.perf_counter() - t0:.1f}s")
+            f"in {time.perf_counter() - t0:.1f}s"
+            + (f" ({stamped} vouched for by a digest stamp, {hashed} read)"
+               if stamped else ""))
 
     def verified_array(self, key):
         self._verify([key])
@@ -564,6 +610,8 @@ class _ReadOnlyCacheReader:
 
     def verify_all(self):
         from woof.ingest.prepared_cache import PREPARED_CACHE_SCHEMA
+        # The payload reports what it proves to the caller's collectors
+        # itself; the returned dict stays the one callers seal.
         self._payload.verify_all(log=lambda _: None)
         return {
             "schema": PREPARED_CACHE_SCHEMA, "status": "PASS",
