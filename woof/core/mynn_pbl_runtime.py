@@ -26,8 +26,10 @@ import cupy as cp
 import numpy as np
 
 from woof.core.kernels import get_kernel
+from woof.core.health_ledger import deferred_note
 from woof.core.mynn_pbl_gpu import (
     _flag_mask,
+    _flag_mask_deferred,
     _nonfinite,
     mynn_bl_driver_cuda,
     mynn_pbl_kernel,
@@ -432,12 +434,22 @@ def validate_mynn_tendencies(out: Mapping[str, cp.ndarray]) -> None:
     names = tuple(out)
     if not names:
         return
-    mask = _flag_mask(_nonfinite(), [out[name] for name in names],
-                      _validity_flags())
-    for name, nonfinite in zip(names, mask):
-        if nonfinite:
-            raise FloatingPointError(
-                f"MYNN PBL produced a non-finite {name} tendency")
+
+    def refuse(mask, note=""):
+        for name, nonfinite in zip(names, mask):
+            if nonfinite:
+                raise FloatingPointError(
+                    f"MYNN PBL produced a non-finite {name} tendency" + note)
+
+    arrays = [out[name] for name in names]
+    # Under a health ledger (woof.core.health_ledger) the verdict is
+    # recorded and raised, with this message, at the step's drain.
+    if _flag_mask_deferred(
+            _nonfinite(), arrays, _validity_flags(),
+            site="mynn-tendencies-finite",
+            refuse=lambda mask: refuse(mask, deferred_note())):
+        return
+    refuse(_flag_mask(_nonfinite(), arrays, _validity_flags()))
 
 
 __all__ = [

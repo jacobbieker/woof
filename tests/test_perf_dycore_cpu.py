@@ -141,7 +141,7 @@ def test_dycore_prepares_acoustic_coefficients_outside_substep_loop():
     import inspect
     from woof.core import dycore
 
-    source = inspect.getsource(dycore.step)
+    source = inspect.getsource(dycore._step_body)
     stage = source.index("for istage, (nsub, dtau) in enumerate(stages):")
     prepare = source.index("prepare_acoustic_coefficients(", stage)
     bind = source.index("prepare_acoustic_substep_launch(", prepare)
@@ -628,7 +628,7 @@ def test_prepared_acoustic_bookkeeping_reuses_launch_containers(monkeypatch):
         assert calls[0][2] is calls[1][2]
         assert calls[0][3] is calls[1][3]
 
-    source = inspect.getsource(dycore.step)
+    source = inspect.getsource(dycore._step_body)
     substeps = source.index("for i in range(nsub):")
     finish = source.index("small_step_finishes[istage]()", substeps)
     hot_loop = source[substeps:finish]

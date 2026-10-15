@@ -107,6 +107,11 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "the P3 composed unit's own compile site; it records through "
         "record_module in the same function and its frame is re-audited on a "
         "device by tests/test_p3_cuda_gpu.py"),
+    "woof/core/health_ledger.py": (
+        "two one-thread health-bookkeeping kernels (fold a validator's flag "
+        "words into one ledger word; OR a status word into an ordered ledger "
+        "slot); they read and write status words only, compute no forecast "
+        "field and are not a translation unit the manifest freezes"),
     "woof/doctor.py": (
         "a one-kernel self-contained probe inside a subprocess source string, "
         "compiled to prove the toolchain works; not a forecast translation unit"),

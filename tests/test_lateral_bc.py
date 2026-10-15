@@ -533,7 +533,7 @@ def test_acoustic_rk_finalizes_nested_state_once_after_rk_loop():
     """WRF calls ``spec_bdy_final`` once after ``Runge_Kutta_loop``."""
     import woof.core.dycore as dycore
 
-    source = inspect.getsource(dycore.step)
+    source = inspect.getsource(dycore._step_body)
     rk_start = source.index("for istage, (nsub, dtau) in enumerate(stages):")
     final_call = source.index(
         "apply_state_boundary_values(state, cfg,\n"

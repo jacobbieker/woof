@@ -144,11 +144,22 @@ class _DeferredLedger(HealthLedger):
 
     def __init__(self) -> None:  # noqa: D107 - deliberately no allocation
         self._buffer = None
+        self._capacity = _LEDGER_CAPACITY
+        # Unordered: the snapshot copies exactly _LEDGER_CAPACITY words.
+        self._ordered = False
         self._index = {}
         self._describe = {}
         self._label = "lagged-health"
         self.records = 0
         self.drains = 0
+        self._pending = 0
+        self._sequence = 0
+        # The carrier check reads the land/ice footprint only on a path
+        # that is about to refuse (never inside a capture: this ledger is
+        # entered around eager STEP ops), so an all-water domain is checked
+        # exactly as under --health-check strict.
+        self.footprint_reads = True
+        self.admit = None
 
     @property
     def _slots(self):

@@ -56,6 +56,7 @@ from woof.core.diff6_edge_workspace import (
     plane_shapes as diff6_edge_plane_shapes,
     planes_values as diff6_edge_planes_values)
 from woof.core.diffusion import add_diffusion_tendencies
+from woof.core import health_ledger
 from woof.core import ieva
 from woof.core.bandwidth_glue import (
     add_array, capture_theta_forcing, prepare_add_arrays,
@@ -3727,6 +3728,13 @@ def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
          refl_10cm_due: bool = False) -> None:
     """Advance ``state`` one full RK3 step of length ``cfg.dt``.
 
+    The schemes' error-only health reads are deferred to the END of the
+    step (:class:`woof.core.health_ledger.resident_step`): one device read
+    per step instead of one blocking read per site, the same exception
+    raised by the same step.  ``WOOF_HEALTH_READBACK=immediate`` restores
+    the per-site reads.  Arithmetic is unchanged either way.  The rest of
+    this docstring describes :func:`_step_body`.
+
     ``acoustic=True`` (default) runs the full ARW split-explicit loop: per
     stage, zero tendencies -> EOS diagnostics at t* -> slow tendencies ->
     initialize the acoustic perturbations from the time-t fields -> acoustic
@@ -3799,6 +3807,17 @@ def step(state: DomainState, cfg: RunConfig, *, acoustic: bool = True,
     ``diff_6th_opt = 1`` with moisture raises ``ValueError`` (unlimited
     fluxes bypass the PD limiter).  Coriolis/curvature is boundary-aware.
     """
+    with health_ledger.resident_step():
+        _step_body(state, cfg, acoustic=acoustic,
+                   mass_flux_observer=mass_flux_observer,
+                   mass_flux_accumulator=mass_flux_accumulator,
+                   refl_10cm_due=refl_10cm_due)
+
+
+def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
+               mass_flux_observer, mass_flux_accumulator,
+               refl_10cm_due: bool) -> None:
+    """The step itself; :func:`step` is this under the resident ledger."""
     if mass_flux_observer is not None and mass_flux_accumulator is not None:
         raise ValueError(
             "mass_flux_observer and mass_flux_accumulator are mutually "

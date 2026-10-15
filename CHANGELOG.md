@@ -40,14 +40,39 @@ New:
   - The adaptive controller of a nested tree reads every domain's CFL
     with one synchronisation per root step instead of one per domain.
   - While lagged, the scheme status words go through the existing
-    health ledger, as under `[tiles]` graph capture. That includes its
-    fail-closed carrier check: an all-water domain whose land-surface
-    radiation carriers have no producer is refused even though no
-    land-surface cell consumes them. Strict mode keeps the old footprint
-    read.
+    health ledger, as under `[tiles]` graph capture. The carrier check
+    reads the land/ice footprint only when it is about to refuse, so an
+    all-water domain is checked exactly as in strict mode.
   - The single-domain `integrate_prepared_case` loop (`woof run` without
     an adaptive clock, and ensemble members on that route) is unchanged.
   See docs/public/PROGRESS.md.
+- The model step no longer stops to read back each scheme's health check.
+  The microphysics, YSU and Kain-Fritsch status words, validated scheme
+  outputs, the surface-radiation carrier finiteness check and MYNN's input
+  and output guards now record their verdicts on the GPU. The step reads them
+  once, at its end. It raises the same exception type with the same message,
+  plus a note that the check failed earlier in the step. An all-water domain
+  is checked as before.
+  - An ordinary step of the wind-farm suite (Thompson, MYNN, Noah, RRTMGP)
+    now has 1 blocking read instead of 7, plus the run loop's stability
+    check.
+  - Measured on a shared RTX A6000, the step is 1.34x faster at 48,000
+    cells, 1.19x at 0.49 M and 1.06x at 1.96 M cells.
+  - Results are bit-identical.
+  - RRTMGP's input guard, Grell-Freitas, WDM6 and the urban models still
+    read straight away.
+  - `WOOF_HEALTH_READBACK=immediate` restores the per-check reads.
+  - Run receipts record the mode and counts under `health_readback`.
+  - Inside the lagged health check above, the step uses that check's
+    ledger and does not read at its own end. MYNN's guards now go through
+    either ledger.
+
+  The study behind this change is in
+  docs/dev/perf-launch-overhead-20261015.md. It reports per-step launches,
+  host syncs, GPU-busy time and the CUDA-graph headroom. It also proposes a
+  new per-step cost for the hindcast cost model.
+  `tools/profile_launch_overhead.py` and `tools/launch_profile/` are the
+  CUPTI-based profiler used for it.
 - Checkpoints no longer stop the forecast while they are written. The
   device state is copied into page-locked host memory on a side stream.
   The model goes on stepping, and a background thread writes, `fsync`s and

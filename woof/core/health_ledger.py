@@ -49,17 +49,42 @@ instantaneous when it is not is worse than a late one.  This is the same
 trade-off the codebase already accepted when it replaced per-substep mass-flux
 readbacks with :class:`~woof.core.dycore.MassFluxAccumulator`.
 
-OPT-IN, AND WHY
----------------
-With no ledger installed, every site behaves EXACTLY as before: it reads its
-status word and raises immediately.  The deferral only happens inside
-:func:`deferring`, which the tiled driver enters around a step and leaves at
-the sweep's synchronisation point.  ``execute_experiment``'s lagged health
-check (:mod:`woof.core.lagged_health`, the default for resident domains)
-enters it around each resident STEP op and reads the words with that step's
-stability record, one op later; ``--health-check strict`` keeps
-instantaneous detection, and the diff to each scheme is one call that is a
-no-op unless a ledger is active.
+WHERE A LEDGER IS ACTIVE
+------------------------
+Three places install one, and with none every site behaves EXACTLY as
+before: it reads its status word and raises immediately.
+
+* :func:`deferring`, which the tiled driver enters around a step and leaves
+  at the sweep's synchronisation point.
+* ``execute_experiment``'s lagged health check (:mod:`woof.core
+  .lagged_health`, the default for resident domains there), which enters
+  :func:`deferring` around each resident STEP op and reads the words with
+  that step's stability record, one op later; ``--health-check strict``
+  removes it.  Its ledger reads the consumer footprint on a refusing path
+  (``footprint_reads``), so the carrier check is exact there too.
+* :func:`resident_step`, which ``woof.core.dycore.step`` enters around every
+  resident step and DRAINS AT THE END OF THAT STEP.  A failure is therefore
+  still reported by the step that produced it -- before the run loop's
+  stability gate, output, checkpoint or nest coupling can observe the state
+  -- and the only thing that moves is how far into that step the model got
+  before saying so.  MEASURED (docs/dev/perf-launch-overhead-20261015.md):
+  an ordinary wind-farm-suite step took seven blocking reads, each a full
+  pipeline drain, and on a card shared with other work each of those waited
+  for the co-tenants' time slice as well.  ``WOOF_HEALTH_READBACK=immediate``
+  restores the per-site reads; :func:`resident_mode` names the mode for
+  receipts.  When :func:`deferring` is already active (a tiled sweep, a
+  graph capture, an executor that lags its health check) the resident step
+  defers to it and does not drain.  Only the sites named in
+  :data:`RESIDENT_SITES` are deferred here; on a FAILING step a deferred
+  input guard lets its scheme run once on the inputs it rejected (MYNN's
+  loops are bounded by the column depth) before the drain raises, and if
+  that run faults the device, the drain never replaces the step's own
+  exception with an unreadable one.
+
+The resident ledger is THREAD-LOCAL: multi-card runs step each slab on its
+own host thread, and one slab's drain must never read, clear or raise another
+slab's words.  :func:`active` answers the calling thread's resident ledger
+first and the process-wide :func:`deferring` ledger otherwise.
 
 DRAIN OR IT DID NOT HAPPEN
 --------------------------
@@ -74,6 +99,8 @@ which is why ``record`` is not public API and the sites reach it through
 from __future__ import annotations
 
 from contextlib import contextmanager
+import os
+import threading
 from typing import Callable
 
 
@@ -82,6 +109,31 @@ from typing import Callable
 #: four levels down inside three schemes and threading a parameter through
 #: every one of them would be a larger and more fragile change than this.
 _ACTIVE: "HealthLedger | None" = None
+
+#: The calling thread's resident-step ledger (:func:`resident_step`).
+_LOCAL = threading.local()
+
+#: Environment switch for the resident-step deferral and its two values.
+#: ``deferred`` is the default; ``immediate`` is the historical per-site read.
+RESIDENT_ENV = "WOOF_HEALTH_READBACK"
+RESIDENT_MODES = ("deferred", "immediate")
+RESIDENT_CAPACITY = 256
+
+#: The sites the resident step defers, by name prefix.  Each is either an
+#: OUTPUT check (the scheme has already run; nothing reads the verdict but
+#: the refusal) or an input check whose scheme stays bounded on rejected
+#: inputs.  Every other site -- RRTMGP's input guard, whose eager path also
+#: replays the detailed validators, Grell-Freitas, WDM6 and the urban
+#: models -- keeps its immediate read on the resident path; the tiled/graph
+#: ledger (:func:`deferring`) still defers them all.
+RESIDENT_SITES = (
+    "microphysics",          # canonical surface-output finite/range flags
+    "ysu",                   # YSU output finite flags
+    "kain-fritsch",          # KF output finite flags
+    "validated:",            # physics._validated_array scheme outputs
+    "carrier-contract:",     # the LSM's radiative-carrier finiteness
+    "mynn-",                 # MYNN guards: loops bounded by nz (mynn_pbl.cu)
+)
 
 
 class HealthLedger:
@@ -94,26 +146,52 @@ class HealthLedger:
     and the default leaves room.
     """
 
-    def __init__(self, capacity: int = 64, *, label: str = "") -> None:
+    def __init__(self, capacity: int = 64, *, label: str = "",
+                 footprint_reads: bool = False, ordered: bool = False,
+                 admit: tuple[str, ...] | None = None) -> None:
         import cupy as cp
 
-        self._slots = cp.zeros(int(capacity), dtype=cp.uint32)
+        self._capacity = int(capacity)
+        #: ``ordered``: a second word per slot holds the sequence number of
+        #: the first FAILING record since the last drain, so the drain
+        #: raises the failure that happened first in program order -- the
+        #: one an immediate read would have raised -- rather than the site
+        #: that happened to be registered first.
+        self._ordered = bool(ordered)
+        self._slots = cp.zeros(self._capacity * (2 if ordered else 1),
+                               dtype=cp.uint32)
+        if ordered:
+            self._slots[self._capacity:].fill(cp.uint32(_NO_ORDER))
         self._index: dict[str, int] = {}
         self._describe: dict[str, Callable[[int], None]] = {}
         self._label = label
         self.records = 0
         self.drains = 0
+        self._pending = 0
+        self._sequence = 0
+        #: True when a site may still take a blocking read on a path that is
+        #: about to REFUSE (never on a healthy path) to reproduce the eager
+        #: answer exactly.  The resident ledger sets it; the tiled/graph
+        #: ledger does not, because a blocking read inside capture is refused
+        #: outright (woof.core.radiation_carriers' consumer footprint).
+        self.footprint_reads = bool(footprint_reads)
+        #: Site-name prefixes this ledger defers; ``None`` defers every site.
+        #: A site it does not admit keeps its immediate read.
+        self.admit = None if admit is None else tuple(admit)
 
     @property
     def slots(self):
-        return self._slots
+        return self._slots[:self._capacity]
+
+    def admits(self, site: str) -> bool:
+        return self.admit is None or site.startswith(self.admit)
 
     def _slot(self, site: str) -> int:
         i = self._index.get(site)
         if i is None:
-            if len(self._index) >= int(self._slots.size):
+            if len(self._index) >= self._capacity:
                 raise RuntimeError(
-                    f"health ledger is full at {self._slots.size} sites; "
+                    f"health ledger is full at {self._capacity} sites; "
                     f"cannot add {site!r}")
             i = len(self._index)
             self._index[site] = i
@@ -122,30 +200,62 @@ class HealthLedger:
     def record(self, site: str, status, describe: Callable[[int], None]) -> None:
         """OR ``status[0]`` into ``site``'s slot.  Device-to-device, capturable."""
         import cupy as cp
+        import numpy as np
 
         i = self._slot(site)
-        cp.bitwise_or(self._slots[i:i + 1], status[:1].reshape(1),
-                      out=self._slots[i:i + 1])
+        if self._ordered:
+            self._sequence += 1
+            _ordered_record_kernel()(
+                (1,), (1,), (self._slots, status[:1].reshape(1),
+                             np.int32(i), np.int32(self._capacity),
+                             np.uint32(min(self._sequence, _NO_ORDER - 1))))
+        else:
+            cp.bitwise_or(self._slots[i:i + 1], status[:1].reshape(1),
+                          out=self._slots[i:i + 1])
         self._describe[site] = describe
         self.records += 1
+        self._pending += 1
 
-    def drain(self) -> None:
+    def drain(self, *, if_recorded: bool = False) -> None:
         """One D2H over every slot; raise for the first site that flagged.
 
-        Clearing happens BEFORE the raise so a caller that catches and
-        continues does not re-raise the same historical failure for ever.
+        "First" is program order on an ``ordered`` ledger and registration
+        order otherwise.  Clearing happens BEFORE the raise so a caller that
+        catches and continues does not re-raise the same historical failure
+        for ever.  An exception raised by a site's description carries
+        ``_woof_deferred_health = True``.
+
+        ``if_recorded=True`` skips the read when :meth:`record` has not run
+        since the last drain.  Only a ledger whose records all run as Python
+        may use it: a replayed CUDA graph ORs into the slots without calling
+        :meth:`record`, so the tiled/graph driver must always read.
         """
         import cupy as cp
 
         if not self._index:
             return
+        if if_recorded and not self._pending:
+            return
+        self._pending = 0
+        self._sequence = 0
         self.drains += 1
         host = cp.asnumpy(self._slots)
-        self._slots.fill(cp.uint32(0))
-        for site, i in self._index.items():
-            flags = int(host[i])
-            if flags:
-                refuse(site, flags, self._describe.get(site))
+        flagged = [(site, i) for site, i in self._index.items() if int(host[i])]
+        if not flagged:
+            return
+        self._slots[:self._capacity].fill(cp.uint32(0))
+        if self._ordered:
+            self._slots[self._capacity:].fill(cp.uint32(_NO_ORDER))
+            flagged.sort(key=lambda item: int(host[self._capacity + item[1]]))
+        site, i = flagged[0]
+        try:
+            refuse(site, int(host[i]), self._describe.get(site))
+        except BaseException as exc:
+            try:
+                exc._woof_deferred_health = True
+            except AttributeError:                         # pragma: no cover
+                pass
+            raise
 
     def close(self) -> None:
         self.drain()
@@ -171,8 +281,172 @@ def refuse(site: str, flags: int, describe: Callable[[int], None] | None
         "description did not raise; a health site must refuse")
 
 
+#: The "no failure recorded yet" sequence number of an ordered slot.
+_NO_ORDER = 0xFFFFFFFF
+
+_ORDERED_RECORD_SOURCE = r"""
+extern "C" __global__ void health_ledger_record_ordered(
+        unsigned int* slots, const unsigned int* status, const int slot,
+        const int capacity, const unsigned int sequence) {
+    const unsigned int word = status[0];
+    if (word != 0u) {
+        slots[slot] |= word;
+        if (sequence < slots[capacity + slot])
+            slots[capacity + slot] = sequence;
+    }
+}
+"""
+_ORDERED_RECORD_KERNEL: list = []
+
+
+def _ordered_record_kernel():
+    import cupy as cp
+
+    if not _ORDERED_RECORD_KERNEL:
+        _ORDERED_RECORD_KERNEL.append(cp.RawKernel(
+            _ORDERED_RECORD_SOURCE, "health_ledger_record_ordered",
+            options=("-std=c++17",)))
+    return _ORDERED_RECORD_KERNEL[0]
+
+
 def active() -> "HealthLedger | None":
-    return _ACTIVE
+    """The ledger the calling thread's health sites report into, if any."""
+    resident = getattr(_LOCAL, "ledger", None)
+    return resident if resident is not None else _ACTIVE
+
+
+def resident_mode() -> str:
+    """``"deferred"`` or ``"immediate"``, from :data:`RESIDENT_ENV`."""
+    raw = os.environ.get(RESIDENT_ENV, "").strip().lower() or "deferred"
+    if raw not in RESIDENT_MODES:
+        raise ValueError(
+            f"{RESIDENT_ENV}={raw!r} is not one of {RESIDENT_MODES}")
+    return raw
+
+
+#: Process-cumulative resident-step bookkeeping for receipts
+#: (:func:`resident_receipt`): steps that deferred, drains that read, and
+#: steps that kept the immediate reads, by named reason.
+_RESIDENT_LOCK = threading.Lock()
+_RESIDENT_STATS = {"deferred_steps": 0, "drains": 0, "immediate_steps": {}}
+
+#: Why a resident step kept the per-site reads.
+IMMEDIATE_REASONS = {
+    "mode-immediate": f"{RESIDENT_ENV}=immediate",
+    "outer-ledger": "a tiled sweep or graph capture owns the ledger and "
+                    "its drain",
+    "capturing": "the step is being captured into a CUDA graph with no "
+                 "ledger of its own",
+}
+
+
+def _count_immediate(reason: str) -> None:
+    with _RESIDENT_LOCK:
+        table = _RESIDENT_STATS["immediate_steps"]
+        table[reason] = table.get(reason, 0) + 1
+
+
+def resident_receipt() -> dict:
+    """The resident health-readback mode and its process-cumulative counts.
+
+    Pinned shape: ``{"mode", "source", "env", "deferred_steps", "drains",
+    "immediate_steps": {reason: steps}}``; ``source`` is ``"default"`` or
+    ``"environment"``.  Counts cover every ``dycore.step`` in the process.
+    """
+    with _RESIDENT_LOCK:
+        stats = {"deferred_steps": _RESIDENT_STATS["deferred_steps"],
+                 "drains": _RESIDENT_STATS["drains"],
+                 "immediate_steps": dict(_RESIDENT_STATS["immediate_steps"])}
+    return {"mode": resident_mode(),
+            "source": ("environment" if os.environ.get(RESIDENT_ENV, "").strip()
+                       else "default"),
+            "env": RESIDENT_ENV, **stats}
+
+
+class resident_step:
+    """Defer the health reads of ONE resident step and drain at its end.
+
+    ``with resident_step():`` around the body of ``dycore.step``.  Yields the
+    ledger, or ``None`` when nothing is deferred: the mode is
+    ``immediate``, a ledger is already active (a tiled sweep or a graph
+    capture owns the drain; nesting would drain inside their capture), or
+    the current stream is capturing.
+
+    On the healthy path the exit is one device-to-host read of the slot
+    buffer, and none at all if no site recorded.  If the step body RAISES,
+    the ledger is still drained first: a deferred failure recorded earlier
+    in the step is what an eager run would have raised first, so it is
+    raised (chained to the later exception) in preference to it.
+    """
+
+    def __init__(self) -> None:
+        self.ledger = None
+
+    def __enter__(self):
+        if active() is not None:
+            _count_immediate("outer-ledger")
+            return None
+        if resident_mode() == "immediate":
+            _count_immediate("mode-immediate")
+            return None
+        import cupy as cp
+
+        if cp.cuda.get_current_stream().is_capturing():
+            # A capture with no ledger of its own: the drain would be a
+            # device-to-host read inside it.  Keep the historical reads,
+            # which the capture refuses loudly, rather than a silent one.
+            _count_immediate("capturing")
+            return None
+
+        ledgers = getattr(_LOCAL, "ledgers", None)
+        if ledgers is None:
+            ledgers = _LOCAL.ledgers = {}
+        device = int(cp.cuda.runtime.getDevice())
+        ledger = ledgers.get(device)
+        if ledger is None:
+            # 256 sites: a site keeps its slot for the life of the thread
+            # (radiation, cumulus and initialisation sites included), and a
+            # full ledger refuses rather than dropping a site.
+            ledger = ledgers[device] = HealthLedger(
+                RESIDENT_CAPACITY, label=f"resident-step:cuda{device}",
+                footprint_reads=True, ordered=True, admit=RESIDENT_SITES)
+        _LOCAL.ledger = ledger
+        self.ledger = ledger
+        return ledger
+
+    def __exit__(self, exc_type, exc, tb):
+        ledger = self.ledger
+        if ledger is None:
+            return False
+        _LOCAL.ledger = None
+        self.ledger = None
+        drains = ledger.drains
+        try:
+            self._drain(ledger, exc)
+        finally:
+            with _RESIDENT_LOCK:
+                _RESIDENT_STATS["deferred_steps"] += 1
+                _RESIDENT_STATS["drains"] += ledger.drains - drains
+        return False
+
+    @staticmethod
+    def _drain(ledger, exc) -> None:
+        _LOCAL.draining = ledger
+        try:
+            if exc is None:
+                ledger.drain(if_recorded=True)
+                return
+            try:
+                ledger.drain(if_recorded=True)
+            except Exception as deferred:
+                # Only a deferred HEALTH refusal replaces the step's own
+                # exception (it happened first).  A drain that cannot read
+                # at all -- a sticky CUDA fault from the same failure --
+                # must not hide the exception that explains it.
+                if getattr(deferred, "_woof_deferred_health", False):
+                    raise deferred from exc
+        finally:
+            _LOCAL.draining = None
 
 
 @contextmanager
@@ -200,11 +474,84 @@ def read_status(status, *, site: str, describe: Callable[[int], None] | None) ->
     fault seen", which is what every caller does nothing about, and the fault
     -- if there is one -- is reported by the drain instead.
     """
-    ledger = _ACTIVE
-    if ledger is None or describe is None:
+    ledger = active()
+    if ledger is None or describe is None or not _admits(ledger, site):
         return int(status[0].item())
     ledger.record(site, status, describe)
     return 0
+
+
+#: The most spans :func:`record_span_bits` folds into one ledger word.
+SPAN_BITS_MAX = 32
+
+_SPAN_BITS_SOURCE = r"""
+extern "C" __global__ void health_span_any_bits(
+        const int* __restrict__ words, const int* __restrict__ spans,
+        const int nspans, unsigned int* __restrict__ out) {
+    unsigned int bit = 0u;
+    const int i = threadIdx.x;
+    if (i < nspans) {
+        for (int w = spans[2 * i]; w < spans[2 * i + 1]; ++w) {
+            if (words[w] != 0) { bit = 1u << i; break; }
+        }
+    }
+    for (int offset = 16; offset > 0; offset >>= 1)
+        bit |= __shfl_xor_sync(0xffffffffu, bit, offset);
+    if (i == 0) out[0] = bit;
+}
+"""
+
+#: ``(device, spans) -> device int32 [lo0, hi0, lo1, hi1, ...]`` and
+#: ``(device, stream, site) -> one uint32 word``.  A call site's spans are a function
+#: of its check list, so each table is uploaded once per device; the word is
+#: rewritten by every call and ORed into the ledger in stream order.
+_SPAN_TABLES: dict = {}
+_SPAN_WORDS: dict = {}
+_SPAN_KERNEL: list = []
+
+
+def record_span_bits(words, spans, *, site: str, describe) -> bool:
+    """Record ``bit i = any(words[lo_i:hi_i] != 0)`` into the active ledger.
+
+    ``words`` is a device int32 flag block a validator has just written
+    (one word per checked array); ``spans`` is a sequence of ``(lo, hi)``
+    ranges of it, one per check, in the order the immediate read would
+    have tested them.  Two launches (the fold and the ledger's OR) replace
+    one blocking read.  ``describe(bits)`` runs at the drain with the OR of
+    every word this site recorded since the last drain, and must raise.
+
+    Returns ``False`` and launches nothing when no ledger is active or there
+    are more than :data:`SPAN_BITS_MAX` spans; the caller then keeps its
+    immediate read.
+    """
+    import cupy as cp
+    import numpy as np
+
+    ledger = active()
+    if (ledger is None or not spans or len(spans) > SPAN_BITS_MAX
+            or not _admits(ledger, site)):
+        return False
+    if not _SPAN_KERNEL:
+        _SPAN_KERNEL.append(cp.RawKernel(
+            _SPAN_BITS_SOURCE, "health_span_any_bits",
+            options=("-std=c++17",)))
+    device = int(cp.cuda.runtime.getDevice())
+    spans = tuple((int(lo), int(hi)) for lo, hi in spans)
+    table = _SPAN_TABLES.get((device, spans))
+    if table is None:
+        table = cp.asarray(np.asarray(spans, dtype=np.int32).reshape(-1))
+        _SPAN_TABLES[(device, spans)] = table
+    # Per (device, stream, site): two streams folding the same site before
+    # their ORs must not share the word between them.
+    key = (device, int(cp.cuda.get_current_stream().ptr), site)
+    out = _SPAN_WORDS.get(key)
+    if out is None:
+        # Write-before-read: the kernel's thread 0 always stores out[0].
+        out = cp.empty(1, dtype=cp.uint32)
+        _SPAN_WORDS[key] = out
+    _SPAN_KERNEL[0]((1,), (32,), (words, table, np.int32(len(spans)), out))
+    ledger.record(site, out, describe)
+    return True
 
 
 def _array_module(cp, array):
@@ -249,8 +596,8 @@ def check_finite(array, *, site: str, message: str) -> bool:
     # ``cupy.isfinite`` there raises ``TypeError: Unsupported type
     # numpy.ndarray``.  Found by their own suite, which is what it is for.
     xp = _array_module(cp, array)
-    ledger = _ACTIVE
-    if ledger is None or xp is not cp:
+    ledger = active()
+    if ledger is None or xp is not cp or not _admits(ledger, site):
         return bool(xp.isfinite(array).all())
     status = cp.logical_not(cp.isfinite(array).all()).astype(
         cp.uint32).reshape(1)
@@ -263,8 +610,18 @@ def _raise_nonfinite(message: str) -> None:
     raise FloatingPointError(message + deferred_note())
 
 
+def _admits(ledger, site: str) -> bool:
+    admits = getattr(ledger, "admits", None)
+    return True if admits is None else bool(admits(site))
+
+
 def deferred_note(ledger: "HealthLedger | None" = None) -> str:
     """The sentence appended to a deferred failure, so nobody is misled."""
+    if getattr(_LOCAL, "draining", None) is not None:
+        return (" (detected by the deferred health read at the end of this "
+                "model step, so the rest of the step ran after the check "
+                f"failed; {RESIDENT_ENV}=immediate stops at the check "
+                "itself)")
     return (" (detected at a deferred health drain, so the run advanced past "
             "the step that produced it; re-run with the ledger disabled to "
             "stop on the exact step)")
