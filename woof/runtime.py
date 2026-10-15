@@ -5931,8 +5931,10 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
             with _writing_progress(
                     progress_callback, "checkpoint",
                     work_bytes=_checkpoint_work_bytes(tree)):
-                tree._last_checkpoint = write_tree_restart(
-                    outdir, tree, valid)
+                # Sets tree._last_checkpoint itself, once the set is
+                # durable (woof.io.async_checkpoint).
+                write_tree_restart(
+                    outdir, tree, valid, progress_callback=progress_callback)
 
         # [tiles], on the SAME terms as the prepared domain-tree route
         # (woof/prepared_domain_tree_forecast.py) and for the same reason.
@@ -6083,7 +6085,8 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
         frame_records=frame_records,
         prepared_cases=getattr(model, "_prepared_by_grid_id", None),
         receipts={**seam_capsule_receipts(model),
-                  "pool_trim": model._pool_trim_policy})
+                  "pool_trim": model._pool_trim_policy,
+                  "checkpoint_writes": model._checkpoint_receipt})
     return ExperimentRunSummary(
         wrfout_paths=paths,
         completed_seconds=model.root.clock.elapsed_seconds,

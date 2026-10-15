@@ -4077,22 +4077,27 @@ def run_prepared_tree(
 
     def restart_handler(tree, ticks):
         valid = exp.start_time + timedelta(seconds=ticks / tree.schedule.clock.tick_den)
-        restart_started = time.perf_counter()
+
+        def published(path, info):
+            # WRF prints `Timing for Writing restart for domain N`.  Logged
+            # once the set is durable: synchronously that is the blocking
+            # write WRF's number describes; asynchronously it is snapshot
+            # to durable (woof.io.async_checkpoint), the loop having paid
+            # only the snapshot.
+            step_log.restart_written(
+                domain=exp.root.grid_id, valid_time=valid, path=path,
+                wall_seconds=float(info["wall_seconds"]))
+
         # Written between two model steps, at the stop tick too: its own
         # record, sized from the state it writes, or the supervisor times it
         # as a step (see runtime._writing_progress).
         with runtime._writing_progress(
                 observer, "checkpoint",
                 work_bytes=runtime._checkpoint_work_bytes(tree)):
-            tree._last_checkpoint = write_tree_restart(
+            write_tree_restart(
                 outdir, tree, valid,
-                sealed_forcing_extension=sealed_forcing_extension)
-        # WRF prints `Timing for Writing restart for domain N`, and this
-        # one IS the blocking synchronous write WRF's number describes.
-        step_log.restart_written(
-            domain=exp.root.grid_id, valid_time=valid,
-            path=tree._last_checkpoint,
-            wall_seconds=time.perf_counter() - restart_started)
+                sealed_forcing_extension=sealed_forcing_extension,
+                on_published=published, progress_callback=observer)
 
     def progress_callback(**event):
         observe_current_counters(model, start_time=exp.start_time)
@@ -4484,6 +4489,7 @@ def run_prepared_tree(
         "timing_seconds": timing,
         "executor": {
             "pool_trim": getattr(model, "_pool_trim_policy", None),
+            "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
             "steps": int(execution.steps),
             "forces": int(execution.forces),
             "feedback_calls": int(execution.feedback_calls),
@@ -4667,7 +4673,8 @@ def run_prepared_tree(
         receipts={"run_receipt": {
             "path": str((evidence / "run-receipt.json").resolve())},
             **_seam_capsule_receipts(model),
-            "pool_trim": getattr(model, "_pool_trim_policy", None)},
+            "pool_trim": getattr(model, "_pool_trim_policy", None),
+            "checkpoint_writes": getattr(model, "_checkpoint_receipt", None)},
     )
     runtime._finalizing_progress(observer, "publish-completion")
     _atomic_json(

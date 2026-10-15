@@ -230,6 +230,13 @@ member. That is deliberate rather than partial: the set is published
 one domain at a time with d01 written last as its commit marker, so the
 root member appearing is exactly the moment the whole set is durable.
 
+Checkpoints are written in the background by default
+([PREPARED-RESTART.md](PREPARED-RESTART.md#how-a-checkpoint-is-written)).
+`restart_written`, and `last_checkpoint` in the progress file, appear
+once the set is durable. That is usually a few steps after its valid
+time, and never before. Its `wall_seconds` is then snapshot to durable;
+the model loop paid only the snapshot.
+
 ## The completion signal: `ready/`
 
 A size check or an mtime check races the writer. Poll this instead:

@@ -3987,6 +3987,12 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     f"output on [[domain]] grid_id = {grid_id} of {source} "
                     "must be an inline TABLE, e.g. output = { preset = "
                     f"\"minimal\" }}, got {dom['output']!r}.")
+            if "async_checkpoints" in dom["output"]:
+                raise ValueError(
+                    f"output on [[domain]] grid_id = {grid_id} of {source} "
+                    "sets async_checkpoints, which is a property of the "
+                    "whole tree's checkpoints (every domain is written in "
+                    "one set): set it in the tree-wide [output] table.")
             domain_output = (
                 history_selection_module.HistorySelection.from_mapping(
                     dict(dom["output"]),

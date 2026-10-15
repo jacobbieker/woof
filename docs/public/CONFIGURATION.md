@@ -66,6 +66,12 @@ The same table configures the in-model hub-height wind diagnostic
 | `hub_sites` | string or array | unset | a sites.v1 JSON path (`woof energy sites`), or inline `{ site_id = "...", lat = ..., lon = ... }` tables, to sample per site |
 | `hub_sample_interval_s` | number | `60` | per-site sampling cadence in model seconds; needs `hub_sites` |
 
+One key in the table is about checkpoints, not history:
+
+| key | type | default | meaning |
+|---|---|---|---|
+| `async_checkpoints` | boolean | `true` | write checkpoints in the background from a snapshot; `false` writes them synchronously, stopping the forecast while they are written. Tree-wide only (a `[[domain]]` `output = {...}` refuses it). `WOOF_ASYNC_CHECKPOINTS` overrides it. It changes no number and no checkpoint byte. See [PREPARED-RESTART.md](PREPARED-RESTART.md#how-a-checkpoint-is-written). |
+
 ## `[case_data]` -- the inputs a config-driven run declares
 
 `woof run CONFIG.toml` is the config-driven route, and `[case_data]` is

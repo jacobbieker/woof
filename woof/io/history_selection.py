@@ -402,9 +402,12 @@ PRODUCT_COUNT_BASIS = (
 
 #: The keys ``[output]`` accepts.  The four ``hub_*`` keys configure the
 #: in-model hub-height wind diagnostic (:class:`HubWindRequest`).
+#: ``async_checkpoints`` is the run's checkpoint-writer switch
+#: (:mod:`woof.io.async_checkpoint`); it is tree-wide only.
 OUTPUT_KEYS: frozenset[str] = frozenset(
     {"preset", "history_vars", "history_drop",
-     "hub_wind", "hub_heights_m", "hub_sample_interval_s", "hub_sites"})
+     "hub_wind", "hub_heights_m", "hub_sample_interval_s", "hub_sites",
+     "async_checkpoints"})
 
 #: ``hub_heights_m`` when ``hub_wind = true`` names none: the common
 #: onshore/offshore turbine hub range, in m above ground level.
@@ -578,6 +581,10 @@ def output_key_rows():
         KeyRow("hub_sites", ("string", "array"), None,
                "Sites to sample every hub_sample_interval_s: a sites.v1 "
                "JSON path or a list of {site_id, lat, lon} tables."),
+        KeyRow("async_checkpoints", "boolean", True,
+               "Write checkpoints in the background from a pinned snapshot "
+               "(default); false writes them synchronously.  Tree-wide; "
+               "WOOF_ASYNC_CHECKPOINTS overrides it."),
     )
 
 
@@ -776,6 +783,13 @@ class HistorySelection:
     #: buffers, so it binds no restart identity.
     hub_wind: HubWindRequest | None = None
 
+    #: ``[output] async_checkpoints`` as written, or ``None`` (unset: the
+    #: asynchronous default).  DELIBERATELY NOT A FIELD: it chooses how a
+    #: checkpoint is written, never what any file contains, and a field
+    #: would move every ``asdict`` walk of the selection -- the preparation
+    #: identity among them -- for runs that never mention it.
+    async_checkpoints = None
+
     # ``_include`` -- the resolved include set, or None for "everything
     # produced" -- is NOT a dataclass field, deliberately.
     # ``dataclasses.asdict`` walks every field, and both the
@@ -914,13 +928,23 @@ class HistorySelection:
                     "with no science in it, and an empty history_drop "
                     "sheds nothing -- name the variables you mean, or "
                     "delete the key.")
-        return cls(
+        async_checkpoints = table.get("async_checkpoints")
+        if async_checkpoints is not None and not isinstance(
+                async_checkpoints, bool):
+            raise ValueError(
+                f"[output] async_checkpoints of {source} must be true or "
+                f"false, got {async_checkpoints!r}.")
+        selection = cls(
             preset=str(table.get("preset", "full")),
             history_vars=tuple(table.get("history_vars", ()) or ()),
             history_drop=tuple(table.get("history_drop", ()) or ()),
             source=source,
             hub_wind=parse_hub_wind(table, source=source, base_dir=base_dir),
         )
+        if async_checkpoints is not None:
+            object.__setattr__(selection, "async_checkpoints",
+                               async_checkpoints)
+        return selection
 
     @property
     def writes_everything(self) -> bool:
