@@ -617,11 +617,11 @@ def test_relocation_is_refused_from_the_selection_not_the_state():
 
 def test_the_output_key_table_is_declared_whole():
     from woof.config import declared_key_rows
-    from woof.io.history_selection import OUTPUT_KEYS
+    from woof.io.history_selection import DOMAIN_OUTPUT_KEYS, OUTPUT_KEYS
 
     rows = declared_key_rows()
     assert set(rows["output"]) == set(OUTPUT_KEYS)
-    assert set(rows["domain.output"]) == set(OUTPUT_KEYS)
+    assert set(rows["domain.output"]) == set(DOMAIN_OUTPUT_KEYS)
 
 
 def test_an_output_block_that_does_not_ask_keeps_its_public_bytes():

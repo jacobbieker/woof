@@ -234,6 +234,11 @@ WARNING_CODES = {
     "chain_stage_failed":
         "one stage of a chained run failed; the chain's own reader is "
         "told which stage before the run's terminal event",
+    "icechunk_export_incomplete":
+        "woof go's live Icechunk export did not complete (the exporter "
+        "could not start, failed, stalled or had a frame refused); the "
+        "forecast's outputs are unaffected and the resume field is the "
+        "woof icechunk-export command that finishes it",
     "secondary_source_behind":
         "a source lead timed out after preparation or forecast already "
         "failed; the first failure remains the run's cause, and the "

@@ -70,10 +70,15 @@ Gridded store (``woof-energy.icechunk-gridded.v1``)
     and ``XTIME`` are replaced by the ``Time`` coordinate (``XTIME`` counts
     minutes from each segment's own start, so it has no single meaning on a
     shared axis).  ``frame_written`` ``(Time,)`` is 1 for every frame
-    written.  Re-running a segment skips frames already written
+    written and ``frame_published_unix_ms`` its source file's mtime.
+    Re-running a segment skips frames already written
     (``on_existing="skip"``, the default) or rewrites them
-    (``"overwrite"``).  Numeric arrays are compressed with Blosc zstd and
-    bitshuffle; the time chunk is ``time_chunk`` frames (default 1, so
+    (``"overwrite"``, or ``"newer"``: only when the source file is newer
+    than the one written, so a later run wins).  The live export
+    (:mod:`woof.icechunk_export`) also lets the axis grow at its end
+    (``extend_axis``) and creates late fields on the frame that first
+    carries them (``add_variables``).  Numeric arrays are compressed with
+    Blosc zstd and bitshuffle; the time chunk is ``time_chunk`` frames (default 1, so
     segments never share a chunk) and the other dimensions are whole unless
     a chunk would exceed :data:`MAX_CHUNK_BYTES`.
 
@@ -125,6 +130,15 @@ MAX_CHUNK_BYTES = 64 * 1024 * 1024
 
 #: Manifest split size along ``time``/``Time``, in chunks.
 MANIFEST_SPLIT_CHUNKS = 672
+
+#: Chunk length of the ``Time`` coordinate of a gridded group whose axis
+#: grows (``write_gridded_segment(extend_axis=True)``), so growing it one
+#: frame at a time rewrites one small chunk rather than adding one.
+GROWING_TIME_COORD_CHUNK = 4096
+
+#: Gridded-group array holding each frame's publication stamp (its source
+#: file's mtime, Unix ms); ``on_existing="newer"`` compares against it.
+FRAME_PUBLISHED = "frame_published_unix_ms"
 
 #: Default site-store chunking: one day of steps by 64 sites by all heights.
 DEFAULT_SITE_CHUNK = 64
@@ -965,6 +979,31 @@ def _open_nc(path: Path):
     return nc
 
 
+def _nc_lock():
+    """The process-wide netCDF4/HDF5 lock
+    (:data:`woof.io.netcdf_serialization.NETCDF4_IO_LOCK`).
+
+    Pinned: HDF5 is not thread-safe, and this module's reader can share
+    a process with another netCDF user (the live export run in a host's
+    thread beside a writer), so every session here holds it."""
+
+    from woof.io.netcdf_serialization import NETCDF4_IO_LOCK
+
+    return NETCDF4_IO_LOCK
+
+
+@contextmanager
+def _nc_session(path: Path):
+    """One read-only netCDF session under :func:`_nc_lock`."""
+
+    with _nc_lock():
+        nc = _open_nc(path)
+        try:
+            yield nc
+        finally:
+            nc.close()
+
+
 def _frame_times(nc, path: Path) -> list[np.datetime64]:
     netCDF4 = _netcdf4()
     if "Times" not in nc.variables:
@@ -988,7 +1027,7 @@ def wrfout_frames(paths: Iterable[str | os.PathLike], *,
 def _all_frames(paths: Iterable[str | os.PathLike]) -> list[Frame]:
     frames: list[Frame] = []
     for path in sorted(Path(p) for p in paths):
-        with _open_nc(path) as nc:
+        with _nc_session(path) as nc:
             for index, stamp in enumerate(_frame_times(nc, path)):
                 frames.append(Frame(path, index, stamp))
     return frames
@@ -1043,7 +1082,7 @@ def _scan_variables(frames: Sequence[Frame]) -> dict[str, dict[str, Any]]:
 
     found: dict[str, dict[str, Any]] = {}
     for path in dict.fromkeys(f.path for f in frames):
-        with _open_nc(path) as nc:
+        with _nc_session(path) as nc:
             for name, variable in nc.variables.items():
                 if name in found or name in REPLACED_WRF_VARIABLES:
                     continue
@@ -1064,44 +1103,76 @@ def _fill_for(dtype: np.dtype):
     return dtype.type(0)
 
 
+def _frame_stamp_ms(path: Path) -> int:
+    """The publication stamp of a frame file: its mtime, Unix ms.
+
+    Pinned: a wrfout is published by renaming a finished temporary onto
+    its name, so its mtime is when it was written -- a frame written again
+    (a resumed run, a history rewind) carries a later stamp than the one
+    it replaces."""
+
+    return int(os.stat(path).st_mtime_ns // 1_000_000)
+
+
+def _create_gridded_variable(zgroup, name: str, meta: Mapping[str, Any], *,
+                             axis_size: int, tchunk: int,
+                             compressors) -> str:
+    """Create one wrfout variable in a gridded group: ``"time"`` (on the
+    axis, fill-valued), ``"static"`` (written whole from the first file
+    carrying it) or ``"skipped"`` (not numeric; nothing created)."""
+
+    dtype = meta["dtype"]
+    if dtype.kind not in "fiu":
+        return "skipped"
+    dims, shape = meta["dims"], meta["shape"]
+    if dims and dims[0] == "Time":
+        full = (axis_size,) + tuple(shape[1:])
+        chunk_shape = (max(axis_size, tchunk),) + tuple(shape[1:])
+        zgroup.create_array(
+            name, shape=full,
+            chunks=_chunks(chunk_shape, dtype.itemsize, tchunk),
+            dtype=dtype, fill_value=_fill_for(dtype),
+            compressors=compressors, dimension_names=dims,
+            attributes=meta["attrs"])
+        return "time"
+    array = zgroup.create_array(
+        name, shape=shape, dtype=dtype, fill_value=_fill_for(dtype),
+        compressors=compressors, dimension_names=dims or None,
+        attributes=meta["attrs"])
+    with _nc_session(meta["path"]) as nc:
+        array[...] = np.asarray(nc.variables[name][...], dtype=dtype)
+    return "static"
+
+
 def _init_gridded(session, group: str, frames: Sequence[Frame],
                   axis: TimeAxis, *, time_chunk: int, compress: bool,
-                  zstd_clevel: int) -> dict[str, Any]:
+                  zstd_clevel: int, grows: bool = False,
+                  interval_known: bool = True) -> dict[str, Any]:
     zarr = _zarr()
     found = _scan_variables(frames)
     root = zarr.open_group(session.store, mode="a")
     zgroup = root.require_group(group)
     compressors = _compressors(compress, zstd_clevel)
+    # A growing axis starts at the size of its first write, so its chunk
+    # is the requested one rather than one capped at that first size.
+    tchunk = max(1, time_chunk if grows else min(time_chunk, axis.size))
     skipped: list[str] = []
     time_vars: list[str] = []
     seed = frames[0].path
     for name, meta in found.items():
-        dtype = meta["dtype"]
-        if dtype.kind not in "fiu":
+        kind = _create_gridded_variable(zgroup, name, meta,
+                                        axis_size=axis.size, tchunk=tchunk,
+                                        compressors=compressors)
+        if kind == "skipped":
             skipped.append(name)
-            continue
-        dims, shape = meta["dims"], meta["shape"]
-        if dims and dims[0] == "Time":
-            full = (axis.size,) + tuple(shape[1:])
-            zgroup.create_array(
-                name, shape=full,
-                chunks=_chunks(full, dtype.itemsize, time_chunk),
-                dtype=dtype, fill_value=_fill_for(dtype),
-                compressors=compressors, dimension_names=dims,
-                attributes=meta["attrs"])
+        elif kind == "time":
             time_vars.append(name)
-        else:
-            array = zgroup.create_array(
-                name, shape=shape, dtype=dtype, fill_value=_fill_for(dtype),
-                compressors=compressors, dimension_names=dims or None,
-                attributes=meta["attrs"])
-            with _open_nc(meta["path"]) as nc:
-                array[...] = np.asarray(nc.variables[name][...], dtype=dtype)
-    tchunk = max(1, min(time_chunk, axis.size))
     offsets = ((axis.times() - axis.start) / np.timedelta64(1, "s")) \
         .astype(np.int64)
+    coord_chunk = max(axis.size, GROWING_TIME_COORD_CHUNK) if grows \
+        else axis.size
     zgroup.create_array(
-        "Time", shape=(axis.size,), chunks=(axis.size,), dtype="int64",
+        "Time", shape=(axis.size,), chunks=(coord_chunk,), dtype="int64",
         fill_value=0, dimension_names=("Time",),
         attributes={"units": axis.units(), "calendar": "proleptic_gregorian",
                     "standard_name": "time",
@@ -1112,12 +1183,15 @@ def _init_gridded(session, group: str, frames: Sequence[Frame],
         attributes={"long_name": "1 where a wrfout frame was written",
                     "flag_values": [0, 1],
                     "flag_meanings": "not_written written"})
-    with _open_nc(seed) as nc:
+    _create_stamps(zgroup, axis.size, tchunk, compressors)
+    with _nc_session(seed) as nc:
         global_attrs = {f"wrf_{k}": _jsonable(nc.getncattr(k))
                         for k in nc.ncattrs()}
     zgroup.attrs.update({
         "schema": GRIDDED_STORE_SCHEMA, **axis.to_attrs(),
         "time_chunk": tchunk, "source": "wrfout",
+        "axis_grows": bool(grows),
+        "time_interval_inferred": not interval_known,
         "variables": time_vars,
         "replaced_variables": list(REPLACED_WRF_VARIABLES),
         "skipped_variables": skipped,
@@ -1132,6 +1206,140 @@ def _init_gridded(session, group: str, frames: Sequence[Frame],
             "skipped_variables": skipped}
 
 
+def _create_stamps(zgroup, size: int, tchunk: int, compressors):
+    return zgroup.create_array(
+        FRAME_PUBLISHED, shape=(size,), chunks=(tchunk,), dtype="int64",
+        fill_value=0, compressors=compressors, dimension_names=("Time",),
+        attributes={"long_name": "publication time of the frame written "
+                                 "here (its source file's mtime)",
+                    "units": "milliseconds since 1970-01-01 00:00:00"})
+
+
+def _members(zgroup) -> set[str]:
+    return {name for name, _ in zgroup.members()}
+
+
+def _grown_axis(axis: TimeAxis, times: Sequence[np.datetime64], *,
+                adopt: bool = False) -> TimeAxis:
+    """``axis`` extended at its end to hold ``times`` (on its grid).
+
+    Pinned: an axis only grows at its end -- a time before its start is
+    refused, never prepended -- and keeps its start and interval, except
+    that a one-step axis whose interval was not given (``adopt``: the
+    group's ``time_interval_inferred``) adopts the greatest common divisor
+    of the new times' offsets from its start."""
+
+    values = np.asarray(times, dtype="datetime64[s]")
+    if values.size == 0:
+        return axis
+    first, last = values.min(), values.max()
+    if first < axis.start:
+        raise IcechunkStoreRefused(
+            f"frame at {first}Z precedes the store's axis start "
+            f"{axis.start}Z; a growing axis is extended at its end, never "
+            "before its start")
+    if last <= axis.end:
+        return axis
+    interval = axis.interval_s
+    if axis.size == 1 and adopt:
+        offsets = [int((t - axis.start) / np.timedelta64(1, "s"))
+                   for t in values if t > axis.start]
+        interval = math.gcd(*offsets) if len(offsets) > 1 else offsets[0]
+    span = int((last - axis.start) / np.timedelta64(1, "s"))
+    if span % interval:
+        raise IcechunkStoreRefused(
+            f"time {last}Z is not on the store's axis ({axis.start}Z every "
+            f"{interval} s)")
+    return TimeAxis(axis.start, last, interval)
+
+
+def _extend_gridded(zgroup, old: TimeAxis, new: TimeAxis) -> None:
+    """Resize every ``Time`` array of a gridded group from ``old`` to
+    ``new`` (same start) and rewrite the ``Time`` coordinate."""
+
+    members = _members(zgroup)
+    names = list(zgroup.attrs["variables"]) + ["frame_written"]
+    if FRAME_PUBLISHED in members:
+        names.append(FRAME_PUBLISHED)
+    for name in names:
+        array = zgroup[name]
+        array.resize((new.size,) + tuple(array.shape[1:]))
+    coord = zgroup["Time"]
+    coord.resize((new.size,))
+    # Only the new steps: the old ones keep their offsets (a one-step
+    # axis that adopted its interval has only offset 0).
+    offsets = ((new.times() - new.start) / np.timedelta64(1, "s")) \
+        .astype(np.int64)
+    coord[old.size:] = offsets[old.size:]
+    zgroup.attrs.update(new.to_attrs())
+
+
+def _add_gridded_variables(zgroup, frames: Sequence[Frame], *,
+                           axis: TimeAxis, compress: bool,
+                           zstd_clevel: int) -> list[str]:
+    """Create the variables ``frames`` carry that the group does not hold
+    yet (a field first written after the group's seed frame), the way the
+    group's creation would have had it seen them: NaN/zero-filled on the
+    axis, attributes from the first file carrying them."""
+
+    members = _members(zgroup)
+    attrs = dict(zgroup.attrs)
+    skipped = list(attrs.get("skipped_variables") or [])
+    known = members | set(skipped) | set(REPLACED_WRF_VARIABLES)
+    found = {name: meta for name, meta in _scan_variables(frames).items()
+             if name not in known}
+    if not found:
+        return []
+    compressors = _compressors(compress, zstd_clevel)
+    tchunk = max(1, int(attrs.get("time_chunk") or 1))
+    variables = list(attrs["variables"])
+    added: list[str] = []
+    for name, meta in found.items():
+        kind = _create_gridded_variable(zgroup, name, meta,
+                                        axis_size=axis.size, tchunk=tchunk,
+                                        compressors=compressors)
+        if kind == "skipped":
+            skipped.append(name)
+            continue
+        if kind == "time":
+            variables.append(name)
+        added.append(name)
+    zgroup.attrs.update({"variables": variables,
+                         "skipped_variables": skipped})
+    return added
+
+
+def _write_frame_values(jobs: Iterable[tuple[Any, int, np.ndarray]],
+                        threads: int) -> None:
+    """``array[t] = values`` for every job, ``threads`` at a time.
+
+    Reading stays on the calling thread (netCDF/HDF5 is not thread-safe);
+    the chunk encoding and the store writes of different arrays run
+    concurrently, at most ``2 * threads`` arrays held in memory."""
+
+    if threads <= 1:
+        for array, t, values in jobs:
+            array[t] = values
+        return
+    from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
+
+    pending: set = set()
+    with ThreadPoolExecutor(max_workers=threads,
+                            thread_name_prefix="icechunk-write") as pool:
+        try:
+            for array, t, values in jobs:
+                if len(pending) >= 2 * threads:
+                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        future.result()
+                pending.add(pool.submit(array.__setitem__, t, values))
+            for future in pending:
+                future.result()
+        finally:
+            for future in pending:
+                future.cancel()
+
+
 def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
                           group: str, axis: TimeAxis | None = None,
                           branch: str = "main", job_id: str | None = None,
@@ -1139,6 +1347,11 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
                           window: tuple[Any, Any] | None = None,
                           on_existing: str = "skip", time_chunk: int = 1,
                           compress: bool = True, zstd_clevel: int = 5,
+                          extend_axis: bool = False,
+                          add_variables: bool = False,
+                          write_threads: int = 1,
+                          axis_interval_known: bool = True,
+                          message: str | None = None,
                           policy: RetryPolicy | None = None,
                           before_commit: Callable[[int], None] | None = None,
                           **storage_options) -> dict[str, Any]:
@@ -1149,11 +1362,24 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
     it when it does (``None`` reads it from the group).  ``window`` =
     ``(first, end)`` keeps frames with ``first <= time < end`` (drop a
     segment's spin-up or its overlap with the next); frames off the axis
-    are refused."""
+    are refused.
 
-    if on_existing not in ("overwrite", "skip"):
+    The live export (:mod:`woof.icechunk_export`) writes one frame per
+    call with three switches the parallel hindcast leaves off:
+    ``extend_axis`` makes the axis grow at its end to hold later frames
+    (``axis`` is then only the creating axis; a group created this way is
+    marked ``axis_grows``; with ``axis_interval_known=False`` its
+    interval is a placeholder the second frame replaces, marked
+    ``time_interval_inferred``), ``add_variables`` creates a field the group
+    does not hold yet instead of dropping it, and ``on_existing="newer"``
+    rewrites a frame already written only when its source file is newer
+    (``frame_published_unix_ms``) -- a later run wins, the same run is a
+    no-op.  ``write_threads`` encodes and stores that many arrays at once.
+    """
+
+    if on_existing not in ("overwrite", "skip", "newer"):
         raise IcechunkStoreRefused(
-            f"on_existing {on_existing!r} is not overwrite or skip")
+            f"on_existing {on_existing!r} is not overwrite, skip or newer")
     if not group or group.strip("/") != group:
         raise IcechunkStoreRefused(
             f"group {group!r} must be a non-empty relative path")
@@ -1164,21 +1390,29 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
     windowed = len(every) - len(frames)
     if not frames:
         raise IcechunkStoreRefused("no wrfout frames to write")
+    stamps_of = {path: _frame_stamp_ms(path)
+                 for path in dict.fromkeys(f.path for f in frames)}
+    frame_times = [f.time for f in frames]
     repo = open_repository(store, **storage_options)
 
     def apply(session) -> dict[str, Any]:
         zgroup = _open_group(session, group)
         created: dict[str, Any] = {"created": False}
+        extended = False
         if zgroup is None:
             if axis is None:
                 raise IcechunkStoreRefused(
                     f"group {group!r} does not exist; give its time axis")
-            group_axis = axis
-            group_axis.index_of([f.time for f in frames])
+            group_axis = (_grown_axis(axis, frame_times,
+                                      adopt=not axis_interval_known)
+                          if extend_axis else axis)
+            group_axis.index_of(frame_times)
             created = _init_gridded(session, group, frames, group_axis,
                                     time_chunk=int(time_chunk),
                                     compress=compress,
-                                    zstd_clevel=zstd_clevel)
+                                    zstd_clevel=zstd_clevel,
+                                    grows=bool(extend_axis),
+                                    interval_known=bool(axis_interval_known))
             zgroup = _open_group(session, group)
         else:
             attrs = dict(zgroup.attrs)
@@ -1186,66 +1420,118 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
                 raise IcechunkStoreRefused(
                     f"group {group!r} is not a {GRIDDED_STORE_SCHEMA} store")
             group_axis = TimeAxis.from_attrs(attrs)
-            if axis is not None and axis != group_axis:
+            if extend_axis:
+                grown = _grown_axis(
+                    group_axis, frame_times,
+                    adopt=bool(attrs.get("time_interval_inferred")))
+                if grown != group_axis:
+                    _extend_gridded(zgroup, group_axis, grown)
+                    group_axis, extended = grown, True
+            elif axis is not None and axis != group_axis:
                 raise IcechunkStoreRefused(
                     f"group {group!r} has time axis "
                     f"{group_axis.to_attrs()}, not {axis.to_attrs()}")
-        index = group_axis.index_of([f.time for f in frames])
-        stored = list(zgroup.attrs["variables"])
-        written = np.asarray(zgroup["frame_written"][:])
-        todo = [(f, int(i)) for f, i in zip(frames, index)
-                if on_existing == "overwrite" or written[i] != 1]
+        index = group_axis.index_of(frame_times)
+        # Only this segment's entries are read: a growing group's masks
+        # are one chunk per frame, and reading them whole made every
+        # one-frame commit cost a read per frame already written.
+        where = (_selector(index),)
+        written = np.asarray(
+            zgroup["frame_written"].get_orthogonal_selection(where))
+        members = _members(zgroup)
+        if FRAME_PUBLISHED not in members and on_existing == "newer":
+            _create_stamps(zgroup, group_axis.size,
+                           max(1, int(zgroup.attrs.get("time_chunk") or 1)),
+                           _compressors(compress, zstd_clevel))
+            members.add(FRAME_PUBLISHED)
+        stamp_array = zgroup[FRAME_PUBLISHED] \
+            if FRAME_PUBLISHED in members else None
+        stamps = (np.asarray(stamp_array.get_orthogonal_selection(where))
+                  if stamp_array is not None
+                  else np.zeros(len(index), dtype=np.int64))
+        todo: list[tuple[Frame, int]] = []
+        replaced = 0
+        for n, (f, i) in enumerate(zip(frames, index)):
+            i = int(i)
+            if written[n] != 1 or on_existing == "overwrite":
+                todo.append((f, i))
+            elif on_existing == "newer" and stamps_of[f.path] > stamps[n]:
+                todo.append((f, i))
+                replaced += 1
         skipped = len(frames) - len(todo)
+        added = (_add_gridded_variables(
+                     zgroup, [f for f, _ in todo], axis=group_axis,
+                     compress=compress, zstd_clevel=zstd_clevel)
+                 if add_variables and todo else [])
+        stored = list(zgroup.attrs["variables"])
         dropped: set[str] = set()
         absent: set[str] = set()
         arrays = {name: zgroup[name] for name in stored}
-        current: Path | None = None
-        nc = None
-        try:
+        lock = _nc_lock()
+        handle: list = []
+
+        def jobs():
+            # The netCDF lock is held for the open, each read and the
+            # close, and released while the values are encoded and stored
+            # (``yield``): HDF5 is never entered by two threads, and a
+            # frame never holds it for a whole write.  An idle open
+            # handle enters nothing.
             for frame, t in todo:
-                if frame.path != current:
-                    if nc is not None:
-                        nc.close()
+                with lock:
                     nc = _open_nc(frame.path)
-                    current = frame.path
-                names = set(nc.variables)
+                    handle.append(nc)
+                    present = {name: tuple(variable.dimensions)
+                               for name, variable in nc.variables.items()}
                 for name in stored:
-                    if name not in names:
-                        absent.add(name)
-                        continue
-                    variable = nc.variables[name]
-                    if not variable.dimensions \
-                            or variable.dimensions[0] != "Time":
+                    dims = present.get(name)
+                    if not dims or dims[0] != "Time":
                         absent.add(name)
                         continue
                     array = arrays[name]
-                    values = np.asarray(variable[frame.index],
-                                        dtype=array.dtype)
+                    with lock:
+                        values = np.asarray(nc.variables[name][frame.index],
+                                            dtype=array.dtype)
                     if values.shape != tuple(array.shape[1:]):
                         raise IcechunkStoreRefused(
                             f"{frame.path.name} {name} has shape "
                             f"{values.shape}, the store {array.shape[1:]}")
-                    array[t] = values
-                for name in names - set(stored):
-                    if name in REPLACED_WRF_VARIABLES:
+                    yield array, t, values
+                for name, dims in present.items():
+                    if name in stored or name in REPLACED_WRF_VARIABLES:
                         continue
-                    if nc.variables[name].dimensions[:1] == ("Time",):
+                    if dims[:1] == ("Time",):
                         dropped.add(name)
-                zgroup["frame_written"][t] = 1
+                with lock:
+                    handle.pop().close()
+
+        try:
+            # Concurrent writes are safe only when no two of them share a
+            # chunk: with one frame per time chunk every (array, frame)
+            # write is whole chunks of its own.
+            tchunk = max(1, int(zgroup.attrs.get("time_chunk") or 1))
+            _write_frame_values(jobs(), max(1, int(write_threads))
+                                if tchunk == 1 else 1)
         finally:
-            if nc is not None:
-                nc.close()
+            while handle:
+                with lock:
+                    handle.pop().close()
+        for frame, t in todo:
+            zgroup["frame_written"][t] = 1
+            if stamp_array is not None:
+                stamp_array[t] = stamps_of[frame.path]
         return {**created, "frames_written": len(todo),
                 "time_chunk": int(zgroup.attrs.get("time_chunk") or 1),
-                "frames_skipped": skipped, "dropped": sorted(dropped),
-                "absent": sorted(absent), "axis": group_axis}
+                "frames_skipped": skipped, "frames_replaced": replaced,
+                "dropped": sorted(dropped), "absent": sorted(absent),
+                "added": added, "extended": extended, "axis": group_axis}
 
     first, last = str(frames[0].time) + "Z", str(frames[-1].time) + "Z"
     result = commit_with_retry(
         repo, branch=branch, apply=apply,
-        message=(f"woof energy icechunk: job {job_id or '-'} segment "
-                 f"{segment_id or '-'} wrote {len(frames)} wrfout frames "
-                 f"into {group} ({first}..{last})"),
+        message=message or (
+            f"woof energy icechunk: job {job_id or '-'} segment "
+            f"{segment_id or '-'} wrote {len(frames)} wrfout frames "
+            f"into {group} ({first}..{last})"),
         metadata=_job_metadata(job_id, segment_id, group, {
             "action": "write-gridded", "first_time": first,
             "last_time": last, "frames": len(frames),
@@ -1270,7 +1556,10 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
         "frames": len(frames), "frames_windowed_out": windowed,
         "frames_written": int(info.get("frames_written", 0)),
         "frames_skipped": int(info.get("frames_skipped", 0)),
+        "frames_replaced": int(info.get("frames_replaced", 0)),
         "created": bool(info.get("created")),
+        "axis_extended": bool(info.get("extended")),
+        "added_variables": info.get("added", []),
         "dropped_variables": info.get("dropped", []),
         "absent_variables": info.get("absent", []),
         "chunk_aligned": aligned,
@@ -1426,7 +1715,8 @@ __all__ = [
     "SITE_STORE_SCHEMA", "GRIDDED_STORE_SCHEMA", "WRITE_SCHEMA",
     "VERIFY_SCHEMA", "SCHEMES", "MAX_CHUNK_BYTES", "MANIFEST_SPLIT_CHUNKS",
     "IcechunkStoreRefused", "TimeAxis", "RetryPolicy", "CommitResult",
-    "Frame", "is_store_url", "storage_from_url", "repository_config",
+    "Frame", "FRAME_PUBLISHED", "GROWING_TIME_COORD_CHUNK",
+    "is_store_url", "storage_from_url", "repository_config",
     "open_repository", "parse_interval", "commit_with_retry",
     "init_site_store", "write_site_region", "wrfout_frames",
     "write_gridded_segment", "verify_repository", "main",

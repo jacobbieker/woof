@@ -1191,6 +1191,104 @@ def test_a_succeeding_chain_reports_one_line_per_stage(tmp_path, capsys,
     assert "go: rendered " in printed
 
 
+@requires_cupy
+@pytest.mark.parametrize("export_ok, want_rc", [(True, 0), (False, 73)])
+def test_go_exports_to_icechunk_beside_the_forecast_and_waits_for_it(
+        tmp_path, capsys, monkeypatch, staged_geog, gfs_config, export_ok,
+        want_rc):
+    """``--icechunk``: the exporter starts before the forecast stage, is
+    told to finish when it ends, and is waited for before go is done; an
+    incomplete export leaves the forecast's outputs and exits 73."""
+
+    from woof import icechunk_export
+
+    order: list[str] = []
+    made: list = []
+
+    class FakeLive:
+        def __init__(self, options, *, sources, state_dir, intervals, say,
+                      env):
+            self.options, self.sources, self.state_dir = (options, sources,
+                                                         state_dir)
+            made.append(self)
+
+        def start(self, *, after=None):
+            order.append("start")
+
+        def finish(self):
+            order.append("finish")
+
+        def command(self):
+            return ["python", "-m", "woof.icechunk_export"]
+
+        def abandon(self):
+            order.append("abandon")
+
+        def wait(self):
+            order.append("wait")
+            return {"ok": export_ok, "exit_code": 0 if export_ok else 1,
+                    "frames_exported": 1, "frames_found": 1}
+
+    def fake_run(command, **kwargs):
+        if "--author-front-door-manifest" in command:
+            manifest = Path(command[command.index("--manifest-out") + 1])
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text("{}", encoding="utf-8")
+        if "--output-root" in command:
+            prepared = Path(command[command.index("--output-root") + 1])
+            prepared.mkdir(parents=True, exist_ok=True)
+            (prepared / "proof.json").write_text(json.dumps({
+                "input_manifest_sha256": "a" * 64,
+                "prepared_cache": {"content_sha256": "b" * 64}}),
+                encoding="utf-8")
+        if "--io-mode" in command:
+            order.append("forecast")
+            frames = Path(
+                command[command.index("--outdir") + 1]) / "wrfout"
+            frames.mkdir(parents=True, exist_ok=True)
+            (frames / "wrfout_d01_2026-07-29_18_00_00").write_text(
+                "", encoding="utf-8")
+        return _FakeCompleted(0, stdout="")
+
+    monkeypatch.setattr(icechunk_export, "LiveExport", FakeLive)
+    monkeypatch.setattr(subprocess, "Popen", _popen_double(fake_run))
+    monkeypatch.setattr(go_cli, "resolve_bridge",
+                        lambda: tmp_path / "gfs_grib2_bridge")
+    monkeypatch.setattr(go_cli, "render_extra_missing", lambda: None)
+
+    rc = cli_main(["go", str(gfs_config), "--outdir", str(tmp_path / "go"),
+                   "--geog-root", str(staged_geog),
+                   "--icechunk", "s3://bucket/run"])
+    printed = capsys.readouterr().out
+    assert rc == want_rc
+    assert order == ["start", "forecast", "finish", "wait"]
+    (live,) = made
+    assert live.options.url == "s3://bucket/run"
+    root = live.state_dir.parent
+    assert live.state_dir == root / icechunk_export.EXPORT_DIRNAME
+    assert live.sources == [root / "run"]
+    assert "go: wrote " in printed
+    from woof.chain_events import CHAIN_EVENTS_FILENAME
+
+    events = [json.loads(line) for line in
+              (root / CHAIN_EVENTS_FILENAME).read_text().splitlines()]
+    assert [e["event"] for e in events
+            if e.get("stage") == "icechunk-export"][:1] == ["stage_started"]
+    if not export_ok:
+        assert any(e.get("code") == "icechunk_export_incomplete"
+                   for e in events)
+
+
+@requires_cupy
+def test_go_refuses_icechunk_with_prepare_only(tmp_path, capsys, gfs_config,
+                                               staged_geog):
+    rc = cli_main(["go", str(gfs_config), "--outdir", str(tmp_path / "go"),
+                   "--geog-root", str(staged_geog), "--prepare-only",
+                   "--icechunk", "s3://bucket/run"])
+    assert rc == 2
+    assert "--prepare-only starts no forecast" in capsys.readouterr().err
+
+
 # NEEDS CUPY INSTALLED, and opens no device: this test runs `woof go` to
 # completion; without cupy the door refuses ahead of the fetch stage and
 # returns 2.

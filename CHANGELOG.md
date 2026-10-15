@@ -34,6 +34,45 @@ New:
   boundary inventory instead of rehashing every boundary table at every
   checkpoint, and the digests hash arrays in place instead of through a
   `tobytes()` copy.
+- `woof go` can export history frames to Icechunk while the forecast runs.
+  Set `[output] icechunk = { url = "s3://..." }` in the config (also
+  `gs://`, `file://` or a directory), or pass `--icechunk URL`. Before,
+  the export started only after the forecast had finished: for the 48 h
+  UK run (289 frames of about 3 GB each) it took another 14 hours. A
+  separate process, at `nice` 10, now polls the run's `ready/` markers.
+  It writes each frame into group `dNN` of the repository (one group per
+  domain, one commit per frame), compressed with Blosc zstd+bitshuffle.
+  The model never waits on the exporter.
+  `go` waits for the export to finish before it reports the run done, and
+  prints progress and lag while it waits. If the export is incomplete
+  (the exporter could not start, crashed, or a frame was refused), the
+  forecast still completes. `go` then names what is missing, prints the
+  command that finishes the export, and exits 73.
+  `woof icechunk-export PATH` finishes such an export, or exports run
+  folders after the fact; it exits 0, 1 (store failure) or 2 (refused).
+  - Each group's time axis grows from its first frame.
+  - A field first written after t=0 (`REFL_10CM`) is created on the frame
+    that first carries it, and is NaN before.
+  - A resumed run's folder continues the same groups. Where a valid time
+    is in both runs, the newer file wins (`frame_published_unix_ms`), so
+    there are no duplicates. Re-running an export commits nothing.
+  - `s3://` and `gs://` URLs are committed directly, with conflict
+    retries. A local repository can still be synced afterwards.
+  - Progress, lag and the final receipt are in
+    `<run>/icechunk-export/status.json`.
+  - Measured on a 40 x 40 x 30 HRRR case (21 frames), alternating runs
+    with and without the export: the median model step was 0.0525 s in
+    both. The live store equalled an export of the same files made after
+    the run.
+  - `woof.energy.icechunk_store.write_gridded_segment` gains
+    `extend_axis`, `add_variables`, `on_existing="newer"` and
+    `write_threads`. With 4 threads, a 540 MB frame took 3-6.5 s instead
+    of 11-15 s. Every gridded group now records
+    `frame_published_unix_ms`. The writer's netCDF reads take the
+    process-wide HDF5 lock.
+  - A `[[domain]]` `output = { ... }` table refuses `icechunk` by name:
+    one repository holds every domain.
+  - See docs/public/PROGRESS.md and docs/energy-hindcast/icechunk.md.
 
 - `woof multi-run` binds a prepared run to its preparation itself. A
   module-form run (`woof.prepared_single_domain_forecast` or

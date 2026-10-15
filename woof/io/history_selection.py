@@ -404,10 +404,20 @@ PRODUCT_COUNT_BASIS = (
 #: in-model hub-height wind diagnostic (:class:`HubWindRequest`).
 #: ``async_checkpoints`` is the run's checkpoint-writer switch
 #: (:mod:`woof.io.async_checkpoint`); it is tree-wide only.
+#: ``icechunk`` asks ``woof go`` to export each history frame to an
+#: Icechunk repository as it lands (:mod:`woof.icechunk_export`); it is
+#: validated here and read by ``go``, and selects nothing on the tape.
 OUTPUT_KEYS: frozenset[str] = frozenset(
     {"preset", "history_vars", "history_drop",
      "hub_wind", "hub_heights_m", "hub_sample_interval_s", "hub_sites",
-     "async_checkpoints"})
+     "async_checkpoints", "icechunk"})
+
+#: The keys a ``[[domain]]`` ``output = {...}`` accepts: the tree-wide
+#: ones less ``icechunk``, which exports every domain of the tree into
+#: one repository (one group per domain) and so belongs to the tree.
+#: ``async_checkpoints`` stays listed so the experiment loader can refuse
+#: it on a domain by name (woof/experiment.py) rather than as unknown.
+DOMAIN_OUTPUT_KEYS: frozenset[str] = OUTPUT_KEYS - {"icechunk"}
 
 #: ``hub_heights_m`` when ``hub_wind = true`` names none: the common
 #: onshore/offshore turbine hub range, in m above ground level.
@@ -548,16 +558,23 @@ def _parse_sites(value, *, base_dir, source: str
     return tuple(normalised), origin
 
 
-def output_key_rows():
+def output_key_rows(*, tree_wide: bool = True):
     """Declared rows (type, default, one-line doc) for every ``[output]`` key.
 
     The whole table, not only the keys no typed field carries: a front end
     reading :func:`woof.config.declared_key_rows` learns ``[output]`` from
     here, and a partial table would read as "these are all the keys".
+    ``tree_wide=False`` gives a ``[[domain]]`` ``output`` table's rows
+    (:data:`DOMAIN_OUTPUT_KEYS`).
     """
     from woof.config_keys import KeyRow, key_rows
 
-    return key_rows(
+    tree_rows = (KeyRow(
+        "icechunk", ("string", "table"), None,
+        "woof go exports each history frame to this Icechunk repository "
+        "as it lands: a URL, or { url, branch, compress, zstd_clevel, "
+        "group_prefix, threads }."),) if tree_wide else ()
+    return key_rows(*tree_rows,
         KeyRow("preset", "string", "full",
                "Named history set: full (default), minimal, severe, "
                "energy or windfarm."),
@@ -880,13 +897,17 @@ class HistorySelection:
                 "surface-only tape.")
 
     @classmethod
-    def from_mapping(cls, table, *, source: str = "<config>", base_dir=None
-                     ) -> "HistorySelection":
+    def from_mapping(cls, table, *, source: str = "<config>", base_dir=None,
+                     tree_wide: bool = True) -> "HistorySelection":
         """Validate one ``[output]`` table.  ``None`` gives :data:`FULL`.
 
         ``base_dir`` is the config file's directory: a relative
         ``hub_sites`` path resolves from there first, then from the
-        working directory.
+        working directory.  ``tree_wide=False`` reads a ``[[domain]]``
+        ``output`` table, which refuses ``icechunk`` by name.  An
+        ``icechunk`` value is validated
+        (:meth:`woof.icechunk_export.ExportOptions.from_mapping`) and not
+        kept: it selects nothing on the tape, and ``woof go`` reads it.
         """
         if table is None:
             return FULL
@@ -895,6 +916,16 @@ class HistorySelection:
                 f"[output] of {source} must be a table, e.g. "
                 '[output] preset = "minimal", got '
                 f"{table!r}.")
+        if not tree_wide and "icechunk" in table:
+            raise ValueError(
+                f"icechunk in output of {source} is tree-wide: one "
+                "repository holds every domain, one group each.  Move it "
+                "to the tree-wide [output] table.")
+        if "icechunk" in table:
+            from woof.icechunk_export import ExportOptions
+
+            ExportOptions.from_mapping(table["icechunk"], source=source,
+                                       base_dir=base_dir)
         unknown = sorted(set(table) - OUTPUT_KEYS)
         if unknown:
             suggestions = "".join(
@@ -1197,7 +1228,7 @@ __all__ = [
     "HistorySelection",
     "HubWindConfigError",
     "HubWindRequest",
-    "OUTPUT_KEYS",
+    "OUTPUT_KEYS", "DOMAIN_OUTPUT_KEYS",
     "PRODUCT_HISTORY_INPUTS",
     "STRUCTURAL_FIELDS",
     "WINDFARM_FIELD_REASONS",

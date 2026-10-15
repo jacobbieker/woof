@@ -72,6 +72,16 @@ One key in the table is about checkpoints, not history:
 |---|---|---|---|
 | `async_checkpoints` | boolean | `true` | write checkpoints in the background from a snapshot; `false` writes them synchronously, stopping the forecast while they are written. Tree-wide only (a `[[domain]]` `output = {...}` refuses it). `WOOF_ASYNC_CHECKPOINTS` overrides it. It changes no number and no checkpoint byte. See [PREPARED-RESTART.md](PREPARED-RESTART.md#how-a-checkpoint-is-written). |
 
+The tree-wide table also asks `woof go` to export each history frame
+to an Icechunk repository while the forecast runs
+([PROGRESS.md](PROGRESS.md#exporting-frames-to-icechunk-while-the-run-goes)).
+A `[[domain]]` `output = { ... }` refuses this key: one repository holds
+every domain, one group each.
+
+| key | type | default | meaning |
+|---|---|---|---|
+| `icechunk` | string or table | unset | a store URL (`s3://bucket/prefix`, `gs://bucket/prefix`, `file:///path`) or a directory (relative to the config), or `{ url = "...", branch = "main", compress = true, zstd_clevel = 5, group_prefix = "", threads = 4 }`; `woof go --icechunk URL` replaces `url` |
+
 ## `[case_data]` -- the inputs a config-driven run declares
 
 `woof run CONFIG.toml` is the config-driven route, and `[case_data]` is
