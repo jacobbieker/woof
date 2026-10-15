@@ -1,0 +1,14 @@
+[ Info: Oceananigans will use 4 threads
+[ Info: iteration 0: max|u| = 10.00, max|w| = 0.00, SST = 290.000 K, mean sensible = 739.8 W m⁻²
+[ Info: iteration 1: max|u| = NaN, max|w| = NaN, SST = 290.000 K, mean sensible = NaN W m⁻²
+[ Info: iteration 2: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 3: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 4: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 5: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 6: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 7: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 8: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 9: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 10: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 11: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²
+[ Info: iteration 12: max|u| = NaN, max|w| = NaN, SST = NaN K, mean sensible = NaN W m⁻²

@@ -1,0 +1,102 @@
+[ Info: Oceananigans will use 4 threads
+[ Info: === case periodic_slab_unpatched ===
+[ Info: [periodic_slab_unpatched] built in 193.9 s
+[ Info: [periodic_slab] iter 0, t = 0 seconds, SST = 20.0000 °C, Q = 498.9 W m⁻²
+[ Info: [periodic_slab] iter 60, t = 5 minutes, SST = NaN °C, Q = NaN W m⁻²
+[ Info: time = 500.0, iteration = 100: NaN found in field T_ocean. Stopping simulation.
+[ Info: === case periodic_slab ===
+[ Info: [periodic_slab] built in 0.4 s
+[ Info: [periodic_slab] iter 0, t = 0 seconds, SST = 20.0000 °C, Q = 498.9 W m⁻²
+[ Info: [periodic_slab] iter 60, t = 5 minutes, SST = 19.9964 °C, Q = 490.1 W m⁻²
+[ Info: [periodic_slab] iter 120, t = 10 minutes, SST = 19.9928 °C, Q = 481.7 W m⁻²
+[ Info: [periodic_slab] iter 180, t = 15 minutes, SST = 19.9893 °C, Q = 473.4 W m⁻²
+[ Info: [periodic_slab] iter 240, t = 20 minutes, SST = 19.9859 °C, Q = 465.4 W m⁻²
+[ Info: [periodic_slab] iter 300, t = 25 minutes, SST = 19.9825 °C, Q = 457.6 W m⁻²
+[ Info: [periodic_slab] iter 360, t = 30 minutes, SST = 19.9792 °C, Q = 450.2 W m⁻²
+[ Info: === case periodic_catke ===
+[ Info: [periodic_catke] built in 16.0 s
+[ Info: [periodic_catke] iter 0, t = 0 seconds, SST = 20.0000 °C, Q = 499.0 W m⁻²
+[ Info: [periodic_catke] iter 60, t = 5 minutes, SST = 19.9958 °C, Q = 490.1 W m⁻²
+[ Info: [periodic_catke] iter 120, t = 10 minutes, SST = 19.9920 °C, Q = 481.5 W m⁻²
+[ Info: [periodic_catke] iter 180, t = 15 minutes, SST = 19.9879 °C, Q = 473.1 W m⁻²
+[ Info: [periodic_catke] iter 240, t = 20 minutes, SST = 19.9837 °C, Q = 465.0 W m⁻²
+[ Info: [periodic_catke] iter 300, t = 25 minutes, SST = 19.9798 °C, Q = 457.2 W m⁻²
+[ Info: [periodic_catke] iter 360, t = 30 minutes, SST = 19.9759 °C, Q = 449.6 W m⁻²
+[ Info: === case lam_slab_unpatched ===
+[ Info: [lam_slab_unpatched] built in 130.4 s
+[ Info: [lam_slab] iter 0, t = 0 seconds, SST = 20.0000 °C, Q = 381.6 W m⁻²
+[ Info: Initializing simulation...
+[ Info:     ... simulation initialization complete (61.255 ms)
+[ Info: Executing initial time step...
+[ Info:     ... initial time step complete (39.551 seconds).
+[ Info: [lam_slab] iter 60, t = 5 minutes, SST = 19.9972 °C, Q = 557.0 W m⁻²
+[ Info: [lam_slab] iter 120, t = 10 minutes, SST = 19.9929 °C, Q = 639.5 W m⁻²
+[ Info: [lam_slab] iter 180, t = 15 minutes, SST = 19.9878 °C, Q = 779.7 W m⁻²
+[ Info: [lam_slab] iter 240, t = 20 minutes, SST = 19.9817 °C, Q = 855.7 W m⁻²
+[ Info: [lam_slab] iter 300, t = 25 minutes, SST = 19.9754 °C, Q = 857.7 W m⁻²
+[ Info: [lam_slab] iter 360, t = 30 minutes, SST = 19.9692 °C, Q = 819.7 W m⁻²
+[ Info: [lam_slab] iter 420, t = 35 minutes, SST = 19.9637 °C, Q = 681.6 W m⁻²
+[ Info: [lam_slab] iter 480, t = 40 minutes, SST = 19.9592 °C, Q = 540.3 W m⁻²
+[ Info: [lam_slab] iter 540, t = 45 minutes, SST = 19.9557 °C, Q = 431.6 W m⁻²
+[ Info: [lam_slab] iter 600, t = 50 minutes, SST = 19.9528 °C, Q = 353.5 W m⁻²
+[ Info: [lam_slab] iter 660, t = 55 minutes, SST = 19.9504 °C, Q = 308.3 W m⁻²
+[ Info: [lam_slab] iter 720, t = 1 hour, SST = 19.9483 °C, Q = 277.2 W m⁻²
+[ Info: === case lam_slab ===
+[ Info: [lam_slab] built in 21.6 s
+[ Info: [lam_slab] iter 0, t = 0 seconds, SST = 20.0000 °C, Q = 381.6 W m⁻²
+[ Info: Initializing simulation...
+[ Info:     ... simulation initialization complete (6.058 ms)
+[ Info: Executing initial time step...
+[ Info:     ... initial time step complete (42.007 ms).
+[ Info: [lam_slab] iter 60, t = 5 minutes, SST = 19.9972 °C, Q = 557.0 W m⁻²
+[ Info: [lam_slab] iter 120, t = 10 minutes, SST = 19.9929 °C, Q = 639.5 W m⁻²
+[ Info: [lam_slab] iter 180, t = 15 minutes, SST = 19.9878 °C, Q = 779.7 W m⁻²
+[ Info: [lam_slab] iter 240, t = 20 minutes, SST = 19.9817 °C, Q = 855.7 W m⁻²
+[ Info: [lam_slab] iter 300, t = 25 minutes, SST = 19.9754 °C, Q = 857.7 W m⁻²
+[ Info: [lam_slab] iter 360, t = 30 minutes, SST = 19.9692 °C, Q = 819.7 W m⁻²
+[ Info: [lam_slab] iter 420, t = 35 minutes, SST = 19.9637 °C, Q = 681.6 W m⁻²
+[ Info: [lam_slab] iter 480, t = 40 minutes, SST = 19.9592 °C, Q = 540.3 W m⁻²
+[ Info: [lam_slab] iter 540, t = 45 minutes, SST = 19.9557 °C, Q = 431.6 W m⁻²
+[ Info: [lam_slab] iter 600, t = 50 minutes, SST = 19.9528 °C, Q = 353.5 W m⁻²
+[ Info: [lam_slab] iter 660, t = 55 minutes, SST = 19.9504 °C, Q = 308.3 W m⁻²
+[ Info: [lam_slab] iter 720, t = 1 hour, SST = 19.9483 °C, Q = 277.2 W m⁻²
+[ Info: === case lam_catke ===
+[ Info: [lam_catke] built in 69.2 s
+[ Info: [lam_catke] iter 0, t = 0 seconds, SST = 20.0000 °C, Q = 381.6 W m⁻²
+[ Info: Initializing simulation...
+[ Info:     ... simulation initialization complete (78.262 ms)
+[ Info: Executing initial time step...
+[ Info:     ... initial time step complete (459.111 ms).
+[ Info: [lam_catke] iter 60, t = 5 minutes, SST = 19.9962 °C, Q = 556.7 W m⁻²
+[ Info: [lam_catke] iter 120, t = 10 minutes, SST = 19.9803 °C, Q = 636.5 W m⁻²
+[ Info: [lam_catke] iter 180, t = 15 minutes, SST = 19.9624 °C, Q = 773.5 W m⁻²
+[ Info: [lam_catke] iter 240, t = 20 minutes, SST = 19.9404 °C, Q = 845.9 W m⁻²
+[ Info: [lam_catke] iter 300, t = 25 minutes, SST = 19.9163 °C, Q = 844.1 W m⁻²
+[ Info: [lam_catke] iter 360, t = 30 minutes, SST = 19.8932 °C, Q = 802.7 W m⁻²
+[ Info: [lam_catke] iter 420, t = 35 minutes, SST = 19.8729 °C, Q = 663.2 W m⁻²
+[ Info: [lam_catke] iter 480, t = 40 minutes, SST = 19.8559 °C, Q = 522.2 W m⁻²
+[ Info: [lam_catke] iter 540, t = 45 minutes, SST = 19.8418 °C, Q = 414.6 W m⁻²
+[ Info: [lam_catke] iter 600, t = 50 minutes, SST = 19.8304 °C, Q = 338.1 W m⁻²
+[ Info: [lam_catke] iter 660, t = 55 minutes, SST = 19.8211 °C, Q = 293.9 W m⁻²
+[ Info: [lam_catke] iter 720, t = 1 hour, SST = 19.8134 °C, Q = 263.5 W m⁻²
+[ Info: === case ocean_open ===
+[ Info: [ocean_open] built in 30.9 s
+[ Info: === case lam_catke_open ===
+[ Info: [lam_catke_open] built in 20.6 s
+[ Info: [lam_catke_open] iter 0, t = 0 seconds, SST = 20.0000 °C, Q = 381.5 W m⁻²
+[ Info: Initializing simulation...
+[ Info:     ... simulation initialization complete (7.201 ms)
+[ Info: Executing initial time step...
+[ Info:     ... initial time step complete (118.156 ms).
+[ Info: [lam_catke_open] iter 60, t = 5 minutes, SST = 19.9962 °C, Q = 556.7 W m⁻²
+[ Info: [lam_catke_open] iter 120, t = 10 minutes, SST = 19.9803 °C, Q = 636.5 W m⁻²
+[ Info: [lam_catke_open] iter 180, t = 15 minutes, SST = 19.9624 °C, Q = 773.4 W m⁻²
+[ Info: [lam_catke_open] iter 240, t = 20 minutes, SST = 19.9404 °C, Q = 845.8 W m⁻²
+[ Info: [lam_catke_open] iter 300, t = 25 minutes, SST = 19.9163 °C, Q = 844.0 W m⁻²
+[ Info: [lam_catke_open] iter 360, t = 30 minutes, SST = 19.8933 °C, Q = 802.6 W m⁻²
+[ Info: [lam_catke_open] iter 420, t = 35 minutes, SST = 19.8730 °C, Q = 663.1 W m⁻²
+[ Info: [lam_catke_open] iter 480, t = 40 minutes, SST = 19.8561 °C, Q = 522.1 W m⁻²
+[ Info: [lam_catke_open] iter 540, t = 45 minutes, SST = 19.8420 °C, Q = 414.5 W m⁻²
+[ Info: [lam_catke_open] iter 600, t = 50 minutes, SST = 19.8306 °C, Q = 337.9 W m⁻²
+[ Info: [lam_catke_open] iter 660, t = 55 minutes, SST = 19.8213 °C, Q = 293.8 W m⁻²
+[ Info: [lam_catke_open] iter 720, t = 1 hour, SST = 19.8136 °C, Q = 263.4 W m⁻²

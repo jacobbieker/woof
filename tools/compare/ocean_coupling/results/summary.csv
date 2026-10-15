@@ -1,0 +1,9 @@
+case,status,iterations,sim_time_s,first_step_wall_s,rest_wall_s,sst_start_C,sst_end_C,mean_turbulent_heat_flux_Wm2,ocean_heat_budget_rel_residual,note
+periodic_slab_unpatched,NONFINITE,100,500.0,4.14,0.35,20.0000,NaN,NaN,NaN,"ΔH=NaN J/m2 vs -ρc∫Jᵀdt=NaN J/m2; interface flux first non-finite after step 1"
+periodic_slab,OK,360,1800.0,0.00,0.76,20.0000,19.9792,473.84,1.24e-12,"ΔH=-8.5291e+05 J/m2 vs -ρc∫Jᵀdt=-8.5291e+05 J/m2"
+periodic_catke,OK,360,1800.0,17.33,1.43,20.0000,19.9759,473.56,1.33e-10,"ΔH=-8.5241e+05 J/m2 vs -ρc∫Jᵀdt=-8.5241e+05 J/m2"
+lam_slab_unpatched,OK,720,3600.0,41.53,98.43,20.0000,19.9483,588.93,6.14e-12,"ΔH=-2.1201e+06 J/m2 vs -ρc∫Jᵀdt=-2.1201e+06 J/m2"
+lam_slab,OK,720,3600.0,0.05,41.05,20.0000,19.9483,588.93,6.14e-12,"ΔH=-2.1201e+06 J/m2 vs -ρc∫Jᵀdt=-2.1201e+06 J/m2"
+lam_catke,OK,720,3600.0,48.23,92.54,20.0000,19.8134,577.26,8.55e-03,"ΔH=-2.0604e+06 J/m2 vs -ρc∫Jᵀdt=-2.0781e+06 J/m2"
+ocean_open,OK,720,3600.0,18.58,6.70,20.0000,20.0000,NaN,NaN,"max|u| = 0.065 m/s after 1 hour"
+lam_catke_open,OK,720,3600.0,2.69,136.25,20.0000,19.8136,577.15,NaN,"ΔH=-1.8696e+06 J/m2 vs -ρc∫Jᵀdt=-2.0777e+06 J/m2"
