@@ -8930,6 +8930,7 @@ def run_prepared_forecast(
         kernel_cache_census=None, restart: Path | None = None,
         health_debug: bool = False,
         ensemble_bootstrap=None,
+        health_check: str | None = None,
 ) -> dict[str, object]:
     """Restore, integrate, and publish hash-bound source-neutral history.
 
@@ -8983,7 +8984,8 @@ def run_prepared_forecast(
             observer=observer, first_products=first_products, stream_init=stream_init,
             progress_options=progress_options, preflight_seconds=preflight_seconds,
             kernel_cache_census=kernel_cache_census, restart=restart,
-            health_debug=health_debug, ensemble_bootstrap=ensemble_bootstrap)
+            health_debug=health_debug, ensemble_bootstrap=ensemble_bootstrap,
+            **({} if health_check is None else {"health_check": health_check}))
 
     from woof.output_disk import require_output_space, renderer_products
 
@@ -9802,6 +9804,7 @@ def run_prepared_forecast(
                     # Preserve the default store cost; explicit diagnostics enable it.
                     validate_state=(bundle is None or health_debug),
                     health_debug=health_debug,
+                    health_check=health_check,
                     skip_feedback_path=True,
                     steppers=steppers,
                     # ONE line per model time step, WRF's own bar.  Handed
@@ -10024,6 +10027,7 @@ def run_prepared_forecast(
         "schema": REPORT_SCHEMA,
         "status": "PASS",
         "pool_trim": getattr(model, "_pool_trim_policy", None),
+        "health_check": getattr(model, "_health_check_policy", None),
         "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
         "source": inputs.source,
         "prepared_layout": inputs.layout,
@@ -10369,6 +10373,8 @@ def run_prepared_forecast(
         receipts={"report": {"path": str((outdir / "report.json").resolve())},
                   **_seam_capsule_receipts(model),
                   "pool_trim": getattr(model, "_pool_trim_policy", None),
+                  "health_check": getattr(
+                      model, "_health_check_policy", None),
                   "checkpoint_writes": getattr(
                       model, "_checkpoint_receipt", None)},
     )
@@ -10466,6 +10472,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--restart", type=Path, help="Resume a canonical checkpoint with this exact sealed preparation/configuration.")
     parser.add_argument("--health-debug", action="store_true", help="Validate the canonical whole-domain state each step.")
+    parser.add_argument("--health-check", choices=("lagged", "strict"), default=None, help="How the per-step health gate reads its result: 'lagged' (default; checked one step later, always before history, checkpoints and the end of the run) or 'strict' (read back every step). WOOF_HEALTH_CHECK sets the same; --health-debug forces strict.")
     # The two MODE flags, declared rather than only intercepted.
     #
     # `main` answers both before argparse sees anything, because each is
@@ -11095,7 +11102,9 @@ def main(argv=None, *, observer=None) -> int:
                     progress_options=ProgressOptions.from_args(args),
                     preflight_seconds=preflight_seconds,
                     kernel_cache_census=kernel_cache_census,
-                    restart=restart, health_debug=args.health_debug)
+                    restart=restart, health_debug=args.health_debug,
+                    **({} if args.health_check is None
+                       else {"health_check": args.health_check}))
 
         clock_changed = None
         try:

@@ -173,6 +173,9 @@ class ExperimentState:
 
     #: Resolved at executor entry, then carried by run receipts.
     _pool_trim_policy = None
+    #: The step health gate's mode (woof.core.lagged_health), resolved at
+    #: executor entry with the run's counters, then carried by receipts.
+    _health_check_policy = None
 
     #: The executor's checkpoint writer while a leg that writes checkpoints
     #: runs (woof.io.async_checkpoint), and the run's checkpoint receipt,
@@ -1557,7 +1560,8 @@ def execute_experiment(
         skip_feedback_path: bool = False,
         pool_trim_per_period: bool | None = None,
         relocation_runner=None, steppers=None, step_observer=None,
-        experiment=None, delayed_child_initializer=None, schedule_dispatch=None):
+        experiment=None, delayed_child_initializer=None, schedule_dispatch=None,
+        health_check: str | None = None):
     """Wire one :class:`ExperimentState` into ``execute_schedule``.
 
     STEP calls the domain's existing dycore, FORCE calls its node-facing
@@ -1625,6 +1629,21 @@ def execute_experiment(
     qualified member scheduler. It receives this executor's actual
     callbacks and adaptive controller after setup. Omission calls the
     original integer executor directly.
+
+    ``health_check`` selects how the per-step health gate (``validate_state``)
+    reads its result: ``"lagged"`` (the default; also ``WOOF_HEALTH_CHECK``)
+    or ``"strict"``.  Lagged copies each resident step's stability record and
+    scheme status words to pinned memory asynchronously and checks them one
+    STEP op later, so the CPU never waits on the step it just queued; every
+    pending record is checked synchronously before a history frame, a
+    checkpoint, a relocation or delayed start, at every stop/history/restart
+    boundary and at the end of the run, so no unchecked state is written.
+    A failure names the step that failed and says it was detected late.
+    Strict is the historical per-step readback, unchanged; ``health_debug``
+    and streamed domains are always strict.  Pinned: a healthy run's numerics
+    are identical in both modes (the checks are read-only reductions into
+    scratch).  The resolved policy and its counters are carried by the model
+    into the run receipt (``model._health_check_policy``).
     """
     experiment = _bind_execution_physics_params(model, experiment)
     from woof.core.restart_request import RestartRequest
@@ -1756,6 +1775,23 @@ def execute_experiment(
         # build alive past its activation (see _release_startup_build).
         for gid in validators:
             validators[gid].require_healthy(phase="initialized-or-restored")
+    from woof.core import health_ledger, lagged_health
+    health_policy = lagged_health.resolve_health_check(
+        health_check, health_debug=health_debug)
+    if not validate_state:
+        health_policy = dict(health_policy, mode="off",
+                             reason="validate_state=False: no step gate runs.")
+    model._health_check_policy = health_policy
+    #: The lagged step gate's queue, or ``None`` when the gate is strict
+    #: or off.  Every ``settle_health`` below is a mandatory checkpoint of
+    #: truth: all pending records are read before it returns.
+    health_monitor = (lagged_health.LaggedHealthMonitor()
+                      if health_policy["mode"] == lagged_health.LAGGED
+                      else None)
+
+    def settle_health(reason: str) -> None:
+        if health_monitor is not None:
+            health_monitor.flush(reason)
 
     def poison() -> None:
         if arena_nan_poison and arena is not None:
@@ -1813,6 +1849,8 @@ def execute_experiment(
                 and relocation_runner.runners[gid].is_due(model, clocks))
         elif relocation_runner.is_due(model, clocks):
             due_targets = (int(relocation_runner.config.grid_id),)
+        if due_targets:
+            settle_health("before relocation")
         for gid in due_targets:
             target = model.node(gid)
             runner = relocation_runner.runners[gid] if collection else relocation_runner
@@ -1872,6 +1910,8 @@ def execute_experiment(
             raise RuntimeError("the root domain cannot have a delayed start")
         if bool(node._started):
             return
+        # The child initializes from its parent's state.
+        settle_health(f"before d{grid_id:02d} starts")
         context = model._activation_context
         exp = context["experiment"]
         # Deliberately no initial_perturbation here: a delayed-start
@@ -1991,15 +2031,25 @@ def execute_experiment(
             streamed_here = _streamed(grid_id)
             if streamed_here is not None:
                 streamed_here.impose_clock(node.state.elapsed_seconds)
-            steppers.get(grid_id, step)(
-                node.state, node.cfg.run,
-                # REFL_10CM is a one-frame producer/consumer handoff. A
-                # headless forecast still advances history alarms in the
-                # clock report, but has no output consumer, so it must not
-                # stage a field that can never be consumed.
-                refl_10cm_due=(
-                    history_handler is not None
-                    and clock.history_rings_within_step()))
+            # Lagged gate, resident domain: the schemes' status words are
+            # ORed into the monitor's ledger on the device instead of each
+            # being read back inside the step (woof.core.health_ledger),
+            # and are checked with this step's stability record.
+            lagged_here = health_monitor is not None and streamed_here is None
+            if lagged_here:
+                health_monitor.begin_step(grid_id=grid_id,
+                                          step=clock.step_count + 1)
+            with (health_ledger.deferring(health_monitor.ledger)
+                  if lagged_here else nullcontext()):
+                steppers.get(grid_id, step)(
+                    node.state, node.cfg.run,
+                    # REFL_10CM is a one-frame producer/consumer handoff. A
+                    # headless forecast still advances history alarms in the
+                    # clock report, but has no output consumer, so it must
+                    # not stage a field that can never be consumed.
+                    refl_10cm_due=(
+                        history_handler is not None
+                        and clock.history_rings_within_step()))
             refresh_model_time(node.state, clock, after_step=True)
             if spectral_seam is not None:
                 # THE Level-2 slow-large-step hook seam.  The RK slow-mode
@@ -2024,19 +2074,26 @@ def execute_experiment(
                 # unchanged resident initialization snapshot.
                 from woof.core.streaming import step_health
 
+                deferred = {}
+                if lagged_here:
+                    # Queued behind the step and checked one op later
+                    # (woof.core.lagged_health); returns no report.
+                    deferred["defer"] = health_monitor.step_sink(
+                        grid_id=grid_id, step=clock.step_count + 1,
+                        cfg=node.cfg.run,
+                        boundary_width=node.cfg.run.spec_bdy_width)
                 report = step_health(steppers.get(grid_id), node.state,
                                      node.cfg.run,
-                                     boundary_width=node.cfg.run.spec_bdy_width)
-                if report["nan"]:
-                    raise RuntimeError(
-                        f"d{grid_id:02d} integration produced a non-finite state "
-                        f"at model step {clock.step_count + 1}")
-                cfl = report["cfl"]
-                if cfl is not None and not math.isfinite(float(cfl)):
-                    raise RuntimeError(
-                        f"d{grid_id:02d} integration produced a non-finite "
-                        f"vertical Courant number at model step {clock.step_count + 1}: "
-                        "a model layer's live thickness is non-positive or non-finite")
+                                     boundary_width=node.cfg.run.spec_bdy_width,
+                                     **deferred)
+                # ``None``: queued (lagged); the monitor judges it later
+                # through the same verdict.
+                failure = (None if report is None else
+                           lagged_health.stability_failure(
+                               report, grid_id=grid_id,
+                               step=clock.step_count + 1))
+                if failure is not None:
+                    raise RuntimeError(failure)
             poison()
             if streamed_here is not None:
                 # The same authority AFTER the step as before it.  The tiles
@@ -2174,6 +2231,8 @@ def execute_experiment(
 
     def on_history(grid_id, ticks) -> None:
         if history_handler is not None:
+            # Every step this frame contains is checked before it is taken.
+            settle_health(f"before d{grid_id:02d} history")
             if validators:
                 validators[grid_id].require_healthy(
                     phase=f"pre-history.d{grid_id:02d}")
@@ -2183,6 +2242,8 @@ def execute_experiment(
 
     def on_restart(ticks) -> None:
         op_started = time.perf_counter()
+        # Every step the checkpoint contains is checked before it is taken.
+        settle_health("before checkpoint")
         if io_manager is not None:
             # A synchronous checkpoint waits for every queued history frame
             # first.  An asynchronous one is ORDERED after them instead:
@@ -2221,11 +2282,20 @@ def execute_experiment(
             or any(clock.history_due() for clock in clocks.values())
             or (restart_enabled and root_clock.restart_due())
             or requested_restart[0])
+        if mandatory:
+            settle_health("at a stop, history or checkpoint boundary")
         if validators and (health_debug or mandatory
                            or root_clock.step_count % 4 == 0):
             for gid, validator in validators.items():
-                validator.require_healthy(
-                    phase=f"post-d01-sync.d{gid:02d}")
+                if health_monitor is None or mandatory:
+                    validator.require_healthy(
+                        phase=f"post-d01-sync.d{gid:02d}")
+                else:
+                    # The periodic (non-mandatory) full-state gate, queued
+                    # and checked one op later like the step gate.
+                    health_monitor.submit_validation(
+                        validator, phase=f"post-d01-sync.d{gid:02d}",
+                        grid_id=gid, step=root_clock.step_count)
 
     #: Wall clock of the outer step that is committing, measured the
     #: same way the single-domain loop measures its own
@@ -2331,12 +2401,13 @@ def execute_experiment(
     if bool(model.root.cfg.run.use_adaptive_time_step):
         from woof.core.adaptive_clock import AdaptiveClockDriver
         from woof.core.dycore import (enable_wrf_cfl_recording,
-                                       take_wrf_cfl)
+                                       take_wrf_cfl, take_wrf_cfl_many)
         # The controller reads the same reduction the probe does rather
         # than carrying a second copy of the kernel.
         enable_wrf_cfl_recording()
         adaptive_driver = AdaptiveClockDriver(
             model, cfl_source=take_wrf_cfl,
+            cfl_source_many=take_wrf_cfl_many,
             tick_den=model.schedule.clock.tick_den,
             carrier_source=lambda gid: (
                 None if _streamed(gid) is None
@@ -2344,6 +2415,12 @@ def execute_experiment(
             map_factor_source=lambda gid: (
                 None if _streamed(gid) is None
                 else _streamed(gid).maximum_map_factor()))
+        if health_monitor is not None:
+            # The controller reads every domain's CFL here, which already
+            # waits for the last step; settling first costs no further
+            # wait and keeps a bad step from choosing the next one.
+            adaptive_driver.before_period = (
+                lambda: settle_health("before the adaptive step choice"))
 
     if restart_handler is not None:
         from woof.io.async_checkpoint import open_checkpoint_writer
@@ -2363,12 +2440,23 @@ def execute_experiment(
                        "period_begin": on_period_begin,
                        "period_end": on_period_end,
                        "period_commit": on_period_commit})
+        # The end of the run is a checkpoint of truth: the last steps'
+        # records are read before anything reports the run complete.
+        settle_health("at the end of the run")
     except BaseException as error:
         # Drained on every exit: the in-flight checkpoint (taken before
         # whatever failed) is finished and published, or removed whole.
         if checkpoint_writer is not None:
             checkpoint_writer.close(error)
+        if health_monitor is not None and isinstance(error, Exception):
+            # An older step that had already gone bad is the root cause,
+            # and the failure strict checking would have reported.
+            health_monitor.flush_after_error(error)
         raise
+    finally:
+        if health_monitor is not None:
+            model._health_check_policy = health_monitor.receipt(
+                health_policy)
     if checkpoint_writer is not None:
         checkpoint_writer.close()
     if relocation_runner is not None:

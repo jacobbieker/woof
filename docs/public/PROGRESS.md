@@ -458,6 +458,51 @@ added to produce it** -- syncing per step to get a "true" GPU time would
 serialise the pipeline the timing exists to observe, and WRF's own
 number is host wall time across the step's launches too.
 
+## The per-step health check, and when a bad step is reported
+
+Every model step is checked for a non-finite state (u, w, theta') and a
+collapsed model layer (a non-finite vertical Courant number). Each
+physics scheme's status word (microphysics surface fields, YSU, KF,
+RRTMGP) is checked too, and every fourth root step the whole state is
+checked against its bounds. The checks run on the GPU in the step's own
+stream position. Only the small result is read back.
+
+By default that read is **lagged**. Each step's result is copied to
+page-locked host memory asynchronously, and it is checked once the next
+step has been queued. The CPU therefore never waits for the step it just
+queued, and the GPU never runs out of work between steps. Before this
+change the CPU waited for every step to finish before queuing the next
+one. That cost most on small domains, where queuing a step takes about
+as long as running it, and on a GPU shared with other runs.
+
+What lagged checking changes, and what it does not:
+
+- **Nothing is computed differently.** The checks are read-only. A
+  healthy run's state and output files are bit-identical in both modes.
+- **A bad step is reported at most one step late.** The error names the
+  step that failed and ends with "lagged health check: d01 step 25
+  failed and was detected after d01 step 26 was queued". In strict mode
+  the run stops before the failed step's clock advances. In lagged mode
+  it stops at the end of that step, so the failure clock
+  (`progress.json`, the failure report) is one step later.
+- **No unchecked state is written.** Every pending result is checked,
+  synchronously, before a history frame is taken, before a checkpoint is
+  written (asynchronous checkpoints included), at every stop, history
+  and restart boundary, before a moving nest relocates, before a delayed
+  nest starts from its parent, and at the end of the run. A NaN step is
+  therefore never in a wrfout file or a checkpoint.
+- **If another error ends the run first**, a pending bad step is still
+  checked and reported as the cause, chained to the later error.
+- Under `--health-debug`, and for a `[tiles]` streamed domain (whose
+  check is folded inside the tile sweep), checking is always strict.
+
+To stop on the exact step, pass `--health-check strict` to either
+prepared runner, or set `WOOF_HEALTH_CHECK=strict` in the environment.
+Child processes inherit the variable, so it works for `woof go` too.
+The run receipt's `health_check` block records the mode, where it came
+from, and how many results were checked late and how many at a
+synchronous boundary.
+
 ## How this relates to the other progress artifacts
 
 WOOF publishes four things, and they are not redundant:

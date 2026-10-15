@@ -54,9 +54,12 @@ OPT-IN, AND WHY
 With no ledger installed, every site behaves EXACTLY as before: it reads its
 status word and raises immediately.  The deferral only happens inside
 :func:`deferring`, which the tiled driver enters around a step and leaves at
-the sweep's synchronisation point.  A production run that has not asked for it
-keeps instantaneous detection, and the diff to each scheme is one call that is
-a no-op unless a ledger is active.
+the sweep's synchronisation point.  ``execute_experiment``'s lagged health
+check (:mod:`woof.core.lagged_health`, the default for resident domains)
+enters it around each resident STEP op and reads the words with that step's
+stability record, one op later; ``--health-check strict`` keeps
+instantaneous detection, and the diff to each scheme is one call that is a
+no-op unless a ledger is active.
 
 DRAIN OR IT DID NOT HAPPEN
 --------------------------
@@ -142,18 +145,30 @@ class HealthLedger:
         for site, i in self._index.items():
             flags = int(host[i])
             if flags:
-                describe = self._describe.get(site)
-                if describe is None:                       # pragma: no cover
-                    raise FloatingPointError(
-                        f"{site} reported health flags {flags:#x} and no "
-                        "description was recorded for it")
-                describe(flags)
-                raise FloatingPointError(                  # pragma: no cover
-                    f"{site} reported health flags {flags:#x} but its "
-                    "description did not raise; a health site must refuse")
+                refuse(site, flags, self._describe.get(site))
 
     def close(self) -> None:
         self.drain()
+
+
+def refuse(site: str, flags: int, describe: Callable[[int], None] | None
+           ) -> None:
+    """Raise for one site whose drained status word is non-zero.
+
+    The one place a drained word becomes an exception -- :meth:`HealthLedger
+    .drain` and the executor's lagged health check
+    (:mod:`woof.core.lagged_health`) both call it -- so the two readers
+    cannot drift.  ``describe`` raises the site's own exception; a site
+    with no description, or one whose description returns, still refuses.
+    """
+    if describe is None:                                   # pragma: no cover
+        raise FloatingPointError(
+            f"{site} reported health flags {flags:#x} and no "
+            "description was recorded for it")
+    describe(flags)
+    raise FloatingPointError(                              # pragma: no cover
+        f"{site} reported health flags {flags:#x} but its "
+        "description did not raise; a health site must refuse")
 
 
 def active() -> "HealthLedger | None":

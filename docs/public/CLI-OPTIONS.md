@@ -2735,6 +2735,7 @@ Takes no options of its own.
 | `--domain-bundle` | explicit hierarchy d01 bundle; if omitted it is derived from the hash-bound domain-artifacts manifest |
 | `--experiment-config` | _(the parser declares no help text for this option)_ |
 | `--frame-markers` | publish OUTDIR/ready/<frame>.json after each history frame is fsynced, self-validated and renamed into place (the default). A marker that exists names a frame that is complete and readable, which is the signal to poll for instead of racing the writer with a size check |
+| `--health-check {lagged,strict}` | How the per-step health gate reads its result: 'lagged' (default; checked one step later, always before history, checkpoints and the end of the run) or 'strict' (read back every step). WOOF_HEALTH_CHECK sets the same; --health-debug forces strict. |
 | `--health-debug` | Validate the canonical whole-domain state each step. |
 | `--history-interval-seconds` | history cadence; must equal the hash-bound experiment's d01 history_interval_s, and defaults to it when omitted |
 | `--io-mode {history}` | _(the parser declares no help text for this option)_ |
@@ -2785,6 +2786,7 @@ Takes no options of its own.
 | `--experiment-config` | _(the parser declares no help text for this option)_ |
 | `--experiment-config-sha256` | _(the parser declares no help text for this option)_ |
 | `--frame-markers` | publish OUTDIR/ready/<frame>.json after each history frame is fsynced, self-validated and renamed into place (the default). A marker that exists names a frame that is complete and readable, which is the signal to poll for instead of racing the writer with a size check |
+| `--health-check {lagged,strict}` | How the per-step health gate reads its result: 'lagged' (default; checked one step later, always before history, checkpoints and the end of the run) or 'strict' (read back every step). WOOF_HEALTH_CHECK sets the same; --health-debug forces strict. |
 | `--health-debug` | _(the parser declares no help text for this option)_ |
 | `--io-mode {history,none}` | _(the parser declares no help text for this option)_ |
 | `--no-frame-markers` | do not publish frame-ready markers |
