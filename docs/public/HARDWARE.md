@@ -123,16 +123,71 @@ module = "woof.prepared_domain_tree_forecast"
 inputs = ["prepared/tree", "configs/tree.toml"]
 args = [
   "--prepared-root", "{input0}",
-  "--preparation-receipt-sha256", "<sha256>",
   "--experiment-config", "{input1}",
-  "--experiment-config-sha256", "<sha256>",
   "--io-mode", "history",
   "--outdir", "{outdir}",
 ]
 outdir = "runs/prepared-tree"
 scratch = "scratch/prepared-tree"
 cache = "cache/prepared-tree"
+
+[[run]]
+name = "prepared-maui"
+device = 0
+module = "woof.prepared_single_domain_forecast"
+inputs = ["prepared/maui", "configs/maui.toml", "configs/maui.namelist.wps"]
+args = [
+  "--prepared-root", "{input0}",
+  "--experiment-config", "{input1}",
+  "--wps-namelist", "{input2}",
+  "--io-mode", "history",
+  "--outdir", "{outdir}",
+]
+outdir = "runs/prepared-maui"
+scratch = "scratch/prepared-maui"
+cache = "cache/prepared-maui"
 ```
+
+You do not copy digests into the plan. When the plan is loaded, each module
+run is bound to its declared `--prepared-root` exactly as
+`woof sim` and `woof go --prepared-root` bind that root. A sealed single-domain
+preparation binds `--proof-sha256`, `--source-manifest-sha256` and
+`--prepared-content-sha256`. A sealed tree binds
+`--preparation-receipt-sha256` and `--experiment-config-sha256`. A chained
+preparation that is still being prepared binds `--prepared-head-sha256` (and
+the source manifest its head names). The digests are read from the
+preparation's own documents and inserted after the `--prepared-root` pair.
+The single-domain runner's `--source` is taken from the bundle when the plan
+omits it.
+
+You can still give digests. Each one you give is kept and checked against
+the derived value, and a mismatch refuses the plan, naming the flag, both
+digests and where the expected one came from. A `--prepared-head-sha256` on a
+sealed chained preparation is accepted when it is the head its proof records
+(`boundary_stream.head_sha256`). It is read back through that head's own
+digest check. A digest must be one separate `"--flag", "<64 lowercase hex>"`
+pair: `--flag=...`, abbreviations, repeats and anything that is not a digest
+are refused. A root that cannot be bound, such as an unfinished preparation or
+a tree given to the single-domain runner, is refused with `woof sim`'s reason
+before anything is claimed.
+
+A mapped single-domain preparation (`icon-global-ml`, `aifs`, `gem-gdps`,
+...) records the experiment config and WPS namelist it was made from in
+`execution_inputs`, and its runner refuses any other bytes. Multi-run checks
+the declared inputs against those digests at plan load. If they differ, it
+refuses and names the file that still holds the recorded bytes, when there is
+one. Routes whose proof records no such entry bind these files through their
+own source manifest, and the receipt says `NOT_RECORDED`. The tree runner
+does not hold its config to the recorded bytes (a forecast may extend its
+stop time, and it checks each per-domain setting itself), so a tree run's
+config is recorded `NOT_CHECKED`. The summary's
+`prepared_binding` records each run's document, mode, every digest with
+`derived` or `given, verified`, and the config and namelist checks.
+`plan_arguments` keeps the argv as written; `arguments` is what was launched.
+
+`woof multi-run plan.toml --dry-run` loads and binds the plan, prints every
+run's command, derived digests and kernel caches as JSON, and stops. It
+queries no device and claims nothing.
 
 Those two prepared forecast modules are the complete module allowlist for
 this schema version. The argv must contain exactly one separate
@@ -157,8 +212,44 @@ launch; prepared runners retain their own atomic absent-outdir claim. This
 preserves earlier outputs and prevents two GPUs from writing the same fixed
 filenames. Each run captures top-level output in
 `scratch/gpuwm-run.log`; supervised worker logs and progress remain in its
-outdir as usual. `CUPY_CACHE_DIR` and NVIDIA's `CUDA_CACHE_PATH` point to
-separate `cupy/` and `cuda/` children of each run's new cache root.
+outdir as usual.
+
+Compiled GPU kernels are shared by default. A forecast's first run on a
+machine compiles every kernel it uses (NVRTC, typically 1-3 minutes) into
+CuPy's on-disk cache and the CUDA driver's JIT cache. Every run that finds
+them there starts in seconds. So every run of a plan reads and fills one
+persistent cache: the one an ordinary `woof run` from the same shell uses. That
+is the inherited `CUPY_CACHE_DIR` and `CUDA_CACHE_PATH`, or CuPy's
+`~/.cupy/kernel_cache` and the driver's per-user `~/.nv/ComputeCache` when
+they are unset. The plan's `[cache]` table or `--kernel-cache` changes this:
+
+```toml
+[cache]
+kernels = "shared"        # default; "per-run"; or a directory: "./kernels"
+```
+
+- A directory (spelled as a path, relative to the plan; `--kernel-cache DIR`
+  is relative to the working directory) gives every run
+  `CUPY_CACHE_DIR=DIR/cupy` and `CUDA_CACHE_PATH=DIR/cuda`. It is created
+  if absent and kept. A directory inside any plan, input, summary, output,
+  scratch or cache path is refused.
+- `per-run` is the old isolation: `cupy/` and `cuda/` under each run's new
+  cache root, empty at launch. Use it for a cross-device numerical comparison
+  or forensic run that must show each process compiled its own kernels.
+- A bare word that is not a keyword (`per_run`, `Shared`) is refused, not
+  turned into a directory.
+
+Concurrent writers are safe. CuPy (14.x, `DiskKernelCacheBackend`) writes
+each compiled kernel to a temporary file in the cache directory and publishes
+it with `os.replace`. Every read checks the SHA-1 the entry starts with, so a
+half-written entry is never seen, and an unreadable one is compiled again.
+Its key includes the source, every option, the NVRTC version and the target
+architecture, so one cache serves several cards without a mix-up. The driver's
+JIT cache is the per-user cache every CUDA process shares by default. Temp
+directories (`TMP`, `TEMP`, `TMPDIR` are each run's scratch), outputs and GPU
+locks stay per run in every mode. The summary's `kernel_cache` block records
+the mode, the paths, where the setting came from and this basis. Each run's
+row records the two paths it was given.
 
 Before launching forecasts, `preflight = "estimate"` runs `woof check` once
 per selected GPU. `"alloc"` adds the allocation measurement, and `"off"`
@@ -316,7 +407,8 @@ measured free memory. `preflight = "alloc"` checks allocate the priced peak,
 so they are admitted by the same rule before the forecasts. `"estimate"`
 checks hold no forecast memory and are held only to `runs_per_gpu`.
 
-Every packed child keeps its own output, scratch, TMP, CuPy and CUDA caches.
+Every packed child keeps its own output, scratch and TMP. GPU kernel caches
+are shared, as above, unless the plan says `per-run`.
 It also gets its own `WOOF_GPU_LOCK_ROOT` under the machine-wide lock root, so
 the siblings' `woof run` UUID locks do not refuse each other. These per-run
 lock roots are removed when every child has finished. The multi-run itself

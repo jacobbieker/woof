@@ -7,8 +7,14 @@ per GPU (``python -m woof.energy.worker --slot-config FILE``).  A slot
    at ``energy-worker-<digest>.lock`` beside the supervisor's own UUID
    lock), so two workers on one host never share a card;
 2. runs with the environment :func:`woof.multi_run.child_environment`
-   builds -- ``CUDA_VISIBLE_DEVICES=<uuid>`` and its own temp, CuPy and
-   CUDA caches;
+   builds -- ``CUDA_VISIBLE_DEVICES=<uuid>`` and its own temp directory.
+   GPU kernel caches are shared and persistent by default
+   (``--kernel-cache shared``: the CuPy and CUDA caches an ordinary
+   ``woof run`` uses, so only the first job on a machine compiles its
+   kernels); ``--kernel-cache per-slot`` gives each slot its own empty
+   ``cache/cupy`` and ``cache/cuda`` (the old isolation), and
+   ``--kernel-cache DIR`` one shared directory
+   (:class:`woof.gpu_packing.KernelCache`);
 3. before each claim, probes the supervisor's UUID lock and waits while
    another woof process (a forecast outside the queue) holds the card;
 4. claims a job (:meth:`woof.energy.workqueue.WorkQueue.claim`), renews
@@ -158,6 +164,7 @@ from woof.gpu_packing import (MPS_COMMAND_TIMEOUT_S,  # noqa: F401
                               MPS_CONTROL, MPS_PIPE_PATH_MAX)
 from woof.gpu_packing import MPSUnavailable as _MPSUnavailable
 from woof.gpu_packing import MpsDaemon as _MpsDaemon
+from woof.gpu_packing import KernelCache, parse_kernel_cache
 from woof.energy.workqueue import (
     PERMANENT_EXIT_CODES, Claim, JobSpecError, LeaseLost, QueueError,
     WorkQueue, declared_gpu_mem_gib, iso_utc, tail_text)
@@ -1205,7 +1212,50 @@ def _devices(args) -> list:
     return list(select_gpus(args.gpus or "all", inventory))
 
 
-def _slot_environment(gpu, slot: int, slot_dir: Path) -> dict[str, str]:
+#: ``--kernel-cache`` keyword for one empty kernel cache per slot.
+KERNEL_CACHE_PER_SLOT = "per-slot"
+
+
+def _kernel_cache(args) -> KernelCache:
+    """``--kernel-cache`` (default ``shared``), refused by name if unknown.
+
+    A shared directory inside ``--workdir`` is refused (the work directory
+    is per-run scratch; a cache there would not outlive it), and one that
+    cannot be created is refused before any slot starts."""
+
+    value = getattr(args, "kernel_cache", None)
+    try:
+        policy = parse_kernel_cache(
+            "shared" if value is None else value, flag="--kernel-cache",
+            base=Path.cwd(),
+            source="default" if value is None else "--kernel-cache",
+            isolated_word=KERNEL_CACHE_PER_SLOT)
+    except ValueError as error:
+        raise WorkerError(str(error)) from None
+    workdir = getattr(args, "workdir", None)
+    if policy.directory is not None and workdir:
+        root = Path(workdir).expanduser().resolve()
+        if policy.directory == root or root in policy.directory.parents \
+                or policy.directory in root.parents:
+            raise WorkerError(
+                f"--kernel-cache {policy.directory} overlaps --workdir "
+                f"{root}; a shared kernel cache is kept across runs, so give "
+                "it a directory of its own")
+    try:
+        policy.prepare()
+    except OSError as error:
+        raise WorkerError(
+            f"--kernel-cache {policy.directory} cannot be created: "
+            f"{error}") from None
+    return policy
+
+
+def _slot_environment(gpu, slot: int, slot_dir: Path,
+                      kernel_cache: KernelCache | None = None
+                      ) -> dict[str, str]:
+    """A slot's environment: its device, its own temp directory and the
+    kernel caches ``kernel_cache`` names (default shared, persistent)."""
+
     from woof.local_gpu import NO_LOCAL_GPU_ENV
 
     scratch = slot_dir / "tmp"
@@ -1224,7 +1274,9 @@ def _slot_environment(gpu, slot: int, slot_dir: Path) -> dict[str, str]:
                    device_selector=gpu.uuid, outdir=slot_dir,
                    scratch_dir=scratch, cache=cache, config=None,
                    module=None, arguments=(), inputs=())
-    return child_environment(PlannedRun(spec, gpu))
+    return child_environment(PlannedRun(
+        spec, gpu, kernel_cache=(KernelCache() if kernel_cache is None
+                                 else kernel_cache)))
 
 
 @dataclass
@@ -1359,6 +1411,7 @@ def _main(args: argparse.Namespace, early: list[int]) -> int:
                 "in this install; install a woof with the hindcast door or "
                 "name a runner with --runner-cmd (a missing door exits 2, "
                 "which would mark every job dead)")
+        kernel_cache = _kernel_cache(args)
         devices = _devices(args)
         packing = _packing(args, devices)
         cards: dict[str, dict[str, Any]] = {}
@@ -1396,7 +1449,8 @@ def _main(args: argparse.Namespace, early: list[int]) -> int:
             return EXIT_REFUSED
         raise
     try:
-        return _run_slots(args, queue, devices, packing, cards, mps, early)
+        return _run_slots(args, queue, devices, packing, cards, mps, early,
+                          kernel_cache=kernel_cache)
     finally:
         if mps is not None:
             mps.stop()
@@ -1417,7 +1471,8 @@ def _queue_url(args) -> str:
 
 def _run_slots(args, queue: WorkQueue, devices: list, packing: _Packing,
                cards: dict[str, dict[str, Any]],
-               mps: "MpsDaemon | None", early: list[int] | None = None) -> int:
+               mps: "MpsDaemon | None", early: list[int] | None = None,
+               kernel_cache: KernelCache | None = None) -> int:
     from woof.supervisor import GPUAlreadyLockedError, GPUFileLock
 
     host = socket.gethostname()
@@ -1425,6 +1480,8 @@ def _run_slots(args, queue: WorkQueue, devices: list, packing: _Packing,
     root = Path(args.workdir) if args.workdir else (
         Path(tempfile.gettempdir()) / "woof-energy-worker" / run_id)
     root.mkdir(parents=True, exist_ok=True)
+    if kernel_cache is None:
+        kernel_cache = KernelCache(isolated_word=KERNEL_CACHE_PER_SLOT)
     slots: list[_SlotProcess] = []
     card_locks: list = []
     index = 0
@@ -1466,7 +1523,7 @@ def _run_slots(args, queue: WorkQueue, devices: list, packing: _Packing,
             config_path.write_text(
                 json.dumps(config.document(), indent=2) + "\n", "utf-8")
             (slot_dir / "summary.json").unlink(missing_ok=True)
-            env = _slot_environment(gpu, index, slot_dir)
+            env = _slot_environment(gpu, index, slot_dir, kernel_cache)
             if mps is not None:
                 env.update(mps.environment())
             slots.append(_SlotProcess(config, config_path, env,
@@ -1565,7 +1622,10 @@ def _run_slots(args, queue: WorkQueue, devices: list, packing: _Packing,
         code = EXIT_OK
     document = {"schema": WORKER_SUMMARY_SCHEMA, "queue": queue.url,
                 "host": host, "workdir": str(root), "exit_code": code,
-                "totals": totals, "slots": rows}
+                "totals": totals, "slots": rows,
+                "kernel_cache": (None if all(device is None
+                                             for device in devices)
+                                 else kernel_cache.receipt())}
     if packing.packed:
         document["packing"] = {
             "slots_per_gpu": packing.slots_per_gpu,

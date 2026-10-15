@@ -429,6 +429,84 @@ def test_the_worker_runs_packed_slots_under_mps(tmp_path):
             calls.read_text().splitlines()] == ["start", "quit"]
 
 
+CACHE_RUNNER = """
+import json, os, sys
+json.dump({k: os.environ.get(k) for k in (
+    "CUPY_CACHE_DIR", "CUDA_CACHE_PATH", "TMPDIR")}, open(sys.argv[1], "w"))
+"""
+
+
+def _cache_worker(tmp_path, *flags):
+    url = f"file://{tmp_path / 'q'}"
+    _woof("energy", "queue", "init", url, "--lease-s", "20")
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    for index in range(2):
+        (jobs / f"k{index}.json").write_text(json.dumps(_job(f"k{index}", 3)))
+    _woof("energy", "queue", "push", url, str(jobs))
+    runner = tmp_path / "runner.py"
+    runner.write_text(CACHE_RUNNER)
+    result = _woof(
+        "energy", "worker", "--queue", url, "--fake-gpus", "1",
+        "--slots-per-gpu", "2", "--gpu-mem-gib", "16", *flags,
+        "--runner-cmd", f"{{python}} {runner} {{result}}",
+        "--exit-when-empty", "--poll-s", "0.2",
+        "--workdir", str(tmp_path / "w"),
+        env={"WOOF_GPU_LOCK_ROOT": str(tmp_path / "locks"),
+             "CUPY_CACHE_DIR": str(tmp_path / "warm" / "cupy"),
+             "CUDA_CACHE_PATH": str(tmp_path / "warm" / "cuda")})
+    summary = json.loads(result.stdout)
+    assert summary["exit_code"] == 0 and summary["totals"] == {"completed": 2}
+    store = wq.open_store(url)
+    seen = [json.loads(store.get(f"done/k{i}.json")[0])["result"]
+            for i in range(2)]
+    return summary, seen
+
+
+def test_packed_slots_share_one_persistent_kernel_cache(tmp_path):
+    """Hindcast jobs are many and short: only the first may compile."""
+
+    summary, seen = _cache_worker(tmp_path)
+    assert {env["CUPY_CACHE_DIR"] for env in seen} == {
+        str(tmp_path / "warm" / "cupy")}
+    assert {env["CUDA_CACHE_PATH"] for env in seen} == {
+        str(tmp_path / "warm" / "cuda")}
+    assert len({env["TMPDIR"] for env in seen}) == 2
+    assert summary["kernel_cache"]["mode"] == "shared"
+    assert summary["kernel_cache"]["source"] == "default"
+
+
+def test_per_slot_kernel_cache_keeps_the_old_isolation(tmp_path):
+    summary, seen = _cache_worker(tmp_path, "--kernel-cache", "per-slot")
+    caches = {env["CUPY_CACHE_DIR"] for env in seen}
+    assert len(caches) == 2
+    assert all(Path(path).parent.name == "cache"
+               and Path(path).parent.parent.parent == tmp_path / "w"
+               for path in caches)
+    assert summary["kernel_cache"]["mode"] == "per-slot"
+
+
+def test_a_kernel_cache_inside_the_workdir_is_refused(tmp_path):
+    url = f"file://{tmp_path / 'q'}"
+    _woof("energy", "queue", "init", url)
+    result = _woof("energy", "worker", "--queue", url, "--fake-gpus", "1",
+                   "--gpu-mem-gib", "16", "--workdir", str(tmp_path / "w"),
+                   "--kernel-cache", str(tmp_path / "w" / "kc"),
+                   "--exit-when-empty", check=False)
+    assert result.returncode == 2
+    assert "overlaps --workdir" in result.stderr
+
+
+def test_an_unknown_kernel_cache_keyword_is_refused(tmp_path):
+    url = f"file://{tmp_path / 'q'}"
+    _woof("energy", "queue", "init", url)
+    result = _woof("energy", "worker", "--queue", url, "--fake-gpus", "1",
+                   "--gpu-mem-gib", "16", "--kernel-cache", "per-run",
+                   "--exit-when-empty", check=False)
+    assert result.returncode == 2
+    assert "write ./per-run" in result.stderr
+
+
 def test_a_card_auto_sizes_to_one_slot_still_runs_packed(tmp_path):
     url = f"file://{tmp_path / 'q'}"
     _woof("energy", "queue", "init", url)

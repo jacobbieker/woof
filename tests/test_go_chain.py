@@ -850,6 +850,32 @@ def test_a_hierarchy_proof_is_refused_toward_the_tree_runner(tmp_path):
         go_cli.proof_digests(prepared)
 
 
+def test_a_mapped_proof_binds_its_evidence_manifest_not_a_tree(tmp_path):
+    """A mapped single-domain proof (icon-global-ml, aifs, ...) records no
+    top-level input_manifest_sha256; its manifest is the evidence copy.
+    It used to be refused as a "multi-domain hierarchy product"."""
+
+    from woof.fetch import sha256_file
+
+    prepared = tmp_path / "prepared"
+    (prepared / "source-evidence").mkdir(parents=True)
+    manifest = prepared / "source-evidence" / "input-manifest.json"
+    manifest.write_text('{"schema": "mapped"}\n', encoding="utf-8")
+    proof = prepared / "proof.json"
+    proof.write_text(json.dumps({
+        "schema": "gpuwm-mapped-direct-wrf-proof-v1",
+        "input_manifest_sha256": None,
+        "prepared_cache": {"content_sha256": "b" * 64}}), encoding="utf-8")
+    digests = go_cli.proof_digests(prepared)
+    assert digests == {"proof": sha256_file(proof),
+                       "source_manifest": sha256_file(manifest),
+                       "prepared_content": "b" * 64}
+
+    manifest.unlink()
+    with pytest.raises(go_cli.GoRefusal, match="names no source input manifest"):
+        go_cli.proof_digests(prepared)
+
+
 def test_a_missing_proof_is_refused_rather_than_guessed(tmp_path):
     prepared = tmp_path / "prepared"
     prepared.mkdir()

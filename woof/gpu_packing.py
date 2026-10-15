@@ -19,7 +19,10 @@ from here, so the two doors cannot drift apart:
   under a short pipe/log directory, hands its variables to children and
   stops only a daemon it started.  Without MPS, kernels from separate
   processes time-slice; with it they share the SMs.  MPS has not been
-  timed on hardware by this tree.
+  timed on hardware by this tree;
+* :class:`KernelCache` / :func:`parse_kernel_cache` -- whether children
+  share one persistent GPU kernel cache (the default) or each start from
+  an empty one of their own (``per-run``).
 
 :mod:`woof.energy.packing` re-exports the numbers and keeps its own
 ``--slots-per-gpu`` parser; :mod:`woof.energy.worker` subclasses
@@ -34,8 +37,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 SLOTS_AUTO = "auto"
 AUTO_MAX_SLOTS_PER_GPU = 8
@@ -217,6 +221,189 @@ class MpsDaemon:
                 "active_thread_percentage": self.thread_percentage}
 
 
-__all__ = ["AUTO_MAX_SLOTS_PER_GPU", "DEFAULT_MEM_MARGIN_GIB", "MPS_CONTROL",
-           "MPS_COMMAND_TIMEOUT_S", "MPS_PIPE_PATH_MAX", "MPSUnavailable",
-           "MpsDaemon", "SLOTS_AUTO", "parse_count_or_auto"]
+# ---------------------------------------------------------------------------
+# GPU kernel caches: shared (default) or isolated per run / slot
+# ---------------------------------------------------------------------------
+
+#: The variable CuPy resolves its on-disk kernel cache from.
+CUPY_CACHE_ENV = "CUPY_CACHE_DIR"
+#: The variable the CUDA driver resolves its JIT (ComputeCache) from.
+CUDA_CACHE_ENV = "CUDA_CACHE_PATH"
+#: Every child reads and fills one persistent kernel cache.
+KERNEL_CACHE_SHARED = "shared"
+#: Every child starts from its own new, empty kernel cache.
+KERNEL_CACHE_PER_RUN = "per-run"
+#: Where CuPy puts its cache when ``CUPY_CACHE_DIR`` is unset (its own
+#: documented default, :func:`woof.kernel_compile_notice.cupy_kernel_cache_dir`).
+CUPY_DEFAULT_CACHE = "~/.cupy/kernel_cache"
+#: Where the driver puts its JIT cache when ``CUDA_CACHE_PATH`` is unset.
+CUDA_DRIVER_DEFAULT_CACHE = (
+    "the CUDA driver's per-user default (~/.nv/ComputeCache on Linux, "
+    "%APPDATA%\\NVIDIA\\ComputeCache on Windows)")
+#: Why several processes may share one kernel cache, recorded in receipts.
+KERNEL_CACHE_CONCURRENCY = (
+    "CuPy (14.x, cupy/cuda/_compiler_cache.py DiskKernelCacheBackend) "
+    "writes each compiled kernel to a NamedTemporaryFile in the cache "
+    "directory and publishes it with os.replace, and every read checks the "
+    "SHA-1 the file starts with, so a concurrent writer is never seen half "
+    "written and an unreadable entry is recompiled, not used; its key "
+    "includes the source, every option, the NVRTC version and the target "
+    "architecture, so one cache serves several cards without a mix-up. "
+    "The CUDA driver's JIT cache is the per-user cache every CUDA process "
+    "of the user shares by default, and the driver manages concurrent use "
+    "of it")
+
+
+@dataclass(frozen=True)
+class KernelCache:
+    """Where a packing door's children keep compiled GPU kernels.
+
+    ``shared`` (the default): every child reads and fills ONE persistent
+    cache, so only the first run on a machine pays the NVRTC compile
+    (typically 1-3 minutes) and every later one -- each packed sibling,
+    each of a hindcast worker's thousands of jobs -- starts warm.  With no
+    ``directory`` that is the cache an ordinary ``woof run`` from the same
+    shell uses: the inherited ``CUPY_CACHE_DIR`` / ``CUDA_CACHE_PATH``, or
+    CuPy's ``~/.cupy/kernel_cache`` and the driver's per-user default when
+    unset (the child environment is left exactly as inherited).  With a
+    ``directory``, ``CUPY_CACHE_DIR=<dir>/cupy`` and
+    ``CUDA_CACHE_PATH=<dir>/cuda``.
+
+    ``per-run``: the isolation multi-run had before -- ``<cache>/cupy``
+    and ``<cache>/cuda`` under each run's own new cache root, empty at
+    launch.  For a cross-device numerical comparison or a forensic run
+    that must prove each process compiled its own kernels.
+
+    What is pinned: temporary directories, outputs and GPU locks are
+    isolated per child in both modes; only the kernel caches are shared.
+    Concurrent writers are safe (:data:`KERNEL_CACHE_CONCURRENCY`).
+    ``source`` names where the setting came from, for the receipt;
+    ``isolated_word`` is what the door calls ``per-run`` (the energy
+    worker says ``per-slot``).
+    """
+
+    mode: str = KERNEL_CACHE_SHARED
+    directory: Path | None = None
+    source: str = "default"
+    isolated_word: str = KERNEL_CACHE_PER_RUN
+
+    @property
+    def shared(self) -> bool:
+        return self.mode == KERNEL_CACHE_SHARED
+
+    @property
+    def label(self) -> str:
+        """The mode as this door's flag spells it (``per-slot``, ...)."""
+
+        return KERNEL_CACHE_SHARED if self.shared else self.isolated_word
+
+    def paths(self, run_cache: Path,
+              parent: Mapping[str, str]) -> tuple[str, str | None]:
+        """``(CuPy cache, CUDA JIT cache)`` a child with ``run_cache`` uses.
+
+        The CUDA cache is ``None`` when it is the driver's own default
+        (shared, ``CUDA_CACHE_PATH`` unset): the driver resolves it
+        (:data:`CUDA_DRIVER_DEFAULT_CACHE`), this process does not."""
+
+        if not self.shared:
+            return str(Path(run_cache) / "cupy"), str(Path(run_cache) / "cuda")
+        if self.directory is not None:
+            return (str(self.directory / "cupy"),
+                    str(self.directory / "cuda"))
+        cupy = (parent.get(CUPY_CACHE_ENV) or "").strip()
+        cuda = (parent.get(CUDA_CACHE_ENV) or "").strip()
+        return (cupy or str(Path(CUPY_DEFAULT_CACHE).expanduser()),
+                cuda or None)
+
+    def apply(self, environment: dict[str, str], run_cache: Path) -> None:
+        """Set (or, shared without a directory, leave) the two variables."""
+
+        if self.shared and self.directory is None:
+            return
+        cupy, cuda = self.paths(run_cache, environment)
+        assert cuda is not None  # set explicitly in both of these modes
+        environment[CUPY_CACHE_ENV] = cupy
+        environment[CUDA_CACHE_ENV] = cuda
+
+    def prepare(self) -> None:
+        """Create a shared ``directory``'s two caches (kept across runs)."""
+
+        if self.shared and self.directory is not None:
+            for child in ("cupy", "cuda"):
+                (self.directory / child).mkdir(parents=True, exist_ok=True)
+
+    def receipt(self, parent: Mapping[str, str] | None = None
+                ) -> dict[str, Any]:
+        environment = os.environ if parent is None else parent
+        record: dict[str, Any] = {
+            "mode": self.label, "source": self.source,
+            "directory": None if self.directory is None else str(
+                self.directory),
+        }
+        if self.shared:
+            cupy, cuda = self.paths(Path("."), environment)
+            if cuda is None:
+                record["cuda_cache_basis"] = (
+                    "CUDA_CACHE_PATH is unset, so the driver uses "
+                    + CUDA_DRIVER_DEFAULT_CACHE)
+            record.update(
+                cupy_cache=cupy, cuda_cache=cuda,
+                basis=("one persistent cache every child reads and fills"
+                       + ("" if self.directory is not None else
+                          ", inherited exactly as an ordinary woof run "
+                          "from this shell finds it")),
+                concurrency=KERNEL_CACHE_CONCURRENCY)
+            if environment.get("CUDA_CACHE_DISABLE"):
+                record["cuda_cache_disable"] = environment["CUDA_CACHE_DISABLE"]
+        else:
+            record["basis"] = (
+                "each child's own new <cache>/cupy and <cache>/cuda, empty "
+                "at launch, so every child compiles every kernel it uses")
+        return record
+
+
+def parse_kernel_cache(value: Any, *, flag: str, base: Path,
+                       source: str,
+                       isolated_word: str = KERNEL_CACHE_PER_RUN
+                       ) -> KernelCache:
+    """``shared``, ``isolated_word`` or a directory path; never guessed.
+
+    A directory must be spelled as a path (it contains a separator or
+    starts with ``~`` or ``.``): a bare word that is not a keyword --
+    ``per_run``, ``Shared`` -- is refused rather than silently becoming
+    a directory of that name.  Relative paths resolve against ``base``.
+    """
+
+    keywords = (KERNEL_CACHE_SHARED, isolated_word)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"{flag} takes {keywords[0]!r}, {keywords[1]!r} or a directory "
+            f"path, not {value!r}")
+    text = value.strip()
+    if text == KERNEL_CACHE_SHARED:
+        return KernelCache(KERNEL_CACHE_SHARED, None, source, isolated_word)
+    if text == isolated_word:
+        return KernelCache(KERNEL_CACHE_PER_RUN, None, source, isolated_word)
+    looks_like_path = (any(sep in text for sep in {"/", os.sep})
+                       or text.startswith(("~", ".")))
+    if not looks_like_path:
+        raise ValueError(
+            f"{flag} takes {keywords[0]!r}, {keywords[1]!r} or a directory "
+            f"path, not {text!r}; write ./{text} for a directory of that "
+            "name")
+    directory = Path(text).expanduser()
+    if not directory.is_absolute():
+        directory = Path(base) / directory
+    directory = directory.resolve()
+    if directory.exists() and not directory.is_dir():
+        raise ValueError(
+            f"{flag} {directory} exists and is not a directory")
+    return KernelCache(KERNEL_CACHE_SHARED, directory, source, isolated_word)
+
+
+__all__ = ["AUTO_MAX_SLOTS_PER_GPU", "CUDA_CACHE_ENV", "CUPY_CACHE_ENV",
+           "DEFAULT_MEM_MARGIN_GIB", "KERNEL_CACHE_CONCURRENCY",
+           "KERNEL_CACHE_PER_RUN", "KERNEL_CACHE_SHARED", "KernelCache",
+           "MPS_CONTROL", "MPS_COMMAND_TIMEOUT_S", "MPS_PIPE_PATH_MAX",
+           "MPSUnavailable", "MpsDaemon", "SLOTS_AUTO",
+           "parse_count_or_auto", "parse_kernel_cache"]
