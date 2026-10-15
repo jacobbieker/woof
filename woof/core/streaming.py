@@ -8630,7 +8630,7 @@ def is_streaming(stepper) -> bool:
     return isinstance(stepper, StreamedDomain)
 
 
-def step_health(stepper, state, cfg, *, boundary_width: int):
+def step_health(stepper, state, cfg, *, boundary_width: int, defer=None):
     """The health of the domain ``stepper`` just advanced, wherever it lives.
 
     ONE call for both modes, because the run loop must not have two branches
@@ -8639,9 +8639,21 @@ def step_health(stepper, state, cfg, *, boundary_width: int):
     report the sweep folded per tile out of the store, which is where the
     domain actually is -- reading the state there returns the corpse the store
     was filled from and never raises again.
+
+    ``defer`` (the lagged health check, :mod:`woof.core.lagged_health`): a
+    callable handed the RESIDENT domain's queued device record instead of
+    reading it back; the call then returns ``None`` and the caller's checks
+    run when the monitor resolves the record.  A streamed domain's report is
+    folded inside the sweep and is returned as before, whatever ``defer``.
     """
     if is_streaming(stepper):
         return stepper.health
+    if defer is not None:
+        from woof.core.dycore import launch_stability_record
+
+        defer(launch_stability_record(state, cfg,
+                                      boundary_width=boundary_width))
+        return None
     from woof.core.dycore import stability_report
 
     return stability_report(state, cfg, boundary_width=boundary_width)

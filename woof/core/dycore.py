@@ -3357,6 +3357,53 @@ def take_wrf_cfl(grid_id: int) -> tuple[float, float]:
     return vert, horiz
 
 
+_WRF_CFL_PINNED: dict[int, np.ndarray] = {}
+
+
+def take_wrf_cfl_many(grid_ids) -> dict[int, tuple[float, float]]:
+    """:func:`take_wrf_cfl` for several domains, with ONE synchronisation.
+
+    The adaptive controller of a nested tree reads every started domain's
+    CFL at each root step before choosing any step; read one at a time that
+    was one blocking copy per domain.  Here each domain's row is copied
+    asynchronously into one page-locked block and the stream is waited on
+    once.  The rows and their decoding are :func:`take_wrf_cfl`'s, so the
+    values are identical; a domain folded on more than one device (or on a
+    device other than the current one) falls back to it.
+    """
+    out: dict[int, tuple[float, float]] = {}
+    queued = []
+    device = int(cp.cuda.runtime.getDevice())
+    for grid_id in grid_ids:
+        gid = int(grid_id)
+        buffers = _wrf_cfl_buffers(gid)
+        calls = _wrf_cfl_bank("_WRF_CFL_CALLS").get(gid, 0)
+        if (len(buffers) == 1 and calls
+                and int(buffers[0].device.id) == device):
+            queued.append((gid, buffers[0][((calls - 1) // 3) % _WRF_CFL_SLOTS]))
+        else:
+            out[gid] = take_wrf_cfl(gid)
+    if not queued:
+        return out
+    count = len(queued)
+    host = _WRF_CFL_PINNED.get(count)
+    if host is None:
+        memory = cp.cuda.alloc_pinned_memory(count * _WRF_CFL_WORDS * 4)
+        host = np.frombuffer(memory, dtype=np.uint32,
+                             count=count * _WRF_CFL_WORDS).reshape(
+                                 count, _WRF_CFL_WORDS)
+        _WRF_CFL_PINNED[count] = host
+    stream = cp.cuda.get_current_stream()
+    for row, (_gid, device_row) in enumerate(queued):
+        device_row.get(stream=stream, out=host[row], blocking=False)
+    stream.synchronize()
+    for row, (gid, _device_row) in enumerate(queued):
+        words = host[row]
+        out[gid] = (float(np.uint32(words[0]).view(np.float32)),
+                    float(np.uint32(words[3]).view(np.float32)))
+    return out
+
+
 def enable_wrf_cfl_recording() -> None:
     """Turn the CFL fold on for a run that is not using the env probe.
 
@@ -4096,6 +4143,26 @@ def stability_report(state: DomainState, cfg: RunConfig | None = None,
     ``boundary_width`` is supplied it also returns the boundary and
     free-interior |w| maxima used by the reference case integration monitor.
     """
+    result = launch_stability_record(state, cfg, boundary_width=boundary_width)
+    host = cp.asnumpy(result)                           # sole health readback
+    return decode_stability_record(host, cfg, boundary_width=boundary_width)
+
+
+def launch_stability_record(state: DomainState, cfg: RunConfig | None = None,
+                            *, boundary_width: int | None = None):
+    """Queue :func:`stability_report`'s two reductions; return the device record.
+
+    The launch half of :func:`stability_report`, with no readback: the
+    returned array is the domain's reused ``integration_health_result``
+    scratch, holding ``health_final``'s eight-word record once the queued
+    kernels have run.  :func:`stability_report` is exactly this plus one
+    blocking copy plus :func:`decode_stability_record`, so the strict
+    per-step gate and the lagged one (:mod:`woof.core.lagged_health`, which
+    copies the record into pinned memory asynchronously) reduce through the
+    same launches and decode through the same function.  The next launch on
+    the same state overwrites the record IN STREAM ORDER, so a reader must
+    queue its copy on the launching stream before that.
+    """
     if state.u.size == 0 or state.w.size == 0 or state.thp.size == 0:
         raise ValueError(
             "zero-size array to reduction operation maximum which has no "
@@ -4132,8 +4199,7 @@ def stability_report(state: DomainState, cfg: RunConfig | None = None,
             DTYPE(c.G)))
     kernel = get_kernel("health", "health_final")
     kernel((1,), (256,), (partial, result, np.int32(nblocks)))
-    host = cp.asnumpy(result)                           # sole health readback
-    return decode_stability_record(host, cfg, boundary_width=boundary_width)
+    return result
 
 
 def decode_stability_record(host, cfg: RunConfig | None = None, *,

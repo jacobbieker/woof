@@ -4,6 +4,42 @@
 
 New:
 
+- The per-step health check no longer makes the CPU wait for each step
+  to finish. Before, every step ended with a blocking read of its health
+  result (NaN, a collapsed model layer, and each physics scheme's status
+  word), so the next step could not be queued until the GPU had drained.
+  Now the result is copied to page-locked memory asynchronously and
+  checked once the next step is queued. Every pending result is still
+  checked synchronously before a history frame, a checkpoint, a stop,
+  history or restart boundary, a relocation, a delayed nest start, an
+  adaptive step choice, and the end of the run, so a bad step never
+  reaches a wrfout or a checkpoint. A failure names the step that went
+  bad and says it was detected one step late. In strict mode the run
+  stops before the failed step's clock advances; in lagged mode it stops
+  at the end of that step. Results are bit-identical.
+  @@MEASURED@@
+  `--health-check strict` on either prepared runner, or
+  `WOOF_HEALTH_CHECK=strict`, checks every step synchronously as before.
+  `--health-debug` and `[tiles]` streamed domains always check strictly.
+  The receipt's `health_check` block records the mode and the counts.
+  Also:
+  - The every-fourth-step full-state check uploads its descriptor
+    tables only when they change. It used to make seven blocking
+    uploads each time. Away from a mandatory boundary it is lagged too.
+    A lagged report has the same phase, field, index and status bits;
+    only the first bad value is read a step later, and the report says
+    so.
+  - The adaptive controller of a nested tree reads every domain's CFL
+    with one synchronisation per root step instead of one per domain.
+  - While lagged, the scheme status words go through the existing
+    health ledger, as under `[tiles]` graph capture. That includes its
+    fail-closed carrier check: an all-water domain whose land-surface
+    radiation carriers have no producer is refused even though no
+    land-surface cell consumes them. Strict mode keeps the old footprint
+    read.
+  - The single-domain `integrate_prepared_case` loop (`woof run` without
+    an adaptive clock, and ensemble members on that route) is unchanged.
+  See docs/public/PROGRESS.md.
 - Checkpoints no longer stop the forecast while they are written. The
   device state is copied into page-locked host memory on a side stream.
   The model goes on stepping, and a background thread writes, `fsync`s and

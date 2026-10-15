@@ -6086,6 +6086,7 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
         prepared_cases=getattr(model, "_prepared_by_grid_id", None),
         receipts={**seam_capsule_receipts(model),
                   "pool_trim": model._pool_trim_policy,
+                  "health_check": model._health_check_policy,
                   "checkpoint_writes": model._checkpoint_receipt})
     return ExperimentRunSummary(
         wrfout_paths=paths,

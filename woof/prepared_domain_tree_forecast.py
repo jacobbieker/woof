@@ -3012,6 +3012,7 @@ def run_prepared_tree(
     ensemble_bootstrap=None,
     health_retry_products=None,
     schedule_dispatch=None,
+    health_check: str | None = None,
 ) -> dict[str, object]:
     """Restore the prepared domains and execute the existing tree engine.
 
@@ -3041,7 +3042,8 @@ def run_prepared_tree(
             progress_options=progress_options, initialization=initialization,
             first_products=first_products, ensemble_bootstrap=ensemble_bootstrap,
             health_retry_products=health_retry_products,
-            **({} if schedule_dispatch is None else {"schedule_dispatch": schedule_dispatch}))
+            **({} if schedule_dispatch is None else {"schedule_dispatch": schedule_dispatch}),
+            **({} if health_check is None else {"health_check": health_check}))
 
     if io_mode not in {"history", "none"}:
         raise ValueError("io_mode must be 'history' or 'none'")
@@ -4245,6 +4247,7 @@ def run_prepared_tree(
             model, history_handler=None if writers is None else history_handler,
             restart_handler=restart_handler, progress_callback=progress_callback,
             validate_state=True, health_debug=health_debug,
+            health_check=health_check,
             skip_feedback_path=(int(exp.feedback) == 0),
             relocation_runner=relocation_runner, steppers=steppers,
             step_observer=step_observer, experiment=active_experiment,
@@ -4489,6 +4492,7 @@ def run_prepared_tree(
         "timing_seconds": timing,
         "executor": {
             "pool_trim": getattr(model, "_pool_trim_policy", None),
+            "health_check": getattr(model, "_health_check_policy", None),
             "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
             "steps": int(execution.steps),
             "forces": int(execution.forces),
@@ -4674,6 +4678,7 @@ def run_prepared_tree(
             "path": str((evidence / "run-receipt.json").resolve())},
             **_seam_capsule_receipts(model),
             "pool_trim": getattr(model, "_pool_trim_policy", None),
+            "health_check": getattr(model, "_health_check_policy", None),
             "checkpoint_writes": getattr(model, "_checkpoint_receipt", None)},
     )
     runtime._finalizing_progress(observer, "publish-completion")
@@ -4900,6 +4905,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=("write/restore checkpoints using the explicit append-only "
               "forcing-prefix contract"))
     parser.add_argument("--health-debug", action="store_true")
+    parser.add_argument("--health-check", choices=("lagged", "strict"),
+                        default=None, help="How the per-step health gate reads its result: 'lagged' (default; checked one step later, always before history, checkpoints and the end of the run) or 'strict' (read back every step). WOOF_HEALTH_CHECK sets the same; --health-debug forces strict.")
     parser.add_argument("--outdir", type=Path, required=True)
     parser.add_argument("--render-products", default=None, metavar="SPEC",
                         help="plot selectors for every committed frame of every "
@@ -5120,6 +5127,8 @@ def main(argv=None, *, observer=None) -> int:
                 io_mode=args.io_mode,
                 restart=restart,
                 health_debug=args.health_debug,
+                **({} if args.health_check is None
+                   else {"health_check": args.health_check}),
                 observer=observer,
                 sealed_forcing_extension=args.sealed_forcing_extension,
                 progress_options=ProgressOptions.from_args(args),

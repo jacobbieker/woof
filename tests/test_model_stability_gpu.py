@@ -35,9 +35,10 @@ def _model(adaptive):
     return exp, model
 
 
+@pytest.mark.parametrize("mode", ["lagged", "strict"])
 @pytest.mark.parametrize("adaptive", [False, True])
 @pytest.mark.parametrize("fault", ["nan", "folded-layer"])
-def test_actual_failed_step_never_reaches_history_or_checkpoint(adaptive, fault):
+def test_actual_failed_step_never_reaches_history_or_checkpoint(adaptive, fault, mode):
     import cupy as cp
     from woof.core import dycore
     from woof.core.model import execute_experiment
@@ -62,8 +63,12 @@ def test_actual_failed_step_never_reaches_history_or_checkpoint(adaptive, fault)
         execute_experiment(model, steppers={1: faulted_step}, experiment=exp,
             history_handler=lambda tree, node, ticks: history.append(node.clock.elapsed_seconds),
             restart_handler=lambda tree, ticks: checkpoints.append(tree.root.clock.elapsed_seconds),
-            pool_trim_per_period=False)
-    assert count == 4 and model.root.clock.elapsed_seconds == 3.
+            pool_trim_per_period=False, health_check=mode)
+    # Every step here is a history and checkpoint instant, so the lagged
+    # gate is settled synchronously before either -- after the clock has
+    # committed the failed step (strict raises before it does).
+    stopped = 4. if mode == "lagged" else 3.
+    assert count == 4 and model.root.clock.elapsed_seconds == stopped
     assert history == [0., 1., 2., 3.]
     assert checkpoints == [1., 2., 3.]
 
@@ -75,12 +80,13 @@ def test_stability_observation_preserves_every_healthy_prognostic_bit(adaptive):
     from tilestream import gather
 
     results = []
-    for validate in (False, True):
+    for validate, mode in ((False, None), (True, "strict"), (True, "lagged")):
         exp, model = _model(adaptive)
         report = execute_experiment(model, experiment=exp, validate_state=validate,
-                                    pool_trim_per_period=False)
+                                    pool_trim_per_period=False, health_check=mode)
         assert report.steps == 4 and model.root.clock.elapsed_seconds == 4.
         results.append({key: cp.asnumpy(value) for key, value in gather.inventory(model.root.state).items()})
-    assert results[0].keys() == results[1].keys()
-    for name in results[0]:
-        np.testing.assert_array_equal(results[0][name], results[1][name], err_msg=name)
+    for other in results[1:]:
+        assert results[0].keys() == other.keys()
+        for name in results[0]:
+            np.testing.assert_array_equal(results[0][name], other[name], err_msg=name)

@@ -362,9 +362,19 @@ class AdaptiveClockDriver:
 
     def __init__(self, model, *, cfl_source, tick_den: int,
                  restart_dt: dict[int, Fraction] | None = None,
-                 carrier_source=None, map_factor_source=None):
+                 carrier_source=None, map_factor_source=None,
+                 cfl_source_many=None):
         self.model = model
         self.cfl_source = cfl_source
+        #: Optional ``grid_ids -> {gid: (vert, horiz)}``: the same values
+        #: as ``cfl_source`` per grid, read in ONE device synchronisation
+        #: (woof.core.dycore.take_wrf_cfl_many).  ``None`` reads per grid.
+        self.cfl_source_many = cfl_source_many
+        #: Called with no arguments before any CFL is read or any step is
+        #: chosen.  The executor's lagged health check settles here, so a
+        #: step that went bad is reported before its CFL can steer the
+        #: next one and while each clock still holds the step that failed.
+        self.before_period = None
         self.carrier_source = carrier_source
         self.tick_den = int(tick_den)
         self.controllers: dict[int, AdaptiveTimestepController] = {}
@@ -549,6 +559,8 @@ class AdaptiveClockDriver:
     # -- the executor's hook ------------------------------------------
 
     def __call__(self, period: int, clocks) -> None:
+        if self.before_period is not None:
+            self.before_period()
         # Whether the ROOT shortened this period to land on a time.  A
         # nest's step is parent_dt/n, so when the parent shortens the
         # nest shortens WITH it -- for the parent's reason, not its own.
@@ -576,13 +588,21 @@ class AdaptiveClockDriver:
             self.model.root.cfg.run, "adaptive_nest_lattice", False))
         if self.model.root.children:
             # The bounded exact divide is required for every tree. Read each
-            # CFL once before changing a domain's applied step or memory.
+            # CFL once before changing a domain's applied step or memory --
+            # every started domain's in one readback when the source can.
+            fused = None
+            if self.cfl_source_many is not None:
+                fused = self.cfl_source_many(tuple(
+                    gid for gid in self.order
+                    if int(clocks[gid].ticks)
+                    >= int(clocks[gid].spec.start_ticks)))
             for gid in self.order:
                 clock = clocks[gid]
                 if int(clock.ticks) < int(clock.spec.start_ticks):
                     continue
                 ctl = self.controllers[gid]
-                vert, horiz = self.cfl_source(gid)
+                vert, horiz = (fused[gid] if fused is not None
+                               else self.cfl_source(gid))
                 lattice_cfls[gid] = (vert, horiz)
                 applied = self._last_applied.get(gid)
                 if (ctl.started and not ctl.stepping_to_time

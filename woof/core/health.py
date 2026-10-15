@@ -18,6 +18,7 @@ import dataclasses
 import ctypes
 import math
 import time
+import weakref
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -1021,6 +1022,20 @@ def _cuda_pointer(value: Any, name: str) -> int:
     return int(value.data.ptr)
 
 
+#: ``{descriptor table buffer: the validator that last uploaded into it}``.
+#: Weak values: a validator that is gone can never be "still the writer".
+_TABLE_WRITERS: "weakref.WeakValueDictionary[int, StateHealthValidator]" = (
+    weakref.WeakValueDictionary())
+
+
+def _table_key(device) -> int:
+    """The buffer's device address (its identity as storage), else its id."""
+    try:
+        return int(device.data.ptr)
+    except AttributeError:
+        return id(device)
+
+
 class StateHealthValidator:
     """Reusable one-launch CUDA validator for one prepared DomainState."""
 
@@ -1047,6 +1062,9 @@ class StateHealthValidator:
         self._status = state.scratch((MAX_HEALTH_FIELDS * 2,),
                                      "integration_health_status_bits")
         self._result = state.scratch((4,), "integration_health_validation")
+        #: ``{table index: host words last uploaded}`` -- each table's
+        #: device array is this validator's own persistent scratch.
+        self._uploaded: dict[int, np.ndarray] = {}
         self._chunk = _MIN_CHUNK_ELEMENTS
         self._chunk_count = 1
         self.fields: tuple[HealthField, ...] = ()
@@ -1124,15 +1142,36 @@ class StateHealthValidator:
                     raise ValueError(
                         f"unknown auxiliary mode {field.aux_mode!r}")
             bits[index] = rule.status_bit
-        self._ptr.set(_word_floats(_u64_words(pointers)))
-        self._aux.set(_word_floats(_u64_words(auxiliaries)))
-        self._size.set(_word_floats(_u64_words(sizes)))
-        self._bounds.set(bounds)
-        self._flags.set(_word_floats(flags))
-        self._planes.set(_word_floats(planes))
-        self._status.set(_word_floats(_u64_words(bits)))
-        initial = np.asarray([0, (1 << 64) - 1], dtype=np.uint64)
-        self._result.set(_word_floats(_u64_words(initial)))
+        # Upload a table only when it differs from what is already on the
+        # device.  Each ``.set`` is a pageable host-to-device copy, which
+        # is a device synchronisation; seven of them on every validation
+        # stalled the queue seven times for tables that change only when a
+        # field is (re)allocated.  The comparison is against the exact
+        # bytes THIS validator last uploaded, and only while it is still
+        # the last writer of that buffer: the tables are named state
+        # scratch, so a second validator over the same state writes the
+        # same device arrays.  Either way the kernel reads the tables it
+        # would have read with an unconditional upload.
+        tables = (
+            (self._ptr, _word_floats(_u64_words(pointers))),
+            (self._aux, _word_floats(_u64_words(auxiliaries))),
+            (self._size, _word_floats(_u64_words(sizes))),
+            (self._bounds, bounds),
+            (self._flags, _word_floats(flags)),
+            (self._planes, _word_floats(planes)),
+            (self._status, _word_floats(_u64_words(bits))),
+        )
+        uploaded = self._uploaded
+        for index, (device, host) in enumerate(tables):
+            previous = uploaded.get(index)
+            key = _table_key(device)
+            if (previous is None or _TABLE_WRITERS.get(key) is not self
+                    or not np.array_equal(previous.view(np.uint32),
+                                          host.view(np.uint32))):
+                device.set(host)
+                uploaded[index] = host.copy()
+                _TABLE_WRITERS[key] = self
+        self._reset_result()
         scanned = sizes[:len(fields)]
         self._chunk = max(_MIN_CHUNK_ELEMENTS,
                           int(scanned.sum()) // _CHUNK_TARGET_BLOCKS)
@@ -1141,30 +1180,54 @@ class StateHealthValidator:
         self.fields = fields_tuple
         self.excluded_integer_fields = tuple(excluded)
 
-    def validate(self, *, phase: str | None = None) -> ValidationReport:
-        """Launch the fused gate once and return its compact host result."""
+    def _reset_result(self) -> None:
+        """Re-arm the record ``[status 0, first all-ones]`` on the device.
+
+        Two stream-ordered fills rather than a host upload: the same words
+        the kernel's atomics start from, without a synchronisation.
+        """
         import cupy as cp
+
+        words = self._result.view(cp.uint64)
+        words[0:1].fill(np.uint64(0))
+        words[1:2].fill(np.uint64((1 << 64) - 1))
+
+    def _launch(self) -> int:
+        """Refresh the descriptors and queue the fused gate; return nfield."""
         from woof.core.kernels import get_kernel
 
         self._refresh()
         nfield = len(self.fields)
         if not nfield:
-            return ValidationReport(True, 0, phase=phase)
+            return 0
         kernel = get_kernel("health", "validate_full_state")
         kernel((self._chunk_count, nfield), (256,), (
             self._ptr, self._aux, self._size, self._bounds, self._flags,
             self._planes, self._status, self._result, np.int32(nfield),
             np.uint64(self._chunk)))
-        words = cp.asnumpy(self._result).view(np.uint64)
+        return nfield
+
+    def _report(self, words, fields, phase, *, value_note: str | None = None
+                ) -> ValidationReport:
+        """The :class:`ValidationReport` for one ``[status, packed]`` record.
+
+        ``fields`` is the descriptor inventory the record was produced
+        against.  The first bad value is read from the field NOW: in the
+        strict path that is the state the record describes; in the lagged
+        path the model has advanced one step since, which ``value_note``
+        says in the report's ``reason``.
+        """
+        import cupy as cp
+
         status, packed = (int(words[0]), int(words[1]))
         if packed == (1 << 64) - 1:
             return ValidationReport(True, status, phase=phase)
         field_number = packed >> 48
         flat = packed & _INDEX_MASK
-        if field_number >= nfield:
+        if field_number >= len(fields):
             raise RuntimeError(
                 f"health kernel returned invalid field id {field_number}")
-        field = self.fields[field_number]
+        field = fields[field_number]
         value = float(cp.asnumpy(field.values.reshape(-1)[flat]))
         if field.auxiliary is not None:
             if field.aux_mode == "direct":
@@ -1173,11 +1236,57 @@ class StateHealthValidator:
             else:
                 value += float(cp.asnumpy(
                     field.auxiliary.reshape(-1)[flat // field.plane_size]))
+        reason = _reason(value, field.rule)
+        if value_note is not None:
+            reason = f"{reason} [{value_note}]"
         return ValidationReport(
             False, status, field.name,
             tuple(int(i) for i in np.unravel_index(
                 flat, tuple(field.values.shape))),
-            flat, value, _reason(value, field.rule), phase)
+            flat, value, reason, phase)
+
+    def validate(self, *, phase: str | None = None) -> ValidationReport:
+        """Launch the fused gate once and return its compact host result."""
+        import cupy as cp
+
+        if not self._launch():
+            return ValidationReport(True, 0, phase=phase)
+        words = cp.asnumpy(self._result).view(np.uint64)
+        return self._report(words, self.fields, phase)
+
+    def submit(self, *, phase: str, out, stream):
+        """Queue the gate and an asynchronous copy of its record into ``out``.
+
+        ``out`` is two page-locked uint64 words; the caller records an
+        event on ``stream`` after this returns and calls the returned
+        ``decode(words)`` once that event has completed.  ``decode`` raises
+        :class:`HealthCheckError` exactly as :meth:`require_healthy` does:
+        the same ``phase``, status bits, field and flat index -- those of
+        the state that was gated.  Only the first bad VALUE is read later,
+        and the report's ``reason`` says so.  ``None`` means there was
+        nothing to scan.
+
+        Resident states only: a device STORE (``[tiles]``) is written by
+        the sweep on its own streams, which this queue is not ordered
+        against, so :class:`StoreHealthValidator` has no ``submit`` and is
+        always read synchronously.
+        """
+        if not self._launch():
+            return None
+        self._result.view(np.uint64).get(stream=stream, out=out,
+                                         blocking=False)
+        fields = self.fields
+
+        def decode(words):
+            report = self._report(
+                words, fields, phase,
+                value_note=("value read when the lagged record was checked, "
+                            "after the following step"))
+            if not report.ok:
+                raise HealthCheckError(report)
+            return report
+
+        return decode
 
     def require_healthy(self, *, phase: str | None = None
                         ) -> ValidationReport:
