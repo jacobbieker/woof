@@ -848,27 +848,42 @@ def test_wrf_time_str():
         wrf_time_str(1.0e15)
 
 
-def test_async_writer_netCDF_sessions_are_process_serial(monkeypatch,
-                                                         tmp_path):
+@pytest.mark.parametrize("engine", ["python", "rust"])
+def test_async_writer_netCDF_sessions_are_serial_only_on_the_netcdf4_engine(
+        monkeypatch, tmp_path, engine):
+    """The netCDF4 engine is HDF5 from create to close, so its sessions are
+    process-serial.  The Rust engine never enters HDF5 while it writes (its
+    one netCDF4 session is the publish-time validation, locked inside
+    WrfoutWriter.close), so two domains' writes OVERLAP."""
     import woof.io.wrfout as wrfout
+    from woof.io.netcdf_serialization import NETCDF4_IO_LOCK
 
+    monkeypatch.setenv(wrfout.WRFOUT_WRITER_ENV, engine)
     active = 0
     peak = 0
     guard = threading.Lock()
+    both = threading.Barrier(2)
+    seen = {}
 
     class SlowWriter:
-        def __init__(self, path, **_kwargs):
+        def __init__(self, path, **kwargs):
             self.path = path
+            seen[Path(path).name] = kwargs
 
         def __enter__(self):
             return self
 
         def write_frame(self, _time_str, _fields):
             nonlocal active, peak
+            seen[Path(self.path).name]["locked"] = NETCDF4_IO_LOCK.locked()
             with guard:
                 active += 1
                 peak = max(peak, active)
-            time.sleep(0.02)
+            if engine == "rust":
+                # Both sessions must be inside write_frame at once.
+                both.wait(timeout=5)
+            else:
+                time.sleep(0.02)
             with guard:
                 active -= 1
 
@@ -883,7 +898,12 @@ def test_async_writer_netCDF_sessions_are_process_serial(monkeypatch,
     _queue_cpu_ticket(second, tmp_path / "d02")
     first.close()
     second.close()
-    assert peak == 1
+    assert peak == (1 if engine == "python" else 2)
+    for kwargs in seen.values():
+        assert kwargs["engine"] == engine
+        assert kwargs["_session_locked"] is (engine == "python")
+        assert kwargs["_expect_frames"] == 1
+        assert kwargs["locked"] is (engine == "python")
     assert not first._thread.is_alive()
     assert not second._thread.is_alive()
 

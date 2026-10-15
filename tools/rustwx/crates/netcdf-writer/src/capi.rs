@@ -542,6 +542,74 @@ pub unsafe extern "C" fn gpuwm_ncwrite_finish(writer: *mut NcWriter) -> i32 {
     })
 }
 
+/// Start hashing the file as it is written, predicting it finishes with
+/// `expected_numrecs` records.  Call once, right after `create` and before
+/// any data.  Returns 0, or -1 with the reason in the last error.
+///
+/// Newer than the ABI marker and additive: no default path depends on it,
+/// so a caller probes for the symbol and re-reads the file when absent.
+///
+/// # Safety
+/// `writer` live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gpuwm_ncwrite_begin_digest(writer: *mut NcWriter, expected_numrecs: u64) -> i32 {
+    guard(ERR, || {
+        clear_error();
+        let Some(writer) = (unsafe { writer.as_mut() }) else {
+            return set_error("begin_digest called with a null writer");
+        };
+        match writer.begin_digest(expected_numrecs) {
+            Ok(()) => OK,
+            Err(err) => fail(err),
+        }
+    })
+}
+
+/// `gpuwm_ncwrite_finish`, and the streamed digest.  CONSUMES the pointer.
+///
+/// Returns -1 when the finish failed (reason in the last error), 1 when the
+/// file finished AND its streamed SHA-256 is the digest of the whole file
+/// (written to `digest_out`, 32 bytes, with the file length in
+/// `bytes_out`), and 0 when the file finished but no streamed digest
+/// exists -- the reason is then in the last error slot, which is not an
+/// error: the caller re-reads the file.
+///
+/// # Safety
+/// `writer` live and not previously finished or aborted; `digest_out`
+/// writable for 32 bytes; `bytes_out` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gpuwm_ncwrite_finish_digest(
+    writer: *mut NcWriter,
+    digest_out: *mut u8,
+    bytes_out: *mut u64,
+) -> i32 {
+    guard(ERR, || {
+        clear_error();
+        if writer.is_null() {
+            return set_error("finish_digest called with a null writer");
+        }
+        let writer = *unsafe { Box::from_raw(writer) };
+        match writer.finish_with_digest() {
+            Ok(crate::writer::FinishedDigest::Streamed { sha256, bytes }) => {
+                if digest_out.is_null() || bytes_out.is_null() {
+                    set_error("finish_digest called without output buffers; the file is finished");
+                    return 0;
+                }
+                unsafe {
+                    std::ptr::copy_nonoverlapping(sha256.as_ptr(), digest_out, 32);
+                    *bytes_out = bytes;
+                }
+                1
+            }
+            Ok(crate::writer::FinishedDigest::Unavailable(reason)) => {
+                set_error(reason);
+                0
+            }
+            Err(err) => fail(err),
+        }
+    })
+}
+
 /// Free a writer WITHOUT finishing it. The file on disk stays incomplete
 /// (`numrecs` 0); the caller owns deleting it.
 ///

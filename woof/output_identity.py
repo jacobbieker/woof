@@ -245,8 +245,19 @@ def publication_revision(path, *, expected=None) -> FileRevision:
 
 
 def completed_file_record(path, *, published=None, cancel_event=None,
-                          handle=None) -> CompletedFileRecord:
-    """Hash a closed output on its completion thread, bound to its writer."""
+                          handle=None, streamed=None,
+                          verify=None) -> CompletedFileRecord:
+    """Hash a closed output on its completion thread, bound to its writer.
+
+    ``streamed`` is ``(bytes, sha256 hex)`` the writer computed while
+    writing the file; the record is then built without reading the payload
+    (:func:`completed_file_record_from_stream`, which ``verify`` makes read
+    and compare too).
+    """
+    if streamed is not None:
+        return completed_file_record_from_stream(
+            path, size=streamed[0], sha256=streamed[1], published=published,
+            cancel_event=cancel_event, handle=handle, verify=verify)
     address = os.path.abspath(path)
     path = Path(path).resolve(strict=True)
     with (path.open("rb") if handle is None else nullcontext(handle)) as stream:
@@ -255,6 +266,64 @@ def completed_file_record(path, *, published=None, cancel_event=None,
             raise _changed(path)
         return _hash_open_file(path, stream, before, address=address,
                                cancel_event=cancel_event)
+
+
+#: Strict mode for a writer that hashed its bytes while writing them:
+#: set to ``1``/``true``/``on``/``yes``, the finished file is ALSO read back
+#: and hashed, and the two digests must agree (:class:`OutputChangedError`
+#: names both otherwise).  Off by default: the streamed digest is the
+#: SHA-256 of the bytes the writer handed the kernel, in file order, and
+#: the revision checks below already refuse a file someone else touched.
+IDENTITY_VERIFY_ENV = "WOOF_OUTPUT_IDENTITY_VERIFY"
+
+
+def identity_verify_requested(environ=None) -> bool:
+    """Has the operator asked for the read-back identity check?"""
+    environ = os.environ if environ is None else environ
+    value = str(environ.get(IDENTITY_VERIFY_ENV, "")).strip().lower()
+    return value in ("1", "true", "on", "yes", "strict")
+
+
+def completed_file_record_from_stream(path, *, size, sha256, published=None,
+                                      cancel_event=None, handle=None,
+                                      verify=None) -> CompletedFileRecord:
+    """The completion record of a file whose writer hashed it while writing.
+
+    PINNED: the same record :func:`completed_file_record` returns for the
+    same bytes -- same path, size, SHA-256 (the writer's streamed digest
+    is the digest of the whole file in file order) and revision -- but the
+    payload is not read.  What is still checked is everything the re-read
+    checked besides the arithmetic: the retained handle's revision equals
+    the published one, the address still names that file, and the file's
+    length is the length that was hashed.  ``verify`` (default:
+    :func:`identity_verify_requested`) re-reads and hashes it too, and
+    refuses a disagreement.
+    """
+    address = os.path.abspath(path)
+    path = Path(path).resolve(strict=True)
+    if verify is None:
+        verify = identity_verify_requested()
+    with (path.open("rb") if handle is None else nullcontext(handle)) as stream:
+        before = _revision(stream)
+        if published is not None and before != published:
+            raise _changed(path)
+        if verify:
+            stream.seek(0)
+            observed = _hash_open_file(path, stream, before, address=address,
+                                       cancel_event=cancel_event)
+            if observed.size != int(size) or observed.sha256 != str(sha256):
+                raise _changed(path, (
+                    f"the writer hashed {int(size)} bytes to {sha256} and the "
+                    f"file reads back as {observed.size} bytes hashing to "
+                    f"{observed.sha256}"))
+            return observed
+        _check_cancel(cancel_event)
+        after = _revision(stream)
+        if (before != after or not _address_matches(path, after)
+                or int(size) != after.size):
+            raise _changed(path)
+        return CompletedFileRecord(str(path), int(size), str(sha256), after,
+                                   address)
 
 
 def _check_cancel(cancel_event):

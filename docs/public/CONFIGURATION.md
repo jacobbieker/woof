@@ -66,11 +66,13 @@ The same table configures the in-model hub-height wind diagnostic
 | `hub_sites` | string or array | unset | a sites.v1 JSON path (`woof energy sites`), or inline `{ site_id = "...", lat = ..., lon = ... }` tables, to sample per site |
 | `hub_sample_interval_s` | number | `60` | per-site sampling cadence in model seconds; needs `hub_sites` |
 
-One key in the table is about checkpoints, not history:
+Two keys in the table are about how files are written, not what they
+carry:
 
 | key | type | default | meaning |
 |---|---|---|---|
 | `async_checkpoints` | boolean | `true` | write checkpoints in the background from a snapshot; `false` writes them synchronously, stopping the forecast while they are written. Tree-wide only (a `[[domain]]` `output = {...}` refuses it). `WOOF_ASYNC_CHECKPOINTS` overrides it. It changes no number and no checkpoint byte. See [PREPARED-RESTART.md](PREPARED-RESTART.md#how-a-checkpoint-is-written). |
+| `history_queue_depth` | integer | `1` | history frames each domain's writer may hold queued behind the one it is writing (1 to 8). A deeper queue lets a burst of frames leave the model loop while the disk catches up, at the price of one page-locked host copy per queued frame; the depth is lowered (and the receipt says so) when those copies would not fit host RAM beside the run. Tree-wide only. `WOOF_HISTORY_QUEUE_DEPTH` overrides it. It changes no byte. See [OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#how-a-history-frame-leaves-the-model). |
 
 The tree-wide table also asks `woof go` to export each history frame
 to an Icechunk repository while the forecast runs

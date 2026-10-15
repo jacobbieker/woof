@@ -84,6 +84,7 @@ mod layout;
 mod patch;
 mod scan;
 mod schema;
+mod sha256;
 mod types;
 mod writer;
 
@@ -93,4 +94,5 @@ pub use patch::{NcPatcher, PatchVar};
 pub use scan::scan_nonfinite;
 pub use schema::{name_is_valid, Attr, Dim, Schema, VarDef};
 pub use types::{AttrValue, NcFormat, NcType, VarData};
-pub use writer::NcWriter;
+pub use sha256::{hex as sha256_hex, Sha256};
+pub use writer::{FinishedDigest, NcWriter};

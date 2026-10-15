@@ -10031,6 +10031,7 @@ def run_prepared_forecast(
         "health_check": getattr(model, "_health_check_policy", None),
         "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
         "health_readback": _health_readback_receipt(),
+        "history_writes": getattr(model, "_history_writes_receipt", None),
         "source": inputs.source,
         "prepared_layout": inputs.layout,
         "scope": (

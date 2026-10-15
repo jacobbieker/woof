@@ -4106,6 +4106,11 @@ def _global_wrf_attrs(
     return attrs
 
 
+def _streamed_identity_frames():
+    from woof.io.history_staging import async_history_mode
+    return None if async_history_mode() == "off" else 1
+
+
 def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,
                       start_time: datetime, title: str, domain_id: int = 1,
                       expect_refl_10cm: bool = True,
@@ -4188,6 +4193,10 @@ def write_case_output(prepared, output_dir: Path, valid_time: datetime, *,
             # scheme would have declared soil_layers_stag=4 here.
             soil_layers=soil_layer_count(prepared.cfg),
             _retain_identity_handle=True,
+            # One frame per file: the Rust engine hashes it while writing,
+            # so its identity below reads no payload back (unless
+            # WOOF_ASYNC_HISTORY=off asks for the old read-back).
+            _expect_frames=_streamed_identity_frames(),
             ) as writer:
         writer.write_frame(valid_time.strftime("%Y-%m-%d_%H:%M:%S"), frame)
     # The frame above is a synchronous host copy, so the per-interval
@@ -6089,7 +6098,9 @@ def _run_built_experiment(exp, data, outdir, model, *, restart=None,
                   "pool_trim": model._pool_trim_policy,
                   "health_check": model._health_check_policy,
                   "checkpoint_writes": model._checkpoint_receipt,
-                  "health_readback": _health_readback_receipt()})
+                  "health_readback": _health_readback_receipt(),
+                  "history_writes": getattr(
+                      model, "_history_writes_receipt", None)})
     return ExperimentRunSummary(
         wrfout_paths=paths,
         completed_seconds=model.root.clock.elapsed_seconds,

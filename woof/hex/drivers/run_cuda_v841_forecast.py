@@ -138,6 +138,7 @@ establish no forecast skill.
 from __future__ import annotations
 
 import argparse
+import contextlib
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -2270,6 +2271,19 @@ def execute_forecast(
         history_zgrid = np.ascontiguousarray(history_zgrid, dtype=np.float32)
         history_zgrid_sha256 = proof.array_sha256(history_zgrid)
 
+    # The history files are written on a background thread (the capture and
+    # its physical gate stay here, so a refusal lands on the step it always
+    # did).  WOOF_ASYNC_HISTORY=off writes them inline, as before.
+    import threading
+
+    from woof.hex.output import AsyncHistoryWriter
+    from woof.io.history_staging import async_history_mode
+
+    history_records_lock = threading.Lock()
+    history_writer = (
+        None if async_history_mode() == "off" else AsyncHistoryWriter(depth=1)
+    )
+
     def capture(step: int) -> None:
         nonlocal capture_seconds, write_seconds
         mark = time.perf_counter()
@@ -2314,45 +2328,68 @@ def execute_forecast(
             zgrid_available=history_zgrid is not None,
         )
         mark = time.perf_counter()
-        snapshot_files[str(step)] = proof.write_snapshot_netcdf(
-            output_root / f"cuda-history.{labels[step]}.nc",
-            snapshot,
-            static,
-            variables=frame["arrays"],
-            xtime=schedule["valid_times"][step],
-            zgrid=history_zgrid if frame["zgrid"] else None,
-            zgrid_sha256=history_zgrid_sha256 if frame["zgrid"] else None,
-        )
-        if host.get("timestep_evidence") is not None:
-            snapshot_files[str(step)] = stamp_timestep_evidence(
-                Path(snapshot_files[str(step)]["path"]), host["timestep_evidence"]
-            )
+        # Everything below is the frame's FILE: written from the host
+        # snapshot the gate above has already passed, so it can run on the
+        # history writer's thread while the model steps on.  The label and
+        # valid time are bound now (a bonus capture installs new ones).
         history_path = output_root / f"cuda-history.{labels[step]}.nc"
-        if les_attachment is not None:
-            stamp_les_history(
+        xtime = schedule["valid_times"][step]
+        # The LES stamp reads the closure's LIVE device fields; take them to
+        # the host NOW, at the captured step, so the file the writer thread
+        # stamps carries this frame's values and the bytes the inline
+        # writer would have written.
+        les_frame = _les_stamp_snapshot(les_attachment)
+
+        def write_frame(snapshot=snapshot, frame=frame, step=step,
+                        history_path=history_path, xtime=xtime,
+                        les_frame=les_frame) -> None:
+            record = proof.write_snapshot_netcdf(
                 history_path,
-                les_attachment,
-                les_model=les_attachment.closure.config.les_model,
+                snapshot,
+                static,
+                variables=frame["arrays"],
+                xtime=xtime,
+                zgrid=history_zgrid if frame["zgrid"] else None,
+                zgrid_sha256=history_zgrid_sha256 if frame["zgrid"] else None,
             )
-        if recovery_attachment is not None:
-            stamp_large_step_recovery_history(history_path, recovery_attachment)
-        if les_attachment is not None or recovery_attachment is not None:
-            # The stamps append attributes and fields, so the recorded bytes
-            # and digest are re-measured, once, from the file as it now stands.
-            snapshot_files[str(step)] = {
-                **snapshot_files[str(step)],
-                "bytes": history_path.stat().st_size,
-                "sha256": proof.sha256_file(history_path),
-            }
+            if host.get("timestep_evidence") is not None:
+                record = stamp_timestep_evidence(
+                    Path(record["path"]), host["timestep_evidence"]
+                )
+            if les_attachment is not None:
+                stamp_les_history(
+                    history_path,
+                    les_frame,
+                    les_model=les_attachment.closure.config.les_model,
+                )
+            if recovery_attachment is not None:
+                stamp_large_step_recovery_history(history_path, recovery_attachment)
+            if les_attachment is not None or recovery_attachment is not None:
+                # The stamps append attributes and fields, so the recorded
+                # bytes and digest are re-measured, once, from the file as it
+                # now stands.
+                record = {
+                    **record,
+                    "bytes": history_path.stat().st_size,
+                    "sha256": proof.sha256_file(history_path),
+                }
+            # Recorded only once the frame is on disk.
+            with history_records_lock:
+                snapshot_files[str(step)] = record
+                history_written.update(
+                    snapshot["arrays"] if frame["arrays"] is None else frame["arrays"]
+                )
+                if frame["zgrid"]:
+                    history_zgrid_frames.append(step)
+                for name in frame["missing"]:
+                    history_missing.setdefault(name, []).append(step)
+
+        if history_writer is None:
+            write_frame()
+        else:
+            history_writer.submit(write_frame, label=labels[step])
+        del write_frame
         write_seconds += time.perf_counter() - mark
-        # Recorded only once the frame is on disk.
-        history_written.update(
-            snapshot["arrays"] if frame["arrays"] is None else frame["arrays"]
-        )
-        if frame["zgrid"]:
-            history_zgrid_frames.append(step)
-        for name in frame["missing"]:
-            history_missing.setdefault(name, []).append(step)
         del snapshot
         gc.collect()
 
@@ -2363,176 +2400,198 @@ def execute_forecast(
     previous = proof._previous_surface_updates(
         stack, host["surface_accumulators"]
     )
-    if 0 in capture_steps:
-        capture(0)
-    if fingerprints is not None:
-        mark = time.perf_counter()
-        fingerprints.write(0, proof.fingerprint_execution_boundary(stack))
-        fingerprint_seconds += time.perf_counter() - mark
-
-    refusal: dict[str, Any] | None = None
-    executed_steps = steps
-    loop_started = time.perf_counter()
-    # GF advective forcing carried step to step; None at step 1 is native's
-    # own start state (tend_physics is zero before dynamics first forms it).
-    gf_dynamics_tendencies = None
-    for step in range(1, steps + 1):
-        mark = time.perf_counter()
-        try:
-            result = proof.execute_composite_step(
-                driver=stack["driver"],
-                backend=stack["backend"],
-                scalar_names=host["scalar_names"],
-                physics_geometry=stack["physics_geometry"],
-                kernel_cache=stack["driver"].cache,
-                previous_surface_updates=previous,
-                dynamics_tendencies=gf_dynamics_tendencies,
-                physics_park=physics_park,
-                # WRF/native diagflag: the step ENDING at a history frame
-                # computes refl10cm inside its own microphysics call.
-                refl_10cm_due=(step in capture_steps),
-            )
-        except (proof.CompositeTransactionError, FloatingPointError) as error:
-            if not stop_on_refusal:
-                raise
-            # The port refused to publish this step.  The staged two-owner
-            # transaction rolled back, so the committed state is still the
-            # previous step.  NO GUARD IS RELAXED: the refusal is recorded
-            # verbatim, the forecast stops here, and every retained frame
-            # precedes the refused step.
-            refusal = {
-                "refused": True,
-                "step": step,
-                "model_seconds": step * DT_SECONDS,
-                "exception": type(error).__name__,
-                "message": str(error),
-                "last_committed_step": step - 1,
-                "note": (
-                    "the port own numeric/geometry validation refused this "
-                    "step; the forecast is truncated at the last committed "
-                    "step and no unpublished state was retained"
-                ),
-            }
-            executed_steps = step - 1
-            break
-        cp.cuda.get_current_stream().synchronize()
-        elapsed = time.perf_counter() - mark
-        integration_seconds += elapsed
-        if first_step_seconds is None:
-            first_step_seconds = elapsed
-        previous = result.committed.surface_updates
-        gf_dynamics_tendencies = result.dynamics_tendencies
-        backend_receipt = dict(result.backend_receipt)
-        surface_execution = proof.require_arwen_v2_surface_execution(
-            backend_receipt, executed=True, label=f"step {step} backend receipt"
-        )
-        step_receipts.append(
-            {
-                "step": step,
-                "seconds": elapsed,
-                "driver": asdict(result.committed.receipt),
-                "backend": backend_receipt,
-                "arwen_v2_surface_execution": surface_execution,
-                "clamp_d2h": result.clamp_d2h.as_dict(),
-                "recovery": result.recovery.receipt(),
-            }
-        )
-        mark = time.perf_counter()
-        try:
-            health.append(
-                step_health_gate(
-                    stack,
-                    step,
-                    cp,
-                    trace_hot_cell=stack.get("solve_cells") is not None,
-                )
-            )
-        except FloatingPointError as error:
-            if not stop_on_refusal:
-                raise
-            # The step was committed but the health gate refuses the state it
-            # produced (non-finite, non-positive, or |w| beyond the divergence
-            # refusal).  Record the refusal verbatim WITH the receipt so the
-            # committed health-envelope series (including this death) is
-            # preserved for signature analysis; nothing is relaxed.
-            refusal = {
-                "refused": True,
-                "refused_in": "step health gate",
-                "step": step,
-                "model_seconds": step * DT_SECONDS,
-                "exception": type(error).__name__,
-                "message": str(error),
-                "last_committed_step": step,
-                "note": (
-                    "the composite step committed but its state fails the "
-                    "health gate; the forecast is truncated here and the "
-                    "per-step health envelopes up to the previous step are "
-                    "retained in this receipt"
-                ),
-            }
-            executed_steps = step
-            health_seconds += time.perf_counter() - mark
-            break
-        health_seconds += time.perf_counter() - mark
-        if fingerprints is not None and step % fingerprint_every == 0:
+    try:
+        if 0 in capture_steps:
+            capture(0)
+        if fingerprints is not None:
             mark = time.perf_counter()
-            fingerprints.write(step, proof.fingerprint_execution_boundary(stack))
+            fingerprints.write(0, proof.fingerprint_execution_boundary(stack))
             fingerprint_seconds += time.perf_counter() - mark
-        if step in capture_steps:
+
+        refusal: dict[str, Any] | None = None
+        executed_steps = steps
+        loop_started = time.perf_counter()
+        # GF advective forcing carried step to step; None at step 1 is native's
+        # own start state (tend_physics is zero before dynamics first forms it).
+        gf_dynamics_tendencies = None
+        for step in range(1, steps + 1):
+            mark = time.perf_counter()
             try:
-                capture(step)
-            except (
-                FloatingPointError,
-                RuntimeError,
-                proof.CompositeTransactionError,
-            ) as error:
+                result = proof.execute_composite_step(
+                    driver=stack["driver"],
+                    backend=stack["backend"],
+                    scalar_names=host["scalar_names"],
+                    physics_geometry=stack["physics_geometry"],
+                    kernel_cache=stack["driver"].cache,
+                    previous_surface_updates=previous,
+                    dynamics_tendencies=gf_dynamics_tendencies,
+                    physics_park=physics_park,
+                    # WRF/native diagflag: the step ENDING at a history frame
+                    # computes refl10cm inside its own microphysics call.
+                    refl_10cm_due=(step in capture_steps),
+                )
+            except (proof.CompositeTransactionError, FloatingPointError) as error:
                 if not stop_on_refusal:
                     raise
-                # Writing a frame re-runs the MPAS-to-physics preparation.  The
-                # state immediately before the instability already fails it, so
-                # this frame cannot be produced.  Stop here with the frames that
-                # were captured cleanly.
+                # The port refused to publish this step.  The staged two-owner
+                # transaction rolled back, so the committed state is still the
+                # previous step.  NO GUARD IS RELAXED: the refusal is recorded
+                # verbatim, the forecast stops here, and every retained frame
+                # precedes the refused step.
                 refusal = {
                     "refused": True,
-                    "refused_in": "history capture",
+                    "step": step,
+                    "model_seconds": step * DT_SECONDS,
+                    "exception": type(error).__name__,
+                    "message": str(error),
+                    "last_committed_step": step - 1,
+                    "note": (
+                        "the port own numeric/geometry validation refused this "
+                        "step; the forecast is truncated at the last committed "
+                        "step and no unpublished state was retained"
+                    ),
+                }
+                executed_steps = step - 1
+                break
+            cp.cuda.get_current_stream().synchronize()
+            elapsed = time.perf_counter() - mark
+            integration_seconds += elapsed
+            if first_step_seconds is None:
+                first_step_seconds = elapsed
+            previous = result.committed.surface_updates
+            gf_dynamics_tendencies = result.dynamics_tendencies
+            backend_receipt = dict(result.backend_receipt)
+            surface_execution = proof.require_arwen_v2_surface_execution(
+                backend_receipt, executed=True, label=f"step {step} backend receipt"
+            )
+            step_receipts.append(
+                {
+                    "step": step,
+                    "seconds": elapsed,
+                    "driver": asdict(result.committed.receipt),
+                    "backend": backend_receipt,
+                    "arwen_v2_surface_execution": surface_execution,
+                    "clamp_d2h": result.clamp_d2h.as_dict(),
+                    "recovery": result.recovery.receipt(),
+                }
+            )
+            mark = time.perf_counter()
+            try:
+                health.append(
+                    step_health_gate(
+                        stack,
+                        step,
+                        cp,
+                        trace_hot_cell=stack.get("solve_cells") is not None,
+                    )
+                )
+            except FloatingPointError as error:
+                if not stop_on_refusal:
+                    raise
+                # The step was committed but the health gate refuses the state it
+                # produced (non-finite, non-positive, or |w| beyond the divergence
+                # refusal).  Record the refusal verbatim WITH the receipt so the
+                # committed health-envelope series (including this death) is
+                # preserved for signature analysis; nothing is relaxed.
+                refusal = {
+                    "refused": True,
+                    "refused_in": "step health gate",
                     "step": step,
                     "model_seconds": step * DT_SECONDS,
                     "exception": type(error).__name__,
                     "message": str(error),
                     "last_committed_step": step,
                     "note": (
-                        "the step integrated and published, but the port own "
-                        "numeric/geometry validation refused to prepare it for "
-                        "physics, so no history frame exists for it; the "
-                        "forecast is truncated at the last frame written"
+                        "the composite step committed but its state fails the "
+                        "health gate; the forecast is truncated here and the "
+                        "per-step health envelopes up to the previous step are "
+                        "retained in this receipt"
                     ),
                 }
                 executed_steps = step
+                health_seconds += time.perf_counter() - mark
                 break
-    loop_seconds = time.perf_counter() - loop_started
-    if refusal is not None and executed_steps > 0 and executed_steps not in capture_steps:
-        # Keep the last committed state renderable even though the refusal
-        # landed between scheduled captures.
-        stamp = datetime.strptime(schedule["start_time"], "%Y-%m-%d_%H:%M:%S") + timedelta(
-            seconds=executed_steps * DT_SECONDS
-        )
-        labels[executed_steps] = stamp.strftime("%Y-%m-%d_%H.%M.%S")
-        schedule["valid_times"][executed_steps] = stamp.strftime("%Y-%m-%d_%H:%M:%S")
-        install_capture_labels(labels)
-        try:
-            capture(executed_steps)
-        except Exception as error:  # noqa: BLE001 - bonus capture, never fatal
-            # Capturing a snapshot re-runs the MPAS-to-physics preparation, and
-            # on a state the port has just refused that preparation refuses
-            # again.  The last committed state is therefore not representable
-            # as a history frame.  Say so; keep the scheduled frames captured
-            # before the instability.
-            refusal["final_state_capture_failed"] = True
-            refusal["final_state_capture_error"] = str(error)
-            labels.pop(executed_steps, None)
-            schedule["valid_times"].pop(executed_steps, None)
-        else:
-            capture_steps.add(executed_steps)
+            health_seconds += time.perf_counter() - mark
+            if fingerprints is not None and step % fingerprint_every == 0:
+                mark = time.perf_counter()
+                fingerprints.write(step, proof.fingerprint_execution_boundary(stack))
+                fingerprint_seconds += time.perf_counter() - mark
+            if step in capture_steps:
+                try:
+                    capture(step)
+                except (
+                    FloatingPointError,
+                    RuntimeError,
+                    proof.CompositeTransactionError,
+                ) as error:
+                    if not stop_on_refusal:
+                        raise
+                    # Writing a frame re-runs the MPAS-to-physics preparation.  The
+                    # state immediately before the instability already fails it, so
+                    # this frame cannot be produced.  Stop here with the frames that
+                    # were captured cleanly.
+                    refusal = {
+                        "refused": True,
+                        "refused_in": "history capture",
+                        "step": step,
+                        "model_seconds": step * DT_SECONDS,
+                        "exception": type(error).__name__,
+                        "message": str(error),
+                        "last_committed_step": step,
+                        "note": (
+                            "the step integrated and published, but the port own "
+                            "numeric/geometry validation refused to prepare it for "
+                            "physics, so no history frame exists for it; the "
+                            "forecast is truncated at the last frame written"
+                        ),
+                    }
+                    executed_steps = step
+                    break
+        loop_seconds = time.perf_counter() - loop_started
+        if history_writer is not None:
+            # Every scheduled frame is on disk (or its failure raised) before
+            # the bonus capture, whose own write failure is never fatal.
+            history_writer.drain()
+        if refusal is not None and executed_steps > 0 and executed_steps not in capture_steps:
+            # Keep the last committed state renderable even though the refusal
+            # landed between scheduled captures.
+            stamp = datetime.strptime(schedule["start_time"], "%Y-%m-%d_%H:%M:%S") + timedelta(
+                seconds=executed_steps * DT_SECONDS
+            )
+            labels[executed_steps] = stamp.strftime("%Y-%m-%d_%H.%M.%S")
+            schedule["valid_times"][executed_steps] = stamp.strftime("%Y-%m-%d_%H:%M:%S")
+            install_capture_labels(labels)
+            try:
+                capture(executed_steps)
+                if history_writer is not None:
+                    # Its file too, so a failed write is this capture's failure.
+                    history_writer.drain()
+            except Exception as error:  # noqa: BLE001 - bonus capture, never fatal
+                # Capturing a snapshot re-runs the MPAS-to-physics preparation, and
+                # on a state the port has just refused that preparation refuses
+                # again.  The last committed state is therefore not representable
+                # as a history frame.  Say so; keep the scheduled frames captured
+                # before the instability.
+                refusal["final_state_capture_failed"] = True
+                refusal["final_state_capture_error"] = str(error)
+                if history_writer is not None:
+                    # Every earlier frame was drained above, so the writer's
+                    # failure, if any, is this capture's: never fatal.
+                    history_writer.clear_failure()
+                labels.pop(executed_steps, None)
+                schedule["valid_times"].pop(executed_steps, None)
+            else:
+                capture_steps.add(executed_steps)
+    except BaseException:
+        # Finish (or report) every frame already handed over before the
+        # failure propagates; no file is left half-written by a thread
+        # the interpreter is tearing down.
+        if history_writer is not None:
+            with contextlib.suppress(BaseException):
+                history_writer.close()
+        raise
+    if history_writer is not None:
+        history_writer.close()
     if refusal is not None:
         steps = executed_steps
     if fingerprints is not None:
@@ -2676,6 +2735,21 @@ def execute_forecast(
             "loop_seconds_including_io": loop_seconds,
             "snapshot_capture_seconds": capture_seconds,
             "history_write_seconds": write_seconds,
+            "history_write_note": (
+                "model-thread seconds spent handing frames to the history "
+                "writer (inline writes under WOOF_ASYNC_HISTORY=off); the "
+                "writer thread's own time is history_write_background_seconds"
+            ),
+            "history_write_background_seconds": (
+                None if history_writer is None
+                else history_writer.receipt["write_seconds"]
+            ),
+            "history_writer": (
+                {"mode": "sync", "reason": "WOOF_ASYNC_HISTORY=off"}
+                if history_writer is None
+                else {key: value for key, value in history_writer.receipt.items()
+                      if key != "frames"}
+            ),
             "boundary_fingerprint_seconds": fingerprint_seconds,
             "health_gate_seconds": health_seconds,
             "steps": steps,
@@ -3278,6 +3352,35 @@ def timestep_evidence_decision(experimental_dt: bool) -> dict[str, Any] | None:
             "woof hex forecast --mesh ... --experimental-dt",
         )
     return None
+
+
+def _les_stamp_snapshot(attachment: Any) -> Any:
+    """A host-side stand-in for ``attachment`` holding what the LES stamp reads.
+
+    ``woof.hex.cuda_les_v841.stamp_les_history`` (frozen source) reads
+    ``closure.last.kdiff``, ``closure.last.eddy_visc_vert`` and
+    ``closure.tke`` through ``closure.cp.asnumpy`` when it runs.  A history
+    file written on a background thread would otherwise read them steps
+    later.  This copies them to the host at the capture; ``asnumpy`` on the
+    copies is the identity, so the stamped bytes are the inline bytes.
+    """
+
+    if attachment is None:
+        return None
+    from types import SimpleNamespace
+
+    closure = attachment.closure
+    host = closure.cp.asnumpy
+    last = None
+    if closure.last is not None:
+        last = SimpleNamespace(kdiff=host(closure.last.kdiff),
+                               eddy_visc_vert=host(closure.last.eddy_visc_vert))
+    return SimpleNamespace(
+        n_cells_real=attachment.n_cells_real,
+        closure=SimpleNamespace(
+            config=closure.config, last=last,
+            tke=None if closure.tke is None else host(closure.tke),
+            cp=SimpleNamespace(asnumpy=np.asarray)))
 
 
 def stamp_timestep_evidence(path: Path, decision: Mapping[str, Any]) -> dict[str, Any]:

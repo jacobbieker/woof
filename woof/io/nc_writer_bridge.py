@@ -420,6 +420,48 @@ class ClassicWriter:
     def num_records(self) -> int:
         return int(self._library.gpuwm_ncwrite_num_records(self._live()))
 
+    def begin_digest(self, expected_records: int) -> str | None:
+        """Hash the file as it is written; ``None``, or why it cannot.
+
+        Predicts the file finishes with ``expected_records`` records (the
+        one header field :meth:`finish` patches).  A library predating
+        the streamed digest answers with the reason rather than raising:
+        the caller then re-reads the finished file, as it always did.
+        """
+        if not _bind_digest(self._library):
+            return ("the loaded netcdf-writer library predates the streamed "
+                    "digest (no gpuwm_ncwrite_begin_digest)")
+        status = int(self._library.gpuwm_ncwrite_begin_digest(
+            self._live(), int(expected_records)))
+        if status != 0:
+            return _last_error(self._library)
+        self._digest_requested = True
+        return None
+
+    def finish_with_digest(self) -> tuple[int, str] | str:
+        """:meth:`finish`, then ``(bytes, sha256 hex)`` of the whole file.
+
+        Returns the reason (a ``str``) instead when no streamed digest
+        exists -- none was requested, the writes were not in file order,
+        or the record count differed from the prediction.  The file is
+        finished either way; a failed finish raises as :meth:`finish` does.
+        """
+        if not getattr(self, "_digest_requested", False):
+            self.finish()
+            return "no streamed digest was requested"
+        handle = self._live()
+        self._handle = None
+        digest = (ctypes.c_uint8 * 32)()
+        size = ctypes.c_uint64(0)
+        status = int(self._library.gpuwm_ncwrite_finish_digest(
+            handle, ctypes.cast(digest, ctypes.POINTER(ctypes.c_uint8)),
+            ctypes.byref(size)))
+        if status < 0:
+            raise NcWriteError(_last_error(self._library))
+        if status == 0:
+            return _last_error(self._library)
+        return int(size.value), bytes(digest).hex()
+
     def finish(self) -> None:
         """Patch ``numrecs``, flush, fsync, and release the handle."""
 
@@ -551,6 +593,33 @@ class ClassicSchema:
                 self._library.gpuwm_ncwrite_schema_free(handle)
             except Exception:
                 pass
+
+
+def _bind_digest(library: ctypes.CDLL) -> bool:
+    """Bind the streamed-digest entry points once; ``False`` if absent.
+
+    Newer than :data:`ABI_MARKER` and additive: the product tape's
+    identity re-reads the finished file when they are missing, so an older
+    library is a slower identity, never a refusal.  The answer is kept on
+    the library object, so a different library is asked afresh.
+    """
+    known = library.__dict__.get("_woof_digest_bound")
+    if known is not None:
+        return known
+    try:
+        library.gpuwm_ncwrite_begin_digest.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint64]
+        library.gpuwm_ncwrite_begin_digest.restype = ctypes.c_int32
+        library.gpuwm_ncwrite_finish_digest.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8),
+            ctypes.POINTER(ctypes.c_uint64)]
+        library.gpuwm_ncwrite_finish_digest.restype = ctypes.c_int32
+    except AttributeError:
+        bound = False
+    else:
+        bound = True
+    library.__dict__["_woof_digest_bound"] = bound
+    return bound
 
 
 #: Whether :func:`_bind_patch` has bound the patch entry points of the
