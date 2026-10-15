@@ -287,6 +287,116 @@ What is still not safe, with or without markers: a size check, an mtime
 check, and any "it showed up in the listing" test on a filesystem whose
 rename is not atomic.
 
+## Exporting frames to Icechunk while the run goes
+
+`woof go` can write each history frame into an
+[Icechunk](https://icechunk.io) repository as soon as the frame is
+published, so the dataset is complete when the forecast is, instead of
+after an export that starts at the end. For a 48 h UK run (289 frames of
+about 3 GB each), the export after the forecast took 14 hours.
+
+Ask for it in the config, or on the command line:
+
+```toml
+[output]
+icechunk = { url = "s3://my-bucket/uk-48h" }   # or gs://..., file:///..., a directory
+```
+
+```
+woof go case.toml --icechunk file:///scratch/uk-48h.icechunk
+```
+
+The table also takes `branch` (default `main`), `compress` (default
+`true`: Blosc zstd with bitshuffle), `zstd_clevel` (default 5),
+`group_prefix` and `threads` (arrays encoded at once, default 4).
+`--icechunk URL` replaces only the URL.
+
+**How it runs.** `go` starts a separate process (`python -m
+woof.icechunk_export`, at `nice` 10) just before the forecast. That
+process polls this page's `ready/` markers, and also walks the forecast
+folder to catch any frame whose marker is missing. It writes each frame it
+has not exported yet into group `dNN` of the repository (one group per
+domain), with one commit per frame. Nothing in the forecast waits on the
+exporter. When the forecast ends, `go` writes `finish` into the export
+folder. The exporter then exports the remaining frames and exits, and `go`
+waits for it before reporting the run done:
+
+```
+go: icechunk export: 281/289 frames committed, 8 pending (1 h 20 min of model time behind, oldest waiting 9 min 12 s), finishing
+go: icechunk export complete -- 289 frames in s3://my-bucket/uk-48h (snapshot 9C128SNY01F6HA0N37A0)
+```
+
+The same progress line is printed every five minutes while the forecast
+runs, whenever frames were committed since the last line.
+
+**Where it records progress.** The export folder is
+`<run folder>/icechunk-export/`. It holds:
+
+- `export.json` (`woof.icechunk-export.spec.v1`): what is exported, and
+  where to.
+- `status.json` (`woof.icechunk-export.status.v1`): rewritten atomically
+  after every frame. It records frames found, committed, pending and
+  refused; per group, the newest valid time found and the newest
+  exported; `lag_model_seconds`; `oldest_pending_wait_seconds`; the last
+  snapshot; and, once the exporter finishes, the final `state`
+  (`complete`, `incomplete`, `failed` or `interrupted`).
+- `state.json`: the frames already exported.
+- `export.log`: the exporter's own output.
+
+**What lands in the store.** Each frame is written by the gridded writer
+used by the hindcast and by `tools/wrfout_to_netcdf.py --icechunk-group`
+([icechunk.md](../energy-hindcast/icechunk.md#live-export-from-woof-go)).
+`Times` and `XTIME` are replaced by a `Time` coordinate. The group's time
+axis starts at its first frame, and grows by one step as each later frame
+arrives. A field the model first writes after t=0, such as `REFL_10CM`,
+is created on the first frame that carries it, and is NaN before that
+frame. Exporting the same frames after the run produces the same store.
+
+**Resumed runs.** A forecast resumed from a checkpoint into a new folder
+(`woof go ... --restart ... --icechunk URL`) continues the same groups.
+Its frames extend the axis. If a valid time is in both runs, the newer
+file wins: each group records `frame_published_unix_ms`, the source
+file's mtime, for every frame. A frame the model writes again after a
+history rewind is replaced the same way. Exporting the older run's folder
+again changes nothing.
+
+**When the export fails, the forecast does not.** If the exporter cannot
+start, crashes, or the store refuses a frame (a different grid, or a time
+off the group's interval), the forecast still runs to the end. `go` then
+names what is missing, prints the command that finishes the export, and
+exits **73**:
+
+```
+go: WARNING -- the Icechunk export is INCOMPLETE (120/289 frames): the exporter exited -9 in state 'following'; see .../icechunk-export/export.log. The forecast itself is complete. Next: woof icechunk-export .../icechunk-export
+```
+
+`woof icechunk-export PATH` reads `export.json` and exports whatever the
+store does not hold yet. Frames already written from the same file are
+skipped. It exits 0 when the export is complete, 1 on a store failure,
+and 2 when a frame is refused. It also works on folders that `go` did not
+export: `woof icechunk-export run1 run2 --url s3://bucket/prefix` exports
+a run and its resumed continuation into one store. A store failure
+(network, throttling) is retried four times, waiting 1, 2, 4 and 8 s,
+before the exporter gives up.
+
+**Remote stores and a local repository synced later.** For `s3://` and
+`gs://` URLs, the exporter commits directly to the bucket, using the
+conflict-retrying commit described in the Icechunk store page. A
+`file://` URL or a directory writes a local repository. The commit lock
+is kept beside that repository, not inside it, so `aws s3 sync` or
+`gsutil rsync` of the repository directory works as before.
+
+**What it costs the forecast.** The exporter runs as a separate process,
+so the only cost to the forecast is the CPU and disk bandwidth that
+process uses. Measured on 2026-10-15 with a 40 x 40 x 30 HRRR case
+(2 s steps, 120 model seconds, a frame every 6 s: 21 frames of 88
+variables), on a card that was also running two other forecasts. Three
+runs with the export and three without were alternated. The median step
+was 0.0525 s in both sets. Per-run medians were 0.048-0.062 s without the
+export and 0.052-0.057 s with it. The live store equalled an export of
+the same files made after the run. If the exporter competes with the
+forecast's host threads on a large domain, lower its `threads`.
+
 ## The flags
 
 On both simulation doors -- `python -m

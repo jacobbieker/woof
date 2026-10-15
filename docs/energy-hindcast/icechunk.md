@@ -173,6 +173,50 @@ Without `--icechunk-group`, the whole-directory export and the
 `--watch-icechunk` stream behave as before, and also take a URL in
 `--icechunk-repo`.
 
+Every group also records `frame_published_unix_ms(Time)`: the mtime of
+the source file each frame was written from.
+
+## Live export from `woof go`
+
+`woof go` with `[output] icechunk = { url = "..." }` or `--icechunk URL`
+exports a forecast's frames while the forecast is running
+([PROGRESS.md](../public/PROGRESS.md#exporting-frames-to-icechunk-while-the-run-goes)).
+`woof icechunk-export` resumes or completes such an export, and also
+exports run folders after the fact. Both use `write_gridded_segment`, one
+frame per commit, and turn on three options that the parallel hindcast
+leaves off:
+
+- **`extend_axis=True`.** The group's axis starts at its first frame and
+  grows at its end as later frames arrive. The `Time` coordinate is
+  chunked by 4096 steps (`GROWING_TIME_COORD_CHUNK`), so the axis grows
+  without adding a chunk per frame. The group is marked
+  `axis_grows: true`. The axis is never extended before its start: a
+  frame earlier than the start is refused. The interval is the domain's
+  `history_interval_s` when the config gives one. Otherwise the exporter
+  infers it from the frames it has found. If it has seen only one frame
+  (`time_interval_inferred: true`), the gap to the next frame becomes
+  the interval.
+- **`add_variables=True`.** A field the group does not hold yet is
+  created on the frame that first carries it. It is NaN-filled (or
+  zero-filled for integers) before that frame, with attributes from that
+  file. This is the rule the group's creation applies to the frames it is
+  given, so live and after-the-fact exports agree. A frame field that is
+  not numeric is listed in `skipped_variables`.
+- **`on_existing="newer"`.** A frame already written is written again
+  only when its source file is newer than the one recorded in
+  `frame_published_unix_ms`. A resumed run's overlap and a history rewind
+  therefore replace the earlier frames, and re-exporting the same files
+  is a no-op.
+
+`write_threads` (default 1; 4 for the live export) encodes and stores
+that many arrays of a frame at once. Each netCDF read holds the
+process-wide HDF5 lock (`woof.io.netcdf_serialization`), so the writer
+can share a process with another netCDF user.
+
+With `s3://` and `gs://` URLs, each frame commits directly to the bucket
+through `commit_with_retry`. A local repository (`file://` or a
+directory) can be synced to a bucket afterwards, as before.
+
 ## Checking a store
 
 ```bash
@@ -208,6 +252,20 @@ and `file://` stores. It covers:
   job's writes lost;
 - idempotent re-runs;
 - the CLI doors.
+
+`tests/test_icechunk_live_export.py` runs the live export against a fake
+forecast that publishes frames the way the history writer does. It
+covers:
+
+- frames landing in the store during the run;
+- two domains in two groups;
+- a field first written at t=1;
+- a resumed run folder whose overlap wins;
+- a rewritten frame;
+- a refused frame, and a store failure followed by a resume;
+- an exporter killed mid-run while the forecast carries on, then
+  completed by `woof icechunk-export`;
+- equality with an export of the same files made after the fact.
 
 The S3 round trip runs only when `WOOF_S3_TEST_URL=s3://bucket/prefix` is
 set. It uses credentials from the environment and writes under a fresh

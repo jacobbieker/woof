@@ -5705,6 +5705,6 @@ def declared_key_rows() -> dict[str, dict[str, dict]]:
     # domain's own output = {...} override alike (one parser reads both).
     from woof.io.history_selection import output_key_rows
     tables["output"] = output_key_rows()
-    tables["domain.output"] = output_key_rows()
+    tables["domain.output"] = output_key_rows(tree_wide=False)
     return {table: {name: row.to_json() for name, row in rows.items()}
             for table, rows in tables.items()}

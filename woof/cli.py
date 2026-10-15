@@ -109,6 +109,7 @@ speedrun_register_cli = _lazy_register("woof.speedrun_cli")
 ingest_register_cli = _lazy_register("woof.ingest.preflight")
 mesh_register_cli = _lazy_register("woof.mpas_mesh")
 ml_export_register_cli = _lazy_register("woof.ml_export")
+icechunk_export_register_cli = _lazy_register("woof.icechunk_export")
 multi_run_register_cli = _lazy_register("woof.multi_run")
 obs_register_cli = _lazy_register("woof.obs.cli")
 render_register_cli = _lazy_register("woof.render")
@@ -439,6 +440,9 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # beside render, the other door that turns history files into a
     # product.
     ml_export_register_cli(sub)
+    # A run's history frames into Icechunk: the export `go` runs beside
+    # a forecast, and the door that resumes or completes it.
+    icechunk_export_register_cli(sub)
     simulated_radar_register_cli(sub)
     verification_visuals_register_cli(sub)
     enprod_register_cli(sub)

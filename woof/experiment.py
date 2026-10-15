@@ -3991,7 +3991,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                 history_selection_module.HistorySelection.from_mapping(
                     dict(dom["output"]),
                     source=f"[[domain]] grid_id = {grid_id} of {source}",
-                    base_dir=output_base_dir))
+                    base_dir=output_base_dir, tree_wide=False))
 
         # Flags: root takes external specified LBCs, children are nested
         # -- WRF &bdy_control, bundle namelist.input specified=T,F,F,F /

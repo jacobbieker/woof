@@ -534,7 +534,10 @@ def main() -> int:
     parser.add_argument(
         "--watch-icechunk",
         action="store_true",
-        help="Continuously watch wrfout files and append each one to Icechunk as it lands",
+        help="Continuously watch wrfout files and append each one to Icechunk as it lands "
+        "(the store's root, every domain together; `woof go --icechunk` and "
+        "`woof icechunk-export --follow` write one group per domain and are "
+        "resumable)",
     )
     parser.add_argument(
         "--delete-after-icechunk",

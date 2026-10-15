@@ -121,7 +121,7 @@ def _loader_tables():
                            nest_lifecycle.DomainFollowConfig), {}),
         "domain.tiles": (streaming.STREAMING_KEYS,
                          (streaming.StreamingOptions,), {}),
-        "domain.output": (H.OUTPUT_KEYS, (H.HistorySelection,), {}),
+        "domain.output": (H.DOMAIN_OUTPUT_KEYS, (H.HistorySelection,), {}),
         "tiles": (streaming.STREAMING_KEYS, (streaming.StreamingOptions,),
                   {}),
         "output": (H.OUTPUT_KEYS, (H.HistorySelection,), {}),

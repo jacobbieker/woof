@@ -66,6 +66,16 @@ The same table configures the in-model hub-height wind diagnostic
 | `hub_sites` | string or array | unset | a sites.v1 JSON path (`woof energy sites`), or inline `{ site_id = "...", lat = ..., lon = ... }` tables, to sample per site |
 | `hub_sample_interval_s` | number | `60` | per-site sampling cadence in model seconds; needs `hub_sites` |
 
+The tree-wide table also asks `woof go` to export each history frame
+to an Icechunk repository while the forecast runs
+([PROGRESS.md](PROGRESS.md#exporting-frames-to-icechunk-while-the-run-goes)).
+A `[[domain]]` `output = { ... }` refuses this key: one repository holds
+every domain, one group each.
+
+| key | type | default | meaning |
+|---|---|---|---|
+| `icechunk` | string or table | unset | a store URL (`s3://bucket/prefix`, `gs://bucket/prefix`, `file:///path`) or a directory (relative to the config), or `{ url = "...", branch = "main", compress = true, zstd_clevel = 5, group_prefix = "", threads = 4 }`; `woof go --icechunk URL` replaces `url` |
+
 ## `[case_data]` -- the inputs a config-driven run declares
 
 `woof run CONFIG.toml` is the config-driven route, and `[case_data]` is
