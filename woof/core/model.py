@@ -174,6 +174,12 @@ class ExperimentState:
     #: Resolved at executor entry, then carried by run receipts.
     _pool_trim_policy = None
 
+    #: The executor's checkpoint writer while a leg that writes checkpoints
+    #: runs (woof.io.async_checkpoint), and the run's checkpoint receipt,
+    #: shared by every leg.  Class attributes for the reason above.
+    _checkpoint_writer = None
+    _checkpoint_receipt = None
+
     def node(self, grid_id: int) -> DomainNode:
         """Return one domain node by its configured grid identifier."""
         return self.nodes_by_grid_id[grid_id]
@@ -1624,7 +1630,6 @@ def execute_experiment(
     from woof.core.restart_request import RestartRequest
     restart_request = RestartRequest()
     requested_restart = [False]
-    from woof.core.clock import execute_schedule
     from woof.core.dycore import step
     from woof.core.state import refresh_model_time
 
@@ -1733,6 +1738,9 @@ def execute_experiment(
     dycore_state_workspace = model._dycore_state_workspace
     io_manager = model._io_manager
     restart_enabled = model.root.clock.spec.restart_ticks is not None
+    #: Opened immediately before the schedule runs (below) and closed --
+    #: drained -- on every exit from it.
+    checkpoint_writer = None
 
     validators = {}
     if validate_state:
@@ -2174,14 +2182,33 @@ def execute_experiment(
             status.pending_d2h = int(io_manager.pending)
 
     def on_restart(ticks) -> None:
+        op_started = time.perf_counter()
         if io_manager is not None:
-            io_manager.drain()
+            # A synchronous checkpoint waits for every queued history frame
+            # first.  An asynchronous one is ORDERED after them instead:
+            # its root member is published only once they are durable
+            # (woof.io.async_checkpoint), so the loop does not wait here.
+            if checkpoint_writer is None or not checkpoint_writer.asynchronous:
+                io_manager.drain()
             status.pending_d2h = int(io_manager.pending)
         if restart_handler is not None:
             restart_handler(model, ticks)
+            if (io_manager is not None and checkpoint_writer is not None
+                    and checkpoint_writer.asynchronous
+                    and not checkpoint_writer.wrote_this_op()):
+                # A handler that wrote no tree checkpoint ordered nothing
+                # after the history: drain it here instead, as before.
+                io_manager.drain()
+                status.pending_d2h = int(io_manager.pending)
             if requested_restart[0]:
+                # A requested checkpoint is acknowledged only once it is
+                # durable and published (woof.core.restart_request).
+                if checkpoint_writer is not None:
+                    checkpoint_writer.wait_published()
                 restart_request.acknowledge()
                 requested_restart[0] = False
+        if checkpoint_writer is not None:
+            checkpoint_writer.record_loop_stall(time.perf_counter() - op_started)
 
     def on_period_end(period, clocks) -> None:
         status.schedule_cursor = PERIOD_BEGIN
@@ -2217,6 +2244,11 @@ def execute_experiment(
         # boundary, after history resets and feedback have committed.
         if requested_restart[0]:
             on_restart(root_clock.ticks)
+        if checkpoint_writer is not None:
+            # A checkpoint that became durable since the last period is
+            # published HERE, on this thread, before the progress record
+            # below can name it.
+            checkpoint_writer.poll()
         if pool_trim_per_period:
             _trim_default_pool()
         now = time.perf_counter()
@@ -2313,20 +2345,47 @@ def execute_experiment(
                 None if _streamed(gid) is None
                 else _streamed(gid).maximum_map_factor()))
 
+    if restart_handler is not None:
+        from woof.io.async_checkpoint import open_checkpoint_writer
+        checkpoint_writer = open_checkpoint_writer(
+            model, experiment=seam_experiment)
+    try:
+        execution = _run_schedule(
+            model, schedule_dispatch=schedule_dispatch, steppers=steppers,
+            adaptive_driver=adaptive_driver, clocks=clocks,
+            skip_feedback_path=skip_feedback_path, start_period=start_period,
+            callbacks={"step": on_step, "force": on_force,
+                       "feedback_prepare": on_feedback_prepare,
+                       "feedback_commit": on_feedback_commit,
+                       "feedback_finalize": on_feedback_finalize,
+                       "history": on_history, "restart": on_restart,
+                       "domain_start": on_domain_start,
+                       "period_begin": on_period_begin,
+                       "period_end": on_period_end,
+                       "period_commit": on_period_commit})
+    except BaseException as error:
+        # Drained on every exit: the in-flight checkpoint (taken before
+        # whatever failed) is finished and published, or removed whole.
+        if checkpoint_writer is not None:
+            checkpoint_writer.close(error)
+        raise
+    if checkpoint_writer is not None:
+        checkpoint_writer.close()
+    if relocation_runner is not None:
+        relocation_runner.close_receipt(model)
+    return execution
+
+
+def _run_schedule(model, *, schedule_dispatch, steppers, adaptive_driver,
+                  clocks, skip_feedback_path, start_period, callbacks):
+    """Hand the executor's callbacks to the schedule walk (or a dispatcher)."""
+    from woof.core.clock import execute_schedule
+
     try:
         if schedule_dispatch is not None:
             execution = schedule_dispatch(
                 model=model, schedule=model.schedule,
-                step_bindings=steppers,
-                callbacks={"step": on_step, "force": on_force,
-                    "feedback_prepare": on_feedback_prepare,
-                    "feedback_commit": on_feedback_commit,
-                    "feedback_finalize": on_feedback_finalize,
-                    "history": on_history, "restart": on_restart,
-                    "domain_start": on_domain_start,
-                    "period_begin": on_period_begin,
-                    "period_end": on_period_end,
-                    "period_commit": on_period_commit},
+                step_bindings=steppers, callbacks=dict(callbacks),
                 adaptive_driver=adaptive_driver, clocks=clocks,
                 skip_feedback_path=skip_feedback_path,
                 start_period=start_period,
@@ -2338,15 +2397,18 @@ def execute_experiment(
                     if bool(model._resumed) else ()))
         else:
             execution = execute_schedule(
-                model.schedule, on_step=on_step, on_force=on_force,
+                model.schedule, on_step=callbacks["step"],
+                on_force=callbacks["force"],
                 on_period_steps=adaptive_driver,
-                on_feedback_prepare=on_feedback_prepare,
-                on_feedback_commit=on_feedback_commit,
-                on_feedback_finalize=on_feedback_finalize,
-                on_history=on_history, on_restart=on_restart,
-                on_domain_start=on_domain_start,
-                on_period_begin=on_period_begin, on_period_end=on_period_end,
-                on_period_commit=on_period_commit,
+                on_feedback_prepare=callbacks["feedback_prepare"],
+                on_feedback_commit=callbacks["feedback_commit"],
+                on_feedback_finalize=callbacks["feedback_finalize"],
+                on_history=callbacks["history"],
+                on_restart=callbacks["restart"],
+                on_domain_start=callbacks["domain_start"],
+                on_period_begin=callbacks["period_begin"],
+                on_period_end=callbacks["period_end"],
+                on_period_commit=callbacks["period_commit"],
                 skip_feedback_path=skip_feedback_path, clocks=clocks,
                 start_period=start_period,
                 started_grid_ids=(
@@ -2366,8 +2428,6 @@ def execute_experiment(
             # it too.
             from woof.core.dycore import reset_wrf_cfl_recording
             reset_wrf_cfl_recording()
-    if relocation_runner is not None:
-        relocation_runner.close_receipt(model)
     return execution
 
 

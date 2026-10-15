@@ -81,7 +81,6 @@ not cases.
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -92,7 +91,6 @@ import os
 from pathlib import Path
 import shlex
 import sys
-import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -2574,56 +2572,35 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-#: sha256 of files this process has already read whole, keyed by every
-#: stat field that moves when a file's bytes can.  A finished folder's
-#: re-run asks "are these still the bytes the receipt recorded?" at the
-#: front door, again in the route that lets the receipt stand in for the
-#: live index, and a third time in the verify-skip; without this each
-#: asking read every file again.
-_DIGEST_MEMO: OrderedDict[tuple, str] = OrderedDict()
-_DIGEST_MEMO_LOCK = threading.Lock()
-_DIGEST_MEMO_ENTRIES = 4096
-#: A file changed this recently can still change again inside its
-#: timestamps' resolution without either one moving, so its digest is
-#: read afresh next time instead of being remembered.
-_DIGEST_SETTLED_NS = 2_000_000_000
-#: The wall clock the settling rule reads.
-_digest_clock_ns = time.time_ns
+def existing_file_verification(path: Path):
+    """How a file already on disk was proven, and its sha256.
 
+    For the checks that ask whether an existing file still holds the
+    bytes a receipt recorded.  Under the default verification policy the
+    digest is reused, without reading, while the file's device, inode,
+    size, modification and change times are identical to those of the
+    full read that produced it -- in this process or an earlier one
+    (:mod:`woof.verify_stamps`); any write to it, any replacement of it,
+    and any file changed in the two seconds before it was read is read
+    again.  ``WOOF_VERIFY=full`` reads every byte every time.  A file
+    just downloaded is hashed with :func:`sha256_file`, because it has
+    never been asked about before.
 
-def _stat_identity(path: Path) -> tuple:
-    status = os.stat(path)
-    return (os.path.abspath(path), status.st_dev, status.st_ino,
-            status.st_size, status.st_mtime_ns, status.st_ctime_ns)
+    Returns a :class:`woof.verify_stamps.Verified`: ``digest`` and
+    ``how`` (``hashed``, ``memo`` or ``stamp``), which the manifests
+    record per file.
+    """
+
+    from woof import verify_stamps
+
+    return verify_stamps.file_sha256(
+        path, hasher=lambda target: sha256_file(Path(target)), min_bytes=0)
 
 
 def existing_file_digest(path: Path) -> str:
-    """sha256 of a file already on disk, read once while it is unchanged.
+    """sha256 of a file already on disk (:func:`existing_file_verification`)."""
 
-    For the checks that ask whether an existing file still holds the
-    bytes a receipt recorded.  The answer is remembered under the file's
-    path, device, inode, size, modification and change times, so any
-    write to it (and any replacement of it) is a new question; a file
-    written in the last two seconds is never remembered at all.  A file
-    just downloaded is hashed with :func:`sha256_file`, because it has
-    never been asked about before.
-    """
-
-    identity = _stat_identity(path)
-    with _DIGEST_MEMO_LOCK:
-        known = _DIGEST_MEMO.get(identity)
-        if known is not None:
-            _DIGEST_MEMO.move_to_end(identity)
-            return known
-    digest = sha256_file(path)
-    settled = (_digest_clock_ns() - max(identity[4], identity[5])
-               >= _DIGEST_SETTLED_NS)
-    if settled and _stat_identity(path) == identity:
-        with _DIGEST_MEMO_LOCK:
-            _DIGEST_MEMO[identity] = digest
-            while len(_DIGEST_MEMO) > _DIGEST_MEMO_ENTRIES:
-                _DIGEST_MEMO.popitem(last=False)
-    return digest
+    return existing_file_verification(path).digest
 
 
 def count_grib2_messages(path: Path) -> int:
@@ -2683,7 +2660,18 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 
 def write_fetch_manifest(out: Path, payload: dict) -> Path:
+    """Publish ``fetch-manifest.json``, stating the verification policy.
+
+    ``verification`` says under which rule the files already on disk
+    were proven (:func:`woof.verify_stamps.receipt`); each file row's
+    ``verified`` says how its own digest was, where the route records it.
+    """
+
+    from woof import verify_stamps
+
     path = out / FETCH_MANIFEST_NAME
+    if "verification" not in payload:
+        payload = {**payload, "verification": verify_stamps.receipt()}
     _atomic_write_text(
         path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return path
@@ -3728,12 +3716,14 @@ def _fetch_gfs_locked(*, cycle: datetime, hours: tuple[int, ...], area: Area,
         # swept before the transfers, receipts first.  Moving a payload
         # aside mid-run is what let an old manifest outlive the
         # bytes it claimed.
+        verified_how = "hashed"
         if path.exists():
             observed = count_grib2_messages(path)
             if observed != bar.expected:
                 raise ValueError(_existing_crop_refusal(
                     name, observed, bar.expected, levels))
-            digest = existing_file_digest(path)
+            proven = existing_file_verification(path)
+            digest, verified_how = proven.digest, proven.how
             recorded = prior_digests.get(name)
             if recorded is not None and digest != recorded:
                 raise ValueError(resume_digest_refusal(name))
@@ -3765,6 +3755,11 @@ def _fetch_gfs_locked(*, cycle: datetime, hours: tuple[int, ...], area: Area,
             # verify-skip, because dividing bytes by seconds means
             # bandwidth for one and sha256 throughput for the other.
             "downloaded": downloaded,
+            # How the sha256 below was proven this run: "hashed" (read),
+            # or reused from an earlier full read of the stat-identical
+            # file -- "memo" in this process, "stamp" in an earlier one
+            # (woof.verify_stamps; WOOF_VERIFY=full reads every byte).
+            "verified": verified_how,
             "sha256": digest, "url": url,
         }
 
@@ -4167,8 +4162,10 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
         # seconds would under-report the wall a caller waited.
         file_started = time.perf_counter()
         downloaded = not path.exists()
+        verified_how = "hashed"
         if path.exists():
-            digest = existing_file_digest(path)
+            proven = existing_file_verification(path)
+            digest, verified_how = proven.digest, proven.how
             recorded = prior_digests.get(name)
             if recorded is not None and digest != recorded:
                 raise ValueError(resume_digest_refusal(name))
@@ -4261,6 +4258,7 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
             "forecast_hour": hour, "bytes": path.stat().st_size,
             "seconds": round(time.perf_counter() - file_started, 6),
             "downloaded": downloaded,
+            "verified": verified_how,
             "sha256": digest, "url": url, "endpoint": endpoint_name,
             "grib2_messages": observed, "idx_records": idx_records,
         }
@@ -6650,11 +6648,16 @@ def _route_fetch_main(args, source: str) -> int:
         if not args.force_refetch:
             fetch_routes.check_prior_request(args.out, plan)
         loop = None
+        # Asked ONCE: the answer cannot change while this process holds
+        # the folder's lock, and each asking used to read every file of
+        # a finished request again (three times over for a 33 GB ICON
+        # cycle before preparation began).
+        cached = (not args.force_refetch
+                  and fetch_routes.request_cached(plan, args.out))
         # A run no host can hold is refused now, not waited for as posting.
-        if args.force_refetch or not fetch_routes.request_cached(plan, args.out):
+        if not cached:
             fetch_routes.refuse_unheld_plan(plan)
-        if as_posted and (args.force_refetch
-                          or not fetch_routes.request_cached(plan, args.out)):
+        if as_posted and not cached:
             loop = _posting_loop(source, cycle, args, leads=plan.leads,
                                  plan=plan, transport=args.transport)
         if loop is not None:
@@ -6665,9 +6668,7 @@ def _route_fetch_main(args, source: str) -> int:
         # offline and after the cycle has left the provider's retention.
         # Anything else asks whether the named cycle is published before a
         # byte moves, as the latest path did while resolving it.
-        if args.cycle != "latest" and (
-                args.force_refetch
-                or not fetch_routes.request_cached(plan, args.out)):
+        if args.cycle != "latest" and not cached:
             require_published_cycle(source, cycle, last, **options)
         # A declared donor is a second download of the same request.
         # Resolving latest already chose a cycle whose donor was
@@ -6833,8 +6834,14 @@ def _retrieve_inapplicable_refusal(source: str) -> str:
 def fetch_main(args) -> int:
     """``woof fetch``; exit 75 when an as-posted source fell behind its budget."""
 
+    from woof import verify_stamps
     from woof.fetch_as_posted import SourceBehind
 
+    try:
+        verify_stamps.apply(args)
+    except ValueError as error:
+        print(f"fetch: {error}", file=sys.stderr)
+        return 2
     try:
         return _fetch_main(args)
     except SourceBehind as error:
@@ -8147,6 +8154,8 @@ def register_cli(subparsers) -> None:
         "--no-probe", action="store_true",
         help="with --readiness: compute the schedule from the table only "
              "and ask no host")
+    from woof import verify_stamps
+    verify_stamps.add_argument(parser)
     parser.add_argument(
         "--force-refetch", action="store_true",
         help="move every existing file in --out aside (nothing is "

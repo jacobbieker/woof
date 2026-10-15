@@ -59,9 +59,40 @@ The digests inside that document -- the input-manifest hash, the
 prepared-cache content hash, and for a domain tree the preparation
 receipt -- are what the forecast stage binds against. `woof sim` reads
 them off the file and hands them to the runner. **The runner still
-recomputes every one of them and still refuses on any difference.**
+checks every one of them and still refuses on any difference.**
 Nothing is weakened by the relay; what you no longer have to be is a
 checksum courier.
+
+### How inputs are verified, and how often they are read
+
+Each stage proves the bytes it consumes: fetch checks the files already
+in `--data-dir`, a reused preparation checks the bundle, the forecast
+preflight checks every authority file and prepared-cache array, and
+after the run the forecast checks them again to refuse inputs that
+changed while it ran. Reading tens of gigabytes four times over was
+most of a re-run's wall on a slow disk, so a file (or cache array) is
+**read once**. The full read records a digest stamp: the file's device,
+inode, size, mtime and ctime with the digest. Later checks of the
+stat-identical file reuse it without reading (see "Verified once, not
+on every re-run" in DATA.md for the exact rule and the per-user store).
+
+- The **post-run check is therefore a stat check.** Each input is
+  compared, by those five fields, with the read that proved it at the
+  preflight. Any input written during the run moves its ctime, so it is
+  read again and refused. Only a change that leaves every field as it was
+  goes unseen: a raw device write, a filesystem whose change times cannot
+  be trusted, or a rewound clock. Run with `WOOF_VERIFY=full` (or `woof
+  go --verify-inputs full`) to have every check, the post-run one
+  included, read every byte again.
+- `report.json` records which happened in `input_verification`. Its
+  `preflight` and `post_run` each carry the policy, the rule, and how
+  many files and arrays were `hashed` against `memo_reused` (read
+  earlier in this process) and `stamp_reused` (read by an earlier run).
+  A reused preparation's decision records the same block as
+  `verification`. So do the fetch manifests, with a `verified` mark on
+  each file.
+- Files smaller than 1 MiB are always read; a stamp would cost more
+  than the read.
 
 ### A preparation the forecast can start before it finishes
 

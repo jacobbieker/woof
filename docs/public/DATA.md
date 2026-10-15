@@ -832,6 +832,43 @@ same `record_bars`, including `inventory_change_accepted`.
   (`gpuwm-fetch-manifest-v1`): source, cycle, area, and per-file
   name/role/bytes/SHA-256. Resume re-verifies existing files against
   the manifest's recorded SHA-256 as well as the per-file record bars.
+- **Verified once, not on every re-run.** Reading every byte again on
+  each re-run is slow for a large cycle. A finished 33 GB ICON cycle on
+  a slow network mount took about an hour just to re-hash before
+  preparation started. So after a full read proves a file's SHA-256,
+  woof records a *digest stamp*: the file's device, inode, size, mtime
+  and ctime, with the digest, the algorithm and when it was read. A later
+  check of the same file whose `stat` is **identical in every one of
+  those fields** reuses the digest without reading it. Any difference
+  is a full read: a new size, a rewrite (which always moves ctime, even
+  when `touch` puts mtime back), or a replaced file (new inode). So is
+  a missing, corrupt or unsettled stamp. A file changed less than 2 s
+  before it was read is never stamped. Large files are read by several
+  threads at once (`WOOF_VERIFY_WORKERS`, default 8 or the CPU count if
+  lower).
+  - Each manifest says how its files were proven: a `verification` block
+    (policy, stamp store, counts) and, per file, `verified`: `hashed`
+    (read now), `memo` (read earlier by this process) or `stamp` (read
+    by an earlier run, stat-identical since).
+  - Stamps live in a per-user cache (`~/.cache/woof/verify-stamps`, or
+    `$XDG_CACHE_HOME`, or `%LOCALAPPDATA%` on Windows), keyed by the
+    file's absolute path, so read-only and shared data trees are never
+    written to. `WOOF_VERIFY_STAMPS=<dir>` moves the store, and `=off`
+    turns it off.
+  - **What a stamp cannot see:** a change that leaves every one of those
+    `stat` fields as it was. That includes bytes rewritten underneath the
+    filesystem (a raw block-device write), a filesystem whose change times
+    cannot be trusted (some network and FUSE mounts, FAT/exFAT, and
+    Windows, whose `st_ctime` is the creation time), a clock set back so a
+    rewrite lands on the same nanoseconds, and a stamp forged by someone
+    who can already write your inputs.
+  - For an audit, `WOOF_VERIFY=full` (or `woof fetch`/`woof go
+    --verify-inputs full`) reads every byte at every check. It reuses no
+    digest and writes no stamp. An unknown `WOOF_VERIFY` value is refused
+    before anything runs.
+  - On Windows `full` is the default, because no stat field there is
+    certain to move when a file is rewritten. Set `WOOF_VERIFY=stamp` to
+    opt in to stamps anyway.
 
 ## The initial-condition provenance a wrfout carries
 

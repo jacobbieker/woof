@@ -9,6 +9,9 @@ preprocessor depend on the full forecast I/O implementation.
 from __future__ import annotations
 
 import hashlib
+import threading
+import weakref
+from types import MappingProxyType
 
 import numpy as np
 
@@ -136,12 +139,30 @@ def _host(value) -> np.ndarray:
     return np.asarray(value)
 
 
+def _c_bytes(host: np.ndarray):
+    """``host``'s C-order bytes as a buffer, copying only when it must.
+
+    ``hashlib`` reads any C-contiguous buffer, so a contiguous array is
+    hashed in place; ``tobytes()`` used to make a full second host copy of
+    every setup and boundary table on every checkpoint.  The bytes fed are
+    exactly the ``tobytes(order="C")`` bytes (PINNED by
+    tests/test_async_checkpoints.py), so no digest moves.
+    """
+    if not host.flags.c_contiguous:
+        host = np.ascontiguousarray(host)
+    try:
+        return memoryview(host)
+    except (TypeError, ValueError, BufferError):
+        # A dtype the buffer protocol cannot name (datetime64, ...).
+        return host.tobytes(order="C")
+
+
 def _digest_array(digest, name: str, value) -> None:
     host = _host(value)
     digest.update(name.encode())
     digest.update(str(host.shape).encode())
     digest.update(str(host.dtype).encode())
-    digest.update(host.tobytes())
+    digest.update(_c_bytes(host))
 
 
 def _update_setup_core(digest, state, *, error_type: type[Exception]) -> bool:
@@ -209,19 +230,149 @@ def _lateral_fingerprint_interval(digest, interval) -> None:
                               law.denominator_rate)
 
 
-def _update_lateral_fingerprint(digest, state) -> None:
-    """Append the exact historical LBC portion of the setup digest."""
+def _update_lateral_fingerprint(digest, state, intervals=None) -> None:
+    """Append the exact historical LBC portion of the setup digest.
+
+    ``intervals`` is the series already taken off ``state`` by a caller
+    that must hash exactly the intervals it keyed a cache on (a streamed
+    series can grow between two reads of it); ``None`` reads it here.
+    """
 
     boundaries = getattr(state, "lateral_boundaries", None)
     if boundaries is None:
         digest.update(b"lateral_boundaries=None;")
         return
+    if intervals is None:
+        intervals = tuple(boundaries.intervals)
     _lateral_fingerprint_header(
         digest, spec_bdy_width=boundaries.spec_bdy_width,
         spec_zone=boundaries.spec_zone, relax_zone=boundaries.relax_zone,
-        count=len(boundaries.intervals))
-    for interval in boundaries.intervals:
+        count=len(intervals))
+    for interval in intervals:
         _lateral_fingerprint_interval(digest, interval)
+
+
+# --------------------------------------------------------------------------
+# Per-inventory caches for the boundary half of the checkpoint identity.
+#
+# A checkpoint header carries the setup fingerprint (every interval's value
+# and tendency bytes) and, under the preserved/sealed forcing contracts, the
+# per-interval prefix rows (which also build an FP32 end frame per side).
+# Recomputing both on every hourly checkpoint re-read every boundary table
+# the run holds -- tens of GB on a 48 h regional run -- for an answer that
+# cannot change: a ``BoundaryInterval``'s tables are immutable by
+# construction (``woof.ingest.lateral_bc._immutable_boundary_array``: a
+# read-only array whose base chain ends in ``bytes``).
+#
+# PINNED, and what keeps the caches exact rather than plausible:
+#   * an entry is used only while EVERY interval it was computed over is the
+#     same live object (weak references, compared with ``is``), in the same
+#     order, under the same spec/relax controls and -- for the setup digest,
+#     which is one stream -- after the same setup-core bytes;
+#   * an interval is cacheable only if its object graph is frozen and every
+#     table in it is immutable by the rule above.  Anything else (a test
+#     double, a hand-built table, a device array) is hashed in full every
+#     time, exactly as before;
+#   * any change to the inventory -- an appended, replaced, dropped or
+#     reordered interval, a new controls triple, a moved setup core -- is a
+#     cache miss and a full recompute.
+# The bytes hashed on a miss are the bytes always hashed; the caches only
+# decide whether to hash them again.
+# --------------------------------------------------------------------------
+
+_CACHE_LOCK = threading.Lock()
+_CACHE_ENTRIES = 8
+_SETUP_FINGERPRINT_CACHE: dict = {}
+_PREFIX_ROW_CACHE: dict = {}
+
+
+def _immutable_table(array) -> bool:
+    """Whether no writer can reach ``array``'s memory (see the block above)."""
+    link = array
+    while isinstance(link, np.ndarray):
+        if link.flags.writeable:
+            return False
+        link = link.base
+    return isinstance(link, bytes)
+
+
+def _frozen(value) -> bool:
+    params = getattr(type(value), "__dataclass_params__", None)
+    return params is not None and bool(params.frozen)
+
+
+def _cacheable_interval(interval) -> bool:
+    """Whether ``interval``'s hashed content is immutable for its lifetime."""
+    if not _frozen(interval):
+        return False
+    fields = getattr(interval, "fields", None)
+    if not isinstance(fields, MappingProxyType):
+        return False
+    for boundary in fields.values():
+        if not _frozen(boundary):
+            return False
+        for side_name in _SIDES:
+            side = getattr(boundary, side_name, None)
+            if side is None or not _frozen(side):
+                return False
+            tables = [side.value, side.tendency]
+            law = getattr(side, "time_law", None)
+            if law is not None:
+                if not _frozen(law):
+                    return False
+                tables += [law.quadratic, law.denominator_rate]
+            if not all(_immutable_table(table) for table in tables):
+                return False
+    return True
+
+
+def _weak_refs(intervals):
+    """Weak references to ``intervals``, or ``None`` when one cannot have one."""
+    try:
+        return tuple(weakref.ref(interval) for interval in intervals)
+    except TypeError:
+        return None
+
+
+def _same_objects(refs, intervals) -> bool:
+    return (len(refs) == len(intervals)
+            and all(ref() is interval
+                    for ref, interval in zip(refs, intervals)))
+
+
+def _remember(cache: dict, key, value) -> None:
+    cache.pop(key, None)
+    cache[key] = value
+    while len(cache) > _CACHE_ENTRIES:
+        cache.pop(next(iter(cache)))
+
+
+def _cached_lateral_fingerprint(digest, state) -> str:
+    """Finish the setup digest, reusing an unchanged inventory's answer."""
+    boundaries = getattr(state, "lateral_boundaries", None)
+    if boundaries is None:
+        _update_lateral_fingerprint(digest, state)
+        return digest.hexdigest()
+    intervals = tuple(boundaries.intervals)
+    refs = (_weak_refs(intervals)
+            if all(_cacheable_interval(interval) for interval in intervals)
+            else None)
+    key = None
+    if refs is not None:
+        key = (digest.copy().hexdigest(),
+               repr((boundaries.spec_bdy_width, boundaries.spec_zone,
+                     boundaries.relax_zone)),
+               tuple(id(interval) for interval in intervals))
+        with _CACHE_LOCK:
+            entry = _SETUP_FINGERPRINT_CACHE.get(key)
+        if entry is not None and _same_objects(entry[0], intervals):
+            return entry[1]
+    _update_lateral_fingerprint(digest, state, intervals)
+    result = digest.hexdigest()
+    if key is not None:
+        with _CACHE_LOCK:
+            _remember(_SETUP_FINGERPRINT_CACHE, key, (refs, result))
+    return result
 
 
 def setup_core_fingerprint(
@@ -352,6 +503,27 @@ def lateral_boundary_prefix_row(interval, *,
     """
 
     built = None if rebuilt_end_frame else built_end_frame(interval)
+    refs = (_weak_refs((interval,)) if _cacheable_interval(interval)
+            else None)
+    key = None
+    if refs is not None:
+        key = (id(interval), bool(rebuilt_end_frame), built)
+        with _CACHE_LOCK:
+            entry = _PREFIX_ROW_CACHE.get(key)
+        if entry is not None and _same_objects(entry[0], (interval,)):
+            return _copy_prefix_row(entry[1])
+    row = _lateral_boundary_prefix_row(interval, built)
+    if key is not None:
+        with _CACHE_LOCK:
+            _remember(_PREFIX_ROW_CACHE, key, (refs, _copy_prefix_row(row)))
+    return row
+
+
+def _copy_prefix_row(row: dict) -> dict:
+    return {**row, "fields": list(row["fields"])}
+
+
+def _lateral_boundary_prefix_row(interval, built) -> dict:
     digest = hashlib.sha256()
     start_frame = hashlib.sha256()
     end_frame = hashlib.sha256()
@@ -447,9 +619,26 @@ def setup_fingerprint(state, *, error_type: type[Exception] = ValueError) -> str
 
     digest = hashlib.sha256()
     nested = _update_setup_core(digest, state, error_type=error_type)
-    if not nested:
-        _update_lateral_fingerprint(digest, state)
-    return digest.hexdigest()
+    if nested:
+        return digest.hexdigest()
+    return _cached_lateral_fingerprint(digest, state)
+
+
+def setup_fingerprints(state, *, error_type: type[Exception] = ValueError
+                       ) -> tuple[str, str]:
+    """``(setup_core_fingerprint, setup_fingerprint)`` from ONE core pass.
+
+    The two digests share their setup-core prefix byte for byte, so a
+    writer that records both (the preserved and sealed forcing contracts)
+    reads the core arrays once instead of twice.
+    """
+
+    digest = hashlib.sha256()
+    nested = _update_setup_core(digest, state, error_type=error_type)
+    core = digest.copy().hexdigest()
+    if nested:
+        return core, digest.hexdigest()
+    return core, _cached_lateral_fingerprint(digest, state)
 
 
 #: The dycore's exported advective forcing pair (WRF RTHFTEN/RQVFTEN) as
@@ -512,4 +701,5 @@ __all__ = [
     "lateral_boundary_prefix_identity",
     "setup_core_fingerprint",
     "setup_fingerprint",
+    "setup_fingerprints",
 ]

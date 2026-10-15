@@ -4,6 +4,36 @@
 
 New:
 
+- Checkpoints no longer stop the forecast while they are written. The
+  device state is copied into page-locked host memory on a side stream.
+  The model goes on stepping, and a background thread writes, `fsync`s and
+  renames the set. On a 294 x 506 x 256 domain each hourly checkpoint used
+  to stall the loop for a median 386 s with the GPU idle (35% of the run).
+  A checkpoint becomes the resume point (`last_checkpoint`, the step log,
+  retirement of older sets) only once it is durable. At most one is in
+  flight; if the next comes due first, the model waits and says so.
+  Every exit, including a failure or a signal, finishes or removes the
+  checkpoint in flight, and a failed write publishes nothing. History
+  frames are no longer drained before each checkpoint; the root member
+  is published only after the frames at or before its instant are
+  durable. The archives are the synchronous archives (same members,
+  order and header, apart from `created`), and results are bit-identical.
+  `[output] async_checkpoints = false` or `WOOF_ASYNC_CHECKPOINTS=0` turns
+  it off. A checkpoint is written synchronously, with the reason printed
+  and recorded, for a `[tiles]` streamed domain, the sealed forcing
+  extension, a state on several GPUs, too little host RAM, or no
+  page-locked memory. The receipt's `checkpoint_writes` block records the
+  mode, any fallback reasons, and each checkpoint's model-loop stall. See
+  PREPARED-RESTART.md.
+- The synchronous checkpoint writer copies one member at a time through
+  one reusable page-locked buffer instead of copying the whole state to
+  the host first. The files are byte-identical. On a 1.5 GiB test state,
+  peak host RSS during the write fell from 1552 MiB to 78 MiB above the
+  process baseline, and the write took 6 s instead of 12-17 s. The setup
+  fingerprint and forcing-prefix rows in each header are cached per
+  boundary inventory instead of rehashing every boundary table at every
+  checkpoint, and the digests hash arrays in place instead of through a
+  `tobytes()` copy.
 - `woof go` can export history frames to Icechunk while the forecast runs.
   Set `[output] icechunk = { url = "s3://..." }` in the config (also
   `gs://`, `file://` or a directory), or pass `--icechunk URL`. Before,
@@ -505,6 +535,37 @@ New:
 
 Changed:
 
+- Inputs are verified once, not on every re-run. Re-running `woof go`
+  on a finished 33 GB ICON cycle spent about 66 minutes in the fetch
+  stage re-hashing files it had already proven. The forecast preflight
+  and the post-run check then read the prepared inputs again.
+  - After a full read proves a file's or prepared-cache array's SHA-256,
+    woof keeps a digest stamp of the file's device, inode, size, mtime and
+    ctime in a per-user cache (`~/.cache/woof/verify-stamps`;
+    `WOOF_VERIFY_STAMPS` moves it, or `off` disables it). A later check of
+    a stat-identical file reuses the digest without reading it. Any
+    differing field, or a missing or corrupt stamp, means a full read, and
+    a file changed less than 2 s before its read is never stamped. This
+    applies to `woof fetch`'s already-present check, `woof go`'s
+    reused-preparation check, and the forecast preflight.
+  - The post-run "inputs changed during execution" check is now a stat
+    comparison against the preflight's reads. A rewrite always moves
+    ctime, so a rewritten input is still refused. A change that keeps
+    every stat field is not seen; `WOOF_VERIFY=full` or
+    `--verify-inputs full` on `woof fetch`/`woof go` reads every byte at
+    every check, as before. `full` is the default on Windows, where
+    `st_ctime` is the creation time. An unknown `WOOF_VERIFY` is refused
+    before anything is fetched or read.
+  - Receipts say which way each input was proven. Fetch manifests have a
+    `verification` block and a per-file `verified` (`hashed`, `memo` or
+    `stamp`), `report.json` has `input_verification.preflight`/`post_run`,
+    and a reused preparation's decision has `verification`.
+  - Full reads are faster too. Files and arrays are read 8 at a time
+    (`WOOF_VERIFY_WORKERS`) in 16 MiB blocks; prepared arrays are hashed
+    without loading them into memory. A table-route fetch (ICON, the DWD
+    tree) now asks once whether the request is already on disk. Before,
+    it asked up to three times, re-reading every file each time. See
+    DATA.md and PIPELINE-STAGES.md.
 - Hindcast defaults are now the cost-efficient end of the requirement.
   On the US + EU-offshore partition (AWS spot, central) they bring the
   year from about $439k (200 m, 70 levels, 8 h runs with 2 h spin-up, on

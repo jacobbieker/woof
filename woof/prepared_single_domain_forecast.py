@@ -1507,6 +1507,11 @@ class PreparedForecastInputs:
     #: Ephemeral immutable mappings verified by this sealed direct preflight.
     #: These change no run authority or serialized receipt identity.
     cache_payload: object | None = field(default=None, repr=False, compare=False)
+    #: How the preflight proved its inputs (:func:`woof.verify_stamps.receipt`):
+    #: the verification policy and the read/stamp counts.  Receipt only; it
+    #: binds nothing.
+    input_verification: Mapping[str, object] | None = field(
+        default=None, compare=False)
 
     @property
     def execution_plan(self):
@@ -1540,6 +1545,41 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _input_sha256(path: Path) -> str:
+    """sha256 of a bound input, reused while the file is stat-identical.
+
+    The preflight's and the post-run check's reader for the authority
+    files: under the default policy a file whose (device, inode, size,
+    mtime_ns, ctime_ns) is identical to the full read that last proved it
+    is not read again (:mod:`woof.verify_stamps`); ``WOOF_VERIFY=full``
+    always reads.  Small files are always read.
+    """
+    from woof import verify_stamps
+    return verify_stamps.file_sha256(
+        path, hasher=lambda target: _sha256(Path(target))).digest
+
+
+def _recording_input_verification(preflight):
+    """Record, on the inputs a preflight returns, how it proved them.
+
+    ``input_verification`` is :func:`woof.verify_stamps.receipt` over every
+    verification the preflight made: the policy, and how many files and
+    cache arrays were read against how many a digest stamp vouched for.
+    """
+    import functools
+
+    @functools.wraps(preflight)
+    def recorded(*args, **kwargs):
+        from woof import verify_stamps
+        verify_stamps.policy()       # a bad WOOF_VERIFY refuses first
+        with verify_stamps.collecting() as tally:
+            inputs = preflight(*args, **kwargs)
+        return replace(inputs, input_verification=MappingProxyType(
+            verify_stamps.receipt(tally)))
+
+    return recorded
 
 
 def _canonical(value) -> str:
@@ -6554,6 +6594,7 @@ def _retained_preflight_payload(reader, *, layout, head):
     return _CachePayload(reader, log=lambda _: None)
 
 
+@_recording_input_verification
 def preflight_prepared_forecast(
         *, source: str, prepared_root: Path, proof_sha256: str | None = None,
         source_manifest_sha256: str,
@@ -7295,7 +7336,7 @@ def preflight_prepared_forecast(
         **_thompson_authority_paths(physics_receipt),
     })
     file_sha256 = MappingProxyType({
-        name: _sha256(path) for name, path in authority_paths.items()
+        name: _input_sha256(path) for name, path in authority_paths.items()
     })
     if ((head is None and file_sha256["proof"] != proof_sha256)
             or ("source_manifest" in file_sha256
@@ -7431,18 +7472,37 @@ def _seal_streamed_inputs(inputs: PreparedForecastInputs, *,
     return replace(sealed_inputs, stream_head=head)
 
 
-def _verify_inputs_unchanged(inputs: PreparedForecastInputs) -> None:
-    _verify_thompson_runtime_environment(inputs.physics_receipt)
-    current = {
-        name: _sha256(path) for name, path in inputs.authority_paths.items()
-    }
-    if current != dict(inputs.file_sha256):
-        raise RuntimeError("prepared forecast inputs changed during execution")
-    verified = PreparedCacheReader(
-        inputs.prepared_cache_path,
-        expected_identity=inputs.cache_identity).verify_all()
-    if verified["content_sha256"] != inputs.cache_reader.content_sha256:
-        raise RuntimeError("prepared cache changed during execution")
+def _verify_inputs_unchanged(inputs: PreparedForecastInputs) -> dict:
+    """Refuse a forecast whose inputs changed while it ran; say how it looked.
+
+    Under the default policy this is a STAT check: every authority file and
+    cache array the preflight proved is compared, by (device, inode, size,
+    mtime_ns, ctime_ns), with the full read that proved it, and only one
+    that differs -- or that was too freshly written to be stamped -- is read
+    again (:mod:`woof.verify_stamps`).  Any write through the filesystem
+    moves ``ctime``, so a file edited during the run is re-read and refused.
+    A change that preserves every stat field (a raw block-device write, a
+    filesystem whose change times cannot be trusted) is not seen;
+    ``WOOF_VERIFY=full`` re-reads every byte here, as this check always did
+    before stamps.  Returns the verification receipt for the report.
+    """
+    from woof import verify_stamps
+
+    with verify_stamps.collecting() as tally:
+        _verify_thompson_runtime_environment(inputs.physics_receipt)
+        current = {
+            name: _input_sha256(path)
+            for name, path in inputs.authority_paths.items()
+        }
+        if current != dict(inputs.file_sha256):
+            raise RuntimeError(
+                "prepared forecast inputs changed during execution")
+        verified = PreparedCacheReader(
+            inputs.prepared_cache_path,
+            expected_identity=inputs.cache_identity).verify_all()
+        if verified["content_sha256"] != inputs.cache_reader.content_sha256:
+            raise RuntimeError("prepared cache changed during execution")
+    return verify_stamps.receipt(tally)
 
 
 def _consume_due_native_refl_10cm(state, ticks: int, consumer, *,
@@ -9688,7 +9748,18 @@ def run_prepared_forecast(
     def restart_handler(tree, ticks):
         from woof.io.restart import write_tree_restart
         valid = exp.start_time + timedelta(seconds=ticks / tree.schedule.clock.tick_den)
-        started = time.perf_counter()
+
+        def published(path, info):
+            # Called once the set is DURABLE -- here for a synchronous
+            # write, at a later period commit for an asynchronous one
+            # (woof.io.async_checkpoint) -- so neither the report's list
+            # nor the step log can name a checkpoint that is not on disk.
+            checkpoints.append(str(Path(path).resolve()))
+            checkpoint_ticks[int(ticks)] = checkpoints[-1]
+            step_log.restart_written(
+                domain=exp.root.grid_id, valid_time=valid, path=path,
+                wall_seconds=float(info["wall_seconds"]))
+
         # Written between two model steps, at the stop tick too: its own
         # record, sized from the state it writes, or the supervisor times it
         # as a step (see runtime._writing_progress).
@@ -9698,13 +9769,9 @@ def run_prepared_forecast(
             # This door publishes no declared experiment, so it names the
             # model-chosen epssm itself: a child downscaled from the
             # checkpoint inherits that label (A181).
-            tree._last_checkpoint = write_tree_restart(
-                outdir, tree, valid, auto_epssm=exp.auto_epssm)
-        checkpoints.append(str(Path(tree._last_checkpoint).resolve()))
-        checkpoint_ticks[int(ticks)] = checkpoints[-1]
-        step_log.restart_written(
-            domain=exp.root.grid_id, valid_time=valid,
-            path=tree._last_checkpoint, wall_seconds=time.perf_counter() - started)
+            write_tree_restart(
+                outdir, tree, valid, auto_epssm=exp.auto_epssm,
+                on_published=published, progress_callback=observer)
 
     # Armed immediately before integration and disarmed by the first
     # completed step: the compile this names is paid inside step 1, and
@@ -9933,7 +10000,7 @@ def run_prepared_forecast(
     runtime._finalizing_progress(observer, "verify-inputs",
         work_bytes=inputs.cache_reader.payload_bytes + sum(
             path.stat().st_size for path in inputs.authority_paths.values()))
-    _verify_inputs_unchanged(inputs)
+    post_run_verification = _verify_inputs_unchanged(inputs)
     # The same gate, told what it is looking at.  The bare ``!=`` this
     # replaced could not tell an implementation that changed from a
     # ``git`` that failed to spawn or from a scratch file this very run
@@ -9957,6 +10024,7 @@ def run_prepared_forecast(
         "schema": REPORT_SCHEMA,
         "status": "PASS",
         "pool_trim": getattr(model, "_pool_trim_policy", None),
+        "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
         "source": inputs.source,
         "prepared_layout": inputs.layout,
         "scope": (
@@ -10157,6 +10225,15 @@ def run_prepared_forecast(
             "direct_wrf_export_source": inputs.export_source_receipt,
             "authority_sha256": dict(inputs.file_sha256),
         },
+        # HOW the inputs above were proven, at the preflight and again
+        # after the run: the verification policy, and how many files and
+        # cache arrays were read against how many a digest stamp of the
+        # stat-identical file vouched for (woof.verify_stamps).
+        "input_verification": {
+            "preflight": (None if inputs.input_verification is None
+                          else dict(inputs.input_verification)),
+            "post_run": post_run_verification,
+        },
     }
     # Added rather than inlined above, and only when [tiles] was
     # configured: an unconfigured run must produce the report it produced
@@ -10291,7 +10368,9 @@ def run_prepared_forecast(
         # step receipts are incomplete refuses a clean capsule here.
         receipts={"report": {"path": str((outdir / "report.json").resolve())},
                   **_seam_capsule_receipts(model),
-                  "pool_trim": getattr(model, "_pool_trim_policy", None)},
+                  "pool_trim": getattr(model, "_pool_trim_policy", None),
+                  "checkpoint_writes": getattr(
+                      model, "_checkpoint_receipt", None)},
     )
     _atomic_json(progress_path, {
         "schema": PROGRESS_SCHEMA,

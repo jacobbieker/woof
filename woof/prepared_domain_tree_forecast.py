@@ -216,6 +216,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _input_sha256(path: Path) -> str:
+    """sha256 of a bound tree input, reused while the file is stat-identical.
+
+    The tree preflight's and post-run check's reader for its authorities,
+    statics and receipts (:func:`woof.prepared_single_domain_forecast._input_sha256`,
+    :mod:`woof.verify_stamps`); ``WOOF_VERIFY=full`` always reads.
+    """
+    from woof import verify_stamps
+    return verify_stamps.file_sha256(
+        path, hasher=lambda target: _sha256(Path(target))).digest
+
+
 def _canonical(value) -> str:
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
@@ -684,6 +696,10 @@ class PreparedTreeInputs:
     #: The preflight's own arguments, so the seal runs the same preflight
     #: again on the sealed tree.
     preflight_arguments: Mapping[str, object] | None = None
+    #: How the preflight proved its inputs (:func:`woof.verify_stamps.receipt`):
+    #: the verification policy and the read/stamp counts.  Receipt only.
+    input_verification: Mapping[str, object] | None = field(
+        default=None, compare=False)
 
 
 def _with_terrain_acoustics(inputs: PreparedTreeInputs) -> PreparedTreeInputs:
@@ -1724,6 +1740,7 @@ def validate_physics_profile(exp, *, source: str, profile: str | None):
         exp, source=source, profile=profile, all_domains=True)
 
 
+@prepared_single._recording_input_verification
 def preflight_prepared_tree(
     *,
     prepared_root: Path,
@@ -2185,13 +2202,13 @@ def preflight_prepared_tree(
         if head_root:
             # No receipt at the head: the root's static cache is bound by
             # the cache identity the head's digest carries.
-            if identity.get("static_cache_sha256") != _sha256(static_path):
+            if identity.get("static_cache_sha256") != _input_sha256(static_path):
                 raise ValueError(
                     f"{label} static cache differs from the prepared head's "
                     "root identity")
             hashes = MappingProxyType({
-                "static": _sha256(static_path),
-                "geometry_receipt": _sha256(geometry_path),
+                "static": _input_sha256(static_path),
+                "geometry_receipt": _input_sha256(geometry_path),
             })
         else:
             _validate_domain_receipt(
@@ -2204,11 +2221,11 @@ def preflight_prepared_tree(
             )
             hashes = MappingProxyType(
                 {
-                    "cache_header": _sha256(cache / "header.json"),
+                    "cache_header": _input_sha256(cache / "header.json"),
                     "cache_content": reader.content_sha256,
-                    "static": _sha256(static_path),
-                    "geometry_receipt": _sha256(geometry_path),
-                    "domain_receipt": _sha256(domain_receipt_path),
+                    "static": _input_sha256(static_path),
+                    "geometry_receipt": _input_sha256(geometry_path),
+                    "domain_receipt": _input_sha256(domain_receipt_path),
                 }
             )
         bundles.append(
@@ -2288,14 +2305,14 @@ def preflight_prepared_tree(
     execution_plan = resolve_execution_plan(exp)
     authority_hashes = MappingProxyType(
         {
-            **({"prepared_head": _sha256(receipt_path)} if head is not None
+            **({"prepared_head": _input_sha256(receipt_path)} if head is not None
                else {
-                   "preparation_receipt": _sha256(receipt_path),
-                   "artifact_receipt": _sha256(artifact_receipt_path),
-                   "artifact_manifest": _sha256(artifact_manifest_path),
+                   "preparation_receipt": _input_sha256(receipt_path),
+                   "artifact_receipt": _input_sha256(artifact_receipt_path),
+                   "artifact_manifest": _input_sha256(artifact_manifest_path),
                }),
-            "experiment_config": _sha256(experiment_config),
-            **{name: _sha256(path) for name, path in mapped_paths.items()},
+            "experiment_config": _input_sha256(experiment_config),
+            **{name: _input_sha256(path) for name, path in mapped_paths.items()},
         }
     )
     chained_head = (str(head["head_sha256"]) if head is not None
@@ -2344,13 +2361,28 @@ def _prepared_input_bytes(inputs: PreparedTreeInputs) -> int:
                   for path in inputs.statics_corridor_cache_path or ()))
 
 
-def _verify_inputs_unchanged(inputs: PreparedTreeInputs) -> None:
+def _verify_inputs_unchanged(inputs: PreparedTreeInputs) -> dict:
+    """Refuse a tree whose inputs changed while it ran; the receipt of how.
+
+    A stat check under the default policy, a full re-read under
+    ``WOOF_VERIFY=full`` -- exactly as the single-domain runner's
+    (:func:`woof.prepared_single_domain_forecast._verify_inputs_unchanged`,
+    which states what a stat check cannot see).
+    """
+    from woof import verify_stamps
+
+    with verify_stamps.collecting() as tally:
+        _verify_tree_inputs_unchanged(inputs)
+    return verify_stamps.receipt(tally)
+
+
+def _verify_tree_inputs_unchanged(inputs: PreparedTreeInputs) -> None:
     current = {
-        "preparation_receipt": _sha256(inputs.preparation_receipt_path),
-        "artifact_receipt": _sha256(inputs.artifact_receipt_path),
-        "artifact_manifest": _sha256(inputs.artifact_manifest_path),
-        "experiment_config": _sha256(inputs.experiment_config),
-        **{name: _sha256(path)
+        "preparation_receipt": _input_sha256(inputs.preparation_receipt_path),
+        "artifact_receipt": _input_sha256(inputs.artifact_receipt_path),
+        "artifact_manifest": _input_sha256(inputs.artifact_manifest_path),
+        "experiment_config": _input_sha256(inputs.experiment_config),
+        **{name: _input_sha256(path)
            for name, path in inputs.mapped_authority_paths.items()},
     }
     if current != dict(inputs.authority_sha256):
@@ -2360,17 +2392,17 @@ def _verify_inputs_unchanged(inputs: PreparedTreeInputs) -> None:
         # object that was actually cropped from during the run.
         for path, grid_id in zip(inputs.statics_corridor_cache_path,
                                  sorted(inputs.statics_corridor)):
-            if _sha256(path) != inputs.statics_corridor[grid_id].cache_sha256:
+            if _input_sha256(path) != inputs.statics_corridor[grid_id].cache_sha256:
                 raise RuntimeError(
                     f"prepared statics corridor d{grid_id:02d} changed "
                     "during execution")
     for bundle in inputs.domains:
         observed = {
-            "cache_header": _sha256(bundle.cache / "header.json"),
+            "cache_header": _input_sha256(bundle.cache / "header.json"),
             "cache_content": bundle.cache_reader.verify_all()["content_sha256"],
-            "static": _sha256(bundle.static_path),
-            "geometry_receipt": _sha256(bundle.geometry_receipt_path),
-            "domain_receipt": _sha256(bundle.domain_receipt_path),
+            "static": _input_sha256(bundle.static_path),
+            "geometry_receipt": _input_sha256(bundle.geometry_receipt_path),
+            "domain_receipt": _input_sha256(bundle.domain_receipt_path),
         }
         if observed != dict(bundle.authority_sha256):
             raise RuntimeError(
@@ -4045,22 +4077,27 @@ def run_prepared_tree(
 
     def restart_handler(tree, ticks):
         valid = exp.start_time + timedelta(seconds=ticks / tree.schedule.clock.tick_den)
-        restart_started = time.perf_counter()
+
+        def published(path, info):
+            # WRF prints `Timing for Writing restart for domain N`.  Logged
+            # once the set is durable: synchronously that is the blocking
+            # write WRF's number describes; asynchronously it is snapshot
+            # to durable (woof.io.async_checkpoint), the loop having paid
+            # only the snapshot.
+            step_log.restart_written(
+                domain=exp.root.grid_id, valid_time=valid, path=path,
+                wall_seconds=float(info["wall_seconds"]))
+
         # Written between two model steps, at the stop tick too: its own
         # record, sized from the state it writes, or the supervisor times it
         # as a step (see runtime._writing_progress).
         with runtime._writing_progress(
                 observer, "checkpoint",
                 work_bytes=runtime._checkpoint_work_bytes(tree)):
-            tree._last_checkpoint = write_tree_restart(
+            write_tree_restart(
                 outdir, tree, valid,
-                sealed_forcing_extension=sealed_forcing_extension)
-        # WRF prints `Timing for Writing restart for domain N`, and this
-        # one IS the blocking synchronous write WRF's number describes.
-        step_log.restart_written(
-            domain=exp.root.grid_id, valid_time=valid,
-            path=tree._last_checkpoint,
-            wall_seconds=time.perf_counter() - restart_started)
+                sealed_forcing_extension=sealed_forcing_extension,
+                on_published=published, progress_callback=observer)
 
     def progress_callback(**event):
         observe_current_counters(model, start_time=exp.start_time)
@@ -4348,9 +4385,10 @@ def run_prepared_tree(
         work_bytes=(None if initialization is not None else
                     _prepared_input_bytes(inputs)))
     if initialization is None:
-        _verify_inputs_unchanged(inputs)
+        post_run_verification = _verify_inputs_unchanged(inputs)
     else:
         initialization.verify_inputs(inputs)
+        post_run_verification = None
     final_identity = _runtime_source_identity()
     moved = _runtime_source_identity_change(runtime_identity, final_identity)
     if moved is not None:
@@ -4451,6 +4489,7 @@ def run_prepared_tree(
         "timing_seconds": timing,
         "executor": {
             "pool_trim": getattr(model, "_pool_trim_policy", None),
+            "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
             "steps": int(execution.steps),
             "forces": int(execution.forces),
             "feedback_calls": int(execution.feedback_calls),
@@ -4527,6 +4566,14 @@ def run_prepared_tree(
                 f"d{bundle.grid_id:02d}": dict(bundle.authority_sha256)
                 for bundle in inputs.domains
             },
+        },
+        # HOW those inputs were proven at the preflight and after the run
+        # (woof.verify_stamps); ``post_run`` is None where the companion
+        # initialization owns the post-run check.
+        "input_verification": {
+            "preflight": (None if inputs.input_verification is None
+                          else dict(inputs.input_verification)),
+            "post_run": post_run_verification,
         },
         "runtime_source_identity": runtime_identity,
         # Present only on a run bound at its prepared head: the head, the
@@ -4626,7 +4673,8 @@ def run_prepared_tree(
         receipts={"run_receipt": {
             "path": str((evidence / "run-receipt.json").resolve())},
             **_seam_capsule_receipts(model),
-            "pool_trim": getattr(model, "_pool_trim_policy", None)},
+            "pool_trim": getattr(model, "_pool_trim_policy", None),
+            "checkpoint_writes": getattr(model, "_checkpoint_receipt", None)},
     )
     runtime._finalizing_progress(observer, "publish-completion")
     _atomic_json(

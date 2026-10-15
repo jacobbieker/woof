@@ -1706,6 +1706,18 @@ class AsyncDomainWrfoutWriter:
     _pending_bytes = 0
     _identity_bytes = 0
     _device = None
+    #: Tickets admitted to the worker, and tickets it has finished with
+    #: (published, skipped by an abort, or failed), in admission order --
+    #: the worker is one FIFO thread.  A checkpoint ordered after the
+    #: frames admitted so far waits for ``_finished_count`` to reach the
+    #: ``_admitted_count`` it captured (:meth:`wait_finished`).  Class
+    #: defaults for the same ``object.__new__`` shells as above.
+    _admitted_count = 0
+    _finished_count = 0
+    #: The ordinal (1-based, in admission order) of the first ticket that
+    #: finished WITHOUT becoming durable -- failed, or skipped by an abort --
+    #: or ``None``.  A barrier fails only if it covers that ticket.
+    _first_undurable = None
 
     @staticmethod
     def _new_ticket_queue() -> queue.Queue:
@@ -1839,6 +1851,8 @@ class AsyncDomainWrfoutWriter:
                         ticket, timeout=_ASYNC_WRITER_POLL_SECONDS)
                 except queue.Full:
                     continue
+                with self._condition:
+                    self._admitted_count += 1
                 return
         finally:
             # Queue.put may unwind for cancellation, KeyboardInterrupt, or a
@@ -2123,6 +2137,7 @@ class AsyncDomainWrfoutWriter:
                 self._queue.task_done()
                 return
             staging_consumed = False
+            durable = False
             writer = None
             ticket_bytes = int(getattr(ticket, "nbytes", 0) or 0)
             try:
@@ -2187,6 +2202,7 @@ class AsyncDomainWrfoutWriter:
                     with self._condition:
                         self._completed_records.append(proof)
                 self.paths.append(ticket.path)
+                durable = True
                 # The file is durable HERE and nowhere earlier: the
                 # WrfoutWriter context above has exited, so its close()
                 # completed the fsync, the self-validation and the
@@ -2235,6 +2251,9 @@ class AsyncDomainWrfoutWriter:
                     else:
                         self._pending -= 1
                         self._pending_bytes -= ticket_bytes
+                    self._finished_count += 1
+                    if not durable and self._first_undurable is None:
+                        self._first_undurable = self._finished_count
                     self._condition.notify_all()
 
     def update_global_attrs(self, global_attrs) -> None:
@@ -2249,6 +2268,47 @@ class AsyncDomainWrfoutWriter:
         """
         self.drain()
         self.global_attrs = dict(global_attrs)
+
+    @property
+    def admitted_count(self) -> int:
+        """Frames admitted so far (see :attr:`_admitted_count`)."""
+        with self._condition:
+            return int(self._admitted_count)
+
+    def wait_finished(self, target: int) -> None:
+        """Wait until the first ``target`` admitted frames are DURABLE.
+
+        Durable is what :meth:`drain` means: written, fsynced, validated,
+        its output identity complete and renamed onto its final name (with
+        its ready marker, when the run writes one).  Unlike :meth:`drain`
+        it does not wait for frames admitted after the caller captured
+        ``target``, so a checkpoint writer thread can order itself after a
+        point in the history without being held up by later frames.
+        Raises if one of THOSE frames did not become durable (it failed, or
+        an abort skipped it) or the worker stopped before reaching them; a
+        failure or abort after them is not this caller's, so a checkpoint
+        whose history is complete is still published while a later frame
+        fails the run.
+        """
+        target = int(target)
+        worker_stopped = False
+        with self._condition:
+            while self._finished_count < target:
+                if not self._thread.is_alive():
+                    worker_stopped = True
+                    break
+                self._condition.wait(timeout=_ASYNC_WRITER_POLL_SECONDS)
+            undurable = self._first_undurable
+        if worker_stopped or (undurable is not None and undurable <= target):
+            self._raise_failure()
+            if self._abort_event.is_set():
+                raise RuntimeError(
+                    "per-domain wrfout writing was aborted before the "
+                    "history frames a checkpoint is ordered after became "
+                    "durable")
+            raise RuntimeError(
+                "per-domain wrfout worker stopped before the history frames "
+                "a checkpoint is ordered after became durable")
 
     def drain(self) -> None:
         """Wait for durable files and their completed output identities."""
@@ -2382,6 +2442,24 @@ def _attach_hub_wind(node, case, selection, grid):
         node.state, selection, nx=run.nx, ny=run.ny, dx=run.dx, dy=run.dy,
         grid_id=node.cfg.grid_id, latlon=grid.latlon_mass,
         streamed=getattr(case, "streamed_store", None) is not None)
+
+
+class HistoryDurabilityBarrier:
+    """The history frames a checkpoint is ordered after (see
+    :meth:`PerDomainWrfoutWriters.durability_barrier`).
+
+    PINNED: the per-domain admission counts at the instant it was taken;
+    :meth:`wait` may be called from any thread, and raises if any of those
+    frames failed or the writers were aborted -- a checkpoint ordered after
+    a frame that never became durable must not be published.
+    """
+
+    def __init__(self, targets):
+        self.targets = tuple(targets)
+
+    def wait(self) -> None:
+        for writer, target in self.targets:
+            writer.wait_finished(target)
 
 
 class PerDomainWrfoutWriters:
@@ -2908,6 +2986,32 @@ class PerDomainWrfoutWriters:
         interval_diagnostics.close_interval(
             node.state, valid_time=valid_time, output_dir=base_dir,
             grid_id=node.cfg.grid_id)
+
+    def durability_barrier(self):
+        """A barrier over every frame submitted so far, or ``None``.
+
+        :meth:`HistoryDurabilityBarrier.wait` returns once each of those
+        frames is durable, the same state :meth:`drain` waits for, without
+        waiting for frames submitted later.  It is what lets a checkpoint
+        be ORDERED after the history at its instant instead of draining
+        the writers between two model steps.  ``None`` -- the caller drains
+        instead -- while a simulated radar consumes the frames: its scans
+        are a second asynchronous stage this barrier does not cover.
+        """
+        if getattr(self, "_simulated_radar", None) is not None:
+            return None
+        if not all(hasattr(writer, "wait_finished")
+                   for writer in self._writers.values()):
+            return None
+        # The drain this replaces also refreshed the run's "last durable
+        # frame" for the progress record; keep doing that, without waiting.
+        for gid in sorted(self._writers):
+            paths = self._writers[gid].paths
+            if paths:
+                self.last_durable_wrfout = paths[-1]
+        return HistoryDurabilityBarrier(tuple(
+            (writer, writer.admitted_count)
+            for _gid, writer in sorted(self._writers.items())))
 
     def drain(self, *, before_domain=None) -> None:
         """Wait for every domain's durable files and output identities.
