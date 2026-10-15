@@ -17,7 +17,15 @@ New:
   bad and says it was detected one step late. In strict mode the run
   stops before the failed step's clock advances; in lagged mode it stops
   at the end of that step. Results are bit-identical.
-  @@MEASURED@@
+  Measured on an RTX A6000 that two other forecasts kept at 100%
+  utilisation, with 5 interleaved runs per mode. Final state, every
+  history instant and every checkpoint instant were bit-identical
+  between jacob/main, strict and lagged. On a 100 x 100 x 50 WSM6
+  domain the median step fell from 36.4 ms to 34.2 ms (6%). On
+  40 x 40 x 30 (dry and WSM6) and 100 x 100 x 50 (dry) the differences
+  were within run-to-run noise (+/-20%). There, a step takes about
+  1.3 ms to queue but 4-13 ms to run on the shared card, so the CPU was
+  not what limited them.
   `--health-check strict` on either prepared runner, or
   `WOOF_HEALTH_CHECK=strict`, checks every step synchronously as before.
   `--health-debug` and `[tiles]` streamed domains always check strictly.
