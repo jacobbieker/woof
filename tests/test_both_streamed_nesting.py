@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gc
 
+import numpy as np
 import pytest
 from conftest import requires_gpu
 
@@ -11,7 +12,8 @@ from conftest import requires_gpu
 # fixture and the production prepared-domain builder, including rolling child
 # tables. There is no source-model-dependent runtime path.
 def trajectory(monkeypatch, *, mode, feedback, steps=6,
-               checkpoint_dir=None, restart_from=None, lifecycle=False):
+               checkpoint_dir=None, restart_from=None, lifecycle=False,
+               cumulus=True):
     import cupy as cp
     from tilestream import test_moving_nest as moving
     from tilestream import test_nest_executor as executor
@@ -23,7 +25,9 @@ def trajectory(monkeypatch, *, mode, feedback, steps=6,
     monkeypatch.setattr(executor, "PARENT_DT", 6.)
     pcfg = moving.parent_cfg(
         nx=96, ny=96, nz=24, dt=6., run_seconds=steps * 6.,
-        nwp_diagnostics=int(lifecycle), radt_minutes=.5, cudt_minutes=.5)
+        nwp_diagnostics=int(lifecycle), radt_minutes=.5,
+        **(dict(cudt_minutes=.5) if cumulus else
+           dict(cu_physics=0, cudt_minutes=0.)))
     ccfg = moving.child_cfg(pcfg, nx=48, ny=48)
     boundaries = moving.domain_boundaries(pcfg, seconds=21600.)
     state, geo = moving.build_parent(pcfg, boundaries=boundaries)
@@ -96,7 +100,7 @@ def trajectory(monkeypatch, *, mode, feedback, steps=6,
         source = steppers[gid].store if gid in steppers else node.state
         digest, fields = moving.carrier_digest(source)
         assert {"state/p", "state/al", "state/alt", "state/mup", "state/qv"} <= fields.keys()
-        assert len(fields) >= 150
+        assert len(fields) >= (150 if cumulus else 140)
         domains[gid] = dict(digest=digest, fields=fields,
                             ticks=node.clock.ticks, step_count=node.clock.step_count)
     output = dict(domains=domains, cadence=moving.cadence_census(model, steppers),
@@ -157,6 +161,64 @@ def test_both_streamed_feedback_matches_and_detects_stale_diagnostic_write(monke
                  if sha != resident["domains"][1]["fields"][name]}
     assert differing == {"state/p", "state/al", "state/alt"}
     assert stale["domains"][2] == resident["domains"][2]
+
+
+def _force_tables_land_late(monkeypatch, milliseconds=200.):
+    """Hold FORCE's rolling-table writes back on the stream FORCE runs on.
+
+    After FORCE has queued its tables, they are poisoned with NaN, a spin
+    kernel holds the caller's stream for ``milliseconds``, and the true
+    tables are written back behind it -- all on the caller's stream.  A
+    child sweep ordered after that stream reads the true tables and steps
+    exactly as an undelayed run does; one that is not copies the poison (or
+    the previous interval) into its tile buffers.  This is the race a
+    streamed child had: d02 differed run to run while d01 was identical.
+    """
+    import cupy as cp
+    from woof.core import nest
+
+    original = nest.attach_nest_boundaries
+    spin = cp.RawKernel(r'''
+extern "C" __global__ void spin(long long cycles) {
+    long long start = clock64();
+    while (clock64() - start < cycles) {}
+}''', "spin")
+    # cudaDevAttrClockRate (kHz): still an attribute where CUDA 13 dropped
+    # cudaDeviceProp.clockRate.
+    rate_khz = cp.cuda.Device().attributes["ClockRate"]
+    cycles = np.int64(milliseconds * rate_khz)
+    calls = []
+
+    def late(state, fields, **kwargs):
+        tables = [array for sides in fields.values()
+                  for pair in sides.values() for array in pair]
+        held = [array.copy() for array in tables]
+        for array in tables:
+            array.fill(np.nan)
+        spin((1,), (1,), (cycles,))
+        for array, keep in zip(tables, held):
+            array[...] = keep
+        calls.append(len(tables))
+        return original(state, fields, **kwargs)
+
+    monkeypatch.setattr(nest, "attach_nest_boundaries", late)
+    return calls
+
+
+@requires_gpu
+@pytest.mark.gpu
+def test_streamed_child_is_deterministic_when_force_lands_late(monkeypatch):
+    # No cumulus, like the 1 km / 333 m Greenland tree that showed it: the
+    # Kain-Fritsch expiry probe in the tile inventory happens to block the
+    # host on the caller's stream before the first tile steps, which hid
+    # the race.
+    first = trajectory(monkeypatch, mode="both", feedback=0, cumulus=False)
+    second = trajectory(monkeypatch, mode="both", feedback=0, cumulus=False)
+    assert second["domains"] == first["domains"]
+    late = _force_tables_land_late(monkeypatch)
+    delayed = trajectory(monkeypatch, mode="both", feedback=0, cumulus=False)
+    assert len(late) == delayed["forces"] == first["forces"] == 6
+    assert delayed["domains"] == first["domains"]
 
 
 @requires_gpu
