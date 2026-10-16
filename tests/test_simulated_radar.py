@@ -506,7 +506,9 @@ def test_scan_timing_names_the_held_history_when_the_forecast_stops(tmp_path, ca
     assert "2 committed history file(s)" in capsys.readouterr().err
 
 
-def test_the_writer_set_cancels_radar_when_the_forecast_raises():
+def test_the_writer_set_finishes_radar_for_the_frames_a_failing_forecast_published():
+    # Drain before stopping: the frames taken before the failure are
+    # published, so the radar scans them; nothing is cancelled.
     from woof.io.wrfout import PerDomainWrfoutWriters
     events = []
     writers = object.__new__(PerDomainWrfoutWriters)
@@ -515,7 +517,27 @@ def test_the_writer_set_cancels_radar_when_the_forecast_raises():
     writers._simulated_radar = SimpleNamespace(cancel=lambda: events.append("cancel"),
                                                close=lambda: events.append("close"))
     assert writers.__exit__(RuntimeError, RuntimeError("step failed"), None) is False
-    assert events == ["cancel", "close"]
+    assert events and set(events) == {"close"}
+
+
+def test_the_writer_set_cancels_radar_when_its_drain_is_abandoned():
+    from woof.io.wrfout import PerDomainWrfoutWriters
+    events = []
+    writers = object.__new__(PerDomainWrfoutWriters)
+    writers._writers = {}
+    writers._abort_event = threading.Event()
+    writers.failure_drain_timeout_s = 0.0
+
+    def slow_close():
+        events.append("close")
+        threading.Event().wait(0.5)
+
+    writers._simulated_radar = SimpleNamespace(cancel=lambda: events.append("cancel"),
+                                               close=slow_close)
+    error = RuntimeError("step failed")
+    assert writers.__exit__(RuntimeError, error, None) is False
+    assert "cancel" in events
+    assert error.woof_history_on_failure["outcome"] == "timeout"
 
 
 def _late_domain_writers(monkeypatch, simulated_radar):

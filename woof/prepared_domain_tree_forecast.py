@@ -2720,6 +2720,10 @@ def _write_failed_run_receipt(outdir, error) -> None:
             "error_type": type(error).__name__,
             "error": str(error),
             "traceback": traceback.format_exc(),
+            # What the history writers did with the frames taken before
+            # the failure (woof.io.wrfout.PerDomainWrfoutWriters).
+            "history_on_failure": getattr(error, "woof_history_on_failure",
+                                          None),
             "stability_recovery_receipt": (
                 str(recovery_path.resolve()) if recovery_path.is_file() else None),
         },
