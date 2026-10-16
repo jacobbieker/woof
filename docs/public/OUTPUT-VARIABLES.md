@@ -226,6 +226,87 @@ disk can resume with a trimmed tape, and a trimmed run resumes a full
 run's checkpoints. Nothing about the forecast changes: same trajectory,
 same numbers, same fingerprint.
 
+## How a history frame leaves the model
+
+A history frame is written in the background. What the model waits for
+depends on where the domain's numbers live. None of it changes a byte of
+any file: every path below writes the same arrays, in the same order, through
+the same writer.
+
+**A resident domain** (no `[tiles]`). The frame's selected fields are
+copied on the device, on the model's own stream, into buffers the writer
+keeps. A side stream then copies those buffers to page-locked host memory,
+and a writer thread writes the file. The model waits only for the device
+copy. It used to wait for the whole copy over PCIe to the host. Before the
+next frame reuses the buffers, the model waits for the previous host copy to
+finish, which normally finished long before.
+
+The buffers are extra device memory: one copy of the frame's selected
+fields, held for the run. They are used only when the run's priced memory
+plan (the resident admission `woof run`, `woof go` and the prepared runners
+take before they build the domain) leaves that much room on the card. The
+writers on a card share that room, and each writer is capped at 4 GiB.
+Otherwise the frame is copied the old way, and the receipt says why:
+
+| reason | when |
+|---|---|
+| `unpriced` | nothing priced this card (a harness, an unread card) |
+| `outside-priced-plan` | the buffers do not fit what the plan leaves |
+| `over-cap` | the frame is larger than 4 GiB |
+| `device-allocation-failed` | the card refused the allocation |
+| `disabled` | `WOOF_ASYNC_HISTORY=off` |
+
+**A `[tiles]` host-store domain.** The frame is copied out of the host
+store with one memcpy, then handed to the writer thread. The model goes on
+sweeping. It used to wait between two sweeps for the whole netCDF write: a
+5.24 GB frame took 81 s. The next frame of that domain waits for this one's
+write to finish, because it refills the same copy. The copy is held only if
+it fits host RAM beside the run. The reserve is the asynchronous
+checkpoint's: the larger of 2 GiB and 5% of RAM. Otherwise the frame is
+written from the store and drained before the next sweep, as before, with
+the reason `insufficient-host-ram`.
+
+**Queue depth.** Each domain's writer can hold `[output]
+history_queue_depth` frames queued behind the one it is writing. The
+default is 1. Each queued frame is one page-locked host copy, and a depth
+whose copies would not fit host RAM is lowered.
+
+**Locking.** The Rust writer (the default engine) takes the process-wide
+netCDF lock only for the netCDF4 read-back that validates a finished tape.
+Nested domains' tapes are therefore written at the same time. The netCDF4
+engine (`WOOF_WRFOUT_WRITER=python`) still holds the lock for its whole
+session.
+
+**Output identity.** The Rust writer computes each tape's SHA-256 while it
+writes the bytes, in file order. It is the same digest a re-read gives, and
+the run's frame records carry it. The writer no longer reads every finished
+file back to hash it. It still checks that the file it renames is the file
+it hashed: same file, same length, and the address names it.
+`WOOF_OUTPUT_IDENTITY_VERIFY=1` also re-reads every tape and refuses one
+whose read-back digest differs. A tape written out of file order, a library
+built before this change, and the netCDF4 engine all fall back to the
+re-read, and the receipt names why.
+
+**Hex.** `woof hex forecast` captures each frame and runs its physical
+gate on the model thread, as before, so a refusal lands on the same step.
+The netCDF write, its zlib compression, the stamps and the file hash then
+run on a background thread. `WOOF_ASYNC_HISTORY=off` writes them inline
+again.
+
+The run receipt's `history_writes` block records, per domain:
+
+* the copy mode and its reason;
+* the requested and effective queue depth;
+* the engine, and what the netCDF lock covers;
+* the identity mode counts;
+* each frame's model-loop cost: host seconds inside the submit, and
+  producer-stream seconds between CUDA events around it;
+* the `[tiles]` frame mode.
+
+`WOOF_ASYNC_HISTORY` (`auto`, the default; `off`; `on`) switches all of it
+off. `on` also allows the device buffers when no plan was priced, using
+the card's live free memory; it is meant for benchmarks.
+
 ## Demo
 
 A two-domain forecast that keeps the storm volumes on the 3 km parent and

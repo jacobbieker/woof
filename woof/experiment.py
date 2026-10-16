@@ -3993,6 +3993,12 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     "sets async_checkpoints, which is a property of the "
                     "whole tree's checkpoints (every domain is written in "
                     "one set): set it in the tree-wide [output] table.")
+            if "history_queue_depth" in dom["output"]:
+                raise ValueError(
+                    f"output on [[domain]] grid_id = {grid_id} of {source} "
+                    "sets history_queue_depth, which is a property of the "
+                    "run's history writers: set it in the tree-wide "
+                    "[output] table.")
             domain_output = (
                 history_selection_module.HistorySelection.from_mapping(
                     dict(dom["output"]),

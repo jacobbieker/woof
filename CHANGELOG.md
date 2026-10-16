@@ -73,6 +73,58 @@ New:
   new per-step cost for the hindcast cost model.
   `tools/profile_launch_overhead.py` and `tools/launch_profile/` are the
   CUPTI-based profiler used for it.
+- History frames leave the model loop sooner. Every file stays
+  byte-identical, and the output identity (SHA-256) is the same value.
+  - Resident domains: the frame's fields are copied device-to-device into
+    buffers the writer keeps, on the model's own stream. A side stream copies
+    them to the host. The model no longer waits for the whole host copy of
+    each frame. The buffers are used only inside the room the run's priced
+    memory plan leaves on the card (at most 4 GiB per writer). Otherwise the
+    old fenced copy is used, and the receipt names the reason (`unpriced`,
+    `outside-priced-plan`, `over-cap`, `device-allocation-failed`,
+    `disabled`).
+  - `[tiles]` host-store domains: the frame is snapshotted with one host
+    memcpy, inside the asynchronous checkpoint's host-RAM budget. The model
+    sweeps on while the frame is written, instead of draining the netCDF
+    write between two sweeps. Otherwise: views and a drain, with the reason
+    `insufficient-host-ram`.
+  - The Rust writer hashes each tape while writing it, so the output
+    identity no longer reads every finished file back. This needs the
+    rebuilt `netcdf-writer`; an older library falls back to the re-read, by
+    name. `WOOF_OUTPUT_IDENTITY_VERIFY=1` re-reads anyway and refuses a
+    disagreement.
+  - The process-wide netCDF lock now covers only the netCDF4 validation
+    reopen of a Rust-engine tape, so nested domains' tapes are written at
+    the same time. The netCDF4 engine keeps its whole-session lock.
+  - `[output] history_queue_depth` (or `WOOF_HISTORY_QUEUE_DEPTH`) lets a
+    domain queue more frames, capped so their page-locked copies fit host
+    RAM. The page-locked pool is released at the writers' drain points.
+  - `woof hex forecast` writes its history files (netCDF, zlib, stamps,
+    hash) on a background thread. The capture and its physical gate stay
+    on the model thread, so refusals land on the same step.
+    `woof.hex.output.AsyncHistoryWriter` is the reusable writer.
+  - The run receipt's `history_writes` block records each domain's copy
+    mode and reason, the queue depth, the identity mode, the lock scope and
+    the per-frame model-loop stall. `WOOF_ASYNC_HISTORY=off` restores every
+    old path. See OUTPUT-VARIABLES.md, "How a history frame leaves the
+    model".
+  - Measured, with other forecasts sharing the card, so read these as
+    rough. The case is a nested 1 km + 333 m Greenland run (180x144x37 and
+    90x72x37), 300 s, history every 30 s (22 files). Old and new runs were
+    interleaved, three of each, and these are medians.
+    - `[tiles]` host store: the model-loop time per 1 km frame fell from
+      243 ms to 20 ms. History submits per run took 4.73 s, now 0.59 s.
+    - Resident: frames are small here, so submits per run went only from
+      0.35 s to 0.25 s. The 1 km producer-stream stall per frame fell from
+      11 ms to 2.8 ms.
+    - The loop wall time moved by less than the run-to-run noise.
+    - Every wrfout was byte-identical between old and new. The streamed
+      identities equal the SHA-256 of the files.
+    - Hex: a harness on real 24k-cell x 80-level frames, not a full
+      forecast (that needs more GPU memory than the test cap). Model-thread
+      time per frame fell from 1.7-2.0 s to under 1 ms, with byte-identical
+      files.
+
 - Checkpoints no longer stop the forecast while they are written. The
   device state is copied into page-locked host memory on a side stream.
   The model goes on stepping, and a background thread writes, `fsync`s and

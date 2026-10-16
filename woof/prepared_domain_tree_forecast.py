@@ -4496,6 +4496,7 @@ def run_prepared_tree(
             "health_check": getattr(model, "_health_check_policy", None),
             "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
             "health_readback": _health_readback_receipt(),
+            "history_writes": getattr(model, "_history_writes_receipt", None),
             "steps": int(execution.steps),
             "forces": int(execution.forces),
             "feedback_calls": int(execution.feedback_calls),
@@ -4682,7 +4683,8 @@ def run_prepared_tree(
             "pool_trim": getattr(model, "_pool_trim_policy", None),
             "health_check": getattr(model, "_health_check_policy", None),
             "checkpoint_writes": getattr(model, "_checkpoint_receipt", None),
-            "health_readback": _health_readback_receipt()},
+            "health_readback": _health_readback_receipt(),
+            "history_writes": getattr(model, "_history_writes_receipt", None)},
     )
     runtime._finalizing_progress(observer, "publish-completion")
     _atomic_json(

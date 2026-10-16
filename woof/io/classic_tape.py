@@ -226,8 +226,20 @@ class ClassicTape:
 
     def __init__(self, path, *, container: str = "cdf2",
                  completion_attr: str | None = None,
-                 frozen_remedy: str = "") -> None:
+                 frozen_remedy: str = "",
+                 expect_records: int | None = None) -> None:
         self._path = Path(path)
+        #: ``expect_records`` asks the writer to hash the file AS IT IS
+        #: WRITTEN, predicting this many records.  After :meth:`close`,
+        #: :attr:`stream_identity` is ``(bytes, sha256 hex)`` of the whole
+        #: finished file, or ``None`` with :attr:`stream_identity_refusal`
+        #: saying why (not requested, an older library, writes out of file
+        #: order, a different record count).  Never changes a byte.
+        self._expect_records = expect_records
+        self.stream_identity: tuple[int, str] | None = None
+        self.stream_identity_refusal: str | None = (
+            None if expect_records is not None
+            else "no streamed digest was requested")
         self._container = container
         self._completion_attr = completion_attr
         self._frozen_remedy = frozen_remedy
@@ -329,6 +341,11 @@ class ClassicTape:
                                     classic_attr_value(attr_value))
             object.__setattr__(variable, "_varid", varid)
         self._writer = schema.create(self._path)
+        if self._expect_records is not None:
+            self.stream_identity_refusal = self._writer.begin_digest(
+                int(self._expect_records))
+            if self.stream_identity_refusal is not None:
+                self._expect_records = None
 
     def _write_record(self, recno: int, variable: ClassicVariable,
                       values) -> None:
@@ -359,7 +376,14 @@ class ClassicTape:
         writer, self._writer = self._writer, None
         self._closed = True
         try:
-            writer.finish()
+            if self._expect_records is not None:
+                result = writer.finish_with_digest()
+                if isinstance(result, str):
+                    self.stream_identity_refusal = result
+                else:
+                    self.stream_identity = result
+            else:
+                writer.finish()
         except Exception:
             writer.abort()
             raise

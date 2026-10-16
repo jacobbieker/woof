@@ -8,6 +8,7 @@ use crate::error::{NcWriteError, Result};
 use crate::header::{numrecs_bytes, pad4, serialize_header, NUMRECS_OFFSET};
 use crate::layout::Layout;
 use crate::schema::Schema;
+use crate::sha256::Sha256;
 use crate::types::{NcType, VarData};
 
 /// Elements converted to big-endian per pass. Bounds peak scratch memory
@@ -38,6 +39,37 @@ pub struct NcWriter {
     /// `record_written[rec][record_var_index]`.
     record_written: Vec<Vec<bool>>,
     finished: bool,
+    /// The streamed SHA-256 of the file's bytes, when the caller asked
+    /// for one (:meth:`begin_digest`).  See [`StreamDigest`].
+    digest: Option<StreamDigest>,
+    /// Why the streamed digest is unavailable, once it is.
+    digest_refusal: Option<String>,
+}
+
+/// The SHA-256 of a file computed from the bytes AS THEY ARE WRITTEN.
+///
+/// SHA-256 is sequential, so this is only the file's digest if every byte
+/// of the file passed through it exactly once and in file order.  The
+/// header is hashed first with the `numrecs` the caller PREDICTS (the one
+/// field `finish` patches afterwards); every data write is hashed while
+/// its offset is the hashed end; anything else -- a gap, an overwrite, a
+/// different final record count, a file length other than the hashed
+/// end -- withdraws the digest with the reason, and the caller re-reads
+/// the file instead.  It never changes a byte written.
+#[derive(Debug)]
+struct StreamDigest {
+    hasher: Sha256,
+    end: u64,
+    expected_numrecs: u64,
+}
+
+/// What [`NcWriter::finish_with_digest`] proves about the finished file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FinishedDigest {
+    /// SHA-256 of the whole file and its length.
+    Streamed { sha256: [u8; 32], bytes: u64 },
+    /// No streamed digest exists; the reason.
+    Unavailable(String),
 }
 
 impl NcWriter {
@@ -72,7 +104,47 @@ impl NcWriter {
             record_written: Vec::new(),
             layout,
             finished: false,
+            digest: None,
+            digest_refusal: None,
         })
+    }
+
+    /// Start hashing the file as it is written, predicting that it will
+    /// finish with `expected_numrecs` records.  Must be called before any
+    /// data is written.
+    pub fn begin_digest(&mut self, expected_numrecs: u64) -> Result<()> {
+        let untouched = self.pos == self.layout.header_len
+            && self.numrecs == 0
+            && !self.fixed_written.iter().any(|written| *written)
+            && self.digest.is_none();
+        if !untouched {
+            return Err(NcWriteError::Usage(
+                "begin_digest must be called once, before any data is written".to_string(),
+            ));
+        }
+        let header = serialize_header(&self.schema, &self.layout.vars, expected_numrecs);
+        if header.len() as u64 != self.layout.header_len {
+            // A count wider than the container's numrecs field would move
+            // every byte after it; refuse rather than hash a fiction.
+            return Err(NcWriteError::Usage(format!(
+                "predicted numrecs {expected_numrecs} does not fit this container's header"
+            )));
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(&header);
+        self.digest = Some(StreamDigest {
+            hasher,
+            end: self.layout.header_len,
+            expected_numrecs,
+        });
+        self.digest_refusal = None;
+        Ok(())
+    }
+
+    fn withdraw_digest(&mut self, reason: String) {
+        if self.digest.take().is_some() {
+            self.digest_refusal = Some(reason);
+        }
     }
 
     /// The path being written.
@@ -165,6 +237,36 @@ impl NcWriter {
         self.finish_inner()?;
         self.finished = true;
         Ok(())
+    }
+
+    /// [`finish`](NcWriter::finish), then say whether the streamed digest
+    /// started by [`begin_digest`](NcWriter::begin_digest) is the digest
+    /// of the file now on disk.
+    pub fn finish_with_digest(mut self) -> Result<FinishedDigest> {
+        self.finish_inner()?;
+        self.finished = true;
+        let Some(digest) = self.digest.take() else {
+            return Ok(FinishedDigest::Unavailable(self.digest_refusal.take().unwrap_or_else(
+                || "no streamed digest was requested".to_string(),
+            )));
+        };
+        if self.numrecs != digest.expected_numrecs {
+            return Ok(FinishedDigest::Unavailable(format!(
+                "the file finished with {} record(s), not the {} predicted when its header was hashed",
+                self.numrecs, digest.expected_numrecs
+            )));
+        }
+        let length = self.out.get_ref().metadata()?.len();
+        if length != digest.end {
+            return Ok(FinishedDigest::Unavailable(format!(
+                "the file is {length} bytes but {} were hashed in order",
+                digest.end
+            )));
+        }
+        Ok(FinishedDigest::Streamed {
+            sha256: digest.hasher.finalize(),
+            bytes: length,
+        })
     }
 
     fn finish_inner(&mut self) -> Result<()> {
@@ -299,6 +401,18 @@ impl NcWriter {
     /// under the cursor -- `BufWriter::seek` flushes, and the in-order
     /// case is every-frame-in-order.
     fn write_at(&mut self, offset: u64, buf: &[u8]) -> Result<()> {
+        if let Some(digest) = self.digest.as_mut() {
+            if offset == digest.end {
+                digest.hasher.update(buf);
+                digest.end += buf.len() as u64;
+            } else {
+                let reason = format!(
+                    "a write at offset {offset} did not continue the hashed prefix (which ends at {})",
+                    digest.end
+                );
+                self.withdraw_digest(reason);
+            }
+        }
         if offset != self.pos {
             self.out.seek(SeekFrom::Start(offset))?;
             self.pos = offset;

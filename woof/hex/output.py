@@ -847,7 +847,240 @@ def write_mpas_history(*args: Any, **kwargs: Any) -> Path:
 write_history_file = write_mpas_history
 
 
+class AsyncHistoryWriteError(Exception):
+    """A history file queued on the asynchronous writer was not written.
+
+    Deliberately not a ``RuntimeError``: the hex forecast reads a
+    ``RuntimeError`` out of a capture as a numeric REFUSAL of that step, and
+    a failed file write is an I/O failure of an earlier frame, not that.
+    """
+
+
+class AsyncHistoryWriter:
+    """Write hex history files on one background thread.
+
+    The model thread hands over a frame that is already a snapshot -- host
+    arrays it will not touch again, or device arrays that :meth:`submit_history`
+    copies first -- and goes back to stepping.  The thread opens every file
+    under the process-wide netCDF4 lock
+    (:func:`woof.io.netcdf_serialization.netcdf4_session`): the history
+    writers are netCDF4/HDF5, and HDF5 here is not thread-safe.
+
+    PINNED (tests/test_history_output_path.py):
+
+    * The bytes are the synchronous writer's bytes: a job runs the same
+      function with the same arguments, only later and on another thread.
+    * Jobs run in submission order, one at a time.  At most ``depth`` are
+      queued behind the one being written, so at most ``depth + 1`` frames
+      are held in host memory.
+    * The FIRST failure is kept and raised by the next :meth:`submit`, by
+      :meth:`drain` and by :meth:`close`.  Jobs queued after it are not run,
+      so a run that failed to write frame N never publishes frame N+1.
+    * :meth:`close` drains, so every frame handed over before a run ends
+      (or fails) is either written or reported.
+    * ``receipt`` holds per-frame ``submit_seconds`` (model-thread time:
+      the queue wait plus any device snapshot) and ``write_seconds``
+      (writer-thread time).
+    """
+
+    def __init__(self, *, depth: int = 1, name: str = "woof-hex-history"):
+        import queue as _queue
+        import threading
+
+        self._queue = _queue.Queue(maxsize=max(1, int(depth)))
+        self._failure: BaseException | None = None
+        self._lock = threading.Lock()
+        self._closed = False
+        self.receipt: dict[str, Any] = {
+            "mode": "async", "depth": max(1, int(depth)),
+            "frames": [], "submit_seconds": 0.0, "write_seconds": 0.0}
+        self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        import time
+
+        from woof.io.netcdf_serialization import netcdf4_session
+
+        while True:
+            item = self._queue.get()
+            try:
+                if item is None:
+                    return
+                job, label, ready = item
+                if self._failure is not None:
+                    continue
+                started = time.perf_counter()
+                try:
+                    if ready is not None:
+                        ready()
+                    with netcdf4_session():
+                        job()
+                except BaseException as error:  # noqa: BLE001 - reported
+                    with self._lock:
+                        if self._failure is None:
+                            self._failure = error
+                    continue
+                elapsed = time.perf_counter() - started
+                with self._lock:
+                    self.receipt["write_seconds"] += elapsed
+                    for row in self.receipt["frames"]:
+                        if row["label"] == label and row.get("write_seconds") is None:
+                            row["write_seconds"] = round(elapsed, 6)
+                            break
+            finally:
+                self._queue.task_done()
+
+    def _raise_failure(self) -> None:
+        failure = self._failure
+        if failure is not None:
+            raise AsyncHistoryWriteError(
+                f"a history file was not written: {type(failure).__name__}: "
+                f"{failure}") from failure
+
+    def submit(self, job, *, label: str | None = None, ready=None) -> None:
+        """Queue ``job()`` (writes one file); returns once it is queued.
+
+        ``ready``, when given, runs first ON THE WRITER THREAD (the wait for
+        a device-to-host copy, :meth:`submit_history`).
+        """
+        import queue as _queue
+        import time
+
+        if self._closed:
+            raise AsyncHistoryWriteError("the history writer is closed")
+        self._raise_failure()
+        started = time.perf_counter()
+        with self._lock:
+            self.receipt["frames"].append({"label": label, "write_seconds": None})
+        while True:
+            if not self._thread.is_alive():
+                self._raise_failure()
+                raise AsyncHistoryWriteError("the history writer thread stopped")
+            try:
+                self._queue.put((job, label, ready), timeout=0.05)
+                break
+            except _queue.Full:
+                continue
+        elapsed = time.perf_counter() - started
+        with self._lock:
+            self.receipt["submit_seconds"] += elapsed
+            for row in reversed(self.receipt["frames"]):
+                if row["label"] == label:
+                    row["submit_seconds"] = round(elapsed, 6)
+                    break
+
+    def submit_history(self, path, mesh, fields, valid_time, **kwargs) -> None:
+        """:func:`write_history` on the writer thread, from a snapshot.
+
+        Device (CuPy) arrays among ``fields`` -- bare or inside a
+        :class:`HistoryField` -- are copied device to device on the current
+        stream (the model can then overwrite its own arrays at once), and
+        those copies go to page-locked host memory on a side stream; the
+        writer thread waits for that copy before it writes.  Host arrays
+        are copied here, because the caller may reuse them.  The file is
+        :func:`write_history`'s file.
+        """
+        staged, ready = _snapshot_fields(fields)
+        self.submit(lambda: write_history(path, mesh, staged, valid_time, **kwargs),
+                    label=str(path), ready=ready)
+
+    def clear_failure(self) -> BaseException | None:
+        """Forget (and return) the recorded failure, after a drain.
+
+        For a caller that drained, submitted ONE optional frame, drained
+        again, and decided its failure is not fatal.
+        """
+        with self._lock:
+            failure, self._failure = self._failure, None
+        return failure
+
+    def drain(self) -> None:
+        """Wait until every queued file is written; raise the first failure."""
+        while True:
+            if self._queue.unfinished_tasks == 0:
+                break
+            if not self._thread.is_alive():
+                break
+            self._thread.join(timeout=0.05)
+        self._raise_failure()
+
+    def close(self) -> None:
+        if self._closed:
+            self._raise_failure()
+            return
+        try:
+            self.drain()
+        finally:
+            self._closed = True
+            if self._thread.is_alive():
+                self._queue.put(None)
+                self._thread.join()
+
+
+def _snapshot_fields(fields: Mapping[str, Any]):
+    """``(host-or-pending fields, ready callable or None)`` for one frame."""
+    try:
+        import cupy as cp
+    except Exception:                      # noqa: BLE001 - CPU-only install
+        cp = None
+
+    def is_device(value):
+        return cp is not None and isinstance(value, cp.ndarray)
+
+    device = []
+    for raw in fields.values():
+        value = raw.values if isinstance(raw, HistoryField) else raw
+        if is_device(value):
+            device.append(value)
+    staged: dict[str, Any] = {}
+    if not device:
+        for name, raw in fields.items():
+            value = raw.values if isinstance(raw, HistoryField) else raw
+            copy = np.array(value, copy=True)
+            staged[name] = (HistoryField(copy, raw.dimensions, dict(raw.attrs))
+                            if isinstance(raw, HistoryField) else copy)
+        return staged, None
+    producer = cp.cuda.get_current_stream()
+    side = cp.cuda.Stream(non_blocking=True)
+    copies = []
+    hosts = {}
+    for name, raw in fields.items():
+        value = raw.values if isinstance(raw, HistoryField) else raw
+        if is_device(value):
+            twin = cp.empty(value.shape, dtype=value.dtype)
+            cp.copyto(twin, value)                   # on the producer stream
+            copies.append(twin)
+            hosts[name] = twin
+        else:
+            hosts[name] = np.array(value, copy=True)
+    captured = cp.cuda.Event()
+    captured.record(producer)
+    side.wait_event(captured)
+    pinned = []
+    for name, value in list(hosts.items()):
+        if is_device(value):
+            memory = cp.cuda.alloc_pinned_memory(int(value.nbytes))
+            host = np.frombuffer(memory, dtype=value.dtype,
+                                 count=value.size).reshape(value.shape)
+            value.get(out=host, stream=side, blocking=False)
+            pinned.append(memory)
+            hosts[name] = host
+    done = cp.cuda.Event()
+    done.record(side)
+    for name, raw in fields.items():
+        staged[name] = (HistoryField(hosts[name], raw.dimensions, dict(raw.attrs))
+                        if isinstance(raw, HistoryField) else hosts[name])
+
+    def ready(_keep=(copies, pinned, side)):
+        done.synchronize()
+
+    return staged, ready
+
+
 __all__ = [
+    "AsyncHistoryWriteError",
+    "AsyncHistoryWriter",
     "Field",
     "HISTORY_MESH_VARIABLES",
     "HistoryField",

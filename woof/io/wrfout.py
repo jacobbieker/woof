@@ -25,6 +25,7 @@ from pathlib import Path
 import queue
 import stat
 import threading
+from time import perf_counter
 import traceback
 
 import numpy as np
@@ -55,10 +56,11 @@ from woof.io.netcdf_serialization import NETCDF4_IO_LOCK
 
 _COMPLETION_ATTR = "GPUWM_WRITE_COMPLETE"
 # netCDF4 releases the GIL around HDF5 calls, while the shipped HDF5 library
-# is not thread-safe.  Domain D2H streams and staging remain independent; only
-# each worker's create/write/close/reopen/publish netCDF session is serialized.
-# The Rust engine needs no such serialization of its own. The ordinary
-# validation path and explicit Python writer still use netCDF4, so the lock stays.
+# is not thread-safe.  Domain D2H streams and staging remain independent.  On
+# the netCDF4 engine each worker's whole create/write/close/reopen/publish
+# session is serialized.  The Rust engine never enters HDF5 while it writes,
+# so only its publish-time validation reopen (netCDF4) takes the lock, inside
+# WrfoutWriter.close(), and nested domains' Rust writes run concurrently.
 #
 # THE LOCK IS NO LONGER THIS MODULE'S.  Guarding the writer against itself
 # left it unguarded against every other netCDF4 READER in the process, and
@@ -120,10 +122,12 @@ class _ClassicTape(ClassicTape):
     header-frozen refusal names this writer's own escapes.
     """
 
-    def __init__(self, path, *, container: str = "cdf2"):
+    def __init__(self, path, *, container: str = "cdf2",
+                 expect_records: int | None = None):
         super().__init__(path, container=container,
                          completion_attr=_COMPLETION_ATTR,
-                         frozen_remedy=_FROZEN_REMEDY)
+                         frozen_remedy=_FROZEN_REMEDY,
+                         expect_records=expect_records)
 
 
 def _stringify_and_clear_exception_tracebacks(exc: BaseException) -> str:
@@ -1031,11 +1035,29 @@ class WrfoutWriter:
 
     def __init__(self, path, *, nx, ny, nz, dx, dy, title="woof",
                  global_attrs=None, field_schema=None, soil_layers=None,
-                 engine=None, _retain_identity_handle=False):
+                 engine=None, _retain_identity_handle=False,
+                 _expect_frames=None, _session_locked=False):
+        """``_expect_frames`` (the async writer passes 1) asks the Rust
+        engine to hash the tape while writing it, predicting that many
+        frames; :meth:`complete_output_identity` then needs no read-back
+        (:attr:`identity_mode`).  ``_session_locked`` says the CALLER
+        already holds :data:`NETCDF4_IO_LOCK` for this whole session (the
+        async writer on the netCDF4 engine), so the publish-time
+        validation must not take it again; every other caller has its
+        validation taken under the lock here."""
         self.engine = resolve_wrfout_engine(engine)
         self.publication_revision = None
         self._publication_file = None
         self._retain_identity_handle = _retain_identity_handle
+        self._session_locked = bool(_session_locked)
+        #: ``(bytes, sha256 hex)`` the Rust engine streamed while writing,
+        #: or ``None`` (see :attr:`identity_mode`).
+        self.stream_identity = None
+        #: How :meth:`complete_output_identity` proves the bytes:
+        #: ``streamed`` (hashed while written), ``streamed+verified``
+        #: (and read back under WOOF_OUTPUT_IDENTITY_VERIFY), or
+        #: ``reread: <why no streamed digest>``.
+        self.identity_mode = None
         if self.engine == "rust":
             from woof.io import nc_writer_bridge
 
@@ -1078,7 +1100,8 @@ class WrfoutWriter:
         self._final_path.parent.mkdir(parents=True, exist_ok=True)
         self._temp_path = unique_temp_path(self._final_path, hidden=True)
         if self.engine == "rust":
-            self.ds = _ClassicTape(self._temp_path)
+            self.ds = _ClassicTape(self._temp_path,
+                                   expect_records=_expect_frames)
         else:
             self.ds = netCDF4.Dataset(
                 self._temp_path, "w", format="NETCDF4_CLASSIC")
@@ -1432,6 +1455,8 @@ class WrfoutWriter:
                 # tape with an unwritten region, then patches numrecs,
                 # flushes and fsyncs.
                 self.ds.close()
+                self.stream_identity = self.ds.stream_identity
+                self._stream_refusal = self.ds.stream_identity_refusal
             else:
                 self.ds.setncattr(_COMPLETION_ATTR, np.int32(1))
                 self.ds.close()
@@ -1439,9 +1464,18 @@ class WrfoutWriter:
             fsync_file(self._temp_path)
             from woof.output_identity import PublicationFile
             self._publication_file = PublicationFile(self._temp_path)
-            validate_wrfout_file(
-                self._temp_path, inventory=inventory, shapes=shapes,
-                times=times)
+            # The ONE netCDF4 session a Rust-engine tape needs is this
+            # reopen, so it alone takes the process-wide lock -- the
+            # create/write/close above never entered HDF5.  A netCDF4-engine
+            # session run by the async writer already holds the lock for
+            # its whole session, and the lock is not reentrant.
+            native = _validation_reader(self._temp_path)[1]
+            with (nullcontext()
+                  if getattr(self, "_session_locked", False) or native
+                  else NETCDF4_IO_LOCK):
+                validate_wrfout_file(
+                    self._temp_path, inventory=inventory, shapes=shapes,
+                    times=times)
             self._publication_file.check_validated()
             if getattr(self, "_retain_identity_handle", False):
                 # Finish identity outside the NetCDF lock, after releasing
@@ -1504,11 +1538,27 @@ class WrfoutWriter:
             retained.close()
 
     def complete_output_identity(self, *, cancel_event=None):
-        from woof.output_identity import CompletedFileRecord, completed_file_record
+        from woof import output_identity
+        from woof.output_identity import CompletedFileRecord
         try:
-            proof = completed_file_record(
+            # Looked up through the module, so a test's stand-in for the
+            # identity step sees both the streamed and the re-read case.
+            streamed = getattr(self, "stream_identity", None)
+            verify = (output_identity.identity_verify_requested()
+                      if streamed is not None else None)
+            proof = output_identity.completed_file_record(
                 self._temp_path, published=self.publication_revision,
-                cancel_event=cancel_event, handle=self._publication_file.handle)
+                cancel_event=cancel_event,
+                handle=self._publication_file.handle,
+                **({} if streamed is None
+                   else {"streamed": streamed, "verify": verify}))
+            if streamed is not None:
+                self.identity_mode = ("streamed+verified" if verify
+                                      else "streamed")
+            else:
+                reason = getattr(self, "_stream_refusal", None) or (
+                    f"the {self.engine} engine does not hash while writing")
+                self.identity_mode = f"reread: {reason}"
             self._publication_file.check_validated()
             if cancel_event is not None and cancel_event.is_set():
                 raise InterruptedError("Output publication was cancelled before completion.")
@@ -1586,6 +1636,33 @@ def _device_state_frame(state, *, include_diagnostic_pressure: bool = True):
         if getattr(state, "physics", None) is not None:
             fields.update(state.physics.output_fields())
         return fields
+
+
+def _async_history_off() -> bool:
+    from woof.io.history_staging import async_history_mode
+    try:
+        return async_history_mode() == "off"
+    except ValueError:
+        return False
+
+
+def _device_copy(cp, dst, src, stream) -> None:
+    """``dst[...] = src`` on ``stream``, byte for byte.
+
+    A contiguous source of the same shape and type is one device-to-device
+    ``memcpyAsync``; anything else (the broadcast ``PHB``/``PB`` columns, a
+    strided view) is CuPy's element-wise copy, which writes the same values
+    ``cp.ascontiguousarray`` would.
+    """
+    if (getattr(src, "flags", None) is not None and src.flags.c_contiguous
+            and tuple(src.shape) == tuple(dst.shape)
+            and src.dtype == dst.dtype):
+        if src.nbytes:
+            dst.data.copy_from_device_async(src.data, int(src.nbytes),
+                                            stream=stream)
+        return
+    with stream:
+        cp.copyto(dst, src, casting="no")
 
 
 @dataclass
@@ -1718,19 +1795,45 @@ class AsyncDomainWrfoutWriter:
     #: finished WITHOUT becoming durable -- failed, or skipped by an abort --
     #: or ``None``.  A barrier fails only if it covers that ticket.
     _first_undurable = None
+    #: Frames the queue may hold behind the one being written: requested
+    #: (``[output] history_queue_depth``), and the page-locked budget's
+    #: cap once the first frame's size is known (``None`` until then).
+    _queue_depth = 1
+    _depth_cap = None
+    _depth_reason = None
+    #: The device snapshot: name -> reusable device buffer, its admitted
+    #: bytes, the event after which the previous frame's host copy has
+    #: stopped reading it, and the mode record (see _d2h_plan).
+    _snapshot = None
+    _snapshot_bytes = 0
+    _snapshot_done = None
+    _snapshot_disabled = None
+    _d2h = None
+    _stall_log = None
+    _frame_mode = None
+    _frame_nbytes = 0
+    #: Which engine writes this domain's tapes, and so which lock covers
+    #: what: ``None`` resolves it on the worker (the CPU shells).
+    _engine = None
+    _identity_modes = None
+    _last_identity_streamed = False
 
     @staticmethod
-    def _new_ticket_queue() -> queue.Queue:
+    def _new_ticket_queue(depth: int = 1) -> queue.Queue:
         # Capacity is per domain: one queued ticket in each of four queues is
         # one complete four-domain history burst.  Each worker may additionally
         # hold its current handoff, bounding queued + worker-held tickets at
-        # eight across a synchronized four-domain write boundary.
-        return _AsyncTicketQueue(maxsize=1)
+        # eight across a synchronized four-domain write boundary (depth 1,
+        # the default; [output] history_queue_depth raises it within the
+        # page-locked budget, woof.io.history_staging).
+        return _AsyncTicketQueue(maxsize=max(1, int(depth)))
 
     def __init__(self, *, nx, ny, nz, dx, dy, title, global_attrs,
                  abort_event=None, soil_layers=None, grid_id=None,
-                 landing_observer=None, history_selection=None, device=None):
+                 landing_observer=None, history_selection=None, device=None,
+                 queue_depth=1):
         import cupy as cp
+        from woof.io.history_staging import FrameStallLog
 
         #: Which domain this writer is, and who to tell when one of its
         #: frames becomes durable.  Both optional: every existing caller
@@ -1753,7 +1856,12 @@ class AsyncDomainWrfoutWriter:
         self._device = cp.cuda.Device(device)
         with self._device:
             self.stream = cp.cuda.Stream(non_blocking=True)
-        self._queue = self._new_ticket_queue()
+        self._queue_depth = max(1, int(queue_depth))
+        self._queue = self._new_ticket_queue(self._queue_depth)
+        self._snapshot = {}
+        self._stall_log = FrameStallLog()
+        self._identity_modes = {}
+        self._engine = resolve_wrfout_engine()
         self._condition = threading.Condition()
         self._pending = 0
         self._failure: BaseException | None = None
@@ -1787,7 +1895,9 @@ class AsyncDomainWrfoutWriter:
         supervisor can bound the drain by its size.
         """
         with self._condition:
-            return 2 * self._pending_bytes + self._identity_bytes
+            # A tape the Rust engine hashed while writing is not read back.
+            factor = 1 if self._last_identity_streamed else 2
+            return factor * self._pending_bytes + self._identity_bytes
 
     @property
     def completed_records(self):
@@ -1846,6 +1956,14 @@ class AsyncDomainWrfoutWriter:
         try:
             while True:
                 self._check_admission_liveness()
+                cap = self._depth_cap
+                if cap is not None and self._queue.qsize() >= cap:
+                    # The page-locked budget allows fewer queued frames
+                    # than the queue's capacity (history_staging).
+                    with self._condition:
+                        self._condition.wait(
+                            timeout=_ASYNC_WRITER_POLL_SECONDS)
+                    continue
                 try:
                     self._queue.put(
                         ticket, timeout=_ASYNC_WRITER_POLL_SECONDS)
@@ -1949,6 +2067,11 @@ class AsyncDomainWrfoutWriter:
                 raise RuntimeError("cannot submit to a closed wrfout writer")
             self._raise_failure()
             producer = cp.cuda.get_current_stream()
+            started = perf_counter()
+            began = cp.cuda.Event()
+            began.record(producer)
+            self._frame_mode = "host-frame" if frame is not None else None
+            self._frame_nbytes = 0
             try:
                 if frame is not None:
                     if state is not None:
@@ -1963,69 +2086,247 @@ class AsyncDomainWrfoutWriter:
                                            global_attrs=global_attrs,
                                            completed_observer=completed_observer)
                     return
-                device_fields = _device_state_frame(
-                    state, include_diagnostic_pressure=True)
-                if refl_field is not None:
-                    device_fields["REFL_10CM"] = refl_field
-                # The [output] selection, resolved BEFORE the staging loop below
-                # so a dropped field costs no D2H at all -- see _history_plan.
-                produced = list(device_fields)
-                produced.extend(name for name in (extra_fields or ())
-                                if name not in device_fields)
-                keep, history_attrs = self._history_plan(produced)
-                ready = cp.cuda.Event()
-                ready.record(producer)
-                self.stream.wait_event(ready)
-
-                host_fields: dict[str, np.ndarray] = {}
-                device_refs: list[object] = []
-                pinned_refs: list[object] = []
-                with self.stream:
-                    for name, value in device_fields.items():
-                        if name not in keep:
-                            continue
-                        if isinstance(value, np.ndarray):
-                            # Already on host: staging it through the device would
-                            # be a pure bounce (measured ~1.8 GiB of cached device
-                            # staging across the initial frames).  np.array preserves
-                            # a scalar P_TOP's 0-D shape; np.ascontiguousarray would
-                            # silently promote it to (1,) and give it a vertical dim.
-                            host_fields[name] = np.array(
-                                value, copy=True, order="C", subok=False)
-                            continue
-                        array = cp.ascontiguousarray(value)
-                        memory = cp.cuda.alloc_pinned_memory(int(array.nbytes))
-                        host = np.frombuffer(memory, dtype=array.dtype,
-                                             count=array.size).reshape(array.shape)
-                        array.get(out=host, stream=self.stream, blocking=False)
-                        host_fields[name] = host
-                        device_refs.append(array)
-                        pinned_refs.append(memory)
-                    for name, value in (extra_fields or {}).items():
-                        # Prognostic/state-derived fields win (notably child HGT,
-                        # which is blended while static HGT_M remains unblended).
-                        if name not in host_fields and name in keep:
-                            host_fields[name] = np.ascontiguousarray(value)
-                    done = cp.cuda.Event()
-                    done.record(self.stream)
-                # The next mutation on the producing stream waits for the snapshot,
-                # while the host remains free to write another domain/file.
-                producer.wait_event(done)
-                ticket = _AsyncFrame(
-                    path=Path(path),
-                    time_str=valid_time.strftime("%Y-%m-%d_%H:%M:%S"),
-                    fields=host_fields, event=done,
-                    completed_observer=completed_observer,
-                    device_refs=tuple(device_refs),
-                    pinned_refs=tuple(pinned_refs),
-                    valid_time=valid_time,
-                    global_attrs=self._frame_attrs(global_attrs, history_attrs))
-                self._admit(ticket)
+                self._submit_device_frame(
+                    cp, producer, path, valid_time, state,
+                    extra_fields=extra_fields, refl_field=refl_field,
+                    global_attrs=global_attrs,
+                    completed_observer=completed_observer)
             finally:
                 # CuPy stream contexts restore their context stack, which can
                 # differ from a producer selected with Stream.use(). Keep the
                 # caller on the stream that waits for this frame's snapshot.
                 producer.use()
+                ended = cp.cuda.Event()
+                ended.record(producer)
+                log = self._stall_log
+                if log is not None and self._frame_mode is not None:
+                    log.record(wall_seconds=perf_counter() - started,
+                               mode=self._frame_mode,
+                               nbytes=self._frame_nbytes,
+                               events=(began, ended))
+
+    def _submit_device_frame(self, cp, producer, path, valid_time, state, *,
+                             extra_fields, refl_field, global_attrs,
+                             completed_observer) -> None:
+        """Stage one resident domain's frame and admit it.
+
+        Two ways to get the frame off the card, chosen per frame by
+        :meth:`_d2h_plan` and recorded:
+
+        * ``snapshot``: the selected device fields are copied DEVICE TO
+          DEVICE, on the producer stream, into buffers this writer keeps;
+          the side stream then copies those buffers to page-locked host
+          memory.  The producer waits for nothing of this frame's -- its
+          next kernel is ordered after the device copy by the stream itself
+          -- and before the NEXT frame's device copy it waits for this
+          frame's host copy to have stopped reading the buffers (normally
+          long finished).
+        * ``direct``: the old path.  The side stream copies the live arrays
+          to the host and the producer waits for that whole copy.
+
+        Both stage the same arrays in the same order, so the file is the
+        same file.
+        """
+        device_fields = _device_state_frame(
+            state, include_diagnostic_pressure=True)
+        if refl_field is not None:
+            device_fields["REFL_10CM"] = refl_field
+        # The [output] selection, resolved BEFORE the staging loop below
+        # so a dropped field costs no D2H at all -- see _history_plan.
+        produced = list(device_fields)
+        produced.extend(name for name in (extra_fields or ())
+                        if name not in device_fields)
+        keep, history_attrs = self._history_plan(produced)
+        snapshot = self._d2h_plan(cp, device_fields, keep)
+        if snapshot:
+            # Fence buffer reuse: the previous frame's host copy
+            # must have finished reading the snapshot buffers.
+            if self._snapshot_done is not None:
+                producer.wait_event(self._snapshot_done)
+            for name, value in device_fields.items():
+                if name in keep and not isinstance(value, np.ndarray):
+                    _device_copy(cp, self._snapshot[name], value,
+                                 producer)
+        ready = cp.cuda.Event()
+        ready.record(producer)
+        self.stream.wait_event(ready)
+
+        host_fields: dict[str, np.ndarray] = {}
+        device_refs: list[object] = []
+        pinned_refs: list[object] = []
+        with self.stream:
+            for name, value in device_fields.items():
+                if name not in keep:
+                    continue
+                if isinstance(value, np.ndarray):
+                    # Already on host: staging it through the device would
+                    # be a pure bounce (measured ~1.8 GiB of cached device
+                    # staging across the initial frames).  np.array preserves
+                    # a scalar P_TOP's 0-D shape; np.ascontiguousarray would
+                    # silently promote it to (1,) and give it a vertical dim.
+                    host_fields[name] = np.array(
+                        value, copy=True, order="C", subok=False)
+                    continue
+                array = (self._snapshot[name] if snapshot
+                         else cp.ascontiguousarray(value))
+                memory = cp.cuda.alloc_pinned_memory(int(array.nbytes))
+                host = np.frombuffer(memory, dtype=array.dtype,
+                                     count=array.size).reshape(array.shape)
+                array.get(out=host, stream=self.stream, blocking=False)
+                host_fields[name] = host
+                if not snapshot:
+                    device_refs.append(array)
+                pinned_refs.append(memory)
+            for name, value in (extra_fields or {}).items():
+                # Prognostic/state-derived fields win (notably child HGT,
+                # which is blended while static HGT_M remains unblended).
+                if name not in host_fields and name in keep:
+                    host_fields[name] = np.ascontiguousarray(value)
+            done = cp.cuda.Event()
+            done.record(self.stream)
+        if snapshot:
+            # The producer goes on; the next frame's device copy
+            # waits for this event instead (above).
+            self._snapshot_done = done
+        else:
+            # The next mutation on the producing stream waits for the
+            # host copy, while the host remains free to write another
+            # domain/file.
+            producer.wait_event(done)
+        self._frame_mode = "snapshot" if snapshot else "direct"
+        self._frame_nbytes = _frame_nbytes(host_fields)
+        self._cap_queue_depth(self._frame_nbytes)
+        ticket = _AsyncFrame(
+            path=Path(path),
+            time_str=valid_time.strftime("%Y-%m-%d_%H:%M:%S"),
+            fields=host_fields, event=done,
+            completed_observer=completed_observer,
+            device_refs=tuple(device_refs),
+            pinned_refs=tuple(pinned_refs),
+            valid_time=valid_time,
+            global_attrs=self._frame_attrs(global_attrs, history_attrs))
+        self._admit(ticket)
+
+    def _d2h_plan(self, cp, device_fields, keep) -> bool:
+        """Snapshot this frame on the device (``True``), or copy direct.
+
+        The buffers are allocated once and reused; a frame that needs more
+        (a field that appears later, a larger shape) is admitted for the
+        difference only.  Every refusal is recorded by name in ``_d2h``
+        and the frame is copied direct, exactly as before this existed.
+        """
+        from woof.io import history_staging
+
+        if self._snapshot is None:
+            self._snapshot = {}
+        wanted = {name: (tuple(value.shape), np.dtype(value.dtype))
+                  for name, value in device_fields.items()
+                  if name in keep and not isinstance(value, np.ndarray)}
+        if not wanted:
+            return False
+        if self._snapshot_disabled is not None:
+            return False
+        missing = {name: spec for name, spec in wanted.items()
+                   if name not in self._snapshot
+                   or (tuple(self._snapshot[name].shape),
+                       np.dtype(self._snapshot[name].dtype)) != spec}
+        if not missing:
+            return True
+        need = sum(int(np.prod(shape, dtype=np.int64)) * dtype.itemsize
+                   for shape, dtype in missing.values())
+        device = (self._device.id if self._device is not None
+                  else cp.cuda.Device().id)
+        if self._snapshot_done is not None:
+            # A buffer about to be replaced may still be read by the last
+            # frame's host copy.
+            self._snapshot_done.synchronize()
+        # A buffer being RESIZED gives its bytes back first, so the request
+        # below is never counted against both copies at once.
+        for name in missing:
+            old = self._snapshot.pop(name, None)
+            if old is not None:
+                history_staging.release_device_snapshot(device, int(old.nbytes))
+                self._snapshot_bytes -= int(old.nbytes)
+        admitted, reason, basis = history_staging.reserve_device_snapshot(
+            device, need, writer_bytes=self._snapshot_bytes)
+        record = self._d2h if self._d2h is not None else {}
+        record["basis"] = basis
+        if not admitted:
+            record.update(mode="direct", reason=reason)
+            record["refusals"] = record.get("refusals", 0) + 1
+            self._d2h = record
+            # The rest of the snapshot cannot serve this frame either: hold
+            # no device memory for a frame copied direct.
+            self._release_snapshot()
+            if reason in ("disabled", "unpriced"):
+                # Neither changes during a run: stop asking.
+                self._snapshot_disabled = reason
+            return False
+        taken = 0
+        try:
+            for name, (shape, dtype) in missing.items():
+                self._snapshot[name] = cp.empty(shape, dtype=dtype)
+                self._snapshot_bytes += int(self._snapshot[name].nbytes)
+                taken += int(self._snapshot[name].nbytes)
+        except cp.cuda.memory.OutOfMemoryError as error:
+            history_staging.release_device_snapshot(device, need - taken)
+            self._release_snapshot()
+            self._snapshot_disabled = "device-allocation-failed"
+            record.update(mode="direct",
+                          reason=f"device-allocation-failed: {error}")
+            self._d2h = record
+            return False
+        record.update(mode="snapshot", reason=None,
+                      snapshot_bytes=int(self._snapshot_bytes))
+        self._d2h = record
+        return True
+
+    def _release_snapshot(self) -> None:
+        """Drop the device snapshot buffers and their admitted bytes."""
+        from woof.io import history_staging
+
+        buffers = self._snapshot or {}
+        done, self._snapshot_done = self._snapshot_done, None
+        if not buffers:
+            return
+        if done is not None:
+            done.synchronize()
+        device = (self._device.id if self._device is not None else 0)
+        history_staging.release_device_snapshot(
+            device, sum(int(b.nbytes) for b in buffers.values()))
+        self._snapshot = {}
+        self._snapshot_bytes = 0
+
+    def _cap_queue_depth(self, frame_bytes: int) -> None:
+        """Lower the queue depth once, if its page-locked frames would not fit."""
+        if self._depth_cap is not None or self._queue_depth <= 1:
+            return
+        from woof.io.history_staging import effective_queue_depth
+
+        depth, reason = effective_queue_depth(self._queue_depth, frame_bytes)
+        self._depth_cap = depth
+        self._depth_reason = reason
+
+    def receipt(self) -> dict:
+        """What this domain's writer did (the run receipt's history_writes)."""
+        log = self._stall_log
+        engine = self._engine or resolve_wrfout_engine()
+        d2h = (dict(self._d2h) if self._d2h else
+               {"mode": "none", "reason": "no device-resident frame was submitted"})
+        return {
+            "grid_id": self.grid_id,
+            "d2h": d2h,
+            "queue_depth": {"requested": int(self._queue_depth),
+                            "effective": int(self._depth_cap
+                                             or self._queue_depth),
+                            "reason": self._depth_reason},
+            "engine": engine,
+            "netcdf_lock": ("validation-only" if engine == "rust"
+                            and not _async_history_off()
+                            else "whole-session"),
+            "identity": dict(self._identity_modes or {}),
+            "stalls": None if log is None else log.summary(),
+        }
 
 
     def _admit_host_frame(self, path, valid_time, frame, *, extra_fields,
@@ -2131,6 +2432,17 @@ class AsyncDomainWrfoutWriter:
     def _worker_on_device(self) -> None:
         if not hasattr(self, "_completed_records"):
             self._completed_records = []
+        engine = self._engine or resolve_wrfout_engine()
+        from woof.io.history_staging import async_history_mode
+        legacy = async_history_mode() == "off"
+        # WHICH LOCK COVERS WHAT.  The netCDF4 engine is HDF5 from create to
+        # close, so its whole session is serialized process-wide.  The Rust
+        # engine never enters HDF5 while it writes: its one netCDF4 session
+        # is the publish-time validation reopen, which WrfoutWriter.close()
+        # takes the lock for itself -- so nested domains' Rust writes overlap.
+        # WOOF_ASYNC_HISTORY=off puts back the old scope (every session
+        # serialized) and the old read-back identity, on both engines.
+        whole_session = engine == "python" or legacy
         while True:
             ticket = self._queue.get()
             if ticket is None:
@@ -2157,7 +2469,7 @@ class AsyncDomainWrfoutWriter:
                          in held["frame"].materialize().items()
                          if name in held["keep"]),
                         held["refl"], held["extra"])
-                with _NETCDF4_IO_LOCK:
+                with (_NETCDF4_IO_LOCK if whole_session else nullcontext()):
                     if self._abort_event.is_set():
                         continue
                     try:
@@ -2170,13 +2482,20 @@ class AsyncDomainWrfoutWriter:
                                     else self.global_attrs),
                                 soil_layers=self.soil_layers,
                                 field_schema=ticket.fields,
-                                _retain_identity_handle=True) as writer:
+                                engine=engine,
+                                _retain_identity_handle=True,
+                                _expect_frames=None if legacy else 1,
+                                _session_locked=whole_session) as writer:
                             writer.write_frame(ticket.time_str, ticket.fields)
                     except BaseException:
-                        # Set the experiment-wide abort while still holding
-                        # the netCDF lock.  A later domain cannot slip into a
-                        # file session between this failure and publication
-                        # cancellation.
+                        # Set the experiment-wide abort at once (still under
+                        # the netCDF lock on the netCDF4 engine).  A session
+                        # that STARTS later sees it and skips; one already
+                        # running concurrently (Rust engine) is cancelled
+                        # before its rename by complete_output_identity's
+                        # cancel_event -- either way it is as if that
+                        # session had run, or not run, wholly before this
+                        # failure.
                         self._abort_event.set()
                         raise
                 # The native writer has consumed every host view and made
@@ -2197,6 +2516,17 @@ class AsyncDomainWrfoutWriter:
                 published = getattr(writer, "publication_revision", None)
                 if published is not None:
                     proof = writer.complete_output_identity(cancel_event=self._abort_event)
+                    mode = str(getattr(writer, "identity_mode", None) or "reread")
+                    with self._condition:
+                        if self._identity_modes is None:
+                            self._identity_modes = {}
+                        key = mode.split(":", 1)[0]
+                        self._identity_modes[key] = (
+                            self._identity_modes.get(key, 0) + 1)
+                        if ":" in mode:
+                            self._identity_modes["reread_reason"] = (
+                                mode.split(":", 1)[1].strip())
+                        self._last_identity_streamed = key.startswith("streamed")
                     if ticket.completed_observer is not None:
                         ticket.completed_observer(proof, ticket.valid_time)
                     with self._condition:
@@ -2354,6 +2684,10 @@ class AsyncDomainWrfoutWriter:
                     continue
                 break
             self._thread.join()
+            # The device snapshot is this writer's; give its bytes back to
+            # the card and to the priced plan (history_staging).
+            with suppress(BaseException), self._device_context():
+                self._release_snapshot()
         if saved is not None:
             raise saved
         self._raise_failure()
@@ -2539,6 +2873,15 @@ class PerDomainWrfoutWriters:
         self._abort_event = threading.Event()
         self._output_observer = None
         self._simulated_radar = None
+        from woof.io.history_staging import async_history_mode, resolve_queue_depth
+        # Refuse a malformed WOOF_ASYNC_HISTORY here, at the door, rather
+        # than at the first history frame.
+        async_history_mode()
+        #: How many frames each domain's writer may queue
+        #: (woof.io.history_staging): requested and where from.
+        self._queue_depth = resolve_queue_depth(history_selection)
+        self._archived_receipts = []
+        self._pinned_blocks_freed = 0
         resumed_episodes = {int(gid): int(episode) for gid, episode
                             in dict(episodes_by_grid_id or {}).items()}
         for node in model.walk_parent_first():
@@ -2566,7 +2909,8 @@ class PerDomainWrfoutWriters:
                 abort_event=self._abort_event,
                 grid_id=node.cfg.grid_id,
                 history_selection=self._selection_for(node.cfg),
-                device=_domain_output_device(node.state))
+                device=_domain_output_device(node.state),
+                queue_depth=self._queue_depth_requested())
             self._hub_wind_by_grid_id[int(node.cfg.grid_id)] = \
                 _attach_hub_wind(node, case, self._selection_for(node.cfg),
                                  node.grid)
@@ -2580,6 +2924,50 @@ class PerDomainWrfoutWriters:
         if progress_callback is not None:
             self.attach_progress_callback(progress_callback)
             self.attach_write_progress(progress_callback)
+
+    def _queue_depth_requested(self) -> int:
+        return int((getattr(self, "_queue_depth", None) or {}).get(
+            "requested", 1))
+
+    def _free_pinned(self) -> None:
+        """Release the page-locked pool's idle blocks at a FINAL drain point.
+
+        Called at the run's finalization drain, at close and when a domain
+        retires -- never at a mid-run drain (a restart's), where the next
+        frame and the checkpoint writer would only pay the page-locked
+        allocations again.
+        """
+        from woof.io.history_staging import free_pinned_pool
+
+        if self.pending:
+            return
+        self._pinned_blocks_freed = (getattr(self, "_pinned_blocks_freed", 0)
+                                     + free_pinned_pool())
+
+    def history_writes_receipt(self) -> dict:
+        """The run receipt's ``history_writes`` block (history_staging)."""
+        from woof.io.history_staging import RECEIPT_SCHEMA, async_history_mode
+
+        domains = list(getattr(self, "_archived_receipts", ()))
+        for gid in sorted(self._writers):
+            receipt = getattr(self._writers[gid], "receipt", None)
+            if callable(receipt):
+                domains.append(receipt())
+        tiles = dict(getattr(self, "_tiles_modes", {}) or {})
+        for row in domains:
+            mode = tiles.get(row.get("grid_id"))
+            if mode is not None:
+                row["tiles_frame"] = mode
+        try:
+            switch = async_history_mode()
+        except ValueError as error:
+            switch = f"invalid: {error}"
+        return {"schema": RECEIPT_SCHEMA, "async_history": switch,
+                "queue_depth": dict(getattr(self, "_queue_depth", None)
+                                    or {"requested": 1, "source": "default"}),
+                "pinned_pool_blocks_freed": int(
+                    getattr(self, "_pinned_blocks_freed", 0)),
+                "domains": domains}
 
     def _selection_for(self, domain_cfg):
         """One domain's ``[output]`` selection: its own, else the tree's.
@@ -2729,7 +3117,8 @@ class PerDomainWrfoutWriters:
             landing_observer=(self._notify_output if self._simulated_radar is not None
                               else None),
             history_selection=self._selection_for(node.cfg),
-            device=_domain_output_device(node.state))
+            device=_domain_output_device(node.state),
+            queue_depth=self._queue_depth_requested())
         self._hub_wind_by_grid_id[grid_id] = _attach_hub_wind(
             node, case, self._selection_for(node.cfg), grid)
 
@@ -2774,6 +3163,12 @@ class PerDomainWrfoutWriters:
             return
         writer.drain()
         writer.close()
+        receipt = getattr(writer, "receipt", None)
+        if callable(receipt):
+            if not hasattr(self, "_archived_receipts"):
+                self._archived_receipts = []
+            self._archived_receipts.append(receipt())
+        self._free_pinned()
         self._archived_paths.extend(writer.paths)
         if not hasattr(self, "_archived_records"):
             self._archived_records = []
@@ -2941,7 +3336,20 @@ class PerDomainWrfoutWriters:
             # frame's size is known, declares the bytes still to move:
             # everything queued plus this frame, written and read back.
             with self._write_beat(phase, self.pending_work_bytes):
-                frame = streamed.history_fields()
+                snapshot = self._streamed_snapshot(streamed, writer)
+                frame = (streamed.history_fields(snapshot=True) if snapshot
+                         else streamed.history_fields())
+                mode = getattr(streamed, "history_snapshot_mode", None)
+                snapshotted = bool(snapshot and isinstance(mode, dict)
+                                   and mode.get("mode") == "snapshot")
+                if not hasattr(self, "_tiles_modes"):
+                    self._tiles_modes = {}
+                if isinstance(mode, dict):
+                    self._tiles_modes[int(node.cfg.grid_id)] = dict(mode)
+                if snapshotted and isinstance(refl_field, np.ndarray):
+                    # The stashed REFL_10CM is a VIEW of the store, which
+                    # the next sweep scatters into; the frame is a copy.
+                    refl_field = np.array(refl_field, copy=True, order="C")
                 deferred = bool(getattr(frame, "deferred", False))
                 frame_bytes = (int(frame.nbytes) if deferred
                                else _frame_nbytes(frame))
@@ -2966,6 +3374,13 @@ class PerDomainWrfoutWriters:
                         # writes; the next write INTO the store waits here
                         # first (tilestream.ranks.RankedRun.add_store_guard).
                         streamed.add_store_guard(consume_staging)
+                    elif snapshotted:
+                        # A SNAPSHOT frame: the carriers were copied out of
+                        # the store, so the next sweep may scatter into it
+                        # while the writer writes.  The next frame of this
+                        # domain refills the same snapshot buffers, so it
+                        # waits for this one first (_streamed_snapshot).
+                        pass
                     else:
                         consume_staging()
             return
@@ -2980,12 +3395,39 @@ class PerDomainWrfoutWriters:
                 completed_observer=committed)
         # The per-interval windows restart HERE, once, for every road that
         # publishes through this writer set (the tree runner, both prepared
-        # runners): submit's producer-stream wait_event has fenced the D2H
-        # snapshot ahead of any later default-stream write, so restarting
+        # runners): submit has ordered the frame's copy ahead of any later
+        # producer-stream write -- the device snapshot is ON that stream,
+        # and a direct copy is fenced by its wait_event -- so restarting
         # the window cannot race the staged copy.
         interval_diagnostics.close_interval(
             node.state, valid_time=valid_time, output_dir=base_dir,
             grid_id=node.cfg.grid_id)
+
+    def _streamed_snapshot(self, streamed, writer) -> bool:
+        """Ask for a snapshot frame, after the last one is written.
+
+        The snapshot buffers and the derived ``T``/``P``/``PSFC``
+        destinations are refilled by every ``history_fields`` call, so the
+        previous frame must have left them before this one is taken: the
+        writer's ``drain_staging`` (normally long finished by the next
+        history time).  ``WOOF_ASYNC_HISTORY=off`` and the ranked road (its
+        frames are deferred already) do not ask.
+        """
+        from woof.io.history_staging import async_history_mode
+
+        if async_history_mode() == "off":
+            return False
+        ranked = getattr(streamed, "_ranked_road", None)
+        if callable(ranked) and ranked():
+            return False
+        mode = getattr(streamed, "history_snapshot_mode", None)
+        if isinstance(mode, dict) and mode.get("mode") != "snapshot":
+            return False
+        if not hasattr(type(streamed), "history_snapshot_mode"):
+            # A stand-in without the snapshot surface keeps the old path.
+            return False
+        getattr(writer, "drain_staging", writer.drain)()
+        return True
 
     def durability_barrier(self):
         """A barrier over every frame submitted so far, or ``None``.
@@ -3036,6 +3478,14 @@ class PerDomainWrfoutWriters:
                     self._writers[gid].drain()
             if self._writers[gid].paths:
                 self.last_durable_wrfout = self._writers[gid].paths[-1]
+        if before_domain is not None:
+            # The finalization drain (every runner passes before_domain
+            # there and nowhere else).
+            self._free_pinned()
+        with suppress(BaseException):
+            # Refreshed at every drain, so the final drain before a run's
+            # report leaves the complete block on the model.
+            self.model._history_writes_receipt = self.history_writes_receipt()
         if getattr(self, "_simulated_radar", None) is not None:
             self._simulated_radar.drain()
 
@@ -3128,6 +3578,16 @@ class PerDomainWrfoutWriters:
                     saved = exc
             if writer.paths:
                 self.last_durable_wrfout = writer.paths[-1]
+        with suppress(BaseException):
+            self._free_pinned()
+        with suppress(BaseException):
+            # The run receipts read it off the model after the writers
+            # close (runtime, both prepared runners): "history_writes".
+            self.model._history_writes_receipt = self.history_writes_receipt()
+        # The door's priced plan describes THIS run; a later run in the same
+        # process takes its own admission (history_staging).
+        from woof.io.history_staging import forget_priced_plans
+        forget_priced_plans()
         if getattr(self, "_simulated_radar", None) is not None:
             try:
                 self._simulated_radar.close()

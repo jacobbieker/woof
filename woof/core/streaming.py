@@ -642,10 +642,15 @@ def admit_resident_road(exp, decision=None, *, machine=None, estimate=None,
                         profile=getattr(machine, "device_profile", None),
                         boundary_species=source_boundary_species(source),
                         urban_columns=urban_columns))
-    return admit(what, resident_forecast_terms(estimate),
-                 free_bytes=int(machine.vram_bytes),
-                 stage="while building the domain state or attaching its "
-                       "physics", envelope=True)
+    record = admit(what, resident_forecast_terms(estimate),
+                   free_bytes=int(machine.vram_bytes),
+                   stage="while building the domain state or attaching its "
+                         "physics", envelope=True)
+    # The room this priced plan leaves on the card is what the history
+    # writers' device snapshots may draw on (woof.io.history_staging).
+    from woof.io.history_staging import record_priced_plan
+    record_priced_plan(record)
+    return record
 
 
 def cold_tree_streaming_decision(exp, nodes, *, machine=None, decisions=None,
@@ -2096,8 +2101,43 @@ class StreamedDomain:
         if due:
             self._stash_domain_refl(state)
 
-    def history_fields(self) -> dict:
+    #: How this domain's history frames leave the store
+    #: (``snapshot``/``views``/``deferred``, the reason, the bytes); set
+    #: when the frame is first built (woof.io.history_staging).
+    history_snapshot_mode = None
+
+    def _admit_history_snapshot(self, plan) -> bool:
+        """May this domain's frames be SNAPSHOTTED off the store?
+
+        A snapshot is one host memcpy of every carrier into buffers the
+        frame keeps (``StoreFrame(overlap=True)``), after which the writer
+        can hold the frame while the next sweep scatters into the store --
+        instead of the model waiting for the whole netCDF write between
+        two sweeps.  Admitted only inside the host-RAM budget the
+        asynchronous checkpoint uses; otherwise the frame stays zero-copy
+        views and the write stays synchronous, by name.
+        """
+        import numpy as np
+        from tilestream import output as _output
+        from woof.io.history_staging import admit_host_snapshot
+
+        nbytes = sum(int(np.prod(plan.shape[name], dtype=np.int64))
+                     * np.dtype(plan.dtype[name]).itemsize
+                     for name in plan.names(_output.SOURCE_CARRIER))
+        admitted, reason = admit_host_snapshot(nbytes)
+        self.history_snapshot_mode = {
+            "mode": "snapshot" if admitted else "views",
+            "reason": reason, "snapshot_bytes": int(nbytes) if admitted else 0}
+        return admitted
+
+    def history_fields(self, *, snapshot: bool = False) -> dict:
         """One wrfout history frame, assembled off the store, host arrays.
+
+        ``snapshot`` asks, when the frame is first built, for the carriers
+        to be COPIED rather than viewed (:meth:`_admit_history_snapshot`);
+        :attr:`history_snapshot_mode` says what was granted.  A snapshot
+        frame stays valid across the next sweep, until the NEXT call to
+        this method, which refills the same buffers.
 
         Built by :class:`tilestream.output.StoreFrame`, whose classification
         of every frame field is MEASURED against the real
@@ -2174,9 +2214,17 @@ class StreamedDomain:
                     "which carriers exist, not which of them the writer "
                     "wants under which name.  Pass attach(template=...) the "
                     "slab the store was built through.")
+            overlap = False
+            if snapshot and not self._ranked_road():
+                overlap = self._admit_history_snapshot(plan)
+            elif self.history_snapshot_mode is None:
+                self.history_snapshot_mode = {
+                    "mode": "deferred" if self._ranked_road() else "views",
+                    "reason": None if self._ranked_road() else "not-requested",
+                    "snapshot_bytes": 0}
             self._frame = _output.StoreFrame(plan, planning,
                                              self.output_setup(),
-                                             self._run.cfg)
+                                             self._run.cfg, overlap=overlap)
         if self._ranked_road():
             return self._ranked_frame()
         # The frame's non-derived rows are zero-copy VIEWS of the pinned

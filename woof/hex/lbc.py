@@ -109,8 +109,14 @@ def read_lbc_valid_time(path: str | Path) -> datetime:
 
     from netCDF4 import Dataset
 
+    from woof.io.netcdf_serialization import netcdf4_session
+
     p = Path(path)
-    with Dataset(p) as dataset:
+    # Under the process-wide netCDF4 lock: the hex forecast writes its
+    # history files with netCDF4 on a background thread
+    # (woof.hex.output.AsyncHistoryWriter), and HDF5 here is not
+    # thread-safe.
+    with netcdf4_session(), Dataset(p) as dataset:
         dataset.set_auto_maskandscale(False)
         return _read_xtime(dataset, p)
 
@@ -147,8 +153,14 @@ def read_lbc_file(path: str | Path) -> LbcFile:
 
     from netCDF4 import Dataset
 
+    from woof.io.netcdf_serialization import netcdf4_session
+
     p = Path(path)
-    with Dataset(p) as dataset:
+    # Under the process-wide netCDF4 lock: the hex forecast writes its
+    # history files with netCDF4 on a background thread
+    # (woof.hex.output.AsyncHistoryWriter), and HDF5 here is not
+    # thread-safe.
+    with netcdf4_session(), Dataset(p) as dataset:
         # Raw bytes, not the mask-and-scale view: the tendency arithmetic is
         # pinned to the reference's float32, so the values must be the file's.
         dataset.set_auto_maskandscale(False)
