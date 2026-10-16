@@ -503,6 +503,46 @@ The run receipt's `health_check` block records the mode, where it came
 from, and how many results were checked late and how many at a
 synchronous boundary.
 
+## When a run fails: the frames it already took
+
+A run that fails -- a health check, a physics refusal, any other error,
+or a first Ctrl-C -- finishes writing the history frames it had already
+taken, publishes them, and then stops with the original error. Before,
+the queue was aborted, so a frame taken a few steps before the failure
+was published or quarantined depending on how far its write had got.
+
+- **Every frame taken before the failure is published**, with its
+  `ready/` marker and `output_written` event as usual. Each was taken
+  from a state the health check had passed, and no frame is taken after
+  the failing step, so nothing computed after it is written.
+- **A valid time is published for every domain or for none.** All
+  domains due at one valid time form a frame set. If the run failed
+  before every domain in the set had taken its frame, the frames it did
+  take are not renamed onto their final names. They are moved to
+  `.quarantine/` with the reason `partial-frame-set`. A set is never
+  partly published, even while the run is healthy: a written frame waits
+  for the rest of its set before it is renamed.
+- **The wait is announced and bounded.** The run prints which domains,
+  how many frames and how many bytes it is finishing, and the bound. The
+  bound is 120 s plus the bytes at 8 MiB/s, the same rate the supervisor
+  uses for a `writing:` record. If the bound passes, or a second Ctrl-C
+  or SIGTERM arrives, the run abandons the unwritten frames as before
+  (quarantined) and says so. A SIGTERM is then handed back, so the run
+  still dies of it.
+- **Simulated radar** scans every frame the drain publishes, inside the
+  same bound. If the drain is abandoned, the radar is stopped and names
+  the frames it left without a volume.
+- **The original error is the one reported.** What happened to the
+  history is added to it as notes, recorded in the receipt's
+  `history_writes.on_failure` block, and in
+  `evidence/failed-run-receipt.json` (`history_on_failure`). That block
+  gives the outcome (`drained`, `timeout`, `interrupted` or
+  `drain-error`), the frames published after the failure, and each
+  withdrawn frame set with its missing domains.
+
+Checkpoints are unchanged: an in-flight checkpoint is still finished and
+published, or removed whole.
+
 ## How this relates to the other progress artifacts
 
 WOOF publishes four things, and they are not redundant:

@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+Changed:
+
+- A failing run now drains its history before it stops. On a health
+  failure, a physics refusal, any other error or a first Ctrl-C, every
+  history frame already taken is written and published, and the run
+  then raises the original error unchanged. Before, the writers aborted
+  their queue, so a frame taken a few steps before a strict NaN abort
+  was published in some runs and quarantined in others. Frames are taken
+  only after the health check has passed, so nothing computed after the
+  failing step is written.
+  - All domains due at one valid time are one frame set, published
+    together or not at all. A written frame waits for the rest of its set
+    before it is renamed onto its final name. If the failure cut a set
+    short, its frames are quarantined as `partial-frame-set`.
+  - The drain prints what it is finishing (domains, frames, bytes) and
+    is bounded by 120 s plus the bytes at 8 MiB/s, the supervisor's
+    finalization rate. The bound, or a second Ctrl-C or SIGTERM, falls
+    back to the old abort, and says so; a SIGTERM is handed back.
+  - Simulated radar scans the drained frames inside the same bound, and
+    is cancelled only if the drain is abandoned.
+  - The outcome is added to the error as notes, and recorded in the
+    receipt's `history_writes.on_failure` block and in
+    `failed-run-receipt.json` (`history_on_failure`).
+  - Checkpoints keep their rules. The hex history writer already drained
+    on failure and is unchanged.
+  See docs/public/PROGRESS.md, "When a run fails".
+
 New:
 
 - The per-step health check no longer makes the CPU wait for each step

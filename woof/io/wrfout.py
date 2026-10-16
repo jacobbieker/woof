@@ -14,7 +14,7 @@ CPU-importable.
 """
 from __future__ import annotations
 from collections.abc import Mapping
-from contextlib import nullcontext, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
@@ -42,7 +42,9 @@ from woof.io.wrf_output_schema import (
     REGISTRY_VAR_META, SCHEME_OUTPUT_FIELDS, WRF_FIELD_TYPE_INTEGER,
     WRF_FIELD_TYPE_REAL,
 )
-from woof.supervisor import (_fsync_directory, fsync_file, quarantine_file,
+from woof.supervisor import (_fsync_directory,
+                              finalization_stale_threshold_seconds,
+                              fsync_file, quarantine_file,
                               replace_file_with_retry, unique_temp_path,
                               writing_progress)
 
@@ -1698,6 +1700,59 @@ class _AsyncFrame:
     #: Required producer identity handoff. Unlike telemetry, failure prevents
     #: publication being treated as a safely consumable ensemble history.
     completed_observer: object = None
+    #: The frame set this frame belongs to (:class:`_PublishGate`), or
+    #: ``None``: the worker writes the frame, then waits here before its
+    #: final-name rename until the set is decided -- published, or withdrawn
+    #: because the run failed before every domain due at the same valid
+    #: time had submitted (:class:`PerDomainWrfoutWriters`).
+    publish_gate: object = None
+
+
+#: The quarantine reason of a frame withdrawn from an incomplete frame set.
+PARTIAL_FRAME_SET = "partial-frame-set"
+
+
+class _DrainBoundPassed(Exception):
+    """The failure drain's own bound passed (never a writer's TimeoutError)."""
+
+
+class _PublishGate:
+    """One valid time's frame set: publish together, or not at all.
+
+    Decided exactly once, by the model thread (:class:`PerDomainWrfoutWriters`):
+    :meth:`publish` when every domain due at the valid time has submitted (or
+    can no longer submit it because its clock has moved past), :meth:`withdraw`
+    when the run failed before the set was complete.  A worker that has
+    written a member frame waits for the decision before renaming it onto
+    its final name, so no reader ever sees one domain's frame for a time
+    without the others.
+    """
+
+    def __init__(self, ticks: int, valid_time) -> None:
+        self.ticks = int(ticks)
+        self.valid_time = valid_time
+        self.decided = threading.Event()
+        self.reason: str | None = None
+        #: grid_id -> final path of each member whose submit returned.
+        self.submitted: dict[int, Path] = {}
+        #: Filled when the decision is a withdrawal.
+        self.missing: tuple[int, ...] = ()
+        #: final path -> where the worker quarantined the written file.
+        self.quarantined: dict[str, str | None] = {}
+
+    @property
+    def published(self) -> bool:
+        return self.decided.is_set() and self.reason is None
+
+    def publish(self) -> None:
+        self.decided.set()
+
+    def withdraw(self, reason: str, missing=()) -> None:
+        if self.decided.is_set():
+            return
+        self.reason = str(reason)
+        self.missing = tuple(sorted(int(gid) for gid in missing))
+        self.decided.set()
 
 
 def _compose_host_frame(frame_items, refl, extra) -> dict:
@@ -1817,6 +1872,19 @@ class AsyncDomainWrfoutWriter:
     _engine = None
     _identity_modes = None
     _last_identity_streamed = False
+    #: The publish gate the frame being submitted joins (``submit``'s
+    #: ``publish_gate``), handed to its ticket at admission.
+    _submit_gate = None
+    #: Called on the model thread before this writer waits for durable
+    #: frames (:meth:`drain`, :meth:`close`, :meth:`update_global_attrs`):
+    #: the writer set decides every frame set still open, because a frame
+    #: waiting at an undecided gate would otherwise never become durable.
+    before_wait = None
+
+    def _decide_before_wait(self) -> None:
+        hook = self.before_wait
+        if hook is not None:
+            hook()
 
     @staticmethod
     def _new_ticket_queue(depth: int = 1) -> queue.Queue:
@@ -1947,6 +2015,8 @@ class AsyncDomainWrfoutWriter:
 
     def _admit(self, ticket: _AsyncFrame) -> None:
         """Admit one staged frame with bounded, liveness-aware waits."""
+        if ticket.publish_gate is None:
+            ticket.publish_gate = self._submit_gate
         ticket.nbytes = (int(ticket.deferred["frame"].nbytes)
                          if ticket.deferred is not None
                          else _frame_nbytes(ticket.fields))
@@ -2018,7 +2088,8 @@ class AsyncDomainWrfoutWriter:
         return {**base, **history_attrs}
 
     def submit(self, path, valid_time, state, *, extra_fields=None,
-               refl_field=None, frame=None, global_attrs=None, completed_observer=None) -> None:
+               refl_field=None, frame=None, global_attrs=None, completed_observer=None,
+               publish_gate=None) -> None:
         """Queue a nonblocking, stream-ordered snapshot of one domain.
 
         ``frame`` is a COMPLETE host frame, already assembled, and it is the
@@ -2057,6 +2128,10 @@ class AsyncDomainWrfoutWriter:
         ``global_attrs`` is a per-frame global-attribute override (carrier
         provenance above all); it rides the ticket so the snapshot taken at
         submit time lands on exactly the file that carries this frame.
+
+        ``publish_gate`` (a :class:`_PublishGate`) holds the written file
+        back from its final name until the writer set decides its frame
+        set; ``None`` publishes as soon as the file is complete.
         """
         import cupy as cp
 
@@ -2072,6 +2147,7 @@ class AsyncDomainWrfoutWriter:
             began.record(producer)
             self._frame_mode = "host-frame" if frame is not None else None
             self._frame_nbytes = 0
+            self._submit_gate = publish_gate
             try:
                 if frame is not None:
                     if state is not None:
@@ -2092,6 +2168,7 @@ class AsyncDomainWrfoutWriter:
                     global_attrs=global_attrs,
                     completed_observer=completed_observer)
             finally:
+                self._submit_gate = None
                 # CuPy stream contexts restore their context stack, which can
                 # differ from a producer selected with Stream.use(). Keep the
                 # caller on the stream that waits for this frame's snapshot.
@@ -2514,6 +2591,13 @@ class AsyncDomainWrfoutWriter:
                     staging_consumed = True
                     self._condition.notify_all()
                 published = getattr(writer, "publication_revision", None)
+                gate = ticket.publish_gate
+                if (published is not None and gate is not None
+                        and not self._await_publish_gate(gate)):
+                    # Withdrawn: its frame set is incomplete because the run
+                    # failed first.  Never renamed onto its final name.
+                    self._withdraw(writer, ticket, gate)
+                    continue
                 if published is not None:
                     proof = writer.complete_output_identity(cancel_event=self._abort_event)
                     mode = str(getattr(writer, "identity_mode", None) or "reread")
@@ -2586,6 +2670,30 @@ class AsyncDomainWrfoutWriter:
                         self._first_undurable = self._finished_count
                     self._condition.notify_all()
 
+    def _await_publish_gate(self, gate) -> bool:
+        """Wait (worker thread) until ``gate`` is decided; True to publish.
+
+        An abort ends the wait too, and answers "publish": the identity
+        step that follows sees the abort and cancels the rename, which is
+        the abort's own quarantine.
+        """
+        while not gate.decided.wait(timeout=_ASYNC_WRITER_POLL_SECONDS):
+            if self._abort_event.is_set():
+                return True
+        return gate.reason is None
+
+    def _withdraw(self, writer, ticket, gate) -> None:
+        """Quarantine a written frame whose frame set was withdrawn."""
+        target = None
+        with suppress(BaseException):
+            writer.release_identity_handle()
+        temp = getattr(writer, "_temp_path", None)
+        if temp is not None and Path(temp).exists():
+            with suppress(BaseException):
+                target = quarantine_file(temp, reason=PARTIAL_FRAME_SET)
+        gate.quarantined[str(ticket.path)] = (None if target is None
+                                              else str(target))
+
     def update_global_attrs(self, global_attrs) -> None:
         """Swap the per-file global attributes for frames submitted later.
 
@@ -2642,19 +2750,28 @@ class AsyncDomainWrfoutWriter:
 
     def drain(self) -> None:
         """Wait for durable files and their completed output identities."""
+        self._decide_before_wait()
         self._drain(include_identity=True)
 
     def drain_staging(self) -> None:
         """Wait until native writes have released borrowed host arrays."""
         self._drain(include_identity=False)
 
-    def _drain(self, *, include_identity) -> None:
+    def _drain(self, *, include_identity, deadline=None) -> None:
+        """Wait for the queue (and identities); ``deadline`` is a
+        ``perf_counter`` instant past which :class:`TimeoutError` is raised
+        with the frames still unfinished."""
         worker_stopped = False
         with self._condition:
             while self._pending or (include_identity and self._identity_pending):
                 if not self._thread.is_alive():
                     worker_stopped = True
                     break
+                if deadline is not None and perf_counter() >= deadline:
+                    raise _DrainBoundPassed(
+                        f"d{int(self.grid_id or 0):02d} still has "
+                        f"{self._pending + int(self._identity_pending)} "
+                        "history frame(s) unfinished")
                 self._condition.wait(timeout=_ASYNC_WRITER_POLL_SECONDS)
         if worker_stopped:
             self._raise_failure()
@@ -2796,11 +2913,138 @@ class HistoryDurabilityBarrier:
             writer.wait_finished(target)
 
 
+#: The fixed part of the failure drain's bound: the supervisor's floor for
+#: one model step (``max(3*p99, 120 s)``), the cost every write pays.
+FAILURE_DRAIN_BASE_SECONDS = 120.0
+
+
+def failure_drain_bound_seconds(work_bytes: int | None) -> float:
+    """How long a failing run waits for the history frames it already took.
+
+    The finalization bound (:func:`woof.supervisor
+    .finalization_stale_threshold_seconds`) at the step floor: the frames'
+    bytes, written and read back, at the slowest storage rate a run folder
+    plausibly has.  At or under the supervisor's own bound for the same
+    ``writing:`` record, so the run gives up and says so before it would be
+    stopped from outside.
+    """
+    return finalization_stale_threshold_seconds(
+        FAILURE_DRAIN_BASE_SECONDS, work_bytes)
+
+
+class _HistoryDrainInterrupted(BaseException):
+    """A second stop signal while a failing run drains its history."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = int(signum)
+
+
+@contextmanager
+def _second_signal_aborts():
+    """SIGTERM raises :class:`_HistoryDrainInterrupted` for the duration.
+
+    Yields a dict that records ``{"signum", "previous"}`` when it fired, so
+    the caller can hand the signal back once the queue is aborted.  SIGINT
+    needs nothing: CPython already raises ``KeyboardInterrupt``.  Installed
+    only from the main thread and never over an ignored or foreign
+    disposition (the same rules as :mod:`woof.signal_report`).
+    """
+    import signal
+
+    fired: dict = {}
+    number = getattr(signal, "SIGTERM", None)
+    previous = None
+    installed = False
+    if (number is not None
+            and threading.current_thread() is threading.main_thread()):
+        try:
+            previous = signal.getsignal(number)
+        except (ValueError, OSError):
+            previous = None
+        if previous is not None and previous is not signal.SIG_IGN:
+            def _handler(signum, _frame):
+                fired.update(signum=int(signum), previous=previous)
+                raise _HistoryDrainInterrupted(signum)
+            try:
+                signal.signal(number, _handler)
+                installed = True
+            except (ValueError, OSError):
+                installed = False
+    try:
+        yield fired
+    finally:
+        if installed:
+            with suppress(ValueError, OSError):
+                signal.signal(number, previous)
+
+
+def _redeliver(fired: dict) -> None:
+    """Hand a caught SIGTERM back to the disposition it interrupted.
+
+    Called by :meth:`PerDomainWrfoutWriters.__exit__` after the drain, never
+    inside it, so nothing of the writer set's own handling can swallow it.
+    A Python handler runs now and may raise (a stoppable door's stop
+    request, which then ends the run).  The default disposition would kill
+    the process before the runner records the failure, so the signal is
+    re-sent at interpreter exit instead: the failure receipt is written and
+    the process still dies of SIGTERM.
+    """
+    import atexit
+    import signal
+
+    previous = fired.get("previous")
+    signum = fired.get("signum")
+    if signum is None:
+        return
+    if callable(previous):
+        previous(signum, None)
+        return
+
+    def die_of_it():
+        with suppress(ValueError, OSError):
+            signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    atexit.register(die_of_it)
+
+
 class PerDomainWrfoutWriters:
-    """One asynchronous writer/side stream per domain in an experiment."""
+    """One asynchronous writer/side stream per domain in an experiment.
+
+    FRAME SETS.  Every domain due at one valid time is one frame set, and a
+    set is published together or not at all: each written frame waits at
+    its set's :class:`_PublishGate` before its final-name rename, and the
+    set is decided (here, on the model thread) once every domain due at that
+    time has submitted -- or has moved past the time without submitting,
+    which only a legitimately skipped frame does.
+
+    ON FAILURE (:meth:`__exit__` with an exception) the frames already taken
+    are written and published, each from a state the health gate passed,
+    and the original exception propagates unchanged.  A set the failure cut
+    short is withdrawn: its written frames are quarantined as
+    ``partial-frame-set``.  The wait is bounded and announced, and a second
+    interrupt -- or the bound -- falls back to aborting the queue
+    (:meth:`_finish_after_failure`).
+    """
 
     _simulated_radar = None
     _output_observer = None
+    _archived_paths = ()
+    _published_paths = frozenset()
+    #: Open frame sets by absolute tick, and their lock; class defaults for
+    #: the ``object.__new__`` shells the CPU tests build.
+    _frame_sets = None
+    _frame_set_lock = threading.Lock()
+    #: The first tick this set took a frame at: a resumed run's restart
+    #: instant, where already-durable frames are not re-emitted.
+    _first_ticks = None
+    #: What the failure drain did (:meth:`_finish_after_failure`); ``None``
+    #: on a run that did not fail.
+    _on_failure = None
+    #: Bound in seconds on the failure drain; ``None`` derives it from the
+    #: bytes still to write (:func:`failure_drain_bound_seconds`).
+    failure_drain_timeout_s = None
 
     #: The tree-wide ``[output]`` history selection this writer set was
     #: built with (``ExperimentConfig.output``), or ``None`` for the FULL
@@ -2871,6 +3115,8 @@ class PerDomainWrfoutWriters:
         #: grid_id -> the hub-wind window this set attached (or None).
         self._hub_wind_by_grid_id = {}
         self._abort_event = threading.Event()
+        self._frame_sets = {}
+        self._frame_set_lock = threading.Lock()
         self._output_observer = None
         self._simulated_radar = None
         from woof.io.history_staging import async_history_mode, resolve_queue_depth
@@ -2911,6 +3157,8 @@ class PerDomainWrfoutWriters:
                 history_selection=self._selection_for(node.cfg),
                 device=_domain_output_device(node.state),
                 queue_depth=self._queue_depth_requested())
+            self._writers[node.cfg.grid_id].before_wait = \
+                self._decide_all_open_sets
             self._hub_wind_by_grid_id[int(node.cfg.grid_id)] = \
                 _attach_hub_wind(node, case, self._selection_for(node.cfg),
                                  node.grid)
@@ -2967,7 +3215,9 @@ class PerDomainWrfoutWriters:
                                     or {"requested": 1, "source": "default"}),
                 "pinned_pool_blocks_freed": int(
                     getattr(self, "_pinned_blocks_freed", 0)),
-                "domains": domains}
+                "domains": domains,
+                **({} if self._on_failure is None
+                   else {"on_failure": dict(self._on_failure)})}
 
     def _selection_for(self, domain_cfg):
         """One domain's ``[output]`` selection: its own, else the tree's.
@@ -3119,6 +3369,7 @@ class PerDomainWrfoutWriters:
             history_selection=self._selection_for(node.cfg),
             device=_domain_output_device(node.state),
             queue_depth=self._queue_depth_requested())
+        self._writers[grid_id].before_wait = self._decide_all_open_sets
         self._hub_wind_by_grid_id[grid_id] = _attach_hub_wind(
             node, case, self._selection_for(node.cfg), grid)
 
@@ -3158,6 +3409,7 @@ class PerDomainWrfoutWriters:
     def remove_domain(self, grid_id: int) -> None:
         """Drain and close one retired episode without losing its paths."""
         grid_id = int(grid_id)
+        self._decide_all_open_sets()
         writer = self._writers.pop(grid_id, None)
         if writer is None:
             return
@@ -3237,22 +3489,16 @@ class PerDomainWrfoutWriters:
         """
         if getattr(self, "_simulated_radar", None) is not None:
             self._simulated_radar.check()
+        # Sets earlier domains have moved past are complete: publish them
+        # before this frame can wait behind them in a queue.
+        self._decide_open_sets()
         seconds = ticks / node.clock.tick_den
         valid_time = self.start_time + timedelta(seconds=seconds)
         episode = int(self._episode_by_grid_id.get(node.cfg.grid_id, 0))
-        base_dir = self.output_dir
-        # THE spelling, from `woof.render_layout`, because the delivered
-        # PNG tree carries the same segment for the same frames: a
-        # reader who found `d05/episode-002` here has to find that
-        # episode's pictures under a folder spelled the same way, and
-        # two independent format strings are two spellings waiting to
-        # drift apart.
-        segment = render_layout.episode_segment(episode)
-        if segment is not None:
-            base_dir = (self.output_dir / f"d{int(node.cfg.grid_id):02d}"
-                        / segment)
+        path = self._frame_path(node.cfg.grid_id, valid_time)
+        base_dir = path.parent
+        if base_dir != self.output_dir:
             base_dir.mkdir(parents=True, exist_ok=True)
-        path = base_dir / wrfout_filename(valid_time, node.cfg.grid_id)
         # SAME-RUN duplicates only.  The breakage this names is a lifecycle
         # or restart boundary publishing one valid time twice inside a
         # single run: the second frame's atomic replace destroys the first,
@@ -3299,6 +3545,7 @@ class PerDomainWrfoutWriters:
             if not capture.keep_member_files:
                 return
         writer = self._writers[node.cfg.grid_id]
+        gate = self._join_frame_set(int(ticks), valid_time)
         committed = (None if capture is None else capture.history_committer(
             grid_id=node.cfg.grid_id, episode=episode))
         # CARRIER PROVENANCE, snapshotted per frame.  Each valid time is
@@ -3361,7 +3608,9 @@ class PerDomainWrfoutWriters:
                             node.cfg.grid_id],
                         refl_field=refl_field,
                         global_attrs=frame_attrs,
-                        completed_observer=committed)
+                        completed_observer=committed,
+                        publish_gate=gate)
+                    self._submitted(gate, int(node.cfg.grid_id), path)
                     # The next sweep may reuse these pinned views once the
                     # native write releases them. Identity hashing can
                     # continue on the worker; final drain/close still wait
@@ -3392,7 +3641,9 @@ class PerDomainWrfoutWriters:
                 extra_fields=self._metadata_by_grid_id[node.cfg.grid_id],
                 refl_field=refl_field,
                 global_attrs=frame_attrs,
-                completed_observer=committed)
+                completed_observer=committed,
+                publish_gate=gate)
+        self._submitted(gate, int(node.cfg.grid_id), path)
         # The per-interval windows restart HERE, once, for every road that
         # publishes through this writer set (the tree runner, both prepared
         # runners): submit has ordered the frame's copy ahead of any later
@@ -3429,6 +3680,109 @@ class PerDomainWrfoutWriters:
         getattr(writer, "drain_staging", writer.drain)()
         return True
 
+    # -- frame sets --------------------------------------------------------
+
+    def _frame_path(self, grid_id: int, valid_time) -> Path:
+        """One domain's final history path at ``valid_time`` (its folder is
+        not created here).
+
+        THE spelling, from `woof.render_layout`, because the delivered PNG
+        tree carries the same segment for the same frames: a reader who
+        found `d05/episode-002` here has to find that episode's pictures
+        under a folder spelled the same way, and two independent format
+        strings are two spellings waiting to drift apart.
+        """
+        grid_id = int(grid_id)
+        segment = render_layout.episode_segment(
+            int(self._episode_by_grid_id.get(grid_id, 0)))
+        base_dir = (self.output_dir if segment is None else
+                    self.output_dir / f"d{grid_id:02d}" / segment)
+        return base_dir / wrfout_filename(valid_time, grid_id)
+
+    def _join_frame_set(self, ticks: int, valid_time) -> _PublishGate:
+        with self._frame_set_lock:
+            if self._frame_sets is None:
+                self._frame_sets = {}
+            if self._first_ticks is None:
+                self._first_ticks = int(ticks)
+            gate = self._frame_sets.get(int(ticks))
+            if gate is None or gate.decided.is_set():
+                gate = self._frame_sets[int(ticks)] = _PublishGate(
+                    ticks, valid_time)
+        return gate
+
+    def _submitted(self, gate: _PublishGate, grid_id: int, path) -> None:
+        with self._frame_set_lock:
+            gate.submitted[int(grid_id)] = Path(path)
+        self._decide_open_sets()
+
+    def _missing_from(self, gate: _PublishGate) -> list[int]:
+        """Domains due at the set's instant that have not submitted.
+
+        A domain whose clock has already moved past the instant without
+        submitting never will (a frame a resume left durable, a frame its
+        schedule skipped), so it does not hold the set back.  Nor does a
+        domain this set cannot ask about (no model, a stand-in clock): a set
+        is never held back on a guess.
+        """
+        ticks = int(gate.ticks)
+        lookup = getattr(getattr(self, "model", None), "node", None)
+        missing = []
+        for gid in sorted(self._writers):
+            if int(gid) in gate.submitted:
+                continue
+            try:
+                clock = lookup(gid).clock
+                spec = clock.spec
+                start = int(spec.start_ticks)
+                if ticks < start or not spec.history_offset_due(ticks - start):
+                    continue
+                if int(clock.ticks) > ticks:
+                    continue
+            except Exception:  # noqa: BLE001 - unknown is not missing
+                continue
+            if (ticks == self._first_ticks
+                    and bool(getattr(self.model, "_resumed", False))):
+                # A resumed run does not re-emit the frames its checkpoint
+                # instant already has on disk.
+                prior = self._frame_path(gid, gate.valid_time)
+                if prior.exists() and prior not in self._published_paths:
+                    continue
+            missing.append(int(gid))
+        return missing
+
+    def _open_sets(self) -> list[_PublishGate]:
+        with self._frame_set_lock:
+            sets = self._frame_sets or {}
+            for ticks in [t for t, g in sets.items() if g.decided.is_set()]:
+                del sets[ticks]
+            return [sets[t] for t in sorted(sets)]
+
+    def _decide_open_sets(self, *, force: bool = False) -> None:
+        """Publish every open set that is complete (all of them, ``force``)."""
+        for gate in self._open_sets():
+            if force or not self._missing_from(gate):
+                gate.publish()
+
+    def _decide_all_open_sets(self) -> None:
+        """Every open set is complete: called between model steps, after
+        the frames at every instant so far were emitted."""
+        self._decide_open_sets(force=True)
+
+    def _withdraw_incomplete_sets(self) -> list[_PublishGate]:
+        """The run failed: withdraw each open set it cut short."""
+        withdrawn = []
+        for gate in self._open_sets():
+            missing = self._missing_from(gate)
+            if not missing:
+                continue
+            names = ", ".join(f"d{gid:02d}" for gid in missing)
+            gate.withdraw(
+                f"{PARTIAL_FRAME_SET}: {names} due at {gate.valid_time} "
+                "had not been taken when the run failed", missing)
+            withdrawn.append(gate)
+        return withdrawn
+
     def durability_barrier(self):
         """A barrier over every frame submitted so far, or ``None``.
 
@@ -3442,6 +3796,9 @@ class PerDomainWrfoutWriters:
         """
         if getattr(self, "_simulated_radar", None) is not None:
             return None
+        # A checkpoint is taken between steps, after every frame at its
+        # instant was emitted: every open set is complete.
+        self._decide_all_open_sets()
         if not all(hasattr(writer, "wait_finished")
                    for writer in self._writers.values()):
             return None
@@ -3468,6 +3825,8 @@ class PerDomainWrfoutWriters:
         checkpoint), and each domain's wait is a ``writing:`` record on the
         attached write progress, sized the same way.
         """
+        # Called between model steps, so every open frame set is complete.
+        self._decide_all_open_sets()
         for gid in sorted(self._writers):
             if before_domain is not None:
                 before_domain(gid, self.pending_work_bytes)
@@ -3603,16 +3962,187 @@ class PerDomainWrfoutWriters:
     def __exit__(self, exc_type, exc, traceback):
         if exc_type is None:
             self.close()
-        else:
-            # A stopping forecast does not wait for queued radar scans: they
-            # are dropped, the running rw_simradar is terminated, and close()
-            # names every history left without a volume.
-            if getattr(self, "_simulated_radar", None) is not None:
+        elif issubclass(exc_type, (Exception, KeyboardInterrupt, SystemExit)):
+            # A failing (or interrupted) run: finish what it already took.
+            fired = {}
+            try:
+                fired = self._finish_after_failure(exc)
+            except BaseException as internal:  # noqa: BLE001 - never replaces exc
+                # The failure being reported is ``exc``; a fault in the
+                # drain itself is attached to it and the queue aborted.
                 with suppress(BaseException):
-                    self._simulated_radar.cancel()
-            # D2H already in flight must complete before process teardown;
-            # publication failures remain quarantined by WrfoutWriter.
-            self._abort_event.set()
-            with suppress(BaseException):
-                self.close()
+                    exc.add_note(
+                        "history: the failure drain itself failed "
+                        f"({type(internal).__name__}: {internal}); the "
+                        "queue was aborted")
+                self._abort_queue()
+            if fired:
+                _redeliver(fired)
+        else:
+            self._abort_queue()
         return False
+
+    def _abort_queue(self) -> None:
+        """Stop publishing at once: the behaviour before the failure drain,
+        and its fallback when the drain is bounded out or interrupted."""
+        # Queued radar scans are dropped, the running rw_simradar is
+        # terminated, and close() names every history left without a volume.
+        if getattr(self, "_simulated_radar", None) is not None:
+            with suppress(BaseException):
+                self._simulated_radar.cancel()
+        # D2H already in flight completes before process teardown; a frame
+        # the abort cut short is quarantined by WrfoutWriter.
+        self._abort_event.set()
+        with suppress(BaseException):
+            self.close()
+
+    def _finish_radar(self, deadline: float) -> None:
+        """Let the simulated radar scan every published frame, bounded."""
+        radar = self._simulated_radar
+        failure: list[BaseException] = []
+
+        def finish():
+            try:
+                radar.close()
+            except BaseException as error:  # noqa: BLE001 - re-raised below
+                failure.append(error)
+
+        worker = threading.Thread(target=finish, name="simulated-radar-finish",
+                                  daemon=True)
+        worker.start()
+        while worker.is_alive():
+            if perf_counter() >= deadline:
+                raise _DrainBoundPassed("simulated radar scans unfinished")
+            worker.join(timeout=_ASYNC_WRITER_POLL_SECONDS)
+        if failure:
+            raise failure[0]
+
+    def _finish_after_failure(self, error) -> None:
+        """Write and publish every frame taken before ``error``; keep it.
+
+        Every frame here was taken after the health gate passed the state
+        it holds (the executor settles health before each history frame,
+        so nothing is taken after the failing step), and finishing them
+        makes the outcome independent of how far each write had got.
+
+        * Each frame set the failure cut short is withdrawn -- its written
+          frames are quarantined as ``partial-frame-set`` -- and every
+          other set is published.
+        * The queued frames are written, announced with their domains,
+          count and bytes, within :func:`failure_drain_bound_seconds`.
+        * The simulated radar finishes the frames it was handed, inside the
+          same bound.
+        * The bound, or a second Ctrl-C / SIGTERM, falls back to aborting
+          the queue (:meth:`_abort_queue`); a SIGTERM is then handed back
+          to the disposition it interrupted.
+
+        ``error`` is never replaced: what happened here is attached to it
+        as notes and as ``error.woof_history_on_failure``, and recorded in
+        the ``history_writes`` receipt under ``on_failure``.
+        """
+        import sys
+
+        started = perf_counter()
+        durable_before = len(self.paths)
+        withdrawn = self._withdraw_incomplete_sets()
+        self._decide_all_open_sets()
+        pending = {int(gid): int(getattr(writer, "pending", 0) or 0)
+                   for gid, writer in sorted(self._writers.items())}
+        pending = {gid: count for gid, count in pending.items() if count}
+        work = int(self.pending_work_bytes)
+        bound = (failure_drain_bound_seconds(work)
+                 if self.failure_drain_timeout_s is None
+                 else float(self.failure_drain_timeout_s))
+        record = {
+            "policy": "drain",
+            "error": f"{type(error).__name__}: {error}"[:500],
+            "pending_frames": {f"d{gid:02d}": count
+                               for gid, count in pending.items()},
+            "pending_bytes": work,
+            "bound_seconds": round(bound, 1),
+            "outcome": None,
+        }
+        self._on_failure = record
+        outcome, detail = "drained", None
+        with _second_signal_aborts() as fired:
+            try:
+                radar = getattr(self, "_simulated_radar", None) is not None
+                if pending or radar:
+                    from woof.signal_report import _bytes_text
+
+                    frames = ", ".join(f"d{gid:02d} {count}"
+                                       for gid, count in pending.items())
+                    what = (f"writing the {sum(pending.values())} history "
+                            f"frame(s) it had already taken ({frames}; "
+                            f"{_bytes_text(work)})" if pending else
+                            "finishing the history it had already taken")
+                    print(f"history: the run stopped ({type(error).__name__}); "
+                          f"{what}{' and their simulated-radar scans' if radar else ''} "
+                          f"before stopping, for at most {bound:.0f} s.  "
+                          "Ctrl-C or SIGTERM again abandons them.",
+                          file=sys.stderr, flush=True)
+                deadline = started + bound
+                with self._write_beat("drain-history-after-failure", work):
+                    for gid in sorted(self._writers):
+                        writer = self._writers[gid]
+                        drain = getattr(writer, "_drain", None)
+                        if drain is None:
+                            writer.drain()
+                        else:
+                            drain(include_identity=True, deadline=deadline)
+                    if getattr(self, "_simulated_radar", None) is not None:
+                        self._finish_radar(deadline)
+            except _DrainBoundPassed as stop:
+                outcome, detail = "timeout", str(stop)
+            except (KeyboardInterrupt, _HistoryDrainInterrupted) as stop:
+                outcome = "interrupted"
+                detail = ("SIGTERM" if isinstance(stop, _HistoryDrainInterrupted)
+                          else "Ctrl-C")
+            except Exception as failed:  # noqa: BLE001 - attached to error
+                outcome = "drain-error"
+                detail = f"{type(failed).__name__}: {failed}"
+            if outcome in ("timeout", "interrupted"):
+                why = (f"the {bound:.0f} s bound passed" if outcome == "timeout"
+                       else f"{detail} during the drain")
+                print(f"history: {why}; abandoning the frames not yet "
+                      "written (quarantined, as a stopped run's always were).",
+                      file=sys.stderr, flush=True)
+                self._abort_queue()
+            elif outcome == "drain-error":
+                # A failed write already aborted the queue (the worker sets
+                # the shared abort); stop the radar too rather than wait
+                # on it unbounded.
+                self._abort_queue()
+            else:
+                with suppress(BaseException):
+                    self.close()
+        published = max(0, len(self.paths) - durable_before)
+        record.update(
+            outcome=outcome, seconds=round(perf_counter() - started, 3),
+            published_after_failure=published,
+            **({} if detail is None else {"detail": detail}),
+            withdrawn=[{
+                "valid_time": str(gate.valid_time),
+                "reason": gate.reason,
+                "missing_domains": [f"d{gid:02d}" for gid in gate.missing],
+                "taken_domains": [f"d{gid:02d}"
+                                  for gid in sorted(gate.submitted)],
+                "quarantined": dict(gate.quarantined),
+            } for gate in withdrawn])
+        with suppress(BaseException):
+            self.model._history_writes_receipt = self.history_writes_receipt()
+        notes = [f"history after the failure: {outcome}; {published} "
+                 "frame(s) taken before it were published"
+                 + ("" if detail is None else f" ({detail})")]
+        for row in record["withdrawn"]:
+            notes.append(f"history: withdrew the frame set at "
+                         f"{row['valid_time']} ({row['reason']}); its "
+                         f"{len(row['quarantined'])} written frame(s) are "
+                         "quarantined")
+        for note in notes:
+            print(note, file=sys.stderr, flush=True)
+            with suppress(BaseException):
+                error.add_note(note)
+        with suppress(BaseException):
+            error.woof_history_on_failure = record
+        return dict(fired)

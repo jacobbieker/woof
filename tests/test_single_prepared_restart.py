@@ -228,7 +228,11 @@ def test_restore_refusal_joins_real_writer_and_preserves_error(failure):
         with runner._checkpoint_restore_resources(owner, log):
             raise failure
     assert caught.value is failure
-    assert abort.is_set() and writer._closed and not writer._thread.is_alive()
+    # Drain before stopping: an ordinary failure finishes what was taken
+    # (nothing, here) instead of aborting, and still joins the worker.
+    assert not abort.is_set()
+    assert writer._closed and not writer._thread.is_alive()
+    assert caught.value.woof_history_on_failure["outcome"] == "drained"
     assert calls == [{"status": "FAIL", "error": f"{type(failure).__name__}: {failure}"}]
 
 
