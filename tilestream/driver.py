@@ -1775,6 +1775,9 @@ class TiledRun:
             origin.synchronize()
 
         streams = [cp.cuda.Stream(non_blocking=True) for _ in range(nbuffers)]
+        #: Recorded on the caller's stream at the top of every sweep step;
+        #: every stream this run owns waits on it (see ``_sweep``).
+        caller_ready = cp.cuda.Event(disable_timing=True)
         # One event per tile, recorded after that tile's gather AND its ring
         # save. Both cross-tile hazards are covered by that single point: a
         # later tile's scatter needs this tile's READ of the store to have
@@ -2172,6 +2175,25 @@ class TiledRun:
                         gstepper.set_sweep(sweep_sequence)
                 if health is not None and health.enabled:
                     health.begin()
+                # THE CALLER'S STREAM, ordered in.  Every stream this run
+                # owns is non-blocking, so none of them waits for what the
+                # caller queued on ITS stream before this sweep -- and a tile
+                # reads some of that: a streamed child's tile buffers copy
+                # the domain's rolling nest tables, which the executor's
+                # FORCE wrote on the caller's stream immediately before this
+                # STEP (woof.core.nest_stream.nested_reload).  Without this
+                # wait that copy raced the FORCE kernels and a nested
+                # [tiles] run's d02 differed run to run while d01 stayed
+                # identical.  The copy streams wait too: a gather reads, and
+                # a scatter overwrites, a DEVICE store the caller may have
+                # just written or still be reading on its stream (feedback's
+                # commit, FORCE's windowed operand reads).  One event and a
+                # wait per owned stream: no host synchronisation.  The same
+                # edge as tilestream.ranks.RankedRun._order_after_caller.
+                caller_ready.record(cp.cuda.get_current_stream())
+                for group in (streams, copy_in, copy_out):
+                    for owned in group or ():
+                        owned.wait_event(caller_ready)
                 # Prime the pipeline.  Never across a sweep boundary: the
                 # buffers
                 # swap there, so a tile gathered early would read the wrong
