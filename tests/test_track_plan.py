@@ -148,8 +148,11 @@ def test_straight_track_plans_a_loadable_three_domain_tree(tmp_path):
     born = d03["start_time"]
     assert born == (launch - timedelta(hours=1)).replace(second=0,
                                                          microsecond=0)
-    assert d03["history_begin_s"] == int((launch - born).total_seconds())
-    assert d03["history_end_s"] == math.ceil((landing - born).total_seconds())
+    # The window opens and closes on the 120 s history grid from d03's birth.
+    assert d03["history_begin_s"] == (
+        math.floor((launch - born).total_seconds() / 120) * 120)
+    assert d03["history_end_s"] == (
+        math.ceil((landing - born).total_seconds() / 120) * 120)
     assert d03["history_interval_s"] == 120.0
 
     # Vertical: 256 levels, the top 7 km over the peak, clipped.
@@ -734,3 +737,20 @@ def test_fit_root_step_makes_steps_divide_history_and_radiation():
     _fit_root_step(domains, 120.0)
     assert (domains[0]["time_step"], domains[0]["time_step_fract_num"],
             domains[0]["time_step_fract_den"]) == (7, 1, 2)
+
+
+def test_history_window_sits_on_the_history_grid():
+    from datetime import datetime
+    from woof.track.plan import PlanTimes
+
+    start = datetime(2026, 1, 1, 0, 0, 0)
+    times = PlanTimes(
+        start=start, end=datetime(2026, 1, 1, 6), launch=datetime(2026, 1, 1, 2, 3, 37),
+        landing=datetime(2026, 1, 1, 4, 59, 1), d03_start=start, cadence_s=3600,
+        cycle=start, start_hour=0, history_s=120.0)
+    begin, end = times.history_window()
+    # A launch 7417 s in opens the window at 7320 s and a landing at 17941 s
+    # closes it at 18000 s: multiples of the 120 s interval, so every frame
+    # falls on a whole d03 step (a 4/3 s step does not divide 7417 s).
+    assert (begin, end) == (7320, 18000)
+    assert begin % 120 == 0 and end % 120 == 0
