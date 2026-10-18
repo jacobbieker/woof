@@ -1385,3 +1385,38 @@ def test_a_child_result_that_drops_a_receipt_is_refused_by_name():
     lost = replace(original, aerosol_initialization={})
     with pytest.raises(ValueError, match="aerosol_initialization"):
         ni._refuse_dropped_child_receipts(original, lost)
+
+
+def test_a_child_base_keeps_a_model_top_fp32_cannot_represent(monkeypatch):
+    """A child's re-derived base records the run's own p_top.
+
+    The state holds p_top in FP32, where 1312.2 Pa is 1312.199951171875;
+    the child's base used to take that copy, so its cache recorded a top
+    the tree forecast refused as differing from the experiment.
+    """
+    run_top = 1312.2
+    assert float(np.float32(run_top)) != run_top
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def base_from_blended(cfg, coord, p_top, blended):
+        seen["p_top"] = p_top
+        raise Stop
+
+    monkeypatch.setattr(ni, "_base_from_blended", base_from_blended)
+    state = SimpleNamespace(
+        total_theta=lambda: np.full((2, 2, 2), 300.0, np.float32),
+        p_top=np.float32(run_top))
+    coord = SimpleNamespace(p_top=run_top)
+    with pytest.raises(Stop):
+        ni._adjust_and_rederive(state, SimpleNamespace(), coord, None, None,
+                                blended=None, column_mass_correction=False)
+    assert seen["p_top"] == run_top
+    # A coordinate not yet finalized falls back to the state's copy.
+    with pytest.raises(Stop):
+        ni._adjust_and_rederive(state, SimpleNamespace(),
+                                SimpleNamespace(p_top=None), None, None,
+                                blended=None, column_mass_correction=False)
+    assert seen["p_top"] == float(np.float32(run_top))
