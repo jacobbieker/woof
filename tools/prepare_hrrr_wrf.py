@@ -1397,6 +1397,8 @@ def _sealed_extension(args, *, valid_time: datetime,
         "--domain-spec", str(args.domain_spec.resolve()),
         "--preprocess-backend", args.preprocess_backend,
     ]
+    if getattr(args, "upper_source_root", None) is not None:
+        benchmark += ["--upper-source-root", str(args.upper_source_root.resolve())]
     _configuration_arguments(benchmark, args)
     for acknowledgement in args.ack:
         benchmark.extend(("--ack", acknowledgement))
@@ -1601,6 +1603,11 @@ def _parser() -> argparse.ArgumentParser:
               "so --source-manifest and its digest are not given"))
     parser.add_argument("--supplement", action="append", default=[],
                         help="PMSL=GRIB donor, bound by the source manifest; repeat for multiple files")
+    parser.add_argument(
+        "--upper-source-root", type=Path,
+        help=("a `woof fetch --source gfs` folder for the same valid times; "
+              "its isobaric levels carry the column above HRRR's own top "
+              "when the model top lies above it (woof.ingest.upper_splice)"))
     static = parser.add_mutually_exclusive_group(required=True)
     static.add_argument("--geog-root", type=Path)
     static.add_argument("--static-cache", type=Path)
@@ -2150,6 +2157,9 @@ def _run_configured(args):
         str(output / PORTABLE_EXPERIMENT_CONFIG_NAME)))
     if args.sealed_prepared_cache:
         benchmark.append("--sealed-prepared-cache")
+    if args.upper_source_root is not None:
+        benchmark.extend(("--upper-source-root",
+                          str(args.upper_source_root.resolve())))
     for acknowledgement in args.ack:
         benchmark.extend(("--ack", acknowledgement))
     if args.prepare_workers is not None:

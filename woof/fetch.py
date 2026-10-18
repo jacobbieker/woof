@@ -7705,6 +7705,11 @@ FETCH_HINT_ROWS = key_rows(
            "how far past its scheduled time a lead may be before the run "
            "stops with exit 75; absent takes the source table's posting "
            "late_after_minutes"),
+    KeyRow("upper_source", "string", "auto",
+           "the isobaric source fetched for the same valid times to carry "
+           "the column above the source's own top when [shared].p_top "
+           "lies above it (HRRR: 'gfs'); 'auto' takes the registry row's "
+           "upper source when the model top needs one, 'none' opts out"),
 )
 FETCH_HINT_KEYS = frozenset(FETCH_HINT_ROWS)
 
@@ -7899,6 +7904,11 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
             refusal = transport_refusal(name, table["transport"])
             if refusal is not None:
                 raise ValueError(refusal)
+        if "upper_source" in table:
+            # The p_top the choice applies to is not in this table; the
+            # source's declaration is, and an explicit pairing it does not
+            # declare is refused at load (source_adapters.upper_source_for).
+            source_adapters.upper_source_for(name, 0.0, table["upper_source"])
         validate_fetch_cadence(name, cadence)
         if cadence is not None and not fetch_accepts_cadence(name):
             raise ValueError(cadence_inapplicable_refusal(name))

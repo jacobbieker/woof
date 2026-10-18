@@ -3043,8 +3043,14 @@ def _detach_mapped_snapshot(met):
 
 def _map_boundary_snapshot(
         snapshot, targets, mapping_report, *,
-        surface_fallback_radius: int = 8, preprocess_backend="cuda"):
-    """Map only four boundary strips, avoiding a disposable full-domain hour."""
+        surface_fallback_radius: int = 8, preprocess_backend="cuda",
+        upper_source=None):
+    """Map only four boundary strips, avoiding a disposable full-domain hour.
+
+    ``upper_source`` (an :class:`woof.upper_source.UpperSourceDonor`) is
+    mapped onto each strip's own exact subgrid and joined above it, so a
+    boundary time's column reaches the same top its start state does.
+    """
     from woof.ingest.hrrr import interpolate_hrrr_to_lambert
 
     started = time.perf_counter()
@@ -3061,6 +3067,10 @@ def _map_boundary_snapshot(
             # refusal that named only "soil mapping" left a coastal
             # domain's owner with four identical-looking suspects.
             target_name=f"the {side} boundary strip of domain 1")
+        if upper_source is not None:
+            met = upper_source.splice(
+                met, subgrid, backend=preprocess_backend,
+                target_name=f"the {side} boundary strip of domain 1")
         compact[side] = _detach_mapped_snapshot(met)
         side_reports[side] = side_report
         del met
@@ -3339,8 +3349,12 @@ def _initialize_state(
         p_top, column_workers=1, surface_fallback_radius: int = 8,
         preprocess_backend="cuda", state_backend="cuda",
         sfcp_to_sfcp=True, water_temperature_statics=None,
-        physical_input=None, physical_output=None):
-    """Full-domain f00/reference initialization with split timing."""
+        physical_input=None, physical_output=None, upper_source=None):
+    """Full-domain f00/reference initialization with split timing.
+
+    ``upper_source`` is a :class:`woof.upper_source.UpperSourceDonor`
+    whose column is joined above the native one before initialization.
+    """
     from woof.core.grid import make_vertical_coord
     from woof.ingest.real import initialize_real
 
@@ -3349,6 +3363,12 @@ def _initialize_state(
             snapshot, grid, static, mapping_report,
             surface_fallback_radius=surface_fallback_radius,
             preprocess_backend=preprocess_backend)
+        if upper_source is not None:
+            from woof.ingest.upper_splice import receipt_sentence
+            met = upper_source.splice(met, grid, backend=preprocess_backend,
+                                      target_name="domain 1")
+            print("  " + receipt_sentence(met.upper_source_receipt),
+                  file=sys.stderr, flush=True)
     else:
         started = time.perf_counter()
         met = physical_input.read(0)
@@ -4425,6 +4445,23 @@ def run(args):
         base_dir=Path(companion_source).parent)
     from woof.ingest.native_supplements import native_pressure_policy, require_native_pressure_field
     case_policy = native_pressure_policy(args.namelist_input, declared_case)
+    # The stratospheric top-up (woof.ingest.upper_splice): decoded once,
+    # mapped onto the root grid at f00 and onto each boundary strip at
+    # every later hour.  Its scratch sits beside the download it decodes,
+    # never inside the bundle this preparation publishes.
+    upper_source = None
+    if getattr(args, "upper_source_root", None) is not None:
+        if any(getattr(args, name, None) is not None for name in (
+                "physical_input_store", "physical_input_provider",
+                "physical_output_store")):
+            raise ValueError(
+                "--upper-source-root splices a second source into the mapped "
+                "native column, and a physical store carries mapped columns "
+                "of its own; prepare the store without the upper source")
+        from woof.upper_source import UpperSourceDonor
+        upper_root = Path(args.upper_source_root).resolve()
+        upper_source = UpperSourceDonor(upper_root,
+                                        scratch_parent=upper_root.parent)
     if args.prepared_cache is None or not args.prepared_cache.exists():
         if args.pipeline_series is not None:
             from tools.hrrr_pipeline import _parse_series
@@ -4514,6 +4551,14 @@ def run(args):
         # absent, the identity is byte-for-byte what it always was.
         **({"initial_perturbation": initial_perturbation}
            if initial_perturbation is not None else {}),
+        # Present only when a second source carries the column above the
+        # native top: a cache prepared with it and one prepared without it
+        # are different states, and a restore or extension must say so.
+        **({"upper_source": {
+            "source": upper_source.source,
+            "cycle": upper_source.cycle.isoformat(),
+            "fetch_manifest_sha256": upper_source.manifest_sha256}}
+           if upper_source is not None else {}),
     }
 
     if static_highres is not None:
@@ -5003,7 +5048,8 @@ def run(args):
                     preprocess_backend=f00_preprocess,
                     state_backend=(
                         "preprocess" if args.prepare_only else "cuda"),
-                    physical_input=initial_physical, physical_output=physical_output)
+                    physical_input=initial_physical, physical_output=physical_output,
+                    upper_source=upper_source)
             f00_job_finished = time.perf_counter()
             if not preprocess_is_cuda:
                 preprocess_worker_budget.record(
@@ -5156,7 +5202,8 @@ def run(args):
                         hour_snapshot, boundary_targets, mapping,
                         surface_fallback_radius=(
                             target.surface_fallback_radius_cells),
-                        preprocess_backend=hour_preprocess)
+                        preprocess_backend=hour_preprocess,
+                        upper_source=upper_source)
                     if physical_output is not None:
                         # Capture is observational: the ordinary boundary strips
                         # above remain the exact arrays the initializer consumes.
@@ -5659,6 +5706,8 @@ def run(args):
                 "lbc_payload_sha256": lbc_payload_sha256,
             },
             "prepared_cache": prepared_cache_receipt,
+            "upper_source": (None if upper_source is None
+                             else upper_source.report()),
             **({"physical_output_store": physical_output_receipt}
                if physical_output_receipt is not None else {}),
             "physics": physics_profile,
@@ -5993,6 +6042,8 @@ def run(args):
         },
         "final_state_digest": final_digest,
         "prepared_cache": prepared_cache_receipt,
+        "upper_source": (None if upper_source is None
+                         else upper_source.report()),
         "physics": {
             **physics_profile,
             **_physics_receipt(driver, cp),
@@ -6247,6 +6298,11 @@ def _parse_args(argv=None):
     parser.add_argument("--preprocess-workers", type=int)
     parser.add_argument("--cpu-preprocess-bridge", type=Path)
     parser.add_argument("--source-root", type=Path)
+    parser.add_argument(
+        "--upper-source-root", type=Path,
+        help=("a `woof fetch --source gfs` folder for the same valid times, "
+              "spliced above the native column at every forcing time "
+              "(woof.ingest.upper_splice)"))
     parser.add_argument("--source-manifest", type=Path)
     parser.add_argument("--source-manifest-sha256")
     parser.add_argument("--static-cache", type=Path, required=True)

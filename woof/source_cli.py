@@ -182,6 +182,12 @@ def _parser(*, prog: str = "woof-wrf-init", add_help: bool = True,
         "--initial-inputs", type=Path, metavar="JSON",
         help="separate packaged analysis inventory for the initial state; "
              "--source continues to supply every lateral boundary frame")
+    parser.add_argument(
+        "--upper-source-root", type=Path, metavar="DIR",
+        help="a `woof fetch --source gfs` folder for the same valid times; "
+             "its isobaric levels carry the column above the source's own "
+             "top at the initial state and every boundary time "
+             "(woof.ingest.upper_splice)")
     mapped = parser.add_argument_group("declarative mapped-source adapter")
     mapped.add_argument(
         "--source-format",
@@ -2156,6 +2162,8 @@ def _mapped_command(args: argparse.Namespace) -> list[str]:
                    else getattr(args, "stock_wrf_export", None))
     if getattr(args, "initial_inputs", None) is not None:
         command.extend(("--initial-inputs", str(args.initial_inputs)))
+    if getattr(args, "upper_source_root", None) is not None:
+        command.extend(("--upper-source-root", str(args.upper_source_root)))
     if export_mode is not None:
         command.extend(("--stock-wrf-export", export_mode))
     if args.input_list is not None:

@@ -287,6 +287,49 @@ def transport_note(transport: str | None, basis: str | None,
     return note
 
 
+def upper_source_note(fetch_table, exp) -> str | None:
+    """The plan's line naming the upper source a run fetches, or None.
+
+    A model top above the lower source's own column is carried by the
+    registry row's upper source (:mod:`woof.upper_source`); the plan says
+    so before anything is downloaded, and a window the upper source
+    cannot be fetched for is refused here rather than after the lower
+    fetch.
+    """
+
+    from woof.source_adapters import get_source_adapter
+    from woof.upper_source import plan_sentence, upper_fetch_plan
+
+    if not isinstance(fetch_table, dict) or not fetch_table.get("source"):
+        return None
+    try:
+        plan = upper_fetch_plan(fetch_table, start_time=exp.start_time,
+                                p_top_pa=exp.vertical.p_top, exp=exp)
+    except ValueError as error:
+        raise GoRefusal(str(error)) from None
+    if plan is None:
+        return None
+    adapter = get_source_adapter(str(fetch_table["source"]))
+    from woof.source_drivability import local_input_requested
+    if local_input_requested(fetch_table):
+        raise GoRefusal(
+            f"[shared].p_top {exp.vertical.p_top:g} Pa lies above the "
+            f"{adapter.source_id} column, and local inputs carry no "
+            f"{plan['source']} above it; fetch the run instead of naming "
+            "source_root, or raise p_top to "
+            f"{adapter.certified_source_top_pa:g} Pa")
+    if adapter.runner == "mapped_composition_v1" and len(exp.domains) > 1:
+        raise GoRefusal(
+            f"[shared].p_top {exp.vertical.p_top:g} Pa lies above the "
+            f"{adapter.source_id} column; the mapped preparation carries an "
+            f"upper source ({plan['source']}) for a single domain only, so "
+            "prepare this tree from --source hrrr (native levels, whose "
+            "children take the upper source too) or raise p_top to "
+            f"{adapter.certified_source_top_pa:g} Pa")
+    lower_top = adapter.certified_source_top_pa
+    return plan_sentence(plan, lower_top_pa=lower_top)
+
+
 def config_fetch_request(payload) -> dict:
     """:func:`fetch_request` for a whole configuration's tables."""
 
@@ -4520,6 +4563,10 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
     elif str(options["render_products"]).strip().lower() != "none":
         stages.append("render")
     print(f"go: {source}, {len(exp.domains)} domain(s); " + " -> ".join(stages))
+    if bundle is None:
+        upper_line = upper_source_note(fetch, exp)
+        if upper_line is not None:
+            print("go: " + upper_line)
     pinned_line = (transport_note(pinned, pinned_from, fetch.get("transport"))
                    if bundle is None else None)
     if pinned_line is not None:
