@@ -128,6 +128,11 @@ class HorizontalSnapshot:
     #: (:func:`woof.ingest.ruc_soil.island_soil_columns`); the count rides
     #: ``masked_field_repairs`` as ``no_source_land``.
     soil_no_source_land: np.ndarray | None = None
+    #: What :func:`woof.ingest.upper_splice.splice_upper_snapshot` did when
+    #: a second, isobaric source carried this column above the first one's
+    #: top (the seam, the levels appended, the seam agreement).  ``None``
+    #: for a column that came from one source alone.
+    upper_source_receipt: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if self.horizontal_operators is not None:

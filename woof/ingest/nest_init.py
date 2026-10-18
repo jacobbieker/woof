@@ -199,6 +199,11 @@ class NestedInputCatalog:
     #: Same validated overlay owner used by root, child and moving footprints.
     static_highres: object | None = None
     water_temperature_policy: str | None = None
+    #: The root's stratospheric top-up (a
+    #: :class:`woof.upper_source.UpperSourceDonor`), joined above each
+    #: child's mapped start column so a child reaches the model top its
+    #: parent does.  ``None`` for a single-source column.
+    upper_source: object | None = None
 
     def __post_init__(self) -> None:
         # A sequence is kept AS the sequence, exactly as
@@ -1063,6 +1068,11 @@ def _prepare_child_input_on_grid_uncached(
             surface_fallback_radius=surface_fallback_radius,
             backend=preprocess,
             target_name=f"domain {child_dc.grid_id}")
+        upper_source = getattr(catalog, "upper_source", None)
+        if upper_source is not None:
+            horizontal = upper_source.splice(
+                horizontal, grid, backend=preprocess,
+                target_name=f"domain {child_dc.grid_id}")
         skin = _host(horizontal.fields["SKINTEMP"])
         lake_skin_temperature = np.where(lake_mask, skin, np.nan)
         if water_statics is not None:

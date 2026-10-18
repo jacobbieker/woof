@@ -83,6 +83,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--stock-wrf-export {optional,required,off}` | mapped preparation's WRF file product: optional by default, required with early configuration admission, or off |
 | `--stock-wrf-namelist-input` | unchanged-stock-WRF namelist matching the native hierarchy except for the certified longwave selection and the stock-only ghg_input and do_radar_ref keys; both declare use_theta_m = 0, the dry theta the exported files hold |
 | `--supplement ROLE=PATH` | composition supplement binding; repeat roles for multiple files |
+| `--upper-source-root DIR` | a `woof fetch --source gfs` folder for the same valid times; its isobaric levels carry the column above the source's own top at the initial state and every boundary time (woof.ingest.upper_splice) |
 | `--valid-time` | initial UTC time in WRF form YYYY-MM-DD_HH:MM:SS. On --source hrrr this is the CYCLE; model time zero is cycle + --forecast-start-hour and is derived for every stage |
 | `--validate-hrrr-domain PATH` | validate a strict HRRR target domain and its complete native interpolation window |
 | `--validate-physics-plan PATH` | validate and resolve a gpuwm-physics-plan-v2 JSON document |
@@ -1845,6 +1846,7 @@ Takes no options of its own.
 | `--stock-wrf-export {optional,required,off}` | mapped preparation's WRF file product: optional by default, required with early configuration admission, or off |
 | `--stock-wrf-namelist-input` | unchanged-stock-WRF namelist matching the native hierarchy except for the certified longwave selection and the stock-only ghg_input and do_radar_ref keys; both declare use_theta_m = 0, the dry theta the exported files hold |
 | `--supplement ROLE=PATH` | composition supplement binding; repeat roles for multiple files |
+| `--upper-source-root DIR` | a `woof fetch --source gfs` folder for the same valid times; its isobaric levels carry the column above the source's own top at the initial state and every boundary time (woof.ingest.upper_splice) |
 | `--valid-time` | initial UTC time in WRF form YYYY-MM-DD_HH:MM:SS. On --source hrrr this is the CYCLE; model time zero is cycle + --forecast-start-hour and is derived for every stage |
 | `--validate-hrrr-domain PATH` | validate a strict HRRR target domain and its complete native interpolation window |
 | `--validate-physics-plan PATH` | validate and resolve a gpuwm-physics-plan-v2 JSON document |

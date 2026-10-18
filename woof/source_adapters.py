@@ -174,6 +174,14 @@ class SourceAdapter:
     #: :func:`fetch_model_top_pa`, so a run whose own ladder tops out
     #: above the certified one fetches the levels it needs with no flag.
     extendable_source_top_pa: float | None = None
+    #: The isobaric source that carries this source's column ABOVE its
+    #: ``certified_source_top_pa`` when a run asks for a higher model top
+    #: (:mod:`woof.ingest.upper_splice`): the doors fetch it for the same
+    #: valid times, the preparation maps it onto the same grid and joins
+    #: the two columns across a seam.  ``None`` means the source's own
+    #: column is all a run gets.  A configuration opts out with
+    #: ``[fetch] upper_source = "none"`` (:func:`upper_source_for`).
+    upper_source: str | None = None
     #: Where this source's native grid reaches, or ``None`` for a global
     #: product.  A declared window (see :mod:`woof.source_coverage`) is what
     #: lets `woof domain` refuse an out-of-coverage plan AT PLAN TIME with
@@ -369,6 +377,7 @@ def _adapter(
     fetch_requires_retrieve: bool = False,
     certified_source_top_pa: float | None = None,
     extendable_source_top_pa: float | None = None,
+    upper_source: str | None = None,
     coverage: CoverageWindow | None = None,
     cycles: CycleGrid | None = None,
     archives: tuple[ArchiveWindow, ...] = (),
@@ -423,6 +432,7 @@ def _adapter(
         fetch_requires_retrieve=fetch_requires_retrieve,
         certified_source_top_pa=certified_source_top_pa,
         extendable_source_top_pa=extendable_source_top_pa,
+        upper_source=upper_source,
         coverage_window=coverage,
         cycle_grid=cycles,
         archive_windows=archives,
@@ -760,6 +770,12 @@ _ADAPTERS = (
         # recommends (woof.physics_menu._recommended_profile).
         default_physics_profile="thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1",
         forcing_interval_seconds=3600.0,
+        # The wrfnat column's top mass level sits at 1731.475 Pa above
+        # HRRR's 1500 Pa lid (docs/public/WRF-INPUTS.md).  A model top
+        # above it takes GFS for the column there (woof.ingest.upper_splice);
+        # the 5000 Pa default emission is unchanged.
+        certified_source_top_pa=1731.475,
+        upper_source="gfs",
         # Hourly, and the walk-back is short on purpose: the
         # operational directories turn over quickly, and a cycle half
         # a day old is not an initialization anyone wants for a
@@ -824,6 +840,9 @@ _ADAPTERS = (
         runner="mapped_composition_v1",
         packaged_profile="hrrr-prs-grib2-v1",
         forcing_interval_seconds=3600.0,
+        # wrfprs stops at 50 hPa; GFS carries a higher model top's column.
+        certified_source_top_pa=5000.0,
+        upper_source="gfs",
         coverage=_CONUS_3KM_LAMBERT,
         notes=(
             "HRRR's public wrfprs product through the GENERIC mapped route: "
@@ -2190,6 +2209,68 @@ def fetch_model_top_pa(source, p_top_pa) -> float | None:
             or not math.isfinite(top) or top <= 0.0 or top >= float(ceiling)):
         return None
     return top
+
+
+#: ``[fetch] upper_source`` values besides a source id: ``auto`` (the
+#: default) takes the registry row's own upper source when the run needs
+#: one, ``none`` opts out and leaves the lower column's top as the limit.
+UPPER_SOURCE_AUTO = "auto"
+UPPER_SOURCE_NONE = "none"
+
+
+def upper_source_for(source, p_top_pa, requested=None) -> str | None:
+    """The upper source a run of SOURCE topped at ``p_top_pa`` fetches, or None.
+
+    ``requested`` is the configuration's ``[fetch] upper_source``
+    (``None`` reads as ``auto``).  The answer is an upper source only
+    when the run's model top lies above (at a lower pressure than) the
+    source's certified top AND the row declares an upper source the
+    configuration has not opted out of; a run inside the source's own
+    column fetches nothing more.  An explicit upper source must be the
+    one the row declares: the splice is certified for that pairing.
+    """
+
+    choice = UPPER_SOURCE_AUTO if requested is None else str(requested).strip().lower()
+    if not source or p_top_pa is None or isinstance(p_top_pa, bool):
+        return None
+    try:
+        adapter = get_source_adapter(str(source))
+        top = float(p_top_pa)
+    except (TypeError, ValueError):
+        return None
+    if choice == UPPER_SOURCE_NONE:
+        return None
+    declared = adapter.upper_source
+    if choice not in (UPPER_SOURCE_AUTO,) and (
+            declared is None or get_source_adapter(choice).source_id != declared):
+        raise ValueError(
+            f"[fetch] upper_source = {requested!r}: source {adapter.source_id!r} "
+            + (f"takes {declared!r} above its column" if declared else
+               "declares no upper source")
+            + f"; use \"{UPPER_SOURCE_AUTO}\" or \"{UPPER_SOURCE_NONE}\"")
+    ceiling = adapter.certified_source_top_pa
+    if (declared is None or ceiling is None or not math.isfinite(top)
+            or top <= 0.0 or top >= float(ceiling)):
+        return None
+    return declared
+
+
+def composite_source_top_pa(source, upper_source=None) -> float | None:
+    """The deepest model top SOURCE can initialise, with UPPER_SOURCE above it.
+
+    Without an upper source this is the row's own reach (its fetch's
+    extension, else its certified ladder); with one it is the upper
+    source's reach, since the composite column ends where the upper one
+    does.  ``None`` when nothing is declared.
+    """
+
+    adapter = get_source_adapter(str(source))
+    if upper_source is not None:
+        adapter = get_source_adapter(str(upper_source))
+    reach = adapter.extendable_source_top_pa
+    if reach is None:
+        reach = adapter.certified_source_top_pa
+    return None if reach is None else float(reach)
 
 
 def _current_config_sha256(name: str, canonical_sha256: str) -> str:

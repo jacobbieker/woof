@@ -1661,6 +1661,36 @@ def _chained_hierarchy_tail(c) -> dict[str, object]:
 
 
 @preprocess_math_call(fixed_backend="cpu")
+def _bound_upper_source(identity, upper_source_root):
+    """The root's upper source for the children, held to the root's seal.
+
+    A root prepared with a stratospheric top-up records the fetch it
+    spliced (``source_identity.upper_source``); its children must take
+    the same one, and a tree whose root took none must not take one.
+    """
+
+    sealed = (identity.get("source_identity") or {}).get("upper_source")
+    if sealed is None and upper_source_root is None:
+        return None
+    if sealed is None:
+        raise ValueError(
+            "--upper-source-root names an upper source, but the root "
+            "preparation was sealed without one; prepare the root with it")
+    if upper_source_root is None:
+        raise ValueError(
+            f"the root preparation joined {sealed.get('source')} above its "
+            "column; pass the same --upper-source-root so every child "
+            "reaches the model top the root does")
+    from woof.upper_source import UpperSourceDonor
+    root = Path(upper_source_root).resolve()
+    donor = UpperSourceDonor(root, scratch_parent=root.parent)
+    if donor.manifest_sha256 != sealed.get("fetch_manifest_sha256"):
+        raise ValueError(
+            f"the upper-source fetch at {root} is not the one the root "
+            "preparation sealed (its SHA256SUMS digest differs)")
+    return donor
+
+
 def prepare_hrrr_hierarchy(
         *, root_preparation: Path, root_domain_spec: Path,
         wps_namelist: Path, namelist_input: Path,
@@ -1669,6 +1699,7 @@ def prepare_hrrr_hierarchy(
         valid_time: datetime, output_root: Path, workers: int = 8,
         cpu_bridge: Path | None = None, statics_corridor=None,
         acknowledgements: tuple[str, ...] = (),
+        upper_source_root: Path | None = None,
 ) -> dict[str, object]:
     """Verify one root preparation and publish generic stock-WRF inputs.
 
@@ -1910,6 +1941,7 @@ def prepare_hrrr_hierarchy(
                 "selection")
         catalog = NestedInputCatalog(
             snapshots=snapshots, static_catalog=static_catalog,
+            upper_source=_bound_upper_source(identity, upper_source_root),
             water_temperature_policy=case_policy["water_temperature_policy"],
             files=tuple(static_catalog.files), static_highres=static_highres,
             provenance={
@@ -2149,6 +2181,11 @@ def _parser() -> argparse.ArgumentParser:
              "tools/prepare_hrrr_wrf.py spells it")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--cpu-preprocess-bridge", type=Path)
+    parser.add_argument(
+        "--upper-source-root", type=Path,
+        help="the upper-source fetch the root preparation spliced above its "
+             "column (woof.ingest.upper_splice); the children's start "
+             "columns take the same one")
     # Spelled exactly as the GFS door spells it
     # (woof/gfs_direct.py), because one runner consumes both bundles
     # and its refusal names this flag as the remedy whichever chain
@@ -2211,6 +2248,7 @@ def main(argv=None) -> int:
         acknowledgements=tuple(args.ack),
         workers=args.workers, cpu_bridge=args.cpu_preprocess_bridge,
         statics_corridor=statics_corridor,
+        upper_source_root=args.upper_source_root,
     )
     # The forecast runner takes --preparation-receipt-sha256 over the
     # receipt this stage just wrote, and the emitted chain tells the

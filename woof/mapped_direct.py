@@ -1320,6 +1320,7 @@ def prepare_mapped_wrf(
     statics_corridor=None,
     as_posted: str | Path | None = None,
     initial_inputs: str | Path | None = None,
+    upper_source_root: str | Path | None = None,
     _source_manifest: str | Path | None = None,
     _source_manifest_sha256: str | None = None,
     _source_adapter: str = "rw-wps-mapped-composition-v2",
@@ -1649,6 +1650,26 @@ def prepare_mapped_wrf(
                              "carries the initial state")
         from woof.initial_source import read_initial_inputs
         initial_request = read_initial_inputs(initial_inputs)
+    # The stratospheric top-up (woof.ingest.upper_splice): a GFS fetch for
+    # the same valid times, mapped onto this grid and joined above the
+    # mapped column at every forcing time.  Only the plain whole-window
+    # single-domain route carries it; the others hold mapped columns this
+    # process does not build, and are refused rather than left short.
+    upper_source = None
+    if upper_source_root is not None:
+        if (hierarchy or as_posted is not None or initial_request is not None
+                or physical_input_store is not None
+                or physical_input_provider is not None
+                or physical_output_store is not None):
+            raise ValueError(
+                "--upper-source-root is carried by the single-domain, "
+                "whole-window mapped preparation; a tree, an as-posted "
+                "window, a separate initial analysis or a physical store "
+                "would leave some forcing time without the upper column")
+        from woof.upper_source import UpperSourceDonor
+        upper_root = Path(upper_source_root).resolve()
+        upper_source = UpperSourceDonor(upper_root,
+                                        scratch_parent=upper_root.parent)
     # A domain tree is published through staging deeper than its
     # output root; refused here, the first point this door knows it
     # prepares a tree, before any source is decoded.  A single-domain
@@ -1879,6 +1900,9 @@ def prepare_mapped_wrf(
     source_top_pressure_pa = _source_top_pressure_pa(
         snapshots, count=None if posted_source is None
         else posted_source.decoded_count, mapping_contract=mapping_contract)
+    if upper_source is not None:
+        # The composite column ends where the upper source's does.
+        source_top_pressure_pa = min(source_top_pressure_pa, upper_source.top_pa)
     if hierarchy:
         grids = validate_native_lambert_contracts(
             exp,
@@ -2082,6 +2106,13 @@ def prepare_mapped_wrf(
                     raise ValueError("member physical input cannot replace a separate "
                                      "initial analysis source")
                 met = physical_input.read(index)
+            if upper_source is not None:
+                met = upper_source.splice(met, grid, backend=preprocess,
+                                          target_name="domain 1")
+                if index == 0:
+                    from woof.ingest.upper_splice import receipt_sentence
+                    print("  " + receipt_sentence(met.upper_source_receipt),
+                          file=sys.stderr, flush=True)
             timing["horizontal_seconds"] = time.perf_counter() - horizontal_started
             column_timing = {}
             terrain_blend.before_initialize(
@@ -2890,6 +2921,10 @@ def prepare_mapped_wrf(
             # 2.4 item 6); a preparation of a complete window has none.
             **({"posting": posted_proof.get("posting")}
                if posted_source is not None else {}),
+            # The stratospheric top-up's seam and appended levels, when a
+            # second source carried the column above the mapped one.
+            **({"upper_source": upper_source.report()}
+               if upper_source is not None else {}),
             "prepared_cache": cache_receipt,
             "export": export_receipt,
             "boundary_stream": writer.boundary_stream_proof(),
@@ -3420,6 +3455,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--input-manifest", type=Path, required=True)
     parser.add_argument("--initial-inputs", type=Path)
+    parser.add_argument("--upper-source-root", type=Path)
     parser.add_argument("--input-manifest-sha256")
     parser.add_argument(
         "--as-posted", type=Path, default=None, metavar="POSTING_DIR",
@@ -3699,6 +3735,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             input_manifest_sha256=args.input_manifest_sha256,
             **({"initial_inputs": args.initial_inputs}
                if args.initial_inputs is not None else {}),
+            **({"upper_source_root": args.upper_source_root}
+               if args.upper_source_root is not None else {}),
             # Named only as posted, so every other call is what it was.
             **({"as_posted": args.as_posted}
                if args.as_posted is not None else {}),

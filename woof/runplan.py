@@ -4288,6 +4288,8 @@ def _fetch_arguments_from_hints(hints: Mapping[str, Any],
     for key in sorted(hints):
         if key == "out":
             continue          # run-plan owns where the data lands
+        if key == "upper_source":
+            continue          # a second fetch of its own (_fetch_upper_source)
         value = hints[key]
         if key == "as_posted":
             # The one boolean key whose false is a flag of its own: the
@@ -4632,6 +4634,47 @@ def _asserted_profile(plan: RunPlan, *, config_path) -> str | None:
     return str(profile)
 
 
+def upper_source_data_dir(data_dir: Path) -> Path:
+    """Where a run's upper-source fetch lands: beside the lower one's folder.
+
+    A sibling rather than a child, so the lower fetch's own SHA256SUMS
+    and file inventory (which the preparation binds) never see it.
+    """
+
+    from woof.upper_source import UPPER_FETCH_DIRNAME
+    data_dir = Path(data_dir)
+    return data_dir.with_name(f"{data_dir.name}-{UPPER_FETCH_DIRNAME}")
+
+
+def _fetch_upper_source(hints: Mapping[str, Any], exp, *, data_dir: Path,
+                        run_dir: Path, observer) -> Path | None:
+    """Fetch the run's upper source when its model top needs one; its folder.
+
+    ``None`` when the lower source's column reaches ``[shared].p_top`` or
+    the configuration opted out (``[fetch] upper_source = "none"``).  The
+    fetch opens (or joins) the run's fetch stage as phase ``fetch_upper``;
+    the lower fetch closes that stage with its own report.
+    """
+
+    from woof.upper_source import upper_fetch_arguments, upper_fetch_plan
+
+    upper = upper_fetch_plan(hints, start_time=exp.start_time,
+                             p_top_pa=exp.vertical.p_top, exp=exp)
+    if upper is None:
+        return None
+    out = upper_source_data_dir(data_dir)
+    observer.enter_stage("fetch", phase="fetch_upper")
+    report = _run_fetch(upper_fetch_arguments(upper, out=out), run_dir,
+                        events=getattr(observer, "events", None))
+    if not (out / "SHA256SUMS").is_file():
+        raise PlanError(
+            f"the {upper['source']} upper-source fetch wrote no "
+            f"{out / 'SHA256SUMS'}, so the preparation has nothing to bind "
+            f"above the {upper['lower_source']} column")
+    del report    # the fetch's own receipt is fetch-manifest.json in ``out``
+    return out
+
+
 def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
                 observer: RunObserver, run_dir: Path,
                 prepare_only: bool = False) -> Mapping[str, Any]:
@@ -4722,6 +4765,12 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
 
     if wif_fetch_domains(exp, hints):
         hints = {**hints, "wif": True}
+    # The stratospheric top-up: a model top above HRRR's own column is
+    # carried by the registry row's upper source (GFS), fetched whole for
+    # the same valid times BEFORE the lower fetch so an as-posted lower
+    # window never waits behind it (woof.upper_source).
+    upper_root = _fetch_upper_source(hints, exp, data_dir=data_dir,
+                                     run_dir=run_dir, observer=observer)
     beside = _native_fetch_beside(plan, hints, exp, data_dir=data_dir,
                                   run_dir=run_dir, observer=observer,
                                   prepare_only=prepare_only)
@@ -4790,6 +4839,12 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
     ]
     prepare += [token for binding in plan.run_options.get("supplement", ())
                 for token in ("--supplement", binding)]
+    upper_stated = {}
+    if upper_root is not None:
+        from woof.upper_source import fetch_root_manifest_sha256
+        prepare += ["--upper-source-root", str(upper_root)]
+        upper_stated = {"upper_source_manifest_sha256":
+                        fetch_root_manifest_sha256(upper_root)}
     profile = _asserted_profile(plan, config_path=config_path)
     if profile:
         # Passed only when the plan states it.  The route owns its own
@@ -4810,7 +4865,8 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
             # arguments name the posting folder of this run's fetch.
             stated={**({} if manifest is None else
                        {"source_manifest_sha256": sha256_file(manifest)}),
-                    "namelist_sha256": sha256_file(inputs["namelist_input"])},
+                    "namelist_sha256": sha256_file(inputs["namelist_input"]),
+                    **upper_stated},
             run=lambda: run_stage("prepare", prepare, explain=False,
                                   progress=prep_root / "progress.json",
                                   observer=_GoObserver(observer)),
@@ -4841,7 +4897,7 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
             # reported as still does not.
             statics_corridor=config_declares_follow_source(exp),
             acknowledgements=tuple(exp.acknowledgements),
-            observe_stage=observe_stage)
+            observe_stage=observe_stage, upper_root=upper_root)
 
     if len(exp.domains) == 1 and not prepare_only:
         # CHAINED PREPARATION (A136 L7c): the native preparation publishes
@@ -5407,7 +5463,8 @@ def _hrrr_hierarchy_stage(*, prep_root: Path, inputs: Mapping[str, Path],
                           observer: RunObserver,
                           statics_corridor: bool = False,
                           acknowledgements: Sequence[str] = (),
-                          observe_stage: bool = True) -> Path:
+                          observe_stage: bool = True,
+                          upper_root: Path | None = None) -> Path:
     """Build d02..dNN from the sealed root preparation.
 
     The stage the GFS tree does not have.  rw-wps is not on this path at
@@ -5492,6 +5549,10 @@ def _hrrr_hierarchy_stage(*, prep_root: Path, inputs: Mapping[str, Path],
     lead = hints.get("forecast_start_hour")
     if lead:
         command += ["--forecast-start-hour", str(int(lead))]
+    if upper_root is not None:
+        # The children's start columns take the same upper source the
+        # root's did; the stage holds it to the root's sealed binding.
+        command += ["--upper-source-root", str(upper_root)]
 
     if observe_stage:
         # Not in a chained tree: its forecast opens its stage at the tree's
@@ -5501,6 +5562,10 @@ def _hrrr_hierarchy_stage(*, prep_root: Path, inputs: Mapping[str, Path],
     # every cache payload, static/corridor/export artifact, and the prepared
     # root input must still match the completed stage's binding.
     stated = {"source_manifest_sha256": manifest_sha}
+    if upper_root is not None:
+        from woof.upper_source import fetch_root_manifest_sha256
+        stated["upper_source_manifest_sha256"] = fetch_root_manifest_sha256(
+            upper_root)
 
     def run_hierarchy():
         run_stage("hierarchy", command, explain=False,
@@ -6084,6 +6149,7 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
     #: onto the run's stream; ``None`` when the window is fetched (or
     #: found) whole first.
     beside = posting = posted_handoff = posting_relay = None
+    upper_root = None
 
     # -- fetch ---------------------------------------------------------
     observer.enter_stage("fetch", phase="fetch")
@@ -6138,8 +6204,13 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
         # verified member list, including cache roots beyond MAX_PATH.
         from woof.filesystem_paths import io_path
         data_dir = io_path(data_dir)
+        # The stratospheric top-up, fetched whole first (_fetch_upper_source).
+        upper_root = _fetch_upper_source(hints, exp, data_dir=data_dir,
+                                         run_dir=run_dir, observer=observer)
         fetch_arguments = _fetch_arguments_from_hints(hints, out=data_dir)
-        if _staged_beside_refusal(hints, exp) is None:
+        # The mapped preparation carries an upper source over a whole
+        # window only (woof.mapped_direct), so its lower fetch is whole too.
+        if upper_root is None and _staged_beside_refusal(hints, exp) is None:
             # AS POSTED (DESIGN A136 2.5): the fetch runs beside the
             # preparation, which starts on the window's start needs and
             # waits for each later lead's marker; its seal writes the input
@@ -6258,6 +6329,9 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
                 run_dir / "chain" / "inputs.json")
         arguments += [token for binding in supplements
                       for token in ("--supplement", binding)]
+        from woof.upper_source import fetch_root_manifest_sha256
+        if upper_root is not None:
+            arguments += ["--upper-source-root", str(upper_root)]
         arguments += [
             # The four paths the handoff declares are the caller's.
             "--wps-namelist", str(namelist),
@@ -6299,7 +6373,12 @@ def _staged_chain(plan: RunPlan, *, config_path: Path, exp,
         def preparation(built=None):
             return prepare_verified(member_receipt, prep_root, lambda: _prepare_stage(
                 prep_root, arguments=arguments,
-                stated={}, run=run_preparation,
+                # The upper fetch's folder is deterministic, so its bytes
+                # (not its path) decide whether a preparation is reusable.
+                stated=({} if upper_root is None else {
+                    "upper_source_manifest_sha256":
+                        fetch_root_manifest_sha256(upper_root)}),
+                run=run_preparation,
                 built=(None if built is None
                        else lambda receipt: built({**receipt, **member_notes}))),
                 notes=member_notes)

@@ -1095,17 +1095,20 @@ def source_model_top_refusal(source: str | None, p_top_pa: float
     """Why SOURCE cannot initialise a model top at ``p_top_pa``, or None.
 
     The registry row's reach: ``extendable_source_top_pa`` when its fetch
-    extends upward, else ``certified_source_top_pa``.  A row declaring
-    neither is left to the preparation's vertical-coverage refusal
-    (``woof.adapt``), which reads the levels actually fetched.
+    extends upward, else ``certified_source_top_pa`` -- or, for a row
+    that declares an ``upper_source``, the composite column's reach
+    (:func:`woof.source_adapters.composite_source_top_pa`), because the
+    emitted config's run fetches that source above the lower column.  A
+    row declaring neither is left to the preparation's vertical-coverage
+    refusal (``woof.adapt``), which reads the levels actually fetched.
     """
+
+    from woof.source_adapters import composite_source_top_pa
 
     if source is None:
         return None
     adapter = get_source_adapter(source)
-    reach = adapter.extendable_source_top_pa
-    if reach is None:
-        reach = adapter.certified_source_top_pa
+    reach = composite_source_top_pa(source, adapter.upper_source)
     if reach is None or float(p_top_pa) >= float(reach):
         return None
     return (f"model top {float(p_top_pa):g} Pa lies above the top of "

@@ -493,6 +493,13 @@ def _column_top_check(adapter, p_top_pa: float | None
                       f"gates the {p_top_pa:g} Pa model top")
     if p_top_pa >= float(ceiling):
         return None, None
+    if adapter.upper_source is not None:
+        from woof.source_adapters import composite_source_top_pa
+        upper_reach = composite_source_top_pa(adapter.source_id, adapter.upper_source)
+        if upper_reach is not None and p_top_pa >= upper_reach:
+            return None, (f"{adapter.source_id}: column stops at "
+                          f"{float(ceiling):g} Pa; {adapter.upper_source} carries "
+                          f"it to the {p_top_pa:g} Pa model top")
     reach = adapter.extendable_source_top_pa
     if (fetch_model_top_pa(adapter.source_id, p_top_pa) is not None
             and reach is not None and p_top_pa >= float(reach)):
