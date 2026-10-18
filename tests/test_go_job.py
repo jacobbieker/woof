@@ -249,7 +249,8 @@ def test_without_boto3_s3_goes_through_rclone_and_failures_retry(
     gj.fetch("s3://bkt/k.toml", tmp_path / "k.toml", what="c",
              sleep=waits.append)
     assert seen[0][:3] == ["rclone", "copyto",
-                           ":s3,provider=AWS,env_auth=true,region=us-west-2:"
+                           ":s3,provider=AWS,env_auth=true,no_check_bucket=true,"
+                           "region=us-west-2:"
                            "bkt/k.toml"]
     assert waits == [2.0] and (tmp_path / "k.toml").read_text() == "ok"
     # A host without any tool is the machine's fault, not the job's:
