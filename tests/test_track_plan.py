@@ -328,9 +328,11 @@ def test_the_nests_follow_the_track_with_this_woofs_itinerary(
     assert relocation["containment"]["grid_id"] == 2
     moves = relocation["move"]
     assert len(moves) >= 5
-    d03_offset = (_domains(document)[3]["start_time"]
-                  - document["experiment"]["start_time"]).total_seconds()
-    assert all(move["at_seconds"] > d03_offset for move in moves)
+    # A moving d03 starts with the tree: the forecast refuses a late birth
+    # (parent- or analysis-born) for a relocation target under a sliding d02.
+    d03 = _domains(document)[3]
+    assert "start_time" not in d03 and "start_from" not in d03
+    assert all(move["at_seconds"] > 0 for move in moves)
     assert all(move["at_seconds"] % relocation["cadence_seconds"] == 0
                for move in moves)
     assert run.plan["relocation"]["mode"] == "track"
