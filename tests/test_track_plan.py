@@ -693,3 +693,42 @@ def test_a_long_uk_window_takes_the_three_hourly_runs(tmp_path, monkeypatch):
     assert any("every 3 h" in note for note in run.notes)
     wps = (run.directory / "uk-long.namelist.wps").read_text()
     assert "interval_seconds = 10800" in wps
+
+
+def test_fit_root_step_makes_steps_divide_history_and_radiation():
+    from fractions import Fraction
+    from woof.track.plan import _fit_root_step
+
+    def tree(step, num, den):
+        return [
+            {"grid_id": 1, "time_step": step, "time_step_fract_num": num,
+             "time_step_fract_den": den, "radt": 10.0},
+            {"grid_id": 2, "parent_id": 1, "parent_time_step_ratio": 3,
+             "radt": 5.0},
+            {"grid_id": 3, "parent_id": 2, "parent_time_step_ratio": 3,
+             "radt": 5.0},
+        ]
+
+    # An odd wizard step (d03 at 100/69 s) is shortened, never lengthened.
+    domains = tree(13, 3, 69)
+    _fit_root_step(domains, 120.0)
+    root = domains[0]
+    root_dt = root["time_step"] + Fraction(root["time_step_fract_num"],
+                                           root["time_step_fract_den"])
+    d03_dt = root_dt / 9
+    assert root_dt <= Fraction(900, 69)
+    assert (Fraction(120) / d03_dt).denominator == 1
+    assert (Fraction(600) / root_dt).denominator == 1
+    assert (Fraction(300) / (d03_dt * 3)).denominator == 1
+    # A step that already fits (the default 7.5/1.5/0.5 s ladder) is kept.
+    domains = [
+        {"grid_id": 1, "time_step": 7, "time_step_fract_num": 1,
+         "time_step_fract_den": 2, "radt": 10.0},
+        {"grid_id": 2, "parent_id": 1, "parent_time_step_ratio": 5,
+         "radt": 5.0},
+        {"grid_id": 3, "parent_id": 2, "parent_time_step_ratio": 3,
+         "radt": 5.0},
+    ]
+    _fit_root_step(domains, 120.0)
+    assert (domains[0]["time_step"], domains[0]["time_step_fract_num"],
+            domains[0]["time_step_fract_den"]) == (7, 1, 2)

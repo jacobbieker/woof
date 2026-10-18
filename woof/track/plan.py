@@ -887,6 +887,55 @@ def _first_comment_block(text: str) -> list[str]:
     return lines
 
 
+
+def _fit_root_step(domains: list[dict], history_s: float) -> None:
+    """Shorten the root step, if it must, so every domain's step divides
+    that domain's radiation period and d03's step divides its history
+    interval and a minute.
+
+    The wizard picks the root step for stability alone; on a ladder other
+    than the default one the steps can come out as odd fractions (e.g. a
+    d03 step of 100/69 s) that no history interval or radiation period is
+    a whole number of.  The step kept is the longest d03 step of the form
+    gcd(history, 60 s)/n that meets every period and is not longer than
+    the wizard's, so stability is never loosened."""
+
+    by_id = {int(t["grid_id"]): t for t in domains}
+    root = by_id[1]
+    root_dt = Fraction(int(root.get("time_step", 0))) + Fraction(
+        int(root.get("time_step_fract_num", 0)),
+        int(root.get("time_step_fract_den", 1)) or 1)
+    # factor[g]: domain g's step over d03's step.
+    factor, gid, below = {3: Fraction(1)}, 3, Fraction(1)
+    while gid != 1:
+        table = by_id[gid]
+        below *= int(table.get("parent_time_step_ratio",
+                               table.get("parent_grid_ratio", 1)))
+        gid = int(table.get("parent_id", gid - 1))
+        factor[gid] = below
+    periods = {g: Fraction(round(float(by_id[g]["radt"]) * 60))
+               for g in factor if by_id[g].get("radt")}
+
+    def fits(d03_dt: Fraction) -> bool:
+        if (Fraction(history_s) / d03_dt).denominator != 1:
+            return False
+        return all((period / (d03_dt * factor[g])).denominator == 1
+                   for g, period in periods.items())
+
+    wizard = root_dt / factor[1]
+    if wizard <= 0 or fits(wizard):
+        return
+    base = Fraction(math.gcd(int(round(history_s)), 60))
+    n = math.ceil(base / wizard)
+    while not fits(base / n):
+        n += 1
+    new_root = base / n * factor[1]
+    root["time_step"] = int(new_root)
+    remainder = new_root - int(new_root)
+    root["time_step_fract_num"] = remainder.numerator
+    root["time_step_fract_den"] = remainder.denominator if remainder else 1
+
+
 def apply_track_tables(document: dict, *, times: PlanTimes,
                        layout: TreeLayout, physics: dict, options: PlanOptions,
                        preset: str, icechunk_url: str,
@@ -914,6 +963,7 @@ def apply_track_tables(document: dict, *, times: PlanTimes,
                 int(placements[gid][0]), int(placements[gid][1]))
         if gid > 1 and "nest" in physics:
             table.update(physics["nest"])
+    _fit_root_step(domains, options.history_s)
     d03 = next(table for table in domains if int(table["grid_id"]) == 3)
     for key in ("start_time", "start_from", "history_begin_s",
                 "history_end_s"):
@@ -1192,19 +1242,20 @@ def plan_track(track: Track3D, name: str, out_dir: Path,
     notes += cadence_notes
     wizard_header, document = render_tree(
         name, source, times, layout, vertical, physics, config_path, hints)
+    # The loader refuses a delayed d03 start that is off d02's step lattice,
+    # and the lattice is only known once the tree loads: load it first with
+    # d03 born at the start, align, then lay the real birth in.
+    probe = apply_track_tables(
+        document, times=replace(times, d03_start=times.start),
+        layout=layout, physics=physics, options=options, preset=preset,
+        icechunk_url=icechunk_url, relocation=None,
+        placements=layout.placements)
+    times = _align_d03_start(times, _load(probe, config_path))
     document = apply_track_tables(
         document, times=times, layout=layout, physics=physics,
         options=options, preset=preset, icechunk_url=icechunk_url,
         relocation=None, placements=layout.placements)
     exp = _load(document, config_path)
-    aligned = _align_d03_start(times, exp)
-    if aligned != times:
-        times = aligned
-        document = apply_track_tables(
-            document, times=times, layout=layout, physics=physics,
-            options=options, preset=preset, icechunk_url=icechunk_url,
-            relocation=None, placements=layout.placements)
-        exp = _load(document, config_path)
     relocation, placements, relocation_notes, relocation_summary = \
         plan_relocation(track, exp, times, options)
     notes += relocation_notes
