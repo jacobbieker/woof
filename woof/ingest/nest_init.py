@@ -788,6 +788,22 @@ def _apply_press_adj_mu(state: DomainState, ht_fine) -> None:
     state.mup0[...] = state.mup
 
 
+def _run_p_top(coord: VerticalCoord, state) -> float:
+    """The run's model top, as the experiment states it.
+
+    The state keeps ``p_top`` in its FP32 dtype, so a top that FP32 cannot
+    represent (1312.2 Pa is 1312.199951171875 there) came back rounded,
+    and a child's re-derived base then recorded a different p_top from its
+    parent's and the experiment's -- refused by the tree forecast
+    (``prepared p_top differs from the experiment``).  The shared
+    coordinate carries the run's float64 top (``finalize_vertical_coord``),
+    so the re-derived base takes it from there, as the root's base does.
+    """
+
+    top = getattr(coord, "p_top", None)
+    return float(state.p_top) if top is None else float(top)
+
+
 def _adjust_and_rederive(state: DomainState, cfg, coord: VerticalCoord,
                          save_mub, ht_fine, *, blended,
                          column_mass_correction: bool = True) -> BaseState:
@@ -837,7 +853,7 @@ def _adjust_and_rederive(state: DomainState, cfg, coord: VerticalCoord,
             float(state.p_top), theta_300, pressure_perturbation, state.qv,
             use_theta_m=0)
     adjusted_theta = theta_300 + np.float32(300.0)
-    base = _base_from_blended(cfg, coord, float(state.p_top), blended)
+    base = _base_from_blended(cfg, coord, _run_p_top(coord, state), blended)
     state.load_base(coord, base)
     state.thp[...] = adjusted_theta - state.thb
     update_diagnostics(state, cfg.hypsometric_opt)
@@ -901,7 +917,8 @@ def _updated_real_result(original: RealInitResult,
     total_mu = _host(state.total_mu())
     c3h = _host(state.c3h)[:, None, None]
     c4h = _host(state.c4h)[:, None, None]
-    p_top = float(state.p_top)
+    # The re-derived base's own top (_run_p_top), not the FP32 state copy.
+    p_top = float(getattr(base, "p_top", None) or state.p_top)
     rederived = {
         "base": base,
         "dry_mass": total_mu,

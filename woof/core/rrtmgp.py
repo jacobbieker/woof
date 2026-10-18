@@ -71,6 +71,21 @@ DATA_DIR = data_assets.rrtmgp_data_dir()
 DTYPE = np.float32
 
 
+def workspace_matches(workspace, *, nz: int, column_chunk, p_top) -> bool:
+    """Whether a shared chunk workspace was sized for this call.
+
+    The adapter's top is the state's FP32 scalar (``DomainState.p_top``)
+    while the workspace holds the experiment's float64 one, so the tops
+    are compared in the state's own precision: a top FP32 cannot
+    represent (1312.2 Pa is 1312.199951171875 there) is the same top, not
+    drift on every radiation call.
+    """
+
+    return (int(workspace.nz) == int(nz)
+            and int(workspace.column_chunk) == column_chunk
+            and DTYPE(workspace.p_top) == DTYPE(p_top))
+
+
 #: Every NetCDF member this module opens, declared once.
 #:
 #: The registry publishes an asset requirement for this set
@@ -3706,15 +3721,13 @@ class RRTMGPRadiation:
                 microphysics=scheme, cldfra=cldfra, validate=False, **kwargs)
 
         workspace = getattr(self, "chunk_workspace", None)
-        if workspace is not None:
-            if (int(workspace.nz) != nz
-                    or int(workspace.column_chunk) != self.column_chunk
-                    or float(workspace.p_top) != p_top):
-                raise ValueError(
-                    "RRTMGP adapter/workspace shape drift: "
-                    f"adapter nz/chunk/p_top={(nz, self.column_chunk, p_top)}, "
-                    "workspace "
-                    f"{(workspace.nz, workspace.column_chunk, workspace.p_top)}")
+        if workspace is not None and not workspace_matches(
+                workspace, nz=nz, column_chunk=self.column_chunk, p_top=p_top):
+            raise ValueError(
+                "RRTMGP adapter/workspace shape drift: "
+                f"adapter nz/chunk/p_top={(nz, self.column_chunk, p_top)}, "
+                "workspace "
+                f"{(workspace.nz, workspace.column_chunk, workspace.p_top)}")
 
         flux_shape = (ncol, nz + 1)
         lw_up = (cp.empty(flux_shape, dtype=DTYPE) if self.longwave

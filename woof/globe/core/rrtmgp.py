@@ -3789,7 +3789,7 @@ class RRTMGPRadiation:
         if workspace is not None:
             if (int(workspace.nz) != nz
                     or int(workspace.column_chunk) != self.column_chunk
-                    or float(workspace.p_top) != p_top):
+                    or DTYPE(workspace.p_top) != DTYPE(p_top)):
                 raise ValueError(
                     "RRTMGP adapter/workspace shape drift: "
                     f"adapter nz/chunk/p_top={(nz, self.column_chunk, p_top)}, "
