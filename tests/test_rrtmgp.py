@@ -26,6 +26,25 @@ from woof import data_assets
 DATA_DIR = data_assets.rrtmgp_data_dir()
 
 
+def test_a_workspace_matches_a_model_top_fp32_cannot_represent():
+    """The adapter's FP32 state top and the workspace's float64 one are
+    the same top; a different top, level count or chunk is still drift."""
+    from types import SimpleNamespace
+    from woof.core.rrtmgp import workspace_matches
+
+    workspace = SimpleNamespace(nz=256, column_chunk=3125, p_top=1312.2)
+    state_top = float(np.float32(1312.2))
+    assert state_top != 1312.2
+    assert workspace_matches(workspace, nz=256, column_chunk=3125,
+                             p_top=state_top)
+    assert not workspace_matches(workspace, nz=256, column_chunk=3125,
+                                 p_top=1000.0)
+    assert not workspace_matches(workspace, nz=255, column_chunk=3125,
+                                 p_top=state_top)
+    assert not workspace_matches(workspace, nz=256, column_chunk=1,
+                                 p_top=state_top)
+
+
 def _rfmip(name):
     """A pinned RFMIP file, fetched from upstream at test time.
 
