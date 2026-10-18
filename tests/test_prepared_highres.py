@@ -395,3 +395,23 @@ def test_sealed_extension_keeps_the_static_request_bound_before_suffix_work(tmp_
             output=tmp_path / "output", env={}, decoder=tmp_path / "decoder", started=0.,
             namelist_invariant={"sha256": "different"})
     assert not (tmp_path / "output").exists()
+
+
+def test_native_publication_accepts_an_output_table(tmp_path):
+    """[output] (history preset, Icechunk export) is the forecast's business,
+    not the prepared root's: the root document drops it rather than
+    refusing the whole preparation as an unsupported table."""
+    from test_hrrr_configured_physics import _case
+    from woof.hrrr_configuration import resolve_root_experiment
+    from woof.experiment_document import publish_experiment_document
+    exp, target, source, namelist, wps = _case(tmp_path)
+    source.write_text(source.read_text() +
+        '\n[output]\npreset = "minimal"\n'
+        '\n[output.icechunk]\nurl = "file:///tmp/x/{name}.icechunk"\n',
+        encoding="utf-8")
+    actual, raw = resolve_root_experiment(target=target, vertical=exp.vertical,
+        namelist_input=namelist, start_time=exp.start_time, run_seconds=exp.run_seconds,
+        experiment_config=source, wps_namelist=wps)
+    assert "output" not in raw
+    published = publish_experiment_document(tmp_path / "pub" / "case.toml", raw, actual)
+    assert "[output" not in published.read_text(encoding="utf-8")
