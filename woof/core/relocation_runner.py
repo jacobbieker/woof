@@ -609,6 +609,33 @@ class RelocationRunner:
 
     # -- the containment leg ----------------------------------------------
 
+    def _containment_bounds(self, *, grid_id=None,
+                            max_move_parent_cells=None,
+                            min_overlap_fraction=None):
+        """The governance block a containment slide is judged against.
+
+        Built from the fields that govern a slide and nothing else:
+        authority (enabled, mode, the sliding parent's grid id) and the
+        two magnitude bounds the caller names.  It used to be the
+        mover's whole config re-aimed with ``_replace``, which carried
+        every mover-scoped field along -- and one of them, the mover's
+        ``max_move_parent_cells``, refused every slide the containment's
+        own cap admitted past it (MEASURED: rows capped at 10,
+        containment cap 19, a run ended at a 17-cell d02 slide).  A
+        field added to ``RelocationConfig`` tomorrow reaches a slide only
+        if it is passed here on purpose.  ``grid_id`` defaults to the
+        containment ancestor's.
+        """
+        from woof.experiment import RelocationConfig
+
+        if grid_id is None:
+            grid_id = self.containment.grid_id
+        return RelocationConfig(
+            enabled=True, grid_id=int(grid_id),
+            mode=self.config.mode,
+            max_move_parent_cells=max_move_parent_cells,
+            min_overlap_fraction=min_overlap_fraction)
+
     def wire_containment(self, *, initializer, on_child_built,
                          static_provenance=None) -> None:
         """Hand the sliding parent its own rebuild pair.
@@ -716,6 +743,21 @@ class RelocationRunner:
                 _prevalidate_placement(comp, parent_node)
             except ValueError:
                 return "mover_compensated_placement"
+            # Every OTHER descendant rides along with the slide and is
+            # re-grounded by relocate_child, which refuses -- after the
+            # parent is already rebuilt -- one carried entirely off its
+            # own old ground.  Judged here, before anything moves, so a
+            # wide slide is walked back to one each descendant survives.
+            from woof.core.nest_relocation import (
+                descendant_regroundings, plan_descendant_reground)
+            for node, delta_i, delta_j in descendant_regroundings(
+                    parent_node, di, dj,
+                    earth_fixed=frozenset({int(mover.cfg.grid_id)})):
+                if int(node.cfg.grid_id) == int(mover.cfg.grid_id):
+                    continue
+                if plan_descendant_reground(node.cfg, delta_i,
+                                            delta_j).disjoint:
+                    return "descendant_off_its_ground"
             return None
 
         di, dj = capped_i, capped_j
@@ -767,14 +809,14 @@ class RelocationRunner:
         if callable(capture):
             capture(parent_node)
         fingerprint_before = model.experiment_fingerprint
-        # The governance block re-aimed at the sliding parent: bounds
-        # authorise BY GRID ID, and the config's own id names the tracked
-        # mover.  Everything else (mode opt-in, min_overlap_fraction)
-        # carries over; the containment table is dropped from the shim so
-        # the config's own strict-ancestor validation does not read the
-        # re-aimed id as self-containment.
-        bounds = _replace(self.config, grid_id=int(cont.grid_id),
-                          containment=None)
+        # The governance block for the sliding parent: bounds authorise BY
+        # GRID ID, and the config's own id names the tracked mover.  The
+        # per-move cap is the CONTAINMENT's -- the one the slide was
+        # clamped to above, in the sliding parent's parent's cells -- not
+        # the mover's row cap (see _containment_bounds).
+        bounds = self._containment_bounds(
+            max_move_parent_cells=cont.max_move_parent_cells,
+            min_overlap_fraction=self.config.min_overlap_fraction)
         reconstruction_args = self._reconstruction_args(
             parent_node, self.containment_initializer, self.containment_preparer)
         receipt = relocate_child(
@@ -1046,8 +1088,7 @@ class RelocationRunner:
         if int(self.config.grid_id) != grid_id:
             # A containment ancestor being put back: authorise BY GRID
             # ID, the same re-aim the containment leg makes.
-            bounds = _replace(self.config, grid_id=grid_id,
-                              containment=None)
+            bounds = self._containment_bounds(grid_id=grid_id)
         # A RESTORE IS NOT A STEERING DECISION.  max_move_parent_cells
         # and min_overlap_fraction bound what one CONSULTATION may do --
         # they exist so a single noisy centroid cannot fling the nest
