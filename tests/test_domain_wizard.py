@@ -2646,7 +2646,8 @@ def test_no_fit_advice_names_only_profiles_the_same_source_accepts(
     # 315803306, lane/20cr-site, admits the historical 1836..2015 archive.
     # Advice ranking needs a valid request to reach memory sizing, not a
     # 2026 window refused by the source's unchanged temporal guard.
-    cycle = "1957-12-18T12" if source == "20crv3-cf" else "2026-08-12T00"
+    cycle = {"20crv3-cf": "1957-12-18T12",
+             "ukv": "2024-06-18T06"}.get(source, "2026-08-12T00")
 
     def _argv(vram: str) -> list[str]:
         return ["domain", f"--point={point}", "--ladder", "12",

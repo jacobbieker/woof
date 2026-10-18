@@ -751,7 +751,11 @@ def fetch_front_door_sources() -> tuple[str, ...]:
 def native_cf_fetch_contract(source: str) -> str | None:
     """Capability probe for annual CF acquisition and bound native preparation."""
     from woof.cf_archive_fetch import contract
-    return contract(fetch_routes.canonical_source(source))
+    from woof import ukv_source
+    canonical = fetch_routes.canonical_source(source)
+    if canonical == ukv_source.SOURCE_ID:
+        return ukv_source.CONTRACT
+    return contract(canonical)
 
 
 def fetch_accepts_area(source: str) -> bool:
@@ -769,8 +773,9 @@ def fetch_accepts_area(source: str) -> bool:
     """
 
     from woof.cf_archive_fetch import sources
+    from woof.ukv_source import SOURCE_ID as UKV
     return fetch_routes.canonical_source(source) in (
-        fetch_routes.LEGACY_ROUTE_SOURCES + sources())
+        fetch_routes.LEGACY_ROUTE_SOURCES + sources() + (UKV,))
 
 
 def fetch_accepts_cadence(source: str) -> bool:
@@ -2018,8 +2023,15 @@ def resolve_latest_cycle(source: str, last_hour: int, *,
 
     if native_cf_fetch_contract(source) is not None:
         from woof.cf_archive_fetch import latest_cycle
+        from woof import ukv_source
+        ukv = fetch_routes.canonical_source(source) == ukv_source.SOURCE_ID
         if start_hour or member is not None or provider is not None or transport is not None:
-            raise ValueError("Annual CF analyses have no forecast lead, member or alternate provider axis")
+            raise ValueError(
+                "The UKV archive has no forecast lead, member or alternate provider "
+                "axis: every hour is its own state" if ukv else
+                "Annual CF analyses have no forecast lead, member or alternate provider axis")
+        if ukv:
+            return ukv_source.latest_cycle(last_hour, cadence)
         return latest_cycle(fetch_routes.canonical_source(source),last_hour,cadence)
     transport = fetch_endpoints.policy_transport(source, transport)
     if as_posted is None:
@@ -6881,6 +6893,9 @@ def _fetch_main(args) -> int:
     era5_product = era5_product or "reanalysis"
     if native_cf_fetch_contract(source) is not None:
         from woof.cf_archive_fetch import cli
+        from woof import ukv_source
+        if source == ukv_source.SOURCE_ID:
+            return ukv_source.cli(args)
         return cli(args)
     if source in fetch_routes.route_ids():
         # A table route refuses the flags it does not take, then validates
@@ -7957,7 +7972,14 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
                 _era5_times(cycle or datetime(2000, 1, 1), hours, step)
         elif native_cf_fetch_contract(name) is not None and not local_source:
             from woof.cf_archive_fetch import validate_window
-            if hours is not None:
+            from woof import ukv_source
+            if name == ukv_source.SOURCE_ID:
+                # A dateless hint is checked against the archive's first
+                # hour; a dated one against its own window.
+                if hours is not None:
+                    ukv_source.validate_window(
+                        cycle or ukv_source.COVERAGE_START, hours, cadence)
+            elif hours is not None:
                 validate_window(name, cycle or datetime(2000, 1, 1), hours, cadence)
         elif name in GFS_CONTAINER_SOURCES:
             step = container_default_cadence(name) if cadence is None else cadence

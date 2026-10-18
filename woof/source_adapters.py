@@ -718,6 +718,30 @@ _MET_OFFICE_GLOBAL_STATE = (
          field_mapping="pending", stock_wrf_gate="not_run",
          runnable=False, packaged_profile=None))
 
+#: The UKV's Source Cooperative archive: one closed Icechunk repository,
+#: hourly from 2024-01-01 00Z to 2025-08-13 22Z (14183 records, measured
+#: 2026-10-18).  Its end is the cycle grid's ``record_end`` below.
+_UKV_SOURCE_COOP_ARCHIVE = ArchiveWindow(
+    "source-coop", "2024-01-01T00",
+    "The Source Cooperative UKV archive holds hourly states from 2024-01-01 "
+    "00Z to 2025-08-13 22Z and is not extended; the 2025-05-16 15Z hour has "
+    "no pressure-level wind direction and is refused.",
+    ("https://source.coop/bkr/metoffice",
+     "s3://us-west-2.opendata.source.coop/bkr/metoffice/"
+     "metoffice_uk_deterministic_2km.icechunk"),
+    checked_at="2026-10-18",
+)
+
+#: Where a domain can sit on the UKV plane, as a latitude/longitude box:
+#: the largest box inside the Lambert azimuthal equal-area grid
+#: (:func:`woof.ukv_source.coverage_box`), shrunk by the fetch's
+#: 0.25-degree margin and rounded inward to its 0.02-degree step, so a
+#: domain inside it never asks the regrid for a point off the plane.  The
+#: plane reaches further at its corners; a domain there is checked point by
+#: point at fetch.  Held equal to the module by tests/test_ukv_source.py.
+_UKV_WINDOW = RegularLatLonWindow(
+    south=45.86, west=-16.84, north=61.04, east=8.94, nx=1290, ny=760)
+
 
 # The order is canonical: the 23 rusty-weather ModelId values, the ERA5 GRIB1
 # source already decoded by woof's native ingest path, the packaged 20CRv3
@@ -1543,6 +1567,80 @@ _ADAPTERS = (
             "business purposes.  Runs before 2025-12-11 12Z publish no "
             "orography and are refused by name.  Not yet accepted by "
             "unchanged stock WRF."
+        ),
+    ),
+    _adapter(
+        "ukv",
+        record="forecast",
+        time_axis="analysis_times",
+        archives=(_UKV_SOURCE_COOP_ARCHIVE,),
+        name="UKV 2 km (Met Office UK, Source Cooperative archive)",
+        aliases=("ukv-2km", "met-office-ukv", "metoffice-ukv",
+                 "uk-deterministic-2km", "ukv-sc"),
+        upstream_model_id=None,
+        file_family="Icechunk/Zarr, regridded to NetCDF-CF at fetch",
+        decoder=(
+            "woof.ukv_source (Icechunk read, LAEA-to-0.02-degree regrid) + "
+            "packaged UKV NetCDF profile + rw_netcdf/netcrust "
+            "(woof.netcdf_bridge)"
+        ),
+        default_product="uk-deterministic-2km",
+        required_products=(
+            "pressure-level temperature, height, humidity and wind",
+            "surface pressure, skin and 1.5 m screen state, 10 m wind",
+            "same-hour ERA5 land state and sea ice (Google ARCO)",
+        ),
+        # An archive of valid times: every hour is its own state, so a
+        # window is a run of hours, not leads of one cycle.
+        max_hour=0,
+        upstream_ingest="declarative_mapping_v1_over_packaged_profile",
+        status=AdapterStatus.RUNNABLE_NOT_CERTIFIED,
+        field_mapping="packaged-rw-wps-ukv-sc-netcdf-v1",
+        level_mapping="33-pressure-level-to-explicit-wrf-eta-v2",
+        cadence_mapping="uniform-hourly-analysis-series-v1",
+        stock_wrf_gate="live-unchanged-stock-wrf-gate-pending",
+        runnable=True,
+        runner="mapped_composition_v1",
+        packaged_profile="ukv-sc-netcdf-v1",
+        forcing_interval_seconds=3600.0,
+        # The ladder is all 33 published levels, to 10 hPa.  Nothing above
+        # it is published, so there is no extendable top: a run above
+        # 10 hPa needs another source for its upper column.
+        certified_source_top_pa=1000.0,
+        coverage=_UKV_WINDOW,
+        # No cycle grid: a closed archive has no publication schedule, and
+        # `--cycle latest` is the archive's last hour less the window
+        # (woof.ukv_source.latest_cycle).  Without one the row offers no
+        # automatic initialization at "now", which it could never serve.
+        composition=(
+            "The archive publishes no soil, no sea ice and no orography. "
+            "The fetch carries the SAME HOUR's ERA5 land-sea mask, sea ice "
+            "and four-layer soil column into every file by nearest index "
+            "(no interpolation, the ERA5 coastline), and one derived "
+            "terrain: the height of the window's first surface pressure on "
+            "its own pressure-level heights, so the files are their own "
+            "in-band terrain supplement."
+        ),
+        notes=(
+            "The Met Office UKV, the UK deterministic 2 km model, from the "
+            "Source Cooperative Icechunk archive (s3://us-west-2.opendata."
+            "source.coop/bkr/metoffice/metoffice_uk_deterministic_2km."
+            "icechunk, anonymous): hourly 2024-01-01 00Z to 2025-08-13 22Z "
+            "on the UK 2 km Lambert azimuthal equal-area grid, 33 pressure "
+            "levels to 10 hPa.  `woof fetch --source ukv --area ...` reads "
+            "the window, regrids it bilinearly to a regular 0.02-degree "
+            "grid over the area plus 0.25 degrees, turns speed and "
+            "true-north from-direction into components and writes one "
+            "NetCDF per hour; each hour moves about 150 MB of whole-plane "
+            "chunks.  THREE limits a reader must know.  (1) Values are "
+            "float16: temperature steps 0.125-0.25 K and geopotential "
+            "height 16 m above about 100 hPa.  (2) Soil, land mask and sea "
+            "ice are ERA5's at 0.25 degrees, so the land state follows the "
+            "ERA5 coastline.  (3) The 2025-05-16 15Z hour has no "
+            "pressure-level wind direction and is refused.  LICENCE: UKV "
+            "data Met Office, British Crown copyright; ERA5 contains "
+            "modified Copernicus Climate Change Service information.  Not "
+            "yet accepted by unchanged stock WRF."
         ),
     ),
     _adapter(

@@ -415,7 +415,14 @@ def managed_download_dir(case_root: Path, fetch_table: dict) -> Path:
                     if manifest.is_file():
                         payload = json.loads(manifest.read_text(encoding="utf-8"))
                         if fetch.native_cf_fetch_contract(source) is not None:
-                            from woof import cf_archive_fetch
+                            from woof import cf_archive_fetch, ukv_source
+                            if source == ukv_source.SOURCE_ID:
+                                if payload.get("schema") != ukv_source.MANIFEST_SCHEMA:
+                                    raise ValueError("The UKV cache has no recognized fetch receipt")
+                                ukv_source.check_prior_request(
+                                    candidate, cycle=cycle, hours=request.get("hours", 0),
+                                    cadence=request.get("cadence"), area=area)
+                                return candidate
                             if payload.get("schema") != cf_archive_fetch.MANIFEST_SCHEMA:
                                 raise ValueError("The native CF cache has no recognized fetch receipt")
                             cf_archive_fetch.check_prior_request(candidate,source=source,cycle=cycle,

@@ -1398,6 +1398,7 @@ def runner_capabilities() -> dict[str, object]:
                 "rap": "uniform-positive-whole-hour",
                 "rap-native": "uniform-positive-whole-hour",
                 "rrfs": "uniform-positive-whole-hour",
+                "ukv": "uniform-positive-whole-hour",
             },
             "forcing_must_cover_run": True,
         },

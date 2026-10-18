@@ -1,0 +1,35 @@
+{
+  "schema": "gpuwm-ukv-source-coop-in-band-surface-provenance-v1",
+  "source": "Met Office UKV (UK deterministic 2 km, mosg__model_configuration uk_det, um_version 13.1) from the Source Cooperative Icechunk archive, regridded at fetch onto a regular 0.02-degree latitude/longitude grid by woof.ukv_source, with the same-hour ERA5 land state and sea ice carried in band",
+  "licence": {
+    "ukv": "Met Office, British Crown copyright, as distributed by Source Cooperative (source.coop/bkr/metoffice); attribute the Met Office",
+    "era5": "Copernicus Climate Change Service (C3S) ERA5, read from Google's analysis-ready copy; 'contains modified Copernicus Climate Change Service information'"
+  },
+  "front_door": "s3://us-west-2.opendata.source.coop/bkr/metoffice/metoffice_uk_deterministic_2km.icechunk (Icechunk format 1, anonymous, branch main); the dated _29092024/_16052025 siblings are format 2 and are not read",
+  "archive": {
+    "time": "time is int64 milliseconds since 1970-01-01, hourly, 14183 records 2024-01-01T00Z..2025-08-13T22Z with no gaps (MEASURED 2026-10-18); the store publishes no forecast_reference_time or forecast_period variable, so each hour is its own valid time and its own source cycle",
+    "grid": "UK 2 km standard grid: Lambert azimuthal equal-area on the WGS84 ellipsoid (semi-axes 6378137 / 6356752.314140356 m), origin 54.9N 2.5W, false easting/northing 0; 1042 x 970 cell centres, x -1158000..924000 m and y -1036000..902000 m at 2000 m",
+    "levels": "33 pressure levels 1000..100000 Pa, top first; every level carries values at every cell (below-ground levels are extrapolated by the producer, no missing values MEASURED on 2024-06-18 06Z)",
+    "precision": "every published field except surface_air_pressure, air_pressure_at_sea_level and visibility is float16: temperature steps 0.125 K below 256 K and 0.25 K above, geopotential height steps 16 m above 16384 m (about 100 hPa and up) and 8 m from 8192 m; the values are used as published",
+    "wind_direction_frame": "wind_from_direction (pressure levels and 10 m) is relative to TRUE north: the angle between the published 300 hPa direction and the geostrophic direction computed on the plane, regressed on the grid convergence over five dates, had slope -0.24 under the true-north reading and -1.24 under the grid-north reading (MEASURED 2026-10-18); components are therefore earth-relative with no rotation",
+    "wind_direction_gap": "the pressure-level wind_from_direction array has 14182 records against 14183 times: the 2025-05-16T15Z record is absent and every later record is stored one index early (bisected against the height-level winds, MEASURED 2026-10-18); that hour is refused and later hours read index - 1; the 10 m direction and every other field are aligned"
+  },
+  "fetch_transform": {
+    "crop": "the requested area plus a 0.25-degree margin, on a regular 0.02-degree grid whose points are multiples of 0.02 degrees; every point must project inside the plane or the fetch refuses naming the first one outside",
+    "horizontal": "bilinear in projection metres from the four surrounding UKV cell centres",
+    "winds": "u = -speed sin(dir), v = -speed cos(dir) on the native grid, then interpolated as components",
+    "terrain_height": "the archive publishes no orography; surface_altitude is the hypsometric height of the window's FIRST hour's published surface pressure on that hour's own pressure-level heights (first level above the ground, layer-mean virtual temperature between it and the 1.5 m screen state), written identically into every file so the files are their own invariant terrain supplement and terrain and surface pressure agree",
+    "screen_level": "air_temperature_1p5m and relative_humidity_1p5m are the 1.5 m screen fields, used as published in the 2 m slots (declared screen_height_m 1.5)",
+    "era5_land_state": "land_sea_mask, sea_ice_cover, soil_temperature_level_1..4 and volumetric_soil_water_layer_1..4 at the SAME valid time from https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3, copied by nearest index (axis by axis, longitude modulo 360, ties to the lower index) onto the 0.02-degree grid: nothing is interpolated, every borrowed value is an ERA5 cell value and the borrowed coastline is the 0.25-degree ERA5 one, the semantics of the composition's nearest_coordinate_index borrow; negative ERA5 soil water (down to -0.01 over the sea) is floored at 0 and counted in the fetch manifest; sea ice is missing over land and declared preserve_mask",
+    "why_in_band": "a cross-source field_sources binding decodes its donor through the donor's own COMPLETE initialization mapping, and no anonymous ERA5 product carries only the land state: the complete ARCO forcing costs about 375 MB of pressure-level chunks per hour to borrow ten surface fields, so the fetch performs the same nearest-index borrow itself and records the donor in every file's source attribute and the fetch manifest"
+  },
+  "soil": "ERA5 layers 0-7, 7-28, 28-100 and 100-289 cm remapped to Noah's 0-10, 10-40, 40-100 and 100-200 cm by conservative layer means (complete coverage); ocean soil is repaired after horizontal interpolation from skin temperature and unit moisture",
+  "model_top": "the ladder reaches 1000 Pa (10 hPa, about 31 km); nothing above it is published, so the route has no upward extension",
+  "deliberate_exclusions": {
+    "vertical_velocity": "not published on pressure levels; the validated explicit zero",
+    "hydrometeors": "cloud fractions and precipitation rates are diagnostics, not mixing ratios; the validated explicit zero",
+    "height_levels": "the 5 m..6 km height-level fields are not read: the pressure ladder covers the whole column"
+  },
+  "input_identity": "dynamic file paths and SHA-256 values are owned by gpuwm-mapped-composition-inputs-v1; the Icechunk snapshot id each file was read from is in its source attribute and the fetch manifest",
+  "qualification": "Implementation route, not an unchanged-stock-WRF certification"
+}
