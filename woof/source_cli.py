@@ -804,7 +804,10 @@ def _required_hrrr_args(args: argparse.Namespace) -> list[str]:
             "--source-orography": args.source_orography,
             "--source-orography-variable": args.source_orography_variable,
             "--domain-source-orography": args.domain_source_orography,
-            "--experiment-config": args.experiment_config,
+            # --experiment-config is NOT unused here: it sizes the statics
+            # corridor from the config's [relocation], which a namelist
+            # cannot spell, and is forwarded with --statics-corridor
+            # (refused below without one).
             "--gfs-series": args.gfs_series,
             "--cycle": args.cycle,
             "--preprocess-backend": args.preprocess_backend,
@@ -832,6 +835,12 @@ def _required_hrrr_args(args: argparse.Namespace) -> list[str]:
             "--sealed-prepared-cache": args.sealed_prepared_cache or None,
             "--extend-root-preparation": args.extend_root_preparation,
         }
+        if (args.experiment_config is not None
+                and args.statics_corridor is None):
+            errors.append(
+                "--experiment-config is read by HRRR hierarchy export only "
+                "to size --statics-corridor; add the corridor or drop the "
+                "config")
         errors.extend(
             f"{flag} is not used by HRRR hierarchy export"
             for flag, value in unused.items()
@@ -1898,6 +1907,11 @@ def _hrrr_command(args: argparse.Namespace) -> list[str]:
                 command.append("--statics-corridor")
             else:
                 command.extend(("--statics-corridor", args.statics_corridor))
+            # The namelists cannot spell [relocation]; the corridor is
+            # sized from the config when one was given.
+            if args.experiment_config is not None:
+                command.extend(("--experiment-config",
+                                str(args.experiment_config)))
         return command
 
     tools = Path(__file__).resolve().parent.parent / "tools"

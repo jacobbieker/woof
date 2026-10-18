@@ -205,6 +205,59 @@ def _sealed_root_rrtmg_compatibility(identity: dict[str, object]) -> str | None:
     return compatibility if isinstance(compatibility, str) else None
 
 
+def _corridor_experiment(native_exp, experiment_config: Path | None):
+    """The experiment a statics corridor is sized and framed against.
+
+    This stage reads its tree from the namelists, and a namelist has no
+    spelling for ``[relocation]``, ``[[domain]] follow`` or the run length
+    a move schedule is bounded by.  A corridor sized from the namelists
+    alone therefore covered only each child's declared footprint, and
+    framed every child against its own parent, while the tree runner,
+    which reads the experiment config, re-derived the reach the config's
+    moves and containment slides allow.  It then refused the bundle at
+    the forecast stage ("a move there would find no statics"), after the
+    whole preparation had run.  MEASURED: a three-domain HRRR tree with
+    [[relocation.move]] rows and a [relocation.containment] parent,
+    launched through ``woof go``, refused d02's corridor exactly that way.
+
+    With the config, the corridor is computed against the config's own
+    experiment -- the one the runner reads, so every input the reach
+    depends on (moves, containment, followers, dormant nests, run length)
+    is the runner's by construction rather than a list of fields copied
+    across.  It is accepted only once its tree is proven to be the
+    namelists' tree, domain for domain (ids, parents, placements, ratios,
+    extents, spacing); a config that disagrees is refused here rather
+    than sealed against the wrong ground.  Without one, the namelist
+    experiment is returned unchanged, so a bundle prepared without it is
+    byte-identical.
+    """
+    if experiment_config is None:
+        return native_exp
+    from woof.experiment import load_experiment
+
+    declared = load_experiment(Path(experiment_config))
+
+    def shape(exp) -> dict:
+        return {int(dc.grid_id): (int(dc.parent_id), int(dc.i_parent_start),
+                                  int(dc.j_parent_start),
+                                  int(dc.parent_grid_ratio),
+                                  int(dc.run.nx), int(dc.run.ny),
+                                  float(dc.run.dx))
+                for dc in exp.domains}
+
+    native_shape, declared_shape = shape(native_exp), shape(declared)
+    if native_shape != declared_shape:
+        differing = sorted(
+            gid for gid in set(native_shape) | set(declared_shape)
+            if native_shape.get(gid) != declared_shape.get(gid))
+        raise ValueError(
+            f"--experiment-config {experiment_config} does not declare "
+            f"{', '.join(f'd{gid:02d}' for gid in differing)} as the "
+            "namelists place it; the statics corridor would be sized for "
+            "a different tree")
+    return declared
+
+
 def _native_experiment(wps_namelist: Path, namelist_input: Path,
                        *, rrtmg_variant: str | None = None,
                        rrtmg_compatibility: str | None = None,
@@ -1415,7 +1468,8 @@ def _chained_hierarchy_tail(c) -> dict[str, object]:
         # re-grounds over the head's copy from its first move; the seal
         # copies it into hierarchy-artifacts/ (A136 L7d).
         corridor_receipt = emit_statics_corridor_set(
-            exp=c.native_exp, grids=c.grids, static_catalog=c.static_catalog,
+            exp=c.corridor_exp, grids=c.grids,
+            static_catalog=c.static_catalog,
             directory=(staging / HIERARCHY_HEAD_DIRNAME
                        / STATICS_CORRIDOR_DIRNAME),
             statics_corridor=c.statics_corridor,
@@ -1700,6 +1754,7 @@ def prepare_hrrr_hierarchy(
         cpu_bridge: Path | None = None, statics_corridor=None,
         acknowledgements: tuple[str, ...] = (),
         upper_source_root: Path | None = None,
+        experiment_config: Path | None = None,
 ) -> dict[str, object]:
     """Verify one root preparation and publish generic stock-WRF inputs.
 
@@ -1719,6 +1774,11 @@ def prepare_hrrr_hierarchy(
     beside ``artifact_receipt``, exactly as the GFS chain binds it into
     ``proof.json``, which is what makes the sealed artifact rather than
     any printed line the contract the tree runner verifies.
+
+    ``experiment_config`` is the run's experiment TOML.  It is read only
+    to size and frame the corridor (:func:`_corridor_experiment`), because
+    the namelists cannot carry the moves, containment and run length
+    that bound a moving nest's reach.
     """
 
     if isinstance(workers, bool) or workers not in range(1, 33):
@@ -1814,7 +1874,19 @@ def prepare_hrrr_hierarchy(
             "--statics-corridor seals child-resolution statics over a "
             "parent extent, and this namelist has no child domain; "
             "remove the flag or prepare a domain tree")
-    validated_corridor_selection(native_exp, statics_corridor)
+    if experiment_config is not None and statics_corridor is None:
+        raise ValueError(
+            "--experiment-config is read only to size --statics-corridor; "
+            "add the corridor or drop the config")
+    if statics_corridor is not None and experiment_config is None:
+        from woof.explain import warn
+        warn("the statics corridor is sized from the namelists alone, which "
+             "cannot carry [relocation]: it covers each child's declared "
+             "footprint and nothing a move reaches.  Pass "
+             "--experiment-config for a tree whose config moves a nest.")
+    corridor_exp = (native_exp if statics_corridor is None
+                    else _corridor_experiment(native_exp, experiment_config))
+    validated_corridor_selection(corridor_exp, statics_corridor)
     wps_runtime_contract = _require_raw_wps_contract(
         Path(wps_namelist), len(native_exp.domains))
     if native_exp.start_time != valid_time:
@@ -2016,6 +2088,7 @@ def prepare_hrrr_hierarchy(
                 root_preparation=Path(root_preparation), root_head=root_head,
                 paths=paths, staging=staging, output_root=output_root,
                 native_exp=native_exp, export_exp=export_exp, grids=grids,
+                corridor_exp=corridor_exp,
                 root=root, restored=restored, root_soil=root_soil,
                 static_fields=static_fields, catalog=catalog,
                 static_catalog=static_catalog, static_highres=static_highres,
@@ -2070,7 +2143,7 @@ def prepare_hrrr_hierarchy(
         # looks for it whichever chain wrote the bundle.  The GFS chain
         # emits through this same function.
         corridor_receipt = emit_statics_corridor_set(
-            exp=native_exp, grids=grids, static_catalog=static_catalog,
+            exp=corridor_exp, grids=grids, static_catalog=static_catalog,
             directory=(staging / "hierarchy-artifacts"
                        / STATICS_CORRIDOR_DIRNAME),
             statics_corridor=statics_corridor, static_highres=static_highres)
@@ -2199,6 +2272,12 @@ def _parser() -> argparse.ArgumentParser:
              "(e.g. 2,3).  Required before the prepared tree runner will "
              "honor a [relocation] follow source; omitted, the bundle is "
              "byte-for-byte unchanged")
+    parser.add_argument(
+        "--experiment-config", type=Path, default=None,
+        help="the run's experiment TOML; with --statics-corridor, sizes "
+             "and frames each corridor from its [relocation] moves, "
+             "containment and run length, which the namelists cannot "
+             "carry")
     return parser
 
 
@@ -2249,6 +2328,7 @@ def main(argv=None) -> int:
         workers=args.workers, cpu_bridge=args.cpu_preprocess_bridge,
         statics_corridor=statics_corridor,
         upper_source_root=args.upper_source_root,
+        experiment_config=args.experiment_config,
     )
     # The forecast runner takes --preparation-receipt-sha256 over the
     # receipt this stage just wrote, and the emitted chain tells the

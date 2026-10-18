@@ -1885,12 +1885,25 @@ def execute_experiment(
                     # accepted move also needs the existing full-state donor.
                     parent_stream.sync_to_state()
                     parent_streams[parent_gid] = parent_stream
+        # Every grid whose validator the runner dropped is rebuilt below,
+        # not only the grids named by "relocated" rows: a
+        # [relocation.containment] slide rebuilds the mover's PARENT
+        # through this same seam, but on_period_begin returns only the
+        # mover's row.  MEASURED before this: a slide of d02 at 600 s
+        # followed by a d03 move left d02 with no validator, and its next
+        # history frame raised KeyError: 2 and ended the run.
+        dropped: set[int] = set()
+
+        def drop_validator(gid) -> None:
+            dropped.add(int(gid))
+            validators.pop(gid, None)
+
         outcome = relocation_runner.on_period_begin(
             model, clocks, period=period,
             # The executor's validator holds live references into the
             # outgoing child; dropping it here is what lets the
             # host-staged release actually free the device bytes.
-            before_rebuild=lambda gid: validators.pop(gid, None))
+            before_rebuild=drop_validator)
         for parent_stream in parent_streams.values():
             # reset_tracker_window already zeroes every live copy, including
             # generated follower carriers. Preserve the legacy fixed-plane
@@ -1899,10 +1912,9 @@ def execute_experiment(
         rows = [] if outcome is None else (
             outcome.get("outcomes", []) if outcome.get("event") == "batch"
             else [outcome])
-        for row in rows:
-            if row.get("event") != "relocated":
-                continue
-            gid = int(row["grid_id"])
+        rebuilt = dropped | {int(row["grid_id"]) for row in rows
+                             if row.get("event") == "relocated"}
+        for gid in sorted(rebuilt):
             if validate_state:
                 from woof.core.health import health_validator_for_domain
                 validators[gid] = health_validator_for_domain(model, model.node(gid))

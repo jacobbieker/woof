@@ -4897,6 +4897,7 @@ def _hrrr_chain(plan: RunPlan, *, config_path: Path, exp,
             # reported as still does not.
             statics_corridor=config_declares_follow_source(exp),
             acknowledgements=tuple(exp.acknowledgements),
+            experiment_config=config_path,
             observe_stage=observe_stage, upper_root=upper_root)
 
     if len(exp.domains) == 1 and not prepare_only:
@@ -5463,6 +5464,7 @@ def _hrrr_hierarchy_stage(*, prep_root: Path, inputs: Mapping[str, Path],
                           observer: RunObserver,
                           statics_corridor: bool = False,
                           acknowledgements: Sequence[str] = (),
+                          experiment_config: Path | None = None,
                           observe_stage: bool = True,
                           upper_root: Path | None = None) -> Path:
     """Build d02..dNN from the sealed root preparation.
@@ -5534,6 +5536,13 @@ def _hrrr_hierarchy_stage(*, prep_root: Path, inputs: Mapping[str, Path],
         # reads that as "every child domain", which is also what
         # corridor_estimate priced for this plan.
         command.append("--statics-corridor")
+        # The config's [relocation], for the same reason as the
+        # acknowledgements below: this stage reads the namelists, which
+        # cannot spell a move schedule, so a corridor sized from them
+        # alone covered only the declared footprints and the tree runner
+        # refused it against the reach the config allows.
+        if experiment_config is not None:
+            command += ["--experiment-config", str(experiment_config)]
     # The config's [experiment] acknowledgements.  This stage reads the
     # namelists, which have no spelling for them, so without the flag a
     # tree on a suite that requires one (every shortwave-only suite

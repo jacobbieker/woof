@@ -1846,7 +1846,11 @@ def hrrr_route_commands(out: "Path", exp: ExperimentConfig, *,
     from woof.stage_cli import staged_route_commands
     from woof.static.corridor import config_declares_follow_source
 
-    corridor = (("--statics-corridor",)
+    # The config rides with the flag: the hierarchy imports the
+    # namelists, which cannot spell [relocation], and sizes the corridor
+    # from the config's moves and containment.
+    corridor = (("--statics-corridor",
+                 f"--experiment-config {_printed_path(out)}")
                 if config_declares_follow_source(exp) else ())
     manifest = f"{source_root}/SHA256SUMS"
     manifest_digest = "<printed by woof fetch>"
