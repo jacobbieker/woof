@@ -481,6 +481,20 @@ def _shared_vertical_coord(vertical: VerticalConfig, nz: int) -> VerticalCoord:
         eta_levels=eta)
 
 
+def _child_snapshot_time(child_dc) -> datetime | None:
+    """The analysis instant a child is prepared from (``None``: the first).
+
+    A delayed nest born from the analysis is prepared at its own start.  A
+    parent-born one (``start_from = "parent"``) is prepared like a nest
+    that starts with the experiment: its atmosphere and land are replaced
+    from the live parent at birth, so only its grid, statics and base
+    state are read from here, and the first snapshot supplies them.
+    """
+    from woof.experiment import starts_from_parent
+
+    return None if starts_from_parent(child_dc) else child_dc.start_time
+
+
 def _initial_snapshot(catalog, valid_time: datetime | None = None):
     # The child barrier wants ONE valid time.  Selecting it by walking
     # the snapshots packed the whole forcing series to read one
@@ -965,7 +979,7 @@ def _prepare_child_input_on_grid_uncached(
     static_fields = build_static_for_domain(
         grid, static_catalog, child_dc.grid_id,
         **({"cfg": cfg} if getattr(cfg, "sf_lake_physics", 0) else {}))
-    source = _initial_snapshot(catalog, child_dc.start_time)
+    source = _initial_snapshot(catalog, _child_snapshot_time(child_dc))
     has_invariant = "SOILGEO" in tuple(getattr(catalog, "inventory", ()))
     catalog_declaration = _catalog_source_declaration(catalog)
     declaration = (source_orography if source_orography is not None

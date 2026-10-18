@@ -77,6 +77,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from woof.core.health_ledger import resident_receipt as _health_readback_receipt  # noqa: E402
 from woof.forecast_initialization import TreeInitialization  # noqa: E402
+from woof.explain import layered  # noqa: E402
 from woof import __version__  # noqa: E402
 from woof import prepared_single_domain_forecast as prepared_single  # noqa: E402
 from woof.certify.capsule import emit_run_capsule  # noqa: E402
@@ -95,7 +96,7 @@ from woof.aerosol_source_receipt import (  # noqa: E402
     AEROSOL_SOURCE_KEY,
     aerosol_source_report_entries,
 )
-from woof.experiment import load_experiment  # noqa: E402
+from woof.experiment import load_experiment, starts_from_parent  # noqa: E402
 from woof.acoustic_adaptation import (  # noqa: E402
     acoustic_receipt, adapt_experiment_to_terrain, fold_corridor_reading,
     readings_from_static)
@@ -1303,6 +1304,13 @@ def _validate_delayed_prepared_geometry(exp) -> None:
 
     movers = moving_grid_ids(exp)
     for gid in delayed_domain_ids(exp):
+        if gid in movers and starts_from_parent(exp.domain(gid)):
+            raise ValueError(
+                f"prepared parent-born child d{gid:02d} is a relocation "
+                "target; a resume rebuilds a parent-born nest by birthing "
+                "it again, which would put a moved nest back on its "
+                "declared ground. Use start_from = \"analysis\" for a "
+                "moving nest")
         parent_id = exp.domain(gid).parent_id
         while parent_id:
             if parent_id in movers:
@@ -1314,17 +1322,52 @@ def _validate_delayed_prepared_geometry(exp) -> None:
             parent_id = exp.domain(parent_id).parent_id
 
 
+def _prepared_valid_time(exp, domain):
+    """The instant a domain's prepared cache must describe
+    (:func:`woof.experiment.domain_prepared_time`)."""
+    from woof.experiment import domain_prepared_time
+
+    return domain_prepared_time(exp, domain)
+
+
+def _parent_born_identity(document, exp):
+    """A parent-born child's cache identity, as preparation sees it.
+
+    Its cache is an ordinary start-with-the-root child cache, so the two
+    fields that make it parent-born -- its later ``start_time`` and the
+    ``start_from`` declaration -- describe nothing that was prepared.  A
+    route that drops a per-domain start from its own namelist (the HRRR
+    hierarchy) and one that carries it (the GFS/mapped hierarchies) then
+    prepare the same document; the cache stamp check
+    (:func:`_validate_delayed_prepared_time`) still holds the cache to the
+    root's analysis.
+    """
+    if not isinstance(document, dict):
+        return document
+    document = dict(document)
+    document["start_time"] = exp.start_time.isoformat()
+    document.pop("start_from", None)
+    return document
+
+
 def _validate_delayed_prepared_time(exp, domain, reader, receipt) -> None:
     """Require an owned child analysis, never infer its date from the root."""
     if exp.domain_start_offset_exact(domain.grid_id) == 0:
         return
-    expected = exp.domain_start_time(domain.grid_id).isoformat()
+    expected = _prepared_valid_time(exp, domain).isoformat()
     stamps = {
         "prepared cache initial_valid_time": reader.header.get(
             "metadata", {}).get("user", {}).get("initial_valid_time"),
         "domain receipt valid_time": receipt.get("valid_time"),
     }
     for label, value in stamps.items():
+        if value != expected and starts_from_parent(domain):
+            raise ValueError(
+                f"d{domain.grid_id:02d} {label} {value!r} differs from "
+                f"the experiment start {expected}: this nest is born from "
+                "its parent (start_from = \"parent\"), so its cache is "
+                "prepared with the root; prepare the tree again with this "
+                "configuration")
         if value != expected:
             raise ValueError(
                 f"d{domain.grid_id:02d} {label} {value!r} differs from "
@@ -1703,6 +1746,170 @@ def _seal_tree_inputs(inputs: PreparedTreeInputs, *,
             "the sealed tree derives a different terrain clock than the one "
             "this head-bound forecast ran on")
     return sealed_inputs
+
+
+#: The JSON-lines ledger of every parent birth (``start_from =
+#: "parent"``) a prepared-tree run performs, one row per birth, beside
+#: the run's other receipts.
+PARENT_BIRTH_RECEIPTS_NAME = "nest_birth_receipts.jsonl"
+
+
+def refuse_streamed_parent_birth(exp, streamed_ids) -> None:
+    """Refuse a parent birth whose child or parent streams from a store.
+
+    The birth reads the WHOLE parent state on the card (a full-parent SINT
+    through :func:`woof.ingest.nest_init.parent_only_init`) and builds the
+    child resident.  A streamed parent keeps its prognostics in a host
+    store, so the interpolation would read its startup arrays, and a
+    streamed child has a store and a tile plan the resident birth does not
+    rebuild.  Neither is implemented; both are refused before the first
+    restore rather than at the birth, hours in.
+    """
+    from woof.experiment import parent_born_domain_ids
+
+    streamed = {int(gid) for gid in streamed_ids}
+    for gid in parent_born_domain_ids(exp):
+        parent_id = int(exp.domain(gid).parent_id)
+        hit = sorted({gid, parent_id} & streamed)
+        if not hit:
+            continue
+        named = ", ".join(f"d{g:02d}" for g in hit)
+        raise ValueError(layered(
+            f"d{gid:02d} is born from its parent d{parent_id:02d} "
+            f"(start_from = \"parent\"), and {named} stream(s) through a "
+            "host store on this run ([tiles] or [devices]). A parent "
+            "birth needs the parent and the child resident on the card: "
+            "give both a resident road (a per-domain tiles = { mode = "
+            "\"off\" } where the card holds them), or set start_from = "
+            "\"analysis\" for this nest.",
+            "The birth interpolates the parent's full live state onto the "
+            "child grid on the card and builds the child resident; a "
+            "streamed parent's live state is in its host store, and a "
+            "streamed child's store and tile plan are not rebuilt by it."))
+
+
+def parent_births_in_checkpoint(checkpoint, exp) -> tuple[int, ...]:
+    """Parent-born grids a checkpoint holds ALIVE, parent-first.
+
+    A born child's setup arrays (terrain blend, base state, map factors)
+    come from the birth, not from its prepared cache, and differ from the
+    cache's in the last bits -- which :func:`woof.io.restart
+    .setup_fingerprint` refuses.  A resume therefore births each of these
+    again before restoring (the relocation route's ``moved_grid_ids``
+    rule, for the same reason); the setup arrays depend only on the
+    parent's setup arrays and the child's statics, so the second birth
+    reproduces them, and the checkpoint then overwrites every prognostic.
+    A child the checkpoint holds NOT_STARTED is left to its ordinary
+    birth at its start_time.  Header-only: no array is loaded.
+    """
+    from woof.experiment import parent_born_domain_ids
+    from woof.io.restart import read_restart_header, tree_restart_members
+
+    born = parent_born_domain_ids(exp)
+    if not born:
+        return ()
+    members = tree_restart_members(checkpoint)
+    return tuple(sorted(
+        gid for gid in born if gid in members
+        and read_restart_header(members[gid]).get("domain_lifecycle")
+        == "STARTED"))
+
+
+def birth_child_from_parent(exp, node, *, static_fields, parent_static_fields,
+                            scratch_arena=None, dycore_state_workspace=None,
+                            radiation_factory=None, radiation_workspace=None,
+                            model=None, resumed=False, receipts_path=None):
+    """Bring a parent-born delayed nest to life from its LIVE parent.
+
+    WRF's nest initialization from the parent, the operator the spawn path
+    already runs (:func:`woof.ingest.nest_spawn_init
+    .spawn_child_from_parent`): a full-parent SINT of the live parent
+    state onto the child grid, then the real-data terrain adoption on the
+    child's OWN prepared statics -- ``blend_terrain`` on ht/mub/phb,
+    ``adjust_tempqv``, the base/EOS re-derivation and ``press_adj``.  The
+    land state is the parent's, through WRF's masked surface interpolator
+    against the child's own land-use categories, and the physics driver is
+    rebuilt over it with the prepared route's native land-use identity
+    (:func:`woof.runtime.rebuild_child_driver_from_land_state`, the
+    prepared relocation preparer's rebuild).  Accumulated precipitation
+    starts from the parent's (:func:`woof.core.physics_continuation
+    .seed_birth_accumulations`), as a spawned nest's does.
+
+    The climatology date is the child's own start, not the parent's live
+    clock, so a resume's second birth (:func:`parent_births_in_checkpoint`)
+    builds the same driver.  The parent is read and never written; the
+    spawn path measures that by digest.  Returns ``(child, receipt)``:
+    the :class:`woof.ingest.nest_init.ChildInitResult` and its JSON
+    receipt, which is appended to ``receipts_path`` when one is given
+    (never for a resume's second birth).
+    """
+    from woof.core.physics_continuation import seed_birth_accumulations
+    from woof.core.radiation_composition import attach_modern_workspace
+    from woof.ingest.nest_spawn_init import (spawn_child_from_parent,
+                                              spawn_land_state_from_parent)
+    from woof.runtime import rebuild_child_driver_from_land_state
+
+    domain = node.cfg
+    gid = int(domain.grid_id)
+    parent = node.parent
+    birth_seconds = float(exp.domain_start_offset_exact(gid))
+
+    def on_child_built(initialized, child_dc, parent_node):
+        land = spawn_land_state_from_parent(
+            child_dc, parent_node, static_fields=initialized.static_fields,
+            parent_static_fields=parent_static_fields,
+            landuse_attrs=NATIVE_LANDUSE_IDENTITY)
+        # The rebuild dates its climatologies from the parent's clock; at
+        # birth that IS the child's start, and on a resume's second birth
+        # the parent still reads its startup tick, so the date is stated.
+        at_start = SimpleNamespace(
+            cfg=parent_node.cfg, state=parent_node.state,
+            clock=SimpleNamespace(elapsed_seconds=birth_seconds))
+        seconds = rebuild_child_driver_from_land_state(
+            exp=exp, data=None, model=model, initialized=initialized,
+            child_dc=child_dc, parent_node=at_start, land=land["fields"],
+            landuse_attrs=dict(NATIVE_LANDUSE_IDENTITY),
+            radiation_factory=(radiation_factory if radiation_factory
+                               is not None else lambda *_: None))
+        driver = getattr(initialized.state, "physics", None)
+        attach_modern_workspace(
+            None if driver is None else driver.radiation_callable,
+            radiation_workspace)
+        on_child_built.last_receipt = {
+            "land_surface": land["receipt"],
+            "precipitation_accumulations": seed_birth_accumulations(
+                initialized.state, parent_node, child_dc),
+            "driver_rebuild_seconds": seconds,
+        }
+
+    on_child_built.last_receipt = None
+    # A resume's second birth reads the parent's startup state and is
+    # overwritten by the checkpoint, so the two whole-parent digests the
+    # spawn path takes to prove the parent untouched buy nothing there.
+    digest = (lambda _state: None) if resumed else None
+    receipt = spawn_child_from_parent(
+        domain, parent,
+        static_fields={"static_fields": static_fields, "receipt": {
+            "static_source": f"prepared cache d{gid:02d}",
+            "highres_overlay": None,
+            "placement": [int(domain.i_parent_start),
+                          int(domain.j_parent_start)]}},
+        blend_width=int(getattr(exp, "blend_width", 5)),
+        scratch_arena=scratch_arena,
+        dycore_state_workspace=dycore_state_workspace,
+        on_child_built=on_child_built, grid=node.grid, state_digest=digest,
+        trigger_receipt={
+            "kind": "start_time",
+            "start_time": exp.domain_start_time(gid).isoformat(),
+            "start_from": "parent", "resumed": bool(resumed)})
+    child = receipt.pop("child_result")
+    # One row per birth: a resume's second birth is bookkeeping for the
+    # restore, not a birth, and is not recorded.
+    if receipts_path is not None and not resumed:
+        with open(receipts_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(_strict_json(receipt), sort_keys=True)
+                         + "\n")
+    return child, receipt
 
 
 def _restore_streamed_child_at_start(owner, node, restore, build):
@@ -2125,10 +2332,15 @@ def preflight_prepared_tree(
         # same table also drops the write cadences and the inert
         # diagnostic toggle, which say when a forecast writes rather than
         # what it integrates.
+        cached_domain = effective_prepared_domain_config(
+            identity.get("domain_config"))
+        live_domain = effective_prepared_domain_config(
+            prepared_domain_config_identity(domain))
+        if starts_from_parent(domain):
+            cached_domain = _parent_born_identity(cached_domain, exp)
+            live_domain = _parent_born_identity(live_domain, exp)
         tolerated_fields, differing_fields = compare_prepared_domain_config(
-            effective_prepared_domain_config(identity.get("domain_config")),
-            effective_prepared_domain_config(
-                prepared_domain_config_identity(domain)),
+            cached_domain, live_domain,
             not_in_use=undelayed_identity_defaults(exp))
         if differing_fields:
             raise ValueError(prepared_identity_refusal(
@@ -3264,6 +3476,7 @@ def run_prepared_tree(
             what="this prepared domain tree, held resident on the card")
     store_ids = ({gid for gid, decision in cold_decisions.items() if decision.stream}
                  if initialization is None else set()) | set(split_ids)
+    refuse_streamed_parent_birth(exp, store_ids)
     resident_domains = tuple(dc for dc in exp.domains if dc.grid_id not in store_ids)
     started = time.perf_counter()
     # The estimator and core.model allocate shared arenas only for a tree.
@@ -3345,7 +3558,7 @@ def run_prepared_tree(
         driver = initialize_prepared_physics(
             restored.initial_result, domain.run, restored.met,
             restored.surface, bundle.static_fields, NATIVE_LANDUSE_IDENTITY,
-            grid, exp.domain_start_time(domain.grid_id),
+            grid, _prepared_valid_time(exp, domain),
             simulation_start_time=exp.start_time,
             constant_glw_wm2=declared_constant_glw(exp),
             p_top=exp.vertical.p_top, column_chunk=exp.column_chunk,
@@ -3491,7 +3704,7 @@ def run_prepared_tree(
             bundle = store_from_prepared_cache(source.cache,
                 expected_identity=dict(source.cache_identity), cfg=domain.run,
                 static=source.static_fields, landuse_attrs=NATIVE_LANDUSE_IDENTITY,
-                grid=grid, valid_time=exp.domain_start_time(domain.grid_id),
+                grid=grid, valid_time=_prepared_valid_time(exp, domain),
                 rows_per_slab=rows, budget_bytes=decision.detail.get('host_claim_bytes'),
                 constant_glw_wm2=declared_constant_glw(exp), physics_initializer=physics,
                 **({"reader": source.cache_reader,
@@ -3522,6 +3735,54 @@ def run_prepared_tree(
         return bundle, SimpleNamespace(initial_result=SimpleNamespace(
             state=state, base=bundle.base, coord=bundle.coord))
 
+    def initialize_parent_born_child(node, clock, *, resumed=False):
+        # start_from = "parent": the cache supplied this child's grid,
+        # statics and the startup build the executor has just released;
+        # its atmosphere and land come from the live parent now.
+        from woof.core.cam_ozone import cam_ozone_setup, ozone_parent_for
+        from woof.core.radiation_composition import make_radiation
+
+        domain = node.cfg
+        gid = int(domain.grid_id)
+        bundle = bundles_by_id[gid]
+        if not resumed and clock.ticks != clock.spec.start_ticks:
+            raise RuntimeError("prepared child birth is off its start tick")
+        # The startup build's driver goes first, as below.
+        drivers.pop(gid, None)
+
+        def radiation(child_dc, _state, lat, lon):
+            # The t = 0 wiring (initialize_prepared_physics): the same
+            # scheme constructor, calendar origin, model top, chunking,
+            # trace gases and parent ozone link.
+            cam = cam_ozone_setup(exp=exp, dc=child_dc, grid=node.grid)
+            return make_radiation(
+                child_dc.run, exp.start_time, lat, lon,
+                p_top=exp.vertical.p_top, column_chunk=exp.column_chunk,
+                trace_gas_overrides=trace_gas_overrides,
+                ozone_parent=ozone_parent_for(cam))
+
+        child, receipt = birth_child_from_parent(
+            exp, node, static_fields=bundle.static_fields,
+            parent_static_fields=prepared[int(domain.parent_id)].static_fields,
+            scratch_arena=arena, dycore_state_workspace=rebuilt,
+            radiation_factory=radiation,
+            radiation_workspace=radiation_workspace, model=model,
+            resumed=resumed, receipts_path=outdir / PARENT_BIRTH_RECEIPTS_NAME)
+        drivers[gid] = child.state.physics
+        terrain = receipt.get("terrain") or {}
+        print(f"prepared tree: d{gid:02d} "
+              + ("born again for the resume" if resumed else "born")
+              + f" from d{int(domain.parent_id):02d} at "
+              f"{exp.domain_start_time(gid).isoformat()} (parent "
+              "interpolation onto its own terrain; terrain shift "
+              f"{float(terrain.get('terrain_max_abs_shift_m', 0.0)):.1f} m)",
+              flush=True)
+        case = SimpleNamespace(
+            static_fields=bundle.static_fields,
+            geog_selection=getattr(bundle, "geog_selection", None),
+            initial_result=child)
+        return SimpleNamespace(grid=node.grid, state=child.state), case
+
     def initialize_delayed_child(node, clock):
         # Native preparation selected this child's exact analysis and ran
         # the real-nest terrain/base-state SINT. Those parent operands are
@@ -3533,6 +3794,8 @@ def run_prepared_tree(
         _validate_delayed_prepared_time(
             exp, domain, bundle.cache_reader,
             _json_object(bundle.domain_receipt_path, "delayed child receipt"))
+        if starts_from_parent(domain):
+            return initialize_parent_born_child(node, clock)
         if clock.ticks != clock.spec.start_ticks:
             raise RuntimeError("prepared child activation is off its start tick")
         if int(domain.grid_id) in early_steppers:
@@ -3980,6 +4243,22 @@ def run_prepared_tree(
         # and the tracker's hysteresis (above), the acoustic Omega
         # (CHECKPOINT_ONLY_STATE), and the tracker's consultation window
         # (restart.CARRIED_SCRATCH_SLOTS).
+        # A parent-born child the checkpoint holds alive is born again
+        # first, so its setup arrays are the birth's rather than its
+        # cache's (parent_births_in_checkpoint says why); the restore
+        # then lands every prognostic of the checkpoint on it.
+        for gid in parent_births_in_checkpoint(checkpoint, exp):
+            from woof.core.model import _release_startup_build
+
+            node = nodes[gid]
+            _release_startup_build(model, node, {})
+            born, case = initialize_parent_born_child(
+                node, node.clock, resumed=True)
+            node.grid, node.state = born.grid, born.state
+            node.coupler = NestCoupler(
+                node, feedback=exp.feedback, smooth_option=exp.smooth_option)
+            node.state._nest_restart_classification = "REBUILT"
+            prepared[gid] = case
         header = read_restart_header(checkpoint)
         model.experiment_fingerprint = fingerprint_across_stored_chain(
             header, fingerprint_as_built, model)

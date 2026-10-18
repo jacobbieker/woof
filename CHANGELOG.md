@@ -4,6 +4,25 @@
 
 New:
 
+- A delayed nest can now be born from its live parent. Set
+  `start_from = "parent"` on a `[[domain]]` whose `start_time` is later
+  than its parent's, and `woof go` interpolates the parent's state onto
+  the nest's own grid and terrain at that instant (WRF's nest
+  initialization from the parent, with the terrain blend, `adjust_tempqv`
+  and `press_adj`), with the parent's land state and accumulated rain. A
+  long coarse spin-up can then feed a short fine one, without fetching an
+  analysis at the nest's start or landing that start on a forcing seam.
+  Each birth is recorded in `nest_birth_receipts.jsonl`. A resume after
+  the birth births the nest again before restoring the checkpoint.
+  Measured on an RTX A6000 with a 1.5 km / 300 m / 100 m HRRR tree whose
+  100 m nest started 10 minutes in: the nest wrote nothing before its
+  start, its first frame matched its parent's window (mean T, MU, PSFC
+  and T2 within 0.002 K, 0.002 Pa, 0.09 Pa and 0.002 K), d01 and d02 were
+  bit-identical to the same run without the nest (one-way), and a resume
+  from a checkpoint after the birth was bit-identical to the unbroken run.
+  `woof run`, `woof stream`, the wrfinput/met_em doors, the stock-WRF
+  export, streamed parents or nests, and moving nests refuse it by name.
+
 - The per-step health check no longer makes the CPU wait for each step
   to finish. Before, every step ended with a blocking read of its health
   result (NaN, a collapsed model layer, and each physics scheme's status

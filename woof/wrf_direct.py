@@ -2277,6 +2277,16 @@ def export_prepared_wrf_hierarchy(
         raise ValueError("export valid time differs from the namelist start time")
     if boundary_interval_seconds <= 0:
         raise ValueError("boundary interval must be positive")
+    for domain, _artifact in pairs:
+        if getattr(domain, "start_from", None) == "parent":
+            # Stock WRF reads a delayed nest's wrfinput at its start;
+            # a parent-born nest has no such analysis to export.
+            raise ValueError(
+                f"d{domain.grid_id:02d} is born from its parent "
+                "(start_from = \"parent\"); the stock-WRF export "
+                "writes a wrfinput per nest from the analysis at its "
+                "start, which a parent-born nest does not have. Export "
+                "with start_from = \"analysis\".")
     output = Path(output_dir)
     if output.exists() and not overwrite:
         raise FileExistsError(f"refusing to overwrite {output}")
