@@ -652,6 +652,27 @@ _PACKAGED_PROFILES = MappingProxyType({
             },
         },
     ),
+    # The UKV (Met Office UK deterministic 2 km) from the Source
+    # Cooperative Icechunk archive.  The archive's grid is a Lambert
+    # azimuthal equal-area plane the engine does not read, so
+    # woof.ukv_source regrids each hour to a regular 0.02-degree grid at
+    # fetch and writes one CF NetCDF per valid time; this profile decodes
+    # those files.  33 pressure levels to 10 hPa, winds already
+    # earth-relative components (the archive's directions are true-north,
+    # measured), 1.5 m screen state.  The archive publishes no orography,
+    # soil or sea ice: every file carries one derived terrain (the height
+    # of the first hour's surface pressure on its own levels), so the files
+    # are their own in-band terrain supplement, and the same-hour ERA5 land
+    # state and sea ice copied by nearest index.
+    "ukv-sc-netcdf-v1": _profile(
+        "rw-wps-ukv-sc",
+        source_format="netcdf",
+        mapping="e4d39d063c4e13acd902f30c6b52d3d803e9226ac08794ea8bb411daebe75f41",
+        composition="e531dc2a90f9a4a26a14622274ba2e74054956f84cb8441b3019c84b0ac83069",
+        provenance="e728f3523462ba9586c7dafaaf6969de567006ab52b77d8ac8ed85806bdc272d",
+        data_role="ukv_sc_in_band_surface",
+        provenance_role="ukv_sc_in_band_surface_provenance",
+    ),
 })
 
 

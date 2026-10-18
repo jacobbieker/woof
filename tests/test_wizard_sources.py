@@ -55,11 +55,17 @@ def _plan_point(source: str) -> tuple[float, float]:
     return _GLOBAL_POINT if centre is None else centre
 
 
+#: A closed archive has no 2026 cycle; its plans start inside the archive.
+_ARCHIVE_CYCLES = {"ukv": "2024-06-18T00"}
+
+
 def _emit(tmp_path: Path, source: str, *extra: str,
           point: tuple[float, float] | None = None,
-          cycle: str = "2026-08-17T00", hours: str = "6",
+          cycle: str | None = None, hours: str = "6",
           extra_card: str = "16gb") -> tuple[int, Path]:
     lat, lon = point if point is not None else _plan_point(source)
+    if cycle is None:
+        cycle = _ARCHIVE_CYCLES.get(source, "2026-08-17T00")
     out = tmp_path / f"{source.replace('-', '_')}.toml"
     rc = cli_main([
         "domain", f"--point={lat:.4f},{lon:.4f}", "--card", extra_card,
@@ -293,7 +299,7 @@ class RemoteAcquisitionReached(Exception):
 
 
 def _stop_at_remote_acquisition(monkeypatch):
-    from woof import fetch as acquisition, era5_acquisition, era5_arco
+    from woof import fetch as acquisition, era5_acquisition, era5_arco, ukv_source
 
     def remote_boundary(*args, **kwargs):
         raise RemoteAcquisitionReached
@@ -301,6 +307,7 @@ def _stop_at_remote_acquisition(monkeypatch):
     monkeypatch.setattr(acquisition, "require_published_cycle", remote_boundary)
     monkeypatch.setattr(era5_acquisition, "_client", remote_boundary)
     monkeypatch.setattr(era5_arco, "retrieve_era5_arco", remote_boundary)
+    monkeypatch.setattr(ukv_source, "open_store", remote_boundary)
 
 
 def test_printed_fetch_arguments_include_indented_supplements():
@@ -332,7 +339,8 @@ def test_printed_chain_parses_with_matching_acquisition(
     # is refused before any host is asked; a cycle the mirror holds reaches
     # the transport.
     cycle = {"icon-global": "2026-09-29T12",
-             "icon-global-ml": "2026-09-29T12"}.get(source, "2026-08-17T00")
+             "icon-global-ml": "2026-09-29T12",
+             **_ARCHIVE_CYCLES}.get(source, "2026-08-17T00")
     rc, out = _emit(tmp_path / "command paths", source, "--explain", cycle=cycle)
     assert rc == 0
     printed = capsys.readouterr().out
@@ -436,7 +444,8 @@ def test_hand_written_fetch_table_validates_for_every_routed_source(source):
 
     from woof.fetch import validate_fetch_hints
 
-    validate_fetch_hints({"source": source, "cycle": "2026-08-17T00",
+    validate_fetch_hints({"source": source,
+                          "cycle": _ARCHIVE_CYCLES.get(source, "2026-08-17T00"),
                           "hours": 6, "out": "data"},
                          source="hand-written.toml")
 

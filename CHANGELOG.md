@@ -4,6 +4,22 @@
 
 New:
 
+- `--source ukv`: the Met Office UKV (UK deterministic 2 km) from the
+  Source Cooperative Icechunk archive, hourly from 2024-01-01 00Z to
+  2025-08-13 22Z, 33 pressure levels to 10 hPa. `woof fetch --source ukv
+  --area ...` reads the window, regrids it from the UK Lambert azimuthal
+  equal-area grid to a regular 0.02-degree grid over the area plus 0.25
+  degrees, writes earth-relative wind components (the archive's
+  directions were measured to be true-north) and one CF NetCDF per hour;
+  the packaged profile `ukv-sc-netcdf-v1` decodes them. The archive has
+  no orography, soil or sea ice: each file carries a terrain derived from
+  the first hour's surface pressure on its own levels, and the same
+  hour's ERA5 land-sea mask, sea ice and soil column (Google's ARCO copy,
+  by nearest index). Windows outside the archive, domains off the UKV
+  grid, and the 2025-05-16 15Z hour (no pressure-level wind direction in
+  the archive) are refused by name. Values are float16 in the archive,
+  so temperature steps 0.125-0.25 K and height 16 m above about 100 hPa.
+
 - A delayed nest can now be born from its live parent. Set
   `start_from = "parent"` on a `[[domain]]` whose `start_time` is later
   than its parent's, and `woof go` interpolates the parent's state onto

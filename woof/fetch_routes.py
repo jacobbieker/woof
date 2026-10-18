@@ -1139,7 +1139,9 @@ def sniff_format(path: Path) -> str | None:
 def all_fetchable_sources() -> tuple[str, ...]:
     """Every ``--source`` the fetch front door accepts, sorted."""
     from woof.cf_archive_fetch import sources
-    return tuple(sorted(set(LEGACY_ROUTE_SOURCES) | set(_ROUTES) | set(sources())))
+    from woof.ukv_source import SOURCE_ID as UKV
+    return tuple(sorted(set(LEGACY_ROUTE_SOURCES) | set(_ROUTES) | set(sources())
+                        | {UKV}))
 
 
 def _canonical(source: str) -> str:
@@ -3664,7 +3666,8 @@ def publishes_prep_handoff(source: str) -> bool:
     """Whether the implemented acquisition path publishes bound prep arguments."""
     source = canonical_source(source)
     from woof.cf_archive_fetch import sources
-    if source in sources():
+    from woof.ukv_source import SOURCE_ID as UKV
+    if source in sources() or source == UKV:
         return True
     if source in route_ids():
         return True

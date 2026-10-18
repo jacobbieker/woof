@@ -355,7 +355,7 @@ def test_prepared_runner_capability_query_is_side_effect_free_without_run_args(
         "ecmwf-ens", "ecmwf-open-data", "era5", "era5-l137", "gdas", "gefs",
         "gem-gdps", "gfs", "hrrr", "hrrr-native", "hrrr-prs", "icon-d2", "icon-eu",
         "icon-global", "icon-global-ml", "mapped", "met-office-global", "rap", "rap-native",
-        "rrfs"]
+        "rrfs", "ukv"]
     assert payload["physics_profile_ids"] == list(runner.PHYSICS_PROFILES)
     assert payload["report_schema"] == runner.REPORT_SCHEMA
     assert payload["window"]["limit_policy"] \
@@ -384,6 +384,7 @@ def test_prepared_runner_capability_query_is_side_effect_free_without_run_args(
         "rap": "uniform-positive-whole-hour",
         "rap-native": "uniform-positive-whole-hour",
         "rrfs": "uniform-positive-whole-hour",
+        "ukv": "uniform-positive-whole-hour",
     }
     twentycr = payload["source_profiles"]["20crv3"]
     assert twentycr["member_identity"] \

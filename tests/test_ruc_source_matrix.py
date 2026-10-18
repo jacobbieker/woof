@@ -74,6 +74,8 @@ EXPECTED_POLICY = {
     "rap": "node_point_samples",
     "rap-native": "node_point_samples",
     "rrfs": "node_point_samples",
+    # Soil carried in band from the same-hour ERA5: the ERA5 layer column.
+    "ukv": "layer_midpoint_samples",
 }
 
 #: The one source RUC cannot be driven from, and WHY -- not "it publishes

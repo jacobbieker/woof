@@ -39,8 +39,9 @@ def test_every_runnable_source_either_routes_or_refuses_by_name():
     handled = set(fetch_routes.route_ids()) | set(fetch_routes.refusal_ids())
     # gfs/hrrr/era5 keep their own hand-written routes in woof.fetch.
     handled |= set(fetch_routes.LEGACY_ROUTE_SOURCES)
-    from woof.cf_archive_fetch import sources
-    handled |= set(sources())
+    # The native acquisitions (the annual CF archives, the UKV archive)
+    # are the rest of the fetch door.
+    handled |= set(fetch_routes.all_fetchable_sources())
     runnable = {row.source_id for row in source_adapters.source_adapters()
                 if row.runnable}
     assert runnable - handled == set()

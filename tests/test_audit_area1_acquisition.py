@@ -1076,13 +1076,17 @@ def _no_transport(monkeypatch):
     monkeypatch.setattr(socket, "socket", contact)
     monkeypatch.setattr(fetch, "require_published_cycle", contact)
     monkeypatch.setattr(fetch, "resolve_latest_cycle", contact)
-    from woof import era5_acquisition, era5_arco
+    from woof import era5_acquisition, era5_arco, ukv_source
     monkeypatch.setattr(era5_acquisition, "_client", contact)
     monkeypatch.setattr(era5_arco, "retrieve_era5_arco", contact)
+    # The UKV archive is read through icechunk's own transport.
+    monkeypatch.setattr(ukv_source, "open_store", contact)
 
 
 def _archive_test_cycle(source):
-    from woof import cf_archive_fetch
+    from woof import cf_archive_fetch, ukv_source
+    if fetch_routes.canonical_source(source) == ukv_source.SOURCE_ID:
+        return f"{ukv_source.COVERAGE_START:%Y-%m-%dT%H}"
     if fetch.native_cf_fetch_contract(source) is not None:
         return cf_archive_fetch.row(fetch_routes.canonical_source(source))["coverage_start"][:13]
     return "2026-08-17T00"
