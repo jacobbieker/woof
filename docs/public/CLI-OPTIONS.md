@@ -1288,6 +1288,35 @@ Takes no options of its own.
 | `--whole-cycle` | download routes only: the fetch stage waits for the whole cycle (the old rule) instead of taking each lead as it posts; wins over the config's [fetch] as_posted |
 | `--wps-namelist PATH` | with --prepared-root: the exact WPS authority required by a single-domain portable bundle |
 
+## `woof estimate-tracks`
+
+| option | what it does |
+|---|---|
+| `--cards LIST` | comma-separated cards to price (default: every card in DEFAULT_CARDS, A6000 first) |
+| `--compression LOW,HIGH` | stored/raw compression band (default: 0.26,0.40) |
+| `--d01-margin-km KM` | d01 margin on every side of the track envelope (default: 60) |
+| `--d03-n N` | d03 columns per side (default: 325) |
+| `--drop-when COL=VALUE` | drop rows whose COL equals VALUE (e.g. a receiver's no-fix flag); repeatable |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--height-col COL` | height column, metres (default: height) |
+| `--height-datum {msl,agl}` | heights above mean sea level or above ground (default: msl) |
+| `--height-fallback-col COL` | column used where the height is blank; repeatable, tried in order |
+| `--lat-col COL` | latitude column, degrees (default: lat) |
+| `--lon-col COL` | longitude column, degrees (default: lon) |
+| `--mapping FILE` | JSON or TOML column mapping with keys time, lat, lon, height, height_fallback, time_format, height_datum, drop_when |
+| `--min-climb M` | climb above the starting ground, metres, that makes a launch (default: 300) |
+| `--nz N` | mass levels on every domain (default: 256) |
+| `--output PATH` | write the JSON here instead of stdout |
+| `--output-interval-s S` | d03 history interval in seconds (default: 120) |
+| `--output-preset PRESET` | [output] history preset the d03 frames are priced with, by the disk planner (default: balloon) |
+| `--paths FILE\|DIR` | 3-D path files (.csv, .tsv, .json, .parquet), one track each, read by woof.track (a directory contributes the files directly inside it) |
+| `--per-track` | keep every track's rows in the JSON |
+| `--prices JSON` | price table with the shape of woof.track_estimate.AWS_PRICES |
+| `--select PATTERNS` | comma-separated shell patterns on track name |
+| `--time-col COL` | time column (default: time) |
+| `--time-format FMT` | a Python strptime format, or 'epoch' for Unix seconds (default: ISO 8601, date and time joined by a space or T); times without a zone are UTC |
+| `--tracks JSON` | JSON list of {name, duration_h, envelope_km: [ew, ns]} rows or Track3D documents (or {"tracks": [...]}, or one Track3D document) |
+
 ## `woof fetch`
 
 | option | what it does |

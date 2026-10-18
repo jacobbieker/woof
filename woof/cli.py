@@ -457,6 +457,11 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     enprod_register_cli(sub)
     downscale_register_cli(sub)
     energy_register_cli(sub)
+    # Moving-nest LES runs along tracks, priced before a card is rented:
+    # beside `energy`, whose hindcast estimator it shares the card table and
+    # store layout with.
+    estimate_tracks_register_cli = _lazy_register("woof.track_estimate")
+    estimate_tracks_register_cli(sub)
     doctor_register_cli(sub)
     obs_register_cli(sub)
     table_assets_register_cli(sub)
