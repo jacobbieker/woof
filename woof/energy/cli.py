@@ -1081,6 +1081,11 @@ def _register_deploy(sub) -> None:
     p.add_argument("--config", default=None, metavar="DEPLOY.toml",
                    help="deployment configuration (TOML or .json); the "
                         "flags below override its top-level keys")
+    p.add_argument("--tier", default=None, metavar="NAME",
+                   help="render the configuration's [tiers.NAME] table: its "
+                        "keys replace the top-level ones and its section "
+                        "tables merge into theirs (one file, several "
+                        "fleets; a file with tiers needs one)")
     p.add_argument("--name", default=None,
                    help="deployment name (lower-case, 40 characters at "
                         "most; prefixes every cloud resource)")

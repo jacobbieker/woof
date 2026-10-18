@@ -117,6 +117,14 @@ flags `--name`, `--image`, `--queue`, `--output-url`, `--workers`,
 and `--spot`/`--on-demand` override the top-level keys. A configuration
 can also be given by flags alone.
 
+One file can describe several fleets. Each `[tiers.NAME]` table is one
+fleet: its keys replace the top-level ones, and its section tables
+(`[tiers.NAME.aws_batch]` and so on) are merged key by key into the
+top-level sections. `--tier NAME` renders one tier; a file with tiers
+needs it. `deploy/examples/aws-track-runs.toml` uses this for an L40S
+fleet and an H100 fleet that share one image, region and set of roles
+(`docs/public/AWS-TRACK-RUNS.md`).
+
 The command prints a JSON summary to stdout and writes notes to stderr.
 The output directory always gets `deploy.json` (`woof-energy.deploy.v1`),
 which records:

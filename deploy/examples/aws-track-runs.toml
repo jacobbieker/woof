@@ -1,0 +1,88 @@
+# Example `woof energy deploy render --config` for a fleet of independent
+# `woof go` forecasts on AWS Batch: one track run per job, each writing its
+# own Icechunk repository (docs/public/AWS-TRACK-RUNS.md).
+#
+# Two tiers, one file; render each with --tier:
+#
+#   woof energy deploy render --backend aws-batch \
+#     --config deploy/examples/aws-track-runs.toml --tier l40s -o deploy-out/l40s
+#   woof energy deploy render --backend aws-batch \
+#     --config deploy/examples/aws-track-runs.toml --tier h100 -o deploy-out/h100
+#
+#   l40s  g6e.xlarge, 1 x L40S 48 GB.  Every run whose
+#         resources.gpu_mem_gib is 44 GiB or less.  Spot, retried.
+#   h100  p5.48xlarge, 8 x H100 80 GB, one GPU per worker.  The runs that
+#         need more than 44 GiB.  On demand: a reclaimed spot attempt
+#         restarts the run from its first step, which at this instance's
+#         price costs more than the spot discount saves.
+#
+# Each tier drains its OWN queue.  A worker admits any one job onto an idle
+# card whatever it declares, so a 52 GiB run on the L40S queue would be
+# claimed and refused there (woof go-job checks resources.gpu_mem_gib
+# against the card and exits 2), never run.  Push each job to the queue of
+# the tier it fits.
+#
+# Every value below is a placeholder: YOUR-BUCKET, the account id, the
+# subnets, the security group and the role names.  Replace them (or delete
+# the identifiers and the renderer writes REPLACE_ME_ placeholders that
+# submit.sh refuses to run with).  Put the fleet in the region of the
+# bucket so no data crosses a region.  No credentials go here: the instance
+# profile and the job role carry the S3 permissions
+# (docs/public/AWS-TRACK-RUNS.md lists the policy).  Inputs are never in
+# this file or the repository: each job document names its own input and
+# output URLs.
+
+image = "123456789012.dkr.ecr.us-west-2.amazonaws.com/woof-energy:1.0.3-cu12"
+# The output prefix.  A job without icechunk_url writes
+# <output_url>/<job_id>.icechunk (the worker receives this as
+# WOOF_ENERGY_OUTPUT_URL).
+output_url = "s3://YOUR-BUCKET/woof-outputs/track-runs"
+# Staged onto instance NVMe by the container entrypoint before any job runs.
+geog_url = "s3://YOUR-BUCKET/woof-static/WPS_GEOG"
+highres_cache_url = "s3://YOUR-BUCKET/woof-static/highres-cache"
+gpus_per_worker = 1
+max_runtime_hours = 72
+# Batch-level retries of a worker (spot reclaim: "Host EC2*").  A job's own
+# retries are the queue's: `woof energy queue init --max-attempts 4`.
+retries = 3
+# Every job runs through `woof go-job`; one job may take up to two days.
+worker_args = [
+  "--runner-cmd", "{python} -m woof go-job {job} --workdir {workdir} --result {result}",
+  "--timeout-s", "172800",
+]
+labels = { project = "woof-track-runs" }
+
+[aws_batch]
+region = "us-west-2"
+subnets = ["subnet-0123456789abcdef0", "subnet-0fedcba9876543210"]
+security_group_ids = ["sg-0123456789abcdef0"]
+instance_role_arn = "arn:aws:iam::123456789012:instance-profile/woof-track-runs-instance"
+job_role_arn = "arn:aws:iam::123456789012:role/woof-track-runs-worker"
+nvme_scratch = true
+root_volume_gib = 200
+
+[tiers.l40s]
+name = "woof-track-runs-l40s"
+queue_url = "s3://YOUR-BUCKET/woof-queue/track-runs/l40s/"
+# One worker per run; extras find the queue empty and exit
+# (exit_when_empty).  Check the account's "All G and VT Spot Instance
+# Requests" vCPU quota: 40 x g6e.xlarge is 160 vCPUs.
+workers = 40
+spot = true
+labels = { project = "woof-track-runs", tier = "l40s" }
+
+[tiers.l40s.aws_batch]
+instance_types = ["g6e.xlarge"]
+
+[tiers.h100]
+name = "woof-track-runs-h100"
+queue_url = "s3://YOUR-BUCKET/woof-queue/track-runs/h100/"
+# Two runs, one GPU each: both workers pack onto one p5.48xlarge.
+workers = 2
+spot = false
+labels = { project = "woof-track-runs", tier = "h100" }
+
+[tiers.h100.aws_batch]
+instance_types = ["p5.48xlarge"]
+# One instance at most: both workers fit on its 8 GPUs.
+max_vcpus = 192

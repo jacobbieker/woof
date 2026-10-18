@@ -38,6 +38,10 @@ daemon inside the container; on Kubernetes the NVIDIA device plugin can
 instead own MPS through its sharing configuration, and the k8s backend
 writes a commented ``mps-sharing.example.yaml`` showing it.
 
+**Tiers.**  A configuration file may hold ``[tiers.NAME]`` tables, each a
+fleet that shares the file's image, region and identities but has its own
+machines, queue and size (``--tier NAME`` renders one; :func:`select_tier`).
+
 Every backend also gets ``deploy.json`` (``woof-energy.deploy.v1``): the
 normalized configuration, its SHA-256, the worker command, the files with
 their SHA-256 and the placeholders left in them.
@@ -437,6 +441,45 @@ def load_config_mapping(path: Path) -> dict:
                             f"{error}") from error
     if not isinstance(data, dict):
         raise DeployRefused(f"{path}: the top level must be a table")
+    return data
+
+
+def select_tier(mapping: Mapping[str, Any], tier: str | None) -> dict:
+    """The table for one ``[tiers.NAME]`` of a configuration file.
+
+    One file can describe several fleets that share an image, a region and
+    their identities but differ in machines and queue -- an L40S fleet and
+    an H100 fleet for the jobs that do not fit 48 GB.  ``tiers.NAME`` keys
+    replace the top-level ones; a section table (``[tiers.NAME.aws_batch]``)
+    is merged key by key over the top-level section.  A file with tiers
+    renders one tier per call (``--tier NAME``)."""
+
+    data = dict(mapping)
+    tiers = data.pop("tiers", None)
+    if tiers is None:
+        if tier is not None:
+            raise DeployRefused(f"--tier {tier}: the configuration declares "
+                                "no [tiers.NAME] tables")
+        return data
+    if not isinstance(tiers, Mapping) or not tiers or not all(
+            isinstance(v, Mapping) for v in tiers.values()):
+        raise DeployRefused("[tiers] must hold one table per tier "
+                            "([tiers.NAME])")
+    if tier is None:
+        raise DeployRefused(f"the configuration declares tiers "
+                            f"{', '.join(sorted(tiers))}; render one with "
+                            "--tier NAME")
+    if tier not in tiers:
+        raise DeployRefused(f"--tier {tier!r} is not one of "
+                            f"{', '.join(sorted(tiers))}")
+    for key, value in tiers[tier].items():
+        if key == "tiers":
+            raise DeployRefused(f"[tiers.{tier}] may not nest tiers")
+        if key in _SECTIONS and isinstance(value, Mapping) \
+                and isinstance(data.get(key), Mapping):
+            data[key] = {**data[key], **value}
+        else:
+            data[key] = value
     return data
 
 
@@ -1569,6 +1612,7 @@ def main(args) -> int:
     try:
         mapping = (load_config_mapping(Path(args.config))
                    if args.config else {})
+        mapping = select_tier(mapping, getattr(args, "tier", None))
         mapping.update(_overrides(args))
         config = config_from_mapping(mapping)
         rendered = render(config, args.backend, strict=bool(args.strict))
@@ -1606,6 +1650,7 @@ __all__ = [
     "DeployConfig", "DeployRefused", "GCP_GPU_MACHINES", "GcpBatchOptions",
     "GpuMachine", "K8sOptions", "PLACEHOLDER_PREFIX", "Rendered",
     "SlurmOptions", "config_from_mapping", "config_sha256", "config_to_dict",
-    "load_config_mapping", "main", "render", "worker_command", "worker_env",
+    "load_config_mapping", "main", "render", "select_tier",
+    "worker_command", "worker_env",
     "write_rendered", "yaml_documents",
 ]

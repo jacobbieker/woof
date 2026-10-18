@@ -105,6 +105,7 @@ energy_register_cli = _lazy_register("woof.energy.cli")
 fetch_register_cli = _lazy_register("woof.fetch")
 geog_register_cli = _lazy_register("woof.geog_assets")
 go_register_cli = _lazy_register("woof.go_cli")
+go_job_register_cli = _lazy_register("woof.go_job")
 speedrun_register_cli = _lazy_register("woof.speedrun_cli")
 ingest_register_cli = _lazy_register("woof.ingest.preflight")
 mesh_register_cli = _lazy_register("woof.mpas_mesh")
@@ -266,7 +267,7 @@ _INTERRUPT_EXIT_CODE = 130
 #: Commands that can run for minutes, where "Ctrl-C does nothing" is a
 #: surprise worth one line rather than a discovery.
 _LONG_RUNNING_COMMANDS = frozenset({
-    "go", "run", "run-plan", "resume", "branch", "fetch", "fetch-geog",
+    "go", "go-job", "run", "run-plan", "resume", "branch", "fetch", "fetch-geog",
     "fetch-tables", "fetch-bridges", "setup", "verify", "downscale",
     "enprod", "render", "dual-run", "certify", "spectral", "energy",
     # The unbundled stages run for exactly as long as the welded ones
@@ -460,6 +461,9 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # reads in pipeline order.
     stage_register_cli(sub)
     go_register_cli(sub)
+    # `go` as a batch job: one job document (config URL, companions,
+    # Icechunk store) in, a result JSON and a scheduler's exit code out.
+    go_job_register_cli(sub)
     # Registered beside `go` because it IS `go`, on a fixed course, with a
     # clock and a sealed capsule around it.  The internal bench surface:
     # release-facing pages carry capability statements, this one carries
