@@ -99,7 +99,7 @@ from woof.core.preflight import (CUDA_CONTEXT_BYTES,
                                   unknown_platform_note)
 from woof.cli_numbers import positive_float, positive_int
 from woof.experiment import ExperimentConfig, build_experiment
-from woof.explain import explain_enabled, muted_warnings, warn
+from woof.explain import explain_enabled, layered, muted_warnings, warn
 from woof.fetch import parse_cycle
 from woof.physics_compat import (ASYMMETRIC_RADIATION_NOCTURNAL_ACK,
                                   CONSTANT_DOWNWARD_LONGWAVE_ACK,
@@ -1027,10 +1027,21 @@ VERTICAL_GENERATOR_FLAGS = (("dzbot", "--dzbot"),
                             ("dzstretch_s", "--dzstretch-s"),
                             ("dzstretch_u", "--dzstretch-u"),
                             ("max_dz", "--max-dz"))
+#: argparse dest -> flag, for the height-band-biased generator
+#: (:mod:`woof.vertical_bands`).  The first two SELECT it; the rest only
+#: shape it.  It also reads ``--dzbot``, ``--max-dz`` and ``--nz``.
+VERTICAL_BAND_SELECTORS = (("eta_band", "--eta-band"),
+                           ("eta_bias_heights", "--eta-bias-heights"))
+VERTICAL_BAND_FLAGS = (*VERTICAL_BAND_SELECTORS,
+                       ("eta_bias_weight", "--eta-bias-weight"),
+                       ("eta_max_stretch", "--eta-max-stretch"),
+                       ("eta_surface_m", "--eta-surface-m"),
+                       ("eta_reference", "--eta-reference"))
 #: Every argparse dest the explicit-column flags write.
 VERTICAL_COLUMN_FLAGS = (("p_top_pa", "--p-top-pa"),
                          ("eta_levels", "--eta-levels"),
-                         *VERTICAL_GENERATOR_FLAGS)
+                         *VERTICAL_GENERATOR_FLAGS,
+                         *VERTICAL_BAND_FLAGS)
 #: The dynamical core's level bound (``ACOUSTIC_VERTICAL_LEVEL_BOUNDS``,
 #: the 256-level ceiling every physics row also sits at).
 _MAX_COLUMN_NZ = 256
@@ -1117,6 +1128,12 @@ def resolve_vertical_column(*, source: str | None, nz: int | None = None,
                             dzstretch_s: float | None = None,
                             dzstretch_u: float | None = None,
                             max_dz: float | None = None,
+                            eta_band=None,
+                            eta_bias_heights=None,
+                            eta_bias_weight: float | None = None,
+                            eta_max_stretch: float | None = None,
+                            eta_surface_m: float | None = None,
+                            eta_reference: str | None = None,
                             cpu_bridge=None) -> dict | None:
     """The explicit model column the vertical flags name, or ``None``.
 
@@ -1131,18 +1148,60 @@ def resolve_vertical_column(*, source: str | None, nz: int | None = None,
       (``woof.ingest.eta.generate_wrf_eta``, auto_levels_opt 2) builds
       ``nz + 1`` levels (``nz`` default 49) for this ``p_top``; controls not
       given keep WRF's own defaults.
+    * ``eta_band`` (``HeightBand`` list) or ``eta_bias_heights`` given:
+      the height-band-biased generator
+      (:func:`woof.vertical_bands.band_biased_column`) builds ``nz + 1``
+      levels (``nz`` default 256, the core's ceiling) to this ``p_top`` from
+      ``dzbot`` (default 10 m), ``eta_max_stretch`` (default 1.08), ``max_dz``
+      and the bands/bias heights (metres MSL unless a band says agl), in the
+      ``eta_reference`` atmosphere over ground at ``eta_surface_m`` m MSL.
     * only ``p_top_pa``: the default ladder (resampled by ``nz``) under it.
 
-    ``eta_levels`` and generator controls together are refused; so is a
-    ``p_top_pa`` above the source's reach (:func:`source_model_top_refusal`).
+    ``eta_levels`` and generator controls together are refused, as are the
+    band generator with ``eta_levels`` or WRF's two stretch factors, and
+    band-shaping options without a band selector; so is a ``p_top_pa``
+    above the source's reach (:func:`source_model_top_refusal`).
     """
 
     generator = {name: value for name, value in (
         ("dzbot", dzbot), ("dzstretch_s", dzstretch_s),
         ("dzstretch_u", dzstretch_u), ("max_dz", max_dz))
         if value is not None}
-    if p_top_pa is None and eta_levels is None and not generator:
+    band_given = {name for name, value in (
+        ("eta_band", eta_band or None),
+        ("eta_bias_heights", eta_bias_heights),
+        ("eta_bias_weight", eta_bias_weight),
+        ("eta_max_stretch", eta_max_stretch),
+        ("eta_surface_m", eta_surface_m),
+        ("eta_reference", eta_reference)) if value is not None}
+    band_selected = bool(band_given & {name for name, _
+                                       in VERTICAL_BAND_SELECTORS})
+    if (p_top_pa is None and eta_levels is None and not generator
+            and not band_given):
         return None
+    if band_given and not band_selected:
+        flags = ", ".join(flag for name, flag in VERTICAL_BAND_FLAGS
+                          if name in band_given)
+        raise VerticalColumnRefused(layered(
+            f"{flags} shape the height-band-biased generator, which only "
+            "--eta-band or --eta-bias-heights selects; add one of them, or "
+            "drop " + flags,
+            "Alone they would leave the column to WRF compute_eta or the "
+            "default ladder, which read none of them."))
+    if band_selected and eta_levels is not None:
+        raise VerticalColumnRefused(
+            "--eta-levels names the column outright; --eta-band/"
+            "--eta-bias-heights would generate a different one.  Give one "
+            "or the other")
+    if band_selected and (dzstretch_s is not None
+                          or dzstretch_u is not None):
+        raise VerticalColumnRefused(layered(
+            "--dzstretch-s/--dzstretch-u are WRF compute_eta's stretch "
+            "factors; the band-biased generator takes one limit, "
+            "--eta-max-stretch R (default 1.08)",
+            "The band generator holds every adjacent layer-depth ratio "
+            "within R in both directions; WRF's surface/aloft pair has no "
+            "meaning there."))
     if eta_levels is not None and generator:
         flags = ", ".join(flag for name, flag in VERTICAL_GENERATOR_FLAGS
                           if name in generator)
@@ -1173,6 +1232,8 @@ def resolve_vertical_column(*, source: str | None, nz: int | None = None,
     base_temp = float(_SHARED_GRID_AND_DYNAMICS["base_temp"])
     controls: dict = {}
     receipt = None
+    header: list[str] = []
+    report: list[str] = []
     if eta_levels is not None:
         ladder = validate_eta_ladder(eta_levels, what="--eta-levels")
         if nz is not None and int(nz) != len(ladder) - 1:
@@ -1180,6 +1241,55 @@ def resolve_vertical_column(*, source: str | None, nz: int | None = None,
                 f"--nz {int(nz)} disagrees with --eta-levels, which names "
                 f"{len(ladder)} full levels (nz={len(ladder) - 1})")
         origin = "explicit"
+    elif band_selected:
+        from woof import vertical_bands as vb
+
+        try:
+            column = vb.band_biased_column(
+                nz=int(nz) if nz is not None else vb.DEFAULT_NZ,
+                dzbot=(float(dzbot) if dzbot is not None
+                       else vb.DEFAULT_DZBOT_M),
+                max_stretch=(float(eta_max_stretch)
+                             if eta_max_stretch is not None
+                             else vb.DEFAULT_MAX_STRETCH),
+                p_top_pa=p_top, bands=tuple(eta_band or ()),
+                bias_heights=tuple(eta_bias_heights or ()),
+                bias_weight=(float(eta_bias_weight)
+                             if eta_bias_weight is not None
+                             else vb.DEFAULT_BIAS_WEIGHT),
+                max_dz=None if max_dz is None else float(max_dz),
+                surface_elevation_m=(float(eta_surface_m)
+                                     if eta_surface_m is not None else 0.0),
+                reference=eta_reference or vb.DEFAULT_REFERENCE,
+                base_temp=base_temp,
+                hybrid_opt=int(_SHARED_GRID_AND_DYNAMICS["hybrid_opt"]),
+                etac=float(_SHARED_GRID_AND_DYNAMICS["etac"]),
+                damping_depth_m=float(_SHARED_GRID_AND_DYNAMICS["zdamp"]))
+        except vb.BandColumnRefused as error:
+            raise VerticalColumnRefused(str(error)) from error
+        ladder = validate_eta_ladder(tuple(column.eta),
+                                     what="band-biased eta_levels")
+        settings = column.settings
+        # The measured profile (ground, top, first layer, stretch, band
+        # counts) is column.lines(); the header adds only what it omits.
+        report = column.lines()
+        header = [
+            "band-biased generator (woof.vertical_bands); bands: " + (
+                ", ".join(f"{band.label()} >= {band.min_levels}"
+                          for band in column.bands) or "none")
+            + (f"; max_dz {settings['max_dz']:g} m"
+               if settings["max_dz"] is not None else "")
+            + (f"; {settings['bias_heights']} bias heights x "
+               f"{settings['bias_weight']:g}"
+               if settings["bias_heights"] else ""),
+            *report]
+        receipt = {"algorithm": "woof-band-biased-eta-v1",
+                   "settings": dict(settings),
+                   "bands": [{"lo_m": band.lo_m, "hi_m": band.hi_m,
+                              "min_levels": band.min_levels,
+                              "datum": band.datum}
+                             for band in column.bands]}
+        origin = "band-biased"
     elif generator:
         from woof.ingest.eta import generate_wrf_eta
 
@@ -1207,7 +1317,7 @@ def resolve_vertical_column(*, source: str | None, nz: int | None = None,
         origin = "default-ladder"
     return {"nz": len(ladder) - 1, "eta_levels": ladder, "p_top": p_top,
             "origin": origin, "controls": controls, "receipt": receipt,
-            "base_temp": base_temp}
+            "base_temp": base_temp, "header": header, "report": report}
 
 
 def add_vertical_column_arguments(parser, *, defaults: str | None = None
@@ -1240,7 +1350,69 @@ def add_vertical_column_arguments(parser, *, defaults: str | None = None
             help=f"{words} for WRF compute_eta level generation "
                  f"(auto_levels_opt 2; WRF default {wrf_default:g}); any of "
                  f"these generates --nz levels to the model top, unset ones "
-                 f"take {unset}")
+                 f"take {unset}"
+                 + ({"--dzbot": "; with --eta-band/--eta-bias-heights it "
+                               "feeds the band-biased generator instead "
+                               "(default there 10 m)",
+                     "--max-dz": "; with --eta-band/--eta-bias-heights it "
+                                 "caps the band-biased generator's layers "
+                                 "instead (no cap there by default)"}
+                    .get(flag, "")))
+    _add_band_arguments(parser)
+
+
+def _add_band_arguments(parser) -> None:
+    """The height-band-biased generator's flags (:mod:`woof.vertical_bands`)."""
+
+    from woof.cli_numbers import finite_float, nonnegative_float
+    from woof.vertical_bands import (DEFAULT_MAX_STRETCH,
+                                     REFERENCE_ATMOSPHERES, parse_band,
+                                     parse_bias_heights)
+
+    parser.add_argument(
+        "--eta-band", type=parse_band, action="append", default=None,
+        metavar="LO:HI:N[:msl|agl]",
+        help="repeatable: at least N mass levels between heights LO and HI "
+             "in metres ABOVE MEAN SEA LEVEL (GPS altitudes are MSL), "
+             "or above the ground with a trailing ':agl', e.g. "
+             "15000:25000:100 (with --p-top-pa 1000: the default top is "
+             "~20.6 km) or 0:2000:41:agl.  Selects the height-band-"
+             "biased eta generator: --nz levels (default 256) from --dzbot "
+             "to the model top, every level a band does not need placed by "
+             "a uniform density that coarsens through the zdamp sponge")
+    parser.add_argument(
+        "--eta-bias-heights", type=parse_bias_heights, default=None,
+        metavar="LIST|FILE",
+        help="target heights in metres MSL: a comma list, a file of "
+             "numbers, or a track file of time,lat,lon,height rows (the "
+             "last field is read): their smoothed histogram "
+             "is added to the band generator's level density.  Selects the "
+             "band generator")
+    parser.add_argument(
+        "--eta-bias-weight", type=nonnegative_float, default=None,
+        metavar="W",
+        help="weight of --eta-bias-heights against the uniform baseline "
+             "density (default 1: half the free levels follow the targets)")
+    parser.add_argument(
+        "--eta-max-stretch", type=positive_float, default=None, metavar="R",
+        help="band generator: largest ratio between adjacent layer depths, "
+             f"either direction (default {DEFAULT_MAX_STRETCH:g})")
+    parser.add_argument(
+        "--eta-surface-m", type=finite_float, default=None, metavar="M",
+        help="band generator: ground elevation in m MSL of the reference "
+             "column heights are converted over (default 0); ':agl' bands "
+             "are measured from it")
+    parser.add_argument(
+        "--eta-reference", choices=REFERENCE_ATMOSPHERES, default=None,
+        help="band generator: atmosphere heights become pressures in -- "
+             "'standard' (US 1976, default; places stratospheric bands "
+             "where the real stratosphere has them) or 'wrf-base' (the "
+             "model's own dry base state, a 200 K isotherm above ~13 km)")
+    parser.add_argument(
+        "--eta-write", default=None, metavar="FILE",
+        help="also write the emitted column's eta levels to FILE, one per "
+             "line with its dz profile as # comments -- readable back by "
+             "--eta-levels FILE")
 
 
 def vertical_column_from_args(args, *, source: str | None) -> dict | None:
@@ -6032,6 +6204,32 @@ def _write_atomic(path: Path, text: str) -> None:
     os.replace(temporary, path)
 
 
+def _eta_levels_text(vertical: dict) -> str:
+    """``--eta-write``: the emitted column as an ``--eta-levels`` FILE, its
+    dz profile (:func:`woof.vertical_bands.dz_profile`) as comments --
+    in the band generator's own reference atmosphere and ground, or the
+    standard atmosphere over sea level for any other column (the file
+    names which)."""
+
+    from woof.vertical_bands import (BandColumnRefused, dz_profile,
+                                     eta_file_text)
+
+    settings = (vertical.get("receipt") or {}).get("settings", {})
+    try:
+        profile = dz_profile(
+            vertical["eta_levels"], p_top_pa=vertical["p_top"],
+            surface_elevation_m=settings.get("surface_elevation_m", 0.0),
+            reference=settings.get("reference", "standard"),
+            base_temp=float(vertical.get("base_temp", 290.0)),
+            hybrid_opt=int(_SHARED_GRID_AND_DYNAMICS["hybrid_opt"]),
+            etac=float(_SHARED_GRID_AND_DYNAMICS["etac"]))
+    except BandColumnRefused as error:
+        raise VerticalColumnRefused(
+            f"--eta-write cannot describe this column: {error}") from error
+    return eta_file_text(vertical["eta_levels"], profile=profile,
+                         header=vertical_column_header(vertical))
+
+
 def render_wps_namelist(projection: dict, dims: list[tuple[int, int]],
                         ratios: tuple[int, ...],
                         root_dx_m: float = ROOT_DX_M,
@@ -6772,6 +6970,16 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
     vertical = vertical_column_from_args(args, source=args.source)
     if vertical is not None:
         nz = int(vertical["nz"])
+    eta_text = None
+    if getattr(args, "eta_write", None) is not None:
+        if vertical is None:
+            raise VerticalColumnRefused(
+                "--eta-write writes an explicit column; name one with "
+                "--eta-band, --eta-bias-heights, --eta-levels, --dzbot or "
+                "--p-top-pa")
+        # Rendered now so a column it cannot describe is refused before
+        # the TOML is written, not after.
+        eta_text = _eta_levels_text(vertical)
     polygon = None
     level_buffer_values = None
     polygon_path = getattr(args, "polygon", None)
@@ -7486,6 +7694,10 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
         wps_path = out.parent / f"{out.stem}.namelist.wps"
         _write_atomic(wps_path, wps_text)
         written = [out, wps_path]
+    if eta_text is not None:
+        eta_path = Path(args.eta_write)
+        _write_atomic(eta_path, eta_text)
+        written.append(eta_path)
     if args.source == "era5" and args.vtable is None:
         if vtable_path.exists():
             if vtable_path.read_bytes() != _PACKAGED_VTABLE.read_bytes():
@@ -7526,7 +7738,13 @@ def domain_main(args, *, sizing_budget: SizingBudget | None = None,
             for domain in exp.domains)
         print(f"domain: fitted grid {grid_extents}; contains the requested "
               "polygon and buffers")
-    if vertical is not None:
+    if vertical is not None and vertical.get("report"):
+        # The band generator's own measured profile, in its own reference
+        # atmosphere and ground; the standard-atmosphere note over a
+        # 1000 hPa surface would quote different heights for the column.
+        for line in vertical["report"]:
+            print("domain: " + line.strip())
+    elif vertical is not None:
         print("domain: " + vertical_column_note(vertical))
     # The spoken half of snap_cadences_to_clock: what the author moved
     # to keep its own two derivations compatible, one line each, or
