@@ -5,18 +5,115 @@ setup. A slab template is only a source for vertical arrays and scalars.
 """
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import numpy as np
 
 
+#: Set to ``1`` to couple a split ([devices]) grid through its whole host
+#: store again, as before the slab windows: every parent step drains the
+#: split grid's slabs and the next sweep copies the store back.  Kept for
+#: comparing the two roads bit for bit; the slab windows are the default.
+SPLIT_DRAIN_ENV = "WOOF_SPLIT_NEST_DRAIN"
+
+
+def split_drain_requested() -> bool:
+    return os.environ.get(SPLIT_DRAIN_ENV, "").strip() not in ("", "0")
+
+
+def slab_run(owner):
+    """The split grid's :class:`tilestream.ranks.RankedRun`, or ``None``.
+
+    ``None`` for every other owner (a [tiles] store, a resident domain) and
+    when :data:`SPLIT_DRAIN_ENV` asks for the whole-store road.
+    """
+    run = getattr(owner, "_run", None)
+    if (owner is None or not getattr(owner, "ranked", False)
+            or not hasattr(run, "read_window") or split_drain_requested()):
+        return None
+    return run
+
+
+class SlabField:
+    """One member of a split grid, read and written by window on its slabs.
+
+    Stands where a host store array stood: it has the member's ``shape``,
+    ``ndim`` and ``dtype``, and ``field[..., y, x]`` is a device copy of that
+    rectangle (:meth:`tilestream.ranks.RankedRun.read_window`).  It is not a
+    view: a write goes through :meth:`write`.
+    """
+
+    def __init__(self, run, key):
+        self.run, self.key = run, key
+        home = run.raw_store[key]
+        self.shape, self.ndim, self.dtype = tuple(home.shape), int(home.ndim), home.dtype
+
+    def _window(self, index):
+        index = index if isinstance(index, tuple) else (index,)
+        parts = [part for part in index if part is not Ellipsis]
+        if (index.count(Ellipsis) > 1 or len(parts) < 2
+                or any(part != slice(None) for part in parts[:-2])
+                or not all(isinstance(part, slice) for part in parts[-2:])):
+            raise TypeError(f"{self.key!r} is read by horizontal window only, "
+                            f"got {index!r}")
+        return tuple(parts[-2:])
+
+    def __getitem__(self, index):
+        return self.run.read_window(self.key, self._window(index))
+
+    def whole(self):
+        """The whole member, as one window (for a reader that takes no window)."""
+        return self[(Ellipsis,) + tuple(slice(0, n) for n in self.shape[-2:])]
+
+    def write(self, window, value):
+        self.run.write_window(self.key, self._window(window), value)
+
+
+class _SlabStore:
+    """The store mapping of a split grid, without draining it.
+
+    The window traffic is counted on the run (``output_report``'s
+    ``window_*`` keys, in the forecast receipt).
+    """
+
+    def __init__(self, run):
+        self.run = run
+        self._fields = {}
+
+    def __contains__(self, key):
+        return key in self.run.store_keys()
+
+    def __getitem__(self, key):
+        field = self._fields.get(key)
+        if field is None:
+            value = self.run.raw_store[key]
+            if getattr(value, "ndim", 0) < 2:
+                # No slab windows a member without a horizontal extent, and a
+                # drain would not have written it either.
+                return value
+            field = self._fields[key] = SlabField(self.run, key)
+        return field
+
+    def get(self, key, default=None):
+        return self[key] if key in self else default
+
+
 class NestWindowSource:
-    """Drain once, then read exact windows from a domain's canonical arrays."""
+    """Read exact windows from a domain's canonical arrays.
+
+    A split grid's windows come straight off its slabs (:class:`SlabField`);
+    any other streamed owner drains once and serves its host store.
+    """
 
     def __init__(self, state):
         self.state = state
         self.owner = getattr(state, "_streamed_domain", None)
-        self.store = self.owner.store if self.owner is not None else None
+        run = slab_run(self.owner)
+        if run is not None:
+            self.store = _SlabStore(run)
+        else:
+            self.store = self.owner.store if self.owner is not None else None
         self.geography = (getattr(self.owner, "_geography", None) or {})
         self.template = (getattr(self.owner, "template_state", None) or state)
         self._geography_flags = None
@@ -54,7 +151,9 @@ class NestWindowSource:
         if value is None or not hasattr(value, "ndim") or np.isscalar(value):
             return value
         import cupy as cp
-        if window is not None and value.ndim >= 2:
+        if isinstance(value, SlabField) and (window is None or value.ndim < 2):
+            value = value.whole()
+        elif window is not None and value.ndim >= 2:
             value = value[(...,) + window]
         if isinstance(value, np.ndarray):
             self.host_to_device_bytes += int(value.nbytes)
@@ -67,7 +166,11 @@ class NestWindowSource:
     def write(self, name, window, value):
         import cupy as cp
 
-        target = self.array(name)[(...,) + window]
+        field = self.array(name)
+        if isinstance(field, SlabField):
+            field.write(window, value)
+            return
+        target = field[(...,) + window]
         if isinstance(target, np.ndarray):
             # cp.asnumpy packs only this bounded result, never a full field.
             target[...] = cp.asnumpy(value)
