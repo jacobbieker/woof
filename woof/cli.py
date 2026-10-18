@@ -99,6 +99,7 @@ enprod_register_cli = _lazy_register("woof.da.enprod")
 cycle_register_cli = _lazy_register("woof.cycle.cli")
 doctor_register_cli = _lazy_register("woof.doctor")
 domain_register_cli = _lazy_register("woof.domain_wizard")
+relocation_register_cli = _lazy_register("woof.relocation_itinerary")
 cyclone_setup_register_cli = _lazy_register("woof.cyclone_setup")
 downscale_register_cli = _lazy_register("woof.downscale")
 energy_register_cli = _lazy_register("woof.energy.cli")
@@ -429,6 +430,9 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     stream_register_cli(sub)
     geog_register_cli(sub)
     domain_register_cli(sub)
+    # Beside `domain` because it finishes a tree `domain` drew: the
+    # moving-nest itinerary that keeps the tree on a known track.
+    relocation_register_cli(sub)
     cyclone_setup_register_cli(sub)
     local_da_register_cli = _lazy_register("woof.local_da")
     local_da_register_cli(sub)

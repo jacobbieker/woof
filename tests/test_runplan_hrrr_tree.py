@@ -314,10 +314,12 @@ def test_a_follow_config_puts_the_corridor_flag_on_the_hierarchy_stage(
 
 def test_a_still_nested_hrrr_plan_composes_exactly_what_it_always_did(
         tmp_path, monkeypatch):
-    """Token for token, the two arms differ by one flag and nothing else.
+    """Token for token, the two arms differ by the corridor and nothing else.
 
     A corridor that leaked into an ordinary nested HRRR run would change
-    what every existing plan prepares.
+    what every existing plan prepares.  The corridor arm carries
+    ``--statics-corridor`` and the ``--experiment-config`` it is sized
+    from (the namelists cannot spell [relocation]); the still arm neither.
     """
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
@@ -335,9 +337,12 @@ def test_a_still_nested_hrrr_plan_composes_exactly_what_it_always_did(
     assert set(still_shape) == set(follow_shape)
     for stage in ("fetch", "prepare"):
         assert still_shape[stage] == follow_shape[stage], stage
+    corridor = follow_shape["hierarchy"]
+    at = corridor.index("--experiment-config")
     assert (still_shape["hierarchy"]
-            == [token for token in follow_shape["hierarchy"]
+            == [token for token in corridor[:at] + corridor[at + 2:]
                 if token != "--statics-corridor"])
+    assert "--experiment-config" not in still_shape["hierarchy"]
 
 
 def test_the_flag_the_chain_composes_is_the_one_the_stage_accepts(
@@ -357,6 +362,7 @@ def test_the_flag_the_chain_composes_is_the_one_the_stage_accepts(
     # Drop `python -m woof.hrrr_hierarchy_direct`; parse the rest.
     parsed = _parser().parse_args(hierarchy[3:])
     assert parsed.statics_corridor == "all"
+    assert parsed.experiment_config is not None
 
 
 def test_the_relay_binds_the_hierarchy_receipt_off_its_bytes(tmp_path,

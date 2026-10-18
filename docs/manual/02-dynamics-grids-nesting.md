@@ -222,6 +222,36 @@ restart fingerprint. Two pinned tests hold this
 [docs/nest-relocation-identity-decision.md:96-108]. Plan moving-nest work as
 single-segment runs, or accept re-preparation on resume.
 
+### 2.5.4 Following a known track
+
+When the target's 3-D path is known in advance, `woof relocation from-track
+PATH CONFIG` writes the itinerary instead of a tracker. PATH is a CSV with a
+header row, or a `.json` list of objects. Its column names come from
+`--time-col`, `--lat-col`, `--lon-col` and, optionally, `--height-col`
+(defaults `time`, `lat`, `lon`; height is reported but not used, because a nest
+spans the whole column). `(0, 0)` no-fix rows are dropped. CONFIG is a tree of at
+least three levels: the mover (default the deepest domain), its parent, which
+slides under `[relocation.containment]`, and a static frame. The track is
+projected with the frame's own grid, the same parent_start/ratio arithmetic
+`woof domain` writes into namelist.wps [woof/relocation_itinerary.py].
+
+The output is a `[relocation]` block, with one `[[relocation.move]]` row per
+cadence window and a containment slide, plus the initial placement. Both nests
+start centred where the path is when the mover starts (its first fix, for a path
+that starts later), so the nest waits over the start of the path until the target
+moves. Each row centres that window's stretch of track in the mover, and every
+window keeps `--margin-cells` (default 40) mover cells from the mover's edges.
+The plan is then replayed against the runner's own rules, in the runner's order
+(slide first, then row, each with its cap, overlap floor and SINT-stencil walk),
+and the container must stay `--container-margin-cells` (default 10) inside the
+frame. Anything the runner would clamp is refused with the time it happens. A
+track too fast for the cadence is refused with the largest cadence that works.
+`--write-config OUT` writes the whole config with the placement patched into
+`[[domain]]` and the companion `OUT-stem.namelist.wps`. It then reloads the
+config through admission. The library entry point is
+`itinerary_from_track(times, lats, lons, geometry, start_time, cadence_s,
+margin_cells)`, which returns a plan with `.to_toml()`.
+
 ## 2.6 LES: the two closures
 
 With `diff_opt=2`, two LES closures are selectable per domain
