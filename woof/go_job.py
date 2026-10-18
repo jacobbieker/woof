@@ -311,9 +311,13 @@ def _rclone_remote(url: str) -> str:
     path = f"{parts.netloc}{parts.path}"
     if parts.scheme == "gs":
         return f":gcs,env_auth=true,bucket_policy_only=true:{path}"
+    # no_check_bucket: the bucket already exists, and without it rclone's
+    # first upload issues CreateBucket, which S3 refuses outside us-east-1
+    # (IllegalLocationConstraintException) and a scoped role may not hold.
     if region:
-        return f":s3,provider=AWS,env_auth=true,region={region}:{path}"
-    return f":s3,provider=AWS,env_auth=true:{path}"
+        return (f":s3,provider=AWS,env_auth=true,no_check_bucket=true,"
+                f"region={region}:{path}")
+    return f":s3,provider=AWS,env_auth=true,no_check_bucket=true:{path}"
 
 
 def _cloud_copy(source: str, dest: str, *, upload: bool) -> None:
