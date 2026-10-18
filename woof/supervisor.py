@@ -1775,7 +1775,17 @@ class RuntimeHeartbeat:
             wrfout = Path(last_durable_wrfout)
             resolved_wrfout = str(wrfout.resolve())
             if resolved_wrfout != self.last_wrfout:
-                fsync_file(wrfout)
+                try:
+                    fsync_file(wrfout)
+                except FileNotFoundError:
+                    # Already handed off: a history consumer may unlink a
+                    # frame as soon as it is published (the Icechunk
+                    # export's delete_after_commit), and the writer
+                    # fsynced it before its rename made it visible, so a
+                    # vanished frame was durable when it went.  Async
+                    # checkpoints name the previous frame here, a whole
+                    # history interval after it landed.
+                    pass
                 self.last_wrfout = resolved_wrfout
         if last_checkpoint is not None:
             resolved_checkpoint = str(Path(last_checkpoint).resolve())

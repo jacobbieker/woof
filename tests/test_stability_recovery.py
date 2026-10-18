@@ -235,6 +235,24 @@ def test_writer_rewind_discards_only_owned_suffix_and_markers(tmp_path):
     assert paths[2] not in manager._published_paths
 
 
+def test_writer_rewind_accepts_a_frame_already_handed_off(tmp_path):
+    """The Icechunk export's delete_after_commit unlinks frames once its
+    store holds them; a rewind past such a frame removes its marker and
+    returns its writer proof as the receipt, instead of refusing."""
+    manager, paths = _writer_shell(tmp_path)
+    paths[2].unlink()
+    receipts = manager.rewind_to_checkpoint(datetime(2026, 10, 4, 0),
+        marker_directory=tmp_path / "ready")
+    assert [path.exists() for path in paths] == [True, False, False]
+    assert manager.paths == tuple(paths[:1])
+    handed = [r for r in receipts if r.get("available") is False]
+    assert [r["bytes"] for r in handed] == [len(b"owned frame 2")]
+    assert handed[0]["identity_source"] == "writer-completion"
+    assert not (tmp_path / "ready" / f"{paths[2].name}.json").exists()
+    assert not (tmp_path / "ready" / f"{paths[1].name}.json").exists()
+    assert paths[2] not in manager._published_paths
+
+
 def test_writer_rewind_refuses_modified_output_before_deleting_anything(tmp_path):
     manager, paths = _writer_shell(tmp_path)
     paths[2].write_bytes(b"modified externally")

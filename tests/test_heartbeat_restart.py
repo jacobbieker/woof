@@ -91,6 +91,22 @@ def test_the_records_of_one_attempt_still_go_forward():
         done, _record(2, supervisor.RESTART_STATUS, restart=_second()))
 
 
+def test_a_frame_handed_off_before_its_heartbeat_does_not_stop_the_run(
+        tmp_path):
+    """The Icechunk export's delete_after_commit may unlink a frame before
+    the step that names it as the last durable one (async checkpoints name
+    the previous frame); the heartbeat records it and the run goes on."""
+    path = tmp_path / "run-progress.json"
+    heartbeat = supervisor.RuntimeHeartbeat(
+        path, run_id="r", config_sha256="d", started_at_utc="s")
+    gone = tmp_path / "wrfout_d03_2026-06-01_12_00_00"
+    heartbeat(model_elapsed_seconds=120.0, outer_step=4,
+              last_durable_wrfout=gone, last_checkpoint=None)
+    record = supervisor.read_heartbeat(path)
+    assert record.last_durable_wrfout == str(gone.resolve())
+    assert record.status == "integrating"
+
+
 def test_the_runtime_heartbeat_publishes_the_restart(tmp_path):
     path = tmp_path / "run-progress.json"
     heartbeat = supervisor.RuntimeHeartbeat(

@@ -1262,7 +1262,7 @@ Takes no options of its own.
 | `--dry-run` | validate the route and show how to launch it; fetch and run nothing |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--geog-root DIR` | override the geography tree (default: [case_data].geog_root for declared inputs, otherwise the staged WPS_GEOG tree) |
-| `--icechunk URL` | export each history frame to this Icechunk repository as it lands (s3://, gs://, file:// or a directory; one group per domain), from a separate process the model never waits on; wins over the config's [output] icechunk url. go waits for it before it is done and exits 73 if the export is incomplete |
+| `--icechunk URL` | export each history frame to this Icechunk repository as it lands (s3://, gs://, file:// or a directory; one group per domain), from a separate process the model never waits on; wins over the config's [output] icechunk url ({name} in it is the [experiment] name). go waits for it before it is done and exits 73 if the export is incomplete |
 | `--keep-checkpoints N` | how many complete checkpoint sets the run keeps in its folder (default 1, enough to resume); 0 keeps every hourly set, which a later branch or downscale from an earlier checkpoint needs |
 | `--keep-member-files` | also retain every member's full history files |
 | `--late-after-minutes MIN` | download routes only: how far past its scheduled time a lead may be before the run stops with exit 75; wins over the config's [fetch] late_after_minutes and the source row's budget |
@@ -1391,7 +1391,7 @@ Takes no options of its own.
 | `--dry-run` | validate the route and show how to launch it; fetch and run nothing |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--geog-root DIR` | override the geography tree (default: [case_data].geog_root for declared inputs, otherwise the staged WPS_GEOG tree) |
-| `--icechunk URL` | export each history frame to this Icechunk repository as it lands (s3://, gs://, file:// or a directory; one group per domain), from a separate process the model never waits on; wins over the config's [output] icechunk url. go waits for it before it is done and exits 73 if the export is incomplete |
+| `--icechunk URL` | export each history frame to this Icechunk repository as it lands (s3://, gs://, file:// or a directory; one group per domain), from a separate process the model never waits on; wins over the config's [output] icechunk url ({name} in it is the [experiment] name). go waits for it before it is done and exits 73 if the export is incomplete |
 | `--keep-checkpoints N` | how many complete checkpoint sets the run keeps in its folder (default 1, enough to resume); 0 keeps every hourly set, which a later branch or downscale from an earlier checkpoint needs |
 | `--keep-member-files` | also retain every member's full history files |
 | `--late-after-minutes MIN` | download routes only: how far past its scheduled time a lead may be before the run stops with exit 75; wins over the config's [fetch] late_after_minutes and the source row's budget |
@@ -1457,18 +1457,21 @@ Takes no options of its own.
 | option | what it does |
 |---|---|
 | `--branch NAME` | Icechunk branch (default main) |
+| `--delete-after-commit` | unlink each wrfout once the store holds it (default: the export.json's, else keep) |
+| `--domains N[,N...]` | export only these grid ids (e.g. 3); the other domains' frames are skipped (default: every domain, or the export.json's) |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--finish-file FILE` | with --follow: drain and stop once FILE exists |
 | `--follow` | keep exporting frames as they land until --finish-file appears or --parent-pid exits |
 | `--group-prefix PREFIX` | put domain N in group PREFIXdNN (default dNN) |
 | `--json` | print the final status document on stdout |
+| `--name NAME` | the value of {name} in --url (woof go fills it with the config's [experiment] name) |
 | `--no-compress` | store arrays with zarr's default codec instead of Blosc zstd+bitshuffle |
 | `--parent-created STAMP` | with --parent-pid: that process's creation stamp, so a reused pid is not mistaken for it |
 | `--parent-pid PID` | with --follow: drain and stop once PID exits |
 | `--poll-seconds S` | with --follow: seconds between looks (default 2) |
 | `--state-dir DIR` | where state.json and status.json go (default: the export folder, else PATH/icechunk-export) |
 | `--threads N` | arrays encoded at once (default 4) |
-| `--url URL` | the store: s3://bucket/prefix, gs://bucket/prefix, file:///path or a directory (default: the export.json's) |
+| `--url URL` | the store: s3://bucket/prefix, gs://bucket/prefix, file:///path or a directory (default: the export.json's); {name} in it is --name |
 | `--zstd-clevel N` | zstd level for the Blosc zstd+bitshuffle compression (default 5) |
 
 ## `woof import-namelist`

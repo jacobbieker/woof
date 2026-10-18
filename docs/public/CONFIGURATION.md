@@ -82,7 +82,7 @@ every domain, one group each.
 
 | key | type | default | meaning |
 |---|---|---|---|
-| `icechunk` | string or table | unset | a store URL (`s3://bucket/prefix`, `gs://bucket/prefix`, `file:///path`) or a directory (relative to the config), or `{ url = "...", branch = "main", compress = true, zstd_clevel = 5, group_prefix = "", threads = 4 }`; `woof go --icechunk URL` replaces `url` |
+| `icechunk` | string or table | unset | a store URL (`s3://bucket/prefix`, `gs://bucket/prefix`, `file:///path`) or a directory (relative to the config), or `{ url = "...", branch = "main", compress = true, zstd_clevel = 5, group_prefix = "", threads = 4, domains = [3], delete_after_commit = false }`; `{name}` in `url` is `[experiment] name`; `domains` exports only those grid ids; `delete_after_commit` unlinks each exported wrfout once the store holds it (needs `--products none`); `woof go --icechunk URL` replaces `url` ([PROGRESS.md](PROGRESS.md#exporting-frames-to-icechunk-while-the-run-goes)) |
 
 ## `[case_data]` -- the inputs a config-driven run declares
 

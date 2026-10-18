@@ -1461,6 +1461,49 @@ def _icechunk_for_chain(args, config):
     return options
 
 
+def _refuse_render_with_deleted_frames(icechunk, products) -> None:
+    """``delete_after_commit`` unlinks each history frame of the exported
+    domains once the store holds it, while ``go``'s render stage, which
+    runs after the forecast and beside the exporter's drain, reads those
+    frames from disk: refused unless the run asks for no products."""
+
+    if icechunk is None or not icechunk.delete_after_commit:
+        return
+    if str(products or "").strip().lower() == "none":
+        return
+    from woof.explain import layered
+
+    raise GoRefusal(layered(
+        "[output] icechunk delete_after_commit deletes the history frames "
+        "the render stage draws from. Next: add --products none (render "
+        "from the Icechunk store afterwards), or drop delete_after_commit.",
+        "The exporter unlinks each frame as soon as its commit lands, and "
+        "the render stage lists and reads the frames on disk after the "
+        "forecast while the exporter is still draining: it would draw a "
+        "partial set or fail on a frame deleted under it, after a forecast "
+        "that finished."))
+
+
+def _plan_export_folders(route: str, output: Path) -> tuple[Path, Path]:
+    """Where a run plan's forecast writes its frames, and the path whose
+    appearance says the plan has claimed its folder (the exporter starts
+    only then: a launch refuses an output folder holding files it did not
+    write).
+
+    The prepared route writes under ``<output>/chain/run`` and makes
+    ``<output>/chain`` once claimed; the experiment route (``[case_data]``)
+    writes into ``<output>`` itself, whose ``run-manifest.json`` is
+    written just after the claim (:func:`woof.runplan.execute_plan`).
+    Waiting for ``<output>/chain`` on that route started no exporter."""
+
+    from woof.runplan import MANIFEST_FILENAME
+
+    output = Path(output)
+    if route == "experiment":
+        return output, output / MANIFEST_FILENAME
+    return output / "chain" / "run", output / "chain"
+
+
 def _icechunk_state_dir(root) -> Path:
     from woof.icechunk_export import EXPORT_DIRNAME
 
@@ -4408,6 +4451,7 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
     # The live Icechunk export: refused here when its table is wrong,
     # started beside the run plan's forecast below.
     icechunk = _icechunk_for_chain(args, config)
+    _refuse_render_with_deleted_frames(icechunk, options["render_products"])
     if flag_transport is not None and acquires:
         # Only a route with a fetch stage carries it: there ``auto`` must
         # reach run-plan to unpin a table's host.  A route without one
@@ -4685,15 +4729,12 @@ def _registered_launch(args, *, config: Path, payload: dict) -> int:
                             source_cli.redirect_adapter_output(sys.stdout, sys.stderr):
                         live = None
                         if icechunk is not None:
-                            # The run plan's forecast writes under
-                            # <output>/chain/run (woof.runplan).
-                            # Started once the plan has claimed
-                            # <output>/chain: a prepared launch refuses an
-                            # output folder holding files it did not write.
+                            forecast_dir, claimed = _plan_export_folders(
+                                plan.route, output)
                             live = _start_icechunk_export(
-                                icechunk, run_dir=output / "chain" / "run",
+                                icechunk, run_dir=forecast_dir,
                                 state_dir=_icechunk_state_dir(output),
-                                config=config, after=output / "chain",
+                                config=config, after=claimed,
                                 say=lambda line: print(line, file=terminal,
                                                        flush=True))
                         try:
@@ -5477,6 +5518,7 @@ def _go_prepared_main(args, *, observer=None) -> int:
     # The live Icechunk export, refused here when its table is wrong --
     # before anything is fetched -- and started beside the forecast.
     icechunk = _icechunk_for_chain(args, plan["config"])
+    _refuse_render_with_deleted_frames(icechunk, plan.get("render_products"))
 
     # The dry run names the predicted folder; the real run reads the
     # path again after the claim below.
@@ -6213,9 +6255,10 @@ def register_cli(subparsers) -> None:
                              "file:// or a directory; one group per "
                              "domain), from a separate process the model "
                              "never waits on; wins over the config's "
-                             "[output] icechunk url.  go waits for it "
-                             "before it is done and exits 73 if the "
-                             "export is incomplete")
+                             "[output] icechunk url ({name} in it is the "
+                             "[experiment] name).  go waits "
+                             "for it before it is done and exits 73 if "
+                             "the export is incomplete")
     parser.add_argument("--keep-checkpoints", type=_checkpoint_sets, default=None,
                         dest="keep_checkpoints", metavar="N",
                         help="how many complete checkpoint sets the run keeps in "

@@ -37,6 +37,17 @@ What is pinned:
   time before the group's start or off its interval) is recorded with
   the reason and the export ends ``incomplete``; it is never dropped
   silently.
+* **A long run fits its disk.**  ``domains = [3]`` exports only
+  those grids (the others' frames are counted as skipped, so the run
+  still finishes ``complete``), and ``delete_after_commit = true``
+  unlinks each exported file once the store holds it (see
+  :meth:`Exporter.delete_exported` for what makes that safe).  ``url``
+  may name the run with ``{name}`` (``[experiment] name``, or
+  ``woof icechunk-export --name``), one repository per experiment.
+* **Moving nests.**  A group's ``wrf_*`` attributes are its first
+  frame's; the nest's placement at every frame is in ``(Time,)`` arrays
+  (``wrf_I_PARENT_START``, ``wrf_CEN_LAT``, ...;
+  :data:`woof.energy.icechunk_store.PLACEMENT_ATTRS`).
 
 Files in the export folder (``<run>/icechunk-export``):
 ``export.json`` (:data:`SPEC_SCHEMA`, what to export where),
@@ -94,7 +105,15 @@ EXPORT_INCOMPLETE_EXIT_CODE = 73
 
 #: Keys ``[output] icechunk = { ... }`` accepts.
 OPTION_KEYS = frozenset({"url", "branch", "compress", "zstd_clevel",
-                         "group_prefix", "threads"})
+                         "group_prefix", "threads", "delete_after_commit",
+                         "domains"})
+
+#: Placeholders ``url`` may carry: ``{name}``, filled by ``woof go`` with
+#: the config's ``[experiment] name`` (or by ``woof icechunk-export
+#: --name``), so a series of configs can share one url template.
+URL_PLACEHOLDERS = ("name",)
+_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+_SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 _FRAME_NAME = re.compile(
     r"^wrfout_d(\d+)_(\d{4})-(\d{2})-(\d{2})_(\d{2})[_:](\d{2})[_:](\d{2})")
@@ -114,7 +133,10 @@ class ExportOptions:
     """Where and how to export.  ``url`` is a store URL (``s3://``,
     ``gs://``, ``file://``) or a local directory; Blosc zstd with
     bitshuffle at ``zstd_clevel`` unless ``compress`` is false; domain N
-    goes to group ``f"{group_prefix}d{N:02d}"``."""
+    goes to group ``f"{group_prefix}d{N:02d}"``.  ``domains`` (grid ids)
+    limits the export to those grids, ``None`` exports every one;
+    ``delete_after_commit`` unlinks each exported wrfout once the store
+    holds it."""
 
     url: str
     branch: str = "main"
@@ -122,13 +144,24 @@ class ExportOptions:
     zstd_clevel: int = 5
     group_prefix: str = ""
     threads: int = DEFAULT_THREADS
+    delete_after_commit: bool = False
+    domains: tuple[int, ...] | None = None
 
     @classmethod
     def from_mapping(cls, value, *, source: str = "<config>",
                      base_dir: Path | None = None,
-                     allow_memory: bool = False) -> "ExportOptions | None":
+                     allow_memory: bool = False,
+                     names: Mapping[str, Any] | None = None,
+                     allow_template: bool = False
+                     ) -> "ExportOptions | None":
         """Validate ``[output] icechunk``: a URL string or a table of
-        :data:`OPTION_KEYS`.  ``None`` (absent) gives ``None``."""
+        :data:`OPTION_KEYS`.  ``None`` (absent) gives ``None``.
+
+        ``{name}`` in ``url`` is filled from ``names`` (``woof go``
+        passes ``[experiment] name``); with
+        ``allow_template`` (the config's own validation, which has no
+        name yet) they are checked and kept, and otherwise a url still
+        carrying one is refused."""
 
         if value is None:
             return None
@@ -149,7 +182,9 @@ class ExportOptions:
             raise IcechunkExportRefused(
                 f"{where} needs url = \"s3://...\", \"gs://...\", "
                 "\"file:///...\" or a directory")
-        url = _checked_url(url.strip(), where=where, base_dir=base_dir,
+        url = _filled_url(url.strip(), where=where, names=names,
+                          allow_template=allow_template)
+        url = _checked_url(url, where=where, base_dir=base_dir,
                            allow_memory=allow_memory)
         branch = value.get("branch", "main")
         if not isinstance(branch, str) or not branch:
@@ -175,14 +210,86 @@ class ExportOptions:
                 or not 1 <= threads <= 64:
             raise IcechunkExportRefused(
                 f"{where} threads must be an integer 1-64")
+        delete = value.get("delete_after_commit", False)
+        if not isinstance(delete, bool):
+            raise IcechunkExportRefused(
+                f"{where} delete_after_commit must be true or false")
+        domains = value.get("domains")
+        if domains is not None:
+            if not isinstance(domains, (list, tuple)) or not domains or any(
+                    isinstance(d, bool) or not isinstance(d, int) or d < 1
+                    for d in domains) or len(set(domains)) != len(domains):
+                raise IcechunkExportRefused(
+                    f"{where} domains must be a non-empty list of distinct "
+                    f"grid ids, e.g. domains = [3], got {domains!r}")
+            domains = tuple(sorted(int(d) for d in domains))
         return cls(url=url, branch=branch, compress=compress,
-                   zstd_clevel=clevel, group_prefix=prefix, threads=threads)
+                   zstd_clevel=clevel, group_prefix=prefix, threads=threads,
+                   delete_after_commit=delete, domains=domains)
 
     def group(self, domain: int) -> str:
         return f"{self.group_prefix}d{int(domain):02d}"
 
+    def exports(self, domain: int) -> bool:
+        """Whether domain ``domain``'s frames go to the store."""
+
+        return self.domains is None or int(domain) in self.domains
+
     def to_mapping(self) -> dict[str, Any]:
-        return asdict(self)
+        mapping = asdict(self)
+        if self.domains is not None:
+            mapping["domains"] = list(self.domains)
+        return mapping
+
+
+def _filled_url(url: str, *, where: str, names: Mapping[str, Any] | None,
+                allow_template: bool) -> str:
+    """``url`` with its :data:`URL_PLACEHOLDERS` filled from ``names``."""
+
+    from woof.explain import layered
+
+    found = _PLACEHOLDER.findall(url)
+    if not found:
+        return url
+    unknown = sorted(set(found) - set(URL_PLACEHOLDERS))
+    if unknown:
+        raise IcechunkExportRefused(layered(
+            f"{where}: url placeholder(s) "
+            f"{', '.join('{' + u + '}' for u in unknown)} are not known; "
+            f"use {', '.join('{' + p + '}' for p in URL_PLACEHOLDERS)}.",
+            "Only the experiment's name is filled into a store URL: each "
+            "run of a series is its own experiment, so one url template "
+            "gives every run its own repository."))
+    if names is None:
+        if allow_template:
+            return url
+        raise IcechunkExportRefused(layered(
+            f"{where}: url {url!r} still carries a placeholder; give the "
+            "store's own URL here, or the name with --name.",
+            "{name} is filled from the config's [experiment] name by woof "
+            "go; nothing here knows that name."))
+    filled = url
+    for key in sorted(set(found)):
+        value = names.get(key)
+        if not isinstance(value, str) or not value:
+            raise IcechunkExportRefused(layered(
+                f"{where}: url uses {{{key}}} but there is no "
+                "[experiment] name to fill it with. Next: set [experiment] "
+                "name, or write the store's URL out.",
+                "The placeholder names one repository per experiment; "
+                "without a name every run would share one url."))
+        if not _SAFE_NAME.fullmatch(value) or value in (".", ".."):
+            raise IcechunkExportRefused(layered(
+                f"{where}: url uses {{{key}}} and [experiment] name "
+                f"{value!r} is not a safe store path segment (letters, "
+                "digits, '.', '_' and '-', not starting with a "
+                "punctuation mark). Next: rename the experiment, or write "
+                "the store's URL out.",
+                "The name becomes part of an object-store key or a "
+                "directory; a '/' would nest repositories and a space or "
+                "'..' would name a different place than it reads."))
+        filled = filled.replace("{" + key + "}", value)
+    return filled
 
 
 def _checked_url(url: str, *, where: str, base_dir: Path | None,
@@ -242,6 +349,14 @@ def history_intervals(config: Path | str | None) -> dict[int, int]:
     return found
 
 
+def _aside(path: Path) -> Path:
+    """Where :meth:`Exporter.delete_exported` moves a frame before it
+    unlinks it: a hidden name in the same folder, which neither the frame
+    walk nor a ready marker names."""
+
+    return Path(path).with_name(f".{Path(path).name}.icechunk-exported")
+
+
 def _whole(value) -> bool:
     return (isinstance(value, (int, float)) and not isinstance(value, bool)
             and math.isfinite(value) and value > 0 and value == int(value))
@@ -261,6 +376,7 @@ class SourceFrame:
     valid: datetime
     size: int
     mtime_ns: int
+    inode: tuple[int, int] | None = None
 
     @property
     def key(self) -> str:
@@ -337,7 +453,7 @@ def discover_frames(sources: Iterable[Path], *,
             continue
         frames.setdefault((info.st_dev, info.st_ino), SourceFrame(
             path, parsed[0], parsed[1], int(info.st_size),
-            int(info.st_mtime_ns)))
+            int(info.st_mtime_ns), (int(info.st_dev), int(info.st_ino))))
     return sorted(frames.values(),
                   key=lambda f: (f.valid, f.domain, f.mtime_ns, f.key))
 
@@ -432,11 +548,16 @@ class Exporter:
         self.frames: dict[str, dict[str, Any]] = {}
         self.refused: dict[str, dict[str, Any]] = {}
         self.found: list[SourceFrame] = []
+        #: Frames of domains ``options.domains`` leaves out: seen, never
+        #: written, never deleted, and no reason for the run not to finish.
+        self.skipped: list[SourceFrame] = []
         self.last_snapshot: str | None = None
         self.last_frame_seconds: float | None = None
         self.state = "starting"
         self.error: str | None = None
         self.notes: list[str] = []
+        #: Why ``state.json`` could not be checked against the store.
+        self.unconfirmed: str | None = None
         self._markers: dict[str, tuple[int, str | None]] = {}
         self._load_state()
         self._reconcile_with_store()
@@ -472,8 +593,13 @@ class Exporter:
         Pinned: ``state.json`` is a cache, the store is the record.  A
         saved frame counts as exported only when its group marks that
         valid time written with this file's publication stamp or a newer
-        one (a later run's frame superseded it); a repository deleted,
-        recreated or reset since leaves nothing confirmed."""
+        one (a later run's frame superseded it: marked ``superseded``,
+        which :meth:`delete_exported` never deletes); a repository
+        deleted, recreated or reset since leaves nothing confirmed.  A
+        store that cannot be reached is retried like a frame, then the
+        records are kept for :meth:`run` to end ``failed`` (resumably):
+        frames deleted after their commit exist only in this record and
+        the store, and a passing outage must not forget them."""
 
         if not self.frames:
             return
@@ -484,10 +610,25 @@ class Exporter:
                                                 TimeAxis, _members,
                                                 _open_group, open_repository)
 
+        delay = 1.0
+        for attempt in range(1, TRANSIENT_ATTEMPTS + 1):
+            try:
+                repo = open_repository(self.options.url, create=False)
+                break
+            except IcechunkStoreRefused:   # no repository: nothing done
+                self.frames, self.last_snapshot = {}, None
+                return
+            except Exception as error:  # noqa: BLE001 - a store failure
+                if attempt == TRANSIENT_ATTEMPTS:
+                    self.unconfirmed = (
+                        f"the store could not be opened to confirm "
+                        f"state.json ({type(error).__name__}: {error})")
+                    return
+                self.sleep(delay)
+                delay *= 2
         try:
-            repo = open_repository(self.options.url, create=False)
             session = repo.readonly_session(branch=self.options.branch)
-        except Exception:  # noqa: BLE001 - no store or branch: nothing done
+        except Exception:  # noqa: BLE001 - no branch: nothing done
             self.frames, self.last_snapshot = {}, None
             return
         by_group: dict[str, list[tuple[str, dict]]] = {}
@@ -514,6 +655,8 @@ class Exporter:
                     continue
                 stamp = int(record.get("mtime_ns", 0)) // 1_000_000
                 if written[index] == 1 and stamps[index] >= stamp:
+                    if stamps[index] > stamp:
+                        record["outcome"] = "superseded"
                     confirmed[key] = record
         self.frames = confirmed
 
@@ -527,14 +670,151 @@ class Exporter:
             "refused": self.refused,
         })
 
-    def _done(self, frame: SourceFrame) -> bool:
+    def _exported(self, frame: SourceFrame) -> bool:
         record = self.frames.get(frame.key)
-        if record is not None and record.get("size") == frame.size \
-                and record.get("mtime_ns") == frame.mtime_ns:
+        return record is not None and record.get("size") == frame.size \
+            and record.get("mtime_ns") == frame.mtime_ns
+
+    def _done(self, frame: SourceFrame) -> bool:
+        if self._exported(frame):
             return True
         record = self.refused.get(frame.key)
         return record is not None and record.get("size") == frame.size \
             and record.get("mtime_ns") == frame.mtime_ns
+
+    def _deleted_records(self) -> dict[str, dict[str, Any]]:
+        """Exported frames this export deleted (``delete_after_commit``)
+        that are no longer on disk: still found and exported, for the
+        counts, though the folder no longer lists them."""
+
+        on_disk = {f.key for f in self.found}
+        return {key: record for key, record in self.frames.items()
+                if record.get("deleted_utc") and key not in on_disk}
+
+    # -- deleting exported frames -------------------------------------------
+
+    def delete_exported(self, frame: SourceFrame) -> bool:
+        """Unlink ``frame``'s file when ``delete_after_commit`` asks and
+        the store holds it; returns whether it was deleted.
+
+        Pinned, so that no frame is lost:
+
+        * Only a frame recorded as exported from this very file (its size
+          and mtime) is deleted, and :meth:`_reconcile_with_store` keeps a
+          record only when the store confirms it -- a frame written to a
+          store since deleted or reset is exported again, never deleted
+          unexported.  A refused frame stays on disk, and so does one the
+          store skipped because it already held a newer file's frame for
+          that time (``superseded``: this file's bytes are not there).
+        * The file is moved aside (renamed to a hidden name the frame
+          walk never lists) and checked there: only the very file that
+          was exported (inode, size, mtime) is unlinked.  A file published
+          onto the name since -- a history rewind republishing it -- is
+          put back under its name (never over a newer one) and exported in
+          its turn.  A symlink is kept (unlinking it frees nothing).
+        * ``deleted_utc`` is saved before the file is touched, and every
+          pass finishes what a killed exporter left (an exported frame
+          still on disk, a file still moved aside), so an exporter killed
+          anywhere in between deletes or restores it when resumed, and one
+          killed after it still counts the frame.
+        * Only exported domains' frames are ever touched."""
+
+        if not self.options.delete_after_commit \
+                or not self.options.exports(frame.domain) \
+                or not self._exported(frame):
+            return False
+        record = self.frames[frame.key]
+        if record.get("outcome") == "superseded":
+            return False
+        try:
+            if frame.path.is_symlink():
+                return False
+            info = frame.path.stat()
+        except OSError:
+            return False
+        if not self._same_file(info, frame.size, frame.mtime_ns,
+                               frame.inode):
+            return False
+        record["deleted_utc"] = _utc()
+        self._save_state()
+        aside = _aside(frame.path)
+        try:
+            os.replace(frame.path, aside)
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            return self._kept(frame.path, record, error)
+        return self._finish_aside(frame.path, record, frame.inode)
+
+    @staticmethod
+    def _same_file(info, size: int, mtime_ns: int,
+                   inode: tuple[int, int] | None) -> bool:
+        return (int(info.st_size), int(info.st_mtime_ns)) == (size, mtime_ns) \
+            and (inode is None
+                 or (int(info.st_dev), int(info.st_ino)) == tuple(inode))
+
+    def _finish_aside(self, path: Path, record: dict[str, Any],
+                      inode: tuple[int, int] | None) -> bool:
+        """Unlink the file moved aside from ``path`` when it is the one
+        ``record`` exported; otherwise put it back (never over a file
+        published since)."""
+
+        aside = _aside(path)
+        try:
+            info = aside.stat()
+        except FileNotFoundError:
+            return False
+        if self._same_file(info, int(record.get("size", -1)),
+                           int(record.get("mtime_ns", -1)), inode):
+            try:
+                aside.unlink()
+            except FileNotFoundError:
+                return False
+            except OSError as error:
+                return self._kept(aside, record, error)
+            return True
+        # Not the exported file: a publication landed between the look
+        # and the move.  Back under its name unless a newer one is there.
+        record.pop("deleted_utc", None)
+        self._save_state()
+        try:
+            os.link(aside, path)
+        except FileExistsError:
+            note = (f"a file published onto {path.name} after its export "
+                    f"was replaced again since; it is kept as {aside.name}")
+            if note not in self.notes:
+                self.notes.append(note)
+                self.say(f"icechunk export: {note}")
+            return False
+        except OSError as error:
+            return self._kept(aside, record, error)
+        aside.unlink()
+        return False
+
+    def _kept(self, path: Path, record: dict[str, Any],
+              error: OSError) -> bool:
+        record.pop("deleted_utc", None)
+        self._save_state()
+        note = (f"could not delete {path.name} after its commit "
+                f"({type(error).__name__}: {error}); it is kept")
+        if note not in self.notes:
+            self.notes.append(note)
+            self.say(f"icechunk export: {note}")
+        return False
+
+    def _delete_exported_on_disk(self) -> None:
+        """:meth:`delete_exported` every exported frame still on disk (a
+        resumed export's, or one whose unlink an earlier pass missed), and
+        finish any file a killed exporter left moved aside."""
+
+        if not self.options.delete_after_commit:
+            return
+        for key, record in list(self.frames.items()):
+            if record.get("deleted_utc") and _aside(Path(key)).exists():
+                self._finish_aside(Path(key), record, None)
+        for frame in self.found:
+            if self._exported(frame):
+                self.delete_exported(frame)
 
     # -- progress ----------------------------------------------------------
 
@@ -548,21 +828,27 @@ class Exporter:
         pending = [f for f in self.found if not self._done(f)]
         exported = 0
         now_ns = time.time_ns()
-        for frame in self.found:
-            name = self.options.group(frame.domain)
+        entries = [(self.options.group(f.domain), f.valid,
+                    f.key in self.frames and self._done(f))
+                   for f in self.found]
+        # Deleted after their commit: exported, and gone from the folder.
+        for key, record in self._deleted_records().items():
+            parsed = parse_frame_name(Path(key).name)
+            if parsed is not None:
+                entries.append((str(record.get("group")), parsed[1], True))
+        for name, valid, done in entries:
             entry = groups.setdefault(name, {
-                "found": 0, "exported": 0, "latest_found": frame.valid,
+                "found": 0, "exported": 0, "latest_found": valid,
                 "latest_exported": None})
-            first_found[name] = min(first_found.get(name, frame.valid),
-                                    frame.valid)
+            first_found[name] = min(first_found.get(name, valid), valid)
             entry["found"] += 1
-            entry["latest_found"] = max(entry["latest_found"], frame.valid)
-            if frame.key in self.frames and self._done(frame):
+            entry["latest_found"] = max(entry["latest_found"], valid)
+            if done:
                 exported += 1
                 entry["exported"] += 1
-                entry["latest_exported"] = frame.valid \
+                entry["latest_exported"] = valid \
                     if entry["latest_exported"] is None \
-                    else max(entry["latest_exported"], frame.valid)
+                    else max(entry["latest_exported"], valid)
         lag = 0.0
         for name, entry in groups.items():
             # Nothing exported yet: behind by the whole span found.
@@ -572,10 +858,14 @@ class Exporter:
             entry["latest_exported"] = _iso(entry["latest_exported"])
         oldest = min((f.mtime_ns for f in pending), default=None)
         return {
-            "frames_found": len(self.found),
+            "frames_found": len(entries),
             "frames_exported": exported,
             "frames_pending": len(pending),
             "frames_refused": len(self.refused),
+            "frames_deleted": sum(1 for r in self.frames.values()
+                                  if r.get("deleted_utc")),
+            "frames_skipped": len(self.skipped),
+            "skipped_domains": sorted({f.domain for f in self.skipped}),
             "lag_model_seconds": lag,
             "oldest_pending_wait_seconds": (
                 None if oldest is None else max(0.0, (now_ns - oldest) / 1e9)),
@@ -586,6 +876,9 @@ class Exporter:
         status = {
             "schema": STATUS_SCHEMA, "state": self.state, "pid": os.getpid(),
             "url": self.options.url, "branch": self.options.branch,
+            "domains": (None if self.options.domains is None
+                        else list(self.options.domains)),
+            "delete_after_commit": self.options.delete_after_commit,
             "sources": [str(s) for s in self.sources],
             "started_utc": _utc(self.started_ms),
             "updated_unix_ms": _now_ms(),
@@ -681,6 +974,7 @@ class Exporter:
             self.last_snapshot = summary["snapshot"]
             outcome = ("replaced" if summary.get("frames_replaced")
                        else "written" if summary.get("frames_written")
+                       else "superseded" if summary.get("frames_superseded")
                        else "already-written")
             self.frames[frame.key] = {
                 **frame.signature(), "group": group,
@@ -710,6 +1004,9 @@ class Exporter:
         failures) or ``interrupted``."""
 
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        if self.unconfirmed is not None:
+            self.state, self.error = "failed", self.unconfirmed
+            return self.write_status()
         self.state = "following" if follow else "draining"
         self.write_status()
         try:
@@ -717,8 +1014,12 @@ class Exporter:
                 finishing = (not follow) or self._finish_requested()
                 if finishing and follow and self.state != "finishing":
                     self.state = "finishing"
-                self.found = discover_frames(self.sources,
-                                             markers=self._markers)
+                every = discover_frames(self.sources, markers=self._markers)
+                self.found = [f for f in every
+                              if self.options.exports(f.domain)]
+                self.skipped = [f for f in every
+                                if not self.options.exports(f.domain)]
+                self._delete_exported_on_disk()
                 pending = [f for f in self.found if not self._done(f)]
                 if not pending:
                     self.write_status()
@@ -733,6 +1034,8 @@ class Exporter:
                 for frame in pending:
                     self.export_frame(frame)
                     self._save_state()
+                    # Only once the commit and its record are saved.
+                    self.delete_exported(frame)
                     self.write_status()
                     if time.monotonic() - looked >= self.poll_seconds:
                         break
@@ -744,12 +1047,18 @@ class Exporter:
             self.state, self.error = "failed", str(error)
             self._save_state()
             return self.write_status()
-        if not self.found:
+        if not self.found and not self._deleted_records():
             # Not "complete": a store holding nothing because the frames
             # were written somewhere else must not read as a finished
             # export.
             self.error = ("no history frames were found under "
                           + ", ".join(str(s) for s in self.sources))
+            if self.skipped:
+                self.error += (
+                    f" of domain(s) {list(self.options.domains or ())}; "
+                    f"{len(self.skipped)} frame(s) of domain(s) "
+                    f"{sorted({f.domain for f in self.skipped})} were "
+                    "skipped")
             self.state = "empty"
             self._save_state()
             return self.write_status()
@@ -826,12 +1135,38 @@ def progress_line(status: Mapping[str, Any] | None) -> str:
     return line
 
 
+def experiment_names(config: Path | str | None) -> dict[str, str]:
+    """The values :data:`URL_PLACEHOLDERS` take for a config: its
+    ``[experiment] name``; ``{}`` when it has none."""
+
+    if config is None or not Path(config).is_file():
+        return {}
+    import tomllib
+
+    try:
+        raw = tomllib.loads(Path(config).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return {}
+    return _names_in(raw)
+
+
+def _names_in(raw: Mapping[str, Any]) -> dict[str, str]:
+    experiment = raw.get("experiment")
+    name = experiment.get("name") if isinstance(experiment, Mapping) \
+        else None
+    if not isinstance(name, str) or not name:
+        return {}
+    return {key: name for key in URL_PLACEHOLDERS}
+
+
 def go_export_options(args, config: Path | None) -> ExportOptions | None:
     """``woof go``'s export request: ``--icechunk URL`` over the config's
     ``[output] icechunk``; ``None`` when neither asks.  A flag URL
-    replaces only the table's ``url``."""
+    replaces only the table's ``url``.  ``{name}`` in either is filled
+    with the config's ``[experiment] name``."""
 
     table = None
+    raw: dict = {}
     if config is not None and Path(config).is_file():
         import tomllib
 
@@ -853,7 +1188,23 @@ def go_export_options(args, config: Path | None) -> ExportOptions | None:
     else:
         source = str(config)
         base = None if config is None else Path(config).resolve().parent
-    return ExportOptions.from_mapping(table, source=source, base_dir=base)
+    options = ExportOptions.from_mapping(table, source=source, base_dir=base,
+                                         names=_names_in(raw))
+    # A [simulated_radar] table is enabled unless it says otherwise
+    # (SimulatedRadarOptions.from_mapping).
+    radar = raw.get("simulated_radar")
+    if options is not None and options.delete_after_commit \
+            and isinstance(radar, Mapping) and radar.get("enabled", True):
+        from woof.explain import layered
+
+        raise IcechunkExportRefused(layered(
+            f"[output] icechunk delete_after_commit of {source} and "
+            "[simulated_radar] cannot run together. Next: drop one, or set "
+            "[simulated_radar] enabled = false.",
+            "Simulated radar scans each history frame after the next one "
+            "on its grid lands, from the file; the exporter would already "
+            "have deleted it, and the radar's failure stops the forecast."))
+    return options
 
 
 class LiveExport:
@@ -1126,9 +1477,12 @@ def _plan(args) -> tuple[ExportOptions, list[Path], dict[int, int], Path]:
         options, sources, intervals = read_spec(spec)
         specs.append((options, sources, intervals, spec.parent))
     flags = {"branch": args.branch, "zstd_clevel": args.zstd_clevel,
-             "group_prefix": args.group_prefix, "threads": args.threads}
+             "group_prefix": args.group_prefix, "threads": args.threads,
+             "domains": args.domains}
     if args.no_compress:
         flags["compress"] = False
+    if args.delete_after_commit:
+        flags["delete_after_commit"] = True
     flags = {k: v for k, v in flags.items() if v is not None}
     if specs:
         options = specs[0][0]
@@ -1148,9 +1502,10 @@ def _plan(args) -> tuple[ExportOptions, list[Path], dict[int, int], Path]:
                 "file:///... or a directory")
         mapping = {"url": args.url}
     mapping.update(flags)
-    options = ExportOptions.from_mapping(mapping, source="woof icechunk-export",
-                                         base_dir=Path.cwd(),
-                                         allow_memory=True)
+    options = ExportOptions.from_mapping(
+        mapping, source="woof icechunk-export", base_dir=Path.cwd(),
+        allow_memory=True,
+        names=None if args.name is None else {"name": args.name})
     sources: list[Path] = []
     intervals: dict[int, int] = {}
     for _o, spec_sources, spec_intervals, _d in specs:
@@ -1167,6 +1522,20 @@ def _plan(args) -> tuple[ExportOptions, list[Path], dict[int, int], Path]:
     return options, sources, intervals, state_dir
 
 
+def _grid_ids(text: str) -> list[int]:
+    import argparse
+
+    try:
+        values = [int(part) for part in str(text).split(",") if part.strip()]
+    except ValueError:
+        values = []
+    if not values:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not a comma-separated list of grid ids, e.g. 3 "
+            "or 2,3")
+    return values
+
+
 def add_arguments(parser) -> None:
     parser.add_argument(
         "paths", nargs="+", type=Path, metavar="PATH",
@@ -1177,7 +1546,10 @@ def add_arguments(parser) -> None:
     parser.add_argument("--url", default=None, metavar="URL",
                         help="the store: s3://bucket/prefix, gs://bucket/"
                              "prefix, file:///path or a directory (default: "
-                             "the export.json's)")
+                             "the export.json's); {name} in it is --name")
+    parser.add_argument("--name", default=None, metavar="NAME",
+                        help="the value of {name} in --url (woof go fills "
+                             "it with the config's [experiment] name)")
     parser.add_argument("--branch", default=None, metavar="NAME",
                         help="Icechunk branch (default main)")
     parser.add_argument("--zstd-clevel", type=int, default=None, metavar="N",
@@ -1191,6 +1563,14 @@ def add_arguments(parser) -> None:
     parser.add_argument("--threads", type=int, default=None, metavar="N",
                         help=f"arrays encoded at once (default "
                              f"{DEFAULT_THREADS})")
+    parser.add_argument("--domains", type=_grid_ids, default=None,
+                        metavar="N[,N...]",
+                        help="export only these grid ids (e.g. 3); the "
+                             "other domains' frames are skipped (default: "
+                             "every domain, or the export.json's)")
+    parser.add_argument("--delete-after-commit", action="store_true",
+                        help="unlink each wrfout once the store holds it "
+                             "(default: the export.json's, else keep)")
     parser.add_argument("--state-dir", type=Path, default=None, metavar="DIR",
                         help="where state.json and status.json go (default: "
                              "the export folder, else PATH/icechunk-export)")
@@ -1279,7 +1659,8 @@ __all__ = [
     "SPEC_SCHEMA", "STATE_SCHEMA", "STATUS_SCHEMA", "EXPORT_DIRNAME",
     "EXPORT_INCOMPLETE_EXIT_CODE", "DEFAULT_THREADS", "OPTION_KEYS",
     "ExportOptions", "Exporter", "ExportFailed", "IcechunkExportRefused",
-    "LiveExport", "SourceFrame", "discover_frames", "go_export_options",
+    "LiveExport", "SourceFrame", "URL_PLACEHOLDERS", "discover_frames",
+    "experiment_names", "go_export_options",
     "history_intervals", "parse_frame_name", "progress_line", "read_spec",
     "register_cli", "resume_command", "write_spec", "main",
 ]

@@ -657,3 +657,451 @@ def test_go_stops_an_exporter_that_stalls(tmp_path):
     assert not result["ok"]
     assert any("no progress" in line and "INCOMPLETE" in line
                for line in said)
+
+
+# --------------------------------------------------------------------------
+# long runs: url placeholders, domains, delete_after_commit
+
+
+def test_url_placeholders_are_filled_with_the_experiment_name(tmp_path):
+    names = {"name": "run-001"}
+    options = ie.ExportOptions.from_mapping(
+        {"url": "s3://bucket/woof-outputs/{name}.icechunk"}, names=names)
+    assert options.url == "s3://bucket/woof-outputs/run-001.icechunk"
+    options = ie.ExportOptions.from_mapping("{name}.icechunk", names=names,
+                                            base_dir=tmp_path)
+    assert options.url == str(tmp_path / "run-001.icechunk")
+    # The config's own validation has no name yet: checked and kept.
+    kept = ie.ExportOptions.from_mapping("s3://b/{name}.icechunk",
+                                         allow_template=True)
+    assert kept.url == "s3://b/{name}.icechunk"
+
+
+@pytest.mark.parametrize("url, names, match", [
+    ("s3://b/{run}.icechunk", {"name": "a"}, "not known"),
+    ("s3://b/{name}.icechunk", None, "still carries a placeholder"),
+    ("s3://b/{name}.icechunk", {}, "no \\[experiment\\] name"),
+    ("s3://b/{name}.icechunk", {"name": "a/b"}, "safe store path"),
+    ("s3://b/{name}", {"name": ".."}, "safe store path"),
+    ("s3://b/{date}", {"name": "a"}, "not known"),
+])
+def test_url_placeholder_refusals_are_named(url, names, match):
+    with pytest.raises(ie.IcechunkExportRefused, match=match):
+        ie.ExportOptions.from_mapping({"url": url}, names=names)
+
+
+def test_go_fills_name_from_the_config_and_the_flag(tmp_path):
+    from woof import go_cli
+    from woof.io.history_selection import HistorySelection
+
+    config = tmp_path / "run.toml"
+    config.write_text(
+        '[experiment]\nname = "run-007"\n'
+        '[output]\nicechunk = { url = "s3://b/runs/{name}.icechunk", '
+        "domains = [3], delete_after_commit = true }\n")
+    options = ie.go_export_options(argparse.Namespace(icechunk=None), config)
+    assert options.url == "s3://b/runs/run-007.icechunk"
+    assert options.domains == (3,) and options.delete_after_commit
+    flagged = ie.go_export_options(
+        argparse.Namespace(icechunk="file:///scratch/{name}.icechunk"),
+        config)
+    assert flagged.url == "file:///scratch/run-007.icechunk"
+    assert flagged.domains == (3,)
+    nameless = tmp_path / "nameless.toml"
+    nameless.write_text('[output]\nicechunk = "s3://b/{name}"\n')
+    with pytest.raises(go_cli.GoRefusal, match="experiment"):
+        go_cli.icechunk_request(argparse.Namespace(icechunk=None), nameless)
+    # The [output] table's own validation accepts the template.
+    HistorySelection.from_mapping({"icechunk": {
+        "url": "s3://b/{name}.icechunk", "domains": [3],
+        "delete_after_commit": True}})
+
+
+def test_go_follows_each_routes_forecast_folder(tmp_path):
+    """The experiment route ([case_data]) writes its frames into the
+    output folder itself and never makes <output>/chain: waiting for that
+    started no exporter at all."""
+
+    from woof import go_cli, runplan
+
+    assert go_cli._plan_export_folders("experiment", tmp_path) == (
+        tmp_path, tmp_path / runplan.MANIFEST_FILENAME)
+    assert go_cli._plan_export_folders("prepared", tmp_path) == (
+        tmp_path / "chain" / "run", tmp_path / "chain")
+
+
+def test_go_refuses_deleting_frames_its_own_stages_read(tmp_path):
+    """The render stage and simulated radar read history frames from disk
+    after they land; delete_after_commit is refused beside them."""
+
+    from woof import go_cli
+
+    deleting = _options("s3://b/x", delete_after_commit=True)
+    with pytest.raises(go_cli.GoRefusal, match="--products none"):
+        go_cli._refuse_render_with_deleted_frames(deleting, None)
+    with pytest.raises(go_cli.GoRefusal, match="--products none"):
+        go_cli._refuse_render_with_deleted_frames(deleting, "t2,refl")
+    go_cli._refuse_render_with_deleted_frames(deleting, "none")
+    go_cli._refuse_render_with_deleted_frames(_options("s3://b/x"), None)
+    go_cli._refuse_render_with_deleted_frames(None, None)
+    config = tmp_path / "radar.toml"
+    config.write_text('[output]\nicechunk = { url = "s3://b/x", '
+                      "delete_after_commit = true }\n[simulated_radar]\n"
+                      'sites = "auto"\n')
+    with pytest.raises(go_cli.GoRefusal, match="simulated_radar"):
+        go_cli.icechunk_request(argparse.Namespace(icechunk=None), config)
+    config.write_text('[output]\nicechunk = { url = "s3://b/x", '
+                      "delete_after_commit = true }\n[simulated_radar]\n"
+                      "enabled = false\n")
+    assert go_cli.icechunk_request(argparse.Namespace(icechunk=None),
+                                   config).delete_after_commit
+
+
+@pytest.mark.parametrize("value, match", [
+    ({"url": "s3://b/x", "domains": []}, "domains"),
+    ({"url": "s3://b/x", "domains": [0]}, "domains"),
+    ({"url": "s3://b/x", "domains": [3, 3]}, "domains"),
+    ({"url": "s3://b/x", "domains": 3}, "domains"),
+    ({"url": "s3://b/x", "delete_after_commit": "yes"}, "true or false"),
+])
+def test_long_run_option_refusals_are_named(value, match):
+    with pytest.raises(ie.IcechunkExportRefused, match=match):
+        ie.ExportOptions.from_mapping(value)
+
+
+def test_the_spec_carries_the_long_run_options_to_the_resume_door(tmp_path):
+    options = _options(_file_url(tmp_path / "repo"), domains=[3, 2],
+                       delete_after_commit=True)
+    assert options.domains == (2, 3)
+    spec = ie.write_spec(tmp_path, options, [tmp_path / "run"])
+    again, _sources, _intervals = ie.read_spec(spec)
+    assert again == options
+    planned = ie._plan(_cli([tmp_path], domains="3"))[0]
+    assert planned.domains == (3,) and planned.delete_after_commit
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    planned = ie._plan(_cli([loose], url=_file_url(tmp_path / "x"),
+                            delete_after_commit=True))[0]
+    assert planned.delete_after_commit and planned.domains is None
+    named = ie._plan(_cli([loose], url=_file_url(tmp_path / "{name}.ic"),
+                          name="run-002"))[0]
+    assert named.url == _file_url(tmp_path / "run-002.ic")
+    with pytest.raises(ie.IcechunkExportRefused, match="placeholder"):
+        ie._plan(_cli([loose], url=_file_url(tmp_path / "{name}.ic")))
+
+
+def test_domains_exports_only_those_and_the_rest_are_handled(tmp_path):
+    run = tmp_path / "run"
+    for index in range(3):
+        publish(run, 1, index)
+        publish(run, 2, index)
+    url = _file_url(tmp_path / "repo")
+    status = _drain([run], url, tmp_path, domains=2, delete_after_commit=True)
+    assert status["state"] == "complete" and status["exit_code"] == 0
+    assert status["frames_exported"] == status["frames_found"] == 3
+    assert status["frames_skipped"] == 3 and status["skipped_domains"] == [1]
+    assert set(status["groups"]) == {"d02"}
+    repo = st.open_repository(url, create=False)
+    root = zarr.open_group(repo.readonly_session("main").store, mode="r")
+    assert {name for name, _ in root.members()} == {"d02"}
+    # The other domain's frames are never touched.
+    left = sorted(p.name[:10] for p in (run / "wrfout").iterdir())
+    assert left == ["wrfout_d01"] * 3
+    # Only frames of other domains: an empty export, said as such.
+    empty = _drain([run], _file_url(tmp_path / "none"), tmp_path,
+                   domains=3)
+    assert empty["state"] == "empty" and "skipped" in empty["error"]
+
+
+def test_delete_after_commit_frees_each_frame_once_the_store_has_it(
+        tmp_path):
+    """Each frame is unlinked after its commit; the counts and the final
+    state still describe every frame; a rerun commits nothing and is
+    still complete."""
+
+    run = tmp_path / "run"
+    url = _file_url(tmp_path / "repo")
+    state = tmp_path / "state"
+    seen: list[bool] = []
+
+    def write(*args, **kwargs):
+        # The file is still there while its frame is being written.
+        seen.append(all(Path(p).exists() for p in args[1]))
+        return st.write_gridded_segment(*args, **kwargs)
+
+    for index in range(4):
+        publish(run, 1, index)
+    options = _options(url, delete_after_commit=True)
+    status = ie.Exporter([run], options, state_dir=state, write=write,
+                         say=lambda _line: None).run()
+    assert status["state"] == "complete"
+    assert status["frames_found"] == status["frames_exported"] == 4
+    assert status["frames_deleted"] == 4 and status["frames_pending"] == 0
+    assert status["groups"]["d01"]["latest_exported"] == \
+        "2025-01-01T00:45:00Z"
+    assert seen == [True] * 4
+    assert list((run / "wrfout").glob("wrfout_d01_*")) == []
+    np.testing.assert_array_equal(_open_group(url, "d01")["U"][:, 0, 0, 0],
+                                  [0, 1, 2, 3])
+    again = ie.Exporter([run], options, state_dir=state).run()
+    assert again["state"] == "complete" and again["frames_exported"] == 4
+    assert again["last_snapshot"] == status["last_snapshot"]
+    # More frames later continue the same store.
+    publish(run, 1, 4)
+    more = ie.Exporter([run], options, state_dir=state).run()
+    assert more["frames_exported"] == 5 and more["frames_deleted"] == 5
+    assert _open_group(url, "d01")["U"].shape[0] == 5
+
+
+def test_a_frame_replaced_after_its_export_is_not_deleted(tmp_path):
+    """A history rewind republishes a name between the export and the
+    unlink: the new file (another inode) is kept and exported in turn."""
+
+    run = tmp_path / "run"
+    url = _file_url(tmp_path / "repo")
+    publish(run, 1, 0)
+    options = _options(url, delete_after_commit=True)
+    exporter = ie.Exporter([run], options, state_dir=tmp_path / "state",
+                           say=lambda _line: None)
+    exporter.found = ie.discover_frames([run])
+    frame = exporter.found[0]
+    assert exporter.export_frame(frame) is not None
+    time.sleep(0.01)
+    publish(run, 1, 0, offset=50.0)
+    assert not exporter.delete_exported(frame)
+    assert frame.path.exists()
+    status = ie.Exporter([run], options, state_dir=tmp_path / "state").run()
+    assert status["state"] == "complete" and not frame.path.exists()
+    assert _open_group(url, "d01")["U"][0, 0, 0, 0] == 50.0
+
+
+def test_a_publication_caught_in_the_move_aside_is_put_back(tmp_path):
+    """The look and the move are two steps: a file published onto the
+    name between them is moved aside, found not to be the exported one,
+    and put back under its name (exported in its turn); a leftover moved
+    aside by a killed exporter is finished on resume."""
+
+    run = tmp_path / "run"
+    url = _file_url(tmp_path / "repo")
+    publish(run, 1, 0)
+    options = _options(url, delete_after_commit=True)
+    state = tmp_path / "state"
+    exporter = ie.Exporter([run], options, state_dir=state,
+                           say=lambda _line: None)
+    exporter.found = ie.discover_frames([run])
+    frame = exporter.found[0]
+    exporter.export_frame(frame)
+    time.sleep(0.01)
+    newer = publish(run, 1, 0, offset=50.0)
+    os.replace(newer, ie._aside(newer))          # as if the move caught it
+    record = exporter.frames[frame.key]
+    assert not exporter._finish_aside(frame.path, record, frame.inode)
+    assert frame.path.exists() and not ie._aside(frame.path).exists()
+    assert "deleted_utc" not in record
+    status = ie.Exporter([run], options, state_dir=state).run()
+    assert status["state"] == "complete" and not frame.path.exists()
+    assert _open_group(url, "d01")["U"][0, 0, 0, 0] == 50.0
+    # Killed after the move, before the unlink: the resume finishes it.
+    publish(run, 1, 1)
+    first = ie.Exporter([run], options, state_dir=state)
+    first.found = ie.discover_frames([run])
+    second = first.found[-1]
+    first.export_frame(second)
+    first.frames[second.key]["deleted_utc"] = "x"
+    first._save_state()
+    os.replace(second.path, ie._aside(second.path))
+    resumed = ie.Exporter([run], options, state_dir=state).run()
+    assert resumed["state"] == "complete"
+    assert resumed["frames_exported"] == resumed["frames_found"] == 2
+    assert not ie._aside(second.path).exists()
+
+
+def test_a_frame_the_store_holds_newer_is_not_deleted(tmp_path):
+    """A file whose valid time the store already holds from a newer file
+    (another run's) was not written: it is never deleted."""
+
+    older, newer = tmp_path / "run1", tmp_path / "run2"
+    publish(older, 1, 0)
+    time.sleep(0.01)
+    publish(newer, 1, 0, offset=100.0)
+    url = _file_url(tmp_path / "repo")
+    _drain([newer], url, tmp_path)
+    status = _drain([older], url, tmp_path, delete_after_commit=True)
+    assert status["state"] == "complete"
+    assert list((older / "wrfout").glob("wrfout_d01_*"))
+    assert _open_group(url, "d01")["U"][0, 0, 0, 0] == 100.0
+
+
+def test_an_unreachable_store_keeps_the_record_and_fails(tmp_path,
+                                                        monkeypatch):
+    """Frames deleted after their commit exist only in state.json and the
+    store: a store that cannot be opened on resume ends the export failed
+    (resumable), never empty, and the record survives for the resume."""
+
+    run = tmp_path / "run"
+    for index in range(2):
+        publish(run, 1, index)
+    url = _file_url(tmp_path / "repo")
+    state = tmp_path / "state"
+    options = _options(url, delete_after_commit=True)
+    assert ie.Exporter([run], options, state_dir=state).run()["state"] == \
+        "complete"
+
+    def down(*_args, **_kwargs):
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(st, "open_repository", down)
+    status = ie.Exporter([run], options, state_dir=state,
+                         sleep=lambda _s: None).run()
+    assert status["state"] == "failed" and "connection reset" in \
+        status["error"]
+    monkeypatch.undo()
+    again = ie.Exporter([run], options, state_dir=state).run()
+    assert again["state"] == "complete" and again["frames_exported"] == 2
+
+
+def test_without_delete_after_commit_nothing_is_deleted(tmp_path):
+    run = tmp_path / "run"
+    for index in range(2):
+        publish(run, 1, index)
+    status = _drain([run], _file_url(tmp_path / "repo"), tmp_path)
+    assert status["frames_deleted"] == 0
+    assert len(list((run / "wrfout").glob("wrfout_d01_*"))) == 2
+
+
+def test_an_export_stopped_between_commit_and_unlink_deletes_on_resume(
+        tmp_path, monkeypatch):
+    run = tmp_path / "run"
+    for index in range(3):
+        publish(run, 1, index)
+    url = _file_url(tmp_path / "repo")
+    state = tmp_path / "state"
+    real_unlink = Path.unlink
+    stopped: list[str] = []
+
+    def unlink(self, *args, **kwargs):
+        # The frame was moved aside; stopped before its unlink.
+        if self.name.startswith(".wrfout_d01") and not stopped:
+            stopped.append(self.name)
+            raise KeyboardInterrupt
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    options = _options(url, delete_after_commit=True)
+    first = ie.Exporter([run], options, state_dir=state,
+                        say=lambda _line: None).run()
+    assert first["state"] == "interrupted" and stopped
+    assert (run / "wrfout" / stopped[0]).exists()
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    resumed = ie.Exporter([run], options, state_dir=state,
+                          say=lambda _line: None).run()
+    assert resumed["state"] == "complete"
+    assert resumed["frames_exported"] == resumed["frames_found"] == 3
+    assert sorted((run / "wrfout").iterdir()) == []
+
+
+def test_an_export_stopped_after_commit_before_its_record_resumes(tmp_path):
+    """Stopped after the store committed a frame and before the exporter
+    recorded it: the resume finds the frame already written from the
+    same file, records it and only then deletes it."""
+
+    run = tmp_path / "run"
+    for index in range(3):
+        publish(run, 1, index)
+    url = _file_url(tmp_path / "repo")
+    state = tmp_path / "state"
+
+    def stops_after_second(*args, **kwargs):
+        summary = st.write_gridded_segment(*args, **kwargs)
+        if kwargs["segment_id"].endswith("00_15_00"):
+            raise KeyboardInterrupt
+        return summary
+
+    options = _options(url, delete_after_commit=True)
+    first = ie.Exporter([run], options, state_dir=state,
+                        write=stops_after_second,
+                        say=lambda _line: None).run()
+    assert first["state"] == "interrupted"
+    names = sorted(p.name for p in (run / "wrfout").glob("wrfout_d01_*"))
+    assert names == ["wrfout_d01_2025-01-01_00_15_00",
+                     "wrfout_d01_2025-01-01_00_30_00"]
+    resumed = ie.Exporter([run], options, state_dir=state,
+                          say=lambda _line: None).run()
+    assert resumed["state"] == "complete" and resumed["frames_exported"] == 3
+    assert list((run / "wrfout").glob("wrfout_d01_*")) == []
+    np.testing.assert_array_equal(
+        _open_group(url, "d01")["frame_written"][:], [1, 1, 1])
+
+
+def test_a_killed_exporter_process_with_delete_after_commit_resumes(
+        tmp_path):
+    """The separate exporter process is SIGKILLed mid-run; the files it
+    committed are gone, the rest are on disk; the resume door finishes
+    the store and frees the rest.  Nothing is lost."""
+
+    run = tmp_path / "go-run" / "run"
+    state = tmp_path / "go-run" / ie.EXPORT_DIRNAME
+    url = _file_url(tmp_path / "repo")
+    live = ie.LiveExport(_options(url, delete_after_commit=True),
+                         sources=[run], state_dir=state, intervals={1: 900},
+                         say=lambda _line: None, poll_seconds=0.05)
+    assert live.start()
+    for index in range(8):
+        publish(run, 1, index)
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        status = live.status() or {}
+        if int(status.get("frames_exported") or 0) >= 2:
+            os.kill(live.process.pid, signal.SIGKILL)
+            break
+        time.sleep(0.02)
+    live.finish()
+    result = live.wait()
+    assert not result["ok"]
+    assert ie.main(_cli([state], json=True)) == 0
+    group = _open_group(url, "d01")
+    np.testing.assert_array_equal(group["frame_written"][:], np.ones(8))
+    np.testing.assert_array_equal(group["U"][:, 0, 0, 0], np.arange(8))
+    assert list((run / "wrfout").glob("wrfout_d01_*")) == []
+    final = json.loads((state / ie.STATUS_NAME).read_text())
+    assert final["frames_exported"] == final["frames_found"] == 8
+
+
+def test_no_frame_before_history_begin_reaches_the_store(tmp_path):
+    """A nest with history_begin_s writes no frame before it (the clock's
+    history lattice), so its group's axis starts at history_begin, not at
+    the simulation start; a frame older than the group's start would be
+    refused by name, never prepended."""
+
+    from types import SimpleNamespace
+
+    from woof.core.clock import DomainTicks, _history_window_ticks
+
+    begin, end = _history_window_ticks(
+        SimpleNamespace(grid_id=2, history_begin_s=1800.0,
+                        history_end_s=None), 60, 1)
+    spec = DomainTicks(
+        grid_id=2, parent_id=1, parent_time_step_ratio=3, step_ticks=60,
+        dt_fp32=None, history_ticks=900, restart_ticks=None,
+        radt_ticks=None, stepra=None, cudt_ticks=None, stepcu=None,
+        bldt_ticks=None, stepbl=None, history_begin_ticks=begin,
+        history_end_ticks=end)
+    due = [t for t in range(0, 3601, 60) if spec.history_offset_due(t)]
+    assert due == [1800, 2700, 3600]
+    run = tmp_path / "run"
+    for elapsed in due:
+        publish(run, 2, elapsed // 900)
+    url = _file_url(tmp_path / "repo")
+    status = _drain([run], url, tmp_path, domains=2)
+    assert status["state"] == "complete" and status["frames_exported"] == 3
+    group = _open_group(url, "d02")
+    assert st.TimeAxis.from_attrs(dict(group.attrs)).start == \
+        np.datetime64("2025-01-01T00:30:00")
+    assert group["Time"].shape == (3,)
+    np.testing.assert_array_equal(group["frame_written"][:], [1, 1, 1])
+    # A stray earlier frame is refused by name, not written before it.
+    publish(run, 2, 0)
+    late = _drain([run], url, tmp_path, domains=2)
+    assert late["state"] == "incomplete"
+    assert "precedes" in late["refused"]["wrfout_d02_2025-01-01_00_00_00"]
+    assert _open_group(url, "d02")["Time"].shape == (3,)

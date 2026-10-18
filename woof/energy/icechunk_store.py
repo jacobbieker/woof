@@ -82,6 +82,16 @@ Gridded store (``woof-energy.icechunk-gridded.v1``)
     segments never share a chunk) and the other dimensions are whole unless
     a chunk would exceed :data:`MAX_CHUNK_BYTES`.
 
+    The group's ``wrf_*`` attributes are the seed frame's (frame 0's)
+    global attributes and are never rewritten.  A moving nest changes some
+    of them at every relocation, so the ones that carry its placement
+    (:data:`PLACEMENT_ATTRS`) are also stored per frame, as ``(Time,)``
+    arrays named like the attribute (``wrf_I_PARENT_START``,
+    ``wrf_CEN_LAT``, ...; listed in the ``placement_variables``
+    attribute): read the arrays, not the attributes, for where the nest
+    was at a given time.  ``XLAT``/``XLONG``/``HGT`` already carry a
+    ``Time`` dimension in every woof wrfout and so follow the nest too.
+
 Manifests are split along ``time``/``Time`` every
 :data:`MANIFEST_SPLIT_CHUNKS` chunks, set when this module creates the
 repository, so a commit rewrites only the manifests its segment touched.
@@ -149,6 +159,15 @@ JOB_SITE_COORDS = ("terrain_height", "domain_id", "dx_m", "inside")
 
 #: wrfout variables the gridded store replaces with its ``Time`` coordinate.
 REPLACED_WRF_VARIABLES = ("Times", "XTIME")
+
+#: wrfout global attributes that change when a nest is relocated, and the
+#: dtype each is stored per frame with: the parent-grid start of the nest
+#: and its centre.  Everything else a relocation re-derives (``XLAT``,
+#: ``XLONG``, ``HGT``, map factors) is a ``Time`` variable already.
+PLACEMENT_ATTRS: dict[str, str] = {
+    "I_PARENT_START": "int32", "J_PARENT_START": "int32",
+    "CEN_LAT": "float32", "CEN_LON": "float32",
+}
 
 _STRING_COORDS = ("site_id", "asset_id", "kind", "domain_id")
 _MEMORY: dict[str, Any] = {}
@@ -1114,6 +1133,63 @@ def _frame_stamp_ms(path: Path) -> int:
     return int(os.stat(path).st_mtime_ns // 1_000_000)
 
 
+def _frame_placement(path: Path) -> dict[str, Any]:
+    """The :data:`PLACEMENT_ATTRS` a frame file carries (absent ones
+    left out)."""
+
+    with _nc_session(path) as nc:
+        present = set(nc.ncattrs())
+        return {name: np.asarray(nc.getncattr(name)).reshape(-1)[0].item()
+                for name in PLACEMENT_ATTRS if name in present}
+
+
+def placement_array_name(attr: str) -> str:
+    """The ``(Time,)`` array holding global attribute ``attr`` per frame
+    (the same name as the group attribute holding frame 0's value)."""
+
+    return f"wrf_{attr}"
+
+
+def _write_placement(zgroup, todo: Sequence[tuple[Frame, int]],
+                     placement_of: Mapping[Path, Mapping[str, Any]], *,
+                     axis: TimeAxis, compressors) -> list[str]:
+    """Set each written frame's :data:`PLACEMENT_ATTRS` in their
+    ``(Time,)`` arrays, creating an array on the first frame that carries
+    its attribute (fill before: 0 for the starts, NaN for the centre).  A
+    frame without an attribute writes the fill, so a rewritten frame never
+    keeps the placement of the file it replaced.  Returns the arrays
+    created."""
+
+    members = _members(zgroup)
+    tchunk = max(1, int(zgroup.attrs.get("time_chunk") or 1))
+    listed = list(zgroup.attrs.get("placement_variables") or [])
+    created: list[str] = []
+    for attr, dtype in PLACEMENT_ATTRS.items():
+        name = placement_array_name(attr)
+        carried = [(t, placement_of.get(f.path, {}).get(attr))
+                   for f, t in todo]
+        if name not in members:
+            if all(value is None for _, value in carried):
+                continue
+            zgroup.create_array(
+                name, shape=(axis.size,), chunks=(tchunk,), dtype=dtype,
+                fill_value=_fill_for(np.dtype(dtype)),
+                compressors=compressors, dimension_names=("Time",),
+                attributes={"long_name": f"wrfout global attribute {attr} "
+                                         "of the frame written here",
+                            "source_attribute": attr})
+            created.append(name)
+            listed.append(name)
+        array = zgroup[name]
+        fill = _fill_for(np.dtype(dtype))
+        for t, value in carried:
+            array[t] = fill if value is None else np.asarray(
+                value, dtype=dtype)
+    if created:
+        zgroup.attrs["placement_variables"] = listed
+    return created
+
+
 def _create_gridded_variable(zgroup, name: str, meta: Mapping[str, Any], *,
                              axis_size: int, tchunk: int,
                              compressors) -> str:
@@ -1196,6 +1272,9 @@ def _init_gridded(session, group: str, frames: Sequence[Frame],
         "replaced_variables": list(REPLACED_WRF_VARIABLES),
         "skipped_variables": skipped,
         "seed_file": seed.name,
+        # The wrf_* attributes below are the seed frame's; a relocated
+        # nest's per-frame placement is in these (Time,) arrays.
+        "placement_variables": [],
         "compression": ("blosc zstd bitshuffle clevel "
                         f"{int(zstd_clevel)}" if compress else "default"),
         "created_utc": datetime.now(timezone.utc).strftime(
@@ -1261,6 +1340,8 @@ def _extend_gridded(zgroup, old: TimeAxis, new: TimeAxis) -> None:
     names = list(zgroup.attrs["variables"]) + ["frame_written"]
     if FRAME_PUBLISHED in members:
         names.append(FRAME_PUBLISHED)
+    names.extend(name for name in zgroup.attrs.get("placement_variables")
+                 or [] if name in members)
     for name in names:
         array = zgroup[name]
         array.resize((new.size,) + tuple(array.shape[1:]))
@@ -1392,6 +1473,7 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
         raise IcechunkStoreRefused("no wrfout frames to write")
     stamps_of = {path: _frame_stamp_ms(path)
                  for path in dict.fromkeys(f.path for f in frames)}
+    placement_of = {path: _frame_placement(path) for path in stamps_of}
     frame_times = [f.time for f in frames]
     repo = open_repository(store, **storage_options)
 
@@ -1450,7 +1532,7 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
                   if stamp_array is not None
                   else np.zeros(len(index), dtype=np.int64))
         todo: list[tuple[Frame, int]] = []
-        replaced = 0
+        replaced = superseded = 0
         for n, (f, i) in enumerate(zip(frames, index)):
             i = int(i)
             if written[n] != 1 or on_existing == "overwrite":
@@ -1458,6 +1540,10 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
             elif on_existing == "newer" and stamps_of[f.path] > stamps[n]:
                 todo.append((f, i))
                 replaced += 1
+            elif stamp_array is not None and stamps[n] > stamps_of[f.path]:
+                # Skipped, and the frame there came from a newer file:
+                # these bytes are not in the store.
+                superseded += 1
         skipped = len(frames) - len(todo)
         added = (_add_gridded_variables(
                      zgroup, [f for f, _ in todo], axis=group_axis,
@@ -1515,6 +1601,8 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
             while handle:
                 with lock:
                     handle.pop().close()
+        _write_placement(zgroup, todo, placement_of, axis=group_axis,
+                         compressors=_compressors(compress, zstd_clevel))
         for frame, t in todo:
             zgroup["frame_written"][t] = 1
             if stamp_array is not None:
@@ -1522,6 +1610,7 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
         return {**created, "frames_written": len(todo),
                 "time_chunk": int(zgroup.attrs.get("time_chunk") or 1),
                 "frames_skipped": skipped, "frames_replaced": replaced,
+                "frames_superseded": superseded,
                 "dropped": sorted(dropped), "absent": sorted(absent),
                 "added": added, "extended": extended, "axis": group_axis}
 
@@ -1557,6 +1646,7 @@ def write_gridded_segment(store, paths: Iterable[str | os.PathLike], *,
         "frames_written": int(info.get("frames_written", 0)),
         "frames_skipped": int(info.get("frames_skipped", 0)),
         "frames_replaced": int(info.get("frames_replaced", 0)),
+        "frames_superseded": int(info.get("frames_superseded", 0)),
         "created": bool(info.get("created")),
         "axis_extended": bool(info.get("extended")),
         "added_variables": info.get("added", []),
@@ -1716,7 +1806,7 @@ __all__ = [
     "VERIFY_SCHEMA", "SCHEMES", "MAX_CHUNK_BYTES", "MANIFEST_SPLIT_CHUNKS",
     "IcechunkStoreRefused", "TimeAxis", "RetryPolicy", "CommitResult",
     "Frame", "FRAME_PUBLISHED", "GROWING_TIME_COORD_CHUNK",
-    "is_store_url", "storage_from_url", "repository_config",
+    "PLACEMENT_ATTRS", "placement_array_name", "is_store_url", "storage_from_url", "repository_config",
     "open_repository", "parse_interval", "commit_with_retry",
     "init_site_store", "write_site_region", "wrfout_frames",
     "write_gridded_segment", "verify_repository", "main",
