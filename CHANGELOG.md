@@ -27,6 +27,26 @@ New:
   float16, so temperature steps 0.125-0.25 K and height 16 m above about
   100 hPa; the live objects are float32.
 
+- `woof track plan` writes a nested, track-following `woof go` run for
+  any 3-D path (time, lat, lon, height). It reads the path with the
+  `woof track inspect` column options. It builds a 1.5 km / 300 m / 100 m
+  tree with the `woof domain` machinery: d01 covers the path's envelope
+  plus a margin, and d03 is born from d02 an hour before launch and writes
+  history only in flight. The column has 256 band-biased levels, and the
+  model top sits 7 km above the path's peak. Only d03 is exported to
+  Icechunk. Each run also gets a `plan.json` with cells, GPU memory,
+  cell-steps, a wall-time range and output volume, and, with
+  `--job-json`, a `woof.go-job.v1` document, inline or by URL under
+  `--inputs-prefix`. Several paths, or a folder, plan in one call with
+  `--names-from stem`. Where this woof has no track itinerary, LES-nest
+  tree suite or lean track history preset, the plan uses static nests,
+  explicit nest physics keys or the `minimal` preset, and its notes say
+  so. When the source was picked automatically and its column stops below
+  the model top, the plan falls back to GFS. A window the source serves
+  only three-hourly (UKV past T+54) is planned and fetched on 3-hour
+  boundaries. A path too fast for the relocation cadence is refused with
+  a cadence that works.
+
 - A delayed nest can now be born from its live parent. Set
   `start_from = "parent"` on a `[[domain]]` whose `start_time` is later
   than its parent's, and `woof go` interpolates the parent's state onto
