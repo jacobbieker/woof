@@ -315,8 +315,52 @@ woof go case.toml --icechunk file:///scratch/uk-48h.icechunk
 
 The table also takes `branch` (default `main`), `compress` (default
 `true`: Blosc zstd with bitshuffle), `zstd_clevel` (default 5),
-`group_prefix` and `threads` (arrays encoded at once, default 4).
-`--icechunk URL` replaces only the URL.
+`group_prefix`, `threads` (arrays encoded at once, default 4), `domains`
+and `delete_after_commit` (below). `--icechunk URL` replaces only the URL.
+
+**Long runs and series of runs.** One table can serve every run of a
+series, each into its own repository, on a disk that holds only a few
+frames:
+
+```toml
+[experiment]
+name = "run-001"
+
+[output]
+icechunk = { url = "s3://my-bucket/woof-outputs/{name}.icechunk",
+             domains = [3], delete_after_commit = true }
+```
+
+- `{name}` in `url` is the config's `[experiment] name`; the URL above
+  becomes `s3://my-bucket/woof-outputs/run-001.icechunk`. It also works
+  in `--icechunk`, and `woof icechunk-export --url ... --name NAME` fills
+  it by hand. A name that is not a plain path segment (letters, digits,
+  `.`, `_`, `-`) is refused, and so is a placeholder in a config without
+  a name.
+- `domains = [3]` exports only those grid ids. The other domains' frames
+  stay on disk, untouched, and are counted in `status.json` as
+  `frames_skipped` (with `skipped_domains`); they do not stop the export
+  from ending `complete`.
+- `delete_after_commit = true` unlinks each exported wrfout once the
+  store holds it. A file is deleted only after its own commit has
+  landed and been recorded in `state.json`, only when it is still the
+  file that was exported (same inode, size and mtime, so a frame a history
+  rewind republished is kept and exported in its turn), and never when the
+  store refused it or skipped it for a newer file's frame of the same
+  time. The file is first renamed to a hidden name beside it and checked
+  there, so a file published onto the name at that moment is put back
+  rather than deleted. A store that cannot be reached when an export
+  resumes ends it `failed`, so the record of deleted frames is kept. A resumed export first checks `state.json` against the
+  store, deletes any exported frame still on disk (an exporter killed
+  between its commit and the unlink), and still counts the deleted
+  frames in `frames_found` and `frames_exported` (`frames_deleted` says how
+  many it removed). The ready markers stay. `go` refuses this option
+  unless the run asks for no pictures (`--products none`), because the
+  render stage reads the frames from disk after the forecast, and it
+  refuses it beside `[simulated_radar]` too. The forecast already tolerates
+  frames that vanish after they are published: its receipts keep the
+  writer's SHA-256 for a missing frame, and a health-recovery rewind skips
+  a frame that has already been deleted.
 
 **How it runs.** `go` starts a separate process (`python -m
 woof.icechunk_export`, at `nice` 10) just before the forecast. That
@@ -358,6 +402,27 @@ axis starts at its first frame, and grows by one step as each later frame
 arrives. A field the model first writes after t=0, such as `REFL_10CM`,
 is created on the first frame that carries it, and is NaN before that
 frame. Exporting the same frames after the run produces the same store.
+A nest with `history_begin_s` writes no frame before it, so its group
+starts at `history_begin_s`. A frame older than a group's first time is
+refused, never prepended.
+
+**Moving nests.** A relocated nest keeps its shape, and its `XLAT`,
+`XLONG` and `HGT` have a `Time` dimension, so they follow it frame by
+frame. The group's `wrf_*` attributes are copied from the group's first
+frame and are never rewritten. Read `wrf_CEN_LAT` from the attributes and
+you get frame 0's centre. The global attributes a relocation changes
+(`I_PARENT_START`, `J_PARENT_START`, `CEN_LAT`, `CEN_LON`) are also stored
+per frame, as `(Time,)` arrays with the same `wrf_` names, listed in the
+group's `placement_variables` attribute. A frame without one of these
+attributes holds 0 (the parent starts) or NaN (the centre) there. With
+xarray:
+
+```python
+ds = xr.open_zarr(repo.readonly_session("main").store, group="d03",
+                  consolidated=False)
+ds["wrf_I_PARENT_START"].sel(Time="2026-06-01T15:00")   # where the nest was then
+ds.attrs["wrf_I_PARENT_START"]                         # frame 0 only
+```
 
 **Resumed runs.** A forecast resumed from a checkpoint into a new folder
 (`woof go ... --restart ... --icechunk URL`) continues the same groups.

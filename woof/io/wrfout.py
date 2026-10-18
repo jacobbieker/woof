@@ -3489,6 +3489,25 @@ class PerDomainWrfoutWriters:
         if getattr(self, "_simulated_radar", None) is not None:
             self._simulated_radar.drain()
 
+    @staticmethod
+    def _rewind_marker(marker_root: Path, path: Path, resolved: Path):
+        """The ready marker of a rewound frame, as a removal (none when
+        it has no marker); a linked marker or one naming another
+        publication is refused."""
+        marker = marker_root / f"{path.name}.json"
+        if not (marker.exists() or marker.is_symlink()):
+            return []
+        if (marker.is_symlink() or not marker.resolve().is_relative_to(
+                marker_root.resolve())):
+            raise ValueError(f"history rewind refuses linked marker {marker}")
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        if (data.get("schema") != "gpuwm.frame-ready/v1"
+                or data.get("path") != str(resolved)):
+            raise ValueError(f"history rewind marker names another "
+                             f"publication: {marker}")
+        return [(marker, {"path": str(marker.resolve()),
+                          "bytes": marker.stat().st_size})]
+
     def rewind_to_checkpoint(self, valid_time, *, marker_directory=None,
                              before_delete=None):
         """Discard only this writer's unchanged frames after a retry seam.
@@ -3510,11 +3529,30 @@ class PerDomainWrfoutWriters:
         proofs = {Path(proof.address): proof for proof in self.completed_records}
         victims = set()
         removals = []
+        handed_off = []
         for path in sorted(self._published_paths):
             instant = _frame_valid(path)
             if instant is None:
                 raise ValueError(f"history rewind cannot date owned frame {path}")
             if instant <= valid_time:
+                continue
+            if not os.path.lexists(path):
+                # Handed off: a history consumer (the Icechunk export's
+                # delete_after_commit) removed it after it was published.
+                # Nothing is left to delete; its writer proof is the
+                # receipt, as at finalization (output_identity.file_records
+                # allow_missing), and its ready marker still goes.
+                proof = proofs.get(path.absolute())
+                if proof is None:
+                    raise ValueError(f"history rewind lacks writer-completion "
+                                     f"proof for handed-off frame {path}")
+                victims.add(path)
+                handed_off.append({**proof.record(), "available": False,
+                                   "identity_source": "writer-completion"})
+                resolved = Path(proof.path)
+                if marker_directory is not None:
+                    removals.extend(self._rewind_marker(
+                        Path(marker_directory), path, resolved))
                 continue
             resolved = path.resolve(strict=True)
             if path.is_symlink() or not resolved.is_relative_to(root):
@@ -3528,22 +3566,11 @@ class PerDomainWrfoutWriters:
             removals.append((path, record))
             victims.add(path)
             if marker_directory is not None:
-                marker_root = Path(marker_directory)
-                marker = marker_root / f"{path.name}.json"
-                if marker.exists() or marker.is_symlink():
-                    if (marker.is_symlink() or not marker.resolve().is_relative_to(
-                            marker_root.resolve())):
-                        raise ValueError(f"history rewind refuses linked marker {marker}")
-                    data = json.loads(marker.read_text(encoding="utf-8"))
-                    if (data.get("schema") != "gpuwm.frame-ready/v1"
-                            or data.get("path") != str(resolved)):
-                        raise ValueError(f"history rewind marker names another "
-                                         f"publication: {marker}")
-                    removals.append((marker, {"path": str(marker.resolve()),
-                                              "bytes": marker.stat().st_size}))
+                removals.extend(self._rewind_marker(
+                    Path(marker_directory), path, resolved))
         if before_delete is not None:
-            before_delete([record for _path, record in removals])
-        receipts = []
+            before_delete([record for _path, record in removals] + handed_off)
+        receipts = list(handed_off)
         for path, record in removals:
             path.unlink()
             receipts.append(record)

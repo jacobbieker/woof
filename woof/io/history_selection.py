@@ -577,7 +577,8 @@ def output_key_rows(*, tree_wide: bool = True):
         "icechunk", ("string", "table"), None,
         "woof go exports each history frame to this Icechunk repository "
         "as it lands: a URL, or { url, branch, compress, zstd_clevel, "
-        "group_prefix, threads }."),) if tree_wide else ()
+        "group_prefix, threads, domains, delete_after_commit }; {name} "
+        "in url is the [experiment] name."),) if tree_wide else ()
     return key_rows(*tree_rows,
         KeyRow("preset", "string", "full",
                "Named history set: full (default), minimal, severe, "
@@ -938,8 +939,10 @@ class HistorySelection:
         if "icechunk" in table:
             from woof.icechunk_export import ExportOptions
 
+            # {name} in its url is woof go's to fill.
             ExportOptions.from_mapping(table["icechunk"], source=source,
-                                       base_dir=base_dir)
+                                       base_dir=base_dir,
+                                       allow_template=True)
         unknown = sorted(set(table) - OUTPUT_KEYS)
         if unknown:
             suggestions = "".join(
