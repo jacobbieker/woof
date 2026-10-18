@@ -324,6 +324,10 @@ class PlanTimes:
     cadence_s: int
     cycle: datetime
     start_hour: int
+    #: d03's history interval: the window opens and closes on its multiples
+    #: (from d03's start), which are whole d03 steps on every ladder
+    #: (_fit_root_step) and whole seconds.
+    history_s: float = 1.0
 
     @property
     def run_seconds(self) -> int:
@@ -336,8 +340,11 @@ class PlanTimes:
     def history_window(self) -> tuple[int, int]:
         """d03's history_begin_s / history_end_s, from d03's start."""
 
-        begin = int(math.floor((self.launch - self.d03_start).total_seconds()))
-        end = int(math.ceil((self.landing - self.d03_start).total_seconds()))
+        grid = max(int(round(self.history_s)), 1)
+        begin = (self.launch - self.d03_start).total_seconds()
+        end = (self.landing - self.d03_start).total_seconds()
+        begin = int(math.floor(begin / grid)) * grid
+        end = int(math.ceil(end / grid)) * grid
         return max(begin, 0), end
 
 
@@ -375,7 +382,7 @@ def plan_times(track: Track3D, source: str, options: PlanOptions, *,
     return PlanTimes(start=_naive(start), end=_naive(end),
                      launch=_naive(launch), landing=_naive(landing),
                      d03_start=_naive(d03), cadence_s=cadence, cycle=cycle,
-                     start_hour=start_hour)
+                     start_hour=start_hour, history_s=float(options.history_s))
 
 
 def _align_d03_start(times: PlanTimes, exp) -> PlanTimes:
