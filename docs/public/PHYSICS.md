@@ -105,7 +105,7 @@ record, and `tests/test_physics_composition_walk.py` regenerates it on
 every release cut and compares it byte for byte. As measured:
 
 - **3557 of 11431 admission attempts are accepted**, covering **3549 distinct
-  accepted suites**, against 32 registered templates. The presets are a
+  accepted suites**, against 34 registered templates. The presets are a
   corner of the space, not the space.
 - **Every accepted run keeps every switch the file set**, checked
   against the resolved per-domain `RunConfig`. Zero rewrites. An

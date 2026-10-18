@@ -666,13 +666,26 @@ SMAGORINSKY_3D_PROFILE_ID = (
 CONSTANT_K_PROFILE_ID = (
     "wsm6-pbl-off-mm5-noah-constant-k-v1"
 )
-#: The seven composition suites in the order every route declaration
-#: appends them (tools/build_registry.py _SUITELESS_TEMPLATES), so a
-#: per-source list and the registry route it is checked against cannot
-#: disagree about their order.  The aerosol-aware suite joined the other
-#: six when its cold-start arm landed (audit R-044): the prepared
-#: single-domain runner builds its initialization like any other suite's,
-#: with nwfa/nifa from the WIF monthly climatology.
+#: The root of the LES-nest tree suite (:data:`LES_NEST_TREE_PROFILE_ID`):
+#: :data:`MYNN_NOAHMP_RTE_RRTMGP_PROFILE_ID` with the microphysics moved to
+#: Thompson and radt 10, cumulus off.
+THOMPSON_MYNN_NOAHMP_RTE_RRTMGP_PROFILE_ID = (
+    "thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-v1"
+)
+#: What every nest of that tree runs: the root above with the PBL off and
+#: the 1.5-order prognostic TKE closure (km_opt 2, diff_opt 2, isfflx 1)
+#: in its place, radt 5.
+THOMPSON_LES_NOAHMP_RTE_RRTMGP_PROFILE_ID = (
+    "thompson-mp8-pbl-off-mynn-noahmp-tke-1-5-order-rte-rrtmgp-v1"
+)
+#: The composition suites in the order every route declaration appends
+#: them (tools/build_registry.py _SUITELESS_TEMPLATES), so a per-source
+#: list and the registry route it is checked against cannot disagree
+#: about their order.  The aerosol-aware suite joined the other six when
+#: its cold-start arm landed (audit R-044): the prepared single-domain
+#: runner builds its initialization like any other suite's, with nwfa/nifa
+#: from the WIF monthly climatology.  The last two are the halves of the
+#: LES-nest tree suite (:data:`TREE_PHYSICS_PROFILES`).
 COMPOSITION_SUITE_PROFILE_IDS = (
     MILBRANDT2MOM_NTIEDTKE_PROFILE_ID,
     WDM6_GRELL_FREITAS_PROFILE_ID,
@@ -681,6 +694,8 @@ COMPOSITION_SUITE_PROFILE_IDS = (
     TKE_1_5_ORDER_PROFILE_ID,
     SMAGORINSKY_3D_PROFILE_ID,
     CONSTANT_K_PROFILE_ID,
+    THOMPSON_MYNN_NOAHMP_RTE_RRTMGP_PROFILE_ID,
+    THOMPSON_LES_NOAHMP_RTE_RRTMGP_PROFILE_ID,
 )
 #: Option-identity knobs that are NOT part of a shipped profile's runtime
 #: product (audit R-067, deriving what used to be nineteen hand-typed
@@ -920,6 +935,107 @@ def identify_single_domain_profile(run_config) -> str | None:
 #: Sentinel for :func:`identify_single_domain_profile`: a config that
 #: lacks a switch entirely never matches a profile that pins it.
 _MISSING = object()
+
+
+# ---------------------------------------------------------------------------
+# Tree suites: one id for a root template and the template its nests run.
+#
+# A registry template is ONE component tuple, and every profile above is
+# one.  A tree whose nests run a different closure from their root -- a
+# mesoscale root over large-eddy nests -- is two tuples, and until this
+# table the only way to ask for one was to hand-write the nest columns.
+# Each half is an ordinary registered template (so each domain's tuple is a
+# named composition, not merely a reachable one, and tree governance in
+# :func:`multi_domain_physics_selection` admits it with no acknowledgement);
+# the tree id pairs them and states the per-domain run keys the registry
+# has no parameter row for.
+@dataclass(frozen=True)
+class TreePhysicsProfile:
+    """A root template, the template every nest runs, and nest-only keys.
+
+    ``nest_settings`` are run keys a nest table writes that no registry
+    template can state (``mix_isotropic`` has no parameter row), each with
+    its reason in ``reasons``.  Every key :meth:`nest_overrides` returns is
+    a per-domain key the experiment loader accepts on a ``[[domain]]``
+    table (``woof.experiment._DOMAIN_RUN_OVERRIDES``).
+    """
+
+    tree_id: str
+    root: str
+    nest: str
+    label: str
+    nest_settings: Mapping[str, object]
+    reasons: Mapping[str, str]
+
+    @property
+    def templates(self) -> tuple[str, str]:
+        return (self.root, self.nest)
+
+    def nest_overrides(self) -> dict[str, object]:
+        """What a nest table writes over the root's ``[shared]`` switches.
+
+        Derived, not tabled: the switches where the nest template's runtime
+        product differs from the root's, plus :attr:`nest_settings`.  A
+        root switch the nest product does not carry (a PBL option's own
+        knob, under PBL off) is left to ``[shared]``, where nothing on the
+        nest reads it.
+        """
+
+        root = single_domain_runtime_switches(self.root)
+        nest = single_domain_runtime_switches(self.nest)
+        changed = {name: value for name, value in nest.items()
+                   if root.get(name, _MISSING) != value}
+        return {**changed, **self.nest_settings}
+
+
+#: The LES-nest tree suite: a 1-2 km Thompson/MYNN/Noah-MP/RTE+RRTMGP root
+#: (radt 10) over 100-300 m nests that turn the PBL off and close the
+#: turbulence with the 1.5-order prognostic TKE (radt 5).  Built for deep
+#: columns (256 levels, dense near the surface and again at 15-25 km, p_top
+#: down to a few hundred Pa) under a relocating innermost nest.
+LES_NEST_TREE_PROFILE_ID = "thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-les-nest-v1"
+
+TREE_PHYSICS_PROFILES: Mapping[str, TreePhysicsProfile] = MappingProxyType({
+    LES_NEST_TREE_PROFILE_ID: TreePhysicsProfile(
+        tree_id=LES_NEST_TREE_PROFILE_ID,
+        root=THOMPSON_MYNN_NOAHMP_RTE_RRTMGP_PROFILE_ID,
+        nest=THOMPSON_LES_NOAHMP_RTE_RRTMGP_PROFILE_ID,
+        label=("Thompson + MYNN + Noah-MP + RTE+RRTMGP root, LES nests "
+               "(PBL off, 1.5-order TKE)"),
+        nest_settings=MappingProxyType({"mix_isotropic": 1}),
+        reasons=MappingProxyType({
+            # docs/public/LES.md section 4, "The mixing length on every
+            # shipped LES child".  Under mix_isotropic = 0 WRF hands
+            # horizontal_diffusion_w_2 the VERTICAL coefficient, capped
+            # at mix_upper_bound*dz^2/dt and differenced over dx, so the
+            # reachable explicit diffusion number is
+            # mix_upper_bound*(dz/dx)^2, and past 1/4 the 2dx mode flips
+            # sign.  A 256-level column dense near the surface and at
+            # 15-25 km still carries layers of a few hundred metres in
+            # between: at the default mix_upper_bound 0.1, dz 300 m over
+            # the 100 m nest is 0.9 and dz 500 m over the 300 m nest is
+            # 0.28, both past the limit (the 100 m tornado tree that ran
+            # at 4.23 blew up).  mix_isotropic = 1 uses one length for
+            # every axis, which is the form every shipped LES child runs
+            # and the one under which divergence D8 is arithmetically
+            # inert.  Written explicitly rather than left to the loader's
+            # auto-switch, so the file says what it runs.
+            "mix_isotropic": (
+                "isotropic mixing length: with layers up to a few hundred "
+                "metres over a 100-300 m nest, mix_upper_bound*(dz/dx)^2 "
+                "exceeds the 1/4 explicit-diffusion limit under "
+                "mix_isotropic = 0 (docs/public/LES.md section 4)"),
+        }),
+    ),
+})
+
+
+def tree_physics_profile(profile: object) -> TreePhysicsProfile | None:
+    """The tree suite ``profile`` names, or ``None`` for any other id."""
+
+    if not isinstance(profile, str):
+        return None
+    return TREE_PHYSICS_PROFILES.get(profile)
 
 
 #: Runtime switches a WRF namelist cannot state accurately, so somebody has
@@ -2391,6 +2507,15 @@ def validate_single_domain_physics_profile(
     registry = physics_registry()
     profile = canonical_template_id(profile, registry)
     template = registry["templates"].get(profile)
+    tree = tree_physics_profile(profile)
+    if tree is not None:
+        raise ValueError(layered(
+            f"physics profile {profile!r} is a tree suite, which a "
+            f"one-domain run cannot be: name its root {tree.root!r} for a "
+            "single domain",
+            f"A tree suite pairs a root template ({tree.root}) with the "
+            f"template every nest runs ({tree.nest}); with no nest, only "
+            "the root half applies."))
     if not isinstance(template, Mapping):
         raise ValueError(
             f"physics profile {profile!r} is not a registered fixed template")
@@ -2901,14 +3026,38 @@ def multi_domain_physics_selection(
                 for key in selector_keys
             },
         }
+    tree = tree_physics_profile(profile)
+    bound_templates: tuple[str, ...] = (
+        () if profile is None else
+        tree.templates if tree is not None else (profile,))
     if profile is not None:
         # The root carries the named profile exactly as the single-domain
         # door would check it, so an explicitly bound tree is refused for
-        # the same reason and in the same words.
+        # the same reason and in the same words.  A TREE suite binds its
+        # root template there, and every nest to its nest template's
+        # components: the nest columns the wizard sized (diff_6th_factor,
+        # epssm, history cadence) are grid decisions, as they are for any
+        # bound tree, but a nest that runs another closure is not this
+        # suite.
         validate_single_domain_physics_profile(
-            profile, config=domain_settings[grid_ids[0]],
+            tree.root if tree is not None else profile,
+            config=domain_settings[grid_ids[0]],
             expert_acknowledgements=expert_acknowledgements,
             acknowledgement_provenance=acknowledgement_provenance)
+    if tree is not None:
+        expected = dict(registry["templates"][tree.nest]["components"])
+        for grid_id in grid_ids[1:]:
+            selected = domains[str(grid_id)]["components"]
+            if selected != expected:
+                raise ValueError(layered(
+                    f"d{grid_id:02d} does not run the nest half of tree "
+                    f"suite {tree.tree_id!r}: components={selected}, "
+                    f"expected {tree.nest!r}={expected}",
+                    "A tree suite binds its root to "
+                    f"{tree.root!r} and every nest to {tree.nest!r}; "
+                    "re-emit the config with `woof domain "
+                    f"--physics-profile {tree.tree_id}`, or drop the "
+                    "profile and the tree is governed tuple by tuple."))
     used, provenance = _acknowledgement_receipt(
         acknowledged, acknowledged, acknowledgement_provenance)
     selected_options: dict[str, list[str]] = {}
@@ -2917,12 +3066,21 @@ def multi_domain_physics_selection(
             if option_id not in selected_options.setdefault(
                     component_id, []):
                 selected_options[component_id].append(option_id)
+    receipt = registry_physics_receipt(
+        registry, options=selected_options,
+        profile=bound_templates[0] if bound_templates else None)
+    # A tree suite runs on both of its templates, so the receipt binds
+    # both template parts.
+    for template_id in bound_templates[1:]:
+        receipt["parts"].update(registry_physics_receipt(
+            registry, options=selected_options,
+            profile=template_id)["parts"])
+    receipt["parts"] = dict(sorted(receipt["parts"].items()))
     return {
         "schema": MULTI_DOMAIN_SELECTION_SCHEMA,
         "profile": profile,
         "registry_sha256": registry_sha256(registry),
-        "registry_physics": registry_physics_receipt(
-            registry, options=selected_options, profile=profile),
+        "registry_physics": receipt,
         "domains": domains,
         "acknowledgements": used,
         "acknowledgement_provenance": provenance,
@@ -3821,6 +3979,12 @@ __all__ = [
     "NOAHMP_MEASURED_COLUMN_CEILING",
     "NOAHMP_MEASURED_SLAB_CALL_SECONDS",
     "COMPOSITION_SUITE_PROFILE_IDS",
+    "LES_NEST_TREE_PROFILE_ID",
+    "THOMPSON_LES_NOAHMP_RTE_RRTMGP_PROFILE_ID",
+    "THOMPSON_MYNN_NOAHMP_RTE_RRTMGP_PROFILE_ID",
+    "TREE_PHYSICS_PROFILES",
+    "TreePhysicsProfile",
+    "tree_physics_profile",
     "SINGLE_DOMAIN_PHYSICS_PROFILES",
     "route_physics_profiles",
     "MORRISON_PROFILE_ID",

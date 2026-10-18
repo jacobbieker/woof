@@ -1085,6 +1085,12 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
     "HFX": ("UPWARD HEAT FLUX AT THE SURFACE", "W m-2"),
     "QFX": ("UPWARD MOISTURE FLUX AT THE SURFACE", "kg m-2 s-1"),
     "LH": ("LATENT HEAT FLUX AT THE SURFACE", "W m-2"),
+    # km_opt=2's prognostic subgrid TKE (state.tke, mass grid, no stagger).
+    # Registry.EM_COMMON:312 (``state real tke ikj dyn_em 2 - r``) puts it
+    # in WRF's restart stream only, so publishing it is an extension of
+    # WRF's history inventory, as EXCH_H is; the description and units are
+    # WRF's own for the carrier.  Present only on a km_opt=2 domain.
+    "TKE": ("TURBULENCE KINETIC ENERGY", "m2 s-2"),
     "TKE_SASE": ("SASE prognostic subgrid turbulence kinetic energy",
                  "m2 s-2"),
     "TKE_SHINHONG": ("Shin-Hong published subgrid turbulence kinetic "

@@ -1941,11 +1941,35 @@ def _restore_streamed_child_at_start(owner, node, restore, build):
 
 
 def validate_physics_profile(exp, *, source: str, profile: str | None):
-    """Assert one named suite on every domain; never rewrite configuration."""
+    """Assert one named suite on every domain; never rewrite configuration.
+
+    A TREE suite (:data:`woof.physics_compat.TREE_PHYSICS_PROFILES`) is
+    asserted half by half: its root template on d01 and its nest template
+    on every nest, each switch for switch, so the receipt names the tree
+    and both halves it was checked against.
+    """
     if profile is None:
         return None
-    return prepared_single._validate_profile_switches(
-        exp, source=source, profile=profile, all_domains=True)
+    from woof.physics_compat import tree_physics_profile
+
+    tree = tree_physics_profile(profile)
+    if tree is None:
+        return prepared_single._validate_profile_switches(
+            exp, source=source, profile=profile, all_domains=True)
+    root = prepared_single._validate_profile_switches(
+        SimpleNamespace(root=exp.root, domains=(exp.root,)),
+        source=source, profile=tree.root, all_domains=True)
+    nest = prepared_single._validate_profile_switches(
+        SimpleNamespace(root=exp.root, domains=tuple(exp.domains[1:])),
+        source=source, profile=tree.nest, all_domains=True)
+    return {
+        **root,
+        "profile": profile,
+        "tree": {"root": tree.root, "nest": tree.nest,
+                 "nest_resolved": nest["resolved"]},
+        "validated_domains": [*root["validated_domains"],
+                              *nest["validated_domains"]],
+    }
 
 
 @prepared_single._recording_input_verification

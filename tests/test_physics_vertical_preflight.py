@@ -256,3 +256,40 @@ def test_legacy_sw_layer_index_validation(count):
     from woof.core.rrtmg_sw import _radiation_layer_count
     with pytest.raises(ValueError,match='layer count'):
         _radiation_layer_count(count)
+
+
+@pytest.mark.parametrize(("p_top", "longwave_cap"),
+                         ((270.0, 1), (450.0, 1), (1000.0, 3), (4000.0, 10)))
+@pytest.mark.parametrize("half", ("root", "nest"))
+def test_the_les_tree_suite_admits_256_levels_under_a_deep_top(
+        half, p_top, longwave_cap):
+    """Both halves of the LES-nest tree suite at the balloon column.
+
+    256 mass levels under a 2.7-40 hPa top: every component the suite runs
+    (Thompson, MYNN or the PBL-off TKE closure, the MYNN surface layer,
+    Noah-MP, RTE+RRTMGP on both streams) admits the depth, and the
+    radiation column carries WRF's nint(p_top / 400 Pa) longwave cap layers
+    and one shortwave layer on top of it.  257 is refused by number.
+    """
+    from woof.physics_compat import (LES_NEST_TREE_PROFILE_ID,
+                                     TREE_PHYSICS_PROFILES,
+                                     single_domain_runtime_switches)
+
+    tree = TREE_PHYSICS_PROFILES[LES_NEST_TREE_PROFILE_ID]
+    switches = single_domain_runtime_switches(getattr(tree, half))
+    receipt = validate_resolved_physics_vertical_levels(
+        {**switches, "nz": 256}, p_top=p_top)
+    totals = {
+        check["component"]: check["total_layers"]
+        for check in receipt["checks"]
+        if check["component"].startswith("RTE+RRTMGP")
+    }
+    assert totals == {"RTE+RRTMGP longwave": 256 + longwave_cap,
+                      "RTE+RRTMGP shortwave": 257}
+    assert any(check["component"] == "Thompson microphysics"
+               for check in receipt["checks"])
+
+    with pytest.raises(PhysicsVerticalPreflightError,
+                       match="RTE\\+RRTMGP longwave requires model levels"):
+        validate_resolved_physics_vertical_levels(
+            {**switches, "nz": 257}, p_top=p_top)

@@ -316,6 +316,50 @@ WINDFARM_FIELD_REASONS: dict[str, str] = {
                "icing droplet MVD",
 }
 
+#: The ``balloon`` preset: what a high-altitude balloon track and the
+#: environment along it are sampled from, at the 2-minute cadence such a
+#: track needs.  Its reader is a trajectory integrator, not a render panel,
+#: so the tape is the column state at every level and the near-surface state
+#: the launch and landing read -- and nothing else, because at 256 levels
+#: every 3-D volume costs 4 bytes per cell per frame and the 2-D planes are
+#: rounding error beside them.
+#:
+#: * Winds through the whole column (``U``, ``V``, ``W``), rotated to
+#:   earth-relative with ``SINALPHA``/``COSALPHA``: the trajectory itself.
+#: * Theta, pressure and geopotential (``T``, ``P``/``PB``, ``PH``/``PHB``):
+#:   the balloon's float altitude, ascent rate and gas temperature.
+#: * Water vapour and the cloud, ice and rain mixing ratios: icing, wetting
+#:   and radiative loading of the envelope.
+#: * The subgrid turbulence energy, ONE volume per domain: ``TKE`` on a
+#:   km_opt=2 large-eddy domain, ``QKE`` (twice the TKE) on a MYNN domain.
+#:   Each is produced only where its closure runs, so neither costs a
+#:   domain the other's volume.
+#: * The near-surface state, surface fluxes and radiation (``PSFC``, ``T2``,
+#:   ``Q2``, ``U10``, ``V10``, ``HFX``, ``LH``, ``UST``, ``SWDOWN``,
+#:   ``GLW``) and the grid-scale precipitation accumulator ``RAINNC``.
+#:
+#: A member the run does not produce is absent, the rule every preset
+#: follows (``QICE`` needs an ice scheme, ``SWDOWN``/``GLW`` radiation).
+#: Thirteen volumes per domain, 52 bytes per cell per frame before
+#: staggering; the disk planner prices a 256-level domain at 52.4 with the
+#: staggered faces and the 2-D planes (``tests/test_history_selection.py``).
+#: Its render-product count has not been measured, and the plan-time
+#: warning says so rather than borrowing the full tape's.
+_BALLOON_FIELDS: frozenset[str] = frozenset({
+    # Column dynamics and the vertical coordinate.
+    "U", "V", "W", "T", "P", "PB", "PH", "PHB",
+    # Moisture and hydrometeors.
+    "QVAPOR", "QCLOUD", "QICE", "QRAIN",
+    # Subgrid turbulence energy: km_opt=2's TKE, MYNN's QKE.
+    "TKE", "QKE",
+    # Near-surface state, surface fluxes and surface radiation.
+    "PSFC", "T2", "Q2", "U10", "V10", "HFX", "LH", "UST", "SWDOWN", "GLW",
+    # Grid-scale precipitation accumulator.
+    "RAINNC",
+    # Grid rotation, for earth-relative winds.
+    "SINALPHA", "COSALPHA",
+})
+
 #: :data:`STRUCTURAL_FIELDS` members the ``windfarm`` preset does NOT carry:
 #: the two volumes.  Every other structural field stays forced.
 WINDFARM_STRUCTURAL_EXEMPT: frozenset[str] = frozenset({"T", "PHB"})
@@ -338,6 +382,7 @@ HISTORY_PRESETS: dict[str, frozenset[str] | None] = {
     "severe": _MINIMAL_FIELDS | _SEVERE_EXTRA_FIELDS,
     "energy": _ENERGY_FIELDS,
     "windfarm": _WINDFARM_FIELDS,
+    "balloon": _BALLOON_FIELDS,
 }
 
 #: What each named preset costs in RENDER PRODUCTS, not in variables.
@@ -582,7 +627,7 @@ def output_key_rows(*, tree_wide: bool = True):
     return key_rows(*tree_rows,
         KeyRow("preset", "string", "full",
                "Named history set: full (default), minimal, severe, "
-               "energy or windfarm."),
+               "energy, windfarm or balloon."),
         KeyRow("history_vars", "array", None,
                "Explicit list of wrfout variables to keep; excludes "
                "history_drop and a non-full preset.", items="string"),
@@ -843,7 +888,10 @@ class HistorySelection:
                 "samples (column winds and theta, hydrometeors, the "
                 "near-surface state, SWDOWN/SWDDNI/SWDDIF/COSZEN); "
                 "'windfarm' keeps only 2-D planes: the hub-height wind and "
-                "scalars, the near-surface state and the gust family.")
+                "scalars, the near-surface state and the gust family; "
+                "'balloon' keeps the column winds, theta, pressure, "
+                "geopotential, moisture, hydrometeors and subgrid TKE with "
+                "the near-surface state and fluxes.")
         if self.history_vars and self.history_drop:
             raise ValueError(
                 f"[output] of {self.source} sets both history_vars and "
@@ -1119,8 +1167,26 @@ class HistorySelection:
             # The ladder's first rung, measured: a tape without T does not
             # open in rw_wrfbatch at all (the windfarm preset's choice).
             return 0, total, exact
+        if self._unmeasured_preset:
+            # No measurement exists, so the full inventory's count is the
+            # only figure that can be stated, and only as a bound.
+            return total, total, False
         kept = PRESET_PRODUCT_COUNTS.get(self.preset, total)
         return kept, total, exact
+
+    @property
+    def _unmeasured_preset(self) -> bool:
+        """A named preset no product count was ever measured for.
+
+        ``balloon``: its reader is a trajectory integrator, and its tape has
+        not been put through ``rw_wrfbatch --list-products``.  Such a
+        preset's cost is stated as unknown rather than borrowed from the
+        full inventory it is not.
+        """
+
+        return (not self.history_vars
+                and self.preset not in PRESET_PRODUCT_COUNTS
+                and self.preset not in SEPARATELY_MEASURED_PRESET_PRODUCT_COUNTS)
 
     def warn_lost_products(self, produced, *, where: str) -> None:
         """Name the render products this selection kills, at plan time.
@@ -1157,6 +1223,12 @@ class HistorySelection:
                     f"keeps at most {kept} of {total} render products (an "
                     f"upper bound: this selection narrows "
                     f"preset={self.preset} further; {separate[2]})")
+        elif self.keeps("T") and self._unmeasured_preset:
+            cost = (f"has no measured render-product count: "
+                    f"preset={self.preset} was never put through rw_wrfbatch "
+                    f"--list-products, so which of the {total} products "
+                    "the full inventory renders it keeps is not known "
+                    "beyond the losses named here")
         elif not self.keeps("T"):
             cost = (f"keeps 0 of {total} render products: it sheds T, and a "
                     "tape without T does not open in rw_wrfbatch (the first "

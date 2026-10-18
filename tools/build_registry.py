@@ -7901,6 +7901,69 @@ _SUITELESS_TEMPLATES = (
             "invent values an oracle has not judged.",
         ),
     ),
+    # The two halves of the LES-nest tree suite
+    # (woof.physics_compat.TREE_PHYSICS_PROFILES): the mesoscale root it
+    # runs on d01, and the large-eddy composition every nest below it runs.
+    # Both are registered as ordinary templates so each domain's tuple is a
+    # NAMED registry composition, not merely a reachable one; the tree id
+    # that pairs them lives beside the profile ids, because a registry
+    # template is one tuple and a tree is two.
+    (
+        "thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-v1",
+        "wsm6-mynn-mynn-noahmp-rte-rrtmgp-expert-only-v1",
+        {"microphysics": "thompson-mp8"},
+        # The engine is stated rather than left to the 4/4 default, and the
+        # radiation interval is the tree root's: ten minutes at 1.5 km,
+        # where the base suite's twelve was chosen for a 3 km grid.
+        {"ra_rrtmg_variant": "rte-rrtmgp", "radt": 10.0},
+        "Thompson + MYNN PBL + MYNN surface layer + Noah-MP + cumulus off "
+        "+ RTE+RRTMGP",
+        (
+            "Composition candidate: no receipt covers the composed suite. "
+            "It is wsm6-mynn-mynn-noahmp-rte-rrtmgp-expert-only-v1 with ONE "
+            "component moved (microphysics wsm6-mp6 -> thompson-mp8) and "
+            "the radiation interval set to the LES-nest tree root's ten "
+            "minutes, so a paired run isolates the microphysics.",
+            "Registered as the root (d01) of the LES-nest tree suite "
+            "thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-les-nest-v1, whose "
+            "nests run thompson-mp8-pbl-off-mynn-noahmp-tke-1-5-order-"
+            "rte-rrtmgp-v1. Noah-MP is implemented-unverified: no woof/WRF "
+            "forecast trajectory comparison exists for it, and its glacier "
+            "refusal and sea-ice skip still apply.",
+        ),
+    ),
+    (
+        "thompson-mp8-pbl-off-mynn-noahmp-tke-1-5-order-rte-rrtmgp-v1",
+        "thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-v1",
+        {"pbl": "off", "turbulence": "tke-1.5-order"},
+        # diff_opt 2 and isfflx 1 are the parameters' own defaults, stated
+        # because the closure is defined by them: km_opt=2 is the metric
+        # (diff_opt=2) TKE closure only with the PBL off, and isfflx=1
+        # hands it the surface layer's fluxes instead of a prescribed one.
+        # Radiation runs every five minutes on a 100-300 m grid, where the
+        # resolved clouds turn over faster than the root's ten.
+        {"radt": 5.0, "diff_opt": 2, "isfflx": 1},
+        "Thompson + PBL off + MYNN surface layer + Noah-MP + 1.5-order TKE "
+        "mixing + RTE+RRTMGP",
+        (
+            "Composition candidate: no receipt covers the composed suite. "
+            "It is thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-v1 with the "
+            "PBL turned off and the 1.5-order prognostic TKE closure "
+            "(km_opt=2, diff_opt=2) in its place, so a paired run against "
+            "that root isolates the closure.",
+            "A three-dimensional mixing operator REPLACES the PBL "
+            "parameterization rather than joining it: km_opt=2 requires "
+            "bl_pbl_physics=0. The MYNN surface layer stays on (isfflx=1) "
+            "and supplies the fluxes Noah-MP and the closure's lower "
+            "boundary read. A PBL-off domain carries no PBLH.",
+            "This is a large-eddy composition for the 100-300 m nests of "
+            "the LES-nest tree suite; on a grid whose spacing does not "
+            "resolve the energy-containing eddies it under-mixes the "
+            "boundary layer. No full-physics real-data column above 192 "
+            "levels has been integrated yet (docs/public/LES.md section 4), "
+            "so 256 levels is the admitted ceiling, not a measured one.",
+        ),
+    ),
 )
 
 
@@ -7963,6 +8026,13 @@ for _composition_suite_id, _off_the_benchmark_because in (
          "the constant-K operator runs with the option's own zero "
          "coefficients, so there is nothing for a published wall-clock "
          "and skill comparison to be measured against"),
+        ("thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-v1",
+         "no native run of this composition exists, so there is no "
+         "namelist contract to gate its replay against"),
+        ("thompson-mp8-pbl-off-mynn-noahmp-tke-1-5-order-rte-rrtmgp-v1",
+         "a large-eddy closure on this route's fixed kilometre-scale "
+         "single domain has no native run behind it and no resolved "
+         "energy-containing eddies to close over"),
 ):
     _TEMPLATE_ROUTES_REFUSED.setdefault(_composition_suite_id, {})[
         _NATIVE_BENCHMARK_ROUTE] = (

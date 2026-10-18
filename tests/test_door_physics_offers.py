@@ -79,8 +79,15 @@ def test_both_doors_offer_the_same_suites():
     probe's two rows did.  Both read one derived table.
     """
 
+    from woof.physics_compat import TREE_PHYSICS_PROFILES
+
     nowcast = _nowcast_offers()
-    wizard = _wizard_offers()
+    # A tree suite pairs a root with the template its nests run, so only
+    # the configuration door, which authors trees, offers one; the nowcast
+    # door's single domain has no nest for its nest half.
+    wizard = [profile for profile in _wizard_offers()
+              if profile not in TREE_PHYSICS_PROFILES]
+    assert set(TREE_PHYSICS_PROFILES) <= set(_wizard_offers())
     assert nowcast, "the nowcast door offers no suite at all"
     assert wizard, "the configuration door offers no suite at all"
     assert set(nowcast) == set(wizard), {
