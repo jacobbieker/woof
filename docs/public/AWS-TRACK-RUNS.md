@@ -47,6 +47,61 @@ output URLs come only from the job documents and the command-line
 arguments you give. The configs, their companion files and any path data
 reach the instances at run time, in one of the two ways in section 2.
 
+## Planning the runs from paths
+
+`woof track plan` turns any 3-D path (time, lat, lon, height) into one
+ready-to-run track run: a config, its companion files, a `plan.json`
+estimate and, with `--job-json`, the job document. It reads the path with
+the same column options as `woof track inspect`. The run's name comes from
+`--name` (one path) or `--names-from stem` (several paths, or a folder).
+
+```bash
+woof track plan path-001.csv --name run-001 --out ./my-runs \
+  --time-col time --lat-col lat --lon-col lon --height-col height \
+  --icechunk-url "s3://YOUR-BUCKET/woof-outputs/track-runs/{name}.icechunk" \
+  --job-json --inputs-prefix s3://YOUR-BUCKET/inputs/
+```
+
+Each run lands in `OUT/<name>/`:
+
+- `<name>.toml`, a three-domain tree built by the `woof domain`
+  machinery. d01 (1.5 km) is static and covers the path's envelope plus
+  `--margin-km` (60). d02 (300 m, 72 km) and d03 (100 m, 32.4 km) start
+  centred on the path. The tree starts `--spinup-h` (3) before launch,
+  rounded down to the source's forcing cadence, and ends at landing,
+  rounded up. d03 is born from d02 (`start_from = "parent"`)
+  `--d03-spinup-h` (1) before launch. It writes history every
+  `--history-s` (120) from launch to landing, and only d03 is exported
+  to Icechunk (`domains = [3]`, `delete_after_commit = true`). Run it with
+  `woof go CONFIG --products none`.
+- `<name>.namelist.wps` (and, for HRRR, the route's namelists), and
+  `<name>.eta.txt`. The column has 256 levels from the band generator
+  (`--eta-band`, default `0:2000:41:agl` and `15000:25000:100`), biased
+  toward the heights the path spends time at. The model top is the
+  standard-atmosphere pressure 7 km above the path's peak, clipped to
+  300-5000 Pa (`--p-top-pa` overrides it).
+- `plan.json`: cells per domain, GPU memory (0.54-0.84 KiB per cell plus
+  3 GiB), cell-steps, a wall-time range at 12-20 million cell-steps per
+  second, and d03's output volume. Its notes say what was chosen and why.
+
+`--source auto` takes the path's suggested regional source where this woof
+can initialise it up to the model top, and `gfs` otherwise. A window
+the source's fetch serves only on a coarser spacing (UKV past T+54) is
+planned on 3-hour (or 6-hour) boundaries. d03 follows the
+path (`[[relocation.move]]`) and d02 slides to contain it
+(`[relocation.containment]`) when this woof has the track itinerary.
+Without it, the nests stay where they are born, and `plan.json` gives the
+share of the flight that d03 still holds. A path that moves too far in
+one `--relocation-cadence-s` window for d03 to keep it inside its margins
+is refused, and the refusal names a cadence that works.
+
+With `--job-json`, the job documents go to `OUT/jobs/l40s/` or
+`OUT/jobs/h100/`, by their `resources.gpu_mem_gib` (44 GiB or less is
+L40S). With `--inputs-prefix`, each document references its files as
+`PREFIX/<name>/<file>`, and the command prints the `woof go-job-push` and
+`woof energy queue push` commands to run. Without it, the documents carry
+the config and its companions inline.
+
 ## 1. Job documents
 
 A job document is a JSON file with the schema `woof.go-job.v1`. Here is one

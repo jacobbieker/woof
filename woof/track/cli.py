@@ -35,44 +35,52 @@ def register_cli(subparsers) -> None:
     inspect.add_argument("--name", default=None, metavar="NAME",
                          help="the track's name (default: the file stem); "
                               "only with a single FILE")
-    inspect.add_argument("--mapping", type=Path, default=None, metavar="FILE",
-                         help="JSON or TOML column mapping with keys time, lat, "
-                              "lon, height, height_fallback, time_format, "
-                              "height_datum, drop_when")
-    inspect.add_argument("--time-col", default=None, metavar="COL",
-                         help="time column (default: time)")
-    inspect.add_argument("--lat-col", default=None, metavar="COL",
-                         help="latitude column, degrees (default: lat)")
-    inspect.add_argument("--lon-col", default=None, metavar="COL",
-                         help="longitude column, degrees (default: lon)")
-    inspect.add_argument("--height-col", default=None, metavar="COL",
-                         help="height column, metres (default: height)")
-    inspect.add_argument("--height-fallback-col", action="append", default=None,
-                         metavar="COL",
-                         help="column used where the height is blank; "
-                              "repeatable, tried in order")
-    inspect.add_argument("--time-format", default=None, metavar="FMT",
-                         help="a Python strptime format, or 'epoch' for Unix "
-                              "seconds (default: ISO 8601, date and time "
-                              "joined by a space or T); times without a "
-                              "zone are UTC")
-    inspect.add_argument("--height-datum", choices=HEIGHT_DATUMS, default=None,
-                         help="heights above mean sea level or above ground "
-                              "(default: msl)")
-    inspect.add_argument("--drop-when", action="append", default=None,
-                         metavar="COL=VALUE",
-                         help="drop rows whose COL equals VALUE (e.g. a "
-                              "receiver's no-fix flag); repeatable")
-    inspect.add_argument("--min-climb", type=float, default=DEFAULT_MIN_CLIMB_M,
-                         metavar="M",
-                         help="climb above the starting ground, metres, that "
-                              f"makes a launch (default: {DEFAULT_MIN_CLIMB_M:g})")
+    add_mapping_arguments(inspect)
     inspect.add_argument("--json", type=Path, default=None, metavar="OUT",
                          help="directory to write <name>.json Track3D documents "
                               "into (created if missing)")
     inspect.set_defaults(func=track_main)
     from woof.explain import add_explain_flag
     add_explain_flag(inspect, nested=True)
+    from woof.track.plan_cli import register_plan
+    register_plan(commands)
+
+
+def add_mapping_arguments(parser) -> None:
+    """The column options `woof track inspect` and `woof track plan` share."""
+
+    parser.add_argument("--mapping", type=Path, default=None, metavar="FILE",
+                        help="JSON or TOML column mapping with keys time, lat, "
+                             "lon, height, height_fallback, time_format, "
+                             "height_datum, drop_when")
+    parser.add_argument("--time-col", default=None, metavar="COL",
+                        help="time column (default: time)")
+    parser.add_argument("--lat-col", default=None, metavar="COL",
+                        help="latitude column, degrees (default: lat)")
+    parser.add_argument("--lon-col", default=None, metavar="COL",
+                        help="longitude column, degrees (default: lon)")
+    parser.add_argument("--height-col", default=None, metavar="COL",
+                        help="height column, metres (default: height)")
+    parser.add_argument("--height-fallback-col", action="append", default=None,
+                        metavar="COL",
+                        help="column used where the height is blank; "
+                             "repeatable, tried in order")
+    parser.add_argument("--time-format", default=None, metavar="FMT",
+                        help="a Python strptime format, or 'epoch' for Unix "
+                             "seconds (default: ISO 8601, date and time "
+                             "joined by a space or T); times without a "
+                             "zone are UTC")
+    parser.add_argument("--height-datum", choices=HEIGHT_DATUMS, default=None,
+                        help="heights above mean sea level or above ground "
+                             "(default: msl)")
+    parser.add_argument("--drop-when", action="append", default=None,
+                        metavar="COL=VALUE",
+                        help="drop rows whose COL equals VALUE (e.g. a "
+                             "receiver's no-fix flag); repeatable")
+    parser.add_argument("--min-climb", type=float, default=DEFAULT_MIN_CLIMB_M,
+                        metavar="M",
+                        help="climb above the starting ground, metres, that "
+                             f"makes a launch (default: {DEFAULT_MIN_CLIMB_M:g})")
 
 
 def mapping_from_args(args) -> ColumnMapping:
