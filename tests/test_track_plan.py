@@ -171,7 +171,7 @@ def test_straight_track_plans_a_loadable_three_domain_tree(tmp_path):
 
     # Output: d03 only, to the {name} store, frames removed once committed.
     icechunk = document["output"]["icechunk"]
-    assert icechunk == {"url": "{name}.icechunk", "domains": [3],
+    assert icechunk == {"url": "{name}.icechunk", "domains": [1, 2, 3],
                         "delete_after_commit": True, "compress": True}
 
     assert plan["schema"] == tp.PLAN_SCHEMA
@@ -186,7 +186,7 @@ def test_straight_track_plans_a_loadable_three_domain_tree(tmp_path):
     fast, slow = estimate["wall_h_range"]
     assert fast == pytest.approx(estimate["cell_steps"] / 20e6 / 3600, abs=0.01)
     assert slow == pytest.approx(estimate["cell_steps"] / 12e6 / 3600, abs=0.01)
-    assert estimate["output"]["d03_bytes"] > 0
+    assert estimate["output"]["bytes"] > 0
     # d03 integrates only from its birth.
     d03_est = next(d for d in estimate["domains"] if d["grid_id"] == 3)
     assert d03_est["active_s"] < plan["times"]["run_seconds"]
@@ -754,3 +754,25 @@ def test_history_window_sits_on_the_history_grid():
     # falls on a whole d03 step (a 4/3 s step does not divide 7417 s).
     assert (begin, end) == (7320, 18000)
     assert begin % 120 == 0 and end % 120 == 0
+
+
+
+def test_every_grid_writes_the_flight_window_on_one_interval(tmp_path):
+    """d01 and d02 write history on d03's interval over the same flight
+    window (none during the spin-up), and the export takes every grid."""
+    track = _track(speed=25.0)
+    run = tp.plan_track(track, "all-grids", tmp_path)
+    document = _config(run)
+    domains = _domains(document)
+    d03 = domains[3]
+    born = ((d03["start_time"] - document["experiment"]["start_time"])
+            .total_seconds() if "start_time" in d03 else 0)
+    for gid in (1, 2):
+        table = domains[gid]
+        assert table["history_interval_s"] == d03["history_interval_s"]
+        assert table["history_begin_s"] == d03["history_begin_s"] + born
+        assert table["history_end_s"] == d03["history_end_s"] + born
+    assert document["output"]["icechunk"]["domains"] == [1, 2, 3]
+    out = run.plan["estimate"]["output"]
+    assert set(out["bytes_per_frame_by_grid"]) == {"d01", "d02", "d03"}
+    assert out["bytes"] == out["bytes_per_frame"] * out["frames"]
