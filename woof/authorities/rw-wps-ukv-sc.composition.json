@@ -1,6 +1,6 @@
 {
   "schema": "gpuwm-mapped-composition-v2",
-  "name": "ukv-source-coop-in-band-derived-terrain-with-era5-land-state",
+  "name": "ukv-in-band-terrain-with-noah-layer-land-state",
   "mapping_binding": "input_manifest_sha256",
   "soil_layers": {
     "temperature_field": "soil_temperature",
@@ -9,59 +9,59 @@
     "source_layers": [
       {
         "top": 0.0,
-        "bottom": 0.07,
+        "bottom": 0.1,
         "selectors": {
           "soil_temperature": {
             "format": "netcdf",
             "name": [
-              "era5_soil_temperature_level_1"
+              "soil_temperature_layer_1"
             ],
             "standard_name": "soil_temperature"
           },
           "volumetric_soil_moisture": {
             "format": "netcdf",
             "name": [
-              "era5_volumetric_soil_water_layer_1"
+              "soil_moisture_layer_1"
             ],
             "standard_name": "volume_fraction_of_condensed_water_in_soil"
           }
         }
       },
       {
-        "top": 0.07,
-        "bottom": 0.28,
+        "top": 0.1,
+        "bottom": 0.4,
         "selectors": {
           "soil_temperature": {
             "format": "netcdf",
             "name": [
-              "era5_soil_temperature_level_2"
+              "soil_temperature_layer_2"
             ],
             "standard_name": "soil_temperature"
           },
           "volumetric_soil_moisture": {
             "format": "netcdf",
             "name": [
-              "era5_volumetric_soil_water_layer_2"
+              "soil_moisture_layer_2"
             ],
             "standard_name": "volume_fraction_of_condensed_water_in_soil"
           }
         }
       },
       {
-        "top": 0.28,
+        "top": 0.4,
         "bottom": 1.0,
         "selectors": {
           "soil_temperature": {
             "format": "netcdf",
             "name": [
-              "era5_soil_temperature_level_3"
+              "soil_temperature_layer_3"
             ],
             "standard_name": "soil_temperature"
           },
           "volumetric_soil_moisture": {
             "format": "netcdf",
             "name": [
-              "era5_volumetric_soil_water_layer_3"
+              "soil_moisture_layer_3"
             ],
             "standard_name": "volume_fraction_of_condensed_water_in_soil"
           }
@@ -69,19 +69,19 @@
       },
       {
         "top": 1.0,
-        "bottom": 2.89,
+        "bottom": 2.0,
         "selectors": {
           "soil_temperature": {
             "format": "netcdf",
             "name": [
-              "era5_soil_temperature_level_4"
+              "soil_temperature_layer_4"
             ],
             "standard_name": "soil_temperature"
           },
           "volumetric_soil_moisture": {
             "format": "netcdf",
             "name": [
-              "era5_volumetric_soil_water_layer_4"
+              "soil_moisture_layer_4"
             ],
             "standard_name": "volume_fraction_of_condensed_water_in_soil"
           }

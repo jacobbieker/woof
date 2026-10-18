@@ -652,24 +652,25 @@ _PACKAGED_PROFILES = MappingProxyType({
             },
         },
     ),
-    # The UKV (Met Office UK deterministic 2 km) from the Source
-    # Cooperative Icechunk archive.  The archive's grid is a Lambert
-    # azimuthal equal-area plane the engine does not read, so
-    # woof.ukv_source regrids each hour to a regular 0.02-degree grid at
-    # fetch and writes one CF NetCDF per valid time; this profile decodes
-    # those files.  33 pressure levels to 10 hPa, winds already
-    # earth-relative components (the archive's directions are true-north,
-    # measured), 1.5 m screen state.  The archive publishes no orography,
-    # soil or sea ice: every file carries one derived terrain (the height
-    # of the first hour's surface pressure on its own levels), so the files
-    # are their own in-band terrain supplement, and the same-hour ERA5 land
-    # state and sea ice copied by nearest index.
+    # The UKV (Met Office UK deterministic 2 km), from the Source
+    # Cooperative Icechunk archive or one run of the Met Office open-data
+    # bucket.  Both publish a Lambert azimuthal equal-area plane the engine
+    # does not read, so woof.ukv_source regrids each hour to a regular
+    # 0.02-degree grid at fetch and writes one CF NetCDF per valid time;
+    # this profile decodes those files whichever store they came from.  33
+    # pressure levels to 10 hPa, winds already earth-relative components
+    # (the directions are true-north, measured), 1.5 m screen state.  Every
+    # file carries one terrain (the live run's orography, or in the archive,
+    # which publishes none, the height of the first hour's surface pressure
+    # on its own levels), so the files are their own in-band terrain
+    # supplement, and the same-hour ERA5 or GFS land state and sea ice on
+    # Noah's four layers, copied by nearest index.
     "ukv-sc-netcdf-v1": _profile(
         "rw-wps-ukv-sc",
         source_format="netcdf",
-        mapping="e4d39d063c4e13acd902f30c6b52d3d803e9226ac08794ea8bb411daebe75f41",
-        composition="e531dc2a90f9a4a26a14622274ba2e74054956f84cb8441b3019c84b0ac83069",
-        provenance="e728f3523462ba9586c7dafaaf6969de567006ab52b77d8ac8ed85806bdc272d",
+        mapping="e69779fe816facadaf7037c9f039027002cea36d552f138565ec7e165cbb07b3",
+        composition="c93c7c0a892ac17b3d888f69f1bdaf58af6715f5e2236f4cab42ccf49eb4cc0d",
+        provenance="8ec217194a63939d300a08b3f0a9ab5badb2e5a1de6f6f87ffe527a618e39c7d",
         data_role="ukv_sc_in_band_surface",
         provenance_role="ukv_sc_in_band_surface_provenance",
     ),

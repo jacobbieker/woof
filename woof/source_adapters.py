@@ -724,12 +724,26 @@ _MET_OFFICE_GLOBAL_STATE = (
 _UKV_SOURCE_COOP_ARCHIVE = ArchiveWindow(
     "source-coop", "2024-01-01T00",
     "The Source Cooperative UKV archive holds hourly states from 2024-01-01 "
-    "00Z to 2025-08-13 22Z and is not extended; the 2025-05-16 15Z hour has "
-    "no pressure-level wind direction and is refused.",
+    "00Z to 2025-08-13 22Z and is not extended; a window it cannot serve "
+    "(after it, or holding its 2025-05-16 15Z hour, which has no "
+    "pressure-level wind direction) is read from the Met Office bucket.",
     ("https://source.coop/bkr/metoffice",
      "s3://us-west-2.opendata.source.coop/bkr/metoffice/"
      "metoffice_uk_deterministic_2km.icechunk"),
     checked_at="2026-10-18",
+)
+#: The Met Office's own bucket: every UKV run, a rolling two years
+#: (oldest run 20241016T2200Z when listed on 2026-10-18).
+_UKV_MET_OFFICE_DOOR = ArchiveWindow(
+    "aws", "",
+    "The Met Office's AWS open-data bucket keeps a rolling two years of UKV "
+    "runs; a window is read from one run whose leads hold every valid time "
+    "(03Z and 15Z reach T+120, three-hourly past T+54; 00/06/09/12/18/21Z "
+    "T+54; the other hours T+12).",
+    ("https://registry.opendata.aws/met-office-uk-deterministic/",
+     "https://met-office-atmospheric-model-data.s3.eu-west-2.amazonaws.com/"
+     "?list-type=2&delimiter=/&prefix=uk-deterministic-2km/"),
+    checked_at="2026-10-18", retention_hours=17520.0,
 )
 
 #: Where a domain can sit on the UKV plane, as a latitude/longitude box:
@@ -1573,14 +1587,14 @@ _ADAPTERS = (
         "ukv",
         record="forecast",
         time_axis="analysis_times",
-        archives=(_UKV_SOURCE_COOP_ARCHIVE,),
-        name="UKV 2 km (Met Office UK, Source Cooperative archive)",
+        archives=(_UKV_SOURCE_COOP_ARCHIVE, _UKV_MET_OFFICE_DOOR),
+        name="UKV 2 km (Met Office UK deterministic)",
         aliases=("ukv-2km", "met-office-ukv", "metoffice-ukv",
                  "uk-deterministic-2km", "ukv-sc"),
         upstream_model_id=None,
-        file_family="Icechunk/Zarr, regridded to NetCDF-CF at fetch",
+        file_family="Icechunk/Zarr or NetCDF-4, regridded to NetCDF-CF at fetch",
         decoder=(
-            "woof.ukv_source (Icechunk read, LAEA-to-0.02-degree regrid) + "
+            "woof.ukv_source (Icechunk or NetCDF read, LAEA-to-0.02-degree regrid) + "
             "packaged UKV NetCDF profile + rw_netcdf/netcrust "
             "(woof.netcdf_bridge)"
         ),
@@ -1588,10 +1602,11 @@ _ADAPTERS = (
         required_products=(
             "pressure-level temperature, height, humidity and wind",
             "surface pressure, skin and 1.5 m screen state, 10 m wind",
-            "same-hour ERA5 land state and sea ice (Google ARCO)",
+            "same-hour ERA5 (Google ARCO) or GFS 0.25-degree land state and sea ice",
         ),
-        # An archive of valid times: every hour is its own state, so a
-        # window is a run of hours, not leads of one cycle.
+        # A window is a run of valid times named by its start: the archive
+        # serves each hour's own analysis and the bucket one run's leads,
+        # chosen by the fetch, so the window has no lead axis of its own.
         max_hour=0,
         upstream_ingest="declarative_mapping_v1_over_packaged_profile",
         status=AdapterStatus.RUNNABLE_NOT_CERTIFIED,
@@ -1608,39 +1623,41 @@ _ADAPTERS = (
         # 10 hPa needs another source for its upper column.
         certified_source_top_pa=1000.0,
         coverage=_UKV_WINDOW,
-        # No cycle grid: a closed archive has no publication schedule, and
-        # `--cycle latest` is the archive's last hour less the window
-        # (woof.ukv_source.latest_cycle).  Without one the row offers no
-        # automatic initialization at "now", which it could never serve.
+        # No cycle grid: which run serves a window is chosen by the fetch
+        # from the bucket's own listing, and `--cycle latest` is the newest
+        # complete run (woof.ukv_source.latest_cycle).
         composition=(
-            "The archive publishes no soil, no sea ice and no orography. "
-            "The fetch carries the SAME HOUR's ERA5 land-sea mask, sea ice "
-            "and four-layer soil column into every file by nearest index "
-            "(no interpolation, the ERA5 coastline), and one derived "
-            "terrain: the height of the window's first surface pressure on "
-            "its own pressure-level heights, so the files are their own "
-            "in-band terrain supplement."
+            "Neither store publishes soil or sea ice, and the archive no "
+            "orography. The fetch carries the SAME HOUR's ERA5 land-sea "
+            "mask, sea ice and soil column (GFS 0.25-degree past ERA5's last "
+            "published hour) into every file on Noah's four layers by "
+            "nearest index (no interpolation, the donor coastline), and one "
+            "terrain: a live run's orography, or in the archive the height "
+            "of the window's first surface pressure on its own levels, so "
+            "the files are their own in-band terrain supplement."
         ),
         notes=(
-            "The Met Office UKV, the UK deterministic 2 km model, from the "
-            "Source Cooperative Icechunk archive (s3://us-west-2.opendata."
-            "source.coop/bkr/metoffice/metoffice_uk_deterministic_2km."
-            "icechunk, anonymous): hourly 2024-01-01 00Z to 2025-08-13 22Z "
-            "on the UK 2 km Lambert azimuthal equal-area grid, 33 pressure "
-            "levels to 10 hPa.  `woof fetch --source ukv --area ...` reads "
-            "the window, regrids it bilinearly to a regular 0.02-degree "
-            "grid over the area plus 0.25 degrees, turns speed and "
-            "true-north from-direction into components and writes one "
-            "NetCDF per hour; each hour moves about 150 MB of whole-plane "
-            "chunks.  THREE limits a reader must know.  (1) Values are "
-            "float16: temperature steps 0.125-0.25 K and geopotential "
-            "height 16 m above about 100 hPa.  (2) Soil, land mask and sea "
-            "ice are ERA5's at 0.25 degrees, so the land state follows the "
-            "ERA5 coastline.  (3) The 2025-05-16 15Z hour has no "
-            "pressure-level wind direction and is refused.  LICENCE: UKV "
-            "data Met Office, British Crown copyright; ERA5 contains "
-            "modified Copernicus Climate Change Service information.  Not "
-            "yet accepted by unchanged stock WRF."
+            "The Met Office UKV, the UK deterministic 2 km model, on the UK "
+            "2 km Lambert azimuthal equal-area grid, 33 pressure levels to "
+            "10 hPa, from two anonymous stores: the Source Cooperative "
+            "Icechunk archive (each hour's own analysis, 2024-01-01 00Z to "
+            "2025-08-13 22Z) and, for any other window, ONE run of the Met "
+            "Office's open-data bucket (a rolling two years; 03Z and 15Z "
+            "runs reach T+120, three-hourly past T+54, so a window longer "
+            "than 54 h takes --cadence 3).  `woof fetch --source ukv --area "
+            "...` reads the window, regrids it bilinearly to a regular "
+            "0.02-degree grid over the area plus 0.25 degrees, turns speed "
+            "and true-north from-direction into components and writes one "
+            "NetCDF per hour; each hour moves about 150 MB.  THREE limits a "
+            "reader must know.  (1) Archive values are float16: temperature "
+            "steps 0.125-0.25 K and geopotential height 16 m above about "
+            "100 hPa.  (2) Soil, land mask and sea ice are ERA5's (GFS's past "
+            "ERA5's last published hour) at 0.25 degrees, so the land state "
+            "follows that coastline.  (3) A live window is one run's "
+            "forecast, not analyses.  LICENCE: UKV data Met Office, British "
+            "Crown copyright; ERA5 contains modified Copernicus Climate "
+            "Change Service information; GFS is NOAA NCEP.  Not yet accepted "
+            "by unchanged stock WRF."
         ),
     ),
     _adapter(
