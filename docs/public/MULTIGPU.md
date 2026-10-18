@@ -47,14 +47,55 @@ one card. A split parent needs its nests split too (see the refusals below).
   their own window of the rolling boundary tables the nest coupler fills, and a
   slab on another card than those tables copies its window across with a
   device-to-device copy, which needs no peer access.
-- Two-way feedback writes into a split parent through its host store, which
-  goes back to the parent's slabs before the parent's next step.
-- The coupler reads a split grid through its host store, so each parent step
-  drains the split parent and nest to the host and the next steps copy them
-  back to their slabs. That is correct and slow: on the one-card proof tree
-  (2.25 km 288 x 288 parent, 750 m 216 x 216 nest) it was 250 drains and 250
-  copies back per grid over 2 h. Reading only the coupler's windows from the
-  slabs is the next step for nested speed.
+- The coupler reads only its windows of a split grid, straight from the
+  slabs: the nest's boundary frame and the parent's interpolation donors for
+  forcing, the nest's footprint for feedback. Each window is taken from the
+  slabs that own its columns (the cells a drain would have landed) into a
+  device array on the coupler's card. Two-way feedback writes the parent's
+  restricted rectangle back the same way, into every slab cell (halo
+  included) that holds it, which is what the old copy back put there. No
+  parent step drains a split grid or copies its store back. With
+  `feedback = 0` the nest is only read, never drained, and a resident parent
+  (`domains = [2]` under a resident root, say) is read in place.
+- Windows on another card are copied with a device-to-device copy (no peer
+  access needed). Their staging buffers are released at the next sweep, or
+  once 256 MiB are pending, so the coupler never waits on the host per
+  window. The forecast receipt's `devices.output_road` counts the windows
+  (`window_reads`, `window_writes` and their bytes) next to the drains
+  (`full_drains`) and copies back (`full_gathers`).
+- `WOOF_SPLIT_NEST_DRAIN=1` brings back the old road for comparison: each
+  parent step drains the split grids to their host stores, the coupler works
+  on the stores, and the next sweeps copy them back to the slabs.
+
+  Measured on one shared RTX A6000, two slabs on card 0 (`ids = [0, 0]`).
+  The tree is a synthetic stand-in for the one-card proof tree, with the same
+  grids: a 288 x 288 parent and a 216 x 216 nest at ratio 3, 49 levels,
+  moist physics with radiation, 12 s parent step, 16 parent steps. Two
+  interleaved runs per road; other jobs shared the card, so single numbers
+  vary by about 20%. Both roads gave bit-identical final carriers and
+  canonical digests for the split nest under a resident parent and for the
+  split parent and nest, at `feedback = 0` and `1`.
+
+  | tree, feedback | drains + copies back per parent step | coupler s per parent step (drain -> windows) | parent step s (drain -> windows) |
+  |---|---|---|---|
+  | resident parent, split nest, 0 | 1 + 1 -> 0 + 0 | 0.35, 0.17 -> 0.29, 0.13 | 1.12, 0.80 -> 0.87, 0.93 |
+  | resident parent, split nest, 1 | 1 + 1 -> 0 + 0 | 0.36, 0.27 -> 0.19, 0.16 | 1.45, 0.97 -> 1.12, 0.86 |
+  | split parent and nest, 0 | 2 + 2 -> 0 + 0 | 0.47, 0.30 -> 0.20, 0.18 | 1.32, 1.16 -> 0.91, 1.10 |
+  | split parent and nest, 1 | 2 + 2 -> 0 + 0 | 0.43, 0.38 -> 0.21, 0.15 | 1.27, 1.13 -> 0.86, 0.81 |
+
+  "Coupler" is forcing plus feedback, timed with the card synchronized
+  around each. A drain took 0.06 to 0.12 s per grid here; its copy back,
+  inside the next sweep, is not timed on its own. The whole split-parent, split-nest, `feedback = 1` run took
+  21.5 and 19.0 s on the old road and 14.4 and 13.3 s with windows, about
+  1.4x faster. The real proof tree took 250 drains and 250 copies back per
+  grid over 2 h on the old road; the coupler now asks for none. The saving grows with the nest. A drain
+  moves every carrier of the grid, but forcing reads only the boundary frame,
+  and feedback reads the footprint on the card. So on a static nest of
+  100 to 500 M cells the drain road would move tens of GB per parent step.
+  Still per window on both roads: the static map factors are copied from
+  the host geography for each forcing window. A one-time health-validator
+  setup before the first step still exposes the store once, and the first
+  sweep copies it back.
 - A split nest's halo also covers the boundary frame (`max(spec_zone,
   relax_zone)`), as a specified root's does.
 
@@ -91,8 +132,8 @@ while the model steps on. The next copy into the store waits until the writer
 has released the previous frame. Running maxima the frame resets (`UP_HELI_MAX`)
 are zeroed on the slabs.
 
-A reader that needs the whole store (the final digest, a restart, a nest
-coupler) still drains it, and the next step copies it back to the slabs. The
+A reader that needs the whole store (the final digest, a restart) still
+drains it, and the next step copies it back to the slabs. The
 forecast receipt's `devices.output_road` counts both roads: frame downloads,
 their bytes, the seconds the stepping thread spent issuing them and the writer
 spent waiting, retained snapshot bytes, direct-copy fallbacks, whole-store

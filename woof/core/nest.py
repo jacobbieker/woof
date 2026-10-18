@@ -90,6 +90,7 @@ from types import MappingProxyType
 import numpy as np
 
 from woof.core.model import FeedbackScratch
+from woof.core.nest_operands import SlabField
 from woof.core.microphysics_transition import (
     edge_parent_planes,
     launch_microphysics_edge_field,
@@ -859,8 +860,12 @@ class NestCoupler:
                 donor = feedback_child_window(reg, window, spec_zone=run.spec_zone)
                 child = (source.raw(kind, donor) if mapped is None else
                          source.device_array(mapped, donor))
-                target = field[(...,) + window]
-                result = cp.empty(target.shape, dtype=cp.float32)
+                # The window's shape, read off the slices: indexing a split
+                # parent's field would copy the rectangle off its slabs.
+                shape = tuple(field.shape[:-2]) + tuple(
+                    len(range(*sl.indices(n)))
+                    for sl, n in zip(window, field.shape[-2:]))
+                result = cp.empty(shape, dtype=cp.float32)
                 copy_fcn(result, child, reg, spec_zone=run.spec_zone,
                          parent_window=window, child_window=donor)
                 if kind == "t":
@@ -1186,8 +1191,13 @@ class NestCoupler:
                 if kind not in _SIGNED_KINDS:
                     i0, j0, niw, njw = smoother_parent_window(reg)
                     if niw > 0 and njw > 0:
-                        window = field[..., j0:j0 + njw, i0:i0 + niw]
+                        rectangle = (slice(j0, j0 + njw), slice(i0, i0 + niw))
+                        window = field[(...,) + rectangle]
                         _clip_nonnegative(window)
+                        if isinstance(field, SlabField):
+                            # A split parent's field is not a view: the
+                            # clipped copy goes back to its slabs.
+                            field.write(rectangle, window)
         if streamed_parent and not canonical_parent:
             _sync_out(parent.state, tuple(dict.fromkeys(written)))
         if bounded_operands:

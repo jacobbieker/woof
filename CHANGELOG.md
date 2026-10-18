@@ -23,6 +23,23 @@ New:
   `woof run`, `woof stream`, the wrfinput/met_em doors, the stock-WRF
   export, streamed parents or nests, and moving nests refuse it by name.
 
+- A nested tree split across cards with `[devices]` is no longer drained
+  to the host at every parent step. The nest coupler now reads only its
+  windows from the slabs: the nest's boundary frame and the parent's
+  donors for forcing, and the nest's footprint for feedback. Two-way
+  feedback writes the parent's restricted rectangle back to the slabs the
+  same way. The next sweep no longer copies the whole store back to every
+  slab. With `feedback = 0` the nest is never drained for coupling. This
+  covers a resident parent over a split nest and a split parent over a
+  split nest. On a stand-in for the one-card proof tree (288 x 288 parent,
+  216 x 216 nest, 49 levels, two slabs on one RTX A6000), both roads gave
+  bit-identical carriers and digests in all four shapes. Drains and copies
+  back per parent step fell from one per split grid to zero. The
+  split-parent, split-nest, `feedback = 1` run was about 1.4x faster
+  (21.5 and 19.0 s down to 14.4 and 13.3 s). `WOOF_SPLIT_NEST_DRAIN=1`
+  brings back the drain road for comparison. See
+  [One forecast across cards](docs/public/MULTIGPU.md#nested-trees).
+
 - The per-step health check no longer makes the CPU wait for each step
   to finish. Before, every step ended with a blocking read of its health
   result (NaN, a collapsed model layer, and each physics scheme's status

@@ -325,7 +325,21 @@ class RankedRun(multigpu.MultiGPUDomain):
                                   full_gathers=0, frame_downloads=0,
                                   frame_download_bytes=0, frame_issue_seconds=[],
                                   frame_wait_seconds=[], scratch_zeroes=0,
-                                  frame_snapshot_bytes=0, fallback_downloads=0)
+                                  frame_snapshot_bytes=0, fallback_downloads=0,
+                                  window_reads=0, window_read_bytes=0,
+                                  window_writes=0, window_write_bytes=0)
+        # The nest coupler's windows (read_window / write_window): per
+        # (member, direction) the slab rectangles a window can meet, and one
+        # reusable event per slab for the coupler's stream to wait on.
+        self._window_plans = {}
+        self._window_events = {}
+        self._window_arrays = (None, {})
+        # Cross-card staging buffers still being copied, with the event that
+        # retires them, and whether a read is queued on the caller's stream
+        # that the slabs' own streams are not yet ordered after.
+        self._window_staging = []
+        self._window_staging_bytes = 0
+        self._window_reads_pending = False
         self._caller_events = {}
         self._jobs = [Queue() for _ in self.tiles]
         self._done = Queue()
@@ -585,6 +599,7 @@ class RankedRun(multigpu.MultiGPUDomain):
         events = []
         moved = 0
         captures = []
+        self._order_after_window_reads()
         # Queue every slab's capture before any host DMA. On one card,
         # pitched copies share a copy engine; a host transfer issued first
         # can otherwise delay a later slab's device capture and its step.
@@ -673,6 +688,7 @@ class RankedRun(multigpu.MultiGPUDomain):
             self._guard_store()
             self._home[key][...] = 0
             return
+        self._order_after_window_reads()
         for rank, dev in enumerate(self.devices):
             arrays = self.inventory_fn(self.tiles[rank], [key])
             if key not in arrays:
@@ -682,6 +698,245 @@ class RankedRun(multigpu.MultiGPUDomain):
         self._fresh.discard(key)
         self._ahead = True
         self.output_report["scratch_zeroes"] += 1
+
+    # -- the nest coupler's windows -------------------------------------------
+    #
+    # A nest coupler reads a few bounded rectangles of a split grid each
+    # parent step (the child's boundary frame, the parent's SINT donors, the
+    # feedback footprint) and, under two-way feedback, writes the parent's
+    # restricted rectangle back.  Reading them through :attr:`store` drained
+    # every carrier of every slab to the host, and the write exposed the store
+    # so the next sweep copied all of it back.  These two methods move only
+    # the rectangle, slab to device (or device to slab), on the caller's
+    # current stream:
+    #
+    # * a read takes each slab's OWNED cells (the scatter plan a drain uses),
+    #   so the bytes are the bytes a drain would have landed in the store;
+    # * a write lands in every slab cell (halo included) the GATHER plan maps
+    #   that rectangle to, which is what the next sweep's full gather would
+    #   have put there.  Halo cells outside it already hold their owner's
+    #   value after the step's exchange, so the full copy back changed none.
+    #
+    # While the store is exposed (a drain landed, a consumer may have written
+    # it, and the next sweep gathers it), the store is the authority and both
+    # go to it instead.
+
+    def _window_plan(self, name, direction):
+        key = (name, direction)
+        plan = self._window_plans.get(key)
+        if plan is None:
+            home = self._home[name]
+            kind = gather.classify(home.shape, self.nz, self.ny, self.nx,
+                                   layers_ok=True)
+            plan = []
+            for rank, rank_spec in enumerate(self.specs):
+                tile_shape = self.arrays[rank][name].shape
+                for src, dst in gather.segments_for(rank_spec, direction, kind):
+                    full, tile = (src, dst) if direction == "gather" else (dst, src)
+                    plan.append((rank,
+                                 gather._range_from_slices(full, home.shape, name),
+                                 gather._range_from_slices(tile, tile_shape, name)))
+            self._window_plans[key] = plan
+        return plan
+
+    def _window_bounds(self, name, window):
+        home = self._home[name]
+        if home.ndim < 2 or len(window) != 2:
+            raise RankedRunError(f"{name!r} window {window!r} is not two "
+                                 "horizontal slices of a horizontal member")
+        bounds = []
+        for sl, extent in zip(window, home.shape[-2:]):
+            start, stop, step = sl.indices(int(extent))
+            if step != 1 or stop <= start:
+                raise RankedRunError(f"{name!r} window {window!r} is not a "
+                                     "non-empty unit-step rectangle")
+            bounds.append((start, stop))
+        return home, bounds
+
+    def _window_pieces(self, name, window, direction):
+        """Where one window of ``name`` lives on the slabs.
+
+        Yields ``(rank, slab_index, window_index, columns)``: the slab array's
+        index and the matching index into a window-shaped array, for every
+        rectangle of the ``direction`` plan the window meets.  ``scatter``
+        gives each column of the window once, from the slab that owns it;
+        ``gather`` gives every slab cell, halo included, that holds it.
+        """
+        _, ((y0, y1), (x0, x1)) = self._window_bounds(name, window)
+        for rank, (gy0, gy1, gx0, gx1), (ty0, _, tx0, _) in self._window_plan(
+                name, direction):
+            oy0, oy1 = max(gy0, y0), min(gy1, y1)
+            ox0, ox1 = max(gx0, x0), min(gx1, x1)
+            if oy0 >= oy1 or ox0 >= ox1:
+                continue
+            yield (rank,
+                   (Ellipsis, slice(ty0 + oy0 - gy0, ty0 + oy1 - gy0),
+                    slice(tx0 + ox0 - gx0, tx0 + ox1 - gx0)),
+                   (Ellipsis, slice(oy0 - y0, oy1 - y0), slice(ox0 - x0, ox1 - x0)),
+                   (oy1 - oy0) * (ox1 - ox0))
+
+    def _wait_for_slab(self, rank, cards):
+        """The current stream of each card in ``cards`` waits for ``rank``'s
+        compute stream: its last step, the exchange the step's sweep chained
+        onto it, and any direct frame download it waited for.  No host wait.
+        """
+        import cupy as cp
+        dev = self.devices[rank]
+        with cp.cuda.Device(dev):
+            event = self._window_events.get(rank)
+            if event is None:
+                event = self._window_events[rank] = cp.cuda.Event(disable_timing=True)
+            event.record(self.compute_streams[rank])
+        for card in dict.fromkeys(cards):
+            with cp.cuda.Device(card):
+                cp.cuda.get_current_stream().wait_event(event)
+
+    def _window_array(self, rank, name):
+        """``rank``'s live carrier ``name``, from one inventory per generation.
+
+        Some carriers are rebound by a step (see :meth:`refresh_arrays`), so
+        the inventory is taken again after every sweep, never kept across
+        one; between sweeps nothing rebinds them.  One inventory per slab per
+        generation: building it is milliseconds, and a coupler transaction
+        reads hundreds of windows.
+        """
+        generation, arrays = self._window_arrays
+        if generation != self._generation:
+            arrays = {}
+            self._window_arrays = (self._generation, arrays)
+        inventory = arrays.get(rank)
+        if inventory is None:
+            inventory = arrays[rank] = self.inventory_fn(self.tiles[rank])
+        return inventory[name]
+
+    #: Staging bytes a coupler transaction may leave pending before the
+    #: copies are waited for and the buffers released.
+    WINDOW_STAGING_LIMIT_BYTES = 256 * 2**20
+
+    def _copy_between_cards(self, dst, src, src_dev):
+        """``dst[...] = src`` across cards with a driver copy (no peer access).
+
+        Queued on the current stream of ``dst``'s card (current here).  The
+        two staging buffers are kept until an event behind the copy has
+        fired: released at the next sweep, or here once more than
+        :data:`WINDOW_STAGING_LIMIT_BYTES` are pending, never by a host
+        wait per window.
+        """
+        import cupy as cp
+        with cp.cuda.Device(src_dev):
+            staged = cp.ascontiguousarray(src)
+            ready = cp.cuda.Event(disable_timing=True)
+            ready.record(cp.cuda.get_current_stream())
+        stream = cp.cuda.get_current_stream()
+        stream.wait_event(ready)
+        landing = cp.empty(staged.shape, dtype=staged.dtype)
+        landing.data.copy_from_device_async(staged.data, int(staged.nbytes), stream)
+        dst[...] = landing
+        done = cp.cuda.Event(disable_timing=True)
+        done.record(stream)
+        self._window_staging.append((int(cp.cuda.Device().id), done, staged, landing))
+        self._window_staging_bytes += 2 * int(staged.nbytes)
+        if self._window_staging_bytes > self.WINDOW_STAGING_LIMIT_BYTES:
+            self._retire_window_staging()
+
+    def _retire_window_staging(self):
+        import cupy as cp
+        staging, self._window_staging = self._window_staging, []
+        self._window_staging_bytes = 0
+        for dev, done, _, _ in staging:
+            with cp.cuda.Device(dev):
+                done.synchronize()
+
+    def _order_after_window_reads(self):
+        """A slab write on a compute stream waits for queued window reads."""
+        if self._window_reads_pending:
+            self._order_after_caller()
+            self._window_reads_pending = False
+
+    def read_window(self, name, window):
+        """One member's horizontal rectangle as a device array, no drain.
+
+        ``window`` is ``(y_slice, x_slice)`` in the member's own (staggered)
+        index space.  The result is C-contiguous on the caller's current card
+        and ordered on its current stream after every slab's last step.
+        """
+        import cupy as cp
+        import numpy as np
+        self._require_open()
+        home, ((y0, y1), (x0, x1)) = self._window_bounds(name, window)
+        if self._exposed:
+            out = cp.asarray(np.ascontiguousarray(home[..., y0:y1, x0:x1]))
+        else:
+            out = cp.empty(home.shape[:-2] + (y1 - y0, x1 - x0), dtype=home.dtype)
+            caller = int(cp.cuda.Device().id)
+            live, covered = {}, 0
+            for rank, slab, part, columns in self._window_pieces(name, window, "scatter"):
+                if rank not in live:
+                    self._wait_for_slab(rank, (caller, self.devices[rank]))
+                    live[rank] = self._window_array(rank, name)
+                if self.devices[rank] == caller:
+                    out[part] = live[rank][slab]
+                else:
+                    self._copy_between_cards(out[part], live[rank][slab],
+                                             self.devices[rank])
+                covered += columns
+            if covered != (y1 - y0) * (x1 - x0):
+                raise RankedRunError(
+                    f"{name!r} window {window!r}: the slabs own {covered} of its "
+                    f"{(y1 - y0) * (x1 - x0)} columns; a read would carry "
+                    "uninitialized cells")
+            # Anything that next writes a slab on its own stream (a frame
+            # snapshot's neighbour, a scratch reset, the next sweep) must
+            # wait for these copies to have read it.
+            self._window_reads_pending = True
+        self.output_report["window_reads"] += 1
+        self.output_report["window_read_bytes"] += int(out.nbytes)
+        return out
+
+    def write_window(self, name, window, value):
+        """Write one member's horizontal rectangle into every slab, no drain.
+
+        Every slab cell, owned or halo, that the gather plan maps the
+        rectangle onto takes the value; the next sweep (or a frame snapshot)
+        is ordered after it on each slab's compute stream.
+        """
+        import cupy as cp
+        self._require_open()
+        home, ((y0, y1), (x0, x1)) = self._window_bounds(name, window)
+        expected = home.shape[:-2] + (y1 - y0, x1 - x0)
+        if tuple(value.shape) != tuple(expected):
+            raise RankedRunError(f"{name!r} window {window!r} takes shape "
+                                 f"{expected}, got {tuple(value.shape)}")
+        if self._exposed:
+            self._await_download()
+            self._guard_store()
+            home[..., y0:y1, x0:x1] = cp.asnumpy(value)
+        else:
+            owned = sum(columns for *_, columns in
+                        self._window_pieces(name, window, "scatter"))
+            if owned != (y1 - y0) * (x1 - x0):
+                raise RankedRunError(
+                    f"{name!r} window {window!r}: the slabs own {owned} of its "
+                    f"{(y1 - y0) * (x1 - x0)} columns; a write would be lost")
+            caller = int(cp.cuda.Device().id)
+            live = {}
+            for rank, slab, part, _ in self._window_pieces(name, window, "gather"):
+                if rank not in live:
+                    self._wait_for_slab(rank, (caller, self.devices[rank]))
+                    live[rank] = self._window_array(rank, name)
+                if self.devices[rank] == caller:
+                    live[rank][slab] = value[part]
+                else:
+                    with cp.cuda.Device(self.devices[rank]):
+                        self._copy_between_cards(live[rank][slab], value[part], caller)
+            # The store no longer holds this member's generation: the next
+            # frame must download it again, and a drain must scatter.
+            self._fresh.discard(name)
+            self._ahead = True
+            self._order_after_caller()
+            self._window_reads_pending = False
+        self.output_report["window_writes"] += 1
+        self.output_report["window_write_bytes"] += int(value.nbytes)
 
     def canonical_store(self):
         """Joined carriers plus the resident digest's small forcing weights."""
@@ -821,6 +1076,8 @@ class RankedRun(multigpu.MultiGPUDomain):
             self._set_live_config(live_config)
         self._gather_exposed()
         self._order_after_caller()
+        self._window_reads_pending = False
+        self._retire_window_staging()
         timing = report is not None and bool(report.get("timing", False))
         step_seconds = exchange_seconds = 0.0
         steps = []
@@ -915,6 +1172,10 @@ class RankedRun(multigpu.MultiGPUDomain):
         self.compute_streams = self.copy_streams = self.unpack_streams = []
         self._streams = []
         self._caller_events = {}
+        self._retire_window_staging()
+        self._window_arrays = (None, {})
+        self._window_events = {}
+        self._window_plans = {}
         self._frame_snapshots = []
         self._snapshot_budgets = []
         self._snapshot_done = []
