@@ -337,8 +337,13 @@ def _forcing_offsets(
 
 
 def _domain_valid_time(exp, domain, root_valid_time: datetime) -> datetime:
+    from woof.experiment import starts_from_parent
+
     configured = getattr(domain, "start_time", None)
-    if configured is None:
+    # A parent-born delayed nest is prepared from the root's analysis
+    # (woof.experiment.domain_prepared_time), and its cache is stamped
+    # with the instant it was prepared at.
+    if configured is None or starts_from_parent(domain):
         return root_valid_time
     return configured
 

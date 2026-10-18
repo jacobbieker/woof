@@ -411,6 +411,10 @@ _DOMAIN_KEY_ROWS = key_rows(
     KeyRow("start_time", "datetime", None,
            "when this nest starts, an offset-free TOML date-time inside "
            "the run; absent starts it with [experiment].start_time"),
+    KeyRow("start_from", "string", "analysis",
+           "what a delayed nest is born from at its start_time: "
+           "\"analysis\" (the source analysis valid then) or \"parent\" "
+           "(its live parent, interpolated onto its own terrain)"),
     KeyRow("e_we", "integer", None,
            "WRF's staggered west-east point count, nx + 1; give e_we or nx"),
     KeyRow("e_sn", "integer", None,
@@ -426,6 +430,8 @@ _DOMAIN_KEYS = frozenset({
     # history_interval_s, and none after start + history_end_s.
     "history_begin_s", "history_end_s",
     "start_time", "static",
+    # What a delayed nest is born from (see START_FROM_PARENT below).
+    "start_from",
     "e_we", "e_sn", "nx", "ny", "dx", "dy", "dt",
     "time_step", "time_step_fract_num", "time_step_fract_den",
     "specified", "nested",
@@ -1022,6 +1028,45 @@ class DomainConfig:
     #: that did not.  Checkpoints are separate files written from model
     #: state (:mod:`woof.io.restart`), never from the history frame.
     output: "object | None" = None
+    #: What a DELAYED nest is born from at its ``start_time``: ``None`` --
+    #: the OFF contract, spelled ``start_from = "analysis"`` -- initializes
+    #: it from the source analysis valid at that instant, and
+    #: :data:`START_FROM_PARENT` interpolates it from its LIVE parent onto
+    #: its own grid and terrain (WRF's nest initialization from the parent,
+    #: the spawn path's operator).  ``None`` drops out of the restart and
+    #: prepared-cache identities, so every experiment written before the
+    #: key existed keeps its exact fingerprint.  A declared ``"parent"``
+    #: binds: the child's initial state is a different one.
+    start_from: str | None = None
+
+
+#: ``[[domain]] start_from`` value that births a delayed nest from its
+#: live parent instead of the analysis at its start time.
+START_FROM_PARENT = "parent"
+
+
+def starts_from_parent(dc) -> bool:
+    """Whether a domain is born from its live parent at a delayed start."""
+    return getattr(dc, "start_from", None) == START_FROM_PARENT
+
+
+def domain_prepared_time(exp, dc) -> datetime:
+    """The analysis instant a domain's prepared state describes.
+
+    A delayed nest born from the analysis is prepared at its own start; a
+    parent-born one is prepared with the root, because at birth it keeps
+    only its grid, statics and base state from preparation and takes its
+    atmosphere and land from the live parent.
+    """
+    if starts_from_parent(dc):
+        return exp.start_time
+    return exp.domain_start_time(dc.grid_id)
+
+
+def parent_born_domain_ids(exp) -> tuple[int, ...]:
+    """grid_ids of the delayed nests born from their live parent."""
+    return tuple(int(dc.grid_id) for dc in exp.domains
+                 if starts_from_parent(dc))
 
 
 @dataclass(frozen=True)
@@ -3158,8 +3203,9 @@ def validate_boundary_timing(
             # day.  The parent-step alignment above is NOT relaxed: it is
             # the rule the spawn instant is already validated against.
             continue
-        if int(dc.grid_id) in live_born:
-            # The same argument, declared by the caller: this child is
+        if int(dc.grid_id) in live_born or starts_from_parent(dc):
+            # The same argument, declared by the caller (or by the
+            # domain's own ``start_from = "parent"``): this child is
             # SINT from its live parent at its start and reads no
             # forcing snapshot there, so a forcing seam has nothing to
             # bind.  The parent-step alignment above still applies.
@@ -3881,6 +3927,34 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             # machinery refuse BY ROUTE through
             # :func:`refuse_delayed_activation` rather than here.
 
+        # --- start_from: what a delayed nest is born from ---------------
+        start_from = _DOMAIN_KEY_ROWS["start_from"].get(
+            dom, where=f"[[domain]] grid_id = {grid_id} of {source}")
+        if start_from not in ("analysis", START_FROM_PARENT):
+            raise ValueError(
+                f"start_from = {start_from!r} on [[domain]] grid_id = "
+                f"{grid_id} of {source} is not a birth source; use "
+                f"\"analysis\" (the default) or \"{START_FROM_PARENT}\".")
+        parent_born_at = (None if is_root else
+                          by_id[parent_id].start_time or start_time)
+        if start_from == START_FROM_PARENT and (
+                is_root or domain_start == parent_born_at):
+            raise ValueError(layered(
+                f"start_from = \"{START_FROM_PARENT}\" on [[domain]] "
+                f"grid_id = {grid_id} of {source} needs a delayed nest: "
+                + ("the root has no parent to be born from."
+                   if is_root else
+                   f"this domain starts with its parent d{parent_id:02d} at "
+                   f"{domain_start.isoformat()}, when the parent is the same "
+                   "analysis it would be interpolated from.")
+                + " Give the nest a [[domain]] start_time later than its "
+                "parent's start, or remove start_from.",
+                "A parent-born nest is interpolated from its parent's live "
+                "state at its start_time, which is only a different initial "
+                "condition from the analysis once the parent has run, and "
+                "a parent born at the same instant has not."))
+        start_from = None if start_from == "analysis" else start_from
+
         # --- spawn: the dormant-nest declaration ------------------------
         spawn_cfg = None
         if "spawn" in dom:
@@ -3936,6 +4010,16 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             from woof.core.nest_lifecycle import build_domain_follow_config
             follow_cfg = build_domain_follow_config(
                 dict(dom["follow"]), source, grid_id=grid_id)
+
+        if start_from is not None and follow_cfg is not None:
+            raise ValueError(layered(
+                f"start_from = \"{START_FROM_PARENT}\" and follow on "
+                f"[[domain]] grid_id = {grid_id} of {source} are not "
+                "supported together. Remove one.",
+                "A parent-born nest's setup arrays come from its birth, and "
+                "a follower's from its last move; a resume rebuilds the "
+                "first by birthing the nest again, which would put a moved "
+                "follower back on its declared ground."))
 
         # --- tiles: this domain's own road -------------------------------
         # Validated by the SAME parser the tree-wide table uses, so one
@@ -4373,7 +4457,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             time_step_fract_den=fract_den, start_time=domain_start,
             history_begin_s=history_begin_s, history_end_s=history_end_s,
             spawn=spawn_cfg, retire=retire_cfg, rearm=rearm_cfg,
-            follow=follow_cfg, tiles=domain_tiles, output=domain_output)
+            follow=follow_cfg, tiles=domain_tiles, output=domain_output,
+            start_from=start_from)
         domains.append(dc)
         by_id[grid_id] = dc
         dt_by_id[grid_id] = dt_ex
@@ -5293,17 +5378,22 @@ def delayed_domain_ids(exp: ExperimentConfig) -> tuple[int, ...]:
 def refuse_delayed_activation(exp: ExperimentConfig, route: str) -> None:
     """Fail loud where a delayed nest start has no activation machinery.
 
-    Delayed activation is a supported shape on the experiment-tree route
-    (``woof run``): that route holds an activation context, and the
-    executor's ``on_domain_start`` initializes the child from the
-    analysis at its activation time before its first step.  A route that
-    builds its domains from prepared caches holds neither -- every node
-    is started at the experiment's t = 0 and no callback exists to bring
-    one to life later -- so a delayed child there stays at tick 0 while
-    the rest of the tree advances, and the executor's tick-exact sync
-    check raises ``tick-exact sync violated after period 0: grid_id=2 at
-    0 ticks, boundary N``.  A traceback with no remedy in it is what this
-    refusal replaces.
+    Delayed activation is a supported shape on two routes.  The
+    experiment-tree route (``woof run``) holds an activation context, and
+    the executor's ``on_domain_start`` initializes the child from the
+    analysis at its activation time before its first step.  The native
+    prepared domain tree (``woof go``) passes the executor its own
+    ``delayed_child_initializer``
+    (:func:`woof.prepared_domain_tree_forecast.run_prepared_tree`), which
+    restores a child prepared from the analysis at its start, or -- for
+    ``start_from = "parent"`` -- interpolates it from its live parent.
+    A route with neither (an external wrfinput/met_em door, ``woof
+    stream``) starts every node at the experiment's t = 0 with no
+    callback to bring one to life later, so a delayed child there stays
+    at tick 0 while the rest of the tree advances, and the executor's
+    tick-exact sync check raises ``tick-exact sync violated after period
+    0: grid_id=2 at 0 ticks, boundary N``.  A traceback with no remedy in
+    it is what this refusal replaces.
     """
     delayed = delayed_domain_ids(exp)
     if not delayed:
@@ -5317,17 +5407,49 @@ def refuse_delayed_activation(exp: ExperimentConfig, route: str) -> None:
         f"{exp.start_time.isoformat()}, and this route has no way to "
         "bring a domain to life mid-run. Start every [[domain]] at "
         "[experiment].start_time here, or run the config through "
-        "`woof run`, which activates delayed nests.",
-        "A delayed nest is initialized at its activation epoch from the "
-        "analysis valid at that instant, by "
+        "`woof go` (native preparation; start_from = \"analysis\" or "
+        "\"parent\") or `woof run` (start_from = \"analysis\"), which "
+        "activate delayed nests.",
+        "A delayed nest is initialized at its activation epoch, either "
+        "from the analysis valid at that instant or, with start_from = "
+        "\"parent\", from its live parent.  `woof run` does it in "
         "woof.core.model.execute_experiment's on_domain_start using the "
         "activation context woof.core.model.build_experiment attaches "
         "(the input catalog, the case data and the radiation "
-        "workspace).  This route restores each domain from a prepared "
-        "cache instead: there is no catalog to re-ingest from and no "
-        "activation callback, so the domain would sit at tick 0 while "
-        "its parent advanced and the run would die at the first period "
-        "boundary with 'tick-exact sync violated'."))
+        "workspace); `woof go` passes the executor the prepared tree's "
+        "own delayed_child_initializer.  This route restores each domain "
+        "some other way and wires no activation callback, so the domain "
+        "would sit at tick 0 while its parent advanced and the run would "
+        "die at the first period boundary with 'tick-exact sync "
+        "violated'."))
+
+
+def refuse_parent_born_activation(exp: ExperimentConfig, route: str) -> None:
+    """Fail loud where ``start_from = "parent"`` has no initializer.
+
+    Only the native prepared domain tree (``woof go``) births a delayed
+    nest from its live parent.  Every other route that activates delayed
+    nests initializes them from the analysis at their start, so a
+    parent-born declaration there would integrate a DIFFERENT initial
+    state than the one the config asks for: honored or refused, never
+    quietly swapped.
+    """
+    born = parent_born_domain_ids(exp)
+    if not born:
+        return
+    named = ", ".join(f"d{gid:02d}" for gid in born)
+    raise ValueError(layered(
+        f"the {route} route does not birth a nest from its parent; "
+        f"{named} declare(s) start_from = \"{START_FROM_PARENT}\". Run "
+        "the config through `woof go` (native preparation), or set "
+        "start_from = \"analysis\" to initialize the nest from the "
+        "analysis valid at its start_time.",
+        "Parent birth interpolates the live parent onto the child's own "
+        "grid and terrain at the activation epoch (the spawn path's "
+        "woof.ingest.nest_spawn_init.spawn_child_from_parent) and "
+        "rebuilds its land state from the parent's; the prepared domain "
+        "tree's delayed_child_initializer is the one route that wires "
+        "it."))
 
 
 def refuse_unrouted_spawn(exp: ExperimentConfig, route: str) -> None:
@@ -5405,12 +5527,22 @@ def _public_config_value(value):
 
 def domain_config_document(domain: DomainConfig) -> dict[str, object]:
     """Resolved domain fields with public execution controls only."""
-    return _public_config_value(domain)
+    return _drop_off_domain_controls(_public_config_value(domain))
+
+
+def _drop_off_domain_controls(document):
+    # A per-domain key introduced after documents were in the field stays
+    # absent when off, so every pre-feature document keeps its bytes.
+    if isinstance(document, dict) and document.get("start_from") is None:
+        document.pop("start_from", None)
+    return document
 
 
 def experiment_config_document(exp: ExperimentConfig) -> dict[str, object]:
     """Resolved experiment fields, preserving the domain document contract."""
     document = _public_config_value(exp)
+    for domain in document.get("domains") or ():
+        _drop_off_domain_controls(domain)
     # A newly introduced execution control stays absent when off, so default
     # public snapshots and plans retain their pre-feature bytes.
     if exp.physics_params is None:

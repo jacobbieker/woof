@@ -305,21 +305,52 @@ runs on six substeps at 30 m/s, and from 40 m/s is halved to 9 s or 10 s.
 
 Each `[[domain]]` may also carry an offset-free `start_time`. It defaults to
 `[experiment].start_time`; d01 must equal that root start. A delayed child is
-dormant until its timestamp, then follows the ordinary parent-state nest
-initialization path -- it initializes from the analysis valid at its
-activation instant, so that instant must be one the declared inputs decode.
-The timestamp must be an exact boundary of its parent's step clock and an
-exact external-forcing seam. Its first history frame is the domain's own
-analysis frame and carries no `REFL_10CM`, exactly as d01's frame at t = 0
-does; every frame after it carries the field. Restart headers persist
-`STARTED`/`NOT_STARTED` lifecycle state, so resuming before the timestamp does
-not initialize the child early.
+dormant until its timestamp and integrates nothing before it: it writes no
+history frame and costs no step. Its `start_from` key says what it is born
+from at that instant:
 
-Delayed activation is a `woof run` capability. The prepared-tree runner
-(`woof-prepared-tree-forecast`, which `woof stream` and the wizard's nested
-route drive) restores every domain from a prepared cache and has no way to
-bring one to life mid-run, so it refuses a delayed `start_time` by name and
-tells you which door runs it.
+- `start_from = "analysis"` (the default) initializes it from the source
+  analysis valid at its start, so that instant must be one the declared
+  inputs decode: an exact boundary of its parent's step clock and an exact
+  external-forcing seam.
+- `start_from = "parent"` interpolates it from its LIVE parent, WRF's nest
+  initialization from the parent: a full-parent SINT of the parent's state
+  onto the child grid, then the real-data terrain adoption on the child's own
+  statics (`blend_terrain` on ht/mub/phb, `adjust_tempqv`, the base/EOS
+  re-derivation and `press_adj`). Its land state is the parent's, through
+  WRF's masked surface interpolator against the child's own land-use
+  categories, and its accumulated precipitation starts from the parent's.
+  This is how a long coarse spin-up feeds a short fine one (for example d01
+  and d02 spun up for 3 h, d03 started 2 h in for its last hour): the fine
+  nest starts from the spun-up parent instead of the cold analysis. The start must still
+  be an exact boundary of its parent's step clock, but need not be a forcing
+  seam, so it can sit between two source leads. The nest is prepared with
+  the root (its cache holds only its grid, statics and base state), so no
+  extra analysis is fetched for it. Each birth appends a row to
+  `nest_birth_receipts.jsonl` in the run directory. The parent must have
+  run first: a nest starting at the same instant as its own parent is
+  refused. A parent-born nest cannot also follow or be a `[relocation]`
+  target, and the stock-WRF export (`wrfinput_dNN`) refuses it.
+
+Its first history frame is the domain's own initial frame and carries no
+`REFL_10CM`, exactly as d01's frame at t = 0 does; every frame after it
+carries the field. Restart headers persist `STARTED`/`NOT_STARTED` lifecycle
+state, so resuming before the timestamp does not initialize the child early:
+it is born at its start from the resumed parent. Resuming after a
+parent birth births the nest again from the parent before the restore (its
+setup arrays come from the birth, not from its cache) and the checkpoint then
+supplies every prognostic.
+
+Which doors activate delayed nests:
+
+| Door | `start_from = "analysis"` | `start_from = "parent"` |
+|---|---|---|
+| `woof go` (native prepared domain tree) | yes | yes, with the parent and the child resident; a parent or child that streams through `[tiles]` or `[devices]` is refused at startup |
+| `woof run` (experiment tree) | yes | refused by name |
+| `woof stream`, `run --wrfinput`, `run --met-em` | refused by name | refused by name |
+
+Automatic health rollback is not qualified for delayed domains and refuses
+them, as before.
 
 External boundary cadence has no whole-hour rule. It must be a positive,
 uniform whole-second interval and an exact integer number of d01 steps because

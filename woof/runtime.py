@@ -1872,6 +1872,9 @@ def rebuild_child_driver_from_land_state(*, exp: ExperimentConfig,
         glw=declared_constant_glw(exp),
         cam_ozone=cam, radiation=radiation, radiation_start_time=exp.start_time,
         radiation_latitude=lat, radiation_longitude=lon,
+        # The footprint's own sub-grid orographic statistics, read only
+        # when topo_wind / gwd_opt is on (which refuses without them).
+        terrain_drag_static=static,
         **lake_physics_inputs(cfg, static),
         **ruc_mosaic_physics_inputs(
             cfg, static, landuse_attrs=attrs, xice=land.get("xice", 0.0),

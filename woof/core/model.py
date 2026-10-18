@@ -577,6 +577,12 @@ def restart_identity_payload(exp) -> dict:
         for name in ("retire", "rearm", "follow"):
             if domain.get(name) is None:
                 domain.pop(name, None)
+        # A delayed nest's birth source, on the same convention: absent
+        # (the analysis birth every pre-key experiment ran) stays absent,
+        # and a declared parent birth binds, because it is a different
+        # initial state for that nest.
+        if domain.get("start_from") is None:
+            domain.pop("start_from", None)
         # A follower's reach bound takes the same convention one level
         # down: its default (None) drops out so every follower fingerprint
         # written before the key existed is unchanged, and a DECLARED
@@ -1003,8 +1009,12 @@ def build_experiment(exp, case_data) -> ExperimentState:
     physics driver and Task-13 coupler.  Every state is constructed against
     the one shared transient arena before any scratch slot is materialized.
     """
-    from woof.experiment import _bind_physics_params
+    from woof.experiment import (_bind_physics_params,
+                                  refuse_parent_born_activation)
     exp = _bind_physics_params(exp, "woof.core.model.build_experiment")
+    # This route's on_domain_start initializes a delayed child from the
+    # analysis at its start; a parent-born child is the prepared tree's.
+    refuse_parent_born_activation(exp, "woof run (experiment-tree)")
     from woof import runtime
     from woof.core.clock import build_schedule, resolve_clock
     from woof.core.preflight import estimate_experiment

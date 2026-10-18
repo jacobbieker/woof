@@ -294,7 +294,8 @@ def nest_start_needs(exp, *, source: str, cycle: datetime | None = None,
             continue
         grid_id = int(domain.grid_id)
         offset = Fraction(exp.domain_start_offset_exact(grid_id))
-        if offset == 0:
+        if offset == 0 or getattr(domain, "start_from", None) == "parent":
+            # A parent-born nest reads no analysis at its start.
             continue
         label = f"d{grid_id:02d}"
         if offset % (cadence * 3600) != 0:

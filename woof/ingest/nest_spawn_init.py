@@ -537,7 +537,8 @@ def spawn_child_from_parent(child_dc, parent_node, *,
                             array_module=None, on_child_built=None,
                             state_digest=None,
                             trigger_receipt=None,
-                            device_free_bytes=None) -> dict[str, object]:
+                            device_free_bytes=None,
+                            grid=None) -> dict[str, object]:
     """Materialize one fired nest from the LIVE parent, and account for it.
 
     ``child_dc`` carries the FIRED placement
@@ -562,6 +563,10 @@ def spawn_child_from_parent(child_dc, parent_node, *,
     returning bytes; it defaults to :func:`card_free_bytes` for a card
     build and is not asked for a NumPy build, which allocates nothing on
     a card.
+
+    ``grid`` is the child grid the caller already holds (a route that
+    built it from prepared geometry); omitted, it is resolved from the
+    parent (:func:`woof.ingest.nest_init.parent_only_init`).
 
     Returns the receipt dict; the live product rides under
     ``"child_result"`` (a :class:`ChildInitResult`), the ``segment_state``
@@ -590,6 +595,8 @@ def spawn_child_from_parent(child_dc, parent_node, *,
         extra["dycore_state_workspace"] = dycore_state_workspace
     if array_module is not None:
         extra["array_module"] = array_module
+    if grid is not None:
+        extra["grid"] = grid
     # register_nest refuses a placement whose donors fall outside the
     # parent's +-2 SINT stencil, so an off-grid fired placement fails
     # HERE, before anything exists to clean up.
