@@ -130,6 +130,12 @@ def _gil_notice(ranks, report):
 class RankedRun(multigpu.MultiGPUDomain):
     """A rank stays resident; host transfers occur only at an exposed seam."""
     ranked = True
+    # The window road's idle state, for a run assembled without __init__
+    # (tests build one with __new__ and sweep it): nothing staged, no read
+    # queued.  __init__ gives each run its own containers.
+    _window_staging = ()
+    _window_staging_bytes = 0
+    _window_reads_pending = False
 
     def __init__(self, store, cfg, *, options, scalars, geography, template,
                  clock=None, seam="zeros", boundaries=None,
@@ -834,12 +840,16 @@ class RankedRun(multigpu.MultiGPUDomain):
         dst[...] = landing
         done = cp.cuda.Event(disable_timing=True)
         done.record(stream)
+        if not isinstance(self._window_staging, list):
+            self._window_staging = []
         self._window_staging.append((int(cp.cuda.Device().id), done, staged, landing))
         self._window_staging_bytes += 2 * int(staged.nbytes)
         if self._window_staging_bytes > self.WINDOW_STAGING_LIMIT_BYTES:
             self._retire_window_staging()
 
     def _retire_window_staging(self):
+        if not self._window_staging:
+            return
         import cupy as cp
         staging, self._window_staging = self._window_staging, []
         self._window_staging_bytes = 0
