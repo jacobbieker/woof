@@ -87,6 +87,10 @@ def _write_csv(path: Path, **kwargs) -> Path:
     return path
 
 
+#: This woof's own itinerary lookup, before the fixture below hides it.
+_REAL_RELOCATION_MODULE = tp._relocation_module
+
+
 @pytest.fixture(autouse=True)
 def _no_itinerary(monkeypatch):
     """Plan against the woof this test runs in, minus any itinerary module
@@ -302,6 +306,46 @@ def test_the_itinerary_is_written_when_this_woof_has_one(tmp_path, monkeypatch):
     assert run.plan["relocation"]["mode"] == "track"
     assert run.plan["layout"]["placements"]["d03"][0] == \
         _domains(document)[3]["i_parent_start"]
+
+
+def test_the_nests_follow_the_track_with_this_woofs_itinerary(
+        tmp_path, monkeypatch, capsys):
+    """With woof relocation from-track in this woof, d03 follows the path:
+    the config carries [[relocation.move]] rows and a d02 containment,
+    loads, and passes the woof go dry run."""
+
+    from woof import go_cli
+    from woof.cli import main
+
+    monkeypatch.setattr(tp, "_relocation_module", _REAL_RELOCATION_MODULE)
+    if tp._relocation_module() is None:
+        pytest.skip("this woof has no track itinerary")
+    run = tp.plan_track(_track(speed=10.0), "follow-real", tmp_path / "p",
+                        tp.PlanOptions(source="gfs"))
+    document = _config(run)
+    relocation = document["relocation"]
+    assert relocation["grid_id"] == 3
+    assert relocation["containment"]["grid_id"] == 2
+    moves = relocation["move"]
+    assert len(moves) >= 5
+    d03_offset = (_domains(document)[3]["start_time"]
+                  - document["experiment"]["start_time"]).total_seconds()
+    assert all(move["at_seconds"] > d03_offset for move in moves)
+    assert all(move["at_seconds"] % relocation["cadence_seconds"] == 0
+               for move in moves)
+    assert run.plan["relocation"]["mode"] == "track"
+    assert run.plan["relocation"]["moves"] == len(moves)
+    bridge = tmp_path / "bridge"
+    bridge.write_bytes(b"stub")
+    monkeypatch.setattr(go_cli, "resolve_bridge", lambda: bridge)
+    capsys.readouterr()
+    assert main(["go", str(run.config), "--dry-run", "--products", "none",
+                 "--outdir", str(tmp_path / "go")]) == 0
+    from woof.experiment import load_experiment
+    loaded = load_experiment(run.config)
+    assert loaded.relocation.enabled
+    assert len(loaded.relocation.moves) == len(moves)
+    assert loaded.relocation.containment.grid_id == 2
 
 
 def test_relocation_track_without_the_itinerary_is_refused(tmp_path):
