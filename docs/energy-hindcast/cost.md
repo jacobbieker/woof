@@ -206,6 +206,7 @@ domain from 0.1 M to 20 M cells on the card you will rent.
 | [FIRST-LIGHT.md](../public/FIRST-LIGHT.md) section 3 | RTX 4070, 504 GB/s, 46 SMs | 342x272x49, 2160 steps in 523 s, output included | 39,057 |
 | `woof/live_products.py` docstring | RTX 5070 Ti, 896 GB/s, 70 SMs | 12/3/1 km stack (170², 336², 408x402) at 170 s per model hour; nz 49 and the 60/15/5 s clock are assumed | 49,480 |
 | fitted `K` | | geometric mean | **43,961** |
+| [below](#calibrated-a6000-100-m-256-levels-les--rte-rrtmgp) (not in the fit) | RTX A6000, 768 GB/s, 84 SMs | 325x325x256 at 100 m, LES + RTE-RRTMGP + Thompson, 600 steps at dt 0.5 s in 563 s, setup excluded | 37,500 |
 
 One receipt was read and deliberately left out of the fit. The RTX 5090
 acceptance run in FIRST-LIGHT.md section 5 (250x200x49, 361 steps in about
@@ -218,6 +219,86 @@ At saturation, `K` predicts about 147 M cell-steps/s on an H100 SXM and
 13 M on an L4. Treat these as scaled guesses until a datacentre card has
 been timed. The first hour on a rented card should be a timed Wales tile,
 and its `K` should replace this table's.
+
+### Calibrated A6000: 100 m, 256 levels, LES + RTE-RRTMGP
+
+This is the first timing in the tree with a deep column, and the one
+`woof estimate-tracks` (`woof/track_estimate.py`) is calibrated on. It is
+kept out of the hindcast fit above. The workload is different (256 levels,
+LES, 5-minute radiation), and the fit's cards and receipts stay as they
+were.
+
+- **Tool**: `tools/bench_les_256.py`. Each case runs in its own process,
+  takes the woof GPU lock, and refuses to start unless `nvidia-smi` shows
+  the card under 10% busy with no other process holding more than 1 GiB.
+- **Domain**: `tilestream.harness.make_config` on a periodic flat domain,
+  built by `tilestream.physics_inventory.default_builder` (WK82 sounding,
+  seeded moisture, a PhysicsDriver attached). The model top is 25 km.
+- **Physics**: `bl_pbl_physics=0`, `km_opt=2`, `diff_opt=2`, revised MM5
+  surface layer, Noah, Thompson (`mp_physics=8`), RTE-RRTMGP
+  (`ra_*_physics=4`, `ra_rrtmg_variant="rte-rrtmgp"`, `radt` 5 min) and 4
+  acoustic substeps.
+- **Timing**: 600 timed steps of `dycore.step` plus the per-step health
+  readback, with radiation on its own cadence. Setup, kernel compilation
+  and warm-up are excluded.
+- **Not included**: lateral-boundary, nest-interpolation, feedback, moving
+  and output kernels, terrain and a real sounding. The estimator's A6000
+  band (0.7x to 1.1x, central 0.9x) is there to cover them.
+- **Conditions**: one RTX A6000 (48 GB, 49,140 MiB as reported, driver
+  610.57.04) on 2026-10-18, idle at the start of every case (0%
+  utilisation, other processes holding at most 1,022 MiB). SM clock 1.80
+  to 1.86 GHz, memory clock 7.6 GHz, 69 to 82 °C.
+- **Memory**: the process's footprint from `nvidia-smi` at the end of each
+  case. The CuPy pool keeps every block it allocated, so that reading is
+  the high-water mark.
+
+| case | cells | s/step (mean) | M cell-steps/s | peak GiB (process, nvidia-smi) |
+|---|---:|---:|---:|---:|
+| d03 325x325x256 alone | 27.0 M | 0.939 | **28.8** | 24.9 |
+| d03 300x300x256 alone | 23.0 M | 0.866 (median 0.797) | 26.6 (28.9 at the median) | 21.9 |
+| 3-domain tree, d03 325 | 46.9 M | 16.7 per d01 step | 29.1 over the tree (ordinary steps) | 37.6 |
+| 3-domain tree, d03 360 | 53.1 M | 19.2 per d01 step | | 41.3 |
+| 3-domain tree, d03 380 | 56.9 M | 21.1 per d01 step | | 43.7 |
+| 3-domain tree, d03 400 | 60.8 M | 23.6 per d01 step | | 46.2 |
+| 3-domain tree, d03 410 | 62.9 M | out of memory | | > 45.1 allocated |
+
+Notes on the rows:
+
+- **Radiation**: a forced RTE-RRTMGP step on the 325 leaf costs 3.18 s,
+  against 0.935 s for an ordinary step (3.4 times). At one step in 600 that
+  adds 0.4% on the leaf. With `radt` 5 min the same ratio adds 1.2% on d02
+  (one step in 200) and 6% on d01 (one in 40). The tree's two timed d01
+  steps follow a forced-radiation warm-up and hold no radiation step, so
+  the estimator adds each domain's radiation from the ratio.
+- **The 300 run**: another process started on the card during the timing,
+  so its mean is slow. The median step gives the same rate as the 325
+  run.
+- **Tree layout**: d01 is 140x140 at 1.5 km (5.0 M cells), d02 is 241x241
+  at 300 m (14.9 M cells), and d03 is the leaf. All three domains have 256
+  levels and live in one process. They are independent periodic domains
+  with no nest coupling, stepped 1 : 5 : 15 (dt 7.5 / 1.5 / 0.5 s).
+
+**Largest d03 beside a ~5 M-cell d01 and the 14.9 M-cell d02 on 48 GB:
+400x400 at 100 m with 256 levels** (46.2 GiB). The next size tried,
+410x410, ran out of memory.
+
+**Memory line** for the tree: about 8.7 GiB + 662 bytes per cell (0.65 KiB
+per cell). That is a straight line through the 325, 380 and 400 points,
+and it predicts the 360 point to 0.1 GiB. The leaf alone is about 4.7 GiB
++ 800 bytes per cell (two points). The estimator prices memory with the
+tree line.
+
+**Throughput**: 28.8 M cell-steps/s is about 4 times the 7 M measured on
+a busy card, and 1.4 to 2.4 times the 12 to 20 M planned for a free one.
+Relative to the hindcast fit it is `K` = 37,500 cell-steps/s per GB/s,
+0.85 of the fitted 43,961. The tree's ordinary-step rate matches the
+leaf's, so a 1.5 km MYNN d01 costs about the same per ordinary cell-step as
+an LES leaf. At d03 325 the tree needs 2.2 s of wall time per simulated
+second while all three domains run.
+
+Every other card in `woof estimate-tracks` is this A6000 figure scaled by
+memory bandwidth, and is labelled uncalibrated. Its band is 0.45x to
+1.25x, central 0.9x.
 
 ## Cards: `--card` for cloud parts
 

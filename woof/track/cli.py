@@ -47,7 +47,8 @@ def register_cli(subparsers) -> None:
 
 
 def add_mapping_arguments(parser) -> None:
-    """The column options `woof track inspect` and `woof track plan` share."""
+    """The column options `woof track inspect`, `woof track plan` and
+    `woof estimate-tracks` share."""
 
     parser.add_argument("--mapping", type=Path, default=None, metavar="FILE",
                         help="JSON or TOML column mapping with keys time, lat, "
