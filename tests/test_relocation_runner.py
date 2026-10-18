@@ -1182,6 +1182,33 @@ def test_containment_slides_the_parent_and_compensates_the_mover():
     assert model.experiment_fingerprint != "base-fingerprint"
 
 
+def test_containment_slide_is_bounded_by_its_own_cap_not_the_movers():
+    """A slide past the MOVER's cap but inside the containment cap runs.
+
+    The slide is clamped to [relocation.containment]
+    max_move_parent_cells, then executed through relocate_child with the
+    config's governance re-aimed at the sliding parent.  The re-aim used
+    to carry the mover's max_move_parent_cells along, so a slide the
+    containment cap admitted was refused there ("the move is 5 parent
+    cells, over the configured maximum of 2") and the run ended -- in
+    production, a track itinerary with rows capped at 10 died at a 17-cell
+    d02 slide its own containment cap of 19 allowed.
+    """
+    parent_plane, parent, child, d03 = _tree3()
+    runner, model, clocks = _containment_runner(
+        parent, child, d03, parent_plane, mover_cap=2, contain_cap=5)
+    runner.on_period_begin(model, clocks)
+    contained = runner.receipts[0]
+    assert contained["event"] == "contained"
+    # Deviation +14 asks round(14/3) = 5; the containment cap of 5 does
+    # not cut it, and the mover's cap of 2 must not either.
+    assert contained["requested_shift_parent_cells"] == [5, 0]
+    assert contained["executed_shift_parent_cells"] == [5, 0]
+    assert contained["clamped_by"] == []
+    assert child.cfg.i_parent_start == 85 + 5
+    assert d03.cfg.i_parent_start == 70 - 15
+
+
 def test_containment_inside_the_deadband_is_silent():
     parent_plane, parent, child, d03 = _tree3()
     from dataclasses import replace

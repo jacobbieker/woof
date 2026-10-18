@@ -772,9 +772,18 @@ class RelocationRunner:
         # mover.  Everything else (mode opt-in, min_overlap_fraction)
         # carries over; the containment table is dropped from the shim so
         # the config's own strict-ancestor validation does not read the
-        # re-aimed id as self-containment.
+        # re-aimed id as self-containment.  The per-move cap does NOT
+        # carry over: the config's max_move_parent_cells bounds the
+        # MOVER's rows, in the mover's parent's cells, and the slide was
+        # clamped above to the containment's own cap, in ITS parent's
+        # cells.  Carrying the mover's cap refused every slide the
+        # containment cap admitted past it, mid-run (MEASURED: rows capped
+        # at 10, containment cap 19, the run ended at a 17-cell d02 slide
+        # with "the move is 17 parent cells, over the configured maximum
+        # of 10").
         bounds = _replace(self.config, grid_id=int(cont.grid_id),
-                          containment=None)
+                          containment=None,
+                          max_move_parent_cells=cont.max_move_parent_cells)
         reconstruction_args = self._reconstruction_args(
             parent_node, self.containment_initializer, self.containment_preparer)
         receipt = relocate_child(

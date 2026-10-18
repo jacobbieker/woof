@@ -789,6 +789,14 @@ Changed:
 
 Fixed:
 
+- A moving nest with a `[relocation.containment]` parent could die mid-run
+  at a containment slide. The runner clamped the slide to
+  `[relocation.containment] max_move_parent_cells`, then judged it against
+  the mover's own `[relocation] max_move_parent_cells`, so any slide wider
+  than the mover's cap refused with "the move is N parent cells, over the
+  configured maximum". This hit `woof relocation from-track` itineraries,
+  whose containment cap is wider than their row cap. A slide is now judged
+  against the containment's cap.
 - `woof go` refused a sealed mapped single-domain preparation (for example
   `icon-global-ml`) at the forecast stage, calling it "a multi-domain
   hierarchy product", because its proof records no top-level
