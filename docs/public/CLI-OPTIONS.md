@@ -649,6 +649,7 @@ Takes no options of its own.
 | `--slots-per-gpu N\|auto` | jobs each worker packs per GPU (woof energy worker --slots-per-gpu; default 1) |
 | `--spot` | run on spot / preemptible capacity |
 | `--strict` | refuse instead of writing REPLACE_ME_ placeholders for missing account identifiers |
+| `--tier NAME` | render the configuration's [tiers.NAME] table: its keys replace the top-level ones and its section tables merge into theirs (one file, several fleets; a file with tiers needs one) |
 | `--workers` | number of workers (array size / task count / completions) |
 
 ## `woof energy estimate`
@@ -1407,6 +1408,32 @@ Takes no options of its own.
 | `--verify-inputs {stamp,full}` | how inputs already on disk are verified: 'stamp' (the default, except on Windows) reuses a file's sha256 without reading it while its device, inode, size, mtime and ctime are identical to the full read that last proved it, and reads it again on any difference; 'full' reads every byte at every check (an audit; slow on a large cycle). Sets WOOF_VERIFY for every stage this command starts; receipts record which ran |
 | `--whole-cycle` | download routes only: the fetch stage waits for the whole cycle (the old rule) instead of taking each lead as it posts; wins over the config's [fetch] as_posted |
 | `--wps-namelist PATH` | with --prepared-root: the exact WPS authority required by a single-domain portable bundle |
+
+## `woof go-job`
+
+| argument | what it does |
+|---|---|
+| `JOB` | a woof.go-job.v1 job document, or a woof.go-job-list.v1 list (or JSON array) of jobs indexed by --index; a path or an s3://, gs://, https:// or file:// URL |
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--index N` | which entry of a job list to run (0-based; default $AWS_BATCH_JOB_ARRAY_INDEX, else $WOOF_WORKER_INDEX) |
+| `--output-prefix URL` | store prefix for a job without icechunk_url: URL/<job_id>.icechunk (default $WOOF_ENERGY_OUTPUT_URL) |
+| `--result PATH` | where the woof.go-job.result.v1 JSON is written (default WORKDIR/result.json); it is also printed on stdout |
+| `--workdir DIR` | where inputs are staged and woof go runs (default $WOOF_SCRATCH/go-job/<job_id>, else ./go-job-<job_id>) |
+
+## `woof go-job-push`
+
+| argument | what it does |
+|---|---|
+| `LOCAL_DIR` | the folder whose files are pushed |
+| `PREFIX` | where they go: s3://BUCKET/PREFIX, gs://BUCKET/PREFIX or file:///DIR |
+
+| option | what it does |
+|---|---|
+| `--dry-run` | print the manifest and upload nothing |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 
 ## `woof hex`
 

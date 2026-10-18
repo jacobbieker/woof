@@ -64,6 +64,12 @@ RUN case "${CUDA}" in \
  && ln -s ".pixi/envs/${env}" /opt/woof/env \
  && pixi shell-hook -e "${env}" > /opt/woof/activate.sh \
  && rm -rf "${HOME}/.cache/rattler"
+# boto3, which an s3:// queue needs (`woof energy worker --queue s3://...`
+# claims, leases and settles jobs through it) and `woof go-job` prefers for
+# s3:// inputs.  It is not in the pixi lock, so it is pinned here.
+ARG BOTO3_VERSION=1.40.40
+RUN /opt/woof/env/bin/python -m pip install --no-cache-dir --no-input \
+      "boto3==${BOTO3_VERSION}"
 # Native bridges, then drop cargo's intermediates (the artifacts woof loads
 # sit directly in target/release).
 RUN pixi run -e "$(cat /opt/woof/.woof-pixi-env)" build-native \
