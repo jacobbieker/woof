@@ -2604,6 +2604,50 @@ Takes no options of its own.
 | `--time-col COL` | time column (default: time) |
 | `--time-format FMT` | a Python strptime format, or 'epoch' for Unix seconds (default: ISO 8601, date and time joined by a space or T); times without a zone are UTC |
 
+## `woof track plan`
+
+| argument | what it does |
+|---|---|
+| `PATHFILE [PATHFILE ...]` | path file (.csv, .tsv, .json, .parquet), or a directory of them |
+
+| option | what it does |
+|---|---|
+| `--d02-window-km KM` | d02's side (default 72) |
+| `--d03-spinup-h H` | d03's spin-up before launch, born from d02 (default 1) |
+| `--d03-window-km KM` | d03's side (default 32.4) |
+| `--drop-when COL=VALUE` | drop rows whose COL equals VALUE (e.g. a receiver's no-fix flag); repeatable |
+| `--dx-km D1,D2,D3` | spacing of d01, d02, d03 in km (default 1.5,0.3,0.1) |
+| `--eta-band LO:HI:N[:msl\|agl]` | height band holding at least N levels; repeatable (default 0:2000:41:agl and 15000:25000:100, fitted under the model top) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--gpu-mem-gib GIB\|auto` | the job's declared GPU memory (default auto: the estimate's upper bound) |
+| `--height-col COL` | height column, metres (default: height) |
+| `--height-datum {msl,agl}` | heights above mean sea level or above ground (default: msl) |
+| `--height-fallback-col COL` | column used where the height is blank; repeatable, tried in order |
+| `--history-s S` | d03 history interval during the flight (default 120) |
+| `--icechunk-url URL` | the run's Icechunk repository, e.g. s3://BUCKET/PREFIX/{name}.icechunk ({name} is the run name; default {name}.icechunk beside the config) |
+| `--inputs-prefix URL` | with --job-json: reference the config and companions as URLs under URL/<name>/ (push them with the printed woof go-job-push command) instead of carrying them inline |
+| `--job-json` | also write a woof.go-job.v1 document per run into OUT/jobs/<tier>/ |
+| `--lat-col COL` | latitude column, degrees (default: lat) |
+| `--lon-col COL` | longitude column, degrees (default: lon) |
+| `--mapping FILE` | JSON or TOML column mapping with keys time, lat, lon, height, height_fallback, time_format, height_datum, drop_when |
+| `--margin-km KM` | ground d01 keeps around the track envelope (default 60; grown when d02 would not fit at the envelope's edge) |
+| `--min-climb M` | climb above the starting ground, metres, that makes a launch (default: 300) |
+| `--name NAME` | the run's name: [experiment] name, job id and Icechunk key (only with a single PATHFILE) |
+| `--names-from {stem}` | name each run after its file stem, with characters a job id cannot carry replaced by '-' (needed for several PATHFILEs) |
+| `--no-eta-bias` | do not bias the column toward the heights the track spends time at |
+| `--out DIR` | directory the runs are written into |
+| `--output-preset PRESET` | history preset (default auto: the lean track preset where this woof has one) |
+| `--p-top-pa PA\|auto` | model top (default auto: the standard-atmosphere pressure 7 km above the track's peak, clipped to 300-5000) |
+| `--physics auto\|explicit\|SUITE` | auto: the registered LES-nest tree suite, else explicit keys; explicit; or a tree suite id |
+| `--relocation {auto,track,static}` | auto: d03 follows the track where this woof has the itinerary, else static nests; track: require it; static: never move |
+| `--relocation-cadence-s S` | how often d03 may move (default 300) |
+| `--result-prefix URL` | with --job-json: write each job's result JSON to URL/<name>.result.json |
+| `--source {auto,hrrr,ukv,gfs,era5}` | boundary source (default auto: the track's suggestion where this woof can prepare it to the model top, else gfs) |
+| `--spinup-h H` | tree spin-up before launch, rounded out to the forcing cadence (default 3) |
+| `--time-col COL` | time column (default: time) |
+| `--time-format FMT` | a Python strptime format, or 'epoch' for Unix seconds (default: ISO 8601, date and time joined by a space or T); times without a zone are UTC |
+| `--track-margin-cells N` | d03 cells the track keeps from d03's edges (default 40) |
+
 ## `woof update`
 
 | option | what it does |
