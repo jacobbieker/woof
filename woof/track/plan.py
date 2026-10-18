@@ -924,7 +924,9 @@ def _fit_root_step(domains: list[dict], history_s: float) -> None:
                for g in factor if by_id[g].get("radt")}
 
     def fits(d03_dt: Fraction) -> bool:
-        if (Fraction(history_s) / d03_dt).denominator != 1:
+        # Every grid writes history on the same interval.
+        if any((Fraction(history_s) / (d03_dt * f)).denominator != 1
+               for f in factor.values()):
             return False
         return all((period / (d03_dt * factor[g])).denominator == 1
                    for g, period in periods.items())
@@ -983,9 +985,22 @@ def apply_track_tables(document: dict, *, times: PlanTimes,
     if begin:
         d03["history_begin_s"] = begin
     d03["history_end_s"] = end
+    # d01 and d02 write the same flight window on the same interval, from
+    # the tree's start (they are never born late), so every grid lands in
+    # the Icechunk repository and none writes during the spin-up.
+    born = (times.d03_start - times.start).total_seconds()
+    for table in domains:
+        if int(table["grid_id"]) == 3:
+            continue
+        table["history_interval_s"] = float(options.history_s)
+        table.pop("history_begin_s", None)
+        if begin + born:
+            table["history_begin_s"] = int(begin + born)
+        table["history_end_s"] = int(end + born)
     document["output"] = {
         "preset": preset,
-        "icechunk": {"url": icechunk_url, "domains": [3],
+        "icechunk": {"url": icechunk_url,
+                     "domains": sorted(int(t["grid_id"]) for t in domains),
                      "delete_after_commit": True, "compress": True},
     }
     document.pop("relocation", None)
@@ -1161,27 +1176,33 @@ def estimate(exp, times: PlanTimes, layout: TreeLayout, options: PlanOptions
 
 
 def _output_bytes(exp, times: PlanTimes, options: PlanOptions) -> dict:
-    """d03's exported history (uncompressed), from the history writer's
-    own pricing where it answers, else 4 bytes x volumes x cells."""
+    """Every grid's exported history (uncompressed), from the history
+    writer's own pricing where it answers, else 4 bytes x volumes x cells."""
 
     begin, end = times.history_window()
     frames = int((end - begin) // options.history_s) + 1
+    per_grid: dict[int, int] = {}
+    basis = "history writer pricing"
     try:
         from woof.output_disk import forecast_projection
-        projection = forecast_projection(exp)
-        d03 = next(d for d in projection["domains"]
-                   if int(d.get("grid_id", 0)) == 3)
-        per_frame = (d03["history_bytes"] / d03["history_frames"]
-                     if d03.get("history_frames") else None)
-    except Exception:  # noqa: BLE001 - an estimate, not a gate
-        per_frame = None
-    basis = "history writer pricing"
-    if not per_frame:
-        dc = exp.domain(3)
-        per_frame = 4 * 14 * int(dc.run.nx) * int(dc.run.ny) * int(dc.run.nz)
-        basis = "4 bytes x 14 volumes per cell"
-    return {"d03_frames": frames, "d03_bytes_per_frame": int(per_frame),
-            "d03_bytes": int(per_frame * frames), "basis": basis,
+        for d in forecast_projection(exp)["domains"]:
+            if d.get("history_frames"):
+                per_grid[int(d["grid_id"])] = int(
+                    d["history_bytes"] / d["history_frames"])
+    except Exception:  # noqa: BLE001 - pricing is advisory
+        per_grid = {}
+    for dc in exp.domains:
+        gid = int(dc.grid_id)
+        if gid not in per_grid:
+            per_grid[gid] = 4 * 14 * int(dc.run.nx) * int(dc.run.ny) * int(
+                dc.run.nz)
+            basis = "4 bytes x 14 volumes per cell"
+    per_frame = sum(per_grid.values())
+    return {"frames": frames,
+            "bytes_per_frame_by_grid": {f"d{g:02d}": b
+                                        for g, b in sorted(per_grid.items())},
+            "bytes_per_frame": int(per_frame),
+            "bytes": int(per_frame * frames), "basis": basis,
             "compressed": "smaller: the export compresses (Blosc zstd)"}
 
 
@@ -1363,7 +1384,7 @@ def plan_track(track: Track3D, name: str, out_dir: Path,
                      "p_top_reason": top_why, "eta_file": eta_path.name},
         "physics": physics.get("label"),
         "output": {"preset": preset, "icechunk_url": icechunk_url,
-                   "domains": [3], "products": "none"},
+                   "domains": [1, 2, 3], "products": "none"},
         "relocation": relocation_summary,
         "follow_check": follow,
         "estimate": sizes,
@@ -1544,7 +1565,7 @@ def summary_table(runs: Sequence[PlannedRun]) -> str:
     width = max([len("run")] + [len(run.name) for run in runs])
     lines = [f"{'run':<{width}}  {'source':<6}  {'start (UTC)':<16}  "
              f"{'hours':>5}  {'d01':>9}  {'Mcells':>7}  {'GiB':>11}  "
-             f"{'wall h':>11}  {'d03 GB':>7}  reloc"]
+             f"{'wall h':>11}  {'out GB':>7}  reloc"]
     for run in runs:
         plan = run.plan
         est = plan["estimate"]
@@ -1558,6 +1579,6 @@ def summary_table(runs: Sequence[PlannedRun]) -> str:
             f"{f'{d01[0]}x{d01[1]}':>9}  {est['total_cells'] / 1e6:>7.1f}  "
             f"{f'{gib[0]:.1f}-{gib[1]:.1f}':>11}  "
             f"{f'{wall[0]:.1f}-{wall[1]:.1f}':>11}  "
-            f"{est['output']['d03_bytes'] / 1e9:>7.1f}  "
+            f"{est['output']['bytes'] / 1e9:>7.1f}  "
             f"{plan['relocation'].get('mode')}")
     return "\n".join(lines)
