@@ -1,6 +1,6 @@
 {
   "schema": "rw-wps.mapping.v1",
-  "name": "ukv-source-coop-regular-0p02-netcdf",
+  "name": "ukv-regular-0p02-netcdf",
   "format": "netcdf",
   "coordinates": {
     "horizontal": {
@@ -546,7 +546,7 @@
         {
           "format": "netcdf",
           "name": [
-            "era5_land_sea_mask"
+            "land_area_fraction"
           ],
           "standard_name": "land_area_fraction"
         }
@@ -575,7 +575,7 @@
         {
           "format": "netcdf",
           "name": [
-            "era5_sea_ice_cover"
+            "sea_ice_area_fraction"
           ],
           "standard_name": "sea_ice_area_fraction"
         }
@@ -604,28 +604,28 @@
         {
           "format": "netcdf",
           "name": [
-            "era5_soil_temperature_level_1"
+            "soil_temperature_layer_1"
           ],
           "standard_name": "soil_temperature"
         },
         {
           "format": "netcdf",
           "name": [
-            "era5_soil_temperature_level_2"
+            "soil_temperature_layer_2"
           ],
           "standard_name": "soil_temperature"
         },
         {
           "format": "netcdf",
           "name": [
-            "era5_soil_temperature_level_3"
+            "soil_temperature_layer_3"
           ],
           "standard_name": "soil_temperature"
         },
         {
           "format": "netcdf",
           "name": [
-            "era5_soil_temperature_level_4"
+            "soil_temperature_layer_4"
           ],
           "standard_name": "soil_temperature"
         }
@@ -657,28 +657,28 @@
         {
           "format": "netcdf",
           "name": [
-            "era5_volumetric_soil_water_layer_1"
+            "soil_moisture_layer_1"
           ],
           "standard_name": "volume_fraction_of_condensed_water_in_soil"
         },
         {
           "format": "netcdf",
           "name": [
-            "era5_volumetric_soil_water_layer_2"
+            "soil_moisture_layer_2"
           ],
           "standard_name": "volume_fraction_of_condensed_water_in_soil"
         },
         {
           "format": "netcdf",
           "name": [
-            "era5_volumetric_soil_water_layer_3"
+            "soil_moisture_layer_3"
           ],
           "standard_name": "volume_fraction_of_condensed_water_in_soil"
         },
         {
           "format": "netcdf",
           "name": [
-            "era5_volumetric_soil_water_layer_4"
+            "soil_moisture_layer_4"
           ],
           "standard_name": "volume_fraction_of_condensed_water_in_soil"
         }
@@ -727,7 +727,7 @@
     }
   ],
   "target": {
-    "name": "gpuwm/WRF-real UKV (Met Office UK deterministic 2 km) from the Source Cooperative archive, regridded to 0.02 degrees at fetch, with the same-hour ERA5 land state and sea ice carried in band",
+    "name": "gpuwm/WRF-real UKV (Met Office UK deterministic 2 km) from the Source Cooperative archive or the Met Office open-data bucket, regridded to 0.02 degrees at fetch, with the same-hour ERA5 or GFS land state and sea ice carried in band",
     "physics_suite": "source-independent",
     "max_dom": 4,
     "require_lateral_boundaries": true,
@@ -910,7 +910,7 @@
       "vertical_velocity": "explicit_zero_with_adapter_validation",
       "snow_water_equivalent": "bound_as_lwe_thickness_of_surface_snow_amount_at_water_density",
       "snow_depth": "not_published_in_archive",
-      "sea_ice_fraction": "bound_from_same_hour_era5_sea_ice_cover"
+      "sea_ice_fraction": "bound_from_same_hour_era5_or_gfs_sea_ice_carried_in_band"
     }
   }
 }

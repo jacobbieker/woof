@@ -4,21 +4,28 @@
 
 New:
 
-- `--source ukv`: the Met Office UKV (UK deterministic 2 km) from the
-  Source Cooperative Icechunk archive, hourly from 2024-01-01 00Z to
-  2025-08-13 22Z, 33 pressure levels to 10 hPa. `woof fetch --source ukv
-  --area ...` reads the window, regrids it from the UK Lambert azimuthal
-  equal-area grid to a regular 0.02-degree grid over the area plus 0.25
-  degrees, writes earth-relative wind components (the archive's
-  directions were measured to be true-north) and one CF NetCDF per hour;
-  the packaged profile `ukv-sc-netcdf-v1` decodes them. The archive has
-  no orography, soil or sea ice: each file carries a terrain derived from
-  the first hour's surface pressure on its own levels, and the same
-  hour's ERA5 land-sea mask, sea ice and soil column (Google's ARCO copy,
-  by nearest index). Windows outside the archive, domains off the UKV
-  grid, and the 2025-05-16 15Z hour (no pressure-level wind direction in
-  the archive) are refused by name. Values are float16 in the archive,
-  so temperature steps 0.125-0.25 K and height 16 m above about 100 hPa.
+- `--source ukv`: the Met Office UKV (UK deterministic 2 km), 33 pressure
+  levels to 10 hPa, from two anonymous stores. A window inside the Source
+  Cooperative Icechunk archive (2024-01-01 00Z to 2025-08-13 22Z, each
+  hour's own analysis) is read from it; any other window is read from ONE
+  run of the Met Office's open-data bucket (a rolling two years), the
+  newest run whose leads hold every valid time and that has posted them
+  all. The 03Z and 15Z runs reach T+120, three-hourly past T+54, so a
+  window longer than 54 h takes `--cadence 3`. `woof fetch --source ukv
+  --area ...` regrids the window from the UK Lambert azimuthal equal-area
+  grid to a regular 0.02-degree grid over the area plus 0.25 degrees,
+  writes earth-relative wind components (the directions were measured to
+  be true-north) and one CF NetCDF per hour; the packaged profile
+  `ukv-sc-netcdf-v1` decodes them. Neither store has soil or sea ice: each
+  file carries the same hour's ERA5 land-sea mask, sea ice and soil
+  column (Google's ARCO copy), or GFS 0.25-degree's past ERA5's last
+  published hour, on Noah's four layers by nearest index, and one terrain
+  (a live run's orography; in the archive, which publishes none, the
+  first hour's surface pressure on its own levels). Domains off the UKV
+  grid, windows no store serves and runs still posting are refused by
+  name, and an interrupted fetch resumes hour by hour. Archive values are
+  float16, so temperature steps 0.125-0.25 K and height 16 m above about
+  100 hPa; the live objects are float32.
 
 - A delayed nest can now be born from its live parent. Set
   `start_from = "parent"` on a `[[domain]]` whose `start_time` is later

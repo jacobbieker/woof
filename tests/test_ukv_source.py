@@ -85,31 +85,80 @@ def test_registry_window_is_the_plane_box_less_the_fetch_margin():
 # The window
 # --------------------------------------------------------------------------
 
+#: A fixed "now" for the live bucket's rolling two years.
+NOW = datetime(2026, 10, 18, 12)
+
+
 def test_window_inside_the_archive():
     times = ukv.validate_window(datetime(2024, 6, 18, 6), 3)
     assert times == tuple(datetime(2024, 6, 18, 6) + timedelta(hours=h) for h in range(4))
     assert ukv.validate_window(datetime(2024, 6, 18, 6), 6, 3)[-1] == datetime(2024, 6, 18, 12)
-    assert ukv.validate_window(ukv.COVERAGE_END, 0) == (ukv.COVERAGE_END,)
-    assert ukv.latest_cycle(4) == ukv.COVERAGE_END - timedelta(hours=4)
+    plan = ukv.plan_window(ukv.COVERAGE_END, 0, now=NOW)
+    assert (plan.store, plan.times) == ("archive", (ukv.COVERAGE_END,))
+
+
+@pytest.mark.parametrize("hour, last", [(3, 120), (15, 120), (0, 54), (6, 54), (9, 54),
+                                        (12, 54), (18, 54), (21, 54), (1, 12), (23, 12)])
+def test_live_run_ladders(hour, last):
+    leads = ukv.run_leads(hour)
+    assert max(leads) == last and set(range(0, min(last, 54) + 1)) <= leads
+    if last == 120:
+        assert 55 not in leads and 57 in leads and 117 in leads
+
+
+def test_window_past_the_archive_is_one_live_run():
+    plan = ukv.plan_window(datetime(2026, 10, 16, 6), 6, now=NOW)
+    assert plan.store == "live" and plan.runs[0] == datetime(2026, 10, 16, 6)
+    # Every candidate run holds every valid time.
+    for run in plan.runs:
+        leads = ukv.run_leads(run.hour)
+        assert all(int((valid - run).total_seconds() // 3600) in leads for valid in plan.times)
+    # A window crossing the archive's end is read live too.
+    assert ukv.plan_window(datetime(2025, 8, 13, 21), 2, now=NOW).store == "live"
+
+
+def test_a_long_window_takes_the_long_runs_at_three_hours():
+    # 66 h from 00Z: no run is hourly that far, the 03Z/15Z runs are at 3 h.
+    with pytest.raises(ValueError, match="--cadence 3"):
+        ukv.plan_window(datetime(2026, 10, 25, 0), 66, now=datetime(2026, 10, 26))
+    plan = ukv.plan_window(datetime(2026, 10, 25, 0), 66, 3, now=datetime(2026, 10, 26))
+    assert plan.store == "live"
+    assert plan.runs[:2] == (datetime(2026, 10, 24, 15), datetime(2026, 10, 24, 3))
 
 
 @pytest.mark.parametrize("cycle, hours", [
     (datetime(2023, 12, 31, 23), 1),
-    (datetime(2025, 8, 13, 21), 2),
-    (datetime(2026, 1, 1, 0), 0),
+    (datetime(2022, 1, 1, 0), 0),
 ])
-def test_window_outside_the_archive_refuses(cycle, hours):
+def test_window_outside_both_stores_refuses(cycle, hours):
     with pytest.raises(ValueError, match="leaves the archive") as error:
-        ukv.validate_window(cycle, hours)
+        ukv.plan_window(cycle, hours, now=NOW)
     assert "2024-01-01 00Z to 2025-08-13 22Z" in str(error.value)
 
 
-def test_window_refuses_the_hour_without_wind_direction():
+def test_the_archive_hour_without_wind_direction_is_read_live_or_refused():
+    plan = ukv.plan_window(datetime(2025, 5, 16, 12), 6, now=NOW)
+    assert plan.store == "live"
+    # Once the bucket has dropped that run, nothing serves the hour.
     with pytest.raises(ValueError, match="no pressure-level wind direction"):
-        ukv.validate_window(datetime(2025, 5, 16, 12), 6)
-    # A cadence that steps over the hour is fine.
-    times = ukv.validate_window(datetime(2025, 5, 16, 14), 2, 2)
-    assert ukv.WIND_DIRECTION_GAP not in times
+        ukv.plan_window(datetime(2025, 5, 16, 12), 6, now=datetime(2028, 1, 1))
+    # A cadence that steps over the hour stays in the archive.
+    plan = ukv.plan_window(datetime(2025, 5, 16, 14), 2, 2, now=NOW)
+    assert plan.store == "archive" and ukv.WIND_DIRECTION_GAP not in plan.times
+
+
+def test_latest_is_the_newest_complete_run(monkeypatch):
+    monkeypatch.setattr(ukv, "datetime", _FrozenDatetime)
+    complete = {datetime(2026, 10, 18, 9)}
+    monkeypatch.setattr(ukv, "live_missing",
+                        lambda run, times: [] if run in complete else ["absent"])
+    assert ukv.latest_cycle(6) == datetime(2026, 10, 18, 9)
+
+
+class _FrozenDatetime(datetime):
+    @classmethod
+    def utcnow(cls):
+        return cls(2026, 10, 18, 12, 30)
 
 
 @pytest.mark.parametrize("hours, cadence", [(-1, None), (3, 2), (2, 0)])
@@ -192,7 +241,8 @@ def test_era5_nearest_index_takes_the_lower_index_on_ties():
     rows, cols = ukv.era5_nearest_indices(np.array([90.0, 53.125, 53.13, -90.0]),
                                           np.array([-0.125, 0.0, 359.9, -180.0]))
     assert rows.tolist() == [0, 147, 147, 720]
-    assert cols.tolist() == [1439, 0, 0, 720]
+    # -0.125 sits halfway between 359.75 (1439) and 0 (0): the lower index.
+    assert cols.tolist() == [0, 0, 0, 720]
 
 
 # --------------------------------------------------------------------------
@@ -304,12 +354,22 @@ def test_store_indices_refuse_a_changed_layout():
 def _fake_era5(valid, latitude, longitude, *, workers=4):
     shape = (len(latitude), len(longitude))
     fields = {output: np.full(shape, value) for output, value in (
-        ("era5_land_sea_mask", 1.0), ("era5_sea_ice_cover", np.nan))}
+        ("land_area_fraction", 1.0), ("sea_ice_area_fraction", np.nan))}
     for k in range(1, 5):
-        fields[f"era5_soil_temperature_level_{k}"] = np.full(shape, 285.0 - k)
-        fields[f"era5_volumetric_soil_water_layer_{k}"] = np.full(shape, 0.3)
-    return fields, {"store": "synthetic", "valid_time": valid.isoformat(),
+        fields[f"soil_temperature_layer_{k}"] = np.full(shape, 285.0 - k)
+        fields[f"soil_moisture_layer_{k}"] = np.full(shape, 0.3)
+    return fields, {"source": "era5", "store": "synthetic", "valid_time": valid.isoformat(),
                     "negative_soil_water_floored": 0}
+
+
+_REAL_LAND_STATE_SOURCE = ukv.land_state_source
+
+
+@pytest.fixture(autouse=True)
+def _era5_holds_every_window(monkeypatch):
+    """No test asks ARCO for its bounds: ERA5 is taken to hold the window."""
+
+    monkeypatch.setattr(ukv, "land_state_source", lambda times, **_: "era5")
 
 
 def test_acquire_writes_the_files_and_front_door(tmp_path, monkeypatch):
@@ -333,7 +393,8 @@ def test_acquire_writes_the_files_and_front_door(tmp_path, monkeypatch):
         terrain = dataset.variables["surface_altitude"][0]
         expected = ukv._RD * 280.0 / ukv._GRAVITY * math.log(100000.0 / 98000.0)
         assert np.allclose(terrain, expected, rtol=1e-3)
-        assert dataset.variables["era5_sea_ice_cover"][0].mask.all()
+        assert dataset.variables["sea_ice_area_fraction"][0].mask.all()
+        assert dataset.getncattr("land_state_source") == "era5"
     arguments = json.loads((tmp_path / fetch_routes.PREP_ARGUMENTS_NAME).read_text())
     assert arguments["source"] == "ukv"
     supplements = [arguments["argv"][i + 1] for i, token in enumerate(arguments["argv"])
@@ -431,14 +492,16 @@ def test_profile_documents_load_and_agree_with_the_row():
             assert set(selector["name"]) <= written, name
 
 
-def test_fetch_doors_know_the_source():
+def test_fetch_doors_know_the_source(monkeypatch):
     from woof import fetch, fetch_routes
     assert fetch.native_cf_fetch_contract("ukv") == ukv.CONTRACT
     assert fetch.native_cf_fetch_contract("met-office-ukv") == ukv.CONTRACT
     assert fetch.fetch_accepts_area("ukv")
     assert "ukv" in fetch_routes.all_fetchable_sources()
     assert fetch_routes.publishes_prep_handoff("ukv")
-    assert fetch.resolve_latest_cycle("ukv", 3) == ukv.COVERAGE_END - timedelta(hours=3)
+    sentinel = datetime(2026, 10, 18, 9)
+    monkeypatch.setattr(ukv, "latest_cycle", lambda hours, cadence=None: sentinel)
+    assert fetch.resolve_latest_cycle("ukv", 3) == sentinel
 
 
 def test_synthetic_file_decodes_through_the_packaged_mapping(tmp_path, monkeypatch):
@@ -477,3 +540,237 @@ def test_live_archive_window(tmp_path):
                            progress=lambda text: None)
     assert manifest["files"][0]["store_record"] == 4062
     assert 0.0 < manifest["terrain"]["max_m"] < 400.0
+
+
+# --------------------------------------------------------------------------
+# The land state
+# --------------------------------------------------------------------------
+
+def test_era5_layers_are_remapped_to_noah_by_layer_means():
+    layers = [np.array([1.0]), np.array([2.0]), np.array([3.0]), np.array([4.0])]
+    noah = ukv.layer_mean_remap(layers, ukv.ERA5_SOIL_LAYERS, ukv.NOAH_SOIL_LAYERS)
+    expected = [(0.07 * 1 + 0.03 * 2) / 0.1, (0.18 * 2 + 0.12 * 3) / 0.3, 3.0, 4.0]
+    assert np.allclose([float(layer[0]) for layer in noah], expected)
+    # Noah's own layers pass through.
+    same = ukv.layer_mean_remap(layers, ukv.NOAH_SOIL_LAYERS, ukv.NOAH_SOIL_LAYERS)
+    assert [float(layer[0]) for layer in same] == [1.0, 2.0, 3.0, 4.0]
+    with pytest.raises(ValueError, match="do not cover"):
+        ukv.layer_mean_remap(layers[:2], ukv.NOAH_SOIL_LAYERS[:2], ukv.NOAH_SOIL_LAYERS)
+
+
+def test_gfs_takes_over_past_era5s_last_hour():
+    times = (datetime(2026, 10, 11, 12), datetime(2026, 10, 12, 0))
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 10, 12)) == "era5"
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 10, 11, 23)) == "gfs"
+    assert ukv.gfs_cycle_for(datetime(2026, 10, 24, 15)) == datetime(2026, 10, 24, 12)
+    assert ukv.gfs_lead(datetime(2026, 10, 24, 12), datetime(2026, 10, 25, 3)) == 15
+    # Past f120 the posted three-hourly lead at or before the valid time.
+    assert ukv.gfs_lead(datetime(2026, 10, 24, 12), datetime(2026, 10, 29, 14)) == 120
+
+
+def test_gfs_land_state_reads_only_its_records(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from woof import mapped_source
+
+    names = ("UGRD:10 m above ground", *ukv.GFS_RECORDS, "TMP:surface")
+    idx, body, offset = [], b"", 0
+    for number, name in enumerate(names, 1):
+        idx.append(f"{number}:{offset}:d=2026101612:{name}:3 hour fcst:")
+        payload = f"<{name}>".encode()
+        body += payload
+        offset += len(payload)
+    requests = []
+
+    def fake_get(url, headers=None):
+        requests.append((url, (headers or {}).get("Range")))
+        if url.endswith(".idx"):
+            return "\n".join(idx).encode()
+        start, end = headers["Range"][len("bytes="):].split("-")
+        return body[int(start):(int(end) + 1 if end else None)]
+
+    written = {}
+
+    def fake_records(path, inventory, dump, wanted):
+        written["bytes"] = Path(path).read_bytes()
+        latitude = np.arange(-90.0, 90.01, 0.25)
+        longitude = np.arange(-180.0, 180.0, 0.25)
+        records = []
+        for position, name in enumerate(ukv.GFS_RECORDS):
+            value = np.full((latitude.size, longitude.size), float(position))
+            if name.startswith(("TSOIL", "SOILW")):
+                value[:, longitude > 1.0] = np.nan          # sea east of 1E
+            records.append(SimpleNamespace(values=value, latitude=latitude, longitude=longitude))
+        return tuple(records)
+
+    monkeypatch.setattr(ukv, "_http_get", fake_get)
+    monkeypatch.setattr(mapped_source, "_build_grib2_tools", lambda: ("inv", "dump"))
+    monkeypatch.setattr(mapped_source, "_grib2_inventory",
+                        lambda path, tool: [{"index": str(i)} for i in range(1, 11)])
+    monkeypatch.setattr(mapped_source, "_grib2_records", fake_records)
+    latitude, longitude = np.array([51.5, 51.52]), np.array([-0.12, -0.1])
+    fields, receipt = ukv.read_gfs(datetime(2026, 10, 16, 15), datetime(2026, 10, 16, 12),
+                                   latitude, longitude, tmp_path)
+    # Exactly the ten land-state records, in the declared order, nothing else.
+    assert written["bytes"] == b"".join(f"<{name}>".encode() for name in ukv.GFS_RECORDS)
+    assert all("f003" in url for url, _ in requests)
+    assert receipt["lead"] == 3 and receipt["source"] == "gfs"
+    assert float(fields["land_area_fraction"][0, 0]) == 0.0
+    assert float(fields["soil_moisture_layer_4"][0, 0]) == 9.0
+    assert set(fields) == set(ukv._LAND_STATE_FIELDS)
+
+
+# --------------------------------------------------------------------------
+# The live bucket, on a small stand-in plane
+# --------------------------------------------------------------------------
+
+_SMALL = dict(x0=0.0, y0=-430000.0, nx=60, ny=50)
+
+
+def _small_plane(monkeypatch):
+    monkeypatch.setattr(ukv, "GRID_X0", _SMALL["x0"])
+    monkeypatch.setattr(ukv, "GRID_Y0", _SMALL["y0"])
+    monkeypatch.setattr(ukv, "GRID_NX", _SMALL["nx"])
+    monkeypatch.setattr(ukv, "GRID_NY", _SMALL["ny"])
+
+
+def _live_object(path, run, valid, product):
+    from netCDF4 import Dataset
+    variable, units, levelled = ukv._LIVE_OBJECTS[product]
+    nx, ny = _SMALL["nx"], _SMALL["ny"]
+    with Dataset(path, "w", format="NETCDF4") as dataset:
+        dataset.createDimension("projection_x_coordinate", nx)
+        dataset.createDimension("projection_y_coordinate", ny)
+        x = dataset.createVariable("projection_x_coordinate", "f4", ("projection_x_coordinate",))
+        x[:] = _SMALL["x0"] + 2000.0 * np.arange(nx)
+        y = dataset.createVariable("projection_y_coordinate", "f4", ("projection_y_coordinate",))
+        y[:] = _SMALL["y0"] + 2000.0 * np.arange(ny)
+        for name, when in (("time", valid), ("forecast_reference_time", run)):
+            var = dataset.createVariable(name, "i8")
+            var.units = "seconds since 1970-01-01 00:00:00"
+            var.assignValue(int((when - datetime(1970, 1, 1)).total_seconds()))
+        dims = ("projection_y_coordinate", "projection_x_coordinate")
+        constant = {"air_temperature": 280.0, "geopotential_height": 1000.0,
+                    "relative_humidity": 0.5, "wind_speed": 10.0, "wind_from_direction": 270.0,
+                    "surface_air_pressure": 98000.0, "surface_temperature": 285.0,
+                    "lwe_thickness_of_surface_snow_amount": 0.0, "surface_altitude": 42.0}[variable]
+        if levelled:
+            dataset.createDimension("pressure", 33)
+            pressure = dataset.createVariable("pressure", "f4", ("pressure",))
+            ladder = np.array(ukv.PRESSURE_LEVELS_PA[::-1], dtype=float)     # bottom first
+            pressure[:] = ladder
+            data = dataset.createVariable(variable, "f4", ("pressure", *dims), zlib=True)
+            value = np.full((33, ny, nx), constant)
+            if variable == "air_temperature":
+                value = value + (ladder / 1000.0)[:, None, None]             # label each level
+            data[:] = value
+        else:
+            data = dataset.createVariable(variable, "f4", dims, zlib=True)
+            data[:] = np.full((ny, nx), constant)
+        data.units = units
+
+
+def _live_bucket(tmp_path, monkeypatch, run, times):
+    store = {}
+    for valid in times:
+        for product in ukv._LIVE_OBJECTS:
+            key = ukv.live_key(run, valid, product)
+            path = tmp_path / "bucket" / Path(key).name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _live_object(path, run, valid, product)
+            store[key] = path.read_bytes()
+    monkeypatch.setattr(ukv, "_http_get",
+                        lambda url, headers=None: store[url[len(ukv.LIVE_HOST) + 1:]])
+    monkeypatch.setattr(ukv, "live_listing",
+                        lambda probe, valid: set(store) if probe == run else set())
+    return store
+
+
+def test_live_window_is_read_from_one_run(tmp_path, monkeypatch):
+    from netCDF4 import Dataset
+    _small_plane(monkeypatch)
+    run = datetime(2026, 10, 16, 3)
+    times = (datetime(2026, 10, 16, 6), datetime(2026, 10, 16, 9))
+    _live_bucket(tmp_path, monkeypatch, run, times)
+    monkeypatch.setattr(ukv, "read_era5", _fake_era5)
+    lat, lon = ukv.laea_inverse(_SMALL["x0"] + 60000.0, _SMALL["y0"] + 50000.0)
+    area = Area(float(lat) - 0.1, float(lon) - 0.1, float(lat) + 0.1, float(lon) + 0.1)
+    manifest = ukv.acquire(cycle=times[0], hours=3, cadence=3, area=area,
+                           out=tmp_path / "out", progress=lambda text: None)
+    assert manifest["store"] == "live" and manifest["run"] == run.isoformat()
+    assert [entry["lead"] for entry in manifest["files"]] == [3, 6]
+    assert manifest["terrain"]["from"] == "published orography"
+    with Dataset(tmp_path / "out" / manifest["files"][0]["path"]) as dataset:
+        temperature = dataset.variables["air_temperature"][0]
+        # Levels are relabelled by value: the 1000 Pa slot holds 1000 Pa's temperature.
+        assert np.allclose(temperature[0], 281.0) and np.allclose(temperature[-1], 380.0)
+        assert np.allclose(dataset.variables["eastward_wind"][0], 10.0, atol=1e-4)
+        assert np.allclose(dataset.variables["surface_altitude"][0], 42.0)
+    assert not (tmp_path / "out" / ".ukv-staging").exists()
+
+
+def test_live_run_selection_skips_a_run_still_posting(monkeypatch):
+    plan = ukv.plan_window(datetime(2026, 10, 16, 6), 0, now=NOW)
+    complete = datetime(2026, 10, 16, 5)
+    monkeypatch.setattr(ukv, "live_missing",
+                        lambda run, times: [] if run == complete else ["k"])
+    assert ukv.select_live_run(plan) == complete
+    monkeypatch.setattr(ukv, "live_missing", lambda run, times: ["uk-deterministic-2km/x.nc"])
+    with pytest.raises(ValueError, match="Wait for the run to finish posting"):
+        ukv.select_live_run(plan)
+
+
+def test_live_object_with_another_layout_refuses(tmp_path, monkeypatch):
+    _small_plane(monkeypatch)
+    run = datetime(2026, 10, 16, 6)
+    store = _live_bucket(tmp_path, monkeypatch, run, (run,))
+    monkeypatch.setattr(ukv, "GRID_X0", _SMALL["x0"] + 2000.0)       # the plane moved
+    lat, lon = ukv.laea_inverse(_SMALL["x0"] + 60000.0, _SMALL["y0"] + 50000.0)
+    regrid = ukv.Regridder(np.array([float(lat)]), np.array([float(lon)]))
+    with pytest.raises(ValueError, match="does not have the layout"):
+        ukv.read_live(run, run, regrid, tmp_path / "staging")
+    assert store
+
+
+@pytest.mark.network
+@pytest.mark.skipif(os.environ.get("WOOF_NETWORK_TESTS") != "1",
+                    reason="reads the Met Office bucket and the GFS mirror")
+def test_live_bucket_window(tmp_path, monkeypatch):
+    monkeypatch.setattr(ukv, "land_state_source", _REAL_LAND_STATE_SOURCE)
+    manifest = ukv.acquire(cycle=datetime(2026, 10, 16, 6), hours=0, cadence=None,
+                           area=Area(51.4, -0.3, 51.6, 0.1), out=tmp_path,
+                           progress=lambda text: None)
+    assert manifest["store"] == "live" and manifest["run"] == "2026-10-16T06:00:00"
+    assert manifest["land_state_source"] == "gfs"
+    assert manifest["terrain"]["from"] == "published orography"
+
+
+def test_a_dateless_window_is_checked_against_the_live_ladders():
+    ukv.check_window_shape(54)
+    ukv.check_window_shape(120, 3)
+    with pytest.raises(ValueError, match="--cadence 3"):
+        ukv.check_window_shape(60)
+    with pytest.raises(ValueError, match="multiple"):
+        ukv.check_window_shape(7, 3)
+
+
+def test_a_window_whose_run_has_not_started_refuses_by_name():
+    future = datetime.utcnow().replace(minute=0, second=0, microsecond=0) + timedelta(days=3)
+    plan = ukv.plan_window(future, 3)
+    with pytest.raises(ValueError, match="has not run yet"):
+        ukv.select_live_run(plan)
+
+
+def test_gfs_cycle_falls_back_while_the_newest_has_not_posted(monkeypatch):
+    from urllib.error import HTTPError
+    asked = []
+
+    def fake_urlopen(request, timeout=None):
+        asked.append(request.full_url)
+        if "/gfs.20261016/12/" in request.full_url:
+            raise HTTPError(request.full_url, 404, "absent", None, None)
+        return open(os.devnull, "rb")
+
+    monkeypatch.setattr(ukv, "urlopen", fake_urlopen)
+    times = (datetime(2026, 10, 16, 15), datetime(2026, 10, 16, 18))
+    assert ukv.choose_gfs_cycle(datetime(2026, 10, 16, 15), times) == datetime(2026, 10, 16, 6)
+    assert asked[-1].endswith("gfs.t06z.pgrb2.0p25.f012.idx")

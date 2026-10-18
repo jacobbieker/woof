@@ -2027,8 +2027,8 @@ def resolve_latest_cycle(source: str, last_hour: int, *,
         ukv = fetch_routes.canonical_source(source) == ukv_source.SOURCE_ID
         if start_hour or member is not None or provider is not None or transport is not None:
             raise ValueError(
-                "The UKV archive has no forecast lead, member or alternate provider "
-                "axis: every hour is its own state" if ukv else
+                "--source ukv names a window by its start: the fetch chooses the run "
+                "and its leads, and there is no member or alternate provider" if ukv else
                 "Annual CF analyses have no forecast lead, member or alternate provider axis")
         if ukv:
             return ukv_source.latest_cycle(last_hour, cadence)
@@ -7974,11 +7974,13 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
             from woof.cf_archive_fetch import validate_window
             from woof import ukv_source
             if name == ukv_source.SOURCE_ID:
-                # A dateless hint is checked against the archive's first
-                # hour; a dated one against its own window.
-                if hours is not None:
-                    ukv_source.validate_window(
-                        cycle or ukv_source.COVERAGE_START, hours, cadence)
+                # A dateless hint resolves to the newest live run, so it is
+                # checked against the live ladders; a dated one against its
+                # own window.
+                if hours is not None and cycle is None:
+                    ukv_source.check_window_shape(hours, cadence)
+                elif hours is not None:
+                    ukv_source.validate_window(cycle, hours, cadence)
             elif hours is not None:
                 validate_window(name, cycle or datetime(2000, 1, 1), hours, cadence)
         elif name in GFS_CONTAINER_SOURCES:
