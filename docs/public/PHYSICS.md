@@ -1933,7 +1933,7 @@ user-facing walkthrough -- the symptom, how to tell which version is
 actually executing, and how to correct the config -- is
 [NOCTURNAL-DEWPOINTS.md](NOCTURNAL-DEWPOINTS.md).
 
-The table below classifies all **31 shipped single-domain profiles**
+The table below classifies all **33 shipped single-domain profiles**
 (`woof.physics_compat.SINGLE_DOMAIN_PHYSICS_PROFILES`, which is the
 `--physics-profile` choice list). The registry carries one further
 template that no fixed-template route declares and so has no row here
@@ -1958,6 +1958,8 @@ load, by the same guard.
 | `thompson-mp8-mynn-mynn-ruc-monthly-rrtmg-legacy-v1` | legacy RRTMG / legacy RRTMG | **yes** (Thompson, MYNN and RUC with prescribed monthly surface seeds) |
 | `thompson-mp8-mynn-mynn-ruc-monthly-solar-rrtmg-legacy-v1` | legacy RRTMG / legacy RRTMG | **yes** (the monthly suite with solar-angle land albedo) |
 | `thompson-mp28-mynn-gsd41-mynn-ruc-rrtmg-legacy-v1` | legacy RRTMG / legacy RRTMG | **yes** (aerosol-aware Thompson with the GSD MYNN v4.1 form over RUC) |
+| `thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-v1` | RTE+RRTMGP / RTE+RRTMGP | **yes** (the root of the LES-nest tree suite `thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-les-nest-v1`) |
+| `thompson-mp8-pbl-off-mynn-noahmp-tke-1-5-order-rte-rrtmgp-v1` | RTE+RRTMGP / RTE+RRTMGP | **yes** (the nest half of that tree suite: PBL off, 1.5-order TKE) |
 | `wsm6-mynn-mynn-noahmp-rte-rrtmgp-expert-only-v1` | RTE+RRTMGP / RTE+RRTMGP | **yes** |
 | `20crv3-wsm6-ysu-mm5-noah-kf-rte-rrtmgp-implemented-unverified-v1` | RTE+RRTMGP / RTE+RRTMGP (declared as the aggregate `ra_physics = 4`) | **yes** |
 | `milbrandt2mom-mp9-ysu-mm5-noah-ntiedtke-rrtmg-legacy-v1` | legacy RRTMG / legacy RRTMG | **yes** |

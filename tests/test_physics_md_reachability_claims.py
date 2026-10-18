@@ -378,7 +378,9 @@ _COMPOSITION_SUITE_COMPONENTS = (
     {"microphysics": "milbrandt2mom-mp9", "cumulus": "new-tiedtke"},
     {"microphysics": "wdm6-mp16", "cumulus": "grell-freitas"},
     {"pbl": "sase"},
-    {"turbulence": "tke-1.5-order"},
+    # The WSM6 row: the LES-nest tree suite's nest half runs the same
+    # closure under Thompson and is not one of the six.
+    {"turbulence": "tke-1.5-order", "microphysics": "wsm6-mp6"},
     {"turbulence": "smagorinsky-3d"},
     {"turbulence": "constant-k"},
 )
