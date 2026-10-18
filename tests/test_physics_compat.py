@@ -401,3 +401,282 @@ def test_an_unimplemented_selector_value_is_told_what_is_implemented():
     message = str(caught.value)
     assert "Implemented selector tuples for this component" in message
     assert "'ra_lw_physics': 4" in message
+
+
+# ---------------------------------------------------------------------------
+# The LES-nest tree suite: a mesoscale root over large-eddy nests.
+# ---------------------------------------------------------------------------
+
+def _les_tree():
+    from woof.physics_compat import (LES_NEST_TREE_PROFILE_ID,
+                                     TREE_PHYSICS_PROFILES)
+
+    return TREE_PHYSICS_PROFILES[LES_NEST_TREE_PROFILE_ID]
+
+
+def _les_tree_text(*, p_top: float = 1000.0, relocation: str = "",
+                   nest_extra: str = "") -> str:
+    """The tree `woof domain --physics-profile <tree>` writes, rendered.
+
+    The same renderer the wizard's fit and final emission call, with the
+    nest columns the door hands it, so a test of this text is a test of
+    the emitted file rather than of a hand-copied one.
+    """
+    import re
+    from datetime import datetime
+
+    from woof.domain_wizard import _projection_entries, render_config
+
+    tree = _les_tree()
+    text = render_config(
+        name="les-tree", start_time=datetime(2026, 4, 8, 4), hours=1,
+        projection=_projection_entries(40.0, -100.0, "auto"),
+        dims=[(40, 40), (45, 45), (48, 48)], ratios=(5, 3),
+        fetch_hints=None, case_data=None, root_dx_m=1500.0,
+        profile=tree.root, cumulus_requested=True, nz=256,
+        history_interval_s=120.0, nest_history_interval_s=120.0,
+        nest_physics=tree.nest_overrides())
+    # The default ladder is eta-normalized, so p_top is the one number a
+    # deeper column moves (woof domain --p-top-pa writes it the same way).
+    text = re.sub(r"^p_top = .*$", f"p_top = {p_top!r}", text, flags=re.M)
+    if nest_extra:
+        # d03's own table: a key it already states is replaced, any other
+        # is added.
+        head, d03 = text.split("grid_id = 3\n")
+        key, value = (part.strip() for part in nest_extra.split("="))
+        d03, count = re.subn(rf"^{key} = .*$", f"{key} = {value}", d03,
+                             count=1, flags=re.M)
+        if not count:
+            d03 = f"{key} = {value}\n" + d03
+        text = head + "grid_id = 3\n" + d03
+    return text + relocation
+
+
+def _load(tmp_path, text):
+    from woof.experiment import load_experiment
+
+    path = tmp_path / "les_tree.toml"
+    path.write_text(text)
+    return load_experiment(path)
+
+
+def test_the_les_tree_suite_pairs_two_registered_templates():
+    from woof.physics_registry import physics_registry
+
+    tree = _les_tree()
+    templates = physics_registry()["templates"]
+    assert templates[tree.root]["components"] == {
+        "cumulus": "off", "land_surface": "noah-mp",
+        "microphysics": "thompson-mp8", "pbl": "mynn",
+        "radiation": "rte-rrtmgp", "surface_layer": "mynn",
+        "turbulence": "smagorinsky-2d", "urban": "none"}
+    # The nest differs from the root in the PBL and the closure ONLY, so a
+    # paired run isolates the closure.
+    nest = dict(templates[tree.nest]["components"])
+    assert nest.pop("pbl") == "off"
+    assert nest.pop("turbulence") == "tke-1.5-order"
+    root = dict(templates[tree.root]["components"])
+    del root["pbl"], root["turbulence"]
+    assert nest == root
+    assert tree.root in SINGLE_DOMAIN_PHYSICS_PROFILES
+    assert tree.nest in SINGLE_DOMAIN_PHYSICS_PROFILES
+
+    switches = single_domain_runtime_switches(tree.root)
+    assert (switches["mp_physics"], switches["bl_pbl_physics"],
+            switches["sf_sfclay_physics"], switches["sf_surface_physics"],
+            switches["cu_physics"]) == (8, 5, 5, 4, 0)
+    assert (switches["ra_lw_physics"], switches["ra_sw_physics"]) == (4, 4)
+    assert switches["ra_rrtmg_variant"] == "rte-rrtmgp"
+    assert switches["radt"] == 10.0
+
+
+def test_the_les_tree_nest_columns_are_the_les_closure_and_per_domain():
+    from woof.experiment import _DOMAIN_RUN_OVERRIDES
+
+    overrides = _les_tree().nest_overrides()
+    assert {key: overrides[key] for key in (
+        "bl_pbl_physics", "km_opt", "diff_opt", "isfflx", "mix_isotropic",
+        "radt")} == {"bl_pbl_physics": 0, "km_opt": 2, "diff_opt": 2,
+                     "isfflx": 1, "mix_isotropic": 1, "radt": 5.0}
+    # Every column is one a [[domain]] table may state; a key the loader
+    # keeps tree-wide would be refused on the nest the wizard writes it to.
+    assert set(overrides) <= set(_DOMAIN_RUN_OVERRIDES)
+    # The microphysics, land surface, surface layer and radiation engine
+    # stay the root's ([shared]), so no nest column restates them.
+    assert not {"mp_physics", "sf_surface_physics", "sf_sfclay_physics",
+                "ra_lw_physics", "ra_sw_physics",
+                "ra_rrtmg_variant"} & set(overrides)
+
+
+def test_the_les_tree_is_registry_reachable_on_every_domain(
+        tmp_path, captured_warnings):
+    """Governed with NO acknowledgement, named or unnamed."""
+    from woof.physics_compat import multi_domain_physics_selection
+
+    exp = _load(tmp_path, _les_tree_text())
+    settings = {int(domain.grid_id): domain.run for domain in exp.domains}
+    tree = _les_tree()
+    for profile in (None, tree.tree_id):
+        captured_warnings.clear()
+        selection = multi_domain_physics_selection(settings, profile=profile)
+        for grid_id, domain in selection["domains"].items():
+            assert domain["governance"] == {
+                "state": "registry-reachable",
+                "required_acknowledgement": None,
+                "acknowledged": True}, grid_id
+        assert selection["acknowledgements"] == []
+        assert not [record for record in captured_warnings
+                    if "physics tuple" in str(record)
+                    or "expert profile" in str(record)]
+    assert selection["profile"] == tree.tree_id
+    # Both halves are bound, part for part.
+    parts = selection["registry_physics"]["parts"]
+    assert f"templates.{tree.root}" in parts
+    assert f"templates.{tree.nest}" in parts
+
+
+def test_a_bound_les_tree_refuses_a_nest_running_another_closure(tmp_path):
+    from woof.physics_compat import multi_domain_physics_selection
+
+    exp = _load(tmp_path, _les_tree_text(nest_extra="km_opt = 3"))
+    settings = {int(domain.grid_id): domain.run for domain in exp.domains}
+    with pytest.raises(ValueError, match="d03 does not run the nest half"):
+        multi_domain_physics_selection(settings,
+                                       profile=_les_tree().tree_id)
+
+
+def test_a_tree_suite_is_not_a_single_domain_profile():
+    from woof.physics_compat import validate_single_domain_physics_profile
+
+    tree = _les_tree()
+    with pytest.raises(ValueError, match="is a tree suite") as caught:
+        validate_single_domain_physics_profile(tree.tree_id)
+    assert tree.root in str(caught.value)
+
+
+_RELOCATION = """
+[relocation]
+enabled = true
+grid_id = 3
+max_move_parent_cells = 3
+cadence_seconds = 120.0
+
+[[relocation.move]]
+at_seconds = 120.0
+di_parent_cells = 1
+dj_parent_cells = 0
+
+[relocation.containment]
+grid_id = 2
+deadband_cells = 4
+max_move_parent_cells = 2
+"""
+
+
+@pytest.mark.parametrize("p_top", (270.0, 450.0, 1000.0, 4000.0))
+def test_the_les_tree_loads_at_256_levels_under_a_relocating_nest(
+        tmp_path, p_top):
+    """The balloon tree: 256 levels, a deep top, d03 moving, d02 sliding.
+
+    The loader runs every relocation refusal (slope radiation, shortwave
+    interpolation, Noah mosaic, lake) and the vertical contract with the
+    authoritative p_top, so a load is the receipt.
+    """
+    exp = _load(tmp_path, _les_tree_text(p_top=p_top,
+                                         relocation=_RELOCATION))
+    assert exp.relocation.enabled and exp.relocation.grid_id == 3
+    assert exp.relocation.containment.grid_id == 2
+    assert exp.vertical.p_top == p_top
+    root, *nests = exp.domains
+    assert (root.run.nz, root.run.bl_pbl_physics, root.run.km_opt,
+            root.run.radt) == (256, 5, 4, 10.0)
+    for nest in nests:
+        run = nest.run
+        assert (run.nz, run.bl_pbl_physics, run.km_opt, run.diff_opt,
+                run.isfflx, run.mix_isotropic, run.radt) == (
+                    256, 0, 2, 2, 1, 1, 5.0)
+        assert (run.mp_physics, run.sf_surface_physics,
+                run.sf_sfclay_physics, run.ra_lw_physics,
+                run.ra_sw_physics) == (8, 4, 5, 4, 4)
+        assert (run.slope_rad, run.swint_opt, run.sf_surface_mosaic,
+                run.sf_lake_physics) == (0, 0, 0, 0)
+
+
+def test_the_relocation_refusals_still_fire_on_the_les_tree(tmp_path):
+    """The control: the load above passed because the refusals had nothing
+    to refuse, not because they were skipped."""
+    with pytest.raises(ValueError, match="slope_rad = 1"):
+        _load(tmp_path, _les_tree_text(relocation=_RELOCATION,
+                                       nest_extra="slope_rad = 1"))
+
+
+@pytest.mark.parametrize("root_dx_m, ratios, dims", (
+    (1800.0, (3,), [(40, 40), (45, 45)]),
+    (1800.0, (5, 3), [(40, 40), (45, 45), (48, 48)]),
+    (900.0, (5,), [(40, 40), (45, 45)]),
+))
+def test_the_wizard_clock_lands_the_nest_radt_on_whole_nest_steps(
+        tmp_path, root_dx_m, ratios, dims):
+    """The derived root clock is chosen against the nests' own radt.
+
+    At 1.8 km the spacing-derived clock is 200/67 s, on which a 300 s
+    nest radt is not a whole number of nest steps; the loader refuses
+    that, so the wizard must pick a clock it accepts.
+    """
+    from datetime import datetime
+
+    from woof.domain_wizard import _projection_entries, render_config
+
+    tree = _les_tree()
+    text = render_config(
+        name="les-tree", start_time=datetime(2026, 4, 8, 4), hours=1,
+        projection=_projection_entries(40.0, -100.0, "auto"),
+        dims=dims, ratios=ratios, fetch_hints=None, case_data=None,
+        root_dx_m=root_dx_m, profile=tree.root, cumulus_requested=True,
+        nz=60, nest_history_interval_s=600.0,
+        nest_physics=tree.nest_overrides())
+    exp = _load(tmp_path, text)
+    assert all(domain.run.radt == 5.0 for domain in exp.domains[1:])
+
+
+def test_the_tree_runner_asserts_a_tree_suite_half_by_half(tmp_path):
+    from woof.prepared_domain_tree_forecast import validate_physics_profile
+
+    tree = _les_tree()
+    exp = _load(tmp_path, _les_tree_text())
+    receipt = validate_physics_profile(exp, source="gfs",
+                                       profile=tree.tree_id)
+    assert receipt["profile"] == tree.tree_id
+    assert (receipt["tree"]["root"], receipt["tree"]["nest"]) == (
+        tree.root, tree.nest)
+    assert [row["grid_id"] for row in receipt["validated_domains"]] == [
+        1, 2, 3]
+    drifted = _load(tmp_path, _les_tree_text(nest_extra="radt = 10.0"))
+    with pytest.raises(ValueError, match="d03"):
+        validate_physics_profile(drifted, source="gfs",
+                                 profile=tree.tree_id)
+
+
+def test_the_wizard_offers_the_tree_and_writes_its_nest_columns():
+    import argparse
+
+    from woof.domain_wizard import _domain_tables, register_cli
+
+    tree = _les_tree()
+    parser = argparse.ArgumentParser()
+    register_cli(parser.add_subparsers())
+    domain = next(action for action in parser._actions
+                  if isinstance(action, argparse._SubParsersAction)
+                  ).choices["domain"]
+    profile = next(action for action in domain._actions
+                   if "--physics-profile" in action.option_strings)
+    assert tree.tree_id in profile.choices
+    tables = _domain_tables([(40, 40), (45, 45), (48, 48)], (5, 3),
+                            root_dx_m=1500.0, profile=tree.root,
+                            cumulus_requested=True,
+                            nest_physics=tree.nest_overrides())
+    assert tables[0]["radt"] == 10.0 and "km_opt" not in tables[0]
+    for table in tables[1:]:
+        assert {key: table[key] for key in tree.nest_overrides()} == (
+            tree.nest_overrides())
+        assert table["cu_physics"] == 0

@@ -37,6 +37,7 @@ from pathlib import Path
 
 import pytest
 
+from woof.wrf461_compatibility import WRFVerdict, pbl_surface_layer_verdict
 from woof.physics_registry import (expert_template_ids_for_source,
                                     physics_registry)
 
@@ -541,9 +542,17 @@ def test_the_mynn_suite_is_reachable_as_a_pair() -> None:
     assert computed[("surface_layer", "mynn")] == "template"
 
     # ...and only ever together, because half a suite is a different model.
+    # The one exception is the PBL turned OFF under the MYNN surface layer:
+    # a large-eddy closure replaces the PBL there, and WRF's own table
+    # calls that pairing legal (module_physics_init.F, "PBL-off selects no
+    # PBL initializer"), so it is not half a MYNN suite but no PBL at all.
     for template_id, template in registry["templates"].items():
-        pair = (template["components"]["pbl"] == "mynn",
+        pbl = template["components"]["pbl"]
+        pair = (pbl == "mynn",
                 template["components"]["surface_layer"] == "mynn")
+        if pbl == "off" and pair[1]:
+            assert pbl_surface_layer_verdict(0, 5)[0] is WRFVerdict.LEGAL
+            continue
         assert pair[0] == pair[1], (
             f"template {template_id!r} selects half the MYNN suite; "
             "woof/physics_compat.py refuses that at runtime, so a template "

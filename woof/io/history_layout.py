@@ -98,7 +98,13 @@ def live_state_history_fields(state) -> dict[str, object]:
             # history file ArWen itself had written (audit R-017).  The row
             # is safe by the same never-both argument QNCCN above makes:
             # mp=9 allocates ``nh`` and mp=18 allocates ``qnh``, never both.
-            ("QNHAIL", "nh")):
+            ("QNHAIL", "nh"),
+            # km_opt=2's prognostic subgrid TKE: allocated only under that
+            # closure (DomainState, device_inventory), so only a km_opt=2
+            # domain's tape gains this one volume; every other closure's
+            # inventory is unchanged.  Restart-only in WRF; published here
+            # so a large-eddy domain's tape carries its subgrid energy.
+            ("TKE", "tke")):
         value = getattr(state, state_name, None)
         if value is not None:
             fields[output_name] = value

@@ -91,6 +91,12 @@ PHYSICS_CHANGES_SINCE_280 = {
     "templates.thompson-mp8-mynn-mynn-ruc-monthly-solar-rrtmg-legacy-v1": (
         "a new named configuration adds sun-angle albedo to the monthly "
         "surface fields; earlier templates keep their settings"),
+    "templates.thompson-mp8-mynn-mynn-noahmp-rte-rrtmgp-v1": (
+        "a new named configuration, the root of the LES-nest tree suite; "
+        "earlier templates keep their settings"),
+    "templates.thompson-mp8-pbl-off-mynn-noahmp-tke-1-5-order-rte-rrtmgp-v1": (
+        "a new named configuration, the nest half of the LES-nest tree "
+        "suite; earlier templates keep their settings"),
     "components.pbl.options.mynn": (
         "mixing length 2 and local scalar diffusion are implemented; "
         "cold initialization now passes vapor to the WRF moments solve"),

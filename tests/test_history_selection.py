@@ -154,7 +154,7 @@ def test_select_preserves_the_produced_order():
 
 def test_named_presets_are_reachable_and_full_is_the_default():
     assert set(hs.HISTORY_PRESETS) == {"full", "minimal", "severe", "energy",
-                                       "windfarm"}
+                                       "windfarm", "balloon"}
     assert hs.HistorySelection.from_mapping({}).preset == "full"
 
 
@@ -202,6 +202,66 @@ def test_severe_keeps_the_storm_volumes_minimal_drops():
     assert {"T", "U", "V", "W", "QVAPOR", "REFL_10CM", "T2"} <= kept
     # The restart-only PBL carriers no product reads are what it sheds.
     assert not ({"EXCH_H", "TSQ"} & kept)
+
+
+#: What the balloon preset is asked to carry, written out independently of
+#: the table under test.
+_BALLOON_VOLUMES = {"U", "V", "W", "T", "P", "PB", "PH", "PHB",
+                    "QVAPOR", "QCLOUD", "QICE", "QRAIN"}
+_BALLOON_PLANES = {"PSFC", "T2", "Q2", "U10", "V10", "HFX", "LH", "UST",
+                   "SWDOWN", "GLW", "RAINNC", "SINALPHA", "COSALPHA"}
+
+
+def test_balloon_keeps_the_column_the_surface_and_the_subgrid_tke():
+    selection = hs.HistorySelection.from_mapping({"preset": "balloon"})
+    assert hs.HISTORY_PRESETS["balloon"] <= hs.HISTORY_VOCABULARY
+    for name in (_BALLOON_VOLUMES | _BALLOON_PLANES | {"TKE", "QKE"}
+                 | hs.STRUCTURAL_FIELDS):
+        assert selection.keeps(name), name
+    # The render-only and restart-only volumes are what it sheds.
+    for name in ("REFL_10CM", "QSNOW", "QGRAUP", "EXCH_H", "TSQ", "MU",
+                 "OLR", "PBLH", "TSLB", "SMOIS"):
+        assert not selection.keeps(name), name
+
+
+def _balloon_cell_bytes(**overrides):
+    """Bytes per cell per frame the disk planner prices for one domain."""
+    import math
+
+    from woof.config import RunConfig
+    from woof.io.history_layout import produced_history_shapes
+
+    values = dict(nx=48, ny=40, nz=256, dx=100.0, dy=100.0, ztop=31000.0,
+                  dt=0.5, run_seconds=600.0, moist=True, mp_physics=8,
+                  sf_sfclay_physics=5, sf_surface_physics=4,
+                  num_soil_layers=4, ra_lw_physics=4, ra_sw_physics=4,
+                  radt=5.0)
+    values.update(overrides)
+    run = RunConfig(**values)
+    shapes = produced_history_shapes(run)
+    selection = hs.HistorySelection.from_mapping({"preset": "balloon"})
+    kept = selection.select(shapes)
+    payload = sum(20 if name == "Times" else 4 * math.prod(shapes[name])
+                  for name in kept)
+    volumes = {name for name in kept if len(shapes[name]) == 3}
+    return payload / (run.nx * run.ny * run.nz), volumes
+
+
+def test_balloon_prices_about_52_bytes_per_cell_per_frame_at_256_levels():
+    """Thirteen volumes, one subgrid TKE each, on both kinds of domain.
+
+    52 bytes is 13 volumes x 4 bytes; staggering (U, V on the faces, W, PH,
+    PHB on the 257 w levels) and the 2-D planes over 256 levels add the
+    rest.  A km_opt=2 LES nest carries TKE and a MYNN root QKE, never both.
+    """
+    les, les_volumes = _balloon_cell_bytes(bl_pbl_physics=0, km_opt=2,
+                                           diff_opt=2)
+    assert les_volumes == _BALLOON_VOLUMES | {"TKE"}
+    mynn, mynn_volumes = _balloon_cell_bytes(dx=1500.0, dy=1500.0, dt=7.5,
+                                             bl_pbl_physics=5, km_opt=4)
+    assert mynn_volumes == _BALLOON_VOLUMES | {"QKE"}
+    for figure in (les, mynn):
+        assert 52.0 < figure < 53.0, figure
 
 
 def test_a_preset_may_be_trimmed_further_by_history_drop():
@@ -467,6 +527,18 @@ def test_a_selection_that_is_not_a_preset_says_its_figure_is_a_bound(capsys):
     selection.warn_lost_products(("REFL_10CM", "T2", "XLAT"), where="d01")
     err = capsys.readouterr().err
     assert "at most" in err and "upper bound" in err
+
+
+def test_an_unmeasured_preset_does_not_borrow_the_full_count(capsys):
+    """``balloon`` was never put through the renderer, so its warning says
+    so instead of claiming it keeps every product the full tape does."""
+    selection = hs.HistorySelection.from_mapping({"preset": "balloon"})
+    assert selection.product_cost() == (162, 162, False)
+    selection.warn_lost_products(hs.HISTORY_VOCABULARY, where="d03")
+    err = capsys.readouterr().err
+    assert "no measured render-product count" in err
+    assert "keeps all" not in err
+    assert "refl needs REFL_10CM" in err
 
 
 def test_the_explain_layer_states_its_coverage_instead_of_completeness(capsys, monkeypatch):
