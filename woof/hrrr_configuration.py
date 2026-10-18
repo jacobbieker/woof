@@ -64,12 +64,16 @@ def resolve_root_experiment(*, target, vertical, namelist_input, start_time,
         root_perturbation_deferral(experiment_config, announce=False)
         raw = tomllib.loads(read_config_authority(experiment_config).payload.decode("utf-8"))
         authority = str(read_config_authority(experiment_config).source)
-        # Prepared meteorological identity is independent of execution capacity
-        # and fetch hints. The caller keeps these in its unchanged launch config.
+        # Prepared meteorological identity is independent of execution capacity,
+        # fetch hints and what history the forecast writes ([output]: preset,
+        # field lists, Icechunk export). The caller keeps these in its
+        # unchanged launch config.
         raw.pop("fetch", None)
         raw.pop("tiles", None)
+        raw.pop("output", None)
         for domain in raw.get("domain", ()):
             domain.pop("tiles", None)
+            domain.pop("output", None)
     else:
         # WHAT THE NAMED SUITE CARRIES THAT A WRF NAMELIST CANNOT SPELL.
         # Two facts, both woof's own, both read off the profile the
