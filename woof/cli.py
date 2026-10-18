@@ -435,6 +435,10 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     research_register_cli(sub)
     case_catalog_register_cli = _lazy_register("woof.case_catalog")
     case_catalog_register_cli(sub)
+    # 3-D paths (time, lat, lon, height) as tracks: the launch, landing,
+    # extent and boundary source a track-following domain is planned from.
+    track_register_cli = _lazy_register("woof.track.cli")
+    track_register_cli(sub)
     render_register_cli(sub)
     # A run's history files as a machine-learning dataset: registered
     # beside render, the other door that turns history files into a

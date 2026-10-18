@@ -2537,6 +2537,34 @@ Takes no options of its own.
 |---|---|
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 
+## `woof track`
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof track inspect`
+
+| argument | what it does |
+|---|---|
+| `FILE [FILE ...]` | track file (.csv, .tsv, .json, .parquet), or a directory of them |
+
+| option | what it does |
+|---|---|
+| `--drop-when COL=VALUE` | drop rows whose COL equals VALUE (e.g. a receiver's no-fix flag); repeatable |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--height-col COL` | height column, metres (default: height) |
+| `--height-datum {msl,agl}` | heights above mean sea level or above ground (default: msl) |
+| `--height-fallback-col COL` | column used where the height is blank; repeatable, tried in order |
+| `--json OUT` | directory to write <name>.json Track3D documents into (created if missing) |
+| `--lat-col COL` | latitude column, degrees (default: lat) |
+| `--lon-col COL` | longitude column, degrees (default: lon) |
+| `--mapping FILE` | JSON or TOML column mapping with keys time, lat, lon, height, height_fallback, time_format, height_datum, drop_when |
+| `--min-climb M` | climb above the starting ground, metres, that makes a launch (default: 300) |
+| `--name NAME` | the track's name (default: the file stem); only with a single FILE |
+| `--time-col COL` | time column (default: time) |
+| `--time-format FMT` | a Python strptime format, or 'epoch' for Unix seconds (default: ISO 8601, date and time joined by a space or T); times without a zone are UTC |
+
 ## `woof update`
 
 | option | what it does |
