@@ -2601,3 +2601,111 @@ def test_a_prepare_only_run_says_its_steps_and_a_forecast_run_does_not(capsys):
                                 label="Initialize the start state"):
         pass
     assert "GPUWM_PREP_EVENT" not in capsys.readouterr().err
+
+
+def _strip_static(ny, nx):
+    mass = np.zeros((ny, nx))
+    return {"HGT_M": mass, "LANDMASK": mass, "MAPFAC_M": mass,
+            "MAPFAC_U": np.zeros((ny, nx + 1)),
+            "MAPFAC_V": np.zeros((ny + 1, nx)),
+            "F": mass, "E": mass, "SINALPHA": mass, "COSALPHA": mass}
+
+
+def test_each_boundary_strip_carries_its_own_mass_point_geodesy():
+    """The four side crops of XLAT_M/XLONG_M are the domain's own cells."""
+    ny, nx, width = 6, 8, 2
+    lat = np.arange(ny * nx, dtype=np.float64).reshape(ny, nx) / 10.0 + 30.0
+    lon = -lat
+    cfg = SimpleNamespace(ny=ny, nx=nx)
+    sides = hrrr_runner._compact_boundary_static(
+        _strip_static(ny, nx), cfg, width=width, latlon=(lat, lon))
+    np.testing.assert_array_equal(sides["west"]["XLAT_M"], lat[:, :width])
+    np.testing.assert_array_equal(sides["east"]["XLONG_M"], lon[:, nx - width:])
+    np.testing.assert_array_equal(sides["south"]["XLAT_M"], lat[:width, :])
+    np.testing.assert_array_equal(sides["north"]["XLONG_M"], lon[ny - width:, :])
+    # Without geodesy the payload is exactly what it was, even when the
+    # static mapping happens to carry XLAT_M/XLONG_M of its own.
+    bare = hrrr_runner._compact_boundary_static(
+        {**_strip_static(ny, nx), "XLAT_M": lat, "XLONG_M": lon}, cfg,
+        width=width)
+    assert set(bare["west"]) == set(_strip_static(ny, nx))
+    with pytest.raises(ValueError, match="mass grid"):
+        hrrr_runner._compact_boundary_static(
+            _strip_static(ny, nx), cfg, width=width, latlon=(lat[1:], lon))
+
+
+def test_a_boundary_strip_hands_its_geodesy_to_the_aerosol_climatology(
+        monkeypatch):
+    """mp=28 strips used to refuse: the initializer had no grid to place
+    the global monthly aerosol climatology on.  Each strip now passes its
+    own XLAT_M/XLONG_M crop as ``wif_grid_latlon``."""
+    import woof.ingest.preprocess_backend as backend_module
+    import woof.ingest.real as real_module
+
+    ny, nx, width = 6, 8, 2
+    lat = np.arange(ny * nx, dtype=np.float64).reshape(ny, nx)
+    from woof.config import RunConfig
+
+    cfg = RunConfig(nx=nx, ny=ny, nz=4, dx=3000.0, dy=3000.0,
+                    ztop=20000.0, dt=15.0, run_seconds=3600.0)
+    sides = hrrr_runner._compact_boundary_static(
+        _strip_static(ny, nx), cfg, width=width, latlon=(lat, lat + 1.0))
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def initialize(snapshot, strip_cfg, *args, **kwargs):
+        seen["latlon"] = kwargs.get("wif_grid_latlon")
+        seen["shape"] = (strip_cfg.ny, strip_cfg.nx)
+        raise Stop
+
+    monkeypatch.setattr(real_module, "initialize_real", initialize)
+    monkeypatch.setattr(
+        backend_module, "resolve_preprocess_backend",
+        lambda *args, **kwargs: SimpleNamespace(
+            array_module=np, name="cpu", selection=None))
+    mets = {side: SimpleNamespace(valid_time=datetime(2024, 7, 30, 14),
+                                  levels_hpa=np.arange(1.0, 3.0), fields={},
+                                  flag_sh_surface_fallback=False)
+            for side in ("west", "east", "south", "north")}
+    with pytest.raises(Stop):
+        hrrr_runner._initialize_boundary_sides(
+            mets, cfg, sides, [1.0, 0.6, 0.3, 0.1, 0.0], p_top=1000.0,
+            width=width, preprocess_backend="cpu")
+    lat_strip, lon_strip = seen["latlon"]
+    assert seen["shape"] == (ny, width)
+    np.testing.assert_array_equal(lat_strip, lat[:, :width])
+    np.testing.assert_array_equal(lon_strip, lat[:, :width] + 1.0)
+
+
+def test_the_aerosol_climatology_is_decoded_once_per_process(
+        monkeypatch, tmp_path):
+    """Four strips per hour place the same global file; it is decoded once,
+    shared read-only, and decoded again when the file changes."""
+    import woof.ingest.wif_climatology as wif
+
+    calls = []
+
+    def decode(path, *, backend="rust"):
+        calls.append(str(path))
+        return wif.WifClimatology(
+            qnwfa=np.zeros((12, 1, 2, 2), np.float32),
+            qnifa=np.zeros((12, 1, 2, 2), np.float32),
+            pressure=np.ones((12, 1, 2, 2), np.float32),
+            latitude=np.array([0.0, 1.0]), longitude=np.array([0.0, 1.0]),
+            source_path=str(path))
+
+    monkeypatch.setattr(wif, "_load_wif_climatology_uncached", decode)
+    monkeypatch.setattr(wif, "_DECODED", {})
+    dataset = tmp_path / "climatology.dat"
+    dataset.write_bytes(b"one")
+    first = wif.load_wif_climatology(dataset)
+    assert wif.load_wif_climatology(dataset) is first
+    assert len(calls) == 1
+    assert not first.qnwfa.flags.writeable
+    import os
+    dataset.write_bytes(b"other")
+    os.utime(dataset, ns=(1, 1))
+    assert wif.load_wif_climatology(dataset) is not first
+    assert len(calls) == 2

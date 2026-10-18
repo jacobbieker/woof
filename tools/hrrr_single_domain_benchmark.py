@@ -2954,11 +2954,19 @@ def _crop_horizontal_snapshot(snapshot, *, y0, y1, x0, x1,
         fields=cropped)
 
 
-def _crop_boundary_static(static, *, y0, y1, x0, x1, full_shape):
+#: The strip's mass-point geodesy, cropped beside the statics when the
+#: caller supplies it (:func:`_compact_boundary_static`).
+_BOUNDARY_GEODESY = ("XLAT_M", "XLONG_M")
+
+
+def _crop_boundary_static(static, *, y0, y1, x0, x1, full_shape,
+                          geodesy=False):
     ny, nx = map(int, full_shape)
     result = {}
-    for name in ("HGT_M", "LANDMASK", "MAPFAC_M", "MAPFAC_U", "MAPFAC_V",
-                 "F", "E", "SINALPHA", "COSALPHA"):
+    names = ("HGT_M", "LANDMASK", "MAPFAC_M", "MAPFAC_U", "MAPFAC_V",
+             "F", "E", "SINALPHA", "COSALPHA",
+             *(_BOUNDARY_GEODESY if geodesy else ()))
+    for name in names:
         value = static[name]
         if value.shape == (ny, nx):
             result[name] = value[y0:y1, x0:x1]
@@ -3091,9 +3099,20 @@ def _map_boundary_snapshot(
     return compact, time.perf_counter() - started
 
 
-def _compact_boundary_static(static, run_cfg, *, width):
-    """Copy the four static side rectangles once for worker initialization."""
+def _compact_boundary_static(static, run_cfg, *, width, latlon=None):
+    """Copy the four static side rectangles once for worker initialization.
+
+    ``latlon`` is the domain's mass-point ``(lat2d, lon2d)``; supplied,
+    each side carries its own crop as ``XLAT_M``/``XLONG_M`` so the strip
+    initialization can place a global dataset (the mp=28 aerosol
+    climatology) on its cells.
+    """
     ny, nx = run_cfg.ny, run_cfg.nx
+    if latlon is not None:
+        lat, lon = (np.asarray(value, dtype=np.float64) for value in latlon)
+        if lat.shape != (ny, nx) or lon.shape != (ny, nx):
+            raise ValueError("boundary geodesy must be the (ny, nx) mass grid")
+        static = {**static, "XLAT_M": lat, "XLONG_M": lon}
     rectangles = {
         "west": (0, ny, 0, width),
         "east": (0, ny, nx - width, nx),
@@ -3105,7 +3124,7 @@ def _compact_boundary_static(static, run_cfg, *, width):
             name: np.ascontiguousarray(value)
             for name, value in _crop_boundary_static(
                 static, y0=y0, y1=y1, x0=x0, x1=x1,
-                full_shape=(ny, nx)).items()
+                full_shape=(ny, nx), geodesy=latlon is not None).items()
         }
         for side, (y0, y1, x0, x1) in rectangles.items()
     }
@@ -3171,57 +3190,29 @@ def _initialize_boundary_sides(
             coord = make_vertical_coord(
                 strip_cfg.nz, hybrid_opt=strip_cfg.hybrid_opt,
                 etac=strip_cfg.etac, eta_levels=eta)
-            # NO ``grid=`` HERE, AND THAT IS THE DECISION, not an
-            # omission.  Every full-domain real route passes the mp=28
-            # aerosol front door; this one must not, for three reasons
-            # that all point the same way.
-            #
-            #  * NOTHING READS WHAT IT WOULD FILL.  These four states are
-            #    built to be thrown away: the only thing taken out of them
-            #    is ``extract_lateral_side(_coupled_device_fields(...))``,
-            #    and that dict is u, v, theta, phi, mu, qv and the analysed
-            #    hydrometeors with their seeded numbers
-            #    (woof.boundary_fields).  nwfa/nifa are deliberately absent
-            #    from it (woof/ingest/lateral_bc.py:639-646, the
-            #    registered mp=28 boundary deviation whose full argument
-            #    is in woof/core/moist.py).  Wiring here would resolve,
-            #    read and interpolate a 225 MB global dataset to populate
-            #    fields that this function's one consumer is documented
-            #    never to look at.
-            #  * THE COST IS PER STRIP, PER HOUR, PER PROCESS.  This runs
-            #    four times per forcing hour inside SPAWNED preparation
-            #    workers (_prepare_boundary_hour), so the load and the
-            #    monthly + vertical interpolation would be paid 4 x hours
-            #    x workers over for a result nobody reads.
-            #  * IT HAS NO GEODESY TO PASS.  ``_crop_boundary_static``
-            #    ships eight named fields and no XLAT/XLONG, on purpose --
-            #    the crop exists to keep the per-worker payload small.
-            #    Wiring would mean widening that payload too.
-            #
-            # WHAT MAKES THIS SAFE rather than a silent gap.  The f00 /
-            # reference state that actually becomes the forecast IS wired
-            # (``_initialize_state`` below passes ``grid=grid``) and the
-            # report this runner writes names THAT state's aerosol source,
-            # so the run's answer is recorded and no second answer exists
-            # to disagree with it.  And this runner cannot reach the mp=28
-            # block at all today: its physics selection is the closed
-            # ``_NATIVE_HRRR_RUNTIME_SWITCHES`` registry, whose profiles
-            # resolve mp_physics 1, 6, 8, 10, 18 and 50 and nothing else
-            # -- none of them aerosol-aware.  (50 joined with the P3
-            # profile row and changes nothing here: P3 carries no aerosol
-            # scalars either.)
-            #
-            # IF AN AEROSOL-AWARE PROFILE IS EVER ADDED TO THAT REGISTRY,
-            # this is the line to revisit -- not by pasting ``grid=`` in,
-            # but by deciding what a boundary strip's aerosol scope IS.
-            # As written it would emit the synthetic-fallback warning four
-            # times per forcing hour per worker, and under
-            # ``mp28_aerosol_source='climatology'`` it would RAISE, because
-            # a strip carries no mass-point geodesy for the resolver to
-            # honour the request with.
+            # The strip's own mass-point geodesy rides beside its statics
+            # (_compact_boundary_static), so an aerosol-aware Thompson
+            # (mp=28) strip places the monthly aerosol climatology on its
+            # own cells exactly as the full-domain f00 state does through
+            # ``grid=``.  Without it, a configuration that names the
+            # climatology -- (aer_init_opt, wif_input_opt) = (1, 1), which
+            # the default HRRR profile's namelist carries -- refused at
+            # the first boundary hour (the initializer cannot guess a
+            # global dataset's grid), and under 'auto' the strips fell
+            # back to the synthetic profile while the start state used
+            # the climatology.  With it, every strip resolves the same
+            # aerosol source the start state does, so its nwfa/nifa enter
+            # the lateral boundary inventory exactly as the start state's
+            # (external_scalar_fields, aerosol_from_input) -- one aerosol
+            # source on the whole boundary.  The dataset is decoded once
+            # per process (wif_climatology.load_wif_climatology), not once
+            # per strip.
+            geodesy = tuple(strip_static.get(name) for name in _BOUNDARY_GEODESY)
             result = initialize_real(
                 strip_met, strip_cfg, coord, strip_static["HGT_M"],
                 landmask=strip_static["LANDMASK"],
+                wif_grid_latlon=(None if any(value is None for value in geodesy)
+                                 else geodesy),
                 p_top=p_top, sfcp_to_sfcp=sfcp_to_sfcp,
                 preprocess_backend=preprocess,
                 state_backend="preprocess",
@@ -5011,7 +5002,7 @@ def run(args):
         setup_record_by_hour = {}
         width = int(dc.run.spec_bdy_width)
         static_sides = _compact_boundary_static(
-            static, dc.run, width=width)
+            static, dc.run, width=width, latlon=grid.latlon_mass())
         boundary_targets = _boundary_mapping_targets(
             grid, static, dc.run, width=width)
         try:

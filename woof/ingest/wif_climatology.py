@@ -79,6 +79,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field as _field
+from pathlib import Path
 
 import numpy as np
 
@@ -295,12 +296,44 @@ def read_wps_intermediate_rust(path):
         raise WifClimatologyError("WPS intermediate file holds no records")
     return records, axes[0], axes[1], corner
 
+#: The datasets this process has already decoded, keyed by the file's
+#: identity (resolved path, size, mtime) and the decoder.  A native HRRR
+#: preparation initializes four boundary strips per forcing hour in each
+#: worker, and every one of them places the same ~225 MB global file on
+#: its cells; decoding it once per process instead of once per strip is
+#: the whole saving.  The arrays are frozen so the shared copy cannot be
+#: edited by one caller under another.
+_DECODED: dict[tuple, "WifClimatology"] = {}
+_DECODED_LIMIT = 2
+
+
 def load_wif_climatology(path, *, backend="rust") -> WifClimatology:
     """Assemble the (12, nlev, nlat, nlon) monthly stacks by field suffix.
 
     ``backend`` selects the DECODER only; the stacking below is metadata
     work on whatever the decoder returned and is identical either way.
+    A file this process already decoded, unchanged since, is returned
+    from memory (read-only).
     """
+
+    resolved = Path(path).resolve()
+    stat = resolved.stat()
+    key = (str(resolved), stat.st_size, stat.st_mtime_ns, _resolve_backend(backend))
+    cached = _DECODED.get(key)
+    if cached is not None and cached.source_path == str(path):
+        return cached
+    decoded = _load_wif_climatology_uncached(path, backend=backend)
+    for array in (decoded.qnwfa, decoded.qnifa, decoded.pressure,
+                  decoded.latitude, decoded.longitude):
+        if isinstance(array, np.ndarray):
+            array.setflags(write=False)
+    while len(_DECODED) >= _DECODED_LIMIT:
+        _DECODED.pop(next(iter(_DECODED)))
+    _DECODED[key] = decoded
+    return decoded
+
+
+def _load_wif_climatology_uncached(path, *, backend="rust") -> WifClimatology:
 
     if _resolve_backend(backend) == "rust":
         records, latitude, longitude, corner = read_wps_intermediate_rust(path)
