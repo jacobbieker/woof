@@ -1260,6 +1260,16 @@ def plan_track(track: Track3D, name: str, out_dir: Path,
         plan_relocation(track, exp, times, options)
     notes += relocation_notes
     placements = placements or layout.placements
+    if relocation is not None and times.d03_start > times.start:
+        # A moving d03 starts with the tree.  A parent-born nest cannot be a
+        # relocation target (a resume re-births it on its declared ground
+        # under a nest that has since moved), and an analysis-born one under
+        # a sliding d02 needs its analysis prepared on d02's live footprint,
+        # which a fixed prepared cache does not hold; both are refused by
+        # the forecast.
+        times = replace(times, d03_start=times.start)
+        notes.append("d03: starts with the tree (a moving nest cannot be "
+                     "born late), so its spin-up is the tree's")
     if relocation is None:
         covered = d03_coverage(track, layout, placements, times,
                                options.track_margin_cells)
