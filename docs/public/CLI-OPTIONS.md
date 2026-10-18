@@ -1854,6 +1854,37 @@ Takes no options of its own.
 | `--wps-namelist` | standard WPS geometry/static-selection namelist |
 | `--wrf-version {3,4}` | with --namelist-support-report: the WRF line the namelist was written for, which selects only the Registry default an omitted &dynamics/use_theta_m takes (3: 0, dry theta, the line operational HRRR v4 runs; 4, the default: 1, moist theta) |
 
+## `woof relocation`
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof relocation from-track`
+
+| argument | what it does |
+|---|---|
+| `track` | path file: a CSV with a header row, or a .json list of objects, one per fix; column names come from --time-col/--lat-col/--lon-col/--height-col; (0, 0) fixes are dropped |
+| `config` | the domain-tree experiment TOML (projection, [[domain]] geometry and start_time) |
+
+| option | what it does |
+|---|---|
+| `--cadence SECONDS` | seconds between move opportunities (default 300); a whole number of root steps |
+| `--container-margin-cells` | frame cells the sliding parent keeps from the frame's edges (default 10) |
+| `--containment-max-move` | cap on one containment slide, frame cells (default: one the slide never meets) |
+| `--deadband-cells` | containment dead-band in the parent's cells (default: the widest the parent's slack affords) |
+| `--grid-id` | the mover (default: [relocation] grid_id, else the deepest domain) |
+| `--height-col NAME` | column holding height, metres (optional; placement is horizontal, so it is reported, not used) |
+| `--json` | print the plan as JSON |
+| `--lat-col NAME` | column holding latitude, degrees (default 'lat') |
+| `--lon-col NAME` | column holding longitude, degrees (default 'lon') |
+| `--margin-cells` | mover cells the track keeps from the mover's edges (default 40) |
+| `--max-move-parent-cells` | cap on one row (default: the largest planned row, so nothing is clamped) |
+| `--min-move-parent-cells` | skip a re-centring move smaller than this while the window still fits (default 1) |
+| `--out` | write the [relocation] snippet here instead of printing it |
+| `--time-col NAME` | column holding the ISO 8601 time, UTC unless it carries an offset (default 'time') |
+| `--write-config TOML` | write the whole config with the placement patched into [[domain]] and [relocation] replaced, validated by reloading it |
+
 ## `woof remote`
 
 | option | what it does |
