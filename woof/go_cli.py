@@ -344,7 +344,7 @@ def _managed_download_request(fetch_table: dict):
     import hashlib
 
     from types import SimpleNamespace
-    from woof import fetch, source_adapters
+    from woof import fetch, fetch_routes, source_adapters
 
     request = {key: value for key, value in fetch_table.items() if key != "out"}
     # ``auto`` is the unpinned request written out, so it keys the folder
@@ -362,7 +362,12 @@ def _managed_download_request(fetch_table: dict):
         raise GoRefusal(f"The forecast download settings are invalid: {error}") from error
     request["source"] = source
     request["cycle"] = cycle.strftime("%Y-%m-%dT%H:%M:%SZ")
-    request["area"] = None if area is None else area.as_manifest()
+    # A table route moves whole published objects whatever the area (the
+    # one that accepts one crops at preparation, woof.regional_crop), so
+    # the area does not name different bytes and does not key the folder:
+    # a moved or re-planned domain reuses the download it already has.
+    request["area"] = (None if area is None or source in fetch_routes.route_ids()
+                       else area.as_manifest())
     request.pop("point", None)
     request.pop("radius_km", None)
     try:

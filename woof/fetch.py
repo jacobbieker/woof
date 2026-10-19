@@ -770,12 +770,21 @@ def fetch_accepts_area(source: str) -> bool:
     that emits an ``area`` hint for a routed source prints a step 1 that
     exits 2.  The crop for those sources happens at `woof prep`, where
     the namelist geometry is the crop.
+
+    A table route whose packaged profile declares an input crop
+    (:func:`woof.regional_crop.crops_at_preparation`: a whole-globe
+    NetCDF source the engine decodes whole) accepts the area too.  Its
+    fetch still moves whole objects; ``woof prep`` cuts them to the
+    ``[fetch] area`` before the decode, so the area a planner writes is
+    the area the preparation reads.
     """
 
     from woof.cf_archive_fetch import sources
+    from woof.regional_crop import crops_at_preparation
     from woof.ukv_source import SOURCE_ID as UKV
-    return fetch_routes.canonical_source(source) in (
-        fetch_routes.LEGACY_ROUTE_SOURCES + sources() + (UKV,))
+    canonical = fetch_routes.canonical_source(source)
+    return (canonical in (fetch_routes.LEGACY_ROUTE_SOURCES + sources() + (UKV,))
+            or crops_at_preparation(canonical))
 
 
 def fetch_accepts_cadence(source: str) -> bool:
@@ -6635,6 +6644,12 @@ def _route_fetch_main(args, source: str) -> int:
         if value is not None:
             hints[key] = value
     validate_fetch_hints(hints, source=COMMAND_LINE_HINTS)
+    if any(key in hints for key in ("area", "point")):
+        # Accepted only for a source whose preparation crops
+        # (fetch_accepts_area): the objects still move whole.
+        print(f"fetch {source}: the published objects are whole-globe and "
+              "move whole; woof prep crops them to the experiment's [fetch] "
+              "area (or its domains plus a margin) before the decode")
     route = fetch_routes.route_for(source)
     if args.transport is not None:
         route.host(args.transport)

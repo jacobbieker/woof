@@ -1488,6 +1488,7 @@ def _apply_packaged_profile(
 
     args.source_format = declared_format
     args._packaged_input_normalizer = profile.get("input_normalizer")
+    args._packaged_input_crop = profile.get("input_crop")
     args.mapping = authorities["mapping"]
     args.composition = authorities["composition"]
     composition_document = json.loads(authorities["composition"].read_text(encoding="utf-8"))
@@ -2664,6 +2665,12 @@ def as_posted_refusal(source: str) -> str | None:
             return (f"--source {source} normalizes every input file of the "
                     f"window ({normalizer}) before its decode, so a lead not "
                     "posted yet has nothing to normalize")
+        from woof.regional_crop import declared_crop
+
+        if declared_crop(adapter.source_id) is not None:
+            return (f"--source {source} crops every input file of the window "
+                    "to the run's area before its decode, so a lead not "
+                    "posted yet has nothing to crop")
     return None
 
 
@@ -3510,6 +3517,40 @@ def dispatch(args: argparse.Namespace, *,
                 normalize_packaged_inputs(normalizer, args)
         except (OSError, TypeError, ValueError, RuntimeError) as error:
             print(f"source input normalization failed: {error}", file=sys.stderr)
+            return EXIT_CONFIG
+
+    crop = getattr(args, "_packaged_input_crop", None)
+    if (crop is not None and adapter.runner == "mapped_composition_v1"
+            and getattr(args, "as_posted", None) is None):
+        # A whole-globe NetCDF source is decoded whole by the engine, so
+        # its objects are cut to the run's area first -- before the input
+        # manifest is authored, so the manifest binds what is decoded.
+        from woof.regional_crop import crop_packaged_inputs, declared_crop_stage
+        try:
+            if args.dry_run:
+                print(_json(declared_crop_stage(crop)))
+            elif not args.wps_namelist or args.author_input_manifest is None:
+                # --author-only without a namelist, or a pinned manifest
+                # naming the uncropped objects: nothing to crop to, or a
+                # binding the crop would break.  The decode reads whole.
+                print(f"prep --source {adapter.source_id}: inputs are not "
+                      "cropped (the crop needs --wps-namelist and an authored "
+                      "input manifest); the decode reads every object whole",
+                      file=sys.stderr)
+            else:
+                cropped = crop_packaged_inputs(crop, args)
+                if cropped["cropped"]:
+                    box = cropped["box"]
+                    print(f"prep --source {adapter.source_id}: cropped "
+                          f"{cropped['inputs']} object(s) to latitude "
+                          f"{box['south']:.2f}..{box['north']:.2f}, longitude "
+                          f"{box['west']:.2f}..{box['east']:.2f} "
+                          f"({cropped['area_from']}): "
+                          f"{cropped['input_bytes']:,} -> "
+                          f"{cropped['cropped_bytes']:,} bytes in "
+                          f"{cropped['directory']}", file=sys.stderr)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            print(f"source input crop failed: {error}", file=sys.stderr)
             return EXIT_CONFIG
 
     if (adapter.runner == "mapped_composition_v1"

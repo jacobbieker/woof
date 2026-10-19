@@ -42,6 +42,7 @@ def _profile(
     contributing_provenances: Mapping[str, Mapping[str, str]] | None = None,
     input_normalizer: str | None = None,
     normalization: str | None = None,
+    input_crop: str | None = None,
 ) -> Mapping[str, object]:
     """One packaged profile: file names, byte pins, and its two roles.
 
@@ -93,6 +94,14 @@ def _profile(
         )
     if input_normalizer is not None and composition_state != "composed":
         raise ValueError("an input normalizer requires a composed profile")
+    if input_crop is not None and (input_normalizer is not None
+                                   or source_format != "netcdf"):
+        # The crop rewrites the objects the engine reads; a normalizer
+        # already writes its own, and only the NetCDF path is cropped
+        # (woof.regional_crop).
+        raise ValueError(
+            f"profile {stem}: an input crop applies to a NetCDF profile "
+            "with no input normalizer")
     roles_declared = data_role is not None and provenance_role is not None
     if composition_state == "composed" and not roles_declared:
         raise ValueError(
@@ -154,6 +163,10 @@ def _profile(
         # Absent for a profile whose source publishes bytes the mapped engine
         # already reads: their public declarations remain unchanged.
         **({"input_normalizer": input_normalizer} if input_normalizer else {}),
+        # Declared by a whole-globe NetCDF source the engine decodes whole:
+        # `woof prep` crops its objects to the run's area before authoring
+        # the input manifest (woof.regional_crop).
+        **({"input_crop": input_crop} if input_crop else {}),
     })
 
 
@@ -634,6 +647,9 @@ _PACKAGED_PROFILES = MappingProxyType({
         provenance="8df36ca0fd6d7c3aa42c83ab5604c8adc87fbc9f54c3b24d6205b5779cae1e1a",
         data_role="met_office_global_invariant_surface",
         provenance_role="met_office_global_invariant_surface_provenance",
+        # The NetCDF decode is whole-object and whole-series, so a small
+        # domain is cropped from the globe before the engine reads it.
+        input_crop="regular-latlon-netcdf-v1",
         # The GDAS borrow carries its own evidence, so the two provenance
         # roles never bind one file twice.
         contributing_provenances={
