@@ -851,3 +851,13 @@ def test_disk_pricing_counts_the_scalars_the_run_carries():
                                                  moist=False)
     assert not set(HUB_SCALAR_OUTPUT_FIELDS) & set(hw.hub_history_shapes(
         HistorySelection.from_mapping({"hub_wind": True}), 10, 20))
+
+
+def test_interval_diagnostic_registry_is_restart_infra():
+    """The per-interval diagnostic registry (hub-height wind and its kin)
+    observes the state and resets its window on resume: classified as
+    infra, so a run with one attached can write a checkpoint."""
+    from woof.core.interval_diagnostics import STATE_ATTRIBUTE
+    from woof.io.restart import classify_state_attr
+
+    assert classify_state_attr(STATE_ATTRIBUTE) == "infra"
