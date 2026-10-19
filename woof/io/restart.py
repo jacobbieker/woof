@@ -500,6 +500,15 @@ STATE_INFRA_ATTRS = frozenset({
     # continued domains retain those fields and do not reapply the recipe.
     "_ensemble_surface_state",
     "elapsed_seconds", "_nest_restart_classification",
+    # The per-history-interval diagnostic registry
+    # (woof/core/interval_diagnostics.py, e.g. hub-height wind): read-only
+    # observers of the model state with their own window buffers, attached
+    # at setup from [output].  Not a trajectory input and not restart
+    # payload: a resumed run opens a fresh window at the restart instant
+    # (woof/core/hub_wind_diag.py documents it), so it was never meant to
+    # be serialized -- and unclassified it refused every checkpoint of a
+    # run that had one attached.
+    "_interval_diagnostics",
     # The domain's ACTIVATION EPOCH in seconds, published beside
     # ``elapsed_seconds`` by woof.core.state.refresh_model_time and from
     # the same tick authority.  Same category, and for the same reason:
