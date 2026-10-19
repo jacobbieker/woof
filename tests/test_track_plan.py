@@ -798,3 +798,20 @@ def test_plan_passes_source_column_and_hub_options(tmp_path):
     eta = document["shared"]["eta_levels"]
     assert len(eta) == 257
     assert run.plan["source"] == "gfs"
+
+
+def test_plan_lets_the_measured_terrain_clock_apply():
+    """A recipe's pinned clock would turn the steep-ground substep rule
+    into advice; the planned tree runs the measured terrain clock."""
+    document = {"experiment": {}, "shared": {"terrain_clock": "pinned"},
+                "domain": [{"grid_id": 1}, {"grid_id": 2}, {"grid_id": 3}]}
+    from datetime import datetime
+    start = datetime(2026, 1, 1)
+    times = tp.PlanTimes(start=start, end=datetime(2026, 1, 1, 6),
+                         launch=datetime(2026, 1, 1, 2), landing=datetime(2026, 1, 1, 5),
+                         d03_start=start, cadence_s=3600, cycle=start, start_hour=0,
+                         history_s=120.0)
+    out = tp.apply_track_tables(
+        document, times=times, layout=None, physics={}, options=tp.PlanOptions(),
+        preset="full", icechunk_url="x.icechunk", relocation=None, placements={})
+    assert out["shared"]["terrain_clock"] == "measured"
