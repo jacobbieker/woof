@@ -789,6 +789,20 @@ Changed:
 
 Fixed:
 
+- A long moving-nest run could run out of GPU memory at a move. An
+  asynchronous checkpoint kept references to the live state arrays it had
+  already copied to host until it was published, so a nest move or a
+  containment slide while a checkpoint was being written could not free
+  the outgoing domain, and its rebuild put a second copy of that domain on
+  the card. With a 256-level 240 x 240 / 324 x 324 nest pair that is about
+  7 GB, and it outlasted the forecast's priced envelope on a 48 GB card.
+  Measured at 64 levels: +691 MiB at a slide and +1,075 MiB at a move at
+  every checkpoint boundary before the fix, nothing after it. The
+  checkpoint now keeps only paths and sizes once its snapshot is queued.
+  Before a relocation releases a domain, the in-flight snapshot and any
+  queued `direct`-mode history frame drop their device references, and the
+  domain's named scratch slots are released with the rest of its arrays.
+  No output byte changes.
 - A moving nest with a `[relocation.containment]` parent could die mid-run
   at a containment slide. The runner clamped the slide to
   `[relocation.containment] max_move_parent_cells`, then judged it against

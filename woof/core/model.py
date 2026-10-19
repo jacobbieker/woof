@@ -1404,6 +1404,38 @@ def _admit_nest_activation(node, catalog, exp, *, streamed_owner=None):
                 "other programs using the GPU); or use a smaller nest"))
 
 
+def release_output_device_refs(model) -> dict[str, int]:
+    """Make in-flight outputs stop pinning live state arrays.
+
+    The asynchronous checkpoint and the asynchronous history writers both
+    stage straight from the live state: until a snapshot or a queued
+    frame lets go of its source arrays, those arrays outlive whatever
+    drops the state.  A relocation drops the moving domain's state and
+    rebuilds it at once, so a reference still held there meant TWO copies
+    of the domain on the card for as long as the output took -- on a
+    long moving-nest run that is what ran a card out of memory at a
+    move.  Called immediately before such a release.  Each output waits
+    only for its own already-queued copy; nothing is drained, and no
+    file or number changes.  Returns the references each dropped.
+
+    One call covers every domain: the checkpoint snapshot and each
+    domain's history writer are released whole, so the descendants a
+    containment slide re-grounds after the mover are covered by the
+    mover's call.  Restore-time relocations run before any output is in
+    flight and need none.
+    """
+    released = {"checkpoint": 0, "history": 0}
+    writer = getattr(model, "_checkpoint_writer", None)
+    release = getattr(writer, "release_device_refs", None)
+    if release is not None:
+        released["checkpoint"] = int(release() or 0)
+    writers = getattr(model, "_io_manager", None)
+    release = getattr(writers, "release_device_refs", None)
+    if release is not None:
+        released["history"] = int(release() or 0)
+    return released
+
+
 def _release_startup_build(model, node, validators, *,
                            streamed_owner=None) -> None:
     """Drop every owner of a delayed child's startup build before its rebuild.
@@ -1457,6 +1489,7 @@ def _release_startup_build(model, node, validators, *,
     grid_id = int(node.cfg.grid_id)
     validators.pop(grid_id, None)
     model._prepared_by_grid_id.pop(grid_id, None)
+    release_output_device_refs(model)
     # Decided before any read of the startup state: a canonical host view
     # refuses a read of its physics with CanonicalStateRefused, and its
     # route restores it (see the docstring).
@@ -1487,13 +1520,9 @@ def _release_startup_build(model, node, validators, *,
         streamed = False
     if not streamed:
         node.coupler = None
+        # Scratch slots (a slot outside the shared arena owns its bytes)
+        # are released with the rest of the state's arrays.
         release_state_arrays(node.state)
-        # Scratch slots sit in a dict, which the array walk above does not
-        # enter; a slot outside the shared arena owns its bytes.
-        try:
-            node.state._scratch.clear()
-        except AttributeError:
-            pass
     gc.collect()
 
 
@@ -1897,6 +1926,10 @@ def execute_experiment(
         def drop_validator(gid) -> None:
             dropped.add(int(gid))
             validators.pop(gid, None)
+            # An in-flight checkpoint snapshot or queued history frame
+            # still referencing the outgoing state would keep it on the
+            # card through the rebuild (see release_output_device_refs).
+            release_output_device_refs(model)
 
         outcome = relocation_runner.on_period_begin(
             model, clocks, period=period,
