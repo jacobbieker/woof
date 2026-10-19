@@ -739,6 +739,32 @@ def test_fit_root_step_makes_steps_divide_history_and_radiation():
             domains[0]["time_step_fract_den"]) == (7, 1, 2)
 
 
+def test_fit_root_step_restores_a_radt_snapped_to_the_wizard_clock():
+    from fractions import Fraction
+    from woof.track.plan import _fit_root_step
+
+    # A 4.5/1.5/0.5 km ladder: the wizard's 22.5 s root snapped radt to
+    # 27 steps (10.125 min), a period no step that divides 120 s history
+    # on every grid meets; the fit restores 10 min and lands on 20 s.
+    domains = [
+        {"grid_id": 1, "time_step": 22, "time_step_fract_num": 1,
+         "time_step_fract_den": 2, "radt": 10.125},
+        {"grid_id": 2, "parent_id": 1, "parent_time_step_ratio": 3,
+         "radt": 5.0},
+        {"grid_id": 3, "parent_id": 2, "parent_time_step_ratio": 3,
+         "radt": 5.0},
+    ]
+    _fit_root_step(domains, 120.0)
+    root = domains[0]
+    root_dt = root["time_step"] + Fraction(root["time_step_fract_num"],
+                                           root["time_step_fract_den"])
+    assert root_dt == 20
+    assert root["radt"] == 10.0
+    for table, dt in zip(domains, (root_dt, root_dt / 3, root_dt / 9)):
+        assert (Fraction(str(table["radt"])) * 60 / dt).denominator == 1
+        assert (Fraction(120) / dt).denominator == 1
+
+
 def test_history_window_sits_on_the_history_grid():
     from datetime import datetime
     from woof.track.plan import PlanTimes
