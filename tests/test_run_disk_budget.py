@@ -295,3 +295,21 @@ def test_delete_after_commit_export_holds_only_its_backlog():
                                            chain=None, render=False,
                                            live_export=keep)
     assert kept["history_bytes"] == whole["history_bytes"]
+
+
+def test_forecast_stage_prices_an_announced_delete_after_commit_export(monkeypatch):
+    """The forecast stage runs as woof go's child and learns of the live
+    export through the environment: its review prices only the backlog."""
+    from woof import output_disk
+    from woof.icechunk_export import LIVE_EXPORT_DELETE_ENV
+
+    exp = _exp(hours=24)
+    monkeypatch.delenv(LIVE_EXPORT_DELETE_ENV, raising=False)
+    whole = output_disk.forecast_projection(exp)
+    monkeypatch.setenv(LIVE_EXPORT_DELETE_ENV, '{"domains": [2]}')
+    held = output_disk.forecast_projection(exp)
+    d1w, d2w = whole["domains"]
+    d1h, d2h = held["domains"]
+    assert d1h["history_bytes"] == d1w["history_bytes"]
+    assert d2h["history_frames_held"] == disk_budget.LIVE_EXPORT_BACKLOG_FRAMES
+    assert held["history_bytes"] < whole["history_bytes"]
