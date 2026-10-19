@@ -973,6 +973,13 @@ def apply_track_tables(document: dict, *, times: PlanTimes,
     # before the mix): drop the ones the scheme now running never reads.
     from woof.physics_source_defaults import LAND_SCOPED_RECIPE_SETTINGS
     shared = document["shared"]
+    # A source recipe may pin the clock to its operational model's (the
+    # HRRR recipe does), turning the measured terrain rules into advice.
+    # Track trees put 100 m nests over whatever ground the track crosses,
+    # and on steep ground those rules are what holds the integration (six
+    # acoustic substeps where four fail), so the plan lets them apply.
+    if shared.get("terrain_clock") == "pinned":
+        shared["terrain_clock"] = "measured"
     for key, schemes in LAND_SCOPED_RECIPE_SETTINGS.items():
         if key in shared and shared.get("sf_surface_physics") not in schemes:
             del shared[key]
