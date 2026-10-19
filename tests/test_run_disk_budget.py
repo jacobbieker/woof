@@ -271,3 +271,27 @@ def test_surface_flux_option_lands_in_shared():
     assert "isftcflx = 2" in quoted
     with pytest.raises(ValueError):
         with_surface_flux_option(text, 3)
+
+
+def test_delete_after_commit_export_holds_only_its_backlog():
+    from woof.icechunk_export import ExportOptions
+
+    exp = _exp(hours=24)
+    whole = disk_budget.projected_run_bytes(exp, keep_checkpoints=1, fetch=None,
+                                            chain=None, render=False)
+    live = ExportOptions.from_mapping({"url": "file:///tmp/x.icechunk",
+                                       "delete_after_commit": True})
+    held = disk_budget.projected_run_bytes(exp, keep_checkpoints=1, fetch=None,
+                                           chain=None, render=False,
+                                           live_export=live)
+    for row_whole, row_held in zip(whole["domains"], held["domains"]):
+        assert row_held["history_frames"] == row_whole["history_frames"]
+        assert row_held["history_frames_held"] == min(
+            row_whole["history_frames"], disk_budget.LIVE_EXPORT_BACKLOG_FRAMES)
+    assert held["history_bytes"] < whole["history_bytes"]
+    # Without delete_after_commit the export leaves every frame on disk.
+    keep = ExportOptions.from_mapping({"url": "file:///tmp/x.icechunk"})
+    kept = disk_budget.projected_run_bytes(exp, keep_checkpoints=1, fetch=None,
+                                           chain=None, render=False,
+                                           live_export=keep)
+    assert kept["history_bytes"] == whole["history_bytes"]

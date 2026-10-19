@@ -258,11 +258,20 @@ def _seconds_before_resume(exp, domain, resume_seconds: float) -> float | None:
     return resume_seconds - max(0.0, start)
 
 
+#: History frames of a live-exported, delete-after-commit domain priced as
+#: on the disk at once: the exporter unlinks each frame once its commit
+#: lands, so the disk holds the export's backlog, not the run's history.
+#: Half an hour of 1-minute frames; a slower store than that stalls the
+#: forecast's disk long before it fills a sized one.
+LIVE_EXPORT_BACKLOG_FRAMES = 30
+
+
 def projected_run_bytes(exp, *, keep_checkpoints: int | None,
                         fetch: Mapping[str, Any] | None, chain: str | None,
                         render: bool, render_products: str = "all",
                         download_present_bytes: int = 0,
-                        resume_seconds: float | None = None) -> dict[str, Any]:
+                        resume_seconds: float | None = None,
+                        live_export=None) -> dict[str, Any]:
     """Every byte ``exp`` will write: download, preparation, history, checkpoints and pictures.
 
     The domain with the lowest grid id is the outermost grid.
@@ -293,8 +302,19 @@ def projected_run_bytes(exp, *, keep_checkpoints: int | None,
     still write its first frame there.
     A part the table cannot price is named in ``unpriced`` and left out of
     ``total_bytes``.
+
+    ``live_export`` is the run's ``[output] icechunk`` export
+    (:class:`woof.icechunk_export.ExportOptions`), or ``None``.  With
+    ``delete_after_commit`` its domains hold at most
+    :data:`LIVE_EXPORT_BACKLOG_FRAMES` history frames on the disk, since
+    each frame is unlinked once the store holds it.
     """
     from woof import download_budget
+
+    deleting = (live_export is not None
+                and bool(getattr(live_export, "delete_after_commit", False)))
+    exported = (None if live_export is None
+                else getattr(live_export, "domains", None))
 
     run_seconds = float(exp.run_seconds)
     restart = float(getattr(exp, "restart_interval_s", 0.0) or 0.0)
@@ -322,13 +342,16 @@ def projected_run_bytes(exp, *, keep_checkpoints: int | None,
         from woof.io.history_selection import resolve
         selection = resolve(getattr(exp, "output", None), getattr(domain, "output", None))
         frame_bytes = history_frame_bytes(run, selection)
-        h = frame_bytes * frames
+        held_frames = frames
+        if deleting and (exported is None or int(domain.grid_id) in exported):
+            held_frames = min(frames, LIVE_EXPORT_BACKLOG_FRAMES)
+        h = frame_bytes * held_frames
         c = cells * per_cell * held
         begin, end = _history_window_seconds(exp, domain)
         # The activation frame precedes the first physics step and carries
         # no output-due reflectivity. A delayed first alarm is already mature.
         start = run_seconds - live if live is not None else run_seconds + 1
-        if frames and begin == 0 and (not resumed or float(resume_seconds) < start):
+        if held_frames and begin == 0 and (not resumed or float(resume_seconds) < start):
             h -= frame_bytes - history_frame_bytes(run, selection, include_reflectivity=False)
         p = (_picture_projection(run.nx, run.ny, live, float(domain.history_interval_s),
                                  render_products,
@@ -341,6 +364,7 @@ def projected_run_bytes(exp, *, keep_checkpoints: int | None,
         checkpoints += c
         pictures += p
         rows.append({"grid_id": int(domain.grid_id), "cells": cells, "history_frames": frames,
+                     "history_frames_held": held_frames,
                      "history_bytes": int(h), "history_frame_bytes": frame_bytes,
                      "history_selection": selection.spelling(),
                      "checkpoint_bytes": int(c), "picture_bytes": int(p)})
