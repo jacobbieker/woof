@@ -3676,6 +3676,22 @@ def _present_download_bytes(request: Mapping[str, Any] | None, directory: Path |
         return 0
 
 
+def _planned_live_export(raw: Mapping[str, Any] | None):
+    """The config's ``[output] icechunk`` export, or ``None``: the disk
+    projection prices a delete-after-commit export's history as its
+    backlog, not the whole run."""
+
+    table = ((raw or {}).get("output") or {}).get("icechunk")
+    if table is None:
+        return None
+    from woof.icechunk_export import ExportOptions
+
+    try:
+        return ExportOptions.from_mapping(table, allow_template=True)
+    except (TypeError, ValueError):
+        return None
+
+
 def _disk_projection(plan: RunPlan, exp, *, raw: Mapping[str, Any], data,
                      fetch_arguments: Sequence[str] | None,
                      run_dir: Path | None = None,
@@ -3699,7 +3715,8 @@ def _disk_projection(plan: RunPlan, exp, *, raw: Mapping[str, Any], data,
         chain=_preparation_chain(plan, raw), render=_plan_draws_pictures(plan),
         render_products=_plan_render_products(plan) or "none",
         download_present_bytes=_present_download_bytes(request, directory, keyed),
-        resume_seconds=_resume_seconds(plan)),
+        resume_seconds=_resume_seconds(plan),
+        live_export=_planned_live_export(raw)),
         keep_checkpoints=keep, download_dir=None if directory is None else str(directory))
 
 
