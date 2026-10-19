@@ -1207,6 +1207,13 @@ def go_export_options(args, config: Path | None) -> ExportOptions | None:
     return options
 
 
+#: Set by :meth:`LiveExport.start` for a delete-after-commit export, so
+#: the child stages' output-disk reviews price the exported grids'
+#: history as the export's backlog (:mod:`woof.output_disk`).  JSON:
+#: ``{"domains": [grid ids] | null}`` (null: every grid).
+LIVE_EXPORT_DELETE_ENV = "WOOF_LIVE_EXPORT_DELETES"
+
+
 class LiveExport:
     """``woof go``'s handle on the exporter process: :meth:`start` before
     the forecast, :meth:`finish` when it ends (however it ends),
@@ -1274,6 +1281,12 @@ class LiveExport:
         self.say(f"go: exporting each history frame to Icechunk "
                  f"{self.options.url} as it lands (its own process; the "
                  f"model never waits on it). Progress: {self.status_path}")
+        if self.options.delete_after_commit:
+            # The stages run as child processes and price their own output
+            # disk: tell them which grids' frames this export unlinks.
+            os.environ[LIVE_EXPORT_DELETE_ENV] = json.dumps(
+                {"domains": (None if self.options.domains is None
+                             else sorted(int(g) for g in self.options.domains))})
         if after is None:
             return self._launch()
         self._starter = threading.Thread(

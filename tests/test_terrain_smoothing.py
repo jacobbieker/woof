@@ -251,7 +251,8 @@ def test_overlay_path(tmp_path,monkeypatch,partial,setting):
     a=plane();grid=SimpleNamespace(e_sn=6,e_we=8)
     base=np.full((5,7),80.0)
     if partial: a[0:4,0:4]=np.nan
-    got,audit=_terrain_on_coverage(a,grid,halo=3,baseline={'HGT_M':base},source_id='synthetic',latlon=None,terrain_smoothing=setting)
+    got,audit,limit=_terrain_on_coverage(a,grid,halo=3,baseline={'HGT_M':base},source_id='synthetic',latlon=None,terrain_smoothing=setting)
+    assert limit is None
     if not partial:
         bits(got,smooth_terrain_reference(a,setting)[3:8,3:10])
     else:

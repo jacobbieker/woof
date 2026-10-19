@@ -33,7 +33,8 @@ def forecast_projection(exp, *, restart=None, io_mode="history",
     projection = disk_budget.projected_run_bytes(
         exp, keep_checkpoints=checkpoint_retention(), fetch=None, chain=None,
         render=io_mode == "history" and render_products not in {"", "none", None},
-        render_products=render_products or "none", resume_seconds=elapsed)
+        render_products=render_products or "none", resume_seconds=elapsed,
+        live_export=_live_export_from_env())
     if io_mode == "none":
         projection["history_bytes"] = 0
         projection["picture_bytes"] = 0
@@ -44,6 +45,27 @@ def forecast_projection(exp, *, restart=None, io_mode="history",
             domain.update(history_bytes=0, history_frames=0, picture_bytes=0)
     projection["scope"] = "forecast output; existing source and prepared inputs excluded"
     return projection
+
+
+def _live_export_from_env():
+    """The delete-after-commit export ``woof go`` started for this run, as
+    announced to its child stages, or ``None``."""
+    import json
+    import os
+    from types import SimpleNamespace
+
+    from woof.icechunk_export import LIVE_EXPORT_DELETE_ENV
+
+    raw = os.environ.get(LIVE_EXPORT_DELETE_ENV)
+    if not raw:
+        return None
+    try:
+        domains = json.loads(raw).get("domains")
+    except (ValueError, AttributeError):
+        return None
+    return SimpleNamespace(
+        delete_after_commit=True,
+        domains=None if domains is None else tuple(int(g) for g in domains))
 
 
 def renderer_products(first_products=None, observer=None) -> str:

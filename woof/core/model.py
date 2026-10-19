@@ -2144,11 +2144,11 @@ def execute_experiment(
                 # ``None``: queued (lagged); the monitor judges it later
                 # through the same verdict.
                 failure = (None if report is None else
-                           lagged_health.stability_failure(
+                           lagged_health.stability_error(
                                report, grid_id=grid_id,
                                step=clock.step_count + 1))
                 if failure is not None:
-                    raise RuntimeError(failure)
+                    raise failure
             poison()
             if streamed_here is not None:
                 # The same authority AFTER the step as before it.  The tiles

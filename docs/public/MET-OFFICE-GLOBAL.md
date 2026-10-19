@@ -37,6 +37,47 @@ binds two supplements beside the input list:
 - `physical_analysis_surface_data`: the same cycle's GDAS f000 analysis,
   which the fetch writes to `<out>/donor-gdas/`.
 
+## Only the run's area is decoded
+
+The objects are whole-globe and the bucket has no subsetting service, so
+the fetch moves them whole. The mapped engine decodes a NetCDF series
+whole as well, so before the input manifest is authored `woof prep` cuts
+every state object and the orography to a box around the run (the profile
+declares `input_crop = "regular-latlon-netcdf-v1"`, implemented in
+`woof.regional_crop`). The box is the experiment's `[fetch] area`, which
+`woof domain` and `woof track plan` now write for this source as they do
+for GFS; with no area it is the namelist's domains plus 2 degrees. Two
+more source cells are kept on every side for the interpolation stencils.
+A declared area that does not hold every domain is refused by name.
+
+The crop copies every variable, attribute, dtype and compression setting
+and only shortens the latitude and longitude dimensions. A box over the
+antimeridian keeps its columns in eastward order and carries on past
+180E (181E, 182E, ...), so the cropped axis stays uniform. The cropped
+objects, a `crop-receipt.json` (input and output SHA-256 of every object,
+the box and the index plan) and the input manifest that binds them go in
+a `met-office-global-crop-<key>/` folder keyed by the request, beside
+where the manifest was asked for; an intact crop of the same request is
+reused. In a standalone `woof prep` that folder sits in the fetch folder,
+one per domain prepared from it. A 27-hour, 3-hourly window over a domain
+about 90 km wide went from 9.1 GB of objects to 7.9 MB, and the engine's
+resident memory from an out-of-memory kill at 68.7 GB to under 1 GB (the
+whole preparation peaked under 4.5 GB). The source is not prepared as
+posted, so every lead is cropped before the decode.
+
+The engine's NetCDF decode is still not memory-priced: it decodes the
+whole series before carving it by valid time, logs `memory_priced: false`
+with `per_time_bytes: 0`, and refuses under a declared
+`GPUWM_MAPPED_ENGINE_MEMORY_BUDGET_BYTES`. Pricing it needs a per-time
+NetCDF decode in the engine (the GRIB2 path's sliced stream); after the
+crop, the whole-series decode is a few megabytes.
+
+The GDAS donor is not cropped: it is one GRIB2 analysis whose land and
+soil records are decoded once, and the composition requires the donor to
+cover the whole primary grid, which a global analysis always does. The `area` does
+not key the managed download folder for a whole-object route, so moving
+or re-planning a domain reuses the objects already fetched.
+
 ## What the source gives you
 
 The bucket is `met-office-atmospheric-model-data` (eu-west-2, anonymous

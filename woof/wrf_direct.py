@@ -2218,6 +2218,22 @@ def validate_stock_wrf_export_hierarchy(exp):
             "domain-tree forecast runner and is not stock-WRF exportable; "
             "the prepared arrays do not contain the configured bubbles",
             unsupported={"perturbation": "deferred native initial-state bubbles"})
+    for domain in exp.domains:
+        if getattr(domain, "start_from", None) == "parent":
+            # Stock WRF reads a delayed nest's wrfinput at its start; a
+            # parent-born nest has no such analysis to export.  The native
+            # tree runs it (spawned from its parent), so this is a file-set
+            # limit, not a preparation failure: the optional companion
+            # export records the refusal and the preparation goes on
+            # (native_hierarchy).  It was a bare ValueError, which ended a
+            # prepared parent-born tree at its optional export.
+            raise StockWrfExportUnsupported(
+                f"d{domain.grid_id:02d} is born from its parent "
+                "(start_from = \"parent\"); the stock-WRF export "
+                "writes a wrfinput per nest from the analysis at its "
+                "start, which a parent-born nest does not have. Export "
+                "with start_from = \"analysis\".",
+                unsupported={"start_from": ("parent", "analysis")})
     # Stock WRF v4.6.1 normalizes microphysics to one selector across the
     # hierarchy.  GPUWM's explicit MP8->MP18 edge is executable only in its
     # own one-way coupler and must never be mislabeled as a READY stock-WRF
@@ -2277,16 +2293,6 @@ def export_prepared_wrf_hierarchy(
         raise ValueError("export valid time differs from the namelist start time")
     if boundary_interval_seconds <= 0:
         raise ValueError("boundary interval must be positive")
-    for domain, _artifact in pairs:
-        if getattr(domain, "start_from", None) == "parent":
-            # Stock WRF reads a delayed nest's wrfinput at its start;
-            # a parent-born nest has no such analysis to export.
-            raise ValueError(
-                f"d{domain.grid_id:02d} is born from its parent "
-                "(start_from = \"parent\"); the stock-WRF export "
-                "writes a wrfinput per nest from the analysis at its "
-                "start, which a parent-born nest does not have. Export "
-                "with start_from = \"analysis\".")
     output = Path(output_dir)
     if output.exists() and not overwrite:
         raise FileExistsError(f"refusing to overwrite {output}")

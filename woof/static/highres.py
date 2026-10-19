@@ -989,10 +989,112 @@ def _baseline_where_uncovered(label: str, name: str, baseline,
     return field
 
 
+def _wide_terrain(terrain: BoundRaster | None, grid, *, halo: int,
+                  terrain_extended: np.ndarray | None
+                  ) -> tuple[np.ndarray | None, int]:
+    """The source the steep-ground pass reads, and how far past ``halo``.
+
+    :func:`woof.static.terrain_slope.smooth_steep_ground` makes a cell
+    depend on the ground ``reach`` cells around it
+    (:func:`woof.static.terrain_slope.steep_ground_reach`), so it reads the
+    source resampled that much further out than the halo the smoother
+    samples.  The halo's own cells keep ``terrain_extended``'s values
+    exactly.  ``(None, 0)`` where no source covers the footprint or the
+    spacing is too coarse for the pass to run.
+    """
+    from .terrain_slope import steep_ground_reach
+
+    if terrain is None or terrain_extended is None:
+        return None, 0
+    reach = steep_ground_reach(min(float(grid.dx), float(grid.dy)))
+    if reach <= 0:
+        return None, 0
+    wide = np.array(resample_continuous(
+        terrain, _extended_grid(grid, halo + reach), method="average"),
+        dtype=np.float64, copy=True)
+    ny, nx = np.shape(terrain_extended)
+    wide[reach:reach + ny, reach:reach + nx] = terrain_extended
+    return wide, reach
+
+
+def _smoothed_steep_ground(filled: np.ndarray, wide: np.ndarray | None,
+                           reach: int, grid, *, halo: int,
+                           terrain_smoothing
+                           ) -> tuple[np.ndarray, dict[str, object] | None]:
+    """``filled`` (the halo-extended terrain) smoothed, steep ground
+    smoothed further, cropped.
+
+    ``wide`` is the same source ``reach`` cells further out
+    (:func:`_wide_terrain`); its cells no source covers take the nearest
+    halo value.  The domain's own cells take exactly what smoothing
+    ``filled`` alone gives, so a gentle domain keeps its bytes whatever
+    its smoother; the ring around them is the source smoothed in place.
+    The steep-ground pass (:mod:`woof.static.terrain_slope`) then moves
+    only ground steeper than the dynamics hold.  Its record counts the
+    domain's own cells, and is ``None`` where none of them moved.
+    """
+    ny, nx = grid.e_sn - 1, grid.e_we - 1
+    if wide is None or reach <= 0:
+        crop = (slice(halo, halo + ny), slice(halo, halo + nx))
+        return smooth_terrain(filled, terrain_smoothing)[crop], None
+    from .terrain_slope import smooth_steep_ground
+
+    ring = np.pad(np.asarray(filled, dtype=np.float64), reach, mode="edge")
+    source = np.where(np.isfinite(wide), wide, ring)
+    fy, fx = np.shape(filled)
+    source[reach:reach + fy, reach:reach + fx] = filled
+    smoothed = smooth_terrain(source, terrain_smoothing)
+    # The domain's own cells keep exactly what smoothing ``filled`` gives,
+    # whatever the smoother's reach; the ring around them is the source
+    # smoothed in place, which is what the pass reads there.
+    own = smooth_terrain(filled, terrain_smoothing)[halo:halo + ny,
+                                                    halo:halo + nx]
+    edge = halo + reach
+    smoothed[edge:edge + ny, edge:edge + nx] = own
+    eased, record = smooth_steep_ground(
+        smoothed, float(grid.dx), float(grid.dy))
+    if record is None:
+        return own, None
+    out = eased[edge:edge + ny, edge:edge + nx]
+    change = np.abs(out - own)
+    changed = change > 0.0
+    if not changed.any():
+        # Only ground outside the domain was steep.
+        return own, None
+    from .terrain_slope import cell_slopes
+    return out, {
+        **record,
+        "steepest_cell_slope_before": float(cell_slopes(
+            own, float(grid.dx), float(grid.dy)).max()),
+        "cells_changed": int(np.count_nonzero(changed)),
+        "max_change_m": float(change[changed].max()),
+    }
+
+
+def _steep_ground_audit(record, hgt, grid) -> dict[str, object]:
+    """The receipt's account of terrain the steep-ground pass smoothed."""
+    from woof.acoustic_adaptation import steepest_slope
+    from .terrain_slope import STEEP_GROUND_REACH_M
+
+    return {
+        **record,
+        "reach_m": STEEP_GROUND_REACH_M,
+        "steepest_slope_after": steepest_slope(
+            hgt, float(grid.dx), float(grid.dy)).slope,
+        "why": ("ground steeper than the steepest slope any measured "
+                "acoustic substep count holds (woof.acoustic_adaptation) "
+                "is smoothed down to it, and only that ground "
+                "(woof.static.terrain_slope)"),
+    }
+
+
 def _terrain_on_coverage(terrain_extended: np.ndarray | None, grid, *,
                          halo: int, baseline, source_id: str | None,
                          latlon, terrain_smoothing=WPS_DEFAULT,
-                         ) -> tuple[np.ndarray, dict[str, object]]:
+                         terrain_wide: np.ndarray | None = None,
+                         reach: int = 0,
+                         ) -> tuple[np.ndarray, dict[str, object],
+                                    dict[str, object] | None]:
     """High-resolution terrain where the source covers, baseline elsewhere.
 
     ``terrain_extended`` is the area-averaged source on the halo-extended
@@ -1002,30 +1104,40 @@ def _terrain_on_coverage(terrain_extended: np.ndarray | None, grid, *,
     Otherwise the uncovered cells are filled from the baseline before
     that pass (the halo ring from its nearest baseline edge cell), and
     the result is blended onto the baseline with the nest terrain ramp.
+
+    ``terrain_wide`` and ``reach`` (:func:`_wide_terrain`) carry the
+    source past the halo for the steep-ground pass; the third return is
+    its record, ``None`` where no ground was steeper than the dynamics
+    hold.
     """
     ny, nx = grid.e_sn - 1, grid.e_we - 1
-    crop = (slice(halo, halo + ny), slice(halo, halo + nx))
     shape_ext = (ny + 2 * halo, nx + 2 * halo)
     if terrain_extended is None:
         covered_ext = np.zeros(shape_ext, dtype=bool)
     else:
         covered_ext = np.isfinite(terrain_extended)
+    crop = (slice(halo, halo + ny), slice(halo, halo + nx))
     if covered_ext.all():
-        smoothed = smooth_terrain(terrain_extended, terrain_smoothing)
-        hgt = smoothed[crop]
-        return hgt, _coverage_record(source_id, np.ones((ny, nx)), latlon)
+        hgt, eased = _smoothed_steep_ground(
+            terrain_extended, terrain_wide, reach, grid, halo=halo,
+            terrain_smoothing=terrain_smoothing)
+        return (hgt, _coverage_record(source_id, np.ones((ny, nx)), latlon),
+                eased)
     weight = _coverage_weight(covered_ext)[crop]
     base = _baseline_where_uncovered(
         "terrain", "HGT_M", baseline, weight < 1.0, (ny, nx), source_id,
         latlon)
+    eased = None
     if covered_ext.any():
         padded = np.pad(base, halo, mode="edge")
         filled = np.where(covered_ext, terrain_extended, padded)
-        high = smooth_terrain(filled, terrain_smoothing)[crop]
+        high, eased = _smoothed_steep_ground(
+            filled, terrain_wide, reach, grid, halo=halo,
+            terrain_smoothing=terrain_smoothing)
         hgt = weight * high + (1.0 - weight) * base
     else:
         hgt = np.array(base, copy=True)
-    return hgt, _coverage_record(source_id, weight, latlon)
+    return hgt, _coverage_record(source_id, weight, latlon), eased
 
 
 def coverage_warning(domain_id: int, coverage: Mapping[str, Mapping]
@@ -1210,10 +1322,13 @@ def build_highres_overrides(
     terrain_extended = (
         None if terrain is None
         else resample_continuous(terrain, extended, method="average"))
-    hgt, terrain_coverage = _terrain_on_coverage(
+    terrain_wide, reach = _wide_terrain(
+        terrain, grid, halo=halo, terrain_extended=terrain_extended)
+    hgt, terrain_coverage, steep_ground = _terrain_on_coverage(
         terrain_extended, grid, halo=halo, baseline=baseline,
         source_id=_source_id(terrain), latlon=latlon,
-        terrain_smoothing=terrain_smoothing)
+        terrain_smoothing=terrain_smoothing, terrain_wide=terrain_wide,
+        reach=reach)
 
     if landcover_water not in WATER_RULES:
         raise ValueError(
@@ -1351,6 +1466,8 @@ def build_highres_overrides(
     if not terrain_smoothing.is_default:
         audit["method"] = audit["method"].replace("one WPS smooth-desmooth terrain pass",
             f"WPS terrain smoothing {terrain_smoothing.label()}")
+    if steep_ground is not None:
+        audit["steep_ground"] = _steep_ground_audit(steep_ground, hgt, grid)
     return fields, audit
 
 
@@ -1399,10 +1516,13 @@ def build_terrain_override(grid: ProjectedGrid, *,
     terrain_extended = (
         None if terrain is None
         else resample_continuous(terrain, extended, method="average"))
-    hgt, terrain_coverage = _terrain_on_coverage(
+    terrain_wide, reach = _wide_terrain(
+        terrain, grid, halo=halo, terrain_extended=terrain_extended)
+    hgt, terrain_coverage, steep_ground = _terrain_on_coverage(
         terrain_extended, grid, halo=halo, baseline=baseline,
         source_id=_source_id(terrain), latlon=latlon,
-        terrain_smoothing=terrain_smoothing)
+        terrain_smoothing=terrain_smoothing, terrain_wide=terrain_wide,
+        reach=reach)
     audit = {
         "method": (
             "hash-bound GeoTIFF reprojection to the WRF spherical "
@@ -1419,6 +1539,8 @@ def build_terrain_override(grid: ProjectedGrid, *,
     if not terrain_smoothing.is_default:
         audit["method"] = audit["method"].replace("one WPS smooth-desmooth terrain pass",
             f"WPS terrain smoothing {terrain_smoothing.label()}")
+    if steep_ground is not None:
+        audit["steep_ground"] = _steep_ground_audit(steep_ground, hgt, grid)
     return {"HGT_M": hgt}, audit
 
 

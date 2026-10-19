@@ -789,6 +789,31 @@ Changed:
 
 Fixed:
 
+- A fine nest over steep ground could go non-finite within seconds. A
+  100 m nest whose 30 m Copernicus terrain read a 1.56 slope (57 degrees)
+  on a canyon wall went non-finite at its fourth step, two model seconds
+  in. Halving its step, six acoustic substeps, `epssm` 0.9 and `diff_opt`
+  1 did not help; smoothing the ground did. High-resolution terrain
+  (`[static.highres]`, the default at 1 km and finer) now gets a
+  steep-ground pass at preparation: ground steeper than 0.85, the
+  steepest slope any measured acoustic substep count holds, is smoothed
+  down to it by local 1-2-1 rounds, and only that ground. Other ground
+  keeps its exact bytes, so flat and gentle domains are unchanged, and
+  the run clock is untouched. The pass reaches at most 2.5 km and runs at
+  500 m and finer (where its rounds leave ground still steeper, the
+  preparation says so); the terrain window is read that much wider so a
+  moving nest's corridor crop still equals its footprint. The static
+  receipt records what moved under `steep_ground`. Re-prepare to pick it
+  up; no configuration change is needed.
+- Nested stability recovery never saw the most common blow-up. The
+  per-step gate raised a plain `RuntimeError` for a non-finite state, so
+  recovery only caught the every-fourth-step full-state validator and
+  `stability-recovery.json` read `attempts: []`, `failures: []` and
+  `FAILED` with no reason. The gate now raises
+  `woof.core.lagged_health.StepStabilityError` (still a `RuntimeError`,
+  same message). Recovery records it and either retries or says why it
+  cannot under `refusal`: a moving or fixed-clock tree, or one with no
+  checkpoint yet.
 - A long moving-nest run could run out of GPU memory at a move. An
   asynchronous checkpoint kept references to the live state arrays it had
   already copied to host until it was published, so a nest move or a
