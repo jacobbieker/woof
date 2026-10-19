@@ -151,6 +151,15 @@ class PlanOptions:
     eta_bands: tuple[str, ...] | None = None
     #: Bias the column toward the heights the track spends time at.
     eta_bias_track: bool = True
+    #: Largest ratio between adjacent layer depths (None: the generator's).
+    eta_max_stretch: float | None = None
+    #: First layer depth (m) for the band generator (None: its default).
+    dzbot_m: float | None = None
+    #: In-model hub-height wind diagnostic heights (m AGL): interval
+    #: max/min/mean wind at each, i.e. gusts by height.
+    hub_heights_m: tuple[float, ...] | None = None
+    #: Points sampled every hub_sample_interval_s: (site_id, lat, lon).
+    hub_sites: tuple[tuple[str, float, float], ...] = ()
     #: ``None`` is auto (P_TOP_HEADROOM_M above the peak, clipped).
     p_top_pa: float | None = None
     icechunk_url: str | None = None
@@ -258,9 +267,10 @@ def choose_source(track: Track3D, requested: str, p_top_pa: float
     from woof.domain_wizard import resolve_source
 
     notes: list[str] = []
-    if requested not in SOURCE_CHOICES:
+    if requested not in SOURCE_CHOICES and not _source_registered(requested):
         raise TrackPlanRefused(
-            f"--source {requested!r} is not one of {', '.join(SOURCE_CHOICES)}")
+            f"--source {requested!r} is neither one of "
+            f"{', '.join(SOURCE_CHOICES)} nor a runnable registered source")
     if requested == "auto":
         wanted = track.boundary_source
         candidate = wanted if wanted != "era5" else FALLBACK_SOURCE
@@ -693,7 +703,9 @@ def vertical_column(track: Track3D, source: str, p_top: float,
     try:
         column = dw.resolve_vertical_column(
             source=source, p_top_pa=p_top, eta_band=bands,
-            eta_bias_heights=heights or None, eta_surface_m=ground)
+            eta_bias_heights=heights or None, eta_surface_m=ground,
+            eta_max_stretch=options.eta_max_stretch,
+            dzbot=options.dzbot_m)
     except dw.VerticalColumnRefused as error:
         raise TrackPlanRefused(str(error)) from error
     return column, notes
@@ -999,6 +1011,11 @@ def apply_track_tables(document: dict, *, times: PlanTimes,
         table["history_end_s"] = int(end + born)
     document["output"] = {
         "preset": preset,
+        **({"hub_heights_m": [float(h) for h in options.hub_heights_m]}
+           if options.hub_heights_m else {}),
+        **({"hub_sites": [{"site_id": n, "lat": la, "lon": lo}
+                          for n, la, lo in options.hub_sites]}
+           if options.hub_sites else {}),
         "icechunk": {"url": icechunk_url,
                      "domains": sorted(int(t["grid_id"]) for t in domains),
                      "delete_after_commit": True, "compress": True},

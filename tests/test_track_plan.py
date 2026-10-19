@@ -776,3 +776,25 @@ def test_every_grid_writes_the_flight_window_on_one_interval(tmp_path):
     out = run.plan["estimate"]["output"]
     assert set(out["bytes_per_frame_by_grid"]) == {"d01", "d02", "d03"}
     assert out["bytes"] == out["bytes_per_frame"] * out["frames"]
+
+
+def test_plan_passes_source_column_and_hub_options(tmp_path):
+    """Any registered source, the band generator's stretch and first
+    layer, and the hub-wind heights/sites reach the planned config."""
+    track = _track(speed=25.0)
+    options = tp.PlanOptions(
+        source="gfs", eta_bands=("0:500:180:agl",), eta_bias_track=False,
+        eta_max_stretch=1.12, dzbot_m=2.5, p_top_pa=5000.0,
+        hub_heights_m=(10.0, 50.0, 100.0),
+        hub_sites=(("STN", 40.0, -100.0),), output_preset="full",
+        relocation="static")
+    run = tp.plan_track(track, "options-run", tmp_path, options)
+    document = _config(run)
+    output = document["output"]
+    assert output["preset"] == "full"
+    assert output["hub_heights_m"] == [10.0, 50.0, 100.0]
+    assert output["hub_sites"] == [{"site_id": "STN", "lat": 40.0,
+                                    "lon": -100.0}]
+    eta = document["shared"]["eta_levels"]
+    assert len(eta) == 257
+    assert run.plan["source"] == "gfs"
