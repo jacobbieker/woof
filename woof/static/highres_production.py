@@ -690,6 +690,35 @@ def _bound(fetched, *, source_id: str, role: str, source_url: str,
         scale_factor=scale_factor)
 
 
+def _terrain_bbox(bbox: FootprintBBox, grid) -> FootprintBBox:
+    """The window the terrain source is read over.
+
+    The steep-ground pass (:mod:`woof.static.terrain_slope`) reads the
+    source :func:`~woof.static.terrain_slope.steep_ground_reach` cells
+    past the halo, so a cell's heights do not depend on the footprint it
+    is built in; the window covers that ring too.  ``bbox`` itself where
+    the pass does not run at this spacing, or where the wider window would
+    cross the cut frame the narrower one keeps to (its ring then takes
+    the nearest halo heights).
+    """
+    from .terrain_slope import steep_ground_reach
+
+    if grid is None or not hasattr(grid, "ij_to_latlon"):
+        return bbox
+    reach = steep_ground_reach(min(float(grid.dx), float(grid.dy)))
+    if reach <= 0:
+        return bbox
+    wide = domain_footprint(grid, HALO + reach)
+    try:
+        _require_cut_frame_window(wide)
+    except (CoverageError, ValueError):
+        return bbox
+    return FootprintBBox(min(wide.lat_min, bbox.lat_min),
+                         max(wide.lat_max, bbox.lat_max),
+                         min(wide.lon_min, bbox.lon_min),
+                         max(wide.lon_max, bbox.lon_max))
+
+
 def _fetch_terrain(bbox: FootprintBBox, cache_root: Path, coverage, *,
                    grid=None, baseline=None, urlopen=None):
     """Fetch/derive terrain for the selected source; return (bound, manifest).
@@ -701,8 +730,11 @@ def _fetch_terrain(bbox: FootprintBBox, cache_root: Path, coverage, *,
     and the model cells under them take the 30-arc-second baseline
     terrain (:func:`woof.static.highres._terrain_on_coverage`), so the
     baseline's own water stays at its own height and its own land keeps
-    its own relief.  The absent ids are named in the manifest.
+    its own relief.  The absent ids are named in the manifest.  The window
+    reaches past ``bbox`` by the steep-ground pass's ring
+    (:func:`_terrain_bbox`).
     """
+    bbox = _terrain_bbox(bbox, grid)
     if coverage.source_id == "usgs-3dep-13as":
         tiles, absent = fetch_three_dep_tiles(bbox, cache_root,
                                               urlopen=urlopen)
@@ -1127,6 +1159,22 @@ def apply_highres_statics(baseline, grid, *, config, domain_id: int,
                                    detail["coverage"]["fields"])
         if warning is not None:
             print(warning)
+        steep = (detail.get("override_audit") or {}).get("steep_ground")
+        if steep is not None:
+            after = float(steep["steepest_slope_after"])
+            line = (f"[static.highres] d{int(domain_id):02d}: ground steeper "
+                    f"than {steep['bound']:g} (steepest "
+                    f"{steep['steepest_cell_slope_before']:.2f}) smoothed on "
+                    f"{steep['cells_changed']} cells, by at most "
+                    f"{steep['max_change_m']:.0f} m; steepest slope now "
+                    f"{after:.2f} (woof.static.terrain_slope)")
+            if after > float(steep["bound"]) * 1.001:
+                line += (f"; still steeper than {steep['bound']:g} after "
+                         f"{steep['rounds_used']} round(s), the most this "
+                         "spacing runs: the forecast may stop there; "
+                         "smooth this domain's terrain further "
+                         "([[domain]] static)")
+            print(line)
         if detail.get("mode") == "terrain":
             print("[static.highres] d%02d: land use and soil remain the "
                   "30-arc-second baseline (%s)"
@@ -1165,7 +1213,8 @@ def _scoped_plan_line(config: HighresStaticConfig, grid,
     if config.terrain_source == "copernicus-dem-glo30":
         from .highres_fetch import copernicus_dem_tile_ids
         try:
-            tiles = copernicus_dem_tile_ids(domain_footprint(grid, HALO))
+            tiles = copernicus_dem_tile_ids(
+                _terrain_bbox(domain_footprint(grid, HALO), grid))
         except (CoverageError, AttributeError, TypeError, ValueError):
             # Advisory only: _apply refuses an unbuildable footprint by
             # name a few lines later.

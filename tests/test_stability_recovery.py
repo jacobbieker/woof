@@ -341,3 +341,80 @@ def test_retry_receipt_preserves_abandoned_force_observation(monkeypatch, tmp_pa
     assert recovery.run(execute) == "replayed"
     abandoned = recovery.receipt["attempts"][0]["discarded_leg_force_observations"]
     assert abandoned["d02"]["process_force_count"] == 11
+
+
+def _step_gate_error(grid_id=2, step=4):
+    from woof.core.lagged_health import stability_error
+    error = stability_error({"nan": True, "cfl": 0.5}, grid_id=grid_id,
+                            step=step)
+    assert error is not None
+    return error
+
+
+def test_step_gate_failure_is_typed_and_keeps_its_message():
+    from woof.core.lagged_health import (StepStabilityError,
+                                         stability_error, stability_failure)
+    report = {"nan": True, "cfl": 0.5}
+    error = stability_error(report, grid_id=3, step=4)
+    # Still the RuntimeError every reader matched, with the same text.
+    assert isinstance(error, RuntimeError)
+    assert isinstance(error, StepStabilityError)
+    assert str(error) == stability_failure(report, grid_id=3, step=4)
+    assert (error.grid_id, error.step, error.phase) == (3, 4, "step.d03")
+    assert error.variable == "u/w/theta'"
+    courant = stability_error({"nan": False, "cfl": float("inf")},
+                              grid_id=1, step=9, note="late")
+    assert courant.variable == "vertical Courant number"
+    assert str(courant).endswith("(late)")
+    assert stability_error({"nan": False, "cfl": 0.9}, grid_id=1,
+                           step=1) is None
+
+
+def test_step_gate_failure_enters_recovery_and_retries(monkeypatch, tmp_path):
+    """A blow-up trips the per-step gate before the full-state validator;
+    that failure must reach the recovery, not bypass it."""
+    model, exp, _ = _checkpoint(monkeypatch, tmp_path)
+    recovery = NestedHealthRecovery(model=model, experiment=exp,
+                                    output_directory=tmp_path)
+    calls = []
+
+    def execute(active):
+        calls.append(active)
+        if len(calls) == 1:
+            model.root.clock.ticks = 3700
+            model.root.clock.elapsed_seconds = 3700
+            raise _step_gate_error()
+        return "replayed"
+
+    assert recovery.run(execute) == "replayed"
+    receipt = json.loads(recovery.receipt_path.read_text())
+    assert receipt["status"] == "RECOVERED"
+    assert len(receipt["attempts"]) == 1
+    failure = receipt["failures"][0]
+    assert failure["error_type"] == "StepStabilityError"
+    assert (failure["domain"], failure["phase"]) == ("d02", "step.d02")
+    assert failure["variable"] == "u/w/theta'"
+
+
+def test_unrecoverable_step_gate_failure_says_why(monkeypatch, tmp_path):
+    """A moving tree with no checkpoint yet cannot be rolled back; the
+    receipt must name the failure and the refusal instead of an empty
+    ``attempts: []`` with no reason."""
+    model, exp, _ = _checkpoint(monkeypatch, tmp_path)
+    exp = replace(exp, relocation=SimpleNamespace(enabled=True))
+    model._last_checkpoint = None
+    recovery = NestedHealthRecovery(model=model, experiment=exp,
+                                    output_directory=tmp_path)
+    error = _step_gate_error(grid_id=3)
+
+    def execute(_active):
+        raise error
+
+    with pytest.raises(RuntimeError) as observed:
+        recovery.run(execute)
+    assert observed.value is error
+    receipt = json.loads(recovery.receipt_path.read_text())
+    assert receipt["status"] == "REFUSED"
+    assert receipt["attempts"] == []
+    assert receipt["failures"][0]["domain"] == "d03"
+    assert "moving" in receipt["refusal"]

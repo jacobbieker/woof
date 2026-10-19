@@ -989,6 +989,20 @@ wind that domain's smoothed terrain was held to 3.5 s steps, while the
 unsmoothed terrain ran 8 s steps (and finished its 3 hours). Watch for that
 warning, and set `max_time_step` yourself if the run stops.
 
+High-resolution terrain (`[static.highres]`, the default at 1 km and
+finer) then gets a steep-ground pass, after the smoother above. Ground
+steeper than 0.85 is smoothed down to it by local 1-2-1 rounds, and only
+that ground. 0.85 is the steepest slope any measured acoustic substep count
+holds (`woof.acoustic_adaptation`). Nothing else changes, so a domain with
+no ground that steep keeps its exact terrain. The pass exists because no
+clock setting rescues steeper ground. A 100 m nest whose canyon wall read
+1.56 went non-finite within two model seconds whatever its step, substep
+count or `epssm`. Smoothed this way it ran on its configured clock. The
+pass reaches at most 2.5 km from a steep face and does not run coarser
+than 500 m. The terrain source is read that much wider, so a moving nest's
+statics stay the same wherever it sits. The static receipt's
+`steep_ground` entry records what moved, and its absence means nothing did.
+
 Roots built from `WPS_GEOG` on the ERA5, GFS, native HRRR and mapped-source (ICON, ECMWF and the rest) routes carry the setting, and so does every nest.
 A root loaded from a prebuilt static cache that does not record its smoothing refuses a non-default setting before integrating default terrain.
 

@@ -89,6 +89,45 @@ def stability_failure(report: dict, *, grid_id: int, step: int) -> str | None:
     return None
 
 
+class StepStabilityError(RuntimeError):
+    """The per-step stability gate's verdict, raised as a typed failure.
+
+    Still a :class:`RuntimeError` carrying :func:`stability_failure`'s
+    text, so every reader that matched the old untyped error still
+    matches.  Typed so that the nested health recovery
+    (:mod:`woof.stability_recovery`) can tell a failed model state from
+    any other runtime error: a blow-up nearly always trips this gate
+    before the every-fourth-step full-state validator sees it, and while
+    it was untyped the recovery never saw the failure at all -- its
+    receipt read ``attempts: []`` and ``failures: []`` with no reason.
+    """
+
+    def __init__(self, message, *, grid_id=None, step=None, variable=None):
+        super().__init__(message)
+        self.grid_id = None if grid_id is None else int(grid_id)
+        self.step = None if step is None else int(step)
+        self.variable = variable
+
+    @property
+    def phase(self) -> str:
+        """Where the gate fired, in the full-state validator's spelling."""
+        return ("step" if self.grid_id is None
+                else f"step.d{self.grid_id:02d}")
+
+
+def stability_error(report: dict, *, grid_id: int, step: int,
+                    note: str | None = None) -> StepStabilityError | None:
+    """:func:`stability_failure` as the typed error to raise, or None."""
+    failure = stability_failure(report, grid_id=grid_id, step=step)
+    if failure is None:
+        return None
+    variable = ("u/w/theta'" if report["nan"]
+                else "vertical Courant number")
+    message = failure if note is None else f"{failure} ({note})"
+    return StepStabilityError(message, grid_id=grid_id, step=step,
+                              variable=variable)
+
+
 class HealthCheckModeRefused(ValueError):
     """A health-check mode this executor does not implement was requested."""
 
@@ -423,11 +462,11 @@ class LaggedHealthMonitor:
                 error.add_note(note)
                 raise
         if record.stability is not None:
-            failure = stability_failure(
+            failure = stability_error(
                 record.stability(record.slot.stability.copy()),
-                grid_id=record.grid_id, step=record.step)
+                grid_id=record.grid_id, step=record.step, note=note)
             if failure is not None:
-                raise RuntimeError(f"{failure} ({note})")
+                raise failure
         if record.validator is not None:
             try:
                 record.validator(record.slot.validator.copy())
