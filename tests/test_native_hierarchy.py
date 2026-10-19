@@ -305,3 +305,40 @@ def test_the_export_request_is_fail_closed_on_an_unknown_value(
     with pytest.raises(ValueError, match="stock_wrf_export must be one of"):
         _run(inputs, tmp_path, stock_wrf_export="maybe")
     assert calls == []
+
+
+def test_a_parent_born_nest_refuses_only_the_optional_export(
+        tmp_path, monkeypatch):
+    """A nest born from its parent has no analysis wrfinput to write.
+
+    That is a limit of the stock-WRF file set, not of the preparation: the
+    refusal is a ``StockWrfExportUnsupported`` (it was a bare ValueError,
+    which ended a fully prepared parent-born tree at its optional export),
+    so the optional companion export records it and the prepared hierarchy
+    is returned.  A requested export still refuses.
+    """
+
+    from woof import wrf_direct
+
+    inputs = _hierarchy_with(
+        monkeypatch, tmp_path, exporter=wrf_direct.export_prepared_wrf_hierarchy)
+    exp, root, initial, boundaries, artifact_build = inputs
+    exp = SimpleNamespace(
+        domains=(SimpleNamespace(grid_id=1, parent_id=0, start_from=None),
+                 SimpleNamespace(grid_id=2, parent_id=1, start_from="parent")),
+        start_time=exp.start_time, perturbation=None)
+    inputs = (exp, root, initial, boundaries, artifact_build)
+
+    with pytest.raises(StockWrfExportUnsupported,
+                       match="born from its parent") as refusal:
+        wrf_direct.validate_stock_wrf_export_hierarchy(exp)
+    assert refusal.value.unsupported == {"start_from": ("parent", "analysis")}
+
+    result = _run(inputs, tmp_path, stock_wrf_export="optional")
+    assert result.artifacts is artifact_build
+    assert result.wrf_manifest["status"] == "REFUSED"
+    assert "born from its parent" in result.wrf_manifest["reason"]
+    assert not (tmp_path / "wrf").exists()
+
+    with pytest.raises(StockWrfExportUnsupported, match="born from its parent"):
+        _run(inputs, tmp_path, stock_wrf_export="required")
