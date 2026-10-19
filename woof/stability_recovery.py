@@ -1,6 +1,10 @@
 """Bounded checkpoint recovery for static prepared nested forecasts.
 
-Only a typed full-state health failure enters this path. The original gate
+Only a typed model-state health failure enters this path: the full-state
+validator's :class:`~woof.core.health.HealthCheckError` or the per-step
+stability gate's :class:`~woof.core.lagged_health.StepStabilityError`.
+Every such failure is recorded in the receipt, and a recovery that cannot
+run says why there (``refusal``). The original gate
 and complete restart identity checks remain unchanged. Fixed clocks, moving
 topologies and ensemble capture fail closed because their rollback has not
 been qualified here.
@@ -15,6 +19,7 @@ import json
 import re
 
 from woof.core.health import HealthCheckError
+from woof.core.lagged_health import StepStabilityError
 
 MAX_HEALTH_RETRIES = 2
 RECOVERY_RECEIPT = "stability-recovery.json"
@@ -22,6 +27,18 @@ RECOVERY_RECEIPT = "stability-recovery.json"
 
 class RecoveryRefused(ValueError):
     """No proven checkpoint or safe adaptive policy is available."""
+
+
+#: The model-state failures recovery answers.  Anything else (memory,
+#: configuration, an untyped floating-point error) propagates untouched.
+HEALTH_FAILURES = (HealthCheckError, StepStabilityError)
+
+
+def _failure_site(error) -> tuple[str, str | None]:
+    """``(phase, variable)`` of a :data:`HEALTH_FAILURES` member."""
+    if isinstance(error, HealthCheckError):
+        return error.report.phase or "", error.report.first_bad_field
+    return error.phase, error.variable
 
 
 def _interval(whole, denominator):
@@ -112,12 +129,12 @@ class NestedHealthRecovery:
         while True:
             try:
                 result = execute(self.experiment)
-            except HealthCheckError as error:
-                phase = error.report.phase or ""
+            except HEALTH_FAILURES as error:
+                phase, variable = _failure_site(error)
                 domains = re.findall(r"d[0-9]+", phase)
                 self.receipt["failures"].append({
                     "error_type": type(error).__name__, "error": str(error),
-                    "phase": phase, "variable": error.report.first_bad_field,
+                    "phase": phase, "variable": variable,
                     "domain": None if not domains else domains[-1],
                     "failed_model_seconds": float(
                         self.model.root.clock.elapsed_seconds),
@@ -244,7 +261,7 @@ class NestedHealthRecovery:
         self.receipt["attempts"].append(attempt)
         self.receipt["status"] = "RETRYING"
         self._publish()
-        reason = (f"full-state health failure; retry {attempt['retry']}/"
+        reason = (f"model-state health failure; retry {attempt['retry']}/"
                   f"{MAX_HEALTH_RETRIES} from {float(checkpoint_seconds):g} s "
                   "with half-sized adaptive step caps")
         self._announce_attempt(attempt, reason)
