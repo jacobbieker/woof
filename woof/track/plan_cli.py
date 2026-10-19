@@ -29,6 +29,19 @@ def _floats(text: str) -> tuple[float, ...]:
     return values
 
 
+def _heights(text: str) -> tuple[float, ...]:
+    import argparse
+
+    from woof.cli_numbers import positive_float
+
+    values = tuple(positive_float(part.strip())
+                   for part in str(text).split(",") if part.strip())
+    if not 0 < len(values) <= 32 or list(values) != sorted(set(values)):
+        raise argparse.ArgumentTypeError(
+            f"{text!r}: give 1-32 strictly increasing heights (m)")
+    return values
+
+
 def _p_top(text: str) -> float | None:
     import argparse
 
@@ -100,10 +113,12 @@ def register_plan(commands) -> None:
     parser.add_argument("--out", type=Path, required=True, metavar="DIR",
                         help="directory the runs are written into")
     add_mapping_arguments(parser)
-    parser.add_argument("--source", choices=tp.SOURCE_CHOICES, default="auto",
-                        help="boundary source (default auto: the track's "
-                             "suggestion where this woof can prepare it to "
-                             "the model top, else gfs)")
+    parser.add_argument("--source", default="auto", metavar="SOURCE",
+                        help="boundary source: auto (the track's suggestion "
+                             "where this woof can prepare it to the model "
+                             "top, else gfs), "
+                             f"{', '.join(tp.SOURCE_CHOICES[1:])}, or any "
+                             "runnable registered source id")
     parser.add_argument("--dx-km", type=_floats, default=tp.DEFAULT_DX_KM,
                         metavar="D1,D2,D3",
                         help="spacing of d01, d02, d03 in km (default "
@@ -153,6 +168,26 @@ def register_plan(commands) -> None:
                              "s3://BUCKET/PREFIX/{name}.icechunk ({name} is "
                              "the run name; default {name}.icechunk beside "
                              "the config)")
+    parser.add_argument("--eta-max-stretch", type=positive_float,
+                        default=None, metavar="R",
+                        help="largest ratio between adjacent layer depths "
+                             "(default: the band generator's 1.08); raise it "
+                             "to pack many levels low and still reach the "
+                             "model top")
+    parser.add_argument("--dzbot", type=positive_float, default=None,
+                        metavar="M",
+                        help="first layer depth in m for the band generator "
+                             "(default 10); lower it when a band packs "
+                             "levels finer than that near the ground")
+    parser.add_argument("--hub-heights-m", type=_heights, default=None,
+                        metavar="H1,H2,...",
+                        help="heights above ground (m) for the in-model "
+                             "hub-wind diagnostic: interval max/min/mean wind "
+                             "at each, i.e. gusts by height (at most 32)")
+    parser.add_argument("--hub-site", action="append", default=[],
+                        metavar="ID:LAT:LON",
+                        help="a point sampled by the hub-wind diagnostic "
+                             "(e.g. a weather station); repeatable")
     parser.add_argument("--output-preset", default="auto", metavar="PRESET",
                         help="history preset (default auto: the lean "
                              "track preset where this woof has one)")
@@ -205,11 +240,23 @@ def _options(args):
         margin_km=args.margin_km, spinup_h=args.spinup_h,
         d03_spinup_h=args.d03_spinup_h, history_s=args.history_s,
         eta_bands=bands, eta_bias_track=not args.no_eta_bias,
+        eta_max_stretch=args.eta_max_stretch, dzbot_m=args.dzbot,
+        hub_heights_m=(tuple(args.hub_heights_m)
+                       if args.hub_heights_m else None),
+        hub_sites=tuple(_hub_site(text) for text in args.hub_site),
         p_top_pa=args.p_top_pa, icechunk_url=args.icechunk_url,
         output_preset=args.output_preset, relocation=args.relocation,
         relocation_cadence_s=args.relocation_cadence_s,
         track_margin_cells=args.track_margin_cells, physics=args.physics,
         gpu_mem_gib=args.gpu_mem_gib)
+
+
+def _hub_site(text: str) -> tuple[str, float, float]:
+    try:
+        name, lat, lon = text.rsplit(":", 2)
+        return name, float(lat), float(lon)
+    except ValueError:
+        raise SystemExit(f"--hub-site {text!r}: expected ID:LAT:LON") from None
 
 
 def plan_main(args) -> int:

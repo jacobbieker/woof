@@ -2677,13 +2677,17 @@ Takes no options of its own.
 | `--d03-window-km KM` | d03's side (default 32.4) |
 | `--drop-when COL=VALUE` | drop rows whose COL equals VALUE (e.g. a receiver's no-fix flag); repeatable |
 | `--dx-km D1,D2,D3` | spacing of d01, d02, d03 in km (default 1.5,0.3,0.1) |
+| `--dzbot M` | first layer depth in m for the band generator (default 10); lower it when a band packs levels finer than that near the ground |
 | `--eta-band LO:HI:N[:msl\|agl]` | height band holding at least N levels; repeatable (default 0:2000:41:agl and 15000:25000:100, fitted under the model top) |
+| `--eta-max-stretch R` | largest ratio between adjacent layer depths (default: the band generator's 1.08); raise it to pack many levels low and still reach the model top |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--gpu-mem-gib GIB\|auto` | the job's declared GPU memory (default auto: the estimate's upper bound) |
 | `--height-col COL` | height column, metres (default: height) |
 | `--height-datum {msl,agl}` | heights above mean sea level or above ground (default: msl) |
 | `--height-fallback-col COL` | column used where the height is blank; repeatable, tried in order |
 | `--history-s S` | d03 history interval during the flight (default 120) |
+| `--hub-heights-m H1,H2,...` | heights above ground (m) for the in-model hub-wind diagnostic: interval max/min/mean wind at each, i.e. gusts by height (at most 32) |
+| `--hub-site ID:LAT:LON` | a point sampled by the hub-wind diagnostic (e.g. a weather station); repeatable |
 | `--icechunk-url URL` | the run's Icechunk repository, e.g. s3://BUCKET/PREFIX/{name}.icechunk ({name} is the run name; default {name}.icechunk beside the config) |
 | `--inputs-prefix URL` | with --job-json: reference the config and companions as URLs under URL/<name>/ (push them with the printed woof go-job-push command) instead of carrying them inline |
 | `--job-json` | also write a woof.go-job.v1 document per run into OUT/jobs/<tier>/ |
@@ -2702,7 +2706,7 @@ Takes no options of its own.
 | `--relocation {auto,track,static}` | auto: d03 follows the track where this woof has the itinerary, else static nests; track: require it; static: never move |
 | `--relocation-cadence-s S` | how often d03 may move (default 300) |
 | `--result-prefix URL` | with --job-json: write each job's result JSON to URL/<name>.result.json |
-| `--source {auto,hrrr,ukv,gfs,era5}` | boundary source (default auto: the track's suggestion where this woof can prepare it to the model top, else gfs) |
+| `--source SOURCE` | boundary source: auto (the track's suggestion where this woof can prepare it to the model top, else gfs), hrrr, ukv, gfs, era5, or any runnable registered source id |
 | `--spinup-h H` | tree spin-up before launch, rounded out to the forcing cadence (default 3) |
 | `--time-col COL` | time column (default: time) |
 | `--time-format FMT` | a Python strptime format, or 'epoch' for Unix seconds (default: ISO 8601, date and time joined by a space or T); times without a zone are UTC |
