@@ -1957,7 +1957,15 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
 
     route = route_for(source)
     host = fetch_endpoints.policy_transport(route.source_id, host)
-    if area is not None:
+    from woof.regional_crop import crops_at_preparation
+
+    if area is not None and crops_at_preparation(route.source_id):
+        # The objects still move whole; `woof prep` crops them to the area
+        # (woof.regional_crop), so it is checked here and names no bytes.
+        from woof.fetch import parse_area
+
+        parse_area(area)
+    elif area is not None:
         raise ValueError(
             f"--area/--point: --source {route.source_id} publishes whole "
             "objects and there is no subsetting service in front of them.\n"
