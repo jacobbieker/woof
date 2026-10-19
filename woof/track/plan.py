@@ -917,7 +917,9 @@ def _fit_root_step(domains: list[dict], history_s: float) -> None:
     d03 step of 100/69 s) that no history interval or radiation period is
     a whole number of.  The step kept is the longest d03 step of the form
     gcd(history, 60 s)/n that meets every period and is not longer than
-    the wizard's, so stability is never loosened."""
+    the wizard's, so stability is never loosened.  A radt the wizard
+    snapped to its own clock (not a whole minute) is restored to the
+    nearest whole minute first, and every period met is written back."""
 
     by_id = {int(t["grid_id"]): t for t in domains}
     root = by_id[1]
@@ -932,8 +934,18 @@ def _fit_root_step(domains: list[dict], history_s: float) -> None:
                                table.get("parent_grid_ratio", 1)))
         gid = int(table.get("parent_id", gid - 1))
         factor[gid] = below
-    periods = {g: Fraction(round(float(by_id[g]["radt"]) * 60))
-               for g in factor if by_id[g].get("radt")}
+    # The wizard snaps the root's radt to whole steps of ITS clock (4.5 km:
+    # 27 x 22.5 s = 10.125 min); once this clock moves that cadence is
+    # stale, so a period off the whole minute goes back to the nearest
+    # whole minute, which the fit below then lands on exactly.
+    periods = {}
+    for g in factor:
+        if not by_id[g].get("radt"):
+            continue
+        seconds = Fraction(str(float(by_id[g]["radt"]))) * 60
+        if seconds.denominator != 1 or seconds % 60:
+            seconds = Fraction(60 * max(1, round(seconds / 60)))
+        periods[g] = seconds
 
     def fits(d03_dt: Fraction) -> bool:
         # Every grid writes history on the same interval.
@@ -943,8 +955,13 @@ def _fit_root_step(domains: list[dict], history_s: float) -> None:
         return all((period / (d03_dt * factor[g])).denominator == 1
                    for g, period in periods.items())
 
+    def write_periods() -> None:
+        for g, period in periods.items():
+            by_id[g]["radt"] = float(period / 60)
+
     wizard = root_dt / factor[1]
     if wizard <= 0 or fits(wizard):
+        write_periods()
         return
     base = Fraction(math.gcd(int(round(history_s)), 60))
     n = math.ceil(base / wizard)
@@ -955,6 +972,7 @@ def _fit_root_step(domains: list[dict], history_s: float) -> None:
     remainder = new_root - int(new_root)
     root["time_step_fract_num"] = remainder.numerator
     root["time_step_fract_den"] = remainder.denominator if remainder else 1
+    write_periods()
 
 
 def apply_track_tables(document: dict, *, times: PlanTimes,
