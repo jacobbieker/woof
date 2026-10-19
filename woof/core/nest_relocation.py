@@ -1130,6 +1130,20 @@ def release_state_arrays(state) -> dict[str, object]:
         elif isinstance(value, np.ndarray):
             host_arrays += 1
             setattr(state, name, None)
+    # Named scratch slots live in a dict the attribute walk does not enter.
+    # A slot outside the shared arena owns its bytes, and anything that
+    # still reaches the emptied state object (a closure, a cycle the
+    # collector has not run on yet) would otherwise keep every one of them
+    # through the rebuild.  The startup-build release clears them too.
+    scratch = getattr(state, "_scratch", None)
+    scratch_device_bytes = 0
+    if isinstance(scratch, dict):
+        for value in scratch.values():
+            if (hasattr(value, "__cuda_array_interface__")
+                    and getattr(value, "base", None) is None):
+                scratch_device_bytes += int(value.nbytes)
+        scratch.clear()
+    owned_device_bytes += scratch_device_bytes
     cumulus_workspace_bytes = 0
     if getattr(state, "physics", None) is not None:
         # DROPPING state.physics IS NOT ENOUGH ON ITS OWN.  The driver
@@ -1161,6 +1175,8 @@ def release_state_arrays(state) -> dict[str, object]:
         "owned_device_arrays": int(owned_device_arrays),
         "shared_view_arrays": int(device_views),
         "host_arrays": int(host_arrays),
+        # Of owned_device_bytes, the share held by named scratch slots.
+        "scratch_device_bytes": int(scratch_device_bytes),
         "cumulus_workspace_bytes": int(cumulus_workspace_bytes),
     }
 

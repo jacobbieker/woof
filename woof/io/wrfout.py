@@ -1817,6 +1817,10 @@ class AsyncDomainWrfoutWriter:
     _engine = None
     _identity_modes = None
     _last_identity_streamed = False
+    #: Queued or worker-held tickets that still own live device arrays
+    #: (the ``direct`` D2H mode stages the state's own arrays), so a
+    #: relocation can make them let go before it releases the state.
+    _held_device_tickets = None
 
     @staticmethod
     def _new_ticket_queue(depth: int = 1) -> queue.Queue:
@@ -1953,6 +1957,10 @@ class AsyncDomainWrfoutWriter:
         with self._condition:
             self._pending += 1
             self._pending_bytes += ticket.nbytes
+            if ticket.device_refs:
+                self._forget_device_ticket()
+                self._held_device_tickets = [
+                    *(self._held_device_tickets or ()), ticket]
         try:
             while True:
                 self._check_admission_liveness()
@@ -1981,7 +1989,49 @@ class AsyncDomainWrfoutWriter:
                 with self._condition:
                     self._pending -= 1
                     self._pending_bytes -= ticket.nbytes
+                    self._forget_device_ticket(ticket)
                     self._condition.notify_all()
+
+    def _forget_device_ticket(self, ticket=None) -> None:
+        """Drop ``ticket`` (and any ticket already released) from the
+        device-holding list.  Caller holds ``self._condition``."""
+        if self._held_device_tickets:
+            self._held_device_tickets = [
+                held for held in self._held_device_tickets
+                if held is not ticket and held.device_refs]
+
+    def release_device_refs(self) -> int:
+        """Make queued frames stop owning live device arrays; count dropped.
+
+        A ``direct``-mode ticket holds the arrays it is copying until the
+        worker takes it, which is one whole frame write later when the
+        writer is behind.  Called on the model thread before a domain's
+        state is dropped for good (a relocation's host-staged release), so
+        the release frees the bytes instead of leaving them with a queued
+        frame while the rebuild allocates a second copy.  Each ticket's own
+        copy is waited for first -- the producer already waits for it
+        before its next kernel -- and the host fields it filled are kept.
+        """
+        with self._condition:
+            held = [ticket for ticket in (self._held_device_tickets or ())
+                    if ticket.device_refs]
+        released = 0
+        if not held:
+            return 0
+        with self._device_context():
+            for ticket in held:
+                refs = ticket.device_refs
+                if refs:
+                    # A failing wait leaves this ticket and the ones after
+                    # it tracked, so the next call (or the worker) still
+                    # finds them.
+                    ticket.event.synchronize()
+                    with self.stream:
+                        ticket.device_refs = ()
+                    released += len(refs)
+                with self._condition:
+                    self._forget_device_ticket(ticket)
+        return released
 
     def _history_plan(self, produced) -> tuple[frozenset[str], dict]:
         """(names to write, global attributes recording the selection).
@@ -2459,6 +2509,8 @@ class AsyncDomainWrfoutWriter:
                 # until NetCDF has finished reading the host field views.
                 with self.stream:
                     ticket.device_refs = ()
+                with self._condition:
+                    self._forget_device_ticket(ticket)
                 if ticket.deferred is not None:
                     # Assembled HERE, off the stepping thread: waits for the
                     # frame's own download, then the same host derivation
@@ -3428,6 +3480,15 @@ class PerDomainWrfoutWriters:
             return False
         getattr(writer, "drain_staging", writer.drain)()
         return True
+
+    def release_device_refs(self) -> int:
+        """Every domain writer's :meth:`AsyncDomainWrfoutWriter.release_device_refs`."""
+        released = 0
+        for gid in sorted(self._writers):
+            release = getattr(self._writers[gid], "release_device_refs", None)
+            if release is not None:
+                released += int(release() or 0)
+        return released
 
     def durability_barrier(self):
         """A barrier over every frame submitted so far, or ``None``.

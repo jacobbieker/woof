@@ -160,6 +160,28 @@ def _align(nbytes: int) -> int:
     return (int(nbytes) + _ALIGN - 1) // _ALIGN * _ALIGN
 
 
+class _PlanTarget:
+    """What a writer thread needs of a :class:`~woof.io.restart.RestartPlan`.
+
+    The plan's ``members`` are the LIVE state arrays, by reference.  A job
+    that kept the plans kept every one of those arrays alive until it was
+    published -- long after the snapshot had copied them -- so a nest that
+    relocated while a checkpoint was in flight could not hand its outgoing
+    state back to the allocator, and the rebuild allocated a second copy
+    of the domain beside it.  MEASURED on a 240 x 240 / 324 x 324 nest
+    pair at nz = 64: +691 MiB (d02 slide) and +1,075 MiB (d03 move) live at
+    every checkpoint boundary that carried a relocation, which at nz = 256
+    is the ~6-7 GB a 48 GB card did not have.  The job keeps the path and
+    the byte count, nothing that points at the card.
+    """
+
+    __slots__ = ("path", "nbytes")
+
+    def __init__(self, plan):
+        self.path = plan.path
+        self.nbytes = int(plan.nbytes)
+
+
 class _Job:
     """One checkpoint between its snapshot and its publication."""
 
@@ -401,7 +423,8 @@ class CheckpointWriter:
                "reason": None, "status": "in-flight",
                "path": str(root_path), "snapshot_bytes": int(need),
                "waited_for_previous_seconds": float(waited)}
-        job = _Job(plans=tuple(plans), payloads=ordered, directory=directory,
+        job = _Job(plans=tuple(_PlanTarget(plan) for plan in plans),
+                   payloads=ordered, directory=directory,
                    root_path=root_path, valid_time=valid_time, event=event,
                    device_refs=device_refs, barrier=barrier,
                    on_published=on_published, row=row)
@@ -482,6 +505,28 @@ class CheckpointWriter:
             job.payloads = None
             job.finished = time.perf_counter()
             job.done.set()
+
+    def release_device_refs(self) -> int:
+        """Stop the in-flight snapshot pinning live device arrays.
+
+        Model thread, before something drops a domain's state for good (a
+        relocation's host-staged release, a delayed child's startup
+        build): the snapshot copy is waited for -- it is already queued
+        ahead of the model's next kernel, so this costs at most that copy
+        -- and its source references go, so the release frees the bytes
+        the rebuild is about to ask for.  The write itself carries on from
+        the host arena.  Returns how many references were dropped.
+        """
+        job = self._job
+        if job is None:
+            return 0
+        refs = job.device_refs
+        if not refs:
+            return 0
+        if job.event is not None:
+            job.event.synchronize()
+        job.device_refs = ()
+        return len(refs)
 
     def wait_idle(self, *, next_valid_time=None, phase="checkpoint-drain",
                   beat: bool = True) -> float:
