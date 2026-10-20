@@ -2680,6 +2680,7 @@ Takes no options of its own.
 | `--dzbot M` | first layer depth in m for the band generator (default 10); lower it when a band packs levels finer than that near the ground |
 | `--eta-band LO:HI:N[:msl\|agl]` | height band holding at least N levels; repeatable (default 0:2000:41:agl and 15000:25000:100, fitted under the model top) |
 | `--eta-max-stretch R` | largest ratio between adjacent layer depths (default: the band generator's 1.08); raise it to pack many levels low and still reach the model top |
+| `--eta-min-free-dz M` | thinnest layer in m the track-height bias may leave above 3 km AGL (default 50); the bias is weakened until the column meets it. 0 turns the floor off |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--gpu-mem-gib GIB\|auto` | the job's declared GPU memory (default auto: the estimate's upper bound) |
 | `--height-col COL` | height column, metres (default: height) |
