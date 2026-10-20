@@ -179,6 +179,13 @@ def register_plan(commands) -> None:
                         help="first layer depth in m for the band generator "
                              "(default 10); lower it when a band packs "
                              "levels finer than that near the ground")
+    parser.add_argument("--eta-min-free-dz",
+                        type=nonnegative_float, default=tp.DEFAULT_ETA_MIN_FREE_DZ_M,
+                        metavar="M",
+                        help="thinnest layer in m the track-height bias may "
+                             "leave above 3 km AGL (default 50); the bias "
+                             "is weakened until the column meets it. 0 "
+                             "turns the floor off")
     parser.add_argument("--hub-heights-m", type=_heights, default=None,
                         metavar="H1,H2,...",
                         help="heights above ground (m) for the in-model "
@@ -241,6 +248,7 @@ def _options(args):
         d03_spinup_h=args.d03_spinup_h, history_s=args.history_s,
         eta_bands=bands, eta_bias_track=not args.no_eta_bias,
         eta_max_stretch=args.eta_max_stretch, dzbot_m=args.dzbot,
+        eta_min_free_dz_m=args.eta_min_free_dz,
         hub_heights_m=(tuple(args.hub_heights_m)
                        if args.hub_heights_m else None),
         hub_sites=tuple(_hub_site(text) for text in args.hub_site),
