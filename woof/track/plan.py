@@ -84,6 +84,17 @@ DEFAULT_RELOCATION_CADENCE_S = 300.0
 #: 4 km at 100 m, clear of the relaxation zone and of the strip a move
 #: cold-starts.
 DEFAULT_TRACK_MARGIN_CELLS = 40
+#: Thinnest layer the track-height bias may leave in the free atmosphere
+#: (above FREE_ATMOSPHERE_AGL_M over the launch ground), in m.  A long
+#: float packs the biased levels to ~15 m in the lower stratosphere; on
+#: the default ladder's 7.5 s root step a 15 m layer is crossed by 2 m/s
+#: of vertical motion, which mountain waves exceed, and a 1.5 km root
+#: over steep ground collapsed such a layer (non-positive thickness) an
+#: hour in.  50 m keeps a 6.7 m/s Courant margin on that step.
+DEFAULT_ETA_MIN_FREE_DZ_M = 50.0
+FREE_ATMOSPHERE_AGL_M = 3000.0
+#: Halvings of the bias weight tried before the bias is dropped.
+ETA_BIAS_HALVINGS = 6
 #: Resource model: device memory per mass cell (KiB) for a 256-level
 #: tree, plus a fixed context; throughput on a 48 GB card in cell-steps
 #: per second.  A range, because both depend on physics and on how much
@@ -155,6 +166,8 @@ class PlanOptions:
     eta_max_stretch: float | None = None
     #: First layer depth (m) for the band generator (None: its default).
     dzbot_m: float | None = None
+    #: Free-atmosphere layer floor the track bias must respect (m); 0 off.
+    eta_min_free_dz_m: float = DEFAULT_ETA_MIN_FREE_DZ_M
     #: In-model hub-height wind diagnostic heights (m AGL): interval
     #: max/min/mean wind at each, i.e. gusts by height.
     hub_heights_m: tuple[float, ...] | None = None
@@ -700,15 +713,52 @@ def vertical_column(track: Track3D, source: str, p_top: float,
         launch, landing = track.launch.time, track.landing.time
         heights = tuple(float(h) for t, h in zip(track.times, track.height)
                         if launch <= t <= landing)
-    try:
-        column = dw.resolve_vertical_column(
-            source=source, p_top_pa=p_top, eta_band=bands,
-            eta_bias_heights=heights or None, eta_surface_m=ground,
-            eta_max_stretch=options.eta_max_stretch,
-            dzbot=options.dzbot_m)
-    except dw.VerticalColumnRefused as error:
-        raise TrackPlanRefused(str(error)) from error
+    def build(bias_heights, weight=None):
+        try:
+            return dw.resolve_vertical_column(
+                source=source, p_top_pa=p_top, eta_band=bands,
+                eta_bias_heights=bias_heights or None, eta_bias_weight=weight,
+                eta_surface_m=ground, eta_max_stretch=options.eta_max_stretch,
+                dzbot=options.dzbot_m)
+        except dw.VerticalColumnRefused as error:
+            raise TrackPlanRefused(str(error)) from error
+
+    column = build(heights)
+    floor = float(options.eta_min_free_dz_m or 0.0)
+    if heights and floor > 0.0:
+        thinnest = _thinnest_free_layer(column, ground)
+        if thinnest < floor:
+            from woof.vertical_bands import DEFAULT_BIAS_WEIGHT
+
+            weight, found = float(DEFAULT_BIAS_WEIGHT), thinnest
+            for _ in range(ETA_BIAS_HALVINGS):
+                weight /= 2.0
+                column = build(heights, weight)
+                thinnest = _thinnest_free_layer(column, ground)
+                if thinnest >= floor:
+                    break
+            else:
+                column = build(None)
+                thinnest, weight = _thinnest_free_layer(column, ground), 0.0
+            notes.append(
+                f"vertical: the track-height bias left a {found:.0f} m "
+                f"layer above {FREE_ATMOSPHERE_AGL_M / 1000:g} km AGL, "
+                f"thinner than the {floor:g} m free-atmosphere floor "
+                f"(--eta-min-free-dz); bias weight {weight:g} gives "
+                f"{thinnest:.0f} m")
     return column, notes
+
+
+def _thinnest_free_layer(column: dict, ground_m: float) -> float:
+    """Thinnest layer (m) of ``column`` above FREE_ATMOSPHERE_AGL_M over
+    ``ground_m``, in the reference column the generator measured."""
+
+    from woof.vertical_bands import dz_profile
+
+    profile = dz_profile(column["eta_levels"], p_top_pa=column["p_top"],
+                         surface_elevation_m=ground_m)
+    above = profile["z_full_m"][:-1] >= ground_m + FREE_ATMOSPHERE_AGL_M
+    return float(profile["dz_m"][above].min()) if above.any() else math.inf
 
 
 def resolve_output_preset(requested: str) -> tuple[str, list[str]]:

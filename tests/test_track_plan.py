@@ -841,3 +841,28 @@ def test_plan_lets_the_measured_terrain_clock_apply():
         document, times=times, layout=None, physics={}, options=tp.PlanOptions(),
         preset="full", icechunk_url="x.icechunk", relocation=None, placements={})
     assert out["shared"]["terrain_clock"] == "measured"
+
+
+def test_track_bias_keeps_free_atmosphere_layers_above_the_floor(tmp_path):
+    """A long float packs the biased levels into very thin stratospheric
+    layers; the plan weakens the bias until no layer above 3 km AGL is
+    thinner than the floor, and says so."""
+    from woof.vertical_bands import dz_profile
+
+    track = _track(speed=5.0, float_s=6 * 3600.0, peak=20000.0)
+
+    def thinnest(options, name):
+        run = tp.plan_track(track, name, tmp_path / name, options)
+        eta = _config(run)["shared"]["eta_levels"]
+        p_top = _config(run)["shared"]["p_top"]
+        profile = dz_profile(eta, p_top_pa=p_top, surface_elevation_m=500.0)
+        above = profile["z_full_m"][:-1] >= 500.0 + tp.FREE_ATMOSPHERE_AGL_M
+        return float(profile["dz_m"][above].min()), run
+
+    unfloored, _ = thinnest(tp.PlanOptions(source="gfs", relocation="static",
+                                           eta_min_free_dz_m=0.0), "off")
+    assert unfloored < tp.DEFAULT_ETA_MIN_FREE_DZ_M
+    floored, run = thinnest(tp.PlanOptions(source="gfs", relocation="static"),
+                            "on")
+    assert floored >= tp.DEFAULT_ETA_MIN_FREE_DZ_M - 0.5
+    assert any("free-atmosphere floor" in note for note in run.plan["notes"])
