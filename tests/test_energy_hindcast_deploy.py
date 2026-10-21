@@ -572,3 +572,22 @@ def test_docker_build_check_passes():
     if result.returncode != 0 and "Cannot connect" in result.stderr:
         pytest.skip("no docker daemon")
     assert result.returncode == 0, result.stderr
+
+
+def test_build_native_builds_every_documented_native_workspace():
+    """The image builds its bridges with ``pixi run build-native``; a crate
+    the documented build loop names but the task leaves out is missing from
+    every deployed worker (the Zarr reader was, so ERA5 from the ARCO store
+    could not be fetched in the image)."""
+    import tomllib
+
+    root = DEPLOY_DIR.parent
+    task = tomllib.loads((root / "pyproject.toml").read_text())[
+        "tool"]["pixi"]["feature"]["base"]["tasks"]["build-native"]
+    task = task if isinstance(task, str) else task["cmd"]
+    built = set(re.findall(r"cd (?:tools/|\.\./)([\w-]+) ", task))
+    loop = re.search(r"for workspace in ([^;]+);",
+                     (root / "docs/public/FIRST-LIGHT.md").read_text())
+    documented = {item.removeprefix("tools/") for item in loop.group(1).split()}
+    assert "zarr_bridge" in documented
+    assert documented <= built, sorted(documented - built)
