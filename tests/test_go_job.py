@@ -310,6 +310,7 @@ class FakeChild:
     def __init__(self, codes, *, export_state="complete", stop_on=None):
         self.codes = list(codes)
         self.calls: list[list[str]] = []
+        self.cwds: list[Path] = []
         self.export_state = export_state
         self.stopped_by = None
         self.stop_on = stop_on
@@ -322,6 +323,7 @@ class FakeChild:
 
     def run(self, argv, *, cwd):
         self.calls.append(list(argv))
+        self.cwds.append(Path(cwd))
         code = self.codes.pop(0)
         if argv[3] == "go":
             outdir = Path(argv[argv.index("--outdir") + 1])
@@ -369,6 +371,22 @@ def test_a_complete_job_stages_runs_and_reports(tmp_path):
     assert set(fields["timings_s"]) == {"stage", "go"}
     assert [entry["path"] for entry in fields["inputs"]] == [
         "f.toml", "f.namelist.wps"]
+
+
+def test_woof_go_runs_beside_the_staged_config(tmp_path):
+    """A wizard-written config resolves [fetch].out against the directory
+    the run starts in and [case_data].forcing against the config, so woof go
+    starts in the staged config's folder, where both meet."""
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "f.toml").write_text(TOML)
+    job = gj.parse_job(_job(config_toml=None, config="f.toml",
+                            resources={"gpu_mem_gib": 30}), base=source)
+    child = FakeChild([0])
+    gj.run_job(job, tmp_path / "w", child=child, card_gib=lambda: 44.9)
+    assert child.calls[0][3] == "go"
+    assert child.cwds[0] == Path(child.calls[0][4]).parent \
+        == tmp_path / "w" / "inputs"
 
 
 @pytest.mark.parametrize("codes, exit_code, status, resumes", [
