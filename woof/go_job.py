@@ -948,7 +948,11 @@ def run_job(job: GoJob, workdir: Path, *, child: _Child | None = None,
     fields["go_command"] = ["woof", *argv[3:]]
     _note(f"running woof go for {job.job_id} -> {job.icechunk_url}")
     go_started = time.monotonic()
-    code = _exit_of(child.run(argv, cwd=workdir))
+    # From the staged config's own folder: a config's [fetch].out is
+    # relative to the directory a run starts in and its [case_data] to the
+    # config, and ``woof domain`` writes both for a run started beside it,
+    # so anywhere else the fetch lands where the inputs are not looked for.
+    code = _exit_of(child.run(argv, cwd=config.parent))
     timings["go"] = round(time.monotonic() - go_started, 3)
     go_code = code
 
