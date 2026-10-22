@@ -467,6 +467,41 @@ def _build_footprint_statics(grid, catalog, child_dc):
     return fields, selection, landuse_attrs, highres_applied
 
 
+def window_static_fields(static_fields, window, cfg):
+    """A footprint's statics cropped to the reconstruction window.
+
+    Mass, staggered and category fields crop at their own extents; the
+    fire mesh's fields (woof.static.fuel) crop at sr_y x sr_x sub-cells per
+    mass cell, so the window keeps the footprint's own fire-mesh words.
+    """
+    sy, sx = window
+    from woof.static.fuel import FIRE_MESH_FIELDS
+    cropped_static = {}
+    for name, value in static_fields.items():
+        array = np.asarray(value)
+        if array.ndim < 2:
+            cropped_static[name] = value
+            continue
+        nyf, nxf = array.shape[-2:]
+        if name in FIRE_MESH_FIELDS:
+            # The footprint's own fire mesh, sr_y x sr_x cells per
+            # mass cell: the window's sub-cells, as they are.
+            ry, rx = nyf // cfg.ny, nxf // cfg.nx
+            if (ry * cfg.ny, rx * cfg.nx) != (nyf, nxf):
+                raise RelocationRefusal(
+                    f"static {name} has unsupported fire-mesh "
+                    f"extent {array.shape}")
+            cropped_static[name] = array[sy.start * ry:sy.stop * ry,
+                                         sx.start * rx:sx.stop * rx]
+            continue
+        if nyf not in (cfg.ny, cfg.ny+1) or nxf not in (cfg.nx, cfg.nx+1):
+            raise RelocationRefusal(
+                f"static {name} has unsupported reconstruction extent {array.shape}")
+        cropped_static[name] = array[..., sy.start:sy.stop+(nyf-cfg.ny),
+                                      sx.start:sx.stop+(nxf-cfg.nx)]
+    return cropped_static
+
+
 def real_relocation_initializer(*, catalog=None, vertical, child_config,
                                 reference_grid, reference_i_parent_start,
                                 reference_j_parent_start,
@@ -599,20 +634,7 @@ def real_relocation_initializer(*, catalog=None, vertical, child_config,
             from woof.core.nest_interp import window_registration
             from woof.ingest.nest_init import _mass_registration
             window_registration(_mass_registration(new_dc, parent_node), window)
-            sy, sx = window
-            cropped_static = {}
-            for name, value in static_fields.items():
-                array = np.asarray(value)
-                if array.ndim < 2:
-                    cropped_static[name] = value
-                    continue
-                nyf, nxf = array.shape[-2:]
-                if nyf not in (cfg.ny, cfg.ny+1) or nxf not in (cfg.nx, cfg.nx+1):
-                    raise RelocationRefusal(
-                        f"static {name} has unsupported reconstruction extent {array.shape}")
-                cropped_static[name] = array[..., sy.start:sy.stop+(nyf-cfg.ny),
-                                              sx.start:sx.stop+(nxf-cfg.nx)]
-            static_fields = cropped_static
+            static_fields = window_static_fields(static_fields, window, cfg)
 
         extra = {}
         if scratch_arena is not None:

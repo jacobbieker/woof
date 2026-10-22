@@ -166,3 +166,21 @@ def test_a_one_node_device_mesh_is_refused():
     for shape in ((1, 4), (4, 1)):
         with pytest.raises(ValueError, match="at least 2 x 2"):
             fire_mesh_slope(cp.ones(shape, cp.float32), 10.0, 10.0)
+
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_a_host_result_build_leaves_the_forecasts_pool_alone():
+    """A nest spawned mid-forecast builds its fuel in a private pool: the
+    default pool (the forecast's) neither grows nor is emptied."""
+    import cupy as cp
+    from woof.static.fuel import FuelStaticsRequest, build_fuel_fields
+    grid, fields = _domain()
+    pool = cp.get_default_memory_pool()
+    held = cp.zeros(1 << 20, dtype=cp.float32)  # the forecast's own block
+    del held  # cached in the default pool, as a forecast's would be
+    before = (pool.used_bytes(), pool.total_bytes())
+    build_fuel_fields(grid, fields, FuelStaticsRequest(sr_x=6, sr_y=6),
+                      landuse_attrs=MODIS, device="gpu")
+    assert (pool.used_bytes(), pool.total_bytes()) == before

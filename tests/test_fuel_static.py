@@ -438,8 +438,11 @@ def test_fuel_preview_is_a_command():
         ["fuel", "preview", "case.toml", "--sr-x", "4", "--sr-y", "2",
          "--json"])
     assert (args.sr_x, args.sr_y, args.json) == (4, 2, True)
-    assert args.landfire is None and args.landfire_kind == "auto"
+    # unset: the domain's own [[domain]] static fuel request decides
+    assert args.landfire is None and args.landfire_kind is None
     assert args.device == "auto"
+    bare = build_parser().parse_args(["fuel", "preview", "case.toml"])
+    assert (bare.sr_x, bare.sr_y) == (None, None)
     assert args.func.__module__ == "woof.fuel_cli"
 
 

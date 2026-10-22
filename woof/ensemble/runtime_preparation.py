@@ -49,10 +49,12 @@ def _plain(value):
         # names in ``_IDENTITY_OMITTED`` (where the work runs, not what it
         # makes) is always left out.
         omitted = getattr(type(value), "_IDENTITY_OMITTED_WHEN_NONE", ())
+        empty = getattr(type(value), "_IDENTITY_OMITTED_WHEN_EMPTY", ())
         never = getattr(type(value), "_IDENTITY_OMITTED", ())
         return {field.name: _plain(getattr(value, field.name)) for field in fields(value)
                 if field.name not in never
-                and not (field.name in omitted and getattr(value, field.name) is None)}
+                and not (field.name in omitted and getattr(value, field.name) is None)
+                and not (field.name in empty and getattr(value, field.name) == ())}
     if isinstance(value, Mapping):
         return {str(key): _plain(item) for key, item in sorted(value.items(), key=lambda row: str(row[0]))}
     if isinstance(value, (list, tuple)):

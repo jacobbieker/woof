@@ -1418,10 +1418,10 @@ Takes no options of its own.
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--json` | print the summary as JSON |
 | `--landfire TIF` | local LANDFIRE FBFM13 or FBFM40 GeoTIFF |
-| `--landfire-kind {auto,fbfm13,fbfm40}` | code set of --landfire (default: auto, read from the codes) |
+| `--landfire-kind {auto,fbfm13,fbfm40}` | code set of --landfire (default: the domain's own request, else auto, read from the codes) |
 | `--output NPZ` | also write NFUEL_CAT, NFUEL_CAT_FIRE, ZSF, DZDXF and DZDYF to this NPZ |
-| `--sr-x N` | fire cells per atmospheric cell west-east (WRF-SFIRE sr_x; default 4) |
-| `--sr-y N` | fire cells per atmospheric cell south-north (WRF-SFIRE sr_y; default 4) |
+| `--sr-x N` | fire cells per atmospheric cell west-east (WRF-SFIRE sr_x; default: the domain's own [[domain]] static fuel request, else 4) |
+| `--sr-y N` | fire cells per atmospheric cell south-north (WRF-SFIRE sr_y; default: the domain's own request, else 4) |
 
 ## `woof global`
 

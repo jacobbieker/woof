@@ -68,6 +68,8 @@ that is the whole domain, with the fire memory one node past each end.
 | `fine_ratio` | 4 x 3 | 10, 10 | 1000, 1000 | WRF-SFIRE's usual refinement |
 | `below_sea` | 3 x 2 | 2, 7 | 250, 125 | terrain below sea level, the smallest domain |
 | `coast_edge` | 6 x 5 | 3, 4 | 750, 900 | a shore on the domain edge |
+| `nest_ratio3` | 9 x 7 | 4, 4 | 333.33, 333.33 | a ratio-3 nest of `hills_even` on its own grid: the parent's terrain at the child's mass points |
+| `nest_ratio5` | 10 x 6 | 3, 2 | 150, 180 | a ratio-5 nest of `coast_edge`, the parent's shore on the child's own west edge |
 
 Each case directory holds `zs` (the input), `zsf`, `dzdxf`, `dzdyf`, `ir`,
 `jr`, `dx`, `dy`, `dxf` and `dyf`, in Fortran index order.
@@ -76,9 +78,9 @@ Each case directory holds `zs` (the input), `zsf`, `dzdxf`, `dzdyf`, `ir`,
 
 | field | words | CPU vs GPU | CPU vs oracle | GPU vs oracle |
 |---|---:|---:|---:|---:|
-| ZSF | 2930 | 0 ULP | 0 ULP | 0 ULP |
-| DZDXF | 2930 | 0 ULP | 0 ULP | 0 ULP |
-| DZDYF | 2930 | 0 ULP | 0 ULP | 0 ULP |
+| ZSF | 4298 | 0 ULP | 0 ULP | 0 ULP |
+| DZDXF | 4298 | 0 ULP | 0 ULP | 0 ULP |
+| DZDYF | 4298 | 0 ULP | 0 ULP | 0 ULP |
 
 The GPU result was measured on an RTX A6000, CuPy 14.2.0, with NVRTC options
 `-std=c++17 -fmad=false --ftz=false`, compiled through

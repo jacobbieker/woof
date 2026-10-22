@@ -62,15 +62,18 @@ The fire-mesh names are WRF-SFIRE's geo_em names.  The mesh covers the mass
 grid only: WRF-SFIRE's ``west_east_subgrid`` is ``e_we * sr_x``, with the
 extra staggered strip, and a geo_em writer pads that strip itself.
 
-A selection carries a request through the static build
-(:func:`woof.static.build.build_static` builds the fields last, after any
-static source's overlay).  A route that overlays ``[static.highres]`` land
-use or terrain afterwards must call :func:`refresh_fuel_fields`, so that
-the fuel and slope come from the fields the run integrates.  The root
-routes do (:func:`woof.runtime.case_static_fields`, ``woof static``,
-``woof fuel preview``).  :func:`with_fuel_statics` is therefore not
-chained into the nest and child static routes, which overlay without that
-refresh.
+A domain asks in its own ``[[domain]] static = { fuel = {...} }``.  The
+request rides the static carrier (:func:`fuel_for`) into every route's GEOG
+selection (:meth:`woof.static.build.GeogSelection.from_case_data`), so the
+root, the children, spawned and relocated nests, the offline child and the
+prepared roots all build the domain's fuel on the domain's own grid.
+:func:`woof.static.build.build_static` builds the fields last, after any
+static source's overlay, and the ``[static.highres]`` overlay seam
+(:func:`woof.static.highres_production.apply_highres_statics`, which every
+route overlays through) rebuilds them from the overlaid land use and
+terrain.  No route calls the rebuild itself.  A moving nest's corridor
+carries no fuel plane: each placement builds its fuel from the crop
+(:meth:`woof.static.corridor.ChildStaticsCorridor.with_fuel`).
 """
 from __future__ import annotations
 
@@ -195,11 +198,138 @@ def fuel_request_for(cfg) -> FuelStaticsRequest | None:
 
 
 def with_fuel_statics(selection, cfg):
-    """A GEOG selection also requesting this configuration's fuel statics."""
+    """A GEOG selection also requesting one domain's fuel statics.
+
+    ``cfg`` is that domain's request (a :class:`FuelStaticsRequest`, e.g.
+    :func:`fuel_for` of the static carrier and the domain's grid_id), or a
+    configuration carrying WRF-SFIRE's ``ifire``/``sr_x``/``sr_y``.  No
+    request returns ``selection`` itself.
+    """
     request = fuel_request_for(cfg)
     if request is None:
         return selection
     return replace(selection, fuel=request)
+
+
+# --- per-domain requests: ``[[domain]] static = { fuel = {...} }`` ------------
+#
+# A domain asks for its fuel statics in its own ``[[domain]]`` table, beside
+# its terrain smoothing, so a configuration can ask on a nest only.  The
+# request rides the static carrier (woof.static.highres_production
+# .HighresStaticConfig) as one row per requesting domain, the way terrain
+# smoothing does, so every route that resolves a domain's GEOG selection from
+# the carrier (the root's case data, a child's input catalog, a corridor, an
+# offline child) builds that domain's fuel on that domain's own grid.
+
+#: The keys of one domain's fuel request.
+DOMAIN_FUEL_KEYS = ("sr_x", "sr_y", "landfire", "landfire_kind")
+
+
+def fuel_row(grid_id: int, request: FuelStaticsRequest) -> tuple:
+    """The carrier row of one domain's request (device is no identity)."""
+    return (int(grid_id), int(request.sr_x), int(request.sr_y),
+            "" if request.landfire is None else str(request.landfire),
+            str(request.landfire_kind))
+
+
+def request_from_row(row) -> tuple[int, FuelStaticsRequest]:
+    """``(grid_id, request)`` of one carrier row, refused when malformed."""
+    if (not isinstance(row, (list, tuple)) or len(row) != 5
+            or type(row[0]) is not int or row[0] < 1):
+        raise ValueError(
+            f"fuel row {row!r} is not [grid_id, sr_x, sr_y, landfire, "
+            "landfire_kind]; refusing to build a fuel map the carrier does "
+            "not record")
+    grid_id, sr_x, sr_y, landfire, kind = row
+    return grid_id, FuelStaticsRequest(
+        sr_x=sr_x, sr_y=sr_y, landfire=(Path(landfire) if landfire else None),
+        landfire_kind=kind)
+
+
+def fuel_for(config, domain_id) -> FuelStaticsRequest | None:
+    """The request ``config`` (a static carrier or ``None``) holds for one
+    domain, or ``None``: every domain of every configuration without a
+    ``[[domain]] static`` fuel request."""
+    for row in getattr(config, "fuel", ()) or ():
+        grid_id, request = request_from_row(row)
+        if grid_id == int(domain_id):
+            return request
+    return None
+
+
+def resolve_landfire_path(value: str, *, source, base_dir=None) -> Path:
+    """A request's raster path: variables expanded, then relative to the
+    configuration's own folder.  One resolution, shared by the loader and
+    the remote bundler, so both name the same file."""
+    from woof.case_data import expand_path_variables
+    path = Path(expand_path_variables(value, "landfire", source))
+    if not path.is_absolute() and base_dir is not None:
+        path = Path(base_dir) / path
+    return path
+
+
+def parse_domain_fuel(table, *, source, grid_id, base_dir=None
+                      ) -> FuelStaticsRequest:
+    """Validate one ``[[domain]] static`` ``fuel = {...}`` table."""
+    from woof.experiment import did_you_mean
+
+    where = f"[[domain]] grid_id = {grid_id} static fuel of {source}"
+    if not isinstance(table, Mapping):
+        raise ValueError(
+            f"{where} must be a table such as {{ sr_x = 4, sr_y = 4 }}; "
+            "refusing to discard the domain's fuel request")
+    unknown = sorted(set(table) - set(DOMAIN_FUEL_KEYS))
+    if unknown:
+        names = ", ".join(f"{key!r}{did_you_mean(key, DOMAIN_FUEL_KEYS)}"
+                          for key in unknown)
+        raise ValueError(
+            f"{where}: unknown keys {names}; known: "
+            f"{list(DOMAIN_FUEL_KEYS)}.  No key is ignored, because a "
+            "dropped key builds a fuel map under the name of your value.")
+    missing = [key for key in ("sr_x", "sr_y") if key not in table]
+    if missing:
+        raise ValueError(
+            f"{where} is missing {missing}: the fire mesh's refinement is "
+            "declared, never implicit (WRF-SFIRE's sr_x and sr_y)")
+    landfire = table.get("landfire")
+    if landfire is not None:
+        if not isinstance(landfire, str) or not landfire:
+            raise ValueError(
+                f"{where}: landfire must be a path string, got {landfire!r}")
+        landfire = resolve_landfire_path(landfire, source=source,
+                                         base_dir=base_dir)
+    try:
+        return FuelStaticsRequest(
+            sr_x=table["sr_x"], sr_y=table["sr_y"], landfire=landfire,
+            landfire_kind=table.get("landfire_kind", "auto"))
+    except ValueError as error:
+        raise ValueError(f"{where}: {error}") from None
+
+
+def resolve_domain_fuel(raw, config, *, source, base_dir=None):
+    """``config`` carrying every domain's ``[[domain]] static`` fuel row.
+
+    No request returns ``config`` itself (``None`` stays ``None``), so a
+    configuration that asks for no fuel resolves exactly the carrier it
+    always did; one with requests and no ``[static.highres]`` gets a
+    disabled carrier, which applies no overlay.
+    """
+    rows = []
+    for index, domain in enumerate(raw.get("domain", ()) or ()):
+        static = domain.get("static") if isinstance(domain, Mapping) else None
+        if isinstance(static, Mapping) and "fuel" in static:
+            grid_id = int(domain.get("grid_id", index + 1))
+            rows.append(fuel_row(grid_id, parse_domain_fuel(
+                static["fuel"], source=source, grid_id=grid_id,
+                base_dir=base_dir)))
+    if not rows:
+        return config
+    from .highres_production import (HighresStaticConfig,
+                                     default_highres_cache_root)
+    if config is None:
+        config = HighresStaticConfig(
+            enabled=False, cache_root=default_highres_cache_root())
+    return replace(config, fuel=tuple(sorted(rows)))
 
 
 # --- the crosswalk table -----------------------------------------------------
@@ -545,7 +675,8 @@ def fire_mesh_latlon(grid, sr_x: int, sr_y: int):
             np.asarray(lon, dtype=np.float64))
 
 
-def landfire_pixel_indices(dataset, grid, sr_x: int, sr_y: int):
+def landfire_pixel_indices(dataset, grid, sr_x: int, sr_y: int, *,
+                           latlon=None):
     """``(row, col)``: each fire cell's raster pixel, -1 outside the raster.
 
     As WPS geogrid samples a source: the cell centre's latitude and
@@ -560,7 +691,8 @@ def landfire_pixel_indices(dataset, grid, sr_x: int, sr_y: int):
         raise ValueError(
             f"LANDFIRE raster {dataset.name} has no CRS; LANDFIRE products "
             "are delivered with one, so this is not a LANDFIRE GeoTIFF")
-    lat, lon = fire_mesh_latlon(grid, sr_x, sr_y)
+    lat, lon = (fire_mesh_latlon(grid, sr_x, sr_y) if latlon is None
+                else latlon)
     source_x, source_y = Transformer.from_crs(
         "EPSG:4326", dataset.crs, always_xy=True).transform(lon, lat)
     source_x, source_y = np.asarray(source_x), np.asarray(source_y)
@@ -583,7 +715,39 @@ def landfire_pixel_indices(dataset, grid, sr_x: int, sr_y: int):
 BAD_CODE = np.int32(MISSING_CODE + 1)
 
 
+#: The last few windows read, keyed by the raster's resolved path, size and
+#: modification time, the refinement and the fire cells' own latitude and
+#: longitude words: a build and the overlay seam's rebuild of the same
+#: domain read the window once.  Keyed by content, so a different grid,
+#: placement or raster can never hit another's entry.
+_WINDOW_CACHE: dict = {}
+_WINDOW_CACHE_SIZE = 2
+
+
 def landfire_window(path, grid, sr_x: int, sr_y: int):
+    """:func:`_read_landfire_window`, read once per raster version and mesh."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"LANDFIRE fuel raster missing: {path}")
+    lat, lon = fire_mesh_latlon(grid, sr_x, sr_y)
+    stat = path.resolve().stat()
+    digest = hashlib.sha256()
+    digest.update(np.ascontiguousarray(lat).tobytes())
+    digest.update(np.ascontiguousarray(lon).tobytes())
+    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns, int(sr_x),
+           int(sr_y), lat.shape, digest.hexdigest())
+    hit = _WINDOW_CACHE.get(key)
+    if hit is None:
+        hit = _read_landfire_window(path, grid, sr_x, sr_y, latlon=(lat, lon))
+        for value in hit:
+            value.setflags(write=False)
+        while len(_WINDOW_CACHE) >= _WINDOW_CACHE_SIZE:
+            _WINDOW_CACHE.pop(next(iter(_WINDOW_CACHE)))
+        _WINDOW_CACHE[key] = hit
+    return hit
+
+
+def _read_landfire_window(path, grid, sr_x: int, sr_y: int, *, latlon):
     """``(block, row, col)``: the raster window and each cell's pixel in it.
 
     Host work, done once per build: the pixel indices
@@ -594,11 +758,9 @@ def landfire_window(path, grid, sr_x: int, sr_y: int):
     for a cell outside the raster.
     """
     rasterio, _, Window = _geo_stack()
-    path = Path(path)
-    if not path.is_file():
-        raise FileNotFoundError(f"LANDFIRE fuel raster missing: {path}")
     with rasterio.open(path) as dataset:
-        row, col = landfire_pixel_indices(dataset, grid, sr_x, sr_y)
+        row, col = landfire_pixel_indices(dataset, grid, sr_x, sr_y,
+                                          latlon=latlon)
         inside = row >= 0
         if not inside.any():
             return (np.full((1, 1), MISSING_CODE, np.int32),
@@ -841,7 +1003,7 @@ def build_fuel_fields(grid, fields: Mapping[str, np.ndarray],
                   window=window)
     if xp is not np and device == "auto":
         try:
-            return _build_fuel_fields(grid, fields, request, xp, **kwargs)
+            return _gpu_build(grid, fields, request, xp, kwargs)
         except _gpu_failure_types() as error:
             import sys
             _GPU_FAILED = f"{type(error).__name__}: {error}"
@@ -849,7 +1011,27 @@ def build_fuel_fields(grid, fields: Mapping[str, np.ndarray],
                   f"for the rest of this process ({_GPU_FAILED}); the GPU "
                   "and CPU bodies give the same words", file=sys.stderr)
             xp = np
+    if xp is not np:
+        return _gpu_build(grid, fields, request, xp, kwargs)
     return _build_fuel_fields(grid, fields, request, xp, **kwargs)
+
+
+def _gpu_build(grid, fields, request, xp, kwargs) -> dict:
+    """The GPU body in a memory pool of its own, unless it stays resident.
+
+    A nest spawned or relocated mid-forecast builds its fuel while the
+    forecast holds the card: the build allocates from a private pool,
+    copies its words to the host and releases the pool, so it neither
+    draws on nor empties the forecast's own pool.
+    """
+    if kwargs["resident"]:
+        return _build_fuel_fields(grid, fields, request, xp, **kwargs)
+    pool = xp.cuda.MemoryPool()
+    try:
+        with xp.cuda.using_allocator(pool.malloc):
+            return _build_fuel_fields(grid, fields, request, xp, **kwargs)
+    finally:
+        pool.free_all_blocks()
 
 
 def _build_fuel_fields(grid, fields, request, xp, *, landuse_attrs,
@@ -925,10 +1107,6 @@ def _build_fuel_fields(grid, fields, request, xp, *, landuse_attrs,
            "NFUEL_CAT_FIRE": fire, "ZSF": zsf, "DZDXF": dzdx, "DZDYF": dzdy}
     if not resident:
         out = {name: _host(value) for name, value in out.items()}
-        if xp is not np:
-            # Static preparation runs before the forecast's device state
-            # exists; what it pooled goes back before that state is priced.
-            xp.get_default_memory_pool().free_all_blocks()
     elif xp is not np:
         # A launch fault surfaces here, inside the build, not later in the
         # consumer that reads the resident fields.

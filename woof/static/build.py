@@ -303,12 +303,16 @@ class GeogSelection:
         # A configuration's static source rides on the same carrier; the
         # build decides per grid whether the source describes it.
         from .external_source import static_source_for
-        return replace(
+        selection = replace(
             cls.from_tokens(data.geog_root, str(value),
                             highres_landcover=_highres_landcover_on_slot(
                                 highres, namelist, index, str(value))),
             terrain_smoothing=smoothing,
             static_source=static_source_for(highres))
+        # The domain's own fuel request ([[domain]] static fuel), when it
+        # makes one; none leaves the selection as it always was.
+        from .fuel import fuel_for, with_fuel_statics
+        return with_fuel_statics(selection, fuel_for(highres, domain_id))
 
     def path(self, field: str) -> Path:
         try:

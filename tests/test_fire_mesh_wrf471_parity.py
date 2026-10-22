@@ -5,11 +5,12 @@ compiled at -O0 in REAL(4) by ``tools/fire_mesh_wrf471_oracle/build.sh``
 (TOOLCHAIN.txt): interpolate_z2fire (module_fr_fire_util.F, whole) refines
 the atmospheric terrain onto the fire mesh, and module_fr_fire_model.F's
 continuation and centred differences give the slope, at
-module_fr_fire_driver.F's ``dxf = dx/ir``.  Seven cases reach every branch:
+module_fr_fire_driver.F's ``dxf = dx/ir``.  Nine cases reach every branch:
 even ratios, odd ratios (edge nodes written twice, the later write kept),
 unit and unequal ratios and spacings, sea inside the domain, a shore on the
-domain edge (WRF's continuation goes below zero past it), and terrain below
-sea level.
+domain edge (WRF's continuation goes below zero past it), terrain below sea
+level, and two nested domains on their own grids (the parent's terrain at
+the child's mass points, at the child's spacing and fire-mesh ratio).
 
 The LANDFIRE pixel each fire cell takes is held to two independent
 placements, for every projection woof grids have (Lambert secant and
@@ -44,7 +45,7 @@ TOOL = REPO / "tools" / "fire_mesh_wrf471_oracle"
 ORACLE = REPO / "woof" / "data" / "fire" / "oracle"
 LLXY = ORACLE / "llxy_fire_mesh"
 CASES = ("below_sea", "coast", "coast_edge", "fine_ratio", "hills_even",
-         "odd_ratio", "unit_ratio")
+         "nest_ratio3", "nest_ratio5", "odd_ratio", "unit_ratio")
 FIELDS = ("zsf", "dzdxf", "dzdyf")
 
 

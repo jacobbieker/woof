@@ -248,11 +248,19 @@ def write_native_static_cache(
         raise FileExistsError(f"refusing to overwrite native static cache {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".tmp-{uuid.uuid4().hex[:8]}.npz")
+    from woof.static.fuel import (FIRE_CATEGORY_DTYPE, FIRE_FLOAT_DTYPE,
+                                  FIRE_MESH_FIELDS)
     arrays = {}
     for name, value in sorted(fields.items()):
         if not isinstance(name, str) or not name:
             raise ValueError("native static field names must be non-empty strings")
-        array = np.asarray(value, dtype=np.float64)
+        array = np.asarray(value)
+        # A fire mesh keeps the dtype its build made it in (uint8
+        # categories, float32 words): the cache holds those bytes, at an
+        # eighth and a half of float64's size.
+        if not (name in FIRE_MESH_FIELDS and array.dtype in (
+                np.dtype(FIRE_CATEGORY_DTYPE), np.dtype(FIRE_FLOAT_DTYPE))):
+            array = np.asarray(value, dtype=np.float64)
         if array.dtype.hasobject or not np.isfinite(array).all():
             raise ValueError(f"native static field {name!r} is not finite numeric")
         arrays[name] = array
@@ -484,7 +492,70 @@ def validate_native_static_fields(
         raise ValueError("static field ALBEDO12M is outside 0..100 percent")
     if land_terrain:
         require_land_terrain(result["HGT_M"], result["LANDMASK"])
+    result.update(_native_fuel_fields(fields, ny, nx))
     return native_static_export_fields(result, grid)
+
+
+def _native_fuel_fields(fields: Mapping[str, object], ny: int, nx: int
+                        ) -> dict[str, np.ndarray]:
+    """A domain's fuel statics (woof.static.fuel), when its build asked.
+
+    They ride the same cache, all five or none, and come back in the dtypes
+    the build made them in: :func:`write_native_static_cache` keeps the fire
+    mesh's uint8 categories and float32 words as they are (a float64 copy,
+    which holds both exactly, is narrowed back), so the round trip is the
+    build's own bytes.  A cache without them is every other domain's,
+    unchanged.
+    """
+    from woof.static.fuel import (FIRE_CATEGORY_DTYPE, FIRE_FLOAT_DTYPE,
+                                  FUEL_CATEGORIES, FUEL_FIELDS)
+    present = [name for name in FUEL_FIELDS if name in fields]
+    if not present:
+        return {}
+    if len(present) != len(FUEL_FIELDS):
+        raise ValueError(
+            f"native static fuel fields {present} are incomplete; a fuel "
+            f"build writes all of {list(FUEL_FIELDS)}")
+    values = {name: np.asarray(fields[name]) for name in FUEL_FIELDS}
+    atmospheric = np.asarray(values["NFUEL_CAT"], dtype=np.float64)
+    fire_shape = values["NFUEL_CAT_FIRE"].shape
+    if (atmospheric.shape != (ny, nx) or len(fire_shape) != 2
+            or fire_shape[0] % ny or fire_shape[1] % nx
+            or fire_shape[0] < ny or fire_shape[1] < nx
+            or any(values[name].shape != fire_shape
+                   for name in ("ZSF", "DZDXF", "DZDYF"))):
+        raise ValueError(
+            f"native static fuel fields have shapes "
+            f"{ {name: value.shape for name, value in values.items()} }; "
+            f"expected NFUEL_CAT ({ny}, {nx}) and one fire mesh whose "
+            "shape is a whole multiple of it")
+    out = {"NFUEL_CAT": atmospheric}
+    if not np.isin(atmospheric, FUEL_CATEGORIES).all():
+        raise ValueError(
+            "static field NFUEL_CAT is outside the fuel categories 1..14")
+    fire = values["NFUEL_CAT_FIRE"]
+    if fire.dtype != np.dtype(FIRE_CATEGORY_DTYPE):
+        wide = np.asarray(fire, dtype=np.float64)
+        if not np.isin(wide, FUEL_CATEGORIES).all():
+            raise ValueError("static field NFUEL_CAT_FIRE is outside the "
+                             "fuel categories 1..14")
+        fire = wide.astype(FIRE_CATEGORY_DTYPE)
+    elif not ((fire >= 1) & (fire <= max(FUEL_CATEGORIES))).all():
+        raise ValueError("static field NFUEL_CAT_FIRE is outside the fuel "
+                         "categories 1..14")
+    out["NFUEL_CAT_FIRE"] = fire
+    for name in ("ZSF", "DZDXF", "DZDYF"):
+        value = values[name]
+        if value.dtype != np.dtype(FIRE_FLOAT_DTYPE):
+            wide = np.asarray(value, dtype=np.float64)
+            value = wide.astype(FIRE_FLOAT_DTYPE)
+            if not np.array_equal(value.astype(np.float64), wide):
+                raise ValueError(
+                    f"static field {name} is not float32 words")
+        if not np.isfinite(value).all():
+            raise ValueError(f"static field {name} is not finite")
+        out[name] = value
+    return out
 
 
 def load_native_static_cache(

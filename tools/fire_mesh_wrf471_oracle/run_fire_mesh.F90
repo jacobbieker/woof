@@ -12,7 +12,7 @@
 ! edge), odd ratios (every edge node written twice, the later write kept),
 ! unit ratio, unequal ratios and spacings, sea inside the domain, a shore
 ! on the domain edge (WRF's continuation goes below zero past it), and
-! terrain below sea level.
+! terrain below sea level, and two nested domains on their own grids.
 ! Written per case: zs (nx, ny), zsf, dzdxf and dzdyf (nx*ir, ny*jr) on the
 ! fire domain 1..ifde, 1..jfde, and the scalars ir, jr, dx, dy, dxf, dyf.
 program run_fire_mesh
@@ -28,6 +28,12 @@ program run_fire_mesh
   call run_case('fine_ratio', 4, 3, 10, 10, 1000.0, 1000.0, 2)
   call run_case('below_sea', 3, 2, 2, 7, 250.0, 125.0, 4)
   call run_case('coast_edge', 6, 5, 3, 4, 750.0, 900.0, 5)
+  ! Nested domains: a child's own terrain on its own grid (the parent's
+  ! terrain sampled at the child's mass points, (ips-0.5) + (i-0.5)/ratio
+  ! in parent coordinates), at the child's spacing dx/ratio and its own
+  ! fire-mesh ratio.
+  call run_case('nest_ratio3', 9, 7, 4, 4, 1000.0 / 3.0, 1000.0 / 3.0, 6)
+  call run_case('nest_ratio5', 10, 6, 3, 2, 750.0 / 5.0, 900.0 / 5.0, 7)
   call oracle_close()
 
 contains
@@ -61,6 +67,19 @@ contains
             zs(i, j) = 0.
           else
             zs(i, j) = 60. * real(i - 1) + 5. * real(j)
+          end if
+        case (6)
+          ! child of hills_even at i_parent_start = j_parent_start = 2
+          zs(i, j) = 400. + 300. * sin(0.9 * (1.5 + (real(i) - 0.5) / 3.)) &
+                     * cos(0.7 * (1.5 + (real(j) - 0.5) / 3.))
+        case (7)
+          ! child of coast_edge at i_parent_start = 1, j_parent_start = 2:
+          ! the parent's shore on the child's own west edge
+          if (0.5 + (real(i) - 0.5) / 5. < 1.5) then
+            zs(i, j) = 0.
+          else
+            zs(i, j) = 60. * (0.5 + (real(i) - 0.5) / 5. - 1.) &
+                       + 5. * (1.5 + (real(j) - 0.5) / 5.)
           end if
         case default
           zs(i, j) = -400. + 37.5 * real(i) - 11.25 * real(j * j)

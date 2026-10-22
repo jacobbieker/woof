@@ -1093,11 +1093,7 @@ def _case_static_fields(grid, geog_root, *, selection: GeogSelection,
         static, grid, config=static_highres, domain_id=domain_id,
         case_date=case_date,
         landuse_attrs=selection.landuse_global_attrs())
-    # A fuel request reads the overlaid land use and terrain (no request:
-    # the same dict back).
-    from woof.static.fuel import refresh_fuel_fields
-    return refresh_fuel_fields(static, grid, selection,
-                               landuse_attrs=selection.landuse_global_attrs())
+    return static
 
 
 def prepare_real_case(cfg: RunConfig, *, grid, geog_root,
@@ -2537,13 +2533,13 @@ def build_prepared_tree_relocation_runner(exp: ExperimentConfig, *,
                        if int(d.parent_id) in (0, int(d.grid_id)))
 
         def statics_builder(grid, new_dc):
-            del grid
             live = {int(n.cfg.grid_id): n.cfg
                     for n in model.walk_parent_first()}
             live[int(new_dc.grid_id)] = new_dc
             origin = origin_in_frame_cells(
                 live, int(new_dc.grid_id), root_id)
-            return corridor.crop_at(*origin)
+            # The grid is read only for a fuel request's fire mesh.
+            return corridor.with_fuel(corridor.crop_at(*origin), grid)
 
         statics_builder.static_provenance = CORRIDOR_REBUILT_STATICS
         statics_builder.source_label = (
@@ -2769,11 +2765,11 @@ def build_prepared_tree_descendant_regrounder(exp, *, model, corridors,
         preparer = preparers[grid_id]
 
         def statics_builder(grid, new_dc):
-            del grid
             live = {int(n.cfg.grid_id): n.cfg
                     for n in model.walk_parent_first()}
             origin = origin_in_frame_cells(live, int(new_dc.grid_id), root_id)
-            return corridor.crop_at(*origin)
+            # The grid is read only for a fuel request's fire mesh.
+            return corridor.with_fuel(corridor.crop_at(*origin), grid)
 
         statics_builder.static_provenance = CORRIDOR_REBUILT_STATICS
         statics_builder.source_label = (
@@ -5207,10 +5203,6 @@ def write_static(exp: ExperimentConfig, data: CaseDataConfig,
         fields, _ = apply_highres_statics(
             fields, grid, config=highres, domain_id=dc.grid_id,
             case_date=exp.start_time.date(),
-            landuse_attrs=selection.landuse_global_attrs())
-        from woof.static.fuel import refresh_fuel_fields
-        fields = refresh_fuel_fields(
-            fields, grid, selection,
             landuse_attrs=selection.landuse_global_attrs())
     return _write_npz(output, fields)
 

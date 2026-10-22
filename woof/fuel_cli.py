@@ -14,21 +14,35 @@ import sys
 from pathlib import Path
 
 
-def preview_fuel(config: Path, *, domain: int | None, sr_x: int, sr_y: int,
+#: The refinement a preview builds at when neither the command line nor the
+#: domain's own ``[[domain]] static`` fuel request names one.
+DEFAULT_PREVIEW_RATIO = 4
+
+
+def preview_fuel(config: Path, *, domain: int | None,
+                 sr_x: int | None = None, sr_y: int | None = None,
                  landfire: Path | None = None,
-                 landfire_kind: str = "auto",
+                 landfire_kind: str | None = None,
                  device: str = "auto") -> tuple[dict, dict]:
-    """``(summary, fields)`` for one domain of ``config``."""
+    """``(summary, fields)`` for one domain of ``config``.
+
+    The domain's own fuel request (``[[domain]] static fuel``), when it
+    declares one, is what is built; a value given here replaces that
+    value.  A domain without one is previewed at
+    :data:`DEFAULT_PREVIEW_RATIO` on the land-use crosswalk unless told
+    otherwise.
+    """
     from woof.case_data import load_experiment_case
     from woof.static.build import GeogSelection, build_static
+    from dataclasses import replace
+
     from woof.static.fuel import (FUEL_FIELDS, FuelStaticsRequest,
-                                  fuel_summary, refresh_fuel_fields,
+                                  build_fuel_fields, fuel_for, fuel_summary,
                                   with_fuel_statics)
+    from woof.static.highres_production import overlay_active
     from woof.static.orographic import with_terrain_drag_statics
     from woof.static.projection import grids_from_projection_config
 
-    request = FuelStaticsRequest(sr_x=sr_x, sr_y=sr_y, landfire=landfire,
-                                 landfire_kind=landfire_kind, device=device)
     exp, data = load_experiment_case(config, require_met_inputs=False)
     ids = [dc.grid_id for dc in exp.domains]
     grid_id = ids[0] if domain is None else int(domain)
@@ -39,26 +53,46 @@ def preview_fuel(config: Path, *, domain: int | None, sr_x: int, sr_y: int,
     index = ids.index(grid_id)
     dc = exp.domains[index]
     grid = grids_from_projection_config(exp)[index]
+    declared = fuel_for(getattr(data, "static_highres", None), grid_id)
+    default = declared or FuelStaticsRequest(sr_x=DEFAULT_PREVIEW_RATIO,
+                                             sr_y=DEFAULT_PREVIEW_RATIO)
+    request = FuelStaticsRequest(
+        sr_x=default.sr_x if sr_x is None else sr_x,
+        sr_y=default.sr_y if sr_y is None else sr_y,
+        landfire=default.landfire if landfire is None else landfire,
+        # A raster named here is read as its own codes say unless its
+        # kind is named too, never under the declared raster's kind.
+        landfire_kind=(landfire_kind if landfire_kind is not None
+                       else "auto" if landfire is not None
+                       else default.landfire_kind),
+        device=device)
     selection = GeogSelection.from_case_data(data, domain_id=grid_id)
     selection = with_fuel_statics(
         with_terrain_drag_statics(selection, dc.run), request)
-    report: dict = {}
-    fields = build_static(grid, data.geog_root, selection=selection,
-                          source_coverage_report=report)
     highres = getattr(data, "static_highres", None)
-    if highres is not None and getattr(highres, "enabled", False):
+    overlay = overlay_active(highres, grid)
+    report: dict = {}
+    # Under an overlay the fuel is built once, from the overlaid fields.
+    fields = build_static(
+        grid, data.geog_root,
+        selection=replace(selection, fuel=None) if overlay else selection,
+        source_coverage_report=report)
+    if overlay:
         from woof.static.highres_production import apply_highres_statics
         landuse_attrs = selection.landuse_global_attrs()
-        fields, _ = apply_highres_statics(
-            fields, grid, config=highres, domain_id=grid_id,
-            case_date=exp.start_time.date(), landuse_attrs=landuse_attrs)
-        # The fuel and slope the run would integrate come from the
-        # overlaid land use and terrain; so does the receipt printed.
+        # The seam's own fuel build is skipped (fuel=()): the preview builds
+        # its request once, from what the overlay left, with its receipt.
+        fields, overlay_receipt = apply_highres_statics(
+            fields, grid, config=replace(highres, fuel=()),
+            domain_id=grid_id, case_date=dc.start_time.date(),
+            landuse_attrs=landuse_attrs)
         report = {}
-        fields = refresh_fuel_fields(fields, grid, selection,
-                                     landuse_attrs=landuse_attrs,
-                                     coverage_report=report)
-        report["fuel"]["after_highres_overlay"] = True
+        fields = {**fields, **build_fuel_fields(
+            grid, fields, request, landuse_attrs=landuse_attrs,
+            coverage_report=report)}
+        report["fuel"]["after_highres_overlay"] = (
+            isinstance(overlay_receipt, dict)
+            and overlay_receipt.get("status") == "APPLIED")
     summary = {"config": str(config), "domain": grid_id,
                "nx": int(grid.e_we) - 1, "ny": int(grid.e_sn) - 1,
                "dx_m": float(grid.dx), "dy_m": float(grid.dy),
@@ -148,19 +182,21 @@ def register_cli(subparsers) -> None:
                          help="experiment TOML with a [case_data] table")
     preview.add_argument("--domain", type=int, default=None, metavar="ID",
                          help="grid_id of the domain (default: the first)")
-    preview.add_argument("--sr-x", type=int, default=4, metavar="N",
+    preview.add_argument("--sr-x", type=int, default=None, metavar="N",
                          help="fire cells per atmospheric cell west-east "
-                              "(WRF-SFIRE sr_x; default 4)")
-    preview.add_argument("--sr-y", type=int, default=4, metavar="N",
+                              "(WRF-SFIRE sr_x; default: the domain's own "
+                              "[[domain]] static fuel request, else 4)")
+    preview.add_argument("--sr-y", type=int, default=None, metavar="N",
                          help="fire cells per atmospheric cell south-north "
-                              "(WRF-SFIRE sr_y; default 4)")
+                              "(WRF-SFIRE sr_y; default: the domain's own "
+                              "request, else 4)")
     preview.add_argument("--landfire", type=Path, default=None,
                          metavar="TIF",
                          help="local LANDFIRE FBFM13 or FBFM40 GeoTIFF")
     preview.add_argument("--landfire-kind", choices=LANDFIRE_KINDS,
-                         default="auto",
-                         help="code set of --landfire (default: auto, read "
-                              "from the codes)")
+                         default=None,
+                         help="code set of --landfire (default: the domain's "
+                              "own request, else auto, read from the codes)")
     preview.add_argument("--device", choices=DEVICES, default="auto",
                          help="where the fire mesh is built (default: auto, "
                               "the GPU when one is usable; both give the "
