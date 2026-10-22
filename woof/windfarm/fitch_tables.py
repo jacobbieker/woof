@@ -71,24 +71,25 @@ class FitchTableRefused(ValueError):
 class FitchTables:
     """``turbws/turbtc/turbpw`` and the per-type header values, by curve.
 
-    ``speed_ms``/``thrust_coefficient``/``power_kw`` are ``(n, MAXVALS2)``
-    float32, zero past each curve's ``rows`` (int32), exactly as WRF's
-    zero-initialised arrays.  ``cut_in_ms`` = ``ws(1)``, ``cut_out_ms`` =
-    ``ws(rows)``, ``standing_ct`` = ``stc``, ``standing_ct2`` =
-    ``ct(rows)``.  The arrays may be NumPy or CuPy.
+    ``speeds_ms``/``thrust_coefficient``/``power_kw`` are ``(n, MAXVALS2)``
+    float32, zero past each curve's ``nval`` rows (int32), exactly as
+    WRF's zero-initialised arrays.  ``cut_in_ms`` = ``ws(1)``,
+    ``cut_out_ms`` = ``ws(nval)``, ``standing_thrust`` = ``stc`` and
+    ``standing_thrust_cutout`` = ``stc2`` = ``ct(nval)``.  The names match
+    the Fitch kernel's curve fields.  The arrays may be NumPy or CuPy.
     """
 
-    rows: Any
-    speed_ms: Any
+    nval: Any
+    speeds_ms: Any
     thrust_coefficient: Any
     power_kw: Any
     cut_in_ms: Any
     cut_out_ms: Any
-    standing_ct: Any
-    standing_ct2: Any
+    standing_thrust: Any
+    standing_thrust_cutout: Any
 
     @classmethod
-    def from_curves(cls, curves, *, standing_ct=STANDING_THRUST_COEFFICIENT
+    def from_curves(cls, curves, *, standing_thrust=STANDING_THRUST_COEFFICIENT
                     ) -> "FitchTables":
         rows = [table_rows(curve) for curve in curves]
         n = len(rows)
@@ -101,11 +102,11 @@ class FitchTables:
             ws[k, :s.size], tc[k, :s.size], pw[k, :s.size] = s, c, p
         last = np.maximum(count - 1, 0)
         index = np.arange(n)
-        arrays = dict(rows=count, speed_ms=ws, thrust_coefficient=tc,
+        arrays = dict(nval=count, speeds_ms=ws, thrust_coefficient=tc,
                       power_kw=pw, cut_in_ms=ws[:, 0].copy(),
                       cut_out_ms=ws[index, last].copy(),
-                      standing_ct=np.full(n, F(standing_ct), dtype=F),
-                      standing_ct2=tc[index, last].copy())
+                      standing_thrust=np.full(n, F(standing_thrust), dtype=F),
+                      standing_thrust_cutout=tc[index, last].copy())
         for value in arrays.values():
             value.setflags(write=False)
         return cls(**arrays)
@@ -158,14 +159,14 @@ def write_table(path, tables: FitchTables, curve: int, *, hub_height_m,
                 diameter_m, nominal_power_mw) -> Path:
     """One ``wind-turbine-N.tbl`` in WRF's list-directed layout."""
 
-    rows = int(tables.rows[curve])
+    rows = int(tables.nval[curve])
     lines = [str(rows),
              " ".join(float32_word(v) for v in (hub_height_m, diameter_m,
-                                         tables.standing_ct[curve],
+                                         tables.standing_thrust[curve],
                                          nominal_power_mw))]
     for k in range(rows):
         lines.append(" ".join(float32_word(a[curve, k]) for a in (
-            tables.speed_ms, tables.thrust_coefficient, tables.power_kw)))
+            tables.speeds_ms, tables.thrust_coefficient, tables.power_kw)))
     path = Path(path)
     path.write_text("\n".join(lines) + "\n", encoding="ascii")
     return path
@@ -188,13 +189,13 @@ def dragcof_cpu(tables: FitchTables, curve, speed, diameter_m,
     curve = np.ascontiguousarray(curve, dtype=np.int64)
     diameter = np.broadcast_to(np.asarray(diameter_m, dtype=F), speed.shape)
     cf = F(correction_factor)
-    ws = np.asarray(tables.speed_ms, dtype=F)[curve]
+    ws = np.asarray(tables.speeds_ms, dtype=F)[curve]
     tc = np.asarray(tables.thrust_coefficient, dtype=F)[curve]
     pw = np.asarray(tables.power_kw, dtype=F)[curve]
     ci = np.asarray(tables.cut_in_ms, dtype=F)[curve]
     co = np.asarray(tables.cut_out_ms, dtype=F)[curve]
-    stc = np.asarray(tables.standing_ct, dtype=F)[curve]
-    stc2 = np.asarray(tables.standing_ct2, dtype=F)[curve]
+    stc = np.asarray(tables.standing_thrust, dtype=F)[curve]
+    stc2 = np.asarray(tables.standing_thrust_cutout, dtype=F)[curve]
     # the bracket: first k with turbws(k) > speed (Fortran's vfound loop)
     above = ws > speed[:, None]
     found = above.any(axis=1)
@@ -338,7 +339,7 @@ def dragcof_gpu(tables: FitchTables, curve, speed, diameter_m,
 
     import cupy as cp
 
-    device = getattr(tables.speed_ms, "device", None)
+    device = getattr(tables.speeds_ms, "device", None)
     with cp.cuda.Device(device.id if device is not None
                         else cp.cuda.Device().id):
         return _dragcof_gpu(cp, tables, curve, speed, diameter_m,
@@ -354,14 +355,14 @@ def _dragcof_gpu(cp, tables, curve, speed, diameter_m, correction_factor):
     out = {name: cp.empty(n, dtype=cp.float32)
            for name in ("thrcof", "powcof", "tkecof", "power1")}
     t = {name: cp.ascontiguousarray(cp.asarray(
-             value, dtype=cp.int32 if name == "rows" else cp.float32))
+             value, dtype=cp.int32 if name == "nval" else cp.float32))
          for name, value in tables.arrays().items()}
     if n:
         kernel = _module(cp.cuda.Device().id).get_function("wf_dragcof")
         kernel(((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,), (
-            np.int32(n), speed, curve, diameter, t["speed_ms"],
+            np.int32(n), speed, curve, diameter, t["speeds_ms"],
             t["thrust_coefficient"], t["power_kw"], t["cut_in_ms"],
-            t["cut_out_ms"], t["standing_ct"], t["standing_ct2"],
+            t["cut_out_ms"], t["standing_thrust"], t["standing_thrust_cutout"],
             np.int32(MAXVALS2), np.float32(correction_factor),
             out["thrcof"], out["powcof"], out["tkecof"], out["power1"]))
     return out

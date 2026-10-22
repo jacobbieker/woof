@@ -47,14 +47,17 @@ rating as ``rated_kw`` is.
 
 PLACEMENT IS WRF'S OWN.  A turbine lands where WRF v4.7.1's Fitch
 initialisation puts it (:mod:`woof.windfarm.wrf_llij`): its lat/lon as
-float32, WRF's real(4) Lambert ``latlon_to_ij`` anchored at the float32
-``XLAT``/``XLONG`` of the domain's first mass point (the values woof writes
-to its own ``XLAT``/``XLONG``, from :mod:`woof.static.lambert`), and
-``nint``.  ``turbine_x``/``turbine_y`` are WRF's float32 ``ts_rx``/``ts_ry``
-(1-based) and the 0-based cell is ``nint - 1``; both are held at max_ulp 0
-against the unmodified WRF source (``tools/windfarm_layout_wrf471_oracle``).
-Lambert domains only; another projection is refused by name.  A turbine
-outside the mass grid, or in its outermost row or column (the rule
+float32, WRF's real(4) ``map_set`` and ``latlon_to_ij`` for the domain's
+projection (Lambert conformal, Mercator or polar stereographic) anchored at
+the float32 ``XLAT``/``XLONG`` of the domain's first mass point (the values
+woof writes as its own ``XLAT``/``XLONG``) with the domain's own ``dx``, and
+``nint``.  A nest is placed the same way from its own corner and spacing,
+which is how its parent start and ratio reach WRF.  ``turbine_x``/
+``turbine_y`` are WRF's float32 ``ts_rx``/``ts_ry`` (1-based) and the
+0-based cell is ``nint - 1``; both are held at max_ulp 0 against the
+unmodified WRF source (``tools/windfarm_layout_wrf471_oracle``).  Any other
+projection is refused by name: WRF's wind-farm code has no arm for it.  A
+turbine outside the mass grid, or in its outermost row or column (the rule
 :func:`woof.core.hub_wind_diag.locate_sites` applies to hub sites: those
 cells are boundary-forced, not modelled), is refused by name.  (WRF's own
 outside test, ``ival < ids .and. ival > ide``, can never be true; woof
@@ -63,10 +66,18 @@ refuses where WRF would index out of its patch.)
 GROUPS: A CELL IS A LIST OF MACHINES.  A cell may hold turbines of
 several curves, hub heights and rotors, as WRF's Fitch scheme allows
 when ``windturbines.txt`` lists several types in one cell: each type
-acts over its own rotor layers and the cell sums them.  So a cell is a
-list of groups, the turbines that share a curve and agree on hub height
-and rotor within ``GROUP_TOLERANCE_M`` (group values are the members'
-mean; nothing is averaged across groups).  A uniform cell is one group.
+acts over its own rotor layers and the cell sums them, turbine by turbine
+in the order it reads ``windturbines.txt``.  So a cell is a list of
+groups: its turbines in table order, split into runs of consecutive
+turbines with the same curve and bit-identical float32 hub height and
+rotor.  A kernel that walks a cell's groups in order and applies each
+group's per-turbine contribution ``count`` times, one turbine at a time,
+adds what WRF adds in WRF's order (WRF subtracts every turbine's
+tendency separately, so ``count * contribution`` in one step rounds
+differently and is not WRF-exact).  A cell listing A, B, A is three
+groups; a uniform cell is one.  ``build_layout(merge_tolerance_m=...)`` merges same-curve
+turbines within a tolerance anywhere in the cell into averaged groups to
+save memory on dense tables; that is opt-in and NOT WRF-exact.
 
 The groups are stored CSR-style rather than on a fixed
 ``max_types_per_cell`` axis: flat per-group arrays sorted by row-major
@@ -140,7 +151,8 @@ from woof.windfarm.fitch_tables import (
     float32_word,
     write_table,
 )
-from woof.windfarm.wrf_llij import WrfLambert, nint
+from woof.windfarm.wrf_llij import (WrfProjection, WrfProjectionRefused,
+                                    nint)
 
 F = np.float32
 
@@ -150,8 +162,8 @@ LAYOUT_SCHEMA = "woof-windfarm.layout-summary.v1"
 TABLE_SPEED_STEP_MS = 0.5
 TABLE_MAX_SPEED_MS = 35.0
 
-#: Turbines of one cell and curve whose hub height and rotor agree within
-#: this are one group.
+#: A suggested ``merge_tolerance_m`` for the opt-in, not-WRF-exact
+#: tolerance grouping (the default groups bit-identical runs only).
 GROUP_TOLERANCE_M = 1.0
 
 #: Library match rungs a table's curve name may resolve through, and how
@@ -203,17 +215,17 @@ def _readonly(array: np.ndarray) -> np.ndarray:
 class WindFarmLayout:
     """Turbines on one domain's mass grid: groups per cell, plus tables.
 
-    GROUPS (CSR).  A group is the turbines of one cell that share a curve
-    and whose hub height and rotor lie within ``GROUP_TOLERANCE_M`` of the
-    group's first turbine (values: the members' mean, rounded once to
-    float32).  Groups are stored flat, sorted by row-major cell
-    ``j * nx + i`` (then curve, hub, rotor), so cell ``c``'s groups are
-    ``g`` in ``cell_group_offset[c] : cell_group_offset[c + 1]``.  Per
-    group: ``group_cell``/``group_j``/``group_i`` (its cell),
+    GROUPS (CSR).  A group is a run of consecutive turbines, in table
+    order within one cell, with the same curve and bit-identical float32
+    hub height and rotor (the module docstring says why; the opt-in
+    ``merge_tolerance_m`` relaxes this and is not WRF-exact).  Groups are
+    stored flat, sorted by row-major cell ``j * nx + i`` and then by
+    table order within the cell, so cell ``c``'s groups, in the order WRF
+    adds them, are ``g`` in ``cell_group_offset[c] : cell_group_offset[c +
+    1]``.  Per group: ``group_cell``/``group_j``/``group_i`` (its cell),
     ``group_turbines``, ``group_curve`` (into ``curve_ids``),
-    ``group_hub_height_m`` and ``group_rotor_diameter_m``.  A uniform cell
-    is one group.  Each group is one WRF turbine type
-    (:meth:`write_wrf_inputs`).
+    ``group_hub_height_m`` and ``group_rotor_diameter_m``;
+    :meth:`kernel_groups` gives them under the Fitch kernel's names.
 
     Per cell, ``(ny, nx)`` in geo_em ``[j, i]`` order, aggregates a kernel
     reads before its group loop: ``turbine_count`` and ``group_count``
@@ -240,7 +252,7 @@ class WindFarmLayout:
     ny: int
     nx: int
     dx_m: float
-    projection: WrfLambert
+    projection: WrfProjection
     turbine_count: np.ndarray
     group_count: np.ndarray
     rated_capacity_kw: np.ndarray
@@ -342,12 +354,22 @@ class WindFarmLayout:
             "curves": [{"curve": cid, "rated_kw": _json_number(self.rated_kw[k]),
                         "cut_in_ms": _json_number(self.tables.cut_in_ms[k]),
                         "cut_out_ms": _json_number(self.tables.cut_out_ms[k]),
-                        "table_rows": int(self.tables.rows[k]),
+                        "table_rows": int(self.tables.nval[k]),
                         "turbines": int(per_curve[k])}
                        for k, cid in enumerate(self.curve_ids)],
             "cells": self.cells(),
             "turbine_library_sha256": self.library_sha256,
         }
+
+    def kernel_groups(self) -> dict[str, np.ndarray]:
+        """The group arrays under the Fitch kernel's field names."""
+
+        return _kernel_groups(self)
+
+    def kernel_curves(self) -> dict[str, np.ndarray]:
+        """The WRF tables under the Fitch kernel's field names."""
+
+        return _kernel_curves(self.tables)
 
     def wrf_types(self) -> tuple[np.ndarray, list[tuple[int, Any, Any]]]:
         """WRF turbine types: ``(type of each group, [(curve, hub, rotor)])``.
@@ -434,6 +456,22 @@ class WindFarmLayout:
             return upload()
 
 
+def _kernel_groups(layout) -> dict[str, Any]:
+    return {"cell": layout.group_cell, "count": layout.group_turbines,
+            "curve": layout.group_curve,
+            "hub_height_m": layout.group_hub_height_m,
+            "rotor_diameter_m": layout.group_rotor_diameter_m}
+
+
+def _kernel_curves(tables) -> dict[str, Any]:
+    return {"speeds_ms": tables.speeds_ms,
+            "thrust_coefficient": tables.thrust_coefficient,
+            "power_kw": tables.power_kw, "nval": tables.nval,
+            "standing_thrust": tables.standing_thrust,
+            "standing_thrust_cutout": tables.standing_thrust_cutout,
+            "cut_in_ms": tables.cut_in_ms, "cut_out_ms": tables.cut_out_ms}
+
+
 def _json_number(value) -> float:
     """A float32 word as the shortest decimal that reads back as it."""
 
@@ -494,6 +532,16 @@ class DeviceWindFarmLayout:
     group_thrust_coefficient: Any
     group_power_coefficient: Any
     group_power_w: Any
+
+    def kernel_groups(self) -> dict[str, Any]:
+        """The group arrays under the Fitch kernel's field names."""
+
+        return _kernel_groups(self)
+
+    def kernel_curves(self) -> dict[str, Any]:
+        """The WRF tables under the Fitch kernel's field names."""
+
+        return _kernel_curves(self.tables)
 
     def arrays(self) -> dict[str, Any]:
         """Every device array by name (tables as ``tables.<name>``)."""
@@ -751,16 +799,27 @@ def _refuse_list(head: str, names: Sequence[str], remedy: str, why: str):
 def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
                  default_curve: str | None = None,
                  library: TurbineLibrary | None = None,
-                 standing_ct=STANDING_THRUST_COEFFICIENT) -> WindFarmLayout:
-    """Place ``turbines`` on ``grid`` (a Lambert :class:`ProjectedGrid`).
+                 standing_thrust=STANDING_THRUST_COEFFICIENT,
+                 merge_tolerance_m: float | None = None) -> WindFarmLayout:
+    """Place ``turbines`` on ``grid`` (a Lambert, Mercator or polar
+    stereographic :class:`ProjectedGrid`, root or nest).
 
-    ``standing_ct`` is every WRF table's ``stc``, the thrust coefficient
-    of a rotor below cut-in.
+    ``standing_thrust`` is every WRF table's ``stc``, the thrust
+    coefficient of a rotor below cut-in.  ``merge_tolerance_m`` (off by
+    default) merges a cell's same-curve turbines whose hub and rotor lie
+    within it into one averaged group, wherever they sit in the table: it
+    saves memory on dense tables but is NOT WRF-exact.
     """
 
     turbines = tuple(turbines)
     if not turbines:
         raise WindFarmLayoutRefused("no turbines to place")
+    if merge_tolerance_m is not None and not (
+            math.isfinite(float(merge_tolerance_m))
+            and float(merge_tolerance_m) >= 0.0):
+        raise WindFarmLayoutRefused(
+            f"merge_tolerance_m must be a finite number of metres >= 0, got "
+            f"{merge_tolerance_m!r}")
     library = library if library is not None else load_turbine_library()
     ids = [t.turbine_id for t in turbines]
     duplicated = sorted(i for i, k in Counter(ids).items() if k > 1)
@@ -858,23 +917,17 @@ def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
             "blade tip underground.")
 
     # -- cells: WRF's own placement ---------------------------------------
-    if getattr(grid, "map_proj", None) != "lambert":
-        raise WindFarmLayoutRefused(layered(
-            f"d{int(grid_id):02d} is a {getattr(grid, 'map_proj', '?')} "
-            "grid; wind-farm placement is transcribed for Lambert conformal "
-            "domains only.\n  remedy: lay the farm out on a Lambert domain "
-            "(`woof domain --projection lambert`)",
-            "Turbines are placed by WRF's own real(4) latlon_to_ij so that a "
-            "WRF run of the same farm puts every turbine in the same cell; "
-            "only the Lambert arm of that code is transcribed and gated."))
     nx, ny = int(grid.e_we) - 1, int(grid.e_sn) - 1
-    # XLAT/XLONG(1, 1): mass point (1, 1) sits at projection coordinate
-    # (1, 1); the scalar transform is the one the mass planes are built from
-    xlat, xlong = (float(v) for v in grid.ij_to_latlon(1.0, 1.0))
-    projection = WrfLambert.map_set(
-        truelat1=F(grid.truelat1), truelat2=F(grid.truelat2),
-        stdlon=F(grid.stand_lon), lat1=F(xlat), lon1=F(xlong),
-        knowni=F(1.0), knownj=F(1.0), dx=F(grid.dx))
+    try:
+        projection = WrfProjection.for_grid(grid)
+    except WrfProjectionRefused as error:
+        raise WindFarmLayoutRefused(layered(
+            f"d{int(grid_id):02d}: {error}.\n  remedy: lay the farm out on "
+            "a Lambert, Mercator or polar stereographic domain",
+            "Turbines are placed by WRF's own real(4) map_set and "
+            "latlon_to_ij so that a WRF run of the same farm puts every "
+            "turbine in the same cell; WRF has no wind-farm placement for "
+            "any other projection.")) from error
     n_turbines = len(turbines)
     lat32 = np.array([F(t.lat) for t in turbines], dtype=F)
     lon32 = np.array([F(t.lon) for t in turbines], dtype=F)
@@ -906,26 +959,49 @@ def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
             "hub-wind site sampler refuses them on the same rule.")
 
     # -- groups ------------------------------------------------------------
-    # In table order, a turbine joins the first open group of its cell and
-    # curve whose FIRST turbine is within GROUP_TOLERANCE_M of it in hub
-    # height and in rotor, else opens one; the groups are then ordered by
-    # cell, curve, first-turbine hub and rotor, and table position.
+    # WRF-exact (the default): a cell's turbines in table order -- the order
+    # WRF reads windturbines.txt and a Fitch kernel adds them -- split into
+    # runs of consecutive turbines with the same curve and bit-identical
+    # float32 hub height and rotor.  A cell listing A, B, A is three groups.
+    # merge_tolerance_m (opt-in, NOT WRF-exact: it reorders and averages
+    # what WRF adds turbine by turbine) instead puts a turbine in the first
+    # earlier group of its cell and curve whose first turbine is within the
+    # tolerance in hub and rotor.
     flat = jj * nx + ii
+    hub32 = hubs.astype(F)
+    rotor32 = rotors.astype(F)
     members: list[list[int]] = []
+    last_in_cell: dict[int, int] = {}
     open_groups: dict[tuple[int, int], list[int]] = {}
     for n in range(n_turbines):
-        key = (int(flat[n]), int(turbine_curve[n]))
+        cell = int(flat[n])
+        if merge_tolerance_m is None:
+            g = last_in_cell.get(cell)
+            if g is not None:
+                first = members[g][0]
+                if (turbine_curve[n] == turbine_curve[first]
+                        and hub32[n].view(np.uint32)
+                        == hub32[first].view(np.uint32)
+                        and rotor32[n].view(np.uint32)
+                        == rotor32[first].view(np.uint32)):
+                    members[g].append(n)
+                    continue
+            last_in_cell[cell] = len(members)
+            members.append([n])
+            continue
+        key = (cell, int(turbine_curve[n]))
         for g in open_groups.setdefault(key, []):
             first = members[g][0]
-            if abs(hubs[n] - hubs[first]) <= GROUP_TOLERANCE_M and \
-                    abs(rotors[n] - rotors[first]) <= GROUP_TOLERANCE_M:
+            if abs(hubs[n] - hubs[first]) <= merge_tolerance_m and \
+                    abs(rotors[n] - rotors[first]) <= merge_tolerance_m:
                 members[g].append(n)
                 break
         else:
             open_groups[key].append(len(members))
             members.append([n])
-    members.sort(key=lambda m: (int(flat[m[0]]), int(turbine_curve[m[0]]),
-                                hubs[m[0]], rotors[m[0]], m[0]))
+    # CSR order: by cell, then each cell's groups in the order they opened
+    # (their first turbine's table position)
+    members.sort(key=lambda m: (int(flat[m[0]]), m[0]))
     turbine_group = np.empty(n_turbines, dtype=np.int32)
     for g, m in enumerate(members):
         turbine_group[m] = g
@@ -933,8 +1009,12 @@ def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
     group_curve = np.array([turbine_curve[m[0]] for m in members],
                            dtype=np.int32)
     group_turbines = np.array([len(m) for m in members], dtype=np.int32)
-    group_hub = np.array([hubs[m].mean() for m in members]).astype(F)
-    group_rotor = np.array([rotors[m].mean() for m in members]).astype(F)
+    if merge_tolerance_m is None:
+        group_hub = np.array([hub32[m[0]] for m in members], dtype=F)
+        group_rotor = np.array([rotor32[m[0]] for m in members], dtype=F)
+    else:
+        group_hub = np.array([hubs[m].mean() for m in members]).astype(F)
+        group_rotor = np.array([rotors[m].mean() for m in members]).astype(F)
     rated = np.array([c.rated_kw for c in curves]).astype(F)
 
     cells = ny * nx
@@ -966,7 +1046,8 @@ def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
 
     # -- tables --------------------------------------------------------------
     try:
-        tables = FitchTables.from_curves(curves, standing_ct=standing_ct)
+        tables = FitchTables.from_curves(curves,
+                                         standing_thrust=standing_thrust)
     except FitchTableRefused as error:
         raise WindFarmLayoutRefused(str(error)) from error
     # the axis tables, per group: WRF's dragcof and power1 at the group's

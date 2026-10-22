@@ -22,9 +22,10 @@ def register_cli(subparsers) -> None:
                     "hub_height_m, rotor_diameter_m and curve) in its mass "
                     "cell of one CONFIG domain, resolve each curve through "
                     "the turbine library, and print one row per turbine "
-                    "group (turbines of one cell sharing a curve, hub height "
-                    "and rotor), with a total row under a cell of several "
-                    "groups.  A turbine outside the domain, in its "
+                    "group (a run of consecutive, identical turbines of one "
+                    "cell in table order, the order WRF reads them; a cell "
+                    "listing A, B, A has three), with a total row under a "
+                    "cell of several groups.  A turbine outside the domain, in its "
                     "outermost row or column, with no curve, with a curve "
                     "the library does not hold, or with its rotor bottom "
                     "below ground is refused by name.")

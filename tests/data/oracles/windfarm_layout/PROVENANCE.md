@@ -3,8 +3,9 @@
 These fixtures pin how WRF's Fitch scheme places a turbine, reads its
 table and interpolates the table. The woof functions under test are
 `woof.windfarm.layout`, `woof.windfarm.wrf_llij` and
-`woof.windfarm.fitch_tables`. WRF ran on four synthetic farms that woof laid
-out and wrote as WRF inputs. `tests/test_windfarm_layout_wrf471_parity.py`
+`woof.windfarm.fitch_tables`. WRF ran on eleven synthetic farms that woof laid
+out and wrote as WRF inputs. The farms cover Lambert, Mercator and polar
+stereographic domains, including nests up to three levels deep. `tests/test_windfarm_layout_wrf471_parity.py`
 rebuilds each layout from its `deck/deck.json` and compares it against the
 fixtures by raw float32 words. Max ULP is 0, CPU against WRF and GPU against
 WRF and the CPU. Integer outputs must match exactly. No output is held out.
@@ -13,7 +14,7 @@ Upstream tag: `v4.7.1`.
 Upstream commit: `f52c197ed39d12e087d02c50f412d90d418f6186`.
 Compiler: GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0 (`pixi exec -s gfortran`).
 C library: GNU libc 2.44 (the host's; the oracle's `cosf`, `sinf`, `tanf`,
-`log10f` and `powf` are this library's).
+`logf`, `log10f` and `powf` are this library's).
 Host: Linux 6.12 x86-64, little endian.
 
 ## What was compiled
@@ -29,7 +30,9 @@ Every upstream file below was used read-only and byte-unmodified, and
 
 `share/module_llxy.F` is the same file as the v4.6.1 copy pinned by
 `tools/llxy_wrf461_oracle`. `module_llxy.F` and `module_model_constants.F`
-are compiled whole. `module_wind_fitch.F` cannot be built outside WRF
+are compiled whole, so `map_set`, `set_lc`, `set_ps` and `set_merc`, and
+`latlon_to_ij` with `llij_lc`, `llij_ps` and `llij_merc`, are WRF's own
+object code, not cuts. `module_wind_fitch.F` cannot be built outside WRF
 because it USEs module_configure and module_dm. `extract.py` therefore cuts
 five contiguous line ranges from it, checking the first and last line of
 each, and compiles them inside the harness's scaffolding:
@@ -53,7 +56,7 @@ after `fetch_sources.sh WRF_SOURCE_ROOT`. Flags: `-O0 -cpp -ffree-form
 -ffree-line-length-none`. Default REAL is real(4), as in WRF's `-DRWORDSIZE=4`
 build. `libmvec-report.txt` shows no `_ZGV*` symbol in any `-O0` object, and
 a positive control shows the check can see one. The objects call scalar
-`powf`, `cosf`, `sinf`, `tanf` and `log10f`.
+`powf`, `cosf`, `sinf`, `tanf`, `logf` and `log10f`.
 
 The harness files are hashed in `HARNESS.sha256`, the sources in
 `SOURCES.sha256` and every fixture in `FIXTURES.sha256`. The test checks all
@@ -61,41 +64,79 @@ three.
 
 ## The decks
 
-`make_deck.py` builds four Lambert grids: NH secant at 12 km and 1 km, SH
-secant at 3 km, and tangent at 4 km. Each has 431 turbines:
+`make_deck.py` builds 11 domains, one case each. Every domain is placed from
+its own corner and its own `dx`, as WRF places a nest:
 
-- 400 at seeded random interior positions;
-- 24 on exact half-cell projection coordinates, the edge where `nint`
-  rounds;
-- one cell holding two machines, with hub heights spread within the
-  grouping tolerance.
+| case | projection | where | nest chain |
+|---|---|---|---|
+| `lc_nh_12km` | Lambert, secant | 33-38N, both sides of stand_lon -97.5 | root |
+| `lc_ladder_d02_3km` | Lambert, secant | 34-36N | 12 km root, then 3 km (ratio 4) |
+| `lc_ladder_d03_1km` | Lambert, secant | 35N | 12, then 3, then 1 km (ratios 4, 3) |
+| `lc_sh_3km` | Lambert, secant, SH | 29-31S | root |
+| `lc_tangent_4km` | Lambert, tangent | 44-46N | root |
+| `merc_tropics_9km` | Mercator | 3-7N | root |
+| `merc_nest_d02_3km` | Mercator | 4-6N | 9 km root, then 3 km (ratio 3) |
+| `merc_dateline_6km` | Mercator, SH | 16-19S, across 180 | root |
+| `ps_nh_6km` | polar stereographic | 84.0-88.6N, lon -98 to 14 about stand_lon -40 | root |
+| `ps_nh_nest_d02_2km` | polar stereographic | 85.7-87.1N | 6 km root, then 2 km (ratio 3) |
+| `ps_sh_dateline_6km` | polar stereographic, SH | 75-80S, across 180 | root |
 
-Between them the decks use all 201 curves of the bundled turbine library.
-That gives 69, 69, 69 and 5 WRF types. Each type gets dragcof queries at 0,
-0.5, 30 and 40 m/s, at every table row and every row midpoint, one float32
-ulp either side of cut-in and cut-out, and at 16 random speeds. The
-`correction_factor` values are 1.0, 0.25, 1.0 and 0.5.
+Each case has 331 turbines:
 
-## Words compared (all four cases; max ULP in every column is 0)
+- 300 at seeded random interior positions;
+- 24 on exact half-cell projection coordinates, where `nint` rounds;
+- one cell holding two machines, with hub heights 0.2 m apart (each is
+  its own WRF type and its own group).
+
+The 201 curves of the bundled turbine library are dealt across the cases,
+22 or 23 WRF types per case. Each type gets dragcof queries at:
+
+- 0, 0.5, 30 and 40 m/s;
+- every table row and every row midpoint;
+- one float32 ulp either side of cut-in and of cut-out;
+- 16 random speeds.
+
+The `correction_factor` (WRF's `windfarm_tke_factor`) is 0.25, 0.5 or 1.0,
+depending on the case.
+
+Regular and rotated latitude-longitude (`map_proj = 6`) are not covered,
+because neither side can place on them. WRF v4.7.1's
+`init_module_wind_fitch` sets up only `PROJ_MERC`, `PROJ_LC` and `PROJ_PS`
+(lines 408-438); its Cassini and rotated-lat-lon arms are commented out,
+so `latlon_to_ij` would stop on an unset projection. woof builds no
+latitude-longitude domain. woof refuses such a grid by name.
+
+## Words compared (all 11 cases; max ULP in every column is 0)
 
 | output | words | CPU vs WRF | GPU vs WRF | CPU vs GPU |
 |---|---:|---:|---:|---:|
-| lat, lon read (each) | 1,724 | 0 | (host only) | (host only) |
-| XLAT/XLONG(1,1) | 8 | 0 | (host only) | (host only) |
-| proj_info: cone, rebydx, rsw, polei, polej, hemi | 24 | 0 | (host only) | (host only) |
-| ts_rx, ts_ry (each) | 1,724 | 0 | (host only) | (host only) |
-| ival, jval, nkind (each, exact) | 1,724 | exact | (host only) | (host only) |
-| hubheight, diameter, stc, stc2, npower, cutin, cutout (each) | 1,724 | 0 | upload exact | upload exact |
-| turbws, turbtc, turbpw (each) | 40,000 | 0 | upload exact | upload exact |
-| thrcof | 22,582 | 0 | 0 | 0 |
-| powcof | 22,582 | 0 | 0 | 0 |
-| tkecof | 22,582 | 0 | 0 | 0 |
-| power1 | 22,582 | 0 | 0 | 0 |
+| lat, lon read (each) | 3,641 | 0 | host only | host only |
+| XLAT/XLONG(1,1) | 22 | 0 | host only | host only |
+| proj_info: cone, rebydx, rsw, polei, polej, hemi, dlon, stdlon, truelat1, truelat2, lat1, lon1, knowni, knownj, dx | 165 | 0 | host only | host only |
+| ts_rx, ts_ry (each) | 3,641 | 0 | host only | host only |
+| ival, jval, nkind (each, exact) | 3,641 | exact | host only | host only |
+| hubheight, diameter, stc, stc2, npower, cutin, cutout (each) | 3,641 | 0 | upload exact | upload exact |
+| turbws, turbtc, turbpw (each, the types used) | 24,500 | 0 | upload exact | upload exact |
+| thrcof | 26,279 | 0 | 0 | 0 |
+| powcof | 26,279 | 0 | 0 | 0 |
+| tkecof | 26,279 | 0 | 0 | 0 |
+| power1 | 26,279 | 0 | 0 | 0 |
 
-In total, 234,496 words are compared against WRF. Placement and the table
-read are one-off CPU setup and have no GPU version. On the GPU the layout's
-arrays are a copy, and the test checks that the copy is raw-word equal to
-the host for every array. `dragcof` and `power1` run on both CPU and GPU.
+In total, 229,777 words are compared against WRF. `proj_info` members that a
+projection does not set keep `map_init`'s -999.9. `map_init` leaves `dlon`
+undefined, so it is written and compared only on Mercator, and as 0 on the
+other projections.
+
+Placement and the table read are one-off CPU setup and have no GPU version.
+On the GPU the layout's arrays are a copy, and the test checks that the copy
+is raw-word equal to the host for every array. `dragcof` and `power1` run on
+both CPU and GPU.
+
+The test also walks WRF's own turbines `k = 1..nt` through the dumped
+`ival`, `jval` and `nkind`. In every cell, the runs of consecutive equal
+types must be the layout's groups, in the same order and with the same
+counts; 3,616 groups match. This is the order a Fitch kernel must add them
+in to reproduce WRF's words.
 
 ## Negative controls
 

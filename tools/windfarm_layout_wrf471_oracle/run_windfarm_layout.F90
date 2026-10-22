@@ -5,7 +5,8 @@
 ! DECK holds what a WRF run of the farm reads (windturbines.txt and its
 ! wind-turbine-N.tbl files, written by woof) plus two harness files:
 !
-!   grid.txt     map_proj truelat1 truelat2 stand_lon dx  (config_flags)
+!   grid.txt     map_proj truelat1 truelat2 stand_lon dx  (config_flags;
+!                map_proj 1 Lambert, 2 polar, 3 Mercator)
 !                its jts ids ide                           (tile bounds)
 !                xlat(its,jts) xlong(its,jts)              (float32 words)
 !   queries.txt  correction_factor nq, then nq lines "kt speedhub"
@@ -38,7 +39,8 @@ program run_windfarm_layout
   real, allocatable :: rx(:), ry(:), rlat(:), rlon(:)
   real, allocatable :: qspeed(:), qthr(:), qpow(:), qtke(:), qp1(:)
   integer, allocatable :: qkt(:)
-  real :: tkecof, powcof, thrcof, speedhub, area, power1, x0, y0
+  real :: tkecof, powcof, thrcof, speedhub, area, power1, x0, y0, pdlon
+  integer :: ntypes
   character(len=1024) :: root
 
   call oracle_root(root)
@@ -106,8 +108,15 @@ program run_windfarm_layout
   call oracle_put('jval', jval(:,1))
   call oracle_put('ts_rx', rx)
   call oracle_put('ts_ry', ry)
+  ! proj_info after the last map_set; dlon is set by set_merc alone
+  ! (map_init leaves it undefined), so it is written as 0 otherwise
+  pdlon = 0.
+  if (config_flags%map_proj == PROJ_MERC) pdlon = ts_proj%dlon
   call oracle_put('proj', (/ ts_proj%cone, ts_proj%rebydx, ts_proj%rsw, &
-                             ts_proj%polei, ts_proj%polej, ts_proj%hemi /))
+                             ts_proj%polei, ts_proj%polej, ts_proj%hemi, &
+                             pdlon, ts_proj%stdlon, ts_proj%truelat1, &
+                             ts_proj%truelat2, ts_proj%lat1, ts_proj%lon1, &
+                             ts_proj%knowni, ts_proj%knownj, ts_proj%dx /))
   call oracle_open('tables')
   call oracle_put('hubheight', hubheight)
   call oracle_put('diameter', diameter)
@@ -116,9 +125,11 @@ program run_windfarm_layout
   call oracle_put('npower', npower)
   call oracle_put('cutin', cutin)
   call oracle_put('cutout', cutout)
-  call oracle_put('turbws', turbws)
-  call oracle_put('turbtc', turbtc)
-  call oracle_put('turbpw', turbpw)
+  ! the types the deck uses (rows past them are WRF's zero fill)
+  ntypes = maxval(nkind)
+  call oracle_put('turbws', turbws(1:ntypes,:))
+  call oracle_put('turbtc', turbtc(1:ntypes,:))
+  call oracle_put('turbpw', turbpw(1:ntypes,:))
   call oracle_open('dragcof')
   call oracle_put('correction_factor', correction_factor)
   call oracle_put('kt', qkt)

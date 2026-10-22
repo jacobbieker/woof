@@ -35,15 +35,17 @@ import pytest
 
 from conftest import requires_gpu
 from woof.energy.turbine_library import load_turbine_library
-from woof.static.lambert import LambertGrid
 from woof.verify.urban_oracle import load_case, ulp_table
 from woof.windfarm import layout as wl
 from woof.windfarm.fitch_tables import dragcof_cpu
+from tools.windfarm_layout_wrf471_oracle.make_deck import grid_from_spec
 
 REPO = Path(__file__).resolve().parents[1]
 ROOT = REPO / "tests" / "data" / "oracles" / "windfarm_layout"
 HARNESS = REPO / "tools" / "windfarm_layout_wrf471_oracle"
-CASES = ("nh_secant_12km", "nh_secant_1km", "sh_secant_3km", "tangent_4km")
+#: The committed cases: every fixture directory with a deck.
+CASES = tuple(sorted(p.name for p in ROOT.iterdir()
+                     if (p / "deck" / "deck.json").is_file()))
 DRAG_FIELDS = ("thrcof", "powcof", "tkecof", "power1")
 
 
@@ -64,11 +66,7 @@ def _assert_words(port, ref, what):
 @lru_cache(maxsize=None)
 def _case(name: str):
     deck = json.loads((ROOT / name / "deck" / "deck.json").read_text())
-    g = deck["grid"]
-    grid = LambertGrid(ref_lat=g["ref_lat"], ref_lon=g["ref_lon"],
-                       truelat1=g["truelat1"], truelat2=g["truelat2"],
-                       stand_lon=g["stand_lon"], dx=g["dx"], dy=g["dx"],
-                       e_we=g["e_we"], e_sn=g["e_sn"])
+    grid = grid_from_spec(deck["grid"], [tuple(n) for n in deck["nests"]])
     turbines = [wl.turbine_from_row(r, n + 1)
                 for n, r in enumerate(deck["turbines"])]
     library = load_turbine_library()
@@ -142,9 +140,7 @@ def test_placement_is_wrfs_to_the_word(name):
     proj = layout.projection
     _assert_words(np.array([proj.lat1, proj.lon1], np.float32),
                   p["lat_lon_known"], "XLAT/XLONG(its, jts)")
-    _assert_words(np.array([proj.cone, proj.rebydx, proj.rsw, proj.polei,
-                            proj.polej, proj.hemi], np.float32),
-                  p["proj"], "proj_info")
+    _assert_words(proj.members(), p["proj"], "proj_info")
     _assert_words(layout.turbine_x, p["ts_rx"], "ts_rx")
     _assert_words(layout.turbine_y, p["ts_ry"], "ts_ry")
     _assert_words(layout.turbine_i + 1, p["ival"], "ival")
@@ -192,16 +188,16 @@ def test_tables_are_what_wrf_read(name):
                   "hubheight")
     _assert_words(layout.group_rotor_diameter_m[group], t["diameter"],
                   "diameter")
-    _assert_words(tables.standing_ct[curve], t["stc"], "stc")
-    _assert_words(tables.standing_ct2[curve], t["stc2"], "stc2")
+    _assert_words(tables.standing_thrust[curve], t["stc"], "stc")
+    _assert_words(tables.standing_thrust_cutout[curve], t["stc2"], "stc2")
     _assert_words(tables.cut_in_ms[curve], t["cutin"], "cutin")
     _assert_words(tables.cut_out_ms[curve], t["cutout"], "cutout")
     _assert_words((layout.rated_kw[curve] / np.float32(1000.0))
                   .astype(np.float32), t["npower"], "npower")
-    for mine, theirs in (("speed_ms", "turbws"),
+    for mine, theirs in (("speeds_ms", "turbws"),
                          ("thrust_coefficient", "turbtc"),
                          ("power_kw", "turbpw")):
-        full = np.zeros((wl.MAXVALS, 100), np.float32)
+        full = np.zeros((len(types), 100), np.float32)
         for k, (c, _, _) in enumerate(types):
             full[k] = getattr(tables, mine)[c]
         _assert_words(full, t[theirs], theirs)
@@ -219,7 +215,7 @@ def test_dragcof_cpu_is_wrfs(name):
 
 
 def test_axis_tables_are_dragcof_at_each_groups_curve_and_rotor():
-    _, _, layout, _ = _case("tangent_4km")
+    _, _, layout, _ = _case("lc_tangent_4km")
     for g in range(0, layout.n_groups, 37):
         out = dragcof_cpu(layout.tables,
                           np.full(layout.speeds_ms.size,
@@ -235,10 +231,10 @@ def test_axis_tables_are_dragcof_at_each_groups_curve_and_rotor():
 def test_negative_control_binary64_thrust_is_not_wrfs():
     """The same interpolation in binary64, rounded once, is not real(4)."""
 
-    _, _, layout, oracle = _case("nh_secant_12km")
+    _, _, layout, oracle = _case("lc_nh_12km")
     curve, speed, _, _ = _queries(layout, oracle)
     t = layout.tables
-    ws = t.speed_ms[curve].astype(np.float64)
+    ws = t.speeds_ms[curve].astype(np.float64)
     tc = t.thrust_coefficient[curve].astype(np.float64)
     s = speed.astype(np.float64)
     above = ws > s[:, None]
@@ -290,3 +286,43 @@ def test_upload_is_raw_word_equal_both_ways():
             assert array.flags.c_contiguous, key
             assert array.dtype == host.dtype, key
             assert np.array_equal(_words(cp.asnumpy(array)), _words(host)), key
+
+
+def test_the_decks_cover_every_projection_and_a_three_level_ladder():
+    codes = set()
+    depth = 0
+    for name in CASES:
+        deck, _, layout, _ = _case(name)
+        codes.add(layout.projection.code)
+        depth = max(depth, len(deck["nests"]))
+        lat = layout.turbine_lat
+        assert lat.size == 331
+    assert codes == {1, 2, 3}
+    assert depth == 2                      # d01 -> d02 -> d03
+    lats = np.concatenate([_case(n)[2].turbine_lat for n in CASES])
+    lons = np.concatenate([_case(n)[2].turbine_lon for n in CASES])
+    assert lats.min() < -75 and lats.max() > 88 and np.any(np.abs(lats) < 5)
+    assert lons.min() < -179.9 and lons.max() > 179.7    # across the dateline
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_each_cells_groups_are_wrfs_runs_in_wrfs_order(name):
+    """Walk WRF's own turbines k = 1..nt (its ival/jval/nkind): in every
+    cell, the runs of consecutive equal types are the layout's groups, in
+    order, with their counts -- what a kernel must add, in WRF's order."""
+
+    _, _, layout, oracle = _case(name)
+    p = oracle["placement"]
+    of_group, _ = layout.wrf_types()
+    runs: dict[tuple[int, int], list[list[int]]] = {}
+    for kind, i, j in zip(p["nkind"], p["ival"], p["jval"]):
+        cell = runs.setdefault((int(j) - 1, int(i) - 1), [])
+        if cell and cell[-1][0] == kind:
+            cell[-1][1] += 1
+        else:
+            cell.append([int(kind), 1])
+    assert sum(len(r) for r in runs.values()) == layout.n_groups
+    for (j, i), expected in runs.items():
+        got = [[int(of_group[g]) + 1, int(layout.group_turbines[g])]
+               for g in layout.groups_of(j, i)]
+        assert got == expected, (j, i)

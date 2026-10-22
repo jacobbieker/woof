@@ -7,14 +7,19 @@ One directory per case under DECK_ROOT, each holding what a WRF run of the
 farm reads -- ``windturbines.txt`` and ``wind-turbine-N.tbl``, written by
 :meth:`woof.windfarm.layout.WindFarmLayout.write_wrf_inputs` -- plus the
 harness's ``grid.txt`` (WRF's config_flags and the float32 XLAT/XLONG of
-the first mass point) and ``queries.txt`` (dragcof calls), and
+the domain's first mass point) and ``queries.txt`` (dragcof calls), and
 ``deck.json``, the woof inputs the parity test rebuilds the layout from.
 
-Every farm is synthetic: seeded random turbines over each grid's interior,
-a block of turbines on exact half-cell projection coordinates (where
-``nint`` rounds), and cells holding several machines.  The four grids
-cover Lambert secant in both hemispheres and the tangent arm at 12, 1, 3
-and 4 km, and between them every curve of the bundled turbine library.
+Every farm is synthetic: seeded random turbines over each domain's
+interior, a block on exact half-cell projection coordinates (where
+``nint`` rounds), and a cell holding several machines.  The domains cover
+the three projections WRF's wind-farm code places on -- Lambert (secant in
+both hemispheres, tangent), Mercator (tropics, across the dateline) and
+polar stereographic (2-4 degrees from the north pole, and in the south
+across the dateline) -- each on both sides of its standard longitude, and
+nests: a three-level 12 -> 3 -> 1 km Lambert ladder and one-level Mercator
+and polar nests, every nest placed from its own corner as WRF places it.
+Between them the decks use every curve of the bundled turbine library.
 """
 
 from __future__ import annotations
@@ -26,31 +31,68 @@ from pathlib import Path
 import numpy as np
 
 from woof.energy.turbine_library import load_turbine_library
-from woof.static.lambert import LambertGrid
+from woof.static.projection import projection_class
 from woof.windfarm import layout as wl
 from woof.windfarm.fitch_tables import (FitchTableRefused, float32_word,
                                         table_rows)
 
 F = np.float32
 
-#: id, ref_lat, ref_lon, truelat1, truelat2, stand_lon, dx, e_we, e_sn,
-#: correction_factor (WRF's windfarm_tke_factor)
-GRIDS = (
-    ("nh_secant_12km", 35.5, -97.5, 25.5, 45.5, -97.5, 12000.0, 61, 49, 1.0),
-    ("nh_secant_1km", 35.205, -97.895, 30.0, 60.0, -97.9, 1000.0, 133, 103,
-     0.25),
-    ("sh_secant_3km", -30.0, 140.0, -20.0, -40.0, 140.0, 3000.0, 81, 81, 1.0),
-    ("tangent_4km", 45.0, 10.0, 45.0, 45.0, 10.0, 4000.0, 61, 61, 0.5),
-)
-RANDOM_TURBINES = 400
+_LC_LADDER = {"map_proj": "lambert", "ref_lat": 35.2, "ref_lon": -97.9,
+              "truelat1": 30.0, "truelat2": 60.0, "stand_lon": -97.9,
+              "dx": 12000.0, "e_we": 61, "e_sn": 49}
+_MERC = {"map_proj": "mercator", "ref_lat": 5.0, "ref_lon": 100.0,
+         "truelat1": 5.0, "truelat2": 5.0, "stand_lon": 100.0,
+         "dx": 9000.0, "e_we": 81, "e_sn": 61}
+_PS_NH = {"map_proj": "polar", "ref_lat": 86.5, "ref_lon": -40.0,
+          "truelat1": 60.0, "truelat2": 60.0, "stand_lon": -40.0,
+          "dx": 6000.0, "e_we": 81, "e_sn": 81}
+
+#: case id -> (root grid, nest chain [(i_parent_start, j_parent_start,
+#: parent_grid_ratio, e_we, e_sn), ...], WRF's windfarm_tke_factor)
+CASES = {
+    "lc_nh_12km": ({"map_proj": "lambert", "ref_lat": 35.5, "ref_lon": -97.5,
+                    "truelat1": 25.5, "truelat2": 45.5, "stand_lon": -97.5,
+                    "dx": 12000.0, "e_we": 61, "e_sn": 49}, [], 1.0),
+    "lc_ladder_d02_3km": (_LC_LADDER, [(21, 17, 4, 97, 73)], 0.25),
+    "lc_ladder_d03_1km": (_LC_LADDER, [(21, 17, 4, 97, 73),
+                                       (33, 25, 3, 97, 73)], 1.0),
+    "lc_sh_3km": ({"map_proj": "lambert", "ref_lat": -30.0, "ref_lon": 140.0,
+                   "truelat1": -20.0, "truelat2": -40.0, "stand_lon": 140.0,
+                   "dx": 3000.0, "e_we": 81, "e_sn": 81}, [], 1.0),
+    "lc_tangent_4km": ({"map_proj": "lambert", "ref_lat": 45.0,
+                        "ref_lon": 10.0, "truelat1": 45.0, "truelat2": 45.0,
+                        "stand_lon": 10.0, "dx": 4000.0, "e_we": 61,
+                        "e_sn": 61}, [], 0.5),
+    "merc_tropics_9km": (_MERC, [], 1.0),
+    "merc_nest_d02_3km": (_MERC, [(27, 21, 3, 76, 61)], 0.5),
+    "merc_dateline_6km": ({"map_proj": "mercator", "ref_lat": -17.8,
+                           "ref_lon": 179.5, "truelat1": -17.8,
+                           "truelat2": -17.8, "stand_lon": 179.5,
+                           "dx": 6000.0, "e_we": 81, "e_sn": 61}, [], 1.0),
+    "ps_nh_6km": (_PS_NH, [], 1.0),
+    "ps_nh_nest_d02_2km": (_PS_NH, [(27, 27, 3, 79, 79)], 0.25),
+    "ps_sh_dateline_6km": ({"map_proj": "polar", "ref_lat": -77.85,
+                            "ref_lon": 179.0, "truelat1": -71.0,
+                            "truelat2": -71.0, "stand_lon": 166.7,
+                            "dx": 6000.0, "e_we": 81, "e_sn": 81}, [], 1.0),
+}
+RANDOM_TURBINES = 300
 HALF_CELL_TURBINES = 24
 SEED = 4711
 
 
-def _grid(spec) -> LambertGrid:
-    _, lat, lon, t1, t2, std, dx, e_we, e_sn, _ = spec
-    return LambertGrid(ref_lat=lat, ref_lon=lon, truelat1=t1, truelat2=t2,
-                       stand_lon=std, dx=dx, dy=dx, e_we=e_we, e_sn=e_sn)
+def grid_from_spec(root: dict, nests=()):
+    """The woof grid of one case: the root, then each nest in the chain."""
+
+    cls = projection_class(root["map_proj"])
+    grid = cls(ref_lat=root["ref_lat"], ref_lon=root["ref_lon"],
+               truelat1=root["truelat1"], truelat2=root["truelat2"],
+               stand_lon=root["stand_lon"], dx=root["dx"], dy=root["dx"],
+               e_we=root["e_we"], e_sn=root["e_sn"])
+    for i_start, j_start, ratio, e_we, e_sn in nests:
+        grid = grid.nest(i_start, j_start, ratio, e_we, e_sn)
+    return grid
 
 
 def _hub(curve) -> float:
@@ -90,7 +132,8 @@ def _turbines(grid, curves, rng, case: str) -> list[dict]:
         x = float(rng.integers(3, nx - 3)) + 0.5
         y = float(rng.integers(3, ny - 3)) + (0.5 if n % 2 else 0.0)
         add(x, y, curves[n % len(curves)])
-    # one cell holding two machines and a within-tolerance hub spread
+    # one cell holding two machines, one of them at hubs 0.2 m apart (each
+    # its own WRF type, and its own group under the default exact grouping)
     cx, cy = nx // 2 + 0.1, ny // 2 + 0.1
     a, b = curves[0], curves[1 % len(curves)]
     for n in range(4):
@@ -108,8 +151,8 @@ def _queries(layout, rng) -> list[tuple[int, float]]:
     out = []
     for t, (k, _, _) in enumerate(types):
         kt = int(np.flatnonzero(kind == t)[0]) + 1
-        n = int(layout.tables.rows[k])
-        ws = layout.tables.speed_ms[k, :n]
+        n = int(layout.tables.nval[k])
+        ws = layout.tables.speeds_ms[k, :n]
         speeds = [F(0.0), F(0.5), F(30.0), F(40.0)]
         speeds += list(ws)
         speeds += list(((ws[:-1].astype(np.float64) + ws[1:]) / 2.0)
@@ -128,41 +171,39 @@ def main(argv: list[str]) -> int:
     root = Path(argv[1])
     library = load_turbine_library()
     curves = _usable_curves(library)
-    chunk = -(-len(curves) // 3)
-    shares = [curves[0:chunk], curves[chunk:2 * chunk], curves[2 * chunk:],
-              [library.get("V112/3000"), library.get("V126/3000"),
-               library.get("V90/3000")]]
     rng = np.random.default_rng(SEED)
-    for spec, share in zip(GRIDS, shares):
-        case, cf = spec[0], spec[-1]
-        grid = _grid(spec)
+    for c, (case, (spec, nests, cf)) in enumerate(CASES.items()):
+        share = curves[c::len(CASES)]
+        grid = grid_from_spec(spec, nests)
         rows = _turbines(grid, share, rng, case)
         turbines = [wl.turbine_from_row(r, n + 1) for n, r in enumerate(rows)]
         layout = wl.build_layout(turbines, grid, library=library)
         deck = root / case
         layout.write_wrf_inputs(deck)
         p = layout.projection
+        word = float32_word
         (deck / "grid.txt").write_text(
-            f"1 {float32_word(p.truelat1)} {float32_word(p.truelat2)} {float32_word(p.stdlon)} "
-            f"{float32_word(p.dx)}\n"
+            f"{p.code} {word(grid.truelat1)} {word(grid.truelat2)} "
+            f"{word(grid.stand_lon)} {word(grid.dx)}\n"
             f"1 1 1 {grid.e_we}\n"
-            f"{float32_word(p.lat1)} {float32_word(p.lon1)}\n", encoding="ascii")
+            f"{word(p.lat1)} {word(p.lon1)}\n", encoding="ascii")
         queries = _queries(layout, rng)
         (deck / "queries.txt").write_text(
-            f"{float32_word(cf)} {len(queries)}\n"
-            + "".join(f"{kt} {float32_word(v)}\n" for kt, v in queries),
+            f"{word(cf)} {len(queries)}\n"
+            + "".join(f"{kt} {word(v)}\n" for kt, v in queries),
             encoding="ascii")
         (deck / "deck.json").write_text(json.dumps({
-            "case": case,
-            "grid": dict(zip(("ref_lat", "ref_lon", "truelat1", "truelat2",
-                              "stand_lon", "dx", "e_we", "e_sn"), spec[1:9])),
-            "correction_factor": cf,
-            "turbines": rows,
+            "case": case, "grid": spec, "nests": [list(n) for n in nests],
+            "correction_factor": cf, "turbines": rows,
             "turbine_library_sha256": library.sha256,
         }, indent=1) + "\n", encoding="ascii")
-        print(f"{case}: {layout.n_turbines} turbines, {layout.n_groups} "
-              f"groups, {len(layout.wrf_types()[1])} WRF types, "
-              f"{len(queries)} dragcof queries")
+        lats = layout.turbine_lat
+        lons = layout.turbine_lon
+        print(f"{case}: {layout.n_turbines} turbines in lat "
+              f"{lats.min():.2f}..{lats.max():.2f}, lon {lons.min():.2f}.."
+              f"{lons.max():.2f}; {layout.n_groups} groups, "
+              f"{len(layout.wrf_types()[1])} WRF types, {len(queries)} "
+              "dragcof queries")
     return 0
 
 

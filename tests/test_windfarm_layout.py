@@ -118,18 +118,18 @@ def test_tables_are_the_curve_as_wrf_reads_it():
     layout = wl.build_layout(_turbines(_farm()), _grid())
     curve = load_turbine_library().get(CURVE)
     t = layout.tables
-    n = int(t.rows[0])
-    ws = t.speed_ms[0, :n]
+    n = int(t.nval[0])
+    ws = t.speeds_ms[0, :n]
     # rows: the curve's own points through cut-out, rounded once to float32
     assert ws.dtype == np.float32 and np.all(np.diff(ws) > 0)
-    assert np.all(t.speed_ms[0, n:] == 0.0)        # WRF's zero padding
+    assert np.all(t.speeds_ms[0, n:] == 0.0)        # WRF's zero padding
     assert t.cut_in_ms[0] == ws[0] and t.cut_out_ms[0] == ws[-1]
     assert float(ws[-1]) == curve.cut_out_ms
     assert np.array_equal(t.power_kw[0, :n], (curve.fraction(
         ws.astype(np.float64)) * curve.rated_kw).astype(np.float32))
     assert np.array_equal(t.thrust_coefficient[0, :n], curve.thrust_coefficient(
         ws.astype(np.float64)).astype(np.float32))
-    assert t.standing_ct2[0] == t.thrust_coefficient[0, n - 1]
+    assert t.standing_thrust_cutout[0] == t.thrust_coefficient[0, n - 1]
     # the axis tables: WRF's dragcof and power1 on 0 .. 35 m/s
     speeds = layout.speeds_ms
     assert speeds.dtype == np.float32
@@ -138,8 +138,8 @@ def test_tables_are_the_curve_as_wrf_reads_it():
     assert layout.group_power_w.shape == \
         layout.group_thrust_coefficient.shape == (layout.n_groups, speeds.size)
     below, above = speeds <= ws[0], speeds >= ws[-1]
-    assert np.all(layout.group_thrust_coefficient[0][below] == t.standing_ct[0])
-    assert np.all(layout.group_thrust_coefficient[0][above] == t.standing_ct2[0])
+    assert np.all(layout.group_thrust_coefficient[0][below] == t.standing_thrust[0])
+    assert np.all(layout.group_thrust_coefficient[0][above] == t.standing_thrust_cutout[0])
     assert np.all(layout.group_power_w[0][below | above] == 0.0)
     assert 0.7 < layout.group_thrust_coefficient[0][speeds == 8.0][0] < 0.9
     # power1 = 0.5 * 1.23 * v^3 * A * powcof recovers the table's kW
@@ -248,7 +248,7 @@ def test_two_turbine_types_get_two_tables():
         row.update(curve="V90/3000", rotor_diameter_m=90.0, hub_height_m=80.0)
     layout = wl.build_layout(_turbines(rows), _grid())
     assert layout.curve_ids == ("V90/3000", CURVE)
-    assert layout.tables.rows.size == 2
+    assert layout.tables.nval.size == 2
     assert layout.group_power_w.shape[0] == layout.n_groups == 9
     assert layout.cells_occupied == 9
     assert list(np.bincount(layout.turbine_curve)) == [3, 6]
@@ -308,54 +308,80 @@ def test_missing_or_too_low_hub_height_is_refused():
 
 
 def _mixed_rows():
-    """One cell: 3 x V112/3000 at 94 m, 2 x V90/3000 at 120 m, and one
-    V112/3000 at 94.6 m (within the group tolerance of the first three)."""
+    """One cell, in table order: 3 x V112/3000 at 94 m, 2 x V90/3000 at
+    120 m, then one more V112/3000 at 94 m (A, A, A, B, B, A)."""
 
     rows = _farm(spacing=50.0)[:6]
     for row in rows[3:5]:
         row.update(curve="V90/3000", rotor_diameter_m=90.0, hub_height_m=120.0)
-    rows[5]["hub_height_m"] = 94.6
     return rows
 
 
-def test_a_mixed_cell_is_one_cell_of_separate_groups():
+def test_a_mixed_cell_is_its_runs_in_table_order():
     layout = wl.build_layout(_turbines(_mixed_rows()), _grid())
     assert layout.cells_occupied == 1
     (j,), (i,) = np.nonzero(layout.turbine_count)
     assert layout.turbine_count[j, i] == 6
-    assert layout.group_count[j, i] == 2
+    assert layout.group_count[j, i] == 3
     groups = list(layout.groups_of(j, i))
-    assert len(groups) == layout.n_groups == 2
-    by_curve = {layout.curve_ids[layout.group_curve[g]]: g for g in groups}
-    v112, v90 = by_curve[CURVE], by_curve["V90/3000"]
-    assert layout.group_turbines[v112] == 4
-    assert layout.group_hub_height_m[v112] == pytest.approx(94.15)
-    assert layout.group_rotor_diameter_m[v112] == 112.0
-    assert layout.group_turbines[v90] == 2
-    assert layout.group_hub_height_m[v90] == 120.0
-    assert layout.group_rotor_diameter_m[v90] == 90.0
+    assert groups == [0, 1, 2] and layout.n_groups == 3
+    # the runs, in the order WRF reads them: A x 3, B x 2, A x 1
+    assert [layout.curve_ids[k] for k in layout.group_curve] == [
+        CURVE, "V90/3000", CURVE]
+    assert layout.group_turbines.tolist() == [3, 2, 1]
+    assert layout.group_hub_height_m.tolist() == [94.0, 120.0, 94.0]
+    assert layout.group_rotor_diameter_m.tolist() == [112.0, 90.0, 112.0]
+    assert layout.turbine_group.tolist() == [0, 0, 0, 1, 1, 2]
     # cell totals sum the groups; the rotor span covers both machines
     assert layout.rated_capacity_kw[j, i] == pytest.approx(6 * 3000.0)
     assert layout.swept_area_m2[j, i] == pytest.approx(
-        math.pi / 4.0 * (4 * 112.0 ** 2 + 2 * 90.0 ** 2))
+        math.pi / 4.0 * (4 * 112.0 ** 2 + 2 * 90.0 ** 2), rel=1e-6)
     assert layout.rotor_top_m[j, i] == pytest.approx(165.0)
-    assert layout.rotor_bottom_m[j, i] == pytest.approx(94.15 - 56.0)
-    assert [layout.turbine_group[n] for n in range(6)] == \
-        [v112, v112, v112, v90, v90, v112]
+    assert layout.rotor_bottom_m[j, i] == pytest.approx(38.0)
     cell = layout.summary()["cells"][0]
-    assert sorted(g["turbines"] for g in cell["groups"]) == [2, 4]
+    assert [g["turbines"] for g in cell["groups"]] == [3, 2, 1]
     assert cell["turbines"] == 6 and cell["capacity_mw"] == pytest.approx(18.0)
+    # the kernel's names for the same arrays
+    k = layout.kernel_groups()
+    assert k["count"] is layout.group_turbines and k["cell"] is \
+        layout.group_cell
+    assert set(layout.kernel_curves()) >= {
+        "speeds_ms", "thrust_coefficient", "power_kw", "nval",
+        "standing_thrust"}
 
 
-def test_hub_heights_past_the_tolerance_split_one_curve():
-    rows = _farm(spacing=50.0)
-    rows[0]["hub_height_m"] = 120.0
-    rows[1]["hub_height_m"] = 95.5          # 1.5 m from 94: its own group
+def test_a_b_a_in_one_cell_is_three_groups():
+    rows = _farm(spacing=20.0)[:3]
+    rows[1].update(curve="V90/3000", rotor_diameter_m=90.0)
     layout = wl.build_layout(_turbines(rows), _grid())
     assert layout.cells_occupied == 1
     assert layout.n_groups == 3
-    assert sorted(layout.group_turbines.tolist()) == [1, 1, 7]
-    assert sorted(layout.group_hub_height_m.tolist()) == [94.0, 95.5, 120.0]
+    assert layout.group_turbines.tolist() == [1, 1, 1]
+    assert layout.turbine_group.tolist() == [0, 1, 2]
+
+
+def test_half_a_metre_of_hub_height_is_two_groups_by_default():
+    rows = _farm(spacing=20.0)[:2]
+    rows[1]["hub_height_m"] = 94.5
+    layout = wl.build_layout(_turbines(rows), _grid())
+    assert layout.n_groups == 2
+    assert layout.group_hub_height_m.tolist() == [94.0, 94.5]
+    # the opt-in tolerance merge (not WRF-exact) makes them one
+    merged = wl.build_layout(_turbines(rows), _grid(),
+                             merge_tolerance_m=wl.GROUP_TOLERANCE_M)
+    assert merged.n_groups == 1
+    assert merged.group_hub_height_m.tolist() == [94.25]
+
+
+def test_one_curve_at_three_hub_heights_is_three_runs_in_table_order():
+    rows = _farm(spacing=50.0)
+    rows[0]["hub_height_m"] = 120.0
+    rows[1]["hub_height_m"] = 95.5
+    layout = wl.build_layout(_turbines(rows), _grid())
+    assert layout.cells_occupied == 1
+    assert layout.n_groups == 3
+    assert layout.group_turbines.tolist() == [1, 1, 7]
+    assert layout.group_hub_height_m.tolist() == [120.0, 95.5, 94.0]
 
 
 def test_duplicate_ids_are_refused():
@@ -409,14 +435,14 @@ def test_cli_prints_and_writes_the_groups_of_a_mixed_cell(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "V90/3000" in out and CURVE in out
     assert "rotors 38-165 m" in out and "(cell)" in out
-    assert "6 turbine(s) in 2 group(s) in 1 cell(s)" in out
+    assert "6 turbine(s) in 3 group(s) in 1 cell(s)" in out
     assert cli_main(["windfarm", "layout", str(QUICKSTART), str(path),
                      "--json"]) == 0
     summary = json.loads(capsys.readouterr().out)
-    assert summary["groups"] == 2 and summary["max_groups_per_cell"] == 2
+    assert summary["groups"] == 3 and summary["max_groups_per_cell"] == 3
     (cell,) = summary["cells"]
-    assert sorted((g["curve"], g["turbines"]) for g in cell["groups"]) == [
-        (CURVE, 4), ("V90/3000", 2)]
+    assert [(g["curve"], g["turbines"]) for g in cell["groups"]] == [
+        (CURVE, 3), ("V90/3000", 2), (CURVE, 1)]
     assert cell["rotor_top_m"] == pytest.approx(165.0)
 
 
@@ -478,16 +504,67 @@ def test_to_device_round_trips_through_cupy():
         assert np.all(flat[offsets[c]:offsets[c + 1]] == c)
 
 
-def test_a_turbine_joins_the_first_group_it_matches_not_the_last_opened():
+def test_the_opt_in_merge_joins_the_first_group_it_matches():
     """A (90.0 m, 112 m), B (90.2 m, 114 m: rotor 2 m off A), C (90.4 m,
-    112 m: A's machine) in one cell: C joins A's group, B stands alone."""
+    112 m: within 1 m of A) in one cell, merged: C joins A's group."""
 
     rows = _farm(spacing=20.0)[:3]
     rows[0].update(hub_height_m=90.0, rotor_diameter_m=112.0)
     rows[1].update(hub_height_m=90.2, rotor_diameter_m=114.0)
     rows[2].update(hub_height_m=90.4, rotor_diameter_m=112.0)
-    layout = wl.build_layout(_turbines(rows), _grid())
+    exact = wl.build_layout(_turbines(rows), _grid())
+    assert exact.n_groups == 3
+    layout = wl.build_layout(_turbines(rows), _grid(), merge_tolerance_m=1.0)
     assert layout.n_groups == 2
     assert layout.turbine_group[0] == layout.turbine_group[2] != \
         layout.turbine_group[1]
     assert sorted(layout.group_turbines.tolist()) == [1, 2]
+
+
+# -- other projections and nests ---------------------------------------------
+
+
+def test_mercator_and_polar_domains_place_the_farm():
+    from woof.static.projection import MercatorGrid, PolarStereoGrid
+
+    merc = MercatorGrid(ref_lat=5.0, ref_lon=100.0, truelat1=5.0,
+                        truelat2=5.0, stand_lon=100.0, dx=1000.0, dy=1000.0,
+                        e_we=42, e_sn=42)
+    layout = wl.build_layout(_turbines(_farm(lat0=5.0, lon0=100.0)), merc)
+    assert layout.projection.code == 3 and layout.n_turbines == 9
+    assert 2 <= layout.cells_occupied <= 4
+    polar = PolarStereoGrid(ref_lat=78.0, ref_lon=15.0, truelat1=60.0,
+                            truelat2=60.0, stand_lon=15.0, dx=1000.0,
+                            dy=1000.0, e_we=42, e_sn=42)
+    layout = wl.build_layout(_turbines(_farm(lat0=78.0, lon0=15.0)), polar)
+    assert layout.projection.code == 2 and layout.n_turbines == 9
+    assert int(layout.turbine_count.sum()) == 9
+
+
+def test_a_nest_places_from_its_own_corner():
+    root = _grid(dx=3000.0, n=41)
+    nest = root.nest(14, 14, 3, 43, 43)
+    layout = wl.build_layout(_turbines(_farm()), nest, grid_id=2)
+    assert layout.dx_m == 1000.0 and (layout.ny, layout.nx) == (42, 42)
+    lat11, lon11 = nest.ij_to_latlon(1.0, 1.0)
+    assert layout.projection.lat1 == np.float32(float(lat11))
+    assert layout.projection.dx == np.float32(1000.0)
+    on_root = wl.build_layout(_turbines(_farm()), root)
+    assert on_root.cells_occupied <= layout.cells_occupied
+
+
+def test_a_projection_wrf_cannot_place_on_is_refused_by_name():
+    class LatLonGrid:
+        map_proj = "lat-lon"
+        e_we = e_sn = 42
+        dx = 0.1
+
+    with pytest.raises(wl.WindFarmLayoutRefused,
+                       match="map_proj 'lat-lon'.*Mercator, Lambert"):
+        wl.build_layout(_turbines(_farm()), LatLonGrid())
+
+
+@pytest.mark.parametrize("bad", [-1.0, float("nan"), float("inf")])
+def test_a_bad_merge_tolerance_is_refused(bad):
+    with pytest.raises(wl.WindFarmLayoutRefused, match="merge_tolerance_m"):
+        wl.build_layout(_turbines(_farm()), _grid(), merge_tolerance_m=bad)
