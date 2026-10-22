@@ -136,8 +136,8 @@ class FuelStaticsRequest:
     ``&domains sr_x, sr_y``).  ``landfire`` is a local LANDFIRE FBFM13 or
     FBFM40 GeoTIFF, or ``None`` to use the land-use crosswalk.  ``device``
     is where the fire mesh is built (:data:`DEVICES`).  It is left out of
-    equality and hashing, because both devices give the same words, so a
-    memo built on one serves the other.
+    equality, hashing and preparation identities, because both devices give
+    the same words, so a memo built on one serves the other.
     """
 
     sr_x: int
@@ -145,6 +145,9 @@ class FuelStaticsRequest:
     landfire: Path | None = None
     landfire_kind: str = "auto"
     device: str = field(default="auto", compare=False)
+    #: Left out of preparation identities too
+    #: (:func:`woof.ensemble.runtime_preparation._plain`).
+    _IDENTITY_OMITTED = ("device",)
 
     def __post_init__(self):
         object.__setattr__(self, "sr_x", _positive_int("sr_x", self.sr_x))
@@ -376,10 +379,27 @@ def to_device(fields: Mapping[str, object]) -> dict:
 
 
 def _gpu_failure_types() -> tuple[type, ...]:
-    """The device failures auto steps back to the CPU body from."""
+    """The device failures auto steps back to the CPU body from.
+
+    CUDA runtime and driver errors, an out-of-memory pool, an NVRTC
+    compile or program failure, and the RuntimeError/OSError CuPy raises
+    when it cannot load NVRTC or the driver at all.
+    """
     from cupy.cuda import compiler, driver, memory, runtime
-    return (runtime.CUDARuntimeError, driver.CUDADriverError,
-            memory.OutOfMemoryError, compiler.CompileException)
+    types = [runtime.CUDARuntimeError, driver.CUDADriverError,
+             memory.OutOfMemoryError, compiler.CompileException,
+             RuntimeError, OSError]
+    try:
+        from cupy_backends.cuda.libs.nvrtc import NVRTCError
+        types.append(NVRTCError)
+    except ImportError:  # pragma: no cover - older CuPy layouts
+        pass
+    return tuple(types)
+
+
+#: Set once the GPU body has failed in this process: ``auto`` then builds on
+#: the CPU without retrying the compile or allocation (and says so once).
+_GPU_FAILED: str | None = None
 
 
 # --- LANDFIRE ----------------------------------------------------------------
@@ -421,6 +441,13 @@ def landfire_codes_to_fuel(codes, kind: str = "auto"):
             raise ValueError("LANDFIRE fuel codes must be whole numbers")
         raw = raw.astype(xp.int64)
     else:
+        if bool(xp.any(values == BAD_CODE)):
+            raise _refusal(
+                "the LANDFIRE raster gives a fire cell a value that is no "
+                "whole fuel-model code (between codes, or outside int32).  "
+                "Use the FBFM13 or FBFM40 product as LANDFIRE publishes it.",
+                "The fuel models are integer codes.  A resampled or "
+                "rescaled copy has values between them that name no model.")
         raw = values.astype(xp.int64)
         valid = raw > 0
         raw = xp.where(valid, raw, 0)
@@ -550,15 +577,21 @@ def landfire_pixel_indices(dataset, grid, sr_x: int, sr_y: int):
     return row, col
 
 
-def sample_landfire(path, grid, sr_x: int, sr_y: int, *, xp=np):
-    """Raw raster codes at every fire sub-cell centre, nearest neighbour.
+#: A sampled pixel that names no fuel-model code: a float raster's value
+#: between codes, or one beyond int32.  Refused when a cell samples it
+#: (:func:`landfire_codes_to_fuel`), not when it sits unread in the window.
+BAD_CODE = np.int32(MISSING_CODE + 1)
 
-    int32 ``(ny * sr_y, nx * sr_x)`` on ``xp``'s device,
-    :data:`MISSING_CODE` where the cell falls outside the raster or on its
-    no-data value.  Only the window the domain covers is read, so a
-    CONUS-wide product costs the domain's footprint.  The pixel indices
-    are computed on the host (:func:`landfire_pixel_indices`); the gather
-    runs on the device when ``xp`` is CuPy.
+
+def landfire_window(path, grid, sr_x: int, sr_y: int):
+    """``(block, row, col)``: the raster window and each cell's pixel in it.
+
+    Host work, done once per build: the pixel indices
+    (:func:`landfire_pixel_indices`), then only the window the domain
+    covers, read and turned into int32 codes.  No data, fill (codes <= 0,
+    LANDFIRE's -9999) and non-finite values are :data:`MISSING_CODE`; a
+    value that is no whole int32 code is :data:`BAD_CODE`.  ``row`` is -1
+    for a cell outside the raster.
     """
     rasterio, _, Window = _geo_stack()
     path = Path(path)
@@ -568,41 +601,50 @@ def sample_landfire(path, grid, sr_x: int, sr_y: int, *, xp=np):
         row, col = landfire_pixel_indices(dataset, grid, sr_x, sr_y)
         inside = row >= 0
         if not inside.any():
-            return xp.full(row.shape, MISSING_CODE, dtype=xp.int32)
+            return (np.full((1, 1), MISSING_CODE, np.int32),
+                    np.full(row.shape, -1, np.int64),
+                    np.zeros(row.shape, np.int64))
         c0, c1 = int(col[inside].min()), int(col[inside].max())
         r0, r1 = int(row[inside].min()), int(row[inside].max())
         block = dataset.read(1, window=Window(c0, r0, c1 - c0 + 1,
                                               r1 - r0 + 1))
         nodata = dataset.nodata
-        missing = np.zeros(block.shape, dtype=bool)
-        if nodata is not None:
-            missing |= (np.isnan(block) if np.isnan(nodata)
-                        else block == nodata)
-        if block.dtype.kind == "f":
-            missing |= ~np.isfinite(block)
-        present = block[~missing]
-        limits = np.iinfo(np.int32)
-        if present.size and (
-                (block.dtype.kind == "f"
-                 and bool(np.any(present != np.floor(present))))
-                or float(present.max()) > limits.max
-                or float(present.min()) <= limits.min):
-            raise _refusal(
-                f"LANDFIRE raster {path} holds {block.dtype} pixels that "
-                "are not whole fuel-model codes (or lie outside int32).  "
-                "Use the FBFM13 or FBFM40 product as LANDFIRE publishes it.",
-                "The fuel models are integer codes.  A resampled or "
-                "rescaled copy has values between them that name no model.")
-        block = np.where(missing, 0, block).astype(np.int32)
-        block[missing] = MISSING_CODE
-    local_row = np.where(inside, row - r0, -1)
-    local_col = np.where(inside, col - c0, 0)
+    values = block.astype(np.float64)
+    missing = ~np.isfinite(values) | (values <= 0.0)
+    if nodata is not None:
+        missing |= (np.isnan(values) if np.isnan(nodata)
+                    else block == nodata)
+    bad = ~missing & ((values != np.floor(values))
+                      | (values > np.iinfo(np.int32).max))
+    codes = np.where(missing | bad, 0.0, values).astype(np.int32)
+    codes[missing] = MISSING_CODE
+    codes[bad] = BAD_CODE
+    return (codes, np.where(inside, row - r0, -1),
+            np.where(inside, col - c0, 0))
+
+
+def gather_landfire(window, *, xp=np):
+    """The window's code at every fire cell, on ``xp``'s device (int32)."""
+    block, row, col = window
     if xp is np:
         codes = np.full(row.shape, MISSING_CODE, dtype=np.int32)
-        codes[inside] = block[local_row[inside], local_col[inside]]
+        inside = row >= 0
+        codes[inside] = block[row[inside], col[inside]]
         return codes
     from . import fire_mesh_gpu
-    return fire_mesh_gpu.gather(block, local_row, local_col, MISSING_CODE)
+    return fire_mesh_gpu.gather(block, row, col, MISSING_CODE)
+
+
+def sample_landfire(path, grid, sr_x: int, sr_y: int, *, xp=np):
+    """Raw raster codes at every fire sub-cell centre, nearest neighbour.
+
+    int32 ``(ny * sr_y, nx * sr_x)`` on ``xp``'s device,
+    :data:`MISSING_CODE` where the cell falls outside the raster or on its
+    no-data or fill value (:func:`landfire_window`).  Only the window the
+    domain covers is read, so a CONUS-wide product costs the domain's
+    footprint.  The gather runs on the device when ``xp`` is CuPy.
+    """
+    return gather_landfire(landfire_window(path, grid, sr_x, sr_y), xp=xp)
 
 
 # --- the fire mesh, as WRF v4.7.1 refines it ---------------------------------
@@ -786,28 +828,32 @@ def build_fuel_fields(grid, fields: Mapping[str, np.ndarray],
     integrates them there.  ``NFUEL_CAT`` is float64 on the host either
     way, like every atmospheric static field.
     """
+    global _GPU_FAILED
     device = request.device if device is None else device
-    xp = array_module(device)
+    xp = np if device == "auto" and _GPU_FAILED else array_module(device)
+    # The raster window and each cell's pixel are host work whichever
+    # device builds the mesh, so a fallback does not repeat them.
+    window = (None if request.landfire is None else
+              landfire_window(request.landfire, grid, request.sr_x,
+                              request.sr_y))
+    kwargs = dict(landuse_attrs=landuse_attrs,
+                  coverage_report=coverage_report, resident=resident,
+                  window=window)
     if xp is not np and device == "auto":
         try:
-            return _build_fuel_fields(grid, fields, request, xp,
-                                      landuse_attrs=landuse_attrs,
-                                      coverage_report=coverage_report,
-                                      resident=resident)
+            return _build_fuel_fields(grid, fields, request, xp, **kwargs)
         except _gpu_failure_types() as error:
             import sys
+            _GPU_FAILED = f"{type(error).__name__}: {error}"
             print(f"[fuel] WORKAROUND: the fire mesh is built on the CPU "
-                  f"({type(error).__name__}: {error}); the GPU and CPU "
-                  "bodies give the same words", file=sys.stderr)
+                  f"for the rest of this process ({_GPU_FAILED}); the GPU "
+                  "and CPU bodies give the same words", file=sys.stderr)
             xp = np
-    return _build_fuel_fields(grid, fields, request, xp,
-                              landuse_attrs=landuse_attrs,
-                              coverage_report=coverage_report,
-                              resident=resident)
+    return _build_fuel_fields(grid, fields, request, xp, **kwargs)
 
 
 def _build_fuel_fields(grid, fields, request, xp, *, landuse_attrs,
-                       coverage_report, resident) -> dict:
+                       coverage_report, resident, window) -> dict:
     missing = [name for name in ("LU_INDEX", "HGT_M") if name not in fields]
     if missing:
         raise KeyError(f"fuel statics need the built fields {missing}")
@@ -842,8 +888,7 @@ def _build_fuel_fields(grid, fields, request, xp, *, landuse_attrs,
         atmospheric = landuse_fuel()
         fire = on_mesh(atmospheric)
     else:
-        codes = xp.asarray(
-            sample_landfire(request.landfire, grid, sr_x, sr_y, xp=xp))
+        codes = xp.asarray(gather_landfire(window, xp=xp))
         mapped, valid, kind = landfire_codes_to_fuel(
             codes, request.landfire_kind)
         if not bool(valid.any()):
@@ -880,6 +925,14 @@ def _build_fuel_fields(grid, fields, request, xp, *, landuse_attrs,
            "NFUEL_CAT_FIRE": fire, "ZSF": zsf, "DZDXF": dzdx, "DZDYF": dzdy}
     if not resident:
         out = {name: _host(value) for name, value in out.items()}
+        if xp is not np:
+            # Static preparation runs before the forecast's device state
+            # exists; what it pooled goes back before that state is priced.
+            xp.get_default_memory_pool().free_all_blocks()
+    elif xp is not np:
+        # A launch fault surfaces here, inside the build, not later in the
+        # consumer that reads the resident fields.
+        xp.cuda.Device().synchronize()
     # Last, so a device failure part way leaves no receipt behind for the
     # CPU body's to collide with.
     if coverage_report is not None:

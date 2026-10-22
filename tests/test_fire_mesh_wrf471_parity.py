@@ -208,6 +208,16 @@ def _ulp64(got, want) -> int:
 
 def test_the_llxy_fixture_is_the_pinned_source():
     from tools.llxy_wrf461_oracle.build_llxy import SOURCE_SHA256
+    pins = dict(reversed(line.split()) for line in
+                (TOOL / "SOURCES.sha256").read_text().splitlines()
+                if line and not line.startswith("#"))
+    assert pins["share/module_llxy.F"] == SOURCE_SHA256
+    for name in ("FIXTURES.sha256", "HARNESS.sha256"):
+        base = LLXY if name == "FIXTURES.sha256" else TOOL
+        for line in (LLXY / name).read_text().splitlines():
+            digest, rel = line.split()
+            got = hashlib.sha256((base / rel).read_bytes()).hexdigest()
+            assert got == digest, rel
     header = [line for line in (LLXY / "fixture.csv").read_text()
               .splitlines() if line.startswith("#")]
     assert f"# source_sha256: {SOURCE_SHA256} (byte-identical in v4.6.1)" \
@@ -256,7 +266,8 @@ def test_fire_cell_latlon_is_wrfs_llxy_word_for_word(cid):
 def test_landfire_pixels_are_the_ones_wrfs_latlon_fall_in(tmp_path, cid):
     """A geographic raster: the pixel WRF's own module_llxy latitude and
     longitude fall in is the pixel the fuel reader takes, for every cell."""
-    import rasterio
+    rasterio = pytest.importorskip("rasterio")
+    pytest.importorskip("pyproj")
     from rasterio.transform import from_origin
     from woof.static.fuel import landfire_pixel_indices
 
@@ -291,7 +302,8 @@ def test_landfire_pixels_are_the_highres_overlays_nearest_words(tmp_path,
     static-fields library, its own projection code), nearest neighbour onto
     a grid whose mass points are the fire cells, returns exactly the index
     the fuel reader takes."""
-    import rasterio
+    rasterio = pytest.importorskip("rasterio")
+    pytest.importorskip("pyproj")
     from rasterio.transform import from_origin
     from woof.static import rust_bridge
     from woof.static.fuel import landfire_pixel_indices
@@ -352,7 +364,8 @@ def test_landfire_pixels_are_the_highres_overlays_nearest_words(tmp_path,
 def test_gpu_gather_takes_the_cpu_pixels(tmp_path):
     """The device gather reads the pixels the host indices name."""
     import cupy as cp
-    import rasterio
+    rasterio = pytest.importorskip("rasterio")
+    pytest.importorskip("pyproj")
     from rasterio.transform import from_origin
     from woof.static.fuel import sample_landfire
 

@@ -67,7 +67,8 @@ def test_landuse_route_gpu_is_the_cpu_words(sr):
 @pytest.mark.gpu
 @requires_gpu
 def test_landfire_route_gpu_is_the_cpu_words(tmp_path):
-    import rasterio
+    rasterio = pytest.importorskip("rasterio")
+    pytest.importorskip("pyproj")
     from rasterio.transform import from_origin
     from woof.static.fuel import (FuelStaticsRequest, build_fuel_fields,
                                   fire_mesh_axis)
@@ -125,8 +126,9 @@ def test_fire_mesh_can_stay_on_the_device():
 def test_a_failing_device_falls_back_on_auto_and_refuses_on_gpu(
         monkeypatch, capsys):
     import cupy as cp
-    from woof.static import fire_mesh_gpu
+    from woof.static import fire_mesh_gpu, fuel
     from woof.static.fuel import FuelStaticsRequest, build_fuel_fields
+    monkeypatch.setattr(fuel, "_GPU_FAILED", None)
     grid, fields = _domain()
     request = FuelStaticsRequest(sr_x=2, sr_y=2)
     cpu = build_fuel_fields(grid, fields, request, landuse_attrs=MODIS,
@@ -142,6 +144,15 @@ def test_a_failing_device_falls_back_on_auto_and_refuses_on_gpu(
     assert "WORKAROUND" in capsys.readouterr().err
     assert report["fuel"]["device"] == "cpu"
     _assert_same(cpu, auto)
+    # Remembered: auto does not retry the failed device, nor say so again.
+    calls = []
+    monkeypatch.setattr(fire_mesh_gpu, "refine_zsf",
+                        lambda *a, **k: calls.append(a))
+    again = build_fuel_fields(grid, fields, request, landuse_attrs=MODIS,
+                              device="auto")
+    assert not calls and "WORKAROUND" not in capsys.readouterr().err
+    _assert_same(cpu, again)
+    monkeypatch.setattr(fire_mesh_gpu, "refine_zsf", broken)
     with pytest.raises(cp.cuda.runtime.CUDARuntimeError):
         build_fuel_fields(grid, fields, request, landuse_attrs=MODIS,
                           device="gpu")

@@ -306,7 +306,8 @@ def test_refresh_is_a_no_op_without_a_request(tmp_path):
 # --- the LANDFIRE raster -----------------------------------------------------
 
 def test_landfire_raster_is_sampled_nearest_at_fire_cell_centres(tmp_path):
-    import rasterio
+    rasterio = pytest.importorskip("rasterio")
+    pytest.importorskip("pyproj")
     from rasterio.transform import from_origin
 
     grid = _grid(nx=4, ny=3, dx=3000.0)
@@ -367,9 +368,11 @@ def test_a_covering_raster_needs_no_land_use_table(tmp_path, monkeypatch):
     raster = tmp_path / "fbfm13.tif"
     raster.write_bytes(b"stand-in")
     grid = _grid(nx=2, ny=2)
-    codes = np.array([[1.0, 2.0, 8.0, 91.0]] * 4)
-    monkeypatch.setattr(fuel, "sample_landfire",
-                        lambda path, grid, sr_x, sr_y, xp: codes.copy())
+    codes = np.array([[1, 2, 8, 91]] * 4, dtype=np.int32)
+    cells = np.indices(codes.shape)
+    monkeypatch.setattr(fuel, "landfire_window",
+                        lambda path, grid, sr_x, sr_y: (codes.copy(),
+                                                        cells[0], cells[1]))
     built = {"LU_INDEX": np.full((2, 2), 5.0), "HGT_M": np.zeros((2, 2))}
     assert MISSING_CODE < 0  # the missing marker is never a valid code
     other_legend = dict(MODIS, MMINLU="SSIB")
@@ -377,7 +380,7 @@ def test_a_covering_raster_needs_no_land_use_table(tmp_path, monkeypatch):
     out = build_fuel_fields(grid, built, request, landuse_attrs=other_legend)
     np.testing.assert_array_equal(out["NFUEL_CAT_FIRE"][0], [1, 2, 8, 14])
     np.testing.assert_array_equal(out["NFUEL_CAT"], [[1, 8], [1, 8]])
-    codes[0, 0] = np.nan
+    codes[0, 0] = MISSING_CODE
     with pytest.raises(ValueError, match="no land-use-to-fuel crosswalk"):
         build_fuel_fields(grid, built, request, landuse_attrs=other_legend)
     out = build_fuel_fields(grid, built, request, landuse_attrs=MODIS)
@@ -385,7 +388,8 @@ def test_a_covering_raster_needs_no_land_use_table(tmp_path, monkeypatch):
 
 
 def _write(path, data, *, dtype, nodata, grid):
-    import rasterio
+    rasterio = pytest.importorskip("rasterio")
+    pytest.importorskip("pyproj")
     from rasterio.transform import from_origin
     lat, lon = grid.latlon_mass()
     west, north = lon.min() - 0.05, lat.max() + 0.05
@@ -397,9 +401,11 @@ def _write(path, data, *, dtype, nodata, grid):
 
 
 def test_raster_words_are_masked_before_they_are_checked(tmp_path):
-    """A no-data word outside int32, or a float product holding whole
-    codes, is read; a float raster holding values between codes is not."""
-    from woof.static.fuel import sample_landfire
+    """A no-data word outside int32, an undeclared float fill, or a float
+    product holding whole codes, is read; a value between codes is refused
+    where a cell samples it, and only there."""
+    from woof.static.fuel import (BAD_CODE, landfire_codes_to_fuel,
+                                  sample_landfire)
     grid = _grid(nx=3, ny=3)
     codes = np.full((30, 30), 101.0)
     codes[:, ::4] = np.nan
@@ -411,11 +417,17 @@ def test_raster_words_are_masked_before_they_are_checked(tmp_path):
     path = tmp_path / "int32.tif"
     _write(path, wide, dtype="int32", nodata=-2147483648, grid=grid)
     np.testing.assert_array_equal(sample_landfire(path, grid, 2, 2), got)
+    filled = np.where(np.isnan(codes), -3.4028235e38, 101.0)
+    path = tmp_path / "undeclared_fill.tif"
+    _write(path, filled, dtype="float32", nodata=None, grid=grid)
+    np.testing.assert_array_equal(sample_landfire(path, grid, 2, 2), got)
     path = tmp_path / "resampled.tif"
     _write(path, np.full((30, 30), 101.5), dtype="float32", nodata=None,
            grid=grid)
-    with pytest.raises(ValueError, match="not whole fuel-model codes"):
-        sample_landfire(path, grid, 2, 2)
+    sampled = sample_landfire(path, grid, 2, 2)
+    assert (sampled == BAD_CODE).all()
+    with pytest.raises(ValueError, match="no whole fuel-model code"):
+        landfire_codes_to_fuel(sampled)
 
 
 # --- the command -------------------------------------------------------------
@@ -444,6 +456,8 @@ def test_preparation_identity_is_unchanged_without_a_request(tmp_path):
     assert _digest(selection) == _digest(legacy)
     fired = with_fuel_statics(selection, FuelStaticsRequest(sr_x=2, sr_y=2))
     assert _plain(fired)["fuel"] == {"sr_x": 2, "sr_y": 2, "landfire": None,
-                                     "landfire_kind": "auto",
-                                     "device": "auto"}
+                                     "landfire_kind": "auto"}
+    on_gpu = with_fuel_statics(
+        selection, FuelStaticsRequest(sr_x=2, sr_y=2, device="gpu"))
+    assert _digest(on_gpu) == _digest(fired)  # where it runs is no identity
     assert _digest(fired) != _digest(selection)

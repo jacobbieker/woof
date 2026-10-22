@@ -13,6 +13,9 @@
 #                                       slope (cut by extract.py)
 #   phys/module_fr_fire_driver.F:566-567 dxf = dx/ir (cut by extract.py)
 #
+# share/module_llxy.F is pinned here too and compiled by build_llxy_fire.py
+# (the fire-cell placement fixture, llxy_fire_mesh/).
+#
 # plus wrf_error_stub.F90 (module_wrf_error's two entries),
 # ../urban_wrf471_oracle/oracle_io.F90 (the fixture writer) and
 # run_fire_mesh.F90.  The fixture lands in BUILD_DIR/fixtures; copy that

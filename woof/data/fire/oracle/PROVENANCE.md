@@ -18,7 +18,9 @@ Host: Linux x86-64, little endian.
 
 The sources are byte-unmodified. Their SHA-256 pins are in
 `tools/fire_mesh_wrf471_oracle/SOURCES.sha256` and are copied here as
-`SOURCES.sha256`. `build.sh` verifies them before anything compiles.
+`SOURCES.sha256`. They are the three fire files below and
+`share/module_llxy.F` (see the next section). `build.sh` verifies them
+before anything compiles.
 
 - `phys/module_fr_fire_util.F` is compiled whole. It provides
   `interpolate_z2fire`, `continue_at_boundary` and `interpolate_2d`.
@@ -108,7 +110,11 @@ every projection woof grids have and every nest.
 through WRF v4.7.1 `share/module_llxy.F` `ij_to_latlon`.
 - That file is byte-identical in v4.6.1 and v4.7.1 (sha256
   `0c777e66ffbb0602479cadcc0ab484769a140c4cb2b3e9a8f757597086f0c76b`), and
-  `tools/llxy_wrf461_oracle` builds it.
+  `tools/llxy_wrf461_oracle` builds it. It is pinned in this oracle's
+  `SOURCES.sha256` beside the fire sources.
+- `llxy_fire_mesh/FIXTURES.sha256` and `llxy_fire_mesh/HARNESS.sha256` hold
+  the fixture's hashes and those of the scripts that wrote it, and the parity
+  test checks both.
 - This oracle uses the same stubs, flags and driver (binary64,
   `-O0 -ffp-contract=off`).
 - A nest is placed the way WPS geogrid and `ProjectedGrid.nest` place it.

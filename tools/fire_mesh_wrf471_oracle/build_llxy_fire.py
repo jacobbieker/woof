@@ -178,6 +178,15 @@ def main(argv: list[str]) -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "fixture.csv").write_text(header + out)
     (OUT / "deck.json").write_text(json.dumps(deck, indent=1) + "\n")
+    # Receipts: the fixture's own hashes, and the harness that wrote it.
+    (OUT / "FIXTURES.sha256").write_text("".join(
+        f"{hashlib.sha256((OUT / name).read_bytes()).hexdigest()}  {name}\n"
+        for name in ("deck.json", "fixture.csv")))
+    harness = ("build_llxy_fire.py", "../llxy_wrf461_oracle/build_llxy.py",
+               "../llxy_wrf461_oracle/run_llxy.F90")
+    (OUT / "HARNESS.sha256").write_text("".join(
+        f"{hashlib.sha256((HERE / rel).read_bytes()).hexdigest()}  {rel}\n"
+        for rel in harness))
     print(f"wrote {OUT}")
     return 0
 
