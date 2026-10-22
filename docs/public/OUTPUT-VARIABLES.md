@@ -438,6 +438,21 @@ written (after the step's microphysics), on the same `hub_height` axis:
 restart behaviour and what is not supported are in
 [docs/energy-hindcast/hub-wind.md](../energy-hindcast/hub-wind.md).
 
+## Smoke tracer fields
+
+With `smoke_tracer = true` (see
+[CONFIGURATION.md](CONFIGURATION.md#smoke-tracer)) every domain writes
+the passive tracer and its column load in the full inventory:
+
+| variable | units | meaning |
+|---|---|---|
+| `SMOKE` | ug kg-1 | smoke mass mixing ratio per kilogram of dry air, mass grid, `Time, bottom_top, south_north, west_east` |
+| `SMOKE_COL` | ug m-2 | the column load, `sum_k SMOKE * C(mu) * abs(dnw) / g`, refreshed at the end of every step |
+
+Both are WOOF names: WRF's analogue is the `tracer` array, whose members
+are named by the `tracer_opt` package. They are absent from a run with
+the tracer off, so its inventory and disk price are unchanged.
+
 ## Wind maxima and gusts
 
 With `nwp_diagnostics = 1` (`&time_control`, or the RunConfig key of the

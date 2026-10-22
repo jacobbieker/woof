@@ -415,7 +415,8 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
                   "ruc_2m_diagnostic", "ruc_snow",
                   "swint_opt", "aer_opt", "alb_sol",
                   "thompson_version", "thompson_fork_snow_fall",
-                  "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest"):
+                  "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
+                  "smoke_tracer", "smoke_emission_file"):
         expected_run.pop(field)
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()

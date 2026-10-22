@@ -142,6 +142,8 @@ def _save_time_t(state):
             names.extend(extra_moist_species(state))
     if getattr(state, 'tke', None) is not None:
         names.append('tke')
+    if getattr(state, 'smoke', None) is not None:
+        names.append('smoke')
     pairs = tuple((getattr(state, name), getattr(state, name + '0'))
                   for name in names)
     launch = _prepare_bookkeeping(state, pairs)
@@ -1653,6 +1655,12 @@ def _smag2d_specs(state: DomainState, km, kh, *, time_t: bool = False,
         specs += [(field(name), None, kh, state.c1h, state.c2h,
                    "smag_r" + name, "")
                   for name in extra_moist_species(state)]
+    if getattr(state, "smoke", None) is not None:
+        # The passive smoke tracer mixes like a moist scalar (K_h), on a
+        # dry state too; its held row also carries the surface emission
+        # (prepare_smoke_tendency).
+        specs.append((field("smoke"), None, kh, state.c1h, state.c2h,
+                      "smag_rsmoke", ""))
     return specs
 
 
@@ -1694,10 +1702,12 @@ DIFF6_FACTOR2_FORK_DEFAULT = 0.04
 #: Rows whose factor is ``diff_6th_factor`` under every form: the dry rows
 #: (``rk_tendency``) and TKE, which the fork's rk_scalar_tend call for
 #: tke_2 hands ``grid%diff_6th_factor`` (fork solve_em.F:2587), as it does
-#: the tracer array (:2831).  Every other row is a moist (:2418) or scalar
-#: (:2974) array row and takes ``diff_6th_factor2`` under the fork.
+#: the tracer array (:2831) -- which is why the smoke tracer, woof's
+#: analogue of that array, sits here too.  Every other row is a moist
+#: (:2418) or scalar (:2974) array row and takes ``diff_6th_factor2`` under
+#: the fork.
 _DIFF6_FACTOR1_SLOTS = frozenset(("smag_ru", "smag_rv", "smag_rw",
-                                  "smag_rth", "smag_rtke"))
+                                  "smag_rth", "smag_rtke", "smag_rsmoke"))
 
 
 def diff6_fork(cfg: RunConfig) -> bool:
@@ -2109,6 +2119,30 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig) -> None:
     # the dry slots, after diff6 has accumulated (WRF divides ru_tendf etc.
     # once, module_em.F:1043, :1054, :1065, :1078).
     _couple_dry_mixing_map_factor(state, specs)
+
+
+def prepare_smoke_tendency(state: DomainState, cfg: RunConfig):
+    """The smoke tracer's held per-step forward tendency, or None.
+
+    One coupled ``(nz, ny, nx)`` buffer, ``smag_rsmoke``, that every RK
+    stage of :func:`woof.core.moist.advance_smoke_stage` reads: the km_opt
+    mixing and sixth-order filter :func:`prepare_fixed_tendencies` left in
+    it (the tracer's ``_smag2d_specs`` row), plus the prescribed surface
+    emission on the lowest layer (:func:`woof.core.smoke_tracer.
+    add_surface_source`).  Without a mixing package the buffer is zeroed
+    here first, because nothing else wrote it this step.  None on every
+    state without the tracer, so nothing is allocated or launched.
+    """
+    if getattr(state, "smoke", None) is None:
+        return None
+    from woof.core import smoke_tracer
+
+    smoke_tracer.bind_emission(state, cfg)
+    held = state.scratch(state.p.shape, "smag_rsmoke")
+    if not (cfg.km_opt in (2, 3, 4) or cfg.diff_6th_opt > 0):
+        held[...] = 0
+    smoke_tracer.add_surface_source(state, held)
+    return held
 
 
 def add_fixed_dry_tendencies(state: DomainState, cfg: RunConfig) -> None:
@@ -3604,7 +3638,8 @@ def apply_open_zero_gradient(state: DomainState, cfg: RunConfig) -> None:
         uw = state.u[:, :, 0]                          # (nz, ny) west face
         ue = state.u[:, :, -1]                         # east face
         outw, oute = uw < 0.0, ue > 0.0
-        for q in (state.thp, state.qv, state.qc, state.qr):
+        for q in (state.thp, state.qv, state.qc, state.qr,
+                  getattr(state, "smoke", None)):
             if q is None:
                 continue
             q[:, :, 0] = cp.where(outw, q[:, :, 1], q[:, :, 0])
@@ -3647,7 +3682,8 @@ def apply_open_zero_gradient(state: DomainState, cfg: RunConfig) -> None:
         vs = state.v[:, 0, :]                          # (nz, nx) south face
         vn = state.v[:, -1, :]                         # north face
         outs, outn = vs < 0.0, vn > 0.0
-        for q in (state.thp, state.qv, state.qc, state.qr):
+        for q in (state.thp, state.qv, state.qc, state.qr,
+                  getattr(state, "smoke", None)):
             if q is None:
                 continue
             q[:, 0, :] = cp.where(outs, q[:, 1, :], q[:, 0, :])
@@ -3940,6 +3976,7 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         update_diagnostics(state, cfg.hypsometric_opt)
     prepare_fixed_tendencies(state, cfg)
     fixed_scalars = fixed_scalar_tendencies(state, cfg)
+    fixed_smoke = prepare_smoke_tendency(state, cfg)
 
     ns = cfg.time_step_sound
     stages = ((1, cfg.dt / 3.0),
@@ -4024,8 +4061,9 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
         # Prognostic TKE (km_opt=2) advects with the same acoustic
         # time-averaged mass fluxes as the moist scalars (WRF
         # rk_scalar_tend for tke, solve_em.F:2362-2399), so a dry TKE run
-        # accumulates sumflux too.
-        scalars = moist or getattr(state, "tke", None) is not None
+        # accumulates sumflux too; so does the passive smoke tracer.
+        scalars = (moist or getattr(state, "tke", None) is not None
+                   or getattr(state, "smoke", None) is not None)
         if scalars:
             ru_m = state.scratch((nzs, nys, nxs + 1), "rk_ru_m")
             rv_m = state.scratch((nzs, nys + 1, nxs), "rk_rv_m")
@@ -4096,6 +4134,13 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                     fixed_tendency=state.scratch(
                         state.p.shape, "smag_rtke"),
                     **scalar_implicit)
+            if fixed_smoke is not None:
+                from woof.core.moist import advance_smoke_stage
+                advance_smoke_stage(
+                    state, cfg, ru_m, rv_m, ww_m, nsub * dtau,
+                    final=(istage == len(stages) - 1),
+                    fixed_tendency=fixed_smoke,
+                    **scalar_implicit)
         apply_open_zero_gradient(state, cfg)          # radiative-open BCs
     # km_opt=2 budget: one device reduction over the completed step, taken
     # here because state.mup is still the mass the final RK scalar update
@@ -4138,6 +4183,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                 microphysics_result, dt=cfg.dt)
         update_diagnostics(state, cfg.hypsometric_opt)  # after the RK loop)
     close_periodic_alias(state, cfg)
+    if getattr(state, "smoke_col", None) is not None:
+        # The smoke tracer's column load for the history writer, from the
+        # completed step's tracer and column mass.  Absent, one getattr.
+        from woof.core.smoke_tracer import refresh_column_load
+        refresh_column_load(state)
     state.elapsed_seconds += cfg.dt
 
 
@@ -4312,7 +4362,7 @@ def stability_gate_failed(report: dict, *, max_cfl: float,
 NONFINITE_SURVEY_CARRIERS = (
     ("w", "W"), ("u", "U"), ("v", "V"), ("thp", "T"), ("php", "PH"),
     ("mup", "MU"), ("p", "P"), ("al", "AL"), ("alt", "ALT"),
-    ("tke", "TKE"),
+    ("tke", "TKE"), ("smoke", "SMOKE"),
     ("qv", "QVAPOR"), ("qc", "QCLOUD"), ("qr", "QRAIN"),
     ("qi", "QICE"), ("qs", "QSNOW"), ("qg", "QGRAUP"),
 )

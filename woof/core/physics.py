@@ -5349,6 +5349,15 @@ class PhysicsDriver:
                 self.call_counts["ysu"] += 1
                 if self.sase_active:
                     self.call_counts["sase"] += 1
+                if (getattr(state, "smoke", None) is not None
+                        and "exch_h" in self.fields):
+                    # The passive smoke tracer takes the scheme's own heat
+                    # diffusivity through WRF's diff4d solve, operator-
+                    # split over this PBL interval (woof.core.smoke_tracer).
+                    # Absent tracer, one getattr.
+                    from woof.core.smoke_tracer import mix_pbl
+                    mix_pbl(state, atmosphere, self.fields["exch_h"],
+                            self.bldt_seconds)
             else:
                 self.pbl_tendencies = PhysicsTendencies.zeros(state)
 

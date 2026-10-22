@@ -732,6 +732,12 @@ SM86_NVRTC_12_9_86 = KernelFrameRecording(
         'sase': 6272,
         'rrtmgp_gas': 0,
         'rrtmgp_rte': 3600,
+        # The passive smoke tracer's surface source and column load
+        # (kernels/smoke_tracer.cu), read 2026-10-22 on an RTX A6000 (same
+        # sm_86 / NVRTC 12.9.86 platform key, Linux, fresh process) through
+        # woof/core/smoke_tracer.py's own NVRTC loader (-fmad=false
+        # --ftz=false), CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES: 0 B each.
+        'smoke_tracer': 0,
         'thompson_aerosol_warm': 112,
         # WDM6 / WSM6 at the 2026-10-12 workspace cut, read through the
         # production loader (load_module, then local_size_bytes) on an RTX

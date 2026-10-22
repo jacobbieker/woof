@@ -1093,6 +1093,14 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
     "TKE": ("TURBULENCE KINETIC ENERGY", "m2 s-2"),
     "TKE_SASE": ("SASE prognostic subgrid turbulence kinetic energy",
                  "m2 s-2"),
+    # The passive smoke tracer (RunConfig.smoke_tracer, state.smoke, mass
+    # grid, no stagger) and its end-of-step column load (state.smoke_col,
+    # 2-D).  woof's own names: WRF's analogue is the ``tracer`` array,
+    # whose members are named per tracer_opt package.  Present only on a
+    # domain that carries the tracer.
+    "SMOKE": ("passive smoke tracer mass mixing ratio, per kg of dry air",
+              "ug kg-1"),
+    "SMOKE_COL": ("column-integrated passive smoke tracer mass", "ug m-2"),
     "TKE_SHINHONG": ("Shin-Hong published subgrid turbulence kinetic "
                      "energy diagnostic", "m2 s-2"),
     # The SPLIT SUBGRID-FLUX DIAGNOSTIC (RunConfig sase_flux_diag, off by

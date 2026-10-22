@@ -92,4 +92,11 @@ def nest_field_kinds(cfg: RunConfig) -> tuple[str, ...]:
             # scheme no qs and no qg (the docstring carries the
             # consequence of widening that tuple).
             kinds += ["qi", "ni", "nr", "qir", "qib"]
+    if getattr(cfg, "smoke_tracer", False):
+        # The passive smoke tracer, on a dry tree too: WRF's ``tracer``
+        # array, its analogue, is declared ``ikjftb`` -- forced down a nest
+        # edge and fed back up it -- so a plume crosses into a nest and its
+        # restriction returns to the parent.  Last, so every moist kind
+        # keeps its position in the inventory.
+        kinds.append("smoke")
     return tuple(kinds)

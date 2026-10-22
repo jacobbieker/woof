@@ -222,6 +222,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "5d9648105e3e9900f1af0fcea6c4858734dc4a7d82f1c2b2064c3fa4b85a75c0",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module",
+    "factory_sha256": "e59e55fe707cdf53249c5d7a0d639d990d026b08a1f7e50e8ef3c010a30eca06",
+    "file": "woof/core/smoke_tracer.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "5f0783593f1e65eddf6bda1e4a1e48e8d7f04f3579d043b72fbc0e4c2ed97af3",
     "constructor": "ElementwiseKernel",
     "factory": "<module>",
@@ -1154,6 +1162,10 @@
    {
     "file": "gpuwm/core/kernels/ysu_validation.cu",
     "sha256": "ed125e770df19cb3161c4a8bed53e55cc0d740f521f318cf9166e2a1063ddd25"
+   },
+   {
+    "file": "woof/core/kernels/smoke_tracer.cu",
+    "sha256": "f0d5fb00af362ce40d7dc9854705b9d72feb24b3a9c7a23fc0c5e88cc0161c8f"
    }
   ],
   "python_compiler_files": [
@@ -1392,6 +1404,10 @@
    {
     "file": "gpuwm/verify/smallstep_vertical_oracle.py",
     "sha256": "dbf2d377f72588e7f0ef27a69ab6aa03a9c9f03751fbe411964278bd0e29a0f4"
+   },
+   {
+    "file": "woof/core/smoke_tracer.py",
+    "sha256": "0829d44a8fe10d7539cc43b09a741217f82691d94414168bb0906125d3463e4b"
    }
   ],
   "python_cuda_literals": [
@@ -5958,6 +5974,53 @@
     ]
    },
    "source_sha256": "565ad5fa1534d6e3a996e7887acc4fd84ec56590d0eeae2d761bef926de3737f"
+  },
+  "kernels:smoke_tracer": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "e79a7135ec2d6e829ec053047a962714078b2ef6e59bc15a8d5cc8a112b43b9e",
+    "sites": {
+     "100": 3
+    }
+   },
+   "native_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "abe0af1840802f1a250e55e6f41aec1f954c285d2bc65aa6c9e2ac6324c395c4"
   },
   "kernels:spec_bdy": {
    "assessment": "static_diagnostic_only",

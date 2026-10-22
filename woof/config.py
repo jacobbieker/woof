@@ -1154,6 +1154,24 @@ class RunConfig:
     #: Empty keeps the existing no-smoke trajectory. This is a forcing
     #: sensitivity input, not an advected or emitted smoke chemistry state.
     rrtmg_smoke_manifest: str = ""
+    #: A passive, positive-definite smoke tracer (``state.smoke``, ug per
+    #: kg of dry air; woof.core.smoke_tracer), the analogue of WRF's
+    #: ``tracer`` array.  It advects with the acoustic time-averaged mass
+    #: fluxes the moist scalars use (positive-definite on the final RK
+    #: stage), mixes under km_opt and the PBL's own diffusivity, takes zero
+    #: inflow and zero-gradient outflow on a specified boundary, and crosses
+    #: nest edges in both directions.  It feeds back into nothing: no
+    #: radiation, microphysics or dynamics reads it.  False (the default)
+    #: allocates nothing and launches nothing, so every earlier trajectory,
+    #: checkpoint and fingerprint is unchanged.  Appended last.
+    smoke_tracer: bool = False
+    #: Optional prescribed surface smoke emission for ``smoke_tracer``: a
+    #: 2-D ``(ny, nx)`` field on this domain's mass grid, in kg m-2 s-1,
+    #: read from a ``.npy`` file or from a ``.nc`` file's ``smoke_emission``
+    #: variable (woof.core.smoke_tracer.load_emission).  Injected into the
+    #: lowest model layer as a mass-conserving source.  Empty (the default)
+    #: emits nothing.  Appended last.
+    smoke_emission_file: str = ""
 
 #: The two ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -2882,7 +2900,7 @@ def load_streaming_options(path: str | Path):
 #: keep resolving to the same string, or restarts and experiment
 #: identities move underneath runs that were never reconfigured.
 CONFIG_RELATIVE_FILE_KEYS: tuple[str, ...] = (
-    "wif_climatology_path", "rrtmg_smoke_manifest",
+    "wif_climatology_path", "rrtmg_smoke_manifest", "smoke_emission_file",
 )
 
 
@@ -3581,6 +3599,60 @@ def terrain_drag_refusal(*, topo_wind, gwd_opt, bl_pbl_physics,
 #: vertical-only, and on any of them ``km_opt = 0`` means no horizontal
 #: mixing operator anywhere.
 HMIX_PRODUCING_PBL_SCHEMES: tuple[int, ...] = (SASE_PBL_SCHEME,)
+
+
+#: The file suffixes :func:`woof.core.smoke_tracer.load_emission` reads.
+SMOKE_EMISSION_SUFFIXES = (".npy", ".nc")
+
+
+def smoke_tracer_refusal(*, smoke_tracer, smoke_emission_file,
+                         bl_pbl_physics=0) -> str | None:
+    """Why this smoke-tracer pair cannot run, or None.
+
+    Only the configuration is judged here.  Whether the emission file opens
+    and matches the domain grid is decided where it is read
+    (woof.core.smoke_tracer.load_emission), because a prepared tree may be
+    validated on a machine the file does not live on.
+    """
+    from woof.explain import layered
+
+    if type(smoke_tracer) is not bool:
+        return layered(
+            f"smoke_tracer={smoke_tracer!r} must be true or false.",
+            "The switch allocates the tracer or leaves the state exactly as "
+            "it was; any other value would leave a reader guessing which "
+            "of the two ran.")
+    if type(smoke_emission_file) is not str:
+        return layered(
+            f"smoke_emission_file={smoke_emission_file!r} must be a file "
+            "path string; empty emits nothing.",
+            "The emission is a prescribed 2-D field read from one file.")
+    if smoke_emission_file and not smoke_tracer:
+        return layered(
+            f"smoke_emission_file={smoke_emission_file!r} needs "
+            "smoke_tracer = true; set it, or remove the file.",
+            "The emission is a source for the smoke tracer.  Without the "
+            "tracer there is no carrier to inject it into, and a file that "
+            "is silently ignored runs a forecast under the name of a "
+            "source it never had.")
+    if smoke_tracer and bl_pbl_physics == SASE_PBL_SCHEME:
+        return layered(
+            f"smoke_tracer = true cannot run under bl_pbl_physics="
+            f"{SASE_PBL_SCHEME} (SASE); select another PBL scheme or turn "
+            "the tracer off.",
+            "The tracer's PBL mixing is WRF's diff4d solve with the scheme's "
+            "own heat diffusivity exch_h, and SASE publishes none: the "
+            "tracer would sit in the surface layer while the run reported "
+            "PBL mixing.")
+    if smoke_emission_file and not smoke_emission_file.lower().endswith(
+            SMOKE_EMISSION_SUFFIXES):
+        return layered(
+            f"smoke_emission_file={smoke_emission_file!r} must name a .npy "
+            "or .nc file.",
+            "The emission reader takes a NumPy array or a NetCDF file's "
+            "smoke_emission variable, both kg m-2 s-1 on the domain's mass "
+            "grid; no other format is read.")
+    return None
 
 
 def km_opt_zero_producer(cfg: RunConfig) -> str | None:
@@ -4430,6 +4502,12 @@ def validate_run_config(cfg: RunConfig) -> RunConfig:
         topo_wind=cfg.topo_wind, gwd_opt=cfg.gwd_opt,
         bl_pbl_physics=cfg.bl_pbl_physics,
         sf_urban_physics=cfg.sf_urban_physics)
+    if why is not None:
+        raise ValueError(why)
+    why = smoke_tracer_refusal(
+        smoke_tracer=cfg.smoke_tracer,
+        smoke_emission_file=cfg.smoke_emission_file,
+        bl_pbl_physics=cfg.bl_pbl_physics)
     if why is not None:
         raise ValueError(why)
     validate_radiation_driver_options(cfg)

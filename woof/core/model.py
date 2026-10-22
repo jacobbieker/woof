@@ -841,6 +841,19 @@ def restart_identity_payload(exp) -> dict:
                 run.pop(key, None)
         if run.get("rrtmg_cloud_optics_form", "wrf_461") == "wrf_461":
             run.pop("rrtmg_cloud_optics_form", None)
+        # The passive smoke tracer, absent-stays-absent: off, nothing is
+        # allocated or launched, so every fingerprint written before the
+        # two fields existed keeps its value.  On, both bind -- the file
+        # is the tracer's only source.
+        if not run.get("smoke_tracer", False):
+            run.pop("smoke_tracer", None)
+        if not run.get("smoke_emission_file", ""):
+            run.pop("smoke_emission_file", None)
+        else:
+            # The file's bytes, not its path alone, are the source.
+            from woof.core.smoke_tracer import emission_file_digest
+            run["smoke_emission_sha256"] = emission_file_digest(
+                run["smoke_emission_file"])
         # Source members, not a path alone, identify prescribed radiation.
         from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
         if run.get("rrtmg_smoke_manifest", ""):

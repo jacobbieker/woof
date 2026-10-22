@@ -65,6 +65,12 @@ def _pop_fork_dycore_defaults(actual: dict) -> bool:
 def test_new_fields_are_reviewed_defaults_appended_last():
     """New fields remain appended, preserving positional construction."""
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # The passive smoke tracer and its prescribed emission, appended off:
+    # nothing is allocated or launched (tests/test_smoke_tracer.py).
+    assert names.pop() == "smoke_emission_file"
+    assert RunConfig.__dataclass_fields__["smoke_emission_file"].default == ""
+    assert names.pop() == "smoke_tracer"
+    assert RunConfig.__dataclass_fields__["smoke_tracer"].default is False
     assert names.pop() == "rrtmg_smoke_manifest"
     assert RunConfig.__dataclass_fields__["rrtmg_smoke_manifest"].default == ""
     # Lane-only radiation selectors follow the complete staged prefix.
@@ -699,6 +705,8 @@ def test_every_existing_legacy_toml_resolves_identically():
         assert actual.pop("swint_opt") == 0 and actual.pop("aer_opt") == 0
         assert actual.pop("rrtmg_cloud_optics_form") == "wrf_461"
         assert actual.pop("rrtmg_smoke_manifest") == ""
+        assert actual.pop("smoke_tracer") is False
+        assert actual.pop("smoke_emission_file") == ""
         assert actual.pop("alb_sol") == 0
         # The RUC SOILPROP lineage changed its default: a non-RUC case
         # never reads it; a RUC case changes answers (CHANGELOG).
@@ -755,6 +763,8 @@ def test_frozen_case_constructed_configs_resolve_identically():
         assert actual.pop("swint_opt") == 0 and actual.pop("aer_opt") == 0
         assert actual.pop("rrtmg_cloud_optics_form") == "wrf_461"
         assert actual.pop("rrtmg_smoke_manifest") == ""
+        assert actual.pop("smoke_tracer") is False
+        assert actual.pop("smoke_emission_file") == ""
         assert actual.pop("alb_sol") == 0
         # The RUC SOILPROP lineage changed its default: a non-RUC case
         # never reads it; a RUC case changes answers (CHANGELOG).

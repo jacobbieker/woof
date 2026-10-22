@@ -338,6 +338,14 @@ def state_array_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
         # the SERIALIZED carrier plus its REBUILT time-t copy.
         shapes["tke"] = m
         shapes["tke0"] = m
+    if getattr(cfg, "smoke_tracer", False):
+        # The passive smoke tracer (state.py, the same gate): the SERIALIZED
+        # carrier and its REBUILT time-t copy, the serialized surface
+        # emission and the serialized end-of-step column load.
+        shapes["smoke"] = m
+        shapes["smoke0"] = m
+        shapes["smoke_emis"] = s2
+        shapes["smoke_col"] = s2
     if cfg.bl_pbl_physics in (SASE_PBL_SCHEME, 11):
         # The published subgrid energy (state.py allocates it under the
         # same two-scheme condition): SASE's prognostic closure energy,

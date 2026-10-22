@@ -1823,6 +1823,11 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "pd_vertical_sl": 0,
     "rrtmg_smoke_manifest": 0,
     "upper_wind_limiter": 0,
+    # The passive smoke tracer's surface source and column load
+    # (woof/core/smoke_tracer.py, its own NVRTC loader, -fmad=false
+    # --ftz=false), read 2026-10-22 through that loader on an RTX A6000
+    # (sm_86), NVRTC 12.9, CuPy 14.2.0: 0 B for both kernels.
+    "smoke_tracer": 0,
     # Initialization-only parameter-table scaler, measured 2026-10-04
     # through the production loader on RTX 5090 / NVRTC 13.4.92: 0 B.
     "physics_params": 0,
@@ -3236,6 +3241,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("terrain_drag_composed")
     if int(getattr(dc.run, "zadvect_implicit", 0) or 0) > 0:
         modules.add("ieva")                    # A158, woof/core/ieva.py
+    if getattr(dc.run, "smoke_tracer", False):
+        modules.add("smoke_tracer")            # woof/core/smoke_tracer.py
     # WRF swint_opt = 1 (woof/core/swint.py) and aer_opt = 3 on the
     # legacy RRTMG shortwave (woof/core/rrtmg_aerosol_optics.py).
     if int(getattr(dc.run, "swint_opt", 0) or 0) == 1:
@@ -4814,9 +4821,11 @@ def scratch_slot_registry(cfg: RunConfig, *,
     if cfg.emdiv > 0.0:
         slots.update(acoustic_mudf=s2)
 
-    if cfg.moist or cfg.km_opt == 2:
-        # dycore.py acoustic time-averaged mass fluxes (moist scalars
-        # and/or the km_opt=2 TKE carrier advect with them).
+    smoke = bool(getattr(cfg, "smoke_tracer", False))
+    if cfg.moist or cfg.km_opt == 2 or smoke:
+        # dycore.py acoustic time-averaged mass fluxes (moist scalars,
+        # the km_opt=2 TKE carrier and/or the smoke tracer advect with
+        # them).
         slots.update(rk_ru_m=xs, rk_rv_m=ys, rk_ww_m=fl)
         slots["moist_rq_t"] = m                     # moist.py:247
         allocated = state_array_shapes(cfg)
@@ -4833,7 +4842,8 @@ def scratch_slot_registry(cfg: RunConfig, *,
             # module must stay importable without cupy;
             # tests/test_p3_port.py pins it to moist.ABSENT_MASS_SLOT.
             slots["moist_absent_mass"] = m
-        pd = ((cfg.moist and cfg.moist_adv_opt == 1) or cfg.km_opt == 2)             and not (cfg.open_x or cfg.open_y)
+        pd = ((cfg.moist and cfg.moist_adv_opt == 1) or cfg.km_opt == 2
+              or smoke) and not (cfg.open_x or cfg.open_y)
         if pd:
             slots.update(pd_fxl=xs, pd_fxc=xs, pd_fyl=ys, pd_fyc=ys,
                          pd_fzl=fl, pd_fzc=fl)      # moist.py:283-288
@@ -5104,6 +5114,19 @@ def scratch_slot_registry(cfg: RunConfig, *,
         # mass-shaped, filled and consumed inside one operator call.
         slots.update(da_nssl_rho=m, da_nssl_t=m)
 
+    if getattr(cfg, "smoke_tracer", False):
+        # woof/core/dycore.py:prepare_smoke_tendency: the smoke tracer's
+        # held per-step forward tendency (mixing, filter, emission), read
+        # by every RK stage of moist.advance_smoke_stage.  Allocated on
+        # every tracer run, with or without a mixing package, because it
+        # also carries the surface emission.
+        slots["smag_rsmoke"] = m
+        if int(cfg.bl_pbl_physics) != 0:
+            # woof/core/smoke_tracer.py:mix_pbl: the diff4d solve's work
+            # row for one column batch, reused by every PBL call.
+            from woof.core.smoke_tracer import PBL_COLUMN_PIECE
+            piece = min(PBL_COLUMN_PIECE, int(cfg.ny) * int(cfg.nx))
+            slots["smoke_pbl_work"] = (piece * (5 * int(cfg.nz) + 1),)
     if cfg.km_opt in (2, 3, 4):
         slots.update(smag_km=m, smag_kh=m)
         if cfg.diff_opt == 1:
@@ -5574,7 +5597,12 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
          # lifetime: they are transported scalars like the number moments,
          # so prepare_fixed_tendencies writes each held tendency once
          # before the RK loop and every stage only reads it.
-         "smag_rqir", "smag_rqib"),
+         "smag_rqir", "smag_rqib",
+         # The smoke tracer's held row.  Same lifetime: written once
+         # before the RK loop (prepare_fixed_tendencies, then
+         # prepare_smoke_tendency adds the surface emission) and only read
+         # by the three stages.
+         "smag_rsmoke"),
         "write_before_read",
         "woof/core/dycore.py:prepare_fixed_tendencies",
         "time-t K and its held tendencies are written and consumed before "
@@ -5600,6 +5628,12 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "tendency on the same footing as the smag_r* row -- zeroed before "
         "the RK loop, read by all three stages, never carried across a "
         "step; smag_tke_tmp and smag_mut are within-call staging"),
+    ScratchSlotLifetime(
+        ("smoke_pbl_work",), "write_before_read",
+        "woof/core/smoke_tracer.py:mix_pbl",
+        "the diff4d solve writes every work value of a column batch before "
+        "it reads one, and each batch completes before the next reuses the "
+        "row; nothing is read across PBL calls"),
     ScratchSlotLifetime(
         ("tke_budget_terms", "tke_budget_raw", "tke_budget_mu0",
          "tke_budget_mu"), "write_before_read",
@@ -6099,7 +6133,9 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
                "qi", "qs", "qg", "nr", "ni", "ns", "ng", "nh", "qh",
                "qir", "qib",
                "qndrop", "qnr", "qni", "qns", "qng", "qnh", "qnn",
-               "qvolg", "qvolh", "nc", "nn", "nwfa", "nifa")),
+               "qvolg", "qvolh", "nc", "nn", "nwfa", "nifa",
+               # The passive smoke tracer (nest_field_kinds' last arm).
+               "smoke")),
         "carrying", "woof/core/nest.py:force; "
         "woof/ingest/lateral_bc.py:attach_nest_boundaries",
         "rolling value/tendency frames are consumed through the complete "
@@ -6711,6 +6747,30 @@ def mynn_scalar_transient_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
     return {"mynn_scalar/local_diffusion_peak": (max(solve, coupling),)}
 
 
+def smoke_tracer_transient_shapes(
+        cfg: RunConfig) -> dict[str, tuple[int, ...]]:
+    """Peak live FP32 storage added by the smoke tracer's own operations.
+
+    The PBL mixing (woof/core/smoke_tracer.py:mix_pbl) solves at most
+    PBL_COLUMN_PIECE columns per launch: four packed (chunk, nz) inputs and
+    the solver's two (chunk, nz) outputs (its work row is the registered
+    ``smoke_pbl_work`` slot).  The column load and the surface source keep only (ny, nx)
+    planes, four at most.  Charged as the larger phase.  Empty with the
+    tracer off, so no other estimate moves.
+    """
+    if not getattr(cfg, "smoke_tracer", False):
+        return {}
+    from woof.core.smoke_tracer import PBL_COLUMN_PIECE
+
+    nz, columns = int(cfg.nz), int(cfg.ny) * int(cfg.nx)
+    planes = 4 * columns
+    pbl = 0
+    if int(cfg.bl_pbl_physics) != 0:
+        chunk = min(PBL_COLUMN_PIECE, columns)
+        pbl = 6 * nz * chunk
+    return {"smoke_tracer/peak": (max(pbl, planes),)}
+
+
 #: PBL schemes that allocate the Shin-Hong per-call output bundle
 #: (woof/core/shinhong.py launch_shinhong: one empty_like comprehension
 #: for the nine 3-D fields, four cp.empty for the 2-D ones -- the five
@@ -7045,6 +7105,7 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
     items += _items("transient", atmosphere_transient_shapes(run, cam_ozone=cam_ozone))
     items += _items("transient", ysu_output_transient_shapes(run))
     items += _items("transient", mynn_scalar_transient_shapes(run))
+    items += _items("transient", smoke_tracer_transient_shapes(run))
     items += mynn_mixscalars_memory_items(run, tile_buffer=tile_buffer)
     from woof.core.physics_inventory import terrain_drag_transient_shapes
     items += _items("transient", terrain_drag_transient_shapes(run))

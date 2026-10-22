@@ -104,7 +104,10 @@ def live_state_history_fields(state) -> dict[str, object]:
             # domain's tape gains this one volume; every other closure's
             # inventory is unchanged.  Restart-only in WRF; published here
             # so a large-eddy domain's tape carries its subgrid energy.
-            ("TKE", "tke")):
+            ("TKE", "tke"),
+            # The passive smoke tracer (RunConfig.smoke_tracer): allocated
+            # only when it is on, so no other run's inventory changes.
+            ("SMOKE", "smoke")):
         value = getattr(state, state_name, None)
         if value is not None:
             fields[output_name] = value
@@ -118,7 +121,9 @@ def live_state_history_fields(state) -> dict[str, object]:
     # nwfa2d (:510) and the exactly-zero nifa2d nothing in
     # module_mp_thompson.F ever fills.
     for output_name, state_name in (
-            ("QNWFA2D", "nwfa2d"), ("QNIFA2D", "nifa2d")):
+            ("QNWFA2D", "nwfa2d"), ("QNIFA2D", "nifa2d"),
+            # The smoke tracer's column load, (ny, nx) like the two above.
+            ("SMOKE_COL", "smoke_col")):
         value = getattr(state, state_name, None)
         if value is not None:
             fields[output_name] = value

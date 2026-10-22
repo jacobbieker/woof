@@ -4,6 +4,19 @@
 
 New:
 
+- `smoke_tracer = true` carries a passive smoke tracer, `SMOKE` (ug per
+  kg of dry air), the analogue of WRF's `tracer` array. It advects with
+  the moist scalars' acoustic-averaged mass fluxes, positive-definite on
+  the final RK stage. It mixes under `km_opt` and through the PBL scheme's
+  heat diffusivity with WRF's `diff4d` solve. A specified boundary gives
+  it zero inflow and zero-gradient outflow, and it crosses nest edges in
+  both directions. It is checkpointed. Nothing reads it back.
+  `smoke_emission_file` (per domain, `.npy` or NetCDF, kg m-2 s-1 on the
+  domain's mass grid) injects a prescribed surface emission into the
+  lowest layer. History gains `SMOKE` and its column load `SMOKE_COL`
+  (ug m-2). Off by default: nothing is allocated or launched, and
+  checkpoints and fingerprints are unchanged.
+
 - `--source ukv`: the Met Office UKV (UK deterministic 2 km), 33 pressure
   levels to 10 hPa, from two anonymous stores. A window inside the Source
   Cooperative Icechunk archive (2024-01-01 00Z to 2025-08-13 22Z, each

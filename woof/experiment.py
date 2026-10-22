@@ -396,6 +396,11 @@ _DOMAIN_RUN_OVERRIDES = (
     # (woof.core.terrain_drag); the GSL suite tapers itself with each
     # domain's grid length, so a column is the natural shape.
     "topo_wind", "gwd_opt",
+    # The prescribed surface smoke emission is a field on ONE domain's mass
+    # grid, so each domain names its own file (or "" for none).  smoke_tracer itself
+    # stays [shared]: a nest edge forces and feeds back the tracer, so a
+    # tree carries it on every domain or on none.
+    "smoke_emission_file",
 )
 
 #: Per-domain vertical keys are REJECTED outright (F1 amendment: the
@@ -1827,7 +1832,14 @@ def load_experiment(path: str | Path, *,
     source = str(authority.source)
     from woof.config import _anchor_config_file_paths
     _anchor_config_file_paths(raw.get("shared", {}), authority.source,
-                              keys=("rrtmg_smoke_manifest",))
+                              keys=("rrtmg_smoke_manifest",
+                                    "smoke_emission_file"))
+    # The smoke emission is per domain too (_DOMAIN_RUN_OVERRIDES), so a
+    # [[domain]] path resolves beside the config exactly as a [shared] one.
+    for table in raw.get("domain", ()) or ():
+        if isinstance(table, dict):
+            _anchor_config_file_paths(table, authority.source,
+                                      keys=("smoke_emission_file",))
     base_dir = Path(authority.source).parent
     experiment = build_experiment_from_config_tables(
         raw, source=source, base_dir=base_dir)
@@ -5511,7 +5523,9 @@ def _public_config_value(value):
                                   ("thompson_version", "wrf_461"),
                                   ("thompson_fork_snow_fall", "blend"),
                                   ("rrtmg_cloud_optics_form", "wrf_461"),
-                                  ("rrtmg_smoke_manifest", "")):
+                                  ("rrtmg_smoke_manifest", ""),
+                                  ("smoke_tracer", False),
+                                  ("smoke_emission_file", "")):
                 if run_document.get(name, default) == default:
                     run_document.pop(name, None)
         return document

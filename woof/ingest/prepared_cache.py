@@ -806,6 +806,11 @@ PREPARATION_INERT_RUN_FIELDS = frozenset({
     # Prescribed smoke acts only in radiation after prepared-state restore.
     # Its full member identity remains in forecast and restart identities.
     "run.rrtmg_smoke_manifest",
+    # The passive smoke tracer starts from zero inside the forecast and its
+    # emission is read on the tracer's first step (core/smoke_tracer.py);
+    # preparation computes neither.  Both bind the forecast and restart
+    # identities when moved.
+    "run.smoke_tracer", "run.smoke_emission_file",
 })
 
 

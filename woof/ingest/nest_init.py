@@ -1591,6 +1591,9 @@ RK_TIME_T_SEED_PAIRS = (
     # :func:`seed_rk_time_t_copies` skips both on every state that is not
     # P3, exactly as it does for the mp=28 row above.
     ("qir", "qir0"), ("qib", "qib0"),
+    # The passive smoke tracer (RunConfig.smoke_tracer).  Absent on every
+    # state that leaves it off, and the None guard skips it there.
+    ("smoke", "smoke0"),
 )
 
 
@@ -1643,6 +1646,10 @@ def _parent_only_base(parent, reg, terrain: bool, *, window=None,
 POSITIVE_DEFINITE_MOMENTS = (
     "nc", "nr", "ni", "ns", "ng", "qndrop", "qnr", "qni", "qns",
     "qng", "qnh", "qnn", "nwfa", "nifa",
+    # The smoke tracer: non-negative by construction, and a SINT
+    # undershoot below zero would be a sink the positive-definite transport
+    # cannot account for.
+    "smoke",
 )
 
 #: Rounding budget for one SINT, in units in the last place of the
@@ -1928,6 +1935,13 @@ def parent_only_init(child_dc: DomainConfig,
                           # The None guard skips both on every state that
                           # is not P3.
                           ("qir", ""), ("qib", ""),
+                          # The passive smoke tracer.  Its emission is NOT
+                          # interpolated: a startup nest is built from the
+                          # source data and never sees its parent's, so a
+                          # nest emits from its own smoke_emission_file or
+                          # not at all, on every road alike.  Absent unless
+                          # smoke_tracer is on.
+                          ("smoke", ""),
                           ("h_diabatic", ""),
                           # The dycore's exported advective forcing pair
                           # (WRF RTHFTEN/RQVFTEN).  Mass-stagger, the same
@@ -1982,6 +1996,12 @@ def parent_only_init(child_dc: DomainConfig,
     seed_rk_time_t_copies(child)
     _set_map_fields(child, grid)
     update_diagnostics(child, cfg.hypsometric_opt)
+    if (getattr(child, "smoke_col", None) is not None
+            and not isinstance(child.smoke_col, np.ndarray)):
+        # The interpolated tracer's column load, so a frame written before
+        # the newborn's first step publishes the plume it was born under.
+        from woof.core.smoke_tracer import refresh_column_load
+        refresh_column_load(child)
     return ChildInitResult(
         state=child, grid=grid, coord=coord, real=None,
         static_fields=None, horizontal=None, soil=None, domain=child_dc,
