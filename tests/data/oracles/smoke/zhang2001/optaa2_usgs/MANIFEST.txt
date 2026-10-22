@@ -1,0 +1,24 @@
+zhang_optaa i4 0
+modesurftype i4 0
+ido_mom0 i4 0
+ido_mom3 i4 0
+dg_num f4 1 3712
+lnsig f4 1 3712
+dens_part f4 1 3712
+airtemp f4 1 3712
+airdens f4 1 3712
+ustar f4 1 3712
+resist_a f4 1 3712
+iseason i4 1 3712
+isurftype i4 1 3712
+iwetsurf i4 1 3712
+airkinvisc_in f4 1 3712
+freepath_in f4 1 3712
+depvel_0 f4 1 3712
+depvel_3 f4 1 3712
+resist_s0 f4 1 3712
+resist_s3 f4 1 3712
+vsettl_0 f4 1 3712
+vsettl_3 f4 1 3712
+airkinvisc_out f4 1 3712
+freepath_out f4 1 3712

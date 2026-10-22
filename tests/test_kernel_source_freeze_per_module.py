@@ -812,6 +812,18 @@ BASELINE_PINNED: dict[str, str] = {
         "ac810c4ffc873f084882adb695eccdbf84d8c7d28af1654c3d01755770460ece",
     "swint":
         "ced1a30cd19b61b749add691522d134cf2cee7b2cb818ebe175b1bd5112620f7",
+    # feat/smoke-physics: the woof.smoke library's composed NVRTC unit
+    # (woof/smoke/_kernels.py, -fmad=false --ftz=false): WRF-SFIRE's fire
+    # smoke tracer emission, the Freitas plume rise of WRF-Chem, Zhang
+    # (2001) deposition and GOCART settling, each held to WRF v4.7.1 at
+    # zero ULP (tests/test_smoke_*_wrf471_parity.py), and woof's own
+    # injection profiles (tests/test_smoke_physics.py).
+    "smoke_emission":
+        "4d9e320673318f62e5c6485c0dad10355375672344306c120a1f2e55c2eff4d6",
+    "smoke_plumerise":
+        "7cea35690f286f3a4d2e794218ca14f8be611a5df9aa9889cf1caf49696a14ab",
+    "smoke_deposition":
+        "2a32d0d8918cfac71f808014f00fd43f95c522af2b52b34232d2ffbcd01e6d90",
 }
 
 _FROZEN = _frozen_module()

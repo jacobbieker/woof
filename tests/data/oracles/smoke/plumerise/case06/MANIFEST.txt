@@ -1,0 +1,11 @@
+u f4 1 48
+v f4 1 48
+theta f4 1 48
+pi f4 1 48
+qv f4 1 48
+zt f4 1 48
+zm f4 1 48
+firesize f4 1 4
+mean_fct f4 1 4
+eburn_in f4 0
+eburn_out f4 1 48

@@ -1,0 +1,14 @@
+dt f4 0
+g f4 0
+dyn_visc f4 0
+uoc i4 0
+reff f8 1 3
+den f8 1 3
+chem f4 3 50 3 4
+t_phy f4 2 50 4
+p_phy f4 2 50 4
+dz8w f4 2 50 4
+rho_phy f4 2 50 4
+tc_out f8 3 50 3 4
+graset f8 2 3 4
+grasetvel f8 2 3 4

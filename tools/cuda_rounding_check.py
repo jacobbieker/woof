@@ -317,7 +317,8 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
     fragments = {"p3", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "urban_bep_bem",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
-                 "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16"}
+                 "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
+                 "smoke_emission", "smoke_plumerise", "smoke_deposition"}
     direct = {"rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf", "ruc_spp"}
     stock = [unit for unit in stock
              if unit.key not in {"kernels:" + name for name in fragments | direct}]
@@ -400,6 +401,10 @@ def composed_units(root: Path) -> list[Unit]:
     ruc = module("ruc_spp")
     units.append(Unit("direct:ruc_spp", (kdir / "ruc_spp.cu").read_text(encoding="utf-8"),
                       tuple(ruc.MODULE_OPTIONS)))
+    smoke = importlib.import_module("woof.smoke._kernels")
+    if not Path(smoke.__file__).resolve().is_relative_to(root):
+        raise RuntimeError("source factory smoke was imported outside the checked tree")
+    units.append(Unit("composed:smoke", smoke.module_source(), tuple(smoke.MODULE_OPTIONS)))
     return units
 
 
