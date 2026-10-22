@@ -6,7 +6,8 @@ tests/test_windfarm_power_diag.py.  Here every device output -- the frame
 evaluation, the hub interpolants, the window sums and maxima, the farm
 pair and the frame fields -- must be the host's raw words (max ULP 0),
 and the power, Ct, density and corrected speed must be the oracles'
-(TurbineCurve, woof.energy.extract, woof.energy.ramps) directly.
+(TurbineCurve, woof.energy.extract, woof.energy.ramps and
+woof.energy.power_farm's density correction) directly.
 Tiny domains only, synthetic turbines.
 """
 from __future__ import annotations
@@ -83,6 +84,8 @@ def test_gpu_equals_the_host_road_and_the_oracles_to_zero_ulp(
         tmp_path, phb_1d, dry):
     import cupy as cp
     from woof.energy.extract import air_density, air_temperature
+    from woof.energy.power_farm import (
+        density_corrected_speed as power_farm_corrected)
     from woof.energy.ramps import density_corrected_speed
 
     rng = np.random.default_rng(11)
@@ -112,6 +115,8 @@ def test_gpu_equals_the_host_road_and_the_oracles_to_zero_ulp(
         assert max_ulp(got["rho"], rho) == 0
         v_eq = density_corrected_speed(got["rews"], got["rho"])
         assert max_ulp(got["v_eq"], v_eq) == 0
+        assert max_ulp(got["v_eq"], power_farm_corrected(got["rews"],
+                                                         got["rho"])) == 0
         running = v_eq <= host_diag.cut_out_ms
         power = np.array([float(c.fraction(v_eq[n])) * (c.rated_kw * 1000.0)
                           for n, c in enumerate(host_diag.curves)])

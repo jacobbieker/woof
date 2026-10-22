@@ -33,9 +33,11 @@ it is ONE inline CUDA kernel, one thread per turbine, and a one-thread
 kernel that folds the farm sum; the NumPy functions below are its
 operation-for-operation mirror and the CPU road.  The kernel is compiled
 straight through NVRTC with ``-fmad=false --ftz=false`` (no contraction,
-no flush), its only transcendental is ``pow`` from the word-exact device
-libm ``woof/core/kernels/glibc_flt64.cuh``, and the host takes the C
-library's ``pow`` through :mod:`woof.core.host_libm`; every sum runs in a
+no flush).  Its transcendentals are ``pow`` from the glibc-word device
+libm ``woof/core/kernels/glibc_flt64.cuh`` (the host takes the C
+library's ``pow`` through :mod:`woof.core.host_libm`) and the correctly
+rounded ``cbrt`` of ``woof/core/kernels/cr_cbrt_flt64.cuh`` (the host
+takes its NumPy twin, :mod:`woof.core.cr_cbrt`); every sum runs in a
 fixed index order.  So every output word is equal on the two roads (max
 ULP 0, ``tests/test_windfarm_power_diag_gpu.py``), and equal to the
 independent oracles each step names:
@@ -63,16 +65,17 @@ independent oracles each step names:
    (1 where either wind is calm) --
    :func:`woof.energy.ramps.rotor_equivalent_wind_speed`'s rule, whose
    strips are interpolated in ln(height) from a forecast's heights, so its
-   REWS is not this one's; the root is ``pow(x, 1/3)`` (:data:`THIRD`);
+   REWS is not this one's; the root is the correctly rounded cbrt
+   (:func:`woof.core.cr_cbrt.cbrt`, ``uw_cbrt`` on the device);
 5. hub moist density ``rho = p / (R_d (T (1 + 0.608 q)))``,
    ``T = theta (p / P0)^(R_d/c_p)``, ``q = qv / (1 + qv)``: the words of
    :func:`woof.energy.extract.air_density` of ``air_temperature`` (``qv =
    0`` on a dry state); and the IEC pitch-regulated density correction
    ``v_eq = REWS (rho / 1.225)^(1/3)``: the words of
-   :func:`woof.energy.ramps.density_corrected_speed`.
-   :func:`woof.energy.power_farm.density_corrected_speed` spells the root
-   ``cbrt`` and so differs from it, BY DESIGN, by at most 4 ULP on about
-   half the arguments (:data:`THIRD` says why);
+   :func:`woof.energy.ramps.density_corrected_speed` and of
+   :func:`woof.energy.power_farm.density_corrected_speed`, which take the
+   same correctly rounded cube root (CORE-MATH's, transcribed for the host
+   and the device alike);
 6. ``POWER = fraction(v_eq) * (rated_kw * 1000)`` W and ``CT = Ct(v_eq)``,
    both ZERO above the curve's ``cut_out_ms`` (no restart hysteresis: a
    diagnostic carries no running state across a cut-out, where
@@ -124,7 +127,9 @@ from pathlib import Path
 import numpy as np
 
 from woof.core.constants import CP, G, P0, RD
-from woof.core.hub_wind_diag import _array_module, _epoch_seconds, locate_sites
+from woof.core.cr_cbrt import cbrt as _cbrt
+from woof.core.hub_wind_diag import (_array_module, _epoch_seconds,
+                                     locate_sites)
 from woof.io.wrf_output_schema import WINDFARM_POWER_OUTPUT_FIELDS
 
 DTYPE = np.float32
@@ -360,16 +365,14 @@ def turbine_curve(turbine: Turbine, library=None):
 # woof.core.host_libm), which the device kernel below mirrors word for word
 # ---------------------------------------------------------------------------
 
-#: The rotor-equivalent and density-correction cube root: ``pow(x, 1/3)``
-#: (glibc's pow on the host, its word-exact device transcription on the
-#: GPU).  NOT ``cbrt``: the repo carries no word-exact device ``cbrt`` and
-#: transcribing glibc's (LGPL) is not done (glibc_flt64.cuh's notice), so
-#: the root is ``woof.energy.ramps.density_corrected_speed``'s
-#: ``(rho / 1.225) ** (1 / 3)`` -- which IS pow -- rather than
-#: ``woof.energy.power_farm``'s ``np.cbrt``.  The roots differ by at most 3
-#: ULP and the corrected speeds by 4, on about half the arguments
-#: (``tests/test_windfarm_power_diag.py`` pins the measured bound).
-THIRD = 1.0 / 3.0
+#: The rotor-equivalent and density-correction cube root is CORE-MATH's
+#: correctly rounded cbrt: :func:`woof.core.cr_cbrt.cbrt` here and
+#: ``uw_cbrt`` (woof/core/kernels/cr_cbrt_flt64.cuh) in the kernel, the
+#: same algorithm and, being correctly rounded, the same word as every
+#: other correctly rounded cbrt -- the one the energy products' density
+#: correction takes too.  Neither ``pow(x, 1/3)`` nor the C library's
+#: ``cbrt`` is correctly rounded (tools/uwpbl_wrf471_oracle/libm64/README.md
+#: measures both).  Imported at the top of the module as ``_cbrt``.
 
 #: Bisection steps of :meth:`TurbineCurve.thrust_coefficient` (its own 40).
 CT_BISECTION_STEPS = 40
@@ -512,12 +515,12 @@ def evaluate_turbines(columns, targets, weights, *, curves, curve_index,
                           np.minimum(np.maximum(cosine, 0.0), 1.0), 1.0)
         along = np.maximum(speed * cosine, 0.0)
         cubed = cubed + float(weights[s]) * (along * along * along)
-    rews = _pow(cubed, THIRD)
+    rews = _cbrt(cubed)
     theta, p = f64["theta"][-1], f64["p"][-1]
     q = f64["qv"][-1] if "qv" in f64 else np.zeros_like(p)
     temperature = theta * _pow(p / P0, RD / CP)
     rho = p / (RD * (temperature * (1.0 + _VIRT * (q / (1.0 + q)))))
-    v_eq = rews * _pow(rho / REFERENCE_DENSITY, THIRD)
+    v_eq = rews * _cbrt(rho / REFERENCE_DENSITY)
     fraction = curve_fraction(v_eq, curves, curve_index)
     ct = thrust_coefficient(v_eq, curves, curve_index, half_rho_area)
     finite = np.isfinite(v_eq)
@@ -533,9 +536,12 @@ def evaluate_turbines(columns, targets, weights, *, curves, curve_index,
 # ---------------------------------------------------------------------------
 # The CUDA kernels.  Inline, the hub-wind precedent (woof/core/hub_wind_diag.py
 # says why a woof/core/kernels/*.cu unit is not used), prefixed by the
-# word-exact device libm glibc_flt64.cuh and compiled straight through NVRTC
-# with --fmad=false --ftz=false (the terrain-drag route).  The bytes of the
-# kernel text are pinned by SHA-256 in tests/test_windfarm_power_diag.py.
+# device libm LIBM_HEADERS (glibc-word pow from glibc_flt64.cuh, CORE-MATH's
+# correctly rounded cbrt from cr_cbrt_flt64.cuh) and compiled straight
+# through NVRTC with --fmad=false --ftz=false (the terrain-drag route).  The
+# kernel text is pinned by SHA-256 in tests/test_windfarm_power_diag.py and
+# each header by its own pin (tests/test_kernel_source_freeze_per_module.py,
+# tests/test_cr_cbrt.py).
 # ---------------------------------------------------------------------------
 
 #: Slots of the packed float64 output buffer, each ``n_turbine`` long:
@@ -712,7 +718,7 @@ __global__ void windfarm_turbines(
         const double along = wf_max(speed * cosine, 0.0);
         cubed = cubed + weights[row] * (along * along * along);
     }
-    const double rews = glibc_pow(cubed, WF_THIRD);
+    const double rews = uw_cbrt(cubed);
 
     // Step 5: hub moist density (woof.energy.extract.air_density of
     // air_temperature) and the IEC density correction (ramps').
@@ -722,7 +728,7 @@ __global__ void windfarm_turbines(
     const double temperature = theta * glibc_pow(pres / WF_P0, WF_RCP);
     const double rho = pres / (WF_RD * (temperature
                                         * (1.0 + WF_VIRT * (q / (1.0 + q)))));
-    const double v_eq = rews * glibc_pow(rho / WF_RHO0, WF_THIRD);
+    const double v_eq = rews * uw_cbrt(rho / WF_RHO0);
 
     // Step 6: TurbineCurve.fraction and .thrust_coefficient, verbatim.
     const int ci = curve_index[t];
@@ -800,7 +806,7 @@ __global__ void windfarm_farm(const double* __restrict__ power, const int n,
 for _name, _value in (
         ("WF_NSEG", str(N_ROTOR_SEGMENTS)),
         ("WF_CT_STEPS", str(CT_BISECTION_STEPS)),
-        ("WF_ONE_THIRD", repr(1.0 / 3.0)), ("WF_THIRD", repr(THIRD)),
+        ("WF_ONE_THIRD", repr(1.0 / 3.0)),
         ("WF_P0", repr(float(P0))), ("WF_RCP", repr(RD / CP)),
         ("WF_RD", repr(float(RD))), ("WF_VIRT", repr(_VIRT)),
         ("WF_RHO0", repr(REFERENCE_DENSITY)),
@@ -811,10 +817,11 @@ del _name, _value
 #: No FMA contraction and no flush to zero (the terrain-drag options).
 MODULE_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 MODULE_KEY = "woof.core.windfarm_power_diag:windfarm_power"
-#: The device libm prepended to the kernel, read from the kernel directory.
-LIBM_HEADER = "glibc_flt64.cuh"
+#: The device libm prepended to the kernel, read from the kernel directory:
+#: glibc-word pow, then the correctly rounded cbrt.
+LIBM_HEADERS = ("glibc_flt64.cuh", "cr_cbrt_flt64.cuh")
 
-#: SHA-256 of the kernel text (before the libm header), pinned by
+#: SHA-256 of the kernel text (after the LIBM_HEADERS), pinned by
 #: tests/test_windfarm_power_diag.py.
 KERNEL_SOURCE_SHA256 = hashlib.sha256(KERNEL_SOURCE.encode("utf-8")).hexdigest()
 
@@ -822,7 +829,8 @@ KERNEL_SOURCE_SHA256 = hashlib.sha256(KERNEL_SOURCE.encode("utf-8")).hexdigest()
 def module_source() -> str:
     """The exact source string NVRTC compiles: the libm, then the kernels."""
     root = Path(__file__).parent / "kernels"
-    return (root / LIBM_HEADER).read_text(encoding="utf-8") + KERNEL_SOURCE
+    return "".join((root / name).read_text(encoding="utf-8")
+                   for name in LIBM_HEADERS) + KERNEL_SOURCE
 
 
 @lru_cache(maxsize=None)

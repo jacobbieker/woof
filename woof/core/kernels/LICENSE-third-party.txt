@@ -332,6 +332,12 @@ b. CORE-MATH (MIT) -- binary64 cos and acos, correctly rounded.  glibc's own
    binary64 cos and acos (IBM, LGPL) are not transcribed anywhere in this
    repository.
 
+c. CORE-MATH (MIT) -- binary64 cbrt (src/binary64/cbrt/cbrt.c, revision
+   8ae55cdd0d953dc1d6f78659435283d3436865ab), correctly rounded, in
+   cr_cbrt_flt64.cuh (the wind-farm power kernel's cube root) and its NumPy
+   twin woof/core/cr_cbrt.py; both carry the notice inline.  glibc's own
+   binary64 cbrt (LGPL) is not transcribed anywhere in this repository.
+
 The upstream files are kept verbatim, sha256-pinned, at
 tools/uwpbl_wrf471_oracle/libm64/upstream/.  These two grants cover the
 routines named here and nothing else, on the terms section 6 states for the
@@ -340,6 +346,7 @@ MIT requires (also at licenses/LICENSE-CORE-MATH-binary64-MIT.txt):
 
     Copyright (c) 2022-2025 Paul Zimmermann and Tom Hubrecht
     Copyright (c) 2024-2025 Alexei Sibidanov.
+    Copyright (c) 2021-2022 Alexei Sibidanov.
 
     These files are part of the CORE-MATH project
     (https://core-math.gitlabpages.inria.fr/).

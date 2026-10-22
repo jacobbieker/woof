@@ -306,16 +306,22 @@ def test_rews_density_power_and_ct_equal_their_oracles_word_for_word(
         tmp_path, seed):
     """Oracle chain, each link independent of this module's arithmetic:
 
-    * REWS: a scalar Python evaluation (math.sqrt, math.pow) of the strip
+    * REWS: a scalar Python evaluation (math.sqrt, and the exact integer
+      cube root woof.core.correctly_rounded_libm.cbrt_cr) of the strip
       winds woof.core.hub_wind_diag.interp_to_heights_np gives;
     * rho: woof.energy.extract.air_density of air_temperature;
-    * v_eq: woof.energy.ramps.density_corrected_speed;
+    * v_eq: woof.energy.ramps.density_corrected_speed AND
+      woof.energy.power_farm.density_corrected_speed (``woof energy
+      power``'s), and the exact-integer cube root by hand;
     * power: TurbineCurve.fraction(v_eq) * (rated_kw * 1000);
     * Ct: TurbineCurve.thrust_coefficient(v_eq) (below cut-out).
     """
     import math
 
+    from woof.core.correctly_rounded_libm import cbrt_cr
     from woof.energy.extract import air_density, air_temperature
+    from woof.energy.power_farm import (
+        density_corrected_speed as power_farm_corrected)
     from woof.energy.ramps import density_corrected_speed
 
     state, diag = _attached(tmp_path, _oracle_state(
@@ -339,7 +345,7 @@ def test_rews_density_power_and_ct_equal_their_oracles_word_for_word(
                       if norm > 0.0 else 1.0)
             along = max(speed * cosine, 0.0)
             cubed = cubed + float(diag.weights[s]) * (along * along * along)
-        rews[n] = math.pow(cubed, 1.0 / 3.0)
+        rews[n] = cbrt_cr(cubed)
     assert max_ulp(now["rews"], rews) == 0
     theta = now["theta_hub"].astype(np.float64)
     p = now["p_hub"].astype(np.float64)
@@ -348,6 +354,11 @@ def test_rews_density_power_and_ct_equal_their_oracles_word_for_word(
     assert max_ulp(now["rho"], rho) == 0
     v_eq = density_corrected_speed(now["rews"], now["rho"])
     assert max_ulp(now["v_eq"], v_eq) == 0
+    assert max_ulp(now["v_eq"], power_farm_corrected(now["rews"],
+                                                     now["rho"])) == 0
+    by_hand = np.array([r * cbrt_cr(float(d) / 1.225)
+                        for r, d in zip(now["rews"], now["rho"])])
+    assert max_ulp(now["v_eq"], by_hand) == 0
     power = np.array([float(c.fraction(v_eq[n])) * (c.rated_kw * 1000.0)
                       for n, c in enumerate(diag.curves)])
     ct = np.array([float(c.thrust_coefficient(v_eq[n]))
@@ -359,23 +370,23 @@ def test_rews_density_power_and_ct_equal_their_oracles_word_for_word(
     assert (now["power"] > 0.0).all()
 
 
-def test_power_farms_cbrt_density_correction_is_the_documented_difference():
-    """woof.energy.power_farm spells (rho / 1.225)^(1/3) as cbrt; this
-    diagnostic (and woof.energy.ramps) as pow(., 1/3), whose exponent is
-    the double nearest 1/3.  Pinned as measured (glibc 2.44): the roots
-    differ by at most 3 ULP and the corrected speeds by at most 4, on
-    roughly half the arguments."""
-    from woof.energy.power_farm import density_corrected_speed as by_cbrt
-    from woof.energy.ramps import density_corrected_speed as by_pow
+def test_the_energy_products_density_correction_is_the_diagnostics_word():
+    """``woof energy power`` (power_farm) and the ramps product take the
+    same correctly rounded cube root as the diagnostic: max ULP 0 between
+    all three and the exact integer reference, over the density and speed
+    ranges a forecast reaches."""
+    from woof.core.correctly_rounded_libm import cbrt_cr
+    from woof.energy.power_farm import density_corrected_speed as by_power
+    from woof.energy.ramps import density_corrected_speed as by_ramps
 
     rng = np.random.default_rng(4)
-    speed = rng.uniform(0.0, 30.0, 200_000)
-    rho = rng.uniform(0.9, 1.4, 200_000)
-    assert max_ulp((rho / 1.225) ** (1.0 / 3.0), np.cbrt(rho / 1.225)) <= 3
-    a, b = by_pow(speed, rho), by_cbrt(speed, rho)
-    assert max_ulp(a, b) <= 4
-    differ = np.count_nonzero(a != b)
-    assert 0 < differ < speed.size
+    speed = rng.uniform(0.0, 40.0, 50_000)
+    rho = rng.uniform(0.6, 1.5, 50_000)
+    want = np.array([v * cbrt_cr(float(d) / 1.225)
+                     for v, d in zip(speed, rho)])
+    assert max_ulp(by_power(speed, rho), want) == 0
+    assert max_ulp(by_ramps(speed, rho), want) == 0
+    assert max_ulp(speed * wp._cbrt(rho / wp.REFERENCE_DENSITY), want) == 0
 
 
 def test_thrust_and_fraction_are_the_library_curve_everywhere():
@@ -582,7 +593,7 @@ def test_registry_dispatches_and_refuses_unsupported_publishers(tmp_path):
 #: The inline kernel's bytes.  Changing them is a decision, not an edit:
 #: re-run the GPU tier (tests/test_windfarm_power_diag_gpu.py) and re-pin.
 KERNEL_SOURCE_SHA256 = (
-    "e76569786600a6c827f8ece258f8f712bed7f9216aeed9e7baa5944ee381d2b7")
+    "fe8bbe5de70420863bd8d15fb320254b46c4a5d877505360f4b5f38b7da5d906")
 
 
 def test_the_inline_kernel_source_and_its_route_are_pinned():
@@ -595,6 +606,8 @@ def test_the_inline_kernel_source_and_its_route_are_pinned():
     assert wp.module_source().endswith(wp.KERNEL_SOURCE)
     assert wp.module_source().startswith(
         (REPO / "woof/core/kernels/glibc_flt64.cuh").read_text(
+            encoding="utf-8")
+        + (REPO / "woof/core/kernels/cr_cbrt_flt64.cuh").read_text(
             encoding="utf-8"))
     # Its one transcendental is the glibc-word pow, never CUDA's.
     import re
@@ -602,7 +615,7 @@ def test_the_inline_kernel_source_and_its_route_are_pinned():
     calls = set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*\(", code))
     assert calls & {"pow", "powf", "cbrt", "exp", "log", "cos", "acos",
                     "__powf", "__expf"} == set()
-    assert "glibc_pow" in calls
+    assert {"glibc_pow", "uw_cbrt"} <= calls
 
 
 def test_every_hook_is_wired_where_the_window_needs_it():

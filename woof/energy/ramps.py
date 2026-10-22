@@ -120,6 +120,8 @@ import warnings
 
 import numpy as np
 
+from woof.core.cr_cbrt import cbrt as cr_cbrt
+
 from woof.energy.contracts import RAMP_EVENT_COLUMNS, ContractError
 #: IEC 61400-12-1 reference air density (kg m-3), shared with wind-power.
 from woof.energy.products import IEC_REFERENCE_DENSITY  # noqa: E402
@@ -187,10 +189,21 @@ class RampsRefused(ContractError):
 def density_corrected_speed(speed: Any, density: Any,
                             reference_density: float = IEC_REFERENCE_DENSITY
                             ) -> np.ndarray:
-    """IEC 61400-12-1 density normalisation ``v (rho / rho_ref)^(1/3)``."""
+    """IEC 61400-12-1 density normalisation ``v (rho / rho_ref)^(1/3)``.
 
-    return np.asarray(speed, dtype=float) * (
-        np.asarray(density, dtype=float) / reference_density) ** (1.0 / 3.0)
+    The cube root is the CORRECTLY ROUNDED one (:func:`woof.core.cr_cbrt.
+    cbrt`, CORE-MATH's), not ``** (1/3)`` or the C library's ``cbrt``: it
+    is the step this product shares with ``woof energy power``
+    (:func:`woof.energy.power_farm.density_corrected_speed`) and with the
+    in-model wind-farm power diagnostic (woof/core/windfarm_power_diag.py,
+    on the device too), and only a correctly rounded root is the same word
+    in all three on every host.  Before 2026-10 this was ``pow(x, 1/3)``,
+    which on glibc 2.44 is 1 ULP from the correctly rounded root on about
+    1.7 % of density ratios in [0.73, 1.14] (2 ULP after the product with
+    the speed), so corrected speeds moved by at most that.
+    """
+    return np.asarray(speed, dtype=float) * cr_cbrt(
+        np.asarray(density, dtype=float) / reference_density)
 
 
 def specific_power(capacity_mw: Any, rotor_diameter_m: Any) -> np.ndarray:
@@ -340,7 +353,8 @@ def rotor_equivalent_wind_speed(speed: Any, heights: Any, hub_height_m: Any,
         cosine = np.where(norm > 0.0, np.clip(cosine, 0.0, 1.0), 1.0)
         segment = segment * cosine
     cubed = np.sum(np.maximum(segment, 0.0) ** 3 * weights, axis=-1)
-    return np.cbrt(cubed), outside.sum(axis=1)
+    # Correctly rounded (woof.core.cr_cbrt): the same word on every host.
+    return cr_cbrt(cubed), outside.sum(axis=1)
 
 
 def shear_exponent(speed: Any, heights: Any, hub_height_m: Any,
@@ -1025,7 +1039,11 @@ def wind_resource_dataset(ds: Any, *, hub_height_m: Any,
             rho = apply(pointwise(hub_linear), [density, hub], core + [[]])
         else:
             rho = IEC_REFERENCE_DENSITY
-        equivalent = rews * (rho / IEC_REFERENCE_DENSITY) ** (1.0 / 3.0)
+        # density_corrected_speed's correctly rounded root, kept on the
+        # labelled arrays (rho is a hub DataArray, or the reference itself).
+        equivalent = rews * xr.apply_ufunc(
+            cr_cbrt, rho / IEC_REFERENCE_DENSITY, dask="parallelized",
+            output_dtypes=[float])
         fraction = xr.apply_ufunc(lambda s: curve_power_fraction(s, curve),
                                   equivalent, dask="parallelized",
                                   output_dtypes=[float])

@@ -468,12 +468,13 @@ and reads the turbine's power curve and thrust coefficient at `v_eq`
 (both zero above cut-out, with no hysteresis). On a GPU run this is one
 CUDA kernel per step, with nothing copied to the host until a frame is
 written. That costs about 0.06 ms per step on an RTX A6000, whatever the
-grid size. The CPU and GPU give the same output words. The density
-correction is `woof.energy.ramps.density_corrected_speed`, which takes
-the cube root as `pow(x, 1/3)`. `woof energy power` takes it as `cbrt`
-instead, so the corrected speed can differ from its value by a few ULP.
-It reads the resolved winds, so it runs with or without a turbine-drag
-scheme. Without one,
+grid size. The CPU and GPU give the same output words. Both cube roots
+(the rotor-equivalent wind's and the density correction's) are
+CORE-MATH's correctly rounded `cbrt`, transcribed for the device and the
+host. `woof energy power` and the ramps product take the same root in
+their density correction, so a corrected speed is the same word in all
+three. It reads the resolved winds, so it runs with or without a
+turbine-drag scheme. Without one,
 the numbers are free-stream estimates. A turbine is diagnosed by every
 domain that contains it. On a domain with none of them inside, the
 diagnostic does not run. Each frame carries:

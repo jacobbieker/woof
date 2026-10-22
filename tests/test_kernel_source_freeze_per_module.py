@@ -916,6 +916,11 @@ PINNED_HEADERS = {
 #: (04118fa24) into the BEP+BEM unit.
 COMPOSED_HEADERS = {
     "urban_bem.cuh": "b4cb2ac2ed49d7e8aeb71193a191eefbe4a6247624772428dd9ac322a89cdb99",
+    # CORE-MATH's correctly rounded binary64 cbrt, prepended by
+    # woof.core.windfarm_power_diag.module_source and woof.core.cr_cbrt (not
+    # by the kernel loader); proven equal to upstream on 2^28 arguments by
+    # tools/uwpbl_wrf471_oracle/libm64/sweep_cbrt.py.
+    "cr_cbrt_flt64.cuh": "543414e82e9042820f6fb386a29bea072b9995ab8046e2c8d1d32e7aff7c2691",
 }
 
 
