@@ -2778,6 +2778,27 @@ Takes no options of its own.
 | `--levels` | vertical levels of the compile domain (default 40) |
 | `--profile PROFILE` | a physics profile to compile for (repeatable); default: every profile a source defaults to |
 
+## `woof windfarm`
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof windfarm layout`
+
+| argument | what it does |
+|---|---|
+| `CONFIG` | experiment TOML whose domain the turbines are placed on |
+| `TURBINES` | turbine table: .csv, GeoJSON FeatureCollection of points, or a sites.v1 JSON |
+
+| option | what it does |
+|---|---|
+| `--curve ID` | turbine-library curve for every turbine whose row names none (required for a sites.v1 document) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--grid-id N` | domain to place the turbines on (default: 1) |
+| `--json` | print the summary as one JSON document instead of a table |
+| `--library FILE` | turbine library JSON (default: the bundled woof/data/energy/turbine_library.json) |
+
 ## `woof-carried-channel`
 
 Takes no options of its own.
