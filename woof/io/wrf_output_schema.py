@@ -1036,6 +1036,24 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
     "QR_HUB": ("RAIN WATER MIXING RATIO AT HUB HEIGHT AGL", "kg kg-1"),
     "QNC_HUB": ("CLOUD DROPLET NUMBER MIXING RATIO AT HUB HEIGHT AGL",
                 "kg-1"),
+    # Wind-farm power at listed turbines (woof/core/windfarm_power_diag.py;
+    # ``[output] windfarm_turbines``).  Not WRF Registry rows: woof's own
+    # diagnostic, present exactly when a domain's [output] names a turbine
+    # file and at least one listed turbine lies inside the domain.  The
+    # per-turbine members share the ``windfarm_turbine`` dimension
+    # (WINDFARM_TURBINE_DIMENSIONED_FIELDS below), in the order of the
+    # windfarm sidecar's ``turbine`` axis, which carries the names.
+    "WINDFARM_WINDOW_S": ("MODEL SECONDS COVERED BY THE POWER_FARM_MEAN "
+                          "WINDOW", "s"),
+    "REWS_TURBINE": ("ROTOR-EQUIVALENT WIND SPEED OVER THE TURBINE ROTOR "
+                     "DISK", "m s-1"),
+    "POWER_TURBINE": ("ELECTRICAL POWER OF THE TURBINE FROM ITS POWER "
+                      "CURVE AT THE DENSITY-CORRECTED ROTOR-EQUIVALENT "
+                      "WIND", "W"),
+    "CT_TURBINE": ("THRUST COEFFICIENT OF THE TURBINE AT THE "
+                   "DENSITY-CORRECTED ROTOR-EQUIVALENT WIND", "1"),
+    "POWER_FARM": ("SUM OF POWER_TURBINE OVER THE DOMAIN'S TURBINES", "W"),
+    "POWER_FARM_MEAN": ("TIME-MEAN POWER_FARM OVER HISTORY INTERVAL", "W"),
     # The wind members of the same nwp_output family (Registry.EM_COMMON:
     # 2079-2081, IO "rh02", attribute text verbatim) and the U/V pair at the
     # instant of the speed max (WRF's clim varstatisticsWIND rule; WRF's
@@ -1188,6 +1206,21 @@ HUB_SCALAR_OUTPUT_FIELDS: tuple[str, ...] = (
 #: The name of that axis in the file.
 HUB_HEIGHT_DIMENSION = "hub_height"
 
+#: Every history name the wind-farm power diagnostic emits, in the order it
+#: emits them (woof/core/windfarm_power_diag.py).
+WINDFARM_POWER_OUTPUT_FIELDS: tuple[str, ...] = (
+    "WINDFARM_WINDOW_S", "REWS_TURBINE", "POWER_TURBINE", "CT_TURBINE",
+    "POWER_FARM", "POWER_FARM_MEAN")
+
+#: The (n_turbine,) members, written on ``(Time, windfarm_turbine)``.
+#: Routed BY NAME, as the hub fields are: an ``n_turbine`` equal to ``nz``
+#: would otherwise land on ``bottom_top``.
+WINDFARM_TURBINE_DIMENSIONED_FIELDS: frozenset[str] = frozenset({
+    "REWS_TURBINE", "POWER_TURBINE", "CT_TURBINE"})
+
+#: The name of that axis in the file.
+WINDFARM_TURBINE_DIMENSION = "windfarm_turbine"
+
 
 __all__ = [
     "HISTORY_FIELDS_BY_NETCDF_NAME",
@@ -1207,6 +1240,9 @@ __all__ = [
     "SURFACE_IDENTITY_OUTPUT_FIELDS",
     "SURFACE_SOLAR_OUTPUT_FIELDS",
     "THOMPSON_AEROSOL_OUTPUT_FIELDS",
+    "WINDFARM_POWER_OUTPUT_FIELDS",
+    "WINDFARM_TURBINE_DIMENSION",
+    "WINDFARM_TURBINE_DIMENSIONED_FIELDS",
     "WRF_FIELD_TYPE_INTEGER",
     "WRF_FIELD_TYPE_REAL",
     "WrfOutputField",

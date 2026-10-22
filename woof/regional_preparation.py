@@ -258,6 +258,8 @@ def _experiment_identity(exp):
             # Off unless asked: identities written before the key existed
             # keep their bytes.
             selection.pop('hub_wind', None)
+        if selection.get('windfarm_power') is None:
+            selection.pop('windfarm_power', None)
         output.append(dict(history_interval_s=domain.history_interval_s, selection=selection,
                            tiles=(domain.tiles or exp.tiles or streaming.OFF).to_mapping()))
     return dict(start_time=exp.start_time.isoformat(), run_seconds=exp.run_seconds,

@@ -5497,7 +5497,11 @@ def _public_config_value(value):
             # Hub-height wind is off unless asked; an [output] block that
             # does not ask keeps its pre-feature public bytes.
             document.pop("hub_wind", None)
-        run_document = (document if isinstance(value, RunConfig) else
+        if (isinstance(value, history_selection_module.HistorySelection)
+                and value.windfarm_power is None):
+            # Wind-farm power likewise: absent stays absent.
+            document.pop("windfarm_power", None)
+        run_document =(document if isinstance(value, RunConfig) else
                         document.get("run") if isinstance(value, DomainConfig) else None)
         if isinstance(run_document, dict):
             # The generic forms existed before these selectors. Keep

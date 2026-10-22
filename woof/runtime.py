@@ -4627,6 +4627,14 @@ def integrate_prepared_case(
             state, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
             dy=cfg.dy, grid_id=domain_id,
             latlon=prepared.grid.latlon_mass, streamed=streamed)
+    # The [output] wind-farm power window (woof/core/windfarm_power_diag.py),
+    # on the same terms as the hub-wind window above.
+    if getattr(history_selection, "windfarm_power", None) is not None:
+        from woof.core.windfarm_power_diag import attach_windfarm_power
+        attach_windfarm_power(
+            state, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
+            dy=cfg.dy, grid_id=domain_id,
+            latlon=prepared.grid.latlon_mass, streamed=streamed)
     if restart_write_steps is not None:
         # THE CHECKPOINT'S QUESTION, ASKED BEFORE STEP 0.  A run that will
         # write checkpoints must be able to NAME its physics setup, and
