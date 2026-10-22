@@ -2601,7 +2601,13 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     "urban_bep_bem",
     # The drag unit borrows glibc helpers from the composed source in
     # woof.core.terrain_drag.module_source(); it cannot compile alone.
-    "terrain_drag"})
+    "terrain_drag",
+    # Fire spread (woof/fire/_device.py) composes glibc_flt32.cuh and
+    # glibc_flt64.cuh ahead of fire_spread.cu and cannot compile alone.  Its
+    # kernels are point-local (one thread per fire-grid cell, a few dozen
+    # scalars); no physics_kernel_modules selector row launches it yet, and
+    # the coupled fire model that does will price its composed unit.
+    "fire_spread"})
 # face_mass, held_heating, rk_bookkeeping and surface_w (the dycore-host
 # speed lane's point-local units, 66af318bc) sat in this set on
 # 2026-09-30 under the same "no measurement platform in this lane"

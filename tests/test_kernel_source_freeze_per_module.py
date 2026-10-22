@@ -669,6 +669,15 @@ BASELINE_PINNED: dict[str, str] = {
     # (tests/test_physics_256_levels_gpu.py).  Previously eff25247.
     "terrain_drag":
         "7bb86babae6e2ee53b5072a27a0e343bc64b3f125400120688f44c500c11e80f",
+    # feat/fire-rothermel: WRF v4.7.1 set_fire_params / fire_ros (float32)
+    # bit for bit against WRF's own Fortran on CPU and GPU
+    # (tests/test_fire_ros_wrf471_parity.py), and the full Rothermel-Albini
+    # model (float64) equal to its NumPy reference word for word
+    # (tests/test_fire_rothermel.py).  Compiled by its own direct NVRTC
+    # loader (woof/fire/_device.py), -fmad=false --ftz=false, with
+    # glibc_flt32.cuh and glibc_flt64.cuh prepended.
+    "fire_spread":
+        "d6dd5c154a9ae3f54e0698b131120f9d2f82025510a150885c073520b97b41b7",
     # ebcf4edd2 lane/urban-bep: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
     "urban_bep":
