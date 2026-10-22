@@ -2601,7 +2601,10 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     "urban_bep_bem",
     # The drag unit borrows glibc helpers from the composed source in
     # woof.core.terrain_drag.module_source(); it cannot compile alone.
-    "terrain_drag"})
+    "terrain_drag",
+    # The Fitch wind-farm drag borrows gfk_pow and glibc_asinf the same way,
+    # from woof.core.windfarm_fitch.module_source().
+    "windfarm_fitch"})
 # face_mass, held_heating, rk_bookkeeping and surface_w (the dycore-host
 # speed lane's point-local units, 66af318bc) sat in this set on
 # 2026-09-30 under the same "no measurement platform in this lane"
@@ -2758,6 +2761,16 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         module="terrain_drag_composed",
         max_local_size_bytes=2208,
         covers=frozenset({"terrain_drag"})),
+    # The Fitch wind-farm drag (WRF windfarm_opt = 1): glibc_flt32.cuh +
+    # glibc_trig_flt32.cuh + windfarm_fitch.cu through
+    # woof/core/windfarm_fitch.py's direct NVRTC loader.  fitch_column keeps
+    # no per-level arrays: 0 B local through the loader on an RTX A6000
+    # (sm_86) at NVRTC 12.9.86 and 13.4.92, and a 0 B stack frame with no
+    # spills in ptxas -v for sm_86, sm_89, sm_100 and sm_120 at both.
+    "windfarm_fitch_composed": ChainedTranslationUnitFrame(
+        module="windfarm_fitch_composed",
+        max_local_size_bytes=0,
+        covers=frozenset({"windfarm_fitch"})),
 }
 
 _seen_covers: set[str] = set()
