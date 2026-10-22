@@ -1093,7 +1093,11 @@ def _case_static_fields(grid, geog_root, *, selection: GeogSelection,
         static, grid, config=static_highres, domain_id=domain_id,
         case_date=case_date,
         landuse_attrs=selection.landuse_global_attrs())
-    return static
+    # A fuel request reads the overlaid land use and terrain (no request:
+    # the same dict back).
+    from woof.static.fuel import refresh_fuel_fields
+    return refresh_fuel_fields(static, grid, selection,
+                               landuse_attrs=selection.landuse_global_attrs())
 
 
 def prepare_real_case(cfg: RunConfig, *, grid, geog_root,
@@ -5203,6 +5207,10 @@ def write_static(exp: ExperimentConfig, data: CaseDataConfig,
         fields, _ = apply_highres_statics(
             fields, grid, config=highres, domain_id=dc.grid_id,
             case_date=exp.start_time.date(),
+            landuse_attrs=selection.landuse_global_attrs())
+        from woof.static.fuel import refresh_fuel_fields
+        fields = refresh_fuel_fields(
+            fields, grid, selection,
             landuse_attrs=selection.landuse_global_attrs())
     return _write_npz(output, fields)
 

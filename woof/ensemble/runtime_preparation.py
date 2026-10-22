@@ -43,7 +43,12 @@ def runtime_input_catalog(data):
 
 def _plain(value):
     if is_dataclass(value) and not isinstance(value, type):
-        return {field.name: _plain(getattr(value, field.name)) for field in fields(value)}
+        # A field a carrier added later and names in
+        # ``_IDENTITY_OMITTED_WHEN_NONE`` is left out while it is None, so
+        # every identity bound before it existed keeps its bytes.
+        omitted = getattr(type(value), "_IDENTITY_OMITTED_WHEN_NONE", ())
+        return {field.name: _plain(getattr(value, field.name)) for field in fields(value)
+                if not (field.name in omitted and getattr(value, field.name) is None)}
     if isinstance(value, Mapping):
         return {str(key): _plain(item) for key, item in sorted(value.items(), key=lambda row: str(row[0]))}
     if isinstance(value, (list, tuple)):
