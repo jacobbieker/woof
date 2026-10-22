@@ -1,0 +1,4 @@
+gfortran: GNU Fortran (conda-forge gcc 16.2.0-7) 16.2.0
+glibc: ldd (GNU libc) 2.44
+host: Linux 6.12.104-1-MANJARO x86_64
+flags: -O0 -ffree-form -ffree-line-length-none (default REAL: real(4))

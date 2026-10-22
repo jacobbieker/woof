@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import requires_gpu
 from woof.cli import main as cli_main
 from woof.core.hub_wind_diag import locate_sites
 from woof.energy.contracts import Site, SiteSet
@@ -72,10 +73,29 @@ def test_three_by_three_farm_is_counted_per_cell():
     assert layout.curve_ids == (CURVE,)
     assert layout.rated_capacity_mw == pytest.approx(27.0)
     occupied = layout.turbine_count > 0
-    assert np.all(layout.curve_index[occupied] == 0)
-    assert np.all(layout.curve_index[~occupied] == -1)
-    assert np.all(layout.hub_height_m[occupied] == 94.0)
-    assert np.all(np.isnan(layout.rotor_diameter_m[~occupied]))
+    # uniform cells: one group each, carrying the one machine
+    assert np.array_equal(layout.group_count, occupied.astype(np.int32))
+    assert layout.n_groups == layout.cells_occupied
+    assert np.all(layout.group_curve == 0)
+    assert np.all(layout.group_hub_height_m == 94.0)
+    assert np.all(layout.group_rotor_diameter_m == 112.0)
+    assert np.array_equal(layout.group_turbines,
+                          layout.turbine_count[layout.group_j, layout.group_i])
+    assert np.allclose(layout.rated_capacity_kw,
+                       3000.0 * layout.turbine_count)
+    assert np.allclose(layout.swept_area_m2[occupied],
+                       layout.turbine_count[occupied] * math.pi * 56.0 ** 2)
+    assert np.all(layout.rotor_top_m[occupied] == 150.0)
+    assert np.all(layout.rotor_bottom_m[occupied] == 38.0)
+    assert np.all(np.isnan(layout.rotor_top_m[~occupied]))
+    assert np.all(layout.swept_area_m2[~occupied] == 0.0)
+    # the CSR offsets index the groups cell by cell
+    assert layout.cell_group_offset.shape == (layout.ny * layout.nx + 1,)
+    assert layout.cell_group_offset[-1] == layout.n_groups
+    for g in range(layout.n_groups):
+        assert g in layout.groups_of(layout.group_j[g], layout.group_i[g])
+    assert np.array_equal(
+        layout.group_j[layout.turbine_group], layout.turbine_j)
     # every turbine's recorded cell is a counted cell
     np.add.at(counted := np.zeros_like(layout.turbine_count),
               (layout.turbine_j, layout.turbine_i), 1)
@@ -94,21 +114,39 @@ def test_arrays_are_read_only_and_the_layout_frozen():
         layout.grid_id = 2
 
 
-def test_tables_are_the_curve_on_the_shared_axis():
+def test_tables_are_the_curve_as_wrf_reads_it():
     layout = wl.build_layout(_turbines(_farm()), _grid())
     curve = load_turbine_library().get(CURVE)
+    t = layout.tables
+    n = int(t.rows[0])
+    ws = t.speed_ms[0, :n]
+    # rows: the curve's own points through cut-out, rounded once to float32
+    assert ws.dtype == np.float32 and np.all(np.diff(ws) > 0)
+    assert np.all(t.speed_ms[0, n:] == 0.0)        # WRF's zero padding
+    assert t.cut_in_ms[0] == ws[0] and t.cut_out_ms[0] == ws[-1]
+    assert float(ws[-1]) == curve.cut_out_ms
+    assert np.array_equal(t.power_kw[0, :n], (curve.fraction(
+        ws.astype(np.float64)) * curve.rated_kw).astype(np.float32))
+    assert np.array_equal(t.thrust_coefficient[0, :n], curve.thrust_coefficient(
+        ws.astype(np.float64)).astype(np.float32))
+    assert t.standing_ct2[0] == t.thrust_coefficient[0, n - 1]
+    # the axis tables: WRF's dragcof and power1 on 0 .. 35 m/s
     speeds = layout.speeds_ms
+    assert speeds.dtype == np.float32
     assert speeds[0] == 0.0 and speeds[-1] == wl.TABLE_MAX_SPEED_MS
-    assert np.allclose(np.diff(speeds), wl.TABLE_SPEED_STEP_MS)
-    assert layout.power_kw.shape == layout.thrust_coefficient.shape == (
-        1, speeds.size)
-    assert np.array_equal(layout.power_kw[0],
-                          curve.fraction(speeds) * curve.rated_kw)
-    assert np.array_equal(layout.thrust_coefficient[0],
-                          curve.thrust_coefficient(speeds))
-    assert layout.power_kw[0].max() == pytest.approx(3000.0)
-    assert 0.7 < layout.thrust_coefficient[0][speeds == 8.0][0] < 0.9
-    assert layout.cut_out_ms[0] == curve.cut_out_ms
+    assert np.all(np.diff(speeds) == wl.TABLE_SPEED_STEP_MS)
+    assert layout.group_power_w.shape == \
+        layout.group_thrust_coefficient.shape == (layout.n_groups, speeds.size)
+    below, above = speeds <= ws[0], speeds >= ws[-1]
+    assert np.all(layout.group_thrust_coefficient[0][below] == t.standing_ct[0])
+    assert np.all(layout.group_thrust_coefficient[0][above] == t.standing_ct2[0])
+    assert np.all(layout.group_power_w[0][below | above] == 0.0)
+    assert 0.7 < layout.group_thrust_coefficient[0][speeds == 8.0][0] < 0.9
+    # power1 = 0.5 * 1.23 * v^3 * A * powcof recovers the table's kW
+    at = (speeds > ws[0]) & (speeds < ws[-1])
+    kw = layout.group_power_w[0][at] / 1000.0
+    assert np.allclose(kw, np.interp(speeds[at], ws, t.power_kw[0, :n]),
+                       rtol=0.05, atol=5.0)
 
 
 def test_cells_agree_with_the_hub_site_locator():
@@ -142,8 +180,7 @@ def test_csv_and_geojson_read_alike(tmp_path):
 def test_blank_columns_take_the_default_curve_and_the_curves_rotor():
     rows = _farm(curve="", rotor_diameter_m="")
     layout = wl.build_layout(_turbines(rows), _grid(), default_curve=CURVE)
-    occupied = layout.turbine_count > 0
-    assert np.all(layout.rotor_diameter_m[occupied] == 112.0)
+    assert np.all(layout.group_rotor_diameter_m == 112.0)
 
 
 def test_a_model_name_resolves_through_the_library():
@@ -211,7 +248,8 @@ def test_two_turbine_types_get_two_tables():
         row.update(curve="V90/3000", rotor_diameter_m=90.0, hub_height_m=80.0)
     layout = wl.build_layout(_turbines(rows), _grid())
     assert layout.curve_ids == ("V90/3000", CURVE)
-    assert layout.power_kw.shape[0] == 2
+    assert layout.tables.rows.size == 2
+    assert layout.group_power_w.shape[0] == layout.n_groups == 9
     assert layout.cells_occupied == 9
     assert list(np.bincount(layout.turbine_curve)) == [3, 6]
 
@@ -258,16 +296,66 @@ def test_missing_or_too_low_hub_height_is_refused():
     rows[3]["hub_height_m"] = ""
     rows[5]["hub_height_m"] = 40.0
     with pytest.raises(wl.WindFarmLayoutRefused,
-                       match="hub height: wt10 \\(none\\), wt12 \\(40 m\\)"):
+                       match="hub height: wt10 \\(none\\), wt12 \\(40 m, "
+                             "rotor bottom -16 m\\)"):
         wl.build_layout(_turbines(rows), _grid())
+    # a rotor bottom exactly at the ground is still above 0 m AGL
+    rows = _farm(hub_height_m=56.0)
+    assert wl.build_layout(_turbines(rows), _grid()).n_turbines == 9
 
 
-def test_a_cell_with_two_machines_is_refused():
+# -- mixed cells -------------------------------------------------------------
+
+
+def _mixed_rows():
+    """One cell: 3 x V112/3000 at 94 m, 2 x V90/3000 at 120 m, and one
+    V112/3000 at 94.6 m (within the group tolerance of the first three)."""
+
+    rows = _farm(spacing=50.0)[:6]
+    for row in rows[3:5]:
+        row.update(curve="V90/3000", rotor_diameter_m=90.0, hub_height_m=120.0)
+    rows[5]["hub_height_m"] = 94.6
+    return rows
+
+
+def test_a_mixed_cell_is_one_cell_of_separate_groups():
+    layout = wl.build_layout(_turbines(_mixed_rows()), _grid())
+    assert layout.cells_occupied == 1
+    (j,), (i,) = np.nonzero(layout.turbine_count)
+    assert layout.turbine_count[j, i] == 6
+    assert layout.group_count[j, i] == 2
+    groups = list(layout.groups_of(j, i))
+    assert len(groups) == layout.n_groups == 2
+    by_curve = {layout.curve_ids[layout.group_curve[g]]: g for g in groups}
+    v112, v90 = by_curve[CURVE], by_curve["V90/3000"]
+    assert layout.group_turbines[v112] == 4
+    assert layout.group_hub_height_m[v112] == pytest.approx(94.15)
+    assert layout.group_rotor_diameter_m[v112] == 112.0
+    assert layout.group_turbines[v90] == 2
+    assert layout.group_hub_height_m[v90] == 120.0
+    assert layout.group_rotor_diameter_m[v90] == 90.0
+    # cell totals sum the groups; the rotor span covers both machines
+    assert layout.rated_capacity_kw[j, i] == pytest.approx(6 * 3000.0)
+    assert layout.swept_area_m2[j, i] == pytest.approx(
+        math.pi / 4.0 * (4 * 112.0 ** 2 + 2 * 90.0 ** 2))
+    assert layout.rotor_top_m[j, i] == pytest.approx(165.0)
+    assert layout.rotor_bottom_m[j, i] == pytest.approx(94.15 - 56.0)
+    assert [layout.turbine_group[n] for n in range(6)] == \
+        [v112, v112, v112, v90, v90, v112]
+    cell = layout.summary()["cells"][0]
+    assert sorted(g["turbines"] for g in cell["groups"]) == [2, 4]
+    assert cell["turbines"] == 6 and cell["capacity_mw"] == pytest.approx(18.0)
+
+
+def test_hub_heights_past_the_tolerance_split_one_curve():
     rows = _farm(spacing=50.0)
     rows[0]["hub_height_m"] = 120.0
-    with pytest.raises(wl.WindFarmLayoutRefused,
-                       match="more than one machine.*wt00.*hub spread 26 m"):
-        wl.build_layout(_turbines(rows), _grid())
+    rows[1]["hub_height_m"] = 95.5          # 1.5 m from 94: its own group
+    layout = wl.build_layout(_turbines(rows), _grid())
+    assert layout.cells_occupied == 1
+    assert layout.n_groups == 3
+    assert sorted(layout.group_turbines.tolist()) == [1, 1, 7]
+    assert sorted(layout.group_hub_height_m.tolist()) == [94.0, 95.5, 120.0]
 
 
 def test_duplicate_ids_are_refused():
@@ -303,14 +391,33 @@ def test_cli_prints_cells_turbines_and_capacity(tmp_path, capsys):
     path = _write_csv(tmp_path / "farm.csv", _farm())
     assert cli_main(["windfarm", "layout", str(QUICKSTART), str(path)]) == 0
     out = capsys.readouterr().out
-    assert "9 turbine(s) in 1 cell(s), at most 9 per cell" in out
+    assert ("9 turbine(s) in 1 group(s) in 1 cell(s), at most 9 turbine(s) "
+            "and 1 group(s) per cell") in out
     assert "rated capacity 27.00 MW" in out
+    assert "(cell)" not in out              # a uniform cell has no total row
     assert cli_main(["windfarm", "layout", str(QUICKSTART), str(path),
                      "--json"]) == 0
     summary = json.loads(capsys.readouterr().out)
     assert summary["schema"] == wl.LAYOUT_SCHEMA
     assert summary["cells_occupied"] == 1
     assert summary["rated_capacity_mw"] == pytest.approx(27.0)
+
+
+def test_cli_prints_and_writes_the_groups_of_a_mixed_cell(tmp_path, capsys):
+    path = _write_csv(tmp_path / "farm.csv", _mixed_rows())
+    assert cli_main(["windfarm", "layout", str(QUICKSTART), str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "V90/3000" in out and CURVE in out
+    assert "rotors 38-165 m" in out and "(cell)" in out
+    assert "6 turbine(s) in 2 group(s) in 1 cell(s)" in out
+    assert cli_main(["windfarm", "layout", str(QUICKSTART), str(path),
+                     "--json"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["groups"] == 2 and summary["max_groups_per_cell"] == 2
+    (cell,) = summary["cells"]
+    assert sorted((g["curve"], g["turbines"]) for g in cell["groups"]) == [
+        (CURVE, 4), ("V90/3000", 2)]
+    assert cell["rotor_top_m"] == pytest.approx(165.0)
 
 
 def test_cli_refusal_names_the_turbine(tmp_path, capsys):
@@ -320,3 +427,67 @@ def test_cli_refusal_names_the_turbine(tmp_path, capsys):
     assert cli_main(["windfarm", "layout", str(QUICKSTART), str(path)]) == 2
     err = capsys.readouterr().err
     assert "woof windfarm:" in err and "wt22" in err
+
+
+# -- the device upload --------------------------------------------------------
+
+
+def _check_upload(layout, device, asnumpy):
+    assert (device.ny, device.nx, device.n_groups) == (
+        layout.ny, layout.nx, layout.n_groups)
+    assert device.n_curves == len(layout.curve_ids)
+    assert device.speed_step_ms == wl.TABLE_SPEED_STEP_MS
+    arrays = device.arrays()
+    assert set(arrays) == set(wl.DEVICE_ARRAYS) | {
+        f"tables.{name}" for name in layout.tables.arrays()}
+    for name, array in arrays.items():
+        host = (getattr(layout.tables, name.split(".", 1)[1])
+                if name.startswith("tables.") else getattr(layout, name))
+        assert array.flags.c_contiguous, name
+        assert array.dtype == host.dtype, name
+        assert array.dtype in (np.int32, np.float32), name
+        back = np.ascontiguousarray(asnumpy(array))
+        assert np.array_equal(back.view(np.uint32), np.ascontiguousarray(
+            host).view(np.uint32)), name
+    assert device.nbytes() > 0
+
+
+def test_to_device_uploads_the_host_words(monkeypatch):
+    monkeypatch.setattr(wl, "_cupy", lambda: np)
+    layout = wl.build_layout(_turbines(_mixed_rows()), _grid())
+    _check_upload(layout, layout.to_device(), np.asarray)
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_to_device_round_trips_through_cupy():
+    import cupy as cp
+
+    rows = _mixed_rows() + _farm(spacing=3000.0, lat0=LAT0 + 0.05)
+    for row in rows[6:]:
+        row["turbine_id"] = "far-" + row["turbine_id"]
+    layout = wl.build_layout(_turbines(rows), _grid())
+    device = layout.to_device(device_id=0)
+    assert isinstance(device.group_power_w, cp.ndarray)
+    assert device.cell_group_offset.device.id == 0
+    _check_upload(layout, device, cp.asnumpy)
+    # the offsets select each cell's groups on the device as on the host
+    offsets = cp.asnumpy(device.cell_group_offset)
+    flat = cp.asnumpy(device.group_cell)
+    for c in range(layout.ny * layout.nx):
+        assert np.all(flat[offsets[c]:offsets[c + 1]] == c)
+
+
+def test_a_turbine_joins_the_first_group_it_matches_not_the_last_opened():
+    """A (90.0 m, 112 m), B (90.2 m, 114 m: rotor 2 m off A), C (90.4 m,
+    112 m: A's machine) in one cell: C joins A's group, B stands alone."""
+
+    rows = _farm(spacing=20.0)[:3]
+    rows[0].update(hub_height_m=90.0, rotor_diameter_m=112.0)
+    rows[1].update(hub_height_m=90.2, rotor_diameter_m=114.0)
+    rows[2].update(hub_height_m=90.4, rotor_diameter_m=112.0)
+    layout = wl.build_layout(_turbines(rows), _grid())
+    assert layout.n_groups == 2
+    assert layout.turbine_group[0] == layout.turbine_group[2] != \
+        layout.turbine_group[1]
+    assert sorted(layout.group_turbines.tolist()) == [1, 2]

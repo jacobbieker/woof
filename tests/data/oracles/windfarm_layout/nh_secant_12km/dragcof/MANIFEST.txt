@@ -1,0 +1,7 @@
+correction_factor f4 0
+kt i4 1 7223
+speedhub f4 1 7223
+thrcof f4 1 7223
+powcof f4 1 7223
+tkecof f4 1 7223
+power1 f4 1 7223

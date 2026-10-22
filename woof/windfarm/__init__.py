@@ -7,6 +7,7 @@ yet.
 """
 
 from woof.windfarm.layout import (  # noqa: F401
+    DeviceWindFarmLayout,
     Turbine,
     WindFarmLayout,
     WindFarmLayoutRefused,
@@ -17,6 +18,7 @@ from woof.windfarm.layout import (  # noqa: F401
 )
 
 __all__ = [
-    "Turbine", "WindFarmLayout", "WindFarmLayoutRefused", "build_layout",
+    "DeviceWindFarmLayout", "Turbine", "WindFarmLayout",
+    "WindFarmLayoutRefused", "build_layout",
     "domain_grid", "layout_for_config", "read_turbines",
 ]

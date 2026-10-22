@@ -21,10 +21,13 @@ def register_cli(subparsers) -> None:
                     "or a woof-energy sites.v1 document; columns lat, lon, "
                     "hub_height_m, rotor_diameter_m and curve) in its mass "
                     "cell of one CONFIG domain, resolve each curve through "
-                    "the turbine library, and print one row per occupied "
-                    "cell.  A turbine outside the domain, in its outermost "
-                    "row or column, with no curve or with a curve the "
-                    "library does not hold is refused by name.")
+                    "the turbine library, and print one row per turbine "
+                    "group (turbines of one cell sharing a curve, hub height "
+                    "and rotor), with a total row under a cell of several "
+                    "groups.  A turbine outside the domain, in its "
+                    "outermost row or column, with no curve, with a curve "
+                    "the library does not hold, or with its rotor bottom "
+                    "below ground is refused by name.")
     layout.add_argument("config", type=Path, metavar="CONFIG",
                         help="experiment TOML whose domain the turbines are "
                              "placed on")
@@ -49,21 +52,34 @@ def register_cli(subparsers) -> None:
 
 
 def layout_table(layout) -> str:
-    """The `woof windfarm layout` table, one row per occupied cell."""
+    """The `woof windfarm layout` table: one row per group, a cell's
+    groups under it, and a total row for a cell of several groups."""
 
+    width = max([len("curve")] + [len(c) for c in layout.curve_ids])
     lines = [f"d{layout.grid_id:02d}: {layout.nx} x {layout.ny} cells of "
              f"{layout.dx_m:g} m",
-             f"{'j':>5}  {'i':>5}  {'turbines':>8}  {'curve':<16}  "
+             f"{'j':>5}  {'i':>5}  {'turbines':>8}  {'curve':<{width}}  "
              f"{'hub m':>6}  {'rotor m':>7}  {'MW':>8}"]
     for cell in layout.cells():
-        lines.append(
-            f"{cell['j']:>5}  {cell['i']:>5}  {cell['turbines']:>8}  "
-            f"{cell['curve']:<16}  {cell['hub_height_m']:>6.1f}  "
-            f"{cell['rotor_diameter_m']:>7.1f}  {cell['capacity_mw']:>8.2f}")
+        for n, group in enumerate(cell["groups"]):
+            where = (f"{cell['j']:>5}  {cell['i']:>5}" if n == 0
+                     else " " * 12)
+            lines.append(
+                f"{where}  {group['turbines']:>8}  "
+                f"{group['curve']:<{width}}  {group['hub_height_m']:>6.1f}  "
+                f"{group['rotor_diameter_m']:>7.1f}  "
+                f"{group['capacity_mw']:>8.2f}")
+        if len(cell["groups"]) > 1:
+            lines.append(
+                f"{'':>12}  {cell['turbines']:>8}  {'(cell)':<{width}}  "
+                f"{'':>6}  {'':>7}  {cell['capacity_mw']:>8.2f}  rotors "
+                f"{cell['rotor_bottom_m']:.0f}-{cell['rotor_top_m']:.0f} m")
     lines.append("")
     lines.append(
-        f"{layout.n_turbines} turbine(s) in {layout.cells_occupied} cell(s), "
-        f"at most {int(layout.turbine_count.max())} per cell; rated "
+        f"{layout.n_turbines} turbine(s) in {layout.n_groups} group(s) in "
+        f"{layout.cells_occupied} cell(s), at most "
+        f"{int(layout.turbine_count.max())} turbine(s) and "
+        f"{int(layout.group_count.max())} group(s) per cell; rated "
         f"capacity {layout.rated_capacity_mw:.2f} MW; curves: "
         + ", ".join(layout.curve_ids))
     return "\n".join(lines)
