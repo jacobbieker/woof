@@ -1875,6 +1875,9 @@ class AsyncDomainWrfoutWriter:
                              else abort_event)
         self.paths: list[Path] = []
         self._completed_records = []
+        #: Largest file this writer has written, which sizes the disk
+        #: reserve a delete-after-commit export holds frames for.
+        self._largest_frame_bytes = 0
         self._thread = threading.Thread(
             target=self._worker, name=f"gpuwm-wrfout-{id(self):x}",
             daemon=True)
@@ -2116,6 +2119,10 @@ class AsyncDomainWrfoutWriter:
             if self._closed:
                 raise RuntimeError("cannot submit to a closed wrfout writer")
             self._raise_failure()
+            from woof.io.export_backpressure import wait_for_export_space
+            wait_for_export_space(
+                Path(path).parent, grid_id=self.grid_id,
+                largest_frame_bytes=getattr(self, "_largest_frame_bytes", 0))
             producer = cp.cuda.get_current_stream()
             started = perf_counter()
             began = cp.cuda.Event()
@@ -2584,6 +2591,12 @@ class AsyncDomainWrfoutWriter:
                     with self._condition:
                         self._completed_records.append(proof)
                 self.paths.append(ticket.path)
+                try:
+                    self._largest_frame_bytes = max(
+                        getattr(self, "_largest_frame_bytes", 0),
+                        Path(ticket.path).stat().st_size)
+                except OSError:
+                    pass
                 durable = True
                 # The file is durable HERE and nowhere earlier: the
                 # WrfoutWriter context above has exited, so its close()
