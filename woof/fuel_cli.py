@@ -16,7 +16,8 @@ from pathlib import Path
 
 def preview_fuel(config: Path, *, domain: int | None, sr_x: int, sr_y: int,
                  landfire: Path | None = None,
-                 landfire_kind: str = "auto") -> tuple[dict, dict]:
+                 landfire_kind: str = "auto",
+                 device: str = "auto") -> tuple[dict, dict]:
     """``(summary, fields)`` for one domain of ``config``."""
     from woof.case_data import load_experiment_case
     from woof.static.build import GeogSelection, build_static
@@ -27,7 +28,7 @@ def preview_fuel(config: Path, *, domain: int | None, sr_x: int, sr_y: int,
     from woof.static.projection import grids_from_projection_config
 
     request = FuelStaticsRequest(sr_x=sr_x, sr_y=sr_y, landfire=landfire,
-                                 landfire_kind=landfire_kind)
+                                 landfire_kind=landfire_kind, device=device)
     exp, data = load_experiment_case(config, require_met_inputs=False)
     ids = [dc.grid_id for dc in exp.domains]
     grid_id = ids[0] if domain is None else int(domain)
@@ -72,7 +73,8 @@ def _print_summary(summary: dict) -> None:
           f"{summary['dx_m']:g} m; fire mesh "
           f"{receipt['sr_x']} x {receipt['sr_y']} per cell = "
           f"{summary['fire_mesh_shape'][1]} x "
-          f"{summary['fire_mesh_shape'][0]}")
+          f"{summary['fire_mesh_shape'][0]}, built on the "
+          f"{receipt['device'].upper()}")
     source = receipt["source"]
     if source == "landfire":
         landfire = receipt["landfire"]
@@ -106,7 +108,8 @@ def fuel_main(args) -> int:
     with redirect_stdout(sys.stderr if args.json else sys.stdout):
         summary, fields = preview_fuel(
             args.config, domain=args.domain, sr_x=args.sr_x, sr_y=args.sr_y,
-            landfire=args.landfire, landfire_kind=args.landfire_kind)
+            landfire=args.landfire, landfire_kind=args.landfire_kind,
+            device=args.device)
     if args.output is not None:
         import numpy as np
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -125,7 +128,7 @@ def fuel_main(args) -> int:
 
 
 def register_cli(subparsers) -> None:
-    from woof.static.fuel import LANDFIRE_KINDS
+    from woof.static.fuel import DEVICES, LANDFIRE_KINDS
     parser = subparsers.add_parser(
         "fuel", help="build and inspect a domain's fire fuel statics",
         description="Fire-model fuel statics: the Anderson-13 NFUEL_CAT map "
@@ -153,12 +156,15 @@ def register_cli(subparsers) -> None:
                               "(WRF-SFIRE sr_y; default 4)")
     preview.add_argument("--landfire", type=Path, default=None,
                          metavar="TIF",
-                         help="local LANDFIRE FBFM13 or FBFM40 GeoTIFF "
-                              "(needs the geog extra: rasterio, pyproj)")
+                         help="local LANDFIRE FBFM13 or FBFM40 GeoTIFF")
     preview.add_argument("--landfire-kind", choices=LANDFIRE_KINDS,
                          default="auto",
                          help="code set of --landfire (default: auto, read "
                               "from the codes)")
+    preview.add_argument("--device", choices=DEVICES, default="auto",
+                         help="where the fire mesh is built (default: auto, "
+                              "the GPU when one is usable; both give the "
+                              "same words)")
     preview.add_argument("--output", type=Path, default=None, metavar="NPZ",
                          help="also write NFUEL_CAT, NFUEL_CAT_FIRE, ZSF, "
                               "DZDXF and DZDYF to this NPZ")

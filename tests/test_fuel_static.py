@@ -9,10 +9,11 @@ from woof.static import build as static_build
 from woof.static.build import GeogSelection
 from woof.static.fuel import (
     FUEL_FIELDS, NO_FUEL, FuelStaticsRequest, build_fuel_fields,
-    crosswalk_table, dominant_fuel, fire_mesh_axis, fire_mesh_slope,
+    MISSING_CODE, crosswalk_table, dominant_fuel, fire_mesh_axis,
+    fire_mesh_slope, fire_mesh_spacing,
     fuel_request_for, fuel_summary, landfire_codes_to_fuel,
-    landuse_fuel_lookup, nfuel_from_lu_index, refine_bilinear,
-    refine_nearest, refresh_fuel_fields, with_fuel_statics)
+    landuse_fuel_lookup, nfuel_from_lu_index, refine_nearest, refine_zsf,
+    refresh_fuel_fields, with_fuel_statics)
 
 MODIS = {"MMINLU": "MODIFIED_IGBP_MODIS_NOAH", "ISWATER": 17, "ISLAKE": 21,
          "ISICE": 15, "ISURBAN": 13, "NUM_LAND_CAT": 21}
@@ -20,6 +21,14 @@ USGS = {"MMINLU": "USGS", "ISWATER": 16, "ISLAKE": -1, "ISICE": 24,
         "ISURBAN": 1, "NUM_LAND_CAT": 24}
 NLCD40 = {"MMINLU": "NLCD40", "ISWATER": 17, "ISLAKE": -1, "ISICE": 15,
           "ISURBAN": 13, "NUM_LAND_CAT": 40}
+
+
+@pytest.fixture(autouse=True)
+def _host_only(monkeypatch):
+    """These are the CPU tests: no device is opened, whatever the host has.
+    tests/test_fuel_static_gpu.py holds the GPU body to this one."""
+    from woof.static import fuel
+    monkeypatch.setattr(fuel, "gpu_available", lambda: False)
 
 
 def _grid(nx=6, ny=5, dx=1000.0):
@@ -56,6 +65,13 @@ def test_a_fire_run_without_a_mesh_is_refused(tmp_path):
             FuelStaticsRequest(sr_x=bad, sr_y=1)
     with pytest.raises(ValueError, match="names no LANDFIRE raster"):
         FuelStaticsRequest(sr_x=1, sr_y=1, landfire_kind="fbfm40")
+    with pytest.raises(ValueError, match="device must be one of"):
+        FuelStaticsRequest(sr_x=1, sr_y=1, device="tpu")
+    # Both devices give the same words, so the device is not identity.
+    assert (FuelStaticsRequest(sr_x=2, sr_y=2, device="gpu")
+            == FuelStaticsRequest(sr_x=2, sr_y=2, device="cpu"))
+    assert (hash(FuelStaticsRequest(sr_x=2, sr_y=2, device="gpu"))
+            == hash(FuelStaticsRequest(sr_x=2, sr_y=2)))
     with pytest.raises(ValueError, match="landfire_kind must be one of"):
         FuelStaticsRequest(sr_x=1, sr_y=1, landfire=tmp_path / "f.tif",
                            landfire_kind="fbfm99")
@@ -194,34 +210,41 @@ def test_fire_sub_cells_tile_their_parent_cell():
     np.testing.assert_allclose(fire_mesh_axis(3, 1), [1.0, 2.0, 3.0])
     parent = np.array([[1, 2], [3, 4]])
     refined = refine_nearest(parent, 3, 2)
-    assert refined.shape == (4, 6)
+    assert refined.shape == (4, 6) and refined.dtype == np.uint8
     np.testing.assert_array_equal(refined[:2, :3], 1)
     np.testing.assert_array_equal(refined[2:, 3:], 4)
 
 
-def test_bilinear_refinement_keeps_a_plane_and_its_slope():
+def test_refinement_keeps_a_plane_and_its_slope():
+    """WRF's refinement is bilinear with a linear continuation past the
+    edge, so a plane stays a plane (to REAL(4)), edge band included.  The
+    words themselves are held to WRF by tests/test_fire_mesh_wrf471_parity.py.
+    """
     ny, nx, dx, dy = 5, 7, 1000.0, 500.0
     j, i = np.mgrid[0:ny, 0:nx].astype(np.float64)
     hgt = 100.0 + 3.0 * i + 5.0 * j
-    zsf = refine_bilinear(hgt, 4, 2)
-    assert zsf.shape == (ny * 2, nx * 4)
+    zsf = refine_zsf(hgt, 4, 2)
+    assert zsf.shape == (ny * 2, nx * 4) and zsf.dtype == np.float32
     yf, xf = np.meshgrid(fire_mesh_axis(ny, 2) - 1.0,
                          fire_mesh_axis(nx, 4) - 1.0, indexing="ij")
     np.testing.assert_allclose(zsf, 100.0 + 3.0 * xf + 5.0 * yf,
-                               rtol=0, atol=1e-11)
-    dzdx, dzdy = fire_mesh_slope(zsf, dx / 4, dy / 2)
-    np.testing.assert_allclose(dzdx, 3.0 / dx, rtol=1e-12)
-    np.testing.assert_allclose(dzdy, 5.0 / dy, rtol=1e-12)
-    # sr = 1 is the atmospheric grid itself
-    np.testing.assert_array_equal(refine_bilinear(hgt, 1, 1), hgt)
+                               rtol=0, atol=2e-4)
+    dzdx, dzdy = fire_mesh_slope(zsf, fire_mesh_spacing(dx, 4),
+                                 fire_mesh_spacing(dy, 2))
+    assert dzdx.dtype == dzdy.dtype == np.float32
+    np.testing.assert_allclose(dzdx, 3.0 / dx, rtol=2e-4)
+    np.testing.assert_allclose(dzdy, 5.0 / dy, rtol=2e-4)
+    # sr = 1 is the atmospheric grid itself, in REAL(4)
+    np.testing.assert_array_equal(refine_zsf(hgt, 1, 1),
+                                  hgt.astype(np.float32))
+    assert fire_mesh_spacing(333.3, 4) == np.float32(333.3) / np.float32(4)
 
 
-def test_degenerate_axes_do_not_index_past_the_grid():
-    one = refine_bilinear(np.array([[7.0, 9.0]]), 2, 3)
-    assert one.shape == (3, 4)
-    np.testing.assert_allclose(one[0], [6.5, 7.5, 8.5, 9.5])
-    dzdx, dzdy = fire_mesh_slope(np.array([[1.0]]), 10.0, 10.0)
-    assert dzdx.shape == dzdy.shape == (1, 1)
+def test_a_one_cell_axis_is_refused():
+    with pytest.raises(ValueError, match="at least 2 x 2"):
+        refine_zsf(np.array([[7.0, 9.0]]), 2, 3)
+    with pytest.raises(ValueError, match="at least 2 x 2"):
+        fire_mesh_slope(np.ones((1, 4), np.float32), 10.0, 10.0)
 
 
 def test_dominant_category_breaks_ties_low():
@@ -240,19 +263,26 @@ def test_build_on_a_grid_gives_both_meshes_and_a_receipt():
                             landuse_attrs=MODIS, coverage_report=report)
     assert out["NFUEL_CAT"].shape == (5, 6)
     assert out["NFUEL_CAT_FIRE"].shape == (20, 24)
-    assert all(out[name].dtype == np.float64 for name in FUEL_FIELDS)
+    assert out["NFUEL_CAT"].dtype == np.float64
+    assert out["NFUEL_CAT_FIRE"].dtype == np.uint8
+    assert all(out[name].dtype == np.float32
+               for name in ("ZSF", "DZDXF", "DZDYF"))
+    assert report["fuel"]["device"] == "cpu"
     np.testing.assert_array_equal(out["NFUEL_CAT"][0], NO_FUEL)
     assert out["NFUEL_CAT"][1, 1] == 10.0  # evergreen needleleaf
     np.testing.assert_array_equal(
         dominant_fuel(out["NFUEL_CAT_FIRE"], 4, 4), out["NFUEL_CAT"])
     # HGT_M rises 1 m per cell in x and nx m per cell in y
-    np.testing.assert_allclose(out["DZDXF"], 1.0 / 1000.0)
-    np.testing.assert_allclose(out["DZDYF"], 6.0 / 1000.0)
+    np.testing.assert_allclose(out["DZDXF"], 1.0 / 1000.0, rtol=1e-5)
+    np.testing.assert_allclose(out["DZDYF"], 6.0 / 1000.0, rtol=1e-5)
     assert report["fuel"]["fire_mesh_shape"] == [20, 24]
     summary = fuel_summary(out)
     assert sum(row["cells"] for row in summary["fire_mesh"]) == 480
     assert summary["slope"]["magnitude_max"] == pytest.approx(
-        np.hypot(1.0, 6.0) / 1000.0)
+        np.hypot(1.0, 6.0) / 1000.0, rel=1e-5)
+    with pytest.raises(ValueError, match="device='gpu'"):
+        build_fuel_fields(grid, built, FuelStaticsRequest(sr_x=1, sr_y=1),
+                          landuse_attrs=MODIS, device="gpu")
     with pytest.raises(ValueError, match="duplicate"):
         build_fuel_fields(grid, built, FuelStaticsRequest(sr_x=1, sr_y=1),
                           landuse_attrs=MODIS, coverage_report=report)
@@ -276,8 +306,7 @@ def test_refresh_is_a_no_op_without_a_request(tmp_path):
 # --- the LANDFIRE raster -----------------------------------------------------
 
 def test_landfire_raster_is_sampled_nearest_at_fire_cell_centres(tmp_path):
-    rasterio = pytest.importorskip("rasterio")
-    pytest.importorskip("pyproj")
+    import rasterio
     from rasterio.transform import from_origin
 
     grid = _grid(nx=4, ny=3, dx=3000.0)
@@ -301,16 +330,17 @@ def test_landfire_raster_is_sampled_nearest_at_fire_cell_centres(tmp_path):
                        nodata=-9999,
                        transform=from_origin(west, north, res, res)) as out:
         out.write(data, 1)
-    col = np.floor((lon - west) / res).astype(int)
-    row = np.floor((north - lat) / res).astype(int)
-    expected_raw = data[row, col].astype(np.float64)
-    expected_raw[expected_raw == -9999] = np.nan
+    with rasterio.open(path) as dataset:
+        inverse = ~dataset.transform
+    col = np.floor(inverse.a * lon + inverse.c).astype(int)
+    row = np.floor(inverse.e * lat + inverse.f).astype(int)
+    expected_raw = data[row, col].astype(np.int32)
+    expected_raw[expected_raw == -9999] = MISSING_CODE
 
     from woof.static.fuel import sample_landfire
     sampled = sample_landfire(path, grid, sr, sr)
-    np.testing.assert_array_equal(np.isnan(sampled), np.isnan(expected_raw))
-    np.testing.assert_array_equal(sampled[~np.isnan(sampled)],
-                                  expected_raw[~np.isnan(expected_raw)])
+    assert sampled.dtype == np.int32
+    np.testing.assert_array_equal(sampled, expected_raw)
 
     built = _fake_static(3, 4)
     report = {}
@@ -339,8 +369,9 @@ def test_a_covering_raster_needs_no_land_use_table(tmp_path, monkeypatch):
     grid = _grid(nx=2, ny=2)
     codes = np.array([[1.0, 2.0, 8.0, 91.0]] * 4)
     monkeypatch.setattr(fuel, "sample_landfire",
-                        lambda path, grid, sr_x, sr_y: codes.copy())
+                        lambda path, grid, sr_x, sr_y, xp: codes.copy())
     built = {"LU_INDEX": np.full((2, 2), 5.0), "HGT_M": np.zeros((2, 2))}
+    assert MISSING_CODE < 0  # the missing marker is never a valid code
     other_legend = dict(MODIS, MMINLU="SSIB")
     request = FuelStaticsRequest(sr_x=2, sr_y=2, landfire=raster)
     out = build_fuel_fields(grid, built, request, landuse_attrs=other_legend)
@@ -353,6 +384,40 @@ def test_a_covering_raster_needs_no_land_use_table(tmp_path, monkeypatch):
     assert out["NFUEL_CAT_FIRE"][0, 0] == 10.0  # MODIS 5 -> 10, filled
 
 
+def _write(path, data, *, dtype, nodata, grid):
+    import rasterio
+    from rasterio.transform import from_origin
+    lat, lon = grid.latlon_mass()
+    west, north = lon.min() - 0.05, lat.max() + 0.05
+    with rasterio.open(path, "w", driver="GTiff", width=data.shape[1],
+                       height=data.shape[0], count=1, dtype=dtype,
+                       crs="EPSG:4326", nodata=nodata,
+                       transform=from_origin(west, north, 0.01, 0.01)) as out:
+        out.write(data.astype(dtype), 1)
+
+
+def test_raster_words_are_masked_before_they_are_checked(tmp_path):
+    """A no-data word outside int32, or a float product holding whole
+    codes, is read; a float raster holding values between codes is not."""
+    from woof.static.fuel import sample_landfire
+    grid = _grid(nx=3, ny=3)
+    codes = np.full((30, 30), 101.0)
+    codes[:, ::4] = np.nan
+    path = tmp_path / "float.tif"
+    _write(path, codes, dtype="float32", nodata=np.nan, grid=grid)
+    got = sample_landfire(path, grid, 2, 2)
+    assert set(np.unique(got)) <= {101, int(MISSING_CODE)}
+    wide = np.where(np.isnan(codes), -2147483648, 101)
+    path = tmp_path / "int32.tif"
+    _write(path, wide, dtype="int32", nodata=-2147483648, grid=grid)
+    np.testing.assert_array_equal(sample_landfire(path, grid, 2, 2), got)
+    path = tmp_path / "resampled.tif"
+    _write(path, np.full((30, 30), 101.5), dtype="float32", nodata=None,
+           grid=grid)
+    with pytest.raises(ValueError, match="not whole fuel-model codes"):
+        sample_landfire(path, grid, 2, 2)
+
+
 # --- the command -------------------------------------------------------------
 
 def test_fuel_preview_is_a_command():
@@ -362,6 +427,7 @@ def test_fuel_preview_is_a_command():
          "--json"])
     assert (args.sr_x, args.sr_y, args.json) == (4, 2, True)
     assert args.landfire is None and args.landfire_kind == "auto"
+    assert args.device == "auto"
     assert args.func.__module__ == "woof.fuel_cli"
 
 
@@ -378,5 +444,6 @@ def test_preparation_identity_is_unchanged_without_a_request(tmp_path):
     assert _digest(selection) == _digest(legacy)
     fired = with_fuel_statics(selection, FuelStaticsRequest(sr_x=2, sr_y=2))
     assert _plain(fired)["fuel"] == {"sr_x": 2, "sr_y": 2, "landfire": None,
-                                     "landfire_kind": "auto"}
+                                     "landfire_kind": "auto",
+                                     "device": "auto"}
     assert _digest(fired) != _digest(selection)

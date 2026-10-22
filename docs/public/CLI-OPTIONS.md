@@ -1413,10 +1413,11 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
+| `--device {auto,cpu,gpu}` | where the fire mesh is built (default: auto, the GPU when one is usable; both give the same words) |
 | `--domain ID` | grid_id of the domain (default: the first) |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--json` | print the summary as JSON |
-| `--landfire TIF` | local LANDFIRE FBFM13 or FBFM40 GeoTIFF (needs the geog extra: rasterio, pyproj) |
+| `--landfire TIF` | local LANDFIRE FBFM13 or FBFM40 GeoTIFF |
 | `--landfire-kind {auto,fbfm13,fbfm40}` | code set of --landfire (default: auto, read from the codes) |
 | `--output NPZ` | also write NFUEL_CAT, NFUEL_CAT_FIRE, ZSF, DZDXF and DZDYF to this NPZ |
 | `--sr-x N` | fire cells per atmospheric cell west-east (WRF-SFIRE sr_x; default 4) |

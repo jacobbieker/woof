@@ -52,8 +52,10 @@ obs = ["pyarrow>=15"]
 dealias = []
 dev = ["pytest>=8.0", "pytest-xdist>=3.5", "psutil>=5.9", "pyyaml>=6.0"]
 publish = ["huggingface_hub>=0.23", "h5py>=3.10"]
-all-cu12 = ["recast-woof[gpu-cu12]", "recast-woof[render]", "recast-woof[obs]"]
-all-cu13 = ["recast-woof[gpu-cu13]", "recast-woof[render]", "recast-woof[obs]"]
+all-cu12 = ["recast-woof[gpu-cu12]", "recast-woof[render]", "recast-woof[obs]",
+            "recast-woof[geog]"]
+all-cu13 = ["recast-woof[gpu-cu13]", "recast-woof[render]", "recast-woof[obs]",
+            "recast-woof[geog]"]
 all = ["recast-woof[all-cu12]"]
 
 [project.scripts]
@@ -83,6 +85,8 @@ woof = [
     "libexec/bridges/*",
 ]
 "woof.core.kernels" = ["*.cu", "*.cuh", "LICENSE-third-party.txt"]
+# The fire-mesh static-preparation kernel (woof/static/fire_mesh_gpu.py).
+"woof.static" = ["*.cu"]
 "woof.obs" = ["data/**/*"]
 "woof.verify" = ["*.json"]
 "woof.certify" = ["*.json"]
@@ -135,6 +139,10 @@ make = "*"
 pkg-config = "*"
 xarray = "*"
 zarr = "*"
+# The [geog] extra from conda-forge (GDAL-linked): the LANDFIRE fuel-raster
+# reader (woof.static.fuel) and the pure-Python high-resolution fallback.
+rasterio = ">=1.3"
+pyproj = ">=3.6"
 
 [tool.pixi.feature.base.pypi-dependencies]
 icechunk = "*"

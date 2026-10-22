@@ -1,0 +1,6 @@
+# WRF v4.7.1 (tag v4.7.1, commit f52c197ed39d12e087d02c50f412d90d418f6186).
+# Every file the fire-mesh oracle compiles, cuts from or cites.  build.sh
+# refuses any other bytes.
+ab9499f12b305257fd62a0c76f299ee308b7fabc98c6fae073ba25f132ec8d27  phys/module_fr_fire_util.F
+f2e3932e088076508a8c7284dc5395770b93b8eb5ba5cccbb1a56775dddd184b  phys/module_fr_fire_model.F
+7662f29bb003697d08ccee585e272a3ed7362edc73bcef5ea8dc95d100d9e578  phys/module_fr_fire_driver.F
