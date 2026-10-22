@@ -2482,6 +2482,7 @@ def _drop_default_off_run_keys(values: dict) -> None:
         values.pop("smoke_tracer", None)
     if not values.get("smoke_emission_file", ""):
         values.pop("smoke_emission_file", None)
+        values.pop("smoke_emission_sha256", None)
     # No prescribed smoke is the source forcing every earlier header ran.
     if not values.get("rrtmg_smoke_manifest", ""):
         values.pop("rrtmg_smoke_manifest", None)
@@ -2610,6 +2611,8 @@ def configuration_echo(cfg) -> dict:
     _drop_default_off_run_keys(values)
     from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
     bind_smoke_source_identity(values)
+    from woof.core.smoke_tracer import bind_emission_identity
+    bind_emission_identity(values)
     return values
 
 
@@ -2627,6 +2630,8 @@ def _configuration_digest_values(config: Mapping) -> dict:
     _drop_default_off_run_keys(values)
     from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
     bind_smoke_source_identity(values)
+    from woof.core.smoke_tracer import bind_emission_identity
+    bind_emission_identity(values)
     for key in CONFIG_DIAGNOSTIC_FIELDS - _DIGEST_DROPPED_DIAGNOSTIC_FIELDS:
         if key in values:
             values[key] = _run_config_default(key)

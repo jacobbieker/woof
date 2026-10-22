@@ -2528,6 +2528,35 @@ def _refuse_moving_slope_radiation(domains, relocation, source) -> None:
                 "call.  Set slope_rad = 0 on the moving nest.")
 
 
+def _refuse_moving_smoke_emission(domains, relocation, source) -> None:
+    """A prescribed smoke emission on a nest that moves: refused.
+
+    The emission file is a field on the nest's grid at its declared
+    placement.  A move rebuilds the nest at a new placement, and the
+    tracer's first step on the rebuilt state would read the same file onto
+    the shifted grid, so the sources would travel with the nest box.  A
+    moving nest may carry the tracer itself, with ``smoke_emission_file =
+    ""``.
+    """
+    moving = set()
+    if relocation is not None and getattr(relocation, "enabled", False) \
+            and (getattr(relocation, "moves", ())
+                 or getattr(relocation, "follow", None) is not None):
+        moving.add(int(relocation.grid_id))
+    moving.update(int(dc.grid_id) for dc in domains
+                  if getattr(dc, "follow", None) is not None)
+    for dc in domains:
+        if int(dc.grid_id) in moving and getattr(
+                dc.run, "smoke_emission_file", ""):
+            raise ValueError(
+                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} moves "
+                "and sets smoke_emission_file: the file is a field on the "
+                "nest's grid at its declared placement, and after a move it "
+                "would be read onto the shifted grid, carrying every source "
+                "with the nest.  Set smoke_emission_file = \"\" on the "
+                "moving nest (it still carries the tracer).")
+
+
 def _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation,
                                                  source) -> None:
     """swint_opt = 1 on a nest rebuilt mid-run: refused until the rebuild
@@ -4575,6 +4604,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     domains = validate_follow_tracks(domains, relocation, source)
     _refuse_windowed_stash_watch(domains, source)
     _refuse_moving_slope_radiation(domains, relocation, source)
+    _refuse_moving_smoke_emission(domains, relocation, source)
     _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source)
     _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation, source)
     _refuse_rebuilt_nest_lake(domains, relocation, source)

@@ -198,6 +198,42 @@ def emission_file_digest(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+#: The key the emission file's SHA-256 is bound under, beside its path, in
+#: the forecast identity, the checkpoint echo and the checkpoint digest.
+EMISSION_IDENTITY_KEY = "smoke_emission_sha256"
+_DIGESTS: dict[tuple, str] = {}
+
+
+def bind_emission_identity(values) -> dict:
+    """Add the emission file's SHA-256 to a config document, in place.
+
+    The rrtmg_smoke_identity rule: empty is absent, and a saved digest stays
+    saved -- digesting a stored checkpoint must not replace the bytes it ran
+    with by the file now at that path, which is what lets a resume refuse a
+    file changed under it.  The digest is cached by path, size and mtime, so
+    a checkpoint write does not re-read an unchanged file.
+    """
+    path = values.get("smoke_emission_file", "") or ""
+    if not path:
+        values.pop("smoke_emission_file", None)
+        values.pop(EMISSION_IDENTITY_KEY, None)
+        return values
+    if EMISSION_IDENTITY_KEY not in values:
+        source = Path(path).expanduser()
+        try:
+            stat = source.stat()
+            key = (str(source), stat.st_size, stat.st_mtime_ns)
+        except OSError:
+            key = None
+        digest = _DIGESTS.get(key) if key is not None else None
+        if digest is None:
+            digest = emission_file_digest(path)
+            if key is not None:
+                _DIGESTS[key] = digest
+        values[EMISSION_IDENTITY_KEY] = digest
+    return values
+
+
 def module_source() -> str:
     """The exact source string NVRTC compiles (``kernels/smoke_tracer.cu``)."""
     from woof.core.kernels import _preamble
@@ -354,7 +390,8 @@ def column_load_reference(smoke, c1h, c2h, dnw, mub, mup) -> np.ndarray:
 __all__ = ["DTYPE", "EMISSION_UNITS", "EMISSION_VARIABLE", "MODULE_KEY",
            "MODULE_OPTIONS", "PBL_COLUMN_PIECE", "SMOKE_COLUMN_UNITS",
            "SMOKE_UNITS", "UG_G", "UG_PER_KG", "add_surface_source",
-           "bind_emission", "column_load_reference", "emission_file_digest",
+           "EMISSION_IDENTITY_KEY", "bind_emission", "bind_emission_identity",
+           "column_load_reference", "emission_file_digest",
            "enabled",
            "load_emission", "mix_pbl", "module_source",
            "refresh_column_load", "surface_source_reference"]

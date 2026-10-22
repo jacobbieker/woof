@@ -2030,7 +2030,7 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
                 buffers[slot], cfg, 1)
 
 
-def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig) -> None:
+def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig) -> bool:
     """Build WRF's time-t ``*_tendf``/``scalar_tends`` once per step.
 
     ``module_first_rk_step_part2`` computes km_opt=4 mixing and sixth-order
@@ -2045,7 +2045,7 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig) -> None:
     include_smag = cfg.km_opt in (2, 3, 4)
     include_diff6 = cfg.diff_6th_opt > 0
     if not (include_smag or include_diff6):
-        return
+        return False
 
     # The K arrays are needed only by Smagorinsky.  Scalar placeholders let
     # _smag2d_specs describe the common carrying buffers without allocating
@@ -2119,9 +2119,11 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig) -> None:
     # the dry slots, after diff6 has accumulated (WRF divides ru_tendf etc.
     # once, module_em.F:1043, :1054, :1065, :1078).
     _couple_dry_mixing_map_factor(state, specs)
+    return True
 
 
-def prepare_smoke_tendency(state: DomainState, cfg: RunConfig):
+def prepare_smoke_tendency(state: DomainState, cfg: RunConfig, *,
+                           mixed: bool):
     """The smoke tracer's held per-step forward tendency, or None.
 
     One coupled ``(nz, ny, nx)`` buffer, ``smag_rsmoke``, that every RK
@@ -2129,9 +2131,10 @@ def prepare_smoke_tendency(state: DomainState, cfg: RunConfig):
     mixing and sixth-order filter :func:`prepare_fixed_tendencies` left in
     it (the tracer's ``_smag2d_specs`` row), plus the prescribed surface
     emission on the lowest layer (:func:`woof.core.smoke_tracer.
-    add_surface_source`).  Without a mixing package the buffer is zeroed
-    here first, because nothing else wrote it this step.  None on every
-    state without the tracer, so nothing is allocated or launched.
+    add_surface_source`).  ``mixed`` is what prepare_fixed_tendencies
+    returned: whether it zeroed and wrote the held rows this step.  When it
+    did not, the buffer is zeroed here first.  None on every state without
+    the tracer, so nothing is allocated or launched.
     """
     if getattr(state, "smoke", None) is None:
         return None
@@ -2139,7 +2142,7 @@ def prepare_smoke_tendency(state: DomainState, cfg: RunConfig):
 
     smoke_tracer.bind_emission(state, cfg)
     held = state.scratch(state.p.shape, "smag_rsmoke")
-    if not (cfg.km_opt in (2, 3, 4) or cfg.diff_6th_opt > 0):
+    if not mixed:
         held[...] = 0
     smoke_tracer.add_surface_source(state, held)
     return held
@@ -3949,6 +3952,11 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
                 f"km_opt={cfg.km_opt} Smagorinsky mixing requires the "
                 "acoustic dycore path (step(acoustic=False) is the "
                 "Phase-1 dry advection test path)")
+        if getattr(state, "smoke", None) is not None:
+            raise NotImplementedError(
+                "smoke_tracer requires the acoustic dycore path: the tracer "
+                "advects with the acoustic time-averaged mass fluxes, which "
+                "step(acoustic=False) does not form")
         for istage, dt_eff in enumerate((cfg.dt / 3.0, cfg.dt / 2.0,
                                          cfg.dt)):
             zero_tendencies()
@@ -3974,9 +3982,9 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
     # the time-t diagnostics before evaluating K and its forward tendencies.
     if cfg.km_opt in (2, 3, 4):
         update_diagnostics(state, cfg.hypsometric_opt)
-    prepare_fixed_tendencies(state, cfg)
+    mixed = prepare_fixed_tendencies(state, cfg)
     fixed_scalars = fixed_scalar_tendencies(state, cfg)
-    fixed_smoke = prepare_smoke_tendency(state, cfg)
+    fixed_smoke = prepare_smoke_tendency(state, cfg, mixed=mixed)
 
     ns = cfg.time_step_sound
     stages = ((1, cfg.dt / 3.0),

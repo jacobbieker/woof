@@ -9,6 +9,7 @@ injects exactly the mass its flux says; the PBL solve conserves a column;
 and an off run allocates nothing.
 """
 from dataclasses import fields, replace
+from datetime import datetime
 
 import numpy as np
 import pytest
@@ -81,6 +82,7 @@ def test_off_keys_drop_from_checkpoint_echo():
 
     on = restart.configuration_echo(_cfg(smoke_tracer=True))
     off = restart.configuration_echo(_cfg())
+    assert "smoke_emission_sha256" not in off and "smoke_emission_sha256" not in on
     assert "smoke_tracer" not in off
     assert "smoke_emission_file" not in off
     assert on["smoke_tracer"] is True
@@ -89,10 +91,14 @@ def test_off_keys_drop_from_checkpoint_echo():
 
 def test_preparation_inert_and_per_domain_override():
     from woof.experiment import _DOMAIN_RUN_OVERRIDES
-    from woof.ingest.prepared_cache import PREPARATION_INERT_RUN_FIELDS
+    from woof.ingest.prepared_cache import (DEFAULT_TOLERANT_IDENTITY_FIELDS,
+                                            PREPARATION_INERT_RUN_FIELDS)
 
-    assert {"run.smoke_tracer", "run.smoke_emission_file"} <= \
-        PREPARATION_INERT_RUN_FIELDS
+    # The prepared inventory holds the tracer's arrays exactly when it is
+    # on, so the switch binds a bundle; the emission file does not.
+    assert "run.smoke_emission_file" in PREPARATION_INERT_RUN_FIELDS
+    assert "run.smoke_tracer" not in PREPARATION_INERT_RUN_FIELDS
+    assert "run.smoke_tracer" in DEFAULT_TOLERANT_IDENTITY_FIELDS
     assert "smoke_emission_file" in _DOMAIN_RUN_OVERRIDES
     assert "smoke_tracer" not in _DOMAIN_RUN_OVERRIDES
 
@@ -656,3 +662,167 @@ def test_emission_digest_names_the_bytes(tmp_path):
     np.save(path, np.ones((8, 40)))
     assert emission_file_digest(path) != first
     assert emission_file_digest(tmp_path / "absent.npy") == "missing"
+
+
+# ----------------------------------------------- nest force / feedback ---
+
+def _nest_twin(feedback: int, smooth_option: int, steps: int = 12):
+    import cupy as cp
+
+    from woof.config import RunConfig
+    from woof.core.diagnostics import update_diagnostics
+    from woof.core.grid import make_base_state, make_vertical_coord
+    from woof.core.model import execute_experiment
+    from woof.core.nest import NestCoupler
+    from woof.core.state import init_at_rest
+    from woof.experiment import (DomainConfig, ExperimentConfig,
+                                 ProjectionConfig, VerticalConfig)
+    from woof.verify.cases.nest_ideal_common import assemble_idealized_tree
+
+    dt = 12.0
+    root_run = RunConfig(
+        nx=40, ny=32, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=dt,
+        run_seconds=steps * dt, output_interval_s=steps * dt,
+        moist=True, mp_physics=0, moist_adv_opt=1, km_opt=4,
+        diff_6th_opt=2, diff_6th_factor=0.12, time_step_sound=4,
+        smoke_tracer=True, grid_id=1, case="smoke_nest_twin_parent")
+    child_run = replace(root_run, nx=30, ny=30, dx=1000.0, dy=1000.0,
+                        dt=float(np.float32(dt) / np.float32(3)),
+                        specified=False, nested=True, grid_id=2,
+                        case="smoke_nest_twin_child")
+    root = DomainConfig(grid_id=1, parent_id=0, i_parent_start=1,
+                        j_parent_start=1, parent_grid_ratio=1,
+                        parent_time_step_ratio=1,
+                        history_interval_s=steps * dt, run=root_run,
+                        time_step=int(dt))
+    child = DomainConfig(grid_id=2, parent_id=1, i_parent_start=16,
+                         j_parent_start=12, parent_grid_ratio=3,
+                         parent_time_step_ratio=3,
+                         history_interval_s=steps * dt, run=child_run)
+    exp = ExperimentConfig(
+        name="smoke_nest_twin", start_time=datetime(2026, 10, 21, 12),
+        run_seconds=steps * dt, vertical=VerticalConfig((), 0.0, 1, 0.2),
+        projection=ProjectionConfig("lambert", 35.0, -97.0, 30.0, 60.0,
+                                    -97.0),
+        feedback=feedback, smooth_option=smooth_option,
+        restart_interval_s=0.0, domains=(root, child))
+
+    coord = make_vertical_coord(root_run.nz)
+    base = make_base_state(coord, lambda z: 300.0 + 0.004 * z,
+                           p_surf=root_run.p_surf, ztop=root_run.ztop)
+    state = init_at_rest(root_run, coord, base)
+    state.u[...] = cp.float32(9.0)
+    state.v[...] = cp.float32(2.0)
+    nz, ny, nx = state.smoke.shape
+    blob = np.zeros((nz, ny, nx), dtype=np.float32)
+    blob[1:5, 13:18, 8:14] = 1.0e-4          # upwind of the child (west)
+    blob[1:4, 15:19, 19:23] = 5.0e-5         # inside the child footprint
+    blob[2, 14, 9] = 1.0e-12                 # a near-zero cell
+    state.qc[...] = cp.asarray(blob)
+    state.smoke[...] = cp.asarray(blob)
+    update_diagnostics(state, root_run.hypsometric_opt)
+
+    model = assemble_idealized_tree(
+        exp, state,
+        coupler_factory=lambda node: NestCoupler(
+            node, feedback=feedback, smooth_option=smooth_option))
+    child_state = model.nodes_by_grid_id[2].state
+    child_init = (cp.asnumpy(child_state.smoke).copy(),
+                  cp.asnumpy(child_state.qc).copy())
+    execution = execute_experiment(model, validate_state=False)
+    return model, blob, child_init, execution
+
+
+
+@pytest.mark.gpu
+@requires_gpu
+@pytest.mark.parametrize("feedback,smooth", [(1, 0), (1, 2), (0, 0)],
+                         ids=["feedback", "feedback-smdsm", "one-way"])
+def test_nest_force_and_feedback_carry_smoke_as_qc_word_for_word(
+        feedback, smooth):
+    """A running two-domain tree: SINT birth, FORCE, FEEDBACK, smoothing.
+
+    The same field starts as qc and as smoke on a ratio-3 tree with no
+    microphysics (mp_physics = 0) and the km_opt = 4 + diff6 package, so
+    both go through the identical nest kinds path (generic code 7
+    coupling, bdy_interp1, copy_fcn restriction, the post-feedback clamp
+    and smoother).  Every domain's smoke must equal its qc word for word,
+    the parent puff must enter the child through its boundary, and with
+    feedback the parent must differ from the one-way run.
+    """
+    import cupy as cp
+
+    model, blob, child_init, execution = _nest_twin(feedback, smooth)
+    assert execution.forces > 0 and execution.feedback_calls > 0
+    assert (child_init[0].view(np.uint32) == child_init[1].view(np.uint32)).all()
+    for grid_id, node in sorted(model.nodes_by_grid_id.items()):
+        assert _max_ulp(node.state.smoke, node.state.qc) == 0, grid_id
+    child = cp.asnumpy(model.nodes_by_grid_id[2].state.smoke)
+    # The western strip started empty (the child's own puff sits in its
+    # middle) and now carries the parent's puff, which crossed in.
+    assert child_init[0][:, :, :6].max() == 0.0
+    assert child[:, :, :6].max() > 1.0e-6
+    if feedback:
+        one_way, _, _, _ = _nest_twin(0, 0)
+        parent = cp.asnumpy(model.nodes_by_grid_id[1].state.smoke)
+        other = cp.asnumpy(one_way.nodes_by_grid_id[1].state.smoke)
+        assert (parent.view(np.uint32) != other.view(np.uint32)).any()
+
+
+def test_offline_child_refuses_the_tracer(tmp_path):
+    """The downscale (ndown) route carries no SMOKE, so it refuses by name."""
+    from woof.offline_child import (OfflineChildContractError,
+                                    resolve_child_run_config)
+
+    path = tmp_path / "child.toml"
+    path.write_text(
+        "[grid]\nnx = 40\nny = 8\nnz = 10\ndx = 1000.0\ndy = 1000.0\n"
+        "ztop = 10000.0\n[run]\ndt = 10.0\nrun_seconds = 0.0\n"
+        "smoke_tracer = true\n", encoding="utf-8")
+    with pytest.raises(OfflineChildContractError, match="online nest"):
+        resolve_child_run_config(path)
+
+
+def test_checkpoint_echo_binds_the_emission_bytes(tmp_path):
+    from woof.io import restart
+
+    path = tmp_path / "e.npy"
+    np.save(path, np.zeros((8, 40)))
+    echo = restart.configuration_echo(
+        _cfg(smoke_tracer=True, smoke_emission_file=str(path)))
+    from woof.core.smoke_tracer import emission_file_digest
+    assert echo["smoke_emission_sha256"] == emission_file_digest(path)
+    # A saved digest stays saved: re-binding a stored echo keeps its bytes.
+    from woof.core.smoke_tracer import bind_emission_identity
+    stored = dict(echo, smoke_emission_sha256="0" * 64)
+    assert bind_emission_identity(stored)["smoke_emission_sha256"] == "0" * 64
+
+
+def test_moving_nest_emission_and_packed_ensemble_are_routed():
+    from types import SimpleNamespace
+
+    from woof.ensemble.suite_capabilities import plan_suite
+    from woof.experiment import _refuse_moving_smoke_emission
+
+    dc = SimpleNamespace(grid_id=2, follow=object(),
+                         run=SimpleNamespace(smoke_emission_file="e.npy"))
+    with pytest.raises(ValueError, match="moves"):
+        _refuse_moving_smoke_emission((dc,), None, "case.toml")
+    still = SimpleNamespace(grid_id=2, follow=None,
+                            run=SimpleNamespace(smoke_emission_file="e.npy"))
+    _refuse_moving_smoke_emission((still,), None, "case.toml")
+    plan = plan_suite(_cfg(smoke_tracer=True), members=2)
+    assert plan.mode == "member_local"
+    assert any("smoke_tracer" in reason
+               for reason in plan.native_fallback_reasons)
+
+
+@pytest.mark.gpu
+@requires_gpu
+def test_the_no_acoustic_path_refuses_the_tracer():
+    from woof.core.dycore import step
+
+    cfg = _cfg(km_opt=0, smoke_tracer=True)
+    state = _state(cfg)
+    with pytest.raises(NotImplementedError, match="acoustic"):
+        step(state, cfg, acoustic=False)

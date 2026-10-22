@@ -1407,7 +1407,7 @@
    },
    {
     "file": "woof/core/smoke_tracer.py",
-    "sha256": "0829d44a8fe10d7539cc43b09a741217f82691d94414168bb0906125d3463e4b"
+    "sha256": "5e4f20188713ce7a3b45ebc719a7675bd4713b34c15329db4713bc599f4f475c"
    }
   ],
   "python_cuda_literals": [
