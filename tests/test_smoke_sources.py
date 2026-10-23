@@ -81,6 +81,8 @@ def test_fields_appended_last_with_their_defaults():
      "takes 3 to 198 levels"),
     ({"smoke_tracer": True, "smoke_injection": "plumerise",
       "smoke_plume_heat_flux": 3.0e4}, "set both positive"),
+    ({"smoke_tracer": True, "smoke_settling": True, "dt": 0.5},
+     "settles nothing"),
 ])
 def test_config_refusals(kw, match):
     with pytest.raises(ValueError, match=match):

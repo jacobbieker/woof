@@ -4025,6 +4025,15 @@ def smoke_sources_refusal(cfg) -> str | None:
                 "fire_heat_flux and fire_area variables.",
                 "A .npy file carries the emission only, and a plume with no "
                 "heat source does not rise.")
+    if settling and float(cfg.dt) < 1.0:
+        return layered(
+            f"smoke_settling = true with dt = {cfg.dt} s settles nothing: "
+            "GOCART's settling steps INT(dt) whole seconds "
+            "(module_gocart_settling.F), which is 0 below one second; turn "
+            "the settling off on this domain.",
+            "Running it would report a settling that moved no smoke.  A "
+            "fractional dt above one second is truncated the same way, as "
+            "WRF-Chem truncates it.")
     if injection == "pbl" and int(cfg.bl_pbl_physics) == 0:
         return layered(
             "smoke_injection = \"pbl\" reads the PBL height, and "
