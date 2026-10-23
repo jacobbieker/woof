@@ -1832,6 +1832,10 @@ class PhysicsDriver:
         # WRF's topo_wind / gwd_opt; initialize_physics attaches it where
         # either is on (restart: rebuilt from the prepared statics).
         self.terrain_drag = None
+        # The smoke deposition's surface receipt
+        # (woof.core.smoke_sources.SmokeSurface); initialize_physics attaches
+        # it where smoke_drydep runs (restart: rebuilt).
+        self.smoke_surface = None
         # WRF's swint_opt = 1 carrier (woof.core.swint); initialize_physics
         # attaches it where the config asks for it (restart: rebuilt; its
         # eleven state fields ride ``fields``).
