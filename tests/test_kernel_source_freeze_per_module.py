@@ -676,6 +676,15 @@ BASELINE_PINNED: dict[str, str] = {
     # direct NVRTC loader (woof/core/windfarm_fitch.py).
     "windfarm_fitch":
         "8b2f3964a1a1e831690ecabdbcfecc29e9f97a2568a99fdc63a9d77e1b11b5a2",
+    # feat/fire-rothermel: WRF v4.7.1 set_fire_params / fire_ros (float32)
+    # bit for bit against WRF's own Fortran on CPU and GPU
+    # (tests/test_fire_ros_wrf471_parity.py), and the full Rothermel-Albini
+    # model (float64) equal to its NumPy reference word for word
+    # (tests/test_fire_rothermel.py).  Compiled by its own direct NVRTC
+    # loader (woof/fire/_device.py), -fmad=false --ftz=false, with
+    # glibc_flt32.cuh and glibc_flt64.cuh prepended.
+    "fire_spread":
+        "d6dd5c154a9ae3f54e0698b131120f9d2f82025510a150885c073520b97b41b7",
     # ebcf4edd2 lane/urban-bep: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
     "urban_bep":

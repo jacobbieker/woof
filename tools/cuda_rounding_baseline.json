@@ -1668,6 +1668,55 @@
  "meaning": "Frozen source and target-compiler diagnostics. This is not cross-card numerical certification.",
  "schema": 1,
  "units": {
+  "composed:fire_spread": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "9c461e8f95c22256204529a584e874b4941f4b3758e2c29cbc8ffa4081677e54",
+    "sites": {
+     "100": 465
+    }
+   },
+   "native_differences": {
+    "sha256": "a2d88a1f0ad47965e56885b13e0161df00fa50e11742780ac723a111c52b3182",
+    "sites": {
+     "100": 5
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "4028a1d1e10e5ee12935fe5ddfc46ba989232a98cc7de328762f739c531f6891"
+  },
   "composed:nest": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
