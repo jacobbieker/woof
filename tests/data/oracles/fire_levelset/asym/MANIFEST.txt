@@ -1,0 +1,96 @@
+nx i4 0
+ny i4 0
+nxa i4 0
+nya i4 0
+ir i4 0
+jr i4 0
+dxa f4 0
+dt f4 0
+nsteps i4 0
+nsub i4 0
+advection i4 0
+reinit i4 0
+options f4 1 9
+ignitions f4 2 8 1
+dumps i4 1 4
+in_vx f4 2 48 40
+in_vy f4 2 48 40
+in_dzdxf f4 2 48 40
+in_dzdyf f4 2 48 40
+in_r_0 f4 2 48 40
+in_bbb f4 2 48 40
+in_phiwc f4 2 48 40
+in_betafl f4 2 48 40
+in_fgip f4 2 48 40
+in_fuel_time f4 2 48 40
+in_fmc_g f4 2 48 40
+init_lfn f4 2 48 40
+init_tign f4 2 48 40
+s1_time f4 0
+s1_tbound f4 0
+s1_lfn f4 2 48 40
+s1_tign f4 2 48 40
+s1_ros f4 2 48 40
+s1_fire_area f4 2 48 40
+s1_fuel_frac f4 2 48 40
+s1_fuel_frac_burnt f4 2 48 40
+s1_fgrnhfx f4 2 48 40
+s1_fgrnqfx f4 2 48 40
+s1_GRNHFX f4 2 6 4
+s1_GRNQFX f4 2 6 4
+s1_CANHFX f4 2 6 4
+s1_CANQFX f4 2 6 4
+s1_AVG_FUEL_FRAC f4 2 6 4
+s1_mean_GRNHFX f4 2 6 4
+s1_mean_GRNQFX f4 2 6 4
+s30_time f4 0
+s30_tbound f4 0
+s30_lfn f4 2 48 40
+s30_tign f4 2 48 40
+s30_ros f4 2 48 40
+s30_fire_area f4 2 48 40
+s30_fuel_frac f4 2 48 40
+s30_fuel_frac_burnt f4 2 48 40
+s30_fgrnhfx f4 2 48 40
+s30_fgrnqfx f4 2 48 40
+s30_GRNHFX f4 2 6 4
+s30_GRNQFX f4 2 6 4
+s30_CANHFX f4 2 6 4
+s30_CANQFX f4 2 6 4
+s30_AVG_FUEL_FRAC f4 2 6 4
+s30_mean_GRNHFX f4 2 6 4
+s30_mean_GRNQFX f4 2 6 4
+s80_time f4 0
+s80_tbound f4 0
+s80_lfn f4 2 48 40
+s80_tign f4 2 48 40
+s80_ros f4 2 48 40
+s80_fire_area f4 2 48 40
+s80_fuel_frac f4 2 48 40
+s80_fuel_frac_burnt f4 2 48 40
+s80_fgrnhfx f4 2 48 40
+s80_fgrnqfx f4 2 48 40
+s80_GRNHFX f4 2 6 4
+s80_GRNQFX f4 2 6 4
+s80_CANHFX f4 2 6 4
+s80_CANQFX f4 2 6 4
+s80_AVG_FUEL_FRAC f4 2 6 4
+s80_mean_GRNHFX f4 2 6 4
+s80_mean_GRNQFX f4 2 6 4
+s120_time f4 0
+s120_tbound f4 0
+s120_lfn f4 2 48 40
+s120_tign f4 2 48 40
+s120_ros f4 2 48 40
+s120_fire_area f4 2 48 40
+s120_fuel_frac f4 2 48 40
+s120_fuel_frac_burnt f4 2 48 40
+s120_fgrnhfx f4 2 48 40
+s120_fgrnqfx f4 2 48 40
+s120_GRNHFX f4 2 6 4
+s120_GRNQFX f4 2 6 4
+s120_CANHFX f4 2 6 4
+s120_CANQFX f4 2 6 4
+s120_AVG_FUEL_FRAC f4 2 6 4
+s120_mean_GRNHFX f4 2 6 4
+s120_mean_GRNQFX f4 2 6 4

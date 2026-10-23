@@ -685,6 +685,14 @@ BASELINE_PINNED: dict[str, str] = {
     # glibc_flt32.cuh and glibc_flt64.cuh prepended.
     "fire_spread":
         "d6dd5c154a9ae3f54e0698b131120f9d2f82025510a150885c073520b97b41b7",
+    # feat/fire-levelset: WRF v4.7.1's fire model (module_fr_fire_core/
+    # phys/util.F: prop_ls_rk3, reinit_ls_rk3, ignite_fire, tign_update,
+    # fuel_left, heat_fluxes, sum_2d_cells), REAL(4) word for word against
+    # WRF's own Fortran (tests/test_fire_levelset_wrf471_parity.py).
+    # Compiled with glibc_flt32.cuh by its own direct NVRTC loader
+    # (woof/fire/levelset.py), -fmad=false --ftz=false.
+    "fire_levelset":
+        "7b6569f098b415cfafd8bf1f4bd06346daf051f7a74b2025a181376fb421553d",
     # ebcf4edd2 lane/urban-bep: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
     "urban_bep":

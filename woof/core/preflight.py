@@ -2610,7 +2610,11 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     # kernels are point-local (one thread per fire-grid cell, a few dozen
     # scalars); no physics_kernel_modules selector row launches it yet, and
     # the coupled fire model that does will price its composed unit.
-    "fire_spread"})
+    "fire_spread",
+    # The fire level set calls glibc_flt32.cuh's gfk_exp/gfk_pow, which
+    # woof.fire.levelset.module_source() prepends; it cannot compile alone.
+    # Priced as fire_levelset_composed.
+    "fire_levelset"})
 # face_mass, held_heating, rk_bookkeeping and surface_w (the dycore-host
 # speed lane's point-local units, 66af318bc) sat in this set on
 # 2026-09-30 under the same "no measurement platform in this lane"
@@ -2777,6 +2781,12 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         module="windfarm_fitch_composed",
         max_local_size_bytes=0,
         covers=frozenset({"windfarm_fitch"})),
+    # The fire level set's production loader (woof/fire/levelset.py), NVRTC
+    # 12.9.86 on sm_86: every export 0 B (one node per thread, no arrays).
+    "fire_levelset_composed": ChainedTranslationUnitFrame(
+        module="fire_levelset_composed",
+        max_local_size_bytes=0,
+        covers=frozenset({"fire_levelset"})),
 }
 
 _seen_covers: set[str] = set()
