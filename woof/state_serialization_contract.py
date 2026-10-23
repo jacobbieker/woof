@@ -52,6 +52,14 @@ STATE_SERIALIZED_ATTRS = (
     # Absent on every state that leaves the tracer off, so no existing
     # inventory moves.
     "smoke", "smoke_emis", "smoke_col",
+    # The coupled fire (RunConfig.ifire, woof/fire/coupling.py
+    # STATE_ATTRS): the level set, ignition time and fuel fraction nothing
+    # reconstructs, and the last step's outputs, serialized for
+    # smoke_col's reason.  Absent unless the fire is on.
+    "fire_lfn", "fire_tign", "fire_fuel_frac", "fire_ros",
+    "fire_area_frac", "fire_burnt", "fire_fgrnhfx", "fire_fgrnqfx",
+    "fire_uf", "fire_vf", "fire_grnhfx", "fire_grnqfx", "fire_canhfx",
+    "fire_canqfx", "fire_avg_fuel_frac", "fire_heat_flux", "fire_area",
     "qi", "qs", "qg", "nc", "nr", "ni", "ns", "ng",
     "qh", "qndrop", "qnr", "qni", "qns", "qng", "qnh", "qnn",
     "qvolg", "qvolh",

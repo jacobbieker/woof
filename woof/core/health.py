@@ -426,6 +426,27 @@ def rule_for_field(name: str, *, p_top: float | None = None) -> FieldRule:
         # The prescribed surface emission, kg m-2 s-1; load_emission
         # refuses a negative or non-finite file.
         return FieldRule("tracer", 0.0, 1.0)
+    # The coupled fire (woof/fire/coupling.py).  Fractions of fuel and of
+    # cell are [0, 1] by construction (fuel_left clamps); the spread rate,
+    # fluxes and areas are non-negative; the level set (m) and the
+    # ignition time (s) are finite with no physical ceiling worth a gate
+    # (init_no_fire sets the level set to twice the mesh diameter).  The
+    # flux ceilings are blow-up catches, two decades over the most intense
+    # crown-fire flux.
+    if leaf in ("fire_fuel_frac", "fire_area_frac", "fire_burnt",
+                "fire_avg_fuel_frac"):
+        return FieldRule("generic", 0.0, 1.0)
+    if leaf == "fire_ros":
+        return FieldRule("generic", 0.0, 1.0e3)
+    if leaf in ("fire_fgrnhfx", "fire_fgrnqfx", "fire_grnhfx", "fire_grnqfx",
+                "fire_canhfx", "fire_canqfx", "fire_heat_flux"):
+        return FieldRule("surface", 0.0, 1.0e9)
+    if leaf == "fire_area":
+        return FieldRule("generic", 0.0, 1.0e12)
+    if leaf in ("fire_uf", "fire_vf"):
+        return FieldRule("wind", -500.0, 500.0)
+    if leaf in ("fire_lfn", "fire_tign"):
+        return FieldRule("generic")
     if leaf in ("effc", "effr", "effi", "effs"):
         # Morrison stores these diagnostics in microns.
         return FieldRule("effective_radius", 0.0, 1.0e6)
@@ -509,6 +530,13 @@ def _walk_arrays(value: Any, prefix: str, *, seen: set[int] | None = None,
 _LID_FROM_STATE = object()
 
 
+def _fire_state_attrs() -> tuple[str, ...]:
+    """The coupled fire's serialized DomainState arrays (woof.fire.coupling)."""
+    from woof.fire.coupling import STATE_ATTRS
+
+    return STATE_ATTRS
+
+
 def collect_state_fields(state: Any, *, backend: str = "cpu",
                          extra_tables: Mapping[str, Any] | None = None,
                          p_top: Any = _LID_FROM_STATE,
@@ -543,6 +571,9 @@ def collect_state_fields(state: Any, *, backend: str = "cpu",
             # Absent unless smoke_tracer is on; the None skip below keeps
             # every other census unchanged.
             "smoke", "smoke_emis", "smoke_col",
+            # The coupled fire's serialized state and outputs (absent
+            # unless ifire is on), woof.fire.coupling's own list.
+            *_fire_state_attrs(),
             # The dycore's exported advective forcing pair.  Absent on a
             # state with no cumulus consumer, and the None skip below is
             # what keeps every other census unchanged.

@@ -3982,6 +3982,21 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
     # the time-t diagnostics before evaluating K and its forward tendencies.
     if cfg.km_opt in (2, 3, 4):
         update_diagnostics(state, cfg.hypsometric_opt)
+    if getattr(cfg, "ifire", 0):
+        # WRF's fire step (module_first_rk_step_part1.F, after the PBL):
+        # the time-t winds to the fire mesh, one fire step, its fluxes as
+        # rthfrten/rqvfrten and, with the smoke tracer, the emission the
+        # tracer's source below reads this same step.  phy_prep's density
+        # needs this step's diagnostics; the physics or the closure above
+        # refreshed them unless neither ran.
+        from woof.fire import coupling as fire_coupling
+        if not physics_enabled(cfg) and cfg.km_opt not in (2, 3, 4):
+            update_diagnostics(state, cfg.hypsometric_opt)
+        fire_coupling.step_domain(state, cfg)
+        # phy_fr_ten: added to the physics tendencies of every RK stage,
+        # whatever the PBL (and with no other physics at all).
+        physics_tendencies = fire_coupling.merge_tendencies(
+            state, physics_tendencies)
     mixed = prepare_fixed_tendencies(state, cfg)
     fixed_scalars = fixed_scalar_tendencies(state, cfg)
     fixed_smoke = prepare_smoke_tendency(state, cfg, mixed=mixed)

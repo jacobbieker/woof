@@ -37,6 +37,7 @@ from woof.config import NO_LAND_SURFACE_SOIL_LAYERS, soil_layer_count
 from woof.io.classic_tape import (ClassicDim, ClassicTape, ClassicVariable,
                                    classic_attr_value)
 from woof.io.wrf_output_schema import (
+    FIRE_MESH_DIMENSIONED_FIELDS, FIRE_MESH_DIMENSIONS,
     HISTORY_FIELDS_BY_NETCDF_NAME, HUB_HEIGHT_DIMENSION,
     HUB_HEIGHT_DIMENSIONED_FIELDS, PHYSICS_SELECTOR_GLOBALS,
     REGISTRY_VAR_META, SCHEME_OUTPUT_FIELDS, WINDFARM_TURBINE_DIMENSION,
@@ -1269,6 +1270,21 @@ class WrfoutWriter:
                     f"{shape}, which is not (n_turbine,)")
             self._ensure_dimension(WINDFARM_TURBINE_DIMENSION, shape[0])
             return ("Time", WINDFARM_TURBINE_DIMENSION)
+        if name in FIRE_MESH_DIMENSIONED_FIELDS:
+            # The coupled fire's mesh (woof/fire/coupling.py), routed by
+            # NAME for the hub axis's reason and created lazily for the
+            # same one: a run without the fire keeps its header
+            # byte-identical.  The mesh refines every mass cell sr_y x sr_x
+            # times, so each extent is a whole multiple of the grid's.
+            shape = tuple(shape)
+            if (len(shape) != 2 or shape[0] % ny or shape[1] % nx
+                    or shape[0] < ny or shape[1] < nx):
+                raise ValueError(
+                    f"fire-mesh history field {name} has shape {shape}, "
+                    f"which is not a refinement of {(ny, nx)}")
+            for dim, size in zip(FIRE_MESH_DIMENSIONS, shape):
+                self._ensure_dimension(dim, size)
+            return ("Time",) + FIRE_MESH_DIMENSIONS
         if name in _SOIL_LAYER_FIELDS:
             expected = (self.soil_layers, ny, nx)
             if tuple(shape) != expected:

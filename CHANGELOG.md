@@ -4,6 +4,28 @@
 
 New:
 
+- `ifire = 2` runs WRF v4.7.1's two-way coupled fire (WRF-SFIRE's level
+  set) on a domain's fire mesh, refined `sr_x` x `sr_y` from the
+  atmospheric grid. Every step, after the PBL, the fire takes the wind at
+  `fire_wind_height` on the fire mesh, advances one fire step from its
+  ignition lines (`fire_ignitions`, WRF's `fire_ignition_*1..5`, in metres
+  or longitude/latitude) and returns its heat and vapour as WRF's
+  `rthfrten`/`rqvfrten`, decaying over `fire_ext_grnd`/`fire_ext_crwn`, in
+  every RK stage whatever the PBL, LES included. With `smoke_tracer =
+  true` the burned fuel becomes the tracer's surface emission, by default
+  with each fuel class's PM2.5 factor (`fire_smoke_factor`). `ifire` on a
+  domain requests its fuel statics. The driver glue -- `fire_driver_em`,
+  `interpolate_atm2fire`, `fire_tendency` -- matches WRF's own Fortran at
+  0 ULP on CPU and GPU (`tools/fire_coupling_wrf471_oracle`, the whole
+  driver run on a stub domain). History gains `FGRNHFX`, `FGRNQFX`,
+  `FIRE_AREA`, `ROS`, `TIGN_G`, `LFN`, `FUEL_FRAC`, `UF`, `VF` on new
+  `south_north_subgrid`/`west_east_subgrid` axes and `GRNHFX`, `GRNQFX`,
+  `CANHFX`, `CANQFX`, `AVG_FUEL_FRAC` on the mass grid. The fire state is
+  checkpointed and resumes bit-exact. A WRF namelist's `&fire` imports.
+  Moving and mid-run-spawned nests, the offline child route and adaptive
+  time steps are refused with `ifire` by name. Off by default: nothing is
+  allocated or launched, and checkpoints and fingerprints are unchanged.
+
 - `smoke_tracer = true` carries a passive smoke tracer, `SMOKE` (ug per
   kg of dry air), the analogue of WRF's `tracer` array. It advects with
   the moist scalars' acoustic-averaged mass fluxes, positive-definite on

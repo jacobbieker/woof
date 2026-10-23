@@ -367,7 +367,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 80,
+**Which keys a `[[domain]]` table may override.** Exactly these 106,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     cu_physics  cudt_minutes  clos_choice  ishallow  radt  radt_minutes  bldt
@@ -386,7 +386,12 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     max_time_step  max_time_step_den  min_time_step  min_time_step_den
     min_time_step_sound  slope_rad  topo_shading  mosaic_urban_canopy
     sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev  topo_wind
-    gwd_opt  smoke_emission_file
+    gwd_opt  smoke_emission_file  ifire  sr_x  sr_y  fire_fuel_read  fire_fuel_cat
+    fire_fuel_table  fire_fmc_read  fire_wind_height  fire_ext_grnd  fire_ext_crwn
+    fire_crwn_hgt  fire_atm_feedback  fire_ignitions  fire_advection
+    fire_lsm_reinit  fire_lsm_reinit_iter  fire_lsm_band_ngp  fire_viscosity
+    fire_viscosity_bg  fire_viscosity_band  fire_viscosity_ngp  fire_lfn_ext_up
+    fire_slope_factor  fire_tracer_smoke  fire_smoke_factor  sfc_lu_index
 
 `clos_choice` and `ishallow` configure the Grell-Freitas cumulus scheme
 (`cu_physics = 3`): which closure the deep scheme uses (0, the default,
@@ -921,6 +926,109 @@ smoke_emission_file = "smoke_source.npy"   # kg m-2 s-1, (ny, nx)
 The history carries `SMOKE` (ug kg-1) and `SMOKE_COL`, the column load
 in ug m-2, on every domain with the tracer on (see
 [OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#smoke-tracer-fields)).
+
+## Coupled fire (`ifire`)
+
+WRF v4.7.1's two-way fire model, WRF-SFIRE's level set (`ifire = 2`),
+runs on a fire mesh that refines each atmospheric cell `sr_x` x `sr_y`
+times. Every atmospheric step, in WRF's place after the PBL, the fire
+takes the wind at `fire_wind_height` on the fire mesh
+(`interpolate_atm2fire`), advances one fire step (WRF takes no
+sub-steps), burns fuel, and returns its heat and vapour as coupled
+theta and moisture tendencies that decay with height (`fire_tendency`,
+WRF's `rthfrten`/`rqvfrten`). The tendencies join the physics tendencies
+of every RK stage whatever the PBL, so the fire works under a PBL scheme
+and in LES with the PBL off. With `smoke_tracer = true` the burned fuel
+also becomes the tracer's surface emission. Each piece matches WRF
+v4.7.1's own Fortran at 0 ULP on CPU and GPU
+(`tools/fire_coupling_wrf471_oracle`). `woof/fire/coupling.py` has the
+details.
+
+Every key is WRF's `&fire` (or `&domains`) name, Registry default and
+scope (`max_domains`): set it in `[shared]` for every domain or in a
+`[[domain]]` table for one. `ifire = 0`, the default, allocates nothing
+and launches nothing, and every other key below is then inert and left
+out of checkpoint, fingerprint and prepared-bundle identities. A WRF
+namelist's `&fire` group and `&domains sr_x, sr_y` import to these keys.
+
+| TOML key | WRF equivalent | default | allowed | note |
+|---|---|---|---|---|
+| `ifire` | `&fire ifire` | 0 | 0, 2 | 2 runs the fire on this domain. 1 is refused: WRF v4.7.1 runs the fire only for 2 |
+| `sr_x`, `sr_y` | `&domains sr_x, sr_y` | 0 | integer >= 1 with `ifire` | fire-mesh cells per atmospheric cell. `ifire` on a domain requests that domain's fuel statics at this refinement (`NFUEL_CAT_FIRE`, `ZSF`, `DZDXF`, `DZDYF`, built by `woof/static/fuel.py`; preview them with [`woof fuel preview`](CLI-OPTIONS.md#woof-fuel-preview)). A `[[domain]] static = { fuel = {...} }` table on the same domain must name the same `sr_x`, `sr_y` and may add a LANDFIRE raster |
+| `fire_fuel_read` | `fire_fuel_read` | -1 | -1, 0, 1, 2 | how the fuel map is set (`set_nfuel_cat`): -1 and 2 read the domain's fuel statics, 0 is uniform `fire_fuel_cat`, 1 is by altitude from `ZSF` |
+| `fire_fuel_cat` | `fire_fuel_cat` | 1 | 1-14 | the uniform category for `fire_fuel_read = 0`: Anderson 1-13, 14 no fuel. Chaparral (4) spreads at WRF's wind-only chaparral rate with `ros_base` fixed at 0, the one word WRF leaves undefined |
+| `fire_fuel_table` | -- (`namelist.fire` present or not) | `"namelist"` | `namelist`, `defaults` | which fuel tables `set_fire_params` loads: `namelist` is WRF's `test/em_fire/namelist.fire`, `defaults` the compiled DATA a WRF run without a `namelist.fire` reads. A woof key |
+| `fire_fmc_read` | `fire_fmc_read` | 1 | 1 | ground fuel moisture from `namelist.fire`'s `fuelmc_g` (0.08). 0 and 2 read inputs woof's prepared state does not carry and are refused |
+| `fire_wind_height` | `fire_wind_height` | 6.096 | > 0 m | height above the ground of the wind the spread rate takes |
+| `fire_ext_grnd` | `fire_ext_grnd` | 50.0 | > 0 m | extinction depth of the surface-fire heat and vapour |
+| `fire_ext_crwn` | `fire_ext_crwn` | 50.0 | > 0 m | extinction depth of the crown-fire heat above `fire_crwn_hgt` |
+| `fire_crwn_hgt` | `fire_crwn_hgt` | 15.0 | >= 0 m | height above which crown heat decays. WRF v4.7.1 has no canopy flux yet, so `CANHFX`/`CANQFX` are zero |
+| `fire_atm_feedback` | `fire_atm_feedback` | 1.0 | >= 0 | multiplies the fluxes into the atmosphere; 0 is a one-way fire |
+| `fire_ignitions` | `fire_ignition_*1..5` | `[]` | up to 5 tables | the ignition lines, in WRF's order. Each table takes any of `start_x`, `start_y`, `end_x`, `end_y` (m from the lower-left corner), `start_lon`, `start_lat`, `end_lon`, `end_lat` (degrees), `radius` (m), `ros` (m/s, default 0.01), `start_time`, `end_time` (s from the domain's start); missing keys take WRF's defaults. As WRF decides, the first line's coordinates choose metres or longitude/latitude for all lines (both is refused); a zero end takes the start, a zero end time the start time; lines count up to the last with a positive radius, and a counted line without one is refused. Longitude/latitude lines need the domain's `XLAT_M`/`XLONG_M` statics |
+| `fire_advection` | `fire_advection` | 1 | 0, 1 | the spread-rate form (`fire_ros`) |
+| `fire_lsm_reinit` | `fire_lsm_reinit` | true | bool | level-set reinitialization |
+| `fire_lsm_reinit_iter` | `fire_lsm_reinit_iter` | 1 | >= 1 | its iterations |
+| `fire_lsm_band_ngp` | `fire_lsm_band_ngp` | 4 | >= 1 | fire-mesh nodes around the front where WENO5 runs |
+| `fire_viscosity` | `fire_viscosity` | 0.4 | >= 0 | artificial viscosity of the level set |
+| `fire_viscosity_bg` | `fire_viscosity_bg` | 0.4 | >= 0 | its value near the front |
+| `fire_viscosity_band` | `fire_viscosity_band` | 0.5 | >= 0 | the ramp between the two |
+| `fire_viscosity_ngp` | `fire_viscosity_ngp` | 2 | >= 1 | nodes around the front that take `fire_viscosity_bg` |
+| `fire_lfn_ext_up` | `fire_lfn_ext_up` | 1.0 | >= 0 | level-set extension at the mesh edge (1 = always up) |
+| `fire_slope_factor` | `fire_slope_factor` | 1.0 | >= 0 | slope correction factor |
+| `fire_tracer_smoke` | `fire_tracer_smoke` | 0.02 | >= 0 kg/kg | smoke per burned fuel under `fire_smoke_factor = "fire_tracer_smoke"` |
+| `fire_smoke_factor` | -- | `"pm25"` | `pm25`, `fire_tracer_smoke` | how burned fuel becomes the smoke tracer's emission: `pm25` takes each fire cell's fuel-class PM2.5 factor (`woof/smoke/emission.py`), `fire_tracer_smoke` WRF's one factor. A woof key |
+| `sfc_lu_index` | `sfc_lu_index` | 28 | USGS category | on a domain with no physics driver (an idealised LES), the fire wind's roughness is this category's LANDUSE.TBL `SFZ0`/100, as WRF's em_fire `landuse_init` sets it. A domain with physics uses its own `z0` |
+
+The smoke source is a flux into the tracer's existing surface seam
+(`state.smoke_emis`, kg m-2 s-1, lowest layer): WRF-SFIRE's
+`add_fire_tracer_emissions` (`tracer_opt = 3`), summed over each cell's
+fire mesh and divided by the step. Plume rise and deposition are not
+part of the fire; `state.fire_heat_flux` and `state.fire_area` carry the
+fire's heat and burning area to them (see
+[OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#coupled-fire-fields)).
+
+Refused, by name:
+
+- `ifire` on a nest that moves (storm-follow or relocation) or is spawned
+  mid-run: the rebuilt nest would lose the fire's level set and fuel. The
+  fire runs on any fixed domain present from its start;
+- `ifire` on the offline (downscaled) child route, whose physics
+  initialization hands the fire no fuel statics;
+- `ifire` with `use_adaptive_time_step`: WRF's fire clock is
+  `itimestep * dt`;
+- `ifire` with `moist = false`: the vapour flux has nowhere to go;
+- `ifire` with `smoke_tracer = true` and a `smoke_emission_file` on the
+  same domain: the fire writes the emission every step;
+- `fire_fuel_read = -1` or 2 on a route that hands no fuel statics, at
+  the first fire step;
+- WRF keys woof does not run: `fire_sfc_flx = 1` and `fire_smk_scheme =
+  1` (WRF's `tg_dist` reads its height before setting it),
+  `fire_lsm_zcoupling`, `fmoist_run`/`fmoist_interp`, `fire_is_real_perim`,
+  and numerics other than WRF's defaults (`fire_upwinding = 9`,
+  `fire_upwinding_reinit = 4`, `fire_fuel_left_method = 1`).
+
+Two differences from WRF, by design: WRF stops the run when the fire
+comes within `fire_boundary_guard` fire-mesh nodes of the edge, and woof
+lets it leave the mesh; and the smoke source reaches every interior
+column, where WRF v4.7.1's loop (`do i=i_st,i_st`) reaches only the
+first of each tile.
+
+```toml
+[shared]
+moist = true
+smoke_tracer = true          # optional: the fire's PM2.5 as a tracer
+
+[[domain]]
+grid_id = 2
+ifire = 2
+sr_x = 4
+sr_y = 4
+fire_fuel_read = -1          # the domain's fuel statics (requested by ifire)
+fire_ignitions = [
+    { start_lon = -105.20, start_lat = 39.80, radius = 30.0, ros = 0.5,
+      start_time = 600.0 },
+]
+```
 
 ## Terrain smoothing (`[[domain]] static`)
 

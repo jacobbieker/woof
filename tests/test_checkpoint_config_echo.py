@@ -22,6 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from woof.config import FIRE_RUN_DEFAULTS
 from woof.io import restart
 from test_restart import (
     _cfg, _fill_setup, _identity_bound_physics_state, _shim_driver_state)
@@ -133,6 +134,8 @@ DEFAULT_OFF = frozenset({
     "alb_sol",
     # The passive smoke tracer, dropped off as in a header written before it.
     "smoke_tracer", "smoke_emission_file",
+    # WRF's coupled fire, inert and dropped while ifire = 0.
+    *FIRE_RUN_DEFAULTS,
 })
 
 

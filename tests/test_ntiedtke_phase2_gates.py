@@ -373,7 +373,7 @@ def test_the_optional_tendency_components_branch_for_16():
     separate-ice-snow package for rqs as well.
     """
     pytest.importorskip("cupy")
-    from woof.config import RunConfig
+    from woof.config import FIRE_RUN_DEFAULTS, RunConfig
     from woof.core.physics import _cumulus_optional_tendency_components
 
     def cfg(mp, cu=16):
@@ -395,7 +395,7 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     """Full domain serialization binds the scheme and every other run field."""
     from dataclasses import asdict, replace
     from datetime import datetime, timedelta
-    from woof.config import RunConfig
+    from woof.config import FIRE_RUN_DEFAULTS, RunConfig
     from woof.experiment import DomainConfig
     from woof.ingest import prepared_cache
 
@@ -416,7 +416,9 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
                   "swint_opt", "aer_opt", "alb_sol",
                   "thompson_version", "thompson_fork_snow_fall",
                   "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
-                  "smoke_tracer", "smoke_emission_file"):
+                  "smoke_tracer", "smoke_emission_file",
+                  # WRF's coupled fire, inert while ifire = 0.
+                  *FIRE_RUN_DEFAULTS):
         expected_run.pop(field)
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()
