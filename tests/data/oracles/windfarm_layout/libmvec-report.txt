@@ -1,0 +1,19 @@
+# module_llxy.o -O0 libm symbols:
+                 U acosf
+                 U asinf
+                 U atan2f
+                 U atanf
+                 U cosf
+                 U expf
+                 U log10f
+                 U logf
+                 U powf
+                 U sinf
+                 U tanf
+# wf_fitch.o -O0 libm symbols:
+                 U powf
+# run_windfarm_layout.o -O0 libm symbols:
+                 U powf
+# positive control (plain expf loop at -Ofast):
+                 U expf
+                 U _ZGVbN4v_expf
