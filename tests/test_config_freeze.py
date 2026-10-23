@@ -65,6 +65,14 @@ def _pop_fork_dycore_defaults(actual: dict) -> bool:
 def test_new_fields_are_reviewed_defaults_appended_last():
     """New fields remain appended, preserving positional construction."""
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # WRF's coupled fire (feat/fire-coupling), appended off: ifire = 0
+    # allocates and launches nothing, and every key is inert and dropped
+    # from every identity (tests/test_fire_coupling.py).
+    from woof.config import FIRE_RUN_DEFAULTS
+    for key in reversed(tuple(FIRE_RUN_DEFAULTS)):
+        assert names.pop() == key
+        assert RunConfig.__dataclass_fields__[key].default \
+            == FIRE_RUN_DEFAULTS[key]
     # The passive smoke tracer and its prescribed emission, appended off:
     # nothing is allocated or launched (tests/test_smoke_tracer.py).
     assert names.pop() == "smoke_emission_file"
@@ -707,6 +715,10 @@ def test_every_existing_legacy_toml_resolves_identically():
         assert actual.pop("rrtmg_smoke_manifest") == ""
         assert actual.pop("smoke_tracer") is False
         assert actual.pop("smoke_emission_file") == ""
+        # WRF's coupled fire, appended off (feat/fire-coupling).
+        from woof.config import FIRE_RUN_DEFAULTS
+        for key, default in FIRE_RUN_DEFAULTS.items():
+            assert actual.pop(key) == default, key
         assert actual.pop("alb_sol") == 0
         # The RUC SOILPROP lineage changed its default: a non-RUC case
         # never reads it; a RUC case changes answers (CHANGELOG).
@@ -765,6 +777,10 @@ def test_frozen_case_constructed_configs_resolve_identically():
         assert actual.pop("rrtmg_smoke_manifest") == ""
         assert actual.pop("smoke_tracer") is False
         assert actual.pop("smoke_emission_file") == ""
+        # WRF's coupled fire, appended off (feat/fire-coupling).
+        from woof.config import FIRE_RUN_DEFAULTS
+        for key, default in FIRE_RUN_DEFAULTS.items():
+            assert actual.pop(key) == default, key
         assert actual.pop("alb_sol") == 0
         # The RUC SOILPROP lineage changed its default: a non-RUC case
         # never reads it; a RUC case changes answers (CHANGELOG).

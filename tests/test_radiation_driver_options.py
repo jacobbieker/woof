@@ -10,7 +10,8 @@ import dataclasses
 
 import pytest
 
-from woof.config import RunConfig, validate_radiation_driver_options
+from woof.config import (FIRE_RUN_DEFAULTS, RunConfig,
+                         validate_radiation_driver_options)
 
 
 def _cfg(**overrides):
@@ -97,7 +98,9 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
                               "thompson_version", "thompson_fork_snow_fall",
                               "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
                               # The passive smoke tracer, appended after.
-                              "smoke_tracer", "smoke_emission_file"]
+                              "smoke_tracer", "smoke_emission_file",
+                              # WRF's coupled fire, appended after.
+                              *FIRE_RUN_DEFAULTS]
     assert RunConfig.__dataclass_fields__["thompson_version"].default == "wrf_461"
     assert RunConfig.__dataclass_fields__["thompson_fork_snow_fall"].default == "blend"
 

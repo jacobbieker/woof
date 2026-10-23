@@ -2623,7 +2623,11 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     # The smoke library's three sources call gfk_*/g64_* from the glibc
     # headers woof.smoke._kernels.module_source() prepends; priced as
     # smoke_composed.
-    "smoke_emission", "smoke_plumerise", "smoke_deposition"})
+    "smoke_emission", "smoke_plumerise", "smoke_deposition",
+    # The fire coupling (woof/fire/coupling.py) calls gfk_log/gfk_exp from
+    # glibc_flt32.cuh, which its module_source() prepends; it cannot
+    # compile alone.  Priced as fire_coupling_composed.
+    "fire_coupling"})
 # face_mass, held_heating, rk_bookkeeping and surface_w (the dycore-host
 # speed lane's point-local units, 66af318bc) sat in this set on
 # 2026-09-30 under the same "no measurement platform in this lane"
@@ -2806,6 +2810,13 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         max_local_size_bytes=64,
         covers=frozenset({"smoke_emission", "smoke_plumerise",
                           "smoke_deposition"})),
+    # The fire coupling's production loader (woof/fire/coupling.py), NVRTC
+    # 12.9.86 on sm_86 (RTX A6000): every export 0 B.  The column kernels
+    # walk the levels with scalars and hold no per-level array.
+    "fire_coupling_composed": ChainedTranslationUnitFrame(
+        module="fire_coupling_composed",
+        max_local_size_bytes=0,
+        covers=frozenset({"fire_coupling"})),
 }
 
 _seen_covers: set[str] = set()
@@ -3286,6 +3297,11 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("ieva")                    # A158, woof/core/ieva.py
     if getattr(dc.run, "smoke_tracer", False):
         modules.add("smoke_tracer")            # woof/core/smoke_tracer.py
+    if int(getattr(dc.run, "ifire", 0) or 0):
+        # WRF's coupled fire: the level set and the driver glue, each its
+        # own direct NVRTC unit (woof/fire/levelset.py, coupling.py).
+        modules.add("fire_levelset_composed")
+        modules.add("fire_coupling_composed")
     # WRF swint_opt = 1 (woof/core/swint.py) and aer_opt = 3 on the
     # legacy RRTMG shortwave (woof/core/rrtmg_aerosol_optics.py).
     if int(getattr(dc.run, "swint_opt", 0) or 0) == 1:

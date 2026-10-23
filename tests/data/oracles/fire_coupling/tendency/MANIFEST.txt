@@ -1,0 +1,26 @@
+nx i4 0
+ny i4 0
+nz i4 0
+cfg_reals f4 1 3
+in_grnhfx f4 2 9 7
+in_grnqfx f4 2 9 7
+in_canhfx f4 2 9 7
+in_canqfx f4 2 9 7
+in_ht f4 2 9 7
+in_z0 f4 2 9 7
+in_ph f4 3 9 11 7
+in_phb f4 3 9 11 7
+in_rho f4 3 9 10 7
+in_z_at_w f4 3 9 11 7
+in_dz8w f4 3 9 10 7
+in_mut f4 2 9 7
+in_c1h f4 1 10
+in_c2h f4 1 10
+in_xlat f4 2 9 7
+in_xlong f4 2 9 7
+in_nfuel_cat f4 2 9 7
+in_zsf f4 2 9 7
+in_dzdxf f4 2 9 7
+in_dzdyf f4 2 9 7
+rthfrten f4 3 9 10 7
+rqvfrten f4 3 9 10 7

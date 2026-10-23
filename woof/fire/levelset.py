@@ -46,10 +46,14 @@ with ``-fmad=false --ftz=false`` and glibc's ``expf``/``powf``
 (``glibc_flt32.cuh``); the host reference evaluates each statement in
 float32 with glibc's ``expf``/``powf`` (:mod:`woof.core.noahmp_libm`).
 
+The chaparral arm of ``fire_ros`` (``FireParams.ischap``) runs WRF's
+wind-only rate, ``max(1.2974 spdms**1.41, .03333)``, with ``ros_base`` fixed
+at 0: WRF never assigns ``ros_base`` there (tend_ls reads its own variable
+undefined), so that one word has no defined answer to reproduce and is held
+out, as in :mod:`woof.fire.wrf_sfire`.
+
 What is not ported, by design:
 
-* the chaparral arm of ``fire_ros`` (``ischap``): WRF leaves ``ros_base``
-  undefined there, so there is no defined answer to reproduce;
 * ``fire_upwinding`` other than 9, ``fire_upwind_split``, the other
   ``fuel_left_method`` and the ``fire_boundary_guard`` stop (a run control,
   not a field: the fire simply leaves the mesh here).
@@ -438,7 +442,8 @@ class FireOptions:
 
 
 #: The arrays ``fire_ros`` reads, in the kernel's argument order.
-PARAM_NAMES = ("vx", "vy", "dzdxf", "dzdyf", "r_0", "bbb", "phiwc", "betafl")
+PARAM_NAMES = ("vx", "vy", "dzdxf", "dzdyf", "r_0", "bbb", "phiwc", "betafl",
+               "ischap")
 FUEL_NAMES = ("fgip", "fuel_time", "fmc_g")
 
 
@@ -466,11 +471,14 @@ class FireParams:
     fgip: object
     fuel_time: object
     fmc_g: object
+    #: 1 where the fuel is chaparral (set_fire_params's ischap): fire_ros's
+    #: wind-only arm, with ros_base 0 where WRF leaves it undefined.
+    ischap: object = None
 
     @classmethod
     def build(cls, mesh: FireMesh, *, xp=np, vx=0.0, vy=0.0, dzdxf=0.0,
               dzdyf=0.0, r_0=0.0, bbb=1.0, phiwc=0.0, betafl=1.0, fgip=0.0,
-              fuel_time=None, fmc_g=0.08, validate: bool = True
+              fuel_time=None, fmc_g=0.08, ischap=0.0, validate: bool = True
               ) -> "FireParams":
         """Every field as a C-contiguous float32 ``(ny, nx)`` array on ``xp``.
 
@@ -490,7 +498,7 @@ class FireParams:
             fuel_time = F(7.0) / _lit("0.85")
         values = dict(vx=vx, vy=vy, dzdxf=dzdxf, dzdyf=dzdyf, r_0=r_0,
                       bbb=bbb, phiwc=phiwc, betafl=betafl, fgip=fgip,
-                      fuel_time=fuel_time, fmc_g=fmc_g)
+                      fuel_time=fuel_time, fmc_g=fmc_g, ischap=ischap)
         out = {}
         for name, value in values.items():
             array = xp.asarray(value).astype(F)
@@ -594,6 +602,12 @@ class Ignition:
     end_time: float | None = None
     radius: float = 10.0
     ros: float = 0.01
+    #: Metres per coordinate unit, WRF's ``unit_fxlong``/``unit_fxlat``:
+    #: 1 for coordinates in m (``set_ideal_coord``); for longitude/latitude
+    #: lines the driver's ``fire_ignition_convert`` values, with the node
+    #: coordinates passed to :func:`step` as ``coords``.
+    unit_x: float = 1.0
+    unit_y: float = 1.0
 
     def __post_init__(self):
         if not self.radius > 0:
@@ -627,8 +641,9 @@ class Ignition:
             ey = start_y + rele * (end_y - start_y)
         else:
             sx, sy, ex, ey = start_x, start_y, end_x, end_y
-        unit = F(1.0) * F(1.0)                 # unit_xf * unit_xf, ideal (m)
-        return (sx, sy, ex, ey, st, et, unit, unit, radius, ros)
+        cx2 = F(self.unit_x) * F(self.unit_x)  # unit_xf * unit_xf
+        cy2 = F(self.unit_y) * F(self.unit_y)
+        return (sx, sy, ex, ey, st, et, cx2, cy2, radius, ros)
 
 
 @dataclass(frozen=True)
@@ -751,7 +766,12 @@ def _shifted(a: np.ndarray):
 
 
 def _fire_ros_cpu(nvx, nvy, p: FireParams, advection: int):
-    """fire_ros (Rothermel, not chaparral), element for element."""
+    """fire_ros, element for element.
+
+    Rothermel, and on chaparral cells (``ischap > 0``) WRF's wind-only arm
+    ``max(1.2974 spdms**1.41, .03333)`` with ``ros_base`` fixed at 0 where
+    WRF leaves it undefined (woof.fire.wrf_sfire makes the same choice).
+    """
     vx, vy, dzx, dzy = p.vx, p.vy, p.dzdxf, p.dzdyf
     if advection:
         speed = np.sqrt(vx * vx + vy * vy) + TINY
@@ -771,6 +791,15 @@ def _fire_ros_cpu(nvx, nvy, p: FireParams, advection: int):
     rb = p.r_0 * FTMIN_TO_MS
     rw = rb * phiw
     rs = rb * phis
+    ischap = p.ischap
+    if ischap is not None:
+        chap = ischap > 0
+        if np.any(chap):
+            chap_wind = np.fmax(_lit("1.2974") * _powf(spdms, _lit("1.41")),
+                                _lit(".03333"))
+            rb = np.where(chap, F(0.0), rb)
+            rw = np.where(chap, chap_wind, rw)
+            rs = np.where(chap, F(0.0), rs)
     rw = rw * cor_wind
     rs = rs * cor_slope
     excess = rb + rw + rs - ROS_MAX
@@ -857,11 +886,11 @@ def _reinit_stage_cpu(s0, ini, curr, mesh, coef, thr_hl, edge):
     return out
 
 
-def _ignite_cpu(lfn_m, tign_m, mesh, sc, start_ts, end_ts):
+def _ignite_cpu(lfn_m, tign_m, mesh, sc, start_ts, end_ts, coords=None):
     """ignite_fire (with nearest) for one ignition line, in place."""
     sx, sy, ex, ey, st, et, cx2, cy2, radius, ros = sc
     half = F(0.5)
-    ax, ay = mesh.coordinates(np)
+    ax, ay = mesh.coordinates(np) if coords is None else coords
     mx = (sx + ex) * half
     my = (sy + ey) * half
     dam2 = (ax - mx) * (ax - mx) * cx2 + (ay - my) * (ay - my) * cy2
@@ -916,20 +945,31 @@ def _check(state: FireState, mesh: FireMesh, params: FireParams):
 
 
 def step(state: FireState, mesh: FireMesh, params: FireParams, dt: float, *,
-         ignitions=(), options: FireOptions = FireOptions()
+         ignitions=(), options: FireOptions = FireOptions(), coords=None
          ) -> tuple[FireState, FireOutputs]:
     """One WRF fire step of ``dt`` seconds: passes 4, 5 and 6, aggregated.
 
     Runs where the state lives (NumPy or CuPy); the state is not modified.
+    ``coords`` is ``(coord_xf, coord_yf)``, the node coordinates
+    ``ignite_fire`` measures from, float32 ``(ny, nx)`` beside the state
+    (WRF's ``fxlong``/``fxlat`` for longitude/latitude ignitions); ``None``
+    is ``set_ideal_coord``'s metres from the lower-left corner.
     """
     xp = _check(state, mesh, params)
     if not float(dt) > 0:
         raise ValueError(f"dt must be positive, got {dt}")
+    if coords is not None:
+        coords = tuple(coords)
+        for array in coords:
+            if (array_module(array) is not xp or array.shape != mesh.shape
+                    or array.dtype != F or not array.flags.c_contiguous):
+                raise ValueError("coords must be two C-contiguous float32 "
+                                 f"{mesh.shape} arrays beside the state")
     run = _step_cpu if xp is np else _step_gpu
-    return run(state, mesh, params, F(dt), tuple(ignitions), options)
+    return run(state, mesh, params, F(dt), tuple(ignitions), options, coords)
 
 
-def _step_cpu(state, mesh, params, dt, ignitions, opts):
+def _step_cpu(state, mesh, params, dt, ignitions, opts, coords=None):
     from woof.fire import heat
 
     ts = F(state.time)
@@ -987,7 +1027,7 @@ def _step_cpu(state, mesh, params, dt, ignitions, opts):
         for ignition in ignitions:
             sc = ignition.scalars(ts, end_ts)
             if sc is not None:
-                _ignite_cpu(lfn, tign, mesh, sc, ts, end_ts)
+                _ignite_cpu(lfn, tign, mesh, sc, ts, end_ts, coords)
         # pass 6: fuel_left, heat_fluxes; then the driver's aggregation
         fuel_frac = state.fuel_frac.copy()
         fine = heat.fuel_heat_cpu(lfn, tign, params, fuel_frac, end_ts, dt)
@@ -996,7 +1036,7 @@ def _step_cpu(state, mesh, params, dt, ignitions, opts):
     return new, FireOutputs(ros=ros, tbound=tbound, **fine, **coarse)
 
 
-def _step_gpu(state, mesh, params, dt, ignitions, opts):
+def _step_gpu(state, mesh, params, dt, ignitions, opts, coords=None):
     import cupy as cp
 
     from woof.fire import heat
@@ -1063,12 +1103,18 @@ def _step_gpu(state, mesh, params, dt, ignitions, opts):
     else:
         final(grid2, block2, (lfn_out, lfn, i32(0), i32(nx), i32(ny)))
     end_ts = ts + dt
-    ignite = _kernel("fl_ignite")
     for ignition in ignitions:
         sc = ignition.scalars(ts, end_ts)
-        if sc is not None:
-            ignite(grid2, block2, (lfn, tign, *sc, ts, end_ts, mesh.dx,
-                                   mesh.dy, i32(nx), i32(ny)))
+        if sc is None:
+            continue
+        if coords is None:
+            _kernel("fl_ignite")(grid2, block2, (
+                lfn, tign, *sc, ts, end_ts, mesh.dx, mesh.dy, i32(nx),
+                i32(ny)))
+        else:
+            _kernel("fl_ignite_xy")(grid2, block2, (
+                lfn, tign, *sc, ts, end_ts, coords[0], coords[1], i32(nx),
+                i32(ny)))
     fuel_frac = state.fuel_frac.copy()
     fine = heat.fuel_heat_gpu(lfn, tign, params, fuel_frac, end_ts, dt, mesh)
     coarse = heat.aggregate_gpu(fine, fuel_frac, mesh, opts)

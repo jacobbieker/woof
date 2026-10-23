@@ -149,6 +149,9 @@ def plan_suite(cfg, *, members=1, registry=None):
         # the member dycore and physics driver; the packed batch carries
         # no tracer stage.
         "smoke_tracer": 0,
+        # WRF's coupled fire runs in the member dycore step only
+        # (woof.fire.coupling); the packed batch has no fire stage.
+        "ifire": 0,
     }
     for key, required in selections.items():
         value = _value(cfg, key, 0)

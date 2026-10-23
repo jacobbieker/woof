@@ -127,6 +127,28 @@ def live_state_history_fields(state) -> dict[str, object]:
         value = getattr(state, state_name, None)
         if value is not None:
             fields[output_name] = value
+    # The coupled fire (RunConfig.ifire, woof/fire/coupling.py), WRF's
+    # Registry.fire history names: the fire-mesh fields (routed by name to
+    # the subgrid axes) and the atmospheric-grid aggregates.  Allocated
+    # only when the fire is on, so no other run's inventory changes.  The
+    # level set and ignition time carry a one-node halo the file does not.
+    for output_name, state_name in (
+            ("FGRNHFX", "fire_fgrnhfx"), ("FGRNQFX", "fire_fgrnqfx"),
+            ("FIRE_AREA", "fire_area_frac"), ("ROS", "fire_ros"),
+            ("TIGN_G", "fire_tign"), ("LFN", "fire_lfn"),
+            ("FUEL_FRAC", "fire_fuel_frac"), ("UF", "fire_uf"),
+            ("VF", "fire_vf"), ("GRNHFX", "fire_grnhfx"),
+            ("GRNQFX", "fire_grnqfx"), ("CANHFX", "fire_canhfx"),
+            ("CANQFX", "fire_canqfx"),
+            ("AVG_FUEL_FRAC", "fire_avg_fuel_frac")):
+        value = getattr(state, state_name, None)
+        if value is None:
+            continue
+        if state_name in ("fire_tign", "fire_lfn"):
+            value = (_HistoryShape((value.shape[0] - 2, value.shape[1] - 2))
+                     if isinstance(value, _HistoryShape)
+                     else value[1:-1, 1:-1])
+        fields[output_name] = value
     for output_name, state_name in (
             ("QHAIL", "qh"), ("QNDROP", "qndrop"),
             ("QNRAIN", "qnr"), ("QNICE", "qni"),

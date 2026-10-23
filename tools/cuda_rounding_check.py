@@ -320,7 +320,8 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
                  "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
                  "fire_levelset",
-                 "smoke_emission", "smoke_plumerise", "smoke_deposition"}
+                 "smoke_emission", "smoke_plumerise", "smoke_deposition",
+                 "fire_coupling"}
     direct = {"rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf", "ruc_spp"}
     stock = [unit for unit in stock
              if unit.key not in {"kernels:" + name for name in fragments | direct}]
@@ -418,6 +419,12 @@ def composed_units(root: Path) -> list[Unit]:
     if not Path(smoke.__file__).resolve().is_relative_to(root):
         raise RuntimeError("source factory smoke was imported outside the checked tree")
     units.append(Unit("composed:smoke", smoke.module_source(), tuple(smoke.MODULE_OPTIONS)))
+    coupling = importlib.import_module("woof.fire.coupling")
+    if not Path(coupling.__file__).resolve().is_relative_to(root):
+        raise RuntimeError("source factory woof.fire.coupling was imported "
+                           "outside the checked tree")
+    units.append(Unit("composed:fire_coupling", coupling.module_source(),
+                      tuple(coupling.MODULE_OPTIONS)))
     return units
 
 
