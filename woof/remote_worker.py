@@ -449,6 +449,18 @@ def _inputs(source, *, preserve_bound=False, extra_wps=None):
         highres = parse_static_table(raw["static"], source=str(source), base_dir=source.parent)
         if highres is not None and "highres" in raw["static"]:
             raw["static"]["highres"]["cache_root"] = str(highres.cache_root.resolve())
+    if not preserve_bound:
+        # A domain's LANDFIRE raster ([[domain]] static fuel) is a large
+        # data reference like the geography: named absolutely so the
+        # remote side reads the same file, never re-resolved there.
+        from woof.static.fuel import resolve_landfire_path
+        for domain in raw.get("domain", ()):
+            static = domain.get("static") if isinstance(domain, dict) else None
+            fuel = static.get("fuel") if isinstance(static, dict) else None
+            if isinstance(fuel, dict) and isinstance(fuel.get("landfire"), str):
+                fuel["landfire"] = str(resolve_landfire_path(
+                    fuel["landfire"], source=str(source),
+                    base_dir=source.parent).resolve())
     sources = {str(source): payload}
     snapshots = {}
     wps_hash = None

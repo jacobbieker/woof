@@ -173,6 +173,15 @@ class GeogSelection:
     #: configuration that names no ``[static] source`` -- which builds
     #: exactly the field set it always built.
     static_source: object = None
+    #: The fire model's fuel statics (:class:`woof.static.fuel.
+    #: FuelStaticsRequest`): ``NFUEL_CAT`` and the fire-mesh terrain slope.
+    #: ``None`` -- every configuration woof ships -- builds exactly the
+    #: field set it always built.
+    fuel: object = None
+    #: Fields a preparation identity leaves out while ``None``
+    #: (:func:`woof.ensemble.runtime_preparation._plain`), so a selection
+    #: without a fuel request keeps the identity it had before the field.
+    _IDENTITY_OMITTED_WHEN_NONE = ("fuel",)
 
     def with_orographic(self, names) -> "GeogSelection":
         """This selection, also building the named orographic fields."""
@@ -294,12 +303,16 @@ class GeogSelection:
         # A configuration's static source rides on the same carrier; the
         # build decides per grid whether the source describes it.
         from .external_source import static_source_for
-        return replace(
+        selection = replace(
             cls.from_tokens(data.geog_root, str(value),
                             highres_landcover=_highres_landcover_on_slot(
                                 highres, namelist, index, str(value))),
             terrain_smoothing=smoothing,
             static_source=static_source_for(highres))
+        # The domain's own fuel request ([[domain]] static fuel), when it
+        # makes one; none leaves the selection as it always was.
+        from .fuel import fuel_for, with_fuel_statics
+        return with_fuel_statics(selection, fuel_for(highres, domain_id))
 
     def path(self, field: str) -> Path:
         try:
@@ -1586,6 +1599,14 @@ def build_static(
                 fields, grid, geog_root, source, requested=source.engine_names(),
                 landuse_attrs=selection.landuse_global_attrs(),
                 report=source_coverage_report)
+        # The fuel map and slope read the land use and terrain the build
+        # finished with, so they come after any static source's overlay.
+        if selection is not None and selection.fuel is not None:
+            from .fuel import build_fuel_fields
+            fields.update(build_fuel_fields(
+                grid, fields, selection.fuel,
+                landuse_attrs=selection.landuse_global_attrs(),
+                coverage_report=source_coverage_report))
     if timing_report is not None:
         timing_report["seconds"] = time.perf_counter() - started
         timing_report["cells"] = int(grid.e_we) * int(grid.e_sn)

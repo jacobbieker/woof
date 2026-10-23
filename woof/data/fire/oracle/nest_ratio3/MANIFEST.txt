@@ -1,0 +1,10 @@
+zs f4 2 9 7
+zsf f4 2 36 28
+dzdxf f4 2 36 28
+dzdyf f4 2 36 28
+ir i4 0
+jr i4 0
+dx f4 0
+dy f4 0
+dxf f4 0
+dyf f4 0

@@ -104,6 +104,7 @@ cyclone_setup_register_cli = _lazy_register("woof.cyclone_setup")
 downscale_register_cli = _lazy_register("woof.downscale")
 energy_register_cli = _lazy_register("woof.energy.cli")
 fetch_register_cli = _lazy_register("woof.fetch")
+fuel_register_cli = _lazy_register("woof.fuel_cli")
 geog_register_cli = _lazy_register("woof.geog_assets")
 go_register_cli = _lazy_register("woof.go_cli")
 go_job_register_cli = _lazy_register("woof.go_job")
@@ -430,6 +431,9 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     companion_setups_register_cli(sub)
     stream_register_cli(sub)
     geog_register_cli(sub)
+    # Beside `geog`: the fire model's fuel statics, built from the same
+    # WPS_GEOG land use and terrain.
+    fuel_register_cli(sub)
     domain_register_cli(sub)
     # Beside `domain` because it finishes a tree `domain` drew: the
     # moving-nest itinerary that keeps the tree on a known track.

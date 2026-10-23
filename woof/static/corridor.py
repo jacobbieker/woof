@@ -773,15 +773,35 @@ def build_child_statics_corridor(*, child_dc, parent_run, reference_grid,
         static_catalog, int(child_dc.grid_id))
     from .lake import with_lake_statics
     selection = with_lake_statics(selection, child_dc.run)
+    request = selection.fuel
+    if request is not None and request.landfire is not None:
+        raise CorridorRefusal(
+            f"d{int(child_dc.grid_id):02d} asks for a LANDFIRE fuel map, and "
+            "a moving nest's statics corridor cannot carry one: the raster "
+            "is sampled at each fire cell, which a corridor crop cannot "
+            "reproduce at the footprint's own cell positions, and a prepared "
+            "run reads no raster.  Use the land-use crosswalk on this nest "
+            "(drop landfire from its [[domain]] static fuel), or keep the "
+            "nest fixed.")
     coverage: dict[str, object] = {}
-    fields = build_static(grid, selection.root, selection=selection,
+    # The corridor carries no fuel plane: a footprint's fuel is a function
+    # of its own LU_INDEX and HGT_M, which the crop already holds, and its
+    # fire mesh continues the footprint's terrain past the footprint's own
+    # edge, so it is built per placement (ChildStaticsCorridor.with_fuel).
+    from dataclasses import replace
+    fields = build_static(grid, selection.root,
+                          selection=replace(selection, fuel=None),
                           source_coverage_report=coverage)
     landuse = selection.landuse_global_attrs()
     highres_receipt = None
     if static_highres is not None and static_highres.enabled:
         from woof.static.highres_production import apply_highres_statics
+        # The overlay seam builds a requested fuel map; the corridor's is
+        # built per placement instead (above), so the seam is asked for
+        # none here.
         fields, highres_receipt = apply_highres_statics(
-            fields, grid, config=static_highres, domain_id=child_dc.grid_id,
+            fields, grid, config=replace(static_highres, fuel=()),
+            domain_id=child_dc.grid_id,
             case_date=child_dc.start_time.date(), landuse_attrs=landuse)
     _validate_corridor_fields(fields, geometry)
     entry = {
@@ -814,6 +834,14 @@ def build_child_statics_corridor(*, child_dc, parent_run, reference_grid,
     }
     if highres_receipt is not None:
         entry["highres"] = highres_receipt
+    if request is not None:
+        from .fuel import fuel_row
+        entry["fuel"] = {
+            "row": list(fuel_row(int(child_dc.grid_id), request)),
+            "landuse": {name: landuse[name] for name in
+                        ("MMINLU", "ISWATER", "ISLAKE", "ISICE", "ISURBAN")
+                        if name in landuse},
+        }
     if reach is not None:
         entry["reach"] = json.loads(json.dumps(reach, allow_nan=False))
     return CorridorBuild(grid_id=int(child_dc.grid_id), fields=fields,
@@ -1075,6 +1103,30 @@ class ChildStaticsCorridor:
     fields: Mapping[str, np.ndarray]
     cache_sha256: str
     highres_applied: bool = False
+    #: The child's fuel request as sealed (``{"row", "landuse"}``), or None.
+    fuel: Mapping[str, object] | None = None
+
+    def with_fuel(self, fields: Mapping[str, np.ndarray], grid
+                  ) -> dict[str, np.ndarray]:
+        """A crop plus the footprint's fuel statics, when the child asked.
+
+        Built from the crop's own (overlaid) LU_INDEX and HGT_M by the
+        same :func:`woof.static.fuel.build_fuel_fields` a direct footprint
+        build runs, on the host so a relocation leaves the forecast's
+        device untouched (both bodies give the same words).
+        """
+        if self.fuel is None:
+            return dict(fields)
+        from dataclasses import replace
+
+        from .fuel import build_fuel_fields, request_from_row
+        _, request = request_from_row(tuple(self.fuel["row"]))
+        built = build_fuel_fields(
+            grid, fields, replace(request, device="cpu"),
+            landuse_attrs=dict(self.fuel["landuse"]))
+        for value in built.values():
+            value.setflags(write=False)
+        return {**fields, **built}
 
     @property
     def host_bytes(self) -> int:
@@ -1323,9 +1375,23 @@ def load_child_statics_corridor(
              "receipt")
     for value in fields.values():
         value.setflags(write=False)
+    fuel = entry.get("fuel")
+    if fuel is not None:
+        from .fuel import request_from_row
+        try:
+            row_id, request = request_from_row(tuple(fuel["row"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CorridorRefusal(
+                f"{label} statics corridor fuel record {fuel!r} is not one "
+                "the preparation writes") from exc
+        _require(row_id == int(grid_id) and request.landfire is None
+                 and isinstance(fuel.get("landuse"), Mapping),
+                 f"{label} statics corridor fuel record {fuel!r} is not this "
+                 "child's land-use request")
     corridor = ChildStaticsCorridor(
         geometry=geometry, fields=fields, cache_sha256=observed,
-        highres_applied=entry.get("highres", {}).get("status") == "APPLIED")
+        highres_applied=entry.get("highres", {}).get("status") == "APPLIED",
+        fuel=None if fuel is None else dict(fuel))
     if entry.get("build_contract") != STATICS_CORRIDOR_BUILD_CONTRACT:
         _verify_legacy_child_statics(
             corridor, child_dc, sealed_child_statics, label)
@@ -1345,9 +1411,11 @@ def corridor_footprint_statics_builder(corridor: ChildStaticsCorridor):
     """
 
     def build(grid, new_dc):
-        del grid  # placement equality is enforced by the drift gate
-        return corridor.crop(int(new_dc.i_parent_start),
-                             int(new_dc.j_parent_start))
+        # Placement equality is enforced by the drift gate; the grid is
+        # read only for a fuel request's fire-mesh spacing.
+        return corridor.with_fuel(
+            corridor.crop(int(new_dc.i_parent_start),
+                          int(new_dc.j_parent_start)), grid)
 
     build.static_provenance = CORRIDOR_REBUILT_STATICS
     build.source_label = (
