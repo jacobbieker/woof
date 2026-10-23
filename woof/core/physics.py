@@ -3441,7 +3441,7 @@ class PhysicsDriver:
         # driver calls dragforce right after the PBL scheme and BEFORE the
         # orographic drag (module_pbl_driver.F:2045-2125, then :2129), adding
         # into RUBLTEN/RVBLTEN and the QKE the scheme just wrote.
-        farm = self.windfarm
+        farm = getattr(self, "windfarm", None)
         if farm is not None:
             self._apply_windfarm(farm, cfg, rates, atmosphere)
         # WRF's gwd_opt (woof.core.terrain_drag): the orographic drag joins

@@ -395,7 +395,7 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     """Full domain serialization binds the scheme and every other run field."""
     from dataclasses import asdict, replace
     from datetime import datetime, timedelta
-    from woof.config import FIRE_RUN_DEFAULTS, RunConfig
+    from woof.config import FIRE_RUN_DEFAULTS, WINDFARM_RUN_DEFAULTS, RunConfig
     from woof.experiment import DomainConfig
     from woof.ingest import prepared_cache
 
@@ -418,7 +418,9 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
                   "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
                   "smoke_tracer", "smoke_emission_file",
                   # WRF's coupled fire, inert while ifire = 0.
-                  *FIRE_RUN_DEFAULTS):
+                  *FIRE_RUN_DEFAULTS,
+                  # WRF's wind farm, inert while windfarm_opt = 0.
+                  *WINDFARM_RUN_DEFAULTS):
         expected_run.pop(field)
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()
