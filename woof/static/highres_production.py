@@ -212,6 +212,15 @@ class HighresStaticConfig:
     #: The published static file this configuration takes its geography
     #: from ([static] source; woof.static.external_source), or None.
     static_source: object = None
+    #: (grid_id, sr_x, sr_y, landfire, landfire_kind) per domain that asks
+    #: for fuel statics ([[domain]] static fuel; woof.static.fuel
+    #: .fuel_row / .fuel_for).  Empty -- every configuration without such a
+    #: request -- resolves exactly the carrier it always did.
+    fuel: tuple[tuple, ...] = ()
+    #: Fields a preparation identity leaves out while empty
+    #: (woof.ensemble.runtime_preparation._plain), so a carrier without a
+    #: fuel request keeps the identity it had before the field.
+    _IDENTITY_OMITTED_WHEN_EMPTY = ("fuel",)
 
     def smoothing_for(self, domain_id):
         """This carrier's terrain smoothing for one domain."""
@@ -236,6 +245,8 @@ class HighresStaticConfig:
             echoed["use_wudapt_lcz"] = self.use_wudapt_lcz
         if self.static_source is not None:
             echoed["static_source"] = self.static_source.echo()
+        if self.fuel:
+            echoed["fuel"] = [list(row) for row in self.fuel]
         return echoed
 
     def applies_to(self, grid) -> bool:
@@ -431,7 +442,11 @@ def resolve_static_highres(raw, *, source: str, base_dir, spacings_m=None, run_c
     # Per-domain terrain smoothing ([[domain]] static) rides on the same
     # carrier; all-default returns ``config`` unchanged.
     from .terrain_smoothing import resolve_domain_smoothing
-    return resolve_domain_smoothing(raw, config, source=source)
+    config = resolve_domain_smoothing(raw, config, source=source)
+    # Per-domain fuel requests ([[domain]] static fuel) ride the same
+    # carrier; none returns ``config`` unchanged.
+    from .fuel import resolve_domain_fuel
+    return resolve_domain_fuel(raw, config, source=source, base_dir=base_dir)
 
 
 def parse_static_table(raw, *, source: str, base_dir
@@ -1084,6 +1099,58 @@ def apply_highres_statics(baseline, grid, *, config, domain_id: int,
                           case_date: date, landuse_attrs, urlopen=None):
     """Replace one domain's static fields from high-resolution sources.
 
+    The domain's fuel statics (``[[domain]] static fuel``; built into
+    ``baseline`` from the baseline land use and terrain) are rebuilt from
+    the overlaid fields here, for every route at once: the root, the
+    children, the spawned and relocated nests, the offline child and the
+    prepared roots all overlay through this function.  A baseline without
+    fuel fields comes back exactly as the overlay leaves it.
+
+    Returns ``(fields, receipt)``.  See
+    :func:`_apply_highres_statics` for the overlay itself.
+    """
+    fields, receipt = _apply_highres_statics(
+        baseline, grid, config=config, domain_id=domain_id,
+        case_date=case_date, landuse_attrs=landuse_attrs, urlopen=urlopen)
+    return with_requested_fuel(
+        fields, grid, config=config, domain_id=domain_id,
+        landuse_attrs=landuse_attrs,
+        rebuild=fields is not baseline), receipt
+
+
+def with_requested_fuel(fields, grid, *, config, domain_id: int,
+                        landuse_attrs, rebuild: bool):
+    """``fields`` carrying the fuel statics ``config`` requests for a domain.
+
+    ``rebuild`` says the fields changed under them (an overlay ran), so any
+    fuel already there was built from other land use and terrain.  Fields
+    that lack a requested fuel map (a static cache prepared before the
+    domain asked) gain one from their own LU_INDEX and HGT_M, so no route
+    runs without the fuel its configuration declares.  No request returns
+    ``fields`` itself.
+    """
+    from .fuel import FUEL_FIELDS, build_fuel_fields, fuel_for
+    request = fuel_for(config, domain_id)
+    present = set(FUEL_FIELDS) & set(fields)
+    if request is None:
+        if present and rebuild:
+            raise ValueError(
+                f"d{int(domain_id):02d}'s statics carry fuel fields that "
+                "its static carrier records no request for, so the overlay "
+                "cannot rebuild them from the overlaid land use and "
+                "terrain; declare the request as [[domain]] static fuel, "
+                "which every route reads")
+        return fields
+    if present == set(FUEL_FIELDS) and not rebuild:
+        return fields
+    return {**fields, **build_fuel_fields(grid, fields, request,
+                                          landuse_attrs=landuse_attrs)}
+
+
+def _apply_highres_statics(baseline, grid, *, config, domain_id: int,
+                           case_date: date, landuse_attrs, urlopen=None):
+    """The overlay of :func:`apply_highres_statics`, without the fuel refresh.
+
     Returns ``(fields, receipt)``.  ``config`` absent or disabled is the
     identity: the exact ``baseline`` object comes back with ``None`` and
     nothing is fetched, printed, or written.  Refusals follow
@@ -1703,6 +1770,7 @@ def parse_sealed_static_highres(echo, *, source: str, base_dir,
     table = dict(echo)
     rows = table.pop("terrain_smoothing", None)
     source_echo = table.pop("static_source", None)
+    fuel_rows = table.pop("fuel", None)
     table.pop("urban_legend", None)
     table.pop("use_wudapt_lcz", None)
     config = parse_static_table({"highres": table}, source=source,
@@ -1723,6 +1791,18 @@ def parse_sealed_static_highres(echo, *, source: str, base_dir,
         from .external_source import setting_from_echo
         config = replace(config, static_source=setting_from_echo(
             source_echo, source=source))
+    if fuel_rows is not None:
+        from .fuel import fuel_row, request_from_row
+        parsed = tuple(fuel_row(*request_from_row(
+            tuple(row) if isinstance(row, list) else row))
+            for row in fuel_rows)
+        if (not parsed or [list(row) for row in parsed] != list(fuel_rows)
+                or list(parsed) != sorted(parsed)):
+            raise ValueError(
+                f"fuel of {source} holds {fuel_rows!r}, which the carrier "
+                "never records (one sorted row per requesting domain); "
+                "refusing to rebuild a fuel map the seal does not record")
+        config = replace(config, fuel=parsed)
     if rows is None:
         return config
     from .terrain_smoothing import smoothing_rows_from_echo
@@ -1778,8 +1858,16 @@ def apply_prepared_highres(baseline, grid, *, config, domain_id, case_date,
     require_root_smoothing(config, domain_id, baseline_receipt)
     from .external_source import require_root_static_source
     require_root_static_source(config, domain_id, baseline_receipt, grid=grid)
+    def requested(fields):
+        # A cache prepared before the domain asked for fuel gains it from
+        # its own fields (with_requested_fuel); no request: ``fields``.
+        return with_requested_fuel(fields, grid, config=config,
+                                   domain_id=domain_id,
+                                   landuse_attrs=landuse_attrs,
+                                   rebuild=False)
+
     if not overlay_active(config, grid):
-        return baseline, baseline_receipt
+        return requested(baseline), baseline_receipt
     previous = (baseline_receipt.get("highres")
                 if isinstance(baseline_receipt, dict) else None)
     if (isinstance(previous, dict) and previous.get("status") == "APPLIED"
@@ -1787,7 +1875,7 @@ def apply_prepared_highres(baseline, grid, *, config, domain_id, case_date,
             and previous.get("case_date") == case_date.isoformat()
             and not _grid_identity_drift(previous.get("grid"), grid,
                                          domain_id)):
-        return baseline, baseline_receipt
+        return requested(baseline), baseline_receipt
     fields, receipt = apply_highres_statics(
         baseline, grid, config=config, domain_id=domain_id,
         case_date=case_date, landuse_attrs=landuse_attrs)

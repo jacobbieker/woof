@@ -1,0 +1,10 @@
+hubheight f4 1 331
+diameter f4 1 331
+stc f4 1 331
+stc2 f4 1 331
+npower f4 1 331
+cutin f4 1 331
+cutout f4 1 331
+turbws f4 2 23 100
+turbtc f4 2 23 100
+turbpw f4 2 23 100

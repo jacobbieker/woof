@@ -1772,6 +1772,36 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "NVRTC 12.9.86; the older rows predate that source. Re-audited by "
         "tests/test_terrain_drag_wrf471_parity.py::"
         "test_production_drag_frames_match_the_recorded_unit.",
+    "windfarm_fitch_composed":
+        "glibc_flt32.cuh + glibc_trig_flt32.cuh + windfarm_fitch.cu, "
+        "assembled by woof/core/windfarm_fitch.module_source() and compiled "
+        "directly with that module's MODULE_OPTIONS; windfarm_fitch.cu "
+        "fails standalone (gfk_pow, glibc_asinf).  Priced 0 B: fitch_column "
+        "read through the loader on sm_86 (RTX A6000) at NVRTC 12.9.86 and "
+        "13.4.92, and ptxas -v reports a 0 B stack frame for sm_86, sm_89, "
+        "sm_100 and sm_120 at both; the kernel holds no per-level array.  "
+        "Re-read on any device by "
+        "tests/test_windfarm_fitch.py::"
+        "test_the_composed_unit_compiles_within_the_priced_frame.",
+    "fire_levelset_composed":
+        "glibc_flt32.cuh + fire_levelset.cu, assembled by "
+        "woof/fire/levelset.module_source() and compiled directly with "
+        "-fmad=false --ftz=false; fire_levelset.cu fails standalone (it "
+        "calls gfk_exp/gfk_pow).  Priced 0 B: every export's "
+        "local_size_bytes on sm_86 (RTX A6000) at NVRTC 12.9.86, read "
+        "2026-10-22.  Not launched by a forecast; re-audited by "
+        "tests/test_fire_levelset_wrf471_parity.py::"
+        "test_fire_unit_frames_match_the_recorded_unit.",
+    "smoke_composed":
+        "glibc_flt32.cuh + glibc_flt64.cuh + smoke_emission.cu + "
+        "smoke_plumerise.cu + smoke_deposition.cu, assembled by "
+        "woof/smoke/_kernels.module_source() and compiled directly with "
+        "-fmad=false --ftz=false; none of the three .cu files compiles "
+        "alone.  Priced 64 B, smoke_plumerise_columns' reading on sm_86 "
+        "(RTX A6000) at NVRTC 12.9.86, 2026-10-23; every other kernel of "
+        "the unit read 0 B.  Re-read on any device by "
+        "tests/test_smoke_physics.py::"
+        "test_the_smoke_unit_compiles_within_its_priced_frame.",
 })
 
 
@@ -1809,6 +1839,21 @@ TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({
     ("86", "12.9.86"): MappingProxyType({
         "topo_wind_static": 0, "terrain_pbl_top": 0,
         "gwdo_column": 1152, "gwdo_gsl_column": 2208}),
+})
+
+
+# The fire level set's direct unit (woof/fire/levelset.py), compile/load-only
+# readings over every export, bound to the source and options read.
+FIRE_LEVELSET_COMPOSED_SOURCE_SHA256 = (
+    "217be10cc758ca1464e3feceb9862b55b7194270e9ff3305fcfdc8c5ca623ff9")
+FIRE_LEVELSET_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
+_FIRE_LEVELSET_EXPORTS = (
+    "fl_extend", "fl_tend_stage", "fl_bound_reduce", "fl_tign_update",
+    "fl_reinit_init", "fl_reinit_stage", "fl_reinit_final", "fl_ignite",
+    "fl_fuel_heat", "fl_sum_cells", "fl_accumulate", "fl_scale")
+FIRE_LEVELSET_COMPOSED_FRAME_READINGS = MappingProxyType({
+    ("86", "12.9.86"): MappingProxyType(
+        {name: 0 for name in _FIRE_LEVELSET_EXPORTS}),
 })
 
 

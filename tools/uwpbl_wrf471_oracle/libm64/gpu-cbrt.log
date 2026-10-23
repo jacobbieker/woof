@@ -1,0 +1,38 @@
+chunk 0: {"arguments": 16777216, "exact_graded": 1048576, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 574132}
+chunk 1: {"arguments": 33554432, "exact_graded": 2097152, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 1148096}
+chunk 2: {"arguments": 50331648, "exact_graded": 3145728, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 1721613}
+chunk 3: {"arguments": 67108864, "exact_graded": 4194304, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 2295615}
+chunk 4: {"arguments": 83886080, "exact_graded": 5242880, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 2868885}
+chunk 5: {"arguments": 100663296, "exact_graded": 6291456, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 3443098}
+chunk 6: {"arguments": 117440512, "exact_graded": 7340032, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 4016695}
+chunk 7: {"arguments": 134217728, "exact_graded": 8388608, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 4590551}
+chunk 8: {"arguments": 150994944, "exact_graded": 9437184, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 5164652}
+chunk 9: {"arguments": 167772160, "exact_graded": 10485760, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 5739089}
+chunk 10: {"arguments": 184549376, "exact_graded": 11534336, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 6313722}
+chunk 11: {"arguments": 201326592, "exact_graded": 12582912, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 6888509}
+chunk 12: {"arguments": 218103808, "exact_graded": 13631488, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 7463262}
+chunk 13: {"arguments": 234881024, "exact_graded": 14680064, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 8037639}
+chunk 14: {"arguments": 251658240, "exact_graded": 15728640, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 8611887}
+chunk 15: {"arguments": 268435456, "exact_graded": 16777216, "gpu_vs_upstream": 0, "host_vs_upstream": 0, "gpu_vs_host": 0, "upstream_vs_exact": 0, "gpu_vs_exact": 0, "host_vs_exact": 0, "libc_cbrt_vs_exact": 9185950}
+{
+  "totals": {
+    "arguments": 268435456,
+    "exact_graded": 16777216,
+    "gpu_vs_upstream": 0,
+    "host_vs_upstream": 0,
+    "gpu_vs_host": 0,
+    "upstream_vs_exact": 0,
+    "gpu_vs_exact": 0,
+    "host_vs_exact": 0,
+    "libc_cbrt_vs_exact": 9185950
+  },
+  "first_mismatches": {},
+  "device": "NVIDIA RTX A6000",
+  "nvrtc": "12.9",
+  "cupy": "14.2.0",
+  "numpy": "2.4.6",
+  "python": "3.11.16",
+  "libc": "glibc 2.44",
+  "machine": "x86_64",
+  "seconds": 811.0
+}

@@ -1,5 +1,6 @@
 {
   "upstream\\acos.c": "ecd6173837214367f0140c038c615a4f37d27795c0cc74e16bdaa59f7df8cff1",
+  "upstream\\cbrt.c": "0a86b7a8f433dfa4610023767102ea19eb3642ea6982871c61c956148837dde4",
   "upstream\\cos.c": "04bffbc8b483c886f78f2c9ab3f2a1ca318dda78ab637a2983a4a9d82374e9d9",
   "upstream\\exp.c": "219b5f666c84864e80ef5ef33bc5453b4702ea74fc5cbf997c3dfacdcf5738cf",
   "upstream\\exp_data.c": "a5e84677e7693c7d22195f86faac5fdc6f92bff7ea2e54c0e7888203a78ffc24",

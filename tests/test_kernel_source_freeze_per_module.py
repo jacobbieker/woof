@@ -669,6 +669,30 @@ BASELINE_PINNED: dict[str, str] = {
     # (tests/test_physics_256_levels_gpu.py).  Previously eff25247.
     "terrain_drag":
         "7bb86babae6e2ee53b5072a27a0e343bc64b3f125400120688f44c500c11e80f",
+    # feat/windfarm-fitch-kernel: the Fitch et al. (2012) wind-farm drag
+    # from WRF v4.7.1 phys/module_wind_fitch.F (windfarm_opt = 1), word for
+    # word against WRF's own Fortran and the binary32 CPU mirror
+    # (tests/test_windfarm_fitch_wrf471_parity.py).  Compiled by its own
+    # direct NVRTC loader (woof/core/windfarm_fitch.py).
+    "windfarm_fitch":
+        "8b2f3964a1a1e831690ecabdbcfecc29e9f97a2568a99fdc63a9d77e1b11b5a2",
+    # feat/fire-rothermel: WRF v4.7.1 set_fire_params / fire_ros (float32)
+    # bit for bit against WRF's own Fortran on CPU and GPU
+    # (tests/test_fire_ros_wrf471_parity.py), and the full Rothermel-Albini
+    # model (float64) equal to its NumPy reference word for word
+    # (tests/test_fire_rothermel.py).  Compiled by its own direct NVRTC
+    # loader (woof/fire/_device.py), -fmad=false --ftz=false, with
+    # glibc_flt32.cuh and glibc_flt64.cuh prepended.
+    "fire_spread":
+        "d6dd5c154a9ae3f54e0698b131120f9d2f82025510a150885c073520b97b41b7",
+    # feat/fire-levelset: WRF v4.7.1's fire model (module_fr_fire_core/
+    # phys/util.F: prop_ls_rk3, reinit_ls_rk3, ignite_fire, tign_update,
+    # fuel_left, heat_fluxes, sum_2d_cells), REAL(4) word for word against
+    # WRF's own Fortran (tests/test_fire_levelset_wrf471_parity.py).
+    # Compiled with glibc_flt32.cuh by its own direct NVRTC loader
+    # (woof/fire/levelset.py), -fmad=false --ftz=false.
+    "fire_levelset":
+        "7b6569f098b415cfafd8bf1f4bd06346daf051f7a74b2025a181376fb421553d",
     # ebcf4edd2 lane/urban-bep: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
     "urban_bep":
@@ -818,6 +842,18 @@ BASELINE_PINNED: dict[str, str] = {
         "f0d5fb00af362ce40d7dc9854705b9d72feb24b3a9c7a23fc0c5e88cc0161c8f",
     "swint":
         "ced1a30cd19b61b749add691522d134cf2cee7b2cb818ebe175b1bd5112620f7",
+    # feat/smoke-physics: the woof.smoke library's composed NVRTC unit
+    # (woof/smoke/_kernels.py, -fmad=false --ftz=false): WRF-SFIRE's fire
+    # smoke tracer emission, the Freitas plume rise of WRF-Chem, Zhang
+    # (2001) deposition and GOCART settling, each held to WRF v4.7.1 at
+    # zero ULP (tests/test_smoke_*_wrf471_parity.py), and woof's own
+    # injection profiles (tests/test_smoke_physics.py).
+    "smoke_emission":
+        "4d9e320673318f62e5c6485c0dad10355375672344306c120a1f2e55c2eff4d6",
+    "smoke_plumerise":
+        "7cea35690f286f3a4d2e794218ca14f8be611a5df9aa9889cf1caf49696a14ab",
+    "smoke_deposition":
+        "2a32d0d8918cfac71f808014f00fd43f95c522af2b52b34232d2ffbcd01e6d90",
 }
 
 _FROZEN = _frozen_module()
@@ -922,6 +958,11 @@ PINNED_HEADERS = {
 #: (04118fa24) into the BEP+BEM unit.
 COMPOSED_HEADERS = {
     "urban_bem.cuh": "b4cb2ac2ed49d7e8aeb71193a191eefbe4a6247624772428dd9ac322a89cdb99",
+    # CORE-MATH's correctly rounded binary64 cbrt, prepended by
+    # woof.core.windfarm_power_diag.module_source and woof.core.cr_cbrt (not
+    # by the kernel loader); proven equal to upstream on 2^28 arguments by
+    # tools/uwpbl_wrf471_oracle/libm64/sweep_cbrt.py.
+    "cr_cbrt_flt64.cuh": "543414e82e9042820f6fb386a29bea072b9995ab8046e2c8d1d32e7aff7c2691",
 }
 
 

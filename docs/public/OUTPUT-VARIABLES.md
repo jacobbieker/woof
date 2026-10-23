@@ -43,7 +43,7 @@ preset = "minimal"
 | `"minimal"` | the 2-D surface state and the accumulators: `T2`, `Q2`, `TH2`, `PSFC`, `U10`/`V10`, `TSK`, the surface energy budget (`HFX`, `LH`, `QFX`, `GRDFLX`, `SWDOWN`, `GLW`, `OLR`), `PBLH`, the precipitation and snow accumulators, `UP_HELI_MAX` and the interval wind extremes (`WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX`, produced under `nwp_diagnostics = 1`), the grid metadata and the land identity, plus the two structural volumes below. |
 | `"severe"` | `minimal` plus the storm-scale volumes: `U`, `V`, `W`, `PH`, `P`, `PB`, the hydrometeor mixing ratios and number concentrations, and `REFL_10CM`. It sheds the restart-only scheme carriers no render product reads. |
 | `"energy"` | what a forecast along power lines, substations and renewable sites is sampled from (`woof energy extract`): the column winds and theta (`U`, `V`, `W`, `T`), the height and pressure coordinate (`PH`, `PHB`, `HGT`, `P`, `PB`), `QVAPOR`, `QCLOUD`, `QRAIN`, `QICE`, `QSNOW`, `QGRAUP`, the near-surface state (`T2`, `Q2`, `U10`, `V10`, `PSFC`), the surface shortwave trio (`SWDOWN`, `SWDDNI`, `SWDDIF`, `COSZEN`), `RAINNC`, `RAINC`, `SINALPHA`/`COSALPHA`, the georeference, and the history-interval wind extremes `WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX` when the run sets `nwp_diagnostics = 1` (see [Wind maxima and gusts](#wind-maxima-and-gusts)). |
-| `"windfarm"` | **only 2-D planes**, for a wind-farm reanalysis whose reader is `woof energy extract`: the hub-height wind and its interval statistics plus the hub-height scalars (`T_HUB`, `P_HUB`, `RHO_HUB`, `QV_HUB`, `QC_HUB`, `QR_HUB`, `QNC_HUB`; see [Hub-height wind fields](#hub-height-wind-fields)), the near-surface state (`U10`, `V10`, `T2`, `Q2`, `PSFC`, `TSK`), the boundary layer and surface fluxes (`PBLH`, `UST`, `HFX`, `LH`, `SWDOWN`), `RAINNC`, `RAINC`, `SNOWNC`, the interval wind extremes (`WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX`), `SINALPHA`/`COSALPHA`, `LANDMASK` and the georeference. **No 3-D volume**: it is the one preset that does not carry the structural `T` and `PHB` (see [What cannot be dropped](#what-cannot-be-dropped)). It needs `hub_wind = true` or `hub_heights_m`, and is refused without them. The reason for every field is the table `woof.io.history_selection.WINDFARM_FIELD_REASONS`. |
+| `"windfarm"` | **only 2-D planes**, for a wind-farm reanalysis whose reader is `woof energy extract`: the hub-height wind and its interval statistics plus the hub-height scalars (`T_HUB`, `P_HUB`, `RHO_HUB`, `QV_HUB`, `QC_HUB`, `QR_HUB`, `QNC_HUB`; see [Hub-height wind fields](#hub-height-wind-fields)), the near-surface state (`U10`, `V10`, `T2`, `Q2`, `PSFC`, `TSK`), the boundary layer and surface fluxes (`PBLH`, `UST`, `HFX`, `LH`, `SWDOWN`), `RAINNC`, `RAINC`, `SNOWNC`, the interval wind extremes (`WSPD10MAX`, `U10MAX`/`V10MAX`, `GUST`, `W_UP_MAX`/`W_DN_MAX`), the per-turbine power rows when `windfarm_turbines` is set (see [Wind-farm power fields](#wind-farm-power-fields)), `SINALPHA`/`COSALPHA`, `LANDMASK` and the georeference. **No 3-D volume**: it is the one preset that does not carry the structural `T` and `PHB` (see [What cannot be dropped](#what-cannot-be-dropped)). It needs `hub_wind = true` or `hub_heights_m`, and is refused without them. The reason for every field is the table `woof.io.history_selection.WINDFARM_FIELD_REASONS`. |
 | `"balloon"` | what a high-altitude balloon trajectory is sampled from, at a short cadence on a deep column: the column winds (`U`, `V`, `W`) with `SINALPHA`/`COSALPHA` to rotate them earth-relative, theta, pressure and geopotential (`T`, `P`, `PB`, `PH`, `PHB`), `QVAPOR`, `QCLOUD`, `QICE`, `QRAIN`, ONE subgrid turbulence volume per domain (`TKE` on a `km_opt = 2` large-eddy domain, `QKE` on a MYNN domain), the near-surface state and fluxes (`PSFC`, `T2`, `Q2`, `U10`, `V10`, `HFX`, `LH`, `UST`, `SWDOWN`, `GLW`), `RAINNC` and the georeference. Thirteen volumes: about 52 bytes per cell per frame (52.4 priced by the disk planner on a 256-level domain, staggering and 2-D planes included). Its render-product count has not been measured. |
 
 A preset is a filter over what the run produced, so a member the run
@@ -437,6 +437,69 @@ written (after the step's microphysics), on the same `hub_height` axis:
 | `QNC_HUB` | kg-1 | cloud droplet number, where the microphysics carries it (the array `QNCLOUD` is written from) | The arithmetic, the
 restart behaviour and what is not supported are in
 [docs/energy-hindcast/hub-wind.md](../energy-hindcast/hub-wind.md).
+
+## Wind-farm power fields
+
+Off by default. `[output] windfarm_turbines = "turbines.csv"` names a
+CSV of turbines, one per row:
+
+```csv
+name,lat,lon,hub_height_m,rotor_diameter_m,turbine_type,rated_kw
+wtg-01,55.02,2.02,100,115,E-115/3000,
+wtg-02,55.03,2.04,120,150,generic,5000
+```
+
+`turbine_type` is a curve id (or any listed name) of the turbine library
+`woof/data/energy/turbine_library.json`, whose `rotor_diameter_m` must
+match the row's to within 1.5 m, or `generic` with `rated_kw` for a
+parametric curve at the row's own rating and rotor. Lines starting with
+`#` are skipped. A misspelt type, a repeated name, or a rotor whose lower
+tip would be below ground is refused when the config is read. A relative
+path is read beside the config file. `woof go` re-reads the config text
+away from its directory, so give it an absolute path.
+
+After every model step the diagnostic reads the model winds at each
+turbine's nearest mass cell (the `hub_sites` placement rule), and
+computes the IEC 61400-12-1 rotor-equivalent wind speed over ten
+equal-height strips of the rotor disk (interpolated linear in height
+like `WSPD_HUB`, weighted by area, with the veer to the hub wind). It
+then applies the density correction `v_eq = REWS (rho_hub / 1.225)^(1/3)`
+and reads the turbine's power curve and thrust coefficient at `v_eq`
+(both zero above cut-out, with no hysteresis). On a GPU run this is one
+CUDA kernel per step, with nothing copied to the host until a frame is
+written. That costs about 0.06 ms per step on an RTX A6000, whatever the
+grid size. The CPU and GPU give the same output words. Both cube roots
+(the rotor-equivalent wind's and the density correction's) are
+CORE-MATH's correctly rounded `cbrt`, transcribed for the device and the
+host. `woof energy power` and the ramps product take the same root in
+their density correction, so a corrected speed is the same word in all
+three. It reads the resolved winds, so it runs with or without a
+turbine-drag scheme. Without one,
+the numbers are free-stream estimates. A turbine is diagnosed by every
+domain that contains it. On a domain with none of them inside, the
+diagnostic does not run. Each frame carries:
+
+| variable | dimensions | meaning |
+|---|---|---|
+| `WINDFARM_WINDOW_S` | `Time` | model seconds the `POWER_FARM_MEAN` window covers |
+| `REWS_TURBINE` | `Time, windfarm_turbine` | rotor-equivalent wind speed at the frame, m s-1 |
+| `POWER_TURBINE` | same | electrical power at the frame, W (0 to the curve's rating) |
+| `CT_TURBINE` | same | thrust coefficient at the frame (0 to 8/9) |
+| `POWER_FARM` | `Time` | sum of `POWER_TURBINE` over the domain's turbines, W |
+| `POWER_FARM_MEAN` | `Time` | time-weighted mean of that sum since the previous history frame, W |
+
+The `windfarm_turbine` axis is in file order, without the turbines that
+lie outside the domain. A `windfarm_d0N_<time>.nc` sidecar is written per
+history write and names that axis. Per turbine it holds the name, type,
+curve id, placement, hub height, rotor diameter, rating and cut-out, the
+frame values `REWS`, `RHO_HUB`, `POWER` and `CT`, and over the window
+`REWS_MEAN`/`REWS_MAX`, `POWER_MEAN`/`POWER_MAX` and `CT_MEAN`/`CT_MAX`.
+It also holds `POWER_FARM`, `POWER_FARM_MEAN` and `POWER_FARM_MAX`. Its
+`turbines_outside_domain` attribute lists the turbines left out. The
+`windfarm`, `minimal` and `severe` presets keep the frame
+fields. The window resets on a resume, as the hub-wind window does.
+`[tiles]`-streamed domains, ensemble capture and nest relocation are
+refused by name.
 
 ## Smoke tracer fields
 

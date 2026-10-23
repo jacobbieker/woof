@@ -66,6 +66,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from woof.core.cr_cbrt import cbrt as cr_cbrt
+
 from woof.energy.contracts import (
     Asset,
     AssetCollection,
@@ -226,7 +228,7 @@ def rotor_equivalent_wind_speed(speed: Any, heights: Any, hub_height_m: Any,
         cubes = np.where(weight[None, :, :] > 0.0,
                          np.asarray(speed, float) ** 3, 0.0)
         cube = np.einsum("tnh,nh->tn", cubes, weight)
-    rews = np.cbrt(cube)
+    rews = cr_cbrt(cube)  # correctly rounded: the same word on every host
     return np.where(used[None, :], rews, np.nan), used
 
 
@@ -234,9 +236,17 @@ def density_corrected_speed(speed: Any, density: Any,
                             reference_density: float = REFERENCE_DENSITY
                             ) -> np.ndarray:
     """IEC 61400-12-1 ``v (rho / rho_ref)^(1/3)`` (pitch-regulated); the
-    signature of ``woof.energy.ramps.density_corrected_speed``."""
+    signature of ``woof.energy.ramps.density_corrected_speed``.
 
-    return np.asarray(speed, dtype=float) * np.cbrt(
+    The cube root is the correctly rounded one (:func:`woof.core.cr_cbrt.
+    cbrt`), so this equals ``ramps.density_corrected_speed`` and the
+    wind-farm power diagnostic's device and host corrections word for
+    word.  Before 2026-10 it was ``np.cbrt`` -- the C library's, which on
+    glibc 2.44 is up to 3 ULP from the correctly rounded root on about half
+    of all arguments (4 ULP after the product with the speed) -- so the
+    corrected speeds, and the power read at them, moved by at most that.
+    """
+    return np.asarray(speed, dtype=float) * cr_cbrt(
         np.asarray(density, dtype=float) / reference_density)
 
 
@@ -857,13 +867,13 @@ def compute_power(forecast, assets: AssetCollection | None,
             any_layout = True
         elif len(idx) == 1 and rows[idx[0]].count > 1:
             loss = fallback_wake_loss(rows[idx[0]].count, plant.offshore)
-            ratio[:, idx] = np.cbrt(1.0 - loss)
+            ratio[:, idx] = cr_cbrt(1.0 - loss)
             plant.wake_method = "fallback-table"
             plant.fallback_loss = loss
         elif len(idx) >= 2:
             total = int(count[idx].sum())
             loss = fallback_wake_loss(total, plant.offshore)
-            ratio[:, idx] = np.cbrt(1.0 - loss)
+            ratio[:, idx] = cr_cbrt(1.0 - loss)
             plant.wake_method = "fallback-table"
             plant.fallback_loss = loss
             notes.add(f"plant {plant.plant_id}: some turbines lack a point "
@@ -875,8 +885,11 @@ def compute_power(forecast, assets: AssetCollection | None,
                   "tables averaged over all directions")
 
     waked = speed * ratio
-    veq = density_corrected_speed(waked, rho)
-    veq_free = density_corrected_speed(speed, rho)
+    # density_corrected_speed for both speeds, its correctly rounded density
+    # scale formed once: speed * cr_cbrt(rho / rho_ref), the same words.
+    scale = cr_cbrt(np.asarray(rho, dtype=float) / REFERENCE_DENSITY)
+    veq = np.asarray(waked, dtype=float) * scale
+    veq_free = np.asarray(speed, dtype=float) * scale
     cut_out = np.array([r.match.curve.cut_out_ms if r.match.curve else np.inf
                         for r in rows])
     restart = np.array([r.match.curve.restart if r.match.curve else np.inf

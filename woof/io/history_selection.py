@@ -47,7 +47,8 @@ from woof.explain import warn
 from woof.io.wrf_output_schema import (HISTORY_FIELDS_BY_NETCDF_NAME,
                                         HUB_SCALAR_OUTPUT_FIELDS,
                                         HUB_WIND_OUTPUT_FIELDS,
-                                        REGISTRY_VAR_META)
+                                        REGISTRY_VAR_META,
+                                        WINDFARM_POWER_OUTPUT_FIELDS)
 
 
 #: The names the writer emits for every frame regardless of physics, plus
@@ -158,6 +159,10 @@ _MINIMAL_FIELDS: frozenset[str] = frozenset({
     # when [output] asks for them (hub_heights_m), and 2-D per height, so
     # they belong with the surface panel rather than the volumes.
     *HUB_WIND_OUTPUT_FIELDS,
+    # Wind-farm power at listed turbines: present only when [output]
+    # windfarm_turbines asks, and one value per turbine -- smaller than any
+    # plane (woof/core/windfarm_power_diag.py).
+    *WINDFARM_POWER_OUTPUT_FIELDS,
     # Grid metadata: 2-D, cheap, and what a staggered reader needs.
     "XLAT_U", "XLONG_U", "XLAT_V", "XLONG_V",
     "MAPFAC_M", "MAPFAC_U", "MAPFAC_V", "F", "E", "SINALPHA", "COSALPHA",
@@ -251,7 +256,7 @@ _ENERGY_FIELDS: frozenset[str] = frozenset({
 #: follows: the gust family needs ``nwp_diagnostics = 1``, the hub planes
 #: need ``[output] hub_wind``/``hub_heights_m``, ``QV/QC/QR_HUB`` a moist
 #: scheme, ``QNC_HUB`` a scheme with a droplet number, ``SNOWNC`` an ice
-#: scheme.
+#: scheme, the per-turbine power rows ``[output] windfarm_turbines``.
 WINDFARM_FIELD_REASONS: dict[str, str] = {
     # Georeference and time (the structural rows a site sampler reads).
     "Times": "valid time of every frame (the sampler's time axis)",
@@ -314,6 +319,17 @@ WINDFARM_FIELD_REASONS: dict[str, str] = {
     "QR_HUB": "hub rain water (forecast rain_mixing_ratio): freezing rain",
     "QNC_HUB": "hub droplet number (forecast cloud_number_mixing_ratio): "
                "icing droplet MVD",
+    # Wind-farm power at the listed turbines (woof/core/windfarm_power_diag.py,
+    # [output] windfarm_turbines): one value per turbine, not a plane.
+    "WINDFARM_WINDOW_S": "model seconds the POWER_FARM_MEAN window covers",
+    "REWS_TURBINE": "rotor-equivalent wind over each turbine's disk: the "
+                    "speed its power curve is read at",
+    "POWER_TURBINE": "per-turbine power from its own curve at the "
+                     "density-corrected REWS: the generation forecast",
+    "CT_TURBINE": "per-turbine thrust coefficient: wake strength and loads",
+    "POWER_FARM": "the domain's summed turbine power at the frame",
+    "POWER_FARM_MEAN": "time-mean summed power over the interval: energy "
+                       "yield",
 }
 
 #: The ``balloon`` preset: what a high-altitude balloon track and the
@@ -446,7 +462,9 @@ PRODUCT_COUNT_BASIS = (
     "proof run (49 levels, WSM6, RRTMG), one field at a time")
 
 #: The keys ``[output]`` accepts.  The four ``hub_*`` keys configure the
-#: in-model hub-height wind diagnostic (:class:`HubWindRequest`).
+#: in-model hub-height wind diagnostic (:class:`HubWindRequest`);
+#: ``windfarm_turbines`` the wind-farm power diagnostic
+#: (:class:`WindfarmPowerRequest`).
 #: ``async_checkpoints`` is the run's checkpoint-writer switch
 #: (:mod:`woof.io.async_checkpoint`); it is tree-wide only.
 #: ``history_queue_depth`` is how many history frames each domain's writer
@@ -458,6 +476,7 @@ PRODUCT_COUNT_BASIS = (
 OUTPUT_KEYS: frozenset[str] = frozenset(
     {"preset", "history_vars", "history_drop",
      "hub_wind", "hub_heights_m", "hub_sample_interval_s", "hub_sites",
+     "windfarm_turbines",
      "async_checkpoints", "history_queue_depth", "icechunk"})
 
 #: The keys a ``[[domain]]`` ``output = {...}`` accepts: the tree-wide
@@ -520,12 +539,13 @@ def _finite_number(value, what: str) -> float:
     return number
 
 
-def _resolve_sites_path(text: str, *, base_dir, source: str) -> Path:
-    """A sites file named relative to the config, else the working directory.
+def _beside_config(text: str, base_dir) -> tuple[Path | None, list[Path]]:
+    """A file named relative to the config, else the working directory:
+    ``(resolved path or None, the candidates looked at)``.
 
     The config's own directory FIRST: a case folder that carries its sites
-    file must sample those turbines from wherever it is launched, and an
-    unrelated ``sites.json`` in the launch directory must not win.
+    or turbine file must read it from wherever it is launched, and an
+    unrelated file of that name in the launch directory must not win.
     """
     path = Path(text).expanduser()
     if path.is_absolute():
@@ -537,7 +557,15 @@ def _resolve_sites_path(text: str, *, base_dir, source: str) -> Path:
         candidates.append(Path.cwd() / path)
     for candidate in candidates:
         if candidate.is_file():
-            return candidate.resolve()
+            return candidate.resolve(), candidates
+    return None, candidates
+
+
+def _resolve_sites_path(text: str, *, base_dir, source: str) -> Path:
+    """A sites file named relative to the config (:func:`_beside_config`)."""
+    found, candidates = _beside_config(text, base_dir)
+    if found is not None:
+        return found
     raise HubWindConfigError(
         f"[output] hub_sites of {source} names {text!r}, which is not a "
         f"file (looked at {[str(c) for c in candidates]}).  hub_sites is a "
@@ -648,6 +676,10 @@ def output_key_rows(*, tree_wide: bool = True):
         KeyRow("hub_sites", ("string", "array"), None,
                "Sites to sample every hub_sample_interval_s: a sites.v1 "
                "JSON path or a list of {site_id, lat, lon} tables."),
+        KeyRow("windfarm_turbines", "string", None,
+               "CSV of turbines (name, lat, lon, hub_height_m, "
+               "rotor_diameter_m, turbine_type) whose power, thrust and "
+               "rotor-equivalent wind are diagnosed every step."),
         KeyRow("async_checkpoints", "boolean", True,
                "Write checkpoints in the background from a pinned snapshot "
                "(default); false writes them synchronously.  Tree-wide; "
@@ -738,6 +770,72 @@ def parse_hub_wind(table, *, source: str = "<config>", base_dir=None
     return HubWindRequest(heights_m=tuple(float(h) for h in heights),
                           sample_interval_s=interval, sites=sites,
                           sites_source=origin)
+
+class WindfarmConfigError(ValueError):
+    """An ``[output] windfarm_turbines`` value the diagnostic cannot honour."""
+
+
+@dataclass(frozen=True)
+class WindfarmPowerRequest:
+    """The validated ``[output] windfarm_turbines`` of one domain.
+
+    PINNED: ``turbines`` is the file's rows in file order, each a
+    :class:`woof.core.windfarm_power_diag.Turbine` (plain floats and
+    strings, so ``dataclasses.asdict`` -- the resolved-TOML and identity
+    walks -- serialises it unchanged); names are unique, every
+    ``turbine_type`` resolved against the turbine library when the file
+    was read.  ``source`` is the resolved file path.
+    """
+
+    turbines: tuple = ()
+    source: str | None = None
+
+    def spelling(self) -> str:
+        return f"windfarm_turbines={len(self.turbines)}"
+
+
+def _resolve_turbine_path(text: str, *, base_dir, source: str) -> Path:
+    """A turbine file named relative to the config, else the working
+    directory -- the ``hub_sites`` rule (:func:`_beside_config`)."""
+    found, candidates = _beside_config(text, base_dir)
+    if found is not None:
+        return found
+    raise WindfarmConfigError(
+        f"[output] windfarm_turbines of {source} names {text!r}, which is "
+        f"not a file (looked at {[str(c) for c in candidates]}).  "
+        "windfarm_turbines is a CSV with the header name, lat, lon, "
+        "hub_height_m, rotor_diameter_m, turbine_type (and rated_kw for a "
+        "generic turbine).")
+
+
+def parse_windfarm_power(table, *, source: str = "<config>", base_dir=None
+                         ) -> WindfarmPowerRequest | None:
+    """``[output] windfarm_turbines`` of one table, or ``None`` (off).
+
+    Off unless asked.  The file is read and every row validated here, at
+    config time, so a misspelt turbine type is refused before the run
+    rather than at its first step.  The reader lives with the diagnostic
+    (:func:`woof.core.windfarm_power_diag.read_turbine_file`) and is
+    imported only when the key is present.
+    """
+    if "windfarm_turbines" not in table:
+        return None
+    value = table["windfarm_turbines"]
+    if not isinstance(value, str) or not value.strip():
+        raise WindfarmConfigError(
+            f"[output] windfarm_turbines of {source} must be the path of a "
+            f"turbine CSV, got {value!r}.  Delete the key to turn the "
+            "wind-farm power diagnostic off.")
+    path = _resolve_turbine_path(value.strip(), base_dir=base_dir, source=source)
+    from woof.core.windfarm_power_diag import (TurbineFileError,
+                                               read_turbine_file)
+    try:
+        turbines = read_turbine_file(path)
+    except TurbineFileError as err:
+        raise WindfarmConfigError(
+            f"[output] windfarm_turbines of {source}: {err}") from None
+    return WindfarmPowerRequest(turbines=turbines, source=str(path))
+
 
 #: How many dropped names the plan-time warning spells out before it
 #: switches to a count.  See :meth:`HistorySelection.warn_lost_products`.
@@ -854,6 +952,12 @@ class HistorySelection:
     #: [output] does: it reads model state and writes only its own
     #: buffers, so it binds no restart identity.
     hub_wind: HubWindRequest | None = None
+    #: The wind-farm power diagnostic this domain asked for
+    #: (``[output] windfarm_turbines``), or ``None`` (the default).  Same
+    #: law as ``hub_wind``: output, never a trajectory input.  Every
+    #: identity and public-document walk pops it when ``None``, so an
+    #: [output] block that does not ask keeps its pre-feature bytes.
+    windfarm_power: WindfarmPowerRequest | None = None
 
     #: ``[output] async_checkpoints`` as written, or ``None`` (unset: the
     #: asynchronous default).  DELIBERATELY NOT A FIELD: it chooses how a
@@ -948,6 +1052,15 @@ class HistorySelection:
                 f"selection keeps none of {list(hub_planes)}: the diagnostic "
                 "would run every step and publish nothing.  Keep at least "
                 "one of them, or delete the hub_* keys.")
+        if self.windfarm_power is not None and not any(
+                self.keeps(name) for name in WINDFARM_POWER_OUTPUT_FIELDS[1:]):
+            raise WindfarmConfigError(
+                f"[output] of {self.source} names windfarm_turbines but its "
+                "selection keeps none of "
+                f"{list(WINDFARM_POWER_OUTPUT_FIELDS[1:])}: the diagnostic "
+                "would run every step and its frame fields would all be "
+                "dropped.  Keep at least one of them, or delete "
+                "windfarm_turbines.")
         if (self.preset == "windfarm" and not self.history_vars
                 and self.hub_wind is None):
             raise HubWindConfigError(
@@ -1042,6 +1155,8 @@ class HistorySelection:
             history_drop=tuple(table.get("history_drop", ()) or ()),
             source=source,
             hub_wind=parse_hub_wind(table, source=source, base_dir=base_dir),
+            windfarm_power=parse_windfarm_power(table, source=source,
+                                                base_dir=base_dir),
         )
         if async_checkpoints is not None:
             object.__setattr__(selection, "async_checkpoints",
@@ -1140,6 +1255,8 @@ class HistorySelection:
             parts.append("history_drop=" + ",".join(self.history_drop))
         if self.hub_wind is not None:
             parts.append(self.hub_wind.spelling())
+        if self.windfarm_power is not None:
+            parts.append(self.windfarm_power.spelling())
         return " ".join(parts)
 
     def product_cost(self) -> tuple[int, int, bool]:
@@ -1331,7 +1448,10 @@ __all__ = [
     "STRUCTURAL_FIELDS",
     "WINDFARM_FIELD_REASONS",
     "WINDFARM_STRUCTURAL_EXEMPT",
+    "WindfarmConfigError",
+    "WindfarmPowerRequest",
     "lost_products",
     "parse_hub_wind",
+    "parse_windfarm_power",
     "resolve",
 ]
