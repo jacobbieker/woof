@@ -3460,6 +3460,15 @@ def _run(args: argparse.Namespace,
             dy=cfg.dy, grid_id=int(cfg.grid_id),
             latlon=lambda: (initial.fields["XLAT"], initial.fields["XLONG"]),
             streamed=streaming.is_streaming(stepper))
+    # The child config's [output] wind-farm power window
+    # (woof/core/windfarm_power_diag.py), on the hub-wind window's terms.
+    if getattr(history_selection, "windfarm_power", None) is not None:
+        from woof.core.windfarm_power_diag import attach_windfarm_power
+        attach_windfarm_power(
+            child, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
+            dy=cfg.dy, grid_id=int(cfg.grid_id),
+            latlon=lambda: (initial.fields["XLAT"], initial.fields["XLONG"]),
+            streamed=streaming.is_streaming(stepper))
     streaming_report = streaming.streaming_receipt(
         tiles, {int(cfg.grid_id): streaming_decision})
     if streaming_report:

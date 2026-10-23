@@ -560,11 +560,20 @@ header and in the UW registry option. The copyright lines and the
 permission text are at licenses/LICENSE-CORE-MATH-binary64-MIT.txt and
 beside the code in woof/core/kernels/LICENSE-third-party.txt.
 
+The binary64 cbrt is CORE-MATH's correctly rounded cube root
+(src/binary64/cbrt/cbrt.c, revision 8ae55cdd0d953dc1d6f78659435283d3436865ab,
+"Copyright (c) 2021-2022 Alexei Sibidanov.", MIT), transcribed for the
+device in woof/core/kernels/cr_cbrt_flt64.cuh and for the host in
+woof/core/cr_cbrt.py; the wind-farm power diagnostic and the energy
+products' density correction take it, so their cube roots are one word on
+every host and card. glibc's own binary64 cbrt (LGPL) is NOT transcribed.
+
 The upstream files are kept verbatim, sha256-pinned, beside the proof
-harness at tools/uwpbl_wrf471_oracle/libm64/upstream/. The two grants are
+harness at tools/uwpbl_wrf471_oracle/libm64/upstream/. The grants are
 scoped by routine: they cover exp, log, pow, cos and acos in
-glibc_flt64.cuh and nothing else in the UW kernel, whose remaining code is
-a transcription of WRF.
+glibc_flt64.cuh, cbrt in cr_cbrt_flt64.cuh and woof/core/cr_cbrt.py, and
+nothing else in those kernels, whose remaining code is a transcription of
+WRF or this project's own.
 
 --------------------------------------------------------------------------
 

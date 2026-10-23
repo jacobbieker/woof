@@ -26,6 +26,13 @@ own buffers.  Nothing in this module or its members is a trajectory input,
 which is why none of them enters a restart identity (see each member's
 own restart note: hub-height wind documents its reset-on-resume semantics
 in woof/core/hub_wind_diag.py).
+
+THE MEMBERS.  ``hub_wind`` (:mod:`woof.core.hub_wind_diag`, ``[output]
+hub_wind``/``hub_heights_m``) and ``windfarm_power``
+(:mod:`woof.core.windfarm_power_diag`, ``[output] windfarm_turbines``:
+rotor-equivalent wind, power and thrust at listed turbines).  Each is
+attached only when its key is set, so a run that sets neither keeps the
+empty registry and every byte it wrote before them.
 """
 from __future__ import annotations
 

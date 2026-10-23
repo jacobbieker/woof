@@ -118,6 +118,10 @@ def native_prepared_eligibility(inputs, node=None, *, members=2, restart=None, k
                                   getattr(dc, "output", None)),
                    "hub_wind", None) is not None for dc in exp.domains):
         reasons.append("[output] hub-height wind folds in the original dycore epilogue; its native batch binding is not qualified")
+    if any(getattr(resolve_output(getattr(exp, "output", None),
+                                  getattr(dc, "output", None)),
+                   "windfarm_power", None) is not None for dc in exp.domains):
+        reasons.append("[output] wind-farm power folds in the original dycore epilogue; its native batch binding is not qualified")
     if getattr(cfg, "hmix_k_diag", False):
         reasons.append("XKMH/XKHH output reads original dycore mixing scratch; its native diagnostic binding is not qualified")
     if cfg.time_step_sound < 2 or cfg.time_step_sound % 2:

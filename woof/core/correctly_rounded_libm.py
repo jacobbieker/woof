@@ -57,7 +57,7 @@ from __future__ import annotations
 
 import decimal
 
-__all__ = ["exp_cr", "log_cr"]
+__all__ = ["cbrt_cr", "exp_cr", "log_cr"]
 
 #: 60 significant decimal digits ~= 199 bits, against the 53 a double needs.
 _PRECISION = 60
@@ -73,3 +73,56 @@ def exp_cr(x: float) -> float:
 def log_cr(x: float) -> float:
     """``log(x)`` correctly rounded to binary64, identically on every host."""
     return float(_CONTEXT.ln(decimal.Decimal(x)))
+
+
+def _icbrt(n: int) -> int:
+    """``floor(n ** (1/3))`` for a non-negative integer, exactly."""
+    if n < 8:
+        return 1 if n else 0
+    # An overestimate, then integer Newton, which descends to the floor.
+    y = (1 << ((n.bit_length() + 2) // 3)) + 1
+    while True:
+        nxt = (2 * y + n // (y * y)) // 3
+        if nxt >= y:
+            break
+        y = nxt
+    while y * y * y > n:
+        y -= 1
+    while (y + 1) ** 3 <= n:
+        y += 1
+    return y
+
+
+def cbrt_cr(x: float) -> float:
+    """``cbrt(x)`` correctly rounded to binary64 (to nearest, ties to even),
+    from exact integer arithmetic alone -- no libm, no decimal context.
+
+    ``|x| = M 2^E`` exactly; with ``t`` chosen so ``cbrt(|x|) 2^t`` carries
+    about 60 bits, ``A = M 2^(E + 3t)`` is an integer and ``R = floor(A^(1/3))``
+    its integer cube root.  The 53-bit rounding of ``A^(1/3)`` is decided
+    by comparing ``A`` with the cube of the midpoint, all in integers, so the
+    result is the correctly rounded double by construction.  (A binary64
+    cube root never lies exactly on a midpoint, whose cube needs more than
+    53 bits; the tie branch is ties-to-even regardless.)  Slow -- tens of
+    microseconds -- and meant as the oracle the fast cube roots are graded
+    against (``woof.core.cr_cbrt``, ``woof/core/kernels/cr_cbrt_flt64.cuh``).
+    """
+    import math
+
+    if x != x or math.isinf(x) or x == 0.0:
+        return x + x
+    negative = x < 0.0
+    m, e = math.frexp(-x if negative else x)
+    mantissa = int(m * 2.0 ** 53)          # |x| = mantissa * 2^(e - 53)
+    t = 60 - e // 3
+    shift = e - 53 + 3 * t                  # >= 127 for every finite x
+    a = mantissa << shift
+    r = _icbrt(a)
+    s = r.bit_length() - 53
+    q = r >> s
+    mid = (2 * q + 1) << (s - 1)            # the midpoint above q, scaled
+    cube = mid * mid * mid
+    if a > cube or (a == cube and q & 1):
+        q += 1
+    value = math.ldexp(float(q), s - t)
+    return -value if negative else value

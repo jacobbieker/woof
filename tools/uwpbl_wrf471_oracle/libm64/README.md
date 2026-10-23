@@ -64,3 +64,45 @@ The `transcription_mismatches` field compares the pinned host adaptation to orig
 `FMA-SITES.md` maps every Arm FMA to the installed instructions. `probe.log` records live public addresses and resolved PLT targets. `table-identity.json` records byte comparison and SHA256 hashes of all three lookup tables. `host-environment.json` records the compiler, glibc, CPU features, and installed libm hash. `upstream-sha256.json` identifies each retained upstream source.
 
 Mechanical generation uses `generate.py` with the Python libclang binding. It selects the active Arm configuration and wraps every floating arithmetic AST node. Copy `generated.inc` back into this directory, then run `python assemble.py` and `python write_fma_report.py` from the workspace root. `postprocess.py` converts C designated initializers, lifts tables to device globals, adapts 128-bit arithmetic, and pins NaN behavior. Re-run the sweeps after regeneration.
+
+## cbrt: CORE-MATH's correctly rounded binary64 cube root
+
+The wind-farm power diagnostic (`woof/core/windfarm_power_diag.py`) and the energy products' density correction (`woof.energy.power_farm` and `woof.energy.ramps`, `density_corrected_speed`) take a cube root that must be the same word on the device and on every host. glibc's `cbrt` (LGPL, not transcribed) is not correctly rounded: on glibc 2.44 it differs from the correctly rounded root on 9,185,950 of the 16,777,216 exactly graded arguments below. `pow(x, 1/3)` is not a cube root either. So both roads take CORE-MATH's `cr_cbrt`:
+
+- the upstream source, `upstream/cbrt.c`, kept verbatim. Its revision is `8ae55cdd0d953dc1d6f78659435283d3436865ab` and its sha256 is `0a86b7a8f433dfa4610023767102ea19eb3642ea6982871c61c956148837dde4`, also in `upstream-sha256.json`. It is MIT, "Copyright (c) 2021-2022 Alexei Sibidanov.";
+- `woof/core/kernels/cr_cbrt_flt64.cuh`, the device transcription (`uw_cbrt`). It rounds to nearest only, and every operation is an explicit `__d*_rn`/`__fma_rn` intrinsic;
+- `woof/core/cr_cbrt.py`, the NumPy transcription. Upstream's `fma(a, b, -fl(ab))` becomes Dekker's exact product error. A subnormal argument is scaled by 2^54 in and 2^-18 out, both exact;
+- `woof.core.correctly_rounded_libm.cbrt_cr`, an exact integer reference that shares no code with the three above. It takes the integer cube root of `M 2^(E+3t)` and makes the 53-bit rounding decision by an integer comparison with the midpoint's cube.
+
+`sweep_cbrt.py` grades all four over 2^28 deterministic arguments (16 chunks of 2^24, eight interleaved streams):
+
+- random binary64 bit patterns;
+- the diagnostic's density-ratio and rotor-cube ranges;
+- log-uniform normals of both signs;
+- subnormals;
+- exact cubes scaled by powers of eight, and their ±4-word neighbourhoods;
+- 1024-word runs across [1, 8);
+- upstream's hard-case arguments and their neighbourhoods.
+
+The three fast implementations are compared on every argument. The exact reference grades a 2^20 stride of each chunk.
+
+```bash
+gcc -O2 -ffp-contract=off -fopenmp -shared -fPIC \
+    tools/uwpbl_wrf471_oracle/libm64/cbrt_batch.c \
+    tools/uwpbl_wrf471_oracle/libm64/upstream/cbrt.c -o /tmp/cbrt_batch.so
+python tools/uwpbl_wrf471_oracle/libm64/sweep_cbrt.py \
+    --library /tmp/cbrt_batch.so --chunks 16 \
+    > tools/uwpbl_wrf471_oracle/libm64/gpu-cbrt.log
+```
+
+| Comparison | Arguments | Mismatches |
+|---|---:|---:|
+| device `uw_cbrt` vs upstream C | 268435456 | 0 |
+| host `cr_cbrt.cbrt` vs upstream C | 268435456 | 0 |
+| device vs host | 268435456 | 0 |
+| upstream C vs exact integer reference | 16777216 | 0 |
+| device vs exact integer reference | 16777216 | 0 |
+| host vs exact integer reference | 16777216 | 0 |
+| glibc `cbrt` (`np.cbrt`) vs exact integer reference | 16777216 | 9185950 |
+
+The run was on an RTX A6000 (NVRTC 12.9, CuPy 14.2.0) on 2026-10-22, with NumPy 2.4.6, Python 3.11.16 and glibc 2.44 on x86-64, and took 811 s. The record, first mismatches included (there were none), is `gpu-cbrt.log`. `tests/test_cr_cbrt.py` re-grades a smaller sweep on every run: on the CPU leg against the exact reference, and on a device against the host.

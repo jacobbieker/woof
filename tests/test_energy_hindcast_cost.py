@@ -600,8 +600,10 @@ def test_windfarm_bytes_come_from_the_presets_own_field_list():
     assert layout["three_d"] == 0
     assert layout["planes"] == len(fields["two_d"]) + 6 * len(
         fields["hub_height"])
-    # 19-byte Times padded to 20, ZNU/ZNW columns, four scalars, HUB_HEIGHT.
-    assert layout["extra_bytes"] == 20 + 4 * (60 + 61) + 4 * 4 + 4 * 6
+    # 19-byte Times padded to 20, ZNU/ZNW columns, four scalars, HUB_HEIGHT,
+    # and the wind-farm power's three scalars (its turbine rows are free).
+    assert layout["extra_bytes"] == (20 + 4 * (60 + 61) + 4 * 4 + 4 * 6
+                                     + 4 * 3)
     # Linear in the hub heights, independent of the levels (no volume).
     two = cost.store_layout("windfarm", 60, hub_heights=2)
     assert layout["planes"] - two["planes"] == 4 * len(fields["hub_height"])
