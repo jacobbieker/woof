@@ -1,0 +1,2667 @@
+{
+ "case": "merc_tropics_9km",
+ "grid": {
+  "map_proj": "mercator",
+  "ref_lat": 5.0,
+  "ref_lon": 100.0,
+  "truelat1": 5.0,
+  "truelat2": 5.0,
+  "stand_lon": 100.0,
+  "dx": 9000.0,
+  "e_we": 81,
+  "e_sn": 61
+ },
+ "nests": [],
+ "correction_factor": 1.0,
+ "turbines": [
+  {
+   "turbine_id": "merc_tropics_9km-0000",
+   "lat": 5.494036618841065,
+   "lon": 97.2416365263177,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0001",
+   "lat": 5.856139742169361,
+   "lon": 100.37556189118389,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0002",
+   "lat": 5.5870098869137195,
+   "lon": 100.44529565899644,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0003",
+   "lat": 4.492157686942917,
+   "lon": 99.18065472459683,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0004",
+   "lat": 5.814064205948341,
+   "lon": 98.83804538708893,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0005",
+   "lat": 3.3748783709823584,
+   "lon": 100.60122132613695,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0006",
+   "lat": 6.574542246370967,
+   "lon": 97.64093181042875,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0007",
+   "lat": 3.970362183521445,
+   "lon": 102.87742054034878,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0008",
+   "lat": 7.037925532236244,
+   "lon": 99.21339634222235,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0009",
+   "lat": 4.676211331118907,
+   "lon": 100.8359922861587,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0010",
+   "lat": 5.686863205401167,
+   "lon": 98.56431253294164,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0011",
+   "lat": 4.393635478777583,
+   "lon": 98.08143187303111,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0012",
+   "lat": 5.69575858776733,
+   "lon": 98.4427775251088,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0013",
+   "lat": 7.174384250448625,
+   "lon": 99.08722242809972,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0014",
+   "lat": 5.080389168407535,
+   "lon": 101.45594094635779,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0015",
+   "lat": 5.049552283100979,
+   "lon": 98.16514437687614,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0016",
+   "lat": 4.844153388390936,
+   "lon": 97.19997298495164,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0017",
+   "lat": 4.034373025521333,
+   "lon": 98.94294704311353,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0018",
+   "lat": 4.229929839730659,
+   "lon": 98.43351933173787,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0019",
+   "lat": 4.273330870535176,
+   "lon": 98.50942985535353,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0020",
+   "lat": 5.723802677144292,
+   "lon": 97.93419178242165,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0021",
+   "lat": 6.2879200023383675,
+   "lon": 97.03541452914111,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0022",
+   "lat": 5.510829776540831,
+   "lon": 97.04531499587192,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0023",
+   "lat": 6.671676102677637,
+   "lon": 102.65714517007987,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0024",
+   "lat": 4.996737082407819,
+   "lon": 102.59207886980676,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0025",
+   "lat": 4.708611606926837,
+   "lon": 98.82719446468694,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0026",
+   "lat": 5.9049034631798065,
+   "lon": 97.29087934534849,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0027",
+   "lat": 4.376619401609432,
+   "lon": 99.16916143640096,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0028",
+   "lat": 4.069310640021413,
+   "lon": 98.27297371184925,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0029",
+   "lat": 4.12052674685448,
+   "lon": 100.32563861214786,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0030",
+   "lat": 5.476533913943612,
+   "lon": 100.06130953071808,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0031",
+   "lat": 6.433263883765363,
+   "lon": 97.08056611610809,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0032",
+   "lat": 5.354744724001591,
+   "lon": 102.9989544917491,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0033",
+   "lat": 4.436262600500328,
+   "lon": 102.20593600248125,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0034",
+   "lat": 6.767447262482932,
+   "lon": 102.41992414705048,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0035",
+   "lat": 6.139681884556765,
+   "lon": 102.89857722530732,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0036",
+   "lat": 6.171804723929355,
+   "lon": 100.4452830268531,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0037",
+   "lat": 3.9833785313396533,
+   "lon": 101.500990715938,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0038",
+   "lat": 6.53466004183538,
+   "lon": 98.88898554360755,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0039",
+   "lat": 4.896891769996927,
+   "lon": 100.85049132354216,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0040",
+   "lat": 4.720432731324095,
+   "lon": 97.76137775349105,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0041",
+   "lat": 5.815797899700712,
+   "lon": 98.97093943775589,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0042",
+   "lat": 3.8013175834303894,
+   "lon": 99.46500112140188,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0043",
+   "lat": 7.157374284915434,
+   "lon": 100.62502917047367,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0044",
+   "lat": 7.2180694070717095,
+   "lon": 98.95370250199802,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0045",
+   "lat": 4.579662221861412,
+   "lon": 102.7941784125297,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0046",
+   "lat": 6.574634140393272,
+   "lon": 101.74186044480513,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0047",
+   "lat": 5.273684932150843,
+   "lon": 101.74676383009688,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0048",
+   "lat": 3.7179940201224895,
+   "lon": 101.17139143068987,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0049",
+   "lat": 4.82718736845159,
+   "lon": 97.05414345096428,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0050",
+   "lat": 6.050518574699055,
+   "lon": 101.03003923385036,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0051",
+   "lat": 5.247920802926274,
+   "lon": 102.35870230019533,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0052",
+   "lat": 7.048525762341896,
+   "lon": 99.95695254931562,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0053",
+   "lat": 4.742457872561715,
+   "lon": 101.56741393700126,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0054",
+   "lat": 6.275251077665729,
+   "lon": 98.83284482845032,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0055",
+   "lat": 4.941771287924823,
+   "lon": 100.54974988254949,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0056",
+   "lat": 2.89681012651792,
+   "lon": 102.92737250469956,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0057",
+   "lat": 4.150192585340022,
+   "lon": 102.13228555985972,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0058",
+   "lat": 3.4560470323610133,
+   "lon": 98.01146768415748,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0059",
+   "lat": 6.661589819047819,
+   "lon": 99.62963397073038,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0060",
+   "lat": 4.942704305675548,
+   "lon": 99.74126641095029,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0061",
+   "lat": 4.443304674150639,
+   "lon": 99.75761507395993,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0062",
+   "lat": 5.957408416045595,
+   "lon": 99.7511330542062,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0063",
+   "lat": 5.376177581161372,
+   "lon": 100.24482076844757,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0064",
+   "lat": 5.532767156515959,
+   "lon": 102.41038855522893,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0065",
+   "lat": 4.298087641839629,
+   "lon": 99.9699551735182,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0066",
+   "lat": 5.035938220480702,
+   "lon": 102.50946223457615,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0067",
+   "lat": 7.188652865321771,
+   "lon": 97.39701291695582,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0068",
+   "lat": 6.939414122736238,
+   "lon": 97.6809244300506,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0069",
+   "lat": 6.2651590919946045,
+   "lon": 99.4886724840878,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0070",
+   "lat": 4.112985475958112,
+   "lon": 99.19493054052006,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0071",
+   "lat": 6.971536838369303,
+   "lon": 99.78912443283517,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0072",
+   "lat": 5.704471175478801,
+   "lon": 103.00378420515158,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0073",
+   "lat": 5.179517773042747,
+   "lon": 98.05707349213694,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0074",
+   "lat": 5.010702479576224,
+   "lon": 101.0392257347216,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0075",
+   "lat": 5.548898387311496,
+   "lon": 102.37786563100393,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0076",
+   "lat": 4.366567028568753,
+   "lon": 102.03449601364835,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0077",
+   "lat": 4.929003735913568,
+   "lon": 102.90776244082758,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0078",
+   "lat": 5.912146250000177,
+   "lon": 100.24657522854231,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0079",
+   "lat": 3.9729069495825797,
+   "lon": 100.23875225273966,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0080",
+   "lat": 5.114841869012153,
+   "lon": 102.98656138310955,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0081",
+   "lat": 3.607095556158356,
+   "lon": 98.0514115104375,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0082",
+   "lat": 4.9362471818937195,
+   "lon": 99.15570417347125,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0083",
+   "lat": 5.850775211643779,
+   "lon": 100.7298326146186,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0084",
+   "lat": 6.765874122962586,
+   "lon": 99.73895892127175,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0085",
+   "lat": 5.587591106844826,
+   "lon": 101.6805256242494,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0086",
+   "lat": 6.625316627662798,
+   "lon": 101.79191309225004,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0087",
+   "lat": 3.6139020758090936,
+   "lon": 100.0492106540664,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0088",
+   "lat": 4.106543886550597,
+   "lon": 101.12479324098368,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0089",
+   "lat": 2.9148952374782766,
+   "lon": 100.86165675254546,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0090",
+   "lat": 4.108826826295996,
+   "lon": 99.14720956169658,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0091",
+   "lat": 4.371321894138518,
+   "lon": 97.61893018127785,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0092",
+   "lat": 4.530089697414738,
+   "lon": 100.65330411063195,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0093",
+   "lat": 6.99920818957105,
+   "lon": 99.09863746695356,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0094",
+   "lat": 4.035660088288523,
+   "lon": 99.7225510607079,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0095",
+   "lat": 4.534079768932898,
+   "lon": 102.7906707201917,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0096",
+   "lat": 5.234634606793918,
+   "lon": 97.90065418784704,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0097",
+   "lat": 5.974294034309821,
+   "lon": 98.32531216126175,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0098",
+   "lat": 6.195155470164565,
+   "lon": 98.8313874138989,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0099",
+   "lat": 3.6182597009259325,
+   "lon": 100.29456293098943,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0100",
+   "lat": 4.418964635235213,
+   "lon": 100.73879104090996,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0101",
+   "lat": 3.36121742445431,
+   "lon": 102.91462122467368,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0102",
+   "lat": 4.662770891778564,
+   "lon": 102.21519780291203,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0103",
+   "lat": 3.4020439314571433,
+   "lon": 99.81893016659747,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0104",
+   "lat": 5.499682754923995,
+   "lon": 99.3623409046598,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0105",
+   "lat": 5.878776893720556,
+   "lon": 101.36041313496216,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0106",
+   "lat": 6.412328018737938,
+   "lon": 101.12222903356715,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0107",
+   "lat": 4.914945194909492,
+   "lon": 99.2590651953037,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0108",
+   "lat": 5.814671282488973,
+   "lon": 102.19707746368225,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0109",
+   "lat": 6.5166772054719075,
+   "lon": 102.69644517131609,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0110",
+   "lat": 4.366988698431712,
+   "lon": 99.5328372745981,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0111",
+   "lat": 3.2904155206749124,
+   "lon": 100.69359276782451,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0112",
+   "lat": 6.365796218517403,
+   "lon": 99.3000458970625,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0113",
+   "lat": 5.118013531257958,
+   "lon": 97.94888841546614,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0114",
+   "lat": 6.501504703389628,
+   "lon": 97.36561298364863,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0115",
+   "lat": 6.364629905691103,
+   "lon": 102.30155385927867,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0116",
+   "lat": 7.215749824264037,
+   "lon": 98.0235295069212,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0117",
+   "lat": 6.050868798541359,
+   "lon": 102.51271655568988,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0118",
+   "lat": 4.019239470806454,
+   "lon": 98.48390869243916,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0119",
+   "lat": 4.6442675673080345,
+   "lon": 100.0269756964251,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0120",
+   "lat": 4.780613584850997,
+   "lon": 101.61891693455148,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0121",
+   "lat": 3.498332337576329,
+   "lon": 97.17682719984244,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0122",
+   "lat": 3.3206662163199496,
+   "lon": 97.97529751224154,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0123",
+   "lat": 5.722853943314334,
+   "lon": 102.457825023347,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0124",
+   "lat": 7.002120230746755,
+   "lon": 102.78403070808999,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0125",
+   "lat": 6.86772007424203,
+   "lon": 99.21456185820699,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0126",
+   "lat": 5.5316365082106955,
+   "lon": 102.85570025471874,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0127",
+   "lat": 6.10917518759949,
+   "lon": 99.47931829462365,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0128",
+   "lat": 5.364742858767542,
+   "lon": 103.06545149462376,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0129",
+   "lat": 6.172259374617283,
+   "lon": 101.61663571326658,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0130",
+   "lat": 5.805225241518457,
+   "lon": 102.87403060808853,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0131",
+   "lat": 7.120918542371413,
+   "lon": 100.7238107581509,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0132",
+   "lat": 3.9123372387419977,
+   "lon": 97.85355613869137,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0133",
+   "lat": 3.455581720332802,
+   "lon": 97.56373982663474,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0134",
+   "lat": 6.845875346510226,
+   "lon": 98.76607730390992,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0135",
+   "lat": 2.9801729094309195,
+   "lon": 97.84785867929001,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0136",
+   "lat": 6.774480413299813,
+   "lon": 100.10214415678843,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0137",
+   "lat": 6.546122286314116,
+   "lon": 97.8561008160166,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0138",
+   "lat": 3.219154394378066,
+   "lon": 102.59980780252083,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0139",
+   "lat": 3.6265430850370706,
+   "lon": 99.55366856269626,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0140",
+   "lat": 6.911043833751677,
+   "lon": 102.0143187103279,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0141",
+   "lat": 4.401012846777888,
+   "lon": 99.56466917579986,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0142",
+   "lat": 5.579550363798859,
+   "lon": 98.7421543794013,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0143",
+   "lat": 3.672403555830357,
+   "lon": 102.96683423024658,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0144",
+   "lat": 5.57565539185579,
+   "lon": 101.44425508229153,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0145",
+   "lat": 4.061785490645207,
+   "lon": 102.87683060757077,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0146",
+   "lat": 4.287189476284965,
+   "lon": 98.5296381610638,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0147",
+   "lat": 4.686572963748205,
+   "lon": 99.20662073618129,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0148",
+   "lat": 4.686728633718303,
+   "lon": 98.93601352987523,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0149",
+   "lat": 3.7819322694035833,
+   "lon": 98.37228438177321,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0150",
+   "lat": 5.500431002771478,
+   "lon": 100.39362335343505,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0151",
+   "lat": 4.546945191483118,
+   "lon": 100.51447751098937,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0152",
+   "lat": 2.8909301423611993,
+   "lon": 101.94226738987973,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0153",
+   "lat": 6.496463610467089,
+   "lon": 98.08754093735988,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0154",
+   "lat": 4.734473181504541,
+   "lon": 102.12659337812573,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0155",
+   "lat": 6.103458688448228,
+   "lon": 101.07029328929973,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0156",
+   "lat": 5.781836323918128,
+   "lon": 101.90057718982955,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0157",
+   "lat": 6.838862387188115,
+   "lon": 97.55892550741675,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0158",
+   "lat": 2.968161828256868,
+   "lon": 99.75483505165272,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0159",
+   "lat": 3.7659690585049646,
+   "lon": 101.14602451512665,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0160",
+   "lat": 5.957510939982328,
+   "lon": 97.84044628326248,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0161",
+   "lat": 3.5293031432347988,
+   "lon": 98.52694963020404,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0162",
+   "lat": 6.586477302788467,
+   "lon": 98.02388000181165,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0163",
+   "lat": 3.031240604343253,
+   "lon": 100.10098435226816,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0164",
+   "lat": 6.80065644065877,
+   "lon": 101.37498859154105,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0165",
+   "lat": 7.136070475624351,
+   "lon": 99.78967142886867,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0166",
+   "lat": 3.501140317622074,
+   "lon": 102.51026210952782,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0167",
+   "lat": 2.858097566711322,
+   "lon": 98.23874567777506,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0168",
+   "lat": 5.670530388825043,
+   "lon": 100.93700619163332,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0169",
+   "lat": 5.676793787924041,
+   "lon": 99.21908273300899,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0170",
+   "lat": 5.642143866045984,
+   "lon": 101.46077434393486,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0171",
+   "lat": 3.223631954793774,
+   "lon": 102.49531902926248,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0172",
+   "lat": 6.11766584102152,
+   "lon": 100.53684344242737,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0173",
+   "lat": 5.758002736615239,
+   "lon": 99.49881604064164,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0174",
+   "lat": 3.554378065171292,
+   "lon": 100.66642832623221,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0175",
+   "lat": 3.267417438406241,
+   "lon": 102.69336599518128,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0176",
+   "lat": 3.645647858198018,
+   "lon": 97.99694301891526,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0177",
+   "lat": 3.489654369080853,
+   "lon": 102.44706755628447,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0178",
+   "lat": 6.096540079269943,
+   "lon": 97.555636022702,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0179",
+   "lat": 5.221594671790456,
+   "lon": 97.87942124292901,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0180",
+   "lat": 3.5475711394042406,
+   "lon": 97.83126447924052,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0181",
+   "lat": 3.6610653145047536,
+   "lon": 100.31158444822557,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0182",
+   "lat": 3.6092014831347683,
+   "lon": 97.0445100074544,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0183",
+   "lat": 6.602799237279584,
+   "lon": 103.04865357688509,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0184",
+   "lat": 5.350444278085774,
+   "lon": 99.02130191342775,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0185",
+   "lat": 5.897170916124509,
+   "lon": 98.11070413571534,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0186",
+   "lat": 5.433950044406274,
+   "lon": 98.13602846586919,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0187",
+   "lat": 3.6020282593379847,
+   "lon": 101.0840641402137,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0188",
+   "lat": 3.0417874178729534,
+   "lon": 102.74917781009859,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0189",
+   "lat": 4.289574428433724,
+   "lon": 102.67666152473699,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0190",
+   "lat": 6.1482940923886815,
+   "lon": 100.28376026630575,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0191",
+   "lat": 7.221769308544523,
+   "lon": 100.6955049243374,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0192",
+   "lat": 6.982817638825708,
+   "lon": 97.10153356049365,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0193",
+   "lat": 3.529581608111272,
+   "lon": 97.52426590521125,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0194",
+   "lat": 4.639022615376035,
+   "lon": 98.87531772874554,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0195",
+   "lat": 4.061688091168989,
+   "lon": 98.52134840445633,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0196",
+   "lat": 4.071385580642215,
+   "lon": 100.54827256140085,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0197",
+   "lat": 6.1031459175644756,
+   "lon": 98.05606720632012,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0198",
+   "lat": 5.405708019111415,
+   "lon": 97.56237895725327,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0199",
+   "lat": 7.207651159825701,
+   "lon": 101.71229386266482,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0200",
+   "lat": 6.633008236511714,
+   "lon": 100.03976026124008,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0201",
+   "lat": 4.929774972368719,
+   "lon": 99.9220636533945,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0202",
+   "lat": 7.148097729313349,
+   "lon": 97.63269208851366,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0203",
+   "lat": 3.1874657477667228,
+   "lon": 99.59539811398713,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0204",
+   "lat": 3.0684899402085506,
+   "lon": 99.51448719228563,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0205",
+   "lat": 5.9976332853820224,
+   "lon": 97.99005733489238,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0206",
+   "lat": 3.8137650971678028,
+   "lon": 96.92741879549048,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0207",
+   "lat": 3.585405946369704,
+   "lon": 97.6907709052458,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0208",
+   "lat": 5.953799549007698,
+   "lon": 97.87018765543581,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0209",
+   "lat": 7.134194535543401,
+   "lon": 99.66654120922058,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0210",
+   "lat": 5.608970117116101,
+   "lon": 98.29903357022012,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0211",
+   "lat": 7.148371988797194,
+   "lon": 102.56610964971637,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0212",
+   "lat": 4.900015091729273,
+   "lon": 102.3700846119883,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0213",
+   "lat": 3.8637183320027617,
+   "lon": 100.95396307572594,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0214",
+   "lat": 6.130966110922628,
+   "lon": 99.14056778746695,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0215",
+   "lat": 4.094525074997534,
+   "lon": 100.3067389058901,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0216",
+   "lat": 6.530214836162671,
+   "lon": 102.78257437022695,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0217",
+   "lat": 4.695761617458999,
+   "lon": 98.75429838791685,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0218",
+   "lat": 5.2066979498357995,
+   "lon": 100.33760740193692,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0219",
+   "lat": 3.0325540916665688,
+   "lon": 102.664463410431,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0220",
+   "lat": 5.191347222918523,
+   "lon": 98.42708731825559,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0221",
+   "lat": 4.127080831765042,
+   "lon": 100.93399315432129,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0222",
+   "lat": 3.3429300008724994,
+   "lon": 100.86333888758175,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0223",
+   "lat": 3.866473431581383,
+   "lon": 102.95223852107046,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0224",
+   "lat": 3.0961818538727357,
+   "lon": 101.6358508275026,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0225",
+   "lat": 5.987135315491599,
+   "lon": 99.00256351464468,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0226",
+   "lat": 6.7644761730363,
+   "lon": 102.83512012585334,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0227",
+   "lat": 5.71057515618223,
+   "lon": 99.46085251771792,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0228",
+   "lat": 3.161742105496856,
+   "lon": 102.66233191960016,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0229",
+   "lat": 6.744698642094249,
+   "lon": 99.40911441744154,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0230",
+   "lat": 3.635317848839861,
+   "lon": 101.64541560961158,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0231",
+   "lat": 3.4044449564823793,
+   "lon": 98.27564478342809,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0232",
+   "lat": 7.069492542219507,
+   "lon": 99.21859540938038,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0233",
+   "lat": 5.740418665998902,
+   "lon": 97.56697463956493,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0234",
+   "lat": 5.271801722527542,
+   "lon": 99.07164766512318,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0235",
+   "lat": 6.3939059084217575,
+   "lon": 98.31090106736481,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0236",
+   "lat": 5.117741430932924,
+   "lon": 99.94603995324195,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0237",
+   "lat": 5.2754591169337886,
+   "lon": 101.50662927121265,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0238",
+   "lat": 5.653164629742477,
+   "lon": 101.71990312438487,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0239",
+   "lat": 4.831981268396177,
+   "lon": 101.2380777096488,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0240",
+   "lat": 7.194899136579707,
+   "lon": 100.34027269804132,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0241",
+   "lat": 3.186456723485577,
+   "lon": 102.66896405259887,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0242",
+   "lat": 5.889374782779939,
+   "lon": 99.8950050767791,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0243",
+   "lat": 4.242415026648459,
+   "lon": 99.06978964359371,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0244",
+   "lat": 7.021310789928563,
+   "lon": 99.15882733758538,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0245",
+   "lat": 2.914329408446889,
+   "lon": 101.05151812492964,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0246",
+   "lat": 6.413770020594853,
+   "lon": 102.52658608015734,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0247",
+   "lat": 2.988548471279401,
+   "lon": 102.04485045884988,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0248",
+   "lat": 5.89848448442828,
+   "lon": 100.87637117443245,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0249",
+   "lat": 4.207433862021816,
+   "lon": 98.81386879765952,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0250",
+   "lat": 2.7594482948545362,
+   "lon": 101.71939829263368,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0251",
+   "lat": 5.881908973603686,
+   "lon": 99.57512770072454,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0252",
+   "lat": 4.606964522958535,
+   "lon": 98.02399303407074,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0253",
+   "lat": 6.042124980109847,
+   "lon": 100.21158441560812,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0254",
+   "lat": 6.940476686805397,
+   "lon": 101.33438939223115,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0255",
+   "lat": 4.368921144882762,
+   "lon": 97.24067450639015,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0256",
+   "lat": 3.7082037028692696,
+   "lon": 102.65675467400123,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0257",
+   "lat": 3.988899289251819,
+   "lon": 99.8091324666424,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0258",
+   "lat": 4.443498872880355,
+   "lon": 100.56012460022856,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0259",
+   "lat": 7.038999908868064,
+   "lon": 102.56740032909595,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0260",
+   "lat": 2.977780925234228,
+   "lon": 101.37259605084132,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0261",
+   "lat": 3.652980435641794,
+   "lon": 102.59524295601415,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0262",
+   "lat": 3.842243517088292,
+   "lon": 101.53112774204988,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0263",
+   "lat": 5.2617811252263635,
+   "lon": 97.96672785606599,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0264",
+   "lat": 5.253742439273509,
+   "lon": 101.36482004007168,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0265",
+   "lat": 3.190057654211941,
+   "lon": 102.63556865509639,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0266",
+   "lat": 4.635563344762772,
+   "lon": 99.70191308691365,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0267",
+   "lat": 3.3743013464723646,
+   "lon": 101.69278181149639,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0268",
+   "lat": 3.5259607030549915,
+   "lon": 99.32306772022399,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0269",
+   "lat": 5.561381301288719,
+   "lon": 99.90813571759637,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0270",
+   "lat": 4.954160071827715,
+   "lon": 97.60230334843186,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0271",
+   "lat": 4.4121817992968175,
+   "lon": 98.17327650499271,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0272",
+   "lat": 5.991033278125954,
+   "lon": 98.98695357360873,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0273",
+   "lat": 4.068735722653571,
+   "lon": 97.7261464368066,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0274",
+   "lat": 6.402686674740394,
+   "lon": 98.30292615585424,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0275",
+   "lat": 4.204736699191201,
+   "lon": 101.43697322161995,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0276",
+   "lat": 6.6176921920745,
+   "lon": 102.84761150148415,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0277",
+   "lat": 2.772137040004381,
+   "lon": 100.46733719342313,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0278",
+   "lat": 4.227920470460262,
+   "lon": 100.73558196919112,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0279",
+   "lat": 5.1381524861459695,
+   "lon": 102.30392278248236,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0280",
+   "lat": 5.839917656076068,
+   "lon": 100.71835271941016,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0281",
+   "lat": 6.24968144341608,
+   "lon": 101.70699308859123,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0282",
+   "lat": 4.400222948918085,
+   "lon": 97.48164580824933,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0283",
+   "lat": 5.213141145910072,
+   "lon": 98.15673977961534,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0284",
+   "lat": 4.844115817174753,
+   "lon": 102.44532837792914,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0285",
+   "lat": 2.880087314995208,
+   "lon": 102.27452532892418,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0286",
+   "lat": 3.393881468757371,
+   "lon": 96.95203341359837,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0287",
+   "lat": 5.104817182531036,
+   "lon": 99.6606666975399,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0288",
+   "lat": 4.940192850887229,
+   "lon": 101.01950336009565,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0289",
+   "lat": 6.493205090347743,
+   "lon": 102.02670995545641,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0290",
+   "lat": 5.246164625550691,
+   "lon": 97.79751991804926,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0291",
+   "lat": 4.107411033568326,
+   "lon": 98.6666493864676,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0292",
+   "lat": 6.29851560884407,
+   "lon": 99.46341738659837,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0293",
+   "lat": 4.837124400230152,
+   "lon": 99.97813748360697,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0294",
+   "lat": 4.427656280504564,
+   "lon": 98.97639995141945,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0295",
+   "lat": 5.709403638187496,
+   "lon": 98.49542390750658,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0296",
+   "lat": 7.121777576349416,
+   "lon": 98.56945053601996,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0297",
+   "lat": 5.5469032041605,
+   "lon": 102.2747762617501,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0298",
+   "lat": 3.314345334859013,
+   "lon": 98.61470266028697,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0299",
+   "lat": 6.8951744167884925,
+   "lon": 102.10892762179009,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0300",
+   "lat": 6.172665719945314,
+   "lon": 99.75621738112496,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0301",
+   "lat": 6.697531588084175,
+   "lon": 99.10613039745817,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0302",
+   "lat": 6.657176761495165,
+   "lon": 101.62521745916696,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0303",
+   "lat": 3.9468418256128928,
+   "lon": 101.13765222141687,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0304",
+   "lat": 3.2574932104907504,
+   "lon": 100.48756523775009,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0305",
+   "lat": 5.808989501173116,
+   "lon": 100.3250434918334,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0306",
+   "lat": 6.576457175087313,
+   "lon": 100.0,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/12000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0307",
+   "lat": 4.757100740460288,
+   "lon": 100.3250434918334,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GW87/1500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0308",
+   "lat": 4.392592475336826,
+   "lon": 101.21891309437522,
+   "hub_height_m": 91.0,
+   "rotor_diameter_m": null,
+   "curve": "N117/3600"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0309",
+   "lat": 3.7036024906328464,
+   "lon": 100.73134785662513,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0310",
+   "lat": 5.60684468744445,
+   "lon": 99.02486952449982,
+   "hub_height_m": 104.0,
+   "rotor_diameter_m": null,
+   "curve": "SCD168/8000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0311",
+   "lat": 6.213059053010113,
+   "lon": 102.19404356987539,
+   "hub_height_m": 74.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT101/3200"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0312",
+   "lat": 6.899255265346582,
+   "lon": 101.7064783321253,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT120/6000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0313",
+   "lat": 5.0,
+   "lon": 100.65008698366678,
+   "hub_height_m": 76.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ111/2100"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0314",
+   "lat": 3.9063067648405507,
+   "lon": 101.869000078042,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V112/3300"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0315",
+   "lat": 3.2169276088243777,
+   "lon": 100.08126087295835,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "V126/3450"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0316",
+   "lat": 3.3386194898332207,
+   "lon": 102.92539142650052,
+   "hub_height_m": 44.0,
+   "rotor_diameter_m": null,
+   "curve": "V47/660"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0317",
+   "lat": 5.889827257697448,
+   "lon": 102.11278269691704,
+   "hub_height_m": 93.5,
+   "rotor_diameter_m": null,
+   "curve": "VS112/2500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0318",
+   "lat": 4.14948704852938,
+   "lon": 99.6749565081666,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0319",
+   "lat": 4.595120008582924,
+   "lon": 98.2935216678747,
+   "hub_height_m": 74.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0320",
+   "lat": 5.283268342957243,
+   "lon": 102.51908706170879,
+   "hub_height_m": 50.0,
+   "rotor_diameter_m": null,
+   "curve": "E-53/800"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0321",
+   "lat": 4.67611505663929,
+   "lon": 99.75621738112496,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0322",
+   "lat": 3.9873749079009855,
+   "lon": 102.43782618875044,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "G80/2000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0323",
+   "lat": 4.190009935679356,
+   "lon": 99.43117388929157,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "GE103/2850"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0324",
+   "lat": 4.967618540872252,
+   "lon": 99.96749565081666,
+   "hub_height_m": 100.0,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0325",
+   "lat": 4.967618540872252,
+   "lon": 99.97155869446458,
+   "hub_height_m": 100.2,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0326",
+   "lat": 4.967618540872252,
+   "lon": 99.9756217381125,
+   "hub_height_m": 100.4,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0327",
+   "lat": 4.967618540872252,
+   "lon": 99.97968478176041,
+   "hub_height_m": 100.6,
+   "rotor_diameter_m": null,
+   "curve": "AW100/3000"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0328",
+   "lat": 4.967618540872252,
+   "lon": 99.96749565081666,
+   "hub_height_m": 99.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0329",
+   "lat": 4.971666310468947,
+   "lon": 99.96749565081666,
+   "hub_height_m": 99.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  },
+  {
+   "turbine_id": "merc_tropics_9km-0330",
+   "lat": 4.975714055189812,
+   "lon": 99.96749565081666,
+   "hub_height_m": 99.0,
+   "rotor_diameter_m": null,
+   "curve": "E-101/3500"
+  }
+ ],
+ "turbine_library_sha256": "ce26b9a379de91484b7b51f759a31a2883e060dc1f528ab93b2a0dd40ce7beb5"
+}

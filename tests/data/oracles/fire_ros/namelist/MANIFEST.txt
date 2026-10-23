@@ -1,0 +1,14 @@
+nfuel_cat i4 1 16
+fmc_g f4 1 28
+cases f4 2 6 120
+fuel_time f4 2 16 28
+fgip f4 2 16 28
+ischap f4 2 16 28
+betafl f4 2 16 28
+bbb f4 2 16 28
+phiwc f4 2 16 28
+r_0 f4 2 16 28
+iboros f4 2 16 28
+ros_base f4 4 16 28 120 2
+ros_wind f4 4 16 28 120 2
+ros_slope f4 4 16 28 120 2

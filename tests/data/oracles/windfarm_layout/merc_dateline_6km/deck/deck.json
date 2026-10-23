@@ -1,0 +1,2667 @@
+{
+ "case": "merc_dateline_6km",
+ "grid": {
+  "map_proj": "mercator",
+  "ref_lat": -17.8,
+  "ref_lon": 179.5,
+  "truelat1": -17.8,
+  "truelat2": -17.8,
+  "stand_lon": 179.5,
+  "dx": 6000.0,
+  "e_we": 81,
+  "e_sn": 61
+ },
+ "nests": [],
+ "correction_factor": 1.0,
+ "turbines": [
+  {
+   "turbine_id": "merc_dateline_6km-0000",
+   "lat": -18.593085913073963,
+   "lon": 178.44164152718727,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0001",
+   "lat": -16.755609371489783,
+   "lon": -178.45440997660737,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0002",
+   "lat": -17.4970864084424,
+   "lon": 178.6960910443055,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0003",
+   "lat": -18.803988926149046,
+   "lon": -178.7639028015487,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0004",
+   "lat": -17.357656222910165,
+   "lon": 179.83010927040198,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0005",
+   "lat": -17.52678815860243,
+   "lon": 177.9592290297096,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0006",
+   "lat": -17.283572028886752,
+   "lon": -179.76847297959773,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0007",
+   "lat": -16.418902686162028,
+   "lon": -179.23234373092976,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0008",
+   "lat": -18.77219450761538,
+   "lon": 178.14405276927442,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0009",
+   "lat": -17.416609465732733,
+   "lon": 179.23621885052256,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0010",
+   "lat": -18.51776372330592,
+   "lon": -178.98728102188673,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0011",
+   "lat": -17.462931015320052,
+   "lon": -179.07443319932497,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0012",
+   "lat": -19.25369048103927,
+   "lon": 177.44955289671495,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0013",
+   "lat": -19.225568660632405,
+   "lon": 179.06335082026507,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0014",
+   "lat": -17.48283310478996,
+   "lon": -178.9448100925684,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0015",
+   "lat": -18.615132807739144,
+   "lon": -178.60779324845564,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0016",
+   "lat": -17.35821907641524,
+   "lon": 178.00258293602965,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0017",
+   "lat": -18.3821145124179,
+   "lon": 178.01882846368508,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0018",
+   "lat": -18.607701614665345,
+   "lon": 177.86085780074364,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0019",
+   "lat": -17.776533167603773,
+   "lon": -179.3933272896067,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0020",
+   "lat": -18.196288078675906,
+   "lon": -179.7109377415729,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0021",
+   "lat": -16.378646871442072,
+   "lon": 178.7625040414449,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0022",
+   "lat": -18.41346929540822,
+   "lon": 178.0823587605921,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0023",
+   "lat": -17.322767668432803,
+   "lon": 177.8260519625165,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0024",
+   "lat": -17.35551718564274,
+   "lon": 178.8907566896812,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0025",
+   "lat": -17.634120660369376,
+   "lon": 179.4803754610821,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0026",
+   "lat": -17.51182976236194,
+   "lon": 177.78573491273767,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0027",
+   "lat": -17.02181084740245,
+   "lon": 179.0898943374483,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0028",
+   "lat": -17.834756879334023,
+   "lon": 179.20862803087604,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0029",
+   "lat": -19.211682374631536,
+   "lon": 179.3569839687205,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0030",
+   "lat": -16.750570415064118,
+   "lon": -178.489717059472,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0031",
+   "lat": -18.401978533798257,
+   "lon": -178.46841984342632,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0032",
+   "lat": -17.372409049257698,
+   "lon": 179.5587711989996,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0033",
+   "lat": -16.777888932757378,
+   "lon": 178.50315073331186,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0034",
+   "lat": -16.360065538610698,
+   "lon": -179.65078673164476,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0035",
+   "lat": -19.050020564973778,
+   "lon": 179.25018723680816,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0036",
+   "lat": -18.41797580319502,
+   "lon": -178.6742409140964,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0037",
+   "lat": -18.021914564649677,
+   "lon": -179.8278470387859,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0038",
+   "lat": -17.12666840668186,
+   "lon": -179.00476793263277,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0039",
+   "lat": -18.960266501960064,
+   "lon": -179.46238198161464,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0040",
+   "lat": -17.631879899154484,
+   "lon": 179.95556084757925,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0041",
+   "lat": -17.386661037221515,
+   "lon": 179.82156138324814,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0042",
+   "lat": -17.11125503880919,
+   "lon": 179.5918146488943,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0043",
+   "lat": -18.442207807328316,
+   "lon": 177.85547335492322,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0044",
+   "lat": -16.29169472103527,
+   "lon": 177.62903502463533,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0045",
+   "lat": -17.68124999328684,
+   "lon": 178.27920406255106,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0046",
+   "lat": -17.778346795567813,
+   "lon": -179.08952587260632,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0047",
+   "lat": -16.90537082211148,
+   "lon": 179.04476535097768,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0048",
+   "lat": -18.274685216707567,
+   "lon": 179.56135212946614,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0049",
+   "lat": -17.811100189093665,
+   "lon": 178.89706847402178,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0050",
+   "lat": -18.67299682540171,
+   "lon": 177.69806925866786,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0051",
+   "lat": -16.397630982095848,
+   "lon": 179.74949791941236,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0052",
+   "lat": -17.003293299526405,
+   "lon": 178.20526418098692,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0053",
+   "lat": -17.848139595848764,
+   "lon": 177.97004163014336,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0054",
+   "lat": -17.07994709501324,
+   "lon": -178.57428601864515,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0055",
+   "lat": -17.882953408806515,
+   "lon": 177.35459153474002,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0056",
+   "lat": -18.936655417791314,
+   "lon": 177.91388258695991,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0057",
+   "lat": -17.954545760187457,
+   "lon": 179.694302021262,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0058",
+   "lat": -18.375838276678707,
+   "lon": -179.32538223031383,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0059",
+   "lat": -17.715277946272735,
+   "lon": 178.32095635658766,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0060",
+   "lat": -16.45399240966212,
+   "lon": -179.58552995650072,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0061",
+   "lat": -17.660110783805806,
+   "lon": 177.71125117161017,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0062",
+   "lat": -18.76670211382023,
+   "lon": 179.92420047513232,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0063",
+   "lat": -17.21888979210192,
+   "lon": 177.8607395554732,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0064",
+   "lat": -16.36389904871932,
+   "lon": 179.21050767080504,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0065",
+   "lat": -17.63514867967254,
+   "lon": -178.42998295930548,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0066",
+   "lat": -16.345755278388737,
+   "lon": -179.15362217652265,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0067",
+   "lat": -18.793870804882957,
+   "lon": -179.78880761903682,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0068",
+   "lat": -17.99293167690449,
+   "lon": -178.86293135893524,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0069",
+   "lat": -18.863663852596275,
+   "lon": 179.96362870625427,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0070",
+   "lat": -18.41665854065259,
+   "lon": -179.3867217200351,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0071",
+   "lat": -17.01961368460536,
+   "lon": 177.60869544815782,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0072",
+   "lat": -18.95616112058012,
+   "lon": 179.71957247923717,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0073",
+   "lat": -17.389832599744423,
+   "lon": -179.466113697156,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0074",
+   "lat": -17.6388612572393,
+   "lon": 178.51772728711296,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0075",
+   "lat": -17.09478491581997,
+   "lon": -179.28928826443013,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0076",
+   "lat": -18.912606920468093,
+   "lon": 179.47617477125695,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0077",
+   "lat": -18.05167797787678,
+   "lon": 179.21702551477722,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0078",
+   "lat": -16.334586383991052,
+   "lon": -179.35007478872174,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0079",
+   "lat": -16.34375284770269,
+   "lon": -179.67012187703207,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0080",
+   "lat": -18.62372034365751,
+   "lon": -179.23240015295016,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0081",
+   "lat": -17.376615215685774,
+   "lon": 178.14547344367503,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0082",
+   "lat": -19.117526539313687,
+   "lon": -179.56089808432117,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0083",
+   "lat": -16.796486468877774,
+   "lon": -178.3683759143369,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0084",
+   "lat": -18.79754712856689,
+   "lon": 178.93092341449503,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0085",
+   "lat": -16.919711185454915,
+   "lon": 179.20484696348896,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0086",
+   "lat": -18.35010655468878,
+   "lon": 177.88250329000655,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0087",
+   "lat": -17.435533512274432,
+   "lon": 177.73801591629265,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0088",
+   "lat": -18.070013606607347,
+   "lon": -179.71848889530096,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0089",
+   "lat": -16.429745750506086,
+   "lon": 178.247951361938,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0090",
+   "lat": -17.713609378758363,
+   "lon": 179.9900202787328,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0091",
+   "lat": -19.201781134740145,
+   "lon": 179.02157849468236,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0092",
+   "lat": -18.113828882009585,
+   "lon": 179.42085640316796,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0093",
+   "lat": -17.15485323337346,
+   "lon": 178.1855950170501,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0094",
+   "lat": -19.171003517755636,
+   "lon": 178.95866212800783,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0095",
+   "lat": -17.761910686499988,
+   "lon": 179.06003815394132,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0096",
+   "lat": -18.10255013792124,
+   "lon": -179.69473275511623,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0097",
+   "lat": -18.060797049864604,
+   "lon": 178.96760454954753,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0098",
+   "lat": -16.317138245248373,
+   "lon": -178.4136076126967,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0099",
+   "lat": -16.788541399716266,
+   "lon": -178.36885753331057,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0100",
+   "lat": -18.741437812418397,
+   "lon": 178.21281025613024,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0101",
+   "lat": -16.89885779380333,
+   "lon": 178.79197945121092,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0102",
+   "lat": -18.483787028519146,
+   "lon": -179.0967382800212,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0103",
+   "lat": -17.277566578068118,
+   "lon": 179.63583075490575,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0104",
+   "lat": -17.675782418347183,
+   "lon": -179.25156535157475,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0105",
+   "lat": -18.000886393014824,
+   "lon": 178.81106340136117,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0106",
+   "lat": -18.25336125566406,
+   "lon": 177.87729207269706,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0107",
+   "lat": -17.33023678202578,
+   "lon": 178.48403962424942,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0108",
+   "lat": -19.11053543141726,
+   "lon": 178.4191896110098,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0109",
+   "lat": -16.85520374228662,
+   "lon": 179.7482977146462,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0110",
+   "lat": -17.656440153223215,
+   "lon": 177.900988447026,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0111",
+   "lat": -16.715549257391913,
+   "lon": 179.3035288996087,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0112",
+   "lat": -17.493154270526873,
+   "lon": 178.4943011730107,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0113",
+   "lat": -19.044273610515546,
+   "lon": -179.62243828694312,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0114",
+   "lat": -16.99421697523789,
+   "lon": 177.38494896695525,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0115",
+   "lat": -17.84679012203452,
+   "lon": 177.80855966755826,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0116",
+   "lat": -16.667326563559953,
+   "lon": 177.58662251099537,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0117",
+   "lat": -16.853977814013376,
+   "lon": -179.2193285180397,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0118",
+   "lat": -18.963064302450178,
+   "lon": -179.00067489299548,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0119",
+   "lat": -18.507075166619586,
+   "lon": -178.64865032807097,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0120",
+   "lat": -18.684019302062396,
+   "lon": 179.0599840817085,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0121",
+   "lat": -18.769721929580612,
+   "lon": 178.15380023604715,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0122",
+   "lat": -19.011310166441646,
+   "lon": 179.9553646676246,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0123",
+   "lat": -18.499658772824333,
+   "lon": 179.33110363822468,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0124",
+   "lat": -18.164399358363994,
+   "lon": 179.50183932085025,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0125",
+   "lat": -18.994809244193434,
+   "lon": -179.39627314366643,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0126",
+   "lat": -17.253238195463,
+   "lon": -178.61994690155635,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0127",
+   "lat": -17.980939988175408,
+   "lon": -179.6614478244935,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0128",
+   "lat": -19.294998513415734,
+   "lon": 179.94205646717631,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0129",
+   "lat": -17.37584683205698,
+   "lon": 179.86713636065917,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0130",
+   "lat": -18.620310511366597,
+   "lon": -179.22672031633772,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0131",
+   "lat": -17.30904668482114,
+   "lon": 179.10053236748342,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0132",
+   "lat": -18.8679565342553,
+   "lon": -178.77216159728465,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0133",
+   "lat": -16.83555736764346,
+   "lon": -179.54840644869563,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0134",
+   "lat": -17.395924239865664,
+   "lon": 177.53620871056444,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0135",
+   "lat": -19.292875982470733,
+   "lon": 179.42840363411216,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0136",
+   "lat": -18.5184753857896,
+   "lon": 178.1150317450226,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0137",
+   "lat": -18.428341637742818,
+   "lon": 178.4730395122411,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0138",
+   "lat": -16.724212452177795,
+   "lon": 179.46259921804884,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0139",
+   "lat": -17.983922729278092,
+   "lon": 178.24082769850128,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0140",
+   "lat": -18.66801566335681,
+   "lon": -178.84932910538907,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0141",
+   "lat": -18.60284553128841,
+   "lon": 177.56495007742404,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0142",
+   "lat": -16.7619137396252,
+   "lon": -178.9180136084343,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0143",
+   "lat": -16.70874424234718,
+   "lon": -179.4063941847295,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0144",
+   "lat": -18.370542730726157,
+   "lon": -179.78282979211053,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0145",
+   "lat": -17.998542178343655,
+   "lon": 177.82824408535973,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0146",
+   "lat": -16.578344722067953,
+   "lon": 177.8739051714535,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0147",
+   "lat": -18.18455687556255,
+   "lon": 177.90929261988072,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0148",
+   "lat": -18.383154761653174,
+   "lon": 177.64229357168352,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0149",
+   "lat": -16.310470674421552,
+   "lon": 177.83069480475962,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0150",
+   "lat": -17.040008525738557,
+   "lon": -179.2800080257642,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0151",
+   "lat": -18.09459883016126,
+   "lon": 179.7308244608483,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0152",
+   "lat": -16.375692516726787,
+   "lon": 179.41591030901847,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0153",
+   "lat": -17.606414055530422,
+   "lon": -179.01231746650444,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0154",
+   "lat": -17.444296016571982,
+   "lon": 177.49775000648728,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0155",
+   "lat": -19.23629554936994,
+   "lon": 179.58367095247348,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0156",
+   "lat": -17.74460958645939,
+   "lon": -178.90892711945324,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0157",
+   "lat": -17.078379350155473,
+   "lon": -179.8290674245732,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0158",
+   "lat": -16.569775984814427,
+   "lon": 178.50965972408065,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0159",
+   "lat": -18.168062037067813,
+   "lon": 177.72507792937245,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0160",
+   "lat": -16.766562041550614,
+   "lon": 178.842431180387,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0161",
+   "lat": -17.3661212770037,
+   "lon": 179.19617935717622,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0162",
+   "lat": -17.822826761142537,
+   "lon": -179.9689505795291,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0163",
+   "lat": -17.871572778914512,
+   "lon": -178.99446156086466,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0164",
+   "lat": -18.86621424756558,
+   "lon": 179.6785730944825,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0165",
+   "lat": -19.029174568754968,
+   "lon": 179.6603052697448,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0166",
+   "lat": -17.13292887518311,
+   "lon": -179.3972609006781,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0167",
+   "lat": -17.199196583599274,
+   "lon": -179.8542357437113,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0168",
+   "lat": -17.089220152923232,
+   "lon": 177.65901687312336,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0169",
+   "lat": -16.657698827372755,
+   "lon": -179.0783308876279,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0170",
+   "lat": -16.57774568255701,
+   "lon": -179.6321182482349,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0171",
+   "lat": -18.79280679142397,
+   "lon": -178.87009387000072,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0172",
+   "lat": -18.604785930449083,
+   "lon": 177.89818393065568,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0173",
+   "lat": -18.733300940220005,
+   "lon": 178.21949705329772,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0174",
+   "lat": -17.647954413178894,
+   "lon": 177.89747659614127,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0175",
+   "lat": -17.48639130589639,
+   "lon": 178.36286822507518,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0176",
+   "lat": -16.69661837937052,
+   "lon": -179.15459744858856,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0177",
+   "lat": -16.400398134884185,
+   "lon": 178.00729798207067,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0178",
+   "lat": -18.81495612961608,
+   "lon": -179.6851326190429,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0179",
+   "lat": -16.489200313839902,
+   "lon": -179.80920235965445,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0180",
+   "lat": -16.905784342156736,
+   "lon": -178.87773997977754,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0181",
+   "lat": -19.0004194474606,
+   "lon": 178.2817181815717,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0182",
+   "lat": -18.44120724150318,
+   "lon": 179.20586648952033,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0183",
+   "lat": -18.614911047948112,
+   "lon": -179.8276992938846,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0184",
+   "lat": -16.934796584124754,
+   "lon": 179.31022022792467,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0185",
+   "lat": -18.525681415528382,
+   "lon": -179.43923526820996,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0186",
+   "lat": -16.706885826720793,
+   "lon": 179.9302084949044,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0187",
+   "lat": -16.394468011430774,
+   "lon": -179.88763029645594,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0188",
+   "lat": -19.29407633542239,
+   "lon": 178.12431891607233,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0189",
+   "lat": -17.135255130996654,
+   "lon": -178.9857529696634,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0190",
+   "lat": -18.89542942052995,
+   "lon": 178.5483776303636,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0191",
+   "lat": -18.111064661810445,
+   "lon": 178.69514541330807,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0192",
+   "lat": -16.879951351841058,
+   "lon": 178.2313155693161,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0193",
+   "lat": -16.582959216754816,
+   "lon": 177.62348924972736,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0194",
+   "lat": -18.611110714861482,
+   "lon": 179.9313030333695,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0195",
+   "lat": -18.06191827798274,
+   "lon": 177.8174296219335,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0196",
+   "lat": -18.06056125255519,
+   "lon": -178.44173470835048,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0197",
+   "lat": -17.820607572888278,
+   "lon": 178.15518918915322,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0198",
+   "lat": -18.79361782522598,
+   "lon": 178.70391818250076,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0199",
+   "lat": -17.33337952531312,
+   "lon": -178.53685325033678,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0200",
+   "lat": -17.97574597513386,
+   "lon": -179.09127318866103,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0201",
+   "lat": -19.04517406117452,
+   "lon": -178.90191054370757,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0202",
+   "lat": -17.548002115589412,
+   "lon": 177.84157809162937,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0203",
+   "lat": -17.646325691375367,
+   "lon": -178.97442052724617,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0204",
+   "lat": -16.685659105065056,
+   "lon": 179.19336494554094,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0205",
+   "lat": -17.794760706928784,
+   "lon": 178.02798886184365,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0206",
+   "lat": -18.007070444110596,
+   "lon": 177.68264949218786,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0207",
+   "lat": -17.544716531247218,
+   "lon": 179.69867153648886,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0208",
+   "lat": -17.720732674745648,
+   "lon": 179.27016352459938,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0209",
+   "lat": -18.86476818599465,
+   "lon": -178.6086689793763,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0210",
+   "lat": -19.135981436603657,
+   "lon": 179.88689471133318,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0211",
+   "lat": -16.322271116427302,
+   "lon": -179.1923416479898,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0212",
+   "lat": -18.175027914049338,
+   "lon": 178.99077626362777,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0213",
+   "lat": -18.443858956500293,
+   "lon": -178.5386314996065,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0214",
+   "lat": -17.29512060832488,
+   "lon": -179.39184799547067,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0215",
+   "lat": -18.052912354064972,
+   "lon": 179.06304651823334,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0216",
+   "lat": -16.782979557476708,
+   "lon": -178.67332542056673,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0217",
+   "lat": -17.457762580017516,
+   "lon": 179.3483160047782,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0218",
+   "lat": -18.709106053936267,
+   "lon": 177.58230157202792,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0219",
+   "lat": -17.537521130873117,
+   "lon": -179.61043897826065,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0220",
+   "lat": -16.673899985914346,
+   "lon": 178.30950823341865,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0221",
+   "lat": -16.90425484613037,
+   "lon": -179.97467117653082,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0222",
+   "lat": -18.583783544314883,
+   "lon": -178.96277223022759,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0223",
+   "lat": -18.21711538375233,
+   "lon": -179.77855356534337,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0224",
+   "lat": -19.04531554794184,
+   "lon": -178.46608177083328,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0225",
+   "lat": -16.967021829965418,
+   "lon": -178.8650799749414,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0226",
+   "lat": -18.01645108118211,
+   "lon": 179.32073772029136,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0227",
+   "lat": -18.199679535992445,
+   "lon": -179.33907869844302,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0228",
+   "lat": -18.31469166774734,
+   "lon": 177.4034506340886,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0229",
+   "lat": -16.565599596297446,
+   "lon": 178.77549473305177,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0230",
+   "lat": -18.879376281281466,
+   "lon": 178.78515715945156,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0231",
+   "lat": -17.6580048840069,
+   "lon": -179.1560072783769,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0232",
+   "lat": -19.232794515288205,
+   "lon": -178.51231306678267,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0233",
+   "lat": -18.43618657759393,
+   "lon": 179.50352718713242,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0234",
+   "lat": -16.308389623457842,
+   "lon": 177.85854969241294,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0235",
+   "lat": -18.32053927556737,
+   "lon": 179.71496091622285,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0236",
+   "lat": -18.75153890057446,
+   "lon": -178.9008371919247,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0237",
+   "lat": -18.004078838797824,
+   "lon": -179.05379728484957,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0238",
+   "lat": -17.704462562896794,
+   "lon": -179.79722144446345,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0239",
+   "lat": -17.27176617526051,
+   "lon": -179.2611569922878,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0240",
+   "lat": -17.937946106532763,
+   "lon": -179.54398147305125,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0241",
+   "lat": -16.90263297482167,
+   "lon": 178.16190304291678,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0242",
+   "lat": -18.111076738971462,
+   "lon": 178.14576865481976,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0243",
+   "lat": -18.237492611077883,
+   "lon": 178.92349026740857,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0244",
+   "lat": -16.698384298040565,
+   "lon": 179.13211163178016,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0245",
+   "lat": -18.083151272374167,
+   "lon": 179.38266043073435,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0246",
+   "lat": -19.142350754943877,
+   "lon": 177.46501596665502,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0247",
+   "lat": -17.659081017861183,
+   "lon": 178.00182023521816,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0248",
+   "lat": -18.86673655887553,
+   "lon": -179.7683723164906,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0249",
+   "lat": -18.175258599989533,
+   "lon": -179.96499347045236,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0250",
+   "lat": -19.24418212463995,
+   "lon": 179.97332318899882,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0251",
+   "lat": -17.2305479684739,
+   "lon": 178.70507173868646,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0252",
+   "lat": -18.663937487102743,
+   "lon": 178.29407662273272,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0253",
+   "lat": -18.681308167525515,
+   "lon": -179.05947942833754,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0254",
+   "lat": -17.067928526697557,
+   "lon": 177.81691824751584,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0255",
+   "lat": -17.37208918802618,
+   "lon": 179.4279659658269,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0256",
+   "lat": -18.560880609316882,
+   "lon": -178.69990528935173,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0257",
+   "lat": -17.72278505450032,
+   "lon": -178.99354852900353,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0258",
+   "lat": -17.91508519345504,
+   "lon": 178.92351959132642,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0259",
+   "lat": -17.139180187552356,
+   "lon": -179.9722525964192,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0260",
+   "lat": -16.669093152097062,
+   "lon": 178.49106066335662,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0261",
+   "lat": -16.78580002362652,
+   "lon": 177.76546188960302,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0262",
+   "lat": -18.283337612150234,
+   "lon": -179.49985442225716,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0263",
+   "lat": -17.486250680461538,
+   "lon": 178.42403437749854,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0264",
+   "lat": -18.746314038284538,
+   "lon": 178.22020588654695,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0265",
+   "lat": -18.0258467377174,
+   "lon": 179.27842142044037,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0266",
+   "lat": -19.117083405546907,
+   "lon": 177.3815003504593,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0267",
+   "lat": -16.915941755577904,
+   "lon": 179.62872852117863,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0268",
+   "lat": -17.067568824113764,
+   "lon": 179.78043874069155,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0269",
+   "lat": -17.30783505022825,
+   "lon": 178.70993335104066,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0270",
+   "lat": -16.62885582505966,
+   "lon": 177.58254823848122,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0271",
+   "lat": -17.29030220086503,
+   "lon": 178.85491115348003,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0272",
+   "lat": -16.494056745081437,
+   "lon": 177.78409103857192,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0273",
+   "lat": -16.48686105626328,
+   "lon": 179.3035627619805,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0274",
+   "lat": -16.613255732942733,
+   "lon": 179.69975838957149,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0275",
+   "lat": -18.657335807661312,
+   "lon": -178.7561885312705,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0276",
+   "lat": -16.730566072422818,
+   "lon": 179.7530853393546,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0277",
+   "lat": -16.801531437439337,
+   "lon": 178.1605440957298,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0278",
+   "lat": -17.983627291859733,
+   "lon": 177.61939493742213,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0279",
+   "lat": -17.70634412923711,
+   "lon": -179.65438837148866,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0280",
+   "lat": -18.72370603556884,
+   "lon": 178.27278750561763,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0281",
+   "lat": -19.020186156861172,
+   "lon": 177.91661100311154,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0282",
+   "lat": -18.15528978364877,
+   "lon": 177.70641713560275,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0283",
+   "lat": -17.270447827485143,
+   "lon": 177.58626842123263,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0284",
+   "lat": -16.72951467448165,
+   "lon": 177.72783672875892,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0285",
+   "lat": -18.743979590822548,
+   "lon": 179.0264044117578,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0286",
+   "lat": -16.501773057069073,
+   "lon": 179.9839660337991,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0287",
+   "lat": -17.064538991141845,
+   "lon": -179.35683097694226,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0288",
+   "lat": -18.067644140480894,
+   "lon": -178.4955012664604,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0289",
+   "lat": -17.022502447978766,
+   "lon": -179.71909219257083,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0290",
+   "lat": -18.14791088753215,
+   "lon": -178.82760835948136,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0291",
+   "lat": -16.834549504173964,
+   "lon": 178.3223721309827,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0292",
+   "lat": -16.993658255096378,
+   "lon": -178.56641703983647,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0293",
+   "lat": -18.095884609906093,
+   "lon": 179.41449117970456,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0294",
+   "lat": -18.00683372629888,
+   "lon": 177.42329752161177,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0295",
+   "lat": -19.222937053627618,
+   "lon": 178.1814422039907,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0296",
+   "lat": -18.224293205174533,
+   "lon": -179.59570974177907,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0297",
+   "lat": -16.425638131581437,
+   "lon": 179.66905411367168,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0298",
+   "lat": -17.9491101076961,
+   "lon": 178.95365941071353,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0299",
+   "lat": -16.48106441147044,
+   "lon": 178.99284753229813,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0300",
+   "lat": -16.798849087145427,
+   "lon": -179.5364208379321,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0301",
+   "lat": -18.76873442440109,
+   "lon": 177.912928438947,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0302",
+   "lat": -16.798849087145427,
+   "lon": 177.79956618458607,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0303",
+   "lat": -19.197521110523212,
+   "lon": 177.96960956612747,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0304",
+   "lat": -17.611013157758478,
+   "lon": 178.5364208379321,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0305",
+   "lat": -17.04287158250034,
+   "lon": -179.2530152020298,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0306",
+   "lat": -16.635992640541645,
+   "lon": 177.85624731176654,
+   "hub_height_m": 130.0,
+   "rotor_diameter_m": null,
+   "curve": "GE220/14000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0307",
+   "lat": -17.638023448685914,
+   "lon": -179.30969632921025,
+   "hub_height_m": 61.0,
+   "rotor_diameter_m": null,
+   "curve": "MM82/2050"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0308",
+   "lat": -19.277795183261958,
+   "lon": 177.7428850574056,
+   "hub_height_m": 134.0,
+   "rotor_diameter_m": null,
+   "curve": "N131/3300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0309",
+   "lat": -17.313634343508625,
+   "lon": -178.85624731176654,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "S114/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0310",
+   "lat": -18.580795220606973,
+   "lon": 179.84008676308278,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "SG114/2625"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0311",
+   "lat": -18.33885450868054,
+   "lon": -179.08297182048838,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT108/2300"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0312",
+   "lat": -16.907342554253532,
+   "lon": 178.98986985537582,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT130/3600"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0313",
+   "lat": -17.475901173827637,
+   "lon": 178.8765076010149,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "SZ88/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0314",
+   "lat": -17.66502969172427,
+   "lon": -179.64978309229303,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V116/2100"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0315",
+   "lat": -19.03685556662188,
+   "lon": 179.61336225436094,
+   "hub_height_m": 88.0,
+   "rotor_diameter_m": null,
+   "curve": "V136/4200"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0316",
+   "lat": -17.232447086630657,
+   "lon": 178.59310196511257,
+   "hub_height_m": 53.0,
+   "rotor_diameter_m": null,
+   "curve": "V66/1650"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0317",
+   "lat": -18.33885450868054,
+   "lon": 179.2165943640977,
+   "hub_height_m": 90.0,
+   "rotor_diameter_m": null,
+   "curve": "VS120/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0318",
+   "lat": -18.90284870161824,
+   "lon": 178.13965294766885,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0319",
+   "lat": -17.52995805163185,
+   "lon": -179.93318872819535,
+   "hub_height_m": 92.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0320",
+   "lat": -16.69029356315643,
+   "lon": -178.51616054868376,
+   "hub_height_m": 57.0,
+   "rotor_diameter_m": null,
+   "curve": "E-70/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0321",
+   "lat": -17.421828234258825,
+   "lon": 177.85624731176654,
+   "hub_height_m": 77.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO114/4800"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0322",
+   "lat": -17.988786914422917,
+   "lon": -178.57284167586423,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "G90/2000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0323",
+   "lat": -17.638023448685914,
+   "lon": 179.84008676308278,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE120/2500"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0324",
+   "lat": -17.82158580076606,
+   "lon": 179.4773275491278,
+   "hub_height_m": 87.5,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0325",
+   "lat": -17.82158580076606,
+   "lon": 179.48016160548684,
+   "hub_height_m": 87.7,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0326",
+   "lat": -17.82158580076606,
+   "lon": 179.48299566184585,
+   "hub_height_m": 87.9,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0327",
+   "lat": -17.82158580076606,
+   "lon": 179.48582971820488,
+   "hub_height_m": 88.1,
+   "rotor_diameter_m": null,
+   "curve": "AW125/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0328",
+   "lat": -17.82158580076606,
+   "lon": 179.4773275491278,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0329",
+   "lat": -17.818887718570437,
+   "lon": 179.4773275491278,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  },
+  {
+   "turbine_id": "merc_dateline_6km-0330",
+   "lat": -17.81618959553549,
+   "lon": 179.4773275491278,
+   "hub_height_m": 117.0,
+   "rotor_diameter_m": null,
+   "curve": "E-115/3000"
+  }
+ ],
+ "turbine_library_sha256": "ce26b9a379de91484b7b51f759a31a2883e060dc1f528ab93b2a0dd40ce7beb5"
+}

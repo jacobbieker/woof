@@ -1,5 +1,6 @@
 Copyright (c) 2022-2025 Paul Zimmermann and Tom Hubrecht
 Copyright (c) 2024-2025 Alexei Sibidanov.
+Copyright (c) 2021-2022 Alexei Sibidanov.
 
 These files are part of the CORE-MATH project
 (https://core-math.gitlabpages.inria.fr/).

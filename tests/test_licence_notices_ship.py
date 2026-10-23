@@ -294,6 +294,10 @@ NOTICE_CARRIERS: tuple[str, ...] = (
     # The UW PBL's binary64 libm: Arm exp/log/pow and CORE-MATH cos/acos,
     # both MIT, notice inline (root NOTICE, "FP64 libm transcriptions").
     "woof/core/kernels/glibc_flt64.cuh",
+    # CORE-MATH's correctly rounded binary64 cbrt (MIT), device and host
+    # (root NOTICE, "FP64 libm transcriptions").
+    "woof/core/kernels/cr_cbrt_flt64.cuh",
+    "woof/core/cr_cbrt.py",
     "woof/core/rrtmgp.py",
     "woof/core/ruc.py",
     "woof/core/thompson_aerosol_contract.py",

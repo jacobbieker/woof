@@ -2533,13 +2533,13 @@ def build_prepared_tree_relocation_runner(exp: ExperimentConfig, *,
                        if int(d.parent_id) in (0, int(d.grid_id)))
 
         def statics_builder(grid, new_dc):
-            del grid
             live = {int(n.cfg.grid_id): n.cfg
                     for n in model.walk_parent_first()}
             live[int(new_dc.grid_id)] = new_dc
             origin = origin_in_frame_cells(
                 live, int(new_dc.grid_id), root_id)
-            return corridor.crop_at(*origin)
+            # The grid is read only for a fuel request's fire mesh.
+            return corridor.with_fuel(corridor.crop_at(*origin), grid)
 
         statics_builder.static_provenance = CORRIDOR_REBUILT_STATICS
         statics_builder.source_label = (
@@ -2765,11 +2765,11 @@ def build_prepared_tree_descendant_regrounder(exp, *, model, corridors,
         preparer = preparers[grid_id]
 
         def statics_builder(grid, new_dc):
-            del grid
             live = {int(n.cfg.grid_id): n.cfg
                     for n in model.walk_parent_first()}
             origin = origin_in_frame_cells(live, int(new_dc.grid_id), root_id)
-            return corridor.crop_at(*origin)
+            # The grid is read only for a fuel request's fire mesh.
+            return corridor.with_fuel(corridor.crop_at(*origin), grid)
 
         statics_builder.static_provenance = CORRIDOR_REBUILT_STATICS
         statics_builder.source_label = (
@@ -4624,6 +4624,14 @@ def integrate_prepared_case(
     if getattr(history_selection, "hub_wind", None) is not None:
         from woof.core.hub_wind_diag import attach_hub_wind
         attach_hub_wind(
+            state, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
+            dy=cfg.dy, grid_id=domain_id,
+            latlon=prepared.grid.latlon_mass, streamed=streamed)
+    # The [output] wind-farm power window (woof/core/windfarm_power_diag.py),
+    # on the same terms as the hub-wind window above.
+    if getattr(history_selection, "windfarm_power", None) is not None:
+        from woof.core.windfarm_power_diag import attach_windfarm_power
+        attach_windfarm_power(
             state, history_selection, nx=cfg.nx, ny=cfg.ny, dx=cfg.dx,
             dy=cfg.dy, grid_id=domain_id,
             latlon=prepared.grid.latlon_mass, streamed=streamed)
