@@ -14,6 +14,8 @@ Array layout is ``(nz, ny, nx)`` with x fastest.  Staggering (WRF-ARW):
 
 from __future__ import annotations
 
+from woof.core.column_schemes import COLUMN_SCHEMES
+
 import math
 from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
@@ -55,6 +57,8 @@ from woof.core.grid import BaseState, VerticalCoord, rebalance_hydrostatic
 # preprocessing distribution omits the verification tree.
 from woof.core.sase_limits import E_MIN as SASE_E_MIN
 from woof.core.wdm6_constants import WDM6_NUMBER_SPECIES
+from woof.microphysics_schemes import scheme as _named_scheme
+from woof.wrf_exact import DIAGNOSTICS_ENABLED
 
 #: Model-field dtype.  FP64 only in setup code and test references.  Keeping
 #: the scalar type available without CuPy lets the Rust/NumPy native-input
@@ -330,6 +334,8 @@ def refresh_model_time(state, clock, *, kernel_launch: bool = False,
     else:
         ticks = clock.ticks + (clock.step_ticks if after_step else 0)
         value = ticks / clock.tick_den
+    from woof.core.sfire_clock import bind_state_clock
+    bind_state_clock(state,value)
     state.elapsed_seconds = value
     # The domain's own ACTIVATION EPOCH, from the same tick authority.
     # A physics driver counts WRF's ITIMESTEP, and ITIMESTEP is 1 on a
@@ -432,6 +438,10 @@ class DomainState:
         if xp is not np and xp is not cp:
             raise TypeError("array_module must be numpy or cupy")
         self._host_setup_state = array_module is np
+        # Same definition as acoustic._spec_zone/_boundary_forced. Stored
+        # geometry lets all health scans keep the interior scalar floor.
+        self._health_spec_zone = (max(0, int(cfg.spec_zone))
+                                  if cfg.specified or cfg.nested else 0)
         # Analysis-producer metadata only. Once coupled snapshots are made,
         # their immutable field inventory owns forcing through cache/restart.
         from woof.boundary_fields import external_scalar_fields
@@ -461,6 +471,9 @@ class DomainState:
         self.p = zeros(nz, ny, nx)          # full pressure
         self.al = zeros(nz, ny, nx)         # alpha'_d
         self.alt = zeros(nz, ny, nx)        # total alpha_d
+        # Allocate before restart restoration so its exact carrier is in
+        # the expected inventory, including before the first diagnostic.
+        self.p_perturbation = zeros(nz, ny, nx) if DIAGNOSTICS_ENABLED else None
 
         # Moisture mixing ratios (per unit dry mass) plus RK time-t copies.
         # The Phase-2 qv/qc/qr allocation is unchanged.  WSM6's ice mass
@@ -515,7 +528,24 @@ class DomainState:
                 self.rqvften = zeros(nz, ny, nx)
             else:
                 self.rthften = self.rqvften = None
-            if cfg.mp_physics == 50:
+            if cfg.mp_physics == 5:
+                # Ferrier-Aligo (Registry.EM_COMMON:3019): package
+                # fer_mp_hires is moist:qv,qc,qr,qi (qi is the TOTAL ice,
+                # cloud ice and precipitating ice together) + scalar:qt +
+                # state:f_ice_phy,f_rain_phy,f_rimef_phy.  Like P3 it has
+                # one ice mass and no qs/qg, and allocating those would hand
+                # the model two frozen species the scheme never writes.
+                # qt is rebuilt from qc+qr+qi on every FER_HIRES entry
+                # (module_mp_fer_hires.F:388), so it is carried, never
+                # transported (woof/core/fer_hires.py).  The three f_*
+                # fields are WRF state arrays: not advected, carried from
+                # step to step, and set by fer_hires_init on a non-restart
+                # start to F_ICE = F_RAIN = 0 and F_RIMEF = 1 (:2912-2923).
+                for name in ("qi", "qt", "f_ice", "f_rain", "f_rimef"):
+                    setattr(self, name, zeros(nz, ny, nx))
+                self.f_rimef[...] = DTYPE(1.0)
+                self.qi0 = rebuilt("qi0", nz, ny, nx)
+            elif cfg.mp_physics == 50:
                 # P3 one-category (Registry.EM_COMMON:3038).  Deliberately
                 # NOT folded into the tuple below: P3 has ONE ice category
                 # and therefore no qs/qg/effs at all -- allocating them
@@ -554,7 +584,50 @@ class DomainState:
                 self.effi[...] = DTYPE(25.0)
                 for name in ("qi0", "ni0", "nr0", "qir0", "qib0"):
                     setattr(self, name, rebuilt(name, nz, ny, nx))
-            elif cfg.mp_physics in (6, 8, 9, 10, 16, 18, 28):
+            elif cfg.mp_physics == 30:
+                from woof.core.fast_sbm_contract import (BIN_SPECIES,EXTRA_SPECIES,
+                                                         NUMBER_SPECIES)
+                self.fast_sbm_bins=zeros(len(BIN_SPECIES),nz,ny,nx)
+                for index,name in enumerate(BIN_SPECIES):
+                    setattr(self,name,self.fast_sbm_bins[index])
+                for name in ("qi","qs","qg",*NUMBER_SPECIES,"th_old","qv_old",
+                             "effc","effi","effs"):
+                    setattr(self,name,zeros(nz,ny,nx))
+                for name in EXTRA_SPECIES:
+                    setattr(self,name+"0",rebuilt(name+"0",nz,ny,nx))
+                self.effc.fill(DTYPE(10.)); self.effi.fill(DTYPE(25.)); self.effs.fill(DTYPE(50.))
+            elif cfg.mp_physics == 2:
+                # Registry.EM_COMMON:3016 has six masses and no radius fields.
+                for name in ("qi", "qs", "qg"):
+                    setattr(self, name, zeros(nz, ny, nx))
+                    setattr(self, name + "0", rebuilt(name + "0", nz, ny, nx))
+            elif cfg.mp_physics == 3:
+                # WSM3 (Registry.EM_COMMON:3017, wsm3scheme): moist:qv,qc,qr
+                # and state:re_cloud,re_ice,re_snow.  Its cloud ice lives in
+                # qc and its snow in qr below 0 C, so it allocates no
+                # qi/qs/qg -- a zero ice field beside a live one would be
+                # the silent-zero-field failure the mp=28 comment above
+                # warns about -- but it does register the radius trio, and
+                # module_physics_init.F:1004-1024 asks WSM3 for all three
+                # under RRTMG.  Background radii are module_model_constants.F
+                # RE_QC_BG/RE_QI_BG/RE_QS_BG (:62-64), the values
+                # module_mp_wsm3.F:166-168 seeds before effectRad_wsm3, in
+                # woof's radiation-facing micron convention.
+                for name in ("effc", "effi", "effs"):
+                    setattr(self, name, zeros(nz, ny, nx))
+                self.effc[...] = DTYPE(2.49)
+                self.effi[...] = DTYPE(4.99)
+                self.effs[...] = DTYPE(9.99)
+            elif cfg.mp_physics in COLUMN_SCHEMES:
+                row = COLUMN_SCHEMES[cfg.mp_physics]
+                for name in row.species:
+                    if name not in ("qv", "qc", "qr"):
+                        setattr(self, name, zeros(nz, ny, nx))
+                        setattr(self, name + "0", rebuilt(name + "0", nz, ny, nx))
+                for name, value in zip(("effc", "effi", "effs"), row.background_radii):
+                    setattr(self, name, zeros(nz, ny, nx))
+                    getattr(self, name)[...] = DTYPE(value)
+            elif cfg.mp_physics in (6, 8, 9, 10, 16, 18, 24, 28, 106):
                 common = ("qi", "qs", "qg", "effc", "effi", "effs")
                 number_and_radius = (
                     ("nr", "ni") if cfg.mp_physics == 8 else
@@ -584,6 +657,11 @@ class DomainState:
                     # silently appear on an mp=8 state.
                     (("nc", "nr", "ni", "nwfa", "nifa")
                      if cfg.mp_physics == 28 else ()))))))
+                if cfg.mp_physics == 24:
+                    # mp=24 (WSM7, Registry.EM_COMMON:3034
+                    # moist:qv,qc,qr,qi,qs,qg,qh): WSM6's six masses plus
+                    # the hail mass, and no number moment.
+                    number_and_radius = ("qh",)
                 for name in common + number_and_radius:
                     setattr(self, name, zeros(nz, ny, nx))
                 if cfg.mp_physics == 16:
@@ -634,7 +712,7 @@ class DomainState:
                 # module_model_constants.F.
                 # Gate: tests/test_p3_port.py::
                 # test_the_background_radius_rows_are_a_six_species_partition
-                if cfg.mp_physics in (6, 8, 16, 28):
+                if cfg.mp_physics in (6, 8, 16, 24, 28, 106):
                     # module_model_constants.F WSM6/Thompson background radii,
                     # stored in woof's radiation-facing micron convention.
                     # (RE_QC_BG/RE_QI_BG/RE_QS_BG = 2.49E-6/4.99E-6/9.99E-6
@@ -694,6 +772,8 @@ class DomainState:
                         "qh0", "nc0", "nr0", "ni0", "ns0", "ng0", "nh0")
                 elif cfg.mp_physics == 10:
                     time_copies += ("nr0", "ni0", "ns0", "ng0")
+                elif cfg.mp_physics == 24:
+                    time_copies += ("qh0",)
                 elif cfg.mp_physics == 16:
                     time_copies += tuple(
                         f"{name}0" for name in WDM6_NUMBER_SPECIES)
@@ -727,6 +807,24 @@ class DomainState:
                     # ArWen shortcut.
                     self.nwfa2d = zeros(ny, nx)
                     self.nifa2d = zeros(ny, nx)
+            elif _named_scheme(cfg.mp_physics) is not None:
+                # A NAMED scheme (woof.microphysics_schemes): its capability
+                # row is the allocation table.  Every species gets storage
+                # and an RK time copy; radii start at the Thompson-family
+                # background; surface
+                # emission fields are cross-step constants like mp=28's.
+                named = _named_scheme(cfg.mp_physics)
+                for name in (named.ice_mass_species + named.moment_species
+                             + named.aerosol_species + ("effc", "effi", "effs")):
+                    setattr(self, name, zeros(nz, ny, nx))
+                self.effc[...] = DTYPE(2.49)
+                self.effi[...] = DTYPE(4.99)
+                self.effs[...] = DTYPE(9.99)
+                for name in (named.ice_mass_species + named.moment_species
+                             + named.aerosol_species):
+                    setattr(self, name + "0", rebuilt(name + "0", nz, ny, nx))
+                for name in named.surface_fields:
+                    setattr(self, name, zeros(ny, nx))
         else:
             self.qv = self.qc = self.qr = None
             self.qv0 = self.qc0 = self.qr0 = None
@@ -736,6 +834,12 @@ class DomainState:
             # has no consumer here either.
             self.rthften = self.rqvften = None
 
+        from woof.core.physics_inventory import PBL_ADVECTED_SCALARS
+        for name, floor in PBL_ADVECTED_SCALARS.get(cfg.bl_pbl_physics, ()):
+            setattr(self, name, zeros(nz, ny, nx))
+            getattr(self, name).fill(DTYPE(floor))
+            setattr(self, name + "0", rebuilt(name + "0", nz, ny, nx))
+
         # WRF two-time-level prognostic TKE (Registry.EM_COMMON:312,
         # ``state real tke ikj dyn_em 2 - r``), the km_opt=2 carrier.
         # Initial value is the allocated zero state exactly as WRF's ideal
@@ -744,6 +848,10 @@ class DomainState:
         # (the ``r`` IO flag) and so does woof -- ``tke`` is SERIALIZED and
         # ``tke0`` is REBUILT (written from tke at every dycore.step entry),
         # both classified in woof/io/restart.py.
+        if cfg.bl_pbl_physics == 5 and cfg.bl_mynn_tkeadvect:
+            # Registry.EM_COMMON:1118,3168: scalar qke_adv, not water mass.
+            self.qke_adv = zeros(nz, ny, nx)
+            self.qke_adv0 = rebuilt("qke_adv0", nz, ny, nx)
         if cfg.km_opt == 2:
             self.tke = zeros(nz, ny, nx)
             self.tke0 = rebuilt("tke0", nz, ny, nx)
@@ -935,12 +1043,13 @@ class DomainState:
         self._phb_host: np.ndarray | None = None
         self._dz_min: float | None = None
 
-        if cfg.nwp_diagnostics == 1:
+        if cfg.nwp_diagnostics == 1 or cfg.gsd_diagnostics == 1:
             # WRF UP_HELI_MAX (Registry.EM_COMMON:2083, IO "rh02"): allocate
             # the serialized running-max accumulator eagerly so restart
             # manifests and wrfout frame schemas are deterministic from the
             # first step (woof/core/uh_diag.py owns the update/reset).
             self.scratch((ny, nx), "up_heli_max")
+        if cfg.nwp_diagnostics == 1:
             # The two consumer-owned tracking windows, allocated on the
             # same gate and for the same reason: deterministic manifests
             # from the first step.  They never reach a wrfout frame;
@@ -952,6 +1061,20 @@ class DomainState:
             # window the run actually folded.
             self.scratch((ny, nx), "uh_follow_window")
             self.scratch((ny, nx), "uh_spawn_window")
+
+        from woof.core.output_diagnostics import initialize as initialize_output
+        initialize_output(self, cfg)
+
+        from woof.core.hail import initialize as initialize_hail
+        initialize_hail(self, cfg)
+
+        # Chem species (woof/core/chem_state.py): the ``chem_<row>`` /
+        # ``chem0_<row>`` arena views and ``self.chem``, allocated ONLY when
+        # the run names chem sets.  A chem-off state gains no attribute, so
+        # its object graph, restart inventory and footprint are unchanged.
+        if getattr(cfg, "chem_sets", ()):
+            from woof.core.chem_state import attach_chem_state
+            attach_chem_state(self, cfg, xp)
 
     def load_base(self, coord: VerticalCoord, base: BaseState, *, native_host=False) -> None:
         """Copy the float64 setup-time coordinate/base arrays to device FP32."""
@@ -1196,6 +1319,42 @@ class DomainState:
                 "height_half() called before load_base(): the base-state "
                 "geopotential has not been loaded")
         return self._dz_min
+
+
+def adopt_wrf_theta_carrier(state) -> None:
+    """Strict mode: hold theta as WRF's ``t = theta - 300`` (``thb == 300``).
+
+    Every strict kernel reads ``thp`` as WRF's ``t_2``: the EOS diagnosis
+    (kernels/diagnostics.cu, ``theta = 300 + thp``), the specified/relaxed
+    boundary coupling under GPUWM_WRF_EXACT_C_BIGSTEP (kernels/lbc_state.cu
+    takes the coupled table as ``thp`` with no ``thb`` term) and the strict
+    diffusion storage (kernels/smag2d.cu).  The wrfinput door supplies that
+    carrier (woof/ingest/wrfinput.py sets ``thb = 300``); the prepared door
+    loaded the preparation's base profile into ``thb`` (290 to 464 K on a
+    12 km GFS case), so strict mode read theta up to 164 K low and the first
+    steps went non-finite (``p`` after the first strict diagnosis, then
+    microphysics RAINNC).  This re-expresses the loaded state in WRF's
+    carrier: ``thp = (thb + thp) - 300`` in FP32, the word a default run
+    writes as history ``T``, and ``thb = 300``.
+
+    Outside strict mode, or when ``thb`` already is 300 everywhere (the
+    wrfinput door), nothing changes.  The preparation's ``thb`` is kept on
+    the host as ``_setup_thb`` so the setup fingerprint
+    (woof/state_serialization_contract.py) still binds the prepared base
+    the cache recorded, not the mode's re-expression of it.
+    """
+    from woof.wrf_exact import ENABLED
+    if not ENABLED:
+        return
+    t0 = np.float32(c.T0)
+    thb = state.thb
+    if bool((thb == t0).all()):
+        return
+    state._setup_thb = np.array(thb.get() if hasattr(thb, "get") else thb,
+                                dtype=np.float32, copy=True)
+    full = thb if thb.ndim == 3 else thb[:, None, None]
+    state.thp[...] = (full + state.thp) - t0
+    thb[...] = t0
 
 
 def _check_terrain_z(base: BaseState, terrain_z) -> None:

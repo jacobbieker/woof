@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.1.0
+
+WOOF 1.1.0 takes engine 2.9.5 and the hex model 0.4.3. Forecast answers change.
+
+New:
+
+- `woof hex` carries the GPU port of MPAS-Atmosphere v8.4.2: both physics
+  suites and their scheme options, initialization and static fields, IAU,
+  limited-area boundaries, streams, restart and diagnostics. WOOF's own
+  physics stays the default suite.
+- `woof hex global --row R --cycle C --work-dir W` runs a global forecast end
+  to end: mesh, static, start, forecast, products, export and score. It is the
+  main global model; the spectral `woof global` stays a full option.
+- From hex 0.4.2 and 0.4.3: one-command limited-area forecasts
+  (`woof hex regional`, `woof hex country --region`), variable-resolution
+  global meshes, storm-following regions and ensembles (`woof hex moving`,
+  `woof hex moving-ensemble`), subseasonal ensembles with weekly products and
+  scores, a mixed-layer ocean and sea ice on the mesh, aerosol transport in
+  global forecasts, keyless ERA5 starts, and an 80-level high-top row.
+- WoFS-shape ensembles (`woof ensemble --recipe wofs`) from any start source,
+  with ensemble soundings, and hurricane ensembles with cyclone products.
+- From engine 2.9.4: the packaged HRRR recipe follows operational HRRR v4
+  physics; `woof race` and `woof standby`; storm-following 1 km nests
+  (`woof go --storm-nests N`); HRRR-Smoke with `--smoke`; coupled hydro wherever a
+  hydrofabric covers the domain, opt-in with `--hydro on`; coupled ocean waves and storm surge (`woof ocean run`); a GPU
+  mixed-layer ocean and prognostic sea ice; live aerosol optics; solar
+  eclipse shading; hail size and HAILCAST; storm tracks fetched automatically
+  (`woof cyclone-setup --storm auto|ID|NAME`) and `woof go --cyclone-products`;
+  new default products (IVT, IWV, freezing level, atmospheric rivers,
+  visibility and fog, snowfall, heat index, WBGT, HDWI, Haines, lightning
+  threat); hub-height wind and solar power products; fire danger indices;
+  archived GFS, dated GEFS and ECMWF ENS sources; polar stereographic domains;
+  and `woof setup --with-geog`, a permissively licensed default geography set.
+
+Changed:
+
+- Coupled hydro is opt-in: a run has no hydro unless it asks with
+  `--hydro on`.
+- The bridge bundle carries the engine's tools and the global model's
+  observation decoders. Maps read `WOOF 1.1.0`.
+
+Fixed:
+
+- Everything engine 2.9.4 and 2.9.5 and hex 0.4.2 and 0.4.3 fix, as their
+  notes list it. From 2.9.5: coastal sea surface temperatures in the
+  mixed-layer ocean no longer drift, hydro start-up runs its spin-up on the
+  GPU, and `install.sh` installs the required Rust when the system Rust is
+  too old.
+
 ## 1.0.3
 
 WOOF runs the operational HRRR configuration: its static file, its

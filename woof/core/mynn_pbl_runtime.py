@@ -99,7 +99,14 @@ VERTICAL_LEVEL_BOUNDS = (5, None)
 #: ``Registry.EM_COMMON:3031`` declares ``package wdm6scheme
 #: mp_physics==16 - moist:qv,qc,qr,qi,qs,qg;scalar:qnn,qnc,qnr``, so F_QS
 #: is true and the scheme's snow is MYNN's to see.
-MYNN_SNOW_MICROPHYSICS = frozenset((6, 8, 9, 10, 16, 18, 28))
+#:
+#: A named scheme (woof/microphysics_schemes.py) joins from its own row: it
+#: belongs here exactly when its mass species carry ``qs``.
+from woof.core.mynn_pbl_metadata import MYNN_SNOW_MICROPHYSICS  # noqa: E402
+
+
+from woof.microphysics_schemes import PORTED_WRF_SNOW_SELECTORS
+MYNN_SNOW_MICROPHYSICS |= frozenset(PORTED_WRF_SNOW_SELECTORS)
 
 
 def mynn_flag_qs(mp_physics: int) -> bool:
@@ -134,11 +141,15 @@ _TENDENCY_OUT = (
 
 
 #: Stage B (W4 full admission): solver qn name -> (state scalar attribute,
-#: returned tendency name).  ``qnbca`` is deliberately absent: WRF's mp=28
-#: Registry package declares no qnbca (F_QNBCA false there), so the runtime
-#: feeds the driver a zero qnbca column -- the solve on an exactly-zero
-#: column with an exactly-zero flux is exactly zero, which is bitwise the
-#: same answer WRF's skipped solve leaves -- and returns no qnbca tendency.
+#: returned tendency name).  ``qnbca`` is absent because WOOF's mp=28 state
+#: carries no black-carbon number.  WRF v4.6.1's mp=28 Registry package DOES
+#: declare it (Registry.EM_COMMON:3036 ``thompsonaero``
+#: ``scalar:...,qnifa,qnbca``), so WRF runs this solve with F_QNBCA true on
+#: its own qnbca field.  The runtime therefore passes FLAG_QNBCA true, as
+#: WRF does, with a zero column: the solve on an exactly-zero column with an
+#: exactly-zero flux is exactly zero, and no qnbca tendency is returned.
+#: tests/test_mynn_wrf461_wrapper_columns_gpu.py grades this option set
+#: (``mixscalars``) against WRF's own wrapper with the same zero column.
 MYNN_MIXSCALARS_QN = (
     ("qnc", "nc", "dnc"),
     ("qni", "ni", "dni"),
@@ -269,6 +280,11 @@ def mynn_pbl_step(
     source["w"] = cp.ascontiguousarray(w[:nz]).reshape(nz, ncol)
     for solver_name, field_name in _STATE_FIELD.items():
         source[solver_name] = fields[field_name].reshape(nz, ncol)
+    if options.get("bl_mynn_tkeadvect", False) and int(itimestep) != 1:
+        # Stage the transported carrier into the existing priced QKE
+        # column slot. A cold call still stages QKE for initialization,
+        # whose source routine replaces QKE_ADV with its initialized QKE.
+        source["qke"] = fields["qke_adv"].reshape(nz, ncol)
     flat_columns = {name: fields[key].reshape(ncol)
                     for name, key in _COLUMN_FIELDS}
     flat_kpbl = fields["kpbl"].reshape(ncol)
@@ -280,6 +296,14 @@ def mynn_pbl_step(
                        for name, array in tendencies.items()}
 
     initflag = 1 if int(itimestep) == 1 else 0
+    if initflag and options.get("cycling", False):
+        # WRF v4.6.1 :661-671 and the fork :4007-4018: a cycled
+        # start keeps the input QKE unless its lowest-level maximum is
+        # below 0.0002.  WRF reduces over its tile; the decision here is the
+        # domain's, made once before the column pieces, so every piece
+        # takes the same branch (one WRF tile spanning the domain).
+        options = dict(options, initialize_qke=bool(
+            float(cp.max(source["qke"][0])) < float(DTYPE(0.0002))))
     piece = mynn_column_pieces(ncol, chunk)
     if scalar_diffusion_on:
         from woof.core.mynn_scalar_mix_gpu import scalar_pblmix_columns_cuda
@@ -311,6 +335,8 @@ def mynn_pbl_step(
             values.update({name: stage[name] for name in ("qv", "qc", "qi")})
         for solver_name in _STATE_FIELD:
             values[solver_name] = stage[solver_name]
+        if options.get("bl_mynn_tkeadvect", False):
+            values["qke_adv"] = stage["qke"]
         values["dx"] = spacing
         # woof has no ocean-current coupling; WRF's uncoupled path passes
         # the zero-initialised UOCE/VOCE arrays (Registry default 0.0).
@@ -325,8 +351,8 @@ def mynn_pbl_step(
             for solver_name, _, _ in MYNN_MIXSCALARS_QN:
                 values[solver_name] = cp.asfortranarray(
                     qn_source[solver_name][:, lo:hi].T)
-            # F_QNBCA is false in mp=28's Registry package; the zero
-            # column solves to exactly zero (see MYNN_MIXSCALARS_QN).
+            # WOOF's mp=28 carries no qnbca; the zero column solves to
+            # exactly zero (see MYNN_MIXSCALARS_QN).
             values["qnbca"] = cp.zeros((n, nz), dtype=DTYPE, order="F")
 
         out = mynn_bl_driver_cuda(
@@ -346,6 +372,8 @@ def mynn_pbl_step(
 
         for name, target in out_state.items():
             target[:, lo:hi] = out[name].T
+        if options.get("bl_mynn_tkeadvect", False):
+            fields["qke_adv"].reshape(nz, ncol)[:, lo:hi] = out["qke_adv"].T
         for name in ("pblh", "rmol", "kpbl"):
             fields[name].reshape(ncol)[lo:hi] = out[name]
         for name in (*MYNN_PBL_DIAGNOSTICS_2D, *MYNN_PBL_DIAGNOSTICS_INT_2D):

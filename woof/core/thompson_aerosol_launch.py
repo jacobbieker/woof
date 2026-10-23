@@ -154,6 +154,18 @@ def validate_fields(fields: dict[str, object]) -> tuple[tuple[int, ...], int]:
     return shape, int(np.prod(shape, dtype=np.int64))
 
 
+def add_optional_fields(fields, **group):
+    """Add an all-or-none accumulator group, preserving argument order."""
+    present = [name for name, value in group.items() if value is not None]
+    if present and len(present) != len(group):
+        names = list(group)
+        label = ", ".join(names[:-1]) + " and " + names[-1]
+        detail = f" (got {present})" if len(group) > 2 else ""
+        raise ValueError(label + " are given together or not at all" + detail)
+    if present:
+        fields.update(group)
+
+
 def validate_fp64_fortran_table(name, value, shape) -> None:
     """Require a float64 Fortran-ordered device table of the given shape.
 
@@ -216,6 +228,54 @@ def probe_nint(x):
     out = _empty_like_int(x)
     _probe("thompson_aa_probe_nint", size, (x, out, np.int32(size)))
     return out
+
+
+#: thompson_aa_probe_libm's operation codes.
+LIBM_PROBE_OPS = {"expf": 0, "logf": 1, "log10f": 2, "powf": 3,
+                  "exp": 4, "log": 5, "log10": 6, "pow": 7,
+                  "hypot": 8, "log1p": 9, "atan2": 10}
+
+
+def probe_libm(name, x, y=None):
+    """One of WOOF's own libm words (thompson_aerosol_libm.cuh) on device.
+
+    ``expf``, ``logf``, ``log10f`` and ``powf`` take and return float32;
+    ``exp``, ``log``, ``log10``, ``pow``, ``hypot``, ``log1p`` and
+    ``atan2`` binary64.  ``y`` is the exponent of the two powers, the second
+    leg of ``hypot`` and the abscissa of ``atan2`` (``x`` its ordinate).
+    """
+    import cupy as cp
+    op = LIBM_PROBE_OPS[name]
+    double = op >= 4
+    x = cp.ascontiguousarray(x, dtype=cp.float64 if double else DTYPE)
+    y = cp.ascontiguousarray(x if y is None else y, dtype=x.dtype)
+    size = int(x.size)
+    out = cp.empty(x.shape, dtype=x.dtype)
+    dummy_f = cp.empty((1,), dtype=DTYPE)
+    dummy_d = cp.empty((1,), dtype=cp.float64)
+    args = ((dummy_f, dummy_f, x, y, dummy_f, out) if double
+            else (x, y, dummy_d, dummy_d, out, dummy_d))
+    _probe("thompson_aa_probe_libm", size,
+           (np.int32(op), *args, np.int32(size)))
+    return out
+
+
+def probe_reenforce_pair(a, b):
+    """Blossey's re-enforcement of a paired collision transfer on device,
+    module_mp_thompson.F:2945-2954: returns ``(a', b')`` with
+    ``a' = REAL(MIN(ABS(a), ABS(b))) * SIGN(1.0, SNGL(a))`` and ``b' = -a'``.
+    """
+    import cupy as cp
+    a = cp.ascontiguousarray(a, dtype=cp.float64)
+    b = cp.ascontiguousarray(b, dtype=cp.float64)
+    if a.shape != b.shape:
+        raise ValueError("a and b must have one shape")
+    size = int(a.size)
+    a_out = cp.empty(a.shape, dtype=cp.float64)
+    b_out = cp.empty(a.shape, dtype=cp.float64)
+    _probe("thompson_aa_probe_reenforce_pair", size,
+           (a, b, a_out, b_out, np.int32(size)))
+    return a_out, b_out
 
 
 def probe_nu_c(nc_m3):
@@ -410,6 +470,7 @@ __all__ = [
     "CLASSIC_MODULE",
     "COLD_MODULE",
     "DEFAULT_THREADS",
+    "LIBM_PROBE_OPS",
     "PROBE_MODULE",
     "PROBE_TABLE_COLS",
     "PROBE_TABLE_ROWS",
@@ -435,6 +496,7 @@ __all__ = [
     "probe_ice_koop",
     "probe_in_bin",
     "probe_inu_c_effrad",
+    "probe_libm",
     "probe_nint",
     "probe_nu_c",
     "probe_saturation",

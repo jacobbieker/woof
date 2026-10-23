@@ -61,7 +61,10 @@ from woof.native_hierarchy import initialize_and_export_native_hierarchy
 from woof.native_wrf_contract import validate_native_lambert_contracts
 from woof.static.corridor import (
     STATICS_CORRIDOR_DIRNAME,
+    catalog_with_corridor_births,
+    corridor_birth_statics,
     emit_statics_corridor_set,
+    move_statics_corridor_set,
     validated_corridor_selection,
 )
 from woof.static.lambert import grids_from_projection_config
@@ -70,6 +73,35 @@ from woof.wrf_physics_inventory import EXPORT_USE_THETA_M
 
 
 SCHEMA = "gpuwm-native-hrrr-hierarchy-direct-v1"
+
+
+def publish_hierarchy_forecast_companions(root, *, resolved_experiment,
+                                         experiment, wps_namelist,
+                                         perturbation_deferral=None):
+    """Publish the actual native tree authority before its atomic handoff.
+
+    Prepared arrays without a matching experiment and WPS file cannot reach
+    the forecast door. Domain identities, vertical levels and start time are
+    round-tripped by the same writer the root preparation uses.
+    """
+    from woof.experiment_document import publish_experiment_document
+    raw = tomllib.loads(resolved_experiment)
+    expected = experiment
+    if perturbation_deferral is not None:
+        perturbation = deferred_perturbation_config(perturbation_deferral)
+        raw["perturbation"] = asdict(perturbation)
+        expected = replace(experiment, perturbation=perturbation)
+    root = Path(root)
+    config = publish_experiment_document(root / "experiment.toml", raw, expected)
+    wps = root / "namelist.wps"
+    if wps.exists():
+        raise FileExistsError(f"refusing to replace published WPS authority: {wps}")
+    shutil.copyfile(wps_namelist, wps)
+    validate_native_lambert_contracts(expected, wps, source_name="native HRRR hierarchy handoff")
+    return {"experiment_config": {"path": config.name, "sha256": sha256_file(config)},
+            "wps_namelist": {"path": wps.name, "sha256": sha256_file(wps)}}
+
+
 _DOMAIN_PREPARATION_OVERRIDES = frozenset({
     "cu_physics", "cudt_minutes", "radt", "radt_minutes", "bldt",
     # The Grell-Freitas closure and shallow-arm selectors ride with
@@ -77,7 +109,7 @@ _DOMAIN_PREPARATION_OVERRIDES = frozenset({
     # cu_physics is 3, so a Grell-Freitas root with clos_choice = 1 has a
     # cumulus-off child holding 0.  Preparation reads neither
     # (woof.ingest.prepared_cache.PREPARATION_INERT_RUN_FIELDS).
-    "clos_choice", "ishallow",
+    "clos_choice", "ishallow", "cugd_avedx",
     "diff_6th_factor", "epssm", "spec_exp", "mp_physics", "moist",
     "moist_cq", "nest_microphysics_transition",
     # The fork's second filter factor rides with diff_6th_factor beside
@@ -98,6 +130,18 @@ _DOMAIN_PREPARATION_OVERRIDES = frozenset({
     # died on "output_interval_s (900.0, 3600.0)".  Preparation itself
     # writes no history frame at all.
     "output_interval_s",
+    # The rest of the per-domain history cadence (the operational HRRR
+    # hourly-then-15-minute pair): writes no prepared byte, and
+    # woof.ingest.prepared_cache already keeps it out of the trajectory
+    # identity.  A storm slot keeps its own 15-minute cadence.
+    "history_interval2_s", "history_interval_change_s",
+    # A storm slot (woof.storm_nests) runs without the GSL drag and the
+    # lake model: a child's statics carry no sub-grid orography statistics
+    # (experiment._refuse_child_terrain_drag) and a rebuilt nest does not
+    # carry the lake column (experiment._refuse_rebuilt_nest_lake).  The
+    # child is prepared from its OWN namelist column, which carries both
+    # zeros, so preparation builds exactly the child the forecast runs.
+    "gwd_opt", "sf_lake_physics",
     # The per-domain turbulence row (woof/experiment.py
     # _DOMAIN_RUN_OVERRIDES, "a PBL parent may carry a PBL-off
     # Smagorinsky child").  Same shape of finding as output_interval_s
@@ -203,6 +247,38 @@ def _sealed_root_rrtmg_compatibility(identity: dict[str, object]) -> str | None:
         return None
     compatibility = run.get("wrf_rrtmg_compatibility")
     return compatibility if isinstance(compatibility, str) else None
+
+
+def with_config_lifecycle(native_exp, config: Path):
+    """``native_exp`` with each domain's spawn/follow/retire/rearm from ``config``.
+
+    The namelists this stage reads have no spelling for a nest's lifecycle,
+    so a storm slot came through as a fixed t = 0 child: its statics
+    corridor covered only its placeholder footprint and the forecast could
+    not crop ground where its trigger fired.  The tables are copied by grid
+    id from the config the chain runs (woof go's re-stated copy); geometry
+    and physics stay the namelists'.
+    """
+    from dataclasses import fields, replace
+
+    from woof.config_authority import read_config_authority
+    from woof.experiment import build_experiment_from_config_tables
+
+    authority = read_config_authority(config)
+    declared = build_experiment_from_config_tables(
+        tomllib.loads(authority.payload.decode("utf-8")),
+        source=str(authority.source), base_dir=authority.base_dir)
+    by_id = {int(dc.grid_id): dc for dc in declared.domains}
+    names = [name for name in ("spawn", "follow", "retire", "rearm")
+             if name in {f.name for f in fields(native_exp.domains[0])}]
+    domains = []
+    for dc in native_exp.domains:
+        source = by_id.get(int(dc.grid_id))
+        if source is None:
+            domains.append(dc)
+            continue
+        domains.append(replace(dc, **{name: getattr(source, name) for name in names}))
+    return replace(native_exp, domains=tuple(domains))
 
 
 def _native_experiment(wps_namelist: Path, namelist_input: Path,
@@ -437,6 +513,17 @@ def _require_raw_stock_delta(
         # Only the typed value verified above is normalized. Its actual
         # absence from stock and disabled stock behavior stay in the receipt.
         normalized_stock["physics"]["alb_sol"] = list(native_alb_sol)
+    # A chem tree's &chem group and the chem array's &dynamics switches are
+    # native-only (woof.hrrr_route_inputs._chem_namelist_rows): the stock
+    # WRF arm is a non-chem build, so it runs the meteorology without them.
+    native_chem = deepcopy(native.get("chem")) if "chem" in native else None
+    if native_chem is not None and "chem" not in stock:
+        normalized_stock["chem"] = deepcopy(native_chem)
+        for key in ("chem_adv_opt", "chem_mix2_off", "chem_mix6_off"):
+            if (key in native.get("dynamics", {})
+                    and key not in stock.get("dynamics", {})):
+                normalized_stock["dynamics"][key] = deepcopy(
+                    native["dynamics"][key])
     if native != normalized_stock:
         differences = []
         for section in sorted(set(native) | set(normalized_stock)):
@@ -464,6 +551,12 @@ def _require_raw_stock_delta(
         "shared_dry_theta": {
             "dynamics.use_theta_m": [EXPORT_USE_THETA_M]},
     }
+    if native_chem is not None and "chem" not in stock:
+        receipt["allowed_deltas"]["chem"] = {
+            "native": native_chem, "stock": None,
+            "reason": ("the stock WRF arm is a non-chem build; it runs the "
+                       "meteorology without the native arm's chemistry"),
+        }
     if native_alb_sol is not None:
         receipt["allowed_deltas"]["physics.alb_sol"] = {
             "native": list(native_alb_sol), "stock": None,
@@ -870,9 +963,20 @@ def _validated_root_preparation_binding(
     # exp.domains[1:] -- so the root's own start IS the experiment's, and
     # that is precisely the not-in-use value a header written before the
     # field existed describes.
+    # The same not-in-use map every other prepared-cache comparison passes
+    # (prepared_cache.undelayed_identity_defaults): a field that joined the
+    # identity after the sealed root was written (the 2.9.4 sea-ice
+    # parameters) is tolerated at its off value instead of refused.  Passing
+    # start_time alone refused a nested HRRR-recipe tree at this binding:
+    # "run.seaice_initial_thickness, run.seaice_new_ice_thickness,
+    # run.seaice_ocean_heat_flux" (2.9.4 rolling, a 4090 host).
+    from types import SimpleNamespace as _Namespace
+
+    from woof.ingest.prepared_cache import undelayed_identity_defaults
+    not_in_use = dict(undelayed_identity_defaults(_Namespace(start_time=None)))
+    not_in_use["start_time"] = live_root.get("start_time")
     _, differing = compare_prepared_domain_config(
-        effective_prepared_domain, live_root,
-        not_in_use={"start_time": live_root.get("start_time")})
+        effective_prepared_domain, live_root, not_in_use=not_in_use)
     if differing:
         raise ValueError(
             "native namelist d01 trajectory controls differ from the sealed "
@@ -951,10 +1055,12 @@ def _source_identity(cpu_bridge: Path) -> dict[str, object]:
 
 
 def _surface_state(restored, static_fields, *, sf_surface_physics, num_soil_layers=None,
-                   fractional_seaice=False):
+                   fractional_seaice=False, seaice_threshold=100.0):
     if restored.surface is None:
         return preprocess_land_surface_soil(
             restored.met.fields,
+            # real.exe's seaice_threshold rule (module_soil_pre.F:341-342).
+            seaice_threshold=float(seaice_threshold),
             sf_surface_physics=int(sf_surface_physics),
             # real.exe keeps the sea-ice fraction under fractional_seaice = 1
             # (module_soil_pre.F:216-219, :337-343 of the HRRR v4.1.21 fork).
@@ -1384,8 +1490,23 @@ def _chained_hierarchy_tail(c) -> dict[str, object]:
     writer = None
     try:
         head_started = time.perf_counter()
+        # The corridor is sealed BEFORE the children initialize, so each
+        # corridor child is born on its crop (plan call 5, 2.9.0); it needs
+        # no boundary time, so a moving nest's forecast re-grounds over the
+        # head's copy from its first move, and the seal copies it into
+        # hierarchy-artifacts/ (A136 L7d).
+        corridor_directory = (staging / HIERARCHY_HEAD_DIRNAME
+                              / STATICS_CORRIDOR_DIRNAME)
+        corridor_receipt = emit_statics_corridor_set(
+            exp=c.lifecycle_exp, grids=c.grids, static_catalog=c.static_catalog,
+            directory=corridor_directory,
+            statics_corridor=c.statics_corridor,
+            static_highres=c.static_highres)
+        births = corridor_birth_statics(
+            corridor_directory, corridor_receipt, c.lifecycle_exp)
         child_results, child_seconds = initialize_native_hierarchy_children(
-            exp=exp, root_node=c.root, catalog=c.catalog,
+            exp=exp, root_node=c.root,
+            catalog=catalog_with_corridor_births(c.catalog, births),
             root_initial_result=c.restored.initial_result,
             workers=c.workers, preprocess_backend="cpu",
             cpu_bridge=c.cpu_bridge,
@@ -1411,15 +1532,6 @@ def _chained_hierarchy_tail(c) -> dict[str, object]:
             source_identity=c.hierarchy_source_identity,
             valid_time=exp.start_time,
             root_metadata=_root_preparation_metadata(None))
-        # The corridor needs no boundary time, so a moving nest's forecast
-        # re-grounds over the head's copy from its first move; the seal
-        # copies it into hierarchy-artifacts/ (A136 L7d).
-        corridor_receipt = emit_statics_corridor_set(
-            exp=c.native_exp, grids=c.grids, static_catalog=c.static_catalog,
-            directory=(staging / HIERARCHY_HEAD_DIRNAME
-                       / STATICS_CORRIDOR_DIRNAME),
-            statics_corridor=c.statics_corridor,
-            static_highres=c.static_highres)
         stock_copy = staging / "namelist.input"
         shutil.copyfile(c.stock_wrf_namelist_input, stock_copy)
         proof_head = {
@@ -1595,7 +1707,8 @@ def _chained_hierarchy_tail(c) -> dict[str, object]:
             restored, c.static_fields,
             sf_surface_physics=c.native_exp.root.run.sf_surface_physics,
             num_soil_layers=c.native_exp.root.run.num_soil_layers,
-            fractional_seaice=int(getattr(c.native_exp.root.run, "fractional_seaice", 0)) == 1)
+            fractional_seaice=int(getattr(c.native_exp.root.run, "fractional_seaice", 0)) == 1,
+            seaice_threshold=float(getattr(c.native_exp.root.run, "seaice_threshold", 100.0)))
         children = start_states.reread_children(writer.root, exp=exp)
         result = export_native_hierarchy(
             exp=exp,
@@ -1669,6 +1782,7 @@ def prepare_hrrr_hierarchy(
         valid_time: datetime, output_root: Path, workers: int = 8,
         cpu_bridge: Path | None = None, statics_corridor=None,
         acknowledgements: tuple[str, ...] = (),
+        lifecycle_config: Path | None = None,
 ) -> dict[str, object]:
     """Verify one root preparation and publish generic stock-WRF inputs.
 
@@ -1760,6 +1874,14 @@ def prepare_hrrr_hierarchy(
         rrtmg_variant=_sealed_root_rrtmg_variant(identity),
         rrtmg_compatibility=_sealed_root_rrtmg_compatibility(identity),
         acknowledgements=tuple(acknowledgements))
+    # The lifecycle tables reach ONLY the statics corridor (a dormant slot's
+    # corridor spans the whole parent).  Every document this stage publishes
+    # or compares stays the namelists' own: the forecast companion
+    # experiment.toml must reload to the namelist identity it was rendered
+    # from, which a spawn table it cannot spell broke (2.9.4 rolling,
+    # a 4090 host: ExperimentDocumentError).
+    lifecycle_exp = (native_exp if lifecycle_config is None
+                     else with_config_lifecycle(native_exp, Path(lifecycle_config)))
     from woof.static.highres_production import parse_sealed_static_highres
     declared_highres = identity.get("source_identity", {}).get("static_highres")
     # The echo carries the nests' own terrain smoothing and the urban
@@ -1853,6 +1975,10 @@ def prepare_hrrr_hierarchy(
         raise FileExistsError(staging)
     staging.mkdir()
     try:
+        publish_hierarchy_forecast_companions(
+            staging, resolved_experiment=native_resolved,
+            experiment=native_exp, wps_namelist=wps_namelist,
+            perturbation_deferral=identity.get("source_identity", {}).get("initial_perturbation"))
         preflight_seconds = time.perf_counter() - started
 
         restore_started = time.perf_counter()
@@ -1880,7 +2006,8 @@ def prepare_hrrr_hierarchy(
             restored, static_fields,
             sf_surface_physics=native_exp.root.run.sf_surface_physics,
             num_soil_layers=native_exp.root.run.num_soil_layers,
-            fractional_seaice=int(getattr(native_exp.root.run, "fractional_seaice", 0)) == 1)
+            fractional_seaice=int(getattr(native_exp.root.run, "fractional_seaice", 0)) == 1,
+            seaice_threshold=float(getattr(native_exp.root.run, "seaice_threshold", 100.0)))
         restore_seconds = time.perf_counter() - restore_started
 
         snapshots_started = time.perf_counter()
@@ -1973,8 +2100,13 @@ def prepare_hrrr_hierarchy(
         # before; no preparation applies a bubble.
         root_deferral = identity["source_identity"].get(
             "initial_perturbation")
-        export_exp = native_exp if root_deferral is None else replace(
-            native_exp,
+        # The prepared caches are bound to the experiment the forecast runs,
+        # so a storm slot's lifecycle tables enter their identity (the tree
+        # forecast refused d02 on "follow, retire, spawn" against a cache
+        # prepared without them; box D 21:35Z).  Without a lifecycle config
+        # this is native_exp itself.
+        export_exp = lifecycle_exp if root_deferral is None else replace(
+            lifecycle_exp,
             perturbation=deferred_perturbation_config(root_deferral))
         if root_head is not None:
             return _chained_hierarchy_tail(SimpleNamespace(
@@ -1984,6 +2116,7 @@ def prepare_hrrr_hierarchy(
                 root_preparation=Path(root_preparation), root_head=root_head,
                 paths=paths, staging=staging, output_root=output_root,
                 native_exp=native_exp, export_exp=export_exp, grids=grids,
+                lifecycle_exp=lifecycle_exp,
                 root=root, restored=restored, root_soil=root_soil,
                 static_fields=static_fields, catalog=catalog,
                 static_catalog=static_catalog, static_highres=static_highres,
@@ -1998,8 +2131,20 @@ def prepare_hrrr_hierarchy(
                 stock_wrf_namelist_input=Path(stock_wrf_namelist_input),
                 cache_header=cache_header, valid_time=valid_time))
         hierarchy_started = time.perf_counter()
+        # Sealed BEFORE the children initialize, so each corridor child is
+        # born on its crop (plan call 5, 2.9.0).  The export refuses an
+        # existing artifact folder, so the set waits beside it and moves in
+        # after the artifact join.
+        pending_corridor = staging / ".statics-corridor-pending"
+        corridor_receipt = emit_statics_corridor_set(
+            exp=lifecycle_exp, grids=grids, static_catalog=static_catalog,
+            directory=pending_corridor,
+            statics_corridor=statics_corridor, static_highres=static_highres)
+        births = corridor_birth_statics(
+            pending_corridor, corridor_receipt, lifecycle_exp)
         result = initialize_and_export_native_hierarchy(
-            exp=export_exp, root_node=root, catalog=catalog,
+            exp=export_exp, root_node=root,
+            catalog=catalog_with_corridor_births(catalog, births),
             artifact_output=staging / "hierarchy-artifacts",
             wrf_output=staging / "wrf-native-input",
             root_initial_result=restored.initial_result,
@@ -2033,15 +2178,14 @@ def prepare_hrrr_hierarchy(
         verify_overlay_sequence(snapshots)
         # AFTER the artifact join, and inside the same staging directory
         # the atomic publication renames: the hierarchy tree is already
-        # sealed on its own terms, and the corridor set lands beside it
-        # under hierarchy-artifacts/, which is where the tree runner
-        # looks for it whichever chain wrote the bundle.  The GFS chain
-        # emits through this same function.
-        corridor_receipt = emit_statics_corridor_set(
-            exp=native_exp, grids=grids, static_catalog=static_catalog,
-            directory=(staging / "hierarchy-artifacts"
-                       / STATICS_CORRIDOR_DIRNAME),
-            statics_corridor=statics_corridor, static_highres=static_highres)
+        # sealed on its own terms, and the corridor set (sealed before the
+        # children, above) moves in beside it under hierarchy-artifacts/,
+        # which is where the tree runner looks for it whichever chain wrote
+        # the bundle.  The GFS chain emits through the same function.
+        if corridor_receipt is not None:
+            move_statics_corridor_set(
+                pending_corridor,
+                staging / "hierarchy-artifacts" / STATICS_CORRIDOR_DIRNAME)
         stock_copy = staging / "namelist.input"
         shutil.copyfile(stock_wrf_namelist_input, stock_copy)
         payload = {
@@ -2148,6 +2292,10 @@ def _parser() -> argparse.ArgumentParser:
              "nested tree without this flag); repeatable, exactly as "
              "tools/prepare_hrrr_wrf.py spells it")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument(
+        "--lifecycle-config", type=Path, default=None, metavar="TOML",
+        help="the experiment config whose [[domain]] spawn/follow/retire/"
+             "rearm tables the namelists cannot carry (storm nests)")
     parser.add_argument("--cpu-preprocess-bridge", type=Path)
     # Spelled exactly as the GFS door spells it
     # (woof/gfs_direct.py), because one runner consumes both bundles
@@ -2211,6 +2359,7 @@ def main(argv=None) -> int:
         acknowledgements=tuple(args.ack),
         workers=args.workers, cpu_bridge=args.cpu_preprocess_bridge,
         statics_corridor=statics_corridor,
+        lifecycle_config=args.lifecycle_config,
     )
     # The forecast runner takes --preparation-receipt-sha256 over the
     # receipt this stage just wrote, and the emitted chain tells the

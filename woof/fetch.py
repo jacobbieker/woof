@@ -98,6 +98,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+import contextlib
 import functools
 
 from woof import (explain, fetch_bars, fetch_endpoints, fetch_guard,
@@ -197,12 +198,13 @@ HRRR_TRANSPORTS = ("auto", "nomads", "s3")
 #: table teaches the front door its host without a code edit.
 FETCH_TRANSPORTS = tuple(sorted(
     set(HRRR_TRANSPORTS)
+    | {row["transport"] for row in fetch_endpoints.archive_document()["layouts"]}
     | {host.name
        for source_id in fetch_routes.route_ids()
        for host in fetch_routes.route_for(source_id).hosts}))
 
 #: Which downloader moves the bytes.  ``rust`` is the vendored
-#: ``rw_fetch`` backbone (16 MiB parallel range GETs, ``.idx``
+#: ``rw_fetch`` backbone (parallel range GETs, ``.idx``
 #: coalescing, the cross-process NOMADS rate governor, a disk cache);
 #: ``python`` is the stdlib ``urllib`` transport in :mod:`tools`, which
 #: stays as the always-available fallback.  ``auto`` uses the backbone
@@ -747,7 +749,8 @@ def fetch_front_door_sources() -> tuple[str, ...]:
     with the row, which is the whole point of the route table being data.
     """
 
-    return fetch_routes.all_fetchable_sources()
+    owners = {row.source_id for row in source_adapters.source_adapters() if row.acquisition_owner}
+    return tuple(sorted(set(fetch_routes.all_fetchable_sources()) | owners))
 
 
 def native_cf_fetch_contract(source: str) -> str | None:
@@ -771,6 +774,10 @@ def fetch_accepts_area(source: str) -> bool:
     """
 
     from woof.cf_archive_fetch import sources
+    adapter = source_adapters.get_source_adapter(source)
+    if adapter.acquisition_owner:
+        from importlib import import_module
+        return bool(getattr(import_module(adapter.acquisition_owner), "FETCH_ACCEPTS_AREA", False))
     return fetch_routes.canonical_source(source) in (
         fetch_routes.LEGACY_ROUTE_SOURCES + sources())
 
@@ -1489,9 +1496,40 @@ def _hrrr_transport_base(transport: str) -> str:
         f"unknown HRRR transport {transport!r}; expected 'nomads' or 's3'")
 
 
+#: The HRRR file each rw_fetch product name stands for.
+HRRR_PRODUCT_FILES = {"nat": "wrfnat", "prs": "wrfprs", "sfc": "wrfsfc"}
+
+
+def hrrr_lead_products() -> tuple[str, ...]:
+    """Every HRRR file one lead's fetch reads, so all its probe must ask.
+
+    ``wrfnat`` (atmosphere) and ``wrfprs`` (soil), plus the file of each
+    runtime surface field the hrrr adapter declares (VEGFRA is cut from
+    ``wrfsfc``).  The breakage this prevents: NOAA posts a lead's
+    ``wrfsfc`` up to ~10 min after its ``wrfnat``/``wrfprs`` (07Z f07 on
+    2026-10-20: wrfprs 08:03:26, wrfsfc 08:13:00), so a probe of the pair
+    alone called the lead posted and the VEGFRA transfer was refused with
+    "the GRIB object is not present at this source", failing the run.
+    """
+
+    from woof.source_adapters import get_source_adapter
+
+    extra = tuple(HRRR_PRODUCT_FILES[row[1]] for row in
+                  get_source_adapter("hrrr").runtime_surface_fields)
+    return tuple(dict.fromkeys(("wrfnat", "wrfprs", *extra)))
+
+
+def hrrr_lead_urls(cycle: datetime, hour: int,
+                   transport: str = "s3") -> tuple[str, ...]:
+    """The URLs of :func:`hrrr_lead_products` for one lead on one host."""
+
+    return tuple(hrrr_object_url(cycle, hour, product, transport=transport)
+                 for product in hrrr_lead_products())
+
+
 def hrrr_object_url(cycle: datetime, hour: int, product: str,
                     transport: str = "s3") -> str:
-    if product not in ("wrfnat", "wrfprs"):
+    if product not in HRRR_PRODUCT_FILES.values():
         raise ValueError(f"unknown HRRR product {product!r}")
     return (f"{_hrrr_transport_base(transport)}/hrrr.{cycle:%Y%m%d}/conus/"
             f"hrrr.t{cycle:%H}z.{product}f{hour:02d}.grib2")
@@ -1597,10 +1635,7 @@ def cycle_probe_urls(source: str, cycle: datetime, last_hour: int,
         if transport is None:
             transport = fetch_endpoints.serving_ladder(
                 source, cycle=cycle)[0].name
-        return (hrrr_object_url(cycle, last_hour, "wrfnat",
-                                transport=transport),
-                hrrr_object_url(cycle, last_hour, "wrfprs",
-                                transport=transport))
+        return hrrr_lead_urls(cycle, last_hour, transport=transport)
     if cycle_is_probeable(source):
         return _route_probe_urls(source, cycle, last_hour, transport,
                                  cadence=cadence, start_hour=start_hour, member=member)
@@ -2357,7 +2392,8 @@ def resolve_hrrr_transport(cycle: datetime, requested: str, *,
 
     Without ``required_leads`` this keeps the historical final-hour
     selection. Native as-posted transfers supply their complete prefix:
-    every wrfnat, wrfprs and index must be available on one endpoint,
+    every wrfnat, wrfprs, runtime surface file and index must be available
+    on one endpoint,
     because a later mirrored lead can arrive before an earlier soil pair.
     An endpoint that said one of them is missing (404 or 410) is never
     taken.  When none holds the whole prefix but one could not be heard
@@ -2412,7 +2448,7 @@ def resolve_hrrr_transport(cycle: datetime, requested: str, *,
                      "none is missing; its transfer's own checks decide")
             return unheard[0]
         raise _HrrrPrefixNotPosted(
-            f"every HRRR endpoint said a wrfnat, wrfprs or index of "
+            f"every HRRR endpoint said a {', '.join(hrrr_lead_products())} or index of "
             f"f{leads[0]:03d}..f{leads[-1]:03d} is missing; a final lead "
             "alone cannot authorize downloading a missing intermediate object")
     if requested == "s3":
@@ -2427,10 +2463,7 @@ def resolve_hrrr_transport(cycle: datetime, requested: str, *,
         now = datetime.now(timezone.utc).replace(tzinfo=None)
     age_hours = fetch_endpoints.cycle_age_hours(cycle, now)
     if requested == "nomads":
-        urls = (hrrr_object_url(cycle, last_hour, "wrfnat",
-                                transport="nomads"),
-                hrrr_object_url(cycle, last_hour, "wrfprs",
-                                transport="nomads"))
+        urls = hrrr_lead_urls(cycle, last_hour, transport="nomads")
         if all(probe(url) for url in urls):
             return "nomads"
         detail = (
@@ -2447,12 +2480,11 @@ def resolve_hrrr_transport(cycle: datetime, requested: str, *,
     ladder = fetch_endpoints.serving_ladder("hrrr", cycle=cycle, now=now)
 
     def window_urls(name: str) -> tuple[str, ...]:
-        return (hrrr_object_url(cycle, last_hour, "wrfnat", transport=name),
-                hrrr_object_url(cycle, last_hour, "wrfprs", transport=name))
+        return hrrr_lead_urls(cycle, last_hour, transport=name)
 
     # The throughput rung first: an hour the archive already mirrors has
-    # nothing left to gain from the slower host.  Both final-hour
-    # objects must answer, because a fetch needs the pair.
+    # nothing left to gain from the slower host.  Every final-hour
+    # object must answer, because a fetch needs them all.
     for endpoint in fetch_endpoints.transfer_probes(ladder):
         if all(probe(url) for url in window_urls(endpoint.name)):
             progress(
@@ -2553,6 +2585,127 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+# Only fresh Rust publications enter this memo. Existing/resumed files still
+# undergo independent identity checks. Mutation, append and rename change keys.
+_STREAM_FACTS = OrderedDict()
+_STREAM_FACTS_LOCK = threading.Lock()
+
+
+def _stream_entry(identity):
+    # Stat clocks can have coarser resolution on overlay filesystems. A
+    # same-size write must invalidate the stream digest even inside one tick.
+    with _STREAM_FACTS_LOCK:
+        entry = _STREAM_FACTS.get(identity)
+        if entry is not None and entry['_change_watch'].unchanged():
+            return entry
+        if entry is not None:
+            _STREAM_FACTS.pop(identity)['_change_watch'].close()
+    return None
+
+
+def _publication(identity: tuple) -> dict:
+    """The fields of a :func:`_stat_identity` a Rust receipt's ``publication`` names."""
+    return dict(zip(("dev", "ino", "bytes", "mtime_ns", "ctime_ns"), identity[1:]))
+
+
+#: Output holds open in this process; see :func:`_fetch_out`.
+_FETCH_OUT_HOLDS = 0
+
+
+@contextlib.contextmanager
+def _fetch_out(out, **options):
+    """The ``fetch-out`` lock; the last one to end closes held payload files.
+
+    A Windows mutation notice keeps its payload open, and an open file
+    refuses a rename of any folder above it and a MoveFileEx replacement
+    of itself.  The fetch that published a payload owns its folder until
+    it lets go.  When no fetch in this process holds an output any more,
+    the fresh facts that keep a file open are dropped, and later checks
+    read the disk as a resumed process does.  An inotify watch holds no
+    file and stays.
+    """
+    global _FETCH_OUT_HOLDS
+    with fetch_guard.hold("fetch-out", out, **options):
+        with _STREAM_FACTS_LOCK:
+            _FETCH_OUT_HOLDS += 1
+        try:
+            yield
+        finally:
+            with _STREAM_FACTS_LOCK:
+                _FETCH_OUT_HOLDS -= 1
+                if not _FETCH_OUT_HOLDS:
+                    for identity in [key for key, value in _STREAM_FACTS.items()
+                                     if value['_change_watch'].holds_file]:
+                        _STREAM_FACTS.pop(identity)['_change_watch'].close()
+
+
+def _remember_stream_facts(path: Path, entry: dict, *, emit_last_byte=True) -> None:
+    if (not isinstance(entry.get("grib2_messages"), int)
+            or not isinstance(entry.get("sha256"), str)):
+        return  # Compatibility with a backbone predating stream receipts.
+    published = entry.get("publication")
+    watch = None
+    if isinstance(published, dict):
+        # Watch before the identity is read, so a change after the read is
+        # noticed even when it lands inside the same change-time tick.
+        from woof.file_change_watch import FileChangeWatch
+        watch = FileChangeWatch(path)
+    try:
+        identity = _stat_identity(path)
+        if entry.get("bytes") != identity[3]:
+            raise ValueError(f"{path.name}: Rust stream receipt byte count differs from the published file; refuses a changed payload")
+        if watch is not None and any(published.get(key) != value
+                                     for key, value in _publication(identity).items()):
+            raise ValueError(f"{path.name}: payload identity changed after Rust publication; refuses binding a digest to changed bytes")
+    except BaseException:
+        if watch is not None:
+            watch.close()
+        raise
+    if watch is not None:
+        with _STREAM_FACTS_LOCK:
+            previous = _STREAM_FACTS.pop(identity, None)
+            if previous is not None:
+                previous['_change_watch'].close()
+            _STREAM_FACTS[identity] = {**entry, '_change_watch': watch}
+            while len(_STREAM_FACTS) > 4096:
+                _STREAM_FACTS.popitem(last=False)[1]['_change_watch'].close()
+    # Platforms without a change-time identity retain independent disk checks.
+    if emit_last_byte and isinstance(entry.get("last_byte_unix"), (int, float)):
+        from woof.timeline.ledger import emit
+        emit("fetch.last_byte", attrs={"name": path.name,
+             "range_completed_unix": entry["last_byte_unix"],
+             "receipt_delay_seconds": time.time() - entry["last_byte_unix"],
+             "boundary": "verified range response completion"})
+
+
+def _rename_stream_payload(landed: Path, dest: Path, entry: dict) -> None:
+    """Verify the published inode, rename it, then rebind its identity.
+
+    A rename changes ctime on Unix and ChangeTime on Windows. It may
+    change neither the bytes nor the inode, so every other identity
+    component must survive it.
+    """
+    _remember_stream_facts(landed, entry, emit_last_byte=False)
+    os.replace(landed, dest)
+    published = entry.get("publication")
+    if isinstance(published, dict):
+        actual = _publication(_stat_identity(dest))
+        if any(actual[key] != published.get(key) for key in actual if key != "ctime_ns"):
+            raise ValueError(f"{dest.name}: payload identity changed during rename; refuses binding changed bytes")
+        entry = {**entry, "publication": actual}
+    _remember_stream_facts(dest, entry)
+
+
+def _fetched_digest(path: Path) -> str:
+    entry = _stream_entry(_stat_identity(path))
+    return entry["sha256"] if entry is not None else sha256_file(path)
+
+
+def _fetched_records(path: Path) -> int:
+    entry = _stream_entry(_stat_identity(path))
+    return entry["grib2_messages"] if entry is not None else count_grib2_messages(path)
+
+
 #: sha256 of files this process has already read whole, keyed by every
 #: stat field that moves when a file's bytes can.  A finished folder's
 #: re-run asks "are these still the bytes the receipt recorded?" at the
@@ -2571,9 +2724,10 @@ _digest_clock_ns = time.time_ns
 
 
 def _stat_identity(path: Path) -> tuple:
-    status = os.stat(path)
-    return (os.path.abspath(path), status.st_dev, status.st_ino,
-            status.st_size, status.st_mtime_ns, status.st_ctime_ns)
+    # Not os.stat on Windows, whose st_ctime is the creation time; see
+    # woof.file_change_watch.stat_identity.
+    from woof.file_change_watch import stat_identity
+    return (os.path.abspath(path), *stat_identity(path))
 
 
 def existing_file_digest(path: Path) -> str:
@@ -2589,6 +2743,12 @@ def existing_file_digest(path: Path) -> str:
     """
 
     identity = _stat_identity(path)
+    # Same-process manifest and supplement binding may ask again immediately
+    # after publication. The trusted stream already hashed these bytes. A
+    # resumed process has no stream facts, and any file mutation changes the key.
+    streamed = _stream_entry(identity)
+    if streamed is not None:
+        return streamed["sha256"]
     with _DIGEST_MEMO_LOCK:
         known = _DIGEST_MEMO.get(identity)
         if known is not None:
@@ -2693,7 +2853,8 @@ def fetch_throughput(out: Path) -> dict | None:
 
     payload = _load_fetch_manifest(Path(out))
     if payload is None:
-        return None
+        from woof.fetch_adoption import route_throughput
+        return route_throughput(Path(out))
     files = payload.get("files")
     if not isinstance(files, list):
         return None
@@ -2733,6 +2894,8 @@ def fetch_throughput(out: Path) -> dict | None:
         "seconds": round(seconds, 6) if timed else None,
         "files_timed": timed,
         "downloaded_files": downloaded,
+        "adopted_files": 0,
+        "reused_files": len(files) - downloaded,
         "downloaded_bytes": downloaded_bytes,
         "downloaded_seconds": (round(downloaded_seconds, 6)
                                if downloaded else None),
@@ -3269,7 +3432,12 @@ def gfs_live_index(cycle: datetime, *, progress=print, opener=None,
     whose own record count is checked anyway.
     """
 
-    url = f"{gfs_object_url(cycle, 0, source)}.idx"
+    try:
+        url = f"{gfs_object_url(cycle, 0, source)}.idx"
+    except ValueError as error:
+        progress(f"fetch {source}: no index layout for this cycle ({error}); "
+                 "the declared pressure ladder stands in; Rust validates the fields")
+        return None
     request = Request(url, headers={"User-Agent": _USER_AGENT})
     try:
         with (opener or paced_urlopen)(request, timeout=120) as response:
@@ -3458,7 +3626,7 @@ def fetch_gfs(*, cycle: datetime, hours: tuple[int, ...], area: Area,
     See :func:`_fetch_gfs_locked` for the transfer itself.
     """
 
-    with fetch_guard.hold("fetch-out", out, progress=progress):
+    with _fetch_out(out, progress=progress):
         return _fetch_gfs_locked(
             cycle=cycle, hours=hours, area=area,
             out=deep_io_path(out, DOWNLOAD_DEPTH_BUDGET), progress=progress,
@@ -3605,6 +3773,11 @@ def _fetch_gfs_locked(*, cycle: datetime, hours: tuple[int, ...], area: Area,
     pool_summary: dict = {}
 
     def publish_manifest() -> Path:
+        # Another preparation may already be reading this completed series.
+        # A cached recheck must not replace it with its first verified hour.
+        # Fresh/interrupted downloads still publish each resumable prefix.
+        if receipt is not None and len(files) < len(hours):
+            return out / FETCH_MANIFEST_NAME
         # Relative names: gfs_grib2_bridge resolves them against the
         # TSV's own directory, so the fetched directory stays relocatable.
         series = out / f"{prefix}-series.tsv"
@@ -3869,10 +4042,11 @@ def _rw_fetch_gfs_fullfile(*, binary: Path, cycle: datetime, hour: int,
 
     from woof import rustwx_fetch
 
+    endpoint = fetch_endpoints.endpoint_named(source, transport)
     record = rustwx_fetch.run_fetch(
         binary, model=source, date=f"{cycle:%Y%m%d}", cycle=cycle.hour,
-        hours=(hour,), product=RW_FETCH_GFS_PRODUCT,
-        source=RW_FETCH_SOURCES[transport],
+        hours=(hour,), product=endpoint.product,
+        source=endpoint.rust_source,
         mode="full-file", out=out, cache_dir=cache_dir, streams=streams,
         on_progress=None if byte_relay is None else byte_relay())
     if len(record["files"]) != 1:
@@ -3880,6 +4054,13 @@ def _rw_fetch_gfs_fullfile(*, binary: Path, cycle: datetime, hour: int,
             f"rw_fetch returned {len(record['files'])} files for one "
             "forecast hour")
     entry = record["files"][0]
+    canonical = f"{GFS_CONTAINER_PREFIX[source]}.t{cycle:%H}z.pgrb2.0p25.f{hour:03d}"
+    if entry["name"] != canonical:
+        _rename_stream_payload(out / entry["name"], out / canonical, entry)
+        entry = {**entry, "name": canonical, "path": str(out / canonical),
+                 "publication": _publication(_stat_identity(out / canonical))}
+    else:
+        _remember_stream_facts(out / entry["name"], entry)
     progress(f"fetch {source} f{hour:03d}: {entry['name']} "
              f"{entry['bytes']:,} B in {entry['wall_seconds']:.1f} s "
              f"({entry['source']}, {entry['mode']} -- "
@@ -3913,7 +4094,7 @@ def fetch_gfs_fullfile(*, cycle: datetime, hours: tuple[int, ...],
     """
 
     transport = fetch_endpoints.policy_transport(source, transport)
-    with fetch_guard.hold("fetch-out", out, progress=progress):
+    with _fetch_out(out, progress=progress):
         return _fetch_gfs_fullfile_locked(
             cycle=cycle, hours=hours, area=area,
             out=deep_io_path(out, DOWNLOAD_DEPTH_BUDGET), progress=progress,
@@ -3978,9 +4159,10 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
     # manifest, and handed to the bridge by the front door.  A folder
     # that already holds this whole request resolves it against the
     # published ladder its receipt recorded, and reads no index.
-    available = _recorded_published_levels(_complete_request_receipt(
+    receipt = _complete_request_receipt(
         out, force=force, source=source, cycle=cycle, area=area,
-        hours=hours, mode="full-file"))
+        hours=hours, mode="full-file")
+    available = _recorded_published_levels(receipt)
     if available is None:
         index_text = gfs_live_index(cycle, progress=progress,
                                     source=source)
@@ -4012,6 +4194,10 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
     pool_summary: dict = {}
 
     def publish_manifest() -> Path:
+        # Keep a completed shared series stable while a second member checks
+        # cached files. Only a fresh/interrupted fetch needs prefix receipts.
+        if receipt is not None and len(files) < len(hours):
+            return out / FETCH_MANIFEST_NAME
         # Relative names: gfs_grib2_bridge resolves them against the
         # TSV's own directory, so the fetched directory stays relocatable.
         series = out / f"{prefix}-series.tsv"
@@ -4031,12 +4217,14 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
             hours=tuple(int(item["forecast_hour"]) for item in files),
             area=area, files=entries)
         payload["notes"] = (
-            "whole pgrb2.0p25 objects (north-to-south DRT 5.3 grids, "
-            "certified in gfs_grib2_bridge with its scan-order flip and "
-            "the SOILW missing-value matched pair); no area crop is "
-            "involved.  Both endpoints publish the same key with the "
-            "same bytes, so per-file endpoints may differ across a "
-            "fall-through without weakening any digest bar")
+            "Whole archive GRIB2 objects; no area crop. The endpoint layout "
+            "declares the product resolution. Rust verifies the GRIB envelope "
+            "and the ingest bridge validates the grid and required fields.")
+        payload["archive_products"] = {
+            name: {"product": fetch_endpoints.endpoint_named(source, name).product,
+                   "layouts": list(fetch_endpoints.endpoint_named(source, name).layouts)}
+            for name in sorted({str(item["endpoint"]) for item in files
+                                if item.get("endpoint")})}
         payload["engine"] = engine
         payload["engine_selection"] = _engine_selection(
             engine, engine_selection)
@@ -4163,9 +4351,9 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
                 endpoint_name = prior.get("endpoint")
                 census = "its receipt recorded"
             else:
-                idx_records = _gfs_index_record_count(
+                idx_records = (_gfs_index_record_count(
                     url + ".idx", progress=progress,
-                    label=f"{source} f{hour:03d}")
+                    label=f"{source} f{hour:03d}") if rungs[0].idx_available else None)
                 # Nothing records which host served a file the receipt
                 # never admitted, and naming the ladder head would be a
                 # claim.
@@ -4180,9 +4368,9 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
             progress(f"fetch {source} f{hour:03d}: {name} exists, "
                      f"{path.stat().st_size:,} B verified -- skipped")
         else:
-            idx_records = _gfs_index_record_count(
+            idx_records = (_gfs_index_record_count(
                 url + ".idx", progress=progress,
-                label=f"{source} f{hour:03d}")
+                label=f"{source} f{hour:03d}") if rungs[0].idx_available else None)
             started = time.perf_counter()
 
             def move(endpoint: fetch_endpoints.Endpoint) -> None:
@@ -4220,7 +4408,7 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
                 raise RuntimeError(str(error)) from None
             endpoint_name = chosen.name
             url = chosen.url(key)
-            observed = count_grib2_messages(path)
+            observed = _fetched_records(path)
             if idx_records is not None and observed != idx_records:
                 _quarantine_rejected(path, progress,
                                      f"{source} full-file")
@@ -4229,7 +4417,7 @@ def _fetch_gfs_fullfile_locked(*, cycle: datetime, hours: tuple[int, ...],
                     f"messages where its live .idx lists "
                     f"{idx_records}; the file has been moved aside, "
                     "nothing was deleted")
-            digest = sha256_file(path)
+            digest = _fetched_digest(path)
             if engine != "rust":
                 progress(f"fetch {source} f{hour:03d}: {name} "
                          f"{path.stat().st_size:,} B in "
@@ -4482,6 +4670,24 @@ def author_gfs_front_door_manifest(
     ``--source-manifest``/``--source-manifest-sha256`` wants verbatim.
     """
 
+    # Fetches atomically publish a resumable prefix after each lead, under
+    # this same lock. A second member can be rechecking the shared download
+    # when the first reaches this stage. Wait for its complete publication,
+    # and keep the inventory, series and hashes in one locked transaction.
+    with _fetch_out(out, progress=progress):
+        return _author_gfs_front_door_manifest_locked(
+            out=out, bridge=bridge, wps_namelist=wps_namelist,
+            experiment_config=experiment_config, static_input=static_input,
+            static_receipt=static_receipt, manifest_out=manifest_out,
+            source=source, forecast_start_hour=forecast_start_hour,
+            progress=progress)
+
+
+def _author_gfs_front_door_manifest_locked(
+        *, out, bridge, wps_namelist, experiment_config, static_input,
+        static_receipt, manifest_out, source, forecast_start_hour, progress):
+    """Author the front-door manifest with the download lock held."""
+
     if source not in GFS_CONTAINER_SOURCES:
         raise ValueError(
             f"the GFS front door serves {GFS_CONTAINER_SOURCES}, not "
@@ -4608,7 +4814,7 @@ def author_gfs_front_door_manifest(
         "schema": GFS_FRONT_DOOR_MANIFEST_SCHEMA,
         "source": identity,
         "files": {
-            role: {"name": path.name, "sha256": sha256_file(path)}
+            role: {"name": path.name, "sha256": _fetched_digest(path)}
             for role, path in roles.items()
         },
     }
@@ -5039,7 +5245,8 @@ def _rw_fetch_hrrr(*, binary: Path, cycle: datetime, hour: int, kind: str,
                    host: str, mode: str, out: Path,
                    cache_dir: Path | None, progress,
                    retries: int = 0, shown_name: str | None = None,
-                   streams: int | None = None, byte_relay=None) -> dict:
+                   streams: int | None = None, byte_relay=None,
+                   analyzed_aerosol: bool = False, extras=()) -> dict:
     """One HRRR product through the Rust backbone; returns its record.
 
     The backbone names each object after the URL it came from, so the
@@ -5067,8 +5274,9 @@ def _rw_fetch_hrrr(*, binary: Path, cycle: datetime, hour: int, kind: str,
     from tools import download_hrrr_native_subset as range_transport
     from woof import rustwx_fetch
 
-    selectors = (range_transport.atmosphere_selectors() if kind == "atmosphere"
-                 else range_transport.soil_selectors())
+    selectors = (range_transport.atmosphere_selectors(
+                     extras, analyzed_aerosol=analyzed_aerosol)
+                 if kind == "atmosphere" else range_transport.soil_selectors())
     patterns = out / f".rw-fetch-{kind}-f{hour:02d}.selectors"
     rustwx_fetch.write_pattern_file(patterns, selectors)
     attempt = 0
@@ -5203,7 +5411,9 @@ def count_selectors_in_index(index_text: str, selectors: tuple[str, ...],
     return matched
 
 
-def _hrrr_derived_bar(entry: dict, *, kind: str, out: Path) -> int | None:
+def _hrrr_derived_bar(entry: dict, *, kind: str, out: Path,
+                      analyzed_aerosol: bool = False,
+                      extras=()) -> int | None:
     """The live selection count behind one Rust HRRR transfer.
 
     In ``idx-subset`` mode the backbone selected the records itself and
@@ -5232,8 +5442,9 @@ def _hrrr_derived_bar(entry: dict, *, kind: str, out: Path) -> int | None:
         return None
     from tools import download_hrrr_native_subset as range_transport
 
-    selectors = (range_transport.atmosphere_selectors() if kind == "atmosphere"
-                 else range_transport.soil_selectors())
+    selectors = (range_transport.atmosphere_selectors(
+                     extras, analyzed_aerosol=analyzed_aerosol)
+                 if kind == "atmosphere" else range_transport.soil_selectors())
     return count_selectors_in_index(
         index_path.read_text(encoding="utf-8"), selectors,
         range_transport.ACCUMULATION_EXCLUSION)
@@ -5246,7 +5457,8 @@ def _download_one_hrrr_product(
         label: str, cache_dir: Path | None, workers: int, retries: int,
         bar_kind: str, certified: int, accept_inventory_change: bool,
         progress, dedup: list[dict] | None = None,
-        streams: int | None = None, byte_relay=None):
+        streams: int | None = None, byte_relay=None,
+        analyzed_aerosol: bool = False, extras=()):
     """Download one HRRR product from one host; ``(bar, url)``.
 
     ``dedup`` collects each Rust transfer's cache accounting, which the
@@ -5281,7 +5493,11 @@ def _download_one_hrrr_product(
             binary=engine_bin, cycle=cycle, hour=hour, kind=kind,
             host=host, mode=mode, out=out, cache_dir=cache_dir,
             progress=progress, retries=retries, shown_name=dest_name,
-            streams=streams, byte_relay=byte_relay)
+            streams=streams, byte_relay=byte_relay,
+            # Said only when asked, so every other request keeps the
+            # backbone call it always made.
+            **({"analyzed_aerosol": True} if analyzed_aerosol else {}),
+            **({"extras": extras} if extras else {}))
         if dedup is not None and isinstance(entry.get("dedup"), dict):
             dedup.append(entry["dedup"])
         url = entry["grib_url"]
@@ -5289,7 +5505,9 @@ def _download_one_hrrr_product(
         if landed != dest:
             # Only the soil product needs renaming: it is carved out of
             # wrfprs and ArWen files it under its own name.
-            os.replace(landed, dest)
+            _rename_stream_payload(landed, dest, entry)
+        else:
+            _remember_stream_facts(dest, entry)
         # The census can only be read after the object has landed, so a
         # tripped tripwire here refuses AFTER a payload exists.  Quarantine
         # it first, then let the refusal say what is actually on disk --
@@ -5297,8 +5515,11 @@ def _download_one_hrrr_product(
         # run also refuses, under a message swearing nothing was
         # downloaded.
         bar = resolve_bar(
-            bar_kind, _hrrr_derived_bar(entry, kind=kind, out=out),
-            accept_inventory_change=accept_inventory_change,
+            bar_kind, _hrrr_derived_bar(
+                entry, kind=kind, out=out,
+                **({"analyzed_aerosol": True} if analyzed_aerosol else {}),
+                extras=extras),
+            accept_inventory_change=accept_inventory_change, certified=certified,
             progress=progress,
             on_refusal=lambda: _quarantine_inventory_payload(
                 dest, out, entry, progress, f"hrrr {label}"))
@@ -5309,7 +5530,7 @@ def _download_one_hrrr_product(
             # count, not the selection's.
             expected_messages = (
                 entry.get("probe", {}).get("idx_record_count") or None)
-        observed = count_grib2_messages(dest)
+        observed = _fetched_records(dest)
         if expected_messages is not None and observed != expected_messages:
             _quarantine_rejected(dest, progress, f"hrrr {label}")
             raise ValueError(
@@ -5324,6 +5545,7 @@ def _download_one_hrrr_product(
         index_path=out / f"{source_name}.idx",
         destination=dest,
         kind=kind,
+        analyzed_aerosol=analyzed_aerosol,
     )
     # The selection itself is the derivation here: with the count clause
     # left on, an inventory change is refused inside the transport with
@@ -5332,7 +5554,8 @@ def _download_one_hrrr_product(
     try:
         range_transport._download_product(
             request, workers=workers, retries=retries,
-            expected_count=None if accept_inventory_change else certified)
+            expected_count=None if accept_inventory_change else certified,
+            **({"extras": extras} if extras else {}))
     except URLError as error:
         raise RuntimeError(hrrr_reach_refusal(
             host, cycle, hour, kind, error)) from None
@@ -5341,7 +5564,7 @@ def _download_one_hrrr_product(
     # before any range GET.  Should one ever reach here the payload has
     # landed, so this refusal quarantines it and tells the truth too.
     bar = resolve_bar(bar_kind, observed,
-                      accept_inventory_change=accept_inventory_change,
+                      accept_inventory_change=accept_inventory_change, certified=certified,
                       progress=progress,
                       on_refusal=lambda: _quarantine_inventory_payload(
                           dest, out, {"idx_name": f"{source_name}.idx"},
@@ -5422,7 +5645,9 @@ def fetch_hrrr(*, cycle: datetime, hours: tuple[int, ...],
                accept_inventory_change: bool = False,
                file_workers: int | None = None,
                transport_fallback: tuple[str, ...] = (),
-               on_hour_ready=None) -> Path:
+               on_hour_ready=None,
+               runtime_surface: str | None = None,
+               analyzed_aerosol: bool = False, extras=()) -> Path:
     """Byte-range download the native HRRR subset series into ``out``.
 
     Single writer per ``--out``: the prior-receipt read, the ``force``
@@ -5438,7 +5663,7 @@ def fetch_hrrr(*, cycle: datetime, hours: tuple[int, ...],
     if fetch_endpoints.policy_uses_aws("hrrr"):
         transport = fetch_endpoints.policy_transport("hrrr", transport)
         transport_fallback = ()
-    with fetch_guard.hold("fetch-out", out, progress=progress):
+    with _fetch_out(out, progress=progress):
         return _fetch_hrrr_locked(
             cycle=cycle, hours=hours, area=area,
             out=deep_io_path(out, DOWNLOAD_DEPTH_BUDGET), workers=workers,
@@ -5450,7 +5675,8 @@ def fetch_hrrr(*, cycle: datetime, hours: tuple[int, ...],
             accept_inventory_change=accept_inventory_change,
             file_workers=file_workers,
             transport_fallback=transport_fallback,
-            on_hour_ready=on_hour_ready)
+            on_hour_ready=on_hour_ready, runtime_surface=runtime_surface,
+            analyzed_aerosol=analyzed_aerosol, extras=extras)
 
 
 def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
@@ -5469,8 +5695,14 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
                        accept_inventory_change: bool = False,
                        file_workers: int | None = None,
                        transport_fallback: tuple[str, ...] = (),
-                       on_hour_ready=None) -> Path:
+                       on_hour_ready=None,
+                       runtime_surface: str | None = None,
+                       analyzed_aerosol: bool = False, extras=()) -> Path:
     """The HRRR transfer, with the output-root lock already held.
+
+    ``analyzed_aerosol``: the configuration's preparation reads HRRR's
+    analyzed aerosol numbers (QNWFA/QNIFA), so the atmosphere subset
+    selects them too and a kept subset without them is fetched again.
 
     Reuses the proven ``.idx`` selection/range transport in
     :mod:`tools.download_hrrr_native_subset` per product (atmosphere
@@ -5537,12 +5769,20 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
                          f"{FETCH_MODES}")
     if engine == "rust" and engine_bin is None:
         raise ValueError("engine 'rust' needs the resolved rw_fetch binary")
-    bar_kinds = {"atmosphere": "hrrr-atmosphere", "soil": "hrrr-soil"}
-    expected_counts = {"atmosphere": range_transport.ATMOSPHERE_RECORD_COUNT,
+    bar_kinds = {"atmosphere": ("hrrr-atmosphere-aerosol" if analyzed_aerosol
+                                else "hrrr-atmosphere"),
+                 "soil": "hrrr-soil"}
+    from woof.ingest.native_extras import requested_extra_fields
+    extras = requested_extra_fields(extras)
+    expected_counts = {"atmosphere": range_transport.atmosphere_record_count(
+                           analyzed_aerosol=analyzed_aerosol, extras=extras),
                        "soil": range_transport.SOIL_RECORD_COUNT}
     from woof.source_adapters import get_source_adapter
     runtime_adapter = get_source_adapter("hrrr")
     runtime_rows = runtime_adapter.runtime_surface_fields
+    from woof.runtime_surface_fetch import declared_runtime_surface_fields
+    runtime_declared = declared_runtime_surface_fields(
+        runtime_surface, runtime_adapter)
     # Seeded, not empty: a completed resume downloads nothing and would
     # otherwise republish record_bars as [], erasing an accepted
     # inventory change the directory's files really were fetched under.
@@ -5577,6 +5817,15 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
     prior_digests = _prior_manifest_digests(out)
     prior_entries = _prior_manifest_entries(out)
     prior_records = _prior_manifest_records(out)
+    previous = out / FETCH_MANIFEST_NAME
+    previous_extras = ()
+    if previous.is_file():
+        previous_extras = tuple(json.loads(previous.read_text()).get("native_extras", ()))
+    if previous_extras != extras:
+        # A full-file census alone cannot prove which subset was requested.
+        prior_digests = {}
+        prior_entries = {}
+        prior_records = {}
     bars.update(_prior_manifest_bars(out))
     deadline = clock() + wait_timeout_s
     files: list[dict] = []
@@ -5629,6 +5878,8 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
         payload["engine_selection"] = _engine_selection(
             engine, engine_selection)
         payload["mode"] = mode
+        if extras:
+            payload["native_extras"] = list(extras)
         payload["record_bars"] = [
             bar.as_manifest() for bar in bars.values()]
         # What the backbone's disk cache cost this run.  A full-file
@@ -5660,6 +5911,16 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
         file_started = time.perf_counter()
         digest = None
         runtime_binding = None
+        if (dest.exists() and not force and kind == "atmosphere"
+                and analyzed_aerosol
+                and prior_records.get(dest_name, 0) < expected_counts[kind]):
+            # A subset kept from a fetch whose preparation did not read the
+            # aerosol pair: it lacks the records this one needs, so it is
+            # set aside (never deleted) and fetched again.
+            _quarantine_rejected(dest, progress, f"hrrr {label}")
+        if dest.exists() and not force and previous_extras != extras:
+            _quarantine_rejected(dest, progress,
+                "native extra request changed; prevents reusing a different tracer inventory")
         if dest.exists() and not force:
             digest = _existing_hrrr_digest(
                 dest, expected_count=expected,
@@ -5668,7 +5929,12 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
             if kind == "soil" and runtime_rows:
                 prior_runtime = (prior_entries.get(dest_name) or {}).get("runtime_surface")
                 if (not isinstance(prior_runtime, list)
-                        or {row.get("field") for row in prior_runtime} != {row[0] for row in runtime_rows}):
+                        or {row.get("field") for row in prior_runtime} != {row[0] for row in runtime_rows}
+                        # A recorded fallback for a field this request
+                        # declares is not a reusable file: the fetch runs
+                        # again and refuses that field by name.
+                        or any(row.get("fallback_id") and row.get("field") in runtime_declared
+                               for row in prior_runtime)):
                     digest = None
                 else:
                     runtime_binding = prior_runtime
@@ -5741,8 +6007,11 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
                         cache_dir=cache_dir, workers=workers,
                         retries=retries, bar_kind=bar_kinds[kind],
                         certified=expected_counts[kind],
+                        **({"extras": extras} if extras else {}),
                         accept_inventory_change=accept_inventory_change,
                         progress=progress, dedup=cache_dedup,
+                        **({"analyzed_aerosol": True}
+                           if analyzed_aerosol else {}),
                         streams=streams,
                         byte_relay=(None if monitor is None else
                                     functools.partial(monitor.relay,
@@ -5769,8 +6038,9 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
                 runtime_binding = append_runtime_surface_records(
                     dest, adapter=runtime_adapter, cycle=cycle, lead=hour, host=chosen,
                     binary=engine_bin if engine == "rust" else None,
-                    cache_dir=cache_dir, progress=progress, streams=streams)
-            digest = sha256_file(dest)
+                    cache_dir=cache_dir, progress=progress, streams=streams,
+                    declared=runtime_declared)
+            digest = _fetched_digest(dest)
             if engine != "rust":
                 # The Rust route has already said this, with the
                 # transport it used; a second line per file said it
@@ -5783,7 +6053,7 @@ def _fetch_hrrr_locked(*, cycle: datetime, hours: tuple[int, ...],
             "name": dest_name, "role": kind, "forecast_hour": hour,
             "bytes": dest.stat().st_size, "sha256": digest,
             "url": url, "transport": chosen,
-            "records": count_grib2_messages(dest),
+            "records": _fetched_records(dest) if downloaded else count_grib2_messages(dest),
             "seconds": round(time.perf_counter() - file_started, 6),
             # Said, not inferred.  Without it `fetch_throughput` read
             # every HRRR fetch as zero downloads -- so a re-run that
@@ -6575,6 +6845,75 @@ _LEGACY_ONLY_FLAGS = {
 }
 
 
+@functools.lru_cache(maxsize=32)
+def _stream_capable(binary, identity):
+    import subprocess
+    try:
+        result = subprocess.run([str(binary), "--help"], capture_output=True,
+                                text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and "rw_fetch object --url URL --output FILE" in result.stdout
+
+
+_ROUTE_OBJECT_TRANSPORT = fetch_routes._download_object
+
+
+def _route_stream_downloader(plan, args):
+    """Use the Rust streaming door for a declared GRIB2 profile.
+
+    Other formats retain their established transport. No source names or
+    provider-specific URL algebra appear in this data path.
+    """
+    adapter = source_adapters.get_source_adapter(plan.source_id)
+    # Preserve a caller's substituted transport, including offline replays.
+    if fetch_routes._download_object is not _ROUTE_OBJECT_TRANSPORT:
+        return None
+    if "grib2" not in str(adapter.packaged_profile).lower():
+        return None
+    from woof import rustwx_fetch
+    binary = rustwx_fetch.find_fetch_bin()
+    if binary is None:
+        return None
+    # Older installed artifacts keep their former route until rebuilt.
+    # The new object door is additive to the existing fetch ABI.
+    if not _stream_capable(binary, _stat_identity(binary)):
+        return None
+    from woof.fetch_connections import max_connections
+    if (max_connections() <= rustwx_fetch.LEGACY_IDLE_CONNECTIONS and
+            not rustwx_fetch._idle_capable(str(binary), _stat_identity(binary))):
+        # An older bridge can retain idle sockets across redirected hosts.
+        # The generic Python transport can honor even a one-connection box.
+        return None
+    def download(url, dest, *, magic, opener=None):
+        # The ahead probe can promote a mirror above the plan's first
+        # endpoint. Size this transfer for its actual host, not that
+        # earlier endpoint's (possibly one-stream) politeness limit.
+        streams = fetch_pool.chunk_streams_per_file(args.fetch_workers,
+            files=len(plan.objects), host=fetch_pool.host_key(url))
+        if opener is not None or magic != "GRIB":
+            return fetch_routes._download_object(url, dest, magic=magic,
+                                                opener=opener, streams=streams)
+        env = dict(os.environ)
+        env["RUSTWX_DOWNLOAD_STREAMS"] = str(streams)
+        dest = Path(dest)
+        if dest.exists():
+            _quarantine_rejected(dest, print,
+                "verified reuse failed; prevents replacing changed input bytes")
+        job = fetch_pool.current_job()
+        relay = getattr(job, "byte_relay", None)
+        entry = rustwx_fetch._run([str(binary), "object", "--url", url,
+            "--output", str(dest)], what="object", out=dest.parent, env=env,
+            on_progress=None if relay is None else relay())
+        _remember_stream_facts(dest, entry)
+        # Preparation binds the durable source manifest. Publication identity
+        # and transfer clocks belong to the memo/ledger, not that content key.
+        return {"name": dest.name, "bytes": entry["bytes"],
+                "sha256": entry["sha256"], "url": url}
+
+    return download
+
+
 def _route_fetch_main(args, source: str) -> int:
     """Fetch a table route with the same cycle/member/window used by its probe."""
     supplied = []
@@ -6625,7 +6964,7 @@ def _route_fetch_main(args, source: str) -> int:
         cycle = parse_cycle(args.cycle, source)
     plan = fetch_routes.resolve_request(source, cycle=cycle, hours=args.hours,
         cadence=args.cadence, start_hour=start, host=args.transport, member=args.member, out=args.out)
-    with fetch_guard.hold("fetch-out", args.out):
+    with _fetch_out(args.out):
         if not args.force_refetch:
             fetch_routes.check_prior_request(args.out, plan)
         loop = None
@@ -6651,10 +6990,7 @@ def _route_fetch_main(args, source: str) -> int:
         # before the first byte moves: a named cycle was never asked, and
         # a cached donor folder is checked for completeness instead.
         for donor in plan.donors:
-            if args.force_refetch or not cached_request_complete(
-                    _route_donor_out(args.out, donor), source=donor.source,
-                    cycle=donor.cycle, area=None, hours=tuple(donor.leads),
-                    mode="full-file", refuse_changed=True):
+            if args.force_refetch or not _donor_cached(donor, args):
                 try:
                     require_published_cycle(
                         donor.source, donor.cycle, max(donor.leads))
@@ -6663,8 +6999,27 @@ def _route_fetch_main(args, source: str) -> int:
                         f"--source {source} takes part of its start from the "
                         f"{donor.source.upper()} analysis of its own cycle, "
                         f"and {error}") from None
-        fetch_routes.run_plan(plan, out=args.out, force=args.force_refetch, file_workers=args.fetch_workers)
         donor_files = _fetch_route_donors(plan, args)
+        bound = False
+
+        def bind_ready(lead, entries, composed):
+            nonlocal bound
+            if not bound:
+                fetch_routes.write_handoff(plan, args.out, donor_files=donor_files)
+                bound = True
+
+        def bind_completed(index, entry):
+            # Probes also use the pool, but carry no payload digest.
+            if entry.get("sha256"):
+                bind_ready(None, None, None)
+
+        # Lead callbacks compose and publish verified prefixes while later
+        # inputs download. The handoff carries planned paths; complete=true
+        # remains the preparation barrier for an ordinary whole-window run.
+        with fetch_pool.completion_hook(bind_completed):
+            fetch_routes.run_plan(plan, out=args.out, force=args.force_refetch,
+                file_workers=args.fetch_workers, on_lead=bind_ready,
+                downloader=_route_stream_downloader(plan, args))
         fetch_routes.write_handoff(plan, args.out, donor_files=donor_files)
     print(f"fetch {source}: manifest {args.out / fetch_routes.MANIFEST_NAME}")
     for line in fetch_routes.handoff_lines(plan, args.out):
@@ -6730,6 +7085,7 @@ def _route_fetch_as_posted(plan, args, loop, *, last: int, options: dict) -> int
 
         fetch_routes.run_plan(plan, out=args.out, force=False,
                               file_workers=args.fetch_workers,
+                              downloader=_route_stream_downloader(plan, args),
                               lead_gate=None if whole else loop,
                               on_lead=published)
     finally:
@@ -6762,6 +7118,58 @@ def _route_donor_out(out: Path, donor) -> Path:
     return Path(out) / f"donor-{donor.source}"
 
 
+def _donor_is_table_route(donor) -> bool:
+    """Whether a declared donor is itself a row of the fetch-route table."""
+    return (donor.source not in GFS_CONTAINER_SOURCES
+            and fetch_routes.canonical_source(donor.source)
+            in fetch_routes.table_route_sources())
+
+
+def _donor_route_plan(donor, args):
+    """The donor's own table-route plan: its source, its cycle, its leads.
+
+    Refuses by name when the donor has neither a table row nor the
+    GFS-container ladder, because then nothing in this door can move
+    its bytes and the handoff would name a supplement nobody fetched.
+    """
+    if not _donor_is_table_route(donor):
+        raise ValueError(
+            f"the declared {donor.source} donor ({donor.role}) is neither "
+            f"a row of {fetch_routes.ROUTE_TABLE_NAME} nor one of the "
+            f"GFS-container sources {', '.join(GFS_CONTAINER_SOURCES)}; "
+            "nothing in this door can download it, so the handoff would "
+            "name a supplement nobody fetched")
+    start = min(donor.leads)
+    # The primary's --transport pin reaches the donor: a user who pinned
+    # a host asked for every byte of this fetch from it, and a donor that
+    # cannot serve that host refuses in its route's own words instead of
+    # quietly walking its own ladder to another host.
+    return fetch_routes.resolve_request(
+        donor.source, cycle=donor.cycle, hours=max(donor.leads) - start,
+        start_hour=start, host=getattr(args, "transport", None),
+        out=_route_donor_out(args.out, donor))
+
+
+def _donor_route_primary(donor_plan, donor) -> Path:
+    """The one primary object the donor role binds (its lowest lead)."""
+    if not donor_plan.primary_files:
+        raise ValueError(
+            f"the {donor.source} donor route plans no primary object for "
+            f"leads {list(donor.leads)}")
+    return Path(donor_plan.primary_files[0])
+
+
+def _donor_cached(donor, args) -> bool:
+    """Whether the donor folder already holds this exact donor request."""
+    donor_out = _route_donor_out(args.out, donor)
+    if _donor_is_table_route(donor):
+        return fetch_routes.request_cached(_donor_route_plan(donor, args),
+                                           donor_out)
+    return cached_request_complete(
+        donor_out, source=donor.source, cycle=donor.cycle, area=None,
+        hours=tuple(donor.leads), mode="full-file", refuse_changed=True)
+
+
 def _fetch_route_donors(plan, args) -> dict:
     """Fetch the cross-source analysis a hybrid profile declares.
 
@@ -6775,14 +7183,27 @@ def _fetch_route_donors(plan, args) -> dict:
 
     donor_files: dict[str, Path] = {}
     for donor in plan.donors:
-        if donor.source not in GFS_CONTAINER_SOURCES:
-            raise ValueError(
-                f"--source {plan.source_id} declares a {donor.source} donor "
-                "and this WOOF has no route for it")
         donor_out = _route_donor_out(args.out, donor)
         print(f"fetch {plan.source_id}: fetching the declared "
               f"{donor.source} donor into {donor_out}")
         print(f"  why: {donor.why}")
+        if donor.source not in GFS_CONTAINER_SOURCES:
+            # A donor that is itself a table route (hrrr-native's
+            # same-cycle hrrr-prs soil column) is fetched the way its
+            # own ``woof fetch --source`` line would fetch it: the
+            # route's plan for the donor's leads, into the donor
+            # folder.  Only the two GFS-container sources have no row
+            # and keep the whole-file ladder below; a donor with
+            # neither is refused by name because nothing here can
+            # move its bytes.
+            donor_plan = _donor_route_plan(donor, args)
+            fetch_routes.run_plan(donor_plan, out=donor_out,
+                                  force=args.force_refetch,
+                                  file_workers=args.fetch_workers,
+                                  downloader=_route_stream_downloader(donor_plan, args))
+            donor_files[donor.role] = donor_out / _donor_route_primary(
+                donor_plan, donor)
+            continue
         choice = select_fetch_engine("auto")
         manifest = fetch_gfs_fullfile(
             cycle=donor.cycle, hours=tuple(donor.leads), area=None,
@@ -6809,16 +7230,35 @@ def _retrieve_inapplicable_refusal(source: str) -> str:
 def fetch_main(args) -> int:
     """``woof fetch``; exit 75 when an as-posted source fell behind its budget."""
 
+    from woof.earth2_licensing import check_namespace
+    check_namespace(args)
     from woof.fetch_as_posted import SourceBehind
+    from woof.timeline.ledger import emit
 
+    from woof import fetch_connections
+    old_cap = os.environ.get(fetch_connections.MAX_CONNECTIONS_ENV)
+    configured_cap = getattr(args, "fetch_max_connections", None)
+    if configured_cap is not None:
+        os.environ[fetch_connections.MAX_CONNECTIONS_ENV] = str(fetch_connections.max_connections(configured_cap))
+    fetch_connections.max_connections()
+    emit("fetch.request", "begin", attrs={"source": args.source,
+         "worker_row": fetch_pool.worker_profile()["id"]})
     try:
         return _fetch_main(args)
     except SourceBehind as error:
         print(f"fetch {args.source}: {error}", file=sys.stderr)
         return error.exit_code
+    finally:
+        emit("fetch.request", "end", attrs={"source": args.source})
+        if configured_cap is not None:
+            if old_cap is None:
+                os.environ.pop(fetch_connections.MAX_CONNECTIONS_ENV, None)
+            else:
+                os.environ[fetch_connections.MAX_CONNECTIONS_ENV] = old_cap
 
 
 def _fetch_main(args) -> int:
+    args.source = source_adapters.source_for_cycle(args.source, getattr(args, "cycle", None))
     source = args.source
     if fetch_endpoints.policy_uses_aws(source):
         args.transport = fetch_endpoints.policy_transport(source)
@@ -6855,6 +7295,13 @@ def _fetch_main(args) -> int:
         # A table route refuses the flags it does not take, then validates
         # its window with the same validator.
         return _route_fetch_main(args, source)
+    acquisition_owner = source_adapters.get_source_adapter(source).acquisition_owner
+    if acquisition_owner is not None:
+        from importlib import import_module
+        return import_module(acquisition_owner).fetch(args)
+    if getattr(args, "model", None) is not None:
+        raise ValueError("--model applies to a source whose row runs a model "
+                         "(--source earth2)")
     if args.validate is not None and source != "era5":
         raise ValueError("--validate applies to --source era5 only")
     if args.fetch_workers is not None:
@@ -6904,7 +7351,9 @@ def _fetch_main(args) -> int:
                 "pgrb2.0p25 objects from the S3 archive).  .idx record "
                 "subsetting of the raw objects is not a certified GFS "
                 "route.")
-        gfs_fullfile = gfs_named_mode == "full-file"
+        gfs_fullfile = gfs_named_mode == "full-file" or (
+            args.transport not in (None, "auto")
+            and bool(fetch_endpoints.endpoint_named(source, args.transport).layouts))
         if not gfs_fullfile:
             cgi_extras = sorted(
                 flag for flag, value in (
@@ -7180,7 +7629,7 @@ def _fetch_main(args) -> int:
         # call re-enters the same lock (it is re-entrant per process).
         requested_gfs_mode = ("full-file" if gfs_fullfile
                               else "nomads-cgi-subset")
-        with fetch_guard.hold("fetch-out", args.out):
+        with _fetch_out(args.out):
             if not args.force_refetch:
                 require_matching_request(args.out, source=source,
                                          cycle=cycle, area=area,
@@ -7308,7 +7757,7 @@ def _fetch_main(args) -> int:
         hours = hrrr_forecast_hours(args.hours, cycle, start_hour)
         # One lock over the guard and the transfer it authorises; see the
         # GFS branch above.
-        with fetch_guard.hold("fetch-out", args.out):
+        with _fetch_out(args.out):
             if not args.force_refetch:
                 require_matching_request(args.out, source="hrrr",
                                          cycle=cycle, area=area)
@@ -7332,7 +7781,7 @@ def _fetch_main(args) -> int:
                     # cycle, and the sentence naming a host that could not
                     # be heard (GS-05). Its answer does not make the window
                     # whole: a posted final lead does not prove the
-                    # intervening wrfnat/wrfprs pairs have reached this
+                    # intervening atmosphere, soil and runtime files reached this
                     # host, so each lead is checked before it joins the
                     # downloaded prefix.
                     if not fetch_endpoints.policy_uses_aws(source):
@@ -7390,6 +7839,8 @@ def _fetch_main(args) -> int:
                     accept_inventory_change=args.accept_inventory_change,
                     file_workers=args.fetch_workers,
                     transport_fallback=transport_fallback,
+                    runtime_surface=getattr(args, "runtime_surface", None),
+                    analyzed_aerosol=bool(getattr(args, "analyzed_aerosol", False)),
                     **({} if on_hour_ready is None else {
                         "on_hour_ready": on_hour_ready}))
 
@@ -7630,8 +8081,16 @@ def _resolve_manifest_bridge(source: str) -> Path:
 #: types, and :func:`validate_fetch_hints` checks every value against its
 #: row.  The key set is read off the rows.
 FETCH_HINT_ROWS = key_rows(
+    KeyRow("fetch_max_connections", "integer", None,
+           "box-wide connection cap for engine fetches; default 30, or WOOF_FETCH_MAX_CONNECTIONS"),
     KeyRow("source", "string", None,
            "the source to acquire, a registry id or alias", required=True),
+    KeyRow("initial_source", "string", None,
+           "separate mapped analysis source at the forecast start; go fetches its analysis"),
+    KeyRow("boundary_cycle_offset_hours", "integer", 0,
+           "boundary cycle offset from the nominal forecast cycle"),
+    KeyRow("boundary_lead_offset_hours", "integer", 0,
+           "boundary start lead offset; cancels the boundary cycle offset"),
     KeyRow("cycle", "string", None,
            "the forcing cycle, YYYY-MM-DDTHH or 'latest'; absent means "
            "any cycle the source publishes"),
@@ -7657,6 +8116,8 @@ FETCH_HINT_ROWS = key_rows(
            "ERA5 only: 'cds' (Copernicus, keyed) or 'arco' (public store)"),
     KeyRow("era5_product", "string", "reanalysis",
            "ERA5 only: 'reanalysis' or 'ensemble_members'"),
+    KeyRow("reuse_fetch", "string", None,
+           "a completed generated fetch root to verify and reuse when it covers this request"),
     KeyRow("member", ("string", "integer"), None,
            "the ensemble member to fetch; absent is the route's control"),
     KeyRow("retrieve", "boolean", False,
@@ -7674,6 +8135,14 @@ FETCH_HINT_ROWS = key_rows(
            "how far past its scheduled time a lead may be before the run "
            "stops with exit 75; absent takes the source table's posting "
            "late_after_minutes"),
+    KeyRow("runtime_surface", "string", None,
+           "comma-separated runtime surface fields (e.g. 'VEGFRA') the "
+           "start must read from the cycle itself; absent, a field the "
+           "source table declares starts from its recorded fallback when "
+           "a cycle publishes no record for it"),
+    *(KeyRow(*hint) for hint in dict.fromkeys(
+        hint for adapter in source_adapters.source_adapters()
+        for hint in adapter.acquisition_hints)),
 )
 FETCH_HINT_KEYS = frozenset(FETCH_HINT_ROWS)
 
@@ -7708,14 +8177,14 @@ def transport_refusal(source: str, transport: object) -> str | None:
         return (f"transport: {name} has no host to choose between, so there "
                 "is nothing to pin. what to do: remove transport.")
     if name in GFS_CONTAINER_SOURCES:
-        if fetch_endpoints.policy_uses_aws(name):
-            fetch_endpoints.endpoint_named(name, transport)
+        try:
+            endpoint = fetch_endpoints.endpoint_named(name, transport)
+        except ValueError as error:
+            return str(error)
+        if endpoint.layouts or fetch_endpoints.policy_uses_aws(name):
             return None
-        return (f"transport pins the host of whole {name} archive objects, "
-                f"which only `woof fetch --source {name} --mode full-file` "
-                "downloads; a [fetch] table fetches the NOMADS grib-filter "
-                "crop, which has exactly one transport, and `woof fetch` "
-                "refuses --transport for it. what to do: remove transport.")
+        return ("transport pins whole archive objects; choose an archive "
+                "host declared in the source table or remove transport.")
     if name == "hrrr":
         if transport not in HRRR_TRANSPORTS:
             return (f"unknown HRRR transport {transport!r}; expected one of "
@@ -7785,6 +8254,8 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
     unknown = sorted(set(table) - FETCH_HINT_KEYS)
     if unknown:
         raise ValueError(f"unknown key(s) {unknown} in {prefix}; known keys: {sorted(FETCH_HINT_KEYS)}")
+    from woof.initial_source import boundary_fetch_request
+    table = boundary_fetch_request(table)
     # Common spellings precede every source, product and local-input branch.
     for key, minimum in (("hours", 0), ("forecast_start_hour", 0), ("cadence", 1)):
         value = table.get(key)
@@ -7804,6 +8275,20 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
     # the rows are what a front end is told these keys take.
     for key, value in table.items():
         FETCH_HINT_ROWS[key].check(value, where=prefix)
+    if table.get("fetch_max_connections") is not None:
+        from woof.fetch_connections import max_connections
+        max_connections(table["fetch_max_connections"])
+    if table.get("runtime_surface") is not None and isinstance(table.get("source"), str):
+        from woof.runtime_surface_fetch import declared_runtime_surface_fields
+        from woof.source_adapters import get_source_adapter
+        try:
+            adapter = get_source_adapter(table["source"])
+        except (KeyError, ValueError):
+            adapter = None
+        try:
+            declared_runtime_surface_fields(table["runtime_surface"], adapter)
+        except ValueError as error:
+            raise ValueError(f"{prefix}: {error}") from None
     late = table.get("late_after_minutes")
     if late is not None and not (math.isfinite(float(late)) and float(late) > 0):
         # A zero budget fails every lead a second late (DESIGN A136 2.1).
@@ -7819,13 +8304,32 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
     if isinstance(table.get("source"), str):
         from woof.source_drivability import local_input_requested
         local_source = local_input_requested(table)
+        # An unregistered name is refused below with the hint table's own
+        # "not one of" list; resolving it here raised the registry's
+        # lookup error first, so the [fetch] table's refusal never fired.
+        try:
+            owner = source_adapters.get_source_adapter(table["source"]).acquisition_owner
+        except ValueError:
+            owner = None
+        # An owner can author an acquisition request and still prepare an
+        # existing local directory. Only explicit local tables prohibit crops.
+        if owner and not table.get("source_root"):
+            local_source = False
     if "source" not in table:
         raise ValueError(f"{prefix} must carry source = {'|'.join(known)}")
-    name = (fetch_routes.canonical_source(str(table["source"]))
-            if local_source else table["source"])
+    name = fetch_routes.canonical_source(str(table["source"]))
     if name not in known or (name not in fetch_front_door_sources() and not local_source):
         raise ValueError(f"source = {name!r} in {prefix} is not one of {known}")
     try:
+        model = table.get("model")
+        adapter = source_adapters.get_source_adapter(name)
+        if model is not None:
+            from importlib import import_module
+            resolve = (getattr(import_module(adapter.acquisition_owner), "acquisition_hints", None)
+                       if adapter.acquisition_owner else None)
+            if resolve is None:
+                raise ValueError("model requires a registry acquisition owner with model selection")
+            resolve(str(table["source"]), model)
         cadence = table.get("cadence")
         for key in ("cycle", "area", "point", "out", "source_root"):
             if key in table and not table[key].strip():
@@ -7850,7 +8354,19 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
         elif name in fetch_routes.route_ids():
             fetch_routes.resolve_member(fetch_routes.route_for(name), table.get("member"))
         elif "member" in table:
-            raise ValueError(f"{name} has no acquisition member axis. Omit member or select an ensemble product.")
+            adapter = source_adapters.get_source_adapter(name)
+            if adapter.acquisition_owner:
+                from importlib import import_module
+                validator = getattr(import_module(adapter.acquisition_owner), "validate_member", None)
+            else:
+                validator = None
+            if validator is None:
+                raise ValueError(f"{name} has no acquisition member axis. Omit member or select an ensemble product.")
+            selection = adapter.selection_owner
+            if selection and table.get("earth2_members"):
+                getattr(import_module(selection), "validate_member")(table["member"], cycle=cycle)
+            else:
+                validator(name, table["member"])
 
         area, point, radius = (table.get(key) for key in ("area", "point", "radius_km"))
         crop_keys = sorted(key for key in ("area", "point", "radius_km") if key in table)
@@ -7899,12 +8415,18 @@ def validate_fetch_hints(table: dict, *, source: str) -> None:
             # deliberately left to acquisition, when a real cycle is selected.
             cycles = ((cycle,) if cycle is not None else
                       fetch_routes.planning_cycles(route))
+            # A table that names no start opens at the route's first
+            # published lead: the GEFSv12 reforecast (first_lead = 3,
+            # lane/cap-gefs-archive) publishes no f000, so checking f000
+            # refused every bare [fetch] source of it.
+            route_start = (start if "forecast_start_hour" in table
+                           else max(start or 0, route.first_lead))
             errors = []
             for candidate in cycles:
                 try:
                     fetch_routes.resolve_cycle(route, candidate)
                     fetch_routes.resolve_leads(route, candidate, 0 if hours is None else hours,
-                                               cadence=cadence, start_hour=start)
+                                               cadence=cadence, start_hour=route_start)
                     break
                 except ValueError as error:
                     errors.append(error)
@@ -7952,7 +8474,14 @@ def source_argument(value: str) -> str:
     except ValueError:
         source_id = name
     if source_id in fetch_routes.all_fetchable_sources():
-        return source_id
+        return source_adapters.canonical_source_token(value)
+    try:
+        if source_adapters.get_source_adapter(source_id).acquisition_owner:
+            # Its bytes are produced by running something (a model), not
+            # downloaded; the row's owner module is the door.
+            return source_id
+    except ValueError:
+        pass
     try:
         fetch_routes.route_for(source_id)
     except ValueError as error:
@@ -7968,6 +8497,21 @@ def register_cli(subparsers) -> None:
              "source with public bytes; native GDAS uses its mapped preparation "
              "profile; retrieve ERA5 from the public ARCO store without a key, "
              "or from Copernicus CDS with configured credentials")
+    parser.add_argument("--reuse-fetch", default=None, metavar="DIR",
+        help="reuse a verified completed generated fetch covering this request before loading its model")
+    parser.add_argument("--model", default=None, metavar="MODEL",
+        help="--source earth2: which NVIDIA Earth-2 model to run through "
+             "earth2studio (fcn3, sfno, pangu, aurora, fengwu, graphcast, aifs: "
+             "a row of woof/authorities/earth2-models.v1.json); the forecast "
+             "and the ERA5 analysis at --cycle are written to --out")
+    parser.add_argument("--earth2-members", help="complete comma-separated Earth-2 noise-id roster")
+    parser.add_argument("--earth2-batch-root", help="shared generated-member batch folder")
+    parser.add_argument("--earth2-batch-size", type=int, help="members per admitted GPU sub-batch")
+    parser.add_argument("--earth2-weights-package", help="local pinned Earth2Studio weight package")
+    parser.add_argument("--prepare-only", action="store_true",
+        help="Earth-2 sources: run only the CPU stage (weights, CPU model construction, initial "
+             "conditions, donor) with no GPU, so it can run outside a card lease; the same "
+             "command with a card then generates from it. Implied when CUDA devices are hidden")
     parser.add_argument("--retrieve", action="store_true",
         help="ERA5: download and validate with the selected provider (default CDS); otherwise write a CDS retrieval template")
     parser.add_argument("--era5-provider", choices=("cds", "arco"), default=None,
@@ -7999,6 +8543,12 @@ def register_cli(subparsers) -> None:
              "does not (a reanalysis published on a delay has a latest, "
              "and it is that delay).  A source that declares neither is "
              "refused by name")
+    parser.add_argument(
+        "--analyzed-aerosol", action="store_true",
+        help="the preparation reads the source's analyzed aerosol numbers "
+             "(QNWFA/QNIFA), so a subset fetch selects them too; implied by "
+             "the native forecast chain when an mp=28 domain asks for the "
+             "analyzed aerosol")
     parser.add_argument(
         "--wif", action="store_true",
         help="stage the SHA-256-verified monthly aerosol climatology in its "
@@ -8160,7 +8710,7 @@ def register_cli(subparsers) -> None:
         "--engine", default=None, choices=FETCH_ENGINES,
         help="hrrr, and gfs/gdas --mode full-file: which downloader "
              "moves the bytes.  'rust' is "
-             "the vendored rw_fetch backbone (16 MiB parallel range "
+             "the vendored rw_fetch backbone (parallel range "
              "GETs, .idx coalescing, the cross-process NOMADS rate "
              "governor, a disk cache); 'python' is the stdlib transport "
              "and always works; 'auto' (default) uses the backbone when "
@@ -8193,6 +8743,12 @@ def register_cli(subparsers) -> None:
              "by URL and byte range, so a re-run or an overlapping "
              "window re-reads bytes instead of re-downloading them")
     parser.add_argument(
+        "--fetch-max-connections", type=int, default=None, metavar="N",
+        help="total engine fetch connections on this box (default 30, or "
+             "WOOF_FETCH_MAX_CONNECTIONS). Shared across engine processes; "
+             "use the same cap for every process. File and range widths are "
+             "clipped to it; receipts record the cap and stream limits.")
+    parser.add_argument(
         "--fetch-workers", type=int, default=None, metavar="N",
         help="how many FILES are in flight at once (default "
              f"{fetch_pool.DEFAULT_FILE_WORKERS}; every source but era5, "
@@ -8208,6 +8764,13 @@ def register_cli(subparsers) -> None:
              "transport: a knob, not a workaround.  The manifest "
              "receipts files, bytes, workers, wall and the effective "
              "speedup under 'concurrency'")
+    parser.add_argument(
+        "--runtime-surface", default=None, metavar="FIELDS",
+        help="comma-separated runtime surface fields (e.g. VEGFRA) the "
+             "start must read from this cycle itself.  A field the source "
+             "table declares but this list omits starts from its recorded "
+             "fallback when the cycle publishes no record for it; a listed "
+             "field the cycle does not publish is refused by name")
     parser.add_argument(
         "--accept-inventory-change", action="store_true",
         help="proceed when the live provider inventory yields a "
@@ -8287,7 +8850,8 @@ __all__ = [
     "fetch_gfs_fullfile",
     "fetch_hrrr", "fetch_main", "gfs_forecast_hours", "gfs_object_url",
     "gfs_suggested_fetch_margin_deg",
-    "hrrr_forecast_hours", "hrrr_object_url", "parse_area", "parse_cycle",
+    "hrrr_forecast_hours", "hrrr_lead_products", "hrrr_lead_urls",
+    "hrrr_object_url", "parse_area", "parse_cycle",
     "read_grib1_records", "register_cli", "resolve_fetch_engine",
     "select_fetch_engine", "resolve_hrrr_transport",
     "cycle_probe_urls", "objects_published",

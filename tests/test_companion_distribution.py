@@ -60,6 +60,31 @@ MOVED_MEMBER_SHA256 = {
         "a1bda803cdb53aedce8a2970c04c355fad19e3744398e1c9b13a876f09730547",
     "thompson/tables/CCN_ACTIVATE.BIN":
         "f2b8d3916560f9046f89f8ac5f32c5292a1800498fd75301e422f147c82a3dbd",
+    # Moved in 2.8.7 as single files (their directories keep other members
+    # in the woof wheel); the digests are the ones they had at e9d54cc17.
+    "case-catalog/historical.zip":
+        "39a2318da1608ac7e77aa71a946b950370bdb7c8888a7efbc1ca1f1629a20195",
+    # Re-provisioned after the move by lane/verify-spp-stochastic: the same
+    # captures rebuilt on the oracle platform (gfortran 13.3.0, glibc 2.39);
+    # the moved bytes were 9bc14a88c46b5454... (gfortran 15.2.0, glibc 2.43).
+    # 2.9.1: its GF captures re-run on the corrected GF harness (receipt.json
+    # gf_rebuild); fb969d191daa1ede... was the archive before that.
+    "spp/native-wrf461.zip":
+        "201025994da48275c72fb06d37e38074c924780139a1aed8ed4409682b3a688e",
+    # Moved in 2.9.0 as a single file, re-encoded on the way (xz of byte
+    # planes of longitude differences; woof/core/rrtmg_sw.py
+    # encode_aer1_climatology).  These are the re-encoded bytes; that the
+    # DECODED words are the ones the 2.9.0 aer_opt=1 port was proven on is
+    # rrtmg_aer1_manifest.json's arrays.climatology sha256, which the loader
+    # checks on every load.
+    "wrf_radiation/rrtmg_aer1_climatology.npz":
+        "c48005c8f802c60f42824b6daa358dd13aec7c3d41200a68876ef7eaa3c04509",
+    # Moved later in 2.8.7 as a directory, beside the Linux bridges' symbol
+    # strip; the digests are the ones they had at e81291059.
+    "chem/optics/table-sha256sums.txt":
+        "d39e1c78ddd3465f0bf3a5e4b329e626be508ac21847ca94fa3a5a11f50486af",
+    "chem/optics/extplw.bin":
+        "239b29e9ffb68549a4cdab88db258ef288d8bd5a13f95397c94dc49a26d25e28",
 }
 
 
@@ -112,9 +137,12 @@ def test_every_moved_tree_is_covered_by_a_recorded_hash() -> None:
     the state the split was supposed to make impossible.
     """
 
-    covered = {relative.rsplit("/", 1)[0]
-               for relative in MOVED_MEMBER_SHA256}
-    missing = sorted(set(data_assets.COMPANION_TREES) - covered)
+    # A moved entry is covered when a recorded member is the entry itself
+    # (a single moved file) or lies inside it (a moved directory).
+    missing = sorted(
+        entry for entry in data_assets.COMPANION_TREES
+        if not any(relative == entry or relative.startswith(entry + "/")
+                   for relative in MOVED_MEMBER_SHA256))
     assert not missing, (
         f"woof.data_assets.COMPANION_TREES moved {missing} into the "
         "companion with no recorded member hash; add one file from each to "

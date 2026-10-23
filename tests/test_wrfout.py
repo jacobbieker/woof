@@ -582,8 +582,9 @@ def test_the_patch_extent_globals_match_the_reference_file():
 @requires_gpu
 def test_state_frame_from_domain_state():
     """state_frame builds the standard wrfout frame from a DomainState:
-    winds / T (theta - 300) / PH / MU plus the terrain-consistent base
-    fields PHB (a flat base state's 1-D column broadcast to 3-D) / MUB /
+    winds / T and dry-theta THM (theta - 300) / PH / MU plus the
+    terrain-consistent base fields PHB (a flat base state's 1-D column
+    broadcast to 3-D) / MUB /
     HGT, P_TOP/ZNU/ZNW vertical identity, and QVAPOR/QCLOUD/QRAIN exactly
     when the state carries moisture."""
     from woof.config import RunConfig
@@ -602,8 +603,10 @@ def test_state_frame_from_domain_state():
     s = init_at_rest(cfg, vc, b)
     s.qv[...] = 0.004
     f = state_frame(s)
-    assert set(f) == {"T", "U", "V", "W", "PH", "MU", "PHB", "MUB", "HGT",
-                      "QVAPOR", "QCLOUD", "QRAIN", "P_TOP", "ZNU", "ZNW"}
+    assert set(f) == {"T", "THM", "U", "V", "W", "PH", "MU", "PHB", "MUB",
+                      "HGT", "QVAPOR", "QCLOUD", "QRAIN", "P_TOP", "ZNU", "ZNW"}
+    # USE_THETA_M=0 publishes the actual dry-theta prognostic as THM.
+    np.testing.assert_array_equal(f["THM"], f["T"])
     assert all(isinstance(a, np.ndarray) and a.dtype == np.float32
                for a in f.values())
     assert f["PHB"].shape == (cfg.nz + 1, cfg.ny, cfg.nx)
@@ -962,6 +965,25 @@ def test_async_worker_releases_device_refs_after_d2h_before_write(
     finally:
         finish_write.set()
         writer.close()
+
+
+def test_queued_device_ownership_survives_unfinished_download(tmp_path):
+    from woof.io.wrfout import AsyncDomainWrfoutWriter
+
+    event = SimpleNamespace(done=False)
+    device = SimpleNamespace()
+    pinned = np.zeros(1, np.float32)
+    ticket = _cpu_ticket(tmp_path / "queued", device_refs=(device,), pinned_refs=(pinned,))
+    ticket.event = event
+    tickets = AsyncDomainWrfoutWriter._new_ticket_queue()
+    tickets.put(ticket)
+    tickets.release_completed_device_refs(nullcontext())
+    assert ticket.device_refs == (device,)
+    event.done = True
+    tickets.release_completed_device_refs(nullcontext())
+    assert ticket.device_refs == ()
+    assert ticket.pinned_refs == (pinned,)
+    assert tickets.get_nowait() is ticket
 
 
 def test_async_write_failure_does_not_retain_field_backing(

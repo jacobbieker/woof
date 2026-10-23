@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import re
 import pytest
 
 from woof.core.preflight import (
@@ -117,7 +118,8 @@ def test_cu_schemes_admits_16_and_every_co_requisite_landed():
     # 1. a real workspace term, not the refusal
     assert ntiedtke_column_workspace_bytes(_exp(16)) > 0
     # 2. the cumulus calendar, so the F14 three-way check runs at all
-    assert "cu_physics in (1, 3, 16)" in inspect.getsource(clock)
+    assert 16 in clock._CU_SCHEMES
+    assert "run.cu_physics in _CU_SCHEMES" in inspect.getsource(clock)
     # 3. the cudt law
     from woof import config as cfgmod
     assert "cu_physics == 16" in inspect.getsource(cfgmod)
@@ -127,8 +129,12 @@ def test_cu_schemes_admits_16_and_every_co_requisite_landed():
     assert _CUMULUS_KERNEL_MODULES.get(16) == ("ntiedtke",)
     # 6. the optional tendency components
     from woof.core import physics
-    assert "cu_physics == 16" in inspect.getsource(
-        physics._cumulus_optional_tendency_components)
+    # WRF returns ice tendency only when the microphysics carries QI.
+    # Check the output contract after G3 shares the early-return branch.
+    assert physics._cumulus_optional_tendency_components(
+        SimpleNamespace(cu_physics=16, mp_physics=1)) == ()
+    assert physics._cumulus_optional_tendency_components(
+        SimpleNamespace(cu_physics=16, mp_physics=6)) == ("rqi",)
 
 
 def test_the_momentum_gate_is_the_corrected_one():
@@ -318,7 +324,8 @@ def test_the_cumulus_calendar_includes_16():
     """
     import inspect
     from woof.core import clock
-    assert "cu_physics in (1, 3, 16)" in inspect.getsource(clock)
+    assert 16 in clock._CU_SCHEMES
+    assert "run.cu_physics in _CU_SCHEMES" in inspect.getsource(clock)
 
 
 def test_the_cudt_law_for_16_exists_and_refuses_a_hold():
@@ -395,7 +402,7 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     """Full domain serialization binds the scheme and every other run field."""
     from dataclasses import asdict, replace
     from datetime import datetime, timedelta
-    from woof.config import RunConfig
+    from woof.config import CHEM_RUN_FIELDS, RunConfig
     from woof.experiment import DomainConfig
     from woof.ingest import prepared_cache
 
@@ -409,21 +416,78 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     compare = prepared_cache.compare_prepared_domain_config
     cached = identity(domain)
     expected_run = asdict(run)
-    # Neutral source and radiation forms are omitted for older cache compatibility.
-    # Every other run field remains bound, including the cumulus switch.
-    for field in ("ruc_irrigation", "ruc_qvg_cold_start",
-                  "ruc_2m_diagnostic", "ruc_snow",
-                  "swint_opt", "aer_opt", "alb_sol",
-                  "thompson_version", "thompson_fork_snow_fall",
-                  "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest"):
-        expected_run.pop(field)
+    from woof.config import drop_inert_g3_fields
+    drop_inert_g3_fields(expected_run)
+    from woof.checkpoint_identity import drop_default_cumulus_selectors
+    drop_default_cumulus_selectors(expected_run)
+    assert run.chem_sets == ""
+    for name in CHEM_RUN_FIELDS:
+        expected_run.pop(name)
+    # The fire block is omitted from an inactive domain's identity
+    # (lane/ec-sfire), by the same rule the document applies.
+    from woof.config import inert_fire_fields
+    for name in inert_fire_fields(run):
+        expected_run.pop(name)
+    # The lightning and aer_opt = 2 controls (golden/ports-rad) leave an
+    # identity that reads neither, by the rule every run document applies.
+    from woof.config import drop_inactive_radiation_port_keys
+    drop_inactive_radiation_port_keys(expected_run)
+    # The 2.9.4 capabilities campaign (lane/cap-*) leaves the identity by
+    # the checkpoint echo's rule (drop_capability_campaign_keys): the
+    # HAILCAST selectors, the ocean door and the lake-state analysis at
+    # their defaults.
+    from woof.checkpoint_identity import drop_capability_campaign_keys
+    drop_capability_campaign_keys(expected_run)
+    # lane/hrrr-v4-output's controls leave it off, by the document's rule
+    # (drop_default_output_controls).
+    from woof.checkpoint_identity import drop_default_output_controls
+    drop_default_output_controls(expected_run)
+    neutral = {"surface_energy_diag": False, "cycling": False,
+               "ruc_irrigation": "wrf_461", "ruc_qvg_cold_start": "wrf",
+               "ruc_2m_diagnostic": "flux", "ruc_snow": "wrf_461",
+               "swint_opt": 0, "aer_opt": 0, "alb_sol": 0,
+               "thompson_version": "wrf_461", "thompson_table_dir": None,
+               "thompson_fork_snow_fall": "blend",
+               "rrtmg_cloud_optics_form": "wrf_461", "rrtmg_smoke_manifest": "",
+               "rrtmg_aer3_type_source": "rural", "bl_mynn_mixaerosols": 0,
+               "bl_mynn_mixnumcon": 0, "tempo_ml_for_bl_nc": False,
+               "tempo_surface_emission_before": False,
+               # golden/wrf-fixes: the MYNN transport, Noah-MP snow-age and
+               # urban generation/canopy controls leave the identity at
+               # their defaults like the generations above.
+               "scalar_adv_opt": 1, "noahmp_snow_age": "wrf_470",
+               "urban_water_balance": "wrf_480",
+               "urban_ucm_generation": "wrf_471", "urban_treeoption": -1,
+               "urban_ttscheme": -1, "urban_fvg": -1.0,
+               "urban_table_dir": "",
+               # 2.9.1: the ocean mixed layer off leaves the identity.
+               "sf_ocean_physics": 0, "oml_hml0": 50.0, "oml_gamma": 0.14,
+               "oml_relaxation_time": 0.0,
+               # 2.9.4: lane/cap-eclipse at its default-on shadow and
+               # lane/cap-slab-ocean's PWP controls with the ocean off.
+               "ra_sw_eclipse": 1, "ocean_levels": 30, "ocean_analysis": "",
+               "ocean_analysis_source": "rtofs",
+               "ocean_mld_climatology": "woa18", "omdt": 1.0,
+               "ocean_z": (), "ocean_t": (), "ocean_s": ()}
+    for name, default in neutral.items():
+        assert expected_run.pop(name) == default
+    # 2.9.0 correct mode (woof/correct_mode.py): a key leaves the document
+    # where no selected scheme reads it (and WB1's output-only key always),
+    # as in the checkpoint echo; this domain runs Morrison and Grell-Freitas.
+    from woof import correct_mode
+    for name in correct_mode.CORRECTION_KEYS:
+        expected_run.pop(name)
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()
     assert compare(cached, identity(domain)) == ([], [])
 
     new_scheme = identity(replace(domain, run=replace(run, cu_physics=16)))
-    assert new_scheme["run"] == {**expected_run, "cu_physics": 16}
-    assert compare(cached, new_scheme) == ([], ["run.cu_physics"])
+    # Under New Tiedtke its WB4 key is read, so the default (on) is bound.
+    wb4 = ({"ntiedtke_dry_mass_coupling": True}
+           if correct_mode.CORRECT_KEYS_DEFAULT else {})
+    assert new_scheme["run"] == {**expected_run, "cu_physics": 16, **wb4}
+    assert compare(cached, new_scheme) == (
+        [], ["run.cu_physics"] + (["run.ntiedtke_dry_mass_coupling"] if wb4 else []))
     # A selected-field or per-scheme serializer cannot drop unrelated
     # trajectory controls or the newly serialized delayed-domain date.
     changed = identity(replace(domain, run=replace(run, dt=10.),
@@ -623,7 +687,7 @@ def test_the_new_tiedtke_restart_identity_names_this_port():
     assert "wrf461" in identity, (
         "the identity does not name the reference version it was ported "
         "from")
-    assert identity.endswith("-v1"), (
+    assert re.search(r"-v[0-9]+$", identity), (
         "the identity carries no revision suffix, so a change to the "
         "driver seam has no way to invalidate old checkpoints")
 

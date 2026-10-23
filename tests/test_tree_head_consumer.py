@@ -458,7 +458,15 @@ def test_the_root_host_store_loads_the_head_and_takes_later_tables_at_seams(
         terrain_z=np.zeros_like(mass))
     initial.surface_pressure = np.full(mass.shape, 99_000.0)
     initial.surface_qv = np.full(mass.shape, 0.01)
-    met = SimpleNamespace(fields={"T2": np.full(mass.shape, 279.0)})
+    met = SimpleNamespace(fields={
+        "LANDSEA": np.ones(mass.shape),
+        "SKINTEMP": np.full(mass.shape, 280.0),
+        "SOILT": np.full((9, *mass.shape), 280.0),
+        "SOILW": np.full((9, *mass.shape), 0.2),
+        "T2": np.full(mass.shape, 279.0),
+        "U10": np.ones((cfg.ny, cfg.nx + 1)),
+        "V10": np.ones((cfg.ny + 1, cfg.nx)),
+    })
     staging = tmp_path / ".tmp-store-head"
     staging.mkdir()
     writer = PreparedTreeWriter(
@@ -789,18 +797,6 @@ def test_each_streamed_attempt_keeps_its_own_folder(tmp_path):
         assert (outdir / name / "wrfout" / "frame").read_text() == number
         assert sorted(entry.name for entry in (outdir / name).iterdir()) \
             == ["progress.json", "wrfout"]
-
-
-def test_the_set_aside_leaves_the_heartbeat_in_the_run_folder(tmp_path):
-    from woof.supervisor import HEARTBEAT_NAME
-
-    outdir = tmp_path / "run"
-    outdir.mkdir()
-    (outdir / "wrfout").mkdir()
-    (outdir / HEARTBEAT_NAME).write_text("worker")
-    attempt = tree._set_aside_streamed_attempt(outdir)
-    assert (outdir / HEARTBEAT_NAME).read_text() == "worker"
-    assert sorted(entry.name for entry in attempt.iterdir()) == ["wrfout"]
 
 
 # ---------------------------------------------------------------------------

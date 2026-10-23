@@ -16,15 +16,34 @@ license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+# Formerly gated the composition and raw-word proof binaries. They are tools
+# of rw_mpas_static now and always built; the name stays so recorded proof
+# recipes that pass `--features native-init-composition-test` still resolve.
+native-init-composition-test = []
+# Optional lossless render-frame storage; ordinary bridge builds stay classic.
+render-netcdf4 = []
+# The hex tools rw_mpas_physics_pool and rw_mpas_stream link the system netCDF
+# C library, which the public CI runners do not carry; they build only with this.
+system-netcdf = []
+
 [dependencies]
 netcrust = { path = "../../vendor/netcrust" }
+netcdf-reader = { path = "../../vendor/netcrust/vendor/netcdf-reader" }
 rayon.workspace = true
 rw-host-memory = { path = "../rw-host-memory" }
 rw-store = { path = "../rw-store" }
 static-fields = { path = "../static-fields" }
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 sha2 = "0.10"
+# rw_mpas_static's stream comparator reads through the netCDF C library,
+# loaded at run time so no build or shipped binary needs it to link or start.
+libloading = "0.9"
+# Window coordinates and the nearest-cell map: pure IEEE `libm` (the same
+# vendored 0.2.16 static-fields pins), so they are the same bits on every
+# x86-64 CPU and C library. See the note at the top of src/window.rs.
+libm = { version = "0.2.16", default-features = false, features = ["force-soft-floats"] }
 thiserror.workspace = true
 
 [[bin]]
@@ -55,13 +74,23 @@ path = "src/bin/rw_mpas_lbc.rs"
 name = "rw_mpas_mesh"
 path = "src/bin/rw_mpas_mesh.rs"
 
-# The writer the mesh registry pins, and the one `gpuwm mesh` runs.
+# The writer the mesh registry pins, and the one `gpuwm mesh` runs. It is
+# also five more tools that used to be binaries of their own: `bounded`
+# (rw_mpas_static_bounded), `words` (rw_mpas_static_words), `gwd-replace`
+# (rw_mpas_gwd_replace), `gwd-review` (rw_mpas_gwd_review) and `verify`
+# (rw_mpas_verify), reached as subcommands or by invoking this binary under
+# the old name. One copy of the shared code in each platform wheel instead
+# of six; see src/bin/rw_mpas_static/main.rs.
 [[bin]]
 name = "rw_mpas_static"
-path = "src/bin/rw_mpas_static.rs"
+path = "src/bin/rw_mpas_static/main.rs"
 
-# The bounded-memory arm. Not a drop-in for the door above: it writes 56 of
-# the pinned 69 variables, so it carries its own name until the schemas meet.
 [[bin]]
-name = "rw_mpas_static_bounded"
-path = "src/bin/rw_mpas_static_bounded.rs"
+name = "rw_mpas_stream"
+path = "src/bin/rw_mpas_stream.rs"
+required-features = ["system-netcdf"]
+
+[[bin]]
+name = "rw_mpas_physics_pool"
+path = "src/bin/rw_mpas_physics_pool.rs"
+required-features = ["system-netcdf"]

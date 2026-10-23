@@ -80,6 +80,80 @@ def check_main(args):
     return run(args)
 
 
+#: ``woof check`` exit code when the configuration reads geography the
+#: WPS_GEOG tree has not staged (the memory legs are still reported).
+EXIT_GEOGRAPHY_MISSING = 6
+
+
+def _check_geography(args) -> str | None:
+    """The refusal ``woof go`` gives for geography this config reads.
+
+    Breakage: ``woof check conus.toml --devices 2`` on the HRRR region
+    recipe passed (ADMITTED on both cards) and the ``woof go`` of the same
+    file then refused before its fetch: the recipe's terrain-drag fields
+    read ``orogwd3_10m``, which plain ``woof fetch-geog`` does not stage
+    (2.9.2 box door test).  The one function go refuses by,
+    :func:`woof.go_cli.geography_refusal`, answers here too, with the same
+    ``woof fetch-geog --config`` remedy, so check and go cannot disagree.
+    A prepared bundle (``--prepared-root``) carries its statics and is not
+    asked, as go does not ask it.
+    """
+
+    if getattr(args, "prepared_root", None) is not None:
+        return None
+    try:
+        if not is_experiment_toml(args.config):
+            return None
+    except Exception:
+        return None  # check_main names a config it cannot read
+    from woof.geog_assets import config_geog_root
+    from woof.go_cli import geography_refusal
+
+    try:
+        return geography_refusal(config_geog_root(Path(args.config)), config=Path(args.config))
+    except FileNotFoundError:
+        # The datasets a run reads come from its WPS namelist.  A
+        # configuration that names a namelist (or forcing) not on disk has
+        # no geography verdict yet: the input leg below names that file,
+        # with its remedy, instead of a traceback from here.  Measured:
+        # tests/test_check_display.py's host-refusal case names a namelist
+        # it never writes and expects the host verdict (exit 5).
+        return None
+
+
+def combined_check_main(args):
+    # Keep the verdict's origin for in-process configuration creators:
+    # the memory check also uses exit 6 for a refused execution plan.
+    args._geography_missing_only = False
+    if args.config is None:
+        print('woof check: CONFIG is required for preflight; bare inventory uses woof check --json', file=sys.stderr)
+        return 2
+    # A known source ceiling must refuse before ingest can decode files or
+    # memory preflight can probe a GPU, even when those later legs cannot run.
+    import tomllib
+    from woof.config_authority import read_config_authority
+    from woof.vertical_contract import validate_config_source_top
+
+    raw = tomllib.loads(read_config_authority(args.config).payload.decode("utf-8"))
+    top_verdict = validate_config_source_top(raw, context=str(args.config))
+    if top_verdict is not None:
+        print(f"woof check: {top_verdict}", file=sys.stderr)
+    ingest = args.ingest_preflight_handler(args)
+    if ingest:
+        return ingest
+    geography = _check_geography(args)
+    if geography is not None:
+        # Before the memory legs, the way go refuses before its fetch; on
+        # stderr so `--json` stdout stays one document.
+        print(f"woof check: geography BLOCKER (exit {EXIT_GEOGRAPHY_MISSING} "
+              "unless a memory leg fails harder): " + geography, file=sys.stderr)
+    code = check_main(args)
+    if geography is not None and code == 0:
+        args._geography_missing_only = True
+        return EXIT_GEOGRAPHY_MISSING
+    return code
+
+
 def is_experiment_toml(path):
     from woof.experiment import is_experiment_toml as check
     return check(path)
@@ -99,15 +173,25 @@ enprod_register_cli = _lazy_register("woof.da.enprod")
 cycle_register_cli = _lazy_register("woof.cycle.cli")
 doctor_register_cli = _lazy_register("woof.doctor")
 domain_register_cli = _lazy_register("woof.domain_wizard")
+tc_tracks_register_cli = _lazy_register("woof.tc_tracks")
+tc_strata_register_cli = _lazy_register("woof.tc_strata")
 cyclone_setup_register_cli = _lazy_register("woof.cyclone_setup")
+earth2_register_cli = _lazy_register("woof.earth2_door")
+earth2_diagnostics_register_cli = _lazy_register("woof.earth2_diagnostics")
 downscale_register_cli = _lazy_register("woof.downscale")
 fetch_register_cli = _lazy_register("woof.fetch")
+fire_static_register_cli = _lazy_register("woof.static.sfire")
+fire_ideal_register_cli = _lazy_register("woof.fire_ideal")
 geog_register_cli = _lazy_register("woof.geog_assets")
 go_register_cli = _lazy_register("woof.go_cli")
+race_register_cli = _lazy_register("woof.race_cli")
+hydro_register_cli = _lazy_register("woof.hydro.cli")
 speedrun_register_cli = _lazy_register("woof.speedrun_cli")
 ingest_register_cli = _lazy_register("woof.ingest.preflight")
 mesh_register_cli = _lazy_register("woof.mpas_mesh")
 ml_export_register_cli = _lazy_register("woof.ml_export")
+scoreboard_register_cli = _lazy_register("woof.scoreboard")
+grib2_export_register_cli = _lazy_register("woof.grib2_export")
 multi_run_register_cli = _lazy_register("woof.multi_run")
 obs_register_cli = _lazy_register("woof.obs.cli")
 render_register_cli = _lazy_register("woof.render")
@@ -115,6 +199,7 @@ simulated_radar_register_cli = _lazy_register("woof.simulated_radar")
 verification_visuals_register_cli = _lazy_register("woof.verification_visuals")
 remote_register_cli = _lazy_register("woof.remote_cli")
 report_register_cli = _lazy_register("woof.report_bundle")
+timeline_register_cli = _lazy_register("woof.timeline.report")
 run_plan_register_cli = _lazy_register("woof.runplan")
 setup_register_cli = _lazy_register("woof.setup_cli")
 sources_register_cli = _lazy_register("woof.sources_cli")
@@ -125,6 +210,7 @@ table_assets_register_cli = _lazy_register("woof.table_assets")
 update_register_cli = _lazy_register("woof.update_cli")
 version_register_cli = _lazy_register("woof.version_cli")
 warm_kernels_register_cli = _lazy_register("woof.warm_kernels")
+kernels_register_cli = _lazy_register("woof.kernel_warm_pack")
 spectral_register_cli = _lazy_register("woof.verify.spectral_cli")
 cells_register_cli = _lazy_register("woof.cells.cli")
 
@@ -270,7 +356,7 @@ _LONG_RUNNING_COMMANDS = frozenset({
     # The unbundled stages run for exactly as long as the welded ones
     # they were split out of: preprocessing is minutes of static build,
     # the forecast is the forecast.
-    "prep", "sim", "warm-kernels",
+    "prep", "sim", "warm-kernels", "fire-ideal",
     # `woof ensemble` is `go` by another name; argparse stores the name
     # the reader typed, so the alias needs its own row to get the notice.
     "ensemble",
@@ -379,7 +465,77 @@ def _run_description() -> str:
         "workaround.")
 
 
-def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
+def _register_run_parser(sub):
+    """The run options shared by the complete and command-specific parsers."""
+    run = sub.add_parser("run", help="integrate a config-driven real case",
+                         description=_run_description())
+    run.add_argument("config", type=Path, metavar="CONFIG", nargs="?",
+                     help=_CONFIG_HELP)
+    run.add_argument("--wrfinput", type=Path, metavar="DIR",
+                     help="WRF real.exe directory containing wrfinput_d0*, "
+                          "wrfbdy_d01 and producing namelist.input (instead of CONFIG)")
+    run.add_argument("--hydro", default=None, metavar="on|off|SETTINGS.toml",
+                     help="hydro is opt-in: on couples it wherever a hydrofabric covers the domain, "
+                          "a TOML file selects settings (as on woof go); without it the run has no hydro")
+    run.add_argument("--restart-from", type=Path, default=None, metavar="WRFRST",
+                     help="continue a WRF run from its restart file (wrfrst_d01_<time>, any "
+                          "suffix): the state, physics and clock are the file's, and the "
+                          "namelist.input and wrfbdy_d01 beside it (or in --wrfinput DIR) "
+                          "supply the settings and the lateral forcing.  With --run-seconds, "
+                          "the window after the restart instant")
+    run.add_argument("--checkpoint-at", default=None, metavar="TIMES",
+                     help="WRF inputs: write only these scheduled checkpoints, as "
+                          "comma-separated WRF valid times (2022-06-13_22:00:00) or "
+                          "`end`; each must be a restart_interval instant of the run. "
+                          "Absent writes every scheduled checkpoint")
+    run.add_argument("--benchmark", action="store_true",
+                     help="WRF inputs: time the forecast as a benchmark. Draws no "
+                          "products and runs no post-run verification, then prints "
+                          "the read, init, first step, steps and write times WRF's "
+                          "rsl.out reports, and the process total "
+                          "(also OUTDIR/benchmark-timing.json)")
+    run.add_argument("--met-em", type=Path, metavar="DIR",
+                     help="WPS metgrid directory with met_em.d0*.nc and producing namelist.input; native WOOF initialization")
+    run.add_argument("--soil-source", type=Path, default=None, metavar="DIR",
+                     help="WRF inputs: original met_em and Vtable directory for automatic soil-water recovery; defaults to the input directory")
+    run.add_argument("--rrtmg-variant", choices=("rrtmg_legacy", "rte-rrtmgp"), default=None,
+                     help="WRF inputs: preserve legacy RRTMG by default; choose rte-rrtmgp to change radiation")
+    run.add_argument("--thompson-version", choices=("wrf_461", "wrf_44"), default=None,
+                     help="WRF inputs: override the classic Thompson generation selected from producer TITLE")
+    run.add_argument("--urban-ucm-generation", choices=("wrf_471","wrf_480"), default=None)
+    run.add_argument("--urban-treeoption", type=int, choices=(0,1), default=None)
+    run.add_argument("--urban-ttscheme", type=int, choices=(0,1), default=None)
+    run.add_argument("--urban-fvg", type=float, default=None)
+    run.add_argument("--urban-table-dir", default=None)
+    run.add_argument("--vertical-grid", default=None,
+                     help="met_em: native, wrf-auto, or explicit:PATH eta grid")
+    run.add_argument("--vertical-levels", type=int, default=None,
+                     help="met_em: requested level count for the selected vertical grid")
+    run.add_argument("--run-seconds", type=float, default=None,
+                     help="shorten a --wrfinput or --met-em run inside its forcing coverage")
+    run.add_argument("--outdir", type=Path, default=Path("out/run"),
+                     metavar="OUT", help="wrfout output directory")
+    run.add_argument(
+        "--preprocess-backend", choices=("cuda", "cpu", "auto"), default=None,
+        help="CONFIG: where the root domain's preparation runs, overriding "
+             "[case_data] preprocess_backend (default: that key, else auto, "
+             "which prepares on the CPU when the card reads busy or cannot "
+             "hold it); pin it so two runs you compare start from the same "
+             "preparation. Nests prepare on the card either way")
+    from woof.da.analysis_door import add_analysis_arguments
+    add_analysis_arguments(run)
+    run.add_argument("--restart", type=Path, default=None, metavar="RST",
+                     help="resume from a gpuwmrst restart file written by "
+                          "an earlier run of the SAME config (only the "
+                          "forecast length / output and restart cadence "
+                          "and each domain's history window, "
+                          "history_begin_s / history_end_s, may differ); "
+                          "restart writing itself is the "
+                          "restart_interval_s config key")
+
+
+def build_parser(*, render_only: bool = False, preset_only: bool = False,
+                 run_only: bool = False, go_only: bool = False, race_only: bool = False) -> argparse.ArgumentParser:
     """The whole woof command surface, assembled.
 
     Split out of :func:`main` so the parser can be inspected without
@@ -397,6 +553,33 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     parser.add_argument("--help-all", nargs=0, action=AllCommandsHelp,
                         help="show every command")
     sub = parser.add_subparsers(prog=parser.prog, dest="command", metavar="COMMAND", required=True)
+    if race_only:
+        race_register_cli(sub)
+        add_explain_flag(sub.choices["race"])
+        return parser
+    if go_only:
+        # Use the complete go registrar without importing unrelated products.
+        go_register_cli(sub)
+        from woof.earth2_licensing import add_licence_argument
+        add_licence_argument(sub.choices["go"])
+        add_explain_flag(sub.choices["go"])
+        return parser
+    if run_only:
+        # A native forecast does not need to import every product's parser.
+        # Keep one run registrar so this path preserves the full flag surface.
+        _register_run_parser(sub)
+        _lazy_register("woof.supervisor")(sub)
+        add_explain_flag(sub.choices["run"])
+        return parser
+    _lazy_register("woof.nwpsuite.cli")(sub)
+    if preset_only:
+        # Metadata inspection does not need the numerical or NetCDF commands.
+        # Importing their parsers made a preset list fail on an otherwise
+        # sufficient CPU install before its own handler could run.
+        _lazy_register("woof.model_presets")(sub)
+        add_explain_flag(parser)
+        add_explain_flag(sub.choices["preset"])
+        return parser
     if render_only:
         # A live frame needs this parser and the common dispatch checks, not
         # imports and registration for every forecast and preparation door.
@@ -404,15 +587,19 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
         add_explain_flag(parser)
         add_explain_flag(sub.choices["render"])
         return parser
+    _lazy_register("woof.hubwind")(sub)
     preflight_register_cli(sub)
+    _lazy_register("woof.ensemble.family_products")(sub)
     ingest_register_cli(sub)
     # Combined check policy (T3 handoff): the cheap CPU input/static/table
     # preflight runs first; only a zero return advances to the memory
     # estimator, so --alloc is gated on valid inputs.
-    sub.choices["check"].set_defaults(
-        func=lambda args: args.ingest_preflight_handler(args)
-        or check_main(args))
+    sub.choices["check"].set_defaults(func=combined_check_main)
     fetch_register_cli(sub)
+    _lazy_register("woof.hf_fetch")(sub)
+    fire_static_register_cli(sub)
+    _lazy_register("woof.fire_ignition")(sub)
+    fire_ideal_register_cli(sub)
     cds_credentials_register_cli = _lazy_register("woof.cds_credentials")
     cds_credentials_register_cli(sub)
     companion_query_register_cli = _lazy_register("woof.companion_query")
@@ -427,6 +614,11 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     geog_register_cli(sub)
     domain_register_cli(sub)
     cyclone_setup_register_cli(sub)
+    _lazy_register("woof.solar")(sub)
+    earth2_register_cli(sub)
+    earth2_diagnostics_register_cli(sub)
+    tc_tracks_register_cli(sub)
+    tc_strata_register_cli(sub)
     local_da_register_cli = _lazy_register("woof.local_da")
     local_da_register_cli(sub)
     research_register_cli = _lazy_register("woof.research_workspaces")
@@ -438,11 +630,16 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # beside render, the other door that turns history files into a
     # product.
     ml_export_register_cli(sub)
+    _lazy_register("woof.earth2_export")(sub)
+    _lazy_register("woof.soundings")(sub)
+    scoreboard_register_cli(sub)
+    grib2_export_register_cli(sub)
     simulated_radar_register_cli(sub)
     verification_visuals_register_cli(sub)
     enprod_register_cli(sub)
     downscale_register_cli(sub)
     doctor_register_cli(sub)
+    timeline_register_cli(sub)
     obs_register_cli(sub)
     table_assets_register_cli(sub)
     bridge_assets_register_cli(sub)
@@ -453,7 +650,14 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # only way to reach.  Registered BEFORE `go` so the help listing
     # reads in pipeline order.
     stage_register_cli(sub)
+    _lazy_register("woof.compose_source")(sub)
+    _lazy_register("woof.source_intermediate")(sub)
+    _lazy_register("woof.storm_diagnostics")(sub)
     go_register_cli(sub)
+    _lazy_register("woof.standby_cli")(sub)
+    race_register_cli(sub)
+    hydro_register_cli(sub)
+    _lazy_register("woof.ocean.door")(sub)
     # Registered beside `go` because it IS `go`, on a fixed course, with a
     # clock and a sealed capsule around it.  The internal bench surface:
     # release-facing pages carry capability statements, this one carries
@@ -464,6 +668,8 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # published NCAR meshes to 1e-11 and had no command anyone could type,
     # which by this project's rule means it was not shipped.
     mesh_register_cli(sub)
+    model_presets_register_cli = _lazy_register("woof.model_presets")
+    model_presets_register_cli(sub)
     certify_register_cli(sub)
     spectral_op_register_cli(sub)
     multi_run_register_cli(sub)
@@ -474,6 +680,10 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # and an assistant read.
     physics_catalog_register_cli = _lazy_register("woof.physics_catalog")
     physics_catalog_register_cli(sub)
+    # The 0 ULP referee for that catalog: recorded stock WRF runs of every
+    # combination, replayed through WOOF and scored word for word.
+    verify_exact_register_cli = _lazy_register("woof.verify_exact.cli")
+    verify_exact_register_cli(sub)
     # The hex (MPAS-style mesh) and global model doors.  Listed here so the
     # help shows them; the words are dispatched in _dispatch_argv before
     # this parser runs, so each component keeps its own full parser.
@@ -489,6 +699,7 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     version_register_cli(sub)
     # The first forecast's GPU kernel compile, paid ahead of time.
     warm_kernels_register_cli(sub)
+    kernels_register_cli(sub)
     spectral_register_cli(sub)
     cells_register_cli(sub)
     lst = sub.add_parser(
@@ -517,42 +728,7 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     ingest.add_argument("--output", type=Path,
                         default=Path("out/initial_state.npz"), metavar="NPZ",
                         help="initialized-state NPZ output")
-    run = sub.add_parser("run", help="integrate a config-driven real case",
-                         description=_run_description())
-    run.add_argument("config", type=Path, metavar="CONFIG", nargs="?",
-                     help=_CONFIG_HELP)
-    run.add_argument("--wrfinput", type=Path, metavar="DIR",
-                     help="WRF real.exe directory containing wrfinput_d0*, "
-                          "wrfbdy_d01 and producing namelist.input (instead of CONFIG)")
-    run.add_argument("--met-em", type=Path, metavar="DIR",
-                     help="WPS metgrid directory with met_em.d0*.nc and producing namelist.input; native WOOF initialization")
-    run.add_argument("--soil-source", type=Path, default=None, metavar="DIR",
-                     help="WRF inputs: original met_em and Vtable directory for automatic soil-water recovery; defaults to the input directory")
-    run.add_argument("--rrtmg-variant", choices=("rrtmg_legacy", "rte-rrtmgp"), default=None,
-                     help="WRF inputs: preserve legacy RRTMG by default; choose rte-rrtmgp to change radiation")
-    run.add_argument("--vertical-grid", default=None,
-                     help="met_em: native, wrf-auto, or explicit:PATH eta grid")
-    run.add_argument("--vertical-levels", type=int, default=None,
-                     help="met_em: requested level count for the selected vertical grid")
-    run.add_argument("--run-seconds", type=float, default=None,
-                     help="shorten a --wrfinput or --met-em run inside its forcing coverage")
-    run.add_argument("--outdir", type=Path, default=Path("out/run"),
-                     metavar="OUT", help="wrfout output directory")
-    run.add_argument(
-        "--preprocess-backend", choices=("cuda", "cpu", "auto"), default=None,
-        help="CONFIG: where the root domain's preparation runs, overriding "
-             "[case_data] preprocess_backend (default: that key, else auto, "
-             "which prepares on the CPU when the card reads busy or cannot "
-             "hold it); pin it so two runs you compare start from the same "
-             "preparation. Nests prepare on the card either way")
-    run.add_argument("--restart", type=Path, default=None, metavar="RST",
-                     help="resume from a gpuwmrst restart file written by "
-                          "an earlier run of the SAME config (only the "
-                          "forecast length / output and restart cadence "
-                          "and each domain's history window, "
-                          "history_begin_s / history_end_s, may differ); "
-                          "restart writing itself is the "
-                          "restart_interval_s config key")
+    _register_run_parser(sub)
     resume = sub.add_parser(
         "resume",
         help="continue a run from its newest valid gpuwmrst checkpoint "
@@ -625,7 +801,7 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
                      dest="rrtmg_variant",
                      help="implementation for a WRF RRTMG 4/4 request: "
                           "RTE+RRTMGP by default, or legacy RRTMG when "
-                          "the namelist selects GSD MYNN or aer_opt=3; "
+                          "the namelist selects GSD MYNN or aer_opt 1, 2 or 3; "
                           "an explicit choice retains its implementation")
     # No argparse default: the report records WHAT chose the line, and
     # "nobody did, the importer's default applied" is one of the answers.
@@ -638,6 +814,12 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
                           "default: 1, moist theta, booked as a "
                           "substitution). The report names the line and "
                           "what chose it")
+    imp.add_argument("--urban-ucm-generation", choices=("wrf_471", "wrf_480"), default=None,
+                     help="single-layer urban numerical generation; omitted imports retain wrf_471")
+    imp.add_argument("--urban-treeoption", type=int, choices=(0,1), default=None)
+    imp.add_argument("--urban-ttscheme", type=int, choices=(0,1), default=None)
+    imp.add_argument("--urban-fvg", type=float, default=None)
+    imp.add_argument("--urban-table-dir", default=None)
     imp.add_argument("--ack", action="append", default=[], metavar="ID",
                      help="declared-experiment acknowledgement id to "
                           "write into [experiment].acknowledgements of "
@@ -666,6 +848,11 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # parser (check, run, resume).
     for subcommand_parser in sub.choices.values():
         add_explain_flag(subcommand_parser)
+    from woof.earth2_licensing import add_licence_argument
+    for name in ("fetch", "prep", "domain", "go", "ensemble", "source-intermediate", "earth2", "earth2-diagnose",
+                 "hf-fetch"):
+        if name in sub.choices:
+            add_licence_argument(sub.choices[name])
     return parser
 
 
@@ -699,7 +886,14 @@ def main(argv: list[str] | None = None) -> int:
     # finding N10).  Nothing else in the product has to remember to
     # flush; a `print` streams because the door said so.
     line_buffer_stdout()
-    with explain_scope(False):
+    from woof.earth2_licensing import check_argv, licence_scope, _values
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    try:
+        check_argv(tokens)
+    except ValueError as error:
+        print(f"woof: {error}", file=sys.stderr)
+        return 2
+    with explain_scope(False), licence_scope(_values(tokens, "--accept-licence")):
         return _dispatch_argv(argv)
 
 
@@ -710,8 +904,28 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
     handled = dispatch_component(tokens)
     if handled is not None:
         return handled
+    if tokens and tokens[0] == "suite":
+        from woof.nwpsuite.cli import main as suite_main
+        return suite_main(tokens[1:])
+    if tokens == ["check", "--json"]:
+        # The configured check door is unchanged. Bare check is inventory only.
+        from woof.nwpsuite.hardware import inventory
+        from json import dumps as box_dumps
+        print(box_dumps(inventory(), sort_keys=True))
+        return 0
+    if (len(tokens) > 1 and tokens[0] == "timeline"
+            and tokens[1] not in {"report", "project", "--help", "-h"}):
+        tokens.insert(1, "report")
     parser = (build_parser(render_only=True)
-              if tokens and tokens[0] == "render" else build_parser())
+              if tokens and tokens[0] == "render" else
+              build_parser(preset_only=True)
+              if tokens and tokens[0] == "preset" else
+              build_parser(run_only=True)
+              if tokens and tokens[0] == "run" else
+              build_parser(go_only=True)
+              if tokens and tokens[0] == "go" else
+              build_parser(race_only=True)
+              if tokens and tokens[0] == "race" else build_parser())
     if not tokens:
         parser.print_help()
         return 0
@@ -741,6 +955,19 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
     # Provenance: the emitted TOML records which front door authored it.
     args.interactive = interactive
     if args.command == "run":
+        if (args.config is not None and args.wrfinput is None
+                and args.met_em is None and Path(args.config).is_dir()
+                and (Path(args.config) / "namelist.input").is_file()):
+            # A WRF run directory named where a CONFIG goes (NCAR's
+            # benchmark folders are run this way): the WRF-input door, which
+            # restarts when its namelist says restart = .true.
+            args.wrfinput, args.config = Path(args.config), None
+        if (args.restart_from is not None and args.wrfinput is None
+                and args.config is None and args.met_em is None):
+            args.wrfinput = Path(args.restart_from).parent
+        if args.restart_from is not None and args.wrfinput is None:
+            parser.error("--restart-from continues a WRF run; it pairs with --wrfinput DIR "
+                         "(or stands alone, reading the directory the file is in)")
         if sum(value is not None for value in (args.config, args.wrfinput, args.met_em)) != 1:
             parser.error("run requires exactly one of CONFIG, --wrfinput DIR or --met-em DIR")
         if args.soil_source is not None and args.wrfinput is None:
@@ -749,10 +976,37 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
             parser.error("--run-seconds is for --wrfinput or --met-em; set run_seconds in CONFIG")
         if args.rrtmg_variant is not None and args.config is not None:
             parser.error("--rrtmg-variant is for WRF inputs; set radiation in CONFIG")
+        if args.thompson_version is not None and (args.config is not None or args.met_em is not None):
+            parser.error("--thompson-version is for WRF folders; set thompson_version in CONFIG")
+        if getattr(args, "checkpoint_at", None) is not None and args.wrfinput is None:
+            # Breakage it prevents: only the WRF-input door reads the
+            # selection, so on another route every scheduled checkpoint
+            # would still be written while the caller believed it was not.
+            parser.error("--checkpoint-at selects the WRF-input door's checkpoints "
+                         "(--wrfinput DIR or --restart-from WRFRST); the other routes "
+                         "do not read it")
+        if args.benchmark and args.wrfinput is None:
+            # Breakage it prevents: the flag would be read by nothing on the
+            # other routes, so a timed run would still render and verify
+            # while its benchmarker believed it did not.
+            parser.error("--benchmark times the WRF-input door (a WRF run folder, "
+                         "--wrfinput DIR or --restart-from WRFRST); the other "
+                         "routes do not read it")
+        if args.config is not None and any(getattr(args,key) is not None for key in ("urban_ucm_generation","urban_treeoption","urban_ttscheme","urban_fvg","urban_table_dir")):
+            parser.error("urban CLI controls are for --wrfinput; set the shared urban fields in CONFIG")
         if args.vertical_levels is not None and args.met_em is None:
             parser.error("--vertical-levels is for --met-em inputs")
         if args.vertical_grid is not None and args.met_em is None:
             parser.error("--vertical-grid is for --met-em inputs")
+        if args.wrfinput is None:
+            # Breakage it prevents: the CONFIG and met_em routes have no
+            # analysis hook, so the bundle would be read by nothing and an
+            # unanalysed forecast would run under an analysed name.
+            from woof.da.analysis_door import AnalysisDoorRefusal, refuse_unrouted
+            try:
+                refuse_unrouted(args, "CONFIG" if args.config is not None else "--met-em")
+            except AnalysisDoorRefusal as error:
+                parser.error(str(error))
         if args.preprocess_backend is not None and args.config is None:
             parser.error("--preprocess-backend pins CONFIG's preparation; the "
                          "--wrfinput and --met-em routes do not read it, so it "
@@ -832,7 +1086,12 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
                   or getattr(args, "readiness", False)))
             or (args.command == "sim"
                 and getattr(args, "print_command", False)))
-        if not _spends_nothing:
+        # `go --prepare-only` fetches and prepares on the CPU backends and
+        # stops before the forecast, so the GPU runtime it would refuse
+        # for is the forecast's (go_cli._prepare_only_needs_no_card).
+        _prepares_only = (args.command == "go"
+                          and getattr(args, "prepare_only", False))
+        if not _spends_nothing and not _prepares_only:
             capabilities.require_for_command(args.command)
         # --no-memory-gate reaches every process this command starts: the
         # forecast stage `go` runs, the worker `run` supervises, the runner
@@ -841,6 +1100,10 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         from woof.core.resident_admission import memory_gate_override
 
         with memory_gate_override(getattr(args, "no_memory_gate", False)):
+            if args.command == "run" and getattr(args, "hydro", None) is not None:
+                from woof.hydro.runtime import run_scope
+                with run_scope(args.hydro, getattr(args, "config", None)):
+                    return _dispatch(args)
             return _dispatch(args)
     except KeyboardInterrupt:
         # Ctrl-C.  Every subcommand gets the same bounded contract: one
@@ -1141,7 +1404,6 @@ def _dispatch(args) -> int:
         if args.json:
             import json
             for record in records:
-                record = record  # manifest records are already dicts
                 record["door"] = case_door(record)
             print(json.dumps(records, indent=2, sort_keys=True))
         else:
@@ -1184,6 +1446,8 @@ def _dispatch(args) -> int:
         try:
             toml_text, report = import_namelists(
                 args.wps, args.input, name=args.name,
+                urban_ucm_generation=args.urban_ucm_generation,
+                urban_controls={key:getattr(args,key) for key in ("urban_treeoption","urban_ttscheme","urban_fvg","urban_table_dir") if getattr(args,key) is not None},
                 static_cache_root=(None if args.static_cache_root is None
                                    else args.static_cache_root.resolve()),
                 **({} if args.rrtmg_variant is None else
@@ -1254,6 +1518,16 @@ def _dispatch(args) -> int:
                 command=f"woof {args.command}"))
             args.config = experiment.path
         _refuse_members_of_one_checkpoint(args)
+        import tomllib
+        from woof.experiment import is_experiment_toml
+
+        continuation = tomllib.loads(experiment.path.read_text(encoding="utf-8"))
+        if "case_data" not in continuation and is_experiment_toml(experiment.path):
+            raise ValueError(
+                "prepared-route forecasts resume with woof go CONFIG --restart CHECKPOINT "
+                "--prepared-root PREPARED --wps-namelist NAMELIST. Use the original prepared "
+                "folder and its bound config and WPS file; resume's declared-input route "
+                "cannot reconstruct that preparation's identity.")
         # Locate only; every safety property of the resume (manifest
         # validation, config/setup/physics identity, complete tree set)
         # is the run machinery's own and runs on the path set here.
@@ -1337,6 +1611,9 @@ def _dispatch(args) -> int:
         from woof.metem_forecast import run_metem_forecast
         launch = run_metem_forecast if args.met_em is not None else run_wrf_forecast
         directory = args.met_em if args.met_em is not None else args.wrfinput
+        urban_controls = {key:getattr(args,key) for key in ("urban_treeoption","urban_ttscheme","urban_fvg","urban_table_dir") if getattr(args,key) is not None}
+        if args.met_em is not None and (args.urban_ucm_generation is not None or urban_controls):
+            raise ValueError("urban generation CLI controls currently require --wrfinput; metgrid imports can select them in the resolved experiment TOML")
         unsupported = [flag for flag, value in (
             ("--prep-timeout", args.prep_timeout),
             ("--directory-input-hash", args.directory_input_hash),
@@ -1347,18 +1624,29 @@ def _dispatch(args) -> int:
         from woof.ensemble.door import request_for_inputs
         ensemble_request = request_for_inputs(members=getattr(args, "members", None),
             keep_member_files=getattr(args, "keep_member_files", None))
+        from woof.da.analysis_door import request_from_args
+        analysis_request = request_from_args(args)
         return launch(directory, args.outdir,
                                run_seconds=args.run_seconds, restart=args.restart,
                                health_debug=args.health_debug, gpu_uuid=args.gpu_uuid,
                                exclusive_gpu=not args.no_supervise,
                                rrtmg_variant=args.rrtmg_variant,
+                               **({} if getattr(args,"thompson_version",None) is None else {"thompson_version":args.thompson_version}),
+                               **({} if args.wrfinput is None else {"urban_ucm_generation":args.urban_ucm_generation,"urban_controls":urban_controls}),
                                allow_shared_gpu=args.allow_shared_gpu,
                                **({} if ensemble_request is None else
                                   {"ensemble_request": ensemble_request.receipt()}),
                                **({"vertical_grid":args.vertical_grid,
                                    "vertical_levels":args.vertical_levels}
                                   if args.met_em is not None else
-                                  ({} if args.soil_source is None else {"soil_source": args.soil_source})))
+                                  ({} if args.soil_source is None else {"soil_source": args.soil_source})),
+                               **({"restart_from": args.restart_from}
+                                  if args.met_em is None and args.restart_from is not None else {}),
+                               **({"analysis": analysis_request}
+                                  if args.met_em is None and analysis_request is not None else {}),
+                               **({"benchmark": True} if args.benchmark else {}),
+                               **({"checkpoint_at": args.checkpoint_at}
+                                  if getattr(args, "checkpoint_at", None) is not None else {}))
 
     # [[domain]]/[experiment] tables route to the experiment path; the
     # legacy [grid]/[dynamics]/[run] shape stays on the frozen case path.
@@ -1376,9 +1664,7 @@ def _dispatch(args) -> int:
     # identity its payload is bound to, and `read_config_authority`
     # checks that binding itself.  Requiring that path to still be a
     # readable file on the worker would refuse a legitimate run.
-    config_authority = None
-    from woof.config_authority import (CONFIG_PAYLOAD_ENV,
-                                        read_config_authority)
+    from woof.config_authority import read_config_authority
     config_authority = read_config_authority(args.config)
     if (config_authority is not None
             and is_experiment_toml_bytes(config_authority.payload)):

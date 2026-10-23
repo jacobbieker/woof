@@ -22,6 +22,9 @@ azimuth_step_deg = 1.0
 volume_duration_s = 300.0
 ```
 
+Platform wheels carry the native radar engine. Fallback installs can obtain
+it with `woof fetch-bridges --partial --artifact rw_simradar`.
+
 An absent table disables this optional product. A present table enables it
 unless `enabled = false`. The table changes output products only; it does not
 change forecast state or restart identity. The option works through the

@@ -26,6 +26,7 @@ from functools import lru_cache
 
 import numpy as np
 
+from woof.core.noahmp_driver_gpu import _current_device
 from woof.core.noahmp_kernel_sources import DEFAULT_OPTIONS, compile_runtime_unit
 from woof.core.noahmp_glacier import GlacierBalanceError, noahmp_glacier
 
@@ -141,7 +142,7 @@ def _raise_on_errors(errors: np.ndarray) -> None:
 
 
 @lru_cache(maxsize=None)
-def _module(options: tuple[str, ...]):
+def _module(device: int, options: tuple[str, ...]):
     """Compile (once per option set) the COMPOSED glacier translation
     unit -- noahmp_leaves.cu (the single glibc device transcription)
     followed by noahmp_glacier.cu, exactly as
@@ -152,9 +153,18 @@ def _module(options: tuple[str, ...]):
         options=options)
 
 
-def glacier_module(options: tuple[str, ...] = DEFAULT_OPTIONS):
+def glacier_module(options: tuple[str, ...] = DEFAULT_OPTIONS, *,
+                   noahmp_snow_age="wrf_470"):
     """The compiled composed glacier unit (cached per option set)."""
-    return _module(tuple(options))
+    from woof.noahmp_generation import snow_age_generation
+    generation = snow_age_generation(noahmp_snow_age)
+    # noahmp_glacier.cu defaults GPUWM_NOAHMP_NIGHT_AGE to 1, so the default
+    # generation compiles runtime_unit("noahmp_glacier") exactly -- the unit
+    # identity the frame recordings and the kernel manifest are keyed on --
+    # and only the explicit wrf_461 reproduction adds a define.
+    if generation == "wrf_470":
+        return _module(_current_device(), tuple(options))
+    return _module(_current_device(), tuple(options) + ("-DGPUWM_NOAHMP_NIGHT_AGE=0",))
 
 
 def evaluate_glacier_columns(inputs: dict, count: int,
@@ -169,7 +179,7 @@ def evaluate_glacier_columns(inputs: dict, count: int,
                                             dtype=np.float32))
     device_out = cp.empty(count * N_OUTPUT, dtype=cp.float32)
     device_io = cp.empty(count * 2, dtype=cp.int32)
-    kernel = glacier_module().get_function("noahmp_glacier_column")
+    kernel = glacier_module(noahmp_snow_age=inputs.get("noahmp_snow_age", "wrf_470")).get_function("noahmp_glacier_column")
     blocks = (count + THREADS - 1) // THREADS
     kernel(
         (blocks,), (THREADS,),
@@ -220,7 +230,8 @@ def evaluate_glacier_columns_on_host(inputs: dict, count: int,
             snowh=inputs["snowh"][i], snice=inputs["snice"][i],
             snliq=inputs["snliq"][i], tg=inputs["tg"][i],
             stc=inputs["stc"][i], sh2o=inputs["sh2o"][i],
-            tauss=inputs["tauss"][i], qsfc=inputs["qsfc"][i])
+            tauss=inputs["tauss"][i], qsfc=inputs["qsfc"][i],
+            noahmp_snow_age=inputs.get("noahmp_snow_age", "wrf_470"))
         for name in GLACIER_OUTPUT_SCALARS:
             out[name][i] = getattr(result, name)
         for name, _w in GLACIER_OUTPUT_ARRAYS:

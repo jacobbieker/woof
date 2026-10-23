@@ -41,13 +41,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
 import functools
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shlex
 import time
+from time import perf_counter
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
@@ -89,7 +92,9 @@ ROUTE_TABLE_SHA256 = (
     # breakage), and cadence_note states the grammar that replaces it.
     # Native-level atmosphere and analysis-soil routes are table entries,
     # merged with the ecmwf-ens and rrfs-ens input-ensemble rows.
-    "6e7155e6461fa9c9093d9c564cef498dc003849cc3a79f99c8aa40d58bd0b9b2"
+    # Moved by the capabilities landing: the ecmwf-ens historical-archive rows
+    # merged over the gfs/gefs archive publication rows.
+    "b4d1e695fe5d95055a243e3ed277d4e17eff1091ed8e46c687c9ae8bb2edc4c8"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own
@@ -182,6 +187,8 @@ class FileRow:
     #: The byte ranges are copied unchanged, then verified by Rust inventory.
     member_index: Mapping[str, object] | None = None
     index_suffix_replaces: str | None = None
+    lead_min: int = 0
+    lead_max: int | None = None
 
 
 @dataclass(frozen=True)
@@ -260,6 +267,7 @@ class Route:
     record_subset_supported: bool
     record_subset_why: str
     prep: Mapping[str, object]
+    first_lead: int = 0
     publication_eras: tuple[PublicationEra, ...] = ()
     #: How a cycle posts and how long a run waits for a lead
     #: (:class:`PostingRow`).  Every loaded route has one: the loader
@@ -330,6 +338,8 @@ def _file_row(raw: Mapping[str, object]) -> FileRow:
             f"{ROUTE_TABLE_NAME}: file role {raw.get('role')!r} declares lead "
             f"rule {leads!r}; the planner reads {sorted(FILE_LEAD_RULES)}")
     return FileRow(
+        lead_min=int(raw.get("lead_min", 0)),
+        lead_max=int(raw["lead_max"]) if raw.get("lead_max") is not None else None,
         role=str(raw["role"]),
         path=str(raw["path"]),
         primary=bool(raw.get("primary", False)),
@@ -692,6 +702,7 @@ def _build_routes() -> Mapping[str, Route]:
              tuple((int(step[0]), int(step[1])) for step in entry["steps"]))
             for entry in raw["ladders"])
         routes[source_id] = Route(
+            first_lead=int(raw.get("first_lead", 0)),
             source_id=source_id,
             label=str(raw["label"]),
             measured=str(raw.get("measured", "")),
@@ -1078,7 +1089,14 @@ def sniff_format(path: Path) -> str | None:
 def all_fetchable_sources() -> tuple[str, ...]:
     """Every ``--source`` the fetch front door accepts, sorted."""
     from woof.cf_archive_fetch import sources
-    return tuple(sorted(set(LEGACY_ROUTE_SOURCES) | set(_ROUTES) | set(sources())))
+    return tuple(sorted(set(LEGACY_ROUTE_SOURCES) | set(_ROUTES) | set(sources())
+                        | {row.source_id for row in source_adapters.source_adapters()
+                           if row.acquisition_owner is not None}))
+
+
+def table_route_sources() -> frozenset[str]:
+    """The source ids that are rows of the route table (no aliases)."""
+    return frozenset(_ROUTES)
 
 
 def _canonical(source: str) -> str:
@@ -1247,7 +1265,7 @@ def ladder_for(route: Route, cycle: datetime) -> tuple[int, ...]:
         start = 0 if index == 0 else previous + step
         leads.extend(range(start, through + 1, step))
         previous = leads[-1]
-    return tuple(leads)
+    return tuple(lead for lead in leads if lead >= route.first_lead)
 
 
 def _extended_cycle_hours(route: Route) -> tuple[int, ...]:
@@ -1521,7 +1539,10 @@ def _ladder_words(route: Route, cycle: datetime) -> str:
     parts = []
     previous = 0
     for index, (through, step) in enumerate(_lead_steps(route, cycle)):
-        start = 0 if index == 0 else previous + step
+        # The first segment begins at the route's first published lead
+        # (ladder_for drops the leads below it), not at f000.
+        start = (-(-route.first_lead // step) * step if index == 0
+                 else previous + step)
         parts.append(f"f{start:03d}..f{through:03d} every {step} h")
         previous = through
     return ", then ".join(parts)
@@ -1787,6 +1808,7 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
                     now: datetime | None = None) -> FetchPlan:
     """Everything a fetch will do, decided before a single byte moves."""
 
+    source = source_adapters.source_for_cycle(source, cycle)
     route = route_for(source)
     host = fetch_endpoints.policy_transport(route.source_id, host)
     if area is not None:
@@ -1837,18 +1859,23 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
     step0_only: list[str] = []
 
     def emit(row: FileRow, lead: int | None) -> None:
+        if lead is not None and (lead < row.lead_min or (row.lead_max is not None and lead > row.lead_max)):
+            return
         lead_context = dict(context)
         if lead is not None:
             lead_context.update({
                 "F": str(lead), "FF": f"{lead:02d}", "FFF": f"{lead:03d}"})
         for entry in (_axis_entries(route, row.axis) if row.axis else ({},)):
             key = _render(row.path, {**lead_context, **entry})
-            if key in seen:
+            identity = (key, lead) if row.member_index and row.member_index.get("format") == "wgrib2" else key
+            if identity in seen:
                 continue
-            seen.add(key)
+            seen.add(identity)
             relpath = _relpath(route, key)
             if row.member_index is not None:
-                relpath = f"members/{member_name}/{relpath}"
+                relpath = (f"members/{member_name}/leads/f{lead:03d}/{relpath}"
+                           if row.member_index.get("format") == "wgrib2"
+                           else f"members/{member_name}/{relpath}")
             index_base = key
             if row.index_suffix_replaces:
                 if not key.endswith(row.index_suffix_replaces):
@@ -1981,7 +2008,6 @@ PREP_ARGUMENTS_NAME = "prep-arguments.json"
 PREP_ARGUMENTS_SCHEMA = "gpuwm-fetch-prep-arguments-v1"
 
 _USER_AGENT = "gpuwm-fetch/2.5 (+https://github.com/arwenweather)"
-_CHUNK = 1 << 20
 _RECOVERY_REQUEST_NAME = "fetch-recovery-request.json"
 _RECOVERY_SCHEMA = "gpuwm-fetch-recovery-v1"
 _RECOVERY_DIRECTORY = ".fetch-verified"
@@ -2013,7 +2039,7 @@ def _verify_payload(path: Path, *, magic: str, label: str) -> None:
         raise ValueError(f"{label}: the server returned an empty object")
     with path.open("rb") as handle:
         head = handle.read(len(magic))
-        if head != magic.encode("ascii"):
+        if head != magic.encode("latin1"):
             raise ValueError(
                 f"{label}: expected a {magic} payload and the first bytes "
                 f"are {head!r} -- the host answered with something that is "
@@ -2052,7 +2078,8 @@ def _admission_reporter(label: str, *, total: int, progress):
     """
 
     def landed(index: int, entry: dict) -> None:
-        note = ("already present" if entry.get("reused")
+        note = ("adopted" if entry.get("adopted") else
+                "already present" if entry.get("reused")
                 else f"{entry.get('bytes', 0) / (1024 * 1024):.1f} MiB")
         progress(progress_mod.format_transfer_done_line(
             label=label, index=index, total=total,
@@ -2063,7 +2090,7 @@ def _admission_reporter(label: str, *, total: int, progress):
 
 def _download_object(url: str, dest: Path, *, magic: str, opener=None,
                      timeout: float = 300.0, progress=None,
-                     declared_size=None) -> dict:
+                     declared_size=None, streams=1) -> dict:
     """Move one object, verify it, and return its manifest entry.
 
     ``progress`` is called with the size of each chunk as it lands.  The
@@ -2072,54 +2099,21 @@ def _download_object(url: str, dest: Path, *, magic: str, opener=None,
     route's opening line and its manifest (UX finding N10).
     """
 
-    from urllib.request import Request  # local: keeps import cost off load
+    from woof.fetch_ranges import download
 
     dest = _io_path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
-    digest = hashlib.sha256()
-    written = 0
-    request = Request(url, headers={"User-Agent": _USER_AGENT})
-    from woof.nomads_governor import paced_urlopen
-    response = paced_urlopen(
-        request, timeout=timeout,
-        **({"opener": opener} if opener is not None else {}))
-    declared = response.headers.get("Content-Length")
-    if declared_size is not None and declared is not None:
-        # The size the host itself states, the moment it states it.  A
-        # HEAD ahead of every transfer would double the request count on
-        # exactly the services whose per-request latency the pool exists
-        # to hide, so the in-flight line learns the total from the
-        # transfer that is already open.
-        try:
-            declared_size(dest, int(declared))
-        except (TypeError, ValueError):          # pragma: no cover
-            pass
     try:
-        with response, part.open("wb") as handle:
-            while True:
-                # Another file already failed this request: the rest of
-                # this one would be bytes nobody uses.
-                fetch_pool.raise_if_stopped()
-                chunk = response.read(_CHUNK)
-                if not chunk:
-                    break
-                handle.write(chunk)
-                digest.update(chunk)
-                written += len(chunk)
-                if progress is not None:
-                    progress(len(chunk))
-    except fetch_pool.TransferCancelled:
+        written, digest = download(url, part, user_agent=_USER_AGENT,
+            streams=streams, timeout=timeout, opener=opener,
+            progress=progress, declared_size=declared_size)
+    except BaseException:
         part.unlink(missing_ok=True)
         raise
-    if declared is not None and int(declared) != written:
-        part.unlink(missing_ok=True)
-        raise ValueError(
-            f"{dest.name}: the host declared {int(declared)} bytes and "
-            f"delivered {written}")
     _verify_payload(part, magic=magic, label=dest.name)
     part.replace(dest)
-    return {"name": dest.name, "bytes": written, "sha256": digest.hexdigest(),
+    return {"name": dest.name, "bytes": written, "sha256": digest,
             "url": url}
 
 
@@ -2167,7 +2161,8 @@ def _download_along_ladder(plan: FetchPlan, obj: PlannedObject, dest: Path, *,
             return download_indexed_member(
                 url, endpoint.url(obj.index_key), dest,
                 declaration=obj.member_index, member_ordinal=obj.member_ordinal,
-                source=plan.source_id, member=plan.member, opener=opener)
+                source=plan.source_id, member=plan.member, opener=opener,
+                forecast_hour=obj.lead)
         return fetch(url, dest, magic=magic, opener=opener)
 
     endpoint, entry = fetch_endpoints.ask_along_ladder(
@@ -2338,8 +2333,9 @@ def request_cached(plan: FetchPlan, out: Path) -> bool:
     except ValueError:
         return False
     prior = _prior_entries(out)
-    return all(_reusable_entry(out, plan, obj, prior) is not None
-               for obj in plan.objects)
+    with ThreadPoolExecutor(max_workers=max(1, min(len(plan.objects), os.cpu_count() or 1))) as pool:
+        return all(pool.map(lambda obj: _reusable_entry(out, plan, obj, prior) is not None,
+                            plan.objects))
 
 
 #: What an unpinned request records where it used to record one host.
@@ -2512,6 +2508,7 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
     # only per-file signal, arriving at completion.  Default-on: no flag
     # turns this on, and a bare run stops going quiet.
     monitor = progress_mod.TransferMonitor(f"fetch {plan.source_id}")
+    workers = fetch_pool.resolve_file_workers(file_workers)
     fetch = downloader
     if fetch is None:
         # ``declared_size`` is bound to the DEFAULT transport only, for
@@ -2520,17 +2517,44 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
         # test's fake is called exactly as before.
         fetch = functools.partial(_download_object,
                                   progress=counter.advance,
-                                  declared_size=monitor.declare_for_path)
+                                  declared_size=monitor.declare_for_path,
+                                  streams=fetch_pool.chunk_streams_per_file(
+                                      workers, files=len(plan.objects)))
 
-    workers = fetch_pool.resolve_file_workers(file_workers)
     ladder = plan.ladder or (plan.host,)
 
-    # Which objects this run still has to move -- the only ones worth
-    # asking a host about.
+    # Verify files across the available cores. Unrecorded files can be
+    # adopted against the host; their HEAD/index responses are capped at
+    # 16 open connections independently of the hashing width.
+    from woof.fetch_adoption import adopt
+
+    def local_entry(obj):
+        known = _reusable_entry(out, plan, obj, prior)
+        if known is not None:
+            return {**known, "adopted": False, "reused": True,
+                    "downloaded": False}
+        dest = out / obj.relpath
+        # A failed recorded checksum is damage, not a new unmanaged file.
+        if (not dest.is_file() or _recovery_entry(out, plan, obj)
+                or prior.get(obj.relpath)):
+            return None
+        entry = adopt(dest, obj, ladder=ladder, magic=_magic_for(plan, obj.role),
+                      verify_payload=_verify_payload, opener=opener, progress=progress)
+        if entry is not None:
+            entry.update(relpath=obj.relpath, role=obj.role, lead=obj.lead,
+                         adopted=True, reused=False, downloaded=False)
+            _write_json(_recovery_path(out, obj), {
+                "request": _request_identity(plan), "key": obj.key, "file": entry})
+        return entry
+
     reuse: dict[str, dict] = {}
     pending: list[PlannedObject] = []
-    for obj in plan.objects:
-        known = _reusable_entry(out, plan, obj, prior)
+    verification_workers = max(1, min(len(plan.objects), os.cpu_count() or 1))
+    verification_started = perf_counter()
+    with ThreadPoolExecutor(max_workers=verification_workers) as pool:
+        local = list(pool.map(local_entry, plan.objects))
+    verification_seconds = perf_counter() - verification_started
+    for obj, known in zip(plan.objects, local):
         if known is not None:
             reuse[obj.relpath] = known
         else:
@@ -2558,7 +2582,8 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
         return (tuple(rung for rung in rungs if rung.name == name)
                 + tuple(rung for rung in rungs if rung.name != name))
 
-    reused = len(reuse)
+    adopted = sum(bool(entry.get("adopted")) for entry in reuse.values())
+    reused = len(reuse) - adopted
     jobs = []
     for obj in plan.objects:
         dest = out / obj.relpath
@@ -2569,7 +2594,7 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
             def _reuse(entry=known, relpath=obj.relpath, role=obj.role,
                        lead=obj.lead) -> dict:
                 return {**entry, "relpath": relpath, "role": role,
-                        "lead": lead, "reused": True}
+                        "lead": lead}
 
             jobs.append(fetch_pool.TransferJob(
                 name=obj.relpath, url=None, action=_reuse,
@@ -2584,6 +2609,10 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
                  group=groups[len(jobs)]) -> dict:
             if lead_gate is not None:
                 rungs = _headed(rungs, lead_gate(group))
+            if dest.exists():
+                from woof.fetch_guard import quarantine
+                aside = quarantine(dest)
+                progress(f"fetch {plan.source_id}: moved rejected file aside to {aside.name}")
             while True:
                 try:
                     entry = _download_along_ladder(
@@ -2601,7 +2630,7 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
                     continue
                 break
             entry = {**entry, "relpath": relpath, "role": role, "lead": lead,
-                     "reused": False}
+                     "reused": False, "adopted": False, "downloaded": True}
             _write_json(_recovery_path(out, obj), {
                 "request": _request_identity(plan), "key": obj.key, "file": entry})
             return entry
@@ -2639,6 +2668,7 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
         f"f{plan.leads[0]:03d}..f{plan.leads[-1]:03d}"
         + (f", member {plan.member}" if plan.member else "")
         + (f"; {behind} behind it" if behind else "")
+        + (f"; {adopted} adopted" if adopted else "")
         + (f"; {reused} already present" if reused else ""))
 
     # WHAT IT IS DOING, per object, as the verified prefix grows.  The
@@ -2670,7 +2700,7 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
                                      progress=progress)
                         if lead_steps else [])
         composed_so_far.extend(composed_now)
-        _write_json(out / MANIFEST_NAME, _plan_manifest(
+        _write_route_manifest(out, _plan_manifest(
             plan, list(admitted), list(composed_so_far), None,
             complete=False))
         _write_sha256sums(out, admitted, composed_so_far)
@@ -2686,10 +2716,13 @@ def run_plan(plan: FetchPlan, *, out: Path, force: bool = False,
 
     composed = (composed_so_far if on_lead is not None
                 else _run_compose(plan, out, progress=progress))
+    receipt.update(verification_workers=verification_workers,
+                   verification_seconds=round(verification_seconds, 6),
+                   adoption_connection_cap=16)
     payload = _plan_manifest(plan, entries, composed, receipt,
                              probe_receipt=probe_receipt,
                              complete=True if on_lead is not None else None)
-    _write_json(out / MANIFEST_NAME, payload)
+    _write_route_manifest(out, payload)
     _write_sha256sums(out, entries, composed)
     return payload
 
@@ -2698,6 +2731,12 @@ def _plan_manifest(plan: FetchPlan, entries, composed, receipt, *,
                    probe_receipt=None, complete: bool | None = None) -> dict:
     """The route manifest for ``entries``; ``complete`` only on an as-posted fetch."""
 
+    acquisition = {}
+    for kind, flag in (("adopted", "adopted"), ("reused", "reused"),
+                       ("downloaded", "downloaded")):
+        selected = [entry for entry in entries if entry.get(flag)]
+        acquisition[f"{kind}_files"] = len(selected)
+        acquisition[f"{kind}_bytes"] = sum(entry.get("bytes", 0) for entry in selected)
     payload = {
         "schema": ROUTE_MANIFEST_SCHEMA,
         "route_table_sha256": packaged_route_table_sha256(),
@@ -2711,7 +2750,7 @@ def _plan_manifest(plan: FetchPlan, entries, composed, receipt, *,
         "endpoints": _endpoint_receipt(plan, entries, probe=probe_receipt),
         "files": entries,
         "composed": composed,
-        "concurrency": receipt,
+        "concurrency": {**(receipt or {}), **acquisition},
         "donors": [
             {"source": donor.source, "role": donor.role,
              "cycle": f"{donor.cycle:%Y-%m-%dT%H}Z",
@@ -2795,6 +2834,25 @@ def _run_compose(plan: FetchPlan, out: Path, *, progress=print) -> list[dict]:
                  f"time{'' if len(composed) == 1 else 's'} from "
                  f"{sum(len(item['parts']) for item in composed)} objects")
     return composed
+
+
+def _write_route_manifest(out: Path, payload: Mapping[str, object]) -> None:
+    # Preparation binds the bytes of this authority document. Transfer timing
+    # and pool width are observations, not input content: putting them here
+    # invalidates an otherwise identical preparation on every cached fetch.
+    material = dict(payload)
+    receipt = material.pop("concurrency", None)
+    # A cached object has the same authority as a freshly acquired object.
+    # Keep reuse observations in the returned payload and recovery receipts.
+    if "files" in material:
+        material["files"] = [
+            {key: value for key, value in entry.items()
+             if key not in {"reused", "adopted", "downloaded", "adoption"}}
+            for entry in material["files"]
+        ]
+    if receipt is not None:
+        _write_json(out / "fetch-pool-receipt.json", receipt)
+    _write_json(out / MANIFEST_NAME, material)
 
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> None:
@@ -3017,7 +3075,15 @@ def prepares_through_packaged_composition(source: str) -> bool:
 
 def publishes_prep_handoff(source: str) -> bool:
     """Whether the implemented acquisition path publishes bound prep arguments."""
+    adapter = source_adapters.get_source_adapter(source)
+    if adapter.acquisition_owner and adapter.acquisition_prep_handoff:
+        return True
     source = canonical_source(source)
+    adapter = source_adapters.get_source_adapter(source)
+    if adapter.acquisition_owner:
+        from importlib import import_module
+        return bool(getattr(import_module(adapter.acquisition_owner),
+                            "PUBLISHES_PREP_HANDOFF", False))
     from woof.cf_archive_fetch import sources
     if source in sources():
         return True

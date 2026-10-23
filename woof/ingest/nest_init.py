@@ -199,6 +199,28 @@ class NestedInputCatalog:
     #: Same validated overlay owner used by root, child and moving footprints.
     static_highres: object | None = None
     water_temperature_policy: str | None = None
+    #: The root's horizontal-mapping conventions, carried for the same
+    #: reason as the policy above: a child sees the catalog, not the route.
+    #: A GFS tree maps its root with WPS ``fix_gfs_rh`` on RH and RH2
+    #: (``gfs_mixed``) and keeps its lakes on metgrid's whole-source water
+    #: search (``gfs_lake_skin = "wps"``); a child left on the defaults
+    #: initialized its 2 m humidity water-relative and its unresolved lakes
+    #: from the 2 m air temperature under the same parent.  The defaults
+    #: are every other regular-grid route's, unchanged.
+    relative_humidity_convention: str = "era5_mixed"
+    lake_whole_source_search: bool = False
+    #: The root's observed lake-ice provider
+    #: (:class:`woof.ingest.lake_ice.LakeIceProvider`), sampled on each
+    #: child's own grid so a nest's lakes are frozen from the same analysis
+    #: as its parent's.  ``None``: the forcing's ice only (every route that
+    #: declares none).
+    lake_ice_provider: object | None = None
+    #: Each corridor child's birth footprint (grid id ->
+    #: :class:`woof.static.corridor.CorridorBirth`), cropped from the
+    #: statics corridor the preparation sealed BEFORE it initialized its
+    #: children, so the child is born on the ground its moves crop from.
+    #: Empty for a tree without a corridor.
+    statics_corridor_births: Mapping[int, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # A sequence is kept AS the sequence, exactly as
@@ -988,13 +1010,28 @@ def _prepare_child_input_on_grid_uncached(
     # top-level input catalog (woof.ingest.preflight.build_input_catalog).
     # Absent/disabled is the identity 30-arc-second path.
     _highres = getattr(catalog, "static_highres", None)
-    if _highres is not None and getattr(_highres, "enabled", False):
-        from woof.static.highres_production import apply_highres_statics
-        static_fields, _ = apply_highres_statics(
-            static_fields, grid, config=_highres,
-            domain_id=child_dc.grid_id,
-            case_date=child_dc.start_time.date(),
-            landuse_attrs=landuse_attrs)
+    _birth = (getattr(catalog, "statics_corridor_births", None)
+              or {}).get(int(child_dc.grid_id))
+    if _birth is not None:
+        # A corridor child is born on its sealed corridor's crop (overlay
+        # and slope bound applied at corridor scale), not on a footprint
+        # build smoothed over its own cells only: plan call 5, 2.9.0.
+        from woof.static.terrain_autosmooth import receipt_of, run_line
+        static_fields = _birth.footprint_statics(static_fields, grid)
+        if receipt_of(static_fields) is not None:
+            print(run_line(receipt_of(static_fields))
+                  + "; cropped from the statics corridor")
+    else:
+        if _highres is not None and getattr(_highres, "enabled", False):
+            from woof.static.highres_production import apply_highres_statics
+            static_fields, _ = apply_highres_statics(
+                static_fields, grid, config=_highres,
+                domain_id=child_dc.grid_id,
+                case_date=child_dc.start_time.date(),
+                landuse_attrs=landuse_attrs, run=cfg)
+        from woof.static.terrain_autosmooth import prepare_fields
+        static_fields = prepare_fields(
+            static_fields, grid, domain_id=child_dc.grid_id, run=cfg)
     # The child assembles its water temperature under the SAME policy as
     # its parent; the catalog carries it because the child sees no case
     # data of its own.  Lakes come from the child's OWN land-use table
@@ -1013,6 +1050,12 @@ def _prepare_child_input_on_grid_uncached(
             landmask=_child_landmask_static,
             lu_index=static_fields["LU_INDEX"],
             landuse_attrs=landuse_attrs))
+    # The child's inland water takes the root forcing's daily-mean 2 m
+    # air temperature where the source does not resolve it (WRF
+    # use_tavg_for_tsk), the same series the root averages.
+    from woof.ingest.horiz import with_inland_air_temperature
+    water_statics = with_inland_air_temperature(
+        water_statics, getattr(catalog, "snapshots", None))
     lake_mask = (
         (np.asarray(static_fields["LU_INDEX"]) ==
          int(landuse_attrs["ISLAKE"])) if water_statics is None
@@ -1070,7 +1113,9 @@ def _prepare_child_input_on_grid_uncached(
         # No lake skin override on the regular-grid lane: metgrid's
         # masked=both SKINTEMP chain with static-landmask targets already
         # yields water-source skin at lakes, matching real.exe's no-TAVGSFC
-        # behavior (module_initialize_real.F:2844-2866).
+        # behavior (module_initialize_real.F:2844-2866), except inland water
+        # with no source water within INLAND_WATER_SOURCE_REACH_M, which
+        # takes the daily-mean 2 m air temperature (use_tavg_for_tsk).
         lake_skin_temperature = None
         # (1) REAL INPUT FIRST, on the child's own grid and unblended HGT_M.
         # Masked-field target cells classify by the child's static LANDMASK,
@@ -1082,8 +1127,28 @@ def _prepare_child_input_on_grid_uncached(
             target_landmask=(None if child_landmask is None
                              else np.asarray(child_landmask) >= 0.5),
             water_temperature_statics=water_statics,
+            relative_humidity_convention=getattr(
+                catalog, "relative_humidity_convention", "era5_mixed"),
+            inland_water_search=(
+                np.asarray(lake_mask, dtype=bool)
+                if getattr(catalog, "lake_whole_source_search", False)
+                else None),
             backend=preprocess)
         mapping_receipt["source_adapter"] = "regular-grid-native-state-v1"
+        provider = getattr(catalog, "lake_ice_provider", None)
+        if provider is not None and getattr(provider, "observation", None) is not None:
+            # Observed lake ice on the child's own grid: SEAICE (and XICE)
+            # set and SKINTEMP capped on the lake cells the analysis sees
+            # frozen; the soil router builds their ice column from these.
+            from dataclasses import replace as _replace
+            child_lat, child_lon = grid.latlon_mass()
+            fields, _, lake_ice_receipt = provider.freeze(
+                horizontal.fields, horizontal.fields["SKINTEMP"],
+                lat=child_lat, lon=child_lon, lake_mask=lake_mask,
+                dx_m=float(cfg.dx), where=f"domain {child_dc.grid_id}",
+                skin_name="SKINTEMP")
+            horizontal = _replace(horizontal, fields=fields)
+            mapping_receipt["lake_ice"] = lake_ice_receipt
     return PreparedChildInput(
         domain=child_dc, grid=grid, static_fields=static_fields,
         horizontal=horizontal, declared_orography=declared_orography,
@@ -1153,21 +1218,6 @@ def start_child_input_preparations(
     return PendingChildInputs(
         exp.domains[1:], by_id, catalog, source_orography, workers,
         preprocess_backend=preprocess_backend, cpu_bridge=cpu_bridge)
-
-
-def prepare_child_inputs_parallel(
-        exp, catalog,
-        source_orography: SourceOrographyDeclaration | None = None,
-        *, workers: int = 8, preprocess_backend: str | object = "cpu",
-        cpu_bridge: Path | str | None = None,
-) -> tuple[PreparedChildInput, ...]:
-    """Blocking convenience wrapper around child-input preparation."""
-
-    with start_child_input_preparations(
-            exp, catalog, source_orography, workers=workers,
-            preprocess_backend=preprocess_backend,
-            cpu_bridge=cpu_bridge) as pending:
-        return pending.result()
 
 
 def _assert_prepared_grid_matches_parent(
@@ -1295,7 +1345,8 @@ def finalize_prepared_child(
     from woof.config import soil_layer_count
 
     from woof.core.landuse import (
-        ruc_fractional_seaice as _ruc_fractional_seaice)
+        ruc_fractional_seaice as _ruc_fractional_seaice,
+        seaice_threshold_of as _seaice_threshold_of)
     soil = preprocess_land_surface_soil(
         horizontal.fields, sf_surface_physics=int(cfg.sf_surface_physics),
         # real.exe's adjust_for_seaice_pre/post keep the fraction under
@@ -1303,6 +1354,7 @@ def finalize_prepared_child(
         # otherwise (module_soil_pre.F:216-219, :337-343, :392-393 of the HRRR
         # v4.1.21 fork).
         fractional_seaice=_ruc_fractional_seaice(cfg),
+        seaice_threshold=_seaice_threshold_of(cfg),
         num_soil_layers=soil_layer_count(cfg),
         soil_type=child_soil_type,
         deep_soil_temperature=static_fields["TMN"],
@@ -1553,6 +1605,19 @@ RK_TIME_T_SEED_PAIRS = (
 )
 
 
+def require_parent_chem_fields(child, parent) -> None:
+    """A child's chemical rows must have live donors on its parent."""
+    chem = getattr(child, "chem", None)
+    if chem is None:
+        return
+    for row in (*chem.transported, *chem.prescribed):
+        if getattr(parent, row.state_attr, None) is None:
+            raise ValueError(
+                f"child chemistry requires parent field {row.state_attr!r}; "
+                "include the child's species in the parent's chem_sets "
+                "before chemical cold fill or nest forcing")
+
+
 def seed_rk_time_t_copies(state) -> tuple[str, ...]:
     """Seed the RK time-t copies from the current fields (WRF start_domain).
 
@@ -1567,6 +1632,11 @@ def seed_rk_time_t_copies(state) -> tuple[str, ...]:
         if value is not None and seed is not None:
             seed[...] = value
             written.append(initial)
+    chem = getattr(state, "chem", None)
+    if chem is not None:
+        for row in chem.transported:
+            getattr(state, row.time_attr)[...] = getattr(state, row.state_attr)
+            written.append(row.time_attr)
     return tuple(written)
 
 
@@ -1759,6 +1829,11 @@ def parent_only_init(child_dc: DomainConfig,
     its existing unconditional nonnegative-field floor after terrain rebuild.
     """
     cfg = child_dc.run
+    if getattr(cfg, "chem_sets", "") and array_module is np:
+        raise ValueError(
+            "chemical parent cold fill requires a CUDA child: the host "
+            "SINT backend is Python numerical code, so use the GPU "
+            "reconstruction path; CPU metadata and serialization remain available")
     parent = parent_node.state
     if cfg.nz != parent_node.cfg.run.nz:
         raise ValueError(
@@ -1802,6 +1877,12 @@ def parent_only_init(child_dc: DomainConfig,
     if array_module is not None:
         state_kwargs["array_module"] = array_module
     child = DomainState(cfg, **state_kwargs)
+    if (getattr(child, "chem", None) is not None
+            and isinstance(child.thp, np.ndarray)):
+        raise ValueError(
+            "chemical parent cold fill requires a CUDA child: the host "
+            "SINT backend is Python numerical code, so use the GPU "
+            "reconstruction path; CPU metadata and serialization remain available")
     interpolation_window = window
     if (interpolation_window is None and not isinstance(child.thp, np.ndarray)
             and isinstance(parent.thp, np.ndarray)):
@@ -1924,6 +2005,28 @@ def parent_only_init(child_dc: DomainConfig,
                 source, registrations[stagger], window=field_window,
                 device_windows=not isinstance(target, np.ndarray))
 
+    chem_clamped = {}
+    chem = getattr(child, "chem", None)
+    if chem is not None:
+        # Every chemical concentration is a mass-grid scalar. A newborn
+        # child and the fresh strip of a relocated child inherit the live
+        # parent through the same native/GPU SINT operator as moisture.
+        # Prescribed composition also follows the new footprint; its
+        # external source can refresh it on the next chemistry step.
+        require_parent_chem_fields(child, parent)
+        for row in (*chem.transported, *chem.prescribed):
+            source = getattr(parent, row.state_attr)
+            target = getattr(child, row.state_attr)
+            target[...] = _reconstruction_sint(
+                source, mass_reg, window=interpolation_window,
+                device_windows=not isinstance(target, np.ndarray))
+            # The same bounded SINT roundoff repair as other positive
+            # scalars, with no particle-number absolute floor. The full
+            # parent donor peak is known even for a reconstructed slab.
+            entry = _clamp_one_moment(target, floor_scale=0.0, reference=source)
+            if entry is not None:
+                chem_clamped[row.state_attr] = entry
+
     # A scheme boundary is a reconstructed child cold start.  NSSL-only
     # moments above are canonicalized from parent mass, while retained latent
     # heating must begin at zero rather than inheriting Thompson's closure.
@@ -1937,6 +2040,10 @@ def parent_only_init(child_dc: DomainConfig,
     # here would be duplicated into them and then refused by the
     # full-state gate at the newborn's first leg.
     clamped = clamp_parent_sint_undershoot(child) if clamp_undershoot else None
+    if chem_clamped:
+        if clamped is None:
+            clamped = {}
+        clamped.update(chem_clamped)
 
     seed_rk_time_t_copies(child)
     _set_map_fields(child, grid)
@@ -2150,7 +2257,7 @@ __all__ = [
     "compare_n1_static", "finalize_prepared_child",
     "finalize_prepared_child_chain", "initialize_child",
     "initialize_child_chain_parallel", "parent_only_init",
-    "prepare_child_input", "prepare_child_inputs_parallel",
+    "prepare_child_input",
     "seed_rk_time_t_copies",
     "start_child_input_preparations", "write_n1_static_npz",
 ]

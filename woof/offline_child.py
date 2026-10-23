@@ -24,9 +24,8 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 import time
 
-import netCDF4
-
 from woof import netcdf_bridge
+from woof.io.netcdf_serialization import netCDF4  # first use only (D-10)
 import numpy as np
 
 from woof.explain import warn
@@ -87,10 +86,6 @@ _GEOMETRY_ATTRS = (
 _STATIC_GEOMETRY_FIELDS = ("HGT", "XLAT", "XLONG", "MAPFAC_M", "ZNU", "ZNW")
 
 _MASS_FIELDS = ("qv", "qc", "qr", "qi", "qs", "qg")
-_NSSL_FIELDS = (
-    "qv", "qc", "qr", "qi", "qs", "qg", "qh", "qndrop", "qnr",
-    "qni", "qns", "qng", "qnh", "qnn", "qvolg", "qvolh",
-)
 _WRF_TO_STATE = MappingProxyType({
     "QVAPOR": "qv", "QCLOUD": "qc", "QRAIN": "qr",
     "QICE": "qi", "QSNOW": "qs", "QGRAUP": "qg",
@@ -306,19 +301,6 @@ def _output_entries(path: Path) -> list[str]:
     return sorted(child.name for child in path.iterdir()
                   if child.name != OUTPUT_OWNER_NAME
                   and not child.name.startswith(OUTPUT_OWNER_NAME + "."))
-
-
-def release_output_owner(path) -> bool:
-    """Give up this process's claim on output folder ``path``, if held.
-
-    Only the owner file goes; the run's output stays.  True when a claim
-    this process held was released.
-    """
-
-    from woof import ownership
-
-    held = ownership.held_claim(output_owner_path(path))
-    return held.release() if held is not None else False
 
 
 def reserve_output_root(path, *, flag: str = "--out") -> Path:
@@ -1712,14 +1694,6 @@ def read_parent_microphysics(
     return MappingProxyType(fields)
 
 
-def _same_shape(fields: Mapping[str, np.ndarray]) -> tuple[int, ...]:
-    shapes = {tuple(np.asarray(value).shape) for value in fields.values()}
-    if len(shapes) != 1:
-        raise OfflineChildContractError(
-            f"microphysics fields have inconsistent shapes {sorted(shapes)}")
-    return next(iter(shapes))
-
-
 #: Cells per device round on the host-chunked conversion route.  The edge
 #: kernel is column-local (every output cell reads its own cell's planes
 #: and its own column's 2-D mass), so a parent is converted a band of
@@ -2558,72 +2532,17 @@ def _to_host(value) -> np.ndarray:
 
 
 def _transported_source_fields(source_mp_physics: int) -> tuple[str, ...]:
-    source_mp = int(source_mp_physics)
-    # mp=0 (WRF's passiveqv package, Registry.EM_COMMON:3014) transports
-    # qv alone in STOCK WRF, but woof's own mp=0 moist state allocates and
-    # advects the warm-rain pair beside it and the ONLINE forcing table
-    # (woof/core/preflight.py::nest_field_kinds) forces all three -- so the
-    # offline mirror reads all three too.  The contract test pins the two
-    # lanes equal, and the lanes are what has to agree here.
-    names = ["qv", "qc", "qr"]
-    if source_mp in {6, 8, 10, 16, 28}:
-        names += ["qi", "qs", "qg"]
-    if source_mp == 8:
-        names += ["nr", "ni"]
-    elif source_mp == 16:
-        # WDM6 (Registry.EM_COMMON:3031): WSM6's six masses plus the CCN
-        # reservoir and the warm-rain number pair, in the online forcing
-        # table's order (woof/core/nest_fields.py, mp==16 arm).
-        names += ["nn", "nc", "nr"]
-    elif source_mp == 28:
-        # Thompson aerosol-aware: classic Thompson's two moments plus the
-        # prognostic droplet number and the two aerosol tracers.  Order is
-        # nr/ni first so the shared prefix with mp=8 stays visible; the
-        # tuple is consumed by name everywhere.  nwfa2d/nifa2d are NOT here
-        # -- they are per-domain constants, not transported scalars, and are
-        # handled by _AEROSOL_SURFACE_EMISSION_WRF.
-        names += ["nr", "ni", "nc", "nwfa", "nifa"]
-    elif source_mp == 10:
-        names += ["nr", "ni", "ns", "ng"]
-    elif source_mp == 50:
-        # P3 one-category (Registry.EM_COMMON:3038): moist qv,qc,qr,qi
-        # with NO qs and NO qg -- 50 is deliberately absent from the
-        # six-species branch above -- plus the two number moments and the
-        # prognostic rime mass/volume pair, all four in the same 4-D
-        # scalar array.  Spelled in the online forcing table's own order
-        # (woof/core/preflight.py::nest_field_kinds, mp==50 arm;
-        # woof/core/moist.py::P3_SPECIES), and the offline-inventory
-        # contract test pins this tuple against that table so the two
-        # lanes cannot drift.
-        names += ["qi", "ni", "nr", "qir", "qib"]
-    elif source_mp == 18:
-        names = list(_NSSL_FIELDS)
-    elif source_mp == 9:
-        # Milbrandt-Yau (Registry.EM_COMMON:3025): the six-species mass set
-        # plus hail mass, and a number moment for every one of the six
-        # hydrometeors.  Imported from woof.core.milbrandt2_constants
-        # rather than re-spelled, so the offline lane and the online forcing
-        # table (woof.core.moist re-exports the same tuple) read one tuple.
-        # That module is pure numpy: woof.core.moist imports cupy when it
-        # is imported, this function answers for `woof --probe`, the
-        # sizing wizard and the offline-child inventory on boxes with no
-        # working CuPy, and reading the tuple through moist made every one
-        # of them die in an import (tests/test_runplan.py::
-        # test_probe_works_on_a_box_whose_cupy_will_not_load,
-        # tests/test_offline_child.py on a CPU node).
-        from woof.core.milbrandt2_constants import MY2_SPECIES
+    """Read the admitted parent's online transported scalar inventory."""
+    from types import SimpleNamespace
+    from woof.core.preflight import nest_field_kinds
 
-        names += list(MY2_SPECIES)
-    elif source_mp not in {0, 1, 6}:
-        # mp=0 (passiveqv), mp=1 (Kessler, Registry.EM_COMMON:3015) and
-        # mp=6 (WSM6) exit on the branches above: the first two ARE the
-        # qv/qc/qr prefix woof advects for them, and WSM6 is that prefix
-        # plus the three frozen masses.  None may fall into this refusal --
-        # every member of OFFLINE_CHILD_MP_PHYSICS has to exit this chain
-        # with a mapping, which the contract test pins.
+    source_mp = int(source_mp_physics)
+    if source_mp not in OFFLINE_CHILD_MP_PHYSICS:
         raise OfflineChildContractError(
             _unsupported_parent_clause(source_mp, what="resolved"))
-    return tuple(names)
+    dynamics = {"u", "v", "w", "t", "ph", "mu"}
+    return tuple(name for name in nest_field_kinds(
+        SimpleNamespace(moist=True, mp_physics=source_mp)) if name not in dynamics)
 
 
 def _resolve_source_physics(

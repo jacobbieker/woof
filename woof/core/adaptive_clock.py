@@ -362,10 +362,12 @@ class AdaptiveClockDriver:
 
     def __init__(self, model, *, cfl_source, tick_den: int,
                  restart_dt: dict[int, Fraction] | None = None,
-                 carrier_source=None, map_factor_source=None):
+                 carrier_source=None, map_factor_source=None,
+                 deadline_source=None):
         self.model = model
         self.cfl_source = cfl_source
         self.carrier_source = carrier_source
+        self.deadline_source = deadline_source
         self.tick_den = int(tick_den)
         self.controllers: dict[int, AdaptiveTimestepController] = {}
         self.order: list[int] = []
@@ -1251,10 +1253,25 @@ class AdaptiveClockDriver:
                     best = clock.spec.start_ticks
                 continue
             alarms = [
-                (clock.spec.history_ticks, clock.spec.start_ticks
-                 + clock.spec.history_begin_ticks, True),
                 (clock.spec.restart_ticks, 0, False),
                 (clock.spec.lbc_interval_ticks, 0, False)]
+            # Only a cadence-changing spec (history_interval2_ticks set) uses
+            # the offset resolver. Every DomainTicks has the method, so asking
+            # for the method sent single-cadence specs with history off
+            # (history_ticks=0) into an integer division by zero (2fa7960471).
+            if getattr(clock.spec, "history_interval2_ticks", None) is None:
+                # Single-cadence specs retain their original alarm contract.
+                # Only cadence-changing specs need the offset resolver.
+                alarms.append((clock.spec.history_ticks,
+                               clock.spec.start_ticks + clock.spec.history_begin_ticks,
+                               True))
+            else:
+                history_due = clock.spec.start_ticks + clock.spec.next_history_offset(
+                    clock.ticks - clock.spec.start_ticks)
+                if (clock.spec.history_end_ticks is None
+                        or history_due - clock.spec.start_ticks <= clock.spec.history_end_ticks):
+                    if best is None or history_due < best:
+                        best = history_due
             # Positive physics cadences are deadlines too. A shortened
             # history step must neither re-phase them nor round their
             # requested period to a multiple of the nominal dt.
@@ -1280,6 +1297,13 @@ class AdaptiveClockDriver:
                     continue
                 if best is None or due < best:
                     best = due
+        # Moving/track deadlines live on the route runner rather than a
+        # domain's output spec. Stepping across one silently loses that
+        # consultation because the runner uses exact tick divisibility.
+        if self.deadline_source is not None:
+            due = self.deadline_source(clocks)
+            if due is not None and (best is None or due < best):
+                best = due
         if best is None or now is None:
             return Fraction(0)
         return Fraction(best - now, self.tick_den)

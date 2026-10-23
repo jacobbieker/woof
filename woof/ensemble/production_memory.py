@@ -38,9 +38,13 @@ def ordinary_output_memory_components(experiment, collector, *, other_experiment
         upload = BatchMemoryPlan(tuple(spec for spec in full.arrays if spec.name not in existing), reserved_bytes=0)
         uploads.append(upload.required_bytes(1))
         replay = replay_memory_plan_for_shape(collector.requests, shape,
-            members=collector.members, tile_rows=collector.tile_rows)
+            members=collector.members, tile_rows=collector.tile_rows,
+            member_weights=getattr(collector, "member_weights", None))
         replays.append(replay.required_bytes(collector.members))
-    return (
+    points = getattr(collector, "nextgen_points", None)
+    return (() if points is None else (MemoryComponent("nextgen_reach_products", "products",
+        fixed_bytes=points.options["device_budget_bytes"],
+        evidence="private per-card CUDA pool hard limit; output-deadline integer counts, IDs and final merge"),)) + (
         MemoryComponent("ensemble_diagnostic_qpf_buffers", "products",
             plan=BatchMemoryPlan(tuple(retained), reserved_bytes=0),
             evidence="collector.memory_plan for every distinct domain shape, including initial/earlier and 1/3/6 h QPF surfaces"),
@@ -53,7 +57,7 @@ def ordinary_output_memory_components(experiment, collector, *, other_experiment
 
 def ordinary_ensemble_memory_model(estimate, experiment, collector, *, inventory_id,
                                    stochastic_provider=None, fft_workspace_bytes=0,
-                                   other_variants=()):
+                                   other_variants=(), initial_wind=False):
     """Add ensemble allocations to the original complete forecast envelope."""
     from woof.core.preflight import FORECAST_POOL_HEADROOM
     variants = ((estimate, experiment),) + tuple(other_variants)
@@ -72,6 +76,10 @@ def ordinary_ensemble_memory_model(estimate, experiment, collector, *, inventory
                       for _, exp in variants]
         external += max(stochastic, key=lambda components: sum(component.inventory(1)["required_bytes"]
                         for component in components))
+    if initial_wind:
+        external += (MemoryComponent("uniform_wind_initialization_seed", "stochastic",
+            fixed_bytes=512, basis="envelope",
+            evidence="one uint64 member seed rounded to the ordinary CuPy pool's 512-byte block; two in-place wind launches"),)
     # The forecast envelope already contains its original pool headroom,
     # context/kernel backing, health inventory and external minimum reserve.
     # Apply the same measured fractional headroom only to the new arrays.

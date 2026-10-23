@@ -228,6 +228,16 @@ def test_a_defaulted_source_on_its_own_cone_is_still_taken():
     assert carrier.static_source.id == "hrrr-conus-v4"
 
 
+#: Shipped configurations that RECORD a refusal rather than a run: the
+#: recent DA deck's literal 601 point domain (438760594), whose required
+#: native HRRR window starts south of row 0.  The deck README says so, and
+#: the refusal must stay the static source's own words.
+_RECORDED_STATIC_REFUSALS = {
+    "da_rerun_286/recent/requested-601-center31/authority/experiment",
+    "da_rerun_286/recent/requested-601-center31/base/experiment",
+}
+
+
 @pytest.mark.parametrize("path,row_id", _shipped_static_source_configs())
 def test_every_shipped_static_source_config_samples_its_source(path, row_id):
     """Breakage it prevents: configs/hrrr_native_quick_demo shipped on a
@@ -238,11 +248,16 @@ def test_every_shipped_static_source_config_samples_its_source(path, row_id):
     spacing, and a d01-target.json companion must name the same window."""
     from woof.domain_wizard import experiment_from_text
     from woof.ingest.hrrr_target import load_hrrr_target_domain
-    from woof.static.external_source import sampling_window, static_source_row
+    from woof.static.external_source import (StaticSourceError, sampling_window,
+                                              static_source_row)
     from woof.static.projection import grids_from_projection_config
     row = static_source_row(row_id)
     exp = experiment_from_text(path.read_text(encoding="utf-8"), source=str(path))
     root = grids_from_projection_config(exp)[0]
+    if _shipped_name(path) in _RECORDED_STATIC_REFUSALS:
+        with pytest.raises(StaticSourceError, match="leaves the source"):
+            sampling_window(row, root)
+        return
     window = sampling_window(row, root)
     if window is None:
         pytest.skip(f"{path.name}: root spacing {root.dx:g} m is not the "
@@ -314,3 +329,23 @@ def test_native_root_receipt_says_a_defaulted_source_was_set_aside(tmp_path, mon
         stand_lon=-97.5, dx_m=1000.0, dy_m=1000.0)
     assert selection.static_source.id == "hrrr-conus-v4"
     assert "static_source_fallback" not in receipt
+
+
+def test_hrrr_wizard_ladder_12_3_emits_no_declared_source_off_its_cone(tmp_path):
+    """Breakage it prevents: ``woof domain --source hrrr --ladder 12-3``
+    wrote ``[static] source = "hrrr-conus-v4"`` on the generic cone, so the
+    3 km nest (the row's spacing, another cone) was refused by name in
+    ``go`` instead of taking the defaulted WPS_GEOG fallback."""
+    import tomllib
+    from woof.cli import main as cli_main
+    out = tmp_path / "okc.toml"
+    rc = cli_main(["domain", "--point", "36.5,-97.5", "--source", "hrrr",
+                  "--cycle", "2024-05-06T18", "--hours", "6",
+                  "--ladder", "12-3", "--vram-gib", "96",
+                  "--out", str(out)])
+    assert rc in (0, None)
+    raw = tomllib.loads(out.read_text(encoding="utf-8"))
+    assert raw["projection"]["truelat1"] != 38.5
+    assert "source" not in raw.get("static", {})
+    from woof.static.source_defaults import with_source_static_defaults
+    assert with_source_static_defaults(raw, "hrrr") is raw

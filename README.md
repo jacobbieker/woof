@@ -9,8 +9,8 @@ install carries three models:
 | Model | Command | Status |
 | --- | --- | --- |
 | Regional (WRF-ARW class, nests, DA) | `woof` | Production |
-| Hex (MPAS-style unstructured mesh) | `woof hex` | Preview |
-| Global (spectral, with ensemble DA) | `woof global` | Preview |
+| Hex (MPAS-Atmosphere v8.4.2 on the GPU, regional and global) | `woof hex`, `woof hex global` | Preview |
+| Global, spectral (the second global model, beside `woof hex global`) | `woof global` | Preview |
 
 Preview means the model is in the package, documented and tested on CPU, and
 its command says preview each time it runs; its config and checkpoint formats
@@ -56,6 +56,10 @@ woof go forecast.toml
 `--dry-run` reviews the route, sizes it for your card and names anything
 missing; the second line fetches, prepares, runs and draws. Pictures are drawn
 as each history frame lands, beside the running forecast.
+
+Coupled hydro is opt-in. `woof go forecast.toml --hydro on` couples NextGen
+hydro wherever a hydrofabric covers the domain; a forecast without it has no
+hydro.
 
 Compare two runs, any product, as run A minus run B:
 
@@ -103,8 +107,9 @@ regions, seasons or forecast lengths. The
 [evidence page](docs/public/VERIFICATION.md) documents historical WRF v4.6.1
 code comparisons and their configuration and coverage limits.
 
-The hex model is a port of the MPAS-A v8.4.1 dynamical core with this engine's
-physics; it is not MPAS and is not endorsed by UCAR. Use official
+The hex model is a GPU port of MPAS-Atmosphere v8.4.2, with this engine's
+physics as its default suite and the MPAS suites selectable; it is not MPAS and
+is not endorsed by UCAR. Use official
 meteorological services for forecasts and warnings.
 
 WOOF continues an engine released before under another name: WOOF 1.0 is

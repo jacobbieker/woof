@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 from pathlib import Path
@@ -16,12 +16,12 @@ from woof.progress_log import ProgressOptions, add_progress_arguments
 
 
 def _sha(path: Path) -> str:
+    # Once per process for an unchanged file (woof.file_digest): the leg
+    # hashes each input before and after its read, for the receipt and at
+    # the end of the run, and a changed file is still hashed again.
+    from woof.file_digest import sha256_file
     from woof.filesystem_paths import io_path
-    digest = hashlib.sha256()
-    with io_path(path).open('rb') as stream:
-        for block in iter(lambda: stream.read(8*1024*1024), b''):
-            digest.update(block)
-    return digest.hexdigest()
+    return sha256_file(io_path(path))
 
 
 @dataclass(frozen=True)
@@ -75,6 +75,14 @@ class WrfTreeInputs:
     #: The tree runner's long-step derivation, filled in beside the
     #: substep one (``woof.terrain_clock.clock_receipt``).
     terrain_clock: Mapping[str, object] | None = None
+    #: ``mp_tend_radar = 1``: each forced domain's radar tendency, read
+    #: from its state file (:mod:`woof.ingest.wrfinput_radar`).  Empty
+    #: when no domain is forced.
+    # A factory, not a shared MappingProxyType default: Python 3.11 and 3.12
+    # refuse an unhashable dataclass default, so the module did not import
+    # there (found by the 2.9.1 CI rehearsal; 3.13 accepts it).
+    radar_tendencies: Mapping[int, object] = field(
+        default_factory=lambda: MappingProxyType({}))
 
 
 @dataclass(frozen=True)
@@ -129,8 +137,24 @@ class WrfInitialization:
                 landuse=bundle.landuse,
                 constant_glw_wm2=declared_constant_glw(self.inputs.experiment),
                 fractional_seaice=bundle.fractional_seaice,
+                hydro_parent_geometry=grid,
                 **({"cam_ozone": cam} if cam is not None else {}))
         return DomainInitialization(wrf_initial_result(bundle.restored, state), initialize)
+
+    def attach_step_forcings(self, nodes, steppers):
+        """Attach ``mp_tend_radar = 1``'s radar tendency once the run's
+        steppers are known; ``None`` when no domain is forced.  The caller
+        detaches the returned handle when the integration ends."""
+        if not self.inputs.radar_tendencies:
+            return None
+        from woof.wrfinput_radar_forcing import WrfinputRadarTendency
+        handle = WrfinputRadarTendency(self.inputs.radar_tendencies)
+        try:
+            handle.attach(nodes, steppers)
+        except BaseException:
+            handle.detach()
+            raise
+        return handle
 
     def verify_inputs(self, inputs):
         current = {name: _sha(path) for name, path in inputs.artifact_paths.items()}
@@ -153,11 +177,71 @@ class WrfInitialization:
 
 
 def wrfinput_window_seconds(run, run_seconds):
-    """Bind a requested wrfinput run window to the shared forcing check."""
+    """Bind a requested wrfinput run window to the shared forcing check.
+
+    On a warm start ``run_seconds`` is the window AFTER the restart
+    instant (what a reader asking for "one hour from the restart" means);
+    the experiment's length is the simulation's, so the restart's elapsed
+    seconds are added before the forcing check.
+    """
     from woof.ingest.preflight import check_forcing_window
-    return check_forcing_window(run_seconds,
+    clock = getattr(run, 'restart_clock', None)
+    total = float(run_seconds) + (0.0 if clock is None else clock.elapsed_seconds)
+    return check_forcing_window(total,
         coverage_seconds=run.coverage.coverage_seconds,
         source='woof run --wrfinput', last_valid_time=run.coverage.end)
+
+
+class WrfRestartInitialization(WrfInitialization):
+    """The WRF-input door's warm start: state, physics and clock from wrfrst.
+
+    The shared restore takes WRF's restart branch for a domain read from a
+    restart file (the file's base state and W, no cold-start rebuild); the
+    physics overlay then fills every cross-step carrier from the file
+    (:func:`woof.ingest.wrfrst.apply_warm_start_physics`), and the tree
+    runner opens the clocks at the restart instant from
+    :attr:`warm_start_clocks`.
+    """
+
+    def __init__(self, inputs: WrfTreeInputs):
+        super().__init__(inputs)
+        self.warm_start_clocks = MappingProxyType({
+            int(bundle.grid_id): bundle.restored.warm_start.clock
+            for bundle in inputs.domains})
+        self.overlay_reports: dict[int, object] = {}
+
+    def restore_domain(self, domain, grid, bundle, *, start_time,
+                       scratch_arena, dycore_state_workspace):
+        from woof.ingest.wrfrst import apply_warm_start_physics
+
+        initialized = super().restore_domain(
+            domain, grid, bundle, start_time=start_time,
+            scratch_arena=scratch_arena,
+            dycore_state_workspace=dycore_state_workspace)
+        cold = initialized.initialize_physics
+        state = initialized.state
+
+        def initialize():
+            driver = cold()
+            report = apply_warm_start_physics(state, driver, bundle.restored,
+                                              domain.run)
+            self.overlay_reports[int(domain.grid_id)] = report
+            path = self.inputs.prepared_root / f'warm-start-d{int(domain.grid_id):02d}.json'
+            from woof.prepared_documents import json_bytes
+            path.write_bytes(json_bytes({
+                'schema': 'gpuwm-wrf-warm-start-overlay-v1',
+                'restart_file': str(bundle.restored.path),
+                'overlay': report.receipt(),
+                'read_checks': dict(bundle.restored.warm_start.checks)}))
+            for name, value in sorted(report.checks.items()):
+                if name.startswith('eos_') or name.startswith('step'):
+                    print(f'WRF warm start d{int(domain.grid_id):02d}: '
+                          f'{name} = {value}', flush=True)
+            return driver
+        return DomainInitialization(initialized.initial_result, initialize)
+
+    def domain_content_sha256(self, bundle):
+        return bundle.authority_sha256['wrfrst']
 
 
 def wrfinput_urban_columns(run) -> dict[int, int] | None:
@@ -204,11 +288,16 @@ def wrfinput_urban_columns(run) -> dict[int, int] | None:
 
 
 def prepare_wrf_run(run, directory: Path, *, run_seconds: float | None = None,
-                    soil_source=None) -> WrfTreeInputs:
-    """Validate the complete CPU handoff and bind the exact input bytes."""
+                    soil_source=None, boundary_pair_file=None) -> WrfTreeInputs:
+    """Validate the complete CPU handoff and bind the exact input bytes.
+
+    ``boundary_pair_file`` (the analysis door's IAU start) is the WRF-form state the boundary's
+    first record is the coupling of, when it is not the run's wrfinput: the analysis the IAU
+    window forces the background toward.  It is read, held to the first record by the same
+    pair check, and bound into the input hashes like every other input file."""
     import re
     import tomllib
-    from woof.config import soil_layer_count
+    from woof.config import ConfigurationRefused, soil_layer_count
     from woof.core.landuse import initialize_landuse
     from woof.namelist_import import parse_namelist
     from woof.experiment import build_experiment
@@ -228,14 +317,21 @@ def prepare_wrf_run(run, directory: Path, *, run_seconds: float | None = None,
             raise ValueError('resolved experiment does not carry exactly one run_seconds')
     exp = build_experiment(tomllib.loads(config), source=str(run.namelist_input))
     if config_declares_follow_source(exp):
-        raise ValueError('moving nests require terrain and land-surface coverage for their future positions; this WRF directory contains only the initial footprints. Supply a prepared statics corridor through native preparation')
+        raise ConfigurationRefused('moving nests require terrain and land-surface coverage for their future positions; this WRF directory contains only the initial footprints. Supply a prepared statics corridor through native preparation')
     grids = tuple(grids_from_projection_config(exp))
+    warm = getattr(run, 'restart_paths', None) is not None
     paths = {'adapter_code': Path(__file__).resolve(),
              'state_adapter_code': Path(__file__).with_name('ingest') / 'wrfinput.py',
              'surface_adapter_code': Path(__file__).with_name('ingest') / 'wrfinput_noahmp.py',
              'soil_recovery_code': Path(__file__).with_name('ingest') / 'wrf_soil_recovery.py',
-             'namelist_input': run.namelist_input, 'wrfbdy': run.wrfbdy_path,
-             **{f'wrfinput_d{gid:02d}': path for gid, path in run.wrfinput_paths.items()}}
+             'namelist_input': run.namelist_input, 'wrfbdy': run.wrfbdy_path}
+    if warm:
+        paths['warm_start_code'] = Path(__file__).with_name('ingest') / 'wrfrst.py'
+        paths.update({f'wrfrst_d{gid:02d}': path
+                      for gid, path in run.restart_paths.items()})
+    else:
+        paths.update({f'wrfinput_d{gid:02d}': path
+                      for gid, path in run.wrfinput_paths.items()})
     original_hashes = {name: _sha(path) for name, path in paths.items()}
     from woof.prepared_documents import preparation_directory, json_bytes, write_document
 
@@ -248,8 +344,13 @@ def prepare_wrf_run(run, directory: Path, *, run_seconds: float | None = None,
                       'south_north':cfg.ny,'south_north_stag':cfg.ny+1,
                       'bottom_top':cfg.nz,'bottom_top_stag':cfg.nz+1,
                       'soil_layers_stag':soil_layer_count(cfg)}
-        restored = read_wrfinput(run.wrfinput_paths[domain.grid_id], expected_dimensions=dimensions, cfg=cfg,
-                                **({} if soil_source is None else {'soil_source': soil_source}))
+        if warm:
+            from woof.ingest.wrfrst import read_wrfrst
+            restored = read_wrfrst(run.restart_paths[domain.grid_id],
+                                   expected_dimensions=dimensions, cfg=cfg)
+        else:
+            restored = read_wrfinput(run.wrfinput_paths[domain.grid_id], expected_dimensions=dimensions, cfg=cfg,
+                                    **({} if soil_source is None else {'soil_source': soil_source}))
         for role, source in getattr(restored, 'soil_recovery', {}).get('input_files', {}).items():
             key = f'soil_recovery_d{domain.grid_id:02d}_{role}'
             paths[key] = Path(source['path'])
@@ -258,14 +359,16 @@ def prepare_wrf_run(run, directory: Path, *, run_seconds: float | None = None,
         names = ('MMINLU', 'NUM_LAND_CAT', 'ISWATER', 'ISLAKE', 'ISICE', 'ISURBAN', 'ISOILWATER')
         missing = sorted(set(names) - set(attrs))
         if missing:
-            raise ValueError(f'{restored.path}: missing land-use identity {missing}')
+            raise ConfigurationRefused(f'{restored.path}: missing land-use identity {missing}')
         land_attrs = {name: attrs[name] for name in names}
         landuse = initialize_landuse(
             restored.raw['LU_INDEX'], soil_type=restored.raw['ISLTYP'],
             urban_legend=int(getattr(cfg, 'sf_urban_physics', 0)) > 0,
             landmask=restored.raw['LANDMASK'], snow=restored.raw['SNOW'],
             xice=restored.raw.get('XICE', restored.raw.get('SEAICE')),
-            valid_time=domain.start_time or exp.start_time, cen_lat=float(attrs['CEN_LAT']),
+            valid_time=(run.restart_clock.valid_time if warm
+                        else domain.start_time or exp.start_time),
+            cen_lat=float(attrs['CEN_LAT']),
             mminlu=str(attrs['MMINLU']), iswater=int(attrs['ISWATER']),
             islake=int(attrs['ISLAKE']), isice=int(attrs['ISICE']),
             isoilwater=int(attrs['ISOILWATER']), fractional_seaice=fractional_seaice,
@@ -278,15 +381,30 @@ def prepare_wrf_run(run, directory: Path, *, run_seconds: float | None = None,
             snoalb=restored.raw.get('SNOALB'))
         static = {name:restored.raw[name] for name in ('LANDMASK','LU_INDEX','ISLTYP','MAPFAC_M','MAPFAC_U','MAPFAC_V','F','E')}
         static['HGT_M'] = restored.raw['HGT']
+        state_key = ('wrfrst' if warm else 'wrfinput')
         bundles.append(WrfDomainBundle(domain.grid_id, restored, MappingProxyType(static),
-                       MappingProxyType({'wrfinput':original_hashes[f'wrfinput_d{domain.grid_id:02d}']}),
+                       MappingProxyType({state_key: original_hashes[f'{state_key}_d{domain.grid_id:02d}']}),
                        landuse, WrfLanduseIdentity(MappingProxyType(land_attrs)),
                        fractional_seaice))
+    pair_restored = None
+    if boundary_pair_file is not None:
+        root_cfg = exp.root.run
+        paths['boundary_pair'] = Path(boundary_pair_file)
+        original_hashes['boundary_pair'] = _sha(paths['boundary_pair'])
+        pair_restored = read_wrfinput(
+            paths['boundary_pair'], cfg=root_cfg,
+            expected_dimensions={'west_east': root_cfg.nx, 'west_east_stag': root_cfg.nx + 1,
+                                 'south_north': root_cfg.ny, 'south_north_stag': root_cfg.ny + 1,
+                                 'bottom_top': root_cfg.nz, 'bottom_top_stag': root_cfg.nz + 1,
+                                 'soil_layers_stag': soil_layer_count(root_cfg)},
+            **({} if soil_source is None else {'soil_source': soil_source}))
     boundaries = read_wrfbdy(run.wrfbdy_path, run_seconds=exp.run_seconds,
                             restored=bundles[0].restored,
                             forcing_interval_seconds=run.coverage.forcing_interval_seconds,
                             spec_bdy_width=exp.root.run.spec_bdy_width,
-                            cfg=exp.root.run)
+                            cfg=exp.root.run, pair_restored=pair_restored)
+    from woof.ingest.wrfinput_radar import prepare as prepare_radar_tendency
+    radar_tendencies = prepare_radar_tendency(run, exp)
     for name, path in paths.items():
         if _sha(path) != original_hashes[name]:
             raise ValueError(f'{path}: changed while its input fields were read')
@@ -314,17 +432,44 @@ def prepare_wrf_run(run, directory: Path, *, run_seconds: float | None = None,
                'soil_source_recovery': {
                    f'd{bundle.grid_id:02d}': dict(bundle.restored.soil_recovery)
                    for bundle in bundles if getattr(bundle.restored, 'soil_recovery', {})},
+               **({'radar_tendency': {
+                   f'd{gid:02d}': tendency.receipt()
+                   for gid, tendency in sorted(radar_tendencies.items())}}
+                  if radar_tendencies else {}),
                'namelist_translation':asdict(run.substitution_report),
                'namelist_translation_text':run.substitution_report.format()}
+    if warm:
+        clock = run.restart_clock
+        receipt['initial_temperature'] = (
+            'THM_2 converted to dry theta with QVAPOR (USE_THETA_M = 1)'
+            if bundles[0].restored.warm_start.use_theta_m == 1
+            else 'THM_2 is dry perturbation potential temperature')
+        receipt['warm_start'] = {
+            'restart_files': {f'd{gid:02d}': str(path)
+                              for gid, path in run.restart_paths.items()},
+            'restart_instant': clock.valid_time.strftime('%Y-%m-%d_%H:%M:%S'),
+            'simulation_start': clock.simulation_start.strftime('%Y-%m-%d_%H:%M:%S'),
+            'itimestep': clock.itimestep, 'dt_seconds': clock.dt_seconds,
+            'elapsed_seconds': clock.elapsed_seconds,
+            'dtbc_seconds': clock.dtbc_seconds,
+            'declared_changes': list(run.restart_notes),
+            'read_checks': {f'd{bundle.grid_id:02d}': dict(bundle.restored.warm_start.checks)
+                            for bundle in bundles},
+            'variable_dispositions': {
+                f'd{bundle.grid_id:02d}': dict(bundle.restored.warm_start.dispositions)
+                for bundle in bundles},
+        }
     write_document(receipt_path, json_bytes(receipt), reused=reused)
     paths.update(experiment_config=config_path, preparation_receipt=receipt_path)
     hashes = {name:_sha(path) for name,path in paths.items()}
     return WrfTreeInputs(directory, config_path, exp, grids, tuple(bundles),
                          tuple((t-exp.start_time).total_seconds()/3600 for t in (*run.coverage.times, run.coverage.end)),
                          int(run.coverage.forcing_interval_seconds),
-                         MappingProxyType({'handoff':'WRF real.exe', 'forcing_origin':'not declared by input files'}),
+                         MappingProxyType({'handoff': 'WRF restart' if warm else 'WRF real.exe',
+                                           'forcing_origin':'not declared by input files'}),
                          resolve_execution_plan(exp), MappingProxyType(hashes),
-                         MappingProxyType(paths), boundaries)
+                         MappingProxyType(paths), boundaries,
+                         radar_tendencies=MappingProxyType(radar_tendencies))
 
 
 def announce_wrf_substitutions(run, receipt_path):
@@ -341,6 +486,23 @@ def announce_wrf_substitutions(run, receipt_path):
               flush=True)
     if run.substitution_report.substitutions:
         print(f'WRF import details: {receipt_path}', flush=True)
+
+
+def announce_warm_start(run, experiment=None):
+    """Say at the terminal what a warm start continues, and what changed."""
+    clock = getattr(run, 'restart_clock', None)
+    if clock is None:
+        return
+    from datetime import timedelta
+    experiment = run.experiment if experiment is None else experiment
+    end = experiment.start_time + timedelta(seconds=float(experiment.run_seconds))
+    print(f'WRF warm start: {clock.path} at '
+          f'{clock.valid_time:%Y-%m-%d_%H:%M:%S}, step {clock.itimestep} of '
+          f'{clock.dt_seconds:g} s from {clock.simulation_start:%Y-%m-%d_%H:%M:%S}; '
+          f'the run ends {end:%Y-%m-%d_%H:%M:%S}',
+          flush=True)
+    for note in run.restart_notes:
+        print(f'WRF warm start: declared change: {note}', flush=True)
 
 
 def worker_exit_status(code):
@@ -509,10 +671,22 @@ def build_parser():
     parser.add_argument('--soil-source', type=Path, default=None, metavar='DIR',
                         help='original met_em and producing Vtable directory for automatic soil recovery; defaults to the WRF input directory')
     parser.add_argument('--rrtmg-variant', choices=('rrtmg_legacy','rte-rrtmgp'), default=None, help='preserve WRF RRTMG by default; choose rte-rrtmgp explicitly to change radiation')
+    parser.add_argument('--thompson-version', choices=('wrf_461','wrf_44'), default=None)
+    parser.add_argument('--urban-ucm-generation', choices=('wrf_471','wrf_480'), default=None)
+    parser.add_argument('--urban-treeoption', type=int, choices=(0,1), default=None)
+    parser.add_argument('--urban-ttscheme', type=int, choices=(0,1), default=None)
+    parser.add_argument('--urban-fvg', type=float, default=None)
+    parser.add_argument('--urban-table-dir', default=None)
     parser.add_argument('--outdir', type=Path, required=True)
     parser.add_argument('--run-seconds', type=float, help='shorten the run inside the supplied boundary coverage')
     parser.add_argument('--io-mode', choices=('history','none'), default='history')
     parser.add_argument('--restart', type=Path)
+    parser.add_argument('--restart-from', type=Path, default=None, metavar='WRFRST',
+                        help='continue a WRF run from its wrfrst_d01 restart file (warm start)')
+    parser.add_argument('--checkpoint-at', default=None, metavar='TIMES',
+                        help='write only these scheduled checkpoints: comma-separated WRF valid times '
+                             '(2022-06-13_22:00:00) or `end`; each must be a restart_interval instant of '
+                             'the run.  Absent writes every scheduled checkpoint')
     parser.add_argument('--health-debug', action='store_true')
     from woof.ensemble.door import add_arguments
     add_arguments(parser)
@@ -526,6 +700,11 @@ def build_parser():
     add_progress_arguments(parser)
     parser.add_argument('--allow-shared-gpu', action='store_true',
                         help='proceed when another CUDA compute process holds the selected GPU. The requested configuration is retained')
+    parser.add_argument('--benchmark', action='store_true',
+                        help='time the forecast as a benchmark: no products, no post-run '
+                             'verification, then a read, init, first step, steps and write summary')
+    from woof.da.analysis_door import add_analysis_arguments
+    add_analysis_arguments(parser, worker=True)
     parser.add_argument('--_worker', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--_output-owner', help=argparse.SUPPRESS)
     return parser
@@ -534,12 +713,24 @@ def build_parser():
 DOOR = 'woof run --wrfinput'
 
 
+def _door_initialization(initialization, plan_path, outdir):
+    """``initialization``, or the analysis door's wrapper of it when a plan was resolved."""
+    if plan_path is None:
+        return initialization
+    from woof.da.analysis_door import AnalysisInitialization, load_plan
+    return AnalysisInitialization(initialization, load_plan(plan_path), outdir=outdir)
+
+
 def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
                      io_mode="history", health_debug=False, gpu_uuid=None,
                      exclusive_gpu=True, rrtmg_variant=None,
+                     thompson_version=None, urban_ucm_generation=None,
+                     urban_controls=None,
                      render_products=None, render_dir=None,
                      progress_options=None, relaunched=False, allow_shared_gpu=False,
-                     output_owner=None, soil_source=None, ensemble_request=None):
+                     output_owner=None, soil_source=None, ensemble_request=None,
+                     restart_from=None, benchmark=False, analysis=None,
+                     checkpoint_at=None):
     import os
     import subprocess
     import sys
@@ -547,11 +738,66 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
     from woof.stage_reuse import claim_run_output
     from woof.wrfinput_door import resolve_wrfinput_run
     started = time.perf_counter()
+    from woof import checkpoint_schedule
+    # Parsed here, at plan review, so a malformed value is refused before
+    # a card is reserved; resolved against the run's clock in the worker.
+    checkpoint_instants = checkpoint_schedule.parse(checkpoint_at)
+    marks = None
+    if benchmark:
+        # NV recipe dry run, D6: a timed run draws nothing and verifies
+        # nothing after the forecast, and says where its wall clock went.
+        from woof import benchmark_timing
+        if render_products is not None and str(render_products).strip().lower() != 'none':
+            raise ValueError(f'--benchmark draws no products; --products {render_products} '
+                             'asks for some. Drop one of the two')
+        render_products = 'none'
+        marks = benchmark_timing.Marks()
+        marks.mark('read_start')
     from woof.ensemble.door import request_for_inputs, production_run_scope
     request = request_for_inputs(override=ensemble_request)
+    # THE ANALYSIS DOOR (woof.da.analysis_door).  The parent checks the
+    # bundle against the run and writes the plan, rewriting the run's inputs
+    # (the analysis or its background as the wrfinput, the boundary rebased
+    # onto it); the worker reads the plan and applies or forces the
+    # increment once the tree is restored.  Resolved before anything else
+    # reads the directory, so every check below is the rewritten run's.
+    analysis_plan = None
+    fresh_analysis_work = None
+    if analysis is not None and analysis.get('plan') is not None:
+        from woof.da.analysis_door import load_plan
+        analysis_plan = Path(analysis['plan'])
+        load_plan(analysis_plan)
+    elif analysis is not None:
+        from woof.da.analysis_door import resolve as resolve_analysis
+        if request is not None:
+            raise ValueError('--analysis starts one forecast from one analysis; a member roster runs one '
+                             'process per member, each with its own bundle (the cycle driver does)')
+        resolved = resolve_analysis(analysis, directory=Path(directory), outdir=Path(outdir),
+                                    run_seconds=run_seconds, restart=restart,
+                                    restart_from=restart_from, soil_source=soil_source)
+        if resolved['plan'] is not None:
+            if restart is None:
+                fresh_analysis_work = Path(resolved['plan']).parent
+            directory = resolved['directory']
+            soil_source = resolved['soil_source']
+            analysis_plan = Path(resolved['plan'])
+            defaults = resolved['forecast_defaults']
+            if rrtmg_variant is None and 'rrtmg_variant' in defaults:
+                rrtmg_variant = defaults['rrtmg_variant']
+            if thompson_version is None and 'thompson_version' in defaults:
+                thompson_version = defaults['thompson_version']
+            if urban_ucm_generation is None and 'urban_ucm_generation' in defaults:
+                urban_ucm_generation = defaults['urban_ucm_generation']
+            for key in ('urban_treeoption', 'urban_ttscheme', 'urban_fvg'):
+                if key in defaults and key not in (urban_controls or {}):
+                    urban_controls = dict(urban_controls or {})
+                    urban_controls[key] = defaults[key]
     from woof.ensemble.calibration_admission import refuse_native_random
     refuse_native_random(directory)
-    run = resolve_wrfinput_run(directory, rrtmg_variant=rrtmg_variant)
+    run = resolve_wrfinput_run(directory, rrtmg_variant=rrtmg_variant,
+                               restart_from=restart_from,
+                               urban_ucm_generation=urban_ucm_generation, urban_controls=urban_controls,
+                               **({} if thompson_version is None else {"thompson_version":thompson_version}))
     if run_seconds is not None:
         wrfinput_window_seconds(run, run_seconds)
     # PLAN REVIEW, and it happens here rather than in the worker child
@@ -566,6 +812,9 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
                                   resume=restart, owner_token=output_owner)
     except (ValueError, FileExistsError) as error:
         print(f'{DOOR}: --outdir refused: {error}', file=sys.stderr)
+        if fresh_analysis_work is not None:
+            import shutil
+            shutil.rmtree(fresh_analysis_work, ignore_errors=True)
         return 2
     outdir = output_claim.path
     try:
@@ -584,6 +833,12 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
                        '--_output-owner', output_claim.token]
             if rrtmg_variant is not None:
                 command += ['--rrtmg-variant', rrtmg_variant]
+            if thompson_version is not None:
+                command += ['--thompson-version', thompson_version]
+            if urban_ucm_generation is not None:
+                command += ['--urban-ucm-generation', urban_ucm_generation]
+            for key,value in (urban_controls or {}).items():
+                command += ['--'+key.replace('_','-'), str(value)]
             if soil_source is not None:
                 from woof.filesystem_paths import canonical_path
                 command += ['--soil-source', str(canonical_path(soil_source))]
@@ -591,6 +846,8 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
                 command += ['--run-seconds', str(run_seconds)]
             if restart is not None:
                 command += ['--restart', str(Path(restart).resolve())]
+            if restart_from is not None:
+                command += ['--restart-from', str(Path(restart_from).resolve())]
             if health_debug:
                 command += ['--health-debug']
             if request is not None:
@@ -602,6 +859,12 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
                 command += ['--products', str(render_products)]
             if render_dir is not None:
                 command += ['--render-dir', str(Path(render_dir).resolve())]
+            if benchmark:
+                command += ['--benchmark']
+            if checkpoint_instants is not None:
+                command += ['--checkpoint-at', ','.join(checkpoint_instants)]
+            if analysis_plan is not None:
+                command += ['--analysis-plan', str(analysis_plan)]
             command += ProgressOptions.worker_flags(progress_options)
             urban_columns = wrfinput_urban_columns(run)
             pricing = ({} if urban_columns is None else
@@ -612,18 +875,54 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
                 # Priced against THIS run's reservation through the same
                 # function `woof run` prices from, so a co-tenant admitted
                 # at one door is admitted at the other.
-                return worker_exit_status(subprocess.run(
-                    command, env=dict(os.environ, CUDA_VISIBLE_DEVICES=cuda_mask),
-                    check=False).returncode)
+                env = dict(os.environ, CUDA_VISIBLE_DEVICES=cuda_mask)
+                if marks is not None:
+                    # The door's own share of the start-up, for the worker's
+                    # summary (benchmark_timing.DOOR_MARKS_ENV).
+                    env[benchmark_timing.DOOR_MARKS_ENV] = benchmark_timing.door_marks(
+                        marks, spawn=time.time())
+                status = worker_exit_status(subprocess.run(
+                    command, env=env, check=False).returncode)
+            if benchmark and status == 0:
+                benchmark_timing.report(
+                    outdir, process_start=benchmark_timing.process_start_unix())
+            return status
         if gpu_uuid is not None:
             raise ValueError('--gpu-uuid requires the default fresh worker; remove --no-supervise')
         from woof.go_cli import GoStageFailed
         from woof.prepared_domain_tree_forecast import run_prepared_tree
         from woof.filesystem_paths import io_path
         worker_output = io_path(outdir)
+        # NV recipe dry run, D5: step 1 compiled the dycore's diffusion
+        # units (32 s of a 33.5 s first step on a warm kernel cache);
+        # they now compile on a background thread while the input is read.
+        from woof import kernel_prewarm
+        # Prebuilt kernel images under a mounted cache (woof.kernel_cache_seed);
+        # nothing when WOOF_KERNEL_CACHE_SEED is unset.
+        from woof import kernel_cache_seed, kernel_prebuild
+        kernel_cache_seed.seed()
+        # WOOF_KERNEL_RECORD: what this run compiles, for a prebuild on
+        # other cards (woof.kernel_prebuild); nothing when unset.
+        kernel_prebuild.install_recorder()
+        # The configuration's whole kernel set compiles on every core while
+        # the input is read (woof.kernel_plan), not one module at a time
+        # inside step 1.
+        kernel_prewarm.start_plan(getattr(run, 'experiment', None))
+        prewarm = kernel_prewarm.start_for(getattr(run, 'experiment', None))
+        plan_document = None
+        if analysis_plan is not None:
+            from woof.da.analysis_door import load_plan
+            plan_document = load_plan(analysis_plan)
+        if marks is not None:
+            marks.mark('prepare_start')
         inputs = prepare_wrf_run(run, worker_output/'input', run_seconds=run_seconds,
-                                 **({} if soil_source is None else {'soil_source': soil_source}))
+                                 **({} if soil_source is None else {'soil_source': soil_source}),
+                                 **({} if plan_document is None or not plan_document.get('boundary_pair_file')
+                                    else {'boundary_pair_file': plan_document['boundary_pair_file']}))
+        if marks is not None:
+            marks.mark('read_end')
         announce_wrf_substitutions(run, inputs.prepared_root/'wrf-import.json')
+        announce_warm_start(run, inputs.experiment)
         plan = door_render_plan(worker_output, render_products=render_products,
                                 render_dir=None if render_dir is None else io_path(render_dir),
                                 init=inputs.experiment.start_time,
@@ -631,16 +930,31 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
         with production_run_scope(request, output_directory=worker_output):
             first_products = arm_door_first_products(plan, outdir=worker_output, started=started)
             try:
-                run_prepared_tree(inputs, output_directory=worker_output, io_mode=io_mode,
-                                  restart=None if restart is None else io_path(restart),
-                                  health_debug=health_debug,
-                                  progress_options=progress_options,
-                                  initialization=WrfInitialization(inputs),
-                                  **({} if first_products is None
-                                     else {'first_products': first_products}))
+                with checkpoint_schedule.selected(checkpoint_instants):
+                    run_prepared_tree(inputs, output_directory=worker_output, io_mode=io_mode,
+                                    restart=None if restart is None else io_path(restart),
+                                    health_debug=health_debug,
+                                    progress_options=progress_options,
+                                    initialization=_door_initialization(
+                                        (WrfRestartInitialization(inputs)
+                                         if getattr(run, 'restart_paths', None) is not None
+                                         else WrfInitialization(inputs)),
+                                        analysis_plan, worker_output),
+                                    **({} if first_products is None
+                                       else {'first_products': first_products}))
             except BaseException as error:
                 stop_door_renders(first_products, error)
                 raise
+            if marks is not None:
+                if prewarm is not None:
+                    marks.values['kernel_prewarm'] = prewarm.receipt()
+                from woof import kernel_plan
+                marks.values['kernel_plan'] = kernel_plan.receipt()
+                marks.write(worker_output)
+                if not relaunched:
+                    benchmark_timing.report(
+                        worker_output, process_start=benchmark_timing.process_start_unix())
+                return 0
             try:
                 draw_door_products(plan, first_products=first_products, door=DOOR)
             except GoStageFailed as failure:
@@ -653,7 +967,16 @@ def run_wrf_forecast(directory, outdir, *, run_seconds=None, restart=None,
         output_claim.close()
 
 
-def main(argv=None):
+def analysis_request(args):
+    from woof.da.analysis_door import request_from_args
+    return request_from_args(args)
+
+
+def main(argv=None, *, in_process=False):
+    """The door.  ``in_process=True`` runs the forecast in this process (the
+    worker's body, as ``woof run --no-supervise`` does) instead of a fresh
+    supervised worker: the warm leg executor (:mod:`woof.leg_executor`)
+    runs successive legs this way on the card it was started on."""
     args = build_parser().parse_args(argv)
     try:
         from woof.ensemble.calibration_admission import refuse_public_arguments
@@ -667,14 +990,21 @@ def main(argv=None):
             members=args.members, keep_member_files=args.keep_member_files)
         return run_wrf_forecast(args.wrfinput, args.outdir, run_seconds=args.run_seconds,
                                restart=args.restart, io_mode=args.io_mode,
-                               health_debug=args.health_debug, exclusive_gpu=not args._worker,
+                               health_debug=args.health_debug,
+                               exclusive_gpu=not (args._worker or in_process),
                                rrtmg_variant=args.rrtmg_variant,
+                               thompson_version=args.thompson_version,
+                               urban_ucm_generation=args.urban_ucm_generation,
+                               urban_controls={key:getattr(args,key) for key in ("urban_treeoption","urban_ttscheme","urban_fvg","urban_table_dir") if getattr(args,key) is not None},
                                render_products=args.render_products,
                                render_dir=args.render_dir,
                                progress_options=ProgressOptions.from_args(args),
                                relaunched=args._worker,
                                allow_shared_gpu=args.allow_shared_gpu,
                                output_owner=args._output_owner, soil_source=args.soil_source,
+                               restart_from=args.restart_from, benchmark=args.benchmark,
+                               analysis=analysis_request(args),
+                               checkpoint_at=args.checkpoint_at,
                                **({} if request is None else {"ensemble_request": request.receipt()}))
     except (ValueError, OSError) as error:
         import sys

@@ -56,7 +56,7 @@ Two of the include entries are DATA anchors that carry no import surface --
 neither can grow Python without somebody deciding it should.
 
 ``tests/`` is scanned too, but only to justify the ``[dev]`` extra: the test
-suite is the only consumer ``pytest`` and ``psutil`` have.
+suite is the only consumer ``pytest`` has.
 """
 
 from __future__ import annotations
@@ -65,6 +65,7 @@ import ast
 import re
 import sys
 import tomllib
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -96,6 +97,7 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
     "cupy": ("cupy-cuda12x", "cupy-cuda13x"),
     "cupy_backends": ("cupy-cuda12x", "cupy-cuda13x"),
     "cupyx": ("cupy-cuda12x", "cupy-cuda13x"),
+    "cuda": ("cuda-pathfinder",),
     "huggingface_hub": ("huggingface_hub",),
     "jsonschema": ("jsonschema",),
     "threadpoolctl": ("threadpoolctl",),
@@ -122,10 +124,32 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
     # not ship.  The two decode instruments that import it are
     # checkout-only by construction -- see _OPTIONAL_BY_DESIGN.
     "test_mapped_engine_parity": (),
+    # NO distribution provides these either: tools/wrf_exact_localize's trace
+    # hooks and comparer, reached by the exact chain's localization
+    # instruments after a sys.path insert -- see _OPTIONAL_BY_DESIGN.
+    "cmpphys": (),
+    "woof_hook": (),
+    "woof_hook2": (),
+    "woof_hook3": (),
+    "woof_gf_inputs": (),
+    "woof_wsm6_inputs": (),
     "arwen_global": ("arwen-global",),
     "cdsapi": ("cdsapi",),
     "setuptools": ("setuptools",),
     "xdist": ("pytest-xdist",),
+    # tests/test_no_undefined_names.py locates the linter through the
+    # wheel's own module (ruff.__main__.find_ruff_bin).
+    "ruff": ("ruff",),
+    # The Earth-2 doors (2.9.3): the runner scripts execute in the separate
+    # earth2studio interpreter WOOF_EARTH2_PYTHON names -- see
+    # _OPTIONAL_BY_DESIGN.
+    "earth2studio": ("earth2studio",),
+    "torch": ("torch",),
+    "torch_harmonics": ("torch-harmonics",),
+    "xarray": ("xarray",),
+    # tools/hf_inventory.py, a maintainer inventory instrument -- see
+    # _OPTIONAL_BY_DESIGN.
+    "requests": ("requests",),
 }
 
 #: Modules this project deliberately never declares, because a *declared*
@@ -133,6 +157,14 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
 #: would pin a version we do not care about and would hide the real
 #: relationship.  If the guarantor ever leaves the table, this fires.
 _GUARANTORS: dict[str, tuple[str, str]] = {
+    "cuda": (
+        "cupy-cuda13x",
+        "The CuPy 14 wheels (cupy-cuda13x and cupy-cuda12x alike, both pinned "
+        ">=14.0 by the gpu extras) require cuda-pathfinder, which ships the "
+        "`cuda.pathfinder` namespace.  woof/forecast_readiness.py imports it "
+        "inside binding(), only after it has established CuPy 14, and reads "
+        "it through CuPy's guarantee, never on its own account.",
+    ),
     "PIL": (
         "matplotlib",
         "matplotlib requires pillow>=8, so a base install always has it. "
@@ -189,7 +221,53 @@ _GENERATED_SOURCE_CONSUMERS: dict[str, tuple[str, str, str]] = {
 #: Modules that are genuinely optional at run time: the importing code has a
 #: try/except and a documented answer for the absent case, so declaring them
 #: would be declaring something the product does not need.
+#: Why the Earth-2 runner scripts' imports are not declared (2.9.3).
+_EARTH2_INTERPRETER = (
+    "the Earth-2 doors (2.9.3): woof/earth2_runner.py, "
+    "earth2_diagnose_runner.py, earth2_diagnostic_runner.py and earth2_io.py "
+    "are the scripts woof earth2 and woof earth2-diagnose launch as a "
+    "subprocess in the interpreter WOOF_EARTH2_PYTHON names, the one with "
+    "earth2studio and its torch stack installed. The woof interpreter never "
+    "imports them, and without that interpreter the doors refuse by naming "
+    "the variable. Declaring the stack here would pull a multi-GiB torch "
+    "install into every woof install for a door that runs beside it, not "
+    "inside it."
+)
+
 _OPTIONAL_BY_DESIGN: dict[str, str] = {
+    "earth2studio": _EARTH2_INTERPRETER,
+    "torch": _EARTH2_INTERPRETER,
+    "xarray": _EARTH2_INTERPRETER,
+    "torch_harmonics": (
+        "woof/earth2_runner.py imports torch_harmonics inside a try/except "
+        "(and the runner itself runs in WOOF_EARTH2_PYTHON): the banded DISCO "
+        "contraction is a memory optimisation and a no-op when "
+        "torch-harmonics is absent."
+    ),
+    "requests": (
+        "tools/hf_inventory.py is the read-only Hugging Face Earth-2 "
+        "inventory a maintainer runs from a checkout to rebuild the model "
+        "table. No woof door imports it (woof hf-fetch downloads with "
+        "urllib), so a user's install never reaches it."
+    ),
+    "cmpphys": (
+        "the WRF exact chain's localization instruments (2.9.1): tools/coupled_exact_trace.py, tools/coupled_gf_receipt.py and tools/coupled_trace_receipt.py put tools/wrf_exact_localize on sys.path and import its trace hooks and comparer by bare name. That directory does not ship (packages.find names `tools`, not `tools*`), so from a wheel the import fails by name; the scripts are maintainer instruments that replay a recorded WRF run from a checkout, and no wheel-user path reaches them."
+    ),
+    "woof_hook": (
+        "the WRF exact chain's localization instruments (2.9.1): tools/coupled_exact_trace.py, tools/coupled_gf_receipt.py and tools/coupled_trace_receipt.py put tools/wrf_exact_localize on sys.path and import its trace hooks and comparer by bare name. That directory does not ship (packages.find names `tools`, not `tools*`), so from a wheel the import fails by name; the scripts are maintainer instruments that replay a recorded WRF run from a checkout, and no wheel-user path reaches them."
+    ),
+    "woof_hook2": (
+        "the WRF exact chain's localization instruments (2.9.1): tools/coupled_exact_trace.py, tools/coupled_gf_receipt.py and tools/coupled_trace_receipt.py put tools/wrf_exact_localize on sys.path and import its trace hooks and comparer by bare name. That directory does not ship (packages.find names `tools`, not `tools*`), so from a wheel the import fails by name; the scripts are maintainer instruments that replay a recorded WRF run from a checkout, and no wheel-user path reaches them."
+    ),
+    "woof_hook3": (
+        "the WRF exact chain's localization instruments (2.9.1): tools/coupled_exact_trace.py, tools/coupled_gf_receipt.py and tools/coupled_trace_receipt.py put tools/wrf_exact_localize on sys.path and import its trace hooks and comparer by bare name. That directory does not ship (packages.find names `tools`, not `tools*`), so from a wheel the import fails by name; the scripts are maintainer instruments that replay a recorded WRF run from a checkout, and no wheel-user path reaches them."
+    ),
+    "woof_gf_inputs": (
+        "the WRF exact chain's localization instruments (2.9.1): tools/coupled_exact_trace.py, tools/coupled_gf_receipt.py and tools/coupled_trace_receipt.py put tools/wrf_exact_localize on sys.path and import its trace hooks and comparer by bare name. That directory does not ship (packages.find names `tools`, not `tools*`), so from a wheel the import fails by name; the scripts are maintainer instruments that replay a recorded WRF run from a checkout, and no wheel-user path reaches them."
+    ),
+    "woof_wsm6_inputs": (
+        "the WRF exact chain's localization instruments (2.9.1): tools/coupled_exact_trace.py, tools/coupled_gf_receipt.py and tools/coupled_trace_receipt.py put tools/wrf_exact_localize on sys.path and import its trace hooks and comparer by bare name. That directory does not ship (packages.find names `tools`, not `tools*`), so from a wheel the import fails by name; the scripts are maintainer instruments that replay a recorded WRF run from a checkout, and no wheel-user path reaches them."
+    ),
     "test_mapped_engine_parity": (
         "tools/extract_mapped_engine_goldens.py and "
         "tools/mapped_engine_parity_sweep.py import the mapped parity "
@@ -233,6 +311,13 @@ _OPTIONAL_BY_DESIGN: dict[str, str] = {
 #: capability is genuinely optional"; it is deliberately more work than
 #: promoting the dependency.
 _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
+    "cuda": (
+        ("gpu-cu13",),
+        "Reachable only through CuPy 14's own requirement on cuda-pathfinder "
+        "(the same guarantee under [gpu-cu12], whose cupy-cuda12x>=14.0 "
+        "carries it), inside the forecast-readiness binding that runs only "
+        "beside a card; a base install never imports it.",
+    ),
     "cupy": (
         ("gpu-cu12", "gpu-cu13"),
         "CuPy ships one wheel per CUDA major and a pip extra cannot detect "
@@ -305,6 +390,15 @@ _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
         "build-the-table dependency, not a read-the-table one. The import is "
         "guarded and names this extra.",
     ),
+    "yaml": (
+        ("dev",),
+        "2.9.0 (r290/publish-test-job): tools/workflow_job_replay.py and "
+        "tools/workflow_rehearsals.py read the repository's own workflow "
+        "YAML to replay a CI job and census the release rehearsals before a "
+        "publish. Both are release-engineering tools run from a checkout with "
+        "the [dev] extra, which already declares pyyaml for the publish.yml "
+        "contract tests; no forecast or data door imports them.",
+    ),
     "pytest": (
         ("dev",),
         "The test suite. tilestream/ ships 41 `test_*.py` modules inside the "
@@ -312,12 +406,6 @@ _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
         "the one gated module that a user's site-packages does contain -- "
         "but nothing outside those files imports them, and only `pytest` "
         "collects them. Shipping them at all is the tiles lane's call.",
-    ),
-    "psutil": (
-        ("dev",),
-        "tests/test_prepare_hrrr_wrf.py's decoder fixture walks its own "
-        "process ancestry on Windows to find the cmd.exe shim Popen "
-        "returned. Test-only, Windows-only.",
     ),
 }
 
@@ -344,6 +432,21 @@ _NEUTRALISED_EXTRAS: dict[str, str] = {
 #: invitation to a shadowed import, and the row is what makes adding another
 #: one a decision.
 _SYS_PATH_SIBLING_SITES: dict[str, str] = {
+    "tools/coupled_wsm6_receipt.py": (
+        "the exact chain's WSM6 localization receipt (2.9.1): inserts its own "
+        "directory and imports coupled_dycore_receipt, which ships beside it. "
+        "A checkout instrument."
+    ),
+    "tools/coupled_dycore_receipt.py": (
+        "the exact chain's localization receipt (2.9.1): inserts its own directory and "
+        "imports coupled_trace_receipt, which ships beside it in tools/; it also "
+        "inserts tools/wrf_exact_localize, which does not ship. A checkout instrument."
+    ),
+    "tools/coupled_reflectivity_probe.py": (
+        "the exact chain's reflectivity probe (2.9.1): inserts its own directory and "
+        "imports coupled_dycore_receipt and coupled_trace_receipt, which ship beside it. "
+        "A checkout instrument."
+    ),
     "tools/nssl2_variant_probe.py": (
         "inserts its own directory and imports nssl2_mp18_digest_probe. The "
         "comment above it says the insert is deliberate because "
@@ -362,11 +465,6 @@ _SYS_PATH_SIBLING_SITES: dict[str, str] = {
         "resolve from a wheel, but it also reads sys.argv[1] at import time, "
         "so it is a checkout-only script by construction. Terrain lane's "
         "file; handed off rather than changed here."
-    ),
-    "tilestream/render_case.py": (
-        "inserts <repo>/tools -- which in an install is "
-        "<site-packages>/tools -- and imports da_nowcast_render at module "
-        "level and again inside _draw_lines. Tiles lane's file."
     ),
 }
 
@@ -408,18 +506,18 @@ def _shipped_sources(config: dict) -> list[Path]:
     return files
 
 
+@lru_cache(maxsize=None)
 def _top_level_imports(path: Path):
-    """``(module, lineno)`` for every absolute import in one file."""
-
+    """Immutable import census, shared by the checks in each worker."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imports = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                yield alias.name.split(".")[0], node.lineno
-        elif isinstance(node, ast.ImportFrom):
-            if node.level or not node.module:   # relative: first-party
-                continue
-            yield node.module.split(".")[0], node.lineno
+            imports.extend((alias.name.split(".")[0], node.lineno)
+                           for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            imports.append((node.module.split(".")[0], node.lineno))
+    return tuple(imports)
 
 
 #: Shipped tools that reach a module of the TEST TREE by bare name after
@@ -441,6 +539,29 @@ _TEST_TREE_IMPORT_SITES: dict[str, tuple[str, ...]] = {
     # helpers so the timing runs on the inputs the suite certifies.
     # Checkout-only by the same construction as the two above.
     "tools/rrtmg_prep_device_check.py": ("test_rrtmg_legacy_prep_device",),
+    # The packed DA member-leg proof (69a8b88ad, 098816bc9): it binds the
+    # established public GPU fixture -- the cycle-join and nested-forecast
+    # suites' experiment, wiring, terrain and land builders -- and hashes
+    # those two suites' bytes as the proof's source identity, so the proof
+    # and the suites cannot drift apart.  Its GPU arms refuse without the
+    # node operator's OWNER check and one complete card UUID, and the import
+    # sits inside that guard (_fixture_imports).  Checkout-only by the same
+    # construction as the three above.
+    "tools/da_member_leg_proof.py": ("test_da_cycle_join_gpu",
+                                     "test_da_nested_forecast_gpu"),
+    # These numerical review tools explicitly insert the checkout's tests
+    # directory. Their fixture helpers are verified by the liveness gate
+    # below and are not runtime dependencies of an installed distribution.
+    "tools/mynn_exact_review.py": ("_mynn_families", "_mynn_families_gsd41"),
+    "tools/mynn_tkeadvect_check.py": ("_mynn_families", "_mynn_families_gsd41"),
+    "tools/mynn_review_restart.py": ("test_mynn_pbl_runtime",),
+    "tools/terrain_clock_review_bench.py": ("test_terrain_clock_review",),
+    # The correct-mode water-budget receipt (2.9.0 7abd12219) runs the same
+    # WSM6 and New Tiedtke columns as tests/test_correct_mode_water_budget.py
+    # through that suite's mirror and residual helpers, so the receipt and
+    # the suite cannot measure different columns.  Checkout-only by the same
+    # construction as the rows above.
+    "tools/correct_mode_water_budget_receipt.py": ("test_correct_mode_water_budget",),
 }
 
 
@@ -964,3 +1085,7 @@ def test_the_shipped_surface_matches_the_packaging_declaration(pyproject):
     assert not any("ftz_receipt" in p.as_posix() for p in shipped), (
         "tools/ subpackages have no __init__ route into the wheel; the "
         "scanner must not pretend they ship")
+    # This generator reads tests/data and imports sealed test helpers. It
+    # belongs with the checkout-only battery, outside the tools top level.
+    assert (REPO_ROOT / "tools/battery/diffusion_cache_source_receipt.py").is_file()
+    assert not any(p.name == "diffusion_cache_source_receipt.py" for p in shipped)

@@ -125,14 +125,30 @@ class AnalyticClearSkyRadiation:
             atmosphere["qv"][0], pressure[0])
         # The analytic flux remains this adapter's approximation, but the
         # surface carrier follows WRF's radiation-clock geometry: only the
-        # hour angle is shifted by half the radiation interval.
-        from woof.core.dudhia import wrf_solar_geometry
-        from woof.core.physics import _physics_period_seconds
+        # hour angle is shifted by half the radiation interval.  A strict
+        # (GPUWM_WRF_EXACT=1) wrf_461 run takes WRF 4.6.1's radiation-call
+        # cosine word for word (woof.core.wrf_radiation_clock: radconst +
+        # calc_coszen on WRF's REAL(4) calendar, the namelist radt used raw,
+        # graded by tools/analytic_clear_sky_oracle); every other run keeps
+        # the solar generation's geometry.
+        from woof.wrf_exact import ENABLED as _strict
         radt_minutes = cfg.radt if cfg.radt > 0.0 else cfg.radt_minutes
-        interval = _physics_period_seconds(radt_minutes, cfg)
-        coszen, _ = wrf_solar_geometry(
-            valid_time, self.latitude_deg, self.longitude_deg,
-            hour_offset_seconds=0.5 * interval)
+        generation = getattr(cfg, "solar_generation", "wrf_480")
+        if _strict and generation == "wrf_461":
+            from woof.core.wrf_radiation_clock import wrf_radiation_coszen
+            coszen = wrf_radiation_coszen(
+                self.start_time, elapsed, radt_minutes,
+                self.latitude_deg, self.longitude_deg)
+        else:
+            from woof.core.dudhia import wrf_solar_geometry
+            from woof.core.physics import _physics_period_seconds
+            interval = _physics_period_seconds(radt_minutes, cfg)
+            from woof.core.solar import solar_period_seconds
+            interval = solar_period_seconds(cfg, interval)
+            coszen, _ = wrf_solar_geometry(
+                valid_time, self.latitude_deg, self.longitude_deg,
+                hour_offset_seconds=0.5 * interval, generation=generation,
+                start_time=self.start_time, elapsed_seconds=state.elapsed_seconds)
         gsw = swdown * (cp.float32(1.0) - fields["albedo"])
 
         # Imported lazily to keep the generic result contract in physics.py

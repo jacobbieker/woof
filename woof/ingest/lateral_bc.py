@@ -13,6 +13,7 @@ import numpy as np
 from woof.boundary_fields import SCALAR_ARRAY_BOUNDARY_FIELDS
 from woof.core import portable_math as pm
 from woof.core.kernels import get_kernel
+from woof.wrf_exact import ENABLED as WRF_EXACT
 from woof.grid_requirements import boundary_axis
 
 #: Every transported hydrometeor/number/volume scalar the coupled-units
@@ -26,8 +27,11 @@ from woof.grid_requirements import boundary_axis
 #: inventory, not kernel behaviour.  The accepted-implies-builds
 #: instrument pins this set against every accepted scheme's
 #: ``nest_field_kinds``.
+from woof.core.fast_sbm_contract import BIN_SPECIES as _FSBM_BIN_SPECIES
+
 COUPLED_SCALAR_STATE_FIELDS = frozenset({
-    "qv", "qc", "qr", "qi", "qs", "qg",
+    "qke_adv",
+    "qv", "qc", "qr", "qi", "qs", "qg", "tke_edmf",
     "nr", "ni", "ns", "ng", "nc", "nwfa", "nifa",
     # mp=9 (Milbrandt-Yau): hail number; the rest of its moments were
     # already named by the schemes that spelled them first.
@@ -37,7 +41,26 @@ COUPLED_SCALAR_STATE_FIELDS = frozenset({
     # mp=50 (P3): rime mass and rime volume, transported with qi.
     "qir", "qib",
     "qh", "qndrop", "qnr",
-    "qni", "qns", "qng", "qnh", "qnn", "qvolg", "qvolh"})
+    "qni", "qns", "qng", "qnh", "qnn", "qvolg", "qvolh",
+    # TEMPO's graupel volume (a named scheme's row); a dry-mass mixing
+    # ratio like NSSL's qvolg, generic coupling code 7.
+    "volg"}) | frozenset(_FSBM_BIN_SPECIES)
+
+
+
+def _is_chem_field(name: str) -> bool:
+    """A chem species field (``chem_<row>``, woof/core/chem_state.py).
+
+    The coupled-scalar doors admit it BESIDE
+    :data:`COUPLED_SCALAR_STATE_FIELDS` rather than through it: the chem
+    rows are named by the chem table, and every one is a dry-mass mixing
+    ratio taking the generic coupling code 7 with half-level mu weighting,
+    exactly like the moments in the set.
+    """
+    from woof.state_serialization_contract import CHEM_STATE_PREFIX
+
+    return name.startswith(CHEM_STATE_PREFIX)
+
 
 _THREADS = 256
 _THETA_OFFSET_K = np.float32(300.0)
@@ -431,6 +454,11 @@ class _DeviceLateralBoundaries:
     #: the owning state by ``_active_device_interval`` before the nested
     #: interval is served.
     nested_reload: object | None = None
+    #: What the packed chem boundary rows (``lbc_chem_*`` slots, see
+    #: :func:`chem_boundary_rows`) were cut from: the served interval and
+    #: the reload count.  A re-attach builds a new record, so a new forcing
+    #: can never be served from the old packing.
+    chem_packed_key: tuple | None = None
 
 
 def _seconds(times: Sequence[datetime | float]) -> np.ndarray:
@@ -580,6 +608,28 @@ def _weights(width, spec_zone, relax_zone, dt, spec_exp, *, wrf_real=False,
             fcx[index] = np.float32(f / denominator)
             g = np.float32(g * numerator)
             gcx[index] = np.float32(g / denominator)
+            continue
+        if WRF_EXACT and timescale_s <= 0.0:
+            # Strict mode, specified branch of WRF lbc_fcx_gcx
+            # (module_bc_em.F): default-REAL left-to-right operations, then
+            # the sponge weight multiplied in REAL.  The float64 law below
+            # rounds once at the end, a different word for some dt
+            # (combo-sweep round 2, LOCALIZE.md item 5).  spec_exp = 0, the
+            # WRF default, makes the sponge weight exactly 1.
+            numerator = np.float32(spec_zone + relax_zone - loop)
+            denominator = np.float32(relax_zone - 1)
+            dt32 = np.float32(dt)
+            f = np.float32(np.float32(0.1) / dt32)
+            f = np.float32(f * numerator)
+            f = np.float32(f / denominator)
+            g = np.float32(np.float32(1.0) / dt32)
+            g = np.float32(g / np.float32(50.0))
+            g = np.float32(g * numerator)
+            g = np.float32(g / denominator)
+            sponge = np.float32(np.exp(np.float32(-(loop - (spec_zone + 1)))
+                                       * np.float32(spec_exp)))
+            fcx[index] = np.float32(f * sponge)
+            gcx[index] = np.float32(g * sponge)
             continue
         ramp = (spec_zone + relax_zone - loop) / (relax_zone - 1)
         sponge = float(pm.exp(-(loop - (spec_zone + 1)) * spec_exp))
@@ -863,15 +913,80 @@ def _active_device_interval(state, cfg):
             reload_tables(state)
         return (resident.intervals[0], resident.clock.dtbc_launch_fp32,
                 resident.clock.dt_fp32, 0.0)   # LIVE
+    interval, dtbc = _served_external_interval(state, resident)
+    device, offset = _evaluate_device_interval(
+        state, _resident_interval(state, interval), dtbc)
+    return (device, offset, lateral_boundary_clock_dt(cfg), cfg.spec_exp)
+
+
+def _served_external_interval(state, resident):
+    """The host interval a specified root is served now, and its ``dtbc``."""
     boundaries = state.lateral_boundaries
     elapsed = (state.elapsed_seconds if resident.clock is None
                else resident.clock.elapsed_seconds)
     interval = boundaries.interval_at(elapsed)
     dtbc = (state.elapsed_seconds - interval.start_seconds
             if resident.clock is None else resident.clock.dtbc_launch_fp32)
-    device, offset = _evaluate_device_interval(
-        state, _resident_interval(state, interval), dtbc)
-    return (device, offset, lateral_boundary_clock_dt(cfg), cfg.spec_exp)
+    return interval, dtbc
+
+
+#: The packed outer boundary rows of the chem rows, in the argument order of
+#: :func:`woof.core.chem_bdy.apply_chem_flow_boundaries`.
+CHEM_BOUNDARY_SLOTS = ("lbc_chem_bxs", "lbc_chem_btxs", "lbc_chem_bxe",
+                       "lbc_chem_btxe", "lbc_chem_bys", "lbc_chem_btys",
+                       "lbc_chem_bye", "lbc_chem_btye")
+
+
+def chem_boundary_rows(state, cfg, names):
+    """WRF-Chem's ``chem_b``/``chem_bt`` for a specified root's chem rows.
+
+    ``names`` are the transported rows' state names in launch order.
+    Returns ``(has_bc, tables, dtbc)`` -- one 0/1 per name (1 where this
+    domain's sealed forcing carries that row), the eight packed
+    ``(rows, nz, ny|nx)`` tables in :data:`CHEM_BOUNDARY_SLOTS` order, and
+    the served interval's ``dtbc`` -- or ``None`` when the forcing carries
+    no chem row (or the domain has no external forcing).
+
+    WRF reads only the OUTERMOST boundary row (``chem_bxs(j,k,1)``,
+    module_input_chem_data.F:1531-2031); the sealed tables are stored
+    outermost first on every side, so row 0 of each side is that row.  The
+    RAW linear tables are read, never a time-law evaluated copy: WRF forms
+    ``chem_b + chem_bt*(dt_rk + dtbc)`` in one expression.  The packing is
+    redone only when the served interval (or a streamed reload) changes.
+    """
+    resident = getattr(state, "_lateral_boundary_device", None)
+    if (not cfg.specified or resident is None or resident.rolling
+            or state.lateral_boundaries is None):
+        return None
+    interval, dtbc = _served_external_interval(state, resident)
+    device = _resident_interval(state, interval)
+    has = [1 if name in device.fields else 0 for name in names]
+    if not any(has):
+        return None
+    probe = device.fields[names[has.index(1)]]
+    nz, ny, _width = probe.west.value.shape
+    nx = probe.south.value.shape[-1]
+    rows = len(names)
+    tables = tuple(_lbc_scratch(state, (rows, nz, ny if n < 4 else nx), slot)
+                   for n, slot in enumerate(CHEM_BOUNDARY_SLOTS))
+    key = (id(interval), id(device), resident.external_reload_count, tuple(names))
+    if resident.chem_packed_key != key:
+        for table in tables:
+            table[...] = 0
+        for index, name in enumerate(names):
+            if not has[index]:
+                continue
+            field = device.fields[name]
+            for n, (side, part) in enumerate(
+                    (("west", "value"), ("west", "tendency"),
+                     ("east", "value"), ("east", "tendency"),
+                     ("south", "value"), ("south", "tendency"),
+                     ("north", "value"), ("north", "tendency"))):
+                source = getattr(getattr(field, side), part)
+                tables[n][index] = (source[:, :, 0] if n < 4
+                                    else source[:, 0, :])
+        resident.chem_packed_key = key
+    return has, tables, dtbc
 
 
 def _resident_weights(state, width, spec_zone, relax_zone, dt, spec_exp, *,
@@ -947,7 +1062,7 @@ def apply_specified_relaxation(field, tendency, boundary: FieldBoundary, *,
         # every non-qv scalar already uses.
         supported = ({"u", "v", "w", "theta", "phi", "mu"}
                      | COUPLED_SCALAR_STATE_FIELDS)
-        if field_name not in supported:
+        if field_name not in supported and not _is_chem_field(field_name):
             raise ValueError(f"unsupported state LBC field {field_name!r}")
         if field_name == "mu":
             shape = (1, *state.mup.shape)
@@ -1023,6 +1138,16 @@ def _apply_legacy_held_interior(tendency, held, msft, active_width, *,
         tendency[interior] += held[interior]
 
 
+def relaxation_shapes(nz, ny, nx):
+    """The tendency shapes the state relaxation launches for a domain whose
+    mass grid is (nz, ny, nx): mass and scalars, u (x-staggered), v
+    (y-staggered), w and phi (z-staggered) and mu (one level). The kernel
+    is shape-specialized (woof.core.kernel_shape), so each is its own
+    image; the kernel pre-warm compiles all of them (woof.kernel_prewarm).
+    """
+    return ((nz, ny, nx), (nz, ny, nx + 1), (nz, ny + 1, nx), (nz + 1, ny, nx), (1, ny, nx))
+
+
 def _launch_state_relaxation(state, field_name, tendency, boundary, *,
                              dtbc, dt, spec_zone, relax_zone, spec_exp,
                              apply_relax, weights, clear_specified, add_held,
@@ -1073,7 +1198,7 @@ def _launch_state_relaxation(state, field_name, tendency, boundary, *,
     mass_perturbation = state.mup if source_mup is None else source_mup
     kind = {"u": 0, "v": 1, "theta": 2, "phi": 3, "mu": 4,
             "qv": 5, "w": 6}.get(field_name, 7)
-    kernel = get_kernel("lbc_state", "state_specified_relaxation")
+    kernel = get_kernel("lbc_state", "state_specified_relaxation", (nz, ny, nx))
     kernel(((count + _THREADS - 1) // _THREADS,), (_THREADS,), (
         tendency, held, state.mub2d, mass_perturbation, u, v, w,
         thp, state.thb, php, scalar,
@@ -1129,6 +1254,14 @@ def _coupled_device_fields(state):
             if name == "qv":  # dry legacy/direct snapshot callers
                 continue
             raise ValueError(f"analysis boundary field {name} has no state array")
+        if _is_chem_field(name):
+            # WRF-Chem's chem boundary arrays hold the species' own mixing
+            # ratio, not a mass-coupled one: flow_dep_bdy_chem takes
+            # max(epsilc, chem_b + chem_bt*dt) straight into chem
+            # (bdy_chem_value_gcm, chem/module_input_chem_data.F:2331-2357),
+            # and nothing relaxes or specifies a chem row on the root.
+            result[name] = getattr(state, name)
+            continue
         result[name] = chm * getattr(state, name)
     return result
 
@@ -1159,8 +1292,9 @@ def couple_nest_field(state, field_name: str, *, out, window=None, frame_width=N
         raise ValueError(
             f"nest coupled output for {field_name} has shape {out.shape}, "
             f"expected {expected}")
-    if field_name not in ({"u", "v", "w", "t", "ph", "mu"}
-                          | COUPLED_SCALAR_STATE_FIELDS):
+    if (field_name not in ({"u", "v", "w", "t", "ph", "mu"}
+                           | COUPLED_SCALAR_STATE_FIELDS)
+            and not _is_chem_field(field_name)):
         raise ValueError(f"unsupported nest coupling field {field_name!r}")
     kind = {"u": 0, "v": 1, "t": 2, "ph": 3, "mu": 4,
             "qv": 5, "w": 6}.get(field_name, 7)
@@ -1232,8 +1366,9 @@ def uncouple_feedback_field(state, field_name: str, coupled, reg, *,
         raise ValueError(
             f"coupled feedback field {field_name} has shape "
             f"{tuple(coupled.shape)}, expected {tuple(target.shape)}")
-    if field_name not in ({"u", "v", "w", "t", "ph"}
-                          | COUPLED_SCALAR_STATE_FIELDS):
+    if (field_name not in ({"u", "v", "w", "t", "ph"}
+                           | COUPLED_SCALAR_STATE_FIELDS)
+            and not _is_chem_field(field_name)):
         raise ValueError(f"unsupported feedback field {field_name!r}")
     kind = {"u": 0, "v": 1, "t": 2, "ph": 3,
             "qv": 5, "w": 6}.get(field_name, 7)
@@ -1464,6 +1599,8 @@ class StateBoundaryFrames:
         #: accumulator uses; see :meth:`_position`.
         self._indexed: bool | None = None
         self._released: set[int] = set()
+        #: Intervals already built, whose start frame can no longer change.
+        self._built: set[int] = set()
 
     def __len__(self) -> int:
         return len(self._frames)
@@ -1591,6 +1728,87 @@ class StateBoundaryFrames:
             for side in ("west", "east", "south", "north")
         })
 
+    def replace_start_state(self, state, *, index: int = 0) -> None:
+        """Make frame ``index`` the coupling of the state the run starts from.
+
+        A preparation whose start state comes from a separate analysis
+        (``--initial-inputs``) first adds the boundary source's own state at
+        the start time, then replaces the start state.  Left as it was, the
+        first interval began from the boundary source's atmosphere: at step
+        0 the specified zone snapped to it and the relaxation zone pulled
+        toward it, a different atmosphere from the one the run starts from
+        (an HRRR start under RAP boundaries).  WRF's rule after an analysis
+        replaces the start is WRFDA's da_update_bc, which operational HRRR
+        runs after GSI: the first boundary record becomes the analysis's
+        own coupling and its tendency runs from there to the next record.
+        Replacing the frame before interval ``index`` is built gives
+        exactly that, through the same producer and the same tendency
+        expression as every other interval.
+
+        The frame keeps the boundary's field inventory: the start state is
+        coupled for the fields the boundary forces, whatever its own
+        initialization would have forced.
+        """
+        index = int(index)
+        if index not in self._frames:
+            raise ValueError(
+                f"forcing-time frame {index} is not held, so the start "
+                "state cannot replace it")
+        if index in self._built or (index - 1) in self._built:
+            raise ValueError(
+                f"boundary interval {index} already read forcing-time frame "
+                f"{index}; the start state must replace it before")
+        scalars = tuple(sorted(
+            self._inventory - {"u", "v", "theta", "phi", "mu"}))
+        held = getattr(state, "_external_scalar_boundary_fields", ("qv",))
+        state._external_scalar_boundary_fields = scalars
+        try:
+            snapshot = _coupled_device_fields(state)
+        finally:
+            state._external_scalar_boundary_fields = held
+        if frozenset(snapshot) != self._inventory:
+            raise ValueError(
+                "the start state cannot be coupled for the boundary's field "
+                f"inventory {sorted(self._inventory)}")
+        self._frames[index] = MappingProxyType({
+            side: extract_lateral_side(snapshot, side, self.spec_bdy_width)
+            for side in ("west", "east", "south", "north")
+        })
+
+    def replace_snapshot(self, snapshot: Mapping[str, object], *,
+                         index: int) -> None:
+        """Replace the held frame at ``index`` with ``snapshot``'s perimeter.
+
+        For a start state replaced after its boundary frame was taken: a
+        separate initial analysis (``--initial-inputs``) is decoded after
+        the boundary source's own start built frame 0.  Left in place, that
+        frame forces the outer rows toward another atmosphere than the one
+        the run starts from, and they jump on the first step (3 km RAP crop
+        under a HRRR start, 2024-05-21 18Z: outer-row T 1.76 K RMS and up to
+        9.7 K, U up to 19 m/s, MU up to 324 Pa after one 20 s step).
+        real.exe's first record is always the coupling of its own wrfinput
+        (main/real_em.F:866-899) and WRFDA's da_update_bc rewrites it the
+        same way after an analysis; taking frame 0 from the new start does
+        both at once, since interval 0's tendency is then built toward the
+        unchanged frame 1.  Only a held frame can be replaced: once its
+        interval is written the boundary it fed is already published.
+        """
+        position = int(index)
+        if position not in self._frames:
+            raise ValueError(
+                f"forcing-time frame {position} is not held"
+                + (" (its interval was already written)"
+                   if position in self._released else "")
+                + "; only a held frame can take a replaced start")
+        if frozenset(snapshot) != self._inventory:
+            raise ValueError(
+                "the replacing boundary field inventory differs from the "
+                "frames already held")
+        self._frames[position] = MappingProxyType({
+            side: extract_lateral_side(snapshot, side, self.spec_bdy_width)
+            for side in ("west", "east", "south", "north")
+        })
+
     def build(self, times: Sequence[datetime | float]) -> LateralBoundaries:
         """Assemble the intervals from the accumulated perimeter frames."""
         if len(self._frames) != len(times) or len(self._frames) < 2:
@@ -1643,7 +1861,8 @@ class StateBoundaryFrames:
             self._frames[index], self._frames[index + 1],
             start_seconds=float(seconds[index]),
             end_seconds=float(seconds[index + 1]))
-        if index == len(seconds) - 2:
+        self._built.add(index)
+        if len(self._built) == len(seconds) - 1:
             self._setup.close()
         return result
 
@@ -1727,6 +1946,9 @@ def attach_lateral_boundaries(state, boundaries: LateralBoundaries) -> None:
     bound keeps ``clock=None`` exactly as before.
     """
     _validate_lateral_attachment(state, boundaries)
+    prestage = getattr(boundaries, "_prestage_owner", None)
+    if prestage is not None and prestage.try_attach(state, boundaries):
+        return
     carried_clock = _carried_external_clock(state)
     total_values = sum(
         array.size
@@ -1825,6 +2047,9 @@ def attach_streaming_lateral_boundaries(
     first = boundaries.intervals[0]
     _validate_lateral_attachment(
         state, boundaries, intervals=(first,) if lazy else None)
+    prestage = getattr(boundaries, "_prestage_owner", None)
+    if prestage is not None and prestage.try_attach(state, boundaries):
+        return
     if lazy:
         reference = None
 
@@ -1995,6 +2220,111 @@ def attach_nest_boundaries(state, fields: Mapping[str, Mapping[str, tuple]],
         frame_width, int(spec_zone), int(relax_zone))
 
 
+def folded_relaxation_rows(cfg) -> tuple[str, ...]:
+    """The rows whose stage-1 relaxation WRF folds into the held tendency.
+
+    ``rk_addtend_dry`` (module_em.F) does ``ru_tendf = ru_tendf +
+    u_save*msfuy`` (v: ``*msfvx``, w: ``*msfty``, t: plain) on rk_step 1
+    and then divides the sum by the map factor on every stage.  phi is not
+    folded the same way only in name: ``ph_tendf`` carries nothing else, so
+    ``(0 + ph_save)/msfty`` is the held phi row this module already adds.
+    w joins on a nest, and on a specified domain that relaxes w.
+    """
+    rows = ["u", "v", "theta"]
+    if cfg.nested or specified_relaxes_w(cfg):
+        rows.append("w")
+    return tuple(rows)
+
+
+def _relaxation_context(state, cfg):
+    device_interval, dtbc, dt, spec_exp = _active_device_interval(state, cfg)
+    timescale_s = relax_timescale_seconds(cfg)
+    common = dict(dtbc=dtbc, dt=dt, spec_zone=cfg.spec_zone,
+                  relax_zone=cfg.relax_zone, spec_exp=spec_exp,
+                  timescale_s=timescale_s)
+    weights = _resident_weights(
+        state, device_interval.fields["u"].west.value.shape[-1],
+        cfg.spec_zone, cfg.relax_zone, dt, spec_exp,
+        wrf_real=bool(cfg.nested), timescale_s=timescale_s)
+    return device_interval, common, weights
+
+
+def capture_folded_relaxation(state, cfg) -> dict:
+    """Strict mode: WRF ``relax_bdy_dry``'s stage-1 relaxation, unscaled.
+
+    Returns ``{row: held}`` for :func:`folded_relaxation_rows`, each the
+    relaxation term WRF writes into ``u_save``/``v_save``/``t_save``/
+    ``w_save`` (zero on the specified rows and the interior), with no map
+    factor.  The dycore folds these into the held ``*_tendf`` before the
+    division (:func:`woof.core.dycore.fold_lateral_relaxation`).  Read
+    from the time-t state, which is the stage-1 state WRF relaxes.
+    """
+    if not (cfg.specified or cfg.nested):
+        return {}
+    if state.lateral_boundaries is None:
+        raise RuntimeError(
+            "cfg.specified=True requires attach_lateral_boundaries(state, ...)")
+    device_interval, common, weights = _relaxation_context(state, cfg)
+    rows = folded_relaxation_rows(cfg)
+    if "w" in rows and "w" not in device_interval.fields:
+        raise RuntimeError(
+            "relax_w = true needs a w boundary table, and this domain's "
+            "lateral forcing carries none")
+    nested_sources = {"u": state.u0, "v": state.v0, "w": state.w0,
+                      "theta": state.thp0}
+    held_rows = {}
+    for name in rows:
+        target = getattr(state, {"theta": "thp"}.get(name, name))
+        held = state.scratch(target.shape, "lbc_relax_" + name)
+        held[...] = 0
+        apply_specified_relaxation(
+            target, held, device_interval.fields[name], **common,
+            apply_relax=True, state=state, field_name=name, weights=weights,
+            clear_specified=True, divide_msf=False,
+            source_field=nested_sources[name] if cfg.nested else None,
+            source_mup=state.mup0 if cfg.nested else None)
+        held_rows[name] = held
+    return held_rows
+
+
+def _apply_state_lateral_boundaries_wrf(state, cfg, rk_stage,
+                                        device_interval, common, weights):
+    """Strict mode, WRF solve_em order.
+
+    The folded rows' relaxation reached the held tendency before this
+    stage's ``rk_addtend_dry`` (:func:`capture_folded_relaxation`), so here
+    they take only ``spec_bdy_dry``: the specified rows' tendency.  phi
+    keeps its held ``ph_save/msfty`` row; mu relaxes on stage 1 straight
+    into its tendency, as ``relax_bdytend(mu, mu_tend)`` does.
+    """
+    folded = folded_relaxation_rows(cfg)
+    rows = [("u", state.ru_t), ("v", state.rv_t), ("theta", state.rth_t)]
+    if "w" in folded:
+        rows.append(("w", state.rw_t))
+    for name, tendency in rows:
+        apply_specified_relaxation(
+            getattr(state, {"theta": "thp"}.get(name, name)), tendency,
+            device_interval.fields[name], **common, apply_relax=False,
+            state=state, field_name=name, weights=weights)
+    held = state.scratch(state.rph_t.shape, "lbc_relax_phi")
+    if rk_stage == 0 or cfg.nested:
+        held[...] = 0
+        apply_specified_relaxation(
+            state.php, held, device_interval.fields["phi"], **common,
+            apply_relax=True, state=state, field_name="phi", weights=weights,
+            clear_specified=True, divide_msf=state.has_msf,
+            source_field=state.php0 if cfg.nested else None,
+            source_mup=state.mup0 if cfg.nested else None)
+    apply_specified_relaxation(
+        state.php, state.rph_t, device_interval.fields["phi"], **common,
+        apply_relax=False, state=state, field_name="phi", weights=weights,
+        add_held=held)
+    apply_specified_relaxation(
+        state.mup[None], state.rmu_t[None], device_interval.fields["mu"],
+        **common, apply_relax=(rk_stage == 0), state=state, field_name="mu",
+        weights=weights)
+
+
 def apply_state_lateral_boundaries(state, cfg, *, rk_stage: int) -> None:
     """Apply WRF dry specified/relaxation tendencies for one RK stage.
 
@@ -2026,6 +2356,10 @@ def apply_state_lateral_boundaries(state, cfg, *, rk_stage: int) -> None:
         state, device_interval.fields["u"].west.value.shape[-1],
         cfg.spec_zone, cfg.relax_zone, common["dt"], spec_exp,
         wrf_real=bool(cfg.nested), timescale_s=timescale_s)
+    if WRF_EXACT:
+        _apply_state_lateral_boundaries_wrf(
+            state, cfg, rk_stage, device_interval, common, weights)
+        return
     if cfg.specified:
         if specified_relaxes_w(cfg):
             # w joins the held rows exactly as it joins a nest's
@@ -2094,13 +2428,6 @@ def apply_state_lateral_boundaries(state, cfg, *, rk_stage: int) -> None:
         state.mup[None], state.rmu_t[None], device_interval.fields["mu"],
         **common, apply_relax=(rk_stage == 0), state=state, field_name="mu",
         weights=weights)
-
-
-def apply_state_qv_lateral_boundary(state, cfg, tendency, *,
-                                    apply_relax=True) -> None:
-    """Compatibility wrapper for the qv scalar forcing path."""
-    return apply_state_scalar_lateral_boundary(
-        state, cfg, "qv", tendency, apply_relax=apply_relax)
 
 
 def apply_state_scalar_lateral_boundary(state, cfg, field_name, tendency, *,
@@ -2180,7 +2507,22 @@ def _launch_finalize_field(state, name, boundary, old_mup_frame, dtbc,
         np.int32(boundary.west.value.shape[-1]), np.int32(spec_zone),
         np.int32(state.has_msf), np.int32(state.thb.ndim == 3),
         np.int32(kind), np.int32(nz), np.int32(ny), np.int32(nx),
-        np.int32(state.mup.shape[0]), np.int32(state.mup.shape[1])))
+        np.int32(state.mup.shape[0]), np.int32(state.mup.shape[1]))
+        + _wrf_final_muts_arg(state))
+
+
+def _wrf_final_muts_arg(state) -> tuple:
+    """Strict mode: WRF's grid%muts for spec_bdy_final, or a null pointer.
+
+    The dycore keeps it after every acoustic loop (woof.core.dycore
+    WRF_MUTS_SLOT); a path that never ran one (a restart's first boundary
+    pass, a unit fixture) passes null and keeps the re-coupling finalizer.
+    """
+    if not WRF_EXACT:
+        return ()
+    from woof.state_serialization_contract import WRF_MUTS_SLOT
+    muts = state.existing_scratch(WRF_MUTS_SLOT)
+    return (muts if muts is not None else np.uint64(0),)
 
 
 def apply_state_boundary_values(state, cfg, elapsed_seconds=None) -> None:
@@ -2411,13 +2753,13 @@ __all__ = ["BoundaryInterval", "FieldBoundary", "LateralBoundaries",
            "apply_specified_relaxation",
            "apply_specified_w_zero_gradient", "apply_state_boundary_values",
            "apply_state_lateral_boundaries",
-           "apply_state_qv_lateral_boundary",
            "apply_state_scalar_lateral_boundary",
            "attach_lateral_boundaries", "attach_nest_boundaries",
            "attach_streaming_lateral_boundaries",
            "StateBoundaryFrames", "build_lateral_boundaries",
            "build_state_lateral_boundaries",
            "build_lateral_interval_from_sides", "extract_lateral_side",
+           "CHEM_BOUNDARY_SLOTS", "chem_boundary_rows",
            "couple_nest_field", "domain_boundary_snapshot",
            "lateral_boundary_clock_dt", "lateral_boundary_reload_count",
            "lateral_boundary_resident_bytes", "record_built_end_frame",
