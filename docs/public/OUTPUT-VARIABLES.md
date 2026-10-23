@@ -528,6 +528,54 @@ Its sources and sinks add, each only under its own switch:
 WRF-Chem's tracer smoke has no deposition; its aerosol analogues are
 `DEP_VEL`, the `ddmass_*` accumulators and `GRASET_n`.
 
+## Coupled fire fields
+
+With `ifire = 2` on a domain (see
+[CONFIGURATION.md](CONFIGURATION.md#coupled-fire-ifire)) its history
+carries WRF's fire fields under their `Registry/registry.fire` names.
+The fire-mesh fields sit on their own axes, `Time, south_north_subgrid,
+west_east_subgrid`, created only on a file that carries them:
+
+| variable | units | meaning |
+|---|---|---|
+| `FGRNHFX` | W/m^2 | heat flux from ground fire, per fire cell |
+| `FGRNQFX` | W/m^2 | moisture flux from ground fire, per fire cell |
+| `FIRE_AREA` | 1 | fraction of each fire cell's area on fire (burning or burned) |
+| `ROS` | m/s | rate of spread normal to the front |
+| `TIGN_G` | s | ignition time on the ground (seconds of the domain's fire clock, `itimestep * dt`; in the future where nothing has burned) |
+| `LFN` | 1 | the level-set function, negative inside the fire (m) |
+| `FUEL_FRAC` | 1 | fraction of the fuel remaining |
+| `UF`, `VF` | m/s | the wind at `fire_wind_height` on the fire mesh |
+
+and on the mass grid, `Time, south_north, west_east`:
+
+| variable | units | meaning |
+|---|---|---|
+| `GRNHFX` | W/m^2 | heat flux from ground fire into the atmosphere, the cell mean times `fire_atm_feedback` |
+| `GRNQFX` | W/m^2 | moisture flux from ground fire, likewise |
+| `CANHFX`, `CANQFX` | W/m^2 | heat and moisture flux from crown fire: zero, as in WRF v4.7.1 |
+| `AVG_FUEL_FRAC` | 1 | fuel remaining averaged to the atmospheric cell |
+
+WRF-SFIRE's subgrid axes are `e_we * sr_x` by `e_sn * sr_y`, with an
+unused strip one atmospheric cell wide past the mass grid. woof's fire
+mesh is the mass grid's own, so here the axes are `nx * sr_x` by
+`ny * sr_y` (`woof/static/fuel.py`'s fire mesh). Fire-mesh node `(J, I)`
+lies in atmospheric cell `(J // sr_y, I // sr_x)`.
+
+Two more fire fields live on the state but not on the tape. They are
+the seam plume rise reads:
+
+- `state.fire_heat_flux` (W m-2, mass grid): `GRNHFX + CANHFX`, the heat
+  `fire_tendency` puts into the atmosphere, averaged over the cell;
+- `state.fire_area` (m2, mass grid): the actively burning area of each
+  cell. It sums `FIRE_AREA * dxf * dyf` over the cell's fire-mesh cells
+  whose burning fraction is positive and whose node ignited less than one
+  burn-out time (`fuel_time`, `fuel_left`'s 1/e time) before the step's
+  end, in WRF's `sum_2d_cells` order.
+
+All of them are absent from a run with the fire off, so its inventory
+and disk price are unchanged.
+
 ## Wind maxima and gusts
 
 With `nwp_diagnostics = 1` (`&time_control`, or the RunConfig key of the

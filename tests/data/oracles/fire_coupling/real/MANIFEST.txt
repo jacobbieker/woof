@@ -1,0 +1,104 @@
+nx i4 0
+ny i4 0
+nz i4 0
+ir i4 0
+jr i4 0
+dx f4 0
+dt f4 0
+nsteps i4 0
+dumps i4 1 3
+cfg_ints i4 1 8
+cfg_reals f4 1 11
+cfg_ignitions f4 2 12 3
+in_ht f4 2 12 10
+in_z0 f4 2 12 10
+in_ph f4 3 12 9 10
+in_phb f4 3 12 9 10
+in_rho f4 3 12 8 10
+in_z_at_w f4 3 12 9 10
+in_dz8w f4 3 12 8 10
+in_mut f4 2 12 10
+in_c1h f4 1 8
+in_c2h f4 1 8
+in_xlat f4 2 12 10
+in_xlong f4 2 12 10
+in_nfuel_cat f4 2 60 40
+in_zsf f4 2 60 40
+in_dzdxf f4 2 60 40
+in_dzdyf f4 2 60 40
+init_nfuel_cat f4 2 60 40
+init_fuel_time f4 2 60 40
+init_fgip f4 2 60 40
+init_r_0 f4 2 60 40
+init_bbb f4 2 60 40
+init_phiwc f4 2 60 40
+init_betafl f4 2 60 40
+init_fmc_g f4 2 60 40
+init_fxlong f4 2 60 40
+init_fxlat f4 2 60 40
+init_lfn f4 2 60 40
+init_tign f4 2 60 40
+init_fuel_frac f4 2 60 40
+s1_in_u f4 3 13 8 10
+s1_in_v f4 3 12 8 11
+s1_uf f4 2 60 40
+s1_vf f4 2 60 40
+s1_uah f4 2 13 11
+s1_vah f4 2 13 11
+s1_lfn f4 2 60 40
+s1_tign f4 2 60 40
+s1_ros f4 2 60 40
+s1_fuel_frac f4 2 60 40
+s1_fire_area f4 2 60 40
+s1_burnt_area_dt f4 2 60 40
+s1_fgrnhfx f4 2 60 40
+s1_fgrnqfx f4 2 60 40
+s1_grnhfx f4 2 12 10
+s1_grnqfx f4 2 12 10
+s1_canhfx f4 2 12 10
+s1_canqfx f4 2 12 10
+s1_avg_fuel_frac f4 2 12 10
+s1_rthfrten f4 3 12 8 10
+s1_rqvfrten f4 3 12 8 10
+s10_in_u f4 3 13 8 10
+s10_in_v f4 3 12 8 11
+s10_uf f4 2 60 40
+s10_vf f4 2 60 40
+s10_uah f4 2 13 11
+s10_vah f4 2 13 11
+s10_lfn f4 2 60 40
+s10_tign f4 2 60 40
+s10_ros f4 2 60 40
+s10_fuel_frac f4 2 60 40
+s10_fire_area f4 2 60 40
+s10_burnt_area_dt f4 2 60 40
+s10_fgrnhfx f4 2 60 40
+s10_fgrnqfx f4 2 60 40
+s10_grnhfx f4 2 12 10
+s10_grnqfx f4 2 12 10
+s10_canhfx f4 2 12 10
+s10_canqfx f4 2 12 10
+s10_avg_fuel_frac f4 2 12 10
+s10_rthfrten f4 3 12 8 10
+s10_rqvfrten f4 3 12 8 10
+s30_in_u f4 3 13 8 10
+s30_in_v f4 3 12 8 11
+s30_uf f4 2 60 40
+s30_vf f4 2 60 40
+s30_uah f4 2 13 11
+s30_vah f4 2 13 11
+s30_lfn f4 2 60 40
+s30_tign f4 2 60 40
+s30_ros f4 2 60 40
+s30_fuel_frac f4 2 60 40
+s30_fire_area f4 2 60 40
+s30_burnt_area_dt f4 2 60 40
+s30_fgrnhfx f4 2 60 40
+s30_fgrnqfx f4 2 60 40
+s30_grnhfx f4 2 12 10
+s30_grnqfx f4 2 12 10
+s30_canhfx f4 2 12 10
+s30_canqfx f4 2 12 10
+s30_avg_fuel_frac f4 2 12 10
+s30_rthfrten f4 3 12 8 10
+s30_rqvfrten f4 3 12 8 10

@@ -883,7 +883,7 @@ WPS_SECTIONS = ("share", "geogrid", "ungrib", "metgrid",
                 *WPS_AUXILIARY_SECTIONS)
 INPUT_SECTIONS = ("time_control", "domains", "physics", "fdda", "dynamics",
                   "bdy_control", "grib2", "namelist_quilt", "noah_mp",
-                  "stoch", "chem")
+                  "stoch", "fire", "chem")
 #: Groups whose every key is recorded and dropped: ungrib/metgrid staging
 #: is replaced by woof's own ingest; FDDA (once no nudging selector is on),
 #: GRIB2 and quilt-server keys have no woof counterpart.
@@ -1526,6 +1526,366 @@ def _uniform(section: str, key: str, values: list):
     return first
 
 
+# ---------------------------------------------------------------------------
+# &fire: WRF v4.7.1's coupled fire model (woof/fire/coupling.py)
+# ---------------------------------------------------------------------------
+
+#: &fire keys that translate 1:1 into a RunConfig field of the same name,
+#: with the Python type the field holds.  Every one is max_domains in
+#: Registry/registry.fire, so each is a per-domain column.
+FIRE_TRANSLATED_KEYS: dict[str, type] = {
+    "ifire": int, "fire_fuel_read": int, "fire_fuel_cat": int,
+    "fire_fmc_read": int, "fire_wind_height": float,
+    "fire_ext_grnd": float, "fire_ext_crwn": float, "fire_crwn_hgt": float,
+    "fire_atm_feedback": float, "fire_advection": int,
+    "fire_lsm_reinit": bool, "fire_lsm_reinit_iter": int,
+    "fire_lsm_band_ngp": int, "fire_viscosity": float,
+    "fire_viscosity_bg": float, "fire_viscosity_band": float,
+    "fire_viscosity_ngp": int, "fire_lfn_ext_up": float,
+    "fire_slope_factor": float, "fire_tracer_smoke": float,
+}
+
+#: The per-line ignition suffixes (fire_ignition_<field><n>, n = 1..5) and
+#: WRF's line count: the record woof.fire.coupling reads, imported so the
+#: two cannot drift apart.
+from woof.fire.coupling import (  # noqa: E402
+    IGNITION_FIELDS as FIRE_IGNITION_FIELDS,
+    MAX_IGNITIONS as FIRE_MAX_IGNITIONS,
+)
+
+#: &fire keys that are read but reach nothing woof runs, with why.
+FIRE_INERT_KEYS: dict[str, str] = {
+    "fire_print_msg": "WRF's fire progress messages; woof writes none",
+    "fire_print_file": "WRF's fire debug text files; woof writes none",
+    "fire_boundary_guard": (
+        "WRF stops the run when the fire comes within this many fire-mesh "
+        "nodes of the edge; woof does not stop the run, and the fire "
+        "leaves the mesh (woof/fire/coupling.py)"),
+    "fire_topo_from_atm": (
+        "WRF v4.7.1's driver reads it nowhere (its use in "
+        "module_fr_fire_driver.F is commented out)"),
+    "fire_lat_init": "read but never used by WRF v4.7.1's fire driver",
+    "fire_lon_init": "read but never used by WRF v4.7.1's fire driver",
+    "fire_ign_time": "read but never used by WRF v4.7.1's fire driver",
+    "fire_shape": "read but never used by WRF v4.7.1's fire driver",
+    "fire_sprd_mdl": "read but never used by WRF v4.7.1's fire driver",
+    "nfmc": "a fuel-moisture-model setting; the moisture model is off",
+    "fmoist_freq": "a fuel-moisture-model setting; the moisture model is off",
+    "fmoist_dt": "a fuel-moisture-model setting; the moisture model is off",
+    "fmep_decay_tlag": (
+        "a fuel-moisture-model setting; the moisture model is off"),
+    "fire_lsm_zcoupling_ref": (
+        "read only under fire_lsm_zcoupling = .true., which is refused"),
+}
+
+#: Truncated-Gaussian-only keys, inert under fire_sfc_flx = 0 /
+#: fire_smk_scheme = 0 (the only schemes that run).
+FIRE_TG_KEYS: dict[str, str] = {
+    "fire_heat_peak": "fire_sfc_flx", "fire_tg_ub": "fire_sfc_flx",
+    "fire_smk_peak": "fire_smk_scheme", "fire_smk_ext": "fire_smk_scheme",
+}
+
+#: &fire keys pinned to WRF's default, with why any other value is refused.
+FIRE_PINNED_KEYS: dict[str, str] = {
+    "fire_fmc_read": (
+        "only 1 (namelist.fire's fuelmc_g) runs: 0 reads FMC_G from "
+        "wrfinput and 2 from a file, neither of which woof's prepared "
+        "state carries"),
+    "fire_sfc_flx": (
+        "only 0 (exponential decay) runs: the truncated-Gaussian scheme 1 "
+        "reads z_w before setting it in WRF v4.7.1 (module_fr_fire_atm.F "
+        "fire_tendency and tg_dist), so it has no defined answer"),
+    "fire_smk_scheme": (
+        "only 0 (smoke into the lowest level) runs: scheme 1's tg_dist "
+        "reads z_w before setting it in WRF v4.7.1 (module_fr_fire_atm.F), "
+        "so it has no defined answer"),
+    "fmoist_run": "WRF-SFIRE's fuel moisture model is not ported",
+    "fmoist_interp": "WRF-SFIRE's fuel moisture model is not ported",
+    "fmoist_only": "WRF-SFIRE's fuel moisture model is not ported",
+    "fire_is_real_perim": (
+        "an observed initial perimeter (LFN_HIST input) is not ported"),
+    "fire_lsm_zcoupling": (
+        "the log-profile wind extrapolation from fire_lsm_zcoupling_ref is "
+        "not ported"),
+    "fire_upwinding": (
+        "woof's level set ports WRF's default 9 (hybrid WENO5/ENO1) only"),
+    "fire_upwinding_reinit": (
+        "woof's level set ports WRF's default reinitialization scheme 4 "
+        "only"),
+    "fire_upwind_split": "woof's level set ports WRF's default 0 only",
+    "fire_fuel_left_method": "woof ports WRF's default fuel_left method 1",
+    "fire_fuel_left_irl": "woof ports WRF's default 2 x 2 fuel_left quadrature",
+    "fire_fuel_left_jrl": "woof ports WRF's default 2 x 2 fuel_left quadrature",
+    "fire_grows_only": "woof's level set ports WRF's default 1 only",
+    "fire_test_steps": "WRF's uncoupled test run mode is not ported",
+    "fs_firebrand_gen_lim": "WRF's firebrand spotting is not ported",
+}
+
+#: em_fire's ideal-initialization keys: WRF reads them only in
+#: module_initialize_fire.F, which a real-data import never runs.
+FIRE_IDEAL_KEY = re.compile(
+    r"^(fire_mountain_\w+|\w+_perturbation|stretch_grd|stretch_hyp|"
+    r"z_grd_scale|sfc_\w+|fire_read_\w+)$")
+
+
+def _wrf_registry_default(section: str, key: str):
+    """WRF v4.7.1's Registry default for ``&section key``, as Python."""
+    from woof.wrf_namelist_registry import wrf_namelist_keys
+
+    row = wrf_namelist_keys()[(section, key)]
+    text, kind = str(row["default"]).strip(), row["type"]
+    if kind == "logical":
+        return text.lower() in (".true.", "t", "true")
+    if kind == "integer":
+        return int(text)
+    if kind == "real":
+        return float(text.rstrip(".") + ".0" if text.endswith(".")
+                     else text)
+    return text
+
+
+def _translate_fire(fire: "_Section", dm: "_Section", dyn: "_Section", *,
+                    max_dom: int, drop) -> tuple[dict[str, list], bool]:
+    """WRF v4.7.1's &fire (with &domains sr_x/sr_y and &dynamics
+    tracer_opt) as RunConfig columns.
+
+    Returns ``(columns, smoke_tracer)``: ``columns`` maps each translated
+    RunConfig field to its per-domain values (empty when no domain runs
+    the fire, so a namelist with ifire = 0 imports exactly as one with no
+    &fire); ``smoke_tracer`` says tracer_opt = 3 asked for WRF's tracer.
+    Fortran namelist semantics: an omitted tail keeps WRF's Registry
+    default (``registry_col``), so ``ifire = 2,`` on a two-domain run
+    burns on the root only, as wrf.exe does.
+    """
+    def column(section: "_Section", key: str) -> list | None:
+        if key not in section.entries:
+            return None
+        return section.registry_col(
+            key, max_dom, _wrf_registry_default(section.name, key))
+
+    ifire = column(fire, "ifire")
+    if ifire is not None:
+        for value in ifire:
+            if isinstance(value, bool) or value not in (0, 2):
+                raise _err("fire", "ifire", ifire,
+                           "WRF v4.7.1 runs a fire for ifire = 2 only "
+                           "(module_first_rk_step_part1.F, start_em.F); "
+                           "use 2 or 0.")
+    on = [bool(ifire and ifire[n] == 2) for n in range(max_dom)]
+    any_on = any(on)
+    off_reason = ("inert: ifire is 0 on every domain, so WRF's fire model "
+                  "never reads it")
+
+    # tracer_opt (&dynamics): WRF's passive tracer package.  3 is the fire
+    # smoke tracer and 1 WRF-Chem's TRACER_SMOKE (filled by &chem's
+    # biomass burning), both woof's smoke_tracer; 0 is none.
+    # Any other package stays unconsumed, so &dynamics refuses it as the
+    # unmapped key it has always been.
+    peeked = dyn.entries.get("tracer_opt") or ()
+    tracer = (column(dyn, "tracer_opt")
+              if peeked and all(not isinstance(v, bool) and v in (0, 1, 3)
+                                for v in peeked) else None)
+    smoke_tracer = False
+    if tracer is not None:
+        if any(v != 0 for v in tracer):
+            if any(v != tracer[0] for v in tracer):
+                raise _err("dynamics", "tracer_opt", tracer,
+                           "woof's smoke tracer is tree-wide (a nest edge "
+                           "forces and feeds back the tracer); set "
+                           "tracer_opt = 3 (or 1) on every domain or on "
+                           "none.")
+            smoke_tracer = True
+        else:
+            drop("dynamics", "tracer_opt", tracer,
+                 "inert: tracer_opt = 0 carries no tracer")
+
+    refinement = {key: column(dm, key) for key in ("sr_x", "sr_y")}
+    for key, values in refinement.items():
+        if values is not None and not any_on:
+            drop("domains", key, values,
+                 "inert: sr_x/sr_y size the fire mesh, and ifire is 0 on "
+                 "every domain")
+
+    columns: dict[str, list] = {}
+    if any_on:
+        for key, values in refinement.items():
+            if values is None:
+                values = [0] * max_dom
+            for value in values:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise _err("domains", key, values,
+                               "must be a whole number of fire-mesh cells "
+                               "per atmospheric cell.")
+            columns[key] = list(values)
+
+    def on_values(values):
+        return [v for n, v in enumerate(values) if on[n]]
+
+    for key in list(fire.entries):
+        if key == "ifire" or key == "fire_num_ignitions" \
+                or key.startswith("fire_ignition_"):
+            continue
+        known = (key in FIRE_TRANSLATED_KEYS or key in FIRE_PINNED_KEYS
+                 or key in FIRE_INERT_KEYS or key in FIRE_TG_KEYS
+                 or key in ("fire_const_time", "fire_const_grnhfx",
+                            "fire_const_grnqfx", "fuel_crosswalk",
+                            "trackember")
+                 or key.startswith("fs_") or bool(FIRE_IDEAL_KEY.match(key)))
+        from woof.wrf_namelist_registry import wrf_namelist_keys
+        if not known or ("fire", key) not in wrf_namelist_keys():
+            continue          # left for fire.finish() to refuse by name
+        values = column(fire, key)
+        default = _wrf_registry_default("fire", key)
+        if key in FIRE_TRANSLATED_KEYS:
+            if not any_on:
+                drop("fire", key, values, off_reason)
+                continue
+            kind = FIRE_TRANSLATED_KEYS[key]
+            converted = []
+            for value in values:
+                if kind is bool:
+                    if not isinstance(value, bool):
+                        raise _err("fire", key, values,
+                                   "must be a Fortran logical.")
+                elif kind is int:
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        raise _err("fire", key, values,
+                                   "must be an integer.")
+                elif isinstance(value, bool) or not isinstance(
+                        value, (int, float)):
+                    raise _err("fire", key, values, "must be a number.")
+                converted.append(kind(value))
+            if key in FIRE_PINNED_KEYS and any(
+                    v != default for v in on_values(converted)):
+                raise _err("fire", key, values, FIRE_PINNED_KEYS[key] + ".")
+            columns[key] = converted
+        elif key in FIRE_PINNED_KEYS or key == "fire_const_time":
+            if key == "fire_const_time":
+                bad = [v for v in on_values(values) if v > 0]
+                why = ("WRF's experimental fire freeze is not ported; "
+                       "only a value <= 0 (never freeze) runs")
+            elif key == "fs_firebrand_gen_lim":
+                bad = [v for v in values if v > 0]
+                why = FIRE_PINNED_KEYS[key]
+            else:
+                bad = [v for v in on_values(values) if v != default]
+                why = FIRE_PINNED_KEYS[key]
+            if bad:
+                raise _err("fire", key, values, why + ".")
+            drop("fire", key, values,
+                 off_reason if not any_on and key != "fs_firebrand_gen_lim"
+                 else f"WRF's default; {why}")
+        elif key in ("fire_const_grnhfx", "fire_const_grnqfx"):
+            drop("fire", key, values,
+                 "inert: read only while fire_const_time freezes the fire, "
+                 "and fire_const_time <= 0 never does")
+        elif key in FIRE_INERT_KEYS:
+            drop("fire", key, values, FIRE_INERT_KEYS[key])
+        elif key in FIRE_TG_KEYS:
+            drop("fire", key, values,
+                 f"inert: read only by the truncated-Gaussian "
+                 f"{FIRE_TG_KEYS[key]} = 1, and only 0 runs")
+        elif key.startswith("fs_") or key in ("fuel_crosswalk",
+                                              "trackember"):
+            if key in ("fuel_crosswalk", "trackember") and any(values):
+                raise _err("fire", key, values,
+                           "WRF's firebrand spotting is not ported.")
+            drop("fire", key, values,
+                 "inert: a firebrand-spotting setting, and spotting is off "
+                 "(fs_firebrand_gen_lim = 0)")
+        elif FIRE_IDEAL_KEY.match(key):
+            if any(v != default for v in values):
+                raise _err("fire", key, values,
+                           "an em_fire ideal-initialization key "
+                           "(module_initialize_fire.F); the importer builds "
+                           "real-data runs, which never read it.")
+            drop("fire", key, values,
+                 "inert: an em_fire ideal-initialization key at WRF's "
+                 "default; a real-data run never reads it")
+
+    # The ignition lines: fire_num_ignitions plus fire_ignition_<f><n>.
+    count = column(fire, "fire_num_ignitions")
+    lines = {}
+    for n in range(1, FIRE_MAX_IGNITIONS + 1):
+        for field in FIRE_IGNITION_FIELDS:
+            key = f"fire_ignition_{field}{n}"
+            if key in fire.entries:
+                lines[(field, n)] = column(fire, key)
+    stray = sorted(key for key in fire.entries
+                   if key.startswith("fire_ignition_"))
+    if stray:
+        raise NamelistRefusal(
+            f"unmapped key(s) {stray} in &fire of {fire.source}: WRF v4.7.1 "
+            "reads fire_ignition_<field><1-5> with field one of "
+            f"{list(FIRE_IGNITION_FIELDS)}.",
+            [("fire", key) for key in stray])
+    if not any_on:
+        if count is not None:
+            drop("fire", "fire_num_ignitions", count, off_reason)
+        for (field, n), values in lines.items():
+            drop("fire", f"fire_ignition_{field}{n}", values, off_reason)
+        if ifire is not None:
+            drop("fire", "ifire", ifire, "ifire = 0: no fire model runs")
+        return {}, smoke_tracer
+    columns["ifire"] = list(ifire)
+    count = count or [0] * max_dom
+    per_domain = []
+    for n in range(max_dom):
+        k = count[n]
+        if isinstance(k, bool) or not isinstance(k, int) or k < 0:
+            raise _err("fire", "fire_num_ignitions", count,
+                       "must be a non-negative integer.")
+        records = []
+        for line in range(1, min(FIRE_MAX_IGNITIONS, k) + 1):
+            record = {}
+            for field in FIRE_IGNITION_FIELDS:
+                values = lines.get((field, line))
+                value = (values[n] if values is not None else
+                         _wrf_registry_default(
+                             "fire", f"fire_ignition_{field}{line}"))
+                if isinstance(value, bool) or not isinstance(
+                        value, (int, float)):
+                    raise _err("fire", f"fire_ignition_{field}{line}",
+                               values, "must be a number.")
+                record[field] = float(value)
+            records.append(record)
+        per_domain.append(records)
+    unread = sorted({f"fire_ignition_{field}{line}"
+                     for (field, line) in lines
+                     if all(line > min(FIRE_MAX_IGNITIONS, k)
+                            for k in count)})
+    for key in unread:
+        field, line = key[len("fire_ignition_"):-1], int(key[-1])
+        drop("fire", key, lines[(field, line)],
+             "inert: beyond fire_num_ignitions on every domain")
+    columns["fire_ignitions"] = per_domain
+    if smoke_tracer:
+        # WRF's tracer_opt = 3 smoke is fire_tracer_smoke of the burnt
+        # fuel; woof's default is the fuel-class PM2.5 factor instead.
+        columns["fire_smoke_factor"] = [
+            "fire_tracer_smoke" if on[n] else "pm25"
+            for n in range(max_dom)]
+    return columns, smoke_tracer
+
+
+def _fire_toml_value(key: str, value) -> str:
+    """A TOML literal for one translated fire value."""
+    if key == "fire_ignitions":
+        tables = ["{ " + ", ".join(f"{field} = {_fmt(float(row[field]))}"
+                                   for field in FIRE_IGNITION_FIELDS) + " }"
+                  for row in value]
+        return "[" + ", ".join(tables) + "]"
+    return _fmt(value)
+
+
+def _fire_default(key: str):
+    """RunConfig's default for a translated fire field."""
+    from woof.config import FIRE_RUN_DEFAULTS
+
+    default = FIRE_RUN_DEFAULTS[key]
+    return [] if key == "fire_ignitions" else default
+
+
 #: WRF-Chem's Zhang (2001) aerosol dry deposition options woof ports
 #: (module_aer_drydep.F:319-354).
 _CHEM_AER_DRYDEP_OPTS = (301, 302, 311, 312)
@@ -1537,17 +1897,18 @@ _CHEM_BIOMASS_BURN_OPTS = (1, 2, 3, 4, 5)
 #: WRF Registry defaults (Registry/registry.chem) of the &chem keys the
 #: importer reads: a max_domains column keeps them in its omitted tail.
 _CHEM_REGISTRY_DEFAULTS = {
-    "chem_opt": 0, "tracer_opt": 0, "biomass_burn_opt": 0,
+    "chem_opt": 0, "biomass_burn_opt": 0,
     "plumerisefire_frq": 180, "scale_fire_emiss": False,
     "aer_drydep_opt": 1, "vertmix_onoff": 1, "chemdt": 2.0,
 }
 
 
 def _import_chem_smoke(chem: "_Section", max_dom: int, drop,
-                       notices: list) -> dict:
+                       notices: list, *, smoke: bool) -> dict:
     """The &chem keys woof's smoke tracer maps, as [shared] settings.
 
-    ``tracer_opt = 1`` (TRACER_SMOKE) is the passive smoke tracer;
+    ``smoke`` is whether &dynamics ``tracer_opt`` asked for the smoke
+    tracer (WRF's tracer_opt is a &dynamics key, read with the fire);
     ``biomass_burn_opt`` 1-5 run WRF-Chem's plumerise, so they select
     ``smoke_injection = "plumerise"`` at ``plumerisefire_frq`` minutes,
     with ``scale_fire_emiss = .true.`` (woof always conserves the
@@ -1572,16 +1933,7 @@ def _import_chem_smoke(chem: "_Section", max_dom: int, drop,
         raise _err("chem", "chem_opt", values,
                    "woof carries no WRF-Chem chemistry or aerosol "
                    "mechanism; only the passive smoke tracer (chem_opt = 0, "
-                   "tracer_opt = 1) is imported.")
-    tracer_opt, values = uniform("tracer_opt")
-    if tracer_opt not in (None, 0, 1):
-        raise _err("chem", "tracer_opt", values,
-                   "woof's smoke tracer is WRF-Chem's TRACER_SMOKE "
-                   "(tracer_opt = 1); the test tracer packages are not "
-                   "carried.")
-    smoke = tracer_opt == 1
-    if smoke:
-        settings["smoke_tracer"] = True
+                   "&dynamics tracer_opt = 1 or 3) is imported.")
     burn, values = uniform("biomass_burn_opt")
     if burn not in (None, 0) and burn not in _CHEM_BIOMASS_BURN_OPTS:
         raise _err("chem", "biomass_burn_opt", values,
@@ -1590,7 +1942,7 @@ def _import_chem_smoke(chem: "_Section", max_dom: int, drop,
     if burning and not smoke:
         raise _err("chem", "biomass_burn_opt", values,
                    "woof's plume-rise injection lifts the smoke tracer; set "
-                   "tracer_opt = 1 with it.")
+                   "&dynamics tracer_opt = 1 (or 3) with it.")
     if burning:
         settings["smoke_injection"] = "plumerise"
     frq, values = uniform("plumerisefire_frq")
@@ -1638,7 +1990,7 @@ def _import_chem_smoke(chem: "_Section", max_dom: int, drop,
         if not smoke:
             raise _err("chem", "aer_drydep_opt", values,
                        "the deposition removes the smoke tracer; set "
-                       "tracer_opt = 1 with it.")
+                       "&dynamics tracer_opt = 1 (or 3) with it.")
         settings["smoke_drydep"] = True
         notices.append(
             f"&chem aer_drydep_opt = {drydep} applies Zhang (2001) dry "
@@ -3430,6 +3782,13 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                     "default is the same 30); a different count describes "
                     "a dataset WOOF has never decoded, and reinterpreting "
                     "it silently would interpolate the wrong column")
+
+    # ---- &fire (with &domains sr_x/sr_y and &dynamics tracer_opt) ---------
+    # Here, before dm.finish(), because sr_x/sr_y are &domains keys.
+    fire_section = _Section("fire", inp.get("fire", {}), str(input_path))
+    fire_columns, fire_smoke_tracer = _translate_fire(
+        fire_section, dm, dyn, max_dom=max_dom, drop=drop)
+    fire_section.finish()
 
     dm.finish()
 
@@ -5579,7 +5938,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     # ---- &chem: the smoke tracer and its sources and sinks ---------------
     # Only WRF-Chem's passive fire-smoke surface is mapped; every other
     # &chem key is refused by name at chem.finish().
-    smoke_settings = _import_chem_smoke(chem, max_dom, drop, notices)
+    smoke_settings = _import_chem_smoke(chem, max_dom, drop, notices,
+                                        smoke=fire_smoke_tracer)
     chem.finish()
 
     if stochastic_controls is not None:
@@ -5798,6 +6158,16 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         lines.append(f"{_topo_key} = {_topo_col[0]}")
     for _drag_key, _drag_col in terrain_drag_columns.items():
         lines.append(f"{_drag_key} = {_drag_col[0]}")
+    # WRF tracer_opt = 3: the smoke tracer (tree-wide), and the coupled
+    # fire's keys at the root's value where it is not woof's default
+    # (per-domain differences follow in each [[domain]]).  Neither is
+    # written for a namelist that runs no fire and no tracer.
+    if fire_smoke_tracer:
+        lines.append("smoke_tracer = true")
+    for _fire_key, _fire_col in fire_columns.items():
+        if _fire_col[0] != _fire_default(_fire_key):
+            lines.append(
+                f"{_fire_key} = {_fire_toml_value(_fire_key, _fire_col[0])}")
     for _smoke_key, _smoke_value in smoke_settings.items():
         lines.append(f"{_smoke_key} = {_fmt(_smoke_value)}")
     if shadlen is not None:
@@ -6014,6 +6384,10 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         for _drag_key, _drag_col in terrain_drag_columns.items():
             if _drag_col[n] != _drag_col[0]:
                 lines.append(f"{_drag_key} = {_drag_col[n]}")
+        for _fire_key, _fire_col in fire_columns.items():
+            if _fire_col[n] != _fire_col[0]:
+                lines.append(f"{_fire_key} = "
+                             f"{_fire_toml_value(_fire_key, _fire_col[n])}")
         # The adaptive clock's max_domains targets and clamps, same rule.
         for _clock_key, _, _ in ADAPTIVE_CLOCK_COLUMNS:
             _clock_col = adaptive_columns[_clock_key]

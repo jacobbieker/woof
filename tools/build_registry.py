@@ -249,6 +249,14 @@ IMPLEMENTED: dict[str, dict] = {
     # every PBL scheme.
     "topo_wind": {"type": "integer", "enum": [0, 1, 2], "default": 0},
     "gwd_opt": {"type": "integer", "enum": [0, 1, 3], "default": 0},
+    # WRF v4.7.1's coupled fire (ifire = 2, WRF-SFIRE's level set:
+    # woof.fire.coupling, phys/module_fr_fire_driver.F, _driver_wrf.F and
+    # _atm.F, held to WRF by tools/fire_coupling_wrf471_oracle and
+    # tests/test_fire_coupling_wrf471_parity.py), off by default.  Its
+    # other &fire keys ride the experiment config; see
+    # _COUPLINGS_NOT_YET_REGISTRY_ROWS for why ifire is not a plan knob.
+    "ifire": {"type": "integer", "enum": [0, 2], "default": 0,
+              "consuming_read": "woof/fire/coupling.py"},
     "o3input": {
         "type": "integer", "enum": [0, 2], "default": 2,
         "warnings": [
@@ -6858,6 +6866,13 @@ _COUPLINGS_NOT_YET_REGISTRY_ROWS = {
         "Selecting the radiation option that resolves that pair is how a "
         "domain asks for it; the token follows the option rather than "
         "varying against it."),
+    "ifire": (
+        "ifire = 2 couples to settings no option row carries: the fire-mesh "
+        "refinement sr_x/sr_y (woof.config refuses ifire without them), a "
+        "moist state for its vapour flux, a fixed clock (no adaptive time "
+        "step) and the domain's fuel statics, which ifire requests at "
+        "preparation. Set ifire with sr_x, sr_y and the &fire keys in the "
+        "experiment config ([shared] or [[domain]])."),
 }
 
 

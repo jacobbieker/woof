@@ -84,8 +84,12 @@ in all. `HARNESS.sha256` has the hashes of the harness that wrote them.
   the run when the fire comes within eight cells of the edge. That is a run
   control, not a field. The port has no stop, so the fire leaves the mesh.
 - **`ischap = 0` everywhere.** `fire_ros`'s chaparral arm leaves `ros_base`
-  undefined, so there is no defined answer to reproduce. The port has no
-  chaparral arm.
+  undefined, so there is no defined answer to reproduce. Since
+  feat/fire-coupling the port runs the arm's wind-only rate,
+  `max(1.2974 spdms**1.41, .03333)`, with `ros_base` fixed at 0 (the
+  held-out word, as in `woof.fire.wrf_sfire`); no fixture here reaches it,
+  and `tests/test_fire_coupling.py` pins the arm itself and its host and
+  device words.
 - **Sub-stepping is harness-side.** WRF only warns when `dt` exceeds the CFL
   bound. The `substep` case's outer-step mean (sum in step order, then
   `/ nsub`) is the harness's, and is what `woof.fire.levelset.advance`

@@ -675,6 +675,21 @@ def resolve_child_run_config(child_config_path, *, child_levels=None):
             "SMOKE.  The child would start with no smoke and take zero "
             "inflow, which reads like a clean domain rather than a "
             "missing input."))
+    if int(getattr(cfg, "ifire", 0) or 0):
+        from woof.explain import layered
+
+        # The fire attaches where a route hands it the domain's fuel
+        # statics (woof.fire.coupling.attach); the offline child's physics
+        # initialization does not, so it would burn a map refined from the
+        # terrain alone or refuse at the first step.
+        raise OfflineChildContractError(layered(
+            f"ifire = {cfg.ifire} in child config {child_config_path} "
+            "cannot run as an offline (downscaled) child; run the domain as "
+            "an online nest ([[domain]] with parent_id) or as a root, where "
+            "the fire attaches on the domain's own fuel statics.",
+            "The offline route's physics initialization hands the fire no "
+            "fuel statics, so the fire would run without the fuel map its "
+            "configuration requests."))
     if child_levels is None:
         return cfg
     # Imported here and not at module scope: ``woof.downscale`` imports

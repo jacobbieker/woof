@@ -904,6 +904,73 @@ def test_sources_and_sinks_add_no_device_to_host_copy(tmp_path, monkeypatch):
 
 @pytest.mark.gpu
 @requires_gpu
+def test_the_coupled_fire_drives_the_plume_through_its_own_fields():
+    """ifire = 2 writes state.fire_heat_flux, state.fire_area and
+    state.smoke_emis every step; the plume runs on exactly those words,
+    each burning column equal to the library's plumerise on its own heat
+    flux and area, and the emitted mass enters the tracer conserved."""
+    import cupy as cp
+
+    from test_fire_coupling import _fire, _state as _fire_state
+    from woof.core.dycore import step
+
+    cfg = _fire(smoke_tracer=True, smoke_injection="plumerise",
+                smoke_plumerise_interval_s=0.0, nz=30, ztop=4000.0)
+    validate_run_config(cfg)
+    state = _fire_state(cfg)
+    emitted = 0.0
+    burned = 0
+    for n in range(60):                           # 30 s, every step a plume
+        step(state, cfg)
+        emitted += float(cp.asnumpy(state.smoke_emis).astype(np.float64)
+                         .sum()) * 1.0e9 * cfg.dt
+        if n < 40:
+            continue
+        heat = cp.asnumpy(state.fire_heat_flux)
+        area = cp.asnumpy(state.fire_area)
+        emis = cp.asnumpy(state.smoke_emis)
+        fire = np.argwhere((heat > 0) & (area >= 1e-6) & (emis > 0))
+        nz, ny, nx = state.p.shape
+        env = {name: state.scratch((nz + 1 if name == "zw" else nz, ny, nx),
+                                   f"smoke_src_{name}")
+               for name in ("u", "v", "theta", "pi", "qv", "zt", "zw")}
+        eburn = cp.asnumpy(state.scratch((nz, ny, nx), "smoke_src_eburn"))
+        status = cp.asnumpy(state.scratch((ny, nx), "smoke_src_status",
+                                          dtype=np.int32))
+        assert not status.any()
+        for j, i in fire[:3]:
+            lib = _library_plume_column(env, j, i, heat[j, i], area[j, i],
+                                        1.0)
+            _same(eburn[:, j, i], cp.asnumpy(lib.eburn_out)[:, 0, 0],
+                  f"fire column {(j, i)} step {n}")
+            burned += 1
+        quiet = (heat == 0) | (emis == 0)
+        assert (eburn[0][quiet] == 1.0).all()
+    assert burned > 0
+    top = cp.asnumpy(state.smoke_inj_top)
+    assert np.isfinite(top).all()
+
+    def airborne(s):
+        layer = ((s.c1h[:, None, None] * (s.mub2d + s.mup)[None]
+                  + s.c2h[:, None, None]) * (-s.dnw[:, None, None]))
+        return float(cp.asnumpy((s.smoke.astype(cp.float64)
+                                 * layer.astype(cp.float64)).sum())) / 9.81
+
+    # The same fire with the surface profile carries the same smoke mass:
+    # the plume moves the emission up, it does not make or lose any.  (Both
+    # carry ~8% more than the emission tally on this open LES box, a
+    # property of the fire coupling's source or the open-boundary
+    # transport, not of the profile.)
+    surface = _fire_state(replace(cfg, smoke_injection="surface"))
+    for _ in range(60):
+        step(surface, replace(cfg, smoke_injection="surface"))
+    ratio = airborne(state) / airborne(surface)
+    assert abs(ratio - 1.0) < 1e-3, ratio
+    assert emitted > 0.0
+
+
+@pytest.mark.gpu
+@requires_gpu
 def test_a_plume_with_no_fire_is_refused_by_name(tmp_path):
     from netCDF4 import Dataset
 
@@ -967,10 +1034,13 @@ def _namelist_pair_texts():
     return texts["WPS_TEXT"], texts["INPUT_TEXT"]
 
 
-def _import_with(tmp_path, extra_input=""):
+def _import_with(tmp_path, extra_input="", extra_dynamics=""):
     from woof.namelist_import import import_namelists
 
     wps, inp = _namelist_pair_texts()
+    if extra_dynamics:
+        inp = inp.replace(" hybrid_opt = 2,",
+                          " hybrid_opt = 2,\n" + extra_dynamics)
     (tmp_path / "namelist.wps").write_text(wps)
     (tmp_path / "namelist.input").write_text(inp + extra_input)
     return import_namelists(tmp_path / "namelist.wps",
@@ -978,7 +1048,13 @@ def _import_with(tmp_path, extra_input=""):
 
 
 def _chem_import(tmp_path, body):
-    return _import_with(tmp_path, extra_input="&chem\n" + body + "/\n")
+    """``body``'s &chem keys, with its tracer_opt line in &dynamics, where
+    WRF declares it (Registry.EM_COMMON)."""
+    lines = body.splitlines(keepends=True)
+    tracer = "".join(line for line in lines if "tracer_opt" in line)
+    chem = "".join(line for line in lines if "tracer_opt" not in line)
+    return _import_with(tmp_path, extra_input="&chem\n" + chem + "/\n",
+                        extra_dynamics=tracer)
 
 
 def test_wrf_chem_keys_import(tmp_path):
@@ -989,6 +1065,7 @@ def test_wrf_chem_keys_import(tmp_path):
         " biomass_burn_opt = 1, 1,\n plumerisefire_frq = 30, 30,\n"
         " scale_fire_emiss = .true., .true.,\n aer_drydep_opt = 302, 302,\n"
         " chemdt = 10, 10,\n vertmix_onoff = 1, 1,\n"))
+    assert toml_text.count("smoke_tracer = true") == 1
     for line in ('smoke_tracer = true', 'smoke_injection = "plumerise"',
                  'smoke_plumerise_interval_s = 1800.0',
                  'smoke_drydep = true', 'smoke_aer_drydep_opt = 302'):

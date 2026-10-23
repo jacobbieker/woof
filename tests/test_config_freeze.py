@@ -73,6 +73,14 @@ def test_new_fields_are_reviewed_defaults_appended_last():
         assert names.pop() == name
         assert (RunConfig.__dataclass_fields__[name].default
                 == SMOKE_SOURCE_DEFAULTS[name])
+    # WRF's coupled fire (feat/fire-coupling), appended off: ifire = 0
+    # allocates and launches nothing, and every key is inert and dropped
+    # from every identity (tests/test_fire_coupling.py).
+    from woof.config import FIRE_RUN_DEFAULTS
+    for key in reversed(tuple(FIRE_RUN_DEFAULTS)):
+        assert names.pop() == key
+        assert RunConfig.__dataclass_fields__[key].default \
+            == FIRE_RUN_DEFAULTS[key]
     # The passive smoke tracer and its prescribed emission, appended off:
     # nothing is allocated or launched (tests/test_smoke_tracer.py).
     assert names.pop() == "smoke_emission_file"
@@ -715,6 +723,10 @@ def test_every_existing_legacy_toml_resolves_identically():
         assert actual.pop("rrtmg_smoke_manifest") == ""
         assert actual.pop("smoke_tracer") is False
         assert actual.pop("smoke_emission_file") == ""
+        # WRF's coupled fire, appended off (feat/fire-coupling).
+        from woof.config import FIRE_RUN_DEFAULTS
+        for key, default in FIRE_RUN_DEFAULTS.items():
+            assert actual.pop(key) == default, key
         from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
         for name, default in SMOKE_SOURCE_DEFAULTS.items():
             assert actual.pop(name) == default, name
@@ -776,6 +788,10 @@ def test_frozen_case_constructed_configs_resolve_identically():
         assert actual.pop("rrtmg_smoke_manifest") == ""
         assert actual.pop("smoke_tracer") is False
         assert actual.pop("smoke_emission_file") == ""
+        # WRF's coupled fire, appended off (feat/fire-coupling).
+        from woof.config import FIRE_RUN_DEFAULTS
+        for key, default in FIRE_RUN_DEFAULTS.items():
+            assert actual.pop(key) == default, key
         from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
         for name, default in SMOKE_SOURCE_DEFAULTS.items():
             assert actual.pop(name) == default, name

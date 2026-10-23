@@ -1172,6 +1172,65 @@ class RunConfig:
     #: lowest model layer as a mass-conserving source.  Empty (the default)
     #: emits nothing.  Appended last.
     smoke_emission_file: str = ""
+    # --- WRF v4.7.1's coupled fire model (woof/fire/coupling.py) ---------
+    # Every key below is WRF's &fire / &domains name and Registry default
+    # (Registry/registry.fire, max_domains: each domain chooses its own),
+    # appended last.  ``ifire = 0`` (the default) allocates nothing and
+    # launches nothing, and every key below is then inert and dropped from
+    # every identity, so earlier trajectories, checkpoints and fingerprints
+    # are unchanged.
+    #: 2 runs WRF-SFIRE's level-set fire on this domain's fire mesh, two-way
+    #: coupled (WRF v4.7.1 has no other fire model; 1 is refused).
+    ifire: int = 0
+    #: Fire-mesh cells per atmospheric cell (&domains sr_x, sr_y).  A
+    #: domain with ``ifire`` requests its fuel statics at this refinement.
+    sr_x: int = 0
+    sr_y: int = 0
+    #: How the fuel map is set (set_nfuel_cat): -1 or 2 the domain's fuel
+    #: statics (NFUEL_CAT_FIRE), 0 uniform ``fire_fuel_cat``, 1 by altitude.
+    fire_fuel_read: int = -1
+    fire_fuel_cat: int = 1
+    #: The fuel tables set_fire_params loads: "namelist" (WRF's
+    #: test/em_fire/namelist.fire) or "defaults" (the compiled DATA, what a
+    #: WRF run without a namelist.fire reads).  A woof key.
+    fire_fuel_table: str = "namelist"
+    #: Ground fuel moisture source; 1 (namelist.fire's fuelmc_g) only.
+    fire_fmc_read: int = 1
+    #: Height (m) the wind is interpolated to for the spread rate.
+    fire_wind_height: float = 6.096
+    #: Extinction depths (m) of the surface and crown fire heat, and the
+    #: height (m) above which the crown heat decays.
+    fire_ext_grnd: float = 50.0
+    fire_ext_crwn: float = 50.0
+    fire_crwn_hgt: float = 15.0
+    #: Multiplier of the heat fluxes into the atmosphere (0 = one-way).
+    fire_atm_feedback: float = 1.0
+    #: The ignition lines, WRF's fire_ignition_*1..5 in order: one tuple
+    #: per line of (start_x, start_y, end_x, end_y, start_lon, start_lat,
+    #: end_lon, end_lat, radius, ros, start_time, end_time).  TOML gives a
+    #: list of tables with those keys (woof.fire.coupling.IGNITION_FIELDS).
+    fire_ignitions: tuple = ()
+    #: The level set's numerics (woof.fire.levelset.FireOptions).
+    fire_advection: int = 1
+    fire_lsm_reinit: bool = True
+    fire_lsm_reinit_iter: int = 1
+    fire_lsm_band_ngp: int = 4
+    fire_viscosity: float = 0.4
+    fire_viscosity_bg: float = 0.4
+    fire_viscosity_band: float = 0.5
+    fire_viscosity_ngp: int = 2
+    fire_lfn_ext_up: float = 1.0
+    fire_slope_factor: float = 1.0
+    #: Smoke per unit of burned fuel (kg/kg), WRF's tracer_opt = 3 factor.
+    fire_tracer_smoke: float = 0.02
+    #: How burned fuel becomes smoke for ``smoke_tracer``: "pm25" (each
+    #: fire cell's fuel-class PM2.5 factor, woof.smoke.emission) or
+    #: "fire_tracer_smoke" (WRF's one factor).  A woof key.
+    fire_smoke_factor: str = "pm25"
+    #: The USGS land-use category whose LANDUSE.TBL roughness the fire's
+    #: wind takes on a domain with no physics driver (WRF em_fire's
+    #: landuse_init value; 28 by default).
+    sfc_lu_index: int = 28
     #: The smoke tracer's injection profile (woof.core.smoke_sources):
     #: ``surface`` (the default) puts the emission in the lowest layer,
     #: exactly as before; ``pbl`` spreads it uniformly in height from the
@@ -1209,6 +1268,49 @@ class RunConfig:
     #: Appended last.
     smoke_particle_radius: float = 0.73e-6
     smoke_particle_density: float = 2500.0
+
+#: The fire keys of :class:`RunConfig` and their defaults: inert, and
+#: dropped from every identity, while ``ifire`` is 0.
+FIRE_RUN_DEFAULTS: dict[str, object] = {
+    "ifire": 0, "sr_x": 0, "sr_y": 0, "fire_fuel_read": -1,
+    "fire_fuel_cat": 1, "fire_fuel_table": "namelist", "fire_fmc_read": 1,
+    "fire_wind_height": 6.096, "fire_ext_grnd": 50.0, "fire_ext_crwn": 50.0,
+    "fire_crwn_hgt": 15.0, "fire_atm_feedback": 1.0, "fire_ignitions": (),
+    "fire_advection": 1, "fire_lsm_reinit": True, "fire_lsm_reinit_iter": 1,
+    "fire_lsm_band_ngp": 4, "fire_viscosity": 0.4, "fire_viscosity_bg": 0.4,
+    "fire_viscosity_band": 0.5, "fire_viscosity_ngp": 2,
+    "fire_lfn_ext_up": 1.0, "fire_slope_factor": 1.0,
+    "fire_tracer_smoke": 0.02, "fire_smoke_factor": "pm25",
+    "sfc_lu_index": 28,
+}
+
+
+def drop_inert_fire_keys(values: dict) -> dict:
+    """Remove the fire keys from a run document while ``ifire`` is 0.
+
+    Off, nothing reads them, so they are not part of any identity; every
+    payload written before the fields existed keeps its bytes.  On, every
+    key binds.  In place; returns ``values``.
+    """
+    if int(values.get("ifire", 0) or 0) <= 0:
+        for key in FIRE_RUN_DEFAULTS:
+            values.pop(key, None)
+    elif isinstance(values.get("fire_ignitions"), tuple):
+        values["fire_ignitions"] = [list(r) for r in values["fire_ignitions"]]
+    return values
+
+
+def normalize_fire_ignitions(value) -> tuple:
+    """TOML ``fire_ignitions`` (a list of tables or of 12-value rows) as
+    the frozen tuple of tuples :class:`RunConfig` holds."""
+    from woof.fire.coupling import ignition_record
+
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(
+            f"fire_ignitions must be a list of ignition tables such as "
+            f"[{{ start_x = 1000.0, start_y = 800.0, radius = 20.0 }}], got "
+            f"{value!r}")
+    return tuple(ignition_record(r) for r in value)
 
 #: The two ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -3087,6 +3189,9 @@ def load_config(path: str | Path, *, accept_epssm_auto: bool = False,
     # validate_run_config, which returns its argument unchanged.
     if isinstance(merged.get("eta_levels"), list):
         merged["eta_levels"] = tuple(merged["eta_levels"])
+    if "fire_ignitions" in merged:
+        merged["fire_ignitions"] = normalize_fire_ignitions(
+            merged["fire_ignitions"])
     return validate_run_config(RunConfig(**merged))
 
 
@@ -3689,6 +3794,140 @@ def smoke_tracer_refusal(*, smoke_tracer, smoke_emission_file,
             "The emission reader takes a NumPy array or a NetCDF file's "
             "smoke_emission variable, both kg m-2 s-1 on the domain's mass "
             "grid; no other format is read.")
+    return None
+
+
+def fire_refusal(cfg) -> str | None:
+    """Why this domain's fire configuration cannot run, or None.
+
+    Only ``ifire = 2`` is judged; off, the fire keys are inert.  Whether
+    the fuel statics exist is decided where the fire attaches
+    (woof.fire.coupling.attach), because a prepared tree may be validated
+    on a machine its statics do not live on.
+    """
+    from woof.explain import layered
+
+    ifire = cfg.ifire
+    if isinstance(ifire, bool) or not isinstance(ifire, int):
+        return layered(f"ifire={ifire!r} must be the integer 0 or 2.",
+                       "WRF v4.7.1's &fire ifire selects the fire model.")
+    if ifire == 0:
+        return None
+    if ifire != 2:
+        return layered(
+            f"ifire = {ifire} is not a WRF v4.7.1 fire model; use 2 "
+            "(WRF-SFIRE's level set) or 0.",
+            "WRF v4.7.1's first_rk_step_part1 and start_em run the fire "
+            "only for ifire == 2; any other value is no fire there, and a "
+            "run that silently burned nothing under ifire = 1 would carry "
+            "a fire it never had.")
+    for name in ("sr_x", "sr_y"):
+        value = getattr(cfg, name)
+        if isinstance(value, bool) or not isinstance(value, int) \
+                or value < 1:
+            return layered(
+                f"ifire = 2 needs {name} >= 1 (fire-mesh cells per "
+                f"atmospheric cell), got {value!r}.",
+                "WRF-SFIRE's &domains sr_x/sr_y defaults to 0, which is no "
+                "fire mesh; the refinement is declared, never implicit.")
+    if min(int(cfg.nx), int(cfg.ny)) < 4:
+        return layered(
+            f"ifire = 2 needs at least 4 x 4 atmospheric cells, got "
+            f"{cfg.nx} x {cfg.ny}.",
+            "WRF continues the fire wind one cell past the domain from the "
+            "two cells inside each edge and feeds the atmosphere only in "
+            "the interior columns.")
+    if not cfg.moist:
+        return layered(
+            "ifire = 2 needs moist = true.",
+            "The fire's moisture flux enters as WRF's rqvfrten, a water "
+            "vapour tendency; a dry state has no vapour to receive it, and "
+            "dropping it would run a fire without the water it releases.")
+    if cfg.use_adaptive_time_step:
+        return layered(
+            "ifire = 2 cannot run under use_adaptive_time_step.",
+            "WRF's fire clock is time_start = itimestep * dt "
+            "(module_fr_fire_driver.F), which assumes one dt for the whole "
+            "run; under an adaptive step its ignition times and fuel burn "
+            "would drift from the model clock.")
+    from woof.fire.coupling import (FUEL_READ, FUEL_TABLES, SMOKE_FACTORS,
+                                     convert_ignitions)
+    if cfg.fire_fuel_read not in FUEL_READ:
+        return layered(
+            f"fire_fuel_read = {cfg.fire_fuel_read!r} is not one of "
+            f"{list(FUEL_READ)} (WRF set_nfuel_cat).",
+            "-1 and 2 keep the domain's fuel map, 0 is uniform "
+            "fire_fuel_cat and 1 is by altitude; WRF crashes on any other.")
+    if cfg.fire_fuel_read == 0 and cfg.fire_fuel_cat not in range(1, 15):
+        return layered(
+            f"fire_fuel_cat = {cfg.fire_fuel_cat!r} is not an Anderson fuel "
+            "model 1-13 or the no-fuel category 14.",
+            "The fuel tables the fire loads carry those 14 categories.")
+    if cfg.fire_fuel_table not in FUEL_TABLES:
+        return layered(
+            f"fire_fuel_table = {cfg.fire_fuel_table!r} is not one of "
+            f"{list(FUEL_TABLES)}.",
+            "namelist is WRF's test/em_fire/namelist.fire, defaults the "
+            "compiled tables a WRF run without namelist.fire reads.")
+    if cfg.fire_fmc_read != 1:
+        return layered(
+            f"fire_fmc_read = {cfg.fire_fmc_read!r} cannot run; use 1.",
+            "0 reads FMC_G from wrfinput and 2 from a file, neither of "
+            "which woof's prepared state carries; 1 is namelist.fire's "
+            "fuelmc_g, WRF's default.")
+    for name, low in (("fire_wind_height", 0.0), ("fire_ext_grnd", 0.0),
+                      ("fire_ext_crwn", 0.0)):
+        value = getattr(cfg, name)
+        if not (isinstance(value, (int, float)) and math.isfinite(value)
+                and value > low):
+            return layered(f"{name} = {value!r} must be a positive number "
+                           "of metres.",
+                           "fire_tendency divides by the extinction depths "
+                           "and interpolate_atm2fire takes the log of the "
+                           "wind height.")
+    for name in ("fire_crwn_hgt", "fire_atm_feedback", "fire_tracer_smoke",
+                 "fire_viscosity", "fire_viscosity_bg", "fire_viscosity_band",
+                 "fire_lfn_ext_up", "fire_slope_factor"):
+        value = getattr(cfg, name)
+        if not (isinstance(value, (int, float)) and math.isfinite(value)
+                and value >= 0):
+            return layered(f"{name} = {value!r} must be a finite number "
+                           ">= 0.",
+                           "Every fire coefficient is a non-negative "
+                           "physical or numerical scale.")
+    if cfg.fire_advection not in (0, 1):
+        return layered(f"fire_advection = {cfg.fire_advection!r} must be 0 "
+                       "or 1.", "WRF's fire_ros has those two forms.")
+    for name in ("fire_lsm_reinit_iter", "fire_lsm_band_ngp",
+                 "fire_viscosity_ngp"):
+        value = getattr(cfg, name)
+        if isinstance(value, bool) or not isinstance(value, int) \
+                or value < 1:
+            return layered(f"{name} = {value!r} must be a whole number >= 1.",
+                           "It counts iterations or fire-mesh nodes.")
+    if cfg.fire_smoke_factor not in SMOKE_FACTORS:
+        return layered(
+            f"fire_smoke_factor = {cfg.fire_smoke_factor!r} is not one of "
+            f"{list(SMOKE_FACTORS)}.",
+            "pm25 takes each fuel class's PM2.5 factor, fire_tracer_smoke "
+            "WRF's one factor.")
+    if cfg.smoke_tracer and cfg.smoke_emission_file:
+        return layered(
+            "ifire = 2 with smoke_tracer = true cannot also take "
+            f"smoke_emission_file = {cfg.smoke_emission_file!r}.",
+            "The fire writes the tracer's surface emission every step from "
+            "the fuel it burns; a prescribed file would be overwritten on "
+            "the first step and run under the name of a source it never "
+            "had.  Remove the file, or the fire.")
+    if not isinstance(cfg.fire_ignitions, tuple):
+        return layered("fire_ignitions must be a list of ignition tables.",
+                       "Each table is one WRF fire_ignition_*N line.")
+    try:
+        convert_ignitions(cfg.fire_ignitions)
+    except ValueError as error:
+        return layered(f"fire_ignitions: {error}.",
+                       "The lines are WRF's fire_ignition_*1..5, read by "
+                       "fire_ignition_convert.")
     return None
 
 
@@ -4654,6 +4893,9 @@ def validate_run_config(cfg: RunConfig) -> RunConfig:
         smoke_tracer=cfg.smoke_tracer,
         smoke_emission_file=cfg.smoke_emission_file,
         bl_pbl_physics=cfg.bl_pbl_physics)
+    if why is not None:
+        raise ValueError(why)
+    why = fire_refusal(cfg)
     if why is not None:
         raise ValueError(why)
     why = smoke_sources_refusal(cfg)

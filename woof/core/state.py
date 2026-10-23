@@ -781,6 +781,17 @@ class DomainState:
             for name, kind in state_fields(cfg).items():
                 setattr(self, name, zeros(nz, ny, nx) if kind == "mass"
                         else zeros(ny, nx))
+        # WRF's coupled fire (RunConfig.ifire, woof/fire/coupling.py).
+        # Allocated ONLY when it is on, so every other configuration's
+        # object graph is byte-identical -- the attributes are ABSENT, as
+        # the smoke tracer's are.  The level set, ignition time and fuel
+        # fraction on the refined fire mesh (sr_y*ny x sr_x*nx), the last
+        # step's fire-mesh and atmospheric-grid outputs (all SERIALIZED, so
+        # a restored state publishes the frame the live one would) and the
+        # REBUILT tendencies fire_tendency writes every step.
+        if getattr(cfg, "ifire", 0):
+            from woof.fire.coupling import allocate_state
+            allocate_state(self, cfg, zeros)
         # Prognostic/published subgrid turbulence energy.  The attribute
         # is ``e_sgs`` because ``self.e`` is already the WRF Coriolis
         # cosine parameter 2*Omega*cos(lat); the owning scheme's symbol

@@ -37,12 +37,15 @@ def _cfg(**kw):
 # --------------------------------------------------------------- config ---
 
 def test_fields_appended_last_and_default_off():
+    from woof.config import FIRE_RUN_DEFAULTS
+
     names = [f.name for f in fields(RunConfig)]
-    # The two tracer fields, followed only by the sources' and sinks'
-    # (tests/test_smoke_sources.py pins those).
-    at = names.index("smoke_tracer")
-    assert names[at:at + 3] == ["smoke_tracer", "smoke_emission_file",
-                                "smoke_injection"]
+    # The coupled fire's keys, then the sources' and sinks'
+    # (tests/test_smoke_sources.py), were appended after the tracer's.
+    from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
+    names = names[:len(names) - len(FIRE_RUN_DEFAULTS)
+                  - len(SMOKE_SOURCE_DEFAULTS)]
+    assert names[-2:] == ["smoke_tracer", "smoke_emission_file"]
     cfg = _cfg()
     assert cfg.smoke_tracer is False
     assert cfg.smoke_emission_file == ""

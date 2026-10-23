@@ -401,6 +401,18 @@ _DOMAIN_RUN_OVERRIDES = (
     # stays [shared]: a nest edge forces and feeds back the tracer, so a
     # tree carries it on every domain or on none.
     "smoke_emission_file",
+    # WRF's coupled fire model (woof/fire/coupling.py): Registry.fire and
+    # &domains declare every one of these max_domains, and a fire burns on
+    # the domain whose mesh resolves it -- commonly the innermost nest
+    # only.  Fire state is per domain and crosses no nest edge.
+    "ifire", "sr_x", "sr_y", "fire_fuel_read", "fire_fuel_cat",
+    "fire_fuel_table", "fire_fmc_read", "fire_wind_height",
+    "fire_ext_grnd", "fire_ext_crwn", "fire_crwn_hgt", "fire_atm_feedback",
+    "fire_ignitions", "fire_advection", "fire_lsm_reinit",
+    "fire_lsm_reinit_iter", "fire_lsm_band_ngp", "fire_viscosity",
+    "fire_viscosity_bg", "fire_viscosity_band", "fire_viscosity_ngp",
+    "fire_lfn_ext_up", "fire_slope_factor", "fire_tracer_smoke",
+    "fire_smoke_factor", "sfc_lu_index",
 )
 
 #: Per-domain vertical keys are REJECTED outright (F1 amendment: the
@@ -2651,6 +2663,36 @@ def _refuse_rebuilt_nest_lake(domains, relocation, source) -> None:
                 "from the start; otherwise its lake state would be reset.")
 
 
+def _refuse_moving_fire(domains, relocation, source) -> None:
+    """ifire on a nest that moves or is spawned mid-run: refused by name.
+
+    WRF v4.7.1's fire lives on the domain's fixed fire mesh: its level set,
+    ignition times and fuel left are fire-mesh state with no nest
+    interpolation (Registry/registry.fire declares none), and a moving
+    nest's fire mesh would have to be rebuilt under a fire already
+    burning.  woof's nest rebuild (a move, a storm-follow or a mid-run
+    spawn) builds the child cold, which would extinguish the fire and
+    relight nothing.  Fire runs on any fixed domain present from its start.
+    """
+    rebuilt = set()
+    if relocation is not None and getattr(relocation, "enabled", False) \
+            and (getattr(relocation, "moves", ())
+                 or getattr(relocation, "follow", None) is not None):
+        rebuilt.add(int(relocation.grid_id))
+    rebuilt.update(int(dc.grid_id) for dc in domains
+                   if getattr(dc, "follow", None) is not None
+                   or getattr(dc, "spawn", None) is not None)
+    for dc in domains:
+        if int(dc.grid_id) in rebuilt and int(getattr(dc.run, "ifire", 0)):
+            raise ValueError(
+                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} moves "
+                "or is spawned mid-run with ifire = 2: a moving or spawned "
+                "nest is rebuilt cold, and the fire's level set, ignition "
+                "times and fuel on its fire mesh would be lost with it.  Run "
+                "the fire on a fixed domain present from its start, or set "
+                "ifire = 0 on the moving nest.")
+
+
 def _refuse_child_terrain_drag(domains, source) -> None:
     """topo_wind / gwd_opt on a child domain: refused until its statics route
     builds the orographic statistics.
@@ -4362,6 +4404,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         for key in _DOMAIN_RUN_OVERRIDES:
             if key in dom:
                 kw[key] = dom[key]
+        if "fire_ignitions" in kw:
+            from woof.config import normalize_fire_ignitions
+            kw["fire_ignitions"] = normalize_fire_ignitions(
+                kw["fire_ignitions"])
         # The axis writes its resolved vector LAST and onto every domain:
         # it is the author of these keys (the [shared]/[[domain]] refusal
         # above guarantees nobody else wrote them), and one experiment is
@@ -4612,6 +4658,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source)
     _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation, source)
     _refuse_rebuilt_nest_lake(domains, relocation, source)
+    _refuse_moving_fire(domains, relocation, source)
     _refuse_child_terrain_drag(domains, source)
     from woof.core.attribute_tracking import validate_attribute_domains
     validate_attribute_domains(domains, relocation)
@@ -5568,6 +5615,9 @@ def _public_config_value(value):
                                   *SMOKE_SOURCE_DEFAULTS.items()):
                 if run_document.get(name, default) == default:
                     run_document.pop(name, None)
+            # The coupled fire's keys, inert while ifire is 0.
+            from woof.config import drop_inert_fire_keys
+            drop_inert_fire_keys(run_document)
         return document
     if isinstance(value, tuple) and hasattr(value, "_fields"):
         return type(value)(*(_public_config_value(item) for item in value))

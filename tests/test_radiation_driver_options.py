@@ -10,7 +10,8 @@ import dataclasses
 
 import pytest
 
-from woof.config import RunConfig, validate_radiation_driver_options
+from woof.config import (FIRE_RUN_DEFAULTS, RunConfig,
+                         validate_radiation_driver_options)
 
 
 def _cfg(**overrides):
@@ -98,6 +99,8 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
                               "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
                               # The passive smoke tracer, appended after.
                               "smoke_tracer", "smoke_emission_file",
+                              # WRF's coupled fire, appended after.
+                              *FIRE_RUN_DEFAULTS,
                               # Its sources and sinks, appended after.
                               "smoke_injection", "smoke_plumerise_interval_s",
                               "smoke_plume_heat_flux", "smoke_plume_fire_area",

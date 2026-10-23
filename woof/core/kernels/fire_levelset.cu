@@ -19,6 +19,7 @@
 //                      (fire_upwinding_reinit = 4), then fire_model pass 5's
 //                      copy lfn = lfn_out.
 //   fl_ignite          ignite_fire with nearest inlined, one ignition line.
+//   fl_ignite_xy       the same at given node coordinates (fxlong/fxlat).
 //   fl_fuel_heat       fuel_left (fuel_left_method = 1, irl = jrl = 2,
 //                      fuel_left_cell_1 inlined), fire_model pass 6's
 //                      fuel_frac_burnt, and heat_fluxes.
@@ -145,7 +146,7 @@ __device__ void fl_fire_ros(float *ros_base, float *ros_wind,
                             float *ros_slope, float nvx, float nvy,
                             float vx, float vy, float dzdx, float dzdy,
                             float r0, float bbb, float phiwc, float betafl,
-                            int advection)
+                            float ischap, int advection)
 {
     const float tiny = 0x1p-126f;
     float speed, tanphi, cor_wind, cor_slope;
@@ -171,6 +172,14 @@ __device__ void fl_fire_ros(float *ros_base, float *ros_wind,
     float rb = r0 * 0.00508f;
     float rw = rb * phiw;
     float rs = rb * phis;
+    if (ischap > 0.0f) {
+        // fire_ros's chaparral arm: the wind alone, with a backing floor.
+        // WRF never assigns ros_base on it (the caller's variable is read
+        // undefined); the port fixes it at 0, as woof.fire.wrf_sfire does.
+        rb = 0.0f;
+        rw = fmaxf(1.2974f * gfk_pow(spdms, 1.41f), 0.03333f);
+        rs = 0.0f;
+    }
     rw = rw * cor_wind;
     rs = rs * cor_slope;
     float excess = rb + rw + rs - 6.0f;
@@ -216,7 +225,8 @@ __device__ void fl_tend_node(
     const float *__restrict__ vy, const float *__restrict__ dzdx,
     const float *__restrict__ dzdy, const float *__restrict__ r0,
     const float *__restrict__ bbb, const float *__restrict__ phiwc,
-    const float *__restrict__ betafl, float dx, float dy, float coef,
+    const float *__restrict__ betafl, const float *__restrict__ ischap,
+    float dx, float dy, float coef,
     float thr_hl, float thr_av, float visc, float visc_bg, float visc_band,
     float slope_factor, int advection, int nx, int ny, int i, int j)
 {
@@ -255,7 +265,7 @@ __device__ void fl_tend_node(
     float nvy = fl_div(d2y, scale);
     float rb, rw, rs;
     fl_fire_ros(&rb, &rw, &rs, nvx, nvy, vx[f], vy[f], dzdx[f], dzdy[f],
-                r0[f], bbb[f], phiwc[f], betafl[f], advection);
+                r0[f], bbb[f], phiwc[f], betafl[f], ischap[f], advection);
     float rr = rb + rw + slope_factor * rs;
     rr = fmaxf(rr, 0.0f);                           // fire_grows_only = 1
     ros[f] = rr;
@@ -289,7 +299,8 @@ extern "C" __global__ void fl_tend_stage(
     const float *__restrict__ vy, const float *__restrict__ dzdx,
     const float *__restrict__ dzdy, const float *__restrict__ r0,
     const float *__restrict__ bbb, const float *__restrict__ phiwc,
-    const float *__restrict__ betafl, float dx, float dy, float coef,
+    const float *__restrict__ betafl, const float *__restrict__ ischap,
+    float dx, float dy, float coef,
     float thr_hl, float thr_av, float visc, float visc_bg, float visc_band,
     float slope_factor, int advection, int nx, int ny)
 {
@@ -300,7 +311,7 @@ extern "C" __global__ void fl_tend_stage(
     float cb = 0.0f;                                // tend_ls's tbound = 0
     if (i <= nx && j <= ny)
         fl_tend_node(lfn, lfn0, out, ros, &cb, vx, vy, dzdx, dzdy, r0, bbb,
-                     phiwc, betafl, dx, dy, coef, thr_hl, thr_av, visc,
+                     phiwc, betafl, ischap, dx, dy, coef, thr_hl, thr_av, visc,
                      visc_bg, visc_band, slope_factor, advection, nx, ny, i,
                      j);
     part[t] = cb;
@@ -426,20 +437,13 @@ extern "C" __global__ void fl_reinit_final(const float *__restrict__ s3,
     lfn[c] = v;
 }
 
-extern "C" __global__ void fl_ignite(float *lfn, float *tign, float sx,
-                                     float sy, float ex, float ey, float st,
-                                     float et, float cx2, float cy2,
-                                     float radius, float ros, float start_ts,
-                                     float end_ts, float fdx, float fdy,
-                                     int nx, int ny)
+// ignite_fire with nearest inlined at one node of coordinates (ax, ay).
+__device__ void fl_ignite_node(float *lfn, float *tign, int c, float ax,
+                               float ay, float sx, float sy, float ex,
+                               float ey, float st, float et, float cx2,
+                               float cy2, float radius, float ros,
+                               float start_ts, float end_ts)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x + 1;
-    int j = blockIdx.y * blockDim.y + threadIdx.y + 1;
-    if (i > nx || j > ny) return;
-    int c = j * (nx + 2) + i;
-    // set_ideal_coord: (i - ifds + 0.5) * dxf
-    float ax = ((float)(i - 1) + 0.5f) * fdx;
-    float ay = ((float)(j - 1) + 0.5f) * fdy;
     // nearest
     float mx = (sx + ex) * 0.5f;
     float my = (sy + ey) * 0.5f;
@@ -469,6 +473,42 @@ extern "C" __global__ void fl_ignite(float *lfn, float *tign, float sx,
         tign[c] = ti;
     }
     lfn[c] = fminf(l, lfn_new);
+}
+
+extern "C" __global__ void fl_ignite(float *lfn, float *tign, float sx,
+                                     float sy, float ex, float ey, float st,
+                                     float et, float cx2, float cy2,
+                                     float radius, float ros, float start_ts,
+                                     float end_ts, float fdx, float fdy,
+                                     int nx, int ny)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x + 1;
+    int j = blockIdx.y * blockDim.y + threadIdx.y + 1;
+    if (i > nx || j > ny) return;
+    // set_ideal_coord: (i - ifds + 0.5) * dxf
+    float ax = ((float)(i - 1) + 0.5f) * fdx;
+    float ay = ((float)(j - 1) + 0.5f) * fdy;
+    fl_ignite_node(lfn, tign, j * (nx + 2) + i, ax, ay, sx, sy, ex, ey, st,
+                   et, cx2, cy2, radius, ros, start_ts, end_ts);
+}
+
+// The same at given node coordinates (WRF's fxlong/fxlat for an ignition
+// in longitude/latitude), (ny, nx) row-major.
+extern "C" __global__ void fl_ignite_xy(float *lfn, float *tign, float sx,
+                                        float sy, float ex, float ey,
+                                        float st, float et, float cx2,
+                                        float cy2, float radius, float ros,
+                                        float start_ts, float end_ts,
+                                        const float *coord_x,
+                                        const float *coord_y, int nx, int ny)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x + 1;
+    int j = blockIdx.y * blockDim.y + threadIdx.y + 1;
+    if (i > nx || j > ny) return;
+    int f = (j - 1) * nx + (i - 1);
+    fl_ignite_node(lfn, tign, j * (nx + 2) + i, coord_x[f], coord_y[f], sx,
+                   sy, ex, ey, st, et, cx2, cy2, radius, ros, start_ts,
+                   end_ts);
 }
 
 // fuel_left_cell_1 for one subcell, corners (00, 01, 10, 11).

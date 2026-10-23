@@ -1789,9 +1789,20 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "-fmad=false --ftz=false; fire_levelset.cu fails standalone (it "
         "calls gfk_exp/gfk_pow).  Priced 0 B: every export's "
         "local_size_bytes on sm_86 (RTX A6000) at NVRTC 12.9.86, read "
-        "2026-10-22.  Not launched by a forecast; re-audited by "
+        "2026-10-22 and again 2026-10-23 with fl_ignite_xy.  Launched by a "
+        "forecast with ifire = 2 (woof/fire/coupling.py); re-audited by "
         "tests/test_fire_levelset_wrf471_parity.py::"
         "test_fire_unit_frames_match_the_recorded_unit.",
+    "fire_coupling_composed":
+        "glibc_flt32.cuh + fire_coupling.cu, assembled by "
+        "woof/fire/coupling.module_source() and compiled directly with "
+        "-fmad=false --ftz=false; fire_coupling.cu fails standalone (it "
+        "calls gfk_log/gfk_exp).  Priced 0 B: every export's "
+        "local_size_bytes on sm_86 (RTX A6000) at NVRTC 12.9.86, read "
+        "2026-10-23; the column kernels hold no per-level array.  Launched "
+        "by a forecast with ifire = 2; re-audited by "
+        "tests/test_fire_coupling.py::"
+        "test_the_coupling_unit_frames_match_the_recorded_unit.",
     "smoke_composed":
         "glibc_flt32.cuh + glibc_flt64.cuh + smoke_emission.cu + "
         "smoke_plumerise.cu + smoke_deposition.cu, assembled by "
@@ -1854,15 +1865,33 @@ TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({
 # The fire level set's direct unit (woof/fire/levelset.py), compile/load-only
 # readings over every export, bound to the source and options read.
 FIRE_LEVELSET_COMPOSED_SOURCE_SHA256 = (
-    "217be10cc758ca1464e3feceb9862b55b7194270e9ff3305fcfdc8c5ca623ff9")
+    "22209c7ca5acfb5704a3a0401787be8e22fa2b12060990e826a0f5f288fccfa6")
 FIRE_LEVELSET_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
+# Re-read 2026-10-23 on the same platform key after feat/fire-coupling
+# added fl_ignite_xy: every export 0 B.
 _FIRE_LEVELSET_EXPORTS = (
     "fl_extend", "fl_tend_stage", "fl_bound_reduce", "fl_tign_update",
     "fl_reinit_init", "fl_reinit_stage", "fl_reinit_final", "fl_ignite",
-    "fl_fuel_heat", "fl_sum_cells", "fl_accumulate", "fl_scale")
+    "fl_ignite_xy", "fl_fuel_heat", "fl_sum_cells", "fl_accumulate",
+    "fl_scale")
 FIRE_LEVELSET_COMPOSED_FRAME_READINGS = MappingProxyType({
     ("86", "12.9.86"): MappingProxyType(
         {name: 0 for name in _FIRE_LEVELSET_EXPORTS}),
+})
+
+
+# The fire coupling's direct unit (woof/fire/coupling.py), compile/load-only
+# readings over every export, bound to the source and options read
+# (sm_86, RTX A6000, NVRTC 12.9.86, 2026-10-23).
+FIRE_COUPLING_COMPOSED_SOURCE_SHA256 = (
+    "b0b05eca160c95d8b0d7a72d3bccfe858df383bdc159e9ee9c5cd134cac3c2cf")
+FIRE_COUPLING_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
+_FIRE_COUPLING_EXPORTS = (
+    "fc_wind_u", "fc_wind_v", "fc_wind_extend", "fc_wind_refine",
+    "fc_tendency", "fc_smoke_flux", "fc_active_area", "fc_rho")
+FIRE_COUPLING_COMPOSED_FRAME_READINGS = MappingProxyType({
+    ("86", "12.9.86"): MappingProxyType(
+        {name: 0 for name in _FIRE_COUPLING_EXPORTS}),
 })
 
 

@@ -352,6 +352,12 @@ def state_array_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
         from woof.core.smoke_sources import state_fields
         for name, kind in state_fields(cfg).items():
             shapes[name] = m if kind == "mass" else s2
+    if getattr(cfg, "ifire", 0):
+        # The coupled fire (state.py, the same gate): the level set and
+        # its outputs on the refined fire mesh and the atmospheric grid,
+        # serialized, and fire_tendency's rebuilt (nz, ny, nx) tendencies.
+        from woof.fire.coupling import state_shapes
+        shapes.update(state_shapes(cfg))
     if cfg.bl_pbl_physics in (SASE_PBL_SCHEME, 11):
         # The published subgrid energy (state.py allocates it under the
         # same two-scheme condition): SASE's prognostic closure energy,
