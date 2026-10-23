@@ -219,7 +219,10 @@ def bind_emission_identity(values) -> dict:
         values.pop(EMISSION_IDENTITY_KEY, None)
         return values
     if EMISSION_IDENTITY_KEY not in values:
-        source = Path(path).expanduser()
+        # The loaders anchor a relative path beside its config; whatever
+        # reaches here is keyed by the file it resolves to now, so a
+        # changed working directory cannot reuse another file's digest.
+        source = Path(path).expanduser().resolve()
         try:
             stat = source.stat()
             key = (str(source), stat.st_size, stat.st_mtime_ns)
@@ -227,7 +230,7 @@ def bind_emission_identity(values) -> dict:
             key = None
         digest = _DIGESTS.get(key) if key is not None else None
         if digest is None:
-            digest = emission_file_digest(path)
+            digest = emission_file_digest(source)
             if key is not None:
                 _DIGESTS[key] = digest
         values[EMISSION_IDENTITY_KEY] = digest
