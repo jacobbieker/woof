@@ -911,6 +911,14 @@ WPS geography and preparation command.
 |---|---|---|---|---|
 | `smoke_tracer` | `tracer_opt` (its `tracer` array) | false | bool | `[shared]` only, so every domain of a tree carries it or none does. A passive smoke mass mixing ratio, `SMOKE`, in ug per kg of dry air. It advects with the moist scalars' mass fluxes (positive-definite on the final RK stage), mixes under `km_opt` and through the PBL scheme's own heat diffusivity (`exch_h`, WRF's `diff4d` solve, every PBL call), takes zero inflow and zero-gradient outflow on a specified boundary, and crosses nest edges both ways. Refused under SASE (`bl_pbl_physics = 900`), which publishes no `exch_h`. Nothing reads it back: radiation, microphysics and the dynamics never see it. Off allocates nothing and launches nothing, so checkpoints and fingerprints match a build without it. Checkpoints bind it; prepared bundles do not |
 | `smoke_emission_file` | -- | `""` | path to a `.npy` or `.nc` file | `[shared]` or per domain, relative paths resolve beside the config. A prescribed surface emission flux on that domain's mass grid, shape `(ny, nx)`, in **kg m-2 s-1**: a `.npy` array, or the `smoke_emission` variable of a NetCDF file (2-D, or 3-D with one leading time; a `units` attribute of `ug m-2 s-1` is converted). It is injected into the lowest model layer as a mass-conserving source. The file is read once, on the tracer's first step, and uploaded to the device; it must be finite, non-negative and free of `_FillValue` cells, and a wrong shape is refused by name. Each domain emits from its own file only: on a tree, give a nest its own `[[domain]] smoke_emission_file`, or `""` for none. Under `feedback = 1` a nest's interior overwrites its parent's there, so a parent source inside a nest's footprint must also be in the nest's file, as each WRF-Chem domain reads its own emissions. The offline (downscaled) child route refuses the tracer: it builds the child from the parent's history, which carries no `SMOKE`. Checkpoints and fingerprints bind the file's SHA-256. Needs `smoke_tracer = true` |
+| `smoke_injection` | `biomass_burn_opt` 1-5 (`plumerise`) | `"surface"` | `"surface"`, `"pbl"`, `"plumerise"` | `[shared]`. The vertical profile the emission enters the tracer through, every profile conserving the column's emission. `surface` is the lowest layer, exactly the run before this key existed. `pbl` spreads it uniformly in height from the ground to the PBL height of the scheme's last call, every step (needs a PBL scheme). `plumerise` runs WRF-Chem's Freitas plume model (`chem/module_chem_plumerise_scalar.F`) on every burning column, on the fire's own heat flux and burning area, as WRF's single-heat-flux biome: the flaming share `smoke_plume_flaming_fraction` is injected per metre from model level 3 to the level above the plume top and the smouldering rest stays at the surface, the column renormalized to the emission's total as WRF's `scale_fire_emiss = .true.` does. The fire comes from the coupled fire model's `fire_heat_flux` (W m-2) and `fire_area` (m2) when it writes them, else from the emission file's `fire_heat_flux`/`fire_area` NetCDF variables, else from `smoke_plume_heat_flux`/`smoke_plume_fire_area`; a column runs the plume only where its emission is positive, as WRF's driver skips a zero `eburn_in`. The emission file's plume variables take `units` of W m-2 or kW m-2 and m2. A `.npy` emission with no heat flux, one of the two scalars without the other, and a plume call that finds no fire at all are refused by name. Needs `smoke_tracer = true` |
+| `smoke_plumerise_interval_s` | `plumerisefire_frq` (minutes) | `10800.0` | >= 0 | Seconds between plume-model calls on WRF's schedule: the domain's first step, then each step that ends at or past the next multiple (0: every step). The profile is cached, and checkpointed, in between. Each call costs about 0.09 ms per burning column on an RTX A6000 |
+| `smoke_plume_heat_flux`, `smoke_plume_fire_area` | -- | `0.0` | >= 0 | The prescribed fire when neither the fire model nor the emission file gives one: sensible heat flux (W m-2) and burning area (m2) |
+| `smoke_plume_flaming_fraction` | `mean_fct` | `1.0` | [0, 1] | WRF's flaming fraction. With WRF's renormalization the column puts `f / (1 + f)` of its emission into the plume layers |
+| `smoke_drydep` | `aer_drydep_opt` 301/302/311/312 | false | bool | Zhang et al. (2001) particle dry deposition at the surface (`zhang2001_aer_drydepvel_1`, as `aer_drydep_driver` calls it), on the surface layer's u*, z0, Obukhov length and USGS land use (MODIS mapped by WRF's `luse2usgs`; other datasets refused), the mass velocity capped at 0.5 m s-1 as `dry_dep_driver` caps it. Applied to the lowest layer after transport and microphysics, where WRF-Chem's `chem_driver` runs it. Needs a surface-layer scheme |
+| `smoke_aer_drydep_opt` | `aer_drydep_opt` | `301` | 301, 302, 311, 312 | Zhang's variant: 30x takes the season from the date (winter before day 90 or after 270), 3x2 is summer always; 31x uses the modified coefficients |
+| `smoke_settling` | -- | false | bool | GOCART gravitational settling (`chem/module_gocart_settling.F`) of the tracer through the whole column, every step, after the deposition (WRF-Chem's order in `dry_dep_driver`) |
+| `smoke_particle_radius`, `smoke_particle_density` | -- | `0.73e-6`, `2500.0` | > 0 | The smoke particle, one monodisperse bin, for both sinks: effective radius (m) and density (kg m-3). The defaults are GOCART's finest dust bin, the PM2.5 bin (`phys/module_data_gocart_dust.F`); Zhang takes a number diameter of twice the radius and ln(sigma) = 0 |
 
 ```toml
 [shared]
@@ -921,6 +929,36 @@ smoke_emission_file = "smoke_source.npy"   # kg m-2 s-1, (ny, nx)
 The history carries `SMOKE` (ug kg-1) and `SMOKE_COL`, the column load
 in ug m-2, on every domain with the tracer on (see
 [OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#smoke-tracer-fields)).
+
+**Sources and sinks.** The removal books the column mass it takes,
+old minus new as `dry_dep_driver` books its `ddmass`, into
+`SMOKE_DEPOSITED` (ug m-2; the settling part also into `SMOKE_GRASET`),
+so emitted = airborne + deposited + outflow to rounding. In the step:
+the profile and the emission tendency are formed from the time-t state,
+transported with the tracer, and deposition then settling act on the
+completed step. WRF-Chem forms them from the state after the previous
+step's transport (one step's lag), applies the deposition velocity as the
+lower boundary of its chemistry mixing (woof's tracer mixes in the PBL
+call, so the velocity is a lowest-layer sink) and skips deposition on its
+first two steps. Every option runs on the GPU and reads nothing back to
+the host.
+
+```toml
+[shared]
+smoke_tracer = true
+smoke_emission_file = "fire.nc"   # smoke_emission, fire_heat_flux, fire_area
+smoke_injection = "plumerise"
+smoke_plumerise_interval_s = 900.0
+smoke_drydep = true
+smoke_settling = true
+```
+
+A WRF-Chem `&chem` group imports: `tracer_opt = 1` sets `smoke_tracer`,
+`biomass_burn_opt` 1-5 with `scale_fire_emiss = .true.` sets
+`smoke_injection = "plumerise"` at `plumerisefire_frq`, and
+`aer_drydep_opt` 301/302/311/312 sets `smoke_drydep`. `chem_opt` must be
+0 and `vertmix_onoff` 1, `chemdt` is recorded as inert, and every other
+`&chem` key is refused by name.
 
 ## Terrain smoothing (`[[domain]] static`)
 

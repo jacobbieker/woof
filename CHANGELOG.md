@@ -4,6 +4,22 @@
 
 New:
 
+- The smoke tracer's sources and sinks (`woof/core/smoke_sources.py`),
+  all off by default and byte-identical to the run before them when off.
+  `smoke_injection = "pbl"` spreads the emission through the boundary
+  layer; `"plumerise"` runs WRF-Chem's Freitas plume model per burning
+  column on the coupled fire model's `fire_heat_flux`/`fire_area`, the
+  emission file's, or prescribed values, every
+  `smoke_plumerise_interval_s` (WRF's `plumerisefire_frq`), with WRF's
+  `scale_fire_emiss` renormalization. `smoke_drydep` applies Zhang (2001)
+  dry deposition (`aer_drydep_opt` 301/302/311/312) and `smoke_settling`
+  GOCART settling, after transport and microphysics as WRF-Chem's
+  `chem_driver` does. History gains `SMOKE_INJ_TOP`, `SMOKE_DRYDEP_VEL`,
+  `SMOKE_DEPOSITED` and `SMOKE_GRASET`. Every piece of physics is the
+  merged `woof.smoke` library's WRF v4.7.1 port, called word for word;
+  the glue kernels equal their CPU twins at 0 ULP. A WRF-Chem `&chem`
+  group now imports its smoke keys and refuses the rest by name.
+
 - `smoke_tracer = true` carries a passive smoke tracer, `SMOKE` (ug per
   kg of dry air), the analogue of WRF's `tracer` array. It advects with
   the moist scalars' acoustic-averaged mass fluxes, positive-definite on
@@ -801,6 +817,10 @@ Changed:
   The old defaults were 365 x 30 h with 6 h spin-up, 200 m and 60 levels.
 
 Fixed:
+
+- A checkpoint of a run with a `smoke_emission_file` was refused on
+  resume by its own emission digest: the restore compared the stored
+  SHA-256 against a live configuration that never bound one.
 
 - A fine nest over steep ground could go non-finite within seconds. A
   100 m nest whose 30 m Copernicus terrain read a 1.56 slope (57 degrees)

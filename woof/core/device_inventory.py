@@ -346,6 +346,12 @@ def state_array_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
         shapes["smoke0"] = m
         shapes["smoke_emis"] = s2
         shapes["smoke_col"] = s2
+        # Its sources and sinks (state.py, the same gates): the cached
+        # plume profile and the injection-top diagnostic, the deposition
+        # velocity and the two accumulated depositions, all SERIALIZED.
+        from woof.core.smoke_sources import state_fields
+        for name, kind in state_fields(cfg).items():
+            shapes[name] = m if kind == "mass" else s2
     if cfg.bl_pbl_physics in (SASE_PBL_SCHEME, 11):
         # The published subgrid energy (state.py allocates it under the
         # same two-scheme condition): SASE's prognostic closure energy,

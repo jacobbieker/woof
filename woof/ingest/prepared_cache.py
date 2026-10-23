@@ -262,6 +262,11 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # before the field describes; a bundle prepared with it on carries it
     # in its header and is compared strictly.
     "run.smoke_tracer",
+    # Its sources and sinks: off (surface injection, no deposition, no
+    # settling) allocates none of their arrays, the prepared state of every
+    # header written before the fields; on, each allocates its own and is
+    # compared strictly.
+    "run.smoke_injection", "run.smoke_drydep", "run.smoke_settling",
     # 2.6.1 added run.p3_backend to RunConfig without adding it here,
     # which refused EVERY tree prepared before it -- 16 of them on the
     # box that found this.  The FOURTH instance of this exact trap in
@@ -819,6 +824,13 @@ PREPARATION_INERT_RUN_FIELDS = frozenset({
     # way cannot restore the other (DEFAULT_TOLERANT_IDENTITY_FIELDS
     # keeps bundles written before the field runnable).
     "run.smoke_emission_file",
+    # The smoke sources' and sinks' parameters are read by the running
+    # model only (core/smoke_sources.py); preparation computes nothing from
+    # them and they allocate nothing.  The switches that do are above.
+    "run.smoke_plumerise_interval_s", "run.smoke_plume_heat_flux",
+    "run.smoke_plume_fire_area", "run.smoke_plume_flaming_fraction",
+    "run.smoke_aer_drydep_opt", "run.smoke_particle_radius",
+    "run.smoke_particle_density",
 })
 
 

@@ -416,7 +416,12 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
                   "swint_opt", "aer_opt", "alb_sol",
                   "thompson_version", "thompson_fork_snow_fall",
                   "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
-                  "smoke_tracer", "smoke_emission_file"):
+                  "smoke_tracer", "smoke_emission_file",
+                  "smoke_injection", "smoke_plumerise_interval_s",
+                  "smoke_plume_heat_flux", "smoke_plume_fire_area",
+                  "smoke_plume_flaming_fraction", "smoke_drydep",
+                  "smoke_aer_drydep_opt", "smoke_settling",
+                  "smoke_particle_radius", "smoke_particle_density"):
         expected_run.pop(field)
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()

@@ -1940,7 +1940,12 @@ def parent_only_init(child_dc: DomainConfig,
                           # source data and never sees its parent's, so a
                           # nest emits from its own smoke_emission_file or
                           # not at all, on every road alike.  Absent unless
-                          # smoke_tracer is on.
+                          # smoke_tracer is on.  Its sources' and sinks'
+                          # state is not interpolated either: the newborn's
+                          # depositions accumulate from its birth, its
+                          # first step is its plume call (domain time 0,
+                          # woof.core.smoke_sources.plume_due) and its
+                          # diagnostics are written by that step.
                           ("smoke", ""),
                           ("h_diabatic", ""),
                           # The dycore's exported advective forcing pair

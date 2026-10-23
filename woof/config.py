@@ -1172,6 +1172,43 @@ class RunConfig:
     #: lowest model layer as a mass-conserving source.  Empty (the default)
     #: emits nothing.  Appended last.
     smoke_emission_file: str = ""
+    #: The smoke tracer's injection profile (woof.core.smoke_sources):
+    #: ``surface`` (the default) puts the emission in the lowest layer,
+    #: exactly as before; ``pbl`` spreads it uniformly in height from the
+    #: ground to the PBL height; ``plumerise`` runs WRF-Chem's Freitas
+    #: plume model per burning column (WRF ``biomass_burn_opt`` > 0).
+    #: Every profile conserves the column's emission.  Appended last.
+    smoke_injection: str = "surface"
+    #: Seconds between plume-model calls (WRF ``plumerisefire_frq``, in
+    #: minutes there, default 180); the profile is cached in between.
+    #: Appended last.
+    smoke_plumerise_interval_s: float = 10800.0
+    #: The plume model's prescribed fire, used on every emitting column
+    #: when neither the fire model's ``state.fire_heat_flux``/``fire_area``
+    #: nor the emission file's ``fire_heat_flux``/``fire_area`` variables
+    #: give one: sensible heat flux (W m-2) and burning area (m2).
+    #: Appended last.
+    smoke_plume_heat_flux: float = 0.0
+    smoke_plume_fire_area: float = 0.0
+    #: The flaming share WRF's plumerise injects aloft (its ``mean_fct``);
+    #: the smouldering remainder stays at the surface after WRF's
+    #: ``scale_fire_emiss`` renormalization.  Appended last.
+    smoke_plume_flaming_fraction: float = 1.0
+    #: Zhang et al. (2001) dry deposition of the tracer at the surface
+    #: (WRF-Chem ``aer_drydep_opt`` 301/302/311/312), its variant in
+    #: ``smoke_aer_drydep_opt``.  False (the default) removes nothing.
+    #: Appended last.
+    smoke_drydep: bool = False
+    smoke_aer_drydep_opt: int = 301
+    #: GOCART gravitational settling of the tracer through the column.
+    #: False (the default) settles nothing.  Appended last.
+    smoke_settling: bool = False
+    #: The smoke particle's effective radius (m) and density (kg m-3) for
+    #: deposition and settling, one monodisperse bin: GOCART's finest dust
+    #: bin, the PM2.5 bin, by default (module_data_gocart_dust.F).
+    #: Appended last.
+    smoke_particle_radius: float = 0.73e-6
+    smoke_particle_density: float = 2500.0
 
 #: The two ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -3655,6 +3692,115 @@ def smoke_tracer_refusal(*, smoke_tracer, smoke_emission_file,
     return None
 
 
+def smoke_sources_refusal(cfg) -> str | None:
+    """Why this smoke source/sink selection cannot run, or None.
+
+    Judges only the configuration (woof.core.smoke_sources); the emission
+    file's plume variables are read and judged on the first plume call.
+    """
+    from woof.explain import layered
+    from woof.core.smoke_sources import (AER_DRYDEP_OPTS, INJECTION_MODES,
+                                         PLUME_MAX_LEVELS, PLUME_MIN_LEVELS)
+
+    injection = getattr(cfg, "smoke_injection", "surface")
+    drydep = getattr(cfg, "smoke_drydep", False)
+    settling = getattr(cfg, "smoke_settling", False)
+    if type(injection) is not str or injection not in INJECTION_MODES:
+        return layered(
+            f"smoke_injection={injection!r} must be one of "
+            f"{', '.join(INJECTION_MODES)}.",
+            "surface puts the emission in the lowest layer, pbl spreads it "
+            "through the boundary layer and plumerise runs WRF-Chem's plume "
+            "model.")
+    for name, value in (("smoke_drydep", drydep),
+                        ("smoke_settling", settling)):
+        if type(value) is not bool:
+            return layered(f"{name}={value!r} must be true or false.",
+                           "The switch runs the sink or leaves the tracer "
+                           "as it was.")
+    on = (injection != "surface") or drydep or settling
+    if on and not getattr(cfg, "smoke_tracer", False):
+        return layered(
+            "smoke_injection, smoke_drydep and smoke_settling act on the "
+            "smoke tracer; set smoke_tracer = true, or leave them at their "
+            "defaults.",
+            "Without the tracer there is no smoke to inject or remove, and a "
+            "setting silently ignored would name a process the run never "
+            "had.")
+    numbers = (("smoke_plumerise_interval_s",
+                getattr(cfg, "smoke_plumerise_interval_s", 10800.0), 0.0),
+               ("smoke_plume_heat_flux",
+                getattr(cfg, "smoke_plume_heat_flux", 0.0), 0.0),
+               ("smoke_plume_fire_area",
+                getattr(cfg, "smoke_plume_fire_area", 0.0), 0.0))
+    for name, value, low in numbers:
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value < low):
+            return layered(f"{name}={value!r} must be a finite number >= "
+                           f"{low:g}.", "It is a duration, a flux or an "
+                           "area.")
+    fraction = getattr(cfg, "smoke_plume_flaming_fraction", 1.0)
+    if (isinstance(fraction, bool) or not isinstance(fraction, (int, float))
+            or not math.isfinite(fraction) or not 0.0 <= fraction <= 1.0):
+        return layered(
+            f"smoke_plume_flaming_fraction={fraction!r} must be in [0, 1].",
+            "It is WRF's flaming fraction mean_fct.")
+    for name in ("smoke_particle_radius", "smoke_particle_density"):
+        value = getattr(cfg, name)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= 0.0):
+            return layered(f"{name}={value!r} must be a positive number.",
+                           "It describes the smoke particle the deposition "
+                           "and settling move.")
+    opt = getattr(cfg, "smoke_aer_drydep_opt", 301)
+    if isinstance(opt, bool) or opt not in AER_DRYDEP_OPTS:
+        return layered(
+            f"smoke_aer_drydep_opt={opt!r} must be one of "
+            f"{', '.join(str(o) for o in AER_DRYDEP_OPTS)}.",
+            "Those are WRF-Chem's Zhang (2001) aer_drydep_opt values: 30x "
+            "takes the season from the date, 3x2 is summer always, 31x the "
+            "modified coefficients.  The other options need WRF-Chem's "
+            "aerosol modules, which woof does not carry.")
+    if injection == "plumerise":
+        nz = int(cfg.nz)
+        if not PLUME_MIN_LEVELS <= nz <= PLUME_MAX_LEVELS:
+            return layered(
+                f"smoke_injection = \"plumerise\" takes {PLUME_MIN_LEVELS} "
+                f"to {PLUME_MAX_LEVELS} levels; this domain has {nz}.",
+                "WRF-Chem's plume model holds the column on its own 200-level "
+                "grid.")
+        heat = getattr(cfg, "smoke_plume_heat_flux", 0.0)
+        area = getattr(cfg, "smoke_plume_fire_area", 0.0)
+        if (heat > 0.0) != (area > 0.0):
+            return layered(
+                "smoke_plume_heat_flux and smoke_plume_fire_area describe one "
+                "prescribed fire; set both positive, or neither.",
+                "A heat flux with no burning area (or the reverse) has no "
+                "plume to rise.")
+        path = getattr(cfg, "smoke_emission_file", "") or ""
+        if path.lower().endswith(".npy") and not heat > 0.0:
+            return layered(
+                "smoke_injection = \"plumerise\" with a .npy emission needs "
+                "the fire's heat flux: set smoke_plume_heat_flux (W m-2) and "
+                "smoke_plume_fire_area (m2), or give a NetCDF emission with "
+                "fire_heat_flux and fire_area variables.",
+                "A .npy file carries the emission only, and a plume with no "
+                "heat source does not rise.")
+    if injection == "pbl" and int(cfg.bl_pbl_physics) == 0:
+        return layered(
+            "smoke_injection = \"pbl\" reads the PBL height, and "
+            "bl_pbl_physics = 0 computes none; select a PBL scheme or "
+            "another profile.", "The profile is uniform up to the PBL top.")
+    if drydep and int(cfg.sf_sfclay_physics) == 0:
+        return layered(
+            "smoke_drydep = true reads u*, z0 and the land use of the "
+            "surface layer, and sf_sfclay_physics = 0 computes none; select "
+            "a surface-layer scheme or turn the deposition off.",
+            "Zhang's deposition velocity is a function of u* and the "
+            "surface type.")
+    return None
+
+
 def km_opt_zero_producer(cfg: RunConfig) -> str | None:
     """What supplies horizontal mixing at ``km_opt = 0``, or None."""
     if cfg.bl_pbl_physics == SASE_PBL_SCHEME:
@@ -4508,6 +4654,9 @@ def validate_run_config(cfg: RunConfig) -> RunConfig:
         smoke_tracer=cfg.smoke_tracer,
         smoke_emission_file=cfg.smoke_emission_file,
         bl_pbl_physics=cfg.bl_pbl_physics)
+    if why is not None:
+        raise ValueError(why)
+    why = smoke_sources_refusal(cfg)
     if why is not None:
         raise ValueError(why)
     validate_radiation_driver_options(cfg)

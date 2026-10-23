@@ -764,6 +764,23 @@ class DomainState:
             self.smoke0 = rebuilt("smoke0", nz, ny, nx)
             self.smoke_emis = zeros(ny, nx)
             self.smoke_col = zeros(ny, nx)
+            # Its sources and sinks (woof/core/smoke_sources.py), each only
+            # under its own switch, so a tracer run without them keeps the
+            # inventory above.  ``smoke_inj_frac`` is the cached plume-rise
+            # profile (fractions of the column's emission per layer), read
+            # every step and refreshed on WRF's plumerisefire_frq schedule:
+            # SERIALIZED, because a resume between two plume calls cannot
+            # recompute it.  All zero means "not yet computed", which the
+            # source kernel reads as the surface profile.  ``smoke_inj_top``
+            # is the injection top diagnostic (m above ground),
+            # ``smoke_drydep_vel`` the deposition velocity (m s-1), and
+            # ``smoke_deposited``/``smoke_graset`` the accumulated surface
+            # deposition, all and settling (ug m-2): serialized, the
+            # accumulators because nothing reconstructs them.
+            from woof.core.smoke_sources import state_fields
+            for name, kind in state_fields(cfg).items():
+                setattr(self, name, zeros(nz, ny, nx) if kind == "mass"
+                        else zeros(ny, nx))
         # Prognostic/published subgrid turbulence energy.  The attribute
         # is ``e_sgs`` because ``self.e`` is already the WRF Coriolis
         # cosine parameter 2*Omega*cos(lat); the owning scheme's symbol

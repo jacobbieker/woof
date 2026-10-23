@@ -2623,7 +2623,12 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     # The smoke library's three sources call gfk_*/g64_* from the glibc
     # headers woof.smoke._kernels.module_source() prepends; priced as
     # smoke_composed.
-    "smoke_emission", "smoke_plumerise", "smoke_deposition"})
+    "smoke_emission", "smoke_plumerise", "smoke_deposition",
+    # The smoke sources' and sinks' glue (woof/core/smoke_sources.py) calls
+    # gfk_pow and the plume model's device code that
+    # woof.core.smoke_sources.module_source() prepends; priced as
+    # smoke_sources_composed.
+    "smoke_sources"})
 # face_mass, held_heating, rk_bookkeeping and surface_w (the dycore-host
 # speed lane's point-local units, 66af318bc) sat in this set on
 # 2026-09-30 under the same "no measurement platform in this lane"
@@ -2806,6 +2811,19 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         max_local_size_bytes=64,
         covers=frozenset({"smoke_emission", "smoke_plumerise",
                           "smoke_deposition"})),
+    # The smoke sources' and sinks' unit (woof/core/smoke_sources.py:
+    # glibc_flt32.cuh + smoke_plumerise.cu + smoke_sources.cu, -fmad=false
+    # --ftz=false), read on sm_86 (RTX A6000) at NVRTC 12.9.86, 2026-10-23:
+    # every kernel 0 B except the plume entries: smoke_plume_fire_columns
+    # 96 B (the library's plume body plus its per-column biome arrays) and
+    # the library's own smoke_plumerise_columns 64 B; the plume state is in
+    # dynamic shared memory.
+    # Launched by smoke_injection pbl/plumerise and the two sinks (with
+    # smoke_composed, whose kernels they call).
+    "smoke_sources_composed": ChainedTranslationUnitFrame(
+        module="smoke_sources_composed",
+        max_local_size_bytes=96,
+        covers=frozenset({"smoke_sources"})),
 }
 
 _seen_covers: set[str] = set()
@@ -3286,6 +3304,13 @@ def domain_kernel_modules(dc: DomainConfig, *,
         modules.add("ieva")                    # A158, woof/core/ieva.py
     if getattr(dc.run, "smoke_tracer", False):
         modules.add("smoke_tracer")            # woof/core/smoke_tracer.py
+        from woof.core.smoke_sources import injection, sinks_on
+        if injection(dc.run) != "surface" or sinks_on(dc.run):
+            # woof/core/smoke_sources.py's glue unit and the woof.smoke
+            # library unit whose profile, deposition and settling kernels
+            # it launches.
+            modules.add("smoke_sources_composed")
+            modules.add("smoke_composed")
     # WRF swint_opt = 1 (woof/core/swint.py) and aer_opt = 3 on the
     # legacy RRTMG shortwave (woof/core/rrtmg_aerosol_optics.py).
     if int(getattr(dc.run, "swint_opt", 0) or 0) == 1:
@@ -5170,6 +5195,7 @@ def scratch_slot_registry(cfg: RunConfig, *,
             from woof.core.smoke_tracer import PBL_COLUMN_PIECE
             piece = min(PBL_COLUMN_PIECE, int(cfg.ny) * int(cfg.nx))
             slots["smoke_pbl_work"] = (piece * (5 * int(cfg.nz) + 1),)
+        slots.update(smoke_sources_scratch_slots(cfg))
     if cfg.km_opt in (2, 3, 4):
         slots.update(smag_km=m, smag_kh=m)
         if cfg.diff_opt == 1:
@@ -5578,6 +5604,25 @@ class ScratchSlotLifetime:
 # Committed audit table. tests/test_preflight.py expands every registry and
 # F4-manifest slot through this table, rejects gaps/overlaps, and separately
 # proves that every arena-admitted row is write-before-read classified.
+#: The smoke sources' float32 work planes (woof/core/smoke_sources.py),
+#: each written before it is read within one call.
+SMOKE_SOURCES_F32_WORK_SLOTS = (
+    "smoke_src_u", "smoke_src_v", "smoke_src_theta", "smoke_src_pi",
+    "smoke_src_qv", "smoke_src_zt", "smoke_src_zw", "smoke_src_dz",
+    "smoke_src_t", "smoke_src_rho", "smoke_src_zref", "smoke_src_eburn",
+    "smoke_src_ztop", "smoke_src_unit", "smoke_src_flux1",
+    "smoke_src_pblsrc", "smoke_src_frac", "smoke_src_dg", "smoke_src_lnsig",
+    "smoke_src_dens", "smoke_src_airtemp", "smoke_src_airdens",
+    "smoke_src_obukhov", "smoke_src_kinvisc", "smoke_src_freepath",
+    "smoke_src_resist_a", "smoke_src_depvel0", "smoke_src_depvel3",
+    "smoke_src_resist_s0", "smoke_src_resist_s3", "smoke_src_vsettl0",
+    "smoke_src_vsettl3", "smoke_src_drydep_tend", "smoke_src_drydep_flux")
+#: Its int32 planes, outside the float32-only shared arena.
+SMOKE_SOURCES_I32_SLOTS = (
+    "smoke_src_k1", "smoke_src_k2", "smoke_src_status", "smoke_src_season",
+    "smoke_src_surftype", "smoke_src_wetsurf")
+
+
 SCRATCH_SLOT_LIFETIME_AUDIT = (
     ScratchSlotLifetime(
         ("diff1_theta_initial",), "carrying",
@@ -5671,6 +5716,27 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "tendency on the same footing as the smag_r* row -- zeroed before "
         "the RK loop, read by all three stages, never carried across a "
         "step; smag_tke_tmp and smag_mut are within-call staging"),
+    ScratchSlotLifetime(
+        SMOKE_SOURCES_F32_WORK_SLOTS, "write_before_read",
+        "woof/core/smoke_sources.py:_env,run_plume,run_pbl_profile,"
+        "_apply_drydep",
+        "every ambient, plume, profile and deposition work plane is written "
+        "in full by the launch that produces it before the next launch of "
+        "the same call reads it; nothing is read across calls (the cached "
+        "plume profile is the serialized state.smoke_inj_frac)"),
+    ScratchSlotLifetime(
+        ("smoke_src_heat", "smoke_src_area"), "carrying",
+        "woof/core/smoke_sources.py:_fire_planes",
+        "the emission file's fire_heat_flux/fire_area, read once into these "
+        "slots and read again at every later plume call; a resume re-reads "
+        "the file (the _smoke_plume_bound marker is infra)"),
+    # EXCLUDED (int32): the shared arena is float32-only.
+    ScratchSlotLifetime(
+        SMOKE_SOURCES_I32_SLOTS, "excluded_unproven",
+        "woof/core/state.py:ScratchArena.view; "
+        "woof/core/smoke_sources.py:run_plume,_apply_drydep",
+        "int32 plume levels and status words and Zhang's integer class, "
+        "season and wetness planes; the shared arena admits float32 only"),
     ScratchSlotLifetime(
         ("smoke_pbl_work",), "write_before_read",
         "woof/core/smoke_tracer.py:mix_pbl",
@@ -6790,6 +6856,59 @@ def mynn_scalar_transient_shapes(cfg: RunConfig) -> dict[str, tuple[int, ...]]:
     return {"mynn_scalar/local_diffusion_peak": (max(solve, coupling),)}
 
 
+def smoke_sources_scratch_slots(cfg) -> dict[str, tuple[int, ...]]:
+    """The scratch slots woof/core/smoke_sources.py requests for ``cfg``.
+
+    Empty unless the tracer runs a non-surface injection or a sink, so no
+    other registry moves.
+    """
+    from woof.core.smoke_sources import drydep_on, injection, settling_on
+
+    nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
+    m, fl, s2 = (nz, ny, nx), (nz + 1, ny, nx), (ny, nx)
+    mode = injection(cfg)
+    slots: dict[str, tuple[int, ...]] = {}
+    if mode == "plumerise":
+        for name in ("u", "v", "theta", "pi", "qv", "zt", "dz", "eburn"):
+            slots[f"smoke_src_{name}"] = m
+        slots["smoke_src_zw"] = fl
+        for name in ("ztop", "k1", "k2", "status", "heat", "area"):
+            slots[f"smoke_src_{name}"] = s2
+    if mode == "pbl":
+        slots["smoke_src_zw"] = fl
+        for name in ("unit", "pblsrc", "frac"):
+            slots[f"smoke_src_{name}"] = m
+        slots["smoke_src_flux1"] = s2
+    if drydep_on(cfg) or settling_on(cfg):
+        for name in ("dz", "t", "rho"):
+            slots[f"smoke_src_{name}"] = m
+        slots["smoke_src_zref"] = s2
+    if drydep_on(cfg):
+        for name in ("dg", "lnsig", "dens", "airtemp", "airdens", "obukhov",
+                     "season", "surftype", "wetsurf", "kinvisc", "freepath",
+                     "resist_a", "depvel0", "depvel3", "resist_s0",
+                     "resist_s3", "vsettl0", "vsettl3", "drydep_tend",
+                     "drydep_flux"):
+            slots[f"smoke_src_{name}"] = s2
+    return slots
+
+
+def smoke_sources_transient_shapes(cfg) -> dict[str, tuple[int, ...]]:
+    """GOCART settling's REAL*8 results, a per-call transient.
+
+    woof/core/smoke_sources.py:_apply_settling allocates the routine's
+    float64 column result and its two surface planes per call (the shared
+    arena is float32-only): priced here in four-byte words, so twice the
+    element count.  Empty without settling.
+    """
+    from woof.core.smoke_sources import settling_on
+
+    if not settling_on(cfg):
+        return {}
+    nz, columns = int(cfg.nz), int(cfg.ny) * int(cfg.nx)
+    return {"smoke_sources/settling_f64": (2 * (nz + 2) * columns,)}
+
+
 def smoke_tracer_transient_shapes(
         cfg: RunConfig) -> dict[str, tuple[int, ...]]:
     """Peak live FP32 storage added by the smoke tracer's own operations.
@@ -7149,6 +7268,7 @@ def estimate_domain(dc: DomainConfig, *, spec_bdy_width: int | None = None,
     items += _items("transient", ysu_output_transient_shapes(run))
     items += _items("transient", mynn_scalar_transient_shapes(run))
     items += _items("transient", smoke_tracer_transient_shapes(run))
+    items += _items("transient", smoke_sources_transient_shapes(run))
     items += mynn_mixscalars_memory_items(run, tile_buffer=tile_buffer)
     from woof.core.physics_inventory import terrain_drag_transient_shapes
     items += _items("transient", terrain_drag_transient_shapes(run))

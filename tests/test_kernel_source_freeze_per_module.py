@@ -854,6 +854,13 @@ BASELINE_PINNED: dict[str, str] = {
         "7cea35690f286f3a4d2e794218ca14f8be611a5df9aa9889cf1caf49696a14ab",
     "smoke_deposition":
         "2a32d0d8918cfac71f808014f00fd43f95c522af2b52b34232d2ffbcd01e6d90",
+    # feat/smoke-sources-sinks: the smoke tracer's injection-profile and
+    # removal glue (woof/core/smoke_sources.py, composed after
+    # glibc_flt32.cuh and smoke_plumerise.cu, -fmad=false --ftz=false),
+    # word-equal to its NumPy twins and around the library's own kernels
+    # word for word (tests/test_smoke_sources.py).
+    "smoke_sources":
+        "aedf5422c810ae608082594de6ddbd3ab53cc6438f39228af718a120c96ddeac",
 }
 
 _FROZEN = _frozen_module()

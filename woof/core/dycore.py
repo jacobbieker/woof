@@ -2129,22 +2129,24 @@ def prepare_smoke_tendency(state: DomainState, cfg: RunConfig, *,
     One coupled ``(nz, ny, nx)`` buffer, ``smag_rsmoke``, that every RK
     stage of :func:`woof.core.moist.advance_smoke_stage` reads: the km_opt
     mixing and sixth-order filter :func:`prepare_fixed_tendencies` left in
-    it (the tracer's ``_smag2d_specs`` row), plus the prescribed surface
-    emission on the lowest layer (:func:`woof.core.smoke_tracer.
-    add_surface_source`).  ``mixed`` is what prepare_fixed_tendencies
+    it (the tracer's ``_smag2d_specs`` row), plus the emission through the
+    configured injection profile (:func:`woof.core.smoke_sources.
+    prepare_injection`; the default ``surface`` profile is
+    :func:`woof.core.smoke_tracer.add_surface_source` itself, the lowest
+    layer).  ``mixed`` is what prepare_fixed_tendencies
     returned: whether it zeroed and wrote the held rows this step.  When it
     did not, the buffer is zeroed here first.  None on every state without
     the tracer, so nothing is allocated or launched.
     """
     if getattr(state, "smoke", None) is None:
         return None
-    from woof.core import smoke_tracer
+    from woof.core import smoke_sources, smoke_tracer
 
     smoke_tracer.bind_emission(state, cfg)
     held = state.scratch(state.p.shape, "smag_rsmoke")
     if not mixed:
         held[...] = 0
-    smoke_tracer.add_surface_source(state, held)
+    smoke_sources.prepare_injection(state, cfg, held)
     return held
 
 
@@ -4190,6 +4192,12 @@ def _step_body(state: DomainState, cfg: RunConfig, *, acoustic: bool,
             state.physics.accept_microphysics(
                 microphysics_result, dt=cfg.dt)
         update_diagnostics(state, cfg.hypsometric_opt)  # after the RK loop)
+    if getattr(state, "smoke_deposited", None) is not None:
+        # The smoke tracer's dry deposition and settling, where WRF's
+        # solve_em calls chem_driver: after the RK loop and microphysics
+        # (woof.core.smoke_sources.apply_sinks).  Absent, one getattr.
+        from woof.core.smoke_sources import apply_sinks
+        apply_sinks(state, cfg)
     close_periodic_alias(state, cfg)
     if getattr(state, "smoke_col", None) is not None:
         # The smoke tracer's column load for the history writer, from the

@@ -847,6 +847,12 @@ def restart_identity_payload(exp) -> dict:
         # is the tracer's only source.
         if not run.get("smoke_tracer", False):
             run.pop("smoke_tracer", None)
+        # Its sources and sinks, absent-stays-absent at every default
+        # (surface injection, no deposition, no settling).
+        from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
+        for key, default in SMOKE_SOURCE_DEFAULTS.items():
+            if key in run and run[key] == default:
+                run.pop(key)
         # The file's bytes, not its path alone, are the source.
         from woof.core.smoke_tracer import bind_emission_identity
         bind_emission_identity(run)

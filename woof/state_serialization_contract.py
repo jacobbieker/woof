@@ -52,6 +52,13 @@ STATE_SERIALIZED_ATTRS = (
     # Absent on every state that leaves the tracer off, so no existing
     # inventory moves.
     "smoke", "smoke_emis", "smoke_col",
+    # Its sources and sinks (woof/core/smoke_sources.py), each allocated
+    # only under its own switch: the cached plume-rise profile (a resume
+    # between two plume calls cannot recompute it), the injection-top and
+    # deposition-velocity diagnostics (p/al/alt's reason) and the two
+    # accumulated depositions nothing reconstructs.
+    "smoke_inj_frac", "smoke_inj_top", "smoke_drydep_vel",
+    "smoke_deposited", "smoke_graset",
     "qi", "qs", "qg", "nc", "nr", "ni", "ns", "ng",
     "qh", "qndrop", "qnr", "qni", "qns", "qng", "qnh", "qnn",
     "qvolg", "qvolh",

@@ -6598,6 +6598,17 @@ def initialize_physics(
     if int(getattr(cfg, "topo_wind", 0) or 0)             or int(getattr(cfg, "gwd_opt", 0) or 0):
         driver.terrain_drag = _attach_terrain_drag(
             state, cfg, f, terrain_drag_static)
+    # The smoke tracer's dry deposition (woof.core.smoke_sources): which
+    # land-use classes ``ivgtyp`` holds and the start time Zhang's season
+    # is dated from.  Only where the deposition runs, so every other
+    # driver is built exactly as before (restart: rebuilt).
+    from woof.core.smoke_sources import smoke_surface
+    surface = smoke_surface(
+        cfg, landuse_dataset,
+        radiation_start_time if radiation_start_time is not None
+        else noahmp_start_time)
+    if surface is not None:
+        driver.smoke_surface = surface
     state.physics = driver
     # WRF's mp_init, ONCE per domain, exactly where phy_init runs it:
     # module_physics_init.F:1635 calls mp_init as the last physics

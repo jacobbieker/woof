@@ -1802,6 +1802,15 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "the unit read 0 B.  Re-read on any device by "
         "tests/test_smoke_physics.py::"
         "test_the_smoke_unit_compiles_within_its_priced_frame.",
+    "smoke_sources_composed":
+        "glibc_flt32.cuh + smoke_plumerise.cu + smoke_sources.cu, "
+        "assembled by woof/core/smoke_sources.module_source() and compiled "
+        "directly with -fmad=false --ftz=false; smoke_sources.cu fails "
+        "standalone (gfk_pow and the plume model's device code).  Priced "
+        "96 B, smoke_plume_fire_columns' reading on sm_86 (RTX A6000) at "
+        "NVRTC 12.9.86, 2026-10-23 (smoke_plumerise_columns 64 B); every "
+        "other kernel of the unit read 0 B.  Re-read on any device by tests/test_smoke_sources.py::"
+        "test_the_sources_unit_compiles_within_its_priced_frame.",
 })
 
 

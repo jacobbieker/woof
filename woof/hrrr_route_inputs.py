@@ -1345,6 +1345,20 @@ ROUTE_FORECAST_TOML_FIELDS: Mapping[str, str] = MappingProxyType({
     "smoke_emission_file": (
         "woof/core/smoke_tracer.py, the tracer's prescribed surface "
         "emission"),
+    # Its sources' and sinks' parameters with no WRF-Chem namelist
+    # spelling (the prescribed plume fire, WRF's per-biome mean_fct and the
+    # particle WRF-Chem takes from its aerosol modules); the forecast TOML
+    # carries them and woof/core/smoke_sources.py reads them.
+    "smoke_plume_heat_flux": (
+        "woof/core/smoke_sources.py, the plume model's prescribed fire"),
+    "smoke_plume_fire_area": (
+        "woof/core/smoke_sources.py, the plume model's prescribed fire"),
+    "smoke_plume_flaming_fraction": (
+        "woof/core/smoke_sources.py, the plume model's flaming share"),
+    "smoke_particle_radius": (
+        "woof/core/smoke_sources.py, the deposition and settling particle"),
+    "smoke_particle_density": (
+        "woof/core/smoke_sources.py, the deposition and settling particle"),
 })
 
 

@@ -181,6 +181,13 @@ _RUNTIME_OUTPUT_KEYS = {
     "fdda": set(),
     "grib2": set(),
     "namelist_quilt": set(),
+    # WRF-Chem's fire-smoke keys the importer maps (the smoke tracer, its
+    # plume-rise injection and its dry deposition): runtime model options
+    # read by the forecast only; none changes what RW-WPS must prepare.
+    "chem": {
+        "chem_opt", "tracer_opt", "biomass_burn_opt", "plumerisefire_frq",
+        "scale_fire_emiss", "aer_drydep_opt", "vertmix_onoff", "chemdt",
+    },
 }
 
 #: Domain TILING keys, which are not moving-nest keys at all -- they

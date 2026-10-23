@@ -883,7 +883,7 @@ WPS_SECTIONS = ("share", "geogrid", "ungrib", "metgrid",
                 *WPS_AUXILIARY_SECTIONS)
 INPUT_SECTIONS = ("time_control", "domains", "physics", "fdda", "dynamics",
                   "bdy_control", "grib2", "namelist_quilt", "noah_mp",
-                  "stoch")
+                  "stoch", "chem")
 #: Groups whose every key is recorded and dropped: ungrib/metgrid staging
 #: is replaced by woof's own ingest; FDDA (once no nudging selector is on),
 #: GRIB2 and quilt-server keys have no woof counterpart.
@@ -1524,6 +1524,143 @@ def _uniform(section: str, key: str, values: list):
                    "per-domain values must be identical (woof shares "
                    "this setting across domains).")
     return first
+
+
+#: WRF-Chem's Zhang (2001) aerosol dry deposition options woof ports
+#: (module_aer_drydep.F:319-354).
+_CHEM_AER_DRYDEP_OPTS = (301, 302, 311, 312)
+#: WRF-Chem's biomass-burning options, each of which runs plumerise
+#: (emissions_driver.F:682-686).
+_CHEM_BIOMASS_BURN_OPTS = (1, 2, 3, 4, 5)
+
+
+#: WRF Registry defaults (Registry/registry.chem) of the &chem keys the
+#: importer reads: a max_domains column keeps them in its omitted tail.
+_CHEM_REGISTRY_DEFAULTS = {
+    "chem_opt": 0, "tracer_opt": 0, "biomass_burn_opt": 0,
+    "plumerisefire_frq": 180, "scale_fire_emiss": False,
+    "aer_drydep_opt": 1, "vertmix_onoff": 1, "chemdt": 2.0,
+}
+
+
+def _import_chem_smoke(chem: "_Section", max_dom: int, drop,
+                       notices: list) -> dict:
+    """The &chem keys woof's smoke tracer maps, as [shared] settings.
+
+    ``tracer_opt = 1`` (TRACER_SMOKE) is the passive smoke tracer;
+    ``biomass_burn_opt`` 1-5 run WRF-Chem's plumerise, so they select
+    ``smoke_injection = "plumerise"`` at ``plumerisefire_frq`` minutes,
+    with ``scale_fire_emiss = .true.`` (woof always conserves the
+    emission); ``aer_drydep_opt`` 301/302/311/312 select the Zhang (2001)
+    dry deposition (1, the Registry default, and <= 0 give zero aerosol
+    velocities under ``chem_opt = 0`` and are inert).  ``chem_opt`` must be
+    0 (no chemistry), ``vertmix_onoff`` 1 and ``chemdt`` is inert.  Every
+    column is read as WRF reads it -- an omitted tail keeps the Registry
+    default -- and must be the same on every domain, the settings being
+    [shared].  Anything else is refused here or by chem.finish().
+    """
+    settings: dict = {}
+
+    def uniform(key):
+        if key not in chem.entries:
+            return None, None
+        values = chem.registry_col(key, max_dom, _CHEM_REGISTRY_DEFAULTS[key])
+        return _uniform("chem", key, values), values
+
+    chem_opt, values = uniform("chem_opt")
+    if chem_opt is not None and chem_opt != 0:
+        raise _err("chem", "chem_opt", values,
+                   "woof carries no WRF-Chem chemistry or aerosol "
+                   "mechanism; only the passive smoke tracer (chem_opt = 0, "
+                   "tracer_opt = 1) is imported.")
+    tracer_opt, values = uniform("tracer_opt")
+    if tracer_opt not in (None, 0, 1):
+        raise _err("chem", "tracer_opt", values,
+                   "woof's smoke tracer is WRF-Chem's TRACER_SMOKE "
+                   "(tracer_opt = 1); the test tracer packages are not "
+                   "carried.")
+    smoke = tracer_opt == 1
+    if smoke:
+        settings["smoke_tracer"] = True
+    burn, values = uniform("biomass_burn_opt")
+    if burn not in (None, 0) and burn not in _CHEM_BIOMASS_BURN_OPTS:
+        raise _err("chem", "biomass_burn_opt", values,
+                   "WRF-Chem defines biomass_burn_opt 0-5.")
+    burning = burn in _CHEM_BIOMASS_BURN_OPTS
+    if burning and not smoke:
+        raise _err("chem", "biomass_burn_opt", values,
+                   "woof's plume-rise injection lifts the smoke tracer; set "
+                   "tracer_opt = 1 with it.")
+    if burning:
+        settings["smoke_injection"] = "plumerise"
+    frq, values = uniform("plumerisefire_frq")
+    if frq is not None:
+        if burning:
+            if isinstance(frq, bool) or not isinstance(frq, int) or frq < 0:
+                raise _err("chem", "plumerisefire_frq", values,
+                           "must be a whole number of minutes >= 0.")
+            settings["smoke_plumerise_interval_s"] = float(60 * frq)
+        else:
+            drop("chem", "plumerisefire_frq", values,
+                 "inert: WRF calls plumerise only under biomass_burn_opt > 0")
+    scale = (chem.registry_col("scale_fire_emiss", max_dom, False)
+             if "scale_fire_emiss" in chem.entries else None)
+    if scale is not None:
+        flags = _require_bools("chem", "scale_fire_emiss", scale)
+        if burning and not all(flags):
+            raise _err("chem", "scale_fire_emiss", scale,
+                       "woof's plume injection always renormalizes the "
+                       "column to the emission's total (WRF's "
+                       "scale_fire_emiss = .true.); the .false. form adds "
+                       "the flaming share on top of the input and is not "
+                       "carried.  Set scale_fire_emiss = .true.")
+        drop("chem", "scale_fire_emiss", scale,
+             "woof's plume injection is the .true. form, always"
+             if burning else
+             "inert: read only by plumerise_driver (biomass_burn_opt > 0)")
+    elif burning:
+        raise _err("chem", "scale_fire_emiss", [False],
+                   "WRF's default .false. adds the flaming share on top of "
+                   "the input emission, and woof always conserves it (the "
+                   ".true. form).  Set scale_fire_emiss = .true.")
+    drydep, values = uniform("aer_drydep_opt")
+    if drydep is not None and drydep <= 1:
+        drop("chem", "aer_drydep_opt", values,
+             "inert: under chem_opt = 0 WRF's aerosol mechanism id is 0 and "
+             "every aerosol deposition velocity is zero")
+    elif drydep is not None:
+        if drydep not in _CHEM_AER_DRYDEP_OPTS:
+            raise _err("chem", "aer_drydep_opt", values,
+                       "woof ports WRF-Chem's Zhang (2001) particle dry "
+                       "deposition (301, 302, 311, 312) for the smoke "
+                       "tracer; the other options need WRF-Chem's aerosol "
+                       "modules.")
+        if not smoke:
+            raise _err("chem", "aer_drydep_opt", values,
+                       "the deposition removes the smoke tracer; set "
+                       "tracer_opt = 1 with it.")
+        settings["smoke_drydep"] = True
+        notices.append(
+            f"&chem aer_drydep_opt = {drydep} applies Zhang (2001) dry "
+            "deposition to the smoke tracer.  WRF-Chem deposits its aerosol "
+            "species with it, not its passive tracer array, which WRF "
+            "mixes with a zero deposition velocity; woof treats the smoke "
+            "tracer as the PM2.5 aerosol the option names.")
+        if drydep != 301:
+            settings["smoke_aer_drydep_opt"] = int(drydep)
+    vertmix, values = uniform("vertmix_onoff")
+    if vertmix is not None and vertmix != 1:
+        raise _err("chem", "vertmix_onoff", values,
+                   "woof's smoke tracer always mixes in the PBL scheme's "
+                   "own call (WRF's diff4d); turning chemistry mixing off is "
+                   "not carried.")
+    chemdt, values = uniform("chemdt")
+    if chemdt is not None:
+        drop("chem", "chemdt", values,
+             "the chemistry time step gates WRF-Chem's mechanism, which woof "
+             "does not run; the smoke tracer's deposition and settling run "
+             "every step, as dry_dep_driver does")
+    return settings
 
 
 def _require_bools(section: str, key: str, values: list) -> list[bool]:
@@ -2478,6 +2615,7 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                    str(input_path))
     noahmp = _Section("noah_mp", inp.get("noah_mp", {}), str(input_path))
     stoch = _Section("stoch", inp.get("stoch", {}), str(input_path))
+    chem = _Section("chem", inp.get("chem", {}), str(input_path))
     # Keys only the operational WRF 3.9 fork (NOAA-EMC/HRRR) defines: a
     # namelist that carries any of them was written for that fork, so its
     # Thompson runs as the fork's (thompson_version = "wrf_39_noaa", emitted
@@ -5438,6 +5576,12 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         else [False] + [True] * (max_dom - 1)
     bdy.finish()
 
+    # ---- &chem: the smoke tracer and its sources and sinks ---------------
+    # Only WRF-Chem's passive fire-smoke surface is mapped; every other
+    # &chem key is refused by name at chem.finish().
+    smoke_settings = _import_chem_smoke(chem, max_dom, drop, notices)
+    chem.finish()
+
     if stochastic_controls is not None:
         from types import SimpleNamespace
         from woof.config import validate_spp_config
@@ -5654,6 +5798,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         lines.append(f"{_topo_key} = {_topo_col[0]}")
     for _drag_key, _drag_col in terrain_drag_columns.items():
         lines.append(f"{_drag_key} = {_drag_col[0]}")
+    for _smoke_key, _smoke_value in smoke_settings.items():
+        lines.append(f"{_smoke_key} = {_fmt(_smoke_value)}")
     if shadlen is not None:
         lines.append(f"shadlen = {_fmt(shadlen)}")
     lines += [
@@ -5989,7 +6135,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     handled = ({(d.section, d.key) for d in dropped}
                | {(f.section, f.key) for f in fixed})
     translated: list[TranslatedKey] = []
-    for section_obj in (share, geo, tc, dm, ph, dyn, bdy, noahmp, stoch):
+    for section_obj in (share, geo, tc, dm, ph, dyn, bdy, noahmp, stoch,
+                        chem):
         for key in section_obj.consumed:
             if (section_obj.name, key) not in handled:
                 translated.append(TranslatedKey(section=section_obj.name,

@@ -133,6 +133,13 @@ DEFAULT_OFF = frozenset({
     "alb_sol",
     # The passive smoke tracer, dropped off as in a header written before it.
     "smoke_tracer", "smoke_emission_file",
+    # Its sources and sinks, dropped at their defaults (surface injection,
+    # no deposition, no settling).
+    "smoke_injection", "smoke_plumerise_interval_s",
+    "smoke_plume_heat_flux", "smoke_plume_fire_area",
+    "smoke_plume_flaming_fraction", "smoke_drydep",
+    "smoke_aer_drydep_opt", "smoke_settling",
+    "smoke_particle_radius", "smoke_particle_density",
 })
 
 

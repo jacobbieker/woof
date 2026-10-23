@@ -123,7 +123,15 @@ def live_state_history_fields(state) -> dict[str, object]:
     for output_name, state_name in (
             ("QNWFA2D", "nwfa2d"), ("QNIFA2D", "nifa2d"),
             # The smoke tracer's column load, (ny, nx) like the two above.
-            ("SMOKE_COL", "smoke_col")):
+            ("SMOKE_COL", "smoke_col"),
+            # Its sources and sinks (woof/core/smoke_sources.py), each
+            # allocated only under its own switch: the injection top, the
+            # dry deposition velocity and the accumulated deposition, all
+            # and by settling.
+            ("SMOKE_INJ_TOP", "smoke_inj_top"),
+            ("SMOKE_DRYDEP_VEL", "smoke_drydep_vel"),
+            ("SMOKE_DEPOSITED", "smoke_deposited"),
+            ("SMOKE_GRASET", "smoke_graset")):
         value = getattr(state, state_name, None)
         if value is not None:
             fields[output_name] = value

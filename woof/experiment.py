@@ -5550,6 +5550,7 @@ def _public_config_value(value):
         run_document =(document if isinstance(value, RunConfig) else
                         document.get("run") if isinstance(value, DomainConfig) else None)
         if isinstance(run_document, dict):
+            from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
             # The generic forms existed before these selectors. Keep
             # their public bytes; an explicitly moved form remains bound.
             for name, default in (("ruc_irrigation", "wrf_461"),
@@ -5563,7 +5564,8 @@ def _public_config_value(value):
                                   ("rrtmg_cloud_optics_form", "wrf_461"),
                                   ("rrtmg_smoke_manifest", ""),
                                   ("smoke_tracer", False),
-                                  ("smoke_emission_file", "")):
+                                  ("smoke_emission_file", ""),
+                                  *SMOKE_SOURCE_DEFAULTS.items()):
                 if run_document.get(name, default) == default:
                     run_document.pop(name, None)
         return document

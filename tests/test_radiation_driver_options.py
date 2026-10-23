@@ -97,7 +97,14 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
                               "thompson_version", "thompson_fork_snow_fall",
                               "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
                               # The passive smoke tracer, appended after.
-                              "smoke_tracer", "smoke_emission_file"]
+                              "smoke_tracer", "smoke_emission_file",
+                              # Its sources and sinks, appended after.
+                              "smoke_injection", "smoke_plumerise_interval_s",
+                              "smoke_plume_heat_flux", "smoke_plume_fire_area",
+                              "smoke_plume_flaming_fraction", "smoke_drydep",
+                              "smoke_aer_drydep_opt", "smoke_settling",
+                              "smoke_particle_radius",
+                              "smoke_particle_density"]
     assert RunConfig.__dataclass_fields__["thompson_version"].default == "wrf_461"
     assert RunConfig.__dataclass_fields__["thompson_fork_snow_fall"].default == "blend"
 

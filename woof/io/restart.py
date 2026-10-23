@@ -131,6 +131,7 @@ from woof.core.uh_diag import (
     UH_FOLLOW_WINDOW_PREFIX as _UH_FOLLOW_WINDOW_PREFIX,
     is_tracker_window_slot as _is_tracker_window_slot)
 from woof.core.wind_gust_diag import WIND_MAXIMA_SLOTS
+from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
 from woof.core.nssl2_contract import (
     CONTRACT_ID as NSSL2_CONTRACT_ID,
     DEFAULT_RESTART_FIELDS as NSSL2_DEFAULT_RESTART_FIELDS,
@@ -517,6 +518,11 @@ STATE_INFRA_ATTRS = frozenset({
     # model state.  A resumed state rebinds the same file to the same
     # values on its first step.
     "_smoke_emission_bound",
+    # Which emission file's fire_heat_flux/fire_area planes
+    # woof.core.smoke_sources last read into its smoke_src_heat/area
+    # scratch: a provenance marker on the same footing.  A resumed state
+    # re-reads the file at its first plume call.
+    "_smoke_plume_bound",
     # The domain's ACTIVATION EPOCH in seconds, published beside
     # ``elapsed_seconds`` by woof.core.state.refresh_model_time and from
     # the same tick authority.  Same category, and for the same reason:
@@ -824,6 +830,11 @@ REBUILT_SCRATCH_PREFIXES = (
     # The smoke tracer's diff4d work row (core/smoke_tracer.py:mix_pbl),
     # written before every read inside one PBL call.
     "smoke_pbl_",
+    # The smoke sources' and sinks' work planes (core/smoke_sources.py):
+    # the ambient column, the plume model's outputs, the deposition
+    # inputs and the prescribed plume planes, each written before it is
+    # read within one call (the plume planes re-read from their file).
+    "smoke_src_",
     # UP_HELI_MAX per-step work planes (column UH + use_column flags),
     # overwritten by every launch; the accumulator itself is the exact
     # serialized name above, deliberately NOT under this prefix.
@@ -1003,6 +1014,11 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # holds only static coefficients and statistics, never a value a step
     # writes, so the rebuilt carrier is the one the checkpoint ran with.
     "terrain_drag",
+    # The smoke deposition's surface receipt (woof.core.smoke_sources.
+    # SmokeSurface): the land-use dataset name and the start time, which
+    # initialize_physics rebuilds from the same arguments on a resume; it
+    # holds no value a step writes.
+    "smoke_surface",
     # WRF's swint_opt = 1 carrier (woof.core.swint): initialize_physics
     # rebuilds it from the resumed RunConfig, latitude, longitude and start
     # time; it holds the per-step zenith-cosine scratch (a local in WRF's
@@ -2483,6 +2499,12 @@ def _drop_default_off_run_keys(values: dict) -> None:
     if not values.get("smoke_emission_file", ""):
         values.pop("smoke_emission_file", None)
         values.pop("smoke_emission_sha256", None)
+    # The smoke sources and sinks (woof.core.smoke_sources), each at its
+    # default the run before they existed: surface injection, no
+    # deposition, no settling, and parameters nothing reads.
+    for key, default in SMOKE_SOURCE_DEFAULTS.items():
+        if key in values and values[key] == default:
+            values.pop(key)
     # No prescribed smoke is the source forcing every earlier header ran.
     if not values.get("rrtmg_smoke_manifest", ""):
         values.pop("rrtmg_smoke_manifest", None)
@@ -4000,6 +4022,13 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
     live_config = _mosaic_checkpoint_config(dataclasses.asdict(cfg))
     from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
     bind_smoke_source_identity(live_config)
+    # The smoke emission file's bytes, bound on the live side exactly as
+    # configuration_echo bound them on the stored side: without it every
+    # checkpoint of a run with a smoke_emission_file was refused on its own
+    # digest ("absent from this build"), and a changed file could not be
+    # told from an unchanged one.
+    from woof.core.smoke_tracer import bind_emission_identity
+    bind_emission_identity(live_config)
     absent = object()
     differences = []
     policy_changes: list[str] = []
@@ -4110,6 +4139,10 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             # the tracer trajectory.
             stored = "" if stored is absent else stored
             live = "" if live is absent else live
+        if key in SMOKE_SOURCE_DEFAULTS:
+            # Old checkpoints ran surface injection with no sinks.
+            stored = SMOKE_SOURCE_DEFAULTS[key] if stored is absent else stored
+            live = SMOKE_SOURCE_DEFAULTS[key] if live is absent else live
         if key == "rrtmg_smoke_manifest":
             # Old checkpoints had no prescribed smoke. An enabled path and
             # its separately compared source identity change the trajectory.

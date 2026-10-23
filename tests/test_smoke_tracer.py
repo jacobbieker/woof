@@ -38,7 +38,11 @@ def _cfg(**kw):
 
 def test_fields_appended_last_and_default_off():
     names = [f.name for f in fields(RunConfig)]
-    assert names[-2:] == ["smoke_tracer", "smoke_emission_file"]
+    # The two tracer fields, followed only by the sources' and sinks'
+    # (tests/test_smoke_sources.py pins those).
+    at = names.index("smoke_tracer")
+    assert names[at:at + 3] == ["smoke_tracer", "smoke_emission_file",
+                                "smoke_injection"]
     cfg = _cfg()
     assert cfg.smoke_tracer is False
     assert cfg.smoke_emission_file == ""

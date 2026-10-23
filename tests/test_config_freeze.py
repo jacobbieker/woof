@@ -65,6 +65,14 @@ def _pop_fork_dycore_defaults(actual: dict) -> bool:
 def test_new_fields_are_reviewed_defaults_appended_last():
     """New fields remain appended, preserving positional construction."""
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # The smoke tracer's sources and sinks, appended at the surface
+    # injection with no deposition and no settling: nothing is allocated
+    # or launched (tests/test_smoke_sources.py).
+    from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
+    for name in reversed(tuple(SMOKE_SOURCE_DEFAULTS)):
+        assert names.pop() == name
+        assert (RunConfig.__dataclass_fields__[name].default
+                == SMOKE_SOURCE_DEFAULTS[name])
     # The passive smoke tracer and its prescribed emission, appended off:
     # nothing is allocated or launched (tests/test_smoke_tracer.py).
     assert names.pop() == "smoke_emission_file"
@@ -707,6 +715,9 @@ def test_every_existing_legacy_toml_resolves_identically():
         assert actual.pop("rrtmg_smoke_manifest") == ""
         assert actual.pop("smoke_tracer") is False
         assert actual.pop("smoke_emission_file") == ""
+        from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
+        for name, default in SMOKE_SOURCE_DEFAULTS.items():
+            assert actual.pop(name) == default, name
         assert actual.pop("alb_sol") == 0
         # The RUC SOILPROP lineage changed its default: a non-RUC case
         # never reads it; a RUC case changes answers (CHANGELOG).
@@ -765,6 +776,9 @@ def test_frozen_case_constructed_configs_resolve_identically():
         assert actual.pop("rrtmg_smoke_manifest") == ""
         assert actual.pop("smoke_tracer") is False
         assert actual.pop("smoke_emission_file") == ""
+        from woof.core.smoke_sources import SMOKE_SOURCE_DEFAULTS
+        for name, default in SMOKE_SOURCE_DEFAULTS.items():
+            assert actual.pop(name) == default, name
         assert actual.pop("alb_sol") == 0
         # The RUC SOILPROP lineage changed its default: a non-RUC case
         # never reads it; a RUC case changes answers (CHANGELOG).

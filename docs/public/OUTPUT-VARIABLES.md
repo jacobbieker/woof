@@ -516,6 +516,18 @@ Both are WOOF names: WRF's analogue is the `tracer` array, whose members
 are named by the `tracer_opt` package. They are absent from a run with
 the tracer off, so its inventory and disk price are unchanged.
 
+Its sources and sinks add, each only under its own switch:
+
+| variable | units | written with | meaning |
+|---|---|---|---|
+| `SMOKE_INJ_TOP` | m | `smoke_injection = "pbl"` or `"plumerise"` | top of the highest layer the column's emission enters, above ground; NaN where the plume model refused the column (where WRF stops), whose emission then went to the surface |
+| `SMOKE_DRYDEP_VEL` | m s-1 | `smoke_drydep` | Zhang (2001) mass deposition velocity, capped at 0.5 |
+| `SMOKE_DEPOSITED` | ug m-2 | `smoke_drydep` or `smoke_settling` | accumulated surface deposition since the domain started, dry deposition plus settling |
+| `SMOKE_GRASET` | ug m-2 | `smoke_settling` | the part of `SMOKE_DEPOSITED` from gravitational settling |
+
+WRF-Chem's tracer smoke has no deposition; its aerosol analogues are
+`DEP_VEL`, the `ddmass_*` accumulators and `GRASET_n`.
+
 ## Wind maxima and gusts
 
 With `nwp_diagnostics = 1` (`&time_control`, or the RunConfig key of the

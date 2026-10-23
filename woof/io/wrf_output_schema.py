@@ -1119,6 +1119,17 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
     "SMOKE": ("passive smoke tracer mass mixing ratio, per kg of dry air",
               "ug kg-1"),
     "SMOKE_COL": ("column-integrated passive smoke tracer mass", "ug m-2"),
+    # Its sources and sinks (woof/core/smoke_sources.py), each present only
+    # under its own switch.  woof's names: WRF-Chem's tracer smoke has no
+    # deposition, and its aerosol analogues are dep_vel/ddmass_*/GRASET_n.
+    "SMOKE_INJ_TOP": ("top of the smoke injection layers above ground",
+                      "m"),
+    "SMOKE_DRYDEP_VEL": ("smoke dry deposition velocity (Zhang 2001)",
+                         "m s-1"),
+    "SMOKE_DEPOSITED": ("accumulated smoke surface deposition, dry "
+                        "deposition and settling", "ug m-2"),
+    "SMOKE_GRASET": ("accumulated smoke gravitational settling deposition",
+                     "ug m-2"),
     "TKE_SHINHONG": ("Shin-Hong published subgrid turbulence kinetic "
                      "energy diagnostic", "m2 s-2"),
     # The SPLIT SUBGRID-FLUX DIAGNOSTIC (RunConfig sase_flux_diag, off by

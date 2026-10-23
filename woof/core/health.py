@@ -426,6 +426,22 @@ def rule_for_field(name: str, *, p_top: float | None = None) -> FieldRule:
         # The prescribed surface emission, kg m-2 s-1; load_emission
         # refuses a negative or non-finite file.
         return FieldRule("tracer", 0.0, 1.0)
+    if leaf == "smoke_inj_frac":
+        # The cached plume profile: fractions of a column's emission, each
+        # in [0, 1] up to rounding of the normalization.
+        return FieldRule("tracer", 0.0, 1.001)
+    if leaf == "smoke_inj_top":
+        # The injection top, m above ground.  A column the plume model
+        # refused (where WRF stops) carries NaN here, which this census
+        # names: its emission went to the surface instead.
+        return FieldRule("tracer", 0.0, 1.0e5)
+    if leaf == "smoke_drydep_vel":
+        # Zhang's mass deposition velocity under dry_dep_driver's 0.5 m s-1
+        # cap.
+        return FieldRule("tracer", 0.0, 0.5)
+    if leaf in ("smoke_deposited", "smoke_graset"):
+        # Accumulated surface deposition, ug m-2: booked non-negative.
+        return FieldRule("tracer", 0.0, 1.0e15)
     if leaf in ("effc", "effr", "effi", "effs"):
         # Morrison stores these diagnostics in microns.
         return FieldRule("effective_radius", 0.0, 1.0e6)
@@ -543,6 +559,9 @@ def collect_state_fields(state: Any, *, backend: str = "cpu",
             # Absent unless smoke_tracer is on; the None skip below keeps
             # every other census unchanged.
             "smoke", "smoke_emis", "smoke_col",
+            # Its sources and sinks, each absent unless its switch is on.
+            "smoke_inj_frac", "smoke_inj_top", "smoke_drydep_vel",
+            "smoke_deposited", "smoke_graset",
             # The dycore's exported advective forcing pair.  Absent on a
             # state with no cumulus consumer, and the None skip below is
             # what keeps every other census unchanged.
