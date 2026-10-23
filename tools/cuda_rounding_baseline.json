@@ -158,6 +158,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "4f5a11304e36ab2b6d858e5c690b5faeb33db02670565c773a39018c632a2c07",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module",
+    "factory_sha256": "848957484072ddf1df67d252f10b260923ceaa8aa586dfd4986c23c1f250f7ce",
+    "file": "woof/core/windfarm_fitch.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "4f894188f9f22b5fa4b2442ab6f4c1f24fd8f902443927cb564ef791ed8d60a1",
     "constructor": "RawKernel",
     "factory": "_validation_scan_kernel",
@@ -1154,6 +1162,10 @@
    {
     "file": "gpuwm/core/kernels/ysu_validation.cu",
     "sha256": "ed125e770df19cb3161c4a8bed53e55cc0d740f521f318cf9166e2a1063ddd25"
+   },
+   {
+    "file": "woof/core/kernels/windfarm_fitch.cu",
+    "sha256": "8b2f3964a1a1e831690ecabdbcfecc29e9f97a2568a99fdc63a9d77e1b11b5a2"
    }
   ],
   "python_compiler_files": [
@@ -1392,6 +1404,10 @@
    {
     "file": "gpuwm/verify/smallstep_vertical_oracle.py",
     "sha256": "dbf2d377f72588e7f0ef27a69ab6aa03a9c9f03751fbe411964278bd0e29a0f4"
+   },
+   {
+    "file": "woof/core/windfarm_fitch.py",
+    "sha256": "b51bc432885f04b207389ef4c04dc011bd60e957c3b9f85c655be70d651a3750"
    }
   ],
   "python_cuda_literals": [
@@ -2086,6 +2102,55 @@
     ]
    },
    "source_sha256": "890b767d643265047606374bb423643b6f7dc60bd14f7173f576c20f48879d0d"
+  },
+  "composed:windfarm_fitch": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "7461f0cd6453d5e548e5903f16a057f4befb4b55636e9547cc2ff76ff761fb11",
+    "sites": {
+     "100": 46
+    }
+   },
+   "native_differences": {
+    "sha256": "5aec4a9f4a01c8d3e24eb1a3438b2db79d8b3a09772e47c7136c7bd756b8380e",
+    "sites": {
+     "100": 2
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "31864a32d80874c5c273441a6ffb99c17c6eacf5e4e9cc6c439015d1d6e6a130"
   },
   "direct:rrtmg_legacy_adapter": {
    "assessment": "static_diagnostic_only",

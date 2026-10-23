@@ -1,0 +1,2675 @@
+{
+ "case": "lc_ladder_d02_3km",
+ "grid": {
+  "map_proj": "lambert",
+  "ref_lat": 35.2,
+  "ref_lon": -97.9,
+  "truelat1": 30.0,
+  "truelat2": 60.0,
+  "stand_lon": -97.9,
+  "dx": 12000.0,
+  "e_we": 61,
+  "e_sn": 49
+ },
+ "nests": [
+  [
+   21,
+   17,
+   4,
+   97,
+   73
+  ]
+ ],
+ "correction_factor": 0.25,
+ "turbines": [
+  {
+   "turbine_id": "lc_ladder_d02_3km-0000",
+   "lat": 35.071174806473294,
+   "lon": -98.07924942253737,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0001",
+   "lat": 36.23332451282574,
+   "lon": -97.55708321730276,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0002",
+   "lat": 35.33878959278883,
+   "lon": -96.3553216742443,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0003",
+   "lat": 36.077974650847885,
+   "lon": -97.33467349219336,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0004",
+   "lat": 34.88879311074223,
+   "lon": -96.71791496782492,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0005",
+   "lat": 35.95353861579373,
+   "lon": -98.42265205049841,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0006",
+   "lat": 34.9749742839531,
+   "lon": -98.57106507480324,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0007",
+   "lat": 34.67231494948898,
+   "lon": -96.74581504793838,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0008",
+   "lat": 34.88153766599662,
+   "lon": -97.58392420794422,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0009",
+   "lat": 34.85879920430116,
+   "lon": -97.41656080346189,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0010",
+   "lat": 36.225380031325315,
+   "lon": -96.5870573187155,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0011",
+   "lat": 35.51929565173993,
+   "lon": -98.39698285327108,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0012",
+   "lat": 34.82786031721396,
+   "lon": -97.15882690127432,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0013",
+   "lat": 36.190388014699515,
+   "lon": -96.80353365832622,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0014",
+   "lat": 36.0314200102927,
+   "lon": -98.27618224570364,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0015",
+   "lat": 36.00889872148913,
+   "lon": -98.90471205757797,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0016",
+   "lat": 35.698521325280126,
+   "lon": -98.73478222471869,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0017",
+   "lat": 35.26138706220594,
+   "lon": -96.81979999706243,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0018",
+   "lat": 35.74595060665768,
+   "lon": -98.37170170123193,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0019",
+   "lat": 34.82799203329234,
+   "lon": -97.00074648515431,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0020",
+   "lat": 36.001824288678385,
+   "lon": -96.1978078310924,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0021",
+   "lat": 35.42021182553151,
+   "lon": -97.88510211200116,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0022",
+   "lat": 35.5559056414582,
+   "lon": -96.60997112322241,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0023",
+   "lat": 34.676807278510566,
+   "lon": -97.26853272359642,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0024",
+   "lat": 34.54199185005988,
+   "lon": -98.89449966638011,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0025",
+   "lat": 34.76244124134063,
+   "lon": -98.83363047299804,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0026",
+   "lat": 34.92043597828975,
+   "lon": -96.37476157771891,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0027",
+   "lat": 34.83626240001132,
+   "lon": -96.30377150306725,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0028",
+   "lat": 35.64509776303608,
+   "lon": -96.29318243280858,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0029",
+   "lat": 35.462346659639806,
+   "lon": -97.51342239710073,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0030",
+   "lat": 35.9181469460106,
+   "lon": -97.07314218949551,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0031",
+   "lat": 35.6442386764462,
+   "lon": -97.96190194949708,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0032",
+   "lat": 35.62625294481114,
+   "lon": -97.89256399436618,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0033",
+   "lat": 35.08998077820563,
+   "lon": -97.99122246279677,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0034",
+   "lat": 34.67019535734401,
+   "lon": -97.73658586108058,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0035",
+   "lat": 34.63182401475239,
+   "lon": -97.74420239679296,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0036",
+   "lat": 34.6612300582655,
+   "lon": -98.47781941192443,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0037",
+   "lat": 36.071018275151,
+   "lon": -97.17498417386258,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0038",
+   "lat": 34.67483601995571,
+   "lon": -98.67800252452332,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0039",
+   "lat": 35.6819015420862,
+   "lon": -96.58307307570033,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0040",
+   "lat": 35.10116924757746,
+   "lon": -97.29779155338196,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0041",
+   "lat": 35.0599108285698,
+   "lon": -98.453546555417,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0042",
+   "lat": 35.173712268583145,
+   "lon": -97.01230125121708,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0043",
+   "lat": 36.118871694572135,
+   "lon": -98.49908076725245,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0044",
+   "lat": 34.554610762304286,
+   "lon": -97.4521093049056,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0045",
+   "lat": 35.87186211260207,
+   "lon": -99.11186597765317,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0046",
+   "lat": 34.400236339070986,
+   "lon": -99.12914225053493,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0047",
+   "lat": 34.98265999179343,
+   "lon": -96.53776858103902,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0048",
+   "lat": 34.927238034929545,
+   "lon": -98.82837149973398,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0049",
+   "lat": 35.68921928391893,
+   "lon": -97.27248083506083,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0050",
+   "lat": 35.00588523025189,
+   "lon": -97.40861443301037,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0051",
+   "lat": 35.531292224398385,
+   "lon": -99.00042312786474,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0052",
+   "lat": 34.729021322515834,
+   "lon": -96.8084801841639,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0053",
+   "lat": 35.942918347540456,
+   "lon": -97.43764065526022,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0054",
+   "lat": 34.654808555104964,
+   "lon": -96.52955958063274,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0055",
+   "lat": 35.76500206592107,
+   "lon": -98.73185418244543,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0056",
+   "lat": 36.135123087374566,
+   "lon": -96.52717020711907,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0057",
+   "lat": 36.14349104876895,
+   "lon": -96.31824815598816,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0058",
+   "lat": 35.184762068310576,
+   "lon": -96.16076740536653,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0059",
+   "lat": 34.57205442934714,
+   "lon": -98.4333109308862,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0060",
+   "lat": 35.33245097711307,
+   "lon": -96.85654832369971,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0061",
+   "lat": 34.669633626030695,
+   "lon": -98.77558129468287,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0062",
+   "lat": 35.26345118763178,
+   "lon": -97.64753760504311,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0063",
+   "lat": 34.49548498125685,
+   "lon": -96.5309119320284,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0064",
+   "lat": 35.09218531379039,
+   "lon": -96.29948255834046,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0065",
+   "lat": 34.65995168985812,
+   "lon": -98.77898920405005,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0066",
+   "lat": 35.12089289265435,
+   "lon": -97.77576898502122,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0067",
+   "lat": 36.035637457389775,
+   "lon": -96.8392481689283,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0068",
+   "lat": 35.34607322097874,
+   "lon": -96.11448096114248,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0069",
+   "lat": 34.88287950295221,
+   "lon": -97.49336070038953,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0070",
+   "lat": 34.676017702468606,
+   "lon": -98.46144572717895,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0071",
+   "lat": 35.111055609438814,
+   "lon": -97.30062155636938,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0072",
+   "lat": 35.358426378974436,
+   "lon": -98.11320901261956,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0073",
+   "lat": 35.74008579582379,
+   "lon": -96.55840918469062,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0074",
+   "lat": 34.69187614128957,
+   "lon": -98.86633081367904,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0075",
+   "lat": 35.33534863176238,
+   "lon": -96.94497502462195,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0076",
+   "lat": 36.04788375090079,
+   "lon": -98.68718504348811,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0077",
+   "lat": 35.81153011543792,
+   "lon": -96.61704596112571,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0078",
+   "lat": 36.17797996350505,
+   "lon": -98.05534526204991,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0079",
+   "lat": 34.444772931068876,
+   "lon": -97.79337269236993,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0080",
+   "lat": 34.77040243270236,
+   "lon": -97.93194582914447,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0081",
+   "lat": 35.35969053290665,
+   "lon": -96.79391064030642,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0082",
+   "lat": 35.558407343955004,
+   "lon": -98.12248097150132,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0083",
+   "lat": 36.147244280914784,
+   "lon": -97.26212171623934,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0084",
+   "lat": 35.03043915645407,
+   "lon": -98.57212946574487,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0085",
+   "lat": 35.46873253767187,
+   "lon": -97.69124277704543,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0086",
+   "lat": 34.73669263815678,
+   "lon": -98.29973585362205,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0087",
+   "lat": 36.11820985731473,
+   "lon": -98.23891972997433,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0088",
+   "lat": 34.819607398263095,
+   "lon": -96.34429117715399,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0089",
+   "lat": 35.06670063638845,
+   "lon": -97.53200144512084,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0090",
+   "lat": 35.34829723970052,
+   "lon": -97.80262311389208,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0091",
+   "lat": 34.92451097412078,
+   "lon": -98.06894255345895,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0092",
+   "lat": 35.30669653708582,
+   "lon": -97.33294980461164,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0093",
+   "lat": 35.98132237606438,
+   "lon": -97.10174000038796,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0094",
+   "lat": 34.609759019491484,
+   "lon": -97.33224949511867,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0095",
+   "lat": 35.051672841420036,
+   "lon": -98.41800952058429,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0096",
+   "lat": 36.03961512914726,
+   "lon": -96.26387437590358,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0097",
+   "lat": 35.143277444242905,
+   "lon": -98.78170126096381,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0098",
+   "lat": 35.68475329533815,
+   "lon": -99.09347575144943,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0099",
+   "lat": 34.50843316491924,
+   "lon": -98.1093821355567,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0100",
+   "lat": 34.43611599559526,
+   "lon": -98.00893684095945,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0101",
+   "lat": 35.230829995634046,
+   "lon": -98.80351914051766,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0102",
+   "lat": 34.76930689636112,
+   "lon": -96.58197933134545,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0103",
+   "lat": 35.28957914144952,
+   "lon": -96.19466825211532,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0104",
+   "lat": 35.29349612612467,
+   "lon": -97.5074078861357,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0105",
+   "lat": 34.546119244780776,
+   "lon": -97.06573458957882,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0106",
+   "lat": 34.98954015355026,
+   "lon": -97.5845620753588,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0107",
+   "lat": 35.561763458140405,
+   "lon": -98.44241151627563,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0108",
+   "lat": 36.036175217540865,
+   "lon": -96.82468862636279,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0109",
+   "lat": 36.20986500175725,
+   "lon": -98.90127603474139,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0110",
+   "lat": 35.43701301477699,
+   "lon": -98.93236082120939,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0111",
+   "lat": 35.72120214478688,
+   "lon": -98.15928825218526,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0112",
+   "lat": 35.601274512378815,
+   "lon": -97.19157080769003,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0113",
+   "lat": 35.124047768486406,
+   "lon": -98.40445171760456,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0114",
+   "lat": 34.95711745885046,
+   "lon": -98.41072186839847,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0115",
+   "lat": 34.96134640272273,
+   "lon": -97.65939486786596,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0116",
+   "lat": 35.45956235656847,
+   "lon": -98.77891075739052,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0117",
+   "lat": 35.45112473297018,
+   "lon": -97.97327078131218,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0118",
+   "lat": 34.7258445316034,
+   "lon": -98.75731871138112,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0119",
+   "lat": 34.47536832094713,
+   "lon": -96.55349083551152,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0120",
+   "lat": 34.527305122111954,
+   "lon": -97.28776467136424,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0121",
+   "lat": 34.94055620206244,
+   "lon": -98.57909302259293,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0122",
+   "lat": 35.84087663394226,
+   "lon": -97.11888568410177,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0123",
+   "lat": 35.986039230154304,
+   "lon": -97.85699752844471,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0124",
+   "lat": 36.07593028084602,
+   "lon": -98.69056180807274,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0125",
+   "lat": 36.098053639542485,
+   "lon": -96.4682408050503,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0126",
+   "lat": 34.57675307920809,
+   "lon": -97.94648524306842,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0127",
+   "lat": 34.70251965340471,
+   "lon": -97.43774122390266,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0128",
+   "lat": 35.37421425850709,
+   "lon": -96.19011379902935,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0129",
+   "lat": 35.449356931095465,
+   "lon": -98.63843579207492,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0130",
+   "lat": 35.114729309016916,
+   "lon": -97.93569666478027,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0131",
+   "lat": 35.84629722436482,
+   "lon": -97.78441596455804,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0132",
+   "lat": 36.035943190604385,
+   "lon": -96.19899904789378,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0133",
+   "lat": 34.717852485607956,
+   "lon": -98.81876190888153,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0134",
+   "lat": 36.193053378539844,
+   "lon": -97.31777774103165,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0135",
+   "lat": 34.94908441279447,
+   "lon": -96.75462574723963,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0136",
+   "lat": 36.088875200996384,
+   "lon": -98.34239982790587,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0137",
+   "lat": 34.83823914469242,
+   "lon": -97.85183080103013,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0138",
+   "lat": 34.82483050270226,
+   "lon": -97.2384090968635,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0139",
+   "lat": 36.010161363173715,
+   "lon": -98.52680903416478,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0140",
+   "lat": 35.02000661955497,
+   "lon": -97.15382325005305,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0141",
+   "lat": 35.05451324608923,
+   "lon": -98.27842755175368,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0142",
+   "lat": 34.83930807773377,
+   "lon": -96.95111153166738,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0143",
+   "lat": 35.73378508016358,
+   "lon": -98.14544194575546,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0144",
+   "lat": 34.8958387328281,
+   "lon": -98.27953793731797,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0145",
+   "lat": 34.538873810093385,
+   "lon": -98.32181552346009,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0146",
+   "lat": 35.645756514721356,
+   "lon": -97.93541967933999,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0147",
+   "lat": 34.496598174294874,
+   "lon": -96.25890551098871,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0148",
+   "lat": 34.828231503276946,
+   "lon": -98.66812578148097,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0149",
+   "lat": 35.85028827392568,
+   "lon": -96.93788134557985,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0150",
+   "lat": 35.02435608623781,
+   "lon": -96.40218423387086,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0151",
+   "lat": 36.20207067631806,
+   "lon": -97.62173289436936,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0152",
+   "lat": 34.44397902056538,
+   "lon": -98.85328596088686,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0153",
+   "lat": 36.086104764319856,
+   "lon": -98.4047890788118,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0154",
+   "lat": 34.628006533464315,
+   "lon": -96.8009366898375,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0155",
+   "lat": 34.75468745490255,
+   "lon": -97.52807021620396,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0156",
+   "lat": 35.08526600194659,
+   "lon": -96.11393834884672,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0157",
+   "lat": 34.968239528319884,
+   "lon": -98.36396710762176,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0158",
+   "lat": 34.7624172605391,
+   "lon": -96.74163032133839,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0159",
+   "lat": 35.21709369994516,
+   "lon": -97.12840264702629,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0160",
+   "lat": 34.75572727675637,
+   "lon": -96.78946190185388,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0161",
+   "lat": 34.78657457888986,
+   "lon": -98.55271188856443,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0162",
+   "lat": 34.47868173336565,
+   "lon": -96.20599997095627,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0163",
+   "lat": 36.164984234782615,
+   "lon": -97.9617704764022,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0164",
+   "lat": 35.3114862098019,
+   "lon": -97.55274128094658,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0165",
+   "lat": 34.45775384006457,
+   "lon": -96.15829321659612,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0166",
+   "lat": 34.64811060370901,
+   "lon": -98.33092714375573,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0167",
+   "lat": 35.34338062051512,
+   "lon": -97.23222585807707,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0168",
+   "lat": 34.91592876391328,
+   "lon": -96.27658068792357,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0169",
+   "lat": 36.21227730406532,
+   "lon": -96.74884326457277,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0170",
+   "lat": 36.04222380965455,
+   "lon": -96.76846574131804,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0171",
+   "lat": 35.78320297835093,
+   "lon": -96.13775686645812,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0172",
+   "lat": 35.6218947351591,
+   "lon": -99.18003881283602,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0173",
+   "lat": 36.21626740865389,
+   "lon": -97.8201879528799,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0174",
+   "lat": 34.98713899401377,
+   "lon": -97.24676226360782,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0175",
+   "lat": 35.3958985333694,
+   "lon": -99.14251448377081,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0176",
+   "lat": 34.49636704452597,
+   "lon": -97.91576504399552,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0177",
+   "lat": 34.37724247155485,
+   "lon": -99.03229808868213,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0178",
+   "lat": 36.18962635009623,
+   "lon": -96.61415468434569,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0179",
+   "lat": 35.627236857868375,
+   "lon": -96.69081043392157,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0180",
+   "lat": 35.2683678283829,
+   "lon": -97.00756717825107,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0181",
+   "lat": 34.71845378492413,
+   "lon": -97.54124186126671,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0182",
+   "lat": 35.50749184683292,
+   "lon": -97.24310885629359,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0183",
+   "lat": 35.60533210517607,
+   "lon": -96.73314463788677,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0184",
+   "lat": 34.60722407518436,
+   "lon": -97.78239756688242,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0185",
+   "lat": 35.87916088216839,
+   "lon": -97.86970455106194,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0186",
+   "lat": 35.92433541707124,
+   "lon": -98.94418615153012,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0187",
+   "lat": 36.147580438688024,
+   "lon": -98.06871580361633,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0188",
+   "lat": 36.11578879487016,
+   "lon": -99.1860360238365,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0189",
+   "lat": 34.984590624083886,
+   "lon": -97.1902306638666,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0190",
+   "lat": 35.29527119144917,
+   "lon": -98.64056174974758,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0191",
+   "lat": 35.24738769199302,
+   "lon": -97.47761908393721,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0192",
+   "lat": 34.79482976496353,
+   "lon": -97.1002096209429,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0193",
+   "lat": 35.350753436100405,
+   "lon": -98.1772042877385,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0194",
+   "lat": 35.9681083080086,
+   "lon": -97.53979141504277,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0195",
+   "lat": 34.947731966159786,
+   "lon": -97.70379384516923,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0196",
+   "lat": 36.23609045002145,
+   "lon": -97.3480632570296,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0197",
+   "lat": 34.71819526634895,
+   "lon": -96.49426058858194,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0198",
+   "lat": 35.09493223326191,
+   "lon": -97.2019398997171,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0199",
+   "lat": 34.807873750461965,
+   "lon": -96.64367829166281,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0200",
+   "lat": 35.76325186927134,
+   "lon": -97.16887725190037,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0201",
+   "lat": 35.408336392389636,
+   "lon": -96.87200430142866,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0202",
+   "lat": 35.12343291587438,
+   "lon": -97.01368282266685,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0203",
+   "lat": 34.53994888404288,
+   "lon": -96.95366463628591,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0204",
+   "lat": 35.482219975810466,
+   "lon": -98.1352513049826,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0205",
+   "lat": 35.57802160632527,
+   "lon": -97.62133106350086,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0206",
+   "lat": 35.86151576281693,
+   "lon": -96.42395854334853,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0207",
+   "lat": 35.27430680741473,
+   "lon": -96.99174284895298,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0208",
+   "lat": 36.145164011616245,
+   "lon": -98.30753266851417,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0209",
+   "lat": 36.08458828756706,
+   "lon": -96.55711962482292,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0210",
+   "lat": 34.514000788557,
+   "lon": -98.95583675463104,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0211",
+   "lat": 34.545107362534175,
+   "lon": -97.77523128025689,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0212",
+   "lat": 34.46051951223808,
+   "lon": -97.39113537269304,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0213",
+   "lat": 35.75225955708285,
+   "lon": -99.09773989637665,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0214",
+   "lat": 35.25719675708919,
+   "lon": -97.28022646587345,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0215",
+   "lat": 35.48732868612264,
+   "lon": -96.64452872707307,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0216",
+   "lat": 35.780906149559904,
+   "lon": -97.05346581032609,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0217",
+   "lat": 35.012315980620656,
+   "lon": -96.44859160956435,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0218",
+   "lat": 34.94922124839068,
+   "lon": -97.85528024804114,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0219",
+   "lat": 36.17038726724438,
+   "lon": -97.82095662948262,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0220",
+   "lat": 34.788285913224236,
+   "lon": -98.54233892468932,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0221",
+   "lat": 35.607566091230744,
+   "lon": -97.77011910569831,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0222",
+   "lat": 35.77205840884282,
+   "lon": -97.9414756638929,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0223",
+   "lat": 34.96202901330327,
+   "lon": -97.58164738483106,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0224",
+   "lat": 35.99164080872427,
+   "lon": -98.42954624623803,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0225",
+   "lat": 34.527858517700956,
+   "lon": -97.83288254645015,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0226",
+   "lat": 34.54503115462811,
+   "lon": -97.19744658058386,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0227",
+   "lat": 35.34643791455226,
+   "lon": -96.41411552655711,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0228",
+   "lat": 34.90094606349166,
+   "lon": -97.42543315547027,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0229",
+   "lat": 36.101588187058496,
+   "lon": -97.33192807949354,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0230",
+   "lat": 34.47857216822931,
+   "lon": -96.95569281062711,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0231",
+   "lat": 36.084502570090706,
+   "lon": -98.66850582094935,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0232",
+   "lat": 34.82913532469621,
+   "lon": -99.0210698254146,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0233",
+   "lat": 35.10511634567122,
+   "lon": -96.75547884172516,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0234",
+   "lat": 34.909113046845015,
+   "lon": -98.00534324989468,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0235",
+   "lat": 34.61126642845915,
+   "lon": -97.39280241704398,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0236",
+   "lat": 35.88344432117829,
+   "lon": -98.2381906715828,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0237",
+   "lat": 34.51520170188933,
+   "lon": -96.43466481667224,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0238",
+   "lat": 35.59113108045897,
+   "lon": -96.38826652085748,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0239",
+   "lat": 35.30216415739794,
+   "lon": -96.91142846320611,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0240",
+   "lat": 34.517294247546936,
+   "lon": -97.59844848548067,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0241",
+   "lat": 34.61662191916122,
+   "lon": -98.22899357700163,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0242",
+   "lat": 34.54740001367322,
+   "lon": -96.81063944175276,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0243",
+   "lat": 36.21778853414956,
+   "lon": -97.51736464095279,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0244",
+   "lat": 34.98010663770353,
+   "lon": -97.60027128688705,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0245",
+   "lat": 34.60545356532473,
+   "lon": -97.67593817475796,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0246",
+   "lat": 35.668047120324964,
+   "lon": -98.6910848167293,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0247",
+   "lat": 34.79632211184412,
+   "lon": -96.26155120654414,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0248",
+   "lat": 36.02029685145599,
+   "lon": -97.30223250150124,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0249",
+   "lat": 35.62258653941156,
+   "lon": -97.86670956605775,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0250",
+   "lat": 36.20485943879702,
+   "lon": -96.72705260535145,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0251",
+   "lat": 35.64609313753476,
+   "lon": -98.33154298738162,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0252",
+   "lat": 35.28974235398842,
+   "lon": -97.92724073051318,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0253",
+   "lat": 35.457701994707016,
+   "lon": -96.3074784787434,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0254",
+   "lat": 36.197306307629695,
+   "lon": -98.3535298711202,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0255",
+   "lat": 34.66773044925427,
+   "lon": -96.71559480676365,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0256",
+   "lat": 34.89333490525299,
+   "lon": -97.33162554784155,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0257",
+   "lat": 36.01532862499678,
+   "lon": -97.68939914372606,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0258",
+   "lat": 35.34015230128612,
+   "lon": -96.50237143787905,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0259",
+   "lat": 35.987451420975255,
+   "lon": -97.56251398377765,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0260",
+   "lat": 34.64486494629766,
+   "lon": -98.41730785365132,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0261",
+   "lat": 35.11440408402447,
+   "lon": -98.92929710639294,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0262",
+   "lat": 34.813141107902325,
+   "lon": -98.31746612037739,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0263",
+   "lat": 35.907534025022784,
+   "lon": -96.94712171007916,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0264",
+   "lat": 35.204647151312756,
+   "lon": -97.29818180254227,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0265",
+   "lat": 34.72444790121874,
+   "lon": -96.51690157294092,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0266",
+   "lat": 36.087842145708656,
+   "lon": -99.17724656247373,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0267",
+   "lat": 34.64057449456915,
+   "lon": -96.54239202475276,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0268",
+   "lat": 35.30105998255992,
+   "lon": -98.0505544364014,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0269",
+   "lat": 36.02030415654014,
+   "lon": -98.9700364978429,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0270",
+   "lat": 34.834605437442775,
+   "lon": -97.55962019159773,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0271",
+   "lat": 34.5535378210468,
+   "lon": -96.64700449797994,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0272",
+   "lat": 35.47275371835696,
+   "lon": -98.01914806168685,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0273",
+   "lat": 34.613686785270964,
+   "lon": -96.39702456231839,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0274",
+   "lat": 35.88593641391324,
+   "lon": -96.82594880181671,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0275",
+   "lat": 35.507668179477925,
+   "lon": -96.84115088528085,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0276",
+   "lat": 34.46087006353575,
+   "lon": -96.99905905677633,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0277",
+   "lat": 35.38435779763329,
+   "lon": -99.11789499700285,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0278",
+   "lat": 35.57628173602779,
+   "lon": -96.61043110860498,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0279",
+   "lat": 35.16690783886326,
+   "lon": -96.1904375707037,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0280",
+   "lat": 34.45530089291052,
+   "lon": -97.55214270331976,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0281",
+   "lat": 36.18745059611365,
+   "lon": -97.31049969097808,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0282",
+   "lat": 35.0342657714081,
+   "lon": -98.3166282884888,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0283",
+   "lat": 34.64953610953808,
+   "lon": -98.40566262201742,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0284",
+   "lat": 34.47334981494212,
+   "lon": -98.908845640967,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0285",
+   "lat": 35.20400645402454,
+   "lon": -98.75254260407633,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0286",
+   "lat": 34.885617487660035,
+   "lon": -96.18786785348505,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0287",
+   "lat": 34.99312622741701,
+   "lon": -96.2609167507685,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0288",
+   "lat": 35.607559851353166,
+   "lon": -97.6466447159753,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0289",
+   "lat": 34.691729043506356,
+   "lon": -99.1497045471798,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0290",
+   "lat": 35.36162136707971,
+   "lon": -96.82412612101047,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0291",
+   "lat": 34.9480200241979,
+   "lon": -99.0143161817939,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0292",
+   "lat": 34.61055539961377,
+   "lon": -97.17869596160324,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0293",
+   "lat": 35.452933407165794,
+   "lon": -98.17829774060567,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0294",
+   "lat": 35.410650660563164,
+   "lon": -98.12205000838827,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0295",
+   "lat": 35.03570229349384,
+   "lon": -98.8942763286035,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0296",
+   "lat": 35.26571791140383,
+   "lon": -96.39877192968896,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0297",
+   "lat": 35.44718893209017,
+   "lon": -97.30317691726964,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0298",
+   "lat": 34.838057118501816,
+   "lon": -96.5039871188294,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0299",
+   "lat": 34.61635634526151,
+   "lon": -96.98183110596466,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0300",
+   "lat": 34.52301590590957,
+   "lon": -98.76612446137528,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0301",
+   "lat": 35.71769599102562,
+   "lon": -98.91777974084391,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0302",
+   "lat": 35.595084471733216,
+   "lon": -98.78040900600968,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0303",
+   "lat": 34.92379396344307,
+   "lon": -98.40273300444505,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0304",
+   "lat": 35.15542194617879,
+   "lon": -98.70722819311709,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0305",
+   "lat": 35.39173719164762,
+   "lon": -98.30507069009184,
+   "hub_height_m": 70.0,
+   "rotor_diameter_m": null,
+   "curve": "GE100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0306",
+   "lat": 35.04425123943817,
+   "lon": -96.95982492830598,
+   "hub_height_m": 110.0,
+   "rotor_diameter_m": null,
+   "curve": "GE137/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0307",
+   "lat": 35.39143556800521,
+   "lon": -97.42741898405188,
+   "hub_height_m": 64.0,
+   "rotor_diameter_m": null,
+   "curve": "GE87/1850"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0308",
+   "lat": 35.36373228189129,
+   "lon": -96.1790627322024,
+   "hub_height_m": 75.0,
+   "rotor_diameter_m": null,
+   "curve": "N100/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0309",
+   "lat": 35.24431224024523,
+   "lon": -96.45169549959093,
+   "hub_height_m": 60.0,
+   "rotor_diameter_m": null,
+   "curve": "N80/2500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0310",
+   "lat": 34.443727470875494,
+   "lon": -98.29926368236801,
+   "hub_height_m": 93.0,
+   "rotor_diameter_m": null,
+   "curve": "S140/3400"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0311",
+   "lat": 35.032236347183186,
+   "lon": -98.63856711760451,
+   "hub_height_m": 120.0,
+   "rotor_diameter_m": null,
+   "curve": "SG200/11000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0312",
+   "lat": 35.67994856598331,
+   "lon": -97.32360339614075,
+   "hub_height_m": 79.5,
+   "rotor_diameter_m": null,
+   "curve": "SWT113/3200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0313",
+   "lat": 34.86759930843664,
+   "lon": -97.19677135799049,
+   "hub_height_m": 97.0,
+   "rotor_diameter_m": null,
+   "curve": "SWT154/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0314",
+   "lat": 36.06609625385545,
+   "lon": -97.38837982180621,
+   "hub_height_m": 73.0,
+   "rotor_diameter_m": null,
+   "curve": "V105/3450"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0315",
+   "lat": 35.6607225272508,
+   "lon": -96.71361864416122,
+   "hub_height_m": 84.0,
+   "rotor_diameter_m": null,
+   "curve": "V117/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0316",
+   "lat": 34.60865196147448,
+   "lon": -97.566447811947,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "V164/8000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0317",
+   "lat": 34.83436730092602,
+   "lon": -96.62809729234141,
+   "hub_height_m": 65.0,
+   "rotor_diameter_m": null,
+   "curve": "V90/2000/GS"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0318",
+   "lat": 35.68154045902401,
+   "lon": -98.0356249433242,
+   "hub_height_m": 85.0,
+   "rotor_diameter_m": null,
+   "curve": "VS82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0319",
+   "lat": 35.61278202854301,
+   "lon": -97.93387040972345,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0320",
+   "lat": 35.58875048416304,
+   "lon": -96.47789306900842,
+   "hub_height_m": 80.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0321",
+   "lat": 35.60854239765383,
+   "lon": -96.98553864349441,
+   "hub_height_m": 89.0,
+   "rotor_diameter_m": null,
+   "curve": "E-138/4200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0322",
+   "lat": 34.52459164266932,
+   "lon": -97.23373980479698,
+   "hub_height_m": 69.0,
+   "rotor_diameter_m": null,
+   "curve": "E-82/3000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0323",
+   "lat": 35.12938766837021,
+   "lon": -96.15159155211018,
+   "hub_height_m": 66.0,
+   "rotor_diameter_m": null,
+   "curve": "ENO92/2200"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0324",
+   "lat": 35.298689156422924,
+   "lon": -97.64382111675059,
+   "hub_height_m": 94.0,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0325",
+   "lat": 35.29868474106596,
+   "lon": -97.6421357409759,
+   "hub_height_m": 94.2,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0326",
+   "lat": 35.298680296756196,
+   "lon": -97.64045036542973,
+   "hub_height_m": 94.4,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0327",
+   "lat": 35.298675823493674,
+   "lon": -97.63876499011349,
+   "hub_height_m": 94.6,
+   "rotor_diameter_m": null,
+   "curve": "AD132/5000"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0328",
+   "lat": 35.298689156422924,
+   "lon": -97.64382111675059,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0329",
+   "lat": 35.300064680106196,
+   "lon": -97.64381572439771,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  },
+  {
+   "turbine_id": "lc_ladder_d02_3km-0330",
+   "lat": 35.301440209361154,
+   "lon": -97.6438103318178,
+   "hub_height_m": 105.0,
+   "rotor_diameter_m": null,
+   "curve": "AW82/1500"
+  }
+ ],
+ "turbine_library_sha256": "ce26b9a379de91484b7b51f759a31a2883e060dc1f528ab93b2a0dd40ce7beb5"
+}

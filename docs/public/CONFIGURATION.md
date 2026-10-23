@@ -65,6 +65,7 @@ The same table configures the in-model hub-height wind diagnostic
 | `hub_heights_m` | array of numbers | `[40, 80, 100, 120, 150, 200]` | heights in m above ground, strictly increasing, at most 32, each in (0, 2000]; setting it turns the diagnostic on |
 | `hub_sites` | string or array | unset | a sites.v1 JSON path (`woof energy sites`), or inline `{ site_id = "...", lat = ..., lon = ... }` tables, to sample per site |
 | `hub_sample_interval_s` | number | `60` | per-site sampling cadence in model seconds; needs `hub_sites` |
+| `windfarm_turbines` | string | unset | a turbine CSV (relative to the config) with the header `name, lat, lon, hub_height_m, rotor_diameter_m, turbine_type` (plus `rated_kw` for `turbine_type = generic`); turns on the wind-farm power diagnostic: per-turbine rotor-equivalent wind, power and thrust coefficient every step, and a `windfarm_d0N_<time>.nc` sidecar of interval means and maxima ([OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#wind-farm-power-fields)) |
 
 Two keys in the table are about how files are written, not what they
 carry:

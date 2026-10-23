@@ -349,12 +349,20 @@ DEFAULT_STORE_HUB_HEIGHTS = 6
 #: ``windfarm`` members that are not one (south_north, west_east) plane per
 #: frame: the time string (19 bytes, padded to 20 as the disk planner
 #: does), the eta columns (nz and nz + 1 values), the scalars and the hub
-#: coordinate (n_hub values).  Every other member is a 2-D plane, or n_hub
-#: planes when it is on the hub_height axis.
+#: coordinate (n_hub values), and the wind-farm power rows: three scalars
+#: and three per-TURBINE vectors, which are priced at nothing here because
+#: the job names no turbine list and a few bytes per turbine per frame do
+#: not register beside one plane.  Every other member is a 2-D plane, or
+#: n_hub planes when it is on the hub_height axis.
 _WINDFARM_NON_PLANES = {"Times": "time string", "ZNU": "column",
                         "ZNW": "column", "P_TOP": "scalar",
                         "XTIME": "scalar", "ITIMESTEP": "scalar",
-                        "HUB_WINDOW_S": "scalar", "HUB_HEIGHT": "hub column"}
+                        "HUB_WINDOW_S": "scalar", "HUB_HEIGHT": "hub column",
+                        "WINDFARM_WINDOW_S": "scalar", "POWER_FARM": "scalar",
+                        "POWER_FARM_MEAN": "scalar",
+                        "REWS_TURBINE": "turbine row",
+                        "POWER_TURBINE": "turbine row",
+                        "CT_TURBINE": "turbine row"}
 
 #: Default lossless compression ratio (stored/raw) of an Icechunk/Zarr
 #: store of float32 model fields with zstd + byte shuffle.  An assumption:
@@ -478,7 +486,9 @@ def store_layout(preset: str, nz: int,
     :data:`woof.io.history_selection.WINDFARM_FIELD_REASONS` (the preset
     itself, so a new row there is priced here) and is an UPPER bound: a
     member the run does not produce (``QNC_HUB`` without a droplet number,
-    ``SNOWNC`` without ice) is counted anyway.
+    ``SNOWNC`` without ice) is counted anyway.  The one exception is the
+    wind-farm power rows: a few bytes per TURBINE, not per column, priced
+    at nothing because the job names no turbine list.
     """
 
     if preset not in STORE_PRESET_NAMES:
@@ -506,6 +516,8 @@ def store_layout(preset: str, nz: int,
             extra += 4 * (nz + (1 if name == "ZNW" else 0))
         elif kind == "hub column":
             extra += 4 * hub_heights
+        elif kind == "turbine row":
+            pass
         else:
             extra += 4
     return {"preset": preset, "three_d": 0, "two_d": len(two_d),

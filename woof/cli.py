@@ -131,6 +131,7 @@ version_register_cli = _lazy_register("woof.version_cli")
 warm_kernels_register_cli = _lazy_register("woof.warm_kernels")
 spectral_register_cli = _lazy_register("woof.verify.spectral_cli")
 cells_register_cli = _lazy_register("woof.cells.cli")
+windfarm_register_cli = _lazy_register("woof.windfarm.cli")
 
 #: Discovered verification cases: name -> case module exposing
 #: ``run(outdir) -> dict`` and ``GATES``.  Membership comes from the
@@ -462,6 +463,10 @@ def build_parser(*, render_only: bool = False) -> argparse.ArgumentParser:
     # store layout with.
     estimate_tracks_register_cli = _lazy_register("woof.track_estimate")
     estimate_tracks_register_cli(sub)
+    # Turbines placed on a domain's grid: the layout a wind-farm
+    # parameterization reads, beside the energy doors whose turbine
+    # library it resolves curves through.
+    windfarm_register_cli(sub)
     doctor_register_cli(sub)
     obs_register_cli(sub)
     table_assets_register_cli(sub)

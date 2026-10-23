@@ -873,6 +873,17 @@ tests/test_mynn_rank_chunk_policy_gpu.py
 # tendencies or losing topo_wind inputs even though column oracles pass.
 tests/test_terrain_drag_devices_gpu.py
 
+# The Fitch wind-farm drag kernel (WRF windfarm_opt = 1) against its float64
+# mirror cell for cell, and its composed unit within the priced frame.
+# Prevents a kernel edit moving the drag, power or TKE source unseen: no CPU
+# test runs fitch_column.
+tests/test_windfarm_fitch.py
+# The same kernel and its binary32 CPU mirror word for word (max ULP 0)
+# against WRF v4.7.1's own module_wind_fitch.F at -O0
+# (tools/windfarm_fitch_wrf471_oracle).  Prevents a reordered sum or a
+# substituted libm call drifting off WRF's words.
+tests/test_windfarm_fitch_wrf471_parity.py
+
 # SHARD 1r: A158, WRF's implicit-explicit vertical advection
 # (zadvect_implicit, lane 281-zadvect-implicit).  The IEVA kernels held word
 # for word to WRF 4.7.1's compiled routines (tools/ieva_wrf_oracle) and the
