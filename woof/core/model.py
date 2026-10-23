@@ -847,6 +847,11 @@ def restart_identity_payload(exp) -> dict:
         # is the tracer's only source.
         if not run.get("smoke_tracer", False):
             run.pop("smoke_tracer", None)
+        # The coupled fire, absent-stays-absent: ifire = 0 allocates and
+        # launches nothing, so its keys are inert and every fingerprint
+        # written before they existed keeps its value.  On, all bind.
+        from woof.config import drop_inert_fire_keys
+        drop_inert_fire_keys(run)
         # The file's bytes, not its path alone, are the source.
         from woof.core.smoke_tracer import bind_emission_identity
         bind_emission_identity(run)

@@ -242,6 +242,11 @@ def initialize_prepared_physics(
         100.0 * static["GREENFRAC"].min(axis=0), dtype=cp.float32)
     driver.fields["shdmax"][...] = cp.asarray(
         100.0 * static["GREENFRAC"].max(axis=0), dtype=cp.float32)
+    if getattr(cfg, "ifire", 0):
+        # WRF's fire_driver_em_init (start_em) on the prepared fuel
+        # statics; a resumed state's restore then overwrites the level set.
+        from woof.fire.coupling import attach as attach_fire
+        attach_fire(state, cfg, static=static, grid=grid)
     driver.fields["psfc"][...] = cp.asarray(
         near_surface_host["surface_pressure"], dtype=cp.float32)
     near_surface = surface_fields_to_device(

@@ -1123,6 +1123,25 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
     "SMOKE": ("passive smoke tracer mass mixing ratio, per kg of dry air",
               "ug kg-1"),
     "SMOKE_COL": ("column-integrated passive smoke tracer mass", "ug m-2"),
+    # The coupled fire (RunConfig.ifire, woof/fire/coupling.py), WRF's
+    # Registry/registry.fire names and descriptions.  The fire-mesh fields
+    # sit on (south_north_subgrid, west_east_subgrid)
+    # (FIRE_MESH_DIMENSIONED_FIELDS); the rest on the mass grid.  Present
+    # only on a domain that runs the fire.
+    "FGRNHFX": ("heat flux from ground fire", "W/m^2"),
+    "FGRNQFX": ("moisture flux from ground fire", "W/m^2"),
+    "FIRE_AREA": ("fraction of cell area on fire", "1"),
+    "ROS": ("rate of spread", "m/s"),
+    "TIGN_G": ("ignition time on ground", "s"),
+    "LFN": ("level function", "1"),
+    "FUEL_FRAC": ("fuel remaining", "1"),
+    "UF": ("fire wind", "m/s"),
+    "VF": ("fire wind", "m/s"),
+    "GRNHFX": ("heat flux from ground fire", "W/m^2"),
+    "GRNQFX": ("moisture flux from ground fire", "W/m^2"),
+    "CANHFX": ("heat flux from crown fire", "W/m^2"),
+    "CANQFX": ("moisture flux from crown fire", "W/m^2"),
+    "AVG_FUEL_FRAC": ("fuel remaining averaged to atmospheric grid", "1"),
     "TKE_SHINHONG": ("Shin-Hong published subgrid turbulence kinetic "
                      "energy diagnostic", "m2 s-2"),
     # The SPLIT SUBGRID-FLUX DIAGNOSTIC (RunConfig sase_flux_diag, off by
@@ -1233,8 +1252,24 @@ WINDFARM_TURBINE_DIMENSIONED_FIELDS: frozenset[str] = frozenset({
 #: The name of that axis in the file.
 WINDFARM_TURBINE_DIMENSION = "windfarm_turbine"
 
+#: The coupled fire's fire-mesh history fields, written on WRF's subgrid
+#: axes and routed BY NAME (a fire mesh as long as nz would otherwise land
+#: on bottom_top).  WRF-SFIRE's subgrid is e_we*sr_x wide, its last sr_x
+#: columns an unused strip past the mass grid; woof's mesh is the mass
+#: grid's own (nx*sr_x, woof.static.fuel), so the axes are sr_x*nx and
+#: sr_y*ny.
+FIRE_MESH_DIMENSIONED_FIELDS: frozenset[str] = frozenset({
+    "FGRNHFX", "FGRNQFX", "FIRE_AREA", "ROS", "TIGN_G", "LFN", "FUEL_FRAC",
+    "UF", "VF"})
+
+#: The (south_north, west_east) names of those axes in the file.
+FIRE_MESH_DIMENSIONS: tuple[str, str] = ("south_north_subgrid",
+                                         "west_east_subgrid")
+
 
 __all__ = [
+    "FIRE_MESH_DIMENSIONED_FIELDS",
+    "FIRE_MESH_DIMENSIONS",
     "HISTORY_FIELDS_BY_NETCDF_NAME",
     "HUB_HEIGHT_DIMENSION",
     "HUB_HEIGHT_DIMENSIONED_FIELDS",

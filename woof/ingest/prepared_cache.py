@@ -262,6 +262,11 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # before the field describes; a bundle prepared with it on carries it
     # in its header and is compared strictly.
     "run.smoke_tracer",
+    # The coupled fire (feat/fire-coupling).  ifire = 0 allocates nothing,
+    # which is exactly the prepared state every header written before the
+    # keys describes; a bundle prepared with the fire on carries them and
+    # is compared strictly.
+    "run.ifire", "run.sr_x", "run.sr_y",
     # 2.6.1 added run.p3_backend to RunConfig without adding it here,
     # which refused EVERY tree prepared before it -- 16 of them on the
     # box that found this.  The FOURTH instance of this exact trap in
@@ -819,6 +824,20 @@ PREPARATION_INERT_RUN_FIELDS = frozenset({
     # way cannot restore the other (DEFAULT_TOLERANT_IDENTITY_FIELDS
     # keeps bundles written before the field runnable).
     "run.smoke_emission_file",
+    # The fire's run-time settings: the fire attaches at the forecast's
+    # first step from the configuration and the prepared fuel statics, so
+    # preparation computes nothing from them.  ifire, sr_x and sr_y are
+    # NOT here: they size the fire arrays in the prepared state's
+    # inventory and request the fuel statics it is built with.
+    "run.fire_fuel_read", "run.fire_fuel_cat", "run.fire_fuel_table",
+    "run.fire_fmc_read", "run.fire_wind_height", "run.fire_ext_grnd",
+    "run.fire_ext_crwn", "run.fire_crwn_hgt", "run.fire_atm_feedback",
+    "run.fire_ignitions", "run.fire_advection", "run.fire_lsm_reinit",
+    "run.fire_lsm_reinit_iter", "run.fire_lsm_band_ngp",
+    "run.fire_viscosity", "run.fire_viscosity_bg",
+    "run.fire_viscosity_band", "run.fire_viscosity_ngp",
+    "run.fire_lfn_ext_up", "run.fire_slope_factor",
+    "run.fire_tracer_smoke", "run.fire_smoke_factor", "run.sfc_lu_index",
     # WRF's windfarm_opt and its three companions (woof.core.
     # windfarm_coupling): the turbines are placed and uploaded at forecast
     # physics initialisation and act only inside the PBL slot; nothing under

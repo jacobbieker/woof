@@ -1029,6 +1029,11 @@ def _initialize_real_case_physics(
         100.0 * static["GREENFRAC"].min(axis=0), dtype=cp.float32)
     driver.fields["shdmax"][...] = cp.asarray(
         100.0 * static["GREENFRAC"].max(axis=0), dtype=cp.float32)
+    if getattr(cfg, "ifire", 0):
+        # WRF's fire_driver_em_init (start_em), on the domain's fuel
+        # statics, after the physics so the wind reads its roughness.
+        from woof.fire.coupling import attach as attach_fire
+        attach_fire(state, cfg, static=static, grid=grid)
 
     # Seed time-zero surface diagnostics from the source analysis.  The
     # first model step replaces them through SFCLAY/Noah/YSU in WRF
@@ -1749,6 +1754,10 @@ def prepare_child_case(initialized, child_dc, *, exp: ExperimentConfig,
             fractional_seaice=False)
     from woof.core.cam_ozone import configure_cam_ozone
     configure_cam_ozone(state, cfg, exp=exp, dc=dc, grid=initialized.grid)
+    if getattr(cfg, "ifire", 0):
+        # WRF's fire_driver_em_init on the nest's own fuel statics.
+        from woof.fire.coupling import attach as attach_fire
+        attach_fire(state, cfg, static=static, grid=initialized.grid)
     return PreparedRealCase(
         static_sampling_contract=current_sampling_contract(),
         cfg=cfg, grid=initialized.grid, static_fields=dict(static),

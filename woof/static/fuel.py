@@ -315,13 +315,44 @@ def resolve_domain_fuel(raw, config, *, source, base_dir=None):
     disabled carrier, which applies no overlay.
     """
     rows = []
-    for index, domain in enumerate(raw.get("domain", ()) or ()):
-        static = domain.get("static") if isinstance(domain, Mapping) else None
+    shared = raw.get("shared", {}) if isinstance(raw, Mapping) else {}
+    shared = shared if isinstance(shared, Mapping) else {}
+    domains = [d for d in (raw.get("domain", ()) or ())
+               if isinstance(d, Mapping)] or [{}]
+    for index, domain in enumerate(domains):
+        static = domain.get("static")
+        grid_id = int(domain.get("grid_id", index + 1))
+        declared = None
         if isinstance(static, Mapping) and "fuel" in static:
-            grid_id = int(domain.get("grid_id", index + 1))
-            rows.append(fuel_row(grid_id, parse_domain_fuel(
+            declared = parse_domain_fuel(
                 static["fuel"], source=source, grid_id=grid_id,
-                base_dir=base_dir)))
+                base_dir=base_dir)
+        # ifire on a domain (WRF's &fire ifire, max_domains) requests the
+        # domain's fuel statics at its &domains sr_x/sr_y, the way a
+        # [[domain]] static fuel table does; a table, when also given, must
+        # name the same mesh and may add a LANDFIRE raster.
+        ifire = domain.get("ifire", shared.get("ifire", 0))
+        if isinstance(ifire, int) and not isinstance(ifire, bool) \
+                and ifire > 0:
+            sr = tuple(domain.get(key, shared.get(key, 0))
+                       for key in ("sr_x", "sr_y"))
+            if declared is None:
+                try:
+                    declared = FuelStaticsRequest(sr_x=sr[0], sr_y=sr[1])
+                except ValueError as error:
+                    raise ValueError(
+                        f"[[domain]] grid_id = {grid_id} of {source} sets "
+                        f"ifire = {ifire}: {error}") from None
+            elif (declared.sr_x, declared.sr_y) != sr:
+                raise _refusal(
+                    f"[[domain]] grid_id = {grid_id} of {source} sets "
+                    f"ifire = {ifire} with sr_x, sr_y = {sr} but its static "
+                    f"fuel table asks for {(declared.sr_x, declared.sr_y)}."
+                    "  Give both the same refinement.",
+                    "The fire runs on the mesh its fuel map is built on; two "
+                    "refinements would build a map the fire cannot read.")
+        if declared is not None:
+            rows.append(fuel_row(grid_id, declared))
     if not rows:
         return config
     from .highres_production import (HighresStaticConfig,

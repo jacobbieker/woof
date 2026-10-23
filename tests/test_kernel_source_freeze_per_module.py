@@ -691,8 +691,14 @@ BASELINE_PINNED: dict[str, str] = {
     # WRF's own Fortran (tests/test_fire_levelset_wrf471_parity.py).
     # Compiled with glibc_flt32.cuh by its own direct NVRTC loader
     # (woof/fire/levelset.py), -fmad=false --ftz=false.
+    # feat/fire-coupling: fire_ros's chaparral arm (ischap, ros_base 0 where
+    # WRF leaves it undefined) and fl_ignite's node body moved into
+    # fl_ignite_node,
+    # shared with fl_ignite_xy (ignition at given node coordinates, WRF's
+    # fxlong/fxlat for longitude/latitude lines); fl_ignite's words are
+    # unchanged (tests/test_fire_levelset_wrf471_parity.py).
     "fire_levelset":
-        "7b6569f098b415cfafd8bf1f4bd06346daf051f7a74b2025a181376fb421553d",
+        "4e73f643c50d9763bbe8ef76ac70204f8094c13d9db5761c8f8ed6860f361b3a",
     # ebcf4edd2 lane/urban-bep: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
     "urban_bep":
@@ -854,6 +860,14 @@ BASELINE_PINNED: dict[str, str] = {
         "7cea35690f286f3a4d2e794218ca14f8be611a5df9aa9889cf1caf49696a14ab",
     "smoke_deposition":
         "2a32d0d8918cfac71f808014f00fd43f95c522af2b52b34232d2ffbcd01e6d90",
+    # feat/fire-coupling: WRF v4.7.1's fire driver glue
+    # (module_fr_fire_driver.F interpolate_atm2fire, module_fr_fire_atm.F
+    # fire_tendency, phy_prep's rho) and the smoke-flux and active-area
+    # seams, compiled with glibc_flt32.cuh by woof/fire/coupling.py's
+    # direct NVRTC loader, -fmad=false --ftz=false; held to the whole WRF
+    # driver at max ULP 0 (tests/test_fire_coupling_wrf471_parity.py).
+    "fire_coupling":
+        "29a24a49d81e875a5249e5a5ae9ca734dd83bb922822f37414184d8a476465a8",
 }
 
 _FROZEN = _frozen_module()

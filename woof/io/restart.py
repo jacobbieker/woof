@@ -118,8 +118,9 @@ from woof.checkpoint_identity import (
     require_identifiable_checkpoint_schemes,
     unidentifiable_checkpoint_schemes,
 )
-from woof.config import (MIX_ISOTROPIC_RESTART_BREAK_NOTICE,
-                          WINDFARM_RUN_DEFAULTS, radiation_scheme_ids)
+from woof.config import (FIRE_RUN_DEFAULTS, MIX_ISOTROPIC_RESTART_BREAK_NOTICE,
+                          WINDFARM_RUN_DEFAULTS, drop_inert_fire_keys,
+                          radiation_scheme_ids)
 from woof.supervisor import _fsync_directory, fsync_file, unique_temp_path
 from woof.physics_compat import (RRTMG_VARIANT_LEGACY,
                                   RRTMG_VARIANT_RTE_RRTMGP, rrtmg_variant)
@@ -450,6 +451,10 @@ STATE_REBUILT_ATTRS = frozenset({
     # The smoke tracer's time-t copy, on tke0's footing: dycore.step
     # writes it from the serialized ``smoke`` before any reader.
     "smoke0",
+    # The coupled fire's tendencies (woof/fire/coupling.py REBUILT_ATTRS):
+    # fire_tendency writes all three at every step's fire call, before the
+    # RK stages read them.
+    "fire_rthfrten", "fire_rqvfrten", "fire_rth_slow",
     # RK time-t copies of transported droplet number.  nc0 exists for the
     # schemes that TRANSPORT nc -- mp=28 (Thompson aerosol-aware), mp=9
     # (Milbrandt-Yau) and mp=16 (WDM6); mp=10 allocates nc but does not
@@ -517,6 +522,10 @@ STATE_INFRA_ATTRS = frozenset({
     # model state.  A resumed state rebinds the same file to the same
     # values on its first step.
     "_smoke_emission_bound",
+    # The coupled fire's runtime (woof.fire.coupling.FireRuntime): mesh,
+    # fuel parameters, ignitions and wind tables, all functions of the
+    # configuration and statics, rebuilt by the resumed route's attach.
+    "_fire",
     # The domain's ACTIVATION EPOCH in seconds, published beside
     # ``elapsed_seconds`` by woof.core.state.refresh_model_time and from
     # the same tick authority.  Same category, and for the same reason:
@@ -2483,6 +2492,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
     so every writer drops each key the same way.  A new default-off field
     joins this list, naming the commit that added it.
     """
+    # ifire = 0 (feat/fire-coupling): no fire allocated or launched, and
+    # every fire key inert -- the state every earlier header ran.
+    drop_inert_fire_keys(values)
     # windfarm_opt off is the state every earlier header ran: no turbine is
     # placed and no kernel launched, so all four keys (and the file's
     # digests) leave; on, they stay and bind_windfarm_identity binds the
@@ -4117,6 +4129,21 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             # Changing the split or solve mass changes the trajectory.
             stored = "wrf_471" if stored is absent else stored
             live = "wrf_471" if live is absent else live
+        if key in FIRE_RUN_DEFAULTS:
+            # The coupled fire's keys (woof/fire/coupling.py).  Off on both
+            # sides they are inert, written by no header and compared by
+            # nobody; otherwise an absent side is the default (ifire = 0
+            # is no fire), so turning the fire on or off, or changing any
+            # of its settings, is refused below.
+            if not (stored_config.get("ifire", 0) or 0) \
+                    and not (live_config.get("ifire", 0) or 0):
+                continue
+            default = FIRE_RUN_DEFAULTS[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
+            if key == "fire_ignitions":
+                stored = tuple(tuple(float(v) for v in r) for r in stored)
+                live = tuple(tuple(float(v) for v in r) for r in live)
         if key in WINDFARM_RUN_DEFAULTS:
             # Old checkpoints ran no wind farm, and an off echo drops the
             # keys (bind_windfarm_identity); a flip, another file, factor
