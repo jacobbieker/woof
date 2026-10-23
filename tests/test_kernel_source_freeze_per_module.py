@@ -669,6 +669,13 @@ BASELINE_PINNED: dict[str, str] = {
     # (tests/test_physics_256_levels_gpu.py).  Previously eff25247.
     "terrain_drag":
         "7bb86babae6e2ee53b5072a27a0e343bc64b3f125400120688f44c500c11e80f",
+    # feat/windfarm-fitch-kernel: the Fitch et al. (2012) wind-farm drag
+    # from WRF v4.7.1 phys/module_wind_fitch.F (windfarm_opt = 1), word for
+    # word against WRF's own Fortran and the binary32 CPU mirror
+    # (tests/test_windfarm_fitch_wrf471_parity.py).  Compiled by its own
+    # direct NVRTC loader (woof/core/windfarm_fitch.py).
+    "windfarm_fitch":
+        "8b2f3964a1a1e831690ecabdbcfecc29e9f97a2568a99fdc63a9d77e1b11b5a2",
     # ebcf4edd2 lane/urban-bep: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
     "urban_bep":

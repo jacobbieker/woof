@@ -1,0 +1,7 @@
+# WRF v4.7.1 (tag v4.7.1, commit f52c197ed39d12e087d02c50f412d90d418f6186).
+# Every file the Fitch wind-farm oracle compiles, cuts from or cites.
+# build.sh refuses any other bytes.
+83247add74780608e798bb62424533b18abf31f3da5aba6374de6fe2550060c3  phys/module_wind_fitch.F
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  share/module_model_constants.F
+42ff53571ba1fb926fa6063108806d9a2f8ff5fdd1fa2ecfc1fdde60f2bf65fb  phys/module_pbl_driver.F
+6f3ee02175b76487c5c6c046ff2fb4c5d41980b86c0f06eb2e09e34dacc9623a  Registry/Registry.EM_COMMON
