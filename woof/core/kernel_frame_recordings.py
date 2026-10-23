@@ -1786,6 +1786,16 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "2026-10-22.  Not launched by a forecast; re-audited by "
         "tests/test_fire_levelset_wrf471_parity.py::"
         "test_fire_unit_frames_match_the_recorded_unit.",
+    "smoke_composed":
+        "glibc_flt32.cuh + glibc_flt64.cuh + smoke_emission.cu + "
+        "smoke_plumerise.cu + smoke_deposition.cu, assembled by "
+        "woof/smoke/_kernels.module_source() and compiled directly with "
+        "-fmad=false --ftz=false; none of the three .cu files compiles "
+        "alone.  Priced 64 B, smoke_plumerise_columns' reading on sm_86 "
+        "(RTX A6000) at NVRTC 12.9.86, 2026-10-23; every other kernel of "
+        "the unit read 0 B.  Re-read on any device by "
+        "tests/test_smoke_physics.py::"
+        "test_the_smoke_unit_compiles_within_its_priced_frame.",
 })
 
 

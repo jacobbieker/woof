@@ -2614,7 +2614,11 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     # The fire level set calls glibc_flt32.cuh's gfk_exp/gfk_pow, which
     # woof.fire.levelset.module_source() prepends; it cannot compile alone.
     # Priced as fire_levelset_composed.
-    "fire_levelset"})
+    "fire_levelset",
+    # The smoke library's three sources call gfk_*/g64_* from the glibc
+    # headers woof.smoke._kernels.module_source() prepends; priced as
+    # smoke_composed.
+    "smoke_emission", "smoke_plumerise", "smoke_deposition"})
 # face_mass, held_heating, rk_bookkeeping and surface_w (the dycore-host
 # speed lane's point-local units, 66af318bc) sat in this set on
 # 2026-09-30 under the same "no measurement platform in this lane"
@@ -2787,6 +2791,16 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         module="fire_levelset_composed",
         max_local_size_bytes=0,
         covers=frozenset({"fire_levelset"})),
+    # woof.smoke's direct NVRTC unit (-fmad=false --ftz=false), read on
+    # sm_86 (RTX A6000) at NVRTC 12.9.86, 2026-10-23: every kernel 0 B
+    # except smoke_plumerise_columns, 64 B (its plume state is 35,728 B of
+    # dynamic shared memory per block, not stack).  Not wired into any
+    # run, so no selector row adds it yet.
+    "smoke_composed": ChainedTranslationUnitFrame(
+        module="smoke_composed",
+        max_local_size_bytes=64,
+        covers=frozenset({"smoke_emission", "smoke_plumerise",
+                          "smoke_deposition"})),
 }
 
 _seen_covers: set[str] = set()
