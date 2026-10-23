@@ -768,5 +768,5 @@ def test_every_forecast_launch_passes_its_wrf_order():
                 where, ast.unparse(keywords["vorder"]))
             seen[name] = seen.get(name, 0) + 1
     # advection.py's Phase-1 path (4), dycore's explicit and split paths
-    # (8), moist's scalar, PD and TKE launches (6).
-    assert seen == {"advection.py": 4, "dycore.py": 8, "moist.py": 6}, seen
+    # (8), moist's scalar, PD, TKE and smoke-tracer launches (8).
+    assert seen == {"advection.py": 4, "dycore.py": 8, "moist.py": 8}, seen

@@ -1165,6 +1165,121 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
             (q,), ru, rv, cfg.spec_zone)
 
 
+def advance_smoke_stage(state: DomainState, cfg: RunConfig,
+                        ru, rv, ww, dt_eff: float, final: bool,
+                        fixed_tendency=None, implicit=None) -> None:
+    """Advance the passive smoke tracer one RK stage from ``smoke0``.
+
+    The tracer is WRF's ``tracer`` array in all but name, and WRF advances
+    that array through the same ``rk_scalar_tend``/``rk_update_scalar[_pd]``
+    pair as the moist scalars, with the acoustic time-averaged mass fluxes
+    (``ru``/``rv``/``ww`` here are ``ru_m``/``rv_m``/``ww_m``).  So this is
+    the extra-species branch of :func:`advance_scalars_stage`, for one field
+    and with no physics tendency:
+
+    * the final stage is positive-definite (``advect_scalar_pd``) unless an
+      edge is radiative-open, where woof's PD kernels have no open blocks
+      and the unlimited update plus the final clamp runs instead -- the
+      moist rows' documented deviation;
+    * ``fixed_tendency`` is the held per-step forward tendency
+      (:func:`woof.core.dycore.prepare_smoke_tendency`: km_opt mixing,
+      sixth-order filter, the surface emission), added on every stage and
+      folded into the time-t tracer before the PD limiter on the last;
+    * a NESTED domain whose parent forces the tracer takes the rolling nest
+      tables exactly as a moist species does (relax rows add, spec rows
+      replace the advective tendency).  Any other specified or nested
+      domain takes WRF ``flow_dep_bdy``: zero on inflow, the first interior
+      row on outflow -- what WRF gives a tracer with no boundary file.
+      Radiative-open edges take :func:`woof.core.dycore.
+      apply_open_zero_gradient` at the end of the stage.
+
+    ``implicit`` is the substep's IEVA split, as in
+    :func:`advance_scalars_stage`.
+    """
+    ww_explicit = ww if implicit is None else implicit[0]
+    nz, ny, nx = state.p.shape
+    mu0 = state.mub2d + state.mup0
+    mu = state.mub2d + state.mup
+    mu0_row = mu0.reshape(-1)
+    mu_row = mu.reshape(-1)
+    msft_row = state.msft.reshape(-1)
+    tend = state.scratch((nz, ny, nx), "moist_rq_t")
+    boundary_forced = cfg.specified or cfg.nested
+    boundary_x = cfg.open_x or boundary_forced
+    boundary_y = cfg.open_y or boundary_forced
+    pd = final and not (cfg.open_x or cfg.open_y)
+    q = state.smoke
+    q0 = state.smoke0
+    apply_scalar_lbc = None
+    if cfg.nested and state.lateral_boundaries is not None:
+        from woof.ingest.lateral_bc import (
+            _active_device_interval,
+            apply_state_scalar_lateral_boundary,
+        )
+        if "smoke" in _active_device_interval(state, cfg)[0].fields:
+            apply_scalar_lbc = apply_state_scalar_lateral_boundary
+    if pd:
+        chm0 = state.c1h[:, None, None] * mu0[None] + state.c2h[:, None, None]
+        bufs = (state.scratch((nz, ny, nx + 1), "pd_fxl"),
+                state.scratch((nz, ny, nx + 1), "pd_fxc"),
+                state.scratch((nz, ny + 1, nx), "pd_fyl"),
+                state.scratch((nz, ny + 1, nx), "pd_fyc"),
+                state.scratch((nz + 1, ny, nx), "pd_fzl"),
+                state.scratch((nz + 1, ny, nx), "pd_fzc"))
+        nested_held = None
+        if apply_scalar_lbc is not None:
+            tend[...] = 0
+            apply_scalar_lbc(state, cfg, "smoke", tend, apply_relax=True,
+                             source_field=q0)
+            nested_held = tend
+        q0_eff = _pd_fold_sources(
+            state, cfg, "smoke", q0, chm0, dt_eff, None,
+            fixed_tendency=fixed_tendency, lbc_held=nested_held)
+        # WRF clears sc_tend after the PD source fold (module_em.F:
+        # 1889-1894); the nested fold aliased ``tend``.
+        tend[...] = 0
+        launch_pd_fluxes(q, q0_eff, ru, rv, ww_explicit, mu, state,
+                         cfg.dx, cfg.dy, dt_eff, *bufs,
+                         msft=state.msft, has_msf=state.has_msf,
+                         open_x=boundary_x, open_y=boundary_y,
+                         vorder=vertical_orders(cfg)[0])
+        launch_pd_renorm_apply(q0_eff, mu0, *bufs, tend=tend,
+                               coord=state,
+                               dx=cfg.dx, dy=cfg.dy, dt=dt_eff,
+                               msft=state.msft, has_msf=state.has_msf,
+                               open_x=boundary_x, open_y=boundary_y)
+        if implicit is not None:
+            _ieva_scalar(state, tend, q0_eff, implicit, mu0, mu, dt_eff)
+        if boundary_forced:
+            _exclude_specified_ring_advection(tend, cfg.spec_zone)
+        _update_scalar_in_place(
+            q, q0_eff, tend, state.c1h, state.c2h, mu0_row, mu_row, dt_eff,
+            msft=(msft_row if state.has_msf else None), clamp=True)
+    else:
+        tend[...] = 0
+        launch_flux_div_scalar(q, ru, rv, ww_explicit, tend, state,
+                               cfg.dx, cfg.dy,
+                               open_x=boundary_x, open_y=boundary_y,
+                               msf=state.msft, has_msf=state.has_msf,
+                               spec=boundary_forced,
+                               vorder=vertical_orders(cfg)[0])
+        if implicit is not None:
+            _ieva_scalar(state, tend, q0, implicit, mu0, mu, dt_eff)
+        lbc_after_msf = apply_scalar_lbc is not None
+        if state.has_msf and lbc_after_msf:
+            tend *= state.msft[None]
+        if apply_scalar_lbc is not None:
+            apply_scalar_lbc(state, cfg, "smoke", tend, apply_relax=True,
+                             source_field=q0)
+        _update_scalar_in_place(
+            q, q0, tend, state.c1h, state.c2h, mu0_row, mu_row, dt_eff,
+            msft=(msft_row if state.has_msf and not lbc_after_msf else None),
+            fixed=fixed_tendency, clamp=final)
+    if boundary_forced and apply_scalar_lbc is None:
+        from woof.ingest.lateral_bc import apply_flow_dependent_boundaries
+        apply_flow_dependent_boundaries((q,), ru, rv, cfg.spec_zone)
+
+
 def bound_tke(tke, upper_bound: float) -> None:
     """WRF ``bound_tke`` (dyn_em/module_em.F:2490-2520), in place.
 

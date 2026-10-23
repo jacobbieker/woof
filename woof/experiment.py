@@ -396,6 +396,11 @@ _DOMAIN_RUN_OVERRIDES = (
     # (woof.core.terrain_drag); the GSL suite tapers itself with each
     # domain's grid length, so a column is the natural shape.
     "topo_wind", "gwd_opt",
+    # The prescribed surface smoke emission is a field on ONE domain's mass
+    # grid, so each domain names its own file (or "" for none).  smoke_tracer itself
+    # stays [shared]: a nest edge forces and feeds back the tracer, so a
+    # tree carries it on every domain or on none.
+    "smoke_emission_file",
 )
 
 #: Per-domain vertical keys are REJECTED outright (F1 amendment: the
@@ -1827,7 +1832,14 @@ def load_experiment(path: str | Path, *,
     source = str(authority.source)
     from woof.config import _anchor_config_file_paths
     _anchor_config_file_paths(raw.get("shared", {}), authority.source,
-                              keys=("rrtmg_smoke_manifest",))
+                              keys=("rrtmg_smoke_manifest",
+                                    "smoke_emission_file"))
+    # The smoke emission is per domain too (_DOMAIN_RUN_OVERRIDES), so a
+    # [[domain]] path resolves beside the config exactly as a [shared] one.
+    for table in raw.get("domain", ()) or ():
+        if isinstance(table, dict):
+            _anchor_config_file_paths(table, authority.source,
+                                      keys=("smoke_emission_file",))
     base_dir = Path(authority.source).parent
     experiment = build_experiment_from_config_tables(
         raw, source=source, base_dir=base_dir)
@@ -2514,6 +2526,35 @@ def _refuse_moving_slope_radiation(domains, relocation, source) -> None:
                 "radiation state, so after every move its land surface "
                 "would take the flat shortwave until the next radiation "
                 "call.  Set slope_rad = 0 on the moving nest.")
+
+
+def _refuse_moving_smoke_emission(domains, relocation, source) -> None:
+    """A prescribed smoke emission on a nest that moves: refused.
+
+    The emission file is a field on the nest's grid at its declared
+    placement.  A move rebuilds the nest at a new placement, and the
+    tracer's first step on the rebuilt state would read the same file onto
+    the shifted grid, so the sources would travel with the nest box.  A
+    moving nest may carry the tracer itself, with ``smoke_emission_file =
+    ""``.
+    """
+    moving = set()
+    if relocation is not None and getattr(relocation, "enabled", False) \
+            and (getattr(relocation, "moves", ())
+                 or getattr(relocation, "follow", None) is not None):
+        moving.add(int(relocation.grid_id))
+    moving.update(int(dc.grid_id) for dc in domains
+                  if getattr(dc, "follow", None) is not None)
+    for dc in domains:
+        if int(dc.grid_id) in moving and getattr(
+                dc.run, "smoke_emission_file", ""):
+            raise ValueError(
+                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} moves "
+                "and sets smoke_emission_file: the file is a field on the "
+                "nest's grid at its declared placement, and after a move it "
+                "would be read onto the shifted grid, carrying every source "
+                "with the nest.  Set smoke_emission_file = \"\" on the "
+                "moving nest (it still carries the tracer).")
 
 
 def _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation,
@@ -4567,6 +4608,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     domains = validate_follow_tracks(domains, relocation, source)
     _refuse_windowed_stash_watch(domains, source)
     _refuse_moving_slope_radiation(domains, relocation, source)
+    _refuse_moving_smoke_emission(domains, relocation, source)
     _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source)
     _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation, source)
     _refuse_rebuilt_nest_lake(domains, relocation, source)
@@ -5519,7 +5561,9 @@ def _public_config_value(value):
                                   ("thompson_version", "wrf_461"),
                                   ("thompson_fork_snow_fall", "blend"),
                                   ("rrtmg_cloud_optics_form", "wrf_461"),
-                                  ("rrtmg_smoke_manifest", "")):
+                                  ("rrtmg_smoke_manifest", ""),
+                                  ("smoke_tracer", False),
+                                  ("smoke_emission_file", "")):
                 if run_document.get(name, default) == default:
                     run_document.pop(name, None)
         return document

@@ -56,6 +56,7 @@ STATUS_BITS = {
     "surface": 1 << 14,
     "generic": 1 << 15,
     "particle_volume": 1 << 16,
+    "tracer": 1 << 17,
 }
 
 _LOWER = 1 << 0
@@ -412,6 +413,19 @@ def rule_for_field(name: str, *, p_top: float | None = None) -> FieldRule:
         return FieldRule("moment", 0.0, 1.0e15)
     if leaf in ("qvolg", "qvolh"):
         return FieldRule("particle_volume", 0.0, 1.0)
+    if leaf in ("smoke", "smoke_col"):
+        # The passive smoke tracer (ug kg-1) and its column load (ug m-2).
+        # Non-negative by construction -- positive-definite transport, an
+        # implicit PBL solve and a clamp on every final stage -- so a
+        # negative value is a defect, not rounding.  The ceiling is a
+        # blow-up catch, not a physical bound: 1e12 ug kg-1 is a kilogram
+        # of smoke per kilogram of air, six decades over the densest fire
+        # plume and further over any column.
+        return FieldRule("tracer", 0.0, 1.0e12)
+    if leaf == "smoke_emis":
+        # The prescribed surface emission, kg m-2 s-1; load_emission
+        # refuses a negative or non-finite file.
+        return FieldRule("tracer", 0.0, 1.0)
     if leaf in ("effc", "effr", "effi", "effs"):
         # Morrison stores these diagnostics in microns.
         return FieldRule("effective_radius", 0.0, 1.0e6)
@@ -525,6 +539,10 @@ def collect_state_fields(state: Any, *, backend: str = "cpu",
             "qh", "qndrop", "qnr", "qni", "qns", "qng",
             "qnh", "qnn", "qvolg", "qvolh", "effc", "effr", "effi",
             "effs", "h_diabatic",
+            # The passive smoke tracer, its emission and its column load.
+            # Absent unless smoke_tracer is on; the None skip below keeps
+            # every other census unchanged.
+            "smoke", "smoke_emis", "smoke_col",
             # The dycore's exported advective forcing pair.  Absent on a
             # state with no cumulus consumer, and the None skip below is
             # what keeps every other census unchanged.

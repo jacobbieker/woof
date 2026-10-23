@@ -834,6 +834,12 @@ BASELINE_PINNED: dict[str, str] = {
     # The node4 8-test adapter/provider gate binds this exact raw source.
     "rrtmg_smoke_manifest":
         "ac810c4ffc873f084882adb695eccdbf84d8c7d28af1654c3d01755770460ece",
+    # The passive smoke tracer's two kernels (surface source, column load),
+    # compiled by woof/core/smoke_tracer.py's direct NVRTC loader with
+    # -fmad=false --ftz=false and word-equal to their NumPy twins
+    # (tests/test_smoke_tracer.py).
+    "smoke_tracer":
+        "f0d5fb00af362ce40d7dc9854705b9d72feb24b3a9c7a23fc0c5e88cc0161c8f",
     "swint":
         "ced1a30cd19b61b749add691522d134cf2cee7b2cb818ebe175b1bd5112620f7",
     # feat/smoke-physics: the woof.smoke library's composed NVRTC unit

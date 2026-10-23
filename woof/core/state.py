@@ -749,6 +749,21 @@ class DomainState:
             self.tke0 = rebuilt("tke0", nz, ny, nx)
         else:
             self.tke = self.tke0 = None
+        # The passive smoke tracer (RunConfig.smoke_tracer,
+        # woof/core/smoke_tracer.py), ug per kg of dry air.  Allocated ONLY
+        # when it is on, so every other configuration's object graph is
+        # byte-identical -- the attributes are ABSENT, not None, exactly
+        # like e_sgs below.  ``smoke`` is SERIALIZED and ``smoke0`` REBUILT
+        # (written from smoke at every dycore.step entry), as tke/tke0.
+        # ``smoke_emis`` is the (ny, nx) surface emission in kg m-2 s-1, a
+        # cross-step input SERIALIZED like nwfa2d; ``smoke_col`` is the
+        # end-of-step column load in ug m-2, serialized like p/al/alt so a
+        # restored state publishes the frame the live one would.
+        if getattr(cfg, "smoke_tracer", False):
+            self.smoke = zeros(nz, ny, nx)
+            self.smoke0 = rebuilt("smoke0", nz, ny, nx)
+            self.smoke_emis = zeros(ny, nx)
+            self.smoke_col = zeros(ny, nx)
         # Prognostic/published subgrid turbulence energy.  The attribute
         # is ``e_sgs`` because ``self.e`` is already the WRF Coriolis
         # cosine parameter 2*Omega*cos(lat); the owning scheme's symbol

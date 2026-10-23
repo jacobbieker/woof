@@ -37,7 +37,11 @@ COUPLED_SCALAR_STATE_FIELDS = frozenset({
     # mp=50 (P3): rime mass and rime volume, transported with qi.
     "qir", "qib",
     "qh", "qndrop", "qnr",
-    "qni", "qns", "qng", "qnh", "qnn", "qvolg", "qvolh"})
+    "qni", "qns", "qng", "qnh", "qnn", "qvolg", "qvolh",
+    # The passive smoke tracer (RunConfig.smoke_tracer): a dry-air mixing
+    # ratio forced across a nest edge with the same coupling as the
+    # moments, and the first member no microphysics scheme owns.
+    "smoke"})
 
 _THREADS = 256
 _THETA_OFFSET_K = np.float32(300.0)

@@ -131,6 +131,8 @@ DEFAULT_OFF = frozenset({
     "v_sca_adv_order", "v_mom_adv_order", "h_mom_adv_order",
     "swint_opt", "aer_opt", "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
     "alb_sol",
+    # The passive smoke tracer, dropped off as in a header written before it.
+    "smoke_tracer", "smoke_emission_file",
 })
 
 

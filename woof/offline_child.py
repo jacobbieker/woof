@@ -657,6 +657,24 @@ def resolve_child_run_config(child_config_path, *, child_levels=None):
     # (adapt_child_acoustics reads it with child_epssm_is_auto).
     cfg = load_config(child_config_path, accept_epssm_auto=True,
                       child_static=True)
+    if getattr(cfg, "smoke_tracer", False):
+        from woof.explain import layered
+
+        # The offline child is built from the parent's history, and neither
+        # its initial state nor its boundary tables read SMOKE: a downscaled
+        # child would start clean and take zero inflow while its config
+        # named a tracer.  WRF's ndown is the same -- ``rebalance`` reads
+        # only moist(P_QV) -- so there is no WRF reference to transcribe.
+        raise OfflineChildContractError(layered(
+            f"smoke_tracer = true in child config {child_config_path} "
+            "cannot run as an offline (downscaled) child; run the domain as "
+            "an online nest ([[domain]] with parent_id), where the tracer "
+            "crosses the nest edge, or turn it off for this child.",
+            "The offline route reads the parent's archived history, and "
+            "neither the child's initial state nor its boundary tables carry "
+            "SMOKE.  The child would start with no smoke and take zero "
+            "inflow, which reads like a clean domain rather than a "
+            "missing input."))
     if child_levels is None:
         return cfg
     # Imported here and not at module scope: ``woof.downscale`` imports

@@ -447,6 +447,9 @@ STATE_REBUILT_ATTRS = frozenset({
     # exactly like thp0 and the moist time-t copies above.  The carrier
     # itself is SERIALIZED (state_serialization_contract.py).
     "tke0",
+    # The smoke tracer's time-t copy, on tke0's footing: dycore.step
+    # writes it from the serialized ``smoke`` before any reader.
+    "smoke0",
     # RK time-t copies of transported droplet number.  nc0 exists for the
     # schemes that TRANSPORT nc -- mp=28 (Thompson aerosol-aware), mp=9
     # (Milbrandt-Yau) and mp=16 (WDM6); mp=10 allocates nc but does not
@@ -509,6 +512,11 @@ STATE_INFRA_ATTRS = frozenset({
     # be serialized -- and unclassified it refused every checkpoint of a
     # run that had one attached.
     "_interval_diagnostics",
+    # Which smoke_emission_file woof.core.smoke_tracer.bind_emission last
+    # read into the serialized ``smoke_emis``: a provenance marker, not
+    # model state.  A resumed state rebinds the same file to the same
+    # values on its first step.
+    "_smoke_emission_bound",
     # The domain's ACTIVATION EPOCH in seconds, published beside
     # ``elapsed_seconds`` by woof.core.state.refresh_model_time and from
     # the same tick authority.  Same category, and for the same reason:
@@ -813,6 +821,9 @@ REBUILT_SCRATCH_PREFIXES = (
     "rk_", "adv_", "smag_", "diff_", "diff6_", "acoustic_", "openbc_",
     "moist_", "pd_", "morr_", "wsm6_", "wdm6_", "refl_", "physics_", "lbc_",
     "integration_health_", "nest_",
+    # The smoke tracer's diff4d work row (core/smoke_tracer.py:mix_pbl),
+    # written before every read inside one PBL call.
+    "smoke_pbl_",
     # UP_HELI_MAX per-step work planes (column UH + use_column flags),
     # overwritten by every launch; the accumulator itself is the exact
     # serialized name above, deliberately NOT under this prefix.
@@ -2465,6 +2476,13 @@ def _drop_default_off_run_keys(values: dict) -> None:
     so every writer drops each key the same way.  A new default-off field
     joins this list, naming the commit that added it.
     """
+    # smoke_tracer off (and so no emission file) is the state every
+    # earlier header ran: no tracer allocated, no kernel launched.
+    if not values.get("smoke_tracer", False):
+        values.pop("smoke_tracer", None)
+    if not values.get("smoke_emission_file", ""):
+        values.pop("smoke_emission_file", None)
+        values.pop("smoke_emission_sha256", None)
     # No prescribed smoke is the source forcing every earlier header ran.
     if not values.get("rrtmg_smoke_manifest", ""):
         values.pop("rrtmg_smoke_manifest", None)
@@ -2593,6 +2611,8 @@ def configuration_echo(cfg) -> dict:
     _drop_default_off_run_keys(values)
     from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
     bind_smoke_source_identity(values)
+    from woof.core.smoke_tracer import bind_emission_identity
+    bind_emission_identity(values)
     return values
 
 
@@ -2610,6 +2630,8 @@ def _configuration_digest_values(config: Mapping) -> dict:
     _drop_default_off_run_keys(values)
     from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
     bind_smoke_source_identity(values)
+    from woof.core.smoke_tracer import bind_emission_identity
+    bind_emission_identity(values)
     for key in CONFIG_DIAGNOSTIC_FIELDS - _DIGEST_DROPPED_DIAGNOSTIC_FIELDS:
         if key in values:
             values[key] = _run_config_default(key)
@@ -4078,6 +4100,16 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             # Changing the split or solve mass changes the trajectory.
             stored = "wrf_471" if stored is absent else stored
             live = "wrf_471" if live is absent else live
+        if key == "smoke_tracer":
+            # Old checkpoints carried no smoke tracer; turning it on or off
+            # changes the state inventory, so a flip is refused below.
+            stored = False if stored is absent else stored
+            live = False if live is absent else live
+        if key == "smoke_emission_file":
+            # Old checkpoints emitted no smoke; a different source changes
+            # the tracer trajectory.
+            stored = "" if stored is absent else stored
+            live = "" if live is absent else live
         if key == "rrtmg_smoke_manifest":
             # Old checkpoints had no prescribed smoke. An enabled path and
             # its separately compared source identity change the trajectory.

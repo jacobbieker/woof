@@ -44,6 +44,14 @@ STATE_SERIALIZED_ATTRS = (
     # Absent (None) under every other km_opt, so non-LES inventories are
     # unchanged.
     "tke",
+    # The passive smoke tracer (RunConfig.smoke_tracer), its prescribed
+    # surface emission and its end-of-step column load.  ``smoke`` is a
+    # transported prognostic nothing reconstructs; ``smoke_emis`` is a
+    # cross-step input on nwfa2d's footing (a coupled producer may write
+    # it every step); ``smoke_col`` is serialized for p/al/alt's reason.
+    # Absent on every state that leaves the tracer off, so no existing
+    # inventory moves.
+    "smoke", "smoke_emis", "smoke_col",
     "qi", "qs", "qg", "nc", "nr", "ni", "ns", "ng",
     "qh", "qndrop", "qnr", "qni", "qns", "qng", "qnh", "qnn",
     "qvolg", "qvolh",

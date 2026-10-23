@@ -257,6 +257,11 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # exists to close, reopened by the merge that adopted its fix.
     "run.mp28_aerosol_source", "run.wif_climatology_path",
     "run.ntiedtke_tiedtke_closure",
+    # The passive smoke tracer.  Not in use (False) allocates no tracer
+    # array, which is exactly the prepared state every header written
+    # before the field describes; a bundle prepared with it on carries it
+    # in its header and is compared strictly.
+    "run.smoke_tracer",
     # 2.6.1 added run.p3_backend to RunConfig without adding it here,
     # which refused EVERY tree prepared before it -- 16 of them on the
     # box that found this.  The FOURTH instance of this exact trap in
@@ -806,6 +811,14 @@ PREPARATION_INERT_RUN_FIELDS = frozenset({
     # Prescribed smoke acts only in radiation after prepared-state restore.
     # Its full member identity remains in forecast and restart identities.
     "run.rrtmg_smoke_manifest",
+    # The smoke tracer's emission is read on the tracer's first step
+    # (core/smoke_tracer.py); preparation computes nothing from it.  It
+    # binds the forecast and restart identities when set.  smoke_tracer
+    # itself is NOT here: the prepared state's serialized inventory holds
+    # the tracer's arrays exactly when it is on, so a bundle prepared one
+    # way cannot restore the other (DEFAULT_TOLERANT_IDENTITY_FIELDS
+    # keeps bundles written before the field runnable).
+    "run.smoke_emission_file",
 })
 
 

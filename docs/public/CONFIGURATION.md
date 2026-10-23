@@ -367,7 +367,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 79,
+**Which keys a `[[domain]]` table may override.** Exactly these 80,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     cu_physics  cudt_minutes  clos_choice  ishallow  radt  radt_minutes  bldt
@@ -386,7 +386,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     max_time_step  max_time_step_den  min_time_step  min_time_step_den
     min_time_step_sound  slope_rad  topo_shading  mosaic_urban_canopy
     sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev  topo_wind
-    gwd_opt
+    gwd_opt  smoke_emission_file
 
 `clos_choice` and `ishallow` configure the Grell-Freitas cumulus scheme
 (`cu_physics = 3`): which closure the deep scheme uses (0, the default,
@@ -904,6 +904,23 @@ fail-loud unimplemented).
 to 0. They are selected in `[shared]` or on a domain and imported from
 WRF namelists. See [Terrain drag](TERRAIN-DRAG.md) for the schemes, required
 WPS geography and preparation command.
+
+## Smoke tracer
+
+| TOML key | WRF equivalent | default | allowed | note |
+|---|---|---|---|---|
+| `smoke_tracer` | `tracer_opt` (its `tracer` array) | false | bool | `[shared]` only, so every domain of a tree carries it or none does. A passive smoke mass mixing ratio, `SMOKE`, in ug per kg of dry air. It advects with the moist scalars' mass fluxes (positive-definite on the final RK stage), mixes under `km_opt` and through the PBL scheme's own heat diffusivity (`exch_h`, WRF's `diff4d` solve, every PBL call), takes zero inflow and zero-gradient outflow on a specified boundary, and crosses nest edges both ways. Refused under SASE (`bl_pbl_physics = 900`), which publishes no `exch_h`. Nothing reads it back: radiation, microphysics and the dynamics never see it. Off allocates nothing and launches nothing, so checkpoints and fingerprints match a build without it. Checkpoints bind it; prepared bundles do not |
+| `smoke_emission_file` | -- | `""` | path to a `.npy` or `.nc` file | `[shared]` or per domain, relative paths resolve beside the config. A prescribed surface emission flux on that domain's mass grid, shape `(ny, nx)`, in **kg m-2 s-1**: a `.npy` array, or the `smoke_emission` variable of a NetCDF file (2-D, or 3-D with one leading time; a `units` attribute of `ug m-2 s-1` is converted). It is injected into the lowest model layer as a mass-conserving source. The file is read once, on the tracer's first step, and uploaded to the device; it must be finite, non-negative and free of `_FillValue` cells, and a wrong shape is refused by name. Each domain emits from its own file only: on a tree, give a nest its own `[[domain]] smoke_emission_file`, or `""` for none. Under `feedback = 1` a nest's interior overwrites its parent's there, so a parent source inside a nest's footprint must also be in the nest's file, as each WRF-Chem domain reads its own emissions. The offline (downscaled) child route refuses the tracer: it builds the child from the parent's history, which carries no `SMOKE`. Checkpoints and fingerprints bind the file's SHA-256. Needs `smoke_tracer = true` |
+
+```toml
+[shared]
+smoke_tracer = true
+smoke_emission_file = "smoke_source.npy"   # kg m-2 s-1, (ny, nx)
+```
+
+The history carries `SMOKE` (ug kg-1) and `SMOKE_COL`, the column load
+in ug m-2, on every domain with the tracer on (see
+[OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#smoke-tracer-fields)).
 
 ## Terrain smoothing (`[[domain]] static`)
 

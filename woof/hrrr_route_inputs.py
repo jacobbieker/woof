@@ -1339,6 +1339,12 @@ ROUTE_FORECAST_TOML_FIELDS: Mapping[str, str] = MappingProxyType({
     "rrtmg_smoke_manifest": (
         "woof/core/rrtmg_smoke_manifest.py, prescribed smoke in the "
         "radiation call"),
+    # The passive smoke tracer's emission has no WRF namelist spelling on
+    # this route (WRF's tracer_opt packages are not imported); the forecast
+    # TOML carries it and woof/core/smoke_tracer.py reads it.
+    "smoke_emission_file": (
+        "woof/core/smoke_tracer.py, the tracer's prescribed surface "
+        "emission"),
 })
 
 

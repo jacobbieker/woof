@@ -95,7 +95,9 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
     offset = fields.index("bl_mynn_cloud_tendency_form") + 1
     assert fields[offset:] == ["swint_opt", "aer_opt", "alb_sol",
                               "thompson_version", "thompson_fork_snow_fall",
-                              "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest"]
+                              "rrtmg_cloud_optics_form", "rrtmg_smoke_manifest",
+                              # The passive smoke tracer, appended after.
+                              "smoke_tracer", "smoke_emission_file"]
     assert RunConfig.__dataclass_fields__["thompson_version"].default == "wrf_461"
     assert RunConfig.__dataclass_fields__["thompson_fork_snow_fall"].default == "blend"
 
