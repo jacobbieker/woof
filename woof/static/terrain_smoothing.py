@@ -230,13 +230,19 @@ def parse_domain_static(table, *, source, grid_id) -> TerrainSmoothing:
         raise ValueError(
             f"{where} must be a table; refusing to discard its terrain "
             "smoothing")
-    known = ("smooth_option", "smooth_passes", "smooth_precision")
+    known = ("smooth_option", "smooth_passes", "smooth_precision", "fuel")
     unknown = sorted(set(table) - set(known))
     if unknown:
         names = ", ".join(f"{k!r}{did_you_mean(k, known)}" for k in unknown)
         raise ValueError(
             f"{where}: unknown keys {names}; refusing to ignore them and "
             "build default terrain")
+    # The domain's fuel request (woof.static.fuel.parse_domain_fuel) shares
+    # the table; a table that holds only it asks for default terrain.
+    if "fuel" in table:
+        table = {key: value for key, value in table.items() if key != "fuel"}
+        if not table:
+            return WPS_DEFAULT
     # smooth_precision alone names the default smoother's arithmetic; a
     # pass count without its smoother stays ambiguous.
     if "smooth_option" not in table and (
@@ -455,6 +461,10 @@ def selection_carrier(config):
         # A configuration's static source (woof.static.external_source)
         # is read by every selection the carrier reaches.
         return config
+    if getattr(config, "fuel", ()):
+        # A domain's fuel request (woof.static.fuel.fuel_for) is read by
+        # the selection of that domain, wherever its statics are built.
+        return config
     if (getattr(config, "enabled", False)
             and getattr(config, "fields", "auto") != "terrain"):
         return config
@@ -483,7 +493,9 @@ def catalog_with_smoothing(inner, config):
             or (getattr(config, "terrain_smoothing", ())
                 and not getattr(held, "terrain_smoothing", ()))
             or (getattr(config, "static_source", None) is not None
-                and getattr(held, "static_source", None) is None)):
+                and getattr(held, "static_source", None) is None)
+            or (getattr(config, "fuel", ())
+                and not getattr(held, "fuel", ()))):
         return SimpleNamespace(**{**vars(inner), "static_highres": config})
     return inner
 

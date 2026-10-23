@@ -1,0 +1,12 @@
+# module_fr_fire_util.o -O0 libm symbols:
+# module_fr_fire_phys.o -O0 libm symbols:
+                 U expf
+                 U logf
+                 U powf
+# phys/module_fr_fire_phys.F at WRF's -O2 -ftree-vectorize -funroll-loops:
+                 U expf
+                 U logf
+                 U powf
+# positive control (plain expf loop at -Ofast):
+                 U expf
+                 U _ZGVbN4v_expf

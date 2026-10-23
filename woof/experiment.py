@@ -407,7 +407,7 @@ _DOMAIN_VERTICAL_KEYS = ("nz", "e_vert", "eta_levels", "p_top", "ztop",
 #: Rows for the [[domain]] keys no typed field declares
 #: (:mod:`woof.config_keys`).
 _DOMAIN_KEY_ROWS = key_rows(
-    KeyRow("static", "table", None, "per-domain terrain smooth_option, smooth_passes and smooth_precision"),
+    KeyRow("static", "table", None, "per-domain terrain smooth_option, smooth_passes and smooth_precision, and the fire model's fuel = { sr_x, sr_y, landfire, landfire_kind } request"),
     KeyRow("start_time", "datetime", None,
            "when this nest starts, an offset-free TOML date-time inside "
            "the run; absent starts it with [experiment].start_time"),
@@ -3811,6 +3811,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if "static" in dom:
             from woof.static.terrain_smoothing import parse_domain_static
             parse_domain_static(dom["static"], source=source, grid_id=grid_id)
+            if isinstance(dom["static"], dict) and "fuel" in dom["static"]:
+                from woof.static.fuel import parse_domain_fuel
+                parse_domain_fuel(dom["static"]["fuel"], source=source,
+                                  grid_id=grid_id)
         if grid_id in by_id:
             raise ValueError(
                 f"duplicate grid_id = {grid_id} in [[domain]] tables of "
@@ -5497,7 +5501,11 @@ def _public_config_value(value):
             # Hub-height wind is off unless asked; an [output] block that
             # does not ask keeps its pre-feature public bytes.
             document.pop("hub_wind", None)
-        run_document = (document if isinstance(value, RunConfig) else
+        if (isinstance(value, history_selection_module.HistorySelection)
+                and value.windfarm_power is None):
+            # Wind-farm power likewise: absent stays absent.
+            document.pop("windfarm_power", None)
+        run_document =(document if isinstance(value, RunConfig) else
                         document.get("run") if isinstance(value, DomainConfig) else None)
         if isinstance(run_document, dict):
             # The generic forms existed before these selectors. Keep

@@ -1399,6 +1399,30 @@ Takes no options of its own.
 | `--wif-only` | with --wif, stage only that dataset and leave the coefficient tables alone |
 | `--wif-root DIR` | stage the WIF dataset into DIR instead of ~/.woof/wif (same meaning as WOOF_WIF_DATA_ROOT) |
 
+## `woof fuel`
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof fuel preview`
+
+| argument | what it does |
+|---|---|
+| `CONFIG` | experiment TOML with a [case_data] table |
+
+| option | what it does |
+|---|---|
+| `--device {auto,cpu,gpu}` | where the fire mesh is built (default: auto, the GPU when one is usable; both give the same words) |
+| `--domain ID` | grid_id of the domain (default: the first) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--json` | print the summary as JSON |
+| `--landfire TIF` | local LANDFIRE FBFM13 or FBFM40 GeoTIFF |
+| `--landfire-kind {auto,fbfm13,fbfm40}` | code set of --landfire (default: the domain's own request, else auto, read from the codes) |
+| `--output NPZ` | also write NFUEL_CAT, NFUEL_CAT_FIRE, ZSF, DZDXF and DZDYF to this NPZ |
+| `--sr-x N` | fire cells per atmospheric cell west-east (WRF-SFIRE sr_x; default: the domain's own [[domain]] static fuel request, else 4) |
+| `--sr-y N` | fire cells per atmospheric cell south-north (WRF-SFIRE sr_y; default: the domain's own request, else 4) |
+
 ## `woof global`
 
 | option | what it does |
@@ -2777,6 +2801,27 @@ Takes no options of its own.
 | `--json` | print the report as one JSON document |
 | `--levels` | vertical levels of the compile domain (default 40) |
 | `--profile PROFILE` | a physics profile to compile for (repeatable); default: every profile a source defaults to |
+
+## `woof windfarm`
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+
+## `woof windfarm layout`
+
+| argument | what it does |
+|---|---|
+| `CONFIG` | experiment TOML whose domain the turbines are placed on |
+| `TURBINES` | turbine table: .csv, GeoJSON FeatureCollection of points, or a sites.v1 JSON |
+
+| option | what it does |
+|---|---|
+| `--curve ID` | turbine-library curve for every turbine whose row names none (required for a sites.v1 document) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--grid-id N` | domain to place the turbines on (default: 1) |
+| `--json` | print the summary as one JSON document instead of a table |
+| `--library FILE` | turbine library JSON (default: the bundled woof/data/energy/turbine_library.json) |
 
 ## `woof-carried-channel`
 

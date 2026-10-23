@@ -314,10 +314,12 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
     # These files are components, not the sources their runtime compiles.
     # Their real factories are included by composed_units. Compiling a
     # fragment without its defines/libm creates false coverage and errors.
-    fragments = {"p3", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "urban_bep_bem",
+    fragments = {"p3", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "windfarm_fitch", "urban_bep_bem",
+                 "fire_spread",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
                  "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
+                 "fire_levelset",
                  "smoke_emission", "smoke_plumerise", "smoke_deposition"}
     direct = {"rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf", "ruc_spp"}
     stock = [unit for unit in stock
@@ -377,6 +379,14 @@ def composed_units(root: Path) -> list[Unit]:
     sw = module("rrtmg_sw")
     _, sw_defines = sw._pack_cuda_tables(sw.load_sw_tables())
     terrain = module("terrain_drag")
+    fitch = module("windfarm_fitch")
+    fire = importlib.import_module("woof.fire._device")
+    if not Path(fire.__file__).resolve().is_relative_to(root):
+        raise RuntimeError("source factory woof.fire._device was imported outside the checked tree")
+    levelset = importlib.import_module("woof.fire.levelset")
+    if not Path(levelset.__file__).resolve().is_relative_to(root):
+        raise RuntimeError("source factory woof.fire.levelset was imported "
+                           "outside the checked tree")
     bem = module("urban_bem")
     mosaic = module("noah_mosaic")
     nt = module("ntiedtke_fused")
@@ -385,6 +395,9 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:rrtmg_sw", sw_defines + (kdir / "rrtmg_sw.cu").read_text(encoding="utf-8"),
              ("-std=c++17", "--ftz=false")),
         Unit("composed:terrain_drag", terrain.module_source(), tuple(terrain.MODULE_OPTIONS)),
+        Unit("composed:windfarm_fitch", fitch.module_source(), tuple(fitch.MODULE_OPTIONS)),
+        Unit("composed:fire_spread", fire.module_source(), tuple(fire.MODULE_OPTIONS)),
+        Unit("composed:fire_levelset", levelset.module_source(), tuple(levelset.MODULE_OPTIONS)),
         Unit("composed:urban_bem", bem.module_source(), tuple(bem.MODULE_OPTIONS)),
         Unit("composed:noah_mosaic", module_source("noah_mosaic", kernel_dir=kdir),
              tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),

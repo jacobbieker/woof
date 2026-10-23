@@ -2602,6 +2602,19 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     # The drag unit borrows glibc helpers from the composed source in
     # woof.core.terrain_drag.module_source(); it cannot compile alone.
     "terrain_drag",
+    # The Fitch wind-farm drag borrows gfk_pow and glibc_asinf the same way,
+    # from woof.core.windfarm_fitch.module_source().
+    "windfarm_fitch",
+    # Fire spread (woof/fire/_device.py) composes glibc_flt32.cuh and
+    # glibc_flt64.cuh ahead of fire_spread.cu and cannot compile alone.  Its
+    # kernels are point-local (one thread per fire-grid cell, a few dozen
+    # scalars); no physics_kernel_modules selector row launches it yet, and
+    # the coupled fire model that does will price its composed unit.
+    "fire_spread",
+    # The fire level set calls glibc_flt32.cuh's gfk_exp/gfk_pow, which
+    # woof.fire.levelset.module_source() prepends; it cannot compile alone.
+    # Priced as fire_levelset_composed.
+    "fire_levelset",
     # The smoke library's three sources call gfk_*/g64_* from the glibc
     # headers woof.smoke._kernels.module_source() prepends; priced as
     # smoke_composed.
@@ -2762,6 +2775,22 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         module="terrain_drag_composed",
         max_local_size_bytes=2208,
         covers=frozenset({"terrain_drag"})),
+    # The Fitch wind-farm drag (WRF windfarm_opt = 1): glibc_flt32.cuh +
+    # glibc_trig_flt32.cuh + windfarm_fitch.cu through
+    # woof/core/windfarm_fitch.py's direct NVRTC loader.  fitch_column keeps
+    # no per-level arrays: 0 B local through the loader on an RTX A6000
+    # (sm_86) at NVRTC 12.9.86 and 13.4.92, and a 0 B stack frame with no
+    # spills in ptxas -v for sm_86, sm_89, sm_100 and sm_120 at both.
+    "windfarm_fitch_composed": ChainedTranslationUnitFrame(
+        module="windfarm_fitch_composed",
+        max_local_size_bytes=0,
+        covers=frozenset({"windfarm_fitch"})),
+    # The fire level set's production loader (woof/fire/levelset.py), NVRTC
+    # 12.9.86 on sm_86: every export 0 B (one node per thread, no arrays).
+    "fire_levelset_composed": ChainedTranslationUnitFrame(
+        module="fire_levelset_composed",
+        max_local_size_bytes=0,
+        covers=frozenset({"fire_levelset"})),
     # woof.smoke's direct NVRTC unit (-fmad=false --ftz=false), read on
     # sm_86 (RTX A6000) at NVRTC 12.9.86, 2026-10-23: every kernel 0 B
     # except smoke_plumerise_columns, 64 B (its plume state is 35,728 B of

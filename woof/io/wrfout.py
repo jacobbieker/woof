@@ -39,7 +39,8 @@ from woof.io.classic_tape import (ClassicDim, ClassicTape, ClassicVariable,
 from woof.io.wrf_output_schema import (
     HISTORY_FIELDS_BY_NETCDF_NAME, HUB_HEIGHT_DIMENSION,
     HUB_HEIGHT_DIMENSIONED_FIELDS, PHYSICS_SELECTOR_GLOBALS,
-    REGISTRY_VAR_META, SCHEME_OUTPUT_FIELDS, WRF_FIELD_TYPE_INTEGER,
+    REGISTRY_VAR_META, SCHEME_OUTPUT_FIELDS, WINDFARM_TURBINE_DIMENSION,
+    WINDFARM_TURBINE_DIMENSIONED_FIELDS, WRF_FIELD_TYPE_INTEGER,
     WRF_FIELD_TYPE_REAL,
 )
 from woof.supervisor import (_fsync_directory, fsync_file, quarantine_file,
@@ -1257,6 +1258,17 @@ class WrfoutWriter:
             if name == "HUB_HEIGHT":
                 return ("Time", HUB_HEIGHT_DIMENSION)
             return ("Time", HUB_HEIGHT_DIMENSION, "south_north", "west_east")
+        if name in WINDFARM_TURBINE_DIMENSIONED_FIELDS:
+            # Wind-farm power (woof/core/windfarm_power_diag.py), routed by
+            # NAME for the hub axis's reason, and created lazily for the
+            # same one: a run without it keeps its header byte-identical.
+            shape = tuple(shape)
+            if len(shape) != 1 or shape[0] < 1:
+                raise ValueError(
+                    f"wind-farm turbine history field {name} has shape "
+                    f"{shape}, which is not (n_turbine,)")
+            self._ensure_dimension(WINDFARM_TURBINE_DIMENSION, shape[0])
+            return ("Time", WINDFARM_TURBINE_DIMENSION)
         if name in _SOIL_LAYER_FIELDS:
             expected = (self.soil_layers, ny, nx)
             if tuple(shape) != expected:
@@ -2843,6 +2855,23 @@ def _attach_hub_wind(node, case, selection, grid):
         streamed=getattr(case, "streamed_store", None) is not None)
 
 
+def _attach_windfarm_power(node, case, selection, grid):
+    """Attach the wind-farm power window a domain's [output] asks for.
+
+    A no-op (``None``) for every selection without ``windfarm_turbines``,
+    exactly as :func:`_attach_hub_wind` is for one without ``hub_*`` keys.
+    """
+    if getattr(selection, "windfarm_power", None) is None:
+        return None
+    from woof.core.windfarm_power_diag import attach_windfarm_power
+
+    run = node.cfg.run
+    return attach_windfarm_power(
+        node.state, selection, nx=run.nx, ny=run.ny, dx=run.dx, dy=run.dy,
+        grid_id=node.cfg.grid_id, latlon=grid.latlon_mass,
+        streamed=getattr(case, "streamed_store", None) is not None)
+
+
 class HistoryDurabilityBarrier:
     """The history frames a checkpoint is ordered after (see
     :meth:`PerDomainWrfoutWriters.durability_barrier`).
@@ -2935,6 +2964,11 @@ class PerDomainWrfoutWriters:
         self._captured_paths = []
         #: grid_id -> the hub-wind window this set attached (or None).
         self._hub_wind_by_grid_id = {}
+        #: grid_id -> the wind-farm power window this set attached (or None:
+        #: no listed turbine inside), and the state it was attached for, so
+        #: a domain with no turbines is placed once per state, not per frame.
+        self._windfarm_power_by_grid_id = {}
+        self._windfarm_power_state_by_grid_id = {}
         self._abort_event = threading.Event()
         self._output_observer = None
         self._simulated_radar = None
@@ -2979,6 +3013,12 @@ class PerDomainWrfoutWriters:
             self._hub_wind_by_grid_id[int(node.cfg.grid_id)] = \
                 _attach_hub_wind(node, case, self._selection_for(node.cfg),
                                  node.grid)
+            self._windfarm_power_by_grid_id[int(node.cfg.grid_id)] = \
+                _attach_windfarm_power(node, case,
+                                       self._selection_for(node.cfg),
+                                       node.grid)
+            self._windfarm_power_state_by_grid_id[int(node.cfg.grid_id)] = \
+                node.state
         self.last_durable_wrfout = None
         if simulated_radar is not None and simulated_radar.enabled:
             from woof.simulated_radar import LiveSimulatedRadar
@@ -3186,6 +3226,9 @@ class PerDomainWrfoutWriters:
             queue_depth=self._queue_depth_requested())
         self._hub_wind_by_grid_id[grid_id] = _attach_hub_wind(
             node, case, self._selection_for(node.cfg), grid)
+        self._windfarm_power_by_grid_id[grid_id] = _attach_windfarm_power(
+            node, case, self._selection_for(node.cfg), grid)
+        self._windfarm_power_state_by_grid_id[grid_id] = node.state
 
     def _ensure_hub_wind(self, node) -> None:
         """The domain's hub-wind window is on the state it publishes NOW.
@@ -3219,6 +3262,37 @@ class PerDomainWrfoutWriters:
         case = self.model._prepared_by_grid_id[grid_id]
         self._hub_wind_by_grid_id[grid_id] = _attach_hub_wind(
             node, case, selection, node.grid)
+
+    def _ensure_windfarm_power(self, node) -> None:
+        """The domain's wind-farm power window is on the state it publishes
+        NOW -- :meth:`_ensure_hub_wind`'s rule for a replaced state."""
+        selection = self._selection_for(node.cfg)
+        if getattr(selection, "windfarm_power", None) is None:
+            return
+        from woof.core import interval_diagnostics
+        from woof.core.windfarm_power_diag import (DIAGNOSTIC_NAME,
+                                                   WindfarmPowerError)
+
+        if interval_diagnostics.get(node.state, DIAGNOSTIC_NAME) is not None:
+            return
+        grid_id = int(node.cfg.grid_id)
+        if not hasattr(self, "_windfarm_power_by_grid_id"):
+            self._windfarm_power_by_grid_id = {}
+            self._windfarm_power_state_by_grid_id = {}
+        if self._windfarm_power_state_by_grid_id.get(grid_id) is node.state:
+            # Placed on this very state already, and no turbine was inside.
+            return
+        previous = self._windfarm_power_by_grid_id.get(grid_id)
+        if previous is not None and previous.window_steps > 0:
+            raise WindfarmPowerError(
+                f"d{grid_id:02d}'s model state was replaced after its "
+                f"wind-farm power window had folded {previous.window_steps} "
+                "step(s); the window would restart mid-interval and publish "
+                "statistics for less time than the frame claims")
+        case = self.model._prepared_by_grid_id[grid_id]
+        self._windfarm_power_by_grid_id[grid_id] = _attach_windfarm_power(
+            node, case, selection, node.grid)
+        self._windfarm_power_state_by_grid_id[grid_id] = node.state
 
     def remove_domain(self, grid_id: int) -> None:
         """Drain and close one retired episode without losing its paths."""
@@ -3266,6 +3340,19 @@ class PerDomainWrfoutWriters:
                 "which was relocated: its hub-wind window and site cells "
                 "belong to the footprint it no longer covers.  Remove the "
                 "hub_* keys from this domain's [output], or do not move it.")
+        # Asked of what was ATTACHED: a domain whose footprint held none of
+        # the listed turbines carries no window, and moving it loses
+        # nothing (the next frame places the turbines on the new grid).
+        if getattr(self, "_windfarm_power_by_grid_id", {}).get(
+                grid_id) is not None:
+            from woof.core.windfarm_power_diag import (
+                WindfarmPowerUnsupportedRoad)
+            raise WindfarmPowerUnsupportedRoad(
+                f"[output] windfarm_turbines is configured on "
+                f"d{grid_id:02d}, which was relocated: its turbines' cells "
+                "belong to the footprint it no longer covers.  Remove "
+                "windfarm_turbines from this domain's [output], or do not "
+                "move it.")
         from woof.runtime import _global_wrf_attrs, _metadata_frame
 
         configured_start = getattr(node.cfg, "start_time", None)
@@ -3331,6 +3418,7 @@ class PerDomainWrfoutWriters:
         from woof.ensemble.runtime_context import current_capture
         capture = current_capture()
         self._ensure_hub_wind(node)
+        self._ensure_windfarm_power(node)
         if capture is not None:
             interval_diagnostics.refuse_unsupported_publisher(
                 node.state, "this run captures ensemble members, whose "

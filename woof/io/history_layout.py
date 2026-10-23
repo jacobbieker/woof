@@ -611,6 +611,9 @@ def history_frame_bytes(cfg, selection=None, *,
     shapes.update(hub_history_shapes(
         selection, run.ny, run.nx, moist="QVAPOR" in shapes,
         droplet_number="QNCLOUD" in shapes))
+    # The wind-farm power rows likewise ([output] windfarm_turbines).
+    from woof.core.windfarm_power_diag import windfarm_history_shapes
+    shapes.update(windfarm_history_shapes(selection))
     names = selection.select(shapes)
     payload = sum(4 * math.prod(shapes[name]) if name != "Times" else 20
                   for name in names)
