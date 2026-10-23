@@ -1,0 +1,4 @@
+# run_reader.o -O0 undefined libm symbols (none expected):
+# positive control (plain expf loop at -Ofast):
+                 U expf
+                 U _ZGVbN4v_expf

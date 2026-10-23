@@ -4,6 +4,22 @@
 
 New:
 
+- `windfarm_opt = 1` runs WRF v4.7.1's Fitch wind-farm scheme in the
+  forecast, so a farm's wakes reach the cells downstream. Each turbine of
+  `windfarm_turbine_file` (a woof turbine table, or WRF's own
+  `windturbines.txt`/`windturbines-ij.txt` and `wind-turbine-N.tbl`) is an
+  elevated momentum sink and a TKE source over the levels its rotor
+  sweeps, added after MYNN in the PBL slot as WRF's PBL driver adds it.
+  The driver's PBL step matches the pure kernel word for word, and the
+  kernel matches WRF's Fortran. History gains WRF's `POWER` (W per cell),
+  also in the `windfarm` preset. `windfarm_ij` and `windfarm_tke_factor`
+  import from WRF namelists. MYNN is required; moving, spawned, streamed
+  and multi-device domains are refused by name. Checkpoints bind the
+  turbine file's bytes. Off by default: nothing is built or launched, and
+  checkpoints, fingerprints and prepared bundles are unchanged. The
+  layout's duplicate GPU `dragcof` kernel is retired; the CPU table writer
+  stays.
+
 - `smoke_tracer = true` carries a passive smoke tracer, `SMOKE` (ug per
   kg of dry air), the analogue of WRF's `tracer` array. It advects with
   the moist scalars' acoustic-averaged mass fluxes, positive-definite on

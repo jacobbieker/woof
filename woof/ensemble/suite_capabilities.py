@@ -149,6 +149,9 @@ def plan_suite(cfg, *, members=1, registry=None):
         # the member dycore and physics driver; the packed batch carries
         # no tracer stage.
         "smoke_tracer": 0,
+        # The Fitch wind farm runs in the member physics driver's PBL slot;
+        # the packed batch has no wind-farm stage.
+        "windfarm_opt": 0,
     }
     for key, required in selections.items():
         value = _value(cfg, key, 0)

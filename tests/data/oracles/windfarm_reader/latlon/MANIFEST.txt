@@ -1,0 +1,14 @@
+nt i4 0
+nkind i4 1 4
+lat f4 1 4
+lon f4 1 4
+hubheight f4 1 4
+diameter f4 1 4
+stc f4 1 4
+npower f4 1 4
+cutin f4 1 4
+cutout f4 1 4
+stc2 f4 1 4
+turbws f4 2 100 100
+turbtc f4 2 100 100
+turbpw f4 2 100 100

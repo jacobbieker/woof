@@ -503,8 +503,8 @@ class DeviceWindFarmLayout:
     names and with its words, plus ``tables`` (:class:`FitchTables` of
     device arrays: ``turbws``/``turbtc``/``turbpw`` and the per-curve
     header values a Fitch kernel's ``dragcof`` reads; see
-    :func:`woof.windfarm.fitch_tables.dragcof_gpu`).  Plain data: no
-    curve names, turbine ids or host bookkeeping.
+    ``woof/core/kernels/windfarm_fitch.cu``).  Plain data: no curve names,
+    turbine ids or host bookkeeping.
     """
 
     ny: int
@@ -789,6 +789,27 @@ def domain_grid(config: str | Path, grid_id: int = 1):
     return grids_from_projection_config(exp)[ids.index(int(grid_id))]
 
 
+def wrf_cells(projection: WrfProjection, lat32, lon32):
+    """WRF's placement of float32 lat/lon: ``(x, y, j, i)``.
+
+    ``x``/``y`` are ``latlon_to_ij``'s float32 ``ts_rx``/``ts_ry``
+    (1-based); the 0-based cell is ``nint - 1``, and -1 where the
+    projection gives no finite point.  The one placement both the woof
+    table and WRF's own ``windturbines.txt`` are read through.
+    """
+    n = len(lat32)
+    x = np.empty(n, dtype=F)
+    y = np.empty(n, dtype=F)
+    ii = np.empty(n, dtype=np.int64)
+    jj = np.empty(n, dtype=np.int64)
+    for k in range(n):
+        x[k], y[k] = projection.latlon_to_ij(F(lat32[k]), F(lon32[k]))
+        finite = np.isfinite(x[k]) and np.isfinite(y[k])
+        ii[k] = nint(x[k]) - 1 if finite else -1
+        jj[k] = nint(y[k]) - 1 if finite else -1
+    return x, y, jj, ii
+
+
 def _refuse_list(head: str, names: Sequence[str], remedy: str, why: str):
     shown = ", ".join(names[:12]) + (f" and {len(names) - 12} more"
                                      if len(names) > 12 else "")
@@ -931,15 +952,7 @@ def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
     n_turbines = len(turbines)
     lat32 = np.array([F(t.lat) for t in turbines], dtype=F)
     lon32 = np.array([F(t.lon) for t in turbines], dtype=F)
-    x = np.empty(n_turbines, dtype=F)
-    y = np.empty(n_turbines, dtype=F)
-    ii = np.empty(n_turbines, dtype=np.int64)
-    jj = np.empty(n_turbines, dtype=np.int64)
-    for n in range(n_turbines):
-        x[n], y[n] = projection.latlon_to_ij(lat32[n], lon32[n])
-        finite = np.isfinite(x[n]) and np.isfinite(y[n])
-        ii[n] = nint(x[n]) - 1 if finite else -1
-        jj[n] = nint(y[n]) - 1 if finite else -1
+    x, y, jj, ii = wrf_cells(projection, lat32, lon32)
     outside = [ids[n] for n in range(n_turbines)
                if not (0 <= ii[n] < nx and 0 <= jj[n] < ny)]
     if outside:
@@ -1113,5 +1126,5 @@ __all__ = [
     "read_turbine_csv",
     "turbines_from_geojson", "turbines_from_sites", "read_turbines",
     "resolve_curve", "speed_axis", "domain_grid", "build_layout",
-    "layout_for_config",
+    "layout_for_config", "wrf_cells",
 ]

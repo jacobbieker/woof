@@ -850,6 +850,12 @@ def restart_identity_payload(exp) -> dict:
         # The file's bytes, not its path alone, are the source.
         from woof.core.smoke_tracer import bind_emission_identity
         bind_emission_identity(run)
+        # WRF's windfarm_opt, absent-stays-absent: off, no turbine is placed
+        # and nothing launches, so all four keys leave and every earlier
+        # fingerprint keeps its value; on, they bind with the turbine
+        # file's and its curves' SHA-256 (woof.core.windfarm_coupling).
+        from woof.core.windfarm_coupling import bind_windfarm_identity
+        bind_windfarm_identity(run)
         # Source members, not a path alone, identify prescribed radiation.
         from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
         if run.get("rrtmg_smoke_manifest", ""):

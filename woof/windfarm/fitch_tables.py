@@ -26,19 +26,20 @@ once to float32 -- the words WRF's list-directed read would make of the
 values :func:`write_table` prints (shortest round-trip decimals).  A row
 at 0 m/s is never written: ``dragcof`` divides by ``ws(nb)**3``.
 
-:func:`dragcof` is ``dragcof`` plus ``power1``, element by element, on the
-CPU (NumPy float32; ``**`` is glibc 2.39's ``powf``,
+:func:`dragcof_cpu` is ``dragcof`` plus ``power1``, element by element, on
+the CPU (NumPy float32; ``**`` is glibc 2.39's ``powf``,
 :func:`woof.core.noahmp_libm.powf_array`, because gfortran calls ``powf``
-for a REAL exponent even when it is 2.) and on the GPU (an NVRTC module,
-``-fmad=false --ftz=false``, ``gfk_pow`` from ``kernels/glibc_flt32.cuh``).
-Both are held at max_ulp 0 against the unmodified WRF statements by
-``tests/test_windfarm_layout_wrf471_parity.py``.
+for a REAL exponent even when it is 2.), held at max_ulp 0 against the
+unmodified WRF statements by ``tests/test_windfarm_layout_wrf471_parity.py``.
+It builds the layout's axis tables.  On the device ``dragcof`` is inlined in
+the Fitch kernel itself (``woof/core/kernels/windfarm_fitch.cu``), held to
+WRF by ``tools/windfarm_fitch_wrf471_oracle``; a second device copy here was
+retired when the scheme was wired into the model.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -56,11 +57,6 @@ PICONST = F(3.1415926535897932384626433)
 #: A parked rotor's thrust coefficient, the ``stc`` of each table header.
 #: WRF reads it from every table and ships no default; woof pins one.
 STANDING_THRUST_COEFFICIENT = F(0.13)
-
-MODULE_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
-MODULE_KEY = "woof.windfarm.fitch_tables:fitch_tables"
-_SOURCES = ("glibc_flt32.cuh",)
-_BLOCK = 128
 
 
 class FitchTableRefused(ValueError):
@@ -226,149 +222,6 @@ def dragcof_cpu(tables: FitchTables, curve, speed, diameter_m,
             "power1": power1.astype(F)}
 
 
-#: The device translation unit (after the preamble and glibc_flt32.cuh).
-KERNEL_SOURCE = r"""// WRF v4.7.1 phys/module_wind_fitch.F dragcof (277-334) and dragforce's
-// swept area and power1 (190-191), one (curve, speed, diameter) per thread.
-//
-// Every statement follows WRF's own, in WRF's order of evaluation; the module
-// is compiled with -fmad=false and --ftz=false, so no product is fused into a
-// sum and no subnormal is flushed, as gfortran does neither.  Fortran's real
-// powers (diameter**2., turbws**3., speedhub**3.) are glibc's powf
-// (gfk_pow; gfortran calls powf for a real exponent even when it is 2.).
-// The table rows are WRF's turbws/turbtc/turbpw: MAXVALS2 slots per curve,
-// zero past the curve's own rows, searched exactly as WRF's vfound loop.
-
-extern "C" __global__ void wf_dragcof(
-    const int n, const float* __restrict__ speed,
-    const int* __restrict__ curve, const float* __restrict__ diameter,
-    const float* __restrict__ turbws, const float* __restrict__ turbtc,
-    const float* __restrict__ turbpw, const float* __restrict__ cutin,
-    const float* __restrict__ cutout, const float* __restrict__ stc,
-    const float* __restrict__ stc2, const int maxvals2,
-    const float correction_factor, float* __restrict__ thr_out,
-    float* __restrict__ powcof_out, float* __restrict__ tke_out,
-    float* __restrict__ power1_out)
-{
-    const int q = blockIdx.x * blockDim.x + threadIdx.x;
-    if (q >= n) return;
-    const int c = curve[q];
-    const float* ws = turbws + (long)c * maxvals2;
-    const float* tc = turbtc + (long)c * maxvals2;
-    const float* pw = turbpw + (long)c * maxvals2;
-    const float v = speed[q];
-    const float cispeed = cutin[c];
-    const float cospeed = cutout[c];
-    const float tdiameter = diameter[q];
-
-    const float area = (3.1415926535897932384626433f / 4.0f)
-                     * gfk_pow(tdiameter, 2.0f);
-
-    bool vfound = false;
-    int nu = 1, nb = 0;
-    for (int k = 0; k < maxvals2; ++k) {
-        if (!vfound && ws[k] > v) { nu = k; nb = k - 1; vfound = true; }
-    }
-    if (nb < 0) nb = 0;
-
-    float thrcof;
-    if (v <= cispeed) {
-        thrcof = stc[c];
-    } else if (v >= cospeed) {
-        thrcof = stc2[c];
-    } else {
-        thrcof = tc[nb] + (tc[nu] - tc[nb]) / (ws[nu] - ws[nb]) * (v - ws[nb]);
-    }
-
-    const float half_rho = 0.5f * 1.23f;
-    float powcof;
-    if (v <= cispeed || v >= cospeed) {
-        powcof = 0.0f;
-    } else {
-        const float fac1 = 1000.0f / (half_rho * gfk_pow(ws[nb], 3.0f) * area);
-        const float fac2 = 1000.0f / (half_rho * gfk_pow(ws[nu], 3.0f) * area);
-        powcof = pw[nb] * fac1
-               + (pw[nu] * fac2 - pw[nb] * fac1) / (ws[nu] - ws[nb]) * (v - ws[nb]);
-    }
-
-    float tkecof = thrcof - powcof;
-    tkecof = correction_factor * tkecof;
-    if (tkecof < 0.0f) tkecof = 0.0f;
-
-    thr_out[q] = thrcof;
-    powcof_out[q] = powcof;
-    tke_out[q] = tkecof;
-    power1_out[q] = half_rho * gfk_pow(v, 3.0f) * area * powcof;
-}
-"""
-
-
-def module_source() -> str:
-    from woof.core.kernels import _preamble
-
-    root = Path(__file__).resolve().parent.parent / "core" / "kernels"
-    return (_preamble()
-            + "".join((root / name).read_text(encoding="utf-8")
-                      for name in _SOURCES)
-            + KERNEL_SOURCE)
-
-
-@lru_cache(maxsize=None)
-def _module(device: int):
-    """NVRTC directly (not RawModule, which appends -ftz=true): see
-    :func:`woof.core.terrain_drag._module`."""
-
-    import cupy as cp
-    from woof import nvrtc_ptx_cache as compiler
-    from woof.certify.kernel_manifest import record_module
-    from woof.kernel_compile_notice import observe_module_compile
-
-    source = module_source()
-    with cp.cuda.Device(device), observe_module_compile(MODULE_KEY):
-        ptx, _ = compiler.compile_using_nvrtc(
-            source, MODULE_OPTIONS, None, "windfarm_fitch.cu")
-        module = cp.cuda.function.Module()
-        module.load(ptx.encode() if isinstance(ptx, str) else ptx)
-    record_module(MODULE_KEY, source=source, options=MODULE_OPTIONS,
-                  module=None)
-    return module
-
-
-def dragcof_gpu(tables: FitchTables, curve, speed, diameter_m,
-                correction_factor=1.0) -> dict[str, Any]:
-    """:func:`dragcof_cpu` on the device; ``tables`` holds CuPy arrays."""
-
-    import cupy as cp
-
-    device = getattr(tables.speeds_ms, "device", None)
-    with cp.cuda.Device(device.id if device is not None
-                        else cp.cuda.Device().id):
-        return _dragcof_gpu(cp, tables, curve, speed, diameter_m,
-                            correction_factor)
-
-
-def _dragcof_gpu(cp, tables, curve, speed, diameter_m, correction_factor):
-    speed = cp.ascontiguousarray(cp.asarray(speed, dtype=cp.float32))
-    n = int(speed.size)
-    curve = cp.ascontiguousarray(cp.asarray(curve, dtype=cp.int32))
-    diameter = cp.ascontiguousarray(cp.broadcast_to(
-        cp.asarray(diameter_m, dtype=cp.float32), speed.shape))
-    out = {name: cp.empty(n, dtype=cp.float32)
-           for name in ("thrcof", "powcof", "tkecof", "power1")}
-    t = {name: cp.ascontiguousarray(cp.asarray(
-             value, dtype=cp.int32 if name == "nval" else cp.float32))
-         for name, value in tables.arrays().items()}
-    if n:
-        kernel = _module(cp.cuda.Device().id).get_function("wf_dragcof")
-        kernel(((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,), (
-            np.int32(n), speed, curve, diameter, t["speeds_ms"],
-            t["thrust_coefficient"], t["power_kw"], t["cut_in_ms"],
-            t["cut_out_ms"], t["standing_thrust"], t["standing_thrust_cutout"],
-            np.int32(MAXVALS2), np.float32(correction_factor),
-            out["thrcof"], out["powcof"], out["tkecof"], out["power1"]))
-    return out
-
-
 __all__ = ["MAXVALS", "MAXVALS2", "PICONST", "STANDING_THRUST_COEFFICIENT",
            "FitchTableRefused", "FitchTables", "table_rows", "write_table",
-           "float32_word",
-           "dragcof_cpu", "dragcof_gpu"]
+           "float32_word", "dragcof_cpu"]

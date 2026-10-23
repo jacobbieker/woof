@@ -133,6 +133,9 @@ DEFAULT_OFF = frozenset({
     "alb_sol",
     # The passive smoke tracer, dropped off as in a header written before it.
     "smoke_tracer", "smoke_emission_file",
+    # WRF's wind farm, all four dropped while windfarm_opt is 0.
+    "windfarm_opt", "windfarm_ij", "windfarm_tke_factor",
+    "windfarm_turbine_file",
 })
 
 

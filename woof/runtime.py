@@ -1011,6 +1011,9 @@ def _initialize_real_case_physics(
         radiation_start_time=start_time, radiation_latitude=lat,
         radiation_longitude=lon,
         terrain_drag_static=static,
+        # WRF's windfarm_opt = 1 places its turbines on this grid; a row
+        # window's state is refused against it by shape.
+        windfarm_grid=grid,
         **lake_physics_inputs(cfg, static),
         **ruc_mosaic_physics_inputs(
             cfg, static, landuse_attrs=landuse_attrs, xice=soil.xice,
@@ -1710,6 +1713,7 @@ def prepare_child_case(initialized, child_dc, *, exp: ExperimentConfig,
         glw=declared_constant_glw(exp),
         radiation=radiation, radiation_start_time=exp.start_time,
         radiation_latitude=lat, radiation_longitude=lon,
+        windfarm_grid=initialized.grid,
         **lake_physics_inputs(cfg, static),
         **ruc_mosaic_physics_inputs(
             cfg, static, landuse_attrs=landuse_attrs, xice=soil.xice,
