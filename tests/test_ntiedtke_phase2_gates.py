@@ -402,7 +402,7 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     """Full domain serialization binds the scheme and every other run field."""
     from dataclasses import asdict, replace
     from datetime import datetime, timedelta
-    from woof.config import CHEM_RUN_FIELDS, RunConfig
+    from woof.config import CHEM_RUN_FIELDS, WINDFARM_RUN_DEFAULTS, RunConfig
     from woof.experiment import DomainConfig
     from woof.ingest import prepared_cache
 
@@ -476,6 +476,10 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     # as in the checkpoint echo; this domain runs Morrison and Grell-Freitas.
     from woof import correct_mode
     for name in correct_mode.CORRECTION_KEYS:
+        expected_run.pop(name)
+    # WRF's wind farm leaves the identity while windfarm_opt = 0
+    # (bind_windfarm_identity), by the same rule the document applies.
+    for name in WINDFARM_RUN_DEFAULTS:
         expected_run.pop(name)
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()

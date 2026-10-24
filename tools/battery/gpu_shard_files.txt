@@ -923,6 +923,11 @@ tests/test_windfarm_fitch.py
 # (tools/windfarm_fitch_wrf471_oracle).  Prevents a reordered sum or a
 # substituted libm call drifting off WRF's words.
 tests/test_windfarm_fitch_wrf471_parity.py
+# windfarm_opt = 1 in the running model: one PBL step of the driver word for
+# word to the pure kernel and its CPU mirror on WRF's arguments, a bit-exact
+# checkpoint round trip, the off path bit for bit, no per-step host copy.
+# Prevents the seam handing the kernel the wrong winds, heights, dt or QKE.
+tests/test_windfarm_coupling_gpu.py
 
 # SHARD 1r: A158, WRF's implicit-explicit vertical advection
 # (zadvect_implicit, lane 281-zadvect-implicit).  The IEVA kernels held word

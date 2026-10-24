@@ -10,7 +10,8 @@ import dataclasses
 
 import pytest
 
-from woof.config import RunConfig, validate_radiation_driver_options
+from woof.config import (WINDFARM_RUN_DEFAULTS, RunConfig,
+                         validate_radiation_driver_options)
 
 
 def _cfg(**overrides):
@@ -99,7 +100,9 @@ def test_the_checkpoint_echo_drops_both_at_their_default():
     # (lane/hrrr-v4-output: e55b68accb, bd4a1c2090, f80ac46aeb).
     later = ["seaice_threshold", "prec_acc_dt", "prec_acc_dt1",
              "gsd_diagnostics", "reset_interval1", "history_interval2_s",
-             "history_interval_change_s", "smoke_off_reason"]
+             "history_interval_change_s", "smoke_off_reason",
+             # WRF's wind farm (the fork's Fitch coupling), appended after.
+             *WINDFARM_RUN_DEFAULTS]
     assert names[-len(later):] == later
     names = names[:-len(later)]
     # The 2.9.4 capabilities campaign's keyword-only keys follow the fire

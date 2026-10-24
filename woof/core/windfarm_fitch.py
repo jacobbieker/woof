@@ -52,8 +52,10 @@ The kernel is held word for word (max ULP 0) to WRF's own Fortran by
 :func:`woof.verify.windfarm_fitch_ref.f32_fitch_column`
 (``tests/test_windfarm_fitch_wrf471_parity.py``); the float64 mirror
 :func:`woof.verify.windfarm_fitch_ref.np_fitch_column` is a secondary
-reference for the closed forms (``tests/test_windfarm_fitch.py``).  Nothing
-here is wired to a namelist.
+reference for the closed forms (``tests/test_windfarm_fitch.py``).  The
+model calls it through :mod:`woof.core.windfarm_coupling` (``windfarm_opt =
+1``) from the PBL slot, held word for word to this launcher by
+``tests/test_windfarm_coupling_gpu.py``.
 """
 from __future__ import annotations
 

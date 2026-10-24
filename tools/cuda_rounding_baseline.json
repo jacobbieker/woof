@@ -537,14 +537,6 @@
     "call_sha256": "4f5a11304e36ab2b6d858e5c690b5faeb33db02670565c773a39018c632a2c07",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
-    "factory_sha256": "48a197fdf6aaddf67dd7445bb8b8c852345b3bf66993a0352c0528625a232e46",
-    "file": "woof/windfarm/fitch_tables.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "4f5a11304e36ab2b6d858e5c690b5faeb33db02670565c773a39018c632a2c07",
-    "constructor": "compile_using_nvrtc",
-    "factory": "_module",
     "factory_sha256": "848957484072ddf1df67d252f10b260923ceaa8aa586dfd4986c23c1f250f7ce",
     "file": "woof/core/windfarm_fitch.py",
     "status": "unresolved"
@@ -3207,11 +3199,11 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "b765cadabe4488a90c5d1d257d3d55d8a398381880ba0491f1223a632d778b95"
+    "sha256": "066c5de9463f1129da1343445cba4bc951a972977be8101d3fe8c3835e8991c7"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "b6b3ebe4c57e1dceb827a991e00901b8ecef4f49fd932611f69ca7fbb60d892e"
+    "sha256": "a71973ae162c36ce654bd616a6c5bdeacef168b2965145124593b949cf902782"
    },
    {
     "file": "woof/core/refl.py",
@@ -3331,7 +3323,7 @@
    },
    {
     "file": "woof/core/windfarm_fitch.py",
-    "sha256": "b51bc432885f04b207389ef4c04dc011bd60e957c3b9f85c655be70d651a3750"
+    "sha256": "23f2e7fb858e1afe783be4c6b171e6a7a86781be2cb2a6c70c0d8b3e84563f59"
    },
    {
     "file": "woof/core/windfarm_power_diag.py",
@@ -3968,10 +3960,6 @@
    {
     "file": "woof/verify/wsm6_process_budget.py",
     "sha256": "c051bbd5fa6fcf1cc8efd055ad8ae5d21732ea7926ea1dad5aeac86beab4b126"
-   },
-   {
-    "file": "woof/windfarm/fitch_tables.py",
-    "sha256": "6a2337d03ecea9a84d6f54596fde118b12c664ce6236e0f18eb1b23aa34973a5"
    }
   ],
   "python_cuda_literals": [
@@ -5122,10 +5110,6 @@
    {
     "file": "woof/verify/wsm6_process_budget.py",
     "sha256": "e64a5dc89ac239deed3b6cfca2bd5e23d60edd1d7d5a945f879bba11030610af"
-   },
-   {
-    "file": "woof/windfarm/fitch_tables.py",
-    "sha256": "09e2afed613a05d05a209b8ab7dcdbdb7099480a68121e67c140517066ce85f7"
    }
   ]
  },

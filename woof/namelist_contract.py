@@ -319,6 +319,14 @@ def _value_rules() -> dict[tuple[str, str], dict]:
         rule(section, "gwd_opt", list(GWD_OPT_VALUES),
              "must be 0, 1 or 3 on every domain (WRF v4.7.1: 1 the KIM drag, "
              "3 the GSL drag suite; 2 is not ported).")
+    # WRF's wind farm (woof.core.windfarm_coupling): Fitch only, under MYNN.
+    from woof.config import WINDFARM_IJ_VALUES, WINDFARM_OPT_VALUES
+    rule("physics", "windfarm_opt", list(WINDFARM_OPT_VALUES),
+         "must be 0 or 1 on every domain (WRF v4.7.1: 1 the Fitch scheme, "
+         "under MYNN; 2, the MAV wake scheme, is not ported).")
+    rule("physics", "windfarm_ij", list(WINDFARM_IJ_VALUES),
+         "0 reads windturbines.txt (lat lon type), 1 windturbines-ij.txt "
+         "(i j type).", scalar=True)
     for key, admitted in MYNN_PBL_OPTION_IDENTITY.items():
         rule("physics", key, [admitted],
              f"woof implements {key} = {admitted!r} only (MYNN option "

@@ -216,6 +216,9 @@ DEFAULT_OFF = frozenset({
     "seaice_prognostic", "seaice_initial_thickness",
     "seaice_new_ice_thickness", "seaice_ocean_heat_flux",
     "lake_state_source", "lake_state_path", "lake_state_accept_licence",
+    # WRF's wind farm, all four dropped while windfarm_opt is 0.
+    "windfarm_opt", "windfarm_ij", "windfarm_tke_factor",
+    "windfarm_turbine_file",
 })
 
 

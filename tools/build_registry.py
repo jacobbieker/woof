@@ -330,6 +330,37 @@ IMPLEMENTED: dict[str, dict] = {
     # every PBL scheme.
     "topo_wind": {"type": "integer", "enum": [0, 1, 2], "default": 0},
     "gwd_opt": {"type": "integer", "enum": [0, 1, 3], "default": 0},
+    # WRF v4.7.1 wind farm (woof.core.windfarm_coupling, kernel
+    # woof.core.windfarm_fitch), off by default: Fitch under MYNN.
+    "windfarm_opt": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "per_domain": True, "component_id": "pbl",
+        "warnings": ["Option 1 runs WRF's Fitch wind-farm scheme in the PBL "
+                     "slot: each turbine of windfarm_turbine_file is an "
+                     "elevated momentum sink and a TKE source in MYNN's QKE "
+                     "over the levels its rotor sweeps, and POWER is "
+                     "written. It requires MYNN (bl_pbl_physics=5). WRF's "
+                     "2 (MAV) is not ported."]},
+    "windfarm_ij": {
+        "type": "integer", "enum": [0, 1], "default": 0,
+        "component_id": "pbl", "read_when": {"windfarm_opt": 1},
+        "warnings": ["0 reads a WRF windturbines.txt as lat lon type rows, "
+                     "1 a windturbines-ij.txt as i j type rows; a woof "
+                     "turbine table is always lat/lon."]},
+    "windfarm_tke_factor": {
+        "type": "number", "default": 0.25,
+        "component_id": "pbl", "read_when": {"windfarm_opt": 1},
+        "warnings": ["The factor on the turbines' TKE source, "
+                     "factor*(Ct - Cp). WRF's default 0.25; 1.0 is Fitch's "
+                     "original."]},
+    "windfarm_turbine_file": {
+        "type": "string", "default": "",
+        "per_domain": True, "component_id": "pbl",
+        "read_when": {"windfarm_opt": 1},
+        "warnings": ["A woof turbine table (.csv, .geojson, sites.v1 .json) "
+                     "or a WRF windturbines.txt / windturbines-ij.txt with "
+                     "its wind-turbine-N.tbl tables beside it. Checkpoints "
+                     "and fingerprints bind its bytes."]},
     "o3input": {
         "type": "integer", "enum": [0, 2], "default": 2,
         "warnings": [
@@ -7156,13 +7187,16 @@ def build(registry: dict) -> dict:
     no_pbl = sorted(
         option_id for option_id, option in pbl_options.items()
         if option.get("selectors", {}).get("bl_pbl_physics") == 0)
+    non_mynn_pbl = sorted(
+        option_id for option_id, option in pbl_options.items()
+        if option.get("selectors", {}).get("bl_pbl_physics") != 5)
     for option_id, option in sorted(turbulence_options.items()):
         if option.get("implemented") is not True:
             continue
         km_opt = option["selectors"]["km_opt"]
         rules = [rule for rule in
                  option.get("constraints", {}).get("refused_when", [])
-                 if not {"topo_wind", "gwd_opt"}.intersection(
+                 if not {"topo_wind", "gwd_opt", "windfarm_opt"}.intersection(
                      rule.get("settings", {}))
                  and ("diff_opt" not in rule.get("settings", {})
                       or "components" in rule)]
@@ -7208,6 +7242,17 @@ def build(registry: dict) -> dict:
                 "height and top level an active PBL scheme writes"),
             "remedy_label": "Set gwd_opt=0.",
             "remedy_settings": {"gwd_opt": 0},
+        })
+        rules.append({
+            "settings": {"windfarm_opt": [1]},
+            "components": {"pbl": non_mynn_pbl},
+            "reason": (
+                "windfarm_opt=1 adds the turbines' TKE source into MYNN's "
+                "QKE inside the PBL driver (bl_pbl_physics=5); another PBL "
+                "scheme carries no QKE, so the rotors would extract "
+                "momentum while their turbulence went nowhere"),
+            "remedy_label": "Set windfarm_opt=0.",
+            "remedy_settings": {"windfarm_opt": 0},
         })
         option.setdefault("constraints", {})["refused_when"] = rules
     sase_constraints = pbl_options["sase"]["constraints"]

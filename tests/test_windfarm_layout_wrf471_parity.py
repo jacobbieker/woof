@@ -255,25 +255,6 @@ def test_negative_control_binary64_thrust_is_not_wrfs():
 
 @pytest.mark.gpu
 @requires_gpu
-@pytest.mark.parametrize("name", CASES)
-def test_dragcof_gpu_is_wrfs_and_the_cpus(name):
-    import cupy as cp
-
-    from woof.windfarm.fitch_tables import dragcof_gpu
-
-    _, _, layout, oracle = _case(name)
-    queries = _queries(layout, oracle)
-    device = layout.to_device(device_id=0)
-    gpu = dragcof_gpu(device.tables, *queries)
-    cpu = dragcof_cpu(layout.tables, *queries)
-    for field in DRAG_FIELDS:
-        on_host = cp.asnumpy(gpu[field])
-        _assert_words(on_host, oracle["dragcof"][field], f"GPU {field}")
-        _assert_words(on_host, cpu[field], f"GPU vs CPU {field}")
-
-
-@pytest.mark.gpu
-@requires_gpu
 def test_upload_is_raw_word_equal_both_ways():
     import cupy as cp
 

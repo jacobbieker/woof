@@ -607,6 +607,10 @@ def physics_history_fields(physics) -> dict[str, object]:
         # publish the name (upstream's split, when present, wins).
         for name, value in surface_solar_history_fields(physics).items():
             output.setdefault(name, value)
+    # WRF's POWER (Registry.EM_COMMON:413, package fitchscheme), written
+    # only where windfarm_opt = 1 runs: each cell's turbine power, W.
+    if getattr(physics, "windfarm", None) is not None:
+        output["POWER"] = physics.fields["power"]
     output["RAINC"] = (physics._zero_accumulator() if physics.rainc is None
                        else physics.rainc)
     output["RAINSH"] = physics._zero_accumulator()
@@ -840,6 +844,8 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
             sase_flux_diag=None, hmix_k_diag=None,
             radiation_active=radiation_enabled(cfg),
             topo_shortwave=object() if topography else None,
+            windfarm=(object() if int(getattr(cfg, "windfarm_opt", 0) or 0)
+                      else None),
             olr=carrier(surface) if "olr" in allocated else None,
             surface_dni=(carrier(surface) if "surface_dni" in allocated
                          else None),

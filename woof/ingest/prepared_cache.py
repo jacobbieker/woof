@@ -1046,6 +1046,15 @@ PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
     # array depends on.  It stays in the experiment fingerprint and the
     # restart identity.
     "run.moist_cq",
+    # WRF's windfarm_opt and its three companions (woof.core.
+    # windfarm_coupling): the turbines are placed and uploaded at forecast
+    # physics initialisation and act only inside the PBL slot; nothing under
+    # woof/ingest reads them, and the prepared state and boundary tables are
+    # the same under every value.  One preparation serves the farm on and
+    # off; the forecast and restart identities bind them (and the file's
+    # bytes) when on.
+    "run.windfarm_opt", "run.windfarm_ij", "run.windfarm_tke_factor",
+    "run.windfarm_turbine_file",
 })
 
 

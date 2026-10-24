@@ -19,8 +19,8 @@
     },
     {
       "path": "woof/config.py",
-      "size": 444715,
-      "sha256": "da10adc5afbee53e4d1164ee20689aa8a936de7ebaa1fc4e574f668ea4c50dc1",
+      "size": 452282,
+      "sha256": "fc74013abae4b85255498b1f9e151eb2ab0184044d9ecdda5840cc3fdcd8365f",
       "reached": "DEFAULT_COLUMN_CHUNK, radiation_enabled, radiation_scheme_ids, RunConfig and SASE_PBL_SCHEME.  RunConfig IS constructed in carried npref, twice, inside its reference-state builders; no door of this package and no test calls those.  Against the cut revision the file differs by 1,130 lines at woof 2.7.3 (308 at 2.7.0), 105 of them inside RunConfig, and RunConfig's own 2.7.0-to-2.7.3 movement is comment text with no field, default or validation changed"
     },
     {
@@ -37,8 +37,8 @@
     },
     {
       "path": "woof/core/preflight.py",
-      "size": 763820,
-      "sha256": "b6b3ebe4c57e1dceb827a991e00901b8ecef4f49fd932611f69ca7fbb60d892e",
+      "size": 764199,
+      "sha256": "a71973ae162c36ce654bd616a6c5bdeacef168b2965145124593b949cf902782",
       "reached": "EXTERNAL_MARGIN_BYTES, device_memory_probe_reason, device_memory_probe_subprocess and MEASURED_LOCAL_MEMORY_PROFILE, which carried ntiedtke reads for its SM count"
     },
     {

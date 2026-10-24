@@ -147,6 +147,9 @@ def plan_suite(cfg, *, members=1, registry=None):
         # the aerosol-aware Thompson scheme the packed binding does not
         # run; both run on the original member driver.
         "swint_opt": 0, "aer_opt": 0,
+        # The Fitch wind farm runs in the member physics driver's PBL slot;
+        # the packed batch has no wind-farm stage.
+        "windfarm_opt": 0,
     }
     for key, required in selections.items():
         value = _value(cfg, key, 0)

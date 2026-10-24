@@ -347,6 +347,10 @@ WINDFARM_FIELD_REASONS: dict[str, str] = {
     "POWER_FARM": "the domain's summed turbine power at the frame",
     "POWER_FARM_MEAN": "time-mean summed power over the interval: energy "
                        "yield",
+    # WRF's own POWER (windfarm_opt = 1, woof/core/windfarm_coupling.py):
+    # the in-model turbines' power per cell, with their wakes.
+    "POWER": "per-cell power of the in-model Fitch turbines (windfarm_opt "
+             "= 1): generation with the farm's own wakes",
 }
 
 #: The ``balloon`` preset: what a high-altitude balloon track and the

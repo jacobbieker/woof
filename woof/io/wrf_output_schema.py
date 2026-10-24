@@ -1252,6 +1252,10 @@ REGISTRY_VAR_META: dict[str, tuple[str, str]] = {
     # Registry.EM_COMMON:1715, written where slope_rad = 1 runs.
     "SWNORM": ("NORMAL SHORT WAVE FLUX AT GROUND SURFACE (SLOPE-DEPENDENT)",
                "W m-2"),
+    # Registry.EM_COMMON:413 (``state real power ij misc 1 - irh "Power"
+    # "Power production" "W"``, package fitchscheme), written where
+    # windfarm_opt = 1 runs: each cell's turbines' power, summed.
+    "POWER": ("Power production", "W"),
     "TSK": ("SURFACE SKIN TEMPERATURE", "K"),
     "T2": ("TEMP at 2 M", "K"),
     "TH2": ("POT TEMP at 2 M", "K"),
