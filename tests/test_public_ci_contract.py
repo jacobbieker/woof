@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -169,6 +170,16 @@ def test_the_cpu_job_uses_the_complete_release_list_and_platform_worker_counts(c
     assert len(files) == len(set(files)) and all((ROOT / name).is_file() for name in files)
 
 
+def test_stage1_keeps_the_full_publication_contracts_after_tag_smoke_is_narrowed(ci):
+    # These six vanished from R5 when its union still read publish.yml/test.
+    full = set(re.findall(r'tests/\S+\.py', _runs(ci['jobs']['publication_contracts'])))
+    assert full == set(run_stage1.publication_files(ROOT))
+    assert {'tests/test_carried_channel.py', 'tests/test_carried_release_packet.py',
+            'tests/test_gpu_pin_set.py', 'tests/test_native_build_inputs.py',
+            'tests/test_precut_gate_completion.py', 'tests/test_release_bump_version.py'} <= full
+
+
+
 def _stage1_root(tmp_path, text):
     folder = tmp_path / "tools/battery"
     folder.mkdir(parents=True)
@@ -259,6 +270,84 @@ def test_native_partition_refuses_uncovered_unexplained_or_duplicate_rows(tmp_pa
     assert message in capsys.readouterr().err
 
 
+# --- the Windows cpu partition, emulated on any host -------------------------
+# Public CI 37665304517 failed 12 native-dependent files on the windows-2025
+# cpu job that no private leg ran without natives.  The emulation that now
+# catches that class must hide every native route and select what the job
+# selects.
+
+def test_the_windows_partition_emulation_reaches_no_native_route(tmp_path):
+    from tools.battery import emulate_windows_cpu_partition as emulation
+    scripts = "Scripts" if os.name == "nt" else "bin"
+    gate = tmp_path / "gate-venv"
+    environ = {"PATH": os.pathsep.join([str(gate / scripts), str(tmp_path / "system")]),
+               "VIRTUAL_ENV": str(gate), "LANG": "C.UTF-8",
+               "WOOF_CPU_PREPROCESS_BRIDGE": "a", "WOOF_ENSEMBLE_PREPARATION_BRIDGE": "a",
+               "WOOF_NCWRITE_BRIDGE": "a", "WOOF_SUPEROB_BRIDGE": "a", "WOOF_RW_NETCDF": "a",
+               "RUSTWX_ASSETS_DIR": "a", "XDG_CACHE_HOME": "a", "PYTHONPATH": "a", "CARGO_TARGET_DIR": "a"}
+    home, venv = tmp_path / "home", tmp_path / "venv"
+    env = emulation.emulated_environment(environ, home, venv)
+    assert [key for key in env if key.startswith(("GPUWM_", "RUSTWX_", "XDG_"))] == ["GPUWM_NO_LOCAL_GPU"]
+    assert env["GPUWM_NO_LOCAL_GPU"] == "1" and env["CUDA_VISIBLE_DEVICES"] == ""
+    assert "PYTHONPATH" not in env and "CARGO_TARGET_DIR" not in env
+    assert env["HOME"] == env["USERPROFILE"] == str(home) and env["VIRTUAL_ENV"] == str(venv)
+    assert env["PATH"].split(os.pathsep) == [str(venv / scripts), str(tmp_path / "system")]
+    assert env["LANG"] == "C.UTF-8"
+
+
+def test_the_windows_partition_emulation_names_only_the_fetcher_the_job_builds(tmp_path):
+    """The Windows cpu leg builds rw_fetch alone, outside the tree, and names it.
+
+    Without it the job's fetch-tables refused every table (exit 2) and 58
+    staging cases in six Stage 1 files refused the same way; one inside the
+    clone would be a ``tools/*/target`` route every other row could find.
+    """
+    from tools.battery import emulate_windows_cpu_partition as emulation
+    clone, outside = tmp_path / "checkout", tmp_path / "rw-fetch-target" / "release"
+    clone.mkdir(), outside.mkdir(parents=True)
+    fetcher = outside / "rw_fetch"
+    with pytest.raises(emulation.Refusal, match="does not exist"):
+        emulation.fetcher_environment({}, fetcher, clone)
+    fetcher.write_bytes(b"")
+    env = emulation.fetcher_environment({"GPUWM_NO_LOCAL_GPU": "1"}, fetcher, clone)
+    assert env == {"GPUWM_NO_LOCAL_GPU": "1", "WOOF_RW_FETCH": str(fetcher.resolve())}
+    inside = clone / "tools" / "rustwx" / "target" / "release" / "rw_fetch"
+    inside.parent.mkdir(parents=True)
+    inside.write_bytes(b"")
+    with pytest.raises(emulation.Refusal, match="inside the clone"):
+        emulation.fetcher_environment({}, inside, clone)
+    assert emulation.FETCHER_ENV in (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+
+def test_the_windows_partition_emulation_names_every_in_tree_native_directory(tmp_path):
+    from tools.battery import emulate_windows_cpu_partition as emulation
+    built = ["tools/rustwx/target", "tools/rw_wps/crates/target", "libexec/bridges", "woof/libexec/bridges"]
+    assert emulation.reachable_native_directories(tmp_path) == []
+    for name in built:
+        (tmp_path / name).mkdir(parents=True)
+    (tmp_path / "tools/rustwx/src").mkdir()
+    assert emulation.reachable_native_directories(tmp_path) == sorted(tmp_path / name for name in built)
+
+
+def test_the_windows_partition_emulation_never_removes_a_directory_it_did_not_make(tmp_path, capsys):
+    from tools.battery import emulate_windows_cpu_partition as emulation
+    kept = tmp_path / "work" / "kept.txt"
+    kept.parent.mkdir()
+    kept.write_text("not the emulation's\n", encoding="utf-8")
+    assert emulation.main(["--work-dir", str(kept.parent)]) == 2
+    assert "is not empty" in capsys.readouterr().err
+    assert kept.read_text(encoding="utf-8") == "not the emulation's\n"
+
+
+def test_the_windows_partition_emulation_selects_what_the_cpu_job_selects(ci):
+    from tools.battery import emulate_windows_cpu_partition as emulation
+    assert emulation.cpu_leg(ROOT, "windows")["os"] == "windows-2025"
+    assert emulation.cpu_leg(ROOT, "linux")["os"] == "ubuntu-24.04"
+    assert f'-m "{emulation.CPU_JOB_MARKERS}"' in _runs(ci["jobs"]["cpu"])
+    header = (ROOT / run_stage1.NATIVE_MANIFEST).read_text(encoding="utf-8")
+    assert "python tools/battery/emulate_windows_cpu_partition.py --work-dir" in header
+
+
 # --- oracles ----------------------------------------------------------------
 
 def test_the_oracles_job_hands_the_list_to_the_runner_not_to_a_shell(ci):
@@ -316,3 +405,34 @@ def test_the_runner_passes_every_manifest_deck_to_pytest_without_shell_translati
     assert run_must_run_gates.main(["--minimum", "20", "--", *arguments]) == 0
     assert calls == [([sys.executable, "-m", "pytest", *arguments,
                       *run_must_run_gates.listed_decks(ROOT)], {"cwd": ROOT})]
+
+
+def _listed(path: pathlib.Path) -> list[str]:
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        entry = line.split("#")[0].strip()
+        if entry:
+            rows.append(entry)
+    return rows
+
+
+def test_every_stage1_file_that_compiles_a_cxx_host_library_is_a_native_row():
+    """A Stage 1 file that builds a C++ library with the PATH's compiler for ctypes is a native row.
+
+    THE BREAKAGE: tests/test_urban_slucm_regime_wrf461.py compiled the SLUCM host twin with ``$CXX`` (default
+    ``c++``) and loaded it through ctypes. The windows-2025 runner's MinGW ``c++`` builds a library that needs
+    runtime DLLs Python does not search, so all ten regime cases errored in public ci at the 2.9.0 r7 snapshot.
+    The Linux partition emulation could not see it, because on Linux the same compiler links and loads. The
+    three sibling suites that build the same twin were already in tools/battery/stage1_native_files.txt.
+    """
+
+    import re
+
+    battery = ROOT / "tools" / "battery"
+    native = set(_listed(battery / "stage1_native_files.txt"))
+    compiles = re.compile(r"""os\.environ\.get\(\s*["']CXX["']""")
+    missing = [name for name in _listed(battery / "stage1_files.txt")
+               if (ROOT / name).is_file() and name not in native
+               and compiles.search((ROOT / name).read_text(encoding="utf-8"))]
+    assert not missing, ("these Stage 1 files build a C++ library with $CXX but are not in "
+                         "tools/battery/stage1_native_files.txt, so the Windows cpu job runs them: " + ", ".join(missing))

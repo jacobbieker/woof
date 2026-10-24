@@ -108,10 +108,39 @@ _CANONICAL_NEST_SLOTS = frozenset({
       for component in ("ci", "ip", "cj", "jp", "xig", "xjg")
       for stagger in ("m", "x", "y")),
 })
+#: A nest's rolling value/tendency frames of a chem row
+#: (woof/core/nest_fields.py appends every transported ``chem_<row>``):
+#: the same eight sides as the fixed kinds above, but the kinds are the
+#: chem table's rows, so they are matched by shape rather than listed.
+_NEST_FRAME_SUFFIXES = tuple(f"_{prefix}{side}" for prefix in ("b", "bt")
+                             for side in ("xs", "xe", "ys", "ye"))
+
+
+def _is_chem_nest_slot(slot: str | None) -> bool:
+    from woof.state_serialization_contract import CHEM_STATE_PREFIX
+
+    head = "nest_" + CHEM_STATE_PREFIX
+    if slot is None or not slot.startswith(head):
+        return False
+    return any(slot.endswith(suffix) and len(slot) > len(head) + len(suffix)
+               for suffix in _NEST_FRAME_SUFFIXES)
+
+
 _CANONICAL_LBC_SLOTS = frozenset({"lbc_weights_0"})
 _CANONICAL_REFL_SLOTS = frozenset({"refl_10cm"})
 _CANONICAL_EXTRA_PREFIXES = ("nest_", "lbc_weights_", "refl_")
-_CANONICAL_EXCLUDED_FRAME_SCRATCH = frozenset({"refl_t"})
+# Reflectivity phase arrays are overwritten on each WSM3 diagnostic call.
+_CANONICAL_EXCLUDED_FRAME_SCRATCH = frozenset({
+    "refl_t", "refl_wsm3_rain", "refl_wsm3_snow", "refl_wsm3_graupel",
+    # The fork's gsd_diagnostics reflectivity at 1 km and 4 km AGL
+    # (woof/core/gsd_diagnostics.py), recomputed from the state at every
+    # history time and read by nothing that steps: output, not trajectory.
+    # Breakage this prevents: a whole HRRR-recipe forecast finished 3 h and
+    # then failed its final digest, "canonical frame-state scratch member
+    # 'refl_10cm_1km' is inside an audited lazy prefix but is not a concrete
+    # registered member" (a rented box, 2026-10-21 19:23Z).
+    "refl_10cm_1km", "refl_10cm_4km",
+})
 CHILD_DUTY_SCRATCH_MEMBERS = (
     "scratch/nest_parent_field",
     "scratch/nest_child_field",
@@ -138,7 +167,8 @@ def lazy_inventory_member_class(name: str) -> str | None:
     scratch_slot = (
         name.removeprefix("scratch/") if name.startswith("scratch/") else None
     )
-    if scratch_slot in _CANONICAL_NEST_SLOTS:
+    if scratch_slot in _CANONICAL_NEST_SLOTS or _is_chem_nest_slot(
+            scratch_slot):
         return CANONICAL_LAZY_MEMBER_CLASSES[0]
     if scratch_slot in _CANONICAL_LBC_SLOTS:
         return CANONICAL_LAZY_MEMBER_CLASSES[1]
@@ -199,7 +229,10 @@ def _canonical_host(name: str, value) -> np.ndarray:
     from woof.io import restart as restart_io
 
     host = np.ascontiguousarray(restart_io._host(value))
-    if host.dtype.byteorder not in ("=", "|"):
+    # isnative, not byteorder in ("=", "|"): an explicitly little-endian dtype ("<f4", as a NetCDF read or
+    # np.frombuffer gives) is this machine order on x86 and was refused at the end of every hex global
+    # forecast ("atmosphere/saved/vertical_velocity has dtype <f4", WOOF 1.1.0 dry bake, 2026-10-19).
+    if not host.dtype.isnative:
         raise ValueError(
             f"canonical digest member {name!r} has dtype {host.dtype!r}, "
             "whose byte order is not this machine's.  The resident road "
@@ -249,7 +282,10 @@ def _canonical_digest_document(manifest: Mapping[str, object],
         ).encode("ascii")
         digest.update(len(descriptor).to_bytes(8, "little"))
         digest.update(descriptor)
-        digest.update(host.tobytes(order="C"))
+        # The array's C-order bytes, hashed in place (the bytes tobytes()
+        # returns, without its copy of every member).
+        digest.update(memoryview(
+            np.ascontiguousarray(host).reshape(-1).view(np.uint8)))
         members.append(member)
     inventory = {
         "schema": CANONICAL_INVENTORY_SCHEMA,

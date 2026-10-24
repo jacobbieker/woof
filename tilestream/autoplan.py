@@ -635,6 +635,22 @@ def rung_of(cfg) -> str:
     return "dry"
 
 
+def output_carrier_bytes_per_cell(cfg) -> float:
+    """Bytes per domain cell of the persistent output carriers ``cfg`` enables.
+
+    Exactly the slots the store and the tile buffers carry
+    (woof.core.output_diagnostics.PERSISTENT) at the shapes their
+    initializer allocates, float32, spread over the nx * ny * nz cells the
+    footprint is priced in.  Zero when the output controls are off.
+    """
+    import math
+    from woof.core.output_diagnostics import PERSISTENT, scratch_shapes
+    shapes = scratch_shapes(cfg)
+    carried = sum(4 * math.prod(shapes[slot]) for slot in PERSISTENT if slot in shapes)
+    cells = int(cfg.nx) * int(cfg.ny) * int(cfg.nz)
+    return carried / cells if carried and cells else 0.0
+
+
 def footprint_for(cfg, *, rung: str | None = None, radiation_context=None,
                   follower_slots=()) -> Footprint:
     """The :class:`Footprint` to plan ``cfg`` with."""
@@ -653,6 +669,18 @@ def footprint_for(cfg, *, rung: str | None = None, radiation_context=None,
         fp = replace(fp, bytes_per_cell=fp.bytes_per_cell + per_cell,
                      store_bytes_per_cell=fp.store_bytes_per_cell + per_cell,
                      source=fp.source + "; declared follower window carriers")
+    output_cell = output_carrier_bytes_per_cell(cfg)
+    if output_cell:
+        # The operational output controls' carriers (interval precipitation
+        # buckets, the gsd_diagnostics maxima and rel_vort) ride the store and
+        # every tile buffer (woof.core.streaming's persistent output slots),
+        # and no measured rung carries them.  Breakage this prevents: a
+        # streamed HRRR-recipe root (1562 x 926 x 50) was refused restoring its
+        # store, "store needs 21.12 GiB but budget_bytes is 20.74 GiB"
+        # (box D, 2026-10-21 21:xxZ).
+        fp = replace(fp, bytes_per_cell=fp.bytes_per_cell + output_cell,
+                     store_bytes_per_cell=fp.store_bytes_per_cell + output_cell,
+                     source=fp.source + "; operational output carriers")
     if wrf_cfl_recording_requested(cfg):
         fp = replace(fp, domain_fixed_bytes=fp.domain_fixed_bytes + WRF_CFL_BYTES)
     if radiation_context is not None and radiation_context.cam_ozone:
@@ -815,12 +843,17 @@ def _cgroup_memory_limits() -> list[tuple[int, int]]:
     Every directory from the process's own cgroup (``/proc/self/cgroup``)
     up to its mount is read (:func:`_cgroup_memory_walk`), because a limit
     on an ancestor (a systemd slice, a pod) binds as hard as one on the
-    leaf.  The room is the limit minus the working set.  The inactive file
-    pages in ``memory.stat`` (``inactive_file``, v1
-    ``total_inactive_file``) are not counted as used: the kernel reclaims
-    them inside the cgroup before it kills anything, so a container that
-    had read its inputs through the page cache still has that room.  A
-    limit whose usage cannot be read is the room.  The same answer as
+    leaf.  The room is the limit minus the working set.  The file pages in
+    ``memory.stat`` (``inactive_file`` and ``active_file``, v1
+    ``total_inactive_file`` and ``total_active_file``) are not counted as
+    used: the kernel reclaims them inside the cgroup before it kills
+    anything, so a container that had read its inputs through the page
+    cache still has that room.  Measured (2.9.2, the hosted-runner
+    emulation, a 16 GiB cgroup after a release build of every crate): the
+    cache sat on the ACTIVE list, 15 GiB of it, and counting only the
+    inactive list read 0.6 GiB of room, so a CPU preparation was refused
+    beside 14 GiB the kernel would have handed over.  A limit whose usage
+    cannot be read is the room.  The same answer as
     ``rw_host_memory::cgroup_memory_limits``.
     """
     return [(level.limit, level.room) for level in _cgroup_memory_walk()
@@ -832,7 +865,8 @@ class _CgroupMemoryLevel(NamedTuple):
 
     ``limit`` is None when the directory publishes no limit (absent,
     ``max``, unreadable, or the v1 "unlimited" sentinel); ``usage`` is None
-    when its usage cannot be read, and ``inactive`` is then 0.
+    when its usage cannot be read, and ``inactive`` (the reclaimable file
+    cache: inactive and active file pages) is then 0.
     """
 
     limit_file: str
@@ -886,15 +920,15 @@ def _cgroup_memory_walk() -> list[_CgroupMemoryLevel]:
     for controllers, relative in memberships:
         if controllers == "":
             mounts = [_CGROUP_ROOT]
-            names = ("memory.max", "memory.current", "inactive_file")
+            names = ("memory.max", "memory.current", ("inactive_file", "active_file"))
         elif "memory" in controllers.split(","):
             mounts = list(dict.fromkeys([os.path.join(_CGROUP_ROOT, controllers),
                                          os.path.join(_CGROUP_ROOT, "memory")]))
             names = ("memory.limit_in_bytes", "memory.usage_in_bytes",
-                     "total_inactive_file")
+                     ("total_inactive_file", "total_active_file"))
         else:
             continue
-        limit_name, usage_name, inactive_key = names
+        limit_name, usage_name, reclaimable_keys = names
         parts = [part for part in relative.split("/") if part and part != ".."]
         for mount in mounts:
             for depth in range(len(parts), -1, -1):
@@ -909,8 +943,9 @@ def _cgroup_memory_walk() -> list[_CgroupMemoryLevel]:
                     continue
                 inactive = 0
                 if usage is not None:
-                    inactive = _cgroup_stat_field(
-                        os.path.join(directory, "memory.stat"), inactive_key) or 0
+                    stat_path = os.path.join(directory, "memory.stat")
+                    inactive = sum(_cgroup_stat_field(stat_path, key) or 0
+                                   for key in reclaimable_keys)
                 levels.append(_CgroupMemoryLevel(limit_file, limit, usage,
                                                  inactive))
     return levels
@@ -2137,17 +2172,25 @@ def measure_footprint(rung: str = "dry", sizes: Sequence[int] = (128, 256),
     for n in sizes:
         cfg = _config_for_rung(n, n, nz, rung)
         keep = []
-        base = used()
         deltas = []
-        for _ in range(max(2, int(buffers))):
-            state, drv = physinv.default_builder(cfg, 4242)
-            if warmup:
-                _harness.run_steps(state, cfg, int(warmup))
-            cp.cuda.runtime.deviceSynchronize()
-            keep.append(state)
-            now = used()
-            deltas.append(now - base)
-            base = now
+        # Each size builds from a PRIVATE, empty pool.  A pool that already
+        # holds free cached blocks it cannot return (they share a chunk with
+        # a live block) cuts the new arrays from that slack with no device
+        # allocation, and cudaMemGetInfo under-counts them: MEASURED 0.70 GiB
+        # short on a 2.74 GiB dry build at 640^2 x49 (RTX 5090, 2026-10-09).
+        # Under-counting here is an under-predicting row, a tile that OOMs.
+        pool = cp.cuda.MemoryPool()
+        with cp.cuda.using_allocator(pool.malloc):
+            base = used()
+            for _ in range(max(2, int(buffers))):
+                state, drv = physinv.default_builder(cfg, 4242)
+                if warmup:
+                    _harness.run_steps(state, cfg, int(warmup))
+                cp.cuda.runtime.deviceSynchronize()
+                keep.append(state)
+                now = used()
+                deltas.append(now - base)
+                base = now
         calls = dict(drv.call_counts) if drv is not None else {}
         marg = sum(deltas[1:]) / len(deltas[1:])
         marginal[n * n * nz] = marg
@@ -2158,6 +2201,7 @@ def measure_footprint(rung: str = "dry", sizes: Sequence[int] = (128, 256),
                f"   -> one-time {(deltas[0] - marg) / MIB:.0f} MiB"
                f"   physics fired {calls or '{}'}")
         del keep, state, drv
+        pool.free_all_blocks()
         cp.get_default_memory_pool().free_all_blocks()
 
     (c0, m0), (c1, m1) = sorted(marginal.items())[:2]

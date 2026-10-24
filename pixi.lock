@@ -140,8 +140,8 @@ environments:
       - pypi: ./
       - pypi: https://files.pythonhosted.org/packages/07/73/3ee8e5b4cb891401e603ffd3a59b35c6afe785fd2de123afe7c7029603dc/nvidia_curand-10.4.4.72-py3-none-manylinux_2_27_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/09/7d/af933f0f6e0767995b4e2d705a0665e454d1c19402aa7e895de3951ebb04/scipy-1.17.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+      - pypi: https://files.pythonhosted.org/packages/1c/6c/b3d4a06aeb04429f4b34c26e76aee6875142d428de59104619ae9ce24353/recast_woof_data-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/1d/6b/eef7a9e32872b8f41e145bf10cddc9af26e153c338852811fe9a9baddf9e/nvidia_nvjitlink-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/22/df/abdfd5c415ab94cce599373dd268b8733e36b74a757db7c3907cd09a0435/recast_woof_data-1.0.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2c/58/ca301544e1fa93ed4f80d724bf5b194f6e4b945841c5bfd555878eea9fcb/referencing-0.37.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2e/a4/1ca765c63a60e3096ae2ad132eb25f6f7eab0377418cd0472808befd9665/matplotlib-3.11.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/32/20/12126ba5364ea43065d6da709e1f5df2c183b9a324efc44469c4a5561355/icechunk-1.1.21-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
@@ -309,7 +309,7 @@ environments:
       - pypi: ./
       - pypi: https://files.pythonhosted.org/packages/09/7d/af933f0f6e0767995b4e2d705a0665e454d1c19402aa7e895de3951ebb04/scipy-1.17.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/12/46/b0fd4b04f86577921feb97d8e2cf028afe04f614d17fb5013de9282c9216/nvidia_cusparse_cu12-12.5.10.65-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
-      - pypi: https://files.pythonhosted.org/packages/22/df/abdfd5c415ab94cce599373dd268b8733e36b74a757db7c3907cd09a0435/recast_woof_data-1.0.3-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/1c/6c/b3d4a06aeb04429f4b34c26e76aee6875142d428de59104619ae9ce24353/recast_woof_data-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2c/58/ca301544e1fa93ed4f80d724bf5b194f6e4b945841c5bfd555878eea9fcb/referencing-0.37.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2e/a4/1ca765c63a60e3096ae2ad132eb25f6f7eab0377418cd0472808befd9665/matplotlib-3.11.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/31/44/193a0e171750ca9f8320626e8a1f2381e4077a65e69e2fb9708bd479e34a/nvidia_curand_cu12-10.3.10.19-py3-none-manylinux_2_27_x86_64.whl
@@ -2358,7 +2358,7 @@ packages:
   - scipy>=1.11
   - pyshp>=2.3
   - cdsapi>=0.7.7
-  - recast-woof-data==1.0.3
+  - recast-woof-data==1.1.0
   - cupy-cuda12x[ctk]>=14.0 ; extra == 'gpu-cu12'
   - cupy-cuda13x[ctk]>=14.0 ; extra == 'gpu-cu13'
   - recast-woof[gpu-cu12] ; extra == 'gpu'
@@ -2438,16 +2438,16 @@ packages:
   requires_dist:
   - nvidia-nvjitlink-cu12
   requires_python: '>=3'
+- pypi: https://files.pythonhosted.org/packages/1c/6c/b3d4a06aeb04429f4b34c26e76aee6875142d428de59104619ae9ce24353/recast_woof_data-1.1.0-py3-none-any.whl
+  name: recast-woof-data
+  version: 1.1.0
+  sha256: 8028f8cf962951df3be1d55797cb5fcd5146a19e6e14beb017079a8eb49bd264
+  requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/1d/6b/eef7a9e32872b8f41e145bf10cddc9af26e153c338852811fe9a9baddf9e/nvidia_nvjitlink-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl
   name: nvidia-nvjitlink
   version: 13.4.92
   sha256: e0391f24ed94ec879b84e3da4d4ec320c879aff681f2c7a638462f7199284323
   requires_python: '>=3'
-- pypi: https://files.pythonhosted.org/packages/22/df/abdfd5c415ab94cce599373dd268b8733e36b74a757db7c3907cd09a0435/recast_woof_data-1.0.3-py3-none-any.whl
-  name: recast-woof-data
-  version: 1.0.3
-  sha256: d5e754fb38645466bc3e7b98553ff74876dbc6ce8d8169ef35bd8136dd6809b4
-  requires_python: '>=3.11'
 - pypi: https://files.pythonhosted.org/packages/2c/58/ca301544e1fa93ed4f80d724bf5b194f6e4b945841c5bfd555878eea9fcb/referencing-0.37.0-py3-none-any.whl
   name: referencing
   version: 0.37.0

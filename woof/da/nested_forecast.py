@@ -1001,11 +1001,12 @@ def _initialize_child_physics(initialized, child_run, inventory,
         glw=constant_glw_wm2,
         radiation_start_time=valid_time, radiation_latitude=lat,
         radiation_longitude=lon,
+        **({"frc_urb2d": static.get("FRC_URB2D")}
+           if int(getattr(child_run, "sf_urban_physics", 0)) == 1 else {}),
         **lake_physics_inputs(child_run, static),
         **ruc_mosaic_physics_inputs(
             child_run, static, landuse_attrs=landuse_identity,
             xice=fields["SEAICE"], fractional_seaice=True))
-    from woof.core.noah import noah_initial_snow_albedo
     from woof.core.landuse import surface_snow_albedo
     driver.fields["snoalb"][...] = cp.asarray(
         surface_snow_albedo(child_run, static, driver.noah_params),

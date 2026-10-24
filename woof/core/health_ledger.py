@@ -101,6 +101,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import os
 import threading
+from contextvars import ContextVar
 from typing import Callable
 
 
@@ -108,7 +109,22 @@ from typing import Callable
 #: read-immediately behaviour.  Module-level because the reporting sites are
 #: four levels down inside three schemes and threading a parameter through
 #: every one of them would be a larger and more fragile change than this.
-_ACTIVE: "HealthLedger | None" = None
+#:
+#: A context variable, not a plain global.  Breakage it prevents: concurrent
+#: ensemble members (woof.ensemble.execution runs each on its own thread)
+#: each wrap their domain step in :func:`deferring` with their OWN step
+#: ledger (woof.core.model, since ac988f1fd).  With one process-wide slot,
+#: member A's scheme sites recorded into member B's ledger while the steps
+#: overlapped, so a sick member's refusal was raised by another member's
+#: drain or lost, and the out-of-order exits restored a stale ledger for good:
+#: every later run in the process then deferred its health reads into a ledger
+#: nobody drains, and an immediate refusal became no refusal at all (the 2.8.7
+#: GPU shard failures in test_mynn_validation_batching, test_mynn_pbl_gpu,
+#: test_gf_engine_smoke and test_graphcap, after
+#: test_ensemble_runtime_forecast_gpu's four-member run).  A context variable
+#: gives every thread, and every ``copy_context()`` member scope, its own slot.
+_ACTIVE: "ContextVar[HealthLedger | None]" = ContextVar(
+    "gpuwm_health_ledger", default=None)
 
 #: The calling thread's resident-step ledger (:func:`resident_step`).
 _LOCAL = threading.local()
@@ -203,14 +219,30 @@ class HealthLedger:
         import numpy as np
 
         i = self._slot(site)
+        flags = status[:1].reshape(1)
+        if flags.dtype != self._slots.dtype:
+            # A site's status word may be a signed 32-bit integer (BEP's
+            # error_flags carries a Fortran line number).  uint32 | int32
+            # promotes to int64, which cannot be written back into the
+            # uint32 slot, so every BEP and BEM run under a deferred ledger
+            # crashed at its first urban call (17 combo-sweep runs,
+            # 2026-10-07 round 2, hidden until then by the door's urban
+            # refusal).  The words are flags: reinterpret the same 32 bits,
+            # which keeps the record a view (no allocation, capturable).
+            if (flags.dtype.kind not in "iu"
+                    or flags.dtype.itemsize != self._slots.dtype.itemsize):
+                raise TypeError(
+                    f"health site {site!r} reported a {flags.dtype} status; "
+                    "a status word is a 32-bit integer")
+            flags = flags.view(self._slots.dtype)
         if self._ordered:
             self._sequence += 1
             _ordered_record_kernel()(
-                (1,), (1,), (self._slots, status[:1].reshape(1),
+                (1,), (1,), (self._slots, flags,
                              np.int32(i), np.int32(self._capacity),
                              np.uint32(min(self._sequence, _NO_ORDER - 1))))
         else:
-            cp.bitwise_or(self._slots[i:i + 1], status[:1].reshape(1),
+            cp.bitwise_or(self._slots[i:i + 1], flags,
                           out=self._slots[i:i + 1])
         self._describe[site] = describe
         self.records += 1
@@ -242,6 +274,11 @@ class HealthLedger:
         host = cp.asnumpy(self._slots)
         flagged = [(site, i) for site, i in self._index.items() if int(host[i])]
         if not flagged:
+            # Every site healthy: release the diagnostic closures (they may
+            # own full atmospheric input generations, YSU's producer-
+            # forensics mapping for example); record() installs the next
+            # description with the next status.  A failed drain keeps them.
+            self._describe.clear()
             return
         self._slots[:self._capacity].fill(cp.uint32(0))
         if self._ordered:
@@ -312,7 +349,7 @@ def _ordered_record_kernel():
 def active() -> "HealthLedger | None":
     """The ledger the calling thread's health sites report into, if any."""
     resident = getattr(_LOCAL, "ledger", None)
-    return resident if resident is not None else _ACTIVE
+    return resident if resident is not None else _ACTIVE.get()
 
 
 def resident_mode() -> str:
@@ -456,13 +493,11 @@ def deferring(ledger: "HealthLedger | None"):
     ``None`` restores the historical immediate reads, which is what makes
     this safe to wrap around anything.
     """
-    global _ACTIVE
-    previous = _ACTIVE
-    _ACTIVE = ledger
+    token = _ACTIVE.set(ledger)
     try:
         yield ledger
     finally:
-        _ACTIVE = previous
+        _ACTIVE.reset(token)
 
 
 def read_status(status, *, site: str, describe: Callable[[int], None] | None) -> int:

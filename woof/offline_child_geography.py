@@ -104,7 +104,7 @@ class ChildGeographyError(ValueError):
 # ---------------------------------------------------------------------------
 
 _STATIC_KEYS = ("terrain", "geog_root", "geog_data_res", "smooth_option",
-                "smooth_passes", "smooth_precision", "highres", "fuel")
+                "smooth_passes", "smooth_precision", "highres")
 
 
 @dataclass(frozen=True)
@@ -196,9 +196,6 @@ def parse_child_static_table(table, *, source: str) -> dict:
         from woof.static.highres_production import parse_static_table
         parse_static_table({"highres": table["highres"]}, source=source,
                            base_dir=Path("."))
-    if "fuel" in table:
-        from woof.static.fuel import parse_domain_fuel
-        parse_domain_fuel(table["fuel"], source=source, grid_id=0)
     return dict(table)
 
 
@@ -251,12 +248,6 @@ def load_child_static_policy(child_config_path, cfg, *,
             f"statistics {list(drag_fields)}, which parent-terrain "
             "interpolation does not supply. Use [static] terrain = \"own\" "
             "and omit --parent-terrain, or set topo_wind = 0 and gwd_opt = 0.")
-    if "fuel" in table and chosen != CHILD_TERRAIN_OWN:
-        raise ValueError(
-            "the downscaled child's fuel statics are built from its own "
-            "land use and terrain, which parent-terrain interpolation does "
-            "not supply. Use [static] terrain = \"own\" and omit "
-            "--parent-terrain, or drop the [static] fuel request.")
     root = geog_root if geog_root is not None else table.get("geog_root")
     if root is None:
         from woof.geog_assets import default_geog_root
@@ -278,14 +269,9 @@ def load_child_static_policy(child_config_path, cfg, *,
     # The high-resolution overlay replaces HGT_M, so it must carry the
     # same smoother as the baseline build.  The shared resolver reads
     # smoother rows from domain.static, including a disabled overlay.
-    # The child's fuel request ([static] fuel, as [[domain]] static fuel
-    # is on a tree) rides the same rows.
-    domain_static = dict(smoothing_keys)
-    if "fuel" in table:
-        domain_static["fuel"] = table["fuel"]
     raw = ({"domain": [{"grid_id": int(cfg.grid_id),
-                        "static": domain_static}]}
-           if domain_static else {})
+                        "static": smoothing_keys}]}
+           if smoothing_keys else {})
     if "highres" in table:
         raw["static"] = {"highres": table["highres"]}
     highres = resolve_static_highres(
@@ -515,11 +501,6 @@ def build_child_geography(parent_frame, placement, cfg, policy, *,
     from woof.static.orographic import with_terrain_drag_statics
 
     selection = with_terrain_drag_statics(_geog_selection(policy, grid), cfg)
-    # The child's own fuel request ([[domain]] static fuel), when it makes
-    # one, on its own grid and fire mesh.
-    from woof.static.fuel import fuel_for, with_fuel_statics
-    selection = with_fuel_statics(
-        selection, fuel_for(policy.highres, int(cfg.grid_id)))
     timing: dict[str, object] = {}
     fields = dict(build_static(grid, policy.geog_root, selection=selection,
                                timing_report=timing))

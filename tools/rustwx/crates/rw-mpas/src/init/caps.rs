@@ -141,13 +141,15 @@ pub fn cap_snow(snow: &mut [f32], snowh: &mut [f32]) -> SnowCap {
 
 /// Cap each land, non-land-ice cell's soil moisture at its soil category's
 /// `STAS` `MAXSMC`.  The liquid part is held at or below the same ceiling.
-pub fn cap_soil_moisture(
+/// Every soil layer a cell carries is capped (four on the Noah arms, more where
+/// the source's own soil nodes are kept).
+pub fn cap_soil_moisture<S: AsMut<[f32]>>(
     landmask: &[i32],
     ivgtyp: &[i32],
     isice_lu: i32,
     isltyp: &[i32],
-    smois: &mut [[f32; 4]],
-    sh2o: &mut [[f32; 4]],
+    smois: &mut [S],
+    sh2o: &mut [S],
 ) -> SoilMoistureCap {
     let mut out = SoilMoistureCap {
         table: "SOILPARM.TBL STAS MAXSMC".to_string(),
@@ -172,14 +174,17 @@ pub fn cap_soil_moisture(
         let smcmax = STAS_MAXSMC[(category - 1) as usize];
         let mut layers = 0usize;
         let mut largest = 0.0f32;
-        for l in 0..4 {
-            if smois[c][l] > smcmax {
-                largest = largest.max(smois[c][l]);
-                smois[c][l] = smcmax;
+        let sm = smois[c].as_mut();
+        for v in sm.iter_mut() {
+            if *v > smcmax {
+                largest = largest.max(*v);
+                *v = smcmax;
                 layers += 1;
             }
-            if sh2o[c][l] > smcmax {
-                sh2o[c][l] = smcmax;
+        }
+        for v in sh2o[c].as_mut().iter_mut() {
+            if *v > smcmax {
+                *v = smcmax;
             }
         }
         if layers > 0 {

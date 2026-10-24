@@ -1,2 +1,0 @@
-literals f4 1 59
-folded f4 1 16

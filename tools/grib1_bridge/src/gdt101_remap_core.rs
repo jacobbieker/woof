@@ -51,13 +51,25 @@ impl Target {
         {
             return Err("target must be at least 2x2 at a positive spacing no coarser than one degree".into());
         }
-        if self.nx.checked_mul(self.ny).map_or(true, |n| n > MAX_TARGET)
+        if self.is_global() {
+            // A whole-sphere window: exactly one full circle of columns
+            // (no duplicated meridian) and rows from pole to pole.  The
+            // donor search runs on unit vectors, so the poles and the
+            // 0/360 seam have no singularity; every column of a pole row
+            // maps to the same point and takes the same donors.
+            if self.nx.checked_mul(self.ny).is_none_or(|n| n > MAX_TARGET) {
+                return Err("global target exceeds the memory envelope".into());
+            }
+            return Ok(());
+        }
+        if self.nx.checked_mul(self.ny).is_none_or(|n| n > MAX_TARGET)
             || !(-180.0..180.0).contains(&self.west)
             || (self.nx - 1) as f64 * self.dx >= 180.
             || self.south < -88.
             || self.south + (self.ny - 1) as f64 * self.dy > 88.
         {
-            return Err("target exceeds the regional, non-polar or memory envelope".into());
+            return Err("target exceeds the regional, non-polar or memory envelope, and is not \
+                        an exact whole-sphere window (nx * dx = 360, rows -90 to 90)".into());
         }
         Ok(())
     }
@@ -111,6 +123,17 @@ impl Target {
     /// and accumulating a decimal spacing may overshoot it by an ulp; a
     /// regional row is at most 88 degrees, where the clamp is the identity.
     fn latitude(&self, j: usize) -> f64 { (self.south + j as f64 * self.dy).clamp(-90., 90.) }
+    /// A global initial state needs the whole sphere: a hemispheric pair of
+    /// regional windows would write two records per field on two grids,
+    /// and the poles would be outside both.  Exact by construction: the
+    /// columns close the circle and the rows reach both poles.
+    pub fn is_global(&self) -> bool {
+        let tol = 1e-9;
+        (self.nx as f64 * self.dx - 360.).abs() < tol
+            && (self.south + 90.).abs() < tol
+            && (self.south + (self.ny - 1) as f64 * self.dy - 90.).abs() < tol
+            && (-180.0..360.0).contains(&self.west)
+    }
     pub fn len(&self) -> usize { self.nx * self.ny }
     pub fn parse(text: &str) -> Result<Self> {
         let p: Vec<_> = text.split_whitespace().collect();
@@ -125,6 +148,47 @@ impl Target {
         };
         value.validate()?;
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod global_target_tests {
+    use super::*;
+    #[test]
+    fn a_whole_sphere_quarter_degree_window_is_admitted_and_a_half_open_one_is_not() {
+        let global = Target { west: 0., south: -90., dx: 0.25, dy: 0.25, nx: 1440, ny: 721 };
+        assert!(global.is_global());
+        global.validate().unwrap();
+        // One column short of the circle: neither regional nor global.
+        let short = Target { nx: 1439, ..global };
+        assert!(!short.is_global());
+        assert!(short.validate().is_err());
+        // Stops short of the north pole.
+        let no_pole = Target { ny: 720, ..global };
+        assert!(no_pole.validate().is_err());
+    }
+    #[test]
+    fn every_global_target_row_including_the_poles_finds_four_donors() {
+        // A coarse synthetic sphere: 5-degree lat-lon cell centres.
+        let mut lat = Vec::new();
+        let mut lon = Vec::new();
+        for j in 0..36 { for i in 0..72 { lat.push(-87.5 + 5. * j as f64); lon.push(2.5 + 5. * i as f64); } }
+        let land = vec![0.; lat.len()];
+        let mut grid = vec![0u8; 35];
+        grid[..4].copy_from_slice(&35u32.to_be_bytes());
+        grid[4] = 3;
+        grid[6..10].copy_from_slice(&(lat.len() as u32).to_be_bytes());
+        grid[12..14].copy_from_slice(&101u16.to_be_bytes());
+        let target = Target { west: 0., south: -90., dx: 1., dy: 1., nx: 360, ny: 181 };
+        let plan = build_plan(&lat, &lon, &land, grid, 78, target, 1_000_000.).unwrap();
+        assert_eq!(plan.stencils.len(), 360 * 181);
+        let field: Vec<f64> = lat.to_vec();
+        let out = apply(&plan, &field, Method::Idw4).unwrap();
+        assert!(out.iter().all(|x| x.is_finite()));
+        // The south pole row takes the southernmost ring's latitude.
+        assert!((out[0] - -87.5).abs() < 1e-9);
+        // and the north pole row the northernmost ring's.
+        assert!((out[out.len() - 1] - 87.5).abs() < 1e-9);
     }
 }
 
@@ -229,13 +293,13 @@ impl Plan {
         }
         if self.unpublished.len() + 4 > self.source_count
             || self.unpublished.windows(2).any(|pair| pair[0] >= pair[1])
-            || self.unpublished.last().map_or(false, |&id| id as usize >= self.source_count)
+            || self.unpublished.last().is_some_and(|&id| id as usize >= self.source_count)
         {
             return Err("invalid unpublished-cell inventory".into());
         }
         for s in &self.stencils {
             if s.land_bits > 15 || s.ids.iter().any(|&id| id as usize >= self.source_count)
-                || s.weights.iter().any(|&w| !w.is_finite() || w < 0. || w > 1.)
+                || s.weights.iter().any(|&w| !w.is_finite() || !(0. ..=1.).contains(&w))
                 || (s.weights.iter().sum::<f64>() - 1.).abs() > 1e-12
             {
                 return Err("invalid donor index, class or normalized weight".into());
@@ -514,7 +578,7 @@ pub fn envelope(data: &[u8]) -> Result<Envelope<'_>> {
         if offset + 5 > data.len() - 4 { return Err("truncated section header".into()); }
         let n = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
         let number = data[offset + 4] as usize;
-        if n < 5 || offset.checked_add(n).map_or(true, |end| end > data.len() - 4)
+        if n < 5 || offset.checked_add(n).is_none_or(|end| end > data.len() - 4)
             || number == 0 || number > 7 || number <= previous || sections[number].is_some()
         {
             return Err("invalid, repeated or out-of-order GRIB2 section".into());
@@ -524,7 +588,7 @@ pub fn envelope(data: &[u8]) -> Result<Envelope<'_>> {
         offset += n;
     }
     for (n, min_len) in [(1, 21), (3, 14), (4, 34), (5, 11), (6, 6), (7, 5)] {
-        if sections[n].map_or(true, |s| s.len() < min_len) {
+        if sections[n].is_none_or(|s| s.len() < min_len) {
             return Err(format!("missing or short GRIB2 section {n}"));
         }
     }
@@ -601,7 +665,7 @@ fn encode_on(template: &[u8], s3: Vec<u8>, points: usize, values: &[f64]) -> Res
     // grib-core's all-missing field contract is explicit all-zero bitmap +
     // empty simple-packed data, rather than an invalid zero-count IEEE field.
     let mut s6 = if present == values.len() { section(6, 6) }
-                 else { section(6, 6 + (values.len() + 7) / 8) };
+                 else { section(6, 6 + values.len().div_ceil(8)) };
     if present == values.len() { s6[5] = 255; }
     else {
         for (i, value) in values.iter().enumerate() {
@@ -744,6 +808,8 @@ mod tests {
     #[test] fn holes_in_geometry_are_not_extrapolated() {
         assert!(build_plan(&[30.,30.,30.125,30.125], &[0.,0.125,0.,0.125],&[1.;4],native_grid(4),78,target(),80_000.).is_err());
     }
+    // This latitude is a test coordinate, not an approximation of pi.
+    #[allow(clippy::approx_constant)]
     #[test] fn kd_matches_bruteforce_including_ties() {
         let mut points=Vec::new();for n in 0..1000 {points.push(Point{xyz:xyz((n%53) as f64-26.,(n%101) as f64-50.).unwrap(),id:n});}
         let original=points.clone();partition(&mut points,0);
@@ -937,10 +1003,11 @@ mod tests {
         let back = Plan::read(&bytes[..]).unwrap();
         assert!(back.global);
         assert_eq!((back.target, back.stencils.len()), (plan.target, plan.stencils.len()));
-        // The same bytes under the regional magic are a 360-degree window,
-        // which the unchanged regional envelope refuses.
+        // The same bytes under the regional magic are an exact whole-sphere
+        // window, which the regional envelope admits since upstream 1.1.0
+        // (`Target::is_global`); it reads back as a regional plan.
         bytes[..8].copy_from_slice(b"GDT101P3");
-        assert!(Plan::read(&bytes[..]).is_err());
+        assert!(!Plan::read(&bytes[..]).unwrap().global);
         // And a regional plan keeps the regional magic.
         let mut regional = Vec::new();
         plan_fixture_regional().write(&mut regional).unwrap();
@@ -951,9 +1018,14 @@ mod tests {
     #[test] fn a_global_target_cannot_ride_a_regional_plan_or_encoder() {
         let mut p = plan();
         p.target = Target::global(1.).unwrap();
+        // Upstream 1.1.0's regional envelope admits an exact whole-sphere
+        // window (`Target::is_global`); this plan's stencils are still the
+        // regional fixture's, so it is refused on their count.
         assert!(p.validate().is_err());
-        assert!(regular_grid(p.target).is_err());
-        assert!(encode_regular(&template(), p.target, &vec![0.; p.target.len()]).is_err());
+        assert!(p.target.validate().is_ok());
+        // ... so the regional wire carries it too (upstream's whole-sphere
+        // window); only the global mode's own wire refuses a regional target.
+        assert!(regular_grid(p.target).is_ok());
         assert!(global_grid(target()).is_err());
         assert!(encode_global(&template(), target(), &[1., 2., 3., 4.]).is_err());
     }

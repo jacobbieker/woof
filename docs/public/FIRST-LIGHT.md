@@ -35,7 +35,7 @@ the shape of the path will not.
 |---|---|
 | `git clone` (local) | 3.0 s |
 | `python -m venv` + `pip install -e recast-woof-data` + `pip install -e '.[gpu-cu12,render]'` | ~25 s cached; a fresh machine downloads ~150 MB (numpy, matplotlib, netCDF4, CuPy) |
-| `woof fetch-tables` (externalized Thompson tables, a one-time ~243 MiB release-asset download from a checkout, SHA-256 verified; a no-op once staged) | connection-speed bound; instant when already present |
+| Optional `woof fetch-tables` (stage Thompson tables ahead of first use, a one-time ~243 MiB release-asset download from a checkout, SHA-256 verified; a no-op once staged) | connection-speed bound; instant when already present |
 | `cargo build --release --locked --offline` in `tools/grib1_bridge` | ~8 s (vendored workspace, no network) |
 | `cargo build --release --locked --offline` in `tools/rustwx` (the production render engine; `--no-render` skips it) | 67 s from clean (measured 2026-07-29, same box; vendored workspace, no network) |
 | `cargo build --release --locked --offline` in `tools/zarr_bridge`, `tools/rw_wps` and `tools/region_global_dealias` (terminal, Zarr reader, mapped decode engine, dealiasing library) | 114 s together from clean, 78 s of it the Zarr reader (measured 2026-09-27 on a Linux node; vendored, no network) |
@@ -43,11 +43,17 @@ the shape of the path will not.
 
 One command does all of it -- `bash install.sh` (POSIX; the universal
 form, mode-bit independent) or `.\install.ps1`
-(PowerShell) from the checkout root: venv, the checkout's `recast-woof-data`
-companion, `[gpu-cu12,render]` extras, the offline Rust builds of all six
-vendored workspaces (the `tools/grib1_bridge` GRIB bridges, the
-`tools/zarr_bridge` Zarr reader, the `tools/rw_wps` mapped decode engine
-and the `tools/region_global_dealias` dealiasing library; `--no-render` /
+(PowerShell) from the checkout root: a venv on free-threaded Python 3.14t
+(found on PATH or installed with uv; multi-card forecasts run about twice
+as fast on it, and `--python` / `-Python` picks another interpreter), the checkout's `recast-woof-data`
+companion, `[gpu-cu12,render]` extras, the offline Rust builds of all nine
+native workspaces (the `tools/grib1_bridge` GRIB bridges, the
+`tools/zarr_bridge` Zarr reader, the `tools/rw_wps` mapped decode engine,
+the `tools/region_global_dealias` dealiasing library, the
+`tools/nextgen_hydrofabric` hydro payload, `tools/nextgen_forcing` forcing
+`tools/nextgen_verify` gauge verification and `tools/hydro_world`, `tools/hydro_world_params`,
+`tools/nextgen_reservoir_prepare` and `tools/hydro_world_init` hydro preparation and `tools/ocean_prepare` and `tools/rw-bathy` ocean preparation and `tools/nextgen_output` hydro output workspaces, fetching their
+locked dependencies first; `--no-render` /
 `-NoRender` skips the renderer, the long pole of install), and a closing
 `woof doctor`; it offers rustup if `cargo` is missing and is safe to
 re-run. The equivalent manual steps install the checkout's own
@@ -61,10 +67,10 @@ git clone https://github.com/recastsystems/woof woof && cd woof
 python -m venv .venv && source .venv/bin/activate
 python -m pip install -e recast-woof-data
 python -m pip install -e '.[gpu-cu12,render]'   # or gpu-cu13
-woof fetch-tables
+woof fetch-tables     # optional: the first Thompson run stages missing tables
 woof fetch-geog       # WPS_GEOG static tree: ~1.3 GB down, ~16 GB unpacked
-for workspace in tools/grib1_bridge tools/rustwx tools/zarr_bridge tools/rw_wps tools/region_global_dealias; do
-  (cd "$workspace" && cargo build --release --locked --offline)
+for workspace in tools/grib1_bridge tools/rustwx tools/zarr_bridge tools/rw_wps tools/region_global_dealias tools/nextgen_hydrofabric tools/nextgen_forcing tools/nextgen_verify tools/hydro_world tools/hydro_world_params tools/nextgen_reservoir_prepare tools/hydro_world_init tools/ocean_prepare tools/rw-bathy tools/nextgen_output; do
+  (cd "$workspace" && cargo fetch --locked && cargo build --release --locked --offline)
 done
 woof doctor
 ```
@@ -76,10 +82,10 @@ git clone https://github.com/recastsystems/woof woof; cd woof
 python -m venv .venv; .\.venv\Scripts\Activate.ps1
 python -m pip install -e recast-woof-data
 python -m pip install -e '.[gpu-cu12,render]'   # or gpu-cu13
-woof fetch-tables
+woof fetch-tables     # optional: the first Thompson run stages missing tables
 woof fetch-geog       # WPS_GEOG static tree: ~1.3 GB down, ~16 GB unpacked
-foreach ($workspace in 'tools\grib1_bridge', 'tools\rustwx', 'tools\zarr_bridge', 'tools\rw_wps', 'tools\region_global_dealias') {
-  Push-Location $workspace; cargo build --release --locked --offline; Pop-Location
+foreach ($workspace in 'tools\grib1_bridge', 'tools\rustwx', 'tools\zarr_bridge', 'tools\rw_wps', 'tools\region_global_dealias', 'tools\nextgen_hydrofabric', 'tools\nextgen_forcing', 'tools\nextgen_verify', 'tools\hydro_world', 'tools\hydro_world_params', 'tools\nextgen_reservoir_prepare', 'tools\hydro_world_init', 'tools\ocean_prepare', 'tools\rw-bathy', 'tools\nextgen_output') {
+  Push-Location $workspace; cargo fetch --locked; cargo build --release --locked --offline; Pop-Location
 }
 woof doctor
 ```

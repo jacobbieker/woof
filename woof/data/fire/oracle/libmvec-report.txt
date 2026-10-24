@@ -1,5 +1,0 @@
-# module_fr_fire_util.o -O0 libm symbols:
-# wrf_fire_slope_cut.o -O0 libm symbols:
-# positive control (plain expf loop at -Ofast):
-                 U expf
-                 U _ZGVbN4v_expf

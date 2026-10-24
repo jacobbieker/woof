@@ -141,12 +141,16 @@ def test_dx_below_the_hex_floor_is_refused(tmp_path):
         with pytest.raises(plan_hex.HexPlanRefusal) as caught:
             _plan(tmp_path, dx_m=dx)
         message = str(caught.value)
-        assert "wrf-tiles" in message and "819 m" in message
+        assert "wrf-tiles" in message and "635 m" in message
         assert "anchored" in message
     assert not (tmp_path / "plan" / "plan.json").exists()
     floor = plan_hex.spacing_floor_m(100.0)
     assert floor["smallest_anchored_dt_s"] == 5.0
-    assert floor["min_dc_edge_m"] == pytest.approx(5.0 * 125.0 / 0.9)
+    # The bind's stability limit (woof.hex.timestep_admission, advective and
+    # acoustic) is linear in min(dcEdge); the retired 0.9 x 125 m/s policy
+    # gave 5.0 * 125 / 0.9.
+    assert floor["min_dc_edge_m"] == pytest.approx(
+        5.0 / floor["stability_seconds_per_metre"])
 
 
 def test_capacity_refusal(tmp_path):
@@ -401,8 +405,8 @@ def test_floor_refusal_names_the_experimental_lane(tmp_path):
         message.index("--hex-experimental-dt")
 
 
-@pytest.mark.parametrize("dx_m,dt", [(100.0, 0.5),
-                                     (50.0, 0.25)])
+@pytest.mark.parametrize("dx_m,dt", [(100.0, 0.75),
+                                     (50.0, 0.375)])
 def test_experimental_plan_lifts_the_floor(tmp_path, dx_m, dt):
     plan = _xplan(tmp_path, dx_m=dx_m)
     outdir = tmp_path / "xplan"
@@ -411,10 +415,12 @@ def test_experimental_plan_lifts_the_floor(tmp_path, dx_m, dt):
     assert extra["timestep"]["dt_seconds"] == dt
     assert extra["timestep_evidence"] == "experimental-unanchored"
     assert extra["timestep"]["timestep_evidence"] == "experimental-unanchored"
-    # Courant still binds: dt sits under 0.9 x 0.8484 dx / 125
+    # Stability still binds: dt sits under the bind's limit on 0.8484 dx
     assert dt <= extra["timestep"]["courant_limit_seconds"]
+    from woof.hex.dt_admission import stability_limit_seconds
+
     assert extra["timestep"]["courant_limit_seconds"] == pytest.approx(
-        0.9 * 0.8484 * dx_m / 125.0)
+        stability_limit_seconds(0.8484 * dx_m))
     assert 600.0 / dt == round(600.0 / dt)
     assert extra["runnable"] == "full" and "blocked_stages" not in extra
     assert extra["stages"] == RASTER_STAGES
@@ -606,7 +612,7 @@ def test_main_reports_the_missing_features(tmp_path, monkeypatch, capsys):
     assert plan_hex.main(args) == 0
     record = json.loads(capsys.readouterr().out)
     assert record["timestep_evidence"] == "experimental-unanchored"
-    assert record["dt_seconds"] == 0.5
+    assert record["dt_seconds"] == 0.75
     assert record["runnable"] == "full"
     assert record["capacity"]["levels"] == 80
     missing = {row["argv_head"] for row in
@@ -635,8 +641,8 @@ def test_capacity_scales_with_levels():
     deep = plan_hex.capacity_verdict(100_000.0, None, 48.0, levels=80)
     assert deep["levels"] == 80
     # The device model prices the column itself (levels/55 per cell above
-    # 55, plus the wider WSM6 frame above 64), so no interim scaling.
-    assert deep["required_mib"] > base["required_mib"] * 1.3
+    # 55, plus the WSM6 column workspace per level), so no interim scaling.
+    assert deep["required_mib"] > base["required_mib"] * 1.25
     assert deep["cells_that_fit"] < base["cells_that_fit"]
     assert "INTERIM" not in deep["bytes_per_cell_basis"]
 

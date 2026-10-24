@@ -949,7 +949,9 @@ def station_obs_source(name: str, *, record=None, folder=None, bbox=None,
         f"{list(STATION_SOURCES)}")
 
 
-__all__ = ["AsosSurfaceSource", "DEFAULT_MATCH_SECONDS",
+from woof.obs.aq_airnow import AirNowStationSource
+
+__all__ = ["AirNowStationSource", "AsosSurfaceSource", "DEFAULT_MATCH_SECONDS",
            "DYNAMICAL_ATTRIBUTION", "DYNAMICAL_MANIFEST_SCHEMA",
            "DYNAMICAL_PRODUCT", "DYNAMICAL_SOURCE",
            "DynamicalAsosSurfaceSource", "MrmsCompositeSource",

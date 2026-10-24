@@ -1,7 +1,0 @@
-ztopmax f4 2 2 4
-k1 i4 1 4
-k2 i4 1 4
-kmt i4 0
-state f4 3 200 12 8
-scalars f4 2 4 8
-mintime i4 1 8

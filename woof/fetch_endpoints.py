@@ -162,6 +162,18 @@ def document() -> Mapping[str, object]:
     return json.loads(_table_path().read_text(encoding="utf-8"))
 
 
+@functools.lru_cache(maxsize=1)
+def archive_document() -> Mapping[str, object]:
+    """Dated archive object grammars, shared with the Rust downloader."""
+    path = _table_path().with_name("rw-wps-archive-layouts.v1.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def archive_rows(source_id: str):
+    return tuple(row for row in archive_document()["layouts"]
+                 if row["source_id"] == source_id)
+
+
 # --------------------------------------------------------------------------
 # Rows
 # --------------------------------------------------------------------------
@@ -201,6 +213,7 @@ class Endpoint:
     #: throttle tables, and a mapping is not hashable.
     run_listing: Mapping[str, str] | None = field(
         default=None, hash=False, compare=False)
+    layouts: tuple = field(default=(), hash=False)
 
     @property
     def host(self) -> str:
@@ -231,7 +244,44 @@ class Endpoint:
     def url(self, key: str) -> str:
         """The absolute URL for one rendered object key."""
 
+        if self.layouts:
+            match = re.fullmatch(self.layouts[0]["key_pattern"], key)
+            if match is None:
+                raise ValueError(f"{self.name}: object key does not match its declared archive grammar: {key}")
+            tokens = {k: v or "" for k, v in match.groupdict().items()}
+            stamp = f'{tokens["YYYY"]}-{tokens["MM"]}-{tokens["DD"]}T{tokens["HH"]}'
+            for row in self.layouts:
+                if (stamp >= row["record_start"]
+                        and (not row.get("cycle_until") or stamp < row["cycle_until"])):
+                    lead = int(tokens["FFF"])
+                    segments = row.get("lead_segments", ())
+                    if segments and not any(
+                            lead <= seg["through"] and lead % seg["step"] == 0
+                            and (i == 0 or lead > segments[i-1]["through"])
+                            for i, seg in enumerate(segments)):
+                        raise ValueError(f"{self.name}: lead {lead} is outside the archive's declared forecast ladder")
+                    return row["base"] + "/" + row["path_template"].format(**tokens) + tokens.get("SUFFIX", "")
+            raise ValueError(f"{self.name}: no declared archive layout for {stamp}")
         return f"{self.base}/{key.lstrip('/')}"
+
+    def supports_cycle(self, cycle: datetime) -> bool:
+        stamp = cycle.strftime("%Y-%m-%dT%H")
+        return not self.layouts or any(
+            stamp >= row["record_start"] and
+            (not row.get("cycle_until") or stamp < row["cycle_until"])
+            for row in self.layouts)
+
+    @property
+    def rust_source(self) -> str:
+        return self.layouts[0]["rust_source"] if self.layouts else {"s3": "aws"}.get(self.name, self.name)
+
+    @property
+    def product(self) -> str:
+        return self.layouts[0]["product"] if self.layouts else "pgrb2.0p25"
+
+    @property
+    def idx_available(self) -> bool:
+        return not self.layouts or bool(self.layouts[0]["idx_available"])
 
 
 def _endpoint(raw: Mapping[str, object], position: int) -> Endpoint:
@@ -256,6 +306,7 @@ def _endpoint(raw: Mapping[str, object], position: int) -> Endpoint:
         base=str(raw["base"]),
         retention_hours=(None if retention is None else float(retention)),
         why=str(raw.get("why", "")),
+        layouts=tuple(raw.get("layouts", ())),
         # No declared rank means "transfer in ladder order", which is
         # what every source outside the NCEP family does: the ladder
         # and the transfer order are then the same tuple, and nothing
@@ -271,13 +322,19 @@ def _endpoint(raw: Mapping[str, object], position: int) -> Endpoint:
 
 def _rows(source_id: str) -> tuple[Mapping[str, object], ...]:
     routes = dict(document().get("routes", {}))
-    if source_id in routes:
-        return tuple(dict(routes[source_id])["hosts"])
     legacy = dict(document().get("legacy_ladders", {}))
-    raw = legacy.get(source_id)
-    if isinstance(raw, list):
-        return tuple(raw)
-    return ()
+    raw = (dict(routes[source_id])["hosts"] if source_id in routes
+           else legacy.get(source_id, ()))
+    hosts = [dict(row) for row in raw] if isinstance(raw, (list, tuple)) else []
+    for row in archive_rows(source_id):
+        if row.get("append_host", True) and not any(h["name"] == row["transport"] for h in hosts):
+            hosts.append({"name": row["transport"], "base": row["base"],
+                          "retention_hours": None, "transfer_rank": row["transfer_rank"],
+                          "why": row["why"]})
+    for host in hosts:
+        host["layouts"] = tuple(row for row in archive_rows(source_id)
+                                if row["transport"] == host["name"])
+    return tuple(hosts)
 
 
 @functools.lru_cache(maxsize=None)
@@ -374,13 +431,16 @@ def serving_ladder(source_id: str, *, cycle: datetime,
     # not asked at all: unlike retention, ``serves_from`` is a bound.
     holding = tuple(entry for entry in rungs if entry.holds(cycle)) or rungs
     age = cycle_age_hours(cycle, now)
-    serving = tuple(entry for entry in holding if entry.covers(age)) or holding
+    # A rung whose dated archive layouts do not reach this cycle is not
+    # asked; when none reaches it the ladder is empty.
+    dated = tuple(entry for entry in holding if entry.supports_cycle(cycle))
+    serving = tuple(entry for entry in dated if entry.covers(age)) or dated
     # A mirror whose runs can be incomplete (``run_listing``) serves a run
     # only as its head, where the run is listed whole before anything is
     # fetched.  Behind a publisher it would be asked object by object
     # after a publisher failure and could leave a part-run from two hosts
     # on disk, so it is not a fall-through rung.
-    if serving[0].run_listing is None:
+    if serving and serving[0].run_listing is None:
         serving = tuple(entry for entry in serving if entry.run_listing is None)
     return serving
 

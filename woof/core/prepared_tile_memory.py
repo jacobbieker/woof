@@ -55,7 +55,7 @@ smallest compute window, ``2 * halo + 1``, and none longer than the domain
 plus its halo -- which still bounds every legal rectangle of that area on
 every term, and does so by a perimeter a tiling can actually have.
 
-MEASURED against the fix, 2026-09-10, a development machine (RTX 5070 Ti, 15.51 GiB,
+MEASURED against the fix, 2026-09-10, test host A (RTX 5070 Ti, 15.51 GiB,
 cupy 14.2.0 / CUDA 13), the same 572x524x49 icon-eu forecast on real
 2026-09-10T12 data, per-process device memory read by nvidia-smi
 (``compute-apps used_memory``: the process's whole device allocation,
@@ -224,14 +224,14 @@ def standalone_rte_storage_bytes(nz: int, columns: int, column_chunk: int,
     This bound stays monotone across chunk tails and SM coverage thresholds.
     """
     from woof.core.rrtmgp import (
-        load_gas_tables, rrtmgp_above_model_layer_counts)
+        gas_table_shape, rrtmgp_above_model_layer_counts)
 
     c = min(int(columns), int(column_chunk))
     if c < 1:
         return {}
     ul, us = rrtmgp_above_model_layer_counts(p_top)
     nl, ns = nz + ul, nz + us
-    lw, sw = load_gas_tables("lw"), load_gas_tables("sw")
+    lw, sw = gas_table_shape("lw"), gas_table_shape("sw")
     planck = c * lw.ngpt * (nl + nl + 1 + 1) * 4
     return {
         "lw/gas_tau": c * nl * lw.ngpt * 4,
@@ -344,9 +344,7 @@ class PreparedTileMemory:
             nx, ny = self.cfg.nx, self.cfg.ny
             fixed = {
                 "k_tables_bytes": pf.k_distribution_bytes(),
-                "physics_tables_bytes": (pf.thompson_coefficient_bytes(
-                    int(self.cfg.mp_physics) == 28)
-                    if int(self.cfg.mp_physics) in (8, 28) else 0),
+                "physics_tables_bytes": pf.thompson_generation_coefficient_bytes(self.cfg),
                 "cuda_context_bytes": self.profile.cuda_context_bytes,
                 "local_memory_bytes": pf.kernel_local_memory_bytes(exp, profile=self.profile),
                 "unmodelled_bytes": pf.ENVELOPE_UNMODELLED_BYTES,

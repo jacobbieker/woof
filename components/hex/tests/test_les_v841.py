@@ -315,8 +315,12 @@ def test_tke_transport_is_bounded_by_its_neighbours(mesh, geom64):
 
 
 # ---------------------------------------------------------------------------
-# configuration refusals
+# configuration refusals -- this port's own selection authority
 # ---------------------------------------------------------------------------
+# WOOF 1.1.0 validates the LES Registry options in its own v8.4.2 port
+# (woof.hex.mixing_v842_les.validate_les_configuration, called by the config
+# types) and runs LES through its resident launcher.  The v8.4.1 authority's
+# rules are held here on the authority itself.
 def _dry(**kw):
     base = dict(
         config_horiz_mixing="2d_smagorinsky",
@@ -329,13 +333,13 @@ def _dry(**kw):
 
 def test_the_dry_lane_admits_both_ported_les_models():
     for model in (les.LES_MODEL_3D_SMAGORINSKY, les.LES_MODEL_PROGNOSTIC_15_ORDER):
-        _dry(config_les_model=model).validate()
-    _dry(
+        les.validate_les_selection(_dry(config_les_model=model))
+    les.validate_les_selection(_dry(
         config_les_model=les.LES_MODEL_3D_SMAGORINSKY,
         config_les_surface="specified",
         config_surface_heat_flux=0.1,
         config_surface_drag_coefficient=0.001,
-    ).validate()
+    ))
 
 
 @pytest.mark.parametrize(
@@ -356,7 +360,7 @@ def test_the_dry_lane_admits_both_ported_les_models():
 )
 def test_unported_les_selections_refuse_by_name(kw, knob):
     with pytest.raises(ConfigurationRefusal) as caught:
-        _dry(**kw).validate()
+        les.validate_les_selection(_dry(**kw))
     assert caught.value.knob == knob
 
 
@@ -366,7 +370,7 @@ def test_les_with_a_running_pbl_scheme_refuses_naming_pbl_off():
         config_les_model=les.LES_MODEL_3D_SMAGORINSKY,
     )
     with pytest.raises(ConfigurationRefusal) as caught:
-        config.validate()
+        les.validate_les_selection(config)
     assert caught.value.knob == "config_pbl_scheme"
     assert "--pbl off" in str(caught.value)
 
@@ -432,9 +436,10 @@ def test_forecast_driver_config_is_untouched_without_les_and_carries_it_with():
         les={"les_model": les.LES_MODEL_3D_SMAGORINSKY, "les_surface": "none"},
     )
     assert selected.config_les_model == les.LES_MODEL_3D_SMAGORINSKY
-    # YSU is still the PBL in this tree, so the selection is refused by name.
+    # YSU is still the PBL in this configuration, so the v8.4.1 authority
+    # refuses the selection by name.
     with pytest.raises(ConfigurationRefusal) as caught:
-        selected.validate()
+        les.validate_les_selection(selected)
     assert "--pbl off" in str(caught.value)
 
 

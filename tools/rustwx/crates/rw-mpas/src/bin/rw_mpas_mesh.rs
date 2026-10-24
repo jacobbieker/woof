@@ -95,19 +95,11 @@ fn usage() -> String {
          --sweeps         relaxation budget (default 300)\n\
          --omega          over-relaxation factor (default 1.4; 1.0 is plain Lloyd)\n\
          --triangulation  how the Delaunay is kept between relaxation sweeps.\n\
-        \x20                 THE RULE: rebuild is the default for every whole-sphere request\n\
-        \x20                 (--spec, --background-km), so goldens and registered meshes\n\
-        \x20                 reproduce without being told; incremental is the default with\n\
-        \x20                 --regional-window, a mesh no registry holds. --from-centres never\n\
-        \x20                 relaxes and refuses the flag. Naming an arm always wins.\n\
-        \x20                 rebuild (class A) rebuilds it from scratch every sweep.\n\
-        \x20                 That is what every registered mesh was generated with and the\n\
-        \x20                 only setting that reproduces one byte for byte.\n\
-        \x20                 incremental (class B) keeps the facets and repairs them by Lawson\n\
-        \x20                 flips. SAME triangulation, but each cell keeps the ring ROTATION\n\
-        \x20                 it had where a rebuild re-rolls it for about 27% of cells, so the\n\
-        \x20                 FILE differs. Use it for a mesh that has never existed; never to\n\
-        \x20                 regenerate one with a registered SHA-256.\n\n\
+        \x20                 incremental (DEFAULT) keeps the facets and repairs them by Lawson\n\
+        \x20                 flips. rebuild rebuilds the hull from scratch every sweep (slower).\n\
+        \x20                 Rings start at their smallest neighbour index, so both arms write\n\
+        \x20                 the same bytes. Meshes generated before 2026-10-16 used the old\n\
+        \x20                 ring rotation and are not reproduced byte for byte by either.\n\n\
          THE REGIONAL WINDOW (EXPERIMENTAL)\n\
          --regional-window  refine and relax only inside this window plus a halo. A GeoJSON\n\
         \x20                 Polygon ([lon, lat]; bare, Feature or one-feature collection) or a\n\
@@ -122,6 +114,7 @@ fn usage() -> String {
         \x20                 plus max(6, ceil(band_cells)) rings. Too short is refused.\n\n\
          THE REGIONAL CULL\n\
          --cull-parent    cut a limited-area mesh out of an existing global grid or static\n\
+         --cull-provenance-grid GRID  bind static provenance to the final regional grid\n\
         \x20                 file instead of generating one. Byte-matches the native\n\
         \x20                 MPAS-Limited-Area v2.2 cull for the same region: bdyMask rings\n\
         \x20                 0..7, parent-subset ordering, contiguous reindex, 0 sentinels\n\
@@ -410,18 +403,12 @@ fn run() -> Result<String, String> {
         }
     };
 
-    // THE CLASS SWITCH, by a stated rule. A whole-sphere request defaults to
-    // `rebuild` -- see `hull::TriangulationMode` for why a faster default
-    // there would silently lapse every registered mesh digest. A regional
-    // window defaults to `incremental`: no registry holds a mesh made with
-    // one, so there is no digest to reproduce, and the rebuild arm's full
-    // re-triangulation per sweep is most of a graded run's wall. Naming the
-    // arm always wins.
-    lloyd.triangulation = match (args.get("triangulation"), &regional) {
-        (Some(v), _) => rw_mpas::mesh::hull::TriangulationMode::parse(v)?,
-        (None, Some(_)) => rw_mpas::mesh::hull::TriangulationMode::Maintained,
-        (None, None) => rw_mpas::mesh::hull::TriangulationMode::Rebuild,
-    };
+    // THE ARM SWITCH. Default `incremental` for every request, a regional
+    // window included; both arms write the same bytes (see
+    // `hull::TriangulationMode`).
+    if let Some(v) = args.get("triangulation") {
+        lloyd.triangulation = rw_mpas::mesh::hull::TriangulationMode::parse(v)?;
+    }
 
     let request = GenerateRequest {
         spec: spec.clone(),
@@ -716,11 +703,13 @@ fn cull_region(args: &Args, parent: &str) -> Result<String, String> {
         }
     }
 
-    let receipt = rw_mpas::mesh::cull::cull_file(
+    let provenance_grid: Option<PathBuf> = args.get("cull-provenance-grid").map(PathBuf::from);
+    let receipt = rw_mpas::mesh::cull::cull_file_with_provenance(
         Path::new(parent),
         &shape,
         &out,
         graph.as_deref(),
+        provenance_grid.as_deref(),
     )
     .map_err(|e| e.to_string())?;
 

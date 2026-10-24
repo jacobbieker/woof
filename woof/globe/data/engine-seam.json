@@ -2,73 +2,73 @@
   "schema": "gpuwm.arwen-global-engine-seam/v1",
   "engine": {
     "distribution": "woof",
-    "version": "1.0.3"
+    "version": "1.1.0"
   },
   "files": [
     {
       "path": "woof/core/constants.py",
-      "size": 2979,
-      "sha256": "76c8c11d1a75d17fd54d0a80646cec9dde04f649247ec2347d3d32e6c0500e9e",
+      "size": 5308,
+      "sha256": "5f1878bc3bb2b13f458814d7dc43a0062ac7e6c16363397ebda29169481d2c35",
       "reached": "CUDA_DEFINES, the first thing every carried kernel's preamble emits, and G and CP in the flux-to-heating conversion.  The highest-value pin in this file: it reaches the assembled source of every carried kernel"
     },
     {
       "path": "woof/certify/kernel_manifest.py",
-      "size": 7134,
-      "sha256": "8eaa9e00cc1d1eaf46c57d00168f6691e41ad2268f0cfcadfaa4d175f524d71b",
+      "size": 7434,
+      "sha256": "ce8e7e87588fd1399f3c78e78027737628f3b8e8705ae7f6e4e7f7cf48d79291",
       "reached": "record_module, called by the carried loader on every compile; it files a second, differing image under a deterministic suffix rather than replacing the first, which is what lets the carried and engine loaders coexist under one manifest root"
     },
     {
       "path": "woof/config.py",
-      "size": 314110,
-      "sha256": "477888f46e75f429c207ae647051009477022bed36a484a632e3211d60875a0a",
+      "size": 444715,
+      "sha256": "da10adc5afbee53e4d1164ee20689aa8a936de7ebaa1fc4e574f668ea4c50dc1",
       "reached": "DEFAULT_COLUMN_CHUNK, radiation_enabled, radiation_scheme_ids, RunConfig and SASE_PBL_SCHEME.  RunConfig IS constructed in carried npref, twice, inside its reference-state builders; no door of this package and no test calls those.  Against the cut revision the file differs by 1,130 lines at woof 2.7.3 (308 at 2.7.0), 105 of them inside RunConfig, and RunConfig's own 2.7.0-to-2.7.3 movement is comment text with no field, default or validation changed"
     },
     {
       "path": "woof/core/state.py",
-      "size": 67263,
-      "sha256": "fe9095c50b0594dc8ad0c8d4e6fff9183d0c1d5678c56cd19564f46f6613efaa",
+      "size": 77075,
+      "sha256": "7129dfe58e3205f0bbc8ba9f507e4183bd4571aaed65c1635bbdede04be3bc16",
       "reached": "DTYPE, DomainState and the constants wdm6/sase read.  The DomainState constructor and init_at_rest are reached only from the same two reference-state builders in carried npref.  Against the cut revision the file differs by 141 lines at woof 2.7.3 (100 at 2.7.0), 109 of them inside DomainState; the 2.7.0-to-2.7.3 movement is one comment in DomainState plus a scratch-arena dtype rule that widens what is accepted and an optional argument nothing here passes"
     },
     {
       "path": "woof/core/grid.py",
-      "size": 34618,
-      "sha256": "76a512591145d37662b1abf4eb9d38b0a89ed864a0d40120d9bad63c8a2701dc",
+      "size": 35832,
+      "sha256": "a949e38f606e85e0f2581d5f1ea9f012acc89f39399b6614e4b3ecdc14835f81",
       "reached": "BaseState, VerticalCoord and rebalance_hydrostatic, bound at module scope by staying state.py"
     },
     {
       "path": "woof/core/preflight.py",
-      "size": 670192,
-      "sha256": "1c017dab9c17ee3e4c3168a9d9985450b5e64a174bb3bcdacef9b44a77ec3bc0",
+      "size": 763820,
+      "sha256": "b6b3ebe4c57e1dceb827a991e00901b8ecef4f49fd932611f69ca7fbb60d892e",
       "reached": "EXTERNAL_MARGIN_BYTES, device_memory_probe_reason, device_memory_probe_subprocess and MEASURED_LOCAL_MEMORY_PROFILE, which carried ntiedtke reads for its SM count"
     },
     {
       "path": "woof/physics_compat.py",
-      "size": 191880,
-      "sha256": "32b98b3090e0be4bc07f3cffc8c0ce0cc2bd574842c5bddbd8fcd0674c61bfd7",
+      "size": 201061,
+      "sha256": "830c07f21e04beb9d7deddebc4ca48b23e184060f1e3e723be82563285f67ad6",
       "reached": "WRF_RRTMG_TO_RTE_RRTMGP and WRF_RRTMG_TO_RTE_RRTMGP_V1, two string tokens carried rrtmgp binds"
     },
     {
       "path": "woof/physics_vertical_contract.py",
-      "size": 14477,
-      "sha256": "9d12b60735cf577172d9b320042a77db20fba4384c45b0382a68cf6cb84d12de",
+      "size": 17001,
+      "sha256": "1bea2a31a4537fb9eed6aa065a361df7b44664dcdbd68aa00a8518f036df9602",
       "reached": "outside_vertical_bounds and refuse_vertical_levels, bound at module scope by carried ysu, and MAX_RRTMGP_MODEL_LEVELS, bound at module scope by carried rrtmgp as its model-level refusal"
     },
     {
       "path": "woof/core/kf.py",
-      "size": 26917,
-      "sha256": "3e8a73b74cd6d86d30c31590b834eb73cc5711cae69fa452dff2291023b0d56a",
+      "size": 32925,
+      "sha256": "4aad471d22fd2df4db5be00d4fc86aebca46145e18c8e652da2249952ddc81a4",
       "reached": "_model_clock_dt, imported at module scope by carried gf"
     },
     {
       "path": "woof/core/health_ledger.py",
-      "size": 12544,
-      "sha256": "3d0253de028cc7e6011df7a1fafc61e174817fe2fbc5e1e3e869c571f4c7f51e",
+      "size": 31263,
+      "sha256": "7135bc6ce56a9c27b6d86ec2749094c1f9705106f882f2e4f0ded065d447a154",
       "reached": "the validation-flag ledger carried ysu and carried rrtmgp read and write.  NOT woof/core/health.py, which differs and is not reached"
     },
     {
       "path": "woof/data_assets.py",
-      "size": 22204,
-      "sha256": "c504dbf16faa5e01528aca84d64a020f428ec667dab51b6ecd751d21750b31ea",
+      "size": 23608,
+      "sha256": "1fea65fe8370daea6c5ab2b730b71765f4a737910c37d8be63c01c10544e4ee5",
       "reached": "rrtmgp_data_dir and require_companion_member, called by carried rrtmgp at MODULE scope: the companion data wheel is an import requirement of the physics driver, not merely a run requirement"
     },
     {
@@ -85,20 +85,20 @@
     },
     {
       "path": "woof/core/morrison_constants.py",
-      "size": 1393,
-      "sha256": "100976309f219fe2466bb35a45ed6f68df70e0dbfb903375c22158cfa7a8044e",
+      "size": 3238,
+      "sha256": "5d596463f5a756eb4dd43b2ba212700f6b8d708738b6659fbaf0613163bb386d",
       "reached": "rimed_ice_constants, which is what morr_rimed_ice = 1 selects; bound at module scope by carried morrison and carried npref"
     },
     {
       "path": "woof/core/microphysics.py",
-      "size": 59125,
-      "sha256": "d902cb78a239635c22adbc0faff3917fff02e6b410658c1c9c6d334cd2a40765",
+      "size": 77579,
+      "sha256": "cd08651d427e5230014ab44859ebb0c7f5d14d41793c65644f03247904e3088c",
       "reached": "MicrophysicsDiagnostics and its siblings, reached only through morrison.apply, which this package never calls"
     },
     {
       "path": "woof/core/refl.py",
-      "size": 43866,
-      "sha256": "ac484a393c650d24c8f2c509d1516dceafd70ef67f953399e1b13f179f605857",
+      "size": 62656,
+      "sha256": "543d0630d24a2d25e8a7d6cb3ac5e476a05b1240bd3ca6c9bd8a3cecf6753445",
       "reached": "the reflectivity constants carried npref's mirrors read"
     },
     {
@@ -115,14 +115,14 @@
     },
     {
       "path": "woof/core/wdm6_constants.py",
-      "size": 9251,
-      "sha256": "26c6700f68e61314020da14b6d886b55536a015b35dd8027b14a6ffbe434da9f",
+      "size": 11893,
+      "sha256": "f0fd0cf8ccca980b333156bec94fbb02676db1417f66d315d0381315970d4b9b",
       "reached": "WDM6_NUMBER_SPECIES, bound at module scope by staying state.py"
     },
     {
       "path": "woof/core/wsm6_constants.py",
-      "size": 7593,
-      "sha256": "c9c56f323c664e3423a7724ef8d83438b3f1021b78cf4cda89058088f67137f9",
+      "size": 42953,
+      "sha256": "2799c9af068660a8e577f2983cc420b6e501a548fa209bac04b081039d03de9f",
       "reached": "rimed_ice_constants for the WSM6 mirrors; imports wdm6_constants and carried npref at module scope"
     },
     {
@@ -133,20 +133,20 @@
     },
     {
       "path": "woof/core/jacobi_eigh.py",
-      "size": 10971,
-      "sha256": "63521fdf3eb2147829526b0107776c7b93712c3027518fc42ee3ecdd0c3b2a6d",
+      "size": 15014,
+      "sha256": "06996c632a72356fc62f576d50506d17b9c967bf34eace746ddb6451e48a6b15",
       "reached": "the LETKF eigensolver.  jacobi_eigh.cu is identical too, so the one kernel the assimilation touches compiles through the ENGINE's loader and needs no carry"
     },
     {
       "path": "woof/da/letkf.py",
-      "size": 134761,
-      "sha256": "8020e3f15e73b6f1c0a26927368061a29ef4d18d8ce33de4e7e7d21029613cd2",
+      "size": 159875,
+      "sha256": "1f339d4b56ab853acf686e3d1d0e3adae265c491e790013e4668d643807c89f1",
       "reached": "gaspari_cohn and the LETKF entries this package's assimilation imports; the filter runs on the engine unchanged"
     },
     {
       "path": "woof/__init__.py",
-      "size": 11125,
-      "sha256": "194482f493ebe063689ac6b74633f6041ba4a68281a06650ca5bdee2f83c05aa",
+      "size": 14918,
+      "sha256": "708222ce0e5650233c979163189b097bb480bc825839e83f05314ffc62e3cd26",
       "reached": "the engine's package init, which executes before any engine module the carried physics imports; carried rrtmgp reaches data_assets through it"
     },
     {
@@ -157,44 +157,44 @@
     },
     {
       "path": "woof/core/mynn_sfclay.py",
-      "size": 10683,
-      "sha256": "74ec131845fcce1f3b01f487f67050424bc13e898e1d1e6121193385df78681f",
+      "size": 11603,
+      "sha256": "209c4c296adcf66297871fa047d23f2ff55f8fccd39eb1152ae97fb6e220a7cf",
       "reached": "MYNN_SURFACE_OUTPUTS, MynnSurfaceResult, launch_mynn_surface_layer and seed_mynn_surface_first_step.  This model runs sfclay, so they are bound at import and never called"
     },
     {
       "path": "woof/core/noahmp_runtime.py",
-      "size": 114361,
-      "sha256": "db31f8724aa6436ae340e9a702324109c4ae5a4aac4b6eb32b2e5fb124990ea7",
+      "size": 118514,
+      "sha256": "9eb3f5fe8d8b5d0fec305f3babc3878199599fdcd7b13e2cdc72eacdb8f66c5a",
       "reached": "the Noah-MP state and diagnostic inventories, its cold start and its step.  This model runs Noah, so they are bound at import and never called"
     },
     {
       "path": "woof/core/ruc_runtime.py",
-      "size": 62326,
-      "sha256": "d1913f6be337050d0a91bbca1ba168b8e5c3a4e6ec940c85edbb0301aaeee8df",
+      "size": 62408,
+      "sha256": "435452fe96aed2287379c6d4162f52a3c5fe9ac1decb6ff286186c344c3b6bda",
       "reached": "the RUC LSM inventories, cold start and step.  This model runs Noah, so they are bound at import and never called"
     },
     {
       "path": "woof/core/mynn_pbl_runtime.py",
-      "size": 20295,
-      "sha256": "83452c52afcee197b997ae6a87ac0ce3823172b8eb3a2de1d4ff0f8019d9fbaf",
+      "size": 22410,
+      "sha256": "f8305b7aa32caf34d3f8f754dc5042c4b565ba1f67b74d4c847da84f3f7f0749",
       "reached": "the MYNN PBL inventories, mynn_pbl_step and validate_mynn_tendencies.  This model runs YSU, so they are bound at import and never called"
     },
     {
       "path": "woof/core/myjpbl.py",
-      "size": 10114,
-      "sha256": "3702afca4f9211653d4e0e1e737187c05b083b17887a0ba595ca534d73dac27d",
+      "size": 10347,
+      "sha256": "db8e37e3b6cdb82fe79fb9d85ed26dc7fccfe74e4bc7123a7819acf99a871263",
       "reached": "MYJ_PBL_INOUT, myj_pbl_step and validate_myj_pbl_outputs.  This model runs YSU, so they are bound at import and never called"
     },
     {
       "path": "woof/core/myjsfc.py",
-      "size": 4404,
-      "sha256": "a546af5c933edc20a8f3e1378290951bc9e0523722968dfe77c6efdc3dded0d6",
+      "size": 5314,
+      "sha256": "0cd7ead16c6b7c4f23eb8d65c87b4ccd0adc3f8984bd5c022da96cad80989c4c",
       "reached": "MYJ_SFCLAY_INOUT, MYJ_SFCLAY_OUTPUTS and launch_myj_sfclay.  This model runs sfclay, so they are bound at import and never called"
     },
     {
       "path": "woof/core/shinhong.py",
-      "size": 13592,
-      "sha256": "9f1c9164ce09eb7944f05fc992e00351abbb69295379c5d49832b770824727fb",
+      "size": 13392,
+      "sha256": "6601d65d6d19af2d27476c0d1b072a8bfdcfe63ed6facb27dd68a5c933960168",
       "reached": "the ShinHong passenger inventory, its TKE floor and its launchers.  This model runs YSU, so they are bound at import and never called"
     },
     {
@@ -211,44 +211,44 @@
     },
     {
       "path": "woof/core/radiation_carriers.py",
-      "size": 29100,
-      "sha256": "ee54479721d8d6a2c416114654ad39e92c00afbec9a62d123ef89e72a47a7500",
+      "size": 32982,
+      "sha256": "12fd6f77dbcb26bc25a2a69a4695408994f3212f0f8c8792edb9b0825df2094c",
       "reached": "the carrier-source tokens, CarrierContract, CarrierContractError and consumer_carriers, which every radiation call in this model goes through.  It differs from the graded tree by one added token (CARRIER_SOURCE_CAM_OZONE) and the two lists it appears in; every name the carried code binds is identical"
     },
     {
       "path": "woof/ingest/soil.py",
-      "size": 98542,
-      "sha256": "a69d4a7f01ae5e32ab881a901f10f902b0d0884a10f9406c30de621b966cb663",
+      "size": 101845,
+      "sha256": "d06e4108c457c5a6d10bbad6b24b52d68f6b44bb8bea257021870e806d6c6b3c",
       "reached": "NOAH_LAYER_THICKNESS_M, the four Noah layer depths every land-surface step is handed.  The file differs from the graded tree by 165 lines and the array is identical in both"
     },
     {
       "path": "woof/verify/sase_ref.py",
-      "size": 327496,
-      "sha256": "212079fb17201b5d9e928270f5430113631a60411bec429525487d5be17cfcb6",
+      "size": 327504,
+      "sha256": "bd9a5a43df63bb01496253ad42949c343d575e2da4f1f9cfa268ba14c43b91be",
       "reached": "C_K, CP_AIR, E_MIN and prandtl_blend: the SASE closure constants carried physics single-sources from the NumPy authority instead of restating.  The file differs from the graded tree by 16 lines, all of them prose, and the four values are identical"
     },
     {
       "path": "woof/core/analytic_radiation.py",
-      "size": 6887,
-      "sha256": "70f20e5b364e00eee9d85c2df118a2ac4e7293cc8ee7f0ac418abd3ac41cdfec",
+      "size": 7902,
+      "sha256": "2c25dc17df46494d185e2c19f110eed8ad7b3b7c64182e13b872bb04caf4d450",
       "reached": "AnalyticClearSkyRadiation, imported inside the radiation selector at ra_lw=ra_sw=90.  The native adapter admits radiation='rrtmgp' only"
     },
     {
       "path": "woof/core/dudhia.py",
-      "size": 15711,
-      "sha256": "4867fd50d0a9b348742152558590d9468310b9b84b4527bd1ab8ba7209b8c467",
+      "size": 18911,
+      "sha256": "bdd30e1dfe449ff10a0fcc7d839636a684a1beb3d7674b0609952933abd4c6e7",
       "reached": "wrf_solar_geometry, imported inside the analytic COSZEN provider a radiation-free run needs, and DudhiaShortwaveRadiation at ra_sw=1.  This model runs RRTMGP with radiation active"
     },
     {
       "path": "woof/core/rrtm_lw.py",
-      "size": 51188,
-      "sha256": "f1b113f3bb4dd6b235e176f37d0d7fde751bb4c8db2fa0acf95a75443f3edb7e",
+      "size": 60389,
+      "sha256": "571ac2a6c3f0a8ded6ce58bdbc7b254a0f48a1ae1ae2757696415163d8a5c33c",
       "reached": "RRTMDudhiaRadiation, imported inside the radiation selector at ra_lw=ra_sw=1.  The native adapter admits radiation='rrtmgp' only, which is why its 83 differing lines are not this model's physics"
     },
     {
       "path": "woof/core/rrtmg_legacy.py",
-      "size": 105283,
-      "sha256": "4761c02c2978669f66605ae8bbc6289da46e62f92d3b22560f88de466861a165",
+      "size": 133264,
+      "sha256": "ab20456c1d2a8c13f55162fb7237aca73ff9d11dfb755948dffabb0a422fe937",
       "reached": "RRTMGLegacyRadiation, imported inside the radiation selector at ra_lw=ra_sw=4 with the legacy variant.  The native adapter admits radiation='rrtmgp' only, which is why its 177 differing lines at woof 2.7.3 (157 at 2.7.0) are not this model's physics"
     },
     {
@@ -259,32 +259,32 @@
     },
     {
       "path": "woof/core/nssl2_default_hooks.py",
-      "size": 13126,
-      "sha256": "f8a513dc9eb8cb88b7c8ff88292a2a010d48c507de8351a1a97edd26d5e6e2cd",
+      "size": 12645,
+      "sha256": "ddc37520e0aeeb1007c1fcb00d940fd4b28012c8cfd81b3d210170175000d973",
       "reached": "the NSSL-2 default hooks, imported beside the contract at mp_physics=18.  The native adapter admits microphysics='morrison'"
     },
     {
       "path": "woof/core/nssl2_runtime.py",
-      "size": 21504,
-      "sha256": "deb3a76002f15d3575644e722ef186b9153eebb3dffc1c79345fdcb1a9ed0b96",
+      "size": 20587,
+      "sha256": "8b357327fd08a87d8f38e1f83811e4ea2514a5b7cf01a698f61381ac1c7c02dc",
       "reached": "pin_absent_nssl2_fields, imported beside the contract at mp_physics=18.  The native adapter admits microphysics='morrison'"
     },
     {
       "path": "woof/core/p3_tables.py",
-      "size": 19960,
-      "sha256": "d3518ee1c2e48863d36433320a9ddff59e5d5a1e6642610668f4804150dfa76a",
+      "size": 21381,
+      "sha256": "70eb060046f0466f17294490f3eb039427b257cc6cc17f9a4211fec166504c39",
       "reached": "load_lookup_table_1 and p3_table_root, imported inside carried rrtmgp's P3 effective-radius path, which only a P3 run reaches"
     },
     {
       "path": "woof/core/mpas_column_batch.py",
-      "size": 80627,
-      "sha256": "784883b13a0326d54e94a54649e3ea9bbf8987ebb012abb63ab7fdadb1a0b965",
+      "size": 88029,
+      "sha256": "ada117a4afb594b137f8bea3111877f56fff86ebb57b5d3bf8f6854396a89ca6",
       "reached": "run_mpas_column_batch, served through carried physics' module-level __getattr__ for the hexagonal line's column batch; no door of this package asks for that name"
     },
     {
       "path": "woof/core/diagnostics.py",
-      "size": 9010,
-      "sha256": "1c66735b1614b64f2cad68bff5b72beff8393894c00968e7cab4b2c2c9de599e",
+      "size": 10315,
+      "sha256": "8d837426e0d15cfb1d516a70e891f54da3f96aa667553dbf3895a35f4e051468",
       "reached": "update_diagnostics, imported inside carried npref's two reference-state builders.  Nothing in this package or its suite calls them, which is where all 26 differing lines live"
     }
   ]

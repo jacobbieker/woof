@@ -141,7 +141,7 @@ def test_the_device_stack_attaches_it_and_the_forecast_labels_it():
         encoding="utf-8"
     )
     assert 'recovery_attachment = stack.get("large_step_recovery")' in forecast
-    assert "stamp_large_step_recovery_history(history_path, recovery_attachment)" in forecast
+    assert "stamp_large_step_recovery_history(destination, recovery_attachment)" in forecast
     # The run receipt is labelled from the attachment that executed, so a
     # preflight (no stack) never claims a recovery mode.
     assert 'payload["large_step_recovery"] = forecast["large_step_recovery"]' in forecast

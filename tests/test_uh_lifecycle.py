@@ -404,6 +404,15 @@ def test_up_heli_max_has_no_trajectory_or_restart_reader():
     }
     assert hits == {
         "woof/core/uh_diag.py",      # owner: update/reset/mirror
+        "woof/core/gsd_diagnostics.py",  # independent GSD history window
+        "woof/ensemble/mass_launcher.py",  # diagnostic download only
+        "woof/ensemble/batch_product_output.py",  # output field assembly only
+        # The WRF warm start's closed-world carrier census names the slot as
+        # REBUILT, never restored: WRF's UP_HELI_MAX running maximum starts a
+        # new window at the restart instant, as after every history write.
+        # A reason-table string (SCRATCH_REBUILT); nothing is read into the
+        # trajectory or the slot.
+        "woof/ingest/wrfrst.py",
         "woof/core/state.py",        # eager allocation under the knob
         "woof/core/dycore.py",       # calls update_up_heli_max only
         "woof/core/preflight.py",    # pricing registry + lifetime audit
@@ -445,16 +454,37 @@ def test_up_heli_max_has_no_trajectory_or_restart_reader():
         # and the AST pins below still hold because streaming touches no
         # scratch API at all.
         "woof/core/streaming.py",
-        # The native ensemble publisher resets the diagnostic after its
-        # synchronous history consumer, through reset_up_heli_max only.
-        # The scratch-access and no-trajectory AST guards below still apply.
+        # Packed member history resets the borrowed view after its
+        # synchronous consumer through reset_up_heli_max only. The strict
+        # scratch-access and no-trajectory AST guards below still apply.
         "woof/ensemble/native_forecast.py",
     }
+
+    native_tree = ast.parse((REPO / "woof/ensemble/native_forecast.py")
+                           .read_text(encoding="utf-8"))
+    uh_imports = [node for node in ast.walk(native_tree)
+                 if isinstance(node, ast.ImportFrom)
+                 and node.module == "woof.core.uh_diag"]
+    assert len(uh_imports) == 1
+    assert [(alias.name, alias.asname) for alias in uh_imports[0].names] \
+        == [("reset_up_heli_max", None)]
+    uh_calls = [node for node in ast.walk(native_tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and "up_heli_max" in node.func.id]
+    assert len(uh_calls) == 1
+    assert uh_calls[0].func.id == "reset_up_heli_max"
+    assert len(uh_calls[0].args) == 1
+    assert isinstance(uh_calls[0].args[0], ast.Name)
+    assert uh_calls[0].args[0].id == "view"
 
     # Outside the owner and the sanctioned sites, no scratch-API access to
     # the slot at all; in dycore/runtime specifically, only the two entry
     # points may appear (no direct slot access).
     sanctioned_scratch = {"woof/core/uh_diag.py", "woof/core/state.py",
+                          "woof/core/gsd_diagnostics.py",
+                          "woof/ensemble/mass_launcher.py",
+                          "woof/ensemble/batch_product_output.py",
                           "woof/io/history_layout.py", "woof/io/restart.py",
                           # Sanctioned for the indirect-acquisition rule
                           # below: live_scratch/domain_scratch ARE the

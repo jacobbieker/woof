@@ -1098,11 +1098,18 @@ def test_real_init_cpu_backend_handles_hrrr_hydrometeor_inventory(
         np.testing.assert_allclose(
             actual, expected, rtol=3.0e-5, atol=5.0e-8)
     if mp_physics == 8:
-        for state in (cpu.state, cuda.state):
-            np.testing.assert_array_equal(
-                cp.asnumpy(state.ni), np.zeros(state.ni.shape, np.float32))
-            np.testing.assert_array_equal(
-                cp.asnumpy(state.nr), np.zeros(state.nr.shape, np.float32))
+        # Since 66ca6e205 an mp=8 cold start seeds analysed rain and ice
+        # with real.exe's make_RainNumber / make_IceNumber
+        # (module_initialize_real.F:4840-4852) instead of starting both
+        # numbers at zero.  Every cell here carries qr and qi and no
+        # analysed number, so every cell is seeded, and the two
+        # preparation backends must seed the same numbers.
+        for name in ("ni", "nr"):
+            actual = cp.asnumpy(getattr(cpu.state, name))
+            expected = cp.asnumpy(getattr(cuda.state, name))
+            assert np.isfinite(actual).all() and np.all(actual > 0.0), name
+            np.testing.assert_allclose(
+                actual, expected, rtol=3.0e-5, atol=0.0, err_msg=name)
 
 
 def test_real74_d01_30min_gate_admits_complete_no_pbl_operator():
@@ -1138,53 +1145,9 @@ def test_real74_d01_30min_gate_admits_complete_no_pbl_operator():
 # ---------------------------------------------------------------------------
 
 
-class _ReferenceVerticalPlan:
-    """WRF-real vertical interpolation through the NumPy reference."""
-
-    def __init__(self, source, surface, target):
-        self.source = np.asarray(source, dtype=np.float32)
-        self.surface = np.asarray(surface, dtype=np.float32)
-        self.target = np.asarray(target, dtype=np.float32)
-
-    def apply(self, field, surface_value, **options):
-        from woof.verify.npref import np_wrf_real_vert_interp
-
-        options.pop("values_are_finite", None)
-        return np.asarray(np_wrf_real_vert_interp(
-            field, surface_value, self.source, self.surface, self.target,
-            **options), dtype=np.float32)
-
-
-class _ReferencePreprocessBackend:
-    """Independent CPU implementation of the preprocessing ABI.
-
-    Deliberately not the packaged Rust CPU bridge: these tests are about the
-    scheme-selection logic in :func:`initialize_real`, and must not skip on a
-    machine where the bridge is unbuilt.
-    """
-
-    name = "cpu-reference-test"
-    array_module = np
-
-    @staticmethod
-    def float32(value):
-        return np.asarray(value, dtype=np.float32)
-
-    @staticmethod
-    def regular_plan(*args, **kwargs):
-        raise AssertionError("horizontal preprocessing is unused here")
-
-    masked_nearest = regular_plan
-    rotate_earth_to_grid = regular_plan
-    era5_rh_to_water = regular_plan
-
-    @staticmethod
-    def prepare_wrf_vertical(source, surface, target):
-        return _ReferenceVerticalPlan(source, surface, target)
-
-    @staticmethod
-    def receipt():
-        return {"backend": "cpu-reference-test"}
+# Both fixtures use the same independent NumPy preprocessing ABI.
+from test_real_init_dry_slot import (
+    _ReferencePreprocessBackend, _ReferenceVerticalPlan)
 
 
 def _analyzed_hrrr_real_init(
@@ -1428,8 +1391,12 @@ def test_the_analyzed_inventory_tuple_and_its_moist_packages_agree():
         assert tuple(
             name for name in HRRR_ANALYZED_HYDROMETEORS if name in retained
         ) == tuple(retained), f"mp={mp_physics} retention is not decoded order"
+        # A named scheme cites its own capability row; it has no WRF
+        # Registry package.  FAST_SBM's package line lives in WRF's
+        # registry.sbm (:318).
         assert package["registry_citation"].startswith(
-            "Registry/Registry.EM_COMMON:")
+            ("Registry/Registry.EM_COMMON:", "woof.microphysics_schemes:",
+             "Registry/registry.sbm:"))
 
 
 def test_mp50_real_ingest_retains_the_condensate_p3_can_hold():

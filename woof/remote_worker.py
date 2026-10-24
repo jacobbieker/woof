@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import copy
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path, PureWindowsPath
@@ -22,6 +21,8 @@ import time
 import tomllib
 import traceback
 
+from woof.remote_artifacts import _file_sha, _sha
+
 SCHEMA = "gpuwm.remote.result.v1"
 TOKEN_ENV = "ARWEN_REMOTE_JOB_TOKEN"
 MAX_BYTES = 128 * 1024
@@ -31,18 +32,6 @@ TERMINAL = {"completed", "failed", "stopped"}
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
-
-
-def _sha(payload):
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _file_sha(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while block := stream.read(1024 * 1024):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _read(path: Path, maximum=MAX_BYTES):
@@ -449,18 +438,6 @@ def _inputs(source, *, preserve_bound=False, extra_wps=None):
         highres = parse_static_table(raw["static"], source=str(source), base_dir=source.parent)
         if highres is not None and "highres" in raw["static"]:
             raw["static"]["highres"]["cache_root"] = str(highres.cache_root.resolve())
-    if not preserve_bound:
-        # A domain's LANDFIRE raster ([[domain]] static fuel) is a large
-        # data reference like the geography: named absolutely so the
-        # remote side reads the same file, never re-resolved there.
-        from woof.static.fuel import resolve_landfire_path
-        for domain in raw.get("domain", ()):
-            static = domain.get("static") if isinstance(domain, dict) else None
-            fuel = static.get("fuel") if isinstance(static, dict) else None
-            if isinstance(fuel, dict) and isinstance(fuel.get("landfire"), str):
-                fuel["landfire"] = str(resolve_landfire_path(
-                    fuel["landfire"], source=str(source),
-                    base_dir=source.parent).resolve())
     sources = {str(source): payload}
     snapshots = {}
     wps_hash = None

@@ -486,7 +486,7 @@ def leg_plans(request: PairRequest) -> tuple[LegPlan, ...]:
                 scratch=scratch,
                 log=directory / "forecast.log",
                 argv=tuple(argv),
-                command=tuple([sys.executable, "-m", "hexcore", "forecast", *argv]),
+                command=tuple([sys.executable, "-m", "woof.hex", "forecast", *argv]),
             )
         )
     return tuple(plans)

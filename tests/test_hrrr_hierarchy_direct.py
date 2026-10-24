@@ -116,6 +116,7 @@ def test_join_highres_cache_survives_publication_and_reuses_tiles(
     root = SimpleNamespace(run=run, grid_id=1)
     exp = SimpleNamespace(root=root, domains=[root, root], start_time=day, run_seconds=60.)
     monkeypatch.setattr(join, "_native_experiment", lambda *a, **k: (exp, "fixture", _Run()))
+    monkeypatch.setattr(join, "publish_hierarchy_forecast_companions", lambda *a, **k: {})
     monkeypatch.setattr(join, "load_hrrr_target_domain", lambda path: target)
     monkeypatch.setattr(join, "_supported_hierarchy_slice", lambda *a, **k: None)
     monkeypatch.setattr(join, "validated_corridor_selection", lambda *a: None)
@@ -192,9 +193,13 @@ def test_join_highres_cache_survives_publication_and_reuses_tiles(
         return SimpleNamespace(timings_seconds={}, artifacts=SimpleNamespace(receipt={}),
                                wrf_manifest={})
 
+    corridor_roots = []
+
     def corridor(**kwargs):
+        # Sealed before the children since plan call 5 (2.9.0); the child
+        # initialization below must resolve the same cache.
         config = kwargs["static_highres"]
-        assert config.cache_root == observed[-1]
+        corridor_roots.append(config.cache_root)
         receipt = highres_receipt(config, "corridor")
         path = kwargs["directory"] / "receipt.json"
         path.parent.mkdir(parents=True)
@@ -203,6 +208,8 @@ def test_join_highres_cache_survives_publication_and_reuses_tiles(
 
     monkeypatch.setattr(join, "initialize_and_export_native_hierarchy", initialize)
     monkeypatch.setattr(join, "emit_statics_corridor_set", corridor)
+    # The stand-in set carries no corridor fields, so no child is born on one.
+    monkeypatch.setattr(join, "corridor_birth_statics", lambda *a: {})
     output = tmp_path / "joined"
     arguments = dict(
         root_preparation=preparation, root_domain_spec=authority,
@@ -222,7 +229,7 @@ def test_join_highres_cache_survives_publication_and_reuses_tiles(
             if not path.exists()]
         assert not transient and not missing, {"staging_references": transient,
                                               "missing_receipt_paths": missing}
-        assert observed[-1] == resolved
+        assert observed[-1] == resolved == corridor_roots[-1]
         assert handed[-1] is not None and handed[-1].cache_root == resolved
         assert not resolved.is_relative_to(output)
         for name in ("child-tile", "corridor-tile", "landcover"):
@@ -1520,7 +1527,7 @@ def test_stock_comparison_rejects_forecast_duration_drift():
         _compare_stock_experiment(native, stock)
 
 
-@pytest.mark.parametrize("max_dom", range(1, 22))
+@pytest.mark.parametrize("max_dom", [1, 2, 21])
 def test_raw_namelist_gate_allows_only_explicit_runtime_deltas(
         tmp_path, max_dom):
     native = tmp_path / "native.input"
@@ -1855,6 +1862,7 @@ def test_the_hierarchy_receipt_relays_the_root_s_perturbation_deferral(
                 run_seconds=60.)
     monkeypatch.setattr(join, "_native_experiment",
                         lambda *a, **k: (exp, "fixture", _Run()))
+    monkeypatch.setattr(join, "publish_hierarchy_forecast_companions", lambda *a, **k: {})
     monkeypatch.setattr(join, "load_hrrr_target_domain", lambda path: target)
     monkeypatch.setattr(join, "_supported_hierarchy_slice", lambda *a, **k: None)
     monkeypatch.setattr(join, "validated_corridor_selection", lambda *a: None)

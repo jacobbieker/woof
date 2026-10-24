@@ -22,6 +22,14 @@ ROOT = Path(__file__).resolve().parents[1]
 #: per thread (``levels-256`` = jacobbieker/woof main on 2026-10-12).  The
 #: bit-identity gates compile those sources beside the shipped ones.
 PRE_CUT_COMMIT = "7950e4171af94587f25ec3da2e279acfea0bf51e"
+#: Per module, the reference the cut is graded against.  WDM6's is the
+#: upstream 1.1.0 kernel (Recast WOOF 1.1.0, 9c5ebdda9): its WRF-word,
+#: WDM6_PLM_SURFACE rewrite with the column arrays still per thread, onto
+#: which the workspace was re-ported when the fork merged that release.
+PRE_CUT_COMMITS = {
+    "wsm6": PRE_CUT_COMMIT,
+    "wdm6": "9c5ebdda9f1d529bb1c5b309e32746204935972d",
+}
 
 SURFACE = ("rainnc", "rainncv", "snownc", "snowncv", "graupelnc",
            "graupelncv", "sr")
@@ -33,7 +41,8 @@ def pre_cut_source(module: str) -> str | None:
     try:
         done = subprocess.run(
             ["git", "-C", str(ROOT), "show",
-             f"{PRE_CUT_COMMIT}:woof/core/kernels/{module}.cu"],
+             f"{PRE_CUT_COMMITS.get(module, PRE_CUT_COMMIT)}"
+             f":woof/core/kernels/{module}.cu"],
             capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -48,7 +57,7 @@ def pre_cut_kernel(module: str, nz: int, text: str):
     :func:`woof.core.kernels.module_source_int_defines` performs."""
     import cupy as cp
 
-    from woof.core.kernels import _unit_text, module_source
+    from woof.core.kernels import _unit_text, module_options, module_source
     from woof.physics_params import edit_kernel_source
 
     full = module_source(module)
@@ -58,7 +67,7 @@ def pre_cut_kernel(module: str, nz: int, text: str):
     tier = 64 if nz <= 64 else 80
     define = "" if tier == 64 else f"#define {module.upper()}_KMAX {tier}\n"
     src = preamble + define + edit_kernel_source(module, text)
-    return cp.RawModule(code=src, options=("-std=c++17",)).get_function(
+    return cp.RawModule(code=src, options=module_options(module)).get_function(
         f"{module}_column")
 
 

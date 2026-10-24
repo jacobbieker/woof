@@ -16,7 +16,7 @@
 //! overwrote one forecast with the other.  The inputs' `GRID_ID` and `DX`
 //! become a `d02-3km` domain token in the slug position, and the same
 //! spacing appears as `Δx 3 km` in the plot subtitle.  Provenance is the
-//! local model (`--source-label`, default `ArWen`) rather than the GDEX
+//! local model (`--source-label`, default `WOOF` plus engine version) rather than the GDEX
 //! source inherited from the `wrf` store-model identity.
 
 #[path = "grib_import.rs"]
@@ -33,6 +33,11 @@ mod wrf_process;
 mod wrf_volumes;
 mod wrf_chart_planes;
 mod wrf_column_planes;
+mod ivt;
+mod wrf_vertical_velocity;
+mod snowfall;
+mod visibility;
+mod source_memo;
 #[path = "mesh.rs"]
 mod mesh;
 #[path = "section.rs"]
@@ -41,7 +46,9 @@ mod input_list;
 mod run_difference;
 mod sheet;
 mod store_render;
+use rw_wrfbatch::sfire;
 mod viewer_profile;
+mod worker;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -67,7 +74,7 @@ use wrf_process::{WrfProcessMessage, WrfProcessOptions, spawn_process_paths};
 /// `wrf`, whose only registered fetch source is GDEX -- a label this lane
 /// never fetched from.  `--source-label` renames it for stock-WRF files,
 /// which ArWen did not produce and must not claim.
-const DEFAULT_SOURCE_LABEL: &str = "WOOF";
+const DEFAULT_SOURCE_LABEL: &str = concat!("WOOF ", env!("GPUWM_ENGINE_VERSION"));
 
 /// The exact `--abi` line `gpuwm.rustwx.RENDERER_ABI_MARKER` pins.
 ///
@@ -140,9 +147,9 @@ gpuwm-rw-wrfbatch-sections-v1\tSECTIONFILL\tslug\tlo\thi\tabsence\trule\t\
 gpuwm-rw-wrfbatch-inputs-json-v1\t\
 gpuwm-rw-wrfbatch-vocabulary-v2\tgeneric\tvar:\tvariables\txsec:\tmesh:\tmeshdiff:\tselectable_slugs\t\
 gpuwm-rw-wrfbatch-layout-v1\t--layout\tauto\tfixed\t--size-class\t--scale\t--pair-sheet\t\
-gpuwm-rw-wrfbatch-difference-v1\t--diff-against\t--diff-inputs-json\t--diff-label-a\t--diff-label-b\t--diff-labels\t--diff-sheet\tDIFFERENCE";
+gpuwm-rw-wrfbatch-difference-v2\t--diff-against\t--diff-inputs-json\t--diff-label-a\t--diff-label-b\t--diff-labels\t--diff-sheet\tDIFFERENCE\tdiffering_cells\tRUSTWX_DIFFERENCE_TABLE";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Args {
     store_root: PathBuf,
     out_dir: PathBuf,
@@ -214,6 +221,12 @@ struct Args {
     /// `--diff-sheet`: draw every requested map product as this run minus
     /// the named run, at the valid time both share (`run_difference.rs`).
     difference: Option<run_difference::DifferenceArgs>,
+    /// `--save-import FILE`: after the import, record what a later draw needs from the frames (the run,
+    /// its stored slots, frame attribution, the run context and the grid identity) in FILE.
+    save_import: Option<PathBuf>,
+    /// `--from-import FILE`: draw from the store run a `--save-import` recorded, without opening the
+    /// converted frames again (they may already be deleted); no wrfout input is needed.
+    from_import: Option<PathBuf>,
     inputs: Vec<PathBuf>,
 }
 
@@ -228,8 +241,8 @@ fn usage() -> &'static str {
 [--footer-title TEXT] [--footer-valid TEXT] [--footer-mesh TEXT] [--footer-leg TEXT] \
 [--footer-note TEXT] [--diff-against WRFOUT]... [--diff-inputs-json FILE] \
 [--diff-labels A,B] [--diff-label-a TEXT] [--diff-label-b TEXT] [--diff-sheet] \
-[--list-products] [--inputs-json FILE] wrfout...\n       \
-rw_wrfbatch --help | --abi"
+[--list-products] [--save-import FILE] [--from-import FILE] [--inputs-json FILE] wrfout...\n       \
+rw_wrfbatch --cf FILE.nc --variable NAME --out-dir DIR [--valid UTC] [--bounds W,E,S,N] [--overlays FILE.json] [--observation FILE]\n       rw_wrfbatch --help | --abi | --worker-abi\n       rw_wrfbatch --worker --worker-host-mib N [fixed render options]"
 }
 
 /// What went wrong, and therefore what the user should be shown.
@@ -334,6 +347,15 @@ meshdiff:<...> (need --mesh-grid FILE.nc; meshdiff also --mesh-reference)"
         // fields, and a same-prefixed two-field line is a trap.
         println!("  {slug}");
     }
+    for row in rw_wrfbatch::hubwind_products::product_catalog() {
+        println!("  {}", row);
+        println!("WRFOUT\t{}\tdirect\teligible\t\thubwind native columns and timeline", row);
+    }
+    for (slug,field,_,_) in sfire::PRODUCTS {
+        println!("  {slug}");
+        println!("NEEDS\t{slug}\tFXLAT\tFXLONG\tLFN\t{field}");
+        println!("WRFOUT\t{slug}\tdirect\teligible\t\trefined fire fields with geographic coordinates");
+    }
     // The fileless half of availability: what each slug NEEDS, in the
     // store's own selector vocabulary, and what this build's wrfout
     // import is PLANNED to write.  Neither opens a file, so both can be
@@ -384,7 +406,12 @@ meshdiff:<...> (need --mesh-grid FILE.nc; meshdiff also --mesh-reference)"
     // Not "total=": the store-aware listing already owns that word for its
     // own count of catalog ROWS (which includes rows no --products spelling
     // selects).  This is the size of the --products vocabulary.
-    println!("selectable_slugs={}", slugs.len());
+    // The hub-height maps (lane/cap-hubwind, 089efd92470) are printed as
+    // products above and `gpuwm render --products hub_*` routes them, so
+    // they are part of the --products vocabulary this count declares.
+    println!("selectable_slugs={}", slugs.len()
+        + rw_wrfbatch::hubwind_products::product_catalog().len()
+        + sfire::PRODUCTS.len());
     println!(
         "pass --store-root DIR --out-dir DIR wrfout... with --list-products \
          for per-frame availability"
@@ -663,6 +690,10 @@ fn frame_attributed(
 }
 
 fn parse_args() -> Result<Invocation, CliError> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from(raw: impl IntoIterator<Item = String>) -> Result<Invocation, CliError> {
     let mut store_root = None;
     let mut out_dir = None;
     let mut products = "all".to_string();
@@ -674,6 +705,8 @@ fn parse_args() -> Result<Invocation, CliError> {
     let mut layout_scale = 1.0f64;
     let mut heavy = false;
     let mut list_products = false;
+    let mut save_import: Option<PathBuf> = None;
+    let mut from_import: Option<PathBuf> = None;
     let mut streamlines: Option<bool> = None;
     let mut source_label = DEFAULT_SOURCE_LABEL.to_string();
     let mut overlays_path: Option<PathBuf> = None;
@@ -695,10 +728,20 @@ fn parse_args() -> Result<Invocation, CliError> {
     let mut diff_labels: Option<rustwx_render::difference::DifferenceLabels> = None;
     let mut diff_sheet = false;
     let mut inputs = Vec::new();
-    let mut raw = std::env::args().skip(1);
+    let mut raw = raw.into_iter();
 
     while let Some(arg) = raw.next() {
         match arg.as_str() {
+            "--save-import" => {
+                save_import = Some(PathBuf::from(raw.next().ok_or_else(|| {
+                    CliError::Usage("--save-import requires a file".to_string())
+                })?));
+            }
+            "--from-import" => {
+                from_import = Some(PathBuf::from(raw.next().ok_or_else(|| {
+                    CliError::Usage("--from-import requires a file".to_string())
+                })?));
+            }
             "--inputs-json" => {
                 let path = PathBuf::from(raw.next().ok_or_else(|| {
                     CliError::Usage("--inputs-json requires a JSON file".to_string())
@@ -996,7 +1039,7 @@ fn parse_args() -> Result<Invocation, CliError> {
         return Ok(Invocation::Catalog);
     }
 
-    if inputs.is_empty() {
+    if inputs.is_empty() && from_import.is_none() {
         return Err(CliError::Usage(
             "at least one wrfout input is required".to_string(),
         ));
@@ -1080,6 +1123,8 @@ fn parse_args() -> Result<Invocation, CliError> {
         mesh_bounds,
         footer,
         difference,
+        save_import,
+        from_import,
         inputs,
     })))
 }
@@ -1126,15 +1171,16 @@ fn validate_request(args: &Args) -> Result<(), CliError> {
     // slugs, so it reads `mesh:qi:colmax` and `xsec:QICE` as typos and
     // refuses a command line that is correct -- which is what a
     // mesh-only or section-only invocation is.
+    let (non_fire,fire_products)=sfire::split_products(&args.products);
     let (non_mesh, mesh_products) =
-        mesh::split_product_spec(&args.products).map_err(CliError::Usage)?;
+        mesh::split_product_spec(&non_fire).map_err(CliError::Usage)?;
     let (store_products, section_products) =
         section::split_product_spec(&non_mesh).map_err(CliError::Usage)?;
     // A spec made only of the catalog keywords this binary expands
     // against the store (`all`, `windowed`, `variables`) names no slug
     // the partition could check; it is expanded after the import.
     if (!store_products.trim().is_empty()
-        || (mesh_products.is_empty() && section_products.is_empty()))
+        || (mesh_products.is_empty() && section_products.is_empty() && fire_products.is_empty()))
         && !is_catalog_keyword_spec(&store_products)
     {
         rusty_weather::render_all::partition_products(&store_products)
@@ -1169,6 +1215,10 @@ fn validate_request(args: &Args) -> Result<(), CliError> {
         return Ok(());
     }
 
+    // A draw from a saved import opens no frame: the store run is the input.
+    if args.from_import.is_some() {
+        return Ok(());
+    }
     // Per-path, in the order given, so the first sentence names the first
     // problem.  The wording matches `gpuwm/render.py`'s matplotlib engine
     // ("{path}: unreadable wrfout ({exc})") so `--engine auto` cannot change
@@ -1206,6 +1256,44 @@ fn validate_request(args: &Args) -> Result<(), CliError> {
 struct GridIdentity {
     domain: Option<String>,
     spacing_m: Option<f64>,
+    /// The grid a producer named for the headline (`GPUWM_GRID_LABEL`,
+    /// `hex 15 km`), which outranks the WRF nest token when present.
+    label: Option<String>,
+}
+
+/// The global attribute a wrfout-shaped file names its grid in, for the
+/// plot headline and the filename's domain slot (`rw_mpas_convert` writes
+/// it; `rw_mpas::convert::GRID_LABEL_ATTRIBUTE` pins the same literal).
+///
+/// THE BREAKAGE THIS PREVENTS, MEASURED (2026-10-10): a resampled hex mesh
+/// forecast carries `GRID_ID = 1` and the resample grid's `DX`, so every
+/// hex map was headlined `(d01 20 km)` and filed `..._d01-20km_...` -- a
+/// WRF nest the model does not have and a spacing the model does not run
+/// at. A file without the attribute (every WRF file) names its grid
+/// exactly as before.
+const GRID_LABEL_ATTRIBUTE: &str = "GPUWM_GRID_LABEL";
+
+/// A file's grid label as the headline may print it: whitespace collapsed,
+/// at most 32 characters, no control character and no `|`; anything else
+/// is ignored rather than drawn.
+fn checked_grid_label(raw: &str) -> Option<String> {
+    let label = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!label.is_empty()
+        && label.chars().count() <= 32
+        && !label.chars().any(|ch| ch.is_control() || ch == '|'))
+    .then_some(label)
+}
+
+/// `hex 15 km` -> `hex15km`, `hex 60-3 km` -> `hex60-3km`: the label as a
+/// filename token, lower case, with nothing but letters, digits, `-` and
+/// `.` kept.
+fn grid_label_slug(label: &str) -> Option<String> {
+    let slug: String = label
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '.')
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect();
+    (!slug.is_empty()).then_some(slug)
 }
 
 /// One identity for the whole invocation, or nothing.
@@ -1238,7 +1326,11 @@ fn file_grid_identity(path: &std::path::Path) -> GridIdentity {
         .as_ref()
         .and_then(|file| file.global_attr_f64("DX").ok())
         .filter(|value| value.is_finite() && *value > 0.0);
-    GridIdentity { domain, spacing_m }
+    let label = file
+        .as_ref()
+        .and_then(|file| file.global_attr_str(GRID_LABEL_ATTRIBUTE).ok())
+        .and_then(|raw| checked_grid_label(&raw));
+    GridIdentity { domain, spacing_m, label }
 }
 
 fn domain_token_from_id(grid_id: i32) -> Option<String> {
@@ -1257,13 +1349,9 @@ fn domain_token_from_filename(path: &std::path::Path) -> Option<String> {
     Some(format!("d{digits}"))
 }
 
-/// `3km`, `1.5km`, `333m` -- the resolution half of the output token.
-/// Sub-kilometre nests read as integer metres because `0.333km` is a
-/// worse label for a 333 m nest than `333m` is.
-fn resolution_token(spacing_m: f64) -> Option<String> {
-    let (value, unit) = spacing_parts(spacing_m)?;
-    Some(format!("{value}{unit}"))
-}
+// The resolution token and its parts live in the library, so the fire
+// renderer (rw_wrfbatch::sfire) names its domain folder the same way.
+use rw_wrfbatch::domain_naming::{resolution_token, spacing_parts};
 
 /// `Δx 3 km`, `Δx 333 m` -- the same number, spelled for the subtitle.
 fn spacing_subtitle(spacing_m: f64) -> Option<String> {
@@ -1271,33 +1359,13 @@ fn spacing_subtitle(spacing_m: f64) -> Option<String> {
     Some(format!("\u{0394}x {value} {unit}"))
 }
 
-fn spacing_parts(spacing_m: f64) -> Option<(String, &'static str)> {
-    if !spacing_m.is_finite() || spacing_m <= 0.0 {
-        return None;
-    }
-    let metres = spacing_m.round();
-    if metres >= 1_000.0 {
-        Some((trimmed_number(spacing_m / 1_000.0), "km"))
-    } else {
-        Some((format!("{metres:.0}"), "m"))
-    }
-}
-
-/// Three decimals at most, with the trailing zeros dropped: `3`, `1.5`,
-/// `1.333`.
-fn trimmed_number(value: f64) -> String {
-    let text = format!("{value:.3}");
-    let trimmed = text.trim_end_matches('0').trim_end_matches('.');
-    if trimmed.is_empty() {
-        "0".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
 
 /// The slug that replaces `native_grid` in every output filename:
 /// `d02-3km`, or `d02` when the file declares no usable `DX`.
 fn native_domain_slug(identity: &GridIdentity) -> Option<String> {
+    if let Some(slug) = identity.label.as_deref().and_then(grid_label_slug) {
+        return Some(slug);
+    }
     let domain = identity.domain.as_ref()?;
     match identity.spacing_m.and_then(resolution_token) {
         Some(resolution) => Some(format!("{domain}-{resolution}")),
@@ -1315,6 +1383,9 @@ fn native_domain_slug(identity: &GridIdentity) -> Option<String> {
 /// stamped that catalog's dataset id -- a dataset this lane never read,
 /// naming an archive these numbers did not come from, on every frame.
 fn domain_title_label(identity: &GridIdentity) -> Option<String> {
+    if let Some(label) = &identity.label {
+        return Some(label.clone());
+    }
     let domain = identity.domain.as_ref()?;
     match identity.spacing_m.and_then(spacing_parts) {
         Some((value, unit)) => Some(format!("{domain} {value} {unit}")),
@@ -1385,7 +1456,7 @@ fn run(mut args: Args) -> Result<(), String> {
     if args.footer != rustwx_render::FooterFields::default() {
         let mut footer = args.footer.clone();
         if footer.mesh_or_grid.is_none() {
-            footer.mesh_or_grid = domain_title_label(&grid_identity(&args.inputs));
+            footer.mesh_or_grid = domain_title_label(&run_grid_identity(&args));
         }
         rustwx_render::set_footer_fields(footer);
     }
@@ -1396,9 +1467,10 @@ fn run(mut args: Args) -> Result<(), String> {
     // frame and its grid file; `xsec:` cuts the wrfout files directly.
     // Both are split off here, and when they are all that was asked for the
     // import is skipped entirely.
-    let (non_mesh_products, mesh_products) = mesh::split_product_spec(&args.products)?;
+    let (non_fire_products,fire_products)=sfire::split_products_for(&args.products,&args.inputs);
+    let (non_mesh_products, mesh_products) = mesh::split_product_spec(&non_fire_products)?;
     let (store_products, section_products) = section::split_product_spec(&non_mesh_products)?;
-    if !mesh_products.is_empty() && !(store_products.is_empty() && section_products.is_empty()) {
+    if !mesh_products.is_empty() && !(store_products.is_empty() && section_products.is_empty() && fire_products.is_empty()) {
         // The INPUTS differ, not just the drawing.  A mesh: product's input
         // is an MPAS history frame; every other family's is a wrfout.  One
         // invocation cannot be handed both lists, and importing a history
@@ -1482,7 +1554,7 @@ fn run(mut args: Args) -> Result<(), String> {
     let section_inputs = args.inputs.clone();
     let section_out_dir = args.out_dir.clone();
     let section_source_label = args.source_label.clone();
-    let section_domain_slug = native_domain_slug(&grid_identity(&args.inputs));
+    let section_domain_slug = native_domain_slug(&run_grid_identity(&args));
     let (section_width, section_height) = match (args.layout, args.section_size) {
         (rustwx_render::LayoutMode::Auto { class, scale }, None) => {
             let plan = rustwx_render::LayoutTable::builtin().plan_section(class, scale);
@@ -1501,6 +1573,23 @@ fn run(mut args: Args) -> Result<(), String> {
         reference_km: args.section_reference_km,
     };
     let section_started = std::time::Instant::now();
+    let fire_rows=sfire::catalog(&args.inputs);
+    let (fire_rendered,fire_skipped,fire_failed,fire_georefs)=if args.list_products || fire_products.is_empty() {(0,0,0,Vec::new())} else {
+        sfire::render(&fire_products,&sfire::RenderConfig {inputs:&args.inputs,out_dir:&args.out_dir,
+            frame:args.frames,width:args.width,height:args.height,source_label:&args.source_label,
+            overlays:args.overlays.as_ref(),annotations:args.annotations.as_ref()})?
+    };
+    if store_products.is_empty() && section_products.is_empty() && !fire_products.is_empty() {
+        if args.list_products {
+            for (slug,kind,status,detail,code) in &fire_rows {println!("PRODUCT\t{slug}\t{kind}\t{status}\t{detail}\t{code}");}
+            println!("CATALOG total={}",fire_rows.len());
+        } else {
+            if !fire_georefs.is_empty() {write_georef_manifest(&args.out_dir,&fire_georefs)?;}
+            println!("FINISHED rendered={fire_rendered} skipped={fire_skipped} failed={fire_failed} elapsed_ms={}",section_started.elapsed().as_millis());
+            if fire_failed>0 || (fire_rendered==0 && !sfire::all_inactive(&args.inputs)) {return Err("Fire render incomplete; see frame-attributed diagnostics".into());}
+        }
+        return Ok(());
+    }
     if store_products.is_empty() && !section_products.is_empty() && !args.list_products {
         let (rendered, failed) = render_section_products(
             &section_products,
@@ -1524,24 +1613,35 @@ fn run(mut args: Args) -> Result<(), String> {
     // Read before the import consumes the paths: the domain token and the
     // subtitle spacing come from the inputs' own global attributes, never
     // from the store (rw-store v1 retains no grid-spacing metadata).
-    let identity = grid_identity(&args.inputs);
+    let identity = run_grid_identity(&args);
     let domain_slug = native_domain_slug(&identity);
     let spacing = identity.spacing_m.and_then(spacing_subtitle);
     let title_provenance = TitleProvenance::LocalImport {
         grid_label: domain_title_label(&identity),
+    };
+    let imported = match &args.from_import {
+        Some(path) => saved_import(path)?,
+        None => {
+            let imported = import_run(
+                args.inputs,
+                &args.store_root,
+                &store_products,
+                args.heavy,
+                args.list_products,
+            )?;
+            if let Some(path) = &args.save_import {
+                save_import(path, &imported, &identity)?;
+            }
+            imported
+        }
     };
     let ImportedRun {
         model: import_model,
         run: import_run_slug,
         stored_slots,
         frame_sources,
-    } = import_run(
-        args.inputs,
-        &args.store_root,
-        &store_products,
-        args.heavy,
-        args.list_products,
-    )?;
+        run_context: _,
+    } = imported;
     if args.list_products {
         return list_products(
             &args.store_root,
@@ -1549,6 +1649,7 @@ fn run(mut args: Args) -> Result<(), String> {
             &import_run_slug,
             &stored_slots,
             args.heavy,
+            fire_rows,
         );
     }
 
@@ -1616,7 +1717,7 @@ fn run(mut args: Args) -> Result<(), String> {
     // geographic transforms beside the PNGs.  The pinned stdout grammar
     // is untouched: the collection rides the same event the RENDERED
     // line already prints.
-    let mut panel_georefs: Vec<RenderedPanelGeoref> = Vec::new();
+    let mut panel_georefs: Vec<RenderedPanelGeoref> = fire_georefs;
     let summary = run_batch_render(request, &cancel, |event| match event {
         BatchRenderEvent::Started {
             planned_items,
@@ -1654,7 +1755,7 @@ fn run(mut args: Args) -> Result<(), String> {
         }
         BatchRenderEvent::Finished(summary) => println!(
             "FINISHED rendered={} skipped={} failed={} elapsed_ms={}",
-            summary.rendered, summary.skipped, summary.failed, summary.elapsed_ms
+            summary.rendered+fire_rendered, summary.skipped+fire_skipped, summary.failed+fire_failed, summary.elapsed_ms
         ),
         _ => {}
     })?;
@@ -1684,12 +1785,12 @@ fn run(mut args: Args) -> Result<(), String> {
         );
         counts
     };
-    if summary.rendered + section_rendered == 0 || summary.failed + section_failed > 0 {
+    if summary.rendered + section_rendered + fire_rendered == 0 || summary.failed + section_failed + fire_failed > 0 {
         return Err(format!(
             "batch render incomplete: rendered={} skipped={} failed={}",
-            summary.rendered + section_rendered,
-            summary.skipped,
-            summary.failed + section_failed
+            summary.rendered + section_rendered + fire_rendered,
+            summary.skipped + fire_skipped,
+            summary.failed + section_failed + fire_failed
         ));
     }
     Ok(())
@@ -1702,6 +1803,105 @@ struct ImportedRun {
     /// The stored frame slots, ascending, which is ascending valid time.
     stored_slots: Vec<u16>,
     frame_sources: std::collections::HashMap<u16, PathBuf>,
+    /// The import's initial-condition disclosure and model label (what the pictures are labelled with).
+    run_context: wrf_process::WrfRunContext,
+}
+
+/// The grid identity this draw labels its pictures with: the one a `--save-import` recorded when
+/// drawing from it, else the inputs' own global attributes.
+fn run_grid_identity(args: &Args) -> GridIdentity {
+    if let Some(path) = &args.from_import {
+        if let Ok(bytes) = std::fs::read(path) {
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                let grid = &value["grid"];
+                let text = |key: &str| grid.get(key).and_then(serde_json::Value::as_str).map(str::to_string);
+                return GridIdentity {
+                    domain: text("domain"),
+                    spacing_m: grid.get("spacing_m").and_then(serde_json::Value::as_f64),
+                    label: text("label"),
+                };
+            }
+        }
+        return GridIdentity::default();
+    }
+    grid_identity(&args.inputs)
+}
+
+const SAVED_IMPORT_SCHEMA: &str = "rw-wrfbatch.saved-import.v1";
+
+/// THE BREAKAGE THIS SERVES (4x RTX PRO 6000 box, 2026-10-17): a draw reopened every converted frame
+/// although the listing had already imported it into the store (22 MB per frame against a 4.3 GB
+/// frame), so the products door had to keep every frame of a series on disk until the last map was
+/// drawn, and member batches filled the disk.  The listing records here what the draw takes from the
+/// frames, so the door can delete each frame as soon as it is imported.
+fn save_import(path: &std::path::Path, imported: &ImportedRun, identity: &GridIdentity) -> Result<(), String> {
+    let mut sources: Vec<(u16, String)> = imported
+        .frame_sources
+        .iter()
+        .map(|(slot, file)| (*slot, file.display().to_string()))
+        .collect();
+    sources.sort();
+    let document = serde_json::json!({
+        "schema": SAVED_IMPORT_SCHEMA,
+        "writer": env!("CARGO_PKG_VERSION"),
+        "model": imported.model,
+        "run": imported.run,
+        "stored_slots": imported.stored_slots,
+        "frame_sources": sources,
+        "run_context": imported.run_context.to_json(),
+        "grid": {"domain": identity.domain, "spacing_m": identity.spacing_m, "label": identity.label},
+    });
+    let bytes = serde_json::to_vec_pretty(&document).map_err(|err| format!("encode {}: {err}", path.display()))?;
+    std::fs::write(path, bytes).map_err(|err| format!("write {}: {err}", path.display()))
+}
+
+/// The import a `--save-import` recorded; its run context is installed as the import would have.
+fn saved_import(path: &std::path::Path) -> Result<ImportedRun, String> {
+    let bytes = std::fs::read(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|err| format!("parse {}: {err}", path.display()))?;
+    if value.get("schema").and_then(serde_json::Value::as_str) != Some(SAVED_IMPORT_SCHEMA) {
+        return Err(format!("{} is not a {SAVED_IMPORT_SCHEMA} record", path.display()));
+    }
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| format!("{} carries no {key}", path.display()))
+    };
+    let stored_slots: Vec<u16> = value
+        .get("stored_slots")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{} carries no stored_slots", path.display()))?
+        .iter()
+        .filter_map(|slot| slot.as_u64().and_then(|n| u16::try_from(n).ok()))
+        .collect();
+    if stored_slots.is_empty() {
+        return Err(format!("{} names no stored slot", path.display()));
+    }
+    let frame_sources = value
+        .get("frame_sources")
+        .and_then(serde_json::Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    let slot = row.get(0)?.as_u64().and_then(|n| u16::try_from(n).ok())?;
+                    Some((slot, PathBuf::from(row.get(1)?.as_str()?)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let run_context = wrf_process::WrfRunContext::from_json(&value["run_context"]);
+    run_context.apply();
+    println!("IMPORTED from {} (no frame reopened)", path.display());
+    Ok(ImportedRun {
+        model: text("model")?,
+        run: text("run")?,
+        stored_slots,
+        frame_sources,
+        run_context,
+    })
 }
 
 /// Import `inputs` into `store_root` for the store products asked for.
@@ -1718,11 +1918,24 @@ fn import_run(
     // (`wrf_process::published_import_record`).  A listing of group keywords
     // alone, the default, still imports in full: it answers what the frames
     // can draw at all.
+    let named = !heavy
+        && named_product_request(store_products)
+        && (!list_products || names_a_product(store_products));
     let mut options = WrfProcessOptions {
         heavy_ecape: heavy,
-        named_products_only: !heavy
-            && named_product_request(store_products)
-            && (!list_products || names_a_product(store_products)),
+        snow_since: std::env::var("GPUWM_SNOW_SINCE").ok().filter(|s| !s.trim().is_empty()),
+        named_products_only: named,
+        // A request of named products imports only what those products
+        // read, in ONE import per file for all of them; a listing of the
+        // same names imports the same plan, so the render that follows
+        // reuses it.  A keyword in the request (`all`, `direct`, `derived`)
+        // keeps the named import whole; `windowed` scopes to what its
+        // windows read.
+        required_fields: if named {
+            wrf_process::required_fields_for_products(store_products)
+        } else {
+            None
+        },
         ..WrfProcessOptions::default()
     };
     if !heavy {
@@ -1787,6 +2000,7 @@ fn import_run(
         run: import.run,
         stored_slots,
         frame_sources,
+        run_context: import.run_context.clone(),
     })
 }
 
@@ -2318,6 +2532,7 @@ fn list_products(
     run_slug: &str,
     stored_slots: &[u16],
     heavy_imported: bool,
+    fire_rows:Vec<sfire::CatalogRow>,
 ) -> Result<(), String> {
     use rusty_weather::batch_render::BatchProductKind;
     use rusty_weather::render_all::StoreFieldSource;
@@ -2348,7 +2563,7 @@ fn list_products(
     // reader sees and is never matched on; `code` is the stable machine
     // spelling a consumer decides with, so a reworded reason cannot
     // silently turn an excluded slug back into a forwarded one.
-    let mut rows: Vec<(String, &str, &str, String, &str)> = Vec::new();
+    let mut rows: Vec<(String, &str, &str, String, &str)> = fire_rows;
 
     for spec in rustwx_products::spec::direct_product_specs() {
         // The ensemble/probabilistic families stay out of `all` -- that
@@ -2768,6 +2983,8 @@ mod tests {
             mesh_bounds: None,
             footer: rustwx_render::FooterFields::default(),
             difference: None,
+            save_import: None,
+            from_import: None,
             inputs,
         }
     }
@@ -3079,35 +3296,6 @@ mod tests {
     }
 
     #[test]
-    fn the_fileless_requirement_rows_need_no_store_and_no_file() {
-        // The pair that answers "can this install draw that?" before a
-        // wrfout exists: what a slug needs, and what the import writes.
-        let planned = crate::wrf_process::WrfProcessOptions::default().planned_store_fields();
-        assert!(!planned.is_empty(), "the import plans no store field at all");
-        let mut described = 0usize;
-        for slug in rusty_weather::render_all::known_product_slugs() {
-            if let Ok(requirements) = rustwx_models::plot_recipe_store_requirements(&slug) {
-                if requirements.iter().any(|row| row.selector.is_some()) {
-                    described += 1;
-                }
-            }
-        }
-        assert!(
-            described > 0,
-            "no catalog slug resolves a store selector without a file"
-        );
-    }
-
-    #[test]
-    fn the_product_vocabulary_is_non_empty_and_deduplicated() {
-        let slugs = rusty_weather::render_all::known_product_slugs();
-        assert!(!slugs.is_empty(), "no product is selectable at all");
-        let mut unique = slugs.clone();
-        unique.dedup();
-        assert_eq!(unique.len(), slugs.len(), "the vocabulary repeats a slug");
-    }
-
-    #[test]
     fn resolution_tokens_are_trimmed_km_or_integer_metres() {
         assert_eq!(resolution_token(3_000.0).as_deref(), Some("3km"));
         assert_eq!(resolution_token(12_000.0).as_deref(), Some("12km"));
@@ -3159,6 +3347,7 @@ mod tests {
         let full = GridIdentity {
             domain: Some("d02".to_string()),
             spacing_m: Some(3_000.0),
+            label: None,
         };
         assert_eq!(native_domain_slug(&full).as_deref(), Some("d02-3km"));
 
@@ -3167,6 +3356,7 @@ mod tests {
         let no_spacing = GridIdentity {
             domain: Some("d02".to_string()),
             spacing_m: None,
+            label: None,
         };
         assert_eq!(native_domain_slug(&no_spacing).as_deref(), Some("d02"));
 
@@ -3175,8 +3365,38 @@ mod tests {
         let no_domain = GridIdentity {
             domain: None,
             spacing_m: Some(3_000.0),
+            label: None,
         };
         assert_eq!(native_domain_slug(&no_domain), None);
+    }
+
+    #[test]
+    fn a_producer_grid_label_names_the_headline_and_the_slug() {
+        // A resampled hex mesh frame: WRF's GRID_ID and the resample DX are
+        // present, and the producer's label outranks both.
+        let hex = GridIdentity {
+            domain: Some("d01".to_string()),
+            spacing_m: Some(14_900.0),
+            label: checked_grid_label("hex  15 km"),
+        };
+        assert_eq!(domain_title_label(&hex).as_deref(), Some("hex 15 km"));
+        assert_eq!(native_domain_slug(&hex).as_deref(), Some("hex15km"));
+        let graded = GridIdentity {
+            label: checked_grid_label("hex 60-3 km"),
+            ..GridIdentity::default()
+        };
+        assert_eq!(native_domain_slug(&graded).as_deref(), Some("hex60-3km"));
+        assert_eq!(checked_grid_label("a|b"), None);
+        assert_eq!(checked_grid_label("   "), None);
+        assert_eq!(checked_grid_label(&"x".repeat(33)), None);
+        // No label: the WRF identity, exactly as before.
+        let wrf = GridIdentity {
+            domain: Some("d02".to_string()),
+            spacing_m: Some(3_000.0),
+            label: None,
+        };
+        assert_eq!(domain_title_label(&wrf).as_deref(), Some("d02 3 km"));
+        assert_eq!(native_domain_slug(&wrf).as_deref(), Some("d02-3km"));
     }
 
     #[test]
@@ -3221,8 +3441,30 @@ fn dispatch() -> Result<(), CliError> {
     }
 }
 
-fn main() -> ExitCode {
+fn render_main() -> ExitCode {
+    if let Some(result) = rw_wrfbatch::hubwind_products::cli(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        return match result { Ok(()) => ExitCode::SUCCESS, Err(message) => { eprintln!("FAILED\t{message}"); ExitCode::FAILURE } };
+    }
+    if let Some(result) = rw_wrfbatch::solar_products::cli(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        return match result { Ok(()) => ExitCode::SUCCESS, Err(message) => { eprintln!("FAILED\t{message}"); ExitCode::FAILURE } };
+    }
+    if let Some(result) = rw_wrfbatch::nextgen_products::cli(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        return match result { Ok(()) => ExitCode::SUCCESS, Err(message) => { eprintln!("FAILED\t{message}"); ExitCode::FAILURE } };
+    }
+    if let Some(result) = rw_wrfbatch::ocean_products::cli(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        return match result { Ok(()) => ExitCode::SUCCESS, Err(message) => { eprintln!("FAILED\t{message}"); ExitCode::FAILURE } };
+    }
     let _ = std::hint::black_box(GPUWM_BRIDGE_SOURCE_REV_STAMP);
+    if std::env::args().nth(1).as_deref() == Some("--worker-abi") {
+        println!("{}", worker::ABI_MARKER);
+        return ExitCode::SUCCESS;
+    }
+    if std::env::args().nth(1).as_deref() == Some("--worker") {
+        return worker::main();
+    }
+    if let Some(result) = rw_wrfbatch::cyclone_products::try_cli(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        return match result { Ok(()) => ExitCode::SUCCESS, Err(message) => { eprintln!("FAILED\t{message}"); ExitCode::FAILURE } };
+    }
     if let Some(result) = rw_wrfbatch::ensemble_products::try_cli(&std::env::args().skip(1).collect::<Vec<_>>()) {
         return match result { Ok(()) => ExitCode::SUCCESS, Err(message) => { eprintln!("FAILED\t{message}"); ExitCode::FAILURE } };
     }
@@ -3264,3 +3506,34 @@ fn main() -> ExitCode {
         }
     }
 }
+
+mod cli_contracts;
+#[path = "bin/ensbatch.rs"] mod ensbatch;
+#[path = "bin/compare.rs"] mod compare_cli;
+#[path = "bin/verify.rs"] mod verify_cli;
+#[path = "bin/scorecard.rs"] mod scorecard_cli;
+#[path = "bin/nowcast_frames.rs"] mod nowcast_frames;
+
+fn main() -> ExitCode {
+    if std::env::args().any(|arg| arg == "--cf") {
+        return rw_wrfbatch::cf_render::main();
+    }
+    // Launchers preserve argv[0] and every following argument.
+    let invoked = std::env::args_os().next().unwrap_or_default();
+    let name = std::path::Path::new(&invoked).file_stem().and_then(|name| name.to_str());
+    // Windows resolves the old executable names without regard to case.
+    #[cfg(windows)]
+    let normalized = name.map(str::to_ascii_lowercase);
+    #[cfg(windows)]
+    let name = normalized.as_deref();
+    match name {
+        Some("rw_ensbatch") => ensbatch::main(),
+        Some("rw_compare") => compare_cli::main(),
+        Some("rw_verify") => verify_cli::main(),
+        Some("rw_scorecard") => scorecard_cli::main(),
+        Some("rw_nowcast_frames") => nowcast_frames::main(),
+        _ => render_main(),
+    }
+}
+
+mod fire_observations;

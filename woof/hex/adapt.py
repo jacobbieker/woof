@@ -1372,14 +1372,17 @@ def timestep_preflight(dt_seconds: float, min_spacing_km: float, *,
     policy = CourantPolicy()
     if not math.isfinite(dt_seconds) or dt_seconds <= 0.0:
         raise AdaptRefusal(f"--dt-seconds {dt_seconds} must be finite and positive")
-    maximum = (policy.safety_factor * min_spacing_km * 1000.0
-               / policy.max_characteristic_speed_m_s)
+    from .dt_admission import stability_limit_seconds
+
+    maximum = stability_limit_seconds(
+        min_spacing_km * 1000.0,
+        max_characteristic_speed_m_s=policy.max_characteristic_speed_m_s)
     if dt_seconds > maximum:
         raise AdaptRefusal(
             f"--dt-seconds {dt_seconds:g} exceeds the Courant limit "
             f"{maximum:.3f} s at the requested minimum spacing "
             f"{min_spacing_km:g} km ({policy.max_characteristic_speed_m_s:g} m/s, "
-            f"safety {policy.safety_factor:g}).  The delivered mesh's dcEdge is "
+            f"woof.hex.timestep_admission).  The delivered mesh's dcEdge is "
             f"shorter than the requested spacing, so a dt that fails here "
             f"fails at the forecast door too"
         )
@@ -1419,7 +1422,7 @@ def timestep_preflight(dt_seconds: float, min_spacing_km: float, *,
             raise AdaptRefusal(
                 f"--dt-seconds {dt_seconds:g} is refused by the experimental "
                 f"lane the forecast applies: {error}.  "
-                f"woof.hex.dt_admission.largest_admissible_dt names the "
+                f"woof.hex.dt_admission.largest_courant_divisor_dt names the "
                 f"timesteps it admits (0.5 s near 100 m, 0.25 s near "
                 f"50 m)"
             ) from None

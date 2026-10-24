@@ -1269,13 +1269,6 @@ class NestCoupler:
         # inclusive (j0, j1, i0, i1). These are mass-grid outputs.
         _sync_out(parent.state, _DIAGNOSTIC_OUTPUTS,
                   window=(cj_lo, cj_hi, ci_lo, ci_hi))
-        if getattr(parent.state, "smoke_col", None) is not None:
-            # Feedback just rewrote the parent's smoke over the nest's
-            # footprint, after the parent's own step refreshed its column
-            # load; refresh it so a history frame's SMOKE_COL is the column
-            # of its SMOKE.  One column-local launch on the device.
-            from woof.core.smoke_tracer import refresh_column_load
-            refresh_column_load(parent.state)
         self._prepared_feedback = None
 
 

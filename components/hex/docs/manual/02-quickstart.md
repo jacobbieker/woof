@@ -23,43 +23,52 @@ pip install recast-woof
 ```
 
 That installs the Python package, its dependencies (numpy, netCDF4, scipy)
-and the `woof` engine distribution (`woof>=2.8.0,<2.9`).
+and the `woof` engine distribution at a version this port has measured.
 
-**No engine constraint of your own is needed.** The port and the engine are
-one project and, in WOOF, one distribution, so the engine you install is the
-engine the port runs. Through 0.3.1 the port pinned sixteen engine files by
-SHA-256 and admitted one exact published engine; that pin retired when the
-two moved together. The forecast now records the digests of those sixteen
-files, the engine's version and, for a git clone, its commit in every
-receipt. `woof hex doctor` reports the installed engine and whether it
-carries every seam file; on a conforming install it reads `woof 2.8.0: all
-16 seam files are in this install; the forecast records their digests`.
+**No engine constraint of your own is needed, and that is new.** Until
+2026-08-27 this page told you to type an engine version beside the package,
+because the declared dependency was `woof>=2.5.5` with no ceiling: a bare
+install took the newest published engine, and the forecast lane pins sixteen
+individual woof source files by SHA-256. A bare install reached an engine the
+pin refused, and the forecast door refused at launch with a digest mismatch
+that named neither the version that works nor the fact that pip chose it.
+
+woof hex 0.4.2 declares `woof>=2.9.4,<2.10`, inside the 2.9 minor, so
+installing it never downgrades an engine you already have. An engine inside
+that range whose radiation helper set this release has not measured is refused
+at the forecast door by name, with the version to install. The range is
+derived from the measured table in `woof.hex.engine_pin`, not typed (README,
+*The engine pin*). The next minor is excluded until it is measured.
+`woof hex doctor` checks installed bytes and names a differing engine. The
+run transcripts below are dated evidence from earlier engines.
 
 Then add the CUDA lane:
 
 ```sh
-pip install "recast-woof[gpu-cu13]"
+pip install "recast-woof[gpu]"     # or, spelled out, "recast-woof[gpu-cu12]"
 ```
 
-**There is one right answer here and it is CUDA 13.** Every GPU door in this
-port goes through `require_cuda`, which refuses a CUDA runtime below `13000`
-by name, so `cupy-cuda13x` is the only wheel the port can execute on. The
-`[gpu-cu12]` extra still resolves (it is in 0.1.0's published metadata) and
-a CuPy installed through it imports, allocates, runs cuBLAS and compiles an
-NVRTC kernel, and is then refused at forecast launch with
-`CudaRefusal: cuda.runtime_version=12090 < required 13000`. Do not use it.
+**A CUDA 12 or a CUDA 13 driver runs this port.** `[gpu]` installs
+`cupy-cuda12x`, which runs on either, because a driver runs its own CUDA
+major and every older one. On a CUDA 13 driver you may instead install
+`"recast-woof[gpu-cu13]"` (`cupy-cuda13x`), the toolchain the byte-identity
+results in this release were measured with. Do not install `[gpu-cu13]` on a
+CUDA 12 driver: it imports, and then every device call stops with
+`cudaErrorInsufficientDriver`.
 
-Check the driver, because a CUDA-13 wheel needs a driver that serves CUDA 13:
+Check the driver:
 
 ```sh
 nvidia-smi        # the CUDA version in the header is your driver's major
 ```
 
 (On recent drivers that header field is spelled `CUDA UMD Version`, driver
-610.74 reads `CUDA UMD Version: 13.3`. A driver below 13 cannot open this
+610.74 reads `CUDA UMD Version: 13.3`. A driver below CUDA 12 cannot open this
 port's CUDA lane at all, and no pip command changes that; `woof hex doctor`
-reads the driver itself and says so rather than offering an install that
-cannot work.)
+reads the driver itself, names the extra for it, and says so rather than
+offering an install that cannot work. A compute capability 12.0 card, such as
+an RTX PRO 6000 or an RTX 50-series card, needs CUDA 12.8 or newer; both
+extras install that.)
 
 Confirm what landed:
 
@@ -134,8 +143,8 @@ woof you have: the transcript above was taken against the published woof
 2.5.2 wheel, whose bundle carries `rw_wrfbatch` and **not** `rw_mpas_init`
 or `rw_mpas_convert`, which is exactly the shortfall the doctor reports
 there. The four MPAS bridge binaries enter the bundle at woof 2.5.3, and
-this distribution's declared range is `woof>=2.8.0,<2.9` (far past
-2.5.3): a conforming install cannot
+this distribution's declared range is `woof>=2.9.4,<2.10` (the floor is
+far past 2.5.3, for the seam bytes the port pins): a conforming install cannot
 land on the engine that transcript was taken from. Doctor
 asks the woof you actually have what its bundle declares, so it never sends
 you to a staging command that cannot deliver the file.
@@ -345,9 +354,9 @@ verdict rather than hiding it. Chapter 6.2 explains the model it decides
 with.
 
 What the run checks before CUDA is touched, stated here rather than
-discovered mid-launch: the sixteen `woof` seam files are hashed and
-recorded, and a missing one is refused by name; the drivers verify their own
-executing modules by SHA-256 against their pins.
+discovered mid-launch: the sixteen pinned `woof` seam files are verified by
+SHA-256 against the pin and a mismatch is refused naming the file and both
+digests, and the drivers verify their own executing modules the same way.
 Both read the installed copies, which are the copies that execute.
 
 ## 2.7 First forecast

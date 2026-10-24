@@ -24,14 +24,13 @@ products).  The grammar is per-field source bindings in
 source's OWN sealed mapping document by SHA-256, and declares a
 grid-alignment and a cycle/time-alignment rule.  The primary mapping
 declares each borrowed field as ``provider: "composition_bound"`` so the
-gap is a declaration, never an absence.  Same-grid contributions (an exact
-coordinate subset) land; between two regular latitude/longitude grids that
-share no cells a binding may opt into ``nearest_coordinate_index``, which
-repeats the nearest donor cell and never interpolates; any other cross-grid
-contribution refuses by NAMING the horizontal regrid capability this
-composition does not have; a
-member-bearing donor refuses by naming member alignment; a vertical-bearing
-borrow on a different ladder refuses by naming vertical alignment.  The
+gap is a declaration, never an absence.  A binding declares either exact
+coordinate subsetting or native bilinear alignment with nearest categories
+and land/sea-aware surface state; between two regular latitude/longitude
+grids that share no cells a binding may instead opt into
+``nearest_coordinate_index``, which repeats the nearest donor cell and
+never interpolates.  Member alignment and vertical merging
+remain explicit contracts.  The
 contributing mapping document is deliberately NOT a row of the input
 manifest: the composition itself pins it by hash, and the manifest pins the
 composition, so the donor's table version is bound transitively while the
@@ -42,6 +41,8 @@ source with its hashes.
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
+from contextvars import ContextVar
 from collections.abc import Sequence as _ABCSequence
 from dataclasses import dataclass, field as dataclass_field, replace as _dataclass_replace
 from datetime import datetime
@@ -52,6 +53,120 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 
 import numpy as np
+
+
+_SHARED_COMPOSITION = ContextVar("shared_composition", default=None)
+
+
+@contextmanager
+def shared_composition_source(source_key, bank_root):
+    """Bind a roster-owned bank in this worker without changing process env.
+
+    The roster removes the bank after its last preparation. The context is
+    local to this thread/task; process workers must receive the same two
+    arguments. Native decoding remains entirely in the Rust engine.
+    """
+    token = _SHARED_COMPOSITION.set((str(source_key),
+        None if bank_root is None else Path(bank_root).resolve()))
+    try:
+        yield
+    finally:
+        _SHARED_COMPOSITION.reset(token)
+
+
+def _shared_composition_key(arguments, source_key):
+    """Bind exact decode operands as well as the planner's source partition."""
+    before = arguments["before"]
+    def bound(path):
+        # Source references carry these paths. Reusing a different spelling
+        # would change the frame/proof even when the source words matched.
+        return {"path": str(path), "sha256": before[str(path)]}
+
+    identity = {
+        "schema": "ensemble-composition-v1", "source_key": source_key,
+        "mapping": before[str(arguments["mapping_path"])],
+        "composition": before[str(arguments["composition_path"])],
+        # Both manifests were fully validated before this seam. Relative
+        # paths depend on their location, so bind their verified role values
+        # below instead of their serialized location-dependent digest.
+        "primary": [bound(path) for path in arguments["primary"]],
+        "supplements": {role: [bound(path) for path in paths]
+                        for role, paths in arguments["supplements"].items()},
+        "provenance": {role: bound(path) for role, path in arguments["provenance"].items()},
+        "contributing": {role: bound(path) for role, path in arguments["contributing"].items()},
+        "decoders": {role: bound(path) for role, path in arguments["decoders"].items()},
+        "engine": _snapshot_authority(arguments["engine"]).sha256,
+        "implementation": _snapshot_authority(Path(__file__)).sha256,
+        "member": arguments["member"], "member_identity": arguments["member_identity"],
+        "grids": [grid.definition() for grid in arguments["atmospheric_grids"]],
+        "lead_batch": arguments["lead_batch"],
+        "memory_budget_bytes": arguments["memory_budget_bytes"],
+        # A fallback the engine substitutes for an unpublished field changes
+        # the composed frames, so two members that differ only here must not
+        # share one bank entry.  Bound only when present, so a composition
+        # without fallbacks keeps its key.
+        **({"unpublished_fallbacks": dict(sorted(arguments["unpublished_fallbacks"].items()))}
+           if arguments.get("unpublished_fallbacks") else {}),
+    }
+    return _canonical_sha256(identity)
+
+
+def _shared_engine_composition(arguments, binding):
+    """One writer per source; later members open their own lazy frame reader."""
+    import shutil
+
+    from woof.remote_artifact_cache import Lease
+    from woof.timeline.ledger import emit
+
+    source_key, bank_root = binding
+    key = _shared_composition_key(arguments, source_key)
+    bank_root.mkdir(parents=True, exist_ok=True)
+    directory = bank_root / key
+    with Lease(bank_root / f"{key}.lock", timeout=3600) as lock:
+        if lock.file is None:
+            raise TimeoutError("shared source composition writer did not release its lease within 3600 s; refusing concurrent writes to the same frames")
+        marker = directory / "READY.json"
+        hit = marker.is_file()
+        if not hit:
+            # Only this bank entry, created by this roster, can be unfinished.
+            # No ready entry is silently repaired or demoted to a warning.
+            if directory.exists():
+                shutil.rmtree(directory)
+            directory.mkdir()
+        attrs = {"source_key": source_key, "composition_key": key, "cache_hit": hit}
+        if hit:
+            ready = json.loads(marker.read_text(encoding="utf-8"))
+            if ready.get("key") != key or ready.get("schema") != "ensemble-composition-v1":
+                raise ValueError("shared composition marker differs from its source binding; refusing wrong-source frames")
+            for name, digest in ready["documents"].items():
+                if name not in ("frames.json", "composition.json") or _snapshot_authority(
+                        directory / "composed" / name).sha256 != digest:
+                    raise ValueError("shared composition metadata changed after seal; refusing unbound frame values")
+            if set(ready["documents"]) != {"frames.json", "composition.json"}:
+                raise ValueError("shared composition seal lacks frame evidence; refusing unbound frame values")
+            emit("prep.compose", "mark", product="ensemble", attrs=attrs)
+        else:
+            # Rust compose performs both decode and composition. These spans
+            # overlap deliberately; timeline unions them rather than adding.
+            emit("prep.decode", "begin", product="ensemble", attrs=attrs)
+            emit("prep.compose", "begin", product="ensemble", attrs=attrs)
+        try:
+            bundle = _compose_through_engine(**{
+                **arguments, "_shared_directory": directory / "composed", "_shared_hit": hit})
+            if not hit:
+                pending = directory / "READY.pending"
+                pending.write_text(json.dumps({"schema": "ensemble-composition-v1", "key": key,
+                    "decode_memory": bundle.native_decode_memory,
+                    "documents": {name: _snapshot_authority(directory / "composed" / name).sha256
+                                  for name in ("frames.json", "composition.json")}},
+                    sort_keys=True) + "\n", encoding="utf-8")
+                pending.replace(marker)
+            return bundle
+        finally:
+            if not hit:
+                attrs["complete"] = marker.is_file()
+                emit("prep.compose", "end", product="ensemble", attrs=attrs)
+                emit("prep.decode", "end", product="ensemble", attrs=attrs)
 
 from woof.mapped_source import (
     GRID_FAMILY_REGULAR,
@@ -68,8 +183,10 @@ from woof.mapped_source import (
     _mapped_engine_choice,
     _mapping_grid_declaration,
     _materialize_frames,
+    _object,
     _require_authority_snapshot,
     _snapshot_authority,
+    _string,
     completed_field_summary,
     load_mapping,
     mapped_frames_to_regular_snapshots,
@@ -115,25 +232,30 @@ _SOIL_PAIR = ("soil_temperature", "volumetric_soil_moisture")
 #: receipt names every carried time so nothing is silently frozen.
 _BOUND_TIME_ALIGNMENTS = frozenset({
     "valid_time_exact", "cycle_invariant_broadcast",
-    "source_cycle_analysis_broadcast",
+    "source_cycle_analysis_broadcast", "source_cycle_analysis_select_broadcast",
 })
 
-#: The landed grid relationships for a borrowed field.
-#: ``exact_coordinate_subset``: the donor grid contains the primary grid as
-#: an exact coordinate subset (identical grids are the degenerate full
-#: subset).  ``nearest_coordinate_index``: an opt-in for two REGULAR
-#: latitude/longitude grids that share no cells, where each primary row and
-#: column takes the donor row and column nearest to it, axis by axis, ties
-#: to the lower index.  Nothing is interpolated: every borrowed value is a
-#: donor value, repeated where the primary grid is finer, so a borrowed
-#: land/sea boundary follows the DONOR grid.  The donor must cover the
-#: primary extent (every primary coordinate within half a donor spacing of
-#: a donor coordinate) and both grids must be regular, or the binding
-#: refuses by name.  Anything else is cross-grid and refuses by naming the
-#: regrid capability.
+#: The landed grid relationships for a borrowed field.  Exact
+#: contiguous/strided subsets and native horizontal regridding
+#: (``bilinear_mask_aware_nearest``: continuous fields use bilinear
+#: weights, masks use nearest; ``nearest_coordinate``: explicit nearest-cell
+#: sampling in the Rust engine).  ``exact_coordinate_subset``: the donor grid
+#: contains the primary grid as an exact coordinate subset (identical grids
+#: are the degenerate full subset).  ``nearest_coordinate_index``: an opt-in
+#: for two REGULAR latitude/longitude grids that share no cells, where each
+#: primary row and column takes the donor row and column nearest to it, axis
+#: by axis, ties to the lower index.  Nothing is interpolated: every borrowed
+#: value is a donor value, repeated where the primary grid is finer, so a
+#: borrowed land/sea boundary follows the DONOR grid.  The donor must cover
+#: the primary extent (every primary coordinate within half a donor spacing
+#: of a donor coordinate) and both grids must be regular, or the binding
+#: refuses by name.
 _GRID_EXACT_SUBSET = "exact_coordinate_subset"
 _GRID_NEAREST_INDEX = "nearest_coordinate_index"
-_BOUND_GRID_ALIGNMENTS = frozenset({_GRID_EXACT_SUBSET, _GRID_NEAREST_INDEX})
+_BOUND_GRID_ALIGNMENTS = frozenset({
+    _GRID_EXACT_SUBSET, "exact_coordinate_strided_subset", "nearest_coordinate",
+    "bilinear_mask_aware_nearest", _GRID_NEAREST_INDEX,
+})
 
 #: Relative tolerance on a regular axis's spacing and on the half-spacing
 #: coverage bound.  The axes compared are decoded coordinates: float32
@@ -146,32 +268,8 @@ _REGULAR_AXIS_REL_TOL = 1e-3
 
 _BINDING_KEYS = {
     "source_id", "mapping_role", "mapping_sha256", "data_role",
-    "provenance_role", "fields", "grid_alignment", "time_alignment",
+    "provenance_role", "fields", "grid_alignment", "time_alignment", "vertical_merge",
 }
-
-
-def _object(
-    value: object,
-    label: str,
-    *,
-    allowed: set[str],
-    required: set[str] = frozenset(),
-) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise TypeError(f"{label} must be an object")
-    unknown = sorted(set(value) - allowed)
-    if unknown:
-        raise ValueError(f"{label} has unknown key(s): {unknown}")
-    missing = sorted(required - set(value))
-    if missing:
-        raise ValueError(f"{label} is missing required key(s): {missing}")
-    return value
-
-
-def _string(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be a non-empty string")
-    return value
 
 
 def _digest(value: object, label: str) -> str:
@@ -303,8 +401,8 @@ def _validate_terrain_supplement(
         raise ValueError("terrain supplement format must equal the mapping format")
     if spec["selector_authority"] != "mapping_field_exact":
         raise ValueError("terrain selector authority must be mapping_field_exact")
-    if spec["grid_alignment"] != "exact_coordinate_subset":
-        raise ValueError("terrain grid alignment must be exact_coordinate_subset")
+    if spec["grid_alignment"] not in {"exact_coordinate_subset", "exact_coordinate_strided_subset"}:
+        raise ValueError("terrain grid alignment must be exact_coordinate_subset or exact_coordinate_strided_subset")
     if spec["time_alignment"] not in _TERRAIN_TIME_ALIGNMENTS:
         raise ValueError(
             "terrain time alignment must be one of "
@@ -330,6 +428,37 @@ def _validate_terrain_supplement(
         )
 
 
+def _validate_vertical_merge(value, label):
+    spec = _object(value, f"{label}.vertical_merge", allowed={
+        "method", "pressure_band_hpa", "primary_pressure_scale", "donor_pressure_scale",
+        "fields", "max_relative_humidity", "pressure_field"}, required={
+        "method", "pressure_band_hpa", "primary_pressure_scale", "donor_pressure_scale",
+        "fields", "max_relative_humidity"})
+    if spec.get("pressure_field") not in (None, "air_pressure"):
+        raise ValueError(f"{label}: pressure_field must name air_pressure")
+    if spec["method"] != "cosine_pressure_distance_log_anomaly":
+        raise ValueError(f"{label}: unsupported vertical transition method")
+    band = spec["pressure_band_hpa"]
+    if (not isinstance(band, list) or len(band) != 2 or
+            not all(isinstance(x, (int, float)) and np.isfinite(x) for x in band) or
+            not 0 <= band[0] < band[1]):
+        raise ValueError(f"{label}: pressure_band_hpa must be increasing nonnegative distances")
+    for key in ("primary_pressure_scale", "donor_pressure_scale"):
+        if spec[key] not in (1, 100):
+            raise ValueError(f"{label}: pressure scales must convert Pa or hPa to Pa")
+    if not 1 <= spec["max_relative_humidity"] <= 1.05:
+        raise ValueError(f"{label}: max_relative_humidity must be in [1, 1.05]")
+    if not isinstance(spec["fields"], dict) or not spec["fields"]:
+        raise ValueError(f"{label}: vertical merge needs field rules")
+    for name, rule in spec["fields"].items():
+        _object(rule, f"{label}.{name}", allowed={"primary_field", "representation"},
+                required={"primary_field", "representation"})
+        _string(rule["primary_field"], f"{label}.{name}.primary_field")
+        if (rule["representation"] not in ("canonical", "relative_humidity_percent") or
+                (rule["representation"] == "relative_humidity_percent" and name != "specific_humidity")):
+            raise ValueError(f"{label}.{name}: unsupported representation")
+
+
 def _validate_field_sources(
     value: object,
     mapping: Mapping[str, object],
@@ -346,7 +475,7 @@ def _validate_field_sources(
         _string(binding_name, "field_sources binding name")
         label = f"composition.field_sources.{binding_name}"
         binding = _object(
-            raw_binding, label, allowed=_BINDING_KEYS, required=_BINDING_KEYS,
+            raw_binding, label, allowed=_BINDING_KEYS, required=_BINDING_KEYS - {"vertical_merge"},
         )
         _string(binding["source_id"], f"{label}.source_id")
         _digest(binding["mapping_sha256"], f"{label}.mapping_sha256")
@@ -362,25 +491,48 @@ def _validate_field_sources(
         if binding["grid_alignment"] not in _BOUND_GRID_ALIGNMENTS:
             raise ValueError(
                 f"{label}.grid_alignment must be one of "
-                f"{sorted(_BOUND_GRID_ALIGNMENTS)}: a cross-grid "
-                "contribution has no landed regrid capability"
+                f"{sorted(_BOUND_GRID_ALIGNMENTS)}"
             )
         if binding["time_alignment"] not in _BOUND_TIME_ALIGNMENTS:
             raise ValueError(
                 f"{label}.time_alignment must be one of "
                 f"{sorted(_BOUND_TIME_ALIGNMENTS)}"
             )
+        merge = binding.get("vertical_merge")
+        if merge is not None:
+            _validate_vertical_merge(merge, label)
+            vertical = mapping["coordinates"]["vertical"]
+            column_pressure = merge.get("pressure_field") == "air_pressure"
+            if column_pressure:
+                if vertical["kind"] != "model_level" or vertical["units"] != "1":
+                    raise ValueError(f"{label}: column pressure merge requires model_level indices")
+                expected = 1
+                if merge["donor_pressure_scale"] != 1:
+                    raise ValueError(f"{label}: column pressure must be in Pa")
+            else:
+                if vertical["kind"] != "pressure":
+                    raise ValueError(f"{label}: vertical merge requires a pressure coordinate")
+                expected = {"Pa": 1, "hPa": 100}.get(vertical["units"])
+            if merge["primary_pressure_scale"] != expected:
+                raise ValueError(f"{label}: primary pressure scale disagrees with coordinate units")
         fields = binding["fields"]
         if not isinstance(fields, list) or not fields:
             raise ValueError(f"{label}.fields must be a non-empty list")
         names = [_string(name, f"{label}.fields[]") for name in fields]
+        if merge:
+            if not set(merge["fields"]).issubset(names):
+                raise ValueError(f"{label}: every vertical merge output must be a bound field")
+            for name, rule in merge["fields"].items():
+                declared = mapping["fields"].get(rule["primary_field"])
+                if declared is not None and declared["target_axes"] != ["vertical", "y", "x"]:
+                    raise ValueError(f"{label}.{name}: primary column must have vertical,y,x axes")
         if len(set(names)) != len(names):
             raise ValueError(f"{label}.fields repeats a field")
         for name in names:
             declared = mapping["fields"].get(name)
             if declared is None:
                 raise ValueError(f"{label} binds unknown field {name!r}")
-            if name not in declared_bound:
+            if name not in declared_bound and name not in (merge or {}).get("fields", {}):
                 raise ValueError(
                     f"field {name!r} has two providers: the primary mapping "
                     f"and contributing source binding {binding_name!r}"
@@ -623,6 +775,7 @@ def _exact_subset_indices(
     label: str,
     *,
     cyclic_degrees: bool = False,
+    allow_strided: bool = False,
 ) -> np.ndarray:
     larger = np.asarray(larger, dtype=np.float64)
     smaller = np.asarray(smaller, dtype=np.float64)
@@ -655,11 +808,36 @@ def _exact_subset_indices(
             wrapped = np.mod(differences, larger.size)
             contiguous = bool(np.all(wrapped == 1)
                               or np.all(wrapped == larger.size - 1))
+        if not contiguous and allow_strided:
+            contiguous = _regular_index_stride(
+                result, larger.size,
+                cyclic_degrees and _closed_longitude_circle(larger),
+            ) is not None
         if not contiguous:
+            kind = "regular strided" if allow_strided else "contiguous"
             raise ValueError(
-                f"primary {label} is not a contiguous terrain-grid subset"
+                f"primary {label} is not a {kind} terrain-grid subset"
             )
     return result
+
+
+def _regular_index_stride(indices: np.ndarray, size: int, cyclic: bool) -> int | None:
+    """Exact regular selection, with no repeated cells or second circle."""
+    if indices.size < 2:
+        return 0
+    differences = np.diff(indices)
+    step = int(differences[0])
+    if step != 0 and np.all(differences == step):
+        return step
+    if cyclic:
+        wrapped = np.mod(differences, size)
+        step = int(wrapped[0])
+        if step > size // 2:
+            step -= size
+        if (step != 0 and np.all(wrapped == step % size)
+                and abs(step) * (indices.size - 1) < size):
+            return step
+    return None
 
 
 def _closed_longitude_circle(longitude: np.ndarray) -> bool:
@@ -725,12 +903,15 @@ def _compose_terrain(
     terrain: _DecodedCollection,
     *,
     time_alignment: str = "valid_time_exact",
+    grid_alignment: str = "exact_coordinate_subset",
 ) -> tuple[_DecodedCollection, dict[str, object]]:
     if time_alignment not in _TERRAIN_TIME_ALIGNMENTS:
         raise ValueError(
             "terrain supplement time_alignment must be one of "
             f"{sorted(_TERRAIN_TIME_ALIGNMENTS)}, got {time_alignment!r}"
         )
+    if grid_alignment != "exact_coordinate_subset":
+        raise ValueError("declared strided terrain selection requires the native Rust engine")
     primary_terrain = [key for key in primary.direct if key[2] == _EXTERNAL_FIELD]
     if primary_terrain:
         raise ValueError(
@@ -1027,13 +1208,18 @@ def _binding_subset_indices(
                 f"nearest_coordinate_index and refuses ({error})"
             ) from error
         return latitude, longitude
+    if grid_alignment == "nearest_coordinate":
+        raise ValueError("nearest-coordinate data processing requires the Rust mapped engine")
+    allow_strided = grid_alignment == "exact_coordinate_strided_subset"
     try:
         latitude = _exact_subset_indices(
             donor.latitude, primary.latitude, "latitude",
+            allow_strided=allow_strided,
         )
         longitude = _exact_subset_indices(
             donor.longitude, primary.longitude, "longitude",
             cyclic_degrees=True,
+            allow_strided=allow_strided,
         )
     except ValueError as error:
         raise ValueError(
@@ -1162,6 +1348,8 @@ def _compose_bound_fields(
                     f"{name!r} at primary valid time(s) {missing}"
                 )
             carrier = None
+        elif alignment == "source_cycle_analysis_select_broadcast":
+            raise ValueError("cycle analysis selection requires the Rust mapped engine")
         elif alignment == "source_cycle_analysis_broadcast":
             if len(primary_cycles) != 1:
                 raise ValueError(
@@ -1237,7 +1425,11 @@ def _compose_bound_fields(
         "grid_alignment": grid_alignment,
         **(dict(_NEAREST_RECEIPT) if grid_alignment == _GRID_NEAREST_INDEX
            else {
-               "coordinate_match": "exact_equivalent_contiguous_subset",
+               "coordinate_match": (
+                   "exact_equivalent_regular_strided_subset"
+                   if grid_alignment == "exact_coordinate_strided_subset"
+                   else "exact_equivalent_contiguous_subset"
+               ),
                "longitude_equivalence": "modulo_360_exact",
            }),
         "primary_shape": [int(primary.latitude.size), int(primary.longitude.size)],
@@ -1260,6 +1452,16 @@ def _compose_bound_fields(
         ),
         "field_subset_sha256": subset_hashes,
     }
+    if binding["grid_alignment"] == "exact_coordinate_strided_subset":
+        receipt.update({
+            "latitude_indices": latitude_indices.tolist(),
+            "longitude_indices": longitude_indices.tolist(),
+            "latitude_index_stride": _regular_index_stride(
+                latitude_indices, donor.latitude.size, False),
+            "longitude_index_stride": _regular_index_stride(
+                longitude_indices, donor.longitude.size,
+                _closed_longitude_circle(donor.longitude)),
+        })
     return _DecodedCollection(
         latitude=primary.latitude,
         longitude=primary.longitude,
@@ -1462,24 +1664,29 @@ class _RegularSnapshots(_ABCSequence):
         self._cached_position: int | None = None
         self._cached_snapshot = None
         self._target_longitudes: tuple[np.ndarray, ...] | None = None
-        self._ring_cuts: dict[bytes, object] = {}
+        self._ring_cuts: dict[tuple[bytes, bytes], object] = {}
 
-    def _ring_cut(self, longitude, projection):
+    def _ring_cut(self, latitude, longitude, projection):
         """The re-cut this sequence's targets need on ``longitude``, or ``None``."""
 
         if not self._target_grids or projection is not None:
             return None
-        from woof.ingest.horiz import global_ring_cut
+        from woof.ingest.horiz import global_source_cut
 
-        key = np.ascontiguousarray(longitude, dtype=np.float64).tobytes()
+        key = (np.ascontiguousarray(latitude, dtype=np.float64).tobytes(),
+               np.ascontiguousarray(longitude, dtype=np.float64).tobytes())
         if key not in self._ring_cuts:
             if self._target_longitudes is None:
                 self._target_longitudes = tuple(
                     pair[1] for grid in self._target_grids
                     for pair in (grid.latlon_mass(), grid.latlon_u(),
                                  grid.latlon_v()))
-            self._ring_cuts[key] = global_ring_cut(
-                longitude, *self._target_longitudes)
+            self._ring_cuts[key] = global_source_cut(
+                latitude, longitude, *self._target_longitudes,
+                target_latitudes=tuple(
+                    pair[0] for grid in self._target_grids
+                    for pair in (grid.latlon_mass(), grid.latlon_u(),
+                                 grid.latlon_v())))
         return self._ring_cuts[key]
 
     def __len__(self) -> int:
@@ -1508,6 +1715,12 @@ class _RegularSnapshots(_ABCSequence):
         """Keep full donor fields and pack only exact atmospheric support."""
         return _RegularSnapshots(self._bundle, self._order, target_grids=grids)
 
+    def select(self, positions):
+        """The snapshots at ``positions`` of this sequence, in that order."""
+        return _RegularSnapshots(
+            self._bundle, tuple(self._order[int(position)] for position in positions),
+            target_grids=self._target_grids)
+
     def snapshot_metadata(self, position: int):
         """Describe the fixed snapshot ABI without copying its field arrays."""
         from woof.ingest.source_metadata import SourceSnapshotMetadata
@@ -1528,8 +1741,10 @@ class _RegularSnapshots(_ABCSequence):
         projection = (None if grid.projection == "regular_latitude_longitude"
                       else {"family": grid.projection,
                             "parameters": dict(grid.parameters)})
-        cut = self._ring_cut(longitude, projection)
+        cut = self._ring_cut(latitude, longitude, projection)
         if cut is not None:
+            from woof.ingest.horiz import polar_donor_latitude
+            latitude, _, _ = polar_donor_latitude(latitude, cut)
             longitude = cut.longitude
         # _pack always constructs Era5Snapshot, for every mapped input format.
         # Full field validation still happens in that constructor and frameset.
@@ -1556,6 +1771,47 @@ class _RegularSnapshots(_ABCSequence):
         else:
             pressure = field(index, "air_pressure").values
         return np.median(np.asarray(pressure), axis=(1, 2)) / 100.0
+
+    def prefetch_through(self, positions) -> None:
+        """Ask a batching frameset to decode every time ``positions`` name at once."""
+
+        hook = getattr(self._bundle.frames, "prefetch_through", None)
+        indices = [self._order[int(position)] for position in positions]
+        if hook is not None and indices:
+            hook(max(indices))
+
+    def surface_field_values(self, position: int, legacy: str):
+        """One surface field of one snapshot, as :meth:`_pack` packs it, or ``None``.
+
+        ``_pack`` builds a whole valid time -- every field read, verified and
+        joined -- and the daily-mean inland air temperature needs one 2 m
+        field from each.  On the 18 h HRRR CONUS start that was 19 whole
+        packs, 30 s on one core in front of the start time's build.  A field
+        the frameset stores under its canonical name is read and verified
+        alone here and converted exactly as the pack converts it
+        (``np.asarray(values, dtype=np.float64)``).  A latitude-longitude
+        source may be re-cut around the globe by the pack, so it, and any
+        frameset without single-field reads, answers ``None`` and the
+        caller packs the snapshot as before.
+        """
+
+        from woof.mapped_source import REGULAR_SNAPSHOT_LEGACY_NAMES
+
+        canonical = next((name for name, value in REGULAR_SNAPSHOT_LEGACY_NAMES.items()
+                          if value == legacy), None)
+        frames = self._bundle.frames
+        field = getattr(frames, "field", None)
+        header = getattr(frames, "header", None)
+        if canonical is None or field is None or header is None:
+            return None
+        index = self._order[int(position)]
+        if header(index).grid.projection == "regular_latitude_longitude":
+            return None
+        try:
+            values = field(index, canonical).values
+        except KeyError:
+            return None
+        return np.asarray(values, dtype=np.float64)
 
     def _pack(self, index: int, *, full=False):
         fieldwise = getattr(self._bundle.frames, "fieldwise_frame", None)
@@ -1590,7 +1846,7 @@ class _RegularSnapshots(_ABCSequence):
         if MAPPED_SOIL_TEMPERATURE not in snapshot.fields \
                 or MAPPED_SOIL_MOISTURE not in snapshot.fields:
             raise ValueError("canonical mapped soil arrays are absent")
-        cut = self._ring_cut(snapshot.longitude, snapshot.projection)
+        cut = self._ring_cut(snapshot.latitude, snapshot.longitude, snapshot.projection)
         if cut is not None:
             from woof.ingest.horiz import recut_global_ring
 
@@ -1856,6 +2112,39 @@ def _compose_scratch_base(destination: Path | None) -> Path | None:
     return base
 
 
+def _unpublished_binding_record(binding_name, binding, fallbacks, *,
+                                mapping_path, donor_files, provenance_path,
+                                before):
+    """The receipt of a binding whose files publish none of its fields.
+
+    Twin of the engine's ``compose.rs unpublished_record``: ``None`` when
+    any bound field has no fallback in ``fallbacks`` (or the binding
+    supplies terrain, which has its own ``when_absent``), so the caller
+    refuses as it always did.
+    """
+
+    names = [str(name) for name in binding["fields"]]
+    if (not fallbacks or _EXTERNAL_FIELD in names
+            or any(name not in fallbacks for name in names)):
+        return None
+    return {
+        "binding": binding_name,
+        "source_id": str(binding["source_id"]),
+        "mapping": {"path": str(mapping_path),
+                    "sha256": before[str(mapping_path)]},
+        "data": [{"path": str(path), "sha256": before[str(path)]}
+                 for path in donor_files],
+        "provenance": {"path": str(provenance_path),
+                       "sha256": before[str(provenance_path)]},
+        "fields": sorted(names),
+        "alignment": {
+            "status": "UNPUBLISHED",
+            "reason": "the supplied files publish no record for these fields",
+            "fallback": {name: fallbacks[name] for name in names},
+        },
+    }
+
+
 def _compose_through_engine(
     *,
     engine: Path,
@@ -1880,6 +2169,9 @@ def _compose_through_engine(
     workers: int | None = None,
     lead_batch: bool = False,
     memory_budget_bytes: int | None = None,
+    unpublished_fallbacks: Mapping[str, str] | None = None,
+    _shared_directory: Path | None = None,
+    _shared_hit: bool = False,
 ) -> MappedSourceBundle:
     """Compose on the Rust engine, keeping every policy check on this side.
 
@@ -1908,40 +2200,60 @@ def _compose_through_engine(
     A failure before the bundle exists deletes it here.
     """
 
+    if _shared_directory is None and (binding := _SHARED_COMPOSITION.get()) is not None and binding[1] is not None:
+        arguments = dict(locals())
+        arguments.pop("binding")
+        return _shared_engine_composition(arguments, binding)
+
     import os
     import tempfile
 
     from woof import mapped_engine_bridge
 
     scratch_base = _compose_scratch_base(scratch_destination)
-    work = tempfile.TemporaryDirectory(
+    work = None if _shared_directory is not None else tempfile.TemporaryDirectory(
         prefix="gpuwm-mapped-compose-",
         dir=None if scratch_base is None else os.fspath(scratch_base),
     )
     try:
-        directory = Path(work.name) / "composed"
+        directory = _shared_directory if work is None else Path(work.name) / "composed"
         try:
-            execution = mapped_engine_bridge.run_engine(
-                "compose",
-                mapping=mapping_path,
-                files=primary,
-                output=directory,
-                composition=composition_path,
-                supplements=supplements,
-                provenance=provenance,
-                contributing_mappings=contributing,
-                input_manifest=manifest_path,
-                input_manifest_sha256=manifest_sha256,
-                engine=engine,
-                atmospheric_grids=atmospheric_grids,
-                threads=workers,
-                lead_batch=lead_batch,
-                **({} if memory_budget_bytes is None else {
-                    "memory_budget_bytes": memory_budget_bytes}),
-            )
+            if _shared_hit:
+                ready = json.loads((directory.parent / "READY.json").read_text(encoding="utf-8"))
+                execution = {"decode_memory": ready["decode_memory"]}
+            else:
+                from woof.timeline.ledger import emit
+                measured = _SHARED_COMPOSITION.get()
+                measured = measured if measured is not None and measured[1] is None else None
+                attrs = {"source_key": measured[0], "cache_hit": False} if measured else None
+                if measured:
+                    emit("prep.decode", "begin", product="ensemble", attrs=attrs)
+                    emit("prep.compose", "begin", product="ensemble", attrs=attrs)
+                try:
+                    execution = mapped_engine_bridge.run_engine(
+                        "compose", mapping=mapping_path, files=primary, output=directory,
+                        composition=composition_path, supplements=supplements, provenance=provenance,
+                        contributing_mappings=contributing, input_manifest=manifest_path,
+                        input_manifest_sha256=manifest_sha256, engine=engine,
+                        atmospheric_grids=atmospheric_grids, threads=workers, lead_batch=lead_batch,
+                        **({} if memory_budget_bytes is None else {"memory_budget_bytes": memory_budget_bytes}),
+                        **({"unpublished_fallbacks": unpublished_fallbacks}
+                           if unpublished_fallbacks else {}),
+                    )
+                finally:
+                    if measured:
+                        emit("prep.compose", "end", product="ensemble", attrs=attrs)
+                        emit("prep.decode", "end", product="ensemble", attrs=attrs)
         except ScratchDiskRefusal as refusal:
             raise scratch_disk_refusal(refusal, scratch_base) from refusal
         evidence = mapped_engine_bridge.read_composition_evidence(directory)
+        for record in evidence["contributing_sources"]:
+            regrid = record.get("alignment", {}).get("horizontal_regrid")
+            if regrid:
+                print(f"prep donor regrid: {record['binding']} {regrid['method']} "
+                      f"{regrid['source_shape']} -> {regrid['target_shape']}, "
+                      f"{regrid['seconds']:.3f} s, {regrid['threads']} threads",
+                      flush=True)
         decode_control = {"budget_bytes": memory_budget_bytes,
                           "pending": bool(atmospheric_grids)}
         def full_fallback():
@@ -1957,7 +2269,8 @@ def _compose_through_engine(
                 before=before, member=member, member_identity=member_identity,
                 scratch_destination=scratch_destination, workers=workers,
                 lead_batch=lead_batch,
-                memory_budget_bytes=decode_control["budget_bytes"]).frames
+                memory_budget_bytes=decode_control["budget_bytes"],
+                unpublished_fallbacks=unpublished_fallbacks).frames
             decode_control["pending"] = False
             return full
         frames = mapped_engine_bridge.open_frameset(
@@ -1986,7 +2299,8 @@ def _compose_through_engine(
             execution.get("decode_memory") if isinstance(execution, Mapping) else None),
             _native_decode_control=decode_control)
     except BaseException:
-        work.cleanup()
+        if work is not None:
+            work.cleanup()
         raise
 
 
@@ -2091,6 +2405,8 @@ def _composed_bundle_from_frames(
         terrain_provenance_path = provenance[
             str(terrain_binding["provenance_role"])]
     warn_completed_fields(completed_field_summary(frames), subject="the source")
+    from woof.mapped_source import warn_unpublished_bindings
+    warn_unpublished_bindings(contributing_records, subject="the source")
     return MappedSourceBundle(
         frames=frames,
         mapping_path=mapping_path,
@@ -2281,6 +2597,8 @@ def decode_composed_source(
                 ("missing.kind", declared["missing"]["kind"],
                  donor_field["missing"]["kind"]),
             ):
+                if aspect == "missing.kind" and name in binding.get("vertical_merge", {}).get("fields", {}):
+                    continue
                 if ours != theirs:
                     raise ValueError(
                         f"field {name!r} {aspect} disagrees between the "
@@ -2368,14 +2686,22 @@ def decode_composed_source(
     ):
         _require_authority_snapshot(snapshot)
     before = {str(path): snapshots[path].sha256 for path in authorities}
+    if any(binding.get("vertical_merge") for binding in bindings.values()) and engine_binary is None:
+        raise ValueError("vertical_merge requires the native mapped engine for column splicing")
+    if any(binding.get("grid_alignment") == "bilinear_mask_aware_nearest"
+           for binding in bindings.values()) and engine_binary is None:
+        raise ValueError("horizontal donor regrid requires the native mapped engine")
     if memory_budget_bytes is not None and engine_binary is None:
         from woof.ingest.memory_refusal import InitializationMemoryRefused
 
         raise InitializationMemoryRefused(
             "the live preparation's future decode requires the native host-memory budget; "
             "the Python decoder cannot enforce that reservation")
+    from woof.runtime_surface_fetch import composition_unpublished_fallbacks
+    unpublished_fallbacks = composition_unpublished_fallbacks(bindings)
     if engine_binary is not None:
         return _compose_through_engine(
+            unpublished_fallbacks=unpublished_fallbacks,
             engine=engine_binary,
             mapping_path=mapping_path,
             composition_path=composition_path,
@@ -2426,6 +2752,7 @@ def decode_composed_source(
         combined, terrain_supplement_receipt = _compose_terrain(
             combined, terrain_collection,
             time_alignment=str(terrain_spec["time_alignment"]),
+            grid_alignment=str(terrain_spec["grid_alignment"]),
         )
         if derived_terrain is not None:
             # Recorded only when terrain was derived, so every receipt of
@@ -2438,17 +2765,34 @@ def decode_composed_source(
     terrain_binding: Mapping[str, object] | None = None
     terrain_binding_receipt: dict[str, object] | None = None
     soil_donor_mapping: Mapping[str, object] | None = None
+    unpublished: set[str] = set()
     for binding_name in sorted(bindings):
         binding = bindings[binding_name]
         bound_names = [str(name) for name in binding["fields"]]
         donor_files = supplements[str(binding["data_role"])]
-        donor_collection = _decode_partition(
-            _partition_contributing(
-                donor_mappings[binding_name], bound_names,
-                binding_name=binding_name,
-            ),
-            donor_files, decoders,
-        )
+        try:
+            donor_collection = _decode_partition(
+                _partition_contributing(
+                    donor_mappings[binding_name], bound_names,
+                    binding_name=binding_name,
+                ),
+                donor_files, decoders,
+            )
+        except NothingMatched:
+            # Twin of the engine's unpublished binding (compose.rs
+            # unpublished_record): files that publish no record for any
+            # bound field, every one of which has a field-keyed fallback.
+            record = _unpublished_binding_record(
+                binding_name, binding, unpublished_fallbacks,
+                mapping_path=donor_paths[binding_name],
+                donor_files=donor_files,
+                provenance_path=provenance[str(binding["provenance_role"])],
+                before=before)
+            if record is None:
+                raise
+            contributing_records.append(record)
+            unpublished.update(bound_names)
+            continue
         combined, receipt = _compose_bound_fields(
             combined, donor_collection,
             binding_name=binding_name, binding=binding,
@@ -2499,6 +2843,8 @@ def decode_composed_source(
     for binding_name in sorted(bindings):
         donor_mapping = donor_mappings[binding_name]
         for name in bindings[binding_name]["fields"]:
+            if str(name) in unpublished:
+                continue
             spec = copy.deepcopy(dict(donor_mapping["fields"][str(name)]))
             # The primary binds a borrowed field in order to publish it,
             # so the donor's own ``dependency_only`` does not ride along:
@@ -2506,7 +2852,16 @@ def decode_composed_source(
             # off the composed frame.
             spec.pop("dependency_only", None)
             union_fields[str(name)] = spec
+    for name in unpublished:
+        # Off the composed frame: the start reads the recorded fallback.
+        union_fields.pop(name, None)
     union["fields"] = union_fields
+    if unpublished:
+        target = dict(union["target"])
+        target["required_fields"] = [
+            item for item in target["required_fields"]
+            if str(item["name"]) not in unpublished]
+        union["target"] = target
 
     input_hashes = {
         str(path): before[str(path)]
@@ -2542,6 +2897,8 @@ def decode_composed_source(
             "member_identity": declared_member_identity,
         }
     warn_completed_fields(completed_field_summary(frames), subject="the source")
+    from woof.mapped_source import warn_unpublished_bindings
+    warn_unpublished_bindings(contributing_records, subject="the source")
     return MappedSourceBundle(
         frames=frames,
         mapping_path=mapping_path,
@@ -2866,10 +3223,17 @@ class PostedFrames(_ABCSequence):
     is answered from the batch's own frameset, one valid time at a time.
     """
 
-    def __init__(self, valid_times, locate):
+    def __init__(self, valid_times, locate, *, prefetch=None):
         self._valid_times = tuple(valid_times)
         self._locate = locate
+        self._prefetch = prefetch
         self._parts: list = []
+
+    def prefetch_through(self, index) -> None:
+        """Have every time through ``index`` decoded in one batch, if the source batches."""
+
+        if self._prefetch is not None:
+            self._prefetch(int(index))
 
     def __len__(self) -> int:
         return len(self._valid_times)

@@ -514,6 +514,39 @@ def test_preparer_moves_physics_continuation_and_reports_it(monkeypatch):
     assert preparer.last_receipt["accumulators_reinitialized"] is False
 
 
+def test_preparer_copies_trigger_and_shared_pbl_forcing_once(monkeypatch):
+    from woof.core import physics_continuation
+
+    preparer, node, new_dc, initialized, outgoing, incoming = _preparer_fixture(monkeypatch)
+    driver = outgoing.physics
+    trigger = driver.cumulus_callable.w0avg
+    forcing = _distinct(trigger.shape, 19)
+    driver.gf_rthblten = forcing
+    driver.pbl_raw_rates = {"dtheta": forcing}
+    incoming.physics.gf_rthblten = np.zeros_like(forcing)
+    incoming.physics.pbl_raw_rates = {"dtheta": incoming.physics.gf_rthblten}
+    copies = []
+    capture = physics_continuation._capture
+
+    def counted(value):
+        copies.append(id(value))
+        return capture(value)
+
+    monkeypatch.setattr(physics_continuation, "_capture", counted)
+    preparer.capture_outgoing(node)
+    assert copies.count(id(trigger)) == 1
+    assert copies.count(id(forcing)) == 1
+    captured = preparer._captured["continuation"]
+    np.testing.assert_array_equal(captured["cumulus/w0avg"].view(np.uint32),
+                                  trigger.view(np.uint32))
+    np.testing.assert_array_equal(captured["held/gf_rthblten"].view(np.uint32),
+                                  forcing.view(np.uint32))
+    assert not np.shares_memory(captured["cumulus/w0avg"], trigger)
+    assert not np.shares_memory(captured["held/gf_rthblten"], forcing)
+    preparer(initialized, new_dc, SimpleNamespace())
+    assert preparer.last_receipt["physics_continuation"]["w0avg_moved"] is True
+
+
 def test_preparer_still_accurate_when_the_rebuilt_child_has_no_driver(
         monkeypatch):
     preparer, node, new_dc, initialized, _out, new_state = (
@@ -557,3 +590,53 @@ def test_raw_pbl_forcing_moves_from_the_restart_registry_in_place(di, dj):
             assert not np.array_equal(target, old), "unshifted control is vacuous"
         else:
             np.testing.assert_array_equal(target, old)
+
+
+def test_strip_settled_cloud_starts_from_the_parent_not_zero():
+    """Correct mode's settled-cloud total (CLOUDNC, finding WB1) is a
+    run-long accumulator like RAINNC, so a moved nest's fresh ground takes
+    the parent's total by the same SINT rule, the overlap keeps the nest's
+    own, and a parent that does not book it leaves the strip cold.
+    Breakage prevented: every move left a zero CLOUDNC band along the
+    nest's leading edge."""
+    from woof.core.nest_interp import sint
+    from woof.core.physics_continuation import (
+        capture_continuation, parent_strip_accumulations,
+        restore_continuation, shift_continuation)
+
+    state = _ScratchState({"mp_cloudnc": np.abs(_distinct((NY, NX), 21))})
+    driver = SimpleNamespace(cumulus_callable=None)
+    captured = capture_continuation(state, driver)
+    plan = _plan(di=2, dj=1)
+    pny, pnx = 16, 16
+    parent = SimpleNamespace(
+        cfg=SimpleNamespace(run=SimpleNamespace(nx=pnx, ny=pny)),
+        state=_ScratchState({
+            "mp_cloudnc": np.abs(_distinct((pny, pnx), 22)) + F32(0.5)}))
+    child_dc = SimpleNamespace(
+        grid_id=2, i_parent_start=plan.placement_to.i_parent_start - 5,
+        j_parent_start=plan.placement_to.j_parent_start - 5,
+        parent_grid_ratio=RATIO, run=SimpleNamespace(nx=NX, ny=NY))
+    strip, receipt = parent_strip_accumulations(parent, child_dc, captured)
+    assert receipt["seeded"] == ["mp_cloudnc"]
+    reg = _mass_registration(child_dc, parent)
+    expected = sint(parent.state.existing_scratch("mp_cloudnc"), reg)
+    np.testing.assert_array_equal(strip["mp_cloudnc"], expected)
+
+    shifted = shift_continuation(captured, plan, strip=strip)
+    new_state = _ScratchState()
+    restore_continuation(new_state, driver, shifted)
+    cloudnc = new_state.existing_scratch("mp_cloudnc")
+    (dst_j, src_j), (dst_i, src_i) = plan.window(cloudnc.shape)
+    fresh = np.ones(cloudnc.shape, dtype=bool)
+    fresh[dst_j, dst_i] = False
+    assert np.array_equal(cloudnc[dst_j, dst_i],
+                          state.existing_scratch("mp_cloudnc")[src_j, src_i])
+    assert np.array_equal(cloudnc[fresh], expected[fresh])
+    assert np.all(expected[fresh] > 0.0)
+    # A parent that books no settled cloud seeds nothing: the strip is cold.
+    plain = SimpleNamespace(cfg=parent.cfg, state=_ScratchState({}))
+    none, receipt = parent_strip_accumulations(plain, child_dc, captured)
+    assert none == {} and receipt["seeded"] == []
+    cold = shift_continuation(captured, plan, strip=none)["mp_cloudnc"]
+    assert np.all(cold[fresh] == 0.0)

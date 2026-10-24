@@ -144,20 +144,39 @@ INIT_ABI_MARKER = (
     "rw_mpas_init --met MET --static STATIC.nc --capsule CAPSULE.nc")
 
 #: ``rw_mpas_convert``'s contract: the output schema and the progress
-#: tokens, which is the literal that changes when the tape contract does.
+#: tokens, which is the literal that changes when the tape contract does,
+#: plus the flags callers pass that an older build refuses (``--remap`` and
+#: its REMAP/BUDGET lines, ``--jobs``).  Without them a pre-2.9.0 converter
+#: matched, passed ``woof doctor``, and the woof hex product stage died
+#: on ``unknown flag --remap``.
 CONVERT_ABI_MARKER = (
-    "gpuwm-rw-mpas-convert-v1\tCONVERTED\tWINDOW\tWEIGHTS\tFINISHED")
+    "gpuwm-rw-mpas-convert-v1\tCONVERTED\tWINDOW\tWEIGHTS\tFINISHED"
+    "\tREMAP\tBUDGET\t--remap nearest|product\t--jobs N")
 
-#: ``rw_mpas_lbc``'s contract, at the head of its argument vector.  The
-#: crate's literal is four usage lines with newlines between them, so
-#: this is a prefix rather than the whole thing, for the reason
-#: :data:`INIT_ABI_MARKER` states: a marker that has to reproduce an
-#: embedded newline exactly breaks on a reflow that changed nothing.
+#: ``rw_mpas_lbc``'s contract, its first usage line through the
+#: physics-mode switch.  The crate's literal is four usage lines with
+#: newlines between them, so this is a prefix rather than the whole thing,
+#: for the reason :data:`INIT_ABI_MARKER` states: a marker that has to
+#: reproduce an embedded newline exactly breaks on a reflow that changed
+#: nothing.  It reaches ``[--physics-mode correct|exact]`` (2.9.0: correct
+#: by default, spelled default first) because the producer reads unknown
+#: flags without complaint: a build from before the switch would take
+#: ``--physics-mode correct`` and write native case-9 boundary winds.
 #: Spelled to match :data:`woof.bridges.BRIDGE_ABI_MARKERS`; a test
-#: binds the two.
+#: binds the two, and both to the crate's literal.
 LBC_ABI_MARKER = (
     "rw_mpas_lbc --grid INIT.nc --out-dir DIR "
-    "--start-time YYYY-MM-DD_HH:MM:SS --stop-time YYYY-MM-DD_HH:MM:SS")
+    "--start-time YYYY-MM-DD_HH:MM:SS --stop-time YYYY-MM-DD_HH:MM:SS "
+    "--interval YYYY-MM-DD_HH:MM:SS=MET_PATH [--interval ...] "
+    "--nfglevels N --fg-interval-seconds N --extrap-airtemp MODE "
+    "--use-spechumd yes|no --theta-adv-order N --coef-3rd-order X "
+    "--oned-underflow preserve|reproduce-ifx-ftz "
+    "[--physics-mode correct|exact]")
+
+#: ``rw_hex_points``'s contract: its ``--abi`` line (schema name and the
+#: stdout progress tokens).  Spelled to match
+#: :data:`woof.bridges.BRIDGE_ABI_MARKERS`.
+POINTS_ABI_MARKER = "gpuwm-rw-hex-points-v1\tPOINT\tSOUNDING\tMETEOGRAM\tFINISHED"
 
 #: ``rw_mpas_remap``'s contract, at the head of its argument vector, for
 #: the reason :data:`LBC_ABI_MARKER` is a prefix.  Spelled to match
@@ -257,6 +276,12 @@ class MpasBridge:
         """The binary, or a refusal carrying this install's remedy."""
 
         found = self.find()
+        if found is None and not os.environ.get(self.env_var):
+            # An artifact the platform wheel leaves to the bridge bundle
+            # (woof.bridge_assets.on_demand_artifacts) is staged on first use.
+            from woof.bridges import fetch_on_demand
+            if fetch_on_demand(self.name):
+                found = self.find()
         if found is None:
             raise MeshRequestError(
                 f"{self.subject} ({self.name}) is not built or not found.\n"
@@ -374,12 +399,25 @@ REMAP = MpasBridge(
     abi_marker=REMAP_ABI_MARKER,
 )
 
-#: Every MPAS binary the crate builds, by artifact name.  Read by
+#: Soundings and meteograms at named points straight off MPAS native
+#: history: the woof hex product door's third binary (2.9.0).  It is a bin
+#: of rw-wrfbatch, not rw-mpas, but it sits on this ladder because this is
+#: the table woof hex resolves its engines through and ``woof doctor``
+#: reports from; left off it, a pip install of both packages had no point
+#: pictures and ``woof hex doctor`` exited 1 naming it.
+POINTS = MpasBridge(
+    name="rw_hex_points",
+    env_var="WOOF_RW_HEX_POINTS",
+    subject="the MPAS sounding and meteogram renderer",
+    abi_marker=POINTS_ABI_MARKER,
+)
+
+#: Every MPAS binary the bundle carries, by artifact name.  Read by
 #: ``woof doctor`` and by the bundle-coverage test, so a sixth binary
 #: is a row here and is reported without a second edit.
 BRIDGES: dict[str, MpasBridge] = {
     bridge.name: bridge for bridge in (MESH, STATIC, INIT, GEOMETRY, HOSTPREP, CONVERT, LBC,
-                                    REMAP)}
+                                    REMAP, POINTS)}
 
 
 # ---------------------------------------------------------------------------
@@ -1138,17 +1176,16 @@ def plan(*, spec: dict, cells: int, workdir: Path,
                                            regional_halo_rings)])
 
 
-#: The two arms of the generator, and what choosing one costs.
+#: The two arms of the generator.
 #:
-#: ``rebuild`` is the DEFAULT and the arm every registered mesh digest was
-#: minted on: the spherical Delaunay is rebuilt from scratch after every
-#: relaxation sweep.  ``incremental`` keeps the facet list and repairs it by
-#: Lawson flips -- the same triangulation, but each cell keeps the neighbour
-#: ring ROTATION it had where a rebuild re-rolls it for about 27 % of cells,
-#: and the grid file records the rotation.  So the fast arm produces a
-#: DIFFERENT FILE from the same request and cannot reproduce a pinned
-#: SHA-256.  It is asked for by name for exactly that reason, and the arm
-#: that ran is stamped into the receipt whenever it is not the default.
+#: ``incremental`` is the binary's DEFAULT (2026-10-16: no
+#: single-threaded stages): the facet list is kept and repaired by Lawson
+#: flips.  ``rebuild`` rebuilds the spherical Delaunay from scratch after
+#: every relaxation sweep, which is slower.  Neighbour rings start at their
+#: smallest neighbour index, so both arms write the same bytes; meshes
+#: registered before 2026-10-16 used the old ring rotation and are not
+#: reproduced byte for byte by either.  The door passes an arm only when one
+#: is asked for.
 TRIANGULATION_ARMS = ("rebuild", "incremental")
 
 #: What ``woof mesh --triangulation`` accepts: an arm, or ``auto`` for the
@@ -1169,22 +1206,12 @@ def resolve_triangulation(spec: dict, *, regional_window: Path | None,
                           requested: str | None) -> tuple[str, str]:
     """The arm ``woof mesh`` runs, and the sentence that says why.
 
-    THE RULE.  A named arm always wins.  Otherwise (``auto``):
-
-    * a UNIFORM request (no regions) builds ``rebuild``: it is the
-      published icosahedral family, and the x1 goldens and every
-      registered uniform mesh reproduce only on that arm;
-    * a REGIONAL WINDOW, a RASTER density spec, or any other graded spec
-      builds ``incremental``: these are new meshes with no registered
-      digest to reproduce, and the rebuild arm spends most of a graded
-      run re-triangulating from scratch every sweep (measured 77 % of the
-      wall on an 89k-cell ladder, 3.6x slower end to end).
-
-    To regenerate a REGISTERED graded mesh (``v20.80.151649``,
-    ``v4.75.*``, a ``woof hex mesh-plan --point`` row) pass
-    ``--triangulation rebuild``: their bytes were minted on that arm.
-    ``rw_mpas_mesh`` itself keeps ``rebuild`` as its whole-sphere default,
-    so scripts and the point-plan door that drive it directly are unchanged.
+    A named arm always wins.  Otherwise (``auto``) it is ``incremental``,
+    rw_mpas_mesh's own default: since rings start at their smallest
+    neighbour index both arms write the same bytes, so the rule this used
+    to apply (``rebuild`` for a uniform request, to reproduce registered
+    digests) no longer changes a byte; it only cost time.  ``spec`` and
+    ``regional_window`` are kept so the note can say what was asked for.
     """
 
     if requested not in (None, "auto"):
@@ -1193,19 +1220,11 @@ def resolve_triangulation(spec: dict, *, regional_window: Path | None,
                 f"--triangulation {requested} is not an arm; it is auto, "
                 "rebuild or incremental")
         return requested, f"{requested}, named with --triangulation"
-    if regional_window is not None:
-        return "incremental", ("incremental (auto): a regional window "
-                               "builds a mesh no registry holds")
-    if _has_raster_region(spec):
-        return "incremental", ("incremental (auto): a raster density spec "
-                               "is a new mesh")
-    if spec.get("regions"):
-        return "incremental", (
-            "incremental (auto): a graded spec is a new mesh; pass "
-            "--triangulation rebuild to regenerate a registered one byte "
-            "for byte")
-    return "rebuild", ("rebuild (auto): a uniform request is the published "
-                       "icosahedral family, reproduced on the rebuild arm")
+    what = ("a regional window" if regional_window is not None
+            else "a raster density spec" if _has_raster_region(spec)
+            else "a graded spec" if spec.get("regions") else "a uniform request")
+    return "incremental", (f"incremental (auto, {what}): rw_mpas_mesh's default; "
+                           "both arms write the same bytes")
 
 
 def generate(*, spec: dict, cells: int, out: Path, workdir: Path,
@@ -1232,12 +1251,11 @@ def generate(*, spec: dict, cells: int, out: Path, workdir: Path,
         if triangulation not in TRIANGULATION_ARMS:
             raise MeshRequestError(
                 f"--triangulation {triangulation} is not an arm; it is "
-                "`rebuild` (the arm every registered mesh digest was "
-                "minted on -- the only one that reproduces one byte for "
-                "byte, and rw_mpas_mesh's whole-sphere default) or "
-                "`incremental` (the same triangulation kept and repaired "
-                "by Lawson flips, which is faster and writes a different "
-                "file)")
+                "`incremental` (the default: the triangulation kept and "
+                "repaired by Lawson flips) or `rebuild` (rebuilt every sweep, "
+                "slower); both write the same bytes, and meshes registered "
+                "before 2026-10-16 used the old ring rotation and are not "
+                "reproduced by either")
         arguments += ["--triangulation", triangulation]
     return _run_mesh(arguments, progress=progress)
 
@@ -1439,13 +1457,20 @@ def default_static_path(grid: Path) -> Path:
 
 def build_static(*, grid: Path, out: Path, geog: Path | None = None,
                  nominal_dx_m: float | None = None, clobber: bool = False,
-                 receipt: Path | None = None, progress=None) -> dict:
+                 receipt: Path | None = None, progress=None,
+                 legacy_static: bool = False) -> dict:
     """Build the static half of the pair and return the engine's document.
 
     Separated from :func:`generate` because the two binaries are separate
     artifacts with separate contracts, and joined at the door because a
     grid without its static is not a deliverable: the mesh registry pins
     both by byte count and SHA-256 and refuses a mesh carrying one.
+
+    The static is MPAS-A v8.4.2's native one by default (2.9.0).
+    ``legacy_static`` asks for the pre-2.9.0 stream (82 variables, the
+    with-lakes land use with its lake class stored as water), for a
+    consumer that still needs that schema.  It is not the bytes
+    of a pre-2.9.0 build: 2.9.0's shared static arithmetic applies to it.
     """
 
     from woof import rustwx_static
@@ -1463,6 +1488,8 @@ def build_static(*, grid: Path, out: Path, geog: Path | None = None,
         argv += ["--receipt", str(receipt)]
     if clobber:
         argv.append("--clobber")
+    if legacy_static:
+        argv.append("--legacy-static")
     try:
         return rustwx_static.run_static(binary, argv, on_progress=progress)
     except rustwx_static.StaticEngineError as error:
@@ -1595,15 +1622,10 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--triangulation", choices=TRIANGULATION_CHOICES, default="auto",
         help="how the Delaunay is kept between relaxation sweeps.  "
-             "rebuild rebuilds it every sweep and is the arm every "
-             "registered mesh was generated with -- the only one that "
-             "reproduces a pinned SHA-256.  incremental keeps the facets "
-             "and repairs them by Lawson flips: the same triangulation, "
-             "several times faster, and a DIFFERENT FILE, because each "
-             "cell keeps the ring rotation a rebuild re-rolls.  auto (the "
-             "default): rebuild for a uniform request, incremental for a "
-             "graded or raster spec or a --regional-window (new meshes).  "
-             "Pass rebuild to regenerate a registered graded mesh")
+             "incremental keeps the facets and repairs them by Lawson "
+             "flips; rebuild rebuilds it every sweep (slower).  Both write "
+             "the same bytes.  auto (the default) takes rw_mpas_mesh's own "
+             "default, incremental")
     parser.add_argument(
         "--regional-window", type=Path, default=None, metavar="POLY.json",
         help="EXPERIMENTAL: refine and relax only inside this window plus "

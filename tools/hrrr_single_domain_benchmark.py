@@ -32,6 +32,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from woof import runtime_manifest  # noqa: E402
+from woof.ingest.hrrr import _read_gate, aerosol_fill_receipt  # noqa: E402
 from woof.ingest.preprocess_backend import preprocess_math_call
 from woof.aerosol_source_receipt import (  # noqa: E402
     AEROSOL_SOURCE_KEY,
@@ -846,6 +847,16 @@ def _configured_soil_mesh(grid, experiment_tables):
     from woof.ingest.soil_downscale import soil_mesh_plan_from_case
     return soil_mesh_plan_from_case(
         None, grid, experiment_tables, source_grid=hrrr_source_grid())
+
+
+def _fetch_receipt_path(args):
+    """The fetch receipt beside the source files, where ``woof fetch``
+    records each runtime surface row (appended, or its fallback)."""
+    from woof.fetch import FETCH_MANIFEST_NAME
+    root = getattr(args, "source_root", None)
+    if root is not None:
+        return Path(root) / FETCH_MANIFEST_NAME
+    return getattr(args, "source_manifest", None)
 
 
 def _source_identity() -> dict[str, object]:
@@ -1824,6 +1835,9 @@ def _configured_physics_receipt(cfg, profile=None, *, acknowledgements=()):
     receipt = {
         "schema": "gpuwm-prepared-physics-profile-v1", "profile": profile,
         "front_door_selection": selection, "selection": "configured d01",
+        # The registry's 4/4 radiation option names the spectral pair
+        # ('rte-rrtmgp'); the engine that computes it is ra_rrtmg_variant.
+        "radiation_engine": getattr(cfg, "ra_rrtmg_variant", None),
         "resolved": resolved,
         "hrrr_initialization_contract": {
             "analyzed_mass_fields": ["QC", "QR", "QI", "QS", "QG"],
@@ -2107,10 +2121,17 @@ def _validate_native_hrrr_physics_profile(
 #: switch this map does not name is now a named refusal here rather than
 #: a silent default three layers down.
 _PROFILE_SWITCH_HOMES = MappingProxyType({
+    'oml_gamma': "shared",
+    'oml_hml0': "shared",
+    'oml_relaxation_time': "shared",
+    'sf_ocean_physics': "shared",
     "aer_init_opt": "shared",
     "alb_sol": "shared",
     "bl_mynn_gsd41_unsquared_qtke": "shared",
     "bl_mynn_mixlength": "shared",
+    # Admitted with the MYNN TKE-advection port (QKE_ADV scalar transport);
+    # the HRRR profiles declare it false, as the operational namelists do.
+    "bl_mynn_tkeadvect": "shared",
     "bl_mynn_version": "shared",
     "bl_pbl_physics": "shared",
     "cu_physics": "shared",
@@ -2283,7 +2304,8 @@ def _experiment_tables(
                 raise ValueError(f"{name} override must be boolean")
             raw["shared"][name] = value
     from woof.physics_source_defaults import (
-        recipe_physics_defaults, recipe_root_defaults, with_recipe_root_defaults)
+        MP_SCOPED_RECIPE_SETTINGS, recipe_physics_defaults,
+        recipe_root_defaults, with_recipe_root_defaults)
     defaults = recipe_physics_defaults("hrrr")
     for name, value in defaults.items():
         if name in ("usemonalb", "rdlai2d"):
@@ -2292,6 +2314,10 @@ def _experiment_tables(
             # declared controls, including explicit false.
             if int(switches["sf_surface_physics"]) in (2, 3):
                 raw["shared"].setdefault(name, value)
+        elif name in MP_SCOPED_RECIPE_SETTINGS:
+            # The fork Thompson generation exists for mp_physics = 28 only.
+            if int(switches["mp_physics"]) in MP_SCOPED_RECIPE_SETTINGS[name]:
+                raw["shared"][name] = value
         else:
             raw["shared"][name] = value
     with_recipe_root_defaults(
@@ -2951,22 +2977,15 @@ def _crop_horizontal_snapshot(snapshot, *, y0, y1, x0, x1,
     return SimpleNamespace(
         valid_time=snapshot.valid_time,
         levels_hpa=np.array(snapshot.levels_hpa, copy=True),
-        fields=cropped)
+        fields=cropped,
+        withheld_fields=dict(getattr(snapshot, "withheld_fields", None) or {}))
 
 
-#: The strip's mass-point geodesy, cropped beside the statics when the
-#: caller supplies it (:func:`_compact_boundary_static`).
-_BOUNDARY_GEODESY = ("XLAT_M", "XLONG_M")
-
-
-def _crop_boundary_static(static, *, y0, y1, x0, x1, full_shape,
-                          geodesy=False):
+def _crop_boundary_static(static, *, y0, y1, x0, x1, full_shape):
     ny, nx = map(int, full_shape)
     result = {}
-    names = ("HGT_M", "LANDMASK", "MAPFAC_M", "MAPFAC_U", "MAPFAC_V",
-             "F", "E", "SINALPHA", "COSALPHA",
-             *(_BOUNDARY_GEODESY if geodesy else ()))
-    for name in names:
+    for name in ("HGT_M", "LANDMASK", "MAPFAC_M", "MAPFAC_U", "MAPFAC_V",
+                 "F", "E", "SINALPHA", "COSALPHA"):
         value = static[name]
         if value.shape == (ny, nx):
             result[name] = value[y0:y1, x0:x1]
@@ -3046,18 +3065,24 @@ def _detach_mapped_snapshot(met):
     return SimpleNamespace(
         valid_time=met.valid_time,
         levels_hpa=np.array(met.levels_hpa, copy=True),
-        fields=fields)
+        fields=fields,
+        # A boundary strip that asks for a withheld field is refused with
+        # the decoder's reason, as the start state is.
+        withheld_fields=dict(getattr(met, "withheld_fields", None) or {}))
 
 
 def _map_boundary_snapshot(
         snapshot, targets, mapping_report, *,
         surface_fallback_radius: int = 8, preprocess_backend="cuda",
-        upper_source=None):
+        domain_grid=None):
     """Map only four boundary strips, avoiding a disposable full-domain hour.
 
-    ``upper_source`` (an :class:`woof.upper_source.UpperSourceDonor`) is
-    mapped onto each strip's own exact subgrid and joined above it, so a
-    boundary time's column reaches the same top its start state does.
+    ``domain_grid`` is the domain the strips were cut from.  Each strip is
+    mapped with it as its lattice parent, so the strips of a domain that
+    IS the native HRRR grid take the identity route its start state took;
+    without it they were interpolated and their edge points refused
+    (acceptance D-05, 2.8.8: the full 1800 x 1060 grid died in its first
+    boundary hour, "HRRR bridge window lacks the bilinear donor cell").
     """
     from woof.ingest.hrrr import interpolate_hrrr_to_lambert
 
@@ -3074,11 +3099,8 @@ def _map_boundary_snapshot(
             # Four strips are mapped independently here, so a soil
             # refusal that named only "soil mapping" left a coastal
             # domain's owner with four identical-looking suspects.
-            target_name=f"the {side} boundary strip of domain 1")
-        if upper_source is not None:
-            met = upper_source.splice(
-                met, subgrid, backend=preprocess_backend,
-                target_name=f"the {side} boundary strip of domain 1")
+            target_name=f"the {side} boundary strip of domain 1",
+            lattice_parent=domain_grid)
         compact[side] = _detach_mapped_snapshot(met)
         side_reports[side] = side_report
         del met
@@ -3099,35 +3121,64 @@ def _map_boundary_snapshot(
     return compact, time.perf_counter() - started
 
 
-def _compact_boundary_static(static, run_cfg, *, width, latlon=None):
+def _compact_boundary_static(static, run_cfg, *, width, latlon_mass=None):
     """Copy the four static side rectangles once for worker initialization.
 
-    ``latlon`` is the domain's mass-point ``(lat2d, lon2d)``; supplied,
-    each side carries its own crop as ``XLAT_M``/``XLONG_M`` so the strip
-    initialization can place a global dataset (the mp=28 aerosol
-    climatology) on its cells.
+    ``latlon_mass`` is the domain's mass-point ``(lat2d, lon2d)``; each
+    side then carries its own rectangle of it as ``XLAT_M``/``XLONG_M``,
+    the geodesy :func:`woof.ingest.real.initialize_real` reads (through
+    ``grid=``) to build an mp=28 strip's aerosol from the monthly WIF
+    climatology.  Without it an mp=28 tree on this route asking for the
+    climatology refused in every boundary worker ("could not derive the
+    model mass-point latitudes/longitudes"), although the start state
+    beside it had them.
     """
     ny, nx = run_cfg.ny, run_cfg.nx
-    if latlon is not None:
-        lat, lon = (np.asarray(value, dtype=np.float64) for value in latlon)
-        if lat.shape != (ny, nx) or lon.shape != (ny, nx):
-            raise ValueError("boundary geodesy must be the (ny, nx) mass grid")
-        static = {**static, "XLAT_M": lat, "XLONG_M": lon}
     rectangles = {
         "west": (0, ny, 0, width),
         "east": (0, ny, nx - width, nx),
         "south": (0, width, 0, nx),
         "north": (ny - width, ny, 0, nx),
     }
-    return {
+    sides = {
         side: {
             name: np.ascontiguousarray(value)
             for name, value in _crop_boundary_static(
                 static, y0=y0, y1=y1, x0=x0, x1=x1,
-                full_shape=(ny, nx), geodesy=latlon is not None).items()
+                full_shape=(ny, nx)).items()
         }
         for side, (y0, y1, x0, x1) in rectangles.items()
     }
+    if latlon_mass is not None:
+        latitude, longitude = (np.asarray(value, dtype=np.float64)
+                               for value in latlon_mass)
+        if latitude.shape != (ny, nx) or longitude.shape != (ny, nx):
+            raise ValueError(
+                "boundary strip geodesy must be the mass grid "
+                f"({ny} x {nx}); got {latitude.shape} and {longitude.shape}")
+        for side, (y0, y1, x0, x1) in rectangles.items():
+            sides[side]["XLAT_M"] = np.ascontiguousarray(latitude[y0:y1, x0:x1])
+            sides[side]["XLONG_M"] = np.ascontiguousarray(longitude[y0:y1, x0:x1])
+    return sides
+
+
+def _boundary_static_sides(static, grid, run_cfg, *, width):
+    """The controller's boundary strip statics, geodesy included.
+
+    The coordinates come from ``grid``, never from ``static``: a root whose
+    statics come from a static source (``[static] source =
+    "hrrr-conus-v4"``) carries no ``XLAT_M``/``XLONG_M`` in its field set,
+    so a strip that looked there found nothing.  With no coordinates every
+    mp=28 boundary worker refused the WIF climatology at forecast start
+    ("could not derive the model mass-point latitudes/longitudes"),
+    blocking every plain HRRR regional run on 2.8.6.  Only an mp=28 domain
+    reads strip geodesy (its aerosol climatology); other schemes keep the
+    small payload.
+    """
+    return _compact_boundary_static(
+        static, run_cfg, width=width,
+        latlon_mass=(grid.latlon_mass() if int(run_cfg.mp_physics) == 28
+                     else None))
 
 
 @preprocess_math_call
@@ -3190,29 +3241,22 @@ def _initialize_boundary_sides(
             coord = make_vertical_coord(
                 strip_cfg.nz, hybrid_opt=strip_cfg.hybrid_opt,
                 etac=strip_cfg.etac, eta_levels=eta)
-            # The strip's own mass-point geodesy rides beside its statics
-            # (_compact_boundary_static), so an aerosol-aware Thompson
-            # (mp=28) strip places the monthly aerosol climatology on its
-            # own cells exactly as the full-domain f00 state does through
-            # ``grid=``.  Without it, a configuration that names the
-            # climatology -- (aer_init_opt, wif_input_opt) = (1, 1), which
-            # the default HRRR profile's namelist carries -- refused at
-            # the first boundary hour (the initializer cannot guess a
-            # global dataset's grid), and under 'auto' the strips fell
-            # back to the synthetic profile while the start state used
-            # the climatology.  With it, every strip resolves the same
-            # aerosol source the start state does, so its nwfa/nifa enter
-            # the lateral boundary inventory exactly as the start state's
-            # (external_scalar_fields, aerosol_from_input) -- one aerosol
-            # source on the whole boundary.  The dataset is decoded once
-            # per process (wif_climatology.load_wif_climatology), not once
-            # per strip.
-            geodesy = tuple(strip_static.get(name) for name in _BOUNDARY_GEODESY)
+            # The strip's own mass-point geodesy, when the controller
+            # shipped it (``_compact_boundary_static(latlon_mass=...)``):
+            # an mp=28 domain's boundary rows carry nwfa/nifa
+            # (woof.boundary_fields.AEROSOL_BOUNDARY_FIELDS), and under the
+            # monthly WIF climatology initialize_real builds them from this
+            # lat/lon, lazily and only on its mp=28 climatology branch, the
+            # same door the start state takes with ``grid=grid``.  Every
+            # other scheme reads none of it.
+            strip_geodesy = (
+                {"XLAT_M": strip_static["XLAT_M"],
+                 "XLONG_M": strip_static["XLONG_M"]}
+                if "XLAT_M" in strip_static else None)
             result = initialize_real(
                 strip_met, strip_cfg, coord, strip_static["HGT_M"],
                 landmask=strip_static["LANDMASK"],
-                wif_grid_latlon=(None if any(value is None for value in geodesy)
-                                 else geodesy),
+                **({} if strip_geodesy is None else {"grid": strip_geodesy}),
                 p_top=p_top, sfcp_to_sfcp=sfcp_to_sfcp,
                 preprocess_backend=preprocess,
                 state_backend="preprocess",
@@ -3710,8 +3754,13 @@ def _write_chained_head(
     writer.write_head(
         initial_result=root_result, met=root_met,
         surface=root_surface.fields, metadata=metadata,
+        # The configuration's zones, which the forecast door compares
+        # against this head (prepared_single_domain_forecast: "prepared
+        # cache LBC width differs from experiment"); a literal 1/4 refused
+        # every HRRR-route tree on other zones, HRRR v4's own 1/9 among them.
         lbc={"spec_bdy_width": int(dc.run.spec_bdy_width),
-             "spec_zone": 1, "relax_zone": 4,
+             "spec_zone": int(dc.run.spec_zone),
+             "relax_zone": int(dc.run.relax_zone),
              "schedule": [[float(k * 3600), float((k + 1) * 3600)]
                           for k in range(len(requested_hours) - 1)],
              "fields": sorted(boundary_sides["west"])},
@@ -3809,7 +3858,7 @@ def _await_admitted(admitter, producer, lead, *, poll_seconds=1.0,
     fail first (it exits at once on a series it cannot read).  The decoder
     is looked at between waits, so its failure is raised now, not once the
     lead posts: the breakage this prevents is a preparation that sat out a
-    lead's whole budget beside a decoder that had already died (a development machine,
+    lead's whole budget beside a decoder that had already died (test host D,
     HRRR 2026-10-01T06, 30 minutes).  ``between`` is called between waits
     too (the build loop writes the intervals already built).
     """
@@ -4046,8 +4095,13 @@ def _write_posted_head(
     writer.write_head(
         initial_result=root_result, met=root_met,
         surface=root_surface.fields, metadata=metadata,
+        # The configuration's zones, which the forecast door compares
+        # against this head (prepared_single_domain_forecast: "prepared
+        # cache LBC width differs from experiment"); a literal 1/4 refused
+        # every HRRR-route tree on other zones, HRRR v4's own 1/9 among them.
         lbc={"spec_bdy_width": int(dc.run.spec_bdy_width),
-             "spec_zone": 1, "relax_zone": 4,
+             "spec_zone": int(dc.run.spec_zone),
+             "relax_zone": int(dc.run.relax_zone),
              "schedule": [[float(k * 3600), float((k + 1) * 3600)]
                           for k in range(len(requested_hours) - 1)],
              "fields": sorted(boundary_sides["west"])},
@@ -4339,10 +4393,18 @@ def _budgeted_preprocess_backend(args, price=None):
         cpu_bridge=args.cpu_preprocess_bridge, price=price)
     if getattr(preprocess, "name", None) == "cuda":
         return preprocess, None
+    # The count the backend itself will run, through the same budget its
+    # constructor applies (affinity, cgroup CPU quota, memory headroom,
+    # WOOF_PREPROCESS_THREADS).  os.cpu_count() ignores the first three,
+    # so on a host whose cgroup grants fewer CPUs than it has cores every
+    # CPU preparation was refused at f00 ("used 245 native workers;
+    # expected 256") by its own receipt check.
+    from woof.ingest.cpu_backend import automatic_workers
+    from woof.ingest.preparation_workers import effective_workers
     effective_preprocess_workers = (
-        int(args.preprocess_workers)
+        effective_workers(int(args.preprocess_workers))
         if args.preprocess_workers is not None
-        else int(os.cpu_count() or 1))
+        else automatic_workers())
     if getattr(preprocess, "workers", None) != effective_preprocess_workers:
         chosen = getattr(preprocess, "selection", None)
         preprocess = resolve_preprocess_backend(
@@ -4528,6 +4590,14 @@ def run(args):
     seal_started = None
 
     requested_hours = model_forcing_hours
+    # The decoder reads HRRR's analyzed aerosol pair only for a
+    # configuration that uses it (use_rap_aero_icbc, or
+    # mp28_aerosol_source = "analysis"), the rule the fetch's record
+    # subset already follows.  Read unasked, a pair NCEP masks with a
+    # GRIB2 bitmap at a later lead stopped an as-posted default-profile
+    # preparation that never used it.
+    from woof.preparation_assets import analyzed_aerosol_domains
+    decoder_reads_analyzed_aerosol = bool(analyzed_aerosol_domains(exp))
     source_identity = {
         **_source_identity(),
         "source_cycle": requested_cycle.isoformat(),
@@ -4744,6 +4814,9 @@ def run(args):
     # ...]` while the answer sat in surface/.  None on the fresh road,
     # which holds the native pair and no surface yet.
     root_surface = None
+    # Recorded runtime surface fallbacks (fetch receipt rows); empty on a
+    # restored cache, whose own prepare receipt already carries them.
+    runtime_surface_fallbacks: dict = {}
     last_valid_time = None
     boundaries = None
     if restore_cached:
@@ -4831,7 +4904,8 @@ def run(args):
             window=source_window.bridge_tuple(),
             workers=args.pipeline_workers,
             log=args.pipeline_signals.with_suffix(".decoder.log"),
-            admissions=admitter.admissions)
+            admissions=admitter.admissions,
+            analyzed_aerosol=decoder_reads_analyzed_aerosol)
         started = time.perf_counter()
         pipeline_producer.start()
         admitter.start()
@@ -4880,7 +4954,8 @@ def run(args):
             cycle=requested_cycle.strftime("%Y-%m-%d %H:%M:%S"),
             window=source_window.bridge_tuple(),
             workers=args.pipeline_workers,
-            log=args.pipeline_signals.with_suffix(".decoder.log"))
+            log=args.pipeline_signals.with_suffix(".decoder.log"),
+            analyzed_aerosol=decoder_reads_analyzed_aerosol)
         started = time.perf_counter()
         pipeline_producer.start()
         pipeline_producer.wait_preflight()
@@ -5001,8 +5076,8 @@ def run(args):
         valid_time_by_hour = {}
         setup_record_by_hour = {}
         width = int(dc.run.spec_bdy_width)
-        static_sides = _compact_boundary_static(
-            static, dc.run, width=width, latlon=grid.latlon_mass())
+        static_sides = _boundary_static_sides(
+            static, grid, dc.run, width=width)
         boundary_targets = _boundary_mapping_targets(
             grid, static, dc.run, width=width)
         try:
@@ -5194,6 +5269,7 @@ def run(args):
                         surface_fallback_radius=(
                             target.surface_fallback_radius_cells),
                         preprocess_backend=hour_preprocess,
+                        domain_grid=grid,
                         upper_source=upper_source)
                     if physical_output is not None:
                         # Capture is observational: the ordinary boundary strips
@@ -5399,7 +5475,7 @@ def run(args):
                             # awaited, so each interval is written once its
                             # two hours are built: collected only when its
                             # slot came round again, interval k waited for
-                            # lead k + slots, not k + 1 (a development machine, HRRR
+                            # lead k + slots, not k + 1 (test host D, HRRR
                             # 2026-10-01T08, two slots: interval 3 waited for
                             # f005 although f004 was in at 09:02Z).  Collection
                             # order moves no byte (segments are written in
@@ -5503,6 +5579,16 @@ def run(args):
 
         _verify_preparation_overlay(overlay_series, physical_input=physical_input,
                                     binding=water_overlay_binding)
+        # Every preparation road (posted bundle, sealed bridge, prepared
+        # cache) checks the source-declared runtime surface fields here and
+        # carries any fallback its fetch receipt recorded into the report.
+        from woof.static.external_source import static_source_for
+        from woof.runtime_surface_fetch import require_runtime_surface_fields
+        from woof.source_adapters import get_source_adapter
+        runtime_surface_fallbacks = require_runtime_surface_fields(
+            root_met, get_source_adapter("hrrr"),
+            source_manifest=_fetch_receipt_path(args),
+            refuse_dropped=static_source_for(static_highres) is not None)
         posted_proof = None
         if writer is not None and (admitter is not None or shared_posted is not None):
             try:
@@ -5579,11 +5665,6 @@ def run(args):
                 seal_process = None
 
             from woof.ingest.prepared_cache import write_prepared_cache
-            from woof.static.external_source import static_source_for
-            if static_source_for(static_highres) is not None:
-                from woof.runtime_surface_fetch import require_runtime_surface_fields
-                from woof.source_adapters import get_source_adapter
-                require_runtime_surface_fields(root_met, get_source_adapter("hrrr"))
             from woof.ingest.hrrr_physics import resolve_prepared_noah_surface
             from woof.ingest.preprocess_backend import (
                 preprocess_reports_identity)
@@ -5717,8 +5798,14 @@ def run(args):
             },
             "input": {
                 "bridge": str(args.bridge.resolve()),
+                "aerosol_missing": aerosol_fill_receipt(_read_gate(args.bridge)),
                 "bridge_manifest_sha256": args.manifest_sha256,
                 "source_manifest_sha256": args.source_manifest_sha256,
+                # Present only when a runtime surface field started from its
+                # fallback because the cycle publishes no record for it; the
+                # rows are the fetch receipt's own (id, reason, cycle).
+                **({"runtime_surface_fallback": runtime_surface_fallbacks}
+                   if runtime_surface_fallbacks else {}),
                 "source_cycle": requested_cycle.isoformat(),
                 "model_start_time": model_start_time.isoformat(),
                 "source_forecast_hours": list(source_forecast_hours),
@@ -5766,10 +5853,12 @@ def run(args):
 
     started = time.perf_counter()
     from woof.static.external_source import static_source_for
-    if static_source_for(static_highres) is not None:
-        from woof.runtime_surface_fetch import require_runtime_surface_fields
-        from woof.source_adapters import get_source_adapter
-        require_runtime_surface_fields(root_met, get_source_adapter("hrrr"))
+    from woof.runtime_surface_fetch import require_runtime_surface_fields
+    from woof.source_adapters import get_source_adapter
+    runtime_surface_fallbacks = require_runtime_surface_fields(
+        root_met, get_source_adapter("hrrr"),
+        source_manifest=_fetch_receipt_path(args),
+        refuse_dropped=static_source_for(static_highres) is not None)
     driver = initialize_hrrr_physics(
         root_result, dc.run, root_met, static, attrs, grid,
         initial_snapshot.valid_time,
@@ -6089,8 +6178,14 @@ def run(args):
         },
         "input": {
             "bridge": str(args.bridge.resolve()),
+                "aerosol_missing": aerosol_fill_receipt(_read_gate(args.bridge)),
             "bridge_manifest_sha256": args.manifest_sha256,
             "source_manifest_sha256": args.source_manifest_sha256,
+            # Present only when a runtime surface field started from its
+            # fallback because the cycle publishes no record for it; the
+            # rows are the fetch receipt's own (id, reason, cycle).
+            **({"runtime_surface_fallback": runtime_surface_fallbacks}
+               if runtime_surface_fallbacks else {}),
             "source_cycle": requested_cycle.isoformat(),
             "model_start_time": model_start_time.isoformat(),
             "source_forecast_hours": list(source_forecast_hours),

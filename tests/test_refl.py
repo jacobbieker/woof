@@ -22,6 +22,22 @@ import pytest
 
 from conftest import requires_gpu
 
+# Consumer expectations come from the independent generated declarations.
+from woof.physics_registry import implemented_selector_values as _intake_selectors
+from woof.physics_registry import consumer_rows_by_selector as _intake_rows
+_INTAKE_MP = tuple(sorted(_intake_selectors("microphysics")))
+_INTAKE_REFL = tuple(mp for mp in _INTAKE_MP if mp)
+_INTAKE_PRODUCERS = tuple(sorted(mp for mp, row in
+    _intake_rows("microphysics", "reflectivity_input_species").items()
+    if row is not None))
+_INTAKE_NATIVE = tuple(sorted(set(_INTAKE_REFL) - set(_INTAKE_PRODUCERS)))
+_INTAKE_SNOW = tuple(sorted(mp for mp, row in
+    _intake_rows("microphysics", "ring_guard").items()
+    if "qs" in (row or {}).get("state_fields", ())))
+_INTAKE_SIX = tuple(sorted(mp for mp, row in
+    _intake_rows("microphysics", "ring_guard").items()
+    if "qg" in (row or {}).get("state_fields", ())))
+
 #: Morrison module PI (module_mp_morr_two_moment.F:99).
 PI = 3.1415926535897932384626434
 
@@ -346,6 +362,11 @@ def test_refl_stash_has_no_trajectory_or_restart_reader():
         # which the scatter carries into the domain field like any other
         # carrier.
         "woof/core/streaming.py",
+        # The VTSM native retention (4dcca7d16, woof/da/spread_vts.py)
+        # also consumes only to CLEAR: its history drain has no output
+        # writer, and an unconsumed stash would refuse the next due frame.
+        # The field is discarded, never read back into the model.
+        "woof/da/spread_vts.py",
         # The hex column-batch seam (6e333822e, phase two of the mpas
         # seam: WRF's history-step diagflag).  On a due step it consumes
         # the handoff inside the same transaction that builds the step
@@ -657,7 +678,7 @@ def test_p3_refuses_by_name_rather_than_being_absent_from_the_gate():
     # pin is on the table's keys rather than on a literal tuple in the
     # source, and the source is asserted to read the table.
     from woof.core.refl import REFL_10CM_INPUT_SPECIES
-    assert set(REFL_10CM_INPUT_SPECIES) == {1, 6, 8, 10, 16, 28}
+    assert set(REFL_10CM_INPUT_SPECIES) == {1, 2, 3, 4, 6, 8, 10, 16, 28, 106}
     import woof.core.refl as refl_module
     source = Path(refl_module.__file__).read_text(encoding="utf-8")
     assert "cfg.mp_physics not in REFL_10CM_INPUT_SPECIES" in source
@@ -676,9 +697,15 @@ def test_native_reflectivity_table_is_the_consumer_minus_producer_set():
     from woof import runtime
     from woof.core.refl import SCHEME_NATIVE_REFL_10CM
 
-    producer = frozenset({1, 6, 8, 10, 16, 28})
+    producer = frozenset({1, 2, 3, 4, 6, 8, 10, 16, 28, 106})
     consumer = frozenset(runtime.REFL_10CM_MICROPHYSICS)
-    assert frozenset(SCHEME_NATIVE_REFL_10CM) == consumer - producer
+    # FAST_SBM (30) is recorded here without being a consumer: it writes no
+    # REFL_10CM at all (woof.core.fast_sbm_runtime.apply refuses a due
+    # frame, so the history lane never asks it), and its row is the reason
+    # the generic bulk operator must never be dispatched for it either.
+    refused = frozenset({30})
+    assert not (refused & consumer)
+    assert frozenset(SCHEME_NATIVE_REFL_10CM) == (consumer - producer) | refused
     assert not (frozenset(SCHEME_NATIVE_REFL_10CM) & producer)
     for scheme, reason in SCHEME_NATIVE_REFL_10CM.items():
         assert len(reason) > 80, f"mp={scheme} has a reason in name only"

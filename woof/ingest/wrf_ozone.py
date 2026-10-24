@@ -59,11 +59,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 import ctypes
-import hashlib
 from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
+
+from woof.ingest.backend_contract import _sha256
 
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "wrf_radiation"
@@ -79,8 +80,6 @@ OZONE_PLEV_SHA256 = \
 
 LEVSIZ = 59   #: climatology pressure levels (module_check_a_mundo for RRTMG)
 LATSIZ = 64   #: climatology latitudes (oznini local parameter)
-LONSIZ = 1    #: zonal climatology
-NUM_MONTHS = 13  #: n_ozmixm; WRF month slots 2..13 carry Jan..Dec
 
 #: ozn_time_int's date_oz: mid-month Julian day of each monthly sample.
 DATE_OZ = (16, 45, 75, 105, 136, 166, 197, 228, 258, 289, 319, 350)
@@ -101,14 +100,6 @@ class OzoneClimatology(NamedTuple):
     plev: np.ndarray
     lat: np.ndarray
     ozmix: np.ndarray
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _read_formatted(path: Path, count: int, label: str) -> np.ndarray:
@@ -357,12 +348,18 @@ def _ozone_time_weights(julian):
 
 
 def ozn_latitude_time_int(julday, julian, xlat,
-                         climo: OzoneClimatology | None = None) -> np.ndarray:
+                         climo: OzoneClimatology | None = None, *,
+                         out: np.ndarray | None = None) -> np.ndarray:
     """The exact latitude then time chain, computing only its two months.
 
     Return float32 ``xlat.shape + (59,)``. The native route rounds each
     latitude statement before the two separate products and monthly sum.
     An older bridge or unusual external climatology takes the original chain.
+
+    ``out``, a C-contiguous float32 array of the result's shape, is filled
+    and returned by the native route instead of a fresh array: a radiation
+    adapter reuses one buffer every call, so a 1 km rank does not fault in
+    ~200 MB of new host memory at every radiation step (A3).
     """
     del julday  # WRF accepts and ignores it.
     if climo is None:
@@ -376,7 +373,10 @@ def ozn_latitude_time_int(julday, julian, xlat,
             from woof.core import portable_math
             latitude, ozone = inputs
             nm, np_, fact1, fact2 = _ozone_time_weights(julian)
-            out = np.empty(y.shape + (LEVSIZ,), dtype=np.float32)
+            shape = y.shape + (LEVSIZ,)
+            if (out is None or out.shape != shape or out.dtype != np.float32
+                    or not out.flags.c_contiguous):
+                out = np.empty(shape, dtype=np.float32)
             status = entries[2](values.ctypes.data, values.size,
                                 latitude.ctypes.data, latitude.size,
                                 ozone.ctypes.data, LEVSIZ, 12, nm, np_, fact1, fact2,

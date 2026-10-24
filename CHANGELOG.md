@@ -4,41 +4,6 @@
 
 New:
 
-- `ifire = 2` runs WRF v4.7.1's two-way coupled fire (WRF-SFIRE's level
-  set) on a domain's fire mesh, refined `sr_x` x `sr_y` from the
-  atmospheric grid. Every step, after the PBL, the fire takes the wind at
-  `fire_wind_height` on the fire mesh, advances one fire step from its
-  ignition lines (`fire_ignitions`, WRF's `fire_ignition_*1..5`, in metres
-  or longitude/latitude) and returns its heat and vapour as WRF's
-  `rthfrten`/`rqvfrten`, decaying over `fire_ext_grnd`/`fire_ext_crwn`, in
-  every RK stage whatever the PBL, LES included. With `smoke_tracer =
-  true` the burned fuel becomes the tracer's surface emission, by default
-  with each fuel class's PM2.5 factor (`fire_smoke_factor`). `ifire` on a
-  domain requests its fuel statics. The driver glue -- `fire_driver_em`,
-  `interpolate_atm2fire`, `fire_tendency` -- matches WRF's own Fortran at
-  0 ULP on CPU and GPU (`tools/fire_coupling_wrf471_oracle`, the whole
-  driver run on a stub domain). History gains `FGRNHFX`, `FGRNQFX`,
-  `FIRE_AREA`, `ROS`, `TIGN_G`, `LFN`, `FUEL_FRAC`, `UF`, `VF` on new
-  `south_north_subgrid`/`west_east_subgrid` axes and `GRNHFX`, `GRNQFX`,
-  `CANHFX`, `CANQFX`, `AVG_FUEL_FRAC` on the mass grid. The fire state is
-  checkpointed and resumes bit-exact. A WRF namelist's `&fire` imports.
-  Moving and mid-run-spawned nests, the offline child route and adaptive
-  time steps are refused with `ifire` by name. Off by default: nothing is
-  allocated or launched, and checkpoints and fingerprints are unchanged.
-
-- `smoke_tracer = true` carries a passive smoke tracer, `SMOKE` (ug per
-  kg of dry air), the analogue of WRF's `tracer` array. It advects with
-  the moist scalars' acoustic-averaged mass fluxes, positive-definite on
-  the final RK stage. It mixes under `km_opt` and through the PBL scheme's
-  heat diffusivity with WRF's `diff4d` solve. A specified boundary gives
-  it zero inflow and zero-gradient outflow, and it crosses nest edges in
-  both directions. It is checkpointed. Nothing reads it back.
-  `smoke_emission_file` (per domain, `.npy` or NetCDF, kg m-2 s-1 on the
-  domain's mass grid) injects a prescribed surface emission into the
-  lowest layer. History gains `SMOKE` and its column load `SMOKE_COL`
-  (ug m-2). Off by default: nothing is allocated or launched, and
-  checkpoints and fingerprints are unchanged.
-
 - `--source ukv`: the Met Office UKV (UK deterministic 2 km), 33 pressure
   levels to 10 hPa, from two anonymous stores. A window inside the Source
   Cooperative Icechunk archive (2024-01-01 00Z to 2025-08-13 22Z, each
@@ -908,6 +873,55 @@ Fixed:
   those inputs already exist. Under `--prepare-only` the forecast memory
   gate warns instead of refusing and the forecast-device check is
   skipped, since no forecast starts.
+
+## 1.1.0
+
+WOOF 1.1.0 takes engine 2.9.5 and the hex model 0.4.3. Forecast answers change.
+
+New:
+
+- `woof hex` carries the GPU port of MPAS-Atmosphere v8.4.2: both physics
+  suites and their scheme options, initialization and static fields, IAU,
+  limited-area boundaries, streams, restart and diagnostics. WOOF's own
+  physics stays the default suite.
+- `woof hex global --row R --cycle C --work-dir W` runs a global forecast end
+  to end: mesh, static, start, forecast, products, export and score. It is the
+  main global model; the spectral `woof global` stays a full option.
+- From hex 0.4.2 and 0.4.3: one-command limited-area forecasts
+  (`woof hex regional`, `woof hex country --region`), variable-resolution
+  global meshes, storm-following regions and ensembles (`woof hex moving`,
+  `woof hex moving-ensemble`), subseasonal ensembles with weekly products and
+  scores, a mixed-layer ocean and sea ice on the mesh, aerosol transport in
+  global forecasts, keyless ERA5 starts, and an 80-level high-top row.
+- WoFS-shape ensembles (`woof ensemble --recipe wofs`) from any start source,
+  with ensemble soundings, and hurricane ensembles with cyclone products.
+- From engine 2.9.4: the packaged HRRR recipe follows operational HRRR v4
+  physics; `woof race` and `woof standby`; storm-following 1 km nests
+  (`woof go --storm-nests N`); HRRR-Smoke with `--smoke`; coupled hydro wherever a
+  hydrofabric covers the domain, opt-in with `--hydro on`; coupled ocean waves and storm surge (`woof ocean run`); a GPU
+  mixed-layer ocean and prognostic sea ice; live aerosol optics; solar
+  eclipse shading; hail size and HAILCAST; storm tracks fetched automatically
+  (`woof cyclone-setup --storm auto|ID|NAME`) and `woof go --cyclone-products`;
+  new default products (IVT, IWV, freezing level, atmospheric rivers,
+  visibility and fog, snowfall, heat index, WBGT, HDWI, Haines, lightning
+  threat); hub-height wind and solar power products; fire danger indices;
+  archived GFS, dated GEFS and ECMWF ENS sources; polar stereographic domains;
+  and `woof setup --with-geog`, a permissively licensed default geography set.
+
+Changed:
+
+- Coupled hydro is opt-in: a run has no hydro unless it asks with
+  `--hydro on`.
+- The bridge bundle carries the engine's tools and the global model's
+  observation decoders. Maps read `WOOF 1.1.0`.
+
+Fixed:
+
+- Everything engine 2.9.4 and 2.9.5 and hex 0.4.2 and 0.4.3 fix, as their
+  notes list it. From 2.9.5: coastal sea surface temperatures in the
+  mixed-layer ocean no longer drift, hydro start-up runs its spin-up on the
+  GPU, and `install.sh` installs the required Rust when the system Rust is
+  too old.
 
 ## 1.0.3
 

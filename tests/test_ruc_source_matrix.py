@@ -63,6 +63,15 @@ EXPECTED_POLICY = {
     "era5-l137": "layer_midpoint_samples",
     "gdas": "layer_midpoint_samples",
     "gefs": "layer_midpoint_samples",
+    # lane/cap-gefs-archive (6a3b8fd50bf): the indexed GEFS retrospective
+    # members carry the GFS Noah four-layer soil, the layer arm.
+    "gefs-reforecast": "layer_midpoint_samples",
+    "gefs-reforecast-weekly": "layer_midpoint_samples",
+    "gefs-v11": "layer_midpoint_samples",
+    "gefs-v11-flat": "layer_midpoint_samples",
+    # 2.9.2: a woof hex run as an ArWen parent. Its history carries MPAS
+    # Noah's four layers (0-10, 10-40, 40-100, 100-200 cm), the GFS ladder.
+    "hex-global": "layer_midpoint_samples",
     "hrrr-native": "node_point_samples",
     "hrrr-prs": "node_point_samples",
     "icon-d2": "node_point_samples",
@@ -77,6 +86,21 @@ EXPECTED_POLICY = {
     # Soil carried in band from the same-hour ERA5: the ERA5 layer column.
     "ukv": "layer_midpoint_samples",
 }
+
+# Parameterized models reuse the certified land-surface profile. Each new
+# profile still needs an independently pinned RUC policy, while another model
+# row on an existing profile needs no duplicate source-name list.
+MODEL_PROFILE_POLICY = {
+    "earth2-pl13-q-netcdf-v1": "layer_midpoint_samples",
+    "earth2-pl13-rh-netcdf-v1": "layer_midpoint_samples",
+    # StormCast rows borrow the same-cycle HRRR native soil (RUC nodes),
+    # so they carry HRRR's node-point policy.
+    "earth2-stormcast-hrrr-netcdf-v1": "node_point_samples",
+    "earth2-stormcast-conus-hrrr-netcdf-v1": "node_point_samples",
+}
+EXPECTED_POLICY.update({row.source_id: MODEL_PROFILE_POLICY[row.packaged_profile]
+    for row in source_adapters()
+    if row.model_table and row.packaged_profile in MODEL_PROFILE_POLICY})
 
 #: The one source RUC cannot be driven from, and WHY -- not "it publishes
 #: differently" but "the soil is not there".  GEM GDPS's mapped composition

@@ -66,6 +66,7 @@ FRAME_NAMES = (
     "tsk", "smois", "tslb", "hfx", "qfx", "lh",
     "t2", "q2", "pblh", "u10", "v10", "psfc",
     "swdown", "glw", "olr", "swddni", "swddif", "coszr",
+    "xice", "snow", "snowh",
     "rainc",
     "dusfcg", "dvsfcg", "dtaux3d", "dtauy3d", "rubldiff", "rvbldiff",
 )

@@ -277,7 +277,7 @@ def _glacier_execution_provenance(evaluator) -> str:
 
 
 def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
-                      dt, dzs, evaluator) -> None:
+                      dt, dzs, evaluator, noahmp_snow_age="wrf_470") -> None:
     """Run NOAHMP_GLACIER over the masked columns and write the driver's
     glacier arm back into ``fields``.
 
@@ -302,12 +302,32 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
     if count == 0:
         return
     at = (gj, gi)
+    # The input deck copies 51 four-byte values per full-domain column.
+    # Gather sparse columns on-device only when this avoids at least 16 MiB:
+    # smaller calls lose to advanced-index launch overhead. The threshold
+    # affects transport only; CPU conversions and physical arithmetic stay.
+    gather_inputs = (mask_host.size - count) * (51 * 4) >= 16 * 1024 * 1024
+    device_at = (cp.asarray(gj), cp.asarray(gi)) if gather_inputs else None
+
+    def read2(value):
+        if gather_inputs:
+            return cp.asnumpy(value[device_at])
+        return cp.asnumpy(value)[at]
+
+    def read_layers(name):
+        if gather_inputs:
+            return cp.asnumpy(fields[name][:, device_at[0], device_at[1]])
+        return cp.asnumpy(fields[name])[:, gj, gi]
+
     dt32 = f32(dt)
 
     def host2(name):
-        return cp.asnumpy(fields[name])[at].astype(np.float32, copy=False)
+        return read2(fields[name]).astype(np.float32, copy=False)
 
     def forcing(name, level=0):
+        if gather_inputs:
+            return cp.asnumpy(atmosphere[name][level][device_at]).astype(
+                np.float32, copy=False)
         return cp.asnumpy(
             atmosphere[name][level]).astype(np.float32, copy=False)[at]
 
@@ -326,12 +346,12 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
     rainbl = host2("rainbl")
     prcp = rainbl / np.float32(dt32)             # :765
     tbot = np.minimum(host2("tmn"), np.float32(263.15))   # :1050
-    cosz = cp.asnumpy(cp.asarray(coszen, dtype=cp.float32))[at]
+    cosz = read2(cp.asarray(coszen, dtype=cp.float32))
 
-    isnow = cp.asnumpy(fields["isnowxy"])[at].astype(np.int32, copy=False)
-    snice = cp.asnumpy(fields["snicexy"])[:, gj, gi].T.astype(
+    isnow = read2(fields["isnowxy"]).astype(np.int32, copy=False)
+    snice = read_layers("snicexy").T.astype(
         np.float32, copy=False)
-    snliq = cp.asnumpy(fields["snliqxy"])[:, gj, gi].T.astype(
+    snliq = read_layers("snliqxy").T.astype(
         np.float32, copy=False)
     # FICEOLD (:1026-1029): live slots divide unguarded, the rest stay 0.
     slot = np.arange(NSNOW, dtype=np.int32)[None, :]
@@ -340,8 +360,8 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
     with np.errstate(divide="ignore", invalid="ignore"):
         np.divide(snice, snice + snliq, out=ficeold, where=live)
 
-    tslb = cp.asnumpy(fields["tslb"])[:, gj, gi].T
-    tsno = cp.asnumpy(fields["tsnoxy"])[:, gj, gi].T
+    tslb = read_layers("tslb").T
+    tsno = read_layers("tsnoxy").T
     inputs = {
         "cosz": cosz, "sfctmp": temperature, "sfcprs": p_ml, "uu": u,
         "vv": v, "q2": q_ml, "soldn": host2("swdown"), "prcp": prcp,
@@ -352,14 +372,20 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
         "snowh": host2("snowh"), "tg": host2("tgxy"),
         "tauss": host2("taussxy"), "qsfc": host2("qsfc"),
         "isnow": isnow, "ficeold": ficeold,
-        "smc": cp.asnumpy(fields["smois"])[:, gj, gi].T,
-        "sh2o": cp.asnumpy(fields["sh2o"])[:, gj, gi].T,
-        "zsnso": cp.asnumpy(fields["zsnsoxy"])[:, gj, gi].T,
+        "smc": read_layers("smois").T,
+        "sh2o": read_layers("sh2o").T,
+        "zsnso": read_layers("zsnsoxy").T,
         "stc": np.concatenate((tsno, tslb), axis=1),
         "snice": snice, "snliq": snliq,
         "zsoil": zsoil_from_dzs(dzs),
     }
+    inputs["noahmp_snow_age"] = noahmp_snow_age
     r = evaluator(inputs, count, float(dt32))
+
+    # Host gathering is finished. Reuse these device indices throughout
+    # write-back instead of uploading both NumPy indices for each carrier.
+    gj, gi = device_at if gather_inputs else (cp.asarray(gj), cp.asarray(gi))
+    at = (gj, gi)
 
     # ---- write-back: the glacier arm (:1065-1150) + shared (:1223-1400)
     def dev(name):
@@ -400,8 +426,9 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
     fields["acsnow"][at] = (fields["acsnow"][at]
                             + cp.asarray(rainbl) * dev("fpice"))
     ponding = (dev("ponding") + dev("ponding1")) + dev("ponding2")
-    fields["acsnom"][at] = (fields["acsnom"][at]
-                            + (dev("qmelt") * dt32f + ponding))
+    fields["acsnom"][at] = acsnom_accumulate(
+        fields["acsnom"][at], dev("qmelt"), dt32f, dev("ponding"),
+        dev("ponding1"), dev("ponding2"))
     fields["pondingxy"][at] = ponding
     put2("emiss", "emissi")
     put2("qsfc", "qsfc")
@@ -438,6 +465,8 @@ def _glacier_lsm_step(fields, atmosphere, glacier_mask, *, params, coszen,
     fields["fvegxy"][at] = zero
     fields["runsfxy"][at] = runsf_mm
     fields["runsbxy"][at] = runsb_mm
+    if "soldrain" in fields:
+        fields["soldrain"][at] = zero  # glacier has no soil bottom drainage
     fields["ecanxy"][at] = zero
     put2("edirxy", "edir")
     fields["etranxy"][at] = zero
@@ -571,6 +600,24 @@ UNDEFINED_VALUE = -1.0e36
 
 #: ``FOLN``, :1031 -- "for now, set to nitrogen saturation".
 FOLN = 1.0
+
+
+def acsnom_accumulate(acsnom, qmelt, dt, ponding, ponding1, ponding2):
+    """``ACSNOM = ACSNOM + QMELT*DT + PONDING + PONDING1 + PONDING2``
+    (module_sf_noahmpdrv.F:1243), in Fortran's left-to-right order.
+
+    Each ``+`` is one binary32 rounding applied to the running total, so the
+    sum is ``((((ACSNOM + QMELT*DT) + PONDING) + PONDING1) + PONDING2)``.
+    Grouping the ponding terms first (as ``PONDINGXY`` is grouped at :1296)
+    rounds differently: the WRF v4.6.1 column oracle
+    (tools/noahmp_wrf461_oracle/column) measured 1 ULP on 8 snowmelt column
+    values before this order was restored.  Works on NumPy and CuPy alike;
+    every operand is binary32 and every operation is a separate rounding.
+    """
+    total = acsnom + qmelt * dt
+    total = total + ponding
+    total = total + ponding1
+    return total + ponding2
 
 #: Carried per-column scalars, in WRF's Registry spelling lower-cased so a
 #: restart manifest and a wrfout carry the identifiers WRF writes.  Every one
@@ -1048,6 +1095,10 @@ class NoahmpRuntimeParameters:
         """Strict-JSON identity: the table bytes plus the dataset choice."""
         receipt = self.bundle.receipt
         tables = receipt.get("tables", receipt)
+        # The canonical loader publishes an asset sequence, not a tables map.
+        # Reading the whole receipt as a map silently discarded every table.
+        if "assets" in receipt:
+            tables = {entry["filename"]: entry for entry in receipt["assets"]}
         payload = {}
         if isinstance(tables, Mapping):
             for name, entry in sorted(tables.items()):
@@ -1056,6 +1107,8 @@ class NoahmpRuntimeParameters:
                         "bytes": int(entry.get("bytes", 0)),
                         "sha256": str(entry.get("sha256", "")),
                     }
+        if not payload:
+            raise ValueError("Noah-MP restart identity requires parameter table seals")
         return {
             "algorithm": "noahmp-lsm-wrf-v4.6.1-v1",
             "wrf_source": "phys/module_sf_noahmpdrv.F:noahmplsm + "
@@ -1088,9 +1141,12 @@ class NoahmpSolarGeometry:
     every column on the equator at New Year and produce a plausible forecast.
     """
 
-    def __init__(self, start_time: datetime, latitude_deg, longitude_deg):
+    def __init__(self, start_time: datetime, latitude_deg, longitude_deg, *, generation="wrf_480"):
         if not isinstance(start_time, datetime):
             raise TypeError("Noah-MP start_time must be a datetime")
+        from woof.core.solar import solar_generation
+        solar_generation(generation)
+        self.solar_generation = generation
         self.start_time = start_time
         self.latitude_deg = np.ascontiguousarray(
             np.asarray(latitude_deg, dtype=np.float32))
@@ -1102,6 +1158,22 @@ class NoahmpSolarGeometry:
         if not np.isfinite(self.latitude_deg).all():
             raise ValueError("Noah-MP latitude must be finite")
 
+    def device_static_fields(self, shape, dzs):
+        """Prepare immutable slab geometry once on the current parent card.
+
+        Call during setup to prewarm; repeated LSM calls reuse the same device
+        latitude and soil depths. Scalar configuration latitude broadcasts to
+        the actual parent grid before the gather kernel sees it.
+        """
+        import cupy as cp
+        key = (cp.cuda.Device().id, tuple(shape), id(dzs))
+        cache = self.__dict__.setdefault("_device_static_cache", {})
+        if key not in cache:
+            latitude = np.broadcast_to(self.latitude_deg, shape)
+            radians = np.ascontiguousarray(np.deg2rad(latitude), dtype=np.float32)
+            cache[key] = (cp.asarray(radians), cp.asarray(zsoil_from_dzs(dzs)), dzs)
+        return cache[key][:2]
+
     def valid_time(self, elapsed_seconds: float) -> datetime:
         return self.start_time + timedelta(seconds=float(elapsed_seconds))
 
@@ -1111,7 +1183,9 @@ class NoahmpSolarGeometry:
 
         mu, _solcon = wrf_solar_geometry(
             self.valid_time(elapsed_seconds),
-            self.latitude_deg, self.longitude_deg, hour_offset_seconds=0.0)
+            self.latitude_deg, self.longitude_deg, hour_offset_seconds=0.0,
+            generation=self.solar_generation, start_time=self.start_time,
+            elapsed_seconds=elapsed_seconds)
         return np.asarray(mu, dtype=np.float32)
 
     def julian(self, elapsed_seconds: float) -> float:
@@ -1166,6 +1240,7 @@ def zsoil_from_dzs(dzs) -> np.ndarray:
 #: forecast seeded from an uninitialised array.
 _COLD_START_SLAB = ("snow", "snowh", "canwat", "tslb", "smois", "sh2o",
                     "tsk", "xice", "ivgtyp", "isltyp", "lai",
+                    "t2mvxy", "t2mbxy",
                     *NOAHMP_STATE_2D, *NOAHMP_STATE_INT_2D,
                     *NOAHMP_STATE_SNOW_3D, *NOAHMP_STATE_SNOWSOIL_3D)
 
@@ -1181,6 +1256,7 @@ COLD_START_WRITES = (
     "tvxy", "tgxy", "canicexy", "canliqxy", "eahxy", "tahxy",
     "cmxy", "chxy", "fwetxy", "sneqvoxy", "alboldxy",
     "qsnowxy", "qrainxy", "wslakexy", "waxy", "xsaixy",
+    "t2mvxy", "t2mbxy",
 )
 
 #: Setting this to ``1`` forces the paired numpy authority for the one-time
@@ -1264,6 +1340,19 @@ def noahmp_cold_start(fields, *, params: NoahmpRuntimeParameters,
 
     for name, array in slab.items():
         fields[name][...] = cp.asarray(array)
+
+    # NOAHMP_INIT also seeds the two 2-m temperature diagnostics
+    # (module_sf_noahmpdrv.F:2129-2132) with exactly the expression it uses
+    # for TVXY and TGXY: TSK, or 273.15 over snow when TSK is warmer.  On a
+    # land column noahmplsm overwrites them at the first step; on open water
+    # and sea ice noahmplsm never writes them, so this seed is what WRF
+    # carries and publishes there for the whole run (T2MV/T2MB in wrfout).
+    # Leaving them at the allocation's zero published 0 K over every water
+    # and sea-ice column; the WRF v4.6.1 column oracle
+    # (tools/noahmp_wrf461_oracle/column) found it.
+    for diagnostic, source in (("t2mvxy", "tvxy"), ("t2mbxy", "tgxy")):
+        if diagnostic in fields:
+            fields[diagnostic][...] = fields[source]
 
 
 def cold_start_on_device(slab, *, params: NoahmpRuntimeParameters,
@@ -1411,7 +1500,8 @@ def cold_start_on_device(slab, *, params: NoahmpRuntimeParameters,
                           ("fwetxy", "fwet"), ("sneqvoxy", "sneqvo"),
                           ("alboldxy", "albold"), ("qsnowxy", "qsnow"),
                           ("qrainxy", "qrain"), ("wslakexy", "wslake"),
-                          ("waxy", "wa"), ("xsaixy", "xsai")):
+                          ("waxy", "wa"), ("xsaixy", "xsai"),
+                          ("t2mvxy", "t2mv"), ("t2mbxy", "t2mb")):
             slab[name].reshape(ncol)[span] = y[:, NI_OUT[out]]
         # ISNOWXY is the integer carrier; the kernel returns it as a float
         # over -3..0, which every integer dtype in the tree holds exactly.
@@ -1491,6 +1581,8 @@ def cold_start_on_host(slab, *, params: NoahmpRuntimeParameters,
             slab["canliqxy"][j, i] = cold.canliq
             slab["eahxy"][j, i] = cold.eah
             slab["tahxy"][j, i] = cold.tah
+            slab["t2mvxy"][j, i] = cold.t2mv
+            slab["t2mbxy"][j, i] = cold.t2mb
             slab["cmxy"][j, i] = cold.cm
             slab["chxy"][j, i] = cold.ch
             slab["fwetxy"][j, i] = cold.fwet
@@ -1532,6 +1624,7 @@ def noahmp_lsm_step(
     opt_tdrn: int,
     opt_soil: int,
     sf_urban_physics: int = 0,
+    noahmp_snow_age: str = "wrf_470",
 ) -> dict[str, int]:
     """One ``noahmplsm`` call.  Mutates ``fields`` in place.
 
@@ -1546,6 +1639,8 @@ def noahmp_lsm_step(
     """
     import cupy as cp
 
+    from woof.noahmp_generation import snow_age_generation
+    snow_age_generation(noahmp_snow_age)
     if int(itimestep) < 1:
         raise ValueError("noahmplsm itimestep is one-based and starts at 1")
     if int(dveg) != SFLX_DVEG:
@@ -1580,6 +1675,7 @@ def noahmp_lsm_step(
             precipitation=precipitation, coszen=coszen,
             dt=dt, dx=dx, dzs=dzs, itimestep=itimestep,
             elapsed_seconds=elapsed_seconds,
+            noahmp_snow_age=noahmp_snow_age,
             **({"sf_urban_physics": int(sf_urban_physics)}
                if int(sf_urban_physics) else {}))
         _noahmp_post_lsm_diagnostics(fields, params=params)
@@ -1832,7 +1928,8 @@ def noahmp_lsm_step(
         # call that has a device batch, is answered there, and continues
         # in the same frame; nothing is replayed and no partially mutated
         # state is ever observed.
-        steps = sflx_steps(handle, col, column_smc, **sflx_kwargs)
+        steps = sflx_steps(handle, col, column_smc,
+                           noahmp_snow_age=noahmp_snow_age, **sflx_kwargs)
         try:
             first = steps.send(None)
         except StopIteration:
@@ -1856,7 +1953,8 @@ def noahmp_lsm_step(
         glacier_evaluator = _resolve_glacier_evaluator()
         _glacier_lsm_step(fields, atmosphere, glacier, params=params,
                           coszen=coszen, dt=dt32, dzs=dzs,
-                          evaluator=glacier_evaluator)
+                          evaluator=glacier_evaluator,
+                          noahmp_snow_age=noahmp_snow_age)
         census["glacier_path"] = _glacier_execution_provenance(
             glacier_evaluator)
     _noahmp_post_lsm_diagnostics(fields, params=params)
@@ -1959,6 +2057,7 @@ def _lsm_step_slab(
     itimestep: int,
     elapsed_seconds: float,
     sf_urban_physics: int = 0,
+    noahmp_snow_age: str = "wrf_470",
 ) -> dict[str, int]:
     """One ``noahmplsm`` call through the whole-slab orchestration.
 
@@ -2015,8 +2114,7 @@ def _lsm_step_slab(
             f"{cosz.shape} for a {(ny, nx)} slab")
     julian32 = f32(geometry.julian(elapsed_seconds))
     yearlen = year_length(geometry.year(elapsed_seconds))
-    latitude = cp.asarray(np.deg2rad(geometry.latitude_deg).astype(np.float32))
-    zsoil_row = cp.asarray(zsoil_from_dzs(dzs))
+    latitude, zsoil_row = geometry.device_static_fields((ny, nx), dzs)
     identity = params.land_use
     foln32 = np.float32(f32(FOLN))
     undefined32 = np.float32(f32(UNDEFINED_VALUE))
@@ -2100,7 +2198,8 @@ def _lsm_step_slab(
         glacier_evaluator = _resolve_glacier_evaluator()
         _glacier_lsm_step(fields, atmosphere, glacier, params=params,
                           coszen=cosz, dt=float(dt32f), dzs=dzs,
-                          evaluator=glacier_evaluator)
+                          evaluator=glacier_evaluator,
+                          noahmp_snow_age=noahmp_snow_age)
         census["glacier_path"] = _glacier_execution_provenance(
             glacier_evaluator)
 
@@ -2172,7 +2271,7 @@ def _lsm_step_slab(
         })
         chunk.update(parameter_chunks[start // SLAB_COLUMN_CHUNK])
 
-        out = evaluate_sflx_slab(chunk, m)
+        out = evaluate_sflx_slab(chunk, m, noahmp_snow_age=noahmp_snow_age)
         _write_back_slab(fields, jc, ic, out, nsoil=nsoil, dt=dt32f)
 
     return census
@@ -2200,6 +2299,8 @@ def _write_back_slab(fields, j, i, r, *, nsoil, dt) -> None:
 
     scatter_slab_fields(j, i, [(fields[carrier], r[name])
                                for carrier, name in _WRITE_BACK_DIRECT])
+    if "soldrain" in fields:
+        scatter_slab_fields(j, i, [(fields["soldrain"], r["soldrain"])])
 
     # ---- the column itself -------------------------------------------------
     scatter_slab_fields(j, i, [
@@ -2227,46 +2328,18 @@ def _write_back_slab(fields, j, i, r, *, nsoil, dt) -> None:
     fields["acsnow"][at] = (fields["acsnow"][at]
                             + fields["rainbl"][at] * r["fpice"])
     ponding = (r["ponding"] + r["ponding1"]) + r["ponding2"]
-    fields["acsnom"][at] = fields["acsnom"][at] + (r["qmelt"] * dt + ponding)
+    fields["acsnom"][at] = acsnom_accumulate(
+        fields["acsnom"][at], r["qmelt"], dt, r["ponding"], r["ponding1"],
+        r["ponding2"])
     fields["pondingxy"][at] = ponding
 
     # :1285-1286, specific humidity back to mixing ratio.
     fields["q2mvxy"][at] = r["q2v"] / (one - r["q2v"])
     fields["q2mbxy"][at] = r["q2b"] / (one - r["q2b"])
 
-    # ---- :1305-1314, the canopy conductance inverse --------------------------
-    laisun = cp.where(zero > r["laisun"], zero, r["laisun"])
-    laisha = cp.where(zero > r["laisha"], zero, r["laisha"])
-    rb = cp.where(zero > r["rb"], zero, r["rb"])
-    closed = ((r["rssun"] <= zero) | (r["rssha"] <= zero)
-              | (laisun == zero) | (laisha == zero))
-    inverse = ((one / (r["rssun"] + rb)) * laisun
-               + (one / (r["rssha"] + rb)) * laisha)
-    fields["rs"][at] = cp.where(closed, zero, one / inverse)
-
-    # ---- :1381-1394, the two column-energy integrals -------------------------
-    stc = r["stc"]
-    zsnso = r["zsnso"]
-    hcpct = r["hcpct"]
-    isnow = r["isnow"].astype(cp.int32)
-    count = int(j.size)
-    soil_energy = cp.zeros(count, dtype=cp.float32)
-    snow_energy = cp.zeros(count, dtype=cp.float32)
-    for k in range(-NSNOW + 1, nsoil + 1):
-        slot = k + NSNOW - 1
-        live = k >= isnow + 1
-        top = k == isnow + 1
-        above = zsnso[:, slot - 1] if slot > 0 else zero
-        thickness = cp.where(top, -zsnso[:, slot], above - zsnso[:, slot])
-        term = ((thickness * hcpct[:, slot])
-                * (stc[:, slot] - np.float32(273.16))) * np.float32(0.001)
-        contribution = cp.where(live, term, zero)
-        if k >= 1:
-            soil_energy = soil_energy + contribution
-        else:
-            snow_energy = snow_energy + contribution
-    fields["soilenergy"][at] = soil_energy
-    fields["snowenergy"][at] = snow_energy
+    _write_back_canopy_and_energy(
+        fields, at, r, r["stc"], r["zsnso"], r["isnow"].astype(cp.int32),
+        r["hcpct"], nsoil=nsoil, arrays=cp)
 
 
 #: The ``SflxResult`` scalars the write-back reads, in one tuple so they can
@@ -2290,7 +2363,7 @@ _WRITE_BACK_DIRECT = (
     ("snowc", "fsno"), ("emiss", "emissi"), ("qsfc", "qsfc"),
     ("tvxy", "tv"), ("tgxy", "tg"), ("canliqxy", "canliq"),
     ("canicexy", "canice"), ("eahxy", "eah"), ("tahxy", "tah"),
-    ("cmxy", "cm"), ("chxy", "ch"), ("fwetxy", "fwet"),
+                          ("cmxy", "cm"), ("chxy", "ch"), ("fwetxy", "fwet"),
     ("sneqvoxy", "sneqvo"), ("alboldxy", "albold"), ("qsnowxy", "qsnow"),
     ("qrainxy", "qrain"), ("wslakexy", "wslake"),
     # WAXY is deliberately absent: opt_run=3 kills GROUNDWATER, so nothing in
@@ -2357,7 +2430,9 @@ def _write_back_batch(host, host_3d, staged, *, nsoil, dt) -> None:
     host["canwat"][at] = r["canliq"] + r["canice"]                    # :1241
     host["acsnow"][at] = host["acsnow"][at] + host["rainbl"][at] * r["fpice"]
     ponding = (r["ponding"] + r["ponding1"]) + r["ponding2"]
-    host["acsnom"][at] = host["acsnom"][at] + (r["qmelt"] * dt + ponding)
+    host["acsnom"][at] = acsnom_accumulate(
+        host["acsnom"][at], r["qmelt"], dt, r["ponding"], r["ponding1"],
+        r["ponding2"])
     host["pondingxy"][at] = ponding
 
     # :1285-1286, specific humidity back to mixing ratio.
@@ -2386,42 +2461,53 @@ def _write_back_batch(host, host_3d, staged, *, nsoil, dt) -> None:
                                     dtype=np.float32, count=count)
     host["isnowxy"][at] = isnow
 
-    # ---- :1305-1314, the canopy conductance inverse -----------------------
+    _write_back_canopy_and_energy(
+        host, at, r, stc, zsnso, isnow,
+        np.array([x.hcpct for x in results], dtype=np.float32),
+        nsoil=nsoil, arrays=np)
+
+
+def _write_back_canopy_and_energy(fields, at, r, stc, zsnso, isnow, hcpct,
+                                  *, nsoil, arrays) -> None:
+    """Shared host/device arithmetic from ``module_sf_noahmpdrv.F:1305-1394``.
+
+    Keep gfortran's signed-zero MAX spelling and layer-order FP32 sums.
+    The host skips wholly dead layers; the device masks their exact +0.0
+    contribution without synchronizing to the host.
+    """
     zero = np.float32(0.0)
-    laisun = np.where(zero > r["laisun"], zero, r["laisun"])
-    laisha = np.where(zero > r["laisha"], zero, r["laisha"])
-    rb = np.where(zero > r["rb"], zero, r["rb"])
+    one = np.float32(1.0)
+    laisun = arrays.where(zero > r["laisun"], zero, r["laisun"])
+    laisha = arrays.where(zero > r["laisha"], zero, r["laisha"])
+    rb = arrays.where(zero > r["rb"], zero, r["rb"])
     closed = ((r["rssun"] <= zero) | (r["rssha"] <= zero)
               | (laisun == zero) | (laisha == zero))
     with np.errstate(divide="ignore", invalid="ignore"):
-        inverse = ((np.float32(1.0) / (r["rssun"] + rb)) * laisun
-                   + (np.float32(1.0) / (r["rssha"] + rb)) * laisha)
-        host["rs"][at] = np.where(closed, zero, np.float32(1.0) / inverse)
+        inverse = ((one / (r["rssun"] + rb)) * laisun
+                   + (one / (r["rssha"] + rb)) * laisha)
+        fields["rs"][at] = arrays.where(closed, zero, one / inverse)
 
-    # ---- :1381-1394, the two column-energy integrals ----------------------
-    hcpct = np.array([x.hcpct for x in results], dtype=np.float32)
-    soil_energy = np.zeros(count, dtype=np.float32)
-    snow_energy = np.zeros(count, dtype=np.float32)
+    soil_energy = arrays.zeros(isnow.size, dtype=np.float32)
+    snow_energy = arrays.zeros(isnow.size, dtype=np.float32)
     for k in range(-NSNOW + 1, nsoil + 1):
         slot = k + NSNOW - 1
         live = k >= isnow + 1
-        if not live.any():
+        if arrays is np and not live.any():
             continue
         top = k == isnow + 1
         above = zsnso[:, slot - 1] if slot > 0 else zero
-        thickness = np.where(top, -zsnso[:, slot], above - zsnso[:, slot])
+        thickness = arrays.where(top, -zsnso[:, slot], above - zsnso[:, slot])
         term = ((thickness * hcpct[:, slot])
                 * (stc[:, slot] - np.float32(273.16))) * np.float32(0.001)
-        # A column that has not reached ISNOW+1 adds an exact +0.0, which is
-        # the identity for every value this accumulator can hold: it starts
-        # at +0.0 and the only way to reach -0.0 by addition is from -0.0.
-        contribution = np.where(live, term, zero)
+        # Exact +0.0 is the identity for these accumulators: they start at
+        # +0.0 and cannot reach -0.0 by addition from any other value.
+        contribution = arrays.where(live, term, zero)
         if k >= 1:
             soil_energy = soil_energy + contribution
         else:
             snow_energy = snow_energy + contribution
-    host["soilenergy"][at] = soil_energy
-    host["snowenergy"][at] = snow_energy
+    fields["soilenergy"][at] = soil_energy
+    fields["snowenergy"][at] = snow_energy
 
 
 __all__ = [
