@@ -56,6 +56,11 @@ def synthetic_static(grid: Path, out: Path) -> Path:
                 np.asarray(ds.variables[name][...]) * EARTH_RADIUS_M ** 2
             )
         ds.setncattr("sphere_radius", EARTH_RADIUS_M)
+        # hex 0.4.x binds a static's regional cut to its final grid and
+        # refuses an artifact without a static build to identify; a real
+        # static carries this from rw_mpas_static.
+        ds.setncattr("rw_static_provenance_json", json.dumps(
+            {"schema": "synthetic-test-static", "grid": grid.name}))
         lat = np.asarray(ds.variables["latCell"][:])
         lon = np.asarray(ds.variables["lonCell"][:])
         ds.createVariable("ter", "f4", ("nCells",))[:] = (
@@ -267,8 +272,11 @@ def test_register_writes_a_global_and_a_cull_row_that_round_trip_and_bind(chain,
     parent, cull = _register_pair(chain, rows)
     assert parent.kind == "generated-global" and parent.point_deg is None
     assert parent.n_levels == LEVELS and cull.n_levels == LEVELS
-    assert parent.timestep_evidence == mesh_rows.ANCHORED_TIMESTEP_EVIDENCE
-    assert parent.dt_seconds in {120.0, 100.0, 75.0}
+    # hex 0.4.x admits a timestep on the stability limit alone (the anchor
+    # table is retired), so a default registration carries no experimental
+    # label; dt is the largest schedulable step.
+    assert not parent.experimental
+    assert parent.dt_seconds > 0.0
     # The spec is the one the generator stamped on the grid.
     assert parent.region["background_km"] == 1000.0 and parent.spec_sha256
     with netCDF4.Dataset(str(chain.static)) as ds:
@@ -361,16 +369,12 @@ def test_register_refuses_a_regional_grid_as_global_and_a_global_as_cull(chain, 
     assert "boundary zone" in str(refusal.value)
 
 
-def test_register_refuses_an_unanchored_timestep_with_the_anchor_table_message(chain, tmp_path) -> None:
-    with pytest.raises(RegisterRefusal) as refusal:
-        register_mesh(grid=chain.grid, static=chain.static, name="g7",
-                      rows=tmp_path / "r.json", dt_seconds=7.0, log=_quiet)
-    assert "holds no timestep anchor" in str(refusal.value)
-    assert not (tmp_path / "r.json").exists()
-    row, _ = register_mesh(grid=chain.grid, static=chain.static, name="g20",
-                           rows=tmp_path / "r.json", dt_seconds=20.0, log=_quiet)
-    assert row.dt_seconds == 20.0
-    assert row.timestep_evidence == mesh_rows.ANCHORED_TIMESTEP_EVIDENCE
+def test_register_admits_a_stable_timestep_without_an_anchor(chain, tmp_path) -> None:
+    # hex 0.4.x retired the anchor table: a timestep inside the stability
+    # limit registers without the experimental opt-in and is not labelled.
+    row, _ = register_mesh(grid=chain.grid, static=chain.static, name="g7",
+                           rows=tmp_path / "r.json", dt_seconds=7.0, log=_quiet)
+    assert row.dt_seconds == 7.0 and not row.experimental
 
 
 def test_register_refuses_a_timestep_above_the_courant_limit_even_experimentally(chain, tmp_path) -> None:
@@ -379,7 +383,7 @@ def test_register_refuses_a_timestep_above_the_courant_limit_even_experimentally
             register_mesh(grid=chain.grid, static=chain.static, name="gbig",
                           rows=tmp_path / "r.json", dt_seconds=100000.0,
                           experimental=experimental, log=_quiet)
-        assert "Courant limit" in str(refusal.value)
+        assert "unstable mesh/timestep" in str(refusal.value)
 
 
 def test_the_experimental_lane_skips_only_the_anchor_and_labels_the_row(chain, tmp_path) -> None:
@@ -389,7 +393,7 @@ def test_the_experimental_lane_skips_only_the_anchor_and_labels_the_row(chain, t
     # anchor fits gets an experimental pick (woof.hex.mesh_point).
     auto, _ = register_mesh(grid=chain.grid, static=chain.static, name="gauto",
                             rows=tmp_path / "auto.json", experimental=True, log=_quiet)
-    assert auto.timestep_evidence == mesh_rows.ANCHORED_TIMESTEP_EVIDENCE
+    assert not auto.experimental
     parent, _ = register_mesh(grid=chain.grid, static=chain.static, name="gx", rows=rows,
                               dt_seconds=7.0, experimental=True, vertical_spec=chain.spec,
                               log=_quiet)
@@ -413,9 +417,10 @@ def test_the_command_line_opens_the_experimental_lane_by_flag_or_environment(
     argv = ["register", "--grid", str(chain.grid), "--static", str(chain.static),
             "--vertical", str(chain.vertical), "--dt-seconds", "7.0"]
     monkeypatch.delenv("WOOF_HEX_EXPERIMENTAL_DT", raising=False)
-    assert hex_main(argv + ["--name", "gshut", "--rows", str(tmp_path / "shut.json")]) != 0
-    assert "holds no timestep anchor" in capsys.readouterr().err
-    assert not (tmp_path / "shut.json").exists()
+    # Without the opt-in a stable timestep registers unlabelled (hex 0.4.x
+    # retired the anchor table); the lane only labels the row.
+    assert hex_main(argv + ["--name", "gshut", "--rows", str(tmp_path / "shut.json")]) == 0
+    assert not mesh_rows.read_rows(tmp_path / "shut.json")[0].experimental
     rows = tmp_path / "flag.json"
     assert hex_main(argv + ["--name", "gflag", "--rows", str(rows),
                             "--experimental-dt"]) == 0
@@ -492,7 +497,7 @@ def test_an_experimental_cull_of_an_anchored_parent_keeps_the_anchored_label(cha
     cull, _ = register_mesh(grid=chain.cull_grid, static=chain.cull_static, name="c1",
                             rows=rows, parent_row="g1000", cull_receipt=chain.cull_receipt,
                             experimental=True, log=_quiet)
-    assert cull.timestep_evidence == mesh_rows.ANCHORED_TIMESTEP_EVIDENCE
+    assert not cull.experimental
 
 
 def test_the_pad_scale_is_derived_only_for_a_cap_on_the_parents_own_core(chain, tmp_path) -> None:

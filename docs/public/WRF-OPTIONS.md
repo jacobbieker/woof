@@ -236,8 +236,8 @@ WRF source: https://github.com/wrf-model/WRF at v4.7.1 (f52c197ed39d).
 
 | value | WRF option | woof |
 |---|---|---|
-| `1` | Fitch wind farm | refused: &physics windfarm_opt = [1]: The Fitch wind-farm drag scheme (fitchscheme) is not ported in this release. Nothing is substituted for it; set windfarm_opt = 0. |
-| `2` | Ma et al. (2022) wind farm with subgrid wakes | refused: &physics windfarm_opt = [2]: The MAV wind-farm drag scheme (mavscheme) is not ported in this release. Nothing is substituted for it; set windfarm_opt = 0. |
+| `1` | Fitch wind farm | refused: &physics windfarm_opt = [1]: the Fitch scheme adds its TKE source into MYNN's QKE, and domain(s) 1 run another PBL scheme (bl_pbl_physics = 5 required). |
+| `2` | Ma et al. (2022) wind farm with subgrid wakes | refused: &physics windfarm_opt = [2]: must be 0 or 1 on every domain (WRF v4.7.1: 1 the Fitch scheme; 2, the MAV wake scheme, is not ported). |
 
 ## `cu_rad_feedback`
 

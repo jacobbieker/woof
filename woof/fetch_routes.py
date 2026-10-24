@@ -3499,15 +3499,23 @@ def _write_route_manifest(out: Path, payload: Mapping[str, object]) -> None:
     # invalidates an otherwise identical preparation on every cached fetch.
     material = dict(payload)
     receipt = material.pop("concurrency", None)
+    # How this run proved the bytes (woof.verify_stamps: hashed, stamp or
+    # memo) is an observation of the run too, not input content: a reuse
+    # run that read nothing must leave the authority's bytes as they were.
+    # It travels with the pool receipt beside the manifest instead.
+    verification = material.pop("verification", None)
     # A cached object has the same authority as a freshly acquired object.
     # Keep reuse observations in the returned payload and recovery receipts.
     if "files" in material:
         material["files"] = [
             {key: value for key, value in entry.items()
-             if key not in {"reused", "adopted", "downloaded", "adoption"}}
+             if key not in {"reused", "adopted", "downloaded", "adoption",
+                            "verified"}}
             for entry in material["files"]
         ]
     if receipt is not None:
+        if verification is not None:
+            receipt = {**receipt, "verification": dict(verification)}
         _write_json(out / "fetch-pool-receipt.json", receipt)
     _write_json(out / MANIFEST_NAME, material)
 

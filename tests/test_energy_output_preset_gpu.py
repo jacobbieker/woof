@@ -204,6 +204,8 @@ def test_composition_carries_the_requested_beam():
     arguments = dict(atmosphere={}, fields={"glw": cp.zeros((2, 3))},
                      state=SimpleNamespace(elapsed_seconds=0.0),
                      cfg=SimpleNamespace(swint_opt=0))
-    assert composed(**arguments).swddir is None
+    # Upstream 1.1.0 publishes SWDDIR by default (cap-solar), so the beam is
+    # carried whether or not the energy preset requested it.
+    assert composed(**arguments).swddir is beam.swddir
     composed.surface_direct_requested = True
     assert composed(**arguments).swddir is beam.swddir

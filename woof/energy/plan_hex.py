@@ -1740,7 +1740,7 @@ STAGE_REQUIREMENTS: dict[str, tuple[dict[str, Any], ...]] = {
 
 def _parse_error(argv: Sequence[str],
                  parsers: dict[str, Any] | None = None) -> str | None:
-    """None when this build's real parser accepts ``woof argv``, else why.
+    """None when this build's real parser accepts the woof command line ``argv``, else why.
 
     ``parsers`` caches the two parsers across one plan's commands (building
     ``woof``'s top-level parser is the slow part).

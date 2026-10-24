@@ -4430,7 +4430,7 @@ def execute_forecast(
         "step_receipt_count": len(step_receipts),
         "physics_cadence": _physics_cadence_proof(
             host.get("pbl_cadence"), step_receipts, executed_steps - start_step,
-            pbl_scheme=(host.get("pbl") or {}).get("scheme", "ysu"),
+            (host.get("pbl") or {}).get("scheme", "ysu"),
         ),
         "physics_rollback": {
             "armed": bool(stop_on_refusal),

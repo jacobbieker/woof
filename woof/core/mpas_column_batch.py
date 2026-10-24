@@ -708,7 +708,8 @@ class MpasColumnBatchPhysics:
         # exactly as validate_run_config refuses cu_physics=3 without one.
         if pbl_scheme not in _BL_PBL_PHYSICS_BY_SCHEME:
             raise ValueError(
-                "pbl_scheme must be 'ysu', 'off' or None (external LES), "
+                "pbl_scheme must be one of 'ysu', 'off' or None (external "
+                "LES), "
                 f"got {pbl_scheme!r}")
         if pbl_scheme in ("off", None) and cumulus_scheme == "gf":
             raise ValueError(

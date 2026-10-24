@@ -1424,12 +1424,9 @@ PHYSICS_PINS: tuple[tuple[str, int, str], ...] = (
 #: retired with the port.
 UNPORTED_PACKAGE_SELECTORS: dict[str, tuple[int, dict[int, str]]] = {
     # sf_ocean_physics is consumed by the Pollard / PWP reader below.
-    "windfarm_opt": (0, {
-        1: "the Fitch wind-farm drag scheme (fitchscheme) is not ported in "
-           "this release",
-        2: "the MAV wind-farm drag scheme (mavscheme) is not ported in this "
-           "release",
-    }),
+    # windfarm_opt left this table with the Fitch port: the wind-farm
+    # reader below takes it (and windfarm_ij, windfarm_tke_factor) first,
+    # refusing 2 (MAV) by name.
 }
 
 #: Keys WRF reads only when one of those selectors (or tmn_update, pinned
@@ -6052,6 +6049,19 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                        "must be a finite number >= 0 (WRF's default 0.25).")
     windfarm_shared: list[str] = []
     if any(windfarm_column):
+        # The MAV scheme's own keys (windfarm_deg, windfarm_wake_model,
+        # windfarm_overlap_method): with the Fitch scheme on they would be
+        # a configuration the run does not have, so they are refused here;
+        # with the farm off UNPORTED_SELECTOR_PARAMETERS drops them as inert.
+        for key in ("windfarm_deg", "windfarm_wake_model",
+                    "windfarm_overlap_method"):
+            raw = ph.take(key)
+            if raw is not None:
+                raise _err("physics", key, raw,
+                           "is a key of WRF's MAV wind-farm scheme "
+                           "(windfarm_opt = 2), which is not ported; the "
+                           "Fitch scheme (windfarm_opt = 1) does not read it. "
+                           "Remove it.")
         turbine_list = Path(input_path).resolve().parent / (
             "windturbines-ij.txt" if windfarm_ij else "windturbines.txt")
         windfarm_shared.append(

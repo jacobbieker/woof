@@ -392,7 +392,7 @@ def test_the_executor_hands_a_parent_born_child_to_the_route(monkeypatch):
     from woof.core.model import execute_experiment
     from woof.runtime import _submit_tree_history_frame
     from test_delayed_nest_activation import (
-        DELAY_SECONDS, _Writers, _stashing_step, _tree)
+        DELAY_SECONDS, _Writers, _analysis_stand_in, _stashing_step, _tree)
     from test_model import _Coupler, _HistoryState
 
     exp, model = _tree(delay_s=DELAY_SECONDS)
@@ -402,6 +402,9 @@ def test_the_executor_hands_a_parent_born_child_to_the_route(monkeypatch):
     model._activation_context = {"experiment": exp}
     monkeypatch.setattr("woof.core.nest.NestCoupler", _Coupler)
     monkeypatch.setattr("woof.core.dycore.step", _stashing_step)
+    # The tick-zero analysis frame diagnoses REFL_10CM on the GPU since
+    # 1.1.0; the stand-in from test_delayed_nest_activation answers here.
+    monkeypatch.setattr("woof.core.refl.analysis_refl_10cm", _analysis_stand_in)
     born = _HistoryState()
     asked = []
 

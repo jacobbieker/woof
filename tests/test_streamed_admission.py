@@ -583,9 +583,14 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # 5,120 B): (7,392 - 5,120) * 170 SMs * 1,536 threads = 593,264,640 B more
     # local-memory reservation, so the envelope moves by 888,601,440 B
     # (15,378,265,207 before).
-    assert payload["peak_envelope_bytes"] == 16266866647
-    assert payload["observed_peak_envelope_bytes"] == 16266866647
-    assert payload["alloc_estimate_bytes"] == 12387917783
+    # The fork's nwp_diagnostics wind running maxima (WSPD10MAX, U10MAX,
+    # V10MAX, W_UP_MAX, W_DN_MAX and the UPP gust; woof/core/wind_gust_diag)
+    # and its SWDDNI/SWDDIF/COSZEN surface-solar carriers: nine 550x550 FP32
+    # planes, 10,890,000 B, 12,305,700 B with the 1.13 pool margin
+    # (16,266,866,647 and 12,387,917,783 at upstream 1.1.0).
+    assert payload["peak_envelope_bytes"] == 16279172347
+    assert payload["observed_peak_envelope_bytes"] == 16279172347
+    assert payload["alloc_estimate_bytes"] == 12400223483
     # The reserve's 0.03 retention term follows the estimate: A163 moved
     # it by 0.03 x -212,355,128 = -6,370,653 B.
     # The density addition raises its retention reserve by 2,009,931 B, and
@@ -597,8 +602,9 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # 8,047,033 B.
     # The cap-solar + cap-hail allocations raise it by 0.03 x 295,336,800 =
     # 8,860,104 B and the hail frame's local memory by 593,264,640 B
-    # (3,648,461,654 before).
-    assert payload["reserve_bytes"] == 4250586398
+    # (3,648,461,654 before).  The fork's nine diagnostic planes above
+    # raise it by 0.03 x 12,305,700 = 369,171 B (4,250,586,398 at 1.1.0).
+    assert payload["reserve_bytes"] == 4250955569
     assert payload["budget_bytes"] == _FITS_STREAMED_GIB * GIB
     assert payload["gates"]["alloc_estimate_le_wddm_budget"] is False
     assert rc == 1
@@ -654,10 +660,10 @@ def test_check_on_a_config_that_does_not_stream_is_byte_identical(
     # change nothing this configuration is charged. The density allocation
     # and its unchanged pool and retention margins remain present in both,
     # as does the priced CLDFRA buffer, and the strict-rim health table.
-    assert old_payload["peak_envelope_bytes"] == 16266866647
-    assert old_payload["observed_peak_envelope_bytes"] == 16266866647
-    assert old_payload["alloc_estimate_bytes"] == 12387917783
-    assert old_payload["reserve_bytes"] == 4250586398
+    assert old_payload["peak_envelope_bytes"] == 16279172347
+    assert old_payload["observed_peak_envelope_bytes"] == 16279172347
+    assert old_payload["alloc_estimate_bytes"] == 12400223483
+    assert old_payload["reserve_bytes"] == 4250955569
     assert old_rc == rc == 1
     assert old_estimate == estimate
     for key in ("peak_envelope_bytes", "observed_peak_envelope_bytes",

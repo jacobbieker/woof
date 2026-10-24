@@ -1255,7 +1255,7 @@ def test_sase_actual_pool_peak_is_within_its_priced_phase(monkeypatch):
 
     allocations = Allocations()
     monkeypatch.setattr(sase, 'cp', allocations)
-    monkeypatch.setattr(sase, '_kern', lambda name: lambda *args, **kwargs: None)
+    monkeypatch.setattr(sase, '_kern', lambda name, *tier: lambda *args, **kwargs: None)
     # A zero-filled kernel stub produces zero z_i. The host scalar bound has
     # no allocation, so replace it with a finite value for this storage test.
     monkeypatch.setattr(sase, 'partition_cap', lambda *args, **kwargs: 1.0)

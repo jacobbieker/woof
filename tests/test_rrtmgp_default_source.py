@@ -5,7 +5,9 @@ import pytest
 from woof.core import kernels
 import woof.wrf_exact as exact
 # RTE pin/header composition refreshed to verified lane BASE ff16d3378bb.
-PINS = {'rrtmgp_gas_default.cu': 'd13b914a28ad8b7ef88904977c7e33b9a7d7e800592473c0fb8debebca031edf', 'rrtmgp_rte_default.cu': '731bd84717398320a1710b2c151a466b9e5bf1a30b633d858fd31d7162dbd173', 'rrtmgp_cloud.cu': '512157c75edf4637d99a1cad490e8db71e51cd2c3643ff129adebefa81557560', 'rrtmgp_planck_common_default.cuh': '4e1a8214ea8e2a3dbd88cc2cda260a21ff678d98acf4f22c971ba0b51b4eba36'}
+# rrtmgp_gas_default.cu re-pinned at the 1.1.0 upstream merge: the fork's
+# one-layer Planck window (no pfrac[128] layer ceiling; previously d13b914a).
+PINS = {'rrtmgp_gas_default.cu': '66557cb1680e4ee29c86845f408dbf0cf3108ae0e158e830554e5b15b5b2c3ba', 'rrtmgp_rte_default.cu': '731bd84717398320a1710b2c151a466b9e5bf1a30b633d858fd31d7162dbd173', 'rrtmgp_cloud.cu': '512157c75edf4637d99a1cad490e8db71e51cd2c3643ff129adebefa81557560', 'rrtmgp_planck_common_default.cuh': '4e1a8214ea8e2a3dbd88cc2cda260a21ff678d98acf4f22c971ba0b51b4eba36'}
 BASE_HEADERS = {'rrtmgp_gas': (), 'rrtmgp_rte': ('rrtmgp_planck_common.cuh', 'rrtmgp_planck_staged_default.cuh'), 'rrtmgp_cloud': ()}
 @pytest.mark.parametrize("name", ("rrtmgp_gas", "rrtmgp_rte", "rrtmgp_cloud"))
 def test_default_source_keeps_the_base_unit_and_headers(monkeypatch,name):

@@ -164,6 +164,11 @@ def test_the_chem_block_is_appended_after_every_older_field():
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
 
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # The fork's wind-farm keys (WRF windfarm_opt and its companions) are
+    # appended after every upstream field.
+    from woof.config import WINDFARM_RUN_DEFAULTS
+    assert names[-len(WINDFARM_RUN_DEFAULTS):] == list(WINDFARM_RUN_DEFAULTS)
+    names = names[:-len(WINDFARM_RUN_DEFAULTS)]
     # Appended last after the campaign, keyword-only: sea ice's real.exe
     # threshold (4c82704f8f) and the HRRR v4 output controls
     # (lane/hrrr-v4-output: e55b68accb, bd4a1c2090, f80ac46aeb).

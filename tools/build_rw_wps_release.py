@@ -401,6 +401,19 @@ _TOP_LEVEL_EXCLUDES = {
     # candidate_map also reads terrain_clock.measured_map. These CPU readers
     # stay staged with their measured JSON tables; neither module executes a
     # forecast, and the model, dycore and physics executors remain excluded.
+    # The fork's forecast-side front doors (woof go-job, woof track
+    # estimate and multi-run GPU packing): each drives or sizes a forecast
+    # (go_job reads the card through woof.core.preflight), and their only
+    # importer is woof/cli.py, excluded above.
+    "go_job.py", "track_estimate.py", "gpu_packing.py",
+    # `woof relocation itinerary` plans a moving nest's track through the
+    # forecast's own relocation runner (woof.core.nest_relocation); its
+    # importers are woof/cli.py and woof/track/plan.py, both excluded.
+    "relocation_itinerary.py",
+    # The fork's live Icechunk exporter: it follows a running forecast's
+    # frames (woof.io.wrfout_frames, woof.supervisor); woof.io.
+    # history_selection's [output] icechunk check reaches it optionally.
+    "icechunk_export.py",
 }
 _CORE_MODULES = {
     "__init__.py",
@@ -874,6 +887,24 @@ _WRFRST_LIVE_OVERLAY = ("apply_warm_start_physics and apply_warm_start_clock "
                         "state; preparation only reads and checks the file")
 
 _OPTIONAL_STAGED_IMPORTS = {
+    ("woof/io/async_checkpoint.py", "woof.core.preflight"):
+        "the fork's asynchronous checkpoint writer reaches the restart writer, the supervisor, the resume ledger and the host-RAM probe only while a forecast writes a checkpoint; preparation stages the module for the RAM-reserve constants and the [output] history_queue_depth grammar (woof.io.history_staging), which call none of them",
+    ("woof/io/async_checkpoint.py", "woof.io.restart"):
+        "the fork's asynchronous checkpoint writer reaches the restart writer, the supervisor, the resume ledger and the host-RAM probe only while a forecast writes a checkpoint; preparation stages the module for the RAM-reserve constants and the [output] history_queue_depth grammar (woof.io.history_staging), which call none of them",
+    ("woof/io/async_checkpoint.py", "woof.supervisor"):
+        "the fork's asynchronous checkpoint writer reaches the restart writer, the supervisor, the resume ledger and the host-RAM probe only while a forecast writes a checkpoint; preparation stages the module for the RAM-reserve constants and the [output] history_queue_depth grammar (woof.io.history_staging), which call none of them",
+    ("woof/io/async_checkpoint.py", "woof.resume"):
+        "the fork's asynchronous checkpoint writer reaches the restart writer, the supervisor, the resume ledger and the host-RAM probe only while a forecast writes a checkpoint; preparation stages the module for the RAM-reserve constants and the [output] history_queue_depth grammar (woof.io.history_staging), which call none of them",
+    ("woof/io/history_selection.py", "woof.icechunk_export"):
+        "the [output] icechunk table is woof go's live export of a forecast's "
+        "history; the grammar validates it with the exporter where the "
+        "exporter is installed and leaves it unread in the standalone "
+        "preparation wheel, which exports no forecast",
+    ("woof/upper_source.py", "woof.domain_wizard"):
+        "experiment_area crops the fork's GFS upper-source fetch to a forecast "
+        "root through the wizard's area hint; its only callers are the woof "
+        "go and run-plan doors (go_cli.py, runplan.py), excluded from the "
+        "standalone preparation wheel",
     ("woof/ocean/seaice/__init__.py", "woof.core.physics"):
         "capture_precipitation reads the live microphysics snow ratio inside a "
         "forecast step; preparation stages the module only for its OUTPUT "

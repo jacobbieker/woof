@@ -102,6 +102,12 @@ from woof.physics_vertical_contract import (  # noqa: E402
     legacy_longwave_layer_tier as rlw_maxlay_tier,
 )
 
+#: The shipped unit's compile-time layer ceiling, under upstream's name: the
+#: hex model's own RRTMG LW binding (woof.hex.mpasphys.rrtmg_lw_v842) and its
+#: AOT build compile this tier.  The regional model compiles the per-run tier
+#: instead (rlw_maxlay_tier).
+MAX_RADIATION_LAYERS = RLW_MAXLAY_SHIPPED
+
 # ---------------------------------------------------------------------------
 # Section 0 -- glibc 2.39 FP32 libm (logf, expf, powf).
 #

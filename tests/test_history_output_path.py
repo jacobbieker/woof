@@ -475,7 +475,15 @@ def _hex_fields(seed):
 
 
 def test_hex_async_writer_writes_write_history_bytes_in_order(tmp_path):
+    from woof.hex import engines, restart_v842
     from woof.hex.output import AsyncHistoryWriter, write_history
+
+    # Hex history is encoded by the rw_mpas_stream Rust tool since 1.1.0
+    # (woof/hex/restart_v842.py), which builds only with system netCDF.
+    try:
+        restart_v842._bridge()
+    except engines.EngineRefusal:
+        pytest.skip("rw_mpas_stream is not built (rw-mpas system-netcdf feature)")
 
     mesh = _Mesh()
     when = [datetime(2026, 1, 1, h) for h in range(3)]

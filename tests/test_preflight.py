@@ -5427,8 +5427,12 @@ def test_wsm6_is_priced_as_a_workspace_that_follows_nz_not_a_tiered_frame():
                         moist=True, moist_cq=True, mp_physics=mp_physics)
         return experiment_from_run_config(cfg, start)
 
-    for nz in (4, 49, 64, 65, 72, 80, 128, 256):
-        assert pf.kernel_local_frame_bytes(exp(nz)).get("wsm6") == 0, nz
+    # One unit for every level count.  Upstream 1.1.0's WRF-exact WSM6
+    # (its own column workspace) keeps a small fixed frame -- 24 B on sm_86,
+    # NVRTC 12.9.86 (kernel_frame_recordings) -- that does not follow nz.
+    frames = {nz: pf.kernel_local_frame_bytes(exp(nz)).get("wsm6")
+              for nz in (4, 49, 64, 65, 72, 80, 128, 256)}
+    assert len(set(frames.values())) == 1 and frames[4] <= 64, frames
     small = _TINY["nx"] * _TINY["ny"]
     blocks = -(-small // WSM6_BLOCK)
     assert pf.wsm6_column_workspace_bytes(exp(72)) == (
@@ -5572,7 +5576,9 @@ def test_the_six_tornado_les_configs_are_the_ones_this_moves():
         rows.append((path.name, f["wsm6"], max(f.values()),
                      pf.wsm6_column_workspace_bytes(exp)))
     assert len(rows) == 6, [name for name, *_ in rows]
-    assert all(wsm6 == 0 and widest < 9008 and workspace > 0
+    # WSM6's frame is the small fixed one of upstream 1.1.0's workspace
+    # kernel (24 B on sm_86), no longer a 9,008 B tier.
+    assert all(wsm6 <= 64 and widest < 9008 and workspace > 0
                for _, wsm6, widest, workspace in rows), rows
 
     # The reservation no longer moves with nz on WSM6's account; the
@@ -5587,7 +5593,7 @@ def test_the_six_tornado_les_configs_are_the_ones_this_moves():
                         moist=True, moist_cq=True, mp_physics=6,
                         hailcast_opt=0)
         exp = experiment_from_run_config(cfg, start)
-        assert pf.kernel_local_frame_bytes(exp)["wsm6"] == 0
+        assert pf.kernel_local_frame_bytes(exp)["wsm6"] <= 64
         reserved[nz] = pf.kernel_local_memory_bytes(exp)
         workspace[nz] = pf.wsm6_column_workspace_bytes(exp)
     assert reserved[64] == reserved[72]

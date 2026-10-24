@@ -513,6 +513,9 @@ def stock_recovery_driver(
     driver.ncells = int(n_cells)
     driver.nedges = int(coe.shape[0])
     driver.v841_context = SimpleNamespace(role="recovery probe")
+    # hex 0.4.x's recovery selects its v8.4.1 arithmetic on the driver's own
+    # source release (CudaDryDycoreDriver.__init__ sets it); the probe is v8.4.1.
+    driver.source_release = "v8.4.1"
     driver.regional_v841 = None
     driver.atmosphere = SimpleNamespace(
         mesh=SimpleNamespace(

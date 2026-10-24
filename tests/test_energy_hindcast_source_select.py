@@ -62,9 +62,10 @@ def test_wales_after_the_orography_era_takes_the_met_office():
 
 
 def test_wales_older_than_every_forecast_archive_takes_era5():
-    choice = ss.select_source(WALES, "2019-06-01T12", 24, now=NOW)
+    # 1.1.0's GFS archive reaches back to 2005-02-15 (woof.source_availability)
+    choice = ss.select_source(WALES, "2004-06-01T12", 24, now=NOW)
     assert choice.source == "era5"
-    assert "2021-03-22" in _checks(choice, "gfs")["date"]
+    assert "2005-02-15" in _checks(choice, "gfs")["date"]
     assert "2022-01-25" in _checks(choice, "ecmwf-open-data")["date"]
 
 
@@ -74,20 +75,20 @@ def test_ifs_before_its_first_preparable_cycle_falls_to_gfs():
     assert "2024-03-18T12" in _checks(choice, "ecmwf-open-data")["date"]
 
 
-def test_conus_takes_hrrr_and_names_the_undeclared_native_archive():
+def test_conus_takes_hrrr_native_from_its_declared_archive():
+    # 1.1.0 declares the HRRR native archive (from 2014-07-30T18), so the
+    # rank-1 source is taken with no accept_unknown_archive opt-in
     choice = ss.select_source(TEXAS, "2026-01-15T00", 24, p_top_pa=5000.0,
                               now=NOW)
-    assert choice.source == "hrrr"
-    native = _checks(choice, "hrrr-native")
-    assert set(native) == {"date"}
-    assert "accept_unknown_archive" in native["date"]
-
-
-def test_accepting_an_undeclared_archive_takes_hrrr_native():
-    choice = ss.select_source(TEXAS, "2026-01-15T00", 24, now=NOW,
-                              accept_unknown_archive=True)
     assert choice.source == "hrrr-native"
-    assert any("accept_unknown_archive" in note for note in choice.notes)
+    assert not any("accept_unknown_archive" in note for note in choice.notes)
+
+
+def test_before_the_native_archive_conus_falls_to_gfs():
+    choice = ss.select_source(TEXAS, "2014-06-01T00", 24, now=NOW,
+                              priority=["hrrr-native", "gfs"])
+    assert choice.source == "gfs"
+    assert "2014-07-30" in _checks(choice, "hrrr-native")["date"]
 
 
 def test_a_cycle_inside_the_nomads_window_takes_hrrr_native():
@@ -172,7 +173,7 @@ def test_a_defaulted_start_keeps_the_preferred_source():
 
 def test_a_defaulted_start_with_no_source_anywhere_is_refused():
     with pytest.raises(ss.SourceSelectRefused) as caught:
-        ss.select_newest(WALES, "2019-06-01T12", 24, now=NOW,
+        ss.select_newest(WALES, "2004-06-01T12", 24, now=NOW,
                          priority=["gfs"])
     assert caught.value.choice is not None
 
@@ -259,7 +260,7 @@ def test_wrf_nests_ranks_hrrr_out():
 
 def test_no_candidate_refuses_with_every_reason():
     with pytest.raises(ss.SourceSelectRefused) as caught:
-        ss.select_source(WALES, "2019-06-01T12", 24, now=NOW,
+        ss.select_source(WALES, "2004-06-01T12", 24, now=NOW,
                          priority=["met-office-global", "gfs"])
     choice = caught.value.choice
     assert choice is not None and choice.source is None
@@ -438,7 +439,7 @@ def test_auto_with_no_candidate_refuses_before_writing(tmp_path):
 
     with pytest.raises(tiles.TilePlanRefusal, match="--source auto"):
         tiles.build_plan(load_sites(SITES_WALES), outdir=tmp_path,
-                         start="2019-06-01T12", source="auto",
+                         start="2004-06-01T12", source="auto",
                          source_priority=("gfs", "met-office-global"),
                          now=NOW)
     assert not list(tmp_path.iterdir())

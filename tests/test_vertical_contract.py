@@ -70,6 +70,14 @@ def test_source_top_refuses_before_inputs_or_memory(
               "conus_hrrr_configuration.toml").read_text()
     text = recipe.replace('source = "hrrr-prs"', f'source = "{source}"').replace(
         "p_top = 5000.0", f"p_top = {requested}")
+    from woof.source_adapters import get_source_adapter
+    if get_source_adapter(source).upper_source is not None:
+        # A row with an upper source initialises the column above its own
+        # top from it (the fork's GFS splice, woof.ingest.upper_splice);
+        # opting out leaves the row's own top as the limit, which is the
+        # refusal this test holds.
+        text = text.replace(f'source = "{source}"',
+                            f'source = "{source}"\nupper_source = "none"', 1)
     config = tmp_path / "experiment.toml"
     config.write_text(text)
 
@@ -101,6 +109,12 @@ def test_source_top_refuses_before_inputs_or_memory(
         context="fixed")
     assert "PASS" in validate_config_source_top(
         {"fetch": {"source": "gfs"}, "shared": {"p_top": 5000}}, context="extended")
+    if get_source_adapter(source).upper_source is not None:
+        # With the splice left on (the default), the composite column
+        # reaches the requested top and the early check passes.
+        assert "PASS" in validate_config_source_top(
+            {"fetch": {"source": source}, "shared": {"p_top": requested}},
+            context="spliced")
 
 
 def test_coordinate_shape_contract_derives_every_extent():

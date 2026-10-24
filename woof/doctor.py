@@ -2563,6 +2563,24 @@ def _bridge_checks() -> list[Check]:
     return checks
 
 
+#: Why an ``unreachable`` finding can still exit 0.  Printed on the two
+#: that do, so the summary's severity census and its blocking count are
+#: never in unexplained disagreement.
+_REFERENCE_DOOR_NOTE = (
+    "This door is not one of the README's or FIRST-LIGHT's own first-run "
+    "steps, so it reports UNREACHABLE without failing the exit code")
+
+#: The two GRIB2 tools, and the directory the mapped/20CRv3 routes
+#: build them in.  ``mapped_source._build_grib2_tools`` spells this
+#: path as ``Path(__file__).resolve().parents[1] / "tools" /
+#: "grib1_bridge"`` from a module that lives in the same package
+#: directory as this one, so the two expressions are the same path by
+#: construction -- and ``tests/test_doctor_mapped_route.py`` binds them
+#: by capturing the ``cwd`` that function would hand to cargo.
+_GRIB2_ROUTE_TOOLS = ("grib2_inventory", "grib2_dump")
+_GRIB2_ROUTE_CRATE_RELATIVE = ("tools", "grib1_bridge")
+
+
 def _grib2_route_crate() -> Path:
     """The directory the mapped/20CRv3 routes run ``cargo build`` in."""
 

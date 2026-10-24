@@ -1131,12 +1131,17 @@ class HistorySelection:
                 "repository holds every domain, one group each.  Move it "
                 "to the tree-wide [output] table.")
         if "icechunk" in table:
-            from woof.icechunk_export import ExportOptions
-
-            # {name} in its url is woof go's to fill.
-            ExportOptions.from_mapping(table["icechunk"], source=source,
-                                       base_dir=base_dir,
-                                       allow_template=True)
+            try:
+                from woof.icechunk_export import ExportOptions
+            except ImportError:
+                # The standalone preparation wheel carries no exporter (it
+                # exports no forecast); woof go validates the table itself.
+                ExportOptions = None
+            if ExportOptions is not None:
+                # {name} in its url is woof go's to fill.
+                ExportOptions.from_mapping(table["icechunk"], source=source,
+                                           base_dir=base_dir,
+                                           allow_template=True)
         unknown = sorted(set(table) - OUTPUT_KEYS)
         if unknown:
             suggestions = "".join(

@@ -1025,6 +1025,16 @@ def _wide_terrain(terrain: BoundRaster | None, grid, *, halo: int,
     return wide, reach
 
 
+#: The fork's local steep-ground pass (woof.static.terrain_slope, a fixed
+#: 0.85 bound) is off since the 1.1.0 merge: upstream's terrain
+#: auto-smoothing (woof.static.terrain_autosmooth) smooths every route's
+#: terrain to the run's measured acoustic slope limit after this overlay
+#: and records it in the receipt, and running the fork's pass first would
+#: pre-empt that pass and its receipt.  The pass and its reach stay
+#: importable for the tests that pin the library itself.
+STEEP_GROUND_PASS = False
+
+
 def _smoothed_steep_ground(filled: np.ndarray, wide: np.ndarray | None,
                            reach: int, grid, *, halo: int,
                            terrain_smoothing
@@ -1042,7 +1052,7 @@ def _smoothed_steep_ground(filled: np.ndarray, wide: np.ndarray | None,
     domain's own cells, and is ``None`` where none of them moved.
     """
     ny, nx = grid.e_sn - 1, grid.e_we - 1
-    if wide is None or reach <= 0:
+    if wide is None or reach <= 0 or not STEEP_GROUND_PASS:
         crop = (slice(halo, halo + ny), slice(halo, halo + nx))
         return smooth_terrain(filled, terrain_smoothing)[crop], None
     from .terrain_slope import smooth_steep_ground

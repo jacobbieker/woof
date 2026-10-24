@@ -238,5 +238,5 @@ def test_the_relocation_seam_runs_before_the_outgoing_release():
 
     source = inspect.getsource(model_module.execute_experiment)
     seam = source[source.index("def drop_validator"):]
-    seam = seam[:seam.index("outcome = relocation_runner.on_period_begin")]
+    seam = seam[:seam.index("relocation_runner.on_period_begin(")]
     assert "release_output_device_refs(model)" in seam

@@ -193,8 +193,11 @@ def test_a_deferred_refusal_names_the_check_the_eager_one_names(bad):
     eager = _first_refusal(checks, flags)
     ledger = health_ledger.HealthLedger(label="test", ordered=True,
                                         admit=health_ledger.RESIDENT_SITES)
+    # Upstream 1.1.0's _first_refusal defers only at a named call site (every
+    # production caller passes one, e.g. "mynn-tendency"); "mynn-" sites are
+    # resident sites.
     with health_ledger.deferring(ledger):
-        assert _first_refusal(checks, flags) is None
+        assert _first_refusal(checks, flags, site="mynn-test") is None
     if eager is None:
         ledger.drain()
         return
@@ -318,7 +321,10 @@ def test_deferred_and_immediate_forecasts_are_bit_identical(monkeypatch):
     sites = set(ledger._index)
     assert "microphysics" in sites
     assert any(site.startswith("carrier-contract:") for site in sites)
-    assert any(site.startswith("mynn-refusal:") for site in sites)
+    # The MYNN refusal sites are upstream 1.1.0's named ones
+    # ("mynn-tendency", ...), not the fork's "mynn-refusal:<message>".
+    assert any(site.startswith("mynn-") and site != "mynn-tendencies-finite"
+               for site in sites)
     assert "mynn-tendencies-finite" in sites
 
 

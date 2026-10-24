@@ -49,7 +49,15 @@ class IntervalDiagnosticError(RuntimeError):
 
 def attached(state) -> tuple:
     """Every diagnostic attached to ``state``, in attachment order."""
-    return tuple(getattr(state, STATE_ATTRIBUTE, None) or ())
+    # The registry is an instance attachment (``setattr`` below), so it is
+    # read from the instance's own dict: a publisher that refuses every
+    # model-state read (a streamed domain's stand-in state) is not asked
+    # for one just to learn that nothing is attached.
+    try:
+        own = vars(state)
+    except TypeError:
+        return tuple(getattr(state, STATE_ATTRIBUTE, None) or ())
+    return tuple(own.get(STATE_ATTRIBUTE) or ())
 
 
 def get(state, name: str):

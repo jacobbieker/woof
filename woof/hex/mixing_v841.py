@@ -916,6 +916,13 @@ def initialize_deformation_weights_v841(
     return replace(weights, finest_spacing_m=spacing)
 
 
+# The native evaluation behind the prep cache, under the name upstream's
+# hex tests and host-prep workers reach it by (the public function was the
+# cached native evaluation itself before the geometry dispatcher above).
+initialize_deformation_weights_v841.__wrapped_prep_cache__ = (  # type: ignore[attr-defined]
+    _deformation_weights_native.__wrapped_prep_cache__)
+
+
 @dataclass(frozen=True, slots=True)
 class SmagorinskyCoefficientsV841:
     kdiff: FloatArray

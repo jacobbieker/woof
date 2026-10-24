@@ -26,6 +26,9 @@ GO_STAGES = {
     "chem fetch": "fetch.chemistry", "manifest": "prep.manifest",
     "prepare": "prep.inputs", "forecast": "post.forecast_process",
     "render": "post.render",
+    # `woof go`'s live Icechunk export ([output] icechunk), a post-forecast
+    # stage whose label carries a hyphen the dotted fallback cannot spell.
+    "icechunk-export": "post.icechunk_export",
 }
 RUN_STAGES = {"fetch": "fetch.inputs", "prepare": "prep.inputs",
               "initialize": "prep.initialize", "forecast": "post.forecast_process",

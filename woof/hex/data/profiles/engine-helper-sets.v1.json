@@ -125,6 +125,19 @@
         "woof/ingest/wrf_ozone.py": "c0a21c777facfbacaaf3f7d6dda1402295d1a32f94a71ccb33338612d4fe08fd"
       },
       "description": "Recast WOOF 1.1.0: the radiation helpers of the engine this distribution was assembled from (8e399d4c3efa) as it ships them (moved to woof/ and their comments and messages reworded by the assembly; no code token differs); byte-equal in source to the hex row engine-2.9.4-source. Admission establishes source identity only."
+    },
+    {
+      "id": "recast-woof-1.1.0-fork-merge",
+      "engine_commit": null,
+      "sources": {
+        "woof/core/kernels/rrtmg_sw.cu": "43134d6d6d2be4b3e668c7ab92d5850f1f992a09812dd09c9536fce5d9ab791e",
+        "woof/core/rrtmg_legacy_prep.py": "f7e6ac7a6aef36113bf8592f8e856361684c268937eea7f2c6833ed3c58b6a8e",
+        "woof/core/rrtmg_lw.py": "f57666bc29ebe64cb94a3bc9a6e6c84e2ee8da68ec3eb3a4af421ada97ed0f2f",
+        "woof/core/rrtmg_mcica.py": "73da66b9eb93ec427b7daaa382306fc8651d28d57539032e3fef7d536ca36a13",
+        "woof/core/rrtmg_sw.py": "9e205e1ab1d487b87e6362bcef069ecec5eb1d358bf383ee2e6df85f694b0221",
+        "woof/ingest/wrf_ozone.py": "c0a21c777facfbacaaf3f7d6dda1402295d1a32f94a71ccb33338612d4fe08fd"
+      },
+      "description": "Recast WOOF 1.1.0 merged with the fork's engine changes (the per-run RRTMG LW layer tier, the surface-solar carriers and the 256-level radiation ceilings): the radiation helpers as this tree carries them. Admission establishes source identity only."
     }
   ]
 }

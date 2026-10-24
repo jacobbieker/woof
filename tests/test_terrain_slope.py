@@ -155,9 +155,14 @@ def test_gentle_overlay_bytes_are_unchanged(monkeypatch, smoothing):
 
 
 def test_overlay_smooths_a_canyon_alike_in_every_footprint(monkeypatch):
+    from woof.static import highres
     from woof.static.highres import _smoothed_steep_ground
     from woof.static.terrain_smoothing import WPS_DEFAULT
     monkeypatch.setenv("WOOF_STATIC_PYTHON", "1")
+    # Off in production since the 1.1.0 merge (upstream's terrain
+    # auto-smoothing owns steep ground); the pass itself is still held to
+    # its footprint invariance here.
+    monkeypatch.setattr(highres, "STEEP_GROUND_PASS", True)
     halo, reach = 3, steep_ground_reach(DX)
     ground = _canyon(ny=160, nx=190)
     ny, nx = 60, 70

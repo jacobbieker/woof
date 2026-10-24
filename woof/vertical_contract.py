@@ -80,6 +80,18 @@ def validate_config_source_top(raw: Mapping, *, context: str) -> str | None:
     source_top = planned_source_top_pressure_pa(source)
     if source_top is None:
         return None
+    if p_top < source_top:
+        # A row with an upper source (the fork's GFS splice above HRRR's
+        # wrfnat column, woof.ingest.upper_splice) initialises the column
+        # above its own top from that source, unless [fetch] upper_source
+        # opts out; the composite column reaches as far as the upper one.
+        from woof.source_adapters import composite_source_top_pa, upper_source_for
+
+        upper = upper_source_for(source, p_top, fetch.get("upper_source"))
+        if upper is not None:
+            composite = composite_source_top_pa(source, upper)
+            if composite is not None:
+                source_top = composite
     detail = (f"source {source!r} top is {source_top / 100:g} hPa "
               f"({source_top:g} Pa); requested p_top = {p_top:g} Pa "
               f"({p_top / 100:g} hPa)")

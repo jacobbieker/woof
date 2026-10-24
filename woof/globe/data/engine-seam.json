@@ -37,8 +37,8 @@
     },
     {
       "path": "woof/core/preflight.py",
-      "size": 764199,
-      "sha256": "a71973ae162c36ce654bd616a6c5bdeacef168b2965145124593b949cf902782",
+      "size": 764576,
+      "sha256": "6ca8f36bc4985a438149d037c08391ef8b3c83f9aef0ebd6684d85f076337852",
       "reached": "EXTERNAL_MARGIN_BYTES, device_memory_probe_reason, device_memory_probe_subprocess and MEASURED_LOCAL_MEMORY_PROFILE, which carried ntiedtke reads for its SM count"
     },
     {
@@ -277,8 +277,8 @@
     },
     {
       "path": "woof/core/mpas_column_batch.py",
-      "size": 88029,
-      "sha256": "ada117a4afb594b137f8bea3111877f56fff86ebb57b5d3bf8f6854396a89ca6",
+      "size": 88055,
+      "sha256": "cd1b8214f4204ebb49ef71eef5cae05c2175e0f479538dd10656697572eb1b64",
       "reached": "run_mpas_column_batch, served through carried physics' module-level __getattr__ for the hexagonal line's column batch; no door of this package asks for that name"
     },
     {

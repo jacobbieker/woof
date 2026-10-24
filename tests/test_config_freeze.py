@@ -84,7 +84,7 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     assert RunConfig.__dataclass_fields__["windfarm_opt"].default == 0
     for name in ("windfarm_opt", "windfarm_ij", "windfarm_tke_factor",
                  "windfarm_turbine_file"):
-        assert not RunConfig.__dataclass_fields__[name].kw_only, name
+        assert RunConfig.__dataclass_fields__[name].kw_only, name
     # Appended last after the campaign, keyword-only and off by default:
     # sea ice's real.exe threshold (4c82704f8f, Registry default 100 K
     # converts nothing) and the HRRR v4 output controls (lane/hrrr-v4-output:

@@ -4351,7 +4351,7 @@ def wsm6_column_workspace_bytes(
                 * WSM6_BLOCK)
     worst = 0
     for dc in exp.domains:
-        if int(dc.run.mp_physics) != 6:
+        if int(getattr(dc.run, "mp_physics", 0) or 0) != 6:
             continue
         columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
         worst = max(worst, wsm6_workspace_floats(int(dc.run.nz), columns) * 4)
@@ -4378,7 +4378,7 @@ def wdm6_column_workspace_bytes(
                 * WDM6_BLOCK)
     worst = 0
     for dc in exp.domains:
-        if int(dc.run.mp_physics) != 16:
+        if int(getattr(dc.run, "mp_physics", 0) or 0) != 16:
             continue
         columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
         worst = max(worst, wdm6_workspace_floats(int(dc.run.nz), columns) * 4)
@@ -7376,10 +7376,14 @@ SCRATCH_SLOT_LIFETIME_AUDIT = (
         "history writes"),
     # The wind running maxima and the UPP gust: the same carrying class
     # as up_heli_max, read-modify-written by one column-local kernel each
-    # step and zeroed only after history writes.
+    # step and zeroed only after history writes.  WSPD10MAX and
+    # W_UP_MAX/W_DN_MAX are also upstream's GSD diagnostic slots (WRF writes
+    # one state variable from both packages), already classified carrying
+    # by the output-diagnostics row above, so this row names only the rest.
     ScratchSlotLifetime(
-        ("wspd10max", "u10max", "v10max", "w_up_max", "w_dn_max",
-         "gust_max"), "carrying",
+        tuple(slot for slot in ("wspd10max", "u10max", "v10max", "w_up_max",
+                                "w_dn_max", "gust_max")
+              if slot not in _OUTPUT_PERSISTENT), "carrying",
         "woof/core/wind_gust_diag.py:update_wind_maxima,reset_wind_maxima; "
         "woof/core/interval_maxima.py:reset_history_interval_maxima; "
         "woof/io/restart.py:SERIALIZED_SCRATCH_SLOTS",

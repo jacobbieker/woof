@@ -453,7 +453,11 @@ def run_cull(arguments: argparse.Namespace) -> int:
         # global parent they are the multi-GB files a cull should not reread.
         if role in DIGESTED_ROLES:
             rows[role]["parent_sha256"] = sha256_file(parents[role])
-            rows[role]["out_sha256"] = sha256_file(out)
+            # A cut the engine reported but did not leave on disk (a stand-in
+            # culler) gets no digest; `woof hex register --cull-receipt`
+            # refuses a receipt without one rather than pin nothing.
+            if Path(out).is_file():
+                rows[role]["out_sha256"] = sha256_file(out)
         if role == "vertical" and vertical_check is not None:
             rows[role]["parent_vertical"] = vertical_check
 

@@ -5226,8 +5226,10 @@ def run_prepared_tree(
         # (woof.verify_stamps); ``post_run`` is None where the companion
         # initialization owns the post-run check.
         "input_verification": {
-            "preflight": (None if inputs.input_verification is None
-                          else dict(inputs.input_verification)),
+            # The WRF-input doors' inputs (woof.wrfinput_forecast) carry no
+            # verification record of their own; only the prepared door does.
+            "preflight": (None if getattr(inputs, "input_verification", None) is None
+                          else dict(getattr(inputs, "input_verification"))),
             "post_run": post_run_verification,
         },
         "runtime_source_identity": runtime_identity,

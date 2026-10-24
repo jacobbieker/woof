@@ -355,7 +355,11 @@ def test_printed_chain_parses_with_matching_acquisition(
     # the transport.
     cycle = {"icon-global": "2026-09-29T12",
              "icon-global-ml": "2026-09-29T12",
-             **_ARCHIVE_CYCLES}.get(source, "2026-08-17T00")
+             **_ARCHIVE_CYCLES}.get(source)
+    if cycle is None:
+        # Upstream's own pick: a cycle inside the source's published
+        # period (an annual CF archive ends in 2015), else the shared one.
+        cycle = _plan_cycle(source)
     rc, out = _emit(tmp_path / "command paths", source, "--explain", cycle=cycle)
     assert rc == 0
     printed = capsys.readouterr().out

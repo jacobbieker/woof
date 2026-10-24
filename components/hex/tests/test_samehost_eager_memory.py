@@ -30,7 +30,12 @@ def _rank_today(cells, card="96gib-188sm"):
 def test_measured_15km_four_card_rank_is_refused_and_was_admitted_before():
     old = _row_model("global/188sm")
     graph_discounted = replace(old, bytes_per_cell=old.bytes_per_cell - 7017 * MIB / 655362)
-    assert graph_discounted.predict_bytes(664586) / MIB < 76_400  # what admitted the run
+    # The fork's 256-level WSM6 cut charges its column workspace on top of
+    # cores measured before it (device_admission.WSM6_WORKSPACE, a stated
+    # over-count); the run of record was admitted without that term.
+    from woof.hex.device_admission import WSM6_WORKSPACE
+    wsm6 = WSM6_WORKSPACE.bytes_for(664586, old.card, old.levels)
+    assert (graph_discounted.predict_bytes(664586) - wsm6) / MIB < 76_400  # what admitted the run
     model, required = _rank(664586)
     assert required > 98_088 * MIB  # the measured out-of-memory lower bound
     assert required > FREE_AT_15KM_ADMISSION

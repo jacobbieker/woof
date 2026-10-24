@@ -380,6 +380,9 @@ _COMPOSED_LOADERS = {
 _DEVICE_LOADERS = {
     "terrain_drag_composed": ("terrain_drag", "_module"),
     "thompson_fork_unit": ("thompson_fork", "_module"),
+    # WRF's windfarm_opt = 1 (the fork's Fitch coupling): its own direct
+    # NVRTC unit, compiled per device like the terrain drag.
+    "windfarm_fitch_composed": ("windfarm_fitch", "_module"),
 }
 
 

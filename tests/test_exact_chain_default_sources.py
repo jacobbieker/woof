@@ -13,7 +13,9 @@ BASE_SOURCES = {
     # ysu_default.cu since b00a0b9ecb1: ae709149b5a reworded a measured-on
     # comment (an export hit) and the calm-column early exit was removed
     # (bl_ysu_run has none: a calm column runs the whole scheme in WRF).
-    "ysu_default.cu": "f56e3ec7646a111d07c5447383ae136b2959b5f4545441a598b51be16ccdc768",
+    # Re-pinned at the 1.1.0 upstream merge: the fork's YSU_KMAX 256 level
+    # ceiling (a refusal guard; previously f56e3ec7).
+    "ysu_default.cu": "7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2",
     "ysu_topo_default.cuh": "031efb139b827dd94fa9407455c3392e85cb29f4af6b954ef18d931e735890b0",
     # Kessler is ONE unit in both modes since the 2.9.1 exact-chain merge
     # (d5e98e3ba59: "kessler_default.cu ... not carried"): kessler.cu with

@@ -121,6 +121,8 @@ include docs/public/receipts/physics-composition-walk.json
 include docs/public/receipts/surface-moisture-ledger-accounting.json
 include docs/2.7.5-development-record.md docs/2.7.6-development-record.md
 include docs/ADAPTIVE-TIMESTEP.md docs/AUTOMATIC-STREAMING-SEARCH.md
+# The fork's energy-forecasts guide, which README.md advertises.
+include docs/energy-forecasts.md
 include docs/ENSEMBLE_PROVIDERS.md docs/SFIRE-IDEAL.md docs/SFIRE-STATIC.md
 include docs/adapt-validation-contract.md docs/arbitrary-verified-adapters.md
 include docs/benchmark.md docs/cells.md docs/cumulus-new-tiedtke.md

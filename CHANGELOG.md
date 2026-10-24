@@ -820,7 +820,9 @@ Fixed:
   preparation says so); the terrain window is read that much wider so a
   moving nest's corridor crop still equals its footprint. The static
   receipt records what moved under `steep_ground`. Re-prepare to pick it
-  up; no configuration change is needed.
+  up; no configuration change is needed. Since the 1.1.0 merge this pass
+  is off: 1.1.0's terrain auto-smoothing smooths every route's terrain to
+  the run's measured slope limit and records it as `terrain_autosmooth`.
 - Nested stability recovery never saw the most common blow-up. The
   per-step gate raised a plain `RuntimeError` for a non-finite state, so
   recovery only caught the every-fourth-step full-state validator and

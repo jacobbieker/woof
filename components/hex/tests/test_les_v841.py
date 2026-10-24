@@ -618,7 +618,10 @@ def test_attachment_drives_the_closure_through_the_subcycle_call(mesh, geom32):
         config_smagorinsky_coef=0.125, config_les_model=les.LES_MODEL_PROGNOSTIC_15_ORDER,
         config_dynamics_split_steps=3, config_split_dynamics_transport=True,
     )
-    config.validate()
+    # The v8.4.1 authority's own check (see "configuration refusals" above):
+    # 1.1.0's config types refuse an LES model their front door has not
+    # connected to its v8.4.2 launcher, and this test drives the v8.4.1 one.
+    les.validate_les_selection(config)
     original = lambda *args, **kwargs: "smagorinsky-2d"  # noqa: E731
 
     class StandIn:

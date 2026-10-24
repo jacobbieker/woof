@@ -159,7 +159,9 @@ def test_high_top_memory_floor_and_roster_use_the_initialized_column(tmp_path, m
     model = forecast_door.resolve_admission_model(SimpleNamespace(
         init=init, model=None, lbc_dir=None, stop_on_refusal=False))
     assert model.levels == 80 and not model.measured
-    assert model.bytes_per_cell == pytest.approx(base.bytes_per_cell * 80 / 55)
+    # The deeper column is priced through the per-level slope
+    # (ShapedFootprintModel.level_scale), the one place it is scaled.
+    assert model.level_bytes_per_cell() == pytest.approx(base.bytes_per_cell * 80 / 55)
     assert model.required_bytes(40962) > base.required_bytes(40962)
     extra = forecast_door.stochastic_array_bytes(40962, '{"sppt":true}', levels=model.levels)
     verdict = forecast_door.admission_verdict(mesh="high", cells=40962,

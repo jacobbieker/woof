@@ -748,9 +748,10 @@ def test_tile_toml_header_does_not_claim_restart_evidence(wales):
     (1, 100.0, True, {**tiles.LES_PHYSICS_RECIPE, "cudt_minutes": 0.0}),
     # ... and kept above it.
     (1, 5000.0, False, {}),
-    # Grell-Freitas parent: its family keys go back to their defaults.
+    # Grell-Freitas parent: its family keys go back to their defaults
+    # (1.1.0's GRELL_FAMILY_DEFAULTS includes Grell 3D's cugd_avedx).
     (3, 500.0, False, {"cu_physics": 0, "cudt_minutes": 0.0,
-                       "clos_choice": 0, "ishallow": 0}),
+                       "clos_choice": 0, "ishallow": 0, "cugd_avedx": 1}),
 ])
 def test_tile_overrides(parent_cu, dx, leaf, expected):
     assert tiles.tile_overrides({"cu_physics": parent_cu}, child_dx_m=dx,

@@ -4309,7 +4309,10 @@ def _device_array_type():
 
 def _is_device_array(value) -> bool:
     kind = _device_array_type()
-    return kind is not None and isinstance(value, kind)
+    # A host ndarray is never a device member, whatever ``cupy`` resolved
+    # to when the type was first cached (a CPU test's numpy stand-in).
+    return (kind is not None and isinstance(value, kind)
+            and not isinstance(value, np.ndarray))
 
 
 def _prepare_restart(path, state, cfg, *, run_trackers=None,
