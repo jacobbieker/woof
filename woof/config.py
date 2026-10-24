@@ -1231,6 +1231,37 @@ class RunConfig:
     #: wind takes on a domain with no physics driver (WRF em_fire's
     #: landuse_init value; 28 by default).
     sfc_lu_index: int = 28
+    #: WRF ``&physics windfarm_opt`` (Registry.EM_COMMON:3003, max_domains,
+    #: default 0): 1 runs the Fitch et al. (2012) wind-farm scheme
+    #: (woof.core.windfarm_coupling, kernel woof.core.windfarm_fitch): each
+    #: turbine is an elevated momentum sink and TKE source in the levels its
+    #: rotor sweeps, added into the PBL momentum tendencies and MYNN's QKE
+    #: right after the PBL scheme, as module_pbl_driver.F:2045-2125 does.
+    #: Requires MYNN (bl_pbl_physics = 5).  0 (the default) builds nothing
+    #: and launches nothing.  WRF's 2 (the MAV scheme) is not ported.
+    #: Appended last.
+    windfarm_opt: int = 0
+    #: WRF ``&physics windfarm_ij`` (Registry.EM_COMMON:3004, scope 1,
+    #: default 0): how a WRF-format turbine list places its turbines; 0
+    #: reads ``lat lon type`` rows and places them with WRF's own map
+    #: projection code, 1 reads ``i j type`` rows (1-based mass indices).
+    #: A woof turbine table (CSV, GeoJSON, sites.v1) is always lat/lon.
+    #: Read only with windfarm_opt = 1.  Appended last.
+    windfarm_ij: int = 0
+    #: WRF ``&physics windfarm_tke_factor`` (Registry.EM_COMMON:3005, scope
+    #: 1, default 0.25): the factor on Fitch's TKE source, C_TKE =
+    #: factor*(Ct - Cp) (Archer et al. 2020's correction; 1.0 is Fitch's
+    #: original).  Read only with windfarm_opt = 1.  Appended last.
+    windfarm_tke_factor: float = 0.25
+    #: woof key, the turbines windfarm_opt = 1 places on this domain: a woof
+    #: turbine table (``.csv``, ``.geojson`` or a sites.v1 ``.json``; curves
+    #: from the turbine library, woof.windfarm.layout) or a WRF
+    #: ``windturbines.txt`` / ``windturbines-ij.txt`` whose
+    #: ``wind-turbine-N.tbl`` tables sit beside it.  Per domain or shared;
+    #: relative paths resolve beside the config.  Read only with
+    #: windfarm_opt = 1, and checkpoints bind its bytes.  Appended last.
+    windfarm_turbine_file: str = ""
+
 
 #: The fire keys of :class:`RunConfig` and their defaults: inert, and
 #: dropped from every identity, while ``ifire`` is 0.
@@ -3003,6 +3034,7 @@ def load_streaming_options(path: str | Path):
 #: identities move underneath runs that were never reconfigured.
 CONFIG_RELATIVE_FILE_KEYS: tuple[str, ...] = (
     "wif_climatology_path", "rrtmg_smoke_manifest", "smoke_emission_file",
+    "windfarm_turbine_file",
 )
 
 
@@ -3894,6 +3926,101 @@ def fire_refusal(cfg) -> str | None:
     return None
 
 
+#: WRF v4.7.1 windfarm_opt values ported (woof.core.windfarm_coupling): 0
+#: off, 1 Fitch.  WRF's 2 (module_wind_mav.F) is not ported.
+WINDFARM_OPT_VALUES = (0, 1)
+#: WRF windfarm_ij: 0 lat/lon turbine rows, 1 i/j turbine rows.
+WINDFARM_IJ_VALUES = (0, 1)
+#: The suffixes of a woof turbine table (woof.windfarm.layout.read_turbines);
+#: any other windfarm_turbine_file is read as WRF's own turbine list.
+WINDFARM_TABLE_SUFFIXES = (".csv", ".geojson", ".json")
+#: The one PBL scheme that carries the QKE Fitch's TKE source is added to.
+WINDFARM_PBL_SCHEME = 5
+#: The four RunConfig keys of the scheme, at their defaults (the identity
+#: rule woof.core.windfarm_coupling.bind_windfarm_identity applies).
+WINDFARM_RUN_DEFAULTS = {"windfarm_opt": 0, "windfarm_ij": 0,
+                         "windfarm_tke_factor": 0.25,
+                         "windfarm_turbine_file": ""}
+
+
+def windfarm_refusal(*, windfarm_opt, windfarm_ij=0,
+                     windfarm_tke_factor=0.25, windfarm_turbine_file="",
+                     bl_pbl_physics=0) -> str | None:
+    """Why this wind-farm setting cannot run, or None.
+
+    Only the configuration is judged here.  Whether the turbine file opens
+    and every turbine lands inside the domain is decided where the layout is
+    built (woof.core.windfarm_coupling, at physics initialisation), because
+    placement needs the domain's projected grid.
+    """
+    from woof.explain import layered
+
+    if isinstance(windfarm_opt, bool) or windfarm_opt not in \
+            WINDFARM_OPT_VALUES:
+        return layered(
+            f"windfarm_opt = {windfarm_opt!r} is not one of "
+            f"{WINDFARM_OPT_VALUES} (0 off, 1 the Fitch scheme); set 0 or 1.",
+            "WRF v4.7.1's windfarm_opt = 2 is the MAV wake scheme "
+            "(module_wind_mav.F), which woof does not port; any other value "
+            "names no scheme at all.")
+    if isinstance(windfarm_ij, bool) or windfarm_ij not in WINDFARM_IJ_VALUES:
+        return layered(
+            f"windfarm_ij = {windfarm_ij!r} is not one of "
+            f"{WINDFARM_IJ_VALUES} (0 lat/lon turbine rows, 1 i/j rows).",
+            "WRF reads windturbines.txt at 0 and windturbines-ij.txt at 1 "
+            "(module_wind_fitch.F:91-95); no other value exists.")
+    if isinstance(windfarm_tke_factor, bool) or not isinstance(
+            windfarm_tke_factor, (int, float)) or not (
+            math.isfinite(float(windfarm_tke_factor))
+            and float(windfarm_tke_factor) >= 0.0):
+        return layered(
+            f"windfarm_tke_factor = {windfarm_tke_factor!r} must be a finite "
+            "number >= 0 (WRF's default 0.25; 1.0 is Fitch's original).",
+            "It scales the turbines' TKE source C_TKE = factor*(Ct - Cp); a "
+            "negative factor would remove turbulence where rotors make it.")
+    if not isinstance(windfarm_turbine_file, str):
+        return layered(
+            f"windfarm_turbine_file = {windfarm_turbine_file!r} must be a "
+            "file path string.",
+            "The turbines come from one table or one WRF turbine list.")
+    if not windfarm_opt:
+        # A shared file with the switch on some domains only is the normal
+        # tree; on a domain with the switch off nothing reads it.
+        return None
+    if not windfarm_turbine_file:
+        return layered(
+            "windfarm_opt = 1 needs windfarm_turbine_file: a turbine table "
+            "(.csv, .geojson, sites.v1 .json) or a WRF windturbines.txt / "
+            "windturbines-ij.txt with its wind-turbine-N.tbl tables beside "
+            "it.",
+            "The scheme acts only where turbines stand; with none listed it "
+            "would run as windfarm_opt = 0 under another name.")
+    if int(bl_pbl_physics) != WINDFARM_PBL_SCHEME:
+        return layered(
+            f"windfarm_opt = 1 needs MYNN (bl_pbl_physics = "
+            f"{WINDFARM_PBL_SCHEME}); bl_pbl_physics = {bl_pbl_physics} "
+            "carries no QKE.  Select bl_pbl_physics = 5, or set "
+            "windfarm_opt = 0.",
+            "WRF adds the turbines' TKE source into MYNN's prognostic QKE "
+            "right after the PBL scheme (module_pbl_driver.F:2053-2063, "
+            "QKE=qke), and WRF's wind-farm documentation pairs the scheme "
+            "with MYNN for that reason.  Under any other PBL scheme the "
+            "rotors would extract momentum while the turbulence they make "
+            "went nowhere.  WRF has no km_opt = 2 TKE arm for the scheme "
+            "either: dragforce is called from the PBL driver only.")
+    if windfarm_ij and windfarm_turbine_file.lower().endswith(
+            WINDFARM_TABLE_SUFFIXES):
+        return layered(
+            f"windfarm_ij = 1 with windfarm_turbine_file = "
+            f"{windfarm_turbine_file!r}: i/j rows are read from a WRF "
+            "windturbines-ij.txt list only; a woof turbine table is always "
+            "lat/lon.  Set windfarm_ij = 0, or name the WRF list.",
+            "A woof table carries lat/lon columns and turbine-library "
+            "curves; reading it as i/j rows would place every turbine in "
+            "the wrong cell.")
+    return None
+
+
 def km_opt_zero_producer(cfg: RunConfig) -> str | None:
     """What supplies horizontal mixing at ``km_opt = 0``, or None."""
     if cfg.bl_pbl_physics == SASE_PBL_SCHEME:
@@ -4750,6 +4877,13 @@ def validate_run_config(cfg: RunConfig) -> RunConfig:
     if why is not None:
         raise ValueError(why)
     why = fire_refusal(cfg)
+    if why is not None:
+        raise ValueError(why)
+    why = windfarm_refusal(
+        windfarm_opt=cfg.windfarm_opt, windfarm_ij=cfg.windfarm_ij,
+        windfarm_tke_factor=cfg.windfarm_tke_factor,
+        windfarm_turbine_file=cfg.windfarm_turbine_file,
+        bl_pbl_physics=cfg.bl_pbl_physics)
     if why is not None:
         raise ValueError(why)
     validate_radiation_driver_options(cfg)

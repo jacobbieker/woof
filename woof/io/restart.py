@@ -119,7 +119,7 @@ from woof.checkpoint_identity import (
     unidentifiable_checkpoint_schemes,
 )
 from woof.config import (FIRE_RUN_DEFAULTS, MIX_ISOTROPIC_RESTART_BREAK_NOTICE,
-                          drop_inert_fire_keys,
+                          WINDFARM_RUN_DEFAULTS, drop_inert_fire_keys,
                           radiation_scheme_ids)
 from woof.supervisor import _fsync_directory, fsync_file, unique_temp_path
 from woof.physics_compat import (RRTMG_VARIANT_LEGACY,
@@ -1012,6 +1012,13 @@ DRIVER_REBUILT_ATTRS = frozenset({
     # holds only static coefficients and statistics, never a value a step
     # writes, so the rebuilt carrier is the one the checkpoint ran with.
     "terrain_drag",
+    # WRF's windfarm_opt = 1 carrier (woof.core.windfarm_coupling):
+    # initialize_physics rebuilds it from the resumed RunConfig, the turbine
+    # file and the domain's grid; it holds only the uploaded layout and the
+    # TKE factor, never a value a step writes -- POWER lives in ``fields``,
+    # serialized and restored in place -- and the checkpoint identity binds
+    # the file's bytes, so the rebuilt carrier is the one the run had.
+    "windfarm",
     # WRF's swint_opt = 1 carrier (woof.core.swint): initialize_physics
     # rebuilds it from the resumed RunConfig, latitude, longitude and start
     # time; it holds the per-step zenith-cosine scratch (a local in WRF's
@@ -2488,6 +2495,12 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # ifire = 0 (feat/fire-coupling): no fire allocated or launched, and
     # every fire key inert -- the state every earlier header ran.
     drop_inert_fire_keys(values)
+    # windfarm_opt off is the state every earlier header ran: no turbine is
+    # placed and no kernel launched, so all four keys (and the file's
+    # digests) leave; on, they stay and bind_windfarm_identity binds the
+    # file's bytes.
+    from woof.core.windfarm_coupling import bind_windfarm_identity
+    bind_windfarm_identity(values)
     # smoke_tracer off (and so no emission file) is the state every
     # earlier header ran: no tracer allocated, no kernel launched.
     if not values.get("smoke_tracer", False):
@@ -4012,6 +4025,10 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
     live_config = _mosaic_checkpoint_config(dataclasses.asdict(cfg))
     from woof.core.rrtmg_smoke_identity import bind_smoke_source_identity
     bind_smoke_source_identity(live_config)
+    # The live turbine file's bytes against the ones the checkpoint ran
+    # with (the echo binds them the same way); off drops every key.
+    from woof.core.windfarm_coupling import bind_windfarm_identity
+    bind_windfarm_identity(live_config)
     absent = object()
     differences = []
     policy_changes: list[str] = []
@@ -4127,6 +4144,14 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             if key == "fire_ignitions":
                 stored = tuple(tuple(float(v) for v in r) for r in stored)
                 live = tuple(tuple(float(v) for v in r) for r in live)
+        if key in WINDFARM_RUN_DEFAULTS:
+            # Old checkpoints ran no wind farm, and an off echo drops the
+            # keys (bind_windfarm_identity); a flip, another file, factor
+            # or placement mode is refused below, as is changed file bytes
+            # (windfarm_turbine_sha256 / windfarm_curves_sha256).
+            default = WINDFARM_RUN_DEFAULTS[key]
+            stored = default if stored is absent else stored
+            live = default if live is absent else live
         if key == "smoke_tracer":
             # Old checkpoints carried no smoke tracer; turning it on or off
             # changes the state inventory, so a flip is refused below.

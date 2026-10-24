@@ -46,7 +46,11 @@ def _fire(**kw):
 # --------------------------------------------------------------- config ---
 
 def test_fields_appended_last_and_default_off():
+    from woof.config import WINDFARM_RUN_DEFAULTS
+
     names = [f.name for f in fields(RunConfig)]
+    # The wind farm's four keys were appended after the fire's.
+    names = names[:len(names) - len(WINDFARM_RUN_DEFAULTS)]
     tail = names[-len(FIRE_RUN_DEFAULTS):]
     assert tail == list(FIRE_RUN_DEFAULTS)
     assert names[-len(FIRE_RUN_DEFAULTS) - 1] == "smoke_emission_file"

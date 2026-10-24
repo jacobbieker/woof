@@ -367,7 +367,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 106,
+**Which keys a `[[domain]]` table may override.** Exactly these 108,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     cu_physics  cudt_minutes  clos_choice  ishallow  radt  radt_minutes  bldt
@@ -392,6 +392,7 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     fire_lsm_reinit  fire_lsm_reinit_iter  fire_lsm_band_ngp  fire_viscosity
     fire_viscosity_bg  fire_viscosity_band  fire_viscosity_ngp  fire_lfn_ext_up
     fire_slope_factor  fire_tracer_smoke  fire_smoke_factor  sfc_lu_index
+    windfarm_opt  windfarm_turbine_file
 
 `clos_choice` and `ishallow` configure the Grell-Freitas cumulus scheme
 (`cu_physics = 3`): which closure the deep scheme uses (0, the default,
@@ -1029,6 +1030,43 @@ fire_ignitions = [
       start_time = 600.0 },
 ]
 ```
+
+## Wind farms
+
+WRF v4.7.1's Fitch et al. (2012) wind-farm scheme (`windfarm_opt = 1`).
+Each turbine is an elevated momentum sink and a source of turbulence in
+the model levels its rotor sweeps, so a farm slows the flow behind it and
+its wake reaches the cells downstream. The drag is added to the PBL
+momentum tendencies and the TKE source to MYNN's `QKE` right after the PBL
+scheme, as WRF's PBL driver does, on the device and with no host copy per
+step. The kernel matches WRF's own Fortran word for word.
+
+| TOML key | WRF equivalent | default | allowed | note |
+|---|---|---|---|---|
+| `windfarm_opt` | `windfarm_opt` | 0 | 0, 1 | `[shared]` or per domain. 1 runs the Fitch scheme on that domain. It needs MYNN (`bl_pbl_physics = 5`): the TKE source goes into MYNN's `QKE`, and every other PBL scheme is refused. WRF's 2 (the MAV wake scheme) is not ported. Off builds nothing and launches nothing, so checkpoints, fingerprints and prepared bundles match a build without it. A moving or spawned nest with it on is refused, as is a `[tiles]`-streamed, row-slab or multi-device domain: the turbines are placed once on the whole domain |
+| `windfarm_turbine_file` | `windturbines.txt` / `windturbines-ij.txt` | `""` | path | `[shared]` or per domain, relative paths resolve beside the config. Either a woof turbine table (`.csv`, `.geojson` or a sites.v1 `.json`, the format `woof windfarm layout` reads; curves from the turbine library) or WRF's own turbine list with its `wind-turbine-N.tbl` tables in the same directory. Turbines are placed with WRF's own projection code; one outside the domain or in its outermost row or column is refused by name. WRF skips a turbine outside a domain instead; woof refuses it so a mistyped coordinate cannot drop a turbine unseen, so on a tree give each farm domain its own `[[domain]] windfarm_turbine_file`. Read only where `windfarm_opt = 1`. Checkpoints and fingerprints bind the file's SHA-256 and its curves' (the WRF tables, or the turbine library) |
+| `windfarm_ij` | `windfarm_ij` | 0 | 0, 1 | `[shared]` only. How a WRF list places its turbines: 0 reads `lat lon type` rows, 1 reads `i j type` rows (1-based mass indices). A woof table is always lat/lon |
+| `windfarm_tke_factor` | `windfarm_tke_factor` | 0.25 | finite, >= 0 | `[shared]` only. The factor on the TKE source, `factor*(Ct - Cp)`; 1.0 is Fitch's original |
+
+```toml
+[shared]
+bl_pbl_physics = 5
+windfarm_opt = 1
+windfarm_turbine_file = "farm.csv"   # turbine_id,lat,lon,hub_height_m,curve
+```
+
+WRF passes the scheme the model time step `dt`, not the PBL interval, so
+with `bldt > 0` each PBL call adds one model step's TKE while its momentum
+tendencies are held for the whole interval. woof does the same. A WRF
+namelist's `windfarm_opt`, `windfarm_ij` and `windfarm_tke_factor` import;
+the turbine file becomes the namelist directory's `windturbines.txt` (or
+`windturbines-ij.txt`), where WRF opens it. The MAV keys
+(`windfarm_wake_model`, `windfarm_overlap_method`, `windfarm_deg`) are
+refused by name.
+
+The history carries WRF's `POWER`, each cell's turbine power in W, on every
+domain with the scheme on, and the `windfarm` preset keeps it (see
+[OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#wind-farm-power-fields)).
 
 ## Terrain smoothing (`[[domain]] static`)
 

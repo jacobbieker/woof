@@ -413,6 +413,11 @@ _DOMAIN_RUN_OVERRIDES = (
     "fire_viscosity_bg", "fire_viscosity_band", "fire_viscosity_ngp",
     "fire_lfn_ext_up", "fire_slope_factor", "fire_tracer_smoke",
     "fire_smoke_factor", "sfc_lu_index",
+    # WRF declares windfarm_opt max_domains (Registry.EM_COMMON:3003), and
+    # each domain places its own turbines, so the switch and the turbine
+    # file are per domain.  windfarm_ij and windfarm_tke_factor are scope 1
+    # in WRF and stay [shared].
+    "windfarm_opt", "windfarm_turbine_file",
 )
 
 #: Per-domain vertical keys are REJECTED outright (F1 amendment: the
@@ -1597,6 +1602,7 @@ class ExperimentConfig:
             tuple(sorted(follower_slots.items())),
             follower_slots.get(int(self.root.grid_id), ())) if follower_slots else None)
         validate_device_road(self.devices, self.tiles, self.domains)
+        _refuse_streamed_windfarm(self.tiles, self.domains)
         if context is not None or self.tiles.follower_context is not None:
             object.__setattr__(self, "tiles", replace(self.tiles, follower_context=context))
         object.__setattr__(self, "domains", tuple(
@@ -1845,13 +1851,16 @@ def load_experiment(path: str | Path, *,
     from woof.config import _anchor_config_file_paths
     _anchor_config_file_paths(raw.get("shared", {}), authority.source,
                               keys=("rrtmg_smoke_manifest",
-                                    "smoke_emission_file"))
-    # The smoke emission is per domain too (_DOMAIN_RUN_OVERRIDES), so a
-    # [[domain]] path resolves beside the config exactly as a [shared] one.
+                                    "smoke_emission_file",
+                                    "windfarm_turbine_file"))
+    # The smoke emission and the turbine file are per domain too
+    # (_DOMAIN_RUN_OVERRIDES), so a [[domain]] path resolves beside the
+    # config exactly as a [shared] one.
     for table in raw.get("domain", ()) or ():
         if isinstance(table, dict):
             _anchor_config_file_paths(table, authority.source,
-                                      keys=("smoke_emission_file",))
+                                      keys=("smoke_emission_file",
+                                            "windfarm_turbine_file"))
     base_dir = Path(authority.source).parent
     experiment = build_experiment_from_config_tables(
         raw, source=source, base_dir=base_dir)
@@ -2540,6 +2549,69 @@ def _refuse_moving_slope_radiation(domains, relocation, source) -> None:
                 "call.  Set slope_rad = 0 on the moving nest.")
 
 
+def _moving_grid_ids(domains, relocation, *, include_spawn=False) -> set:
+    """The grid ids whose footprint moves during the run (a relocation, a
+    follow track and, with ``include_spawn``, a nest born mid-run wherever
+    its trigger fires)."""
+    moving = set()
+    if relocation is not None and getattr(relocation, "enabled", False) \
+            and (getattr(relocation, "moves", ())
+                 or getattr(relocation, "follow", None) is not None):
+        moving.add(int(relocation.grid_id))
+    moving.update(int(dc.grid_id) for dc in domains
+                  if getattr(dc, "follow", None) is not None
+                  or (include_spawn and getattr(dc, "spawn", None) is not None))
+    return moving
+
+
+def _refuse_streamed_windfarm(tiles, domains) -> None:
+    """windfarm_opt = 1 on a domain that streams its columns: refused here,
+    before preparation, rather than when the first tile buffer is built.
+
+    The turbines are placed once on the whole domain and the Fitch kernel
+    indexes whole-domain columns; a [tiles] road hands the physics a tile's
+    columns.  ``mode = "auto"`` is admitted: it runs resident when the
+    domain fits, and a streamed fallback is refused by name when its first
+    buffer is built.
+    """
+    for dc in domains:
+        if not int(getattr(dc.run, "windfarm_opt", 0) or 0):
+            continue
+        road = dc.tiles if getattr(dc, "tiles", None) is not None else tiles
+        if getattr(road, "enabled", False) and \
+                getattr(road, "mode", None) != "auto":
+            raise ValueError(
+                f"[[domain]] grid_id = {int(dc.grid_id)} sets windfarm_opt = "
+                "1 and streams its columns through [tiles]: the turbines are "
+                "placed once on the whole domain and the wind-farm kernel "
+                "reads whole-domain columns, so it runs on a resident domain "
+                "only.  Turn [tiles] off for this domain, or set "
+                "windfarm_opt = 0.")
+
+
+def _refuse_moving_windfarm(domains, relocation, source) -> None:
+    """windfarm_opt = 1 on a nest that moves or spawns: refused.
+
+    The turbines are placed once on the nest's grid at its declared
+    placement (woof.core.windfarm_coupling); a move rebuilds the nest at a
+    new placement, where the same cell indices are other ground, so the
+    farm would travel with the nest box, and a spawned nest's footprint is
+    unknown when the farm is placed.  WRF places its turbines once at
+    initialisation too (init_module_wind_fitch).
+    """
+    moving = _moving_grid_ids(domains, relocation, include_spawn=True)
+    for dc in domains:
+        if int(dc.grid_id) in moving and int(
+                getattr(dc.run, "windfarm_opt", 0) or 0):
+            raise ValueError(
+                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} moves "
+                "and sets windfarm_opt = 1: the turbines are placed once on "
+                "the nest's grid at its declared placement, and after a move "
+                "the same cells are other ground, so the farm would travel "
+                "with the nest.  Set windfarm_opt = 0 on the moving nest, or "
+                "keep the nest fixed.")
+
+
 def _refuse_moving_smoke_emission(domains, relocation, source) -> None:
     """A prescribed smoke emission on a nest that moves: refused.
 
@@ -2550,13 +2622,7 @@ def _refuse_moving_smoke_emission(domains, relocation, source) -> None:
     moving nest may carry the tracer itself, with ``smoke_emission_file =
     ""``.
     """
-    moving = set()
-    if relocation is not None and getattr(relocation, "enabled", False) \
-            and (getattr(relocation, "moves", ())
-                 or getattr(relocation, "follow", None) is not None):
-        moving.add(int(relocation.grid_id))
-    moving.update(int(dc.grid_id) for dc in domains
-                  if getattr(dc, "follow", None) is not None)
+    moving = _moving_grid_ids(domains, relocation)
     for dc in domains:
         if int(dc.grid_id) in moving and getattr(
                 dc.run, "smoke_emission_file", ""):
@@ -4655,6 +4721,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     _refuse_windowed_stash_watch(domains, source)
     _refuse_moving_slope_radiation(domains, relocation, source)
     _refuse_moving_smoke_emission(domains, relocation, source)
+    _refuse_moving_windfarm(domains, relocation, source)
     _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source)
     _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation, source)
     _refuse_rebuilt_nest_lake(domains, relocation, source)
@@ -5616,6 +5683,12 @@ def _public_config_value(value):
             # The coupled fire's keys, inert while ifire is 0.
             from woof.config import drop_inert_fire_keys
             drop_inert_fire_keys(run_document)
+            # windfarm_opt off reads none of its four keys (a shared turbine
+            # file with the switch on other domains only included).
+            if not run_document.get("windfarm_opt", 0):
+                from woof.config import WINDFARM_RUN_DEFAULTS
+                for name in WINDFARM_RUN_DEFAULTS:
+                    run_document.pop(name, None)
         return document
     if isinstance(value, tuple) and hasattr(value, "_fields"):
         return type(value)(*(_public_config_value(item) for item in value))

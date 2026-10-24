@@ -65,6 +65,16 @@ def _pop_fork_dycore_defaults(actual: dict) -> bool:
 def test_new_fields_are_reviewed_defaults_appended_last():
     """New fields remain appended, preserving positional construction."""
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # WRF's windfarm_opt and its three companions, appended off: no turbine
+    # is placed and nothing launches (tests/test_windfarm_coupling.py).
+    assert names.pop() == "windfarm_turbine_file"
+    assert RunConfig.__dataclass_fields__["windfarm_turbine_file"].default == ""
+    assert names.pop() == "windfarm_tke_factor"
+    assert RunConfig.__dataclass_fields__["windfarm_tke_factor"].default == 0.25
+    assert names.pop() == "windfarm_ij"
+    assert RunConfig.__dataclass_fields__["windfarm_ij"].default == 0
+    assert names.pop() == "windfarm_opt"
+    assert RunConfig.__dataclass_fields__["windfarm_opt"].default == 0
     # WRF's coupled fire (feat/fire-coupling), appended off: ifire = 0
     # allocates and launches nothing, and every key is inert and dropped
     # from every identity (tests/test_fire_coupling.py).
@@ -719,6 +729,10 @@ def test_every_existing_legacy_toml_resolves_identically():
         from woof.config import FIRE_RUN_DEFAULTS
         for key, default in FIRE_RUN_DEFAULTS.items():
             assert actual.pop(key) == default, key
+        assert actual.pop("windfarm_opt") == 0
+        assert actual.pop("windfarm_ij") == 0
+        assert actual.pop("windfarm_tke_factor") == 0.25
+        assert actual.pop("windfarm_turbine_file") == ""
         assert actual.pop("alb_sol") == 0
         # The RUC SOILPROP lineage changed its default: a non-RUC case
         # never reads it; a RUC case changes answers (CHANGELOG).
@@ -781,6 +795,10 @@ def test_frozen_case_constructed_configs_resolve_identically():
         from woof.config import FIRE_RUN_DEFAULTS
         for key, default in FIRE_RUN_DEFAULTS.items():
             assert actual.pop(key) == default, key
+        assert actual.pop("windfarm_opt") == 0
+        assert actual.pop("windfarm_ij") == 0
+        assert actual.pop("windfarm_tke_factor") == 0.25
+        assert actual.pop("windfarm_turbine_file") == ""
         assert actual.pop("alb_sol") == 0
         # The RUC SOILPROP lineage changed its default: a non-RUC case
         # never reads it; a RUC case changes answers (CHANGELOG).

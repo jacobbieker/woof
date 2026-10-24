@@ -136,6 +136,9 @@ DEFAULT_OFF = frozenset({
     "smoke_tracer", "smoke_emission_file",
     # WRF's coupled fire, inert and dropped while ifire = 0.
     *FIRE_RUN_DEFAULTS,
+    # WRF's wind farm, all four dropped while windfarm_opt is 0.
+    "windfarm_opt", "windfarm_ij", "windfarm_tke_factor",
+    "windfarm_turbine_file",
 })
 
 

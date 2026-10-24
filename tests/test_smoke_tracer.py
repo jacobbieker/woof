@@ -37,11 +37,13 @@ def _cfg(**kw):
 # --------------------------------------------------------------- config ---
 
 def test_fields_appended_last_and_default_off():
-    from woof.config import FIRE_RUN_DEFAULTS
+    from woof.config import FIRE_RUN_DEFAULTS, WINDFARM_RUN_DEFAULTS
 
     names = [f.name for f in fields(RunConfig)]
-    # The coupled fire's keys were appended after the tracer's.
-    names = names[:len(names) - len(FIRE_RUN_DEFAULTS)]
+    # The coupled fire's keys were appended after the tracer's, and the
+    # wind farm's after the fire's.
+    names = names[:len(names) - len(FIRE_RUN_DEFAULTS)
+                  - len(WINDFARM_RUN_DEFAULTS)]
     assert names[-2:] == ["smoke_tracer", "smoke_emission_file"]
     cfg = _cfg()
     assert cfg.smoke_tracer is False

@@ -2,8 +2,9 @@
 
 :mod:`woof.windfarm.layout` reads a turbine table and places it on a
 domain (WRF's ``windturbines.txt`` and ``windfarm_ij``); ``woof windfarm
-layout`` prints what it placed.  Nothing here is wired into a forecast
-yet.
+layout`` prints what it placed.  A forecast runs the turbines' drag with
+``windfarm_opt = 1`` (:mod:`woof.core.windfarm_coupling`), which reads its
+``windfarm_turbine_file`` through this package.
 """
 
 from woof.windfarm.layout import (  # noqa: F401

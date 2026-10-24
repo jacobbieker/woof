@@ -501,6 +501,20 @@ fields. The window resets on a resume, as the hub-wind window does.
 `[tiles]`-streamed domains, ensemble capture and nest relocation are
 refused by name.
 
+The diagnostic above reads the turbines' power curves at the resolved
+wind; it does not slow the flow. The turbines' own effect on the flow is
+WRF's Fitch scheme, `windfarm_opt = 1` (see
+[CONFIGURATION.md](CONFIGURATION.md#wind-farms)), which writes WRF's own
+row on every domain where it runs:
+
+| variable | units | meaning |
+|---|---|---|
+| `POWER` | W | `Power production` (Registry.EM_COMMON:413): each mass cell's turbine power from the last PBL call, summed over the cell's turbines; `Time, south_north, west_east` |
+
+It is absent with the scheme off. `POWER` is WRF's power-table value at the
+hub-height wind of the model's own (waked) flow, so a farm's downstream
+rows read less than its front row. The `windfarm` preset keeps it.
+
 ## Smoke tracer fields
 
 With `smoke_tracer = true` (see

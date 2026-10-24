@@ -3302,6 +3302,8 @@ def domain_kernel_modules(dc: DomainConfig, *,
         # own direct NVRTC unit (woof/fire/levelset.py, coupling.py).
         modules.add("fire_levelset_composed")
         modules.add("fire_coupling_composed")
+    if int(getattr(dc.run, "windfarm_opt", 0) or 0):
+        modules.add("windfarm_fitch_composed")  # woof/core/windfarm_fitch.py
     # WRF swint_opt = 1 (woof/core/swint.py) and aer_opt = 3 on the
     # legacy RRTMG shortwave (woof/core/rrtmg_aerosol_optics.py).
     if int(getattr(dc.run, "swint_opt", 0) or 0) == 1:
@@ -4566,6 +4568,10 @@ def physics_array_shapes(cfg: RunConfig, *, cam_ozone: bool = False,
 
     from woof.core.physics_inventory import terrain_drag_array_shapes
     shapes.update(terrain_drag_array_shapes(cfg))
+    # WRF's windfarm_opt = 1 (woof.core.windfarm_coupling): POWER in the
+    # serialized fields and the turbine layout, uploaded once.
+    from woof.core.windfarm_coupling import windfarm_array_shapes
+    shapes.update(windfarm_array_shapes(cfg))
 
     stacks = ["pbl_tendencies", "radiation_tendencies", "cumulus_tendencies"]
     reuse_pbl = physics_reuses_pbl_composition(cfg)

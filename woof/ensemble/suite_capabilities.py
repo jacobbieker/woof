@@ -152,6 +152,9 @@ def plan_suite(cfg, *, members=1, registry=None):
         # WRF's coupled fire runs in the member dycore step only
         # (woof.fire.coupling); the packed batch has no fire stage.
         "ifire": 0,
+        # The Fitch wind farm runs in the member physics driver's PBL slot;
+        # the packed batch has no wind-farm stage.
+        "windfarm_opt": 0,
     }
     for key, required in selections.items():
         value = _value(cfg, key, 0)
