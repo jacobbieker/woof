@@ -1782,8 +1782,9 @@ class RunConfig:
     smoke_off_reason: str = _config_field(default="", kw_only=True)
 
     # WRF windfarm_opt and its companions (the fork's Fitch coupling),
-    # APPENDED LAST after upstream 1.1.0's fields so no positional field
-    # moves.
+    # APPENDED LAST after upstream 1.1.0's fields.  They follow the
+    # ``_: KW_ONLY`` sentinel, so they are keyword-only and no positional
+    # field moves.
     #: WRF ``&physics windfarm_opt`` (Registry.EM_COMMON:3003, max_domains,
     #: default 0): 1 runs the Fitch et al. (2012) wind-farm scheme
     #: (woof.core.windfarm_coupling, kernel woof.core.windfarm_fitch): each

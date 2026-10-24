@@ -2486,9 +2486,12 @@ def execute_experiment(
             restart_handler(model, ticks)
             if (io_manager is not None and checkpoint_writer is not None
                     and checkpoint_writer.asynchronous
-                    and not checkpoint_writer.wrote_this_op()):
+                    and not checkpoint_writer.wrote_this_op()
+                    and not orders_history_itself(restart_handler)):
                 # A handler that wrote no tree checkpoint ordered nothing
-                # after the history: drain it here instead, as before.
+                # after the history: drain it here instead, as before --
+                # unless it orders its own (upstream's deferred publish,
+                # which bypasses this writer on purpose).
                 io_manager.drain()
                 status.pending_d2h = int(io_manager.pending)
             if requested_restart[0]:

@@ -818,7 +818,10 @@ def produced_history_shapes(cfg, *, include_reflectivity: bool = True
     state.physics = None
     uh = (carrier(surface)
           if int(cfg.nwp_diagnostics) == 1 or cfg.gsd_diagnostics else None)
-    diagnostic_slots = {"up_heli_max", *WIND_MAXIMA_SLOTS}
+    # The wind maxima are DomainState's nwp_diagnostics = 1 slots; under GSD
+    # alone only its own WSPD10MAX/W_UP_MAX/W_DN_MAX exist (in _scratch).
+    diagnostic_slots = {"up_heli_max"} | (
+        set(WIND_MAXIMA_SLOTS) if int(cfg.nwp_diagnostics) == 1 else set())
     state.existing_scratch = (
         lambda name: uh if name in diagnostic_slots
         else state._scratch.get(name))
