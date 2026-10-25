@@ -370,6 +370,12 @@ history variable.  Did you mean QCLOUD?  The valid set is: ACRUNOFF,
 ALBOLD, ... ZTOP_PLUME.
 ```
 
+Hail diameter diagnostics: `HAIL_MAXK1`, `HAIL_MAX2D`, `HAIL_MAXK1_RUN` and
+`HAIL_MAX2D_RUN` are in metres; `HAILCAST_DIAM_MAX`, `HAILCAST_DIAM_MEAN`,
+`HAILCAST_DIAM_STD`, `HAILCAST_RUNMAX` and `HAILCAST_DHAIL1` through
+`HAILCAST_DHAIL5` are in millimetres. See [maximum hail diameter](HAIL-DIAMETER.md)
+for the PSD criterion, supported distributions, history windows and verification.
+
 ## Surface solar fields
 
 Beside `SWDOWN` (global horizontal irradiance), a run with radiation on
@@ -514,69 +520,6 @@ row on every domain where it runs:
 It is absent with the scheme off. `POWER` is WRF's power-table value at the
 hub-height wind of the model's own (waked) flow, so a farm's downstream
 rows read less than its front row. The `windfarm` preset keeps it.
-
-## Smoke tracer fields
-
-With `smoke_tracer = true` (see
-[CONFIGURATION.md](CONFIGURATION.md#smoke-tracer)) every domain writes
-the passive tracer and its column load in the full inventory:
-
-| variable | units | meaning |
-|---|---|---|
-| `SMOKE` | ug kg-1 | smoke mass mixing ratio per kilogram of dry air, mass grid, `Time, bottom_top, south_north, west_east` |
-| `SMOKE_COL` | ug m-2 | the column load, `sum_k SMOKE * C(mu) * abs(dnw) / g`, refreshed at the end of every step |
-
-Both are WOOF names: WRF's analogue is the `tracer` array, whose members
-are named by the `tracer_opt` package. They are absent from a run with
-the tracer off, so its inventory and disk price are unchanged.
-
-## Coupled fire fields
-
-With `ifire = 2` on a domain (see
-[CONFIGURATION.md](CONFIGURATION.md#coupled-fire-ifire)) its history
-carries WRF's fire fields under their `Registry/registry.fire` names.
-The fire-mesh fields sit on their own axes, `Time, south_north_subgrid,
-west_east_subgrid`, created only on a file that carries them:
-
-| variable | units | meaning |
-|---|---|---|
-| `FGRNHFX` | W/m^2 | heat flux from ground fire, per fire cell |
-| `FGRNQFX` | W/m^2 | moisture flux from ground fire, per fire cell |
-| `FIRE_AREA` | 1 | fraction of each fire cell's area on fire (burning or burned) |
-| `ROS` | m/s | rate of spread normal to the front |
-| `TIGN_G` | s | ignition time on the ground (seconds of the domain's fire clock, `itimestep * dt`; in the future where nothing has burned) |
-| `LFN` | 1 | the level-set function, negative inside the fire (m) |
-| `FUEL_FRAC` | 1 | fraction of the fuel remaining |
-| `UF`, `VF` | m/s | the wind at `fire_wind_height` on the fire mesh |
-
-and on the mass grid, `Time, south_north, west_east`:
-
-| variable | units | meaning |
-|---|---|---|
-| `GRNHFX` | W/m^2 | heat flux from ground fire into the atmosphere, the cell mean times `fire_atm_feedback` |
-| `GRNQFX` | W/m^2 | moisture flux from ground fire, likewise |
-| `CANHFX`, `CANQFX` | W/m^2 | heat and moisture flux from crown fire: zero, as in WRF v4.7.1 |
-| `AVG_FUEL_FRAC` | 1 | fuel remaining averaged to the atmospheric cell |
-
-WRF-SFIRE's subgrid axes are `e_we * sr_x` by `e_sn * sr_y`, with an
-unused strip one atmospheric cell wide past the mass grid. woof's fire
-mesh is the mass grid's own, so here the axes are `nx * sr_x` by
-`ny * sr_y` (`woof/static/fuel.py`'s fire mesh). Fire-mesh node `(J, I)`
-lies in atmospheric cell `(J // sr_y, I // sr_x)`.
-
-Two more fire fields live on the state but not on the tape. They are
-the seam plume rise reads:
-
-- `state.fire_heat_flux` (W m-2, mass grid): `GRNHFX + CANHFX`, the heat
-  `fire_tendency` puts into the atmosphere, averaged over the cell;
-- `state.fire_area` (m2, mass grid): the actively burning area of each
-  cell. It sums `FIRE_AREA * dxf * dyf` over the cell's fire-mesh cells
-  whose burning fraction is positive and whose node ignited less than one
-  burn-out time (`fuel_time`, `fuel_left`'s 1/e time) before the step's
-  end, in WRF's `sum_2d_cells` order.
-
-All of them are absent from a run with the fire off, so its inventory
-and disk price are unchanged.
 
 ## Wind maxima and gusts
 

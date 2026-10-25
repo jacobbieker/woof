@@ -613,6 +613,7 @@ COMMAND_REQUIREMENTS: dict[str, tuple[Requirement, ...]] = {
     # deep inside the runner instead of at the front door -- the exact
     # failure this table was added to close, re-opened by a new door.
     "sim": (GPU_RUNTIME,),
+    "fire-ideal": (GPU_RUNTIME,),
     "verify": (GPU_RUNTIME,),
 }
 
@@ -631,6 +632,8 @@ _BEFORE = {
                "spawned."),
     "sim": ("Refusing here, before the prepared tree is opened and its "
             "identity recomputed."),
+    "fire-ideal": ("Refusing here, before the native sounding and ideal "
+                   "fire state are initialized on the card."),
     "verify": "Refusing here, before the case allocates anything.",
 }
 

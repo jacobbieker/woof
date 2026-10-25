@@ -133,6 +133,8 @@ def plan_suite(cfg, *, members=1, registry=None):
         raise ValueError("members must be a positive integer")
     components = selected_capabilities(cfg, registry=registry)
     reasons = []
+    if _value(cfg, "chem_sets", ""):
+        reasons.append("active chemistry keeps the original member species arrays, source-hour caches and mass ledger; the native packed graph lacks chemistry producers and typed state ownership")
     for row in components:
         if not row.implemented:
             reasons.append(f"{row.component} selection has no qualified packed registry row")
@@ -145,13 +147,6 @@ def plan_suite(cfg, *, members=1, registry=None):
         # the aerosol-aware Thompson scheme the packed binding does not
         # run; both run on the original member driver.
         "swint_opt": 0, "aer_opt": 0,
-        # The passive smoke tracer is advanced, mixed and emitted only by
-        # the member dycore and physics driver; the packed batch carries
-        # no tracer stage.
-        "smoke_tracer": 0,
-        # WRF's coupled fire runs in the member dycore step only
-        # (woof.fire.coupling); the packed batch has no fire stage.
-        "ifire": 0,
         # The Fitch wind farm runs in the member physics driver's PBL slot;
         # the packed batch has no wind-farm stage.
         "windfarm_opt": 0,

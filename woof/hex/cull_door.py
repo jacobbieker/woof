@@ -136,6 +136,7 @@ def cull_one(
     *,
     graph: Path | None = None,
     clobber: bool = False,
+    provenance_grid: Path | None = None,
 ) -> dict[str, Any]:
     """Cut one file, and return what the engine said it did."""
 
@@ -153,6 +154,10 @@ def cull_one(
     ]
     if graph is not None:
         argv += ["--graph", str(graph)]
+    if provenance_grid is not None:
+        help_result = subprocess.run([str(engine), "--help"], capture_output=True, text=True)
+        if "--cull-provenance-grid" in (help_result.stdout + help_result.stderr):
+            argv += ["--cull-provenance-grid", str(provenance_grid)]
     if clobber:
         argv.append("--clobber")
     started = time.perf_counter()
@@ -429,6 +434,7 @@ def run_cull(arguments: argparse.Namespace) -> int:
             out,
             graph=graph,
             clobber=bool(getattr(arguments, "clobber", False)),
+            provenance_grid=Path(rows["grid"]["out"]) if role == "static" else None,
         )
         cells = rows[role].get("receipt", {}).get("region_cells")
         parent_cells = rows[role].get("receipt", {}).get("parent_cells")
@@ -447,7 +453,11 @@ def run_cull(arguments: argparse.Namespace) -> int:
         # global parent they are the multi-GB files a cull should not reread.
         if role in DIGESTED_ROLES:
             rows[role]["parent_sha256"] = sha256_file(parents[role])
-            rows[role]["out_sha256"] = sha256_file(out)
+            # A cut the engine reported but did not leave on disk (a stand-in
+            # culler) gets no digest; `woof hex register --cull-receipt`
+            # refuses a receipt without one rather than pin nothing.
+            if Path(out).is_file():
+                rows[role]["out_sha256"] = sha256_file(out)
         if role == "vertical" and vertical_check is not None:
             rows[role]["parent_vertical"] = vertical_check
 

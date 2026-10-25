@@ -34,6 +34,38 @@ DELTA = 500.0
 SEED = 20260720
 
 
+def _zero_radiation_boundary_fluxes(cfg, surface):
+    """Complete the zero-radiation stub's declared history/energy outputs."""
+    import cupy as cp
+    from woof.core.physics import radiation_boundary_flux_names
+    return {name: cp.zeros_like(surface) for name in radiation_boundary_flux_names(cfg)}
+
+
+def _zero_radiation(**kw):
+    """Shared zero-flux fixture for the admitted driver integrations."""
+    import cupy as cp
+    from woof.core.physics import RadiationResult
+    cfg = kw["cfg"]
+    z3 = cp.zeros((cfg.nz, cfg.ny, cfg.nx), cp.float32)
+    z2 = cp.zeros((cfg.ny, cfg.nx), cp.float32)
+    return RadiationResult(z3, cp.zeros_like(z3), z2, cp.zeros_like(z2),
+                           coszen=cp.zeros_like(z2),
+                           boundary_fluxes=_zero_radiation_boundary_fluxes(cfg, z2))
+
+
+def _moist_driver_state(cfg, **vertical_kwargs):
+    """The common deterministic sounding; each test sets its own winds/deck."""
+    from woof.core.grid import make_base_state, make_vertical_coord
+    from woof.core.moist import init_moist_balanced
+    coord = make_vertical_coord(cfg.nz, **vertical_kwargs)
+    base = make_base_state(
+        coord, lambda z: 300.0 + 0.004 * np.asarray(z, np.float64),
+        p_surf=cfg.p_surf, ztop=cfg.ztop)
+    return init_moist_balanced(
+        cfg, coord, base,
+        lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+
+
 def _band_limited32(rng, shape=SHAPE):
     """FP32 cast of an authority-box-filtered standard-normal field."""
     from woof.verify.sase_ref import box_filter
@@ -1372,9 +1404,7 @@ def test_sase_driver_d01_column_parameters_stable_50_steps():
 
     from woof.config import RunConfig, validate_run_config
     from woof.core import dycore
-    from woof.core.grid import make_base_state, make_vertical_coord
-    from woof.core.moist import init_moist_balanced
-    from woof.core.physics import RadiationResult, initialize_physics
+    from woof.core.physics import initialize_physics
     from woof.verify.sase_ref import E_MIN
 
     cfg = RunConfig(nx=12, ny=10, nz=40, dx=12000.0, dy=12000.0,
@@ -1384,12 +1414,7 @@ def test_sase_driver_d01_column_parameters_stable_50_steps():
                     sf_surface_physics=2, km_opt=0,
                     bl_pbl_physics=_SASE_SELECTOR)
     assert validate_run_config(cfg) is cfg     # the admitted combination
-    coord = make_vertical_coord(cfg.nz, stretch=1.6)
-    theta = lambda z: 300.0 + 0.004 * np.asarray(z, np.float64)
-    base = make_base_state(coord, theta, p_surf=cfg.p_surf, ztop=cfg.ztop)
-    state = init_moist_balanced(
-        cfg, coord, base,
-        lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+    state = _moist_driver_state(cfg, stretch=1.6)
     z_half = state.height_half()
     dz1 = 2.0 * float(z_half[0])
     assert 40.0 <= dz1 <= 65.0, f"fixture dz1 drifted: {dz1:.1f} m"
@@ -1402,14 +1427,8 @@ def test_sase_driver_d01_column_parameters_stable_50_steps():
     state.v[...] = cp.float32(1.0)
     state.e_sgs[...] = cp.float32(1.0)         # e spun up
 
-    def radiation(**kw):
-        z3 = cp.zeros((cfg.nz, cfg.ny, cfg.nx), cp.float32)
-        z2 = cp.zeros((cfg.ny, cfg.nx), cp.float32)
-        return RadiationResult(z3, cp.zeros_like(z3), z2,
-                               cp.zeros_like(z2))
-
     initialize_physics(state, cfg, landmask=1.0, tsk=302.0,
-                       swdown=400.0, glw=320.0, radiation=radiation)
+                       swdown=400.0, glw=320.0, radiation=_zero_radiation)
     for step in range(50):
         dycore.step(state, cfg)                # physics runs inside
         e = state.e_sgs
@@ -1606,9 +1625,7 @@ def test_sase_driver_step_smoke():
 
     from woof.config import RunConfig, validate_run_config
     from woof.core import dycore
-    from woof.core.grid import make_base_state, make_vertical_coord
-    from woof.core.moist import init_moist_balanced
-    from woof.core.physics import RadiationResult, initialize_physics
+    from woof.core.physics import initialize_physics
     from woof.verify.sase_ref import E_MIN
 
     cfg = RunConfig(nx=12, ny=10, nz=16, dx=2000.0, dy=2000.0,
@@ -1618,12 +1635,7 @@ def test_sase_driver_step_smoke():
                     sf_surface_physics=2, km_opt=0,
                     bl_pbl_physics=_SASE_SELECTOR)
     assert validate_run_config(cfg) is cfg     # the admitted combination
-    coord = make_vertical_coord(cfg.nz)
-    theta = lambda z: 300.0 + 0.004 * np.asarray(z, np.float64)
-    base = make_base_state(coord, theta, p_surf=cfg.p_surf, ztop=cfg.ztop)
-    state = init_moist_balanced(
-        cfg, coord, base,
-        lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+    state = _moist_driver_state(cfg)
     # Sheared flow so the strain/production channels are live.
     z_half = state.height_half()
     shear = (5.0 + 8.0 * z_half / cfg.ztop).astype(np.float32)
@@ -1632,15 +1644,9 @@ def test_sase_driver_step_smoke():
                         (cfg.nz, cfg.ny, cfg.nx + 1)))
     state.v[...] = cp.float32(1.0)
 
-    def radiation(**kw):
-        z3 = cp.zeros((cfg.nz, cfg.ny, cfg.nx), cp.float32)
-        z2 = cp.zeros((cfg.ny, cfg.nx), cp.float32)
-        return RadiationResult(z3, cp.zeros_like(z3), z2,
-                               cp.zeros_like(z2))
-
     driver = initialize_physics(state, cfg, landmask=1.0, tsk=302.0,
                                 swdown=400.0, glw=320.0,
-                                radiation=radiation)
+                                radiation=_zero_radiation)
     tend = driver.compute(state, cfg)
 
     assert driver.call_counts["sase"] == 1
@@ -2582,7 +2588,6 @@ def test_lake_flux_device_stable_layer_and_kv_collapse(monkeypatch):
     assert abs(red["dth_col"]) <= 0.5, red["dth_col"]
 
 
-
 # ---------------------------------------------------------------------------
 # S3-9e: on-device gate-2a receipt-equivalence probe (written 2026-07-21
 # while yolo-c owned the card; VALIDATED same day after seal -- receipt at
@@ -3129,9 +3134,7 @@ def test_sase_driver_d02_first_light_moist_50_steps(monkeypatch):
     from woof.config import RunConfig, validate_run_config
     from woof.core import dycore
     from woof.core import physics as physics_mod
-    from woof.core.grid import make_base_state, make_vertical_coord
-    from woof.core.moist import init_moist_balanced
-    from woof.core.physics import RadiationResult, initialize_physics
+    from woof.core.physics import initialize_physics
     from woof.core.sase import (launch_moist_n2, launch_n2,
                                  launch_sase_step)
     from woof.verify.sase_ref import (CP_AIR, E_MIN, EP2_RV, P0_REF,
@@ -3145,12 +3148,7 @@ def test_sase_driver_d02_first_light_moist_50_steps(monkeypatch):
                     sf_surface_physics=2, km_opt=0,
                     bl_pbl_physics=_SASE_SELECTOR)
     assert validate_run_config(cfg) is cfg     # the admitted combination
-    coord = make_vertical_coord(cfg.nz, stretch=1.6)
-    theta = lambda z: 300.0 + 0.004 * np.asarray(z, np.float64)
-    base = make_base_state(coord, theta, p_surf=cfg.p_surf, ztop=cfg.ztop)
-    state = init_moist_balanced(
-        cfg, coord, base,
-        lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+    state = _moist_driver_state(cfg, stretch=1.6)
     z_half = np.asarray(state.height_half(), np.float64)
     # Sustained saturated deck: liquid qs from the initial state (the
     # authority's own Tetens/Exner chain), qv = qs + qc = 0.2 g/kg in
@@ -3182,14 +3180,8 @@ def test_sase_driver_d02_first_light_moist_50_steps(monkeypatch):
     state.e_sgs[...] = cp.float32(0.01)
     n_patch = int(patch.sum())                 # 16900 saturated columns
 
-    def radiation(**kw):
-        z3 = cp.zeros((cfg.nz, cfg.ny, cfg.nx), cp.float32)
-        z2 = cp.zeros((cfg.ny, cfg.nx), cp.float32)
-        return RadiationResult(z3, cp.zeros_like(z3), z2,
-                               cp.zeros_like(z2))
-
     initialize_physics(state, cfg, landmask=1.0, tsk=302.0,
-                       swdown=400.0, glw=320.0, radiation=radiation)
+                       swdown=400.0, glw=320.0, radiation=_zero_radiation)
     # (The opt-in per-call CUDA-event instrumentation is not part
     # of this port -- it existed to feed a campaign harness that did not
     # come with it -- so the seam-share print below is dropped and the
@@ -5000,10 +4992,7 @@ def test_sase_driver_d02_first_light_vent_50_steps(monkeypatch):
     from woof.config import RunConfig, validate_run_config
     from woof.core import dycore
     from woof.core import physics as physics_mod
-    from woof.core.grid import make_base_state, make_vertical_coord
-    from woof.core.moist import init_moist_balanced
-    from woof.core.physics import (RadiationResult, initialize_physics,
-                                    sase_surface_rho1)
+    from woof.core.physics import initialize_physics, sase_surface_rho1
     from woof.core.sase import (launch_moist_n2, launch_n2,
                                  launch_plume_vent_flux,
                                  launch_vent_deposit_scale)
@@ -5017,13 +5006,7 @@ def test_sase_driver_d02_first_light_vent_50_steps(monkeypatch):
                     sf_surface_physics=2, km_opt=0,
                     bl_pbl_physics=_SASE_SELECTOR)
     assert validate_run_config(cfg) is cfg
-    coord = make_vertical_coord(cfg.nz, stretch=1.6)
-    base = make_base_state(coord,
-                           lambda z: 300.0 + 0.004 * np.asarray(z, np.float64),
-                           p_surf=cfg.p_surf, ztop=cfg.ztop)
-    state = init_moist_balanced(
-        cfg, coord, base,
-        lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+    state = _moist_driver_state(cfg, stretch=1.6)
     z_half = np.asarray(state.height_half(), np.float64)
     th_tot = cp.asnumpy(state.total_theta()).astype(np.float64)
     p_eos = cp.asnumpy(state.p).astype(np.float64)
@@ -5061,14 +5044,8 @@ def test_sase_driver_d02_first_light_vent_50_steps(monkeypatch):
     state.e_sgs[...] = cp.float32(1.0)
     n_patch = int(patch.sum())
 
-    def radiation(**kw):
-        z3 = cp.zeros((cfg.nz, cfg.ny, cfg.nx), cp.float32)
-        z2 = cp.zeros((cfg.ny, cfg.nx), cp.float32)
-        return RadiationResult(z3, cp.zeros_like(z3), z2,
-                               cp.zeros_like(z2))
-
     initialize_physics(state, cfg, landmask=1.0, tsk=302.0,
-                       swdown=400.0, glw=320.0, radiation=radiation)
+                       swdown=400.0, glw=320.0, radiation=_zero_radiation)
 
     def vent_census():
         """(firing columns, capped columns, max |s| deficit) through the
@@ -5207,21 +5184,13 @@ def test_m2_driver_deposit_end_to_end_separation(monkeypatch):
     from woof.config import RunConfig, validate_run_config
     from woof.core import dycore
     from woof.core import physics as physics_mod
-    from woof.core.grid import make_base_state, make_vertical_coord
-    from woof.core.moist import init_moist_balanced
-    from woof.core.physics import RadiationResult, initialize_physics
+    from woof.core.physics import initialize_physics
     from woof.verify.sase_ref import (CP_AIR, EP2_RV, P0_REF, RD_AIR,
                                        SVP1, SVP2, SVP3, SVPT0)
 
     ny = nx = 120
     steps = 5
     z_deck = (450.0, 1400.0)
-
-    def radiation(**kw):
-        z3 = cp.zeros((49, ny, nx), cp.float32)
-        z2 = cp.zeros((ny, nx), cp.float32)
-        return RadiationResult(z3, cp.zeros_like(z3), z2,
-                               cp.zeros_like(z2))
 
     def build():
         """The identical initial condition, built twice from the same
@@ -5233,14 +5202,7 @@ def test_m2_driver_deposit_end_to_end_separation(monkeypatch):
                         ra_physics=4, sf_sfclay_physics=1,
                         sf_surface_physics=2, km_opt=0, bl_pbl_physics=_SASE_SELECTOR)
         assert validate_run_config(cfg) is cfg
-        coord = make_vertical_coord(cfg.nz, stretch=1.6)
-        base = make_base_state(
-            coord,
-            lambda z: 300.0 + 0.004 * np.asarray(z, np.float64),
-            p_surf=cfg.p_surf, ztop=cfg.ztop)
-        state = init_moist_balanced(
-            cfg, coord, base,
-            lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+        state = _moist_driver_state(cfg, stretch=1.6)
         zh = np.asarray(state.height_half(), np.float64)
         th_tot = cp.asnumpy(state.total_theta()).astype(np.float64)
         p_eos = cp.asnumpy(state.p).astype(np.float64)
@@ -5266,7 +5228,7 @@ def test_m2_driver_deposit_end_to_end_separation(monkeypatch):
         state.e_sgs[...] = cp.float32(1.0)
         drv = initialize_physics(state, cfg, landmask=1.0, tsk=302.0,
                                  swdown=400.0, glw=320.0,
-                                 radiation=radiation)
+                                 radiation=_zero_radiation)
         return cfg, state, drv, zh, pat
 
     def advance(cfg, state):
@@ -5644,9 +5606,7 @@ def test_flux_diag_enabled_leaves_every_prognostic_bitwise_identical():
 
     from woof.config import RunConfig, validate_run_config
     from woof.core import dycore
-    from woof.core.grid import make_base_state, make_vertical_coord
-    from woof.core.moist import init_moist_balanced
-    from woof.core.physics import RadiationResult, initialize_physics
+    from woof.core.physics import initialize_physics
     from woof.io.restart import STATE_SERIALIZED_ATTRS
 
     def run(flux_diag, steps=6):
@@ -5658,28 +5618,16 @@ def test_flux_diag_enabled_leaves_every_prognostic_bitwise_identical():
                         km_opt=0, bl_pbl_physics=_SASE_SELECTOR,
                         sase_flux_diag=flux_diag)
         assert validate_run_config(cfg) is cfg
-        coord = make_vertical_coord(cfg.nz)
-        base = make_base_state(
-            coord, lambda z: 300.0 + 0.004 * np.asarray(z, np.float64),
-            p_surf=cfg.p_surf, ztop=cfg.ztop)
-        state = init_moist_balanced(
-            cfg, coord, base,
-            lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+        state = _moist_driver_state(cfg)
         z_half = state.height_half()
         shear = (5.0 + 8.0 * z_half / cfg.ztop).astype(np.float32)
         state.u[...] = cp.asarray(np.broadcast_to(
             shear[:, None, None], (cfg.nz, cfg.ny, cfg.nx + 1)))
         state.v[...] = cp.float32(1.0)
 
-        def radiation(**_kw):
-            z3 = cp.zeros((cfg.nz, cfg.ny, cfg.nx), cp.float32)
-            z2 = cp.zeros((cfg.ny, cfg.nx), cp.float32)
-            return RadiationResult(z3, cp.zeros_like(z3), z2,
-                                   cp.zeros_like(z2))
-
         driver = initialize_physics(state, cfg, landmask=1.0, tsk=302.0,
                                     swdown=400.0, glw=320.0,
-                                    radiation=radiation)
+                                    radiation=_zero_radiation)
         for _ in range(steps):
             driver.compute(state, cfg)
             dycore.step(state, cfg)
@@ -5756,9 +5704,7 @@ def test_hmix_k_diag_enabled_leaves_every_prognostic_bitwise_identical(
 
     from woof.config import RunConfig, validate_run_config
     from woof.core import dycore
-    from woof.core.grid import make_base_state, make_vertical_coord
-    from woof.core.moist import init_moist_balanced
-    from woof.core.physics import RadiationResult, initialize_physics
+    from woof.core.physics import initialize_physics
     from woof.io.restart import STATE_SERIALIZED_ATTRS
 
     mixing = (dict(km_opt=0, bl_pbl_physics=_SASE_SELECTOR)
@@ -5774,13 +5720,7 @@ def test_hmix_k_diag_enabled_leaves_every_prognostic_bitwise_identical(
                         sf_surface_physics=2, hmix_k_diag=enabled,
                         **mixing)
         assert validate_run_config(cfg) is cfg
-        coord = make_vertical_coord(cfg.nz)
-        base = make_base_state(
-            coord, lambda z: 300.0 + 0.004 * np.asarray(z, np.float64),
-            p_surf=cfg.p_surf, ztop=cfg.ztop)
-        state = init_moist_balanced(
-            cfg, coord, base,
-            lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+        state = _moist_driver_state(cfg)
         z_half = state.height_half()
         shear = (5.0 + 8.0 * z_half / cfg.ztop).astype(np.float32)
         # Horizontally varying wind: both producers scale with the
@@ -5796,15 +5736,9 @@ def test_hmix_k_diag_enabled_leaves_every_prognostic_bitwise_identical(
             1.0 + v_wave[None, None, :]
             + np.zeros((cfg.nz, cfg.ny + 1, 1))).astype(np.float32))
 
-        def radiation(**_kw):
-            z3 = cp.zeros((cfg.nz, cfg.ny, cfg.nx), cp.float32)
-            z2 = cp.zeros((cfg.ny, cfg.nx), cp.float32)
-            return RadiationResult(z3, cp.zeros_like(z3), z2,
-                                   cp.zeros_like(z2))
-
         driver = initialize_physics(state, cfg, landmask=1.0, tsk=302.0,
                                     swdown=400.0, glw=320.0,
-                                    radiation=radiation)
+                                    radiation=_zero_radiation)
         recorded = 0.0
         for _ in range(steps):
             driver.compute(state, cfg)
@@ -6728,9 +6662,7 @@ def test_sase_driver_additive_switch_is_selectable_and_fires():
     from dataclasses import replace
 
     from woof.config import RunConfig, validate_run_config
-    from woof.core.grid import make_base_state, make_vertical_coord
-    from woof.core.moist import init_moist_balanced
-    from woof.core.physics import RadiationResult, initialize_physics
+    from woof.core.physics import initialize_physics
     from woof.verify.sase_ref import E_MIN
 
     cfg_on = RunConfig(nx=12, ny=10, nz=16, dx=2000.0, dy=2000.0,
@@ -6748,13 +6680,7 @@ def test_sase_driver_additive_switch_is_selectable_and_fires():
         assert validate_run_config(cfg) is cfg           # (i) admitted
 
     def run(cfg):
-        coord = make_vertical_coord(cfg.nz)
-        theta = lambda z: 300.0 + 0.004 * np.asarray(z, np.float64)
-        base = make_base_state(coord, theta, p_surf=cfg.p_surf,
-                               ztop=cfg.ztop)
-        state = init_moist_balanced(
-            cfg, coord, base,
-            lambda z: 0.010 * np.exp(-np.asarray(z, np.float64) / 2400.0))
+        state = _moist_driver_state(cfg)
         z_half = state.height_half()
         shear = (5.0 + 8.0 * z_half / cfg.ztop).astype(np.float32)
         state.u[...] = cp.asarray(
@@ -6762,15 +6688,9 @@ def test_sase_driver_additive_switch_is_selectable_and_fires():
                             (cfg.nz, cfg.ny, cfg.nx + 1)))
         state.v[...] = cp.float32(1.0)
 
-        def radiation(**kw):
-            z3 = cp.zeros((cfg.nz, cfg.ny, cfg.nx), cp.float32)
-            z2 = cp.zeros((cfg.ny, cfg.nx), cp.float32)
-            return RadiationResult(z3, cp.zeros_like(z3), z2,
-                                   cp.zeros_like(z2))
-
         driver = initialize_physics(state, cfg, landmask=1.0, tsk=302.0,
                                     swdown=400.0, glw=320.0,
-                                    radiation=radiation)
+                                    radiation=_zero_radiation)
         driver.compute(state, cfg)
         assert driver.call_counts["sase"] == 1
         return cp.asnumpy(state.e_sgs)

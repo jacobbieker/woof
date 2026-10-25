@@ -344,7 +344,13 @@ def test_slab_windows_match_the_drain_road_with_no_drain(monkeypatch, mode, feed
         # The one copy back allowed is the health validator's: it is built
         # off the store before the first step (a drain with nothing to land,
         # so no drain is counted), and the first sweep copies the store back.
-        assert new["full_drains"] == 0 and new["full_gathers"] <= 1, (gid, new)
+        # And one drain is the stop boundary's mandatory health gate: since
+        # upstream 1.1.0 a streamed domain's health rules read the store
+        # through a drain (woof.core.health._AttachedStoreBundle), so the
+        # final full-state check scans the slabs, not a stale mirror.  No
+        # nest force drains.
+        assert new["full_drains"] <= 1 and new["full_gathers"] <= 1, (gid, new)
+        assert new["full_drains"] < old["full_drains"], (gid, old, new)
         assert new["window_reads"] > 0
     # Only a split parent under feedback is written.
     assert (windowed["reports"].get(1, {}).get("window_writes", 0) > 0) == (

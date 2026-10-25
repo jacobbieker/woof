@@ -300,12 +300,17 @@ def _bridge_manifest_extension(*, predecessor: Path, suffix: Path,
     suffix_gate = dict(row.split("\t", 1) for row in
                        (suffix / "gate.txt").read_text().splitlines() if row)
     suffix_fields = gate_supplement_fields(suffix_gate)
+    # The cycle's PBL height (HPBL) is one more atmosphere payload when the
+    # wrfnat publishes it (hrrr_grib2_bridge OPTIONAL_SURFACE_SPECS).
+    from woof.ingest.native_supplements import gate_optional_surface_fields
+    suffix_surface_fields = gate_optional_surface_fields(suffix_gate)
     suffix_soil_fields = gate_soil_surface_fields(suffix_gate)
     optional_soil_count = len(suffix_soil_fields)
     if suffix_fields and ("supplement-inventory.tsv" not in old_entries
                           or "supplement-inventory.tsv" not in suffix_entries):
         raise ValueError("supplement selection receipt is not bound by predecessor/suffix manifests")
-    if atmosphere_count != 22 + len(suffix_fields) or soil_count != 2 + optional_soil_count:
+    if (atmosphere_count != 22 + len(suffix_fields) + len(suffix_surface_fields)
+            or soil_count != 2 + optional_soil_count):
         raise ValueError(
             "suffix bridge lacks its declared atmosphere/supplement and soil fields")
     if set(retained) & set(appended):
@@ -1724,8 +1729,17 @@ def _require_microphysics_tables(profile: str) -> None:
 
     switches = (single_domain_runtime_switches(profile)
                 if isinstance(profile, str) else vars(profile))
-    if int(switches["mp_physics"]) == THOMPSON_MP_PHYSICS:
+    mp_physics = int(switches["mp_physics"])
+    if mp_physics == THOMPSON_MP_PHYSICS:
         require_thompson_tables(assets=CLASSIC_TABLE_ASSETS)
+    elif mp_physics == 28:
+        # mp=28 reads the classic set plus CCN_ACTIVATE.BIN from the same
+        # root; staged here (first use) before the forcing download, not
+        # refused at root preparation after it.
+        from woof.core.thompson_aerosol_contract import AEROSOL_TABLE_ASSETS
+
+        require_thompson_tables(
+            assets=(*CLASSIC_TABLE_ASSETS, *AEROSOL_TABLE_ASSETS))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2013,6 +2027,14 @@ def _run_configured(args):
     if (configured.root.run.sf_lake_physics == 1
             and configured.root.run.use_lakedepth == 1):
         static_arguments.append("--lake-depth")
+    # The terrain-drag statistics the configured physics reads (gwd_opt,
+    # topo_wind).  Without them the forecast seam refused the prepared root
+    # after the whole preparation (prepared_terrain_drag_missing; QA R4).
+    from woof.static.orographic import required_static_fields
+    drag_fields = required_static_fields(
+        configured.root.run.topo_wind or 0, configured.root.run.gwd_opt or 0)
+    if drag_fields:
+        static_arguments += ["--orographic", ",".join(drag_fields)]
     static_domain_arguments = ([] if args.domain_spec is None else [
         "--domain-spec", str(args.domain_spec.resolve())])
     geometry_receipt = output / "native-geometry-receipt.json"
@@ -2084,6 +2106,17 @@ def _run_configured(args):
                     *static_arguments,
                 ], env)
             else:
+                if drag_fields:
+                    stored = json.loads(static_receipt.read_text(
+                        encoding="utf-8")).get("array_sha256", {})
+                    missing_drag = [name for name in drag_fields
+                                    if name not in stored]
+                    if missing_drag:
+                        raise ValueError(
+                            "prepared_terrain_drag_missing: the static cache "
+                            f"{static_cache} has no {', '.join(missing_drag)} "
+                            "required by the configured terrain drag; build "
+                            "the static from --geog-root instead")
                 _link_file_create(static_cache, sealed_static)
                 _link_file_create(static_receipt, sealed_receipt)
             static_cache = sealed_static

@@ -131,11 +131,13 @@ def _assert_words(got, want, what):
 
 
 @pytest.mark.parametrize(("nz", "p_top", "nlayers"),
-                         ((256, 100.0, 256), (150, 5000.0, 163),
+                         ((256, 100.0, 257), (150, 5000.0, 163),
                           (256, 5000.0, 269)))
 def test_deep_columns_build_wrf_buffer_layers(nz, p_top, nlayers):
     """CPU leg: WRF's count (kme + nint(p_top / 4 hPa) - 1) and grid hold
-    at depth, including the 1 hPa top that builds no buffer layer."""
+    at depth.  At the 1 hPa top WRF's rounded extension is zero, and
+    upstream 1.1.0's compute_lw_nlayers keeps one clear buffer layer there
+    (max(1, n)), so a 256-level column is 257 longwave layers."""
     column = deep_column(nz, p_top)
     assert column["nlayers"] == nlayers
     out = prep.lwrad_prep(**column)
@@ -167,14 +169,18 @@ def test_compiled_tier_frames_are_priced_per_layer(maxlay):
     frames = lw.gpu_local_frame_bytes(maxlay)
     priced = pf.rrtmg_lw_legacy_chain_frame_bytes(maxlay)
     assert priced == 16 * maxlay
+    # The inline march (upstream 1.1.0) carries the same four per-thread
+    # columns as the coalesced march it fuses taut/odcld/efclfrac into.
+    marches = ("rlw_rtrn_march", "rlw_rtrn_march_inline")
     assert max(frames.values()) == frames["rlw_rtrn_march"] <= priced
-    assert all(v <= 512 for k, v in frames.items() if k != "rlw_rtrn_march")
+    assert frames.get("rlw_rtrn_march_inline", 0) <= priced
+    assert all(v <= 512 for k, v in frames.items() if k not in marches)
 
 
 @pytest.mark.gpu
 @pytest.mark.parametrize(("nz", "p_top"), ((256, 100.0), (150, 5000.0)))
 def test_deep_column_device_chain_matches_numpy_bitwise(C, nz, p_top):
-    """The 256-level / 1 hPa column (256 radiation layers, tier 256) and a
+    """The 256-level / 1 hPa column (257 radiation layers, tier 320) and a
     150-level / 50 hPa column (163 layers, tier 192): the single-column and
     batched device chains equal the NumPy port word for word, twice."""
     cp = pytest.importorskip("cupy")
@@ -184,7 +190,7 @@ def test_deep_column_device_chain_matches_numpy_bitwise(C, nz, p_top):
                deep_column(nz, p_top, shift=2.0)]
     ins = engine_inputs(columns)
     assert ins["nlay"] > 128
-    assert legacy_longwave_layer_tier(ins["nlay"]) in (192, 256)
+    assert legacy_longwave_layer_tier(ins["nlay"]) in (192, 256, 320)
     want = _numpy_reference(ins, C)
     for key in OUT_KEYS:
         assert np.isfinite(want[key]).all(), key

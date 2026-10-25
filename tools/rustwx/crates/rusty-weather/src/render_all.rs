@@ -334,12 +334,13 @@ fn hour_presentation(
         });
     };
 
-    let forecast_hour = u16::try_from(exact.lead_seconds / 3_600).map_err(|_| {
-        format!(
-            "exact lead {} seconds exceeds the renderer's forecast-hour range",
-            exact.lead_seconds
-        )
-    })?;
+    // Exact-time stores already carry ordinal u16 slots separately from their
+    // physical u64 lead. The legacy products request uses this number only for
+    // its artifact token here: fields come from the opened slot, and BOTH the
+    // subtitle and suffix below carry the authoritative exact timestamp/lead.
+    // Long integrations must use their slot token rather than narrowing their
+    // physical lead or refusing otherwise valid reanalysis frames.
+    let forecast_hour = u16::try_from(exact.lead_seconds / 3_600).unwrap_or(storage_slot);
     let valid = exact_valid_parts(exact.valid_unix);
     let lead_hours = exact.lead_seconds / 3_600;
     let lead_minutes = (exact.lead_seconds % 3_600) / 60;
@@ -456,7 +457,8 @@ pub fn render_hour_products(
     let presentation = hour_presentation(config, hour, store.exact_time())?;
 
     if !direct_slugs.is_empty() {
-        let direct_request = DirectBatchRequest {
+        let mut direct_request = DirectBatchRequest {
+            accumulation_window: None,
             geographic_overlays: config.geographic_overlays.clone(),
             panel_annotations: config.panel_annotations.clone(),
             model: config.model,
@@ -481,6 +483,27 @@ pub fn render_hour_products(
             subtitle_right_override: source_subtitle_override(config),
             title_provenance: config.title_provenance.clone(),
         };
+        if config.title_provenance.is_local_import() && direct_slugs.iter().any(|slug| {
+            matches!(slug.as_str(), "snowfall_window" | "snow_10to1_window" | "snow_kuchera_window" | "snowfall_liquid_equivalent" | "snow_depth_change")
+        }) {
+            let since = std::env::var("GPUWM_SNOW_SINCE").ok()
+                .filter(|value| !value.trim().is_empty());
+            if let Some(exact) = store.exact_time() {
+                if let Some(origin) = exact.origin_unix() {
+                    direct_request.accumulation_window = Some(
+                        rustwx_products::direct::local_accumulation_window(
+                            origin, exact.valid_unix, since.as_deref(),
+                        )?,
+                    );
+                }
+            } else {
+                direct_request.accumulation_window = Some(
+                    rustwx_products::direct::local_accumulation_window_from_cycle(
+                        &config.date_yyyymmdd, config.cycle_utc, hour, since.as_deref(),
+                    )?,
+                );
+            }
+        }
         let outcome = store_render::render_direct_recipes_from_store(
             store,
             &direct_request,
@@ -755,6 +778,25 @@ mod tests {
             presentation.output_suffix.as_deref(),
             Some("valid_19740403_183000z_lead_000h30m00s")
         );
+    }
+
+    #[test]
+    fn exact_time_long_integration_retains_physical_lead_and_valid_stamp() {
+        let mut config = presentation_config(Some("Δx 4 km"), None);
+        config.date_yyyymmdd = "19791001".to_string();
+        config.cycle_utc = 0;
+        let exact = RwsExactTime::new(1_317_330_000, 1_624_914_000);
+        let presentation = hour_presentation(&config, 7, Some(exact)).unwrap();
+        assert_eq!(presentation.forecast_hour, 7, "artifact token is the storage slot");
+        assert_eq!(presentation.output_suffix.as_deref(),
+            Some("valid_20210628_210000z_lead_365925h00m00s"));
+        let subtitle = presentation.subtitle_left.unwrap();
+        assert!(subtitle.contains("+365925:00"), "{subtitle}");
+        assert!(subtitle.contains("Valid 06/28 21:00Z"), "{subtitle}");
+        // Keep the existing whole-hour token when it is representable.
+        let boundary = hour_presentation(&config, 7,
+            Some(RwsExactTime::new(u64::from(u16::MAX) * 3_600, exact.valid_unix))).unwrap();
+        assert_eq!(boundary.forecast_hour, u16::MAX);
     }
 
     #[test]

@@ -83,6 +83,19 @@ def table() -> dict[str, Any]:
     document = json.loads(TABLE_PATH.read_text(encoding="utf-8"))
     if document.get("schema") != TABLE_SCHEMA:
         raise ValueError(f"{TABLE_PATH.name}: expected schema {TABLE_SCHEMA!r}")
+    # Curated prose remains authoritative. A new scheme already declares its
+    # name and scope in the registry; staging it does not require a duplicate
+    # catalog option row. This fallback makes no cost or qualification claim.
+    descriptions = document["descriptions"]
+    for family, component in _registry()["components"].items():
+        rows = descriptions.setdefault(family, {})
+        for option_id, option in component["options"].items():
+            if option_id not in rows:
+                words = option.get("description") or option.get("label")
+                if not isinstance(words, str) or not words.strip():
+                    raise ValueError(
+                        f"{family}.{option_id}: registry needs a description or label")
+                rows[option_id] = words
     return document
 
 
@@ -818,7 +831,6 @@ def apply_to_experiment(text: str, request: Mapping[str, Any], *, load: bool = T
     # it off is written off.
     requested = _cumulus_requested(request) or bool(file_cumulus(text)[0])
     settings, _ = _as_emitted(settings, base, dx_km=float(verdict["dx_km"]), requested=requested)
-    settings.update(route_stated(settings, verdict["source"]))
     known = _run_fields()
     full = {key: value for key, value in settings.items() if key in known and value is not None}
     changed = _changed(base, settings)
@@ -906,6 +918,13 @@ def apply_to_experiment(text: str, request: Mapping[str, Any], *, load: bool = T
     missing = [f"{key} = {_toml_value(full[key])}" for key in sorted(in_shared) if key not in seen_shared]
     out[shared_end:shared_end] = missing
     result = "\n".join(out) + "\n"
+    # Both catalog --into and domain --physics-choices write this file.
+    # The root's final switches, including its cumulus choice, own the header.
+    from woof.domain_wizard import mix_physics_summary
+
+    result = re.sub(r"^# PHYSICS: .*$",
+                    lambda _: f"# PHYSICS: {mix_physics_summary(result, request)}.",
+                    result, flags=re.MULTILINE)
     if not load:
         return result
     with tempfile.TemporaryDirectory() as folder:
@@ -1106,26 +1125,6 @@ def _settings(request: Mapping[str, Any]) -> tuple[str, dict[str, Any], dict[str
                                               "table uses, such as mp_physics.")
     settings.update(overrides)
     return base, settings, chosen, blocked
-
-
-def route_stated(settings: Mapping[str, Any], source: str | None) -> dict[str, Any]:
-    """The switches ``source``'s route runs for this set whatever a file says.
-
-    The HRRR route runs its namelists, and a WRF namelist has no key for
-    ``moist_cq``: the route's importer answers it from
-    :func:`woof.physics_compat.implicit_runtime_switches`.  That authority
-    enables WRF's moisture pressure correction for every suite; a dry
-    state bypasses it without a moisture carrier.  A verification opt-out
-    cannot be encoded by this route's namelists, so the round trip checks
-    it before publication.  Empty on every route that reads the
-    configuration itself.
-    """
-
-    if not source:
-        return {}
-    from woof.hrrr_route_inputs import route_implicit_switches
-
-    return dict(route_implicit_switches(source, settings))
 
 
 def _cumulus_requested(request: Mapping[str, Any]) -> bool:
@@ -1340,10 +1339,6 @@ def check(request: Mapping[str, Any]) -> dict[str, Any]:
     base, settings, chosen, blocked = _settings(request)
     as_written = dict(settings)
     settings, retired = _as_emitted(settings, base, dx_km=dx_km, requested=_cumulus_requested(request))
-    # What the source's route runs for a switch its own files cannot state,
-    # so the check describes, and a mix is written with, what that route
-    # runs (route_stated).
-    settings.update(route_stated(settings, source))
     if retired:
         chosen["cumulus"] = next(key for key, row in _menu()["cumulus"].items()
                                  if row["settings"].get("cu_physics") == settings["cu_physics"])

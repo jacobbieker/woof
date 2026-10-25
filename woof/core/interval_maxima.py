@@ -31,6 +31,23 @@ def history_interval_slots() -> tuple[str, ...]:
                  for slot in slots)
 
 
+#: Slots upstream 1.1.0's GSD diagnostics (woof.core.gsd_diagnostics) also
+#: fold, under the same names, on their own ``reset_interval1`` window.
+#: Where the GSD block is live it owns their window, so the history reset
+#: leaves them alone; its own WSPD10UMAX/VMAX and W_MEAN keep the same span.
+GSD_SHARED_SLOTS = ("wspd10max", "w_up_max", "w_dn_max")
+#: A slot only the GSD block allocates: its presence marks the block live.
+_GSD_MARKER = "wspd10umax"
+
+
+def _gsd_owns(state) -> bool:
+    existing = getattr(state, "existing_scratch", None)
+    try:
+        return existing is not None and existing(_GSD_MARKER) is not None
+    except Exception:  # noqa: BLE001 -- a test double without the pool
+        return False
+
+
 def reset_history_interval_maxima(state) -> None:
     """Zero every registered running max wherever the domain keeps it.
 
@@ -39,8 +56,10 @@ def reset_history_interval_maxima(state) -> None:
     the state never allocated (``nwp_diagnostics = 0``, a test double) is a
     no-op.
     """
+    skip = GSD_SHARED_SLOTS if _gsd_owns(state) else ()
     for slot in history_interval_slots():
-        zero_domain_slot(state, slot)
+        if slot not in skip:
+            zero_domain_slot(state, slot)
 
 
 def reset_streamed_history_interval_maxima(stepper) -> None:
@@ -55,7 +74,11 @@ def reset_streamed_history_interval_maxima(stepper) -> None:
     store = getattr(stepper, "store", None)
     if store is None:
         return
+    skip = (GSD_SHARED_SLOTS
+            if store.get("scratch/" + _GSD_MARKER) is not None else ())
     for slot in history_interval_slots():
+        if slot in skip:
+            continue
         buffer = store.get("scratch/" + slot)
         if buffer is not None:
             buffer[...] = 0.0

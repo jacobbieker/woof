@@ -43,25 +43,44 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::io::Write;
 
 #[path = "../../../../preparation_resources.rs"]
-mod resources;
+pub mod resources;
+
+/// glibc malloc arenas this process may create ([`limit_allocator_arenas`]).
+pub const ALLOCATOR_ARENAS: i32 = 8;
+
+/// Cap glibc's malloc arenas at [`ALLOCATOR_ARENAS`] unless the caller set
+/// `MALLOC_ARENA_MAX` itself; returns the cap applied, if any.  Called once,
+/// before any thread is spawned.
+///
+/// Named breakage: glibc gives each new thread its own arena (up to eight
+/// per core), and the pages a worker frees stay in its arena's heap.  On a
+/// 491-core box (V59) a compose under the parent's declared child budget
+/// (3.45 GB, the remaining-forcing batch of a 48 h RAP window) held 1.37 GB
+/// beyond its decoded first frame after the first valid time -- about
+/// 2.8 MB of freed-but-retained heap per worker, which `malloc_trim` cannot
+/// return from fragmented arenas -- and refused itself ("one source time on
+/// one worker needs 2321683623 bytes, but only 2080276944 usable bytes
+/// remain") with 470 GB of host memory free; V60 (368 cores) the same.
+/// With eight arenas the same compose runs on all 491 workers under that
+/// budget, no slower (25 frames 50.0 s unlimited, 35.4 s with eight).
+pub fn limit_allocator_arenas() -> Option<i32> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        if std::env::var_os("MALLOC_ARENA_MAX").is_some() {
+            return None;
+        }
+        // SAFETY: mallopt only sets an allocator parameter and takes no
+        // pointer; it is called before this process starts any thread.
+        if unsafe { libc::mallopt(libc::M_ARENA_MAX, ALLOCATOR_ARENAS) } == 1 {
+            return Some(ALLOCATOR_ARENAS);
+        }
+    }
+    None
+}
 
 /// Override for the worker count, for measurement and for a caller who
 /// is running several engines at once and wants each one narrower.
 pub const THREADS_ENV: &str = "GPUWM_MAPPED_ENGINE_THREADS";
-
-/// The single-valid-time sweep the old cap of eight came from, kept
-/// because it is still the right number for ONE valid time's message
-/// decode (a 32-logical-CPU box, `examples/decode_timing.rs`, no
-/// `--output`, warm cache):
-///
-///   threads      1       2       4       8      16      32
-///   hrrr-prs  27.67   18.51   13.24   11.30   10.99   11.20  s
-///   gdas      14.97    9.23    6.52    5.65    5.63       -   s
-///
-/// A whole-series compose no longer runs one valid time at a time, so
-/// the pool is not capped at it: [`lanes`] decides how many valid times
-/// share the pool, and the pool is as wide as the machine.
-pub const SINGLE_TIME_KNEE: usize = 8;
 
 /// The most workers this process may have: the override if it parses to
 /// a positive number, else every core this process may run on.  The pool
@@ -378,6 +397,27 @@ pub fn lanes(per_time_bytes: u64, field_bytes: &[u64], held_bytes: u64, times: u
         .and_then(|value| value.trim().parse::<usize>().ok())
         .filter(|value| *value > 0);
     Ok(limit_requested_lanes(fit, requested))
+}
+
+/// Whether a ONE-lane writer may write a frame's bytes while the next
+/// valid time decodes: that keeps one prepared frame (priced at its
+/// decoded size, the sum of `field_bytes`) beside the valid time in
+/// flight, so it is granted only when [`series_price`] of one lane plus
+/// that frame fits the same budget [`lanes`] priced.  A platform that
+/// cannot report its memory overlaps, as [`lanes`] keeps two in flight
+/// there.
+///
+/// Named breakage: a memory-bound series (one lane) wrote each valid
+/// time's whole frame stream -- about 13 GB on a 3 km CONUS native-level
+/// source -- and only then began decoding the next, so every valid time
+/// paid its write on one core with the pool idle.
+pub fn overlap_write(per_time_bytes: u64, field_bytes: &[u64], held_bytes: u64) -> crate::refusal::Result<bool> {
+    let budget = usable_budget(held_bytes)?;
+    let decoded = field_bytes.iter().copied().fold(0u64, u64::saturating_add);
+    Ok(match budget.filter(|_| per_time_bytes > 0) {
+        Some(share) => series_price(1, width(), per_time_bytes, field_bytes).saturating_add(decoded) <= share,
+        None => true,
+    })
 }
 
 fn limit_requested_lanes(fit: usize, requested: Option<usize>) -> usize {

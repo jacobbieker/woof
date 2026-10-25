@@ -52,6 +52,14 @@ _KDIR = os.path.join(_ROOT, "woof", "core", "kernels")
 #: per-thread frame.  The A/B gate compiles THAT source beside the shipped
 #: one, so it needs the object in the local repository.
 PRE_CUT_COMMIT = "7950e4171af94587f25ec3da2e279acfea0bf51e"
+#: Per kernel, the local-frame source the workspace is graded against.
+#: myjpbl.cu's is upstream 1.1.0's (Recast WOOF 1.1.0, 9c5ebdda9): its
+#: WRF-exact MYJPBL with the column still per thread, onto which the
+#: workspace was re-ported when the fork merged that release.
+PRE_CUT_COMMITS = {
+    "myjpbl": "9c5ebdda9f1d529bb1c5b309e32746204935972d",
+    "myjurb": PRE_CUT_COMMIT,
+}
 
 #: The CUDA default per-thread stack: a frame at or under it reserves
 #: nothing.
@@ -248,6 +256,10 @@ def _columns(nz, ny, nx, *, seed, ztop=None):
         "elflx": c2(rng.uniform(-50.0, 450.0, n)),
         "uz0": c2(rng.uniform(-0.5, 0.5, n)),
         "vz0": c2(rng.uniform(-0.5, 0.5, n)),
+        # Terrain height: WRF seeds ZINT(KTE+1) = HT (upstream 1.1.0's
+        # WRF-exact MYJPBL reads it).  Its own generator, so the draws
+        # above are the ones this fixture always made.
+        "ht": c2(np.random.default_rng(seed + 11).uniform(0.0, 1500.0, n)),
     }
     state = {"thz0": c2(th[0] + rng.uniform(-2.0, 2.0, n)),
              "qz0": c2(qv[0] * rng.uniform(0.8, 1.2, n)),
@@ -297,13 +309,15 @@ def _bep(host, *, seed):
 def _pre_cut_function(name: str, func: str):
     import cupy as cp
 
-    from woof.core.kernels import _extra_header_text, _preamble
+    from woof.core.kernels import (_extra_header_text, _preamble,
+                                   module_options)
     from woof.physics_params import edit_kernel_source
 
     try:
         text = subprocess.run(
             ["git", "-C", _ROOT, "show",
-             f"{PRE_CUT_COMMIT}:woof/core/kernels/{name}.cu"],
+             f"{PRE_CUT_COMMITS.get(name, PRE_CUT_COMMIT)}"
+             f":woof/core/kernels/{name}.cu"],
             check=True, capture_output=True, text=True).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         pytest.skip(f"pre-cut {name}.cu not readable from git: {exc}")
@@ -311,7 +325,7 @@ def _pre_cut_function(name: str, func: str):
         "PRE_CUT_COMMIT no longer names the local-frame kernel")
     src = _preamble() + _extra_header_text(name) + edit_kernel_source(
         name, text)
-    mod = cp.RawModule(code=src, options=("-std=c++17",))
+    mod = cp.RawModule(code=src, options=module_options(name))
     return mod.get_function(func)
 
 

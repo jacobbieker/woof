@@ -398,7 +398,9 @@ def test_a_finished_route_folder_is_read_once_and_then_vouched_for(
     assert warm["verification"]["stamp_reused"] == len(plan.objects)
     assert warm["verification"]["hashed"] == 0
     assert all(entry["reused"] for entry in warm["files"])
-    on_disk = json.loads((tmp_path / fetch_routes.MANIFEST_NAME).read_text())
+    # The tally is a run observation, kept beside the authority (which a
+    # reuse run leaves byte-identical) in the pool receipt.
+    on_disk = json.loads((tmp_path / "fetch-pool-receipt.json").read_text())
     assert on_disk["verification"]["stamp_reused"] == len(plan.objects)
 
     # A touched file is read again; a damaged one is moved, not reused.

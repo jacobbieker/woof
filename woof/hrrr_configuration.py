@@ -39,7 +39,18 @@ def resolved_run_settings(cfg):
     resolved = asdict(cfg)
     resolved["ra_lw_physics"], resolved["ra_sw_physics"] = radiation_scheme_ids(cfg)
     resolved["radiation_scheme_ids"] = list(radiation_scheme_ids(cfg))
-    return resolved
+    # Wire form: tuples as JSON arrays.  The preparation report is JSON, so a
+    # tuple field (the ocean profiles became tuples to keep RunConfig hashable,
+    # lane/cap-fix-a 1e5d77fbd3e) came back as a list and () != [] refused every
+    # HRRR preparation with "resolved physics differs from the request"
+    # (V58 whole HRRR gate run on lane/cap-base, 2026-10-21).
+    def wire(value):
+        if isinstance(value, (tuple, list)):
+            return [wire(item) for item in value]
+        if isinstance(value, dict):
+            return {key: wire(item) for key, item in value.items()}
+        return value
+    return {key: wire(value) for key, value in resolved.items()}
 
 
 def resolve_root_experiment(*, target, vertical, namelist_input, start_time,
@@ -64,6 +75,19 @@ def resolve_root_experiment(*, target, vertical, namelist_input, start_time,
         root_perturbation_deferral(experiment_config, announce=False)
         raw = tomllib.loads(read_config_authority(experiment_config).payload.decode("utf-8"))
         authority = str(read_config_authority(experiment_config).source)
+        # The scheme generations the declared [fetch] source carries are
+        # filled BEFORE the table is split off, exactly as the config-table
+        # loader behind `woof sim` fills them
+        # (woof.physics_source_defaults.fill_omitted_generation_selectors),
+        # so the physics this preparation resolves, records in its receipt
+        # and holds its benchmark to is the physics the forecast integrates
+        # from the same file.  Breakage this prevents: a bare
+        # operational-fork-source configuration (no thompson_version,
+        # thompson_fork_snow_fall or mynn_sfclay_variant written) prepared
+        # through this route resolved and recorded WRF v4.6.1's generations
+        # while `woof sim` ran the fork pair (lane review, 2026-10-06).
+        from woof.physics_source_defaults import fill_omitted_generation_selectors
+        fill_omitted_generation_selectors(raw, raw.get("fetch"))
         # Prepared meteorological identity is independent of execution capacity,
         # fetch hints and what history the forecast writes ([output]: preset,
         # field lists, Icechunk export). The caller keeps these in its
@@ -71,6 +95,10 @@ def resolve_root_experiment(*, target, vertical, namelist_input, start_time,
         raw.pop("fetch", None)
         raw.pop("tiles", None)
         raw.pop("output", None)
+        # [radar_heating] is an execution control too: one preparation
+        # serves the unheated control and every heated arm, and the launch
+        # config hands the table to the door (--radar-heating-table).
+        raw.pop("radar_heating", None)
         for domain in raw.get("domain", ()):
             domain.pop("tiles", None)
             domain.pop("output", None)

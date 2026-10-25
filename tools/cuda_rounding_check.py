@@ -314,14 +314,11 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
     # These files are components, not the sources their runtime compiles.
     # Their real factories are included by composed_units. Compiling a
     # fragment without its defines/libm creates false coverage and errors.
-    fragments = {"p3", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "windfarm_fitch", "urban_bep_bem",
-                 "fire_spread",
+    fragments = {"p3", "p3_zdiag", "fast_sbm", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "urban_bep_bem",
+                 "windfarm_fitch", "fire_spread",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
-                 "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16",
-                 "fire_levelset",
-                 "smoke_emission", "smoke_plumerise", "smoke_deposition",
-                 "fire_coupling"}
+                 "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16"}
     direct = {"rrtmg_legacy_prep", "rrtmg_legacy_adapter", "rrtmg_mcica_wrf", "ruc_spp"}
     stock = [unit for unit in stock
              if unit.key not in {"kernels:" + name for name in fragments | direct}]
@@ -384,21 +381,29 @@ def composed_units(root: Path) -> list[Unit]:
     fire = importlib.import_module("woof.fire._device")
     if not Path(fire.__file__).resolve().is_relative_to(root):
         raise RuntimeError("source factory woof.fire._device was imported outside the checked tree")
-    levelset = importlib.import_module("woof.fire.levelset")
-    if not Path(levelset.__file__).resolve().is_relative_to(root):
-        raise RuntimeError("source factory woof.fire.levelset was imported "
-                           "outside the checked tree")
     bem = module("urban_bem")
     mosaic = module("noah_mosaic")
     nt = module("ntiedtke_fused")
+    sfc = module("noah_sfcdiags")
+    p3 = module("p3_device")
+    fsbm = module("fast_sbm_cuda")
+    # The direct FAST_SBM compiler resolves these quoted headers through -I.
+    # Expand them here so the receipt binds their bytes without a host path.
+    fsbm_source = (kdir / "fast_sbm.cu").read_text(encoding="utf-8")
+    fsbm_source = re.sub(r'^#include "([^"]+)"$',
+                         lambda match: (kdir / match[1]).read_text(encoding="utf-8"),
+                         fsbm_source, flags=re.MULTILINE)
     units = [
+        Unit("composed:noah_sfcdiags", sfc._source(), ()),
+        Unit("composed:fast_sbm", fsbm_source, tuple(fsbm.CUDA_OPTIONS)),
+        Unit("composed:p3_reflectivity", p3.p3_reflectivity_source(kernel_dir=kdir),
+             tuple(p3.DEFAULT_OPTIONS)),
         Unit("composed:rrtmg_lw", lw._gpu_source(), ("-std=c++17", "--ftz=false")),
         Unit("composed:rrtmg_sw", sw_defines + (kdir / "rrtmg_sw.cu").read_text(encoding="utf-8"),
              ("-std=c++17", "--ftz=false")),
         Unit("composed:terrain_drag", terrain.module_source(), tuple(terrain.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch", fitch.module_source(), tuple(fitch.MODULE_OPTIONS)),
         Unit("composed:fire_spread", fire.module_source(), tuple(fire.MODULE_OPTIONS)),
-        Unit("composed:fire_levelset", levelset.module_source(), tuple(levelset.MODULE_OPTIONS)),
         Unit("composed:urban_bem", bem.module_source(), tuple(bem.MODULE_OPTIONS)),
         Unit("composed:noah_mosaic", module_source("noah_mosaic", kernel_dir=kdir),
              tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
@@ -415,16 +420,6 @@ def composed_units(root: Path) -> list[Unit]:
     ruc = module("ruc_spp")
     units.append(Unit("direct:ruc_spp", (kdir / "ruc_spp.cu").read_text(encoding="utf-8"),
                       tuple(ruc.MODULE_OPTIONS)))
-    smoke = importlib.import_module("woof.smoke._kernels")
-    if not Path(smoke.__file__).resolve().is_relative_to(root):
-        raise RuntimeError("source factory smoke was imported outside the checked tree")
-    units.append(Unit("composed:smoke", smoke.module_source(), tuple(smoke.MODULE_OPTIONS)))
-    coupling = importlib.import_module("woof.fire.coupling")
-    if not Path(coupling.__file__).resolve().is_relative_to(root):
-        raise RuntimeError("source factory woof.fire.coupling was imported "
-                           "outside the checked tree")
-    units.append(Unit("composed:fire_coupling", coupling.module_source(),
-                      tuple(coupling.MODULE_OPTIONS)))
     return units
 
 
@@ -557,8 +552,10 @@ def capture_compiler_sources(destination: Path, compiler=None):
 
 
 def _options(unit: Unit, arch: int) -> tuple[str, ...]:
+    from woof.cuda_subnormals import effective_options
     options = tuple(option for option in unit.options
                     if not option.startswith(("-arch=", "--gpu-architecture=")))
+    options = effective_options(unit.source, options)
     if not any(option.lstrip("-").startswith("ftz=") for option in options):
         options += ("-ftz=true",)
     if "--device-as-default-execution-space" not in options:

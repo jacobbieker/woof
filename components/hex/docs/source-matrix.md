@@ -37,12 +37,17 @@ and a forecast receipt, with one met_intermediate receipt or verbatim refusal
 per source. Every verdict quoted in the tables below is reproduced verbatim
 here, so the table is readable on its own.
 
-The one authored table this matrix required, `Vtable.ECMWF-OD.rw`, was a
-repository asset that this checkout no longer carried.  It is now packaged
-at `woof/data/vtables/Vtable.ECMWF-OD.rw`, beside `Vtable.GFS.rw` and
-`Vtable.ERA5.rw`, and `woof hex intermediate --source
-gfs|gdas|ecmwf-open-data|era5|aifs` (`woof/hex/met_intermediate_door.py`)
-now drives `met_intermediate` with them; this matrix's rows were minted by
+The one authored table this matrix required, `Vtable.ECMWF-OD.rw`, ships
+inside the package at `woof/hex/data/vtables/Vtable.ECMWF-OD.rw`, beside the
+other Vtables the init-source rows name. It is packaged because
+`woof hex init-source` hands it to `woof`'s `met_intermediate` writer from
+an installed wheel; a table left in the repository is a table a pip install
+does not have.
+
+`woof hex intermediate --source gfs|gdas|ecmwf-open-data|era5|aifs`
+(`woof/hex/met_intermediate_door.py`) drives `met_intermediate` with the
+packaged Vtables (`woof/data/vtables/Vtable.ECMWF-OD.rw` beside
+`Vtable.GFS.rw` and `Vtable.ERA5.rw`); this matrix's rows were minted by
 hand.  The recreated table is read off a 2026-09-24 IFS oper file and is
 not byte-identical to the one these rows used.  The writer changed too:
 time-processed messages (2 m maximum and minimum temperature) no longer

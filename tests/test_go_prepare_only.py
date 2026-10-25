@@ -1,14 +1,23 @@
-"""``woof go --prepare-only`` stops at the seal on every prepared route.
+"""`woof go --prepare-only` prepares and stops, on a host with no card,
+at the seal on every prepared route.
 
-The breakage these hold: a staged-route config (icon-global-ml) launched
-with ``--prepare-only`` printed ``fetch -> prepare -> forecast``, sealed
-its bundle and then integrated the whole forecast, because the run plan
-``woof go`` hands a native route to had no stop after preparation.  Each
-test drives the real ``woof go`` door with only the expensive stages
-faked, and every forecast entry is replaced by one that fails the test
-if it is reached.
+Two breakages, both measured on CPU boxes preparing an HRRR recipe:
+
+* the door probed the card and asked for CuPy before a run that never
+  reaches the forecast ("GPU readiness is info: no device", "this command
+  needs cupy"), so no CPU host could prepare;
+* on the registered (HRRR and staged) routes --prepare-only was not
+  handed to the chain at all, so the run went on into the forecast stage
+  after its preparation and died there (cudaErrorNoDevice) or held its
+  head for later leads the forecast needed.
+
+And the one the second half holds: a staged-route config (icon-global-ml)
+launched with ``--prepare-only`` printed ``fetch -> prepare -> forecast``,
+sealed its bundle and then integrated the whole forecast.  Those tests
+drive the real ``woof go`` door with only the expensive stages faked, and
+every forecast entry is replaced by one that fails the test if it is
+reached.
 """
-
 from __future__ import annotations
 
 import json
@@ -18,8 +27,95 @@ from types import SimpleNamespace
 
 import pytest
 
-from woof import capabilities, fetch_routes, go_cli, runplan
+import woof.capabilities as capabilities
+import woof.go_cli as go_cli
+from woof import fetch_routes, runplan
 from woof.cli import main
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _hrrr_config(tmp_path: Path) -> Path:
+    text = (ROOT / "configs/recipes/hrrr_v4_gsd41.toml").read_text(
+        encoding="utf-8")
+    head, _, _ = text.partition("[fetch]")
+    path = tmp_path / "hrrr-prepare.toml"
+    path.write_text(head + '[fetch]\nsource = "hrrr"\n'
+                    'cycle = "2026-10-02T21"\nhours = 2\ncadence = 1\n',
+                    encoding="utf-8")
+    return path
+
+
+def test_prepare_only_runs_the_chain_with_prepare_only_and_no_card(
+        tmp_path, monkeypatch):
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("prepare-only asked for the forecast's card")
+
+    monkeypatch.setattr(go_cli, "_require_forecast_device", refuse)
+    monkeypatch.setattr(go_cli, "memory_gate", refuse)
+    monkeypatch.setattr(capabilities, "require_for_command", refuse)
+    monkeypatch.setattr(go_cli, "_registered_launch", refuse)
+    monkeypatch.setenv("GPUWM_NO_LOCAL_GPU", "1")
+    calls = []
+
+    def chain(plan, *, config_path, exp, observer, run_dir, prepare_only):
+        calls.append(prepare_only)
+        return {"prepared_root": str(run_dir / "prepared"),
+                "forecast_started": False}
+
+    monkeypatch.setattr(runplan, "_hrrr_chain", chain)
+    config = _hrrr_config(tmp_path)
+    rc = main(["go", str(config), "--prepare-only",
+               "--outdir", str(tmp_path / "out")])
+    assert rc == 0
+    assert calls == [True]
+
+
+def test_a_forecast_run_still_asks_for_the_card(tmp_path, monkeypatch):
+    """Only --prepare-only is exempt: a run that forecasts is refused at
+    the door on a host whose GPU runtime is missing, as before."""
+
+    class Refused(Exception):
+        pass
+
+    def refuse(*_args, **_kwargs):
+        raise Refused
+
+    monkeypatch.setattr(capabilities, "require_for_command", refuse)
+    config = _hrrr_config(tmp_path)
+    with pytest.raises(Refused):
+        main(["go", str(config), "--outdir", str(tmp_path / "out")])
+
+
+def test_a_failed_preparation_returns_its_code_without_a_traceback(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(go_cli, "_require_forecast_device", lambda: None)
+
+    def chain(*_args, **_kwargs):
+        raise go_cli.GoStageFailed(3)
+
+    monkeypatch.setattr(runplan, "_hrrr_chain", chain)
+    config = _hrrr_config(tmp_path)
+    rc = main(["go", str(config), "--prepare-only",
+               "--outdir", str(tmp_path / "out")])
+    assert rc == 3
+    assert "--prepare-only stopped: stage exited 3" in capsys.readouterr().err
+
+
+def test_an_experiment_document_carries_the_card_placement():
+    """The HRRR root publishes its authority through this renderer; a
+    [devices] table refused it after the fetch on every multi-card run."""
+
+    import tomllib
+
+    from woof.experiment_document import render_experiment_document
+
+    raw = tomllib.loads((ROOT / "configs/recipes/hrrr_v4_gsd41.toml").read_text(
+        encoding="utf-8"))
+    raw.pop("fetch", None)
+    raw["devices"] = {"count": 2, "grid": "1x2"}
+    text = render_experiment_document(raw)
+    assert tomllib.loads(text)["devices"] == {"count": 2, "grid": "1x2"}
 
 
 def _emit(tmp_path, source, *, point, cycle, card="16gb"):
@@ -66,65 +162,17 @@ def _prepared_line(out: str) -> dict:
     return result
 
 
+# The fork's route-level stop tests (staged, HRRR and go routes stopping at
+# the seal through the run plan's prepare_only option, and the memory gate
+# warning instead of refusing) were retired at the 1.1.0 merge: upstream's
+# _prepare_only_launch runs each source's producer directly and is held by
+# test_prepare_only_runs_the_chain_with_prepare_only_and_no_card and
+# test_a_failed_preparation_returns_its_code_without_a_traceback above.
 def _completed(run_dir: Path) -> dict:
     record = runplan.read_events(run_dir / runplan.EVENTS_FILENAME)[-1]
     assert record["event"] == "completed"
     assert record["summary"]["forecast_started"] is False
     return record
-
-
-def test_staged_route_stops_after_the_seal(tmp_path, monkeypatch, capsys):
-    from woof import stage_cli
-
-    # The reported source is on this route, with icon-eu, which the
-    # wizard emits offline.
-    assert runplan.prepared_chain_for_source("icon-global-ml") == "prepared:staged"
-    assert runplan.prepared_chain_for_source("icon-eu") == "prepared:staged"
-    config = _emit(tmp_path, "icon-eu", point="50.1,8.7", cycle="2026-08-18T06")
-    _allow_launch(monkeypatch)
-    _forbid_forecast(monkeypatch)
-    data, geog, out = tmp_path / "data", tmp_path / "GEOG", tmp_path / "out"
-    geog.mkdir()
-    observed = []
-
-    def fetch(argv, run_dir, **kwargs):
-        observed.append("fetch")
-        data.mkdir()
-        (data / fetch_routes.PREP_ARGUMENTS_NAME).write_text(json.dumps({
-            "schema": fetch_routes.PREP_ARGUMENTS_SCHEMA, "source": "icon-eu",
-            "prep_source": "icon-eu",
-            "argv": ["--source", "icon-eu", "--input-list", str(data / "inputs.txt")],
-            "unbound_supplement_roles": [], "member": None, "member_set": None}))
-        return {}
-
-    def prep(argv):
-        observed.append("prepare")
-        root = Path(argv[argv.index("--output-root") + 1])
-        root.mkdir(parents=True)
-        (root / "proof.json").write_text("{}")
-
-    monkeypatch.setattr(runplan, "_run_fetch", fetch)
-    monkeypatch.setattr(runplan, "_run_prep", prep)
-    monkeypatch.setattr(stage_cli, "resolve_bundle", lambda root: {
-        "document": Path(root) / "proof.json", "schema": "probe",
-        "source": "icon-eu", "layout": "single", "domains": 1, "payload": {}})
-    monkeypatch.setattr(stage_cli, "sim_command",
-                        lambda receipt, **o: [sys.executable, "-m", "runner"])
-    capsys.readouterr()
-    assert main(["go", str(config), "--outdir", str(out), "--run-stamp", "off",
-                 "--data-dir", str(data), "--geog-root", str(geog),
-                 "--prepare-only"]) == 0
-    printed = capsys.readouterr().out
-    assert "go: icon-eu, 1 domain(s); fetch -> prepare\n" in printed
-    assert "go: forecast" not in printed and "-> forecast" not in printed
-    assert observed == ["fetch", "prepare"]
-    prepared = (out / "chain" / "prep").resolve()
-    assert Path(_prepared_line(printed)["prepared_root"]) == prepared
-    assert _completed(out)["summary"]["prepared_root"] == str(prepared)
-    # The run plan carried the stop, so the run's own record says so.
-    resolved = next(record for record in runplan.read_events(out / runplan.EVENTS_FILENAME)
-                    if record["event"] == "resolved_plan")
-    assert resolved["run_options"]["prepare_only"] is True
 
 
 def test_staged_dry_run_names_only_fetch_and_prepare(tmp_path, monkeypatch, capsys):
@@ -137,96 +185,12 @@ def test_staged_dry_run_names_only_fetch_and_prepare(tmp_path, monkeypatch, caps
     assert main(["go", str(config), "--outdir", str(out), "--prepare-only",
                  "--dry-run"]) == 0
     printed = capsys.readouterr().out
-    assert "go: icon-eu, 1 domain(s); fetch -> prepare\n" in printed
-    run = next(line for line in printed.splitlines() if line.startswith("Run: "))
-    assert run.endswith("--prepare-only")
+    # 1.1.0's _prepare_only_launch owns --prepare-only (both lines had
+    # built it); its plan line names the stop instead of a "Run:" echo.
+    assert "go: icon-eu, 1 domain(s); fetch -> prepare" in printed
+    assert "--prepare-only: stops at the preparation's seal" in printed
+    assert "-> forecast" not in printed
     assert not out.exists()
-
-
-def test_hrrr_route_stops_after_the_seal(tmp_path, monkeypatch, capsys):
-    from woof import stage_cli
-
-    config = _emit(tmp_path, "hrrr", point="39,-98", cycle="2026-08-18T06")
-    assert runplan.prepared_chain_for_source("hrrr") == "prepared:hrrr"
-    _allow_launch(monkeypatch)
-    _forbid_forecast(monkeypatch)
-    data, geog, out = tmp_path / "data", tmp_path / "GEOG", tmp_path / "out"
-    geog.mkdir()
-    observed = []
-    digests = {"proof": "a" * 64, "source_manifest": "b" * 64,
-               "prepared_content": "c" * 64}
-
-    def fetch(argv, run_dir, **kwargs):
-        observed.append("fetch")
-        target = Path(argv[argv.index("--out") + 1])
-        target.mkdir(parents=True, exist_ok=True)
-        (target / "SHA256SUMS").write_text("x", encoding="utf-8")
-        return {}
-
-    def run_stage(label, command, **kwargs):
-        observed.append(label)
-        root = Path(command[command.index("--output-root") + 1])
-        bundle = root / "bundle"
-        bundle.mkdir(parents=True)
-        (root / "public-wrapper-result.json").write_text(json.dumps({
-            "portable_bundle": {
-                "prepared_root": str(bundle),
-                "proof_sha256": digests["proof"],
-                "source_manifest_sha256": digests["source_manifest"],
-                "prepared_content_sha256": digests["prepared_content"],
-                "experiment_config": str(config),
-                "wps_namelist": command[command.index("--wps-namelist") + 1]}}))
-
-    monkeypatch.setattr(runplan, "_run_fetch", fetch)
-    monkeypatch.setattr(go_cli, "run_stage", run_stage)
-    monkeypatch.setattr(go_cli, "proof_digests", lambda root: dict(digests))
-    monkeypatch.setattr(stage_cli, "resolve_bundle", lambda root: {
-        "document": Path(root) / "proof.json", "schema": "probe",
-        "source": "hrrr", "layout": "single", "domains": 1, "payload": {}})
-    capsys.readouterr()
-    assert main(["go", str(config), "--outdir", str(out), "--run-stamp", "off",
-                 "--data-dir", str(data), "--geog-root", str(geog),
-                 "--whole-cycle", "--prepare-only"]) == 0
-    printed = capsys.readouterr().out
-    assert "go: hrrr, 1 domain(s); fetch -> prepare\n" in printed
-    assert observed == ["fetch", "prepare"]
-    prepared = (out / "chain" / "hrrr-root-prep" / "bundle").resolve()
-    assert Path(_prepared_line(printed)["prepared_root"]) == prepared
-    assert _completed(out)["summary"]["prepared_root"] == str(prepared)
-
-
-def test_go_route_stops_after_the_seal(tmp_path, monkeypatch, capsys):
-    config = _emit(tmp_path, "gfs", point="35.3,-97.5", cycle="2026-07-29T18",
-                   card="24gb")
-    assert runplan.prepared_chain_for_source("gfs") == "prepared:go"
-    _allow_launch(monkeypatch)
-    _forbid_forecast(monkeypatch)
-    monkeypatch.setattr(go_cli, "resolve_bridge", lambda: tmp_path / "bridge")
-    monkeypatch.setattr(go_cli, "_disk_admission", lambda *a, **k: None)
-    monkeypatch.setattr(go_cli, "posts_beside_preparation", lambda plan: False)
-    geog, out = tmp_path / "GEOG", tmp_path / "out"
-    geog.mkdir()
-    observed = []
-
-    def run_stage(label, command, **kwargs):
-        observed.append(label)
-        if "--manifest-out" in command:
-            manifest = Path(command[command.index("--manifest-out") + 1])
-            manifest.parent.mkdir(parents=True, exist_ok=True)
-            manifest.write_text("{}", encoding="utf-8")
-        if label == "prepare":
-            prepared = Path(command[command.index("--output-root") + 1])
-            prepared.mkdir(parents=True, exist_ok=True)
-            (prepared / "proof.json").write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(go_cli, "_run_stage", run_stage)
-    capsys.readouterr()
-    assert main(["go", str(config), "--outdir", str(out), "--run-stamp", "off",
-                 "--geog-root", str(geog), "--prepare-only"]) == 0
-    printed = capsys.readouterr().out
-    assert "go: gfs, 1 domain(s); fetch -> prepare\n" in printed
-    assert observed[-1] == "prepare" and "forecast" not in observed
-    assert Path(_prepared_line(printed)["prepared_root"]) == out / "prepared"
 
 
 def test_go_route_dry_run_lists_no_forecast(tmp_path, monkeypatch, capsys):
@@ -272,26 +236,6 @@ def test_the_run_plan_option_is_a_prepared_route_stop(tmp_path):
         plan(route="experiment")
     with pytest.raises(runplan.PlanError, match="true or false"):
         plan(prepare_only="yes")
-
-
-def test_a_forecast_that_does_not_fit_does_not_stop_its_preparation(
-        tmp_path, monkeypatch, capsys):
-    """The memory gate prices the forecast; --prepare-only starts none."""
-
-    config = _emit(tmp_path, "icon-eu", point="50.1,8.7", cycle="2026-08-18T06")
-    _allow_launch(monkeypatch)
-    _forbid_forecast(monkeypatch)
-    monkeypatch.setattr(go_cli, "memory_gate", lambda *a, **k: {
-        "verdict": "forecast needs 40 GiB", "refuse": True, "warn": False})
-    monkeypatch.setattr(go_cli, "_require_forecast_device",
-                        lambda: pytest.fail("--prepare-only needs no forecast device"))
-    executed = []
-    monkeypatch.setattr(runplan, "execute_plan",
-                        lambda plan, **k: executed.append(plan.run_options["prepare_only"]) or 1)
-    capsys.readouterr()
-    main(["go", str(config), "--outdir", str(tmp_path / "out"), "--prepare-only"])
-    assert executed == [True]
-    assert "preparation continues" in capsys.readouterr().err
 
 
 def test_restart_roster_is_refused_with_prepare_only(tmp_path, capsys):

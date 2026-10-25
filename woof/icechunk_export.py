@@ -401,7 +401,7 @@ def discover_frames(sources: Iterable[Path], *,
                     markers: dict[str, tuple[int, str | None]] | None = None
                     ) -> list[SourceFrame]:
     """Every published frame under ``sources``: those the history walk
-    (:func:`woof.io.wrfout.iter_wrfout_files`) finds and those named by
+    (:func:`woof.io.wrfout_frames.iter_wrfout_files`) finds and those named by
     ``ready/*.json`` markers.
 
     One file reached by two spellings (a marker's resolved path and the
@@ -411,7 +411,7 @@ def discover_frames(sources: Iterable[Path], *,
     a cache of parsed markers by path and mtime, kept by a caller that
     looks again and again."""
 
-    from woof.io.wrfout import iter_wrfout_files
+    from woof.io.wrfout_frames import iter_wrfout_files
     from woof.progress_log import FRAME_MARKER_DIRNAME, FRAME_MARKER_SCHEMA
 
     cache = markers if markers is not None else {}

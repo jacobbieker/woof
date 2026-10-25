@@ -21,6 +21,7 @@ const CENTRE: [f64; 2] = [45.0, 10.0];
 
 fn small_spec() -> MeshSpec {
     MeshSpec {
+        rasters: Vec::new(),
         background_km: 480.0,
         regions: vec![Region {
             shape: Shape::Cap {

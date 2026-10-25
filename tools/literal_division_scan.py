@@ -59,6 +59,17 @@ FTZ_FALSE_SOURCES = frozenset({
     # tied to this exception by test_literal_division_source_gate.py and
     # both-card bit oracles in test_terrain_drag_wrf471_parity.py.
     "terrain_drag.cu",
+    # 2.9.0 round 2: the no-FTZ routes of the cumulus and lightning ports. g3.cu
+    # and nsas.cu compile through kernels.compile_noftz_module with
+    # module_options --fmad=false --ftz=false (kernels._NO_FTZ_MODULES), and
+    # lightning.cu through kernels.load_module's direct NVRTC site with
+    # --ftz=false --fmad=false; without -ftz=true NVVM keeps div.rn, which is
+    # IEEE.  test_literal_division_source_gate.py ties each exception to its
+    # options.
+    "g3.cu", "nsas.cu", "lightning.cu",
+    # hydro.reservoirs._module composes this header and uses ieee_module
+    # exclusively; test_nextgen_reservoir_divisions_use_non_ftz pins the route.
+    "nextgen_reservoirs.cuh",
 })
 
 _NUMBER = r"(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?"

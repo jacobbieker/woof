@@ -98,7 +98,7 @@ anything else.
 The experimental lane (``--hex-experimental-dt``)
 -------------------------------------------------
 An explicit opt-in that lifts the spacing floor.  The timestep is the
-largest one :func:`woof.hex.dt_admission.largest_admissible_dt` admits on the
+largest one :func:`woof.hex.dt_admission.largest_courant_divisor_dt` admits on the
 finest delivered edge -- Courant, exact division of the 600 s radiation
 cadence and binary64 clock closure all still apply -- with no anchor row
 behind it: 0.5 s at 100 m, 0.25 s at 50 m.  The anchor table is
@@ -277,8 +277,11 @@ def spacing_floor_m(dx_m: float) -> dict[str, Any]:
             f"{'convection-off' if scheme is None else 'Grell-Freitas'} "
             "anchor, so no hex mesh can be admitted at this spacing")
     smallest_dt = float(anchored[0])
-    min_dc_edge_m = (smallest_dt * policy.max_characteristic_speed_m_s
-                     / policy.safety_factor)
+    # The bind's stability limit is linear in min(dcEdge), so the edge that
+    # admits the smallest anchor is that anchor over the limit per metre.
+    seconds_per_metre = dt_admission.stability_limit_seconds(
+        1000.0, max_characteristic_speed_m_s=policy.max_characteristic_speed_m_s) / 1000.0
+    min_dc_edge_m = smallest_dt / seconds_per_metre
     floor_m = min_dc_edge_m / DELIVERED_SPACING_P05
     return {
         "floor_dx_m": floor_m,
@@ -286,7 +289,7 @@ def spacing_floor_m(dx_m: float) -> dict[str, Any]:
         "smallest_anchored_dt_s": smallest_dt,
         "cumulus": "off" if scheme is None else scheme,
         "max_characteristic_speed_m_s": policy.max_characteristic_speed_m_s,
-        "courant_safety_factor": policy.safety_factor,
+        "stability_seconds_per_metre": seconds_per_metre,
         "delivered_spacing_p05": DELIVERED_SPACING_P05,
         "gate": ("woof.hex.dt_admission.ADMITTED_TIMESTEPS + "
                  "woof.hex.timestep_admission.CourantPolicy, applied by "
@@ -304,9 +307,8 @@ def _check_floor(dx_m: float) -> dict[str, Any]:
             f"timestep: the smallest anchored "
             f"(cumulus {floor['cumulus']}) timestep is "
             f"{floor['smallest_anchored_dt_s']:g} s, and at "
-            f"{floor['max_characteristic_speed_m_s']:g} m/s with a "
-            f"{floor['courant_safety_factor']:g} Courant safety factor that "
-            f"needs min dcEdge >= {floor['min_dc_edge_m']:.0f} m; delivered "
+            f"{floor['max_characteristic_speed_m_s']:g} m/s the bind's stability "
+            f"limit needs min dcEdge >= {floor['min_dc_edge_m']:.0f} m; delivered "
             f"cells run as fine as {floor['delivered_spacing_p05']:g} x their "
             f"request, hence {floor['floor_dx_m']:.0f} m "
             f"({floor['gate']}).  For {dx_m:g} m along the corridors use "
@@ -334,7 +336,7 @@ def experimental_timestep(dx_m: float) -> dict[str, Any]:
     The largest dt that divides the 600 s radiation cadence, closes the
     model clock exactly in binary64 and satisfies the Courant policy on the
     finest delivered edge (``DELIVERED_SPACING_P05 x dx``), by
-    :func:`woof.hex.dt_admission.largest_admissible_dt` -- the function the
+    :func:`woof.hex.dt_admission.largest_courant_divisor_dt` -- the function the
     forecast door's experimental lane re-checks with, so the plan and the
     run agree on the number.  No anchor row is consulted or written.
     """
@@ -345,21 +347,19 @@ def experimental_timestep(dx_m: float) -> dict[str, Any]:
 
     policy = CourantPolicy()
     min_dc_edge_m = DELIVERED_SPACING_P05 * dx_m
-    found = dt_admission.largest_admissible_dt(
+    found = dt_admission.largest_courant_divisor_dt(
         min_dc_edge_m,
-        max_characteristic_speed_m_s=policy.max_characteristic_speed_m_s,
-        safety_factor=policy.safety_factor)
+        max_characteristic_speed_m_s=policy.max_characteristic_speed_m_s)
     dt = found["largest_admissible_dt_seconds"]
     if dt is None:
         raise HexPlanRefusal(
             f"--dx-m {dx_m:g} admits no timestep even on the experimental "
             f"lane: its finest delivered edge, about {min_dc_edge_m:.1f} m, "
             f"has a Courant limit of {found['courant_limit_seconds']:.4g} s "
-            f"({policy.max_characteristic_speed_m_s:g} m/s, safety "
-            f"{policy.safety_factor:g}), and no divisor of the "
+            f"({policy.max_characteristic_speed_m_s:g} m/s), and no divisor of the "
             f"{found['radiation_cadence_seconds']:g} s radiation cadence at "
             "or below it closes the model clock exactly in binary64 "
-            "(woof.hex.dt_admission.largest_admissible_dt).  Coarsen --dx-m "
+            "(woof.hex.dt_admission.largest_courant_divisor_dt).  Coarsen --dx-m "
             "or use --topology wrf-tiles")
     return {
         "dt_seconds": float(dt),
@@ -370,9 +370,8 @@ def experimental_timestep(dx_m: float) -> dict[str, Any]:
         "radiation_steps": found["radiation_steps_at_that_dt"],
         "rejected_for_clock_closure": len(found["rejected_for_clock_closure"]),
         "max_characteristic_speed_m_s": policy.max_characteristic_speed_m_s,
-        "courant_safety_factor": policy.safety_factor,
         "delivered_spacing_p05": DELIVERED_SPACING_P05,
-        "gate": ("woof.hex.dt_admission.largest_admissible_dt (Courant + "
+        "gate": ("woof.hex.dt_admission.largest_courant_divisor_dt (Courant + "
                  "radiation divisibility + binary64 clock closure); no "
                  "ADMITTED_TIMESTEPS anchor"),
     }
@@ -1741,7 +1740,7 @@ STAGE_REQUIREMENTS: dict[str, tuple[dict[str, Any], ...]] = {
 
 def _parse_error(argv: Sequence[str],
                  parsers: dict[str, Any] | None = None) -> str | None:
-    """None when this build's real parser accepts ``woof argv``, else why.
+    """None when this build's real parser accepts the woof command line ``argv``, else why.
 
     ``parsers`` caches the two parsers across one plan's commands (building
     ``woof``'s top-level parser is the slow part).

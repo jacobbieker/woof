@@ -255,16 +255,22 @@ const KNOWN_MAP_SOURCES: [MapSource; 6] = [
         grib1_earth_radius_km: 6367.47,
         centre_rules: CentreRules::Wps,
     },
-    // DWD ICON.  rrpr.F has no DWD arm, so the header text is this tool's
-    // own; it matches none of rrpr.F's substring tests ("NCEP", "ECMWF"),
-    // and none of those repairs is DWD's.  ICON reports RELHUM over liquid
-    // water at every temperature, publishes the land fraction (FR_LAND)
-    // rather than a flag, publishes snow water equivalent unhalved (W_SNOW,
-    // kg m-2) and physical snow depth (H_SNOW, m), and integrates on a
-    // sphere of 6371.229 km.
+    // DWD ICON (centre 78).  rrpr.F has no DWD arm; the header is the text
+    // ungrib's rd_grib2.F writes for centre 78, and it matches none of
+    // rrpr.F's substring tests ("NCEP", "ECMWF"), so none of those repairs
+    // runs.  ICON reports RELHUM over liquid water at every temperature,
+    // publishes the land fraction (FR_LAND) rather than a flag (the init's
+    // masked soil interpolation tests LANDSEA against 0, so a coastal cell at
+    // 0.3 would be read as land), publishes snow water equivalent unhalved
+    // (W_SNOW, kg m-2) and physical snow depth (H_SNOW, m), and integrates on
+    // a sphere of 6371.229 km.  One row serves both ICON tables: the
+    // regional Vtable.ICON.rw (GEOPT and SOILW, converted by the WPS rules)
+    // and the global ICON tables (FI, HHL, W_SO and T_SO, converted by
+    // `apply_centre_rules`); each rule engages only on the fields its table
+    // names.
     MapSource {
         label: "dwd",
-        header: "DWD",
+        header: "DWD Offenbach",
         rh_over_ice: false,
         masked_surface_repair: false,
         snow_water_equivalent_doubled: false,
@@ -866,6 +872,10 @@ struct Collector {
     /// reached the store.  Both at once is refused: their `xlvl`s are
     /// different quantities in one level table.
     vertical_coordinates: BTreeSet<u8>,
+    /// Depth bounds in metres of every field selected on a below-ground
+    /// layer (GRIB2 type 106 with both surfaces), by field name: the
+    /// soil-water-mass rule needs the layer thickness the record carried.
+    layer_bounds_m: BTreeMap<String, (f64, f64)>,
 }
 
 impl Collector {
@@ -882,6 +892,7 @@ impl Collector {
             messages_seen: 0,
             messages_matched: 0,
             vertical_coordinates: BTreeSet::new(),
+            layer_bounds_m: BTreeMap::new(),
         }
     }
 
@@ -996,6 +1007,13 @@ fn collect_grib2(path: &Path, vtable: &[VtableRow], out: &mut Collector) -> Resu
         out.messages_matched += 1;
         if matches!(product.level_type, 100 | 150) {
             out.vertical_coordinates.insert(product.level_type);
+        }
+        if product.level_type == 106
+            && product.second_level_value.is_finite()
+            && product.second_level_value > product.level_value
+        {
+            out.layer_bounds_m
+                .insert(row.name.clone(), (product.level_value, product.second_level_value));
         }
         out.insert(Slab {
             name: row.name.clone(),
@@ -1409,7 +1427,22 @@ fn apply_centre_rules(
     if source.centre_rules == CentreRules::Dwd {
         ght_from_fi(collector, ledger);
         ght_from_hhl(collector, ledger)?;
-        dwd_heights_complete(collector, ledger)?;
+        // The heights check belongs to runs on ICON's own height sources
+        // (FI, HHL, model levels): a table that reads GEOPT instead
+        // (Vtable.ICON.rw) gets its heights from the WPS rule
+        // `hgt_from_geopt`, which runs after these.
+        let icon_heights = vtable.iter().any(|row| row.name == "FI" || row.name == "HHL")
+            || collector.has_field("FI")
+            || collector.has_field("HHL")
+            || collector.vertical_coordinates.contains(&150);
+        if icon_heights {
+            dwd_heights_complete(collector, ledger)?;
+        } else {
+            ledger.off(
+                "dwd_heights_complete",
+                "DWD: the Vtable names no FI or HHL; heights come from hgt_from_geopt".into(),
+            );
+        }
         soilm_from_w_so(collector, vtable, ledger)?;
         soilt_from_t_so(collector, vtable, ledger)?;
     } else {
@@ -1826,6 +1859,7 @@ fn apply_ungrib_rules(collector: &mut Collector, source: &MapSource, ledger: &mu
     surface_rh_from_dewpoint(collector, ledger);
     masked_surface_fields(collector, source, ledger);
     soil_height_from_geopotential(collector, ledger);
+    soil_moisture_from_water_mass(collector, ledger);
     snow_from_ecmwf_water_equivalent(collector, ledger);
     landsea_fraction_to_flag(collector, source, ledger);
     snow_water_equivalent_doubling(collector, source, ledger);
@@ -1846,6 +1880,57 @@ fn height_from_geopotential(collector: &mut Collector, ledger: &mut RuleLedger) 
         "GEOPT present without HGT (not source-gated)".into(),
         points,
         format!("HGT = GEOPT / 9.81 on {levels} levels"),
+    );
+}
+
+/// Soil water published as a MASS per layer (kg m-2) becomes the
+/// volumetric fraction the init reads: `SOILMxxx = SOILWxxx / (1000 kg m-3
+/// x layer thickness)`, the thickness taken from the record's own type-106
+/// depth pair.  A Vtable selects the mass under a `SOILW` scratch name (blank
+/// description) and declares the `SOILM` output with a blank selector, the
+/// same pattern as GEOPT -> HGT and SOILGEO -> SOILHGT.  Not source-gated:
+/// the units are the table's declaration, not a centre's.  Masked points
+/// (water, where a land-only layer has no value) stay masked.
+fn soil_moisture_from_water_mass(collector: &mut Collector, ledger: &mut RuleLedger) {
+    let sources: Vec<(String, f64, Vec<f32>, SlabGrid)> = collector
+        .slabs
+        .iter()
+        .filter(|((n, lvl), _)| n.starts_with("SOILW") && lvl.0 == XLVL_SURFACE)
+        .filter_map(|((n, _), s)| {
+            collector
+                .layer_bounds_m
+                .get(n)
+                .map(|(top, bottom)| (n.clone(), bottom - top, s.values.clone(), s.grid.clone()))
+        })
+        .collect();
+    if sources.is_empty() {
+        ledger.off(
+            "soilm_from_soil_water_mass",
+            "no SOILW layer with type-106 depth bounds was selected".into(),
+        );
+        return;
+    }
+    let mut points = 0usize;
+    let mut detail = Vec::new();
+    for (name, thickness, values, grid) in sources {
+        let target = format!("SOILM{}", &name[5..]);
+        if collector.has_surface(&target) {
+            continue;
+        }
+        let divisor = (1000.0 * thickness) as f32;
+        let derived: Vec<f32> = values
+            .iter()
+            .map(|v| if *v == MASKED_SENTINEL { *v } else { v / divisor })
+            .collect();
+        points += derived.iter().filter(|v| **v != MASKED_SENTINEL).count();
+        detail.push(format!("{target} = {name} / (1000 * {thickness:.4} m)"));
+        collector.insert(Slab { name: target, xlvl: XLVL_SURFACE, grid, values: derived });
+    }
+    ledger.on(
+        "soilm_from_soil_water_mass",
+        "SOILW mass-per-layer fields with depth bounds (not source-gated)".into(),
+        points,
+        detail.join("; "),
     );
 }
 
@@ -2510,8 +2595,9 @@ fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Invocation, Str
 }
 
 fn main() {
-    // Keep the release-provenance stamp in the binary: the bundle cut
-    // proves a staged bridge by these bytes (see lib.rs).
+    // Keep the release owner's build.rs stamp in the executable (2.9.0: this
+    // binary joined the bridge bundle, and a bridge the cut cannot prove from
+    // its bytes must not ship), as gdt101_remap does.
     let _ = std::hint::black_box(gpuwm_preprocess_cpu::SOURCE_REV_STAMP);
     if let Err(message) = run() {
         eprintln!("met_intermediate: {message}");
@@ -2874,6 +2960,31 @@ mod core101;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn soil_water_mass_becomes_volumetric_by_the_records_own_layer_thickness() {
+        // The breakage this prevents: ICON publishes W_SO in kg m-2 per
+        // TERRA layer; handed to the init as a fraction it would read 3.9
+        // (a 0-1 cm layer holding 39 kg m-2 would be 3.9 m3 m-3).
+        let mut c = Collector::new(0.0);
+        c.insert(slab("SOILW002", XLVL_SURFACE, vec![20.0, MASKED_SENTINEL]));
+        c.layer_bounds_m.insert("SOILW002".into(), (0.01, 0.03));
+        let mut ledger = RuleLedger::default();
+        soil_moisture_from_water_mass(&mut c, &mut ledger);
+        let out = &c.surface("SOILM002").unwrap().values;
+        assert!((out[0] - 1.0).abs() < 1e-6, "{out:?}");
+        assert_eq!(out[1], MASKED_SENTINEL);
+        assert!(ledger.entries.iter().any(|e| e.rule == "soilm_from_soil_water_mass" && e.applied));
+    }
+
+    #[test]
+    fn soil_water_mass_without_depth_bounds_is_not_converted() {
+        let mut c = Collector::new(0.0);
+        c.insert(slab("SOILW002", XLVL_SURFACE, vec![20.0]));
+        let mut ledger = RuleLedger::default();
+        soil_moisture_from_water_mass(&mut c, &mut ledger);
+        assert!(c.surface("SOILM002").is_none());
+    }
+
     use super::*;
 
     fn args(list: &[&str]) -> Vec<String> {
@@ -3031,6 +3142,9 @@ mod tests {
     #[test]
     fn a_known_label_resolves_to_the_header_text_ungrib_writes() {
         assert_eq!(resolve_map_source("ecmwf").unwrap().header, "ECMWF");
+        assert_eq!(resolve_map_source("DWD").unwrap().header, "DWD Offenbach");
+        assert!(resolve_map_source("dwd").unwrap().landsea_to_flag);
+        assert!(!resolve_map_source("dwd").unwrap().rh_over_ice);
         assert_eq!(resolve_map_source("NCEP-GFS").unwrap().header, "NCEP GFS Analysis");
         assert_eq!(resolve_map_source(" ecmwf ").unwrap().header, "ECMWF");
     }
@@ -3535,7 +3649,7 @@ mod tests {
 
     #[test]
     fn dwd_and_ukmo_resolve_and_say_which_repairs_they_take() {
-        assert_eq!(dwd().header, "DWD");
+        assert_eq!(dwd().header, "DWD Offenbach");
         assert_eq!(resolve_map_source("UKMO").unwrap().header, "UKMO");
         // ICON reports RELHUM over water, publishes FR_LAND as a fraction
         // and W_SNOW unhalved; none of the NCEP repairs is DWD's.

@@ -402,10 +402,14 @@ def test_a_track_across_the_projection_switch_latitude(tmp_path):
     assert min(y) >= margin - 1 and max(y) <= n1y - margin + 1
 
 
-def test_a_polar_track_is_refused(tmp_path):
+def test_a_polar_track_is_planned_on_polar_stereographic(tmp_path):
+    # From 1.1.0 a pole-enclosing root takes the polar stereographic
+    # projection, regular through its hemisphere's pole with periodic
+    # source and static donors (domain_wizard._pole_clearance_refusal),
+    # so a track near the pole is planned rather than refused.
     track = _track(lat0=89.3, lon0=0.0)
-    with pytest.raises(ValueError, match="pole"):
-        tp.plan_track(track, "polar", tmp_path)
+    run = tp.plan_track(track, "polar", tmp_path)
+    assert run.plan["layout"]["projection"]["map_proj"] == "polar"
 
 
 # ---------------------------------------------------------------------------

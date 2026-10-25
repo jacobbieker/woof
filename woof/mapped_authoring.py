@@ -39,9 +39,11 @@ from woof.mapped_source import (
     _grib_selectors_overlap,
     _load_json_bytes,
     _mapped_engine_choice,
+    _object,
     _require_authority_snapshot,
     _sha256,
     _snapshot_authority,
+    _string,
     load_mapping,
 )
 from woof.native_wrf_distribution import bridge_identity
@@ -95,30 +97,6 @@ _GRIB2_SELECTOR_OVERRIDES = {
     "member",
 }
 _MAX_STABLE_SNAPSHOT_BYTES = 128 * 1024 * 1024
-
-
-def _object(
-    value: object,
-    label: str,
-    *,
-    allowed: set[str],
-    required: set[str] = frozenset(),
-) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise TypeError(f"{label} must be an object")
-    unknown = sorted(set(value) - allowed)
-    if unknown:
-        raise ValueError(f"{label} has unknown key(s): {unknown}")
-    missing = sorted(required - set(value))
-    if missing:
-        raise ValueError(f"{label} is missing required key(s): {missing}")
-    return value
-
-
-def _string(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be a non-empty string")
-    return value
 
 
 def _u8(value: object, label: str) -> int:
@@ -1585,14 +1563,25 @@ def _require_role_inventory(composition, supplements, provenance) -> None:
     for binding in (composition.get("field_sources") or {}).values():
         expected_supplements.add(str(binding["data_role"]))
         expected_provenance.add(str(binding["provenance_role"]))
-    if set(supplements) != expected_supplements:
-        raise ValueError(
-            "supplement role inventory differs from the composition contract"
-        )
-    if set(provenance) != expected_provenance:
-        raise ValueError(
-            "provenance role inventory differs from the composition contract"
-        )
+    # Each refusal names the roles, so a reader knows which --supplement
+    # (or provenance) to add or drop: a composition that grows a role (the
+    # wrfsfcf00 vegetation source 6a69b356f added to hrrr-prs) otherwise
+    # refused every hand-written prep line with no word of what it lacked.
+    for kind, given, expected in (
+            ("supplement", set(supplements), expected_supplements),
+            ("provenance", set(provenance), expected_provenance)):
+        if given != expected:
+            parts = []
+            if expected - given:
+                parts.append("missing " + ", ".join(sorted(expected - given)))
+            if given - expected:
+                parts.append("unexpected " + ", ".join(sorted(given - expected)))
+            raise ValueError(
+                f"{kind} role inventory differs from the composition contract: "
+                + "; ".join(parts)
+                + (". Pass one --supplement ROLE=PATH per missing role (the "
+                   "fetch's prep-command.txt spells each)" if kind == "supplement"
+                   else ""))
 
 
 def _author_manifest_payload(output_path: Path, *, mapping_path, composition_path,

@@ -407,13 +407,14 @@ def test_a_ladder_the_childs_radiation_cannot_run_refuses_at_plan_review(
         "--accept-parent-cadence",
         "--out", str(tmp_path / "child-run"), "--dry-run"]
 
-    assert cli_main(args + ["--child-levels", "128,2.5"]) != 0
+    # The fork raised RTE+RRTMGP to 256 MODEL levels with no cap layer
+    # above the top (woof/physics_vertical_contract.py), so the ceiling no
+    # longer depends on p_top: a 128-level ladder now plans clean, and the
+    # first ladder past it is refused by validate_run_config's own
+    # vertical preflight, before anything is opened.
+    assert cli_main(args + ["--child-levels", "257,2.5"]) != 0
     err = capsys.readouterr().err
-    assert "exceeds a radiation adapter's layer ceiling" in err
-    # Named on the parent's OWN model top, read off the tape, not on a
-    # p_top the review invented.
-    assert "p_top=10000 Pa" in err
-    assert "RTE+RRTMGP longwave" in err
+    assert "RTE+RRTMGP longwave requires model levels nz <= 256" in err
     assert not (tmp_path / "child-run").exists()
 
     # THE CONTROL: the same config and the same route with a ladder that

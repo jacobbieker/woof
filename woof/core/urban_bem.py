@@ -39,6 +39,7 @@ from typing import Mapping
 import numpy as np
 
 from woof.core.urban_bem_layout import METADATA
+from woof.core.urban_state import BEP_SPEC, BEM_SPEC
 
 # module_sf_bep_bem.F:22-53, the BEP_BEM module parameters.
 NDM = 2
@@ -60,26 +61,7 @@ DIMENSIONS = MappingProxyType({
 
 #: The option-3 arrays (Registry.EM_COMMON), in infra's row convention:
 #: layers 0 = 2-D, a string names an ``urban_map_*`` size or ``ndm``.
-STATE_SPEC = MappingProxyType({
-    "tsk_rural_bep": ("f4", 0),
-    "trb_urb4d": ("f4", "zrd"), "tw1_urb4d": ("f4", "zwd"),
-    "tw2_urb4d": ("f4", "zwd"), "tgb_urb4d": ("f4", "gd"),
-    "sfw1_urb3d": ("f4", "zd"), "sfw2_urb3d": ("f4", "zd"),
-    "sfr_urb3d": ("f4", "zdf"), "sfg_urb3d": ("f4", "ndm"),
-    "tlev_urb3d": ("f4", "bd"), "qlev_urb3d": ("f4", "bd"),
-    "tw1lev_urb3d": ("f4", "wd"), "tw2lev_urb3d": ("f4", "wd"),
-    "tglev_urb3d": ("f4", "gbd"), "tflev_urb3d": ("f4", "fbd"),
-    **{name: ("f4", 0) for name in (
-        "sf_ac_urb3d", "lf_ac_urb3d", "cm_ac_urb3d", "sfvent_urb3d",
-        "lfvent_urb3d", "ep_pv_urb3d", "qgr_urb3d", "tgr_urb3d",
-        "draingr_urb3d")},
-    "sfwin1_urb3d": ("f4", "wd"), "sfwin2_urb3d": ("f4", "wd"),
-    "t_pv_urb3d": ("f4", "zdf"), "trv_urb4d": ("f4", "zgrd"),
-    "qr_urb4d": ("f4", "zgrd"), "drain_urb4d": ("f4", "zdf"),
-    "sfrv_urb3d": ("f4", "zdf"), "lfrv_urb3d": ("f4", "zdf"),
-    "dgr_urb3d": ("f4", "zdf"), "lfr_urb3d": ("f4", "zdf"),
-    "dg_urb3d": ("f4", "ndm"), "lfg_urb3d": ("f4", "ndm"),
-})
+STATE_SPEC = MappingProxyType({**BEP_SPEC, **BEM_SPEC})
 
 # ---------------------------------------------------------------------------
 # the generated layouts
@@ -183,12 +165,13 @@ def tables_from_params(params) -> dict[str, object]:
 # the device module
 # ---------------------------------------------------------------------------
 
-def module_source() -> str:
+def module_source(*, kernel_dir=None) -> str:
     """The exact source string NVRTC compiles."""
     from woof.core.kernels import _preamble
 
-    root = Path(__file__).parent / "kernels"
-    return _preamble() + "".join(
+    root = Path(kernel_dir) if kernel_dir is not None else Path(__file__).parent / "kernels"
+    from woof.cuda_subnormals import MARKER
+    return MARKER + _preamble(root) + "".join(
         (root / name).read_text(encoding="utf-8") for name in _SOURCES)
 
 
@@ -196,6 +179,8 @@ def module_source() -> str:
 def _bem_module():
     """Dedicated loader: this module alone needs both option overrides."""
     import cupy as cp
+    from woof.cuda_subnormals import install
+    install()
 
     from woof.certify.kernel_manifest import record_module
 
@@ -283,6 +268,12 @@ def workspace_bytes_per_column(nz: int) -> int:
                 + WORKSPACE_FLOATS_PER_LEVEL * (int(nz) + 1))
 
 
+def urban_columns(frc_urb2d):
+    """Positive validated [0,1] fractions, including positive subnormal words."""
+    import cupy as cp
+    return cp.flatnonzero(frc_urb2d.ravel().view(cp.int32) > cp.int32(0))
+
+
 class ColumnPlan:
     """The urban column list, chunked to a workspace budget, and its buffers.
 
@@ -294,7 +285,7 @@ class ColumnPlan:
     def __init__(self, frc_urb2d, nz: int, workspace_bytes: int) -> None:
         import cupy as cp
 
-        cols = cp.flatnonzero(frc_urb2d.ravel() > cp.float32(0))
+        cols = urban_columns(frc_urb2d)
         cols = cols.astype(cp.int32)
         self.count = int(cols.size)
         self.nz = int(nz)
@@ -367,7 +358,11 @@ def launch_bep_bem_columns(dev: Mapping, cls: Mapping, *, gmt, julday,
         args += tuple(scalars[name] for name in COLUMN_SCALAR_ARGUMENTS)
         args += (plan.ws, np.int32(plan.words), err)
         kernel(((count + 31) // 32,), (32,), args)
-        status = err.max().reshape(1)
+        # A uint32 status word, as the health ledger's slots are: err is
+        # int32 (non-negative codes) and cupy refuses to OR an int32 word
+        # into a uint32 slot, which crashed option 3 on the first step of
+        # every single-device forecast once ac988f1fd deferred those reads.
+        status = err.max().reshape(1).astype(cp.uint32)
         code = health_ledger.read_status(status, site="urban_bem",
                                          describe=_refuse)
         if code:

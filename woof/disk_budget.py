@@ -220,11 +220,23 @@ def history_frames(exp, domain, run_seconds: float | None = None, *,
     interval = Fraction(str(domain.history_interval_s))
     if interval <= 0:
         return int(after_seconds is None or start + begin > Fraction(str(after_seconds)))
-    last = (end - begin) // interval
-    first = 0
-    if after_seconds is not None:
-        first = max(0, (Fraction(str(after_seconds)) - start - begin) // interval + 1)
-    return max(0, int(last - first + 1))
+    after = None if after_seconds is None else Fraction(str(after_seconds)) - start
+
+    def count(origin, period, limit):
+        last = (limit - origin) // period
+        # Inclusive begin and exclusive resume, on the same alarm lattice.
+        first = max(0, -((origin - begin) // period))
+        if after is not None:
+            first = max(first, (after - origin) // period + 1)
+        return max(0, int(last - first + 1))
+
+    run = getattr(domain, "run", None)
+    interval2 = Fraction(str(getattr(run, "history_interval2_s", 0)))
+    if interval2 <= 0:
+        return count(begin, interval, end)
+    change = Fraction(str(run.history_interval_change_s))
+    return (count(begin, interval, min(end, change))
+            + count(change + interval2, interval2, end))
 
 
 def _history_window_seconds(exp, domain):
@@ -348,10 +360,10 @@ def projected_run_bytes(exp, *, keep_checkpoints: int | None,
         h = frame_bytes * held_frames
         c = cells * per_cell * held
         begin, end = _history_window_seconds(exp, domain)
-        # The activation frame precedes the first physics step and carries
-        # no output-due reflectivity. A delayed first alarm is already mature.
+        # A tick-zero analysis writes the zero reflectivity array. Only a
+        # later activation precedes its domain's first reflectivity producer.
         start = run_seconds - live if live is not None else run_seconds + 1
-        if held_frames and begin == 0 and (not resumed or float(resume_seconds) < start):
+        if held_frames and start > 0 and begin == 0 and (not resumed or float(resume_seconds) < start):
             h -= frame_bytes - history_frame_bytes(run, selection, include_reflectivity=False)
         p = (_picture_projection(run.nx, run.ny, live, float(domain.history_interval_s),
                                  render_products,

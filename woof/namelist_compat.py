@@ -124,7 +124,9 @@ _PHYSICS_STATE_KEYS = {
         "num_soil_layers", "sf_urban_physics", "use_wudapt_lcz", "num_urban_hi",
         "slucm_distributed_drag", "distributed_ahe_opt", "sf_lake_physics", "mosaic_lu",
         "mosaic_soil", "mosaic_cat", "icloud", "morr_rimed_ice", "hail_opt",
-        "ghg_input", "o3input", "aer_opt", "sst_update", "surface_input_source",
+        "ghg_input", "o3input", "aer_opt",
+        "aer_type", "aer_aod550_opt", "aer_angexp_opt", "aer_ssa_opt", "aer_asy_opt",
+        "aer_aod550_val", "aer_angexp_val", "aer_ssa_val", "aer_asy_val", "sst_update", "surface_input_source",
         "num_land_cat", "fractional_seaice",
         # Land-surface state selectors WRF-Runner-generated namelists carry
         # (2026-07-30 interop verification).  Each changes what real.exe
@@ -665,10 +667,19 @@ def analyze_namelists(
     # copy of one set, so adding a projection meant remembering to edit a
     # door that is not the projection module.
     from woof.static.projection import (
-        implemented_projections, latlon_blocker,
+        implemented_projections, is_latlon_map_proj, latlon_blocker,
+        latlon_refusal,
     )
     implemented = implemented_projections()
     implemented_list = _quoted_list(implemented)
+    # A lat-lon namelist spells dx/dy in DEGREES.  Read as metres by the
+    # hierarchy check below it produced a second, misleading refusal
+    # ("expected 0.108 m from its parent ratio"); the projection refusal
+    # is the one answer such a pair gets.
+    latlon_grid = (isinstance(raw_projection, str)
+                   and is_latlon_map_proj(raw_projection)
+                   and raw_projection.strip().lower().replace("_", "-")
+                   not in implemented)
     if not isinstance(raw_projection, str):
         issues.append(_issue(
             "INVALID_PROJECTION", "&geogrid/map_proj",
@@ -682,7 +693,8 @@ def analyze_namelists(
         if normalized_projection not in implemented:
             issues.append(_issue(
                 "UNSUPPORTED_PROJECTION", "&geogrid/map_proj",
-                f"map_proj={raw_projection!r}; RW-WPS implements Lambert "
+                (f"{latlon_refusal()}. " if latlon_grid else "")
+                + f"map_proj={raw_projection!r}; RW-WPS implements Lambert "
                 "conformal, Mercator, and polar stereographic geometry.",
                 f"Use map_proj={implemented_list}. "
                 "Latitude-longitude is rejected rather than "
@@ -1052,17 +1064,24 @@ def analyze_namelists(
                         f"and height {covered_j} do not fit "
                         f"d{parent_index + 1:02d} e_sn={inp_sn[parent_index]}"
                     )
-            dx_root, dy_root = _finite_floats(
-                (_value(geogrid, "dx"), _value(geogrid, "dy")),
-                "&geogrid/dx,dy",
-            )
-            if dx_root <= 0.0 or dy_root <= 0.0:
-                raise ValueError("root dx and dy must be positive")
-            dx_values, dy_values = [dx_root], [dy_root]
-            for index in range(1, max_dom):
-                parent_index = inp_parent[index] - 1
-                dx_values.append(dx_values[parent_index] / inp_ratio[index])
-                dy_values.append(dy_values[parent_index] / inp_ratio[index])
+            if latlon_grid:
+                # Degrees on the WPS side (see latlon_grid above); the
+                # input's metres are reported as declared, not compared.
+                dx_values, dy_values = list(inp_dx), list(inp_dy)
+            else:
+                dx_root, dy_root = _finite_floats(
+                    (_value(geogrid, "dx"), _value(geogrid, "dy")),
+                    "&geogrid/dx,dy",
+                )
+                if dx_root <= 0.0 or dy_root <= 0.0:
+                    raise ValueError("root dx and dy must be positive")
+                dx_values, dy_values = [dx_root], [dy_root]
+                for index in range(1, max_dom):
+                    parent_index = inp_parent[index] - 1
+                    dx_values.append(
+                        dx_values[parent_index] / inp_ratio[index])
+                    dy_values.append(
+                        dy_values[parent_index] / inp_ratio[index])
             for index, (declared_dx, declared_dy, expected_dx, expected_dy) in enumerate(
                 zip(inp_dx, inp_dy, dx_values, dy_values, strict=True), start=1
             ):

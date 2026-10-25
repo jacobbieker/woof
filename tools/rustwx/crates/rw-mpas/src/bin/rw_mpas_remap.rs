@@ -6,7 +6,7 @@
 //! state), barycentric where it does not (diagnostics), conservative in
 //! height onto the target's own terrain-following levels, and rebalanced
 //! hydrostatically with the same column routine `rw_mpas_init` uses.  See
-//! `rw_mpas::remap` for the whole pipeline and what it refuses.
+//! `rw_mpas::state_remap` for the whole pipeline and what it refuses.
 //!
 //! The output is laid out from the TARGET template (`--to-vertical`, else
 //! `--to-grid` when it carries a vertical grid): every static, mesh and
@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use rw_mpas::init::dynamics::VirtualFactor;
-use rw_mpas::remap::{run, Balance, RemapConfig, RemapReceipt, DEFAULT_MIN_COVERAGE};
+use rw_mpas::state_remap::{run, Balance, RemapConfig, RemapReceipt, DEFAULT_MIN_COVERAGE};
 
 /// `GPUWM_BRIDGE_SOURCE_REV=<40-hex commit>`: see `rw_mpas_init` for why the
 /// stamp exists and how the release cut reads it.

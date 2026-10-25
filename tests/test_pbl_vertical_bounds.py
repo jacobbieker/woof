@@ -78,7 +78,10 @@ def test_the_ensemble_batch_ysu_plan_follows_the_contract():
 
 
 @pytest.mark.parametrize("define, module_name, bounds", (
-    ("YSU_KMAX", "ysu", YSU_VERTICAL_LEVEL_BOUNDS),
+    # 1.1.0 retired ysu.cu: the default arithmetic compiles ysu_default.cu
+    # and the wrf_480 generation ysu_480.cu; both carry the ceiling.
+    ("YSU_KMAX", "ysu_default", YSU_VERTICAL_LEVEL_BOUNDS),
+    ("YSU_KMAX", "ysu_480", YSU_VERTICAL_LEVEL_BOUNDS),
     ("SHINHONG_KMAX", "shinhong", SHINHONG_VERTICAL_LEVEL_BOUNDS),
     ("MYJ_KMAX", "myjpbl", MYJ_VERTICAL_LEVEL_BOUNDS),
     ("KF_KMAX", "kf", KF_VERTICAL_LEVEL_BOUNDS),
@@ -189,7 +192,7 @@ def test_kf_refuses_out_of_range_levels():
         with pytest.raises(ValueError,
                            match=f"KF requires 8 <= nz <= 256, got {nz}"):
             launch_kf(*(_column(nz) for _ in range(9)),
-                      dx=12000.0, dt=60.0, cudt=5.0)
+                      dx=12000.0, dt=60.0, cudt_minutes=5.0)
 
 
 @pytest.mark.parametrize("gwd_opt", (1, 3))

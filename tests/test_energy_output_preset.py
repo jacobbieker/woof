@@ -164,8 +164,11 @@ def test_surface_solar_schema_rows(name, description, units, registry,
     assert (row.description, row.units) == (description, units)
     assert row.registry == registry
     assert row.wrf_history is history
-    # Model-state rows: the selector-driven inventory is untouched.
-    assert name not in OUTPUT_FIELDS_BY_NETCDF_NAME
+    # Model-state rows: the selector-driven inventory is untouched -- except
+    # COSZEN, which upstream 1.1.0's own solar history (cap-solar) also
+    # declares there; the history vocabulary still resolves to this row.
+    if name != "COSZEN":
+        assert name not in OUTPUT_FIELDS_BY_NETCDF_NAME
     assert name in hs.HISTORY_VOCABULARY
 
 

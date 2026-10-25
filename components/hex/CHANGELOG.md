@@ -1,84 +1,120 @@
 # Changelog
 
-*This file accumulated without a version cut through 0.1.0 and 0.1.1, so
-entries below carry work from those lines as well as this one, and no clean
-boundary can be drawn between them after the fact. The published release note
-for each shipped version is the summary of record for what that version
-contained. From 0.2.0 forward the file is cut at the release.*
+## 0.4.3
 
-## 0.3.2 (2026-09-29)
+Requires woof>=2.9.4,<2.10.
 
-WOOF (the engine and this port in one distribution):
-- The exact engine pin retired. The port no longer holds sixteen engine
-  files to SHA-256 digests or admits one exact published engine: in WOOF
-  the engine and the port ship from one commit, so the breakage the pin
-  prevented (a separately published engine carrying seam bytes the port was
-  never run with) cannot happen in an install. Gone: hexcore.engine_pin,
-  its published-engine and admitted-engine tables,
-  verification/engine-verdicts/admitted-engines.json and
-  tools/measure_engine_verdicts.py. The records of past measurements stay
-  in verification/engine-verdicts/.
-- woof.hex.engine_identity measures the engine a run executes: the digests
-  of the sixteen seam files, the declared version and, for a git tree, its
-  commit. The adapter, the x4 and forecast drivers, the forecast door and
-  doctor record these where they recorded the pinned constants. A missing
-  seam file, a seam file dirty in a git clone and a restore onto different
-  engine bytes are still refused; a moved seam byte is recorded.
-- The seam contract (engine woof/core/mpas_column_batch.py and
-  docs/mpas-seam.md) is held in the tree by
-  tests/test_engine_seam_contract.py instead of at launch. Measured
-  unchanged from engine 2.7.4 to the 2.8 head, as is the composed glacier
-  unit; 8 of the 16 seam files moved in between, which the old pin would
-  have refused.
-- The forecast receipt's arwen_commit and contract surface are the measured
-  engine's. They restated the x4 proof's constants, which name an older
-  engine than the one that ran.
-- The standalone distribution declares woof>=2.8.0,<2.9. The frozen
-  execution pin of cuda_arwen_physics_v841.py and the restated adapter
-  contract digest were re-derived with tools/repin_source_tables.py.
-- sm_89 is an admitted architecture: the RTX 40 series and the L40S run
-  hex forecasts. Until now every sm_89 card was refused by name ("below
-  the proven contract floor 12.0 and holds no per-architecture anchor").
-  The anchor was measured on an RTX 4090 on 2026-09-24: the numerical
-  contract against sm_120, 123 records identical (the FTZ route grid, the
-  --fmad=false contraction pin, the transport and guarded kernel decks,
-  the v8.4.1 release-specific audit and the regional contract decks) with
-  two named deviations (the guard-cost timing control, timing only at
-  1.274725x against the borrowed 1.25x, bitwise identity held; the v8.4.1
-  four-pass audit, inherited and not measured on the card, because it
-  refuses before any device work on every card at that tree and the
-  release-specific kernels were measured directly), two 30-minute
-  forecasts byte-identical in every frame, a byte-identical P3 pair, and
-  a guard-cost ceiling of 1.55 from 200 readings in 10 separate processes
-  with bitwise identity held in every one. Each anchor row now pins its
-  evidence directory by SHA-256 (ArchAnchor.evidence_sha256), so a tree
-  that ships without the receipts still names the exact record each row
-  rests on.
-- Every architecture NVRTC can compile the kernels for runs a hex
-  forecast, by default, with no flag. A card whose architecture holds no
-  anchor is no longer refused ("holds no per-architecture anchor" named no
-  breakage). woof hex forecast meets two architecture refusals, each
-  naming a breakage: a card NVRTC cannot compile for (compute capability
-  below 7.5 on the CUDA 13 toolkit), and, on an unanchored card, ordinary
-  arithmetic that is not IEEE, which the door measures first in one tiny
-  compile and launch. The
-  anchors stay as the evidence record: the preflight line and every
-  receipt say "anchored" (with the evidence pin of an anchor row; sm_120,
-  the proven contract floor, carries none) or "unanchored". The forecast
-  driver, the x4 proof harness and sixteen tools stop pinning sm_120
-  (required_compute); the pin stays only on the two FTZ instruments and
-  two tools whose bytes a recorded pin holds, where it refuses only parts
-  newer than sm_120. Two-GPU runs are not a supported path in this
-  release: the two-GPU forecast tool (run_cuda_v841_forecast_2gpu.py) is
-  unchanged and still refuses a card below compute capability 12.0.
-- woof hex doctor names the card, its compute capability and its anchor
+Fixed: global and subseasonal forecasts with sea ice no longer stop at their first step on woof 2.9.4, and `woof hex s2s` runs of any length finish their energy products.
+
+## 0.4.2
+
+Requires woof>=2.9.4,<2.10.
+
+New:
+- `woof hex regional`: one-command limited-area forecasts from HRRR around a point, with mesh, boundaries, products and a stage receipt.
+- Limited-area runs over any named region through `woof hex country --region`.
+- Variable-resolution global meshes from `woof hex mesh-plan --global-mesh --generate --run`.
+- Storm-following regions authored from tracks, best tracks or IBTrACS with `woof hex moving case`, `run` and `products`.
+- Storm-following ensembles with `woof hex moving-ensemble`, including SPPT and SKEB under local time stepping.
+- Mixed-layer ocean and sea ice on the mesh columns, on by default in subseasonal runs.
+- Aerosol transport (advection, boundary-layer mixing, deposition, settling) in global forecasts, and `woof hex chem-sources` to prepare RAVE and GBBEPx smoke, GEOS-FP composition, dust and sea-salt sources.
+- Subseasonal products: weekly means, anomalies, climatology and terciles, member history export, MJO and BSISO indices, weekly scores against ERA5, and hub-height wind and solar energy tables.
+- An 80-level high-top row, `global-120km-high-top`, for stratospheric runs.
+- Keyless ERA5 initialization from the public ARCO store as `--source era5`; the CDS route is `era5-cds`. Lagged ERA5 analysis members for subseasonal ensembles.
+- IVT, freezing height and the 300 hPa jet in the default global products; 850 and 925 hPa winds in regional products.
+
+Fixed:
+- Observation scoring fetches the on-demand engine bridges (rw_asos, rw_prepbufr) before scoring.
+- Radiosonde cells at hours other than 00Z and 12Z are reported as not applicable.
+- An interrupted mesh download resumes.
+- Global ensembles pipeline member groups on each card, size groups by the card's memory, and name each member in its maps.
+- Subseasonal runs accept any length of 7 days or more; `--members` takes a total count.
+- `woof hex physics list` and `resolve` report the MPAS suite routes the forecast door uses; a suite named through `--forecast-arg` is the planned and recorded physics.
+- Storm-following members read the selected suite's sea-ice threshold.
+- `woof hex moving run --resume` redraws the products of a segment whose product step was interrupted.
+- PyPI uploads run only for version-tag releases.
+
+## 0.4.1
+
+Requires woof>=2.9.2,<2.10.
+
+New:
+- MPAS-A v8.4.2 dycore, GPU physics and LES closures, with four acoustic substeps and a native-free framework. WOOF physics remains the default.
+- MPAS physics ports: WSM6, Thompson, Kain-Fritsch, Tiedtke, Grell-Freitas, revised MM5, MYNN, YSU, Noah, sea ice, RRTMG and CAM.
+- Real-data and idealized initialization, vertical grids, orographic statics, aerosol climatology, SST and sea-ice updates, IAU, limited-area boundaries, streams, restart and diagnostics.
+- Correct mode for MPAS and WOOF physics, with named corrections, switches and receipt records.
+- Global and country workflows, source-table initialization, analysis bundles, mesh remapping, cycling and subseasonal ensembles.
+- Forecast products, soundings, meteograms, NetCDF export and observation scorecards, including IGRA2 radiosondes for past cycles.
+- Ensemble and preset preparation, member queues, shared static caches, a pinned preparation store and suite-aware soil and aerosol initialization.
+- Storm-following regions with balanced conservative remapping, physics-state carry, restart and same-host multi-card execution.
+- MPAS physics tables fetched from pinned data-only assets in `physics-resources-v0.4.1`.
+- CUDA 12 and CUDA 13 installation extras, driver-aware diagnostics, bundled helpers and a manylinux_2_28 wheel.
+- Asynchronous history output, cached input digests, parallel host preparation, fine-terrain sampling and diagnostic export.
+- Kernel packs fetched on demand from `kernel-packs-v0.4.1`; `woof hex fetch-assets --from DIR` and `WOOF_HEX_ASSETS_FROM` support offline staging.
+
+Fixed:
+- MPAS shortwave shape specialization and YSU memory probes support woof 2.9.3.
+- Physics routing, vegetation, soil columns and variable-mesh convection follow the selected suite. MPAS physics without a namelist selects `mesoscale_reference`; default YSU timesteps respect engine limits and explicit selections.
+- WSM6 precipitation checks accept valid step scalings; limited-area forecasts avoid the first-step buffer failure, and CUDA graph replay refreshes heating and tendencies.
+- Same-host forecasts handle IAU, per-card kernels and memory admission; local time stepping supports even acoustic counts and exchanges multi-card interface fluxes.
+- Moving remaps extend below-ground states hydrostatically and evaporate subsaturated cloud water; unsupported move hooks are refused by name.
+- Static construction preserves grid precision and maps lake categories; vertical templates use the bundled CDF-5 copier.
+- Installed country, products and preset commands resolve their helpers; TEMPO checks aerosols before fetching tables, and table generators use pinned logarithm arithmetic.
+- Strict checks compare data and attributes without file identifiers, authenticate installed engine wheels by archive and RECORD hashes, and use bundled float32 geometry math across host glibc versions, built from the shipped sources in source checkouts; reference checks include staged changes, shell isolation, timestep and dycore anchors.
+- Windows source installs work without bash or netCDF-C development files; kernel and physics asset fetches, initialization, subseasonal runs and cycling use portable file locks.
+- RRFS-MPAS selections name the required site build when their native library is unavailable.
+- Public exports exclude UCAR Noah-MP v5 and UGWP implementations, with licence gates, native stubs and dependency notices.
+- The public release workflow builds the wheel: the renderer and surface-series helpers download by pinned hash beside the engine bridges. Packaging includes helper licences and METIS, checks sizes and excludes kernel packs. Fetches verify whole batches; doctor recognizes offline packs and reports MPAS physics-resource readiness. Release checks validate engine availability and public CI before preparing a cut.
+
+## 0.3.3 (2026-09-29)
+
+Requires woof 2.8.0 (woof>=2.8.0,<2.8.1), as 0.3.2 did.
+
+New:
+- Every NVIDIA architecture NVRTC can compile the kernels for is admitted
+  by default, with no flag: compute capability 7.5 (Turing) and newer on
+  the CUDA 13 toolkit. sm_86 and sm_89 hold anchors, sm_120 is the proven
+  contract floor (anchored, with no pin: the contract was first measured
+  there), and a card of any other architecture runs unanchored and its
+  receipts say so.
+- sm_89 holds an anchor (an RTX 4090, 2026-09-24): the numerical contract
+  measured against sm_120, 123 records identical, with two named
+  deviations: the guard-cost timing control (timing only, 1.274725x
+  against the borrowed 1.25x ceiling, bitwise identity held) and the
+  v8.4.1 four-pass audit (inherited, not measured on the card: it refuses
+  before any device work on every card at that tree, and the
+  release-specific kernels were measured directly). Its own guard-cost
+  ceiling is 1.55. Each anchor row pins its evidence by SHA-256
+  (ArchAnchor.evidence_sha256).
+- The preflight prints one line per card: anchored, with the evidence pin,
+  or unanchored. Every receipt (door, driver, proof harness) records the
+  compute capability and the same status.
+- On an unanchored card the door measures the numeric route before the run
+  in one tiny compile and launch (the FTZ route, the guarded subnormal
+  fallback, the --fmad=false pin, IEEE ordinary arithmetic) and records it.
+- `woof hex doctor` names the card, its compute capability and its anchor
   status. An unanchored card is never a gap; the one gap it reports is
   the forecast door's own refusal, a card NVRTC cannot compile for.
-- The hex tests find the package by its import name, so the whole suite
-  holds folded into recast-woof as well as standalone.
-- The render door refused every frame with "rw_wrfbatch produced no
-  catalog rows" on the 2.8 renderer, which prints six fields per catalog
-  row. The door reads five or more.
+
+Fixed:
+- An architecture holding no anchor was refused ("holds no
+  per-architecture anchor"), a refusal that named no breakage.
+  `woof hex forecast` now meets two architecture refusals, each naming
+  one: a card NVRTC cannot compile for, and ordinary arithmetic that is not
+  IEEE.
+- The forecast driver and the x4 proof harness pinned sm_120
+  (required_compute), which refused sm_121 and every newer part. Sixteen
+  tools under tools/ did too and no longer do. The pin stays only on the
+  two FTZ instruments and two tools whose bytes a recorded pin holds,
+  where it refuses only parts newer than sm_120. Two-GPU runs are not a
+  supported path in this release: the two-GPU forecast tool
+  (run_cuda_v841_forecast_2gpu.py) is unchanged and still refuses a card
+  below compute capability 12.0.
+- `woof hex render` refused every frame with "rw_wrfbatch produced no
+  catalog rows" on woof 2.8.0, whose renderer prints six fields per
+  catalog row. The door reads five or more.
+- The hex tests find the package by its import name, so they hold in any
+  layout the package is installed or folded into.
 - Every forecast's start frame (F000) published q2 as 0 and psfc as
   100000 Pa in every cell, the physics seam's values before its first call,
   so the hour-0 2 m dewpoint map was drawn from zero humidity while every
@@ -87,6 +123,8 @@ WOOF (the engine and this port in one distribution):
   bounded to saturation at the 2 m temperature (a specific-humidity start
   such as HRRR's leaves the start file's q2 at zero); psfc is the model's
   own surface pressure. Later frames and the model state are unchanged.
+
+## 0.3.2 (2026-09-29)
 
 New:
 - woof hex forecast --preset NAME selects a row of woof.hex.forecast_preset,
@@ -103,8 +141,7 @@ New:
   engine's column seam does not take as an argument is refused by name.
 
 Changed:
-- The physics seam was measured against woof 2.8.0 before the exact pin
-  retired (above). Eight of
+- The physics seam re-pins to woof 2.8.0: woof>=2.8.0,<2.8.1. Eight of
   the sixteen pinned engine files moved between the published 2.7.4 and
   2.8.0 wheels (woof/config.py, woof/core/gf.py, woof/core/kernels/gf.cu,
   woof/core/kernels/__init__.py, woof/core/microphysics.py,
@@ -117,8 +154,8 @@ Changed:
   frames byte-identical under the two engines; the cull's contract deck is
   8 of 8 decks bitwise and 22 of 22 kernels at the unchanged kernel-set
   digest. Nothing is declared for the move.
-  verification/engine-verdicts/repin-280-20260929.json is the last
-  measured table; premeasure-280-20260929.json shows 2.7.5, 2.7.6, 2.7.7 and 2.8.0
+  verification/engine-verdicts/repin-280-20260929.json is the table of
+  record; premeasure-280-20260929.json shows 2.7.5, 2.7.6, 2.7.7 and 2.8.0
   all failing the 2.7.4 manifest, so 0.3.1 installs kept resolving 2.7.4.
 - The physics seam's per-step rollback export is taken only under
   --stop-on-refusal, the one option that reads it. It copied every persisted
@@ -270,7 +307,7 @@ New:
   array; the garbage discipline restores every padded argument of a
   launch in one launch instead of one cupy fill per column. The kernels
   compare, select and store what they are handed and do no arithmetic on
-  the values, so the dycore's byte identity is untouched by construction;
+  the values, so the hex self-reproducibility is unchanged by construction;
   the measuring and audited forms of the discipline keep the per-column
   fills.
 - launch_checked in woof.hex.cuda_backend: one launch, the error state
@@ -412,7 +449,7 @@ New:
 - The engine-verdict instrument ships in the tree. tools/measure_engine_verdicts.py
   downloads every wheel of every published woof from 2.5.0 up, hashes the
   sixteen pinned seam files inside each, reads the build road off the
-  engine's tags, and writes the JSON that hexcore.engine_pin's table is
+  engine's tags, and writes the JSON that woof.hex.engine_pin's table is
   spliced from (verification/engine-verdicts/). The table gate in
   tests/test_engine_pin.py now runs on the published tree and in the sdist
   instead of skipping there, and a re-pin is one command
@@ -434,7 +471,7 @@ New:
   each other and with the git tree's HEAD), computes the composed glacier
   digest by the engine's own hand, and writes the row to
   verification/engine-verdicts/admitted-engines.json, spliced into
-  hexcore.engine_pin.ADMITTED_ENGINES and gated by tests/test_engine_pin.py
+  woof.hex.engine_pin.ADMITTED_ENGINES and gated by tests/test_engine_pin.py
   like the published table. The seam check, the forecast door, doctor and
   the adapter's checkout guard accept a tree whose bytes are exactly that
   row's under that version string, and every receipt and restart identity
@@ -659,8 +696,8 @@ Changed:
   one token: `from mpas_port.X import Y` becomes `from hexcore.X import Y`.
   The distribution name (`woof hex`), the console script (`woof hex ...`)
   and every command surface are untouched. The old name overclaimed: this
-  project keeps MPAS-A v8.4.1's **dycore and mesh** byte-identical, pinned as
-  a specification, and deliberately does not match that model's physics,
+  project implements MPAS-A v8.4.x's **dycore numerics and mesh conventions**,
+  pinned as a specification and checked with stated one-step dry tolerances, and deliberately does not match that model's physics,
   which is WRF physics run through MPAS's own plumbing. Naming the package
   after another project put that project's name in every user's import line
   for a relationship holding over half the model. `woof.hex` names what is
@@ -684,7 +721,7 @@ Fixed:
   `woof hex doctor` reported the estate healthy and exited 0. A green
   install and a dead run, with no route out by reading. Three changes, all
   default-on: the declared range is now **`woof>=2.5.8,<2.5.9`**, derived by
-  `hexcore.engine_pin` from a measured table of every published engine rather
+  `woof.hex.engine_pin` from a measured table of every published engine rather
   than typed, with an **exclusive ceiling at the first engine nobody has
   measured** so a future engine cut cannot re-open it; `doctor` hashes the
   pinned files that live in `site-packages` and reports the offending version

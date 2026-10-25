@@ -170,11 +170,17 @@ def _old_ceiling_source(source: str, define: str) -> str:
     return source.replace(shipped, f"#define {define} {OLD_KMAX}")
 
 
-def _raw_module(source: str):
-    """``load_module``'s own compile call, on another source string."""
+def _raw_module(source: str, name: str | None = None, kernels=None):
+    """``load_module``'s own compile call, on another source string: the
+    production options of module ``name`` (the no-FMA units compile with
+    ``--fmad=false``), the bare default for a loader that has none."""
     import cupy as cp
 
-    return cp.RawModule(code=source, options=("-std=c++17",),
+    options = ("-std=c++17",)
+    module_options = getattr(kernels, "module_options", None)
+    if name is not None and module_options is not None:
+        options = module_options(name)
+    return cp.RawModule(code=source, options=options,
                         name_expressions=None)
 
 
@@ -224,14 +230,20 @@ def test_ysu_is_bit_identical_to_the_128_level_kernel(package, nz, monkeypatch):
 
     Y = importlib.import_module(f"{package}.ysu")
     kernels = importlib.import_module(f"{package}.kernels")
-    old = _raw_module(_old_ceiling_source(kernels.module_source("ysu"),
-                                          "YSU_KMAX"))
+    # The regional default generation's own unit (wrf_480 -> ysu_480 since
+    # 1.1.0); the global port carries one "ysu" unit.
+    stem = "ysu"
+    if package == "woof.core":
+        from woof.ysu_generations import ysu_kernel_selection
+        stem = ysu_kernel_selection(Y.YSU_DEFAULT_GENERATION)[0]
+    old = _raw_module(_old_ceiling_source(kernels.module_source(stem),
+                                          "YSU_KMAX"), stem, kernels)
     col = _pbl_columns(cp, nz, 96)
     surf = _surface(cp, 96)
     shipped = _bits(Y.launch_ysu(**col, **surf, dt=30.0))
     served = []
     monkeypatch.setattr(Y, "get_kernel",
-                        _routing(Y.get_kernel, "ysu", old, served))
+                        _routing(Y.get_kernel, stem, old, served))
     before = _bits(Y.launch_ysu(**col, **surf, dt=30.0))
     assert served == ["ysu_column"]
     _assert_ran(shipped, ("du", "dtheta", "exch_h"))
@@ -261,10 +273,11 @@ def test_shinhong_is_bit_identical_to_the_128_level_kernel(nz, monkeypatch):
     import cupy as cp
 
     from woof.core import shinhong as S
+    from woof.core import kernels
     from woof.core.kernels import module_source
 
     old = _raw_module(_old_ceiling_source(module_source("shinhong"),
-                                          "SHINHONG_KMAX"))
+                                          "SHINHONG_KMAX"), "shinhong", kernels)
     col = _pbl_columns(cp, nz, 96, shinhong=True)
     surf = _surface(cp, 96, shinhong=True)
     kw = dict(dt=30.0, dx=1000.0, dy=1000.0)
@@ -283,14 +296,17 @@ def test_shinhong_is_bit_identical_to_the_128_level_kernel(nz, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _kf_inputs(cp, nz, ncol):
+    """``launch_kf``'s columns (upstream 1.1.0's KF_eta_CPS signature):
+    u, v, T, qv, p, rho, PI, DZ8W and the running-mean w0avg."""
     atm = _atmosphere(nz, ncol, seed=23)
     # Grid-scale ascent through the lowest 3 km, so KF's w-dependent trigger
     # fires on most columns at every level count (it scales w by dx/25 km).
     atm["w"] = np.where(atm["z"] < 3000.0, 0.15, 0.0)
+    atm["rho"] = atm["pressure"] / (
+        287.0 * atm["temperature"] * (1.0 + 0.608 * atm["qv"]))
     return [_f32(cp, atm[name]) for name in (
-        "u", "v", "temperature", "qv")] + [
-        _f32(cp, np.zeros_like(atm["qv"]))] + [
-        _f32(cp, atm[name]) for name in ("pressure", "exner", "dz", "w")]
+        "u", "v", "temperature", "qv", "pressure", "rho", "exner", "dz",
+        "w")]
 
 
 def test_kf_runs_a_256_level_column_to_a_1_hpa_top():
@@ -300,43 +316,57 @@ def test_kf_runs_a_256_level_column_to_a_1_hpa_top():
 
     assert kf.VERTICAL_LEVEL_BOUNDS == (8, DEEP)
     out = _bits(kf.launch_kf(*_kf_inputs(cp, DEEP, 64),
-                             dx=12000.0, dt=60.0, cudt=300.0))
+                             dx=12000.0, dt=60.0, cudt_minutes=5.0))
     _assert_ran(out, ("rthcuten", "rqvcuten"))
     assert set(np.unique(out["triggered"])) <= {0, 1}
     assert out["triggered"].sum() > 0, "no column convected"
-    assert (out["rainc"] >= 0).all() and (out["rainc"] > 0).any()
+    assert (out["raincv"] >= 0).all() and (out["raincv"] > 0).any()
+
+
+def _kf_old_ceiling_function():
+    """kf_column compiled on KF's own route (KF_MODULE_OPTIONS) from the
+    shipped source with only ``KF_KMAX`` put back to 128."""
+    import cupy as cp
+
+    from woof import nvrtc_ptx_cache as compiler
+    from woof.core.kernels import module_source
+    from woof.core.kf import KF_MODULE_OPTIONS
+
+    source = _old_ceiling_source(module_source("kf"), "KF_KMAX")
+    binary, _ = compiler.compile_using_nvrtc(
+        source, KF_MODULE_OPTIONS, None, "kf_kmax128.cu")
+    module = cp.cuda.function.Module()
+    module.load(binary.encode() if isinstance(binary, str) else binary)
+    return module.get_function("kf_column")
 
 
 @pytest.mark.parametrize("nz", [49, OLD_KMAX])
 def test_kf_is_bit_identical_to_the_128_level_kernel(nz, monkeypatch):
+    """KF_KMAX is a refusal ceiling only (no array in kf.cu is sized by it
+    since upstream's WRF port), so the 128 and 256 images must agree word
+    for word wherever both admit the column."""
     import cupy as cp
 
-    from woof.core import kernels
     from woof.core import kf
     from woof.core.kf import KFPhaseMode
 
-    old_fn = kernels.get_kernel_int_defines("kf", "kf_column",
-                                            (("KF_KMAX", OLD_KMAX),))
-    new_fn = kernels.get_kernel("kf", "kf_column")
-    # The 128 arm is a different image: the stack pair is half the size.
-    assert (int(old_fn.attributes["local_size_bytes"])
-            < int(new_fn.attributes["local_size_bytes"]))
-    real = kernels.get_kernel
+    old_fn = _kf_old_ceiling_function()
+    real = kf._kf_function
     served = []
 
-    def routed(name, func):
-        if (name, func) == ("kf", "kf_column"):
-            served.append(func)
+    def routed(name):
+        if name == "kf_column":
+            served.append(name)
             return old_fn
-        return real(name, func)
+        return real(name)
 
     inputs = _kf_inputs(cp, nz, 96)
     triggered = 0
     for phase in KFPhaseMode:
-        kw = dict(dx=12000.0, dt=60.0, cudt=300.0, phase_mode=phase)
+        kw = dict(dx=12000.0, dt=60.0, cudt_minutes=5.0, phase_mode=phase)
         shipped = _bits(kf.launch_kf(*inputs, **kw))
         with monkeypatch.context() as m:
-            m.setattr(kernels, "get_kernel", routed)
+            m.setattr(kf, "_kf_function", routed)
             before = _bits(kf.launch_kf(*inputs, **kw))
         _assert_bitwise(shipped, before,
                         f"KF_KMAX 128 -> 256 at nz={nz}, {phase.name}")

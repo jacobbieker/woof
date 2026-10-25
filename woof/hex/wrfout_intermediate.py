@@ -27,7 +27,7 @@ THE ROAD, and what is borrowed from where.
   (``woof.ingest.hrrr._ProjectedCpuPlan``: WPS overlapping-parabolic with FP64
   donor selection, run by the Rust indexed-donor entry when the CPU bridge
   exports it), handed this grid's donors instead of HRRR's.  Every record is
-  then produced by the HRRR route's own :func:`regrid_hour` from the
+  then produced by the HRRR route's in-memory :func:`regrid_hour_records` from the
   ``wrfout`` row of :data:`woof.hex.hrrr_intermediate.SOURCE_ROWS`.
 * WRITE -- :func:`woof.hex.hrrr_intermediate.write_intermediate`: the WPS
   version-5 layout, read back through this tree's reader before the receipt
@@ -73,7 +73,7 @@ from .hrrr_intermediate import (
     LatLonTarget,
     SourceRow,
     SourceWindow,
-    regrid_hour,
+    regrid_hour_records as regrid_hour,
     sha256_file,
     source_row,
     write_intermediate,
@@ -608,6 +608,13 @@ def projected_plan(zero_x: np.ndarray, zero_y: np.ndarray, window: SourceWindow,
     plan.fy = np.asarray(zero_y - global_iy, dtype=np.float32)
     plan.nearest_ix = (np.floor(zero_x + 0.5).astype(np.int64) - window.i_start).astype(np.int32)
     plan.nearest_iy = (np.floor(zero_y + 0.5).astype(np.int64) - window.j_start).astype(np.int32)
+    # Targets whose four-point stencil leaves the window (the engine's own
+    # rule, WPS sixteen_pt falling back to four_pt); refused below, so none.
+    edge_rule = getattr(engine, "_parabolic_stencil_leaves_window", None)
+    plan.edge = (
+        None if edge_rule is None
+        else edge_rule(plan.ix, plan.iy, window.nx, window.ny, identity=False)
+    )
     plan._native = None
     plan.operator = engine.PROJECTED_OPERATOR_NUMPY
     if (int(plan.ix.min()) - STENCIL_BEFORE < 0 or int(plan.ix.max()) + STENCIL_AFTER >= window.nx

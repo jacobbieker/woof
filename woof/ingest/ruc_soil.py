@@ -472,102 +472,6 @@ def _apply_moisture_adjustment(
     return adjusted
 
 
-#: The constant real.exe floors RUC soil moisture at from a layer source:
-#: ``dyn_em/module_initialize_real.F`` v4.6.1 :3441.
-RUC_ZERO_SOIL_MOISTURE = np.float32(0.005)
-
-_RUC_MOISTURE_FLOOR_WRF_REFERENCE = {
-    "wrf_version": "v4.6.1",
-    "wrf_citation": (
-        "dyn_em/module_initialize_real.F:3350 account_for_zero_soil_moisture "
-        "SELECT CASE; CASE (RUCLSMSCHEME) :3435, flag_soil_layers arm "
-        ":3437-3443 (smois(i,:,j) = MAX(smois(i,:,j), 0.005) on every "
-        "column and level); flag_soil_levels arm :3444-3445 is a no-op"),
-    "wrf_behavior": (
-        "real.exe: for a layer source under RUC, every level of every "
-        "column is floored at 0.005 m3 m-3, unconditionally and silently; "
-        "this repairs init_soil_3_real's 0 m anchor "
-        "(share/module_soil_pre.F:1945-1947), a linear extrapolation off "
-        "the top two source layers that goes below zero wherever the top "
-        "layer is much drier than the one beneath it"),
-    "gpuwm_behavior": (
-        "the same floor on the same geometry, counted: only values below "
-        "0.005 move, every other value is byte-untouched, a non-finite "
-        "value is left for the RUC cold start's own refusal"),
-}
-
-
-def account_for_zero_ruc_soil_moisture(soil_moisture, *, source_geometry,
-                                       landmask=None):
-    """real.exe's RUC arm of ``account_for_zero_soil_moisture``.
-
-    ``init_soil_3_real`` anchors a layer source's moisture at 0 m with a
-    linear extrapolation off the top two layer midpoints
-    (``share/module_soil_pre.F:1945-1947``, :func:`remap_soil_to_ruc_levels`
-    reproduces it bit for bit).  It is not a weighted mean of its donors:
-    with Noah-shaped samples at 5 and 25 cm the anchor is ``1.25*m1 -
-    0.25*m2``, below zero wherever the deeper layer holds more than five
-    times the top layer's water, and the RUC level at 0 m takes it.  WRF
-    repairs exactly that in ``dyn_em/module_initialize_real.F`` (v4.6.1
-    :3435-3445): under ``RUCLSMSCHEME`` with ``flag_soil_layers = 1`` every
-    level of every column is floored at ``MAX(smois, 0.005)``; with
-    ``flag_soil_levels = 1`` (a node source, no anchor extrapolated) it is
-    a no-op.  Both arms are reproduced here.
-
-    Only values below 0.005 move (water columns already hold 1.0), so a
-    healthy column is byte-identical.  A non-finite value is left as it is
-    for the RUC cold start's own fail-closed 0..1 check.  ``landmask``
-    only splits the receipt's counts.  Returns ``(soil_moisture,
-    receipt)``; the receipt is EMPTY and the array is returned unchanged
-    when nothing needed the floor.
-    """
-    if source_geometry not in {_LAYER_SOURCE, _LEVEL_SOURCE}:
-        raise ValueError(
-            f"source_geometry={source_geometry!r} must be "
-            f"{_LAYER_SOURCE!r} or {_LEVEL_SOURCE!r}")
-    if source_geometry != _LAYER_SOURCE:
-        return soil_moisture, {}
-    values = np.asarray(soil_moisture)
-    needs = values < RUC_ZERO_SOIL_MOISTURE
-    if not needs.any():
-        return soil_moisture, {}
-    floored = np.where(needs, RUC_ZERO_SOIL_MOISTURE, values).astype(
-        values.dtype)
-    land = (np.ones(values.shape[1:], dtype=bool) if landmask is None
-            else np.asarray(landmask) >= 0.5)
-    per_level = {}
-    for level in range(values.shape[0]):
-        mask = needs[level]
-        count = int(np.count_nonzero(mask))
-        if count:
-            per_level[f"SMOIS_L{level + 1}"] = {
-                "floored_values": count,
-                "land_values": int(np.count_nonzero(mask & land)),
-                "min_pre_floor": float(np.min(values[level][mask])),
-            }
-    columns = needs.any(axis=0)
-    receipt = {
-        "policy": "ruc-layer-source-soil-moisture-floored-to-0.005",
-        "wrf_reference": dict(_RUC_MOISTURE_FLOOR_WRF_REFERENCE),
-        "floor_m3_m3": float(RUC_ZERO_SOIL_MOISTURE),
-        "fields": per_level,
-        "total_floored_values": int(np.count_nonzero(needs)),
-        "floored_columns": int(np.count_nonzero(columns)),
-        "floored_land_columns": int(np.count_nonzero(columns & land)),
-        "min_pre_floor": float(np.min(values[needs])),
-    }
-    print(
-        "RUC soil moisture floor: "
-        f"{receipt['total_floored_values']} value(s) below "
-        f"{float(RUC_ZERO_SOIL_MOISTURE)} m3 m-3 in "
-        f"{receipt['floored_columns']} column(s) across {sorted(per_level)} "
-        f"(min pre-floor {receipt['min_pre_floor']:.6g}) floored to "
-        f"{float(RUC_ZERO_SOIL_MOISTURE)}, as real.exe does for a layer "
-        "source under RUC (module_initialize_real.F:3441)",
-        file=sys.stderr)
-    return floored, receipt
-
-
 # ---------------------------------------------------------------------------
 # The runtime seam.
 #
@@ -642,12 +546,13 @@ class RucSoilState:
     #: the Noah call's snow cap and this arm's own soil-moisture cap on RUC's
     #: levels against ``STAS-RUC``'s MAXSMC.  EMPTY when neither capped.
     init_caps: Mapping[str, object] = field(default_factory=dict)
-    #: real.exe's RUC arm of ``account_for_zero_soil_moisture``
-    #: (:func:`account_for_zero_ruc_soil_moisture`), spelled as
-    #: :class:`woof.ingest.soil.NoahSoilState`'s ``moisture_floor`` so the
-    #: routes that bind that receipt bind this one; EMPTY when no value
-    #: needed it.
-    moisture_floor: Mapping[str, object] = field(default_factory=dict)
+    #: real.exe's ``SMOIS = MAX(SMOIS, 0.005)`` for a layer source
+    #: (:func:`account_for_zero_ruc_soil_moisture`); EMPTY when nothing was
+    #: below it.
+    soil_moisture_floor: Mapping[str, object] = field(default_factory=dict)
+    #: The sea-ice cells of the Noah surface call, spelled as
+    #: :class:`woof.ingest.soil.NoahSoilState`'s ``sea_ice_cells``.
+    sea_ice_cells: np.ndarray | None = None
 
 
 def _midpoint_cm(name: str, prefix: str) -> int:
@@ -782,6 +687,7 @@ def preprocess_ruc_soil(
     soil_mesh=None,
     route=None,
     fractional_seaice: bool = False,
+    seaice_threshold: float = 100.0,
 ) -> RucSoilState:
     """Build a RUC initial soil state, in ``preprocess_noah_soil``'s signature.
 
@@ -880,7 +786,8 @@ def preprocess_ruc_soil(
     surface = preprocess_noah_soil(
         fields,
         **({"fractional_seaice": True} if fractional_seaice else {}),
-            soil_type=soil_type,
+        **_threshold_keyword(seaice_threshold),
+        soil_type=soil_type,
         deep_soil_temperature=deep_soil_temperature,
         lake_mask=lake_mask, lake_skin_temperature=lake_skin_temperature,
         soil_layer_contract=soil_layer_contract,
@@ -993,8 +900,7 @@ def preprocess_ruc_soil(
     # remap and the sea-ice column below; the init porosity cap then
     # applies to the floored values, and SH2O is copied from the result.
     soil_moisture, moisture_floor = account_for_zero_ruc_soil_moisture(
-        columns.soil_moisture, source_geometry=geometry,
-        landmask=surface.landmask)
+        columns.soil_moisture, geometry)
 
     # The porosity ceiling on the levels LSMRUC integrates, against the
     # table it integrates them with (woof.ingest.soil.
@@ -1019,6 +925,7 @@ def preprocess_ruc_soil(
         tsk, soil_temperature, soil_moisture, liquid_moisture = (
             fractional_sea_ice_post(
                 xice=surface.xice, tsk=tsk, sst=sea_water,
+                ice=surface.sea_ice_cells,
                 deep_soil_temperature=surface.deep_soil_temperature,
                 soil_temperature=soil_temperature,
                 soil_moisture=soil_moisture,
@@ -1040,12 +947,86 @@ def preprocess_ruc_soil(
         soil_texture_downscale=downscale_receipt,
         soil_temperature_repair=temperature_repair,
         init_caps=init_caps,
-        moisture_floor=moisture_floor,
+        soil_moisture_floor=moisture_floor,
+        sea_ice_cells=surface.sea_ice_cells,
     )
 
 
+def _threshold_keyword(seaice_threshold) -> dict:
+    """``seaice_threshold`` for a soil call, empty at WRF's 100 K default
+    so a default call is the call it was before the field existed."""
+    if float(seaice_threshold) == 100.0:
+        return {}
+    return {"seaice_threshold": float(seaice_threshold)}
+
+
+#: real.exe's floor for a RUC column built from a LAYER source
+#: (``dyn_em/module_initialize_real.F`` v4.6.1 :3435-3446,
+#: ``account_for_zero_soil_moisture``, ``CASE ( RUCLSMSCHEME )``).
+_WRF_RUC_LAYER_MOISTURE_FLOOR = np.float32(0.005)
+#: The same constant under the name this module exports.
+RUC_ZERO_SOIL_MOISTURE = _WRF_RUC_LAYER_MOISTURE_FLOOR
+
+
+def account_for_zero_ruc_soil_moisture(soil_moisture, geometry: str):
+    """WRF's ``account_for_zero_soil_moisture`` for ``sf_surface_physics=3``.
+
+    The linear surface anchor from a dry top layer can be negative even
+    when the input layer samples are within 0..1. The remapped 0 and 1 cm
+    nodes then fail cold-start admission without real.exe's layer floor.
+
+    real.exe never hands RUC that column: after the soil remap,
+    ``module_initialize_real.F`` :3435-3446 takes, for a
+    ``flag_soil_layers`` source, ``SMOIS = MAX(SMOIS, 0.005)`` on every
+    level of every column (the ``lqmi`` residual beside it is commented
+    out), and for a ``flag_soil_levels`` source does nothing.  This is that
+    branch, element for element, in float32.  Water columns already hold
+    1.0 and are unaffected.  It is announced with its count and minimum
+    rather than applied silently, and the receipt rides
+    :class:`RucSoilState`.  Returns ``(soil_moisture, receipt)``; the input
+    array is returned untouched (same object) when nothing is below.
+    """
+
+    if geometry != _LAYER_SOURCE:
+        return soil_moisture, {}
+    moisture = np.asarray(soil_moisture)
+    below = np.isfinite(moisture) & (moisture < _WRF_RUC_LAYER_MOISTURE_FLOOR)
+    if not below.any():
+        return soil_moisture, {}
+    per_level = {
+        f"SMOIS_L{level + 1}": int(np.count_nonzero(below[level]))
+        for level in range(moisture.shape[0]) if below[level].any()}
+    receipt = {
+        "policy": "wrf-ruc-layer-source-smois-max-0.005",
+        "wrf_citation": (
+            "dyn_em/module_initialize_real.F v4.6.1 :3435-3446 "
+            "account_for_zero_soil_moisture CASE (RUCLSMSCHEME), "
+            "flag_soil_layers arm"),
+        "floored_values": int(np.count_nonzero(below)),
+        "floored_columns": int(np.count_nonzero(below.any(axis=0))),
+        "per_level": per_level,
+        "min_pre_floor": float(np.min(moisture[below])),
+    }
+    from woof.static.rust_bridge import floor_ruc_layer_moisture
+    floored = floor_ruc_layer_moisture(moisture)
+    # "note:" on stderr: the prep door (woof.prep_output) puts only
+    # warning/note lines on screen, so a bare stdout line reached the
+    # details log alone and the floor was invisible at the door (2.8.8
+    # acceptance D-02).
+    print(
+        f"note: RUC soil moisture: {receipt['floored_values']} value(s) in "
+        f"{receipt['floored_columns']} column(s) below "
+        f"{float(_WRF_RUC_LAYER_MOISTURE_FLOOR):.3g} on {sorted(per_level)} "
+        f"(min {receipt['min_pre_floor']:.6g}, the layer source's "
+        "extrapolated surface anchor) raised to 0.005, as real.exe does for "
+        "RUC from a layer source (module_initialize_real.F:3441)",
+        file=sys.stderr)
+    return floored, receipt
+
+
 def fractional_sea_ice_post(*, xice, tsk, sst, deep_soil_temperature,
-                            soil_temperature, soil_moisture, liquid_moisture):
+                            soil_temperature, soil_moisture, liquid_moisture,
+                            ice=None):
     """real.exe's RUC sea-ice column under ``fractional_seaice = 1``.
 
     ``share/module_soil_pre.F`` adjust_for_seaice_post, the RUCLSMSCHEME arm
@@ -1066,10 +1047,16 @@ def fractional_sea_ice_post(*, xice, tsk, sst, deep_soil_temperature,
     missing or outside 170..400 K blends with its own TSK, which is the
     ``flag_sst = 0`` arm for that cell.  Only called under
     ``fractional_seaice = 1``: at the default the binary arm is unchanged.
+
+    ``ice`` is the Noah call's ``sea_ice_cells``: the ``xice >= 0.02``
+    cells and the ``seaice_threshold`` cells (water colder than the
+    threshold, :341-342), which take this column with their XICE as
+    analysed -- possibly 0, so the blend is then the SST.  ``None`` keeps
+    the fraction-only decision ``xice > 0``.
     """
     f32 = np.float32
     xice = np.asarray(xice, dtype=f32)
-    ice = xice > f32(0.0)
+    ice = (xice > f32(0.0)) if ice is None else np.asarray(ice, dtype=bool)
     tsk = np.array(tsk, dtype=f32, copy=True)
     if sst is None:
         water = tsk
@@ -1121,6 +1108,7 @@ def preprocess_land_surface_soil(
     route=None,
     fractional_seaice: bool = False,
     soil_no_source_land=None,
+    seaice_threshold: float = 100.0,
 ):
     """Route a soil source to the selected land surface's own geometry.
 
@@ -1167,7 +1155,8 @@ def preprocess_land_surface_soil(
         return preprocess_ruc_soil(
             fields,
             **({"fractional_seaice": True} if fractional_seaice else {}),
-            soil_type=soil_type,
+            **_threshold_keyword(seaice_threshold),
+        soil_type=soil_type,
             deep_soil_temperature=deep_soil_temperature,
             lake_mask=lake_mask, lake_skin_temperature=lake_skin_temperature,
             soil_layer_contract=soil_layer_contract,
@@ -1188,7 +1177,8 @@ def preprocess_land_surface_soil(
         return preprocess_noah_soil(
             fields,
             **({"fractional_seaice": True} if fractional_seaice else {}),
-            soil_type=soil_type,
+            **_threshold_keyword(seaice_threshold),
+        soil_type=soil_type,
             deep_soil_temperature=deep_soil_temperature,
             lake_mask=lake_mask, lake_skin_temperature=lake_skin_temperature,
             soil_layer_contract=soil_layer_contract,

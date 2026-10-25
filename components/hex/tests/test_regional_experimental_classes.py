@@ -150,7 +150,10 @@ def test_an_unminted_fine_class_is_admitted_with_the_flag_and_labelled(tmp_path)
     assert record["contract_route"] == "presented"
     assert record["forecast_anchor"] == ""
     assert "EXPERIMENTAL-UNMINTED" in record["basis"]
-    assert record["courant_limit_seconds"] == pytest.approx(117.2 * 0.9 / 125.0)
+    from woof.hex.dt_admission import stability_limit_seconds
+
+    # The bind's stability limit (WOOF 1.1.0), not the retired 0.9 x 125 m/s.
+    assert record["courant_limit_seconds"] == pytest.approx(stability_limit_seconds(117.2))
     # Never a row of the shipped table.
     assert dict(ra.ADMITTED_CLASSES) == before
     assert ra.admitted_class("graded-117m-dt0.5-z7") is None
@@ -172,13 +175,13 @@ def test_the_flag_never_waives_the_contract_deck():
 
 def test_the_flag_never_relaxes_the_courant_ceiling(tmp_path):
     digest = "ab" * 32
-    ledger = _ledger(tmp_path, _receipt(digest, 400, "graded-117m-dt1-z7"))
+    ledger = _ledger(tmp_path, _receipt(digest, 400, "graded-117m-dt2-z7"))
     with pytest.raises(ra.RegionalAdmissionRefusal) as error:
         ra.require_regional_anchor(
             None, bdy_mask_sha256=digest, n_cells=400,
             contract_directories=[ledger], experimental=True,
             boundary_zone_width=7, n_vert_levels=55, finest_edge_m=117.2,
-            dt_seconds=1.0,
+            dt_seconds=2.0,
         )
     assert "Courant ceiling" in str(error.value)
 
@@ -419,7 +422,7 @@ def test_receipt_generation_refuses_a_courant_violation(tmp_path):
     paths = _write_synthetic_cull(tmp_path)
     with pytest.raises(rcr.RegionalReceiptRefusal) as error:
         rcr.generate_local_contract_receipt(
-            paths["grid"], out=tmp_path / "cull.json", dt_seconds=1.0,
+            paths["grid"], out=tmp_path / "cull.json", dt_seconds=2.0,
             static=paths["static"], init=paths["init"], lbc_dir=tmp_path,
             experimental=True, deck_runner=_fake_deck_runner(paths["digest"]),
         )

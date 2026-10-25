@@ -20,7 +20,15 @@ import numpy as np
 # CuPy-free and staged wherever this one is, so the values are imported
 # rather than transcribed.  Re-exported under their own names below.
 from woof.core.wdm6_constants import WDM6_VERTICAL_LEVEL_BOUNDS
-from woof.core.wsm6_constants import WSM6_VERTICAL_LEVEL_BOUNDS
+# WSM3's ceiling is owned the same way: the deepest WSM3_KMAX tier of the
+# CuPy-free constants leaf.
+from woof.core.wsm3_constants import WSM3_VERTICAL_LEVEL_BOUNDS
+# WSM6's 256-level workspace ceiling and WSM6R's window are owned by the
+# WSM6 family's CuPy-free constants module, which their launchers enforce;
+# imported for the same reason.
+from woof.core.wsm6_constants import (WSM6R_VERTICAL_LEVEL_BOUNDS,
+                                       WSM6_VERTICAL_LEVEL_BOUNDS)
+from woof.core.wsm_family_constants import vertical_level_bounds as _wsm_family_bounds
 
 
 class PhysicsVerticalPreflightError(ValueError):
@@ -76,6 +84,8 @@ def refuse_vertical_levels(label: str,
         "starts; reaching it here means the preparation gate was bypassed.")
 
 
+FAST_SBM_VERTICAL_LEVEL_BOUNDS = (2, None)
+
 MYNN_VERTICAL_LEVEL_BOUNDS = (5, None)
 #: YSU.  The ceiling is ``YSU_KMAX`` in ``kernels/ysu.cu`` (and the global
 #: port's ``woof/globe/core/kernels/ysu.cu``), which is now a REFUSAL
@@ -115,6 +125,7 @@ SASE_VERTICAL_LEVEL_BOUNDS = (2, 256)
 #: where the implicit diffusion has an interior interface (compute_vdiff's
 #: k = 2..pver rows) and a Richardson number exists above the surface.
 UWPBL_VERTICAL_LEVEL_BOUNDS = (2, None)
+SATMEDMF_VERTICAL_LEVEL_BOUNDS = (8, None)
 #: Kain-Fritsch.  ``KF_KMAX`` in ``kernels/kf.cu`` is the refusal ceiling;
 #: it sizes only the two stack-resident arrays ``tv_env`` and
 #: ``positive_energy`` (2 x 4 x 256 = 2,048 B declared at 256, kept on the
@@ -129,7 +140,15 @@ KF_VERTICAL_LEVEL_BOUNDS = (8, 256)
 # integer-define tier, so there is no fixed upper bound to declare.
 GF_VERTICAL_LEVEL_BOUNDS = (12, None)
 KESSLER_VERTICAL_LEVEL_BOUNDS = (None, 256)
-#: WSM6 (mp_physics=6): imported above from ``woof.core.wsm6_constants``.
+LIN_VERTICAL_LEVEL_BOUNDS = (2, 512)
+#: Ferrier-Aligo (mp_physics=5): the kernel streams the column top-down and
+#: keeps no level array (woof/core/kernels/fer_hires.cu), so there is no
+#: ceiling; two levels are the least EGCP01DRV's top-level override and one
+#: level below it need.
+FERRIER_VERTICAL_LEVEL_BOUNDS = (2, None)
+from woof.core.wsm6_constants import WSM5_VERTICAL_LEVEL_BOUNDS
+#: WSM6 (mp_physics=6): imported above from ``woof.core.wsm6_constants``
+#: (the 256-level workspace ceiling).
 THOMPSON_VERTICAL_LEVEL_BOUNDS = (2, 256)
 #: Aerosol-aware Thompson (mp_physics=28).  Identical to the classic
 #: Thompson bound and NOT a copy of a number: the mp=28 sedimentation
@@ -153,6 +172,10 @@ NSSL2_VERTICAL_LEVEL_BOUNDS = (3, 256)
 #: existed the gate SKIPPED mp=9 silently, so a 300-level Milbrandt-Yau run
 #: passed ``woof check`` and died on its first microphysics call.
 MILBRANDT2_VERTICAL_LEVEL_BOUNDS = (3, 256)
+#: TEMPO (named scheme, woof.microphysics_schemes): its sedimentation
+#: reads k-2..k+1 (semi-Lagrangian wi stencil) and needs nz >= 3; the GPU
+#: runtime compiles its column arrays for the domain's nz, capped here.
+TEMPO_VERTICAL_LEVEL_BOUNDS = (3, 256)
 #: WDM6 (mp_physics=16): the 256-level refusal ceiling, imported from the
 #: CuPy-free constants module at the top of this file rather than retyped
 #: (``WDM6_VERTICAL_LEVEL_BOUNDS``).
@@ -161,6 +184,10 @@ MILBRANDT2_VERTICAL_LEVEL_BOUNDS = (3, 256)
 #: no level tier, so like Grell-Freitas the row is a floor with no declared
 #: ceiling.  The floor is the dycore's own: one level is a column.
 P3_VERTICAL_LEVEL_BOUNDS = (1, None)
+#: WSM7 (mp_physics=24): the floor the PLM remap needs (a layer above and
+#: below) and the deepest compiled ``WSM7_KMAX`` tier, read from the
+#: scheme's row in woof/data/wsm_family/schemes.json rather than retyped.
+WSM7_VERTICAL_LEVEL_BOUNDS = _wsm_family_bounds(24)
 #: New Tiedtke (cu_physics=16).  ``kernels/ntiedtke.cu`` skips ``k >= nz-2``
 #: and loops ``k = nz-2 .. 1`` (the transcription of ``jk = klevm1, 2, -1``),
 #: so a column needs four levels before the cloud-base search has one
@@ -175,6 +202,21 @@ NEW_TIEDTKE_VERTICAL_LEVEL_BOUNDS = (4, None)
 #: so ``validate_resolved_physics_vertical_levels`` reads this row directly
 #: whenever ``gwd_opt`` is 1 or 3.
 TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS = (None, 256)
+# Original cu6 reads the same interior cloud-base levels; global arenas
+# carry the full vertical dimension without a compiled level ceiling.
+TIEDTKE_VERTICAL_LEVEL_BOUNDS = (4, None)
+#: Grell 3D (cu_physics=5).  ``kernels/g3.cu`` starts the k22 search at
+#: level 3 (cup_MAXIMI(..,3,..)), stops the cloud-top search at ktf-1 and
+#: smooths k = 3 .. nz-2 in conv_grell_spread3d, so a column needs six
+#: levels for every one of those ranges to hold an interior row; no fixed
+#: ceiling, the workspace is (nz+1) words per slot at run time.
+GRELL_3D_VERTICAL_LEVEL_BOUNDS = (6, None)
+#: New SAS (cu_physics=96).  nsas2d reads zi(3)-zi(2) for the bottom
+#: mass-flux level (module_cu_nsas.F:909) and needs kb < kbcon < kmax for
+#: a cloud base, and nscv2d's PBL and cloud searches run k = 2 .. kte-1,
+#: so four levels are the least with one interior row; no ceiling, the
+#: workspace is sized from nz at run time (woof.core.column_cumulus).
+NEW_SAS_VERTICAL_LEVEL_BOUNDS = (4, None)
 #: The dynamical core's own vertical bound, from the top ``WPHI_MAX_LEV``
 #: tier ``woof.core.acoustic`` compiles the implicit w''-phi'' solve at.
 #: Bound to the launcher's ladder by

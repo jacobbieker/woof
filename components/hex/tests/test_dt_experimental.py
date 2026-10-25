@@ -9,15 +9,19 @@ checks only -- Courant, cadence divisibility, RK shape, binary64 clock
 closure -- labels everything it touches ``experimental-unanchored``, and
 never writes a table row.
 
-What is pinned here, gate by gate (config, mesh-point choice, bind, door,
+WOOF 1.1.0 retired the anchor gate (2026-10-10): no timestep is refused for
+lacking an anchor, so the lane no longer OPENS anything -- it labels.  What
+is pinned here, gate by gate (config, mesh-point choice, bind, door,
 driver):
 
-* without the flag nothing moves, refusal text included;
+* without the flag a sub-anchor timestep runs unlabelled, as any timestep
+  does since the gate's retirement;
 * with the flag, 0.5 s and 0.25 s on synthetic 100 m and 50 m meshes are
-  admitted, and so is exactly what ``largest_admissible_dt`` returns;
-* a timestep that fails Courant, divisibility or clock closure is refused
-  even with the flag, and so is an unanchored timestep ABOVE the smallest
-  anchor;
+  labelled ``experimental-unanchored``, and the mesh-point choice is
+  exactly what ``largest_courant_divisor_dt`` returns;
+* a timestep that fails stability, divisibility, clock closure or the
+  millisecond quantum is refused by the lane, and the lane never applies at
+  or above the smallest anchor;
 * the label reaches every receipt and the history file.
 
 Everything here runs on a CPU-only box.
@@ -110,9 +114,9 @@ def test_sub_anchor_timesteps_are_admitted_on_synthetic_fine_meshes(dt, minimum)
 
 @pytest.mark.parametrize("minimum", [MIN_DC_100M, MIN_DC_50M, 100.0, 50.0])
 def test_the_lane_admits_exactly_what_largest_admissible_dt_returns(minimum):
-    """The energy planner uses largest_admissible_dt; the door must agree."""
+    """The energy planner uses largest_courant_divisor_dt; the door must agree."""
 
-    dt = dt_admission.largest_admissible_dt(minimum)["largest_admissible_dt_seconds"]
+    dt = dt_admission.largest_courant_divisor_dt(minimum)["largest_admissible_dt_seconds"]
     assert dt is not None and dt < 5.0
     anchor = dt_admission.experimental_dt_anchor(
         dt, cumulus_scheme=None, minimum_dc_edge_m=minimum
@@ -172,54 +176,40 @@ def test_the_lane_refuses_without_a_mesh_unless_courant_is_deferred_by_name():
     assert '"deferred_to": "bind_mesh"' in deferred.schedule_receipt
 
 
-def test_require_dt_anchor_without_the_flag_is_byte_identical():
+def test_the_anchor_gate_is_retired_and_the_lane_only_labels():
+    """WOOF 1.1.0 retired ``require_dt_anchor``: a sub-anchor timestep is
+    recorded as unmatched evidence, not refused, and the lane's record is a
+    label on that run -- never a table row."""
+
+    assert not hasattr(dt_admission, "require_dt_anchor")
     for dt in (0.5, 0.25):
-        with pytest.raises(DtAdmissionError) as caught:
-            dt_admission.require_dt_anchor(
-                dt, radiation_seconds=600.0, surface_pbl_seconds=dt,
-                cumulus_seconds=None, cumulus_scheme=None,
-            )
-        assert str(caught.value) == dt_admission.unanchored_refusal(dt, None, dt)
-
-
-def test_require_dt_anchor_with_the_flag_admits_below_and_refuses_above():
-    anchor = dt_admission.require_dt_anchor(
-        0.5, radiation_seconds=600.0, surface_pbl_seconds=0.5,
-        cumulus_seconds=None, cumulus_scheme=None,
-        experimental=True, minimum_dc_edge_m=MIN_DC_100M,
+        record = dt_admission.anchor_record(
+            dt, radiation_seconds=600.0, surface_pbl_seconds=dt,
+            cumulus_seconds=None, cumulus_scheme=None,
+        )
+        assert record["matched"] is False
+    anchor = dt_admission.experimental_dt_anchor(
+        0.5, cumulus_scheme=None, minimum_dc_edge_m=MIN_DC_100M
     )
     assert anchor.experimental
     with pytest.raises(DtAdmissionError) as caught:
-        dt_admission.require_dt_anchor(
-            7.5, radiation_seconds=600.0, surface_pbl_seconds=7.5,
-            cumulus_seconds=None, cumulus_scheme=None,
-            experimental=True, minimum_dc_edge_m=1.0e6,
+        dt_admission.experimental_dt_anchor(
+            7.5, cumulus_scheme=None, minimum_dc_edge_m=1.0e6
         )
-    message = str(caught.value)
-    assert message.startswith(dt_admission.unanchored_refusal(7.5, None, 7.5))
-    assert "experimental lane was requested and does not apply" in message
-    # An anchored timestep is answered from the table, flag or no flag.
-    proven = dt_admission.require_dt_anchor(
-        120.0, radiation_seconds=600.0, surface_pbl_seconds=120.0,
-        cumulus_seconds=120.0, cumulus_scheme="gf", experimental=True,
-        minimum_dc_edge_m=1.0e6,
-    )
-    assert proven is ADMITTED_TIMESTEPS[dt_admission.dt_key(120.0, "gf")]
+    assert "not below the smallest anchored" in str(caught.value)
 
 
-def test_the_config_gate_admits_only_inside_a_scope_for_that_timestep():
-    with pytest.raises(ConfigurationRefusal) as caught:
-        _off_config(0.5).validate()
-    assert str(caught.value).startswith("config_dt=0.5 is refused")
-    assert "experimental" not in str(caught.value)
 
+
+
+def test_the_config_admits_a_sub_anchor_timestep_on_its_cadences():
+    """The config's gate is cadence integrality and clock closure (WOOF 1.1.0),
+    in or out of a lane scope; the scope changes no admission."""
+
+    _off_config(0.5).validate()
     with dt_admission.experimental_lane(0.5, minimum_dc_edge_m=MIN_DC_100M):
         _off_config(0.5).validate()
-        # The scope is ONE timestep: another unanchored value stays refused.
-        with pytest.raises(ConfigurationRefusal):
-            _off_config(0.25).validate()
-    with pytest.raises(ConfigurationRefusal):
-        _off_config(0.5).validate()
+        _off_config(0.25).validate()
 
 
 def test_a_scope_cannot_hold_a_timestep_the_lane_refuses_and_does_not_nest():
@@ -282,45 +272,53 @@ def test_the_recommendation_is_representable_below_one_second():
 def test_the_search_reaches_meshes_finer_than_the_old_divisor_cutoff():
     """Below ~35 m the Courant floor's count passes 2400; the search follows it."""
 
-    result = dt_admission.largest_admissible_dt(TAIL * 25.0)
+    result = dt_admission.largest_courant_divisor_dt(TAIL * 25.0)
     assert result["largest_admissible_dt_seconds"] == 0.125
     dt_admission.experimental_dt_anchor(
         0.125, cumulus_scheme=None, minimum_dc_edge_m=TAIL * 25.0
     )
-    # and the registered graded rows are reproduced unchanged
-    assert dt_admission.largest_admissible_dt(13_311.8)["largest_admissible_dt_seconds"] == 75.0
-    assert dt_admission.largest_admissible_dt(14_398.0)["largest_admissible_dt_seconds"] == 100.0
+    # On the registered graded rows' edges the search answers an exact
+    # divisor under the bind's stability limit (the retired 0.9 x 125 m/s
+    # policy declared 75 s and 100 s there; the rows keep their own dt).
+    for minimum in (13_311.8, 14_398.0):
+        found = dt_admission.largest_courant_divisor_dt(minimum)
+        dt = found["largest_admissible_dt_seconds"]
+        assert dt <= found["courant_limit_seconds"]
+        assert found["radiation_cadence_seconds"] % dt == 0.0
 
 
 def test_the_courant_refusal_prints_a_sub_second_recommendation():
     authority = edge_length_authority(np.array([MIN_DC_50M, 60.0]))
     with pytest.raises(TimestepAdmissionError) as caught:
         admit_timestep(0.5, authority)
-    assert "Declare dt_seconds <= 0.3 s" in str(caught.value)
+    # 0.3937 s maximum: rounded down at its second significant figure.
+    assert "dt <= 0.39 s" in str(caught.value)
     coarse = edge_length_authority(np.array([869.25, 900.0]))
     with pytest.raises(TimestepAdmissionError) as caught:
         admit_timestep(20.0, coarse)
-    assert "Declare dt_seconds <= 6.2 s" in str(caught.value)
+    assert "dt <= 8.0 s" in str(caught.value)
 
 
 # ---------------------------------------------------------------------------
 # mesh_point.choose_timestep
 # ---------------------------------------------------------------------------
-def test_choose_timestep_without_the_flag_refuses_a_fine_mesh_unchanged():
-    with pytest.raises(mesh_point.PointPlanRefusal) as caught:
-        mesh_point.choose_timestep(MIN_DC_100M, fine_dx_m=100.0)
-    assert "no anchored timestep fits" in str(caught.value)
-    assert "experimental" not in str(caught.value)
+def test_choose_timestep_without_the_flag_takes_the_mesh_rule_unlabelled():
+    """Without the flag a 100 m mesh takes MPAS-A's 6 s/km rule (WOOF 1.1.0),
+    600/1024 s, with no label: nothing is refused for lacking an anchor."""
+
+    chosen = mesh_point.choose_timestep(MIN_DC_100M, fine_dx_m=100.0)
+    assert chosen["dt_seconds"] == 600.0 / 1024
+    assert "timestep_evidence" not in chosen
 
 
 @pytest.mark.parametrize(
-    "fine_dx_m,expected", [(100.0, 0.5), (50.0, 0.25)]
+    "fine_dx_m,expected", [(100.0, 0.75), (50.0, 0.375)]
 )
-def test_choose_timestep_with_the_flag_picks_largest_admissible_dt(fine_dx_m, expected):
+def test_choose_timestep_with_the_flag_picks_largest_courant_divisor_dt(fine_dx_m, expected):
     minimum = TAIL * fine_dx_m
     chosen = mesh_point.choose_timestep(minimum, fine_dx_m=fine_dx_m, experimental=True)
     assert chosen["dt_seconds"] == expected
-    assert chosen["dt_seconds"] == dt_admission.largest_admissible_dt(minimum)[
+    assert chosen["dt_seconds"] == dt_admission.largest_courant_divisor_dt(minimum)[
         "largest_admissible_dt_seconds"
     ]
     assert chosen["timestep_evidence"] == EXPERIMENTAL_TIMESTEP_EVIDENCE
@@ -343,7 +341,11 @@ def _door_seams(monkeypatch):
 
     monkeypatch.setattr(door, "read_device_compute", lambda: (12, 0))
     monkeypatch.setattr(door, "read_card_profile", lambda: REFERENCE_CARD)
-    monkeypatch.setattr(door, "seam_source_problem", lambda checkout: None)
+    monkeypatch.setattr(door, "seam_source_problem", lambda checkout: None, raising=False)
+    # WOOF 1.1.0's door seams, supplied as tests/test_forecast_door.py does.
+    monkeypatch.setattr(door, "seam_pin_problem", lambda checkout: None, raising=False)
+    monkeypatch.setattr(door, "read_nvrtc_targets", lambda: (75, 80, 86, 89, 90, 100, 120, 121),
+                        raising=False)
     monkeypatch.delenv(dt_admission.EXPERIMENTAL_DT_ENV, raising=False)
 
 
@@ -383,17 +385,20 @@ def _refusal(arguments: argparse.Namespace) -> str:
 
 
 @pytest.mark.parametrize("mesh,dt", [("fine-100m", 0.5), ("fine-50m", 0.25)])
-def test_the_door_refusal_is_unchanged_without_the_flag(tmp_path, mesh, dt):
-    message = _refusal(_namespace(tmp_path, mesh))
-    assert message.startswith(f"--mesh {mesh} declares dt={dt:g} s and selects ")
-    assert message.endswith(dt_admission.unanchored_refusal(dt, None, dt))
-    assert "experimental" not in message.lower()
+def test_without_the_flag_the_door_runs_a_sub_anchor_dt_unlabelled(tmp_path, mesh, dt):
+    request = door.resolve_request(
+        _namespace(tmp_path, mesh, "--dt", repr(dt)), registry=_registry()
+    )
+    assert request.dt_seconds == dt
+    assert not request.experimental_dt and not request.timestep_experimental
+    assert "--experimental-dt" not in door.build_driver_argv(request)
 
 
 @pytest.mark.parametrize("mesh,dt,steps", [("fine-100m", 0.5, 3600), ("fine-50m", 0.25, 7200)])
 def test_the_door_admits_with_the_flag_and_labels_everything(tmp_path, mesh, dt, steps):
     request = door.resolve_request(
-        _namespace(tmp_path, mesh, "--experimental-dt"), registry=_registry()
+        _namespace(tmp_path, mesh, "--experimental-dt", "--dt", repr(dt)),
+        registry=_registry(),
     )
     assert request.experimental_dt and request.timestep_experimental
     assert request.dt_seconds == dt and request.steps == steps
@@ -412,21 +417,30 @@ def test_the_door_admits_with_the_flag_and_labels_everything(tmp_path, mesh, dt,
 
 
 def test_the_door_admission_record_says_courant_is_the_binds(tmp_path):
-    record = door.admit_timestep("fine-100m", 0.5, nominal_dx_m=100.0, experimental=True)
+    record = door.admit_timestep(
+        "fine-100m", 0.5, nominal_dx_m=100.0, experimental=True, radiation_seconds=600.0,
+    )
     assert record["timestep_evidence"] == EXPERIMENTAL_TIMESTEP_EVIDENCE
-    assert "bind_mesh" in record["schedule_receipt"]
+    assert record["anchor"]["matched"] is False
+    plain = door.admit_timestep("fine-100m", 0.5, nominal_dx_m=100.0, radiation_seconds=600.0)
+    assert "timestep_evidence" not in plain
 
 
 def test_the_environment_switch_opens_the_lane_and_refuses_ambiguity(tmp_path, monkeypatch):
     monkeypatch.setenv(dt_admission.EXPERIMENTAL_DT_ENV, "1")
-    request = door.resolve_request(_namespace(tmp_path, "fine-100m"), registry=_registry())
+    request = door.resolve_request(
+        _namespace(tmp_path, "fine-100m", "--dt", "0.5"), registry=_registry())
     assert request.experimental_dt and request.timestep_experimental
     monkeypatch.setenv(dt_admission.EXPERIMENTAL_DT_ENV, "0")
-    assert "experimental" not in _refusal(_namespace(tmp_path, "fine-100m")).lower()
+    for sub in ("zero", "yes", "pre"):
+        (tmp_path / sub).mkdir()
+    plain = door.resolve_request(
+        _namespace(tmp_path / "zero", "fine-100m", "--dt", "0.5"), registry=_registry())
+    assert not plain.experimental_dt
     monkeypatch.setenv(dt_admission.EXPERIMENTAL_DT_ENV, "yes")
-    assert "is neither 1" in _refusal(_namespace(tmp_path, "fine-100m"))
+    assert "is neither 1" in _refusal(_namespace(tmp_path / "yes", "fine-100m", "--dt", "0.5"))
     # Preflight reports the ambiguous switch BESIDE the other problems.
-    arguments = _namespace(tmp_path, "fine-100m", "--preflight")
+    arguments = _namespace(tmp_path / "pre", "fine-100m", "--preflight", "--dt", "0.5")
     arguments.init = tmp_path / "absent.init.nc"
     request = door.resolve_request(arguments, registry=_registry())
     joined = " ".join(request.input_problems)
@@ -435,9 +449,9 @@ def test_the_environment_switch_opens_the_lane_and_refuses_ambiguity(tmp_path, m
 
 
 def test_the_flag_does_not_admit_a_timestep_that_fails_divisibility(tmp_path):
-    message = _refusal(_namespace(tmp_path, "fine-odd", "--experimental-dt"))
-    assert "--mesh fine-odd declares dt=0.35 s" in message
-    assert "radiation_seconds=600 s is not a positive integer multiple" in message
+    message = _refusal(_namespace(tmp_path, "fine-odd", "--experimental-dt", "--dt", "0.35"))
+    assert "dt=0.35 s" in message
+    assert "not a positive integer multiple" in message
     # The lane refuses it by the same rung when it is the one asked.
     with pytest.raises(DtAdmissionError) as caught:
         dt_admission.experimental_dt_anchor(
@@ -447,10 +461,20 @@ def test_the_flag_does_not_admit_a_timestep_that_fails_divisibility(tmp_path):
     assert "radiation_seconds=600" in str(caught.value)
 
 
-def test_the_flag_does_not_open_unanchored_timesteps_above_five_seconds(tmp_path):
-    message = _refusal(_namespace(tmp_path, "fine-7s", "--experimental-dt"))
-    assert dt_admission.unanchored_refusal(7.5, None, 7.5) in message
-    assert "does not apply" in message
+def test_the_flag_labels_nothing_at_or_above_five_seconds(tmp_path):
+    """Above the smallest anchor the lane does not apply: an unanchored 7.5 s
+    runs (the gate is retired) and carries no experimental label."""
+
+    request = door.resolve_request(
+        _namespace(tmp_path, "fine-7s", "--experimental-dt", "--dt", "7.5"),
+        registry=_registry(),
+    )
+    assert request.experimental_dt and not request.timestep_experimental
+    receipt = door.build_receipt(
+        request=request, admission=None, bind_receipt=None, driver_receipt=None,
+        history=[], driver_argv=[], seconds=0.0, status="test",
+    )
+    assert "timestep_evidence" not in receipt
 
 
 def test_an_ordinary_run_carries_no_label_and_no_flag(tmp_path):
@@ -512,6 +536,7 @@ def _binding_module(monkeypatch, *, dt: float, minimum: float, nominal: float):
         lambda path, row: {"nCells": 10, "nEdges": 30, "nominalMinDc_f32": nominal},
     )
     monkeypatch.setattr(binding, "admit_regional_row", lambda row, observed: {"regional": False})
+    monkeypatch.setattr(binding, "_grid_cell_spacing", lambda path, len_disp_m: None)
     monkeypatch.setattr(binding, "_inspect_static", lambda path, row, observed: {})
     monkeypatch.setattr(
         binding, "_static_edge_authority",
@@ -520,7 +545,7 @@ def _binding_module(monkeypatch, *, dt: float, minimum: float, nominal: float):
     passing = types.SimpleNamespace(
         as_dict=lambda: {}, minimum_ratio=1.0, minimum_ratio_edge=0,
         minimum_ratio_dv_edge_m=1.0, amplification=1.0,
-        policy=types.SimpleNamespace(minimum_dv_over_dc=0.1),
+        policy=types.SimpleNamespace(minimum_dv_over_dc=0.1, apvm_upwinding=0.5),
     )
     monkeypatch.setattr(binding, "_static_dual_edges", lambda path: (None, None, None))
     monkeypatch.setattr(binding, "admit_dual_edges", lambda *a, **k: passing)
@@ -547,15 +572,24 @@ def _bind(binding, tmp_path, **kwargs):
 @pytest.mark.parametrize(
     "dt,minimum,nominal", [(0.5, MIN_DC_100M, 100.0), (0.25, MIN_DC_50M, 50.0)]
 )
-def test_bind_refuses_without_the_flag_and_admits_with_it(
+def test_bind_labels_only_with_the_flag(
     tmp_path, monkeypatch, dt, minimum, nominal
 ):
+    """Without the flag the bind admits a sub-anchor timestep unlabelled
+    (WOOF 1.1.0 retired the anchor gate); with it, it warns and labels."""
+
     binding = _binding_module(monkeypatch, dt=dt, minimum=minimum, nominal=nominal)
-    with pytest.raises(binding.MeshBindingMismatch) as caught:
-        _bind(binding, tmp_path)
-    message = str(caught.value)
-    assert dt_admission.unanchored_refusal(dt, None, dt) in message
-    assert "experimental" not in message.lower()
+    with pytest.raises(_Reached):
+        forecast, lines = _bind(binding, tmp_path, dt_seconds=dt, radiation_seconds=600.0)
+    plain_lines: list[str] = []
+    with pytest.raises(_Reached):
+        binding.bind_mesh(
+            object(), "synthetic-fine", grid=tmp_path / "g.nc",
+            static=tmp_path / "s.nc", forecast=types.SimpleNamespace(),
+            verify_frozen_sources=False, dt_seconds=dt, radiation_seconds=600.0,
+            log=plain_lines.append,
+        )
+    assert not any("EXPERIMENTAL-UNANCHORED" in line for line in plain_lines)
 
     forecast = types.SimpleNamespace(TIMESTEP_EVIDENCE_DECISION={"stale": True})
     lines: list[str] = []
@@ -564,6 +598,7 @@ def test_bind_refuses_without_the_flag_and_admits_with_it(
             object(), "synthetic-fine", grid=tmp_path / "g.nc",
             static=tmp_path / "s.nc", forecast=forecast,
             verify_frozen_sources=False, experimental_dt=True, log=lines.append,
+            dt_seconds=dt, radiation_seconds=600.0,
         )
     assert any("WARNING" in line and "EXPERIMENTAL-UNANCHORED" in line for line in lines)
     assert any(f"dt={dt:.9g} s" in line for line in lines)
@@ -590,8 +625,8 @@ def test_bind_publishes_its_decision_only_through_the_success_helper(monkeypatch
 def test_bind_refuses_a_courant_failure_even_with_the_flag(tmp_path, monkeypatch):
     binding = _binding_module(monkeypatch, dt=0.5, minimum=MIN_DC_50M, nominal=50.0)
     with pytest.raises(binding.MeshBindingMismatch) as caught:
-        _bind(binding, tmp_path, experimental_dt=True)
-    assert "unsafe mesh/timestep combination" in str(caught.value)
+        _bind(binding, tmp_path, experimental_dt=True, dt_seconds=0.5, radiation_seconds=600.0)
+    assert "unstable mesh/timestep combination" in str(caught.value)
 
 
 def test_bind_resets_a_stale_decision_on_an_ordinary_bind(tmp_path, monkeypatch):
@@ -602,6 +637,7 @@ def test_bind_resets_a_stale_decision_on_an_ordinary_bind(tmp_path, monkeypatch)
             object(), "synthetic-fine", grid=tmp_path / "g.nc",
             static=tmp_path / "s.nc", forecast=forecast,
             verify_frozen_sources=False, experimental_dt=True, log=lambda _: None,
+            dt_seconds=5.0, radiation_seconds=600.0,
         )
     assert forecast.TIMESTEP_EVIDENCE_DECISION is None
 
@@ -691,5 +727,8 @@ def test_a_timestep_off_the_millisecond_quantum_is_refused(dt, minimum):
             dt, cumulus_scheme=None, minimum_dc_edge_m=minimum
         )
     assert "whole number of milliseconds" in str(caught.value)
-    search = dt_admission.largest_admissible_dt(minimum)
-    assert dt in search["rejected_for_millisecond_quantum"]
+    search = dt_admission.largest_courant_divisor_dt(minimum)
+    assert search["rejected_for_millisecond_quantum"]
+    assert not any(dt_admission.whole_milliseconds(x)
+                   for x in search["rejected_for_millisecond_quantum"])
+    assert dt_admission.whole_milliseconds(search["largest_admissible_dt_seconds"])

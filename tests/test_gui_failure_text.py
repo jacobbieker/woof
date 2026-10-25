@@ -39,11 +39,11 @@ JS = Path(__file__).resolve().parents[1] / "woof" / "gui" / "static" / "js"
 def stage_geography(root: Path) -> None:
     """A tree the WRF static builder's check accepts: each dataset it opens, each with its WPS index."""
 
-    from woof.geog_assets import GEOG_CONSUMER_WRF, datasets_required_by
+    # By directory, as the check reads them: the default soil categories are
+    # children of the soilgrids container (permissive geog set, 2026-10-21).
+    from _staged_geog import staged_wrf_geog_tree
 
-    for name in datasets_required_by(GEOG_CONSUMER_WRF):
-        (root / name).mkdir(parents=True, exist_ok=True)
-        (root / name / "index").write_text("type = continuous\n", encoding="utf-8")
+    staged_wrf_geog_tree(root)
 
 
 def _serve(tmp_path, runner):
@@ -276,13 +276,21 @@ def test_a_remedy_written_as_terminal_comments_keeps_its_words(tmp_path):
 def test_the_linux_steps_give_the_geography_size_the_tool_gives():
     # The Linux note said fetch-geog "downloads several gigabytes". The page's refusal quotes the tool's own figures,
     # and the disk the tree takes once unpacked is the one a user has to find room for.
-    from woof.geog_assets import GEOG_CONSUMER_WRF, datasets_required_by, size_phrase
+    # 2.9.0: the steps run the bare command (the default set, which carries the
+    # mesh builder's soil archive that `woof doctor` requires once the wheel
+    # bundles that builder), and name `--datasets wrf` with its own figures.
+    from woof.geog_assets import GEOG_ARCHIVES, GEOG_CONSUMER_WRF, datasets_required_by, size_phrase
 
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
     linux = readme[readme.index("### Linux"):]
+    steps = linux[:linux.index("```", linux.index("```") + 3)]
+    assert "woof fetch-geog\n" in steps and "--datasets" not in steps
     note = " ".join(linux[linux.index("`fetch-geog` sets up"):].split("\n\n", 1)[0].split())
-    compressed, unpacked = re.findall(r"~([\d.]+) GB", size_phrase(datasets_required_by(GEOG_CONSUMER_WRF)))
+    default = tuple(a.dataset for a in GEOG_ARCHIVES if a.fetch_by_default)
+    compressed, unpacked = re.findall(r"~([\d.]+) GB", size_phrase(default))
     assert f"about {compressed} GB" in note and f"about {unpacked} GB of disk once unpacked" in note
+    compressed, unpacked = re.findall(r"~([\d.]+) GB", size_phrase(datasets_required_by(GEOG_CONSUMER_WRF)))
+    assert "`--datasets wrf`" in note and f"about {compressed} GB, about {unpacked} GB unpacked" in note
     assert "several gigabytes" not in note
 
 

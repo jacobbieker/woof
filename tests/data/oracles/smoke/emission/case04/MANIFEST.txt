@@ -1,9 +1,0 @@
-ir i4 0
-jr i4 0
-fire_tracer_smoke f4 0
-rho f4 3 4 2 4
-dz8w f4 3 4 2 4
-burnt_area_dt f4 2 4 4
-fgip f4 2 4 4
-tracer_in f4 3 4 2 4
-tracer_out f4 3 4 2 4

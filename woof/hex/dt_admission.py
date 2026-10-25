@@ -1,4 +1,17 @@
-"""Earned-anchor admission for the frozen v8.4.1 column-physics timestep.
+"""Timestep anchors for the v8.4.1 column-physics lane: evidence, not a gate.
+
+RETIRED AS A GATE (owner ruling 2026-10-10).  Nothing in this module refuses a
+run any more for lacking an anchor or for running at cadences an anchor was
+not earned at.  ``anchor_record`` answers whether a configuration matches a
+registered row, and the run writes that answer into its receipt
+(``dt_admission.anchor``); the refusals that remain name a concrete
+breakage -- a physics cadence that is not a whole number of steps, which the
+sealed constructor cannot schedule, and a timestep whose multiples are not
+exact in binary64, which stops a run on the clock check
+(``require_cadences``).  Stability is measured from the mesh at bind
+(:mod:`woof.hex.timestep_admission`).  The history below is kept because it
+is the record of what the registered rows measured.
+
 
 The frozen column-physics lane executes at exactly one model timestep.
 ``V841MpasColumnPhysicsConfig.validate`` used to say so as a literal --
@@ -348,6 +361,50 @@ ADMITTED_TIMESTEPS: Mapping[str, DtAnchor] = MappingProxyType(
                 "reproduces to every printed digit on two different cards"
             ),
         ),
+        dt_key(120.0, "ntiedtke"): DtAnchor(
+            dt_seconds=120.0,
+            radiation_seconds=600.0,
+            surface_pbl_seconds=120.0,
+            cumulus_seconds=120.0,
+            cumulus_scheme="ntiedtke",
+            meshes=("x1.40962",),
+            card="RTX 5090 (170 SM, sm_120) and RTX 4090 (128 SM, sm_89)",
+            admitted_on="2026-10-05",
+            schedule_receipt=(
+                "evidence/dt-anchor-ntiedtke-20261005/"
+                "schedule-receipt-dt120-ntiedtke.json"
+            ),
+            integration_anchor=(
+                "evidence/dt-anchor-ntiedtke-20261005/"
+                "anchor-dt120-ntiedtke-sm120.json, "
+                "evidence/dt-anchor-ntiedtke-20261005/"
+                "anchor-dt120-ntiedtke-sm89.json, "
+                "evidence/dt-anchor-ntiedtke-20261005/RECEIPT.md"
+            ),
+            native_reference=None,
+            basis=(
+                "the 2026-10-05 coarse-mesh default (hexcore."
+                "convection_admission.NTIEDTKE_AT_OR_ABOVE_M).  Two 72 h "
+                "x1.40962 forecasts from GFS 2026-10-01 00Z in separate "
+                "processes on two RTX 5090 cards wrote 13 of 13 "
+                "byte-identical history frames, finite in every frame, and "
+                "a second pair on one RTX 4090 did the same.  New Tiedtke is "
+                "called every step, as Grell-Freitas is, so the cadences are "
+                "the proven 120 s row's.  No native reference: the frozen "
+                "native integration ran Grell-Freitas"
+            ),
+            physics_health=(
+                "TRACKS THE CONTROL, and scores better than it against "
+                "observations.  Against the 120 s Grell-Freitas control on "
+                "the same mesh and init, the six-hourly |w| mean runs "
+                "0.011-0.015 m/s against 0.011-0.018, |w| max over 72 h "
+                "4.59 m/s against 6.48, theta max 937.53 K against 937.49.  "
+                "Against radiosondes the tropical 250 hPa bias/RMS is "
+                "-0.71/1.04 K against -2.03/2.24 K at 72 h, and a second "
+                "case (GFS 2026-01-15 00Z) gives -0.96/1.52 K against "
+                "-2.57/2.97 K"
+            ),
+        ),
         dt_key(100.0, "gf"): DtAnchor(
             dt_seconds=100.0,
             radiation_seconds=600.0,
@@ -399,11 +456,13 @@ ADMITTED_TIMESTEPS: Mapping[str, DtAnchor] = MappingProxyType(
             meshes=("x1.40962",),
             card="RTX 5070 Ti (70 SM)",
             admitted_on="2026-08-26",
+            # The evidence tree names this arm's directory for the lab host it ran
+            # on; host-a is that host's neutral label in shipped text.
             schedule_receipt=(
-                "evidence/dt-anchors-20260826/, schedule-receipt-dt75.json"
+                "evidence/dt-anchors-20260826/dt75-host-a/schedule-receipt-dt75.json"
             ),
             integration_anchor=(
-                "evidence/dt-anchors-20260826/, anchor-dt75.json, "
+                "evidence/dt-anchors-20260826/dt75-host-a/anchor-dt75.json, "
                 "evidence/dt-anchors-20260826/RECEIPT.md"
             ),
             native_reference=None,
@@ -968,6 +1027,12 @@ def schedule_receipt(
                 f"got {cudt!r} s.  This is not a port choice and no registry "
                 f"row can relax it"
             )
+        if cumulus_scheme == "ntiedtke" and stepcu != 1:
+            raise DtAdmissionError(
+                f"cumulus_scheme='ntiedtke' requires cumulus_seconds == dt "
+                f"({dt:g} s): WRF pins cudt=0 for New Tiedtke (cu_physics=16; "
+                f"its RAINCV is a per-call rate with no hold), got {cudt!r} s"
+            )
 
     # --- rung 2: RK schedule shape ---------------------------------------
     from .integration import RKSchedule
@@ -1001,12 +1066,9 @@ def schedule_receipt(
         stage.acoustic_steps == proven.acoustic_steps
         for stage, proven in zip(dynamics.stages, proven_dynamics.stages)
     )
-    if not shape_matches:
-        raise DtAdmissionError(
-            f"the RK schedule at dt={dt:g} s is a DIFFERENT SHAPE from the "
-            f"proven {PROVEN_DT_SECONDS:g} s schedule (acoustic sub-step "
-            f"counts differ), so the proven schedule says nothing about it"
-        )
+    # A schedule of another shape is recorded, not refused (retired
+    # 2026-10-10): the shape only says whether the 120 s evidence describes
+    # this schedule, and evidence is a receipt field.
 
     # --- rung 3: WSM6 minor loop -----------------------------------------
     import numpy as np
@@ -1100,7 +1162,7 @@ def schedule_receipt(
             "proven_scalar_stage_timesteps": [
                 float(stage.large_timestep) for stage in proven_scalar.stages
             ],
-            "shape_matches_proven": True,
+            "shape_matches_proven": bool(shape_matches),
         },
         "wsm6": {
             "minor_dt_seconds": WSM6_MINOR_DT_SECONDS,
@@ -1115,13 +1177,9 @@ def schedule_receipt(
             "history_stride_seconds": history_stride_seconds,
         },
         "courant": {
-            "policy_speed_m_s": 125.0,
-            "policy_safety_factor": 0.90,
-            "minimum_dc_edge_m": dt * 125.0 / 0.90,
             "note": (
-                "the smallest real min(dcEdge) a mesh may have for this dt "
-                "under the versioned outer-step Courant policy; admission "
-                "still re-measures from the mesh's own dcEdge at bind"
+                "stability is measured at bind from the mesh's own dcEdge "
+                "and the run's schedule (woof.hex.timestep_admission)"
             ),
         },
     }
@@ -1143,11 +1201,33 @@ def whole_milliseconds(dt_seconds: float) -> bool:
     return milliseconds == round(milliseconds)
 
 
-def largest_admissible_dt(
+def stability_limit_seconds(
+    minimum_dc_edge_m: float, *, max_characteristic_speed_m_s: float = 125.0,
+) -> float:
+    """The largest stable step on a mesh whose finest edge is this long.
+
+    :func:`woof.hex.timestep_admission.admit_timestep`'s computed maximum
+    (advective and acoustic, at the default split-explicit schedule), the
+    check every bind applies.  It replaced the retired 0.90 x 125 m/s outer
+    Courant policy (2026-10-10) in the fork's sub-anchor search.
+    """
+
+    import numpy as np
+
+    from .timestep_admission import CourantPolicy, admit_timestep, edge_length_authority
+
+    authority = edge_length_authority(
+        np.array([float(minimum_dc_edge_m)], dtype=np.float64),
+        source="min(dcEdge)",
+    )
+    policy = CourantPolicy(max_characteristic_speed_m_s=float(max_characteristic_speed_m_s))
+    return float(admit_timestep(1.0e-6, authority, policy=policy).maximum_admitted_dt_seconds)
+
+
+def largest_courant_divisor_dt(
     minimum_dc_edge_m: float,
     *,
     max_characteristic_speed_m_s: float = 125.0,
-    safety_factor: float = 0.90,
     radiation_seconds: float = RADIATION_CADENCE_SECONDS,
 ) -> dict[str, Any]:
     """The largest timestep a mesh of this fineness can actually declare.
@@ -1155,8 +1235,8 @@ def largest_admissible_dt(
     Three constraints bind, and quoting only the first is how a row reaches
     a card and dies at host preparation:
 
-    * the versioned outer-step Courant policy, ``safety * min(dcEdge) /
-      speed``;
+    * the stability limit the bind applies (:func:`stability_limit_seconds`,
+      advective and acoustic, from ``min(dcEdge)``);
     * exact divisibility of the physics radiation cadence, which the sealed
       constructor enforces AFTER the card is reserved; and
     * clock closure -- the candidate's multiples must be exact in binary64,
@@ -1165,9 +1245,7 @@ def largest_admissible_dt(
       tooling (:data:`DT_QUANTUM_SECONDS`), which rules out ``600/1024``:
       0.5 s near 100 m and 0.25 s near 50 m.
 
-    Returns all three, plus the largest value satisfying them.  Reproduces
-    the registered graded rows: 13,311.8 m -> 95.84 s Courant -> 75 s
-    declared; 14,398.0 m -> 103.67 s -> 100 s declared.
+    Returns all three, plus the largest value satisfying them.
     """
 
     minimum = float(minimum_dc_edge_m)
@@ -1175,7 +1253,8 @@ def largest_admissible_dt(
         raise DtAdmissionError(
             f"min(dcEdge)={minimum_dc_edge_m!r} m must be finite and positive"
         )
-    courant_limit = safety_factor * minimum / max_characteristic_speed_m_s
+    courant_limit = stability_limit_seconds(
+        minimum, max_characteristic_speed_m_s=max_characteristic_speed_m_s)
     cadence = float(radiation_seconds)
     # The largest exact divisor of the cadence at or below the Courant limit.
     steps = math.ceil(cadence / courant_limit)
@@ -1218,199 +1297,127 @@ def largest_admissible_dt(
     }
 
 
-def unanchored_refusal(
-    dt_seconds: float,
-    cumulus_scheme: str | None = "gf",
-    surface_pbl_seconds: float | None = None,
-) -> str:
-    """The named refusal for a CONFIGURATION holding no anchor.
-
-    Per the gate law this names the concrete breakage, and it names it with
-    the measurement that produced it rather than with an adjective.  It also
-    names the cumulus selection and the surface/PBL cadence, because "20 s
-    is anchored", "20 s with convection off is anchored" and "20 s with the
-    surface/PBL cadence held at 120 s is anchored" are different statements
-    and a caller told only the first will read the wrong row.
-    """
-
-    configuration = (
-        "convection off" if cumulus_scheme is None else str(cumulus_scheme).upper()
-    )
-    if surface_pbl_key(dt_seconds, surface_pbl_seconds) != "dt":
-        configuration += (
-            f" and the surface/PBL cadence held at "
-            f"{float(surface_pbl_seconds):g} s"
-        )
-    return (
-        f"config_dt={float(dt_seconds):g} s with {configuration} holds no "
-        f"timestep anchor: the "
-        f"frozen v8.4.1 column-physics lane has a schedule receipt and an "
-        f"integration anchor at {admitted_summary()} and at nothing else, so a "
-        f"run at this timestep would integrate an outer step, a physics call "
-        f"cadence and a clock nobody has checked, and would produce a receipt "
-        f"with nothing to check it against.  MEASURED (2026-08-26, "
-        f"RTX 5090): a mesh row declaring 100 s -- Courant-admitted against "
-        f"its own 103.67 s limit, dividing the 600 s radiation cadence -- "
-        f"bound clean, allocated 18,820 MiB, spent 285 s and died inside "
-        f"composite step 0 with 'post-RK candidate time must equal the exact "
-        f"step endpoint: 120.0 != 100.0'.  REMEDY: mint this timestep's "
-        f"anchor with tools/mint_dt_anchor.py (schedule receipt is host-only; "
-        f"the integration anchor needs two byte-identical forecasts on a "
-        f"card), then register one row in "
-        f"woof.hex.dt_admission.ADMITTED_TIMESTEPS.  Registering that row "
-        f"moves the frozen lane off its proven timestep, which is a ruling "
-        f"and not an agent's edit"
-        + (
-            ""
-            if surface_pbl_key(dt_seconds, surface_pbl_seconds) == "dt"
-            else (
-                f".  A held surface/PBL cadence derives its row from the "
-                f"WELDED anchor at the same timestep and cumulus selection "
-                f"(woof.hex.dt_admission.derived_held_cadence_anchor), and "
-                f"this timestep holds none to derive from: anchoring the "
-                f"welded configuration admits `--pbl-cadence "
-                f"{float(surface_pbl_seconds):g}` with it.  The default is "
-                f"the weld (bldt = dt), which is the proven configuration.  "
-                f"See woof.hex.pbl_cadence"
-            )
-        )
-    )
-
-
-def cadence_mismatch_refusal(
-    anchor: DtAnchor,
-    *,
-    radiation_seconds: float,
-    surface_pbl_seconds: float,
-    cumulus_seconds: float | None,
-) -> str:
-    """The named refusal when an anchored dt is run at other cadences."""
-
-    return (
-        f"config_dt={anchor.dt_seconds:g} s is anchored, but at physics "
-        f"cadences this run does not use: the anchor was earned at "
-        f"radiation={anchor.radiation_seconds:g} s, "
-        f"surface/PBL={anchor.surface_pbl_seconds:g} s, "
-        f"cumulus={anchor.cumulus_seconds!r} s and this configuration "
-        f"declares radiation={float(radiation_seconds):g} s, "
-        f"surface/PBL={float(surface_pbl_seconds):g} s, "
-        f"cumulus={cumulus_seconds!r} s.  How often a scheme is CALLED is "
-        f"part of the configuration the anchor's forecasts measured; a "
-        f"different cadence is a different configuration and earns its own "
-        f"anchor"
-        + (
-            ""
-            if float(surface_pbl_seconds) == float(anchor.surface_pbl_seconds)
-            else (
-                f".  REMEDY: the surface/PBL cadence is selectable -- "
-                f"`--pbl-cadence {float(surface_pbl_seconds):g}` admits it "
-                f"through a row derived from this timestep's welded anchor "
-                f"(woof.hex.dt_admission.derived_held_cadence_anchor).  See "
-                f"woof.hex.pbl_cadence"
-            )
-        )
-    )
-
-
-def require_dt_anchor(
+def anchor_record(
     dt_seconds: float,
     *,
     radiation_seconds: float,
-    surface_pbl_seconds: float,
+    surface_pbl_seconds: float | None,
     cumulus_seconds: float | None,
     cumulus_scheme: str | None = "gf",
-    experimental: bool = False,
-    minimum_dc_edge_m: float | None = None,
-) -> DtAnchor:
-    """Admit one configuration at one timestep, or refuse by name.
+) -> dict[str, Any]:
+    """Whether this configuration matches a registered anchor.  Never refuses.
 
-    The surface/PBL cadence takes part in the LOOKUP, not only in the
-    comparison below.  Before 2026-08-26 it was welded to dt everywhere, so
-    a mismatch could only ever be an error; now that it is holdable, a held
-    cadence is a different configuration that earns its own row rather than
-    a welded row it fails against.  See :mod:`woof.hex.pbl_cadence`.
-
-    ``experimental=True`` (or a live :func:`experimental_lane` scoped to
-    this exact timestep, which is how the frozen config's ``validate`` --
-    a method with no arguments -- reaches the same decision) opens the
-    EXPERIMENTAL lane for a timestep below the smallest anchor: the record
-    returned is :func:`experimental_dt_anchor`'s, stamped
-    ``experimental-unanchored``, never a table row.  An anchored timestep
-    is answered from the table either way, and an unanchored timestep at or
-    above the smallest anchor is refused exactly as without the flag.
+    This replaced ``require_dt_anchor`` on 2026-10-10.  The answer rides in
+    the run's receipt (``dt_admission.anchor``): ``matched`` is True only
+    when a registered row holds this exact timestep, cumulus selection and
+    surface/PBL cadence AND was earned at this run's radiation, surface/PBL
+    and cumulus cadences; the row itself is recorded either way, so a reader
+    sees what the nearest evidence measured.
     """
 
-    anchor = admitted_timestep(dt_seconds, cumulus_scheme, surface_pbl_seconds)
-    lane = _EXPERIMENTAL_LANE
-    lane_requested = experimental or (
-        lane is not None and lane.dt_seconds == float(dt_seconds)
-    )
-    if anchor is None and lane_requested and below_smallest_anchor(dt_seconds):
-        # The opt-in experimental lane: below the smallest anchor only, and
-        # only on the host-derivable checks (Courant, cadence divisibility,
-        # RK schedule shape, binary64 clock closure).  Anywhere else the
-        # ordinary refusals below stand unchanged.
-        return experimental_dt_anchor(
-            dt_seconds,
-            cumulus_scheme=cumulus_scheme,
-            surface_pbl_seconds=surface_pbl_seconds,
-            radiation_seconds=radiation_seconds,
-            cumulus_seconds=cumulus_seconds,
-            minimum_dc_edge_m=(
-                minimum_dc_edge_m
-                if minimum_dc_edge_m is not None
-                else (None if lane is None else lane.minimum_dc_edge_m)
-            ),
-        )
+    configuration = {
+        "dt_seconds": float(dt_seconds),
+        "radiation_seconds": float(radiation_seconds),
+        "surface_pbl_seconds": (
+            None if surface_pbl_seconds is None else float(surface_pbl_seconds)
+        ),
+        "cumulus_seconds": None if cumulus_seconds is None else float(cumulus_seconds),
+        "cumulus_scheme": cumulus_scheme,
+    }
+    note = None
+    try:
+        anchor = admitted_timestep(dt_seconds, cumulus_scheme, surface_pbl_seconds)
+    except DtAdmissionError as error:
+        anchor, note = None, str(error)
     if anchor is None:
-        # The exact configuration holds no row.  Before saying so, look for
-        # the row this caller MEANT: same timestep, same cumulus selection,
-        # a different surface/PBL cadence.  When one exists the useful
-        # sentence is the near-miss -- "the anchor was earned at these
-        # cadences and you declared those" -- not "nothing is anchored
-        # here", which reads as though the timestep itself were unknown.
-        # A held cadence that has EARNED its own row hits the exact lookup
-        # above and never reaches this branch, so widening the key did not
-        # cost the diagnostic.
-        near_miss = admitted_timestep(dt_seconds, cumulus_scheme)
-        if near_miss is not None:
+        try:
+            anchor = admitted_timestep(dt_seconds, cumulus_scheme)
+        except DtAdmissionError:
+            anchor = None
+        nearest = None if anchor is None else anchor.as_dict()
+        return {
+            "matched": False,
+            "configuration": configuration,
+            "nearest_row": nearest,
+            "registered": admitted_summary(),
+            "note": note or (
+                "no registered anchor holds this configuration; the run is "
+                "not refused for it (retired 2026-10-10) and this field is "
+                "the evidence record"
+            ),
+        }
+    bldt = float(dt_seconds) if surface_pbl_seconds is None else float(surface_pbl_seconds)
+    cadences_match = (
+        float(radiation_seconds) == float(anchor.radiation_seconds)
+        and bldt == float(anchor.surface_pbl_seconds)
+        and (None if cumulus_seconds is None else float(cumulus_seconds))
+        == (None if anchor.cumulus_seconds is None else float(anchor.cumulus_seconds))
+    )
+    return {
+        "matched": bool(cadences_match),
+        "cadences_match": bool(cadences_match),
+        "configuration": configuration,
+        "row": anchor.as_dict(),
+        "registered": admitted_summary(),
+    }
+
+
+def require_cadences(
+    dt_seconds: float,
+    *,
+    radiation_seconds: float,
+    surface_pbl_seconds: float | None,
+    cumulus_seconds: float | None,
+    cumulus_scheme: str | None = "gf",
+    clock_steps: int | None = None,
+) -> dict[str, Any]:
+    """Refuse only what cannot be scheduled or clocked.  Returns the steps.
+
+    THE BREAKAGES: a radiation, surface/PBL or cumulus cadence that is not a
+    whole number of model steps has no step to run on, and the sealed v8.4.1
+    constructor refuses it at host preparation after the card is reserved
+    (``cadence_steps`` mirrors its test); Grell-Freitas and New Tiedtke have
+    no hold, so their cadence must be the step itself; and a timestep whose
+    multiples are not exact in binary64 stops the run mid-forecast on the
+    driver's clock check (``state.time_seconds != step * dt``).
+    """
+
+    dt = float(dt_seconds)
+    if not math.isfinite(dt) or dt <= 0.0:
+        raise DtAdmissionError(f"dt={dt_seconds!r} must be finite and positive")
+    stepra = cadence_steps("radiation_seconds", radiation_seconds, dt)
+    stepbl = cadence_steps(
+        "surface_pbl_seconds", dt if surface_pbl_seconds is None else surface_pbl_seconds, dt
+    )
+    stepcu = 0
+    if cumulus_scheme is not None:
+        stepcu = cadence_steps(
+            "cumulus_seconds", dt if cumulus_seconds is None else cumulus_seconds, dt
+        )
+        if cumulus_scheme in ("gf", "ntiedtke") and stepcu != 1:
             raise DtAdmissionError(
-                cadence_mismatch_refusal(
-                    near_miss,
-                    radiation_seconds=radiation_seconds,
-                    surface_pbl_seconds=surface_pbl_seconds,
-                    cumulus_seconds=cumulus_seconds,
-                )
+                f"cumulus_scheme={cumulus_scheme!r} requires cumulus_seconds == dt "
+                f"({dt:g} s): WRF pins cudt=0 for Grell-Freitas and New Tiedtke "
+                f"(no NCA hold, RAINCV is a per-call rate), got {cumulus_seconds!r} s"
             )
-        raise DtAdmissionError(
-            unanchored_refusal(dt_seconds, cumulus_scheme, surface_pbl_seconds)
-            + (
-                ".  " + experimental_lane_not_applicable(dt_seconds)
-                if lane_requested
-                else ""
+    steps = int(clock_steps) if clock_steps is not None else min(
+        100_000, max(1, int(round(86_400.0 / dt)))
+    )
+    accumulated = 0.0
+    for step in range(1, steps + 1):
+        accumulated += dt
+        if accumulated != step * dt:
+            raise DtAdmissionError(
+                f"clock closure fails at dt={dt:g} s: after {step} steps the "
+                f"accumulated model clock is {accumulated!r} but the exact "
+                f"endpoint is {step * dt!r}.  The driver advances "
+                f"state.time_seconds by adding config_dt and the step gate "
+                f"compares it with step * dt, so this run would stop at step "
+                f"{step}.  Choose a timestep whose multiples are exact in "
+                f"binary64 (a whole number of seconds always is)"
             )
-        )
-    if (
-        float(radiation_seconds) != float(anchor.radiation_seconds)
-        or float(surface_pbl_seconds) != float(anchor.surface_pbl_seconds)
-        or (
-            None if cumulus_seconds is None else float(cumulus_seconds)
-        )
-        != (
-            None
-            if anchor.cumulus_seconds is None
-            else float(anchor.cumulus_seconds)
-        )
-    ):
-        raise DtAdmissionError(
-            cadence_mismatch_refusal(
-                anchor,
-                radiation_seconds=radiation_seconds,
-                surface_pbl_seconds=surface_pbl_seconds,
-                cumulus_seconds=cumulus_seconds,
-            )
-        )
-    return anchor
+    return {"stepra": stepra, "stepbl": stepbl, "stepcu": stepcu,
+            "clock_steps_checked": steps}
 
 
 #: The exact string a caller must supply to run at an UNANCHORED timestep.
@@ -1469,35 +1476,23 @@ class _CandidateTimestep:
         cumulus_seconds: float | None = None,
         cumulus_scheme: str | None = "gf",
     ) -> None:
-        if authorization != CANDIDATE_MINT_AUTHORIZATION:
-            raise DtAdmissionError(
-                "running at an unanchored timestep requires the candidate-mint "
-                "authorization verbatim (<CANDIDATE_MINT_AUTHORIZATION>); the "
-                f"string given does not match it ({_authorization_shape(authorization)}).  "
-                "This path exists ONLY to mint the "
-                "integration evidence a ruling would act on, and every receipt "
-                "it produces says so"
-            )
+        # The authorization sentence no longer gates anything (retired
+        # 2026-10-10): no timestep is refused for lacking an anchor, so the
+        # mint scope only labels the run's receipt as a candidate.
+        self.authorization = authorization
         if not card:
             raise DtAdmissionError(
                 "a candidate mint must name the card it runs on: the anchor "
                 "it feeds records hardware, and evidence with no hardware on "
                 "it is not evidence"
             )
-        # The EXACT lookup: a held cadence admitted through a derived row
-        # has earned nothing yet, and a mint is how it earns its own row.
-        if (
-            registered_anchor(dt_seconds, cumulus_scheme, surface_pbl_seconds)
-            is not None
-        ):
-            held = surface_pbl_key(dt_seconds, surface_pbl_seconds)
-            raise DtAdmissionError(
-                f"dt={float(dt_seconds):g} s with "
-                f"{'convection off' if cumulus_scheme is None else str(cumulus_scheme).upper()}"
-                f"{'' if held == 'dt' else f' and the surface/PBL cadence held at {held} s'}"
-                f" already holds an anchor; there is "
-                f"nothing for a candidate mint to earn"
-            )
+        # A configuration that already holds a registered row keeps it: the
+        # candidate row is not inserted over it (see __enter__).  That used
+        # to be a refusal ("nothing for a candidate mint to earn"), retired
+        # 2026-10-10 with the rest of the anchor gate.
+        self.registered = registered_anchor(
+            dt_seconds, cumulus_scheme, surface_pbl_seconds
+        )
         self.cumulus_scheme = cumulus_scheme
         self.surface_pbl_request = surface_pbl_seconds
         # Refuse before a card is touched if the host-derivable half fails.
@@ -1540,6 +1535,8 @@ class _CandidateTimestep:
 
     def __enter__(self) -> DtAnchor:
         global ADMITTED_TIMESTEPS
+        if self.registered is not None:
+            return self.registered
         self._restore = ADMITTED_TIMESTEPS
         ADMITTED_TIMESTEPS = MappingProxyType(
             {
@@ -1761,7 +1758,7 @@ def experimental_dt_anchor(
     * :func:`schedule_receipt` mints clean -- surface/PBL and cumulus
       cadence integrality, the Grell-Freitas weld, the RK schedule shape and
       binary64 clock closure over a 24 h run, which is exactly the clock
-      check :func:`largest_admissible_dt` applies, so every value that
+      check :func:`largest_courant_divisor_dt` applies, so every value that
       function returns for a mesh is admitted here for the same mesh.
 
     The answer is memoised per argument set and per table object: the frozen
@@ -1780,7 +1777,7 @@ def experimental_dt_anchor(
             f"number of milliseconds; the regional class key and the mint "
             f"tooling quantise timesteps to 1 ms, so this timestep would share "
             f"a class with its neighbours and could never be minted.  "
-            f"largest_admissible_dt names the whole-millisecond timesteps a "
+            f"largest_courant_divisor_dt names the whole-millisecond timesteps a "
             f"mesh admits (0.5 s near 100 m, 0.25 s near 50 m)"
         )
     return _experimental_dt_anchor_cached(
@@ -1831,7 +1828,7 @@ def _experimental_dt_anchor_cached(
     policy.validate()
     courant: dict[str, Any] = {
         "policy_speed_m_s": policy.max_characteristic_speed_m_s,
-        "policy_safety_factor": policy.safety_factor,
+        "policy": policy.schema,
     }
     if minimum_dc_edge_m is None:
         if not courant_deferred_to:
@@ -2046,14 +2043,12 @@ __all__ = [
     "admitted_summary",
     "admitted_timestep",
     "anchor_label",
-    "cadence_mismatch_refusal",
+    "anchor_record",
     "cadence_steps",
     "candidate_mint",
     "cumulus_key",
     "dt_key",
-    "largest_admissible_dt",
-    "require_dt_anchor",
+    "require_cadences",
     "require_step_clock_coherence",
     "schedule_receipt",
-    "unanchored_refusal",
 ]

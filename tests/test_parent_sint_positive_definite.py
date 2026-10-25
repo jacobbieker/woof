@@ -56,10 +56,7 @@ def test_every_clamped_field_is_bounded_at_zero_by_the_health_gate():
     """
     for name in POSITIVE_DEFINITE_MOMENTS:
         rule = rule_for_field(name)
-        # The smoke tracer and its emission are bounded at zero under their
-        # own status class (woof/core/health.py), not as moments.
-        assert rule.status_class == (
-            "tracer" if name.startswith("smoke") else "moment")
+        assert rule.status_class == "moment"
         assert rule.lower == 0.0
 
 

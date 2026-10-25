@@ -349,7 +349,8 @@ def test_a_sub_anchor_dt_needs_the_experimental_lane(tmp_path):
 
 def test_the_courant_and_clock_checks_stay_enforced():
     with pytest.raises(adapt.AdaptRefusal, match="Courant"):
-        adapt.timestep_preflight(4.0, 0.5, experimental=True, hours=6.0,
+        # 500 m: the bind's stability limit is about 4.64 s.
+        adapt.timestep_preflight(4.8, 0.5, experimental=True, hours=6.0,
                                  history_every_minutes=30)
     with pytest.raises(adapt.AdaptRefusal, match="whole number"):
         adapt.timestep_preflight(1.7, 0.5, experimental=True, hours=6.0,

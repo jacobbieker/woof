@@ -40,10 +40,11 @@ def test_wsm6_workspace_follows_nz_up_to_256_levels():
     assert not hasattr(wsm6, "_kernel_capacity")
     for nz in (2, 49, 64, 65, 80, 81, 128, 256):
         assert wsm6_workspace_extent(nz) == nz + 1
-    # whole lane-interleaved blocks of WSM6WS_SLOTS slots
-    assert WSM6WS_SLOTS == 30 and WSM6_BLOCK == 32
-    assert wsm6_workspace_floats(49, 1) == 30 * 50 * 32
-    assert wsm6_workspace_floats(49, 33) == 2 * 30 * 50 * 32
+    # whole lane-interleaved blocks of WSM6WS_SLOTS slots, which hold the
+    # 17 nz + 8 (nz + 1) rows per column the kernel indexes
+    assert WSM6WS_SLOTS == 25 and WSM6_BLOCK == 32
+    assert wsm6_workspace_floats(49, 1) == 25 * 50 * 32
+    assert wsm6_workspace_floats(49, 33) == 2 * 25 * 50 * 32
     for nz in (1, 257):
         with pytest.raises(ValueError, match="2 <= nz <= 256"):
             wsm6_workspace_extent(nz)
@@ -77,7 +78,7 @@ def test_wrf_wsm6_coefficients_and_restart_identity():
     assert hail.pvtg == pytest.approx(846.3231230270577, rel=2.0e-14)
     assert graupel.roqimax == pytest.approx(8.125e-5, rel=2.0e-15)
     assert MICROPHYSICS_ALGORITHM_IDENTITIES[6] == (
-        "wsm6-single-moment-six-class-wrf-v4.6.1-v1")
+        "wsm6-single-moment-six-class-wrf-v4.6.1-v2-real-clamp-product")
 
 
 def test_wsm6_state_preflight_nesting_and_diagnostics_inventory():

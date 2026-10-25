@@ -361,6 +361,11 @@ def restart_scalars(header: Mapping[str, Any]) -> dict:
                                   driver["call_counts"].items()}
         scalars["ysu_nan_guard_fires"] = int(driver["ysu_nan_guard_fires"])
         scalars["microphysics_updates"] = int(driver["microphysics_updates"])
+        if "fire" in driver:
+            from tilestream.sfire import GRID_CLOCKS
+            scalars["fire_clocks"] = {key: driver["fire"]["grid"][key] for key in GRID_CLOCKS}
+            scalars["fire_header"] = {key: driver[key] for key in
+                                     ("fire", "fire_setup_identity", "fire_setup_fingerprint")}
         # The carrier contract's records travel with the clock for the same
         # reason the counters do: the freshness law
         # (woof/core/radiation_carriers.py) reads produced-at stamps
@@ -413,6 +418,8 @@ def driver_restart_header(scalars: Mapping[str, Any]) -> dict | None:
         if "surface_radiation_policy" in scalars:
             driver_header["surface_radiation_policy"] = str(
                 scalars["surface_radiation_policy"])
+    if driver_header is not None and "fire_header" in scalars:
+        driver_header.update(scalars["fire_header"])
     return driver_header
 
 
@@ -564,6 +571,7 @@ def read_store_restart(path, store, setup: DomainSetup, cfg, *,
             f"restart file {path} header is missing {missing_header}")
     version = header.get("format_version")
     _restart.require_readable_format_version(version, path)
+    _restart._require_current_algorithm_identities(header, cfg, path)
     _restart._require_config_match(header["config"], cfg, path)
 
     live_lbc_clock = setup.lbc_clock_identity(cfg)
@@ -617,6 +625,12 @@ def read_store_restart(path, store, setup: DomainSetup, cfg, *,
     # Compared against the CHECKPOINTED subset for the same reason the
     # writer emits only that subset; the rest is zeroed below.
     arrays = _physinv.checkpointed_carriers(whole_store)
+    # The checkpoint-only driver carriers are tolerant both ways, as the
+    # resident reader is (physics_inventory.is_absent_tolerant).
+    stored = {key: value for key, value in stored.items()
+              if key in arrays or not _physinv.is_absent_tolerant(key)}
+    arrays = {key: value for key, value in arrays.items()
+              if key in stored or not _physinv.is_absent_tolerant(key)}
     if set(stored) != set(arrays):
         missing = sorted(set(arrays) - set(stored))
         extra = sorted(set(stored) - set(arrays))

@@ -6,11 +6,19 @@ scheme-native radiation effective radii.  WRF v4.6.1
 ``phys/physics_mmm/mp_wsm6.F90`` and ``mp_wsm6_effectRad.F90`` are the
 primary numerical authorities.
 
-The local process equations and WRF's forward semi-Lagrangian monotone-PLM
-sedimentation are ported and checked against direct calls into the v4.6.1
-Fortran.  This remains an executable integration port, not a whole-model or
-bitwise WRF-parity claim; device and coupled-trajectory evidence are separate
-release gates.
+The kernel is a word-for-word port of WRF's own call chain (the
+``module_mp_wsm6.F`` wrapper, ``mp_wsm6_run`` with its semi-Lagrangian
+sedimentation, and ``mp_wsm6_effectRad_run``), graded bit for bit against
+those routines compiled by gfortran over 65 columns and six step/hail
+configurations (tools/wsm6_wrf461_column_oracle,
+tests/test_wsm6_wrf461_column_exact.py).  The column scheme is the claim;
+whole-model trajectories are separate evidence.
+
+The module also carries WSM6R, WRF's revised WSM6 (``mp_physics=106``,
+``phys/module_mp_wsm6r.F``), as the family's second row (``WSM6_FAMILY``):
+same six species, its own column kernel ``kernels/wsm6r.cu`` graded word for
+word against WRF v4.6.1 by tests/test_wsm6r_wrf461_column_exact.py, and no
+adapter module of its own.
 """
 
 from __future__ import annotations
@@ -19,59 +27,133 @@ import numpy as np
 import cupy as cp
 
 from woof.config import RunConfig
-from woof.core import constants as c
-from woof.core.kernels import get_kernel
+from woof.core.kernels import get_kernel, get_kernel_int_defines
 from woof.core.state import DTYPE, DomainState
+from woof.core.wsm_family import (check_surface, check_volume, finish_fields,
+                                    precipitation_surface, prepare_fields)
 
+from woof.core.device_cache import cuda_cache
 from woof.core.wsm6_constants import (WSM6_BLOCK, WSM6_MAX_LEVELS,
                                        WSM6_TILE_BLOCKS_PER_SM,
                                        WSM6_VERTICAL_LEVEL_BOUNDS,
+                                       WSM6R_RADII_F32,
+                                       WSM6R_VERTICAL_LEVEL_BOUNDS,
+                                       wrf_init_words, wrf_radar_words,
                                        wsm6_workspace_extent,
-                                       wsm6_workspace_floats)
+                                       wsm6_workspace_floats,
+                                       wsm6_workspace_rows,
+                                       wsm6r_init_words)
 
 _COLUMN_TPB = WSM6_BLOCK
+# The level ceiling and the workspace geometry live in wsm6_constants (a
+# CuPy-free leaf) so the memory preflight and the hex device admission can
+# price a WSM6 configuration on a host with no device.  The 64/80 KMAX tier
+# ladder is retired (2026-10-12): the column arrays live in a workspace sized
+# to the runtime nz, so WSM6_KMAX is a 256-level refusal ceiling only and one
+# unit is compiled for every level count.
 _KMAX = WSM6_MAX_LEVELS
 VERTICAL_LEVEL_BOUNDS = WSM6_VERTICAL_LEVEL_BOUNDS
+_INIT_WORDS: dict = {}
 
 
-def wsm6_tile_columns(fn, ncol: int) -> int:
-    """Columns to keep in flight: enough to fill the card, and no more.
+def _init_words_on_device(hail_opt: int):
+    """``mp_wsm6_init``'s float32 words for ``hail_opt``, uploaded once per device."""
+    key = ("init", cp.cuda.runtime.getDevice(), int(hail_opt))
+    words = _INIT_WORDS.get(key)
+    if words is None:
+        words = cp.asarray(wrf_init_words(hail_opt))
+        _INIT_WORDS[key] = words
+    return words
 
-    The workspace is charged per column IN FLIGHT where the local-memory
-    backing store it replaced was charged per thread the card could ever
-    hold; over-sizing the tile hands that ratio back.  The device's
-    occupancy query only ever lowers the measured blocks-per-SM constant.
+
+def wsm6_radar_words_on_device(hail_opt: int, *, initialization="column_oracle"):
+    """mp_radar's radar_init words for ``refl10cm_wsm6``: (float32, float64).
+
+    ``initialization`` selects the column oracle's words or the stock
+    scalar build's (wsm6_constants.wrf_radar_words).
+    """
+    key = ("radar", cp.cuda.runtime.getDevice(), int(hail_opt), initialization)
+    words = _INIT_WORDS.get(key)
+    if words is None:
+        f32, f64 = wrf_radar_words(hail_opt, initialization=initialization)
+        words = (cp.asarray(f32), cp.asarray(f64))
+        _INIT_WORDS[key] = words
+    return words
+
+
+def wsm6_kernel(func: str, nz: int, conservative_surface: bool = False):
+    """``func`` from ``kernels/wsm6.cu`` for an ``nz``-level column.
+
+    One unit serves every admitted level count (2 <= nz <= 256): the column
+    arrays live in the launcher's workspace, so ``WSM6_KMAX`` is a refusal
+    ceiling and nothing is compiled per level count.  ``nz`` outside the
+    bounds is refused here, by name, before anything compiles.
+
+    ``conservative_surface`` is correct-mode finding WB5
+    (``RunConfig.wsm6_conservative_surface``): its own unit compiled with
+    ``WSM6_PLM_SURFACE``.  False compiles exactly the unit this function
+    compiled before the key existed.
+    """
+    wsm6_workspace_extent(nz)               # the 2 <= nz <= 256 refusal
+    if conservative_surface:
+        return get_kernel_int_defines(
+            "wsm6", func, (("WSM6_PLM_SURFACE", 1),))
+    return get_kernel("wsm6", func)
+
+
+def wsm6_tile_columns(kernel, ncol: int) -> int:
+    """Columns in flight per launch: the card's resident capacity for
+    ``kernel`` (occupancy, not the theoretical thread limit), at most
+    ``WSM6_TILE_BLOCKS_PER_SM`` blocks per SM, floored at one block and
+    capped at ``ncol``.
+
+    The workspace is charged per column in flight; the local frame it
+    replaced was charged per thread the card could ever hold, so a tile
+    wider than the resident set would hand that cost back.  The per-SM cap
+    is what lets the memory preflight and the hex device admission price
+    the workspace from constants alone; the occupancy query only ever
+    lowers it.  Tile width is memory shape only: every column runs the
+    same thread program.
     """
     try:
-        sms = int(cp.cuda.Device().attributes["MultiProcessorCount"])
+        dev = cp.cuda.Device()
+        sms = int(dev.attributes["MultiProcessorCount"])
     except Exception:                              # noqa: BLE001
         # No device to size against (a host-side test drives the launcher
         # with a stand-in kernel): one tile, the whole domain.
-        return int(max(WSM6_BLOCK, int(ncol)))
-    per_sm = WSM6_TILE_BLOCKS_PER_SM
+        return int(max(_COLUMN_TPB, int(ncol)))
+    per_sm = min(WSM6_TILE_BLOCKS_PER_SM,
+                 int(dev.attributes["MaxThreadsPerMultiProcessor"]) // _COLUMN_TPB)
     try:
         from cupy_backends.cuda.api import driver
 
         resident = driver.occupancyMaxActiveBlocksPerMultiprocessor(
-            fn.kernel.ptr, WSM6_BLOCK, 0)
+            getattr(kernel, "kernel", kernel).ptr, _COLUMN_TPB, 0)
         per_sm = min(per_sm, int(resident))
     except Exception:                              # noqa: BLE001
-        pass                                       # keep the measured value
-    per_sm = max(1, int(per_sm))
-    # Floored at one block: the tile is the STEP of the launcher's loop.
-    return int(max(WSM6_BLOCK, min(int(ncol), sms * per_sm * WSM6_BLOCK)))
+        pass                                       # keep the thread limit
+    per_sm = max(1, per_sm)
+    return int(max(_COLUMN_TPB, min(int(ncol), sms * per_sm * _COLUMN_TPB)))
+
+
+def _tile_blocks(tile: int) -> int:
+    return (int(tile) + _COLUMN_TPB - 1) // _COLUMN_TPB
 
 
 def launch_wsm6(theta, qv, qc, qr, qi, qs, qg, rho, pii, pressure, dz,
                 rainnc, rainncv, snownc, snowncv,
                 graupelnc, graupelncv, sr, dt: float, *,
-                effc, effi, effs, hail_opt: int = 0) -> None:
-    """Launch one WSM6 call over contiguous FP32 ``(nz,ny,nx)`` fields."""
+                effc, effi, effs, hail_opt: int = 0,
+                conservative_surface: bool = False) -> None:
+    """Launch one WSM6 call over contiguous FP32 ``(nz,ny,nx)`` fields.
+
+    ``conservative_surface``: correct-mode finding WB5 (see wsm6_kernel).
+    """
     shape = theta.shape
     if len(shape) != 3:
         raise ValueError(f"WSM6 fields must be 3-D, got {shape}")
     nz, ny, nx = shape
-    wskp = wsm6_workspace_extent(nz)
+    wsm6_workspace_extent(nz)               # the 2 <= nz <= 256 refusal
     if not np.isfinite(dt) or dt <= 0.0:
         raise ValueError(f"dt must be finite and positive, got {dt}")
     if int(hail_opt) not in (0, 1):
@@ -82,98 +164,219 @@ def launch_wsm6(theta, qv, qc, qr, qi, qs, qg, rho, pii, pressure, dz,
         "pressure": pressure, "dz": dz,
         "effc": effc, "effi": effi, "effs": effs,
     }
-    for name, value in volume.items():
-        if value.shape != shape:
-            raise ValueError(f"{name} must have shape {shape}, got {value.shape}")
-        if value.dtype != DTYPE:
-            raise TypeError(f"{name} must be float32, got {value.dtype}")
-        if not value.flags.c_contiguous:
-            raise ValueError(f"{name} must be C-contiguous")
-    surface_shape = (ny, nx)
-    for name, value in {
+    check_volume(volume, shape)
+    check_surface({
             "rainnc": rainnc, "rainncv": rainncv,
             "snownc": snownc, "snowncv": snowncv,
             "graupelnc": graupelnc, "graupelncv": graupelncv,
-            "sr": sr}.items():
-        if value.shape != surface_shape or value.dtype != DTYPE:
-            raise ValueError(f"{name} must be float32 {surface_shape}, got "
-                             f"{value.dtype} {value.shape}")
-        if not value.flags.c_contiguous:
-            raise ValueError(f"{name} must be C-contiguous")
+            "sr": sr}, (ny, nx))
     ncol = ny * nx
-    kernel = get_kernel("wsm6", "wsm6_column")
-    # The column arrays live in a global workspace sized to the columns in
-    # flight and to this call's nz (kernels/wsm6.cu says why).  Columns go
-    # in tiles of `tile`, each launched with the SAME one-thread-one-column
-    # mapping, shifted by `col0` because the (nz, ny, nx) fields make a
-    # column tile a strided scatter rather than a slice.
+    if not isinstance(conservative_surface, bool):
+        raise TypeError("conservative_surface must be a bool, got "
+                        f"{conservative_surface!r}")
+    kernel = wsm6_kernel("wsm6_column", nz, conservative_surface)
+    # The column arrays live in a workspace for the columns in flight
+    # (kernels/wsm6.cu, COLUMN WORKSPACE): tiles of `tile` columns, each
+    # launched with the same one-thread-one-column mapping, the tile passed
+    # as a column OFFSET because a column tile of (nz, ny, nx) fields is
+    # not contiguous.  The workspace returns to the pool with the call.
     tile = wsm6_tile_columns(kernel, ncol)
+    if tile < ncol and tile % _COLUMN_TPB:
+        # The last block of a partial tile would run the next tile's first
+        # columns as well, so they would be stepped twice (measured: 2.4 %
+        # of surface words moved at a 1,000-column tile).
+        raise ValueError(f"WSM6 tile {tile} must be a multiple of "
+                         f"{_COLUMN_TPB} columns when it splits the mesh")
+    # wsm6_workspace_floats is the priced size (whole lane-interleaved
+    # blocks of WSM6WS_SLOTS x (nz + 1) floats), never below the
+    # _tile_blocks(tile) * 32 * wsm6_workspace_rows(nz) the kernel indexes.
     ws = cp.empty(wsm6_workspace_floats(nz, tile), dtype=DTYPE)
+    coef = _init_words_on_device(hail_opt)
     try:
-        for col0 in range(0, ncol, tile):
-            count = min(tile, ncol - col0)
-            blocks = (count + _COLUMN_TPB - 1) // _COLUMN_TPB
+        for lo in range(0, ncol, tile):
+            count = min(tile, ncol - lo)
             kernel(
-                (blocks,), (_COLUMN_TPB,),
+                (_tile_blocks(count),), (_COLUMN_TPB,),
                 (theta, qv, qc, qi, qr, qs, qg, rho, pressure, pii, dz,
                  rainnc, rainncv, snownc, snowncv, graupelnc, graupelncv, sr,
-                 effc, effi, effs, DTYPE(dt), np.int32(hail_opt),
+                 effc, effi, effs, coef, DTYPE(dt),
                  np.int32(nz), np.int32(ny), np.int32(nx),
-                 ws, np.int32(wskp), np.int32(col0)))
+                 ws, np.int32(lo)))
     finally:
         del ws
 
 
+@cuda_cache(maxsize=None, ready=True)
+def _wsm6r_coefficients():
+    """wsm6rinit's frozen float32 words on the current device."""
+    words = np.asarray(wsm6r_init_words(), dtype=np.uint32).view(np.float32)
+    return cp.asarray(words)
+
+
+def launch_wsm6r(theta, qv, qc, qr, qi, qs, qg, rho, pii, pressure, dz,
+                 rainnc, rainncv, dt: float, *, work) -> None:
+    """Launch one WSM6R (mp_physics=106) call over FP32 ``(nz,ny,nx)`` fields.
+
+    The argument list is what WRF's driver hands ``wsm6r``
+    (module_microphysics_driver.F:2362-2372): theta, the six moist
+    species, rho, pi_phy, p, dz8w, dt, RAINNC and RAINNCV -- WSM6R reports
+    no snow, graupel, SR or effective radius.  ``work`` is a
+    ``(3, nz, ny, nx)`` FP32 scratch for fallk's per-level fall speeds.
+    theta is updated in place (it holds the temperature during the call).
+    """
+    shape = theta.shape
+    if len(shape) != 3:
+        raise ValueError(f"WSM6R fields must be 3-D, got {shape}")
+    nz, ny, nx = shape
+    minimum, _ = WSM6R_VERTICAL_LEVEL_BOUNDS
+    if nz < minimum:
+        raise ValueError(f"WSM6R requires nz >= {minimum}, got {nz}")
+    if not np.isfinite(dt) or dt <= 0.0:
+        raise ValueError(f"dt must be finite and positive, got {dt}")
+    volume = {
+        "theta": theta, "qv": qv, "qc": qc, "qr": qr,
+        "qi": qi, "qs": qs, "qg": qg, "rho": rho, "pii": pii,
+        "pressure": pressure, "dz": dz,
+    }
+    check_volume(volume, shape)
+    if (work.shape != (3,) + shape or work.dtype != DTYPE
+            or not work.flags.c_contiguous):
+        raise ValueError(f"work must be C-contiguous float32 {(3,) + shape}, "
+                         f"got {work.dtype} {work.shape}")
+    check_surface({"rainnc": rainnc, "rainncv": rainncv}, (ny, nx))
+    ncol = ny * nx
+    blocks = (ncol + _COLUMN_TPB - 1) // _COLUMN_TPB
+    get_kernel("wsm6r", "wsm6r_column")(
+        (blocks,), (_COLUMN_TPB,),
+        (theta, qv, qc, qi, qr, qs, qg, rho, pressure, pii, dz,
+         rainnc, rainncv, work, _wsm6r_coefficients(), DTYPE(dt),
+         np.int32(nz), np.int32(ny), np.int32(nx)))
+
+
+def launch_wsm6r_effective_radii(theta, pii, qc, qi, qs, rho, effc, effi,
+                                 effs) -> None:
+    """WSM6's mp_wsm6_effectRad_run on a WSM6R state, radii in microns.
+
+    WRF's wsm6r computes no radius (has_reqc = 0, so WRF's RRTMG makes its
+    own, as woof's legacy RRTMG arm does).  RTE+RRTMGP reads scheme radii,
+    and WSM6R's size distributions are WSM6's, so woof evaluates WSM6's own
+    routine on the post-call state at t = th*pii (kernels/wsm6r.cu).
+    """
+    shape = theta.shape
+    nz, ny, nx = shape
+    for name, value in {"theta": theta, "pii": pii, "qc": qc, "qi": qi,
+                        "qs": qs, "rho": rho, "effc": effc, "effi": effi,
+                        "effs": effs}.items():
+        if (value.shape != shape or value.dtype != DTYPE
+                or not value.flags.c_contiguous):
+            raise ValueError(f"{name} must be C-contiguous float32 {shape}, "
+                             f"got {value.dtype} {value.shape}")
+    words = np.asarray([bits for _, bits in WSM6R_RADII_F32],
+                       dtype=np.uint32).view(np.float32)
+    ncol = ny * nx
+    blocks = (ncol + _COLUMN_TPB - 1) // _COLUMN_TPB
+    get_kernel("wsm6r", "wsm6r_effective_radii")(
+        (blocks,), (_COLUMN_TPB,),
+        (theta, pii, qc, qi, qs, rho, effc, effi, effs,
+         DTYPE(words[0]), DTYPE(words[1]),
+         np.int32(nz), np.int32(ny), np.int32(nx)))
+
+
+#: The WSM6 family by WRF selector: what each member's column kernel
+#: produces beyond the six masses and theta.  WSM6R (106) carries WSM6's
+#: species set, so it is this module's second row, not an adapter of its
+#: own; its WRF wrapper reports RAINNC/RAINNCV only.
+WSM6_FAMILY = {
+    6: {"label": "WSM6", "radii": True, "frozen_surface": True},
+    106: {"label": "WSM6R", "radii": True, "frozen_surface": False},
+}
+
+
 def apply(state: DomainState, cfg: RunConfig, dt: float, *,
           refl_10cm_due: bool = False):
-    """Prepare WRF fields, run WSM6, and finish retained MP heating."""
+    """Prepare WRF fields, run a WSM6-family scheme, finish MP heating."""
+    mp = int(cfg.mp_physics)
+    if mp not in WSM6_FAMILY:
+        raise ValueError(f"mp_physics={mp} is not a WSM6-family scheme "
+                         f"({sorted(WSM6_FAMILY)})")
+    if mp == 106:
+        return _apply_wsm6r(state, cfg, dt, refl_10cm_due=refl_10cm_due)
     nz, ny, nx = state.p.shape
     required = ("qi", "qs", "qg", "effc", "effi", "effs")
     missing = [name for name in required if getattr(state, name, None) is None]
     if missing:
         raise ValueError("mp_physics=6 state lacks WSM6 fields: "
                          + ", ".join(missing))
-    thb = state.thb if state.thb.ndim == 3 else state.thb[:, None, None]
-    phb = state.phb if state.phb.ndim == 3 else state.phb[:, None, None]
-    theta = state.scratch((nz, ny, nx), "wsm6_theta")
-    rho = state.scratch((nz, ny, nx), "wsm6_rho")
-    pii = state.scratch((nz, ny, nx), "wsm6_pii")
-    dz = state.scratch((nz, ny, nx), "wsm6_dz")
-    z8w = state.scratch((nz + 1, ny, nx), "wsm6_z8w")
-    theta[...] = thb + state.thp
-    rho[...] = 1.0 / state.alt
-    pii[...] = cp.power(state.p / DTYPE(c.P0), DTYPE(c.RCP))
-    z8w[...] = (phb + state.php) / DTYPE(c.G)
-    dz[...] = z8w[1:] - z8w[:-1]
+    theta, rho, pii, dz = _wsm6_prepare(state, "wsm6", rounded_exner=True)
+    surface = precipitation_surface(state)
 
-    surface = (ny, nx)
-    rainnc = state.scratch(surface, "mp_rainnc")
-    rainncv = state.scratch(surface, "mp_rainncv")
-    snownc = state.scratch(surface, "mp_snownc")
-    snowncv = state.scratch(surface, "mp_snowncv")
-    graupelnc = state.scratch(surface, "mp_graupelnc")
-    graupelncv = state.scratch(surface, "mp_graupelncv")
-    sr = state.scratch(surface, "mp_sr")
-
-    from woof.core.microphysics import (MicrophysicsDiagnostics,
-                                         moist_physics_finish,
-                                         save_pre_mp_theta)
+    from woof.core.microphysics import save_pre_mp_theta
     save_pre_mp_theta(state)
     launch_wsm6(
         theta, state.qv, state.qc, state.qr, state.qi, state.qs, state.qg,
-        rho, pii, state.p, dz, rainnc, rainncv, snownc, snowncv,
-        graupelnc, graupelncv, sr, dt, effc=state.effc,
-        effi=state.effi, effs=state.effs, hail_opt=cfg.wsm6_hail_opt)
-    if refl_10cm_due:
-        from woof.core.refl import compute_and_stash_refl_10cm
-        refl_t = state.scratch((nz, ny, nx), "refl_t")
-        refl_t[...] = theta * pii
-        compute_and_stash_refl_10cm(state, cfg, refl_t, state.p)
-    moist_physics_finish(state, cfg, theta, dt)
-    return MicrophysicsDiagnostics(
-        rainnc=rainnc, rainncv=rainncv, sr=sr,
-        snownc=snownc, snowncv=snowncv,
-        graupelnc=graupelnc, graupelncv=graupelncv)
+        rho, pii, state.p, dz, dt=dt, **surface, effc=state.effc,
+        effi=state.effi, effs=state.effs, hail_opt=cfg.wsm6_hail_opt,
+        conservative_surface=bool(
+            getattr(cfg, "wsm6_conservative_surface", False)))
+    return finish_fields(state, cfg, theta, pii, dt, surface,
+                         refl_10cm_due=refl_10cm_due)
 
 
-__all__ = ["apply", "launch_wsm6", "wsm6_tile_columns"]
+def _wsm6_prepare(state: DomainState, prefix: str, *, rounded_exner=False):
+    """Shared named allocator, retained at the scratch-inventory pinned site."""
+    nz, ny, nx = state.p.shape
+    theta = state.scratch((nz, ny, nx), f"{prefix}_theta")
+    rho = state.scratch((nz, ny, nx), f"{prefix}_rho")
+    pii = state.scratch((nz, ny, nx), f"{prefix}_pii")
+    dz = state.scratch((nz, ny, nx), f"{prefix}_dz")
+    z8w = state.scratch((nz + 1, ny, nx), f"{prefix}_z8w")
+    prepare_fields(state, theta, rho, pii, dz, z8w, rounded_exner=rounded_exner)
+    return theta, rho, pii, dz
+
+
+def _apply_wsm6r(state: DomainState, cfg: RunConfig, dt: float, *,
+                 refl_10cm_due: bool = False):
+    """mp_physics=106: WRF's wsm6r call, then the shared finish.
+
+    WRF's wsm6r reports RAINNC and RAINNCV only, and no effective radius;
+    the radii RTE+RRTMGP reads are WSM6's routine on this state
+    (:func:`launch_wsm6r_effective_radii`).  The surface contract's SR
+    slot is therefore zero, and
+    :func:`woof.core.physics.microphysics_scheme_sr_available` says 106
+    has none, so the land surface takes WRF's no-SR temperature proxy.
+    Snow and graupel do not leave the column under their own names: WSM6R
+    lumps every species' fallout into RAINNC, as WRF does.
+
+    REFL_10CM is not produced by WRF's wsm6r at all; when an output frame
+    is due, woof diagnoses it with WSM6's refl10cm_wsm6 operator
+    (woof.core.refl), whose particle-size assumptions -- n0r 8e6, n0s
+    2e6*exp(0.12*(t0c-t)), n0g 4e6, graupel density 500 -- are WSM6R's
+    own PARAMETERs (module_mp_wsm6r.F:6-25).
+    """
+    nz, ny, nx = state.p.shape
+    missing = [name for name in ("qi", "qs", "qg", "effc", "effi", "effs")
+               if getattr(state, name, None) is None]
+    if missing:
+        raise ValueError("mp_physics=106 state lacks WSM6R fields: "
+                         + ", ".join(missing))
+    theta, rho, pii, dz = _wsm6_prepare(state, "wsm6r")
+    work = state.scratch((3, nz, ny, nx), "wsm6r_work")
+    surface = precipitation_surface(state, ("rain",))
+    surface["sr"].fill(0.0)
+
+    from woof.core.microphysics import save_pre_mp_theta
+    save_pre_mp_theta(state)
+    launch_wsm6r(theta, state.qv, state.qc, state.qr, state.qi, state.qs,
+                 state.qg, rho, pii, state.p, dz, surface["rainnc"],
+                 surface["rainncv"], dt,
+                 work=work)
+    launch_wsm6r_effective_radii(theta, pii, state.qc, state.qi, state.qs,
+                                 rho, state.effc, state.effi, state.effs)
+    return finish_fields(state, cfg, theta, pii, dt, surface,
+                         refl_10cm_due=refl_10cm_due)
+
+
+__all__ = ["WSM6_FAMILY", "apply", "launch_wsm6", "launch_wsm6r",
+           "launch_wsm6r_effective_radii", "wsm6_kernel",
+           "wsm6_radar_words_on_device", "wsm6_tile_columns",
+           "wsm6_workspace_rows"]

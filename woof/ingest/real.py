@@ -50,12 +50,6 @@ def surface_fields_to_device(met, array_module, *, preserve_dtype=False):
     }
 
 
-def _available_cpu_count() -> int:
-    """The CPUs this process may run on (its affinity where the OS has one)."""
-    from woof.ingest.cpu_backend import available_cpu_count
-    return available_cpu_count()
-
-
 def _default_column_workers(preprocess_backend, preprocess_workers) -> int:
     """Setup column threads when the caller named none.
 
@@ -194,19 +188,29 @@ def _host_owned_float64(value) -> np.ndarray:
 HRRR_ANALYZED_HYDROMETEORS = ("QC", "QR", "QI", "QS", "QG")
 DECLARED_ANALYZED_HYDROMETEORS = (*HRRR_ANALYZED_HYDROMETEORS, "QH")
 
-#: Vertical velocity at a real-data cold start: exact zero, on every route,
-#: whether or not the source publishes one.  WRF real never interpolates a
-#: source W: v4.6.1 ``dyn_em/module_initialize_real.F`` (sha256
+#: Vertical velocity at a real-data cold start when the source carries
+#: none: exact zero.  WRF real never interpolates a source W: v4.6.1
+#: ``dyn_em/module_initialize_real.F`` (sha256
 #: b4199371567369fa93471f66eef60cb63a55407718b828d724e43587bc4dc82e)
 #: contains no assignment to ``grid%w_1`` or ``grid%w_2`` at all, so the W
 #: real.exe writes is the allocation zero, and the first thing the model
 #: does with it is diagnose the terrain-following lower boundary
-#: (``dyn_em/start_em.F:1519-1530``, ``set_w_surface``).  The regular-source
-#: join drops a carried ``vertical_velocity`` by name
-#: (woof.mapped_source.REGULAR_JOIN_DROPPED_FIELDS) and the hrrr-prs
-#: mapping zeroes it by policy, so the five hydrometeor masses are carried
-#: from the analysis while W is not.  The receipt says so rather than
-#: leaving it to be inferred from an absence.
+#: (``dyn_em/start_em.F:1519-1530``, ``set_w_surface``).  That is the
+#: right start for a source whose analysis holds no vertical motion.  It
+#: was the WRONG start for an analysis that does: HRRR's own forecast
+#: launches from a cycled state that keeps every updraft, while a start
+#: from its published wrfnat analysis under this zero policy dropped them
+#: all, so every storm the analysis held collapsed and had to re-form in
+#: the first hour (2024-05-21 18Z Iowa crop: f01 FSS35 at 27 km 0.30
+#: against HRRR's own 0.42; hour-one spin-up defect, fix program
+#: 2026-10-06).  A source that publishes a vertical velocity on its model
+#: levels (HRRR wrfnat and RAP awp130bgrb publish omega, 0/2/8, on all
+#: fifty) now reaches ``initialize_real`` as ``OMEGA`` (Pa s-1) or ``WW``
+#: (m s-1) through the regular-source join
+#: (woof.mapped_source.VERTICAL_VELOCITY_LEGACY_NAMES) and is carried:
+#: see :func:`vertical_velocity_from_omega` and
+#: :func:`interface_vertical_velocity`.  The receipt names which of the
+#: two happened rather than leaving it to be inferred from an absence.
 WRF_REAL_VERTICAL_VELOCITY_POLICY = {
     "state_field": "w",
     "policy": "exact-fp32-zero",
@@ -215,8 +219,81 @@ WRF_REAL_VERTICAL_VELOCITY_POLICY = {
     "real_citation": (
         "dyn_em/module_initialize_real.F assigns neither grid%w_1 nor "
         "grid%w_2; dyn_em/start_em.F:1519-1530 diagnoses the lower boundary"),
-    "source_vertical_velocity": "not interpolated on any route",
+    "source_vertical_velocity": "the source carried none (no OMEGA or WW field)",
 }
+
+#: The constants UPP uses to publish omega from WRF's W
+#: (``INITPOST.F``: ``omga = -w * pmid * g / (rd * t * (1 + d608 * q))``),
+#: inverted here exactly so a round trip through the published product
+#: returns the model's own W.
+UPP_OMEGA_RD = 287.04
+UPP_OMEGA_G = 9.81
+UPP_OMEGA_D608 = 0.608
+
+#: What the carried-W receipt says, before its measured numbers are added.
+CARRIED_VERTICAL_VELOCITY_POLICY = {
+    "state_field": "w",
+    "policy": "carried-from-source",
+    "interface_rule": (
+        "W is interpolated on the mass levels (linear in pressure, constant "
+        "below the source's lowest level), then each interior interface "
+        "takes the mean of its two bounding mass levels; the surface "
+        "interface is left to set_w_surface (WRF start_em.F:1519-1530) and "
+        "the model top is zero"),
+}
+
+
+def vertical_velocity_from_omega(omega, temperature, qv, pressure, *, xp=np):
+    """Geometric W (m s-1) from omega (Pa s-1), inverting UPP's publication.
+
+    ``w = -omega * Rd * T * (1 + 0.608 qv) / (p * g)`` with UPP's own
+    constants, on whatever array module ``xp`` the four operands share.
+    """
+
+    virtual = temperature * (1.0 + UPP_OMEGA_D608 * qv)
+    return -(omega * (UPP_OMEGA_RD / UPP_OMEGA_G)) * virtual / pressure
+
+
+def interface_vertical_velocity(w_mass, *, xp=np):
+    """W on the ``nz + 1`` interfaces from W on the ``nz`` mass levels.
+
+    Interior interfaces average their bounding mass levels; the surface
+    interface is zero here (set_w_surface diagnoses it from the terrain
+    slope on the first step, as it does for a zero start) and the model
+    top is zero, WRF's upper boundary condition for W.
+    """
+
+    if w_mass.ndim != 3 or w_mass.shape[0] < 2:
+        raise ValueError("mass-level W must be (nz, ny, nx) with nz >= 2")
+    nz = w_mass.shape[0]
+    out = xp.zeros((nz + 1,) + tuple(w_mass.shape[1:]), dtype=w_mass.dtype)
+    out[1:nz] = 0.5 * (w_mass[:-1] + w_mass[1:])
+    return out
+
+
+def vertical_velocity_receipt(source_name, w_mass, w_interfaces, *, xp=np):
+    """The carried-W receipt: the source field, the formula and the numbers."""
+
+    receipt = dict(CARRIED_VERTICAL_VELOCITY_POLICY)
+    receipt["source_field"] = source_name
+    if source_name == "OMEGA":
+        receipt["conversion"] = (
+            "w = -omega * Rd * T * (1 + 0.608 qv) / (p * g) on the target "
+            f"mass levels, Rd={UPP_OMEGA_RD}, g={UPP_OMEGA_G} (UPP INITPOST.F "
+            "inverted)")
+    else:
+        receipt["conversion"] = "source geometric vertical velocity in m s-1, no conversion"
+    receipt["mass_level_w_m_s"] = {
+        "minimum": float(xp.min(w_mass)), "maximum": float(xp.max(w_mass)),
+        "cells_above_1_m_s": int(xp.count_nonzero(w_mass > 1.0)),
+        "cells_below_minus_1_m_s": int(xp.count_nonzero(w_mass < -1.0)),
+    }
+    receipt["interface_w_m_s"] = {
+        "minimum": float(xp.min(w_interfaces)),
+        "maximum": float(xp.max(w_interfaces)),
+        "nonzero_count": int(xp.count_nonzero(w_interfaces)),
+    }
+    return receipt
 
 HRRR_HYDROMETEOR_CORRESPONDENCE_SCHEMA_V1 = (
     "gpuwm-real-hydrometeor-correspondence-v1")
@@ -270,6 +347,7 @@ _HRRR_DISPOSITION_OPERATOR = {
 #: fields that do not exist for it.
 #:
 #:   1  kesslerscheme   Registry.EM_COMMON:3015  moist:qv,qc,qr
+#:   3  wsm3scheme      Registry.EM_COMMON:3017  moist:qv,qc,qr
 #:   6  wsm6scheme      Registry.EM_COMMON:3021  moist:qv,qc,qr,qi,qs,qg
 #:   8  thompson        Registry.EM_COMMON:3024  moist:qv,qc,qr,qi,qs,qg
 #:   9  milbrandt2mom   Registry.EM_COMMON:3025  moist:qv,qc,qr,qi,qs,qg,qh
@@ -322,10 +400,20 @@ _HRRR_DISPOSITION_OPERATOR = {
 #: mass entering with zero moments gets the scheme's own prescribed size
 #: distributions on the first call rather than undefined arithmetic.
 HRRR_ANALYZED_HYDROMETEOR_MOIST_PACKAGE = {
+    2: {"registry_citation":"Registry/Registry.EM_COMMON:3016",
+        "retained":HRRR_ANALYZED_HYDROMETEORS},
     1: {"registry_citation": "Registry/Registry.EM_COMMON:3015",
         "retained": ("QC", "QR")},
+    # WSM3: Kessler's narrow package; real.exe keeps QC and QR and drops
+    # the analysed QI/QS/QG (module_initialize_real.F:1859-1977).
+    3: {"registry_citation": "Registry/Registry.EM_COMMON:3017",
+        "retained": ("QC", "QR")},
+    4: {"registry_citation": "Registry/Registry.EM_COMMON:3018",
+        "retained": ("QC", "QR", "QI", "QS")},
     6: {"registry_citation": "Registry/Registry.EM_COMMON:3021",
         "retained": HRRR_ANALYZED_HYDROMETEORS},
+    106: {"registry_citation": "Registry/Registry.EM_COMMON:3022",
+          "retained": HRRR_ANALYZED_HYDROMETEORS},
     8: {"registry_citation": "Registry/Registry.EM_COMMON:3024",
         "retained": HRRR_ANALYZED_HYDROMETEORS},
     9: {"registry_citation": "Registry/Registry.EM_COMMON:3025",
@@ -336,10 +424,20 @@ HRRR_ANALYZED_HYDROMETEOR_MOIST_PACKAGE = {
          "retained": HRRR_ANALYZED_HYDROMETEORS},
     18: {"registry_citation": "Registry/Registry.EM_COMMON:3033",
          "retained": HRRR_ANALYZED_HYDROMETEORS},
+    24: {"registry_citation": "Registry/Registry.EM_COMMON:3034",
+         "retained": HRRR_ANALYZED_HYDROMETEORS},
     28: {"registry_citation": "Registry/Registry.EM_COMMON:3036",
+         "retained": HRRR_ANALYZED_HYDROMETEORS},
+    30: {"registry_citation": "Registry/registry.sbm:318",
          "retained": HRRR_ANALYZED_HYDROMETEORS},
     50: {"registry_citation": "Registry/Registry.EM_COMMON:3038",
          "retained": ("QC", "QR", "QI")},
+    # Ferrier-Aligo: moist:qv,qc,qr,qi, so real.exe interpolates QC, QR and
+    # QI and drops QS/QG (dyn_em/module_initialize_real.F:1859-1977 keys
+    # every species on its P_Q* membership).  QI here is the analysis's
+    # cloud ice alone, which is exactly what real.exe hands the scheme.
+    5: {"registry_citation": "Registry/Registry.EM_COMMON:3019",
+        "retained": ("QC", "QR", "QI")},
 }
 
 #: The microphysics ids whose WRF Registry ``moist:`` package can receive the
@@ -376,7 +474,16 @@ HRRR_ANALYZED_HYDROMETEOR_MOIST_PACKAGE = {
 #: integer sets and would go blind on a comprehension -- can still see this
 #: site.  ``test_the_analyzed_inventory_tuple_and_its_moist_packages_agree``
 #: pins the two equal.
-HRRR_ANALYZED_HYDROMETEOR_MP_PHYSICS = (1, 6, 8, 9, 10, 16, 18, 28, 50)
+HRRR_ANALYZED_HYDROMETEOR_MP_PHYSICS = (1, 2, 3, 4, 5, 6, 8, 9, 10, 16, 18, 24, 28, 30, 50, 106)
+# Named schemes with the six-mass moist package retain every analysed
+# hydrometeor (capability row, woof.microphysics_schemes).
+from woof.microphysics_schemes import NAMED_SCHEMES as _NAMED_MP_SCHEMES
+for _s in _NAMED_MP_SCHEMES.values():
+    if _s.ice_mass_species == ("qi", "qs", "qg"):
+        HRRR_ANALYZED_HYDROMETEOR_MOIST_PACKAGE[_s.mp_id] = {
+            "registry_citation": f"woof.microphysics_schemes:{_s.name}",
+            "retained": HRRR_ANALYZED_HYDROMETEORS}
+        HRRR_ANALYZED_HYDROMETEOR_MP_PHYSICS += (_s.mp_id,)
 
 # WRF v4.6.1, commit d66e442fccc04111067e29274c9f9eaccc3cef28:
 # dyn_em/module_initialize_real.F:1859-1977 interpolates QR/QC/QI/QS/QG one
@@ -883,10 +990,10 @@ def _mp28_aerosol_source_policy(cfg: RunConfig, state, *, receipt=True) -> dict[
     # source-absent zeros once the cold-start closure has run over the
     # analyzed mass, and their receipt is
     # hydrometeor_initialization["cold_start_moment_closure"].
-    receipt["source_absent_state_fields"] = {
-        name: array_correspondence_fingerprint(getattr(state, name))
-        for name in ("nwfa", "nifa", "nwfa2d", "nifa2d")
-    }
+    absent_names = ("nwfa", "nifa", "nwfa2d", "nifa2d")
+    receipt["source_absent_state_fields"] = dict(zip(
+        absent_names,
+        _fingerprints_side_by_side(getattr(state, name) for name in absent_names)))
     return receipt
 
 
@@ -1377,20 +1484,60 @@ def _receipt_array_fingerprint(value):
 
 def _receipt_nonnegative_finite(value):
     valid = getattr(value, "receipt_valid", None)
-    return (bool(valid) if valid is not None else
-            bool(np.isfinite(value).all()) and not bool(np.any(value < 0.0)))
+    if valid is not None:
+        return bool(valid)
+    array = np.asarray(value)
+    if array.size < _RECEIPT_HASH_MIN_CELLS or not array.flags.c_contiguous:
+        return bool(np.isfinite(array).all()) and not bool(np.any(array < 0.0))
+    # A host replay output is one CONUS volume per source level: the two
+    # whole-array passes took 6.3 s of the receipt thread on one core
+    # (bounded CUDA road, a 5090 host, 2026-10-21).  Chunks answer the same
+    # question side by side (NumPy releases the GIL); the verdict is an AND.
+    flat = array.reshape(-1)
+    step = 1 << 22
+    chunks = [flat[start:start + step] for start in range(0, flat.size, step)]
+
+    def ok(chunk):
+        return bool(np.isfinite(chunk).all()) and not bool(np.any(chunk < 0.0))
+    from os import cpu_count
+    with ThreadPoolExecutor(max_workers=max(1, min(16, cpu_count() or 1)),
+                            thread_name_prefix="receipt-check") as pool:
+        return all(pool.map(ok, chunks))
+
+
+def _fingerprints_side_by_side(values) -> list:
+    """``[array_correspondence_fingerprint(v) for v in values]``, hashed side by side.
+
+    Each array is still one ordered SHA-256 stream (so every receipt is the
+    one the serial call writes); independent arrays run on separate native
+    workers instead of one after another on the calling thread.
+    """
+    arrays = []
+    for value in values:
+        if hasattr(value, "get"):
+            value = value.get()
+        arrays.append(np.ascontiguousarray(np.asarray(value)))
+    if len(arrays) < 2 or any(array.size == 0 for array in arrays):
+        return [array_correspondence_fingerprint(array) for array in arrays]
+    from os import cpu_count
+    from woof.ingest.preparation_fingerprints import array_fingerprints
+    receipts = array_fingerprints(arrays, workers=max(1, min(len(arrays), cpu_count() or 1)))
+    if receipts is None:
+        return [array_correspondence_fingerprint(array) for array in arrays]
+    return receipts
 
 
 class _ReceiptHasher:
-    def __init__(self, pool):
+    def __init__(self, pool, depth=2):
         self.pool = pool
         self.pending = []
+        self.depth = max(1, int(depth))
 
     def submit(self, value):
         from concurrent.futures import Future
         # Bound live host arrays to two pending hashes, rather than retaining
         # all source-level outputs until the receipt has been assembled.
-        if len(self.pending) == 2:
+        if len(self.pending) >= self.depth:
             self.pending.pop(0).result()
         if hasattr(value, "get"):
             value = _receipt_host_float32(value)
@@ -1401,6 +1548,66 @@ class _ReceiptHasher:
             job = self.pool.submit(_receipt_array_fingerprint, value)
         self.pending.append(job)
         return job
+
+
+#: CUDA runtime statuses that mean "no card here", not a device fault.
+#: 100 cudaErrorNoDevice: the card is masked (CUDA_VISIBLE_DEVICES empty, the
+#: CPU preprocess backend).  35 cudaErrorInsufficientDriver: a host with cupy
+#: installed and no NVIDIA driver at all, where the backend choice already fell
+#: back to the CPU ("cupy is installed but CUDA could not start").  Breakage
+#: the 35 prevents: every HRRR prepare on a CPU-only host (the WOOF bake's
+#: data stage, 2026-10-22 dry bake prepare_la-basin-750m) died in this receipt
+#: job after the whole CPU preparation had run.
+_NO_CARD_STATUSES = frozenset({100, 35})
+
+
+def _start_receipt_job(function, *args, **kwargs):
+    """Run one receipt builder on its own thread, on this thread's card.
+
+    The HRRR hydrometeor disposition replays the vertical operator once per
+    source level and hashes every replay: 59-65 s of a 120 s full HRRR CONUS
+    start (1797x1057x50 from RAP native, 2026-10-16) at about two cores with
+    the card idle, all of it before the rest of the start could proceed.
+    Its inputs are read-only from here on, so it runs beside the remaining
+    stages and the caller joins it with ``result()``.
+    """
+    import threading
+    from concurrent.futures import Future
+    device = None
+    cupy = sys.modules.get("cupy")
+    if cupy is not None:
+        try:
+            device = cupy.cuda.runtime.getDevice()
+        except cupy.cuda.runtime.CUDARuntimeError as exc:
+            if exc.status not in _NO_CARD_STATUSES:
+                raise
+            # No card on this thread (the CPU preprocess backend masks it;
+            # a host without one): the receipt runs on the host, as the
+            # whole preparation does there.  Asking unconditionally refused
+            # every CPU-backend start with cudaErrorNoDevice.
+            device = None
+    binding = pm.current_cpu_bridge_binding()
+    job = Future()
+
+    def run():
+        try:
+            if device is not None:
+                sys.modules["cupy"].cuda.Device(device).use()
+            if binding is None:
+                value = function(*args, **kwargs)
+            else:
+                # The caller's worker cap, not a private worker's one thread:
+                # this is one job beside its caller, and its CPU replays are
+                # the start's critical path (run_with_shared_cpu_bridge_binding).
+                value = pm.run_with_shared_cpu_bridge_binding(
+                    binding, function, *args, **kwargs)
+        except BaseException as error:  # re-raised by the caller's result()
+            job.set_exception(error)
+        else:
+            job.set_result(value)
+
+    threading.Thread(target=run, name="gpuwm-receipt", daemon=True).start()
+    return job
 
 
 def build_hrrr_hydrometeor_vertical_disposition(
@@ -1414,9 +1621,16 @@ def build_hrrr_hydrometeor_vertical_disposition(
     if count < _RECEIPT_HASH_MIN_CELLS:
         return _build_hrrr_hydrometeor_vertical_disposition(
             *args, operator_replay=operator_replay, hasher=_ReceiptHasher(None))
-    with _column_pool(2) as pool:
+    # One SHA-256 stream per replay, up to eight replays hashing side by
+    # side.  Two workers left the receipt waiting on its hashes (11.8 s of
+    # hashing at HRRR CONUS, 1797x1057x50 from RAP native, which held the
+    # start in its join); the pending host copies stay bounded by the pool.
+    from os import cpu_count
+    workers = max(2, min(8, cpu_count() or 2))
+    with _column_pool(workers) as pool:
         return _build_hrrr_hydrometeor_vertical_disposition(
-            *args, operator_replay=operator_replay, hasher=_ReceiptHasher(pool))
+            *args, operator_replay=operator_replay,
+            hasher=_ReceiptHasher(pool, depth=workers))
 
 
 def _build_hrrr_hydrometeor_vertical_disposition(
@@ -1545,14 +1759,14 @@ def _build_hrrr_hydrometeor_vertical_disposition(
     }
     del raw_production_support, packed_production_support
 
+    pressure_fingerprints = _fingerprints_side_by_side(
+        (geometry["source_pressure"], geometry["surface_pressure"],
+         geometry["target_pressure"], order))
     geometry_receipt = {
-        "source_pressure": array_correspondence_fingerprint(
-            geometry["source_pressure"]),
-        "surface_pressure": array_correspondence_fingerprint(
-            geometry["surface_pressure"]),
-        "target_pressure": array_correspondence_fingerprint(
-            geometry["target_pressure"]),
-        "source_level_order": array_correspondence_fingerprint(order),
+        "source_pressure": pressure_fingerprints[0],
+        "surface_pressure": pressure_fingerprints[1],
+        "target_pressure": pressure_fingerprints[2],
+        "source_level_order": pressure_fingerprints[3],
         "source_level_order_values": order.tolist(),
         "production_target_support": production_support_receipt,
         "pressure_partition": pressure_partition_receipt,
@@ -3356,8 +3570,13 @@ def _rebalance_moist_pressure_serial(pressure_guess, qtot, dry_mass, base,
 
 def _rebalance_moist_pressure(pressure_guess, qtot, dry_mass, base, coord, *,
                               column_workers=1):
-    """Run the unchanged vertical recurrence over parallel row slabs."""
+    """Use native columns, retaining the exact parallel row-slab reference."""
     workers = _column_worker_count(column_workers)
+    from woof.ingest import host_arrays
+    native = host_arrays.moist_pressure(
+        pressure_guess, qtot, dry_mass, base, coord, workers=workers)
+    if native is not None:
+        return native
     pressure = np.empty_like(pressure_guess)
     if workers == 1 or pressure_guess.shape[1] < 2:
         return _rebalance_moist_pressure_serial(
@@ -3588,6 +3807,13 @@ class RealInitResult:
     #: native-HRRR lane and the pressure-level/RH lane, and that map only
     #: exists on the former.
     aerosol_initialization: dict[str, object] = field(default_factory=dict)
+    #: What the start state's W is: the zero policy
+    #: (WRF_REAL_VERTICAL_VELOCITY_POLICY) or the carried source field with
+    #: its measured range (vertical_velocity_receipt).  Kept beside, not
+    #: inside, ``hydrometeor_initialization`` for the same reason as the
+    #: aerosol receipt: W is carried on any route whose source publishes
+    #: one, and that map only exists on the analyzed-hydrometeor lane.
+    vertical_velocity_initialization: dict[str, object] = field(default_factory=dict)
     #: How many cells of ``surface_qv`` ABOVE were floored at WRF's
     #: ``qv_min_value`` on the way out, and how far below it they were
     #: (:func:`_floor_flag_sh_surface_mixing_ratio`).  Only the FLAG_SH
@@ -3611,6 +3837,12 @@ class RealInitResult:
     #: always empty on the RH lane, whose :func:`_saturation_mixing_ratio`
     #: floors inline.
     prognostic_moisture_floor: dict[str, object] = field(default_factory=dict)
+    #: Row-unit unstaggered eta fields for IC and boundary table callers.
+    boundary_tracers: dict[str, object] = field(default_factory=dict)
+    #: One receipt per chem boundary source that filled this frame's chem
+    #: rows (:func:`woof.chem_source_init.fill_boundary_sources`): the
+    #: frames, weights, files and operators.  Empty on a chem-off run.
+    chem_initialization: tuple = ()
 
 
 def _wif_grid_latlon_from(grid, state):
@@ -3798,13 +4030,40 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         # Boundary callers retain only state. Checks stay at their owners.
         return {} if boundary_only else array_correspondence_fingerprint(value)
 
+    def receipt_fingerprints_of(values):
+        # receipt_fingerprint over several independent arrays, side by side.
+        values = tuple(values)
+        return ([{} for _ in values] if boundary_only
+                else _fingerprints_side_by_side(values))
+
     def receipt_fingerprints(names, value_for):
         names = tuple(names)
         if boundary_only:
             return {name: {} for name in names}
-        if route_name != "cpu" or state_xp is not host_numpy:
-            return {name: receipt_fingerprint(value_for(name)) for name in names}
         from woof.ingest.preparation_fingerprints import array_fingerprints
+        if route_name != "cpu" or state_xp is not host_numpy:
+            # The device route hashed one field at a time on the calling
+            # thread (7 s of the HRRR CONUS start on one core).  The host
+            # copies of up to eight fields now hash side by side; each is
+            # still one ordered SHA-256 stream, so every receipt is the one
+            # array_correspondence_fingerprint wrote.
+            result = {}
+            for start in range(0, len(names), 8):
+                batch = names[start:start + 8]
+                arrays = []
+                for name in batch:
+                    value = value_for(name)
+                    if hasattr(value, "get"):
+                        value = value.get()
+                    arrays.append(host_numpy.ascontiguousarray(host_numpy.asarray(value)))
+                receipts = (None if any(array.size == 0 for array in arrays) else
+                            array_fingerprints(arrays, workers=max(
+                                1, min(int(column_workers or 1), len(arrays)))))
+                if receipts is None:
+                    receipts = [receipt_fingerprint(array) for array in arrays]
+                result.update(zip(batch, receipts))
+                del arrays
+            return result
         result = {}
         # Normalize at most two fields at a time. A five-species source may
         # hold float64 fields whose FP32 receipt copies are each substantial.
@@ -3921,8 +4180,18 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         if (_resolved_mp28_aerosol_source(cfg) == "analysis"
                 and len(_carried_aerosol) != len(AEROSOL_NUMBER_FIELDS)):
             missing = sorted(set(AEROSOL_NUMBER_FIELDS) - set(_carried_aerosol))
+            # A source that PUBLISHED the pair but whose decoder withheld
+            # it (a GRIB2 bitmap masking points, with no fill policy) says
+            # so: "missing" alone sends the operator looking for fields
+            # the file in hand carries.
+            withheld = getattr(snapshot, "withheld_fields", None) or {}
+            reasons = sorted({withheld[name] for name in missing if name in withheld})
+            published = ("; the source published " + ", ".join(name for name in missing if name in withheld)
+                         + " with a GRIB2 bitmap (masked points) on this cycle and the decoder withheld them: "
+                         + "; ".join(reasons)) if reasons else ""
             raise ValueError("analyzed aerosol IC/BC requires QNWFA and QNIFA on every initial and boundary frame; missing "
-                             + ", ".join(missing) + "; substituting climatology would change the requested forcing")
+                             + ", ".join(missing) + "; substituting climatology would change the requested forcing"
+                             + published)
         if cfg.use_rap_aero_icbc and not boundary_only:
             validate_run_preparation(cfg)
         if not (len(_carried_aerosol) == len(AEROSOL_NUMBER_FIELDS)
@@ -4042,6 +4311,16 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
                if name in host_required else snapshot.fields[name])
         for name in required
     }
+    # The source's vertical velocity, when the join packed one: geometric
+    # (WW, m s-1) is taken ahead of omega (OMEGA, Pa s-1) because it needs
+    # no conversion.  Neither is required; a source without one keeps the
+    # zero start (WRF_REAL_VERTICAL_VELOCITY_POLICY).
+    vertical_velocity_source = next(
+        (name for name in ("WW", "OMEGA") if name in snapshot.fields), None)
+    if vertical_velocity_source is not None:
+        fields[vertical_velocity_source] = snapshot.fields[vertical_velocity_source]
+    else:
+        vertical_velocity_source = None
     # Source precedence is explicit: a case may declare an artifact OR use
     # the forcing catalog's validated era5_z_invariant provider.  Silently
     # replacing a declaration would make provenance depend on GRIB inventory.
@@ -4058,6 +4337,8 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
     mass_names = ["TT", "GHT"]
     mass_names += (["PRES", "SPFH"] if has_specific_humidity else ["RH"])
     mass_names += list(decoded_species) + list(main_numbers)
+    if vertical_velocity_source is not None:
+        mass_names.append(vertical_velocity_source)
     if any(fields[name].shape != mass_shape for name in mass_names):
         raise ValueError(
             f"mass-field shapes do not match levels and mass grid: {mass_names}")
@@ -4232,8 +4513,20 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
     order_backend = backend_xp.asarray(order, dtype=backend_xp.int32)
 
     def backend_ordered_levels(value):
-        return backend_xp.take(
-            plan_float32(value), order_backend, axis=0)
+        value = plan_float32(value)
+        if backend_xp is host_numpy and value.ndim == 3 and value.size >= _RECEIPT_HASH_MIN_CELLS:
+            # The same take, one source level per copy, side by side: on the
+            # host roads a CONUS volume per field was one 4.6 s single-core
+            # np.take (bounded CUDA road, a 5090 host, 2026-10-21).
+            out = host_numpy.empty((len(order), *value.shape[1:]), dtype=value.dtype)
+            def copy(level):
+                out[level] = value[int(order[level])]
+            from os import cpu_count
+            with ThreadPoolExecutor(max_workers=max(1, min(16, cpu_count() or 1)),
+                                    thread_name_prefix="ordered-levels") as pool:
+                list(pool.map(copy, range(len(order))))
+            return out
+        return backend_xp.take(value, order_backend, axis=0)
 
     mass_source_pd_f32 = plan_float32(source_pd)
     mass_surface_pd_f32 = plan_float32(surface_pd)
@@ -4260,6 +4553,16 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         plan_float32(pressure),
         plan_float32(fields["PSFC"]),
         interp_in_logp=False, extrap="temperature")
+    # The source's vertical velocity rides the same mass-level plan as
+    # pressure (linear in p); below the source's lowest level it holds
+    # that level's value, and the surface pseudo-level is zero, the
+    # kinematic ground value, so nothing is invented beneath the source.
+    source_w_target = None
+    if vertical_velocity_source is not None:
+        source_w_target = mass_vertical_plan.apply(
+            backend_ordered_levels(fields[vertical_velocity_source]),
+            plan_float32(np.zeros((cfg.ny, cfg.nx), dtype=np.float32)),
+            interp_in_logp=False, extrap="constant")
     temperature_h = (_setup(temperature).astype(np.float64) if device_route
                      else _host_owned_float64(temperature))
     rh_h = (None if rh is None else
@@ -4321,6 +4624,29 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
                 column_workers=column_workers),
             total_pressure_h, column_workers=column_workers)
     mark_timing("thermodynamic_vertical_interpolation")
+    # The carried vertical velocity on the target mass levels, in m s-1,
+    # converted from omega with this column's own interpolated T, qv and
+    # p (vertical_velocity_from_omega) or taken as published (WW).  Held
+    # as one FP32 field until the state's W interfaces are formed below;
+    # the receipt it fills is the one hydrometeor_initialization carries.
+    w_mass_h = None
+    vertical_velocity_initialization = dict(WRF_REAL_VERTICAL_VELOCITY_POLICY)
+    if source_w_target is not None:
+        carried_w = (_setup(source_w_target).astype(np.float64) if device_route
+                     else _host_owned_float64(source_w_target))
+        if vertical_velocity_source == "OMEGA":
+            carried_w = vertical_velocity_from_omega(
+                carried_w, temperature_h, qv_h, total_pressure_h, xp=np)
+        if not bool(np.isfinite(carried_w).all()):
+            raise ValueError(
+                f"the source vertical velocity ({vertical_velocity_source}) "
+                "interpolated to a non-finite value: a defect in the forcing "
+                "column, not a value to be clamped away")
+        w_mass_h = carried_w.astype(np.float32)
+        del carried_w, source_w_target
+        if release_completed_host:
+            del fields[vertical_velocity_source]
+    mark_timing("vertical_velocity_conversion")
     if release_completed_host:
         # Their final consumers have finished. Retaining widened source
         # fields beside the finished host state needlessly doubled host RAM.
@@ -4337,6 +4663,7 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
     # not vapour.  The order is essential, not cosmetic.
     hydrometeors = {}
     hydrometeor_initialization: dict[str, object] = {}
+    vertical_disposition_job = None
     if decoded_species:
         # WRF's Q interpolation uses the metgrid surface pseudo-level.
         # Native HRRR has no supplied surface analysis and retains zero.
@@ -4344,12 +4671,32 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         zero_surface = backend_xp.zeros(
             (cfg.ny, cfg.nx), dtype=backend_xp.float32)
 
-        def replay_hydrometeor_support(ordered_mask):
-            return mass_vertical_plan.apply(
-                backend_xp.asarray(ordered_mask, dtype=backend_xp.float32),
-                zero_surface,
+        # The plan and surface are bound at definition: the replay runs on
+        # the receipt thread after this function has released its own names.
+        def replay_hydrometeor_support(ordered_mask, _plan=mass_vertical_plan,
+                                       _surface=zero_surface, _xp=backend_xp,
+                                       _vboundb=cfg.nz + 1):
+            if (_xp is host_numpy and getattr(_plan, "accepts_bool_mask", False)
+                    and isinstance(ordered_mask, host_numpy.ndarray)
+                    and ordered_mask.dtype == host_numpy.bool_):
+                # The bounded CUDA plan widens each batch's bytes on the card
+                # (bounded_cuda._VerticalPlan): the host never builds the
+                # 380 MB float copy per replay (6.7 s of the receipt thread).
+                operand = ordered_mask
+            elif (_xp is not host_numpy and isinstance(ordered_mask, host_numpy.ndarray)
+                    and ordered_mask.dtype == host_numpy.bool_):
+                # Upload the mask as bytes and widen it on the card: the
+                # same 0/1 floats, a quarter of the host conversion and
+                # transfer per replay (5.6 s of the receipt thread at
+                # HRRR CONUS, one replay per source level).
+                operand = _xp.asarray(ordered_mask).astype(_xp.float32)
+            else:
+                operand = _xp.asarray(ordered_mask, dtype=_xp.float32)
+            return _plan.apply(
+                operand,
+                _surface,
                 interp_in_logp=True, extrap="constant",
-                vboundb=cfg.nz + 1, values_are_finite=True)
+                vboundb=_vboundb, values_are_finite=True)
 
         invalid_source = []
         for name in decoded_species:
@@ -4407,16 +4754,22 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
             for name in decoded_species
             if name not in retained_names
         }
-        vertical_disposition = build_hrrr_hydrometeor_vertical_disposition(
+        # The disposition receipt describes the state; it does not decide
+        # it.  It runs beside the rest of the initialization and is joined
+        # before the result is returned, so its bytes and its failures are
+        # unchanged and it no longer sits on the start's critical path.
+        vertical_disposition_job = _start_receipt_job(
+            build_hrrr_hydrometeor_vertical_disposition,
             {name: fields[name] for name in retained_names},
             order,
             mass_source_pd_f32,
             mass_surface_pd_f32,
             mass_target_pd_f32,
-            hydrometeors,
+            dict(hydrometeors),
             operator_replay=replay_hydrometeor_support,
         ) if (retained_names and not supplied_mass_surfaces
-              and not boundary_only) else {}
+              and not boundary_only) else None
+        vertical_disposition = {}
         # Which regular-grid operator carried each retained species to the
         # mass grid, read off the snapshot that mapped it (the mapped
         # profiles, ERA5 and GFS publish it; the native HRRR decoder and a
@@ -4439,7 +4792,7 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
             },
             "discarded_source_species": discarded,
             "vertical_disposition": vertical_disposition,
-            "vertical_velocity": dict(WRF_REAL_VERTICAL_VELOCITY_POLICY),
+            "vertical_velocity": vertical_velocity_initialization,
         }
         if supplied_mass_surfaces:
             hydrometeor_initialization["schema"] = "gpuwm-metgrid-hydrometeor-initialization-v1"
@@ -4450,10 +4803,20 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
                 "source": "WRF module_initialize_real.F:1862-1997",
                 "operation": "linear Q interpolation with supplied surface before moist-pressure recurrence",
                 "source_level_order": order.tolist(),
-                "source_dry_pressure": receipt_fingerprint(mass_source_pd_f32),
-                "surface_dry_pressure": receipt_fingerprint(mass_surface_pd_f32),
-                "target_dry_pressure": receipt_fingerprint(mass_target_pd_f32),
+                **dict(zip(("source_dry_pressure", "surface_dry_pressure",
+                            "target_dry_pressure"),
+                           receipt_fingerprints_of((mass_source_pd_f32,
+                                                    mass_surface_pd_f32,
+                                                    mass_target_pd_f32)))),
             }
+    from woof.ingest.native_extras import interpolate_boundary_tracers
+    # A snapshot-shaped namespace (the HRRR runner's boundary strips, a
+    # detached mapped hour) may carry no tracer mapping at all: no tracers.
+    source_tracers = getattr(snapshot, "boundary_tracers", None)
+    boundary_tracers = interpolate_boundary_tracers(
+        source_tracers, mass_vertical_plan, backend_ordered_levels,
+        backend_xp.zeros((cfg.ny, cfg.nx), dtype=backend_xp.float32), cfg.nz
+    ) if source_tracers else {}
     mark_timing("hydrometeor_vertical_interpolation")
 
     number_moments, number_receipt = {}, {}
@@ -4506,8 +4869,8 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
             if any(not bool(backend_xp.isfinite(value).all()) or bool((value < 0).any())
                    for value in (source, surface)):
                 raise ValueError(f"analyzed number field {name} is non-finite or negative")
-            source_numbers[name] = receipt_fingerprint(source)
-            surface_numbers[name] = receipt_fingerprint(surface)
+            source_numbers[name], surface_numbers[name] = receipt_fingerprints_of(
+                (source, surface))
             if name not in number_targets:
                 continue
             number_plan = donor_plan if name in donor_numbers else mass_vertical_plan
@@ -4543,8 +4906,14 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
     # carry contributes nothing there either -- ``hydrometeors`` holds
     # exactly the retained set, in the package's own qc/qr/qi/qs/qg order,
     # and the accumulation below is WRF's own left-to-right one.
+    # The host setup route (every mp=28 start) sums on all its workers only
+    # host arrays: a full-device start's CuPy hydrometeors fell to the
+    # one-thread loop below (about 4 s of the HRRR CONUS start).  Their
+    # host copies take the native sum, the one a bounded start's NumPy
+    # fields take; the loop stays the fallback.
     condensate_h = (None if device_route else _host_arrays.sum_fields(
-        hydrometeors.values(), workers=column_workers))
+        [value.get() if hasattr(value, "get") else value
+         for value in hydrometeors.values()], workers=column_workers))
     if condensate_h is None:
         for analyzed in hydrometeors.values():
             contribution = _setup(analyzed).astype(np.float64)
@@ -5211,8 +5580,10 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
             if wif_resolution is not None:
                 aerosol_initialization["dataset"] = describe_wif_source(
                     wif_resolution)
-            _warn_synthetic_aerosol_fallback(
-                _source_choice, wif_resolution)
+            from woof.core.chem_mp_coupling import effective_mode
+            if effective_mode(cfg) != "diagnose":
+                _warn_synthetic_aerosol_fallback(
+                    _source_choice, wif_resolution)
     # Install supplied moments after the explicit source-absent MP8/28
     # branches. The analysis must never be overwritten by their zero policy.
     if decoded_numbers:
@@ -5238,6 +5609,37 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
             boundary_species=boundary_masses)
         hydrometeor_initialization["lateral_boundary_species"] = list(
             boundary_hydrometeor_fields(cfg, boundary_masses))
+    # CHEM BOUNDARY SOURCES (woof/chem_source_init.py).  Rows whose first
+    # enabled boundary source is a data-store composition source take their
+    # field for THIS frame on its final total hydrostatic pressure (WRF's
+    # p+pb, the target WRF-Chem's mozbc uses), so source and target are both
+    # total pressure.  A chem-off state has no ``chem`` attribute and nothing
+    # here runs; a chem state with no such source returns at once.
+    chem_initialization = ()
+    if getattr(state, "chem", None) is not None:
+        from woof.chem_source_init import fill_boundary_sources
+        chem_initialization = tuple(fill_boundary_sources(
+            state, cfg, valid_time=getattr(snapshot, "valid_time", None),
+            latlon=_wif_grid_latlon_from(grid, state),
+            pressure=_host_float32(total_pressure_h),
+            frame="boundary" if boundary_only else "initial"))
+        for receipt in chem_initialization:
+            if "thompson_initialization" in receipt:
+                number_source = receipt["thompson_initialization"]
+                aerosol_initialization.update(number_source)
+                boundary_aerosol_from_input = True
+                carried = getattr(state, "_external_scalar_boundary_fields", ())
+                state._external_scalar_boundary_fields = tuple(dict.fromkeys(
+                    (*carried, *number_source["initialized_fields"])))
+                initialized = aerosol_initialization.setdefault("initialized_state_fields", {})
+                absent = aerosol_initialization.get("source_absent_state_fields", {})
+                names = tuple(number_source["initialized_fields"])
+                initialized.update(zip(names, _fingerprints_side_by_side(
+                    getattr(state, name) for name in names)))
+                for name in names:
+                    absent.pop(name, None)
+                if not absent:
+                    aerosol_initialization.pop("source_absent_state_fields", None)
     # Thompson's cold-start numbers (module_initialize_real.F:4819-4855),
     # which real.exe runs after every analysed field is in place and which
     # fill only where the number is at or below zero: an installed
@@ -5286,9 +5688,23 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         u, v = _host_float32(u), _host_float32(v)
     state.u[...] = state_xp.asarray(u, dtype=state_xp.float32)
     state.v[...] = state_xp.asarray(v, dtype=state_xp.float32)
-    # WRF_REAL_VERTICAL_VELOCITY_POLICY: W starts at exact zero on every
-    # route, and the hydrometeor receipt above says so.
-    state.w[...] = 0.0
+    if w_mass_h is None:
+        # WRF_REAL_VERTICAL_VELOCITY_POLICY: the source carried no vertical
+        # velocity, so W starts at exact zero and the receipt says so.
+        state.w[...] = 0.0
+    else:
+        # The source's vertical motion, on the W interfaces: the start keeps
+        # the updrafts its analysis holds.  The receipt replaces the zero
+        # policy with the measured field.
+        w_interfaces = interface_vertical_velocity(w_mass_h, xp=np)
+        vertical_velocity_initialization.clear()
+        vertical_velocity_initialization.update(vertical_velocity_receipt(
+            vertical_velocity_source, w_mass_h, w_interfaces, xp=np))
+        if state_xp is host_numpy:
+            w_interfaces = _host_float32(w_interfaces)
+        state.w[...] = state_xp.asarray(w_interfaces, dtype=state_xp.float32)
+        del w_interfaces, w_mass_h
+    mark_timing("vertical_velocity_upload")
     total_phi = None if boundary_only else _setup(state.phb + state.php)
     mark_timing("remaining_state_upload_and_geopotential_readback")
     # The ONE place a surface mixing ratio is published rather than
@@ -5301,6 +5717,10 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
     # The native and preprocessing workers above free on their own threads
     # too; the next forcing time and the companion files start without it.
     _return_freed_host_memory()
+    if vertical_disposition_job is not None:
+        hydrometeor_initialization["vertical_disposition"] = (
+            vertical_disposition_job.result())
+        mark_timing("hydrometeor_disposition_receipt_join")
     if timing_report is not None:
         timing_report["total_seconds"] = perf_counter() - timing_start
     result = RealInitResult(
@@ -5311,11 +5731,14 @@ def initialize_real(snapshot: HorizontalSnapshot, cfg: RunConfig,
         total_specific_volume=alpha,
         integrated_moisture_pressure=intq,
         hypsometric_opt=cfg.hypsometric_opt,
+        boundary_tracers=boundary_tracers,
         hydrometeor_initialization=hydrometeor_initialization,
         aerosol_initialization=aerosol_initialization,
+        vertical_velocity_initialization=vertical_velocity_initialization,
         surface_moisture_floor=surface_qv_floor,
         initial_perturbation=perturbation_receipt,
-        prognostic_moisture_floor=prognostic_qv_floor)
+        prognostic_moisture_floor=prognostic_qv_floor,
+        chem_initialization=chem_initialization)
     if device_route and not boundary_only:
         result = _ops.export_result(result, base=host_base)
     return result

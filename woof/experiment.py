@@ -52,10 +52,11 @@ from woof.core import streaming as streaming_module
 from woof.io import history_selection as history_selection_module
 from woof import simulated_radar_config as simulated_radar_module
 from woof.config_keys import KeyRow, key_rows
-from woof.config import (DEFAULT_COLUMN_CHUNK,
+from woof.config import (DEFAULT_COLUMN_CHUNK, RADAR_HEATING_OFF, RadarHeatingConfig,
                           EXPLICIT_HORIZONTAL_DIFFUSION_LIMIT,
                           EPSSM_AUTO,
-                          GRELL_FAMILY_DEFAULTS, GRELL_FREITAS_CU_PHYSICS,
+                          GRELL_FAMILY_CU_PHYSICS, GRELL_FAMILY_DEFAULTS,
+                          SAS_FAMILY_DEFAULTS, SAS_PGCON_SCHEMES,
                           MIX_ISOTROPIC_AUTO, SASE_FAIL_CLOSED_DEFAULTS,
                           SASE_PBL_SCHEME, RunConfig,
                           anisotropic_w_mixing_ratio,
@@ -282,13 +283,27 @@ _SHARED_FORBIDDEN = {
 #: So no namelist-driven route can produce a per-domain isfflx, and none
 #: should: a config that uses it has left WRF-expressible territory and
 #: cannot be round-tripped back to a namelist.
+from woof.sfire_config import FIRE_DOMAIN_FIELDS
+
 _DOMAIN_RUN_OVERRIDES = (
+    "hailcast_opt", "haildt",
+    "lightning_option", "lightning_dt", "lightning_start_seconds",
+    "flashrate_factor", "iccg_method", "iccg_prescribed_num",
+    "iccg_prescribed_den", "cellcount_method", "cldtop_adjustment", "do_radar_ref",
     # clos_choice/ishallow ride with cu_physics: per-domain because the
     # scheme they configure is, and inert (validated zero) on any domain
     # that does not select cu_physics = 3.  On a tree that mixes
     # Grell-Freitas with another cumulus choice a [shared] value reaches
     # the Grell-Freitas domains only (see tree_runs_grell below).
-    "cu_physics", "cudt_minutes", "clos_choice", "ishallow",
+    # cugd_avedx joins them for Grell 3D (cu_physics = 5) on the same terms.
+    "cu_physics", "cudt_minutes", "clos_choice", "ishallow", "cugd_avedx",
+    "maxiens", "maxens", "maxens2", "maxens3", "ensdim", "cu_diag", "convtrans_avglen_m",
+    # The SAS-family keys, on the Grell keys' terms (tree_runs_sas below):
+    # per-domain because the scheme they configure is.  sas_pgcon is a WRF
+    # max_domains key; nsas_dx_factor is WRF scope 1, and the namelist door
+    # writes the one value onto every New SAS domain, so a per-domain
+    # difference is reachable only by writing the TOML directly.
+    "sas_pgcon", "nsas_dx_factor",
     "radt", "radt_minutes", "bldt",
     # Every domain owns its radiation driver. Spectrum composition, CAM
     # parent transport and shared workspace sizing resolve these choices
@@ -351,6 +366,7 @@ _DOMAIN_RUN_OVERRIDES = (
     # frame, so a tree can carry the horizontal viscosity on the domain
     # whose mixing is being read and leave it off the rest.
     "hmix_k_diag",
+    "surface_energy_diag",
     # LES-nest inflow seeding (P3): per-domain because the mechanism IS
     # per-edge -- it perturbs one child's rolling nest-boundary tables,
     # validate_run_config refuses it on a non-nested domain, and like
@@ -392,33 +408,19 @@ _DOMAIN_RUN_OVERRIDES = (
     "mosaic_urban_canopy",
     # WRF Registry scopes CLM lake selection per domain.
     "sf_lake_physics", "use_lakedepth", "lakedepth_default", "lake_min_elev",
+    "lake_state_source", "lake_state_path", "lake_state_accept_licence",
     # WRF declares topo_wind and gwd_opt max_domains too
     # (woof.core.terrain_drag); the GSL suite tapers itself with each
     # domain's grid length, so a column is the natural shape.
     "topo_wind", "gwd_opt",
-    # The prescribed surface smoke emission is a field on ONE domain's mass
-    # grid, so each domain names its own file (or "" for none).  smoke_tracer itself
-    # stays [shared]: a nest edge forces and feeds back the tracer, so a
-    # tree carries it on every domain or on none.
-    "smoke_emission_file",
-    # WRF's coupled fire model (woof/fire/coupling.py): Registry.fire and
-    # &domains declare every one of these max_domains, and a fire burns on
-    # the domain whose mesh resolves it -- commonly the innermost nest
-    # only.  Fire state is per domain and crosses no nest edge.
-    "ifire", "sr_x", "sr_y", "fire_fuel_read", "fire_fuel_cat",
-    "fire_fuel_table", "fire_fmc_read", "fire_wind_height",
-    "fire_ext_grnd", "fire_ext_crwn", "fire_crwn_hgt", "fire_atm_feedback",
-    "fire_ignitions", "fire_advection", "fire_lsm_reinit",
-    "fire_lsm_reinit_iter", "fire_lsm_band_ngp", "fire_viscosity",
-    "fire_viscosity_bg", "fire_viscosity_band", "fire_viscosity_ngp",
-    "fire_lfn_ext_up", "fire_slope_factor", "fire_tracer_smoke",
-    "fire_smoke_factor", "sfc_lu_index",
+    "history_interval2_s", "history_interval_change_s",
+    "prec_acc_dt", "prec_acc_dt1", "gsd_diagnostics", "reset_interval1",
     # WRF declares windfarm_opt max_domains (Registry.EM_COMMON:3003), and
     # each domain places its own turbines, so the switch and the turbine
     # file are per domain.  windfarm_ij and windfarm_tke_factor are scope 1
     # in WRF and stay [shared].
     "windfarm_opt", "windfarm_turbine_file",
-)
+) + FIRE_DOMAIN_FIELDS
 
 #: Per-domain vertical keys are REJECTED outright (F1 amendment: the
 #: vertical grid is single-sourced from ExperimentConfig.vertical, so
@@ -429,7 +431,7 @@ _DOMAIN_VERTICAL_KEYS = ("nz", "e_vert", "eta_levels", "p_top", "ztop",
 #: Rows for the [[domain]] keys no typed field declares
 #: (:mod:`woof.config_keys`).
 _DOMAIN_KEY_ROWS = key_rows(
-    KeyRow("static", "table", None, "per-domain terrain smooth_option, smooth_passes and smooth_precision, and the fire model's fuel = { sr_x, sr_y, landfire, landfire_kind } request"),
+    KeyRow("static", "table", None, "per-domain terrain smooth_option, smooth_passes and smooth_precision"),
     KeyRow("start_time", "datetime", None,
            "when this nest starts, an offset-free TOML date-time inside "
            "the run; absent starts it with [experiment].start_time"),
@@ -1479,6 +1481,11 @@ class ExperimentConfig:
     output: "object" = history_selection_module.FULL
     #: Radar products observe saved history and do not change restart state.
     simulated_radar: simulated_radar_module.SimulatedRadarOptions = simulated_radar_module.OFF
+    #: The resolved [radar_heating] table (:class:`woof.config.RadarHeatingConfig`).
+    #: OFF when absent, and then absent from every document and identity.
+    #: Present, it binds the restart identity (minus the windows path), so a
+    #: checkpoint written heated cannot resume under other heating or none.
+    radar_heating: "RadarHeatingConfig" = RADAR_HEATING_OFF
     #: grid_ids whose ``mix_isotropic`` was CHOSEN BY THE MODEL because
     #: the config left it unset or wrote the ``"auto"`` sentinel (ArWen's
     #: 2026-08-16 auto-switch ruling; ``resolve_auto_mix_isotropic``).
@@ -1539,6 +1546,9 @@ class ExperimentConfig:
             raise ValueError(
                 "feedback must be 0 (one-way) or 1 (experimental "
                 f"two-way), got {self.feedback!r}.")
+        if (any(dc.run.fire_smoke for dc in self.domains)
+                and not any(dc.run.ifire == 2 for dc in self.domains)):
+            raise ValueError("bulk SFIRE smoke needs an actual ifire=2 source domain in the tree")
         if self.smooth_option not in SMOOTH_OPTION_OPTIONS:
             raise ValueError(
                 "smooth_option must be 0 (none), 1 (sm121) or 2 (smdsm), "
@@ -1794,8 +1804,7 @@ def is_experiment_toml(path: str | Path) -> bool:
     ``[[domain]]`` present) rather than a legacy RunConfig TOML."""
     from woof.config_authority import read_config_authority
 
-    raw = tomllib.load(io.BytesIO(read_config_authority(path).payload))
-    return "experiment" in raw or "domain" in raw
+    return is_experiment_toml_bytes(read_config_authority(path).payload)
 
 
 def is_experiment_toml_bytes(payload: bytes) -> bool:
@@ -1851,16 +1860,13 @@ def load_experiment(path: str | Path, *,
     from woof.config import _anchor_config_file_paths
     _anchor_config_file_paths(raw.get("shared", {}), authority.source,
                               keys=("rrtmg_smoke_manifest",
-                                    "smoke_emission_file",
                                     "windfarm_turbine_file"))
-    # The smoke emission and the turbine file are per domain too
-    # (_DOMAIN_RUN_OVERRIDES), so a [[domain]] path resolves beside the
-    # config exactly as a [shared] one.
+    # The turbine file is per domain too (_DOMAIN_RUN_OVERRIDES), so a
+    # [[domain]] path resolves beside the config exactly as a [shared] one.
     for table in raw.get("domain", ()) or ():
         if isinstance(table, dict):
             _anchor_config_file_paths(table, authority.source,
-                                      keys=("smoke_emission_file",
-                                            "windfarm_turbine_file"))
+                                      keys=("windfarm_turbine_file",))
     base_dir = Path(authority.source).parent
     experiment = build_experiment_from_config_tables(
         raw, source=source, base_dir=base_dir)
@@ -1869,36 +1875,15 @@ def load_experiment(path: str | Path, *,
 
 
 def review_root_footprint(experiment: "ExperimentConfig", source: str) -> None:
-    """Refuse a configuration whose ROOT footprint encloses the
-    projection pole.
+    """Keep a Lambert root clear of its singular cone tip.
 
-    The companion doors have always measured this and refused it -- the
-    wizard on a drawn or fitted root, the GeoJSON exporter on a
-    perimeter that spans a full turn of longitude -- and until 2.7.3
-    that was the only place it ran.  A hand-authored [projection] plus
-    [[domain]] carrying the same footprint passed plan review, so the
-    file was called good and then refused by the door that prepared it.
-    It is a geometric impossibility rather than a missing piece of
-    evidence: lat-lon source interpolation and static-tile windowing are
-    not pole-capable, on any projection, so no smaller card and no other
-    selector makes this configuration runnable.
-
-    Called from the two doors that read a config FILE
-    (:func:`load_experiment` and
-    :func:`woof.case_data.load_experiment_case_bytes`), which is what a
-    plan is.  Not from :func:`build_experiment` itself, because the
-    wizard's fitting search builds a real experiment per ladder rung in
-    order to price it and shrinks off the poleward rungs with its own
-    bound (:func:`woof.domain_wizard.point_request_bound`); refusing to
-    build them would kill the search instead of steering it.
-
-    Children are not asked: a child lies inside its parent, so a root
-    that clears the pole clears it for the whole tree.  Idealized
-    configurations (no [projection]) carry no footprint to measure.
+    Polar stereographic is regular through its hemisphere's pole. Its
+    source and static windows include periodic donor halos, so a cap is
+    valid through file-backed loading as well as wizard fitting.
     """
 
     projection = experiment.projection
-    if projection is None:
+    if projection is None or projection.map_proj == "polar":
         return
     root = experiment.root.run
     if not footprint_contains_pole(
@@ -1913,9 +1898,9 @@ def review_root_footprint(experiment: "ExperimentConfig", source: str) -> None:
         f"experiment config {source}: the root domain ({root.nx} x "
         f"{root.ny} mass points at {root.dx / 1000:g} km on "
         f"{projection.map_proj!r}) contains or touches the {pole} pole; "
-        "lat-lon source interpolation and static-tile windowing are not "
-        "pole-capable, so no projection holds this footprint. Move "
-        "[projection] ref_lat away from the pole, or shrink the root "
+        "Lambert longitude is singular there. Set [projection] map_proj "
+        "to 'polar' for a pole-enclosing domain, or move ref_lat "
+        "away from the pole or shrink the root "
         "(nx/ny/dx), until the footprint clears it.")
 
 
@@ -1928,11 +1913,27 @@ def build_experiment_from_config_tables(raw: dict, *, source: str,
     """
     import copy
 
+    from woof.vertical_contract import validate_config_source_top
+
+    validate_config_source_top(raw, context=source)
     raw = copy.deepcopy(raw)
     fetch_table = raw.pop("fetch", None)
     if fetch_table is not None:
         from woof.fetch import validate_fetch_hints
         validate_fetch_hints(fetch_table, source=source)
+        # A run that starts from HRRR with smoke on takes HRRR-Smoke's
+        # smoke as its start state and edge values (the source's row).
+        from woof.config import apply_route_chem_sources
+        apply_route_chem_sources(raw, fetch_table)
+        # A configuration that names an operational-fork source (hrrr*,
+        # rap*) and omits a scheme-generation selector runs that source's
+        # generation, not the generic WRF v4.6.1 one: the door's carried
+        # experiment.toml predated these selectors and silently ran the
+        # v4.6.1 surface layer and Thompson against HRRR's own analysis
+        # (woof.physics_source_defaults.GENERATION_SELECTORS).  Written
+        # keys are kept as written.
+        from woof.physics_source_defaults import fill_omitted_generation_selectors
+        fill_omitted_generation_selectors(raw, fetch_table)
     case_table = raw.pop("case_data", None)
     if case_table is not None:
         from woof.case_data import build_case_data
@@ -1980,9 +1981,14 @@ def drop_unreached_grell_selectors(raw: dict, kept_runs) -> None:
     ran the Registry defaults, and left in [shared] the keys would refuse
     it.  With a Grell-Freitas domain kept, they stay and reach it.
     """
-    if any(run.cu_physics == GRELL_FREITAS_CU_PHYSICS for run in kept_runs):
-        return
     shared = raw.get("shared")
+    if not any(run.cu_physics in SAS_PGCON_SCHEMES for run in kept_runs):
+        # The SAS-family keys, on the same terms.
+        if isinstance(shared, dict):
+            for key in SAS_FAMILY_DEFAULTS:
+                shared.pop(key, None)
+    if any(run.cu_physics in GRELL_FAMILY_CU_PHYSICS for run in kept_runs):
+        return
     if isinstance(shared, dict):
         for key in GRELL_FAMILY_DEFAULTS:
             shared.pop(key, None)
@@ -2612,64 +2618,20 @@ def _refuse_moving_windfarm(domains, relocation, source) -> None:
                 "keep the nest fixed.")
 
 
-def _refuse_moving_smoke_emission(domains, relocation, source) -> None:
-    """A prescribed smoke emission on a nest that moves: refused.
-
-    The emission file is a field on the nest's grid at its declared
-    placement.  A move rebuilds the nest at a new placement, and the
-    tracer's first step on the rebuilt state would read the same file onto
-    the shifted grid, so the sources would travel with the nest box.  A
-    moving nest may carry the tracer itself, with ``smoke_emission_file =
-    ""``.
-    """
-    moving = _moving_grid_ids(domains, relocation)
-    for dc in domains:
-        if int(dc.grid_id) in moving and getattr(
-                dc.run, "smoke_emission_file", ""):
-            raise ValueError(
-                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} moves "
-                "and sets smoke_emission_file: the file is a field on the "
-                "nest's grid at its declared placement, and after a move it "
-                "would be read onto the shifted grid, carrying every source "
-                "with the nest.  Set smoke_emission_file = \"\" on the "
-                "moving nest (it still carries the tracer).")
-
-
 def _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation,
                                                  source) -> None:
-    """swint_opt = 1 on a nest rebuilt mid-run: refused until the rebuild
-    carries the fit.
+    """RETIRED: swint_opt = 1 on a nest rebuilt mid-run is served.
 
-    A move or a spawn rebuilds the nest's physics driver cold
-    (woof.runtime.rebuild_child_driver_from_land_state) and carries only
-    the land-surface radiation carriers (woof.core.physics_continuation);
-    the shortwave interpolation's fit coefficients and reference call
-    (woof.core.swint STATE_FIELDS, Registry misc state in WRF) are not
-    among them.  The rebuilt nest keeps its model time, so its next
-    radiation call is a whole cadence away, and on every step until then
-    interp_sw_radiation evaluates a zero reference: SWDOWN, GSW and the
-    direct and diffuse parts are zero over the whole nest in daylight.
+    The defect this refused -- a spawned or moved nest's driver rebuilt cold
+    with no shortwave-interpolation fit, so its surface shortwave read zero
+    in daylight until its next radiation call a whole radt away -- is fixed
+    at its cause: woof.runtime.rebuild_child_driver_from_land_state marks
+    the rebuilt driver to call radiation on its first step
+    (``force_radiation_next_step``), exactly as a nest born at t = 0 does,
+    so the fit restarts from a real call.  Kept as a named no-op so the
+    load sequence that called it reads the same.
     """
-    rebuilt = {}
-    if relocation is not None and getattr(relocation, "enabled", False)             and (getattr(relocation, "moves", ())
-                 or getattr(relocation, "follow", None) is not None):
-        rebuilt[int(relocation.grid_id)] = "moves"
-    for dc in domains:
-        if getattr(dc, "follow", None) is not None:
-            rebuilt[int(dc.grid_id)] = "moves"
-        elif getattr(dc, "spawn", None) is not None:
-            rebuilt.setdefault(int(dc.grid_id), "is spawned mid-run")
-    for dc in domains:
-        how = rebuilt.get(int(dc.grid_id))
-        if how is not None and int(getattr(dc.run, "swint_opt", 0) or 0) == 1:
-            raise ValueError(
-                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} {how} "
-                "and sets swint_opt = 1: a move or a spawn rebuilds the "
-                "nest's physics cold and does not carry the shortwave "
-                "interpolation's fit (woof.core.swint), so until the "
-                "nest's next radiation call its surface shortwave would be "
-                "zero in daylight.  Keep this nest still and present from "
-                "the start, or set swint_opt = 0.")
+    del domains, relocation, source
 
 
 def _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source) -> None:
@@ -2727,36 +2689,6 @@ def _refuse_rebuilt_nest_lake(domains, relocation, source) -> None:
                 "rebuild does not carry lake water, ice, snow and sediment "
                 "heat storage. Keep this lake domain fixed and present "
                 "from the start; otherwise its lake state would be reset.")
-
-
-def _refuse_moving_fire(domains, relocation, source) -> None:
-    """ifire on a nest that moves or is spawned mid-run: refused by name.
-
-    WRF v4.7.1's fire lives on the domain's fixed fire mesh: its level set,
-    ignition times and fuel left are fire-mesh state with no nest
-    interpolation (Registry/registry.fire declares none), and a moving
-    nest's fire mesh would have to be rebuilt under a fire already
-    burning.  woof's nest rebuild (a move, a storm-follow or a mid-run
-    spawn) builds the child cold, which would extinguish the fire and
-    relight nothing.  Fire runs on any fixed domain present from its start.
-    """
-    rebuilt = set()
-    if relocation is not None and getattr(relocation, "enabled", False) \
-            and (getattr(relocation, "moves", ())
-                 or getattr(relocation, "follow", None) is not None):
-        rebuilt.add(int(relocation.grid_id))
-    rebuilt.update(int(dc.grid_id) for dc in domains
-                   if getattr(dc, "follow", None) is not None
-                   or getattr(dc, "spawn", None) is not None)
-    for dc in domains:
-        if int(dc.grid_id) in rebuilt and int(getattr(dc.run, "ifire", 0)):
-            raise ValueError(
-                f"[[domain]] grid_id = {int(dc.grid_id)} of {source} moves "
-                "or is spawned mid-run with ifire = 2: a moving or spawned "
-                "nest is rebuilt cold, and the fire's level set, ignition "
-                "times and fuel on its fire mesh would be lost with it.  Run "
-                "the fire on a fixed domain present from its start, or set "
-                "ifire = 0 on the moving nest.")
 
 
 def _refuse_child_terrain_drag(domains, source) -> None:
@@ -3422,7 +3354,12 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     """Validate a parsed experiment TOML dict and build the config."""
     known_tables = ("experiment", "shared", "projection", "domain",
                     "relocation", "perturbation", "tiles", "devices", "output", "simulated_radar",
-                    "spectral_numerics", "physics_params")
+                    "spectral_numerics", "physics_params", "radar_heating")
+    # Setup lineage is provenance, with no atmosphere or follower controls.
+    if isinstance(raw, dict) and "lineage" in raw:
+        from woof.cyclone_tracks import validate_lineage
+        raw = dict(raw)
+        validate_lineage(raw.pop("lineage"))
     # [ingest] is INGEST POLICY, and it is validated-and-dropped HERE
     # rather than added to the companion list above.  The companion
     # tables declare INPUTS: dropping one loses a setting, so the caller
@@ -3440,12 +3377,8 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         from woof.ingest.soil_downscale import parse_ingest_table
         raw = dict(raw)
         parse_ingest_table(raw.pop("ingest"), source=source)
-    # Random-physics switches (SPPT, SKEBS, SPP and the perturbation
-    # selectors) are refused HERE, in the builder every config door loads
-    # through, so no route can read past them and only fail at the first
-    # physics call, after its download and its preparation on the card.
-    # The reason is the calibration one: their amplitudes have not been
-    # measured against observations.
+    # Missing random-field/parameter consumers refuse before preparation:
+    # otherwise their requested increments would silently stay absent.
     from woof.ensemble_admission import refuse_configured_random
     refuse_configured_random(raw)
     if isinstance(raw, dict) and "ensemble" in raw:
@@ -3716,6 +3649,17 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         raw.get("output"), source=source, base_dir=output_base_dir)
     simulated_radar = simulated_radar_module.SimulatedRadarOptions.from_mapping(
         raw.get("simulated_radar"), source=source)
+    # ---- [radar_heating] ---------------------------------------------
+    # Absent is OFF and changes no document, fingerprint or argv.  Present,
+    # it is honored by the deterministic prepared door
+    # (woof.da.forecast_heating) and refused by every route that does not
+    # attach it (forecast_heating.require_routed, asked by
+    # execute_experiment), never ignored.  A relative windows root is
+    # anchored at the config file's own directory.
+    source_path = Path(str(source))
+    radar_heating = RadarHeatingConfig.from_mapping(
+        raw.get("radar_heating"), source=source,
+        base_dir=source_path.parent if source_path.is_file() else None)
 
     # ---- [shared] ------------------------------------------------------
     shared = dict(raw.get("shared", {}))
@@ -3907,6 +3851,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     auto_epssm_ids: list[int] = []
     by_id: dict[int, DomainConfig] = {}
     dt_by_id: dict[int, Fraction] = {}
+    # Each built domain's adaptive-clock step bounds (exact), so a child whose
+    # bounds come from [shared] takes its parent's over its time-step ratio.
+    adaptive_bounds_by_id: dict[int, dict[str, Fraction]] = {}
     dx_by_id: dict[int, Fraction] = {}
     fp32_by_id: dict[int, np.float32] = {}
     # A tree that mixes SASE with another PBL scheme.  The SASE selectors
@@ -3939,7 +3886,17 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             "cu_physics",
             dom.get("cu_physics",
                     shared.get("cu_physics", RunConfig.cu_physics)))
-        == GRELL_FREITAS_CU_PHYSICS
+        in GRELL_FAMILY_CU_PHYSICS
+        for dom in domain_tables)
+    # And for the SAS-family keys (nsas_dx_factor, sas_pgcon), read only
+    # where cu_physics is a SAS scheme: a [shared] value reaches the SAS
+    # domains and leaves the others on the Registry defaults.
+    tree_runs_sas = any(
+        physics_mode.settings.get(
+            "cu_physics",
+            dom.get("cu_physics",
+                    shared.get("cu_physics", RunConfig.cu_physics)))
+        in SAS_PGCON_SCHEMES
         for dom in domain_tables)
     for index, dom in enumerate(domain_tables):
         _reject_moving_nest_keys("domain", dom, source)
@@ -3960,10 +3917,6 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if "static" in dom:
             from woof.static.terrain_smoothing import parse_domain_static
             parse_domain_static(dom["static"], source=source, grid_id=grid_id)
-            if isinstance(dom["static"], dict) and "fuel" in dom["static"]:
-                from woof.static.fuel import parse_domain_fuel
-                parse_domain_fuel(dom["static"]["fuel"], source=source,
-                                  grid_id=grid_id)
         if grid_id in by_id:
             raise ValueError(
                 f"duplicate grid_id = {grid_id} in [[domain]] tables of "
@@ -4470,10 +4423,24 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         for key in _DOMAIN_RUN_OVERRIDES:
             if key in dom:
                 kw[key] = dom[key]
-        if "fire_ignitions" in kw:
-            from woof.config import normalize_fire_ignitions
-            kw["fire_ignitions"] = normalize_fire_ignitions(
-                kw["fire_ignitions"])
+        # WRF's adaptive nest steps at its parent's step over
+        # parent_time_step_ratio.  The starting/min/max bounds are per-domain
+        # keys, and a [shared] value reached every child verbatim: under the
+        # HRRR recipe (all three pinned at 20 s) a 1 km nest stepped at the
+        # parent's 20 s and went non-finite within eight steps (box D,
+        # 2026-10-21).  A child that does not set a bound itself takes its
+        # parent's over the ratio, as an exact fraction.
+        if parent_id != 0 and kw.get("use_adaptive_time_step"):
+            parent_bounds = adaptive_bounds_by_id.get(int(parent_id), {})
+            for bound_key in ("starting_time_step", "max_time_step", "min_time_step"):
+                if bound_key in dom or f"{bound_key}_den" in dom:
+                    continue
+                inherited = parent_bounds.get(bound_key)
+                if inherited is None:
+                    continue
+                value = inherited / int(dom["parent_time_step_ratio"])
+                kw[bound_key] = int(value.numerator)
+                kw[f"{bound_key}_den"] = int(value.denominator)
         # The axis writes its resolved vector LAST and onto every domain:
         # it is the author of these keys (the [shared]/[[domain]] refusal
         # above guarantees nobody else wrote them), and one experiment is
@@ -4485,8 +4452,20 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                 if key not in dom:
                     kw[key] = default
         if (tree_runs_grell and kw.get("cu_physics", RunConfig.cu_physics)
-                != GRELL_FREITAS_CU_PHYSICS):
+                not in GRELL_FAMILY_CU_PHYSICS):
             for key, default in GRELL_FAMILY_DEFAULTS.items():
+                if key not in dom:
+                    kw[key] = default
+        # G3-only shared controls reach only G3 domains. Explicit domain
+        # controls remain validated, so an off-scheme value is not discarded.
+        from woof.config import G3_RUN_DEFAULTS
+        if tree_runs_grell and kw.get("cu_physics", RunConfig.cu_physics) != 5:
+            for key, default in G3_RUN_DEFAULTS.items():
+                if key not in dom:
+                    kw[key] = default
+        if (tree_runs_sas and kw.get("cu_physics", RunConfig.cu_physics)
+                not in SAS_PGCON_SCHEMES):
+            for key, default in SAS_FAMILY_DEFAULTS.items():
                 if key not in dom:
                     kw[key] = default
         # bl_pbl_physics is per-domain for every scheme, SASE included:
@@ -4531,10 +4510,29 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if epssm_auto:
             kw.pop("epssm", None)
             auto_epssm_ids.append(grid_id)
+        # The chem name lists may arrive from TOML as arrays; RunConfig
+        # stores them as one comma-separated string (as load_config does).
+        # [shared]-only: every domain of a tree carries the same chem sets,
+        # because a nest's chem boundary is its parent's field.
+        from woof.config import apply_chem_set_defaults, join_chem_name_lists
+        join_chem_name_lists(kw)
+        # The sets' own scheme defaults (smoke: washout on, hourly plume),
+        # for keys this configuration leaves unset, as load_config does.
+        apply_chem_set_defaults(kw)
         # The full legacy invariant battery applies to every per-domain
         # RunConfig (p5t1 review F1): same checks, same messages as
         # load_config.
+        from woof.surface_ocean import apply_ocean_defaults
+        apply_ocean_defaults(kw)
         run = validate_run_config(RunConfig(**kw))
+        bounds = {}
+        for bound_key in ("starting_time_step", "max_time_step", "min_time_step"):
+            num = getattr(run, bound_key, None)
+            if num is None or (isinstance(num, (int, float)) and num <= 0):
+                continue
+            den = int(getattr(run, f"{bound_key}_den", 0) or 0) or 1
+            bounds[bound_key] = Fraction(num) / den
+        adaptive_bounds_by_id[int(grid_id)] = bounds
 
         # --- cadence divisibility (integer domain steps) ----------------
         # TOML decimal minutes use the same decimal clock as run_seconds;
@@ -4720,12 +4718,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
     domains = validate_follow_tracks(domains, relocation, source)
     _refuse_windowed_stash_watch(domains, source)
     _refuse_moving_slope_radiation(domains, relocation, source)
-    _refuse_moving_smoke_emission(domains, relocation, source)
     _refuse_moving_windfarm(domains, relocation, source)
     _refuse_rebuilt_nest_noah_mosaic(domains, relocation, source)
     _refuse_rebuilt_nest_shortwave_interpolation(domains, relocation, source)
     _refuse_rebuilt_nest_lake(domains, relocation, source)
-    _refuse_moving_fire(domains, relocation, source)
     _refuse_child_terrain_drag(domains, source)
     from woof.core.attribute_tracking import validate_attribute_domains
     validate_attribute_domains(domains, relocation)
@@ -4743,6 +4739,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         physics_mode=physics_mode,
         perturbation=perturbation,
         tiles=tiles, devices=devices, output=output, simulated_radar=simulated_radar,
+        radar_heating=radar_heating,
         spectral_numerics=spectral_numerics,
         auto_epssm=tuple(sorted(auto_epssm_ids)),
         physics_params=physics_params)
@@ -5071,7 +5068,11 @@ def ucm_first_level_refusal(experiment: ExperimentConfig, *,
         base_temp = float(run.base_temp)
         za_base = 0.5 * _first_layer_depth(float(eta[1]), vertical, base_temp)
         za_warm = za_base * UCM_PLAN_WARMEST_LAYER_K / base_temp
-        heights = ucm_canopy_heights(lcz)
+        table_options = {
+            "generation": getattr(run, "urban_ucm_generation", "wrf_471"),
+            "tbl_dir": getattr(run, "urban_table_dir", "") or None,
+        }
+        heights = ucm_canopy_heights(lcz, **table_options)
         over = {k: h for k, h in heights.items() if h >= za_warm}
         if not over:
             continue
@@ -5090,7 +5091,7 @@ def ucm_first_level_refusal(experiment: ExperimentConfig, *,
                 lo = mid
             else:
                 hi = mid
-        tallest_urbparm = max(ucm_canopy_heights(0).values())
+        tallest_urbparm = max(ucm_canopy_heights(0, **table_options).values())
         remedies = [
             (f"land cover whose urban classes stay below the level: NLCD "
              f"with use_wudapt_lcz = 0 (the three URBPARM classes, the "
@@ -5648,10 +5649,20 @@ def _public_config_value(value):
     if isinstance(value, StreamingOptions):
         return value.to_mapping()
     if is_dataclass(value):
+        from woof.config import CHEM_RUN_FIELDS
+        inert_chem = (frozenset(CHEM_RUN_FIELDS)
+                      if isinstance(value, RunConfig) and not value.chem_sets
+                      else frozenset())
+        if isinstance(value, RunConfig):
+            from woof.config import inert_fire_fields
+            inert_chem = inert_chem | frozenset(inert_fire_fields(value))
         document = {item.name: _public_config_value(getattr(value, item.name))
                     for item in fields(value)
-                    if not (isinstance(value, FollowConfig)
-                            and value.field != "attribute" and item.name in ATTRIBUTE_KEYS)}
+                    if item.name not in inert_chem
+                    and not (isinstance(value, FollowConfig)
+                            and ((value.field != "attribute" and item.name in ATTRIBUTE_KEYS)
+                                 or (value.field != "pressure" and item.name in {
+                                     "pressure_center", "fallback_level_hpa", "fallback_deficit_m"})))}
         if (isinstance(value, history_selection_module.HistorySelection)
                 and value.hub_wind is None):
             # Hub-height wind is off unless asked; an [output] block that
@@ -5661,9 +5672,13 @@ def _public_config_value(value):
                 and value.windfarm_power is None):
             # Wind-farm power likewise: absent stays absent.
             document.pop("windfarm_power", None)
-        run_document =(document if isinstance(value, RunConfig) else
+        run_document = (document if isinstance(value, RunConfig) else
                         document.get("run") if isinstance(value, DomainConfig) else None)
         if isinstance(run_document, dict):
+            from woof.config import drop_inert_g3_fields
+            drop_inert_g3_fields(run_document)
+            from woof.checkpoint_identity import drop_default_cumulus_selectors
+            drop_default_cumulus_selectors(run_document)
             # The generic forms existed before these selectors. Keep
             # their public bytes; an explicitly moved form remains bound.
             for name, default in (("ruc_irrigation", "wrf_461"),
@@ -5673,16 +5688,92 @@ def _public_config_value(value):
                                   ("swint_opt", 0), ("aer_opt", 0),
                                   ("alb_sol", 0),
                                   ("thompson_version", "wrf_461"),
+                                  ("thompson_table_dir", None),
                                   ("thompson_fork_snow_fall", "blend"),
                                   ("rrtmg_cloud_optics_form", "wrf_461"),
+                                  ("rrtmg_aer3_type_source", "rural"),
                                   ("rrtmg_smoke_manifest", ""),
-                                  ("smoke_tracer", False),
-                                  ("smoke_emission_file", "")):
+                                  ("surface_energy_diag", False),
+                                  ("cycling", False),
+                                  ("bl_mynn_mixaerosols", 0),
+                                  ("bl_mynn_mixnumcon", 0),
+                                  ("tempo_ml_for_bl_nc", False),
+                                  ("tempo_surface_emission_before", False),
+                                  # 2.9.0 (golden/wrf-fixes).  WRF's one
+                                  # scalar advection operator and the WRF
+                                  # 4.7.1 urban canopy at their defaults.
+                                  ("scalar_adv_opt", 1),
+                                  ("urban_ucm_generation", "wrf_471"),
+                                  ("urban_treeoption", -1),
+                                  ("urban_ttscheme", -1),
+                                  ("urban_fvg", -1.0),
+                                  ("urban_table_dir", ""),
+                                  # The four WRF 4.7/4.8 fix selectors: a
+                                  # document written before them ran the
+                                  # PREVIOUS generation, so that value is
+                                  # the absent one (as in a checkpoint
+                                  # header, restart.ECHO_ABSENT_RUN_VALUES)
+                                  # and the corrected default is written.
+                                  ("solar_generation", "wrf_461"),
+                                  ("ysu_version", "wrf_461"),
+                                  ("noahmp_snow_age", "wrf_461"),
+                                  ("urban_water_balance", "wrf_471")):
                 if run_document.get(name, default) == default:
                     run_document.pop(name, None)
-            # The coupled fire's keys, inert while ifire is 0.
-            from woof.config import drop_inert_fire_keys
-            drop_inert_fire_keys(run_document)
+            # ... and the scheme-scoped ones reach nothing while their
+            # scheme is off, so they leave such a document whatever they say.
+            if run_document.get("bl_pbl_physics", 0) != 1:
+                run_document.pop("ysu_version", None)
+            if run_document.get("sf_surface_physics", 0) != 4:
+                run_document.pop("noahmp_snow_age", None)
+            if int(run_document.get("sf_urban_physics", 0) or 0) != 1:
+                run_document.pop("urban_water_balance", None)
+            # The ocean mixed layer (2.9.1): off, its selector and settings
+            # leave the document, which keeps the bytes it had before them.
+            if int(run_document.get("sf_ocean_physics", 0) or 0) == 0:
+                from woof.surface_ocean import ocean_namelist_defaults
+                for name, default in (("sf_ocean_physics", 0),
+                                      *ocean_namelist_defaults().items()):
+                    if run_document.get(name, default) == default:
+                        run_document.pop(name, None)
+            # The correct-mode keys (woof/correct_mode.py), by the
+            # checkpoint echo's rule: written only where on AND read by a
+            # selected scheme, so a default document without WSM6 or New
+            # Tiedtke keeps its bytes under the 2.9.0 correct-mode default,
+            # and an exact-mode document keeps the bytes it had before them.
+            from woof.correct_mode import (CORRECTION_KEYS,
+                                            OUTPUT_ONLY_KEYS, key_in_scope)
+            for name in CORRECTION_KEYS:
+                if (name in OUTPUT_ONLY_KEYS
+                        or not run_document.get(name, False)
+                        or not key_in_scope(name, run_document)):
+                    run_document.pop(name, None)
+            # Lightning and aer_opt = 2 controls (golden/ports-rad): absent
+            # while unread, so default public documents keep their bytes.
+            from woof.config import drop_inactive_radiation_port_keys
+            drop_inactive_radiation_port_keys(run_document)
+            # The 2.9.4 capabilities campaign, by the checkpoint echo's rule
+            # (woof.checkpoint_identity.drop_capability_campaign_keys), plus
+            # lane/cap-eclipse's default-on shadow (absent reads 1) and
+            # lane/cap-slab-ocean's PWP controls at their defaults while the
+            # ocean is off.
+            from woof.checkpoint_identity import drop_capability_campaign_keys
+            drop_capability_campaign_keys(run_document)
+            from woof.checkpoint_identity import drop_default_output_controls
+            drop_default_output_controls(run_document)
+            if run_document.get("ra_sw_eclipse", 1) == 1:
+                run_document.pop("ra_sw_eclipse", None)
+            if int(run_document.get("sf_ocean_physics", 0) or 0) == 0:
+                for name, default in (("ocean_levels", 30),
+                                      ("ocean_analysis", ""),
+                                      ("ocean_analysis_source", "rtofs"),
+                                      ("ocean_mld_climatology", "woa18"),
+                                      ("omdt", 1.0)):
+                    if run_document.get(name, default) == default:
+                        run_document.pop(name, None)
+                for name in ("ocean_z", "ocean_t", "ocean_s"):
+                    if not run_document.get(name, ()):
+                        run_document.pop(name, None)
             # windfarm_opt off reads none of its four keys (a shared turbine
             # file with the switch on other domains only included).
             if not run_document.get("windfarm_opt", 0):
@@ -5729,4 +5820,9 @@ def experiment_config_document(exp: ExperimentConfig) -> dict[str, object]:
         document.pop("devices", None)
     if not exp.simulated_radar.enabled:
         document.pop("simulated_radar", None)
+    heating = getattr(exp, "radar_heating", None)
+    if heating is None or not heating.enabled:
+        document.pop("radar_heating", None)
+    else:
+        document["radar_heating"] = heating.to_mapping()
     return document

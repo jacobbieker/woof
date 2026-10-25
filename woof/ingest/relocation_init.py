@@ -128,16 +128,6 @@ def _host(value, dtype=None) -> np.ndarray:
     return array if dtype is None else np.asarray(array, dtype=dtype)
 
 
-def _write_window(target, window, values) -> None:
-    """Assign host ``values`` into ``target[..., dst_j, dst_i]``."""
-    (dst_j, _src_j), (dst_i, _src_i) = window
-    if hasattr(target, "__cuda_array_interface__"):
-        import cupy as cp
-
-        values = cp.asarray(np.ascontiguousarray(values))
-    target[..., dst_j, dst_i] = values
-
-
 # ---------------------------------------------------------------------------
 # Overlap statics equality: asserted, never assumed
 # ---------------------------------------------------------------------------
@@ -237,18 +227,34 @@ class DonorFillPlan:
 
     def apply(self, values: np.ndarray) -> np.ndarray:
         """Fill one field's strip cells from their donors (trailing y, x)."""
-        values = np.asarray(values)
+        from woof.core.physics_continuation import _array_module
+
+        xp = _array_module(values)
+        values = xp.asarray(values)
         ny, nx = self.donor_flat.shape
         if values.shape[-2:] != (ny, nx):
             raise ValueError(
                 f"donor fill built for (ny, nx) = {(ny, nx)}, got a field "
                 f"with trailing shape {values.shape[-2:]}")
         flat = values.reshape(values.shape[:-2] + (ny * nx,))
-        return flat[..., self.donor_flat.ravel()].reshape(values.shape)
+        donors = xp.asarray(self.donor_flat.ravel())
+        return flat[..., donors].reshape(values.shape)
 
 
-def _nearest_donor(target_yx: np.ndarray, donor_yx: np.ndarray) -> np.ndarray:
+def _nearest_donor(target_yx: np.ndarray, donor_yx: np.ndarray, *,
+                   device: bool = False) -> np.ndarray:
     """Exact nearest donor per target (first index breaks ties)."""
+    if device and len(target_yx):
+        import cupy as cp
+        from woof.core.kernels import get_kernel
+
+        kernel = get_kernel("nest", "relocation_nearest_donor")
+        picked = cp.empty(len(target_yx), dtype=cp.int64)
+        kernel((len(target_yx),), (128,), (
+            cp.asarray(target_yx, dtype=cp.int64),
+            cp.asarray(donor_yx, dtype=cp.int64), picked,
+            np.int32(len(donor_yx))))
+        return picked.get()
     out = np.empty(target_yx.shape[0], dtype=np.int64)
     chunk = max(1, int(4e6) // max(1, donor_yx.shape[0]))
     for start in range(0, target_yx.shape[0], chunk):
@@ -261,7 +267,7 @@ def _nearest_donor(target_yx: np.ndarray, donor_yx: np.ndarray) -> np.ndarray:
 
 
 def donor_fill_plan(*, overlap_mask: np.ndarray,
-                    landmask: np.ndarray) -> DonorFillPlan:
+                    landmask: np.ndarray, device: bool = False) -> DonorFillPlan:
     """Build the strip's donor assignment from the overlap and landmask."""
     overlap_mask = np.asarray(overlap_mask, dtype=bool)
     land = np.asarray(landmask) >= 0.5
@@ -296,12 +302,12 @@ def donor_fill_plan(*, overlap_mask: np.ndarray,
         if donors.size == 0:
             unresolved |= targets
             continue
-        picked = donors[_nearest_donor(coords[targets], coords[donors])]
+        picked = donors[_nearest_donor(coords[targets], coords[donors], device=device)]
         donor_flat.ravel()[np.flatnonzero(targets)] = picked
         counts[label] = int(np.count_nonzero(targets))
     if unresolved.any():
         donors = np.flatnonzero(flat_overlap)
-        picked = donors[_nearest_donor(coords[unresolved], coords[donors])]
+        picked = donors[_nearest_donor(coords[unresolved], coords[donors], device=device)]
         donor_flat.ravel()[np.flatnonzero(unresolved)] = picked
         counts["class_fallback_filled"] = int(np.count_nonzero(unresolved))
     return DonorFillPlan(donor_flat=donor_flat, counts=counts)
@@ -467,41 +473,6 @@ def _build_footprint_statics(grid, catalog, child_dc):
     return fields, selection, landuse_attrs, highres_applied
 
 
-def window_static_fields(static_fields, window, cfg):
-    """A footprint's statics cropped to the reconstruction window.
-
-    Mass, staggered and category fields crop at their own extents; the
-    fire mesh's fields (woof.static.fuel) crop at sr_y x sr_x sub-cells per
-    mass cell, so the window keeps the footprint's own fire-mesh words.
-    """
-    sy, sx = window
-    from woof.static.fuel import FIRE_MESH_FIELDS
-    cropped_static = {}
-    for name, value in static_fields.items():
-        array = np.asarray(value)
-        if array.ndim < 2:
-            cropped_static[name] = value
-            continue
-        nyf, nxf = array.shape[-2:]
-        if name in FIRE_MESH_FIELDS:
-            # The footprint's own fire mesh, sr_y x sr_x cells per
-            # mass cell: the window's sub-cells, as they are.
-            ry, rx = nyf // cfg.ny, nxf // cfg.nx
-            if (ry * cfg.ny, rx * cfg.nx) != (nyf, nxf):
-                raise RelocationRefusal(
-                    f"static {name} has unsupported fire-mesh "
-                    f"extent {array.shape}")
-            cropped_static[name] = array[sy.start * ry:sy.stop * ry,
-                                         sx.start * rx:sx.stop * rx]
-            continue
-        if nyf not in (cfg.ny, cfg.ny+1) or nxf not in (cfg.nx, cfg.nx+1):
-            raise RelocationRefusal(
-                f"static {name} has unsupported reconstruction extent {array.shape}")
-        cropped_static[name] = array[..., sy.start:sy.stop+(nyf-cfg.ny),
-                                      sx.start:sx.stop+(nxf-cfg.nx)]
-    return cropped_static
-
-
 def real_relocation_initializer(*, catalog=None, vertical, child_config,
                                 reference_grid, reference_i_parent_start,
                                 reference_j_parent_start,
@@ -634,7 +605,20 @@ def real_relocation_initializer(*, catalog=None, vertical, child_config,
             from woof.core.nest_interp import window_registration
             from woof.ingest.nest_init import _mass_registration
             window_registration(_mass_registration(new_dc, parent_node), window)
-            static_fields = window_static_fields(static_fields, window, cfg)
+            sy, sx = window
+            cropped_static = {}
+            for name, value in static_fields.items():
+                array = np.asarray(value)
+                if array.ndim < 2:
+                    cropped_static[name] = value
+                    continue
+                nyf, nxf = array.shape[-2:]
+                if nyf not in (cfg.ny, cfg.ny+1) or nxf not in (cfg.nx, cfg.nx+1):
+                    raise RelocationRefusal(
+                        f"static {name} has unsupported reconstruction extent {array.shape}")
+                cropped_static[name] = array[..., sy.start:sy.stop+(nyf-cfg.ny),
+                                              sx.start:sx.stop+(nxf-cfg.nx)]
+            static_fields = cropped_static
 
         extra = {}
         if scratch_arena is not None:

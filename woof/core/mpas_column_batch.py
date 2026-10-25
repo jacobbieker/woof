@@ -263,18 +263,23 @@ _SPECIES_BY_SCHEME = {
     "p3": ("qv", "qc", "qr", "qi", "ni", "nr", "qir", "qib"),
     "thompson_aero": ("qv", "qc", "qr", "qi", "qs", "qg",
                       "ni", "nr", "nc", "nwfa", "nifa"),
+    "tempo": ("qv", "qc", "qr", "qi", "qs", "qg",
+              "ni", "nr", "nc", "nwfa", "nifa", "ng", "volg"),
 }
 _SPECIES = _SPECIES_BY_SCHEME["wsm6"]
 
 #: woof ``mp_physics`` selector per scheme row.  One table, so the
 #: RunConfig the seam builds and the species row it enforces cannot
 #: drift apart.
-_MP_PHYSICS_BY_SCHEME = {"wsm6": 6, "p3": 50, "thompson_aero": 28}
+_MP_PHYSICS_BY_SCHEME = {"wsm6": 6, "p3": 50, "thompson_aero": 28, "tempo": 900}
 
 #: ``pbl_scheme`` -> WRF ``bl_pbl_physics``.  "ysu" is the published
 #: configuration; "off" is WRF's bl_pbl_physics=0 (surface layer and LSM
 #: still run, no PBL tendencies), for a caller resolving turbulence itself.
-_BL_PBL_PHYSICS_BY_SCHEME = {"ysu": 1, "off": 0}
+#: ``None`` is upstream's spelling of the same slot for an external LES
+#: closure (hex's resident v8.4.2 LES); it seals as ``None`` in the identity
+#: exactly as 1.1.0 records it.
+_BL_PBL_PHYSICS_BY_SCHEME = {"ysu": 1, "off": 0, None: 0}
 
 #: Scheme rows whose driver arm binds a GRAUPEL accumulator, and so
 #: report ``graupelncv`` in the per-call receipt and ``GRAUPELNC`` in
@@ -282,7 +287,7 @@ _BL_PBL_PHYSICS_BY_SCHEME = {"ysu": 1, "off": 0}
 #: (woof/core/physics_inventory.py's mp=50 surface-slot row), and a
 #: permanent zero key would let a consumer claim a field the scheme
 #: never has.
-_GRAUPEL_SCHEMES = frozenset({"wsm6", "thompson_aero"})
+_GRAUPEL_SCHEMES = frozenset({"wsm6", "thompson_aero", "tempo"})
 
 #: The one scheme row whose phase-2 adapter consumes ``rho_dry``, and
 #: the reason each other row refuses it BY NAME rather than accepting
@@ -290,6 +295,7 @@ _GRAUPEL_SCHEMES = frozenset({"wsm6", "thompson_aero"})
 #: (woof/core/wsm6.py:109-112); P3 and aerosol-aware Thompson both
 #: build density from the EOS pressure inside their own kernels.
 _RHO_DRY_REFUSAL_BY_SCHEME = {
+    "tempo": "TEMPO derives its density from pressure, temperature and vapour",
     "p3": ("P3's kernels derive density from the EOS pressure where "
            "the authority does (module_mp_p3.F)"),
     "thompson_aero": ("mp_gt_driver builds its own rho from the EOS "
@@ -313,6 +319,7 @@ _RHO_DRY_REFUSAL_BY_SCHEME = {
 #: nothing refills either afterwards, so they are cross-step constants
 #: a resume cannot rebuild from the caller's transported state.
 _STATE_RESTART_FIELDS_BY_SCHEME = {
+    "tempo": ("effc", "effi", "effs", "h_diabatic", "nwfa2d", "nifa2d"),
     "wsm6": ("effc", "effi", "effs", "h_diabatic"),
     "p3": ("effc", "effi", "h_diabatic", "th_old", "qv_old"),
     "thompson_aero": ("effc", "effi", "effs", "h_diabatic",
@@ -379,9 +386,10 @@ def resolve_column_batch_cadences(*, dt, radiation_seconds,
       slot (``cumulus_seconds`` must then be None too).
     """
     dt = _require_positive("dt", dt)
-    if cumulus_scheme not in ("gf", "kf", None):
+    schemes = {"gf": 3, "kf": 1, "ntiedtke": 16, None: 0}
+    if cumulus_scheme not in schemes:
         raise ValueError(
-            f"cumulus_scheme must be 'gf', 'kf' or None, got "
+            f"cumulus_scheme must be 'gf', 'kf', 'ntiedtke' or None, got "
             f"{cumulus_scheme!r}")
     stepra = _cadence_steps("radiation_seconds", radiation_seconds, dt)
     stepbl = _cadence_steps("surface_pbl_seconds", surface_pbl_seconds, dt)
@@ -391,7 +399,7 @@ def resolve_column_batch_cadences(*, dt, radiation_seconds,
         "bldt_minutes": stepbl * dt / 60.0,
         "stepra": stepra,
         "stepbl": stepbl,
-        "cu_physics": {"gf": 3, "kf": 1, None: 0}[cumulus_scheme],
+        "cu_physics": schemes[cumulus_scheme],
     }
     if cumulus_scheme is None:
         if cumulus_seconds is not None:
@@ -400,11 +408,11 @@ def resolve_column_batch_cadences(*, dt, radiation_seconds,
         resolved["stepcu"] = 0
         return resolved
     stepcu = _cadence_steps("cumulus_seconds", cumulus_seconds, dt)
-    if cumulus_scheme == "gf":
+    if cumulus_scheme in ("gf", "ntiedtke"):
         if stepcu != 1:
             raise ValueError(
-                f"cumulus_scheme='gf' requires cumulus_seconds == dt "
-                f"({dt} s): WRF pins cudt=0 for Grell-Freitas (STEPCU=1, "
+                f"cumulus_scheme={cumulus_scheme!r} requires cumulus_seconds == dt "
+                f"({dt} s): this scheme pins cudt=0 (STEPCU=1, "
                 f"no NCA hold); got {cumulus_seconds} s")
         # GF carries WRF's pinned cudt=0 spelling; the effective cadence
         # is every step.
@@ -512,6 +520,9 @@ class _ColumnBatchState:
         self.php = zeros(nz + 1, ny, nx)
         self.alt = zeros(*shape3)
         self.w = zeros(nz + 1, ny, nx)
+        if cfg.mp_physics == 900:
+            # Per-domain SAVE state is needed for transactional retry/restart.
+            self.tempo_first_call = True
         for name in species:
             setattr(self, name, zeros(*shape3))
         if cfg.mp_physics == 50:
@@ -550,7 +561,7 @@ class _ColumnBatchState:
                                 dtype=np.float32)
             self.effs = xp.full(shape3, np.float32(9.99),
                                 dtype=np.float32)
-        if cfg.mp_physics == 28:
+        if cfg.mp_physics in (28, 900):
             # QNWFA2D / QNIFA2D: WRF's SURFACE aerosol emission
             # TENDENCIES (# kg-1 s-1, Registry.EM_COMMON:492-493).  They
             # are INTENT(IN) to mp_gt_driver (module_mp_thompson.F:1098;
@@ -650,7 +661,8 @@ class MpasColumnBatchPhysics:
                  vegfra=50.0, tsk=300.0, tmn=285.0, xice=0.0, snow=0.0,
                  snow_depth=0.0, soil_temperature=285.0,
                  soil_moisture=0.30, xice_threshold=0.5,
-                 wsm6_hail_opt=0, pbl_scheme="ysu"):
+                 wsm6_hail_opt=0, physics_mode=None,
+                 physics_correct_skip=(), pbl_scheme="ysu"):
         # ---- pure validation FIRST: every refusal below fires before a
         # single device allocation, so the CPU-hermetic contract tests
         # can exercise the whole refusal surface without touching a GPU.
@@ -696,13 +708,24 @@ class MpasColumnBatchPhysics:
         # exactly as validate_run_config refuses cu_physics=3 without one.
         if pbl_scheme not in _BL_PBL_PHYSICS_BY_SCHEME:
             raise ValueError(
-                f"pbl_scheme must be one of "
-                f"{sorted(_BL_PBL_PHYSICS_BY_SCHEME)}, got {pbl_scheme!r}")
-        if pbl_scheme == "off" and cumulus_scheme == "gf":
+                "pbl_scheme must be one of 'ysu', 'off' or None (external "
+                "LES), "
+                f"got {pbl_scheme!r}")
+        if pbl_scheme in ("off", None) and cumulus_scheme == "gf":
             raise ValueError(
                 "pbl_scheme='off' with cumulus_scheme='gf': Grell-Freitas "
                 "indexes the column at KPBL, which only a PBL scheme "
                 "writes; select no cumulus scheme with the PBL slot off")
+        # Correct mode (woof/correct_mode.py; physics.mode).  None is the
+        # engine default: "correct" from 2.9.0, "exact" (forced, recorded)
+        # under GPUWM_WRF_EXACT=1.  The resolution authors every correction
+        # key, so "exact" builds the config -- and the restart identity --
+        # this seam built before the keys existed, whatever their RunConfig
+        # defaults; an identity proof against native MPAS names "exact".
+        from woof import correct_mode
+        correct = correct_mode.resolve(
+            physics_mode, physics_correct_skip,
+            source="MpasColumnBatchPhysics physics_mode")
         threshold = float(xice_threshold)
         if not np.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
             raise ValueError(
@@ -785,17 +808,14 @@ class MpasColumnBatchPhysics:
             radt=cadences["radt_minutes"],
             radt_minutes=cadences["radt_minutes"],
             bldt=cadences["bldt_minutes"],
-            cudt_minutes=cadences["cudt_minutes"])
+            cudt_minutes=cadences["cudt_minutes"],
+            **correct.settings)
         self._cfg = cfg
+        self._correct_mode = correct
         self._cadences = cadences
         self._dt = float(cadences["dt"])
         self._nz, self._ncol = nz, ncol
         self._pbl_scheme = pbl_scheme
-        #: The counter that says the surface/PBL stack ran this step: the
-        #: PBL slot's ("ysu") when a PBL scheme is selected, the surface
-        #: layer's when the slot is off -- the stack still runs on its
-        #: cadence, it just has no PBL member.
-        self._surface_pbl_counter = "ysu" if pbl_scheme != "off" else "sfclay"
         self._start_time = start_time
         self._microphysics_scheme = microphysics_scheme
         self._has_graupel = microphysics_scheme in _GRAUPEL_SCHEMES
@@ -823,6 +843,8 @@ class MpasColumnBatchPhysics:
             "xland_source": ("native" if xland is not None
                              else "derived-from-landmask"),
         }
+        if pbl_scheme is None:
+            self._identity["pbl_scheme"] = None
         if microphysics_scheme != "wsm6":
             # Scheme-asymmetric ON PURPOSE: the wsm6 identity stays
             # byte-identical to schema v2 before the P3 arm existed, so
@@ -830,10 +852,17 @@ class MpasColumnBatchPhysics:
             # restore refuses on the identity comparison (the key is
             # present on one side only).
             self._identity["microphysics"] = microphysics_scheme
-        if pbl_scheme != "ysu":
+        if pbl_scheme not in ("ysu", None):
             # Same asymmetry, same reason: a YSU identity stays
             # byte-identical, and a restore across the PBL slot refuses.
             self._identity["pbl_scheme"] = pbl_scheme
+        if correct.applied:
+            # Present only in correct mode, for the same reason as the
+            # microphysics key above: an exact-mode payload stays
+            # byte-identical, and a restore across modes (or across a
+            # different skip list) refuses on the identity comparison
+            # rather than continuing a trajectory under other arithmetic.
+            self._identity["physics_correct"] = list(correct.applied)
 
         # ---- device construction from here on --------------------------
         import cupy as cp
@@ -901,7 +930,6 @@ class MpasColumnBatchPhysics:
 
         # Persistent input/atmosphere buffers ((nz[+1], 1, ncol)).
         shape3 = (nz, 1, ncol)
-        iface3 = (nz + 1, 1, ncol)
         # GF dynamics forcing lanes: persistent seam-owned buffers the
         # driver's GF adapter reads permanently.  Zero until a caller
         # supplies rates through run_phase1 -- which is also native
@@ -914,11 +942,19 @@ class MpasColumnBatchPhysics:
         if dx_column is not None:
             self._driver.gf_dx_column = cp.asarray(
                 dx_column.reshape(1, ncol))
+        # Seam-owned atmosphere buffers.  theta and pressure stay bound to
+        # state.thp/state.p between calls; temperature, dz and rho are
+        # derived here; exner is derived when the caller supplies none
+        # (allocated on that first call).  u, v, p_interface,
+        # z_interface and a caller exner are NOT mirrored: run_phase1
+        # hands the driver read-only views of the caller's arrays for the
+        # duration of the call (memory census 2026-10-14, item 10: the
+        # mirrors were 4 to 5 whole-mesh fields held all run).  No driver
+        # path writes them (test_phase1_leaves_every_input_byte_identical)
+        # and the atmosphere dict is dropped when the call returns.
         self._in = {name: cp.zeros(shape3, dtype=cp.float32)
-                    for name in ("u", "v", "theta", "temperature",
-                                 "pressure", "exner", "dz", "rho")}
-        self._in.update({name: cp.zeros(iface3, dtype=cp.float32)
-                         for name in ("p_interface", "z_interface")})
+                    for name in ("theta", "temperature", "pressure",
+                                 "dz", "rho")}
         self._atmosphere = None
         state.prepared_physics_atmosphere = self._supplied_atmosphere
 
@@ -1004,7 +1040,7 @@ class MpasColumnBatchPhysics:
     def run_phase1(self, *, dt, u, v, theta, pressure, pressure_interface,
                    z_interface, w, rho_dry, qv, qc, qr, qi, qs=None,
                    qg=None, ni=None, nr=None, qir=None, qib=None,
-                   nc=None, nwfa=None, nifa=None,
+                   nc=None, nwfa=None, nifa=None, ng=None, volg=None,
                    exner=None, rthdynten=None,
                    rqvdynten=None) -> MpasColumnPhysicsTendencies:
         """Run the due phase-1 chain; return the held raw tendency set.
@@ -1047,7 +1083,7 @@ class MpasColumnBatchPhysics:
         inputs.update(self._require_species(
             "run_phase1", qv=qv, qc=qc, qr=qr, qi=qi, qs=qs, qg=qg,
             ni=ni, nr=nr, qir=qir, qib=qib, nc=nc, nwfa=nwfa,
-            nifa=nifa))
+            nifa=nifa, ng=ng, volg=volg))
         for name in ("u", "v", "theta", "pressure",
                      "rho_dry") + self._species:
             self._require_input(name, inputs[name], level)
@@ -1067,13 +1103,14 @@ class MpasColumnBatchPhysics:
         def v3(a):
             return a.reshape(a.shape[0], 1, ncol)
 
-        # One copy per input into seam-owned buffers (stated copies).
-        buf["u"][...] = v3(u)
-        buf["v"][...] = v3(v)
+        # theta and pressure are copied into the seam-owned buffers the
+        # state carries between calls; u, v and the interface fields are
+        # read in place for this call only (constructor, census item 10).
+        u3, v3u = v3(u), v3(v)
+        p_interface3 = v3(pressure_interface)
+        z_interface3 = v3(z_interface)
         buf["theta"][...] = v3(theta)
         buf["pressure"][...] = v3(pressure)
-        buf["p_interface"][...] = v3(pressure_interface)
-        buf["z_interface"][...] = v3(z_interface)
         state.w[...] = v3(w)
         # NEGATIVE-QV LAW: clamp in the seam's scratch copy, exactly as
         # MPAS bulk physics applies max(qv, 0) before its schemes.  The
@@ -1086,13 +1123,16 @@ class MpasColumnBatchPhysics:
         # T = theta*exner, physics density (1+qv)*rho_dry for WRF
         # phy_prep's (1+qv)/alt.
         if exner is None:
+            exner3 = buf.get("exner")
+            if exner3 is None:
+                exner3 = buf["exner"] = cp.zeros((nz, 1, ncol),
+                                                 dtype=cp.float32)
             cp.power(buf["pressure"] / cp.float32(_constants.P0),
-                     cp.float32(_constants.RCP), out=buf["exner"])
+                     cp.float32(_constants.RCP), out=exner3)
         else:
-            buf["exner"][...] = v3(exner)
-        cp.multiply(buf["theta"], buf["exner"], out=buf["temperature"])
-        cp.subtract(buf["z_interface"][1:], buf["z_interface"][:-1],
-                    out=buf["dz"])
+            exner3 = v3(exner)
+        cp.multiply(buf["theta"], exner3, out=buf["temperature"])
+        cp.subtract(z_interface3[1:], z_interface3[:-1], out=buf["dz"])
         cp.multiply(cp.float32(1.0) + state.qv, v3(rho_dry),
                     out=buf["rho"])
         # GF dynamics forcing lanes: refresh the seam-owned persistent
@@ -1119,9 +1159,9 @@ class MpasColumnBatchPhysics:
         self._atmosphere = {
             "theta": buf["theta"], "temperature": buf["temperature"],
             "pressure": buf["pressure"],
-            "p_interface": buf["p_interface"], "exner": buf["exner"],
-            "u": buf["u"], "v": buf["v"],
-            "z_interface": buf["z_interface"], "dz": buf["dz"],
+            "p_interface": p_interface3, "exner": exner3,
+            "u": u3, "v": v3u,
+            "z_interface": z_interface3, "dz": buf["dz"],
             "qv": state.qv, "qc": state.qc, "qi": state.qi,
             "qs": atmosphere_qs, "rho": buf["rho"],
         }
@@ -1167,8 +1207,9 @@ class MpasColumnBatchPhysics:
             step_index=self._step_index,
             elapsed_seconds=state.elapsed_seconds,
             radiation_ran=after["radiation"] > before["radiation"],
-            surface_pbl_ran=(after[self._surface_pbl_counter]
-                             > before[self._surface_pbl_counter]),
+            # The surface layer's counter: it runs on the surface/PBL
+            # cadence with or without a PBL member (pbl_scheme="off").
+            surface_pbl_ran=after["sfclay"] > before["sfclay"],
             cumulus_ran=after["cumulus"] > before["cumulus"])
         self._pending_phase = _PHASE2
         return result
@@ -1176,8 +1217,8 @@ class MpasColumnBatchPhysics:
     # ------------------------------------------------------------------
     def run_phase2(self, *, theta, qv, qc, qr, qi, qs=None, qg=None,
                    ni=None, nr=None, qir=None, qib=None, nc=None,
-                   nwfa=None, nifa=None, pressure,
-                   rho_dry=None, z_interface,
+                   nwfa=None, nifa=None, ng=None, volg=None, pressure,
+                   rho_dry=None, z_interface, w=None,
                    refl_10cm_due: bool = False) -> dict:
         """Run the phase-2 scheme in place on the caller's arrays.
 
@@ -1231,7 +1272,13 @@ class MpasColumnBatchPhysics:
         species = self._require_species(
             "run_phase2", qv=qv, qc=qc, qr=qr, qi=qi, qs=qs, qg=qg,
             ni=ni, nr=nr, qir=qir, qib=qib, nc=nc, nwfa=nwfa,
-            nifa=nifa)
+            nifa=nifa, ng=ng, volg=volg)
+        if scheme == "tempo":
+            if w is None:
+                raise ValueError("run_phase2: TEMPO requires post-RK vertical velocity; held pre-RK velocity is a different cloud input")
+            self._require_input("w", w, iface)
+        elif w is not None:
+            raise ValueError(f"run_phase2: {scheme!r} does not consume a post-RK w argument")
         if wsm6 and rho_dry is None:
             raise ValueError(
                 "run_phase2: microphysics_scheme='wsm6' requires "
@@ -1251,6 +1298,8 @@ class MpasColumnBatchPhysics:
         self._require_input("z_interface", z_interface, iface)
 
         state, cfg, driver = self._state, self._cfg, self._driver
+        if scheme == "tempo":
+            state.w[...] = w.reshape(nz + 1, 1, ncol)
 
         def v3(a):
             return a.reshape(a.shape[0], 1, ncol)
@@ -1281,6 +1330,24 @@ class MpasColumnBatchPhysics:
                 # the state WRF's init would test -- the caller's own
                 # arrays, the caller's own geometry.
                 self._aerosol_init = self._thompson_first_contact()
+            if scheme == "tempo" and self._aerosol_init is None:
+                if not bool(cp.any(state.nwfa)) or not bool(cp.any(state.nifa)):
+                    raise ValueError("TEMPO column seam requires supplied water-friendly and ice-friendly aerosol initial fields; an absent climatology must not become a synthetic real forecast")
+                # The existing MPAS column geometry uses bottom interfaces.
+                # Record the emission convention separately from port parity.
+                if cfg.tempo_surface_emission_before:
+                    area = getattr(self, "_cell_area_m2", None)
+                    if area is None:
+                        raise ValueError("native TEMPO surface emission initialization requires cell areas")
+                    from woof.core.tempo import _runtime
+                    _runtime(cfg, nz).initialize_mpas_surface_emission(
+                        state.nwfa[0], z_interface[1] - z_interface[0], area, state.nwfa2d)
+                else:
+                    state.nwfa2d[...] = state.nwfa[0] * cp.float32(0.000196)
+                self._aerosol_init = {"ccn": False, "in": False,
+                                      "source": "supplied", "surface_emission":
+                                      "native MPAS area and depth scaling" if cfg.tempo_surface_emission_before
+                                      else "lowest-level times 0.000196"}
             # THE ARW POST-RK PAIR (woof/core/dycore.py:2507-2510):
             # microphysics dispatch, then the driver's bucket/RAINBL
             # acceptance.
@@ -1357,6 +1424,12 @@ class MpasColumnBatchPhysics:
                 "nwfa2d_source": nwfa2d_source}
 
     @property
+    def correct_mode_receipt(self) -> dict:
+        """``physics.mode`` as this seam resolved it, and the findings the
+        switch changed (MODE-KEY.md rule 3; woof/correct_mode.py)."""
+        return self._correct_mode.receipt()
+
+    @property
     def aerosol_init_receipt(self):
         """The seam's ``thompson_init`` receipt, or None.
 
@@ -1400,6 +1473,38 @@ class MpasColumnBatchPhysics:
         out["RAINC"] = (cp.zeros(ncol, dtype=cp.float32)
                         if rainc is None else rainc.reshape(ncol).copy())
         return out
+
+    def settled_cloud(self):
+        """Host-visible copies of correct mode's settled-cloud pair, or None.
+
+        Finding WB1 (woof/core/thompson_cloud_booking.py): aerosol-aware
+        Thompson's cloud fallout drops the water it takes out of the lowest
+        level, and correct mode books it in ``CLOUDNC`` (mm, accumulated)
+        with the last call's amount in ``CLOUDNCV``.  The pair exists exactly
+        when this seam books it (a Thompson row in correct mode); exact mode
+        and the other rows return None.  Kept apart from
+        :meth:`accumulated_precipitation` because settled cloud is not
+        precipitation (WRF, UFS and MPAS keep it out of their totals).
+        """
+        existing = self._state.existing_scratch
+        cloudnc = existing("mp_cloudnc")
+        cloudncv = existing("mp_cloudncv")
+        if cloudnc is None or cloudncv is None:
+            return None
+        ncol = self._ncol
+        return {"CLOUDNC": cloudnc.reshape(ncol).copy(),
+                "CLOUDNCV": cloudncv.reshape(ncol).copy()}
+
+    def surface_fluxes_device(self) -> dict:
+        """Resident surface-layer fluxes for an external turbulence closure.
+
+        No host export: ust is m/s, hfx W/m2 and qfx kg/m2/s. Held
+        surface steps expose the same persistent fields as due steps.
+        """
+        if self._pending_phase != _PHASE2:
+            raise RuntimeError("surface fluxes require completed phase one")
+        return {name: self._driver.fields[name].reshape(self._ncol)
+                for name in ("ust", "hfx", "qfx")}
 
     @property
     def call_counts(self) -> dict:
@@ -1479,13 +1584,15 @@ class MpasColumnBatchPhysics:
             # and when rides here.
             "carriers": driver.carriers.state(),
         }
-        if self._microphysics_scheme == "thompson_aero":
+        if self._microphysics_scheme in ("thompson_aero", "tempo"):
             # Scheme-asymmetric like the identity's "microphysics" key:
             # the wsm6/p3 payloads stay byte-identical.  A restored
             # mp=28 seam must know first contact already happened, or
             # its next run_phase2 would re-run thompson_init's presence
             # tests on a checkpointed field.
             scalars["aerosol_init"] = self.aerosol_init_receipt
+        if self._microphysics_scheme == "tempo":
+            scalars["tempo_first_call"] = bool(self._state.tempo_first_call)
         return {
             "identity": dict(self._identity),
             "arrays": arrays,
@@ -1528,6 +1635,17 @@ class MpasColumnBatchPhysics:
                     f"restart payload lacks {key!r} but this seam "
                     "already carries live state for it; restore into a "
                     "freshly constructed seam")
+        # Correct mode WB1's settled-cloud pair joined aerosol-aware
+        # Thompson seams after their payloads existed.  It is output only
+        # (no prognostic word reads it), so a payload written before it
+        # restores with the total counting from the resume, as the mainline
+        # restart does (woof/io/restart.py), instead of being refused.
+        for key in ("scratch/mp_cloudnc", "scratch/mp_cloudncv"):
+            if key in live and key not in stored:
+                print(f"note: restart payload predates the settled-cloud "
+                      f"total {key.split('/', 1)[1]!r}; it counts from "
+                      "this resume")
+                stored[key] = np.zeros(live[key].shape, np.float32)
         missing = sorted(set(live) - set(stored))
         extra = sorted(set(stored) - set(live))
         if missing or extra:
@@ -1562,7 +1680,7 @@ class MpasColumnBatchPhysics:
         adapter = driver.cumulus_callable
         if adapter is not None and hasattr(adapter, "_history_time"):
             adapter._history_time = scalars["kf_history_time"]
-        if self._microphysics_scheme == "thompson_aero":
+        if self._microphysics_scheme in ("thompson_aero", "tempo"):
             if "aerosol_init" not in scalars:
                 raise ValueError(
                     "restart payload lacks scalars['aerosol_init']: an "
@@ -1572,6 +1690,10 @@ class MpasColumnBatchPhysics:
             receipt = scalars["aerosol_init"]
             self._aerosol_init = (None if receipt is None
                                   else dict(receipt))
+        if self._microphysics_scheme == "tempo":
+            if type(scalars.get("tempo_first_call")) is not bool:
+                raise ValueError("TEMPO restart needs its first-call SAVE flag to prevent reseeding a resumed or retried domain")
+            state.tempo_first_call = scalars["tempo_first_call"]
         # Carrier provenance (schema v2): the held radiation buffers were
         # restored as driver arrays above; this restores WHO wrote them
         # and WHEN, so the first radiation-not-due step's LSM consumption

@@ -621,6 +621,14 @@ def admit_resident_road(exp, decision=None, *, machine=None, estimate=None,
     (:func:`woof.core.resident_admission.memory_gate_overridden`), and a
     forecast the envelope over-prices still runs.  The loaders' constructor
     floors below it are exact and are never skipped.
+
+    THE MYNN WIDTH IS A SPEED CHOICE (A3c, as the ranked road prices it).
+    When this function prices the forecast and the width the run would
+    walk does not fit, the forecast is priced at the narrowest width a run
+    may walk; admitted there, the widest width that fits the card is
+    pinned for this process before the build allocates a workspace
+    (:func:`fit_resident_mynn_width`), so the run never holds a wider
+    workspace than the card was priced to hold.
     """
     if decision is not None and (decision.stream
                                  or decision.budget_bytes is not None):
@@ -630,27 +638,80 @@ def admit_resident_road(exp, decision=None, *, machine=None, estimate=None,
     from woof.core import preflight
     from woof.core.resident_admission import admit, resident_forecast_terms
 
-    if estimate is None:
+    def price(width=None):
+        if forcing_intervals is None:
+            return preflight.admission_estimate(
+                exp, machine=machine, source=source,
+                urban_columns=urban_columns, mynn_column_chunk=width)
         from woof.boundary_fields import source_boundary_species
-        estimate = (preflight.admission_estimate(exp, machine=machine,
-                                                 source=source,
-                                                 urban_columns=urban_columns)
-                    if forcing_intervals is None else
-                    preflight.estimate_experiment(
-                        exp, column_chunk=exp.column_chunk,
-                        forcing_intervals=max(1, int(forcing_intervals)),
-                        profile=getattr(machine, "device_profile", None),
-                        boundary_species=source_boundary_species(source),
-                        urban_columns=urban_columns))
+        with preflight.required_mynn_pricing(exp, width, only_given=True):
+            return preflight.estimate_experiment(
+                exp, column_chunk=exp.column_chunk,
+                forcing_intervals=max(1, int(forcing_intervals)),
+                profile=getattr(machine, "device_profile", None),
+                boundary_species=source_boundary_species(source),
+                urban_columns=urban_columns,
+                **preflight.single_card_residue_terms(exp))
+
+    free = int(machine.vram_bytes)
+    narrowed = False
+    if estimate is None:
+        estimate = price()
+        if (estimate.peak_envelope_bytes > free
+                and preflight.mynn_width_adjustable(exp)):
+            from woof.core.mynn_pbl_scratch import (
+                MYNN_PBL_COLUMN_CHUNK_MINIMUM)
+            narrow = price(MYNN_PBL_COLUMN_CHUNK_MINIMUM)
+            if narrow.peak_envelope_bytes <= free:
+                estimate, narrowed = narrow, True
     record = admit(what, resident_forecast_terms(estimate),
-                   free_bytes=int(machine.vram_bytes),
+                   free_bytes=free,
                    stage="while building the domain state or attaching its "
                          "physics", envelope=True)
+    if narrowed:
+        record = dict(record, mynn_column_chunk=fit_resident_mynn_width(
+            exp, price, free_bytes=free, what=what))
     # The room this priced plan leaves on the card is what the history
     # writers' device snapshots may draw on (woof.io.history_staging).
     from woof.io.history_staging import record_priced_plan
     record_priced_plan(record)
     return record
+
+
+def fit_resident_mynn_width(exp, price, *, free_bytes: int, what: str) -> int:
+    """Pin the widest MYNN column width whose envelope fits the card.
+
+    Called once the forecast was admitted at the narrowest width because
+    the width the run would walk did not fit (:func:`admit_resident_road`).
+    ``price(width)`` is the admission's own estimate at one width; the
+    envelope grows with the width, so the widest fitting width is bisected
+    from the narrowest (admitted) to the run's own (refused), and pinned for
+    this process (:func:`woof.core.mynn_pbl_scratch.pin_mynn_column_chunk`)
+    before the build sizes a workspace.  The width changes speed, never a
+    byte of output.
+    """
+    from woof.core.mynn_pbl_scratch import (
+        mynn_rank_chunk_candidates, pin_mynn_column_chunk,
+        resolve_mynn_column_chunk)
+    nz = next(int(dc.run.nz) for dc in exp.domains
+              if int(getattr(dc.run, "bl_pbl_physics", 0) or 0) == 5)
+    own = int(resolve_mynn_column_chunk(nz))
+    ladder = [width for width in mynn_rank_chunk_candidates(nz)
+              if width < own] or [min(mynn_rank_chunk_candidates(nz))]
+    lo, hi = 0, len(ladder) - 1
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if price(ladder[mid]).peak_envelope_bytes <= int(free_bytes):
+            lo = mid
+        else:
+            hi = mid - 1
+    width = int(ladder[lo])
+    pin_mynn_column_chunk(width)
+    print(f"{what}: MYNN column width {width} columns, the widest that fits "
+          f"the card's {int(free_bytes) / 2**30:.2f} GiB free (the run's own "
+          f"{own} does not); the width changes speed, never bytes",
+          flush=True)
+    return width
 
 
 def cold_tree_streaming_decision(exp, nodes, *, machine=None, decisions=None,
@@ -1086,6 +1147,8 @@ def _resident_admission(options, machine, estimate=None, *,
                  "budget_bytes": max(0, budget - int(withheld_bytes)),
                  "scope": "configured experiment",
                  "basis": estimate.envelope_basis}
+    if getattr(estimate, "hydro_memory", None) is not None:
+        admission["hydro_memory"] = estimate.hydro_memory
     # Absent, not zero, where nothing was withheld: a tree with no moving
     # nest keeps the receipt it had before this term existed.
     if withheld_bytes:
@@ -1892,6 +1955,13 @@ class StreamedDomain:
                  scalars=None, host_store=None, stability=None,
                  geography=None, boundaries=None, template=None,
                  inventory_fn=None):
+        if getattr(getattr(run, "cfg", None), "chem_sets", ""):
+            from tilestream.sfire_smoke import accepts, ranked_accepts
+            allowed = ranked_accepts if getattr(run, "ranked", False) else accepts
+            if not allowed(run.cfg):
+                raise StreamingRefused(
+                    "tiled chemistry requires whole-domain accounting for its post-step "
+                    "operators; only the source-only bulk SFIRE profile has that owner")
         self._run = run
         self.decision = decision
         self._state = state
@@ -2092,14 +2162,47 @@ class StreamedDomain:
             from woof.ensemble.stochastic_streaming import attach_stochastic_sweep_lease
             attach_stochastic_sweep_lease(self._run, stochastic)
 
+        if int(getattr(cfg, 'ifire', 0)) == 2 and int(getattr(cfg, 'fire_test_steps', 0)) > 0:
+            from woof.sfire_debug import run_streamed_test_steps
+            run_streamed_test_steps(self, state, cfg)
+        smoke_ledger = getattr(self, '_smoke_ledger', None)
+        if smoke_ledger is not None:
+            self._run.drain()
+            smoke_ledger.begin(self.store)
+        domain_driver = getattr(state, "physics", None)
+        physics_control = PhysicsStepControl.from_driver(domain_driver)
+        if (physics_control is not None
+                and getattr(domain_driver, "force_radiation_next_step", False)):
+            # A driver rebuilt mid-run (a spawn or a move, dac9ff9417) calls
+            # radiation on its first step. The tile buffers never see the
+            # domain driver's one-step flag, so the whole sweep takes it as
+            # a radiation-due override and the flag clears here, as the
+            # resident physics step clears it.
+            physics_control = PhysicsStepControl(tuple(
+                (name, True if name == "radiation_due_override" else value)
+                for name, value in physics_control.values))
+            domain_driver.force_radiation_next_step = False
         with self.allocation_scope():
             self._run.sweep(
                 1, step_kwargs=step_kwargs, report=self.report, live_config=cfg,
-                physics_control=PhysicsStepControl.from_driver(
-                    getattr(state, "physics", None)))
+                physics_control=physics_control)
+        if smoke_ledger is not None:
+            self._run.drain()
+            smoke_ledger.end(self.store)
+        spotting_owner = getattr(self, "_spotting_owner", None)
+        if spotting_owner is not None:
+            self._run.drain()
+            spotting_owner.advance(dt=float(cfg.dt),
+                history_alarm=bool(step_kwargs.get("fire_history_due", False)))
+            self._run.reseed_clock(self.scalars)
         self.steps += 1
         if due:
             self._stash_domain_refl(state)
+        if int(getattr(cfg, 'ifire', 0)) == 2 and (
+                int(getattr(cfg, 'fire_print_msg', 0)) > 0 or
+                int(getattr(cfg, 'fire_print_file', 0)) > 0):
+            from woof.sfire_debug import report_streamed
+            report_streamed(self, cfg)
 
     #: How this domain's history frames leave the store
     #: (``snapshot``/``views``/``deferred``, the reason, the bytes); set
@@ -2198,8 +2301,12 @@ class StreamedDomain:
                 plan = _output.frame_plan(
                     self._state, extra_available=planning.keys())
             elif self._template is not None:
+                # Resident ranks retain the live producer, while the prepared
+                # template predates the first radiation call and its native
+                # direct/diffuse output flag. Measure against a live rank.
+                template = self.template_state if self._ranked_road() else self._template
                 plan = _output.store_frame_plan(
-                    self._template, planning, self._run.cfg,
+                    template, planning, self._run.cfg,
                     extra_available=planning.keys())
             else:
                 raise StreamingRefused(
@@ -2224,7 +2331,8 @@ class StreamedDomain:
                     "snapshot_bytes": 0}
             self._frame = _output.StoreFrame(plan, planning,
                                              self.output_setup(),
-                                             self._run.cfg, overlap=overlap)
+                                             self._run.cfg, overlap=overlap,
+                                             scalars=lambda: self.scalars)
         if self._ranked_road():
             return self._ranked_frame()
         # The frame's non-derived rows are zero-copy VIEWS of the pinned
@@ -2661,6 +2769,33 @@ class StreamedDomain:
             # bandwidth.
             check_pinned=bool(self.host_store))
 
+    def prepare_restart(self, path, cfg, *, run_trackers=None,
+                        tree_header=None, extra_scratch_slots=()):
+        """Snapshot :meth:`write_restart` now and publish it later.
+
+        Returns ``(publish, deferrable)``.  ``publish()`` writes the file and
+        returns what :meth:`write_restart` returns.  Its payload is the
+        store's own arrays, so it may run after the model steps on only
+        where no sweep writes the store: ``deferrable`` is True on the
+        ranked road alone (its slabs are the domain and the store is a
+        mirror that only the next drain or frame download writes, both of
+        which call the store guards first).  On every other streamed road a
+        sweep writes the store, so the caller must publish before stepping.
+        """
+        from tilestream import restart_stream
+
+        snapshot = getattr(self._run, "checkpoint_store", None)
+        store = snapshot() if callable(snapshot) else self.store
+        publish = restart_stream.prepare_streamed_restart(
+            path, store, cfg, scalars=self.scalars,
+            setup=self.restart_setup(), template_state=self.template_state,
+            run_trackers=run_trackers, tree_header=tree_header,
+            extra_scratch_slots=extra_scratch_slots,
+            stochastic_binding=StreamedDomain._ensemble_stochastic_binding(self),
+            check_pinned=bool(self.host_store))
+        return publish, (bool(getattr(self, "ranked", False))
+                         and hasattr(self._run, "add_store_guard"))
+
     def restore_restart(self, path, cfg):
         """Restore a restart file INTO the store, in place, and reseed the clock.
 
@@ -2697,8 +2832,15 @@ class StreamedDomain:
 
     def apply_restart(self, validated):
         info = validated.apply()
+        spotting_owner = getattr(self, "_spotting_owner", None)
+        if spotting_owner is not None:
+            spotting_owner.synchronize()
         if self.scalars is not None:
             self._run.reseed_clock(self.scalars)
+        if (getattr(self, '_smoke_ledger', None) is not None
+                or getattr(self._run, 'smoke_ledger', None) is not None):
+            from tilestream.sfire_smoke import refresh_history
+            refresh_history(self)
         return info
 
     def canonical_digest(self, clock, *, scope: str = "trajectory",
@@ -2735,6 +2877,23 @@ class StreamedDomain:
                 "call counts of nothing -- attach(scalars=None) is the "
                 "gate's CARRY NOTHING control and must not be digested as a "
                 "forecast")
+        arrays, scalars = self.canonical_digest_inputs()
+        return canonical_store_digest(arrays, scalars, clock,
+                                      scope=scope, before_hash=before_hash)
+
+    def canonical_digest_inputs(self):
+        """``(arrays, scalars)`` that :meth:`canonical_digest` hashes, as host
+        arrays, taken now.  For a caller that hands the cards back before it
+        hashes: everything the digest reads is in these two values."""
+        from woof.state_digest import _canonical_extra_manifest
+
+        if self.scalars is None:
+            raise StreamingRefused(
+                "this streamed domain carries no scalars, so its canonical "
+                "digest would be stamped with an elapsed time and physics "
+                "call counts of nothing -- attach(scalars=None) is the "
+                "gate's CARRY NOTHING control and must not be digested as a "
+                "forecast")
         arrays = dict(self._run.canonical_store()
                       if getattr(self, "ranked", False) else self.store)
         if self._state is not None:
@@ -2746,8 +2905,8 @@ class StreamedDomain:
                 # Joined carriers and rank-derived forcing weights already
                 # name their live owner; a facade cannot overwrite them.
                 arrays.setdefault(name, value)
-        return canonical_store_digest(arrays, self.scalars, clock,
-                                      scope=scope, before_hash=before_hash)
+        return arrays, {key: (dict(value) if isinstance(value, dict) else value)
+                        for key, value in self.scalars.items()}
 
     def add_store_guard(self, guard) -> None:
         """Hand the run a callable to wait on before it writes the store.
@@ -2812,6 +2971,20 @@ class StreamedDomain:
                 "this streamed domain carries no scalars, so it has no clock "
                 "to impose -- attach(scalars=None) is the gate's CARRY "
                 "NOTHING control and must not be driven by the model loop")
+        from woof.core.sfire_clock import SOURCE_CLOCK_KEY, bind_streamed_clock
+
+        def source_store():
+            # Lazy: on the ranked road ``self.store`` is a full drain of
+            # every slab plus a full re-gather before the next sweep, and
+            # this runs twice per step.  Only a fire clock that actually
+            # moves reads it, and only when the domain carries the field
+            # (membership is asked without a drain).  See bind_streamed_clock.
+            keys = getattr(self._run, "store_keys", None)
+            if callable(keys) and SOURCE_CLOCK_KEY not in keys():
+                return {}
+            return self.store
+
+        bind_streamed_clock(self.scalars, source_store, seconds)
         self.scalars["elapsed_seconds"] = float(seconds)
         if getattr(self, "ranked", False):
             self._run.impose_domain_clock(seconds)
@@ -2871,11 +3044,6 @@ class StreamedDomain:
             return live
         return {k: live[k] for k in names if k in live}
 
-    @staticmethod
-    def _window_slices(shape, window) -> tuple:
-        """One slice rule for every consumer; see :func:`window_slices`."""
-        return window_slices(shape, window)
-
     def sync_to_state(self, names=None, *, window=None) -> int:
         """Copy the store onto the attached state.  Returns arrays copied.
 
@@ -2896,7 +3064,7 @@ class StreamedDomain:
             src = store.get(key)
             if src is None or getattr(dev, "shape", None) is None:
                 continue
-            sl = self._window_slices(dev.shape, window)
+            sl = window_slices(dev.shape, window)
             with _array_device_scope(dev):
                 dev[sl] = cp.asarray(src[sl])
             copied += 1
@@ -2929,7 +3097,7 @@ class StreamedDomain:
             dst = store.get(key)
             if dst is None:
                 continue
-            sl = self._window_slices(dev.shape, window)
+            sl = window_slices(dev.shape, window)
             with _array_device_scope(dev):
                 dst[sl] = cp.asnumpy(dev[sl])
             copied += 1
@@ -3024,9 +3192,12 @@ class StreamedDomain:
 #: it is what the history writer emits, and a streamed run whose wrfout
 #: carried the frozen t=0 accumulator would be wrong in a file rather than
 #: in a decision, which is worse.
+from woof.core.output_diagnostics import PERSISTENT as OUTPUT_PERSISTENT
+from woof.core.hail import HISTORY as HAIL_HISTORY
+
 TRACKER_PLANE_CARRIERS: tuple[str, ...] = (
     "scratch/up_heli_max", "scratch/uh_follow_window",
-    "scratch/uh_spawn_window")
+    "scratch/uh_spawn_window") + tuple("scratch/" + slot for slot in (*HAIL_HISTORY, *OUTPUT_PERSISTENT))
 
 
 def _array_device_scope(*arrays):
@@ -4345,6 +4516,9 @@ def refl_handoff_hook():
     def hook(tile_state, tspec, itile, stream):
         if refl_10cm_is_stashed(tile_state):
             consume_refl_10cm(tile_state)
+        if getattr(tile_state, 'chem', None) is not None:
+            from woof.core.chem_history import streaming_fields
+            streaming_fields(tile_state)
 
     return hook
 
@@ -4482,6 +4656,28 @@ def attach(state, cfg, decision: StreamingDecision, *, tile_state_factory,
             "them from LANDUSEF), so Noah mosaic cannot run streamed.  Run "
             "this domain resident ([tiles] mode = 'off'), or set "
             "sf_surface_mosaic = 0.")
+    from woof.config import CU_DOMAIN_EDGE_BAND_SCHEMES
+
+    if int(getattr(cfg, "cu_physics", 0) or 0) in CU_DOMAIN_EDGE_BAND_SCHEMES:
+        periodic = [axis for axis, wraps in zip("xy", _periodic_axes(cfg))
+                    if wraps]
+        if periodic:
+            # Named breakage: the scheme writes only the band four columns
+            # in from the DOMAIN's edges, periodic or not, and a tile window
+            # that wraps across a periodic edge computes its own window's
+            # band instead: the streamed tendencies differ from the resident
+            # run's beside every periodic domain edge (see
+            # woof.config.CU_DOMAIN_EDGE_BAND_SCHEMES for the measurement).
+            raise StreamingRefused(
+                f"grid_id = {int(getattr(cfg, 'grid_id', 0))} sets "
+                f"cu_physics = {int(cfg.cu_physics)}, whose convective band "
+                "stops four columns short of the domain's lateral edges even "
+                f"on a periodic axis, and this domain is periodic in "
+                f"{' and '.join(periodic)}: a tile window that wraps across "
+                "that edge would write tendencies the resident run leaves at "
+                "zero, so it cannot run streamed.  Run this domain resident "
+                "([tiles] mode = 'off'), or give it specified or open lateral "
+                "boundaries.")
     from tilestream import driver as _driver
     from tilestream import gather as _gather
     from tilestream import physics_inventory as _physics
@@ -4574,6 +4770,27 @@ def attach(state, cfg, decision: StreamingDecision, *, tile_state_factory,
     # because feat-route-wire found [tiles] write_mode was planned for
     # and then ignored here in favour of a hard-coded "ring".
     px, py = _periodic_axes(cfg)
+    from tilestream.global_inventory import global_keys
+    smoke_ledger = None
+    if getattr(cfg, 'chem_sets', ''):
+        from tilestream.sfire_smoke import accepts, configure_tile, GlobalSmokeLedger
+        if not accepts(cfg):
+            raise StreamingRefused(
+                "tiled chemistry requires whole-domain accounting for its post-step "
+                "operators; only the source-only bulk SFIRE profile has that owner")
+        original_factory = tile_state_factory
+        def smoke_tile_factory(tile_cfg):
+            result = original_factory(tile_cfg)
+            configure_tile(result)
+            return result
+        tile_state_factory = smoke_tile_factory
+        smoke_ledger = GlobalSmokeLedger(cfg, geography or {}, state if state is not None else template)
+    spotting_owner = None
+    if int(getattr(cfg,"ifire",0)) == 2 and int(getattr(cfg,"fs_firebrand_gen_lim",0)) > 0:
+        from tilestream.sfire_spotting import StreamedSpottingOwner
+        spotting_owner = StreamedSpottingOwner(state,cfg,store,scalars,
+            geography=geography,template=template)
+        spotting_owner.bind(tuple(s for s in (state,template) if s is not None))
     run = _driver.TiledRun(
         store, cfg, int(decision.tile_nx), int(decision.tile_ny),
         int(decision.halo), int(decision.nbuffers),
@@ -4589,7 +4806,7 @@ def attach(state, cfg, decision: StreamingDecision, *, tile_state_factory,
         # at ATTACH time a question -- will refl_10cm_due ever be True? --
         # that only the model's history cadence can answer, and getting it
         # wrong stops the forecast at the first history frame.
-        post_step_hook=refl_handoff_hook())
+        post_step_hook=refl_handoff_hook(),global_keys=global_keys(store))
     # A store-built root has no resident mirror. Bind its declared clock
     # before even the t=0 history/restart setup is captured, not only when the
     # first tile steps. The same hook verifies this identity on every bind.
@@ -4624,7 +4841,7 @@ def attach(state, cfg, decision: StreamingDecision, *, tile_state_factory,
             boundary_width=int(getattr(cfg, "spec_bdy_width", 0)) or None,
             window=stability_window)
         run.observer = stability.observe
-    return StreamedDomain(run, decision, state=state, scalars=scalars,
+    streamed = StreamedDomain(run, decision, state=state, scalars=scalars,
                           host_store=(decision.store == "host"),
                           stability=stability,
                           # Carried, not just used: geography and the LBC
@@ -4645,12 +4862,12 @@ def attach(state, cfg, decision: StreamingDecision, *, tile_state_factory,
                           # see that method for the carrier a narrower
                           # harvest silently left at t=0.
                           inventory_fn=inventory_fn)
-
-
-def _is_periodic(cfg) -> bool:
-    from tilestream.autoplan import is_periodic
-
-    return bool(is_periodic(cfg))
+    if spotting_owner is not None:
+        streamed._spotting_owner=spotting_owner
+        spotting_owner.bind(run.tiles)
+    if smoke_ledger is not None:
+        streamed._smoke_ledger = smoke_ledger
+    return streamed
 
 
 # ---------------------------------------------------------------------------
@@ -4734,6 +4951,11 @@ def _twin_rrtmg_legacy(scheme, cls, lat, lon):
         # Rank construction uses neutral geography before the gather replaces
         # it. The deferred provider validates the live adapter grid at use.
         smoke_options["smoke_provider"] = smoke_provider.deferred_rebind(lat, lon)
+    transported = getattr(scheme, "_transported_smoke", None)
+    if transported is not None:
+        # simple_dir_fdb = 1: the NAME of the state attribute the shortwave
+        # reads; each buffer's state carries its own tile of that tracer.
+        smoke_options["transported_smoke"] = transported
     return cls(scheme.start_time, lat, lon,
                p_top=scheme.p_top,
                column_chunk=scheme.column_chunk,
@@ -4745,6 +4967,7 @@ def _twin_rrtmg_legacy(scheme, cls, lat, lon):
                # of the restart identity, and what _check_pins holds against
                # the run config on every call.
                aer_opt=scheme.aer_opt,
+               aer3_type_source=getattr(scheme, "aer3_type_source", "rural"),
                trace_gas_overrides=getattr(scheme, "trace_gas_overrides", None),
                **smoke_options)
 
@@ -4767,6 +4990,18 @@ def _twin_composed_radiation(scheme, cls, lat, lon):
     return cls(scheme.start_time, tile_lat, tile_lon,
                longwave_adapter=_tile_scheme(scheme.longwave_adapter, tile_lat, tile_lon),
                shortwave_adapter=_tile_scheme(scheme.shortwave_adapter, tile_lat, tile_lon))
+
+
+def _twin_column_cumulus(scheme, cls, lat, lon):
+    """Rebuild :class:`~woof.core.column_cumulus.ColumnCumulus`.
+
+    Its whole policy is its row of ``COLUMN_CUMULUS_SCHEMES``, selected by
+    ``cu_physics``; the namelist knobs it reads come from ``cfg`` at every
+    call and it holds no state between calls, so the twin is exact.  It
+    carries no geography.  The tile's own PhysicsDriver binds itself through
+    ``bind_driver`` on the first cumulus call, as for the domain's adapter.
+    """
+    return cls(scheme.scheme.cu_physics)
 
 
 @dataclass(frozen=True)
@@ -4811,12 +5046,19 @@ _TWIN_RECIPES = {
         reproduces=frozenset({"start_time", "latitude_deg", "longitude_deg",
                               "longwave_adapter", "shortwave_adapter"}),
     ),
+    # The column-cumulus table's one adapter (New SAS, cu_physics = 96): a
+    # plain class whose constructor requires the table row's cu_physics.
+    "woof.core.column_cumulus:ColumnCumulus": _TwinRecipe(
+        build=_twin_column_cumulus,
+        reproduces=frozenset({"cu_physics"}),
+    ),
     "woof.core.rrtmg_legacy:RRTMGLegacyRadiation": _TwinRecipe(
         build=_twin_rrtmg_legacy,
         reproduces=frozenset({"start_time", "latitude_deg", "longitude_deg",
                               "p_top", "column_chunk", "ozone_parent",
                               "ozone_routing", "o3input", "longwave",
-                              "shortwave", "aer_opt", "trace_gas_overrides", "smoke_provider"}),
+                              "shortwave", "aer_opt", "trace_gas_overrides", "smoke_provider",
+                              "aer3_type_source", "transported_smoke"}),
         # WRF's radiation call counter; the domain's adapter has stepped
         # when a buffer is built mid-run, a fresh twin has not, and that
         # difference is not dropped policy.
@@ -5236,7 +5478,22 @@ def prepared_tile_state_factory(state, cfg, *, tables0=None, seed: int = 4242,
 
         geo = _harness.neutral_geography(tile_cfg)
         extra = _surface_tile_initialization_inputs(driver, tile_cfg)
+        # No land-surface cold start over the poison: every carrier it
+        # would write is gathered from the store before the buffer serves
+        # a tile.  Measured on the 2-card HRRR crop (499x567, a rented box, 2026-
+        # 10-06): the ranked road spent its whole 18 s between the second
+        # admission pass and "[devices] ON" in ruclsminit's host column
+        # loop, one rank after the other; on the full HRRR lattice that is
+        # the 84-92 s gap of the lane/pi-startup-idle profile.
+        extra["lsm_cold_start"] = False
+        # The same argument for the seeded fields: constant poison, not
+        # 16.5 s of host random numbers per HRRR rank (harness.
+        # make_physics_state, ``poison``), since the gather overwrites them.
+        extra["poison"] = "constant"
         if driver is not None:
+            if getattr(driver, "fire", None) is not None:
+                from tilestream.sfire import tile_static
+                extra["fire_static_data"] = tile_static(driver.fire, tile_cfg)
             lat = np.asarray(geo.lat, dtype=np.float64)
             lon = np.asarray(geo.lon, dtype=np.float64)
             # A FRESH twin per buffer for each -- never the domain's own
@@ -5593,13 +5850,17 @@ def ranked_halo(cfg, *, max_map_factor=1.0) -> int:
     from dataclasses import replace
     from woof.core.adaptive_clock import acoustic_step_ceiling
     from tilestream.harness import halo_radius
-    from tilestream.realcase import boundary_width
+    from tilestream.realcase import seam_fiction_width
     padded = replace(cfg, time_step_sound=acoustic_step_ceiling(cfg, max_map_factor))
-    # A nest's boundary application writes the same perimeter frame as a
-    # specified domain's (from its parent's rolling tables), so it pays the
-    # same frame width on a seam.
+    # A nest's boundary application writes the same specified zone as a
+    # specified domain's (from its parent's rolling tables, zeros on a
+    # seam), so it pays the same seam fiction.  The relaxation band is
+    # masked per side on every slab (LateralBoundaries.seam_sides), so the
+    # frame width is not paid: tilestream.realcase.seam_fiction_width.
     forced = bool(cfg.specified) or bool(getattr(cfg, "nested", False))
-    return int(halo_radius(padded)) + (boundary_width(cfg) if forced else 0)
+    from tilestream.sfire import dependency_halo
+    return max(int(halo_radius(padded)) + (seam_fiction_width(cfg) if forced else 0),
+               dependency_halo(cfg))
 
 
 def ranked_specs(cfg, options, *, halo):
@@ -5662,13 +5923,33 @@ def ranked_domain_builder(bundle, *, clock=DERIVE_CLOCK, options, seam="zeros",
                 raise StreamingRefused("ranked_domain_builder needs clock= with tabulated "
                     "forcing; no resident domain exists to derive the clock and forcing "
                     "would otherwise run ONE TIMESTEP LATE")
+        from tilestream.global_inventory import global_keys
+        spotting_owner = None
+        if int(getattr(cfg, "ifire", 0)) == 2 and int(getattr(cfg, "fs_firebrand_gen_lim", 0)) > 0:
+            from tilestream.sfire_spotting import StreamedSpottingOwner
+            spotting_owner = StreamedSpottingOwner(state, cfg, bundle.store, bundle.scalars,
+                geography=bundle.geography, template=bundle.template)
+            spotting_owner.bind(tuple(value for value in (state, bundle.template) if value is not None))
+        smoke_ledger = None
+        from tilestream.sfire_smoke import accepts, GlobalSmokeLedger
+        if getattr(cfg, "chem_sets", "") and accepts(cfg):
+            smoke_ledger = GlobalSmokeLedger(cfg, bundle.geography,
+                state if state is not None else bundle.template)
+        owned_global_keys = global_keys(bundle.store)
         run = RankedRun(bundle.store, cfg, options=options, scalars=bundle.scalars,
             geography=bundle.geography, template=bundle.template,
             boundaries=bundle.boundaries, clock=None if clock is DERIVE_CLOCK else clock,
             seam=seam, check_geography=check_geography, step_mode=step_mode,
             nest_hook=nest_hook, snapshot_limits=snapshot_limits,
-            mynn_column_chunks=mynn_column_chunks)
+            mynn_column_chunks=mynn_column_chunks,
+            global_keys=owned_global_keys)
         try:
+            if smoke_ledger is not None:
+                from tilestream.sfire_smoke import configure_tile
+                for tile in run.tiles:
+                    configure_tile(tile)
+            if spotting_owner is not None:
+                spotting_owner.bind(run.tiles)
             stability = StreamedStability(run, cfg,
                 boundary_width=int(getattr(cfg, "spec_bdy_width", 0) or 0) or None)
             run.observer = stability.observe
@@ -5678,6 +5959,10 @@ def ranked_domain_builder(bundle, *, clock=DERIVE_CLOCK, options, seam="zeros",
                 inventory_fn=streamed_store_inventory())
             streamed.ranked = True
             streamed.devices_report = run.devices_report
+            if spotting_owner is not None:
+                streamed._spotting_owner = spotting_owner
+            if smoke_ledger is not None:
+                streamed._smoke_ledger = smoke_ledger
             return streamed
         except BaseException:
             run.close()
@@ -8441,9 +8726,22 @@ def domain_field(state, name: str, *, setup: bool = False):
     Missing live carriers never fall back to the frozen attachment state.
     CanonicalStoreState resolves its own inventory without resident methods.
     Immutable one-dimensional setup is safe to borrow from the template.
+
+    The drain comes first for a canonical facade too: its arrays ARE the
+    owner's host store, current only as of the last drain.  Breakage this
+    prevents: the facade branch returned before the drain, and with
+    ``StreamedDomain.impose_clock`` no longer draining after every step
+    (67e213588's per-step drain, removed by the mc-clock fix) an attribute
+    tracker on a ranked parent read the mirror of the last drain.
     """
     from woof.core.streamed_state import CanonicalStoreState
     if isinstance(state, CanonicalStoreState):
+        # The facade's own owner only: an attribute the facade lacks resolves
+        # through its slab template, whose methods it refuses to run.
+        owner = vars(state).get("_streamed_domain")
+        drain = getattr(getattr(owner, "_run", None), "drain", None)
+        if drain is not None:
+            drain()
         return getattr(state, name, None)
     _drain_streamed(state)
     endpoint = getattr(state, "_streamed_domain", None)

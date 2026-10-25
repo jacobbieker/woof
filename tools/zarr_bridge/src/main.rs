@@ -2,6 +2,8 @@
 //! zarrs owns codecs/array decoding; the project's NetCDF writer owns serialization and
 //! mapped-engine owns the existing WRF humidity derivations.
 mod http_store;
+mod reach_archive;
+mod soiltemp;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use netcdf_writer::{AttrValue, NcFormat, NcType, NcWriter, Schema, VarData};
@@ -14,7 +16,7 @@ use std::{
     io::{BufWriter, Write},
     ops::Range,
     path::Path,
-    sync::Arc,
+    sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex},
 };
 use zarrs::{
     array::Array,
@@ -25,6 +27,26 @@ use zarrs::{
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 type SourceArray = Array<dyn ReadableStorageTraits>;
 const SCHEMA: &str = "arwen.regular-forcing.v1";
+/// How many fields of one record are read from the store at once.
+///
+/// THE DEFECT THIS EXISTS TO END.  The reads were serial: one field of
+/// one hour at a time, each a HEAD and a GET to the store, so a 12 MB
+/// request took 146 s at 3 % CPU on a link that was mostly idle
+/// (measured 2026-10-17 on the ArWen box).  The fields of a record are
+/// independent chunks, so they are read concurrently and written in the
+/// request's order, which leaves the output byte for byte what it was.
+/// Bounded so a wide request does not open a hundred transfers at once;
+/// `GPUWM_RW_ZARR_WORKERS` names another bound.
+const DEFAULT_READ_WORKERS: usize = 8;
+
+fn read_workers(fields: usize) -> usize {
+    let bound = std::env::var("GPUWM_RW_ZARR_WORKERS")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_READ_WORKERS);
+    bound.min(fields).max(1)
+}
 
 #[used]
 pub static GPUWM_BRIDGE_SOURCE_REV_STAMP: &str =
@@ -165,10 +187,17 @@ fn units_match(array: &SourceArray, expected: &str, name: &str) -> Result<()> {
         "K" => &["k", "kelvin"],
         "Pa" => &["pa", "pascal", "pascals"],
         "hPa" => &["hpa", "millibar", "millibars", "mbar", "mb"],
+        "J m-2" => &["jm-2", "j/m2"],
+        "W m-2" => &["wm-2", "w/m2"],
         "m s-1" => &["ms-1", "m/s"],
         "m2 s-2" => &["m2s-2", "m2/s2"],
         "kg kg-1" => &["kgkg-1", "kg/kg", "1"],
         "m3 m-3" => &["m3m-3", "m3/m3"],
+        "kg m-3" => &["kgm-3", "kg/m3"],
+        "kg m-1 s-1" => &["kgm-1s-1", "kg/(ms)", "kg/m/s"],
+        "kg m-2" => &["kgm-2", "kg/m2"],
+        // ECMWF writes "~" for integer class codes (ERA5 soil_type).
+        "code" => &["~", "code"],
         "1" => &["1", "dimensionless", "(0-1)", "0-1", "proportion"],
         "m" => &[
             "m",
@@ -286,7 +315,7 @@ fn coordinate(store: &ReadableStorage, name: &str) -> Result<(SourceArray, Vec<f
     if array.shape().len() != 1 {
         return fail(format!("{name} coordinate must be one dimensional"));
     }
-    let values = numbers(&array, &[0..array.shape()[0]])?;
+    let values = numbers(&array, std::slice::from_ref(&(0..array.shape()[0])))?;
     if values.is_empty() || values.iter().any(|x| !x.is_finite()) {
         return fail(format!("{name} coordinate is empty or nonfinite"));
     }
@@ -354,6 +383,30 @@ fn define_field(
     )?;
     Ok((id, mask))
 }
+/// `rw_zarr coverage STORE`: the time window the store declares, as JSON.
+/// The hydro initial state asks it before planning a spin-up, so a forecast
+/// past the reanalysis's last hour spins up to that hour and carries the
+/// state forward (gpuwm.hydro.initial_state) instead of failing the fetch.
+fn coverage_main(args: &[String]) -> Result<()> {
+    if args.len() != 3 {
+        return fail("usage: rw_zarr coverage STORE");
+    }
+    let store: ReadableStorage = if args[2].starts_with("https://") {
+        Arc::new(http_store::HttpStore::new(&args[2])?)
+    } else {
+        Arc::new(zarrs::filesystem::FilesystemStore::new(&args[2])?)
+    };
+    let group = Group::open(store, "/")?;
+    let c = Coverage::declared_by(&group)?;
+    let iso = |m: &NaiveDateTime| m.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    println!("{}", serde_json::to_string(&json!({
+        "schema": "gpuwm.zarr-coverage.v1", "store": args[2],
+        "start": iso(&c.start), "finalized_stop": iso(&c.finalized_stop),
+        "accepted_stop": iso(&c.accepted_stop), "accepted_attribute": c.accepted_attribute,
+        "start_text": c.start_text, "finalized_text": c.finalized_text, "accepted_text": c.accepted_text,
+    }))?);
+    Ok(())
+}
 fn extract(request: Request, output: &Path) -> Result<Value> {
     if output.exists() {
         return fail(format!("output already exists: {}", output.display()));
@@ -401,11 +454,9 @@ fn extract(request: Request, output: &Path) -> Result<Value> {
         .attributes()
         .get("calendar")
         .and_then(Value::as_str)
-    {
-        if !["standard", "gregorian", "proleptic_gregorian"].contains(&calendar) {
+        && !["standard", "gregorian", "proleptic_gregorian"].contains(&calendar) {
             return fail("unsupported CF calendar");
         }
-    }
     let (unit, epoch) = units
         .split_once(" since ")
         .ok_or("unsupported CF time units")?;
@@ -630,7 +681,9 @@ fn extract(request: Request, output: &Path) -> Result<Value> {
             VarData::F64(&[times[record].and_utc().timestamp() as f64]),
         )?;
         let mut retained = BTreeMap::new();
-        for (field, array) in request.fields.iter().zip(&arrays) {
+        // One field's chunk, read and cropped to the requested window.
+        let read_field = |index: usize| -> std::result::Result<Vec<f64>, String> {
+            let (field, array) = (&request.fields[index], &arrays[index]);
             eprintln!(
                 "Zarr: {} {}/{} {}",
                 times[record],
@@ -646,7 +699,7 @@ fn extract(request: Request, output: &Path) -> Result<Value> {
                 ranges.push(0..levels.len() as u64);
             }
             ranges.extend([y0 as u64..y1 as u64, 0..longitude.len() as u64]);
-            let source = numbers(array, &ranges)?;
+            let source = numbers(array, &ranges).map_err(|e| e.to_string())?;
             let mut values =
                 Vec::with_capacity(plane * if field.pressure { levels.len() } else { 1 });
             for zi in if field.pressure {
@@ -660,6 +713,33 @@ fn extract(request: Request, output: &Path) -> Result<Value> {
                     }
                 }
             }
+            Ok(values)
+        };
+        // The record's fields are read concurrently (DEFAULT_READ_WORKERS)
+        // and written below in the request's order.
+        type FieldRead = std::result::Result<Vec<f64>, String>;
+        let slots: Vec<Mutex<Option<FieldRead>>> =
+            (0..request.fields.len()).map(|_| Mutex::new(None)).collect();
+        let next = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..read_workers(request.fields.len()) {
+                scope.spawn(|| loop {
+                    let index = next.fetch_add(1, Ordering::SeqCst);
+                    if index >= request.fields.len() {
+                        break;
+                    }
+                    let result = read_field(index);
+                    *slots[index].lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        Some(result);
+                });
+            }
+        });
+        for (field, slot) in request.fields.iter().zip(slots) {
+            let values = slot
+                .into_inner()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .ok_or_else(|| format!("{} was not read", field.source))?
+                .map_err(|message| format!("{}: {message}", field.source))?;
             write_field(
                 &mut writer,
                 record as u64,
@@ -739,9 +819,18 @@ fn dump_record(args: &[String]) -> Result<()> {
 }
 fn run() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("reach-archive") {
+        return reach_archive::run(&args[2..]);
+    }
     if args.get(1).map(String::as_str)==Some("dump-record") { return dump_record(&args); }
+    if args.get(1).map(String::as_str) == Some("soiltemp-climatology") {
+        return soiltemp::run(&args[2..]);
+    }
+    if args.get(1).map(String::as_str) == Some("coverage") {
+        return coverage_main(&args);
+    }
     if args.len() != 4 || args[1] != "extract" {
-        return fail("usage: rw_zarr extract REQUEST.json OUTPUT.nc");
+        return fail("usage: rw_zarr extract REQUEST.json OUTPUT.nc | soiltemp-climatology REQUEST.json OUTPUT_DIR");
     }
     let request: Request = serde_json::from_slice(&fs::read(&args[2])?)?;
     let result = extract(request, Path::new(&args[3]))?;

@@ -131,8 +131,8 @@ def test_the_schedule_receipt_mints_at_sub_second_dt_with_convection_off(
     assert rk["dynamics_stage_acoustic_steps"] == [1, 3, 6]
     assert rk["scalar_stage_timesteps"] == [dt / 3.0, dt / 2.0, dt]
     assert receipt["wsm6"]["minor_loops"] == 1
-    # the smallest finest edge this dt may run on under the 125 m/s, 0.9 policy
-    assert receipt["courant"]["minimum_dc_edge_m"] == pytest.approx(dt * 125.0 / 0.9)
+    # WOOF 1.1.0: stability is the bind's, on the mesh's own dcEdge
+    assert "timestep_admission" in receipt["courant"]["note"]
     assert receipt["known_answer_control"]["reproduces_archived_120s"] is True
 
 
@@ -177,7 +177,10 @@ def test_the_regional_plan_covers_every_part_of_a_mint(mint, tmp_path, dt):
     assert plan["timestep_evidence"] == "experimental-unanchored"
     checks = plan["checks"]
     assert checks["courant"]["admitted"]
-    assert checks["courant"]["limit_seconds"] == pytest.approx(0.72)
+    from woof.hex.dt_admission import stability_limit_seconds
+
+    assert checks["courant"]["limit_seconds"] == pytest.approx(
+        stability_limit_seconds(checks["courant"]["finest_edge_m"]))
     assert checks["radiation_steps"] == int(600 / dt)
     assert checks["clock_closes_in_binary64"] and checks["dt_ms_exact"]
     assert checks["regional"] and not checks["already_anchored"]
@@ -358,35 +361,18 @@ def test_the_integration_plan_shows_the_authorization_by_name(mint):
 
 
 # ---------------------------------------------------------------------------
-# refusal without the authorization, before any card is touched
+# the authorization sentence no longer gates (WOOF 1.1.0, retired 2026-10-10)
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("authorization", ["", "yes", PLACEHOLDER])
-def test_a_sub_second_candidate_mint_is_refused_without_the_authorization(
-    authorization,
-):
-    with pytest.raises(DtAdmissionError) as caught:
-        dt_admission.candidate_mint(
-            0.5,
-            authorization=authorization,
-            card="RTX A6000",
-            cumulus_scheme=None,
-        )
-    assert "authorization verbatim" in str(caught.value)
-    assert dt_admission.admitted_timestep(0.5, None) is None
+def test_a_sub_second_candidate_mint_only_labels_its_authorization(authorization):
+    """``candidate_mint`` no longer refuses on the sentence: no timestep is
+    refused for lacking an anchor, so the scope only labels the receipt.  It
+    still writes no table row."""
 
-
-def test_the_candidate_forecast_refuses_and_prints_no_sentence(mint, capsys):
-    rc = mint.main(
-        ["--candidate-forecast", "--dt", "0.5", "--card", "RTX A6000",
-         "--authorization", "please", "--", "--mesh", "x1.40962",
-         "--convection", "off"]
-    )
-    captured = capsys.readouterr()
-    assert rc == 2
-    _no_sentence(captured.out + captured.err)
-    refusal = json.loads(captured.err)
-    assert refusal["candidate_forecast"] == "refused"
-    assert PLACEHOLDER in refusal["refusal"]
+    with dt_admission.candidate_mint(
+        0.5, authorization=authorization, card="RTX A6000", cumulus_scheme=None,
+    ):
+        pass
     assert dt_admission.admitted_timestep(0.5, None) is None
 
 
@@ -407,30 +393,6 @@ def test_the_campaign_refuses_to_run_without_an_authorization(campaign, tmp_path
         campaign.main(_campaign_argv(tmp_path, "--control-dt", "0.25"))
     assert caught.value.code == 2
     assert not (tmp_path / "work").exists()
-
-
-def test_the_campaign_refuses_a_wrong_authorization_before_any_arm(
-    campaign, tmp_path, monkeypatch
-):
-    started: list[list[str]] = []
-    monkeypatch.setattr(
-        campaign, "_run", lambda argv, *rest: started.append(argv) or 0
-    )
-    rc = campaign.main(
-        _campaign_argv(tmp_path, "--control-dt", "0.25", "--authorization", "please")
-    )
-    assert rc == 1
-    assert started == [], "no arm may start on a refused authorization"
-    failed = (tmp_path / "work" / "FAILED").read_text()
-    anchor = (tmp_path / "work" / "anchor-dt0p5.json").read_text()
-    for text in (failed, anchor):
-        _no_sentence(text)
-        assert PLACEHOLDER in text
-    assert json.loads(anchor)["timestep_evidence"] == "experimental-unanchored"
-    # the host half was minted first, at the sub-second timestep
-    receipt = json.loads((tmp_path / "work" / "schedule-receipt-dt0p5.json").read_text())
-    assert receipt["cadences"]["stepra"] == 1200
-    assert not (tmp_path / "work" / "arm-a").exists()
 
 
 def test_the_campaign_dry_run_prints_every_leg_and_writes_nothing(

@@ -128,6 +128,41 @@ class NoahSoilState:
     #: the largest value it met.  EMPTY whenever neither capped a cell, the
     #: ``moisture_floor`` discipline.
     init_caps: Mapping[str, object] = field(default_factory=dict)
+    #: The cells real.exe's adjust_for_seaice_post made sea ice: water
+    #: (not terrestrial on the decision surface) with ``XICE >=`` the
+    #: XICE threshold OR an input skin below ``seaice_threshold``.  Land
+    #: use reads it (:func:`woof.core.landuse.initialize_landuse`
+    #: ``sea_ice_cells``) so the ice category and soil class 16 land on
+    #: exactly the cells this state built an ice column for, including a
+    #: threshold cell whose XICE stays below 0.02 under fractional sea ice.
+    #: ``None`` from a constructor that predates the field.
+    sea_ice_cells: np.ndarray | None = None
+
+
+def seaice_threshold_cells(skin, water, seaice_threshold, *, fallback=None):
+    """real.exe's ``seaice_threshold`` rule: the water cells it makes ice.
+
+    ``share/module_soil_pre.F`` adjust_for_seaice_post (HRRR v4.1.21 fork
+    :245-246 Noah/Noah-MP, :341-342 RUC) converts a cell where
+    ``LANDMASK < 0.5 .AND. TSK < SEAICE_THRESHOLD``, TSK being the input
+    skin temperature real.exe saved before its SST fill (``tsk_save``,
+    module_initialize_real.F:2749, passed as the routine's ``tsk``).  A
+    saved skin outside 170..400 K is first replaced by the SST-filled skin
+    (:240-243), which is ``fallback`` here.  REAL arithmetic: both sides
+    compare in float32.  A threshold at or below 170 K can never trigger
+    (no admitted skin is that cold) and returns an all-false mask.
+    """
+    water = np.asarray(water, dtype=bool)
+    threshold = np.float32(seaice_threshold)
+    if not np.isfinite(threshold) or threshold <= np.float32(170.0):
+        return np.zeros(water.shape, dtype=bool)
+    test = np.asarray(skin, dtype=np.float32)
+    if fallback is not None:
+        valid = (np.isfinite(test) & (test >= np.float32(170.0))
+                 & (test <= np.float32(400.0)))
+        test = np.where(valid, test,
+                        np.asarray(fallback, dtype=np.float32))
+    return water & np.isfinite(test) & (test < threshold)
 
 
 _TEMP_NAMES = ("ST000007", "ST007028", "ST028100", "ST100289")
@@ -1400,7 +1435,8 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
                          water_temperature_policy=None,
                          soil_mesh=None,
                          route=None, fractional_seaice: bool = False,
-                         soil_moisture_cap: bool = True) -> NoahSoilState:
+                         soil_moisture_cap: bool = True,
+                         seaice_threshold: float = 100.0) -> NoahSoilState:
     """Map ERA5 layers, GFS Noah layers, or native HRRR depth nodes to Noah.
 
     This is ``module_soil_pre.F:init_soil_2_real`` with layer input:
@@ -1616,6 +1652,10 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
     # must be XLAND=1; otherwise the driver's earlier open-water return masks
     # the xice branch.
     xice[terrestrial] = 0.0
+    # The analysed fraction a seaice_threshold cell keeps under fractional
+    # sea ice: adjust_for_seaice_post never reaches its XICE < 0.02 reset
+    # for a cell it converted (:392-393 is the ELSE arm).
+    analysed_xice = xice.copy()
     if not isinstance(fractional_seaice, (bool, np.bool_)):
         raise TypeError("fractional_seaice must be boolean")
     # module_soil_pre.F uses REAL fractions and a REAL 0.02 threshold.
@@ -1657,6 +1697,24 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
             raise ValueError(
                 "assembled water_temperature is non-finite or outside "
                 "170..400 K on open water")
+    # The seaice_threshold arm of the same IF (module_soil_pre.F:245-246,
+    # :341-342): open water whose input skin is below the threshold becomes
+    # ice whatever its XICE says.  Default 100 K converts nothing.
+    cold_water = seaice_threshold_cells(
+        skin, (~terrestrial) & (~sea_ice), seaice_threshold,
+        fallback=water_temperature)
+    if cold_water.any():
+        sea_ice = sea_ice | cold_water
+        # Binary: XICE = 1 (:247-249, :343-344).  Fractional: as analysed.
+        xice[cold_water] = (1.0 if not fractional_seaice
+                            else analysed_xice[cold_water])
+        effective_land = terrestrial | sea_ice
+        landmask = effective_land.astype(np.float64)
+        # :240-243: an out-of-band saved skin is replaced by the SST-filled
+        # skin before the cell takes it.
+        skin = np.where(
+            cold_water & ~(np.isfinite(skin) & (skin >= 170.0)
+                           & (skin <= 400.0)), water_temperature, skin)
     tsk = np.where(terrestrial | sea_ice, skin, water_temperature)
     if not np.isfinite(tsk).all() or np.any((tsk < 170.0) | (tsk > 400.0)):
         raise ValueError(_nonphysical_tsk_message(tsk, terrestrial | sea_ice))
@@ -1951,6 +2009,7 @@ def preprocess_noah_soil(fields: Mapping[str, object], *, soil_type,
         soil_texture_downscale=downscale_receipt,
         soil_temperature_repair=temperature_repair,
         init_caps=init_caps,
+        sea_ice_cells=sea_ice,
     )
 
 
@@ -1960,4 +2019,4 @@ __all__ = ["SNOW_WATER_CAP_KG_M2", "cap_land_moisture_at_smcmax",
            "NOAH_LAYER_THICKNESS_M", "NoahSoilState",
            "SOIL_TEMPERATURE_RECONCILER_NAMES", "SST_RECONCILER_NAMES",
            "island_soil_columns", "preprocess_noah_soil", "reconciler_soil_temperature",
-           "reconciler_sst", "soil_source_orography"]
+           "reconciler_sst", "seaice_threshold_cells", "soil_source_orography"]

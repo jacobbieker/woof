@@ -253,8 +253,6 @@ REFUSED_SOURCES: Mapping[str, str] = {
     "gem-gdps": "met_intermediate has no 'eccc-gdps' map source",
     "20crv3": "met_intermediate has no 'ncep-20crv3' map source, and the "
               "native grid is Gaussian",
-    "era5-l137": "hybrid model levels are not a Vtable operation; use the "
-                 "mapped route",
 }
 
 

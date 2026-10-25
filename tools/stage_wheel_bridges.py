@@ -1,95 +1,10 @@
-"""Stage the built Rust artifacts INTO the package, for a platform wheel.
+"""Stage every declared native artifact into a platform wheel.
 
-``pip install recast-woof`` used to land a Python half with no compiled Rust at
-all: every decoder, the fetch backbone, the renderer and the radar front
-door were downloaded afterwards by ``woof setup`` / ``woof
-fetch-bridges``.  That made the post-install step a failure surface on
-the one command every user runs first, and it made "the decode runs in
-Rust" unreachable on a bare install -- which is the whole point of doing
-the decode in Rust.
-
-This tool closes that by copying the artifacts
-:data:`woof.bridge_assets.BUNDLED_ARTIFACTS` declares out of the two
-Cargo workspaces and into :func:`woof.bridges.packaged_bridge_dir`
-(``woof/libexec/bridges``), which
-``[tool.setuptools.package-data]`` sweeps into the wheel.  Run it
-between ``cargo build --release`` and ``python -m build``; the resulting
-wheel is platform-tagged by ``setup.py`` because it now carries native
-code.
-
-It is deliberately NOT a build step: it copies bytes that already exist
-and refuses when they do not, so a wheel can never be built with a
-silently missing artifact and ship a door that dies at first use.
-
-    python tools/stage_wheel_bridges.py --platform win-x86_64
-    python tools/stage_wheel_bridges.py --clean
-
-``--dest DIR`` points the same table-driven copy at a directory other
-than the package, which is what completes a HOME from a build tree::
-
-    python tools/stage_wheel_bridges.py --dest ~/.woof/bridges
-
-That rung -- ``woof.bridges.default_bridge_dir`` -- is the last one
-every resolver searches, and it is the rung a wheel-less checkout user
-fills.  Filling it by hand is how a home came to carry sixteen of the
-declared artifacts, missing the NetCDF decoder and the NetCDF writer
-behind the default wrfout engine; a hand copy has no declaration to
-check itself against and this tool does.  Only the in-package
-destination is emptied first (a wheel carrying two platforms is both
-wrong and over PyPI's cap); any other destination keeps everything this
-tool did not stage.
-
-What is NOT staged, and why: the renderer's basemap shapefiles.  They
-are 21.1 MB compressed, and there is no room for them.  They are also
-DATA (Natural Earth coastlines and county polygons), not a processing
-path.  Since 2.8.0 they ship in the ``recast-woof-data`` companion, which
-every install pulls, and :func:`woof.rustwx.renderer_env` hands that
-copy to this wheel's renderer; before that they reached a wheel install
-only through ``woof fetch-bridges``, which no install text ran, and
-every picture came out with no coastlines, borders or state lines.
-
-Sizes, measured 2026-08-17 at the 2.5.0 integration tip, against
-PyPI's 100 MB per-file cap read strictly as 100,000,000 B::
-
-    pure wheel      gpuwm-2.5.0-py3-none-any.whl          91,926,618 B
-    pure sdist      gpuwm-2.5.0.tar.gz                    95,245,042 B
-    win-x86_64      gpuwm-2.5.0-py3-none-win_amd64.whl   108,695,109 B
-    linux-x86_64    ...-manylinux_2_28_x86_64.whl        111,697,820 B
-
-The pure pair is what ``.github/workflows/publish.yml`` ships (it runs
-``--clean`` first) and it fits, with 8.07 MB of headroom on the wheel
-and 4.75 MB on the sdist -- the sdist, not the wheel, is the binding
-constraint of the published pair.  The win and linux numbers are this
-Windows host and a development machine respectively; the linux one is from the
-2.5.0 Linux shakeout, everything else was measured together on one box.
-
-BOTH PLATFORM WHEELS ARE OVER THE CAP AT THIS TIP -- by 8.70 MB and
-11.70 MB.  The bridge payload has roughly doubled since these numbers
-were last written (compressed, it is now 16.77 MB on Windows and 19.77
-MB on Linux over the pure base), which is ``rw_netcdf``,
-``netcdf_writer`` and ``region_global_dealias`` joining
-:data:`woof.bridge_assets.BUNDLED_ARTIFACTS`.  Whatever this docstring
-claimed before, do not read a headroom number off it again without
-re-measuring: the figures it carried into this tip (96.66 MB win, 98.35
-MB linux, "1.65 MB of headroom on Linux") were 12-13 MB low and had the
-sign inverted -- the wheels were over the cap while the doc said they
-were under it, and the whole documented rationale for excluding the
-basemaps rested on that dead number.
-
-Nothing published is broken by this: the per-platform wheel is not a
-shape PyPI receives today.  The remedy for making it one is the
-companion split -- the payload moves into a companion distribution
-rather than a decoder being dropped -- and until that lands, a platform
-wheel built here is a local artifact, not an uploadable one.
-``tools/verify_release_artifacts.py`` measures every distribution file
-in the dist directory against the cap and refuses the ones a cut is
-about to publish, so this cannot be discovered at upload time with the
-tag already public.
-
-67 MB of the pure base is physics tables (Thompson and RRTMGP).  If the
-PURE pair ever runs out of room, the remedy is externalising another
-table through ``woof fetch-tables`` -- the route ``freezeH2O.dat`` and
-``qr_acr_qg_V4.dat`` already take -- rather than dropping a decoder.
+Run after the release Cargo builds and before ``python -m build``. The shared
+rw_wrfbatch executable and its five native launchers carry the old tool names.
+Both package staging and a user's bridge directory receive the full roster.
+Basemap assets stay in recast-woof-data and the downloadable bridge bundle.
+``tools.battery.wheel_size`` measures wheels before release gates.
 """
 
 from __future__ import annotations
@@ -120,6 +35,16 @@ MANIFEST_SCHEMA = "gpuwm-wheel-bridge-bundle-v1"
 
 #: Where each workspace puts its release build, by crate-relative path.
 _WORKSPACE_TARGET = {
+    "tools/nextgen_hydrofabric": "target/release",
+    "tools/nextgen_verify": "target/release",
+    "tools/nextgen_output": "target/release",
+    "tools/nextgen_forcing": "target/release",
+    "tools/hydro_world": "target/release",
+    "tools/hydro_world_params": "target/release",
+    "tools/nextgen_reservoir_prepare": "target/release",
+    "tools/hydro_world_init": "target/release",
+    "tools/ocean_prepare": "target/release",
+    "tools/rw-bathy": "target/release",
     bridges.CRATE_RELATIVE: "target/release",
     bridges.RUSTWX_CRATE_RELATIVE: "target/release",
     "tools/region_global_dealias": "target/release",
@@ -197,8 +122,18 @@ def _is_packaged_destination(destination: Path) -> bool:
         return False
 
 
+def staged_artifacts(destination: Path) -> tuple[bridge_assets.BundledArtifact, ...]:
+    """What ``destination`` takes: the in-package directory gets what the
+    wheel carries (:func:`woof.bridge_assets.wheel_artifacts`, which leaves
+    out the on-demand artifacts so the wheel stays under PyPI's per-file
+    limit); any other destination, a user's bridge directory included, gets
+    the whole declared roster, on-demand artifacts and all."""
+    if _is_packaged_destination(destination):
+        return bridge_assets.wheel_artifacts()
+    return bridge_assets.BUNDLED_ARTIFACTS
+
 def stage(platform: str, *, destination: Path | None = None) -> Path:
-    """Copy every declared artifact into ``destination``, or refuse.
+    """Copy every artifact ``destination`` takes into it, or refuse.
 
     Fail closed and fail COMPLETE: every missing artifact is collected
     and reported at once, because a build operator who has to re-run
@@ -216,9 +151,10 @@ def stage(platform: str, *, destination: Path | None = None) -> Path:
     """
 
     destination = destination or bridges.packaged_bridge_dir()
+    roster = staged_artifacts(destination)
     missing: list[str] = []
     plan: list[tuple[bridge_assets.BundledArtifact, Path, Path]] = []
-    for artifact in bridge_assets.BUNDLED_ARTIFACTS:
+    for artifact in roster:
         origin = source_path(artifact, platform)
         if not origin.is_file():
             missing.append(f"  {artifact.name:24s} expected at {origin}")
@@ -228,13 +164,13 @@ def stage(platform: str, *, destination: Path | None = None) -> Path:
     if missing:
         raise SystemExit(
             f"stage_wheel_bridges: {len(missing)} of "
-            f"{len(bridge_assets.BUNDLED_ARTIFACTS)} declared artifacts are "
+            f"{len(roster)} declared artifacts are "
             f"not built for {platform}:\n" + "\n".join(missing) +
             "\n\nBuild them first, from the checkout root:\n"
             + "\n".join(
                 "  " + bridges.cargo_build_one_liner(crate)
                 for crate in dict.fromkeys(
-                    artifact.crate for artifact in bridge_assets.BUNDLED_ARTIFACTS)))
+                    artifact.crate for artifact in roster)))
 
     purge_build_staging()
     if _is_packaged_destination(destination) and destination.exists():
@@ -276,13 +212,12 @@ def stage_from_bundle(archive: Path, platform: str,
 
     Only the binaries are taken.  ``assets/`` members are the renderer's
     basemap shapefiles, deliberately not shipped in the wheel (see the
-    module docstring).
-    """
+    module docstring).    """
 
     destination = destination or bridges.packaged_bridge_dir()
     wanted = {
         bridge_assets.artifact_filename(artifact, platform): artifact
-        for artifact in bridge_assets.BUNDLED_ARTIFACTS
+        for artifact in staged_artifacts(destination)
     }
     purge_build_staging()
     if _is_packaged_destination(destination) and destination.exists():
@@ -319,6 +254,16 @@ def stage_from_bundle(archive: Path, platform: str,
         json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     return destination
 
+
+def _staged_count(destination: Path) -> str:
+    """What was staged, as the count the destination's own record holds."""
+
+    staged = len(json.loads(
+        (destination / MANIFEST_NAME).read_text(encoding="utf-8"))["artifacts"])
+    declared = len(bridge_assets.BUNDLED_ARTIFACTS)
+    if staged == declared:
+        return f"{staged} artifacts"
+    return f"{staged} of {declared} artifacts"
 
 def clean(destination: Path | None = None) -> None:
     purge_build_staging()
@@ -373,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
                                         destination=args.dest)
         total = sum(path.stat().st_size for path in destination.iterdir()
                     if path.is_file())
-        print(f"staged {len(bridge_assets.BUNDLED_ARTIFACTS)} artifacts for "
+        print(f"staged {_staged_count(destination)} for "
               f"{args.platform} from {args.from_bundle} into {destination} "
               f"({total / 1e6:.2f} MB)")
         return 0
@@ -386,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
     destination = stage(args.platform, destination=args.dest)
     total = sum(path.stat().st_size for path in destination.iterdir()
                 if path.is_file())
-    print(f"staged {len(bridge_assets.BUNDLED_ARTIFACTS)} artifacts for "
+    print(f"staged {_staged_count(destination)} for "
           f"{args.platform} into {destination} ({total / 1e6:.2f} MB)")
     return 0
 

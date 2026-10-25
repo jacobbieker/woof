@@ -32,7 +32,7 @@ import pytest
 from conftest import requires_gpu
 from test_restart import (
     _LIFECYCLE_FREE_CHILD_DIGEST, _LIFECYCLE_FREE_ROOT_DIGEST,
-    _canonical_member_digest, _cfg, _extension_state, _fill_serialized,
+    _PINNED_UNDER_MEASURED_CLOCK, _canonical_member_digest, _cfg, _extension_state, _fill_serialized,
     _fill_setup, _historical_setup_fingerprint, _sealed_tree_fixture,
     _shim_state)
 from woof import state_serialization_contract as contract
@@ -53,8 +53,11 @@ def _writer(model, mode=ASYNC) -> CheckpointWriter:
 
 
 def _tree(monkeypatch):
+    # Upstream 1.1.0 pins the lifecycle-free digests under the measured
+    # terrain clock (tests/test_background_checkpoint.py does the same).
     return _sealed_tree_fixture(
-        monkeypatch, forcing_count=2, run_seconds=3600.0, payload_seed=31)
+        monkeypatch, forcing_count=2, run_seconds=3600.0, payload_seed=31,
+        run_overrides=_PINNED_UNDER_MEASURED_CLOCK)
 
 
 def _members(directory, grid_id):
