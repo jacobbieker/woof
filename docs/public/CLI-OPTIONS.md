@@ -611,7 +611,7 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--card` | card for --point sizing (default 24gb): a tier (12gb/16gb/24gb/32gb), a size ('10gb') or a model with a recorded size ('RTX 3080'), the same spellings `woof domain` accepts |
 | `--child-config` | legacy RunConfig TOML for the child (specified=true, nested=false) |
 | `--child-config-sha256` | require the exact reviewed child configuration bytes |
-| `--child-levels N[,STRETCH]` | give the child its own vertical ladder of N levels instead of inheriting the parent's, clustered toward the ground by STRETCH (the LES case: a 100 m child wants the levels, not just the columns). p_top, hybrid_opt and etac stay shared with the parent |
+| `--child-levels SPEC` | give the child its own vertical ladder instead of inheriting the parent's (the LES case: a 100 m child wants the levels, not just the columns). SPEC is N,STRETCH (N levels clustered toward the ground by STRETCH); eta:LIST\|FILE (the full-level eta values, 1.0 first and 0.0 last, as a comma list or a file of them, e.g. one written by `python -m woof.vertical_bands --write`); or bands:NZ,LO:HI:N[:agl][,...] with optional dzbot=M, max_stretch=R, max_dz=M, ground=M and reference=standard\|wrf-base (a band-biased ladder of NZ levels holding at least N levels between LO and HI metres, laid out under the parent's model top, :agl over its median ground under the child). p_top, hybrid_opt and etac stay shared with the parent |
 | `--child-size NX[,NY]` | explicit child extent for --point |
 | `--child-surface-from` | child-grid wrfinput/history file with land identity + soil warm start (required for surface-physics children) |
 | `--dry-run` | validate contracts, derive/print the plan, write the derived TOML, run nothing |
@@ -3912,6 +3912,37 @@ Takes no options of its own.
 | `--time-col COL` | time column (default: time) |
 | `--time-format FMT` | a Python strptime format, or 'epoch' for Unix seconds (default: ISO 8601, date and time joined by a space or T); times without a zone are UTC |
 | `--track-margin-cells N` | d03 cells the track keeps from d03's edges (default 40) |
+
+## `woof track splice`
+
+| option | what it does |
+|---|---|
+| `--blend-m M` | depth of a linear blend layer centred on each cutoff height (default 0: a hard switch) |
+| `--child PATH` | two-grid form: the fine grid's wrfout files or run folder |
+| `--child-domain N` | the child's domain number when a folder holds several |
+| `--drop-when COL=VALUE` | drop rows whose COL equals VALUE (e.g. a receiver's no-fix flag); repeatable |
+| `--edge-cells K` | cells at each lateral edge of every finer grid that are never used (its boundary rows and relaxation zone; default: the spec_bdy_width of a child.toml beside its history, else 5) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--fields-out DIR` | write each finer grid's merged frames into DIR/<grid>/ |
+| `--group NAME` | the Icechunk group (default: splice/<name> for a path; spliced/<grid> for a field set) |
+| `--height-col COL` | height column, metres (default: height) |
+| `--height-datum {msl,agl}` | heights above mean sea level or above ground (default: msl) |
+| `--height-fallback-col COL` | column used where the height is blank; repeatable, tried in order |
+| `--icechunk URL` | also write into this Icechunk repository: a path sample as one (sample,) group, merged frames through the wrfout group writer, one group per grid |
+| `--lat-col COL` | latitude column, degrees (default: lat) |
+| `--lateral-blend-cells K` | cells, inside the edge zone, across which a finer grid fades in (default 3; 0 switches) |
+| `--lon-col COL` | longitude column, degrees (default: lon) |
+| `--mapping FILE` | JSON or TOML column mapping with keys time, lat, lon, height, height_fallback, time_format, height_datum, drop_when |
+| `--min-climb M` | climb above the starting ground, metres, that makes a launch (default: 300) |
+| `--name NAME` | the path's name (default: the file stem) |
+| `--out FILE` | path sample output: .csv (one row per fix) or .json (rows plus the continuity statement) |
+| `--parent PATH` | two-grid form: the coarse full-depth grid's wrfout files or run folder |
+| `--parent-domain N` | the parent's domain number when a folder holds several |
+| `--path FILE` | a 3-D path file (time, lat, lon, height), read with the `woof track inspect` column options |
+| `--splice-height-m M` | two-grid form: the child's cutoff height (geopotential m) |
+| `--tier PATH[,CUTOFF_M][,dN]` | one grid of the stack: its wrfout files' folder (or one file), its cutoff height in geopotential m (absent on the first, coarsest, full-depth grid) and its domain number when the folder holds several; repeat coarsest first |
+| `--time-col COL` | time column (default: time) |
+| `--time-format FMT` | a Python strptime format, or 'epoch' for Unix seconds (default: ISO 8601, date and time joined by a space or T); times without a zone are UTC |
 
 ## `woof update`
 

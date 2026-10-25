@@ -540,21 +540,175 @@ def build_child_eta_levels(nz: int, *, stretch: float | None) -> tuple:
 
 
 
-def _parse_child_levels(spec):
-    """``--child-levels N[,STRETCH]`` -> an explicit ladder, or ``None``."""
+#: The ``--child-levels`` spellings, in the order the help names them.
+#: ``N,STRETCH`` is the original tanh ladder; ``eta:`` and ``bands:`` are
+#: an explicit ladder and a band-biased one (:mod:`woof.vertical_bands`).
+CHILD_LEVELS_SPELLINGS = (
+    "N,STRETCH",
+    "eta:LIST|FILE",
+    "bands:NZ,LO:HI:N[:agl][,...][,dzbot=M][,max_stretch=R][,max_dz=M]"
+    "[,ground=M][,reference=standard|wrf-base]")
+
+#: Keys a ``bands:`` spec may set, mapped onto
+#: :func:`woof.vertical_bands.band_biased_column`'s keyword names.
+_BAND_SPEC_KEYS = {"dzbot": "dzbot", "max_stretch": "max_stretch",
+                   "max_dz": "max_dz", "ground": "surface_elevation_m",
+                   "reference": "reference"}
+
+
+def child_levels_kind(spec) -> str | None:
+    """Which ``--child-levels`` spelling ``spec`` is: ``"stretch"``,
+    ``"eta"``, ``"bands"``, or ``None`` for no spec."""
 
     if spec is None:
         return None
+    text = str(spec).strip()
+    if text.startswith("eta:"):
+        return "eta"
+    if text.startswith("bands:"):
+        return "bands"
+    return "stretch"
+
+
+def _parse_band_spec(spec: str) -> tuple[int, tuple, dict]:
+    """``bands:NZ,BAND...,key=value...`` -> ``(nz, bands, settings)``.
+
+    Pure syntax: the ladder itself needs the parent's model top and is
+    built by :func:`_parse_child_levels` once that is known.
+    """
+
+    from woof.vertical_bands import REFERENCE_ATMOSPHERES, parse_band
+
+    body = str(spec).strip()[len("bands:"):]
+    parts = [part.strip() for part in body.split(",") if part.strip()]
+    spelling = CHILD_LEVELS_SPELLINGS[2]
+    if not parts:
+        raise OfflineChildContractError(
+            f"--child-levels {spec!r}: expected {spelling}")
+    try:
+        nz = int(parts[0])
+    except ValueError:
+        raise OfflineChildContractError(
+            f"--child-levels {spec!r}: the first field must be the level "
+            f"count NZ; expected {spelling}") from None
+    bands, settings = [], {}
+    for part in parts[1:]:
+        if "=" in part:
+            key, _, value = (piece.strip() for piece in part.partition("="))
+            if key not in _BAND_SPEC_KEYS:
+                raise OfflineChildContractError(
+                    f"--child-levels {spec!r}: unknown key {key!r}; "
+                    f"expected one of {sorted(_BAND_SPEC_KEYS)}")
+            if key in settings:
+                raise OfflineChildContractError(
+                    f"--child-levels {spec!r}: {key} is given twice")
+            if key == "reference":
+                if value not in REFERENCE_ATMOSPHERES:
+                    raise OfflineChildContractError(
+                        f"--child-levels {spec!r}: reference must be one "
+                        f"of {list(REFERENCE_ATMOSPHERES)}")
+                settings[key] = value
+                continue
+            try:
+                number = float(value)
+            except ValueError:
+                raise OfflineChildContractError(
+                    f"--child-levels {spec!r}: {key} must be a number") \
+                    from None
+            if not math.isfinite(number):
+                raise OfflineChildContractError(
+                    f"--child-levels {spec!r}: {key} must be finite")
+            settings[key] = number
+            continue
+        try:
+            bands.append(parse_band(part))
+        except argparse.ArgumentTypeError as error:
+            raise OfflineChildContractError(
+                f"--child-levels {spec!r}: {error}") from None
+    return nz, tuple(bands), settings
+
+
+def child_levels_need_column(spec) -> bool:
+    """Whether ``spec`` can only be built once the parent's model top,
+    ``hybrid_opt`` and ``etac`` are known (the ``bands:`` spelling)."""
+
+    return child_levels_kind(spec) == "bands"
+
+
+def _parse_child_levels(spec, *, column=None, syntax_only: bool = False):
+    """``--child-levels SPEC`` -> an explicit ladder, or ``None``.
+
+    Three spellings (:data:`CHILD_LEVELS_SPELLINGS`):
+
+    * ``N,STRETCH`` -- ``make_vertical_coord``'s tanh ladder;
+    * ``eta:LIST|FILE`` -- the full-level eta values themselves, a comma
+      list or a file of them (the ``--eta-levels`` reader, so a file
+      written by ``python -m woof.vertical_bands --write`` works);
+    * ``bands:NZ,BAND...`` -- a band-biased ladder
+      (:func:`woof.vertical_bands.band_biased_column`) whose heights are
+      laid out under the PARENT's model top.  ``column`` carries that top
+      as ``{"p_top_pa", "hybrid_opt", "etac"}``; without it this spelling
+      is refused by name, except under ``syntax_only``, which checks the
+      spelling and answers ``None``.
+
+    Every spelling keeps ``p_top``/``hybrid_opt``/``etac`` shared with
+    the parent, which is what the conservative remap requires.
+    """
+
+    if spec is None:
+        return None
+    kind = child_levels_kind(spec)
+    if kind == "eta":
+        from woof.cli_numbers import eta_levels_list
+        from woof.domain_wizard import validate_eta_ladder
+
+        body = str(spec).strip()[len("eta:"):]
+        try:
+            ladder = validate_eta_ladder(
+                eta_levels_list(body), what=f"--child-levels {spec!r}")
+        except (argparse.ArgumentTypeError, ValueError) as error:
+            raise OfflineChildContractError(
+                f"--child-levels {spec!r}: {error}") from None
+        return tuple(float(value) for value in ladder)
+    if kind == "bands":
+        nz, bands, settings = _parse_band_spec(spec)
+        if syntax_only:
+            return None
+        if column is None or column.get("p_top_pa") is None:
+            raise OfflineChildContractError(layered(
+                f"--child-levels {spec!r} needs the parent's model top to "
+                "lay its bands out, and none could be read",
+                "A band-biased ladder places heights under the parent's "
+                "p_top, which is read from the archived parent's P_TOP.  "
+                "Write the ladder with `python -m woof.vertical_bands "
+                "--p-top-pa P --write FILE` and pass --child-levels "
+                "eta:FILE instead."))
+        from woof.vertical_bands import BandColumnRefused, band_biased_column
+
+        kwargs = {_BAND_SPEC_KEYS[key]: value
+                  for key, value in settings.items()}
+        kwargs.setdefault("surface_elevation_m",
+                          float(column.get("surface_elevation_m", 0.0)))
+        try:
+            built = band_biased_column(
+                nz=nz, bands=bands, p_top_pa=float(column["p_top_pa"]),
+                hybrid_opt=int(column.get("hybrid_opt", 2)),
+                etac=float(column.get("etac", 0.2)), **kwargs)
+        except BandColumnRefused as error:
+            raise OfflineChildContractError(
+                f"--child-levels {spec!r}: {error}") from None
+        return tuple(float(value) for value in built.eta)
     parts = [part.strip() for part in str(spec).split(",")]
     try:
         nz = int(parts[0])
     except ValueError:
         raise OfflineChildContractError(
             f"--child-levels {spec!r}: expected N[,STRETCH] with an integer "
-            "level count") from None
+            "level count, or eta:LIST|FILE, or bands:NZ,BAND...") from None
     if len(parts) > 2:
         raise OfflineChildContractError(
-            f"--child-levels {spec!r}: expected N[,STRETCH]")
+            f"--child-levels {spec!r}: expected N[,STRETCH] (an explicit "
+            "ladder is spelled eta:LIST|FILE)")
     stretch = None
     if len(parts) == 2 and parts[1]:
         try:
@@ -566,6 +720,45 @@ def _parse_child_levels(spec):
         return build_child_eta_levels(nz, stretch=stretch)
     except ValueError as exc:
         raise OfflineChildContractError(str(exc)) from exc
+
+
+#: Half-width, in parent cells, of the footprint a ``--point`` child's
+#: ``:agl`` bands stand on when no ``--child-size`` says how big it is.
+POINT_GROUND_HALF_CELLS = 16
+
+
+def parent_column_basis(frame_path, *, footprint=None) -> dict:
+    """The column a ``bands:`` child ladder is laid out in: the archived
+    parent's model top (``P_TOP`` off the tape) and a reference ground --
+    the median of the parent's terrain (``HGT``) over ``footprint``
+    (``(j0, j1, i0, i1)`` 0-based parent mass cells, clamped; the whole
+    parent when ``None``), which ``:agl`` bands stand on unless the spec
+    names ``ground=M``.  ``hybrid_opt``/``etac`` are added by the caller
+    that knows the child's (they are shared with the parent)."""
+
+    from woof.offline_child import parent_archive_p_top
+
+    ground = 0.0
+    with netCDF4.Dataset(frame_path) as dataset:
+        if "HGT" in dataset.variables:
+            hgt = np.asarray(dataset.variables["HGT"][0], dtype=np.float64)
+            if footprint is not None:
+                j0, j1, i0, i1 = (int(v) for v in footprint)
+                ny, nx = hgt.shape
+                j0, i0 = max(0, j0), max(0, i0)
+                j1, i1 = min(ny, max(j1, j0 + 1)), min(nx, max(i1, i0 + 1))
+                hgt = hgt[j0:j1, i0:i1]
+            ground = float(np.median(hgt))
+    return {"p_top_pa": parent_archive_p_top(frame_path),
+            "surface_elevation_m": ground}
+
+
+def _child_levels_column(spec, frame_path, *, footprint=None):
+    """:func:`parent_column_basis` when ``spec`` needs it, else ``None``."""
+
+    if not child_levels_need_column(spec):
+        return None
+    return parent_column_basis(frame_path, footprint=footprint)
 
 #: How many PARENT cells a derived child's relaxation zone spans.
 #:
@@ -1838,7 +2031,7 @@ def _downscale_main(args, reservation: _OutputReservation,
         # malformed N[,STRETCH] and a bare N with no stretch -- a uniform
         # ladder under a stretched parent is a different atmosphere --
         # still refuse at the same moment they always did.
-        _parse_child_levels(args.child_levels)
+        _parse_child_levels(args.child_levels, syntax_only=True)
         child_config = Path(args.child_config)
         _verify_child_config_hash(child_config, getattr(args, "child_config_sha256", None))
         sizing = _sizing_budget(args, auto_vram)
@@ -1876,7 +2069,22 @@ def _downscale_main(args, reservation: _OutputReservation,
         output_interval_s = (float(args.output_interval_seconds)
                              if args.output_interval_seconds is not None
                              else contract.interval_seconds)
-        child_levels = _parse_child_levels(args.child_levels)
+        if args.child_size is not None:
+            size = [int(p) for p in str(args.child_size).split(",")]
+            half_i = max(1, size[0] // (2 * ratio))
+            half_j = max(1, size[-1] // (2 * ratio))
+        else:
+            half_i = half_j = POINT_GROUND_HALF_CELLS
+        levels_column = _child_levels_column(
+            args.child_levels, frames[0],
+            footprint=(j0 - half_j, j0 + half_j + 1,
+                       i0 - half_i, i0 + half_i + 1))
+        child_levels = _parse_child_levels(
+            args.child_levels,
+            column=(None if levels_column is None else {
+                **levels_column,
+                "hybrid_opt": int(parent_config.get("hybrid_opt", 2)),
+                "etac": float(parent_config.get("etac", 0.2))}))
         # Every instant the child's step has to land on besides its run
         # length, history and checkpoint: the health line, and the parent's
         # frame interval, where the boundary seam falls
@@ -1985,7 +2193,21 @@ def _downscale_main(args, reservation: _OutputReservation,
     # function the runner's admission calls: a --child-levels ladder
     # beside --child-config lands in the cfg the plan is written from and
     # the price is taken on, so review and run describe one grid.
-    cfg = resolve_child_run_config(child_config, child_levels=args.child_levels)
+    if args.child_config is not None:
+        # The supplied child's footprint on the parent, for its :agl bands.
+        levels_column = None
+        if child_levels_need_column(args.child_levels):
+            from woof.config import load_config
+
+            declared = load_config(child_config, accept_epssm_auto=True,
+                                   child_static=True)
+            levels_column = _child_levels_column(
+                args.child_levels, frames[0], footprint=(
+                    j_start - 1, j_start - 1 + -(-declared.ny // ratio),
+                    i_start - 1, i_start - 1 + -(-declared.nx // ratio)))
+    cfg = resolve_child_run_config(
+        child_config, child_levels=args.child_levels,
+        parent_column=levels_column)
     child_config_sha256 = _verify_child_config_hash(
         child_config, getattr(args, "child_config_sha256", None))
     # The run's root has to take specified boundaries.  Asked HERE, at
@@ -2373,6 +2595,10 @@ def _downscale_main(args, reservation: _OutputReservation,
         # the runner cannot reach a different answer than the review did.
         tiles=args.tiles,
         child_levels=args.child_levels,
+        # A bands: ladder is laid out under the parent's model top and over
+        # its ground; the runner resolves the same spec, so it is handed
+        # the same column (its hybrid_opt/etac are the child config's own).
+        child_levels_column=levels_column,
         outdir=Path(args.out),
         # This process created --out moments ago to hold the config it
         # derived; the never-adopt reservation already happened there.
@@ -2639,13 +2865,25 @@ def register_cli(subparsers) -> None:
     # is still refused, because it would be filled in with a uniform
     # ladder and a uniform ladder under a stretched parent is a different
     # atmosphere.
-    parser.add_argument("--child-levels", default=None, metavar="N[,STRETCH]",
-                        help="give the child its own vertical ladder of N "
-                             "levels instead of inheriting the parent's, "
-                             "clustered toward the ground by STRETCH (the "
-                             "LES case: a 100 m child wants the levels, not "
-                             "just the columns).  p_top, hybrid_opt and etac "
-                             "stay shared with the parent")
+    parser.add_argument("--child-levels", default=None, metavar="SPEC",
+                        help="give the child its own vertical ladder "
+                             "instead of inheriting the parent's (the LES "
+                             "case: a 100 m child wants the levels, not "
+                             "just the columns).  SPEC is N,STRETCH (N "
+                             "levels clustered toward the ground by "
+                             "STRETCH); eta:LIST|FILE (the full-level eta "
+                             "values, 1.0 first and 0.0 last, as a comma "
+                             "list or a file of them, e.g. one written by "
+                             "`python -m woof.vertical_bands --write`); or "
+                             "bands:NZ,LO:HI:N[:agl][,...] with optional "
+                             "dzbot=M, max_stretch=R, max_dz=M, ground=M "
+                             "and reference=standard|wrf-base (a "
+                             "band-biased ladder of NZ levels holding at "
+                             "least N levels between LO and HI metres, laid "
+                             "out under the parent's model top, :agl over "
+                             "its median ground under the child).  p_top, "
+                             "hybrid_opt and etac stay shared with the "
+                             "parent")
     # The same vocabulary `woof go --products` takes, and the same
     # default: a downscaled forecast is a forecast, and a reader who
     # gets pictures from one and frames from the other is reading two
