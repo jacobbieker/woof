@@ -223,8 +223,9 @@ detail and the corrections. W = WOOF, C = CliMA, N = NumericalEarth.
   tiles, each re-run by `woof downscale`, with no domain-count ceiling
   ([W7]). `woof downscale --child-levels` gives an offline child its own
   deeper level ladder ([W8]).
-- **WOOF: no vertical nesting.** A live tree has none: sub-km children share
-  their parent's level count ([W9]).
+- **WOOF: one-way vertical nesting.** A live nest may name its own
+  `eta_levels` (WRF `vert_refine_method = 2`); without it, sub-km children
+  share their parent's level count ([W9]).
 - **WOOF: documentation conflict.** The energy topology table says
   `wrf-nests` is "Two-way inside one run" (`docs/energy-forecasts.md:435`),
   but the plan preamble says "sibling nests of one run (feedback = 0)"

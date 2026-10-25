@@ -199,6 +199,66 @@ class ExperimentState:
             stack.extend(reversed(current.children))
 
 
+class LadderRadiationWorkspaces:
+    """One :class:`SharedRRTMGPChunkWorkspace` per level count of a tree.
+
+    A tree whose nests carry their own eta ladders (WRF vert_refine_method
+    = 2) has domains of different ``nz``, and an RRTMGP workspace is laid
+    out for exactly one.  Each distinct ``nz`` gets its own workspace, and
+    an adapter resolves its own at call time (:meth:`for_nz`, read by
+    ``woof.core.rrtmgp``).  A tree of one ladder never builds this: it
+    keeps the one shared workspace it always had.
+    """
+
+    def __init__(self, workspaces: Mapping[int, SharedRRTMGPChunkWorkspace]):
+        if not workspaces:
+            raise ValueError("a ladder workspace set needs a workspace")
+        chunks = {int(ws.column_chunk) for ws in workspaces.values()}
+        tops = {float(ws.p_top) for ws in workspaces.values()}
+        if len(chunks) != 1 or len(tops) != 1:
+            raise ValueError("ladder workspaces must share column_chunk and "
+                             "p_top")
+        self._workspaces = MappingProxyType(
+            {int(nz): ws for nz, ws in sorted(workspaces.items())})
+        self.column_chunk = chunks.pop()
+        self.p_top = tops.pop()
+
+    @property
+    def nbytes(self) -> int:
+        return sum(ws.nbytes for ws in self._workspaces.values())
+
+    @property
+    def level_counts(self) -> tuple[int, ...]:
+        return tuple(self._workspaces)
+
+    def for_nz(self, nz: int) -> SharedRRTMGPChunkWorkspace:
+        try:
+            return self._workspaces[int(nz)]
+        except KeyError:
+            raise ValueError(
+                f"no RRTMGP workspace for nz={nz}; this tree's ladders "
+                f"have {list(self._workspaces)}") from None
+
+
+def tree_level_counts(exp) -> tuple[int, ...]:
+    """The distinct mass-level counts of a tree's domains, ascending."""
+    return tuple(sorted({int(dc.run.nz) for dc in exp.domains}))
+
+
+def build_radiation_workspace(exp):
+    """The tree's shared RRTMGP workspace: one when every domain shares a
+    level count (as always), one per count otherwise."""
+    counts = tree_level_counts(exp)
+    if len(counts) == 1:
+        return SharedRRTMGPChunkWorkspace(
+            nz=counts[0], column_chunk=exp.column_chunk,
+            p_top=exp.vertical.p_top)
+    return LadderRadiationWorkspaces({
+        nz: SharedRRTMGPChunkWorkspace(
+            nz=nz, column_chunk=exp.column_chunk, p_top=exp.vertical.p_top)
+        for nz in counts})
+
+
 @dataclass
 class SharedRRTMGPChunkWorkspace:
     """One real byte allocation shared by all sequential RRTMGP adapters.
@@ -1239,9 +1299,7 @@ def build_experiment(exp, case_data) -> ExperimentState:
     # its engine-default column_chunk=None contract -- so no workspace is
     # built (and no chunking attributes are stamped onto the adapter).
     radiation_workspace = (
-        SharedRRTMGPChunkWorkspace(
-            nz=exp.root.run.nz, column_chunk=exp.column_chunk,
-            p_top=exp.vertical.p_top)
+        build_radiation_workspace(exp)
         if uses_modern_rrtmgp_workspace(exp) else None)
     if (radiation_workspace is not None
             and radiation_workspace.nbytes != estimate.workspace_bytes):

@@ -70,11 +70,20 @@ the Registry's 5000 Pa [docs/public/CONFIGURATION.md:183].
 
 Two hard properties a WRF user must plan around:
 
-- **No vertical nesting in a LIVE tree, by construction.** The vertical grid of an
-  inline nest tree is single-sourced from `ExperimentConfig.vertical` and per-domain
-  vertical keys are rejected outright: a 250 m LES child inside a running tree takes
-  its parents' level count [docs/public/LES.md:341-345]. The consequences for sub-km
-  work are measured in section 2.8. **An OFFLINE child is not bound by this.**
+- **Vertical nesting in a LIVE tree: one-way, WRF `vert_refine_method = 2`.** A
+  `[[domain]]` may name its own `eta_levels` (with `nz`/`e_vert` agreeing). `p_top`,
+  `hybrid_opt` and `etac` stay shared, and the root's ladder is `[shared]`'s. The
+  parent forces the nest through WRF's vertical interpolation (a monotone cubic in a
+  reference log-pressure height) and WRF's rebalance of `t`, QV and `ph` on the
+  parent's columns, before the horizontal SINT. A nest born from its parent is
+  interpolated the same way, and a nest prepared from the analysis is built on its
+  own ladder directly, as real.exe builds `wrfinput_d0N` on the nest's `e_vert`.
+  The operators are held word for word to WRF v4.7.1's Fortran on the CPU and the
+  GPU (`tools/vert_nest_wrf471_oracle`). Refused by name: feedback, moving,
+  following and spawned nests, split (`[devices]`) and streamed (`[tiles]`) edges,
+  and a nest with a different microphysics scheme. Without a ladder of its own a
+  nest takes its parent's level count, bitwise as before. **An OFFLINE child is not
+  bound by any of this.**
   `woof downscale --child-levels N,STRETCH` builds a standalone child on its own
   eta ladder off archived parent history, through a conservative vertical remap
   (`woof/vertical_remap.py`): the child's initial state and its whole lateral

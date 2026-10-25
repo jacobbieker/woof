@@ -152,11 +152,13 @@ _GUARD_KEY_ROWS = key_rows(
     # 1 = isobaric re-interpolation, not implemented.
     KeyRow("nest_interp_coord", "integer", 0,
            "nest vertical coordinate; only 0 (eta levels) is implemented"),
-    # Vertical nest refinement: rejected (identical vertical grid on all
-    # domains; WRF only calls init_domain_vert_nesting when e_vert
-    # differs, share/mediation_integrate.F:666).
+    # Vertical nest refinement (WRF vert_refine_method = 2): a nest names
+    # its own eta_levels under the shared p_top/hybrid_opt/etac
+    # (woof/core/nest_vertical.py).  2 is accepted as a declaration and
+    # changes nothing by itself; 1 (integer refinement) is refused.
     KeyRow("vert_refine_method", "integer", 0,
-           "vertical nest refinement; only 0 (none) is implemented"),
+           "vertical nest refinement: 0, or 2 (a [[domain]] names its own "
+           "eta_levels); 1 (integer refinement) is not implemented"),
     # High-resolution child terrain ingest: rejected (children SINT the
     # parent terrain and blend it, dyn_em/nest_init_utils.F).
     KeyRow("input_from_hires", "boolean", False,
@@ -428,6 +430,14 @@ _DOMAIN_RUN_OVERRIDES = (
 _DOMAIN_VERTICAL_KEYS = ("nz", "e_vert", "eta_levels", "p_top", "ztop",
                          "hybrid_opt", "etac")
 
+#: The per-domain vertical keys a NESTED domain may carry: its own eta
+#: ladder (WRF vert_refine_method = 2) and the level counts that must agree
+#: with it.  The model top and the hybrid coordinate stay shared.
+_DOMAIN_LADDER_KEYS = ("nz", "e_vert", "eta_levels")
+
+#: WRF's ``vert_refine_method`` for arbitrary per-nest eta levels.
+VERT_REFINE_ARBITRARY = 2
+
 #: Rows for the [[domain]] keys no typed field declares
 #: (:mod:`woof.config_keys`).
 _DOMAIN_KEY_ROWS = key_rows(
@@ -443,6 +453,9 @@ _DOMAIN_KEY_ROWS = key_rows(
            "WRF's staggered west-east point count, nx + 1; give e_we or nx"),
     KeyRow("e_sn", "integer", None,
            "WRF's staggered south-north point count, ny + 1; give e_sn or ny"),
+    KeyRow("e_vert", "integer", None,
+           "a nest on its own ladder: WRF's full-level count, which must be "
+           "len(eta_levels); absent, the nest shares [shared]'s"),
 )
 
 _DOMAIN_KEYS = frozenset({
@@ -457,6 +470,9 @@ _DOMAIN_KEYS = frozenset({
     # What a delayed nest is born from (see START_FROM_PARENT below).
     "start_from",
     "e_we", "e_sn", "nx", "ny", "dx", "dy", "dt",
+    # A nest on its own eta ladder (WRF vert_refine_method = 2); nz and
+    # e_vert must agree with it.  Refused on the root (_domain_ladder).
+    "eta_levels", "nz", "e_vert",
     "time_step", "time_step_fract_num", "time_step_fract_den",
     "specified", "nested",
     # The dormant-nest declaration (woof/core/nest_spawn.py): a child
@@ -1069,6 +1085,115 @@ class DomainConfig:
 START_FROM_PARENT = "parent"
 
 
+def has_own_ladder(dc) -> bool:
+    """Whether a domain carries its own eta ladder (WRF vert_refine_method
+    = 2): only a nest does, and only when it differs from [shared]'s."""
+    return bool(getattr(getattr(dc, "run", None), "eta_levels", None))
+
+
+def domain_vertical(vertical: "VerticalConfig", dc) -> "VerticalConfig":
+    """The VerticalConfig ``dc`` is built on: [shared]'s, or [shared]'s top
+    and hybrid coordinate with the nest's own eta ladder."""
+    if dc is None or not has_own_ladder(dc):
+        return vertical
+    from dataclasses import replace as _replace
+    return _replace(vertical, eta_levels=tuple(
+        float(v) for v in dc.run.eta_levels))
+
+
+def vertically_nested_ids(exp) -> tuple[int, ...]:
+    """Grid ids whose ladder differs from their parent's: the edges the
+    nest coupler interpolates vertically."""
+    by_id = {int(dc.grid_id): dc for dc in exp.domains}
+    out = []
+    for dc in exp.domains:
+        parent = by_id.get(int(dc.parent_id))
+        if parent is None:
+            continue
+        mine = domain_vertical(exp.vertical, dc).eta_levels
+        theirs = domain_vertical(exp.vertical, parent).eta_levels
+        if tuple(mine) != tuple(theirs):
+            out.append(int(dc.grid_id))
+    return tuple(out)
+
+
+def _refuse_unsupported_vertical_nesting(exp) -> None:
+    """A nest on its own ladder, where the tree cannot carry one: refused
+    by name before anything is prepared.
+
+    * ``feedback = 1``: the restriction averages child cells onto parent
+      cells level by level, with no vertical operator back up (WRF's
+      feedback with vertical refinement is a later phase here).
+    * a moving, following or spawned nest (and a nest under one): a move
+      rebuilds the nest from a full SINT of its live parent and transplants
+      its overlap, both on the parent's ladder.
+    * a split ([devices]) or streamed ([tiles] on, not auto) edge: the
+      bounded-operand corridors read parent windows on the parent's levels
+      and have no vertical step.
+    """
+    nested = set(vertically_nested_ids(exp))
+    if not nested:
+        return
+    names = ", ".join(f"d{gid:02d}" for gid in sorted(nested))
+    if int(exp.feedback) != 0:
+        raise ValueError(layered(
+            f"feedback = {exp.feedback} with a nest on its own eta ladder "
+            f"({names}) is refused: two-way feedback across differing "
+            "ladders is not implemented.",
+            "The restriction averages child cells onto parent cells level "
+            "by level (copy_fcn); between two ladders it would need a "
+            "vertical operator back up.  Set feedback = 0, or give the "
+            "nest [shared]'s ladder."))
+    moving = _moving_grid_ids(exp.domains, exp.relocation,
+                              include_spawn=True)
+    by_id = {int(dc.grid_id): dc for dc in exp.domains}
+    for gid in sorted(nested):
+        chain, cursor = [], by_id[gid]
+        while cursor is not None:
+            chain.append(int(cursor.grid_id))
+            cursor = by_id.get(int(cursor.parent_id))
+        if moving & set(chain):
+            raise ValueError(layered(
+                f"d{gid:02d} is on its own eta ladder and moves, follows, "
+                "spawns or sits under a nest that does: refused.",
+                "A move rebuilds the nest from a full SINT of its live "
+                "parent and transplants its overlap, both on the parent's "
+                "ladder; the vertical step is wired into birth and "
+                "forcing only."))
+    for gid in sorted(nested):
+        for member in (by_id[gid], by_id[int(by_id[gid].parent_id)]):
+            if getattr(member.run, "chem_sets", ""):
+                raise ValueError(
+                    f"chemistry on d{int(member.grid_id):02d}, an end of the "
+                    f"edge to d{gid:02d}, a nest on its own eta ladder: "
+                    "refused, the chemical species are handed down on the "
+                    "parent's levels only.")
+    devices = getattr(exp, "devices", None)
+    if devices is not None and getattr(devices, "enabled", False):
+        split = set(devices.split_grid_ids(dc.grid_id for dc in exp.domains))
+        touched = [gid for gid in sorted(nested)
+                   if gid in split or int(by_id[gid].parent_id) in split]
+        if touched:
+            raise ValueError(
+                f"[devices] splits an edge of a nest on its own eta ladder "
+                f"({', '.join(f'd{g:02d}' for g in touched)}): refused, "
+                "the split corridors read parent windows on the parent's "
+                "levels and have no vertical step.  Run that edge on one "
+                "card.")
+    for gid in sorted(nested):
+        for member in (by_id[gid], by_id[int(by_id[gid].parent_id)]):
+            road = (member.tiles if getattr(member, "tiles", None)
+                    is not None else exp.tiles)
+            if getattr(road, "enabled", False) and \
+                    getattr(road, "mode", None) != "auto":
+                raise ValueError(
+                    f"[tiles] streams d{int(member.grid_id):02d}, an end of "
+                    f"the edge to d{gid:02d}, a nest on its own eta ladder: "
+                    "refused, the streamed corridors read parent windows on "
+                    "the parent's levels and have no vertical step.  Turn "
+                    "[tiles] off for that domain.")
+
+
 def starts_from_parent(dc) -> bool:
     """Whether a domain is born from its live parent at a delayed start."""
     return getattr(dc, "start_from", None) == START_FROM_PARENT
@@ -1613,6 +1738,7 @@ class ExperimentConfig:
             follower_slots.get(int(self.root.grid_id), ())) if follower_slots else None)
         validate_device_road(self.devices, self.tiles, self.domains)
         _refuse_streamed_windfarm(self.tiles, self.domains)
+        _refuse_unsupported_vertical_nesting(self)
         if context is not None or self.tiles.follower_context is not None:
             object.__setattr__(self, "tiles", replace(self.tiles, follower_context=context))
         object.__setattr__(self, "domains", tuple(
@@ -3017,7 +3143,8 @@ def _reject_misplaced_run_keys(dom: dict, grid_id, source: str) -> None:
     """
     known = {f.name for f in fields(RunConfig)}
     misplaced = sorted(key for key in dom
-                       if key in known and key not in _DOMAIN_KEYS)
+                       if key in known and key not in _DOMAIN_KEYS
+                       and key not in _DOMAIN_LADDER_KEYS)
     if misplaced:
         raise ValueError(
             f"key(s) {misplaced} on [[domain]] grid_id={grid_id} of "
@@ -3050,19 +3177,77 @@ def _reject_domain_vertical_keys(dom: dict, grid_id, source: str) -> None:
     refines the vertical grid: ``if (nest%e_vert /= parent%e_vert)``
     guards init_domain_vert_nesting, share/mediation_integrate.F:666).
     """
-    present = [key for key in _DOMAIN_VERTICAL_KEYS if key in dom]
+    present = [key for key in _DOMAIN_VERTICAL_KEYS
+               if key in dom and key not in _DOMAIN_LADDER_KEYS]
     if present:
-        raise ValueError(
+        raise ValueError(layered(
             f"vertical key(s) {present} on [[domain]] grid_id={grid_id} "
-            f"of {source} are rejected: the vertical grid is "
-            "single-sourced from [shared] (ExperimentConfig.vertical) -- "
-            "vertical nesting is rejected by construction for an INLINE "
-            "nest tree (WRF only calls init_domain_vert_nesting when a "
-            "nest refines the vertical grid, "
-            "share/mediation_integrate.F:666), because the inline "
-            "corridor interpolates boundaries every parent step on the "
-            "GPU and has no vertical operator there.  "
-            + _OFFLINE_LADDER_DOOR)
+            f"of {source} are rejected: the model top and the hybrid "
+            "coordinate are shared by every domain of a tree.",
+            "A nest may carry its own eta_levels (WRF vert_refine_method "
+            "= 2), which it is interpolated onto from its parent every "
+            "parent step (woof/core/nest_vertical.py); that interpolation "
+            "is defined only between two ladders spanning the same "
+            "column, which is p_top, hybrid_opt and etac in common "
+            "(external/RSL_LITE/force_domain_em_part2.F:73-109)."))
+
+
+def _domain_ladder(dom: dict, grid_id, source: str, *, is_root: bool,
+                   shared_eta: tuple, shared_nz: int):
+    """A nested ``[[domain]]``'s own eta ladder, or ``None``.
+
+    ``eta_levels`` names it (``nz``/``e_vert`` beside it must agree); a
+    ladder equal to [shared]'s is no ladder of its own.  The root's ladder
+    is [shared]'s and is never restated per domain.
+    """
+    present = [key for key in _DOMAIN_LADDER_KEYS if key in dom]
+    if not present:
+        return None
+    if is_root:
+        raise ValueError(
+            f"vertical key(s) {present} on the root [[domain]] grid_id="
+            f"{grid_id} of {source} are rejected: the root's ladder is "
+            "[shared].eta_levels.  Only a nest names its own (WRF "
+            "vert_refine_method = 2).")
+    if "eta_levels" not in dom:
+        raise ValueError(
+            f"[[domain]] grid_id={grid_id} of {source} names "
+            f"{present} without eta_levels: a nest's own level count needs "
+            "the ladder itself.  Give eta_levels (1.0 first, 0.0 last), "
+            "or drop the key to share [shared]'s.")
+    if not shared_eta:
+        raise ValueError(
+            f"[[domain]] grid_id={grid_id} of {source} names its own "
+            "eta_levels under a [shared] that names none: vertical "
+            "nesting interpolates between two explicit ladders.")
+    try:
+        ladder = tuple(float(v) for v in dom["eta_levels"])
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"eta_levels on [[domain]] grid_id={grid_id} of {source} must "
+            "be a list of numbers") from None
+    try:
+        VerticalConfig(eta_levels=ladder, p_top=1.0, hybrid_opt=2, etac=0.2)
+    except ValueError as err:
+        raise ValueError(
+            f"eta_levels on [[domain]] grid_id={grid_id} of {source}: "
+            f"{err}") from None
+    nz = len(ladder) - 1
+    if not 4 <= nz <= 256:
+        raise ValueError(
+            f"eta_levels on [[domain]] grid_id={grid_id} of {source} has "
+            f"nz = {nz} mass levels; the dynamical core takes 4..256")
+    if "nz" in dom and int(dom["nz"]) != nz:
+        raise ValueError(
+            f"[[domain]] grid_id={grid_id} of {source}: nz = {dom['nz']} "
+            f"but its eta_levels hold {nz} mass levels")
+    if "e_vert" in dom and int(dom["e_vert"]) != nz + 1:
+        raise ValueError(
+            f"[[domain]] grid_id={grid_id} of {source}: e_vert = "
+            f"{dom['e_vert']} but its eta_levels hold {nz + 1} full levels")
+    if ladder == tuple(shared_eta) and nz == int(shared_nz):
+        return None
+    return ladder
 
 
 def _bad_mix_isotropic_sentinel(value, where: str, source: str) -> str:
@@ -3728,12 +3913,17 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                 "(nest_interp_coord = 1) is not implemented; only the "
                 "standard eta-level interpolation (0).")
         if key == "vert_refine_method":
+            if value == VERT_REFINE_ARBITRARY:
+                # WRF's arbitrary refinement is what a [[domain]]
+                # eta_levels spells; the declaration itself changes
+                # nothing and is not carried.
+                continue
             raise ValueError(
                 f"vert_refine_method = {value!r} in [shared] of {source} "
-                "is rejected: vertical nest refinement is not "
-                "implemented -- e_vert/eta_levels/p_top must be identical "
-                "across domains (WRF only calls init_domain_vert_nesting "
-                "when refining, share/mediation_integrate.F:666).")
+                "is rejected: only 0 and 2 (each nest names its own "
+                "eta_levels under the shared p_top, hybrid_opt and etac) "
+                "are implemented; integer refinement (1) is not.  Give the "
+                "nest an explicit eta_levels ladder instead.")
         raise ValueError(
             f"input_from_hires = {value!r} in [shared] of {source} is "
             "rejected: high-resolution child terrain input is not "
@@ -4423,6 +4613,17 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         for key in _DOMAIN_RUN_OVERRIDES:
             if key in dom:
                 kw[key] = dom[key]
+        # WRF vert_refine_method = 2: a nest on its own eta ladder.  Its
+        # RunConfig carries the ladder and the level count; [shared] keeps
+        # the top and the hybrid coordinate every domain shares.  A domain
+        # that names no ladder (or [shared]'s own) carries neither key, so
+        # its RunConfig is the one it always was.
+        own_ladder = _domain_ladder(
+            dom, grid_id, source, is_root=is_root,
+            shared_eta=tuple(vertical.eta_levels), shared_nz=nz)
+        if own_ladder is not None:
+            kw["eta_levels"] = own_ladder
+            kw["nz"] = len(own_ladder) - 1
         # WRF's adaptive nest steps at its parent's step over
         # parent_time_step_ratio.  The starting/min/max bounds are per-domain
         # keys, and a [shared] value reached every child verbatim: under the

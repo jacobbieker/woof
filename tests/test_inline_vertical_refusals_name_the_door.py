@@ -21,25 +21,35 @@ def _names_the_door(message: str) -> bool:
     return all(phrase in message for phrase in DOOR_PHRASES)
 
 
-def test_the_experiment_config_refusal_names_the_offline_door():
-    """A per-domain vertical key on a [[domain]] table is still refused."""
+def test_the_experiment_config_refusal_names_the_inline_door():
+    """A per-domain model top is still refused, and the refusal names what
+    a nest MAY carry: its own eta_levels (WRF vert_refine_method = 2)."""
     from woof.experiment import _reject_domain_vertical_keys
 
     with pytest.raises(ValueError) as excinfo:
-        _reject_domain_vertical_keys({"nz": 96}, 2, "child.toml")
+        _reject_domain_vertical_keys({"p_top": 96}, 2, "child.toml")
     message = str(excinfo.value)
     assert "rejected" in message
-    assert _names_the_door(message), message
+    assert "eta_levels" in message and "vert_refine_method" in message
 
 
-@pytest.mark.parametrize("key", ["nz", "e_vert", "eta_levels", "p_top",
-                                 "ztop", "hybrid_opt", "etac"])
-def test_every_per_domain_vertical_key_is_still_refused(key):
-    """NEGATIVE CONTROL: the reworded refusal must still refuse all seven."""
+@pytest.mark.parametrize("key", ["p_top", "ztop", "hybrid_opt", "etac"])
+def test_every_shared_vertical_key_is_still_refused_per_domain(key):
+    """NEGATIVE CONTROL: the top and the hybrid coordinate stay shared."""
     from woof.experiment import _reject_domain_vertical_keys
 
     with pytest.raises(ValueError):
         _reject_domain_vertical_keys({key: 1}, 2, "child.toml")
+
+
+@pytest.mark.parametrize("key", ["nz", "e_vert", "eta_levels"])
+def test_a_nests_own_ladder_keys_pass_to_the_ladder_check(key):
+    """A nest's own ladder is WRF vert_refine_method = 2; its keys are
+    validated by woof.experiment._domain_ladder
+    (tests/test_vertical_nesting_config.py), not refused here."""
+    from woof.experiment import _reject_domain_vertical_keys
+
+    _reject_domain_vertical_keys({key: 1}, 2, "child.toml")
 
 
 def test_a_domain_table_with_no_vertical_key_is_admitted():

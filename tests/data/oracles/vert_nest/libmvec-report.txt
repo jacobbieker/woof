@@ -1,0 +1,12 @@
+# wrf_vert_nest_interp.o -O0 libm symbols:
+# wrf_vcoord.o -O0 libm symbols:
+                 U expf
+                 U powf
+                 U sinf
+# run_vert_nest.o -O0 libm symbols:
+                 U logf
+                 U powf
+                 U sinf
+# positive control (plain expf loop at -Ofast):
+                 U expf
+                 U _ZGVbN4v_expf

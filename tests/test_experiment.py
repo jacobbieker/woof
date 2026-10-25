@@ -414,18 +414,23 @@ def test_rejects_unaligned_footprint(tmp_path):
         load_experiment(_write(tmp_path, text=text))
 
 
-def test_rejects_vertical_nesting(tmp_path):
-    """F1 amendment: ANY per-domain vertical key is rejected outright --
-    the vertical grid is single-sourced from ExperimentConfig.vertical,
-    so even a value MATCHING [shared] is a load error."""
-    for key in ("nz = 7", "e_vert = 8", "p_top = 5000.0",
-                "eta_levels = [1.0, 0.5, 0.0]",
-                "nz = 8",              # matches [shared] -- still rejected
-                "hybrid_opt = 2", "etac = 0.2", "ztop = 12000.0"):
-        with pytest.raises(ValueError,
-                           match="vertical nesting is rejected"):
+def test_rejects_vertical_keys_a_tree_shares(tmp_path):
+    """The model top and the hybrid coordinate are shared by every domain;
+    a nest may carry only its own eta ladder (WRF vert_refine_method = 2,
+    tests/test_vertical_nesting_config.py), and a level count alone, the
+    root's own ladder, or a ladder under a [shared] that names none, are
+    refused."""
+    for key in ("p_top = 5000.0", "hybrid_opt = 2", "etac = 0.2",
+                "ztop = 12000.0"):
+        with pytest.raises(ValueError, match="shared by every domain"):
             load_experiment(_write(tmp_path, d02=key))
-    with pytest.raises(ValueError, match="vertical nesting is rejected"):
+    for key in ("nz = 7", "e_vert = 8", "nz = 8"):
+        with pytest.raises(ValueError, match="without eta_levels"):
+            load_experiment(_write(tmp_path, d02=key))
+    with pytest.raises(ValueError, match="names none"):
+        load_experiment(_write(tmp_path,
+                               d02="eta_levels = [1.0, 0.8, 0.5, 0.2, 0.0]"))
+    with pytest.raises(ValueError, match="root"):
         load_experiment(_write(tmp_path, d01="eta_levels = [1.0, 0.0]"))
     with pytest.raises(ValueError, match="vert_refine_method"):
         load_experiment(_write(tmp_path, shared="vert_refine_method = 1"))

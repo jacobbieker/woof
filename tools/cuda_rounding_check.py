@@ -315,7 +315,7 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
     # Their real factories are included by composed_units. Compiling a
     # fragment without its defines/libm creates false coverage and errors.
     fragments = {"p3", "p3_zdiag", "fast_sbm", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "urban_bep_bem",
-                 "windfarm_fitch", "fire_spread",
+                 "windfarm_fitch", "fire_spread", "nest_vertical",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
                  "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16"}
@@ -378,6 +378,7 @@ def composed_units(root: Path) -> list[Unit]:
     _, sw_defines = sw._pack_cuda_tables(sw.load_sw_tables())
     terrain = module("terrain_drag")
     fitch = module("windfarm_fitch")
+    vnest = module("nest_vertical")
     fire = importlib.import_module("woof.fire._device")
     if not Path(fire.__file__).resolve().is_relative_to(root):
         raise RuntimeError("source factory woof.fire._device was imported outside the checked tree")
@@ -403,6 +404,7 @@ def composed_units(root: Path) -> list[Unit]:
              ("-std=c++17", "--ftz=false")),
         Unit("composed:terrain_drag", terrain.module_source(), tuple(terrain.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch", fitch.module_source(), tuple(fitch.MODULE_OPTIONS)),
+        Unit("composed:nest_vertical", vnest.module_source(), tuple(vnest.MODULE_OPTIONS)),
         Unit("composed:fire_spread", fire.module_source(), tuple(fire.MODULE_OPTIONS)),
         Unit("composed:urban_bem", bem.module_source(), tuple(bem.MODULE_OPTIONS)),
         Unit("composed:noah_mosaic", module_source("noah_mosaic", kernel_dir=kdir),

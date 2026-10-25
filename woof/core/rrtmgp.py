@@ -4088,6 +4088,10 @@ class RRTMGPRadiation:
                 microphysics=scheme, cldfra=cldfra, validate=False, **kwargs)
 
         workspace = getattr(self, "chunk_workspace", None)
+        if workspace is not None and hasattr(workspace, "for_nz"):
+            # A tree of several ladders keeps one workspace per level count
+            # (woof.core.model.LadderRadiationWorkspaces).
+            workspace = workspace.for_nz(nz)
         if workspace is not None and not workspace_matches(
                 workspace, nz=nz, column_chunk=self.column_chunk, p_top=p_top):
             raise ValueError(

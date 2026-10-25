@@ -1569,6 +1569,9 @@ PHYSICS_CHOICES: dict[str, tuple[tuple[int, ...], str]] = {
 #: &domains nest-interpolation keys pinned to WRF's default, as
 #: key -> (the one admitted value, why).  Exported by
 #: woof.namelist_contract.
+#: WRF's vert_refine_method for arbitrary per-nest eta levels.
+VERT_REFINE_ARBITRARY_NAMELIST = 2
+
 NEST_GUARDS: dict[str, tuple[object, str]] = {
     "interp_method_type": (2,
      'only SINT (2, the WRF default per Registry.EM_COMMON:2301) '
@@ -1576,8 +1579,9 @@ NEST_GUARDS: dict[str, tuple[object, str]] = {
     "nest_interp_coord": (0,
      'isobaric nest re-interpolation is not implemented.'),
     "vert_refine_method": (0,
-     'vertical nest refinement is rejected (identical '
-     'e_vert/eta_levels/p_top on all domains).'),
+     'vertical nest refinement takes 0 or 2: a nest with its own e_vert '
+     'and eta_levels (vert_refine_method = 2) imports as a [[domain]] '
+     'eta_levels under the shared p_top.'),
     "input_from_hires": (False,
      'high-resolution child terrain input is rejected (children '
      'SINT + blend the parent terrain).'),
@@ -3917,8 +3921,54 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         drop("domains", "time_step_fract_den", [fract_den],
              "denominator of a zero fractional step (time_step_fract_num "
              "= 0): the step is time_step whatever it is")
-    nz = _uniform("domains", "e_vert", e_vert) - 1
+    # WRF vert_refine_method = 2 (dyn_em/nest_init_utils.F:271-427): each
+    # domain may carry its own e_vert, and eta_levels lists every
+    # domain's ladder one after another (domain d's starts after the
+    # e_vert of every domain before it, :315-322).  woof spells that as a
+    # [[domain]] eta_levels on each nest whose ladder differs from d01's.
+    vert_refine_raw = dm.take("vert_refine_method")
+    vert_refine = ([int(v) for v in vert_refine_raw]
+                   if vert_refine_raw is not None else [0] * max_dom)
+    # Entries past the last one written take WRF's Registry default, 0.
+    vert_refine = (vert_refine + [0] * max_dom)[:max_dom]
+    for value in vert_refine:
+        if value not in (0, VERT_REFINE_ARBITRARY_NAMELIST):
+            raise _err("domains", "vert_refine_method", vert_refine_raw,
+                       "only 0 and 2 (each nest names its own eta_levels "
+                       "under the shared p_top) are implemented; integer "
+                       "refinement (1) is not.")
+    refined = any(v == VERT_REFINE_ARBITRARY_NAMELIST for v in vert_refine)
+    if vert_refine_raw is not None:
+        fix("domains", "vert_refine_method", vert_refine_raw,
+            VERT_REFINE_ARBITRARY_NAMELIST if refined else 0,
+            "each nest's own ladder is its [[domain]] eta_levels" if refined
+            else "no nest refines the vertical grid")
+    if refined:
+        nz = int(e_vert[0]) - 1
+    else:
+        nz = _uniform("domains", "e_vert", e_vert) - 1
     eta_levels = [float(v) for v in (dm.take("eta_levels") or [])]
+    domain_eta: list[list[float] | None] = [None] * max_dom
+    if refined:
+        total = sum(int(v) for v in e_vert)
+        if len(eta_levels) != total:
+            raise _err("domains", "eta_levels", len(eta_levels),
+                       f"with vert_refine_method = 2 eta_levels must list "
+                       f"every domain's ladder in turn: {total} values for "
+                       f"e_vert = {list(e_vert)}")
+        start = 0
+        for n in range(max_dom):
+            ladder = eta_levels[start:start + int(e_vert[n])]
+            start += int(e_vert[n])
+            if n and (vert_refine[n] != VERT_REFINE_ARBITRARY_NAMELIST
+                      and ladder != domain_eta[0]):
+                raise _err("domains", "vert_refine_method", vert_refine_raw,
+                           f"domain {n + 1} has its own e_vert/eta_levels "
+                           "but vert_refine_method /= 2")
+            domain_eta[n] = ladder
+        eta_levels = domain_eta[0]
+        domain_eta = [None if (n == 0 or domain_eta[n] == domain_eta[0])
+                      else domain_eta[n] for n in range(max_dom)]
     if metgrid_initialization:
         from woof.ingest.eta import wrf_automatic_eta_requested
         if wrf_automatic_eta_requested(eta_levels):
@@ -3977,6 +4027,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         adaptive_columns[key][0] for key, _, _ in ADAPTIVE_CLOCK_COLUMNS)
 
     for key, (ok, why) in NEST_GUARDS.items():
+        if key == "vert_refine_method":
+            continue   # read with e_vert above
         raw = dm.take(key)
         value = ok if raw is None else raw[0]
         if value != ok:
@@ -7312,6 +7364,13 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             f"nx = {e_we[n] - 1}",
             f"ny = {e_sn[n] - 1}",
         ]
+        if domain_eta[n] is not None:
+            # WRF vert_refine_method = 2: this nest's own ladder.
+            lines.append("eta_levels = [")
+            for i in range(0, len(domain_eta[n]), 5):
+                chunk = ", ".join(repr(v) for v in domain_eta[n][i:i + 5])
+                lines.append(f"    {chunk},")
+            lines.append("]")
         if moist_column[n] != moist_column[0]:
             lines.append(f"moist = {_fmt(moist_column[n])}")
         for key, column in stochastic_flags.items():

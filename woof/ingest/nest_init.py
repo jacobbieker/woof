@@ -47,7 +47,7 @@ from woof.ingest.preprocess_backend import preprocess_math_call
 from woof.core.diagnostics import update_diagnostics
 from woof.core.grid import (BaseState, VerticalCoord,
                             hybrid_column_ordering_refusal,
-                            make_vertical_coord)
+                            finalize_vertical_coord, make_vertical_coord)
 from woof.core.nest_interp import (adjust_tempqv, blend_terrain,
                                     register_nest, sint)
 from woof.core.microphysics_transition import (
@@ -499,10 +499,10 @@ def _shared_vertical_coord(vertical: VerticalConfig, nz: int) -> VerticalCoord:
     eta = np.asarray(vertical.eta_levels, dtype=np.float64)
     if eta.shape != (int(nz) + 1,):
         raise ValueError(
-            f"shared eta_levels has shape {eta.shape}, expected "
-            f"({int(nz) + 1},) for every domain: a live nest tree "
-            "interpolates lateral boundaries every parent step and shares "
-            "one ladder across all of its domains." + _OFFLINE_LADDER_DOOR)
+            f"eta_levels has shape {eta.shape}, expected "
+            f"({int(nz) + 1},) for this domain: a domain is built on "
+            "[shared].eta_levels, or on its own [[domain]] eta_levels "
+            "(woof.experiment.domain_vertical)." + _OFFLINE_LADDER_DOOR)
     return make_vertical_coord(
         int(nz), hybrid_opt=vertical.hybrid_opt, etac=vertical.etac,
         eta_levels=eta)
@@ -681,18 +681,33 @@ def _reconstruction_sint(source, reg, *, window=None, device_windows=False):
 
 def _capture_parent_blend_fields(child_dc: DomainConfig,
                                  parent_node: DomainNode, *, window=None,
-                                 device_windows=False):
-    """SINT only the three fields that survive real-input overwrite."""
+                                 device_windows=False, child_state=None):
+    """SINT only the three fields that survive real-input overwrite.
+
+    A child on its own eta ladder (``child_state`` given and on another
+    ladder) takes the parent's ``phb`` vertically interpolated onto its
+    levels first, on the parent's columns, as WRF's
+    ``interp_domain_em_part2`` does before the horizontal step
+    (woof/core/nest_vertical.py).
+    """
     reg = _mass_registration(child_dc, parent_node)
     parent = parent_node.state
     if parent.phb.ndim != 3:
         raise ValueError(
             "real child initialization requires a terrain parent with "
             "three-dimensional phb")
+    phb = parent.phb
+    if child_state is not None:
+        from woof.core.nest_vertical import (VerticalNestPlan, interp_any,
+                                             ladders_differ)
+        if ladders_differ(parent, child_state):
+            plan = VerticalNestPlan.from_states(parent, child_state,
+                                                child_dc.run)
+            phb = interp_any(plan, phb)
     sint_args = dict(window=window, device_windows=device_windows)
     return (_reconstruction_sint(parent.ht, reg, **sint_args),
             _reconstruction_sint(parent.mub2d, reg, **sint_args),
-            _reconstruction_sint(parent.phb, reg, **sint_args))
+            _reconstruction_sint(phb, reg, **sint_args))
 
 
 def _blend_terrain_triple(state: DomainState, captures, fine: BaseState,
@@ -1327,7 +1342,13 @@ def finalize_prepared_child(
                 "declared_orography": prepared.declared_orography,
                 "preprocessing": prepared.preprocess_receipt,
                 "water_temperature_policy": prepared.water_temperature_policy})
-    coord = _shared_vertical_coord(vertical, cfg.nz)
+    # A nest on its own eta ladder (WRF vert_refine_method = 2) is
+    # initialized on that ladder, as real.exe builds wrfinput_d0N on the
+    # nest's own e_vert: the vertical interpolation from the analysis lands
+    # on the child's levels directly.
+    from woof.experiment import domain_vertical
+    coord = _shared_vertical_coord(domain_vertical(vertical, child_dc),
+                                   cfg.nz)
     init_kwargs = dict(
         source_orography=prepared.declared_orography, p_top=vertical.p_top,
         sfcp_to_sfcp=sfcp_to_sfcp,
@@ -1426,8 +1447,13 @@ def finalize_prepared_child(
     save_mub = state.mub2d.copy()
 
     # (2) Scope-trimmed SINT capture: ht/mub/phb ONLY.
+    from woof.experiment import has_own_ladder
+    # Only a nest on its own ladder hands its state over (the vertical
+    # step needs its coefficients); every other call is the one it was.
+    ladder_args = ({"child_state": state} if has_own_ladder(child_dc)
+                   else {})
     ht_int, mub_int, phb_int = _capture_parent_blend_fields(
-        child_dc, parent_node)
+        child_dc, parent_node, **ladder_args)
     # A sealed root can have been prepared on CUDA while deterministic child
     # workers use the CPU backend (or vice versa).  SINT follows the parent
     # backend, so move its three retained operands to the new child's backend
@@ -1569,6 +1595,24 @@ def initialize_child(
         sfcp_to_sfcp=sfcp_to_sfcp,
         soil_layer_contract=soil_layer_contract,
         initial_perturbation=initial_perturbation)
+
+
+def _ladder_arrays(source, *, with_cf: bool) -> dict:
+    """A ladder's float32 arrays as a state holds them (``source`` is a
+    state or a :class:`VerticalCoord`), for
+    :meth:`woof.core.nest_vertical.VerticalNestPlan.from_coefficients`."""
+    out = {name: np.asarray(_host(getattr(source, name)), dtype=np.float32)
+           for name in ("c1h", "c2h", "c3h", "c4h", "c1f", "c2f", "c3f",
+                        "c4f", "dnw", "rdnw", "rdn")}
+    if with_cf:
+        out["cf"] = tuple(np.float32(getattr(source, name)) for name in (
+            "cf1", "cf2", "cf3", "cfn", "cfn1"))
+    return out
+
+
+def transition_mixed_edge(parent_run, child_run) -> bool:
+    """Whether a parent->child edge changes microphysics scheme."""
+    return bool(resolve_microphysics_transition(parent_run, child_run).mixed)
 
 
 def _coord_from_parent(state: DomainState, parent_cfg) -> VerticalCoord:
@@ -1876,12 +1920,12 @@ def parent_only_init(child_dc: DomainConfig,
             "SINT backend is Python numerical code, so use the GPU "
             "reconstruction path; CPU metadata and serialization remain available")
     parent = parent_node.state
-    if cfg.nz != parent_node.cfg.run.nz:
+    own_ladder = getattr(cfg, "eta_levels", None)
+    if cfg.nz != parent_node.cfg.run.nz and not own_ladder:
         raise ValueError(
-            f"parent-only initialization forbids vertical nesting: child "
-            f"nz={cfg.nz} differs from parent nz={parent_node.cfg.run.nz}. "
-            "This idealized branch builds the child's state from the "
-            "parent's arrays in place, with no vertical operator."
+            f"parent-only initialization: child nz={cfg.nz} differs from "
+            f"parent nz={parent_node.cfg.run.nz} and the child names no "
+            "eta_levels of its own to be interpolated onto."
             + _OFFLINE_LADDER_DOOR)
     for name in ("hybrid_opt", "etac"):
         child_value = getattr(cfg, name, None)
@@ -1909,7 +1953,42 @@ def parent_only_init(child_dc: DomainConfig,
         cfg = replace(cfg, nx=sx.stop-sx.start, ny=sy.stop-sy.start)
         grid = grid.translated(sx.start, sy.start,
                                e_we=cfg.nx+1, e_sn=cfg.ny+1)
-    coord = _coord_from_parent(parent, parent_node.cfg.run)
+    vertical_plan = None
+    if own_ladder:
+        # WRF vert_refine_method = 2 (interp_domain_em_part2): the parent
+        # is interpolated VERTICALLY onto the child's ladder on its own
+        # columns first, and only then horizontally; every SINT below
+        # reads the vertically interpolated parent.
+        child_coord = make_vertical_coord(
+            int(cfg.nz), hybrid_opt=int(cfg.hybrid_opt),
+            etac=float(cfg.etac),
+            eta_levels=np.asarray(own_ladder, dtype=np.float64))
+        if parent.p_top is not None:
+            finalize_vertical_coord(child_coord, float(parent.p_top))
+        parent_znw = np.asarray(_host(parent.znw), dtype=np.float32)
+        if (parent_znw.shape != child_coord.znw.shape
+                or not np.array_equal(
+                    parent_znw, child_coord.znw.astype(np.float32))):
+            from woof.core.nest_vertical import (VerticalNestPlan,
+                                                 VerticallyNestedParent)
+            if transition_mixed_edge(parent_node.cfg.run, cfg):
+                raise ValueError(
+                    "a nest on its own eta ladder with a different "
+                    "microphysics scheme from its parent is not "
+                    "implemented: the scheme transition reads the parent's "
+                    "own planes, on the parent's levels")
+            vertical_plan = VerticalNestPlan.from_coefficients(
+                parent=_ladder_arrays(parent, with_cf=True),
+                child=_ladder_arrays(child_coord, with_cf=False),
+                p_top=parent.p_top,
+                hypsometric_opt=int(cfg.hypsometric_opt),
+                base_temp=float(cfg.base_temp))
+            parent = VerticallyNestedParent(parent, vertical_plan)
+            coord = child_coord
+        else:
+            coord = _coord_from_parent(parent, parent_node.cfg.run)
+    else:
+        coord = _coord_from_parent(parent, parent_node.cfg.run)
     state_kwargs = {}
     if scratch_arena is not None:
         state_kwargs["scratch_arena"] = scratch_arena

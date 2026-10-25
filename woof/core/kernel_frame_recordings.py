@@ -2131,6 +2131,16 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "preflight.thompson_fork_column_workspace_bytes.  Re-read on any "
         "device by tests/test_thompson_fork_column_gpu.py::"
         "test_the_column_unit_compiles_to_the_frame_it_is_priced_at.",
+    "nest_vertical_composed":
+        "glibc_flt32.cuh + nest_vertical.cu, assembled by "
+        "woof/core/nest_vertical.module_source() and compiled directly with "
+        "that module's MODULE_OPTIONS; nest_vertical.cu fails standalone "
+        "(gfk_log, gfk_pow).  Priced 0 B: nest_vert_interp and "
+        "nest_vert_rebalance read through the loader on sm_86 (RTX A6000) "
+        "at NVRTC 12.9.86, strict and fast; neither kernel holds a "
+        "per-level array.  Re-read on any device by "
+        "tests/test_nest_vertical_wrf471_parity.py::"
+        "test_the_composed_unit_compiles_within_the_priced_frame.",
 })
 
 

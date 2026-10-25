@@ -1329,6 +1329,13 @@ BASELINE_PINNED: dict[str, str] = {
     # RE-PINNED at the 1.1.0 upstream merge: YSU_KMAX 256 (the fork's ceiling, via the rename of ysu.cu).
     # Previously f56e3ec7.
     "ysu_default": "7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2",
+    # feat/live-vertical-nesting: WRF v4.7.1 vertical grid nesting
+    # (vert_refine_method = 2), the vertical interpolation and the
+    # rebalance, word for word against WRF's own Fortran and the binary32
+    # CPU twin (tests/test_nest_vertical_wrf471_parity.py).  Compiled by its
+    # own direct NVRTC loader (woof/core/nest_vertical.py) with
+    # glibc_flt32.cuh prepended.
+    "nest_vertical": "a287e47a3237a2525c39e203775018ef6a863610835cef9166bfcc8c67f6044b",
 }
 
 _FROZEN = _frozen_module()

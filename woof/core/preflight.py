@@ -3123,6 +3123,10 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     # tests/test_preflight.py::test_the_recorded_local_frames_match_the_driver
     # asserts the set of modules NVRTC refuses alone is exactly this set, and
     # both compiled alone on the 2.9.2 line.
+    # Vertical grid nesting (woof/core/nest_vertical.py) composes
+    # glibc_flt32.cuh ahead of nest_vertical.cu (gfk_log, gfk_pow) and
+    # compiles through its own direct loader; NVRTC refuses the unit alone.
+    "nest_vertical",
     })
 
 #: Priced units whose committed ``.cu`` compiles only through its own
@@ -3329,6 +3333,16 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         module="thompson_fork_unit",
         max_local_size_bytes=784,
         covers=frozenset({"thompson_fork"})),
+    # WRF vertical grid nesting (a child on its own eta ladder):
+    # glibc_flt32.cuh + nest_vertical.cu through woof/core/nest_vertical.py's
+    # direct NVRTC loader.  Both kernels walk a column with scalars only and
+    # keep no per-level array: 0 B local for nest_vert_interp and
+    # nest_vert_rebalance on an RTX A6000 (sm_86) at NVRTC 12.9.86, in the
+    # strict and the fast build.
+    "nest_vertical_composed": ChainedTranslationUnitFrame(
+        module="nest_vertical_composed",
+        max_local_size_bytes=0,
+        covers=frozenset({"nest_vertical"})),
 }
 
 _seen_covers: set[str] = set()
@@ -3973,6 +3987,11 @@ def physics_kernel_modules(exp: ExperimentConfig) -> frozenset[str]:
     modules = set(CORE_KERNEL_MODULES)
     for dc in exp.domains:
         modules |= domain_kernel_modules(dc, prices_refl=prices_refl)
+    from woof.experiment import vertically_nested_ids
+    if vertically_nested_ids(exp):
+        # A nest on its own eta ladder: the parent forces and births it
+        # through woof/core/nest_vertical.py's composed unit.
+        modules.add("nest_vertical_composed")
     return frozenset(modules)
 
 
@@ -10475,15 +10494,18 @@ def estimate_experiment(
     uses_arena = len(exp.domains) > 1
     arena_shapes = (shared_scratch_arena_shapes(exp.domains)
                     if uses_arena else {})
-    nz = exp.domains[0].run.nz
+    # One workspace per distinct level count (a tree whose nests carry
+    # their own eta ladders); a tree of one ladder prices the one it
+    # always did.
+    level_counts = sorted({int(dc.run.nz) for dc in exp.domains})
     from woof.hydro.memory import forecast_plan
     hydro_plan = forecast_plan(exp)
     return ExperimentMemoryEstimate(
         hydro_memory=None if hydro_plan is None else hydro_plan.inventory(),
         domains=domains,
         k_tables_bytes=k_distribution_bytes() if uses_rrtmgp else 0,
-        workspace_bytes=(_workspace_total_bytes(
-            nz, column_chunk, exp.vertical.p_top)
+        workspace_bytes=(sum(_workspace_total_bytes(
+            nz, column_chunk, exp.vertical.p_top) for nz in level_counts)
                           if uses_rrtmgp else legacy_envelope),
         scratch_arena_bytes=(shared_scratch_arena_bytes(exp.domains)
                              if uses_arena else 0),
@@ -11353,11 +11375,11 @@ def run_alloc_preflight(
             for kind in ("lw", "sw"):
                 holdings.append(load_gas_tables(kind).to_device())
                 holdings.append(load_cloud_tables(kind).to_device())
-            nz = exp.domains[0].run.nz
-            for name, (shape, size) in rrtmgp_workspace_shapes(
-                    nz, column_chunk, exp.vertical.p_top).items():
-                dtype = cp.bool_ if size == 1 else DTYPE
-                holdings.append(cp.zeros(shape, dtype=dtype))
+            for nz in sorted({int(dc.run.nz) for dc in exp.domains}):
+                for name, (shape, size) in rrtmgp_workspace_shapes(
+                        nz, column_chunk, exp.vertical.p_top).items():
+                    dtype = cp.bool_ if size == 1 else DTYPE
+                    holdings.append(cp.zeros(shape, dtype=dtype))
         if any(dc.run.cu_physics == 1 for dc in exp.domains):
             # The once-per-process KF device LUT (kf.py _device_table):
             # materialized so the residency proof covers it.
