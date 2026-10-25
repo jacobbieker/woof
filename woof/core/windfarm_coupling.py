@@ -308,8 +308,6 @@ def _place(rows, ij: int, *, grid, shape, path) -> list[tuple[int, int]]:
         # An unstructured mesh: the nearest cell centre (woof.windfarm.cells),
         # refused outside the mesh and in its boundary columns.
         from woof.windfarm.cells import CellPlacementRefused, place_on_cells
-        if ij:
-            raise _ij_on_cells(path)
         try:
             columns = place_on_cells(
                 grid, np.array([r[0] for r in rows], F).astype(np.float64),

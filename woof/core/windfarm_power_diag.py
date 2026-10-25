@@ -1090,6 +1090,39 @@ class WindfarmPowerDiagnostic:
                   for k, q in enumerate(WINDOW_QUANTITIES)}
         return sums, maxima, [float(packed[-2]), float(packed[-1])]
 
+    def take_window(self) -> dict:
+        """The window folded since it last restarted, on the host, and
+        restart it: ``{"steps", "seconds"}`` plus, after a step, the
+        ``"sums"``/``"max"`` per quantity and the ``"farm"`` pair.  A caller
+        that closes the window itself (hex's per-frame sidecar,
+        :mod:`woof.hex.windfarm`) reads it here rather than the internals."""
+        if not self.window_steps:
+            out = {"steps": 0, "seconds": 0.0}
+        else:
+            sums, maxima, farm = self._window_host()
+            out = {"steps": int(self.window_steps),
+                   "seconds": float(self.window_s),
+                   "sums": sums, "max": maxima, "farm": list(farm)}
+        self.window_s = 0.0
+        self.window_steps = 0
+        return out
+
+    @staticmethod
+    def window_statistics(now, window) -> dict:
+        """The sidecar's window statistics from :meth:`take_window`'s
+        record, or the frame's own instant when no step is behind it."""
+        if window["steps"]:
+            seconds = window["seconds"]
+            return {"mean": {q: window["sums"][q] / seconds
+                             for q in WINDOW_QUANTITIES},
+                    "max": window["max"],
+                    "farm_mean": window["farm"][0] / seconds,
+                    "farm_max": window["farm"][1]}
+        farm = sequential_sum(now["power"])
+        return {"mean": {q: now[q] for q in WINDOW_QUANTITIES},
+                "max": {q: now[q] for q in WINDOW_QUANTITIES},
+                "farm_mean": farm, "farm_max": farm}
+
     def history_fields(self, state) -> dict:
         """The frame's turbine fields: evaluated NOW, plus the farm mean."""
         now = self.evaluate(state)

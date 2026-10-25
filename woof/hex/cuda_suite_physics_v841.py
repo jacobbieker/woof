@@ -452,10 +452,14 @@ def constructor_values_for(
             # the nearest MODELLED column, so the seam is told which columns
             # a limited-area mesh models.  Only with the wind farm on, so
             # every other run's mapping (and its identity) is unchanged.
-            mapped["interior_column"] = (
-                np.ones(int(values["n_columns"]), dtype=np.bool_)
-                if interior_column is None
-                else np.asarray(interior_column, dtype=np.bool_))
+            if interior_column is None:
+                raise ValueError(
+                    "windfarm_opt = 1 needs interior_column, the physics "
+                    "columns a turbine may stand in "
+                    "(woof.hex.windfarm.interior_columns); without it a "
+                    "limited-area mesh's boundary columns would take turbines")
+            mapped["interior_column"] = np.asarray(interior_column,
+                                                   dtype=np.bool_)
         return mapped
     generation = dict(suite.get("generation", {}) or {})
     if generation:
@@ -1454,7 +1458,24 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
         if dict(seam.selection) != self._constructor.selection:
             raise ValueError("the suite seam was built with another selection")
         self._validate_surface_classification(seam)
+        power = getattr(self, "windfarm_power", None)
+        if power is not None:
+            # A seam rebuilt on a resume or a rollback keeps the power
+            # window's observer (woof.hex.windfarm).
+            from .windfarm import hook
+
+            hook(seam, power)
         return seam
+
+    def commit_step(self) -> None:
+        super().commit_step()
+        if getattr(self, "windfarm_power", None) is not None:
+            self.windfarm_power.commit()
+
+    def abort_step(self) -> None:
+        if getattr(self, "windfarm_power", None) is not None:
+            self.windfarm_power.discard()
+        super().abort_step()
 
     def _validate_noahmp_census(self, *, require: bool) -> Mapping[str, Any] | None:
         """The land surface's own census (RUC's or Noah-MP's)."""

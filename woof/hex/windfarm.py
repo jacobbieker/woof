@@ -143,10 +143,12 @@ class HexWindfarmPower:
     both rows, so the diagnostic's destaggering ``0.5*(a + a)`` returns the
     column's own word.
 
-    WHEN IT FOLDS.  In phase two of every step, after the seam has copied
-    the post-RK state in and before microphysics adjusts it
-    (:meth:`observe`, a ``phase2_observers`` hook of the column seam): the
-    WRF-like core's dycore-epilogue instant.  The frame's own values are
+    WHEN IT FOLDS.  Its columns are gathered in phase two of every step,
+    after the seam has copied the post-RK state in and before microphysics
+    adjusts it (:meth:`observe`, a ``phase2_observers`` hook of the column
+    seam): the WRF-like core's dycore-epilogue instant.  They enter the
+    window when the backend commits the step (:meth:`commit`); an aborted
+    step is dropped (:meth:`discard`).  The frame's own values are
     evaluated from the history frame's arrays (:meth:`frame_values`).  The
     window restarts at every frame (:meth:`take_window`); a resumed run
     starts a fresh window, as on the WRF-like core.
@@ -172,21 +174,22 @@ class HexWindfarmPower:
             self.diagnostic = WindfarmPowerDiagnostic(
                 request, pseudo_rows, ny=1, nx=2 * self.n, xp=cp,
                 device_id=self.device_id, grid_id=self.grid_id)
-            self._index = cp.asarray(self.columns)
         self._pseudo = None
         self._maps = None
+        self._pending_dt = None
         #: The geometry the sidecar records: the column itself, its centre.
         self.cell_rows = None
 
     def bind_cells(self, placement) -> None:
         """Record each turbine's column and centre for the sidecar rows."""
-        from woof.windfarm.cells import nearest_cells
+        from woof.windfarm.cells import SPHERE_RADIUS_M, _unit_vectors
 
-        cols, distance = nearest_cells(
-            placement, [t.lat for t in self.turbines],
-            [t.lon for t in self.turbines])
-        if not np.array_equal(cols, self.columns):
-            raise RuntimeError("the power diagnostic's turbines moved column")
+        cols = self.columns
+        points = _unit_vectors([t.lat for t in self.turbines],
+                               [t.lon for t in self.turbines])
+        dots = np.clip(np.einsum("ij,ij->i", points, placement._xyz[cols]),
+                       -1.0, 1.0)
+        distance = SPHERE_RADIUS_M * np.arccos(dots)
         self.cell_rows = tuple(
             (t.name, t.lat, t.lon, 0, int(c),
              float(placement.latitude_deg[c]),
@@ -258,25 +261,33 @@ class HexWindfarmPower:
                         for name, index in maps.items()}
 
     def observe(self, seam) -> None:
-        """Fold one completed step (a ``phase2_observers`` hook)."""
+        """Gather one step's post-RK columns (a ``phase2_observers`` hook).
+
+        The fold waits for :meth:`commit`: a step the backend aborts never
+        enters the window (:meth:`discard`)."""
         import cupy as cp
 
         with cp.cuda.Device(self.device_id):
-            self.diagnostic.on_step(self._gather(seam), float(seam._dt))
+            self._gather(seam)
+        self._pending_dt = float(seam._dt)
+
+    def commit(self) -> None:
+        """Fold the gathered step into the window (the step committed)."""
+        import cupy as cp
+
+        if self._pending_dt is None:
+            return
+        with cp.cuda.Device(self.device_id):
+            self.diagnostic.on_step(self._pseudo, self._pending_dt)
+        self._pending_dt = None
+
+    def discard(self) -> None:
+        """Drop the gathered step (the step was rolled back)."""
+        self._pending_dt = None
 
     def take_window(self) -> dict:
         """The window since the last frame (host), and restart it."""
-        diag = self.diagnostic
-        if not diag.window_steps:
-            out = {"steps": 0, "seconds": 0.0}
-        else:
-            sums, maxima, farm = diag._window_host()
-            out = {"steps": int(diag.window_steps),
-                   "seconds": float(diag.window_s),
-                   "sums": sums, "max": maxima, "farm": farm}
-        diag.window_s = 0.0
-        diag.window_steps = 0
-        return out
+        return self.diagnostic.take_window()
 
     # -- the frame ------------------------------------------------------------
 
@@ -318,25 +329,12 @@ class HexWindfarmPower:
     def write_frame(self, now: Mapping[str, Any], window: Mapping[str, Any],
                     *, valid_time: str, output_dir) -> Path:
         """The frame's sidecar, as the WRF-like core writes it."""
-        from woof.core.windfarm_power_diag import (WINDOW_QUANTITIES,
-                                                   sequential_sum,
-                                                   write_windfarm_sidecar)
+        from woof.core.windfarm_power_diag import write_windfarm_sidecar
 
-        if window["steps"]:
-            seconds = window["seconds"]
-            stats = {"mean": {q: window["sums"][q] / seconds
-                              for q in WINDOW_QUANTITIES},
-                     "max": window["max"],
-                     "farm_mean": window["farm"][0] / seconds,
-                     "farm_max": window["farm"][1]}
-        else:
-            # No step behind this frame (the start, or the first frame after
-            # a resume): the window is the frame's own instant.
-            farm = sequential_sum(now["power"])
-            stats = {"mean": {q: now[q] for q in WINDOW_QUANTITIES},
-                     "max": {q: now[q] for q in WINDOW_QUANTITIES},
-                     "farm_mean": farm, "farm_max": farm}
-            seconds = 0.0
+        # No step behind this frame (the start, or the first frame after a
+        # resume): the window is the frame's own instant.
+        stats = self.diagnostic.window_statistics(now, window)
+        seconds = float(window["seconds"])
         when = datetime.strptime(valid_time, "%Y-%m-%d_%H:%M:%S")
         return write_windfarm_sidecar(
             self.diagnostic, now=now, window=stats, window_s=seconds,
@@ -377,10 +375,17 @@ def attach_power(seam, *, turbine_file, placement, grid_id: int = 1):
     power = HexWindfarmPower(layout, n_columns=placement.n_columns,
                              grid_id=grid_id, source=str(path))
     power.bind_cells(placement)
-    seam.phase2_observers = tuple(getattr(seam, "phase2_observers", ())) + (
-        power.observe,)
+    hook(seam, power)
     return power
 
 
-__all__ = ["HexWindfarmPower", "WINDFARM_KEYS", "attach_power",
+def hook(seam, power) -> None:
+    """Hand ``seam`` the power window's observer (once per seam: the backend
+    builds a fresh seam on a resume and on a rollback)."""
+    observers = tuple(getattr(seam, "phase2_observers", ()))
+    if power.observe not in observers:
+        seam.phase2_observers = observers + (power.observe,)
+
+
+__all__ = ["HexWindfarmPower", "WINDFARM_KEYS", "attach_power", "hook",
            "interior_columns", "mpas_route_refusal", "power_turbines"]

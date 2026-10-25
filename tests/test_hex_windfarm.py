@@ -73,6 +73,18 @@ def _write(path, rows):
 # placement
 
 
+def test_the_tree_agrees_with_brute_force_on_random_points():
+    from woof.windfarm.cells import _unit_vectors, nearest_cells
+
+    p = _placement(15, 2000.0)
+    rng = np.random.default_rng(9)
+    lat = rng.uniform(p.latitude_deg.min(), p.latitude_deg.max(), 400)
+    lon = rng.uniform(p.longitude_deg.min(), p.longitude_deg.max(), 400)
+    cols, _ = nearest_cells(p, lat, lon)
+    brute = np.argmax(_unit_vectors(lat, lon) @ p._xyz.T, axis=1)
+    assert np.array_equal(cols, brute)
+
+
 def test_a_point_goes_to_the_nearest_cell_centre_and_ties_to_the_lowest():
     from woof.windfarm.cells import nearest_cells
 
@@ -195,11 +207,16 @@ def test_the_constructor_carries_the_interior_mask_only_with_the_farm_on():
             cell_area_m2=np.ones(4), interior_column=np.zeros(4, bool))
         assert "interior_column" not in off
         suite["physics"] = {"bl_pbl_physics": 5, "windfarm_opt": 1}
+        with pytest.raises(ValueError, match="needs interior_column"):
+            adapter.constructor_values_for(
+                values, row_name="x", orographic_statistics=None,
+                cell_area_m2=np.ones(4))
         on = adapter.constructor_values_for(
             values, row_name="x", orographic_statistics=None,
-            cell_area_m2=np.ones(4))
+            cell_area_m2=np.ones(4),
+            interior_column=np.array([1, 1, 0, 0], bool))
         assert on["interior_column"].dtype == np.bool_
-        assert on["interior_column"].all()
+        assert list(on["interior_column"]) == [True, True, False, False]
     finally:
         adapter._suite_for_row = original
 
@@ -438,7 +455,11 @@ def test_the_power_window_reads_each_turbine_column_word_for_word(tmp_path):
     assert (want["power"] > 0).all()
     # The window: two folds, then a take restarts it.
     power.observe(seam)
+    power.commit()
     power.observe(seam)
+    power.discard()                  # an aborted step never enters
+    power.observe(seam)
+    power.commit()
     window = power.take_window()
     assert window["steps"] == 2 and window["seconds"] == 40.0
     assert np.allclose(window["sums"]["power"], 40.0 * want["power"])

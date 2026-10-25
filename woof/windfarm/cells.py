@@ -114,21 +114,40 @@ class CellPlacement:
         return (1, self.n_columns)
 
 
+def _tree(placement: CellPlacement):
+    """A k-d tree over the unit cell centres, built once per placement."""
+    tree = placement.__dict__.get("_kdtree")
+    if tree is None:
+        from scipy.spatial import cKDTree
+        tree = cKDTree(placement._xyz)
+        object.__setattr__(placement, "_kdtree", tree)
+    return tree
+
+
 def nearest_cells(placement: CellPlacement, lat_deg, lon_deg) -> tuple[
         np.ndarray, np.ndarray]:
     """``(column, distance_m)`` of each point: its nearest cell centre on
     the sphere (ties to the lowest column) and the great-circle distance to
-    it.  Every column is a candidate; interiority is the caller's rule."""
+    it.  Every column is a candidate; interiority is the caller's rule.
+
+    The chord between unit vectors grows with the great-circle distance, so
+    the k-d tree's few nearest by chord hold the nearest on the sphere; among
+    them the largest binary64 dot product wins, the lowest column on a tie.
+    """
     points = _unit_vectors(lat_deg, lon_deg)
     xyz = placement._xyz
+    k = min(8, xyz.shape[0])
+    _, candidates = _tree(placement).query(points, k=k)
+    candidates = np.asarray(candidates).reshape(points.shape[0], k)
     columns = np.empty(points.shape[0], dtype=np.int64)
     distance = np.empty(points.shape[0], dtype=np.float64)
     for n, p in enumerate(points):
-        dots = xyz @ p
-        best = int(np.argmax(dots))       # first maximum: lowest index
+        near = np.sort(candidates[n])
+        dots = xyz[near] @ p
+        best = int(near[int(np.argmax(dots))])   # first maximum: lowest index
         columns[n] = best
         distance[n] = SPHERE_RADIUS_M * float(
-            np.arccos(np.clip(dots[best], -1.0, 1.0)))
+            np.arccos(np.clip(xyz[best] @ p, -1.0, 1.0)))
     return columns, distance
 
 

@@ -1525,6 +1525,7 @@ def build_forecast_constructor_values(
     start_time_text: str | None,
     config: Any,
     n_soil_levels: int | None = None,
+    suite_row: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, np.ndarray], dict[str, Any]]:
     from netCDF4 import Dataset
 
@@ -1907,7 +1908,8 @@ def build_forecast_constructor_values(
 
     from woof.hex.physics_suites import load_table as _physics_table
 
-    if (config.config_pbl_scheme not in pbl_admission.CONFIG_SCHEMES.values()
+    if (suite_row
+            and config.config_pbl_scheme not in pbl_admission.CONFIG_SCHEMES.values()
             and config.config_pbl_scheme in _physics_table()["options"]["config_pbl_scheme"]):
         # A column-suite or generic-seam row: suite_config recorded the
         # selection's own boundary layer (MYNN), which that seam builds from
@@ -2382,6 +2384,7 @@ def prepare_forecast_host(
         start_time_text=start_time_text,
         config=config,
         n_soil_levels=N_SOIL_LEVELS,
+        suite_row=suite_adapter is not None,
     )
     if arwen_les.active(config):
         constructor_values["pbl_scheme"] = None
