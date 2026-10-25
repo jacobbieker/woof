@@ -608,7 +608,8 @@ def resolve_child_streaming_options(child_config_path, flag_mode):
     return resolved
 
 
-def resolve_child_run_config(child_config_path, *, child_levels=None):
+def resolve_child_run_config(child_config_path, *, child_levels=None,
+                             parent_column=None):
     """The child ``RunConfig`` the run is actually built on.
 
     ONE resolution rule for the two doors, as above.  ``child_levels`` is
@@ -623,6 +624,12 @@ def resolve_child_run_config(child_config_path, *, child_levels=None):
     ``p_top``, ``hybrid_opt`` and ``etac`` are left inherited, which is
     what keeps ``woof.vertical_remap.require_shared_column_basis``
     satisfied by construction.
+
+    ``parent_column`` is the archived parent's column
+    (:func:`woof.downscale.parent_column_basis`: its model top and
+    reference ground), which a ``bands:`` spec lays its heights out in;
+    ``hybrid_opt``/``etac`` are taken from the child config, which
+    shares them with the parent.  The other spellings do not read it.
     """
 
     from dataclasses import replace
@@ -649,7 +656,10 @@ def resolve_child_run_config(child_config_path, *, child_levels=None):
     # Never None here: _parse_child_levels answers None only for a None
     # spec, which the guard above already returned on, and every other
     # unreadable spec is a refusal it raises itself.
-    ladder = _parse_child_levels(child_levels)
+    ladder = _parse_child_levels(
+        child_levels,
+        column={**dict(parent_column or {}),
+                "hybrid_opt": int(cfg.hybrid_opt), "etac": float(cfg.etac)})
     if cfg.eta_levels is not None:
         declared = tuple(float(value) for value in cfg.eta_levels)
         if declared != tuple(ladder):

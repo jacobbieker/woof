@@ -44,6 +44,8 @@ def register_cli(subparsers) -> None:
     add_explain_flag(inspect, nested=True)
     from woof.track.plan_cli import register_plan
     register_plan(commands)
+    from woof.track.splice import register_splice
+    register_splice(commands)
 
 
 def add_mapping_arguments(parser) -> None:

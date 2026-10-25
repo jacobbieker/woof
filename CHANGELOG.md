@@ -4,6 +4,27 @@
 
 New:
 
+- `woof downscale --child-levels` takes two more spellings: `eta:LIST|FILE`, an
+  explicit child eta ladder (a comma list or a file such as one
+  `python -m woof.vertical_bands --write` makes), and
+  `bands:NZ,LO:HI:N[:agl],...`, a band-biased ladder laid out under the
+  archived parent's model top and over its median ground. The child still
+  shares the parent's `p_top`, `hybrid_opt` and `etac`, so the conservative
+  remap is unchanged. `N,STRETCH` and runs that name no ladder are unchanged.
+
+- `woof track splice` joins a stack of grids. The coarsest covers the whole box at
+  every height; finer ones cover smaller footprints below cutoff heights. Each
+  point is answered by the finest grid that covers it, laterally beyond its
+  edge zone and below its cutoff, falling back to the next coarser grid, with
+  optional linear blends across `--lateral-blend-cells` and `--blend-m`. Grids
+  are given as `--parent`/`--child`/`--splice-height-m`, or as any number of
+  `--tier PATH[,CUTOFF_M]`, coarsest first. `--path` samples every fix of a
+  time/lat/lon/height path (CSV, JSON or an Icechunk group) and states each
+  join's continuity, vertical and lateral. `--fields-out` writes each finer
+  grid's frames merged with the coarser ones, plus `SPLICE_WEIGHT`, in wrfout
+  layout for the Icechunk group writer. It reads finished history only; no run
+  changes.
+
 - `windfarm_opt = 1` runs WRF v4.7.1's Fitch wind-farm scheme in the
   forecast, so a farm's wakes reach the cells downstream. Each turbine of
   `windfarm_turbine_file` (a woof turbine table, or WRF's own

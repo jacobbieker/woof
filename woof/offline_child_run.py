@@ -3074,7 +3074,8 @@ def _run(args: argparse.Namespace,
     # function `woof downscale`'s plan review calls, so a --child-levels
     # ladder reaches this door with the same answer the review printed.
     cfg = resolve_child_run_config(
-        args.child_config, child_levels=getattr(args, "child_levels", None))
+        args.child_config, child_levels=getattr(args, "child_levels", None),
+        parent_column=getattr(args, "child_levels_column", None))
     # Read at ADMISSION, beside the config it belongs to, and before any
     # parent frame is opened: mode = 'on' streams unconditionally and needs
     # no card to be knowable, so a malformed block fails here rather than

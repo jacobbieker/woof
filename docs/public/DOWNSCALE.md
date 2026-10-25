@@ -1036,7 +1036,30 @@ woof downscale parent/ --parent-restart latest   --point 39.5,-84.0 --ratio 5 --
 `N,STRETCH` is the level count and the tanh clustering toward the ground; the
 derived `child.toml` carries the resulting ladder explicitly as `eta_levels`, so
 the grid the child was prepared on is the grid it integrates on and both are
-readable in the config. The initial state and the whole lateral boundary table
+readable in the config.
+
+Two more spellings name the ladder outright:
+
+- `eta:LIST|FILE` takes the full-level eta values themselves, 1.0 first and 0.0
+  last, as a comma list or a file of them (`#` comments allowed). A file written
+  by `python -m woof.vertical_bands --write FILE` is one.
+- `bands:NZ,LO:HI:N[:agl][,...]` builds a band-biased ladder of `NZ` levels with
+  at least `N` mass levels between `LO` and `HI` metres
+  (`woof/vertical_bands.py`), laid out under the archived parent's model top
+  (`P_TOP` off its history). Optional `dzbot=M`, `max_stretch=R`, `max_dz=M`,
+  `ground=M` and `reference=standard|wrf-base` keys set the generator. An `:agl`
+  band stands on the median of the parent's terrain under the child's footprint
+  (for `--point` without `--child-size`, the 33 x 33 parent cells around the
+  point) unless `ground=M` names a height.
+
+```bash
+woof downscale parent/ --parent-restart latest --point LAT,LON --ratio 3 \
+  --child-levels "bands:80,0:3000:45:agl,dzbot=20" --out out/child
+```
+
+That child spends 45 of its 80 levels in the lowest 3 km above the parent's
+median ground and the rest above it, still to the parent's own model top.
+`p_top`, `hybrid_opt` and `etac` stay shared with the parent in every spelling. The initial state and the whole lateral boundary table
 set are remapped once, at preparation, on the host; the integration loop is
 unchanged.
 
@@ -1047,6 +1070,74 @@ column with coincident endpoints, and moving a field between them is exact
 rebinning rather than interpolation. Measured on a prepared child: water
 substance drifts 1.2e-16 relative, potential temperature 0.0, the column's dry
 mass closes to 0.0 Pa, and the child's model top lands on the parent's exactly.
+
+### Joining fine low grids to a coarse one: `woof track splice`
+
+Each grid in a stack has its own footprint and its own useful depth. The coarse
+grid covers the whole box at every height. A fine child covers a smaller box
+(`--point` and `--child-size NX[,NY]` place it anywhere inside the parent, or
+`--child-config` with `--i-parent-start`/`--j-parent-start`) and spends its
+levels near the ground. A grandchild can be downscaled from the child the same
+way, smaller again. `woof track splice` joins them.
+
+**The precedence rule.** A point is answered by the finest grid that covers it.
+"Covers" means both of these:
+
+- laterally, beyond that grid's edge zone. The edge zone is its boundary rows
+  and relaxation zone, which are never used.
+- vertically, below that grid's cutoff height.
+
+Outside a grid's footprint or above its cutoff, the point falls back to the next
+coarser grid, down to the coarsest, which is full depth. Each join can be soft:
+
+- a grid fades in linearly across `--lateral-blend-cells` cells (default 3)
+  inside its edge zone;
+- it also fades across a `--blend-m` layer centred on its cutoff.
+
+The two shares multiply. The edge zone is `--edge-cells`; by default it is the
+`spec_bdy_width` of the `child.toml` that `woof downscale` writes beside the
+history, else 5. Heights are geopotential metres, as in the history.
+
+```bash
+# two grids
+woof track splice --parent parent/ --child out/child --splice-height-m 6000 \
+  --blend-m 1000 --path path.csv --out sample.json
+
+# any number, coarsest first: PATH[,CUTOFF_M][,dN]
+woof track splice --tier parent/ --tier out/child,8000 --tier out/grandchild,3000 \
+  --blend-m 500 --path path.csv --out sample.json
+
+# each finer grid's frames merged with the coarser ones, into Icechunk
+woof track splice --tier parent/ --tier out/child,8000 --tier out/grandchild,3000 \
+  --fields-out out/spliced --icechunk file:///data/repo
+```
+
+- **A path sample** reports, at every fix:
+  - the spliced `u`, `v` (earth-relative), `w`, `theta`, `pressure` and
+    `qvapor`;
+  - each grid's own value and share;
+  - which grid answered.
+
+  For each join it states:
+  - **vertical**: fine minus coarse at the cutoff height, along the path;
+  - **lateral**: fine minus coarse at fixes in the footprint's edge band;
+  - the largest step of the spliced value where the answering grid changes,
+    beside the median and 99th-percentile step elsewhere.
+
+  The output is CSV, JSON, or one `(sample,)` Icechunk group.
+- **A merged field set** writes each finer grid's own wrfout frames with `U`,
+  `V`, `W`, `T`, `P` and `QVAPOR` replaced outside its share by the coarser
+  grids. These are interpolated to its grid points and heights, with the
+  precedence rule applied in the same order. A `SPLICE_WEIGHT` variable is
+  added. The wrfout layout is kept, so `--icechunk` writes one group per grid
+  with the same writer the live export uses. Grids must share one projection,
+  because the winds stay grid-relative.
+
+Interpolation is horizontally bilinear, vertically linear in height within each
+neighbouring column, and linear in time between bracketing frames. A point below
+a column's lowest level holds that level's value, and the sample flags it. A
+point above the column's top, or outside a grid's history, is missing there and
+falls back.
 
 ### The LES case is stated at the door
 
@@ -1146,6 +1237,7 @@ atmosphere, so the parent's history is not read for ozone and needs no
   that coarse terrain at a fine grid spacing.
 - **The child's eta ladder is its own only if you ask for one.** Without
   `--child-levels` the child keeps the parent's levels, exactly as before.
+  `--child-levels` takes `N,STRETCH`, `eta:LIST|FILE` or `bands:NZ,...`.
   With it the child is built on its own ladder through a conservative
   vertical remap; `p_top`, `hybrid_opt` and `etac` stay shared with the
   parent, and a level count given without a stretch is refused rather than
