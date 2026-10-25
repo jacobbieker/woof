@@ -574,6 +574,18 @@ def _rebind_soil_levels(levels: int) -> None:
     proof.N_SOIL_LEVELS = int(levels)
 
 
+def _windfarm_interior_columns(mesh: Any, *, is_regional: bool, physics: Any):
+    """The physics columns a wind farm may stand in, or ``None`` with the
+    wind farm off (woof.hex.windfarm.interior_columns)."""
+
+    engine = getattr(physics, "engine_physics", None) or {}
+    if not int(engine.get("windfarm_opt", 0) or 0):
+        return None
+    from woof.hex.windfarm import interior_columns
+
+    return interior_columns(mesh, is_regional=is_regional)
+
+
 def _suite_host(
     adapter: Any,
     row_name: str,
@@ -583,6 +595,7 @@ def _suite_host(
     orographic_statistics: Path | None,
     is_regional: bool,
     cell_area_m2=None,
+    interior_column=None,
 ) -> tuple[dict[str, Any], None, dict[str, Any]]:
     """The suite row's sealed-constructor mapping, drag statistics included.
 
@@ -632,9 +645,14 @@ def _suite_host(
             "not bound on suite rows: the generic engine entry takes no "
             "shdmax (follow-up: carry it in the suite seam's statics)"
         )
+    extra = {}
+    if interior_column is not None:
+        # Read by windfarm_opt = 1 alone (woof.hex.windfarm); an adapter that
+        # predates it is handed exactly the keywords it was handed before.
+        extra["interior_column"] = interior_column
     mapped = adapter.constructor_values_for(
         values, row_name=row_name, orographic_statistics=oro,
-        cell_area_m2=cell_area_m2,
+        cell_area_m2=cell_area_m2, **extra,
     )
     classification = dict(
         adapter.seal_constructor(mapped).expected_surface_classification()
@@ -1507,6 +1525,7 @@ def build_forecast_constructor_values(
     start_time_text: str | None,
     config: Any,
     n_soil_levels: int | None = None,
+    suite_row: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, np.ndarray], dict[str, Any]]:
     from netCDF4 import Dataset
 
@@ -1887,9 +1906,22 @@ def build_forecast_constructor_values(
     # identity digest are byte-identical.
     from woof.hex import pbl_admission
 
-    pbl_request = pbl_admission.request_for_config(config.config_pbl_scheme)
-    if pbl_request != pbl_admission.DEFAULT_REQUEST:
-        values["pbl_scheme"] = pbl_admission.ENGINE_SCHEMES[pbl_request]
+    from woof.hex.physics_suites import load_table as _physics_table
+
+    if (suite_row
+            and config.config_pbl_scheme not in pbl_admission.CONFIG_SCHEMES.values()
+            and config.config_pbl_scheme in _physics_table()["options"]["config_pbl_scheme"]):
+        # A column-suite or generic-seam row: suite_config recorded the
+        # selection's own boundary layer (MYNN), which that seam builds from
+        # its selection, not from this frozen-lane key.  THE BREAKAGE: every
+        # MYNN run (rrfs_v2_dev, --physics config_pbl_scheme=bl_mynn) stopped
+        # here with "not one the frozen column-physics lane admits".  The
+        # receipt still names it (config_pbl_scheme below).
+        pbl_request = None
+    else:
+        pbl_request = pbl_admission.request_for_config(config.config_pbl_scheme)
+        if pbl_request != pbl_admission.DEFAULT_REQUEST:
+            values["pbl_scheme"] = pbl_admission.ENGINE_SCHEMES[pbl_request]
     arrays = {
         name: value for name, value in values.items() if isinstance(value, np.ndarray)
     }
@@ -2352,6 +2384,7 @@ def prepare_forecast_host(
         start_time_text=start_time_text,
         config=config,
         n_soil_levels=N_SOIL_LEVELS,
+        suite_row=suite_adapter is not None,
     )
     if arwen_les.active(config):
         constructor_values["pbl_scheme"] = None
@@ -2406,6 +2439,8 @@ def prepare_forecast_host(
                 pad_regional_physics_column(np.asarray(proof._mesh_value(mesh, "areaCell"), dtype=np.float64),
                     donor_cell=getattr(mesh, "attrs", {}).get("regional_garbage_donor_cell"))
                 if is_regional else np.asarray(proof._mesh_value(mesh, "areaCell"), dtype=np.float64)),
+            interior_column=_windfarm_interior_columns(
+                mesh, is_regional=is_regional, physics=physics),
         )
         seal = suite_adapter.seal_constructor
         relaxation["surface"] = relax_suite_surface_classification(classification)
@@ -3665,6 +3700,16 @@ def execute_forecast(
                                                       tables=_Namespace(rate=1))])
         balance.sample(balance_view, float(start_step) * float(DT_SECONDS), cp)
     static = proof._static_output_fields(host)
+    # WRF's windfarm_opt = 1 (woof.hex.windfarm): the per-turbine power
+    # window, folded by the physics seam every step, published beside every
+    # history frame.  Nothing exists with the wind farm off.
+    windfarm_power = getattr(stack["backend"], "windfarm_power", None)
+    windfarm_windows: dict[int, Any] = {}
+    windfarm_files: dict[str, Any] = {}
+    windfarm_zgrid = None
+    if windfarm_power is not None:
+        windfarm_zgrid = (history_zgrid if history_zgrid is not None else
+                          load_history_zgrid(Path(host["constructor_receipt"]["init_path"])))
     jedi_files: dict[str, Any] = {}
     checkpoint_files: dict[str, Any] = {}
     init_fallback_cache: dict[str, Any] = {}
@@ -3863,6 +3908,14 @@ def execute_forecast(
         mark = time.perf_counter()
         destination = output_root / f"cuda-history.{labels[step]}.nc"
         snapshot["valid_time"] = schedule["valid_times"][step]
+        if windfarm_power is not None:
+            # The frame's own turbine values, from the arrays this frame
+            # writes, and the window the capture closed.
+            windfarm_now = windfarm_power.frame_values(
+                snapshot["arrays"], zgrid=windfarm_zgrid, terrain=static["ter"])
+            windfarm_files[str(step)] = str(windfarm_power.write_frame(
+                windfarm_now, windfarm_windows.pop(step, {"steps": 0, "seconds": 0.0}),
+                valid_time=snapshot["valid_time"], output_dir=output_root))
         if history is None:
             time_ledger.emit("forecast.output.history", "begin", attrs={"step": step})
             record = proof.write_snapshot_netcdf(
@@ -3929,6 +3982,9 @@ def execute_forecast(
         nonlocal capture_seconds
         time_ledger.emit("forecast.output.capture", "begin", attrs={"step": step})
         mark = time.perf_counter()
+        if windfarm_power is not None:
+            # Closed here, on the loop's thread, before the next step folds.
+            windfarm_windows[step] = windfarm_power.take_window()
         if capture_pending:
             previous_step = capture_pending.pop(0).result()
             # A failed writer must not move NetCDF into the capture worker.
@@ -4585,6 +4641,7 @@ def execute_forecast(
         },
         "snapshot_receipts": snapshot_receipts,
         "snapshot_files": snapshot_files,
+        **({} if windfarm_power is None else {"windfarm_files": windfarm_files}),
         "refusal": refusal,
         "steps_requested": int(schedule["steps"]),
         "steps_executed": executed_steps,

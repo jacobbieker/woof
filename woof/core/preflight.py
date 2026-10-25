@@ -3130,6 +3130,10 @@ UNMEASURED_KERNEL_MODULES = frozenset({
     # glibc_flt32.cuh ahead of nest_vertical.cu (gfk_log, gfk_pow) and
     # compiles through its own direct loader; NVRTC refuses the unit alone.
     "nest_vertical",
+    # The Fitch drag on columns of unequal area (hex's wind farm,
+    # woof/core/windfarm_fitch.py _cells_module) is compiled after
+    # windfarm_fitch.cu, whose helpers it calls; NVRTC refuses it alone.
+    "windfarm_fitch_cells",
     })
 
 #: Priced units whose committed ``.cu`` compiles only through its own
@@ -3346,6 +3350,15 @@ CHAINED_TRANSLATION_UNIT_FRAMES: dict[str, ChainedTranslationUnitFrame] = {
         module="nest_vertical_composed",
         max_local_size_bytes=0,
         covers=frozenset({"nest_vertical"})),
+    # hex's wind farm (woof.hex.windfarm): glibc_flt32.cuh +
+    # glibc_trig_flt32.cuh + windfarm_fitch.cu + windfarm_fitch_cells.cu
+    # through woof/core/windfarm_fitch.py's _cells_module.
+    # fitch_column_cells, like fitch_column, keeps no per-level array: 0 B
+    # local through the loader on an RTX A6000 (sm_86) at NVRTC 12.9.86.
+    "windfarm_fitch_cells_composed": ChainedTranslationUnitFrame(
+        module="windfarm_fitch_cells_composed",
+        max_local_size_bytes=0,
+        covers=frozenset({"windfarm_fitch_cells"})),
 }
 
 _seen_covers: set[str] = set()

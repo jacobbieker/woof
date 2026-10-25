@@ -302,22 +302,38 @@ def _speed32(u, v, k):
     return np.sqrt(_powf(u[k], 2.0) + _powf(v[k], 2.0))
 
 
-def f32_fitch_column(u, v, z_interface, layout, du, dv, qke=None, *, dx,
-                     dy=None, dt=0.0, tke_factor=0.25, rho=None):
+def f32_fitch_column(u, v, z_interface, layout, du, dv, qke=None, *,
+                     dx=None, dy=None, dt=0.0, tke_factor=0.25, rho=None,
+                     cell_area=None):
     """The kernel in binary32 on the CPU, word for word.
 
     Adds into float32 ``du``/``dv`` (and ``qke``) in place exactly as
     ``fitch_column`` does, with the C library's powf and asinf
     (:mod:`woof.core.host_libm`) where the kernel calls glibc's, and the
     kernel's order of every sum.  Returns ``(power, thrust, overlap)``.
+
+    ``cell_area`` (ny*nx values, m2) in place of ``dx`` is the CPU twin of
+    ``fitch_column_cells`` (an unstructured mesh's columns of unequal
+    area): each column's ``wfdensity`` is ``float32(1)/float32(area)``,
+    :func:`woof.core.windfarm_fitch.cell_wfdensity`, and every other
+    statement is the one above.
     """
     u = np.asarray(u, dtype=F)
     v = np.asarray(v, dtype=F)
     z_w = np.asarray(z_interface, dtype=F)
     rho = None if rho is None else np.asarray(rho, dtype=F)
     nz, ny, nx = u.shape
-    dy = dx if dy is None else dy
-    wfdensity = F(F(1.0) / (F(dx) * F(dy)))
+    if cell_area is not None:
+        if dx is not None or dy is not None:
+            raise ValueError("give dx or cell_area, not both")
+        area32 = np.asarray(cell_area).astype(F).reshape(-1)
+        if area32.size != ny * nx:
+            raise ValueError(f"cell_area has {area32.size} columns, the "
+                             f"fields {ny * nx}")
+        wfdensity_col = F(1.0) / area32
+    else:
+        dy = dx if dy is None else dy
+        wfdensity_col = np.full(ny * nx, F(F(1.0) / (F(dx) * F(dy))), F)
     dt, factor = F(dt), F(tke_factor)
     piconst = F(3.1415926535897932384626433)
     power = np.zeros((ny, nx), F)
@@ -327,6 +343,7 @@ def f32_fitch_column(u, v, z_interface, layout, du, dv, qke=None, *, dx,
     maxvals = layout.speeds_ms.shape[1]
     for c in range(ny * nx):
         j, i = divmod(c, nx)
+        wfdensity = wfdensity_col[c]
         uc, vc, zw = u[:, j, i], v[:, j, i], z_w[:, j, i]
         zw0 = zw[0]
         pw = th = swept = F(0.0)

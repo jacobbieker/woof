@@ -1353,6 +1353,13 @@ BASELINE_PINNED: dict[str, str] = {
     # held to their NumPy twins (tests/test_nest_feedback_vertical.py);
     # the two WRF kernels above them are unchanged.  Previously a287e47a.
     "nest_vertical": "34b9327b30e96dff241273080ef68f3ba4114971eae3086fce0d51938af07b4b",
+    # feat/hex-windfarm: the Fitch drag on columns of unequal area (hex's
+    # Voronoi cells): fitch_column with each column's area in WRF's dx*dx,
+    # word for word against WRF v4.7.1's Fortran (area = dx*dx), the
+    # WRF-grid kernel column by column, and its binary32 CPU twin
+    # (tests/test_windfarm_fitch_cells.py).  Compiled after windfarm_fitch.cu
+    # by woof/core/windfarm_fitch.py's direct NVRTC loader (_cells_module).
+    "windfarm_fitch_cells": "74d904b04eae739706c93519d0f96abad8d26d74951e327076595639d8144876",
 }
 
 _FROZEN = _frozen_module()

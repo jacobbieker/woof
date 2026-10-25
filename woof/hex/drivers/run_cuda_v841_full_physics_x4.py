@@ -4307,12 +4307,15 @@ def write_snapshot_netcdf(
             "xice": "1",
             "snow": "kg m^{-2}",
             "snowh": "m",
+            "power": "W",
         }
         long_names = {
             "swdown": "downward shortwave flux at the surface, last radiation call",
             "swddni": "surface direct-normal shortwave (SWDDIR / COSZEN), last radiation call",
             "swddif": "surface diffuse shortwave, last radiation call",
             "coszr": "cosine of the solar zenith angle, last radiation call",
+            "power": "wind-farm power per cell at the hub-height wind, last "
+                     "PBL call (WRF POWER, windfarm_opt = 1)",
         }
         if zgrid_array is not None:
             variable = dataset.createVariable(

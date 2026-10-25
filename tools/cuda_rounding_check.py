@@ -315,7 +315,7 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
     # Their real factories are included by composed_units. Compiling a
     # fragment without its defines/libm creates false coverage and errors.
     fragments = {"p3", "p3_zdiag", "fast_sbm", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "urban_bep_bem",
-                 "windfarm_fitch", "fire_spread", "nest_vertical",
+                 "windfarm_fitch", "fire_spread", "nest_vertical", "windfarm_fitch_cells",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
                  "rrtmg_lw_taugb06_09", "rrtmg_lw_taugb13_16"}
@@ -405,6 +405,7 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:terrain_drag", terrain.module_source(), tuple(terrain.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch", fitch.module_source(), tuple(fitch.MODULE_OPTIONS)),
         Unit("composed:nest_vertical", vnest.module_source(), tuple(vnest.MODULE_OPTIONS)),
+        Unit("composed:windfarm_fitch_cells", fitch.cells_module_source(), tuple(fitch.MODULE_OPTIONS)),
         Unit("composed:fire_spread", fire.module_source(), tuple(fire.MODULE_OPTIONS)),
         Unit("composed:urban_bem", bem.module_source(), tuple(bem.MODULE_OPTIONS)),
         Unit("composed:noah_mosaic", module_source("noah_mosaic", kernel_dir=kdir),

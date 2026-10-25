@@ -412,6 +412,7 @@ def constructor_values_for(
     row_name: str,
     orographic_statistics: Mapping[str, np.ndarray] | None,
     cell_area_m2=None,
+    interior_column=None,
 ) -> dict[str, Any]:
     """The frozen door's mapping, re-shaped to the suite row's seam.
 
@@ -446,6 +447,19 @@ def constructor_values_for(
         mapped["physics"] = dict(suite["physics"])
         if cell_area_m2 is not None:
             mapped["cell_area_m2"] = np.asarray(cell_area_m2, dtype=np.float64)
+        if int(mapped["physics"].get("windfarm_opt", 0) or 0):
+            # WRF's windfarm_opt = 1 (woof.hex.windfarm): the turbines go to
+            # the nearest MODELLED column, so the seam is told which columns
+            # a limited-area mesh models.  Only with the wind farm on, so
+            # every other run's mapping (and its identity) is unchanged.
+            if interior_column is None:
+                raise ValueError(
+                    "windfarm_opt = 1 needs interior_column, the physics "
+                    "columns a turbine may stand in "
+                    "(woof.hex.windfarm.interior_columns); without it a "
+                    "limited-area mesh's boundary columns would take turbines")
+            mapped["interior_column"] = np.asarray(interior_column,
+                                                   dtype=np.bool_)
         return mapped
     generation = dict(suite.get("generation", {}) or {})
     if generation:
@@ -492,6 +506,7 @@ class SealedSuiteConstructorV841:
         generation = values.get("generation")
         keys.discard("generation")
         keys.discard("cell_area_m2")
+        keys.discard("interior_column")
         if generation is not None and not isinstance(generation, Mapping):
             raise TypeError("generation must be a mapping of generation selectors")
         if values.get("physics") is not None:
@@ -798,6 +813,18 @@ class SealedSuiteConstructorV841:
             if np.any(area <= 0):
                 raise ValueError("cell_area_m2 must be positive")
             arrays["cell_area_m2"] = area
+        windfarm = int(physics.get("windfarm_opt", 0) or 0)
+        if (values.get("interior_column") is not None) != bool(windfarm):
+            raise ValueError(
+                "interior_column is sealed exactly when windfarm_opt = 1 places "
+                "turbines on the mesh's modelled columns")
+        if windfarm:
+            if values.get("cell_area_m2") is None:
+                raise ValueError(
+                    "windfarm_opt = 1 divides each column's drag by its own "
+                    "volume and needs the mesh's cell_area_m2")
+            arrays["interior_column"] = _host_exact_array(
+                values, "interior_column", dtype=np.dtype(np.bool_), shape=(ncol,))
         z = np.asarray(values["z_interface_nominal_m"])
         if z.shape != (nlev + 1,) or not np.all(np.isfinite(z)) or np.any(np.diff(z) <= 0):
             raise ValueError("z_interface_nominal_m must be finite, increasing, nlev+1 long")
@@ -988,6 +1015,10 @@ class SealedSuiteConstructorV841:
             "cell_area_m2": values.get("cell_area_m2"),
             "surface": surface,
             "statics": {} if oro is None else dict(oro),
+            # Only with windfarm_opt = 1: every other seam is built with
+            # exactly the keywords it was built with before.
+            **({} if values.get("interior_column") is None
+               else {"interior_column": values["interior_column"]}),
         }
 
     def receipt(self) -> Mapping[str, Any]:
@@ -1376,6 +1407,17 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
         self._helper_scope = bind_arwen_helpers_v2(root)
         self._rollback_snapshot = rollback_snapshot
         self._seam = self._new_seam()
+        # WRF's windfarm_opt = 1 (woof.hex.windfarm): the engine's PBL slot
+        # runs the drag; the per-turbine power window folds on the seam's
+        # phase two.  None with the wind farm off, which builds nothing.
+        self.windfarm_power = None
+        physics = constructor.physics or {}
+        if int(physics.get("windfarm_opt", 0) or 0):
+            from .windfarm import attach_power
+
+            self.windfarm_power = attach_power(
+                self._seam, turbine_file=physics["windfarm_turbine_file"],
+                placement=self._seam.windfarm_placement)
         self._phase = "boundary"
         self._boundary_snapshot = None
         self._step_start = None
@@ -1416,7 +1458,24 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
         if dict(seam.selection) != self._constructor.selection:
             raise ValueError("the suite seam was built with another selection")
         self._validate_surface_classification(seam)
+        power = getattr(self, "windfarm_power", None)
+        if power is not None:
+            # A seam rebuilt on a resume or a rollback keeps the power
+            # window's observer (woof.hex.windfarm).
+            from .windfarm import hook
+
+            hook(seam, power)
         return seam
+
+    def commit_step(self) -> None:
+        super().commit_step()
+        if getattr(self, "windfarm_power", None) is not None:
+            self.windfarm_power.commit()
+
+    def abort_step(self) -> None:
+        if getattr(self, "windfarm_power", None) is not None:
+            self.windfarm_power.discard()
+        super().abort_step()
 
     def _validate_noahmp_census(self, *, require: bool) -> Mapping[str, Any] | None:
         """The land surface's own census (RUC's or Noah-MP's)."""
@@ -1637,6 +1696,9 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
             raise RuntimeError("diagnostic_snapshot is legal only at a committed boundary")
         self._private_binding_guard()
         names = (*_REQUIRED_ARWEN_EXPORT_FIELDS, *_OPTIONAL_ARWEN_EXPORT_FIELDS)
+        if int((self._constructor.physics or {}).get("windfarm_opt", 0) or 0):
+            # WRF's POWER (W per cell), the history field ``power``.
+            names = (*names, "power")
         exported, export_inventory = diagnostic_export(self._seam, names)
         if (
             not isinstance(exported, Mapping)

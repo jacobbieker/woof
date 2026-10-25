@@ -817,21 +817,13 @@ def _refuse_list(head: str, names: Sequence[str], remedy: str, why: str):
         f"{head}: {shown}.\n  remedy: {remedy}", why))
 
 
-def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
-                 default_curve: str | None = None,
-                 library: TurbineLibrary | None = None,
-                 standing_thrust=STANDING_THRUST_COEFFICIENT,
-                 merge_tolerance_m: float | None = None) -> WindFarmLayout:
-    """Place ``turbines`` on ``grid`` (a Lambert, Mercator or polar
-    stereographic :class:`ProjectedGrid`, root or nest).
+def _machines(turbines, *, default_curve, library, merge_tolerance_m):
+    """Each turbine's curve, rotor and hub, checked: the half of
+    :func:`build_layout` that does not depend on where a turbine stands.
 
-    ``standing_thrust`` is every WRF table's ``stc``, the thrust
-    coefficient of a rotor below cut-in.  ``merge_tolerance_m`` (off by
-    default) merges a cell's same-curve turbines whose hub and rotor lie
-    within it into one averaged group, wherever they sit in the table: it
-    saves memory on dense tables but is NOT WRF-exact.
+    Returns ``(turbines, ids, library, curves, turbine_curve, rotors,
+    hubs)``; every refusal is by turbine id.
     """
-
     turbines = tuple(turbines)
     if not turbines:
         raise WindFarmLayoutRefused("no turbines to place")
@@ -937,40 +929,16 @@ def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
             "invented, and a rotor bottom below 0 m AGL would put the "
             "blade tip underground.")
 
-    # -- cells: WRF's own placement ---------------------------------------
-    nx, ny = int(grid.e_we) - 1, int(grid.e_sn) - 1
-    try:
-        projection = WrfProjection.for_grid(grid)
-    except WrfProjectionRefused as error:
-        raise WindFarmLayoutRefused(layered(
-            f"d{int(grid_id):02d}: {error}.\n  remedy: lay the farm out on "
-            "a Lambert, Mercator or polar stereographic domain",
-            "Turbines are placed by WRF's own real(4) map_set and "
-            "latlon_to_ij so that a WRF run of the same farm puts every "
-            "turbine in the same cell; WRF has no wind-farm placement for "
-            "any other projection.")) from error
-    n_turbines = len(turbines)
-    lat32 = np.array([F(t.lat) for t in turbines], dtype=F)
-    lon32 = np.array([F(t.lon) for t in turbines], dtype=F)
-    x, y, jj, ii = wrf_cells(projection, lat32, lon32)
-    outside = [ids[n] for n in range(n_turbines)
-               if not (0 <= ii[n] < nx and 0 <= jj[n] < ny)]
-    if outside:
-        _refuse_list(
-            f"turbines outside d{int(grid_id):02d} ({nx} x {ny} cells of "
-            f"{grid.dx:g} m)", outside,
-            "drop them from the table or use a domain that contains them",
-            "A turbine outside the mass grid has no cell to act on.")
-    edge = [ids[n] for n in range(n_turbines)
-            if ii[n] in (0, nx - 1) or jj[n] in (0, ny - 1)]
-    if edge:
-        _refuse_list(
-            f"turbines in d{int(grid_id):02d}'s outermost row or column",
-            edge, "use a domain that holds them at least one cell inside "
-                  "its edge",
-            "The outermost cells are boundary-forced, not modelled; the "
-            "hub-wind site sampler refuses them on the same rule.")
+    return turbines, ids, library, curves, turbine_curve, rotors, hubs
 
+
+def _assemble(*, turbines, ids, library, curves, turbine_curve, rotors, hubs,
+              ny, nx, jj, ii, x, y, lat32, lon32, grid_id, dx_m, projection,
+              standing_thrust, merge_tolerance_m) -> WindFarmLayout:
+    """The groups, aggregates and tables of turbines already placed in
+    cells ``(jj, ii)`` of an ``(ny, nx)`` grid: the half of
+    :func:`build_layout` that does not depend on how they were placed."""
+    n_turbines = len(turbines)
     # -- groups ------------------------------------------------------------
     # WRF-exact (the default): a cell's turbines in table order -- the order
     # WRF reads windturbines.txt and a Fitch kernel adds them -- split into
@@ -1073,7 +1041,7 @@ def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
     shape = (n_groups, speeds.size)
 
     return WindFarmLayout(
-        grid_id=int(grid_id), ny=ny, nx=nx, dx_m=float(grid.dx),
+        grid_id=int(grid_id), ny=ny, nx=nx, dx_m=float(dx_m),
         projection=projection,
         turbine_count=plane(count, np.int32),
         group_count=plane(per_cell, np.int32),
@@ -1104,6 +1072,113 @@ def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
         library_sha256=library.sha256)
 
 
+def build_layout(turbines: Iterable[Turbine], grid, *, grid_id: int = 1,
+                 default_curve: str | None = None,
+                 library: TurbineLibrary | None = None,
+                 standing_thrust=STANDING_THRUST_COEFFICIENT,
+                 merge_tolerance_m: float | None = None) -> WindFarmLayout:
+    """Place ``turbines`` on ``grid`` (a Lambert, Mercator or polar
+    stereographic :class:`ProjectedGrid`, root or nest).
+
+    ``standing_thrust`` is every WRF table's ``stc``, the thrust
+    coefficient of a rotor below cut-in.  ``merge_tolerance_m`` (off by
+    default) merges a cell's same-curve turbines whose hub and rotor lie
+    within it into one averaged group, wherever they sit in the table: it
+    saves memory on dense tables but is NOT WRF-exact.
+    """
+    turbines, ids, library, curves, turbine_curve, rotors, hubs = _machines(
+        turbines, default_curve=default_curve, library=library,
+        merge_tolerance_m=merge_tolerance_m)
+
+    # -- cells: WRF's own placement ---------------------------------------
+    nx, ny = int(grid.e_we) - 1, int(grid.e_sn) - 1
+    try:
+        projection = WrfProjection.for_grid(grid)
+    except WrfProjectionRefused as error:
+        raise WindFarmLayoutRefused(layered(
+            f"d{int(grid_id):02d}: {error}.\n  remedy: lay the farm out on "
+            "a Lambert, Mercator or polar stereographic domain",
+            "Turbines are placed by WRF's own real(4) map_set and "
+            "latlon_to_ij so that a WRF run of the same farm puts every "
+            "turbine in the same cell; WRF has no wind-farm placement for "
+            "any other projection.")) from error
+    n_turbines = len(turbines)
+    lat32 = np.array([F(t.lat) for t in turbines], dtype=F)
+    lon32 = np.array([F(t.lon) for t in turbines], dtype=F)
+    x, y, jj, ii = wrf_cells(projection, lat32, lon32)
+    outside = [ids[n] for n in range(n_turbines)
+               if not (0 <= ii[n] < nx and 0 <= jj[n] < ny)]
+    if outside:
+        _refuse_list(
+            f"turbines outside d{int(grid_id):02d} ({nx} x {ny} cells of "
+            f"{grid.dx:g} m)", outside,
+            "drop them from the table or use a domain that contains them",
+            "A turbine outside the mass grid has no cell to act on.")
+    edge = [ids[n] for n in range(n_turbines)
+            if ii[n] in (0, nx - 1) or jj[n] in (0, ny - 1)]
+    if edge:
+        _refuse_list(
+            f"turbines in d{int(grid_id):02d}'s outermost row or column",
+            edge, "use a domain that holds them at least one cell inside "
+                  "its edge",
+            "The outermost cells are boundary-forced, not modelled; the "
+            "hub-wind site sampler refuses them on the same rule.")
+
+    return _assemble(
+        turbines=turbines, ids=ids, library=library, curves=curves,
+        turbine_curve=turbine_curve, rotors=rotors, hubs=hubs, ny=ny,
+        nx=nx, jj=jj, ii=ii, x=x, y=y, lat32=lat32, lon32=lon32,
+        grid_id=grid_id, dx_m=float(grid.dx), projection=projection,
+        standing_thrust=standing_thrust,
+        merge_tolerance_m=merge_tolerance_m)
+
+
+
+
+def build_cell_layout(turbines: Iterable[Turbine], placement, *,
+                      grid_id: int = 1, default_curve: str | None = None,
+                      library: TurbineLibrary | None = None,
+                      standing_thrust=STANDING_THRUST_COEFFICIENT,
+                      merge_tolerance_m: float | None = None
+                      ) -> WindFarmLayout:
+    """Place ``turbines`` on an unstructured mesh's columns.
+
+    ``placement`` is a :class:`woof.windfarm.cells.CellPlacement`: each
+    turbine goes to the column whose cell centre is nearest
+    (:func:`woof.windfarm.cells.place_on_cells`, refused by name outside
+    the mesh or in its boundary columns).  Curves, hubs, rotors, groups and
+    tables are :func:`build_layout`'s own, so a cell's turbines group in
+    table order exactly as on a WRF grid.  The layout's grid is ``(1,
+    n_columns)``: ``turbine_i`` is the column, ``turbine_j`` 0,
+    ``turbine_x`` the 1-based column as a float32 and ``turbine_y`` 1;
+    there is no projection (``projection`` is ``None``).
+    """
+
+    from woof.windfarm.cells import CellPlacementRefused, place_on_cells
+
+    turbines, ids, library, curves, turbine_curve, rotors, hubs = _machines(
+        turbines, default_curve=default_curve, library=library,
+        merge_tolerance_m=merge_tolerance_m)
+    lat32 = np.array([F(t.lat) for t in turbines], dtype=F)
+    lon32 = np.array([F(t.lon) for t in turbines], dtype=F)
+    try:
+        # The table's float32 words, as WRF's placement reads them.
+        ii = place_on_cells(placement, lat32.astype(np.float64),
+                            lon32.astype(np.float64), ids)
+    except CellPlacementRefused as error:
+        raise WindFarmLayoutRefused(str(error)) from error
+    ii = ii.astype(np.int64)
+    jj = np.zeros_like(ii)
+    return _assemble(
+        turbines=turbines, ids=ids, library=library, curves=curves,
+        turbine_curve=turbine_curve, rotors=rotors, hubs=hubs, ny=1,
+        nx=placement.n_columns, jj=jj, ii=ii,
+        x=(ii + 1).astype(F), y=np.ones(ii.size, F), lat32=lat32,
+        lon32=lon32, grid_id=grid_id, dx_m=float(placement.nominal_dx_m),
+        projection=None, standing_thrust=standing_thrust,
+        merge_tolerance_m=merge_tolerance_m)
+
+
 def layout_for_config(config: str | Path, turbines: str | Path, *,
                       grid_id: int = 1, default_curve: str | None = None,
                       library_path: str | Path | None = None
@@ -1126,5 +1201,5 @@ __all__ = [
     "read_turbine_csv",
     "turbines_from_geojson", "turbines_from_sites", "read_turbines",
     "resolve_curve", "speed_axis", "domain_grid", "build_layout",
-    "layout_for_config", "wrf_cells",
+    "build_cell_layout", "layout_for_config", "wrf_cells",
 ]
