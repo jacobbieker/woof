@@ -196,6 +196,15 @@ def native_route(arguments: Any, *, default_mode: str = 'exact'):
         # MPAS suite route would run ArWen's physics while its author believes it ran MPAS's.
         raise ValueError('--physics-default-backend applies to an explicit MPAS suite route (--physics-suite '
                          'or config_physics_suite); this run has none')
+    if config is not None:
+        # WRF's wind-farm keys have no MPAS Registry row: refused by name rather
+        # than written into a namelist nothing reads (woof.hex.windfarm).
+        from ..windfarm import mpas_route_refusal
+        named = [override.partition('=')[0] for override in (getattr(arguments, 'physics', None) or ())]
+        named += [key for options in groups.values() for key in options]
+        refusal = mpas_route_refusal(named)
+        if refusal is not None:
+            raise ValueError(refusal)
     if config is not None and getattr(arguments, 'physics', None):
         # Reconstruct one native physics group so parse_fortran_namelist never
         # discards a repeated group. WOOF-only selectors have no Registry row.

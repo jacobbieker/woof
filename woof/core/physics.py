@@ -6798,6 +6798,14 @@ def _attach_windfarm(state, cfg, fields, grid):
             "resident real-case domain (woof go, the prepared single-domain "
             "and domain-tree forecasts without [tiles]), which passes the "
             "domain's grid.")
+    elif hasattr(grid, "area_m2"):
+        # An unstructured mesh's columns (woof.windfarm.cells.CellPlacement,
+        # hex's generic column seam): one row of columns, each its own area.
+        if tuple(grid.shape) != shape:
+            raise ValueError(
+                f"{where}: this state's columns are {shape} and the mesh "
+                f"placement holds {tuple(grid.shape)}; the wind farm's cells "
+                "are whole-mesh columns.")
     else:
         grid_shape = (int(grid.e_sn) - 1, int(grid.e_we) - 1)
         if grid_shape != shape:

@@ -1193,6 +1193,25 @@ The history carries WRF's `POWER`, each cell's turbine power in W, on every
 domain with the scheme on, and the `windfarm` preset keeps it (see
 [OUTPUT-VARIABLES.md](OUTPUT-VARIABLES.md#wind-farm-power-fields)).
 
+**On hex** (`woof hex forecast`) the same keys are `--physics` overrides
+on WOOF's physics, with a MYNN boundary layer:
+
+```
+woof hex forecast ... --physics-suite rrfs_v2_dev \
+    --physics windfarm_opt=1 --physics windfarm_turbine_file=/abs/farm.csv
+```
+
+A turbine goes to the cell whose centre is nearest (the rule MPAS applies
+to a point), and each column's own `areaCell` takes WRF's `dx*dx`, so the
+drag is divided by the cell volume. A turbine outside the mesh or in a
+limited-area mesh's boundary cells is refused by name, as is
+`windfarm_ij = 1` (an unstructured mesh has no i/j) and the MPAS suite route
+(`--physics-backend mpasphys`: MPAS-A has no wind-farm scheme). The history
+frames carry `power` (WRF's `POWER`, W per cell), and a woof turbine table
+also gets a `windfarm_d01_<time>.nc` sidecar per frame: per-turbine
+rotor-equivalent wind, power and thrust coefficient, with their means and
+maxima over the steps since the last frame (`woof.hex.windfarm`).
+
 ## Terrain smoothing (`[[domain]] static`)
 
 Preparation automatically adds Rust 1-2-1 passes when a domain exceeds the

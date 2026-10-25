@@ -67,6 +67,8 @@ FRAME_NAMES = (
     "t2", "q2", "pblh", "u10", "v10", "psfc",
     "swdown", "glw", "olr", "swddni", "swddif", "coszr",
     "xice", "snow", "snowh",
+    # WRF's POWER, written only by a windfarm_opt = 1 run (woof.hex.windfarm).
+    "power",
     "rainc",
     "dusfcg", "dvsfcg", "dtaux3d", "dtauy3d", "rubldiff", "rvbldiff",
 )

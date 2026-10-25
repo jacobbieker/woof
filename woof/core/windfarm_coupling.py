@@ -284,10 +284,40 @@ def wrf_table_paths(path) -> dict[int, Path]:
             for kind in _list_kinds(path)}
 
 
+def _is_cells(grid) -> bool:
+    """True for an unstructured mesh's columns
+    (:class:`woof.windfarm.cells.CellPlacement`), not a projected grid."""
+    from woof.windfarm.cells import CellPlacement
+
+    return isinstance(grid, CellPlacement)
+
+
+def _ij_on_cells(path) -> WindFarmRefused:
+    return WindFarmRefused(
+        f"windfarm_ij = 1 with {path}: i/j turbine rows index a WRF grid, "
+        "and an unstructured mesh's columns have no i/j.  List the turbines "
+        "by lat/lon (windfarm_ij = 0); each goes to the cell whose centre "
+        "is nearest")
+
+
 def _place(rows, ij: int, *, grid, shape, path) -> list[tuple[int, int]]:
     """0-based (j, i) of each turbine; refused outside or on the edge."""
     ny, nx = shape
     cells = []
+    if grid is not None and _is_cells(grid):
+        # An unstructured mesh: the nearest cell centre (woof.windfarm.cells),
+        # refused outside the mesh and in its boundary columns.
+        from woof.windfarm.cells import CellPlacementRefused, place_on_cells
+        if ij:
+            raise _ij_on_cells(path)
+        try:
+            columns = place_on_cells(
+                grid, np.array([r[0] for r in rows], F).astype(np.float64),
+                np.array([r[1] for r in rows], F).astype(np.float64),
+                [f"turbine {n}" for n in range(1, len(rows) + 1)])
+        except CellPlacementRefused as error:
+            raise WindFarmRefused(f"{path}: {error}") from error
+        return [(0, int(c)) for c in columns]
     if ij:
         cells = [(j - 1, i - 1) for i, j, _ in rows]
     else:
@@ -339,6 +369,8 @@ def wrf_fitch_layout(path, *, ij: int, shape, grid=None):
     path = Path(path)
     if not path.is_file():
         raise WindFarmRefused(f"turbine list {path} does not exist")
+    if ij and grid is not None and _is_cells(grid):
+        raise _ij_on_cells(path)
     rows = _wrf_rows(path, ij)
     paths = wrf_table_paths(path)
     kinds = sorted(paths)
@@ -412,8 +444,10 @@ def fitch_layout_for_file(path, *, ij: int = 0, shape, grid=None,
     """The kernel layout of one domain's turbine file.
 
     ``shape`` is the domain's mass grid (ny, nx); ``grid`` its projected
-    grid (needed for lat/lon placement).  Every refusal is the reader's or
-    the layout's own, by name.
+    grid (needed for lat/lon placement), or an unstructured mesh's columns
+    (:class:`woof.windfarm.cells.CellPlacement`, shape ``(1, n_columns)``),
+    where each turbine goes to the nearest cell centre.  Every refusal is
+    the reader's or the layout's own, by name.
     """
     path = Path(path)
     if not path.is_file():
@@ -422,9 +456,24 @@ def fitch_layout_for_file(path, *, ij: int = 0, shape, grid=None,
         layout, _ = wrf_fitch_layout(path, ij=ij, shape=shape, grid=grid)
         return layout
     if ij:
+        if grid is not None and _is_cells(grid):
+            raise _ij_on_cells(path)
         raise WindFarmRefused(
             f"windfarm_ij = 1 with {path}: i/j rows are read from a WRF "
             "windturbines-ij.txt only; a woof turbine table is lat/lon")
+    if grid is not None and _is_cells(grid):
+        from woof.windfarm.layout import (WindFarmLayoutRefused,
+                                          build_cell_layout, read_turbines)
+        try:
+            built = build_cell_layout(read_turbines(path), grid,
+                                      grid_id=grid_id)
+        except WindFarmLayoutRefused as error:
+            raise WindFarmRefused(str(error)) from error
+        if (built.ny, built.nx) != tuple(shape):
+            raise WindFarmRefused(
+                f"{path} was placed on {built.nx} columns and this state "
+                f"carries {shape[1]}")
+        return fitch_layout_from_layout(built)
     if grid is None:
         raise WindFarmRefused(
             f"{path} places turbines by lat/lon and this route hands the "
@@ -538,13 +587,26 @@ class WindFarm:
 
     layout: object
     tke_factor: float
+    #: An unstructured mesh's per-column ``wfdensity`` (1/area, float32, on
+    #: the device; :func:`woof.core.windfarm_fitch.cell_wfdensity`), or
+    #: ``None`` on a WRF grid, whose cells are all ``dx*dx``.
+    wfdensity: object | None = None
 
     def apply(self, atmosphere: Mapping[str, object], du, dv, *, qke, power,
               dx: float, dt: float) -> None:
         """``dragforce``: add the rotors' drag to ``du``/``dv`` and their
-        TKE to ``qke`` in place, and write ``power`` (W per cell)."""
+        TKE to ``qke`` in place, and write ``power`` (W per cell).
+
+        On an unstructured mesh ``dx`` is not read: each column's own area
+        takes WRF's ``dx*dx`` (``fitch_column_cells``)."""
         from woof.core.windfarm_fitch import launch_fitch
 
+        if self.wfdensity is not None:
+            launch_fitch(atmosphere["u"], atmosphere["v"],
+                         atmosphere["z_interface"], self.layout, du, dv,
+                         wfdensity=self.wfdensity, qke=qke, dt=dt,
+                         tke_factor=self.tke_factor, power=power)
+            return
         launch_fitch(atmosphere["u"], atmosphere["v"],
                      atmosphere["z_interface"], self.layout, du, dv,
                      dx=dx, qke=qke, dt=dt, tke_factor=self.tke_factor,
@@ -571,7 +633,13 @@ def build_windfarm(cfg, *, shape, grid=None) -> WindFarm:
             "build again from settled files")
     _BUILT[str(path)] = after
     layout.device_arrays()
-    return WindFarm(layout=layout, tke_factor=float(cfg.windfarm_tke_factor))
+    wfdensity = None
+    if grid is not None and _is_cells(grid):
+        import cupy as cp
+        from woof.core.windfarm_fitch import cell_wfdensity
+        wfdensity = cp.asarray(cell_wfdensity(grid.area_m2))
+    return WindFarm(layout=layout, tke_factor=float(cfg.windfarm_tke_factor),
+                    wfdensity=wfdensity)
 
 
 # --------------------------------------------------------------------------

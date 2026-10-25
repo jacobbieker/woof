@@ -1373,7 +1373,15 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                  start_time, latitude_deg, longitude_deg,
                  terrain_height_m, z_interface_nominal_m, p_top_pa, dx_m,
                  cumulus_seconds=None, dx_column_m=None, cell_area_m2=None,
-                 surface=None, statics=None, cumulus_active_column=None):
+                 surface=None, statics=None, cumulus_active_column=None,
+                 interior_column=None):
+        """``interior_column`` (one bool per column, default all True) says
+        which columns a limited-area caller models; it is read only by
+        ``windfarm_opt = 1``, which places each turbine in the column whose
+        cell centre is nearest (:mod:`woof.windfarm.cells`) and refuses one
+        in a column that is not interior.  The wind farm divides its drag
+        by each column's own ``cell_area_m2`` (WRF's ``dx*dx``), which it
+        therefore requires."""
         # ---- pure validation FIRST (no device allocation before it) ----
         if not isinstance(n_levels, numbers.Integral) or n_levels < 3:
             raise ValueError(
@@ -1437,7 +1445,8 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
         accepted = set(inspect.signature(initialize_physics).parameters)
         seam_bound = {"state", "cfg", "radiation_start_time",
                       "radiation_latitude", "radiation_longitude",
-                      "terrain_drag_static", "radiation", "cumulus"}
+                      "terrain_drag_static", "radiation", "cumulus",
+                      "windfarm_grid"}
         given = {} if surface is None else dict(surface)
         unknown = sorted(name for name in given
                          if name not in accepted or name in seam_bound)
@@ -1479,10 +1488,38 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
                     f"column ({ncol},), got {value.shape}")
             oro[name] = value.reshape(1, ncol)
         znu = _nominal_znu(z_interface_nominal_m, p_top)
+        windfarm_grid = None
+        if int(getattr(cfg, "windfarm_opt", 0) or 0):
+            # WRF's windfarm_opt = 1 on an unstructured mesh: the turbines go
+            # to the nearest cell centre and each column's drag is divided
+            # by its own volume, so the seam needs every column's area.
+            from woof.windfarm.cells import CellPlacement
+            if area is None:
+                raise ValueError(
+                    "windfarm_opt = 1 on the column seam needs cell_area_m2: "
+                    "the Fitch drag is divided by each column's volume "
+                    "(area * dz), WRF's dx*dx on its own grid, and these "
+                    "columns have no uniform dx")
+            interior = (np.ones(ncol, dtype=bool) if interior_column is None
+                        else np.asarray(interior_column, dtype=bool).reshape(-1))
+            if interior.shape != (ncol,):
+                raise ValueError(
+                    f"interior_column must have one value per column ({ncol},)"
+                    f", got {interior.shape}")
+            windfarm_grid = CellPlacement(
+                latitude_deg=lat, longitude_deg=lon, area_m2=area,
+                interior=interior, nominal_dx_m=dx)
+        elif interior_column is not None:
+            raise ValueError(
+                "interior_column is read only by windfarm_opt = 1; with the "
+                "wind farm off it would be accepted and never read")
 
         self._cfg = cfg
         self._plan = plan
         self._cadences = cadences
+        #: The columns the wind farm was placed on (windfarm_opt = 1), else
+        #: None: a caller's per-turbine diagnostic places by the same rule.
+        self.windfarm_placement = windfarm_grid
         self._dt = float(cadences["dt"])
         self._nz, self._ncol = nz, ncol
         self._start_time = start_time
@@ -1536,6 +1573,8 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
 
         kwargs = {name: on_grid(value) for name, value in given.items()}
         kwargs.setdefault("glw", None)
+        if windfarm_grid is not None:
+            kwargs["windfarm_grid"] = windfarm_grid
         self._driver = initialize_physics(
             state, cfg, **kwargs,
             radiation_start_time=start_time,
@@ -1607,6 +1646,9 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
         self._step_index = 0
         self._pending_phase = _PHASE1
         state.elapsed_seconds = 0.0
+        #: Callables handed this seam in run_phase2 after the post-RK state
+        #: is copied in and before microphysics (read-only observers).
+        self.phase2_observers = ()
 
     # ------------------------------------------------------------------
     @property
@@ -1903,6 +1945,11 @@ class MpasColumnPhysics(MpasColumnBatchPhysics):
         cp.divide(cp.float32(1.0), v3(rho_dry), out=state.alt)
         cp.multiply(v3(z_interface), cp.float32(_constants.G),
                     out=state.php)
+        # The post-RK state, before microphysics adjusts it: the instant the
+        # WRF-like core's dycore epilogue folds its interval diagnostics
+        # (woof.hex.windfarm.HexWindfarmPower).  Read-only; none by default.
+        for observer in self.phase2_observers:
+            observer(self)
         receipt = {}
         first_contact = _FIRST_CONTACT.get(int(cfg.mp_physics))
         if first_contact is not None and self._aerosol_init is None:

@@ -200,6 +200,14 @@ _MICROPHYSICS_CONTRACT_ROWS = {
 _PBL_CONTRACT_ROWS = {
     "ysu": ("YSU", "YSU_VERTICAL_LEVEL_BOUNDS"),
     "bl_ysu": ("YSU", "YSU_VERTICAL_LEVEL_BOUNDS"),
+    # MYNN (the column seam's bl_pbl_physics = 5: MPAS's bl_mynn, the GSL
+    # fork's bl_mynnedmf): a floor of 5 levels and no ceiling.  THE BREAKAGE
+    # THESE ROWS PREVENT: a column-suite run whose configuration records
+    # MYNN (rrfs_v2_dev, --physics config_pbl_scheme=bl_mynn) stopped here
+    # before the seam was sealed.
+    "mynn": ("MYNN", "MYNN_VERTICAL_LEVEL_BOUNDS"),
+    "bl_mynn": ("MYNN", "MYNN_VERTICAL_LEVEL_BOUNDS"),
+    "bl_mynnedmf": ("MYNN", "MYNN_VERTICAL_LEVEL_BOUNDS"),
     "off": None,
 }
 

@@ -521,6 +521,15 @@ It is absent with the scheme off. `POWER` is WRF's power-table value at the
 hub-height wind of the model's own (waked) flow, so a farm's downstream
 rows read less than its front row. The `windfarm` preset keeps it.
 
+On hex (`woof hex forecast` with `--physics windfarm_opt=1`) the frame
+field is `power` (`Time, nCells`, W), and a woof turbine table also writes
+the `windfarm_d01_<time>.nc` sidecar above beside every history frame. Its
+window folds once per step, on the post-dynamics state before microphysics
+(the instant the WRF-like core folds it). Its frame values come from that
+frame's own `u_zonal`, `v_meridional`, `theta`, `pressure` and `qv`, at
+the turbine's own cell. `grid_j` is 0 and `grid_i` is the cell index. The
+first frame of a run or of a resume reports its own instant as the window.
+
 ## Wind maxima and gusts
 
 With `nwp_diagnostics = 1` (`&time_control`, or the RunConfig key of the
