@@ -2141,6 +2141,16 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
         "per-level array.  Re-read on any device by "
         "tests/test_nest_vertical_wrf471_parity.py::"
         "test_the_composed_unit_compiles_within_the_priced_frame.",
+    "windfarm_fitch_cells_composed":
+        "glibc_flt32.cuh + glibc_trig_flt32.cuh + windfarm_fitch.cu + "
+        "windfarm_fitch_cells.cu, assembled by "
+        "woof/core/windfarm_fitch.cells_module_source() and compiled "
+        "directly with MODULE_OPTIONS; windfarm_fitch_cells.cu fails "
+        "standalone (it calls windfarm_fitch.cu's helpers).  Priced 0 B: "
+        "fitch_column_cells read through the loader on sm_86 (RTX A6000) at "
+        "NVRTC 12.9.86; the kernel holds no per-level array.  Re-read on any "
+        "device by tests/test_windfarm_fitch_cells.py::"
+        "test_the_cells_unit_compiles_within_the_priced_frame.",
 })
 
 

@@ -5008,7 +5008,7 @@ def test_legacy_rrtmg_variant_prices_the_lw_chain_local_frame():
         "rrtmg_lw_taugb13_16", "p3", "urban_bep_bem",
         "terrain_drag", "windfarm_fitch",
         "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched", "noah_mosaic",
-        "thompson_fork", "nest_vertical"}
+        "thompson_fork", "nest_vertical", "windfarm_fitch_cells"}
     assert covered <= pf.UNMEASURED_KERNEL_MODULES
     assert not modules & pf.UNMEASURED_KERNEL_MODULES
 

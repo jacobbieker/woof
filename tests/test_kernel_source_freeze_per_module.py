@@ -1348,6 +1348,13 @@ BASELINE_PINNED: dict[str, str] = {
     # own direct NVRTC loader (woof/core/nest_vertical.py) with
     # glibc_flt32.cuh prepended.
     "nest_vertical": "a287e47a3237a2525c39e203775018ef6a863610835cef9166bfcc8c67f6044b",
+    # feat/hex-windfarm: the Fitch drag on columns of unequal area (hex's
+    # Voronoi cells): fitch_column with each column's area in WRF's dx*dx,
+    # word for word against WRF v4.7.1's Fortran (area = dx*dx), the
+    # WRF-grid kernel column by column, and its binary32 CPU twin
+    # (tests/test_windfarm_fitch_cells.py).  Compiled after windfarm_fitch.cu
+    # by woof/core/windfarm_fitch.py's direct NVRTC loader (_cells_module).
+    "windfarm_fitch_cells": "74d904b04eae739706c93519d0f96abad8d26d74951e327076595639d8144876",
 }
 
 _FROZEN = _frozen_module()

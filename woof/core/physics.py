@@ -6775,6 +6775,11 @@ def _pbl_momentum_targets(rates, option: str):
     return targets
 
 
+def _is_cell_placement(grid) -> bool:
+    from woof.core.windfarm_coupling import _is_cells
+    return _is_cells(grid)
+
+
 def _attach_windfarm(state, cfg, fields, grid):
     """The domain's :class:`woof.core.windfarm_coupling.WindFarm`.
 
@@ -6798,6 +6803,14 @@ def _attach_windfarm(state, cfg, fields, grid):
             "resident real-case domain (woof go, the prepared single-domain "
             "and domain-tree forecasts without [tiles]), which passes the "
             "domain's grid.")
+    elif _is_cell_placement(grid):
+        # An unstructured mesh's columns (woof.windfarm.cells.CellPlacement,
+        # hex's generic column seam): one row of columns, each its own area.
+        if tuple(grid.shape) != shape:
+            raise ValueError(
+                f"{where}: this state's columns are {shape} and the mesh "
+                f"placement holds {tuple(grid.shape)}; the wind farm's cells "
+                "are whole-mesh columns.")
     else:
         grid_shape = (int(grid.e_sn) - 1, int(grid.e_we) - 1)
         if grid_shape != shape:

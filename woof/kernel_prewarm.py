@@ -386,6 +386,8 @@ _DEVICE_LOADERS = {
     # WRF vertical grid nesting (a nest on its own eta ladder): its own
     # direct NVRTC unit, compiled per device like the terrain drag.
     "nest_vertical_composed": ("nest_vertical", "_module"),
+    # hex's wind farm: the Fitch drag on columns of unequal area.
+    "windfarm_fitch_cells_composed": ("windfarm_fitch", "_cells_module"),
 }
 
 

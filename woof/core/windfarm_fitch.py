@@ -75,6 +75,11 @@ PICONST = np.float32(3.1415926535897932384626433)
 MODULE_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 MODULE_KEY = "woof.core.windfarm_fitch:windfarm_fitch"
 _SOURCES = ("glibc_flt32.cuh", "glibc_trig_flt32.cuh", "windfarm_fitch.cu")
+#: The columns-of-unequal-area variant (an unstructured mesh): the same unit
+#: with ``windfarm_fitch_cells.cu`` after it, compiled as its own module so
+#: the WRF-grid module above keeps its bytes.
+CELLS_MODULE_KEY = "woof.core.windfarm_fitch:windfarm_fitch_cells"
+_CELLS_SOURCES = _SOURCES + ("windfarm_fitch_cells.cu",)
 _BLOCK = 128
 #: A null device pointer for the kernel's optional arrays.
 _NULL = np.uintp(0)
@@ -259,6 +264,16 @@ def module_source() -> str:
         (root / name).read_text(encoding="utf-8") for name in _SOURCES)
 
 
+def cells_module_source() -> str:
+    """The exact source of the unequal-area module (``fitch_column_cells``):
+    :func:`module_source` with ``windfarm_fitch_cells.cu`` appended."""
+    from woof.core.kernels import _preamble
+
+    root = Path(__file__).parent / "kernels"
+    return _preamble() + "".join(
+        (root / name).read_text(encoding="utf-8") for name in _CELLS_SOURCES)
+
+
 @lru_cache(maxsize=None)
 def _module(device: int):
     """NVRTC directly, -fmad=false and --ftz=false, one module per device.
@@ -284,10 +299,52 @@ def _module(device: int):
     return module
 
 
+@lru_cache(maxsize=None)
+def _cells_module(device: int):
+    """The unequal-area module, compiled exactly as :func:`_module` is."""
+    import cupy as cp
+    from woof import nvrtc_ptx_cache as compiler
+
+    from woof.certify.kernel_manifest import record_module
+    from woof.kernel_compile_notice import observe_module_compile
+
+    source = cells_module_source()
+    with cp.cuda.Device(device), observe_module_compile(CELLS_MODULE_KEY):
+        ptx, _ = compiler.compile_using_nvrtc(
+            source, MODULE_OPTIONS, None, "windfarm_fitch_cells.cu")
+        module = cp.cuda.function.Module()
+        module.load(ptx.encode() if isinstance(ptx, str) else ptx)
+    record_module(CELLS_MODULE_KEY, source=source, options=MODULE_OPTIONS,
+                  module=None)
+    return module
+
+
 def _kernel(name: str):
     import cupy as cp
 
     return _module(cp.cuda.Device().id).get_function(name)
+
+
+def cell_wfdensity(cell_area):
+    """WRF's ``wfdensity`` per column of an unequal-area mesh.
+
+    ``1.0/(dx*dx)`` (module_wind_fitch.F:109) with the column's own area in
+    ``dx*dx``'s place: ``float32(1) / float32(area)``, one IEEE division per
+    column, on the array's own device (CuPy) or host (NumPy) -- the same
+    word either way.  An area that is ``float32(dx) * float32(dx)`` gives
+    WRF's own word.
+    """
+    xp = np
+    try:
+        import cupy as cp
+        if isinstance(cell_area, cp.ndarray):
+            xp = cp
+    except ImportError:  # pragma: no cover - CPU-only installs
+        pass
+    area = xp.ascontiguousarray(xp.asarray(cell_area).astype(xp.float32))
+    if not bool(xp.all(xp.isfinite(area))) or not bool(xp.all(area > 0)):
+        raise ValueError("cell areas must be finite and positive")
+    return xp.float32(1.0) / area
 
 
 def _f32(xp, array, shape, name):
@@ -308,10 +365,11 @@ def _target(array, shape, name):
 
 
 def launch_fitch(u, v, z_interface, layout: FitchLayout, du, dv, *,
-                 dx: float, dy: float | None = None, qke=None,
+                 dx: float | None = None, dy: float | None = None, qke=None,
                  dt: float | None = None,
                  tke_factor: float = WINDFARM_TKE_FACTOR, rho=None,
-                 power=None, diagnostics=None):
+                 power=None, diagnostics=None, cell_area=None,
+                 wfdensity=None):
     """Add the wind-farm drag to ``du``/``dv`` in place; return the power.
 
     ``u``, ``v`` are mass-point winds (nz, ny, nx), m s-1, as the PBL
@@ -328,6 +386,15 @@ def launch_fitch(u, v, z_interface, layout: FitchLayout, du, dv, *,
     groups; one rotor's fraction for a uniform cell), and with ``rho``
     (nz, ny, nx, kg m-3) ``thrust`` (ny, nx), N, the momentum the cell's
     rotors remove per second (rho*|dV/dt|*dx*dy*dz over the rotor levels).
+
+    COLUMNS OF UNEQUAL AREA (an unstructured mesh, ``woof.hex.windfarm``):
+    give ``cell_area`` (ny*nx values, m2, each column's horizontal area)
+    instead of ``dx``, or its :func:`cell_wfdensity` as ``wfdensity`` (a
+    device array, held by a caller that launches every step).  The kernel is
+    then ``fitch_column_cells`` (``kernels/windfarm_fitch_cells.cu``), which
+    is ``fitch_column`` with each column's area in WRF's ``dx*dx``: the drag
+    is divided by the cell volume area*dz.  Without either, the launch is
+    the WRF-grid kernel, unchanged.
     """
     import cupy as cp
 
@@ -363,13 +430,47 @@ def launch_fitch(u, v, z_interface, layout: FitchLayout, du, dv, *,
         if rho is not None:
             rho = _f32(cp, rho, (nz, ny, nx), "rho")
             thrust = cp.empty((ny, nx), dtype=cp.float32)
+    lay = layout.device_arrays()
+    maxvals = layout.speeds_ms.shape[1]
+    n = ny * nx
+    if cell_area is not None or wfdensity is not None:
+        if dx is not None or dy is not None:
+            raise ValueError("give dx (a uniform grid) or each column's area "
+                             "(cell_area / wfdensity), not both")
+        if cell_area is not None and wfdensity is not None:
+            raise ValueError("give cell_area or its wfdensity, not both")
+        if wfdensity is None:
+            wfdensity = cp.asarray(cell_wfdensity(cell_area))
+        if (not isinstance(wfdensity, cp.ndarray)
+                or wfdensity.dtype != cp.float32 or wfdensity.size != n
+                or not wfdensity.flags.c_contiguous):
+            raise ValueError(
+                f"wfdensity must be a contiguous float32 device array of "
+                f"{n} columns")
+        _cells_module(cp.cuda.Device().id).get_function("fitch_column_cells")(
+            ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,),
+            (u, v, z_w, rho if thrust is not None else _NULL,
+             lay["cell_offsets"], lay["count"], lay["curve"],
+             lay["hub_height_m"], lay["rotor_diameter_m"], lay["speeds_ms"],
+             lay["thrust_coefficient"], lay["power_kw"], lay["nval"],
+             lay["standing_thrust"], du, dv,
+             qke if qke is not None else _NULL, power,
+             thrust if thrust is not None else _NULL,
+             overlap if overlap is not None else _NULL,
+             wfdensity, np.float32(0.0 if dt is None else dt),
+             np.float32(tke_factor), PICONST,
+             np.int32(nz), np.int32(n), np.int32(maxvals)))
+        if diagnostics is not None:
+            diagnostics["overlap"] = overlap
+            if thrust is not None:
+                diagnostics["thrust"] = thrust
+        return power
+    if dx is None:
+        raise ValueError("dx is required (or each column's cell_area)")
     dy = dx if dy is None else dy
     # wfdensity = 1.0/(dx*dx)  (module_wind_fitch.F:109)
     wfdensity = np.float32(np.float32(1.0)
                            / (np.float32(dx) * np.float32(dy)))
-    lay = layout.device_arrays()
-    maxvals = layout.speeds_ms.shape[1]
-    n = ny * nx
     _kernel("fitch_column")(
         ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,),
         (u, v, z_w, rho if thrust is not None else _NULL,
