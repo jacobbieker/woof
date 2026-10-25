@@ -1576,12 +1576,12 @@ def finalize_prepared_child(
     # ladder hands its state over instead (the vertical step needs its
     # coefficients, woof/core/nest_vertical.py), on the full-field capture.
     from woof.experiment import has_own_ladder
+    spec_width = int(cfg.spec_bdy_width)
+    blend_width = int(getattr(child_dc, "blend_width", 5))
     if has_own_ladder(child_dc):
         ht_int, mub_int, phb_int = _capture_parent_blend_fields(
             child_dc, parent_node, child_state=state)
     else:
-        spec_width = int(cfg.spec_bdy_width)
-        blend_width = int(getattr(child_dc, "blend_width", 5))
         ht_int, mub_int, phb_int = _capture_parent_blend_frame(
             child_dc, parent_node, frame=spec_width + max(blend_width, 0))
     # A sealed root can have been prepared on CUDA while deterministic child

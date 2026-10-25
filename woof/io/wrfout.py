@@ -1958,7 +1958,19 @@ class AsyncDomainWrfoutWriter:
             physical = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
         except (AttributeError, ValueError, OSError):
             physical = 16 * 1024 ** 3
-        return int(min(64 * 1024 ** 3, physical // 4))
+        budget = int(min(64 * 1024 ** 3, physical // 4))
+        # The admitted frames are page-locked host copies here (the fork's
+        # device-snapshot staging), so they also stay inside the host RAM
+        # the history staging contract leaves beside the run and the
+        # async-checkpoint reserve (woof.io.history_staging.host_ram_budget).
+        try:
+            from woof.io.history_staging import host_ram_budget
+            ram = host_ram_budget()
+        except Exception:  # noqa: BLE001 -- unknown RAM keeps the cap above
+            ram = None
+        if ram is not None:
+            budget = min(budget, max(0, int(ram[0])))
+        return budget
 
     def __init__(self, *, nx, ny, nz, dx, dy, title, global_attrs,
                  abort_event=None, soil_layers=None, grid_id=None,
@@ -3909,8 +3921,9 @@ class PerDomainWrfoutWriters:
         # producer-stream write -- the device snapshot is ON that stream,
         # and a direct copy is fenced by its wait_event -- so restarting
         # the window cannot race the staged copy.
-        # A quick-look frame (upstream 1.1.1's run controls) reports the
-        # running windows and leaves them running, as the history maxima do
+        # A quick-look frame (upstream 1.1.1's run controls) neither closes
+        # nor reports the per-interval windows: they keep running to the
+        # next full frame, which closes them, as the history maxima do
         # (runtime.reset_history_windows_after_frame).
         if quicklook is None:
             interval_diagnostics.close_interval(
