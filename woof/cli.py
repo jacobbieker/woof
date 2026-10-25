@@ -684,7 +684,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     # combination, replayed through WOOF and scored word for word.
     verify_exact_register_cli = _lazy_register("woof.verify_exact.cli")
     verify_exact_register_cli(sub)
-    # The hex (MPAS-style mesh) and global model doors.  Listed here so the
+    # The hex (MPAS-style mesh) model door.  Listed here so the
     # help shows them; the words are dispatched in _dispatch_argv before
     # this parser runs, so each component keeps its own full parser.
     from woof.components import register_component_doors

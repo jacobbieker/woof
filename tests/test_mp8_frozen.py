@@ -975,8 +975,19 @@ FROZEN_MODULE_DIGESTS = {
         # The MORR_ROW37_OFF oracle build is unchanged line for line, so
         # the WRF bitwise reading above stands for it.
         # Previously 5b518642/e6166236.
-        '741d71ee81038a2e68ded3f5d8f57b59a8e00f9eb42473e4918db7fff7ef749d',
-        'bd671bfcf9c6631bc0a445f40d723ba01322d656dbcdfc698f44a3182c439e66'),
+        # RE-PINNED by fix/morrison-kf-speed (2026-10-23): mo_sediment_impl
+        # skips the still levels above KTOP (mo_still_level: +0 speeds,
+        # finite sign-clear moments, positive DZ/RHO, number tendency not
+        # -0, so every split step there adds or subtracts +0 and changes no
+        # word) and evaluates (RHOSU/RHO)**0.54 and **0.35 only for the
+        # categories and levels that read them.  No arithmetic line moved.
+        # Reading: captured real sedimentation inputs (150x150x49, step 60)
+        # 0 of 37,665,000 argument words differ, 0.91 -> 0.21 ms a call
+        # (an RTX 4090, shared card, 50 back-to-back launches); the 15-min
+        # whole forecast's wrfout 0 of 31,808,221 words differ.
+        # Previously 741d71ee/09b1d5a5.
+        '3fd84d25ccae3b3616be2f99e5f4ddc594256c2ecbb457aa0381f724db481054',
+        '7655b4e64f892082b0a0eecfee2db62fb566cf2bb24393976c23163ad822553c'),
 
     'mynn_pbl': (
         # RE-PINNED by the level-major MYNN layout (speed lane, 2.8.1):

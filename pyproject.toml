@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recast-woof"
-version = "1.1.0"
+version = "1.1.1"
 description = "Recast WOOF: GPU-native regional weather forecasting with WRF-class physics, data assimilation and native preprocessing, plus the hex model (a GPU port of MPAS-Atmosphere v8.4.2) and its global configuration"
 readme = "README.md"
 license = "Apache-2.0"
@@ -20,7 +20,7 @@ requires-python = ">=3.11"
 # recast-woof-data: reference tables and map assets, pinned to this version.
 dependencies = ["numpy>=2.0", "netCDF4>=1.6", "matplotlib>=3.8",
                 "jsonschema>=4.0",
-                "scipy>=1.11", "pyshp>=2.3", "cdsapi>=0.7.7", "recast-woof-data==1.1.0"]
+                "scipy>=1.11", "pyshp>=2.3", "cdsapi>=0.7.7", "recast-woof-data==1.1.1"]
 keywords = ["WRF", "WPS", "GRIB", "NetCDF", "weather", "CUDA", "MPAS", "data-assimilation"]
 classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
@@ -106,18 +106,6 @@ woof = [
 # init_gpu kernels (**/*.cu). libexec: the hex release's compiled helpers, present only in a platform wheel
 # (stage_hex_helpers.py in the assembly stages them before that build).
 "woof.hex" = ["*.json", "data/**/*", "libexec/*", "native/*.rs", "*.cu", "*.cuh", "**/*.cu", "**/*.cuh"]
-"woof.globe" = [
-    "*.cu",
-    "*.cuh",
-    "*.json",
-    "configs/**/*",
-    "core/kernels/*.cu",
-    "core/kernels/*.cuh",
-    "core/kernels/*.txt",
-    "data/**/*",
-    "radiance_tables/**/*",
-    "semilag/*.cu",
-]
 tools = ["prepare_hrrr_*.sh", "hydro_world/data/sources.v1.json", "hydro_world/data/recipes.v1.json",
          "hydro_world_params/data/params.v1.json"]
 tilestream = ["output-scaling.json"]

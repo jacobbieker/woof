@@ -878,7 +878,7 @@ def test_separate_analysis_starts_the_boundary_from_itself_and_uses_donor_aeroso
     def initialize(met, *positional, **kwargs):
         calls_to_initializer.append(kwargs)
         if "aerosol_snapshot" in kwargs:
-            assert kwargs["aerosol_snapshot"] is expected.mets[0]
+            assert _is_donor_cut_of(kwargs["aerosol_snapshot"], expected.mets[0])
             return donor_result
         return original(met, *positional, **kwargs)
 
@@ -900,8 +900,23 @@ def test_separate_analysis_starts_the_boundary_from_itself_and_uses_donor_aeroso
     assert calls["cache_stream"]["head"]["initial_result"] is donor_result
     assert proof["initial_source"]["source"] == "distinct-analysis"
     assert proof["initial_source"]["aerosol_source"] == "boundary-analysis"
-    assert calls_to_initializer[1]["aerosol_snapshot"] is expected.mets[0]
+    assert _is_donor_cut_of(calls_to_initializer[1]["aerosol_snapshot"], expected.mets[0])
     assert (args["output_root"] / "source-evidence" / "initial" / "request.json").read_bytes() == b"bound donor"
+
+
+def _is_donor_cut_of(donor, boundary_analysis):
+    """The donor is the boundary analysis cut to the fields a donor is read for.
+
+    The rest of the boundary analysis is released before the initial
+    analysis is built (woof.ingest.real.aerosol_donor_snapshot); the kept
+    fields are the boundary analysis' own arrays, not copies.
+    """
+    from woof.ingest.real import AEROSOL_DONOR_COORDINATE_FIELDS
+    keep = {*AEROSOL_DONOR_COORDINATE_FIELDS, "QNWFA", "QNIFA", "QNWFA_SFC", "QNIFA_SFC"}
+    return (donor is not boundary_analysis
+            and set(donor.fields) == keep & set(boundary_analysis.fields)
+            and all(donor.fields[name] is boundary_analysis.fields[name]
+                    for name in donor.fields))
 
 
 def test_the_chained_admission_is_priced_with_the_mapping_it_prepares_from(
@@ -1293,7 +1308,7 @@ def test_a_mapped_tree_defers_the_perturbation_block_the_gfs_tree_defers(
     assert all(operands.get("initial_perturbation") is None
                for operands in calls["initialize_operands"])
     assert "initial_perturbation" not in routed["source_identity"]
-    assert "deferred to prepared-tree forecast initialization" in (
+    assert "deferred to prepared forecast initialization" in (
         capsys.readouterr().err)
 
 
@@ -1305,22 +1320,19 @@ def test_a_mapped_tree_without_the_block_writes_the_proof_it_always_did(
     assert "initial_perturbation" not in proof
 
 
-def test_a_single_mapped_domain_still_refuses_the_perturbation_block(
+def test_a_single_mapped_domain_defers_the_perturbation_block(
         monkeypatch, tmp_path):
-    """The prepared single-domain runner applies no bubble, so a
-    single-domain preparation is refused by name before any work."""
+    """The prepared single-domain runner applies the bubbles to its restored
+    state (fix/single-domain-perturbation), so a single-domain preparation
+    is no longer refused: it prepares unperturbed arrays, and the runner
+    writes the treatment receipt when it applies them."""
     args, calls, expected = _install_prepare_fakes(
         monkeypatch, tmp_path, domain_count=1, backend="cpu")
     expected.exp.perturbation = _noise_bubble()
 
-    with pytest.raises(
-            ValueError,
-            match=r"single-domain mapped-adapter prepared-cache route does "
-                  r"not apply \[perturbation\]"):
-        mapped_direct.prepare_mapped_wrf(**args)
-    assert calls["build_static"] == 0
-    assert calls["interpolate"] == 0
-    assert not args["output_root"].exists()
+    proof = mapped_direct.prepare_mapped_wrf(**args)
+    assert proof is not None
+    assert args["output_root"].is_dir()
 
 
 def test_mapped_hierarchy_preserves_five_minute_offsets_end_to_end(

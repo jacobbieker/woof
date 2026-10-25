@@ -815,6 +815,7 @@ def is_wif_intermediate_file(path) -> bool:
 # there.  An unset default that finds nothing is not this error; it is a
 # fallback, and it returns a :class:`WifSourceResolution` that says so.
 from woof.ingest.wif_dataset import (      # noqa: E402
+    WIF_DATASET_ROOT_ENV,
     MissingWifClimatologyDataset,
     resolve_wif_data_root,
 )
@@ -828,12 +829,18 @@ class WifSourceResolution:
     ``origin`` names the rule that decided, and ``fallback_reason`` is the
     sentence a receipt prints when ``path`` is ``None`` -- populated on
     exactly the ``None`` case, so a consumer cannot forget to say why.
+
+    ``portable_reason`` is the same sentence with each searched location
+    named by its rule rather than by this process's absolute path (the
+    working directory, the home directory).  It is what a preparation
+    receipt binds; see :func:`portable_wif_statement`.
     """
 
     path: object              # pathlib.Path | None
     origin: str
     candidates: tuple
     fallback_reason: object = None   # str | None
+    portable_reason: object = None   # str | None
 
     @property
     def resolved(self) -> bool:
@@ -933,12 +940,96 @@ def resolve_wif_climatology(path=None, *, env=None, cwd=None,
             + WIF_CLIMATOLOGY_FILE + ")",
             tuple(tried))
 
-    reason = (
+    reason = _not_found_sentence(str(staged), str(probe))
+    if explicit_required:
+        raise MissingWifClimatologyDataset(
+            (requested_by or "mp28_aerosol_source='climatology'")
+            + " requires the dataset and " + reason)
+    # The portable spelling names the two default locations by rule.  The
+    # absolute spelling above is this process's cwd and home, and the
+    # namelist import used to write it into the WRF-input door's
+    # preparation receipt: a --restart launched from another directory
+    # then hashed a different receipt and was refused as "written for a
+    # different run" (5 km radar DA, 2026-10-23), though nothing about the
+    # run differed.
+    portable = _not_found_sentence(
+        "$" + WIF_DATASET_ROOT_ENV + ", default ~/.woof/wif",
+        "./" + WIF_CLIMATOLOGY_FILE)
+    return WifSourceResolution(None, "unresolved", tuple(tried), reason,
+                               portable)
+
+
+def _download_wif_dataset(root) -> int:
+    """`woof fetch-tables --wif` into ``root``: 0 staged, 2 refused."""
+    from woof.table_assets import stage_wif_dataset
+
+    return stage_wif_dataset(None, root)
+
+
+def acquire_wif_climatology(path=None, *, env=None, cwd=None,
+                            requested_by=None):
+    """Locate the dataset, download it when it is not here, or refuse by name.
+
+    What a run that COMMITS to the climatology calls (``mp28_aerosol_source``
+    'auto' or 'climatology' on a real-data mp=28 preparation).  Named
+    breakage (a real-data mp=28 run, 2026-10-23
+    12:58Z): with no copy on the machine, 'auto' used to fall back to
+    thompson_init's synthetic CCN/IN profile with only a warning, so a run
+    on a box missing one 225 MB file was a different forecast from the same
+    run on a box that had it, and nothing failed.  Now the search below is
+    followed by the pinned download `woof fetch-tables --wif` performs
+    (exact size and SHA-256 before the atomic install into
+    ``$WOOF_WIF_DATA_ROOT``, default ~/.woof/wif), and when that fails too
+    the run is refused with the ways out.  The synthetic profile is reached
+    only by naming it (``mp28_aerosol_source='synthetic'``).
+
+    A path a human chose that is not the dataset raises exactly as
+    :func:`resolve_wif_climatology` does; it is never replaced by a download.
+    """
+
+    resolution = resolve_wif_climatology(path, env=env, cwd=cwd,
+                                         requested_by=requested_by)
+    if resolution.resolved:
+        return resolution
+    import os
+    import sys
+    from pathlib import Path
+
+    environ = os.environ if env is None else env
+    root = resolve_wif_data_root(None, env=environ)
+    print(f"mp_physics=28 aerosol: {WIF_CLIMATOLOGY_FILE} is not on this "
+          f"machine; downloading the pinned copy into {root}", file=sys.stderr)
+    if _download_wif_dataset(root) == 0:
+        resolution = resolve_wif_climatology(path, env=env, cwd=cwd,
+                                             requested_by=requested_by)
+        if resolution.resolved:
+            return resolution
+    searched = str(resolution.fallback_reason or _not_found_sentence(
+        str(root / WIF_CLIMATOLOGY_FILE),
+        str(Path.cwd() / WIF_CLIMATOLOGY_FILE))).rstrip()
+    if not searched.endswith("."):
+        searched += "."
+    raise MissingWifClimatologyDataset(
+        (requested_by or "mp28_aerosol_source='auto'")
+        + " needs WRF's monthly WIF aerosol climatology to initialize "
+        "mp_physics=28, and " + searched
+        + " The pinned download into " + str(root) + " failed as well "
+        "(its reason is printed above). Without the dataset the aerosol "
+        "would start from thompson_init's synthetic CCN/IN profile, a "
+        "different forecast from WRF's, so the run stops here. Stage it "
+        "with `woof fetch-tables --wif` (or `--wif --from DIR` offline), "
+        "set [shared] wif_climatology_path or $" + WIF_CLIMATOLOGY_PATH_ENV
+        + ", or select [shared] mp28_aerosol_source='synthetic' to take the "
+        "synthetic profile deliberately.")
+
+
+def _not_found_sentence(staged: str, probe: str) -> str:
+    return (
         "no " + WIF_CLIMATOLOGY_FILE + " was found. Searched, in order: "
         "[shared] wif_climatology_path (unset), $" + WIF_CLIMATOLOGY_PATH_ENV
         + " (unset), $" + WIF_CLIMATOLOGY_ROOT_ENV + " (unset), the root "
-        "`woof fetch-tables --wif` stages into (" + str(staged) + "), and "
-        "the working directory (" + str(probe) + "). A candidate that "
+        "`woof fetch-tables --wif` stages into (" + staged + "), and "
+        "the working directory (" + probe + "). A candidate that "
         "exists but does not begin with a complete WPS intermediate "
         "(IFV=5) field record is not counted as found, because an empty "
         "or truncated copy would refuse in the ingest lane instead of "
@@ -946,11 +1037,52 @@ def resolve_wif_climatology(path=None, *, env=None, cwd=None,
         "redistribute this 225 MB dataset; it is WRF's own, downloaded with "
         "WRF, taken from a WRF run/ directory (" + WIF_REFERENCE_SOURCE
         + "), or staged with `woof fetch-tables --wif --from DIR`.")
-    if explicit_required:
-        raise MissingWifClimatologyDataset(
-            (requested_by or "mp28_aerosol_source='climatology'")
-            + " requires the dataset and " + reason)
-    return WifSourceResolution(None, "unresolved", tuple(tried), reason)
+
+
+def _file_sha256(path) -> str:
+    """SHA-256 of a resolved dataset, cached per (path, size, mtime)."""
+    from pathlib import Path
+
+    stat = Path(path).stat()
+    key = (str(path), stat.st_size, stat.st_mtime_ns)
+    cached = _SHA256_CACHE.get(key)
+    if cached is None:
+        import hashlib
+
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as stream:
+            while True:
+                block = stream.read(1 << 22)
+                if not block:
+                    break
+                digest.update(block)
+        cached = _SHA256_CACHE[key] = digest.hexdigest()
+    return cached
+
+
+_SHA256_CACHE: dict = {}
+
+
+def portable_wif_statement(resolution) -> str:
+    """The resolution as a preparation receipt binds it: by content, not by host path.
+
+    A resolved dataset is named by the rule that found it, its byte count
+    and its SHA-256; an unresolved search by :attr:`WifSourceResolution.
+    portable_reason`.  Two processes that would read the same bytes (or
+    find none) from different working directories or home directories
+    state the same sentence, and two that would read different copies do
+    not.  The absolute paths stay in what a run prints and in
+    :func:`describe_wif_source`, which are records, not identity.
+    """
+    if resolution.resolved:
+        from pathlib import Path
+
+        sha256 = _file_sha256(resolution.path)
+        size = Path(resolution.path).stat().st_size
+        return (f"{resolution.origin}; {size} bytes, sha256 {sha256}"
+                + ("" if sha256 != WIF_REFERENCE_SHA256
+                   else f" (the {WIF_REFERENCE_SOURCE} reference)"))
+    return str(resolution.portable_reason or resolution.fallback_reason or "")
 
 
 def describe_wif_source(resolution):
@@ -960,7 +1092,6 @@ def describe_wif_source(resolution):
     copies produce two different initial conditions, and a receipt that
     merely repeated the pinned constant would hide exactly that.
     """
-    import hashlib
     from pathlib import Path
 
     if not resolution.resolved:
@@ -968,14 +1099,7 @@ def describe_wif_source(resolution):
                 "candidates": list(resolution.candidates),
                 "fallback_reason": resolution.fallback_reason}
     source = Path(resolution.path)
-    digest = hashlib.sha256()
-    with source.open("rb") as stream:
-        while True:
-            block = stream.read(1 << 22)
-            if not block:
-                break
-            digest.update(block)
-    sha256 = digest.hexdigest()
+    sha256 = _file_sha256(source)
     return {
         "resolved": True,
         "origin": resolution.origin,

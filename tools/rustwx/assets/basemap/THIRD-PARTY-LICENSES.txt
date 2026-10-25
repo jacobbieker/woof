@@ -2,7 +2,7 @@ THIRD-PARTY LICENCES FOR THE RECAST WOOF BRIDGE BUNDLE
 ==============================================================================
 
 This file is the binary-form notice for the compiled artefacts distributed
-in this bundle and staged into Recast WOOF platform wheels: 74 Rust executables and
+in this bundle and staged into Recast WOOF platform wheels: 73 Rust executables and
 libraries, plus the map assets beside it and two embedded fonts.
 
 Those binaries are built from two kinds of source, and both carry third-party
@@ -409,18 +409,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-
-2.6  WMO BUFR master tables -- ECMWF ecCodes, Apache License 2.0  (compiled into rw_wis2)
-
-tools/rustwx/crates/rw-obs/tables/bufr/element.table and sequence.def are
-Table B and Table D of the WMO FM 94 BUFR master tables, version 46, as
-distributed in ECMWF's ecCodes (definitions/bufr/tables/0/wmo/46/).  They
-are compiled into the rw-obs library with include_str!, and the rw_wis2
-decoder in this bundle reads WIS2 BUFR messages through them, so that
-executable carries them.
-
-Copyright 2005- ECMWF.  Licensed under the Apache License, Version 2.0; the
-full text of that licence is reproduced in section 4 of this file.
 
 ==============================================================================
 3.  VENDORED RUST CRATES -- INVENTORY

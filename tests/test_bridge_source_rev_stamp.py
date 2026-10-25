@@ -380,8 +380,6 @@ _STAMP_SOURCES = {
     "rw_ndbc": "crates/rw-obs/src/bin/ndbc.rs",
     "rw_gnssro": "crates/rw-obs/src/bin/gnssro.rs",
     "rw_wis2": "crates/rw-obs/src/bin/wis2.rs",
-    # The global model's microwave door; rw-atms has its own build.rs.
-    "rw_atms": "crates/rw-atms/src/main.rs",
     "rw_prepbufr": "crates/rw-obs/src/bin/prepbufr.rs",
     "rw_madis": "crates/rw-obs/src/bin/madis.rs",
     "rw_opera": "crates/rw-obs/src/bin/opera.rs",
@@ -447,7 +445,6 @@ _STAMP_BUILDS = {
                                     # four.
                                     "crates/rw-obs/build.rs",
                                     "crates/rw-goes/build.rs",
-                                    "crates/rw-atms/build.rs",
                                     "crates/rw-netcdf/build.rs",
                                     "crates/netcdf-writer/build.rs",
                                     "crates/static-fields/build.rs",

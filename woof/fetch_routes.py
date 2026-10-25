@@ -94,7 +94,16 @@ ROUTE_TABLE_SHA256 = (
     # merged with the ecmwf-ens and rrfs-ens input-ensemble rows.
     # Moved by the capabilities landing: the ecmwf-ens historical-archive rows
     # merged over the gfs/gefs archive publication rows.
-    "b4d1e695fe5d95055a243e3ed277d4e17eff1091ed8e46c687c9ae8bb2edc4c8"
+    # Moved by fix/go-posted-cycle-default: the rap-native and hrrr-native
+    # publication_lag rows are measured (they were an unmeasured 1.5 h
+    # estimate, so a default `woof go` waited ~40 min for a posted cycle).
+    # rrfs-ens fetches its declared companion (the deterministic prslev and
+    # 2dfld pair of the same cycle) as non-primary rows bound to the
+    # composition's companion data role.
+    # Moved by the ecmwf-open-data-0p1 route (IFS HRES open data at 0.1
+    # degree, published from the 2026-10-20 cycles).
+    # Both, merged for 2.9.7.
+    "94cf98db1f32acbeb6b61163e858309610474f6057e6cb58304ba3dfb4334afd"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own

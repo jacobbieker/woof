@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.1.1
+
+WOOF 1.1.1 takes engine 2.9.7 and the hex model 0.4.5. Forecast answers change.
+
+New:
+
+- Soundings at any point and hour after a run: every run and ensemble member
+  writes a column store that `woof soundings` draws from.
+- Run controls: per-nest history intervals, a quick-look stream between full
+  frames, an LES closure below 250 m, the storm nest size and an inner nest.
+- Moving nest-downs: `woof downscale --follow storm|parent|fixed|target` and
+  `--warm-from`. Children finer than 4 km default to the HRRR-shape suite.
+- IFS HRES open data at 0.1 degree, and RRFS ensemble members that start with
+  their same-cycle deterministic companion.
+- Branched ensembles (`woof ensemble --branch-from`) share each card among
+  several members and draw their maps on every core.
+- A cyclone rain swath product, and 5 km CONUS forecasts that stream on a
+  32 GB card.
+- Hex: the MPAS physics route runs every hex shape (limited-area and
+  storm-following regions, ensembles, local time stepping, Hex with Regional,
+  restart, IAU, stochastic physics, two or more cards) and runs faster.
+- Hex with Regional in three shapes: a nest placed at launch, a nest added
+  mid-run, and a nest that spawns when a storm attribute crosses a threshold.
+- Hex doors start from any posted forecast hour (`--lead-hours`) of GFS, GEFS,
+  IFS, IFS ENS, AIFS and AIFS ENS; regions take drawn shapes and can be kept
+  as inits; maps stream from the first hour.
+
+Changed:
+
+- The spectral global model (`woof global`) is retired. Global forecasts run
+  on `woof hex global`, which exports to the regional model on both physics
+  routes.
+
+Fixed:
+
+- Everything engine 2.9.6 and 2.9.7 and hex 0.4.4 and 0.4.5 fix, as their
+  notes list it. Among them: `woof go` no longer waits on a RAP or HRRR native
+  cycle that has already posted, preparation has no single-core stages, and
+  hex exports on the MPAS physics route carry terrain height and
+  reflectivity.
+
 ## 1.1.0
 
 WOOF 1.1.0 takes engine 2.9.5 and the hex model 0.4.3. Forecast answers change.

@@ -1013,7 +1013,6 @@ TIME_CONTROL_IGNORED_KEYS: dict[str, str] = {
         "use_netcdf_classic", "ncd_nofill")},
     "iofields_filename": _AUX_HISTORY_REASON,
     "ignore_iofields_warning": _AUX_HISTORY_REASON,
-    "output_diagnostics": _WRF_DIAGNOSTIC_OUTPUT_REASON,
     "output_ready_flag": "ignored WRF output-ready marker; woof records "
                          "history completion in its output manifest",
     **{key: _WRF_DIAGNOSTIC_OUTPUT_REASON for key in (
@@ -1352,27 +1351,6 @@ def _consume_unrun_dynamics_controls(dyn, inp: dict, max_dom: int,
     for key in ("km_opt_dfi", "moist_adv_dfi_opt"):
         _drop_dfi_companion(dyn, key, inp, drop)
     return carried
-
-
-def _translate_operational_fork_time_controls(tc, run_seconds: float, drop,
-                                              substitutions) -> None:
-    """&time_control output-cadence keys of the operational WRF 3.9 fork,
-    never refused.
-
-    WRF's ``cycling`` is NOT handled here.  :func:`_translate_namelists`
-    maps it onto ``[shared] cycling`` on every route (the fork namelist's
-    included), before this function runs.  This function used to declare
-    ``cycling = .true.`` a fresh start; had it ever run first it would have
-    eaten the key and the report would have said the run did not cycle
-    while both MYNN generations carry the input QKE, QC_BL and CLDFRA_BL
-    on a cycled start.
-    """
-    for key in ("diag_int", "wind_int"):
-        drop("time_control", key, tc.take(key),
-             "climate-statistics window in module_diag_cl::clwrf_output_calc "
-             "(output_diagnostics), which is not ported; these controls do not "
-             "gate module_diag_gsd hourly maxima; no forecast-state effect")
-
 
 
 def ignored_time_control_reason(key: str) -> str | None:
@@ -3303,6 +3281,12 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     for key in carried_selectors:
         operational_ruc_defaults.pop(key, None)
         operational_thompson_defaults.pop(key, None)
+    climate_values = {key: tc.scalar(key, default) for key, default in
+                      (("output_diagnostics", 0), ("diag_int", 15), ("wind_int", 5))}
+    for key, value in climate_values.items():
+        if type(value) is not int or (value not in (0, 1) if key == "output_diagnostics" else value <= 0):
+            raise _err("time_control", key, value,
+                       "must be 0 or 1" if key == "output_diagnostics" else "must be positive whole minutes")
     gsd_diagnostics = tc.scalar("gsd_diagnostics", 0)
     if gsd_diagnostics not in (0, 1):
         raise _err("time_control", "gsd_diagnostics", gsd_diagnostics,
@@ -3528,7 +3512,7 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
     # admits it under both: WOOF's v4.6.1 generation carries the three
     # fields its WRF original zeroes, a declared fix.  This is the ONE place
     # the key is read, on every import route including the operational
-    # fork's (_translate_operational_fork_time_controls leaves it alone).
+    # fork's, with the same carried-state ownership.
     cycling_values = tc.take("cycling")
     cycling = None
     if cycling_values is not None:
@@ -3746,8 +3730,6 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
          tc.take("adjust_output_times"),
          "inert on the exact rational clock (alarms land "
          "exactly on the history cadence)")
-    _translate_operational_fork_time_controls(
-        tc, run_seconds, drop, substitutions)
     for key in sorted(tc.entries):
         reason = ignored_time_control_reason(key)
         if reason is not None:
@@ -5057,7 +5039,8 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
         # ArWen and WRF runs were never comparable.
         from woof.config import (MP28_AEROSOL_SOURCE_DEFAULT,
                                   MP28_AEROSOL_SYNTHETIC_FALLBACK)
-        from woof.ingest.wif_climatology import resolve_wif_climatology
+        from woof.ingest.wif_climatology import (portable_wif_statement,
+                                                  resolve_wif_climatology)
         # The printed line now reports a RESOLUTION, not a deviation.  It is
         # still printed unconditionally, for the same reason it always was:
         # which aerosol initial state a run used is the single fact that
@@ -5070,16 +5053,22 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
             _wif = resolve_wif_climatology()
         except Exception:      # an explicit override that does not exist
             _wif = None        # -- initialize_real raises on it by name
+        # Stated by CONTENT and by rule, never by this process's absolute
+        # paths: this report is bound into the WRF-input door's preparation
+        # receipt, and a cwd or home path in it made a --restart launched
+        # from another directory a "different run" (5 km radar DA,
+        # 2026-10-23).  The run's own warning and aerosol receipt keep the
+        # paths.
         if _wif is not None and _wif.resolved:
             defaults_applied.append(AppliedDefault(
                 key="mp28 aerosol initial state",
                 value="WRF monthly WIF aerosol climatology "
-                      f"({_wif.path})",
+                      f"({portable_wif_statement(_wif)})",
                 reason=MP28_AEROSOL_SOURCE_DEFAULT))
         else:
             reason = MP28_AEROSOL_SYNTHETIC_FALLBACK
             if _wif is not None and _wif.fallback_reason:
-                reason = reason + " " + str(_wif.fallback_reason)
+                reason = reason + " " + portable_wif_statement(_wif)
             # AND WHAT THE RUN DOOR WILL DO WITH IT -- but only when it
             # will.  This import writes a TOML and runs nothing, so it
             # does not refuse; if these namelists describe a domain with
@@ -7147,6 +7136,9 @@ def _translate_namelists(wps: dict, inp: dict, *, wps_path: Path,
                        ("cycling", cycling)):
         if value is not None:
             lines.append(f"{key} = {_fmt(value)}")
+    for key, default in (("output_diagnostics", 0), ("diag_int", 15), ("wind_int", 5)):
+        if climate_values["output_diagnostics"] or climate_values[key] != default:
+            lines.append(f"{key} = {_fmt(climate_values[key])}")
     for key, column in precipitation_columns.items():
         # reset_interval1 is emitted only when the namelist moves it off
         # its 60 min Registry default, so an import that never names it

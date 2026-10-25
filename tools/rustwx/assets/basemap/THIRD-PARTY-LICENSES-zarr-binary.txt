@@ -7,7 +7,7 @@ including build-time packages. It is not a claim that every resolved
 package is linked into both binaries. The first-party reader uses the
 repository Apache-2.0 licence; dependencies retain the grants below.
 
-Cargo.lock sha256 ede24c77959987eb9df504486b5a593cd22b9c068f75a6c3bf1fed130f326729
+Cargo.lock sha256 31594509414e59817e805a6eda8d0c1fb53ecbd1ac80999bc2a9ec2cb297085b
 x86_64-unknown-linux-gnu: 236 resolved packages
 x86_64-pc-windows-msvc: 237 resolved packages
 
@@ -6401,7 +6401,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[ZARR-089] sha256 70e1d9692c8b6f1bdb93be9dcde93e010da828609f0e74e422c0a1ba6704e7ae
+[ZARR-089] sha256 f259215e2ca57734993f4b65cccd2721793cc6a5826df17d2bbb80414ece0241
 As carried by:
   licenses/THIRD-PARTY-LICENSES-bridge-binaries.txt
 ------------------------------------------------------------------------------
@@ -6409,7 +6409,7 @@ THIRD-PARTY LICENCES FOR THE RECAST WOOF BRIDGE BUNDLE
 ==============================================================================
 
 This file is the binary-form notice for the compiled artefacts distributed
-in this bundle and staged into Recast WOOF platform wheels: 74 Rust executables and
+in this bundle and staged into Recast WOOF platform wheels: 73 Rust executables and
 libraries, plus the map assets beside it and two embedded fonts.
 
 Those binaries are built from two kinds of source, and both carry third-party

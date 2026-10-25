@@ -143,13 +143,15 @@ def run_mesh_plan(arguments: argparse.Namespace) -> int:
     if getattr(arguments, "run", False):
         raise MpasPortError("--run requires --global-mesh --generate")
 
-    if getattr(arguments, "point", None) is not None and arguments.spec is not None:
+    drawn = (getattr(arguments, "shape", None) is not None
+             or getattr(arguments, "ellipse", None) is not None)
+    if (getattr(arguments, "point", None) is not None or drawn) and arguments.spec is not None:
         raise MpasPortError(
-            "--spec and --point were both given; a plan prices one request. "
-            "--spec hands the generator an authored spec unchanged, --point "
-            "writes the ladder spec for you"
+            "--spec and --point (or --shape/--ellipse) were both given; a plan prices one "
+            "request. --spec hands the generator an authored spec unchanged, --point "
+            "and a drawn core write the ladder spec for you"
         )
-    if getattr(arguments, "point", None) is not None:
+    if getattr(arguments, "point", None) is not None or drawn:
         from .mesh_point import run_point
 
         return run_point(arguments)
@@ -211,12 +213,21 @@ def add_mesh_plan_parser(commands: argparse._SubParsersAction) -> None:
 
     add_point_arguments(parser)
     global_group = parser.add_argument_group("generated global variable-resolution forecast")
+    from .products_door import add_label_arguments
+
+    add_label_arguments(global_group)
     global_group.add_argument("--global-mesh", action="store_true",
                               help="price/build the whole global mesh, without a limited-area cull")
     global_group.add_argument("--run", action="store_true",
                               help="with --global-mesh --generate: init-source, forecast and Rust products")
     global_group.add_argument("--source", default=None, help="an init-source table row")
     global_group.add_argument("--cycle", default=None, help="YYYY-MM-DDTHH")
+    global_group.add_argument("--lead-hours", type=int, default=0, metavar="H",
+                              help="with --run: start from this forecast hour of --cycle (a forecast source's own "
+                                   "cadence, e.g. GFS 2026-10-23T18 --lead-hours 348); the run's start is cycle + H")
+    global_group.add_argument("--from-last-hour", action="store_true",
+                              help="with --run: start from the source's LAST forecast hour for --cycle and run --hours "
+                                   "on (a free run of our own model past the source; the receipt says so)")
     global_group.add_argument("--hours", type=float, default=12.0)
     global_group.add_argument("--history-every-minutes", type=int, default=180)
     global_group.add_argument("--staged", type=Path, action="append", default=[])
@@ -225,6 +236,9 @@ def add_mesh_plan_parser(commands: argparse._SubParsersAction) -> None:
     global_group.add_argument("--jobs", type=int, default=8)
     global_group.add_argument("--region", action="append", default=[],
                               help="products view NAME=region:CLAT,CLON,W_KM,H_KM")
+    global_group.add_argument("--forecast-arg", action="append", default=[], metavar="ARG",
+                              help="with --run: a flag for the forecast door, e.g. "
+                                   "--forecast-arg=--physics-suite=convection_permitting; repeat for several")
     parser.set_defaults(handler=run_mesh_plan)
 
 
@@ -247,6 +261,10 @@ def run_global_mesh(arguments: argparse.Namespace) -> int:
     from .swath.sizing import dry_run
     from .vertical_spec import VerticalSpec
 
+    if getattr(arguments, "shape", None) is not None or getattr(arguments, "ellipse", None) is not None:
+        raise MpasPortError(
+            "--global-mesh takes a drawn core as a --spec (any shape row, any number of "
+            "regions); --shape and --ellipse build the limited-area door's ladder")
     if arguments.point is not None and arguments.spec is not None:
         raise MpasPortError("--spec and --point are mutually exclusive")
     if arguments.spec is not None:
@@ -277,11 +295,38 @@ def run_global_mesh(arguments: argparse.Namespace) -> int:
         if not arguments.source or not arguments.cycle:
             raise MpasPortError("--run requires --source and --cycle")
         from .init_sources import Cycle, load_table, resolve_source, resolve_writer, resolve_vtable
-        cycle = Cycle.parse(arguments.cycle)
+        issued = Cycle.parse(arguments.cycle)
+        lead = int(getattr(arguments, "lead_hours", 0) or 0)
+        if lead < 0:
+            raise MpasPortError(f"--lead-hours {lead} is negative; it is the forecast hour of --cycle the run starts from")
+        if getattr(arguments, "from_last_hour", False):
+            from .source_horizon import SourceHorizonError, resolve_lead
+            try:
+                lead = resolve_lead(resolve_source(load_table(arguments.source_table), arguments.source),
+                                    issued.when, lead, True)
+            except SourceHorizonError as error:
+                raise MpasPortError(str(error)) from None
+            arguments.lead_hours = lead
+        # The run starts at that forecast hour: the init is the hour's forecast (init-source --lead-hours, which
+        # checks it against the source row's cadence and horizon), and a globe needs no boundaries.
+        cycle = Cycle(issued.when + datetime.timedelta(hours=lead))
+        issued_label = f"{arguments.cycle} f{lead:03d}" if lead else arguments.cycle
         source_table = load_table(arguments.source_table)
         source = resolve_source(source_table, arguments.source)
         resolve_writer(None)
         resolve_vtable(source)
+        from .source_horizon import beyond_source, label as horizon_label
+        extension = beyond_source(source, issued.when, lead, arguments.hours)
+        if extension and not getattr(arguments, "brand", None):
+            # Every sounding of a run past its source says so, top right (the host's own --brand wins).
+            from .source_horizon import brand as horizon_brand
+            arguments.brand = horizon_brand(f"{arguments.source} {issued_label}", extension)
+        issued_label = horizon_label(issued_label, extension)
+        if lead:
+            from .init_sources import template_context
+
+            # Refused here, before minutes of mesh and static: a lead off the row's cadence or past its horizon.
+            template_context(issued, source, arguments.member, lead)
         seconds = arguments.hours * 3600
         cadence = arguments.history_every_minutes * 60
         if (not math.isfinite(seconds) or seconds <= 0 or cadence <= 0 or
@@ -333,6 +378,10 @@ def run_global_mesh(arguments: argparse.Namespace) -> int:
     receipt["rows_file"] = str(rows_file)
     env = dict(os.environ)
     receipt["numerics_environment"] = {k: env.get(k) for k in ("WOOF_HEX_NUMERICS", "GPUWM_WRF_EXACT", "WOOF_HEX_CUDA_GRAPHS")}
+    if arguments.run:
+        # The hours past the source's last forecast hour, named (None when the source covers the run).
+        receipt["lead_hours"] = lead
+        receipt["beyond_source"] = extension
     started = time.monotonic()
 
     def save() -> None:
@@ -344,6 +393,14 @@ def run_global_mesh(arguments: argparse.Namespace) -> int:
     def stage(name: str, argv: list[Any]) -> dict[str, Any]:
         receipt["status"] = "running"
         receipt["active_stage"] = name
+        # The stage's argv is on the receipt BEFORE the stage runs: a door that
+        # joins the live run (woof hex add-nest at +3 h) reads the forecast's
+        # folder, mesh, init, start and hours from it.  "stages" gains the row
+        # only when the stage ends, so reading that alone refused every
+        # mid-run add (shapes 2-3 checker, 2026-10-23).
+        receipt.setdefault("started_stages", {})[name] = {
+            "argv": [str(a) for a in argv],
+            "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()}
         save()
         print(f"STAGE {name}", flush=True)
         result = card_fit.run_stage([str(a) for a in argv], name=name, directory=root / "logs", env=env)
@@ -361,10 +418,24 @@ def run_global_mesh(arguments: argparse.Namespace) -> int:
         receipt["engines"] = {
             "mesh": {"path": str(engine), "sha256": mesh_rows.sha256_file(engine)},
             "static": {"path": str(static_engine), "sha256": mesh_rows.sha256_file(static_engine)}}
-        stage("mesh", [engine, "--spec", spec_path, "--out", grid, "--receipt", generator_receipt])
-        stage("static", [static_engine, "--grid", grid, "--out", static, "--geog", geog,
-                         "--nominal-dx-m", finest, "--native-init", "--native-gwd-static",
-                         "--receipt", static_receipt])
+        # The mesh and its static depend on the spec and the geography alone, never the cycle: a premade library
+        # entry (woof.hex.prep_store, WOOF_HEX_PREP_STORE: a directory or an S3 ticket) is fetched instead of built,
+        # byte-identical by its SHA-256. Measured on a g7e box 2026-10-23: the 60->15 km globe's mesh and static
+        # took minutes to build and a library fetch takes seconds.
+        from . import prep_store
+
+        def stored_stage(name: str, argv: list[Any]) -> None:
+            got = prep_store.run_or_fetch(argv, runner=lambda a: stage(name, a))
+            if got.get("source") == "store":
+                receipt["stages"].append({"name": name, "source": "store", "key": got.get("key"),
+                                          **{k: v for k, v in got.items() if k in ("bytes", "seconds", "transfer_seconds", "store")}})
+                save()
+                print(f"STAGE {name} from the library ({got.get('key', '')[:12]})", flush=True)
+
+        stored_stage("mesh", [engine, "--spec", spec_path, "--out", grid, "--receipt", generator_receipt])
+        stored_stage("static", [static_engine, "--grid", grid, "--out", static, "--geog", geog,
+                                "--nominal-dx-m", finest, "--native-init", "--native-gwd-static",
+                                "--receipt", static_receipt])
         errors = mesh_point.static_coordinate_errors(grid, static)
         if errors:
             raise MpasPortError(errors[0])
@@ -398,7 +469,7 @@ def run_global_mesh(arguments: argparse.Namespace) -> int:
                 [str(rows_file), *[str(p) for p in mesh_rows.row_files()]])
             prefix = [sys.executable, "-m", "woof.hex.cli"]
             init_argv = [*prefix, "init-source", "--source", arguments.source,
-                         "--cycle", arguments.cycle, "--out-dir", root / "init",
+                         "--cycle", arguments.cycle, *(["--lead-hours", lead] if lead else []), "--out-dir", root / "init",
                          "--grid", grid, "--static", static, "--vertical-spec", vertical,
                          "--jobs", arguments.jobs]
             for path in arguments.staged:
@@ -411,16 +482,42 @@ def run_global_mesh(arguments: argparse.Namespace) -> int:
             init_receipt = root / "init" / "init-source-receipt.json"
             receipt["source_binding"] = json.loads(init_receipt.read_text())
             run = root / "forecast"
+            # The f000 maps the moment the first frame is written, not after the whole forecast (first_look.py);
+            # both passes name the same case, so the full pass replaces the first look's pictures in place.
+            from .first_look import FirstLook
+            from .products_door import label_argv
+            case = f"{row.name}-{cycle.start_time[:13].replace('-', '').replace('_', '')}"
+            look = FirstLook(run, grid=grid, init=root / "init" / "init.nc", start_time=cycle.start_time,
+                             out=root / "products", case=case,
+                             extra=[*(a for region in arguments.region for a in ("--region", region)),
+                                    *label_argv(arguments)],
+                             log=root / "logs" / "first-look.log")
+            look.start()
+            # A named suite (--forecast-arg=--physics-suite=NAME) takes the forecast door's own step for it,
+            # as the global door does; the caller's flags come last and win.
+            from .global_door import forecast_arg_physics
+            extra = [str(item) for item in getattr(arguments, "forecast_arg", None) or ()]
+            named = forecast_arg_physics(extra)
+            # The receipt names the physics the forecast ran, as the global door's does (the zoom-globe receipt
+            # named none: both-routes gate, rg1).
+            receipt["physics"] = {"suite": named.get("suite") or "arwen (the forecast door default)",
+                                  "mode": named.get("mode") or "exact",
+                                  **({"namelist": named["namelist"]} if named.get("namelist") else {})}
+            step = [] if (named.get("suite") or named.get("namelist")) else ["--dt", dt]
             measured = stage("forecast", [*prefix, "forecast", "--mesh", row.name,
                 "--grid", grid, "--static", static, "--init", root / "init" / "init.nc",
-                "--init-source", f"{arguments.source} {arguments.cycle}; spec {receipt['spec_sha256']}",
+                "--init-source", f"{arguments.source} {issued_label}; spec {receipt['spec_sha256']}",
                 "--start-time", cycle.start_time, "--hours", arguments.hours,
-                "--dt", dt, "--history-every-minutes", arguments.history_every_minutes,
-                "--out", run, "--scratch", root / "scratch", "--no-products"])
+                *step, "--history-every-minutes", arguments.history_every_minutes,
+                "--out", run, "--scratch", root / "scratch", "--no-products", *extra])
+            receipt["first_look"] = look.finish()
             receipt["predicted_vs_measured"] = card_fit.comparison(measured_fit, measured)
-            products = [*prefix, "products", run, "--out", root / "products", "--jobs", arguments.jobs]
+            products = [*prefix, "products", run, "--out", root / "products", "--case", case, "--jobs", arguments.jobs,
+                        *label_argv(arguments)]
             for region in arguments.region:
                 products += ["--region", region]
+            if look.receipt() is not None:  # the hours the first look rendered while the forecast ran keep their maps
+                products += ["--live-frames", look.receipt()]
             stage("products", products)
             receipt["products_manifest"] = str(root / "products")
         receipt["status"] = "complete" if arguments.run else "generated"
