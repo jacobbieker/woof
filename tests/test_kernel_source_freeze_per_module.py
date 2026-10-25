@@ -1334,8 +1334,13 @@ BASELINE_PINNED: dict[str, str] = {
     # rebalance, word for word against WRF's own Fortran and the binary32
     # CPU twin (tests/test_nest_vertical_wrf471_parity.py).  Compiled by its
     # own direct NVRTC loader (woof/core/nest_vertical.py) with
-    # glibc_flt32.cuh prepended.
-    "nest_vertical": "a287e47a3237a2525c39e203775018ef6a863610835cef9166bfcc8c67f6044b",
+    # glibc_flt32.cuh prepended.  RE-PINNED by feat/vertical-nest-feedback:
+    # three kernels appended for the cross-ladder, height-limited feedback
+    # (nest_fb_remap, nest_fb_blend, nest_fb_ph_column;
+    # woof/core/nest_feedback.py),
+    # held to their NumPy twins (tests/test_nest_feedback_vertical.py);
+    # the two WRF kernels above them are unchanged.  Previously a287e47a.
+    "nest_vertical": "9f35912a893b955bcb9f0600f0bad610e22845489ce40e22ecd4e99419c5d41e",
 }
 
 _FROZEN = _frozen_module()

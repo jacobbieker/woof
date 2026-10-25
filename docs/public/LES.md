@@ -391,8 +391,10 @@ These are limits of the current build, not opinions about LES.
   `etac`. The parent forces it every parent step through WRF's vertical
   interpolation and rebalance (`woof/core/nest_vertical.py`, held word for
   word to WRF v4.7.1's Fortran), and a nest born from its parent is
-  interpolated the same way. Feedback, moving, spawned, split and
-  streamed edges are refused by name. A 250 m child no longer has to run
+  interpolated the same way. With `feedback = 1` it feeds back through a
+  conservative remap onto the parent's levels, optionally only below
+  `feedback_top_m`. Moving, spawned, split and streamed edges are refused by
+  name. A 250 m child no longer has to run
   its parents' level count. Offline, `woof downscale --child-levels
   128,2.5` builds a child on its own ladder off archived parent history,
   remapping the initial state and the boundary tables once at preparation

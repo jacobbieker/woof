@@ -453,6 +453,13 @@ _DOMAIN_KEY_ROWS = key_rows(
            "WRF's staggered west-east point count, nx + 1; give e_we or nx"),
     KeyRow("e_sn", "integer", None,
            "WRF's staggered south-north point count, ny + 1; give e_sn or ny"),
+    KeyRow("feedback_top_m", "number", None,
+           "two-way feedback height limit, metres above the parent's "
+           "ground: only parent levels wholly below it are fed back; "
+           "absent feeds back the whole column (WRF)"),
+    KeyRow("feedback_taper_levels", "integer", 3,
+           "parent levels below feedback_top_m over which the feedback "
+           "fades out"),
     KeyRow("e_vert", "integer", None,
            "a nest on its own ladder: WRF's full-level count, which must be "
            "len(eta_levels); absent, the nest shares [shared]'s"),
@@ -473,6 +480,8 @@ _DOMAIN_KEYS = frozenset({
     # A nest on its own eta ladder (WRF vert_refine_method = 2); nz and
     # e_vert must agree with it.  Refused on the root (_domain_ladder).
     "eta_levels", "nz", "e_vert",
+    # The height limit of this nest's two-way feedback (FeedbackTop).
+    "feedback_top_m", "feedback_taper_levels",
     "time_step", "time_step_fract_num", "time_step_fract_den",
     "specified", "nested",
     # The dormant-nest declaration (woof/core/nest_spawn.py): a child
@@ -1078,6 +1087,47 @@ class DomainConfig:
     #: key existed keeps its exact fingerprint.  A declared ``"parent"``
     #: binds: the child's initial state is a different one.
     start_from: str | None = None
+    #: The height limit of this nest's two-way feedback
+    #: (:class:`FeedbackTop`), or ``None`` for WRF's whole-column
+    #: feedback.  ``None`` is the OFF contract: omitted from the restart
+    #: and prepared-cache identities, so every experiment written before
+    #: the key existed keeps its exact fingerprint.  A declared limit binds,
+    #: because it decides which parent levels the nest writes.
+    feedback_top: "FeedbackTop | None" = None
+
+
+@dataclass(frozen=True)
+class FeedbackTop:
+    """Where a nest's two-way feedback stops (``[[domain]]``
+    ``feedback_top_m``, ``feedback_taper_levels``).
+
+    ``top_m`` is a height in metres above the PARENT's ground, read on the
+    parent's base geopotential.  The parent levels fed back are those whose
+    whole layer lies below it in every column the nest writes; the topmost
+    ``taper_levels`` of them are blended linearly between the fed-back and
+    the parent's own value (weights taper/(taper+1) down to 1/(taper+1)),
+    so the cutoff carries no step.  Above it the parent's levels are left
+    as they are.
+    """
+
+    top_m: float
+    taper_levels: int = 3
+
+    def __post_init__(self):
+        import math as _math
+        if not (isinstance(self.top_m, (int, float))
+                and not isinstance(self.top_m, bool)
+                and _math.isfinite(float(self.top_m))
+                and float(self.top_m) > 0.0):
+            raise ValueError(
+                f"feedback_top_m must be a finite positive height in "
+                f"metres above the parent's ground, got {self.top_m!r}")
+        if (isinstance(self.taper_levels, bool)
+                or not isinstance(self.taper_levels, int)
+                or not 0 <= self.taper_levels <= 20):
+            raise ValueError(
+                f"feedback_taper_levels must be an integer 0..20, got "
+                f"{self.taper_levels!r}")
 
 
 #: ``[[domain]] start_from`` value that births a delayed nest from its
@@ -1117,13 +1167,72 @@ def vertically_nested_ids(exp) -> tuple[int, ...]:
     return tuple(out)
 
 
+def _refuse_unsupported_partial_feedback(exp) -> None:
+    """A height-limited or cross-ladder feedback where the tree cannot
+    carry one: refused by name before anything is prepared.
+
+    The vertical remap and the level taper run on resident arrays: a
+    split ([devices]) or streamed ([tiles] on) end of the edge restricts
+    through bounded windows that have neither, and a moving, following or
+    spawned nest rebuilds its edge at each move.
+    """
+    if int(exp.feedback) == 0:
+        return
+    nested = set(vertically_nested_ids(exp))
+    limited = {int(dc.grid_id) for dc in exp.domains
+               if getattr(dc, "feedback_top", None) is not None}
+    special = nested | limited
+    if not special:
+        return
+    by_id = {int(dc.grid_id): dc for dc in exp.domains}
+    moving = _moving_grid_ids(exp.domains, exp.relocation,
+                              include_spawn=True)
+    devices = getattr(exp, "devices", None)
+    split = (set(devices.split_grid_ids(dc.grid_id for dc in exp.domains))
+             if devices is not None and getattr(devices, "enabled", False)
+             else set())
+    for gid in sorted(special):
+        # The nest itself or any grid above it: a nest under a moving one
+        # moves with it, and the edge's level weights are built once.
+        chain, cur = [], gid
+        while cur in by_id and int(by_id[cur].parent_id) != 0:
+            chain.append(cur)
+            cur = int(by_id[cur].parent_id)
+        mover = next((g for g in chain if g in moving), None)
+        if mover is not None:
+            raise ValueError(
+                f"feedback from d{gid:02d} (a height-limited or cross-ladder "
+                f"feedback) under d{mover:02d}, which moves, follows or "
+                "spawns: refused, this feedback is wired for a static edge "
+                "only.")
+    for gid in sorted(special):
+        ends = (by_id[gid], by_id[int(by_id[gid].parent_id)])
+        if any(int(member.grid_id) in split for member in ends):
+            raise ValueError(
+                f"[devices] splits an end of the feedback edge to d{gid:02d} "
+                "(a height-limited or cross-ladder feedback): refused, the "
+                "split restriction has no vertical remap or level taper.  "
+                "Run that edge on one card.")
+        for member in ends:
+            road = (member.tiles if getattr(member, "tiles", None)
+                    is not None else exp.tiles)
+            if getattr(road, "enabled", False) and \
+                    getattr(road, "mode", None) != "auto":
+                raise ValueError(
+                    f"[tiles] streams d{int(member.grid_id):02d}, an end of "
+                    f"the feedback edge to d{gid:02d} (a height-limited or "
+                    "cross-ladder feedback): refused, the streamed "
+                    "restriction has no vertical remap or level taper.  "
+                    "Turn [tiles] off for that domain.")
+
+
 def _refuse_unsupported_vertical_nesting(exp) -> None:
     """A nest on its own ladder, where the tree cannot carry one: refused
     by name before anything is prepared.
 
-    * ``feedback = 1``: the restriction averages child cells onto parent
-      cells level by level, with no vertical operator back up (WRF's
-      feedback with vertical refinement is a later phase here).
+    * (``feedback = 1`` is admitted: the nest is remapped onto the
+      parent's ladder before the horizontal restriction,
+      woof/core/nest_feedback.py.)
     * a moving, following or spawned nest (and a nest under one): a move
       rebuilds the nest from a full SINT of its live parent and transplants
       its overlap, both on the parent's ladder.
@@ -1135,15 +1244,6 @@ def _refuse_unsupported_vertical_nesting(exp) -> None:
     if not nested:
         return
     names = ", ".join(f"d{gid:02d}" for gid in sorted(nested))
-    if int(exp.feedback) != 0:
-        raise ValueError(layered(
-            f"feedback = {exp.feedback} with a nest on its own eta ladder "
-            f"({names}) is refused: two-way feedback across differing "
-            "ladders is not implemented.",
-            "The restriction averages child cells onto parent cells level "
-            "by level (copy_fcn); between two ladders it would need a "
-            "vertical operator back up.  Set feedback = 0, or give the "
-            "nest [shared]'s ladder."))
     moving = _moving_grid_ids(exp.domains, exp.relocation,
                               include_spawn=True)
     by_id = {int(dc.grid_id): dc for dc in exp.domains}
@@ -1739,6 +1839,7 @@ class ExperimentConfig:
         validate_device_road(self.devices, self.tiles, self.domains)
         _refuse_streamed_windfarm(self.tiles, self.domains)
         _refuse_unsupported_vertical_nesting(self)
+        _refuse_unsupported_partial_feedback(self)
         if context is not None or self.tiles.follower_context is not None:
             object.__setattr__(self, "tiles", replace(self.tiles, follower_context=context))
         object.__setattr__(self, "domains", tuple(
@@ -4251,6 +4352,36 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                 "a parent born at the same instant has not."))
         start_from = None if start_from == "analysis" else start_from
 
+        # --- feedback_top: the height limit of this nest's feedback -----
+        feedback_top = None
+        if "feedback_top_m" in dom or "feedback_taper_levels" in dom:
+            if is_root:
+                raise ValueError(
+                    f"feedback_top_m on the root [[domain]] grid_id = "
+                    f"{grid_id} of {source}: the root feeds back into "
+                    "nothing.  Set it on the nest whose feedback it limits.")
+            if "feedback_top_m" not in dom:
+                raise ValueError(
+                    f"feedback_taper_levels on [[domain]] grid_id = "
+                    f"{grid_id} of {source} without feedback_top_m: the "
+                    "taper fades the feedback out below a height, which "
+                    "needs the height.")
+            if int(exp.get("feedback", 0)) != 1:
+                raise ValueError(layered(
+                    f"feedback_top_m on [[domain]] grid_id = {grid_id} of "
+                    f"{source} limits a feedback this tree does not run: "
+                    "[experiment] feedback = 0.",
+                    "Set feedback = 1 to feed the nest back below the "
+                    "height, or remove feedback_top_m."))
+            try:
+                feedback_top = FeedbackTop(
+                    top_m=dom["feedback_top_m"],
+                    taper_levels=dom.get("feedback_taper_levels", 3))
+            except ValueError as err:
+                raise ValueError(
+                    f"[[domain]] grid_id = {grid_id} of {source}: {err}"
+                ) from None
+
         # --- spawn: the dormant-nest declaration ------------------------
         spawn_cfg = None
         if "spawn" in dom:
@@ -4814,7 +4945,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             history_begin_s=history_begin_s, history_end_s=history_end_s,
             spawn=spawn_cfg, retire=retire_cfg, rearm=rearm_cfg,
             follow=follow_cfg, tiles=domain_tiles, output=domain_output,
-            start_from=start_from)
+            start_from=start_from, feedback_top=feedback_top)
         domains.append(dc)
         by_id[grid_id] = dc
         dt_by_id[grid_id] = dt_ex
@@ -6002,6 +6133,8 @@ def _drop_off_domain_controls(document):
     # absent when off, so every pre-feature document keeps its bytes.
     if isinstance(document, dict) and document.get("start_from") is None:
         document.pop("start_from", None)
+    if isinstance(document, dict) and document.get("feedback_top") is None:
+        document.pop("feedback_top", None)
     return document
 
 

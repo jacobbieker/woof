@@ -125,10 +125,86 @@ def test_a_malformed_nest_ladder_is_refused(tmp_path, ladder, words):
         load_experiment(_write(tmp_path, d02=f"eta_levels = {ladder}"))
 
 
-def test_feedback_across_two_ladders_is_refused_by_name(tmp_path):
-    with pytest.raises(ValueError, match="feedback = 1 with a nest on its own"):
-        load_experiment(_write(tmp_path, d02=f"eta_levels = {CHILD_ETA}",
-                               experiment="feedback = 1"))
+def test_feedback_across_two_ladders_is_admitted(tmp_path):
+    exp = load_experiment(_write(tmp_path, d02=f"eta_levels = {CHILD_ETA}",
+                                 experiment="feedback = 1"))
+    assert exp.feedback == 1 and exp.domain(2).feedback_top is None
+
+
+def test_a_feedback_height_limit_is_parsed(tmp_path):
+    from woof.experiment import FeedbackTop
+
+    exp = load_experiment(_write(
+        tmp_path, d02=f"eta_levels = {CHILD_ETA}\nfeedback_top_m = 4000.0\n"
+                      "feedback_taper_levels = 2",
+        experiment="feedback = 1"))
+    assert exp.domain(2).feedback_top == FeedbackTop(4000.0, 2)
+    exp = load_experiment(_write(tmp_path, d02="feedback_top_m = 3000",
+                                 experiment="feedback = 1"))
+    assert exp.domain(2).feedback_top == FeedbackTop(3000, 3)
+    assert exp.root.feedback_top is None
+
+
+@pytest.mark.parametrize("d02, experiment, words", [
+    ("feedback_top_m = 3000.0", "", "feedback = 0"),
+    ("feedback_taper_levels = 2", "feedback = 1", "without feedback_top_m"),
+    ("feedback_top_m = -5.0", "feedback = 1", "finite positive"),
+    ("feedback_top_m = 3000.0\nfeedback_taper_levels = 40",
+     "feedback = 1", "0..20"),
+])
+def test_a_malformed_feedback_height_limit_is_refused(tmp_path, d02,
+                                                      experiment, words):
+    with pytest.raises(ValueError, match=words):
+        load_experiment(_write(tmp_path, d02=d02, experiment=experiment))
+
+
+def test_a_feedback_height_limit_on_the_root_is_refused(tmp_path):
+    path = _write(tmp_path, experiment="feedback = 1")
+    text = path.read_text().replace(
+        "dx = 12000.0\n", "dx = 12000.0\nfeedback_top_m = 3000.0\n", 1)
+    path.write_text(text)
+    with pytest.raises(ValueError, match="root"):
+        load_experiment(path)
+
+
+def test_a_height_limited_feedback_refuses_moving_and_streamed_edges(
+        tmp_path):
+    import dataclasses
+    from types import SimpleNamespace
+
+    from woof.experiment import _refuse_unsupported_partial_feedback
+
+    exp = load_experiment(_write(tmp_path, d02="feedback_top_m = 3000.0",
+                                 experiment="feedback = 1"))
+    _refuse_unsupported_partial_feedback(exp)
+    spawned = dataclasses.replace(exp.domain(2), spawn=object())
+    tree = SimpleNamespace(
+        domains=(exp.root, spawned), vertical=exp.vertical, feedback=1,
+        relocation=exp.relocation, devices=exp.devices, tiles=exp.tiles)
+    with pytest.raises(ValueError, match="moves, follows or spawns"):
+        _refuse_unsupported_partial_feedback(tree)
+    streamed = SimpleNamespace(enabled=True, mode="on")
+    tiled = dataclasses.replace(exp.domain(2), tiles=streamed)
+    tree = SimpleNamespace(
+        domains=(exp.root, tiled), vertical=exp.vertical, feedback=1,
+        relocation=exp.relocation, devices=exp.devices, tiles=exp.tiles)
+    with pytest.raises(ValueError, match="streams d02"):
+        _refuse_unsupported_partial_feedback(tree)
+
+
+def test_an_absent_height_limit_leaves_the_identities_alone(tmp_path):
+    """OFF contract: the field is dropped from the restart identity when
+    None, so a tree that never names it fingerprints as it always did; a
+    declared limit binds."""
+    import json
+
+    from woof.core.model import restart_identity_payload
+
+    exp = load_experiment(_write(tmp_path, experiment="feedback = 1"))
+    assert "feedback_top" not in json.dumps(restart_identity_payload(exp))
+    limited = load_experiment(_write(tmp_path, d02="feedback_top_m = 3000.0",
+                                     experiment="feedback = 1"))
+    assert "feedback_top" in json.dumps(restart_identity_payload(limited))
 
 
 def test_a_spawned_nest_on_its_own_ladder_is_refused_by_name(tmp_path):
@@ -460,3 +536,39 @@ def test_the_force_corridor_runs_the_vertical_step_on_the_sint_donors():
                 assert np.array_equal(cp.asnumpy(a).view(np.uint32),
                                       cp.asnumpy(b).view(np.uint32)), \
                     (kind, side)
+
+
+def test_a_height_limited_nest_under_a_moving_one_is_refused(tmp_path):
+    import dataclasses
+    from types import SimpleNamespace
+
+    from woof.experiment import _refuse_unsupported_partial_feedback
+
+    exp = load_experiment(_write(tmp_path, d02="feedback_top_m = 3000.0",
+                                 experiment="feedback = 1"))
+    d02 = exp.domain(2)
+    d03 = dataclasses.replace(d02, grid_id=3, parent_id=2,
+                              feedback_top=d02.feedback_top)
+    mover = dataclasses.replace(d02, feedback_top=None, spawn=object())
+    tree = SimpleNamespace(
+        domains=(exp.root, mover, d03), vertical=exp.vertical, feedback=1,
+        relocation=exp.relocation, devices=exp.devices, tiles=exp.tiles)
+    with pytest.raises(ValueError, match="d03.*under d02"):
+        _refuse_unsupported_partial_feedback(tree)
+
+
+def test_an_absent_height_limit_is_absent_from_the_public_documents(
+        tmp_path):
+    from woof.experiment import domain_config_document
+    from woof.ingest.prepared_cache import effective_prepared_domain_config
+
+    exp = load_experiment(_write(tmp_path, experiment="feedback = 1"))
+    assert "feedback_top" not in domain_config_document(exp.domain(2))
+    limited = load_experiment(_write(tmp_path, d02="feedback_top_m = 3000.0",
+                                     experiment="feedback = 1"))
+    document = domain_config_document(limited.domain(2))
+    assert document["feedback_top"]["top_m"] == 3000.0
+    # Preparation never reads it: one prepared bundle serves any limit.
+    assert effective_prepared_domain_config(document) == \
+        effective_prepared_domain_config(
+            domain_config_document(exp.domain(2)))

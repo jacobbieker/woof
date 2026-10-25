@@ -124,7 +124,7 @@ _SIGNED_KINDS = frozenset({"u", "v", "w", "t", "ph", "mu"})
 _WRF_T0 = np.float32(300.0)
 
 
-def _rebase_feedback_theta(state, reg, spec_zone) -> None:
+def _rebase_feedback_theta(state, reg, spec_zone, field=None) -> None:
     """Re-express restricted WRF ``t_2`` against the parent's base theta.
 
     WRF restricts ``t_2 = theta - 300`` and writes it straight into the
@@ -142,11 +142,18 @@ def _rebase_feedback_theta(state, reg, spec_zone) -> None:
         reg, spec_zone=spec_zone)
     if i_hi < i_lo or j_hi < j_lo:
         return
-    window = state.thp[:, j_lo:j_hi + 1, i_lo:i_hi + 1]
+    target = state.thp if field is None else field
+    window = target[:, j_lo:j_hi + 1, i_lo:i_hi + 1]
     window += _WRF_T0
     thb = state.thb
     window -= (thb[:, j_lo:j_hi + 1, i_lo:i_hi + 1] if thb.ndim == 3
                else thb[:, None, None])
+
+
+def _cupy():
+    import cupy
+
+    return cupy
 
 
 def _clip_nonnegative(window) -> None:
@@ -318,18 +325,22 @@ class NestCoupler:
         self.crosses_ladders = (
             parent.run.nz != child.run.nz
             or _run_ladder(parent.run) != _run_ladder(child.run))
-        if self.feedback == 1 and self.crosses_ladders:
-            raise ValueError(
-                "experimental feedback is horizontal-only and requires "
-                "identical vertical levels, one eta ladder, on both ends of "
-                "the edge (parent "
-                f"nz={parent.run.nz}, child nz={child.run.nz}): the reverse "
-                "feedback operator averages child cells onto parent cells "
-                "with no vertical mapping, so a mismatched pair would feed "
-                "the parent values from the wrong levels.  Set feedback = "
-                "0 for a nest on its own ladder; the parent forces it "
-                "through WRF's vertical interpolation "
-                "(woof/core/nest_vertical.py).")
+        #: The child's feedback height limit
+        #: (:class:`woof.experiment.FeedbackTop`), or ``None`` for the
+        #: whole column.
+        self.feedback_top = getattr(child, "feedback_top", None)
+        #: Whether feedback on this edge runs woof/core/nest_feedback.py:
+        #: a child on its own ladder is remapped onto the parent's before
+        #: the restriction, and a height limit blends the result in level
+        #: by level.  Neither -> WRF's feedback exactly as before.
+        self.partial_feedback = self.feedback == 1 and (
+            self.crosses_ladders or self.feedback_top is not None)
+        self._feedback_weights = None
+        self._fb_constants = None
+        self._fb_windows: dict = {}
+        self._fb_work: dict = {}
+        #: Parent layers fed back on a height-limited edge (receipt).
+        self.feedback_levels_below = None
         #: The FEEDBACK edge, child scheme -> parent scheme, resolved
         #: through the same matrix as the forward one with the policy
         #: passed EXPLICITLY (the parent's own key is the policy of its
@@ -1176,6 +1187,13 @@ class NestCoupler:
             parent.state, "_streamed_domain", None) is not None
         bounded_operands = bounded_child or canonical_parent
         written = ["mup"]
+        if self.partial_feedback and (bounded_operands or streamed_parent):
+            raise RuntimeError(
+                f"the feedback edge d{parent.cfg.grid_id:02d} -> "
+                f"d{node.cfg.grid_id:02d} crosses eta ladders or stops at a "
+                "height, and an end of it is tile-streamed: the streamed "
+                "restriction has no vertical remap or level taper.  Turn "
+                "[tiles] off for both domains of the edge.")
         if streamed_parent and not canonical_parent:
             _sync_in(parent.state,
                      tuple(dict.fromkeys(
@@ -1187,16 +1205,26 @@ class NestCoupler:
         # straight into the exact parent overlap and nothing else is
         # touched.  MU is no different from the rest; it leads only because
         # the smoother and finalize below read the updated mass.
+        # A height limit below the model top leaves the parent's mu alone:
+        # the column above the limit keeps the parent's winds, so a child's
+        # mu written over it would add or remove mass aloft that no flux
+        # carried (measured: parent w noise 4-10x above the limit).  The
+        # parent's mass then follows from its own continuity equation,
+        # driven by the child's winds below the limit.
+        restrict_mu = not (self.partial_feedback
+                           and self._feedback_tapered())
         if bounded_operands:
             from woof.core.nest_operands import NestWindowSource
             child_source = NestWindowSource(node.state)
             parent_source = NestWindowSource(parent.state)
             self._restrict_windowed("mu", child_source, parent_source)
-        else:
+        elif restrict_mu:
             child_mu = self._raw_child_field("mu")
             copy_fcn(
                 parent.state.mup[None], child_mu, self.registrations["m"],
                 spec_zone=run.spec_zone)
+        else:
+            written.remove("mup")
 
         reverse = self.microphysics_reverse_transition
         diagnosed = tuple(
@@ -1204,6 +1232,12 @@ class NestCoupler:
             if kind != "mu" and self._reverse_diagnoses(kind))
         if diagnosed:
             self._sync_feedback_source()
+        if self.partial_feedback:
+            self._commit_partial(node, payload["kinds"], diagnosed,
+                                 restrict_mu=restrict_mu)
+            self.feedback_count += 1
+            self.last_feedback_ticks = int(node.clock.ticks)
+            return
         for kind in payload["kinds"]:
             if kind == "mu":
                 continue
@@ -1268,30 +1302,7 @@ class NestCoupler:
                     smoother(
                         field, reg, smooth_option=self.smooth_option,
                         scratch=self._scratch("nest_parent_field"))
-                # smdsm's de-smoothing pass is ANTI-diffusive (xnu =
-                # -0.52, interp_fcn.F:3976) and can undershoot a sharp
-                # gradient; on a positive-definite species that is a
-                # small negative -- MEASURED, first d02->d01 feedback of
-                # the Melissa two-way run: qv = -2.2e-07 inside the
-                # rectangle, and the health gate rightly refused it.
-                # WRF tolerates the transient because its microphysics
-                # clamps moisture at CONSUMPTION (e.g. Thompson's
-                # MAX(1.e-10, qv)); ArWen's gate asserts the bound at
-                # the period boundary, so the transaction re-establishes
-                # it here, over exactly the cells the smoother wrote.
-                # The restriction itself is a convex average and sm121's
-                # weights are convex, so only the smdsm path can trip
-                # this; the clamp is a provable no-op everywhere else.
-                if kind not in _SIGNED_KINDS:
-                    i0, j0, niw, njw = smoother_parent_window(reg)
-                    if niw > 0 and njw > 0:
-                        rectangle = (slice(j0, j0 + njw), slice(i0, i0 + niw))
-                        window = field[(...,) + rectangle]
-                        _clip_nonnegative(window)
-                        if isinstance(field, SlabField):
-                            # A split parent's field is not a view: the
-                            # clipped copy goes back to its slabs.
-                            field.write(rectangle, window)
+                self._clamp_smoothed(field, kind, reg)
         if streamed_parent and not canonical_parent:
             _sync_out(parent.state, tuple(dict.fromkeys(written)))
         if bounded_operands:
@@ -1302,6 +1313,268 @@ class NestCoupler:
                 self.feedback_host_scratch_bytes, parent_source.max_host_scratch_bytes)
         self.feedback_count += 1
         self.last_feedback_ticks = int(node.clock.ticks)
+
+    def _clamp_smoothed(self, field, kind, reg) -> None:
+        """The non-negativity clamp over the smoother's window, after the
+        smoother ran on ``field`` (shared by both feedback paths)."""
+        from woof.core.nest_interp import smoother_parent_window
+
+        # smdsm's de-smoothing pass is ANTI-diffusive (xnu =
+        # -0.52, interp_fcn.F:3976) and can undershoot a sharp
+        # gradient; on a positive-definite species that is a
+        # small negative -- MEASURED, first d02->d01 feedback of
+        # the Melissa two-way run: qv = -2.2e-07 inside the
+        # rectangle, and the health gate rightly refused it.
+        # WRF tolerates the transient because its microphysics
+        # clamps moisture at CONSUMPTION (e.g. Thompson's
+        # MAX(1.e-10, qv)); ArWen's gate asserts the bound at
+        # the period boundary, so the transaction re-establishes
+        # it here, over exactly the cells the smoother wrote.
+        # The restriction itself is a convex average and sm121's
+        # weights are convex, so only the smdsm path can trip
+        # this; the clamp is a provable no-op everywhere else.
+        if kind not in _SIGNED_KINDS:
+            i0, j0, niw, njw = smoother_parent_window(reg)
+            if niw > 0 and njw > 0:
+                rectangle = (slice(j0, j0 + njw), slice(i0, i0 + niw))
+                window = field[(...,) + rectangle]
+                _clip_nonnegative(window)
+                if isinstance(field, SlabField):
+                    # A split parent's field is not a view: the
+                    # clipped copy goes back to its slabs.
+                    field.write(rectangle, window)
+
+    def _feedback_level_weights(self):
+        """``(layer, interface)`` float32 weights of the height limit,
+        built once from the parent's base geopotential (static: a moving
+        nest is refused) over every column the edge writes."""
+        if self._feedback_weights is not None:
+            return self._feedback_weights
+        from woof.core.nest_feedback import (
+            FeedbackTopRefused, level_weights, levels_below)
+        from woof.core.nest_interp import smoother_parent_window
+
+        node = self.child_node
+        pstate = node.parent.state
+        nz = int(node.parent.cfg.run.nz)
+        top = self.feedback_top
+        if top is None:
+            below = nz
+        else:
+            reg = self.registrations["m"]
+            i_lo, i_hi, j_lo, j_hi = feedback_parent_bounds(
+                reg, spec_zone=node.cfg.run.spec_zone)
+            i0, j0, niw, njw = smoother_parent_window(reg)
+            if self.smooth_option != 0 and niw > 0 and njw > 0:
+                i_lo, i_hi = min(i_lo, i0), max(i_hi, i0 + niw - 1)
+                j_lo, j_hi = min(j_lo, j0), max(j_hi, j0 + njw - 1)
+            # One more column each way: the u/v faces on the high side.
+            ny, nx = (int(v) for v in pstate.mup.shape)
+            i_lo, j_lo = max(0, i_lo - 1), max(0, j_lo - 1)
+            i_hi, j_hi = min(nx - 1, i_hi + 1), min(ny - 1, j_hi + 1)
+            below = levels_below(
+                pstate.phb, top.top_m,
+                (i_lo, j_lo, i_hi - i_lo + 1, j_hi - j_lo + 1))
+            if below == 0:
+                raise FeedbackTopRefused(
+                    f"feedback_top_m = {top.top_m:g} m on "
+                    f"d{node.cfg.grid_id:02d} lies below the top of the "
+                    f"parent d{node.parent.cfg.grid_id:02d}'s lowest layer "
+                    "somewhere under the nest: no parent level would be fed "
+                    "back.  Raise it, or set feedback = 0.")
+        self._feedback_weights = level_weights(
+            nz, below, 0 if top is None else top.taper_levels)
+        self.feedback_levels_below = int(below)
+        return self._feedback_weights
+
+    def _partial_windows(self, stagger: str):
+        """``(rect, union, region)`` of one stagger as ``(i0, j0, ni, nj)``:
+        the rectangle ``copy_fcn`` writes, its union with the smoother's
+        window (what is blended), and that union grown by the one-cell ring
+        the smoother reads (what the work copy must hold)."""
+        cached = self._fb_windows.get(stagger)
+        if cached is not None:
+            return cached
+        from woof.core.nest_interp import smoother_parent_window
+
+        reg = self.registrations[stagger]
+        run = self.child_node.cfg.run
+        i_lo, i_hi, j_lo, j_hi = feedback_parent_bounds(
+            reg, spec_zone=run.spec_zone)
+        rect = (i_lo, j_lo, i_hi - i_lo + 1, j_hi - j_lo + 1)
+        if self.smooth_option != 0:
+            i0, j0, niw, njw = smoother_parent_window(reg)
+            if niw > 0 and njw > 0:
+                i_lo, i_hi = min(i_lo, i0), max(i_hi, i0 + niw - 1)
+                j_lo, j_hi = min(j_lo, j0), max(j_hi, j0 + njw - 1)
+        union = (i_lo, j_lo, i_hi - i_lo + 1, j_hi - j_lo + 1)
+        nyf, nxf = reg.nyp, reg.nxp
+        ri0, rj0 = max(0, i_lo - 1), max(0, j_lo - 1)
+        ri1, rj1 = min(nxf - 1, i_hi + 1), min(nyf - 1, j_hi + 1)
+        region = (ri0, rj0, ri1 - ri0 + 1, rj1 - rj0 + 1)
+        self._fb_windows[stagger] = (rect, union, region)
+        return self._fb_windows[stagger]
+
+    def _partial_work(self, name: str, like):
+        """A persistent work array shaped like ``like`` (one per name and
+        shape, allocated at the first feedback and reused every parent
+        step: at most the four parent field shapes plus the three
+        restricted layer masses, about 7 parent 3-D fields of scratch).
+        Every cell read is written first in the same transaction, so the
+        buffers carry nothing across steps or restarts."""
+        key = (name, tuple(like.shape))
+        work = self._fb_work.get(key)
+        if work is None:
+            xp = np if isinstance(like, np.ndarray) else _cupy()
+            work = xp.empty(like.shape, dtype=np.float32)
+            self._fb_work[key] = work
+        return work
+
+    def _partial_constants(self):
+        """The two ladders and the level weights, on the parent's device,
+        built once per edge."""
+        if self._fb_constants is not None:
+            return self._fb_constants
+        from woof.core import nest_feedback as fb
+
+        node = self.child_node
+        pstate = node.parent.state
+        xp = np if isinstance(pstate.mup, np.ndarray) else _cupy()
+        w_layer, w_iface = self._feedback_level_weights()
+        self._fb_constants = {
+            "child": tuple(xp.asarray(v) for v in fb._ladder(node.state)),
+            "parent": tuple(xp.asarray(v) for v in fb._ladder(pstate)),
+            "w": xp.asarray(w_layer), "wi": xp.asarray(w_iface),
+        }
+        return self._fb_constants
+
+    def _feedback_tapered(self) -> bool:
+        """Does the height limit stop below the parent's model top?"""
+        self._feedback_level_weights()
+        return self.feedback_levels_below < int(
+            self.child_node.parent.cfg.run.nz)
+
+    def _commit_partial(self, node, kinds, diagnosed, *,
+                        restrict_mu=True) -> None:
+        """The restriction of every kind on a cross-ladder or height-limited
+        edge (woof/core/nest_feedback.py).  ``mu`` has already been
+        restricted when the whole column is fed back (``restrict_mu``),
+        and is left as the parent's below the model top.  Each other kind
+        is remapped onto the parent's ladder (across ladders), restricted
+        by ``copy_fcn`` into a work copy of the parent field, divided by a
+        layer mass (layer kinds, across ladders), rebased, smoothed and
+        clamped there, then blended into the parent with the level weights
+        (``ph`` rebuilt as a column)."""
+        from woof.core import nest_feedback as fb
+
+        parent = node.parent
+        pstate, cstate = parent.state, node.state
+        run = node.cfg.run
+        nz = int(parent.cfg.run.nz)
+        const = self._partial_constants()
+        crossing = self.crosses_ladders
+        masses = {}
+        tapered = self.feedback_levels_below < nz
+        # mu first, when it is fed back: the scalars' layer masses below are
+        # the parent's final ones.  WRF's feedback smooths it with the rest;
+        # no other kind's restriction reads it, so the order is free and the
+        # full-column result is the shared path's, bit for bit.
+        if self.smooth_option != 0 and "mu" in kinds and restrict_mu:
+            smoother(pstate.mup, self.registrations["m"],
+                     smooth_option=self.smooth_option,
+                     scratch=self._scratch("nest_parent_field"))
+
+        def layer_mass(stagger, like_child, like_parent):
+            # The child columns' own masses in the parent's layers,
+            # restricted: the divisor that makes the restricted content a
+            # mass-weighted mean (a constant comes back as itself).
+            if stagger not in masses:
+                column = fb.remap_layers(
+                    like_child, cstate.mub2d, cstate.mup, const["child"],
+                    const["parent"], xstag=int(stagger == "x"),
+                    ystag=int(stagger == "y"), mass=True)
+                restricted = self._partial_work(f"mass_{stagger}",
+                                                like_parent)
+                copy_fcn(restricted, column, self.registrations[stagger],
+                         spec_zone=run.spec_zone)
+                masses[stagger] = restricted
+            return masses[stagger]
+
+        def parent_mass(like_parent):
+            # The parent's own layer masses (scalars are mass points).
+            if "parent" not in masses:
+                masses["parent"] = fb.remap_layers(
+                    like_parent, pstate.mub2d, pstate.mup, const["parent"],
+                    const["parent"], mass=True)
+            return masses["parent"]
+
+        for kind in kinds:
+            if kind == "mu":
+                continue
+            stagger = _STAGGER.get(kind, "m")
+            reg = self.registrations[stagger]
+            target = getattr(pstate, _state_attr(kind))
+            if isinstance(target, SlabField):
+                raise RuntimeError(
+                    f"a split parent d{parent.cfg.grid_id:02d} under a "
+                    "cross-ladder or height-limited feedback edge: refused, "
+                    "the split restriction has no vertical remap or level "
+                    "taper.  Run the edge on one card.")
+            xstag, ystag = int(kind == "u"), int(kind == "v")
+            interface = kind in fb.INTERFACE_KINDS
+            child_field = (self._mapped_child_field(kind) if kind in diagnosed
+                           else self._raw_child_field(kind))
+            if crossing and kind == "ph":
+                # The total geopotential: each ladder's base is its own.
+                phb = cstate.phb
+                child_field = child_field + (
+                    phb if phb.ndim == 3 else phb[:, None, None])
+            source = child_field
+            if crossing:
+                child_field = fb.remap_layers(
+                    child_field, cstate.mub2d, cstate.mup, const["child"],
+                    const["parent"], xstag=xstag, ystag=ystag,
+                    interface=interface)
+            rect, union, region = self._partial_windows(stagger)
+            work = self._partial_work("field", target)
+            ri, rj, rni, rnj = region
+            box = (slice(None), slice(rj, rj + rnj), slice(ri, ri + rni))
+            work[box] = target[box]
+            copy_fcn(work, child_field, reg, spec_zone=run.spec_zone)
+            i0, j0, ni, nj = rect
+            cells = (slice(None), slice(j0, j0 + nj), slice(i0, i0 + ni))
+            if crossing and not interface:
+                # Moisture, number concentrations and other scalars keep
+                # their CONTENT: the child's mass of water in each layer
+                # becomes the parent's, divided by the parent's own layer
+                # mass.  t, u and v keep their mass-weighted MEAN: divided
+                # by the child's restricted layer mass, so a constant
+                # comes back as itself.
+                if kind in _SIGNED_KINDS:
+                    mass = layer_mass(stagger, source, target)
+                else:
+                    mass = parent_mass(target)
+                work[cells] = work[cells] / mass[cells]
+            if crossing and kind == "ph":
+                phb = pstate.phb
+                work[cells] = work[cells] - (
+                    phb[cells] if phb.ndim == 3
+                    else phb[:, None, None])
+            if kind == "t":
+                _rebase_feedback_theta(pstate, reg, run.spec_zone,
+                                       field=work)
+            if self.smooth_option != 0:
+                smoother(work, reg, smooth_option=self.smooth_option,
+                         scratch=self._scratch("nest_parent_field"))
+                self._clamp_smoothed(work, kind, reg)
+            if kind == "ph" and tapered:
+                fb.ph_column(target, work, pstate.phb, pstate.mub2d,
+                             pstate.mup, pstate.mup, const["parent"],
+                             const["w"], const["wi"], union)
+                continue
+            weights = const["wi"] if int(work.shape[0]) == nz + 1 \
+                else const["w"]
+            fb.blend(target, work, weights, union)
 
     def feedback_finalize(self, node) -> None:
         if node is not self.child_node:

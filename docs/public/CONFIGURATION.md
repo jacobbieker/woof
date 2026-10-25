@@ -245,11 +245,76 @@ such a nest everything through WRF v4.7.1's vertical-nesting operators
 
 Refused by name, before anything is prepared:
 
-- `feedback = 1` (the restriction has no vertical operator back up);
 - a nest on its own ladder that moves, follows or spawns, or sits under one
   that does;
 - a split (`[devices]`) or streamed (`[tiles]` on) edge;
 - a nest whose microphysics scheme differs from its parent's.
+
+#### Feedback from a nest on its own ladder, below a height (`[[domain]]`)
+
+| TOML key | WRF equivalent | default | allowed | note |
+|---|---|---|---|---|
+| `feedback_top_m` | none | absent (whole column) | > 0 m | nests only, needs `[experiment] feedback = 1`; metres above the PARENT's ground |
+| `feedback_taper_levels` | none | 3 | 0..20 | needs `feedback_top_m` |
+
+With `feedback = 1`, a nest on its own `eta_levels` feeds back through woof's own
+operator (`woof/core/nest_feedback.py`). WRF v4.7.1 has none: it refuses feedback
+with vertical refinement (`share/module_check_a_mundo.F:2719-2737`). The same
+operator carries a height limit, with or without a ladder of its own. Each parent
+step it does the following:
+
+1. **Ladder remap.** Each child column is remapped onto the parent's ladder in
+   its own dry-pressure coordinate, `pd = c3f * MU + c4f`. Mass-point and face
+   fields become the mass content of each parent layer: every child layer's mass
+   is split over the parent layers it overlaps. `w` and `ph` are interpolated
+   linearly in `pd`.
+2. **Horizontal restriction.** WRF's `copy_fcn` averages those columns onto the
+   parent, unchanged, then divides them by a layer mass:
+   - `t`, `u` and `v` keep their **mass-weighted mean**: they are divided by the
+     child columns' own restricted masses, so a constant comes back as itself
+     whatever the two grids' terrain;
+   - moisture, number concentrations and other scalars keep their **content**:
+     they are divided by the parent's own layer mass, so the parent's water in
+     each layer over the restriction rectangle equals the child's, to rounding;
+   - `ph` is carried as the total geopotential and re-expressed against the
+     parent's own `phb`.
+3. **Smoothing.** The parent smoother (`smooth_option`) and the non-negativity
+   clamp run on the result, as WRF's feedback runs them.
+4. **Blend.** The result is blended into the parent level by level:
+   - parent layers whose top lies below `feedback_top_m` in every column the
+     nest writes are fed back (height read on the base geopotential);
+   - the top `feedback_taper_levels` of those layers take weights
+     `n/(n+1) .. 1/(n+1)`;
+   - interfaces take the mean of their two layers;
+   - above, the parent's winds, `w`, potential temperature, moisture and
+     pressure are left exactly as they were.
+
+   `ph` is rebuilt as a column from the ground up: fed layers take the child's
+   thickness, and the layers above keep their own. Geopotential is a vertical
+   integral, so above the limit it moves only by what the column below it now
+   weighs.
+
+**`mu`.** With the whole column fed back (no limit, or a limit above the model
+top), `mu` is fed back as WRF feeds it, and each layer's dry mass then matches
+the child's wherever the parent's `mub` is the mean of the child's under it.
+With a limit below the model top, the parent keeps its own `mu`. Writing the
+child's column mass under the parent's own winds aloft adds or removes mass that
+no flux carried. In a 3-tier test this raised the parent's `w` noise above the
+limit 4-10x. Instead, the parent's mass follows its own continuity equation,
+driven by the child's winds below the limit.
+
+A nest on the parent's own levels with no limit runs WRF's feedback exactly as
+before. So does a limit above the model top, where every weight is 1.
+
+Refused by name with a limit, or across two ladders:
+
+- when the tree loads: a nest that moves, follows or spawns, or sits under one
+  that does, and a split (`[devices]`) or streamed (`[tiles]` on) end of the edge;
+- at the first feedback, once the parent's base state is known: a limit below the
+  parent's lowest layer top, and an end of the edge that `[tiles] mode = "auto"`
+  has chosen to stream.
+
+Lowering the nest's model top is not supported: `p_top` stays shared.
 
 #### The coordinate a run's terrain can order
 

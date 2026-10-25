@@ -671,6 +671,11 @@ def restart_identity_payload(exp) -> dict:
         # initial state for that nest.
         if domain.get("start_from") is None:
             domain.pop("start_from", None)
+        # A nest's feedback height limit, on the same convention: absent
+        # (WRF's whole-column feedback) stays absent, a declared limit
+        # binds.
+        if domain.get("feedback_top") is None:
+            domain.pop("feedback_top", None)
         # A follower's reach bound takes the same convention one level
         # down: its default (None) drops out so every follower fingerprint
         # written before the key existed is unchanged, and a DECLARED

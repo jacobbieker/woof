@@ -503,7 +503,12 @@ the 2.8.7 release carries the file; later releases point at it there.
     only calls `init_domain_vert_nesting` when a nest refines the vertical
     grid, guarded by `nest%e_vert /= parent%e_vert` at
     share/mediation_integrate.F:663 with the call at :665; a nest's own
-    `eta_levels` under the shared `p_top` IS ported, woof/core/nest_vertical.py),
+    `eta_levels` under the shared `p_top` IS ported, woof/core/nest_vertical.py;
+    feedback from such a nest has no WRF counterpart -- WRF v4.7.1 stops at
+    share/module_check_a_mundo.F:2719-2737, "vert_refine_method=2 only works
+    with feedback = 0" -- so woof/core/nest_feedback.py is woof's own
+    conservative remap ahead of WRF's copy_fcn, held to its NumPy twin and to
+    identity with WRF's feedback on one ladder, not to an oracle),
     **adaptive time step** (`use_adaptive_time_step`), and
     **`input_from_hires`** terrain are rejected design-scope options that the
     bundle namelist never exercises.

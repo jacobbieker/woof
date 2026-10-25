@@ -93,9 +93,11 @@ def test_feedback_refuses_only_the_mismatched_vertical_ladder():
             parent_cfg.run, grid_id=2, nx=9, ny=9, nz=3,
             dx=1000.0, dy=1000.0, dt=10.0, specified=False,
             nested=True))
-    with pytest.raises(ValueError, match="horizontal-only.*vertical level"):
-        NestCoupler(
-            SimpleNamespace(cfg=same_scheme, parent=parent), feedback=1)
+    # Unequal level counts are admitted since the cross-ladder feedback
+    # (woof/core/nest_feedback.py, tests/test_nest_feedback_vertical.py).
+    crossing = NestCoupler(
+        SimpleNamespace(cfg=same_scheme, parent=parent), feedback=1)
+    assert crossing.crosses_ladders and crossing.partial_feedback
 
 
 def test_feedback_provenance_is_explicit_and_feedback0_is_absent(tmp_path):
@@ -725,7 +727,7 @@ def test_check_advises_on_two_way_before_the_tree_refuses_it():
     # ...and it names all three shapes the coupler refuses at build,
     # which are the reasons a legal feedback = 1 config still stops.
     for precondition in ("vertical level counts", "microphysics",
-                         "field inventories"):
+                         "field inventories", "feedback_top_m"):
         assert precondition in FEEDBACK_TWO_WAY_ADVISORY
 
 

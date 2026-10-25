@@ -276,6 +276,10 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # A delayed nest's birth source.  Not in use (None, the analysis
     # birth) is what every header before the key describes.
     "start_from",
+    # A nest's feedback height limit; None (whole-column feedback) is what
+    # every header before the key describes (and the forecast-only field is
+    # dropped from the comparison anyway, PREPARATION_INERT_RUN_FIELDS).
+    "feedback_top",
     # 2.8's per-domain follower reach bound, nested in a DECLARED follow
     # document.  Its not-in-use value is None (the engine default), the
     # state every follower header written before the key describes, and
@@ -619,6 +623,7 @@ def undelayed_identity_defaults(experiment) -> dict[str, object]:
             "retire": None, "rearm": None, "follow": None,
             "follow.reach_speed_m_s": None,
             "start_from": None,
+            "feedback_top": None,
             # The history window: DomainConfig's own defaults, read from
             # the dataclass rather than restated (the reason is below).
             **_domain_config_defaults("history_begin_s", "history_end_s"),
@@ -776,6 +781,11 @@ PREPARATION_INERT_RUN_FIELDS = SFIRE_PREPARATION_INERT_RUN_FIELDS | frozenset({
     # card could not hold the smoke envelope was refused at emission for it,
     # and its native tree authority did not reload (a 4090 host and a rented box, 2026-10-21).
     "run.smoke_off_reason",
+    # A nest's feedback height limit (DomainConfig.feedback_top) is read
+    # only by the forecast's feedback transaction (woof/core/nest.py);
+    # preparation never names it, so one prepared bundle serves any limit.
+    # It stays in the restart identity, where it binds.
+    "feedback_top",
     # Eclipse attenuation is evaluated at forecast UTC; preparation never reads it.
     "run.ra_sw_eclipse",
     # The zero-layer sea ice model (woof/ocean/seaice) is seeded by the

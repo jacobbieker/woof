@@ -496,12 +496,13 @@ FEEDBACK_TWO_WAY_ADVISORY = (
     "stamped experimental and runs on BOTH routes -- the native "
     "experiment-runner route (`woof run`) and the prepared-hierarchy "
     "route, `rw-wps` preparation followed by the domain-tree runner.  "
-    "What refuses is not the route but the tree: the nest coupler names "
-    "three shapes it cannot feed back when it is built -- unequal "
-    "parent/child vertical level counts, mixed parent/child "
-    "microphysics, and mismatched active prognostic field inventories.  "
-    "A tree clear of those three runs two-way wherever it is launched; "
-    "feedback = 0 output is unchanged either way."
+    "What refuses is not the route but the tree.  Unequal parent/child "
+    "vertical level counts (a nest on its own eta ladder) and a "
+    "feedback_top_m height limit feed back through woof's own "
+    "conservative remap, which refuses a split, tile-streamed or moving "
+    "edge; mixed parent/child microphysics and mismatched active "
+    "prognostic field inventories feed back through the reverse "
+    "microphysics edge.  feedback = 0 output is unchanged either way."
 )
 
 
@@ -3988,9 +3989,13 @@ def physics_kernel_modules(exp: ExperimentConfig) -> frozenset[str]:
     for dc in exp.domains:
         modules |= domain_kernel_modules(dc, prices_refl=prices_refl)
     from woof.experiment import vertically_nested_ids
-    if vertically_nested_ids(exp):
+    if vertically_nested_ids(exp) or (int(exp.feedback) == 1 and any(
+            getattr(dc, "feedback_top", None) is not None
+            for dc in exp.domains)):
         # A nest on its own eta ladder: the parent forces and births it
-        # through woof/core/nest_vertical.py's composed unit.
+        # through woof/core/nest_vertical.py's composed unit.  A
+        # height-limited feedback blends through the same unit
+        # (woof/core/nest_feedback.py).
         modules.add("nest_vertical_composed")
     return frozenset(modules)
 

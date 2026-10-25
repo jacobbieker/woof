@@ -29,13 +29,15 @@ hunt for them.
   takes 99.8 s against 27.6 s whole-decode, of which 37.5 s is the inventory
   pass alone. An uncompressed multi-message source shows no such cost (RAP, 6
   valid times: 13.34 s against 13.33 s).
-- **Vertical nesting in a live tree is one-way; explicit eta levels only; nz above
+- **Vertical nesting in a live tree; explicit eta levels only; nz above
   128 admitted but unrun** (section 2.2). A nest that names its own `eta_levels` is
   forced through WRF's `vert_refine_method = 2` operators. Without one, sub-km
   children of a RUNNING tree take their parents' level count, which makes the inline
   nested 250 m capability coarse LES at the gray-zone edge (effective dz 96.7 m
   measured in-PBL on the 49-level tree, section 2.8). Feedback across two ladders,
-  and a moving nest on its own ladder, are not implemented. An OFFLINE child gets
+  optionally below `feedback_top_m`, is woof's own conservative remap: WRF has
+  no such operator to certify it against. A moving nest on its own ladder, and a
+  nest with a lower model top, are not implemented. An OFFLINE child gets
   its own ladder from `woof downscale --child-levels`, through a conservative remap
   (section 2.2).
 - **Two-way feedback is experimental and unmeasured**; it feeds back dynamic

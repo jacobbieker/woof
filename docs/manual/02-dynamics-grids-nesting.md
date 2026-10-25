@@ -79,8 +79,11 @@ Two hard properties a WRF user must plan around:
   interpolated the same way, and a nest prepared from the analysis is built on its
   own ladder directly, as real.exe builds `wrfinput_d0N` on the nest's `e_vert`.
   The operators are held word for word to WRF v4.7.1's Fortran on the CPU and the
-  GPU (`tools/vert_nest_wrf471_oracle`). Refused by name: feedback, moving,
-  following and spawned nests, split (`[devices]`) and streamed (`[tiles]`) edges,
+  GPU (`tools/vert_nest_wrf471_oracle`). With `feedback = 1` such a nest feeds
+  back through woof's own conservative ladder remap ahead of WRF's `copy_fcn`
+  (`woof/core/nest_feedback.py`; WRF refuses feedback with vertical refinement).
+  Any nest may also stop its feedback below `feedback_top_m`. Refused by name:
+  moving, following and spawned nests, split (`[devices]`) and streamed (`[tiles]`) edges,
   and a nest with a different microphysics scheme. Without a ladder of its own a
   nest takes its parent's level count, bitwise as before. **An OFFLINE child is not
   bound by any of this.**

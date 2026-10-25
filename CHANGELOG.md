@@ -4,6 +4,32 @@
 
 New:
 
+- Two-way feedback from a nest on its own eta ladder, and feedback limited to
+  the levels below a height. `feedback = 1` now runs on an edge that crosses
+  two ladders, and a nest's `[[domain]]` may set `feedback_top_m` (metres
+  above the parent's ground) and `feedback_taper_levels` (default 3).
+  - Each child column is first remapped conservatively onto the parent's
+    ladder. The remap is done in its own dry-pressure coordinate, so each
+    layer's mass and water are carried exactly.
+  - WRF's `copy_fcn` then restricts it horizontally:
+    - `t`, `u` and `v` keep the child's mass-weighted mean, so a constant
+      field comes back unchanged;
+    - moisture and other scalars keep the child's water content per layer.
+  - The parent smoother and clamp run as before.
+  - The result is blended into the parent level by level. Parent levels
+    wholly below the limit are fed back, and the top
+    `feedback_taper_levels` of them fade out linearly.
+  - Above the limit the parent's winds, temperature, moisture and pressure
+    are not touched. Its geopotential is rebuilt as a column from the ground.
+  - With a limit below the model top, the parent keeps its own `mu`.
+  - WRF v4.7.1 refuses feedback with vertical refinement
+    (`share/module_check_a_mundo.F:2719-2737`), so this operator is woof's
+    own. Its GPU kernels match their NumPy twins bit for bit.
+  - A nest on the parent's levels with no limit, or with a limit above the
+    model top, is WRF's feedback word for word.
+  - Moving, spawned, split and streamed edges are refused by name.
+  - A tree that sets neither keeps its fingerprints, checkpoints and caches.
+
 - A live nest can carry its own eta ladder (WRF `vert_refine_method = 2`): a
   `[[domain]]` names `eta_levels` under the tree's shared `p_top`,
   `hybrid_opt` and `etac`. The parent forces it every parent step through
@@ -12,7 +38,7 @@ New:
   word for word (`tools/vert_nest_wrf471_oracle`). A nest born from its parent
   is interpolated the same way. A nest prepared from the analysis is built on
   its own ladder directly. WRF namelists with `vert_refine_method = 2` and
-  per-domain `e_vert`/`eta_levels` import. Feedback, moving, spawned, split
+  per-domain `e_vert`/`eta_levels` import. Moving, spawned, split
   and streamed edges, and a nest with a different microphysics scheme, are
   refused by name. A tree whose nests name no ladder of their own is
   unchanged: its RunConfigs, fingerprints, checkpoints and caches are the

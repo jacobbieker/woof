@@ -511,7 +511,7 @@ def feedback_provenance(exp: ExperimentConfig) -> Mapping[str, object] | None:
         "shared-explicit-eta-ladder-horizontal-only"
         if exp.vertical.eta_levels
         else "shared-legacy-level-count-horizontal-only")
-    return {
+    receipt = {
         "schema": "gpuwm-experimental-feedback-provenance-v1",
         "feedback": "experimental",
         "feedback_value": 1,
@@ -520,6 +520,24 @@ def feedback_provenance(exp: ExperimentConfig) -> Mapping[str, object] | None:
         "restriction": "wrf-v4.6.1-copy_fcn-horizontal",
         "vertical_mapping": vertical_mapping,
     }
+    # A nest on its own eta ladder, or one whose feedback stops at a
+    # height, runs woof's own operator (woof/core/nest_feedback.py; WRF
+    # refuses feedback with vertical refinement).  Said only when present,
+    # so every other receipt is the one it always was.
+    from woof.experiment import vertically_nested_ids
+    nested = set(vertically_nested_ids(exp))
+    tops = {f"d{int(dc.grid_id):02d}": {
+                "feedback_top_m": float(dc.feedback_top.top_m),
+                "feedback_taper_levels": int(dc.feedback_top.taper_levels)}
+            for dc in exp.domains
+            if getattr(dc, "feedback_top", None) is not None}
+    if nested or tops:
+        receipt["vertical_mapping"] = (
+            "woof-conservative-eta-remap-height-limited")
+        receipt["cross_ladder_nests"] = sorted(
+            f"d{int(gid):02d}" for gid in nested)
+        receipt["feedback_tops"] = tops
+    return receipt
 
 
 def _write_feedback_provenance_receipt(

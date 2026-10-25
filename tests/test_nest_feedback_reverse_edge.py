@@ -125,21 +125,17 @@ def test_mismatched_inventories_no_longer_refuse_two_way():
     assert coupler.microphysics_reverse_transition.mixed is False
 
 
-def test_unequal_vertical_levels_are_still_refused():
-    """The third refusal is a DIFFERENT item and must survive this one.
-
-    The reverse operator averages child cells onto parent cells with no
-    vertical mapping, so a mismatched ladder would feed the parent values
-    from the wrong levels.  That is a missing capability, not a missing
-    measurement.
-    """
+def test_unequal_vertical_levels_feed_back_through_the_ladder_remap():
+    """The third refusal is retired too: a nest on its own ladder is
+    remapped onto the parent's levels before the restriction
+    (woof/core/nest_feedback.py)."""
     parent_cfg = _domain(1, 0, nx=14, ny=14, nz=2, moist=True, mp_physics=6)
     child_cfg = _domain(2, 1, nx=9, ny=9, ratio=3, nz=3, moist=True,
                         mp_physics=6)
     parent = SimpleNamespace(cfg=parent_cfg)
     child = SimpleNamespace(cfg=child_cfg, parent=parent)
-    with pytest.raises(ValueError, match="horizontal-only.*vertical level"):
-        NestCoupler(child, feedback=1)
+    coupler = NestCoupler(child, feedback=1)
+    assert coupler.crosses_ladders and coupler.partial_feedback
 
 
 # --------------------------------------------------------------------------

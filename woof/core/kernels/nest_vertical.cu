@@ -284,3 +284,195 @@ extern "C" __global__ void nest_vert_rebalance(
     }
 #undef I
 }
+
+// ---------------------------------------------------------------------------
+// Two-way feedback from a nest on its own eta ladder, limited in height
+// (woof/core/nest_feedback.py).  Not WRF's: WRF v4.7.1 refuses feedback with
+// vertical refinement (share/module_check_a_mundo.F:2719-2737,
+// "vert_refine_method=2 only works with feedback = 0"), so these are woof's
+// own operators, held to their binary64/binary32 NumPy twins at max ULP 0.
+//
+//   nest_fb_remap     one CHILD column from the child's ladder onto the
+//                     parent's, both ladders placed in the child column's own
+//                     dry-pressure coordinate pd = c3f*MU + c4f (p_top, shared,
+//                     cancels; the bottom edge is MU and the top 0 by
+//                     construction).  mode 0: the layer integral
+//                     Q_k = sum_j overlap(j, k) * src_j, the mass-coupled
+//                     content of parent layer k (conservative: the overlaps
+//                     of a child layer sum to its own mass).  mode 1: an
+//                     interface value, linear in pd between the child
+//                     interfaces that bracket the parent's.  mode 2: the
+//                     column's mass in each parent layer, the divisor that
+//                     turns a restricted content back into a mean.
+//   nest_fb_blend     parent = parent + w_k * (fed - parent), level by level:
+//                     w = 1 copies, w = 0 leaves the parent's word alone.
+//
+// MU at a u (v) point is the mean of the two mass columns beside it, the
+// domain edge taking its one neighbour.  Every sum is binary64, in increasing
+// child-layer order; compiled -fmad=false --ftz=false.
+
+__device__ __forceinline__ double fb_mu(const float* __restrict__ mub,
+                                        const float* __restrict__ mup,
+                                        int ny, int nx, int jf, int i_f,
+                                        int xstag, int ystag)
+{
+    int ja = jf, jb = jf, ia = i_f, ib = i_f;
+    if (xstag) { ia = i_f - 1 < 0 ? 0 : i_f - 1; ib = i_f > nx - 1 ? nx - 1 : i_f; }
+    if (ystag) { ja = jf - 1 < 0 ? 0 : jf - 1; jb = jf > ny - 1 ? ny - 1 : jf; }
+    long long a = (long long)ja * nx + ia;
+    long long b = (long long)jb * nx + ib;
+    double ma = (double)mub[a] + (double)mup[a];
+    if (a == b) return ma;
+    double mb = (double)mub[b] + (double)mup[b];
+    return 0.5 * (ma + mb);
+}
+
+__device__ __forceinline__ double fb_edge(const float* __restrict__ c3,
+                                          const float* __restrict__ c4,
+                                          int k, int nz, double mu)
+{
+    if (k <= 0) return mu;
+    if (k >= nz) return 0.0;
+    double a = (double)c3[k] * mu;
+    return a + (double)c4[k];
+}
+
+extern "C" __global__ void nest_fb_remap(
+    const float* __restrict__ src, float* __restrict__ out,
+    const float* __restrict__ mub, const float* __restrict__ mup,
+    const float* __restrict__ c3c, const float* __restrict__ c4c,
+    const float* __restrict__ c3p, const float* __restrict__ c4p,
+    int nzc, int nzp, int ny, int nx, int nyf, int nxf,
+    int xstag, int ystag, int mode)
+{
+    long long ncol = (long long)nyf * nxf;
+    long long c = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= ncol) return;
+    int jf = (int)(c / nxf), i_f = (int)(c % nxf);
+    double mu = fb_mu(mub, mup, ny, nx, jf, i_f, xstag, ystag);
+    if (mode == 0) {
+        int j0 = 0;
+        for (int k = 0; k < nzp; ++k) {
+            double bot = fb_edge(c3p, c4p, k, nzp, mu);
+            double top = fb_edge(c3p, c4p, k + 1, nzp, mu);
+            double acc = 0.0;
+            for (int j = j0; j < nzc; ++j) {
+                double cb = fb_edge(c3c, c4c, j, nzc, mu);
+                if (cb <= top) break;
+                double ct = fb_edge(c3c, c4c, j + 1, nzc, mu);
+                double ov = fmin(bot, cb) - fmax(top, ct);
+                if (ov > 0.0) {
+                    double term = ov * (double)src[(long long)j * ncol + c];
+                    acc = acc + term;
+                }
+            }
+            while (j0 < nzc && fb_edge(c3c, c4c, j0 + 1, nzc, mu) >= top) ++j0;
+            out[(long long)k * ncol + c] = (float)acc;
+        }
+    } else if (mode == 2) {
+        for (int k = 0; k < nzp; ++k) {
+            double bot = fb_edge(c3p, c4p, k, nzp, mu);
+            double top = fb_edge(c3p, c4p, k + 1, nzp, mu);
+            out[(long long)k * ncol + c] = (float)(bot - top);
+        }
+    } else {
+        int j = 0;
+        for (int k = 0; k <= nzp; ++k) {
+            double x = fb_edge(c3p, c4p, k, nzp, mu);
+            while (j < nzc - 1 && fb_edge(c3c, c4c, j + 1, nzc, mu) >= x) ++j;
+            double lo = fb_edge(c3c, c4c, j, nzc, mu);
+            double hi = fb_edge(c3c, c4c, j + 1, nzc, mu);
+            double f = (lo - x) / (lo - hi);
+            double a = (double)src[(long long)j * ncol + c];
+            double b = (double)src[(long long)(j + 1) * ncol + c];
+            double d = b - a;
+            double s = f * d;
+            out[(long long)k * ncol + c] = (float)(a + s);
+        }
+    }
+}
+
+extern "C" __global__ void nest_fb_blend(
+    float* __restrict__ parent, const float* __restrict__ fed,
+    const float* __restrict__ w, int nlev, int nyf, int nxf,
+    int i0, int j0, int ni, int nj)
+{
+    long long n = (long long)nlev * nj * ni;
+    long long c = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= n) return;
+    int k = (int)(c / ((long long)nj * ni));
+    long long r = c % ((long long)nj * ni);
+    int jf = j0 + (int)(r / ni), i_f = i0 + (int)(r % ni);
+    long long idx = ((long long)k * nyf + jf) * nxf + i_f;
+    float wk = w[k];
+    if (wk == 1.0f) {
+        parent[idx] = fed[idx];
+    } else if (wk != 0.0f) {
+        float p = parent[idx];
+        float d = fed[idx] - p;
+        float s = wk * d;
+        parent[idx] = p + s;
+    }
+}
+
+// nest_fb_ph_column: the height-limited blend of ph, one parent column of the
+// blend window.  Geopotential is a vertical integral, so a level-by-level
+// blend would hand the column above the limit a thickness its mass does not
+// have.  Instead the column is rebuilt upward from the ground, layer by
+// layer, on TOTAL geopotential (phb + ph):
+//   fed layer (w = 1)    the restricted child thickness,
+//   untouched (w = 0)    the parent's own thickness scaled by the change of
+//                        its layer mass, dm(MU_new) / dm(MU_old): the layer's
+//                        inverse density -- hence its p, theta, q -- is kept,
+//   taper (0 < w < 1)    d_old + w * (d_child - d_old).
+// The ground point takes the interface blend of the perturbation.
+extern "C" __global__ void nest_fb_ph_column(
+    float* __restrict__ ph, const float* __restrict__ fed,
+    const float* __restrict__ phb, const float* __restrict__ mub,
+    const float* __restrict__ mup_old, const float* __restrict__ mup_new,
+    const float* __restrict__ c3p, const float* __restrict__ c4p,
+    const float* __restrict__ wl, const float* __restrict__ wi,
+    int nz, int ny, int nx, int phb_column, int i0, int j0, int ni, int nj)
+{
+    long long c = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= (long long)ni * nj) return;
+    int jf = j0 + (int)(c / ni), i_f = i0 + (int)(c % ni);
+    long long plane = (long long)ny * nx;
+    long long at = (long long)jf * nx + i_f;
+    double mb = (double)mub[at];
+    double mu_old = mb + (double)mup_old[at];
+    double mu_new = mb + (double)mup_new[at];
+#define PHB(k) ((double)(phb_column ? phb[(k)] : phb[(long long)(k) * plane + at]))
+    float p0 = ph[at];
+    float r0 = fed[at];
+    float g0;
+    float w0 = wi[0];
+    if (w0 == 1.0f) g0 = r0;
+    else if (w0 == 0.0f) g0 = p0;
+    else { float d = r0 - p0; float s = w0 * d; g0 = p0 + s; }
+    double tot = PHB(0) + (double)g0;
+    double old_lo = PHB(0) + (double)p0;
+    double fed_lo = PHB(0) + (double)r0;
+    ph[at] = g0;
+    for (int k = 0; k < nz; ++k) {
+        long long up = (long long)(k + 1) * plane + at;
+        double old_hi = PHB(k + 1) + (double)ph[up];
+        double fed_hi = PHB(k + 1) + (double)fed[up];
+        double dm_old = fb_edge(c3p, c4p, k, nz, mu_old)
+                        - fb_edge(c3p, c4p, k + 1, nz, mu_old);
+        double dm_new = fb_edge(c3p, c4p, k, nz, mu_new)
+                        - fb_edge(c3p, c4p, k + 1, nz, mu_new);
+        double d_old = (old_hi - old_lo) * (dm_new / dm_old);
+        double d_fed = fed_hi - fed_lo;
+        float w = wl[k];
+        double d;
+        if (w == 1.0f) d = d_fed;
+        else if (w == 0.0f) d = d_old;
+        else { double e = d_fed - d_old; double s = (double)w * e; d = d_old + s; }
+        tot = tot + d;
+        ph[up] = (float)(tot - PHB(k + 1));
+        old_lo = old_hi;
+        fed_lo = fed_hi;
+    }
+#undef PHB
+}
