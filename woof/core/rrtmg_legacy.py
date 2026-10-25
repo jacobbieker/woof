@@ -1265,9 +1265,14 @@ class ParentOzoneProvider:
     not a case for a silent climatology fallback.
     """
 
-    def __init__(self, parent, registration):
+    def __init__(self, parent, registration, *, vertical_plan=None):
         self.parent = parent
         self.registration = registration
+        #: The edge's :class:`woof.core.nest_vertical.VerticalNestPlan`
+        #: when the child runs on its own eta ladder: the parent's o33d is
+        #: on the parent's levels and is interpolated onto the child's
+        #: before the SINT.  ``None`` inside one ladder.
+        self.vertical_plan = vertical_plan
         self.released = False
 
     def release(self) -> None:
@@ -1294,8 +1299,6 @@ class ParentOzoneProvider:
                 "parent's current radiation before it radiates")
         import cupy as cp
 
-        from woof.core import nest_interp as _nest
-
         grid = getattr(self.parent, "_o33d_grid", None)
         if grid is None:
             raise RuntimeError(
@@ -1305,7 +1308,9 @@ class ParentOzoneProvider:
                 "parent->child interpolation routing); fix the call "
                 "sequencing instead of falling back to a per-nest "
                 "climatology WRF never evaluates")
-        child = cp.asnumpy(_nest.sint(cp.asarray(grid), self.registration))
+        from woof.core.nest_vertical import sint_onto_child_ladder
+        child = cp.asnumpy(sint_onto_child_ladder(
+            self.vertical_plan, cp.asarray(grid), self.registration))
         nz = child.shape[0]
         return np.ascontiguousarray(
             child.transpose(1, 2, 0).reshape(-1, nz))

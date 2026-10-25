@@ -298,7 +298,13 @@ def transfer_parent_ozone(node, registration):
     if source is None or parent_counts.get("cam_ozone", 0) == 0:
         raise RuntimeError("child CAM ozone FORCE preceded its parent's first "
                            "ozone producer; local climatology cannot replace it")
-    sint(source, registration, out=driver.o3rad)
+    # A child on its own eta ladder takes the parent's ozone through the
+    # vertical interpolation first, as every other parent field reaches it.
+    from woof.core.nest_vertical import sint_onto_child_ladder
+    coupler = getattr(node, "coupler", None)
+    plan = (coupler.vertical_plan()
+            if getattr(coupler, "crosses_ladders", False) else None)
+    sint_onto_child_ladder(plan, source, registration, out=driver.o3rad)
     streamed = getattr(node.state, "_streamed_domain", None)
     count = domain_call_counts(streamed, node.state).get("cam_ozone", 0) + 1
     driver.call_counts["cam_ozone"] = count

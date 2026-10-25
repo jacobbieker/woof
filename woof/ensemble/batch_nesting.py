@@ -319,6 +319,11 @@ class PreparedMemberNestEdge:
             raise ValueError("member feedback and smoothing retain the original options")
         if parent.cfg.nz != child.cfg.nz:
             raise BatchStateUnsupported("member feedback has no vertical mapping between different domain level counts")
+        if getattr(parent.cfg, "eta_levels", None) != getattr(child.cfg, "eta_levels", None):
+            raise BatchStateUnsupported(
+                "a member nest edge between two eta ladders is not implemented: its forcing "
+                "and restriction run on the parent's levels.  Run a nest on its own "
+                "eta_levels through the single-member tree (woof/core/nest.py)")
         if not isinstance(parent_dt_fp32, np.float32) or not np.isfinite(parent_dt_fp32) or parent_dt_fp32 <= 0:
             raise ValueError("member nest edge requires the original positive FP32 parent step")
         if isinstance(parent_interval_ticks, bool) or int(parent_interval_ticks) <= 0:

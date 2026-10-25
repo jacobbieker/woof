@@ -1352,7 +1352,7 @@ BASELINE_PINNED: dict[str, str] = {
     # woof/core/nest_feedback.py),
     # held to their NumPy twins (tests/test_nest_feedback_vertical.py);
     # the two WRF kernels above them are unchanged.  Previously a287e47a.
-    "nest_vertical": "9f35912a893b955bcb9f0600f0bad610e22845489ce40e22ecd4e99419c5d41e",
+    "nest_vertical": "34b9327b30e96dff241273080ef68f3ba4114971eae3086fce0d51938af07b4b",
 }
 
 _FROZEN = _frozen_module()

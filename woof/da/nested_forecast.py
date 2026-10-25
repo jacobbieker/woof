@@ -592,6 +592,12 @@ def nested_experiment(exp: ExperimentConfig,
     a child that can restrict its parent is a different experiment whose
     parent trajectory is no longer the one the ensemble was scored on.
     """
+    from woof.experiment import has_own_ladder
+    if has_own_ladder(child_dc):
+        raise NestedForecastRefusal(
+            "a DA nested free-forecast child on its own eta_levels is not "
+            "implemented: the analysis increment is carried down on the "
+            "parent's levels.  Drop the child's eta_levels for this leg")
     if len(exp.domains) != 1:
         raise NestedForecastRefusal(
             f"nested free-forecast legs attach ONE child to a single-domain "

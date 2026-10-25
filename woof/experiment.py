@@ -1195,10 +1195,12 @@ def _refuse_unsupported_partial_feedback(exp) -> None:
     """
     if int(exp.feedback) == 0:
         return
+    # A nest on its own ladder already meets these refusals, word for word,
+    # in _refuse_unsupported_vertical_nesting; only a height limit on a
+    # nest that shares its parent's levels is new here.
     nested = set(vertically_nested_ids(exp))
-    limited = {int(dc.grid_id) for dc in exp.domains
-               if getattr(dc, "feedback_top", None) is not None}
-    special = nested | limited
+    special = {int(dc.grid_id) for dc in exp.domains
+               if getattr(dc, "feedback_top", None) is not None} - nested
     if not special:
         return
     by_id = {int(dc.grid_id): dc for dc in exp.domains}
@@ -4440,10 +4442,13 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     "[experiment] feedback = 0.",
                     "Set feedback = 1 to feed the nest back below the "
                     "height, or remove feedback_top_m."))
+            where = f"[[domain]] grid_id = {grid_id} of {source}"
             try:
                 feedback_top = FeedbackTop(
-                    top_m=dom["feedback_top_m"],
-                    taper_levels=dom.get("feedback_taper_levels", 3))
+                    top_m=_DOMAIN_KEY_ROWS["feedback_top_m"].get(
+                        dom, where=where),
+                    taper_levels=_DOMAIN_KEY_ROWS[
+                        "feedback_taper_levels"].get(dom, where=where))
             except ValueError as err:
                 raise ValueError(
                     f"[[domain]] grid_id = {grid_id} of {source}: {err}"

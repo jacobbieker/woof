@@ -40,10 +40,10 @@ NumPy twin rather than to an oracle:
    ``nest_fb_ph_column``): geopotential is a vertical integral, so the
    column is rebuilt upward from the ground on total geopotential, the
    fed layers taking the child's thickness and the untouched ones their
-   own scaled by the change of their layer mass under the fed-back
-   ``mu``.  Above the limit every layer keeps its inverse density, hence
-   its pressure, potential temperature and moisture; its geopotential
-   moves only by what the column below it now weighs.
+   own.  The parent keeps its ``mu`` under a limit (below), so above the
+   limit every layer keeps its mass and inverse density, hence its
+   pressure, potential temperature and moisture; its geopotential moves
+   only by what the column below it now weighs.
 
 ``mu`` is a column quantity: with the whole column fed back it is fed
 back whole, as WRF feeds it, and each layer's dry mass is then the child's
@@ -274,19 +274,16 @@ def blend(parent, fed, weights, window):
     return parent
 
 
-def ph_column_cpu(ph, fed, phb, mub, mup_old, mup_new, parent_ladder,
-                  w_layer, w_iface, window):
-    """The twin of ``nest_fb_ph_column``, in place on ``ph``."""
+def ph_column_cpu(ph, fed, phb, w_layer, w_iface, window):
+    """The twin of ``nest_fb_ph_column``, in place on ``ph``.  ``fed`` is
+    read only where a layer weight is nonzero (the levels the transaction
+    restricted)."""
 
-    c3p, c4p = parent_ladder
-    nz = c3p.size - 1
     i0, j0, ni, nj = window
     if ni <= 0 or nj <= 0:
         return ph
+    nz = ph.shape[0] - 1
     sl = (slice(j0, j0 + nj), slice(i0, i0 + ni))
-    mb = np.asarray(mub, dtype=F)[sl].astype(D)
-    mu_old = mb + np.asarray(mup_old, dtype=F)[sl].astype(D)
-    mu_new = mb + np.asarray(mup_new, dtype=F)[sl].astype(D)
     phb = np.asarray(phb, dtype=F)
 
     def base(k):
@@ -308,33 +305,25 @@ def ph_column_cpu(ph, fed, phb, mub, mup_old, mup_new, parent_ladder,
     ph[(0,) + sl] = g0
     for k in range(nz):
         old_hi = base(k + 1) + ph[(k + 1,) + sl].astype(D)
-        fed_hi = base(k + 1) + fed[(k + 1,) + sl].astype(D)
-        dm_old = _edge_cpu(c3p, c4p, k, nz, mu_old) - _edge_cpu(
-            c3p, c4p, k + 1, nz, mu_old)
-        dm_new = _edge_cpu(c3p, c4p, k, nz, mu_new) - _edge_cpu(
-            c3p, c4p, k + 1, nz, mu_new)
-        d_old = (old_hi - old_lo) * (dm_new / dm_old)
-        d_fed = fed_hi - fed_lo
+        d_old = old_hi - old_lo
         w = wl[k]
-        if w == F(1.0):
-            d = d_fed
-        elif w == F(0.0):
-            d = d_old
-        else:
-            d = d_old + D(w) * (d_fed - d_old)
+        d = d_old
+        if w != F(0.0):
+            fed_hi = base(k + 1) + fed[(k + 1,) + sl].astype(D)
+            d_fed = fed_hi - fed_lo
+            d = d_fed if w == F(1.0) else d_old + D(w) * (d_fed - d_old)
+            fed_lo = fed_hi
         tot = tot + d
         ph[(k + 1,) + sl] = (tot - base(k + 1)).astype(F)
-        old_lo, fed_lo = old_hi, fed_hi
+        old_lo = old_hi
     return ph
 
 
-def ph_column(ph, fed, phb, mub, mup_old, mup_new, parent_ladder, w_layer,
-              w_iface, window):
+def ph_column(ph, fed, phb, w_layer, w_iface, window):
     """``nest_fb_ph_column`` in place on ``ph`` (or its twin)."""
 
     if _is_host(ph):
-        return ph_column_cpu(ph, fed, phb, mub, mup_old, mup_new,
-                             parent_ladder, w_layer, w_iface, window)
+        return ph_column_cpu(ph, fed, phb, w_layer, w_iface, window)
     import cupy as cp
 
     i0, j0, ni, nj = (int(v) for v in window)
@@ -343,15 +332,11 @@ def ph_column(ph, fed, phb, mub, mup_old, mup_new, parent_ladder, w_layer,
     for name, a in (("ph", ph), ("fed", fed)):
         if not a.flags.c_contiguous or a.dtype != cp.float32:
             raise ValueError(f"ph_column {name} must be contiguous float32")
-    c3p, c4p = _dev_ladder(parent_ladder)
-    nz = int(c3p.size) - 1
+    nz = int(ph.shape[0]) - 1
     phb = cp.ascontiguousarray(phb, dtype=cp.float32)
     _kernel("nest_fb_ph_column")(
         _blocks(ni * nj), (_BLOCK,),
-        (ph, fed, phb, cp.ascontiguousarray(mub, dtype=cp.float32),
-         cp.ascontiguousarray(mup_old, dtype=cp.float32),
-         cp.ascontiguousarray(mup_new, dtype=cp.float32), c3p, c4p,
-         cp.asarray(w_layer, dtype=cp.float32),
+        (ph, fed, phb, cp.asarray(w_layer, dtype=cp.float32),
          cp.asarray(w_iface, dtype=cp.float32), np.int32(nz),
          np.int32(ph.shape[1]), np.int32(ph.shape[2]),
          np.int32(1 if phb.ndim == 1 else 0), np.int32(i0), np.int32(j0),

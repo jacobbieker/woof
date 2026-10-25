@@ -421,16 +421,14 @@ extern "C" __global__ void nest_fb_blend(
 // have.  Instead the column is rebuilt upward from the ground, layer by
 // layer, on TOTAL geopotential (phb + ph):
 //   fed layer (w = 1)    the restricted child thickness,
-//   untouched (w = 0)    the parent's own thickness scaled by the change of
-//                        its layer mass, dm(MU_new) / dm(MU_old): the layer's
-//                        inverse density -- hence its p, theta, q -- is kept,
+//   untouched (w = 0)    the parent's own thickness (the parent's mu is not
+//                        fed back under a height limit, so each layer keeps
+//                        its mass and its inverse density, hence its p),
 //   taper (0 < w < 1)    d_old + w * (d_child - d_old).
 // The ground point takes the interface blend of the perturbation.
 extern "C" __global__ void nest_fb_ph_column(
     float* __restrict__ ph, const float* __restrict__ fed,
-    const float* __restrict__ phb, const float* __restrict__ mub,
-    const float* __restrict__ mup_old, const float* __restrict__ mup_new,
-    const float* __restrict__ c3p, const float* __restrict__ c4p,
+    const float* __restrict__ phb,
     const float* __restrict__ wl, const float* __restrict__ wi,
     int nz, int ny, int nx, int phb_column, int i0, int j0, int ni, int nj)
 {
@@ -439,9 +437,6 @@ extern "C" __global__ void nest_fb_ph_column(
     int jf = j0 + (int)(c / ni), i_f = i0 + (int)(c % ni);
     long long plane = (long long)ny * nx;
     long long at = (long long)jf * nx + i_f;
-    double mb = (double)mub[at];
-    double mu_old = mb + (double)mup_old[at];
-    double mu_new = mb + (double)mup_new[at];
 #define PHB(k) ((double)(phb_column ? phb[(k)] : phb[(long long)(k) * plane + at]))
     float p0 = ph[at];
     float r0 = fed[at];
@@ -457,18 +452,16 @@ extern "C" __global__ void nest_fb_ph_column(
     for (int k = 0; k < nz; ++k) {
         long long up = (long long)(k + 1) * plane + at;
         double old_hi = PHB(k + 1) + (double)ph[up];
-        double fed_hi = PHB(k + 1) + (double)fed[up];
-        double dm_old = fb_edge(c3p, c4p, k, nz, mu_old)
-                        - fb_edge(c3p, c4p, k + 1, nz, mu_old);
-        double dm_new = fb_edge(c3p, c4p, k, nz, mu_new)
-                        - fb_edge(c3p, c4p, k + 1, nz, mu_new);
-        double d_old = (old_hi - old_lo) * (dm_new / dm_old);
-        double d_fed = fed_hi - fed_lo;
+        double d_old = old_hi - old_lo;
         float w = wl[k];
-        double d;
-        if (w == 1.0f) d = d_fed;
-        else if (w == 0.0f) d = d_old;
-        else { double e = d_fed - d_old; double s = (double)w * e; d = d_old + s; }
+        double d = d_old;
+        double fed_hi = fed_lo;
+        if (w != 0.0f) {
+            fed_hi = PHB(k + 1) + (double)fed[up];
+            double d_fed = fed_hi - fed_lo;
+            if (w == 1.0f) d = d_fed;
+            else { double e = d_fed - d_old; double s = (double)w * e; d = d_old + s; }
+        }
         tot = tot + d;
         ph[up] = (float)(tot - PHB(k + 1));
         old_lo = old_hi;

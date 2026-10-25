@@ -532,8 +532,10 @@ def feedback_provenance(exp: ExperimentConfig) -> Mapping[str, object] | None:
             for dc in exp.domains
             if getattr(dc, "feedback_top", None) is not None}
     if nested or tops:
-        receipt["vertical_mapping"] = (
-            "woof-conservative-eta-remap-height-limited")
+        receipt["vertical_mapping"] = "-".join(
+            (["woof-conservative-eta-remap"] if nested else
+             ["shared-eta-ladder"])
+            + (["height-limited"] if tops else []))
         receipt["cross_ladder_nests"] = sorted(
             f"d{int(gid):02d}" for gid in nested)
         receipt["feedback_tops"] = tops
@@ -1723,7 +1725,7 @@ def prepare_experiment_case(exp: ExperimentConfig,
 def _child_radiation_adapter(exp: ExperimentConfig, data: CaseDataConfig,
                              dc, state, lat, lon, *,
                              radiation_workspace=None,
-                             radiation_parent=None):
+                             radiation_parent=None, vertical_plan=None):
     """Construct one child domain's radiation adapter (shared by the
     t=0 preparer and the relocation preparer, so a relocated child's
     radiation is wired by exactly the code that wired it at start)."""
@@ -1753,7 +1755,8 @@ def _child_radiation_adapter(exp: ExperimentConfig, data: CaseDataConfig,
                 child_nx=cfg.nx, child_ny=cfg.ny,
                 parent_nx=parent_dc.run.nx, parent_ny=parent_dc.run.ny,
                 stagger="", wrapper="interp")
-            ozone_parent = ParentOzoneProvider(radiation_parent, registration)
+            ozone_parent = ParentOzoneProvider(
+                radiation_parent, registration, vertical_plan=vertical_plan)
     radiation = make_radiation(
         cfg, exp.start_time, lat, lon, p_top=float(state.p_top),
         trace_gas_overrides=({"co2": data.co2_vmr}
@@ -1980,12 +1983,20 @@ def rebuild_child_driver_from_land_state(*, exp: ExperimentConfig,
                             static_fields=static)
     if radiation_factory is None:
         parent_physics = getattr(parent_node.state, "physics", None)
+        # A child on its own eta ladder receives the parent's ozone through
+        # the vertical interpolation (woof/core/nest_vertical.py).
+        vertical_plan = None
+        from woof.core.nest_vertical import VerticalNestPlan, ladders_differ
+        if ladders_differ(parent_node.state, state):
+            vertical_plan = VerticalNestPlan.from_states(
+                parent_node.state, state, child_dc.run)
         radiation = _child_radiation_adapter(
             exp, data, child_dc, state, lat, lon,
             radiation_workspace=(
                 model._activation_context or {}).get("radiation_workspace"),
             radiation_parent=(None if parent_physics is None
-                              else parent_physics.radiation_callable))
+                              else parent_physics.radiation_callable),
+            vertical_plan=vertical_plan)
     else:
         radiation = radiation_factory(child_dc, state, lat, lon)
     if landuse_attrs is None:

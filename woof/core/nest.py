@@ -146,8 +146,9 @@ def _rebase_feedback_theta(state, reg, spec_zone, field=None) -> None:
     window = target[:, j_lo:j_hi + 1, i_lo:i_hi + 1]
     window += _WRF_T0
     thb = state.thb
-    window -= (thb[:, j_lo:j_hi + 1, i_lo:i_hi + 1] if thb.ndim == 3
-               else thb[:, None, None])
+    nlev = window.shape[0]
+    window -= (thb[:nlev, j_lo:j_hi + 1, i_lo:i_hi + 1] if thb.ndim == 3
+               else thb[:nlev, None, None])
 
 
 def _cupy():
@@ -1194,6 +1195,14 @@ class NestCoupler:
                 "height, and an end of it is tile-streamed: the streamed "
                 "restriction has no vertical remap or level taper.  Turn "
                 "[tiles] off for both domains of the edge.")
+        if self.partial_feedback and any(
+                isinstance(getattr(parent.state, _state_attr(kind), None),
+                           SlabField) for kind in payload["kinds"]):
+            raise RuntimeError(
+                f"a split parent d{parent.cfg.grid_id:02d} under a "
+                "cross-ladder or height-limited feedback edge: refused, the "
+                "split restriction has no vertical remap or level taper.  "
+                "Run the edge on one card.")
         if streamed_parent and not canonical_parent:
             _sync_in(parent.state,
                      tuple(dict.fromkeys(
@@ -1415,18 +1424,20 @@ class NestCoupler:
         self._fb_windows[stagger] = (rect, union, region)
         return self._fb_windows[stagger]
 
-    def _partial_work(self, name: str, like):
-        """A persistent work array shaped like ``like`` (one per name and
-        shape, allocated at the first feedback and reused every parent
-        step: at most the four parent field shapes plus the three
-        restricted layer masses, about 7 parent 3-D fields of scratch).
-        Every cell read is written first in the same transaction, so the
-        buffers carry nothing across steps or restarts."""
-        key = (name, tuple(like.shape))
+    def _partial_work(self, name: str, like=None, *, shape=None):
+        """A persistent float32 work array (one per name and shape,
+        allocated at the first feedback and reused every parent step).
+        On a height-limited edge the field buffers hold only the levels the
+        limit feeds back.  Every cell read is written first in the same
+        transaction, so the buffers carry nothing across steps or
+        restarts."""
+        shape = tuple(like.shape if shape is None else shape)
+        key = (name, shape)
         work = self._fb_work.get(key)
         if work is None:
-            xp = np if isinstance(like, np.ndarray) else _cupy()
-            work = xp.empty(like.shape, dtype=np.float32)
+            pstate = self.child_node.parent.state
+            xp = np if isinstance(pstate.mup, np.ndarray) else _cupy()
+            work = xp.empty(shape, dtype=np.float32)
             self._fb_work[key] = work
         return work
 
@@ -1484,42 +1495,57 @@ class NestCoupler:
                      smooth_option=self.smooth_option,
                      scratch=self._scratch("nest_parent_field"))
 
-        def layer_mass(stagger, like_child, like_parent):
+        below = self.feedback_levels_below
+
+        def levels(kind, nlev):
+            # The parent levels this kind writes: all of them on a whole
+            # column; under a limit the fed-back layers (interfaces up to the
+            # top of the last one), ph excepted, whose column is rebuilt.
+            if not tapered or kind == "ph":
+                return nlev
+            return below + 1 if kind in fb.INTERFACE_KINDS else below
+
+        def remapped(name, field, nlev_out, **kw):
+            out = self._partial_work(
+                name, shape=(nlev_out,) + tuple(field.shape[1:]))
+            return fb.remap_layers(field, cstate.mub2d, cstate.mup,
+                                   const["child"], const["parent"], out=out,
+                                   **kw)
+
+        def layer_mass(stagger, like_child, nlev):
             # The child columns' own masses in the parent's layers,
             # restricted: the divisor that makes the restricted content a
             # mass-weighted mean (a constant comes back as itself).
             if stagger not in masses:
-                column = fb.remap_layers(
-                    like_child, cstate.mub2d, cstate.mup, const["child"],
-                    const["parent"], xstag=int(stagger == "x"),
-                    ystag=int(stagger == "y"), mass=True)
-                restricted = self._partial_work(f"mass_{stagger}",
-                                                like_parent)
-                copy_fcn(restricted, column, self.registrations[stagger],
+                column = remapped(f"mass_column_{stagger}", like_child, nz,
+                                  xstag=int(stagger == "x"),
+                                  ystag=int(stagger == "y"), mass=True)
+                reg = self.registrations[stagger]
+                restricted = self._partial_work(
+                    f"mass_{stagger}", shape=(nlev, reg.nyp, reg.nxp))
+                copy_fcn(restricted, column[:nlev], reg,
                          spec_zone=run.spec_zone)
                 masses[stagger] = restricted
             return masses[stagger]
 
-        def parent_mass(like_parent):
+        def parent_mass(nlev):
             # The parent's own layer masses (scalars are mass points).
             if "parent" not in masses:
+                out = self._partial_work("mass_parent",
+                                         shape=(nz,) + tuple(pstate.mup.shape))
                 masses["parent"] = fb.remap_layers(
-                    like_parent, pstate.mub2d, pstate.mup, const["parent"],
-                    const["parent"], mass=True)
-            return masses["parent"]
+                    out, pstate.mub2d, pstate.mup, const["parent"],
+                    const["parent"], mass=True, out=out)
+            return masses["parent"][:nlev]
 
         for kind in kinds:
             if kind == "mu":
                 continue
             stagger = _STAGGER.get(kind, "m")
             reg = self.registrations[stagger]
-            target = getattr(pstate, _state_attr(kind))
-            if isinstance(target, SlabField):
-                raise RuntimeError(
-                    f"a split parent d{parent.cfg.grid_id:02d} under a "
-                    "cross-ladder or height-limited feedback edge: refused, "
-                    "the split restriction has no vertical remap or level "
-                    "taper.  Run the edge on one card.")
+            full = getattr(pstate, _state_attr(kind))
+            nlev = levels(kind, int(full.shape[0]))
+            target = full[:nlev]
             xstag, ystag = int(kind == "u"), int(kind == "v")
             interface = kind in fb.INTERFACE_KINDS
             child_field = (self._mapped_child_field(kind) if kind in diagnosed
@@ -1527,14 +1553,17 @@ class NestCoupler:
             if crossing and kind == "ph":
                 # The total geopotential: each ladder's base is its own.
                 phb = cstate.phb
-                child_field = child_field + (
-                    phb if phb.ndim == 3 else phb[:, None, None])
+                total = self._partial_work("ph_total", child_field)
+                total[...] = child_field
+                total += phb if phb.ndim == 3 else phb[:, None, None]
+                child_field = total
             source = child_field
             if crossing:
-                child_field = fb.remap_layers(
-                    child_field, cstate.mub2d, cstate.mup, const["child"],
-                    const["parent"], xstag=xstag, ystag=ystag,
-                    interface=interface)
+                child_field = remapped(
+                    f"remap_{kind in fb.INTERFACE_KINDS}_{stagger}",
+                    child_field, nz + 1 if interface else nz, xstag=xstag,
+                    ystag=ystag, interface=interface)
+            child_field = child_field[:nlev]
             rect, union, region = self._partial_windows(stagger)
             work = self._partial_work("field", target)
             ri, rj, rni, rnj = region
@@ -1551,9 +1580,9 @@ class NestCoupler:
                 # by the child's restricted layer mass, so a constant
                 # comes back as itself.
                 if kind in _SIGNED_KINDS:
-                    mass = layer_mass(stagger, source, target)
+                    mass = layer_mass(stagger, source, nlev)
                 else:
-                    mass = parent_mass(target)
+                    mass = parent_mass(nlev)
                 work[cells] = work[cells] / mass[cells]
             if crossing and kind == "ph":
                 phb = pstate.phb
@@ -1568,13 +1597,11 @@ class NestCoupler:
                          scratch=self._scratch("nest_parent_field"))
                 self._clamp_smoothed(work, kind, reg)
             if kind == "ph" and tapered:
-                fb.ph_column(target, work, pstate.phb, pstate.mub2d,
-                             pstate.mup, pstate.mup, const["parent"],
-                             const["w"], const["wi"], union)
+                fb.ph_column(target, work, pstate.phb, const["w"],
+                             const["wi"], union)
                 continue
-            weights = const["wi"] if int(work.shape[0]) == nz + 1 \
-                else const["w"]
-            fb.blend(target, work, weights, union)
+            weights = const["wi"] if interface else const["w"]
+            fb.blend(target, work, weights[:nlev], union)
 
     def feedback_finalize(self, node) -> None:
         if node is not self.child_node:

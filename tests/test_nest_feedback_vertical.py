@@ -147,23 +147,18 @@ def test_ph_column_matches_its_twin_bit_for_bit(flat):
     import cupy as cp
 
     rng = np.random.default_rng(9)
-    parent = _ladder(30, rng)
     ny, nx = 11, 13
     ph = rng.normal(0.0, 50.0, (31, ny, nx)).astype(F)
     fed = (ph + rng.normal(0.0, 5.0, ph.shape)).astype(F)
     phb = (np.linspace(0.0, 2.0e5, 31) if flat else
            np.linspace(0.0, 2.0e5, 31)[:, None, None]
            + rng.uniform(0, 3000.0, (1, ny, nx))).astype(F)
-    mub = rng.uniform(70000.0, 95000.0, (ny, nx)).astype(F)
-    old = rng.uniform(-300.0, 300.0, (ny, nx)).astype(F)
-    new = (old + rng.uniform(-50.0, 50.0, (ny, nx))).astype(F)
     w, wi = fb.level_weights(30, 12, 3)
     window = (1, 2, nx - 3, ny - 4)
     host = ph.copy()
-    fb.ph_column_cpu(host, fed, phb, mub, old, new, parent, w, wi, window)
+    fb.ph_column_cpu(host, fed, phb, w, wi, window)
     dev = cp.asarray(ph)
-    fb.ph_column(dev, cp.asarray(fed), cp.asarray(phb), cp.asarray(mub),
-                 cp.asarray(old), cp.asarray(new), parent, w, wi, window)
+    fb.ph_column(dev, cp.asarray(fed), cp.asarray(phb), w, wi, window)
     np.testing.assert_array_equal(host.view(np.int32),
                                   cp.asnumpy(dev).view(np.int32))
     assert not np.array_equal(host, ph)
@@ -527,3 +522,97 @@ def test_height_limited_feedback_restart_is_sha_identical(monkeypatch,
                        pool_trim_per_period=False)
     assert tf._feedback_state_sha256(resumed) == unbroken_sha
     assert resumed.node(2).coupler.feedback_levels_below == 1
+
+
+# -- parent->child carriers on an own-ladder nest ------------------------------
+
+
+def _ozone_edge(xp, *, nzp=8, nzc=15, ratio=3):
+    """A CAM-ozone (o3input = 2) parent->child edge with the child on its
+    own ladder: real registration and plan, stub physics drivers."""
+    from test_vertical_nesting_config import CHILD_ETA, SHARED_ETA, _plan
+
+    from woof.core.cam_ozone import ROUTING_PARENT_INTERPOLATED
+    from woof.core.nest_interp import register_nest
+
+    assert len(SHARED_ETA) - 1 == nzp and len(CHILD_ETA) - 1 == nzc
+    plan = _plan(SHARED_ETA, CHILD_ETA)
+    parent_cfg = _domain(1, 0, nx=20, ny=20, nz=nzp)
+    child_cfg = _domain(2, 1, nx=8 * ratio, ny=8 * ratio, nz=nzc,
+                        ratio=ratio)
+    reg = register_nest(
+        nri=ratio, nrj=ratio, i_parent_start=child_cfg.i_parent_start,
+        j_parent_start=child_cfg.j_parent_start, child_nx=child_cfg.run.nx,
+        child_ny=child_cfg.run.ny, parent_nx=20, parent_ny=20, stagger="",
+        wrapper="interp")
+    rng = np.random.default_rng(5)
+    parent_o3 = rng.uniform(1e-8, 1e-5, (nzp, 20, 20)).astype(F)
+    parent = SimpleNamespace(
+        state=SimpleNamespace(physics=SimpleNamespace(
+            o3rad=xp.asarray(parent_o3), call_counts={"cam_ozone": 1})))
+    child_driver = SimpleNamespace(
+        cam_ozone=SimpleNamespace(mode=ROUTING_PARENT_INTERPOLATED),
+        o3rad=xp.zeros((nzc, child_cfg.run.ny, child_cfg.run.nx),
+                       dtype=xp.float32),
+        call_counts={})
+    node = SimpleNamespace(
+        cfg=child_cfg, parent=parent,
+        state=SimpleNamespace(physics=child_driver),
+        coupler=SimpleNamespace(crosses_ladders=True,
+                                vertical_plan=lambda: plan))
+    return node, reg, plan, parent_o3
+
+
+def test_cam_ozone_reaches_an_own_ladder_nest_on_its_levels_cpu():
+    """o3input = 2 on an own-ladder nest: the parent's ozone (8 levels)
+    reaches the child (15) through the vertical interpolation, then SINT,
+    instead of SINT writing parent levels into a child-shaped buffer."""
+    from woof.core.cam_ozone import transfer_parent_ozone
+    from woof.core.nest_interp import sint, window_registration
+
+    node, reg, plan, parent_o3 = _ozone_edge(np)
+    transfer_parent_ozone(node, reg)
+    got = node.state.physics.o3rad
+    cropped, donor = window_registration(reg, (slice(0, reg.nyc),
+                                               slice(0, reg.nxc)))
+    want = sint(plan.interp_cpu(np.ascontiguousarray(
+        parent_o3[(slice(None),) + donor])), cropped)
+    np.testing.assert_array_equal(got, want)
+    assert node.state.physics.call_counts["cam_ozone"] == 1
+
+
+@requires_gpu
+@pytest.mark.gpu
+def test_cam_ozone_own_ladder_transfer_cpu_and_gpu_agree_bit_for_bit():
+    import cupy as cp
+
+    from woof.core.cam_ozone import transfer_parent_ozone
+
+    host_node, reg, _, _ = _ozone_edge(np)
+    transfer_parent_ozone(host_node, reg)
+    dev_node, reg, _, _ = _ozone_edge(cp)
+    transfer_parent_ozone(dev_node, reg)
+    np.testing.assert_array_equal(
+        host_node.state.physics.o3rad.view(np.int32),
+        cp.asnumpy(dev_node.state.physics.o3rad).view(np.int32))
+
+
+@requires_gpu
+@pytest.mark.gpu
+def test_legacy_rrtmg_parent_ozone_provider_uses_the_child_ladder():
+    """The legacy-RRTMG route (ParentOzoneProvider) carries o33d the same
+    way, and agrees with the CPU path bit for bit."""
+    from woof.core.nest_interp import sint, window_registration
+    from woof.core.rrtmg_legacy import ParentOzoneProvider
+
+    node, reg, plan, parent_o3 = _ozone_edge(np)
+    provider = ParentOzoneProvider(SimpleNamespace(_o33d_grid=parent_o3),
+                                   reg, vertical_plan=plan)
+    columns = provider()
+    cropped, donor = window_registration(reg, (slice(0, reg.nyc),
+                                               slice(0, reg.nxc)))
+    want = sint(plan.interp_cpu(np.ascontiguousarray(
+        parent_o3[(slice(None),) + donor])), cropped)
+    nz = want.shape[0]
+    np.testing.assert_array_equal(
+        columns, want.transpose(1, 2, 0).reshape(-1, nz))

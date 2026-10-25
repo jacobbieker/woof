@@ -945,6 +945,16 @@ Fixed:
   gate warns instead of refusing and the forecast-device check is
   skipped, since no forecast starts.
 
+- A nest on its own eta ladder with CAM ozone (`o3input = 2`) crashed in
+  `cam_ozone.transfer_parent_ozone`. SINT wrote the parent's levels into a
+  child-shaped buffer. The CAM and legacy-RRTMG parent ozone carriers now
+  reach such a nest through the vertical interpolation, then SINT, as every
+  other parent field does (`nest_vertical.sint_onto_child_ladder`). The CPU
+  and GPU paths match bit for bit.
+- Batched ensemble member nests and DA nested free-forecast legs carry
+  parent fields on the parent's levels. A child on its own `eta_levels` is
+  now refused by name on both paths.
+
 ## 1.1.1
 
 WOOF 1.1.1 takes engine 2.9.7 and the hex model 0.4.5. Forecast answers change.

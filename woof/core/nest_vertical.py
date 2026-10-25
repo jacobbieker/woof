@@ -562,6 +562,33 @@ def interp_any(plan: VerticalNestPlan, field):
     return plan.interp(field)
 
 
+def sint_onto_child_ladder(plan, source, registration, *, out=None):
+    """A parent mass-point field on the parent's half levels, carried onto
+    a child: WRF's order, the parent's donor columns interpolated onto the
+    child's ladder first (:meth:`VerticalNestPlan.interp`, or its CPU twin
+    on a host array), then SINT horizontally.  ``plan`` ``None`` (one
+    ladder) is the bare SINT, word for word.
+
+    Every parent->child transfer outside the dynamics' own forcing (the
+    CAM and legacy-RRTMG ozone carriers) goes through here, so a child on
+    its own ladder never receives a field on the parent's level count.
+    """
+    from woof.core.nest_interp import sint, window_registration
+
+    if plan is None:
+        return sint(source, registration, out=out)
+    cropped, donor = window_registration(
+        registration, (slice(0, registration.nyc), slice(0, registration.nxc)))
+    if isinstance(source, np.ndarray):
+        window = np.ascontiguousarray(source[(slice(None),) + donor],
+                                      dtype=np.float32)
+    else:
+        import cupy as cp
+        window = cp.ascontiguousarray(source[(slice(None),) + donor],
+                                      dtype=cp.float32)
+    return sint(interp_any(plan, window), cropped, out=out)
+
+
 #: The parent fields a nest's initialization reads through the vertical
 #: interpolation (woof.ingest.nest_init.parent_only_init and its base):
 #: every prognostic and scalar on the parent's half or full levels, the
@@ -690,4 +717,5 @@ def _kernel(name: str):
 
 __all__ = ["VerticalNestPlan", "VerticalNestRefused",
            "VerticallyNestedParent", "interp_any",
-           "ladders_differ", "module_source", "reference_heights"]
+           "ladders_differ", "module_source", "reference_heights",
+           "sint_onto_child_ladder"]
