@@ -42,7 +42,7 @@ def test_ordered_height_integrals_match_host(monkeypatch, aligned, kind):
 
 
 @pytest.mark.skipif(os.environ.get('HEX_TEST_CUDA') != '1', reason='requires an owned CUDA card')
-@pytest.mark.parametrize('source_levels,target_levels', [(1, 1), (9, 5), (55, 55)])
+@pytest.mark.parametrize('source_levels,target_levels', [(1, 1), (9, 5), (55, 55), (256, 256), (256, 137)])
 @pytest.mark.parametrize('middle', [(), (2, 3)])
 def test_layer_rates_match_host_and_refresh_values(monkeypatch, source_levels, target_levels, middle):
     pytest.importorskip('cupy')
@@ -64,3 +64,28 @@ def test_layer_rates_match_host_and_refresh_values(monkeypatch, source_levels, t
         actual = w.layer_intensive(product)
         assert actual.shape == expected.shape
         assert actual.tobytes() == expected.tobytes()
+
+
+@pytest.mark.skipif(os.environ.get('HEX_TEST_CUDA') != '1', reason='requires an owned CUDA card')
+@pytest.mark.parametrize('aligned', [False, True])
+def test_256_layer_height_integrals_match_host(aligned):
+    """The deepest hex column (256 layers, source index 255) on the GPU route, 0 ULP."""
+    pytest.importorskip('cupy')
+    rng=np.random.default_rng(256)
+    n=19; levels=256
+    overlap=np.eye(n)*.75+np.roll(np.eye(n),1,axis=1)*.25
+    horizontal=ConservativeMap(csr_matrix(overlap),np.ones(n),np.ones(n),{})
+    z=np.linspace(0.,26500.,levels+1)[:,None]*np.ones((1,n))
+    target=z+(1-z/26500.)*rng.uniform(-10.,10.,n)
+    w=HeightConservativeMap(horizontal,z,target,np.diff(z[:,0]),np.diff(z[:,0]),endpoint_alignment=aligned)
+    assert w.backend == 'cuda'
+    assert int(w.sample_layer.max()) == 255
+    density=rng.uniform(.1,1.1,(levels,n))
+    value=rng.uniform(0.,2.,(levels,n))
+    if not aligned:
+        w.extend_below_ground(np.full_like(density,300.),np.ones_like(density))
+    w.backend='cpu'
+    expected=w.mass_intensive(value,density=density)
+    w.backend='cuda'
+    actual=w.mass_intensive(value,density=density)
+    assert actual.tobytes()==expected.tobytes()
