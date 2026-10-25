@@ -711,6 +711,16 @@ def output_key_rows(*, tree_wide: bool = True):
                "the one it is writing (1-8; default 1).  Capped so the "
                "page-locked copies fit host RAM; tree-wide; "
                "WOOF_HISTORY_QUEUE_DEPTH overrides it."),
+        KeyRow("full_history_interval_s", "number", 0.0,
+               "Seconds between FULL history frames; between them each "
+               "frame is the 2-D between_preset subset.  0 writes every "
+               "frame with this selection."),
+        KeyRow("between_preset", "string", "minimal",
+               "History preset written between full frames when "
+               "full_history_interval_s is set."),
+        KeyRow("between_history_add", "array", None,
+               "Wrfout variables added to between_preset's subset.",
+               items="string"),
     )
 
 

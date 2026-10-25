@@ -110,7 +110,9 @@ ROUTE_TABLE_SHA256 = (
     # Moved by the ecmwf-open-data-0p1 route (IFS HRES open data at 0.1
     # degree, published from the 2026-10-20 cycles).
     # Both, merged for 2.9.7.
-    "94cf98db1f32acbeb6b61163e858309610474f6057e6cb58304ba3dfb4334afd"
+    # Then the fork's met-office-global, icon-global (DWD v1 tree with the
+    # source.coop mirror) and icon-global-ml rows, merged onto 1.1.1.
+    "550f5af0a1e464d1ba73f5feeb1c66a19e3c152dd60337e334428713fdedf610"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own
