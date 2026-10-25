@@ -1,5 +1,5 @@
 """The observation streams of the data assimilation (moved into the engine
-from woof global ``woof.globe.obs_streams`` at b54373992587; the door rows it
+from woof global ``arwen_global.obs_streams`` at b54373992587; the door rows it
 needs are the engine's, :data:`woof.obs.frontdoor.STREAM_DOORS`): what each is,
 which Rust front door fetches and decodes it, how far behind real time it
 arrives and in which latency class that puts it, how an hour's tables are

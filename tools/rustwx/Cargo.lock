@@ -4224,8 +4224,10 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui_kittest",
+ "flate2",
  "image",
  "libloading 0.8.9",
+ "netcdf-reader 0.5.0",
  "pollster",
  "rayon",
  "rustwx-sounding",
@@ -4242,6 +4244,7 @@ dependencies = [
 name = "rw-store"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "fs4",
  "memmap2",
  "rayon",

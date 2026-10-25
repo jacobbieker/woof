@@ -988,6 +988,56 @@ def _plan_restart_identity(plan) -> dict[str, object]:
 cold_tree_streaming_decision = streaming.cold_tree_streaming_decision
 
 
+def _external_door_streams(exp, initialization, refusal):
+    """``exp`` with [tiles] mode = 'auto', when only the card refused it resident.
+
+    Breakage this closes (X12): the WRF-input door (``woof run --wrfinput``,
+    the deterministic leg of a 5 km CONUS DA cycle: 1080x636x49, HRRR recipe
+    + GF) was refused on a 32 GB card at its resident envelope, and the
+    refusal's remedy -- "[tiles] mode = 'auto' (or --tiles auto)" -- named
+    settings this door does not have: its experiment is imported from
+    ``namelist.input``, which carries no [tiles], and it takes no --tiles.
+    So the default refused a run the streamed road can hold.  When the
+    resident forecast is the only thing that refused and nothing configures
+    a mode, the door streams instead and says so; the output is the same
+    bytes ([tiles] binds no identity: :func:`woof.core.streaming
+    .identity_payload_entry`).
+
+    THE TILES GET WHAT THE RESTORED DOMAIN LEAVES.  An external door restores
+    its domain resident and attaches the store from it (``store_ids`` is
+    empty for an external initialization), and the attached state stays on
+    the card beside the tile buffers.  So the planner is given the card's
+    free memory less what that state holds -- the refusal's own model state,
+    physics and lateral boundary terms -- as ``[tiles] vram_budget_bytes``;
+    the card's whole free figure would plan buffers that only fit an empty
+    card.
+
+    ``None`` (keep the refusal) for the prepared door, which runs a config
+    that can name its mode (``woof go`` re-states it there), when any
+    [tiles] is configured, on the tree or on a domain, and when the refusal
+    carries no card reading.
+    """
+    if initialization is None or refusal.free_bytes is None:
+        return None
+    options = getattr(exp, "tiles", None) or streaming.OFF
+    if options.enabled or any(getattr(dc, "tiles", None) is not None
+                              for dc in exp.domains):
+        return None
+    held = sum(int(refusal.terms.get(name, 0)) for name in (
+        "model state", "physics", "lateral boundary tables"))
+    budget = int(refusal.free_bytes) - held
+    if budget <= 0:
+        return None
+    print(f"prepared tree: the resident forecast does not fit this card "
+          f"({int(refusal.need_bytes) / 2**30:.2f} GiB envelope against "
+          f"{int(refusal.free_bytes) / 2**30:.2f} GiB free), so it streams "
+          "through host memory: [tiles] mode = 'auto' (identical output), "
+          f"tiles within the {budget / 2**30:.2f} GiB the restored domain "
+          f"leaves ({held / 2**30:.2f} GiB held)", flush=True)
+    return replace(exp, tiles=streaming.StreamingOptions(
+        mode="auto", vram_budget_bytes=budget))
+
+
 def resolve_execution_plan(exp) -> Mapping[str, object]:
     """Resolve every edge through the engine's actual transition authority.
 
@@ -3630,21 +3680,38 @@ def run_prepared_tree(
             admission_machine = prepared_single._stream_reserved_machine(
                 admission_machine, stream_head, identity=admission_identity)
         from woof.boundary_fields import source_boundary_species
-        streaming.admit_resident_road(
-            exp, None, machine=admission_machine,
-            estimate=(None if admission_machine is None else
-                      estimate_experiment(
-                          exp,
-                          forcing_interval_seconds=(
-                              inputs.boundary_interval_seconds),
-                          forcing_intervals=retained_intervals,
-                          lateral_boundaries=external_boundaries,
-                          profile=getattr(admission_machine,
-                                          "device_profile", None),
-                          boundary_species=source_boundary_species(
-                              priced_boundary),
-                          urban_columns=urban_columns)),
-            what="this prepared domain tree, held resident on the card")
+        from woof.core.resident_admission import ResidentMemoryRefused
+        try:
+            streaming.admit_resident_road(
+                exp, None, machine=admission_machine,
+                estimate=(None if admission_machine is None else
+                          estimate_experiment(
+                              exp,
+                              forcing_interval_seconds=(
+                                  inputs.boundary_interval_seconds),
+                              forcing_intervals=retained_intervals,
+                              lateral_boundaries=external_boundaries,
+                              profile=getattr(admission_machine,
+                                              "device_profile", None),
+                              boundary_species=source_boundary_species(
+                                  priced_boundary),
+                              urban_columns=urban_columns)),
+                what="this prepared domain tree, held resident on the card")
+        except ResidentMemoryRefused as refusal:
+            streamed_exp = _external_door_streams(exp, initialization, refusal)
+            if streamed_exp is None:
+                raise
+            exp = streamed_exp
+            inputs = replace(inputs, experiment=exp)
+            planning_machine = streaming.cold_planning_machine(exp)
+            planning_exp = prepared_single._stream_reserved_experiment(
+                exp, planning_machine, stream_head, identity=admission_identity)
+            cold_decisions = {}
+            cold_nodes = _prepared_planning_nodes(inputs)
+            cold_tree = cold_tree_streaming_decision(
+                planning_exp, cold_nodes, machine=planning_machine,
+                decisions=cold_decisions, source=priced_boundary,
+                urban_columns=urban_columns)
     store_ids = ({gid for gid, decision in cold_decisions.items() if decision.stream}
                  if initialization is None else set()) | set(split_ids)
     refuse_streamed_parent_birth(exp, store_ids)
@@ -4502,12 +4569,14 @@ def run_prepared_tree(
         if not result["ok"]:
             raise FloatingPointError(f"initial d{grid_id:02d} health failed: {result}")
 
-    from woof.ensemble.runtime_context import initialized_bootstrap_handoff, observe_current_counters
+    from woof.ensemble.runtime_context import (initialized_bootstrap_handoff,
+        observe_current_counters, observe_initial_diagnostics)
     ensemble_report = initialized_bootstrap_handoff(
         ensemble_bootstrap, inputs=inputs, model=model, node=model.root,
         output_directory=outdir, observer=observer, step_log=step_log)
     if ensemble_report is not None:
         return ensemble_report
+    observe_initial_diagnostics(model)
     observe_current_counters(model, start_time=exp.start_time)
 
     history = []
@@ -4880,14 +4949,6 @@ def run_prepared_tree(
                 wrfout_paths = writers.paths
         exp = recovery.experiment
         inputs = replace(inputs, experiment=exp)
-        if spawn_runner is not None:
-            # One row per nest life (spawn, track, stop reason), from the
-            # receipts the walk just closed.
-            from woof.nest_lives import write_nest_lives
-            try:
-                write_nest_lives(outdir)
-            except Exception as error:  # the forecast is done; never lose it here
-                print(f"prepared tree: nest-lives summary not written: {error}", flush=True)
         runtime._finalizing_progress(observer, "close-relocation-receipt")
         if spawn_runner is not None:
             # The walk rebinds the runner as newborn followers come alive;
@@ -4895,6 +4956,16 @@ def run_prepared_tree(
             relocation_runner = getattr(model, "_relocation_runner", relocation_runner)
         if relocation_runner is not None:
             relocation_runner.close_receipt(model)
+        if spawn_runner is not None:
+            # One row per nest life (spawn, track, stop reason), from the
+            # receipts the walk and the relocation runner just closed.  A
+            # life still running at the end stops at the run's end, not at
+            # the last spawn boundary.
+            from woof.nest_lives import write_nest_lives
+            try:
+                write_nest_lives(outdir, run_end_s=float(exp.run_seconds))
+            except Exception as error:  # the forecast is done; never lose it here
+                print(f"prepared tree: nest-lives summary not written: {error}", flush=True)
     except BaseException as error:
         from woof.ingest.boundary_stream import SourceBehind
 
@@ -5462,16 +5533,33 @@ def _start_seal_waits(outdir: Path, prepared_root: Path, observer):
 
 
 #: Where a head-bound attempt's outputs go when the run starts again on
-#: the sealed tree (a later interval moved the terrain clock).  A later
-#: attempt in the same folder takes ``streamed-attempt-2`` and so on.
+#: the sealed tree (a later interval moved the terrain clock):
+#: ``<outdir>/.quarantine/streamed-attempt``.  A later attempt in the same
+#: folder takes ``streamed-attempt-2`` and so on.
 STREAMED_ATTEMPT_DIRNAME = "streamed-attempt"
+#: The folder the attempts are kept under, inside the run folder.  THE
+#: BREAKAGE: kept at ``<outdir>/streamed-attempt/``, the attempt's history
+#: frames carried the same names as the sealed forecast's and sat inside
+#: the run's history tree, so every reader that walks that tree took them
+#: as this run's frames.  The WOOF worker keeps the first path per name in
+#: sorted order, and ``streamed-attempt/`` sorts before ``wrfout/``, so a
+#: published LA run (HRRR 2026-10-21T12, 2.25/0.75 km) carried the
+#: discarded attempt's frames up to 15Z and the sealed forecast's after
+#: it: d01 RAINNC fell by up to 2.085 mm between 15Z and 16Z at 4,723
+#: cells and ``woof ml-export`` refused the run.  Every frame reader
+#: already leaves a dot-prefixed folder out (``woof.io.wrfout.
+#: is_wrfout_frame``, ``woof.render_layout.history_frames``) and the WOOF
+#: worker leaves ``.quarantine`` out by name, which is the folder
+#: ``woof.supervisor.quarantine_file`` keeps such files in.
+STREAMED_ATTEMPT_PARENT = ".quarantine"
 #: What stays in the run folder when an attempt is set aside: the
 #: supervisor heartbeat, which describes the worker rather than one
 #: attempt's outputs.  THE BREAKAGE: moved aside with the attempt, it left
 #: ``woof go``'s watchdog reading nothing new while the rerun waited for
 #: the seal, and the watchdog stopped the worker as stalled; on Windows
-#: the move also races the watchdog's own reads of the file.
-KEPT_IN_PLACE = frozenset({HEARTBEAT_NAME})
+#: the move also races the watchdog's own reads of the file.  The
+#: quarantine folder stays too: it holds the earlier attempts.
+KEPT_IN_PLACE = frozenset({HEARTBEAT_NAME, STREAMED_ATTEMPT_PARENT})
 
 
 def _is_streamed_attempt(name: str) -> bool:
@@ -5484,24 +5572,28 @@ def _is_streamed_attempt(name: str) -> bool:
 def _set_aside_streamed_attempt(outdir: Path) -> Path:
     """Move every output of a head-bound attempt into one kept folder.
 
-    Each attempt gets its own folder and an earlier attempt's folder stays
-    where it is, so a folder already holding one is never refused and no
-    attempt is nested inside another.  The heartbeat stays in place
+    The folder is ``<outdir>/.quarantine/streamed-attempt[-N]``: out of the
+    run's history tree (:data:`STREAMED_ATTEMPT_PARENT`), so no reader
+    publishes the attempt's frames as the sealed forecast's.  Each attempt
+    gets its own folder and an earlier attempt's folder stays where it is,
+    so a folder already holding one is never refused and no attempt is
+    nested inside another.  The heartbeat stays in place
     (:data:`KEPT_IN_PLACE`).
     """
 
     outdir = Path(outdir)
-    earlier = {entry.name for entry in outdir.iterdir()
+    kept = outdir / STREAMED_ATTEMPT_PARENT
+    kept.mkdir(exist_ok=True)
+    earlier = {entry.name for entry in kept.iterdir()
                if entry.is_dir() and _is_streamed_attempt(entry.name)}
     name, number = STREAMED_ATTEMPT_DIRNAME, 1
     while name in earlier:
         number += 1
         name = f"{STREAMED_ATTEMPT_DIRNAME}-{number}"
-    attempt = outdir / name
+    attempt = kept / name
     attempt.mkdir()
     for entry in sorted(outdir.iterdir()):
-        if (entry.name != name and entry.name not in earlier
-                and entry.name not in KEPT_IN_PLACE):
+        if entry.name not in KEPT_IN_PLACE:
             os.replace(entry, attempt / entry.name)
     return attempt
 

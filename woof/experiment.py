@@ -501,6 +501,11 @@ _DOMAIN_KEYS = frozenset({
     # trim the 1 km child that writes ten times the bytes" is said
     # explicitly rather than applied to the whole tree.
     "output",
+    # The quick-look stream (`quicklook = { every_s = 300, history_vars =
+    # [...] }`): a domain whose full history is every history_interval_s
+    # also writes a small variable subset every every_s in between, to
+    # quicklook/wrfout_dNN_<time> (see DomainConfig.full_history_interval_s).
+    "quicklook",
     *_DOMAIN_RUN_OVERRIDES,
 })
 _DOMAIN_REQUIRED = ("grid_id", "parent_id", "i_parent_start",
@@ -791,8 +796,8 @@ class PerturbationConfig:
     Absent block = ``ExperimentConfig.perturbation is None`` = zero
     behavior change, byte-identical prepared state (the
     inflow_perturbation OFF discipline).  Present, the block is either
-    honored on the experiment runtime path, deferred by a domain-tree
-    preparation to the tree runner that applies it
+    honored on the experiment runtime path, deferred by a preparation to
+    the prepared forecast runner that applies it, single-domain or tree
     (:func:`deferred_initial_perturbation`), or refused by name on
     routes that do not thread it (:func:`refuse_unrouted_perturbation`);
     it is never dropped.
@@ -908,7 +913,8 @@ def refuse_unrouted_perturbation(exp, route: str) -> None:
         "Initial-state theta bubbles are applied by the experiment "
         "runtime path (woof run / woof ingest, through "
         "woof.ingest.real.initialize_real) and by the prepared "
-        "domain-tree forecast runner (applied to the restored states, "
+        "single-domain and domain-tree forecast runners (applied to the "
+        "restored states, woof.prepared_single_domain_forecast and "
         "woof.prepared_domain_tree_forecast)."))
 
 
@@ -925,36 +931,32 @@ def deferred_initial_perturbation(exp, route: str, *,
     """What a preparation does with the experiment's [perturbation] block.
 
     No preparation writes a bubble into the arrays it prepares.  The
-    prepared domain-tree forecast runner applies the configured bubbles
-    to the restored states at experiment start
-    (:mod:`woof.prepared_domain_tree_forecast`), whatever source
-    prepared the tree, so a tree preparation keeps its initial and
-    boundary arrays unperturbed and returns this receipt for its proof.
-    Every source route calls this one function; none has its own path.
-
-    A single-domain preparation still refuses the block, by the route's
-    name (:func:`refuse_unrouted_perturbation`): the prepared
-    single-domain forecast runner applies no bubble, so the bundle would
-    run the unperturbed state under the bubbles' name.  An absent block
-    returns ``None`` on either shape and says nothing.
+    prepared forecast runners apply the configured bubbles to the
+    restored states at experiment start
+    (:mod:`woof.prepared_domain_tree_forecast` for a tree,
+    :mod:`woof.prepared_single_domain_forecast` for one domain),
+    whatever source prepared the bundle, so a preparation keeps its
+    initial and boundary arrays unperturbed and returns this receipt for
+    its proof.  Every source route calls this one function; none has its
+    own path.  An absent block returns ``None`` and says nothing.
 
     ``announce`` says the deferral once on stderr.  A stage that only
     needs the early refusal passes False, so a preparation that reads
     its configuration in two processes says it once.
     """
 
-    if len(exp.domains) < 2:
-        refuse_unrouted_perturbation(exp, f"single-domain {route}")
     perturbation = getattr(exp, "perturbation", None)
     if perturbation is None:
         return None
+    runner = ("woof.prepared_domain_tree_forecast" if len(exp.domains) > 1
+              else "woof.prepared_single_domain_forecast")
     if announce:
         warn(
-            "initial perturbation is deferred to prepared-tree forecast "
+            "initial perturbation is deferred to prepared forecast "
             "initialization",
             "Prepared initial and boundary arrays remain unperturbed, and "
             "the preparation receipt records the configured bubbles as "
-            "deferred. The domain-tree forecast runner applies them once to "
+            "deferred. The prepared forecast runner applies them once to "
             "the restored states at experiment start, never on restart or "
             "to a nest born later. Companion stock-WRF export cannot "
             "represent this deferred mutation.")
@@ -962,7 +964,7 @@ def deferred_initial_perturbation(exp, route: str, *,
         "schema": DEFERRED_PERTURBATION_SCHEMA,
         "status": "DEFERRED_TO_FORECAST_INITIALIZATION",
         "prepared_arrays": "unperturbed source initial and boundary states",
-        "application_route": "woof.prepared_domain_tree_forecast",
+        "application_route": runner,
         "application_point": "restored states at experiment start time",
         "applied_on_restart": False,
         "applied_to_delayed_domains": False,
@@ -1077,6 +1079,21 @@ class DomainConfig:
     #: that did not.  Checkpoints are separate files written from model
     #: state (:mod:`woof.io.restart`), never from the history frame.
     output: "object | None" = None
+    #: The QUICK-LOOK stream (``quicklook = { every_s, history_vars }`` on
+    #: a [[domain]]).  When set, ``history_interval_s`` above is the
+    #: quick-look cadence -- the alarm every history consumer (the clock,
+    #: the adaptive driver, the divisibility checks) already reads -- and
+    #: this is the cadence of the FULL frames, a whole multiple of it.  A
+    #: frame on the full lattice is an ordinary wrfout; every other frame
+    #: is written with :attr:`quicklook_output` only, to its own folder,
+    #: ``quicklook/wrfout_dNN_<time>`` (the renderer needs the wrfout
+    #: name; the folder marks the subset).  ``None``
+    #: (every domain without the key) writes every frame full, exactly as
+    #: before.  Output-only like ``output``: it leaves the restart identity.
+    full_history_interval_s: float | None = None
+    #: The quick-look frames' variable selection
+    #: (:class:`woof.io.history_selection.HistorySelection`).
+    quicklook_output: "object | None" = None
     #: What a DELAYED nest is born from at its ``start_time``: ``None`` --
     #: the OFF contract, spelled ``start_from = "analysis"`` -- initializes
     #: it from the source analysis valid at that instant, and
@@ -1316,6 +1333,56 @@ def parent_born_domain_ids(exp) -> tuple[int, ...]:
     """grid_ids of the delayed nests born from their live parent."""
     return tuple(int(dc.grid_id) for dc in exp.domains
                  if starts_from_parent(dc))
+
+
+#: The quick-look subset when a ``quicklook`` table names no variables: the
+#: maps a minute-by-minute look needs (composite reflectivity, updraft
+#: helicity, 10 m wind, 2 m temperature and moisture, surface pressure and
+#: accumulated precipitation).  Measured 13 B per cell against 172 for a
+#: full frame (WOOF run-controls feasibility, 2026-10-23).
+QUICKLOOK_DEFAULT_VARS = ("REFL_10CM", "UP_HELI_MAX", "U10", "V10", "T2",
+                          "Q2", "PSFC", "RAINNC", "RAINC")
+
+
+def _quicklook(dom: dict, *, grid_id: int, source: str,
+               history_interval_s: float):
+    """(alarm cadence, full cadence, selection) for one domain's table.
+
+    No ``quicklook`` key: ``(history_interval_s, None, None)``, the
+    domain as it always was.  Refused, by name: a quick-look cadence that
+    is not below the full one, or that does not divide it -- a full frame
+    must land on a quick-look alarm, or the full tape would drift off its
+    own interval.
+    """
+    table = dom.get("quicklook")
+    if table is None:
+        return history_interval_s, None, None
+    where = f"quicklook on [[domain]] grid_id = {grid_id} of {source}"
+    if not isinstance(table, dict):
+        raise ValueError(f"{where} must be an inline TABLE, e.g. quicklook = "
+                         "{ every_s = 300.0 }, got " + repr(table))
+    unknown = sorted(set(table) - {"every_s", "history_vars"})
+    if unknown:
+        raise ValueError(f"unknown key(s) {unknown} in {where}; known keys: "
+                         "['every_s', 'history_vars']")
+    every = table.get("every_s")
+    if (isinstance(every, bool) or not isinstance(every, (int, float))
+            or not math.isfinite(float(every)) or float(every) <= 0):
+        raise ValueError(f"{where}: every_s must be a positive number of "
+                         f"seconds, got {every!r}")
+    every = float(every)
+    full = Fraction(str(history_interval_s))
+    quick = Fraction(str(every))
+    if quick >= full or (full / quick).denominator != 1:
+        raise ValueError(
+            f"{where}: every_s = {every:g} s must be shorter than the "
+            f"domain's history_interval_s = {history_interval_s:g} s and "
+            "divide it exactly, so every full frame lands on a quick-look "
+            "time")
+    names = table.get("history_vars", list(QUICKLOOK_DEFAULT_VARS))
+    selection = history_selection_module.HistorySelection.from_mapping(
+        {"history_vars": list(names)}, source=where)
+    return every, float(history_interval_s), selection
 
 
 @dataclass(frozen=True)
@@ -4727,6 +4794,11 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         history_begin_s, history_end_s = _history_window(
             dom, grid_id=grid_id, source=source,
             run_seconds=run_seconds)
+        # The quick-look stream: the alarm becomes its cadence, and the
+        # full frames keep the declared interval (DomainConfig docs).
+        history_interval_s, full_history_interval_s, quicklook_output = (
+            _quicklook(dom, grid_id=grid_id, source=source,
+                       history_interval_s=history_interval_s))
         kw = dict(shared)
         kw.update(
             nx=nx, ny=ny, nz=nz, dx=float(dx_ex), dy=float(dx_ex),
@@ -4945,7 +5017,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             history_begin_s=history_begin_s, history_end_s=history_end_s,
             spawn=spawn_cfg, retire=retire_cfg, rearm=rearm_cfg,
             follow=follow_cfg, tiles=domain_tiles, output=domain_output,
-            start_from=start_from, feedback_top=feedback_top)
+            start_from=start_from, feedback_top=feedback_top,
+            full_history_interval_s=full_history_interval_s,
+            quicklook_output=quicklook_output)
         domains.append(dc)
         by_id[grid_id] = dc
         dt_by_id[grid_id] = dt_ex
@@ -6004,6 +6078,23 @@ def _public_config_value(value):
                 and value.windfarm_power is None):
             # Wind-farm power likewise: absent stays absent.
             document.pop("windfarm_power", None)
+        from woof.io.history_selection import HistorySelection
+        if (isinstance(value, HistorySelection)
+                and not document.get("full_history_interval_s")):
+            # The between-hours subset (S4, HRRR-shaped sub-hourly history)
+            # stays absent while no full cadence is set: every frame is
+            # written with the selection, as before, and a default document
+            # keeps its pre-feature bytes.
+            for name in ("full_history_interval_s", "between_preset",
+                         "between_history_add"):
+                document.pop(name, None)
+        if isinstance(value, DomainConfig):
+            # The quick-look stream (run controls, 2.9.7) stays absent while a
+            # domain has none, so a default document keeps its pre-feature
+            # bytes (and every experiment fingerprint read from it).
+            for name in ("full_history_interval_s", "quicklook_output"):
+                if document.get(name) is None:
+                    document.pop(name, None)
         run_document = (document if isinstance(value, RunConfig) else
                         document.get("run") if isinstance(value, DomainConfig) else None)
         if isinstance(run_document, dict):
@@ -6095,6 +6186,13 @@ def _public_config_value(value):
             drop_default_output_controls(run_document)
             if run_document.get("ra_sw_eclipse", 1) == 1:
                 run_document.pop("ra_sw_eclipse", None)
+            # tc/nest's fixed-frame archive (2.9.7) is read only on a nested
+            # domain, and off is the historical counter every earlier
+            # document ran: absent there, by the checkpoint echo's rule
+            # (woof.io.restart._drop_inert_nest_archive).
+            if (not run_document.get("nested")
+                    or not run_document.get("nest_accumulation_archive", False)):
+                run_document.pop("nest_accumulation_archive", None)
             if int(run_document.get("sf_ocean_physics", 0) or 0) == 0:
                 for name, default in (("ocean_levels", 30),
                                       ("ocean_analysis", ""),

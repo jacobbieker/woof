@@ -436,7 +436,7 @@ FRONT_DOORS = {"hail": HAIL, "mrms": MRMS, "stage4": STAGE4, "asos": ASOS, "goes
 #: WIS2 feed and MADIS (aircraft, radiosondes, mesonets).  The crates are the
 #: engine's (``tools/rustwx/crates/rw-obs``, bins igra2, amv, ndbc, gnssro,
 #: wis2, madis); until 2.9.0 their rows lived in
-#: woof global (``woof.globe.obs_doors``), which is why the engine's local
+#: woof global (``arwen_global.obs_doors``), which is why the engine's local
 #: data assimilation imported that package to reach them.  The markers are the
 #: binaries' own ``--abi`` lines on this line.  Kept apart from FRONT_DOORS so
 #: the ``woof obs`` instruments and the verification routes that enumerate

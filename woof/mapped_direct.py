@@ -67,7 +67,7 @@ from woof.ingest.preprocess_backend import (
     release_backend_memory,
     resolve_preprocess_backend,
 )
-from woof.ingest.real import initialize_real
+from woof.ingest.real import aerosol_donor_snapshot, initialize_real
 from woof.ingest.soil import (
     door_reconciled_soil_category, soil_temperature_repair_proof)
 from woof.ingest.source_coverage import (
@@ -964,8 +964,12 @@ class _PostedMappedSource:
                 if lead not in self.markers:
                     self._read_marker(lead, self.posted.wait(lead))
                 end = self._next
+                # A NetCDF decode holds its whole batch at once (it is priced
+                # per batch, not per time), so its later batches are one lead:
+                # each then fits the cap the first decode's price set.
+                batch = 1 if self.source_format == "netcdf" else POSTED_BATCH_LEADS
                 last = (max(int(until), position) if until is not None
-                        else self._next + POSTED_BATCH_LEADS - 1)
+                        else self._next + batch - 1)
                 last = min(last, len(self.leads) - 1)
                 while end + 1 <= last:
                     later = self.leads[end + 1]
@@ -1524,6 +1528,7 @@ def prepare_mapped_wrf(
     physical_output_store: str | Path | None = None,
     physical_input_provider=None,
     physical_member_index: int | None = None,
+    inland_air_mean_hours: float | None = None,
 ) -> dict[str, object]:
     """Build native WRF inputs from one complete mapped-source composition.
 
@@ -2235,7 +2240,8 @@ def prepare_mapped_wrf(
         landuse_attrs=selection.landuse_global_attrs())
     # Inland water the source does not resolve takes the forcing's
     # daily-mean 2 m air temperature (WRF use_tavg_for_tsk).
-    water_statics = with_inland_air_temperature(water_statics, snapshots)
+    water_statics = with_inland_air_temperature(
+        water_statics, snapshots, hours=inland_air_mean_hours)
     with prep_stage("root_initialize", label="Initialize root forcing states",
                     backend=str(preprocess_receipt["backend"]),
                     count=(len(snapshots) if hierarchy and not chain_tree
@@ -2338,8 +2344,17 @@ def prepare_mapped_wrf(
             # hierarchy; an unchained hierarchy keeps the start time last.
             build_started = time.perf_counter()
             if source_override is None:
-                with snapshot_lock:
-                    source = snapshots[index]
+                from woof.ingest.boundary_stream import concurrent_forcing_build
+                pack = getattr(snapshots, "pack_uncached", None)
+                if pack is not None and concurrent_forcing_build():
+                    # Beside other builds each packs its own copy, the same
+                    # snapshot the cached read returns. Named breakage: 17
+                    # forcing-time workers ran at ~3 cores, every one waiting
+                    # here for the next time's pack (Oklahoma City, 2026-10-23).
+                    source = pack(index)
+                else:
+                    with snapshot_lock:
+                        source = snapshots[index]
             else:
                 source = source_override
             timing = {"forcing_index": index, "valid_time": str(source.valid_time)}
@@ -2497,7 +2512,11 @@ def prepare_mapped_wrf(
                 from woof.initial_source import decode_initial_analysis
                 boundary_head_backend = preprocess
                 boundary_head_preprocessing = copy.deepcopy(preprocess.receipt())
-                aerosol_met = (initial_met if cfg.use_rap_aero_icbc else None)
+                # Only the donor's aerosol and its coordinate stay held for
+                # the initial analysis' build; the rest of the boundary
+                # analysis is released here.
+                aerosol_met = (aerosol_donor_snapshot(initial_met)
+                               if cfg.use_rap_aero_icbc else None)
                 initial_met = None
                 del initial_result
                 release_backend_memory(preprocess)
@@ -2803,6 +2822,12 @@ def prepare_mapped_wrf(
                 initial_perturbation=initial_perturbation,
                 mapping_contract=mapping_contract,
                 posted_source=posted_source, posted_plan=posted_plan,
+                worker_policy=worker_policy,
+                # Physical stores need the later times in order, as on the
+                # single-domain route; anything else builds them side by side.
+                forcing_times_independent=(physical_input is None
+                                           and physical_output is None
+                                           and physical_output_store is None),
             )
             # The chained tree owns the start state from here and releases
             # it at its head; these names would keep it resident.
@@ -3193,6 +3218,10 @@ def prepare_mapped_wrf(
         initialize_seconds += time.perf_counter() - boundaries_started
         forcing_timings.sort(key=lambda entry: entry["forcing_index"])
         posted_proof = {}
+        # Every deferred full re-read of the inputs has matched before the
+        # cache seals (woof.authority_digests): a changed input never seals.
+        from woof import authority_digests
+        authority_digests.join()
         with prep_stage("prepared_cache", label="Seal prepared cache"):
             cache_started = time.perf_counter()
             if posted_source is None:
@@ -3579,15 +3608,41 @@ def _prepare_chained_mapped_tree(c) -> dict[str, object]:
                         label="Initialize remaining forcing states",
                         backend=backend, count=len(c.snapshots) - 1):
             boundaries_started = time.perf_counter()
+            # The later root times side by side, as the single-domain route
+            # builds them (forcing_time_workers; written in index order, so
+            # the bytes are the serial loop's). Named breakage: a domain tree
+            # built them one at a time -- the WOOF Oklahoma City nest pair
+            # spent 82-112 s here at about 3 of 32 cores (2026-10-23).
+            from woof.ensemble.posted_preparation import current_posted_preparation
+            from woof.ingest.preparation_workers import forcing_time_workers
+            independent_times = (c.forcing_times_independent
+                                 and current_posted_preparation() is None)
+            if independent_times and posted is not None:
+                independent_times = posted.prepare_independent_times()
+            forcing_workers = forcing_time_workers(
+                len(c.snapshots) - 1,
+                cpu_workers=c.worker_policy.get("effective_workers"),
+                backend=backend,
+                selection=c.preprocess_receipt.get("selection"),
+            ) if independent_times else {
+                "workers": 1, "basis": "ordered physical source or pending posted lead"}
+            c.worker_policy["forcing_time_workers"] = forcing_workers
+            print(f"preparation workers: forcing times {forcing_workers['workers']} "
+                  f"({forcing_workers.get('caps', forcing_workers['basis'])})", file=sys.stderr, flush=True)
             writer.stream_forcing_times(
                 count=len(c.snapshots),
                 build_forcing_time=c.build_forcing_time,
                 forcing=c.forcing, times=c.times,
-                release=lambda: release_backend_memory(c.preprocess))
+                release=lambda: release_backend_memory(c.preprocess),
+                workers=forcing_workers["workers"])
         initialize_seconds += time.perf_counter() - boundaries_started
         root_identity = binding.identity
         posted_proof = {}
         decode_seconds = c.decode_seconds
+        # Every deferred full re-read of the inputs has matched before the
+        # cache seals (woof.authority_digests): a changed input never seals.
+        from woof import authority_digests
+        authority_digests.join()
         with prep_stage("prepared_cache", label="Seal prepared cache"):
             if posted is None:
                 root_content_sha256 = str(writer.seal_cache()["content_sha256"])
@@ -3812,6 +3867,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--upper-source-root", type=Path)
     parser.add_argument("--input-manifest-sha256")
     parser.add_argument(
+        "--inland-air-mean-hours", type=float, default=None, metavar="HOURS",
+        help="hours of source 2 m air temperature that inland water beyond "
+             "the source reach averages (the source row's "
+             "inland_air_mean_hours; 0 = the start time's own; default 24)")
+    parser.add_argument(
         "--as-posted", type=Path, default=None, metavar="POSTING_DIR",
         help=("an as-posted fetch's posting/ folder: prepare as the leads "
               "post, decoding each lead batch as its marker appears, and "
@@ -3951,6 +4011,19 @@ def _next_command_lines(args, proof: Mapping[str, object]) -> list[str]:
 
 @owns_source_coverage_refusal
 def main(argv: Sequence[str] | None = None) -> int:
+    """The mapped preparation, inside its input-digest scope.
+
+    This process decodes the inputs the fetch recorded, so its snapshots
+    take those digests and the full re-reads run beside the decode
+    (:mod:`woof.authority_digests`); the cache seals only after they match.
+    """
+    from woof import authority_digests
+
+    with authority_digests.deferred_checks():
+        return _main(argv)
+
+
+def _main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.mapped_engine is not None:
@@ -4117,6 +4190,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             hierarchy_workers=args.hierarchy_workers,
             stock_wrf_export=args.stock_wrf_export,
             statics_corridor=statics_corridor,
+            **({"inland_air_mean_hours": args.inland_air_mean_hours}
+               if args.inland_air_mean_hours is not None else {}),
         )
     except InitializationMemoryRefused as error:
         # A preparation the card cannot hold under an explicit

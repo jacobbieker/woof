@@ -1,12 +1,13 @@
-"""The component doors: ``woof hex`` and ``woof global``.
+"""The component door: ``woof hex``.
 
-The regional engine is the core of this distribution.  Two components ride
-with it as subpackages: the hex model (``woof.hex``, an MPAS-style
-unstructured-mesh port, preview) and the global model (``woof.globe``,
-preview; ``global`` is a Python keyword, so the package cannot carry that
-name, but the command word can).  Each keeps its own complete command-line
-parser, so the front door hands the rest of the command line to it
-unchanged instead of re-declaring its options here.
+The regional engine is the core of this distribution.  The hex model
+(``woof.hex``, an MPAS-style unstructured-mesh port, preview) rides with it
+as a subpackage, regional and global (``woof hex global``).  It keeps its own
+complete command-line parser, so the front door hands the rest of the command
+line to it unchanged instead of re-declaring its options here.
+
+The spectral global model (``woof global``) was retired in WOOF 1.1.1; the
+word stays only to say so and to name the global model that replaced it.
 """
 from __future__ import annotations
 
@@ -18,8 +19,12 @@ import sys
 COMPONENTS = {
     "hex": ("woof.hex.cli", "main", "hex model (preview)",
             "the hex (MPAS-style mesh) model, preview: woof hex --help"),
-    "global": ("woof.globe.cli", "main", "global model (preview)",
-               "the global model, preview: woof global --help"),
+}
+
+#: retired command words -> what to run instead
+RETIRED = {
+    "global": ("the spectral global model was retired in WOOF 1.1.1; global forecasts "
+               "run on the hex model: woof hex global --help"),
 }
 
 
@@ -43,6 +48,9 @@ def dispatch_component(tokens: list[str]) -> int | None:
     Returns the component's exit code, or None when the words are not a
     component command and the regional parser should take them.
     """
+    if tokens and tokens[0] in RETIRED:
+        print(f"woof {tokens[0]}: {RETIRED[tokens[0]]}", file=sys.stderr)
+        return 2
     if not tokens or tokens[0] not in COMPONENTS:
         return None
     word = tokens[0]

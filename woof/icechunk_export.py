@@ -418,9 +418,13 @@ def discover_frames(sources: Iterable[Path], *,
     candidates: list[Path] = []
     for root in sources:
         root = Path(root)
+        # A quick-look subset frame (``quicklook/wrfout_dNN_<time>``,
+        # 1.1.1's run controls) is not a history frame of the group's
+        # interval: it is never exported.
         candidates.extend(Path(os.path.abspath(path)) for path in
                           iter_wrfout_files(root, "wrfout_d*",
-                                            include_temporaries=False))
+                                            include_temporaries=False)
+                          if Path(path).parent.name != "quicklook")
         try:
             entries = sorted((root / FRAME_MARKER_DIRNAME).glob(
                 "wrfout_d*.json"))

@@ -471,6 +471,9 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
                "ocean_z": (), "ocean_t": (), "ocean_s": ()}
     for name, default in neutral.items():
         assert expected_run.pop(name) == default
+    # 2.9.7 tc/nest: the fixed-frame archive is read only on a nested domain;
+    # this root leaves it out by the document's rule.
+    assert expected_run.pop("nest_accumulation_archive") is True
     # 2.9.0 correct mode (woof/correct_mode.py): a key leaves the document
     # where no selected scheme reads it (and WB1's output-only key always),
     # as in the checkpoint echo; this domain runs Morrison and Grell-Freitas.
@@ -481,6 +484,10 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     # (bind_windfarm_identity), by the same rule the document applies.
     for name in WINDFARM_RUN_DEFAULTS:
         expected_run.pop(name)
+    # 2.9.7 HN1 (hydrometeor_handover_numbers) is read under Morrison, so
+    # this domain's identity binds it while it is on.
+    if correct_mode.CORRECT_KEYS_DEFAULT:
+        expected_run["hydrometeor_handover_numbers"] = True
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()
     assert compare(cached, identity(domain)) == ([], [])

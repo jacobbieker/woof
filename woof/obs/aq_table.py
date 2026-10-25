@@ -1,6 +1,6 @@
 """AirNow mirror of rw-obs/src/table.rs. Provisional verification policy.
 
-The optional woof.globe.obs_table named by the original Rust header is
+The optional arwen_global.obs_table named by the original Rust header is
 absent from this export. Its integration must add these same vocabulary rows.
 """
 VARIABLE_TABLE = {

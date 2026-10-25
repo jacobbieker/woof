@@ -359,6 +359,23 @@ def card_estimate(cells: int, devices: str | None) -> dict[str, Any]:
     return policy
 
 
+def lease_estimate(grid: Path, cells: int, count: int | None, levels: int, suite: bool) -> dict[str, Any]:
+    """What to declare to a box lease per card (``gpu-lease --vram-mib``), from the forecast door's own
+    admission row (woof.hex.drivers.samehost_forecast_v841.lease_vram_mib), or why it cannot be priced here."""
+
+    if suite:
+        return {"vram_mib_per_card": None, "basis": "a named MPAS suite route prices its own device memory"}
+    if not count:
+        return {"vram_mib_per_card": None, "basis": "the card count is decided at bind"}
+    if not Path(grid).is_file():
+        return {"vram_mib_per_card": None, "basis": "the mesh is not built yet; the mesh stage builds it"}
+    try:
+        from .drivers.samehost_forecast_v841 import lease_vram_mib
+        return lease_vram_mib(grid, int(count), cells=int(cells), levels=int(levels))
+    except Exception as error:  # the forecast door re-decides at bind; the plan says why it could not
+        return {"vram_mib_per_card": None, "basis": f"not priced here: {error}"}
+
+
 def _visible_card_names() -> list[str]:
     try:
         out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
@@ -429,6 +446,26 @@ def history_cadence(hours: float, explicit: int | None, row_default: int, steps_
 def plan(args: argparse.Namespace, table: Mapping[str, Any] | None = None) -> dict[str, Any]:
     table = table or load_table(args.table)
     cycle = _cycle(args.cycle)
+    lead = int(getattr(args, "lead_hours", 0) or 0)
+    if lead < 0:
+        raise GlobalDoorError(f"--lead-hours {lead} is negative; it is the forecast hour of --cycle the run starts from")
+    if getattr(args, "from_last_hour", False):
+        # Extend a run: start from the source's LAST posted hour for this cycle (its table row's ladder).
+        from .init_sources import load_table as _sources, resolve_source as _source
+        from .source_horizon import SourceHorizonError, resolve_lead
+        try:
+            lead = resolve_lead(_source(_sources(), args.source, getattr(args, "accept_licence", ())), cycle, lead,
+                                True)
+        except SourceHorizonError as error:
+            raise GlobalDoorError(str(error)) from None
+        args.lead_hours = lead
+    if lead and (getattr(args, "members", None) or getattr(args, "lagged", None) is not None):
+        # The ensemble door binds every member's own lead to the common valid time from --lagged
+        # (global_ensemble.member_bindings); a start lead on top would have to shift each binding, which it does not.
+        raise GlobalDoorError("--lead-hours starts one forecast from a later hour of --cycle; an ensemble's members "
+                              "take their leads from --lagged, so pass one of them")
+    cycle = cycle + _dt.timedelta(hours=lead)
+    issued_label = f"{args.cycle} f{lead:03d}" if lead else args.cycle
     row, mesh, physics = resolve_row(table, args.row, args.physics_row)
     hours = float(args.hours if args.hours is not None else row.get("hours", 24))
     named = forecast_arg_physics(args.forecast_arg)
@@ -472,7 +509,20 @@ def plan(args: argparse.Namespace, table: Mapping[str, Any] | None = None) -> di
     source = args.source
     from .init_sources import load_table as load_sources, resolve_source
     accepted = getattr(args, "accept_licence", ())
-    resolve_source(load_sources(), source, accepted)
+    source_row = resolve_source(load_sources(), source, accepted)
+    from .source_horizon import beyond_source, label as horizon_label
+    # The hours past the source's last forecast hour are a free run of our own model (a globe needs no boundaries).
+    extension = beyond_source(source_row, _cycle(args.cycle), lead, hours)
+    if extension and not getattr(args, "brand", None):
+        # Every sounding of a run past its source says so, top right (the host's own --brand wins).
+        from .source_horizon import brand as horizon_brand
+        args.brand = horizon_brand(f"{source} {issued_label}", extension)
+    issued_label = horizon_label(issued_label, extension)
+    if lead:
+        from .init_sources import Cycle, template_context
+
+        # Refused at the plan, before any download: a lead off the row's cadence or past its horizon.
+        template_context(Cycle.parse(args.cycle), source_row, getattr(args, "member", None), lead)
     init_dir = work / "init"
     if selected_vertical:
         init_dir /= spec.sha256()[:12]
@@ -482,6 +532,8 @@ def plan(args: argparse.Namespace, table: Mapping[str, Any] | None = None) -> di
     common = ["--grid", str(grid), "--static", str(static)]
     init_argv = ["init-source", "--source", source, "--cycle", args.cycle, "--out-dir", str(init_dir),
                  *common, "--vertical-spec", str(vertical)]
+    if lead:
+        init_argv += ["--lead-hours", str(lead)]
     for licence in accepted:
         init_argv += ["--accept-licence", licence]
     for staged in args.staged or []:
@@ -492,7 +544,7 @@ def plan(args: argparse.Namespace, table: Mapping[str, Any] | None = None) -> di
         init_argv += ["--member", str(args.member)]
     forecast_argv = ["forecast", "--mesh", mesh_name, *common, "--init", str(init),
                      "--start-time", start,
-                     "--init-source", f"{source} {args.cycle}"
+                     "--init-source", f"{source} {issued_label}"
                      + (f" member {args.member}" if getattr(args, "member", None) is not None else "")
                      + f"; global row {row['id']}",
                      "--hours", f"{hours:g}", "--history-every-minutes", str(every),
@@ -513,7 +565,14 @@ def plan(args: argparse.Namespace, table: Mapping[str, Any] | None = None) -> di
         forecast_argv += ["--stochastic", args.stochastic]
     for extra in args.forecast_arg or []:
         forecast_argv.append(extra)
-    products_argv = ["products", str(forecast), "--out", str(work / "products")]
+    from .products_door import label_argv
+
+    # One case for the first look and the full pass. THE BREAKAGE THIS PREVENTS (parity run group 4, 2026-10-24):
+    # the products door names a case from the forecast receipt's mesh binding, which the MPAS-physics route does not
+    # write, so its full pass filed into x1.40962-<cycle> while the first look filed into hex-x1.40962-native-<cycle>:
+    # the full pass could not skip the hours drawn live and every such hour was drawn twice, into two trees.
+    case = f"{mesh_name}-{str(args.cycle).replace('-', '').replace('T', '')}"
+    products_argv = ["products", str(forecast), "--out", str(work / "products"), "--case", case, *label_argv(args)]
     export_argv = ["export", str(forecast), "--out", str(work / "export"), "--window", "global",
                    "--field-set", args.export_field_set, "--overwrite"]
     score_config = work / "observation-scorecard.config.json"
@@ -522,11 +581,14 @@ def plan(args: argparse.Namespace, table: Mapping[str, Any] | None = None) -> di
     if selected_vertical and not args.devices:
         cards = {"selected_cards": None,
                  "basis": "this vertical grid has no card-fit measurement; forecast admission must measure it"}
+    cards["lease"] = lease_estimate(grid, mesh["cells"], cards.get("selected_cards"), spec.n_vert_levels,
+                                    suite_arm is not None)
     result = {
         "schema": PLAN_SCHEMA,
         "row": row, "mesh": {"id": row["mesh"], **mesh}, "physics": {"row": row["physics"], **physics},
         "table": {"path": table["_path"], "sha256": table["_sha256"]},
-        "cycle": args.cycle, "start_time": start, "hours": hours, "history_every_minutes": every,
+        "cycle": args.cycle, "lead_hours": lead, "start_time": start, "hours": hours, "history_every_minutes": every,
+        "beyond_source": extension,
         "history_cadence": cadence,
         "source": source,
         "vertical": {**spec.to_mapping(), "sha256": spec.sha256(), "mesh_name": mesh_name,
@@ -539,6 +601,7 @@ def plan(args: argparse.Namespace, table: Mapping[str, Any] | None = None) -> di
         "static_argv": ["--grid", str(grid), "--out", str(static), *table["static"]["argv"],
                         *static_geog_argv(args.geog),
                         "--receipt", str(mesh_dir / "static-receipt.json")],
+        "case": case,
         "commands": {"init": init_argv, "forecast": forecast_argv, "products": products_argv,
                      "export": export_argv, "score": score_argv},
         # The scorer reads init and start from the forecast receipt when it can; a run stopped before
@@ -741,6 +804,11 @@ def stage_static(value: Mapping[str, Any], status) -> dict[str, Any]:
     else:
         status.skip("static", f"the cache holds {static.name}, built natively from grid "
                               f"{grid_sha[:16]} (global-static.json)")
+    # The RRFS-shape suite's GSL drag reads the mesh's orographic statistics (woof.hex.ugwp_oro); built
+    # here, beside the cached static, so no card waits on it.
+    from .ugwp_oro import prepare_for_forecast
+    prepare_for_forecast(value.get("commands", {}).get("forecast", ()), grid,
+                         argv[argv.index("--geog") + 1] if "--geog" in argv else None, log=status.note)
     _register(value, grid, static, rows_file, receipt_path)
     return {"static": str(static), "mesh_rows": str(rows_file)}
 
@@ -780,7 +848,9 @@ def _init_matches(value: Mapping[str, Any]) -> bool:
     return (init.is_file()
             and (receipt.get("init") or {}).get("path") == str(init)
             and str(receipt.get("source")) == str(value["source"])
-            and digits.startswith(value["cycle"].replace("-", "").replace("T", "")))
+            and digits.startswith(value["cycle"].replace("-", "").replace("T", ""))
+            # An init from another forecast hour of the same cycle is another start state.
+            and int(receipt.get("lead_hours") or 0) == int(value.get("lead_hours") or 0))
 
 
 def _run_door(argv: Sequence[str], env: Mapping[str, str]) -> int:
@@ -850,8 +920,12 @@ def run_global(args: argparse.Namespace) -> int:
                                "physics": {"planned": {"row": value["physics"]["row"],
                                                        "suite": value["physics"].get("suite"),
                                                        "mode": value["physics"]["mode"]},
+                                           # The MPAS suite route writes native-physics-receipt.json, never
+                                           # forecast-receipt.json; the pointer named a file that did not exist.
                                            "forecast_receipt": str(Path(value["paths"]["forecast"])
-                                                                   / "forecast-receipt.json")}}
+                                                                   / ("native-physics-receipt.json"
+                                                                      if value["physics"].get("suite")
+                                                                      else "forecast-receipt.json"))}}
     rows_env = os.pathsep.join(filter(None, [value["paths"]["mesh_rows"], os.environ.get("WOOF_HEX_MESH_ROWS")]))
     env = {"WOOF_HEX_MESH_ROWS": rows_env}
     # ONE scorer per run. The forecast door queues the automatic scorer when the forecast ends; it
@@ -868,6 +942,9 @@ def run_global(args: argparse.Namespace) -> int:
         score_config.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     if score_config.is_file():
         env["WOOF_HEX_OBSERVATION_CONFIG"] = str(score_config)
+    if "score" in set(args.skip or []):
+        # --skip score: the forecast door queues no automatic scorer either (observation_scorecard.SCORING_ENV).
+        env["WOOF_HEX_OBSERVATION_SCORING"] = "off"
     try:
         if value.get("members"):
             from .global_ensemble import run_ensemble
@@ -882,6 +959,7 @@ def run_global(args: argparse.Namespace) -> int:
             status.done(f"{value['row']['id']} {value['cycle']}: {len(value['members'])} members, {', '.join(stages)}")
             _write_receipt(work, receipt)
             return 0
+        live_receipt = None  # the first look's live-frames.json: the products pass skips the hours it rendered
         for name in stages:
             started = time.monotonic()
             if name == "mesh":
@@ -903,8 +981,28 @@ def run_global(args: argparse.Namespace) -> int:
                         continue
                 status.stage(name, eta_s=(value["wall_estimate"] or {}).get("seconds") if name == "forecast" else None)
                 status.note("woof hex " + " ".join(value["commands"][name]))
-                rc = _run_door(value["commands"][name], env)
+                look = None
+                if name == "forecast" and "products" in stages:
+                    # The f000 maps the moment the first frame is written, not after the whole forecast (first_look.py).
+                    from .first_look import FirstLook
+                    paths = value["paths"]
+                    # The full pass's labels too, so its pictures replace the first look's in place.
+                    products_command = [str(a) for a in value["commands"]["products"]]
+                    labels = [a for flag in ("--model-label", "--brand") if flag in products_command
+                              for a in (flag, products_command[products_command.index(flag) + 1])]
+                    look = FirstLook(Path(paths["forecast"]), grid=paths["grid"], init=paths["init"],
+                                     start_time=value["start_time"], out=paths["products"], extra=labels,
+                                     case=value["case"])
+                    look.start()
+                command = value["commands"][name]
+                if name == "products" and live_receipt is not None:
+                    command = [*command, "--live-frames", str(live_receipt)]
+                rc = _run_door(command, env)
                 result = {"returncode": rc}
+                if look is not None:
+                    result["first_look"] = look.finish()
+                    live_receipt = look.receipt()
+                    status.note(f"first look: {result['first_look'].get('status')}")
                 if name == "score" and rc == 3:
                     completed = completed_scorecard(value["paths"]["forecast"], score_config)
                     if completed is not None:
@@ -970,6 +1068,13 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
                              "waited for until it posts (see --max-wait-minutes)")
     parser.add_argument("--work-dir", type=Path, default=None, help="the run folder")
     parser.add_argument("--source", default="gfs", help="init-source row (default gfs; see init-source --list)")
+    parser.add_argument("--lead-hours", type=int, default=0, metavar="H",
+                        help="start from this forecast hour of --cycle (a forecast source's own cadence, e.g. GFS "
+                             "2026-10-23T18 --lead-hours 348); the run's start is cycle + H")
+    parser.add_argument("--from-last-hour", action="store_true",
+                        help="start from the source's LAST forecast hour for --cycle (IFS HRES 00/12Z: 360 h) and run "
+                             "--hours on: the hours past the source are a free run of our own model, and the receipt "
+                             "says so")
     parser.add_argument("--accept-licence", action="append", default=[], metavar="LICENCE",
                         help="research-only model opt-in naming each exact code/weight licence")
     parser.add_argument("--member", type=int, default=None, help="one member of an ensemble source (e.g. gefs)")
@@ -995,6 +1100,9 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--forecast-arg", action="append", default=[], metavar="ARG",
                         help="one extra forecast-door argument, repeatable (e.g. --forecast-arg=--checkpoint-hours=6)")
     parser.add_argument("--table", type=Path, default=None, help="alternative table (tests)")
+    from .products_door import add_label_arguments
+
+    add_label_arguments(parser)
     from .global_cycle import add_cycle_arguments
     from .global_ensemble import add_ensemble_arguments
 
