@@ -87,8 +87,8 @@ def refuse_vertical_levels(label: str,
 FAST_SBM_VERTICAL_LEVEL_BOUNDS = (2, None)
 
 MYNN_VERTICAL_LEVEL_BOUNDS = (5, None)
-#: YSU.  The ceiling is ``YSU_KMAX`` in ``kernels/ysu.cu`` (and the global
-#: port's ``woof/globe/core/kernels/ysu.cu``), which is now a REFUSAL
+#: YSU.  The ceiling is ``YSU_KMAX`` in ``kernels/ysu_default.cu`` and
+#: ``kernels/ysu_480.cu``, which is now a REFUSAL
 #: ceiling and nothing else: the column arrays live in a global workspace
 #: whose per-slot extent is the runtime ``nz``, so no array is sized by it.
 #: It sits at the dynamical core's own 256-level ceiling.  The floor is the

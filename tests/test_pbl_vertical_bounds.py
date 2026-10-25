@@ -47,18 +47,18 @@ def test_the_contract_bounds_are_the_launchers_own_bounds():
 
 
 def test_the_guard_only_ceilings_are_the_launchers_own_bounds():
-    """YSU (regional, global, ensemble batch), KF and terrain drag.
+    """YSU (regional, ensemble batch), KF and terrain drag.
 
     Each of these was a 128-level guard over a column the kernel no longer
     sizes at 128 (or, for terrain drag, a per-thread profile it now sizes at
     256); they sit at the dycore's own 256-level ceiling.
     """
     from woof.core import kf, terrain_drag
-    from woof.globe.core import ysu as globe_ysu
+    from woof.core import ysu
 
     assert KF_VERTICAL_LEVEL_BOUNDS == kf.VERTICAL_LEVEL_BOUNDS
     assert TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS == terrain_drag.VERTICAL_LEVEL_BOUNDS
-    assert YSU_VERTICAL_LEVEL_BOUNDS == globe_ysu.VERTICAL_LEVEL_BOUNDS
+    assert YSU_VERTICAL_LEVEL_BOUNDS == ysu.VERTICAL_LEVEL_BOUNDS
     dycore_ceiling = ACOUSTIC_VERTICAL_LEVEL_BOUNDS[1]
     for bounds in (YSU_VERTICAL_LEVEL_BOUNDS, SHINHONG_VERTICAL_LEVEL_BOUNDS,
                    KF_VERTICAL_LEVEL_BOUNDS,
@@ -86,7 +86,6 @@ def test_the_ensemble_batch_ysu_plan_follows_the_contract():
     ("MYJ_KMAX", "myjpbl", MYJ_VERTICAL_LEVEL_BOUNDS),
     ("KF_KMAX", "kf", KF_VERTICAL_LEVEL_BOUNDS),
     ("TD_KMAX", "terrain_drag", TERRAIN_DRAG_VERTICAL_LEVEL_BOUNDS),
-    ("YSU_KMAX", "globe:ysu", YSU_VERTICAL_LEVEL_BOUNDS),
 ))
 def test_the_declared_ceiling_is_the_compiled_kernel_ceiling(
         define, module_name, bounds):
@@ -94,12 +93,7 @@ def test_the_declared_ceiling_is_the_compiled_kernel_ceiling(
     from pathlib import Path
 
     import woof.core.kernels as kernels
-    import woof.globe.core.kernels as globe_kernels
-
-    package = kernels
-    if module_name.startswith("globe:"):
-        package, module_name = globe_kernels, module_name.split(":", 1)[1]
-    source = (Path(package.__file__).with_name(f"{module_name}.cu")
+    source = (Path(kernels.__file__).with_name(f"{module_name}.cu")
               .read_text(encoding="utf-8"))
     line = next(ln for ln in source.splitlines()
                 if ln.startswith(f"#define {define} "))
@@ -169,19 +163,6 @@ def test_shinhong_refuses_out_of_range_levels_by_name():
                         dt=60.0, dx=1000.0, dy=1000.0)
     assert ("Shin-Hong PBL requires 4 <= nz <= 256, got nz=257"
             in str(caught.value))
-
-
-def test_global_ysu_refuses_too_many_levels_by_name():
-    from woof.globe.core.ysu import launch_ysu
-
-    with pytest.raises(PhysicsVerticalPreflightError) as caught:
-        launch_ysu(*(_column(257) for _ in range(6)), None, None, None, None,
-                   psfc=None, znt=None, ust=None, hfx=None, qfx=None,
-                   wspd=None, br=None, psim=None, psih=None, xland=None,
-                   u10=None, v10=None, dt=60.0)
-    message = str(caught.value)
-    assert "YSU PBL requires 4 <= nz <= 256, got nz=257" in message
-    assert "workspace" in message and "local memory" not in message
 
 
 def test_kf_refuses_out_of_range_levels():

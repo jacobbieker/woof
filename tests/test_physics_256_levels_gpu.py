@@ -205,7 +205,7 @@ def _routing(module_obj, stem, old_module, served):
 # YSU, regional and global
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("package", ["woof.core", "woof.globe.core"])
+@pytest.mark.parametrize("package", ["woof.core"])
 def test_ysu_runs_a_256_level_column_to_a_1_hpa_top(package):
     import importlib
 
@@ -221,7 +221,7 @@ def test_ysu_runs_a_256_level_column_to_a_1_hpa_top(package):
     assert ((out["kpbl"] >= 1) & (out["kpbl"] < DEEP)).all()
 
 
-@pytest.mark.parametrize("package", ["woof.core", "woof.globe.core"])
+@pytest.mark.parametrize("package", ["woof.core"])
 @pytest.mark.parametrize("nz", [49, OLD_KMAX])
 def test_ysu_is_bit_identical_to_the_128_level_kernel(package, nz, monkeypatch):
     import importlib

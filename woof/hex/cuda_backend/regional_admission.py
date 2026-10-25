@@ -717,8 +717,19 @@ class RegionalContract:
 #: launches. A host-side cache key only; no CUDA source string or
 #: arithmetic changed. Re-derived by tools/repin_source_tables.py; not a
 #: new regional forecast mint, archived scope unchanged.
+#: (20) 2026-10-24 (hex 0.4.5 landing batch): host-side changes only in
+#: this set since (19): aot.py accepts pack banners through
+#: compile_contract.build_id_accepted (865a117); runtime.py memoises kernel
+#: resolution and records shape origins (U-MPASPHYS-1, 5a270ec);
+#: cuda_driver.py loads every moist species on a limited-area MPAS-suite run
+#: (47f7459; the regional qv-only path is unchanged for the dycore's own
+#: runs); cuda_horizontal_v841.py adds solve_vorticity, which launches the
+#: existing vertex_diagnostics_v841_f32 kernel unchanged (G1);
+#: cuda_transport_v841.py a comment. No CUDA source string or arithmetic
+#: changed. Re-derived by tools/repin_source_tables.py; not a new regional
+#: forecast mint, archived scope unchanged.
 MINTED_KERNEL_SET_SHA256 = (
-    "4f65c1364396cf0da83dc700da8a5fe2023c8bbf7c6a285e706593821e7f0b91"
+    "03c5aeb3b03ed873ca84007132b2eb686309e2a4f9ce82deb013b1d0f094e2dd"
 )
 
 _DRY_MINT_CAVEAT = (

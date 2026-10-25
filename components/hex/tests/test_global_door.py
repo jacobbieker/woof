@@ -120,7 +120,33 @@ def test_devices_and_extra_forecast_arguments_reach_the_forecast_door(tmp_path):
     forecast = value["commands"]["forecast"]
     assert forecast[forecast.index("--samehost-devices") + 1] == "0,1"
     assert "--checkpoint-hours=6" in forecast
-    assert value["cards"] == {"selected_cards": 2, "basis": "--devices names the cards"}
+    assert {k: v for k, v in value["cards"].items() if k != "lease"} == {"selected_cards": 2, "basis": "--devices names the cards"}
+    assert value["cards"]["lease"]["vram_mib_per_card"] is None  # no grid in the test cache
+
+
+def test_the_model_label_and_brand_reach_the_product_stage(tmp_path, monkeypatch):
+    # WOOF sounding labels (2026-10-23): the door forwards what the host calls the model to its soundings.
+    monkeypatch.setattr(global_door, "_visible_cards", lambda: [])
+    brand = "WOOF Hex · Global 120 km · Init GFS 22 Oct 2026 00Z"
+    value = global_door.plan(_args(tmp_path, "--model-label", "WOOF Hex", "--brand", brand))
+    products = value["commands"]["products"]
+    assert products[products.index("--model-label") + 1] == "WOOF Hex"
+    assert products[products.index("--brand") + 1] == brand
+    build_parser().parse_args(products)
+    # unset, nothing is forwarded and the products door keeps its own default
+    bare = global_door.plan(_args(tmp_path))["commands"]["products"]
+    assert "--model-label" not in bare and "--brand" not in bare
+
+
+def test_the_first_look_and_the_full_pass_file_into_one_case(tmp_path, monkeypatch):
+    # Parity run group 4: on the MPAS-physics route the products door named the case from the grid file
+    # (x1.40962-<cycle>) while the first look used the runtime mesh name, so every live hour was drawn twice.
+    monkeypatch.setattr(global_door, "_visible_cards", lambda: [])
+    value = global_door.plan(_args(tmp_path))
+    products = value["commands"]["products"]
+    assert value["case"] == f"{global_door.runtime_mesh_name(value['mesh']['id'])}-2026101112"
+    assert products[products.index("--case") + 1] == value["case"]
+    build_parser().parse_args(products)
 
 
 def test_a_wall_estimate_needs_the_same_card(monkeypatch):

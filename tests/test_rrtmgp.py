@@ -1203,10 +1203,9 @@ def _deep_clear_column(tables, nlay, *, ncol=2, p_top=1.1):
     return play, plev, tlay, tlev, tsfc, vmr
 
 
-#: The regional engine's RRTMGP and the global model's carried copy
-#: (woof/globe/core/rrtmgp.py, its own kernels under woof/globe/core/kernels)
-#: lost the same pfrac[128] ceiling; every deep-column test runs both.
-_RRTMGP_COPIES = ("woof.core.rrtmgp", "woof.globe.core.rrtmgp")
+#: The regional engine's RRTMGP (the global model's carried copy left with
+#: the spectral global model in 1.1.1).
+_RRTMGP_COPIES = ("woof.core.rrtmgp",)
 
 
 @pytest.mark.gpu

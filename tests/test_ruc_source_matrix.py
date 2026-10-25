@@ -60,6 +60,9 @@ EXPECTED_POLICY = {
     "aigfs": "layer_midpoint_samples",
     "ecmwf-ens": "layer_midpoint_samples",
     "ecmwf-open-data": "layer_midpoint_samples",
+    # E-SRC (src/any-init-sources 94841c57ed): IFS HRES open data at 0.1
+    # degree, decoded by the 0.25-degree oper profile's soil layers.
+    "ecmwf-open-data-0p1": "layer_midpoint_samples",
     "era5-l137": "layer_midpoint_samples",
     "gdas": "layer_midpoint_samples",
     "gefs": "layer_midpoint_samples",
@@ -85,6 +88,9 @@ EXPECTED_POLICY = {
     "rrfs": "node_point_samples",
     # Soil carried in band from the same-hour ERA5: the ERA5 layer column.
     "ukv": "layer_midpoint_samples",
+    # S9 (lane/leftovers-295): the RRFS ensemble member's soil comes from its
+    # declared deterministic RRFS companion, the same RUC nodes as rrfs.
+    "rrfs-ens": "node_point_samples",
 }
 
 # Parameterized models reuse the certified land-surface profile. Each new

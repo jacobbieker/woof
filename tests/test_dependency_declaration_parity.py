@@ -114,6 +114,7 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
     "rasterio": ("rasterio",),
     "scipy": ("scipy",),
     "shapefile": ("pyshp",),
+    "py7zr": ("py7zr",),
     "wrf": ("wrf-rust",),
     # The companion distribution, split out of this one in 2.5.0 when the
     # woof wheel measured 103.62 MiB against PyPI's 100 MiB per-file cap.
@@ -320,6 +321,13 @@ _EXTRA_GATED: dict[str, tuple[tuple[str, ...], str]] = {
         "forecast. The import is lazy and its absence raises "
         "DynamicalUnavailable naming `pip install 'recast-woof[obs]'`; no "
         "forecast or preprocessing route reaches it, and [all-*] carries it.",
+    ),
+    "py7zr": (
+        ("hydro-conus",),
+        "Decodes the CONUS NHDPlus V2.1 .7z source archives only, inside an "
+        "explicit --hydro run on a CONUS domain. py7zr and its codecs are "
+        "LGPL-2.1-or-later, outside the permissive licences a bare install "
+        "carries; without it the door prepares the worldwide fabric and says why.",
     ),
     "cuda": (
         ("gpu-cu13",),
@@ -837,6 +845,10 @@ def test_all_covers_every_extra_a_forecast_user_needs(declaration, pyproject):
                 "aggregate but tests/test_static_highres_warp_routing.py, "
                 "which makes rasterio/pyproj/affine unimportable and "
                 "requires the default terrain build to still answer.",
+        "hydro-conus": "the LGPL-2.1+ 7z decoder for the CONUS NHDPlus hydro "
+                       "source archives; hydro is opt-in and the worldwide "
+                       "fabric covers CONUS without it, and [all] stays on "
+                       "permissive licences (licence ruling 2026-10-14).",
         "mcp": "the arwen-mcp server's protocol stack, an agent "
                "integration surface rather than a forecast capability; "
                "a person following the quickstart runs forecasts from "

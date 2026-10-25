@@ -1,6 +1,6 @@
 """Neutral point-observation table and table-declared cache decoders.
 
-Moved into the engine from woof global (``woof.globe.obs_table`` at
+Moved into the engine from woof global (``arwen_global.obs_table`` at
 b54373992587) so the engine's own local data assimilation reads neutral
 tables without the global package installed; woof global keeps its copy
 until it is superseded.  The module is unchanged apart from this paragraph.
