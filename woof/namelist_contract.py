@@ -304,6 +304,10 @@ def _value_rules() -> dict[tuple[str, str], dict]:
     for key, (allowed, why) in ni.PHYSICS_CHOICES.items():
         rule("physics", key, allowed, why, scalar=True)
     for key, (ok, why) in ni.NEST_GUARDS.items():
+        if key == "vert_refine_method":
+            # Per domain: 0, or 2 for a nest on its own eta ladder.
+            rule("domains", key, [0, ni.VERT_REFINE_ARBITRARY_NAMELIST], why)
+            continue
         rule("domains", key, [ok], why, scalar=True)
     for key in ("slope_rad", "topo_shading"):
         rule("physics", key, [0, 1],

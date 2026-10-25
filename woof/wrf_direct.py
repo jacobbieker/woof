@@ -2351,8 +2351,12 @@ def _prepared_domain_context(artifact: PreparedDomainArtifacts, domain,
     if p_top != float(exp.vertical.p_top):
         raise ValueError(
             f"d{domain.grid_id:02d} prepared p_top differs from namelist")
+    from woof.experiment import domain_vertical
+    # A nest on its own ladder (WRF vert_refine_method = 2) is prepared on
+    # it; every other domain on [shared]'s.
     expected_eta = np.asarray(
-        exp.vertical.eta_levels, dtype=cache.array("coord/znw").dtype)
+        domain_vertical(exp.vertical, domain).eta_levels,
+        dtype=cache.array("coord/znw").dtype)
     if not np.array_equal(cache.array("coord/znw"), expected_eta):
         raise ValueError(
             f"d{domain.grid_id:02d} prepared eta levels differ from namelist")
@@ -2443,6 +2447,23 @@ def validate_stock_wrf_export_hierarchy(exp):
                     int(domain.run.mp_physics),
                     int(by_id[domain.parent_id].run.mp_physics))})
 
+
+
+def _nest_ladders(exp) -> dict:
+    """``{"nest_ladders": {...}}`` for a tree whose nests carry their own
+    eta ladders (WRF vert_refine_method = 2), else ``{}``."""
+    from woof.experiment import domain_vertical, vertically_nested_ids
+
+    nested = vertically_nested_ids(exp)
+    if not nested:
+        return {}
+    ladders = {}
+    for gid in nested:
+        eta = domain_vertical(exp.vertical, exp.domain(gid)).eta_levels
+        ladders[f"d{gid:02d}"] = {
+            "e_vert": len(eta),
+            "eta_sha256": _array_sha256(np.asarray(eta, dtype=np.float64))}
+    return {"vert_refine_method": 2, "nest_ladders": ladders}
 
 
 def export_prepared_wrf_hierarchy(
@@ -2591,6 +2612,10 @@ def export_prepared_wrf_hierarchy(
                 "hybrid_opt": exp.vertical.hybrid_opt,
                 "eta_sha256": _array_sha256(np.asarray(
                     exp.vertical.eta_levels, dtype=np.float64)),
+                # WRF vert_refine_method = 2: each nest on its own ladder,
+                # named only when there is one, so every other export's
+                # manifest is byte-identical.
+                **_nest_ladders(exp),
             },
             "source": {
                 "domains": sources,

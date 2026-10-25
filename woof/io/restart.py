@@ -2154,10 +2154,28 @@ def _resolved_object_setup_identity(value, label: str) -> dict:
     return payload
 
 
+def _domain_workspace(workspace, cfg):
+    """The one workspace a domain's adapter uses: a tree of several level
+    counts keeps one per count (woof.core.model.LadderRadiationWorkspaces),
+    and a domain's identity is its own count's, exactly what a tree of one
+    ladder recorded."""
+    if workspace is not None and hasattr(workspace, "for_nz"):
+        return workspace.for_nz(int(cfg.nz))
+    return workspace
+
+
 def _rrtmgp_workspace_identity(workspace) -> dict:
     """Bind the optional workspace code path without hashing scratch bytes."""
     if workspace is None:
         return {"present": False}
+    if hasattr(workspace, "for_nz"):
+        # A tree of several ladders (woof.core.model.LadderRadiationWorkspaces)
+        # where the caller does not know the domain's count: bind every
+        # count's workspace.
+        return {"present": True, "class": _callable_class_name(workspace),
+                "level_counts": [int(n) for n in workspace.level_counts],
+                "per_count": [_rrtmgp_workspace_identity(workspace.for_nz(n))
+                              for n in workspace.level_counts]}
     try:
         p_top = float(workspace.p_top)
         if not math.isfinite(p_top) or p_top < 0.0:
@@ -2516,7 +2534,8 @@ def _radiation_setup_identity(driver, cfg) -> dict:
                         scheme.sw_cloud_tables, "RRTMGP SW cloud table"),
                 },
                 "chunk_workspace": _rrtmgp_workspace_identity(
-                    getattr(scheme, "chunk_workspace", None)),
+                    _domain_workspace(getattr(scheme, "chunk_workspace",
+                                              None), cfg)),
             })
         except AttributeError as exc:
             raise RestartManifestError(

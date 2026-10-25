@@ -759,10 +759,14 @@ def validate_native_lambert_contracts(
                 "authors a config whose [shared] block carries the "
                 "certified ladder; copy its nz/p_top/eta_levels lines "
                 "into your imported config."))
+    from woof.experiment import domain_vertical
+
     for domain in exp.domains:
         try:
             validate_explicit_eta_grid(
-                vertical.eta_levels,
+                # A nest on its own ladder (WRF vert_refine_method = 2) is
+                # checked against that ladder, under the shared p_top.
+                domain_vertical(vertical, domain).eta_levels,
                 nz=domain.run.nz,
                 p_top=vertical.p_top,
                 source_top_pressure_pa=source_top_pressure_pa,

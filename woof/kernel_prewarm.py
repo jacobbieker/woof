@@ -383,6 +383,9 @@ _DEVICE_LOADERS = {
     # WRF's windfarm_opt = 1 (the fork's Fitch coupling): its own direct
     # NVRTC unit, compiled per device like the terrain drag.
     "windfarm_fitch_composed": ("windfarm_fitch", "_module"),
+    # WRF vertical grid nesting (a nest on its own eta ladder): its own
+    # direct NVRTC unit, compiled per device like the terrain drag.
+    "nest_vertical_composed": ("nest_vertical", "_module"),
 }
 
 

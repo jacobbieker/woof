@@ -385,18 +385,19 @@ These are limits of the current build, not opinions about LES.
   0.921, and the nested child's shared 49-level grid gives up 4.8 points
   of it. The battery extends that sweep, strictly monotone: **0.92476 at
   nz=160 and 0.92941 at nz=192**.
-- **Vertical nesting is impossible in an INLINE nest tree, and available
-  offline.** The vertical grid of a running tree is single-sourced from
-  `ExperimentConfig.vertical`, and per-domain vertical keys are rejected
-  outright (`woof/experiment.py`, `_DOMAIN_VERTICAL_KEYS`): the inline
-  corridor interpolates boundaries every parent step on the GPU and has no
-  vertical operator there. A 250 m child running *inside* the tree does
-  therefore run its parents' level count. To give it more, run it as an
-  offline child off archived parent history: `woof downscale
-  --child-levels 128,2.5` builds it on its own ladder, remapping the
-  initial state and the whole lateral-boundary table set once at
-  preparation in FP64. That is the door that recovers the 4.8 points of
-  resolved TKE the shared 49-level grid gives up, measured in §2 above.
+- **A nest can carry its own levels, inline or offline.** Inside a
+  running tree a `[[domain]]` names its own `eta_levels` (WRF
+  `vert_refine_method = 2`) under the shared `p_top`, `hybrid_opt` and
+  `etac`. The parent forces it every parent step through WRF's vertical
+  interpolation and rebalance (`woof/core/nest_vertical.py`, held word for
+  word to WRF v4.7.1's Fortran), and a nest born from its parent is
+  interpolated the same way. Feedback, moving, spawned, split and
+  streamed edges are refused by name. A 250 m child no longer has to run
+  its parents' level count. Offline, `woof downscale --child-levels
+  128,2.5` builds a child on its own ladder off archived parent history,
+  remapping the initial state and the boundary tables once at preparation
+  in FP64. Either recovers the 4.8 points of resolved TKE the shared
+  49-level grid gives up, measured in §2 above.
 - **`km_opt=2` on a nest cold-starts its own TKE, under any parent.** WRF
   gives `tke` no `i` (nest-interpolation) and no `f` (feedback) Registry
   flag, so a child cold-starts its own TKE and never feeds it back, and

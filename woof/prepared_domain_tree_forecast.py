@@ -1277,7 +1277,11 @@ def _validate_vertical(reader: PreparedCacheReader, exp, grid_id: int) -> None:
     metadata = reader.header.get("metadata")
     if not isinstance(metadata, dict):
         raise ValueError(f"d{grid_id:02d} cache metadata is missing")
-    eta = tuple(float(value) for value in exp.vertical.eta_levels)
+    from woof.experiment import domain_vertical
+    # A nest on its own ladder (WRF vert_refine_method = 2) was prepared on
+    # it; every other domain on [shared]'s.
+    eta = tuple(float(value) for value in domain_vertical(
+        exp.vertical, exp.domain(grid_id)).eta_levels)
     observed = reader.read_array("coord/znw")
     if observed.shape != (len(eta),) or not np.array_equal(
         observed.astype(np.float64), np.asarray(eta, dtype=np.float64)
@@ -3473,7 +3477,7 @@ def run_prepared_tree(
         ExperimentState,
         ModelMemoryLedger,
         ModelRuntimeStatus,
-        SharedRRTMGPChunkWorkspace,
+        build_radiation_workspace,
         execute_experiment,
         publish_declared_experiment,
         uses_modern_rrtmgp_workspace,
@@ -3664,9 +3668,7 @@ def run_prepared_tree(
     # ("shared radiation allocation differs from preflight") -- exactly
     # the failure uses_modern_rrtmgp_workspace's docstring predicts.
     radiation_workspace = (
-        SharedRRTMGPChunkWorkspace(
-            nz=exp.root.run.nz, column_chunk=exp.column_chunk, p_top=exp.vertical.p_top
-        )
+        build_radiation_workspace(exp)
         if uses_modern_rrtmgp_workspace(exp)
         else None
     )

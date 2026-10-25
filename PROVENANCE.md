@@ -498,11 +498,12 @@ the 2.8.7 release carries the file; later releases point at it there.
     `_weights` with `spec_exp = 0` is therefore a stated transliteration of
     that branch instead of a default-value coincidence.
   - **Moving nests** (`num_moves`/`move_*`/`vortex_*`/corral keys),
-    **vertical nesting** (per-domain `e_vert`/`eta_levels`/`p_top`
-    differences and `vert_refine_method != 0`; WRF only calls
-    `init_domain_vert_nesting` when a nest refines the vertical grid, guarded
-    by `nest%e_vert /= parent%e_vert` at
-    share/mediation_integrate.F:663 with the call at :665),
+    **vertical nesting beyond WRF's `vert_refine_method = 2`** (per-domain
+    `p_top` differences and integer refinement, `vert_refine_method = 1`; WRF
+    only calls `init_domain_vert_nesting` when a nest refines the vertical
+    grid, guarded by `nest%e_vert /= parent%e_vert` at
+    share/mediation_integrate.F:663 with the call at :665; a nest's own
+    `eta_levels` under the shared `p_top` IS ported, woof/core/nest_vertical.py),
     **adaptive time step** (`use_adaptive_time_step`), and
     **`input_from_hires`** terrain are rejected design-scope options that the
     bundle namelist never exercises.

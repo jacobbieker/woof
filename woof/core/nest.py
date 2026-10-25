@@ -164,6 +164,12 @@ _SIDES = (("west", "xs"), ("east", "xe"),
 _GEOMETRY_NAMES = ("ci", "ip", "cj", "jp", "xig", "xjg")
 
 
+def _run_ladder(run) -> tuple | None:
+    """A domain's own eta ladder, or ``None`` for [shared]'s."""
+    ladder = getattr(run, "eta_levels", None)
+    return None if not ladder else tuple(float(v) for v in ladder)
+
+
 def _state_attr(kind: str) -> str:
     """The ``DomainState`` attribute one nest field kind lives on."""
     return {"t": "thp", "ph": "php", "mu": "mup"}.get(kind, kind)
@@ -306,17 +312,24 @@ class NestCoupler:
         self.slot_dtypes = nest_slot_dtypes(child, width, parent)
         self.microphysics_transition = resolve_microphysics_transition(
             parent.run, child.run)
-        if self.feedback == 1 and parent.run.nz != child.run.nz:
+        #: Whether this edge crosses two eta ladders (WRF
+        #: vert_refine_method = 2): a child naming its own eta_levels, or
+        #: a parent that does while the child keeps [shared]'s.
+        self.crosses_ladders = (
+            parent.run.nz != child.run.nz
+            or _run_ladder(parent.run) != _run_ladder(child.run))
+        if self.feedback == 1 and self.crosses_ladders:
             raise ValueError(
                 "experimental feedback is horizontal-only and requires "
-                f"identical parent/child vertical level counts (parent "
+                "identical vertical levels, one eta ladder, on both ends of "
+                "the edge (parent "
                 f"nz={parent.run.nz}, child nz={child.run.nz}): the reverse "
                 "feedback operator averages child cells onto parent cells "
                 "with no vertical mapping, so a mismatched pair would feed "
-                "the parent values from the wrong levels.  A per-domain "
-                "vertical ladder is available on the OFFLINE downscale "
-                "route (`woof downscale --child-levels`), which is one-way "
-                "by construction and takes no feedback.")
+                "the parent values from the wrong levels.  Set feedback = "
+                "0 for a nest on its own ladder; the parent forces it "
+                "through WRF's vertical interpolation "
+                "(woof/core/nest_vertical.py).")
         #: The FEEDBACK edge, child scheme -> parent scheme, resolved
         #: through the same matrix as the forward one with the policy
         #: passed EXPLICITLY (the parent's own key is the policy of its
@@ -364,6 +377,11 @@ class NestCoupler:
         self.last_feedback_ticks = None
         self.placement_generation = 0
         self.relocation_count = 0
+        #: The edge's :class:`woof.core.nest_vertical.VerticalNestPlan`,
+        #: built from the two loaded bases at the first force; ``None``
+        #: on an edge inside one ladder, which runs exactly as before.
+        self._vertical_plan = None
+        self._vertical_windows: dict = {}
 
     def _build_registrations(self):
         """The three stagger registrations for the child's CURRENT placement.
@@ -874,6 +892,66 @@ class NestCoupler:
                     result -= thb if thb.ndim == 3 else thb[:, None, None]
                 parent_source.write(attr, window, result)
 
+    # -- vertical nesting (WRF vert_refine_method = 2) --------------------
+
+    def vertical_plan(self):
+        """The edge's vertical-nesting plan, built once from the two
+        loaded bases (``None`` inside one ladder)."""
+        if not self.crosses_ladders:
+            return None
+        if self._vertical_plan is None:
+            from woof.core.nest_vertical import VerticalNestPlan
+            self._vertical_plan = VerticalNestPlan.from_states(
+                self.child_node.parent.state, self.child_node.state,
+                self.child_node.cfg.run)
+        return self._vertical_plan
+
+    def _vertical_window(self, stagger: str):
+        """The parent donor rectangle one stagger's SINT reads for the
+        whole child, and the registration cropped to it.  The vertical
+        step runs on exactly those parent columns."""
+        if stagger not in self._vertical_windows:
+            from woof.core.nest_interp import window_registration
+            reg = self.registrations[stagger]
+            self._vertical_windows[stagger] = window_registration(
+                reg, (slice(0, reg.nyc), slice(0, reg.nxc)))
+        return self._vertical_windows[stagger]
+
+    def _vertical_parent_field(self, kind: str):
+        """WRF's intermediate field for one kind: the coupled parent on its
+        donor columns, interpolated onto the child's ladder
+        (``force_domain_em_part2``'s ``nest_forcedown_interp_vert``)."""
+        import cupy as cp
+
+        plan = self.vertical_plan()
+        cropped, donor = self._vertical_window(_STAGGER.get(kind, "m"))
+        full = self._coupled_parent_field(kind)
+        window = cp.ascontiguousarray(full[(slice(None),) + donor])
+        return plan.interp(window), cropped
+
+    def _vertical_forcing(self, node, kinds):
+        """t_2, QV and ph_2 interpolated and rebalanced on the child's
+        ladder (``force_domain_em_part2.F:124-303``), keyed by kind; the
+        other kinds are interpolated one at a time in the force loop."""
+        import cupy as cp
+
+        plan = self.vertical_plan()
+        out = {kind: self._vertical_parent_field(kind)
+               for kind in ("t", "qv", "ph") if kind in kinds}
+        if "t" not in out or "ph" not in out:
+            return out
+        cropped, donor = self._vertical_window("m")
+        parent_state = node.parent.state
+        if "qv" in out:
+            qv = out["qv"][0]
+        else:
+            # A dry tree: WRF's moist(P_QV) is zero.
+            qv = cp.zeros_like(out["t"][0])
+        plan.rebalance(out["t"][0], qv, out["ph"][0],
+                       parent_state.mub2d[donor], parent_state.mup[donor],
+                       parent_state.ht[donor])
+        return out
+
     def force(self, node) -> None:
         """Refresh this child's rolling tables from ``parent(t+dt_p)``.
 
@@ -909,27 +987,43 @@ class NestCoupler:
         run = node.cfg.run
         bounded_operands = (getattr(node.state, "_streamed_domain", None) is not None
                             or getattr(parent.state, "_streamed_domain", None) is not None)
+        if bounded_operands and self.crosses_ladders:
+            raise RuntimeError(
+                f"d{int(node.cfg.grid_id):02d} is on its own eta ladder and "
+                "an end of its edge is streamed or split: the bounded "
+                "corridors read parent windows on the parent's levels and "
+                "have no vertical step.  Run this edge resident.")
         if bounded_operands:
             from woof.core.nest_operands import NestWindowSource
             parent_source = NestWindowSource(parent.state)
             child_source = NestWindowSource(node.state)
-        for kind in nest_field_kinds(run):
+        kinds = nest_field_kinds(run)
+        vertical = (self._vertical_forcing(node, kinds)
+                    if self.crosses_ladders else None)
+        for kind in kinds:
             if bounded_operands:
                 out = self._rolling_out(kind)
                 self._force_windowed(kind, out, parent_source, child_source)
                 fields[_APPLICATION_NAME.get(kind, kind)] = out
                 continue
-            parent_field = self._coupled_parent_field(kind)
-            child_field = self._coupled_child_field(kind, frame=True)
             stagger = _STAGGER.get(kind, "m")
+            if vertical is not None and kind != "mu":
+                parent_field, registration = (
+                    vertical.pop(kind) if kind in vertical
+                    else self._vertical_parent_field(kind))
+            else:
+                parent_field = self._coupled_parent_field(kind)
+                registration = self.registrations[stagger]
+            child_field = self._coupled_child_field(kind, frame=True)
             out = self._rolling_out(kind)
             bdy_interp1(
-                parent_field, child_field, self.registrations[stagger],
+                parent_field, child_field, registration,
                 parent_dt_fp32=parent.clock.dt_fp32,   # LIVE
                 parent_interval_ticks=parent_interval_ticks,
                 spec_zone=run.spec_zone, relax_zone=run.relax_zone,
                 spec_bdy_width=run.spec_bdy_width, out=out)
             fields[_APPLICATION_NAME.get(kind, kind)] = out
+            del parent_field
 
         if bounded_operands:
             self.force_sync_bytes += (parent_source.host_to_device_bytes

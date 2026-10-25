@@ -1,0 +1,8 @@
+# WRF v4.7.1 (tag v4.7.1, commit f52c197ed39d12e087d02c50f412d90d418f6186).
+# Every file the vertical-nesting oracle compiles, cuts from or cites.
+# build.sh refuses any other bytes.
+680881db48904396f38856ca1dd2578a84e8eb0a9cdd05d49f4c63cd8ce9bdaa  share/interp_fcn.F
+768d95ef689a6e38a69c2bc8fd822c71b24a4811d4620aa62db38e951cd7ebe9  external/RSL_LITE/force_domain_em_part2.F
+7428971d4d18ffa7489b9f72d74b641b41049d1f9d3d68dcdca889477d5554f5  external/RSL_LITE/interp_domain_em_part2.F
+5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062  share/module_model_constants.F
+07db287108ab031f89e8bb80d830871daf8ba962f60d394e1ff31c845c1b4a14  dyn_em/nest_init_utils.F

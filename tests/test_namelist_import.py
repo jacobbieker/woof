@@ -874,7 +874,7 @@ def test_rejects_hand_typed_child_dx(tmp_path):
     assert "3999" not in toml_text
 
 
-def test_rejects_vertical_nesting(tmp_path):
+def test_rejects_vertical_nesting_without_vert_refine_method(tmp_path):
     inp = INPUT_TEXT.replace("e_vert = 9, 9", "e_vert = 9, 8")
     with pytest.raises(ValueError, match="must be identical"):
         import_namelists(*_pair(tmp_path, inp=inp))

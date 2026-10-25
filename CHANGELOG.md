@@ -4,6 +4,20 @@
 
 New:
 
+- A live nest can carry its own eta ladder (WRF `vert_refine_method = 2`): a
+  `[[domain]]` names `eta_levels` under the tree's shared `p_top`,
+  `hybrid_opt` and `etac`. The parent forces it every parent step through
+  WRF's vertical interpolation and its rebalance of `t`, QV and `ph`, ported
+  as one GPU unit and a binary32 CPU twin that both match WRF v4.7.1's Fortran
+  word for word (`tools/vert_nest_wrf471_oracle`). A nest born from its parent
+  is interpolated the same way. A nest prepared from the analysis is built on
+  its own ladder directly. WRF namelists with `vert_refine_method = 2` and
+  per-domain `e_vert`/`eta_levels` import. Feedback, moving, spawned, split
+  and streamed edges, and a nest with a different microphysics scheme, are
+  refused by name. A tree whose nests name no ladder of their own is
+  unchanged: its RunConfigs, fingerprints, checkpoints and caches are the
+  same.
+
 - `woof downscale --child-levels` takes two more spellings: `eta:LIST|FILE`, an
   explicit child eta ladder (a comma list or a file such as one
   `python -m woof.vertical_bands --write` makes), and

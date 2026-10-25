@@ -215,6 +215,41 @@ copied.
 | `hybrid_opt` | `hybrid_opt` | 0 (legacy) | 0/1 (sigma), 2 (WRF cubic-B) | importer default 2 (Registry) |
 | `etac` | `etac` | 0.2 | [0, 1] | the value asked for; preparation lowers it when this run's terrain needs it (below) |
 | `ztop` | -- | required | > 0 | WOOF-only scaffold height; real runs derive heights from p_top/eta_levels |
+| `vert_refine_method` | `vert_refine_method` | 0 | 0, 2 | 2 declares what a nest's own `eta_levels` already says and changes nothing; 1 (integer refinement) is refused |
+
+#### A nest on its own eta ladder (`[[domain]]`, WRF `vert_refine_method = 2`)
+
+| TOML key | WRF equivalent | default | allowed | note |
+|---|---|---|---|---|
+| `eta_levels` | `eta_levels` (this domain's slice) | [shared]'s | 1.0 -> 0.0 strictly decreasing, 4 <= nz <= 256 | nests only; the root's ladder is [shared]'s |
+| `nz` / `e_vert` | `e_vert` | len(eta_levels) | must agree with `eta_levels` | refused without `eta_levels` |
+
+A nest that names its own `eta_levels` runs on them under the tree's shared
+`p_top`, `hybrid_opt` and `etac`. A ladder equal to `[shared]`'s is no ladder
+of its own: that nest's `RunConfig` is the one it always was. The parent hands
+such a nest everything through WRF v4.7.1's vertical-nesting operators
+(`woof/core/nest_vertical.py`, held word for word to WRF's Fortran by
+`tests/test_nest_vertical_wrf471_parity.py`):
+
+- **Each parent step:** the parent's coupled fields, on the parent columns the
+  nest's SINT reads, are interpolated onto the nest's levels. This is a
+  monotone cubic Hermite in a reference log-pressure height, with the surface
+  and top points of half-level fields extrapolated by the parent's
+  `cf1..cfn1`. `t`, QV and `ph` are then rebalanced on the nest's coefficients
+  (`force_domain_em_part2.F:124-303`), and the boundary tables are built as
+  before.
+- **At the nest's start:** a nest prepared from the analysis is built on its own
+  ladder (the analysis is interpolated onto its levels directly). A nest born
+  from its parent (`start_from = "parent"`) takes the parent interpolated
+  vertically, then horizontally (`interp_domain_em_part2`).
+
+Refused by name, before anything is prepared:
+
+- `feedback = 1` (the restriction has no vertical operator back up);
+- a nest on its own ladder that moves, follows or spawns, or sits under one
+  that does;
+- a split (`[devices]`) or streamed (`[tiles]` on) edge;
+- a nest whose microphysics scheme differs from its parent's.
 
 #### The coordinate a run's terrain can order
 
