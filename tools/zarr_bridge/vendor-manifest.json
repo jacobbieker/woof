@@ -1,6 +1,6 @@
 {
   "schema": "arwen.zarr-vendor.v1",
-  "lock_sha256": "eb574bb9e6f5978c821a1ccbc2de9294d20699707ff8b352fc494e1cb77414a2",
+  "lock_sha256": "48aca7b6bdc272bedd4f090ff4402250eab2119378c9e84b4ec595bb160a67f5",
   "command": "python tools/update_zarr_license_notice.py (shared registry maintenance: tools/rustwx/VENDOR.md)",
   "packages": [
     {

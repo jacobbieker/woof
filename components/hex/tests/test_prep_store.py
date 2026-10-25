@@ -53,7 +53,7 @@ def _runner(argv):
 
 
 def _geog(root: Path) -> Path:
-    for _, name in ps.GEOG_DATASETS:
+    for _, (name, *_older) in ps.GEOG_DATASETS:
         d = root / ("soilgrids/" + name if name in ps.GEOG_CONTAINERS else name)
         d.mkdir(parents=True)
         (d / "index").write_text(f"type=categorical\n# {name}\n")
@@ -162,7 +162,7 @@ def test_static_key_depends_on_grid_geog_and_options(env):
 def test_geog_layout_flat_or_container_is_not_keyed(tmp_path):
     nested = _geog(tmp_path / "a")
     flat = tmp_path / "b"
-    for _, name in ps.GEOG_DATASETS:
+    for _, (name, *_older) in ps.GEOG_DATASETS:
         src = nested / ("soilgrids/" + name if name in ps.GEOG_CONTAINERS else name)
         dst = flat / name
         dst.mkdir(parents=True)
@@ -188,17 +188,30 @@ def test_incomplete_geog_builds_and_absent_geog_uses_the_declared_pin(env):
     assert ps.static_request(argv(geog), {}, pinned=pin) is None
 
 
-def test_corrupt_store_bytes_are_refused_and_nothing_is_published(env):
+def test_corrupt_store_bytes_are_refused_and_the_door_builds(env, capsys):
     tmp, store, box = env
     out = tmp / "a.nc"
     built = ps.run_or_fetch(_mesh_argv(tmp, out), runner=_runner)
     os.replace(box, store)
     (store / "mesh" / built["key"] / "grid.nc").write_bytes(b"not the grid")
     dest = tmp / "c" / "g.nc"
-    with pytest.raises(ps.PrepStoreError):
-        ps.run_or_fetch(_mesh_argv(tmp, dest), runner=_runner)
-    assert not dest.exists()
+    calls = []
+    got = ps.run_or_fetch(_mesh_argv(tmp, dest), runner=lambda a: calls.append(a) or _runner(a))
+    assert got["source"] == "built" and calls
+    assert dest.read_bytes() != b"not the grid"
     assert not list(dest.parent.glob(".*partial"))
+    assert "BAD STORE ENTRY REFUSED" in capsys.readouterr().err
+
+
+def test_store_missing_an_entry_file_builds(env):
+    tmp, store, box = env
+    out = tmp / "a.nc"
+    built = ps.run_or_fetch(_mesh_argv(tmp, out), runner=_runner)
+    os.replace(box, store)
+    (store / "mesh" / built["key"] / "grid.nc").unlink()
+    dest = tmp / "d" / "g.nc"
+    assert ps.run_or_fetch(_mesh_argv(tmp, dest), runner=_runner)["source"] == "built"
+    assert dest.exists() and not list(dest.parent.glob(".*partial"))
 
 
 def test_existing_output_without_clobber_runs_the_engine(env):
@@ -307,3 +320,45 @@ def test_expired_ticket_is_a_miss(env, monkeypatch):
     monkeypatch.delenv(ps.ENV_OUTBOX)
     result = ps.run_or_fetch(_mesh_argv(tmp, tmp / "g.nc"), runner=_runner)
     assert result["source"] == "built"
+
+
+def test_the_engines_current_dataset_names_are_keyed(tmp_path):
+    """woof 2.9.5's rw_mpas_static reads texture_top (in soilgrids), soiltemp_era5_1deg and the lake-free land use.
+    A root laid out that way (the WOOF run-box image) keys; before, two slots read as missing and no static was
+    ever stored (318 s rebuilt on every run of the 30 km region, g7e box 2026-10-23)."""
+    geog = _geog(tmp_path / "geog")
+    fp = ps.geog_fingerprint(geog)
+    assert not any(row.get("missing") for row in fp["slots"].values())
+    assert fp["dirs"]["soilcat"] == "soilgrids/texture_top"
+    assert fp["dirs"]["soil_temperature"] == "soiltemp_era5_1deg"
+    # an older layout (soiltype_top_30s, soiltemp_1deg) still keys, and differently
+    old = tmp_path / "old"
+    for slot, names in ps.GEOG_DATASETS:
+        name = names[-1]
+        d = old / ("soilgrids/" + name if name in ps.GEOG_CONTAINERS else name)
+        d.mkdir(parents=True)
+        (d / "index").write_text(f"type=categorical\n# {name}\n")
+        (d / "00001-00010.00001-00010").write_bytes(b"\0" * 100)
+    fp_old = ps.geog_fingerprint(old)
+    assert not any(row.get("missing") for row in fp_old["slots"].values())
+    assert fp_old["sha256"] != fp["sha256"]
+    # a root holding both land-use directories keys both
+    (geog / "modis_landuse_20class_30s_with_lakes").mkdir()
+    (geog / "modis_landuse_20class_30s_with_lakes" / "index").write_text("x")
+    assert ps.geog_fingerprint(geog)["sha256"] != fp["sha256"]
+
+
+def test_the_native_static_flags_are_keyed(tmp_path):
+    """The global and variable-resolution doors ask rw_mpas_static for --native-init --native-gwd-static; before,
+    those flags made the request unparseable, so their statics were never stored."""
+    geog = _geog(tmp_path / "geog")
+    grid = tmp_path / "grid.nc"
+    grid.write_bytes(b"g")
+    exe = _engine(tmp_path, "rw_mpas_static")
+    base = [*exe, "--grid", str(grid), "--geog", str(geog), "--out", str(tmp_path / "s.nc")]
+    plain = ps.static_request(base, {})
+    native = ps.static_request([*base, "--native-init", "--native-gwd-static", "--nominal-dx-m", "15000"], {})
+    assert plain is not None and native is not None
+    assert native[0] != plain[0]
+    assert native[1]["options"]["native_init"] is True and native[1]["options"]["native_gwd_static"] is True
+    assert "native_init" not in plain[1]["options"]  # keys built without the flags are unchanged

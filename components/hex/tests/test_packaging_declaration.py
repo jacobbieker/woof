@@ -37,11 +37,9 @@ def declaration() -> dict:
 # ---------------------------------------------------------------------------
 def test_the_version_is_stated_in_exactly_one_place(declaration: dict) -> None:
     declared = declaration["project"]["version"]
-    assert declared == "0.4.3", (
-        "0.4.3 is the hotfix cut on woof 2.9.4 (approved as 0.4.2.1 on 2026-10-22; three-part because the "
-        "release checks read three-part versions): 0.4.2 plus the s2s fix "
-        "(one sea-ice owner per column, rw_s2s_energy in the wheel); moving it is a release "
-        "decision, not an edit"
+    assert declared == "0.4.5", (
+        "0.4.5 is the release beside woof 2.9.7 (2026-10-24, pre-approved with it): every fix and the "
+        "MPAS-physics route at parity; moving it is a release decision, not an edit"
     )
 
     source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
@@ -143,7 +141,7 @@ def test_the_runtime_version_agrees_with_the_declaration(declaration: dict) -> N
 # ---------------------------------------------------------------------------
 def test_the_console_script_reaches_a_real_entry_point(declaration: dict) -> None:
     scripts = declaration["project"]["scripts"]
-    assert scripts == {"woof hex": "woof.hex.cli:main"}, (
+    assert scripts == {"woof hex": "woof.hex.cli:entry"}, (
         "one console script with subcommands, mirroring woof's shape; a "
         f"script per door was not the decision.  Found: {scripts}"
     )

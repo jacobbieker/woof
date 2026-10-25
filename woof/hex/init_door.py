@@ -1018,7 +1018,8 @@ def run_init_command(arguments: argparse.Namespace) -> int:
                    "and soil-moisture ceilings",
         },
         "init_cap_notes": cap_notes,
-        "physics_initialization": aerosol_receipt,
+        "physics_initialization": (aerosol_receipt if aerosol_receipt is not None
+                                   else selection.get("physics_initialization")),
         "run_declarations": declarations,
         "output": _described(out),
         "door_seconds": round(time.time() - started, 3),

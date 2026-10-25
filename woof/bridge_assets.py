@@ -846,18 +846,6 @@ BUNDLED_ARTIFACTS: tuple[BundledArtifact, ...] = (
         "rw_wis2", "executable", bridges.RUSTWX_CRATE_RELATIVE,
         "WOOF_RW_WIS2", "the WIS2 global feed (woof obs streams fetch --stream wis2)",
         on_demand=True),
-    # The global model's microwave door.  Its crate is on this line
-    # (``crates/rw-atms``, stamping its source revision through its own
-    # build.rs), ``cargo build --release --locked`` at ``tools/rustwx``
-    # builds it, and the engine's own bundle carries the global model's
-    # other five observation decoders (igra2, amv, ndbc, gnssro, wis2)
-    # since 2.9.2.  This one was never in this tuple, so on a clean wheel
-    # install ``woof global doctor`` exited 1 naming it as not staged and
-    # the global model's microwave leg and DA cycle had no decoder.
-    BundledArtifact(
-        "rw_atms", "executable", bridges.RUSTWX_CRATE_RELATIVE,
-        "WOOF_RW_ATMS",
-        "ATMS microwave radiances (woof global microwave, da cycle)"),
     BundledArtifact(
         "rw_prepbufr", "executable", bridges.RUSTWX_CRATE_RELATIVE,
         "WOOF_RW_PREPBUFR", "NCEP prepbufr conventional observations (local DA)",
@@ -1483,6 +1471,15 @@ NATIVE_BUILD_INPUTS["tools/nextgen_reservoir_prepare"] = ("tools/nextgen_reservo
 # renderer workspace's closure, as the forcing and gauge tools do.
 NATIVE_BUILD_INPUTS["tools/hydro_world_init"] = (
     "tools/hydro_world_init", "tools/hydro_world", *NATIVE_BUILD_INPUTS["tools/rustwx"])
+
+# These bridges compile the pinned static projection library, including its
+# embedded database. A change there must invalidate every dependent artifact.
+for _hydro_crate in ("tools/hydro_world", "tools/hydro_world_params",
+                     "tools/hydro_world_init", "tools/nextgen_hydrofabric",
+                     "tools/nextgen_verify"):
+    NATIVE_BUILD_INPUTS[_hydro_crate] += ("tools/hydro_proj",)
+    if "tools/rustwx/vendor/crates-io" not in NATIVE_BUILD_INPUTS[_hydro_crate]:
+        NATIVE_BUILD_INPUTS[_hydro_crate] += ("tools/rustwx/vendor/crates-io",)
 
 # The 2.9.4 ocean preparation (lane/cap-slab-ocean, rw_ocean) and bathymetry
 # (rw_bathy) tools build against the renderer workspace's shared NetCDF

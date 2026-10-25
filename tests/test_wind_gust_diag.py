@@ -294,7 +294,16 @@ def test_every_history_publisher_resets_the_wind_maxima():
     submit = next(node for node in ast.walk(tree)
                   if isinstance(node, ast.FunctionDef)
                   and node.name == "_submit_tree_history_frame")
-    assert "reset_history_interval_maxima" in ast.unparse(submit)
+    # 1.1.1 routes the tree runner's resets through
+    # reset_history_windows_after_frame (full frames only), which calls
+    # both reset_up_heli_max and reset_history_interval_maxima.
+    text = ast.unparse(submit)
+    if "reset_history_interval_maxima" not in text:
+        assert "reset_history_windows_after_frame" in text
+        helper = next(node for node in ast.walk(tree)
+                      if isinstance(node, ast.FunctionDef)
+                      and node.name == "reset_history_windows_after_frame")
+        assert "reset_history_interval_maxima" in ast.unparse(helper)
     # Every other publisher that resets UP_HELI_MAX resets these too.
     for rel in ("woof/runtime.py", "woof/offline_child_run.py",
                 "woof/ensemble/native_forecast.py",

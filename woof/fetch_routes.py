@@ -101,7 +101,18 @@ ROUTE_TABLE_SHA256 = (
     # keys under p/, a two-rung ladder with the source.coop mirror,
     # serves_from, run_listing and the DWD attribution); and icon-global-ml,
     # ICON global's 120 model levels on the same ladder, with a window_limit.
-    "fb9f39f8f7a38659a2c77cc9ef1e758e734d22091f62abc7230b0a70dbb26689"
+    # Moved by fix/go-posted-cycle-default: the rap-native and hrrr-native
+    # publication_lag rows are measured (they were an unmeasured 1.5 h
+    # estimate, so a default `woof go` waited ~40 min for a posted cycle).
+    # rrfs-ens fetches its declared companion (the deterministic prslev and
+    # 2dfld pair of the same cycle) as non-primary rows bound to the
+    # composition's companion data role.
+    # Moved by the ecmwf-open-data-0p1 route (IFS HRES open data at 0.1
+    # degree, published from the 2026-10-20 cycles).
+    # Both, merged for 2.9.7.
+    # Then the fork's met-office-global, icon-global (DWD v1 tree with the
+    # source.coop mirror) and icon-global-ml rows, merged onto 1.1.1.
+    "550f5af0a1e464d1ba73f5feeb1c66a19e3c152dd60337e334428713fdedf610"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own

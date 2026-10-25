@@ -4,13 +4,12 @@
 
 WOOF is a regional weather model with WRF-class physics that runs on one
 NVIDIA GPU, with its own preprocessing, data assimilation and plots. One
-install carries three models:
+install carries two models:
 
 | Model | Command | Status |
 | --- | --- | --- |
 | Regional (WRF-ARW class, nests, DA) | `woof` | Production |
 | Hex (MPAS-Atmosphere v8.4.2 on the GPU, regional and global) | `woof hex`, `woof hex global` | Preview |
-| Global, spectral (the second global model, beside `woof hex global`) | `woof global` | Preview |
 
 Preview means the model is in the package, documented and tested on CPU, and
 its command says preview each time it runs; its config and checkpoint formats
@@ -100,10 +99,9 @@ name.
   forecasts along power lines, substations and renewable sites from
   OpenStreetMap or your own grid data, with line rating, icing and power
   products.
-- `components/hex/` and `components/globe/`: the hex and global models' manuals,
-  tests and tools.
-- `woof --help-all` lists every command; `woof hex --help` and
-  `woof global --help` list the preview models' commands.
+- `components/hex/`: the hex model's manual, tests and tools.
+- `woof --help-all` lists every command; `woof hex --help` lists the hex
+  model's commands.
 
 ## Science and limits
 
@@ -138,7 +136,7 @@ meteorological services for forecasts and warnings.
 
 WOOF continues an engine released before under another name: WOOF 1.0 is
 that engine's release 2.8.0 and the fixes made since, under the WOOF name,
-with the hex and global models inside it. Settings spelled `GPUWM_*` keep
+with the hex model inside it. Settings spelled `GPUWM_*` keep
 working beside the new `WOOF_*` spelling.
 
 ## Licence

@@ -205,14 +205,13 @@ the NCAR-published mesh (fetched and pinned), the native static, the init, the
 forecast on as many cards as the mesh needs, products, export and scores.
 Rows are defined at 120, 60, 30 and 15 km, on WOOF physics and on the
 woof global suite; the measured runs are the 120 km rows. **Hex global is
-the main global model; woof global remains available as a second (spectral)
-global model.** woof global keeps its LETKF and observation
-streams; hex global starts from an analysis you supply
+WOOF's global model** (the spectral global model was retired in WOOF
+1.1.1). Hex global starts from an analysis you supply
 (`woof hex forecast --analysis`).
 
 On one case (GFS 2026-10-11 12Z, 24 h), the 500 hPa height error against the
 GFS analysis was 10.0 m for hex at 120 km, against 14.9 and 13.5 m for the
-woof global T127 and T255 runs; T255, at twice hex's resolution, was best on
+spectral global model's T127 and T255 runs (retired in WOOF 1.1.1); T255, at twice hex's resolution, was best on
 250 hPa wind (4.80 against 4.87 m/s). One case is not a skill claim. On the
 120 and 60 km rows the physics step is capped at 300 s on woof 2.9.0: at the
 mesh's own step the YSU boundary layer and New Tiedtke left single layers up to
@@ -424,7 +423,7 @@ Also proven:
 | `woof hex render` on an RRFS run's own output | the converter stops with "history has no latCell", also with `--mesh`, and RRFS writes its 2 m and reflectivity fields to the `diag` stream |
 | Zone carry (corridor cases) on a moving region with an MPAS suite, and the RRFS suite on a moving case | zone carry with an MPAS suite is refused by name (run the case without a corridor; its moves take the overlap remap). The RRFS suite takes the same route but has not been run on a moving case. MPAS-A v8.4.2 suites move on one card (docs/moving-nest.md) |
 | A full-cyclone replay of the two over-limit moves with the balance fix | not yet run; it needs a card with about 64 GB or more (the 470,308-cell member holds about 54 GB, and a move about 62 GB) |
-| An ensemble analysis inside hex global | not part of this package: hex global starts from an analysis you supply (`woof hex forecast --analysis`); woof global keeps its LETKF |
+| An ensemble analysis inside hex global | not part of this package: hex global starts from an analysis you supply (`woof hex forecast --analysis`) |
 | IAU on multi-card local time stepping, and `--balance-series` off one card | the LTS block executor has no held-tendency hook and the ranks no balance sampler; refused by name |
 | A combined correct-mode native referee | one native build carrying every fix is a follow-up |
 | A hex-specific maths-library pin | it changes the dycore arithmetic and needs every native reference rebuilt |
@@ -1109,7 +1108,7 @@ woof hex forecast --mesh x1.2562 --grid x1.2562.grid.nc --init x1.2562.init.nc \
 - **Native comparison backends** require an explicit site build. Per-scheme
   backend selectors and `--physics-default-backend native-cpu` select that
   site's Fortran implementations. Build them with
-  `woof hex physics-resources build --pin-set v8.4.2`, then pass
+  `woof hex physics-resources build --pin-set v8.4.2 --build-native-library`, then pass
   `--native-physics-library` or set `MPAS_NATIVE_LIBRARY`. The RRFS-MPAS
   route requires its separate site build,
   `woof hex physics-resources build --pin-set rrfs`; a public install
@@ -1119,8 +1118,34 @@ woof hex forecast --mesh x1.2562 --grid x1.2562.grid.nc --init x1.2562.init.nc \
   *Correct mode* above).
 
 `--preflight` checks routing and metadata without integrating.
-`woof hex verify-mpas --deck DECK --receipt R.json --work-root DIR` runs a
-deck and compares every stream word hex writes against native MPAS.
+`woof hex verify-mpas --deck DECK --receipt R.json --work-root DIR --ratchet RATCHET`
+runs a deck and compares every stream word hex writes against native MPAS.
+The published decks are in the sdist under `verification/gates/` (see its
+README for the data layout). The headline deck runs every active physics
+slot on the GPU, so it needs no native MPAS library, no MPAS-Model tree and no
+compiler. Running it from a pip install:
+
+```sh
+pip install "recast-woof[gpu-cu13]"
+woof hex physics-resources fetch
+woof hex verify-mpas --deck verification/gates/decks/mpas-headline-convection-permitting.json \
+    --ratchet verification/gates/ratchet.json --receipt hl-3.json --work-root hl-3-work
+```
+
+The comparator is the `verify` tool of woof's `rw_mpas_static` bridge,
+found in the install. It loads the system netCDF-C library at run time
+(`apt install libnetcdf-dev`, `dnf install netcdf`, or set `RW_MPAS_NETCDF_LIBRARY`). `--comparator` or
+`WOOF_HEX_RW_MPAS_VERIFY` names another build. verify-mpas captures the run's
+environment itself, before and after the forecast, and writes both captures
+into the receipt: the engine (a git checkout's commit, or for a pip install
+its installed files checked against their RECORD hashes), CUDA runtime,
+NVRTC, CuPy, driver, card and every external math header. It refuses a run
+whose numerics are not strict, whose capture is incomplete, or whose engine
+files differ from their RECORD. A deck may pin a reference environment
+(`strict_environment`). Identical words are GREEN in any environment, and the
+receipt lists how the environment differs from the reference. Differing words
+are a source regression only in the reference environment; elsewhere the
+verdict is ENVIRONMENT, with the raw counts kept.
 
 ---
 
@@ -1442,8 +1467,8 @@ third-party term in the distribution is permissive; `NOTICE` section 2 names
 the one routine kept on a stated reliance instead (Numerical Recipes'
 log-gamma in WSM6's reflectivity constants, as MMM-physics carries it).
 
-WOOF's RTE+RRTMGP radiation, which the global rows' woof global arm runs
-(as does any WOOF-route run that selects it), reads a trace-gas and ozone
+WOOF's RTE+RRTMGP radiation, which any WOOF-route run that selects it
+runs, reads a trace-gas and ozone
 table that woof's data package ships under CC-BY-SA-4.0. woof hex does not
 carry it. It is data: the licence permits sale, and its share-alike reaches
 only adaptations of that table (`NOTICE` section 10).

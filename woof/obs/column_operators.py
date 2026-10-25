@@ -2,7 +2,7 @@
 
 ``refractivity_n`` (the two-term Smith and Weintraub refractivity) and
 ``dewpoint_from_specific_humidity`` (Bolton 1980) moved here from woof global
-(``woof.globe.obs_operators`` and ``woof.globe.surface_energy`` at
+(``arwen_global.obs_operators`` and ``arwen_global.surface_energy`` at
 b54373992587) with their constants, unchanged, so
 :mod:`woof.da.obs_point` no longer imports the global package.
 """

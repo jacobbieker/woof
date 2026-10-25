@@ -1,4 +1,5 @@
 """Native-level boundary conversion, declarations and shared remapping."""
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
@@ -133,12 +134,22 @@ def test_source_conversion_precedes_convex_mapping(bridge):
     source = {"MASSDEN": raw, "PRES": np.array([[[100000, 50000], [80000, 60000]]], np.float32), "TT": np.full_like(raw, 280)}
     plan = backend.indexed_plan((2, 2), np.array([[0.5]]), np.array([[0.5]]))
     row = SimpleNamespace(name="arbitrary_tracer", boundary=({"source": "declared_source", "fields": ("MASSDEN",), "weights": (1,), "conversion": "kg_m3_to_ug_kg_dry"},))
-    result = map_boundary_rows(source, (row,), SimpleNamespace(name="declared_source", variables=SOURCE.variables), plan, cpu_bridge=bridge)[row.name]
+    declared = SimpleNamespace(name="declared_source", variables=SOURCE.variables)
+    result = map_boundary_rows(source, (row,), declared, plan, cycle=datetime(2025, 1, 8, 12, tzinfo=timezone.utc), cpu_bridge=bridge)[row.name]
     expected = plan.apply(mass_density_inverse(raw, source["PRES"], source["TT"]), method="bilinear")
     np.testing.assert_array_equal(result, expected)
     assert np.min(result) >= 0
     zeros = plan.apply(np.zeros_like(raw), method="bilinear")
     assert np.count_nonzero(zeros) == 0
+    # Before 2021-12-21 14Z NOAA wrote the same field in ug m-3 under the
+    # kg m-3 label: those bytes are 1e9 larger and read back to the same smoke.
+    old = dict(source, MASSDEN=(raw * np.float32(1e9)).astype(np.float32))
+    early = map_boundary_rows(old, (row,), declared, plan, cycle=datetime(2021, 7, 28, 12), cpu_bridge=bridge)[row.name]
+    np.testing.assert_allclose(early, expected, rtol=1e-6)
+    # Without a cycle the units cannot be known: refused by name.
+    from woof.chem_conversions import UnitsEpochError
+    with pytest.raises(UnitsEpochError, match="carries no file cycle"):
+        map_boundary_rows(source, (row,), declared, plan, cpu_bridge=bridge)
 
 
 def test_synthetic_column_uses_hydrometeor_vertical_operator(bridge):
@@ -228,6 +239,7 @@ def test_fetch_records_extras_and_refetches_a_changed_selector(tmp_path, monkeyp
     from datetime import datetime
     import json
     from woof import fetch
+    from woof import runtime_surface_fetch
     from tools import download_hrrr_native_subset as transport
     calls = []
 
@@ -239,6 +251,18 @@ def test_fetch_records_extras_and_refetches_a_changed_selector(tmp_path, monkeyp
         return {"kind": request.kind}
 
     monkeypatch.setattr(transport, "_download_product", product)
+    # This test substitutes the native product transport. Substitute its
+    # runtime-surface companion as well, so the synthetic GRIB envelopes
+    # cannot escape into a real network fetch or a user's installed binary.
+    # Runtime surface extraction itself is covered by test_fetch.py and
+    # test_runtime_surface_fallback.py. Keep its table inventory in the
+    # receipt so a repeated unchanged request remains reusable here.
+    def runtime_records(path, *, adapter, **kwargs):
+        return [{"field": name, "units": units, "selector": selector}
+                for name, _product, selector, units, *_ in
+                adapter.runtime_surface_fields]
+
+    monkeypatch.setattr(runtime_surface_fetch, "append_runtime_surface_records", runtime_records)
     options = dict(cycle=datetime(2025, 8, 1), hours=(0, 1), area=None,
                    out=tmp_path / "inputs", progress=lambda _: None, file_workers=1)
     default = json.loads(fetch.fetch_hrrr(**options).read_text())

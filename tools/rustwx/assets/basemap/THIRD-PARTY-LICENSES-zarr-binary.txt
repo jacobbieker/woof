@@ -7,7 +7,7 @@ including build-time packages. It is not a claim that every resolved
 package is linked into both binaries. The first-party reader uses the
 repository Apache-2.0 licence; dependencies retain the grants below.
 
-Cargo.lock sha256 eb574bb9e6f5978c821a1ccbc2de9294d20699707ff8b352fc494e1cb77414a2
+Cargo.lock sha256 48aca7b6bdc272bedd4f090ff4402250eab2119378c9e84b4ec595bb160a67f5
 x86_64-unknown-linux-gnu: 237 resolved packages
 x86_64-pc-windows-msvc: 238 resolved packages
 
@@ -6667,7 +6667,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[ZARR-090] sha256 cdf5b2837eef410d8366859b4cd880ec0e805a0a54ec56e855644e0758ac9752
+[ZARR-090] sha256 f259215e2ca57734993f4b65cccd2721793cc6a5826df17d2bbb80414ece0241
 As carried by:
   licenses/THIRD-PARTY-LICENSES-bridge-binaries.txt
 ------------------------------------------------------------------------------
@@ -6675,7 +6675,7 @@ THIRD-PARTY LICENCES FOR THE RECAST WOOF BRIDGE BUNDLE
 ==============================================================================
 
 This file is the binary-form notice for the compiled artefacts distributed
-in this bundle and staged into Recast WOOF platform wheels: 74 Rust executables and
+in this bundle and staged into Recast WOOF platform wheels: 73 Rust executables and
 libraries, plus the map assets beside it and two embedded fonts.
 
 Those binaries are built from two kinds of source, and both carry third-party
@@ -7082,18 +7082,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-
-2.6  WMO BUFR master tables -- ECMWF ecCodes, Apache License 2.0  (compiled into rw_wis2)
-
-tools/rustwx/crates/rw-obs/tables/bufr/element.table and sequence.def are
-Table B and Table D of the WMO FM 94 BUFR master tables, version 46, as
-distributed in ECMWF's ecCodes (definitions/bufr/tables/0/wmo/46/).  They
-are compiled into the rw-obs library with include_str!, and the rw_wis2
-decoder in this bundle reads WIS2 BUFR messages through them, so that
-executable carries them.
-
-Copyright 2005- ECMWF.  Licensed under the Apache License, Version 2.0; the
-full text of that licence is reproduced in section 4 of this file.
 
 ==============================================================================
 3.  VENDORED RUST CRATES -- INVENTORY
