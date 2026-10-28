@@ -477,6 +477,18 @@ IMPLEMENTED: dict[str, dict] = {
     "seaice_initial_thickness": {'type': 'number', 'default': 1.0, 'minimum': 0.0, 'per_domain': False, 'component_id': 'land_surface', 'consuming_read': 'woof/ocean/seaice/__init__.py', 'warnings': ['Uniform initial ice thickness prior in metres unless an input thickness field is supplied; not an observation.']},
     "seaice_new_ice_thickness": {'type': 'number', 'default': 0.5, 'minimum': 0.0, 'per_domain': False, 'component_id': 'land_surface', 'consuming_read': 'woof/ocean/seaice/__init__.py', 'warnings': ['New-ice thickness in metres used for thermodynamic concentration growth.']},
     "seaice_ocean_heat_flux": {'type': 'number', 'default': 2.0, 'per_domain': False, 'component_id': 'land_surface', 'consuming_read': 'woof/ocean/seaice/__init__.py', 'warnings': ['Prescribed basal ocean-to-ice heat flux in W m-2; no ocean circulation or seasonal skill is implied.']},
+    # real.exe's adjust_for_seaice_post rule, carried by RunConfig into the
+    # Noah, RUC and Noah-MP soil ingest (woof/ingest/soil.py); retired from
+    # the unimplemented ledger, whose slab-scheme reason it had outlived.
+    "seaice_threshold": {
+        "type": "number", "default": 100.0, "per_domain": False,
+        "component_id": "land_surface", "consuming_read": "woof/ingest/soil.py",
+        "warnings": ["Initialisation only (WRF real.exe adjust_for_seaice_post): "
+                     "open water whose input skin temperature is below this "
+                     "many K becomes sea ice in the Noah, RUC and Noah-MP soil "
+                     "ingest. The default 100 K converts nothing; HRRR v4 runs "
+                     "271.4. Other land surfaces keep the analysed ice "
+                     "fraction."]},
     "oml_hml0": {
         "type": "number", "default": 50.0,
         "component_id": "land_surface", "consuming_read": "woof/core/surface_ocean.py",
@@ -1263,11 +1275,6 @@ UNIMPLEMENTED_LEDGER: dict[str, tuple[str, str]] = {
         "The selector belongs to the absent Noah sea-ice thermodynamics "
         "driver; option 1 additionally requires ICEDEPTH ingest/state/restart "
         "carriers that woof does not have."),
-    "seaice_threshold": (
-        "c",
-        "SEAICE_THRESHOLD is consumed by WRF's unported slab land-surface "
-        "scheme. The ported LSMs use their own XICE_THRESHOLD contracts and "
-        "cannot honor this different selector."),
     "shallowcu_forced_ra": (
         "c",
         "Forced shallow-cumulus radiation needs persistent shallow-convective "
