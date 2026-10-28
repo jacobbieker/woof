@@ -160,8 +160,15 @@ def test_manylinux_probes_every_declared_artifact_before_output(tmp_path, monkey
     for artifact in bridge_assets.BUNDLED_ARTIFACTS:
         filename = bridge_assets.artifact_filename(artifact, "linux-x86_64")
         (release / filename).write_bytes(b"\x7fELF" + _artifact_bytes(artifact, filename, SOURCE_REV))
+    # The engine plants these failures on its terminal UI binary; a tree that
+    # leaves that workspace out declares no such artifact, so they land on
+    # the first declared executable instead.
+    from _woof_snapshot import without_left_out_artifacts
+    declared = {a.name for a in bridge_assets.BUNDLED_ARTIFACTS}
+    target = "arwen-tui" if "arwen-tui" in declared else next(
+        a.name for a in bridge_assets.BUNDLED_ARTIFACTS if a.kind == "executable")
     if failure == "missing":
-        (release / "arwen-tui").unlink()
+        (release / target).unlink()
     if failure == "duplicate":
         monkeypatch.setattr(bridge_assets, "BUNDLED_ARTIFACTS",
                             (*bridge_assets.BUNDLED_ARTIFACTS, bridge_assets.BUNDLED_ARTIFACTS[0]))
@@ -169,7 +176,7 @@ def test_manylinux_probes_every_declared_artifact_before_output(tmp_path, monkey
     monkeypatch.setattr(linux_build.shutil, "which", lambda *args, **kwargs: "readelf")
     def probe(path):
         called.append(path.name)
-        return (not (failure == "probe" and path.name == "arwen-tui"), "fixture execution result")
+        return (not (failure == "probe" and path.name == target), "fixture execution result")
     monkeypatch.setattr(doctor, "_exec_probe", probe)
     class FixtureCommands:
         environment = {}
@@ -204,7 +211,7 @@ def test_manylinux_probes_every_declared_artifact_before_output(tmp_path, monkey
             "arwen-tui", "rw_zarr", "rw_grib2export", "rw_isobaric", "rw_superob",
             "rw_nowcast_frames",
         }
-        assert required <= {r["artifact"] for r in result}
+        assert without_left_out_artifacts(required) <= {r["artifact"] for r in result}
         assert set(called) == {a.name for a in bridge_assets.BUNDLED_ARTIFACTS if a.kind == "executable"}
         assert set(commands.abi_calls) == {bridge_assets.library_abi_for(a.name)[0]
                                           for a in bridge_assets.BUNDLED_ARTIFACTS if a.kind == "library"}
@@ -890,6 +897,9 @@ def test_the_workflow_probe_reads_the_shared_table_not_its_own_copy() -> None:
     forget.
     """
 
+    from _woof_snapshot import engine_workflow_reason
+    if (reason := engine_workflow_reason(".github/workflows/publish.yml")) is not None:
+        pytest.skip(reason)
     workflow = (
         Path(verify_release_artifacts.__file__).resolve().parent.parent
         / ".github" / "workflows" / "publish.yml"
@@ -1057,6 +1067,10 @@ def test_a_frozen_kernel_source_is_allowed_by_its_exact_bytes_only(
 
     from tools.release_exclusions import PINNED_KERNEL_SOURCES
 
+    if not PINNED_KERNEL_SOURCES:
+        # The Recast WOOF assembly rewords the host names out of the frozen
+        # kernels' comments and retires their allowances, so the table is empty.
+        pytest.skip("no frozen kernel source in this tree names a host, so the allowance has no row to test")
     repo = Path(verify_release_artifacts.__file__).resolve().parents[1]
     rel = sorted(PINNED_KERNEL_SOURCES)[0]
     payload = (repo / rel).read_bytes()

@@ -1152,8 +1152,8 @@ def _gate(args: argparse.Namespace, scratch: Path) -> int:
         t0 = time.monotonic()
         # G0 has no device. CPU transaction fixtures must not initialize CUDA
         # merely because CuPy is installed and phase memory release defaults on.
-        env = dict(os.environ, CUDA_VISIBLE_DEVICES="", GPUWM_HEX_POOL_RELEASE="0",
-                   GPUWM_HEX_LMEM_RELEASE="0")
+        env = dict(os.environ, CUDA_VISIBLE_DEVICES="", WOOF_HEX_POOL_RELEASE="0",
+                   WOOF_HEX_LMEM_RELEASE="0")
         # A lane may keep TMPDIR inside its checkout. Plain temporary fixtures
         # must not discover the enclosing repository, while fixture repositories
         # with their own .git still work normally.

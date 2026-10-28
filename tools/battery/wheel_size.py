@@ -41,7 +41,7 @@ def pre_gate(root, output, *, build_natives=False):
         raise ValueError("wheel size pre-gate requires a supported native platform")
     environment = dict(os.environ, GPUWM_BRIDGE_SOURCE_REV=revision,
                        CARGO_PROFILE_RELEASE_LTO="fat", GPUWM_NO_LOCAL_GPU="1",
-                       CUDA_VISIBLE_DEVICES="-1", GPUWM_ALLOW_UNPINNED_WHEEL="1")
+                       CUDA_VISIBLE_DEVICES="-1", WOOF_ALLOW_UNPINNED_WHEEL="1")
     # Do not inherit the two rejected optimizations or another profile.
     for key in list(environment):
         if key.startswith("CARGO_PROFILE_") and key != "CARGO_PROFILE_RELEASE_LTO":

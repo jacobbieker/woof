@@ -345,7 +345,9 @@ def metadata_fixture(tmp_path, *, project="woof", readme="Prepared release docum
     config = f'[project]\nname = "{project}"\nreadme = "README.md"\n'
     if project == "recast-woof-data":
         config += 'dynamic = ["version"]\n[tool.setuptools.dynamic]\nversion = {file = ["woof_data/VERSION"]}\n'
-        (source_dir / "VERSION").write_text(VERSION + "\n", encoding="utf-8")
+        # the data distribution's import package is woof_data, where the dynamic version file lives
+        (project_root / "woof_data").mkdir(exist_ok=True)
+        (project_root / "woof_data" / "VERSION").write_text(VERSION + "\n", encoding="utf-8")
     else:
         config += f'version = "{VERSION}"\n'
     (project_root / "pyproject.toml").write_text(config, encoding="utf-8")

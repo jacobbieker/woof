@@ -226,7 +226,7 @@ from typing import Any
 DISTRIBUTION = "recast-woof"
 
 #: The public repository a checkout comes from, named in remedies.
-REPOSITORY = "https://github.com/FahrenheitResearch/arwen"
+REPOSITORY = "https://github.com/recastsystems/woof"
 
 
 @dataclass(frozen=True)

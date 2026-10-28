@@ -74,7 +74,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 #: The distribution's own name, in every spelling that can appear.
-_SELF = "woof"
+_SELF = "recast-woof"
 
 #: Packages that live in this repository.  A bare import of one of these is a
 #: cross-import question, not a dependency question (see
@@ -91,6 +91,12 @@ _FIRST_PARTY = frozenset({"woof", "tools", "tilestream",
 #: the scanner without a row here fails the test rather than passing quietly:
 #: the point is that adding an import forces a decision about who ships it.
 _PROVIDERS: dict[str, tuple[str, ...]] = {
+    # The folded hex model's own third-party imports (woof/hex); each is gated below.
+    "boto3": ("boto3",),
+    "cfgrib": ("cfgrib",),
+    "cftime": ("cftime",),
+    "mpi4py": ("mpi4py",),
+    "tomli": ("tomli",),
     "h5py": ("h5py",),
     "PIL": ("pillow",),
     "affine": ("affine",),
@@ -158,6 +164,12 @@ _PROVIDERS: dict[str, tuple[str, ...]] = {
 #: would pin a version we do not care about and would hide the real
 #: relationship.  If the guarantor ever leaves the table, this fires.
 _GUARANTORS: dict[str, tuple[str, str]] = {
+    "cftime": (
+        "netcdf4",
+        "netCDF4 requires cftime, so a base install always has it. The hex model's serial NetCDF guards "
+        "(woof/hex/multi_member.py serial_netcdf, woof/hex/drivers/samehost_serial_io_v841.py) wrap "
+        "cftime's date functions beside netCDF4's and read it through that guarantee.",
+    ),
     "cuda": (
         "cupy-cuda13x",
         "The CuPy 14 wheels (cupy-cuda13x and cupy-cuda12x alike, both pinned "
@@ -236,6 +248,24 @@ _EARTH2_INTERPRETER = (
 )
 
 _OPTIONAL_BY_DESIGN: dict[str, str] = {
+    "boto3": (
+        "woof/hex/analysis_bundle.py tries boto3 inside a try/except for an s3:// analysis bundle and "
+        "falls back to the HTTPS route without it; no default door needs it."
+    ),
+    "cfgrib": (
+        "woof/hex/initialization.py imports cfgrib only for an explicitly selected engine='cfgrib' GRIB "
+        "grouping and refuses by name (cfgrib_runtime) when it is absent; the default route decodes "
+        "through the Rust bridges."
+    ),
+    "mpi4py": (
+        "woof/hex/mpasphys/launch_v842.py imports mpi4py inside worker(), the private MPI worker of a "
+        "multi-rank native MPAS reference run launched under mpiexec; the GPU forecast route never "
+        "reaches it."
+    ),
+    "tomli": (
+        "woof/hex/nest_triggers.py falls back to tomli only when tomllib is missing, which is Python "
+        "below 3.11; the distribution requires 3.11 or newer, so the fallback never runs."
+    ),
     "earth2studio": _EARTH2_INTERPRETER,
     "torch": _EARTH2_INTERPRETER,
     "xarray": _EARTH2_INTERPRETER,
@@ -888,7 +918,7 @@ def _installed_metadata_is_this_tree() -> bool:
     from pathlib import Path
     here = Path(__file__).resolve().parents[1]
     try:
-        dist = _md.distribution("woof")
+        dist = _md.distribution("recast-woof")
     except _md.PackageNotFoundError:
         return False
     try:

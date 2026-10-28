@@ -52,6 +52,8 @@ def test_the_door_finds_the_packaged_copier_before_path_and_cargo(tmp_path, monk
     copier.write_bytes(b"")
     copier.chmod(0o755)
     monkeypatch.setattr(vertical_spec, "__file__", str(package / "vertical_spec.py"))
+    from woof.hex import helpers  # (WOOF) the wheel's libexec is read through woof.hex.helpers
+    monkeypatch.setattr(helpers, "PACKAGED_DIR", package / "libexec")
     monkeypatch.delenv("WOOF_HEX_NETCDF_COPY", raising=False)
     monkeypatch.setattr(vertical_spec.shutil, "which", lambda name: pytest.fail(f"looked on PATH for {name}"))
     assert vertical_spec._netcdf_copy_executable() == str(copier)
@@ -77,13 +79,13 @@ def test_a_netcdf4_template_is_copied_as_it_is(tmp_path, monkeypatch):
 
 
 def test_the_fallback_message_no_longer_blames_a_missing_cargo():
-    text = (TREE / "src/hexcore/vertical_spec.py").read_text(encoding="utf-8")
+    text = (TREE / "../../woof/hex/vertical_spec.py").read_text(encoding="utf-8")
     assert "there is no cargo to build" not in text
     assert "woof/hex/libexec, not on PATH" in text
 
 
 def test_the_wheel_carries_the_static_netcdf_notice():
-    notice = TREE / "src/hexcore/data/licenses/netcdf-c-COPYRIGHT"
+    notice = TREE / "../../woof/hex/data/licenses/netcdf-c-COPYRIGHT"
     assert "Copyright 2018 Unidata" in notice.read_text(encoding="utf-8")
     script = (TREE / "tools/build_netcdf_classic_static.sh").read_text(encoding="utf-8")
     assert "a474149844e6144566673facf097fea253dc843c37bc0a7d3de047dc8adda5dd" in script

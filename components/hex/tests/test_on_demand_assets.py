@@ -243,7 +243,7 @@ def test_cache_off_still_has_per_user_asset_root(estate, monkeypatch, tmp_path):
     monkeypatch.setenv('WOOF_HEX_PREP_CACHE', 'off')
     monkeypatch.delenv('WOOF_HEX_CACHE_ROOT', raising=False)
     monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'xdg'))
-    assert assets.cache_root() == tmp_path / 'xdg/gpuwm-hex'
+    assert assets.cache_root() == tmp_path / 'xdg/woof hex'
 
 
 def test_explicit_override_precedes_pins(estate, monkeypatch):

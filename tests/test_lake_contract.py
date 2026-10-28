@@ -70,7 +70,10 @@ def test_lake_nonpositive_explicit_default_uses_wrf_reference_geometry():
 def test_lake_fixture_and_upstream_hashes_are_bound():
     manifest = json.loads((ORACLE / "manifest.json").read_text())
     for name, expected in manifest["files"].items():
-        assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == expected, name
+        # The manifest is a data record and keeps the engine's package path (gpuwm/...); in this
+        # tree the package is woof/.
+        path = ROOT / ("woof/" + name[len("gpuwm/"):] if name.startswith("gpuwm/") else name)
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, name
 
 
 def test_lake_arena_holds_every_live_lake_array():

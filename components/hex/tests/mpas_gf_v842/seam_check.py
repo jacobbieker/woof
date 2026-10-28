@@ -14,7 +14,7 @@ def check(seam_tree,receipt):
     # Read f4's implementation; never modify it or substitute a fake registry.
     sys.path.insert(0,str(seam_tree/'src'))
     from woof.hex.mpasphys.driver_v842 import SlotRegistry,resolve_namelist,Backend
-    path=Path(__file__).parents[2]/'src/hexcore/mpasphys/gf_mpas_v842.py'
+    path=Path(__file__).parents[2]/'../../woof/hex/mpasphys/gf_mpas_v842.py'
     spec=importlib.util.spec_from_file_location('gf_lane_port',path)
     gf=importlib.util.module_from_spec(spec);spec.loader.exec_module(gf)
     registry=SlotRegistry();gf.register(registry)

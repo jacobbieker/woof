@@ -10,7 +10,7 @@ SOURCE = 'extern "C" __global__ void copy_words(const unsigned* a, unsigned* b) 
 def test_real_module_load_and_named_jit_fallbacks(tmp_path, monkeypatch):
     import cupy as cp
     import numpy as np
-    write = pytest.importorskip("hexcore.kernel_pack").write
+    write = pytest.importorskip("woof.hex.kernel_pack").write
     from woof.hex.cuda_backend import KernelCache, require_cuda
     from woof.hex.cuda_backend.aot import compiler_identity, source_hash
     from woof.hex.cuda_backend.aot_build import compile_entry
@@ -63,7 +63,7 @@ def test_real_cupy_bridge_preserves_template_name_mapping(tmp_path, monkeypatch)
     import cupy as cp
     import numpy as np
     from cupy.cuda import compiler
-    write = pytest.importorskip("hexcore.kernel_pack").write
+    write = pytest.importorskip("woof.hex.kernel_pack").write
     from woof.hex.cuda_backend.aot import Pack, capture_requests, compiler_identity, install, recipe
     from woof.hex.cuda_backend.aot_build import compile_entry
 
@@ -117,7 +117,7 @@ def test_real_cupy_bridge_preserves_template_name_mapping(tmp_path, monkeypatch)
 def test_real_cached_banner_preserves_fingerprint_without_compiling(tmp_path, monkeypatch):
     from cupy_backends.cuda.libs import nvrtc
     from woof.certify import compile_platform
-    write = pytest.importorskip("hexcore.kernel_pack").write
+    write = pytest.importorskip("woof.hex.kernel_pack").write
     from woof.hex.cuda_backend.aot import Pack, cache_compiler_banner, compiler_identity, recipe
     from woof.hex.cuda_backend.aot_build import compile_entry
     import cupy as cp

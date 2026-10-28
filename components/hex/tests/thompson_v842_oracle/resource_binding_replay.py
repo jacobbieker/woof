@@ -21,7 +21,7 @@ def digest(path):
 
 
 def replay(provider_source, directory, native_tables, auxiliary, engine, packet, receipt):
-    spec = importlib.util.spec_from_file_location('hexcore.mpasphys._thompson_resource_witness', provider_source)
+    spec = importlib.util.spec_from_file_location('woof.hex.mpasphys._thompson_resource_witness', provider_source)
     provider = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(provider)
     source = packet.with_suffix('.diagnostic.cuh')

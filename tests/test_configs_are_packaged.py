@@ -183,7 +183,10 @@ def test_the_configs_the_headline_docs_name_are_in_the_wheel(
 
     _require_source_tree()
     shipped = _files_setuptools_would_ship(monkeypatch)
+    from _woof_snapshot import left_out
     for relative in _DOCUMENTED_CONFIGS:
+        if left_out(relative):
+            continue
         assert (REPO_ROOT / relative).is_file(), (
             f"a headline document names {relative}, which is not in the tree")
         assert relative in shipped, (

@@ -128,7 +128,7 @@ def test_the_repin_measures_and_writes_the_helper_set_row(tmp_path, monkeypatch)
     import json
 
     root = tmp_path / "engine"
-    names = sorted(json.loads((repin.TREE / "src/hexcore/radiation_source_sets.json").read_text())["baseline"])
+    names = sorted(json.loads((repin.TREE / "../../woof/hex/radiation_source_sets.json").read_text())["baseline"])
     for name in names:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(name.encode() + b" v2.9.1\n")

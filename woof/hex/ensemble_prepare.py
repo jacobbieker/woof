@@ -80,7 +80,7 @@ def run_prepare(args):
         before = time.monotonic()
         with log.open("w") as stream:
             rc = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT,
-                                env=dict(os.environ, CUDA_VISIBLE_DEVICES="", GPUWM_HEX_NO_LOCAL_GPU="1")).returncode
+                                env=dict(os.environ, CUDA_VISIBLE_DEVICES="", WOOF_HEX_NO_LOCAL_GPU="1")).returncode
         record = {"command": command, "log": str(log), "returncode": rc, "wall_seconds": time.monotonic()-before}
         if rc:
             return record, None, []

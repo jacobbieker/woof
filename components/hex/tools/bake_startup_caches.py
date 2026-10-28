@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     for path in (prep, cupy_dir, driver):
         path.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
-    env.update(GPUWM_HEX_PREP_CACHE=str(prep), CUPY_CACHE_DIR=str(cupy_dir), CUDA_CACHE_PATH=str(driver))
+    env.update(WOOF_HEX_PREP_CACHE=str(prep), CUPY_CACHE_DIR=str(cupy_dir), CUDA_CACHE_PATH=str(driver))
     env.pop("WOOF_HEX_KERNEL_PREWARM", None)
     if args.work is not None:
         args.work.mkdir(parents=True, exist_ok=True)

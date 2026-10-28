@@ -11,6 +11,7 @@ from woof.namelist_import import import_namelists
 from ishmael_retirement import requested_by_own_number, without_retired_line
 from test_audit_parent_generic_bytes import without_import_capability_lines
 from wrf_clock_lines import without_wrf_clock_lines
+from woof_engine_spelling import engine_spelling
 
 
 FIXTURES = Path(__file__).parent / "fixtures/tolerance_parent_byte_controls"
@@ -60,7 +61,7 @@ def _assert_old_bytes(group, pins, key, emitted, *, retired=lambda old: old):
     old = (FIXTURES / group / relative).read_bytes()
     assert len(old) == row["bytes"]
     assert hashlib.sha256(old).hexdigest() == row["sha256"]
-    assert without_wrf_clock_lines(emitted).encode("utf-8") == retired(old)
+    assert engine_spelling(without_wrf_clock_lines(emitted)).encode("utf-8") == retired(old)
 
 
 @pytest.mark.parametrize("case", NAMELISTS)

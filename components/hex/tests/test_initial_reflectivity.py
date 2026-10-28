@@ -100,7 +100,7 @@ def test_no_microphysics_reports_why_instead_of_inventing_a_field():
 def test_both_history_paths_ask_the_backend_at_step_zero():
     from pathlib import Path
 
-    drivers = Path(__file__).resolve().parents[1] / "src/hexcore/drivers"
+    drivers = Path(__file__).resolve().parents[1] / "../../woof/hex/drivers"
     for name in ("samehost_forecast_v841.py", "run_cuda_v841_full_physics_x4.py"):
         text = (drivers / name).read_text()
         assert "initial_refl10cm(" in text, f"{name} no longer computes the hour-0 reflectivity"
@@ -113,7 +113,7 @@ def test_the_background_history_handoff_carries_the_step():
     # inside the due step's WSM6 call" for a field computed from the init.
     from pathlib import Path
 
-    source = (Path(__file__).resolve().parents[1] / "src/hexcore/drivers/run_cuda_v841_forecast.py").read_text()
+    source = (Path(__file__).resolve().parents[1] / "../../woof/hex/drivers/run_cuda_v841_forecast.py").read_text()
     assert '"receipt": {"step": step}' in source
-    writer = (Path(__file__).resolve().parents[1] / "src/hexcore/drivers/run_cuda_v841_full_physics_x4.py").read_text()
+    writer = (Path(__file__).resolve().parents[1] / "../../woof/hex/drivers/run_cuda_v841_full_physics_x4.py").read_text()
     assert '(snapshot.get("receipt") or {}).get("step") == 0' in writer

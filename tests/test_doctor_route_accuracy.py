@@ -605,8 +605,10 @@ def test_untested_never_reads_as_ok_and_always_says_not_tested():
     assert "UNTESTED" in text
     assert "ok " not in text.splitlines()[1]
     findings = doctor.collect_checks()
+    from _woof_snapshot import without_left_out_artifacts
+    # one terminal-workspace line where the tree carries the terminal UI, none where it leaves it out
     assert sum(finding.name == "terminal workspace arwen-tui (woof tui)"
-               for finding in findings) == 1
+               for finding in findings) == len(without_left_out_artifacts({"arwen-tui"}))
     for finding in findings:
         if finding.status == "untested":
             assert finding.detail.startswith("not tested"), finding.name

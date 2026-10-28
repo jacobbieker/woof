@@ -686,7 +686,7 @@
     "tests/test_rrtmg_lw_buffer_grid.py": 15
    },
    "reason": "The native profile word test now refuses host exp/log/pow/trig calls, preventing platform-libm expected words from silently reaching the CPU public CI leg. Both recorded CPU leg expressions collect 15 native tests and exclude four GPU tests.",
-   "test_sha256": "3849617994214f32aa82ab9ec4f00e30958086f248704b9adb9838779f8cbfdc"
+   "test_sha256": "5ea87fbd8251cf1a6677f2e398d35228ca3904bcfcd8570611049eb7f87bb9cf"
   },
   {
    "recorded_on": "2026-10-03",
@@ -1564,7 +1564,7 @@
    "environment": {
     "GPUWM_NO_LOCAL_GPU": "1"
    },
-   "collected_total": 29890,
+   "collected_total": 29895,
    "files": {
     "tests/test_runplan.py": 169,
     "tests/test_nest_spawn_soil.py": 20,
@@ -1624,7 +1624,7 @@
     "tests/test_tiles_distribution.py": 9,
     "tests/test_multigpu_specified_bc.py": 25,
     "tests/test_streamed_carrier_freshness.py": 16,
-    "tests/test_cargo_gate_manifest.py": 275,
+    "tests/test_cargo_gate_manifest.py": 267,
     "tests/test_verify_release_artifacts.py": 43,
     "tests/test_release_snapshot_front_door.py": 6,
     "tests/test_release_snapshot_machine_paths.py": 31,
@@ -1841,7 +1841,6 @@
     "tests/test_attached_store_health.py": 4,
     "tests/test_streamed_lifecycle_restart.py": 4,
     "tests/test_single_adaptive_runtime.py": 7,
-    "tests/test_launchpad_api.py": 13,
     "tests/test_auto_admission.py": 19,
     "tests/test_auto_search_host_floor.py": 8,
     "tests/test_auto_search_feasible.py": 3,
@@ -1878,7 +1877,6 @@
     "tests/test_qnn_specified_inflow.py": 4,
     "tests/test_wrfinput_physics_fields.py": 35,
     "tests/test_metgrid_number_initialization.py": 38,
-    "tests/test_tui_cli.py": 14,
     "tests/test_supervisor.py": 113,
     "tests/test_ingest_preflight.py": 33,
     "tests/test_tui_products.py": 10,
@@ -2406,15 +2404,11 @@
     "tests/test_fast_sbm_water_budget.py": 10,
     "tests/test_health_census_companions.py": 4,
     "tests/test_fetch_command_abi.py": 5,
-    "tests/test_workflow_rehearsals.py": 3,
     "tests/test_workflow_job_replay.py": 5,
-    "tests/test_pypi_capacity.py": 9,
-    "tests/test_publish_preflight.py": 2,
     "tests/test_vendor_cache_ignore.py": 1,
     "tests/test_mpas_init_thread_identity.py": 1,
     "tests/test_region_recipe.py": 24,
     "tests/test_resolved_scale_receipt.py": 11,
-    "tests/test_gui_failure_text.py": 15,
     "tests/test_hrrr_static_terrain_drag.py": 3,
     "tests/test_hrrr_native_static.py": 8,
     "tests/test_run_observer_closed_stream.py": 3,
@@ -2520,7 +2514,8 @@
     "tests/test_wheel_glibc_tag.py": 3,
     "tests/test_hydro_short_run_history.py": 6,
     "tests/test_static_sources.py": 26,
-    "tests/test_renderer_warnings.py": 15
+    "tests/test_renderer_warnings.py": 15,
+    "tests/test_hex_mpas_route_imports.py": 69
    }
   },
   "always": {
@@ -2529,10 +2524,10 @@
    "environment": {
     "GPUWM_NO_LOCAL_GPU": "1"
    },
-   "collected_total": 7631,
+   "collected_total": 7623,
    "files": {
     "tests/test_stage1_manifest.py": 1941,
-    "tests/test_cargo_gate_manifest.py": 275,
+    "tests/test_cargo_gate_manifest.py": 267,
     "tests/test_tiles_gate_manifest.py": 41,
     "tests/test_battery_list_census.py": 4041,
     "tests/test_licence_notices_ship.py": 53,

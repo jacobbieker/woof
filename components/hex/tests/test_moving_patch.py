@@ -531,7 +531,7 @@ def test_operator_cli_keeps_worker_timing_when_archive_is_retired(tmp_path, inhe
     import sys
     grid = _write_operator_cli_grid(tmp_path)
     out = tmp_path / 'operator.npz'
-    env = dict(os.environ, GPUWM_HEX_OVERLAP_THREADS='2', GPUWM_HEX_OVERLAP_EXECUTOR='process')
+    env = dict(os.environ, WOOF_HEX_OVERLAP_THREADS='2', WOOF_HEX_OVERLAP_EXECUTOR='process')
     env.pop('WOOF_HEX_SPHERICAL_OVERLAP_LIB', None)
     for name in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS'):
         env[name] = inherited_native_threads
@@ -630,8 +630,8 @@ else:
 sys.exit(main(sys.argv[1:]))
 '''
     env = dict(os.environ, TMPDIR=str(tmp_path), HEX_TEST_CANCEL_STAGE=cancel_stage,
-               GPUWM_HEX_OVERLAP_THREADS='2',
-               GPUWM_HEX_OVERLAP_EXECUTOR='process', OPENBLAS_NUM_THREADS='1',
+               WOOF_HEX_OVERLAP_THREADS='2',
+               WOOF_HEX_OVERLAP_EXECUTOR='process', OPENBLAS_NUM_THREADS='1',
                OMP_NUM_THREADS='1', MKL_NUM_THREADS='1')
     env.pop('WOOF_HEX_SPHERICAL_OVERLAP_LIB', None)
     proc = start_child([sys.executable, '-c', probe, 'moving', 'operator',

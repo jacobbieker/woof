@@ -49,7 +49,7 @@ from test_mesh_validation import graded_sphere_mesh
 netCDF4 = pytest.importorskip("netCDF4")
 
 ROOT = Path(__file__).resolve().parents[1]
-PINS = ROOT / "src/hexcore/data/engine-bridges.json"
+PINS = ROOT / "../../woof/hex/data/engine-bridges.json"
 #: The radius rw_mpas_static carries a unit-sphere grid to (MPAS_EARTH_RADIUS_M).
 RADIUS = 6_371_229.0
 BINARY64 = "binary64_earth_centred"

@@ -95,7 +95,7 @@ def test_worker_refuses_before_any_raw_extension_call(operation):
 
 def test_existing_imported_reader_aliases_are_guarded_and_restored(monkeypatch):
     netcdf, dates, calls = _fake_extensions()
-    alias = ModuleType("hexcore.test_reader_alias")
+    alias = ModuleType("woof.hex.test_reader_alias")
     alias.ImportedDataset = netcdf.Dataset
     alias.convert_date = netcdf.date2num
     monkeypatch.setitem(sys.modules, alias.__name__, alias)
@@ -108,13 +108,13 @@ def test_existing_imported_reader_aliases_are_guarded_and_restored(monkeypatch):
             _worker(lambda: alias.convert_date(0, "unused"))
         assert calls == before
         assert set(guard.receipt()["existing_reader_aliases_patched"]) >= {
-            "hexcore.test_reader_alias.ImportedDataset", "hexcore.test_reader_alias.convert_date"}
+            "woof.hex.test_reader_alias.ImportedDataset", "woof.hex.test_reader_alias.convert_date"}
     assert (alias.ImportedDataset, alias.convert_date) == originals
 
 
 def test_entrypoints_and_reader_aliases_restore_after_caller_exception(monkeypatch):
     netcdf, dates, _calls = _fake_extensions()
-    alias = ModuleType("gpuwm.test_reader_alias")
+    alias = ModuleType("woof.test_reader_alias")
     alias.Dataset = netcdf.Dataset
     monkeypatch.setitem(sys.modules, alias.__name__, alias)
     original_dataset, original_conversion = netcdf.Dataset, dates.num2date
@@ -129,7 +129,7 @@ def test_entrypoints_and_reader_aliases_restore_after_caller_exception(monkeypat
 def test_aliases_first_bound_during_guard_restore_after_failure(monkeypatch):
     netcdf, dates, _calls = _fake_extensions()
     original_dataset, original_date = netcdf.Dataset, dates.date2num
-    alias = ModuleType("hexcore.test_new_reader_alias")
+    alias = ModuleType("woof.hex.test_new_reader_alias")
     with pytest.raises(ValueError, match="after import"):
         with coordinator_only_extension_io(netcdf=netcdf, cftime=dates) as guard:
             # This mirrors a module's from-import while the CLI is loading.
@@ -140,7 +140,7 @@ def test_aliases_first_bound_during_guard_restore_after_failure(monkeypatch):
             raise ValueError("after import")
     assert alias.Dataset is original_dataset and alias.date2num is original_date
     assert set(guard.receipt()["new_reader_aliases_restored"]) >= {
-        "hexcore.test_new_reader_alias.Dataset", "hexcore.test_new_reader_alias.date2num"}
+        "woof.hex.test_new_reader_alias.Dataset", "woof.hex.test_new_reader_alias.date2num"}
 
 
 def _write_file(path):
@@ -201,7 +201,7 @@ def test_existing_mesh_reader_preserves_every_loaded_byte_and_attribute(tmp_path
     original_alias = mesh.Dataset
     with coordinator_only_extension_io() as guard:
         guarded = mesh._read_netcdf(path)
-        assert "hexcore.mesh.Dataset" in guard.receipt()["existing_reader_aliases_patched"]
+        assert "woof.hex.mesh.Dataset" in guard.receipt()["existing_reader_aliases_patched"]
     assert mesh.Dataset is original_alias
     for index in (0, 1, 3, 4):
         assert plain[index] == guarded[index]

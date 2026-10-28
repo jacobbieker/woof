@@ -34,7 +34,15 @@ from woof.static.lambert import (
     grids_from_projection_config,
     grids_from_wps_namelist,
 )
-from woof.verify.cases.real74_d01 import BUNDLE
+try:
+    from woof.verify.cases.real74_d01 import BUNDLE
+except ModuleNotFoundError as error:
+    # Recast WOOF leaves this verification case module out; without it there
+    # is no reference bundle either, so the three @requires_bundle cases skip
+    # and every synthetic case still runs.
+    if error.name != "woof.verify.cases.real74_d01":
+        raise
+    BUNDLE = Path(__file__).resolve().parent / "reference-bundle-not-in-this-tree"
 
 REPO = Path(__file__).resolve().parents[1]
 BUNDLE_WPS = BUNDLE / "namelists" / "namelist.wps"
@@ -3141,8 +3149,13 @@ def test_non_source_fixed_triplet_keeps_current_staging_importer_bytes(tmp_path)
     from ishmael_retirement import with_retired_line
     # The pin also predates the capabilities campaign's three import lines.
     from capability_campaign_import import without_campaign_import_lines
+    # The pin also predates the package's name: the importer's comment lines
+    # name the program and its module paths (woof here), and the pinned bytes
+    # carry the engine's spelling of those words.
+    engine_spelling = "".join(line.replace("woof", "gpuwm") if line.startswith("#") else line
+                              for line in text.splitlines(keepends=True))
     assert hashlib.sha256(with_retired_line(
-        without_campaign_import_lines(text)).encode()).hexdigest() \
+        without_campaign_import_lines(engine_spelling)).encode()).hexdigest() \
         == baseline["fixed_triplet_60"]
     assert "terrain_clock" not in text
     run = _load(tmp_path, text).root.run

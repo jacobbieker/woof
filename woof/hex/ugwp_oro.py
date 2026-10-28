@@ -257,7 +257,7 @@ def suite_reads_ugwp(suite: str | None, physics: Sequence[str] = ()) -> bool:
     if not suite:
         return False
     from importlib.resources import files
-    table = json.loads(files("hexcore").joinpath("data/profiles/mpas-physics-suites.v1.json").read_text())
+    table = json.loads(files("woof.hex").joinpath("data/profiles/mpas-physics-suites.v1.json").read_text())
     rows = table.get("suites", [])
     for row in rows:
         if row.get("name") == suite:

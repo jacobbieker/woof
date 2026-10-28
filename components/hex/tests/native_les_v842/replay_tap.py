@@ -91,7 +91,7 @@ def main():
             raise ValueError('capture bank does not cover the complete LES module')
     if not result['calls']:
         raise ValueError('no real native calls found')
-    result['module_sha256'] = hashlib.sha256(Path(__import__('hexcore.mixing_v842_les', fromlist=['x']).__file__).read_bytes()).hexdigest()
+    result['module_sha256'] = hashlib.sha256(Path(__import__('woof.hex.mixing_v842_les', fromlist=['x']).__file__).read_bytes()).hexdigest()
     result['passed'] = result['differing_words'] == 0
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
     args.receipt.write_text(json.dumps(result, indent=2) + '\n')

@@ -1115,7 +1115,7 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         # `go` catches its own interrupt one layer down so it can name
         # the stage and the pid it was waiting on; this is the floor
         # under every other command.
-        print(f"\ngpuwm {args.command}: interrupted (Ctrl-C); stopping "
+        print(f"\nwoof {args.command}: interrupted (Ctrl-C); stopping "
               "here. Any partial output carries no completion receipt.",
               file=sys.stderr)
         return _INTERRUPT_EXIT_CODE

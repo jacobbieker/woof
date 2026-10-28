@@ -38,17 +38,38 @@ GOLDEN = json.loads(
 
 
 def _frozen_constructors():
-    from woof.verify.cases import (hill2d, igw, moist_bubble, real74_d01,
+    from woof.verify.cases import (hill2d, igw, moist_bubble,
                                     straka, wk82)
-    return {
+    constructors = {
         "straka.default_config": straka.default_config,
         "igw.default_config": igw.default_config,
         "hill2d.default_config": hill2d.default_config,
         "moist_bubble.default_config": moist_bubble.default_config,
         "wk82.default_config": wk82.default_config,
+    }
+    try:
+        from woof.verify.cases import real74_d01
+    except ImportError:
+        from _woof_snapshot import left_out
+        if not left_out("woof/verify/cases/real74_d01.py"):
+            raise
+        return constructors  # the real-case module is left out of this tree, its two constructors with it
+    constructors.update({
         "real74_d01.config": real74_d01.config,
         "real74_d01.phase3_config": real74_d01.phase3_config,
-    }
+    })
+    return constructors
+
+
+def _golden_in_this_tree() -> set:
+    """The golden keys whose config file or case module this tree carries."""
+    from _woof_snapshot import left_out
+
+    def gone(key):
+        if key.startswith("configs/"):
+            return left_out(key)
+        return left_out(f"woof/verify/cases/{key.split('.')[0]}.py")
+    return {key for key in GOLDEN if not gone(key)}
 
 
 def _pop_fork_dycore_defaults(actual: dict) -> bool:
@@ -592,6 +613,9 @@ def test_every_existing_legacy_toml_resolves_identically():
     tomls = sorted((REPO / "configs").glob("*.toml"))
     assert tomls, "configs/ directory is empty?"
     legacy = _legacy_run_config_tomls()
+    if not legacy and not any(key.startswith("configs/") for key in _golden_in_this_tree()):
+        pytest.skip("every legacy TOML the golden file freezes is a case configuration this tree leaves out "
+                    "(tests/_woof_left_out.txt); this case runs in the engine's tree")
     assert legacy, "no legacy TOMLs found in configs/"
     for path in legacy:
         key = f"configs/{path.name}"
@@ -628,7 +652,7 @@ def test_golden_inventory_matches_known_frozen_surface():
     expected = set(_frozen_constructors())
     expected |= {f"configs/{p.name}"
                  for p in _legacy_run_config_tomls()}
-    assert set(GOLDEN) == expected
+    assert _golden_in_this_tree() == expected
 
 
 def test_parameter_set_is_appended_to_the_experiment_config():

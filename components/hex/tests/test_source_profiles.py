@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from _layout import PACKAGE_DIR, package_path
 from woof.hex.source_profiles import (
     AUDIT_CLASSES,
     SourceProfileError,
@@ -28,7 +29,7 @@ from woof.hex.source_profiles import (
 from woof.hex.vertical_spec import VerticalSpec
 
 TREE = Path(__file__).resolve().parents[1]
-TABLE = TREE / "src" / "hexcore" / "data" / "profiles" / "source-profiles.v1.json"
+TABLE = TREE / ".." / ".." / "woof" / "hex" / "data" / "profiles" / "source-profiles.v1.json"
 
 
 def test_the_packaged_table_loads_and_names_its_rows():
@@ -204,6 +205,9 @@ def _raised_at(error: BaseException) -> tuple[str, str]:
     if code.co_name == "_refuse" and len(frames) > 1:
         code = frames[-2]
     path = Path(code.co_filename).resolve()
+    if path.is_relative_to(PACKAGE_DIR.resolve()):
+        # the rows name package files by their repository path in either layout (_layout.package_path)
+        return "src/hexcore/" + path.relative_to(PACKAGE_DIR.resolve()).as_posix(), code.co_qualname
     return path.relative_to(TREE).as_posix(), code.co_qualname
 
 
@@ -379,7 +383,7 @@ def test_every_refusal_layer_is_in_its_file_and_function(knob, layer, first):
     # each is held by source: its function exists, names the knob, and holds
     # the reason text.  A shared reason ("...lane is exact") is therefore held
     # per knob, inside the one function that refuses it.
-    tree = ast.parse((TREE / layer["site"]).read_text(encoding="utf-8"))
+    tree = ast.parse(package_path(layer["site"]).read_text(encoding="utf-8"))
     function = _function_node(tree, layer["function"])
     assert function is not None, f"{layer['site']} has no {layer['function']}"
     if first:

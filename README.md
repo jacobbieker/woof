@@ -42,6 +42,15 @@ WPS-equivalent preprocessor, the renderer).
 terrain, land use and soil from: about 1.3 GB, 17 GB unpacked, once per
 computer. `fetch-tables` adds two Thompson microphysics tables (about 314 MiB).
 Reference tables and map assets arrive with the `recast-woof-data` package.
+`woof doctor` reports each remedy as a command or a `#` comment explaining
+the manual step.
+
+For a developer installation from a clone of this repository, use
+`bash install.sh`: it installs the checkout's `recast-woof-data` companion and
+the package with its extras, builds the native tools (this needs Rust and a C
+toolchain) and ends with `woof doctor`. The explicit `bash install.sh` form
+also works when an extracted source archive has lost its executable bits; use
+it if `./install.sh` reports `Permission denied`.
 
 ## Run a forecast
 
@@ -75,6 +84,11 @@ name.
   The [code verification record](docs/public/VERIFICATION.md) documents
   historical WRF v4.6.1 comparisons and their configuration and coverage
   limits.
+- [Stage contract](docs/public/PIPELINE-STAGES.md) for running preprocessing,
+  the simulation and rendering on your own terms.
+- [Smoke, dust and air quality](docs/public/SMOKE-AND-AIR-QUALITY.md): wildfire
+  smoke, dust, sea salt, carbon and CAMS air-quality species are an opt-in
+  product, off unless a configuration names `chem_sets`.
 - `components/hex/`: the hex model's manual, tests and tools.
 - `woof --help-all` lists every command; `woof hex --help` lists the hex
   model's commands.
@@ -105,9 +119,9 @@ regions, seasons or forecast lengths. The
 [evidence page](docs/public/VERIFICATION.md) documents historical WRF v4.6.1
 code comparisons and their configuration and coverage limits.
 
-The hex model is a GPU port of MPAS-Atmosphere v8.4.2, with this engine's
-physics as its default suite and the MPAS suites selectable; it is not MPAS and
-is not endorsed by UCAR. Use official
+The hex model is a GPU port of MPAS-Atmosphere v8.4.2, with MPAS-A's own
+physics suites as its default and this engine's physics selectable; it is not
+MPAS and is not endorsed by UCAR. Use official
 meteorological services for forecasts and warnings.
 
 WOOF continues an engine released before under another name: WOOF 1.0 is

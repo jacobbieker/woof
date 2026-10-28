@@ -117,11 +117,11 @@ def test_a_bare_run_takes_four_acoustic_substeps():
 
 
 def test_the_driver_parser_and_the_binding_default_to_the_same_value():
-    source = (TREE / "src/hexcore/drivers/run_cuda_v841_forecast.py").read_text(encoding="utf-8")
+    source = (TREE / "../../woof/hex/drivers/run_cuda_v841_forecast.py").read_text(encoding="utf-8")
     assert 'parser.add_argument("--acoustic-substeps", type=int, default=4)' in source
     assert "acoustic_substeps: int = 2" not in source
     assert "acoustic_substeps: int = 2" not in (
-        TREE / "src/hexcore/forecast_door.py").read_text(encoding="utf-8")
+        TREE / "../../woof/hex/forecast_door.py").read_text(encoding="utf-8")
 
 
 def test_two_acoustic_substeps_is_still_selectable():
@@ -137,7 +137,7 @@ def test_two_acoustic_substeps_is_still_selectable():
 
 
 def test_the_rk2_certificates_cover_both_counts():
-    table = json.loads((TREE / "src/hexcore/data/dycore-step-anchors.v1.json").read_text())
+    table = json.loads((TREE / "../../woof/hex/data/dycore-step-anchors.v1.json").read_text())
     assert {row["acoustic_substeps"] for row in table["anchors"]} == {2, 4}
 
 

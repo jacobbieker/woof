@@ -18,7 +18,7 @@ inline uint4 make_uint4(unsigned int x, unsigned int y, unsigned int z, unsigned
     return {x, y, z, w};
 }
 struct { unsigned int x; } blockDim, blockIdx, threadIdx;
-#include "../src/hexcore/stochastic.cu"
+#include "../../../woof/hex/stochastic.cu"
 
 int main() {
     rlimit core = {0, 0};

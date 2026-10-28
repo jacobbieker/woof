@@ -95,7 +95,6 @@ tests/test_projection_oracle.py
 tests/test_thompson_aerosol_oracle_provenance.py
 tests/test_thompson_oracle_provenance.py
 
-tests/test_tui_cli.py
 
 # Committed WRF SOILVEGIN and complete LSMRUC mosaic fixtures. A skipped
 # comparison would lose mixture-order and irrigation regression coverage.

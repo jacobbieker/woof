@@ -29,7 +29,7 @@ from woof.hex import engines
 from woof.hex.engines import GEOMETRY, EngineRefusal, locate, resolve
 
 ROOT = Path(__file__).resolve().parents[1]
-PINS = ROOT / "src/hexcore/data/engine-bridges.json"
+PINS = ROOT / "../../woof/hex/data/engine-bridges.json"
 
 
 def _renderer_row(directory, binary, **extra):
@@ -259,7 +259,7 @@ def test_s2s_renderer_is_reachable_from_the_wheel(tmp_path, monkeypatch):
     binary = _executable(tmp_path / "woof/hex/libexec" / RENDERER.name)
     for name in (*RENDERER.env_names, RENDERER.gpuwm_env):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(engines, "bundled_candidate", lambda spec: binary)
+    monkeypatch.setattr(engines, "bundled_candidate", lambda spec, **_: binary)
     assert locate(RENDERER) == (binary, "this distribution's woof/hex/libexec")
 
 
@@ -276,7 +276,7 @@ def test_the_ladder_reads_the_wheels_libexec_before_gpuwms_bridges(tmp_path, mon
     staged = _executable(tmp_path / "bridges" / GEOMETRY.name)
     for name in (*GEOMETRY.env_names, GEOMETRY.gpuwm_env):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(engines, "bundled_candidate", lambda spec: bundled)
+    monkeypatch.setattr(engines, "bundled_candidate", lambda spec, **_: bundled)
     monkeypatch.setattr(engines, "gpuwm_candidates", lambda spec: (staged,))
     assert resolve(GEOMETRY) == bundled
     assert locate(GEOMETRY) == (bundled, "this distribution's woof/hex/libexec")
@@ -294,7 +294,7 @@ def test_a_bundled_bridge_without_its_executable_bit_is_refused_by_name(tmp_path
     bundled.chmod(0o644)
     for name in (*GEOMETRY.env_names, GEOMETRY.gpuwm_env):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(engines, "bundled_candidate", lambda spec: bundled)
+    monkeypatch.setattr(engines, "bundled_candidate", lambda spec, **_: bundled)
     with pytest.raises(EngineRefusal, match="not executable"):
         resolve(GEOMETRY)
 

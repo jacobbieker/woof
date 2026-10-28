@@ -2653,6 +2653,19 @@ _EXPECTED_280_PREFLIGHT_REFUSALS = {
 }
 
 
+def _woof_renamed_part_refusals() -> set[str]:
+    """Registry parts whose physics differs from 2.8.0 only by the package
+    name: their source names woof (a module path or the data package), so
+    2.8.0's recorded digests cannot match them and the preflight names them
+    as changed beside the recorded differences above."""
+    from woof.physics_registry import (
+        registry_physics_part_sources, strip_registry_documentation)
+    package = re.compile(r"\bwoof[._/]|woof_data/")
+    return {f"registry physics of {name} (changed)"
+            for name, source in registry_physics_part_sources().items()
+            if package.search(json.dumps(strip_registry_documentation(source)))}
+
+
 @pytest.mark.parametrize("physics_profile", [runner.PHYSICS_PROFILE, None])
 def test_a_proof_prepared_under_the_280_registry_resolves_at_preflight(
         tmp_path, monkeypatch, physics_profile):
@@ -2686,8 +2699,12 @@ def test_a_proof_prepared_under_the_280_registry_resolves_at_preflight(
     prefix = "physics selection differs from the hash-bound experiment/profile: "
     assert prefix in str(caught.value)
     assert "Prepare again" in str(caught.value)
-    assert str(caught.value).split(prefix, 1)[1].split(". Prepare again", 1)[0] \
-        == "; ".join(_EXPECTED_280_PREFLIGHT_REFUSALS[physics_profile])
+    refused = str(caught.value).split(prefix, 1)[1].split(
+        ". Prepare again", 1)[0].split("; ")
+    expected = _EXPECTED_280_PREFLIGHT_REFUSALS[physics_profile]
+    renamed = _woof_renamed_part_refusals()
+    assert [line for line in refused
+            if line in expected or line not in renamed] == expected
 
     for receipt in (proof["physics"], proof["export"]["physics"]):
         receipt["registry_sha256"] = "e" * 64

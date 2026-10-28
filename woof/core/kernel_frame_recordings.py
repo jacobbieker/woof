@@ -751,6 +751,9 @@ SM120_NVRTC_13_4_92 = KernelFrameRecording(
         # reproduced every other row of this recording to the byte.
         'pd_vertical_sl': 0,
         'rrtmg_smoke_manifest': 0,
+        # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
+        # labels), proven equal with comments stripped; the preprocessor drops
+        # comments, so the compiled binary does not move.
         'upper_wind_limiter': 0,
         # The coupled fire's standalone units (lane/ec-sfire), read
         # 2026-10-06 with `tools/vram_reserve_probe.py frames` on test host D's
@@ -1065,7 +1068,7 @@ PHYSICS_PARAMS_MEASURED_SOURCE_SHA256 = (
 # (noah 176 B, ruc 144 B, ysu 0 B).  Previously e9b862f4.
 DYCORE_FRAME_MEASURED_SOURCE_SHA256 = MappingProxyType({
     "pd_vertical_sl": "929291a52c94c01fc7a3c648d867e26f0339b84865a24445911d8f7b2f862222",
-    "upper_wind_limiter": "d5ae17c0401ca7ef2d72f16de490e57a2090e6e35523c060637eef0e1b4686a8",
+    "upper_wind_limiter": "0b57b55c7acd1139831d1be904441213150690facd7c4593010456066457a587",
 })
 
 #: A167: sm_120 at NVRTC 12.9.86, the compiler of the default recast-woof[gpu]
@@ -1971,7 +1974,7 @@ CHAINED_UNITS_WITHOUT_A_PER_PLATFORM_ROW = MappingProxyType({
 # 6000 on 2026-10-07 with the new source and is unchanged; the other three
 # rows are carried from the previous composition, not re-read.
 TERRAIN_DRAG_COMPOSED_SOURCE_SHA256 = (
-    '152673b7e9981fc75721b69b0d222e0bd9d8b4fdfc5bcfe14275d0d61f2aab9b')
+    '417b8731c7c4eba6ca5211dbc8656f9ab6f248a1c33e06c62312744546a8135e')
 
 TERRAIN_DRAG_COMPOSED_OPTIONS = ("-std=c++17", "-fmad=false", "--ftz=false")
 TERRAIN_DRAG_COMPOSED_FRAME_READINGS = MappingProxyType({

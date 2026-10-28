@@ -254,7 +254,7 @@ def test_rebinding_a_hook_outside_hexcore_bypasses_the_cache(cache_root, monkeyp
     assert _bits(rebound) != _bits(default)
     assert _events("v841-vertical-velocity-damping") == ["miss", "hit-memory", "uncacheable"]
     (row,) = [r for r in prep_cache._ledger if r.get("event") == "uncacheable"]
-    assert "hexcore.native_geometry_math.sin" in row["reason"]
+    assert "woof.hex.native_geometry_math.sin" in row["reason"]
 
 
 def test_rebinding_a_hook_to_another_trusted_function_misses(cache_root, monkeypatch):

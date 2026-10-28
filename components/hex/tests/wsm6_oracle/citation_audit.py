@@ -14,7 +14,7 @@ def audit(reference: Path, receipt: Path):
     for name,path in files.items():
         if hashlib.sha256(path.read_bytes()).hexdigest()!=pinned[name]:
             raise RuntimeError(f'pinned native source changed: {name}')
-    source=(here.parents[1]/'src/hexcore/mpasphys/wsm6_v842.py').read_text()
+    source=(here.parents[1]/'../../woof/hex/mpasphys/wsm6_v842.py').read_text()
     rows=[]
     pattern=r'([A-Za-z0-9_]+\.(?:F90|F)):((?:\d+(?:-\d+)?)(?:,\s*\d+(?:-\d+)?)*)'
     for m in re.finditer(pattern,source):

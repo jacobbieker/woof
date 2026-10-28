@@ -10385,7 +10385,7 @@
  },
  "generated_by": "tools/fast_sbm_wrf480_oracle/pack_fixtures.py",
  "harness_sha256": {
-  "build.sh": "3d07f473fb134b5bbd9101bc23769397fef3ad370dc5fa9da1bcf0b5dcb9fda1",
+  "build.sh": "9568bf7eb2b293570ae923b6ec2ac9e83a4dbeaf8127cd1e6f4aaf42d3d3b20e",
   "fsbm_probe.F90": "958126e842d19bd39f4d818c0bd908affee9ed74b5b8bb47924c20d62c742d8a",
   "instrument_probes.py": "5cd1f50b241c100dd00bc956a09d1a59e54cb7d4919e6868bcd97701798cca51",
   "run_column.F90": "dddc97e8e8ffcb0ad845a952d63989509037ee563f167551809a2748c8189d78",

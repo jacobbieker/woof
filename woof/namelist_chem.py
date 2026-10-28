@@ -324,7 +324,7 @@ def import_chem_section(entries: dict, *, max_dom: int, fork: bool,
             if runs and all(value == 1 for value in active):
                 fix("chem", key, values, 1,
                     f"{what}: '{chem_set}' runs it ({process}, "
-                    f"gpuwm/{CHEM_PROCESS_PATH.get(process, 'core')})")
+                    f"woof/{CHEM_PROCESS_PATH.get(process, 'core')})")
                 continue
             raise error(
                 "chem", key, values,

@@ -370,7 +370,7 @@ def profile_scope(directory: Path | None):
     try:
         from woof.hex.partition_samehost_v841 import SameHostRanks
     except ModuleNotFoundError as error:
-        if error.name != "hexcore.partition_samehost_v841":
+        if error.name != "woof.hex.partition_samehost_v841":
             raise
         SameHostRanks = None
     previous = None if SameHostRanks is None else SameHostRanks._call

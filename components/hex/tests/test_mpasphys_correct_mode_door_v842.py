@@ -50,7 +50,7 @@ def native_preflight(monkeypatch):
     """Stand in for the Rust pool reader and the stream reader; everything else is the real route."""
     # These door tests fake the forecast itself; the ported-route suite refusal
     # (resident_v842.ported_route_refusal, tested in test_mpasphys_resident_v842) is not their subject.
-    monkeypatch.setattr("hexcore.mpasphys.resident_v842.ported_route_refusal", lambda config: None)
+    monkeypatch.setattr("woof.hex.mpasphys.resident_v842.ported_route_refusal", lambda config: None)
     layout = SimpleNamespace(configs={"config_start_time": "2023-03-31_12:00:00", "config_dt": 360.0,
                                       "config_run_duration": "0_01:00:00", "config_do_restart": False})
     monkeypatch.setattr(forecast_v842, "decode_registry_pools", lambda *a, **k: layout)

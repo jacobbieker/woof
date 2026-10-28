@@ -790,7 +790,7 @@ STATIC_LAYOUT = (('CLD_EXTLIQ1', 812), ('CLD_SSALIQ1', 812), ('CLD_ASYLIQ1', 812
 
 CUDA_SOURCE = r"""
 // Legacy RRTMG SW (WRF v4.6.1, ra_sw_physics = 4) - CUDA twin of the
-// NumPy FP32 reference in woof/core/rrtmg_sw.py, held at max_ulp 0
+// NumPy FP32 reference in gpuwm/core/rrtmg_sw.py, held at max_ulp 0
 // against the same Fortran fixtures.
 //
 // Numerics discipline (follows the Noah-MP lanes of this project):
@@ -809,11 +809,11 @@ CUDA_SOURCE = r"""
 //     __double2float_rn flushes subnormal results on this toolchain
 //     (see tests/test_noahmp_kernel_subnormals.py on the Noah-MP lane);
 //   * the glibc 2.39 logf/expf transcriptions below are the same audited
-//     tables as woof/core/rrtmg_sw.py SECTION 1 / noahmp_leaves.cu,
+//     tables as gpuwm/core/rrtmg_sw.py SECTION 1 / noahmp_leaves.cu,
 //     carried under the rsw_ prefix so this unit never collides with the
 //     Noah-MP translation units.
 //
-// The host driver (woof/core/rrtmg_sw.py, SECTION 10) compiles this file
+// The host driver (gpuwm/core/rrtmg_sw.py, SECTION 10) compiles this file
 // with a generated preamble of #defines: exact-bit scalar constants
 // (RSW_C_* via __uint_as_float) and offsets into one packed FP32 table
 // buffer (RSW_T_*), both derived from the verified SWTables.

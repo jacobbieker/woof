@@ -20,7 +20,7 @@ def main():
     if (companion / "woof/kernel_pack.py").is_file():
         sources.append(str(companion))
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(sources),
-               GPUWM_CARD=physical, GPUWM_NO_LOCAL_GPU="0", GPUWM_HEX_NO_LOCAL_GPU="0",
+               WOOF_CARD=physical, GPUWM_NO_LOCAL_GPU="0", WOOF_HEX_NO_LOCAL_GPU="0",
                CUPY_CACHE_DIR=str(lane / "cache/gpu-tests/cupy"),
                CUDA_CACHE_PATH=str(lane / "cache/gpu-tests/cuda"))
     command = [sys.executable, "-m", "pytest", "-q", "tests/test_cuda_subcycle_graphs.py",

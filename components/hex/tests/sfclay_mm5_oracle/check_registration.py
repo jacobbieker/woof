@@ -5,7 +5,7 @@ p.add_argument("f4_checkout",type=Path);p.add_argument("receipt",type=Path);args
 f4=args.f4_checkout.resolve()/'tree/src'
 sys.path.insert(0,str(f4))
 from woof.hex.mpasphys.driver_v842 import SlotRegistry,resolve_namelist
-path=Path(__file__).resolve().parents[2]/'src/hexcore/mpasphys/sfclay_mm5_v842.py'
+path=Path(__file__).resolve().parents[2]/'../../woof/hex/mpasphys/sfclay_mm5_v842.py'
 spec=importlib.util.spec_from_file_location('p9_draft_registry_binding',path)
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 def provider(call):raise RuntimeError('CPU registration check has no prepared numerical pools')

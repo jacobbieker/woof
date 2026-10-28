@@ -62,7 +62,7 @@ def test_non_fork_import_is_byte_identical_to_the_previous_importer(tmp_path):
     else:
         path = Path(control) / "woof/namelist_import.py"
     assert hashlib.sha256(path.read_bytes()).hexdigest() == (
-        'fe8bd9f884c6c3ea4eb9a3c1a5680116ae00114a8cf71325dccbc9f89d0e47cd')
+        '0f548373e9c8e171d466f40915bf7c1392a2d4be6a3e15ceaac61a42b2e66144')
     spec = importlib.util.spec_from_file_location("before_configuration_doors", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

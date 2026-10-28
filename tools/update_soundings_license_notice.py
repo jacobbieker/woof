@@ -21,7 +21,7 @@ import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-MARKER = '\nPUBLIC SOUNDING WINDOW: LOCKED DEPENDENCY NOTICES\n'
+MARKER = '\nPUBLIC SOUNDING WINDOW \u2014 LOCKED DEPENDENCY NOTICES\n'
 END = '\nEND PUBLIC SOUNDING WINDOW DEPENDENCY NOTICES\n'
 COPIES = ('licenses/THIRD-PARTY-LICENSES-bridge-binaries.txt',
           'tools/rustwx/assets/basemap/THIRD-PARTY-LICENSES.txt')

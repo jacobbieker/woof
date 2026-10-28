@@ -27,12 +27,12 @@
     }
   },
   "implementation": {
-    "gpuwm/core/nssl2_nucond.py": "7b8843370c886cb536a1af7e105646f16d9d5f06f5f58b08a4910e3f1ce95993",
-    "gpuwm/core/kernels/nssl2_nucond.cu": "a57ed276737bafee3c31709423bdc9fb23ef7c74906840838a71a3a7b9523355",
-    "gpuwm/core/nssl2_diagnostics.py": "7a7ee43052f2a4262281cc9b17061d63a86a8a070ebe7d754d0bf9fe726bcd81",
-    "gpuwm/core/kernels/nssl2_diagnostics.cu": "aea3a5b1157ca95b69c8df077680e27058b752d5e707f2134f408d0aa7f42bd2",
-    "gpuwm/core/nssl2_radiation.py": "1a640c5ada9c0b40b27407294dd3f5a4019ab72244703eebfba123a4ff84de70",
-    "tests/test_nssl2_nucond_diagnostics.py": "55afe5aae638b11af4538d01d83b6117a0e4cb78e6d1abc0d93db9b6dc0bca3e"
+    "woof/core/nssl2_nucond.py": "523e9e65f4f606c31a5f285f606d62dccdfd881c1ebca77ad4adcd186e2d5f89",
+    "woof/core/kernels/nssl2_nucond.cu": "a57ed276737bafee3c31709423bdc9fb23ef7c74906840838a71a3a7b9523355",
+    "woof/core/nssl2_diagnostics.py": "e3b459a9ce82ddd8383ee8084035a8458138bfe8e70fbbba98408b3718aa4fd9",
+    "woof/core/kernels/nssl2_diagnostics.cu": "aea3a5b1157ca95b69c8df077680e27058b752d5e707f2134f408d0aa7f42bd2",
+    "woof/core/nssl2_radiation.py": "ddc7a0e2fcefcd12211d3f319b5ad52bf729a3b338eae2704fed51e3f042f4a1",
+    "tests/test_nssl2_nucond_diagnostics.py": "727c68442db425e4a86aee7e7d22698af85b8b8ff65a37c6074feadcd7d5a60b"
   },
   "unit_contracts": {
     "registry_mode": "Mass kg/kg, number and CCN #/kg, volume m3/kg.",
@@ -62,8 +62,8 @@
     "column_oracle_repin": "Re-pinned gpuwm/core/kernels/nssl2_nucond.cu, gpuwm/core/kernels/nssl2_diagnostics.cu, tests/test_nssl2_nucond_diagnostics.py when lane/verify-nssl2-mp18 (2026-10-07) transliterated NUCOND/QVEXCESS (module_mp_nssl_2mom.F:6052-6199, :9611-12215) and radardd02 (:8588-9597) from WRF v4.6.1. The re-pin was made after re-running the oracles: this file's 64-row NUCOND and radardd02 fixtures pass in both unit modes and both arithmetic builds, and tools/nssl2_wrf461_column_oracle grades the whole production step at 0 ULP on all 101,664 outputs of its 96 columns (strict build) against WRF with its four documented defects corrected. No fixture, no oracle build input and no WRF source hash changed."
   },
   "frozen_low_level_kernel": {
-    "gpuwm/core/nssl2.py": "1fa293913fb4a8541b9357bf918fc260c6c63f910a0221394a368b264d382e96",
-    "gpuwm/core/kernels/nssl2.cu": "296120cb3ca678bbb42a5c19940eec029bebb52a5224f678f252a4706231840b",
+    "woof/core/nssl2.py": "1fa293913fb4a8541b9357bf918fc260c6c63f910a0221394a368b264d382e96",
+    "woof/core/kernels/nssl2.cu": "296120cb3ca678bbb42a5c19940eec029bebb52a5224f678f252a4706231840b",
     "hash_scope": "base_commit_git_blob",
     "base_commit_must_be_ancestor": true,
     "checkout_policy": "Current checkout bytes may differ after legitimate descendant core commits; the pinned base blobs remain immutable evidence."

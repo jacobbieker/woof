@@ -78,7 +78,6 @@ OPTIONAL_MODULES: dict[str, str] = {
     "rasterio": "recast-woof[geog]",
     "pyproj": "recast-woof[geog]",
     "affine": "recast-woof[geog]",
-    "mcp": "recast-woof[mcp]",
     "huggingface_hub": "recast-woof[publish]",
     "h5py": "recast-woof[publish]",
     # The Rust extension modules, which are built rather than pip-installed.

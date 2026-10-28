@@ -130,7 +130,7 @@ def referee_builder(tool: str = "native_library_build"):
     """Load the source checkout's proof tool, never a packaged compiler recipe."""
     if tool not in {"native_library_build", "thompson_tables"}:
         raise NativeLibraryError(f"unknown native referee tool {tool!r}")
-    path = Path(__file__).resolve().parents[3] / f"tools/native_dry_reference/{tool}.py"
+    path = Path(__file__).resolve().parents[3] / "components" / "hex" / f"tools/native_dry_reference/{tool}.py"
     if not path.is_file():
         raise NativeLibraryError(
             "native compilation is a source-checkout referee tool: "

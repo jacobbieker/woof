@@ -63,8 +63,8 @@ def main():
     run = root / 'runs' / (profile['case'] + '-' + Path(profile['init']).parent.name.split('-')[-1] + '-' + a.arm)
     run.mkdir(parents=True, exist_ok=False)
     tree = Path(os.environ['HEX_CAPABILITY_CHECKOUT'])
-    env = dict(os.environ, GPUWM_HEX_MESH_ROWS=profile['mesh_rows'], GPUWM_WRF_EXACT='0',
-               GPUWM_HEX_PREP_CACHE=str(root / 'hostprep-cache'))
+    env = dict(os.environ, WOOF_HEX_MESH_ROWS=profile['mesh_rows'], GPUWM_WRF_EXACT='0',
+               WOOF_HEX_PREP_CACHE=str(root / 'hostprep-cache'))
     dt = a.dt or a.nominal_dt
     expected = int(round(a.hours * 3600 / dt))
     flags = [f for f in profile['forecast_flags']]

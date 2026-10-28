@@ -93,6 +93,10 @@ def restart_dead_products(segments, log, popen=None, alive=None) -> list[str]:
         if not command:
             log(f'products of {fc} died unfinished and their command is not in {logged}; not redrawn')
             continue
+        if command[:2] == ['woof', 'hex']:
+            # the door logs its program as "woof hex" (one argv entry, two words), and command[1:] below
+            # drops exactly one entry; split, it relaunched `woof.hex.cli hex products`, which refuses
+            command = ['woof hex', *command[2:]]
         if '--scratch' not in command and '--keep-scratch' not in command:
             shutil.rmtree(fc / 'products.products-scratch', ignore_errors=True)
         environment = dict(os.environ, CUDA_VISIBLE_DEVICES='', GPUWM_NO_LOCAL_GPU='1')
@@ -255,9 +259,9 @@ def stop_process_tree(proc, grace_seconds: float = 60.0):
 def load_tracker_module(path: str | None):
     """P2's ``woof.hex.storm_tracker``; ``path`` loads a staged copy of that one file."""
     if path:
-        spec = importlib.util.spec_from_file_location('hexcore.storm_tracker', path)
+        spec = importlib.util.spec_from_file_location('woof.hex.storm_tracker', path)
         module = importlib.util.module_from_spec(spec)
-        sys.modules['hexcore.storm_tracker'] = module
+        sys.modules['woof.hex.storm_tracker'] = module
         spec.loader.exec_module(module)
         return module
     return importlib.import_module('woof.hex.storm_tracker')
@@ -906,20 +910,20 @@ class Controller:
         # segment never inherits them from the caller's environment.  Knobs such as
         # WOOF_HEX_MOVING_BALANCE (the balanced remap initialization, default on) pass through.
         env = {k: v for k, v in os.environ.items() if k not in RUN_STATE_VARIABLES}
-        env.update(GPUWM_HEX_MOVING_SHOCK='1', GPUWM_WRF_EXACT='0', OMP_NUM_THREADS='2',
-                   OPENBLAS_NUM_THREADS='1', GPUWM_HEX_MESH_ROWS=member['mesh_rows'],
-                   GPUWM_HEX_MOVING_CHECKPOINT_OUT=str(out_boundary),
-                   GPUWM_HEX_MOVING_CONTROL=str(control),
-                   GPUWM_HEX_MOVING_SEAL_EVERY_SECONDS=str(int(self.a.seal_every_hours * 3600)),
-                   GPUWM_HEX_MOVING_HEIGHT_REMAP='absolute')
+        env.update(WOOF_HEX_MOVING_SHOCK='1', GPUWM_WRF_EXACT='0', OMP_NUM_THREADS='2',
+                   OPENBLAS_NUM_THREADS='1', WOOF_HEX_MESH_ROWS=member['mesh_rows'],
+                   WOOF_HEX_MOVING_CHECKPOINT_OUT=str(out_boundary),
+                   WOOF_HEX_MOVING_CONTROL=str(control),
+                   WOOF_HEX_MOVING_SEAL_EVERY_SECONDS=str(int(self.a.seal_every_hours * 3600)),
+                   WOOF_HEX_MOVING_HEIGHT_REMAP='absolute')
         if self.a.device is not None:
             env['CUDA_VISIBLE_DEVICES'] = str(self.a.device)
         if checkpoint_in:
             env['WOOF_HEX_MOVING_CHECKPOINT_IN'] = str(checkpoint_in)
         if operator and str(operator).endswith('.zone.npz'):
-            env.update(GPUWM_HEX_MOVING_ZONE=str(operator), GPUWM_HEX_MOVING_SHOCK_ZONE=str(operator))
+            env.update(WOOF_HEX_MOVING_ZONE=str(operator), WOOF_HEX_MOVING_SHOCK_ZONE=str(operator))
         elif operator:
-            env.update(GPUWM_HEX_MOVING_OPERATOR=str(operator), GPUWM_HEX_MOVING_SOURCE_GRID=str(source_grid))
+            env.update(WOOF_HEX_MOVING_OPERATOR=str(operator), WOOF_HEX_MOVING_SOURCE_GRID=str(source_grid))
         return env
 
     def launch(self, kind, *, member_name=None, begin=None, checkpoint_in='state', operator='state',

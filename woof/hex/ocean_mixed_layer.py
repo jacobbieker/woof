@@ -24,7 +24,7 @@ def mode():
 
 
 def configuration(overrides=None):
-    table = json.loads(files("hexcore").joinpath("data/ocean-mixed-layer.v1.json").read_text())
+    table = json.loads(files("woof.hex").joinpath("data/ocean-mixed-layer.v1.json").read_text())
     values = dict(table["defaults"])
     supplied = json.loads(os.environ.get(OPTIONS_ENV, "{}")) if overrides is None else overrides
     if not isinstance(supplied, dict) or set(supplied) - set(values):
@@ -44,7 +44,7 @@ def configuration(overrides=None):
 def _kernel(device):
     import cupy as cp
     from . import numerics
-    source = files("hexcore").joinpath("kernels/ocean_mixed_layer.cu").read_text()
+    source = files("woof.hex").joinpath("kernels/ocean_mixed_layer.cu").read_text()
     # CuPy's cached NVRTC path appends -ftz=true itself. Passing either spelling
     # of ftz here makes NVRTC reject the duplicate in the default fast mode.
     # The kernel uses double arithmetic for its budget and carries double state.

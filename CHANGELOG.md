@@ -1,6 +1,37 @@
 # Changelog
 
-## 1.1.1
+## 1.1.2 (2026-10-27)
+
+WOOF 1.1.2 takes engine 2.9.8 and the hex model 0.4.8. Forecast answers change.
+
+New:
+
+- Hex runs MPAS physics by default: a run that names no physics runs
+  MPAS-A's `convection_permitting` suite on the GPU. The regional model's
+  physics stays one flag away; `woof hex physics list` shows every suite.
+
+Fixed:
+
+- `woof hex` with MPAS physics (the default), `woof hex physics list` and
+  `woof hex physics resolve` no longer stop with "No module named 'hexcore'".
+  The RRFS physics route, the ocean mixed layer, the UGWP orographic drag
+  tables and the hex preparation cache work again too.
+- Hex local time stepping on the full step, column-suite restore and
+  rollback, product redraws after a moving run's controller restarts, and
+  settings handed to hex child processes work again.
+- `install.sh` and `install.ps1` run `woof` (they called the old command
+  name), and package version lookups and documentation links name
+  recast-woof.
+- `pip install recast-woof` installs threadpoolctl and psutil, and the
+  `hydro-conus` extra exists.
+- `python -m tools.import_sweep` and `tools/battery/run_stage1.py` run on
+  the public tree, and the test suite is green on it.
+- Everything engine 2.9.8 and hex 0.4.6, 0.4.7 and 0.4.8 fix, as their notes
+  list it. Among them: storm-following runs no longer refuse a move, a cycle
+  that is not posted yet is fetched from the next source, and GOES-17 ABI
+  windows fetch.
+
+## 1.1.1 (2026-10-25)
 
 WOOF 1.1.1 takes engine 2.9.7 and the hex model 0.4.5. Forecast answers change.
 
@@ -41,7 +72,7 @@ Fixed:
   hex exports on the MPAS physics route carry terrain height and
   reflectivity.
 
-## 1.1.0
+## 1.1.0 (2026-10-23)
 
 WOOF 1.1.0 takes engine 2.9.5 and the hex model 0.4.3. Forecast answers change.
 
@@ -90,7 +121,7 @@ Fixed:
   GPU, and `install.sh` installs the required Rust when the system Rust is
   too old.
 
-## 1.0.3
+## 1.0.3 (2026-10-06)
 
 WOOF runs the operational HRRR configuration: its static file, its
 Thompson, MYNN, RUC, surface-layer and radiation forms, its fixed 20 s
@@ -306,7 +337,7 @@ Fixed:
   verification and validation against observations; old physics profile
   IDs are accepted as aliases.
 
-## 1.0.2
+## 1.0.2 (2026-10-02)
 
 WRF-fidelity fixes correct moisture pressure terms, edge vertical velocity,
 diffusion and map factors, and the 2 m humidity cap. Forecast answers change.
@@ -481,7 +512,7 @@ Available since 1.0.1:
   `[case_data] preprocess_backend`, and `--preprocess-workers` sets decode
   concurrency. A 48 h HRRR decode on 24 cores took 140 s instead of 480 s.
 
-## 1.0.1
+## 1.0.1 (2026-10-01)
 
 The engine's speed work, forecasts that start before their inputs finish
 posting, and the fixes made since 1.0.0.
@@ -555,7 +586,7 @@ Fixed:
 - A global receipt's `libraries` block records the `recast-woof` version.
   1.0.0 receipts recorded `recast-woof-data` and not the package itself.
 
-## 1.0.0
+## 1.0.0 (2026-09-29)
 
 Recast WOOF 1.0.0 is the regional engine of release 2.8.0 and the fixes made
 since, under the WOOF name, with the hex and global models inside it and the

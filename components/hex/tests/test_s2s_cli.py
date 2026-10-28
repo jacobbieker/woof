@@ -31,7 +31,7 @@ runpy.run_module('woof.hex.cli', run_name='__main__')
 def test_public_source_row_dry_run_is_offline(tmp_path, source, row, days):
     destination = tmp_path / "not-created"
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", CUDA_VISIBLE_DEVICES="",
-               GPUWM_HEX_CUDA_GRAPHS="0", GPUWM_HEX_CUDA_GRAPHS_REQUIRE_REPLAY="0")
+               WOOF_HEX_CUDA_GRAPHS="0", WOOF_HEX_CUDA_GRAPHS_REQUIRE_REPLAY="0")
     command = [sys.executable, "-B", "-c", GUARDED_ENTRYPOINT, "s2s", "--row", row,
                "--source", source, "--cycle", "2023-03-31T12", "--members", "4",
                "--days", str(days), "--work-dir", str(destination),

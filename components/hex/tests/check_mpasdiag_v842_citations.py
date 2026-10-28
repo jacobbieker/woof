@@ -22,7 +22,7 @@ LEDGER=Path(__file__).with_name("mpasdiag_v842_citations.json")
 
 
 def inventory(source_root):
-    found=[r for r in LEGACY.citation_occurrences(TREE/"src/hexcore/mpasdiag")
+    found=[r for r in LEGACY.citation_occurrences(TREE/"../../woof/hex/mpasdiag")
            if Path(r.python_path).name in FILES]
     rows=[]
     for citation,count in sorted(Counter(r.citation for r in found).items()):

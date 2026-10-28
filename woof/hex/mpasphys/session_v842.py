@@ -58,7 +58,7 @@ class NativePhysicsSession:
             module, operation = prepare.split(':', 1)
             getattr(import_module(module), operation)(layout)
         from importlib import import_module
-        provider = import_module(getattr(config,'driver_module','hexcore.mpasphys.driver_v842'))
+        provider = import_module(getattr(config,'driver_module','woof.hex.mpasphys.driver_v842'))
         NativePoolArguments = provider.NativePoolArguments
         NativeCalendarState = provider.NativeCalendarState
         NativeDriverHooks = provider.NativeDriverHooks

@@ -542,10 +542,29 @@ CQ_OFF_280_NAMED_PROFILES = frozenset({
 })
 
 
+#: Recast WOOF: a part whose physics (documentation stripped) names this
+#: package -- a consumer row's class path ``woof.core.*``, an asset root
+#: ``woof_data/...`` -- holds the engine's ``gpuwm`` spelling in a 2.8.0
+#: receipt, so against this tree the receipt names it changed.
+_WOOF_PACKAGE = re.compile(r"\bwoof[._/]|woof_data/")
+
+
+def _woof_renamed_parts(row, spelling) -> set[str]:
+    """The receipt's selected parts that differ from 2.8.0 only by the package name."""
+    try:
+        selection = _expected_for(row, spelling)
+    except ValueError:
+        return set()
+    renamed = {name for name, source in registry_physics_part_sources().items()
+               if _WOOF_PACKAGE.search(json.dumps(strip_registry_documentation(source)))}
+    return {f"registry physics of {name} (changed)"
+            for name in selection["registry_physics"]["parts"] if name in renamed}
+
+
 def _legacy_expected(row, spelling, *additional):
     """Known default correction plus the mutation an individual test makes."""
     return sorted({*EXPECTED_280_REFUSALS[(row["profile"], spelling)],
-                   *additional})
+                   *_woof_renamed_parts(row, spelling), *additional})
 
 
 def _loaded_config(switches) -> RunConfig:

@@ -410,7 +410,9 @@ def test_default_authority_and_fingerprint_base_golden(name, authority, fingerpr
         base_wps_namelist=path.with_suffix(".namelist.wps"),
         physics_profile=plan["profile"], output_directory=destination)
     payload = (destination / "experiment.toml").read_bytes()
-    assert hashlib.sha256(payload).hexdigest() == authority
+    # the emitter's comment lines name WOOF where the golden's named the engine (tests/woof_engine_spelling.py)
+    from woof_engine_spelling import engine_spelling
+    assert hashlib.sha256(engine_spelling(payload.decode("utf-8")).encode("utf-8")).hexdigest() == authority
     assert (destination / "namelist.wps").read_bytes() == path.with_suffix(".namelist.wps").read_bytes()
     exp = load_experiment(destination / "experiment.toml")
     # The retained golden predates 48847c9eb's local_face default. Inverse

@@ -69,7 +69,8 @@ def test_unnamed_namelist_keeps_the_global_default(tmp_path):
     # rigid lid, this one reads WRF's open top (2026-10-12).  That one line
     # put back, the pinned hash holds.
     from operational_namelist_edits import with_parent_lid
-    assert hashlib.sha256(with_parent_lid(historical).encode()
+    from woof_engine_spelling import engine_spelling
+    assert hashlib.sha256(engine_spelling(with_parent_lid(historical)).encode()
                           ).hexdigest() == baseline["namelist"]
     assert "mynn_sfclay_variant" not in document["shared"]
     run = build_experiment(document, source="unnamed import").root.run
@@ -155,7 +156,8 @@ def test_non_source_requests_keep_the_same_bytes_and_default():
     for source in ("gfs", "era5", "rrfs"):
         assert recipe_physics_defaults(source) == {}
         text = _recipe(source)
-        assert hashlib.sha256(text.encode()).hexdigest() == baseline["recipes"][source]
+        from woof_engine_spelling import engine_spelling
+        assert hashlib.sha256(engine_spelling(text).encode()).hexdigest() == baseline["recipes"][source]
         assert "mynn_sfclay_variant" not in tomllib.loads(text)["shared"]
         assert with_physics_defaults_text(text, recipe_physics_defaults(source)) is text
     assert namelist_physics_defaults("namelist.input") == {}

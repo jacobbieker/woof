@@ -78,19 +78,19 @@ def main(argv=None):
         else:
             cmd += ['--gpuwm-checkout', str(a.engine)]
     engine = cmd[cmd.index('--gpuwm-checkout') + 1] if '--gpuwm-checkout' in cmd else None
-    env = dict(os.environ, GPUWM_HEX_MOVING_SHOCK='1', GPUWM_WRF_EXACT='0', OMP_NUM_THREADS='2',
-               OPENBLAS_NUM_THREADS='1', GPUWM_HEX_MESH_ROWS=member['mesh_rows'],
-               GPUWM_HEX_MOVING_CONTROL=str(control), GPUWM_HEX_MOVING_HEIGHT_REMAP='absolute',
-               GPUWM_HEX_MOVING_CHECKPOINT_IN=str(a.carrier),
+    env = dict(os.environ, WOOF_HEX_MOVING_SHOCK='1', GPUWM_WRF_EXACT='0', OMP_NUM_THREADS='2',
+               OPENBLAS_NUM_THREADS='1', WOOF_HEX_MESH_ROWS=member['mesh_rows'],
+               WOOF_HEX_MOVING_CONTROL=str(control), WOOF_HEX_MOVING_HEIGHT_REMAP='absolute',
+               WOOF_HEX_MOVING_CHECKPOINT_IN=str(a.carrier),
                PYTHONPATH=os.pathsep.join([str(TREE / 'src')] + ([engine] if engine else [])))
     for key in ('WOOF_HEX_MOVING_OPERATOR', 'WOOF_HEX_MOVING_SOURCE_GRID', 'WOOF_HEX_MOVING_ZONE',
                 'WOOF_HEX_MOVING_SHOCK_ZONE', 'WOOF_HEX_MOVING_CHECKPOINT_OUT', 'WOOF_HEX_MOVING_CHECKPOINT_WAIT'):
         env.pop(key, None)
     operator = record.get('operator')
     if operator and str(operator).endswith('.zone.npz'):
-        env.update(GPUWM_HEX_MOVING_ZONE=str(operator), GPUWM_HEX_MOVING_SHOCK_ZONE=str(operator))
+        env.update(WOOF_HEX_MOVING_ZONE=str(operator), WOOF_HEX_MOVING_SHOCK_ZONE=str(operator))
     elif operator:
-        env.update(GPUWM_HEX_MOVING_OPERATOR=str(operator), GPUWM_HEX_MOVING_SOURCE_GRID=str(record['source_grid']))
+        env.update(WOOF_HEX_MOVING_OPERATOR=str(operator), WOOF_HEX_MOVING_SOURCE_GRID=str(record['source_grid']))
     (a.out / 'replay-command.json').write_text(json.dumps(dict(command=cmd, operator=operator,
                                                                carrier=str(a.carrier)), indent=1) + '\n')
     wrapped = [*(a.launcher.split() if a.launcher else []), *cmd]

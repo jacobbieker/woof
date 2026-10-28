@@ -14,7 +14,7 @@ inline uint4 make_uint4(unsigned int x, unsigned int y, unsigned int z, unsigned
     return {x, y, z, w};
 }
 struct { unsigned int x; } blockDim, blockIdx, threadIdx;
-#include "../src/hexcore/stochastic.cu"
+#include "../../../woof/hex/stochastic.cu"
 
 constexpr int cells=4, edges=6, levels=3;
 const int coe[]={0,1, 0,2, 0,3, 1,2, 1,3, 2,3};

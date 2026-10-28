@@ -42,8 +42,8 @@ def main():
         parser.add_argument('--' + name, type=Path, required=True)
     args = parser.parse_args()
     import cupy as cp
-    native_module = module('hexcore.mpasphys._p21_ozone_native', args.provider / 'native_backend.py')
-    device_module = module('hexcore.mpasphys._p21_ozone_device', args.provider / 'device_pools_v842.py')
+    native_module = module('woof.hex.mpasphys._p21_ozone_native', args.provider / 'native_backend.py')
+    device_module = module('woof.hex.mpasphys._p21_ozone_device', args.provider / 'device_pools_v842.py')
     tables_directory = args.reference / 'src/core_atmosphere/physics/physics_wrf/files'
     resources = dict(rust_decoder=dict(path=str(args.decoder), sha256=sha(args.decoder)),
         table_directory=str(tables_directory), nOznLevels=59,

@@ -15,7 +15,7 @@ import sys
 import translate
 
 ROOT = Path(__file__).resolve().parent
-TARGET = ROOT.parents[1] / "src/hexcore/mpasphys/rrfs/mp_nssl2m.py"
+TARGET = ROOT.parents[1] / "../../woof/hex/mpasphys/rrfs/mp_nssl2m.py"
 PINNED_SHA = "06bd80040c47a9613cb4a528f961d947404363b10043402040f8a1298e42edd4"
 
 STATE = ("th", "qv", "qc", "qr", "qi", "qs", "qh", "qhl", "ccw", "crw", "cci", "csw", "chw", "chl", "cn", "vhw", "vhl")

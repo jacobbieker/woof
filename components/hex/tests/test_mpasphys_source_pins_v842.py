@@ -48,7 +48,7 @@ PINS = {
 }
 
 def test_driver_source_pins():
-    root=Path(__file__).resolve().parents[1]/'src/hexcore/mpasphys'
+    root=Path(__file__).resolve().parents[1]/'../../woof/hex/mpasphys'
     native=os.environ.get('MPAS_REF')
     if native is None:
         pytest.skip('set MPAS_REF to the pinned MPAS-A v8.4.2 source')

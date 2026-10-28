@@ -70,7 +70,7 @@ def main():
         spec.loader.exec_module(backend)
         spec = importlib.util.spec_from_file_location('wsm6_binding_replay', Path(__file__).with_name('replay.py'))
         replay = importlib.util.module_from_spec(spec)
-        sys.modules['hexcore.mpasphys.wsm6_v842'] = port
+        sys.modules['woof.hex.mpasphys.wsm6_v842'] = port
         spec.loader.exec_module(replay)
         with backend.NativePhysics(args.native_library, test_only=True) as native:
             values = np.asarray([native.get_constant(name) if name else 0

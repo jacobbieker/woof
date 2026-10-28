@@ -117,7 +117,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
         "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
         "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "4533b839e4292e22c20e920b4738301dcd3edc4657efc7b0363a342eb92fc36e",
+        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "8fd83d65f51f1e893285643260e81b2bf8b8a8668bb5b52cccc3c6a734530780",
         "src/hexcore/step_anchors.py": (
             "13f8bf3361b3fc5c25805d05d48e3c59841050e3d372c03c96f1498133399b72"
         ),
@@ -149,7 +149,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         # Re-frozen 2026-10-05 for the startup lane (host-preparation cache);
         # the rationale lives beside the runner's pin.
         "src/hexcore/cuda_driver.py": (
-            "726c3353f22e933ecb802aa3bac04d175aac75e2527060f5a4b64e1b8688635d"
+            "462c3834f24e1467a6db108baa290c089293e355104a71c02c23e8980e398fe6"
         ),
         # New pin (startup lane, 2026-10-05): the frozen driver executes host
         # preparation through this module; the rationale lives beside the

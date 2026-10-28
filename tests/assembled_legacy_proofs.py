@@ -3,14 +3,14 @@ import hashlib
 import json
 from pathlib import Path
 
-SOURCE_EXTENSION_SHA = 'acfe924f5b9154bc32bd885064037a0df733918041551f8f252d0692da46ff79'
-DIFFUSION_CACHE_EXTENSION_SHA = "2d0a03fbffcec53d12d692c524e3fed01611677a08f677c2ff76f39214549c79"
+SOURCE_EXTENSION_SHA = '5ea8c66aeb6c8a00381af08d25a92324c8df4a5a7c04d2274b3b53c1b3faa2b8'
+DIFFUSION_CACHE_EXTENSION_SHA = "79275bdf13467cc1c3087889f42ee609ec9652bd65f3bd76b54d1f6cda5fd4ba"
 
 PROOF_SHAS = {
-    "acoustic-published.json": "a87236d1940de34920102e86cbfc57ddafb0cabb103c4d891923385cf9c2e1e9",
-    "coordinate-native.json": "e444d6d4eed8a6c875a1970d0ac8d97f255357df6874ef5c915b1c0cfcefc070",
-    "coordinate-negative.json": "b27d2342e986363910c29a38baff9a7adf1b7d8d4652f60d5404670ef13a49ba",
-    "driver-source.json": "30597673b9cb04a53ec297f20df5050fdb0bfa7b6ef025c2b0c7020bae6a54bb",
+    "acoustic-published.json": "98773019ee4abd55296e27ff731be4f97e4cdb6c1f4d02780b9725a923f1d96e",
+    "coordinate-native.json": "4964d7356142ba2915bfa71a177301d1a41c710dc0c91ed7ae7b61b6de706c5e",
+    "coordinate-negative.json": "d6b418b1204d21fae4c73f25257a6955eec6898a638f27ba0787e3f85e8b87b0",
+    "driver-source.json": "81fdd38a02aa625ed23b29dcfb7d31771ff1149d3b2f96e3e98ecd0cf64ddcf8",
 }
 
 

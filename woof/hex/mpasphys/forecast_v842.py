@@ -157,7 +157,7 @@ def native_route(arguments: Any, *, default_mode: str = 'exact'):
     if len(matches)>1:
         raise ValueError('native physics route is ambiguous in the suites table')
     provider = import_module(matches[0][1].get('driver_module',
-                'hexcore.mpasphys.driver_v842')) if matches else None
+                'woof.hex.mpasphys.driver_v842')) if matches else None
     # --physics-default-backend replaces the route's table default (hex-cuda on the v8.4.2 suites) for every
     # slot that names no backend of its own; native-cpu there is the native referee.
     default_backend = getattr(arguments, 'physics_default_backend', None)

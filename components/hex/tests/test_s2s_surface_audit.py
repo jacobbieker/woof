@@ -2,7 +2,7 @@ import importlib.util
 from pathlib import Path
 import numpy as np
 import pytest
-spec=importlib.util.spec_from_file_location('audit',Path(__file__).parents[1]/'src/hexcore/s2s_surface_audit.py')
+spec=importlib.util.spec_from_file_location('audit',Path(__file__).parents[1]/'../../woof/hex/s2s_surface_audit.py')
 audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
 cli_spec=importlib.util.spec_from_file_location('audit_cli',Path(__file__).parents[1]/'tools/audit_s2s_surface.py')
 cli=importlib.util.module_from_spec(cli_spec);cli_spec.loader.exec_module(cli)

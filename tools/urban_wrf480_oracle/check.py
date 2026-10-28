@@ -84,7 +84,7 @@ def grade_root(sources, out):
     if failures or not mutation_failures:
         (out / "root-receipt.json").write_text(json.dumps(receipt,indent=2,default=str))
         raise ValueError(f"root comparison failed: {len(failures)} differing words; receipt at {out / 'root-receipt.json'}")
-    env = dict(os.environ, GPUWM_URBAN480_ORACLE_BUILD=str(out),CUDA_VISIBLE_DEVICES="",GPUWM_NO_LOCAL_GPU="1")
+    env = dict(os.environ, WOOF_URBAN480_ORACLE_BUILD=str(out),CUDA_VISIBLE_DEVICES="",GPUWM_NO_LOCAL_GPU="1")
     command = ["python","-m","pytest","-q",tests]
     p = subprocess.run(list(map(str,command)),env=env,text=True,capture_output=True)
     receipt["pytest_command"]=list(map(str,command))
@@ -131,7 +131,7 @@ def grade_water(out):
             hg[0][:3]=got[12:15];wg[0][:3]=want[12:15]
             hg[4][11]=got[15];wg[4][11]=want[15]
             steps+=1
-    env=dict(os.environ,GPUWM_URBAN480_ORACLE_BUILD=str(out),CUDA_VISIBLE_DEVICES="",GPUWM_NO_LOCAL_GPU="1")
+    env=dict(os.environ,WOOF_URBAN480_ORACLE_BUILD=str(out),CUDA_VISIBLE_DEVICES="",GPUWM_NO_LOCAL_GPU="1")
     p=subprocess.run(["python","-m","pytest","-q",str(tests)],env=env,text=True,capture_output=True)
     (out/"water-pytest.log").write_text(p.stdout+p.stderr)
     receipt={"cases":ncases,"steps":steps,"words":steps*len(test.FIELDS),"differences":differences,

@@ -28,7 +28,7 @@ def main():
         out.mkdir(parents=True)
         command=parity_command(sys.executable,out,os.environ['E'],manifest)
         env=dict(os.environ,PYTHONPATH=str(tree/'src')+':'+os.environ['E'],
-                 GPUWM_HEX_MESH_ROWS=str(R/'mesh-rows.json'),HEXPUB=str(tree),HEXEXP=str(tree),
+                 WOOF_HEX_MESH_ROWS=str(R/'mesh-rows.json'),HEXPUB=str(tree),HEXEXP=str(tree),
                  HEX_CAPABILITY_CHECKOUT=str(tree))
         with (out/'forecast.log').open('w') as log:
             result=subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT)

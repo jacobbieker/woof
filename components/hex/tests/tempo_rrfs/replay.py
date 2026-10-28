@@ -109,7 +109,7 @@ def main():
              'native_library':str(args.native_library),'native_library_sha256':h(args.native_library),
              'cpp_library_sha256':h(ROOT/('scratch/tempo-build/libtempo_audit.so' if args.math_audit else 'scratch/tempo-build/libtempo_host.so')),
              'table_sha256':{p.name:h(p) for p in (ROOT/'scratch/tables').iterdir() if p.is_file()},
-             'blob_sha256':h(out/'blob.bin') if not args.no_blob else None,'records_per_case':12 if args.all_records else 1,'module_sha256':h(Path(__file__).parents[2]/'src/hexcore/mpasphys/rrfs/tempo_v303.py'),'cases':rows,'all_outputs_bitwise_equal':all(not r['state'] and not r['diagnostics'] for r in rows)}
+             'blob_sha256':h(out/'blob.bin') if not args.no_blob else None,'records_per_case':12 if args.all_records else 1,'module_sha256':h(Path(__file__).parents[2]/'../../woof/hex/mpasphys/rrfs/tempo_v303.py'),'cases':rows,'all_outputs_bitwise_equal':all(not r['state'] and not r['diagnostics'] for r in rows)}
     receipt['initialized_blob_sha256']=hashlib.sha256(memoryview(blob).cast('B')).hexdigest();receipt['levels']=args.levels
     receipt['column_cases']=case_count;receipt['stress_corpus']=args.stress_corpus
     if rrfs_build:

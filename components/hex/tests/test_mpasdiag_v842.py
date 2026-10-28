@@ -126,7 +126,7 @@ def receipt():
         patch=os.environ.get('MPAS_DIAG_REAL_PATCH')
         if patch:fingerprints['real_patch_manifest']=hashlib.sha256((Path(patch)/'patch.json').read_bytes()).hexdigest()
         for name in ('cloud_v842.py','pv_v842.py','soundings_v842.py'):
-            source=Path(__file__).resolve().parents[1]/'src/hexcore/mpasdiag'/name
+            source=Path(__file__).resolve().parents[1]/'../../woof/hex/mpasdiag'/name
             fingerprints[name]=hashlib.sha256(source.read_bytes()).hexdigest()
         Path(path).write_text(json.dumps({"tier":"strict standalone synthetic/real columns and native executable station files",
             "whole_forecast_proof":False,"process_count":1,

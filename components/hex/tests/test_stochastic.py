@@ -146,7 +146,7 @@ def test_actual_harmonic_covariance_through_degree_512(tmp_path):
         compiler_stdout=compiled.stdout, compiler_stderr=compiled.stderr,
         run_command=call, exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr,
         run_wall_seconds=time.perf_counter()-before,
-        kernel_sha256=hashlib.sha256((source.parent.parent/'src/hexcore/stochastic.cu').read_bytes()).hexdigest(),
+        kernel_sha256=hashlib.sha256((source.parent.parent/'../../woof/hex/stochastic.cu').read_bytes()).hexdigest(),
         no_gpu_execution=True, scope='host addition-theorem oracle of actual CUDA source; not GPU validation')
     (tmp_path/'harmonic-covariance-audit.json').write_text(json.dumps(evidence, indent=2)+'\n')
     assert result.returncode == 0, evidence
@@ -187,7 +187,7 @@ def test_actual_cuda_source_statistics_and_seed_words(tmp_path):
                          wall_seconds=time.perf_counter()-before))
     evidence = dict(command=command, compile_wall_seconds=compile_seconds,
         compiler_stdout=compiled.stdout, compiler_stderr=compiled.stderr, runs=rows,
-        kernel_sha256=hashlib.sha256((source.parent.parent/'src/hexcore/stochastic.cu').read_bytes()).hexdigest(),
+        kernel_sha256=hashlib.sha256((source.parent.parent/'../../woof/hex/stochastic.cu').read_bytes()).hexdigest(),
         no_gpu_execution=True, scope='small host unit oracle of actual CUDA source; not GPU validation')
     (tmp_path/'statistics-audit.json').write_text(json.dumps(evidence, indent=2))
     assert all(row['exit_code'] == 0 for row in rows), evidence
@@ -232,7 +232,7 @@ def test_actual_cuda_forcing_invariants_and_strided_writes(tmp_path):
         compiler_stdout=compiled.stdout, compiler_stderr=compiled.stderr,
         run_command=call, exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr,
         run_wall_seconds=time.perf_counter()-before,
-        kernel_sha256=hashlib.sha256((source.parent.parent/'src/hexcore/stochastic.cu').read_bytes()).hexdigest(),
+        kernel_sha256=hashlib.sha256((source.parent.parent/'../../woof/hex/stochastic.cu').read_bytes()).hexdigest(),
         no_gpu_execution=True, scope='small host invariant oracle of actual CUDA source; not GPU validation')
     (tmp_path/'forcing-audit.json').write_text(json.dumps(evidence, indent=2))
     assert result.returncode == 0, evidence
@@ -366,7 +366,7 @@ def test_actual_pattern_snapshot_resume_and_cadence_on_host(tmp_path, monkeypatc
                          fractional_cadences=fractional))
     evidence = dict(command=command, compiler_stdout=compiled.stdout, compiler_stderr=compiled.stderr,
         compile_wall_seconds=compile_seconds, cases=rows, ar1_launches=len(launches),
-        kernel_sha256=hashlib.sha256((source.parent.parent/'src/hexcore/stochastic.cu').read_bytes()).hexdigest(),
+        kernel_sha256=hashlib.sha256((source.parent.parent/'../../woof/hex/stochastic.cu').read_bytes()).hexdigest(),
         no_gpu_execution=True, scope='host unit check of production Python control flow and actual CUDA-source AR(1); NumPy matrix sum; not GPU validation')
     (tmp_path/'pattern-restart-audit.json').write_text(json.dumps(evidence, indent=2))
 

@@ -170,7 +170,7 @@ def require_rrtmg_legacy_ready() -> None:
     package_dir = Path(__file__).resolve().parent
     for relative in _RRTMG_LEGACY_ASSETS:
         if not (package_dir / relative).is_file():
-            missing.append(f"asset gpuwm/{relative}: file not found")
+            missing.append(f"asset woof/{relative}: file not found")
     if missing:
         raise NotImplementedError(
             "ra_rrtmg_variant='rrtmg_legacy' (exact port of WRF v4.6.1's "

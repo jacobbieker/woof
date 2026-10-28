@@ -262,7 +262,15 @@ def test_sources_are_resolvable_and_public_reference_covers_every_recipe():
             source = citations[key]
             assert source["title"] and source["publisher"] and source["supports"]
             if not source["url"].startswith("https://"):
-                assert (ROOT / source["url"]).is_file()
+                # the catalog is a data record and keeps the engine's package path (gpuwm/...);
+                # in this tree the package is woof/
+                url = source["url"]
+                if url.startswith("gpuwm/") and not (ROOT / url).exists():
+                    url = "woof/" + url[len("gpuwm/"):]
+                from _woof_snapshot import left_out
+                if left_out(url):
+                    continue  # a cited source this tree leaves out (the terminal UI's own sources)
+                assert (ROOT / url).is_file(), source["url"]
 
 
 def test_research_capability_manifest_is_bound_to_the_actual_import_and_window_contracts():

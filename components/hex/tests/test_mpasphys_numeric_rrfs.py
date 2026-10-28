@@ -102,5 +102,5 @@ def test_direct_nvrtc_preserves_minimum_subnormal(authority):
         y[0]=__fmul_rn(x[0],1.0f);
     }'''
     x=cp.asarray(np.array([1],dtype=np.uint32).view(np.float32));y=cp.zeros_like(x)
-    cache.raw_kernel('subnormal',source,module_key='hexcore.mpasphys.rrfs.subnormal')((1,),(1,),(x,y))
+    cache.raw_kernel('subnormal',source,module_key='woof.hex.mpasphys.rrfs.subnormal')((1,),(1,),(x,y))
     assert int(cp.asnumpy(y).view(np.uint32)[0])==1

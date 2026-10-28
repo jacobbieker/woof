@@ -371,12 +371,12 @@
   },
   "tool_inputs": {
     "tools/wrf_diffusion_oracle/vertical_w_control.py": {
-      "sha256": "24660520863ccdb755d6543e49d300fc163f764e9709b03b72fa194665828c44",
-      "bytes": 9759
+      "sha256": "f31870095d2a7c95d6b4ffc3f2234e12d132d47c10671c8a06cc9ba6d90708b7",
+      "bytes": 9756
     },
     "tools/wrf_diffusion_oracle/vertical_driver.py": {
-      "sha256": "95a4a6b26cccac8d4d03a65161083d5547d27a5ced65a11249cba1e5dbed3c15",
-      "bytes": 8262
+      "sha256": "87f92a32a0cc3aa6a34b25966bb8440fc081b39c5ebcec793ba8852772962d55",
+      "bytes": 8258
     },
     "tools/wrf_diffusion_oracle/vertical_driver_complete.F90": {
       "sha256": "ab2db37f5b1158f97a5695105e5ef917e362bc535a42a6c871292c5ab8faf188",
@@ -390,11 +390,11 @@
       "sha256": "607f9d3a9f130240d7bde6a880e093e5108afea45964c5363461db67e4710262",
       "bytes": 4976
     },
-    "gpuwm/verify/smallstep_oracle.py": {
-      "sha256": "8e8db7b72c07bdbe62c9ae7d2ecc4dd66331dbcabd6c1dc87f93d63659f2fb39",
-      "bytes": 6068
+    "woof/verify/smallstep_oracle.py": {
+      "sha256": "f73c2a1e8996467fbe3a82fb6fa94cd3bf7d7d1d069fc66850d2cb3dd8a5d92d",
+      "bytes": 6063
     },
-    "gpuwm/core/fp32_ulp.py": {
+    "woof/core/fp32_ulp.py": {
       "sha256": "e7a63f76f5457bddcb16ecf28288c25ba210a372aa31e5c8f6a5eb136f01cfe2",
       "bytes": 7856
     }

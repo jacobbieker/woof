@@ -279,7 +279,7 @@ def _release_at(root: Path, package: str) -> str | None:
 
     A source tree: the ``[project].version`` of its ``pyproject.toml`` when
     that names woof.  An installed root (``site-packages``): the
-    ``gpuwm-*.dist-info`` whose RECORD lists ``<package>/__init__.py``.
+    ``recast_woof-*.dist-info`` whose RECORD lists ``<package>/__init__.py``.
     Anything else cannot be answered, and an unanswerable question is
     silent here like every gate in this module.
     """
@@ -295,12 +295,12 @@ def _release_at(root: Path, package: str) -> str | None:
         name = re.search(_PYPROJECT_FIELD.format(field="name"), text, re.M)
         version = re.search(_PYPROJECT_FIELD.format(field="version"), text,
                             re.M)
-        if name and name.group(1).strip().lower() == "woof" and version:
+        if name and name.group(1).strip().lower() == "recast-woof" and version:
             return version.group(1).strip()
         return None
     wanted = f"{package}/__init__.py"
     try:
-        records = sorted(root.glob("gpuwm-*.dist-info"))
+        records = sorted(root.glob("recast_woof-*.dist-info"))
     except OSError:
         return None
     for info in records:
@@ -311,7 +311,7 @@ def _release_at(root: Path, package: str) -> str | None:
             continue
         if any(line.split(",", 1)[0] == wanted
                for line in record.splitlines()):
-            return info.name[len("gpuwm-"):-len(".dist-info")]
+            return info.name[len("recast_woof-"):-len(".dist-info")]
     return None
 
 

@@ -72,7 +72,7 @@ result = {'scope': 'strict standalone MPAS EVAPO; single process, no MPI',
           'columns': n, 'nonzero_subnormal_outputs': int(subnormals.sum()),
           'native_evaporation_words': [f'{int(w):08x}' for w in expected],
           'differing_words': diff,
-          'production_source_sha256': hashlib.sha256(Path(__import__('hexcore.mpasphys.noah_v842', fromlist=['']).__file__).read_bytes()).hexdigest()}
+          'production_source_sha256': hashlib.sha256(Path(__import__('woof.hex.mpasphys.noah_v842', fromlist=['']).__file__).read_bytes()).hexdigest()}
 out = Path('receipts/subnormal-cuda.json' if a.gpu else 'n1out/subnormal-host.json')
 out.write_text(json.dumps(result, indent=2)+'\n')
 print(json.dumps(result, indent=2))

@@ -1520,7 +1520,7 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
     def _base_receipt(self) -> dict[str, Any]:
         receipt = super()._base_receipt()
         receipt["schema"] = CUDA_SUITE_PHYSICS_V841_SCHEMA
-        receipt["frozen_adapter_schema"] = "mpas-port.cuda-arwen-physics-v841/v2"
+        receipt["frozen_adapter_schema"] = "mpas-port.cuda-woof-physics-v841/v3"
         census = receipt.pop("last_noahmp_census", None)
         receipt["last_land_surface_census"] = census
         receipt["suite"] = {
@@ -1759,7 +1759,7 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
         if not isinstance(payload, Mapping) or payload.get("schema") != CUDA_SUITE_PHYSICS_V841_SCHEMA:
             raise ValueError("backend restart schema is not the column suite's")
         frozen = dict(payload)
-        frozen["schema"] = "mpas-port.cuda-arwen-physics-v841/v2"
+        frozen["schema"] = "mpas-port.cuda-woof-physics-v841/v3"
         super().restore_restart_state(frozen)
 
     def _restart_identity(self) -> Mapping[str, Any]:

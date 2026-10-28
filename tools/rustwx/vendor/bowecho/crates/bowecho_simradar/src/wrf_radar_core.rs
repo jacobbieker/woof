@@ -167,7 +167,7 @@ fn property_tmatrix_ref_source(
 /// supercell), while the classic Stoelinga `dbz` (wrf-core `CALCDBZ`,
 /// fixed Marshall-Palmer intercepts) is what the community wrf-python/GR2
 /// pipeline renders. The choice is a per-import operator difference of roughly
-/// +10..+20 dB in those regions, not a rendering artifact.
+/// +10..+20 dB in those regions — not a rendering artifact.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReflectivityOperator {
@@ -176,7 +176,7 @@ pub enum ReflectivityOperator {
     #[default]
     ModelNative,
     /// Always compute `dbz` (wrf-core `CALCDBZ`, Stoelinga 2005 fixed
-    /// intercepts) (the community wrf-python/GR2 look) even when the file
+    /// intercepts) — the community wrf-python/GR2 look — even when the file
     /// carries `REFL_10CM`.
     ClassicStoelinga,
 }
@@ -406,7 +406,7 @@ impl ReflectivityOperator {
     }
 
     /// The source label stamped when this operator uses the computed `dbz`
-    /// (`CALCDBZ`) path: distinguishing a deliberate Stoelinga choice from a
+    /// (`CALCDBZ`) path — distinguishing a deliberate Stoelinga choice from a
     /// model-native fallback.
     pub fn computed_dbz_source(self) -> &'static str {
         match self {
@@ -433,14 +433,14 @@ pub fn planned_ref_source(
     }
 }
 
-/// Nyquist velocity (m/s) stamped on every radial when velocity folding is OFF:
-/// deliberately large so the native, forward-modelled Vr is treated as
+/// Nyquist velocity (m/s) stamped on every radial when velocity folding is OFF
+/// — deliberately large so the native, forward-modelled Vr is treated as
 /// already-unfolded TRUE velocity by the dealias/readout code (it never folds).
 /// This is the historical stamp the community WRF→GR2 script also implied by
 /// leaving the data unfolded.
 pub const UNFOLDED_NYQUIST_MPS: f32 = 320.0;
 
-/// Default FOLDING Nyquist (m/s) when the realistic-Nyquist option is enabled:
+/// Default FOLDING Nyquist (m/s) when the realistic-Nyquist option is enabled —
 /// a typical WSR-88D low-PRF Doppler Nyquist. Real VELocity Nyquists cluster
 /// around here (roughly 8–33 m/s depending on VCP/PRF).
 pub const DEFAULT_FOLD_NYQUIST_MPS: f32 = 25.0;
@@ -503,7 +503,7 @@ pub struct SyntheticRadarConfig {
     /// source cuts/rays/gates/times/moment availability verbatim and takes
     /// precedence over `scan_strategy`; it is not a VCP reconstruction.
     pub exact_replay_template: Option<Arc<ExactScanTemplate>>,
-    /// Site id stamped on the volume (drives the loop-engine cross-site guard,
+    /// Site id stamped on the volume (drives the loop-engine cross-site guard —
     /// every hour of one run must share it).
     pub site_id: String,
     pub site_name: Option<String>,
@@ -521,15 +521,15 @@ pub struct SyntheticRadarConfig {
     pub max_range_m: f64,
     /// Set the effective gate spacing equal to the WRF grid resolution (the
     /// file's `DX` global attribute, metres) instead of [`Self::gate_spacing_m`],
-    /// so a coarse grid is not oversampled, 250 m gates on a 3 km grid imply
+    /// so a coarse grid is not oversampled — 250 m gates on a 3 km grid imply
     /// ~12 redundant gates per model cell, more resolution than the model has.
     /// Resolved per file at build time by [`effective_gate_spacing`] and clamped
     /// to `[GRID_GATE_MIN_M, GRID_GATE_MAX_M]` so a garbage `DX` cannot produce an
     /// absurd gate count; a file with a missing/invalid `DX` falls back to
-    /// [`Self::gate_spacing_m`]. OFF by default: an OFF build uses the configured
+    /// [`Self::gate_spacing_m`]. OFF by default — an OFF build uses the configured
     /// gate spacing exactly as before (bit-identical to a build without this).
     pub match_gate_to_grid: bool,
-    /// Reflectivity floor (dBZ): gates below this (and their velocity) are
+    /// Reflectivity floor (dBZ): gates below this — and their velocity — are
     /// left NaN so clear air renders transparent, like a real scope.
     pub ref_floor_dbz: f32,
     /// The FOLDING Nyquist velocity (m/s). Used ONLY when [`Self::fold_velocity`]
@@ -543,8 +543,8 @@ pub struct SyntheticRadarConfig {
     pub nyquist_mps: f32,
     /// Fold the forward-modelled radial velocity like a real pulse-pair radar:
     /// alias every velocity gate into the [`Self::nyquist_mps`] co-interval so VEL
-    /// FOLDS (and the velocity dealiaser has genuine work, a practice ground on
-    /// known ground truth). OFF by default: the native Vr is the exact TRUE wind
+    /// FOLDS (and the velocity dealiaser has genuine work — a practice ground on
+    /// known ground truth). OFF by default — the native Vr is the exact TRUE wind
     /// projection and [`UNFOLDED_NYQUIST_MPS`] is stamped, so an OFF build is
     /// bit-identical to a build without the feature.
     pub fold_velocity: bool,
@@ -640,7 +640,7 @@ pub struct SyntheticRadarConfig {
     /// is bit-identical to a build without the feature.
     pub ref_gate_texture: bool,
     /// "Gate texture" on VELOCITY: a gentle ±0.5 m/s wobble on the forward-
-    /// modelled radial velocity. OFF by default and kept opt-in: the clean Vr
+    /// modelled radial velocity. OFF by default and kept opt-in — the clean Vr
     /// feeds the velocity dealias / GBVTD consumers downstream, and a noisy Vr
     /// would pollute them. Separate from [`Self::ref_gate_texture`] on purpose:
     /// reflectivity wants the speckle, velocity does not.
@@ -971,20 +971,20 @@ impl SyntheticRadarConfig {
     /// freshly-built volume replaces the stale one (rule (c), equal status +
     /// different path) and flows to the display.
     ///
-    /// Included, everything that alters a gate value or its position: the
+    /// Included — everything that alters a gate value or its position: the
     /// antenna placement (`site_id`, `site_lat_deg`, `site_lon_deg`,
     /// `antenna_msl_m`), the elevation ladder (which already encodes the
     /// optional 0.1° low tilt), `azimuth_count`, `gate_spacing_m`, `max_range_m`,
     /// `match_gate_to_grid` (the BOOL, not the resolved spacing: the effective
     /// spacing is derived from the file's `DX` at build time and the file is fixed
-    /// for a run, so the same file + bool always resolves to the same spacing,
+    /// for a run, so the same file + bool always resolves to the same spacing —
     /// hashing the bool is sufficient to force a rebuild when it toggles),
     /// `ref_floor_dbz`, `nyquist_mps`, `fold_velocity` (toggling folding
     /// re-aliases every velocity gate and re-stamps the Nyquist, so it must
     /// rebuild), `reflectivity_operator`, both gate-texture flags, and
     /// `clutter_intensity` (so moving the clutter slider rebuilds and replaces
     /// the stale volume on re-import). Deliberately EXCLUDED: `site_name` (a
-    /// label, never changes a sample).
+    /// label — never changes a sample).
     pub fn data_fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -1081,7 +1081,7 @@ impl SyntheticRadarConfig {
     }
 
     /// The Nyquist velocity (m/s) stamped on every radial of the built volume.
-    /// With folding ON it is the folding Nyquist [`Self::nyquist_mps`]: the
+    /// With folding ON it is the folding Nyquist [`Self::nyquist_mps`] — the
     /// truth the dealiaser/readout/fold-warnings must see. With folding OFF it is
     /// the historical [`UNFOLDED_NYQUIST_MPS`] (320), so the unfolded TRUE Vr is
     /// treated as already-dealiased (the dealiaser becomes a no-op because no
@@ -1359,8 +1359,8 @@ pub const GRID_GATE_MIN_M: f64 = 100.0;
 /// capped so a bogus attribute cannot collapse the scan to a handful of gates.
 pub const GRID_GATE_MAX_M: f64 = 10_000.0;
 
-/// The WRF `DX` (metres) if it is a usable grid resolution (finite and
-/// positive) else `None`. Shared by [`effective_gate_spacing`] and the import
+/// The WRF `DX` (metres) if it is a usable grid resolution — finite and
+/// positive — else `None`. Shared by [`effective_gate_spacing`] and the import
 /// note so both agree on whether the grid resolution was actually applied.
 fn valid_grid_dx(dx_m: Option<f64>) -> Option<f64> {
     dx_m.filter(|dx| dx.is_finite() && *dx > 0.0)
@@ -1459,7 +1459,7 @@ pub fn effective_gate_spacing(config: &SyntheticRadarConfig, dx_m: Option<f64>) 
 }
 
 /// Whether the effective gate spacing came from the grid `DX` (matching is on
-/// AND the file supplied a usable `DX`): drives the self-documenting import
+/// AND the file supplied a usable `DX`) — drives the self-documenting import
 /// note, distinguishing a genuine grid match from a matched-but-fell-back run.
 fn matched_grid_dx(config: &SyntheticRadarConfig, dx_m: Option<f64>) -> bool {
     config.match_gate_to_grid && valid_grid_dx(dx_m).is_some()
@@ -1478,7 +1478,7 @@ fn matched_grid_dx(config: &SyntheticRadarConfig, dx_m: Option<f64>) -> bool {
 /// sends it to `+nyquist`, while the half-open interval keeps it at `−nyquist`.
 ///
 /// A velocity ALREADY inside `[−nyquist, +nyquist)` is returned bit-for-bit
-/// unchanged: a real estimator aliases only out-of-Nyquist velocities, so
+/// unchanged — a real estimator aliases only out-of-Nyquist velocities, so
 /// in-Nyquist gates (clutter/near-zero returns, sub-Nyquist winds) are never even
 /// perturbed by float rounding. Only genuinely out-of-range gates take the wrap.
 ///
@@ -2005,12 +2005,12 @@ fn checked_property_tmatrix_build_remainder(
 ///
 /// Reflectivity: `REFL_10CM` (the model's own Thompson 10-cm reflectivity) when
 /// present and the operator is [`ReflectivityOperator::ModelNative`], else
-/// `wrf-core`'s `dbz` (`CALCDBZ`, Stoelinga 2005), the same diagnostic
+/// `wrf-core`'s `dbz` (`CALCDBZ`, Stoelinga 2005) — the same diagnostic
 /// BowEcho's composite reflectivity uses, so a synthetic scan co-locates with
 /// the model's own composite. [`ReflectivityOperator::ClassicStoelinga`] forces
 /// the `CALCDBZ` path even when the file carries `REFL_10CM`. Raw wrfout carries
 /// the hydrometeor mixing ratios `dbz` needs; a post-processed / climate wrfout
-/// may not: this returns an `Err` (empty/absent reflectivity) so the caller can
+/// may not — this returns an `Err` (empty/absent reflectivity) so the caller can
 /// warn rather than emit an all-NaN scan.
 pub fn read_wrf_radar_fields(
     file: &WrfFile,
@@ -2024,7 +2024,7 @@ pub fn read_wrf_radar_fields(
 /// can show "Reading …" instead of freezing.
 ///
 /// PERF: the four heavy 3-D fields (height, reflectivity, earth-relative winds,
-/// vertical velocity) are the whole cost of a synthetic scan, on a 250 m
+/// vertical velocity) are the whole cost of a synthetic scan — on a 250 m
 /// 800×800×79 wrfout the NetCDF decompress dominates (~7 s serial), while the
 /// polar sampling that follows is <0.1 s. Each is an independent variable, so
 /// they are read/decompressed on separate threads with `std::thread::scope`.
@@ -2032,7 +2032,7 @@ pub fn read_wrf_radar_fields(
 /// decompresses (the expensive part) without it, so the inflates overlap:
 /// wall time drops to the single longest field (~2.5–3 s here, ~2.5× faster).
 /// Each thread calls the exact same `getvar`/`read_var` entry points as before,
-/// so the sampled output is byte-for-byte unchanged: this is a speed change,
+/// so the sampled output is byte-for-byte unchanged — this is a speed change,
 /// not an accuracy change.
 pub fn read_wrf_radar_fields_reporting(
     file: &WrfFile,
@@ -2115,7 +2115,7 @@ fn read_wrf_radar_fields_reporting_inner(
     let (dbz, ref_source) = refl_res?;
     if require_native_reflectivity && dbz.iter().all(|value| !value.is_finite()) {
         return Err(format!(
-            "WRF reflectivity ({ref_source}) is entirely missing: is this a \
+            "WRF reflectivity ({ref_source}) is entirely missing — is this a \
              post-processed/climate wrfout without hydrometeor mixing ratios?"
         ));
     }
@@ -2127,7 +2127,7 @@ fn read_wrf_radar_fields_reporting_inner(
     let lon_f32 = to_f32(&lon);
     // Domain-bounded: a WRF grid's row/col perimeter IS its true data edge,
     // so gates past that edge (but still inside the rectangular lat/lon
-    // bbox) must sample nothing, without the bound, the LUT's hole-fill
+    // bbox) must sample nothing — without the bound, the LUT's hole-fill
     // dilation leaked nearest-edge values into a ~3-bin smeared ring around
     // the domain boundary.
     let lut = InverseLut::build_with_shape_domain_bounded(&lat_f32, &lon_f32, nx, ny)
@@ -5330,8 +5330,8 @@ fn build_cut(
                 };
                 // Reflectivity gate texture (default ON): perturb BEFORE the
                 // floor test so echo edges go ragged the way marginal-SNR gates
-                // do on a real scope. When off, `dbz` is `sample.dbz` untouched:
-                // the output stays bit-identical to a textureless build.
+                // do on a real scope. When off, `dbz` is `sample.dbz` untouched
+                // — the output stays bit-identical to a textureless build.
                 let intrinsic_dbz = z_to_dbz(sample.z_linear);
                 let mut intrinsic_zdr = f32::NAN;
                 let mut rho_hv = f32::NAN;
@@ -5586,7 +5586,7 @@ fn build_cut(
                 // Realistic Nyquist (opt-in): alias the true Vr into the folding
                 // co-interval, AFTER the clutter VEL replacement. Applied last so
                 // it folds exactly what the display will store. Clutter gates are
-                // ~0 ± 0.5 m/s (well inside any sane Nyquist) so folding leaves
+                // ~0 ± 0.5 m/s — well inside any sane Nyquist — so folding leaves
                 // them untouched. With folding OFF this branch never runs, so the
                 // output is bit-identical to a build without the feature.
                 if config.fold_velocity && vel_val.is_finite() {
@@ -6262,7 +6262,7 @@ fn normalize_intrinsic(
 
 /// Sample the 3-D model fields at (lat, lon, MSL height) by horizontal 2×2
 /// bilinear weights (over the curvilinear WRF grid) combined with a
-/// per-corner vertical bracket in MSL height, i.e. trilinear. Returns `None`
+/// per-corner vertical bracket in MSL height — i.e. trilinear. Returns `None`
 /// off the domain or when the height sits below terrain / above the model top
 /// at every contributing corner.
 fn sample_column(
@@ -6585,7 +6585,7 @@ fn lerp(a: f32, b: f32, t: f32) -> Option<f32> {
 // against real Level-II: reflectivity texture on the order of ±2 dB,
 // correlated over a few gates in range (the pulse volume smears neighbours)
 // plus a smaller fully independent per-gate jitter; velocity gets only a
-// gentle ±0.5 m/s wobble, pulse-pair Vr estimates are far smoother than
+// gentle ±0.5 m/s wobble — pulse-pair Vr estimates are far smoother than
 // reflectivity at decent SNR, and a noisy Vr would pollute the dealias/GBVTD
 // consumers downstream.
 
@@ -6602,7 +6602,7 @@ const TEXTURE_SALT_REF: u32 = 0x5265_6631; // "Ref1"
 const TEXTURE_SALT_REF_JITTER: u32 = 0x5265_664A; // "RefJ"
 const TEXTURE_SALT_VEL: u32 = 0x5665_6C31; // "Vel1"
 
-/// 32-bit avalanche mix (splitmix32 finalizer): platform-independent.
+/// 32-bit avalanche mix (splitmix32 finalizer) — platform-independent.
 fn texture_mix(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(0x7feb_352d);
@@ -6655,14 +6655,14 @@ fn vel_gate_texture_mps(tilt: usize, az: usize, gate: usize) -> f32 {
 // dialled by `SyntheticRadarConfig::clutter_intensity` (0 = off, 1 ≈ the script).
 //
 // Like the gate texture above, every draw is a pure hash of
-// (frame seed, tilt, azimuth, gate): deterministic, so a rebuilt frame is
+// (frame seed, tilt, azimuth, gate) — deterministic, so a rebuilt frame is
 // bit-identical and a loop never shimmers. UNLIKE the texture, the FRAME SEED
 // (site id + valid time) is folded in, so distinct forecast hours get distinct
 // clutter, reproducing the script's per-time-step variation without a live RNG.
 //
 // Antenna height: the script keys clutter on beam height AGL. We do not have a
 // per-gate terrain lookup inside the sampling loop, so we use the beam height
-// ABOVE THE ANTENNA as the AGL proxy: exact at the radar and a good
+// ABOVE THE ANTENNA as the AGL proxy — exact at the radar and a good
 // approximation within the 40 km clutter cap, where terrain relief is a
 // second-order effect on near-in ground return.
 
@@ -6679,11 +6679,11 @@ const CLUTTER_BASE_DBZ: f32 = 22.0;
 /// Multiplier applied inside a hotspot rectangle (the script's `*= 1.8`).
 const CLUTTER_HOTSPOT_BOOST: f32 = 1.8;
 
-const CLUTTER_SALT_ROLL: u32 = 0x436c_5250; // "ClRP", apply/skip roll
-const CLUTTER_SALT_NOISE: u32 = 0x436c_4e5a; // "ClNZ", dBZ noise
-const CLUTTER_SALT_TEXTURE: u32 = 0x436c_5458; // "ClTX", dBZ texture
-const CLUTTER_SALT_VEL: u32 = 0x436c_564c; // "ClVL", near-zero velocity jitter
-const CLUTTER_SALT_HOTSPOT: u32 = 0x436c_4853; // "ClHS", hotspot stream seed
+const CLUTTER_SALT_ROLL: u32 = 0x436c_5250; // "ClRP" — apply/skip roll
+const CLUTTER_SALT_NOISE: u32 = 0x436c_4e5a; // "ClNZ" — dBZ noise
+const CLUTTER_SALT_TEXTURE: u32 = 0x436c_5458; // "ClTX" — dBZ texture
+const CLUTTER_SALT_VEL: u32 = 0x436c_564c; // "ClVL" — near-zero velocity jitter
+const CLUTTER_SALT_HOTSPOT: u32 = 0x436c_4853; // "ClHS" — hotspot stream seed
 
 /// One deterministic seed per forecast frame: site id + valid-time seconds,
 /// avalanche-mixed. Folded into every clutter draw so the SAME hour rebuilds
@@ -6734,7 +6734,7 @@ impl SplitMix32 {
     }
 }
 
-/// A near-radar hotspot rectangle in (azimuth index, gate index) space: the
+/// A near-radar hotspot rectangle in (azimuth index, gate index) space — the
 /// script's `hotspot_mask[ray_min:ray_max, gate_min:gate_max]`.
 struct ClutterRect {
     ray_min: usize,
@@ -6789,7 +6789,7 @@ fn in_clutter_hotspot(hotspots: &[ClutterRect], az: usize, gate: usize) -> bool 
     hotspots.iter().any(|h| h.contains(az, gate))
 }
 
-/// A hashed uniform in [0, 1) from (frame seed, tilt, az, gate) + a salt: the
+/// A hashed uniform in [0, 1) from (frame seed, tilt, az, gate) + a salt — the
 /// parallel-safe per-gate analogue of [`texture_noise`], order-independent so it
 /// is identical whatever order rayon visits the radials in.
 fn clutter_unit(frame_seed: u32, tilt: usize, az: usize, gate: usize, salt: u32) -> f32 {
@@ -6851,7 +6851,7 @@ fn ground_clutter_dbz(
     }
 
     // Base ≈ 22·combined dBZ + range-dependent noise, clipped 5..35, plus a
-    // little texture, then scaled by the user amount so lower settings are
+    // little texture — then scaled by the user amount so lower settings are
     // dimmer as well as rarer.
     let noise_factor = 4.0 - 3.0 * tilt as f32 / 7.0;
     let noise = clutter_signed(frame_seed, tilt, az, gate, CLUTTER_SALT_NOISE) * noise_factor;

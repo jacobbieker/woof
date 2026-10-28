@@ -42,7 +42,7 @@ def test_the_controller_reads_the_refusal_sentence(tmp_path):
     from woof.hex.moving_run import route_refusal
 
     sentence = moving_route_refusal("same-host", {"WOOF_HEX_MOVING_CONTROL": "/c"})
-    (tmp_path / "forecast.log").write_text("ADMISSION ...\ngpuwm-hex: " + sentence + "\n")
+    (tmp_path / "forecast.log").write_text("ADMISSION ...\nwoof hex: " + sentence + "\n")
     assert route_refusal(tmp_path) == sentence
     (tmp_path / "forecast.log").write_text("woof hex: the forecast driver stopped with CUDADriverError\n")
     assert route_refusal(tmp_path) is None

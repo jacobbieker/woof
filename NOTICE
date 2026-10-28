@@ -1659,8 +1659,8 @@ carry the CUDA port of Noah-MP v5.0
 with it) or the tests and oracles that transcribe it (tests/noahmp_v842/,
 tests/urban_v842/). The list of withheld paths is tools/licence_holds.json
 (hold ucar-noahmp-v5). A private build that keeps the port also keeps
-UCAR's terms in full (licenses/LICENSE-Noah-MP-UCAR.txt) and the notices
-those terms require (licenses/NOTICE-Noah-MP-UCAR-private-builds.txt); in
+UCAR's terms in full (that build's LICENSE-Noah-MP-UCAR.txt) and the notices
+those terms require (its NOTICE-Noah-MP-UCAR-private-builds.txt); in
 such a build UCAR's terms, not Apache-2.0, govern that portion.
 
 No default runs Noah-MP v5.0: the MPAS suites default to Noah (section 3).
@@ -2059,3 +2059,40 @@ contains each staged asset's name, hash, origins, licences and full notice
 texts. It accompanies the public assets. Fortran runtimes and native
 resource ZIPs that carry them are excluded from this release's asset set.
 Noah-MP v5 and UGWP implementations are held out under sections 4 and 8.
+
+
+Licence texts the hex model's components ship, by their path in this tree:
+  licenses/LICENSE-AER-RRTMG-BSD-3-Clause-hex.txt
+  licenses/LICENSE-CORE-MATH-MIT-hex.txt
+  licenses/LICENSE-FDLIBM-SunPro-hex.txt
+  licenses/LICENSE-MPAS-BSD-3-Clause-hex.txt
+  licenses/LICENSE-WRF-public-domain-hex.txt
+  licenses/LICENSE-c-blosc-BSD-3-Clause.txt
+  licenses/s2s-rust-NOTICE.md
+  licenses/s2s-rust-autocfg-1.5.1-LICENSE-APACHE
+  licenses/s2s-rust-autocfg-1.5.1-LICENSE-MIT
+  licenses/s2s-rust-chrono-0.4.44-LICENSE.txt
+  licenses/s2s-rust-crossbeam-deque-0.8.8-LICENSE-APACHE
+  licenses/s2s-rust-crossbeam-deque-0.8.8-LICENSE-MIT
+  licenses/s2s-rust-crossbeam-epoch-0.9.21-LICENSE-APACHE
+  licenses/s2s-rust-crossbeam-epoch-0.9.21-LICENSE-MIT
+  licenses/s2s-rust-crossbeam-utils-0.8.23-LICENSE-APACHE
+  licenses/s2s-rust-crossbeam-utils-0.8.23-LICENSE-MIT
+  licenses/s2s-rust-either-1.19.0-LICENSE-APACHE
+  licenses/s2s-rust-either-1.19.0-LICENSE-MIT
+  licenses/s2s-rust-itoa-1.0.18-LICENSE-APACHE
+  licenses/s2s-rust-itoa-1.0.18-LICENSE-MIT
+  licenses/s2s-rust-memchr-2.8.3-COPYING
+  licenses/s2s-rust-memchr-2.8.3-LICENSE-MIT
+  licenses/s2s-rust-num-traits-0.2.19-LICENSE-APACHE
+  licenses/s2s-rust-num-traits-0.2.19-LICENSE-MIT
+  licenses/s2s-rust-rayon-1.10.0-LICENSE-APACHE
+  licenses/s2s-rust-rayon-1.10.0-LICENSE-MIT
+  licenses/s2s-rust-rayon-core-1.13.0-LICENSE-APACHE
+  licenses/s2s-rust-rayon-core-1.13.0-LICENSE-MIT
+  licenses/s2s-rust-ryu-1.0.23-LICENSE-APACHE
+  licenses/s2s-rust-ryu-1.0.23-LICENSE-BOOST
+  licenses/s2s-rust-serde-1.0.218-LICENSE-APACHE
+  licenses/s2s-rust-serde-1.0.218-LICENSE-MIT
+  licenses/s2s-rust-serde_json-1.0.140-LICENSE-APACHE
+  licenses/s2s-rust-serde_json-1.0.140-LICENSE-MIT

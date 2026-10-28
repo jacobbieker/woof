@@ -13,7 +13,7 @@ from pathlib import Path
 import runpy
 import sys
 
-source = Path(__file__).resolve().parents[1] / "src/hexcore/verify_mpas.py"
+source = Path(__file__).resolve().parents[1] / "../../woof/hex/verify_mpas.py"
 destination = Path(os.environ["MPAS_VERIFY_TRACE"])
 arcs = set()
 previous = {}
@@ -41,7 +41,7 @@ if sys.argv[1:3] != ["-m", "woof.hex.cli"]:
 sys.argv = sys.argv[2:]
 sys.settrace(observe)
 try:
-    runpy.run_module("hexcore.cli", run_name="__main__", alter_sys=True)
+    runpy.run_module("woof.hex.cli", run_name="__main__", alter_sys=True)
 finally:
     sys.settrace(None)
     sha = hashlib.sha256(source.read_bytes()).hexdigest()

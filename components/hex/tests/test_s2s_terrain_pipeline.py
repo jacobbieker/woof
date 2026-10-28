@@ -14,7 +14,7 @@ import pytest
 
 
 def load(monkeypatch):
-    root = Path(__file__).parents[1] / "src/hexcore"
+    root = Path(__file__).parents[1] / "../../woof/hex"
     package = types.ModuleType("terrain_contract")
     package.__path__ = [str(root)]
     monkeypatch.setitem(sys.modules, package.__name__, package)

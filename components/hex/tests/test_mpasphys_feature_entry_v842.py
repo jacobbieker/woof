@@ -55,8 +55,8 @@ def test_feature_entry_preserves_clock_numerics_and_stream_owner(
         dispatched.append((args, kwargs))
         return 17
 
-    monkeypatch.setattr('hexcore.licence_gate.native_library_refusal', lambda *args: None)
-    monkeypatch.setattr('hexcore.fullstep_lts_admission.moving_region_requested', lambda: False)
+    monkeypatch.setattr('woof.hex.licence_gate.native_library_refusal', lambda *args: None)
+    monkeypatch.setattr('woof.hex.fullstep_lts_admission.moving_region_requested', lambda: False)
     monkeypatch.setattr(door, 'load_table', lambda: {'mpasphys_v842': {}})
     monkeypatch.setattr(door, 'decode_registry_pools', decode)
     monkeypatch.setattr(door, 'read_streams', lambda *args, **kwargs: ())

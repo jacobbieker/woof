@@ -23,7 +23,7 @@ import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-MARKER = '\nCOUPLED HYDRO OUTPUT LIBRARY (rw_nextgen_output): LOCKED DEPENDENCY NOTICES\n'
+MARKER = '\nCOUPLED HYDRO OUTPUT LIBRARY (rw_nextgen_output) \u2014 LOCKED DEPENDENCY NOTICES\n'
 END = '\nEND COUPLED HYDRO OUTPUT LIBRARY DEPENDENCY NOTICES\n'
 COPIES = ('licenses/THIRD-PARTY-LICENSES-bridge-binaries.txt',
           'tools/rustwx/assets/basemap/THIRD-PARTY-LICENSES.txt')

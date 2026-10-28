@@ -52,7 +52,7 @@ def main():
     cases = sorted({name.split('/')[0] for name in records})
     assert len(cases) == 181, 'requires the entire authentic native driver fixture'
     spec = importlib.util.spec_from_file_location(
-        'hexcore.mpasphys.enabled_sw_radius_candidate', args.module.resolve())
+        'woof.hex.mpasphys.enabled_sw_radius_candidate', args.module.resolve())
     port = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = port
     spec.loader.exec_module(port)

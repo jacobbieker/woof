@@ -66,7 +66,7 @@ def test_broken_callback_is_selected_at_first_native_step():
 def proposal():
     path=os.environ.get('RRFS_INTEGRATOR_FORECAST_PROPOSAL')
     if not path:pytest.skip('explicit scratch proposal required')
-    return load_module('hexcore.mpasphys.rrfs_forecast_proposal',Path(path))
+    return load_module('woof.hex.mpasphys.rrfs_forecast_proposal',Path(path))
 
 
 @pytest.mark.parametrize('suite',['hrrrv5','rrfs_mesoscale_reference','rrfs_convection_permitting','rrfs_none'])
@@ -120,7 +120,7 @@ def test_stream_metadata_preserves_native_duplicate_attribute_semantics(fork_nat
     from woof.hex.mpasphys.rrfs.driver_rrfs import stream_tree
     import xml.etree.ElementTree as ET
     kind,path=fork_native
-    monkeypatch.setattr('hexcore.mpasphys.native_backend.NativePhysics',kind)
+    monkeypatch.setattr('woof.hex.mpasphys.native_backend.NativePhysics',kind)
     decks=sorted(site_support.rrfs_reference('decks','RRFS_PUBLISHED_DECK_ROOT',vendor='rrfs-decks').glob('*/*/streams.atmosphere'))
     if not decks:pytest.skip('r0 decks not published')
     checked=0
@@ -185,7 +185,7 @@ def test_second_ring_adapter_retains_native_order_and_dummy_storage(fork_native,
     import numpy as np
     from woof.hex.mpasphys.rrfs.driver_rrfs import initialize_native_core
     from woof.hex.mpasphys.session_v842 import NativePhysicsSession
-    provider = ModuleType('hexcore.core_rrfs')
+    provider = ModuleType('woof.hex.core_rrfs')
     counts = np.array([2, 0, 1], dtype=np.int32)
     neighbors = np.array([[2, 1, -1], [-1, -1, -1], [0, -1, -1]], dtype=np.int32)
     calls = []
@@ -193,7 +193,7 @@ def test_second_ring_adapter_retains_native_order_and_dummy_storage(fork_native,
         calls.append((mesh, cell_solve_count))
         return counts, neighbors
     provider.initialize_second_ring_rrfs = bridge
-    monkeypatch.setitem(sys.modules, 'hexcore.core_rrfs', provider)
+    monkeypatch.setitem(sys.modules, 'woof.hex.core_rrfs', provider)
     kind, path = fork_native
     with kind(path, test_only=True, pin_set='rrfs') as native:
         native.pool('mesh')
@@ -224,9 +224,9 @@ def test_complete_hydrated_native_session_selects_fork_provider(fork_native, sui
     if not trial:
         pytest.skip('explicit complete decoded-pool/session proposal fixture required')
     trial = Path(trial)
-    pool_provider = load_module('hexcore.mpasphys.rrfs_pool_session_trial',
+    pool_provider = load_module('woof.hex.mpasphys.rrfs_pool_session_trial',
         trial / 'tree/src/hexcore/mpasphys/pool_v842.py')
-    session_provider = load_module('hexcore.mpasphys.rrfs_session_trial',
+    session_provider = load_module('woof.hex.mpasphys.rrfs_session_trial',
         trial / 'tree/src/hexcore/mpasphys/session_v842.py')
     text = (trial / (suite + '-namelist.atmosphere')).read_text()
     config = resolve_namelist(text)

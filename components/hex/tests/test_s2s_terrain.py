@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 spec = importlib.util.spec_from_file_location("s2s_terrain",
-    Path(__file__).parents[1] / "src/hexcore/s2s_terrain.py")
+    Path(__file__).parents[1] / "../../woof/hex/s2s_terrain.py")
 terrain = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(terrain)
 

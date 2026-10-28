@@ -1009,7 +1009,7 @@ def run_ensemble(args):
             residents = slots.count(card) if slots else 1
             env = dict(os.environ, CUDA_VISIBLE_DEVICES=visible[card],
                        GPU_MUTEX_CARDS=os.environ["GPU_MUTEX_CARDS"].replace(",", " ").split()[card],
-                       GPUWM_HEX_MESH_ROWS=assets["mesh_rows"])
+                       WOOF_HEX_MESH_ROWS=assets["mesh_rows"])
             # Respect a caller's warm caches; a fresh root would recompile and
             # re-prepare the 30 km host state once per member.
             env.setdefault("WOOF_HEX_PREP_CACHE", str(output.parent / "hostprep-cache"))

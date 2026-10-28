@@ -495,7 +495,10 @@ def test_every_bundled_artifact_entry_point_references_the_stamp():
 
 def test_every_bridge_workspace_build_script_injects_the_revision():
     _require_bridge_sources()
+    from _woof_snapshot import left_out
     for workspace, scripts in _STAMP_BUILDS.items():
+        if left_out(workspace):
+            continue
         for entry in scripts:
             relative, variable = (entry if isinstance(entry, tuple) else
                                   (entry, "GPUWM_BRIDGE_SOURCE_REV"))

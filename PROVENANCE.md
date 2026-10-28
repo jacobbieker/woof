@@ -192,21 +192,23 @@ bytes are outside the numerical oracle.
   `-ftz=true` to whatever the caller passed, at
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
-  The inventory records 12 distinct caller-supplied option tuples across the
-  132 compile sites in the shipped package, each listed here with a site
+  The inventory records 14 distinct caller-supplied option tuples across the
+  185 compile sites in the shipped package, each listed here with a site
   that supplies it:
   - no caller options -- `woof/core/attribute_tracking.py:99`
-    (xp.ElementwiseKernel), and 87 other site(s)
+    (xp.ElementwiseKernel), and 135 other site(s)
   - `-std=c++17` -- `woof/core/acoustic_fusion.py:403` (cp.RawModule), and
     13 other site(s)
   - `--std=c++17` -- `woof/ensemble/batch_perturbation.py:51`
-    (xp.RawModule), and 9 other site(s)
+    (xp.RawModule), and 10 other site(s)
   - `-std=c++17` `--ftz=false` -- `woof/core/chem_plumerise_cache.py:37`
     (compiler.compile_using_nvrtc), and 5 other site(s)
-  - `--std=c++11` -- `woof/hydro/module_history.py:72` (cp.RawModule), and
-    2 other site(s)
-  - `-fmad=false` -- `woof/core/dycore.py:302` (cp.ElementwiseKernel), and
-    2 other site(s)
+  - `--std=c++11` -- `woof/hex/cuda_courant_fullstep_lts.py:52`
+    (cp.RawKernel), and 3 other site(s)
+  - `-fmad=false` -- `woof/core/dycore.py:302` (cp.ElementwiseKernel), and 2
+    other site(s)
+  - `--fmad=false` -- `woof/hex/moving_vertical_cuda.py:19` (cp.RawKernel),
+    and 1 other site(s)
   - `-std=c++17` `--fmad=false` -- `woof/core/kernels/__init__.py:689`
     (cp.RawModule), and 1 other site(s)
   - `-std=c++17` `--fmad=false` `--ftz=false` --
@@ -220,6 +222,10 @@ bytes are outside the numerical oracle.
     `woof/core/kernels/__init__.py:805` (compiler.compile_using_nvrtc)
   - `-std=c++17` `-fmad=false` -- `woof/core/nest_interp.py:261`
     (cp.RawModule)
+  - a target flag built from the device architecture at run time a target
+    flag built from the device architecture at run time --
+    `woof/hex/mpasphys/surface_update_v842.py:148`
+    (compiler.compile_using_nvrtc)
   `R5` and `R1` are kernels inside ONE compiled object -- same device, same
   flags, one compile -- and they did not measure alike, so on this device
   the outcome follows the instruction the compiler emitted rather than the

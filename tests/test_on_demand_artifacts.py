@@ -68,8 +68,10 @@ def test_restored_tools_and_default_paths_are_carried():
         assert artifact.kind == "executable", artifact.name
         assert not artifact.vendored, artifact.name
         assert artifact.name not in bridges.BRIDGE_ENV, artifact.name
-    for default in ("rw_wrfbatch", "rw_netcdf", "netcdf_writer", "gpuwm_mapped_engine",
-                    "rw_fetch", "static_fields", "rw_nexrad", "arwen-tui"):
+    from _woof_snapshot import without_left_out_artifacts
+    for default in sorted(without_left_out_artifacts(
+            ("rw_wrfbatch", "rw_netcdf", "netcdf_writer", "gpuwm_mapped_engine",
+             "rw_fetch", "static_fields", "rw_nexrad", "arwen-tui"))):
         assert default in {a.name for a in bridge_assets.wheel_artifacts()}, default
 
 

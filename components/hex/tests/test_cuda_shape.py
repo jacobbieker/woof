@@ -42,7 +42,7 @@ def test_cache_receives_distinct_source_and_module_key():
 ])
 def test_real_signatures_body_unchanged(unit,name,dims):
     import importlib,re
-    source=importlib.import_module('hexcore.'+unit)._CUDA_SOURCE
+    source=importlib.import_module('woof.hex.'+unit)._CUDA_SOURCE
     code,_=specialize(source,name,dims)
     # Undo only the explicit signature renames and inserted declarations.
     for dimension,value in dims:
@@ -60,7 +60,7 @@ def test_module_dispatch_binds_shapes_once():
     for unit,name in [('cuda_acoustic_v841','acoustic_ru_v841'),
                       ('cuda_dynamics_v841','vector_momentum_hoist_v841_f32'),
                       ('cuda_transport_v841','transport_edge_values_hoist_v841')]:
-        module=importlib.import_module('hexcore.'+unit);cache=Cache()
+        module=importlib.import_module('woof.hex.'+unit);cache=Cache()
         generic=module._kernel(name,cache)
         first=module._kernel(name,cache,(('nlev',55),))
         assert module._kernel(name,cache,(('nlev',55),)) is first

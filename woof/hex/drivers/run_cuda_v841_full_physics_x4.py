@@ -255,7 +255,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
     "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
     "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "4533b839e4292e22c20e920b4738301dcd3edc4657efc7b0363a342eb92fc36e",
+    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "8fd83d65f51f1e893285643260e81b2bf8b8a8668bb5b52cccc3c6a734530780",
     # Native upper damping: Rust and CUDA match compiled source blocks.
     "src/hexcore/native/upper_damping.rs": "5483b2c1e7da45317ffe4213c5879b583070d9e28d591ec52a9c697a052e81f1",
     "src/hexcore/upper_damping_v841.py": "947f477d5f56b41d95fb5a0b92adb21d68be95b5fac19ba524181cb373710860",
@@ -459,7 +459,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # person).  No code line differs from the copy the H1 identities above
     # ran on.  No card run for this merge.
     "src/hexcore/cuda_driver.py": (
-        "726c3353f22e933ecb802aa3bac04d175aac75e2527060f5a4b64e1b8688635d"
+        "462c3834f24e1467a6db108baa290c089293e355104a71c02c23e8980e398fe6"
     ),
     # THE BREAKAGE THIS PREVENTS: cuda_driver.py now executes host
     # preparation through woof.hex.prep_cache.  Unpinned, an edit to the key

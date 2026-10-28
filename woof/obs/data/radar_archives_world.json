@@ -68,7 +68,7 @@
       ],
       "file_name": "KMA_{site}_{t:%Y%m%d%H%M}.uf",
       "auth": {
-        "env": "GPUWM_KMA_AUTHKEY",
+        "env": "WOOF_KMA_AUTHKEY",
         "param": "authKey",
         "how": "create a free account at https://apihub.kma.go.kr, apply for the radar raw-data API (rdr_file_down.php, rdr=UF) on the radar data page, and put the issued authKey in this variable. Without it the API answers HTTP 401 ('not a valid auth key'), measured 2026-10-16."
       },

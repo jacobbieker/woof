@@ -209,7 +209,10 @@ def test_spp_specializations_leave_default_compiler_sources_frozen():
             # RE-PINNED for 2.9.1 (the WRF exact chain): float32-widened GFS
             # constants, the PBL closure bound, the lower-face W and the FMA exp
             # form are default-on GF corrections. Previously ada52295.
-            "gf": "b5b0d38cd579ceb07253858607d743fe1b6652c4178f3d098d7fa423158f3af9",
+            # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
+            # labels), proven equal with comments stripped; the preprocessor drops
+            # comments, so the compiled binary does not move.
+            "gf": "def595abad6b216b052a38c05bceab230fbe9018467774b92adfc354e035cb3f",
             # Accepted staging adds source-selected GSD41 entry points.
             # This pins the actual default compiler string and checks that
             # constructing an SPP specialization leaves that string intact.

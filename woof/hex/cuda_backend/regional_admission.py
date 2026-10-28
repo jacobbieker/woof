@@ -695,7 +695,7 @@ class RegionalContract:
 #: changed. Re-derived by tools/repin_source_tables.py; not a new regional
 #: forecast mint, archived scope unchanged.
 MINTED_KERNEL_SET_SHA256 = (
-    "03c5aeb3b03ed873ca84007132b2eb686309e2a4f9ce82deb013b1d0f094e2dd"
+    "65c1eadf8eeb5b40f0c8a1088b48d3fb29f1329ac3b4112deb69dc23ae760178"
 )
 
 _DRY_MINT_CAVEAT = (

@@ -449,6 +449,11 @@ def inline_kernel_offenders(root) -> list[str]:
         kernel_dir(root) / "common.cu")
     offenders = []
     for path in sorted((root / "woof").rglob("*.py")):
+        if path.relative_to(root).parts[:2] == ("woof", "hex"):
+            # Recast WOOF: the hex model folded in transcribes MPAS-A's own
+            # divisions under its own numerics and bitwise gate; A146 is the
+            # regional engine's rule.
+            continue
         text = path.read_text(encoding="utf-8")
         if "__global__" not in text and "__device__" not in text \
                 and not any(f in text for f in _KERNEL_FACTORIES):

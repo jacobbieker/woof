@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-REPOSITORY_URL = "https://github.com/FahrenheitResearch/arwen"
+REPOSITORY_URL = "https://github.com/recastsystems/woof"
 
 _RELEASE = re.compile(r"\d+\.\d+\.\d+")
 

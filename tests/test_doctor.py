@@ -148,7 +148,7 @@ def test_doctor_cli_exit_codes_and_report_shape(monkeypatch, capsys,
     else:
         # Line 1 is the install headline (which copy of woof produced
         # this); the report's own banner follows it.
-        assert "\ngpuwm doctor\n" in out
+        assert "\nwoof doctor\n" in out
     assert rc_healthy_or_not in (0, 1)
 
     monkeypatch.setattr(doctor, "find_spec", lambda name: None)
@@ -852,7 +852,8 @@ def test_a_bridge_that_predates_the_contract_is_missing_not_ok(
     # The isobaric-height reader resolves through its own ladder
     # (woof.isobaric_bridge, the obs-regrid one) for the MPAS binaries'
     # reason: it builds in `tools/rustwx`, not the grib1_bridge crate.
-    assert extra == {"region_global_dealias", "netcdf_writer",
+    from _woof_snapshot import without_left_out_artifacts
+    assert extra == without_left_out_artifacts({"region_global_dealias", "netcdf_writer",
                      "gpuwm_preprocess_cpu",
                      "gpuwm_mapped_engine", "static_fields", "obs_regrid", "obs_score",
                      "rw_isobaric", "rw_superob",
@@ -899,7 +900,7 @@ def test_a_bridge_that_predates_the_contract_is_missing_not_ok(
                      # cap-slab-ocean) and rw_bathy (woof.ocean.surge.driver,
                      # its own tools/rw-bathy workspace, cap-surge).
                      "rw_ice_verify", "rw_fire_indices", "rw_ocean", "rw_ocean_verify",
-                     "rw_bathy"}
+                     "rw_bathy"})
 
 
 def test_the_decoder_door_gates_the_contract_for_every_caller(
@@ -2907,7 +2908,7 @@ def _resolve_extra(extras: dict[str, list[str]], name: str) -> set[str]:
         seen.add(key)
         assert key in extras, f"pyproject declares no [{key}] extra"
         for dep in extras[key]:
-            inner = re.fullmatch(r"woof\[([^\]]+)\]", dep.strip())
+            inner = re.fullmatch(r"recast-woof\[([^\]]+)\]", dep.strip())
             if inner:
                 stack.extend(part.strip()
                              for part in inner.group(1).split(","))

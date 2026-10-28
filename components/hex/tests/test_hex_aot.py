@@ -19,7 +19,7 @@ def row(arch="sm_120"):
 
 
 def pack(tmp_path, monkeypatch, rows=None):
-    write = pytest.importorskip("hexcore.kernel_pack").write
+    write = pytest.importorskip("woof.hex.kernel_pack").write
     monkeypatch.delenv("WOOF_HEX_AOT", raising=False)
     path = tmp_path / "pack.json"
     write(path, {"compiler": "test"}, rows or [row()])
@@ -147,7 +147,7 @@ def test_build_inventory_contains_production_and_both_architectures():
     # ignore that ABI while retaining every caller's generic carrier.
     assert {f"hexcore.cuda_{family}_v841" for family in
             ("acoustic", "dynamics", "transport", "horizontal")} <= modules
-    assert "hexcore.cuda_shape" not in modules
+    assert "woof.hex.cuda_shape" not in modules
     assert all(r["source_sha256"] == source_hash(r["source"]) for r in rows)
 
 

@@ -1894,7 +1894,7 @@
           "native-cpu",
           "hex-cuda"
         ],
-        "module": "hexcore.mpasphys.surface_update_v842",
+        "module": "woof.hex.mpasphys.surface_update_v842",
         "operations": [
           "physics_update_surface",
           "physics_update_sst",
@@ -2890,8 +2890,8 @@
     },
     "backend_namelist_group": "hex_mpasphys",
     "backend": "mpasphys",
-    "driver_module": "hexcore.mpasphys.rrfs.driver_rrfs",
-    "native_core_module": "hexcore.mpasphys.rrfs.driver_rrfs",
+    "driver_module": "woof.hex.mpasphys.rrfs.driver_rrfs",
+    "native_core_module": "woof.hex.mpasphys.rrfs.driver_rrfs",
     "dycore_path": "v8.3.1-noaa",
     "pin_set": "rrfs",
     "model_commit": "1d6e370e7b43a332074809f170532a216c2212fb",
@@ -5108,13 +5108,13 @@
       "src/core_atmosphere/physics/mpas_atmphys_o3climatology.F": "adbd1e35946cdb99c9b4da7c4be608a10b8bd45cff68e4bc1373f3afcf16c80c",
       "src/core_atmosphere/physics/mpas_atmphys_driver_seaice.F": "d3c4d279aff5e2ec15770f9dfb8532a5beb0d3e0ae3cb22a543838e4dedbd31d"
     },
-    "streams_parser": "hexcore.mpasphys.rrfs.driver_rrfs:stream_tree",
-    "native_registry_prepare": "hexcore.mpasphys.rrfs.driver_rrfs:prepare_native_registry",
-    "native_layout_prepare": "hexcore.mpasphys.rrfs.driver_rrfs:prepare_native_layout",
-    "native_table_selector": "hexcore.mpasphys.rrfs.driver_rrfs:native_table_inputs",
+    "streams_parser": "woof.hex.mpasphys.rrfs.driver_rrfs:stream_tree",
+    "native_registry_prepare": "woof.hex.mpasphys.rrfs.driver_rrfs:prepare_native_registry",
+    "native_layout_prepare": "woof.hex.mpasphys.rrfs.driver_rrfs:prepare_native_layout",
+    "native_table_selector": "woof.hex.mpasphys.rrfs.driver_rrfs:native_table_inputs",
     "native_table_override_keyword": "override_roots",
-    "native_table_stream_selector": "hexcore.mpasphys.rrfs.driver_rrfs:native_table_stream_inputs",
-    "native_initialization_namelist": "hexcore.mpasphys.rrfs.driver_rrfs:stage_native_initialization_namelist",
+    "native_table_stream_selector": "woof.hex.mpasphys.rrfs.driver_rrfs:native_table_stream_inputs",
+    "native_initialization_namelist": "woof.hex.mpasphys.rrfs.driver_rrfs:stage_native_initialization_namelist",
     "native_table_streams": [
       {
         "stream": "ugwp_ngw_in",

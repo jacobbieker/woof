@@ -19,7 +19,7 @@ def test_every_output_word_equals_the_unmodified_generation_oracle(tmp_path,bank
         pytest.skip("set THOMPSON_GENERATION_ORACLE_LANE to the owned source-oracle and Rust column bank")
     root = Path(__file__).resolve().parents[1]
     source = Path(lane)/"columns"/(bank+"-"+kind+".npz")
-    env = dict(os.environ,GPUWM_THOMPSON_GENERATION_TABLE_ROOT=str(Path(lane)/"oracle44/run"))
+    env = dict(os.environ,WOOF_THOMPSON_GENERATION_TABLE_ROOT=str(Path(lane)/"oracle44/run"))
     env["GPUWM_WRF_EXACT"] = "1" if strict else "0"
     command = [sys.executable,str(root/"tools/thompson_generation_oracle/benchmark_columns.py"),"compare",str(source),str(tmp_path),"--lane",lane,"--version","wrf_44"]
     subprocess.run(command,check=True,env=env)

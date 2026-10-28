@@ -35,7 +35,7 @@ from woof.hex.driver import DryDycoreConfig
 from woof.hex.errors import ConfigurationRefusal
 
 TREE = pathlib.Path(__file__).resolve().parents[1]
-PACKAGE = TREE / "src" / "hexcore"
+PACKAGE = TREE / ".." / ".." / "woof" / "hex"
 RULER_TOOL = TREE / "tools" / "run_cuda_v841_numeric_ruler.py"
 
 V841_LANES = (

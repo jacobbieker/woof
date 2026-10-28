@@ -206,7 +206,7 @@ def test_stopping_a_child_stops_its_whole_tree(tmp_path):
 
 
 def test_no_moving_file_is_bound_to_a_host_queue_or_work_root():
-    files = sorted((TREE / "src" / "hexcore").glob("moving_*.py")) + [TREE / "src" / "hexcore" / "storm_tracker.py"]
+    files = sorted((TREE / ".." / ".." / "woof" / "hex").glob("moving_*.py")) + [TREE / ".." / ".." / "woof" / "hex" / "storm_tracker.py"]
     files += sorted((TREE / "tools" / "moving48").glob("*"))
     files += [TREE / "tools" / "run_moving_patch.py"]
     files += sorted((TREE / "tools" / "moving_jolt").glob("*"))

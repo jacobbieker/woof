@@ -80,7 +80,7 @@ CODE_SUFFIXES = frozenset({
 #: package's package-data (tests/test_package_data_coverage.py holds every
 #: data file under gpuwm/ declared), the data companion's ``data/**/*`` and
 #: the repository configs (``configs = ["**/*"]``).
-WHEEL_DATA_SUBTREES = ("gpuwm/", "recast-woof-data/woof_data/", "configs/")
+WHEEL_DATA_SUBTREES = ("woof/", "recast-woof-data/woof_data/", "configs/")
 
 #: The other package-data declarations, as tree patterns: the tools package's
 #: ``release/*.json``, the default-on hydro door's three source tables
@@ -97,7 +97,7 @@ WHEEL_DATA_PATTERNS = ("tools/release/*.json",
 #: ``tilestream*``, ``configs*``, ``mpas_cycle_bridge*``) and the data
 #: companion's package.  Read whole: a development module the build leaves
 #: out (tilestream's ``test_*``) is still in the public tree.
-WHEEL_CODE_SUBTREES = ("gpuwm/", "recast-woof-data/woof_data/", "configs/",
+WHEEL_CODE_SUBTREES = ("woof/", "recast-woof-data/woof_data/", "configs/",
                        "tilestream/", "mpas_cycle_bridge/")
 
 #: The top-level-only packages the root pyproject includes (``tools`` and

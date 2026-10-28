@@ -21,7 +21,7 @@ subprocess.run([str(args.fixture), str(args.out / 'fixture')], check=True)
 os.environ['WOOF_HEX_RW_MPAS_STREAM'] = str((args.o1 / 'rw_mpas_stream').resolve())
 for name in ('streams_v842', 'restart_v842'):
     path = args.o1 / 'hexcore' / (name + '.py')
-    spec = importlib.util.spec_from_file_location('hexcore.' + name, path)
+    spec = importlib.util.spec_from_file_location('woof.hex.' + name, path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)

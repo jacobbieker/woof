@@ -10,7 +10,7 @@ fluxes at 6 and 7, stage duration at 8), then re-pin.
 import hashlib
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "hexcore"
+SRC = Path(__file__).resolve().parents[1] / ".." / ".." / "woof" / "hex"
 
 
 def test_the_shadow_pin_is_the_shipped_driver():

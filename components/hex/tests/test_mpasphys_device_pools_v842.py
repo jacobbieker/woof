@@ -13,7 +13,7 @@ from woof.hex.mpasphys.device_pools_v842 import NativeDevicePoolViews, register_
 def host_only_memory_release(monkeypatch):
     # These ABI checks use NumPy stand-ins. Pool-release hooks otherwise import
     # CuPy even though no test allocates a device array or claims CUDA coverage.
-    monkeypatch.setattr('hexcore.mpasphys.device_pools_v842.phase_release',
+    monkeypatch.setattr('woof.hex.mpasphys.device_pools_v842.phase_release',
                         lambda *args, **kwargs: nullcontext())
 
 
@@ -88,7 +88,7 @@ def test_native_scalar_and_constant_aliases_keep_rkind():
 
 
 def test_table_selected_callback_commits_through_real_registry(monkeypatch):
-    p=provider();module=ModuleType('hexcore.mpasphys.oml_v842');seen=[]
+    p=provider();module=ModuleType('woof.hex.mpasphys.oml_v842');seen=[]
     def callback(c):
         seen.append(c.scheme);c.pools['diag']['aliased'][0]=np.float32(11)
     module.launch_slot=callback;monkeypatch.setitem(sys.modules,module.__name__,module)
@@ -108,7 +108,7 @@ def test_missing_selected_module_or_descriptor_is_explicit(monkeypatch):
 @pytest.mark.parametrize('scheme', ['sf_monin_obukhov', 'sf_monin_obukhov_rev'])
 def test_selected_mm5_diagnostics_read_committed_post_surface_words(monkeypatch,scheme):
     p=provider();p.session.hooks=SimpleNamespace(external={})
-    module=ModuleType('hexcore.mpasphys.sfclay_mm5_v842');events=[]
+    module=ModuleType('woof.hex.mpasphys.sfclay_mm5_v842');events=[]
     module.bind_native_pools=lambda owner,c:owner
     def surface(c):
         c.pools['diag']['aliased'][0]=np.float32(11)
@@ -176,7 +176,7 @@ def test_descriptor_installs_persistent_resources_before_binding(monkeypatch,tmp
     def ensure(*,landuse=None,cache=None,include_mynnedmf=True):
         assert not include_mynnedmf
         built.append(landuse);return path
-    monkeypatch.setattr('hexcore.mpasphys.resources_build.ensure_packet',ensure)
+    monkeypatch.setattr('woof.hex.mpasphys.resources_build.ensure_packet',ensure)
     register_cuda_slots(SlotRegistry(),config,p)
     assert built==[None] and events==[('resources',{'packet':'certified'})]
     events.clear()

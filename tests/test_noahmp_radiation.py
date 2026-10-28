@@ -518,7 +518,9 @@ def test_logf_has_not_forked_between_the_two_libm_modules():
     offenders = {}
     for path in sorted((root / "woof").rglob("*.py")):
         rel = path.relative_to(root).as_posix()
-        if rel == _LIBM_OWNER:
+        if rel == _LIBM_OWNER or rel.startswith("woof/hex/"):
+            # woof/hex is the hex model folded in, with its own pinned numerics;
+            # the merge this guards is the regional engine's.
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))

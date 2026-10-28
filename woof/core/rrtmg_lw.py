@@ -3482,7 +3482,7 @@ def _gpu_source():
 
 
 # Preserve the historical twin header as part of the compiled source identity.
-_LW_COALESCED_HEADER = """// GENERATED from rrtmg_lw_chain.cu by woof.core.rrtmg_lw._lw_coalesced_source
+_LW_COALESCED_HEADER = """// GENERATED from rrtmg_lw_chain.cu by gpuwm.core.rrtmg_lw._lw_coalesced_source
 // (tests/test_rrtmg_lw_speed_identity.py fails if this file and the generator
 // disagree): the address-only twin of the chain kernels the BATCHED LW engine
 // launches.  Every per-g-point slab (cloud inputs, odcld, efclfrac and the
@@ -3493,7 +3493,7 @@ _LW_COALESCED_HEADER = """// GENERATED from rrtmg_lw_chain.cu by woof.core.rrtmg
 // arithmetic statement is the same text in the same order.  The unsuffixed
 // kernels stay for the single-column entry points and their oracle gates.
 // Regenerate with:
-//   python -c "from woof.core import rrtmg_lw as m; m._write_coalesced_twin()"
+//   python -c "from gpuwm.core import rrtmg_lw as m; m._write_coalesced_twin()"
 
 """
 def _march_inline_source(coalesced):

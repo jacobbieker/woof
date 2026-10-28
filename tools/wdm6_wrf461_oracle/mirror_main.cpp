@@ -9,7 +9,7 @@
 // through gpuwm.core.wdm6.launch_wdm6 (run_woof.py).  Reflectivity is not
 // mirrored and is written as zero.
 #define WDM6_CPU_MIRROR
-#include "gpuwm/core/kernels/wdm6.cu"
+#include "woof/core/kernels/wdm6.cu"
 
 #include <cstdio>
 #include <cstdlib>

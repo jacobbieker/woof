@@ -170,7 +170,7 @@ def main():
                 script=('import json; from pathlib import Path; '
                         'from woof.hex.mpasphys.resources_build import build_packet; '
                         f'print(json.dumps(build_packet(Path({str(a.cache)!r}),image_arch={arch!r})))')
-                env=dict(os.environ,GPUWM_HEX_NUMERICS=mode)
+                env=dict(os.environ,WOOF_HEX_NUMERICS=mode)
                 def packet():
                     value=subprocess.check_output([sys.executable,'-c',script],text=True,env=env)
                     result=json.loads(value)

@@ -63,7 +63,7 @@ def _fixture():
             log.get().append("returned")
             return out
 
-    sw = ModuleType("gpuwm.test_sw")
+    sw = ModuleType("woof.test_sw")
     sw.CudaSW = CudaSW
     sw.other = object()
     modules["legacy"] = _module("gpuwm.test_legacy", """

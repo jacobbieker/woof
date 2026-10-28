@@ -6,11 +6,11 @@
 #                                           -- from a checkout root
 #
 # The standalone (iwr | iex) form clones the public repository into
-# .\gpuwm when run outside a checkout; WOOF_REPO_URL overrides the
+# .\woof when run outside a checkout; WOOF_REPO_URL overrides the
 # clone source (fork or mirror).
 #
 # What it does, in order (every step is re-run safe):
-#   1. finds the checkout (or clones $env:WOOF_REPO_URL into .\gpuwm);
+#   1. finds the checkout (or clones $env:WOOF_REPO_URL into .\woof);
 #   2. makes sure a Rust toolchain is present, offering to install
 #      rustup when `cargo` is missing (prompts first; -Yes or
 #      WOOF_INSTALL_YES=1 consents non-interactively), and that it is
@@ -149,14 +149,14 @@ if ((Test-Path 'pyproject.toml') -and (Test-Path 'woof') -and
         (Test-Path 'tools\grib1_bridge')) {
     Say "using the existing checkout at $(Get-Location)"
 } elseif ((Test-Path 'woof\pyproject.toml') -and
-        (Test-Path 'woof\gpuwm')) {
+        (Test-Path 'woof\woof')) {
     Set-Location 'woof'
     Say "using the existing checkout at $(Get-Location)"
 } else {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Fail 'git is required to clone'
     }
-    Say "cloning $repoUrl into .\gpuwm"
+    Say "cloning $repoUrl into .\woof"
     Invoke-Step 'git clone' { git clone $repoUrl woof }
     Set-Location 'woof'
 }
@@ -675,7 +675,7 @@ if ($NoFetchTables) {
     Say 'staging the externalized Thompson tables (downloads only what'
     Say 'is absent -- ~243 MiB from a checkout; SHA-256 verified)'
     Invoke-Step 'woof fetch-tables' {
-        & (Join-Path '.venv' 'Scripts\gpuwm.exe') fetch-tables
+        & (Join-Path '.venv' 'Scripts\woof.exe') fetch-tables
     }
 }
 
@@ -767,7 +767,7 @@ Say 'running woof doctor'
 $callerPath = $env:Path
 try {
     $env:Path = (Join-Path (Get-Location).Path '.venv\Scripts') + ';' + $callerPath
-    & (Join-Path '.venv' 'Scripts\gpuwm.exe') doctor
+    & (Join-Path '.venv' 'Scripts\woof.exe') doctor
     $doctorExit = $LASTEXITCODE
 } finally {
     $env:Path = $callerPath

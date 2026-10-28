@@ -14,7 +14,7 @@ candidate = text.replace('r_pow(SNCOVR,SNOEXP)', 'MU(SNCOVR,SNCOVR)')
 candidate = candidate.replace('T1 = AD(MU(TFREEZ,noah_max', '// GNU strict folds real PARAMETER SNOEXP=2 to one rounded multiply; module_sf_noahlsm.F:3282.\nT1 = AD(MU(TFREEZ,noah_max', 1)
 candidate_source = out / 'noah_v842.py'
 candidate_source.write_text(candidate)
-spec = importlib.util.spec_from_file_location('hexcore.mpasphys.noah_v842', candidate_source)
+spec = importlib.util.spec_from_file_location('woof.hex.mpasphys.noah_v842', candidate_source)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 sys.modules[spec.name] = module
