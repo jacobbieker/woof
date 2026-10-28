@@ -142,15 +142,6 @@ RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST = {
         "([output] hub_wind); it reads finished state, writes 2-D output "
         "planes only and is held word for word to its NumPy mirror by "
         "tests/test_hub_wind_diag.py; not a forecast translation unit"),
-    "woof/hex/cuda_compensated_recovery.py": (
-        "the hex large-step recovery's one-kernel unit, compiled like the "
-        "rest of the hex engine's RawModule kernels outside the regional "
-        "manifest and graded by components/hex/tests/"
-        "test_cuda_compensated_recovery.py"),
-    "woof/hex/cuda_les_v841.py": (
-        "the hex MPAS v8.4.1 LES closure kernel, compiled like the rest of "
-        "the hex engine's RawModule kernels outside the regional manifest "
-        "and graded by components/hex/tests/test_les_v841.py"),
     "woof/core/health_ledger.py": (
         "two one-thread health-bookkeeping kernels (fold a validator's flag "
         "words into one ledger word; OR a status word into an ordered ledger "
