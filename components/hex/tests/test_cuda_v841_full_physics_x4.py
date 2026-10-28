@@ -117,7 +117,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
         "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
         "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "8fd83d65f51f1e893285643260e81b2bf8b8a8668bb5b52cccc3c6a734530780",
+        "src/hexcore/data/profiles/engine-helper-sets.v1.json": "b65bfe35132ba47d405b30bb2057ebd60a080b46edbd13127db0c8c175e8dcdd",
         "src/hexcore/step_anchors.py": (
             "13f8bf3361b3fc5c25805d05d48e3c59841050e3d372c03c96f1498133399b72"
         ),
@@ -134,7 +134,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
             "8dc6e9a3d8e88c231bc8d738f80a1655839aed2478b56ccc5038ab4daba7cfb5"
         ),
         "src/hexcore/cuda_physics_v841.py": (
-            "887fd1797eba42f035afb102f45fd223c42d50d38e153cdc1efe9fa4565bd857"
+            "18ac060a3adf6884eef7b853cb4b8fab76b37a6ec561c545372515d7f7e71672"
         ),
         # Re-frozen 2026-08-26 for the convection ruling: the physics cadence
         # table reports convection: None when no scheme is selected; and again
@@ -257,7 +257,7 @@ def test_frozen_source_hashes_and_adapter_contract_are_exact() -> None:
         ),
         # Current d15ea3482cc5 cache-key correction; archived proofs unchanged.
         "src/hexcore/cuda_transport_v841.py": (
-            "12006584f732c71a1e6263d9e2b4ad773455a52dec74ec3e8b29677fe360060d"
+            "1d2f3cf785c85b539a20e17d092ead5d0099f25e92ec452e116d420c46dea4a0"
         ),
         "src/hexcore/cuda_transport.py": (
             "013ed46f8ef3bcc1a445b2e81135e262c23c49950e52e5b62b22e4274644b15e"

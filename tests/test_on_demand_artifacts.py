@@ -36,6 +36,8 @@ STREAM_DOORS = {"rw_igra2", "rw_amv", "rw_ndbc", "rw_gnssro", "rw_wis2", "rw_pre
                 "rw_hail", "rw_airnow", "rw_scoreboard", "rw_tc_fields", "rw_fire_indices",
                 # Post-2.9.4: native Rust coupled hydro output, fetched on first use.
                 "rw_nextgen_output",
+                # 2.9.9 (PyPI per-file limit): the fixed-ladder probability renderer, which no forecast reaches.
+                "rw_probgrid",
                 # WOOF 1.1.0 r16 (PyPI per-file limit): European radar, and the three MPAS bridges every
                 # hex door reads from the hex helpers first.
                 "rw_odim", "rw_mpas_geometry", "rw_mpas_convert", "rw_mpas_lbc"}

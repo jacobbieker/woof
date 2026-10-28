@@ -15452,7 +15452,7 @@
     },
     {
       "file": "tests/test_member_leg_cost.py",
-      "line": 318,
+      "line": 356,
       "kind": "prose",
       "anchor": "assert nvrtc_ptx_cache.compile_using_nvrtc(\"k2\", (\"--ftz=false\",)) == (\"image\", None)",
       "anchor_sha256": "d2e9e7d5001aa793f35e45db436728d54d81e3edbc8e4dd47becf5fea3ed8b16",
@@ -15463,7 +15463,7 @@
     },
     {
       "file": "tests/test_member_leg_cost.py",
-      "line": 321,
+      "line": 359,
       "kind": "prose",
       "anchor": "(\"cupy\", \"k1\", [\"-std=c++17\"]), (\"direct\", \"k2\", [\"--ftz=false\"])]",
       "anchor_sha256": "3043fdf216bad7eedbda57f5b1f765a5fd5d1d317af3c9d53190d21fa436dd2d",
@@ -23064,7 +23064,7 @@
     },
     {
       "file": "tools/battery/list_census.json",
-      "line": 1952,
+      "line": 1954,
       "kind": "prose",
       "anchor": "\"tests/test_uwpbl_ftz_wrf471_parity.py\": 11,",
       "anchor_sha256": "39942b014f872c0d0175fe10909dff70e95d74274173112dec763baa2ff382fd",
@@ -23075,7 +23075,7 @@
     },
     {
       "file": "tools/battery/list_census.json",
-      "line": 2464,
+      "line": 2466,
       "kind": "prose",
       "anchor": "\"tests/test_urban_default_subnormals.py\": 4,",
       "anchor_sha256": "0313de8388c53dbaaddacb2915697554a0293302b6d3aa20d5d4f1567f861279",
@@ -23086,7 +23086,7 @@
     },
     {
       "file": "tools/battery/list_census.json",
-      "line": 2542,
+      "line": 2544,
       "kind": "prose",
       "anchor": "\"tests/test_ftz_route_inventory.py\": 8,",
       "anchor_sha256": "cfb237107baa84410b8190d4f7e3850de64662b520871ae493be81a1cfc932ed",
@@ -23097,7 +23097,7 @@
     },
     {
       "file": "tools/battery/list_census.json",
-      "line": 2543,
+      "line": 2545,
       "kind": "prose",
       "anchor": "\"tests/test_ftz_claim_consistency.py\": 18,",
       "anchor_sha256": "1fe47ed9fb7bdf435e636bc98234552157c2bf06965c466b5dcd3f71a5a30214",
@@ -23108,7 +23108,7 @@
     },
     {
       "file": "tools/battery/list_census.json",
-      "line": 2544,
+      "line": 2546,
       "kind": "prose",
       "anchor": "\"tests/test_ftz_render.py\": 29,",
       "anchor_sha256": "ae2462a82a3c7281a60c30cea7f3b20db068021596afe3fd00987cd07ce3fd0a",
@@ -39674,7 +39674,7 @@
     },
     {
       "file": "woof/bridges.py",
-      "line": 344,
+      "line": 346,
       "kind": "prose",
       "anchor": "b\"--oned-underflow preserve|reproduce-ifx-ftz \"",
       "anchor_sha256": "6168760c58e7469ca61e7c5034684297af19b0c1022165ceaefff5d09c0a574b",
@@ -44503,7 +44503,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1764,
+      "line": 1775,
       "kind": "prose",
       "anchor": "#: subnormal flushing as the ufuncs it replaces.",
       "anchor_sha256": "2396772d9c20a586c331ba249e7b235d5d68a43bccf195922601452e8c83b938",
@@ -45911,7 +45911,7 @@
     },
     {
       "file": "woof/ingest/real.py",
-      "line": 833,
+      "line": 840,
       "kind": "prose",
       "anchor": "# subnormal reciprocal finite. Infinity reciprocates to finite zero.",
       "anchor_sha256": "228b5348935554290bba3788d5ce9eabd47fcf63b7709751899bab593c9fb4fa",
@@ -45922,7 +45922,7 @@
     },
     {
       "file": "woof/ingest/real.py",
-      "line": 868,
+      "line": 875,
       "kind": "prose",
       "anchor": "# Integer predicates retain FP32 subnormals on both cards.",
       "anchor_sha256": "36ff837833697e69050c8ae7a49e6f1f1fea16022d8484f73899c664d8db18d0",
@@ -45933,7 +45933,7 @@
     },
     {
       "file": "woof/ingest/real.py",
-      "line": 1445,
+      "line": 1452,
       "kind": "prose",
       "anchor": "subnormal = bool(cp.any(nonzero & (magnitude_bits < cp.uint32(0x00800000))))",
       "anchor_sha256": "23fade873248f1c410086c7cf2b273c31f4dda7f258615764c29b06f863943b9",
@@ -45944,7 +45944,7 @@
     },
     {
       "file": "woof/ingest/real.py",
-      "line": 1460,
+      "line": 1467,
       "kind": "prose",
       "anchor": "\"extrema_on_host\": subnormal,",
       "anchor_sha256": "102bc636882b89b4c711fba16811ed2a57fb77c0526a6737565ab0397888358c",
@@ -45988,7 +45988,7 @@
     },
     {
       "file": "woof/kernel_aot_build.py",
-      "line": 52,
+      "line": 51,
       "kind": "prose",
       "anchor": "options += (\"-ftz=true\",)",
       "anchor_sha256": "aad20ce393374d0f4208d97a7b5d64f827c76c7a63c43d66160a973c993f3103",
@@ -45999,7 +45999,7 @@
     },
     {
       "file": "woof/kernel_compile_notice.py",
-      "line": 403,
+      "line": 406,
       "kind": "prose",
       "anchor": "# The engine's direct NVRTC route (woof.nvrtc_ptx_cache: the no-FTZ",
       "anchor_sha256": "bfedfba3830be1c0f49fc811981399aa546ba68cf2f7a818c101ebc33fdbd422",
@@ -46010,7 +46010,7 @@
     },
     {
       "file": "woof/kernel_plan.py",
-      "line": 694,
+      "line": 700,
       "kind": "prose",
       "anchor": "options.append(\"-ftz=true\")",
       "anchor_sha256": "be1e4e1bab657b0896783e22557a2db90e28f87e9e95e164ecf2291be4b4b675",

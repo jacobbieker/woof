@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.1.3 (2026-10-28)
+
+WOOF 1.1.3 takes engine 2.9.9 and the hex model 0.4.9. Forecast answers change.
+
+New:
+
+- A hurricane map theme, `woof-light-tc`: 10 m wind bands with edges at 34,
+  50, 64, 83, 96, 113 and 137 kt, and isobars every 4 hPa.
+
+Fixed:
+
+- Forecasts that start a RUC or Noah land surface from another model's soil
+  (ERA5, GFS, GEFS, IFS and others) map its soil moisture onto the land
+  model's own scale, so the surface no longer starts too wet and too cold.
+- Every physics choice the catalog offers runs.
+- Runs of 48 h or longer with sea ice on the grid start again.
+- A moving step-down draws hourly window products such as 1 h rain, over the
+  ground the grid reached during the hour.
+- A restart continues a checkpoint taken while GFS boundaries were still
+  streaming, and runs that keep one checkpoint set no longer stop on a
+  missing checkpoint.
+- A forecast no longer waits up to five minutes on a stuck kernel warm-up,
+  and no longer spins a CPU core while it waits for the card.
+- The column store, GFS preparation, analysis bundles and restart checksums
+  run on every core.
+- Hex on MPAS physics no longer stops with non-finite columns after weeks of
+  model time, and a checkpoint resumes under a changed timestep.
+- Hex 30 km globes no longer run out of GPU memory, and large ranks fit a
+  32 GB card.
+- Hex local time stepping picks the fastest plan for the mesh: a 96 -> 3 km
+  zoom globe runs about 1.2x faster than the fixed step on MPAS physics.
+- Hex zoom globes rotate a stored mesh instead of generating one, and
+  MPAS-physics start-up and history output run on every core.
+- Hex storm-following runs no longer stop when a reused member is unsafe
+  for the storm.
+- A stalled hex source download is retried after 10 s instead of 300 s.
+
 ## 1.1.2 (2026-10-27)
 
 WOOF 1.1.2 takes engine 2.9.8 and the hex model 0.4.8. Forecast answers change.

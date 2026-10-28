@@ -34,9 +34,15 @@ physics runs on every local column, as a class's does on one card, so the frames
 
 Not identical to the fixed step, by design (a different time scheme); the dycore of each class is the pinned
 MPAS numerics at its own step.  Refused by name, each with its breakage (``admission_refusal``):
-restart / DA cycling / IAU / stochastic forcing / chemistry, the balance series and nest triggers, timed
-surface updating, a limited-area mesh and a non-v8.4.2 dycore row.  A moving segment runs on the classes
-(``ClassMoving``: the move hooks at macro boundaries, as on the WOOF route's class executor).
+restart / DA cycling / IAU / chemistry, the balance series and nest triggers, timed surface updating, a
+limited-area mesh, a non-v8.4.2 dycore row, and stochastic forcing on several cards (as on the WOOF route).  A
+moving segment runs on the classes (``ClassMoving``: the move hooks at macro boundaries, as on the WOOF route's
+class executor).
+
+Stochastic forcing (SPPT / SKEB) on one card runs the WOOF route's class-aware generator,
+:class:`woof.hex.stochastic.LtsStochasticPhysics`: one spectral process on the global mesh, drawn once at each
+macro start by the coordinator (``begin_macro``), each class forcing its own local sources through
+``LtsClassStochastic`` inside its step, and the SKEB budget closed at the macro end (``end_macro``).
 """
 from __future__ import annotations
 
@@ -76,6 +82,7 @@ class _Board:
         self.parked = [False] * classes  # waiting in before_step, or finished
         self.macro_seconds = -1.0        # model seconds since the start of the last completed macro boundary
         self.deposits: dict[tuple, dict[int, dict]] = {}
+        self.assembled: set[tuple] = set()  # frames class 0 has assembled (every class's deposit read)
         self.stop_requested: float | None = None   # model seconds a moving controller stopped this segment at
 
     def fail(self, reason: str) -> None:
@@ -114,6 +121,26 @@ def _device_synchronize():
     cp.cuda.Device().synchronize()
 
 
+class _FrameReady:
+    """A class frame's download wait (``PhysicsStreams._capture``), with the frame's deposit key and its card.
+
+    The writer worker runs it on the card the class captured on, so the staging block goes back to that card's
+    pool when a block of a class cut across cards finishes its download.
+    """
+
+    __slots__ = ('wait', 'key', 'device')
+
+    def __init__(self, wait, key, device):
+        self.wait, self.key, self.device = wait, key, device
+
+    def __call__(self):
+        if self.device is None:
+            return self.wait()
+        import cupy as cp
+        with cp.cuda.Device(self.device):
+            return self.wait()
+
+
 class LtsClassExecution:
     """The ``execution`` seam of ``runtime_v842.run_native_dynamics`` for one rate class."""
 
@@ -135,6 +162,8 @@ class LtsClassExecution:
         self.cycling = None
         self.current_step = 0                 # the class step in flight (0: the initial state)
         self.multi_card = False               # a block of a class cut across cards (FullStepLtsMulti)
+        self.stochastic_shared = None         # the member's LtsStochasticPhysics (run_lts_classes), or None
+        self.stochastic_lock = None           # shared by every class: the first carried restore applies
 
     # -- construction --------------------------------------------------------------------------------
     def receipt_path(self, out):
@@ -153,6 +182,22 @@ class LtsClassExecution:
 
     def bind_dycore(self, dycore):
         self.dycore = dycore
+
+    def stochastic_physics(self, config):
+        """This class's view of the member's one LTS stochastic process (``runtime_v842`` builds it here).
+
+        THE BREAKAGE THIS PREVENTS (U-H5): without this seam every class would build its own ``StochasticPhysics``
+        on its truncated local mesh and draw its own pattern at its own step clock (as many unrelated patterns as
+        rate classes, SKEB normalised over a cut mesh), so the executor refused the combination, and every WOOF
+        storm roster (SPPT/SKEB members on a refined moving mesh) failed on the default MPAS-physics route.
+        """
+        from ..stochastic import StochasticConfig
+        shared = self.stochastic_shared
+        if shared is None:
+            raise ValueError('stochastic forcing on an LTS class needs the member process run_lts_classes builds')
+        if StochasticConfig.parse(config).state_json() != shared.config.state_json():
+            raise ValueError('an LTS class resolved another stochastic configuration than its member process')
+        return LtsClassStochastic(shared, self.index, self.stochastic_lock)
 
     def bind_coupling(self, coupling):
         self.coupling = coupling
@@ -267,29 +312,71 @@ class LtsClassExecution:
                     convective.driver.vertex_order = cp.asarray(
                         np.argsort(np.asarray(execution.partition.vertex_l2g), kind='stable').astype(np.int64))
 
-            def _snapshot(self, selected):
-                local = super()._snapshot(selected)
-                board = execution.board
+            #: Every frame but the held f000 one takes ``PhysicsStreams.write``'s writer-thread path: the step thread
+            #: only queues the frame's download, and this class's assembly worker (``_assemble_captured``) waits for
+            #: it, deposits the words and, on class 0, assembles the global frame ahead of the encode.  THE BREAKAGE
+            #: THIS PREVENTS: every class waited for its download and copied its deposit on its step thread, and
+            #: class 0 assembled the global frame there, so at every frame each class parked late and the
+            #: coordinator, which starts a macro only when every class is parked, held the whole card about 2 s
+            #: (about 4 s per model hour on the 96/3 km storm mesh, HEX-HOST-BOUND-2026-10-27 'What remains').
+            WRITER_THREAD_CAPTURE = True
+
+            def _capture(self, selected):
+                local, ready = super()._capture(selected)
+                # The frame's key and card are read here, on the step thread, while the class clock stands on it.
                 key = (str(self.current_time(step=0, dt=0)), tuple(s.name for s in selected))
+                views = getattr(self.session, 'device_pools', None)
+                cp = getattr(views, 'cp', None) if views is not None else None
+                device = cp.cuda.Device().id if hasattr(cp, 'cuda') else None
+                return local, _FrameReady(ready, key, device)
+
+            def _snapshot(self, selected):
+                # The held f000 frame only (complete_first_frame reads it on the forecast thread).  Copies: a class
+                # other than 0 releases its pinned writer storage as soon as its (empty) encode returns.
+                local, ready = self._capture(selected)
+                ready()
+                return self._deposit(ready.key, local, copy_words=True)
+
+            def _assemble_captured(self, ready, snapshot):
+                # This class's assembly worker, in frame order: the download landed, then deposit (and assemble).
+                ready()
+                return self._deposit(ready.key, snapshot, copy_words=False)
+
+            def _deposit(self, key, local, *, copy_words):
+                board = execution.board
+                words = ({name: (copy(item) if not hasattr(item, 'values') else
+                                 type(item)(np.array(item.values, copy=True), item.dimensions, item.attrs))
+                          for name, item in local.items()} if copy_words else dict(local))
                 with board.lock:
-                    slot = board.deposits.setdefault(key, {})
-                    # Copies: this class's pinned writer storage is reused at its next frame.
-                    slot[execution.index] = {name: (copy(item) if not hasattr(item, 'values') else
-                                                    type(item)(np.array(item.values, copy=True), item.dimensions,
-                                                               item.attrs))
-                                             for name, item in local.items()}
+                    board.deposits.setdefault(key, {})[execution.index] = words
                     board.lock.notify_all()
                 if execution.index != 0:
+                    if not copy_words:
+                        # The words are this class's pinned writer storage: the frame (so its host slot) stays in
+                        # flight until class 0 has read them.
+                        board.wait(lambda: key in board.assembled, f'class 0 to assemble frame {key[0]}')
                     return {}
                 # Class 0 always writes, so per-file frame counts (append records) never move between classes.
-                board.wait(lambda: len(board.deposits.get(key, {})) == board.classes, f'every class at frame {key[0]}')
+                try:
+                    board.wait(lambda: len(board.deposits.get(key, {})) == board.classes,
+                               f'every class at frame {key[0]}')
+                    with board.lock:
+                        slot = board.deposits.pop(key)
+                    snapshots = [slot[i] for i in range(board.classes)]
+                    # On all cores (samehost_v842.assemble_snapshot).  The serial guard that stood here cited the
+                    # first-step validation refusals, whose cause was the physics edge projection reading past its
+                    # tendency arrays (resident_v842.ResidentPhysicsGlue, dummy-cell geometry), not the assembly.
+                    # Every decomposed field is a new global array; the rest are class 0's own words.
+                    frame = assemble_snapshot(snapshots, execution.partitions, self.rows, execution.global_layout)
+                except LtsAborted:
+                    raise
+                except BaseException as error:
+                    board.fail(f'class 0 frame {key[0]} assembly: {type(error).__name__}: {error}')
+                    raise
                 with board.lock:
-                    slot = board.deposits.pop(key)
-                snapshots = [slot[i] for i in range(board.classes)]
-                # On all cores (samehost_v842.assemble_snapshot).  The serial guard that stood here cited the
-                # first-step validation refusals, whose cause was the physics edge projection reading past its
-                # tendency arrays (resident_v842.ResidentPhysicsGlue, dummy-cell geometry), not the assembly.
-                return assemble_snapshot(snapshots, execution.partitions, self.rows, execution.global_layout)
+                    board.assembled.add(key)
+                    board.lock.notify_all()
+                return frame
 
             def _encode(self, jobs, snapshot, when, step, *extra, **options):
                 if execution.index != 0:
@@ -326,6 +413,62 @@ class LtsClassExecution:
                 return {name: assembled[name].values for name in names if name in assembled}
 
         return ClassPhysicsStreams
+
+
+class _SharedProcess:
+    """The member's spectral process as one class sees it: snapshot as is, restore once for every class."""
+
+    def __init__(self, shared, lock):
+        self._shared, self._lock = shared, lock
+
+    def snapshot(self, *, device=False):
+        return self._shared.process.snapshot(device=device)
+
+    def restore(self, value):
+        # Every class's session restores the carried pattern (runtime_v842); the process is the member's one, so
+        # the first restore applies it and the others must name the same draw.
+        with self._lock:
+            restored = getattr(self._shared, 'carried_restore', None)
+            key = (value['base']['time'], value['base']['draw'])
+            if restored is None:
+                self._shared.process.restore(value)
+                self._shared.carried_restore = key
+            elif restored != key:
+                raise ValueError('LTS classes carried different stochastic patterns for one member')
+
+
+class LtsClassStochastic:
+    """``coupling.stochastic`` of one LTS class: forces its sources through the member's one LTS process.
+
+    The coordinator draws the pattern at every macro start (``LtsStochasticPhysics.begin_macro``) and closes the
+    SKEB budget at the macro end; inside a class step this applies the held pattern to the class's local cells
+    and edges (owned edges add to the budget).  The step timing is the class's own (one class thread each).
+    """
+
+    def __init__(self, shared, index, lock):
+        import cupy as cp
+        from ..stochastic_timing import StepTimings
+        self.shared, self.index = shared, int(index)
+        self.config = shared.config
+        self.process = _SharedProcess(shared, lock)
+        self.step_timing = StepTimings(cp)
+
+    def apply(self, held, *, state, rho_edge, normal_velocity, time_seconds, dt, names):
+        return self.shared.apply(self.index, held, state=state, rho_edge=rho_edge, normal_velocity=normal_velocity,
+                                 time_seconds=time_seconds, dt=dt, names=names)
+
+    def receipt(self):
+        return dict(self.shared.receipt(), klass=self.index, step_cost=self.step_timing.receipt())
+
+
+def stochastic_config(arguments):
+    """The run's stochastic configuration, resolved as ``runtime_v842`` resolves it (option and namelist)."""
+    from ..stochastic import resolve_options
+    path = getattr(arguments, 'physics_namelist', None)
+    value = getattr(arguments, 'stochastic', None)
+    if value in ('', 'off', 'none'):
+        value = None
+    return resolve_options(value, None if path is None else Path(path).read_text())
 
 
 def moving_admitted(moving) -> bool:
@@ -620,12 +763,14 @@ def admission_refusal(arguments, layout, config, moving=None) -> str | None:
         if getattr(arguments, name, None):
             return (f'{why} with active local time stepping on the MPAS suite route is not built: each class '
                     'session holds its own clock, pools and samplers, and no class carries it across classes yet')
-    if getattr(arguments, 'stochastic', None) not in (None, '', 'off', 'none'):
-        from ..stochastic import resolve_options
-        if resolve_options(arguments.stochastic, None).enabled:
-            return ('stochastic forcing with active local time stepping on the MPAS suite route is not built: the '
-                    'pattern is drawn per step and the classes step at different rates (the WOOF route has a '
-                    'class-aware generator, LtsStochasticPhysics, that this route does not call yet)')
+    # Retired 2026-10-27 (U-H5): stochastic forcing on one card runs the ArWen route's class-aware generator
+    # (LtsStochasticPhysics, driven per macro by run_lts_classes).  Several cards stay refused, as on the ArWen route.
+    if getattr(arguments, 'samehost_devices', None) and stochastic_config(arguments).enabled:
+        from ..drivers.samehost_forecast_v841 import device_list
+        if len(set(device_list(arguments.samehost_devices))) > 1:
+            return ('stochastic forcing with active local time stepping on several cards is not built on either '
+                    'route: the SKEB budget is a member-wide owned-edge reduction that one card cannot publish to '
+                    'the blocks on other cards.  Run each ensemble member on one card')
     if str(layout.configs.get('config_IAU_option', 'off')).strip() != 'off':
         return 'IAU with active local time stepping on the MPAS suite route is not built'
     if layout.configs.get('config_do_restart') and not (moving is not None and moving.carrier is not None):
@@ -810,8 +955,19 @@ def run_lts_classes(arguments, config, layout, payload, streams, start, stop, dt
     board = _Board(len(partitions))
     executions = [LtsClassExecution(board, index, units[index].rate, top, partitions, prepared[index][2],
                                     layout) for index in range(len(partitions))]
+    member_stochastic = None
+    member_config = stochastic_config(arguments)
+    if member_config.enabled:
+        if bplan is not None:
+            raise ValueError('stochastic forcing with active local time stepping runs on one card')
+        from ..stochastic import LtsStochasticPhysics
+        # One spectral process on the global mesh for every class (the ArWen route's generator).
+        member_stochastic = LtsStochasticPhysics(mesh, grid.vertical_grid, member_config, partitions)
+    stochastic_lock = threading.Lock()
     for execution in executions:
         execution.multi_card = bplan is not None
+        execution.stochastic_shared = member_stochastic
+        execution.stochastic_lock = stochastic_lock
     results: list = [None] * len(partitions)
     comms = None
     if moving_state is not None:
@@ -907,6 +1063,12 @@ def run_lts_classes(arguments, config, layout, payload, streams, start, stop, dt
 
         active.stepper = stepper
         synchronize_cards()
+        # The member's model clock at the first macro (a resumed moving segment starts past zero); every class
+        # starts there, and each class step's forcing checks it stands on its macro interval.
+        clock_offset = float(drivers[0].atmosphere.state.time_seconds)
+        if member_stochastic is not None and any(
+                abs(float(driver.atmosphere.state.time_seconds) - clock_offset) > 1e-6 for driver in drivers):
+            raise RuntimeError('LTS classes start at different model clocks; one stochastic macro cannot hold them')
         with board.lock:
             board.klass = members
             board.ready = True
@@ -919,8 +1081,13 @@ def run_lts_classes(arguments, config, layout, payload, streams, start, stop, dt
                 # The moving controller stopped the segment at this frame; every class sealed and left its loop.
                 break
             mark = time.perf_counter()
+            if member_stochastic is not None:
+                member_stochastic.begin_macro(clock_offset + float(macro * top) * base_dt, float(top) * base_dt)
+                synchronize_cards()
             active.advance_macro(top)
             synchronize_cards()
+            if member_stochastic is not None:
+                member_stochastic.end_macro()
             macro_rows.append(dict(macro=macro + 1, base_steps=top, seconds=time.perf_counter() - mark))
             with board.lock:
                 board.macro_seconds = float((macro + 1) * top) * base_dt
@@ -939,6 +1106,7 @@ def run_lts_classes(arguments, config, layout, payload, streams, start, stop, dt
                        macro_seconds_mean=(sum(r['seconds'] for r in warm) / len(warm) if warm else None),
                        macros=len(macro_rows), events=dict(active.events),
                        registers_empty=bool(active.registers_empty()),
+                       stochastic=None if member_stochastic is None else member_stochastic.receipt(),
                        warm_seconds_per_forecast_hour=(
                            sum(r['seconds'] for r in warm) / len(warm) * 3600.0 / (top * base_dt)
                            if warm else None),

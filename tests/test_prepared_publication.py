@@ -582,6 +582,8 @@ def test_the_on_demand_set_is_read_from_the_tagged_declaration(publication):
                                                     "rw_tc_fields", "rw_fire_indices",
                                                     # Post-2.9.4 native Rust hydro output.
                                                     "rw_nextgen_output",
+                                                    # 2.9.9 (PyPI per-file limit): the probability renderer.
+                                                    "rw_probgrid",
                                                     # WOOF 1.1.0 r16 (PyPI per-file limit).
                                                     "rw_odim", "rw_mpas_geometry", "rw_mpas_convert",
                                                     "rw_mpas_lbc"} == {

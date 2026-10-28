@@ -920,7 +920,7 @@ below; a renderer shipped without it would satisfy clause 2 nowhere.
 
 Compiled artifacts (release bridge bundles and platform wheels)
 
-73 Rust executables and libraries (woof.bridge_assets
+74 Rust executables and libraries (woof.bridge_assets
 .BUNDLED_ARTIFACTS) are distributed in compiled form: as GitHub release
 bridge bundles, and staged into platform wheels at woof/libexec/bridges/.
 A platform wheel carries all of them except the on-demand set

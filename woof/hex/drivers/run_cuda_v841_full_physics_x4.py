@@ -255,7 +255,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     "src/hexcore/history_writer.py": "570c9124745a8d8325a35c11da17e58036bfcf2e3117a5be502dec196a9905f0",
     "src/hexcore/cuda_arwen_helper_scope_v2.py": "641e8b77427a7c2f8eff374daa37e09a034fc45271d1dac67c3e39d03e3814e9",
     "src/hexcore/radiation_source_sets.json": "4fdb41a8102a0c4891771ed476d2eb7cf870e89a66c1a2dd4a92b8cd42dac802",
-    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "8fd83d65f51f1e893285643260e81b2bf8b8a8668bb5b52cccc3c6a734530780",
+    "src/hexcore/data/profiles/engine-helper-sets.v1.json": "b65bfe35132ba47d405b30bb2057ebd60a080b46edbd13127db0c8c175e8dcdd",
     # Native upper damping: Rust and CUDA match compiled source blocks.
     "src/hexcore/native/upper_damping.rs": "5483b2c1e7da45317ffe4213c5879b583070d9e28d591ec52a9c697a052e81f1",
     "src/hexcore/upper_damping_v841.py": "947f477d5f56b41d95fb5a0b92adb21d68be95b5fac19ba524181cb373710860",
@@ -305,8 +305,12 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # validation threshold moves; no field is written differently.
     # Re-frozen for the Morrison row: per-bucket signed-fallout validation
     # preserves native words; the default positive-sum policy is unchanged.
+    # Re-derived 2026-10-27 (fix/hex-host-bound): the kernel-cache contract check reads the
+    # compile-platform binding alone (compile_contract.kernel_cache_platform) instead of a full
+    # manifest JSON round trip at every coupling launch.  No kernel, launch or operand changed;
+    # 2 h Milton LTS forecast 0 of 1,167,818,735 words differ (HEX-HOST-BOUND-2026-10-27).
     "src/hexcore/cuda_physics_v841.py": (
-        "887fd1797eba42f035afb102f45fd223c42d50d38e153cdc1efe9fa4565bd857"
+        "18ac060a3adf6884eef7b853cb4b8fab76b37a6ec561c545372515d7f7e71672"
     ),
     # Re-frozen during the 12 GiB capacity work: the dynamics subcycle stopped
     # copying a scalar block nothing writes, stopped taking a private image of
@@ -874,7 +878,7 @@ EXECUTION_SOURCE_PINS: dict[str, str | None] = {
     # This is the current execution identity, not a re-mint of archived x4
     # or regional forecast evidence. Device requalification remains pending.
     "src/hexcore/cuda_transport_v841.py": (
-        "12006584f732c71a1e6263d9e2b4ad773455a52dec74ec3e8b29677fe360060d"
+        "1d2f3cf785c85b539a20e17d092ead5d0099f25e92ec452e116d420c46dea4a0"
     ),
     # THE BREAKAGE THESE TWO PREVENT, found by the NVRTC reciprocal-rewrite
     # lane (the NVRTC reciprocal-rewrite defect): a pinned translation unit does not compile its own file.

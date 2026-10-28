@@ -64,6 +64,7 @@ from woof.ingest.horiz import (HorizontalSnapshot,
 from woof.ingest.hrrr import (HrrrNativeSnapshot,
                                interpolate_hrrr_to_lambert)
 from woof.ingest.real import RealInitResult, initialize_real
+from woof.ingest.land_state import land_state_context
 from woof.ingest.ruc_soil import preprocess_land_surface_soil
 from woof.ingest.soil import (NoahSoilState, reconciler_soil_temperature,
                                reconciler_sst, soil_source_orography)
@@ -1506,6 +1507,10 @@ def finalize_prepared_child(
         # its parent's was, onto a grid where one source cell is even
         # wider in model cells.
         soil_mesh=prepared.soil_mesh,
+        # The child's own source column, so it takes the same-model donor
+        # its root takes (woof/ingest/land_state.py).
+        land_state=land_state_context(
+            grid, getattr(horizontal, "valid_time", None)),
         route=_WATER_ROUTE)
     save_mub = state.mub2d.copy()
 

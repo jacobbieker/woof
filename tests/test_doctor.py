@@ -879,6 +879,10 @@ def test_a_bridge_that_predates_the_contract_is_missing_not_ok(
                      # The global globe packer (2.8.9) builds in tools/rustwx
                      # and resolves through WOOF_RW_GLOBE_PACK, likewise.
                      "rw_globe_pack",
+                     # The fixed-ladder probability renderer builds in
+                     # tools/rustwx and resolves through WOOF_RW_PROBGRID,
+                     # likewise.
+                     "rw_probgrid",
                      # The observation scorecard and the forecast
                      # verification scorer build in tools/rustwx and resolve
                      # through WOOF_RW_SCORECARD / WOOF_RW_SCOREBOARD, so

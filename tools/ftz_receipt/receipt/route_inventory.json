@@ -9,9 +9,9 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 446,
+  "site_count": 447,
   "site_count_by_kind": {
-    "cupy.ElementwiseKernel": 31,
+    "cupy.ElementwiseKernel": 32,
     "cupy.RawKernel": 54,
     "cupy.RawModule": 213,
     "cupy.ReductionKernel": 11,
@@ -24,7 +24,7 @@
       "cupy.cuda.compiler.compile_using_nvrtc": 22
     },
     "package": {
-      "cupy.ElementwiseKernel": 21,
+      "cupy.ElementwiseKernel": 22,
       "cupy.RawKernel": 13,
       "cupy.RawModule": 63,
       "cupy.ReductionKernel": 7,
@@ -1592,7 +1592,7 @@
     },
     {
       "file": "tests/test_member_leg_cost.py",
-      "line": 318,
+      "line": 356,
       "column": 11,
       "surface": "tests",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -5674,7 +5674,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1812,
+      "line": 1823,
       "column": 17,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -5690,7 +5690,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1827,
+      "line": 1838,
       "column": 17,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -5706,7 +5706,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1850,
+      "line": 1861,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -6123,6 +6123,22 @@
       "options_element_expressions": null,
       "options_are_literal": false,
       "text": "_DIAGNOSTICS = cp.ElementwiseKernel("
+    },
+    {
+      "file": "woof/core/surface_ocean.py",
+      "line": 74,
+      "column": 21,
+      "surface": "package",
+      "constructor": "cp.ElementwiseKernel",
+      "constructor_kind": "cupy.ElementwiseKernel",
+      "enclosing": "_ice_owned",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "_ICE_OWNED = cp.ElementwiseKernel("
     },
     {
       "file": "woof/core/tempo_runtime.py",
@@ -6834,7 +6850,7 @@
     },
     {
       "file": "woof/hex/cuda_backend/runtime.py",
-      "line": 438,
+      "line": 443,
       "column": 25,
       "surface": "package",
       "constructor": "cp.RawModule",

@@ -461,6 +461,11 @@ _NOT_CARRIED_TESTS = {
         "gpuwm-hex's rust/physics-tables crate",
     "test_physics_route_resources.py::test_the_pool_reader_is_gpuwm_24b6f08_byte_for_byte":
         "gpuwm-hex's rust/physics-pool crate",
+    "test_physics_route_resources.py::test_the_pool_reader_is_gpuwm_24b6f08_plus_the_field_parallel_transport":
+        "gpuwm-hex's rust/physics-pool crate",
+    "test_physics_route_resources.py::test_the_pool_transport_takes_the_cpus_it_may_use":
+        "gpuwm-hex's rust/physics-pool crate",
+    "test_libm_batch_packaged.py::test_setup_names_the_bridge_by_the_runtime_source_key": "gpuwm-hex's setup.py",
 }
 #: a fixture that loads gpuwm-hex's setup.py
 _NOT_CARRIED_FIXTURES = {"hexsetup": "gpuwm-hex's setup.py"}
