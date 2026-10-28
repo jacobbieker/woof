@@ -31,18 +31,12 @@ from typing import Any
 
 import numpy as np
 
+from woof.core.fp32_ulp import fp32_ulp_distance as ulp_distance_f32
+
 ROOT = Path(__file__).resolve().parents[1]
 for entry in (str(ROOT / "src"), str(ROOT / "tools")):
     if entry not in sys.path:
         sys.path.insert(0, entry)
-
-
-def ulp_distance_f32(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    x = np.ascontiguousarray(a, dtype=np.float32).view(np.int32).astype(np.int64)
-    y = np.ascontiguousarray(b, dtype=np.float32).view(np.int32).astype(np.int64)
-    x = np.where(x < 0, np.int64(-2147483648) - x, x)
-    y = np.where(y < 0, np.int64(-2147483648) - y, y)
-    return np.abs(x - y)
 
 
 def compare(name: str, dev: np.ndarray, host32: np.ndarray, host64: np.ndarray) -> dict[str, Any]:

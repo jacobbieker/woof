@@ -68,8 +68,10 @@ _TOTAL_ORDER_OWNERS = {
 #: checkout: third-party packages (Pillow, SciPy, urllib3, CuPy) are not
 #: this estate, and with them in scope the gate was red on every checkout
 #: installed the documented way.
+# .pixi/: the pixi environments live inside the checkout, and conda-forge
+# GDAL ships bash completions named *.py that are not Python.
 _VENDORED = ("tools/grib1_bridge/vendor", "work/", "evidence/",
-             ".worktrees/", ".claude/worktrees/", ".venv/")
+             ".worktrees/", ".claude/worktrees/", ".venv/", ".pixi/")
 
 #: A NESTED CHECKOUT is its own estate wherever it sits, not only under
 #: the two prefixes above: stray worktrees land at arbitrary root-level

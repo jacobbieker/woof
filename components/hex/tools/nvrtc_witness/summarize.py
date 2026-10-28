@@ -1,4 +1,4 @@
-﻿"""Reconcile untimed CuPy NVRTC events against strace -ff execve receipts."""
+"""Reconcile untimed CuPy NVRTC events against strace -ff execve receipts."""
 import argparse
 import json
 from pathlib import Path

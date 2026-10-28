@@ -1,4 +1,4 @@
-﻿"""Untimed CuPy NVRTC witness. Enabled only by HEX_NVRTC_WITNESS_DIR.
+"""Untimed CuPy NVRTC witness. Enabled only by HEX_NVRTC_WITNESS_DIR.
 
 Place this directory first on PYTHONPATH in a fresh Python process. Children
 inherit it. No source text or option values are logged. Use the accompanying

@@ -1721,7 +1721,7 @@ def test_the_route_asks_for_an_optional_stock_wrf_export():
 
     tree = ast.parse(inspect.getsource(hrrr_hierarchy_direct))
     modes = [
-        keyword.value.value
+        ast.unparse(keyword.value)
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -1729,7 +1729,15 @@ def test_the_route_asks_for_an_optional_stock_wrf_export():
         for keyword in node.keywords
         if keyword.arg == "stock_wrf_export"
     ]
-    assert modes == ["optional"]
+    # Since `woof prep --no-stock-wrf-export` (U-E6) the call relays the
+    # route's own mode, so "optional" is that mode's default, in the
+    # route and in its command line; "off" is the only other spelling.
+    assert modes == ["stock_wrf_export"]
+    route = inspect.signature(hrrr_hierarchy_direct.prepare_hrrr_hierarchy)
+    assert route.parameters["stock_wrf_export"].default == "optional"
+    flag = hrrr_hierarchy_direct._parser()._option_string_actions[
+        "--no-stock-wrf-export"]
+    assert (flag.default, flag.const) == ("optional", "off")
 
 
 def test_raw_wps_gate_binds_hourly_hierarchy_contract(tmp_path):

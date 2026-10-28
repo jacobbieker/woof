@@ -2,7 +2,7 @@ THIRD-PARTY LICENCES FOR THE RECAST WOOF BRIDGE BUNDLE
 ==============================================================================
 
 This file is the binary-form notice for the compiled artefacts distributed
-in this bundle and staged into Recast WOOF platform wheels: 74 Rust executables and
+in this bundle and staged into Recast WOOF platform wheels: 76 Rust executables and
 libraries, plus the map assets beside it and two embedded fonts.
 
 Those binaries are built from two kinds of source, and both carry third-party
