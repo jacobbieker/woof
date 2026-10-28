@@ -71,7 +71,7 @@ def system_python():
                            '@"%WOOF_INSTALL_TEST_PYTHON%" "%WOOF_INSTALL_TEST_BACKEND%" py314t %*\r\n')
     else:
         program = home / 'python3.14t'
-        program.write_text('#!/bin/sh\nGPUWM_INSTALL_TEST_FROM_PATH=1 exec "$WOOF_INSTALL_TEST_PYTHON" '
+        program.write_text('#!/bin/sh\nWOOF_INSTALL_TEST_FROM_PATH=1 exec "$WOOF_INSTALL_TEST_PYTHON" '
                            '"$WOOF_INSTALL_TEST_BACKEND" py314t "$@"\n')
         program.chmod(0o755)
     return program
@@ -81,7 +81,7 @@ if kind == 'git':
     assert args[:1] == ['clone'], args
     checkout = cwd / args[-1]
     for name in ('woof', 'recast-woof-data', 'tools/grib1_bridge', 'tools/rustwx',
-                 'tools/arwen-tui', 'tools/zarr_bridge', 'tools/rw_wps',
+                 'tools/zarr_bridge', 'tools/rw_wps',
                  'tools/region_global_dealias', 'tools/nextgen_hydrofabric',
                  'tools/nextgen_forcing', 'tools/nextgen_verify', 'tools/hydro_world',
                  'tools/hydro_world_params', 'tools/nextgen_reservoir_prepare',
@@ -236,9 +236,6 @@ elif kind == 'cargo':
         output.touch()
         output.with_suffix('.exe').touch()
 elif kind == 'woof' and args == ['doctor']:
-    if not (cwd / 'tools/arwen-tui/target/release/arwen-tui').is_file():
-        print('fixture doctor: terminal workspace was never built', file=sys.stderr)
-        sys.exit(43)
     sys.exit(int(os.environ.get('WOOF_INSTALL_TEST_DOCTOR_EXIT', '0')))
 '''
 
@@ -333,7 +330,7 @@ def _run(tmp_path, platform, *, no_render=False, failure='', companion_gate=True
         found = tmp_path / 'free-threaded-bin'
         found.mkdir()
         program = found / 'python3.14t'
-        program.write_text('#!/bin/sh\nGPUWM_INSTALL_TEST_FROM_PATH=1 exec "$WOOF_INSTALL_TEST_PYTHON" '
+        program.write_text('#!/bin/sh\nWOOF_INSTALL_TEST_FROM_PATH=1 exec "$WOOF_INSTALL_TEST_PYTHON" '
                            '"$WOOF_INSTALL_TEST_BACKEND" py314t "$@"\n',
                            encoding='utf8', newline='\n')
         program.chmod(0o755)
@@ -433,7 +430,7 @@ fi
     done = subprocess.run(args, cwd=stage, env=env, capture_output=True, text=True, timeout=60,
                           stdin=subprocess.DEVNULL, start_new_session=os.name != 'nt')
     rows = [json.loads(line) for line in log.read_text(encoding='utf8').splitlines()] if log.exists() else []
-    held = stage / 'gpuwm/.venv/cupy.txt'
+    held = stage / 'woof/.venv/cupy.txt'
     done.cupy = held.read_text().split() if held.exists() else None
     done.path_after = after_path.read_text(encoding='utf8') if after_path.exists() else None
     return done, rows
@@ -455,7 +452,7 @@ def _required_workspaces(no_render=False):
 
 @pytest.mark.parametrize('platform', ['posix', 'powershell'])
 @pytest.mark.parametrize('no_render', [False, True])
-def test_clean_clone_installs_matching_companion_then_engine_and_builds_tui(tmp_path, platform, no_render):
+def test_clean_clone_installs_matching_companion_then_engine_and_builds_the_workspaces(tmp_path, platform, no_render):
     done, rows = _run(tmp_path, platform, no_render=no_render)
     assert done.returncode == 0, done.stdout + done.stderr
     installs = _pip_rows(rows)
@@ -467,7 +464,7 @@ def test_clean_clone_installs_matching_companion_then_engine_and_builds_tui(tmp_
     ]
     built = [Path(row['cwd']).name for row in rows
              if row['kind'] == 'cargo' and row['args'][0] == 'build']
-    assert built == ['grib1_bridge', *([] if no_render else ['rustwx']), 'arwen-tui', 'zarr_bridge',
+    assert built == ['grib1_bridge', *([] if no_render else ['rustwx']), 'zarr_bridge',
                      'rw_wps', 'region_global_dealias', 'nextgen_hydrofabric',
                      'nextgen_forcing', 'nextgen_verify', 'hydro_world', 'hydro_world_params', 'nextgen_reservoir_prepare', 'hydro_world_init',
                      'ocean_prepare', 'rw-bathy', 'nextgen_output']
@@ -496,23 +493,27 @@ def test_installer_doctor_sees_the_environment_it_just_installed(tmp_path, platf
 
 
 @pytest.mark.parametrize('platform', ['posix', 'powershell'])
-def test_terminal_build_is_required_even_after_dependency_resolution_succeeds(tmp_path, platform):
+def test_the_installer_builds_no_terminal_workspace(tmp_path, platform):
+    # Recast WOOF ships no terminal workspace (tools/arwen-tui stays with ArWen): an installer that
+    # still built it would stop every source install on a folder the clone does not carry.
     done, rows = _run(tmp_path, platform, companion_gate=False, no_render=True)
     assert done.returncode == 0, done.stdout + done.stderr
-    assert any(row['kind'] == 'cargo' and Path(row['cwd']).name == 'arwen-tui' for row in rows)
+    assert not any(row['kind'] == 'cargo' and Path(row['cwd']).name == 'arwen-tui' for row in rows)
 
 
 @pytest.mark.parametrize('platform', ['posix', 'powershell'])
 @pytest.mark.parametrize('failure', ['companion', 'tui'])
 def test_installer_stops_at_failed_owned_prerequisite(tmp_path, platform, failure):
     done, rows = _run(tmp_path, platform, failure=failure)
+    if failure == 'tui':
+        # Recast WOOF builds no terminal workspace, so a terminal build that would fail cannot stop its install.
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert not any(row['kind'] == 'cargo' and Path(row['cwd']).name == 'arwen-tui' for row in rows)
+        return
     assert done.returncode != 0
     assert not any(row['kind'] == 'woof' for row in rows)
-    if failure == 'companion':
-        assert not any(any(arg.startswith('.[') for arg in row['args']) for row in rows)
-        assert not any(row['kind'] == 'cargo' for row in rows)
-    else:
-        assert rows[-1]['kind'] == 'cargo' and Path(rows[-1]['cwd']).name == 'arwen-tui'
+    assert not any(any(arg.startswith('.[') for arg in row['args']) for row in rows)
+    assert not any(row['kind'] == 'cargo' for row in rows)
 
 
 @pytest.mark.parametrize('platform', ['posix', 'powershell'])

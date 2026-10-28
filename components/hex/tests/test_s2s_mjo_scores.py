@@ -56,7 +56,7 @@ def test_binding_restart_overlap_and_member_export_init(tmp_path, monkeypatch):
             'init': argv[argv.index('--init') + 1],
             'simulation_start': argv[argv.index('--simulation-start') + 1], 'field_set': 'full'})
         return 0
-    monkeypatch.setattr('hexcore.global_ensemble._cli', export)
+    monkeypatch.setattr('woof.hex.global_ensemble._cli', export)
     receipt = s2s_mjo.export_members(value, state, args, {})
     assert receipt['status'] == 'complete'
     assert {argv[argv.index('--init') + 1] for argv in calls} == {m['init'] for m in members}
@@ -135,11 +135,11 @@ def test_render_retry_requires_acknowledged_complete_figure_set(tmp_path, monkey
     bridge = ModuleType('woof.rustwx')
     bridge.find_renderer = lambda: Path('/real/rw_wrfbatch')
     bridge.renderer_env = lambda: {}
-    engine = ModuleType('woof')
-    engine.rustwx = bridge
-    monkeypatch.setitem(sys.modules, 'woof', engine)
+    # (WOOF) the engine and the hex model share the woof package: keep it, replace its rustwx
+    import woof as engine
+    monkeypatch.setattr(engine, 'rustwx', bridge, raising=False)
     monkeypatch.setitem(sys.modules, 'woof.rustwx', bridge)
-    monkeypatch.setattr('hexcore.engines.resolve', lambda _: tmp_path / 'rw_wrfbatch')
+    monkeypatch.setattr('woof.hex.engines.resolve', lambda _: tmp_path / 'rw_wrfbatch')
     directory = tmp_path / 's2s-mjo/figures'
     directory.mkdir(parents=True)
     names = ['rmm-mem001-phase.png'] + [f'rmm-mem001-{f}-longitude-time.png' for f in ['olr', 'u850', 'u200']]

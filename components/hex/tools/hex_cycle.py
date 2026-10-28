@@ -209,8 +209,8 @@ def run(args) -> int:
     if args.radiation:
         forecast += ["--radiation-seconds", f"{args.radiation:g}"]
     forecast += shlex.split(args.forecast_extra)
-    env = dict(os.environ, GPUWM_HEX_MESH_ROWS=str(args.mesh_rows), GPUWM_WRF_EXACT="0",
-               GPUWM_HEX_REGIONAL_CONTRACT_DIR=str(args.work / "contracts"))
+    env = dict(os.environ, WOOF_HEX_MESH_ROWS=str(args.mesh_rows), GPUWM_WRF_EXACT="0",
+               WOOF_HEX_REGIONAL_CONTRACT_DIR=str(args.work / "contracts"))
     stop = threading.Event()
     futures: list = []
     with ThreadPoolExecutor(max_workers=args.render_workers, thread_name_prefix="render") as pool:

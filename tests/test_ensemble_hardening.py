@@ -1054,7 +1054,7 @@ def test_consumer_guard_reaches_every_position_a_definition_carries(tmp_path):
     expected = []
     for name, (source, labels) in _RV6_04_PROBES.items():
         (package / name).write_text(source, encoding="utf-8")
-        expected.extend(f"gpuwm/{name}:{label}" for label in labels)
+        expected.extend(f"woof/{name}:{label}" for label in labels)
     assert _analysis_roster_consumer_offenders(package) == expected
 
     # And one at a time, so a shape that only fires beside another is not
@@ -1063,7 +1063,7 @@ def test_consumer_guard_reaches_every_position_a_definition_carries(tmp_path):
         alone = _synthetic_scan_root(tmp_path / name.replace(".", "_"))
         (alone / name).write_text(source, encoding="utf-8")
         assert _analysis_roster_consumer_offenders(alone) == [
-            f"gpuwm/{name}:{label}" for label in labels], name
+            f"woof/{name}:{label}" for label in labels], name
 
 
 def test_consumer_guard_attributes_every_node_to_exactly_one_scope():

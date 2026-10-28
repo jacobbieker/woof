@@ -495,67 +495,67 @@
     "implementation": "rust-parallel-fp32-v1",
     "implementation_tree": {
       "files": {
-        "gpuwm/core/host_libm.py": {
-          "bytes": 7289,
-          "sha256": "a1bd118c95aea370fdf6b7cf775fcf528d3b1a66937612c2ffb1ee7ddc953447"
+        "woof/core/host_libm.py": {
+          "bytes": 7287,
+          "sha256": "61ae69da9d5d655867c53281a7f6e3a240093f7ba860dfa823d930226fb4abbc"
         },
-        "gpuwm/core/noahmp_libm.py": {
+        "woof/core/noahmp_libm.py": {
           "bytes": 56003,
           "sha256": "20562a36da4cddca84018b978ce1302697400eab5d7897b45911b02667fb28e8"
         },
-        "gpuwm/core/state.py": {
+        "woof/core/state.py": {
           "bytes": 66677,
           "sha256": "204cc15c3a956e505e019f725c96ce90ed040d381afd9b1ed2d86fc86e251066"
         },
-        "gpuwm/core/thompson_entry.py": {
-          "bytes": 35352,
-          "sha256": "20b9d3192bdb39617180911bc5d1cbe063add5a9de39f2ec4b84b1b22d519f6a"
+        "woof/core/thompson_entry.py": {
+          "bytes": 35331,
+          "sha256": "f315b39093f91832f87dd48df9cb7edd2c80faf42c02e8b65178588ed0fc88ba"
         },
-        "gpuwm/ingest/atmospheric_window.py": {
+        "woof/ingest/atmospheric_window.py": {
           "bytes": 10794,
           "sha256": "080484aa78b9422347e28877fadd182dd26e8c61a8bfe77cda7f95f5c07476ef"
         },
-        "gpuwm/ingest/cold_start_cpu.py": {
-          "bytes": 12543,
-          "sha256": "8f4e671731e08d9d4faef026fa37a1c9dd254e3b37793fef6c87b4a3f73f2cff"
+        "woof/ingest/cold_start_cpu.py": {
+          "bytes": 12536,
+          "sha256": "779c6575616d4dd851069b628f674039c96068e23bc2594d8f1f067e18f45aeb"
         },
-        "gpuwm/ingest/cpu_backend.py": {
+        "woof/ingest/cpu_backend.py": {
           "bytes": 84535,
           "sha256": "ecc71057dbc4dc100c7f52e531cfd5424d487f7f1ddfae43f4e1bb399b0ca9e7"
         },
-        "gpuwm/ingest/horiz.py": {
+        "woof/ingest/horiz.py": {
           "bytes": 118568,
           "sha256": "1a7d5c23b882f43d7e0fa3b887ecc65f7d52ac82043bb54a91e6967049d0ade3"
         },
-        "gpuwm/ingest/host_arrays.py": {
+        "woof/ingest/host_arrays.py": {
           "bytes": 8869,
           "sha256": "a79c11541f4f2e728ed525c24a01b0d154f82c17384eef15bf44c8e4f1881921"
         },
-        "gpuwm/ingest/interpolation_support.py": {
-          "bytes": 2555,
-          "sha256": "9be833136d3dc4fea8f40f4358fc7dd90225ffa0ca9936ae8bb09ba41fea9d87"
+        "woof/ingest/interpolation_support.py": {
+          "bytes": 2554,
+          "sha256": "432895a05af865b2138c6ba109d13e39fe61c83a4f66eaea62196f5348875fe3"
         },
-        "gpuwm/ingest/lake_temperature.py": {
+        "woof/ingest/lake_temperature.py": {
           "bytes": 8908,
           "sha256": "250a97b710e696c650f817be01cad3459495cc1ab20e7e509580c223f6c4a177"
         },
-        "gpuwm/ingest/preparation_fingerprints.py": {
-          "bytes": 4057,
-          "sha256": "e10f85420f6bfa032ac82ea85120ccea2ca383e344dc266ddb8d588826ad9a5f"
+        "woof/ingest/preparation_fingerprints.py": {
+          "bytes": 4055,
+          "sha256": "63a1727a6f0e5c6ef45b1baffd719d868b1420c8babed939554082b4a4da901a"
         },
-        "gpuwm/ingest/preprocess_backend.py": {
+        "woof/ingest/preprocess_backend.py": {
           "bytes": 71412,
           "sha256": "4bacb96f2eb39ce9fb90800dceedc37aa8b164b81489491e90252afc8b7b0444"
         },
-        "gpuwm/ingest/real.py": {
+        "woof/ingest/real.py": {
           "bytes": 279440,
           "sha256": "25ce9f2a9ca024387591d9863e98cc16c1fadbd968e19b98efe13f8afb8dbdee"
         },
-        "gpuwm/ingest/vert.py": {
+        "woof/ingest/vert.py": {
           "bytes": 20089,
           "sha256": "78d2a54aab88af49f31d393d95bafec991df885394de03ff8b4052492b7ddeb1"
         },
-        "gpuwm/ingest/water_temperature.py": {
+        "woof/ingest/water_temperature.py": {
           "bytes": 42305,
           "sha256": "d7d3c29d09dea0103149999dbc96225abbcce6a19bebd551477d5f6a5f308f19"
         }
@@ -610,7 +610,7 @@
     ],
     "workers": 8
   },
-  "proof_content_sha256": "dd29c87bb78ab2196244a7e8b271b7a4f3c1a596ba581cd47109c1e0e9024f10",
+  "proof_content_sha256": "7e61bfe50a538dfeab36015da36073ffb321423e15cc489133b9d9dd1fabd275",
   "schema": "gpuwm-mapped-direct-wrf-proof-v1",
   "soil_texture_downscale": {
     "advisory": false,

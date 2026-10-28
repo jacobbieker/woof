@@ -69,6 +69,113 @@ class EnsembleDoorError(MpasPortError):
     """The ensemble path refuses, and says why."""
 
 
+# -- graceful recovery (WOOF 2026-10-26, run_2de68ba40c93de79: one member's products refused at f15 and the door threw
+# away the nine good members). Each per-member stage is retried once; a member that still fails is recorded in
+# ensemble.json "missing" with its own reason and the ensemble goes on with the others. The door refuses only when
+# no member is left. WOOF_FAULT_PLAN (test-only; the WOOF worker passes it for injected runs) fails named units.
+FAULT_ENV = "WOOF_FAULT_PLAN"
+MEMBER_RETRIES = 1
+_FAULT_PLAN = None
+_FAULT_TEXT = {
+    "exit": "FAULT INJECTION: exited 1",
+    "transient": "FAULT INJECTION: Connection reset by peer",
+    "nonfinite": "FAULT INJECTION: history q2 is not finite at f{hour:03d}",
+    "hang": "FAULT INJECTION: no progress (stall)",
+    "http500": "FAULT INJECTION: HTTP 500",
+    "gpu": "FAULT INJECTION: CUDA_ERROR_ILLEGAL_ADDRESS: an illegal memory access was encountered (Xid 13)",
+}
+
+
+def member_number(run_id) -> int | None:
+    digits = "".join(ch for ch in str(run_id)[-4:] if ch.isdigit())
+    return int(digits) if digits else None
+
+
+def fault_point(unit: str, run_id, hour=None) -> str | None:
+    """The injected failure for this unit, or None. Each plan item fails its unit ``times`` times."""
+    global _FAULT_PLAN
+    if _FAULT_PLAN is None:
+        try:
+            plan = json.loads(os.environ.get(FAULT_ENV) or "[]")
+        except ValueError:
+            plan = []
+        _FAULT_PLAN = [item for item in (plan if isinstance(plan, list) else []) if isinstance(item, dict)]
+    number = member_number(run_id)
+    for item in _FAULT_PLAN:
+        want = item.get("member")
+        if item.get("unit") != unit or int(item.get("times") or 0) <= 0:
+            continue
+        if want not in (None, "*") and str(want) != str(number):
+            continue
+        item["times"] = int(item["times"]) - 1
+        at = item.get("hour") if isinstance(item.get("hour"), int) else (hour or 0)
+        return _FAULT_TEXT.get(str(item.get("kind") or "exit"), _FAULT_TEXT["exit"]).format(hour=at)
+    return None
+
+
+def failure_reason(text: str) -> str:
+    """A stage's own reason: its last line that refuses, errs or fails, else its last line."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        low = line.lower()
+        if any(word in low for word in ("refused", "error", "not finite", "failed", "fault injection", "exited")):
+            return line[:400]
+    return lines[-1][:400] if lines else ""
+
+
+def _log_reason(path) -> str:
+    try:
+        return failure_reason(Path(path).read_text(encoding="utf-8", errors="replace")[-20000:])
+    except (OSError, TypeError):
+        return ""
+
+
+def _captured_door(argv, env, log: Path) -> int:
+    """_run_door with the stage's output (its subprocesses' too) captured at the file-descriptor level into ``log``,
+    then echoed to the door's own output, so a failed member stage has its own reason."""
+    from .global_door import _run_door
+
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_bytes(b"")
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved = os.dup(1), os.dup(2)
+    py = sys.stdout, sys.stderr
+    try:
+        # Both the descriptors (subprocesses, native code) and Python's own streams append to the one log.
+        with open(log, "ab") as stream, open(log, "a", encoding="utf-8", buffering=1) as text:
+            os.dup2(stream.fileno(), 1)
+            os.dup2(stream.fileno(), 2)
+            sys.stdout = sys.stderr = text
+            try:
+                return _run_door(argv, env)
+            except Exception as error:  # a stage that raises is a failed stage with that reason
+                print(f"{argv[0]} failed: {type(error).__name__}: {error}", flush=True)
+                return 1
+            finally:
+                text.flush()
+                sys.stdout, sys.stderr = py
+    finally:
+        sys.stdout, sys.stderr = py
+        os.dup2(saved[0], 1)
+        os.dup2(saved[1], 2)
+        os.close(saved[0])
+        os.close(saved[1])
+        try:
+            sys.stdout.write(log.read_text(encoding="utf-8", errors="replace")[-200000:])
+            sys.stdout.flush()
+        except OSError:
+            pass
+
+
+def history_hours(folder) -> int:
+    """History frames a member's forecast folder holds (its hours made, the start included)."""
+    try:
+        return sum(1 for _ in Path(folder).rglob("*history*.nc"))
+    except (OSError, TypeError):
+        return 0
+
+
 def forecast_devices(requested: str | None, environment=None, error=EnsembleDoorError) -> list[str]:
     """Resolve logical device selections inside the inherited CUDA allocation.
 
@@ -196,8 +303,8 @@ def _probe_cards(devices: str | None) -> list[dict[str, Any]]:
         out = subprocess.run([sys.executable, "-c", _CARD_PROBE], capture_output=True, text=True,
                              timeout=120, env=env)
         cards = json.loads(out.stdout.strip().splitlines()[-1]) if out.returncode == 0 else []
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-        return []
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, TypeError, AttributeError):
+        return []  # no readable card here: the forecast door admits at bind
     return cards if isinstance(cards, list) else []
 
 
@@ -213,20 +320,26 @@ def _forecast_flag(argv: Sequence[str], flag: str) -> str | None:
 def memory_group_limit(value: Mapping[str, Any], args: argparse.Namespace) -> int | None:
     """Members per group the smallest visible card holds, priced exactly as the roster admission prices them.
 
-    Same sum as ``multi_member._run_members``: each member's solo floor
-    (``forecast_door.required_free_bytes`` on this card's footprint row and the run's headroom) plus its
+    Same sum as the roster admissions (``multi_member._run_members``, ``multi_member.admit_suite_group``): each
+    member's solo floor on the route it runs (``device_admission.route_required_free_bytes`` on this card's
+    footprint row and the run's headroom; the MPAS route never below its measured whole runs) plus its
     stochastic arrays (``forecast_door.stochastic_array_bytes`` of the member's own options), against the
     card's free bytes, through ``device_admission.co_tenancy_limits``.  None when no card can be read here
     (the forecast door still admits, and a refused group still splits).
     """
 
     from . import forecast_door as door
-    from .device_admission import card_profile_from_attributes, co_tenancy_limits, model_for_card
+    from .device_admission import (card_profile_from_attributes, co_tenancy_limits, model_for_card,
+                                   route_required_free_bytes)
+    from .multi_member import argv_physics_route
 
     cards = _probe_cards(getattr(args, "devices", None))
     if not cards:
         return None
     argv = list(value["commands"]["forecast"])
+    # Each member is priced on the route it runs: the MPAS route (the hex default) holds far more than the
+    # ArWen-route rows (U-H4: 30 km MPAS members planned 2 per RTX PRO 6000 at the ArWen price and ran out of memory).
+    route = argv_physics_route(argv)
     headroom = _forecast_flag(argv, "--headroom-mib")
     margin = None if headroom is None else int(round(float(headroom) * door.MIB))
     cells = int(value["mesh"]["cells"])
@@ -240,7 +353,8 @@ def memory_group_limit(value: Mapping[str, Any], args: argparse.Namespace) -> in
         model = model_for_card(profile, "global", rollback_armed="--stop-on-refusal" in argv)
         table, memory = co_tenancy_limits(
             mesh_kind="global", cells=cells, levels=levels, card_bytes=int(card["total"]),
-            free_bytes=int(card["free"]), solo_required_bytes=door.required_free_bytes(cells, model, margin),
+            free_bytes=int(card["free"]),
+            solo_required_bytes=route_required_free_bytes(cells, model, margin, route=route),
             member_additional_bytes=additional)
         limits.append(min(table, memory))
     return max(1, min(limits))
@@ -274,6 +388,127 @@ def group_limit(value: Mapping[str, Any], args: argparse.Namespace) -> int:
         return 1
     priced = memory_group_limit(value, args)
     return table if priced is None else max(1, min(table, priced))
+
+
+#: Extra columns one rank of a member split over several cards holds beyond its share of the mesh (its halo
+#: rings and the seam packets), as a fraction of that share.  Priced high on purpose until the measured rows
+#: below replace it: a rank that does not fit fails at its first step, a rank priced a little high only costs
+#: a card.
+RANK_HALO_SHARE = 0.10
+
+
+def cards_per_member(value: Mapping[str, Any], args: argparse.Namespace,
+                     cards: list[dict[str, Any]] | None = None) -> int:
+    """Cards one member runs on: ``--cards-per-member``, else the fewest cards whose per-rank price fits the
+    smallest visible card.
+
+    THE BREAKAGE THIS PREVENTS (8x RTX 5090 fit, 2026-10-27): a 30 km MPAS-route member peaks at 75,069 MiB
+    on one card (``device_admission.MPAS_ROUTE_RUN_PEAKS``), more than twice a 32 GB card, and the ensemble
+    door only ever put a member on ONE card (``forecast_argv`` strips ``--samehost-devices``), so a 30 km
+    global ensemble (and the synthetic-radar DA cycle's member forecasts, which run through this door) could
+    not run on any 32 GB card at all.  The forecast door already runs one member over several cards in one
+    process (the same-host rank threads, ``mpasphys.samehost_v842`` on the MPAS route); this picks how many.
+
+    The price of one rank is the member's own route price (``device_admission.route_required_free_bytes``, the
+    MPAS route never below its measured whole runs) at the rank's share of the columns plus
+    :data:`RANK_HALO_SHARE`, against the card's TOTAL memory: the card count is a property of the shape and
+    the card model, not of what another lease holds on the box at the moment (the forecast door's own
+    admission still checks the free memory when it binds).  1 whenever a member fits one card.
+    """
+
+    requested = getattr(args, "cards_per_member", None)
+    resident = getattr(args, "members_per_card", None)
+    if requested in (None, "", "auto") and resident not in (None, "", "auto") and int(resident) > 1:
+        return 1  # several members resident on ONE card were asked for: a member fits one card
+    if cards is None:
+        cards = _probe_cards(getattr(args, "devices", None))
+    visible = max(1, len(cards)) if cards else len(forecast_devices(getattr(args, "devices", None)))
+    if requested not in (None, "", "auto"):
+        count = int(requested)
+        if not 1 <= count <= visible:
+            raise EnsembleDoorError(f"--cards-per-member is 1 to the {visible} cards this door can use, got {count}")
+        return count
+    if not cards:
+        return 1
+    from . import forecast_door as door
+    from .device_admission import card_profile_from_attributes, model_for_card, route_required_free_bytes
+    from .multi_member import argv_physics_route
+
+    argv = list(value["commands"]["forecast"])
+    route = argv_physics_route(argv)
+    headroom = _forecast_flag(argv, "--headroom-mib")
+    margin = None if headroom is None else int(round(float(headroom) * door.MIB))
+    cells = int(value["mesh"]["cells"])
+    smallest = min(cards, key=lambda card: int(card["total"]))
+    profile = card_profile_from_attributes(smallest["name"], {"MultiProcessorCount": smallest["sms"],
+                                                               "MaxThreadsPerMultiProcessor": smallest["threads"]})
+    model = model_for_card(profile, "global", rollback_armed="--stop-on-refusal" in argv)
+    total = int(smallest["total"])
+    if route_required_free_bytes(cells, model, margin, route=route) <= total:
+        return 1
+    for count in range(2, len(cards) + 1):
+        share = -(-int(cells * (1.0 + RANK_HALO_SHARE)) // count)
+        if route_required_free_bytes(share, model, margin, route=route) <= total:
+            return count
+    # Not even every visible card holds it: one card each, and the forecast door's own admission refuses by name.
+    return 1
+
+
+def card_slots(cards: Sequence[str], per_member: int) -> list[str]:
+    """The card sets members run on: consecutive runs of ``per_member`` cards (``"0,1,2"``), one queue each.
+    Cards left over after the last whole set run nothing (named in the forecast stage's record)."""
+
+    if per_member <= 1:
+        return list(cards)
+    return [",".join(cards[at:at + per_member]) for at in range(0, len(cards) - per_member + 1, per_member)]
+
+
+def _set_flag(argv: list[str], flag: str, value: str) -> None:
+    if flag in argv:
+        argv[argv.index(flag) + 1] = value
+    else:
+        argv += [flag, value]
+
+
+def member_forecast_argv(value: Mapping[str, Any], member: Mapping[str, Any], out: Path, scratch: Path,
+                         ranks: int) -> list[str]:
+    """One member alone, over ``ranks`` cards (the forecast door's same-host ranks), with exactly the arguments its
+    roster record would give it (``multi_member.roster_members``): init, start, length, history start, source
+    label and the member's own stochastic identity, so the member is the same member it is on one card."""
+
+    argv = list(value["commands"]["forecast"])
+    if "--samehost-devices" in argv:
+        at = argv.index("--samehost-devices")
+        del argv[at:at + 2]
+    _set_flag(argv, "--init", str(member["init"]))
+    _set_flag(argv, "--out", str(out / member["run_id"]))
+    _set_flag(argv, "--scratch", str(scratch / member["run_id"]))
+    _set_flag(argv, "--start-time", str(member["start_time"]))
+    _set_flag(argv, "--hours", f"{float(member['hours']):g}")
+    _set_flag(argv, "--history-from-minutes", f"{float(member.get('history_from_minutes') or 0):g}")
+    _set_flag(argv, "--init-source", json.dumps(member["provenance"], sort_keys=True))
+    _set_flag(argv, "--stochastic", json.dumps(member["stochastic"], sort_keys=True))
+    return [*argv, "--samehost-devices", ",".join(str(index) for index in range(ranks))]
+
+
+#: Host bytes one member's forecast process holds, per mesh cell, by route, with headroom.  Measured (hex fit/hex-5090
+#: = rel/hex-0.4.9 + this branch, RTX 5090, MPAS physics convection_permitting, 2026-10-27): whole-run VmHWM 4.22 GB
+#: at 40,962 cells (120 km, one rank) and 8.46 GB at 99,898 cells (multi-zoom, fixed step) = 72 KB/cell + 1.3 GB.
+#: Used only to hold back the PIPELINED next process on a card set while the host lacks the memory
+#: (see ``worker`` in run_forecasts).
+HOST_BYTES_PER_CELL = {"mpas": 80 * 1024, "arwen": 60 * 1024}
+#: The interpreter, CUDA context and kernel images of one forecast process.
+HOST_BYTES_FLOOR = 2 << 30
+#: Each same-host rank past the first: 6.68 GB for 2 ranks against 4.22 GB for 1 at 120 km (measured as above).
+HOST_BYTES_PER_EXTRA_RANK = 5 << 29
+
+
+def member_host_bytes(value: Mapping[str, Any], ranks: int = 1) -> int:
+    from .multi_member import argv_physics_route
+    route = argv_physics_route(list(value["commands"]["forecast"]))
+    cells = int(value["mesh"]["cells"])
+    return (HOST_BYTES_FLOOR + cells * HOST_BYTES_PER_CELL.get(route, HOST_BYTES_PER_CELL["mpas"])
+            + max(0, int(ranks) - 1) * HOST_BYTES_PER_EXTRA_RANK)
 
 
 def _init_done(member: Mapping[str, Any], value: Mapping[str, Any]) -> bool:
@@ -416,12 +651,32 @@ def run_inits(value: Mapping[str, Any], members: list[dict[str, Any]], args, sta
             status.step(done, note=f"{member['run_id']} init exited {member['init_returncode']}")
             if member["init_returncode"] != 0:
                 failed.append(member["run_id"])
-    if failed:
+    retried = []
+    for run_id in sorted(failed):
+        member = next(m for m in todo if m["run_id"] == run_id)
+        log = Path(member["init_dir"]).parent / "init.log"
+        first = _log_reason(log)
+        for attempt in range(2, 2 + MEMBER_RETRIES):
+            status.note(f"{run_id} init retry {attempt - 1} of {MEMBER_RETRIES} after: {first}")
+            began = time.monotonic()
+            rc = _cli(member["init_argv"], log, env)
+            retried.append({"run_id": run_id, "stage": "init", "attempt": attempt, "of": 1 + MEMBER_RETRIES, "rc": rc,
+                            "reason": first, "seconds": round(time.monotonic() - began, 1), "recovered": rc == 0})
+            for bound in members:
+                if bound["init"] == member["init"]:
+                    bound["init_returncode"] = rc
+            if rc == 0:
+                break
+    lost = sorted({m["run_id"] for m in members if m.get("init_returncode", 0) != 0})
+    for member in members:
+        if member.get("init_returncode", 0) != 0:
+            member["missing"] = {"stage": "init", "reason": _log_reason(Path(member["init_dir"]).parent / "init.log")
+                                 or f"init exited {member['init_returncode']}", "attempts": 1 + MEMBER_RETRIES}
+    if lost and len(lost) == len(members):
         raise EnsembleDoorError(
-            f"the init of {', '.join(sorted(failed))} failed (logs: members/<run_id>/init.log); an ensemble "
-            f"with members missing is not run as if it were complete")
+            f"the init of every member failed ({', '.join(lost)}; logs: members/<run_id>/init.log)")
     return {"built": len(todo), "skipped": len(unique) - len(todo), "jobs": jobs,
-            "source_inputs": len(unique), "bound_members": len(members)}
+            "source_inputs": len(unique), "bound_members": len(members), "retried": retried, "missing": lost}
 
 
 def member_case(value: Mapping[str, Any], member: Mapping[str, Any]) -> str:
@@ -483,12 +738,22 @@ def forecast_argv(value: Mapping[str, Any], roster: Path, out: Path, scratch: Pa
 
 
 def run_forecasts(value: Mapping[str, Any], members: list[dict[str, Any]], args, status, env,
-                  live: bool = False) -> dict[str, Any]:
-    """``live``: the products stage follows, so each member's maps are drawn while its group integrates."""
+                  live: bool = False, ensemble: list[dict[str, Any]] | None = None, group_size: int | None = None,
+                  prefix: str = "") -> dict[str, Any]:
+    """``live``: the products stage follows, so each member's maps are drawn while its group integrates.
+    ``ensemble``: the whole ensemble when ``members`` is a retry of some of them (each member's stochastic identity is
+    sized by the whole ensemble, so a retried member is the same member); ``group_size`` and ``prefix`` (its group
+    folders) for a retry, which runs each member alone so one bad member cannot fail the others again."""
     work = Path(value["paths"]["work"])
+    whole = ensemble or members
     gate = live_draw_gate(len(members)) if live else None
-    limit = group_limit(value, args)
-    cards = forecast_devices(args.devices)
+    devices = forecast_devices(args.devices)
+    ranks = cards_per_member(value, args)
+    limit = 1 if ranks > 1 else (group_size or group_limit(value, args))
+    cards = card_slots(devices, ranks)
+    if not cards:
+        raise EnsembleDoorError(f"a member needs {ranks} cards and this door can use {len(devices)}")
+    host_need = member_host_bytes(value, ranks)
     pending: "queue.Queue[list[dict[str, Any]]]" = queue.Queue()
     for start in range(0, len(members), limit):
         pending.put(members[start:start + limit])
@@ -517,7 +782,7 @@ def run_forecasts(value: Mapping[str, Any], members: list[dict[str, Any]], args,
     def _run_group(card: str, group: list[dict[str, Any]], started: threading.Event) -> None:
         with lock:
             counter[0] += 1
-            name = f"g{counter[0]:02d}"
+            name = f"{prefix}g{counter[0]:02d}"
         warm_page_cache([m["init"] for m in group])
         out, scratch = work / "ensemble" / name, work / "scratch" / name
         roster = work / "ensemble" / f"{name}.roster.json"
@@ -532,13 +797,17 @@ def run_forecasts(value: Mapping[str, Any], members: list[dict[str, Any]], args,
         for m in group:
             identity = m["member"] if m["member"] is not None and not m["provenance"]["lag_hours"] else member_number(m["run_id"])
             m["stochastic"] = member_options(identity, seed=stochastic_seed,
-                source_members=len({item["member"] for item in members}), ensemble_size=len(members), **overrides)
-        roster.write_text(json.dumps([
-            {"run_id": m["run_id"], "init": m["init"], "stochastic": m["stochastic"],
-             **{key: m[key] for key in ("start_time", "hours", "history_from_minutes")},
-             "init_source": json.dumps(m["provenance"], sort_keys=True)}
-            for m in group], indent=2) + "\n", encoding="utf-8")
-        argv = forecast_argv(value, roster, out, scratch, group[0]["init"])
+                source_members=len({item["member"] for item in whole}), ensemble_size=len(whole), **overrides)
+        if ranks > 1:
+            # One member over the card set: the forecast door's same-host ranks (a roster cannot span cards).
+            argv = member_forecast_argv(value, group[0], out, scratch, ranks)
+        else:
+            roster.write_text(json.dumps([
+                {"run_id": m["run_id"], "init": m["init"], "stochastic": m["stochastic"],
+                 **{key: m[key] for key in ("start_time", "hours", "history_from_minutes")},
+                 "init_source": json.dumps(m["provenance"], sort_keys=True)}
+                for m in group], indent=2) + "\n", encoding="utf-8")
+            argv = forecast_argv(value, roster, out, scratch, group[0]["init"])
         log = work / "ensemble" / f"{name}.log"
         ticket = work / "ensemble" / f"{name}.card-ticket.json"
         ticket.unlink(missing_ok=True)
@@ -547,8 +816,13 @@ def run_forecasts(value: Mapping[str, Any], members: list[dict[str, Any]], args,
         threading.Thread(target=_signal_on_ticket, args=(ticket, started, done), daemon=True).start()
         looks = member_looks(value, group, out, len(members), args, gate) if gate is not None else {}
         try:
-            rc = _cli(argv, log, {**env, "CUDA_VISIBLE_DEVICES": card, GATE_ENV: str(gate_path(card)),
-                                  TICKET_ENV: str(ticket)})
+            injected = next((text for m in group for text in [fault_point("forecast", m["run_id"])] if text), None)
+            if injected:
+                log.write_text(injected + "\n", encoding="utf-8")
+                rc = 1
+            else:
+                rc = _cli(argv, log, {**env, "CUDA_VISIBLE_DEVICES": card, GATE_ENV: str(gate_path(card)),
+                                      TICKET_ENV: str(ticket)})
         finally:
             done.set()
             # The forecast has ended: each look lets a draw in progress land; what it rendered, its member's full
@@ -559,7 +833,8 @@ def run_forecasts(value: Mapping[str, Any], members: list[dict[str, Any]], args,
                     m["first_look"] = look.finish()
                     receipt = look.receipt()
                     m["live_frames"] = str(receipt) if receipt else None
-        row = {"group": name, "card": card, "members": [m["run_id"] for m in group], "returncode": rc,
+        row = {"group": name, "card": card, "cards_per_member": ranks, "members": [m["run_id"] for m in group],
+               "returncode": rc,
                "seconds": round(time.monotonic() - began, 1), "log": str(log), "out": str(out)}
         try:
             row["card_handoff"] = json.loads(ticket.read_text(encoding="utf-8"))
@@ -576,7 +851,8 @@ def run_forecasts(value: Mapping[str, Any], members: list[dict[str, Any]], args,
                 status.note(f"{name}: card {card} refused {len(group)} resident members; split in two")
         else:
             for member in group:
-                member.update(group=name, card=card, forecast=str(out / member["run_id"]), forecast_returncode=rc)
+                member.update(group=name, card=card, forecast=str(out / member["run_id"]), forecast_returncode=rc,
+                              forecast_log=str(log))
             with lock:
                 finished[0] += len(group)
                 status.step(finished[0], note=f"{name} on card {card}: {', '.join(row['members'])} exited {rc} "
@@ -602,6 +878,16 @@ def run_forecasts(value: Mapping[str, Any], members: list[dict[str, Any]], args,
                             return
                     time.sleep(0.5)  # a split group may still be queued by another card
                     continue
+                # Host-RAM admission for the PIPELINED start: the next group's process prepares on the host while
+                # this card's current group still holds its own host memory.  THE BREAKAGE THIS PREVENTS (V8X,
+                # 8x RTX 5090, 251 GB host, 2026-10-27): hex 60 km forecast children at 21-29 GB each were the
+                # cgroup OOM killer's victims 30 times in one night.  Waits only while another group of this card
+                # is still running (a first group always starts) and never longer than that group runs.
+                while any(item.is_alive() for item in running):
+                    available = _available_host_bytes()
+                    if available is None or available >= host_need:
+                        break
+                    time.sleep(2.0)
                 started = threading.Event()
                 thread = threading.Thread(target=run_group, args=(card, group, started),
                                           name=f"hex-card-{card}", daemon=True)
@@ -618,7 +904,9 @@ def run_forecasts(value: Mapping[str, Any], members: list[dict[str, Any]], args,
     for thread in threads:
         thread.join()
     failed = [m["run_id"] for m in members if m.get("forecast_returncode") != 0]
-    return {"members_per_group": limit, "cards": cards, "groups": groups, "failed": failed}
+    return {"members_per_group": limit, "cards_per_member": ranks, "cards": cards,
+            "cards_unused": [card for card in devices if not any(card in slot.split(",") for slot in cards)],
+            "host_bytes_per_member": host_need, "groups": groups, "failed": failed}
 
 
 def restore_forecasts(value, members):
@@ -651,7 +939,12 @@ def run_ensemble(value: dict[str, Any], args: argparse.Namespace, stages: list[s
     if "forecast" not in stages and any(name in stages for name in ("products", "export", "score")):
         restore_forecasts(value, members)
     record: dict[str, Any] = {"schema": SCHEMA, "row": value["row"]["id"], "source": value["source"],
-                              "cycle": value["cycle"], "members": members, "stages": {}}
+                              "cycle": value["cycle"], "members": members, "stages": {}, "missing": [],
+                              "recovery": []}
+
+    def lose(member, stage, reason, **extra):
+        member.setdefault("missing", {"stage": stage, "reason": reason, **extra})
+        record["missing"].append({"run_id": member["run_id"], "stage": stage, "reason": reason, **extra})
 
     def save() -> None:
         (work / "ensemble.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -661,15 +954,51 @@ def run_ensemble(value: dict[str, Any], args: argparse.Namespace, stages: list[s
             started = time.monotonic()
             if name == "init":
                 record["stages"]["init"] = run_inits(value, members, args, status, env)
+                record["recovery"] += record["stages"]["init"].get("retried", [])
+                for member in members:
+                    if member.get("missing"):
+                        record["missing"].append({"run_id": member["run_id"], **member["missing"]})
             elif name == "forecast":
-                result = run_forecasts(value, members, args, status, env, live="products" in stages)
+                ready = [m for m in members if not m.get("missing")]
+                result = run_forecasts(value, ready, args, status, env, live="products" in stages, ensemble=members)
                 record["stages"]["forecast"] = result
-                if result["failed"]:
+                for attempt in range(2, 2 + MEMBER_RETRIES):
+                    failed = [m for m in ready if m.get("forecast_returncode") != 0]
+                    if not failed:
+                        break
+                    reasons = {m["run_id"]: _log_reason(m.get("forecast_log")) or m.get("forecast_error")
+                               or f"forecast exited {m.get('forecast_returncode')}" for m in failed}
+                    for m in failed:
+                        for key in ("forecast_returncode", "forecast_error", "group", "card", "forecast"):
+                            m.pop(key, None)
+                    status.note(f"forecast retry {attempt - 1} of {MEMBER_RETRIES}, each member alone: "
+                                + ", ".join(m["run_id"] for m in failed))
+                    began = time.monotonic()
+                    again = run_forecasts(value, failed, args, status, env, live="products" in stages, ensemble=members,
+                                          group_size=1, prefix=f"r{attempt - 1}")
+                    seconds = round(time.monotonic() - began, 1)
+                    record["stages"].setdefault("forecast_retries", []).append(again)
+                    for m in failed:
+                        record["recovery"].append({"run_id": m["run_id"], "stage": "forecast", "attempt": attempt,
+                                                   "of": 1 + MEMBER_RETRIES, "rc": m.get("forecast_returncode"),
+                                                   "reason": reasons[m["run_id"]], "seconds": seconds,
+                                                   "recovered": m.get("forecast_returncode") == 0})
+                for m in ready:
+                    if m.get("forecast_returncode") != 0:
+                        lose(m, "forecast", _log_reason(m.get("forecast_log")) or m.get("forecast_error")
+                             or f"forecast exited {m.get('forecast_returncode')}",
+                             attempts=1 + MEMBER_RETRIES, hours=history_hours(m.get("forecast")))
+                result["failed"] = [m["run_id"] for m in members if m.get("missing")]
+                if all(m.get("missing") for m in members):
                     raise EnsembleDoorError(
-                        f"the forecast of {', '.join(result['failed'])} failed (logs: ensemble/gNN.log)")
+                        f"the forecast of every member failed (logs: ensemble/gNN.log): "
+                        + "; ".join(f"{x['run_id']}: {x['reason']}" for x in record["missing"][:4]))
             elif name in ("products", "export", "score"):
                 status.stage(name, step_count=len(members))
                 for index, member in enumerate(members, 1):
+                    if member.get("missing") and member["missing"].get("stage") in ("init", "forecast"):
+                        status.step(index, note=f"{member['run_id']} {name} skipped: its {member['missing']['stage']} is missing")
+                        continue
                     forecast = member["forecast"]
                     out = work / "members" / member["run_id"]
                     if name == "products":
@@ -687,20 +1016,47 @@ def run_ensemble(value: dict[str, Any], args: argparse.Namespace, stages: list[s
                         config.write_text(json.dumps({**value["score_config"], "init": member["init"]}, indent=2)
                                           + "\n", encoding="utf-8")
                         argv = ["score", forecast, "--config", str(config)]
-                    rc = _run_door(argv, env)
-                    if name == "score" and rc == 3:
-                        from .observation_scorecard import completed_scorecard
-                        completed = completed_scorecard(forecast, config)
-                        if completed is not None:
-                            member["scorer_returncode"] = rc
-                            member["score_status"] = completed["status"]
-                            member["measured_metrics"] = completed["measured_metrics"]
-                            status.note(completed["note"])
-                            rc = 0
+                    stage_log = out / f"{name}.log"
+                    first = None
+                    for attempt in range(1, 2 + MEMBER_RETRIES):
+                        began = time.monotonic()
+                        injected = fault_point(name, member["run_id"])
+                        if injected:
+                            stage_log.parent.mkdir(parents=True, exist_ok=True)
+                            stage_log.write_text(injected + "\n", encoding="utf-8")
+                            print(f"{member['run_id']} {name}: {injected}", flush=True)
+                            rc = 1
+                        else:
+                            rc = _captured_door(argv, env, stage_log)
+                        if name == "score" and rc == 3:
+                            from .observation_scorecard import completed_scorecard
+                            completed = completed_scorecard(forecast, config)
+                            if completed is not None:
+                                member["scorer_returncode"] = rc
+                                member["score_status"] = completed["status"]
+                                member["measured_metrics"] = completed["measured_metrics"]
+                                status.note(completed["note"])
+                                rc = 0
+                        reason = _log_reason(stage_log) if rc != 0 else ""
+                        if attempt > 1:
+                            record["recovery"].append({"run_id": member["run_id"], "stage": name, "attempt": attempt,
+                                                       "of": 1 + MEMBER_RETRIES, "rc": rc, "reason": first,
+                                                       "seconds": round(time.monotonic() - began, 1),
+                                                       "recovered": rc == 0})
+                        if rc == 0:
+                            break
+                        first = first or reason or f"{name} exited {rc}"
+                        status.note(f"{member['run_id']} {name} exited {rc}: {reason}"
+                                    + (f"; retry {attempt} of {MEMBER_RETRIES}" if attempt <= MEMBER_RETRIES else ""))
                     member[f"{name}_returncode"] = rc
                     status.step(index, note=f"{member['run_id']} {name} exited {rc}")
                     if rc != 0:
-                        raise EnsembleDoorError(f"{name} of {member['run_id']} exited {rc}")
+                        # The member's other outputs stay: its forecast (and, for products, its export) is still
+                        # in the ensemble's products unless its own reason says its data is bad from some hour.
+                        lose(member, name, reason or f"{name} exited {rc}", attempts=1 + MEMBER_RETRIES)
+                if name != "score" and all(m.get(f"{name}_returncode", 1) != 0 for m in members):
+                    raise EnsembleDoorError(f"{name} failed for every member: "
+                                            + "; ".join(f"{x['run_id']}: {x['reason']}" for x in record["missing"][:4]))
             else:
                 continue  # mesh and static are the one-state stages, run by the caller
             record["stages"].setdefault(name, {})["seconds"] = round(time.monotonic() - started, 1)
@@ -720,5 +1076,8 @@ def add_ensemble_arguments(parser: argparse.ArgumentParser) -> None:
                              "then the members resident on the card in groups (see --members-per-card)")
     parser.add_argument("--members-per-card", default="auto", metavar="N|auto",
                         help="resident members per group, 1 to 4 (default: the co-tenancy table's limit, capped by what the card's memory holds)")
+    parser.add_argument("--cards-per-member", default="auto", metavar="N|auto",
+                        help="cards one member runs on (the forecast door's same-host ranks; default auto: 1 when a "
+                             "member fits one card, else the fewest cards whose per-rank price fits)")
     parser.add_argument("--init-jobs", default="auto", metavar="N|auto",
                         help="member inits built at once (default auto: one per four cores, bounded by host RAM)")

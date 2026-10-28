@@ -94,7 +94,7 @@ def test_the_named_forecast_pair_is_masked_digest_identical(receipts):
 SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     "src/hexcore/cuda_driver.py": {
         "recorded": "cb6477ef2fd02ad551e9b6c8af0724c94fc4d90bdc712fff1378d218662f5d04",
-        "current": "726c3353f22e933ecb802aa3bac04d175aac75e2527060f5a4b64e1b8688635d",
+        "current": "462c3834f24e1467a6db108baa290c089293e355104a71c02c23e8980e398fe6",
         "why": (
             "convection ruling, 2026-08-26: _v841_physics_cadences reports "
             "convection: None when no cumulus scheme is selected instead of "
@@ -213,7 +213,7 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     },
     "src/hexcore/cuda_backend/runtime.py": {
         "recorded": "4deab4b3a37467491a531750e8618705c6884c19c0395891bc426fce2ea6ba5a",
-        "current": "5a714e4b6a26f3e76921bc28a688c483d43169a48ef169a7d6243f730b6a56f8",
+        "current": "6c1143d9c691c2d2fb982daa1366b4c72237b1b1863ee85cbabfb615b8710b0f",
         "why": (
             "2026-10-15: require_cuda's default runtime floor 13000 -> 12000 "
             "(CUDA 12 support) and one docstring paragraph; host Python "
@@ -403,7 +403,7 @@ SOURCE_DRIFT_SINCE_CAMPAIGN: dict[str, dict[str, str]] = {
     },
     "src/hexcore/cuda_transport_v841.py": {
         "recorded": "55c66759d9c81f65ed71ce77570897c102fd64661da6ad6c37b438b27771ab23",
-        "current": "12006584f732c71a1e6263d9e2b4ad773455a52dec74ec3e8b29677fe360060d",
+        "current": "1d2f3cf785c85b539a20e17d092ead5d0099f25e92ec452e116d420c46dea4a0",
         "why": (
             "2026-10-19 LTS hook repair: unspecialized lookups retain their "
             "two-part key; the acoustic tap uses the launched shape identity. "

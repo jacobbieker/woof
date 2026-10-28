@@ -211,7 +211,7 @@ def test_a_pinned_tree_builds_a_wheel(tmp_path):
 
 def test_the_dev_override_builds_and_says_unpublishable(tmp_path):
     tree = _synthetic_tree(tmp_path, UNPINNED_PINS)
-    completed = _bdist_wheel(tree, _env(GPUWM_ALLOW_UNPINNED_WHEEL="1"))
+    completed = _bdist_wheel(tree, _env(WOOF_ALLOW_UNPINNED_WHEEL="1"))
     output = completed.stdout + completed.stderr
     assert completed.returncode == 0, output
     assert list(tree.glob("dist/*.whl")), output

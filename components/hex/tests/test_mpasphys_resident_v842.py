@@ -70,7 +70,7 @@ def test_resident_admission_requires_every_active_slot_and_owned_global_mesh(mon
 
 
 def test_preparation_keeps_native_surface_sum_and_interpolation_writes(monkeypatch):
-    monkeypatch.setattr('hexcore.mpasphys.math_v842.bind_common_carrier_math', lambda source: source)
+    monkeypatch.setattr('woof.hex.mpasphys.math_v842.bind_common_carrier_math', lambda source: source)
     source = preparation_source()
     production = source.split('extern "C" __global__ void prep_interfaces_v841_f32(', 1)[1]
     production = production.split('extern "C" __global__ void validate_prep_v841_f32(', 1)[0]

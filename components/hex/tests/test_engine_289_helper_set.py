@@ -39,5 +39,5 @@ def test_the_refusal_names_the_engine_and_both_remedies(tmp_path):
     message = str(refused.value)
     assert "the installed engine is woof 2.9.1" in message
     assert f"measured on woof {engine_pin.wanted_version()}" in message
-    assert f"pip install \"woof=={engine_pin.wanted_version()}\"" in message
+    assert f"pip install \"{engine_pin.DISTRIBUTION}=={engine_pin.wanted_version()}\"" in message
     assert "woof hex release that admits woof 2.9.1" in message

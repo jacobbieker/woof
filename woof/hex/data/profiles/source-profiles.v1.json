@@ -290,12 +290,12 @@
       "hex_lanes": {
         "namelist-dry": {
           "door": "woof.hex.config.dry_dycore_config_from_namelist(text, source_release='v8.4.1')",
-          "config_type": "hexcore.config_v841.V841UpperDampingDryConfig",
+          "config_type": "woof.hex.config_v841.V841UpperDampingDryConfig",
           "what": "hex's namelist door: the dry v8.4.1 lane read from a namelist.atmosphere, as read_dry_dycore_config does (src/hexcore/config.py:465-570)"
         },
         "forecast-column": {
           "door": "woof hex forecast (src/hexcore/drivers/run_cuda_v841_forecast.py:733-846, build_forecast_config)",
-          "config_type": "hexcore.config_v841.V841UpperDampingSmagorinskyConfig",
+          "config_type": "woof.hex.config_v841.V841UpperDampingSmagorinskyConfig",
           "what": "the lane the forecast door builds. The door exposes only the timestep, the physics cadences, the convection selection, the mixing selection and the boundary switch (read off the grid); every other dycore setting is a literal of this type, and no namelist is read"
         }
       },

@@ -2,8 +2,8 @@
   "schema": "aq-off-emitted-config-bytes-v1",
   "staging_sha": "00bbfcf9a91723125b4a1328248e90b66e611256",
   "source_sha256": {
-    "gpuwm/config.py": "0d2de87bba1f02b08e1339a178aad4fa90a71104b2c038819bb8d86b8d6a0956",
-    "gpuwm/io/restart.py": "bfef017a8cd0a323d1a87d8c1e7e113c72d3edb7aa728d1780d15647b60b3437"
+    "woof/config.py": "0d2de87bba1f02b08e1339a178aad4fa90a71104b2c038819bb8d86b8d6a0956",
+    "woof/io/restart.py": "bfef017a8cd0a323d1a87d8c1e7e113c72d3edb7aa728d1780d15647b60b3437"
   },
   "cases": {
     "generic_dry": {

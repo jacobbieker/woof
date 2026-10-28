@@ -59,13 +59,13 @@ def test_device_maths_reproduce_the_certified_headers(tmp_path):
         path = Path(out[scheme]["path"])
         assert path.name == filename
         assert hashlib.sha256(path.read_bytes()).hexdigest() == expected == out[scheme]["sha256"]
-    sources = json.loads((ROOT / "src/hexcore/data/mpasphys-maths/SOURCES.json").read_text(encoding="utf-8"))
+    sources = json.loads((ROOT / "../../woof/hex/data/mpasphys-maths/SOURCES.json").read_text(encoding="utf-8"))
     assert sorted(sources["outputs"].values()) == sorted(sha for _, sha in rb.MATHS.values())
 
 
 def test_a_changed_vendored_source_refuses_by_name(tmp_path, monkeypatch):
     copy = tmp_path / "data" / "mpasphys-maths"
-    shutil.copytree(ROOT / "src/hexcore/data/mpasphys-maths", copy)
+    shutil.copytree(ROOT / "../../woof/hex/data/mpasphys-maths", copy)
     target = copy / "core-math" / "tanhf.c"
     target.write_bytes(target.read_bytes() + b"\n")
     monkeypatch.setattr(rb, "_data_root", lambda name: tmp_path / "data" / name)
@@ -74,7 +74,7 @@ def test_a_changed_vendored_source_refuses_by_name(tmp_path, monkeypatch):
 
 
 def test_vendored_notices_ship_beside_the_maths():
-    root = ROOT / "src/hexcore/data/mpasphys-maths"
+    root = ROOT / "../../woof/hex/data/mpasphys-maths"
     sources = json.loads((root / "SOURCES.json").read_text(encoding="utf-8"))
     for name, sha in sources["notices"].items():
         assert hashlib.sha256((root / name).read_bytes()).hexdigest() == sha
@@ -170,7 +170,7 @@ def test_thompson_generators_link_the_pinned_log10f(tmp_path):
     shim = next(command for command in commands if "cr_log10f.c" in command)
     assert "-Dcr_log10f=log10f" in shim and commands.index(shim) < commands.index(links[0])
     staged = rb._stage_pinned_log10f(tmp_path)
-    sources = json.loads((ROOT / "src/hexcore/data/mpasphys-maths/SOURCES.json").read_text(encoding="utf-8"))
+    sources = json.loads((ROOT / "../../woof/hex/data/mpasphys-maths/SOURCES.json").read_text(encoding="utf-8"))
     assert hashlib.sha256(staged.read_bytes()).hexdigest() == sources["files"][rb.PINNED_LOG10F]["sha256"]
     assert "float cr_log10f(float x)" in staged.read_text(encoding="utf-8")
     # The release image has glibc 2.28. Its other libm functions also differ

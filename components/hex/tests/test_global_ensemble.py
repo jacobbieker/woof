@@ -306,15 +306,20 @@ def test_member_scores_only_complete_on_verified_measurements(tmp_path, monkeypa
     monkeypatch.setattr(global_door, '_run_door', lambda argv, env: scorer_rc)
     monkeypatch.setattr(observation_scorecard, 'completed_scorecard', completed)
     if expected_rc:
-        with pytest.raises(EnsembleDoorError, match=f'score of mem001 exited {expected_rc}'):
-            global_ensemble.run_ensemble(value, args, ['score'], _Status(), {})
+        # A score that does not complete is that member's missing score (graceful recovery): retried once, recorded
+        # with its reason, and the ensemble goes on.
+        record = global_ensemble.run_ensemble(value, args, ['score'], _Status(), {})
+        assert all(m['score_returncode'] == expected_rc for m in record['members'])
+        assert [(x['run_id'], x['stage']) for x in record['missing']] == [('mem001', 'score'), ('mem002', 'score')]
     else:
         record = global_ensemble.run_ensemble(value, args, ['score'], _Status(), {})
         assert all(m['score_returncode'] == 0 and m['scorer_returncode'] == 3 for m in record['members'])
         assert all(m['measured_metrics'] == 7 for m in record['members'])
-    assert len(checked) == (2 if expected_rc == 0 else 1 if scorer_rc == 3 else 0)
-    for (forecast, config), member in zip(checked, saved):
-        assert forecast == member['forecast'] and config['init'] == member['init']
+    # an unverified score is checked on each of its two tries
+    assert len(checked) == (2 if expected_rc == 0 else 4 if scorer_rc == 3 else 0)
+    by_forecast = {m['forecast']: m for m in saved}
+    for forecast, config in checked:
+        assert config['init'] == by_forecast[forecast]['init']
 
 
 def test_planner_prices_members_like_the_roster_admission(monkeypatch):
@@ -403,3 +408,85 @@ def test_each_member_draws_its_own_hours_while_its_group_integrates(tmp_path, mo
     for argv, m in zip(calls, members):
         assert argv[argv.index("--live-frames") + 1] == m["live_frames"]   # the full pass keeps the hours drawn live
         assert argv[argv.index("--case") + 1] == global_ensemble.member_case(value, m)
+
+
+_PRO_6000 = {"name": "NVIDIA RTX PRO 6000 Blackwell Server Edition", "free": 97_300 * 1024**2,
+             "total": 97_887 * 1024**2, "sms": 188, "threads": 1536}
+
+
+@pytest.mark.parametrize("physics, expected", [((), 1), (("--physics-suite=convection_permitting",), 1),
+                                                (("--physics-suite=arwen_mpas_column",), 2)])
+def test_auto_members_per_card_prices_the_mpas_route_30km(monkeypatch, physics, expected):
+    """U-H4 (global synradar cycle, 2026-10-27): ``global --row global-30km --source gefs --members-per-card auto`` on
+    RTX PRO 6000 cards planned 2 MPAS-physics members per card at the ArWen-route floor (43,080 MiB each); one member
+    alone peaks 75,069 MiB, so all four ran out of memory ~3 min in.  A run that names no physics (the hex default)
+    or names an MPAS suite is priced on the MPAS route and planned 1 per card; the WOOF route keeps its price."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(global_door, "_visible_cards", lambda: [_PRO_6000["total"]])
+    monkeypatch.setattr(global_ensemble, "_probe_cards", lambda devices: [dict(_PRO_6000)])
+    value = {"mesh": {"cells": 655_362}, "members": [{"stochastic": None}, {"stochastic": None}],
+             "commands": {"forecast": ["forecast", "--mesh", "x1.655362", *physics]}}
+    assert global_ensemble.group_limit(value, SimpleNamespace(members_per_card="auto", devices=None)) == expected
+
+
+def test_mpas_suite_roster_refuses_a_group_the_card_cannot_hold(tmp_path, monkeypatch):
+    """U-H4, the runtime half: the MPAS-suite roster started every member at once with no memory decision.  Two 30 km
+    members on one RTX PRO 6000 are now refused before any member starts, with the "co-tenancy refuses" text the
+    ensemble door splits on; one member is left to the one-member door."""
+    from types import SimpleNamespace
+    from woof.hex import mesh_rows, multi_member
+
+    monkeypatch.setattr(global_ensemble, "_probe_cards", lambda devices: [dict(_PRO_6000)])
+    monkeypatch.setattr(mesh_rows, "_dimensions", lambda path: {"nCells": 655_362})
+    member = SimpleNamespace(grid=tmp_path / "x1.655362.grid.nc", init=None, stochastic=None, headroom_mib=None,
+                             lbc_dir=None, stop_on_refusal=False)
+    assert multi_member.admit_suite_group([("mem001", member)], None) is None
+    with pytest.raises(MemoryError, match=global_ensemble.REFUSED_GROUP + " 2 members"):
+        multi_member.admit_suite_group([("mem001", member), ("mem002", member)], None)
+    admitted = device_admission.route_required_free_bytes(
+        655_362, device_admission.model_for_card(device_admission.card_profile_from_attributes(
+            _PRO_6000["name"], {"MultiProcessorCount": 188, "MaxThreadsPerMultiProcessor": 1536}), "global"),
+        route="mpas")
+    # Never below the measured single-member peak, plus the curve's 10 %; and one member still fits the card.
+    assert 75_069 * 1024**2 * 1.10 < admitted < _PRO_6000["free"]
+
+
+_RTX_5090 = {"name": "NVIDIA GeForce RTX 5090", "free": 32_100 * 1024**2, "total": 32_607 * 1024**2,
+             "sms": 170, "threads": 1536}
+
+
+def test_a_30km_mpas_member_runs_over_several_32gb_cards(tmp_path, monkeypatch):
+    """8x RTX 5090 fit (2026-10-27): a 30 km MPAS-route member peaks 75,069 MiB on one card and the ensemble door put
+    every member on ONE card, so a 30 km global ensemble (the synthetic-radar DA cycle's members) could not run on a
+    32 GB card at all.  Auto now spreads one member over the fewest cards whose per-rank price fits, as the forecast
+    door's same-host ranks, with the member's own init, start, label and stochastic identity; a member that fits one
+    card keeps one card and its roster."""
+    value, args = _plan(tmp_path, source="gefs", members="1-3", devices="0,1,2,3,4,5,6,7")
+    value["mesh"]["cells"] = 655_362
+    monkeypatch.setattr(global_ensemble, "_probe_cards", lambda devices: [dict(_RTX_5090) for _ in range(8)])
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    ranks = global_ensemble.cards_per_member(value, args)
+    assert 2 <= ranks <= 4
+    calls = []
+
+    def fake(argv, log, env):
+        calls.append((argv, env["CUDA_VISIBLE_DEVICES"]))
+        log.write_text("ok")
+        return 0
+
+    monkeypatch.setattr(global_ensemble, "_cli", fake)
+    result = global_ensemble.run_forecasts(value, value["members"], args, _Status(), {})
+    assert result["failed"] == [] and result["cards_per_member"] == ranks and result["members_per_group"] == 1
+    assert len(calls) == 3 and all("--members" not in argv for argv, _ in calls)
+    for argv, cards in calls:
+        assert len(cards.split(",")) == ranks
+        assert argv[argv.index("--samehost-devices") + 1] == ",".join(str(i) for i in range(ranks))
+        member = next(m for m in value["members"] if argv[argv.index("--init") + 1] == m["init"])
+        assert argv[argv.index("--out") + 1] == member["forecast"]
+        assert json.loads(argv[argv.index("--stochastic") + 1]) == json.loads(json.dumps(member["stochastic"]))
+        assert json.loads(argv[argv.index("--init-source") + 1]) == member["provenance"]
+    # 120 km members still fit one card each: one card, the roster.
+    small, small_args = _plan(tmp_path / "small", source="gefs", members="1-2", devices="0,1")
+    monkeypatch.setattr(global_ensemble, "_probe_cards", lambda devices: [dict(_RTX_5090) for _ in range(2)])
+    assert global_ensemble.cards_per_member(small, small_args) == 1

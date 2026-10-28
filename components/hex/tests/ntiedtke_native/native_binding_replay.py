@@ -25,8 +25,8 @@ def module(name, path):
 
 def replay(reference, native_source, provider_source, layout_source, library, receipt):
     native_module = module('ntiedtke_native_abi_witness', native_source)
-    device_module = module('hexcore.mpasphys._ntiedtke_device_witness', provider_source)
-    layout_module = module('hexcore.mpasphys._ntiedtke_layout_witness', layout_source)
+    device_module = module('woof.hex.mpasphys._ntiedtke_device_witness', provider_source)
+    layout_module = module('woof.hex.mpasphys._ntiedtke_layout_witness', layout_source)
     registry = ET.fromstring(layout_module.registry_text(reference / 'src/core_atmosphere/Registry.xml'))
     nz, solve, cells = 3, 4, 6
     dimensions = dict(nVertLevels=nz, nVertLevelsP1=nz+1, nCells=cells, nCellsSolve=solve)

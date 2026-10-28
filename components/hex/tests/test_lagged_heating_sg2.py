@@ -150,7 +150,7 @@ def test_lts_recover_wrappers_forward_the_carry():
     """The LTS executors wrap driver._recover_candidate; a wrapper with the old
     six-argument signature raises TypeError at the first physics stage."""
 
-    root = Path(__file__).resolve().parents[1] / "src" / "hexcore"
+    root = Path(__file__).resolve().parents[1] / ".." / ".." / "woof" / "hex"
     for name in ("cuda_fullstep_lts_active.py", "cuda_fullstep_lts_multi.py"):
         text = (root / name).read_text(encoding="utf-8")
         assert "**lagged_heating" in text, name

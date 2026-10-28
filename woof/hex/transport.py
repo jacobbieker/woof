@@ -481,7 +481,7 @@ def _normalize_deriv_two(value: ArrayLike, n_edges: int) -> FloatArray:
     )
 
 
-@cached("advection-coefficients", salt=lambda: __import__("hexcore.rust_hostprep",fromlist=["_engine_digest"])._engine_digest())
+@cached("advection-coefficients", salt=lambda: __import__("woof.hex.rust_hostprep",fromlist=["_engine_digest"])._engine_digest())
 def build_advection_coefficients(
     mesh: Any,
     deriv_two: ArrayLike | None = None,

@@ -283,12 +283,12 @@ def test_unscoped_calls_retain_original_cache_behavior_and_coefficients():
 def test_functions_and_old_and_new_aliases_restore_after_exception(monkeypatch):
     modules, _identity = _modules()
     original = modules["kernels"].get_kernel
-    old_alias = ModuleType("gpuwm.test_old_kernel_reader")
+    old_alias = ModuleType("woof.test_old_kernel_reader")
     old_alias.get_kernel = original
     monkeypatch.setitem(sys.modules, old_alias.__name__, old_alias)
     with pytest.raises(ValueError, match="after cache call"):
         with scoped_physics_resources(modules=modules) as scope:
-            new_alias = ModuleType("gpuwm.test_new_kernel_reader")
+            new_alias = ModuleType("woof.test_new_kernel_reader")
             new_alias.get_kernel = modules["kernels"].get_kernel
             monkeypatch.setitem(sys.modules, new_alias.__name__, new_alias)
             with scope.rank(0, 0):

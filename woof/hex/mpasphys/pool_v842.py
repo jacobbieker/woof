@@ -407,8 +407,12 @@ class NativePoolHydration:
                     raise RuntimeError(f"pool read-ahead order differs at {key} vs {(pool, row['name'])}")
                 buffer = future.result()
                 in_flight -= size
-                for level in range(1, row["nlevels"] + 1):
-                    n.put_field(pool, name, buffer, level=level, nlevels=row["nlevels"])
+                if record.get("fill") is not None and callable(getattr(n, "put_zero_field", None)):
+                    # A Registry-initial zero field: the same words, allocated untouched (put_zero_field).
+                    n.put_zero_field(pool, name, buffer.shape, buffer.dtype, nlevels=row["nlevels"])
+                else:
+                    for level in range(1, row["nlevels"] + 1):
+                        n.put_field(pool, name, buffer, level=level, nlevels=row["nlevels"])
                 del buffer, future
         if ('mesh', 'nominalMinDc') in self.records:
             nominal = self.horizontal_length()
@@ -449,9 +453,129 @@ class NativePoolHydration:
                 n.exchange_group(group, active_fields)
 
 
+#: Workers of the Rust pool transport; the reader takes at most this many (rw_mpas_physics_pool MAX_WORKERS).
+POOL_TRANSPORT_MAX_THREADS = 16
+
+
+def pool_transport_threads() -> int:
+    """Workers rw_mpas_physics_pool runs: the CPUs this process may use, held to the CPU quota, at most 16.
+
+    THE BREAKAGE THIS REMOVES (U-H3, hex 0.4.8, 30 km globe on 4x RTX PRO 6000, 2026-10-27): every
+    MPAS-physics member start ran the transport on one thread for about 30 s while its card waited.
+    ``RAYON_NUM_THREADS`` (hexcore sets it to the container quota) lowers the count; so does
+    ``WOOF_HEX_HOST_COPY_THREADS``.  The count is handed to the reader explicitly, so the stage row
+    and the process agree.
+    """
+    import os
+    count = min(POOL_TRANSPORT_MAX_THREADS, host_copy_threads())
+    text = os.environ.get("RAYON_NUM_THREADS", "").strip()
+    if text.isdigit() and int(text) > 0:
+        count = min(count, int(text))
+    return max(1, count)
+
+
+#: Reader processes one transport fans out to.  Each process opens the sources itself.
+POOL_READER_MAX_PROCESSES = 8
+
+
+def pool_reader_processes(workers: int, fields: int) -> int:
+    """Reader processes for one transport: the worker count, at most POOL_READER_MAX_PROCESSES.
+
+    ``WOOF_HEX_POOL_READER_PROCESSES`` sets the count; 1 runs the single reader exactly as before.
+    """
+    import os
+    text = os.environ.get("WOOF_HEX_POOL_READER_PROCESSES", "").strip()
+    count = int(text) if text.isdigit() and int(text) > 0 else min(POOL_READER_MAX_PROCESSES, workers)
+    return max(1, min(count, fields))
+
+
+def run_pool_reader(reader: Path, request: Path, output: Path, workers: int) -> None:
+    """Run rw_mpas_physics_pool on ``request``, split over several reader processes.
+
+    THE COST THIS REMOVES (V5090 box, 2026-10-27, x1.163842 GEFS init, 117 payload fields, 1.5 GB):
+    the reader serialises every netCDF-C call inside one process behind a mutex (netCDF-C is not
+    thread safe), so the decode took 7.4 s at 16 threads and 8.6 s at 1: the reads ran on one core.
+    At 30 km (6 GB of payload) it was 39-52 s of every member start while the cards waited.
+    Separate processes keep separate netCDF-C state, so their reads run side by side.
+
+    Identity: every field is transported by the same binary from the same sources with the same
+    request entry, and the reader's bytes per field do not depend on the other fields it carries
+    (its own tests: one worker and many write the same bytes).  Each part's payload file is renamed
+    to the name the single reader gives it (``field-<request index>.bin``) and the manifest lists
+    the records in request order, as the single reader writes it.  If any part fails, the single
+    reader runs the whole request, so a refusal is the one a single pass reports.
+    """
+    import os
+    import shutil
+    request = Path(request)
+    output = Path(output)
+    full = json.loads(request.read_text())
+    fields = full["fields"]
+    processes = pool_reader_processes(workers, len(fields))
+    if processes <= 1:
+        subprocess.run([str(reader), str(request), str(output)], check=True,
+                       env={**os.environ, "RAYON_NUM_THREADS": str(workers)})
+        return
+    # Balance the parts by payload bytes, largest field first; each part keeps request order.
+    sizes = [int(np.prod(f.get("shape") or [1], dtype=np.int64)) for f in fields]
+    loads = [0] * processes
+    parts: list[list[int]] = [[] for _ in range(processes)]
+    for index in sorted(range(len(fields)), key=lambda i: (-sizes[i], i)):
+        target = min(range(processes), key=lambda p: (loads[p], p))
+        parts[target].append(index)
+        loads[target] += sizes[index]
+    parts = [sorted(part) for part in parts if part]
+    output.mkdir(parents=True, exist_ok=True)
+    each = max(1, -(-workers // len(parts)))
+    directories = [output / f".reader-part-{k}" for k in range(len(parts))]
+    launched = []
+    try:
+        for part, directory in zip(parts, directories):
+            shutil.rmtree(directory, ignore_errors=True)
+            directory.mkdir(parents=True)
+            part_request = directory / "request.json"
+            part_request.write_text(json.dumps({**full, "fields": [fields[i] for i in part]}))
+            launched.append(subprocess.Popen(
+                [str(reader), str(part_request), str(directory / "out")],
+                env={**os.environ, "RAYON_NUM_THREADS": str(each)},
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        failed = False
+        for process in launched:
+            failed = process.wait() != 0 or failed
+        if failed:
+            # The single reader reports the first refusal in request order, as before.
+            for directory in directories:
+                shutil.rmtree(directory, ignore_errors=True)
+            subprocess.run([str(reader), str(request), str(output)], check=True,
+                           env={**os.environ, "RAYON_NUM_THREADS": str(workers)})
+            return
+        records: list[Any] = [None] * len(fields)
+        for part, directory in zip(parts, directories):
+            manifest = json.loads((directory / "out" / "manifest.json").read_text())
+            if manifest.get("schema") != "mpas-native-pool-payload-v1" or len(manifest["fields"]) != len(part):
+                raise ValueError("a pool reader part returned an unexpected manifest")
+            for index, record in zip(part, manifest["fields"]):
+                if record.get("payload") is not None:
+                    name = f"field-{index:04d}.bin"
+                    os.replace(directory / "out" / record["payload"], output / name)
+                    record["payload"] = name
+                records[index] = record
+        (output / "manifest.json").write_text(json.dumps(
+            {"schema": "mpas-native-pool-payload-v1", "fields": records}, indent=2, ensure_ascii=False))
+    finally:
+        for process in launched:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        for directory in directories:
+            shutil.rmtree(directory, ignore_errors=True)
+
+
 def decode_registry_pools(reader: Path, source: Path, config: DriverConfig,
-                          namelist: str, sources: list[Path], output: Path) -> RegistryLayout:
+                          namelist: str, sources: list[Path], output: Path,
+                          threads: int | None = None) -> RegistryLayout:
     """Rust I/O followed by native allocation; mpas_io_streams.F:925-1023."""
+    import os
     abi = subprocess.check_output([str(reader), "--abi"], text=True).strip()
     if abi != "gpuwm-rw-mpas-physics-pool-v1":
         raise ValueError("unexpected Rust physics-pool transport ABI")
@@ -476,7 +600,9 @@ def decode_registry_pools(reader: Path, source: Path, config: DriverConfig,
     request = output / "request.json"
     request.write_text(json.dumps({**full, "fields": [f for f in full["fields"]
                                                       if (f["pool"], f["name"]) not in filled]}, indent=2) + "\n")
-    subprocess.run([str(reader), str(request), str(output)], check=True)
+    # Fields are transported on ``threads`` workers (U-H3); each payload is the same bytes at any count.
+    workers = pool_transport_threads() if threads is None else max(1, int(threads))
+    run_pool_reader(reader, request, output, workers)
     if fills:
         manifest_path = output / "manifest.json"
         manifest = json.loads(manifest_path.read_text())

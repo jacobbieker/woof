@@ -27,7 +27,7 @@ def project_frame(frame: str):
     path = match["file"].replace("\\", "/")
     if any(path.endswith(skip) for skip in SKIP):
         return None
-    for root in ("gpuwm/", "tools/"):
+    for root in ("woof/", "tools/"):
         at = path.find(root)
         if at >= 0 and "site-packages/cupy" not in path \
                 and "site-packages/numpy" not in path:

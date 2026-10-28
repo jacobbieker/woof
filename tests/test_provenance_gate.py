@@ -219,7 +219,7 @@ def test_the_diagnostic_commands_are_never_refused(tmp_path):
 #: The modules ``import woof`` and this gate's verdict run, copied into a
 #: throwaway checkout so the verdict is measured on a real interpreter
 #: with nothing of this machine's own installs in play.
-_GATE_MODULES = ("__init__.py", "cupy_windows_warning.py", "numerics.py", "explain.py",
+_GATE_MODULES = ("__init__.py", "_env.py", "cupy_windows_warning.py", "numerics.py", "explain.py",
                  "provenance.py", "provenance_gate.py", "runtime_manifest.py")
 
 
@@ -678,7 +678,7 @@ def test_announce_for_main_returns_the_refusal_instead_of_raising(
 def _installed_tilestream(site: Path, version: str) -> Path:
     (site / "tilestream").mkdir(parents=True)
     (site / "tilestream" / "__init__.py").write_text("", encoding="utf-8")
-    info = site / f"gpuwm-{version}.dist-info"
+    info = site / f"recast_woof-{version}.dist-info"
     info.mkdir()
     (info / "RECORD").write_text(
         "woof/__init__.py,,\ntilestream/__init__.py,sha256=x,0\n",

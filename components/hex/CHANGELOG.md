@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.4.9
+
+Requires woof>=2.9.7,<2.10.
+
+Fixed:
+- The s2s door wires its ocean on the MPAS-physics route: a prescribed surface series updates SST and sea ice, and the default prognostic ocean runs MPAS's mixed layer on the GPU.
+- Storm rosters on the MPAS-physics route run SPPT and SKEB with local time stepping.
+- Plain hex on MPAS physics no longer stops with non-finite columns after weeks: MYNN's lowest-layer pressure thickness can no longer be zero (correct mode). A checkpoint resumes under a changed timestep or a changed correction set.
+- Automatic members per card prices MPAS-physics members on their own measured memory, so 30 km globes no longer run out of GPU memory.
+- A mid-window start (delayed start) writes the whole initial_time stamp.
+- The MPAS-physics pool decode runs on every core, and forecasts use the reader their wheel carries.
+- Zoom globes rotate a stored template mesh instead of generating one, and fetch the start source beside the mesh and static.
+- Hex init holds its thread pools to the container's CPU quota, and the main thread no longer spins a core waiting on the card.
+- Storm-following moves keep one ocean-ice owner, and moved sea points take the role of their carried ice.
+- MPAS-route runs keep far less host memory: device views use the framework's own storage.
+- Thompson microphysics caps its column workspace at 1.5 GiB per call (`WOOF_HEX_THOMPSON_WORKSPACE_MIB`), so large ranks no longer run a 32 GB card out of memory at the first microphysics step. Output is unchanged.
+- A bare local-time-stepping run on a refined mesh moves its default step onto the class clock, and two LTS blocks on one card no longer race on a spec upload.
+- The observation scorer runs with no card visible, so card leases can be released when the forecast ends.
+- MPAS-physics steps do their per-step host bookkeeping off the step thread: a storm-following local-time-stepping run goes from 43.1 to 29.5 s per model hour on one card. Output is unchanged.
+- One-card local time stepping shares one work arena across its classes and runs the limiter one species per pass, so a 48/3 km storm-following run fits a 32 GB card.
+- A global member that does not fit one card runs over several cards on the same host, and the next pipelined member's host memory is priced per rank.
+- The MPAS-physics route applies `--acoustic-substeps`, `--time-integration-order` and `--monotonic`.
+- A bare local-time-stepping run picks its step for the mesh's real coarsest class, so a 96 -> 3 km zoom globe steps 15 s instead of 12.5 s.
+- The zoom globe's products pass keeps the column stores the live loop already wrote instead of rewriting them on one core.
+- A stalled source download is retried on a new connection after 10 s instead of waiting 300 s.
+- Local time stepping picks the fastest class plan for the mesh and runs the plain fixed step where that is faster; on a 96 -> 3 km zoom globe a bare LTS request now runs about 1.2x faster than the fixed step on MPAS physics.
+- MPAS-physics local time stepping deposits and assembles its history frames off the class step threads, so the classes no longer wait 1-2 s at every frame.
+- MPAS-physics start-up and history output no longer wait on one core: the pool decode, init reads, region preparation and frame encoding run in parallel (a 30 km member over 4 cards starts in 85 s instead of 112 s; output unchanged).
+- Zoom-globe, global, regional and country runs give their card back to a card queue when the forecast ends and draw their products on the CPU.
+- Local time stepping runs its rate classes on the faster dycore kernels (about 1.2x faster on a 3 km zoom globe).
+- A storm-following move no longer stops the run when a member reused from disk is ready but unsafe for the storm, and a case with no safe radius is refused when it is loaded.
+- Packaging links the pinned netCDF for every helper, and two exit-drop tests no longer race.
+- Kernel packs (`kernel-packs-v0.4.9`) carry the corrected MYNN kernel, so a new box does not compile it on first use.
+
+## 0.4.8
+
+Requires woof>=2.9.7,<2.10.
+
+Fixed:
+- A global ensemble retries a member stage that fails once, and a member that still fails is recorded as missing while the other members finish.
+- MPAS-physics runs that update SST, sea ice, greenness and deep soil from a surface series keep that update on the GPU instead of asking for the native MPAS library.
+- A test now guards the Grell-Freitas scratch fix from 0.4.6: no GF output may read a workspace word before writing it.
+
+## 0.4.7
+
+Requires woof>=2.9.7,<2.10.
+
+Fixed:
+- Storm-following runs no longer refuse a move with "FP32 moving integral cannot meet its conservation tolerance".
+- A cycle that is not posted yet is refused naming every address it tried (NOAA first) and when it posts; archives that lag a cycle are skipped for younger cycles.
+- A start file without a 2 m analysis (IFS starts carry q2 as NaN and t2m as 0 K) takes its 2 m fields from the first physics call, so ensemble products no longer fail with "history q2 is not finite".
+- A run's exit no longer waits on an idle kernel-compile worker that ignored the stop signal.
+
+## 0.4.6
+
+Requires woof>=2.9.7,<2.10.
+
+New:
+- MPAS physics is the default on every door: a run that names no physics runs MPAS-A's own `convection_permitting` suite on the GPU (the suite follows MPAS-A practice by mesh, `data/profiles/physics-default.v1.json`). WOOF physics stays one flag away: `--physics-suite arwen_mpas_column` (`--physics-row arwen` on `global`).
+- The cycle door takes an MPAS physics forecast as its coarse and parent stream.
+- Kernel packs (`kernel-packs-v0.4.6`, CUDA 12.9, 13.0 and 13.4) carry the MPAS physics kernels, so a new box starts MPAS physics runs without compiling them.
+- Storm- and setup-following runs start from a premade mesh rotated to the storm (`moving template` builds one), and the static builder maps geography to global meshes about twice as fast, with identical output.
+
+Fixed:
+- MPAS physics runs with local time stepping no longer fail at the first step on a new box (Noah kernel cache).
+- `forecast --receipt` writes its receipt on the MPAS physics route.
+- Storm-following and other MPAS physics runs no longer stop with a non-finite state after a few hours (Grell-Freitas shallow convection read an unset cloud-top value).
+- Local time stepping on two or more cards gives the same results as one card, on both physics routes; MPAS physics runs it on several cards.
+
 ## 0.4.5
 
 Requires woof>=2.9.7,<2.10.

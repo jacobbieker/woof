@@ -339,7 +339,7 @@ def _compiler_toolkit(uv: str, recipe: dict, env: Path, log: Path):
 
 #: CUDA 13.2's own guard: glibc 2.42 declares the C23 rsqrt/rsqrtf noexcept, and the device declarations
 #: must agree.
-_RSQRT_GUARD = """/* woof earth2_env: the glibc 2.42+ rsqrt guard CUDA 13.2 ships, for an earlier 13.x header. */
+_RSQRT_GUARD = """/* gpuwm earth2_env: the glibc 2.42+ rsqrt guard CUDA 13.2 ships, for an earlier 13.x header. */
 #if !defined(_NV_RSQRT_SPECIFIER)
 #  if defined(__GNUC__) && !defined(__ANDROID__) && !defined(__QNX__) && !defined(__APPLE__) && !defined(__HORIZON__)
 #    include <features.h>

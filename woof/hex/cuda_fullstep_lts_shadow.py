@@ -18,7 +18,7 @@ from .cuda_courant_fullstep_lts import CudaColumnTransportMonitor
 # Re-audited again for 0.4.5: the limited-area suite change to cuda_driver.py touches the moist coefficients only;
 # both transport calls keep the same argument positions.  tests/test_fullstep_lts_shadow_pin.py now fails on any
 # driver change, so the pin is re-audited at merge time instead of refusing a user's run.
-NATIVE_DRIVER_SHA256 = '9034951ee871ace985ccc7eacfa8559d1798d653cb0a7c64a1e353dcce5b22ef'
+NATIVE_DRIVER_SHA256 = '462c3834f24e1467a6db108baa290c089293e355104a71c02c23e8980e398fe6'
 
 
 class FullStepShadow:

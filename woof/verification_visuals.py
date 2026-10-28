@@ -1086,7 +1086,7 @@ def _finish_run(root, *, sections=None) -> dict | None:
                "retry_command": f'woof verify-visuals "{root}"'}
         _atomic_json(root / BACKGROUND_NAME, job)
         env = os.environ.copy()
-        env.update(CUDA_VISIBLE_DEVICES="", GPUWM_NO_LOCAL_GPU="1", GPUWM_VERIFY_VISUALS="0")
+        env.update(CUDA_VISIBLE_DEVICES="", GPUWM_NO_LOCAL_GPU="1", WOOF_VERIFY_VISUALS="0")
         package_root = str(Path(__file__).resolve().parent.parent)
         env["PYTHONPATH"] = os.pathsep.join(filter(None, (package_root, env.get("PYTHONPATH"))))
         options = {"start_new_session": True} if os.name != "nt" else {

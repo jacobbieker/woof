@@ -227,6 +227,9 @@ def test_every_land_use_initialisation_says_whether_the_urban_legend_is_on():
     root = Path(__file__).resolve().parents[1] / "woof"
     silent = []
     for path in sorted(root.rglob("*.py")):
+        if path.relative_to(root).parts[0] == "hex":
+            # the hex Noah port's own initialize_landuse (woof/hex/mpasphys), another routine with another signature
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call)

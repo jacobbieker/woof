@@ -37,7 +37,7 @@ def prepare(native, output):
     parallel = output / 'parallel.py'
     fixed = output / 'fixed.py'
     complete = output / 'cam_rad_v842.py'
-    product = Path(__file__).resolve().parents[2] / 'src/hexcore/mpasphys/cam_rad_v842.py'
+    product = Path(__file__).resolve().parents[2] / '../../woof/hex/mpasphys/cam_rad_v842.py'
     shutil.copyfile(product, base)
     spec = importlib.util.spec_from_file_location('cam_pinned_product', base)
     module = importlib.util.module_from_spec(spec)

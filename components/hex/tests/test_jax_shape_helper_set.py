@@ -20,9 +20,11 @@ def test_shape_row_binds_six_helpers_and_transformer():
     checkout_pins = Path(__file__).resolve().parents[2] / "tools/jax_hex_shape/engine-source-pins.json"
     if checkout_pins.is_file():
         assert pins_path.read_bytes() == checkout_pins.read_bytes()
+    # (WOOF) the replay kit's pins keep the engine's paths (gpuwm/), the same files as woof/ here
+    record = {"woof/" + k[len("gpuwm/"):] if k.startswith("gpuwm/") else k: v for k, v in pins["files"].items()}
     for name in ("woof/core/rrtmg_lw.py", "woof/core/rrtmg_sw.py"):
-        assert scope.ADMITTED_SOURCE_SETS[MODE][name] == pins["files"][name]["candidate"]
-    assert scope.EXECUTION_DEPENDENCIES[MODE][DEPENDENCY] == pins["files"][DEPENDENCY]["candidate"]
+        assert scope.ADMITTED_SOURCE_SETS[MODE][name] == record[name]["candidate"]
+    assert scope.EXECUTION_DEPENDENCIES[MODE][DEPENDENCY] == record[DEPENDENCY]["candidate"]
 
 
 def test_unknown_dependency_refuses_before_import(tmp_path, monkeypatch):

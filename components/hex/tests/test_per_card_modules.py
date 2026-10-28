@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "hexcore"
+SRC = Path(__file__).resolve().parents[1] / ".." / ".." / "woof" / "hex"
 CARD_ARGS = {"device", "device_id", "dev", "card"}
 
 

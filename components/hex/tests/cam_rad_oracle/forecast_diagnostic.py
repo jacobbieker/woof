@@ -14,7 +14,7 @@ def main(argv=None):
     from woof.hex import physics_suites
     from woof.hex.mpasphys import device_pools_v842 as pools
     from woof.hex.cli import main as door
-    source=resources.files('hexcore').joinpath(physics_suites.TABLE_PATH)
+    source=resources.files('woof.hex').joinpath(physics_suites.TABLE_PATH)
     before=source.read_bytes()
     table=json.loads(before)
     added={}

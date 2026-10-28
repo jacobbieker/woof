@@ -24,7 +24,7 @@ def mode():
 
 
 def configuration(overrides=None):
-    table = json.loads(files("hexcore").joinpath("data/ocean-mixed-layer.v1.json").read_text())
+    table = json.loads(files("woof.hex").joinpath("data/ocean-mixed-layer.v1.json").read_text())
     values = dict(table["defaults"])
     supplied = json.loads(os.environ.get(OPTIONS_ENV, "{}")) if overrides is None else overrides
     if not isinstance(supplied, dict) or set(supplied) - set(values):
@@ -44,7 +44,7 @@ def configuration(overrides=None):
 def _kernel(device):
     import cupy as cp
     from . import numerics
-    source = files("hexcore").joinpath("kernels/ocean_mixed_layer.cu").read_text()
+    source = files("woof.hex").joinpath("kernels/ocean_mixed_layer.cu").read_text()
     # CuPy's cached NVRTC path appends -ftz=true itself. Passing either spelling
     # of ftz here makes NVRTC reject the duplicate in the default fast mode.
     # The kernel uses double arithmetic for its budget and carries double state.
@@ -63,6 +63,13 @@ class MixedLayerOcean:
         f = service.backend._seam._driver.fields
         if service.noahmp is None:
             raise ValueError("prognostic ocean requires the WOOF Noah-MP sea-ice energy hook")
+        driver_class = type(service.backend._seam._driver)
+        if hasattr(driver_class, "_run_noahmp") and not getattr(driver_class, "hex_seaice_hook", False):
+            # The hook is the only caller of step(): without it the ocean is
+            # attached, never stepped, and still republished at every move
+            # (suite route, Milton hex storm-following, box M 2026-10-27).
+            raise ValueError("prognostic ocean requires the hex Noah-MP sea-ice hook on this physics route; "
+                             "without it the ocean would never be stepped")
         p = self.options
         tf = 273.15 - .054*p["salinity_psu"]
         ocean = service.owned["landmask"] == 0

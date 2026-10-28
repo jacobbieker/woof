@@ -898,7 +898,11 @@ def load_native_dynamics_inputs(arguments, layout, payload, *, keep_initialized_
     # Native allocates every selected carrier, including absent input species;
     # Registry.xml:1701-1754; mpas_atmphys_init_microphysics.F:98-226. Rust already
     # applied their Registry defaults while decoding the complete scalar buffer.
-    state.scalars=np.ascontiguousarray(hydration.field_buffer('state','scalars')[...,:-1])
+    # The same bytes as np.ascontiguousarray, copied in blocks on host threads (woof.hex.host_parallel): the Fortran-
+    # ordered scalars of a 30 km init are ~1.4 GB, a strided copy of ~6 s on the main thread before (2026-10-27).
+    from ..host_parallel import contiguous_copy
+    scalars=hydration.field_buffer('state','scalars')[...,:-1]
+    state.scalars=contiguous_copy(scalars,dtype=scalars.dtype)
     for name in ('defc_a','defc_b'):
         if keep_initialized_deformation:
             # MPAS-Model-rrfs/src/core_atmosphere/mpas_atm_core.F:373-614:
@@ -1446,7 +1450,11 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
         stochastic_restart = None if not resumed else moving.carrier.get('stochastic')
         if stochastic_config.enabled:
             partition = getattr(execution, 'stochastic_partition', None)
-            coupling.stochastic = (StochasticPhysics(mesh, grid.vertical_grid, stochastic_config)
+            # An LTS rate class forces through its member's one class-aware process (lts_v842, U-H5), never a
+            # pattern of its own on its truncated local mesh.
+            class_stochastic = getattr(execution, 'stochastic_physics', None)
+            coupling.stochastic = (class_stochastic(stochastic_config) if class_stochastic is not None else
+                StochasticPhysics(mesh, grid.vertical_grid, stochastic_config)
                 if partition is None else
                 StochasticPhysics(mesh, grid.vertical_grid, stochastic_config, partition=partition()))
             dycore.stochastic = coupling.stochastic

@@ -1079,7 +1079,20 @@ def child_physics_config(parent_config: dict, *, child_dx_m: float,
     profile = canonical_template_id(profile)
     switches = dict(profile_switches(profile))
     switches.pop("epssm", None)
-    return {**parent_config, **switches}, profile, basis
+    merged = {**parent_config, **switches}
+    # The suite owns the surface layer, so the parent's MM5-only surface-layer
+    # options go with the parent's surface layer.  The breakage this prevents:
+    # a storm run (MM5 surface layer, isftcflx/iz0tlnd on) gave its 1 km
+    # moving step-down the suite's MYNN surface layer with the storm run's
+    # isftcflx, which the configuration refuses ("isftcflx/iz0tlnd are MM5
+    # surface-layer options and require sf_sfclay_physics=1 or 91"), so every
+    # moving step-down inside a storm run failed (2.9.7 WOOF rebake canary,
+    # run_2c31777d1de61ea6).
+    if merged.get("sf_sfclay_physics") not in (1, 91):
+        for name in ("isftcflx", "iz0tlnd"):
+            if name not in switches and merged.get(name):
+                merged[name] = 0
+    return merged, profile, basis
 
 
 def _with_parent_epssm_label(merged: dict, parent_header) -> dict:
@@ -2676,8 +2689,11 @@ def _downscale_main(args, reservation: _OutputReservation,
         # keeps every set.
         keep_checkpoints=int(keep_checkpoints or 0),
         warm_start=warm_start,
-        # A segment of a moving step-down: the forecast's own start.
-        simulation_start=getattr(args, "simulation_start", None))
+        # A segment of a moving step-down: the forecast's own start, and
+        # the place its frames record (on the parent's lattice), so the
+        # segments' frames are one moving nest's history.
+        simulation_start=getattr(args, "simulation_start", None),
+        history_parent_start=getattr(args, "history_parent_start", None))
     # From here the directory belongs to the run: a forecast that dies
     # mid-integration leaves frames a reader needs, and a report.json
     # whose `result` is FAIL rather than one claiming it finished.

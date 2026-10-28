@@ -41,7 +41,7 @@ def main():
     p.add_argument('receipt', type=Path)
     a = p.parse_args()
     support = Path(__file__).resolve().parent
-    module = support.parents[1] / 'src/hexcore/mpasphys/sfclay_mm5_v842.py'
+    module = support.parents[1] / '../../woof/hex/mpasphys/sfclay_mm5_v842.py'
     pins = json.loads((support / 'citation_pins_v842.json').read_text())
     expected = Counter({(v['citation_file'], v['first'], v['last']): v['occurrences']
                         for v in pins['windows']})

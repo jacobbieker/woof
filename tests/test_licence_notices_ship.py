@@ -1070,6 +1070,13 @@ def test_the_terminal_notice_generator_replaces_only_its_own_section() -> None:
     have deleted the BowEcho and recast-radar-tools notices and the bzip2 table
     grant from the notice a compiled consumer receives."""
     _requires_source_tree()
+    if not (ROOT / "tools" / "update_tui_license_notice.py").is_file():
+        # Recast WOOF builds no terminal workspace: its generator stays with the regional engine's own
+        # distribution, and the binary notice WOOF ships has no section 5 for it to rewrite.
+        notice = (LICENSES / "THIRD-PARTY-LICENSES-bridge-binaries.txt").read_bytes().decode("utf-8")
+        assert "LOCKED DEPENDENCIES AND LICENCE TEXTS" not in notice
+        assert "update_tui_license_notice" not in notice
+        return
     tool = _notice_tool("update_tui_license_notice.py")
     path = LICENSES / "THIRD-PARTY-LICENSES-bridge-binaries.txt"
     notice = path.read_bytes().decode("utf-8")

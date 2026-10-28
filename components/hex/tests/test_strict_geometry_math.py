@@ -79,7 +79,7 @@ def test_no_compiler_names_install_fix_without_host_fallback(tmp_path, monkeypat
 
 
 def test_concurrent_source_users_publish_one_library(tmp_path):
-    env = dict(os.environ, HEXCORE_NATIVE_CPU_CACHE=str(tmp_path))
+    env = dict(os.environ, WOOF_HEX_NATIVE_CPU_CACHE=str(tmp_path))
     # Match the parent package in both source and installed layouts; pytest's
     # in-process sys.path changes do not reach a newly started interpreter.
     env["PYTHONPATH"] = str(Path(builder.__file__).resolve().parents[1]) + (

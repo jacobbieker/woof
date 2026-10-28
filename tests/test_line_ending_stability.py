@@ -219,7 +219,6 @@ _CRLF_DEBT = frozenset({
     # left this list at A146: its constant-divisor rewrite (a98f2482e) wrote
     # the file back LF, and restoring the CR bytes is a commit the line-ending
     # hook refuses, so the file stays normalized.
-    "woof/core/landuse.py",
     "woof/core/rrtm_taumol.py",
     # woof/da/letkf.py left this list in the DA speed integration: the
     # obs-ops lane wrote it back LF (e13abf285) and the line-ending hook
@@ -311,7 +310,7 @@ def _is_authored(relative: str) -> bool:
         return crate in _AUTHORED_RUSTWX_CRATES
     if relative.startswith("tools/"):
         return relative.endswith(".py")
-    if relative.startswith(("gpuwm/", "tests/", "configs/")):
+    if relative.startswith(("woof/", "tests/", "configs/")):
         return True
     return "/" not in relative  # the release mechanics at the repo root
 

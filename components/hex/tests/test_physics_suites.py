@@ -217,7 +217,7 @@ def test_an_override_off_the_profiles_synthesizes_a_registered_row():
     assert np.float32(profile["soil_level_depths_m"][2]) != np.float32(0.7)
     assert adapter.physics_suite(profile["id"])["backend_row"] == resolved.backend_row
     row = resolve_backend(resolved.backend_row)
-    assert row.adapter_module == "hexcore.cuda_suite_physics_v841"
+    assert row.adapter_module == "woof.hex.cuda_suite_physics_v841"
     assert row.anchored is False
     assert row.driven_scalar_names[-3:] == ("ni", "nr", "nc")
     assert row.appended_scalar_names == ("nwfa", "nifa")

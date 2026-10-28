@@ -5,7 +5,7 @@
 #                                           -- from a checkout root
 #
 # The standalone (curl | sh) form clones the public repository into
-# ./gpuwm when run outside a checkout; WOOF_REPO_URL overrides the
+# ./woof when run outside a checkout; WOOF_REPO_URL overrides the
 # clone source (fork or mirror).
 #
 # What it does, in order (every step is re-run safe):
@@ -119,7 +119,7 @@ fail() { printf 'install: ERROR: %s\n' "$*" >&2; exit 1; }
 REPO_URL="${WOOF_REPO_URL:-https://github.com/recastsystems/woof}"
 if [ -f pyproject.toml ] && [ -d woof ] && [ -d tools/grib1_bridge ]; then
     say "using the existing checkout at $(pwd)"
-elif [ -f woof/pyproject.toml ] && [ -d woof/gpuwm ]; then
+elif [ -f woof/pyproject.toml ] && [ -d woof/woof ]; then
     cd woof
     say "using the existing checkout at $(pwd)"
 else
@@ -595,12 +595,12 @@ if [ "$NO_FETCH_TABLES" = 1 ]; then
 else
     say "staging the externalized Thompson tables (downloads only what"
     say "is absent -- ~243 MiB from a checkout; SHA-256 verified)"
-    .venv/bin/gpuwm fetch-tables
+    .venv/bin/woof fetch-tables
     # The default mixed-layer ocean's 12 WOA18 MLD months (~85 MB), staged
     # now so no forecast reads NCEI at start.  Not fatal here: a forecast
     # still fetches its month on a miss, and doctor names the gap.
     say "staging the WOA18 ocean mixed-layer climatology (~85 MB)"
-    .venv/bin/gpuwm fetch-tables --ocean --ocean-only || say "WOA18 ocean climatology not staged yet; re-run: woof fetch-tables --ocean"
+    .venv/bin/woof fetch-tables --ocean --ocean-only || say "WOA18 ocean climatology not staged yet; re-run: woof fetch-tables --ocean"
 fi
 
 # ------------------------------------------------------- offline Rust build
@@ -658,7 +658,7 @@ say "running woof doctor"
 # is doctor's own, unchanged.
 doctor_log="$(mktemp)"
 doctor_status="$(mktemp)"
-{ status=0; PATH="$(pwd)/.venv/bin:$PATH" .venv/bin/gpuwm doctor || status=$?; echo "$status" > "$doctor_status"; } 2>&1 | tee "$doctor_log"
+{ status=0; PATH="$(pwd)/.venv/bin:$PATH" .venv/bin/woof doctor || status=$?; echo "$status" > "$doctor_status"; } 2>&1 | tee "$doctor_log"
 status="$(cat "$doctor_status")"
 rm -f "$doctor_status"
 if [ "$status" -eq 0 ]; then

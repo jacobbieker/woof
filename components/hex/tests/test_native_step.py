@@ -75,7 +75,7 @@ def libraries(tmp_path_factory):
     if compiler is None:
         pytest.skip("C compiler required for native submission ABI check")
     root = tmp_path_factory.mktemp("native-step")
-    source = Path(__file__).parents[1] / "src/hexcore/native/step_submit.c"
+    source = Path(__file__).parents[1] / "../../woof/hex/native/step_submit.c"
     native = root / "step.so"
     fake_source = root / "cuda.c"
     fake_source.write_text(FAKE_DRIVER)

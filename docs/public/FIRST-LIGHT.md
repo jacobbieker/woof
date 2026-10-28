@@ -48,6 +48,7 @@ form, mode-bit independent) or `.\install.ps1`
 as fast on it, and `--python` / `-Python` picks another interpreter), the checkout's `recast-woof-data`
 companion, `[gpu-cu12,render]` extras, the offline Rust builds of all nine
 native workspaces (the `tools/grib1_bridge` GRIB bridges, the
+`tools/rustwx` render engine, the
 `tools/zarr_bridge` Zarr reader, the `tools/rw_wps` mapped decode engine,
 the `tools/region_global_dealias` dealiasing library, the
 `tools/nextgen_hydrofabric` hydro payload, `tools/nextgen_forcing` forcing

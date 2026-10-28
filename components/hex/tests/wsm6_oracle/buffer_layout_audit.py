@@ -63,7 +63,7 @@ def audit(oracle,receipt):
                              cuda_species_extent=actual))
     if not rows:raise AssertionError('no native vertical buffers audited')
     value=dict(scope=__doc__,process_count=1,acceptance=False,
-               production_source_sha256=hashlib.sha256(Path(__import__('hexcore.mpasphys.wsm6_v842',fromlist=['']).__file__).read_bytes()).hexdigest(),
+               production_source_sha256=hashlib.sha256(Path(__import__('woof.hex.mpasphys.wsm6_v842',fromlist=['']).__file__).read_bytes()).hexdigest(),
                audited_buffers=len(rows),three_species_buffers=sum(r['cuda_species_extent']==3 for r in rows),
                rows=rows)
     receipt.parent.mkdir(parents=True,exist_ok=True)

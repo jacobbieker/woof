@@ -410,7 +410,7 @@ def stream_utils():
             pytest.skip('o2 stream service needed for pool adapter replay')
         import importlib.util
         import sys
-        name='hexcore.mpasdiag.utils'
+        name='woof.hex.mpasdiag.utils'
         spec=importlib.util.spec_from_file_location(name,source)
         module=importlib.util.module_from_spec(spec)
         sys.modules[name]=module

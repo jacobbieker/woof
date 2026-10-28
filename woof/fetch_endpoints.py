@@ -214,6 +214,10 @@ class Endpoint:
     run_listing: Mapping[str, str] | None = field(
         default=None, hash=False, compare=False)
     layouts: tuple = field(default=(), hash=False)
+    #: An archive that takes a cycle some hours after it runs (its layout row's ``available_after_hours``): it does
+    #: not cover a younger cycle.  THE BREAKAGE THIS PREVENTS (WOOF production run_6452d3110cf0705f, 2026-10-26):
+    #: GFS 06Z asked for at 07:29Z, before it posted, ended on NCAR GDEX's 404, an archive about two days behind.
+    available_after_hours: float | None = None
 
     @property
     def host(self) -> str:
@@ -237,6 +241,8 @@ class Endpoint:
     def covers(self, age_hours: float) -> bool:
         """Does this endpoint still serve a cycle ``age_hours`` old?"""
 
+        if self.available_after_hours is not None and age_hours < self.available_after_hours:
+            return False
         if self.retention_hours is None:
             return True
         return age_hours <= float(self.retention_hours)
@@ -301,7 +307,10 @@ def _endpoint(raw: Mapping[str, object], position: int) -> Endpoint:
             raise ValueError(
                 f"{TABLE_NAME}: endpoint {raw.get('name')} run_listing names "
                 "an https bucket, a key_prefix and why")
+    after = [float(row["available_after_hours"]) for row in raw.get("layouts", ())
+             if row.get("available_after_hours") is not None]
     return Endpoint(
+        available_after_hours=max(after) if after else None,
         name=str(raw["name"]),
         base=str(raw["base"]),
         retention_hours=(None if retention is None else float(retention)),

@@ -1047,7 +1047,7 @@
                 "repository": "ArWen",
                 "revision": "c92924ac357b8da9818f0ad8af16c3834cde0496",
                 "path": "woof/hydro/noahowp/initial.py",
-                "sha256": "316207e0d4f8207b325f79eb85539fb0d4d7cdf723756491365f5625c94cae71"
+                "sha256": "cae3afacaf6dcbdf00b8718b852f8d4bc3db8388b81ca7232af08e61e5914be6"
               },
               "schema": "arwen.noahowp.initial.v1",
               "recipe": "Explicit native namelist + pinned Apache parameter tables + per-column overrides; Rust initialization and verified transfers.",
@@ -2263,7 +2263,7 @@
                 "repository": "ArWen",
                 "revision": "c92924ac357b8da9818f0ad8af16c3834cde0496",
                 "path": "woof/hydro/noahowp/initial.py",
-                "sha256": "316207e0d4f8207b325f79eb85539fb0d4d7cdf723756491365f5625c94cae71"
+                "sha256": "cae3afacaf6dcbdf00b8718b852f8d4bc3db8388b81ca7232af08e61e5914be6"
               },
               "schema": "arwen.noahowp.initial.v1",
               "recipe": "Explicit native namelist + pinned Apache parameter tables + per-column overrides; Rust initialization and verified transfers.",
@@ -3839,7 +3839,7 @@
                 "repository": "ArWen",
                 "revision": "c92924ac357b8da9818f0ad8af16c3834cde0496",
                 "path": "woof/hydro/noahowp/initial.py",
-                "sha256": "316207e0d4f8207b325f79eb85539fb0d4d7cdf723756491365f5625c94cae71"
+                "sha256": "cae3afacaf6dcbdf00b8718b852f8d4bc3db8388b81ca7232af08e61e5914be6"
               },
               "schema": "arwen.noahowp.initial.v1",
               "recipe": "Explicit native namelist + pinned Apache parameter tables + per-column overrides; Rust initialization and verified transfers.",

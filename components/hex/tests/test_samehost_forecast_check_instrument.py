@@ -10,7 +10,7 @@ import pytest
 
 
 def _instrument():
-    path = Path(__file__).resolve().parents[1] / "src/hexcore/drivers/forecast_receipt.py"
+    path = Path(__file__).resolve().parents[1] / "../../woof/hex/drivers/forecast_receipt.py"
     spec = importlib.util.spec_from_file_location("_samehost_forecast_check_instrument", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -146,7 +146,7 @@ def test_control_source_without_samehost_module_profiles_main_only(tmp_path, mon
     original_import = builtins.__import__
 
     def control_import(name, *args, **kwargs):
-        if name == "hexcore.partition_samehost_v841":
+        if name == "woof.hex.partition_samehost_v841":
             raise ModuleNotFoundError(
                 f"No module named '{name}'", name=name
             )
@@ -174,7 +174,7 @@ def test_profile_scope_does_not_hide_a_missing_worker_dependency(tmp_path, monke
     original_import = builtins.__import__
 
     def broken_dependency(name, *args, **kwargs):
-        if name == "hexcore.partition_samehost_v841":
+        if name == "woof.hex.partition_samehost_v841":
             raise ModuleNotFoundError("No module named 'cupy'", name="cupy")
         return original_import(name, *args, **kwargs)
 
@@ -290,7 +290,7 @@ def test_rank_final_forcing_observer_disabled_does_not_wrap_or_import_proof(monk
     original_import = builtins.__import__
 
     def no_proof(name, *args, **kwargs):
-        if name == "hexcore.drivers.run_cuda_v841_forecast":
+        if name == "woof.hex.drivers.run_cuda_v841_forecast":
             pytest.fail("disabled rank observer imported the single-card proof")
         return original_import(name, *args, **kwargs)
 

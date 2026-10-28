@@ -26,7 +26,7 @@ def main():
     parser.add_argument('--dependencies', type=Path)
     args = parser.parse_args()
     from importlib.util import find_spec
-    if args.dependencies and find_spec('hexcore.mpasphys.radshared_v842') is None:
+    if args.dependencies and find_spec('woof.hex.mpasphys.radshared_v842') is None:
         # Authenticated unlanded parent stand-ins remain diagnostic authority.
         import importlib.util
         import woof.hex.mpasphys
@@ -151,8 +151,8 @@ def main():
                   native_manifest_sha256=digest(manifest_path), observer_passivity=True,
                   production_source=str(Path(radiation.__file__).resolve()),
                   production_sha256=digest(Path(radiation.__file__)),
-                  parent_source=str(Path(sys.modules['hexcore.mpasphys.radshared_v842'].__file__).resolve()),
-                  parent_sha256=digest(Path(sys.modules['hexcore.mpasphys.radshared_v842'].__file__)),
+                  parent_source=str(Path(sys.modules['woof.hex.mpasphys.radshared_v842'].__file__).resolve()),
+                  parent_sha256=digest(Path(sys.modules['woof.hex.mpasphys.radshared_v842'].__file__)),
                   scope='all records of stated real whole cloud-driver calls; no SW/LW or forecast claim',
                   comparisons=comparisons)
     args.receipt.write_text(json.dumps(result, indent=2) + '\n')

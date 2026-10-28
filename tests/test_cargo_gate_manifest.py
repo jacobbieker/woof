@@ -425,6 +425,9 @@ def test_test_targets_cannot_share_release_artifacts_through_directory_aliases(t
 
 def test_worker_gate_uses_the_battery_python_without_shell_expansion(monkeypatch, tmp_path):
     from types import SimpleNamespace
+    if not (REPOSITORY_ROOT / "tools/arwen-tui").is_dir():
+        pytest.skip("the terminal UI workspace (tools/arwen-tui), the only gate row whose environment names "
+                    "@python, is not in this tree; its row leaves the gate list with it")
     runner = _runner()
     entry = next(e for e in _entries() if e.package == "arwen-tui")
     seen = {}
@@ -1066,8 +1069,12 @@ def test_the_manifest_prebuilds_as_one_whole_call_per_workspace_plus_target_unio
     union = next(a for a, _ in rustwx if a[5] == 'static-fields')
     assert union[6:8] == ['--lib', '--test'] and union.count('--test') == 6 and '--' not in union
     assert len(rustwx) == 3
-    assert by_workspace['tools/arwen-tui'] == [(['test', '--no-run', '--locked', '--offline', '-p', 'arwen-tui'],
-                                                ('WOOF_TUI_TEST_PYTHON=@python',))]
+    if (REPOSITORY_ROOT / 'tools/arwen-tui').is_dir():
+        assert by_workspace['tools/arwen-tui'] == [(['test', '--no-run', '--locked', '--offline', '-p', 'arwen-tui'],
+                                                    ('WOOF_TUI_TEST_PYTHON=@python',))]
+    else:
+        # a tree without the terminal UI workspace carries no gate row for it, so nothing prebuilds it
+        assert 'tools/arwen-tui' not in by_workspace
 
 
 def test_prebuild_jobs_come_from_the_driver_before_the_rows_jobs(monkeypatch) -> None:

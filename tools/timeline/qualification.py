@@ -148,7 +148,7 @@ def run(args):
     run_id = args.outdir.name
     env = dict(os.environ, **authority["cache_environment"],
                PYTHONPATH=str(source) + ":" + str(source / "tests"),
-               GPUWM_TIME_LEDGER=str(ledger_path), GPUWM_RUN_ID=run_id, GPUWM_PRODUCT="regional",
+               WOOF_TIME_LEDGER=str(ledger_path), WOOF_RUN_ID=run_id, WOOF_PRODUCT="regional",
                OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", RAYON_NUM_THREADS="4")
     env.update(bridge_env(args.engine_base))
     variables = {"python": sys.executable, "input": authority["parent_input_pack"],

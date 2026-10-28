@@ -1628,6 +1628,11 @@ def resolve_door_physics(
     if (suite is None and not raw and namelist is None
             and explicit_convection in (None, "auto", *_CONVECTION_SPELLING)):
         return None, None, {}
+    from .physics_default import is_arwen_default
+    if is_arwen_default(suite, overrides=raw, namelist=namelist, convection=explicit_convection):
+        # --physics-suite arwen_mpas_column alone: the ArWen route exactly as a bare run took it before MPAS
+        # physics became the hex default (0.4.6), so the ArWen arm of every door stays byte-identical.
+        return None, None, {}
     # The engine tree whose registry says which options exist: the one the
     # run names when it carries a registry (a tree that is no engine at all
     # is refused by name further down, at the pin check), else the
@@ -1965,6 +1970,13 @@ def resolve_request(
                   + (f" (this engine lacks {', '.join(dt_selection['engine_lacks'])})"
                      if dt_selection.get("engine_lacks") else "")
                   + "; --dt SECONDS runs a step of your choosing", file=sys.stderr, flush=True)
+    fixed_selection = dt_selection
+    dt_selection = lts_step(arguments, dt_selection, float(radiation_seconds))
+    # The ArWen route measured the MPAS route's loss on the same mesh (HEX-LTS-REGRESSION-2026-10-27): LTS runs
+    # only where the route's measured per-step cost predicts it wins (lts_choice), at the cheapest top class.
+    dt_selection = chosen_step(arguments, fixed_selection, dt_selection,
+                               lts_choice(arguments, route="arwen", fixed_dt=float(fixed_selection["dt_seconds"]),
+                                          lts_dt=float(dt_selection["dt_seconds"])))
     dt_selection["registered_row_dt_seconds"] = float(row.dt_seconds)
     dt_seconds = float(dt_selection["dt_seconds"])
     # The preset is a ROW (woof.hex.forecast_preset) and resolves into the
@@ -3230,6 +3242,10 @@ def release_device_memory() -> dict[str, Any] | None:
     much, so "released" is a number and not a hope.  Returns ``None`` when
     there is no CUDA runtime to ask (a CPU proof run)."""
 
+    if os.environ.get("CUDA_VISIBLE_DEVICES") == "":
+        # No device visible (the card was given back, woof.hex.card_lease): nothing is held, and asking would only
+        # fail; never open a context here.
+        return None
     try:
         import gc
 
@@ -4021,13 +4037,20 @@ def mpas_suite_lts_refusal(arguments: argparse.Namespace, environ=None) -> str |
         if knobs["fullstep_lts_mode"] != "active":
             return ("the full-step shadow runs on one device: the partitioned shadow has no owner-only donor "
                     "reduction (halo duplicates would corrupt the rate census)")
-        return ("active local time stepping on the MPAS suite route runs on one card: its classes rendezvous on one "
-                "device; several cards need the WOOF route's class blocks across cards, which carry no MPAS "
-                "physics pools yet.  Drop --samehost-devices (one card)")
+        # Retired 2026-10-25 (hex 0.4.6): active LTS on several cards cuts every rate class into blocks, one per
+        # card (woof.hex.mpasphys.lts_v842.run_lts_classes on woof.hex.cuda_fullstep_lts_multi).
     return None
 
 
 def run_forecast(arguments: argparse.Namespace) -> int:
+    # The hex default physics (owner ruling 2026-10-25): a run that names no physics takes MPAS-A's own suite on
+    # the MPAS route, chosen by mesh (woof.hex.physics_default).  Applied before the roster split, so every member
+    # and every segment process decides the same route.  --physics-suite arwen_mpas_column is the ArWen route.
+    from . import physics_default
+    defaulted = physics_default.apply(arguments)
+    if defaulted is not None:
+        print(f"woof hex: physics {defaulted['suite']} on the MPAS route (the hex default; "
+              f"--physics-suite {physics_default.arwen_suite()} runs WOOF physics)", file=sys.stderr, flush=True)
     if getattr(arguments, "members", None) is not None:
         from .multi_member import run_members
         return run_members(arguments, sys.modules[__name__])
@@ -4138,6 +4161,171 @@ def write_kernel_plan_receipt(out: Any) -> None:
         pass
 
 
+def lts_step(arguments: argparse.Namespace, selection: dict[str, Any], radiation_seconds: float) -> dict[str, Any]:
+    """A default step under full-step LTS, moved onto the class clock (:func:`mpas_defaults.lts_class_clock_dt`)."""
+    if not getattr(arguments, "fullstep_local_timestep", False):
+        return selection
+    events = {"radiation": float(radiation_seconds)}
+    history = getattr(arguments, "history_every_minutes", None)
+    if history:
+        events["history"] = float(history) * 60.0
+    hours = getattr(arguments, "hours", None)
+    if hours:
+        events["run length"] = float(hours) * 3600.0
+    # The plan's real top class, not the ladder's ceiling (HEX-LAM-VS-ZOOM-2026-10-27 defect 1: the clock took the
+    # config dataclass's 16 while both executors plan at most 8, so the 96 -> 3 km zoom globe stepped 12.5 s, not
+    # 15 s).  The cap is the executors' own default; the mesh census (woof.hex.fullstep_lts_census) lowers it to the
+    # top class the mesh grades to, and the state bounds only lower that further, by powers of two.
+    top = lts_top_rate(arguments)
+    # lts_choice prices every top class against the fixed step from these (a lower top class may keep the step).
+    arguments._lts_clock = {"fixed": dict(selection), "events": dict(events)}
+    moved = mpas_defaults.lts_class_clock_dt(selection, max_rate=int(top["rate"]), events=events)
+    if moved is not selection:
+        moved = {**moved, "lts_top_rate_source": top["source"]}
+        print(f"woof hex: timestep {moved['dt_seconds']:g} s for full-step local time stepping (the default "
+              f"{selection['dt_seconds']:g} s puts the coarsest class step, {int(top['rate'])} x, off the "
+              f"radiation/history clock; {top['source']})", file=sys.stderr, flush=True)
+    return moved
+
+
+def lts_top_rate(arguments: argparse.Namespace) -> dict[str, Any]:
+    """The coarsest class full-step LTS can plan on this run's mesh: ``{"rate", "source", "census"}``.
+
+    The cap is ``--fullstep-lts-max-rate``, else the executors' default (8).  When the run's grid (or init) file is
+    readable, the mesh's own census lowers it (a mesh whose coarsest cells are 4x its finest never plans 8); the
+    census is kept on ``arguments`` for the MPAS route's LTS-or-fixed choice.
+    """
+    from .fullstep_lts_census import DOOR_DEFAULT_MAX_RATE, mesh_class_census, read_mesh_edges
+
+    cached = getattr(arguments, "_fullstep_lts_top", None)
+    if cached is not None:
+        return cached
+    rate = getattr(arguments, "fullstep_lts_max_rate", None)
+    cap = int(DOOR_DEFAULT_MAX_RATE if rate is None else rate)
+    source = (f"--fullstep-lts-max-rate {cap}" if rate is not None
+              else f"the executors' default top rate {cap}")
+    top: dict[str, Any] = {"rate": cap, "source": source, "census": None, "closed": None}
+    path = getattr(arguments, "grid", None) or getattr(arguments, "init", None)
+    edges = read_mesh_edges(path)
+    if edges is not None:
+        census = mesh_class_census(*edges, max_rate=cap)
+        top = {"rate": max(census), "census": census, "closed": bool((edges[1] >= 0).all()),
+               "source": f"{source}; the mesh grades to {max(census)} ({Path(str(path)).name})"}
+        arguments._fullstep_lts_edges = edges
+    arguments._fullstep_lts_top = top
+    return top
+
+
+def write_lts_choice_receipt(arguments: argparse.Namespace) -> None:
+    """``fullstep-lts-choice.json`` beside the run's frames when the door chose between LTS and the fixed step."""
+    record = getattr(arguments, "fullstep_lts_door_choice", None)
+    out = getattr(arguments, "out", None)
+    if record is None or out is None or not Path(out).expanduser().is_dir():
+        return
+    try:
+        (Path(out).expanduser() / "fullstep-lts-choice.json").write_text(json.dumps(record, indent=2) + "\n")
+    except OSError:
+        pass
+
+
+def chosen_step(arguments: argparse.Namespace, fixed: dict[str, Any], clocked: dict[str, Any],
+                choice: str | None) -> dict[str, Any]:
+    """The run's step selection after :func:`lts_choice`: the fixed step's, the clock's, or the chosen class's."""
+    if choice == "fixed":
+        return dict(fixed)
+    step = getattr(arguments, "_lts_chosen_dt", None)
+    if choice != "lts" or step is None or float(step) == float(clocked["dt_seconds"]):
+        return clocked
+    rate = int(getattr(arguments, "fullstep_lts_max_rate", 0) or 0)
+    return {**fixed, "dt_seconds": float(step), "lts_max_rate": rate,
+            "source": "lts class clock" if float(step) != float(fixed["dt_seconds"]) else fixed.get("source"),
+            "default_dt_seconds": float(fixed["dt_seconds"]),
+            "rule": (f"{fixed.get('rule', '')}; top class {rate} chosen by the measured cost "
+                     f"(woof.hex.fullstep_lts_choice), {rate} x {float(step):g} s on every event")}
+
+
+def mpas_lts_choice(arguments: argparse.Namespace, *, fixed_dt: float, lts_dt: float, environ=None) -> str | None:
+    """:func:`lts_choice` on the MPAS suite route."""
+    return lts_choice(arguments, route="mpas-suite", fixed_dt=fixed_dt, lts_dt=lts_dt, environ=environ)
+
+
+def lts_choice(arguments: argparse.Namespace, *, route: str, fixed_dt: float, lts_dt: float,
+               environ=None) -> str | None:
+    """Active full-step LTS or the fixed step for this run on ``route``; None when there is nothing to choose.
+
+    THE BREAKAGE THIS PREVENTS (HEX-LAM-VS-ZOOM-2026-10-27 defect 2, HEX-LTS-REGRESSION-2026-10-27): on the
+    96 -> 3 km zoom globe, active LTS ran 19 % slower than the fixed step on BOTH physics routes even on the right
+    class clock (MPAS 105.9 vs 85.7, ArWen 98.4 vs 79.3 s per forecast hour, RTX 5090): the plan halves the cell
+    work per step but steps 1.875 class steps per base step, and a step's fixed host cost is about 90,000 cells'
+    worth of work on either route.  The door predicts both from the mesh's class census and the route's measured
+    per-step cost (woof.hex.fullstep_lts_choice, data/fullstep-lts-step-cost.v1.json) and runs the fixed step where
+    LTS loses, as a plain run: the fixed step's own timestep and no LTS argument left, so its output is the fixed
+    run's.  LTS still runs where it wins (a mesh whose cells are mostly coarse).  Chosen only for one card, a closed
+    mesh and no moving region (a moving segment needs the class executor's move hooks, and several cards run other
+    executors that were not measured).  ``WOOF_HEX_FULLSTEP_LTS_FORCE=1`` runs LTS anyway.
+    """
+    from .fullstep_lts_admission import moving_launch_switches
+    from .fullstep_lts_census import mesh_class_census
+    from .fullstep_lts_choice import FORCE_ENV, clock_fits, plan_choice
+    from .mpasphys.lts_v842 import lts_requested
+
+    environ = os.environ if environ is None else environ
+    if not lts_requested(arguments) or getattr(arguments, "samehost_devices", None) is not None:
+        return None
+    if moving_launch_switches(environ):
+        return None
+    top = lts_top_rate(arguments)
+    census = top["census"]
+    if census is None or len(census) < 2 or not top["closed"]:
+        return None  # one class runs the fixed step anyway; a limited-area mesh meets the LTS executor's refusal
+    # Every top class from the mesh's own down to 2, each at the step its class clock allows (a default step moves
+    # down only as far as that class needs; an explicit step is priced only where it already fits).
+    candidates = [(int(top["rate"]), float(lts_dt), census)]
+    clock = getattr(arguments, "_lts_clock", None)
+    edges = getattr(arguments, "_fullstep_lts_edges", None)
+    rate = int(top["rate"]) // 2
+    while clock is not None and edges is not None and rate >= 2:
+        moved = mpas_defaults.lts_class_clock_dt(clock["fixed"], max_rate=rate, events=clock["events"])
+        step = float(moved["dt_seconds"])
+        if clock_fits(step, rate, clock["events"]):
+            lower = mesh_class_census(*edges, max_rate=rate)
+            if len(lower) >= 2:
+                candidates.append((rate, step, lower))
+        rate //= 2
+    choice = plan_choice(sum(int(count) for count in census.values()), route=route, fixed_dt_seconds=fixed_dt,
+                         candidates=candidates)
+    forced = str(environ.get(FORCE_ENV, "")).strip().lower() in ("1", "true", "yes", "on")
+    if forced:
+        top_row = choice["candidates"][0]
+        choice = {**choice, "forced_by": f"{FORCE_ENV}=1", "choice": "lts", "lts_top_rate": top_row["top_rate"],
+                  "lts_dt_seconds": top_row["dt_seconds"]}
+    predicted = choice["predicted_seconds_per_forecast_hour"]
+    if choice["choice"] == "lts" and int(choice["lts_top_rate"]) != int(top["rate"]):
+        # A lower top class is cheaper: the executors plan at most that class, at the step its clock allows.
+        arguments.fullstep_lts_max_rate = int(choice["lts_top_rate"])
+        print(f"woof hex: local time stepping with top class {int(choice['lts_top_rate'])} at "
+              f"{float(choice['lts_dt_seconds']):g} s (predicted {predicted['lts']:g} s per forecast hour; the mesh's "
+              f"top class {int(top['rate'])} needs {float(lts_dt):g} s and is predicted slower)", file=sys.stderr,
+              flush=True)
+    arguments._lts_chosen_dt = None if choice["choice"] != "lts" else float(choice["lts_dt_seconds"])
+    lts_dt = float(choice["lts_dt_seconds"] or lts_dt)
+    record = {"route": route, "door_choice": choice}
+    arguments.fullstep_lts_door_choice = record
+    print(json.dumps({"fullstep_lts": record}, default=str), flush=True)
+    if choice["choice"] == "fixed":
+        for name in ("fullstep_lts_mode", "fullstep_lts_max_rate", "fullstep_lts_buffer_rings"):
+            setattr(arguments, name, None)
+        arguments.fullstep_local_timestep = False
+        print(f"woof hex: fixed step {fixed_dt:g} s instead of active local time stepping: on this mesh LTS is "
+              f"predicted at {predicted['lts']:g} s per forecast hour against {predicted['fixed']:g} s for the fixed "
+              f"step ({route} route, measured per-step cost); {FORCE_ENV}=1 runs LTS anyway", file=sys.stderr,
+              flush=True)
+    elif not forced:
+        print(f"woof hex: active local time stepping at {lts_dt:g} s: predicted {predicted['lts']:g} s per forecast "
+              f"hour against {predicted['fixed']:g} s for the fixed step", file=sys.stderr, flush=True)
+    return choice["choice"]
+
+
 def bind_native_step(arguments: argparse.Namespace, native_text: str) -> str:
     """The MPAS suite route's ``config_dt``: the namelist's, else the door's own step for the mesh.
 
@@ -4159,6 +4347,7 @@ def bind_native_step(arguments: argparse.Namespace, native_text: str) -> str:
         text = None if requested is None else str(requested).strip().lower()
         if text not in (None, "", "auto", "row") and float(text) != float(named):
             raise ValueError(f"--dt {requested} and the namelist config_dt {named} name two steps for one run")
+        mpas_lts_choice(arguments, fixed_dt=float(named), lts_dt=float(named))
         return native_text
     registry = load_registry(resolve_repo(getattr(arguments, "repo", None)))
     row = registry.get(getattr(arguments, "mesh", None))
@@ -4176,13 +4365,70 @@ def bind_native_step(arguments: argparse.Namespace, native_text: str) -> str:
     radiation = namelist_option(native_text, "physics", "config_radtlw_interval")
     radiation_seconds = (float(interval_seconds(radiation)) if radiation not in (None, "", "none")
                          else float(mpas_defaults.DEFAULT_RADIATION_SECONDS))
-    selection = mpas_defaults.resolve_dt(
+    fixed = mpas_defaults.resolve_dt(
         requested, nominal_dx_m=nominal_dx_m, row_dt_seconds=row_dt_seconds,
         radiation_seconds=radiation_seconds)
+    selection = lts_step(arguments, fixed, radiation_seconds)
+    # "fixed": the plain fixed-step run (the step a run without LTS takes, no LTS argument left for any reader);
+    # "lts": the step of the top class the choice took.
+    selection = chosen_step(arguments, fixed, selection,
+                            mpas_lts_choice(arguments, fixed_dt=float(fixed["dt_seconds"]),
+                                            lts_dt=float(selection["dt_seconds"])))
     dt = float(selection["dt_seconds"])
     print(f"woof hex: MPAS suite timestep {dt:g} s ({selection.get('source')}: {selection.get('rule', '')})",
           file=sys.stderr, flush=True)
     return set_namelist_options(native_text, {"nhyd_model": {"config_dt": dt}})
+
+
+#: The door's dycore schedule flags and the MPAS &nhyd_model option each one names.
+NATIVE_SCHEDULE_FLAGS = (
+    ("acoustic_substeps", "--acoustic-substeps", "config_number_of_sub_steps"),
+    ("time_integration_order", "--time-integration-order", "config_time_integration_order"),
+    ("monotonic", "--monotonic", "config_monotonic"),
+)
+
+
+def _namelist_value(value: Any) -> Any:
+    """A parsed namelist scalar as an int or bool (Fortran logicals arrive as text from some readers)."""
+    if isinstance(value, str):
+        text = value.strip().strip(".").lower()
+        if text in ("true", "t"):
+            return True
+        if text in ("false", "f"):
+            return False
+        return int(text)
+    return value
+
+
+def bind_native_dynamics(arguments: argparse.Namespace, native_text: str) -> str:
+    """The MPAS suite route's dycore schedule: each door flag given becomes its &nhyd_model option.
+
+    THE BREAKAGE THIS PREVENTS (2026-10-27, time-step options on the 96->3 km zoom globe): this route returns
+    before resolve_request, the only reader of --acoustic-substeps, --time-integration-order and --monotonic,
+    so `--dt 24 --acoustic-substeps 6` ran four acoustic sub-steps (the history's config_number_of_sub_steps
+    was 4) and nothing said the flag had been dropped.  A flag not given leaves the namelist (or MPAS's
+    Registry default) in charge, as before; a namelist naming a different value is refused as two values
+    for one run, as bind_native_step refuses two steps.
+    """
+    from .mpasphys.forecast_v842 import namelist_option, set_namelist_options
+
+    options: dict[str, Any] = {}
+    for attribute, flag, option in NATIVE_SCHEDULE_FLAGS:
+        given = getattr(arguments, attribute, None)
+        if given is None:
+            continue
+        value = bool(given) if attribute == "monotonic" else int(given)
+        named = namelist_option(native_text, "nhyd_model", option)
+        if named is not None:
+            if _namelist_value(named) != value:
+                raise ValueError(f"{flag} {given} and the namelist {option} {named} name two values for one run")
+            continue
+        options[option] = value
+    if not options:
+        return native_text
+    print("woof hex: MPAS suite dycore schedule " + ", ".join(f"{k}={v}" for k, v in options.items())
+          + " (explicit flags)", file=sys.stderr, flush=True)
+    return set_namelist_options(native_text, {"nhyd_model": options})
 
 
 def _run_forecast(arguments: argparse.Namespace) -> int:
@@ -4243,6 +4489,7 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             announce_physics_mode(native_config, arguments)
             announce_cpu_slots(native_config)
             native_text = bind_native_step(arguments, native_text)
+            native_text = bind_native_dynamics(arguments, native_text)
             arguments._native_timeline = True
             prewarm_native_kernels()
             time_ledger.emit("prep.door", "end")
@@ -4250,9 +4497,22 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
                 rc = run_native_physics(arguments, native_config, native_text)
                 if rc == 0:
                     native_default_products(arguments)
+                    receipt = getattr(arguments, "receipt", None)
+                    if receipt is not None:
+                        # THE BREAKAGE THIS PREVENTS (2026-10-25, MPAS physics the hex default): this route returns
+                        # before resolve_request, the only reader of --receipt, so the flag was accepted and no file
+                        # was written (a cycle slot's forecast-receipt.json never appeared).  The route's receipt is
+                        # native-physics-receipt.json beside its frames; --receipt gets that receipt.
+                        import shutil
+                        source = Path(arguments.out) / "native-physics-receipt.json"
+                        if not source.is_file():
+                            raise RuntimeError(f"--receipt {receipt}: the MPAS suite route finished without "
+                                               f"{source.name} in {arguments.out}")
+                        shutil.copyfile(source, Path(receipt).expanduser())
                 return rc
             finally:
                 write_kernel_plan_receipt(getattr(arguments, "out", None))
+                write_lts_choice_receipt(arguments)
     except (ValueError, OSError, RuntimeError) as error:
         raise _refuse(str(error)) from error
     started = time.monotonic()
@@ -4514,6 +4774,7 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
         f"frames={len(history)} status={status} out={request.out}",
         flush=True,
     )
+    write_lts_choice_receipt(arguments)
     command = render_command(request, history)
     if command is not None and rc == 0 and not getattr(arguments, "no_products", False):
         # The standard product set is the forecast's last stage by default
@@ -4611,20 +4872,23 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
         "--physics-backend", default=DEFAULT_BACKEND, metavar="ROW",
         help="mpasphys selects the MPAS suite route (its Registry default is "
              "mesoscale_reference; --physics-suite or a namelist may select another). "
-             "Otherwise, the column-physics backend row this run selects "
-             "(woof.hex.physics_backend_admission). The default is the "
-             "frozen lane. A provider's row runs its own pinned column "
+             "Otherwise, the WOOF-route column-physics backend row this run selects "
+             "(woof.hex.physics_backend_admission); naming a row selects the WOOF "
+             "route. Its default is the frozen lane. A provider's row runs its own pinned column "
              "batch and may declare extra prognostic scalars and a point "
              "source; an unregistered name is refused naming the rows "
              "this installation carries")
     parser.add_argument(
         "--physics-suite", default=None, metavar="NAME",
-        help="named physics suite (woof.hex.physics_suites; `woof hex physics "
-             "list`). With no suite flag the run is arwen_mpas_column, the "
-             "proven suite. rrfs_v2_dev is shaped after RRFS v2 (hrrrv5) and "
-             "lists every difference from it; MPAS's own suite names "
-             "(mesoscale_reference, convection_permitting, hrrrv5) resolve as "
-             "MPAS resolves them, and an option hex cannot run is refused by name")
+        help="named physics suite (`woof hex physics list`). With no physics "
+             "named (no suite, namelist, --physics override, --convection scheme or "
+             "backend row) the run takes the hex default: MPAS-A's own physics on "
+             "the MPAS route, the suite picked for the mesh (convection_permitting; "
+             "data/profiles/physics-default.v1.json). arwen_mpas_column runs WOOF "
+             "physics exactly as a bare run did before 0.4.6; arwen_thompson_column "
+             "and rrfs_v2_dev are the other WOOF-route suites. MPAS's own suite names "
+             "(mesoscale_reference, convection_permitting, hrrrv5) run the MPAS route, "
+             "and an option hex cannot run is refused by name")
     parser.add_argument(
         "--physics", action="append", default=None, metavar="KEY=VALUE",
         help="override one physics option, repeatable: an MPAS selector "
@@ -4634,7 +4898,8 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
              "a WOOF generation selector (thompson_version, thompson_fork_snow_fall, "
              "bl_mynn_version, bl_mynn_mixlength, mynn_sfclay_variant, "
              "rrtmg_cloud_optics_form) or config_frac_seaice. Recorded as an "
-             "override in the receipt")
+             "override in the receipt. With no --physics-suite it overrides the WOOF "
+             "suite (arwen_mpas_column); name an MPAS suite to override on the MPAS route")
     parser.add_argument(
         "--physics-namelist", type=Path, default=None, metavar="FILE",
         help="an MPAS namelist.atmosphere whose physics the run takes "
@@ -4852,7 +5117,8 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
              "(default: 0.1)")
     parser.add_argument(
         "--convection", default="auto", metavar="SCHEME",
-        help="cumulus selection: auto, off, gf, ntiedtke, or any cumulus "
+        help="WOOF-route cumulus selection (a scheme other than auto selects the "
+             "WOOF route when no suite is named): auto, off, gf, ntiedtke, or any cumulus "
              "option of WOOF's physics registry by MPAS name, registry option "
              "id or cu_physics number (kain-fritsch, cu_tiedtke, 6). "
              "The default 'auto' switches the cumulus "

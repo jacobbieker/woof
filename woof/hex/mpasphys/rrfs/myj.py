@@ -854,7 +854,7 @@ __device__ static real myjsfc_table(const real* __restrict__ psi,
 
 // MPAS-Model-rrfs/src/core_atmosphere/physics/physics_wrf/module_sf_myjsfc.F:76-1062 at 1d6e370e
 extern "C" __global__ void myjsfc_column(
-    // full columns, woof bottom-up (nz, n)
+    // full columns, gpuwm bottom-up (nz, n)
     const real* __restrict__ dz_a,
     const real* __restrict__ tke_a,
     // lowest-model-level state (n)

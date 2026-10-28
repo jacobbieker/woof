@@ -2658,6 +2658,19 @@ _EXPECTED_280_PREFLIGHT_REFUSALS = {
 }
 
 
+def _woof_renamed_part_refusals() -> set[str]:
+    """Registry parts whose physics differs from 2.8.0 only by the package
+    name: their source names woof (a module path or the data package), so
+    2.8.0's recorded digests cannot match them and the preflight names them
+    as changed beside the recorded differences above."""
+    from woof.physics_registry import (
+        registry_physics_part_sources, strip_registry_documentation)
+    package = re.compile(r"\bwoof[._/]|woof_data/")
+    return {f"registry physics of {name} (changed)"
+            for name, source in registry_physics_part_sources().items()
+            if package.search(json.dumps(strip_registry_documentation(source)))}
+
+
 @pytest.mark.parametrize("physics_profile", [runner.PHYSICS_PROFILE, None])
 def test_a_proof_prepared_under_the_280_registry_resolves_at_preflight(
         tmp_path, monkeypatch, physics_profile):
@@ -2691,8 +2704,12 @@ def test_a_proof_prepared_under_the_280_registry_resolves_at_preflight(
     prefix = "physics selection differs from the hash-bound experiment/profile: "
     assert prefix in str(caught.value)
     assert "Prepare again" in str(caught.value)
-    assert str(caught.value).split(prefix, 1)[1].split(". Prepare again", 1)[0] \
-        == "; ".join(_EXPECTED_280_PREFLIGHT_REFUSALS[physics_profile])
+    refused = str(caught.value).split(prefix, 1)[1].split(
+        ". Prepare again", 1)[0].split("; ")
+    expected = _EXPECTED_280_PREFLIGHT_REFUSALS[physics_profile]
+    renamed = _woof_renamed_part_refusals()
+    assert [line for line in refused
+            if line in expected or line not in renamed] == expected
 
     for receipt in (proof["physics"], proof["export"]["physics"]):
         receipt["registry_sha256"] = "e" * 64
@@ -4356,6 +4373,45 @@ def test_hash_bound_history_cadence_refuses_a_disagreeing_cli_cadence(capsys):
     nonstep = _retime_single_domain(base, cadence_seconds=71.0)
     with pytest.raises(ValueError, match="whole number of exact model time steps"):
         runner._validate_hash_bound_history_cadence(nonstep, 71.0)
+
+
+def test_quicklook_domain_runs_its_own_default_history_cadence(tmp_path):
+    """U-E3 (2026-10-26, WOOF run_2f1ab5667c4cbdf6): a single-domain run
+    with ``--quicklook-interval 300`` on 15-minute full frames refused its
+    own default before the first step.  ``_clock_defaults`` reads the
+    TOML's declared history_interval_s (900, the FULL cadence), the parsed
+    DomainConfig carries the 300 s quick-look alarm, and the cadence check
+    compared the two.  Both name the experiment's own stream now; a
+    cadence that is neither still refuses, and the schedule still counts
+    every alarm frame (quick-look subsets included)."""
+    text = (ROOT / "configs" / "gfs_wrf_direct_proof.toml").read_text(
+        encoding="utf-8")
+    assert text.count("history_interval_s = 3600.0\n") == 1
+    text = text.replace(
+        "history_interval_s = 3600.0\n",
+        "history_interval_s = 900.0\nquicklook = { every_s = 300.0 }\n")
+    config = tmp_path / "quicklook.toml"
+    config.write_text(text, encoding="utf-8")
+    exp = load_experiment(config)
+    assert exp.root.history_interval_s == 300.0
+    assert exp.root.full_history_interval_s == 900.0
+
+    run_seconds, default_cadence = runner._clock_defaults(config)
+    assert default_cadence == 900.0
+    receipt = runner._validate_hash_bound_history_cadence(exp, default_cadence)
+    assert receipt["full_history_seconds"] == 900.0
+    assert receipt["quicklook_seconds"] == 300.0
+    assert receipt["expected_frame_count"] == int(run_seconds // 300) + 1
+    assert runner._validate_hash_bound_history_cadence(
+        exp, 300.0)["expected_frame_count"] == receipt["expected_frame_count"]
+    with pytest.raises(ValueError, match=r"history_interval_s = 900 s on d01 "
+                       r"\(with a 300 s quick-look stream\)"):
+        runner._validate_hash_bound_history_cadence(exp, 600.0)
+    plan = runner._execution_plan_receipt(
+        source_exp=exp, executed_exp=exp, profile="p",
+        history_interval_seconds=default_cadence)
+    assert not [row for row in plan["execution_overrides"]
+                if row["kind"] == "output-cadence"]
 
 
 def test_adaptive_prepared_cadence_reaches_exact_offgrid_output_schedule():

@@ -39,7 +39,7 @@ def main(argv=None):
     env = dict(os.environ, WRF_SOURCE_ROOT=str(args.wrf461.resolve()),
                YSU_WRF480_SOURCE=str(args.wrf480_source.resolve()),
                YSU_COLUMN_FIXTURE=str(args.ysu_fixture.resolve()),
-               GPUWM_CLDFRA2_COUPLED_ROOT=str(args.coupled_fixture.resolve()),
+               WOOF_CLDFRA2_COUPLED_ROOT=str(args.coupled_fixture.resolve()),
                PYTEST_ADDOPTS="")
     records = []
     for exact in ("0", "1"):

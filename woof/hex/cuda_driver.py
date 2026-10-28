@@ -1514,7 +1514,7 @@ extern "C" __global__ void moist_cell_coefficients_v841_f32(
         float total = 0.0f;
         // nmass, not nScalars: only the mass-LOADING species enter qtot.
         // The species row orders them as a contiguous leading run, so one
-        // count is the whole rule (woof.hex.species_row).  A number
+        // count is the whole rule (hexcore.species_row).  A number
         // concentration folded in here would collapse 1/(1+qtot); a rime
         // MASS that is a component of another species would double-count it.
         for (int species = 0; species < nmass; ++species) {

@@ -862,7 +862,7 @@ _ROOT_DATA = {
 }
 _TOOL_FILES = {"__init__.py", *HRRR_HELPERS}
 _FORBIDDEN_STAGED_FILES = {
-    f"gpuwm/{name}" for name in _TOP_LEVEL_EXCLUDES
+    f"woof/{name}" for name in _TOP_LEVEL_EXCLUDES
 } | {
     "woof/core/model.py",
     "woof/core/dycore.py",

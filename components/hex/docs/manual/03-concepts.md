@@ -78,7 +78,8 @@ each checked against its own native referee build; `--physics-mode exact` is
 the matched arithmetic. See [the MPAS physics seam](mpas-physics-seam.md).
 
 **WOOF's physics is not MPAS's, so agreement with MPAS is not its standard.**
-On the default route woof hex runs the WOOF engine's physics suite through a
+On the WOOF route (`--physics-suite arwen_mpas_column`; MPAS physics is the
+default since 0.4.6) woof hex runs the WOOF engine's physics suite through a
 pinned seam, and that physics is judged by **skill against observations**
 (MRMS precipitation and radar products, ASOS surface stations). Matching
 another model's choices was never evidence of being right; matching the

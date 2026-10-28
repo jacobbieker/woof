@@ -30,7 +30,7 @@ numerical target.
 | `tools/noahmp_wrf461_oracle/stub_wrf.F90` | `f515529d7b2504c72970402e4d97ef3bcd7764412a800a3d788bedf28e639d2b` |
 | `tools/noahmp_wrf461_oracle/run_parameters.F90` | `04d5956393788acaae3650d3cde9e4d660cafc3a9034dd5182f75d64cac668fa` |
 | `tools/noahmp_wrf461_oracle/run_sflx.F90` | `c98d4b07dad50a364f8c830b00e424fa57b68e10cb0c461d044412cb65a28c10` |
-| `tools/noahmp_wrf461_oracle/build.sh` | `2f4e06a054db026fcff49bb443c09b1fa4e466a0c1d7ec113daba7008fb03f88` |
+| `tools/noahmp_wrf461_oracle/build.sh` | `8cf7b60267c55c5f55da7c7e0e5bbd98ea9a7de9a3249ebf5e35594f04d718ee` |
 
 The four harness digests are of the canonical LF form of those files. The CSV
 fixtures are protected by the repository's `gpuwm/data/** -text` attribute; the
@@ -247,9 +247,9 @@ deliberately untouched.
 
 | Artefact | SHA-256 |
 |---|---|
-| `tools/noahmp_wrf461_oracle/build_leaves.sh` | `9173d4ed7d0740f26ac2486e852fabe87fb6653a186b2862d0b89b6ddbc7f222` |
+| `tools/noahmp_wrf461_oracle/build_leaves.sh` | `7e3fe0450c79867cf82409ef81a5d7bd4ca4f0f8bca8962eaf5d6cf90d98654e` |
 | `tools/noahmp_wrf461_oracle/run_leaves.F90` | `fb86abfa1b94c194618e90455286c587332c934d5981768fa49f6bd8a098129c` |
-| `tools/noahmp_wrf461_oracle/check_visibility_patch.py` | `bcaf0e65786bcd00800cad7e1f825952d56b5caf8f36aa0e7e2fbb0c3b95f606` |
+| `tools/noahmp_wrf461_oracle/check_visibility_patch.py` | `4911cc50b30795d08642b1960e5934f6c3495f78103e85c24756bb1996f540e4` |
 | `tools/noahmp_wrf461_oracle/validate_leaf_oracle.py` | `453296c28c22ac5f310eb84449d1f69c3b1a22ef447c6f801ff211d9b636d965` |
 | `tools/noahmp_wrf461_oracle/dump_libm_reference.c` | `d3648242cabd43c4f44f8d1127e3e2d34230ba473416f0c9818f496e2a2768fa` |
 | `patches/noahmp-lsm-leaf-visibility.patch` | `164885a9ce956a51be2ab189165da8b60217b636a720c994e04dfb862a05aad5` |

@@ -414,7 +414,7 @@ def replay():
             "tier": "standalone whole-module CUDA/native replay, config_physics_mode='correct'; not forecast proof",
             "native_library_sha256": hashlib.sha256(Path(native).read_bytes()).hexdigest(),
             "port_source_sha256": hashlib.sha256(
-                (Path(__file__).parents[1] / "src/hexcore/iau_v842.py").read_bytes()).hexdigest(),
+                (Path(__file__).parents[1] / "../../woof/hex/iau_v842.py").read_bytes()).hexdigest(),
             "process_count": 1, "records": records, "compile_manifest": cache.compile_manifest(),
         }, indent=2) + "\n")
 

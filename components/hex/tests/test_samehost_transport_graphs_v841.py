@@ -497,7 +497,7 @@ def gpu_check_and_benchmark(args):
     import cupy as cp
     module = transport_module
     if args.transport_source:
-        spec = importlib.util.spec_from_file_location("hexcore._transport_before_check", args.transport_source)
+        spec = importlib.util.spec_from_file_location("woof.hex._transport_before_check", args.transport_source)
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)

@@ -21,8 +21,8 @@ from woof.hex.drivers import fullstep_lts_forecast_v841 as lts
 from woof.hex.fullstep_lts_admission import admit_mesh_rates, moving_region_requested
 from woof.hex.moving_control import MovingControl
 
-MOVING_MODULES = ("hexcore.moving_checkpoint", "hexcore.moving_control", "hexcore.moving_zone_state",
-                  "hexcore.moving_physics", "hexcore.moving_state", "hexcore.moving_zone")
+MOVING_MODULES = ("woof.hex.moving_checkpoint", "woof.hex.moving_control", "woof.hex.moving_zone_state",
+                  "woof.hex.moving_physics", "woof.hex.moving_state", "woof.hex.moving_zone")
 
 
 def _clear_moving(monkeypatch):
@@ -128,11 +128,11 @@ def test_class_map_without_switches_is_the_default_lts_map(monkeypatch):
 def test_the_carrier_switch_is_what_engages_the_resume_hook(tmp_path, monkeypatch):
     _clear_moving(monkeypatch)
     calls = []
-    fake = ModuleType("hexcore.moving_checkpoint")
+    fake = ModuleType("woof.hex.moving_checkpoint")
     fake.load_boundary = lambda path: calls.append(("load", path)) or {"rates": np.ones(8, np.int32)}
     fake.resume_same_mesh_host = lambda host, payload: calls.append(("resume",)) or host
     fake.carry_physics_top_pressure = lambda host, payload: calls.append(("top",)) or host
-    monkeypatch.setitem(sys.modules, "hexcore.moving_checkpoint", fake)
+    monkeypatch.setitem(sys.modules, "woof.hex.moving_checkpoint", fake)
     _execute(tmp_path, _one_class_host(0.0), _schedule())
     assert calls == []
     monkeypatch.setenv("WOOF_HEX_MOVING_CHECKPOINT_IN", str(tmp_path / "boundary.pkl"))

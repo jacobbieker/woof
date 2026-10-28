@@ -49,7 +49,7 @@ def test_step_certificates_hold_their_receipts_and_cannot_borrow_rk3():
     import hashlib
     from woof.hex.config_v841 import V841MpasColumnPhysicsConfig
     from woof.hex.step_anchors import step_anchor_record
-    table = json.loads((ROOT / "src/hexcore/data/dycore-step-anchors.v1.json").read_text())
+    table = json.loads((ROOT / "../../woof/hex/data/dycore-step-anchors.v1.json").read_text())
     assert {(r["dt_seconds"], r["order"], r["acoustic_substeps"]) for r in table["anchors"]} == {(15.0, 2, 2), (20.0, 2, 4), (60.0, 2, 2)}
     for row in table["anchors"]:
         data = (ROOT / row["certificate"]).read_bytes()

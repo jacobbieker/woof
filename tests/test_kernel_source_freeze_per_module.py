@@ -1749,4 +1749,4 @@ def test_mosaic_ucm_composed_source_is_pinned():
     # match the release Fortran oracle. Other WRF 4.8 physics is outside it.
     from woof.core.noah_mosaic import mosaic_ucm_source
     assert hashlib.sha256(mosaic_ucm_source().encode()).hexdigest() == (
-        '7ca1678c17f876987f4973744e6829c121cabaec2f56d5a47c7168e714b0b3c5')
+        'cfa235dcf278a44fc9ef80dcc5700e2e6b2ddfe640c12314f0db86e4e7a65401')

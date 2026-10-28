@@ -1483,9 +1483,6 @@ tests/test_streamed_lifecycle_restart.py
 # Ordinary single-domain execution routes through the shared adaptive scheduler.
 tests/test_single_adaptive_runtime.py
 
-# Visual launcher uses the shared wizard/schema and preserves exact user settings.
-tests/test_launchpad_api.py
-
 # Configured automatic admission retains shared allocations and explicit settings.
 tests/test_auto_admission.py
 
@@ -1576,7 +1573,6 @@ tests/test_streamed_state.py
 tests/test_qnn_specified_inflow.py
 tests/test_wrfinput_physics_fields.py
 tests/test_metgrid_number_initialization.py
-tests/test_tui_cli.py
 
 # Reported GPU-preflight and ERA5 mask failures have permanent CPU coverage.
 tests/test_supervisor.py
@@ -2811,10 +2807,7 @@ tests/test_health_census_companions.py
 tests/test_fetch_command_abi.py
 
 # Publication rehearsal completeness, isolation, project capacity and vendor hygiene.
-tests/test_workflow_rehearsals.py
 tests/test_workflow_job_replay.py
-tests/test_pypi_capacity.py
-tests/test_publish_preflight.py
 tests/test_vendor_cache_ignore.py
 
 # Hex init threading identity (2026-10-12, 8e): rw_mpas_init columns run on
@@ -2833,7 +2826,6 @@ tests/test_region_recipe.py
 # Linux geography note must quote the tool's own figures for the set the
 # steps fetch. The Node article cells skip where Node is absent.
 tests/test_resolved_scale_receipt.py
-tests/test_gui_failure_text.py
 
 # HRRR route terrain drag (2026-10-13, 2.9.0 verify round 1, QA R4): the
 # hrrr route's root static omitted the drag statistics gwd_opt/topo_wind read,
@@ -3018,3 +3010,6 @@ tests/test_wheel_glibc_tag.py
 tests/test_hydro_short_run_history.py
 tests/test_static_sources.py
 tests/test_renderer_warnings.py
+tests/test_cuda_wait.py
+tests/test_prep_host_parallel.py
+tests/test_hex_mpas_route_imports.py

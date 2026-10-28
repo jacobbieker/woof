@@ -19,7 +19,7 @@ def test_native_prewarm_precedes_run_and_receipt_survives_failure(tmp_path, monk
     monkeypatch.setattr(forecast_door, 'mpas_suite_lts_refusal', lambda a: None)
     # These door tests fake the forecast itself; the ported-route suite refusal
     # (resident_v842.ported_route_refusal, tested in test_mpasphys_resident_v842) is not their subject.
-    monkeypatch.setattr("hexcore.mpasphys.resident_v842.ported_route_refusal", lambda config: None)
+    monkeypatch.setattr("woof.hex.mpasphys.resident_v842.ported_route_refusal", lambda config: None)
     monkeypatch.setattr(licence_gate, 'admit', lambda c, a: c)
     monkeypatch.setattr(forecast_door, 'announce_physics_mode', lambda *a: None)
     monkeypatch.setattr(forecast_door, 'announce_cpu_slots', lambda *a: None)

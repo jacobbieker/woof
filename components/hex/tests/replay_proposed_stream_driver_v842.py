@@ -19,9 +19,9 @@ from replay_hex_restart_forecast_v842 import main as run_six_arms
 
 
 PREIMAGES = {
-    'hexcore.mesh': ('tree/src/hexcore/mesh.py',
+    'woof.hex.mesh': ('tree/src/hexcore/mesh.py',
         'e6d7ea9cceeb17532ed3b4d10e3336fb6686b62949081e6c880dccddbee11885'),
-    'hexcore.mpasphys.runtime_v842': ('tree/src/hexcore/mpasphys/runtime_v842.py',
+    'woof.hex.mpasphys.runtime_v842': ('tree/src/hexcore/mpasphys/runtime_v842.py',
         '9bf2c00377455647a8c48984db631bafdb3b273f90b796f59df6b983f3aeb562'),
 }
 
@@ -71,7 +71,7 @@ def run_proposed_cli(argv):
             sys.modules[name] = module
             setattr(parent, member, module)
             spec.loader.exec_module(module)
-        runtime = sys.modules['hexcore.mpasphys.runtime_v842']
+        runtime = sys.modules['woof.hex.mpasphys.runtime_v842']
         original_run = runtime.run_native_dynamics
 
         def proposed_run(*arguments, **keywords):

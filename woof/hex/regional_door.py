@@ -283,7 +283,9 @@ def plan(args: argparse.Namespace) -> dict[str, Any]:
         "card": args.card,
         "cycle": args.cycle if parent is None else parent["start"],
         "parent": parent,
-        "forecast_args": [str(item) for item in (getattr(args, "forecast_arg", None) or ())],
+        # The hex default physics (MPAS suite by mesh, woof.hex.physics_default) is written into the region's
+        # forecast flags here, so the init, step and species rules below see the suite the forecast runs.
+        "forecast_args": _physics_default_flags(args),
         "hours": hours,
         "history_every_minutes": int(args.history_every_minutes
                                      if args.history_every_minutes is not None
@@ -543,6 +545,13 @@ def _stage_init(args, value, status) -> dict[str, Any]:
             "--oned-underflow", switches["oned_underflow"]]
     argv += _init_suite_argv(value)
     return {"returncode": _cli(argv, status)}
+
+
+def _physics_default_flags(args) -> list[str]:
+    """The caller's --forecast-arg flags, plus the hex default MPAS suite when they name no physics."""
+    from .physics_default import ensure
+
+    return ensure([str(item) for item in (getattr(args, "forecast_arg", None) or ())])
 
 
 def _init_suite_argv(value: Mapping[str, Any]) -> list[str]:
@@ -808,6 +817,11 @@ def run_regional(args: argparse.Namespace) -> int:
                 receipt.update(outcome="failed", returncode=int(result["returncode"]))
                 status.failed(f"the {name} stage exited {result['returncode']}")
                 return int(result["returncode"])
+            if name == "forecast":
+                # The forecast is the last GPU stage (the products are CPU work in Rust binaries): a card queue
+                # gets its card back now instead of after them (woof.hex.card_lease).
+                from .card_lease import gpu_work_done
+                timing["card_given_back"] = gpu_work_done()
         receipt.update(outcome="done", returncode=0)
         status.done(f"{value['row']['id']} {value['cycle']} at {value['point_deg']}: {', '.join(stages)}")
         return 0

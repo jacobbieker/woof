@@ -7,7 +7,7 @@ from woof.hex import file_lock
 
 def test_a_held_lock_refuses_a_second_non_blocking_holder(tmp_path):
     path = tmp_path / "locks" / "door.lock"
-    probe = ("import sys\nfrom hexcore import file_lock\n"
+    probe = ("import sys\nfrom woof.hex import file_lock\n"
              "with open(sys.argv[1], 'a') as s:\n"
              "    try:\n        file_lock.lock(s, blocking=False)\n    except BlockingIOError:\n        sys.exit(3)\n")
     with file_lock.held(path):

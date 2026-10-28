@@ -26,7 +26,7 @@ def _tempo_row(monkeypatch, ensure):
     module.ensure_tempo_tables = ensure
     monkeypatch.setitem(sys.modules, "woof.tempo_assets", module)
     species = types.SimpleNamespace(engine_scheme="tempo")
-    monkeypatch.setattr("hexcore.species_row.species_row_for_names", lambda names: species)
+    monkeypatch.setattr("woof.hex.species_row.species_row_for_names", lambda names: species)
     row = _Row()
     row.driven_scalar_names = ("qv",)
     row.appended_scalar_names = ()
@@ -85,7 +85,7 @@ def test_tempo_from_an_init_with_aerosol_passes_the_door(monkeypatch, tmp_path):
 
 def test_other_schemes_never_open_the_init(monkeypatch, tmp_path):
     species = types.SimpleNamespace(engine_scheme="wsm6")
-    monkeypatch.setattr("hexcore.species_row.species_row_for_names", lambda names: species)
+    monkeypatch.setattr("woof.hex.species_row.species_row_for_names", lambda names: species)
     row = _Row()
     row.driven_scalar_names = ("qv",)
     row.appended_scalar_names = ()

@@ -69,7 +69,7 @@ def test_disabled_iau_does_not_access_streams():
 
 def test_iau_v842_citations_have_pinned_source_windows():
     manifest=json.loads((Path(__file__).parent/"native_iau_v842/citations.json").read_text())
-    source=(Path(__file__).parents[1]/"src/hexcore/iau_v842.py").read_text()
+    source=(Path(__file__).parents[1]/"../../woof/hex/iau_v842.py").read_text()
     citations=set()
     for match in re.finditer(r'([A-Za-z_]+\.(?:F|xml)):(\d+)-(\d+)(?:,(\d+)-(\d+))?',source):
         name,a,b,c,d=match.groups()
@@ -91,12 +91,12 @@ def test_stream_request_uses_actual_o1_membership_and_filename(tmp_path):
     if source:
         import importlib.util
         import sys
-        spec=importlib.util.spec_from_file_location("hexcore._iau_stream_contract",source)
+        spec=importlib.util.spec_from_file_location("woof.hex._iau_stream_contract",source)
         streams_module=importlib.util.module_from_spec(spec)
         sys.modules[spec.name]=streams_module
         spec.loader.exec_module(streams_module)
     else:
-        streams_module=pytest.importorskip("hexcore.streams_v842",reason="o1-streams-restart not landed")
+        streams_module=pytest.importorskip("woof.hex.streams_v842",reason="o1-streams-restart not landed")
     path=tmp_path/"streams.atmosphere"
     path.write_text('''<streams><immutable_stream name="iau" type="input"
         filename_template="increments.$Y-$M-$D_$h.$m.$s.nc"
@@ -158,7 +158,7 @@ def replay(request):
             "native_execution_host":os.uname().nodename,
             "process_count":1,
             "native_library_sha256":hashlib.sha256(Path(native_path).read_bytes()).hexdigest(),
-            "port_source_sha256":hashlib.sha256((Path(__file__).parents[1]/"src/hexcore/iau_v842.py").read_bytes()).hexdigest(),
+            "port_source_sha256":hashlib.sha256((Path(__file__).parents[1]/"../../woof/hex/iau_v842.py").read_bytes()).hexdigest(),
             "replay_source_sha256":hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "source":"MPAS-A v8.4.2 f34984b mpas_atm_iau.F:31-292",
             "records":records, "compile_manifest":cache.compile_manifest(),

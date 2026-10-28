@@ -1465,6 +1465,20 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
             from .windfarm import hook
 
             hook(seam, power)
+        # A coupled hex ocean owns ocean ice through the Noah-MP sea-ice hook,
+        # as on the frozen route. Without it here the ocean was attached but
+        # never stepped, woof's own ice model stayed live, and every
+        # storm-following move republished the frozen ocean ice over the
+        # engine's: polar columns flipped water/sea ice/glacier, the history
+        # census refused, Noah-MP's glacier water budget failed and the next
+        # move refused "carried ice volume has no carried ice area" (Milton
+        # hex storm-following, box M 2026-10-27). Prescribed runs keep the
+        # route's published ice owner. In this release the coupled hex ocean
+        # is the prognostic mixed layer (woof.hex.ocean_mixed_layer).
+        from .ocean_mixed_layer import mode as _ocean_mode
+        if _ocean_mode() == "prognostic" and self._constructor.selection.get("land_surface_scheme") == "noahmp":
+            from .arwen_seaice import install_noahmp_seaice
+            install_noahmp_seaice(self, seam)
         return seam
 
     def commit_step(self) -> None:
@@ -1579,7 +1593,7 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
     def _base_receipt(self) -> dict[str, Any]:
         receipt = super()._base_receipt()
         receipt["schema"] = CUDA_SUITE_PHYSICS_V841_SCHEMA
-        receipt["frozen_adapter_schema"] = "mpas-port.cuda-arwen-physics-v841/v2"
+        receipt["frozen_adapter_schema"] = "mpas-port.cuda-woof-physics-v841/v3"
         census = receipt.pop("last_noahmp_census", None)
         receipt["last_land_surface_census"] = census
         receipt["suite"] = {
@@ -1821,7 +1835,7 @@ class PersistentSuiteCudaPhysicsBackendV841(PersistentTwoPhaseCudaPhysicsBackend
         if not isinstance(payload, Mapping) or payload.get("schema") != CUDA_SUITE_PHYSICS_V841_SCHEMA:
             raise ValueError("backend restart schema is not the column suite's")
         frozen = dict(payload)
-        frozen["schema"] = "mpas-port.cuda-arwen-physics-v841/v2"
+        frozen["schema"] = "mpas-port.cuda-woof-physics-v841/v3"
         super().restore_restart_state(frozen)
 
     def _restart_identity(self) -> Mapping[str, Any]:

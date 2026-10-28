@@ -36,6 +36,8 @@ STREAM_DOORS = {"rw_igra2", "rw_amv", "rw_ndbc", "rw_gnssro", "rw_wis2", "rw_pre
                 "rw_hail", "rw_airnow", "rw_scoreboard", "rw_tc_fields", "rw_fire_indices",
                 # Post-2.9.4: native Rust coupled hydro output, fetched on first use.
                 "rw_nextgen_output",
+                # 2.9.9 (PyPI per-file limit): the fixed-ladder probability renderer, which no forecast reaches.
+                "rw_probgrid",
                 # WOOF 1.1.0 r16 (PyPI per-file limit): European radar, and the three MPAS bridges every
                 # hex door reads from the hex helpers first.
                 "rw_odim", "rw_mpas_geometry", "rw_mpas_convert", "rw_mpas_lbc"}
@@ -68,8 +70,10 @@ def test_restored_tools_and_default_paths_are_carried():
         assert artifact.kind == "executable", artifact.name
         assert not artifact.vendored, artifact.name
         assert artifact.name not in bridges.BRIDGE_ENV, artifact.name
-    for default in ("rw_wrfbatch", "rw_netcdf", "netcdf_writer", "gpuwm_mapped_engine",
-                    "rw_fetch", "static_fields", "rw_nexrad", "arwen-tui"):
+    from _woof_snapshot import without_left_out_artifacts
+    for default in sorted(without_left_out_artifacts(
+            ("rw_wrfbatch", "rw_netcdf", "netcdf_writer", "gpuwm_mapped_engine",
+             "rw_fetch", "static_fields", "rw_nexrad", "arwen-tui"))):
         assert default in {a.name for a in bridge_assets.wheel_artifacts()}, default
 
 

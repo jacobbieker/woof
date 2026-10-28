@@ -643,7 +643,7 @@ def test_gate_forecast_proof_cap_and_timeout_recovery_use_tmpdir(tmp_path, monke
             (work / "hex.log").write_text("actual model trace retained\n")
             (work / "hex-output").mkdir()
             return SimpleNamespace(returncode=124)
-        assert command[2:4] == ["hexcore.cli", "verify-mpas"]
+        assert command[2:4] == ["woof.hex.cli", "verify-mpas"]
         assert command[command.index("--failed-model-exit") + 1] == "124"
         partial = Path(command[command.index("--hex-output") + 1])
         assert partial.is_relative_to(temporary_root)

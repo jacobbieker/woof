@@ -87,7 +87,7 @@ def main():
                 raise ValueError("external source authority does not bind its complete manifest")
             manifest = json.loads(manifest_path.read_text())
             expected = {name: digest for name, digest in manifest.items()
-                        if name.startswith("gpuwm/") and Path(name).suffix in (".py", ".cu", ".cuh")}
+                        if name.startswith("woof/") and Path(name).suffix in (".py", ".cu", ".cuh")}
             if expected != receipt["sources_sha256"]:
                 raise ValueError("executed engine code differs from the external committed source manifest")
             default_tip = authority["tip"]

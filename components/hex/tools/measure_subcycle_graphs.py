@@ -36,15 +36,15 @@ def main():
     args.cache.mkdir(parents=True, exist_ok=True)
     # Driver scratch admission requires a destination that does not yet exist.
     os.environ.update(
-        GPUWM_TIME_LEDGER=str(args.output / "ledger.jsonl"),
+        WOOF_TIME_LEDGER=str(args.output / "ledger.jsonl"),
         CUPY_CACHE_DIR=str(args.cache / "cupy"),
-        GPUWM_HEX_PREP_CACHE=str(args.cache / "prep"),
-        GPUWM_CACHE_ROOT=str(args.cache / "engine"),
+        WOOF_HEX_PREP_CACHE=str(args.cache / "prep"),
+        WOOF_CACHE_ROOT=str(args.cache / "engine"),
         XDG_CACHE_HOME=str(args.cache / "xdg"),
-        GPUWM_HEX_MESH_ROWS=str(args.input / "mesh" / "mesh-rows.json"),
-        GPUWM_HEX_REGIONAL_CONTRACT_DIR=str(args.input / "contract"),
-        GPUWM_HEX_CUDA_GRAPHS=args.graphs,
-        GPUWM_HEX_CUDA_GRAPHS_REQUIRE_REPLAY=args.graphs,
+        WOOF_HEX_MESH_ROWS=str(args.input / "mesh" / "mesh-rows.json"),
+        WOOF_HEX_REGIONAL_CONTRACT_DIR=str(args.input / "contract"),
+        WOOF_HEX_CUDA_GRAPHS=args.graphs,
+        WOOF_HEX_CUDA_GRAPHS_REQUIRE_REPLAY=args.graphs,
     )
     from woof.timeline.ledger import Ledger
     card = os.environ.get("GPU_MUTEX_CARDS", "").split(",")[0]

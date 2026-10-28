@@ -546,7 +546,7 @@ def _member_environment(gpu_uuid, plan):
     environment = os.environ.copy()
     environment.update(CUDA_VISIBLE_DEVICES=gpu_uuid, CUDA_DEVICE_ORDER="PCI_BUS_ID",
         GPUWM_MAPPED_ENGINE_THREADS="12", GPUWM_MAPPED_ENGINE_MEMORY_BUDGET_BYTES=str(plan["decoder_budget_bytes"]),
-        GPUWM_PREPROCESS_THREADS="12", RAYON_NUM_THREADS="12",
+        WOOF_PREPROCESS_THREADS="12", RAYON_NUM_THREADS="12",
         OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1",
         NUMEXPR_NUM_THREADS="1", PYTHONUNBUFFERED="1")
     return environment

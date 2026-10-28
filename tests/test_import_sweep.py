@@ -71,8 +71,8 @@ def test_a_declared_extra_is_tolerated_and_nothing_else_is() -> None:
     assert tolerated(ModuleNotFoundError("no cupy", name="cupy"))
     assert tolerated(ModuleNotFoundError("no cupyx", name="cupyx"))
     assert tolerated(ModuleNotFoundError("broken cupyx", name="cupyx.scipy")) is None
-    assert tolerated(ModuleNotFoundError("no mcp", name="mcp")) == \
-        OPTIONAL_MODULES["mcp"]
+    assert tolerated(ModuleNotFoundError("no rasterio", name="rasterio")) == \
+        OPTIONAL_MODULES["rasterio"]
 
     assert tolerated(ModuleNotFoundError("no netCDF4", name="netCDF4")) is None
     assert tolerated(

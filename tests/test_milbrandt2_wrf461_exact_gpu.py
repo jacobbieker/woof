@@ -132,7 +132,7 @@ def test_the_comparison_sees_cudas_powf(tmp_path, monkeypatch):
     source = module_source("milbrandt2")
     assert source.count("gfk_pow(") > 60
     # Leave the definition in the prepended header alone; swap the calls.
-    head, sep, body = source.partition("// woof/core/kernels/milbrandt2.cu")
+    head, sep, body = source.partition("// gpuwm/core/kernels/milbrandt2.cu")
     assert sep
     mutated = cp.RawModule(code=head + sep + body.replace("gfk_pow(", "powf("),
                            options=module_options("milbrandt2"))

@@ -28,7 +28,7 @@ def main():
         parser.add_argument('--'+name.replace('_','-'),type=Path,required=True)
     a=parser.parse_args()
     abi=module('radshared_native_binding',a.native_source)
-    device=module('hexcore.mpasphys._radshared_device_binding',a.provider_source)
+    device=module('woof.hex.mpasphys._radshared_device_binding',a.provider_source)
     registry=a.reference/'src/core_atmosphere/Registry.xml'
     tree=ET.parse(registry).getroot()
     wanted={'mesh':('meshDensity',),'sfc_input':('xland',),'diag_physics':('cldfrac',)}

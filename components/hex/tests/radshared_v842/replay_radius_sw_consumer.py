@@ -46,7 +46,7 @@ def main():
     import cupy as cp
     from woof.hex.mpasphys import radshared_v842
     spec = importlib.util.spec_from_file_location(
-        'hexcore.mpasphys.rrtmg_sw_radius_candidate', args.module.resolve())
+        'woof.hex.mpasphys.rrtmg_sw_radius_candidate', args.module.resolve())
     port = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = port
     spec.loader.exec_module(port)

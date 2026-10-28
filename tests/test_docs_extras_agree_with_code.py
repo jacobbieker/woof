@@ -210,7 +210,7 @@ def _extras_named_by_code() -> dict[str, list[str]]:
     # distribution by name, never the checkout-relative `.[...]` form.
     found: dict[str, list[str]] = {}
     root = _repo_root()
-    pattern = re.compile(r"woof\[([a-z0-9,._-]+)\]")
+    pattern = re.compile(r"recast-woof\[([a-z0-9,._-]+)\]")
     for path in _code():
         try:
             text = path.read_text(encoding="utf-8")

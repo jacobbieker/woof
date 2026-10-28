@@ -37,7 +37,7 @@ def main():
     records = {r['name']: r for r in manifest['records']}
     cases = sorted({name.split('/')[0] for name in records})
     assert len(cases) == 300 and len(records) == len(manifest['records'])
-    spec = importlib.util.spec_from_file_location('hexcore.mpasphys.enabled_lw_radius_candidate', args.module.resolve())
+    spec = importlib.util.spec_from_file_location('woof.hex.mpasphys.enabled_lw_radius_candidate', args.module.resolve())
     port = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = port
     spec.loader.exec_module(port)

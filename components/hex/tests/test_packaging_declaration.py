@@ -20,7 +20,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "pyproject.toml"
-PACKAGE = ROOT / "src" / "hexcore"
+PACKAGE = ROOT / ".." / ".." / "woof" / "hex"
 
 #: Distribution names on PyPI vs the module they install.  Only the entries
 #: that actually differ; anything else is assumed to match.
@@ -37,9 +37,9 @@ def declaration() -> dict:
 # ---------------------------------------------------------------------------
 def test_the_version_is_stated_in_exactly_one_place(declaration: dict) -> None:
     declared = declaration["project"]["version"]
-    assert declared == "0.4.5", (
-        "0.4.5 is the release beside woof 2.9.7 (2026-10-24, pre-approved with it): every fix and the "
-        "MPAS-physics route at parity; moving it is a release decision, not an edit"
+    assert declared == "0.4.9", (
+        "0.4.9 is the all-fixes release on woof 2.9.7 (2026-10-27, all-fixes train): the s2s ocean on "
+        "the MPAS route, storm rosters with SPPT/SKEB and LTS, MYNN RP7 and the other named fixes; moving it is a release decision, not an edit"
     )
 
     source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")

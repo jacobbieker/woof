@@ -110,7 +110,7 @@ def validate(checkout, lane):
         else:
             require(receipt['native_process_count'] == 1, 'Native replay process count differs')
             modules = receipt['loaded_modules']
-            loaded_source(modules['hexcore.mpasphys.rrfs.radiation_rrfs'], production)
+            loaded_source(modules['woof.hex.mpasphys.rrfs.radiation_rrfs'], production)
             names = ['rrtmg_sw_v842', 'rrtmg_lw_v842']
             if kind == 'driver':
                 names.append('radshared_v842')

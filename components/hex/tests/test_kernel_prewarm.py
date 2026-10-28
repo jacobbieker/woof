@@ -120,7 +120,7 @@ def test_legacy_image_manifest_remains_replayable(stub):
 
 
 def test_shared_pack_codec_and_hex_reader_agree(stub):
-    kernel_pack = pytest.importorskip("hexcore.kernel_pack")
+    kernel_pack = pytest.importorskip("woof.hex.kernel_pack")
     kernel_prewarm.install_recorder()
     stub._compile_with_cache_cuda("source", ("--fmad=false",), "120")
     kernel_prewarm.save_manifest()

@@ -1418,7 +1418,7 @@
         assert_eq!(
             renamed.data_fingerprint(),
             fingerprint,
-            "site_name is a label, it must not move the data fingerprint"
+            "site_name is a label — it must not move the data fingerprint"
         );
 
         let larger_memory_budget = SyntheticRadarConfig {
@@ -1462,19 +1462,19 @@
         assert!(differs(&|c| c.max_range_m = 460_000.0), "max_range_m");
         assert!(
             differs(&|c| c.match_gate_to_grid = true),
-            "match_gate_to_grid: toggling grid-matching resizes gates and must rebuild"
+            "match_gate_to_grid — toggling grid-matching resizes gates and must rebuild"
         );
         assert!(differs(&|c| c.ref_floor_dbz = 5.0), "ref_floor_dbz");
         assert!(differs(&|c| c.nyquist_mps = 64.0), "nyquist_mps");
         assert!(
             differs(&|c| c.fold_velocity = true),
-            "fold_velocity: toggling folding re-aliases VEL and re-stamps Nyquist"
+            "fold_velocity — toggling folding re-aliases VEL and re-stamps Nyquist"
         );
         assert!(differs(&|c| c.ref_gate_texture = false), "ref_gate_texture");
         assert!(differs(&|c| c.vel_gate_texture = true), "vel_gate_texture");
         assert!(
             differs(&|c| c.clutter_intensity = 0.5),
-            "clutter_intensity: the slider must rebuild the volume"
+            "clutter_intensity — the slider must rebuild the volume"
         );
         assert!(
             differs(&|c| c.reflectivity_operator = ClassicStoelinga),
@@ -2126,7 +2126,7 @@
         assert_eq!(fold_velocity_mps(2.0 * vn, vn), 0.0);
         assert_eq!(fold_velocity_mps(3.0 * vn, vn), -vn);
 
-        // Boundary convention: half-open [-Vn, +Vn), BOTH +Vn and -Vn map to
+        // Boundary convention: half-open [-Vn, +Vn) — BOTH +Vn and -Vn map to
         // -Vn (+Vn aliases in, -Vn is already the representable end).
         assert_eq!(fold_velocity_mps(vn, vn), -vn);
         assert_eq!(fold_velocity_mps(-vn, vn), -vn);
@@ -2336,11 +2336,11 @@
         let defaults = SyntheticRadarConfig::default();
         assert!(
             defaults.ref_gate_texture,
-            "reflectivity texture ships ON, the smooth field looks garbage without it"
+            "reflectivity texture ships ON — the smooth field looks garbage without it"
         );
         assert!(
             !defaults.vel_gate_texture,
-            "velocity texture stays opt-in, the clean Vr feeds dealias/GBVTD"
+            "velocity texture stays opt-in — the clean Vr feeds dealias/GBVTD"
         );
 
         let fields = uniform_box_fields();
@@ -2497,12 +2497,12 @@
         let time = DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap();
 
         // Amount 0: the clutter path is skipped, so every finite REF is the pure
-        // 8 dBZ echo, nothing is injected (bit-identical to the featureless path).
+        // 8 dBZ echo — nothing is injected (bit-identical to the featureless path).
         let clean = build_synthetic_volume(&fields, time, &clutter_box_config(0.0));
         for value in ref_values(&clean).iter().filter(|value| value.is_finite()) {
             assert!(
                 (value - 8.0).abs() < 1e-6,
-                "amount-0 REF {value} must be the pristine model echo: no clutter injected"
+                "amount-0 REF {value} must be the pristine model echo — no clutter injected"
             );
         }
 
@@ -2522,7 +2522,7 @@
         );
 
         // A DIFFERENT forecast frame (different valid time) gets a DIFFERENT
-        // clutter pattern: the seed folds in the frame time.
+        // clutter pattern — the seed folds in the frame time.
         let other_time = DateTime::<Utc>::from_timestamp(1_700_003_600, 0).unwrap();
         let other = build_synthetic_volume(&fields, other_time, &clutter_box_config(1.0));
         assert_ne!(
@@ -2572,7 +2572,7 @@
         assert_eq!(
             moment_bits(&clean),
             moment_bits(&cluttered),
-            "40 dBZ echo out-values any clutter: the field must be untouched"
+            "40 dBZ echo out-values any clutter — the field must be untouched"
         );
     }
 

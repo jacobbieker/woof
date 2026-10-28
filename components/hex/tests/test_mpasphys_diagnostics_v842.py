@@ -64,7 +64,7 @@ def test_shared_trig_matches_native_gnu_functions():
         if(i<n){s[i]=sinf(x[i]);c[i]=cosf(x[i]);}
     }''')
     result=[cp.empty(values.shape,np.float32) for _ in range(2)]
-    kernel=MpasPhysicsKernelCache().raw_kernel('trig',source,module_key='hexcore.mpasphys.trig_witness_v842')
+    kernel=MpasPhysicsKernelCache().raw_kernel('trig',source,module_key='woof.hex.mpasphys.trig_witness_v842')
     kernel(((values.size+127)//128,),(128,),(np.int32(values.size),cp.asarray(values),*result))
     for got,want in zip(result,expected):
         np.testing.assert_array_equal(cp.asnumpy(got).view(np.uint32),want.view(np.uint32))

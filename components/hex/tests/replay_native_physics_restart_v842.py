@@ -166,7 +166,7 @@ def main():
         native_binary_sha256=digest(args.native/'atmosphere_model'),
         publication_sha256=digest(args.reference/'PUBLICATION.json'),
         orchestration_sha256=digest(__file__),
-        stream_adapter_sha256=digest(Path(__file__).parent.parent/'src/hexcore/restart_v842.py'),scope='Actual native forecast controls; no hex-computed forecast claim',
+        stream_adapter_sha256=digest(Path(__file__).parent.parent/'../../woof/hex/restart_v842.py'),scope='Actual native forecast controls; no hex-computed forecast claim',
         cases=[],passed=False)
     restart_name='restart.'+half.strftime('%Y-%m-%d_%H.%M.%S')+'.nc'
     saved=args.scratch/'native-restart.nc';encoded=args.scratch/'pool-restart.nc'

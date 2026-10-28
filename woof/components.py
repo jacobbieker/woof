@@ -39,7 +39,12 @@ def component_available(word: str) -> bool:
 def register_component_doors(sub) -> None:
     """List each component in the front door's help; dispatch happens earlier."""
     for word, (_module, _func, _label, text) in COMPONENTS.items():
-        sub.add_parser(word, help=text, add_help=False)
+        door = sub.add_parser(word, help=text, add_help=False)
+        # Every word after the component's name goes to the component's own
+        # parser (dispatch_component runs before this one), so this entry
+        # defines no options of its own: a forwarding door, like `woof obs`.
+        # (1.1.2) the docs-flag test held `woof hex ...` commands to this empty parser
+        door._forward_argv = True
 
 
 def dispatch_component(tokens: list[str]) -> int | None:

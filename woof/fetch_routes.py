@@ -110,9 +110,12 @@ ROUTE_TABLE_SHA256 = (
     # Moved by the ecmwf-open-data-0p1 route (IFS HRES open data at 0.1
     # degree, published from the 2026-10-20 cycles).
     # Both, merged for 2.9.7.
-    # Then the fork's met-office-global, icon-global (DWD v1 tree with the
-    # source.coop mirror) and icon-global-ml rows, merged onto 1.1.1.
-    "550f5af0a1e464d1ba73f5feeb1c66a19e3c152dd60337e334428713fdedf610"
+    # Moved by fix/U-E8: hrrr-native's soil donor counts its leads from the
+    # request's start (lead_origin window_start), so a time-lagged member
+    # takes its own run's soil at the start.
+    # Then (fork) the met-office-global, icon-global (DWD v1 tree with the
+    # source.coop mirror) and icon-global-ml rows, merged onto 1.1.3.
+    "83f4898f3a4e65fa63e65f053fc822aabd498325712008a1ddbfeea7c218300a"
 )
 
 #: Sources whose acquisition predates the route table and keeps its own
@@ -234,6 +237,16 @@ class ComposeRow:
     why: str
 
 
+DONOR_LEAD_ORIGINS = ("cycle", "window_start")
+
+
+def _donor_lead_origin(row) -> str:
+    origin = str(row.get("lead_origin", "cycle"))
+    if origin not in DONOR_LEAD_ORIGINS:
+        raise ValueError(f"donor lead_origin {origin!r} is not one of {DONOR_LEAD_ORIGINS}")
+    return origin
+
+
 @dataclass(frozen=True)
 class DonorRow:
     source: str
@@ -241,6 +254,11 @@ class DonorRow:
     leads: tuple[int, ...]
     cycle: str
     why: str
+    #: What ``leads`` count from: ``cycle`` (the donor's own leads, the
+    #: same for every request) or ``window_start`` (offsets from the
+    #: request's first lead, so a time-lagged request that starts at f03
+    #: takes the donor's f03 record, valid when the forecast starts).
+    lead_origin: str = "cycle"
 
 
 @dataclass(frozen=True)
@@ -774,7 +792,8 @@ def _build_routes() -> Mapping[str, Route]:
                 DonorRow(source=str(row["source"]), role=str(row["role"]),
                          leads=tuple(int(lead) for lead in row["leads"]),
                          cycle=str(row.get("cycle", "same")),
-                         why=str(row.get("why", "")))
+                         why=str(row.get("why", "")),
+                         lead_origin=_donor_lead_origin(row))
                 for row in raw.get("donors", [])),
             record_subset_supported=bool(
                 raw["record_subset"].get("supported", False)),
@@ -2137,7 +2156,9 @@ def resolve_request(source: str, *, cycle: datetime, hours: int,
 
     donors = tuple(
         DonorRequest(source=row.source, role=row.role, cycle=cycle,
-                     leads=row.leads, why=row.why)
+                     leads=(row.leads if row.lead_origin == "cycle"
+                            else tuple(leads[0] + lead for lead in row.leads)),
+                     why=row.why)
         for row in route.donors)
 
     if compose:
@@ -3476,7 +3497,43 @@ def _endpoint_receipt(plan: FetchPlan,
     }
 
 
+def _composed_already(dest: Path, out: Path, parts) -> tuple[str, int] | None:
+    """``(sha256, bytes)`` when ``dest`` already holds exactly the parts' concatenation, else None."""
+
+    try:
+        if not dest.is_file():
+            return None
+        want = hashlib.sha256()
+        size = 0
+        for part in parts:
+            data = (out / part.relpath).read_bytes()
+            want.update(data)
+            size += len(data)
+        if dest.stat().st_size != size:
+            return None
+        have = hashlib.sha256()
+        with dest.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                have.update(chunk)
+    except OSError:
+        return None
+    return (want.hexdigest(), size) if have.hexdigest() == want.hexdigest() else None
+
+
 def _run_compose(plan: FetchPlan, out: Path, *, progress=print) -> list[dict]:
+    """Concatenate each composed valid time from its parts.
+
+    A composed file that already holds exactly its parts' bytes is left as
+    it is, and a changed one is written beside it and renamed into place.
+    THE BREAKAGE THIS PREVENTS (WOOF sensitivity smoke, 2026-10-25,
+    three gem-gdps members of one cycle with different physics): members of
+    one ensemble share one download folder (recipe_door._SharedDownloads)
+    and each member's chain runs this fetch again; the in-place rewrite of
+    ``composed/gdps_*.grib2`` by a later member moved the file an earlier
+    member's preparation had hashed, and that member's deferred re-read
+    refused with "authority changed while it was re-read". Every composed
+    route (gem-gdps, ecmwf-open-data-0p1, the GEFS routes) was exposed.
+    """
     composed: list[dict] = []
     for step in plan.compose:
         if step.kind != "concat_per_lead":
@@ -3484,15 +3541,24 @@ def _run_compose(plan: FetchPlan, out: Path, *, progress=print) -> list[dict]:
                 f"{ROUTE_TABLE_NAME}: unknown compose kind {step.kind!r}")
         dest = out / step.name
         dest.parent.mkdir(parents=True, exist_ok=True)
+        already = _composed_already(dest, out, step.parts)
+        if already is not None:
+            composed.append({
+                "name": step.name, "bytes": already[1],
+                "sha256": already[0], "lead": step.lead,
+                "parts": [part.relpath for part in step.parts]})
+            continue
         digest = hashlib.sha256()
         written = 0
-        with dest.open("wb") as handle:
+        temporary = dest.with_name(dest.name + ".composing")
+        with temporary.open("wb") as handle:
             for part in step.parts:
                 data = (out / part.relpath).read_bytes()
                 handle.write(data)
                 digest.update(data)
                 written += len(data)
-        _verify_payload(dest, magic="GRIB", label=step.name)
+        _verify_payload(temporary, magic="GRIB", label=step.name)
+        replace_file_with_retry(temporary, dest)
         composed.append({
             "name": step.name, "bytes": written,
             "sha256": digest.hexdigest(), "lead": step.lead,

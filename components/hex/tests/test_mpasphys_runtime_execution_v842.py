@@ -278,23 +278,23 @@ def harness(monkeypatch, tmp_path, *, resident, injected, fail_after=False):
         def flush(self):
             pass
 
-    module('hexcore.mpasphys.resident_output_diagnostics_v842',
+    module('woof.hex.mpasphys.resident_output_diagnostics_v842',
            ResidentOutputDiagnostics=OutputDiagnostics)
-    module('hexcore.mpasphys.framework_backend_v842', FrameworkPhysics=Native)
-    module('hexcore.mpasphys.streams_output_v842', PhysicsStreams=Output,
+    module('woof.hex.mpasphys.framework_backend_v842', FrameworkPhysics=Native)
+    module('woof.hex.mpasphys.streams_output_v842', PhysicsStreams=Output,
            output_inventory=lambda *args: {})
-    module('hexcore.mpasphys.config_v842', NativeMpasDycoreConfigV842=Config)
-    module('hexcore.cuda_driver', CudaDryDycoreDriver=Dycore)
-    module('hexcore.cuda_backend', KernelCache=lambda **kwargs: object(),
+    module('woof.hex.mpasphys.config_v842', NativeMpasDycoreConfigV842=Config)
+    module('woof.hex.cuda_driver', CudaDryDycoreDriver=Dycore)
+    module('woof.hex.cuda_backend', KernelCache=lambda **kwargs: object(),
            require_cuda=lambda **kwargs: object())
-    module('hexcore.cuda_physics_prep_v841',
+    module('woof.hex.cuda_physics_prep_v841',
            CudaMpasToPhysGeometryV841=NS(from_host=lambda mesh: object()))
-    module('hexcore.physics_suites', load_table=lambda: {'mpasphys_v842': {}})
-    module('hexcore.mpasphys.diagnostics_v842', initialize_thermodynamics=lambda *args, **kwargs: None)
-    module('hexcore.device_memory_release', process_release=lambda: NS(receipt=lambda: {}),
+    module('woof.hex.physics_suites', load_table=lambda: {'mpasphys_v842': {}})
+    module('woof.hex.mpasphys.diagnostics_v842', initialize_thermodynamics=lambda *args, **kwargs: None)
+    module('woof.hex.device_memory_release', process_release=lambda: NS(receipt=lambda: {}),
            phase_release=lambda name, **kw: __import__('contextlib').nullcontext(),
            mpas_half_keep_threshold=lambda: None)
-    module('hexcore.mpasphys.surface_update_v842', RustSurfaceRecordReader=Reader)
+    module('woof.hex.mpasphys.surface_update_v842', RustSurfaceRecordReader=Reader)
     monkeypatch.setattr(resident_v842, 'ResidentPhysicsGlue', glue)
     for name, value in dict(NativePhysics=Native, NativePhysicsSession=Session,
             ResidentNativeCoupling=Coupling, load_native_dynamics_inputs=load,
@@ -360,7 +360,7 @@ def test_runtime_honors_library_handoff_and_table_ownership(monkeypatch, tmp_pat
     if native_referee:
         h.library = h.native_library
         # The explicit library takes precedence even for an all-GPU config.
-        h.module('hexcore.mpasphys.framework_backend_v842')
+        h.module('woof.hex.mpasphys.framework_backend_v842')
     else:
         def forbidden_native(*args, **kwargs):
             pytest.fail('library=None must not construct the native referee')
@@ -519,9 +519,9 @@ def test_runtime_loader_and_selected_factory(monkeypatch, tmp_path, variant, iau
         class VariantDriver(selected):
             pass
         selected = VariantDriver
-        h.module('hexcore.physics_suites', load_table=lambda: {'mpasphys_v842': {'dycore': 'test'}})
+        h.module('woof.hex.physics_suites', load_table=lambda: {'mpasphys_v842': {'dycore': 'test'}})
         variant_cache = object()
-        h.module('hexcore.dycore_variants',
+        h.module('woof.hex.dycore_variants',
                  resolve_dycore_variant=lambda config, row, **kwargs: config,
                  dycore_driver_type=lambda config: VariantDriver,
                  dycore_kernel_cache_type=lambda config: lambda **kwargs: variant_cache)
@@ -540,7 +540,7 @@ def test_runtime_loader_and_selected_factory(monkeypatch, tmp_path, variant, iau
     if les:
         h.layout.configs['config_les_model'] = 'test'
         les_instance = NS(receipt=lambda step: {'step': step})
-        h.module('hexcore.cuda_les_v842', ResidentLesV842=lambda *args: les_instance)
+        h.module('woof.hex.cuda_les_v842', ResidentLesV842=lambda *args: les_instance)
         monkeypatch.setattr(runtime, 'NativePoolHydration',
                             lambda *args: NS(field_buffer=lambda *args: np.ones((1, 3))))
 

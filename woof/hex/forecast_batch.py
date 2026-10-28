@@ -446,7 +446,7 @@ def run_batch(roster_path, receipt_path):
         for slot in range(per_card):
             name = f"card{card}.w{slot}"
             env = dict(os.environ, CUDA_VISIBLE_DEVICES=visible, GPU_MUTEX_CARDS=str(card),
-                       GPUWM_CARD=str(card), HEX_BATCH_WORKER=name)
+                       WOOF_CARD=str(card), HEX_BATCH_WORKER=name)
             # Several members share this card: each hands its pool's unused
             # blocks back at macro boundaries (fullstep_lts_forecast_v841,
             # WOOF_HEX_RELEASE_POOL) instead of holding its transients' peak.
@@ -573,10 +573,10 @@ def _run_member(member, cli):
 #: Modules a member imports anyway; the slot imports them once before forking.
 #: None of them touches the CUDA runtime at import (a CUDA context does not
 #: survive fork; each child creates its own).
-_PRELOAD = ("numpy", "netCDF4", "cupy", "hexcore.drivers.run_cuda_v841_forecast",
-            "hexcore.drivers.fullstep_lts_forecast_v841", "hexcore.cuda_fullstep_lts_active",
-            "hexcore.cuda_driver", "hexcore.cuda_arwen_physics_v841", "hexcore.fullstep_lts_classes",
-            "hexcore.partition_local_mesh_v841", "woof.core.mpas_column_batch", "woof.core.physics")
+_PRELOAD = ("numpy", "netCDF4", "cupy", "woof.hex.drivers.run_cuda_v841_forecast",
+            "woof.hex.drivers.fullstep_lts_forecast_v841", "woof.hex.cuda_fullstep_lts_active",
+            "woof.hex.cuda_driver", "woof.hex.cuda_arwen_physics_v841", "woof.hex.fullstep_lts_classes",
+            "woof.hex.partition_local_mesh_v841", "woof.core.mpas_column_batch", "woof.core.physics")
 
 
 def _member_in_child(job, cli):

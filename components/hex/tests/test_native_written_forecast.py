@@ -200,7 +200,7 @@ def test_v842_citation_windows_and_no_uncited_kernel():
     from pathlib import Path
     import pytest
     from woof.hex.mpasdiag._citation_pins import PINS
-    root = Path(__file__).parents[1] / "src/hexcore/mpasdiag"
+    root = Path(__file__).parents[1] / "../../woof/hex/mpasdiag"
     counts = Counter()
     pattern = re.compile(r'(?P<file>[A-Za-z0-9_]+\.F):(?P<ranges>\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)')
     for path in root.glob("*.py"):

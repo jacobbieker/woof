@@ -345,7 +345,9 @@ def metadata_fixture(tmp_path, *, project="woof", readme="Prepared release docum
     config = f'[project]\nname = "{project}"\nreadme = "README.md"\n'
     if project == "recast-woof-data":
         config += 'dynamic = ["version"]\n[tool.setuptools.dynamic]\nversion = {file = ["woof_data/VERSION"]}\n'
-        (source_dir / "VERSION").write_text(VERSION + "\n", encoding="utf-8")
+        # the data distribution's import package is woof_data, where the dynamic version file lives
+        (project_root / "woof_data").mkdir(exist_ok=True)
+        (project_root / "woof_data" / "VERSION").write_text(VERSION + "\n", encoding="utf-8")
     else:
         config += f'version = "{VERSION}"\n'
     (project_root / "pyproject.toml").write_text(config, encoding="utf-8")
@@ -580,6 +582,8 @@ def test_the_on_demand_set_is_read_from_the_tagged_declaration(publication):
                                                     "rw_tc_fields", "rw_fire_indices",
                                                     # Post-2.9.4 native Rust hydro output.
                                                     "rw_nextgen_output",
+                                                    # 2.9.9 (PyPI per-file limit): the probability renderer.
+                                                    "rw_probgrid",
                                                     # WOOF 1.1.0 r16 (PyPI per-file limit).
                                                     "rw_odim", "rw_mpas_geometry", "rw_mpas_convert",
                                                     "rw_mpas_lbc"} == {

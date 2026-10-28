@@ -126,7 +126,7 @@ def test_the_helper_crate_notice_follows_the_bridge_pin() -> None:
     Rerun tools/helper_licences.py against the new commit.
     """
     text = _text(LICENSES / "THIRD-PARTY-LICENSES-helper-binaries.txt")
-    pin_bytes = (ROOT / "src" / "hexcore" / "data" / "engine-bridges.json").read_bytes()
+    pin_bytes = (ROOT / ".." / ".." / "woof" / "hex" / "data" / "engine-bridges.json").read_bytes()
     pins = json.loads(pin_bytes)
     assert "Written by tools/helper_licences.py" in text
     commit = re.search(r"^  woof commit +([0-9a-f]{40})$", text, re.M)

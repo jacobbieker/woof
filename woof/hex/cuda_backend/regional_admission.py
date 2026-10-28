@@ -728,8 +728,22 @@ class RegionalContract:
 #: cuda_transport_v841.py a comment. No CUDA source string or arithmetic
 #: changed. Re-derived by tools/repin_source_tables.py; not a new regional
 #: forecast mint, archived scope unchanged.
+#: (21) 2026-10-27 (hex 0.4.9 all-fixes batch): runtime.py makes the host
+#: wait on the card with blocking sync instead of CUDA's spin (c151b3e9; the
+#: main thread held one core at 100 %). The only changed member of this set
+#: since (20); no CUDA source string or arithmetic changed. Re-derived by
+#: tools/repin_source_tables.py; not a new regional forecast mint, archived
+#: scope unchanged.
+#: (22) 2026-10-27 (hex 0.4.9 fold-everything batch): cuda_transport_v841.py
+#: tells an exchanger that declares begin_species_pass which species each
+#: limiter pass carries, and an exchanger declaring fct_scale_parts None takes
+#: the route default (fix/lts-share-0.4.9 7b2ac42a, the one-card active LTS
+#: class exchanger). Regional exchangers declare neither, so their passes are
+#: unchanged. The only changed member of this set since (21); no CUDA source
+#: string or arithmetic changed. Re-derived by tools/repin_source_tables.py;
+#: not a new regional forecast mint, archived scope unchanged.
 MINTED_KERNEL_SET_SHA256 = (
-    "03c5aeb3b03ed873ca84007132b2eb686309e2a4f9ce82deb013b1d0f094e2dd"
+    "454a57b4fa5aa9711b1aa90482d358ad4831ccfa506534fc7f6e655d3a3b4b92"
 )
 
 _DRY_MINT_CAVEAT = (

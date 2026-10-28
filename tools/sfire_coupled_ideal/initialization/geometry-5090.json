@@ -8,8 +8,8 @@
   "device": "NVIDIA GeForce RTX 5090",
   "native_receipt_sha256": "1b37539f996339132c0c06c9fe9bbcad8a1d4e9d571afefe6de3427df986adae",
   "source_sha256": {
-    "gpuwm/core/sfire_ideal.py": "cbc9812595186cb1dc717f1b7c0bda09495cbd6bbb3bc7df077435ab1eb70ddf",
-    "gpuwm/core/kernels/sfire_ideal.cu": "4ae70ca85d10d8b198dad60bcf9eab1d528f222c649d2a001ebe3a5299181714"
+    "woof/core/sfire_ideal.py": "cbc9812595186cb1dc717f1b7c0bda09495cbd6bbb3bc7df077435ab1eb70ddf",
+    "woof/core/kernels/sfire_ideal.cu": "4ae70ca85d10d8b198dad60bcf9eab1d528f222c649d2a001ebe3a5299181714"
   },
   "cases": {
     "ideal_geometry/coordinates": {

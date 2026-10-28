@@ -700,7 +700,7 @@ def verify_engine_tree(root: Path, commit: str, version: str, paths: list[str]) 
     checked = ["pyproject.toml", *paths]
     for relative in checked:
         key = Path(relative)
-        if key.is_absolute() or ".." in key.parts or not relative.startswith(("gpuwm/", "docs/", "pyproject.toml")):
+        if key.is_absolute() or ".." in key.parts or not relative.startswith(("woof/", "docs/", "pyproject.toml")):
             raise SystemExit(f"unsafe engine manifest path {relative!r}")
         path = root / relative
         if not path.resolve().is_relative_to(root):

@@ -428,3 +428,57 @@ def pytest_collection_modifyitems(
             item.add_marker(assets_skip)
         if bigcard_skip is not None and item.get_closest_marker("bigcard") is not None:
             item.add_marker(bigcard_skip)
+        not_carried = _not_carried_folded(item)
+        if not_carried is not None:
+            item.add_marker(pytest.mark.skip(reason=not_carried))
+
+
+# (WOOF) Checks of gpuwm-hex's own distribution and repository, which a tree that folds this package in under
+# another import name does not carry: gpuwm-hex's pyproject.toml, setup.py, MANIFEST.in, NOTICE,
+# THIRD-PARTY-NOTICES.txt and engine-patches/, its wheel layout, its Rust crates (rust/) and vendored METIS
+# sources (third_party/), and its release tooling on its own repository layout.  The folding tree declares and
+# checks its own distribution, and ships the helpers those crates build prebuilt.  Each row names what is not
+# carried; nothing here skips in this repository's own layout.
+_NOT_CARRIED_FILES = {
+    "test_packaging_declaration.py": "gpuwm-hex's pyproject.toml, MANIFEST.in and sdist",
+    "test_wheel_platform_check.py": "gpuwm-hex's wheel layout and publish workflow",
+    "test_licence_notices.py": "gpuwm-hex's NOTICE, THIRD-PARTY-NOTICES.txt and licenses/ "
+                               "(the folding tree's NOTICE carries this NOTICE under its own heading)",
+    "test_s2s_renderer_packaging.py": "gpuwm-hex's setup.py",
+    "test_gpmetis_bundled.py": "gpuwm-hex's vendored METIS sources (third_party/); hex_gpmetis ships prebuilt",
+    "test_repin_source_tables.py": "gpuwm-hex's repository layout, where its repin tool runs",
+}
+_NOT_CARRIED_TESTS = {
+    "test_engine_bridges_bundled.py::test_source_prebuilts_match_this_tree_so_publish_can_build":
+        "gpuwm-hex's engine-patches/",
+    "test_netcdf_copy_packaged.py::test_the_sdist_carries_the_copier_crate_and_not_its_build_output":
+        "gpuwm-hex's MANIFEST.in and rust/netcdf-copy",
+    "test_netcdf_copy_packaged.py::test_the_wheel_build_installs_the_copier_into_libexec": "gpuwm-hex's setup.py",
+    "test_obs_scorer_optional.py::test_setup_builds_the_scorer_only_from_a_source_checkout": "gpuwm-hex's setup.py",
+    "test_static_coordinate_precision.py::test_the_wheel_bundles_a_static_builder_that_holds_binary64":
+        "gpuwm-hex's setup.py",
+    "test_physics_resources_build.py::test_the_crate_builds_every_decoder_the_builder_binds":
+        "gpuwm-hex's rust/physics-tables crate",
+    "test_physics_route_resources.py::test_the_pool_reader_is_gpuwm_24b6f08_byte_for_byte":
+        "gpuwm-hex's rust/physics-pool crate",
+    "test_physics_route_resources.py::test_the_pool_reader_is_gpuwm_24b6f08_plus_the_field_parallel_transport":
+        "gpuwm-hex's rust/physics-pool crate",
+    "test_physics_route_resources.py::test_the_pool_transport_takes_the_cpus_it_may_use":
+        "gpuwm-hex's rust/physics-pool crate",
+    "test_libm_batch_packaged.py::test_setup_names_the_bridge_by_the_runtime_source_key": "gpuwm-hex's setup.py",
+}
+#: a fixture that loads gpuwm-hex's setup.py
+_NOT_CARRIED_FIXTURES = {"hexsetup": "gpuwm-hex's setup.py"}
+
+
+def _not_carried_folded(item: pytest.Item) -> str | None:
+    from _layout import FOLDED, NOT_CARRIED_FOLDED
+
+    if not FOLDED:
+        return None
+    module = Path(str(getattr(item, "fspath", ""))).name
+    what = (_NOT_CARRIED_FILES.get(module)
+            or _NOT_CARRIED_TESTS.get(f"{module}::{item.name.split('[')[0]}")
+            or next((why for name, why in _NOT_CARRIED_FIXTURES.items()
+                     if name in getattr(item, "fixturenames", ())), None))
+    return None if what is None else f"{NOT_CARRIED_FOLDED}: {what}"

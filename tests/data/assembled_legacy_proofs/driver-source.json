@@ -13,9 +13,9 @@
     ],
     "cupy_version": "14.2.0",
     "module_source_sha256": {
-      "smag2d": "e0ddc6075c1da84434eea66c55f39340e40a273c1080ae32578540a706b8e270",
+      "smag2d": "2cdfe1e9b38cfd901a837460526bed5887285bb367593992fd95b95df15e3d24",
       "diff_opt1": "9737655267fca7f30d0a4053008997de55a8e12f4fe552622a09f70ea994e271",
-      "acoustic": "22704608360351a64d84bbf90ed1574e8e62edb5b06f5deea85376d93fca5cf8"
+      "acoustic": "3f0f8577ca182aa04ac7586d1fbdd12e993f7b81874b395e1ee913304b692d48"
     },
     "module_options": {
       "smag2d": [
@@ -42,49 +42,49 @@
     "default_diffusion": true
   },
   "source_inputs": {
-    "gpuwm/core/kernels/__init__.py": {
+    "woof/core/kernels/__init__.py": {
       "bytes": 28570,
       "sha256": "e44a76e72880e6cbacee4a3cf299ab7e1a0b418e737355b3b64bfd60358b67cc"
     },
-    "gpuwm/core/kernels/common.cuh": {
+    "woof/core/kernels/common.cuh": {
       "bytes": 332,
       "sha256": "c78b17cb02ef67a2ad24d19e06e1129d7d5bcda74b972b38470fd33a6e58ff43"
     },
-    "gpuwm/core/kernels/smag2d.cu": {
+    "woof/core/kernels/smag2d.cu": {
       "bytes": 140826,
       "sha256": "731d7f64e86af2d17344be7328fda2a3ecfd4f2e22371f6093128ca2f3192500"
     },
-    "gpuwm/core/constants.py": {
+    "woof/core/constants.py": {
       "bytes": 2979,
       "sha256": "76c8c11d1a75d17fd54d0a80646cec9dde04f649247ec2347d3d32e6c0500e9e"
     },
-    "gpuwm/core/dycore.py": {
+    "woof/core/dycore.py": {
       "bytes": 247314,
       "sha256": "d4cc20c6a23c94f169228d19937724bb678b51b4e597495af09a1672ce8c263b"
     },
-    "gpuwm/wrf_exact.py": {
+    "woof/wrf_exact.py": {
       "bytes": 5198,
       "sha256": "46a2451b5ac0408d8c1fb63ea801debd99c05a66bf110cb509f372020b1c3c57"
     },
-    "gpuwm/nvrtc_ptx_cache.py": {
+    "woof/nvrtc_ptx_cache.py": {
       "bytes": 10626,
       "sha256": "78c42865a01763a13d0349321699913de51ba2465508900bbfc4c64794e61134"
     },
-    "gpuwm/verify/smallstep_oracle.py": {
-      "bytes": 6068,
-      "sha256": "8e8db7b72c07bdbe62c9ae7d2ecc4dd66331dbcabd6c1dc87f93d63659f2fb39"
+    "woof/verify/smallstep_oracle.py": {
+      "bytes": 6063,
+      "sha256": "f73c2a1e8996467fbe3a82fb6fa94cd3bf7d7d1d069fc66850d2cb3dd8a5d92d"
     },
-    "gpuwm/verify/diffusion_oracle.py": {
-      "bytes": 3432,
-      "sha256": "13d184e6478741a240836ef205ee7f86bc2ef17cbcedd5d3596fb621212694e9"
+    "woof/verify/diffusion_oracle.py": {
+      "bytes": 3429,
+      "sha256": "7b68ee8c1198f5f2110e1504cc119ba5e4cd4bd45ceccaae13019fe62df127bb"
     },
-    "gpuwm/core/fp32_ulp.py": {
+    "woof/core/fp32_ulp.py": {
       "bytes": 7856,
       "sha256": "e7a63f76f5457bddcb16ecf28288c25ba210a372aa31e5c8f6a5eb136f01cfe2"
     },
     "tools/assembled_legacy_replay.py": {
-      "bytes": 22340,
-      "sha256": "f53f4c541b052cdbef7ad554f8aae5b4c624e91a2b40515496b2523bea9e42fb"
+      "bytes": 22314,
+      "sha256": "b53ef8e66b860b442b18e2a587419fd119f9518aa1d6300b425d4b4fb8fc6788"
     },
     "tools/wrf_diffusion_oracle/analysis_plot.py": {
       "bytes": 1736,
@@ -107,8 +107,8 @@
       "sha256": "1e4097dc2ad406b4444165e43393fa7656504cb40e9b08118524e2800dc0cb46"
     },
     "tools/wrf_diffusion_oracle/constant_compare.py": {
-      "bytes": 3522,
-      "sha256": "266db7a5db1582302566cdf7a0bff9df1711259679d5fa49d312ae904a8e8d88"
+      "bytes": 3519,
+      "sha256": "b54adcc764f7bd7a06f41f18c95d066b6595a667ed0d1d7126656ec879d41c2a"
     },
     "tools/wrf_diffusion_oracle/deformation_arithmetic.py": {
       "bytes": 3193,
@@ -119,28 +119,28 @@
       "sha256": "f8e3378c69599589bd79b633cbbb34fdc337cdeecde20fbb3c3b0c16357f170c"
     },
     "tools/wrf_diffusion_oracle/deformation_compare.py": {
-      "bytes": 6796,
-      "sha256": "71540fe1bf2a04f8be62d04cd502cf9c6973d50dda9004e48377a1f063ee827c"
+      "bytes": 6791,
+      "sha256": "2dcd92c098f68ad41bb66b07e972bf2cb7d6f61bfe2d5d12e11bcf6861cce68b"
     },
     "tools/wrf_diffusion_oracle/deformation_make_cases.py": {
       "bytes": 3252,
       "sha256": "2ac7ac4cb5269c77e6d88ca132be4e156d9cfd230e599db66eec35a1d53ed8a6"
     },
     "tools/wrf_diffusion_oracle/deformation_mutations.py": {
-      "bytes": 3963,
-      "sha256": "8aa7fdb3e1dd6f32d1eec5d985dec751ad9a0de261b6db6a3b370c859219f6d4"
+      "bytes": 3961,
+      "sha256": "f86f5d998ba9daa53ab06d28569ebb4e545a3fba883014cfd4a38252b2b48c4e"
     },
     "tools/wrf_diffusion_oracle/deformation_reference.py": {
       "bytes": 3723,
       "sha256": "bd6e86be17ac34202c80f3f488fbe4c60c101c76b69d44e0bafd6f36de72ea0b"
     },
     "tools/wrf_diffusion_oracle/deformation_seal.py": {
-      "bytes": 1869,
-      "sha256": "6d0f554bc8f4ad62e0704323b95a4f9afacaabc98af342d2937fad904793f018"
+      "bytes": 1868,
+      "sha256": "271f7bb67b269c344f57c797a4a8864a34d7dba72cdd9ed5070e92fc3f18059c"
     },
     "tools/wrf_diffusion_oracle/deformation_witness.py": {
-      "bytes": 1633,
-      "sha256": "87378fef37801d77c97e9864a4c13ef5c3afbef24be6bcc6938a2a26c99b3b30"
+      "bytes": 1632,
+      "sha256": "9da94ee2f729fa97df567edd3a80a5c6dd378ea377f5b591ae6d6852fff93bb8"
     },
     "tools/wrf_diffusion_oracle/diff6_build.py": {
       "bytes": 3396,
@@ -151,16 +151,16 @@
       "sha256": "42e2479b9dfdc257ca5b80cf102e2472ab9dce51f6fd054897516977a7638907"
     },
     "tools/wrf_diffusion_oracle/diff6_compare.py": {
-      "bytes": 3775,
-      "sha256": "1a3ea352968f6714012fee0f1c13144b15576ef0282e488c861868387c1db14b"
+      "bytes": 3772,
+      "sha256": "154cd17dd994b12ff683adfb26456219179f657540a19aed53afec3517698b73"
     },
     "tools/wrf_diffusion_oracle/diff6_fork_oracle.py": {
-      "bytes": 9491,
-      "sha256": "297cf18867bc63139e66b17b4908c1652eb2be1dc0ca39c97ba54e06518b991f"
+      "bytes": 9488,
+      "sha256": "f720d1c0d14d9b5047e65a3ef1e519b630d43809c9315d259ae3d6eaa3de008a"
     },
     "tools/wrf_diffusion_oracle/driver_seal.py": {
-      "bytes": 1407,
-      "sha256": "50ef896fc2260ec010711303393efa3191a80e2ae39213beb7eff794324915c2"
+      "bytes": 1406,
+      "sha256": "e46036b5017ac5e6e053533ffcef30484a19bbd3cb079052310e35400824e3cd"
     },
     "tools/wrf_diffusion_oracle/gpu_owner.py": {
       "bytes": 2515,
@@ -175,32 +175,32 @@
       "sha256": "85c5dd76b5a3a0751557d7c1d4f978cbf6323e44b0e5d199b8f54d833bb702be"
     },
     "tools/wrf_diffusion_oracle/horizontal_compare.py": {
-      "bytes": 10195,
-      "sha256": "3c6d162e7c36a95c3060842b1bef3399188611729769e1437ae7ca87498daee6"
+      "bytes": 10188,
+      "sha256": "872798204d05c730005b2df1bf26e60f13ce4eb77eeb61f333d6ec1507d06af7"
     },
     "tools/wrf_diffusion_oracle/horizontal_driver.py": {
-      "bytes": 8799,
-      "sha256": "539fd6da0cad96f9380bd0e7dce10ed862d8b17a710145de9c563aebb955bf86"
+      "bytes": 8794,
+      "sha256": "8c45be543d19ea93a329fad86d59f52ec99de96a094f5736659e975754859388"
     },
     "tools/wrf_diffusion_oracle/horizontal_driver_build.py": {
       "bytes": 544,
       "sha256": "e8c71e05c413d3d531bade7d9822061226d3bcc4f171182beb6cb50b3e61f474"
     },
     "tools/wrf_diffusion_oracle/km1_oracle.py": {
-      "bytes": 23691,
-      "sha256": "86801c89722d309cccb396cf67520c3f74e6037b5a7737de0a00e1a8e947bbf2"
+      "bytes": 23684,
+      "sha256": "7112b9ff3c438eb792aa11c3cecf960b903572a767d2903907f99d360b15e8ec"
     },
     "tools/wrf_diffusion_oracle/mix_full_fields_oracle.py": {
       "bytes": 9460,
       "sha256": "5054df4ddf27f0cf44b026ac39f0f9643f6fadc76d210406f35f96f6765a0647"
     },
     "tools/wrf_diffusion_oracle/model_smoke.py": {
-      "bytes": 3143,
-      "sha256": "87d572712d51cae66b202110643ca9da52f4f5aa7a91a4511f7467f740410d2f"
+      "bytes": 3139,
+      "sha256": "13f6a41610a2e383f4c9faa7676b4b7db751c8963167b9a5734edd15de9818f3"
     },
     "tools/wrf_diffusion_oracle/rounding_attribution.py": {
-      "bytes": 14919,
-      "sha256": "97a091a8b358586c882532162c1f91a306bad394408229c01390f84128ae4a3a"
+      "bytes": 14912,
+      "sha256": "fcd9830335795bfae581837a02ab73ca73d27b3ccf89d3555e9a1b041df5546e"
     },
     "tools/wrf_diffusion_oracle/upper_wind_fork_fixture.py": {
       "bytes": 3579,
@@ -215,12 +215,12 @@
       "sha256": "ee529a04d9978af76522a1600c7950e78964b0dffd208a10c20c20dfd8076fd5"
     },
     "tools/wrf_diffusion_oracle/vertical_compare.py": {
-      "bytes": 6445,
-      "sha256": "056cc12768c1e82dd7c461b83641769091dec1314805587a51c041f8fb7fc01d"
+      "bytes": 6441,
+      "sha256": "e83f5bb503adf8b36838d821d19b5814b3e84db811754f9021f7ffccab9fe6c9"
     },
     "tools/wrf_diffusion_oracle/vertical_driver.py": {
-      "bytes": 8262,
-      "sha256": "95a4a6b26cccac8d4d03a65161083d5547d27a5ced65a11249cba1e5dbed3c15"
+      "bytes": 8258,
+      "sha256": "87f92a32a0cc3aa6a34b25966bb8440fc081b39c5ebcec793ba8852772962d55"
     },
     "tools/wrf_diffusion_oracle/vertical_driver_build.py": {
       "bytes": 531,
@@ -231,16 +231,16 @@
       "sha256": "b40f21540d741af9b94e5cbb008404eeb90585cafee14a9e73690a1c220a8822"
     },
     "tools/wrf_diffusion_oracle/vertical_gpu.py": {
-      "bytes": 6275,
-      "sha256": "163982759fe2821b1b56fa83fd10fc2f9d5ea567977a5274a66f234a0d049578"
+      "bytes": 6267,
+      "sha256": "86e6b8967ddc96f6ca803c220f59941a15036d54dcc6cbe6676e62f1f495e869"
     },
     "tools/wrf_diffusion_oracle/vertical_reference.py": {
       "bytes": 4362,
       "sha256": "3cfd148980d4e480c4ff2cf092f3cdc3af9cca33833328b12763e050125ae675"
     },
     "tools/wrf_diffusion_oracle/vertical_w_control.py": {
-      "bytes": 9759,
-      "sha256": "24660520863ccdb755d6543e49d300fc163f764e9709b03b72fa194665828c44"
+      "bytes": 9756,
+      "sha256": "f31870095d2a7c95d6b4ffc3f2234e12d132d47c10671c8a06cc9ba6d90708b7"
     },
     "tests/data/wrf471_diffusion/horizontal-driver/manifest.json": {
       "bytes": 14373,
@@ -480,10 +480,10 @@
     }
   },
   "artifacts": {
-    "horizontal-driver.json": "4b53a12bf374601bc1c79e79cc1a5044ec851afb4a7b2e862f092b4fda30eed4",
-    "vertical-driver.json": "008015f0076b47a4a88257ecf3d549c1acb62e9226f9f69b13c4e702f23e0f24",
-    "km-mutations.json": "854d86d71946e17b4291631e2a64dfbfcaf6d1211a8c18d41571c431d7d2f286",
-    "vertical-native-control.json": "4fd35aa7ea8258375cdcd40fa865e08624ba5c1394b096a59841d3446bd783ee"
+    "horizontal-driver.json": "2faca36db7816149d204e361c95d0e30755c7d4381251dececa3be4e6c061886",
+    "vertical-driver.json": "49343e3039c7b4c9106611875869cdc37e41e61ef069140759c70ad3ed6f4f26",
+    "km-mutations.json": "d8bd2017ba22f24750c551b829490ff24a8d565b44da56ebb802ff420dacc818",
+    "vertical-native-control.json": "cf914ed6b16ca594bfca126daecefe58b2a1d8e1229d3cd8732bbdcaf887db33"
   },
   "source_provenance": "Raw source hashes read from actual6cbd capture commit; current raw bytes equal committed capture source. Compiled module/options certified GPU measured. Historical GPU comparisons remain unchanged and refuse corrected old words."
 }

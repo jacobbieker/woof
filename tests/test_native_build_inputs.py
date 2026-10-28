@@ -108,6 +108,9 @@ def test_shared_preparation_resources_follow_native_dependency_closures():
 ))
 def test_shared_registry_changes_invalidate_every_new_consumer(crate):
     """A shared dependency edit must not reuse an old private-registry binary."""
+    from _woof_snapshot import left_out
+    if left_out(crate):
+        pytest.skip(f"{crate} is left out of this tree (tests/_woof_left_out.txt), so nothing builds from it here")
     assert "tools/rustwx/vendor/crates-io" in bridge_assets.NATIVE_BUILD_INPUTS[crate]
 
 
@@ -156,7 +159,12 @@ def test_the_table_covers_every_outside_input_the_sources_reach():
         "does not list them, so a reused binary could embed a stale copy",
         missing)
     # The discovery is not vacuous: the terminal embeds its Python worker.
-    assert "woof/tui_worker.py" in references["tools/arwen-tui"]
+    from _woof_snapshot import left_out
+    if left_out("tools/arwen-tui"):
+        # a tree without the terminal: the decoder crate's shared preparation source is the witness
+        assert "tools/preparation_resources.rs" in references["tools/grib1_bridge"]
+    else:
+        assert "woof/tui_worker.py" in references["tools/arwen-tui"]
 
 
 def test_no_rust_source_embeds_from_an_excluded_path():
@@ -256,6 +264,10 @@ def test_unchanged_inputs_at_an_ancestor_are_interchangeable(history):
 
 
 def test_a_changed_input_refuses_reuse_and_names_the_path(history):
+    from _woof_snapshot import left_out
+    if left_out("tools/arwen-tui"):
+        pytest.skip("the terminal workspace (tools/arwen-tui), whose embedded Python worker this case changes, "
+                    "is left out of this tree (tests/_woof_left_out.txt), and no build inputs are declared for it")
     repo = history["repo"]
     reason = bridge_assets.native_input_difference(
         repo, "tools/arwen-tui", history["python_only"], history["worker"])

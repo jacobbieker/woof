@@ -30,9 +30,9 @@
     ],
     "cupy_version": "14.2.0",
     "module_source_sha256": {
-      "smag2d": "e0ddc6075c1da84434eea66c55f39340e40a273c1080ae32578540a706b8e270",
+      "smag2d": "2cdfe1e9b38cfd901a837460526bed5887285bb367593992fd95b95df15e3d24",
       "diff_opt1": "9737655267fca7f30d0a4053008997de55a8e12f4fe552622a09f70ea994e271",
-      "acoustic": "22704608360351a64d84bbf90ed1574e8e62edb5b06f5deea85376d93fca5cf8"
+      "acoustic": "3f0f8577ca182aa04ac7586d1fbdd12e993f7b81874b395e1ee913304b692d48"
     },
     "module_options": {
       "smag2d": [
@@ -59,53 +59,53 @@
     "default_diffusion": true
   },
   "source_inputs": {
-    "gpuwm/core/kernels/acoustic.cu": {
-      "sha256": "89af01f989f6a61a697fba00f1effcfe393d74016a52a5cd100a184701adbc25",
-      "bytes": 107777
+    "woof/core/kernels/acoustic.cu": {
+      "sha256": "92d0a3e4bf0312e16ebcc4714a40729e0f9c67cceb794b2ccf07bbd85c51f745",
+      "bytes": 107773
     },
-    "gpuwm/core/kernels/common.cuh": {
+    "woof/core/kernels/common.cuh": {
       "sha256": "c78b17cb02ef67a2ad24d19e06e1129d7d5bcda74b972b38470fd33a6e58ff43",
       "bytes": 332
     },
-    "gpuwm/core/kernels/__init__.py": {
+    "woof/core/kernels/__init__.py": {
       "sha256": "e44a76e72880e6cbacee4a3cf299ab7e1a0b418e737355b3b64bfd60358b67cc",
       "bytes": 28570
     },
-    "gpuwm/core/constants.py": {
+    "woof/core/constants.py": {
       "sha256": "76c8c11d1a75d17fd54d0a80646cec9dde04f649247ec2347d3d32e6c0500e9e",
       "bytes": 2979
     },
-    "gpuwm/core/acoustic.py": {
+    "woof/core/acoustic.py": {
       "sha256": "2552a40bdf24715e611f5500786a4636a7fb77daac45a6e2bc4b04d6f6ca3384",
       "bytes": 34602
     },
-    "gpuwm/verify/smallstep_vertical_oracle.py": {
+    "woof/verify/smallstep_vertical_oracle.py": {
       "sha256": "825964e10ab08632e9e89d13e6ed77edca0708a02accadce857ba47f18de61cc",
       "bytes": 30394
     },
-    "gpuwm/verify/smallstep_oracle.py": {
-      "sha256": "8e8db7b72c07bdbe62c9ae7d2ecc4dd66331dbcabd6c1dc87f93d63659f2fb39",
-      "bytes": 6068
+    "woof/verify/smallstep_oracle.py": {
+      "sha256": "f73c2a1e8996467fbe3a82fb6fa94cd3bf7d7d1d069fc66850d2cb3dd8a5d92d",
+      "bytes": 6063
     },
-    "gpuwm/verify/default_kernel_source.py": {
+    "woof/verify/default_kernel_source.py": {
       "sha256": "79b0ad7e9cf251e22d619dc29f2aec132a1ade92c681660647819c2efa530490",
       "bytes": 3670
     },
-    "gpuwm/core/fp32_ulp.py": {
+    "woof/core/fp32_ulp.py": {
       "sha256": "e7a63f76f5457bddcb16ecf28288c25ba210a372aa31e5c8f6a5eb136f01cfe2",
       "bytes": 7856
     },
-    "gpuwm/wrf_exact.py": {
+    "woof/wrf_exact.py": {
       "sha256": "46a2451b5ac0408d8c1fb63ea801debd99c05a66bf110cb509f372020b1c3c57",
       "bytes": 5198
     },
-    "gpuwm/nvrtc_ptx_cache.py": {
+    "woof/nvrtc_ptx_cache.py": {
       "sha256": "78c42865a01763a13d0349321699913de51ba2465508900bbfc4c64794e61134",
       "bytes": 10626
     },
     "tools/assembled_legacy_replay.py": {
-      "sha256": "f53f4c541b052cdbef7ad554f8aae5b4c624e91a2b40515496b2523bea9e42fb",
-      "bytes": 22340
+      "sha256": "b53ef8e66b860b442b18e2a587419fd119f9518aa1d6300b425d4b4fb8fc6788",
+      "bytes": 22314
     },
     "tools/smallstep_wrf471_oracle/vertical_workspace.py": {
       "sha256": "ba19d104cbee78aab0ea3381f39b2e372a90737e33c5368c53c6e793a17b489b",

@@ -168,8 +168,11 @@ def public_files(root: Path) -> list[str]:
     out = subprocess.run(["git", "ls-files"], cwd=str(root),
                          capture_output=True, text=True, check=True)
     globs = release_exclusions(root)
+    # Recast WOOF: the hex model folded in (woof/hex, components/hex) carries
+    # its own FTZ authority and claims; this census is the regional engine's.
     return sorted({path for path in out.stdout.splitlines()
-                   if path.strip() and not is_excluded(path, globs)})
+                   if path.strip() and not is_excluded(path, globs)
+                   and not path.startswith(("woof/hex/", "components/hex/"))})
 
 
 def _long_path(path: Path) -> Path:

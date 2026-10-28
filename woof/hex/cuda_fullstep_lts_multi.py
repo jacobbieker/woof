@@ -323,6 +323,22 @@ def _launch(kernel: Any, total: int, args: tuple[Any, ...]) -> None:
         kernel(((int(total) + 255) // 256,), (256,), args)
 
 
+def _upload_spec(cp: Any, spec: np.ndarray, weight: np.ndarray) -> tuple[Any, Any]:
+    """A fill spec and its weights on the device, complete before any stream reads them.
+
+    BREAKAGE WITHOUT THE WAIT (2026-10-26, 3-zone multi-zoom globe, WOOF route, two LTS blocks on one
+    card, ``--samehost-devices=0,0``): the spec cache is per CARD and keyed by class, so the two blocks of
+    one class on one card share it.  The block that builds an entry queues its host-to-device copy on its
+    own rank stream; the other block, on another stream, found the entry and launched its fill before the
+    copy landed, and the forecast stopped with cudaErrorIllegalAddress in the first steps (round B).  With
+    ``CUDA_LAUNCH_BLOCKING=1`` the same run went 96 steps clean.  One block per card never shares an entry
+    across streams, so it never crashed.  Built once per key, so the wait costs nothing per step.
+    """
+    arrays = (cp.asarray(spec), cp.asarray(weight))
+    cp.cuda.get_current_stream().synchronize()
+    return arrays
+
+
 class _TransportGroup:
     """Abort/close every class transport together (the rank pool's failure contract)."""
 
@@ -510,8 +526,7 @@ class _BlockExchanger:
             a, b, wa, wb = plane_weights(plane, length, effective[other], substeps)
             row[1], row[2] = base + a, base + b
             weight[2 * other], weight[2 * other + 1] = wa, wb
-        cp = owner.cp
-        cached = lane.spec_cache[key] = (cp.asarray(spec), cp.asarray(weight))
+        cached = lane.spec_cache[key] = _upload_spec(owner.cp, spec, weight)
         return cached
 
     def _scalar_spec(self, kind: str, phase: int) -> tuple[Any, Any]:
@@ -542,8 +557,7 @@ class _BlockExchanger:
             else:
                 row[1], row[2] = base + START, base + END
                 weight[2 * other] = weight[2 * other + 1] = 0.5
-        cp = owner.cp
-        cached = lane.spec_cache[key] = (cp.asarray(spec), cp.asarray(weight))
+        cached = lane.spec_cache[key] = _upload_spec(owner.cp, spec, weight)
         return cached
 
     # -- the native round sites ---------------------------------------------------
@@ -563,7 +577,9 @@ class _BlockExchanger:
             owner._fill_scalars(block, state.scalars, *self._scalar_spec("A", START))
         fields = self._state_fields(state, saved, scalars=True)
         if dynamics_tendencies is not None:
-            fields += [(name, getattr(dynamics_tendencies, name), "cell") for name in ("rthdynten", "rqvdynten")]
+            # rqvdynten is formed only for GF and New Tiedtke on the MPAS-physics route (runtime_v842.prepare_transport)
+            fields += [(name, getattr(dynamics_tendencies, name), "cell") for name in ("rthdynten", "rqvdynten")
+                       if getattr(dynamics_tendencies, name, None) is not None]
         self.peer("A", fields)
 
     def round_stage_entry(self, state: Any, saved: Any) -> None:
@@ -1561,6 +1577,14 @@ class FullStepLtsMulti:
             del rebuilt
         if int(block.reflux_edge.size):
             self._edge_velocity(block, block.reflux_edge, block.reflux_edge_cells)
+        if has_finer:
+            # The velocities just recovered next to refluxed cells (owned edges) and the rebuilt w (owned reflux
+            # columns) reach the peers' halo too.  THE BREAKAGE THIS PREVENTS: the peers kept the pre-reflux words
+            # there until the next step's round A, so the output diagnostics a frame computes from the halo
+            # (divergence, the reconstructed winds at a seam cell) differed in the last place from the one-card
+            # class whenever a class with a finer interface was cut (240/60 km globe, 2 ranks, 2026-10-25).
+            block.exchanger.peer("R", [("normal_velocity", saved.normal_velocity, "edge"),
+                                       ("vertical_velocity", saved.vertical_velocity, "cell")])
         self._publish(block, atmosphere, self.truth_plane)
         if self.ntr:
             if packets:

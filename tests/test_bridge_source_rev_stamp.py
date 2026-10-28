@@ -320,6 +320,8 @@ _STAMP_SOURCES = {
     # The ensemble reducer the AQ line bundled: same crate, same build.rs
     # stamp; its entry point black_boxes SOURCE_REV_STAMP in main.
     "rw_ensbatch": "crates/rw-wrfbatch/src/bin/ensbatch.rs",
+    # Fixed-ladder probability maps (WOOF severe ML); same crate, same build.rs stamp.
+    "rw_probgrid": "crates/rw-wrfbatch/src/bin/probgrid.rs",
     "rw_verify": "crates/rw-wrfbatch/src/bin/verify.rs",
     "rw_mpas_mesh": "crates/rw-mpas/src/bin/rw_mpas_mesh.rs",
     # One executable with several tools since 2.9.0; the stamp sits in the
@@ -499,7 +501,10 @@ def test_every_bundled_artifact_entry_point_references_the_stamp():
 
 def test_every_bridge_workspace_build_script_injects_the_revision():
     _require_bridge_sources()
+    from _woof_snapshot import left_out
     for workspace, scripts in _STAMP_BUILDS.items():
+        if left_out(workspace):
+            continue
         for entry in scripts:
             relative, variable = (entry if isinstance(entry, tuple) else
                                   (entry, "GPUWM_BRIDGE_SOURCE_REV"))

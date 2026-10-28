@@ -2,19 +2,19 @@
   "schema": "measured-slimming-loader-source-replay-v1",
   "base": "e5b0c7ff52b02bf12bd0909f93eb37569c7ac079",
   "tip": "8807f8778f854dfe58c225072addbf9abeffe432",
-  "source": "gpuwm/core/kernels/__init__.py",
+  "source": "woof/core/kernels/__init__.py",
   "before": {
     "bytes": 55701,
     "sha256": "737c3ca23a79c22b222c79ab7efee76e1fa8863593ef059ecd579bce99b41285"
   },
   "after": {
-    "bytes": 56279,
-    "sha256": "cd5533e48c6b7c898aa49da76f480561c0983b1e616e5709d4f036de4a734d50"
+    "bytes": 56220,
+    "sha256": "bb732bb61c1b022f52c39223e9282a4f25bb2824b38b4b6e3f9e1ff367b963e9"
   },
   "generator": "tools/assembled_legacy_replay.py",
-  "generator_sha256": "f53f4c541b052cdbef7ad554f8aae5b4c624e91a2b40515496b2523bea9e42fb",
+  "generator_sha256": "b53ef8e66b860b442b18e2a587419fd119f9518aa1d6300b425d4b4fb8fc6788",
   "recorder": "tools/battery/loader_source_receipt.py",
-  "recorder_sha256": "14f15bb387b433fd8ece64f07dd1889295cd6a694f36920e70c9563c2e46905c",
+  "recorder_sha256": "4874faf6bdf1795a079c22535561210a74dd89ff2b1028090e71456dce72b050",
   "numerics": "strict",
   "measurements": {
     "coordinate": {
@@ -69,9 +69,9 @@
     ],
     "cupy_version": "14.2.0",
     "module_source_sha256": {
-      "smag2d": "e0ddc6075c1da84434eea66c55f39340e40a273c1080ae32578540a706b8e270",
+      "smag2d": "2cdfe1e9b38cfd901a837460526bed5887285bb367593992fd95b95df15e3d24",
       "diff_opt1": "9737655267fca7f30d0a4053008997de55a8e12f4fe552622a09f70ea994e271",
-      "acoustic": "22704608360351a64d84bbf90ed1574e8e62edb5b06f5deea85376d93fca5cf8"
+      "acoustic": "3f0f8577ca182aa04ac7586d1fbdd12e993f7b81874b395e1ee913304b692d48"
     },
     "module_options": {
       "smag2d": [
@@ -111,14 +111,14 @@
   },
   "ysu_compiled_source_sha256": "6261061b62ef15ca30cf3746baf9177cdc1a0eafc2544937f41c674e0fd5a932",
   "moved_sources": {
-    "gpuwm/core/dycore.py": {
+    "woof/core/dycore.py": {
       "sealed": {
         "bytes": 253853,
         "sha256": "fd19cd99d786d9cc2878741767ebb7f54fb3cf39bba57b7f1c1d1d4cac91e1dd"
       },
       "after": {
-        "bytes": 254517,
-        "sha256": "0938491e6f0525208d55a6c7e8d593b62a75418084fb988c2262952f8751f781"
+        "bytes": 254386,
+        "sha256": "3250c0347a57a4d7931a5681b505629674da54b5fbc4bda7bfc7e43ad0c59dcf"
       }
     }
   },

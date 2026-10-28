@@ -590,8 +590,6 @@ cpu  tools/rw_wps  projected-intermediate  8
 # interpreter path, resolved as one environment value without shell expansion.
 # Cold Windows/Linux: 7 visual + 2 geography builder; 14 terminal + 4 worker controls.
 # slimtest-s10 2026-10-20: floor lowered from 9 to 8 (1 duplicate tests removed; llvm-cov regions not lower)
-cpu  tools/arwen-launchpad  arwen-launchpad  8
-cpu  tools/arwen-tui  arwen-tui  18  WOOF_TUI_TEST_PYTHON=@python
 
 # The regular-grid Zarr reader ships with the bundle. The real CLI reads a
 # hand-encoded store, writes NetCDF, and preserves CF packing, missingness,

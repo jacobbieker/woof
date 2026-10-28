@@ -3,8 +3,8 @@
   "source_adapters_sha256": "d5a7096f3c9db505341d234f1bea183fb9677bcbed7beaded84ec20913884634",
   "frame_header_sha256": "834081c12b05041e1cadf2011ba4b10d56613b77a5eaef600e927a9d5a05e8eb",
   "source_files": [
-    "gpuwm/source_adapters.py",
-    "gpuwm/mapped_source.py"
+    "woof/source_adapters.py",
+    "woof/mapped_source.py"
   ],
   "source_adapters_rebased_on": [
     {

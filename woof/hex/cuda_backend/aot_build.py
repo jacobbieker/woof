@@ -43,13 +43,13 @@ def inventory(package_root=None, numerics=None, compiler_family=None, *, compile
                  and n.func.attr in ("raw_kernel", "raw_kernels") and len(n.args) >= 2]
         if not calls:
             continue
-        module_name = "hexcore." + ".".join(path.relative_to(root).with_suffix("").parts)
+        module_name = "woof.hex." + ".".join(path.relative_to(root).with_suffix("").parts)
         namespace = vars(importlib.import_module(module_name))
         # The resident launcher takes a unit and source as arguments. Resolve
         # its two production bindings using the same source providers, without
         # constructing a session or querying a GPU during wheel discovery.
         bindings = [namespace]
-        if module_name == "hexcore.mpasphys.resident_v842":
+        if module_name == "woof.hex.mpasphys.resident_v842":
             bindings = [dict(namespace, unit="latitude", source=namespace["_LATITUDE"]),
                         dict(namespace, unit="preparation", source=namespace["preparation_source"]())]
         for call in calls:
@@ -68,7 +68,7 @@ def inventory(package_root=None, numerics=None, compiler_family=None, *, compile
                 row = {"module_key": key, "source": source,
                        "options": [*_hex_numerics.kernel_base(numerics), *extra],
                        "source_sha256": source_hash(source)}
-                if module_name == "hexcore.mpasphys.resident_v842":
+                if module_name == "woof.hex.mpasphys.resident_v842":
                     # These calls use MpasPhysicsKernelCache, whose carrier
                     # route appends these flags and bypasses RawModule's FTZ
                     # override. Record that actual compile request.

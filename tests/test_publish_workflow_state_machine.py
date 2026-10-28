@@ -25,6 +25,10 @@ VERSION = "9.8.7"
 
 @pytest.fixture(scope="module")
 def workflow():
+    from _woof_snapshot import engine_workflow_reason
+    reason = engine_workflow_reason(".github/workflows/publish.yml")
+    if reason is not None:
+        pytest.skip(reason)
     return yaml.safe_load((ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8"))
 
 

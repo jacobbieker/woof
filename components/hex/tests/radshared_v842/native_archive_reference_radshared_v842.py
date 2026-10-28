@@ -92,7 +92,7 @@ def main():
                   process_count=1, native_binary_sha256=manifest['binary_sha256'],
                   archive_receipt_sha256=sha(args.archives),
                   publication_path=str(publication_path), publication_sha256=sha(publication_path),
-                  actual_f2_module_sha256=sha(Path(__import__('hexcore.verify_mpas', fromlist=['']).__file__)),
+                  actual_f2_module_sha256=sha(Path(__import__('woof.hex.verify_mpas', fromlist=['']).__file__)),
                   comparator_sha256=sha(args.comparator),
                   native_output_files=len(native['outputs']),
                   native_output_records=sum(len(r['steps']) for r in native['outputs']),

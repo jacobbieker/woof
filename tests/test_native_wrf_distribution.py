@@ -503,7 +503,7 @@ def test_standalone_terrain_preparation_reads_measured_maps_without_forecast(
         "terrain_clock_map.json", "terrain_clock_map_local_face.json",
         "terrain_clock_adaptive_local_face.json",
     }
-    assert {f"gpuwm/{name}" for name in names} <= set(receipt["files"])
+    assert {f"woof/{name}" for name in names} <= set(receipt["files"])
     metadata = tomllib.loads((staged / "pyproject.toml").read_text(encoding="utf-8"))
     assert names <= set(metadata["tool"]["setuptools"]["package-data"]["woof"])
     assert not [item for item in receipt["optional_internal_imports"]
@@ -623,7 +623,7 @@ assert "cupy" not in sys.modules
                  "render", "render_receipts", "background_contract", "regional_preparation",
                  "local_da", "local_da_fetch", "local_da_observations", "local_da_runtime",
                  "cyclone_seed", "cyclone_sources"):
-        assert f"gpuwm/{name}.py" not in files
+        assert f"woof/{name}.py" not in files
     assert "woof/ingest/case_store.py" not in files
     assert "woof/ingest/relocation_continuation.py" not in files
     assert "woof/core/thompson_contract.py" in files
@@ -1176,6 +1176,9 @@ assert Path(probe.__file__).resolve().is_relative_to(root)
     environment = os.environ.copy()
     environment.pop("WOOF_NATIVE_DISTRIBUTION_MANIFEST", None)
     environment.pop("GPUWM_NO_LOCAL_GPU", None)
+    # WOOF's spelling of the same switch: woof/_env.py maps it back onto the
+    # engine's name at import, so the probe would still see local CUDA forbidden.
+    environment.pop("WOOF_NO_LOCAL_GPU", None)
     environment.pop("PYTHONSAFEPATH", None)
     environment["CUDA_VISIBLE_DEVICES"] = "-1"
     environment["PYTHONPATH"] = os.pathsep.join((str(shadow), str(staged)))
@@ -2043,7 +2046,7 @@ def test_a_freshly_sealed_artifact_carries_the_distribution_version():
     import woof
     from tools.build_rw_wps_release import _standalone_pyproject
 
-    distribution = metadata.version("woof")
+    distribution = metadata.version("recast-woof")
     for platform in ("linux-x86_64", "windows-x86_64"):
         contract = distribution_contract(platform)
         assert contract["gpuwm_version"] == distribution, platform
@@ -2063,7 +2066,7 @@ def test_a_freshly_written_prepared_cache_stamps_this_release(tmp_path):
         CACHE_WRITER_KEY, cache_writer_version)
 
     header = {CACHE_WRITER_KEY: {"gpuwm_version": __version__}}
-    assert cache_writer_version(header) == metadata.version("woof")
+    assert cache_writer_version(header) == metadata.version("recast-woof")
 
 
 # ---------------------------------------------------------------------------
@@ -2136,7 +2139,7 @@ def test_every_declared_bridge_is_one_row_and_nothing_is_written_per_bridge():
         assert bridge.workspace in BRIDGE_WORKSPACES
         assert bridge.option.startswith("--")
         assert bridge.dest == bridge.option[2:].replace("-", "_")
-        assert bridge.env_var.startswith("GPUWM_")
+        assert bridge.env_var.startswith("WOOF_")
         assert bridge.usage_marker == f"usage: {bridge.name}"
         assert _BRIDGE_USAGE_MARKERS[bridge.name] == bridge.usage_marker
         assert bridge.consumer.strip() == bridge.consumer and bridge.consumer

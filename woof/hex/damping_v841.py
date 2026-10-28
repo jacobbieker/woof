@@ -19,7 +19,7 @@ V841_DSS_SOURCE = (
 )
 
 
-@cached("v841-vertical-velocity-damping", salt=lambda: __import__("hexcore.rust_hostprep",fromlist=["_engine_digest"])._engine_digest())
+@cached("v841-vertical-velocity-damping", salt=lambda: __import__("woof.hex.rust_hostprep",fromlist=["_engine_digest"])._engine_digest())
 def build_v841_vertical_velocity_damping(
     zgrid: FloatArray,
     *,

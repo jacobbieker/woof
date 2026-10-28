@@ -16,4 +16,4 @@ def trace_layout_error(frame, event, argument):
 
 
 sys.settrace(trace_layout_error)
-runpy.run_module('hexcore.cli', run_name='__main__')
+runpy.run_module('woof.hex.cli', run_name='__main__')

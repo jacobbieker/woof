@@ -54,7 +54,7 @@ def main() -> None:
     if forbidden:
         raise ValueError("snapshot selection includes a forbidden environment file")
     sources = {name: hashlib.sha256(blobs[name]).hexdigest() for name in files
-               if name.startswith("gpuwm/") and Path(name).suffix in (".py", ".cu", ".cuh")}
+               if name.startswith("woof/") and Path(name).suffix in (".py", ".cu", ".cuh")}
     workspace_sources = {path.relative_to(root).as_posix()
                          for path in (root / "woof").rglob("*")
                          if path.is_file() and path.suffix in (".py", ".cu", ".cuh")}

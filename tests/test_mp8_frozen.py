@@ -1852,6 +1852,9 @@ FROZEN_MODULE_DIGESTS = {
         # =strict.  Previously 044c3246/45a053bb.
         '09ff5be4fdcc47bae59531da801bcd5dd55653df991497052bac01023cca1ea7',
         '7984e07f07350659cde2a2ec034406891b66fb0c25c37bd788090fb982eff37a'),
+    # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
+    # labels), proven equal with comments stripped; the preprocessor drops
+    # comments, so the compiled binary does not move.
     'smag2d': (
         # Re-pinned on the 1.5 integration line: feature/les-integration's
         # verified km_opt=2/3 work edits smag2d.cu after this table was
@@ -1923,7 +1926,7 @@ FROZEN_MODULE_DIGESTS = {
         '731d7f64e86af2d17344be7328fda2a3ecfd4f2e22371f6093128ca2f3192500',
         # smag2d's default composition keeps 2.9.1's glibc_flt32 text
         # (glibc_flt32_default.cuh); the exact chain's header is strict-only.
-        'e0ddc6075c1da84434eea66c55f39340e40a273c1080ae32578540a706b8e270'),
+        '2cdfe1e9b38cfd901a837460526bed5887285bb367593992fd95b95df15e3d24'),
     'spec_bdy': (
         'bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161',
         'bc03ed595bacc546d8e041fbb1d11b5bb3b3b90760ef06ea1dd1f0f18b4de931'),

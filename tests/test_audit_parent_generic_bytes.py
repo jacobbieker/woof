@@ -16,6 +16,7 @@ from woof.domain_wizard import render_config
 from woof.namelist_import import import_namelists
 from ishmael_retirement import requested_by_own_number, without_retired_line
 from wrf_clock_lines import without_wrf_clock_lines
+from woof_engine_spelling import engine_spelling
 
 
 FIXTURES = Path(__file__).parent / "fixtures/generic_byte_controls"
@@ -69,6 +70,7 @@ def without_import_capability_lines(candidate):
 
 
 def assert_old_bytes(parent, pins, key, candidate):
+    candidate = engine_spelling(candidate)
     expected = pins["cases"][key]
     path = Path(expected["file"])
     assert len(path.parts) == 1 and path.suffix == ".toml"

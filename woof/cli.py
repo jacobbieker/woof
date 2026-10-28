@@ -1117,7 +1117,11 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         # `go --prepare-only` fetches and prepares on the CPU backends and
         # stops before the forecast, so the GPU runtime it would refuse
         # for is the forecast's (go_cli._prepare_only_needs_no_card).
-        _prepares_only = (args.command == "go"
+        # `ensemble` is go by another name and prepares the same way: its
+        # --prepare-only prepares every member on the CPU and stops before
+        # the forecast. Breakage it prevents: a DA warm-start box preparing
+        # an HRRR time-lagged roster without CuPy was refused at the door.
+        _prepares_only = (args.command in ("go", "ensemble")
                           and getattr(args, "prepare_only", False))
         if not _spends_nothing and not _prepares_only:
             capabilities.require_for_command(args.command)
@@ -1143,7 +1147,7 @@ def _dispatch_argv(argv: list[str] | None = None) -> int:
         # `go` catches its own interrupt one layer down so it can name
         # the stage and the pid it was waiting on; this is the floor
         # under every other command.
-        print(f"\ngpuwm {args.command}: interrupted (Ctrl-C); stopping "
+        print(f"\nwoof {args.command}: interrupted (Ctrl-C); stopping "
               "here. Any partial output carries no completion receipt.",
               file=sys.stderr)
         return _INTERRUPT_EXIT_CODE

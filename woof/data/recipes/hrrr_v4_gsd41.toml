@@ -195,9 +195,9 @@ swint_opt = 1
 # is next release): on full CONUS, 8x RTX 5090, ordinary steps 3.50 s with
 # smoke vs 0.295 s without, radiation steps 5.0-5.4 s vs 1.85 s.  The keys
 # below are the smoke-off form (chemistry off, every other chem switch at its
-# default).  --smoke on woof go, woof domain --recipe, gpuwm standby and
-# gpuwm race restores the smoke-on set described above from ONE place,
-# gpuwm.smoke_execution.HRRR_SMOKE_SETTINGS:
+# default).  --smoke on woof go, woof domain --recipe, woof standby and
+# woof race restores the smoke-on set described above from ONE place,
+# woof.smoke_execution.HRRR_SMOKE_SETTINGS:
 #   chem_sets = "smoke", chem_sources = "rave-3km,rap-native-smoke,hrrr-native-smoke",
 #   simple_dir_fdb = 1, biomass_burn_opt = 4, enh_vermix = true, flam_part = 0.75,
 #   aer_drydep_opt = 111, chem_adv_opt = 2, chem_mix6_off = true, vertmix_onoff = 1,

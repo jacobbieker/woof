@@ -47,7 +47,7 @@ def test_a_door_refusal_before_the_first_step_is_not_retried(tmp_path):
     (seg / "control").mkdir(parents=True)
     (seg / "fc").mkdir()
     (seg / "fc" / "timeline.jsonl").write_text('{"stage": "prep.door", "phase": "begin"}\n')
-    (seg / "forecast.log").write_text("noise\ngpuwm-hex: config_microp_scheme='mp_wsm6' is refused: ...\n")
+    (seg / "forecast.log").write_text("noise\nwoof hex: config_microp_scheme='mp_wsm6' is refused: ...\n")
     assert moving_run.door_refusal(seg, 2).startswith("config_microp_scheme")
     assert moving_run.door_refusal(seg, -11) is None
     (seg / "fc" / "timeline.jsonl").write_text('{"stage": "forecast.first_step", "phase": "begin"}\n')

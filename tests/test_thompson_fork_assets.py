@@ -322,10 +322,10 @@ def test_wrong_published_bytes_never_land(transfers, monkeypatch):
 
 
 @pytest.mark.parametrize("version,tags", [
-    ("2.8.9", ("v2.8.9", "v2.8.7")),
-    ("2.8.7", ("v2.8.7",)),
-    ("2.8.6", ("v2.8.7",)),
-    ("2.9.0.dev3", ("v2.8.7",)),
+    ("1.1.2", ("v1.1.2", "v1.1.0")),
+    ("1.1.0", ("v1.1.0",)),
+    ("1.0.3", ("v1.1.0",)),
+    ("1.2.0.dev3", ("v1.1.0",)),
 ])
 def test_the_default_published_bases_are_this_release_then_the_first_carrier(monkeypatch, version, tags):
     """The cut uploads the set to every release from 2.8.7 on
@@ -338,7 +338,7 @@ def test_the_default_published_bases_are_this_release_then_the_first_carrier(mon
     monkeypatch.delenv(fork.FORK_RELEASE_BASE_ENV, raising=False)
     monkeypatch.setattr(woof, "__version__", version)
     root = RELEASE_ASSET_BASE_URL.rsplit("/", 1)[0]
-    assert root == "https://github.com/FahrenheitResearch/arwen/releases/download"
+    assert root == "https://github.com/recastsystems/woof/releases/download"
     assert fork._published_bases() == tuple(f"{root}/{tag}" for tag in tags)
 
 

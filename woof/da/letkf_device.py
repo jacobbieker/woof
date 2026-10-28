@@ -71,7 +71,7 @@ _SOURCE = r"""
 
 __device__ __forceinline__ double gc_scaled(double d, double two_over_cut)
 {
-    // woof.da.letkf.gaspari_cohn, operation for operation (compiled with
+    // gpuwm.da.letkf.gaspari_cohn, operation for operation (compiled with
     // fmad off, so no product is contracted into an addition).
     double r = d * two_over_cut;
     r = fmin(r, 2.0);

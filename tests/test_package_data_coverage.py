@@ -732,7 +732,10 @@ def test_the_renderer_asset_tree_is_delivered_by_a_declared_mechanism(
 #: reaches users as the per-platform release-asset bundles ``woof setup``
 #: stages.  So this pattern matching nothing in CI is the normal state, not a
 #: half-built release.
-_STAGED_AT_RELEASE: set[tuple[str, str]] = {("woof", "libexec/bridges/*")}
+_STAGED_AT_RELEASE: set[tuple[str, str]] = {("woof", "libexec/bridges/*"),
+                                            # the hex helpers, staged by the assembly's stage_hex_helpers.py
+                                            # for a platform or ops wheel; a PyPI wheel fetches them on use
+                                            ("woof.hex", "libexec/*")}
 
 
 def test_no_package_data_pattern_is_dead(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -976,7 +979,7 @@ def test_the_redistributed_table_is_not_excluded_in_the_pyproject_declaration(
     with PYPROJECT.open("rb") as stream:
         config = tomllib.load(stream)
     excluded |= {
-        "gpuwm/" + entry
+        "woof/" + entry
         for entry in config["tool"]["setuptools"].get(
             "exclude-package-data", {}).get("woof", [])}
 

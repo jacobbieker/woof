@@ -386,6 +386,10 @@ def _discover_manifest_site_files(seeds=SITE_FILES):
         relative = path.relative_to(REPO).as_posix()
         if relative in RAWMODULE_CONSTRUCTORS_OUTSIDE_THE_MANIFEST:
             continue
+        if relative.startswith("woof/hex/"):
+        # The folded hex model compiles through its own KernelCache and compile contract
+        # (woof/hex/cuda_backend), held by its own tier-1 tests; this audit is the regional engine's.
+            continue
         text = path.read_text(encoding="utf-8")
         if not any(token in text for token in ("RawModule", "record_module")):
             continue
@@ -425,6 +429,10 @@ def test_every_rawmodule_constructor_in_the_tree_is_named():
     """
     constructors = set()
     for path in sorted((REPO / "woof").rglob("*.py")):
+        if path.relative_to(REPO).as_posix().startswith("woof/hex/"):
+        # The folded hex model compiles through its own KernelCache and compile contract
+        # (woof/hex/cuda_backend), held by its own tier-1 tests; this audit is the regional engine's.
+            continue
         text = path.read_text(encoding="utf-8")
         if "RawModule" not in text and "RawKernel" not in text:
             continue

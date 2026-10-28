@@ -68,6 +68,8 @@ def test_the_six_doors_are_bundled_on_demand_and_not_in_the_wheel():
         | {"rw_hail", "rw_airnow", "rw_scoreboard", "rw_tc_fields", "rw_fire_indices"}
         # Post-2.9.4: native Rust coupled hydro output.
         | {"rw_nextgen_output"}
+        # 2.9.9 (PyPI per-file limit): the fixed-ladder probability renderer.
+        | {"rw_probgrid"}
         # WOOF 1.1.0 r16 (PyPI per-file limit): European radar, and the three MPAS bridges every hex door
         # reads from the hex helpers first.
         | {"rw_odim", "rw_mpas_geometry", "rw_mpas_convert", "rw_mpas_lbc"})

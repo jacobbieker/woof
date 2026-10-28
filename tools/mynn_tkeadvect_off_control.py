@@ -13,7 +13,7 @@ def main():
         for phase,code in (('before','off-base'),('after','src')):
             t=r/code;env=dict(os.environ,T=str(t),PYTHONPATH=str(t)+':'+str(t/'tests'))
             for key in ('GPUWM_WRF_EXACT','WOOF_WRF_EXACT_ADVECTION'):env.pop(key,None)
-            if mode=='strict':env.update(GPUWM_WRF_EXACT='1',GPUWM_WRF_EXACT_ADVECTION='1')
+            if mode=='strict':env.update(GPUWM_WRF_EXACT='1',WOOF_WRF_EXACT_ADVECTION='1')
             out=r/f'off-real/{mode}/{phase}'
             door=[sys.executable,'-m','woof.cli','sim',str(r/'real-prepared'),'--experiment-config',str(r/'real-prepared/experiment.toml'),'--wps-namelist',str(r/'real-prepared/namelist.wps'),'--outdir',str(out),'--print-command']
             p=subprocess.run(door,env=env,cwd=t,text=True,capture_output=True,check=True)

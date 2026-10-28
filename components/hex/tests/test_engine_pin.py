@@ -30,6 +30,24 @@ from woof.hex import doctor
 from woof.hex import engine_pin
 from woof.hex import forecast_door as door
 
+#: (WOOF) This tree is the engine and the hex model in one distribution, so the requirement names it
+#: (engine_pin.DISTRIBUTION); the measurement records keep the engine's own spellings (gpuwm>=, gpuwm/),
+#: which name the same files here as woof/.
+DIST = engine_pin.DISTRIBUTION
+
+
+def _folded(value):
+    if isinstance(value, dict):
+        return {_folded(k): _folded(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_folded(v) for v in value]
+    if isinstance(value, str):
+        if value.startswith("gpuwm/"):
+            return "woof/" + value[len("gpuwm/"):]
+        if value.startswith("gpuwm>="):
+            return DIST + value[len("gpuwm"):]
+    return value
+
 
 # ---------------------------------------------------------------------------
 # the derivation
@@ -85,7 +103,7 @@ def test_the_range_is_the_floors_whole_minor_so_pip_never_downgrades(monkeypatch
         _row("2.5.7", moved=("woof/io/restart.py",)),
     ))
     assert engine_pin.gpuwm_ceiling() == "2.6"
-    assert engine_pin.gpuwm_requirement() == "woof>=2.5.6,<2.6"
+    assert engine_pin.gpuwm_requirement() == f"{DIST}>=2.5.6,<2.6"
 
 
 def test_the_2_9_0_pin_derives_the_call_14_range(monkeypatch):
@@ -96,7 +114,7 @@ def test_the_2_9_0_pin_derives_the_call_14_range(monkeypatch):
         _row("2.9.0"),
         _row("2.9.1", moved=("woof/core/rrtmg_legacy.py",)),
     ))
-    assert engine_pin.gpuwm_requirement() == "woof>=2.9.0,<2.10"
+    assert engine_pin.gpuwm_requirement() == f"{DIST}>=2.9.0,<2.10"
 
 
 def test_an_unmeasured_minor_is_never_admitted(monkeypatch):
@@ -113,7 +131,7 @@ def test_an_unmeasured_minor_is_never_admitted(monkeypatch):
         _row("2.5.7"),
     ))
     assert engine_pin.gpuwm_ceiling() == "2.6"
-    assert engine_pin.gpuwm_requirement() == "woof>=2.5.6,<2.6"
+    assert engine_pin.gpuwm_requirement() == f"{DIST}>=2.5.6,<2.6"
 
 
 def test_no_usable_engine_is_a_refusal_rather_than_a_silent_range(monkeypatch):
@@ -139,7 +157,7 @@ def test_installation_policy_does_not_relabel_measured_bytes(
     assert engine_pin.wanted_version() == measured
     assert engine_pin.pinned_engine().version == measured
     assert engine_pin.gpuwm_floor() == expected
-    assert engine_pin.gpuwm_requirement() == f"woof>={expected},<{ceiling}"
+    assert engine_pin.gpuwm_requirement() == f"{DIST}>={expected},<{ceiling}"
     assert engine_pin.PUBLISHED_ENGINES == rows
     if expected != measured:
         assert engine_pin.engine(expected) is None
@@ -147,7 +165,7 @@ def test_installation_policy_does_not_relabel_measured_bytes(
 
 def test_shipped_installation_minimum_keeps_the_release_range():
     assert engine_pin.GPUWM_INSTALL_MINIMUM == "2.9.7"
-    assert engine_pin.gpuwm_requirement() == "woof>=2.9.7,<2.10"
+    assert engine_pin.gpuwm_requirement() == f"{DIST}>=2.9.7,<2.10"
 
 
 def _repin_documents() -> dict[str, dict]:
@@ -158,7 +176,7 @@ def _repin_documents() -> dict[str, dict]:
     found = {}
     for path in sorted((ROOT / "verification" / "engine-verdicts").glob("repin-*.json")):
         document = json.loads(path.read_text(encoding="utf-8"))
-        found[document["pin"]["version"]] = dict(document, _path=path)
+        found[document["pin"]["version"]] = dict(_folded(document), _path=path)
     return found
 
 
@@ -185,8 +203,8 @@ def test_the_shipped_table_says_what_the_measurement_said():
     # The record's requirement was derived under the policy of its day (a
     # one-patch range until plan call 14); the floor it measured is what
     # still binds, and the range is that floor's whole minor.
-    assert verdicts["requirement"].startswith(f"woof>={pinned},")
-    assert engine_pin.gpuwm_requirement() == f"woof>={engine_pin.gpuwm_floor()},<{engine_pin.gpuwm_ceiling()}"
+    assert verdicts["requirement"].startswith(f"{DIST}>={pinned},")
+    assert engine_pin.gpuwm_requirement() == f"{DIST}>={engine_pin.gpuwm_floor()},<{engine_pin.gpuwm_ceiling()}"
     assert [row.version for row in engine_pin.PUBLISHED_ENGINES if row.usable] == [pinned]
     current = engine_pin.engine(pinned)
     assert current.on_pypi and current.offline_build_road and current.moved == ()
@@ -229,7 +247,7 @@ def test_the_table_is_the_instruments_output_not_a_transcription():
         f"{VERDICTS_OF_RECORD.relative_to(ROOT).as_posix()} is missing; the "
         "table has no measurement to be rendered from"
     )
-    verdicts = json.loads(VERDICTS_OF_RECORD.read_text(encoding="utf-8"))
+    verdicts = _folded(json.loads(VERDICTS_OF_RECORD.read_text(encoding="utf-8")))
     assert verdicts["pin"]["version"] == engine_pin.measured_gpuwm_floor()
     assert verdicts["instrument"] == "tools/repin_source_tables.py"
     measured = {
@@ -262,7 +280,7 @@ def test_the_table_is_the_instruments_output_not_a_transcription():
     assert spec is not None and spec.loader is not None
     instrument = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(instrument)
-    source = (ROOT / "src" / "hexcore" / "engine_pin.py").read_text(encoding="utf-8")
+    source = (ROOT / ".." / ".." / "woof" / "hex" / "engine_pin.py").read_text(encoding="utf-8")
     start = source.index(instrument.BEGIN_MARK)
     end = source.index(instrument.END_MARK) + len(instrument.END_MARK)
     assert source[start:end] == instrument.render_rows(verdicts["tags"]), (
@@ -595,7 +613,7 @@ def test_the_admitted_table_is_the_instruments_output_not_a_transcription():
     assert document["schema"] == instrument.ADMITTED_SCHEMA
     assert document["instrument"] == "tools/measure_engine_verdicts.py"
 
-    source = (ROOT / "src" / "hexcore" / "engine_pin.py").read_text(encoding="utf-8")
+    source = (ROOT / ".." / ".." / "woof" / "hex" / "engine_pin.py").read_text(encoding="utf-8")
     start = source.index(instrument.ADMITTED_BEGIN_MARK)
     end = source.index(instrument.ADMITTED_END_MARK) + len(instrument.ADMITTED_END_MARK)
     assert source[start:end] == instrument.render_admitted_rows(document["engines"]), (

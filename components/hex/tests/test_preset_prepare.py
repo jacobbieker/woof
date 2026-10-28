@@ -17,11 +17,11 @@ def test_cycle_selects_packaged_public_source_and_vertical_contract():
     cycle, model, mesh, source = prep.request(args)
     assert cycle.hour == 12 and mesh["cells"] > 0
     assert source["role"] == "preparation_source"
-    spec = resources.files("hexcore").joinpath(model["vertical"]["preparation_vertical_spec"])
+    spec = resources.files("woof.hex").joinpath(model["vertical"]["preparation_vertical_spec"])
     assert len(json.loads(spec.read_text())["specified_interfaces_m"]) == model["vertical"]["interfaces"]
     import hashlib
     table_row = source["intermediate"]["vtable"]
-    table = resources.files("hexcore").joinpath(table_row["resource"]).read_bytes()
+    table = resources.files("woof.hex").joinpath(table_row["resource"]).read_bytes()
     assert hashlib.sha256(table).hexdigest() == table_row["sha256"]
     # The native WPS reader needs ordinary meteorological names and numeric
     # GRIB1 columns, even for GRIB2. The adaptation table has neither.

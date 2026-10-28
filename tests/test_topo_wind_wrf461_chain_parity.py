@@ -139,7 +139,7 @@ def test_fixture_hashes_and_build_receipt():
 #: wrote.  Merged with the WRF exact chain in 2.9.1.
 HARNESS_SUCCESSORS = {
     "tools/topo_wind_wrf461_oracle/../ysu_wrf461_oracle/make_wide_columns.py":
-        "1605dbf9d232107e24fd275fa0b1cd6a7b44589750994f86c19fd590a46d9318",
+        "ab3570083eda274ef19b4a253511364d32009fc3a8b9d9aa4dba034fda7208d8",
 }
 
 

@@ -208,7 +208,7 @@ ce1c8d871e949b6057bd0b5bb8ff76c12abfed7e1439df8e7c7cdcb599e299f9  snowtemp_contr
 836295b3ff7c610bab7cbd2a93404d02a0c6c7f4a90cde38db657dc7ec4cc187  run_snowtemp_contract.F90
 a12bc1ba855f83105e92e0c9bea2ffd66b8229c028a53836da0d4d1d96f29fbf  validate_snowtemp_contract_oracle.py
 90e64e4132ab6bb171a003dd05232bffc4e76df6fc8f11c869710452f8e0c703  build_snowtemp_contract.sh
-32da6ce770988428d9a8c85f19c01e2ff4976f7a696dd8c2485e7b946b303b62  mutation_study_snowtemp.py
+0796279b26dd4817b9a1f1180bf27a22884f6e4ba0b52ab649edb0fd1162e76b  mutation_study_snowtemp.py
 ```
 
 `oracle/snowsoil.csv` drives `snowsoil`, the complete snow-covered land
@@ -357,7 +357,7 @@ to `run_snowseaice.F90`, so one reader serves both files.
 85283 bytes
 b3605132f784d1ac6e694bdc6aaff6dfc1f843c838be96fe3b5289489505e6e7  snowseaice_contract.csv
 70835b88cf9b91a79c22447095eb00570c933ddd67471e207ef841522db786dd  run_snowseaice_contract.F90
-eaf3f2f77a92f8f9a67816357324cf03c6927822e594df4a75835453f55963ce  validate_snowseaice_contract_oracle.py
+99251cc7b0d7d1c43836e8b82585bd45da1178530468cc4d35768be3c13bf699  validate_snowseaice_contract_oracle.py
 ```
 
 `oracle/sfctmp.csv` pins WRF `sfctmp` end to end -- the snow-preparation

@@ -226,6 +226,8 @@ def test_installed_default_resolves_the_shipped_native_reference(monkeypatch, tm
     monkeypatch.delenv("WOOF_HEX_CONTRACT_HOSTPREP", raising=False)
     monkeypatch.setattr(rust, "__file__", str(module))
     monkeypatch.setattr(rust, "gpuwm_candidates", lambda spec: ())
+    from woof.hex import helpers  # (WOOF) the wheel's libexec is read through woof.hex.helpers
+    monkeypatch.setattr(helpers, "PACKAGED_DIR", package / "libexec")
     rust.engine.cache_clear()
     try:
         assert rust.engine() == executable

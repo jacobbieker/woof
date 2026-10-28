@@ -200,7 +200,7 @@ def package_tuples(inventory: dict) -> list[tuple[tuple, list[dict]]]:
     """Distinct literal option tuples over the shipped package surface."""
     groups: dict[tuple, list[dict]] = {}
     for record in inventory["sites"]:
-        if not record["file"].startswith("gpuwm/"):
+        if not record["file"].startswith("woof/"):
             continue
         options = record.get("options")
         key = tuple(options) if options else ()
