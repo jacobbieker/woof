@@ -36,6 +36,8 @@ def _digest(a):
 
 
 def _record(name, args):
+    if not _STATE.get("path"):
+        return
     import numpy as np
     import cupy as cp
     row = {"seq": _STATE["seq"], "kernel": name, "args": []}
@@ -68,9 +70,19 @@ class _Traced:
         return getattr(self._fn, attr)
 
 
+def set_output(path: str) -> None:
+    """Send later launches to ``path`` (truncated), numbering from 0."""
+    _STATE["path"], _STATE["seq"] = path, 0
+    open(path, "w").close()
+
+
 def install(path: str | None = None) -> None:
-    _STATE["path"] = path or os.environ["WOOF_LAUNCH_TRACE"]
-    open(_STATE["path"], "w").close()
+    if _STATE.get("installed"):
+        if path:
+            set_output(path)
+        return
+    _STATE["installed"] = True
+    set_output(path or os.environ["WOOF_LAUNCH_TRACE"])
     from woof import backend
     if backend.requested() != "cuda":
         from woof.backend.metal import loader

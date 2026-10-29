@@ -1541,3 +1541,24 @@ def _gate_on_case_inputs(items) -> None:
                     reason=f"this machine does not hold the case inputs: "
                            f"{absent}"))
                 break
+
+
+# WOOF_LAUNCH_TRACE_DIR=<dir>: every kernel launch of each test is recorded
+# to <dir>/<test id>.jsonl (tools/launch_trace.py) -- run the same tests on
+# CUDA and on MLX, then tools/backend_receipts.py compares them launch by
+# launch.  Off unless the variable is set.
+if os.environ.get("WOOF_LAUNCH_TRACE_DIR"):
+    @pytest.fixture(autouse=True)
+    def _woof_launch_trace(request):
+        import re as _re
+        import sys as _sys
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tools = os.path.join(root, "tools")
+        if tools not in _sys.path:
+            _sys.path.insert(0, tools)
+        import launch_trace
+        directory = os.environ["WOOF_LAUNCH_TRACE_DIR"]
+        os.makedirs(directory, exist_ok=True)
+        name = _re.sub(r"[^A-Za-z0-9_.-]+", "_", request.node.nodeid)[:200] + ".jsonl"
+        launch_trace.install(os.path.join(directory, name))
+        yield
