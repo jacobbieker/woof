@@ -240,30 +240,19 @@ class CompileError(RuntimeError):
 
 class MetalModule:
     """CuPy ``RawModule``'s interface over one translated unit.  The Metal
-    library and every kernel's pipeline are built when the module is made,
-    so a unit that does not compile fails here, naming its MSL file."""
+    library is built when the module is made, so a unit whose MSL does not
+    compile fails here, naming its MSL file; each kernel's pipeline (most
+    of a cold unit's compile time) is built at its first ``get_function``,
+    or for every kernel by :meth:`build_all`."""
 
     def __init__(self, unit: TranslatedUnit, name: str):
-        from woof.backend.metal import ext
         self.unit = unit
         self.name = name
         self.library_key = f"woof:{name}:{unit.key[:24]}"
         self.code = unit.msl
         self._functions: dict[str, MetalFunction] = {}
-        kernels = sorted(unit.kernels)
-        try:
-            limits = ext.load().compile(self.library_key, unit.msl, kernels, MATH_MODE_SAFE)
-        except RuntimeError as exc:
-            import os
-            import tempfile
-            path = os.path.join(tempfile.gettempdir(), f"woof-metal-{unit.key[:16]}.metal")
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(unit.msl)
-            errors = [line for line in str(exc).splitlines() if "error:" in line][:12] \
-                or str(exc).strip().splitlines()[:12]     # a pipeline failure has no `error:` lines
-            raise CompileError(f"Metal did not compile the translation of {name!r} "
-                               f"(MSL saved to {path}):\n" + "\n".join(errors)) from None
-        self.max_threads = dict(zip(kernels, limits))
+        self.max_threads: dict[str, int] = {}
+        self._build(())
         # module globals: one buffer each, for the module's lifetime, zeroed
         # or holding the declaration's initialiser
         from woof.backend.facade import asarray
@@ -288,9 +277,33 @@ class MetalModule:
 
     get_global_var = get_global
 
+    def _build(self, kernels):
+        """Build the library and the named kernels' pipelines."""
+        from woof.backend.metal import ext
+        kernels = [k for k in kernels if k not in self.max_threads]
+        try:
+            limits = ext.load().compile(self.library_key, self.unit.msl, kernels, MATH_MODE_SAFE)
+        except RuntimeError as exc:
+            import os
+            import tempfile
+            path = os.path.join(tempfile.gettempdir(), f"woof-metal-{self.unit.key[:16]}.metal")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.unit.msl)
+            errors = [line for line in str(exc).splitlines() if "error:" in line][:12] \
+                or str(exc).strip().splitlines()[:12]     # a pipeline failure has no `error:` lines
+            raise CompileError(f"Metal did not compile the translation of {self.name!r} "
+                               f"(MSL saved to {path}):\n" + "\n".join(errors)) from None
+        self.max_threads.update(zip(kernels, limits))
+
+    def build_all(self) -> None:
+        """Every kernel's pipeline now (tools/metal_translation_census.py)."""
+        self._build(sorted(self.unit.kernels))
+
     def get_function(self, name: str) -> MetalFunction:
         fn = self._functions.get(name)
         if fn is None:
+            if name in self.unit.kernels:
+                self._build((name,))
             fn = self._functions[name] = MetalFunction(self.unit, name, self.library_key, self)
         return fn
 

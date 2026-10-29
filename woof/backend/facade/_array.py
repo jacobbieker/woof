@@ -74,7 +74,7 @@ class Storage:
     filled array can be one scalar with stride 0), and a kernel bound to
     such a buffer would read and write past the one element it holds."""
 
-    __slots__ = ("arr", "dtype", "__weakref__")
+    __slots__ = ("arr", "dtype", "_aliases", "__weakref__")
 
     def __init__(self, arr, dtype: np.dtype, *, fresh: bool = False):
         """``fresh``: ``arr`` is a newly computed value no other array holds
@@ -86,6 +86,7 @@ class Storage:
         flat = _materialize(arr)
         self.arr = flat if fresh else mx.array(flat)
         self.dtype = np.dtype(dtype)
+        self._aliases = None
         # A new value is usually still lazy -- a copy or an expression of other
         # buffers.  It must be computed before any in-place launch overwrites
         # what it reads (flush_pending), as CUDA's stream order would have it.
@@ -108,6 +109,27 @@ class Storage:
         import mlx.core as mx
         self.arr = out
         mx.async_eval(out)
+
+    def alias(self, dtype) -> "Storage":
+        """This buffer as ``dtype`` elements: a second storage over the same
+        Metal buffer (MLX's ``view`` shares it), for memory handed out
+        untyped (``hostAlloc``).  Both see every in-place write."""
+        import mlx.core as mx
+        from woof.backend.metal import ext
+        dtype = np.dtype(dtype)
+        if dtype == self.dtype:
+            return self
+        if self._aliases is None:
+            self._aliases = {}
+        st = self._aliases.get(dtype)
+        if st is None:
+            mx.eval(self.arr)
+            arr = self.arr.view(storage_mx_dtype(dtype))
+            mx.eval(arr)
+            if int(ext.load().gpu_address(arr)) != int(ext.load().gpu_address(self.arr)):
+                raise NotImplementedError("MLX copied a reinterpreting view; the memory cannot be shared")
+            st = self._aliases[dtype] = Storage(arr, dtype, fresh=True)
+        return st
 
     def address(self) -> int:
         """The buffer's GPU address (evaluating it first).  Recorded, so an
@@ -187,6 +209,10 @@ class ndarray:
             if not isinstance(memptr, MemoryPointer):
                 raise TypeError("the facade's ndarray(memptr=) takes a facade MemoryPointer")
             _storage, _offset = memptr.storage, memptr.offset
+            if _storage.dtype != dtype and memptr.untyped:
+                if _offset % dtype.itemsize:
+                    raise NotImplementedError("a typed view at an offset that is not a whole element")
+                _storage = _storage.alias(dtype)
             if strides is not None:
                 _strides = tuple(int(x) for x in strides)
         if _storage is None:
@@ -339,11 +365,11 @@ class ndarray:
 
     # ---------------------------------------------------------- write
     def _write(self, values):
-        """Store an mx.array (storage dtype, broadcastable to shape) into
-        this view, in place: the storage keeps its buffer and address."""
+        """Store an mx.array (this view's dtype, broadcastable to shape)
+        into this view, in place: the storage keeps its buffer and address.
+        The copy kernel addresses the buffer in this view's element width,
+        so a reinterpreted-dtype view writes like any other."""
         from woof.backend.facade._write import write
-        if not self._same_item():
-            raise NotImplementedError("writing through a reinterpreted-dtype view")
         write(self, values)
 
     def _flat_indices(self):
@@ -505,10 +531,14 @@ class _ArrayInterface(dict):
 class MemoryPointer:
     """CuPy's MemoryPointer over facade storage: (storage, byte offset)."""
 
-    def __init__(self, storage: Storage, offset: int = 0, size: int | None = None):
+    def __init__(self, storage: Storage, offset: int = 0, size: int | None = None,
+                 untyped: bool = False):
         self.storage = storage
         self.offset = int(offset)
         self.size = storage.nbytes - self.offset if size is None else int(size)
+        # bytes with no element type of their own (a hostAlloc block): an
+        # ndarray over them takes its dtype (Storage.alias)
+        self.untyped = untyped
 
     @property
     def ptr(self):
@@ -519,7 +549,7 @@ class MemoryPointer:
         return self
 
     def __add__(self, nbytes):
-        return MemoryPointer(self.storage, self.offset + int(nbytes))
+        return MemoryPointer(self.storage, self.offset + int(nbytes), untyped=self.untyped)
 
     def _bytes_view(self, nbytes):
         st = self.storage

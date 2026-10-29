@@ -46,7 +46,14 @@ def _edit(text, edits):
     return text
 
 
-def run_here(unit, kernel, npz, scalars, threads, edits, host):
+def _shape(threads, tpb, grid, block):
+    """The launch: ``--grid``/``--block`` as given, else 1-D over ``threads``."""
+    if grid:
+        return grid, block or (tpb, 1, 1)
+    return ((threads + tpb - 1) // tpb,), (tpb,)
+
+
+def run_here(unit, kernel, npz, scalars, threads, edits, host, grid=None, block=None):
     args = _args(npz, scalars)
     if host:
         sys.path.insert(0, str(ROOT / "tools" / "thompson_real_column_parity"))
@@ -56,7 +63,7 @@ def run_here(unit, kernel, npz, scalars, threads, edits, host):
             host_backend.set_transform(unit, lambda t: _edit(t, edits))
         fn = host_backend.host_get_kernel(unit, kernel)
         arrays = [np.array(a, copy=True) if isinstance(a, np.ndarray) else a for a in args]
-        fn(((threads + 127) // 128,), (128,), tuple(arrays))
+        fn(*_shape(threads, 128, grid, block), tuple(arrays))
         return arrays
     import woof  # noqa: F401
     import cupy as cp
@@ -67,7 +74,7 @@ def run_here(unit, kernel, npz, scalars, threads, edits, host):
             _edit(original(name, *a, **k), edits) if name == unit else original(name, *a, **k))
     fn = kernels.get_kernel(unit, kernel)
     dev = [cp.asarray(a) if isinstance(a, np.ndarray) else a for a in args]
-    tpb = int(os.environ.get("PROBE_TPB", "128")); fn(((threads + tpb - 1) // tpb,), (tpb,), tuple(dev))
+    fn(*_shape(threads, int(os.environ.get("PROBE_TPB", "128")), grid, block), tuple(dev))
     return [cp.asnumpy(a) if isinstance(a, cp.ndarray) else a for a in dev]
 
 
@@ -75,13 +82,30 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("unit"); ap.add_argument("kernel"); ap.add_argument("npz")
     ap.add_argument("--scalars", nargs="*", default=[])
-    ap.add_argument("--threads", type=int, required=True)
+    ap.add_argument("--threads", type=int, default=0)
+    ap.add_argument("--grid", type=lambda t: tuple(int(x) for x in t.split(",")),
+                    help="a launch grid X,Y,Z (instead of --threads)")
+    ap.add_argument("--block", type=lambda t: tuple(int(x) for x in t.split(",")))
     ap.add_argument("--edit", nargs=2, action="append", default=[], metavar=("ANCHOR", "TEXT"))
+    ap.add_argument("--repeat", type=int, default=0,
+                    help="Metal only: replay N times in one process and compare the repeats "
+                         "(a kernel whose words vary is nondeterministic)")
     ap.add_argument("--side", choices=("metal", "host"), help=argparse.SUPPRESS)
     ap.add_argument("--out", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
+    if a.repeat:
+        runs = [run_here(a.unit, a.kernel, a.npz, a.scalars, a.threads, a.edit, False,
+                         a.grid, a.block)
+                for _ in range(a.repeat)]
+        for i, r in enumerate(runs[1:], 1):
+            bad = [k for k, (x, y) in enumerate(zip(runs[i - 1], r)) if isinstance(x, np.ndarray)
+                   and not np.array_equal(x.view(np.uint8), y.view(np.uint8))]
+            print(f"repeat {i}: " + (f"identical to repeat {i - 1}" if not bad
+                                     else f"arguments {bad} differ from repeat {i - 1}"))
+        return 0
     if a.side:
-        res = run_here(a.unit, a.kernel, a.npz, a.scalars, a.threads, a.edit, a.side == "host")
+        res = run_here(a.unit, a.kernel, a.npz, a.scalars, a.threads, a.edit, a.side == "host",
+                       a.grid, a.block)
         np.savez(a.out, **{f"arg{i}": r for i, r in enumerate(res) if isinstance(r, np.ndarray)})
         return 0
     results = {}
@@ -89,9 +113,14 @@ def main(argv=None):
         out = f"/tmp/kernel_probe_{side}.npz"
         env = dict(os.environ, GPUWM_NUMERICS="strict")
         if side == "host":
-            env.update(WOOF_BACKEND="cuda", PYTHONPATH="")
+            sys.path.insert(0, str(ROOT / "tools" / "thompson_real_column_parity"))
+            from host_backend import host_environment
+            env = host_environment(env)
         cmd = [sys.executable, __file__, a.unit, a.kernel, a.npz, "--threads", str(a.threads),
                "--side", side, "--out", out, "--scalars", *a.scalars]
+        for flag, value in (("--grid", a.grid), ("--block", a.block)):
+            if value:
+                cmd += [flag, ",".join(map(str, value))]
         for anchor, text in a.edit:
             cmd += ["--edit", anchor, text]
         subprocess.run(cmd, check=True, env=env, cwd=ROOT)

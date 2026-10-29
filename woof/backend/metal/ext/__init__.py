@@ -28,6 +28,9 @@ MODULE = "_woof_metal_launch"
 #: Environment override for the build cache directory.
 BUILD_DIR_ENV = "WOOF_METAL_EXT_DIR"
 
+#: Environment override for the pipeline archive directory ("off": none).
+PIPELINE_DIR_ENV = "WOOF_METAL_PIPELINE_DIR"
+
 
 def cache_root() -> Path:
     env = os.environ.get(BUILD_DIR_ENV)
@@ -35,6 +38,17 @@ def cache_root() -> Path:
         return Path(env).expanduser()
     base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     return (base / "woof" / "metal-ext").expanduser()
+
+
+def pipeline_root() -> Path | None:
+    """Where built pipelines persist as Metal binary archives (launch.cpp
+    ``pipeline_for``): ``$WOOF_METAL_PIPELINE_DIR``, else ``metal-pipelines``
+    beside the extension cache.  A cold unit's pipelines are most of its
+    compile time (CLM lake's step kernel: about 20 minutes)."""
+    env = os.environ.get(PIPELINE_DIR_ENV)
+    if env in ("off", "0"):
+        return None
+    return Path(env).expanduser() if env else cache_root().parent / "metal-pipelines"
 
 
 def build_key() -> str:
@@ -102,4 +116,8 @@ def load():
     spec = importlib.util.spec_from_file_location(MODULE, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    archives = pipeline_root()
+    if archives is not None:
+        archives.mkdir(parents=True, exist_ok=True)
+        module.set_pipeline_archive_dir(str(archives))
     return module

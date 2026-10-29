@@ -2,8 +2,8 @@
 
 For every unit of ``woof/core/kernels`` (the exact text NVRTC would compile,
 ``woof.core.kernels.module_source``), translate it with
-``woof.backend.translate`` and build it with Metal (``MetalModule``, which
-compiles eagerly).  Each unit lands in one class:
+``woof.backend.translate`` and build it with Metal (``MetalModule``, every
+kernel's pipeline).  Each unit lands in one class:
 
 ``compiled``        translated and every kernel's pipeline built;
 ``refused``         the translator refused a construct, by name;
@@ -84,6 +84,7 @@ def census_one(name: str, retain: bool) -> dict:
         return {"unit": name, "class": "source_error", "message": f"{type(exc).__name__}: {exc}"[:400]}
     try:
         module = load_unit(name.replace(":", "_"), source, options=options)
+        module.build_all()
     except TranslationError as exc:
         text = str(exc)
         cls = "source_error" if "does not parse" in text or "preprocessing failed" in text else "refused"

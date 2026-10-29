@@ -18,15 +18,22 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import launch_trace  # noqa: E402
 
-def first_divergence(a_path: Path, b_path: Path):
+
+def first_divergence(a_path: Path, b_path: Path, known=None):
     a = [json.loads(l) for l in a_path.read_text().splitlines() if l.strip()]
     b = [json.loads(l) for l in b_path.read_text().splitlines() if l.strip()]
+    if known is not None:
+        # launches of kernels the first backend never records (the MLX
+        # facade's own elementwise/copy kernels, which CuPy runs untraced)
+        b = [r for r in b if r["kernel"] in known]
     for x, y in zip(a, b):
         if x["kernel"] != y["kernel"]:
             return ("sequence", x["seq"], f"{x['kernel']} vs {y['kernel']}")
-        if x["args"] != y["args"]:
-            bad = [i for i, (p, q) in enumerate(zip(x["args"], y["args"])) if p != q]
+        bad = launch_trace.differing_args(x, y)
+        if bad:
             return ("words", x["seq"], f"{x['kernel']} args {bad}")
     if len(a) != len(b):
         return ("length", min(len(a), len(b)), f"{len(a)} vs {len(b)} launches")
@@ -37,9 +44,14 @@ def main(argv=None):
     argv = argv or sys.argv[1:]
     da, db = Path(argv[0]), Path(argv[1])
     common = sorted(set(p.name for p in da.glob("*.jsonl")) & set(p.name for p in db.glob("*.jsonl")))
+    known = set()
+    for path in da.glob("*.jsonl"):
+        for line in path.read_text().splitlines():
+            if line.strip():
+                known.add(json.loads(line)["kernel"])
     agree, kernels = 0, collections.Counter()
     for name in common:
-        d = first_divergence(da / name, db / name)
+        d = first_divergence(da / name, db / name, known)
         if d is None:
             agree += 1
             continue

@@ -15,6 +15,7 @@ import pytest
 
 from conftest import requires_gpu
 from woof.core.fp32_ulp import fp32_ulp_distance
+from woof.verify.platform_pins import pin_path
 from woof.verify.smallstep_oracle import ORACLE_DIR
 from woof.verify.smallstep_horizontal_oracle import (
     horizontal_port_outputs, load_horizontal_fixture,
@@ -28,15 +29,30 @@ def test_horizontal_compiled_fixture_pins():
         assert hashlib.sha256((ORACLE_DIR/filename).read_bytes()).hexdigest()==expected,filename
 
 
+def output_sha256(value):
+    return hashlib.sha256(np.ascontiguousarray(value).view(np.uint32).tobytes()).hexdigest()
+
+
+def _frozen(fixture,baseline,name,keys):
+    """The pinned output words: CUDA's arrays in the fixture, or another
+    backend's digests in its own baseline (woof.verify.platform_pins)."""
+    if "gpu_sha256" in baseline:
+        return {key:baseline["gpu_sha256"][name][key] for key in keys}
+    return {key:fixture[name+"__gpu_"+key].copy() for key in keys}
+
+
+def _baseline():
+    return json.loads(pin_path(ORACLE_DIR/"horizontal-baseline.json").read_text(encoding="utf-8"))
+
+
 @pytest.fixture(scope="module")
 def horizontal_measurements():
-    baseline=json.loads((ORACLE_DIR/"horizontal-baseline.json").read_text(encoding="utf-8"))
+    baseline=_baseline()
     with np.load(ORACLE_DIR/"horizontal.npz",allow_pickle=False) as fixture:
         result=[]
         for name,data,cfg,reference,full_theta in load_horizontal_fixture(ORACLE_DIR/"horizontal.npz"):
             actual=horizontal_port_outputs(data,cfg,full_theta_probe=full_theta)
-            frozen={key:fixture[name+"__gpu_"+key].copy() for key in actual}
-            result.append((name,actual,reference,frozen,baseline[name]))
+            result.append((name,actual,reference,_frozen(fixture,baseline,name,actual),baseline[name]))
     return result
 
 
@@ -44,8 +60,11 @@ def _assert_outputs(measurements,keys):
     for name,actual,reference,frozen,baseline in measurements:
         for key in keys:
             got,want=actual[key],reference[key]
-            np.testing.assert_array_equal(got.view(np.uint32),frozen[key].view(np.uint32),
-                                          err_msg=name+" "+key+" GPU output words drifted")
+            if isinstance(frozen[key],str):
+                assert output_sha256(got)==frozen[key],name+" "+key+" GPU output words drifted"
+            else:
+                np.testing.assert_array_equal(got.view(np.uint32),frozen[key].view(np.uint32),
+                                              err_msg=name+" "+key+" GPU output words drifted")
             d=fp32_ulp_distance(got,want)
             assert int(d.max())==baseline[key]["max_ulp"],(name,key,"ULP measurement drifted")
             assert int(np.count_nonzero(got.view(np.uint32)!=want.view(np.uint32)))==baseline[key]["different_words"],(name,key,"word count drifted")
@@ -74,8 +93,9 @@ def test_horizontal_word_gate_rejects_missing_pressure_term():
     else:
         raise AssertionError("real-state pressure-gradient fixture missing")
     actual=horizontal_port_outputs(data,cfg,full_theta_probe=full_theta,drop_pressure_term=True)
-    baseline=json.loads((ORACLE_DIR/"horizontal-baseline.json").read_text(encoding="utf-8"))[name]
+    baseline=_baseline()
     with np.load(ORACLE_DIR/"horizontal.npz",allow_pickle=False) as fixture:
-        frozen={key:fixture[name+"__gpu_"+key].copy() for key in actual}
+        frozen=_frozen(fixture,baseline,name,actual)
+    baseline=baseline[name]
     with pytest.raises(AssertionError,match="GPU output words drifted"):
         _assert_outputs([(name,actual,reference,frozen,baseline)],("u_pp","v_pp"))

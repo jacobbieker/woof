@@ -22,6 +22,11 @@
 #include <nanobind/stl/tuple.h>
 
 #include <array>
+#include <cctype>
+#include <chrono>
+#include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <unordered_map>
 #include <cstdint>
@@ -48,6 +53,87 @@ namespace mx = mlx::core;
 // see translate.inline_pointer_functions.)
 constexpr NS::UInteger kCallStackDepth = 1;
 
+// WOOF_METAL_COMPILE_LOG=1: each library and pipeline build's seconds on
+// stderr (where a cold unit's compile time goes).
+static void compile_log(const char* what, const std::string& name,
+                        std::chrono::steady_clock::time_point began) {
+  static const bool on = std::getenv("WOOF_METAL_COMPILE_LOG") != nullptr;
+  if (!on) return;
+  double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+  std::fprintf(stderr, "[woof.metal] %s %s %.2f s\n", what, name.c_str(), seconds);
+}
+
+// Libraries built here too, beside the pipelines: one cache, our options.
+// (LibraryOptimizationLevelSize was measured slower to compile: nssl2's
+// fused unit took 991 s against 772 s at the default level.)
+static MTL::Library* library_for(const std::string& library_key, const std::string& source, int math_mode) {
+  static std::mutex mutex;
+  static std::unordered_map<std::string, NS::SharedPtr<MTL::Library>> cache;
+  std::lock_guard<std::mutex> lock(mutex);
+  auto it = cache.find(library_key);
+  if (it != cache.end()) return it->second.get();
+  auto pool = NS::AutoreleasePool::alloc()->init();
+  auto* options = MTL::CompileOptions::alloc()->init();
+  if (__builtin_available(macOS 15, *)) {
+    options->setMathMode(math_mode == 2 ? MTL::MathModeFast : math_mode == 1 ? MTL::MathModeRelaxed
+                                                                            : MTL::MathModeSafe);
+    options->setLanguageVersion(MTL::LanguageVersion3_2);
+  } else {
+    options->setFastMathEnabled(math_mode == 2);
+    options->setLanguageVersion(MTL::LanguageVersion3_1);
+  }
+  NS::Error* error = nullptr;
+  auto began = std::chrono::steady_clock::now();
+  auto* lib = mx::metal::device(mx::Device::gpu).mtl_device()->newLibrary(
+      NS::String::string(source.c_str(), NS::UTF8StringEncoding), options, &error);
+  compile_log("library", library_key.substr(0, 40), began);
+  options->release();
+  if (lib == nullptr) {
+    std::string what = error ? error->localizedDescription()->utf8String() : "unknown error";
+    pool->release();
+    throw std::runtime_error("[metal::Device] Unable to build metal library from source\n" + what);
+  }
+  pool->release();
+  cache.emplace(library_key, NS::TransferPtr(lib));
+  return lib;
+}
+
+// Built pipelines persist across processes in Metal binary archives, one
+// per (library, kernel) under the directory set_pipeline_archive_dir names
+// (woof.backend.metal.ext; empty: none).  The OS shader cache does not keep
+// the largest pipelines: CLM lake's step kernel compiled again from scratch
+// hours after its first build.  A cold pipeline is compiled once, into a
+// fresh archive (addComputePipelineFunctions), which is written to disk and
+// then supplies the pipeline itself (FailOnBinaryArchiveMiss).
+static std::string g_archive_dir;
+
+static std::string archive_path(const std::string& library_key, const std::string& kernel) {
+  std::string name = library_key + "__" + kernel;
+  for (auto& c : name) {
+    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) c = '_';
+  }
+  return g_archive_dir + "/" + name + ".metalarchive";
+}
+
+static MTL::BinaryArchive* open_archive(MTL::Device* device, const std::string& path) {
+  auto* desc = MTL::BinaryArchiveDescriptor::alloc()->init();
+  if (!path.empty()) desc->setUrl(NS::URL::fileURLWithPath(NS::String::string(path.c_str(), NS::UTF8StringEncoding)));
+  NS::Error* error = nullptr;
+  auto* archive = device->newBinaryArchive(desc, &error);
+  desc->release();
+  return archive;
+}
+
+static MTL::ComputePipelineState* pipeline_from(MTL::Device* device, MTL::ComputePipelineDescriptor* desc,
+                                                MTL::BinaryArchive* archive) {
+  desc->setBinaryArchives(NS::Array::array(archive));
+  NS::Error* error = nullptr;
+  auto* state = device->newComputePipelineState(desc, MTL::PipelineOptionFailOnBinaryArchiveMiss,
+                                                nullptr, &error);
+  desc->setBinaryArchives(nullptr);
+  return state;
+}
+
 static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::string& library_key,
                                                const std::string& kernel) {
   static std::mutex mutex;
@@ -57,6 +143,7 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
   auto it = cache.find(key);
   if (it != cache.end()) return it->second.get();
   auto pool = NS::AutoreleasePool::alloc()->init();
+  auto* device = mx::metal::device(mx::Device::gpu).mtl_device();
   auto* fn = lib->newFunction(NS::String::string(kernel.c_str(), NS::UTF8StringEncoding));
   if (fn == nullptr) {
     pool->release();
@@ -66,8 +153,32 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
   desc->setComputeFunction(fn);
   desc->setMaxCallStackDepth(kCallStackDepth);
   NS::Error* error = nullptr;
-  auto* state = mx::metal::device(mx::Device::gpu).mtl_device()->newComputePipelineState(
-      desc, MTL::PipelineOptionNone, nullptr, &error);
+  MTL::ComputePipelineState* state = nullptr;
+  auto began = std::chrono::steady_clock::now();
+  if (!g_archive_dir.empty()) {
+    std::string path = archive_path(library_key, kernel);
+    auto* stored = access(path.c_str(), R_OK) == 0 ? open_archive(device, path) : nullptr;
+    if (stored == nullptr) stored = open_archive(device, std::string());   // none, or another OS's
+    if (stored != nullptr) {
+      state = pipeline_from(device, desc, stored);          // a hit: no compile
+      if (state != nullptr) {
+        compile_log("pipeline (archive)", kernel, began);
+      } else if (stored->addComputePipelineFunctions(desc, &error)) {
+        // the one compile, into the archive; written atomically beside
+        std::string partial = path + ".partial";
+        auto* url = NS::URL::fileURLWithPath(NS::String::string(partial.c_str(), NS::UTF8StringEncoding));
+        if (stored->serializeToURL(url, &error)) std::rename(partial.c_str(), path.c_str());
+        state = pipeline_from(device, desc, stored);
+        compile_log("pipeline (archived)", kernel, began);
+      }
+      stored->release();
+    }
+  }
+  if (state == nullptr) {
+    error = nullptr;
+    state = device->newComputePipelineState(desc, MTL::PipelineOptionNone, nullptr, &error);
+    compile_log("pipeline", kernel, began);
+  }
   desc->release();
   fn->release();
   if (state == nullptr) {
@@ -136,9 +247,7 @@ class LaunchTranslated : public mx::Primitive {
       std::vector<mx::array>& outputs) override {
     auto& s = stream();
     auto& d = mx::metal::device(s.device);
-    mx::CompileOptions options;
-    options.math_mode = static_cast<mx::MathMode>(math_mode_);
-    auto* lib = d.get_library(library_key_, options, [this]() { return source_; });
+    auto* lib = library_for(library_key_, source_, math_mode_);
     auto* pipeline = pipeline_for(lib, library_key_, kernel_);
     size_t per_group = std::get<0>(threads_) * std::get<1>(threads_) * std::get<2>(threads_);
     if (per_group > pipeline->maxTotalThreadsPerThreadgroup()) {
@@ -331,9 +440,7 @@ std::vector<int> compile(
     const std::vector<std::string>& kernels,
     int math_mode) {
   auto& d = mx::metal::device(mx::Device::gpu);
-  mx::CompileOptions options;
-  options.math_mode = static_cast<mx::MathMode>(math_mode);
-  auto* lib = d.get_library(library_key, options, [&]() { return source; });
+  auto* lib = library_for(library_key, source, math_mode);
   std::vector<int> limits;
   for (const auto& k : kernels) {
     limits.push_back(int(pipeline_for(lib, library_key, k)->maxTotalThreadsPerThreadgroup()));
@@ -376,6 +483,8 @@ NB_MODULE(_woof_metal_launch, m) {
       nb::arg("null_slots") = std::vector<int>{},
       nb::arg("null_table") = std::vector<int>{});
   m.def("gpu_address", &gpu_address, nb::arg("array"));
+  m.def("set_pipeline_archive_dir", [](const std::string& path) { g_archive_dir = path; },
+        nb::arg("path"));
   m.def("compile", &compile, nb::arg("library_key"), nb::arg("source"),
         nb::arg("kernels"), nb::arg("math_mode") = 0);
 }

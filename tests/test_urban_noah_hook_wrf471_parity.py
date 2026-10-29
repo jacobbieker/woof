@@ -72,6 +72,10 @@ _FIELDS_BY_CASE: dict[str, tuple[str, ...]] = {
 MEASURED_MAX_ULP_BY_ARCHITECTURE: dict[str, dict[str, dict[str, int]]] = {
     "120": {case: {field: 0 for field in fields}
             for case, fields in _FIELDS_BY_CASE.items()},
+    # The MLX backend (woof's Metal translation): zero in every field as
+    # well, read 2026-10-29 on an M3 Max.
+    "metal": {case: {field: 0 for field in fields}
+              for case, fields in _FIELDS_BY_CASE.items()},
 }
 
 

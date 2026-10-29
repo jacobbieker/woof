@@ -15,6 +15,7 @@ import pytest
 
 from conftest import requires_gpu
 from woof.core.kernels import module_source
+from woof.verify.platform_pins import pin_path
 from woof.verify.smallstep_oracle import ORACLE_DIR
 from woof.verify.smallstep_vertical_oracle import _measure, vertical_port_outputs, vertical_cases
 
@@ -235,19 +236,15 @@ def test_vertical_selector_invokes_native_callable_once(monkeypatch):
     assert calls == [("advance_w_phi", (2,), (128,), ("vertical",))]
 
 
-@pytest.fixture(scope="module")
-def vertical_measurements():
-    baseline_path = ORACLE_DIR / "vertical-native.json"
-    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-    measured, native_word_identity = {}, {}
+def measure_vertical():
+    """Each case's distances from compiled WRF, and its output words."""
+    measured, outputs = {}, {}
     with np.load(ORACLE_DIR / "vertical-reference.npz", allow_pickle=False) as refs:
         for name, raw, metadata in vertical_cases():
             got = vertical_port_outputs(raw, metadata,
                   reference_inputs={key: refs[name + "__" + key + "_input"]
                                     for key in ("history_p", "history_old")})
-            native_word_identity[name] = {field: np.array_equal(value.view(np.uint32),
-                refs[name + "__" + field + "_native"].view(np.uint32))
-                for field, value in got.items() if field != "ph_diag"}
+            outputs[name] = {field: value for field, value in got.items() if field != "ph_diag"}
             ref = lambda field: refs[name + "__" + field + "_wrf"]
             measured[name] = {
                 "calc_coef_w": {field: _measure(got[field], ref(field))
@@ -260,8 +257,30 @@ def vertical_measurements():
             measured[name]["calc_p_rho"]["reference_pm1_copy"] = _measure(ref("p"), ref("pm1"))
             measured[name]["calc_p_rho"]["history_weighted_p"] = _measure(got["history"], ref("history"))
             measured[name]["calc_p_rho"]["reference_pm1_history_copy"] = _measure(ref("p"), ref("pm1_history"))
+    return measured, outputs
+
+
+def output_sha256(value) -> str:
+    return hashlib.sha256(np.ascontiguousarray(value).view(np.uint32).tobytes()).hexdigest()
+
+
+@pytest.fixture(scope="module")
+def vertical_measurements():
+    # CUDA's output words are frozen as arrays in the reference archive;
+    # another backend's pin (woof.verify.platform_pins) records their digests.
+    baseline = json.loads(pin_path(ORACLE_DIR / "vertical-native.json").read_text(encoding="utf-8"))
+    measured, outputs = measure_vertical()
+    native_word_identity = {}
+    with np.load(ORACLE_DIR / "vertical-reference.npz", allow_pickle=False) as refs:
+        for name, got in outputs.items():
+            if "native_sha256" in baseline:
+                native_word_identity[name] = {field: output_sha256(value) == baseline["native_sha256"][name][field]
+                                              for field, value in got.items()}
+            else:
+                native_word_identity[name] = {field: np.array_equal(value.view(np.uint32),
+                    refs[name + "__" + field + "_native"].view(np.uint32)) for field, value in got.items()}
     assert set(measured) == set(baseline["cases"])
-    return measured, baseline["cases"], native_word_identity
+    return measured, baseline["cases"], native_word_identity, outputs
 
 
 def test_vertical_compiled_reference_arrays_are_pinned():
@@ -277,7 +296,7 @@ def test_vertical_compiled_reference_arrays_are_pinned():
 @pytest.mark.gpu
 @requires_gpu
 def test_calc_coef_w_matches_compiled_wrf471_measured_words(vertical_measurements):
-    measured, baseline, _ = vertical_measurements
+    measured, baseline, *_ = vertical_measurements
     for name in measured:
         assert measured[name]["calc_coef_w"] == baseline[name]["calc_coef_w"], name
 
@@ -285,7 +304,7 @@ def test_calc_coef_w_matches_compiled_wrf471_measured_words(vertical_measurement
 @pytest.mark.gpu
 @requires_gpu
 def test_advance_w_matches_compiled_wrf471_measured_words(vertical_measurements):
-    measured, baseline, _ = vertical_measurements
+    measured, baseline, *_ = vertical_measurements
     for name in measured:
         assert measured[name]["advance_w"] == baseline[name]["advance_w"], name
 
@@ -293,7 +312,7 @@ def test_advance_w_matches_compiled_wrf471_measured_words(vertical_measurements)
 @pytest.mark.gpu
 @requires_gpu
 def test_calc_p_rho_matches_compiled_wrf471_measured_words(vertical_measurements):
-    measured, baseline, _ = vertical_measurements
+    measured, baseline, *_ = vertical_measurements
     for name in measured:
         assert measured[name]["calc_p_rho"] == baseline[name]["calc_p_rho"], name
 
@@ -301,7 +320,7 @@ def test_calc_p_rho_matches_compiled_wrf471_measured_words(vertical_measurements
 @pytest.mark.gpu
 @requires_gpu
 def test_native_vertical_output_words_equal_frozen_receipt(vertical_measurements):
-    _, _, identities = vertical_measurements
+    _, _, identities, _ = vertical_measurements
     for name, outputs in identities.items():
         assert all(outputs.values()), (name, outputs)
 

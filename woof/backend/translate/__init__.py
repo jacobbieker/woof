@@ -1595,18 +1595,29 @@ class _Rewriter:
                 self.edits.replace(toks[0].extent.start.offset, name.extent.start.offset,
                                    f"__woof_addr_table<{tspace} {elem}*> ")
 
-    def inline_pointer_functions(self):
-        """``always_inline`` on every device function of the unit, unless the
-        source says __noinline__ (the prelude's soft-float keeps its calls).
+    #: Body size (tokens) at or under which WOOF_INLINE_POLICY=size inlines.
+    INLINE_TOKENS = 300
 
-        Metal's out-of-line calls between a unit's own functions gave wrong
-        values: Noah-MP's water kernel read __dadd_rn(2, 5) as 0 inside
-        d_soilwater, varying with the threadgroup size (right at 32 threads,
-        wrong at 1, 8 and 128) and vanishing under shader validation.  With
-        the unit's functions inlined it is CUDA's word for word at every size.
-        CUDA inlines device functions by default too."""
+    def inline_pointer_functions(self):
+        """Every device function of the unit is ``always_inline`` (a source
+        ``__noinline__`` stands): CUDA's own default, and the one policy under
+        which Metal has given CUDA's words everywhere it was tried.
+
+        Left to its heuristics, Metal's compiler gave wrong values (Noah-MP's
+        water kernel: varying with the threadgroup size, vanishing under
+        shader validation).  Explicit out-of-line calls were no cure: with
+        small functions inlined into out-of-line ones, Morrison's mo_process
+        gave different words on repeated launches of the same inputs; with
+        every function out of line it was right alone and wrong after another
+        test file ran in the process.  Fully inlined, both are deterministic
+        and CUDA's word for word.  The price is compile time on the largest
+        units (CLM lake ~20 min, NSSL's fused unit ~13 min cold).
+        WOOF_INLINE_POLICY=size|none and WOOF_KEEP_CALL=f,g select the
+        alternatives, for diagnosis only."""
         K = self.ci.CursorKind
-        kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD)
+        kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR, K.DESTRUCTOR)
+        policy = os.environ.get("WOOF_INLINE_POLICY", "")
+        keep_call = set(os.environ.get("WOOF_KEEP_CALL", "").split(","))
         done = set()
         for node in self.tu.cursor.walk_preorder():
             if node.kind not in kinds or not node.is_definition() or not self.main_file(node):
@@ -1617,12 +1628,34 @@ class _Rewriter:
             if key in done:
                 continue
             done.add(key)
-            toks = [t.spelling for t in node.get_tokens()][:40]
-            if "noinline" in toks:
+            tokens = list(node.get_tokens())
+            if "noinline" in [t.spelling for t in tokens[:40]]:
                 continue
-            at = self._return_type_start(node)
-            if at is not None:
-                self.edits.insert(at, "__attribute__((always_inline)) ", rank=-70_000)
+            at = self._attribute_site(node, tokens)
+            if at is None:
+                continue
+            body = next((c for c in node.get_children() if c.kind == K.COMPOUND_STMT), None)
+            size = len(list(body.get_tokens())) if body is not None else 0
+            if policy == "none" or node.spelling in keep_call:
+                inline = False
+            elif policy == "size":
+                inline = size <= self.INLINE_TOKENS
+            else:
+                inline = True
+            self.edits.insert(at, "__attribute__((always_inline)) " if inline
+                              else "__attribute__((noinline)) ", rank=-70_000)
+
+    def _attribute_site(self, node, tokens):
+        """Where a function attribute goes: before the return type, or
+        before a constructor's / destructor's name."""
+        if node.kind.name in ("CONSTRUCTOR", "DESTRUCTOR"):
+            base = node.spelling.lstrip("~").split("<", 1)[0]
+            for i, t in enumerate(tokens):
+                if t.spelling == base:
+                    j = i - 1 if node.kind.name == "DESTRUCTOR" and i and tokens[i - 1].spelling == "~" else i
+                    return tokens[j].extent.start.offset
+            return None
+        return self._return_type_start(node)
 
     def _return_type_start(self, cursor):
         tokens = list(cursor.get_tokens())
@@ -1650,6 +1683,20 @@ class _Rewriter:
             i += 1
         return tokens[i].extent.start.offset if i < idx else None
 
+    def _static_member_definition(self, owner, member):
+        """``constant constexpr T C::m;`` after the class: MSL is C++14, where
+        a static constexpr member that is odr-used (bound to a const&
+        parameter of a function kept out of line) needs a definition."""
+        toks = [t.spelling for t in member.get_tokens()]
+        if "constexpr" not in toks or owner.kind.name not in ("STRUCT_DECL", "CLASS_DECL"):
+            return                      # (class templates: their members stay folded)
+        if any(c.kind.name.startswith("TEMPLATE") for c in owner.get_children()):
+            return
+        end = self._statement_end(owner)
+        spelled = self._spell_type(member.type, drop_const=True)
+        self.edits.insert(end, f"\nconstant constexpr {spelled} {owner.spelling}::{member.spelling};",
+                          rank=65_000)
+
     def struct_fields(self, cursor):
         """Pointer fields take their initialiser's space (else device),
         reference members thread; static data members are constant."""
@@ -1674,6 +1721,7 @@ class _Rewriter:
             elif c.kind == K.VAR_DECL:
                 # a static data member is program-scope storage: constant
                 self.constant_declaration(c)
+                self._static_member_definition(cursor, c)
             elif c.kind == K.CONSTRUCTOR and c.is_definition():
                 self._arithmetic_constructor(cursor, c)
             elif c.kind in (K.STRUCT_DECL, K.CLASS_DECL, K.CLASS_TEMPLATE,

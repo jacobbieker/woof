@@ -40,7 +40,11 @@ def test_momentum_oracle_wrf471_source_and_fixture_pins():
                       ("momentum-diagnostics-sm89-nvrtc12.9.86.json", "diagnostic_sha256")):
         assert hashlib.sha256((MOMENTUM_ORACLE_DIR / name).read_bytes()).hexdigest() == platform_receipt[key]
     primary = json.loads((MOMENTUM_ORACLE_DIR / "momentum-measurements.json").read_text())
-    alternate = json.loads((MOMENTUM_ORACLE_DIR / "momentum-measurements-sm89-nvrtc12.9.86.json").read_text())
+    for name in ("momentum-measurements-sm89-nvrtc12.9.86.json", "momentum-measurements-metal.json"):
+        _same_references(primary, json.loads((MOMENTUM_ORACLE_DIR / name).read_text()))
+
+
+def _same_references(primary, alternate):
     for case in MOMENTUM_CASES:
         for routine in MOMENTUM_ROUTINES:
             for field in ("ru_t", "rv_t", "rw_t"):

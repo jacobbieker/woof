@@ -65,15 +65,43 @@ nondeterministic, three diagnostic variables help:
 
 ## Known Metal compiler behaviour
 
-* **Out-of-line calls between a unit's own functions** gave wrong values in
-  Noah-MP's water kernel. The result depended on the threadgroup size and
-  disappeared under shader validation. Every device function of a unit is
-  therefore `always_inline`, except where the source says `__noinline__`.
-  This costs compile time: CLM lake takes about 20 minutes cold. Metal's
-  shader cache makes later builds fast.
+* **Every device function of a unit is `always_inline`**, except where the
+  source says `__noinline__`. This is CUDA's own default, and the only policy
+  under which Metal has given CUDA's words in every case tried. The
+  alternatives each failed somewhere:
+  - left to the compiler's heuristics, Noah-MP's water kernel gave wrong
+    values that varied with the threadgroup size and vanished under shader
+    validation;
+  - with small functions inlined into out-of-line ones, Morrison's
+    `mo_process` gave different words on repeated launches of the same
+    inputs;
+  - with everything out of line, Morrison was right alone but wrong after
+    another test file had run in the process.
+
+  The cost is cold compile time on the largest units: CLM lake's step
+  kernel alone takes about 5 minutes. `WOOF_INLINE_POLICY=size|none` and
+  `WOOF_KEEP_CALL=f,g` select the alternatives, for diagnosis.
+  `tools/kernel_probe.py --repeat N` shows whether a kernel's words vary
+  across replays.
+* **Static constexpr members.** MSL is C++14, so an out-of-line call that
+  binds a `static constexpr` data member to a `const&` parameter odr-uses
+  it. The translator therefore emits the member's out-of-class definition.
 * **Pipelines** are built by woof, not MLX, keeping `maxCallStackDepth` at 1.
   A deeper declared depth reserves stack per thread for every level, and
   `fast_sbm` then fails to build: "exceeds available stack space".
+
+## Compile time
+
+A unit's Metal library is built when it is loaded. Each kernel's pipeline
+is built at its first `get_function`, and pipelines are most of the cold
+cost (Morrison: library 4.7 s, `mo_process` 18 s).
+
+Built pipelines persist as Metal binary archives in
+`~/.cache/woof/metal-pipelines`. `WOOF_METAL_PIPELINE_DIR` moves the
+directory, and `off` disables the archives. The OS shader cache does not
+keep the largest pipelines: CLM lake's step kernel compiled again from
+scratch hours after its first build. `WOOF_METAL_COMPILE_LOG=1` prints each
+library and pipeline build's time, and whether it came from an archive.
 
 ## Address spaces
 
@@ -87,13 +115,54 @@ function per combination of spaces. Two cases need runtime help:
 * **A struct pointer field given pointers in two spaces** (goddard's `GArray`)
   is refused by name until structs get the same treatment.
 
+## Mapped host memory
+
+`cudaHostAlloc` returns an evaluated MLX buffer's host address. Apple
+memory is unified, so `cudaPointerGetAttributes` gives that buffer's GPU
+address as the device pointer. `UnownedMemory` over the address is the
+same buffer, as an ndarray of whatever dtype it is viewed with
+(`Storage.alias`). Kernels and facade writes change the host bytes in place,
+as CUDA's mapped page-locked memory does. `tests/test_metal_mapped_host_memory.py`
+guards this.
+
+## Measured-word pins per backend
+
+Many parity tests pin the words a GPU produced, and their distance from
+compiled WRF, rather than only asserting bit-identity. CUDA's pins carry
+NVRTC's multiply-add contraction, which fast numerics and the oracle tools'
+default options leave on. The Metal translation never contracts, so on MLX
+the same measurements give CUDA's `--fmad=false` words. Those words are
+usually closer to WRF; momentum's `rw_t`, for example, is exact in every
+case.
+
+The MLX backend's pins are recorded beside CUDA's:
+
+* `<pin>-metal.json` files, chosen by `woof.verify.platform_pins.pin_path`
+  and written by `tools/record_metal_pins.py`;
+* rows keyed `metal` in per-compiler tables (`nvrtc_build()` is `"metal"`
+  on MLX, and the facade's compute capability is `metal`);
+* a `deformation-gpu-metal-receipt.json`, written by the receipt tool
+  itself.
+
+Record a family only after showing that its Metal words are CUDA's words
+with contraction off. Run `tools/launch_trace.py` on both machines, with
+CUDA's compiles forced to `--fmad=false`, and compare the traces with
+`tools/backend_receipts.py`. A remaining difference is then a vendor-libm
+or NaN-payload delta, and the pin file says so (for example the `known_deltas`
+in `vertical-native-metal.json`).
+
 ## Finding a difference
 
 1. `tools/launch_trace.py`: run the same scenario on CUDA (`ssh pb`) and on
-   MLX, and report the first launch whose array words differ.
+   MLX, and report the first launch whose array words differ. Each array
+   argument records its digest before and after the launch, and an argument
+   counts only if both backends gave it the same input words. An
+   uninitialised `cupy.empty` buffer holds old pool data on CUDA and zeros
+   on MLX, and that is not a divergence.
 2. `tools/kernel_probe.py`: replay that launch on the Metal translation and on
-   the host C++ build of the same source, with probe edits, and diff every
-   word.
+   the host C++ build of the same source (with the unit's `-D` options),
+   with probe edits, and diff every word. `--grid X,Y,Z --block X,Y,Z`
+   gives a 3-D launch.
 3. `tools/metal_unit_errors.py UNIT`: show each Metal compile error beside its
    MSL line.
 4. `tools/metal_translation_census.py`: which units translate and compile.

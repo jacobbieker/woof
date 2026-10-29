@@ -225,20 +225,53 @@ def _properties(device=0):
     }
 
 
-#: hostAlloc's blocks by address: unified memory, so page-locked host
-#: memory is host memory; the block lives until freeHost.
+#: hostAlloc's blocks by host address: (host view, storage).  Memory is
+#: unified, so a block is one Metal buffer seen two ways -- a NumPy view of
+#: its bytes, and the facade storage kernels bind -- which is CUDA's mapped
+#: page-locked memory (cudaHostAllocMapped) exactly.  It lives until freeHost.
 _HOST_BLOCKS: dict = {}
+
+#: cudaMemoryType
+_MEMORY_UNREGISTERED, _MEMORY_HOST, _MEMORY_DEVICE = 0, 1, 2
 
 
 def _host_alloc(nbytes, flags=0):
-    block = np.zeros(max(int(nbytes), 1), dtype=np.uint8)
-    ptr = int(block.ctypes.data)
-    _HOST_BLOCKS[ptr] = block
+    import mlx.core as mx
+    from woof.backend.facade._array import ndarray
+    block = ndarray((max(int(nbytes), 1),), np.uint8)
+    st = block._st
+    mx.eval(st.arr)
+    host = np.asarray(memoryview(st.arr))
+    ptr = int(host.ctypes.data)
+    st.address()                  # registered, so its GPU address resolves (UnownedMemory)
+    _HOST_BLOCKS[ptr] = (host, st)
     return ptr
 
 
 def _free_host(ptr):
     _HOST_BLOCKS.pop(int(ptr), None)
+
+
+def _host_block_at(ptr):
+    for base, (host, st) in _HOST_BLOCKS.items():
+        if base <= ptr < base + host.nbytes:
+            return base, st
+    return None
+
+
+def _pointer_attributes(ptr):
+    """cudaPointerGetAttributes: a hostAlloc block is page-locked host memory
+    with a device address; a storage's GPU address is device memory."""
+    from woof.backend.facade._array import storage_at
+    ptr = int(ptr)
+    found = _host_block_at(ptr)
+    if found is not None:
+        base, st = found
+        return types.SimpleNamespace(type=_MEMORY_HOST, device=0, hostPointer=ptr,
+                                     devicePointer=st.address() + (ptr - base))
+    if storage_at(ptr) is not None:
+        return types.SimpleNamespace(type=_MEMORY_DEVICE, device=0, hostPointer=0, devicePointer=ptr)
+    return types.SimpleNamespace(type=_MEMORY_UNREGISTERED, device=-2, hostPointer=0, devicePointer=0)
 
 
 runtime = types.SimpleNamespace(
@@ -248,6 +281,9 @@ runtime = types.SimpleNamespace(
     memGetInfo=_mem_get_info,
     deviceSynchronize=_drain,
     hostAlloc=_host_alloc,
+    pointerGetAttributes=_pointer_attributes,
+    memoryTypeHost=_MEMORY_HOST,
+    memoryTypeDevice=_MEMORY_DEVICE,
     # cudaDeviceGetLimit: Metal has no CUDA stack/heap limit to report (0)
     deviceGetLimit=lambda limit: 0,
     freeHost=_free_host,
@@ -475,13 +511,20 @@ function = types.SimpleNamespace(Module=_FunctionModule, Function=object)
 
 
 def UnownedMemory(ptr, size, owner, device_id=-1):
-    """CuPy wraps a raw address; the facade's module globals are already
-    MemoryPointers (loader.get_global_var), so that pointer is the memory."""
-    from woof.backend.facade._array import MemoryPointer
+    """CuPy wraps a raw address.  The facade's module globals are already
+    MemoryPointers (loader.get_global_var), so that pointer is the memory;
+    an integer must be a GPU address a storage handed out (a hostAlloc
+    block's device pointer, or ``a.data.ptr``).  A hostAlloc block is
+    untyped bytes, so an ndarray over it takes the dtype it asks for."""
+    from woof.backend.facade._array import MemoryPointer, storage_at
     if isinstance(ptr, MemoryPointer):
         return ptr
-    raise AttributeError("cupy.cuda.UnownedMemory over a raw integer address is not implemented "
-                         "by woof's mlx backend (MLX owns its allocations)")
+    found = storage_at(int(ptr))
+    if found is None:
+        raise AttributeError("cupy.cuda.UnownedMemory over an address no facade storage handed out")
+    st, offset = found
+    return MemoryPointer(st, offset, int(size),
+                         untyped=any(block is st for _host, block in _HOST_BLOCKS.values()))
 
 
 def _memory_pointer(mem, offset=0):
@@ -489,7 +532,7 @@ def _memory_pointer(mem, offset=0):
     a MemoryPointer standing for its memory (UnownedMemory above)."""
     from woof.backend.facade._array import MemoryPointer
     if isinstance(mem, MemoryPointer):
-        return MemoryPointer(mem.storage, mem.offset + int(offset))
+        return MemoryPointer(mem.storage, mem.offset + int(offset), untyped=mem.untyped)
     return MemoryPointer(mem, offset)
 
 
