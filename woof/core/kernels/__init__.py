@@ -321,6 +321,8 @@ _EXTRA_HEADERS: dict[str, tuple[str, ...]] = {
     "nssl2_driver_support": ("glibc_flt32.cuh", "nssl2_wrf_math.cuh"),
     "nssl2_diagnostics": ("glibc_flt32.cuh", "nssl2_wrf_math.cuh"),
     "rrtmgp_gas": ("rrtmgp_libm.cuh", "rrtmgp_planck_common.cuh"),
+    # WRF-Solar icloud = 3 (cal_cldfra3): glibc's log10f and powf.
+    "cldfra3": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh"),
 }
 
 #: Read-only view for tests and freeze receipts.
@@ -499,9 +501,11 @@ _URBAN_NO_FTZ_MODULES = frozenset({"urban_ucm", "urban_ucm480", "urban_bep",
                                    "urban_bep_couple"})
 # aer_opt2: WRF keeps the aerosol optics' subnormal operands (port289-final 550349628).
 # oml: graded word for word against WRF 4.6.1 OML1D (tools/oml_wrf461_oracle).
+# cldfra3: graded word for word against WRF 4.7.1 cal_cldfra3
+# (tools/cldfra3_wrf471_oracle); tiny condensate words must not flush.
 _NO_FTZ_MODULES = frozenset({"g3", "nsas", "sfclay", "myjsfc", "mynn_surface", "mynn_pbl",
                              "thompson_column", "ysu_480", "wsm6r",
-                             "aer_opt2", "oml", "farms"}) | _SOLAR_NO_FTZ_MODULES
+                             "aer_opt2", "oml", "farms", "cldfra3"}) | _SOLAR_NO_FTZ_MODULES
 
 # The exact chain's strict intake contracts (GPUWM_WRF_EXACT=1): these units
 # also compile without contraction in a strict process.  A default process

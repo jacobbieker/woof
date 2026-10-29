@@ -229,6 +229,10 @@ BASELINE_PINNED: dict[str, str] = {
     # one.  Under ice it carries the ice owner's heat and keeps entrained
     # polar water at or above freezing.  Previously 969bc568.
     "oml": "ce97181b17e72439ceb7cab26a9e088013669bb94e42b786b1b14293e4241728",
+    # WRF-Solar cloud fraction (icloud = 3): WRF v4.7.1 cal_cldfra3 and its
+    # helpers, 500 columns equal word for word to the gfortran -O0 / glibc
+    # 2.39 record (tests/test_cldfra3_wrf471_oracle.py) on Metal and CUDA.
+    "cldfra3": "c4cd578fbfb71343a4e3712eb4b1c51f154bc1845372a157aaf8f93a3b78e498",
     # e677dccb6: active table edits multiply binary64 values on the GPU,
     # round once to REAL, and reject non-positive crop roughness.
     "physics_params":

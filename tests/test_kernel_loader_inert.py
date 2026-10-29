@@ -54,6 +54,10 @@ _ALLOWED_AEROSOL_MODULES = frozenset({
 #: at max_ulp 0, which is a stronger gate than source identity and the only
 #: reason the trade was takeable.
 _EXPECTED_HEADERS = {
+    # WRF-Solar icloud = 3 (cal_cldfra3), a new unit graded word for word
+    # against WRF v4.7.1 (tests/test_cldfra3_wrf471_oracle.py): glibc's
+    # log10f and powf.
+    "cldfra3": ("glibc_flt32.cuh", "glibc_flt32_extra.cuh"),
     "gsd_initial_reflectivity": ("glibc_flt32.cuh", "glibc_flt64.cuh",
                                  "thompson_fork_constants.cuh", "thompson_fork.cu"),
     # A new full-column generation unit; existing classic and aerosol units
@@ -264,6 +268,8 @@ def test_lake_compile_options_do_not_change_existing_modules(monkeypatch, strict
     # WRF-Solar FARMS (swint_opt = 2), graded bitwise against WRF v4.7.1's
     # module_ra_farms.F (tests/test_farms_wrf471_parity.py).
     expected["farms"] = ("-std=c++17", "--fmad=false", "--ftz=false")
+    # WRF-Solar cal_cldfra3 (icloud = 3): column-exact, subnormals kept.
+    expected["cldfra3"] = ("-std=c++17", "--fmad=false", "--ftz=false")
     # WRF's HAILCAST diagnostics (lane/cap-hail 97e9a3ca061) compile without
     # FMA, like the other column-exact WRF ports.
     expected["hail"] = ("-std=c++17", "--fmad=false")
