@@ -168,3 +168,56 @@ extern "C" __global__ void rlw_rtrn_prol_gpoints(
         atomicOr(&icldlyr[(long long)col * nl + (lay - 1)], 1);
 #undef MC2
 }
+
+// Spectral output (rrtmg_spectral_output = bands): rlw_rtrn_accum_rows's
+// per-band terms, each scaled as the broadband total is.  WRF rtrnmc adds
+// ``uflux(lev)*delwave(iband)`` per band (uflux = urad*wtdiff, urad summed
+// over the band's g-points in order) and multiplies the total by fluxfac;
+// the band flux is that term times fluxfac.  A separate launch over the
+// same inputs: the broadband words do not change.
+// thread -> (col, lev, band); out (4, ncol, nl+1, 16): u, d, uc, dc (W/m2)
+extern "C" __global__ void rlw_rtrn_band_rows(
+    int ncol, int nl,
+    const float* __restrict__ radld_p,     // (ncol, nl, NGPTLW)
+    const float* __restrict__ radclrd_p,
+    const float* __restrict__ radlu_p,
+    const float* __restrict__ radclru_p,
+    const unsigned char* __restrict__ iclddn_p,
+    const float* __restrict__ radlu_sfc,   // (ncol, NGPTLW)
+    const float* __restrict__ radclru_sfc,
+    const int* __restrict__ ngs,
+    const float* __restrict__ delwave,
+    float wtdiff, float fluxfac,
+    float* __restrict__ out)
+{
+    long long n1 = (long long)nl + 1;
+    long long idx = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= (long long)ncol * n1 * NBNDLW) return;
+    int iband = (int)(idx % NBNDLW) + 1;
+    int lev = (int)((idx / NBNDLW) % n1);
+    int col = (int)(idx / NBNDLW / n1);
+    int g_lo = (iband == 1) ? 0 : ngs[iband - 2];
+    int g_hi = ngs[iband - 1];
+    float urad = 0.0f, drad = 0.0f, clru = 0.0f, clrd = 0.0f;
+    for (int g = g_lo; g < g_hi; ++g) {
+        if (lev <= nl - 1) {
+            long long i = ((long long)col * nl + lev) * NGPTLW + g;
+            drad = RLW_AD(drad, radld_p[i]);
+            if (iclddn_p[i]) clrd = RLW_AD(clrd, radclrd_p[i]);
+            else clrd = drad;
+        }
+        bool flag0 = iclddn_p[(long long)col * nl * NGPTLW + g];
+        long long iu = lev == 0 ? (long long)col * NGPTLW + g
+                                : ((long long)col * nl + lev - 1) * NGPTLW + g;
+        urad = RLW_AD(urad, lev == 0 ? radlu_sfc[iu] : radlu_p[iu]);
+        if (flag0) clru = RLW_AD(clru, lev == 0 ? radclru_sfc[iu] : radclru_p[iu]);
+        else clru = urad;
+    }
+    float dw = delwave[iband - 1];
+    long long plane = (long long)ncol * n1 * NBNDLW;
+    long long at = ((long long)col * n1 + lev) * NBNDLW + (iband - 1);
+    out[at] = RLW_MU(RLW_MU(RLW_MU(urad, wtdiff), dw), fluxfac);
+    out[plane + at] = RLW_MU(RLW_MU(RLW_MU(drad, wtdiff), dw), fluxfac);
+    out[2 * plane + at] = RLW_MU(RLW_MU(RLW_MU(clru, wtdiff), dw), fluxfac);
+    out[3 * plane + at] = RLW_MU(RLW_MU(RLW_MU(clrd, wtdiff), dw), fluxfac);
+}

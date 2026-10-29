@@ -113,6 +113,9 @@ F = np.float32
 # ---------------------------------------------------------------------------
 NBNDSW = 14
 NGPTSW = 112
+#: rrtmg_spectral_output quantities, in the first axis of the band and
+#: g-point slabs (kernels/rrtmg_sw.cu rsw_spectral_input)
+SPECTRAL_QUANTITIES = ("fu", "fd", "cu", "cd", "fddir", "cddir")
 MXMOL = 38
 NMOL = 7
 JPB1, JPB2 = 16, 29
@@ -2975,6 +2978,10 @@ class CudaSW:
         import cupy as cp
         self.cp = cp
         self.tab = tab
+        #: rrtmg_spectral_output: "none", "bands" (O["sw_band"], (6, ncol,
+        #: nlay+1, 14)) or "gpoints" (O["sw_gpt"], (6, ncol, nlay+1, 112));
+        #: quantities SPECTRAL_QUANTITIES, levels as the broadband slabs
+        self.spectral_output = "none"
         packed, defines = _pack_cuda_tables(tab)
         src_path = __import__("pathlib").Path(__file__).parent / "kernels" / "rrtmg_sw.cu"
         code = defines + src_path.read_text(encoding="ascii")
@@ -3609,6 +3616,13 @@ class CudaSW:
                        "puvfd", "pnifd")}
         swhr = cp.empty((ncol, nlayers), dtype=cp.float32)
         swhrc = cp.empty((ncol, nlayers), dtype=cp.float32)
+        spectral = self.spectral_output
+        if spectral not in ("none", "bands", "gpoints"):
+            raise ValueError(f"rrtmg_spectral_output must be none, bands or gpoints, not {spectral!r}")
+        if spectral != "none":
+            width = NBNDSW if spectral == "bands" else NGPTSW
+            O["sw_band" if spectral == "bands" else "sw_gpt"] = cp.empty(
+                (len(SPECTRAL_QUANTITIES), ncol, nl1, width), dtype=cp.float32)
 
         iceflg = int(iceflgsw)
         # laysolfr is computed on device from the resident jp/laytrop
@@ -3826,6 +3840,25 @@ class CudaSW:
                  acc["puvcddir"], acc["pnifd"], acc["pnicd"],
                  acc["pnifddir"], acc["pnicddir"]),
                 shared_mem=6 * 8 * 32 * 4)
+            if spectral != "none":
+                # separate launches over the same buffers: the broadband
+                # words above are unchanged by the option
+                width = NBNDSW if spectral == "bands" else NGPTSW
+                part = cp.empty((len(SPECTRAL_QUANTITIES), nc, nl1, width), f32)
+                total = part.size
+                if spectral == "bands":
+                    self._k("rsw_spc_band_accum_b")(
+                        ((total + 127) // 128,), (128,),
+                        (i32(nc), i32(nlayers), self.ngb_gpu, zincflx_d,
+                         zcd_d, zcu_d, zfd_d, zfu_d, ztn_d, ztcn_d, part))
+                    O["sw_band"][:, rows] = part
+                else:
+                    self._k("rsw_spc_gpt_b")(
+                        ((total + 127) // 128,), (128,),
+                        (i32(nc), i32(nlayers), zincflx_d,
+                         zcd_d, zcu_d, zfd_d, zfu_d, ztn_d, ztcn_d, part))
+                    O["sw_gpt"][:, rows] = part
+                del part
             del zincflx_d, zcd_d, zcu_d, zfd_d, zfu_d, ztn_d, ztcn_d
 
             swhr_d = scratch.take("swhr", (nc, nlayers), f32)
@@ -4159,7 +4192,7 @@ SW_GPU_KERNEL_NAMES = (
     "rsw_spcvmc_gpt", "rsw_spc_accum", "rsw_inatm_layers", "rsw_post",
     "rsw_setcoef_b", "rsw_taumol_b", "rsw_sfluxzen_b", "rsw_cldprmc_b",
     "rsw_spcvmc_gpt_b", "rsw_spc_accum_b", "rsw_inatm_layers_b",
-    "rsw_post_b", "rsw_laysolfr_b",
+    "rsw_post_b", "rsw_laysolfr_b", "rsw_spc_band_accum_b", "rsw_spc_gpt_b",
 )
 
 

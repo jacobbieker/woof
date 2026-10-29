@@ -29,6 +29,10 @@ def first_divergence(a_path: Path, b_path: Path, known=None):
         # launches of kernels the first backend never records (the MLX
         # facade's own elementwise/copy kernels, which CuPy runs untraced)
         b = [r for r in b if r["kernel"] in known]
+    if not a and b:
+        # nothing to compare: the first backend's tracer saw none of this
+        # test's launches -- not an agreement
+        return ("untraced", 0, f"{len(b)} launches traced on one side only")
     for x, y in zip(a, b):
         if x["kernel"] != y["kernel"]:
             return ("sequence", x["seq"], f"{x['kernel']} vs {y['kernel']}")

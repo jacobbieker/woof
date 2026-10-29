@@ -152,10 +152,22 @@ def asarray(a, dtype=None, order=None, *, blocking=False):
 
 
 def array(a, dtype=None, copy=True, order="K", subok=False, ndmin=0, *, blocking=False):
+    """NumPy's layout rule: ``order`` C or F is that layout; K and A keep a
+    Fortran-contiguous source's column-major memory (kernels index
+    ``cp.array(x, order="F")`` buffers as Fortran arrays)."""
     if isinstance(a, ndarray):
-        out = a.copy() if copy else a
-        return out if dtype is None else astype(out, dtype)
-    return from_host(np.array(a, dtype=dtype, ndmin=ndmin))
+        fortran = order == "F" or (order in ("K", "A", None) and a.ndim > 1
+                                   and a.is_f_contiguous() and not a.is_c_contiguous())
+        out = a if dtype is None else astype(a, dtype)
+        if fortran:
+            return _fortran_from_host(out.get())
+        if not out.is_c_contiguous():
+            return out.copy()
+        return out.copy() if copy and out is a else out
+    host = np.array(a, dtype=dtype, ndmin=ndmin, order=order if order in ("C", "F", "A", "K") else "K")
+    if host.ndim > 1 and host.flags.f_contiguous and not host.flags.c_contiguous:
+        return _fortran_from_host(host)
+    return from_host(host)
 
 
 def ascontiguousarray(a, dtype=None):
@@ -357,7 +369,10 @@ def _reduce(np_name, mx_name, a, axis=None, dtype=None, out=None, keepdims=False
         if axis is not None:
             kw["axis"] = axis
         v = getattr(mx, mx_name)(values, **kw)
-        rdt = np.result_type(getattr(np, np_name)(np.zeros((1,), dtype or a.dtype)))
+        if dtype is not None and np_name in ("sum", "prod", "mean"):
+            rdt = np.dtype(dtype)       # NumPy's: an explicit dtype is the result's
+        else:
+            rdt = np.result_type(getattr(np, np_name)(np.zeros((1,), dtype or a.dtype)))
         r = _wrap(v.astype(storage_mx_dtype(rdt)), rdt)
     if out is not None:
         copyto(out, r)

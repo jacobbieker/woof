@@ -3,10 +3,11 @@
 ``install(path)`` (before woof imports cupy) makes each launch append one
 JSON line to ``path``: the sequence number, the kernel name, and for every
 array argument its dtype, shape and a SHA-256 of its words *after* the
-launch, then of its words before it (scalar arguments verbatim).  Two
-backends' words are compared only where the launch was given the same
-words: an uninitialised ``cupy.empty`` buffer holds old pool data on CUDA
-and zeros on MLX, and a kernel that leaves it alone is not a divergence.  Run the same scenario on CUDA and on
+launch, then of its words before it, then of the words the launch wrote
+(their positions and values); scalar arguments verbatim.  An array given
+the same words on both backends is compared whole; one given different
+words (an uninitialised ``cupy.empty`` buffer holds old pool data on CUDA
+and zeros on MLX) is compared on the words the launch wrote.  Run the same scenario on CUDA and on
 MLX, then ``compare(a, b)`` reports the first launch whose arrays differ --
 the first kernel to check, given that every launch before it agreed.
 
@@ -39,11 +40,24 @@ def _digest(a):
 
 
 def _before(args):
-    """The digests of a launch's arrays as it is given them."""
+    """A launch's arrays as it is given them (host copies)."""
     if not _STATE.get("path"):
         return None
     import cupy as cp
-    return [_digest(a)[2] if isinstance(a, cp.ndarray) else None for a in args]
+    return [cp.asnumpy(a).copy() if isinstance(a, cp.ndarray) else None for a in args]
+
+
+def _written(old, new):
+    """Digest of the words a launch changed: their positions and values.
+    A partly written uninitialised workspace then compares on what the
+    kernel wrote, not on what the allocator left in the rest."""
+    import numpy as np
+    a = np.ascontiguousarray(old).view(np.uint8).reshape(-1, old.itemsize)
+    b = np.ascontiguousarray(new).view(np.uint8).reshape(-1, new.itemsize)
+    changed = np.flatnonzero((a != b).any(axis=1))
+    h = hashlib.sha256(changed.astype(np.int64).tobytes())
+    h.update(np.ascontiguousarray(b[changed]).tobytes())
+    return h.hexdigest()[:16]
 
 
 def _record(name, args, before=None):
@@ -55,7 +69,12 @@ def _record(name, args, before=None):
     _STATE["seq"] += 1
     for i, a in enumerate(args):
         if isinstance(a, cp.ndarray):
-            row["args"].append(_digest(a) + ([before[i]] if before else []))
+            entry = _digest(a)
+            if before:
+                old = before[i]
+                entry += [hashlib.sha256(np.ascontiguousarray(old).tobytes()).hexdigest()[:16],
+                          _written(old, cp.asnumpy(a))]
+            row["args"].append(entry)
         elif isinstance(a, (np.generic, int, float, bool)):
             row["args"].append(repr(a.item() if isinstance(a, np.generic) else a))
         else:
@@ -143,6 +162,17 @@ def install(path: str | None = None) -> None:
     RawKernel.__wrapped_original__ = cupy.RawKernel
     cupy.RawModule = RawModule
     cupy.RawKernel = RawKernel
+    # modules loaded from an image (woof's direct-NVRTC compiles, e.g.
+    # rrtmg_sw.CudaSW: cupy.cuda.function.Module().load(...))
+    from cupy.cuda import function as cuda_function
+
+    class Module(cuda_function.Module):
+        def get_function(self, name):
+            fn = super().get_function(name)
+            # CuPy's own kernels (cupy_*) load through this class too, and
+            # its Cython launchers take only a real Function: wrap woof's
+            return fn if name.startswith("cupy_") else _Traced(fn, name)
+    cuda_function.Module = Module
     # woof's direct-NVRTC loads (cupy.cuda.function.Module, whose type CuPy
     # checks) reach kernels through woof's own wrapper
     from woof.core import kernels
@@ -156,14 +186,20 @@ def install(path: str | None = None) -> None:
 
 def differing_args(x, y):
     """The arguments of two records of one launch whose words differ after
-    it, among those given the same words before it."""
+    it.  An argument given different words (uninitialised memory) differs
+    only if the words the launch wrote differ."""
     bad = []
     for i, (p, q) in enumerate(zip(x["args"], y["args"])):
         if p == q:
             continue
-        if isinstance(p, list) and isinstance(q, list) and len(p) == len(q) == 4:
-            if p[3] != q[3] or p[:3] == q[:3]:
+        if isinstance(p, list) and isinstance(q, list) and len(p) == len(q) and len(p) >= 4:
+            if p[:3] == q[:3]:
                 continue
+            # given different words (uninitialised memory): compare what
+            # the launch wrote -- nothing, for a buffer it left alone
+            if p[3] != q[3]:
+                if len(p) < 5 or p[4] == q[4]:
+                    continue
         bad.append(i)
     return bad
 
