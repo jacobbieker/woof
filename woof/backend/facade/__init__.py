@@ -120,8 +120,13 @@ def nonzero(a):
     return where(a)
 
 
-def take(a, indices, axis=None):
-    return asarray(np.take(asnumpy(a), asnumpy(indices), axis=axis))
+def take(a, indices, axis=None, out=None, mode="raise"):
+    host = np.take(asnumpy(a), asnumpy(indices) if isinstance(indices, ndarray) else indices,
+                   axis=axis, mode=mode)
+    if out is not None:
+        copyto(out, asarray(host))
+        return out
+    return asarray(host)
 
 
 def roll(a, shift, axis=None):
@@ -365,10 +370,22 @@ def _scipy_on_host(module, name):
     return fn
 
 
-cupyx.scipy = types.SimpleNamespace(
-    special=types.SimpleNamespace(**{n: _scipy_on_host("special", n) for n in ("erf", "erfc", "gamma", "gammaln")}),
-    ndimage=types.SimpleNamespace(**{n: _scipy_on_host("ndimage", n) for n in (
+def _module(name, **attrs):
+    m = types.ModuleType(name)
+    m.__dict__.update(attrs)
+    m.__path__ = []          # a package, so `import cupyx.scipy.special` resolves
+    return m
+
+
+cupyx.scipy = _module("cupyx.scipy",
+    special=_module("cupyx.scipy.special", **{n: _scipy_on_host("special", n)
+                                              for n in ("erf", "erfc", "gamma", "gammaln")}),
+    ndimage=_module("cupyx.scipy.ndimage", **{n: _scipy_on_host("ndimage", n) for n in (
         "minimum_filter", "maximum_filter", "uniform_filter", "gaussian_filter", "label", "convolve")}))
+cupyx.__path__ = []
+#: the facade's own submodules, for `import cupyx.scipy.special` (backend._FacadeFinder)
+SUBMODULES = {"cupyx.scipy": cupyx.scipy, "cupyx.scipy.special": cupyx.scipy.special,
+              "cupyx.scipy.ndimage": cupyx.scipy.ndimage}
 
 
 def __getattr__(name):

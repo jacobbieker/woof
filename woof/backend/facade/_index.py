@@ -98,5 +98,16 @@ def setitem(a: ndarray, key, value):
         return
     # Advanced: scatter into the full view, then write the view back.
     whole = a._values()
-    whole[_advanced_key(key)] = operand_values(value, a.dtype)
+    values = operand_values(value, a.dtype)
+    import mlx.core as mx
+    if whole.dtype == mx.uint64:
+        # MLX's GPU scatter has no 64-bit word type (float64 is stored as
+        # uint64 words): scatter the two 32-bit halves of each word, which a
+        # trailing axis carries past the key untouched.
+        halves = whole.reshape(-1).view(mx.uint32).reshape(tuple(whole.shape) + (2,))
+        v = values.reshape(-1).view(mx.uint32).reshape(tuple(values.shape) + (2,))
+        halves[_advanced_key(key)] = v
+        a._write(halves.reshape(-1).view(mx.uint64).reshape(tuple(whole.shape)))
+        return
+    whole[_advanced_key(key)] = values
     a._write(whole)

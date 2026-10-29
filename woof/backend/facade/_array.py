@@ -574,6 +574,21 @@ class _Pointer:
     def size(self):
         return self._a._st.nbytes
 
+    def memset_async(self, value, size, stream=None):
+        """cudaMemsetAsync from this view's first byte: ``size`` bytes of
+        ``value``.  The facade's arrays are typed storage, so a byte range
+        must cover whole storage elements, and only a zero fill is spelled
+        for every dtype."""
+        st, a = self._a._st, self._a
+        item = st.dtype.itemsize
+        if int(value) != 0 or a._offset % item or int(size) % item:
+            raise NotImplementedError("memset of a non-zero byte, or of a partial storage element")
+        count = int(size) // item
+        if count:
+            ndarray((count,), st.dtype, _storage=st, _offset=a._offset).fill(0)
+
+    memset = memset_async
+
 
 # woof tells device arrays from host ones by `type(x).__module__` too (20
 # sites); in a facade process this class IS cupy's ndarray.

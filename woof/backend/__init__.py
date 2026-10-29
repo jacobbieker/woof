@@ -97,6 +97,8 @@ class _FacadeLoader:
         if not getattr(facade, "_configured", False):
             facade.configure(self.backend)
             facade._configured = True
+        if spec.name in facade.SUBMODULES:
+            return facade.SUBMODULES[spec.name]
         return facade if spec.name == "cupy" else facade.cupyx
 
     def exec_module(self, module):
@@ -110,11 +112,11 @@ class _FacadeFinder:
         self.backend = backend
 
     def find_spec(self, fullname, path=None, target=None):
-        if fullname not in ("cupy", "cupyx"):
+        if fullname not in ("cupy", "cupyx", "cupyx.scipy", "cupyx.scipy.special", "cupyx.scipy.ndimage"):
             return None
         import importlib.machinery
         spec = importlib.machinery.ModuleSpec(fullname, _FacadeLoader(self.backend),
-                                              is_package=(fullname == "cupy"))
+                                              is_package=fullname in ("cupy", "cupyx", "cupyx.scipy"))
         if fullname == "cupy":
             # `import cupy.cuda`: the facade package's own submodules
             spec.submodule_search_locations = list(

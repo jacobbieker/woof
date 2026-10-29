@@ -284,6 +284,11 @@ class _MemoryPool:
     def n_free_blocks(self):
         return 0
 
+    def free_bytes(self):
+        """Bytes the pool holds but does not lend: MLX's buffer cache."""
+        mx = _mx()
+        return int(mx.get_cache_memory()) if hasattr(mx, "get_cache_memory") else 0
+
     def malloc(self, size):
         """A fresh allocation of ``size`` bytes, as a MemoryPointer."""
         from woof.backend.facade._array import MemoryPointer, ndarray
