@@ -2666,7 +2666,9 @@ _DIGEST_DROPPED_DIAGNOSTIC_FIELDS = frozenset(
     {"hailcast_opt", "haildt", "nwp_diagnostics", "tke_budget", "sase_flux_diag", "surface_energy_diag",
      # Correct mode WB1: output-only and on by default from 2.9.0, so it is
      # dropped rather than held at a default no earlier digest carried.
-     "thompson_cloud_surface_booking"})
+     "thompson_cloud_surface_booking",
+     # Band-resolved RRTMG fluxes: output-only; no earlier digest carried it.
+     "rrtmg_spectral_output"})
 
 
 #: WRF's slope_rad / topo_shading / shadlen (woof.core.topo_radiation),
@@ -2835,6 +2837,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # scalar_pblmix: off preserves checkpoints predating scalar diffusion.
     if not values.get("surface_energy_diag", False):
         values.pop("surface_energy_diag", None)
+    # rrtmg_spectral_output (output-only band-resolved RRTMG fluxes): off is
+    # every earlier header.
+    if values.get("rrtmg_spectral_output", "none") == "none":
+        values.pop("rrtmg_spectral_output", None)
     if not values.get("scalar_pblmix", 0):
         values.pop("scalar_pblmix", None)
     # MYNN-EDMF's split mixing keys (lane rrfs288-gap1): off mixes nothing

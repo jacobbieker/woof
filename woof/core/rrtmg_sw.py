@@ -4298,6 +4298,22 @@ def sw_batched_vram_bytes(ncol_chunk, nlay, ncol_total=None, *, mcica_layout="gp
             + max(stage_u, stage_s, stage_p) + out_b)
 
 
+def band_wavenumbers():
+    """The 14 shortwave bands' (wavenum1, wavenum2), cm-1, from the pinned
+    rrsw_wvn tables, in band order 16..29."""
+    import base64
+    low, high = (np.frombuffer(base64.b64decode(_STATIC_TABLES[k][2]), dtype="<f4")
+                 for k in ("wvn/wavenum1", "wvn/wavenum2"))
+    return tuple(float(v) for v in low), tuple(float(v) for v in high)
+
+
+def gpoint_bands():
+    """Each of the 112 shortwave g-points' band, 0..13 (ngb - 16)."""
+    import base64
+    ngb = np.frombuffer(base64.b64decode(_STATIC_TABLES["wvn/ngb"][2]), dtype="<i4")
+    return tuple(int(b) - 16 for b in ngb)
+
+
 def sw_batched_to_host(out):
     """Host (numpy) copies of an rrtmg_sw_batched_device result, plus the
     three derived difference outputs the per-column driver computes on

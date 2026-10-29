@@ -179,6 +179,10 @@ def drop_default_spp_selectors(values: dict) -> None:
 CONFIG_DIAGNOSTIC_FIELDS = frozenset(
     {"hailcast_opt", "haildt", "nwp_diagnostics", "tke_budget", "sase_flux_diag", "hmix_k_diag",
      "surface_energy_diag",
+     # Band-resolved RRTMG fluxes: separate kernels over the spectral
+     # buffers, broadband and prognostic words unchanged
+     # (tests/test_rrtmg_spectral_output.py).
+     "rrtmg_spectral_output",
      # Correct mode WB1 (woof/correct_mode.py OUTPUT_ONLY_KEYS): books the
      # settled-cloud total CLOUDNC and changes no prognostic word.
      "thompson_cloud_surface_booking"})

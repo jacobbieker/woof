@@ -42,6 +42,8 @@ from woof.io.classic_tape import (ClassicDim, ClassicTape, ClassicVariable,
 from woof.io.wrf_output_schema import (
     HISTORY_FIELDS_BY_NETCDF_NAME, HUB_HEIGHT_DIMENSION,
     HUB_HEIGHT_DIMENSIONED_FIELDS, PHYSICS_SELECTOR_GLOBALS,
+    RRTMG_LW_BAND_DIMENSION, RRTMG_LW_WAVENUMBERS, RRTMG_SW_GPT_DIMENSION,
+    rrtmg_spectral_dimension,
     RADIATION_CLDFRA_ATTRIBUTES,
     REGISTRY_VAR_META, SCHEME_OUTPUT_FIELDS, WINDFARM_TURBINE_DIMENSION,
     WINDFARM_TURBINE_DIMENSIONED_FIELDS, WRF_FIELD_TYPE_INTEGER,
@@ -1238,6 +1240,15 @@ class WrfoutWriter:
             if name == "HUB_HEIGHT":
                 return ("Time", HUB_HEIGHT_DIMENSION)
             return ("Time", HUB_HEIGHT_DIMENSION, "south_north", "west_east")
+        axis = rrtmg_spectral_dimension(name)
+        if axis is not None:
+            # rrtmg_spectral_output, routed by NAME (a band count equal to
+            # nz must not land on bottom_top)
+            if len(shape) != 3 or tuple(shape[1:]) != (ny, nx):
+                raise ValueError(f"RRTMG spectral history field {name} has shape {tuple(shape)}, "
+                                 f"which is not a band stack over {(ny, nx)}")
+            self._ensure_dimension(axis, int(shape[0]))
+            return ("Time", axis, "south_north", "west_east")
         if name in WINDFARM_TURBINE_DIMENSIONED_FIELDS:
             # Wind-farm power (woof/core/windfarm_power_diag.py), routed by
             # NAME for the hub axis's reason, and created lazily for the
@@ -1332,6 +1343,20 @@ class WrfoutWriter:
         var.description = desc
         var.units = units
         var.stagger = stagger
+        axis = rrtmg_spectral_dimension(name)
+        if axis is not None:
+            # which wavenumber interval each band covers, cm-1
+            if axis == RRTMG_LW_BAND_DIMENSION:
+                low, high = zip(*RRTMG_LW_WAVENUMBERS)
+            else:
+                from woof.core.rrtmg_sw import band_wavenumbers
+                low, high = band_wavenumbers()
+                if axis == RRTMG_SW_GPT_DIMENSION:
+                    from woof.core.rrtmg_sw import gpoint_bands
+                    var.setncattr("band_of_gpoint", np.asarray(gpoint_bands(), np.int32))
+            var.setncattr("wavenumber_low", np.asarray(low, np.float32))
+            var.setncattr("wavenumber_high", np.asarray(high, np.float32))
+            var.setncattr("wavenumber_units", "cm-1")
         if name == "CLDFRA":
             # Radiation's cadence is coarser than history's: say what a
             # between-calls frame and the initial frame carry.

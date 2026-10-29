@@ -494,6 +494,12 @@ def physics_history_fields(physics) -> dict[str, object]:
         for key, schema in table.items():
             if key in physics.fields:
                 output[schema.netcdf_name] = physics.fields[key]
+    # rrtmg_spectral_output's band (and shortwave g-point) fluxes
+    from woof.core.physics_inventory import LW_SPECTRAL_FLUXES, SW_SPECTRAL_FLUXES
+    for base in (*SW_SPECTRAL_FLUXES, *LW_SPECTRAL_FLUXES):
+        for suffix in ("_band", "_gpt"):
+            if base + suffix in physics.fields:
+                output[(base + suffix).upper()] = physics.fields[base + suffix]
     # WRF's live surface masks (core history rows in stock wrf.exe; the
     # seaice and lake branches can move them during a run).  2.9.0 wrote
     # neither, so a wrfout reader found no land/water mask beside LANDMASK.

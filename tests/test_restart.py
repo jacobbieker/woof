@@ -3962,7 +3962,13 @@ def _diagnostic_default(name):
     return RunConfig.__dataclass_fields__[name].default
 
 
+#: The "on" value of a switch that is neither a boolean nor an integer.
+_DIAGNOSTIC_ON = {"rrtmg_spectral_output": "bands"}
+
+
 def _diagnostic_on(name):
+    if name in _DIAGNOSTIC_ON:
+        return _DIAGNOSTIC_ON[name]
     return True if isinstance(_diagnostic_default(name), bool) else 1
 
 

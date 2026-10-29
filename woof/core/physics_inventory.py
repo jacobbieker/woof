@@ -54,6 +54,47 @@ def radiation_boundary_flux_names(cfg):
              if int(selector)==4}
     return tuple(name for name in RADIATION_BOUNDARY_FLUXES if name[:2] in sides)
 
+#: rrtmg_spectral_output's fields: WRF's top (t) and bottom (b) flux names
+#: resolved by band (``<name>_band``) or, shortwave only, by g-point
+#: (``<name>_gpt``); value (quantity index, level) into the engines'
+#: spectral slabs (woof.core.rrtmg_sw.SPECTRAL_QUANTITIES fu fd cu cd
+#: fddir cddir; woof.core.rrtmg_lw.LW_SPECTRAL_QUANTITIES u d uc dc).
+SW_SPECTRAL_FLUXES = {
+    "swupt": (0, "t"), "swuptc": (2, "t"), "swdnt": (1, "t"), "swdntc": (3, "t"),
+    "swupb": (0, "b"), "swupbc": (2, "b"), "swdnb": (1, "b"), "swdnbc": (3, "b"),
+    "swddir": (4, "b"), "swddirc": (5, "b"),
+}
+LW_SPECTRAL_FLUXES = {
+    "lwupt": (0, "t"), "lwuptc": (2, "t"),
+    "lwupb": (0, "b"), "lwupbc": (2, "b"), "lwdnb": (1, "b"), "lwdnbc": (3, "b"),
+}
+#: band or g-point count per (side, rrtmg_spectral_output)
+SPECTRAL_WIDTHS = {("sw", "bands"): 14, ("sw", "gpoints"): 112,
+                   ("lw", "bands"): 16, ("lw", "gpoints"): 16}
+
+
+def radiation_spectral_fields(cfg) -> dict[str, int]:
+    """rrtmg_spectral_output's physics fields, field name -> band (or
+    g-point) count; each is (count, ny, nx).  Legacy RRTMG only, on the
+    side(s) running selector 4.  Longwave has bands under either option:
+    a g-point is a quadrature point, not a wavelength interval."""
+    mode = str(getattr(cfg, "rrtmg_spectral_output", "none") or "none")
+    if mode == "none":
+        return {}
+    from woof.config import RRTMG_VARIANT_LEGACY, radiation_scheme_ids
+    if cfg.ra_rrtmg_variant != RRTMG_VARIANT_LEGACY:
+        return {}
+    lw, sw = radiation_scheme_ids(cfg)
+    out = {}
+    for side, selector, table in (("sw", sw, SW_SPECTRAL_FLUXES), ("lw", lw, LW_SPECTRAL_FLUXES)):
+        if int(selector) != 4:
+            continue
+        suffix = "_gpt" if side == "sw" and mode == "gpoints" else "_band"
+        for name in table:
+            out[name + suffix] = SPECTRAL_WIDTHS[(side, mode)]
+    return out
+
+
 #: HORIZONTAL EDDY-VISCOSITY DIAGNOSTIC (cfg.hmix_k_diag): the (momentum,
 #: scalar) history names each horizontal mixing producer publishes under.
 #:

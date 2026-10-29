@@ -98,6 +98,10 @@ def frame_dims(name, shape, *, nx: int, ny: int, nz: int) -> tuple:
         return ("snow_layers_stag", "south_north", "west_east")
     if name in _SNSO_LAYER_FIELDS:
         return ("snso_layers_stag", "south_north", "west_east")
+    from woof.io.wrf_output_schema import rrtmg_spectral_dimension
+    axis = rrtmg_spectral_dimension(name)
+    if axis is not None and len(shape) == 3 and shape[1:] == (ny, nx):
+        return (axis, "south_north", "west_east")
     table = {
         (): (), (nz,): ("bottom_top",), (nz + 1,): ("bottom_top_stag",),
         (nz, ny, nx): ("bottom_top", "south_north", "west_east"),

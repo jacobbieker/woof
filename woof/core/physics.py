@@ -73,6 +73,7 @@ from woof.core.physics_inventory import (
     CUMULUS_HISTORY_RATES, CUMULUS_HISTORY_SPECIES, history_tendency_rows,
     scm_forcing_fields,
     radiation_boundary_flux_names,
+    radiation_spectral_fields,
     _HMIX_K_DIAG_NAMES,
     hmix_k_diag_names,
     microphysics_scratch_slots,
@@ -1216,6 +1217,9 @@ class RadiationResult:
     aerosol2d: dict | None = None
     aodtot: cp.ndarray | None = None
     boundary_fluxes: Mapping[str, cp.ndarray] | None = None
+    # rrtmg_spectral_output: physics field name -> (count, ny, nx) band or
+    # g-point fluxes (woof.core.physics_inventory.radiation_spectral_fields)
+    spectral_fluxes: Mapping[str, cp.ndarray] | None = None
 
 
 @dataclass
@@ -3020,6 +3024,13 @@ class PhysicsDriver:
             for name in expected_fluxes:
                 self.fields[name][...] = _checked_array(
                     result.boundary_fluxes[name], (ny,nx), "radiation "+name)
+        spectral = radiation_spectral_fields(cfg)
+        if spectral:
+            if result.spectral_fluxes is None or set(result.spectral_fluxes) != set(spectral):
+                raise ValueError("radiation omitted its rrtmg_spectral_output fluxes")
+            for name, count in spectral.items():
+                self.fields[name][...] = _checked_array(
+                    result.spectral_fluxes[name], (count, ny, nx), "radiation " + name)
         swdown = _checked_array(
             result.swdown, (ny, nx), "radiation SWDOWN")
         glw = _checked_array(result.glw, (ny, nx), "radiation GLW")
@@ -7207,6 +7218,8 @@ def initialize_physics(
     for name in radiation_boundary_flux_names(cfg):
         f[name] = cp.zeros(shape,dtype=DTYPE)
         f["ac"+name] = cp.zeros(shape,dtype=DTYPE)
+    for name, count in radiation_spectral_fields(cfg).items():
+        f[name] = cp.zeros((count,) + tuple(shape), dtype=DTYPE)
     if "swupt" in radiation_boundary_flux_names(cfg) and "coszen" not in f:
         f["coszen"] = cp.zeros(shape,dtype=DTYPE)
     n_soil = soil_layer_count(cfg)

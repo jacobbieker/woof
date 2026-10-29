@@ -1836,6 +1836,16 @@ class RunConfig:
     #: relative paths resolve beside the config.  Read only with
     #: windfarm_opt = 1, and checkpoints bind its bytes.  Appended last.
     windfarm_turbine_file: str = ""
+    # RRTMG per-band (and per-g-point) flux diagnostic (output-only, per
+    # domain).  "bands" adds WRF's top and bottom radiative fluxes resolved
+    # by RRTMG band -- 14 shortwave, 16 longwave -- as <NAME>_BAND history
+    # fields (SWDNB_BAND, LWUPT_BAND, ...); "gpoints" resolves the
+    # shortwave by its 112 g-points instead (<NAME>_GPT).  Legacy RRTMG
+    # (ra_rrtmg_variant = "rrtmg_legacy") only.  Separate kernels over the
+    # spectral buffers the broadband sums read, so no prognostic or
+    # broadband word changes (tests/test_rrtmg_spectral_output.py, which
+    # also holds every band word to compiled WRF).  Appended last, keyword-only.
+    rrtmg_spectral_output: str = "none"
 
 #: The ways a domain's clock meets the measured terrain rules
 #: (:attr:`RunConfig.terrain_clock`).
@@ -6612,6 +6622,15 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ValueError("ocean_config requires an active surface layer to supply 10m winds and friction velocity")
     if type(cfg.surface_energy_diag) is not bool:
         raise ConfigurationRefused("surface_energy_diag must be boolean")
+    if cfg.rrtmg_spectral_output not in ("none", "bands", "gpoints"):
+        raise ConfigurationRefused("rrtmg_spectral_output must be \"none\", \"bands\" or \"gpoints\"")
+    if cfg.rrtmg_spectral_output != "none":
+        lw_scheme, sw_scheme = radiation_scheme_ids(cfg)
+        if cfg.ra_rrtmg_variant != RRTMG_VARIANT_LEGACY or 4 not in (int(lw_scheme), int(sw_scheme)):
+            raise ConfigurationRefused(
+                "rrtmg_spectral_output needs legacy RRTMG radiation (ra_lw_physics or "
+                "ra_sw_physics = 4 with ra_rrtmg_variant = \"rrtmg_legacy\"); RTE+RRTMGP's "
+                "band output is not wired yet")
     why = terrain_drag_refusal(
         topo_wind=cfg.topo_wind, gwd_opt=cfg.gwd_opt,
         bl_pbl_physics=cfg.bl_pbl_physics,

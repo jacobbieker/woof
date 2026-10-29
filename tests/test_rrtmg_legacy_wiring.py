@@ -1139,3 +1139,34 @@ def test_geography_audit_tracks_bound_caches_and_snapshot_bytes(dtype, shape, mo
     scheme.geography_cache_dependencies = {}
     with pytest.raises(driver.GeographyNotGatherable, match="flattened-column"):
         driver.assert_geography_gathered(state)
+
+
+@gpu_gate
+@pytest.mark.parametrize("mode", ["bands", "gpoints"])
+def test_spectral_output_through_the_adapter(adapter, env, baseline, mode):
+    """rrtmg_spectral_output through the radiation adapter: every existing
+    result word unchanged; each band field (count, ny, nx) adds up to its
+    WRF boundary flux; night shortwave columns zero.  (The band words
+    themselves are held to compiled WRF in tests/test_rrtmg_spectral_output.py.)"""
+    from woof.core.physics_inventory import radiation_spectral_fields
+    cfg = SimpleNamespace(**vars(env.cfg), rrtmg_spectral_output=mode,
+                          ra_rrtmg_variant="rrtmg_legacy", ra_physics=4)
+    expected = radiation_spectral_fields(cfg)
+    assert expected and all(n.endswith("_gpt" if (mode == "gpoints" and n.startswith("sw")) else "_band")
+                            for n in expected)
+    result = adapter(atmosphere=env.atmosphere, fields=env.fields, state=env.state, cfg=cfg)
+    got = _host_result(result)
+    for name in ("rthratenlw", "rthratensw", "swdown", "glw", "olr"):
+        bits_equal(f"{mode}/{name}", got[name], baseline[name])
+    assert set(result.spectral_fluxes) == set(expected)
+    night = np.asarray(_reference(env)["coszen"]).reshape(env.ny, env.nx) <= 0
+    for name, count in expected.items():
+        value = cp.asnumpy(result.spectral_fluxes[name])
+        assert value.shape == (count, env.ny, env.nx), name
+        base = name.rsplit("_", 1)[0]
+        if base in result.boundary_fluxes:
+            total = value.astype(np.float64).sum(axis=0)
+            np.testing.assert_allclose(total, cp.asnumpy(result.boundary_fluxes[base]),
+                                       rtol=2e-5, atol=1e-3, err_msg=name)
+        if name.startswith("sw"):
+            assert not value[:, night].any(), name

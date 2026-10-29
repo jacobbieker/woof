@@ -93,6 +93,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     """
     from woof.config import CHEM_RUN_FIELDS, FIRE_RUN_FIELDS
     names = [f.name for f in dataclasses.fields(RunConfig)]
+    # Output-only band-resolved RRTMG fluxes, appended off.
+    assert names.pop() == "rrtmg_spectral_output"
+    assert RunConfig.__dataclass_fields__["rrtmg_spectral_output"].default == "none"
+    assert RunConfig.__dataclass_fields__["rrtmg_spectral_output"].kw_only
     # WRF's windfarm_opt and its three companions, appended off: no turbine
     # is placed and nothing launches (tests/test_windfarm_coupling.py).
     assert names.pop() == "windfarm_turbine_file"
@@ -537,7 +541,9 @@ def _check_frozen_defaults(actual):
                          # 2.9.7: the HRRR v4 climate statistics (off) and
                          # tc/nest's archive (read only on a nested domain).
                          ("output_diagnostics", 0), ("diag_int", 15),
-                         ("wind_int", 5), ("nest_accumulation_archive", True)):
+                         ("wind_int", 5), ("nest_accumulation_archive", True),
+                         # output-only band-resolved RRTMG fluxes, off
+                         ("rrtmg_spectral_output", "none")):
         assert actual.pop(field) == value, field
     # WRF's windfarm_opt and its three companions (the fork's Fitch
     # coupling), appended after upstream 1.1.0's fields, off.

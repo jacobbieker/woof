@@ -2345,6 +2345,13 @@ class RRTMGLegacyRadiation:
         for name,value in boundary_fluxes.items():
             if name.startswith("sw"):
                 value.fill(0)
+        # rrtmg_spectral_output: (count, column) slabs per flux name, zero
+        # where the engine does not run (night shortwave columns)
+        from woof.core.physics_inventory import (LW_SPECTRAL_FLUXES, SW_SPECTRAL_FLUXES,
+                                                  radiation_spectral_fields)
+        spectral_out = {name: cp.zeros((count, ncol), dtype=cp.float32)
+                        for name, count in radiation_spectral_fields(cfg).items()}
+        spectral_mode = str(getattr(cfg, "rrtmg_spectral_output", "none") or "none")
         rthratensw = cp.zeros((nz, ncol), dtype=cp.float32)
         gsw = cp.zeros(ncol, dtype=cp.float32)
         # SWDDIR/SWDDIF, rrtmg_swrad's swdkdir/swdkdif at the surface
@@ -2433,8 +2440,15 @@ class RRTMGLegacyRadiation:
                     mc["ciwpmcl"], mc["clwpmcl"], mc["cswpmcl"],
                     mc["reicmcl"], mc["relqmcl"], mc["resnmcl"],
                     tauaer, self._C, column_chunk=chunk_lw,
-                    mcica_layout="column", _stage_probe=self._stage_probe)
+                    mcica_layout="column", _stage_probe=self._stage_probe,
+                    spectral_output=spectral_mode if spectral_out else "none")
                 del mc, tauaer
+                if "lw_band" in res:
+                    for base, (q, level) in LW_SPECTRAL_FLUXES.items():
+                        name = base + "_band"
+                        if name in spectral_out:
+                            k = -1 if level == "t" else 0
+                            spectral_out[name][:, wsel] = res["lw_band"][q, :, k, :].T
                 nl = int(res["hr"].shape[1])
                 # Map directly into the global grids and read Exner there.
                 _adapter_kernel("rla_lw_out_grid")(
@@ -2561,7 +2575,10 @@ class RRTMGLegacyRadiation:
                 # Built on the card: a host array here was one pinned-staged
                 # upload (and one CUDA event) per SW window (_window_tables).
                 adjes = cp.full(nc, np.float32(ps["adjes"]), dtype=cp.float32)
-                res = _cuda_sw(self._sw_tables).rrtmg_sw_batched_device(
+                engine = _cuda_sw(self._sw_tables)
+                engine.spectral_output = (spectral_mode if any(n.startswith("sw") for n in spectral_out)
+                                          else "none")
+                res = engine.rrtmg_sw_batched_device(
                     nc, ps["nlay"], ps["icld"], ps["play"][rows],
                     ps["plev"][rows], ps["tlay"][rows], ps["tlev"][rows],
                     ps["tsfc"][rows], ps["h2ovmr"][rows], ps["o3vmr"][rows],
@@ -2579,7 +2596,15 @@ class RRTMGLegacyRadiation:
                     aerosol=aerosol_w,
                     column_chunk=chunk_sw, _stage_probe=self._stage_probe,
                     mcica_layout="column")
+                engine.spectral_output = "none"
                 del mc, aerosol_w
+                slab = res.get("sw_band", res.get("sw_gpt"))
+                if slab is not None:
+                    suffix = "_band" if "sw_band" in res else "_gpt"
+                    for base, (q, level) in SW_SPECTRAL_FLUXES.items():
+                        if base + suffix in spectral_out:
+                            k = -1 if level == "t" else 0
+                            spectral_out[base + suffix][:, selw] = slab[q, :, k, :].T
                 if diagnostic_sink is not None:
                     idx = day_idx[a0 + w0:a0 + w1]
                     diagnostic_sink(
@@ -2637,6 +2662,8 @@ class RRTMGLegacyRadiation:
         self.update_count += 1
         return RadiationResult(
             boundary_fluxes={name:value.reshape(ny,nx) for name,value in boundary_fluxes.items()},
+            spectral_fluxes=({name: value.reshape(-1, ny, nx) for name, value in spectral_out.items()}
+                             if spectral_out else None),
             rthratenlw=rthratenlw.reshape(nz, ny, nx),
             rthratensw=rthratensw.reshape(nz, ny, nx),
             swdown=swdown.reshape(ny, nx),

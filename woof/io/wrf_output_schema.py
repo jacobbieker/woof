@@ -1458,6 +1458,35 @@ WINDFARM_TURBINE_DIMENSIONED_FIELDS: frozenset[str] = frozenset({
 WINDFARM_TURBINE_DIMENSION = "windfarm_turbine"
 
 
+#: rrtmg_spectral_output (RunConfig): WRF's top and bottom fluxes resolved
+#: by RRTMG band (``<NAME>_BAND``) or shortwave g-point (``SW*_GPT``),
+#: written on ``(Time, <axis>, south_north, west_east)`` and routed BY NAME
+#: as the hub fields are.  The axes exist only in a file that carries them.
+RRTMG_SW_BAND_DIMENSION = "rrtmg_sw_band"
+RRTMG_SW_GPT_DIMENSION = "rrtmg_sw_gpt"
+RRTMG_LW_BAND_DIMENSION = "rrtmg_lw_band"
+
+#: Band edges, cm-1: WRF's rrlw_wvn wavenum1/wavenum2 (their differences
+#: are the port's delwave, tests/test_rrtmg_spectral_output.py).  The
+#: shortwave edges come from the port's own tables (woof.core.rrtmg_sw).
+RRTMG_LW_WAVENUMBERS = ((10.0, 350.0), (350.0, 500.0), (500.0, 630.0), (630.0, 700.0),
+                        (700.0, 820.0), (820.0, 980.0), (980.0, 1080.0), (1080.0, 1180.0),
+                        (1180.0, 1390.0), (1390.0, 1480.0), (1480.0, 1800.0), (1800.0, 2080.0),
+                        (2080.0, 2250.0), (2250.0, 2380.0), (2380.0, 2600.0), (2600.0, 3250.0))
+
+
+def rrtmg_spectral_dimension(name: str):
+    """The spectral axis of an rrtmg_spectral_output history name, or None."""
+    if name.startswith("SW") and name.endswith("_GPT"):
+        return RRTMG_SW_GPT_DIMENSION
+    if name.endswith("_BAND"):
+        if name.startswith("SW"):
+            return RRTMG_SW_BAND_DIMENSION
+        if name.startswith("LW"):
+            return RRTMG_LW_BAND_DIMENSION
+    return None
+
+
 from woof.core.output_diagnostics import HISTORY as _OUTPUT_HISTORY
 # setdefault, not update: WSPD10MAX and W_UP_MAX/W_DN_MAX are also the
 # nwp_diagnostics wind maxima (woof/core/wind_gust_diag.py), whose rows
@@ -1469,8 +1498,21 @@ from woof.core.hail import HISTORY as _HAIL_HISTORY
 REGISTRY_VAR_META.update({symbol: (description, units)
     for symbol, units, description in _HAIL_HISTORY.values()})
 
+from woof.core.physics_inventory import LW_SPECTRAL_FLUXES as _LW_SPEC, SW_SPECTRAL_FLUXES as _SW_SPEC
+for _base in (*_SW_SPEC, *_LW_SPEC):
+    _desc, _units = REGISTRY_VAR_META.get(_base.upper(), (_base.upper(), "W m-2"))
+    REGISTRY_VAR_META[_base.upper() + "_BAND"] = (f"{_desc}, PER RRTMG BAND", _units or "W m-2")
+    if _base.startswith("sw"):
+        REGISTRY_VAR_META[_base.upper() + "_GPT"] = (f"{_desc}, PER RRTMG G-POINT", _units or "W m-2")
+del _base, _desc, _units, _LW_SPEC, _SW_SPEC
+
 __all__ = [
     "HISTORY_FIELDS_BY_NETCDF_NAME",
+    "RRTMG_LW_BAND_DIMENSION",
+    "RRTMG_LW_WAVENUMBERS",
+    "RRTMG_SW_BAND_DIMENSION",
+    "RRTMG_SW_GPT_DIMENSION",
+    "rrtmg_spectral_dimension",
     "HUB_HEIGHT_DIMENSION",
     "HUB_HEIGHT_DIMENSIONED_FIELDS",
     "HUB_SCALAR_OUTPUT_FIELDS",

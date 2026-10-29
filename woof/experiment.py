@@ -369,6 +369,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # whose mixing is being read and leave it off the rest.
     "hmix_k_diag",
     "surface_energy_diag",
+    # Output-only: band-resolved RRTMG fluxes, (14|16|112, ny, nx) planes
+    # per flux name and frame.
+    "rrtmg_spectral_output",
     # LES-nest inflow seeding (P3): per-domain because the mechanism IS
     # per-edge -- it perturbs one child's rolling nest-boundary tables,
     # validate_run_config refuses it on a non-nested domain, and like
