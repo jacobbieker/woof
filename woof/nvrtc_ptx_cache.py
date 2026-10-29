@@ -268,6 +268,12 @@ def compile_using_nvrtc(source, options=(), arch=None, filename="kern.cu",
     if no_local_gpu():
         raise RuntimeError(
             f"{NO_LOCAL_GPU_ENV} forbids local NVRTC compilation")
+    from woof import backend
+    if backend.active() != "cuda":
+        # woof's facade backends: an image naming the source, which
+        # cupy.cuda.function.Module().load translates (woof.backend.facade.cuda)
+        from woof.backend.facade.cuda import translated_image
+        return translated_image(source, tuple(options or ()), filename), ""
     cupy, compiler = _compiler_runtime()
     # Include every final arithmetic control before lookup, including WRF
     # exact controls otherwise injected only at the NVRTC program boundary.

@@ -52,6 +52,24 @@ from woof import _env as _woof_env  # noqa: E402
 
 _woof_env.apply()
 
+# A non-CUDA backend has to own `import cupy` before any woof module
+# imports it, so an explicit WOOF_BACKEND=mlx|cpu is installed here, on the
+# import every entry point makes (woof/backend/__init__.py).  With no
+# WOOF_BACKEND, a Mac with MLX and no CuPy selects mlx the same way.
+import os as _os  # noqa: E402
+import sys as _sys  # noqa: E402
+
+_requested_backend = _os.environ.get("WOOF_BACKEND", "").strip().lower()
+if _requested_backend in ("mlx", "cpu"):
+    from woof import backend as _backend
+
+    _backend.install()
+elif not _requested_backend and _sys.platform == "darwin":
+    from woof import backend as _backend
+
+    if _backend.requested() == "mlx":
+        _backend.install()
+
 def _no_numpy_huge_page_advice() -> None:
     """Stop numpy advising the kernel to back its arrays with huge pages.
 

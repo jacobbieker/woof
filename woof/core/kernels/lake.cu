@@ -3,7 +3,9 @@ extern "C" __global__ void lake_init_columns(int n,const float* seed,float* colu
 #ifdef __CUDACC__
 int slot = blockDim.x*blockIdx.x+threadIdx.x; if(slot>=count)return;
 int col = col0+slot; if(col>=n)return;
+#ifdef LAKE_ARENA
 lake_arena_begin(arena,count,slot);
+#endif
 #else
 for(int col=0;col<n;++col) {
 #endif
@@ -341,7 +343,9 @@ extern "C" __global__ void lake_step_columns(int n,const float* forcing,float* c
 #ifdef __CUDACC__
 int slot = blockDim.x*blockIdx.x+threadIdx.x; if(slot>=count)return;
 int col = col0+slot; if(col>=n)return;
+#ifdef LAKE_ARENA
 lake_arena_begin(arena,count,slot);
+#endif
 #else
 for(int col=0;col<n;++col) {
 #endif

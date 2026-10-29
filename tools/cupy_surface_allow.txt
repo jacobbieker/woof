@@ -1,0 +1,20 @@
+# CuPy paths woof uses that the mlx facade deliberately does not provide.
+# tools/cupy_surface_census.py --gate fails on any gap NOT listed here.
+# One path per line; the reason after '#'.
+cupy._core.core                                  # NVRTC/AOT kernel tooling (kernel_plan, aot_build, forecast_readiness): CUDA builds only
+cupy._core.core._get_header_source               # NVRTC header discovery: CUDA builds only
+cupy._core.core.assemble_cupy_compiler_options   # NVRTC option assembly: CUDA builds only
+cupy._core.core.__file__                         # NVRTC header discovery: CUDA builds only
+cupy._core.core._get_cccl_include_options        # NVRTC header discovery: CUDA builds only
+cupy._core.core._get_header_dir_path             # NVRTC header discovery: CUDA builds only
+cupy.cuda.cufft                                  # cuFFT plan handles (DA perturbation, stochastic patterns); the facade's fft is host NumPy
+cupy.cuda.cufft.CUFFT_C2C                        # cuFFT plan handles
+cupy.cuda.cufft.CUFFT_C2R                        # cuFFT plan handles
+cupy.cuda.cufft.CUFFT_D2Z                        # cuFFT plan handles
+cupy.cuda.cufft.CUFFT_R2C                        # cuFFT plan handles
+cupy.cuda.cufft.CUFFT_Z2D                        # cuFFT plan handles
+cupy.cuda.cufft.Plan1d                           # cuFFT plan handles
+cupy.fft._fft._get_cufft_plan_nd                 # cuFFT plan cache
+cupy.cuda.pinned_memory                          # restart.py falls back to a NumPy buffer when page-locking is unavailable
+cupy.cuda.pinned_memory.PinnedMemory             # (same)
+cupy.cuda.pinned_memory.PinnedMemoryPointer      # (same)

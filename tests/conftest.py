@@ -33,6 +33,14 @@ import re
 # tests of the fast default select it themselves (tests/test_numerics_default.py).
 os.environ["GPUWM_NUMERICS"] = "strict"
 
+# WOOF_BACKEND=mlx|cpu runs the GPU suite on woof's facade backends: the
+# facade must own `import cupy` before has_gpu() below probes it, so the
+# backend is installed here, ahead of any import of cupy (woof/backend).
+if os.environ.get("WOOF_BACKEND", "").strip().lower() in ("mlx", "cpu"):
+    from woof import backend as _woof_backend
+
+    _woof_backend.install()
+
 import pytest
 
 #: Set to 1 to guarantee no local device is opened, whatever is collected.

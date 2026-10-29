@@ -31,6 +31,7 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
 ]
 
 [project.urls]
@@ -43,6 +44,11 @@ Changelog = "https://github.com/recastsystems/woof/blob/main/CHANGELOG.md"
 gpu-cu12 = ["cupy-cuda12x[ctk]>=14.0"]
 gpu-cu13 = ["cupy-cuda13x[ctk]>=14.0"]
 gpu = ["recast-woof[gpu-cu12]"]
+# Apple-silicon GPU through MLX (Metal); the forecast's cupy calls run on a
+# facade over mlx.core (woof.backend), its kernels translated to Metal.
+# libclang: the CUDA-to-Metal translator's typed front end (woof.backend.translate).
+gpu-mlx = ["mlx>=0.29; sys_platform == 'darwin' and platform_machine == 'arm64'",
+           "libclang>=18.1"]
 # The wrf-rust Python bindings, for the renderer's Python-side helpers.
 render = ["wrf-rust>=0.2.39,<0.3"]
 # The legacy Python warp path of the high-resolution static builder; the
@@ -64,6 +70,8 @@ all-cu12 = ["recast-woof[gpu-cu12]", "recast-woof[render]", "recast-woof[obs]",
             "recast-woof[geog]"]
 all-cu13 = ["recast-woof[gpu-cu13]", "recast-woof[render]", "recast-woof[obs]",
             "recast-woof[geog]"]
+all-mlx = ["recast-woof[gpu-mlx]", "recast-woof[render]", "recast-woof[obs]",
+           "recast-woof[geog]"]
 all = ["recast-woof[all-cu12]"]
 
 [project.scripts]
@@ -143,7 +151,7 @@ testpaths = ["tests", "tilestream"]
 [tool.pixi.workspace]
 name = "woof"
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", { platform = "osx-arm64", macos = "14.0" }]
 
 [tool.pixi.feature.base.dependencies]
 python = "3.14.*"
@@ -164,6 +172,39 @@ pyproj = ">=3.6"
 icechunk = "*"
 pyarrow = ">=15"
 
+# CuPy wheels exist for Linux only; the CUDA environments stay there.
+[tool.pixi.feature.cu12]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.cu13]
+platforms = ["linux-64"]
+
+[tool.pixi.feature.mlx]
+platforms = ["osx-arm64-macos-14-0"]
+
+# The facade backend owns `import cupy` in every process of the environment
+# (woof/backend/startup/sitecustomize.py).  The cpu environment gains the
+# same activation when the cpu facade backend lands.
+[tool.pixi.feature.mlx.activation.env]
+WOOF_BACKEND = "mlx"
+PYTHONPATH = "$PIXI_PROJECT_ROOT/woof/backend/startup"
+
+# netCDF4 publishes no cp314 macOS wheel; conda-forge's satisfies the pin.
+[tool.pixi.feature.mlx.dependencies]
+netcdf4 = ">=1.6"
+
+[tool.pixi.feature.cpu.dependencies]
+netcdf4 = ">=1.6"
+
+[tool.pixi.feature.cpu.pypi-dependencies]
+recast-woof = { path = ".", editable = true, extras = ["render", "obs", "geog", "dev"] }
+
+[tool.pixi.feature.mlx.pypi-dependencies]
+# nanobind 3.x carries internals ABI v22, the one mlx 0.32 is built with;
+# woof.backend.metal.ext must share it to pass mx.array across.
+nanobind = ">=3.0,<3.2"
+recast-woof = { path = ".", editable = true, extras = ["all-mlx", "dev"] }
+
 [tool.pixi.feature.cu12.pypi-dependencies]
 recast-woof = { path = ".", editable = true, extras = ["all-cu12"] }
 
@@ -173,6 +214,8 @@ recast-woof = { path = ".", editable = true, extras = ["all-cu13"] }
 [tool.pixi.environments]
 default = { features = ["base", "cu12"], no-default-feature = true }
 cuda13 = { features = ["base", "cu13"], no-default-feature = true }
+mlx = { features = ["base", "mlx"], no-default-feature = true }
+cpu = { features = ["base", "cpu"], no-default-feature = true }
 
 [tool.pixi.feature.base.tasks]
 doctor = "woof doctor"

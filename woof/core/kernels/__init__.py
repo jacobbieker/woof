@@ -590,6 +590,9 @@ def _load_diffusion_module(name: str, defines=()):
         options = effective_options(options)
     tier = ",".join(f"{key}={value}" for key, value in defines)
     key = f"{MODULE_KEY_ROOT}:{name}" + (f"[{tier}]" if tier else "")
+    from woof import backend
+    if backend.active() != "cuda":
+        return _translated_module(name, source, key=f"{name}[{tier}]" if tier else name, options=options)
     module = compile_diffusion_source(source, key, options)
     note_compiled(name)
     return module
@@ -758,8 +761,26 @@ class _DirectNvrtcModule:
         return self.module.get_function(name)
 
 
+def _translated_module(name: str, source: str, *, key: str | None = None, options=None):
+    """Non-CUDA backends: the same unit, translated (woof.backend), with
+    the options the CUDA route would hand NVRTC."""
+    from woof import backend
+    if backend.active() == "mlx":
+        from woof.backend.metal.loader import load_unit
+        return load_unit(key or name, source,
+                         options=module_options(name) if options is None else options)
+    raise backend.BackendUnavailable(f"backend {backend.active()!r} cannot load kernel units yet")
+
+
 @cuda_cache(maxsize=None)
 def load_module(name: str):
+    from woof import backend
+    if backend.active() != "cuda":
+        if name in _DIFFUSION_MODULES:
+            return _load_diffusion_module(name)
+        if name in _UNFLUSHED_MODULES:
+            return load_module_unflushed(name)
+        return _translated_module(name, module_source(name))
     import cupy as cp
     if name in _DIFFUSION_MODULES:
         return _load_diffusion_module(name)
@@ -852,6 +873,10 @@ def load_module_int_defines(
                 f"CUDA integer define {key} must be a positive integer")
     prefix = "\n".join(f"#define {key} {value}" for key, value in normalized)
     src = module_source_int_defines(name, normalized, prefix=prefix)
+    from woof import backend
+    if backend.active() != "cuda":
+        tier = ",".join(f"{key}={value}" for key, value in normalized)
+        return _translated_module(name, src, key=f"{name}[{tier}]")
     if name in _NO_FTZ_MODULES:
         tier = ",".join(f"{key}={value}" for key, value in normalized)
         return compile_noftz_module(name, src, f"{MODULE_KEY_ROOT}:{name}[{tier}]")
@@ -938,6 +963,10 @@ def load_module_unflushed(name: str, defines: tuple[tuple[str, int], ...] = ()):
               else module_source(name))
     tier = ",".join(f"{key}={value}" for key, value in normalized)
     key = f"{MODULE_KEY_ROOT}:{name}" + (f"[{tier}]" if tier else "")
+    from woof import backend
+    if backend.active() != "cuda":
+        return _translated_module(name, source, key=f"{name}[{tier}]" if tier else name,
+                                  options=UNFLUSHED_OPTIONS)
     with observe_module_compile(key):
         image, _mapping = nvrtc_ptx_cache.compile_using_nvrtc(
             source, UNFLUSHED_OPTIONS, None, f"{name}.cu")

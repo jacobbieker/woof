@@ -1,0 +1,1 @@
+import os; os.environ.get("WOOF_BACKEND", "").strip().lower() in ("mlx", "cpu") and __import__("woof")

@@ -1,0 +1,311 @@
+"""Load translated CUDA units as Metal libraries; launch kernels in place.
+
+:func:`load_unit` returns a :class:`MetalModule` with CuPy's ``RawModule``
+interface (``get_function``); its functions have CuPy's launch signature,
+``kernel(grid, block, args, shared_mem=0, stream=None)``, so every woof
+launcher runs unchanged.
+
+Arguments are bound by the kernel's translated signature:
+
+* a pointer parameter takes a facade ``ndarray``; the launch binds its
+  storage at the view's byte offset, and a non-``const`` pointer's storage
+  is rebound to the launch output, which shares the input's buffer
+  (``woof.backend.metal.ext``), so the kernel writes in place;
+* a scalar parameter is packed as its C type (``struct`` format from the
+  signature), whatever Python or NumPy scalar is passed.
+
+Before encoding, every pending facade value is encoded first
+(``facade._array.flush_pending``): a lazy reader of a buffer's old value
+must run before the kernel writes over it.
+"""
+
+from __future__ import annotations
+
+import os
+import struct
+from functools import lru_cache
+
+import numpy as np
+
+from woof.backend.translate import TranslatedUnit, translate
+
+MATH_MODE_SAFE = 0
+
+
+class LaunchError(RuntimeError):
+    """A launch whose arguments do not fit the kernel's signature."""
+
+
+def _dim3(value) -> tuple[int, int, int]:
+    if isinstance(value, (int, np.integer)):
+        return (int(value), 1, 1)
+    dims = tuple(int(v) for v in value) + (1, 1, 1)
+    return dims[:3]
+
+
+class MetalFunction:
+    def __init__(self, unit: TranslatedUnit, name: str, library_key: str, module=None):
+        self.module = module
+        if name not in unit.kernels:
+            raise LaunchError(f"no kernel {name!r} in the translated unit "
+                              f"(kernels: {', '.join(sorted(unit.kernels))})")
+        self.unit = unit
+        self.name = name
+        self.signature = unit.kernels[name]
+        self.library_key = library_key
+        self.attributes = {"local_size_bytes": 0}
+
+    def __call__(self, grid, block, args, shared_mem=0, stream=None):
+        from woof.backend.facade._array import flush_pending, ndarray
+        from woof.backend.metal import ext
+        sig = self.signature
+        params = sig.params
+        visible = [p for p in params if p.global_name is None]
+        if len(args) != len(visible):
+            raise LaunchError(f"{self.name}: {len(args)} arguments for {len(visible)} parameters")
+        supplied = iter(args)
+        buffers, offsets, writable, slots, targets = [], [], [], [], []
+        blob = bytearray(sig.scalar_size)
+        for p in params:
+            a = self.module.globals[p.global_name] if p.global_name is not None else next(supplied)
+            if p.pointer:
+                if not isinstance(a, ndarray):
+                    raise LaunchError(f"{self.name}: parameter {p.name!r} is a pointer; "
+                                      f"got {type(a).__name__}")
+                slots.append(len(buffers) if sig.pointer_mode == "direct" else -1)
+                buffers.append(a._st.arr)
+                offsets.append(a._offset)
+                writable.append(not p.const)
+                targets.append(a._st if not p.const else None)
+            else:
+                blob[p.offset:p.offset + p.size] = self._pack(p, a)
+        if not any(writable):
+            # It writes only through device addresses it was handed (a pointer
+            # table).  MLX schedules a primitive through its outputs, so a
+            # one-word sentinel rides along at a slot the kernel never reads.
+            spare = (sig.scalar_slot + 1) if sig.scalar_slot >= 0 else (
+                2 if sig.pointer_mode == "table" else len(buffers))
+            if spare > 30:
+                raise LaunchError(f"{self.name}: no free buffer slot for the launch sentinel")
+            sentinel = _sentinel()
+            buffers.append(sentinel._st.arr)
+            offsets.append(0)
+            writable.append(True)
+            slots.append(spare)
+            targets.append(sentinel._st)
+        if sig.pointer_mode == "table" or sig.indirect:
+            _guard_residency(self.name)
+        blobs, blob_slots = ([bytes(blob)], [sig.scalar_slot]) if sig.scalar_size else ([], [])
+        flush_pending()
+        if _TRACE:
+            with open(_TRACE, "a") as f:
+                f.write(self.name + "\n")
+        mode = _SERIAL_MODE if (not _SERIAL_ONLY or any(k in self.name for k in _SERIAL_ONLY)) else ""
+        if sig.indirect or mode in ("1", "before"):
+            # buffers reached through host-built address tables are invisible
+            # to MLX's hazard tracking: let everything before finish first
+            import mlx.core as mx
+            mx.synchronize()
+        outputs = ext.load().launch(
+            self.library_key, self.unit.msl, self.name, _dim3(grid), _dim3(block),
+            buffers, offsets, writable, slots, sig.table_slot, blobs, blob_slots,
+            int(shared_mem or 0), MATH_MODE_SAFE)
+        written = iter(outputs)
+        for st in targets:
+            if st is not None:
+                st.rebind_written(next(written))
+        if sig.indirect or mode in ("1", "after"):
+            import mlx.core as mx
+            mx.eval(*outputs)       # ... and finish before anything after it
+            if mode == "1":
+                mx.synchronize()
+
+    def _pack(self, p, value) -> bytes:
+        if p.fmt is None:
+            if isinstance(value, (bytes, bytearray)) and len(value) == p.size:
+                return bytes(value)
+            if isinstance(value, np.ndarray) and value.nbytes == p.size:
+                return value.tobytes()
+            if isinstance(value, np.generic) and value.nbytes == p.size:
+                return value.tobytes()
+            raise LaunchError(f"{self.name}: by-value parameter {p.name!r} ({p.ctype}, "
+                              f"{p.size} bytes) needs its bytes")
+        if isinstance(value, np.generic):
+            value = value.item()
+        try:
+            packed = struct.pack("<" + p.fmt, value)
+        except struct.error as exc:
+            raise LaunchError(f"{self.name}: parameter {p.name!r} ({p.ctype}): {exc}") from None
+        if len(packed) != p.size:
+            raise LaunchError(f"{self.name}: parameter {p.name!r} packs {len(packed)} bytes "
+                              f"for a {p.size}-byte {p.ctype}")
+        return packed
+
+
+_SENTINEL = None
+
+
+def _sentinel():
+    global _SENTINEL
+    if _SENTINEL is None:
+        from woof.backend.facade._array import ndarray
+        _SENTINEL = ndarray((1,), np.uint32)
+    return _SENTINEL
+
+
+def _guard_residency(kernel: str):
+    """A table-bound kernel reaches its buffers through GPU addresses, which
+    are valid only for resident memory: MLX's residency sets, bounded by
+    the wired limit the backend sets (woof.backend.facade.configure)."""
+    import mlx.core as mx
+    limit = _wired_limit()
+    if limit and mx.get_active_memory() > limit:
+        raise LaunchError(
+            f"{kernel}: {mx.get_active_memory()} bytes are allocated, past the "
+            f"{limit}-byte wired limit; the buffers this kernel reaches through its "
+            "argument table may not be resident")
+
+
+_WIRED = None
+
+
+def _wired_limit():
+    return _WIRED
+
+
+def set_wired_limit():
+    """Enable MLX's residency sets for every allocation up to the device's
+    recommended working set (called once when the mlx backend installs)."""
+    global _WIRED
+    import mlx.core as mx
+    info = (getattr(mx, "device_info", None) or mx.metal.device_info)()
+    _WIRED = int(info["max_recommended_working_set_size"])
+    mx.set_wired_limit(_WIRED)
+    return _WIRED
+
+
+#: C type of a module global's element -> the storage dtype it is held in
+#: WOOF_METAL_SERIAL=1: every launch waits for all earlier GPU work and
+#: finishes before returning -- a diagnostic for ordering hazards.
+_SERIAL_MODE = os.environ.get("WOOF_METAL_SERIAL", "")
+_SERIAL = _SERIAL_MODE not in ("", "0")
+#: WOOF_METAL_SERIAL_ONLY=a,b: serialise only kernels whose name contains one
+_SERIAL_ONLY = tuple(x for x in os.environ.get("WOOF_METAL_SERIAL_ONLY", "").split(",") if x)
+#: WOOF_METAL_TRACE=path: append each launched kernel's name
+_TRACE = os.environ.get("WOOF_METAL_TRACE", "")
+
+_GLOBAL_DTYPES = {"float": np.float32, "double": np.float64, "int": np.int32,
+                  "unsigned int": np.uint32, "long": np.int64, "unsigned long": np.uint64,
+                  "long long": np.int64, "unsigned long long": np.uint64, "short": np.int16,
+                  "unsigned short": np.uint16, "char": np.int8, "signed char": np.int8,
+                  "unsigned char": np.uint8, "bool": np.bool_}
+
+
+class CompileError(RuntimeError):
+    """Metal refused a translated unit; the MSL is saved for inspection."""
+
+
+class MetalModule:
+    """CuPy ``RawModule``'s interface over one translated unit.  The Metal
+    library and every kernel's pipeline are built when the module is made,
+    so a unit that does not compile fails here, naming its MSL file."""
+
+    def __init__(self, unit: TranslatedUnit, name: str):
+        from woof.backend.metal import ext
+        self.unit = unit
+        self.name = name
+        self.library_key = f"woof:{name}:{unit.key[:24]}"
+        self.code = unit.msl
+        self._functions: dict[str, MetalFunction] = {}
+        kernels = sorted(unit.kernels)
+        try:
+            limits = ext.load().compile(self.library_key, unit.msl, kernels, MATH_MODE_SAFE)
+        except RuntimeError as exc:
+            import os
+            import tempfile
+            path = os.path.join(tempfile.gettempdir(), f"woof-metal-{unit.key[:16]}.metal")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(unit.msl)
+            errors = [line for line in str(exc).splitlines() if "error:" in line][:12]
+            raise CompileError(f"Metal did not compile the translation of {name!r} "
+                               f"(MSL saved to {path}):\n" + "\n".join(errors)) from None
+        self.max_threads = dict(zip(kernels, limits))
+        # module globals: one buffer each, for the module's lifetime, zeroed
+        # or holding the declaration's initialiser
+        from woof.backend.facade import asarray
+        from woof.backend.facade._array import ndarray
+        self.globals = {}
+        for gname, g in unit.globals.items():
+            dtype = _GLOBAL_DTYPES.get(g["ctype"], np.uint8)
+            count = g["nbytes"] // np.dtype(dtype).itemsize
+            if g.get("init"):
+                self.globals[gname] = asarray(np.frombuffer(g["init"], dtype=dtype).copy())
+            else:
+                self.globals[gname] = ndarray((count,), dtype)
+
+    def get_global(self, name):
+        """CuPy's RawModule.get_global: the global's MemoryPointer."""
+        from woof.backend.facade._array import MemoryPointer
+        if name not in self.globals:
+            raise KeyError(f"module {self.name!r} has no global {name!r} "
+                           f"(globals: {', '.join(sorted(self.globals)) or 'none'})")
+        a = self.globals[name]
+        return MemoryPointer(a._st, a._offset)
+
+    get_global_var = get_global
+
+    def get_function(self, name: str) -> MetalFunction:
+        fn = self._functions.get(name)
+        if fn is None:
+            fn = self._functions[name] = MetalFunction(self.unit, name, self.library_key, self)
+        return fn
+
+    def compile(self, *a, **k):
+        return None
+
+
+def contracts(options) -> bool:
+    """Whether a unit's Metal translation may contract multiply-adds.
+
+    ``fast`` numerics: as NVRTC would after woof.numerics' compile boundary
+    (contract unless the effective options still say ``--fmad=false``).
+    ``strict``: never.  NVRTC's own contraction choices cannot be reproduced
+    on Metal, so strict Metal keeps every operation rounded as written --
+    the host tier's ``-ffp-contract=off`` and gfortran -O0's arithmetic.
+    """
+    from woof import numerics
+    if numerics.is_strict():
+        return False
+    effective = numerics.effective_options(tuple(options or ()))
+    return not any(o in ("--fmad=false", "-fmad=false") for o in effective)
+
+
+def retains_subnormals(name: str, source: str, options) -> bool:
+    """Whether CUDA keeps this unit's binary32 subnormals (--ftz=false):
+    then its Metal translation must too (woof/backend/metal/f32s.h)."""
+    from woof import numerics
+    from woof.core import kernels
+    from woof.cuda_subnormals import MARKER
+    effective = numerics.effective_options(tuple(options or ()))
+    if any(o in ("--ftz=false", "-ftz=false") for o in effective):
+        return True
+    if MARKER.strip() and MARKER.strip() in source:
+        return True
+    base = name.split("[", 1)[0]
+    sets = (kernels._NO_FTZ_MODULES, kernels._SOLAR_NO_FTZ_MODULES,
+            kernels._URBAN_NO_FTZ_MODULES, kernels._UNFLUSHED_MODULES)
+    return any(base in s for s in sets)
+
+
+@lru_cache(maxsize=None)
+def _translated(source: str, unit: str, contract: bool, retain: bool, defines=()) -> TranslatedUnit:
+    return translate(source, unit=unit, contract=contract, retain_subnormals=retain, defines=defines)
+
+
+def load_unit(name: str, source: str, *, options=()) -> MetalModule:
+    from woof import numerics
+    from woof.backend.translate import option_defines
+    defines = option_defines(numerics.effective_options(tuple(options or ())))
+    unit = _translated(source, name, contracts(options), retains_subnormals(name, source, options),
+                       defines)
+    return MetalModule(unit, name)
