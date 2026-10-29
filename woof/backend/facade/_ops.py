@@ -108,28 +108,39 @@ def full(shape, fill_value, dtype=None, order="C"):
     return _wrap(mx.broadcast_to(scalar_values(fill_value, dtype), shape), np.dtype(dtype), fresh=True)
 
 
-def _like(a, dtype, shape):
-    return (a.dtype if dtype is None else dtype), (a.shape if shape is None else shape)
+def _like(a, dtype, shape, order="K"):
+    """dtype, shape and memory order of a ``*_like`` result: "K" and "A"
+    keep a column-major prototype's layout, which a kernel indexing the
+    buffer relies on as it does on CUDA."""
+    if order in ("K", "A", None):
+        f = (isinstance(a, ndarray) and a.ndim > 1 and a.is_f_contiguous()
+             and not a.is_c_contiguous() and (shape is None or len(tuple(np.atleast_1d(shape))) == a.ndim))
+        order = "F" if f else "C"
+    return (a.dtype if dtype is None else dtype), (a.shape if shape is None else shape), order
+
+
+def _in_order(r, order):
+    return r.copy(order="F") if order == "F" and r.ndim > 1 else r
 
 
 def empty_like(a, dtype=None, order="K", subok=None, shape=None):
-    dtype, shape = _like(a, dtype, shape)
-    return empty(shape, dtype)
+    dtype, shape, order = _like(a, dtype, shape, order)
+    return empty(shape, dtype, order)
 
 
 def zeros_like(a, dtype=None, order="K", subok=None, shape=None):
-    dtype, shape = _like(a, dtype, shape)
-    return zeros(shape, dtype)
+    dtype, shape, order = _like(a, dtype, shape, order)
+    return zeros(shape, dtype, order)
 
 
 def ones_like(a, dtype=None, order="K", subok=None, shape=None):
-    dtype, shape = _like(a, dtype, shape)
-    return ones(shape, dtype)
+    dtype, shape, order = _like(a, dtype, shape, order)
+    return _in_order(ones(shape, dtype), order)
 
 
 def full_like(a, fill_value, dtype=None, order="K", subok=None, shape=None):
-    dtype, shape = _like(a, dtype, shape)
-    return full(shape, fill_value, dtype)
+    dtype, shape, order = _like(a, dtype, shape, order)
+    return _in_order(full(shape, fill_value, dtype), order)
 
 
 def arange(*args, dtype=None):
@@ -198,6 +209,9 @@ def asnumpy(a, stream=None, order="C", out=None, blocking=True):
 
 
 def astype(a: ndarray, dtype) -> ndarray:
+    """CuPy's ``astype`` (order "K"): a column-major array stays column-major."""
+    if a.ndim > 1 and a._memory_order("K") == "F":
+        return astype(a.transpose(), dtype).transpose()
     mx = _mx()
     dtype = np.dtype(dtype)
     if a.dtype == np.float64 or dtype == np.float64:

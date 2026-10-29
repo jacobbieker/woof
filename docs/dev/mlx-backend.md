@@ -131,6 +131,17 @@ function per combination of spaces. Two cases need runtime help:
   buffer in `device` memory, and the analysis says so. Only `const` and
   `__constant__` data is `constant`.
 
+## Memory order
+
+Facade arrays carry NumPy strides, and CuPy's memory-order rules hold:
+`reshape`/`ravel`/`flatten` with `order="F"` read indices column-major,
+and `astype`, `copy(order="K")`, `array(order=...)` and the `*_like`
+constructors keep a column-major prototype's layout. Kernels index these
+buffers directly, so a dropped layout scrambles fields rather than failing
+(SATMEDMF's column packing did). `tests/test_metal_memory_order.py` guards
+this. Elementwise results are row-major whatever their operands' layout;
+make a column-major kernel argument explicit with `asfortranarray`.
+
 ## Mapped host memory
 
 `cudaHostAlloc` returns an evaluated MLX buffer's host address. Apple
@@ -162,7 +173,8 @@ The MLX backend's pins are recorded beside CUDA's:
 
 Record a family only after showing that its Metal words are CUDA's words
 with contraction off. Run `tools/launch_trace.py` on both machines, with
-CUDA's compiles forced to `--fmad=false`, and compare the traces with
+CUDA's compiles forced to `--fmad=false` (`WOOF_FMAD_OFF=1`, applied at
+`woof.numerics.effective_options`), and compare the traces with
 `tools/backend_receipts.py`. A remaining difference is then a vendor-libm
 or NaN-payload delta, and the pin file says so (for example the `known_deltas`
 in `vertical-native-metal.json`).

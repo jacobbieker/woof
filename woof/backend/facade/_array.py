@@ -425,15 +425,27 @@ class ndarray:
         shape = tuple(shape)
         if reduce(operator.mul, shape, 1) != self.size:
             raise ValueError(f"cannot reshape array of size {self.size} into shape {shape}")
+        if self._memory_order(order) == "F":
+            # column-major index order: NumPy's a.reshape(s, "F") is
+            # a.T.reshape(reversed s).T, a view when a is F-contiguous
+            return self.transpose().reshape(tuple(reversed(shape))).transpose()
         if self.is_c_contiguous():
             return ndarray(shape, self.dtype, _storage=self._st, _offset=self._offset)
         return self.copy().reshape(shape)
 
+    def _memory_order(self, order) -> str:
+        """"C" or "F": NumPy's "A" and "K" read F only for an array laid out
+        column-major (and not also row-major)."""
+        order = (order or "C").upper()
+        if order in ("A", "K"):
+            return "F" if self.is_f_contiguous() and not self.is_c_contiguous() else "C"
+        return order
+
     def ravel(self, order="C"):
-        return self.reshape(-1)
+        return self.reshape(-1, order=order)
 
     def flatten(self, order="C"):
-        return self.copy().reshape(-1)
+        return self.copy().reshape(-1, order=self._memory_order(order))
 
     def squeeze(self, axis=None):
         keep = [i for i, n in enumerate(self.shape)
@@ -455,6 +467,8 @@ class ndarray:
         return self.transpose(axes)
 
     def copy(self, order="C"):
+        if self.ndim > 1 and self._memory_order(order) == "F":
+            return self.transpose().copy().transpose()
         mx = _mx()
         return ndarray(self.shape, self.dtype,
                        _storage=Storage(mx.contiguous(self._values()), self._st.dtype)) \
