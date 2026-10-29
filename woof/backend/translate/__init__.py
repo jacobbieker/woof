@@ -66,6 +66,13 @@ PARSE_DEFINES = (
     "-D__device__=", "-D__host__=", "-D__forceinline__=inline",
     "-D__noinline__=__attribute__((noinline))", "-D__restrict__=", "-D__launch_bounds__(...)=",
     "-D__CUDACC__=1", "-D__CUDACC_RTC__=1", "-D__WOOF_METAL__=1", "-D__align__(n)=alignas(n)",
+    # NVRTC's own spelling of the keywords (a unit that #undefs __global__
+    # restores it as `__location__(global)`)
+    "-D__location__(x)=__woof_location_##x",
+    f'-D__woof_location_global=__attribute__((annotate("{_GLOBAL}")))',
+    f'-D__woof_location_shared=__attribute__((annotate("{_SHARED}")))',
+    f'-D__woof_location_constant=__attribute__((annotate("{_CONSTANT}")))',
+    "-D__woof_location_device=", "-D__woof_location_host=",
 )
 
 #: Where a unit's own `#include "sibling.cuh"` resolves (NVRTC gets the
@@ -486,6 +493,7 @@ class _Rewriter:
         self.emit_decl_sites()
         self.thread_builtins(top)
         self.inline_pointer_functions()
+        self.table_parameters()
         self.rewrite_tokens()
         msl = self.edits.apply()
         msl = msl.replace(f'__attribute__((annotate("{_GLOBAL}")))', "")
@@ -1355,11 +1363,40 @@ class _Rewriter:
             return next(t for t in tokens if t.spelling == "<").extent.end.offset
         return None                                         # functional cast T(x)
 
+    def _address_table_casts(self):
+        """``(const T* const*)address``: a table of device addresses reached by
+        an integer address.  Metal has no pointer-to-pointer it can spell
+        here, so the cast builds the table wrapper over the address's words:
+        ``__woof_addr_table<const device T*>(reinterpret_cast<const device ulong*>(address))``."""
+        from woof.backend.translate.spaces import _CASTS, _INTEGER_KINDS, _is_table
+        K = self.ci.CursorKind
+        done = set()
+        for node in self.tu.cursor.walk_preorder():
+            if node.kind.name not in _CASTS or not self.main_file(node) or not _is_table(node.type):
+                continue
+            operand = [c for c in node.get_children() if c.kind not in (K.TYPE_REF, K.TEMPLATE_REF)]
+            if not operand or operand[-1].type.get_canonical().kind.name not in _INTEGER_KINDS:
+                continue
+            key = (node.extent.start.offset, node.extent.end.offset)
+            if key in done:
+                continue
+            done.add(key)
+            target = node.type.get_canonical().get_pointee().get_pointee()
+            tspace = "const device" if target.is_const_qualified() else "device"
+            elem = self._spell_type(target, drop_const=True)
+            op_start = operand[-1].extent.start.offset
+            self.edits.replace(key[0], op_start,
+                               f"__woof_addr_table<{tspace} {elem}*>(reinterpret_cast<const device ulong*>(")
+            self.edits.insert(key[1], "))", rank=60_000)
+        return done
+
     def cast_plan(self, instance):
         """Insertions naming each pointer cast's space in one function
         instance (an integer address is device memory; null takes device)."""
         plan = []
         for (start, end), spaces in self.spaces.cast_spaces.get(instance, {}).items():
+            if (start, end) in getattr(self, "_table_casts", ()):
+                continue
             if len(spaces) > 1:
                 self.refuse_at(start, f"a pointer cast reads {' and '.join(sorted(spaces))} pointers")
             at = self._cast_insert_at(start, end)
@@ -1372,8 +1409,9 @@ class _Rewriter:
         here; multi-instance functions carry theirs per copy
         (_space_inserts).  Casts the analysis never reached (struct
         methods) take their operand's space read without context."""
+        self._table_casts = self._address_table_casts()
         multi = {usr for usr, inst in self.spaces.instances.items() if len(inst) > 1}
-        reached = set()
+        reached = set(self._table_casts)
         for instance, casts in self.spaces.cast_spaces.items():
             reached.update(casts)
             if instance is None or instance[0] in multi:
@@ -1421,6 +1459,20 @@ class _Rewriter:
                 self.edits.replace(at, at + len(name), f"__woof_in_{name}")
                 prologue.append(f"{pointee} __woof_copy_{name} = *__woof_in_{name}; "
                                 f"thread {pointee} *{name} = &__woof_copy_{name};")
+            self.edits.insert(body.extent.start.offset + 1, "\n    " + "\n    ".join(prologue), rank=10_001)
+        for usr, params in self.spaces.variant.items():
+            info = self.spaces.functions[usr]
+            body = next((c for c in info.cursor.get_children()
+                         if c.kind == self.ci.CursorKind.COMPOUND_STMT), None)
+            if body is None:
+                continue
+            prologue = []
+            for parm in params:
+                name = parm.spelling
+                elem = self._spell_type(parm.type.get_pointee(), drop_const=True)
+                at = parm.location.offset
+                self.edits.replace(at, at + len(name), f"__woof_vp_{name}")
+                prologue.append(f"__woof_vptr<{elem}> {name}(__woof_vp_{name});")
             self.edits.insert(body.extent.start.offset + 1, "\n    " + "\n    ".join(prologue), rank=10_001)
         for usr, info in self.spaces.functions.items():
             this_spaces = sorted(self.spaces.this_spaces.get(usr, ()))
@@ -1491,15 +1543,57 @@ class _Rewriter:
         for (index, _, _), space in zip(info.slots, spaces):
             if index < len(params):
                 plan.append((params[index].extent.start.offset, f"{space} "))
-        if cursor is info.cursor and len(self.spaces.instances.get(info.cursor.get_usr(), ())) > 1:
+        multi = len(self.spaces.instances.get(info.cursor.get_usr(), ())) > 1
+        if cursor is info.cursor and multi:
             plan += self.cast_plan((info.cursor.get_usr(), spaces))
             plan += self.decl_plan((info.cursor.get_usr(), spaces))
+        if multi:
+            # A call that omits a defaulted pointer is the device instance's
+            # (spaces.call); other instances drop the default, or such a call
+            # would match them all.
+            # (C++ defaults are trailing: such an instance drops all of them)
+            if any(space != "device" and index < len(params)
+                   and any(t.spelling == "=" for t in params[index].get_tokens())
+                   for (index, _, _), space in zip(info.slots, spaces)):
+                for parm in params:
+                    eq = next((t for t in parm.get_tokens() if t.spelling == "="), None)
+                    if eq is not None:
+                        plan.append((eq.extent.start.offset, "/* "))
+                        plan.append((parm.extent.end.offset, " */"))
         if info.returns:
             ret = self.spaces.returns.get((info.cursor.get_usr(), spaces)) or "device"
             start = self._return_type_start(cursor)
             if start is not None:
                 plan.append((start, f"{ret} "))
         return plan
+
+    def table_parameters(self):
+        """A device function's ``T**`` / ``T* const*`` parameter receives a
+        kernel's address table (rewrite_kernel): it is declared as the same
+        ``__woof_addr_table<device T*>``, whose ``F[k]`` is the device pointer."""
+        from woof.backend.translate.spaces import _is_table
+        K = self.ci.CursorKind
+        kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD)
+        seen = set()
+        for node in self.tu.cursor.walk_preorder():
+            if node.kind not in kinds or not self.main_file(node) or self.is_kernel(node):
+                continue
+            for parm in node.get_children():
+                if parm.kind != K.PARM_DECL or not _is_table(parm.type):
+                    continue
+                key = self.span(parm)
+                if key in seen:
+                    continue
+                seen.add(key)
+                target = parm.type.get_canonical().get_pointee().get_pointee()
+                tspace = "const device" if target.is_const_qualified() else "device"
+                elem = self._spell_type(target, drop_const=True)
+                toks = list(parm.get_tokens())
+                name = next((t for t in toks if t.spelling == parm.spelling), None)
+                if name is None or not toks:
+                    self.refuse(parm, f"cannot find the type of table parameter {parm.spelling!r}")
+                self.edits.replace(toks[0].extent.start.offset, name.extent.start.offset,
+                                   f"__woof_addr_table<{tspace} {elem}*> ")
 
     def inline_pointer_functions(self):
         """``always_inline`` on every device function of the unit, unless the
@@ -1846,6 +1940,8 @@ class _Rewriter:
                 self.fold_init_list(node)
             if kind == K.UNARY_OPERATOR and not self.retain and _is_float(node.type):
                 self.flushing_negation(node)
+            if kind == K.CONDITIONAL_OPERATOR and _is_float(node.type):
+                self.select_minmax(node)
             if kind == K.UNARY_OPERATOR and _is_double(node.type):
                 inner = list(node.get_children())
                 toks = [t.spelling for t in node.get_tokens()]
@@ -1930,6 +2026,46 @@ class _Rewriter:
                 if r.kind.name == "RETURN_STMT" and kids:
                     rs, re_ = self.span(kids[0])
                     self.edits.wrap(rs, re_, "(", ")", 0)
+
+    _PURE = ("DECL_REF_EXPR", "MEMBER_REF_EXPR", "ARRAY_SUBSCRIPT_EXPR", "FLOATING_LITERAL",
+             "INTEGER_LITERAL", "PAREN_EXPR", "UNEXPOSED_EXPR")
+
+    def select_minmax(self, node):
+        """``a > b ? a : b`` (and its mirrors): NVCC emits max.f32 / min.f32,
+        which order -0 below +0, where the conditional as written returns b
+        for equal zeros.  Rewritten to __woof_selmax/__woof_selmin: the
+        conditional's own result except on equal operands, where CUDA's
+        signed-zero order holds.  (RRTMG's prep preflight asserts
+        rp_max(+0, -0) == +0 on the card.)"""
+        kids = list(node.get_children())
+        if len(kids) != 3 or kids[0].kind.name != "BINARY_OPERATOR":
+            return
+        cond, yes, no = kids
+        ops = list(cond.get_children())
+        if len(ops) != 2:
+            return
+        op = next((t.spelling for t in cond.get_tokens()
+                   if ops[0].extent.end.offset <= t.extent.start.offset < ops[1].extent.start.offset), None)
+        if op not in (">", ">=", "<", "<="):
+            return
+        text = lambda c: "".join(t.spelling for t in c.get_tokens())
+        def pure(c):
+            return all(n.kind.name in self._PURE or n.kind.name.startswith("TYPE") for n in c.walk_preorder())
+        if not all(pure(c) for c in (ops[0], ops[1], yes, no)):
+            return
+        l, r, y, n = text(ops[0]), text(ops[1]), text(yes), text(no)
+        if (y, n) == (l, r):
+            kind = "max" if op in (">", ">=") else "min"
+        elif (y, n) == (r, l):
+            kind = "min" if op in (">", ">=") else "max"
+        else:
+            return
+        s, e = self.span(node)
+        ys, ye = self.span(yes)
+        ns, ne = self.span(no)
+        self.edits.replace(s, ys, f"__woof_sel{kind}(")
+        self.edits.replace(ye, ns, ", ")
+        self.edits.replace(ne, e, ")")
 
     def flushing_negation(self, node):
         """``-x`` on a binary32 value in a -ftz=true unit: CUDA's neg.ftz
@@ -2246,7 +2382,7 @@ def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bo
 
 VENDOR_LIBM64 = HERE / "vendor_libm64.cuh"
 F64CR = HERE.parents[1] / "core" / "kernels" / "f64cr.cuh"
-_VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?)\s*\(")
+_VENDOR_CALL = re.compile(r"\b(exp|log|log10|sin|cos|atan|pow|atan2|hypot|log2|expm1|tanh|tgammaf?|lgamma|log1pf?|cbrtf?|erfc?)\s*\(")
 CR_CBRT = HERE.parents[1] / "core" / "kernels" / "cr_cbrt_flt64.cuh"
 
 

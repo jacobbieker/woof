@@ -259,7 +259,8 @@ class MetalModule:
             path = os.path.join(tempfile.gettempdir(), f"woof-metal-{unit.key[:16]}.metal")
             with open(path, "w", encoding="utf-8") as f:
                 f.write(unit.msl)
-            errors = [line for line in str(exc).splitlines() if "error:" in line][:12]
+            errors = [line for line in str(exc).splitlines() if "error:" in line][:12] \
+                or str(exc).strip().splitlines()[:12]     # a pipeline failure has no `error:` lines
             raise CompileError(f"Metal did not compile the translation of {name!r} "
                                f"(MSL saved to {path}):\n" + "\n".join(errors)) from None
         self.max_threads = dict(zip(kernels, limits))

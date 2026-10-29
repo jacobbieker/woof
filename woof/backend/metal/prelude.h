@@ -322,6 +322,15 @@ static inline float fmaxf(float a, float b) {
   a = __woof_ftz(a); b = __woof_ftz(b);
   return a == b ? as_type<float>(as_type<uint>(a) & as_type<uint>(b)) : metal::fmax(a, b);
 }
+// `a > b ? a : b` / `a < b ? a : b` as NVCC compiles them (max.f32 /
+// min.f32): the conditional's result, except that equal operands combine
+// their bits, so -0 orders below +0 (translate select_minmax).
+static inline float __woof_selmax(float a, float b) {
+  return a > b ? a : (a == b ? as_type<float>(as_type<uint>(a) & as_type<uint>(b)) : b);
+}
+static inline float __woof_selmin(float a, float b) {
+  return a < b ? a : (a == b ? as_type<float>(as_type<uint>(a) | as_type<uint>(b)) : b);
+}
 static inline float fmin(float a, float b) { return fminf(a, b); }
 static inline float fmax(float a, float b) { return fmaxf(a, b); }
 static inline float ldexpf(float a, int n) { return metal::ldexp(a, n); }
@@ -476,8 +485,39 @@ template <typename T> static inline T __shfl_xor_sync(uint mask, T v, int lane_m
 // passes real GPU addresses), read one entry at a time.
 template <typename T> struct __woof_addr_table {
   const device ulong* w;
+  __woof_addr_table(const device ulong* p) : w(p) {}
+  // a table reached through a device pointer to its entries (`(T**)address`):
+  // in device memory, an array of pointers is an array of 64-bit words
+  template <typename P> __woof_addr_table(const device P* p) : w(reinterpret_cast<const device ulong*>(p)) {}
   T operator[](long i) const { return reinterpret_cast<T>(w[i]); }
   T operator*() const { return reinterpret_cast<T>(w[0]); }
+};
+
+// A read-only pointer that, as CUDA's generic pointers may, points into one
+// address space now and another later (a const parameter reassigned to a
+// threadgroup tile, then indexed): one pointer per space and a tag.  Reads
+// dispatch on the tag; a use that needs a device pointer gets the device one.
+template <typename T> struct __woof_vptr {
+  const device T* d = nullptr; const threadgroup T* g = nullptr;
+  const thread T* t = nullptr; const constant T* c = nullptr; int which = 0;
+  __woof_vptr(const device T* p) : d(p), which(0) {}
+  __woof_vptr(const threadgroup T* p) : g(p), which(1) {}
+  __woof_vptr(const thread T* p) : t(p), which(2) {}
+  __woof_vptr(const constant T* p) : c(p), which(3) {}
+  thread __woof_vptr& operator=(const device T* p) { d = p; which = 0; return *this; }
+  thread __woof_vptr& operator=(const threadgroup T* p) { g = p; which = 1; return *this; }
+  thread __woof_vptr& operator=(const thread T* p) { t = p; which = 2; return *this; }
+  thread __woof_vptr& operator=(const constant T* p) { c = p; which = 3; return *this; }
+  T operator[](long i) const {
+    return which == 0 ? d[i] : which == 1 ? g[i] : which == 2 ? t[i] : c[i];
+  }
+  T operator*() const { return (*this)[0]; }
+  __woof_vptr operator+(long i) const {
+    __woof_vptr r = *this;
+    if (which == 0) r.d += i; else if (which == 1) r.g += i; else if (which == 2) r.t += i; else r.c += i;
+    return r;
+  }
+  operator const device T*() const { return d; }
 };
 
 // ---------------------------------------------------------------- misc

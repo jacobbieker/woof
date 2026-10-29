@@ -40,14 +40,13 @@
 namespace nb = nanobind;
 namespace mx = mlx::core;
 
-// Pipelines built here, not by MLX's Device::get_kernel: MLX makes them from
-// the bare function, which leaves MTLComputePipelineDescriptor's
-// maxCallStackDepth at its default of 1.  A translated unit calls through
-// several levels of functions the compiler keeps out of line (soft-float
-// binary64, large device functions); deeper than the declared depth, Metal's
-// results are undefined.  Breakage it prevents: Noah-MP's soil-water solve
-// read __fma_rn(2, 3, 1) as 0 three calls deep and saturated every column.
-constexpr NS::UInteger kCallStackDepth = 64;
+// Pipelines built here, not by MLX's Device::get_kernel, so their
+// descriptor is ours to set.  maxCallStackDepth stays Metal's default of 1:
+// a deeper declared depth reserves stack per thread for every level, and the
+// spectral-bin microphysics (fast_sbm) then exceeds the available stack.
+// (Raising it did not cure the out-of-line call fault that inlining does;
+// see translate.inline_pointer_functions.)
+constexpr NS::UInteger kCallStackDepth = 1;
 
 static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::string& library_key,
                                                const std::string& kernel) {

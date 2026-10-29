@@ -5,7 +5,7 @@ A CUDA unit calling CUDA's binary64 libm names runs through the real path
 Its words are compared with the implementation each name maps to
 (woof/backend/translate/vendor_libm64.cuh):
 
-* atan2, hypot, log2, expm1, tanh, tgamma: the Rust libm 0.2.16 crate the
+* atan2, hypot, log2, expm1, tanh, tgamma, lgamma, log1p, erf, erfc: the Rust libm 0.2.16 crate the
   header transcribes, built here from tools/rustwx/vendor/crates-io/libm;
 * exp, log, log10, sin, atan, pow: woof's correctly rounded f64cr.cuh,
   built here as host C++ from the same header text.
@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LIBM = ROOT / "tools" / "rustwx" / "vendor" / "crates-io" / "libm"
 F64CR = ROOT / "woof" / "core" / "kernels" / "f64cr.cuh"
 
-RUST_FNS = ("atan2", "hypot", "log2", "expm1", "tanh", "tgamma", "lgamma", "log1p")
+RUST_FNS = ("atan2", "hypot", "log2", "expm1", "tanh", "tgamma", "lgamma", "log1p", "erf", "erfc")
 CR_FNS = ("exp", "log", "log10", "sin", "atan", "pow")
 BINARY = {"atan2", "hypot", "pow"}
 CR_EXTRA = ("cbrt", "cos")      # cr_cbrt and wlm_cos: graded against exact decimal values
@@ -63,7 +63,8 @@ fn main() {
     for i in 0..n {
         let (a, b) = (word(i), word(n + i));
         for v in [libm::atan2(a, b), libm::hypot(a, b), libm::log2(a), libm::expm1(a),
-                  libm::tanh(a), libm::tgamma(a), libm::lgamma(a), libm::log1p(a)] {
+                  libm::tanh(a), libm::tgamma(a), libm::lgamma(a), libm::log1p(a),
+                  libm::erf(a), libm::erfc(a)] {
             out.write_all(&v.to_bits().to_le_bytes()).unwrap();
         }
         let af = a as f32;
@@ -147,7 +148,9 @@ def gpu(a, b) -> np.ndarray:
     x, y = cp.asarray(a), cp.asarray(b)
     out = cp.zeros((n * len(ALL),), dtype=cp.float64)
     outf = cp.zeros((n * len(F32_FNS),), dtype=cp.float32)
-    kern = cp.RawModule(code=CUDA_UNIT, options=("-std=c++17", "--fmad=false")).get_function("grade")
+    # --ftz=false: the transcriptions themselves; a flushing unit would also
+    # flush subnormal binary32 results, as CUDA does (woof/backend/metal/prelude.h)
+    kern = cp.RawModule(code=CUDA_UNIT, options=("-std=c++17", "--fmad=false", "--ftz=false")).get_function("grade")
     kern(((n + 127) // 128,), (128,), (x, y, out, outf, np.int32(n)))
     return out.get().reshape(n, len(ALL)), outf.get().reshape(n, len(F32_FNS))
 

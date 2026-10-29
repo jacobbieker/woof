@@ -156,3 +156,4 @@ template <class A, class B> auto min(A a, B b) -> decltype(a + b);
 float __woof_ieee_add(float, float); float __woof_ieee_sub(float, float);
 float __woof_ieee_mul(float, float); float __woof_ieee_div(float, float);
 float __woof_ieee_min(float, float); float __woof_ieee_max(float, float);
+float __woof_selmax(float, float); float __woof_selmin(float, float);

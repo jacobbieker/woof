@@ -70,6 +70,8 @@ class SpaceAnalysis:
         self._analysing: set = set()
         #: (start, end) of a nullptr argument -> the cast's opening text
         self.null_casts: dict = {}
+        #: function USR -> const pointer parameters read through __woof_vptr
+        self.variant: dict = {}
         #: pointer field USR -> spaces aggregate initialisers give it
         self.field_spaces: dict = {}
         #: local pointer/reference variable usr -> spaces it took (all instances)
@@ -100,8 +102,10 @@ class SpaceAnalysis:
                 continue
             params = [p for p in c.get_children() if p.kind == K.PARM_DECL]
             # An array parameter is a pointer (C's decay); it binds like one.
+            # A pointer to pointers is a kernel's address table passed on
+            # (__woof_addr_table, rewritten by the translator): no space slot.
             slots = [(i, p, "ptr" if _indirection(p.type) == "array" else _indirection(p.type))
-                     for i, p in enumerate(params) if _indirection(p.type)]
+                     for i, p in enumerate(params) if _indirection(p.type) and not _is_table(p.type)]
             if c.kind == K.CONSTRUCTOR:
                 returns = None
             elif c.kind in (K.FUNCTION_DECL, K.CXX_METHOD):
@@ -150,8 +154,8 @@ class SpaceAnalysis:
                                if t.extent.start.offset >= lhs_end), None)
                     if usr in params and op == "=":
                         assigned.add(usr)
+        indexed = set()
         for usr in assigned:
-            p = params[usr]
             for node in fn.walk_preorder():
                 if node.kind == K.ARRAY_SUBSCRIPT_EXPR:
                     kids = list(node.get_children())
@@ -161,11 +165,13 @@ class SpaceAnalysis:
                         base = inner[0] if inner else None
                     if base is not None and base.kind == K.DECL_REF_EXPR and base.referenced is not None \
                             and base.referenced.get_usr() == usr:
-                        idx = self.rw.src(kids[1]).strip()
-                        if idx != "0":
-                            self.rw.refuse(node, f"parameter {p.spelling!r} is reassigned across address "
-                                                 "spaces and indexed past its first element")
-        return [params[u] for u in sorted(assigned)]
+                        if self.rw.src(kids[1]).strip() != "0":
+                            indexed.add(usr)
+        # Indexed past element 0: a variant pointer (one pointer per address
+        # space and a tag, prelude __woof_vptr) -- what a CUDA generic pointer is.
+        if indexed:
+            self.variant[fn.get_usr()] = [params[u] for u in sorted(indexed)]
+        return [params[u] for u in sorted(assigned - indexed)]
 
     def resolve(self, ref) -> FnInfo | None:
         if ref is None:
@@ -554,6 +560,8 @@ class SpaceAnalysis:
                 return THREAD
             return None
         if kind == "ARRAY_SUBSCRIPT_EXPR":
+            if children and _is_table(children[0].type) and not lvalue:
+                return DEVICE           # an address table's entry: a device pointer
             if children and _indirection(children[0].type) is None:
                 # `obj[i]` on a class object inside a template, where clang
                 # leaves the operator call unresolved: its operator[]'s space
@@ -579,6 +587,8 @@ class SpaceAnalysis:
                 return self.space(base, env)
             return self.space(base, env, lvalue=True)
         if kind == "UNARY_OPERATOR":
+            if children and not lvalue and _is_table(children[0].type) and _operator(e, children) == "*":
+                return DEVICE           # *table: its first entry
             if lvalue and _operator(e, children) in ("-", "+", "!", "~"):
                 return THREAD           # a prvalue: a temporary binds the reference
             return self.space(children[0], env, lvalue=True) if children else None
@@ -633,6 +643,12 @@ class SpaceAnalysis:
         if kind in ("COMPOUND_LITERAL_EXPR", "INIT_LIST_EXPR"):
             return THREAD
         return THREAD if lvalue else None
+
+
+def _is_table(t) -> bool:
+    """``T**`` / ``T* const*``: a pointer whose pointee is a pointer."""
+    c = t.get_canonical()
+    return c.kind.name == "POINTER" and c.get_pointee().get_canonical().kind.name == "POINTER"
 
 
 def field_key(field):

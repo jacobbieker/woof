@@ -314,3 +314,9 @@ static inline f32s __woof_ieee_mul(f32s a, f32s b) { return a * b; }
 static inline f32s __woof_ieee_div(f32s a, f32s b) { return a / b; }
 static inline f32s __woof_ieee_min(f32s a, f32s b) { return fminf(a, b); }
 static inline f32s __woof_ieee_max(f32s a, f32s b) { return fmaxf(a, b); }
+static inline f32s __woof_selmax(f32s a, f32s b) {
+  return a > b ? a : (a == b ? f32s(as_type<float>(as_type<uint>(a.v) & as_type<uint>(b.v))) : b);
+}
+static inline f32s __woof_selmin(f32s a, f32s b) {
+  return a < b ? a : (a == b ? f32s(as_type<float>(as_type<uint>(a.v) | as_type<uint>(b.v))) : b);
+}

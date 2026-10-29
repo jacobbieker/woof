@@ -705,6 +705,69 @@ __device__ __forceinline__ double wlm_lgamma(double x) {
     if (sign) r = __dsub_rn(nadj, r);
     return r;
 }
+// erf.rs (FreeBSD s_erf.c), Rust libm 0.2.16: erf and erfc, statement by
+// statement; exp is the crate's own (wlm_exp).
+__device__ __forceinline__ double wlm_erfc1(double x) {
+    double s = __dsub_rn(wlm_abs(x), 1.0);
+    double p = __dadd_rn(wlm_negd(0.0023621185607526594), __dmul_rn(s, __dadd_rn(0.41485611868374833, __dmul_rn(s, __dadd_rn(wlm_negd(0.3722078760357013), __dmul_rn(s, __dadd_rn(0.31834661990116175, __dmul_rn(s, __dadd_rn(wlm_negd(0.11089469428239668), __dmul_rn(s, __dadd_rn(0.035478304325618236, __dmul_rn(s, wlm_negd(0.002166375594868791)))))))))))));
+    double q = __dadd_rn(1.0, __dmul_rn(s, __dadd_rn(0.10642088040084423, __dmul_rn(s, __dadd_rn(0.540397917702171, __dmul_rn(s, __dadd_rn(0.07182865441419627, __dmul_rn(s, __dadd_rn(0.12617121980876164, __dmul_rn(s, __dadd_rn(0.01363708391202905, __dmul_rn(s, 0.011984499846799107))))))))))));
+    return __dsub_rn(__dsub_rn(1.0, 0.8450629115104675), __ddiv_rn(p, q));
+}
+__device__ __forceinline__ double wlm_erfc2(unsigned ix, double x) {
+    if (ix < 0x3ff40000) return wlm_erfc1(x);
+    x = wlm_abs(x);
+    double s = __ddiv_rn(1.0, __dmul_rn(x, x));
+    double r, bs;
+    if (ix < 0x4006db6d) {
+        r = __dadd_rn(wlm_negd(0.009864944034847148), __dmul_rn(s, __dadd_rn(wlm_negd(0.6938585727071818), __dmul_rn(s, __dadd_rn(wlm_negd(10.558626225323291), __dmul_rn(s, __dadd_rn(wlm_negd(62.375332450326006), __dmul_rn(s, __dadd_rn(wlm_negd(162.39666946257347), __dmul_rn(s, __dadd_rn(wlm_negd(184.60509290671104), __dmul_rn(s, __dadd_rn(wlm_negd(81.2874355063066), __dmul_rn(s, wlm_negd(9.814329344169145)))))))))))))));
+        bs = __dadd_rn(1.0, __dmul_rn(s, __dadd_rn(19.651271667439257, __dmul_rn(s, __dadd_rn(137.65775414351904, __dmul_rn(s, __dadd_rn(434.56587747522923, __dmul_rn(s, __dadd_rn(645.3872717332679, __dmul_rn(s, __dadd_rn(429.00814002756783, __dmul_rn(s, __dadd_rn(108.63500554177944, __dmul_rn(s, __dadd_rn(6.570249770319282, __dmul_rn(s, wlm_negd(0.0604244152148581)))))))))))))))));
+    } else {
+        r = __dadd_rn(wlm_negd(0.0098649429247001), __dmul_rn(s, __dadd_rn(wlm_negd(0.799283237680523), __dmul_rn(s, __dadd_rn(wlm_negd(17.757954917754752), __dmul_rn(s, __dadd_rn(wlm_negd(160.63638485582192), __dmul_rn(s, __dadd_rn(wlm_negd(637.5664433683896), __dmul_rn(s, __dadd_rn(wlm_negd(1025.0951316110772), __dmul_rn(s, wlm_negd(483.5191916086514)))))))))))));
+        bs = __dadd_rn(1.0, __dmul_rn(s, __dadd_rn(30.33806074348246, __dmul_rn(s, __dadd_rn(325.7925129965739, __dmul_rn(s, __dadd_rn(1536.729586084437, __dmul_rn(s, __dadd_rn(3199.8582195085955, __dmul_rn(s, __dadd_rn(2553.0504064331644, __dmul_rn(s, __dadd_rn(474.52854120695537, __dmul_rn(s, wlm_negd(22.44095244658582)))))))))))))));
+    }
+    double z = wlm_setlo(x, 0u);
+    double e1 = wlm_exp(__dsub_rn(__dmul_rn(wlm_negd(z), z), 0.5625));
+    double e2 = wlm_exp(__dadd_rn(__dmul_rn(__dsub_rn(z, x), __dadd_rn(z, x)), __ddiv_rn(r, bs)));
+    return __ddiv_rn(__dmul_rn(e1, e2), x);
+}
+__device__ __forceinline__ double wlm_erf(double x) {
+    unsigned ix = wlm_hi(x);
+    unsigned sign = ix >> 31;
+    ix &= 0x7fffffff;
+    double sg = sign ? 1.0 : 0.0;
+    if (ix >= 0x7ff00000) return __dadd_rn(__dsub_rn(1.0, __dmul_rn(2.0, sg)), __ddiv_rn(1.0, x));
+    if (ix < 0x3feb0000) {
+        if (ix < 0x3e300000) return __dmul_rn(0.125, __dadd_rn(__dmul_rn(8.0, x), __dmul_rn(1.0270333367641007, x)));
+        double z = __dmul_rn(x, x);
+        double r = __dadd_rn(0.12837916709551256, __dmul_rn(z, __dadd_rn(wlm_negd(0.3250421072470015), __dmul_rn(z, __dadd_rn(wlm_negd(0.02848174957559851), __dmul_rn(z, __dadd_rn(wlm_negd(0.005770270296489442), __dmul_rn(z, wlm_negd(2.3763016656650163e-05)))))))));
+        double s = __dadd_rn(1.0, __dmul_rn(z, __dadd_rn(0.39791722395915535, __dmul_rn(z, __dadd_rn(0.0650222499887673, __dmul_rn(z, __dadd_rn(0.005081306281875766, __dmul_rn(z, __dadd_rn(0.00013249473800432164, __dmul_rn(z, wlm_negd(3.960228278775368e-06)))))))))));
+        double y = __ddiv_rn(r, s);
+        return __dadd_rn(x, __dmul_rn(x, y));
+    }
+    double y;
+    if (ix < 0x40180000) y = __dsub_rn(1.0, wlm_erfc2(ix, x));
+    else { double tiny = wlm_bits(0x0010000000000000ULL); y = __dsub_rn(1.0, tiny); }
+    return sign ? wlm_negd(y) : y;
+}
+__device__ __forceinline__ double wlm_erfc(double x) {
+    unsigned ix = wlm_hi(x);
+    unsigned sign = ix >> 31;
+    ix &= 0x7fffffff;
+    double sg = sign ? 1.0 : 0.0;
+    if (ix >= 0x7ff00000) return __dadd_rn(__dmul_rn(2.0, sg), __ddiv_rn(1.0, x));
+    if (ix < 0x3feb0000) {
+        if (ix < 0x3c700000) return __dsub_rn(1.0, x);
+        double z = __dmul_rn(x, x);
+        double r = __dadd_rn(0.12837916709551256, __dmul_rn(z, __dadd_rn(wlm_negd(0.3250421072470015), __dmul_rn(z, __dadd_rn(wlm_negd(0.02848174957559851), __dmul_rn(z, __dadd_rn(wlm_negd(0.005770270296489442), __dmul_rn(z, wlm_negd(2.3763016656650163e-05)))))))));
+        double s = __dadd_rn(1.0, __dmul_rn(z, __dadd_rn(0.39791722395915535, __dmul_rn(z, __dadd_rn(0.0650222499887673, __dmul_rn(z, __dadd_rn(0.005081306281875766, __dmul_rn(z, __dadd_rn(0.00013249473800432164, __dmul_rn(z, wlm_negd(3.960228278775368e-06)))))))))));
+        double y = __ddiv_rn(r, s);
+        if (sign || ix < 0x3fd00000) return __dsub_rn(1.0, __dadd_rn(x, __dmul_rn(x, y)));
+        return __dsub_rn(0.5, __dadd_rn(__dsub_rn(x, 0.5), __dmul_rn(x, y)));
+    }
+    if (ix < 0x403c0000) return sign ? __dsub_rn(2.0, wlm_erfc2(ix, x)) : wlm_erfc2(ix, x);
+    double tiny = wlm_bits(0x0010000000000000ULL);
+    return sign ? __dsub_rn(2.0, tiny) : __dmul_rn(tiny, tiny);
+}
 // f64cr.cuh's sin hands |x| >= 2^20 to the platform sin, which on these
 // backends wlm_IS this sin.  wlm_KNOWN wlm_GAP: that range reduces by fmod against the
 // binary64 2*pi (exact fmod, inexact modulus: relative error ~|x| * 2^-53),
@@ -759,6 +822,8 @@ __device__ __forceinline__ double tanh(double x) { return wlm_tanh(x); }
 __device__ __forceinline__ double tgamma(double x) { return wlm_tgamma(x); }
 __device__ __forceinline__ double lgamma(double x) { return wlm_lgamma(x); }
 __device__ __forceinline__ double log1p(double x) { return wlm_log1p(x); }
+__device__ __forceinline__ double erf(double x) { return wlm_erf(x); }
+__device__ __forceinline__ double erfc(double x) { return wlm_erfc(x); }
 __device__ __forceinline__ float log1pf(float x) { return wlm_log1pf(x); }
 __device__ __forceinline__ float cbrtf(float x) { return wlm_cbrtf(x); }
 // tgammaf.rs: binary64 tgamma rounded once.

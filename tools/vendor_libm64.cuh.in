@@ -705,6 +705,84 @@ __device__ __forceinline__ double plm_lgamma(double x) {
     if (sign) r = D(nadj - r);
     return r;
 }
+// erf.rs (FreeBSD s_erf.c), Rust libm 0.2.16: erf and erfc, statement by
+// statement; exp is the crate's own (plm_exp).
+__device__ __forceinline__ double plm_erfc1(double x) {
+    double s = D(plm_abs(x) - 1.0);
+    double p = D(-2.36211856075265944077e-03 + s * (4.14856118683748331666e-01 + s * (-3.72207876035701323847e-01
+               + s * (3.18346619901161753674e-01 + s * (-1.10894694282396677476e-01 + s * (3.54783043256182359371e-02
+               + s * -2.16637559486879084300e-03))))));
+    double q = D(1.0 + s * (1.06420880400844228286e-01 + s * (5.40397917702171048937e-01 + s * (7.18286544141962662868e-02
+               + s * (1.26171219808761642112e-01 + s * (1.36370839120290507362e-02 + s * 1.19844998467991074170e-02))))));
+    return D(1.0 - 8.45062911510467529297e-01 - p / q);
+}
+__device__ __forceinline__ double plm_erfc2(unsigned ix, double x) {
+    if (ix < 0x3ff40000) return plm_erfc1(x);
+    x = plm_abs(x);
+    double s = D(1.0 / (x * x));
+    double r, bs;
+    if (ix < 0x4006db6d) {
+        r = D(-9.86494403484714822705e-03 + s * (-6.93858572707181764372e-01 + s * (-1.05586262253232909814e+01
+            + s * (-6.23753324503260060396e+01 + s * (-1.62396669462573470355e+02 + s * (-1.84605092906711035994e+02
+            + s * (-8.12874355063065934246e+01 + s * -9.81432934416914548592e+00)))))));
+        bs = D(1.0 + s * (1.96512716674392571292e+01 + s * (1.37657754143519042600e+02 + s * (4.34565877475229228821e+02
+             + s * (6.45387271733267880336e+02 + s * (4.29008140027567833386e+02 + s * (1.08635005541779435134e+02
+             + s * (6.57024977031928170135e+00 + s * -6.04244152148580987438e-02))))))));
+    } else {
+        r = D(-9.86494292470009928597e-03 + s * (-7.99283237680523006574e-01 + s * (-1.77579549177547519889e+01
+            + s * (-1.60636384855821916062e+02 + s * (-6.37566443368389627722e+02 + s * (-1.02509513161107724954e+03
+            + s * -4.83519191608651397019e+02))))));
+        bs = D(1.0 + s * (3.03380607434824582924e+01 + s * (3.25792512996573918826e+02 + s * (1.53672958608443695994e+03
+             + s * (3.19985821950859553908e+03 + s * (2.55305040643316442583e+03 + s * (4.74528541206955367215e+02
+             + s * -2.24409524465858183362e+01)))))));
+    }
+    double z = plm_setlo(x, 0u);
+    double e1 = plm_exp(D(-z * z - 0.5625));
+    double e2 = plm_exp(D((z - x) * (z + x) + r / bs));
+    return D(e1 * e2 / x);
+}
+__device__ __forceinline__ double plm_erf(double x) {
+    unsigned ix = plm_hi(x);
+    unsigned sign = ix >> 31;
+    ix &= 0x7fffffff;
+    double sg = sign ? 1.0 : 0.0;
+    if (ix >= 0x7ff00000) return D(1.0 - 2.0 * sg + 1.0 / x);
+    if (ix < 0x3feb0000) {
+        if (ix < 0x3e300000) return D(0.125 * (8.0 * x + 1.02703333676410069053e+00 * x));
+        double z = D(x * x);
+        double r = D(1.28379167095512558561e-01 + z * (-3.25042107247001499370e-01 + z * (-2.84817495755985104766e-02
+                   + z * (-5.77027029648944159157e-03 + z * -2.37630166566501626084e-05))));
+        double s = D(1.0 + z * (3.97917223959155352819e-01 + z * (6.50222499887672944485e-02 + z * (5.08130628187576562776e-03
+                   + z * (1.32494738004321644526e-04 + z * -3.96022827877536812320e-06)))));
+        double y = D(r / s);
+        return D(x + x * y);
+    }
+    double y;
+    if (ix < 0x40180000) y = D(1.0 - plm_erfc2(ix, x));
+    else { double tiny = plm_bits(0x0010000000000000ULL); y = D(1.0 - tiny); }
+    return sign ? plm_negd(y) : y;
+}
+__device__ __forceinline__ double plm_erfc(double x) {
+    unsigned ix = plm_hi(x);
+    unsigned sign = ix >> 31;
+    ix &= 0x7fffffff;
+    double sg = sign ? 1.0 : 0.0;
+    if (ix >= 0x7ff00000) return D(2.0 * sg + 1.0 / x);
+    if (ix < 0x3feb0000) {
+        if (ix < 0x3c700000) return D(1.0 - x);
+        double z = D(x * x);
+        double r = D(1.28379167095512558561e-01 + z * (-3.25042107247001499370e-01 + z * (-2.84817495755985104766e-02
+                   + z * (-5.77027029648944159157e-03 + z * -2.37630166566501626084e-05))));
+        double s = D(1.0 + z * (3.97917223959155352819e-01 + z * (6.50222499887672944485e-02 + z * (5.08130628187576562776e-03
+                   + z * (1.32494738004321644526e-04 + z * -3.96022827877536812320e-06)))));
+        double y = D(r / s);
+        if (sign || ix < 0x3fd00000) return D(1.0 - (x + x * y));
+        return D(0.5 - (x - 0.5 + x * y));
+    }
+    if (ix < 0x403c0000) return sign ? D(2.0 - plm_erfc2(ix, x)) : plm_erfc2(ix, x);
+    double tiny = plm_bits(0x0010000000000000ULL);
+    return sign ? D(2.0 - tiny) : D(tiny * tiny);
+}
 // f64cr.cuh's sin hands |x| >= 2^20 to the platform sin, which on these
 // backends IS this sin.  KNOWN GAP: that range reduces by fmod against the
 // binary64 2*pi (exact fmod, inexact modulus: relative error ~|x| * 2^-53),
@@ -759,6 +837,8 @@ __device__ __forceinline__ double tanh(double x) { return plm_tanh(x); }
 __device__ __forceinline__ double tgamma(double x) { return plm_tgamma(x); }
 __device__ __forceinline__ double lgamma(double x) { return plm_lgamma(x); }
 __device__ __forceinline__ double log1p(double x) { return plm_log1p(x); }
+__device__ __forceinline__ double erf(double x) { return plm_erf(x); }
+__device__ __forceinline__ double erfc(double x) { return plm_erfc(x); }
 __device__ __forceinline__ float log1pf(float x) { return plm_log1pf(x); }
 __device__ __forceinline__ float cbrtf(float x) { return plm_cbrtf(x); }
 // tgammaf.rs: binary64 tgamma rounded once.
