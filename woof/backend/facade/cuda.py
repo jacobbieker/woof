@@ -216,10 +216,29 @@ def _properties(device=0):
         "major": 0, "minor": 0,
         "multiProcessorCount": _attributes()["MultiProcessorCount"],
         "maxThreadsPerBlock": 1024,
+        # resident threads per GPU core: only local-memory frames are priced
+        # with it (woof.core.preflight), and Metal reports no CUDA frame
+        "maxThreadsPerMultiProcessor": 1024,
         "warpSize": 32,
         "sharedMemPerBlock": 32768,
         "architecture": str(info.get("architecture", "")),
     }
+
+
+#: hostAlloc's blocks by address: unified memory, so page-locked host
+#: memory is host memory; the block lives until freeHost.
+_HOST_BLOCKS: dict = {}
+
+
+def _host_alloc(nbytes, flags=0):
+    block = np.zeros(max(int(nbytes), 1), dtype=np.uint8)
+    ptr = int(block.ctypes.data)
+    _HOST_BLOCKS[ptr] = block
+    return ptr
+
+
+def _free_host(ptr):
+    _HOST_BLOCKS.pop(int(ptr), None)
 
 
 runtime = types.SimpleNamespace(
@@ -228,6 +247,10 @@ runtime = types.SimpleNamespace(
     getDeviceCount=lambda: 1,
     memGetInfo=_mem_get_info,
     deviceSynchronize=_drain,
+    hostAlloc=_host_alloc,
+    # cudaDeviceGetLimit: Metal has no CUDA stack/heap limit to report (0)
+    deviceGetLimit=lambda limit: 0,
+    freeHost=_free_host,
     getDeviceProperties=_properties,
     runtimeGetVersion=lambda: 0,
     driverGetVersion=lambda: 0,
@@ -260,6 +283,12 @@ class _MemoryPool:
 
     def n_free_blocks(self):
         return 0
+
+    def malloc(self, size):
+        """A fresh allocation of ``size`` bytes, as a MemoryPointer."""
+        from woof.backend.facade._array import MemoryPointer, ndarray
+        a = ndarray((max(int(size), 1),), np.uint8)
+        return MemoryPointer(a._st, 0, int(size))
 
 
 _POOL = _MemoryPool()
@@ -327,8 +356,54 @@ class using_allocator:
 
     def __exit__(self, *exc):
         return False
-compiler = types.SimpleNamespace(CompileException=RuntimeError)
-driver = types.SimpleNamespace(CUDADriverError=RuntimeError)
+def _compile_using_nvrtc(source, options=(), arch=None, filename="kern.cu", name_expressions=None,
+                         log_stream=None, cache_in_memory=False, jitify=False, method=None):
+    """CuPy's direct NVRTC call: a translated image (``function.Module().load``
+    translates it) and no name mapping."""
+    if name_expressions:
+        raise AttributeError("NVRTC name expressions are not supported by woof's mlx backend")
+    return translated_image(source, tuple(options or ()), filename), None
+
+
+def _compile_with_cache_cuda(source, options, arch=None, cache_dir=None, extra_source=None,
+                             backend="nvrtc", enable_cooperative_groups=False, name_expressions=None,
+                             log_stream=None, jitify=False, *args, **kwargs):
+    """CuPy's cached compile behind every RawModule: the translated module."""
+    module = _FunctionModule()
+    module.load(translated_image(source, tuple(options or ()), "kern.cu"))
+    return module
+
+
+class _NVRTCProgram:
+    """Present so woof's NVRTC option hooks (woof.numerics, woof.wrf_exact,
+    woof.cuda_subnormals) install; the facade never runs NVRTC."""
+
+    def __init__(self, src, name="kern.cu", *args, **kwargs):
+        self.src = src
+
+    def compile(self, options=(), log_stream=None):
+        raise AttributeError("NVRTC is not available on woof's mlx backend")
+
+
+compiler = types.SimpleNamespace(
+    CompileException=RuntimeError, compile_using_nvrtc=_compile_using_nvrtc,
+    _compile_with_cache_cuda=_compile_with_cache_cuda, _NVRTCProgram=_NVRTCProgram,
+    _get_arch=lambda: "metal")
+
+
+def _func_get_attribute(attribute, function_ptr):
+    """CUfunction attributes: Metal has no CUDA local frame, registers or
+    PTX version to report; 0 for each (max threads: the pipeline's own
+    limit is checked at launch)."""
+    return 0
+
+
+driver = types.SimpleNamespace(
+    CUDADriverError=RuntimeError, funcGetAttribute=_func_get_attribute,
+    CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK=0, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES=1,
+    CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES=2, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES=3,
+    CU_FUNC_ATTRIBUTE_NUM_REGS=4, CU_FUNC_ATTRIBUTE_PTX_VERSION=5,
+    CU_FUNC_ATTRIBUTE_BINARY_VERSION=6)
 
 #: No NVRTC: (0, 0) so a receipt header cannot be mistaken for a CUDA build
 #: (the facade's cupy.__version__ names the backend).

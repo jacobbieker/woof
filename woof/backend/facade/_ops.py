@@ -39,7 +39,12 @@ def _dtype_hint(x):
 
 
 def scalar_values(value, dtype):
-    """A Python/NumPy scalar as a 0-d mx.array in ``dtype``'s storage."""
+    """A Python/NumPy scalar (or a one-element facade array) as a 0-d
+    mx.array in ``dtype``'s storage."""
+    if isinstance(value, ndarray):
+        if value.size != 1:
+            raise ValueError(f"a fill value must be a scalar; got shape {value.shape}")
+        value = value.get().reshape(())
     host = np.asarray(value, dtype=dtype)
     return to_storage_values(host).reshape(())
 
@@ -68,7 +73,8 @@ def _wrap(values, dtype, *, fresh: bool = False) -> ndarray:
 
 
 def from_host(host: np.ndarray) -> ndarray:
-    host = np.ascontiguousarray(host)
+    # (np.ascontiguousarray promotes a 0-d array to 1-d: keep the scalar shape)
+    host = np.require(np.asarray(host), requirements="C")
     if host.dtype == np.float64 or host.dtype.kind in "biufc?":
         return _wrap(to_storage_values(host).reshape(host.shape), host.dtype, fresh=True)
     raise TypeError(f"the mlx backend cannot hold dtype {host.dtype}")
@@ -97,7 +103,7 @@ def ones(shape, dtype=np.float32, order="C"):
 def full(shape, fill_value, dtype=None, order="C"):
     import mlx.core as mx
     if dtype is None:
-        dtype = np.asarray(fill_value).dtype
+        dtype = fill_value.dtype if isinstance(fill_value, ndarray) else np.asarray(fill_value).dtype
     shape = (int(shape),) if isinstance(shape, (int, np.integer)) else tuple(int(n) for n in shape)
     return _wrap(mx.broadcast_to(scalar_values(fill_value, dtype), shape), np.dtype(dtype), fresh=True)
 
@@ -245,7 +251,8 @@ _BINARY = {
     "remainder": "remainder", "mod": "remainder", "arctan2": "arctan2",
     "bitwise_and": "bitwise_and", "bitwise_or": "bitwise_or", "bitwise_xor": "bitwise_xor",
     "left_shift": "left_shift", "right_shift": "right_shift", "hypot": None,
-    "copysign": None, "logaddexp": "logaddexp",
+    "copysign": None, "logaddexp": "logaddexp", "nextafter": None, "ldexp": None,
+    "float_power": None, "gcd": None, "lcm": None, "heaviside": None,
 }
 _COMPARE = {
     "less": "less", "less_equal": "less_equal", "greater": "greater",

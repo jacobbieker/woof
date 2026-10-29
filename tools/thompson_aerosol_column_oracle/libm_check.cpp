@@ -2,7 +2,7 @@
 //
 // Compiles gpuwm/core/kernels/thompson_aerosol_libm.cuh (on glibc_flt32.cuh
 // and glibc_flt64.cuh) for the host behind
-// tools/thompson_real_column_parity/cuda_host_shim.h and compares every
+// woof/backend/host/cuda_host_shim.h and compares every
 // returned word with the host C library the gfortran WRF oracle calls:
 // expf, logf and log10f over all 2^32 float32 inputs, powf, exp, log, pow
 // and log10 on N sampled arguments each (default 2e8), and hypot and log1p

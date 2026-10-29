@@ -78,9 +78,45 @@ def install(name: str | None = None) -> str:
         if importlib.util.find_spec("mlx") is None:
             raise BackendUnavailable("backend 'mlx' needs the mlx package "
                                      "(pixi environment `mlx`, or the gpu-mlx extra)")
-    from woof.backend import facade
-    facade.configure(name)
-    sys.modules["cupy"] = facade
-    sys.modules["cupyx"] = facade.cupyx
+    # Lazily: `import cupy` finds the facade when something first imports it,
+    # so a module that imports no cupy on CUDA imports none here either.
+    if not any(isinstance(f, _FacadeFinder) for f in sys.meta_path):
+        sys.meta_path.insert(0, _FacadeFinder(name))
     _active = name
     return name
+
+
+class _FacadeLoader:
+    """Hands out the facade (``cupy``) or its ``cupyx`` as the module."""
+
+    def __init__(self, backend: str):
+        self.backend = backend
+
+    def create_module(self, spec):
+        from woof.backend import facade
+        if not getattr(facade, "_configured", False):
+            facade.configure(self.backend)
+            facade._configured = True
+        return facade if spec.name == "cupy" else facade.cupyx
+
+    def exec_module(self, module):
+        return None
+
+
+class _FacadeFinder:
+    """``import cupy`` / ``import cupyx`` -> woof's facade (install())."""
+
+    def __init__(self, backend: str):
+        self.backend = backend
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname not in ("cupy", "cupyx"):
+            return None
+        import importlib.machinery
+        spec = importlib.machinery.ModuleSpec(fullname, _FacadeLoader(self.backend),
+                                              is_package=(fullname == "cupy"))
+        if fullname == "cupy":
+            # `import cupy.cuda`: the facade package's own submodules
+            spec.submodule_search_locations = list(
+                importlib.util.find_spec("woof.backend.facade").submodule_search_locations)
+        return spec

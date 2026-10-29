@@ -269,6 +269,18 @@ fft.fftfreq, fft.rfftfreq = _on_host(np.fft.fftfreq), _on_host(np.fft.rfftfreq)
 fft.fftshift, fft.ifftshift = _on_host(np.fft.fftshift), _on_host(np.fft.ifftshift)
 fft.config = types.SimpleNamespace(enable_nd_planning=False, get_plan_cache=lambda: None)
 
+# cupy.testing: NumPy's assertions on host copies
+def _testing_on_host(fn):
+    def check(*args, **kwargs):
+        return fn(*[asnumpy(a) if isinstance(a, ndarray) else a for a in args], **kwargs)
+    check.__name__ = fn.__name__
+    return check
+
+
+testing = types.SimpleNamespace(**{n: _testing_on_host(getattr(np.testing, n)) for n in (
+    "assert_array_equal", "assert_array_almost_equal", "assert_allclose", "assert_array_less",
+    "assert_array_max_ulp", "assert_array_almost_equal_nulp", "assert_equal")})
+
 get_default_memory_pool = cuda.get_default_memory_pool
 get_default_pinned_memory_pool = cuda.get_default_pinned_memory_pool
 
@@ -329,8 +341,7 @@ class _Unsupported:
         raise BackendUnsupported(f"cupy.{self._name} is not implemented by woof's mlx backend")
 
 
-from woof.backend.facade._elementwise import ElementwiseKernel  # noqa: E402
-ReductionKernel = _Unsupported("ReductionKernel")
+from woof.backend.facade._elementwise import ElementwiseKernel, ReductionKernel  # noqa: E402
 fuse = lambda *a, **k: (lambda f: f) if not a or not callable(a[0]) else a[0]  # noqa: E731
 
 cupyx = types.ModuleType("cupyx")

@@ -26,6 +26,7 @@ NumPy on the host (:mod:`woof.backend.facade._ops`).
 from __future__ import annotations
 
 import operator
+import weakref
 from functools import reduce
 
 import numpy as np
@@ -61,7 +62,7 @@ def storage_mx_dtype(dtype: np.dtype):
 def to_storage_values(host: np.ndarray):
     """A host array -> an mx.array in its storage dtype (float64 as words)."""
     mx = _mx()
-    host = np.ascontiguousarray(host)
+    host = np.require(np.asarray(host), requirements="C")   # (keeps 0-d)
     if host.dtype == np.float64:
         return mx.array(host.view(np.uint64))
     return mx.array(host)
@@ -85,6 +86,10 @@ class Storage:
         flat = _materialize(arr)
         self.arr = flat if fresh else mx.array(flat)
         self.dtype = np.dtype(dtype)
+        # A new value is usually still lazy -- a copy or an expression of other
+        # buffers.  It must be computed before any in-place launch overwrites
+        # what it reads (flush_pending), as CUDA's stream order would have it.
+        PENDING.append(self)
 
     @property
     def nbytes(self) -> int:
@@ -105,11 +110,35 @@ class Storage:
         mx.async_eval(out)
 
     def address(self) -> int:
-        """The buffer's GPU address (evaluating it first)."""
+        """The buffer's GPU address (evaluating it first).  Recorded, so an
+        address handed back as a kernel argument (CUDA code passes
+        ``a.data.ptr`` for pointers) resolves to this storage."""
         import mlx.core as mx
         from woof.backend.metal import ext
         mx.eval(self.arr)
-        return int(ext.load().gpu_address(self.arr))
+        base = int(ext.load().gpu_address(self.arr))
+        _ADDRESSES[base] = weakref.ref(self)
+        return base
+
+
+#: GPU base address -> the storage that handed it out (Storage.address)
+_ADDRESSES: dict = {}
+
+
+def storage_at(address: int):
+    """(storage, byte offset) of a GPU address a storage handed out, or None."""
+    from woof.backend.metal import ext
+    for base, ref in list(_ADDRESSES.items()):
+        st = ref()
+        if st is None:
+            del _ADDRESSES[base]
+            continue
+        if base <= address < base + max(st.nbytes, 1):
+            if int(ext.load().gpu_address(st.arr)) != base:   # rebound since
+                del _ADDRESSES[base]
+                continue
+            return st, address - base
+    return None
 
 
 def _materialize(arr):

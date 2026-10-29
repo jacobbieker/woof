@@ -170,3 +170,123 @@ class ElementwiseKernel:
                 f"    if (i >= __woof_n) return;\n"
                 + "".join(f"    {line}\n" for line in loads)
                 + f"    {self.operation};\n}}\n")
+
+
+class ReductionKernel:
+    """``cupy.ReductionKernel``: ``map_expr`` per element, folded with
+    ``reduce_expr`` (``a``, ``b``) from ``identity`` over the reduced axes,
+    then ``post_map_expr`` (``a``) into each output.
+
+    One thread per output element folds its elements serially, in index
+    order: deterministic, and exact for the bitwise/logical reductions woof
+    uses.  (A floating sum would differ from CuPy's tree order by rounding.)
+    """
+
+    def __init__(self, in_params, out_params, map_expr, reduce_expr, post_map_expr,
+                 identity, name="reduce_kernel", reduce_type=None, reduce_dims=True,
+                 preamble="", options=(), **_):
+        self.inputs = _params(in_params)
+        self.outputs = _params(out_params)
+        if len(self.outputs) != 1 or any(p.raw for p in self.inputs + self.outputs):
+            raise ValueError("ReductionKernel: one output and no raw parameters")
+        self.map_expr, self.reduce_expr, self.post_map_expr = map_expr, reduce_expr, post_map_expr
+        self.identity = identity
+        self.name = re.sub(r"\W", "_", name)
+        self.reduce_type = reduce_type
+        self.preamble = preamble or ""
+        self.options = tuple(options or ())
+        self._modules = {}
+
+    def __call__(self, *args, axis=None, keepdims=False, out=None, stream=None, **_):
+        from woof.backend.facade import _ops
+        from woof.backend.facade._array import ndarray
+        if len(args) not in (len(self.inputs), len(self.inputs) + 1):
+            raise TypeError(f"{self.name}: {len(args)} arguments for {len(self.inputs)} inputs")
+        ins = list(args[:len(self.inputs)])
+        if len(args) > len(self.inputs):
+            out = args[-1]
+        types: dict[str, np.dtype] = {}
+        for p, a in zip(self.inputs, ins):
+            if p.generic:
+                types.setdefault(p.type, np.dtype(a.dtype if hasattr(a, "dtype") else np.asarray(a).dtype))
+        for p in self.outputs:
+            if p.generic and p.type not in types:
+                if out is None:
+                    raise TypeError(f"{self.name}: cannot infer the type {p.type}")
+                types[p.type] = np.dtype(out.dtype)
+
+        def dtype_of(p):
+            return types[p.type] if p.generic else np.dtype(p.type)
+
+        arrays = [_ops.asarray(a) for a in ins if isinstance(a, (ndarray, np.ndarray))]
+        shape = np.broadcast_shapes(*[a.shape for a in arrays]) if arrays else ()
+        nd = len(shape)
+        axes = tuple(range(nd)) if axis is None else tuple(sorted(a % nd for a in np.atleast_1d(axis)))
+        keep = tuple(i for i in range(nd) if i not in axes)
+        out_shape = tuple(1 if i in axes else shape[i] for i in range(nd)) if keepdims \
+            else tuple(shape[i] for i in keep)
+        n_out = int(np.prod([shape[i] for i in keep])) if keep else 1
+        n_red = int(np.prod([shape[i] for i in axes])) if axes else 1
+
+        call_args, is_array = [], []
+        for p, a in zip(self.inputs, ins):
+            dt = dtype_of(p)
+            if isinstance(a, (ndarray, np.ndarray)):
+                a = _ops.asarray(a)
+                if a.dtype != dt:
+                    a = a.astype(dt)
+                # (kept axes..., reduced axes...), dense: element (o, r) at o*n_red + r
+                b = _ops.broadcast_to(a, shape).transpose(keep + axes)
+                call_args.append(_ops.ascontiguousarray(b))
+                is_array.append(True)
+            else:
+                call_args.append(dt.type(a))
+                is_array.append(False)
+        odt = dtype_of(self.outputs[0])
+        result = _ops.empty((n_out,), odt)
+        call_args += [result, np.int64(n_out), np.int64(n_red)]
+        key = (tuple(str(types.get(t)) for t in sorted(types)), tuple(is_array))
+        fn = self._modules.get(key)
+        if fn is None:
+            from woof.backend.facade import RawModule
+            fn = self._modules[key] = RawModule(code=self._source(types, is_array),
+                                                options=self.options or ("-std=c++17",)) \
+                .get_function(self.name)
+        if n_out:
+            fn((((n_out + _TPB - 1) // _TPB),), (_TPB,), tuple(call_args))
+        result = result.reshape(out_shape)
+        if out is not None:
+            _ops.copyto(out, result)
+            return out
+        return result
+
+    def _source(self, types, is_array):
+        def ctype(p):
+            return _CTYPES[np.dtype(types[p.type]).name] if p.generic else _CTYPES[p.type]
+
+        out = self.outputs[0]
+        rtype = self.reduce_type or ctype(out)
+        params, loads = [], []
+        for p, array in zip(self.inputs, is_array):
+            t = ctype(p)
+            if array:
+                params.append(f"const {t}* __woof_in_{p.name}")
+                loads.append(f"const {t} {p.name} = __woof_in_{p.name}[__woof_o * __woof_r + __woof_k];")
+            else:
+                params.append(f"{t} {p.name}")
+        params.append(f"{ctype(out)}* __woof_out")
+        typedefs = "".join(f"typedef {_CTYPES[np.dtype(dt).name]} {nm};\n" for nm, dt in types.items())
+        return (f"{typedefs}{self.preamble}\n"
+                f'extern "C" __global__ void {self.name}({", ".join(params)}, '
+                f"long long __woof_n, long long __woof_r) {{\n"
+                f"    long long __woof_o = (long long)blockIdx.x * blockDim.x + threadIdx.x;\n"
+                f"    if (__woof_o >= __woof_n) return;\n"
+                f"    {rtype} a = ({rtype})({self.identity});\n"
+                f"    for (long long __woof_k = 0; __woof_k < __woof_r; ++__woof_k) {{\n"
+                + "".join(f"        {line}\n" for line in loads)
+                + f"        {rtype} b = ({rtype})({self.map_expr});\n"
+                f"        a = ({rtype})({self.reduce_expr});\n"
+                f"    }}\n"
+                f"    {ctype(out)} {out.name};\n"
+                f"    {self.post_map_expr};\n"
+                f"    __woof_out[__woof_o] = {out.name};\n}}\n")

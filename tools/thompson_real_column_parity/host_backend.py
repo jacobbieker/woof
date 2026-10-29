@@ -41,7 +41,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-SHIM = HERE / "cuda_host_shim.h"
+SHIM = ROOT / "woof" / "backend" / "host" / "cuda_host_shim.h"   # the host tier's shim
 
 CXX_FLAGS = ("-O2", "-std=c++17", "-ffp-contract=off",
              "-fno-unsafe-math-optimizations", "-fno-tree-vectorize",
@@ -255,7 +255,7 @@ class HostModule:
             cpp.write_text(unit, encoding="utf-8", newline="\n")
             tmp = build / f"{stem}.{os.getpid()}.tmp.so"
             done = subprocess.run(
-                [cxx, *CXX_FLAGS, "-I", str(HERE), str(cpp), "-o", str(tmp),
+                [cxx, *CXX_FLAGS, "-I", str(HERE), "-I", str(SHIM.parent), str(cpp), "-o", str(tmp),
                  "-lm"], capture_output=True, text=True, check=False)
             cpp.unlink(missing_ok=True)
             if done.returncode != 0:
