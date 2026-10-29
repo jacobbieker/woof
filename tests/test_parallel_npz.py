@@ -72,3 +72,35 @@ def test_zip64_end_records_match_np_savez(tmp_path, monkeypatch):
     parallel_npz.write_npz(written, payload, workers=4)
     assert b"PK\x06\x06" in reference.read_bytes()[-200:]               # the branch really ran
     assert written.read_bytes() == reference.read_bytes()
+
+
+def test_members_staged_through_one_buffer_keep_their_own_bytes(tmp_path):
+    """A checkpoint's device members are staged through ONE reused host buffer
+    (woof.io.restart._StagedMember): each turns into an array only when asked,
+    by overwriting that buffer and returning a view of it.  The writer must ask
+    for each member immediately before writing it, as np.savez does.  The
+    breakage this prevents: the parallel writer materialised every member first,
+    so every staged member of a 1.1.3 checkpoint carried the bytes of the last
+    one staged (found by the mlx backend's restart test, where a resumed run
+    then read another field's values as its surface heat flux)."""
+    shared = np.empty(64, dtype=np.uint8)
+
+    class Staged:
+        def __init__(self, value):
+            self._value = value
+
+        def __array__(self, dtype=None, copy=None):
+            out = shared[:self._value.nbytes].view(self._value.dtype).reshape(self._value.shape)
+            out[...] = self._value
+            return out
+
+    rng = np.random.default_rng(5)
+    values = {f"fields/m{i}": rng.standard_normal((2, 3)).astype(np.float32) for i in range(4)}
+    written = tmp_path / "staged.npz"
+    parallel_npz.write_npz(written, {k: Staged(v) for k, v in values.items()}, workers=2)
+    with np.load(written) as archive:
+        for key, value in values.items():
+            np.testing.assert_array_equal(archive[key], value, err_msg=key)
+    reference = tmp_path / "savez.npz"
+    np.savez(reference, **values)
+    assert written.read_bytes() == reference.read_bytes()
