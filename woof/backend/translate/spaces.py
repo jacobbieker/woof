@@ -15,7 +15,13 @@ function one overload per distinct combination it is called with:
   (worklist over (function, parameter-spaces) instances, from the kernels);
 * struct pointer fields are ``device`` (woof's accessor structs wrap kernel
   buffers), and a member function returning a reference or pointer into one
-  returns ``device``.
+  returns ``device``;
+* a *space-generic* struct (one whose pointer field is given pointers in two
+  spaces: goddard's ``GArray`` wraps kernel buffers and local arrays) is a
+  slot like a pointer: a parameter of its type takes the space of the
+  argument's data, a local takes its initialiser's, and its methods return
+  references into that space.  The translator gives the struct an address
+  space template parameter (``__WS``).
 
 A value whose space cannot be determined, or that receives two different
 spaces where one is required, is a :class:`TranslationError` naming it.
@@ -87,6 +93,8 @@ class SpaceAnalysis:
         self.this_spaces: dict = {}
         #: the unit dereferences integer addresses (host-built pointer tables)
         self.address_casts = False
+        #: space-generic struct names (the translator's detection pass)
+        self.generic = set(getattr(rewriter, "generic_structs", ()) or ())
         self._instance = None
 
     # ---------------------------------------------------------- collection
@@ -95,6 +103,8 @@ class SpaceAnalysis:
         for c in cursors:
             if c.kind in (K.NAMESPACE, K.LINKAGE_SPEC, K.STRUCT_DECL, K.CLASS_DECL, K.CLASS_TEMPLATE,
                           K.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION):
+                if c.spelling in self.generic:
+                    continue        # its methods are templated on the space instead
                 self.collect(list(c.get_children()))
                 continue
             if c.kind not in (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR) \
@@ -106,6 +116,9 @@ class SpaceAnalysis:
             # (__woof_addr_table, rewritten by the translator): no space slot.
             slots = [(i, p, "ptr" if _indirection(p.type) == "array" else _indirection(p.type))
                      for i, p in enumerate(params) if _indirection(p.type) and not _is_table(p.type)]
+            slots += [(i, p, "gstruct") for i, p in enumerate(params)
+                      if not _indirection(p.type) and self.generic_name(p.type)]
+            slots.sort(key=lambda slot: slot[0])
             if c.kind == K.CONSTRUCTOR:
                 returns = None
             elif c.kind in (K.FUNCTION_DECL, K.CXX_METHOD):
@@ -243,7 +256,8 @@ class SpaceAnalysis:
         for usr, info in list(self.functions.items()):
             if usr not in self.instances:
                 # pointers default to buffers; references to objects (locals)
-                self.request(info, tuple(THREAD if ind == "ref" else DEVICE for _, _, ind in info.slots), None)
+                self.request(info, tuple(THREAD if ind in ("ref", "gstruct") else DEVICE
+                                         for _, _, ind in info.slots), None)
         self.drain()
 
     def drain(self):
@@ -296,6 +310,14 @@ class SpaceAnalysis:
                         self.var_spaces.setdefault(node.get_usr(), set()).add(space)
                         self.inst_var_spaces.setdefault(self._instance, {}).setdefault(
                             node.get_usr(), set()).add(space)
+            elif kind == K.VAR_DECL and self.generic_name(node.type):
+                init = [c for c in node.get_children() if c.kind not in (K.TYPE_REF, K.TEMPLATE_REF, K.NAMESPACE_REF)]
+                space = self.gspace(init[-1], env) if init else None
+                if space not in (None, NULL):
+                    env[node.get_usr()] = space
+                    self.var_spaces.setdefault(node.get_usr(), set()).add(space)
+                    self.inst_var_spaces.setdefault(self._instance, {}).setdefault(
+                        node.get_usr(), set()).add(space)
             elif kind == K.CALL_EXPR:
                 self.call(node, env)
             if kind == K.CONDITIONAL_OPERATOR and _indirection(node.type) == "ptr":
@@ -355,6 +377,8 @@ class SpaceAnalysis:
             decl = t.get_declaration()
         if decl is None or decl.kind.name not in ("STRUCT_DECL", "CLASS_DECL", "CLASS_TEMPLATE"):
             return
+        if decl.spelling.split("<", 1)[0] in self.generic:
+            return              # the space rides in the type (gspace)
         fields = [c for c in decl.get_children() if c.kind.name == "FIELD_DECL"]
         if not fields:          # an implicit instantiation lists none: its template's
             pattern = self._class_template(decl.spelling.split("<", 1)[0])
@@ -417,6 +441,73 @@ class SpaceAnalysis:
                     return c
         return None
 
+    # ---------------------------------------------------------- generic structs
+    def generic_name(self, t):
+        """The space-generic struct ``t`` is (through const and references), or None."""
+        if not self.generic:
+            return None
+        c = t.get_canonical()
+        while c.kind.name in ("LVALUEREFERENCE", "RVALUEREFERENCE"):
+            c = c.get_pointee().get_canonical()
+        decl = c.get_declaration()
+        if decl is None or decl.kind.name == "NO_DECL_FOUND":
+            decl = t.get_declaration()
+        if decl is None or decl.kind.name == "NO_DECL_FOUND":
+            return None
+        name = decl.spelling.split("<", 1)[0]
+        return name if name in self.generic else None
+
+    def _generic_method(self, ref) -> bool:
+        parent = ref.semantic_parent
+        return parent is not None and parent.spelling.split("<", 1)[0] in self.generic \
+            and ref.kind.name in ("CXX_METHOD", "FUNCTION_TEMPLATE", "CONVERSION_FUNCTION", "CONSTRUCTOR")
+
+    def _call_object(self, call):
+        """The object a member or operator call is made on."""
+        kids = list(call.get_children())
+        if not kids:
+            return call
+        first = kids[0]
+        if first.kind.name == "MEMBER_REF_EXPR":
+            inner = list(first.get_children())
+            return inner[0] if inner else first
+        return first
+
+    def gspace(self, e, env):
+        """The space of a space-generic struct value's data: a parameter's
+        or local's (env), an aggregate's first pointer, or the object a
+        conversion or copy is made from."""
+        while True:
+            kind = e.kind.name
+            kids = [c for c in e.get_children() if c.kind.name not in ("TYPE_REF", "TEMPLATE_REF", "NAMESPACE_REF")]
+            if kind == "DECL_REF_EXPR":
+                d = e.referenced
+                return env.get(d.get_usr()) if d is not None else None
+            if kind == "INIT_LIST_EXPR":
+                return self.space(kids[0], env) if kids else None
+            if kind == "CALL_EXPR":
+                ref = e.referenced
+                if ref is not None and ref.kind.name == "CONSTRUCTOR":
+                    args = list(e.get_arguments())
+                    if not args:
+                        return None
+                    e = args[0]
+                    continue
+                if ref is not None and self._generic_method(ref):
+                    e = self._call_object(e)
+                    continue
+                return None
+            if kind == "MEMBER_REF_EXPR" and kids:
+                e = kids[0]
+                continue
+            if kids and kind in _PASS_THROUGH + ("CXX_FUNCTIONAL_CAST_EXPR", "MATERIALIZE_TEMPORARY_EXPR"):
+                e = kids[-1]
+                continue
+            if len(kids) == 1 and kind.startswith("UNEXPOSED"):
+                e = kids[0]
+                continue
+            return None
+
     def _subscript_operator(self, base):
         """The operator[] (one return space for every overload) of ``base``'s class."""
         t = base.type
@@ -452,6 +543,8 @@ class SpaceAnalysis:
         ref = node.referenced
         if ref is None or ref.kind.name not in ("CXX_METHOD",):
             return
+        if self._generic_method(ref):
+            return
         kids = list(node.get_children())
         if not kids:
             return
@@ -481,6 +574,14 @@ class SpaceAnalysis:
         args = list(node.get_arguments())
         spaces = []
         for index, parm, ind in info.slots:
+            if ind == "gstruct":
+                s = self.gspace(args[index], env) if index < len(args) else None
+                if s in (None, NULL):
+                    self.rw.refuse(args[index] if index < len(args) else node,
+                                   f"cannot tell which address space the data of the argument for "
+                                   f"{info.name}({parm.spelling}) lives in")
+                spaces.append(s)
+                continue
             if index >= len(args) or args[index].location.file is None \
                     or args[index].extent.start.offset == args[index].extent.end.offset:
                 # a defaulted argument: the callee's own default (nullptr)
@@ -504,11 +605,12 @@ class SpaceAnalysis:
             spelled = info.slots[k][1].type.spelling
             order = list(range(k - 1, -1, -1)) + list(range(k + 1, len(spaces)))
             for j in order:
-                if spaces[j] != NULL and info.slots[j][1].type.spelling == spelled:
+                if spaces[j] != NULL and info.slots[j][2] != "gstruct" \
+                        and info.slots[j][1].type.spelling == spelled:
                     return spaces[j]
             return DEVICE
-        for k, ((index, parm, _), sp) in enumerate(zip(info.slots, spaces)):
-            if sp == NULL:
+        for k, ((index, parm, ind), sp) in enumerate(zip(info.slots, spaces)):
+            if sp == NULL and ind != "gstruct":
                 fill = fill_for(k)
                 cast = self._null_cast_node(args[index])
                 if cast is not None:            # `(T*)0`: that cast names the space itself
@@ -547,7 +649,7 @@ class SpaceAnalysis:
                     return THREADGROUP
                 parent = d.semantic_parent
                 if parent is not None and parent.kind.name in ("TRANSLATION_UNIT", "NAMESPACE", "LINKAGE_SPEC"):
-                    return CONSTANT
+                    return self.rw.program_var_space(d)    # a mutable global is a device buffer
                 if parent is not None and parent.kind.name in ("STRUCT_DECL", "CLASS_DECL", "CLASS_TEMPLATE",
                                                                "CLASS_TEMPLATE_PARTIAL_SPECIALIZATION"):
                     return CONSTANT     # a static data member: program scope, so `constant`
@@ -577,6 +679,10 @@ class SpaceAnalysis:
             member = e.referenced
             if member is None and children:
                 member = self._dependent_field(e, children[0])   # `s.f` on a template's struct
+            if member is not None and member.kind.name == "FIELD_DECL" and children \
+                    and _indirection(member.type) == "ptr" and member.semantic_parent is not None \
+                    and member.semantic_parent.spelling.split("<", 1)[0] in self.generic:
+                return self.gspace(children[0], env)
             if member is not None and member.kind.name == "FIELD_DECL" and not lvalue \
                     and _indirection(member.type) == "ptr":
                 return self.rw._field_space(member)
@@ -627,11 +733,15 @@ class SpaceAnalysis:
             self.rw.refuse(e, f"a conditional chooses between {a} and {b} pointers")
         if kind == "CALL_EXPR":
             ref = e.referenced
+            if ref is not None and self._generic_method(ref):
+                # `a(i)` on a space-generic struct: a reference into its data
+                return self.gspace(self._call_object(e), env)
             info = self.resolve_call(e)
             if info is not None and info.returns:
                 args = list(e.get_arguments())
-                spaces = tuple((self.space(args[i], env, lvalue=(ind == "ref")) if i < len(args) else None)
-                               or (THREAD if ind == "ref" else DEVICE)
+                spaces = tuple(((self.gspace(args[i], env) if ind == "gstruct" else
+                                 self.space(args[i], env, lvalue=(ind == "ref"))) if i < len(args) else None)
+                               or (THREAD if ind in ("ref", "gstruct") else DEVICE)
                                for i, _, ind in info.slots)
                 spaces = tuple(DEVICE if s == NULL else s for s in spaces)
                 key = (info.cursor.get_usr(), spaces)

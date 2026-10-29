@@ -479,9 +479,10 @@ class _Rewriter:
         K = self.ci.CursorKind
         top = [c for c in self.tu.cursor.get_children() if self.main_file(c)]
         from woof.backend.translate.spaces import SpaceAnalysis
+        self._kernel_cursors = self._kernels(top)
+        self.generic_structs = self._space_generic_structs(top)
         self.spaces = SpaceAnalysis(self)
         self.spaces.collect(top)
-        self._kernel_cursors = self._kernels(top)
         self.spaces.run(self._kernel_cursors)
         self.eliminate_gotos()
         self.dynamic_shared = self._dynamic_shared(top)
@@ -508,6 +509,25 @@ class _Rewriter:
         return TranslatedUnit(msl=msl, kernels=self.kernels, globals={
             g["name"]: {"nbytes": g["nbytes"], "ctype": g["ctype"], "space": g["space"], "init": g.get("init")}
             for g in self.module_globals.values()})
+
+    def _space_generic_structs(self, top) -> set:
+        """Structs whose pointer field is given pointers in two address
+        spaces: a probe of the space analysis records every field's spaces
+        (refusing nothing for them), and those become space-generic --
+        templated on the space of their data (generic_struct)."""
+        from woof.backend.translate.spaces import SpaceAnalysis
+        self.generic_structs = set()
+        self._probing_fields = True
+        try:
+            probe = self.spaces = SpaceAnalysis(self)
+            probe.collect(top)
+            probe.run(self._kernel_cursors)
+        except TranslationError:
+            return set()        # the real pass names what it cannot do
+        finally:
+            self._probing_fields = False
+            self.spaces = None
+        return {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
 
     def visit_top(self, cursor):
         K = self.ci.CursorKind
@@ -563,6 +583,19 @@ class _Rewriter:
             self.module_global(cursor, "device", init=init)
             return
         self.constant_declaration(cursor)
+
+    def program_var_space(self, cursor) -> str:
+        """The space a program-scope variable's storage has in the MSL
+        (program_scope_var): a mutable ``__device__`` global is a module
+        buffer in ``device`` memory, everything else ``constant``."""
+        K = self.ci.CursorKind
+        if any(c.kind == K.ANNOTATE_ATTR and c.spelling == _CONSTANT for c in cursor.get_children()):
+            return "constant"
+        t = cursor.type
+        base = t
+        while base.kind.name in ("CONSTANTARRAY", "INCOMPLETEARRAY"):
+            base = base.element_type
+        return "constant" if (base.is_const_qualified() or t.is_const_qualified()) else "device"
 
     def _has_initialiser(self, cursor):
         return any(c.kind.name not in ("TYPE_REF", "ANNOTATE_ATTR", "NAMESPACE_REF", "TEMPLATE_REF")
@@ -740,7 +773,46 @@ class _Rewriter:
             if len(spaces) > 1:
                 self.refuse(stmt, f"one declaration holds {' and '.join(sorted(spaces))} pointers")
             plan.append((at, f"{next(iter(spaces), default)} "))
+        for at, (stmt, usrs, owner) in self._generic_local_sites().items():
+            if owner != fn_usr:
+                continue
+            spaces = set()
+            for u in usrs:
+                spaces |= spaces_of.get(u, set())
+            if len(spaces) > 1:
+                self.refuse(stmt, f"one declaration holds data in {' and '.join(sorted(spaces))} memory")
+            if spaces:
+                plan.append((at, f", {self.SPACE_INDEX[next(iter(spaces))]}"))
         return plan
+
+    def _generic_local_sites(self):
+        """Local declarations of a space-generic struct type: where each
+        statement's ``S<...>`` takes its space, keyed by offset."""
+        if getattr(self, "_generic_sites", None) is None:
+            self._generic_sites = {}
+            if self.generic_structs:
+                K = self.ci.CursorKind
+                stmts = self._decl_stmts()
+                for n in self.tu.cursor.walk_preorder():
+                    if n.kind != K.VAR_DECL or not self.main_file(n):
+                        continue
+                    name = self.spaces.generic_name(n.type)
+                    owner = n.semantic_parent
+                    if name is None or owner is None or owner.kind.name not in (
+                            "FUNCTION_DECL", "FUNCTION_TEMPLATE", "CXX_METHOD", "CONSTRUCTOR"):
+                        continue
+                    if owner.semantic_parent is not None and \
+                            owner.semantic_parent.spelling.split("<", 1)[0] in self.generic_structs:
+                        continue        # inside the struct: __WS (generic_struct)
+                    stmt = stmts.get(n.get_usr())
+                    if stmt is None:
+                        continue
+                    at = self.generic_type_close(list(stmt.get_tokens()), name)
+                    if at is None:
+                        self.refuse(n, f"cannot place the address space of {name!r} local {n.spelling!r}")
+                    site = self._generic_sites.setdefault(at, (stmt, [], owner.get_usr()))
+                    site[1].append(n.get_usr())
+        return self._generic_sites
 
     def emit_decl_sites(self):
         """Statements in kernels and single-instance functions; the
@@ -755,6 +827,14 @@ class _Rewriter:
                 self.edits.insert(at, text, rank=-20_000)
                 self._emitted_sites.add(at)
         # statements no analysed instance owns (methods, lambdas, unused code)
+        for at, (stmt, usrs, owner) in self._generic_local_sites().items():
+            if at in self._emitted_sites or owner in multi:
+                continue
+            spaces = set()
+            for u in usrs:
+                spaces |= self.spaces.var_spaces.get(u, set())
+            if len(spaces) == 1:
+                self.edits.insert(at, f", {self.SPACE_INDEX[next(iter(spaces))]}", rank=-20_000)
         for at, (stmt, usrs, owner, default) in self._qualified_sites.items():
             if at in self._emitted_sites or owner in multi:
                 continue
@@ -1481,7 +1561,11 @@ class _Rewriter:
             instances = sorted(self.spaces.instances.get(usr) or ())
             if not instances:
                 instances = [tuple(DEVICE for _ in info.slots)]
+            seen_decls = set()
             for cursor in [info.cursor] + info.decls:
+                if self.span(cursor) in seen_decls:
+                    continue        # one prototype reached twice (collect sees it per scope)
+                seen_decls.add(self.span(cursor))
                 plans = [self._space_inserts(info, cursor, spaces) for spaces in instances]
                 if this_spaces:
                     at = self._method_qualifier_at(cursor)
@@ -1540,9 +1624,18 @@ class _Rewriter:
         K = self.ci.CursorKind
         params = [p for p in cursor.get_children() if p.kind == K.PARM_DECL]
         plan = []
-        for (index, _, _), space in zip(info.slots, spaces):
-            if index < len(params):
-                plan.append((params[index].extent.start.offset, f"{space} "))
+        for (index, _, ind), space in zip(info.slots, spaces):
+            if index >= len(params):
+                continue
+            if ind == "gstruct":
+                name = self.spaces.generic_name(params[index].type)
+                at = self.generic_type_close(list(params[index].get_tokens()), name)
+                if at is None:
+                    self.refuse(params[index], f"cannot place the address space of {name!r} parameter "
+                                               f"{params[index].spelling!r} (spell it {name}<...>)")
+                plan.append((at, f", {self.SPACE_INDEX[space]}"))
+                continue
+            plan.append((params[index].extent.start.offset, f"{space} "))
         multi = len(self.spaces.instances.get(info.cursor.get_usr(), ())) > 1
         if cursor is info.cursor and multi:
             plan += self.cast_plan((info.cursor.get_usr(), spaces))
@@ -1598,6 +1691,12 @@ class _Rewriter:
     #: Body size (tokens) at or under which WOOF_INLINE_POLICY=size inlines.
     INLINE_TOKENS = 300
 
+    #: Units whose fully inlined kernel Metal's compiler cannot build: its
+    #: service crashes (XPC_ERROR_CONNECTION_INTERRUPTED) on goddard's
+    #: radiation column, which compiles in a second with the large
+    #: functions out of line.  Its device oracle holds it to WRF's words.
+    INLINE_POLICY_BY_UNIT = {"goddard": "size"}
+
     def inline_pointer_functions(self):
         """Every device function of the unit is ``always_inline`` (a source
         ``__noinline__`` stands): CUDA's own default, and the one policy under
@@ -1616,7 +1715,8 @@ class _Rewriter:
         alternatives, for diagnosis only."""
         K = self.ci.CursorKind
         kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD, K.CONSTRUCTOR, K.DESTRUCTOR)
-        policy = os.environ.get("WOOF_INLINE_POLICY", "")
+        policy = os.environ.get("WOOF_INLINE_POLICY", "") or self.INLINE_POLICY_BY_UNIT.get(
+            self.unit.split("[", 1)[0], "")
         keep_call = set(os.environ.get("WOOF_KEEP_CALL", "").split(","))
         done = set()
         for node in self.tu.cursor.walk_preorder():
@@ -1697,11 +1797,89 @@ class _Rewriter:
         self.edits.insert(end, f"\nconstant constexpr {spelled} {owner.spelling}::{member.spelling};",
                           rank=65_000)
 
+    #: a space-generic struct's template argument for each address space
+    #: (prelude __woof_space_of)
+    SPACE_INDEX = {"thread": 0, "device": 1, "constant": 2, "threadgroup": 3}
+
+    @staticmethod
+    def _closing_angle(tokens, i):
+        """The index of the ``>`` closing the ``<`` at ``tokens[i]``."""
+        depth = 0
+        for j in range(i, len(tokens)):
+            t = tokens[j].spelling
+            if t == "<":
+                depth += 1
+            elif t in (">", ">>"):
+                depth -= len(t)
+                if depth <= 0:
+                    return j
+            elif t in (";", "{"):
+                return None
+        return None
+
+    def generic_struct(self, cursor):
+        """A space-generic struct (spaces.py): ``template<..., int __WS = 0>``,
+        its pointer field ``__woof_sptr<T, __WS>``, a method's reference or
+        pointer return ``__woof_sref``/``__woof_sptr<T, __WS>``, and every
+        ``S<...>`` it names carries ``__WS`` on."""
+        K = self.ci.CursorKind
+        from woof.backend.translate.spaces import _indirection, _template_return
+        if cursor.kind != K.CLASS_TEMPLATE:
+            self.refuse(cursor, f"{cursor.spelling!r} holds pointers in two address spaces; only a "
+                                "class template can carry the space as a template parameter")
+        toks = list(cursor.get_tokens())
+        if not toks or toks[0].spelling != "template":
+            self.refuse(cursor, f"cannot find the template header of {cursor.spelling!r}")
+        close = self._closing_angle(toks, 1)
+        if close is None:
+            self.refuse(cursor, f"cannot find the template header of {cursor.spelling!r}")
+        self.edits.insert(toks[close].extent.start.offset, ", int __WS = 0", rank=-30_000)
+        for c in cursor.get_children():
+            if c.kind == K.FIELD_DECL and _indirection(c.type) == "ptr":
+                ftoks = list(c.get_tokens())
+                star = next((t for t in ftoks if t.spelling == "*"), None)
+                if star is None:
+                    self.refuse(c, f"cannot respell pointer field {c.spelling!r}")
+                self.edits.insert(ftoks[0].extent.start.offset, "__woof_sptr<", rank=-30_000)
+                self.edits.replace(star.extent.start.offset, star.extent.end.offset, ", __WS> ")
+            elif c.kind in (K.CXX_METHOD, K.FUNCTION_TEMPLATE):
+                kind = _template_return(c) if c.kind == K.FUNCTION_TEMPLATE else _indirection(c.result_type)
+                if kind not in ("ref", "ptr"):
+                    continue
+                mtoks = list(c.get_tokens())
+                start = self._return_type_start(c)
+                name = next((i for i, t in enumerate(mtoks) if t.spelling == c.spelling or
+                             (c.spelling.startswith("operator") and t.spelling == "operator")), None)
+                if start is None or name is None or mtoks[name - 1].spelling not in ("&", "*"):
+                    self.refuse(c, f"cannot respell the return type of {c.spelling!r}")
+                mark = mtoks[name - 1]
+                alias = "__woof_sref" if mark.spelling == "&" else "__woof_sptr"
+                self.edits.insert(start, f"{alias}<", rank=-30_000)
+                self.edits.replace(mark.extent.start.offset, mark.extent.end.offset, ", __WS> ")
+        # S<...> inside the class: the same space
+        for i in range(close + 1, len(toks) - 1):
+            if toks[i].spelling == cursor.spelling and toks[i + 1].spelling == "<":
+                j = self._closing_angle(toks, i + 1)
+                if j is not None:
+                    self.edits.insert(toks[j].extent.start.offset, ", __WS", rank=-30_000)
+
+    def generic_type_close(self, tokens, name):
+        """Where a ``name<...>`` among ``tokens`` takes its space argument."""
+        for i in range(len(tokens) - 1):
+            if tokens[i].spelling == name and tokens[i + 1].spelling == "<":
+                j = self._closing_angle(tokens, i + 1)
+                if j is not None:
+                    return tokens[j].extent.start.offset
+        return None
+
     def struct_fields(self, cursor):
         """Pointer fields take their initialiser's space (else device),
         reference members thread; static data members are constant."""
         K = self.ci.CursorKind
         from woof.backend.translate.spaces import _indirection
+        if cursor.spelling in getattr(self, "generic_structs", ()):
+            self.generic_struct(cursor)
+            return
         seen = set()
         for c in cursor.get_children():
             if c.kind == K.FIELD_DECL and _indirection(c.type) == "ptr":
@@ -1755,6 +1933,8 @@ class _Rewriter:
                 return c.spelling[len(_SPACE_HINT):]
         from woof.backend.translate.spaces import field_key
         given = self.spaces.field_spaces.get(field_key(field), set()) if self.spaces is not None else set()
+        if len(given) > 1 and getattr(self, "_probing_fields", False):
+            return sorted(given)[0]
         if len(given) > 1:
             self.refuse(field, f"pointer field {field.spelling!r} is given {' and '.join(sorted(given))} "
                                "pointers; a Metal struct field has one address space")
@@ -1999,6 +2179,8 @@ class _Rewriter:
                     word = _double_literal(self.src(inner[0])) ^ (1 << 63)
                     self.edits.replace(s, e, f"__woof_f64_lit(0x{word:016X}UL)")
                     continue
+            if kind == K.CALL_EXPR and self.retain:
+                self.f32s_literal_arguments(node)
             if kind == K.FLOATING_LITERAL and _is_double(node.type):
                 s, e = self.span(node)
                 token = self.data[s:e].decode()
@@ -2184,6 +2366,31 @@ class _Rewriter:
         else:
             return None
         return f"__woof_f64_lit(0x{word:016X}UL)"
+
+    def f32s_literal_arguments(self, call):
+        """In a subnormal-retaining unit ``float`` is ``f32s``, but a float
+        literal is still ``float``: passed to ``g(f64, float)`` beside an
+        overload ``g(f64, f64)``, both need a user-defined conversion and
+        Metal calls the call ambiguous.  CUDA chose the float parameter, so
+        the literal argument of a parameter clang resolved as ``float``
+        becomes ``f32s(...)`` (goddard's g_div / g_pow)."""
+        ref = call.referenced
+        if ref is None or ref.kind.name not in ("FUNCTION_DECL", "CXX_METHOD") or not self.main_file(ref):
+            return
+        params = [c for c in ref.get_children() if c.kind.name == "PARM_DECL"]
+        for arg, parm in zip(call.get_arguments(), params):
+            if parm.type.get_canonical().kind.name != "FLOAT":
+                continue
+            inner = arg
+            while inner.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(inner.get_children())) == 1:
+                inner = next(inner.get_children())
+            literal = inner
+            if inner.kind.name == "UNARY_OPERATOR" and len(list(inner.get_children())) == 1:
+                literal = next(inner.get_children())
+            if literal.kind.name != "FLOATING_LITERAL" or literal.type.get_canonical().kind.name != "FLOAT":
+                continue
+            s, e = self.span(inner)
+            self.edits.wrap(s, e, "f32s(", ")", 900)
 
     def const_eval(self, node):
         """Evaluate a constant expression of literals: ("double", float) or

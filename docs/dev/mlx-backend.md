@@ -83,6 +83,14 @@ nondeterministic, three diagnostic variables help:
   `WOOF_KEEP_CALL=f,g` select the alternatives, for diagnosis.
   `tools/kernel_probe.py --repeat N` shows whether a kernel's words vary
   across replays.
+* **goddard compiles with out-of-line calls** (`INLINE_POLICY_BY_UNIT`).
+  Fully inlined, its radiation kernel crashes Metal's compiler service
+  (`XPC_ERROR_CONNECTION_INTERRUPTED`). Its device oracle holds the result to
+  WRF's words in both builds, on repeated runs.
+* **A `float` literal argument in an `--ftz=false` unit** becomes `f32s(...)`
+  when clang resolved its parameter as `float`. Otherwise `g(f64, float)`
+  beside `g(f64, f64)` is ambiguous in Metal, because both need a
+  user-defined conversion.
 * **Static constexpr members.** MSL is C++14, so an out-of-line call that
   binds a `static constexpr` data member to a `const&` parameter odr-uses
   it. The translator therefore emits the member's out-of-class definition.
@@ -112,8 +120,16 @@ function per combination of spaces. Two cases need runtime help:
 * **A pointer reassigned across spaces and then indexed** (for example
   `zcd = tile` in RRTMG SW) becomes `__woof_vptr<T>`: one pointer per space
   and a tag.
-* **A struct pointer field given pointers in two spaces** (goddard's `GArray`)
-  is refused by name until structs get the same treatment.
+* **A struct pointer field given pointers in two spaces** (goddard's `GArray`
+  wraps kernel buffers and local arrays) makes the struct *space-generic*. A
+  probe of the analysis finds such fields. The class template then gains an
+  `int __WS` parameter, and its field and reference returns become
+  `__woof_sptr<T, __WS>` / `__woof_sref<T, __WS>`. A parameter of the struct
+  type is a slot like a pointer: one overload per space combination. Each
+  local declaration takes its initialiser's space.
+* **Program-scope variables.** A mutable `__device__` global is a module
+  buffer in `device` memory, and the analysis says so. Only `const` and
+  `__constant__` data is `constant`.
 
 ## Mapped host memory
 

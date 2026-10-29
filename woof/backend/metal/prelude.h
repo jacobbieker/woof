@@ -493,6 +493,17 @@ template <typename T> struct __woof_addr_table {
   T operator*() const { return reinterpret_cast<T>(w[0]); }
 };
 
+// A space-generic struct's pointer and reference types (translator
+// generic_struct): its __WS template argument names the address space of
+// the data it wraps, 0 thread, 1 device, 2 constant, 3 threadgroup.
+template <typename T, int S> struct __woof_space_of;
+template <typename T> struct __woof_space_of<T, 0> { typedef thread T* ptr; typedef thread T& ref; };
+template <typename T> struct __woof_space_of<T, 1> { typedef device T* ptr; typedef device T& ref; };
+template <typename T> struct __woof_space_of<T, 2> { typedef constant T* ptr; typedef constant T& ref; };
+template <typename T> struct __woof_space_of<T, 3> { typedef threadgroup T* ptr; typedef threadgroup T& ref; };
+template <typename T, int S> using __woof_sptr = typename __woof_space_of<T, S>::ptr;
+template <typename T, int S> using __woof_sref = typename __woof_space_of<T, S>::ref;
+
 // A read-only pointer that, as CUDA's generic pointers may, points into one
 // address space now and another later (a const parameter reassigned to a
 // threadgroup tile, then indexed): one pointer per space and a tag.  Reads
