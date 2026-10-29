@@ -217,13 +217,24 @@ static inline f32s fma(f32s a, f32s b, f32s c) { return fmaf(a, b, c); }
 static inline f32s fminf(f32s a, f32s b) {
   if (isnan(a)) return b;
   if (isnan(b)) return a;
+  if (a == b) return f32s(as_type<float>(as_type<uint>(a.v) | as_type<uint>(b.v)));  // -0 < +0, as CUDA
   return (b < a) ? b : a;
 }
 static inline f32s fmaxf(f32s a, f32s b) {
   if (isnan(a)) return b;
   if (isnan(b)) return a;
+  if (a == b) return f32s(as_type<float>(as_type<uint>(a.v) & as_type<uint>(b.v)));
   return (a < b) ? b : a;
 }
+// float beside f32s (a literal beside a value): the f32s overloads, exactly,
+// or the call is ambiguous with the binary64 mixed templates
+#define WOOF_F32S_MIXED_MINMAX(N, F)                                              \
+  static inline f32s N(float a, f32s b) { return F(f32s(a), b); }                 \
+  static inline f32s N(f32s a, float b) { return F(a, f32s(b)); }
+WOOF_F32S_MIXED_MINMAX(fminf, fminf) WOOF_F32S_MIXED_MINMAX(fmaxf, fmaxf)
+WOOF_F32S_MIXED_MINMAX(fmin, fminf) WOOF_F32S_MIXED_MINMAX(fmax, fmaxf)
+WOOF_F32S_MIXED_MINMAX(min, fminf) WOOF_F32S_MIXED_MINMAX(max, fmaxf)
+#undef WOOF_F32S_MIXED_MINMAX
 static inline f32s fmin(f32s a, f32s b) { return fminf(a, b); }
 static inline f32s fmax(f32s a, f32s b) { return fmaxf(a, b); }
 static inline f32s min(f32s a, f32s b) { return fminf(a, b); }
@@ -287,3 +298,19 @@ static inline long llroundf(f32s a) { return (long)roundf(a).v; }
 WOOF_F32S_ATOMIC(device)
 WOOF_F32S_ATOMIC(threadgroup)
 #undef WOOF_F32S_ATOMIC
+// PTX arithmetic without .ftz (add/sub/mul/div.rn.f32, min/max.f32): IEEE
+// binary32 with its subnormals in any unit, flushing or not -- CUDA executes
+// these unflushed whatever -ftz says, and woof's kernels use them to pin a
+// rounding (woof/backend/translate rewrite_ptx_asm).
+static inline float __woof_ieee_add(float a, float b) { return (f32s(a) + f32s(b)).v; }
+static inline float __woof_ieee_sub(float a, float b) { return (f32s(a) - f32s(b)).v; }
+static inline float __woof_ieee_mul(float a, float b) { return (f32s(a) * f32s(b)).v; }
+static inline float __woof_ieee_div(float a, float b) { return (f32s(a) / f32s(b)).v; }
+static inline float __woof_ieee_min(float a, float b) { return fminf(f32s(a), f32s(b)).v; }
+static inline float __woof_ieee_max(float a, float b) { return fmaxf(f32s(a), f32s(b)).v; }
+static inline f32s __woof_ieee_add(f32s a, f32s b) { return a + b; }
+static inline f32s __woof_ieee_sub(f32s a, f32s b) { return a - b; }
+static inline f32s __woof_ieee_mul(f32s a, f32s b) { return a * b; }
+static inline f32s __woof_ieee_div(f32s a, f32s b) { return a / b; }
+static inline f32s __woof_ieee_min(f32s a, f32s b) { return fminf(a, b); }
+static inline f32s __woof_ieee_max(f32s a, f32s b) { return fmaxf(a, b); }

@@ -152,3 +152,7 @@ unsigned long long atomicMin(unsigned long long*, unsigned long long);
 unsigned long long atomicMax(unsigned long long*, unsigned long long);
 template <class A, class B> auto max(A a, B b) -> decltype(a + b);
 template <class A, class B> auto min(A a, B b) -> decltype(a + b);
+// Inline PTX without .ftz, rewritten (rewrite_ptx_asm): IEEE binary32 with subnormals.
+float __woof_ieee_add(float, float); float __woof_ieee_sub(float, float);
+float __woof_ieee_mul(float, float); float __woof_ieee_div(float, float);
+float __woof_ieee_min(float, float); float __woof_ieee_max(float, float);

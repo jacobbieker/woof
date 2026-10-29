@@ -49,3 +49,24 @@ def test_a_launch_waits_for_earlier_readers_of_what_it_overwrites():
         if want is None:
             want = words
         assert np.array_equal(words, want), "a reader saw a later in-place write"
+
+
+def test_values_taken_before_an_in_place_launch_keep_their_words():
+    """``before = x.copy()`` or ``x * 2``, then a kernel writing ``x`` in
+    place: the copy and the expression hold x's old words (CUDA's stream
+    order), a view of x shows the new ones.  Breakage it prevents: MLX
+    computed the lazy copy after the launch, so Lin's h_diabatic -- theta
+    after minus a copy from before -- was 0 everywhere (2026-10-29)."""
+    from woof import backend
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    import cupy as cp
+
+    bump = cp.RawKernel(r'''extern "C" __global__ void bump(float* x, int n) {
+        int i = blockIdx.x * blockDim.x + threadIdx.x; if (i < n) x[i] += 1.0f; }''', "bump")
+    x = cp.zeros(64, dtype=cp.float32)
+    before, doubled, view = x.copy(), x * cp.float32(2.0), x[2:5]
+    bump((1,), (64,), (x, np.int32(64)))
+    assert not before.get().any()
+    assert not doubled.get().any()
+    assert (view.get() == 1.0).all()

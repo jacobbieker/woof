@@ -22,6 +22,8 @@
 #include <nanobind/stl/tuple.h>
 
 #include <array>
+#include <mutex>
+#include <unordered_map>
 #include <cstdint>
 #include <sstream>
 #include <stdexcept>
@@ -37,6 +39,47 @@
 
 namespace nb = nanobind;
 namespace mx = mlx::core;
+
+// Pipelines built here, not by MLX's Device::get_kernel: MLX makes them from
+// the bare function, which leaves MTLComputePipelineDescriptor's
+// maxCallStackDepth at its default of 1.  A translated unit calls through
+// several levels of functions the compiler keeps out of line (soft-float
+// binary64, large device functions); deeper than the declared depth, Metal's
+// results are undefined.  Breakage it prevents: Noah-MP's soil-water solve
+// read __fma_rn(2, 3, 1) as 0 three calls deep and saturated every column.
+constexpr NS::UInteger kCallStackDepth = 64;
+
+static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::string& library_key,
+                                               const std::string& kernel) {
+  static std::mutex mutex;
+  static std::unordered_map<std::string, NS::SharedPtr<MTL::ComputePipelineState>> cache;
+  std::lock_guard<std::mutex> lock(mutex);
+  std::string key = library_key + "\x1f" + kernel;
+  auto it = cache.find(key);
+  if (it != cache.end()) return it->second.get();
+  auto pool = NS::AutoreleasePool::alloc()->init();
+  auto* fn = lib->newFunction(NS::String::string(kernel.c_str(), NS::UTF8StringEncoding));
+  if (fn == nullptr) {
+    pool->release();
+    throw std::runtime_error("[woof.backend.metal] no kernel " + kernel + " in its library");
+  }
+  auto* desc = MTL::ComputePipelineDescriptor::alloc()->init();
+  desc->setComputeFunction(fn);
+  desc->setMaxCallStackDepth(kCallStackDepth);
+  NS::Error* error = nullptr;
+  auto* state = mx::metal::device(mx::Device::gpu).mtl_device()->newComputePipelineState(
+      desc, MTL::PipelineOptionNone, nullptr, &error);
+  desc->release();
+  fn->release();
+  if (state == nullptr) {
+    std::string what = error ? error->localizedDescription()->utf8String() : "unknown error";
+    pool->release();
+    throw std::runtime_error("[woof.backend.metal] cannot build the pipeline of " + kernel + ": " + what);
+  }
+  pool->release();
+  cache.emplace(key, NS::TransferPtr(state));
+  return state;
+}
 
 namespace {
 
@@ -62,7 +105,9 @@ class LaunchTranslated : public mx::Primitive {
       std::vector<std::string> blobs,
       std::vector<int> blob_slots,
       size_t threadgroup_bytes,
-      int math_mode)
+      int math_mode,
+      std::vector<int> null_slots,
+      std::vector<int> null_table)
       : mx::Primitive(stream),
         library_key_(std::move(library_key)),
         source_(std::move(source)),
@@ -76,7 +121,9 @@ class LaunchTranslated : public mx::Primitive {
         blobs_(std::move(blobs)),
         blob_slots_(std::move(blob_slots)),
         threadgroup_bytes_(threadgroup_bytes),
-        math_mode_(math_mode) {}
+        math_mode_(math_mode),
+        null_slots_(std::move(null_slots)),
+        null_table_(std::move(null_table)) {}
 
   void eval_cpu(const std::vector<mx::array>&, std::vector<mx::array>&)
       override {
@@ -93,7 +140,7 @@ class LaunchTranslated : public mx::Primitive {
     mx::CompileOptions options;
     options.math_mode = static_cast<mx::MathMode>(math_mode_);
     auto* lib = d.get_library(library_key_, options, [this]() { return source_; });
-    auto* pipeline = d.get_kernel(kernel_, lib);
+    auto* pipeline = pipeline_for(lib, library_key_, kernel_);
     size_t per_group = std::get<0>(threads_) * std::get<1>(threads_) * std::get<2>(threads_);
     if (per_group > pipeline->maxTotalThreadsPerThreadgroup()) {
       throw std::runtime_error(
@@ -159,6 +206,14 @@ class LaunchTranslated : public mx::Primitive {
         }
       }
     }
+    // Null pointers: a direct slot left without a buffer reads as null in
+    // the kernel; a table entry is the address 0, at its pointer's position.
+    for (int slot : null_slots_) {
+      enc.set_buffer(nullptr, slot);
+    }
+    for (int pos : null_table_) {   // ascending
+      table.insert(table.begin() + std::min<size_t>(size_t(pos), table.size()), uint64_t(0));
+    }
     if (table_slot_ >= 0) {
       if (table.empty()) table.push_back(0);
       enc.set_bytes(table.data(), int(table.size()), table_slot_);
@@ -207,6 +262,8 @@ class LaunchTranslated : public mx::Primitive {
   std::vector<std::string> blobs_;
   std::vector<int> blob_slots_;
   size_t threadgroup_bytes_;
+  std::vector<int> null_slots_;
+  std::vector<int> null_table_;
   int math_mode_;
 };
 
@@ -228,7 +285,9 @@ std::vector<mx::array> launch(
     const std::vector<nb::bytes>& blobs,
     const std::vector<int>& blob_slots,
     size_t threadgroup_bytes,
-    int math_mode) {
+    int math_mode,
+    std::vector<int> null_slots,
+    std::vector<int> null_table) {
   size_t n = buffers.size();
   if (offsets.size() != n || writable.size() != n || buffer_slots.size() != n) {
     throw std::invalid_argument("offsets, writable and buffer_slots must match buffers");
@@ -259,7 +318,8 @@ std::vector<mx::array> launch(
   auto stream = mx::default_stream(mx::Device::gpu);
   auto primitive = std::make_shared<LaunchTranslated>(
       stream, library_key, source, kernel, groups, threads, offsets, writable,
-      buffer_slots, table_slot, std::move(blob_bytes), blob_slots, threadgroup_bytes, math_mode);
+      buffer_slots, table_slot, std::move(blob_bytes), blob_slots, threadgroup_bytes, math_mode,
+      std::move(null_slots), std::move(null_table));
   return mx::array::make_arrays(std::move(shapes), dtypes, primitive, buffers);
 }
 
@@ -277,7 +337,7 @@ std::vector<int> compile(
   auto* lib = d.get_library(library_key, options, [&]() { return source; });
   std::vector<int> limits;
   for (const auto& k : kernels) {
-    limits.push_back(int(d.get_kernel(k, lib)->maxTotalThreadsPerThreadgroup()));
+    limits.push_back(int(pipeline_for(lib, library_key, k)->maxTotalThreadsPerThreadgroup()));
   }
   return limits;
 }
@@ -313,7 +373,9 @@ NB_MODULE(_woof_metal_launch, m) {
       nb::arg("blobs"),
       nb::arg("blob_slots"),
       nb::arg("threadgroup_bytes") = 0,
-      nb::arg("math_mode") = 0);
+      nb::arg("math_mode") = 0,
+      nb::arg("null_slots") = std::vector<int>{},
+      nb::arg("null_table") = std::vector<int>{});
   m.def("gpu_address", &gpu_address, nb::arg("array"));
   m.def("compile", &compile, nb::arg("library_key"), nb::arg("source"),
         nb::arg("kernels"), nb::arg("math_mode") = 0);

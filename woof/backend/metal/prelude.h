@@ -25,6 +25,20 @@
 
 // F64_SOFT_H_TEXT
 
+// binary64 -> binary32 as CUDA converts: under -ftz=true (every unit that
+// does not keep subnormals) a subnormal result flushes to a signed zero
+// (cvt.rn.ftz.f32.f64).  Tested on the bits: a Metal compare would itself
+// flush the subnormal it is testing.
+static inline float __woof_cvt_f32(ulong b) {
+  float r = f64_to_f32(b);
+#ifndef WOOF_RETAIN_SUBNORMALS
+  uint u = as_type<uint>(r);
+  if ((u & 0x7F800000u) == 0u) u &= 0x80000000u;
+  r = as_type<float>(u);
+#endif
+  return r;
+}
+
 struct f64 {
   ulong b;
   f64() = default;
@@ -41,7 +55,7 @@ struct f64 {
   f64(bool x) : b(x ? 0x3FF0000000000000UL : 0UL) {}
   static constexpr f64 bits(ulong u) { f64 r = f64(); r.b = u; return r; }
 #define WOOF_F64_CONV(AS)                                                        \
-  operator float() const AS { return f64_to_f32(b); }                            \
+  operator float() const AS { return __woof_cvt_f32(b); }                        \
   operator int() const AS { return f64_to_i32(b); }                              \
   operator uint() const AS { return (uint)f64_to_i64(b); }                       \
   operator long() const AS { return f64_to_i64(b); }                             \
@@ -233,7 +247,7 @@ static inline int __double2loint(f64 a) { return (int)(uint)a.b; }
 static inline f64 __hiloint2double(int hi, int lo) {
   return f64::bits(((ulong)(uint)hi << 32) | (ulong)(uint)lo);
 }
-static inline float __double2float_rn(f64 a) { return f64_to_f32(a.b); }
+static inline float __double2float_rn(f64 a) { return __woof_cvt_f32(a.b); }
 static inline int __double2int_rz(f64 a) { return f64_to_i32(a.b); }
 static inline int __double2int_rn(f64 a) { return f64_to_i32(rint(a).b); }
 static inline int __double2int_rd(f64 a) { return f64_to_i32(floor(a).b); }
@@ -265,8 +279,23 @@ static inline float __saturatef(float a) { return metal::clamp(a, 0.0f, 1.0f); }
 
 static inline float sqrtf(float a) { return metal::precise::sqrt(a); }
 static inline float sqrt(float a) { return metal::precise::sqrt(a); }
-static inline float fabsf(float a) { return metal::fabs(a); }
-static inline float fabs(float a) { return metal::fabs(a); }
+// -ftz=true: CUDA flushes a subnormal operand of abs, neg, copysign, min
+// and max (abs.ftz / neg.ftz / min.ftz ...), which Metal implements as bit
+// operations or compares that keep it.  __woof_ftz flushes on the bits;
+// a unit that keeps subnormals (WOOF_RETAIN_SUBNORMALS) never flushes.
+static inline float __woof_ftz(float a) {
+#ifndef WOOF_RETAIN_SUBNORMALS
+  uint u = as_type<uint>(a);
+  if ((u & 0x7F800000u) == 0u) u &= 0x80000000u;
+  return as_type<float>(u);
+#else
+  return a;
+#endif
+}
+// unary minus on a float (the translator rewrites `-x` in flushing units)
+static inline float __woof_neg(float a) { return -__woof_ftz(a); }
+static inline float fabsf(float a) { return metal::fabs(__woof_ftz(a)); }
+static inline float fabs(float a) { return fabsf(a); }
 static inline float floorf(float a) { return metal::floor(a); }
 static inline float floor(float a) { return metal::floor(a); }
 static inline float ceilf(float a) { return metal::ceil(a); }
@@ -278,14 +307,23 @@ static inline float rint(float a) { return metal::rint(a); }
 static inline float nearbyintf(float a) { return metal::rint(a); }
 static inline float roundf(float a) { return metal::round(a); }
 static inline float round(float a) { return metal::round(a); }
-static inline float copysignf(float a, float b) { return metal::copysign(a, b); }
-static inline float copysign(float a, float b) { return metal::copysign(a, b); }
+static inline float copysignf(float a, float b) { return metal::copysign(__woof_ftz(a), b); }
+static inline float copysign(float a, float b) { return copysignf(a, b); }
 static inline float fmaf(float a, float b, float c) { return metal::fma(a, b, c); }
 static inline float fma(float a, float b, float c) { return metal::fma(a, b, c); }
-static inline float fminf(float a, float b) { return metal::fmin(a, b); }
-static inline float fmaxf(float a, float b) { return metal::fmax(a, b); }
-static inline float fmin(float a, float b) { return metal::fmin(a, b); }
-static inline float fmax(float a, float b) { return metal::fmax(a, b); }
+// CUDA's min/max order -0 below +0 (max(-0, +0) = +0, min = -0, in either
+// operand order); Metal's return the second operand for equal zeros.  Equal
+// operands combine their bits: OR for min (sign set if either), AND for max.
+static inline float fminf(float a, float b) {
+  a = __woof_ftz(a); b = __woof_ftz(b);
+  return a == b ? as_type<float>(as_type<uint>(a) | as_type<uint>(b)) : metal::fmin(a, b);
+}
+static inline float fmaxf(float a, float b) {
+  a = __woof_ftz(a); b = __woof_ftz(b);
+  return a == b ? as_type<float>(as_type<uint>(a) & as_type<uint>(b)) : metal::fmax(a, b);
+}
+static inline float fmin(float a, float b) { return fminf(a, b); }
+static inline float fmax(float a, float b) { return fmaxf(a, b); }
 static inline float ldexpf(float a, int n) { return metal::ldexp(a, n); }
 static inline bool isnan(float a) { return metal::isnan(a); }
 static inline bool isinf(float a) { return metal::isinf(a); }
@@ -320,8 +358,8 @@ static inline long min(long a, long b) { return metal::min(a, b); }
 static inline long max(long a, long b) { return metal::max(a, b); }
 static inline ulong min(ulong a, ulong b) { return metal::min(a, b); }
 static inline ulong max(ulong a, ulong b) { return metal::max(a, b); }
-static inline float min(float a, float b) { return metal::fmin(a, b); }
-static inline float max(float a, float b) { return metal::fmax(a, b); }
+static inline float min(float a, float b) { return fminf(a, b); }
+static inline float max(float a, float b) { return fmaxf(a, b); }
 static inline int abs(int a) { return metal::abs(a); }
 static inline long llabs(long a) { return metal::abs(a); }
 static inline int __clz(int a) { return metal::clz(a); }
@@ -534,6 +572,6 @@ WOOF_ATOMIC64_SPLIT(atomicXor, xor)
 // CUDA's max/min over mixed integer types: the usual arithmetic
 // conversions, as C++ would choose the common type.
 template <WOOF_ARITH(A), WOOF_ARITH(B)>
-static inline auto max(A a, B b) -> decltype(a + b) { return decltype(a + b)(a) > decltype(a + b)(b) ? decltype(a + b)(a) : decltype(a + b)(b); }
+static inline auto max(A a, B b) -> decltype(a + b) { return max(decltype(a + b)(a), decltype(a + b)(b)); }  // the same-type max: CUDA's zero order
 template <WOOF_ARITH(A), WOOF_ARITH(B)>
-static inline auto min(A a, B b) -> decltype(a + b) { return decltype(a + b)(a) < decltype(a + b)(b) ? decltype(a + b)(a) : decltype(a + b)(b); }
+static inline auto min(A a, B b) -> decltype(a + b) { return min(decltype(a + b)(a), decltype(a + b)(b)); }

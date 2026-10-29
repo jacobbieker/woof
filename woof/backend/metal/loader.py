@@ -53,7 +53,22 @@ class MetalFunction:
         self.name = name
         self.signature = unit.kernels[name]
         self.library_key = library_key
-        self.attributes = {"local_size_bytes": 0}
+        self.ptr = 0              # CUfunction handle stand-in (driver.funcGetAttribute)
+
+    # CuPy's Function attributes.  Metal reports no CUDA local frame,
+    # registers or PTX version (0 each); the thread limit is the pipeline's.
+    local_size_bytes = shared_size_bytes = const_size_bytes = num_regs = 0
+    ptx_version = binary_version = 0
+
+    @property
+    def max_threads_per_block(self):
+        return int(getattr(self.module, "max_threads", {}).get(self.name, 1024)) if self.module else 1024
+
+    @property
+    def attributes(self):
+        return {"max_threads_per_block": self.max_threads_per_block, "shared_size_bytes": 0,
+                "const_size_bytes": 0, "local_size_bytes": 0, "num_regs": 0,
+                "ptx_version": 0, "binary_version": 0}
 
     def __call__(self, grid, block, args, shared_mem=0, stream=None):
         from woof.backend.facade._array import flush_pending, ndarray
@@ -65,14 +80,32 @@ class MetalFunction:
             raise LaunchError(f"{self.name}: {len(args)} arguments for {len(visible)} parameters")
         supplied = iter(args)
         buffers, offsets, writable, slots, targets = [], [], [], [], []
+        null_slots, null_table = [], []
+        ordinal = -1                      # the pointer's position: slot, or table entry
         blob = bytearray(sig.scalar_size)
         for p in params:
             a = self.module.globals[p.global_name] if p.global_name is not None else next(supplied)
             if p.pointer:
+                ordinal += 1
+                if a is None or (isinstance(a, (int, np.integer)) and not isinstance(a, (bool, np.bool_))
+                                 and int(a) == 0):
+                    # nullptr: nothing bound (direct) or the address 0 (table)
+                    (null_slots if sig.pointer_mode == "direct" else null_table).append(ordinal)
+                    continue
+                if isinstance(a, (int, np.integer)) and not isinstance(a, (bool, np.bool_)) and int(a):
+                    # an address (``x.data.ptr``): the storage that handed it out
+                    from woof.backend.facade._array import storage_at
+                    found = storage_at(int(a))
+                    if found is None:
+                        raise LaunchError(f"{self.name}: parameter {p.name!r} got the address "
+                                          f"0x{int(a):x}, which no live facade array handed out")
+                    st, off = found
+                    a = ndarray((max(st.nbytes - off, 1) // st.dtype.itemsize or 1,), st.dtype,
+                                _storage=st, _offset=off)
                 if not isinstance(a, ndarray):
                     raise LaunchError(f"{self.name}: parameter {p.name!r} is a pointer; "
                                       f"got {type(a).__name__}")
-                slots.append(len(buffers) if sig.pointer_mode == "direct" else -1)
+                slots.append(ordinal if sig.pointer_mode == "direct" else -1)
                 buffers.append(a._st.arr)
                 offsets.append(a._offset)
                 writable.append(not p.const)
@@ -84,7 +117,7 @@ class MetalFunction:
             # table).  MLX schedules a primitive through its outputs, so a
             # one-word sentinel rides along at a slot the kernel never reads.
             spare = (sig.scalar_slot + 1) if sig.scalar_slot >= 0 else (
-                2 if sig.pointer_mode == "table" else len(buffers))
+                2 if sig.pointer_mode == "table" else ordinal + 1)
             if spare > 30:
                 raise LaunchError(f"{self.name}: no free buffer slot for the launch sentinel")
             sentinel = _sentinel()
@@ -109,7 +142,7 @@ class MetalFunction:
         outputs = ext.load().launch(
             self.library_key, self.unit.msl, self.name, _dim3(grid), _dim3(block),
             buffers, offsets, writable, slots, sig.table_slot, blobs, blob_slots,
-            int(shared_mem or 0), MATH_MODE_SAFE)
+            int(shared_mem or 0), MATH_MODE_SAFE, null_slots, null_table)
         written = iter(outputs)
         for st in targets:
             if st is not None:

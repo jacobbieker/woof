@@ -38,6 +38,7 @@ recursion, ``long double``, a device function that reads ``threadIdx``.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 import struct
@@ -207,9 +208,11 @@ def rewrite_ptx_asm(text: str, unit: str) -> str:
         ins = [x.strip() for x in _ASM_IN.findall(m.group(4))]
         a = ins[0] if ins else None
         b = ins[1] if len(ins) > 1 else None
+        # No .ftz: CUDA keeps binary32 subnormals here whatever -ftz says,
+        # so these are the IEEE ops in any unit (f32s.h __woof_ieee_*).
         mm = re.fullmatch(r"(add|sub|mul|div)\.rn\.f32 %0, ?%1, ?%2;", body)
         if mm:
-            return f"{out} = __f{mm.group(1)}_rn({a}, {b});"
+            return f"{out} = __woof_ieee_{mm.group(1)}({a}, {b});"
         mm = re.fullmatch(r"setp\.(eq|ne|lt|le|gt|ge)\.f32 %?\w+, ?%1, ?%2; selp\.u32 %0, ?1, ?0, ?%?\w+;", body)
         if mm:
             return f"{out} = {_PTX_CMP[mm.group(1)].format(a=a, b=b)} ? 1u : 0u;"
@@ -218,9 +221,9 @@ def rewrite_ptx_asm(text: str, unit: str) -> str:
         if mm:
             return f"{out} = {_PTX_CMP[mm.group(1)].format(a=a, b=b)} ? 1.0f : 0.0f;"
         if re.fullmatch(r"min\.f32 %0, ?%1, ?%2;", body):
-            return f"{out} = fminf({a}, {b});"
+            return f"{out} = __woof_ieee_min({a}, {b});"
         if re.fullmatch(r"max\.f32 %0, ?%1, ?%2;", body):
-            return f"{out} = fmaxf({a}, {b});"
+            return f"{out} = __woof_ieee_max({a}, {b});"
         if re.fullmatch(r"cvt\.rn\.f32\.f64 %0, ?%1;", body):
             return f"{out} = __double2float_rn({a});"
         raise TranslationError(f"{unit}: inline PTX with no Metal translation: {body!r}")
@@ -482,6 +485,7 @@ class _Rewriter:
         self.emit_spaces()
         self.emit_decl_sites()
         self.thread_builtins(top)
+        self.inline_pointer_functions()
         self.rewrite_tokens()
         msl = self.edits.apply()
         msl = msl.replace(f'__attribute__((annotate("{_GLOBAL}")))', "")
@@ -808,7 +812,7 @@ class _Rewriter:
             if target is None:
                 self.refuse(g, "goto whose label clang could not resolve")
             by_label.setdefault((target.spelling, self.span(target)), []).append(g)
-        regions = []
+        regions, wrappers = [], []
         for (name, (ls, le)), jumps in by_label.items():
             label = next(l for l in labels.get(name, []) if self.span(l) == (ls, le))
             block = parent(label)
@@ -816,7 +820,7 @@ class _Rewriter:
                 self.refuse(label, f"label {name!r} is not a statement of a block")
             stmts = list(block.get_children())
             j = next(i for i, st in enumerate(stmts) if self.span(st) == (ls, le))
-            if self._backward_goto(name, label, stmts, j, jumps, chain, parent, block, regions):
+            if self._backward_goto(name, label, stmts, j, jumps, chain, parent, block, regions, wrappers):
                 continue
             first = j
             inner_loops = []
@@ -860,6 +864,8 @@ class _Rewriter:
             flag = f"__woof_goto_{name}"
             self.edits.insert(rs, f"bool {flag} = false; do {{ ", rank=-50_000)
             self.edits.insert(ls, f"}} while (false); ", rank=50_000)
+            wrappers.append({"kind": "forward", "rs": rs, "close": ls, "flag": flag, "name": name,
+                             "jumps": [self.span(g)[0] for g in jumps], "node": label})
             label_tokens = list(label.get_tokens())
             if len(label_tokens) >= 2 and label_tokens[1].spelling == ":":
                 self.edits.replace(label_tokens[0].extent.start.offset, label_tokens[1].extent.end.offset, "")
@@ -874,8 +880,33 @@ class _Rewriter:
                 seen.add(key)
                 end = self._statement_end(loop)
                 self.edits.insert(end, f" if ({flag}) break;", rank=50_000)
+        self._nested_wrapper_exits(wrappers)
 
-    def _backward_goto(self, name, label, stmts, j, jumps, chain, parent, block, regions):
+    def _nested_wrapper_exits(self, wrappers):
+        """A jump that crosses another region's wrapper on its way out: the
+        wrapper (a do/while(false) or retry loop the elimination made, not in
+        the AST) is left by the jump's break, and the enclosing region must be
+        left too -- ``if (flag) break;`` right after the inner wrapper closes.
+        Breakage it prevents: lin_ggamma's ``goto __label_000020`` out of a
+        loop also nested in L_28's wrapper fell into ``return 0.0f``, so
+        Γ(b+4) was 0, Lin's rain never fell, and its radar was 84 dBZ off."""
+        done = set()
+        for outer in wrappers:
+            for at in outer["jumps"]:
+                for inner in wrappers:
+                    if inner is outer or not (inner["rs"] <= at < inner["close"]):
+                        continue
+                    if not (outer["rs"] <= inner["rs"] and inner["close"] <= outer["close"]):
+                        continue
+                    if outer["kind"] == "backward":
+                        self.refuse(outer["node"], f"backward goto {outer['name']!r} from inside the "
+                                                   f"structured region of label {inner['name']!r}")
+                    key = (id(inner), id(outer))
+                    if key not in done:
+                        done.add(key)
+                        self.edits.insert(inner["close"], f" if ({outer['flag']}) break; ", rank=50_001)
+
+    def _backward_goto(self, name, label, stmts, j, jumps, chain, parent, block, regions, wrappers):
         """Backward ``goto L;`` (a Fortran retry: ``100 CONTINUE ... GOTO 100``)
         -> ``while (true) { L's statements ...; break; }`` with each jump a
         ``continue``.  True when handled; forward jumps go back to the caller.
@@ -923,6 +954,8 @@ class _Rewriter:
         regions.append((rs, re_))
         self.edits.insert(rs, "while (true) { ", rank=-50_000)
         self.edits.insert(re_, " break; }", rank=50_000)
+        wrappers.append({"kind": "backward", "rs": rs, "close": re_, "flag": None, "name": name,
+                         "jumps": [self.span(g)[0] for g, _, _ in tops], "node": label})
         label_tokens = list(label.get_tokens())
         if len(label_tokens) >= 2 and label_tokens[1].spelling == ":":
             self.edits.replace(label_tokens[0].extent.start.offset, label_tokens[1].extent.end.offset, "")
@@ -1266,7 +1299,15 @@ class _Rewriter:
             m = re.fullmatch(r"(.*?)\s*((?:\[[^\]]+\])+)", t.spelling)
             if m is None:
                 raise TranslationError(f"{self.unit}: cannot read the array bounds of {t.spelling!r}")
-            return m.group(1), re.findall(r"\[([^\]]+)\]", m.group(2))
+            dims = re.findall(r"\[([^\]]+)\]", m.group(2))
+            base = t
+            for _ in dims:                      # the element type, spelled as every other type is
+                nxt = base.get_array_element_type()
+                if nxt.kind.name == "INVALID":
+                    break
+                base = nxt
+            elem = self._spell_type(base, drop_const=False) if base is not t else m.group(1)
+            return elem, dims
         dims = []
         while t.get_canonical().kind.name == "CONSTANTARRAY":
             dims.append(t.get_canonical().element_count)
@@ -1459,6 +1500,35 @@ class _Rewriter:
             if start is not None:
                 plan.append((start, f"{ret} "))
         return plan
+
+    def inline_pointer_functions(self):
+        """``always_inline`` on every device function of the unit, unless the
+        source says __noinline__ (the prelude's soft-float keeps its calls).
+
+        Metal's out-of-line calls between a unit's own functions gave wrong
+        values: Noah-MP's water kernel read __dadd_rn(2, 5) as 0 inside
+        d_soilwater, varying with the threadgroup size (right at 32 threads,
+        wrong at 1, 8 and 128) and vanishing under shader validation.  With
+        the unit's functions inlined it is CUDA's word for word at every size.
+        CUDA inlines device functions by default too."""
+        K = self.ci.CursorKind
+        kinds = (K.FUNCTION_DECL, K.FUNCTION_TEMPLATE, K.CXX_METHOD)
+        done = set()
+        for node in self.tu.cursor.walk_preorder():
+            if node.kind not in kinds or not node.is_definition() or not self.main_file(node):
+                continue
+            if self.is_kernel(node):
+                continue
+            key = self.span(node)
+            if key in done:
+                continue
+            done.add(key)
+            toks = [t.spelling for t in node.get_tokens()][:40]
+            if "noinline" in toks:
+                continue
+            at = self._return_type_start(node)
+            if at is not None:
+                self.edits.insert(at, "__attribute__((always_inline)) ", rank=-70_000)
 
     def _return_type_start(self, cursor):
         tokens = list(cursor.get_tokens())
@@ -1774,6 +1844,8 @@ class _Rewriter:
                 continue
             if kind == K.INIT_LIST_EXPR:
                 self.fold_init_list(node)
+            if kind == K.UNARY_OPERATOR and not self.retain and _is_float(node.type):
+                self.flushing_negation(node)
             if kind == K.UNARY_OPERATOR and _is_double(node.type):
                 inner = list(node.get_children())
                 toks = [t.spelling for t in node.get_tokens()]
@@ -1858,6 +1930,23 @@ class _Rewriter:
                 if r.kind.name == "RETURN_STMT" and kids:
                     rs, re_ = self.span(kids[0])
                     self.edits.wrap(rs, re_, "(", ")", 0)
+
+    def flushing_negation(self, node):
+        """``-x`` on a binary32 value in a -ftz=true unit: CUDA's neg.ftz
+        flushes a subnormal x to -0, Metal's negation flips the bit and keeps
+        it.  ``-<literal>`` is a constant and stays as written."""
+        kids = list(node.get_children())
+        toks = list(node.get_tokens())
+        if len(kids) != 1 or not toks or toks[0].spelling != "-":
+            return
+        inner = kids[0]
+        while inner.kind.name in ("PAREN_EXPR", "UNEXPOSED_EXPR") and len(list(inner.get_children())) == 1:
+            inner = next(inner.get_children())
+        if inner.kind.name in ("FLOATING_LITERAL", "INTEGER_LITERAL") or self.const_eval(inner) is not None:
+            return                  # a constant (and constant initialisers must stay constexpr)
+        s, e = self.span(node)
+        self.edits.replace(toks[0].extent.start.offset, toks[0].extent.end.offset, "__woof_neg(")
+        self.edits.insert(e, ")", rank=60_000)
 
     def static_local(self, node):
         """MSL has no function-scope statics.  A constant one is the same
@@ -2138,10 +2227,15 @@ class _Rewriter:
         return name + "_w" if name in METAL_RESERVED else name
 
 
-def prelude(*, contract: bool, retain_subnormals: bool = False) -> str:
+def prelude(*, contract: bool, retain_subnormals: bool = False, ieee_helpers: bool = False) -> str:
+    """``retain_subnormals``: the unit is --ftz=false (float is f32s);
+    ``ieee_helpers``: it uses the subnormal-keeping ops of non-.ftz PTX,
+    which f32s.h also defines, in a unit that otherwise flushes."""
     soft = (METAL_DIR / "f64_soft.h").read_text()
     text = (METAL_DIR / "prelude.h").read_text().replace("// F64_SOFT_H_TEXT", soft)
     if retain_subnormals:
+        text = "#define WOOF_RETAIN_SUBNORMALS 1\n" + text
+    if retain_subnormals or ieee_helpers:
         text += "\n" + (METAL_DIR / "f32s.h").read_text()
     # The prelude always compiles uncontracted: __fmul_rn and kin promise one
     # rounding each, and LLVM records contraction per instruction, so their
@@ -2399,7 +2493,8 @@ def translate(source: str, *, unit: str = "<unit>", contract: bool = False,
     text = flatten_inheritance(text, unit)
     tu = parse(text)
     result = _Rewriter(text, tu, unit=unit, retain_subnormals=retain_subnormals).run()
-    result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals)
+    result.msl = (prelude(contract=contract, retain_subnormals=retain_subnormals,
+                          ieee_helpers="__woof_ieee_" in result.msl)
                   + "\n// ---- translated unit: " + unit + "\n" + result.msl)
     result.key = hashlib.sha256(result.msl.encode()).hexdigest()
     return result
