@@ -2984,7 +2984,7 @@ class CudaSW:
         self.spectral_output = "none"
         packed, defines = _pack_cuda_tables(tab)
         src_path = __import__("pathlib").Path(__file__).parent / "kernels" / "rrtmg_sw.cu"
-        code = defines + src_path.read_text(encoding="ascii")
+        code = defines + src_path.read_text(encoding="ascii") + spectral_source()
         # CuPy appends -ftz=true to NVRTC options; that reaches even
         # mul.rn.f32 from __fmul_rn and flushes the subnormal
         # transmittance products (1e-20 * 1e-20 = 1e-40) the Fortran
@@ -4296,6 +4296,13 @@ def sw_batched_vram_bytes(ncol_chunk, nlay, ncol_total=None, *, mcica_layout="gp
     stage_p = (4 * copied + 1) * s_gnl + 3 * s_b + s_c
     return (sw_batched_scratch_bytes(nc, nl)
             + max(stage_u, stage_s, stage_p) + out_b)
+
+
+def spectral_source() -> str:
+    """The spectral output kernels (kernels/rrtmg_sw_spectral.cuh), appended
+    to the shortwave unit by each of its compiles."""
+    from pathlib import Path
+    return "\n" + (Path(__file__).parent / "kernels" / "rrtmg_sw_spectral.cuh").read_text(encoding="ascii")
 
 
 def band_wavenumbers():

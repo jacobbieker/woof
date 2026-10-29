@@ -14,7 +14,7 @@ from __future__ import annotations
 from woof.hex import numerics as _hex_numerics
 
 import numpy as np
-from woof.core.rrtmg_sw import CudaSW, _pack_cuda_tables
+from woof.core.rrtmg_sw import CudaSW, _pack_cuda_tables, spectral_source
 
 # MPAS module_ra_rrtmg_sw.F:10026-10664 argument roster.
 FIELD_NAMES = ("p3d", "t3d", "dz8w", "pi3d", "qv3d", "qc3d", "qi3d",
@@ -191,7 +191,7 @@ class MPASShortwave(CudaSW):
         kernels = Path(legacy.__file__).parent / "kernels"
         shared_math = (kernels / "glibc_flt32.cuh").read_text()
         shared_trig = (kernels / "glibc_trig_flt32.cuh").read_text()
-        code = defines + shared_math + shared_trig + CUDA_SOURCE
+        code = defines + shared_math + shared_trig + CUDA_SOURCE + spectral_source()
         self._shape_source = code
         self._shape_options = _hex_numerics.options(COMPILE_OPTIONS)
         self._shape_modules = {}
